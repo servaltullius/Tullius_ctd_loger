@@ -1,0 +1,116 @@
+{
+  "project_name": "Tullius_ctd_loger",
+  "root": ".",
+  "exclude_dirs": [
+    "node_modules",
+    "vendor",
+    "third_party",
+    "external",
+    "extern",
+    "deps",
+    ".git",
+    ".vibe",
+    ".venv",
+    "venv",
+    ".tox",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
+    ".idea",
+    "dist",
+    "build",
+    "out",
+    "coverage",
+    "bin",
+    "obj",
+    "artifacts",
+    "target",
+    ".gradle",
+    ".dart_tool",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".tmp",
+    "__pycache__"
+  ],
+  "include_globs": [
+    "**/*.cs",
+    "**/*.xaml",
+    "**/*.fs",
+    "**/*.vb",
+    "**/*.py",
+    "**/*.js",
+    "**/*.jsx",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.go",
+    "**/*.rs",
+    "**/*.java",
+    "**/*.kt",
+    "**/*.c",
+    "**/*.h",
+    "**/*.cpp",
+    "**/*.hpp",
+    "**/*.csproj",
+    "**/*.sln",
+    "**/*.fsproj",
+    "**/*.vbproj",
+    "**/*.md",
+    "**/*.json",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.toml",
+    "**/*.xml"
+  ],
+  "critical_tags": [
+    "@critical",
+    "CRITICAL:"
+  ],
+  "context": {
+    "latest_file": ".vibe/context/LATEST_CONTEXT.md",
+    "max_recent_files": 12
+  },
+  "checks": {
+    "doctor": [],
+    "precommit": []
+  },
+  "quality_gates": {
+    "cycle_block": true,
+    "boundary_block": false,
+    "dotnet_build_block_on_increase": true,
+    "typecheck_prefer_solution": false,
+    "complexity_warn_threshold": 15,
+    "max_method_lines_warn": 50,
+    "max_nesting_warn": 4,
+    "max_params_warn": 5
+  },
+  "architecture": {
+    "enabled": true,
+    "rules": [],
+    "python_roots": [
+      "src",
+      "."
+    ],
+    "js_aliases": {}
+  },
+  "placeholders": {
+    "enabled": true,
+    "target_lang": "korean",
+    "bad_unit_words_ko": [
+      "초",
+      "분",
+      "시간",
+      "포인트",
+      "%",
+      "동안",
+      "초당"
+    ]
+  },
+  "profiling": {
+    "enabled_by_default": false,
+    "mode": "dotnet",
+    "entry": null
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "skyrimdiag",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "commonlibsse-ng",
+    "nlohmann-json"
+  ]
+}
+
