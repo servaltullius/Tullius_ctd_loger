@@ -1,10 +1,10 @@
-# SkyrimDiag (Tullius CTD Logger) — MVP
+# Tullius CTD Logger (SkyrimDiag) — Beta
 
 This repository contains an MVP implementation of the design in:
 - `doc/1.툴리우스_ctd_로거_개발명세서.md`
 - `doc/2.코드골격참고.md`
 
-## What’s included (MVP A)
+## What’s included
 
 - **SKSE plugin (DLL)**: shared-memory blackbox ringbuffer, main-thread heartbeat, passive crash mark (VEH)
   - Optional: recent resource load log (e.g. `.nif/.hkx/.tri`)
@@ -37,7 +37,7 @@ This repository contains an MVP implementation of the design in:
   - `EnablePerfHitchLog=1` records a `PerfHitch` event when the main-thread scheduled heartbeat runs late (best-effort).
   - Tuning: `PerfHitchThresholdMs`, `PerfHitchCooldownMs`
 - Manual capture:
-  - `Ctrl+Shift+F12` → immediately writes a dump + WCT JSON (then the helper exits).
+  - `Ctrl+Shift+F12` → immediately writes a dump + WCT JSON (스냅샷/문제상황 캡처용).
 - Dump analysis (no WinDbg required):
   - Easiest (default): after a dump is written, the helper auto-runs the DumpTool and creates human-friendly files next to the dump.
     - Toggle in `SkyrimDiagHelper.ini`: `AutoAnalyzeDump=1`
@@ -56,11 +56,18 @@ For in-game validation without waiting:
   - `Ctrl+Shift+F10` → intentional crash (tests crash capture)
   - `Ctrl+Shift+F11` → intentional hang on the main thread (tests hang detection + WCT/dump)
 
+## Beta testing
+
+베타 배포 목적은 “원인 모드 특정”을 **최대한 유저 친화적으로** 돕는 것입니다. 다만 덤프 기반 추정은 본질적으로 한계가 있으므로,
+리포트의 **신뢰도(높음/중간/낮음)** 표기를 참고해주세요.
+
+- 베타 테스터 가이드: `docs/BETA_TESTING.md`
+
 ## Package (zip)
 
 After building on Windows, create an MO2-friendly zip:
 ```powershell
-python scripts/package.py --build-dir build-win --out dist/SkyrimDiag.zip
+python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
 ```
 
 ## Build (Windows)

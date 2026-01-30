@@ -1,4 +1,5 @@
 #include "CrashLogger.h"
+#include "Utf.h"
 
 #include <Windows.h>
 
@@ -19,22 +20,6 @@
 
 namespace skydiag::dump_tool {
 namespace {
-
-std::wstring ToWide(std::string_view s)
-{
-  if (s.empty()) {
-    return {};
-  }
-
-  const int needed = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-  if (needed <= 0) {
-    return {};
-  }
-
-  std::wstring out(static_cast<std::size_t>(needed), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), needed);
-  return out;
-}
 
 std::wstring WideLower(std::wstring_view s)
 {
@@ -586,7 +571,7 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::vector<std::wstring> out;
   out.reserve(std::min<std::size_t>(rows.size(), 8));
   for (const auto& r : rows) {
-    const std::wstring wLower = ToWide(r.moduleLower);
+    const std::wstring wLower = Utf8ToWide(r.moduleLower);
     const std::wstring key = WideLower(wLower);
 
     const auto it = canonicalByFilenameLower.find(key);

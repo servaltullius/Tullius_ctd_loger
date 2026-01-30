@@ -2,6 +2,7 @@
 #include "EvidenceBuilder.h"
 #include "CrashLogger.h"
 #include "Mo2Index.h"
+#include "Utf.h"
 
 #include <Windows.h>
 
@@ -28,37 +29,6 @@
 
 namespace skydiag::dump_tool {
 namespace {
-
-std::wstring ToWide(std::string_view s)
-{
-  if (s.empty()) {
-    return {};
-  }
-
-  const int needed = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-  if (needed <= 0) {
-    return {};
-  }
-
-  std::wstring out(static_cast<std::size_t>(needed), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), needed);
-  return out;
-}
-
-std::string WideToUtf8(std::wstring_view w)
-{
-  if (w.empty()) {
-    return {};
-  }
-  const int needed =
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-  if (needed <= 0) {
-    return {};
-  }
-  std::string out(static_cast<std::size_t>(needed), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), needed, nullptr, nullptr);
-  return out;
-}
 
 struct MappedFile
 {
@@ -261,7 +231,7 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
       return std::nullopt;
     }
 
-    const std::wstring wpath = ToWide(utf8);
+    const std::wstring wpath = Utf8ToWide(utf8);
     std::filesystem::path p(wpath);
     const auto file = p.filename().wstring();
 
@@ -350,7 +320,7 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     ModuleInfo mi{};
     mi.base = mod.BaseOfImage;
     mi.end = mi.base + mod.SizeOfImage;
-    mi.path = ToWide(utf8);
+    mi.path = Utf8ToWide(utf8);
     mi.filename = std::filesystem::path(mi.path).filename().wstring();
     mi.inferred_mod_name = InferMo2ModNameFromPath(mi.path);
     mi.is_systemish = IsSystemishModule(mi.filename);
@@ -469,7 +439,12 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
     if (maxN == 0) {
       return tids;
     }
-    std::sort(nonCycle.begin(), nonCycle.end(), [](const Row& a, const Row& b) { return a.waitTime > b.waitTime; });
+    std::sort(nonCycle.begin(), nonCycle.end(), [](const Row& a, const Row& b) {
+      if (a.waitTime != b.waitTime) {
+        return a.waitTime > b.waitTime;
+      }
+      return a.tid < b.tid;
+    });
     for (const auto& r : nonCycle) {
       if (r.tid == 0u) {
         continue;
@@ -727,7 +702,14 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     rows.push_back(Row{ idx, score });
   }
 
-  std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.score > b.score; });
+  std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) {
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    const auto an = WideLower(modules[a.modIndex].filename);
+    const auto bn = WideLower(modules[b.modIndex].filename);
+    return an < bn;
+  });
 
   if (rows.empty()) {
     return out;
@@ -1095,7 +1077,17 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(const std::vector<Mod
     rows.push_back(row);
   }
 
-  std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.score > b.score; });
+  std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) {
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    if (a.firstDepth != b.firstDepth) {
+      return a.firstDepth < b.firstDepth;
+    }
+    const auto an = WideLower(modules[a.modIndex].filename);
+    const auto bn = WideLower(modules[b.modIndex].filename);
+    return an < bn;
+  });
 
   const std::uint32_t topScore = rows[0].score;
   const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
@@ -1308,6 +1300,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
   const auto mo2Index = TryBuildMo2IndexFromModulePaths(modulePaths);
+  std::unordered_map<std::wstring, std::vector<std::wstring>> mo2ProvidersCache;
 
   // Exception info
   std::optional<CONTEXT> excCtx;
@@ -1409,6 +1402,20 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
         out.resources.reserve(static_cast<std::size_t>(std::min<std::uint32_t>(rWrite, rCap)));
 
+        const auto normMo2Key = [](std::wstring_view relPath) {
+          std::wstring key(relPath);
+          while (!key.empty() && (key.front() == L'\\' || key.front() == L'/')) {
+            key.erase(key.begin());
+          }
+          for (auto& ch : key) {
+            if (ch == L'/') {
+              ch = L'\\';
+            }
+            ch = static_cast<wchar_t>(towlower(ch));
+          }
+          return key;
+        };
+
         for (std::uint32_t i = rBegin; i < rWrite; i++) {
           const auto& ent = rl.entries[i % rCap];
           const std::uint32_t seq1 = ent.seq;
@@ -1437,10 +1444,18 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
           rr.t_ms = (tmp.qpc >= start)
             ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
             : 0.0;
-          rr.path = ToWide(std::string_view(tmp.path_utf8, len));
+          rr.path = Utf8ToWide(std::string_view(tmp.path_utf8, len));
           rr.kind = ResourceKindFromPath(rr.path);
           if (mo2Index) {
-            rr.providers = FindMo2ProvidersForDataPath(*mo2Index, rr.path, /*maxProviders=*/8);
+            // Provider mapping can be expensive in large modpacks. Cache by normalized rel-path.
+            const std::wstring key = normMo2Key(rr.path);
+            auto it = mo2ProvidersCache.find(key);
+            if (it == mo2ProvidersCache.end()) {
+              rr.providers = FindMo2ProvidersForDataPath(*mo2Index, rr.path, /*maxProviders=*/8);
+              it = mo2ProvidersCache.emplace(key, rr.providers).first;
+            } else {
+              rr.providers = it->second;
+            }
             rr.is_conflict = rr.providers.size() >= 2;
           }
           out.resources.push_back(std::move(rr));

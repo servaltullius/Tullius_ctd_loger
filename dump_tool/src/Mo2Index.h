@@ -13,6 +13,10 @@ struct Mo2Index
   std::filesystem::path base;
   std::filesystem::path modsDir;
   std::filesystem::path overwriteDir;
+  std::filesystem::path profilesDir;
+  std::filesystem::path profileDir;
+  std::wstring profileName;
+  std::filesystem::path modlistPath;
   std::vector<std::filesystem::path> modDirs;
   std::vector<std::wstring> modNames;
 };

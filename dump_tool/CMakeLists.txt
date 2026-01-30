@@ -14,6 +14,8 @@ add_executable(SkyrimDiagDumpTool WIN32
   src/CrashLogger.h
   src/Mo2Index.cpp
   src/Mo2Index.h
+  src/Utf.cpp
+  src/Utf.h
   src/OutputWriter.cpp
   src/GuiApp.cpp
   src/GuiApp.h

@@ -1,4 +1,5 @@
 #include "GuiApp.h"
+#include "Utf.h"
 
 #include <commdlg.h>
 #include <commctrl.h>
@@ -362,22 +363,6 @@ LRESULT CALLBACK EvidenceSplitterSubclassProc(
   }
 
   return DefSubclassProc(hwnd, msg, wParam, lParam);
-}
-
-std::wstring Utf8ToWide(std::string_view s)
-{
-  if (s.empty()) {
-    return {};
-  }
-
-  const int needed = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-  if (needed <= 0) {
-    return {};
-  }
-
-  std::wstring out(static_cast<std::size_t>(needed), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), needed);
-  return out;
 }
 
 std::wstring Quote(std::wstring_view s)
