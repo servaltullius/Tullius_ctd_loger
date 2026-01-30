@@ -1,6 +1,128 @@
 # Tullius CTD Logger (SkyrimDiag) — Beta
 
-- 한국어 안내: `docs/README_KO.md`
+> **한국어 안내(메인)** + **베타 테스터 가이드** 포함  
+> 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
+
+## 한국어 안내
+
+### 1) 무엇인가요?
+
+Skyrim SE/AE 환경에서 **CTD(크래시) / 프리징 / 무한로딩** 상황을 best-effort로 캡처하고,
+WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태로 보여주는 진단 도구입니다.
+
+### 2) 구성 요소
+
+- **SKSE 플러그인**: `SKSE/Plugins/SkyrimDiag.dll`
+  - 블랙박스(이벤트/상태) 기록, heartbeat, (옵션) 리소스(.nif/.hkx/.tri) 기록
+- **Helper(외부 프로세스)**: `SKSE/Plugins/SkyrimDiagHelper.exe`
+  - 게임 프로세스 attach → 프리징/무한로딩 감지 → 덤프 + WCT 저장
+- **DumpTool(뷰어/분석기)**: `SKSE/Plugins/SkyrimDiagDumpTool.exe`
+  - `.dmp`를 읽고 “요약/근거/이벤트/리소스/WCT” 탭으로 보기 쉽게 표시
+
+### 3) 설치 (MO2)
+
+1) GitHub Releases의 zip를 **MO2에서 “모드로 설치”** 후 활성화  
+2) 아래 파일들이 포함되어 있는지 확인:
+   - `SKSE/Plugins/SkyrimDiag.dll`
+   - `SKSE/Plugins/SkyrimDiag.ini`
+   - `SKSE/Plugins/SkyrimDiagHelper.exe`
+   - `SKSE/Plugins/SkyrimDiagHelper.ini`
+   - `SKSE/Plugins/SkyrimDiagDumpTool.exe`
+3) MO2에서 **SKSE로 실행**
+
+### 4) 출력 위치
+
+- 기본적으로 결과(덤프/리포트)는 보통 MO2 `overwrite\\SKSE\\Plugins\\`에 생성됩니다.
+- 한 곳으로 모으고 싶으면 `SkyrimDiagHelper.ini`의 `OutputDir=`를 설정하세요.
+
+## 베타 테스터 가이드 (README 버전)
+
+> 자세한 버전: `docs/BETA_TESTING.md`
+
+### A. 캡처 종류
+
+- **CTD(게임이 튕김)**: `*_Crash_*.dmp`
+- **프리징/무한로딩(자동 감지)**: 기준 시간 이상 멈추면 `*_Hang_*.dmp`
+  - 기준 시간은 `SkyrimDiagHelper.ini`에서 조절:
+    - `HangThresholdInGameSec` (인게임)
+    - `HangThresholdLoadingSec` (로딩 화면)
+    - `EnableAdaptiveLoadingThreshold=1` (로딩 시간 자동 학습/보정, 추천)
+- **수동 스냅샷(핫키)**: `Ctrl+Shift+F12`
+  - 정상 상태에서 찍은 수동 캡처는 “문제”가 아닐 수 있습니다.
+  - **문제 상황(프리징/무한로딩/CTD 직전)** 에서 찍는 것이 진단에 가장 유효합니다.
+
+### B. DumpTool(뷰어)로 보는 법
+
+- `.dmp`를 `SkyrimDiagDumpTool.exe`에 드래그&드롭하거나 실행 후 파일을 선택합니다.
+- 탭:
+  - **요약**: 결론 1문장 + 신뢰도
+  - **근거**: 콜스택/스택스캔/리소스 충돌/WCT 등 단서
+  - **이벤트**: 직전 이벤트(상관관계 단서)
+  - **리소스**: 최근 로드된 `.nif/.hkx/.tri` 및 MO2 제공자(충돌 단서)
+  - **WCT**: 스레드 대기 관계(데드락/바쁜 대기 추정)
+
+### C. 추천 설정(베타용)
+
+- `SkyrimDiag.ini`
+  - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
+- `SkyrimDiagHelper.ini`
+  - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
+  - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
+
+### D. “빠른 재현” 테스트(가능한 경우)
+
+CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 동작하는지”만 빠르게 확인할 수 있습니다.
+
+- `SkyrimDiag.ini`에서 `EnableTestHotkeys=1`
+  - `Ctrl+Shift+F10` : 의도적 크래시(CTD 덤프 생성 확인)
+  - `Ctrl+Shift+F11` : 의도적 행(프리징) 유발(행 감지/WCT/덤프 생성 확인)
+
+### E. 이슈 제보 시 필수 첨부
+
+- 문제 상황의 `*.dmp` 1개
+- 같은 이름의:
+  - `*_SkyrimDiagReport.txt`
+  - `*_SkyrimDiagSummary.json`
+  - `*_SkyrimDiagBlackbox.jsonl` (있다면)
+  - `SkyrimDiag_WCT_*.json` (있다면)
+- (있다면) Crash Logger SSE/AE의 `crash-*.log`
+
+### F. 이슈 템플릿(복사해서 사용)
+
+```text
+[환경]
+- 게임: SE/AE/VR, 버전:
+- SKSE 버전:
+- MO2 사용: 예/아니오
+- 단일 프로필: 예/아니오
+
+[문제 유형]
+- CTD / 프리징 / 무한로딩 / 히치
+
+[재현 방법]
+- (가능하면 단계별로)
+
+[첨부]
+- *.dmp:
+- *_SkyrimDiagReport.txt:
+- *_SkyrimDiagSummary.json:
+- *_SkyrimDiagBlackbox.jsonl: (있으면)
+- SkyrimDiag_WCT_*.json: (있으면)
+- Crash Logger crash-*.log: (있으면)
+
+[추가 메모]
+- 최근 설치/업데이트한 모드/플러그인:
+- 추정 원인 또는 의심 모드:
+```
+
+### G. 개인정보/보안 주의
+
+- 덤프/로그에는 PC 경로(드라이브 문자/유저명)가 포함될 수 있습니다.
+- 공개 업로드가 부담되면, 경로가 보이는 부분은 마스킹 후 공유해주세요.
+
+---
+
+## English (for contributors)
 
 This repository contains an MVP implementation of the design in:
 - `doc/1.툴리우스_ctd_로거_개발명세서.md`
