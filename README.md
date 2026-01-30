@@ -1,5 +1,7 @@
 # Tullius CTD Logger (SkyrimDiag) — Beta
 
+- 한국어 안내: `docs/README_KO.md`
+
 This repository contains an MVP implementation of the design in:
 - `doc/1.툴리우스_ctd_로거_개발명세서.md`
 - `doc/2.코드골격참고.md`
