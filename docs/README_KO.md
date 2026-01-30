@@ -30,6 +30,15 @@
   - `overwrite\\SKSE\\Plugins\\` 에 생성됩니다.
 - 한 곳으로 모으고 싶으면 `SkyrimDiagHelper.ini`의 `OutputDir=`를 설정하세요.
 
+## 성능 영향(오버헤드) 안내
+
+- 이 도구는 “상시 FPS 측정/상시 스택워크” 같은 무거운 방식이 아니라, **최소 신호 기록 + 필요 시 덤프 캡처** 구조를 목표로 합니다.
+- 그래도 환경에 따라 아래 옵션은 미세한 오버헤드/스턱 가능성이 있습니다:
+  - `EnableResourceLog=1` : loose file 오픈 후킹(필터: `.nif/.hkx/.tri`) → 로딩/스트리밍이 많은 모드팩에서 미세 영향 가능  
+    → 의심되면 **가장 먼저 `EnableResourceLog=0`** 로 테스트하세요.
+  - `EnablePerfHitchLog=1` : 메인 스레드 스톨(히치) 단서 기록(가벼움) → 필요 없으면 끌 수 있습니다.
+  - `CrashHookMode=2` : 모든 예외 기록(권장하지 않음) → **기본값 `CrashHookMode=1` 유지 권장**
+
 ## 캡처 방식
 
 - **실제 CTD(게임이 튕김)**: `*_Crash_*.dmp` 생성
@@ -56,4 +65,3 @@
 
 - 자세한 제보 양식: `docs/BETA_TESTING.md`
 - 원인 판정은 “확정”이 아니라 **best-effort 추정 + 신뢰도 표기**입니다.
-
