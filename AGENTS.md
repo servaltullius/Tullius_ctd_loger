@@ -9,6 +9,24 @@ This section is generated. Re-run pinning to update.
 - (none matched this repo)
 <!-- skills-scout:end -->
 
+## Recommended Skills for This Repo (Manual Pin)
+
+The auto-pinner currently doesn’t match any skills for this repo, but we *do* have relevant global skills installed.
+When doing code review / refactoring / decoupling / architecture work on this repo, prefer:
+
+- `receiving-code-review`: Evaluate external review feedback before implementing.
+- `code-review-excellence`: Produce thorough, actionable code review notes.
+- `refactor`: Surgical refactors without behavior change.
+- `architecture-designer`: Architecture review + trade-offs.
+- `architecture-patterns`: Decoupling guidance (Clean/Hexagonal patterns).
+- `architecture-decision-records`: Write/maintain ADRs for major design decisions.
+- `c4-architecture`: Generate C4 Mermaid diagrams for documentation.
+
+Superpowers (invoke via `~/.codex/superpowers/.codex/superpowers-codex use-skill <name>`):
+- `superpowers:systematic-debugging`: Root-cause-first bug fixing.
+- `superpowers:verification-before-completion`: Evidence before “fixed”.
+- `superpowers:test-driven-development`: Add minimal failing tests before fixes.
+
 ## Project Overview
 
 - **Purpose:** Skyrim SE/AE용 진단 도구 (SKSE 플러그인 + 외부 Helper + DumpTool Viewer)

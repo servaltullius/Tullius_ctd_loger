@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-set "VSROOT=C:\Program Files\Microsoft Visual Studio\18\Community"
+set "VSROOT=C:\Program Files\Microsoft Visual Studio\2022\Community"
 set "VCPKG_ROOT=%VSROOT%\VC\vcpkg"
 
 call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"

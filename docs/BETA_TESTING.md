@@ -26,6 +26,8 @@
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
+  - `HangThresholdInMenuSec` : 메뉴/종료 직전 같은 “메뉴 상태”에서의 프리징 기준(기본 30초)
+    - 정상 종료 직전에 일시적으로 heartbeat가 멈춰도 hang dump가 쌓이지 않도록, 메뉴 상태에서는 더 높은 임계값을 사용합니다.
 
 ## 3) 캡처 방식
 
@@ -39,7 +41,9 @@
 - 모드팩마다 로딩 시간이 크게 다르기 때문에, `SkyrimDiagHelper.ini`의 임계값이 중요합니다:
   - `HangThresholdInGameSec` : 인게임 프리징 기준(기본 10초)
   - `HangThresholdLoadingSec` : 로딩 화면 기준(기본 600초)
+  - `HangThresholdInMenuSec` : 메뉴(일시정지/메인메뉴/종료 직전 등) 기준(기본 30초)
   - `EnableAdaptiveLoadingThreshold=1` 이면 최근 로딩 시간을 학습해 자동 보정합니다(추천).
+  - **Alt-Tab(백그라운드) 주의:** 게임이 Alt-Tab으로 “일시정지”되는 환경에서는 heartbeat가 멈출 수 있습니다. 기본 설정(`SuppressHangWhenNotForeground=1`)은 **비포그라운드 상태에서 자동 hang dump 생성을 억제**합니다. (백그라운드 프리징도 자동 덤프를 원하면 `0`으로)
 
 ### C. 수동 스냅샷(핫키)
 

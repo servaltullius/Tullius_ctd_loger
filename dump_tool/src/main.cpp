@@ -12,6 +12,7 @@
 
 #include "Analyzer.h"
 #include "GuiApp.h"
+#include "OutputWriter.h"
 
 namespace skydiag::dump_tool {
 namespace {
@@ -161,4 +162,3 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
   LocalFree(argv);
   return rc;
 }
-

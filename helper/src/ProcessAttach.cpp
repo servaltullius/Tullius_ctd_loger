@@ -94,10 +94,16 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
     return false;
   }
   out.shm = static_cast<const skydiag::SharedLayout*>(view);
+  out.shmSize = sizeof(skydiag::SharedLayout);
   {
     MEMORY_BASIC_INFORMATION mbi{};
     if (VirtualQuery(view, &mbi, sizeof(mbi)) != 0 && mbi.RegionSize > 0) {
-      out.shmSize = static_cast<std::size_t>(mbi.RegionSize);
+      if (mbi.RegionSize < out.shmSize) {
+        if (err) *err = L"Shared memory view too small (RegionSize=" + std::to_wstring(static_cast<std::uint64_t>(mbi.RegionSize)) +
+          L", expected=" + std::to_wstring(static_cast<std::uint64_t>(out.shmSize)) + L")";
+        Detach(out);
+        return false;
+      }
     }
   }
 

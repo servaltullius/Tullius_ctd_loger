@@ -75,17 +75,24 @@ std::string WideToUtf8Bounded(const wchar_t (&buf)[N])
 
 }  // namespace
 
-bool EnableDebugPrivilege()
+struct DebugPrivilegeResult
+{
+  bool enabled = false;
+  DWORD error = 0;
+};
+
+DebugPrivilegeResult EnableDebugPrivilege()
 {
   HANDLE token = nullptr;
   if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token)) {
-    return false;
+    return DebugPrivilegeResult{ false, GetLastError() };
   }
 
   LUID luid{};
   if (!LookupPrivilegeValueW(nullptr, SE_DEBUG_NAME, &luid)) {
+    const DWORD le = GetLastError();
     CloseHandle(token);
-    return false;
+    return DebugPrivilegeResult{ false, le };
   }
 
   TOKEN_PRIVILEGES tp{};
@@ -97,7 +104,7 @@ bool EnableDebugPrivilege()
   const DWORD le = GetLastError();
   CloseHandle(token);
 
-  return ok && le == ERROR_SUCCESS;
+  return DebugPrivilegeResult{ ok && le == ERROR_SUCCESS, le };
 }
 
 bool CaptureWct(std::uint32_t pid, nlohmann::json& out, std::wstring* err)
@@ -106,7 +113,13 @@ bool CaptureWct(std::uint32_t pid, nlohmann::json& out, std::wstring* err)
   out["pid"] = pid;
   out["threads"] = nlohmann::json::array();
 
-  EnableDebugPrivilege();  // best-effort
+  {
+    const auto dbg = EnableDebugPrivilege();  // best-effort
+    out["debugPrivilegeEnabled"] = dbg.enabled;
+    if (!dbg.enabled && dbg.error != 0) {
+      out["debugPrivilegeError"] = static_cast<std::uint32_t>(dbg.error);
+    }
+  }
 
   // Synchronous session: Flags=0. (Some SDKs only define WCT_ASYNC_OPEN_FLAG.)
   HWCT session = OpenThreadWaitChainSession(0, nullptr);

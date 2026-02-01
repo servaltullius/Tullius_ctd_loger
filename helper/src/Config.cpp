@@ -35,6 +35,8 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.hangThresholdInGameSec =
     static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"HangThresholdInGameSec", 10, path.c_str()));
+  cfg.hangThresholdInMenuSec =
+    static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"HangThresholdInMenuSec", 30, path.c_str()));
   cfg.hangThresholdLoadingSec =
     static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"HangThresholdLoadingSec", 600, path.c_str()));
 
@@ -68,6 +70,9 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AdaptiveLoadingMinExtraSec", 120, path.c_str()));
   cfg.adaptiveLoadingMaxSec = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AdaptiveLoadingMaxSec", 1800, path.c_str()));
+
+  cfg.suppressHangWhenNotForeground =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"SuppressHangWhenNotForeground", 1, path.c_str()) != 0;
 
   if (cfg.outputDir.empty()) {
     cfg.outputDir = ExeDir();

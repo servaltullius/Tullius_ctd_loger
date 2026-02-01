@@ -1,4 +1,5 @@
 #include "GuiApp.h"
+#include "OutputWriter.h"
 #include "Utf.h"
 
 #include <commdlg.h>
@@ -6,6 +7,7 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <uxtheme.h>
+#include <vsstyle.h>
 
 #include <algorithm>
 #include <cwctype>
@@ -16,6 +18,38 @@
 #include <string_view>
 
 #include <nlohmann/json.hpp>
+
+// ============================================================================
+// Skyrim/Elder Scrolls Dark Fantasy Theme Color Palette
+// ============================================================================
+namespace theme {
+  // Background colors (Deep Indigo/Midnight)
+  constexpr COLORREF BG_BASE = RGB(26, 27, 46);        // #1a1b2e - Main window
+  constexpr COLORREF BG_CARD = RGB(30, 41, 59);        // #1e293b - Card/panel
+  constexpr COLORREF BG_INPUT = RGB(15, 23, 42);       // #0f172a - Input fields
+  
+  // Text colors (Ice/Frost white)
+  constexpr COLORREF TEXT_PRIMARY = RGB(226, 232, 240);   // #e2e8f0 - Primary text
+  constexpr COLORREF TEXT_SECONDARY = RGB(148, 163, 184); // #94a3b8 - Secondary text
+  constexpr COLORREF TEXT_MUTED = RGB(100, 116, 139);     // #64748b - Muted text
+  
+  // Accent colors (Dragonfire & Frost)
+  constexpr COLORREF ACCENT_GOLD = RGB(212, 168, 83);     // #d4a853 - Dragon gold
+  constexpr COLORREF ACCENT_AMBER = RGB(245, 158, 11);    // #f59e0b - Amber
+  constexpr COLORREF ACCENT_ICE = RGB(91, 192, 190);      // #5bc0be - Frost blue
+  constexpr COLORREF ACCENT_CYAN = RGB(143, 209, 255);    // #8fd1ff - Cyan
+  
+  // Status/Confidence colors
+  constexpr COLORREF CONF_HIGH_BG = RGB(20, 83, 45);      // #14532d - Deep green
+  constexpr COLORREF CONF_HIGH_FG = RGB(134, 239, 172);   // #86efac - Light green
+  constexpr COLORREF CONF_MED_BG = RGB(120, 53, 15);      // #78350f - Deep amber
+  constexpr COLORREF CONF_MED_FG = RGB(251, 191, 36);     // #fbbf24 - Light amber
+  constexpr COLORREF CONF_LOW_BG = RGB(127, 29, 29);      // #7f1d1d - Deep red
+  constexpr COLORREF CONF_LOW_FG = RGB(252, 165, 165);    // #fca5a5 - Light red
+  
+  // Border/Divider
+  constexpr COLORREF BORDER = RGB(51, 65, 85);            // #334155
+}
 
 namespace skydiag::dump_tool {
 namespace {
@@ -153,7 +187,7 @@ int ClampInt(int v, int lo, int hi)
 
 void Layout(AppState* st);
 
-void ApplyListViewModernStyle(HWND lv)
+void ApplyListViewModernStyle(HWND lv, bool dark = true)
 {
   if (!lv) {
     return;
@@ -165,9 +199,51 @@ void ApplyListViewModernStyle(HWND lv)
   ex |= (LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
   ListView_SetExtendedListViewStyle(lv, ex);
 
-  // White "card" background.
-  ListView_SetBkColor(lv, RGB(255, 255, 255));
-  ListView_SetTextBkColor(lv, RGB(255, 255, 255));
+  if (dark) {
+    // Dark theme background
+    ListView_SetBkColor(lv, theme::BG_CARD);
+    ListView_SetTextBkColor(lv, theme::BG_CARD);
+    ListView_SetTextColor(lv, theme::TEXT_PRIMARY);
+    SetWindowTheme(lv, L"DarkMode_Explorer", nullptr);
+  } else {
+    // White "card" background.
+    ListView_SetBkColor(lv, RGB(255, 255, 255));
+    ListView_SetTextBkColor(lv, RGB(255, 255, 255));
+  }
+}
+
+// Enable Windows 10/11 dark title bar and immersive dark mode
+void EnableDarkMode(HWND hwnd)
+{
+  // Windows 10 1809+ (build 17763)
+  constexpr DWORD DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+  
+  BOOL dark = TRUE;
+  DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+  
+  // Set dark mode for the window theme
+  SetWindowTheme(hwnd, L"DarkMode", nullptr);
+}
+
+// Apply dark theme to buttons
+void ApplyDarkButton(HWND btn)
+{
+  if (!btn) return;
+  SetWindowTheme(btn, L"DarkMode", nullptr);
+}
+
+// Apply dark theme to edit controls
+void ApplyDarkEdit(HWND edit)
+{
+  if (!edit) return;
+  SetWindowTheme(edit, L"DarkMode", nullptr);
+}
+
+// Apply dark theme to tab control
+void ApplyDarkTab(HWND tab)
+{
+  if (!tab) return;
+  SetWindowTheme(tab, L"DarkMode", nullptr);
 }
 
 LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
@@ -188,14 +264,15 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
         wchar_t text[32]{};
         ListView_GetItemText(cd->nmcd.hdr.hwndFrom, static_cast<int>(cd->nmcd.dwItemSpec), 0, text, 32);
 
-        COLORREF fg = RGB(185, 28, 28);
-        COLORREF bg = RGB(254, 226, 226);
+        // Dark theme confidence badge colors (Dragonfire theme)
+        COLORREF fg = theme::CONF_LOW_FG;
+        COLORREF bg = theme::CONF_LOW_BG;
         if (wcscmp(text, L"높음") == 0) {
-          fg = RGB(21, 128, 61);
-          bg = RGB(220, 252, 231);
+          fg = theme::CONF_HIGH_FG;
+          bg = theme::CONF_HIGH_BG;
         } else if (wcscmp(text, L"중간") == 0) {
-          fg = RGB(161, 98, 7);
-          bg = RGB(254, 249, 195);
+          fg = theme::CONF_MED_FG;
+          bg = theme::CONF_MED_BG;
         }
 
         // Theme'd listviews on modern Windows can ignore clrTextBk for subitems.
@@ -220,8 +297,8 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
           oldFont = static_cast<HFONT>(SelectObject(hdc, st->uiFontSemibold));
         }
 
-        // Base cell background (card white).
-        HBRUSH cellBg = CreateSolidBrush(RGB(255, 255, 255));
+        // Base cell background (dark card).
+        HBRUSH cellBg = CreateSolidBrush(theme::BG_CARD);
         FillRect(hdc, &rc, cellBg);
         DeleteObject(cellBg);
 
@@ -264,9 +341,9 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
         return CDRF_SKIPDEFAULT;
       }
 
-      // Default text colors for other columns.
-      cd->clrText = RGB(17, 24, 39);
-      cd->clrTextBk = RGB(255, 255, 255);
+      // Default text colors for other columns (dark theme).
+      cd->clrText = theme::TEXT_PRIMARY;
+      cd->clrTextBk = theme::BG_CARD;
       return CDRF_DODEFAULT;
     }
   }
@@ -1049,11 +1126,27 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       const HDC hdc = reinterpret_cast<HDC>(wParam);
       if ((ctl == st->summaryEdit || ctl == st->wctEdit || ctl == st->eventsFilterEdit) && st->bgCardBrush) {
         SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(17, 24, 39));
-        SetBkColor(hdc, RGB(255, 255, 255));
+        SetTextColor(hdc, theme::TEXT_PRIMARY);
+        SetBkColor(hdc, theme::BG_INPUT);
         return reinterpret_cast<INT_PTR>(st->bgCardBrush);
       }
       break;
+    }
+    
+    case WM_CTLCOLORLISTBOX: {
+      if (!st) break;
+      const HDC hdc = reinterpret_cast<HDC>(wParam);
+      SetTextColor(hdc, theme::TEXT_PRIMARY);
+      SetBkColor(hdc, theme::BG_CARD);
+      return reinterpret_cast<INT_PTR>(st->bgCardBrush);
+    }
+    
+    case WM_CTLCOLORBTN: {
+      if (!st) break;
+      const HDC hdc = reinterpret_cast<HDC>(wParam);
+      SetTextColor(hdc, theme::TEXT_PRIMARY);
+      SetBkColor(hdc, theme::BG_BASE);
+      return reinterpret_cast<INT_PTR>(st->bgBaseBrush);
     }
 
     case WM_CREATE: {
@@ -1064,8 +1157,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
       st->uiFont = CreateUiFont(hwnd);
       st->uiFontSemibold = CreateUiFontSemibold(hwnd);
-      st->bgBaseBrush = CreateSolidBrush(RGB(249, 250, 251));
-      st->bgCardBrush = CreateSolidBrush(RGB(255, 255, 255));
+      // Skyrim Dark Fantasy Theme brushes
+      st->bgBaseBrush = CreateSolidBrush(theme::BG_BASE);
+      st->bgCardBrush = CreateSolidBrush(theme::BG_INPUT);
+      
+      // Enable dark mode for window
+      EnableDarkMode(hwnd);
 
       st->tab = CreateWindowExW(
         0,
@@ -1109,6 +1206,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         reinterpret_cast<HMENU>(kIdSummaryEdit),
         cs->hInstance,
         nullptr);
+      ApplyDarkEdit(st->summaryEdit);
 
       st->evidenceList = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -1179,6 +1277,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         reinterpret_cast<HMENU>(kIdEventsFilterEdit),
         cs->hInstance,
         nullptr);
+      ApplyDarkEdit(st->eventsFilterEdit);
       SendMessageW(
         st->eventsFilterEdit,
         EM_SETCUEBANNER,
@@ -1240,6 +1339,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         reinterpret_cast<HMENU>(kIdWctEdit),
         cs->hInstance,
         nullptr);
+      ApplyDarkEdit(st->wctEdit);
 
       CreateWindowExW(
         0,
@@ -1297,7 +1397,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         cs->hInstance,
         nullptr);
 
-      ApplyExplorerTheme(st->tab);
+      ApplyDarkTab(st->tab);
       ApplyExplorerTheme(st->evidenceList);
       ApplyExplorerTheme(st->recoList);
       ApplyExplorerTheme(st->eventsList);
@@ -1313,7 +1413,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->wctEdit, st->uiFont);
 
       for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist }) {
-        ApplyFont(GetDlgItem(hwnd, bid), st->uiFont);
+        HWND btn = GetDlgItem(hwnd, bid);
+        ApplyFont(btn, st->uiFont);
+        ApplyDarkButton(btn);
       }
 
       // Increase row height using an imagelist trick.
@@ -1520,7 +1622,7 @@ int RunGuiViewer(HINSTANCE hInst, const GuiOptions& opt, const AnalyzeOptions& a
   wc.lpfnWndProc = WndProc;
   wc.hInstance = hInst;
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-  wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+  wc.hbrBackground = CreateSolidBrush(theme::BG_BASE);
   wc.lpszClassName = kWndClassName;
   RegisterClassExW(&wc);
 
@@ -1532,7 +1634,7 @@ int RunGuiViewer(HINSTANCE hInst, const GuiOptions& opt, const AnalyzeOptions& a
   HWND hwnd = CreateWindowExW(
     0,
     kWndClassName,
-    L"SkyrimDiag Viewer",
+    L"툴리우스 CTD 로거 - SkyrimDiag Viewer",
     WS_OVERLAPPEDWINDOW,
     CW_USEDEFAULT,
     CW_USEDEFAULT,

@@ -1,4 +1,4 @@
-#include "Analyzer.h"
+#include "OutputWriter.h"
 #include "Utf.h"
 
 #include <Windows.h>

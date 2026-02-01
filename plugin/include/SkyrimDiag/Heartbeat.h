@@ -13,9 +13,9 @@ struct HeartbeatConfig
   bool enableHitchLog = true;
   std::uint32_t hitchThresholdMs = 250;
   std::uint32_t hitchCooldownMs = 3000;
-  };
+};
 
-  bool StartHeartbeatScheduler(const HeartbeatConfig& cfg);
-  void HeartbeatOnInputLoaded() noexcept;
+bool StartHeartbeatScheduler(const HeartbeatConfig& cfg);
+void HeartbeatOnInputLoaded() noexcept;
 
 }  // namespace skydiag::plugin

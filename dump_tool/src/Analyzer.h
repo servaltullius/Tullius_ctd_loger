@@ -95,6 +95,5 @@ struct AnalyzeOptions
 };
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err);
-bool WriteOutputs(const AnalysisResult& r, std::wstring* err);
 
 }  // namespace skydiag::dump_tool

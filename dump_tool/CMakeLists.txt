@@ -4,8 +4,7 @@ project(SkyrimDiagDumpTool VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES CXX)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 
-add_executable(SkyrimDiagDumpTool WIN32
-  resources/SkyrimDiagDumpTool.rc
+add_library(SkyrimDiagDumpToolCore STATIC
   src/Analyzer.cpp
   src/Analyzer.h
   src/EvidenceBuilder.cpp
@@ -17,22 +16,38 @@ add_executable(SkyrimDiagDumpTool WIN32
   src/Utf.cpp
   src/Utf.h
   src/OutputWriter.cpp
+  src/OutputWriter.h)
+
+target_link_libraries(SkyrimDiagDumpToolCore
+  PUBLIC
+    skydiag_shared
+    nlohmann_json::nlohmann_json
+    Dbghelp
+)
+
+target_compile_definitions(SkyrimDiagDumpToolCore
+  PRIVATE
+    _UNICODE
+    UNICODE)
+
+set_property(TARGET SkyrimDiagDumpToolCore PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+
+add_executable(SkyrimDiagDumpTool WIN32
+  resources/SkyrimDiagDumpTool.rc
   src/GuiApp.cpp
   src/GuiApp.h
   src/main.cpp)
 
 target_link_libraries(SkyrimDiagDumpTool
   PRIVATE
-    skydiag_shared
-    nlohmann_json::nlohmann_json
+    SkyrimDiagDumpToolCore
     Comdlg32
     Comctl32
     Shell32
     Ole32
     User32
     UxTheme
-    Dwmapi
-    Dbghelp)
+    Dwmapi)
 
 target_compile_definitions(SkyrimDiagDumpTool
   PRIVATE

@@ -1,5 +1,6 @@
 #include <Windows.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -151,6 +152,81 @@ void StartDumpToolIfConfigured(const skydiag::helper::HelperConfig& cfg, const s
   CloseHandle(pi.hProcess);
 }
 
+bool IsPidInForeground(DWORD pid)
+{
+  const HWND fg = GetForegroundWindow();
+  if (!fg) {
+    return false;
+  }
+
+  HWND root = GetAncestor(fg, GA_ROOTOWNER);
+  if (!root) {
+    root = fg;
+  }
+
+  DWORD fgPid = 0;
+  GetWindowThreadProcessId(root, &fgPid);
+  return fgPid == pid;
+}
+
+struct FindWindowCtx
+{
+  DWORD pid = 0;
+  HWND hwnd = nullptr;
+};
+
+BOOL CALLBACK EnumWindows_FindTopLevelForPid(HWND hwnd, LPARAM lParam)
+{
+  auto* ctx = reinterpret_cast<FindWindowCtx*>(lParam);
+  if (!ctx) {
+    return TRUE;
+  }
+
+  DWORD pid = 0;
+  GetWindowThreadProcessId(hwnd, &pid);
+  if (pid != ctx->pid) {
+    return TRUE;
+  }
+
+  // Prefer visible, unowned top-level windows as the "main" window.
+  if (!IsWindowVisible(hwnd)) {
+    return TRUE;
+  }
+  if (GetWindow(hwnd, GW_OWNER) != nullptr) {
+    return TRUE;
+  }
+
+  ctx->hwnd = hwnd;
+  return FALSE;  // stop
+}
+
+HWND FindMainWindowForPid(DWORD pid)
+{
+  FindWindowCtx ctx{};
+  ctx.pid = pid;
+  EnumWindows(EnumWindows_FindTopLevelForPid, reinterpret_cast<LPARAM>(&ctx));
+  return ctx.hwnd;
+}
+
+bool IsWindowResponsive(HWND hwnd, UINT timeoutMs)
+{
+  if (!hwnd || !IsWindow(hwnd)) {
+    return false;
+  }
+
+  DWORD_PTR result = 0;
+  SetLastError(ERROR_SUCCESS);
+  const LRESULT ok = SendMessageTimeoutW(
+    hwnd,
+    WM_NULL,
+    0,
+    0,
+    SMTO_ABORTIFHUNG | SMTO_BLOCK,
+    timeoutMs,
+    &result);
+  return ok != 0;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -180,6 +256,14 @@ int wmain(int argc, wchar_t** argv)
 
   if (!proc.shm || proc.shm->header.magic != skydiag::kMagic) {
     std::wcerr << L"[SkyrimDiagHelper] Shared memory invalid/missing.\n";
+    skydiag::helper::Detach(proc);
+    return 3;
+  }
+  if (proc.shm->header.version != skydiag::kVersion) {
+    std::wcerr << L"[SkyrimDiagHelper] Shared memory version mismatch (got="
+               << proc.shm->header.version << L", expected=" << skydiag::kVersion << L").\n";
+    AppendLogLine(MakeOutputBase(cfg), L"Shared memory version mismatch (got=" + std::to_wstring(proc.shm->header.version) +
+      L", expected=" + std::to_wstring(skydiag::kVersion) + L")");
     skydiag::helper::Detach(proc);
     return 3;
   }
@@ -223,6 +307,8 @@ int wmain(int argc, wchar_t** argv)
   bool hangCapturedThisEpisode = false;
   bool heartbeatEverAdvanced = false;
   bool warnedHeartbeatStale = false;
+  bool hangSuppressedNotForegroundThisEpisode = false;
+  HWND targetWindow = nullptr;
 
   bool wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
   std::uint64_t loadStartQpc = wasLoading ? proc.shm->header.start_qpc : 0;
@@ -235,6 +321,10 @@ int wmain(int argc, wchar_t** argv)
     LARGE_INTEGER now{};
     QueryPerformanceCounter(&now);
     const auto stateFlags = proc.shm->header.state_flags;
+    const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
+    const std::uint32_t inGameThresholdSec = inMenu
+      ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
+      : cfg.hangThresholdInGameSec;
     const std::uint32_t loadingThresholdSec = (cfg.enableAdaptiveLoadingThreshold && loadStats.HasSamples())
       ? adaptiveLoadingThresholdSec
       : cfg.hangThresholdLoadingSec;
@@ -243,13 +333,14 @@ int wmain(int argc, wchar_t** argv)
       proc.shm->header.last_heartbeat_qpc,
       proc.shm->header.qpc_freq,
       stateFlags,
-      cfg.hangThresholdInGameSec,
+      inGameThresholdSec,
       loadingThresholdSec);
 
     AppendLogLine(outBase, L"Manual capture triggered via " + std::wstring(trigger) +
       L" (secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
       L", threshold=" + std::to_wstring(decision.thresholdSec) +
-      L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) + L")");
+      L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) +
+      L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
 
     nlohmann::json wctJson;
     std::wstring wctErr;
@@ -259,6 +350,10 @@ int wmain(int argc, wchar_t** argv)
       wctJson = nlohmann::json::object();
       wctJson["pid"] = proc.pid;
       wctJson["error"] = "capture_failed";
+    }
+    if (wctJson.contains("debugPrivilegeEnabled") && wctJson["debugPrivilegeEnabled"].is_boolean() &&
+        !wctJson["debugPrivilegeEnabled"].get<bool>()) {
+      AppendLogLine(outBase, L"Warning: EnableDebugPrivilege failed; WCT capture may be incomplete.");
     }
 
     wctJson["capture"] = nlohmann::json::object();
@@ -411,11 +506,14 @@ int wmain(int argc, wchar_t** argv)
       proc.shm->header.last_heartbeat_qpc,
       proc.shm->header.qpc_freq,
       stateFlags,
-      cfg.hangThresholdInGameSec,
+      ((stateFlags & skydiag::kState_InMenu) != 0u)
+        ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
+        : cfg.hangThresholdInGameSec,
       loadingThresholdSec);
 
     if (!decision.isHang) {
       hangCapturedThisEpisode = false;
+      hangSuppressedNotForegroundThisEpisode = false;
       continue;
     }
 
@@ -427,6 +525,122 @@ int wmain(int argc, wchar_t** argv)
 
     if (hangCapturedThisEpisode) {
       continue;
+    }
+
+    // Common case: users Alt-Tab away while Skyrim is intentionally paused.
+    // In that state, the heartbeat can stop, but it is not actionable to create a hang dump.
+    // Default: suppress auto hang dumps while Skyrim is not the foreground process.
+    // (Optional) If suppression is disabled, we still try to detect "background pause" by checking
+    // whether the game window is responsive.
+    const bool isForeground = IsPidInForeground(proc.pid);
+    if (!isForeground) {
+      if (cfg.suppressHangWhenNotForeground) {
+        if (!hangSuppressedNotForegroundThisEpisode) {
+          hangSuppressedNotForegroundThisEpisode = true;
+          const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
+          AppendLogLine(outBase, L"Hang detected but Skyrim is not foreground; suppressing hang dump. "
+            L"(secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
+            L", threshold=" + std::to_wstring(decision.thresholdSec) +
+            L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) +
+            L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
+        }
+        hangCapturedThisEpisode = false;
+        continue;
+      }
+
+      if (!targetWindow || !IsWindow(targetWindow)) {
+        targetWindow = FindMainWindowForPid(proc.pid);
+      }
+      if (targetWindow && IsWindowResponsive(targetWindow, 250)) {
+        if (!hangSuppressedNotForegroundThisEpisode) {
+          hangSuppressedNotForegroundThisEpisode = true;
+          const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
+          AppendLogLine(outBase, L"Hang detected but target window is responsive and not foreground; assuming Alt-Tab/pause and skipping hang dump. "
+            L"(secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
+            L", threshold=" + std::to_wstring(decision.thresholdSec) +
+            L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) +
+            L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
+        }
+        hangCapturedThisEpisode = false;
+        continue;
+      }
+    } else {
+      hangSuppressedNotForegroundThisEpisode = false;
+    }
+
+    // Avoid generating hang dumps during normal shutdown or transient stalls:
+    // Re-check after a short grace period. If the process exits or heartbeats recover, skip capture.
+    if (proc.process) {
+      const DWORD w = WaitForSingleObject(proc.process, 1500);
+      if (w == WAIT_OBJECT_0) {
+        AppendLogLine(outBase, L"Hang detected but target process exited during grace period; skipping hang dump.");
+        break;
+      }
+      if (w == WAIT_FAILED) {
+        const DWORD le = GetLastError();
+        std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";
+        AppendLogLine(outBase, L"Target process wait failed: " + std::to_wstring(le));
+        break;
+      }
+    }
+
+    LARGE_INTEGER now2{};
+    QueryPerformanceCounter(&now2);
+    const auto stateFlags2 = proc.shm->header.state_flags;
+    const std::uint32_t inGameThresholdSec2 = ((stateFlags2 & skydiag::kState_InMenu) != 0u)
+      ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
+      : cfg.hangThresholdInGameSec;
+    const std::uint32_t loadingThresholdSec2 = (cfg.enableAdaptiveLoadingThreshold && loadStats.HasSamples())
+      ? adaptiveLoadingThresholdSec
+      : cfg.hangThresholdLoadingSec;
+    const auto decision2 = skydiag::helper::EvaluateHang(
+      static_cast<std::uint64_t>(now2.QuadPart),
+      proc.shm->header.last_heartbeat_qpc,
+      proc.shm->header.qpc_freq,
+      stateFlags2,
+      inGameThresholdSec2,
+      loadingThresholdSec2);
+    if (!decision2.isHang) {
+      AppendLogLine(outBase, L"Hang detected but recovered during grace period; skipping hang dump.");
+      hangCapturedThisEpisode = false;
+      hangSuppressedNotForegroundThisEpisode = false;
+      continue;
+    }
+
+    const bool isForeground2 = IsPidInForeground(proc.pid);
+    if (!isForeground2) {
+      if (cfg.suppressHangWhenNotForeground) {
+        if (!hangSuppressedNotForegroundThisEpisode) {
+          hangSuppressedNotForegroundThisEpisode = true;
+          const bool inMenu = (stateFlags2 & skydiag::kState_InMenu) != 0u;
+          AppendLogLine(outBase, L"Hang confirmed but Skyrim is not foreground; suppressing hang dump. "
+            L"(secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
+            L", threshold=" + std::to_wstring(decision2.thresholdSec) +
+            L", loading=" + std::to_wstring(decision2.isLoading ? 1 : 0) +
+            L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
+        }
+        hangCapturedThisEpisode = false;
+        continue;
+      }
+
+      if (!targetWindow || !IsWindow(targetWindow)) {
+        targetWindow = FindMainWindowForPid(proc.pid);
+      }
+      if (targetWindow && IsWindowResponsive(targetWindow, 250)) {
+        if (!hangSuppressedNotForegroundThisEpisode) {
+          hangSuppressedNotForegroundThisEpisode = true;
+          const bool inMenu = (stateFlags2 & skydiag::kState_InMenu) != 0u;
+          AppendLogLine(outBase, L"Hang confirmed but target window is responsive and not foreground; assuming Alt-Tab/pause and skipping hang dump. "
+            L"(secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
+            L", threshold=" + std::to_wstring(decision2.thresholdSec) +
+            L", loading=" + std::to_wstring(decision2.isLoading ? 1 : 0) +
+            L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
+        }
+        hangCapturedThisEpisode = false;
+        continue;
+      }
+    } else {
+      hangSuppressedNotForegroundThisEpisode = false;
     }
 
     const auto ts = Timestamp();
@@ -441,13 +655,17 @@ int wmain(int argc, wchar_t** argv)
       wctJson["pid"] = proc.pid;
       wctJson["error"] = "capture_failed";
     }
+    if (wctJson.contains("debugPrivilegeEnabled") && wctJson["debugPrivilegeEnabled"].is_boolean() &&
+        !wctJson["debugPrivilegeEnabled"].get<bool>()) {
+      AppendLogLine(outBase, L"Warning: EnableDebugPrivilege failed; WCT capture may be incomplete.");
+    }
 
     wctJson["capture"] = nlohmann::json::object();
     wctJson["capture"]["kind"] = "hang";
-    wctJson["capture"]["secondsSinceHeartbeat"] = decision.secondsSinceHeartbeat;
-    wctJson["capture"]["thresholdSec"] = decision.thresholdSec;
-    wctJson["capture"]["isLoading"] = decision.isLoading;
-    wctJson["capture"]["stateFlags"] = stateFlags;
+    wctJson["capture"]["secondsSinceHeartbeat"] = decision2.secondsSinceHeartbeat;
+    wctJson["capture"]["thresholdSec"] = decision2.thresholdSec;
+    wctJson["capture"]["isLoading"] = decision2.isLoading;
+    wctJson["capture"]["stateFlags"] = stateFlags2;
 
     const std::string wctUtf8 = wctJson.dump(2);
     WriteTextFileUtf8(wctPath, wctUtf8);
@@ -468,12 +686,12 @@ int wmain(int argc, wchar_t** argv)
     } else {
       std::wcout << L"[SkyrimDiagHelper] Hang dump written: " << dumpPath << L"\n";
       std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
-      std::wcout << L"[SkyrimDiagHelper] Hang decision: secondsSinceHeartbeat=" << decision.secondsSinceHeartbeat
-                 << L" threshold=" << decision.thresholdSec << L" loading=" << (decision.isLoading ? L"1" : L"0") << L"\n";
+      std::wcout << L"[SkyrimDiagHelper] Hang decision: secondsSinceHeartbeat=" << decision2.secondsSinceHeartbeat
+                 << L" threshold=" << decision2.thresholdSec << L" loading=" << (decision2.isLoading ? L"1" : L"0") << L"\n";
       AppendLogLine(outBase, L"Hang dump written: " + dumpPath);
       AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
-      AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
-        L" threshold=" + std::to_wstring(decision.thresholdSec) + L" loading=" + std::to_wstring(decision.isLoading ? 1 : 0));
+      AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
+        L" threshold=" + std::to_wstring(decision2.thresholdSec) + L" loading=" + std::to_wstring(decision2.isLoading ? 1 : 0));
       StartDumpToolIfConfigured(cfg, dumpPath, outBase);
     }
 
