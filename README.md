@@ -63,6 +63,10 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
 ### B. DumpTool(뷰어)로 보는 법
 
 - `.dmp`를 `SkyrimDiagDumpTool.exe`에 드래그&드롭하거나 실행 후 파일을 선택합니다.
+- DumpTool 언어:
+  - 기본: 영어(넥서스 배포용). `Lang: EN/KO` 버튼으로 한국어 토글 가능
+  - 영구 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] Language=en|ko`
+  - CLI: `SkyrimDiagDumpTool.exe --lang en|ko <dump>`
 - 탭:
   - **요약**: 결론 1문장 + 신뢰도
   - **근거**: 콜스택/스택스캔/리소스 충돌/WCT 등 단서
@@ -76,6 +80,10 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
+  - Alt-Tab/백그라운드 일시정지 오탐 방지(기본값 권장)
+    - `SuppressHangWhenNotForeground=1`
+    - `ForegroundGraceSec=5` (포그라운드로 돌아온 직후 잠깐 기다렸다가 캡처)
+    - 포그라운드 복귀 후에도 창이 정상 응답 중이면 행 덤프를 계속 억제(Alt-Tab 오탐 추가 감소)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
 
 ### D. “빠른 재현” 테스트(가능한 경우)
@@ -94,7 +102,8 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
   - `*_SkyrimDiagSummary.json`
   - `*_SkyrimDiagBlackbox.jsonl` (있다면)
   - `SkyrimDiag_WCT_*.json` (있다면)
-- (있다면) Crash Logger SSE/AE의 `crash-*.log`
+- (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
+  - v1.18.0+의 `C++ EXCEPTION:` 블록(throw 타입/정보/위치/모듈)이 있으면 DumpTool에서 함께 표시됩니다.
 
 ### F. 이슈 템플릿(복사해서 사용)
 
@@ -117,7 +126,7 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 - *_SkyrimDiagSummary.json:
 - *_SkyrimDiagBlackbox.jsonl: (있으면)
 - SkyrimDiag_WCT_*.json: (있으면)
-- Crash Logger crash-*.log: (있으면)
+- Crash Logger crash-*.log / threaddump-*.log: (있으면)
 
 [추가 메모]
 - 최근 설치/업데이트한 모드/플러그인:
@@ -160,6 +169,10 @@ This repository contains an MVP implementation of the design in:
 - Run Skyrim via SKSE as usual (MO2).
 - Outputs:
   - Dumps/WCT/stats are written by the helper. Set `OutputDir` in `SkyrimDiagHelper.ini` for an easy-to-find folder.
+- Hang detection (in `SkyrimDiagHelper.ini`):
+  - `SuppressHangWhenNotForeground=1` avoids false hang dumps while Skyrim is paused in the background (Alt-Tab).
+  - `ForegroundGraceSec=5` waits briefly after returning to foreground before capturing a hang, so momentary resume delays don’t spam dumps.
+  - After returning to foreground, hang dumps stay suppressed while the game window is responsive (and not in a loading screen), until the heartbeat advances.
 - Crash hook behavior (in `SkyrimDiag.ini`):
   - `CrashHookMode=0` Off
   - `CrashHookMode=1` Fatal exceptions only (recommended; reduces false “Crash_*.dmp” during normal play/loading)
@@ -177,6 +190,10 @@ This repository contains an MVP implementation of the design in:
   - Manual:
     - Drag-and-drop a `.dmp` onto `SkyrimDiagDumpTool.exe`, or double-click it to pick a dump file.
     - The DumpTool opens a viewer UI (tabs: summary/evidence/events/resources/WCT).
+  - Language (DumpTool):
+    - Default: English (for Nexus). Toggle in-app via the `Lang: EN/KO` button.
+    - Persist via `SkyrimDiagDumpTool.ini`: `[SkyrimDiagDumpTool] Language=en|ko`
+    - CLI override: `SkyrimDiagDumpTool.exe --lang en|ko <dump>`
   - Output files:
     - `<stem>_SkyrimDiagSummary.json` (exception + module+offset, flags, etc.)
     - `<stem>_SkyrimDiagReport.txt` (quick human-readable report)

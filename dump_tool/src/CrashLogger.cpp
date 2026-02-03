@@ -1,4 +1,5 @@
 #include "CrashLogger.h"
+#include "CrashLoggerParseCore.h"
 #include "Utf.h"
 
 #include <Windows.h>
@@ -26,26 +27,6 @@ std::wstring WideLower(std::wstring_view s)
   std::wstring out(s);
   std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
   return out;
-}
-
-std::string AsciiLower(std::string_view s)
-{
-  std::string out;
-  out.reserve(s.size());
-  for (const char c : s) {
-    out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-  }
-  return out;
-}
-
-bool ContainsCaseInsensitiveAscii(std::string_view haystack, std::string_view needle)
-{
-  if (needle.empty()) {
-    return true;
-  }
-  const std::string h = AsciiLower(haystack);
-  const std::string n = AsciiLower(needle);
-  return h.find(n) != std::string::npos;
 }
 
 bool IsSystemishModule(std::wstring_view filename)
@@ -280,9 +261,7 @@ std::optional<std::string> ReadFilePrefixUtf8(const std::filesystem::path& path,
 
 bool LooksLikeCrashLoggerLogText(std::string_view utf8Prefix)
 {
-  // Heuristic: both strings should appear.
-  return ContainsCaseInsensitiveAscii(utf8Prefix, "crashlogger") &&
-         ContainsCaseInsensitiveAscii(utf8Prefix, "probable call stack");
+  return crashlogger_core::LooksLikeCrashLoggerLogTextCore(utf8Prefix);
 }
 
 std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::optional<std::filesystem::path>& mo2BaseDir)
@@ -356,43 +335,6 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
   }
 
   return dirs;
-}
-
-std::optional<std::string_view> TryExtractModulePlusOffsetTokenAscii(std::string_view line)
-{
-  const auto lower = AsciiLower(line);
-
-  auto pos = lower.find(".dll+");
-  std::size_t plusLen = 5;
-  if (pos == std::string::npos) {
-    pos = lower.find(".exe+");
-  }
-  if (pos == std::string::npos) {
-    return std::nullopt;
-  }
-
-  std::size_t start = pos;
-  while (start > 0) {
-    const char c = line[start - 1];
-    if (c == ' ' || c == '\t') {
-      break;
-    }
-    start--;
-  }
-
-  std::size_t end = pos + plusLen;
-  while (end < line.size()) {
-    const unsigned char c = static_cast<unsigned char>(line[end]);
-    if (!std::isxdigit(c)) {
-      break;
-    }
-    end++;
-  }
-
-  if (end <= start) {
-    return std::nullopt;
-  }
-  return line.substr(start, end - start);
 }
 
 }  // namespace
@@ -521,57 +463,12 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::string_view logUtf8,
   const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
 {
-  std::unordered_map<std::string, std::uint32_t> freq;
-  bool inStack = false;
-
-  std::istringstream iss{ std::string(logUtf8) };
-  std::string line;
-  while (std::getline(iss, line)) {
-    if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
-    }
-
-    if (!inStack) {
-      if (ContainsCaseInsensitiveAscii(line, "probable call stack")) {
-        inStack = true;
-      }
-      continue;
-    }
-
-    if (line.empty() || ContainsCaseInsensitiveAscii(line, "registers:") || ContainsCaseInsensitiveAscii(line, "modules:")) {
-      break;
-    }
-
-    auto tokOpt = TryExtractModulePlusOffsetTokenAscii(line);
-    if (!tokOpt) {
-      continue;
-    }
-    const std::string_view tok = *tokOpt;
-    const auto plus = tok.find('+');
-    if (plus == std::string::npos || plus == 0) {
-      continue;
-    }
-
-    const std::string module = AsciiLower(tok.substr(0, plus));
-    freq[module] += 1;
-  }
-
-  struct Row
-  {
-    std::string moduleLower;
-    std::uint32_t count = 0;
-  };
-  std::vector<Row> rows;
-  rows.reserve(freq.size());
-  for (const auto& [k, v] : freq) {
-    rows.push_back(Row{ k, v });
-  }
-  std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.count > b.count; });
+  const auto modulesLower = crashlogger_core::ParseCrashLoggerTopModulesAsciiLower(logUtf8);
 
   std::vector<std::wstring> out;
-  out.reserve(std::min<std::size_t>(rows.size(), 8));
-  for (const auto& r : rows) {
-    const std::wstring wLower = Utf8ToWide(r.moduleLower);
+  out.reserve(std::min<std::size_t>(modulesLower.size(), 8));
+  for (const auto& moduleLower : modulesLower) {
+    const std::wstring wLower = Utf8ToWide(moduleLower);
     const std::wstring key = WideLower(wLower);
 
     const auto it = canonicalByFilenameLower.find(key);

@@ -34,6 +34,8 @@ set_property(TARGET SkyrimDiagDumpToolCore PROPERTY MSVC_RUNTIME_LIBRARY "MultiT
 
 add_executable(SkyrimDiagDumpTool WIN32
   resources/SkyrimDiagDumpTool.rc
+  src/DumpToolConfig.cpp
+  src/DumpToolConfig.h
   src/GuiApp.cpp
   src/GuiApp.h
   src/main.cpp)

@@ -44,6 +44,7 @@
   - `HangThresholdInMenuSec` : 메뉴(일시정지/메인메뉴/종료 직전 등) 기준(기본 30초)
   - `EnableAdaptiveLoadingThreshold=1` 이면 최근 로딩 시간을 학습해 자동 보정합니다(추천).
   - **Alt-Tab(백그라운드) 주의:** 게임이 Alt-Tab으로 “일시정지”되는 환경에서는 heartbeat가 멈출 수 있습니다. 기본 설정(`SuppressHangWhenNotForeground=1`)은 **비포그라운드 상태에서 자동 hang dump 생성을 억제**합니다. (백그라운드 프리징도 자동 덤프를 원하면 `0`으로)
+  - **Alt-Tab 복귀 직후 오탐 방지:** 포그라운드로 돌아온 직후 잠깐 동안은 heartbeat가 바로 회복되지 않을 수 있습니다. 기본 설정(`ForegroundGraceSec=5`)은 이 구간에서 자동 hang dump 생성을 잠시 유예합니다.
 
 ### C. 수동 스냅샷(핫키)
 
@@ -64,6 +65,10 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 ## 4) DumpTool로 보는 법(유저 기준)
 
 - `.dmp`를 `SkyrimDiagDumpTool.exe`에 드래그 앤 드롭하거나 실행 후 파일을 선택합니다.
+- DumpTool 언어:
+  - 기본: 영어(넥서스 배포용). `Lang: EN/KO` 버튼으로 한국어 토글 가능
+  - 영구 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] Language=en|ko`
+  - CLI: `SkyrimDiagDumpTool.exe --lang en|ko <dump>`
 - 탭 가이드:
   - **요약**: “결론”을 한 문장으로 표시(신뢰도 포함)
   - **근거**: 왜 그렇게 판단했는지(콜스택/스택 스캔/리소스 충돌/WCT 등)
@@ -89,7 +94,7 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
   - `*_SkyrimDiagSummary.json`
   - `*_SkyrimDiagBlackbox.jsonl` (있다면)
   - `SkyrimDiag_WCT_*.json` (있다면)
-- (있다면) Crash Logger SSE/AE의 `crash-*.log`
+- (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
 
 ### 함께 적어주세요
 
@@ -120,7 +125,7 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 - *_SkyrimDiagSummary.json:
 - *_SkyrimDiagBlackbox.jsonl: (있으면)
 - SkyrimDiag_WCT_*.json: (있으면)
-- Crash Logger crash-*.log: (있으면)
+- Crash Logger crash-*.log / threaddump-*.log: (있으면)
 
 [추가 메모]
 - 최근 설치/업데이트한 모드/플러그인:

@@ -4,10 +4,13 @@
 #include <string>
 #include <vector>
 
+#include "I18nCore.h"
+
 namespace skydiag::dump_tool {
 
 struct EvidenceItem
 {
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;  // "높음/중간/낮음"
   std::wstring title;
   std::wstring details;
@@ -15,6 +18,7 @@ struct EvidenceItem
 
 struct SuspectItem
 {
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;  // "높음/중간/낮음"
   std::wstring module_filename;
   std::wstring module_path;
@@ -48,6 +52,7 @@ struct ResourceRow
 
 struct AnalysisResult
 {
+  i18n::Language language = i18n::DefaultLanguage();
   std::wstring dump_path;
   std::wstring out_dir;
 
@@ -66,6 +71,10 @@ struct AnalysisResult
   // Optional: Crash Logger SSE/AE integration (best-effort)
   std::wstring crash_logger_log_path;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
+  std::wstring crash_logger_cpp_exception_type;
+  std::wstring crash_logger_cpp_exception_info;
+  std::wstring crash_logger_cpp_exception_throw_location;
+  std::wstring crash_logger_cpp_exception_module;
 
   // Heuristic: suspects inferred from stack/module scanning
   std::vector<SuspectItem> suspects;
@@ -92,6 +101,7 @@ struct AnalysisResult
 struct AnalyzeOptions
 {
   bool debug = false;
+  i18n::Language language = i18n::DefaultLanguage();
 };
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err);

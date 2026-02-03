@@ -25,6 +25,7 @@ struct HelperConfig {
   std::uint32_t adaptiveLoadingMinExtraSec = 120;
   std::uint32_t adaptiveLoadingMaxSec = 1800;
   bool suppressHangWhenNotForeground = true;
+  std::uint32_t foregroundGraceSec = 5;
 };
 
 HelperConfig LoadConfig(std::wstring* err);

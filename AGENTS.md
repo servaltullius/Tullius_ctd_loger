@@ -17,6 +17,7 @@ When doing code review / refactoring / decoupling / architecture work on this re
 - `receiving-code-review`: Evaluate external review feedback before implementing.
 - `code-review-excellence`: Produce thorough, actionable code review notes.
 - `refactor`: Surgical refactors without behavior change.
+- `changelog-automation`: Draft consistent release notes / changelog entries.
 - `architecture-designer`: Architecture review + trade-offs.
 - `architecture-patterns`: Decoupling guidance (Clean/Hexagonal patterns).
 - `architecture-decision-records`: Write/maintain ADRs for major design decisions.

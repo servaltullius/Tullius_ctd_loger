@@ -74,6 +74,9 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.suppressHangWhenNotForeground =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"SuppressHangWhenNotForeground", 1, path.c_str()) != 0;
 
+  cfg.foregroundGraceSec = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"ForegroundGraceSec", 5, path.c_str()));
+
   if (cfg.outputDir.empty()) {
     cfg.outputDir = ExeDir();
   }

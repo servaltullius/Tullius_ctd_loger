@@ -1,6 +1,7 @@
 #include "Analyzer.h"
 #include "EvidenceBuilder.h"
 #include "CrashLogger.h"
+#include "CrashLoggerParseCore.h"
 #include "Mo2Index.h"
 #include "Utf.h"
 
@@ -372,9 +373,10 @@ std::wstring EventTypeName(std::uint16_t t)
   }
 }
 
-std::wstring ConfidenceHigh() { return L"높음"; }
-std::wstring ConfidenceMid() { return L"중간"; }
-std::wstring ConfidenceLow() { return L"낮음"; }
+std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
+{
+  return std::wstring(i18n::ConfidenceLabel(lang, level));
+}
 
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN)
 {
@@ -621,22 +623,23 @@ bool GetThreadStackBytes(void* dumpBase, std::uint64_t dumpSize, const ThreadRec
   return true;
 }
 
-std::wstring ConfidenceForTopSuspect(std::uint32_t topScore, std::uint32_t secondScore)
+i18n::ConfidenceLevel ConfidenceForTopSuspectLevel(std::uint32_t topScore, std::uint32_t secondScore)
 {
   if (topScore >= 128u || (topScore >= 48u && topScore >= (secondScore * 2u))) {
-    return ConfidenceHigh();
+    return i18n::ConfidenceLevel::kHigh;
   }
   if (topScore >= 20u) {
-    return ConfidenceMid();
+    return i18n::ConfidenceLevel::kMedium;
   }
-  return ConfidenceLow();
+  return i18n::ConfidenceLevel::kLow;
 }
 
 std::vector<SuspectItem> ComputeStackScanSuspects(
   void* dumpBase,
   std::uint64_t dumpSize,
   const std::vector<ModuleInfo>& modules,
-  const std::vector<std::uint32_t>& targetTids)
+  const std::vector<std::uint32_t>& targetTids,
+  i18n::Language lang)
 {
   std::vector<SuspectItem> out;
   if (!dumpBase || modules.empty() || targetTids.empty()) {
@@ -717,7 +720,8 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
 
   const std::uint32_t topScore = rows[0].score;
   const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
-  const std::wstring conf = ConfidenceForTopSuspect(topScore, secondScore);
+  const auto confTop = ConfidenceForTopSuspectLevel(topScore, secondScore);
+  const bool en = (lang == i18n::Language::kEnglish);
 
   const std::size_t n = std::min<std::size_t>(rows.size(), 5);
   out.reserve(n);
@@ -726,12 +730,15 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     const auto& m = modules[row.modIndex];
 
     SuspectItem si{};
-    si.confidence = (i == 0) ? conf : ConfidenceMid();
+    si.confidence_level = (i == 0) ? confTop : i18n::ConfidenceLevel::kMedium;
+    si.confidence = ConfidenceText(lang, si.confidence_level);
     si.module_filename = m.filename;
     si.module_path = m.path;
     si.inferred_mod_name = m.inferred_mod_name;
     si.score = row.score;
-    si.reason = L"스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측";
+    si.reason = en
+      ? (L"Observed " + std::to_wstring(row.score) + L" hit(s) in stack scan")
+      : (L"스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측");
     out.push_back(std::move(si));
   }
 
@@ -1018,18 +1025,21 @@ std::uint32_t CallstackFrameWeight(std::size_t depth)
   return 1;
 }
 
-std::wstring ConfidenceForTopSuspectCallstack(std::uint32_t topScore, std::uint32_t secondScore, std::size_t firstDepth)
+i18n::ConfidenceLevel ConfidenceForTopSuspectCallstackLevel(std::uint32_t topScore, std::uint32_t secondScore, std::size_t firstDepth)
 {
   if (firstDepth <= 2 && (topScore >= 24u || topScore >= (secondScore + 12u))) {
-    return ConfidenceHigh();
+    return i18n::ConfidenceLevel::kHigh;
   }
   if (firstDepth <= 6 && (topScore >= 12u || topScore >= (secondScore + 6u))) {
-    return ConfidenceMid();
+    return i18n::ConfidenceLevel::kMedium;
   }
-  return ConfidenceLow();
+  return i18n::ConfidenceLevel::kLow;
 }
 
-std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(const std::vector<ModuleInfo>& modules, const std::vector<std::uint64_t>& pcs)
+std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  i18n::Language lang)
 {
   std::vector<SuspectItem> out;
   if (modules.empty() || pcs.empty()) {
@@ -1091,7 +1101,8 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(const std::vector<Mod
 
   const std::uint32_t topScore = rows[0].score;
   const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
-  const std::wstring conf = ConfidenceForTopSuspectCallstack(topScore, secondScore, rows[0].firstDepth);
+  const auto confTop = ConfidenceForTopSuspectCallstackLevel(topScore, secondScore, rows[0].firstDepth);
+  const bool en = (lang == i18n::Language::kEnglish);
 
   const std::size_t n = std::min<std::size_t>(rows.size(), 5);
   out.reserve(n);
@@ -1100,14 +1111,15 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(const std::vector<Mod
     const auto& m = modules[row.modIndex];
 
     SuspectItem si{};
-    si.confidence = (i == 0) ? conf : ConfidenceMid();
+    si.confidence_level = (i == 0) ? confTop : i18n::ConfidenceLevel::kMedium;
+    si.confidence = ConfidenceText(lang, si.confidence_level);
     si.module_filename = m.filename;
     si.module_path = m.path;
     si.inferred_mod_name = m.inferred_mod_name;
     si.score = row.score;
-    si.reason =
-      L"콜스택 상위 프레임에서 가중치=" + std::to_wstring(row.score) +
-      L", 최초 깊이=" + std::to_wstring(row.firstDepth);
+    si.reason = en
+      ? (L"Callstack weight=" + std::to_wstring(row.score) + L", first depth=" + std::to_wstring(row.firstDepth))
+      : (L"콜스택 상위 프레임에서 가중치=" + std::to_wstring(row.score) + L", 최초 깊이=" + std::to_wstring(row.firstDepth));
     out.push_back(std::move(si));
   }
 
@@ -1169,6 +1181,7 @@ bool TryComputeStackwalkSuspects(
   std::uint32_t excTid,
   const std::optional<CONTEXT>& excCtx,
   const std::vector<ThreadRecord>& threads,
+  i18n::Language lang,
   AnalysisResult& out)
 {
   if (!dumpBase || modules.empty() || targetTids.empty() || threads.empty()) {
@@ -1195,6 +1208,7 @@ bool TryComputeStackwalkSuspects(
 
   Candidate best{};
   Candidate bestAny{};
+  const bool en = (lang == i18n::Language::kEnglish);
   for (const auto tid : targetTids) {
     CONTEXT ctx{};
     bool haveCtx = false;
@@ -1224,7 +1238,7 @@ bool TryComputeStackwalkSuspects(
       bestAny.pcs = pcs;
     }
 
-    auto suspects = ComputeCallstackSuspectsFromAddrs(modules, pcs);
+    auto suspects = ComputeCallstackSuspectsFromAddrs(modules, pcs, lang);
     if (suspects.empty()) {
       continue;
     }
@@ -1252,10 +1266,21 @@ bool TryComputeStackwalkSuspects(
     const auto topLower = WideLower(best.suspects[0].module_filename);
     for (const auto& m : out.crash_logger_top_modules) {
       if (WideLower(m) == topLower) {
-        best.suspects[0].confidence = ConfidenceHigh();
-        best.suspects[0].reason += L" (Crash Logger 콜스택에도 등장)";
+        best.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+        best.suspects[0].confidence = ConfidenceText(lang, best.suspects[0].confidence_level);
+        best.suspects[0].reason += en ? L" (also in Crash Logger callstack)" : L" (Crash Logger 콜스택에도 등장)";
         break;
       }
+    }
+  }
+
+  // Also boost when Crash Logger provides an explicit C++ exception module that matches our top suspect.
+  if (!out.crash_logger_cpp_exception_module.empty() && !best.suspects.empty()) {
+    const auto topLower = WideLower(best.suspects[0].module_filename);
+    if (WideLower(out.crash_logger_cpp_exception_module) == topLower) {
+      best.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+      best.suspects[0].confidence = ConfidenceText(lang, best.suspects[0].confidence_level);
+      best.suspects[0].reason += en ? L" (Crash Logger C++ exception module)" : L" (Crash Logger C++ 예외 모듈)";
     }
   }
 
@@ -1274,8 +1299,8 @@ bool TryComputeStackwalkSuspects(
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
 {
-  (void)opt;
   out = AnalysisResult{};
+  out.language = opt.language;
   out.dump_path = dumpPath;
   out.out_dir = outDir;
 
@@ -1542,6 +1567,23 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
             }
           }
           out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
+
+          if (auto cpp = crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii(*logUtf8)) {
+            if (!cpp->type.empty()) {
+              out.crash_logger_cpp_exception_type = Utf8ToWide(cpp->type);
+            }
+            if (!cpp->info.empty()) {
+              out.crash_logger_cpp_exception_info = Utf8ToWide(cpp->info);
+            }
+            if (!cpp->throw_location.empty()) {
+              out.crash_logger_cpp_exception_throw_location = Utf8ToWide(cpp->throw_location);
+            }
+            if (!cpp->module.empty()) {
+              std::wstring mod = Utf8ToWide(cpp->module);
+              const auto it = canonicalByLower.find(WideLower(mod));
+              out.crash_logger_cpp_exception_module = (it != canonicalByLower.end()) ? it->second : mod;
+            }
+          }
         }
       }
     }
@@ -1567,15 +1609,15 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         std::sort(tids.begin(), tids.end());
         tids.erase(std::unique(tids.begin(), tids.end()), tids.end());
         const auto threads = LoadThreads(dumpBase, dumpSize);
-        if (!TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, out)) {
+        if (!TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, opt.language, out)) {
           out.suspects_from_stackwalk = false;
-          out.suspects = ComputeStackScanSuspects(dumpBase, dumpSize, allModules, tids);
+          out.suspects = ComputeStackScanSuspects(dumpBase, dumpSize, allModules, tids, opt.language);
         }
       }
     }
   }
 
-  BuildEvidenceAndSummary(out);
+  BuildEvidenceAndSummary(out, opt.language);
   if (err) err->clear();
   return true;
 }

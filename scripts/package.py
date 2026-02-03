@@ -94,11 +94,15 @@ def main(argv: list[str]) -> int:
 
     ini_plugin = root / "dist" / "SkyrimDiag.ini"
     ini_helper = root / "dist" / "SkyrimDiagHelper.ini"
+    ini_dump_tool = root / "dist" / "SkyrimDiagDumpTool.ini"
     if not ini_plugin.is_file():
         print(f"ERROR: missing {ini_plugin}", file=sys.stderr)
         return 4
     if not ini_helper.is_file():
         print(f"ERROR: missing {ini_helper}", file=sys.stderr)
+        return 4
+    if not ini_dump_tool.is_file():
+        print(f"ERROR: missing {ini_dump_tool}", file=sys.stderr)
         return 4
 
     out_zip = Path(args.out) if args.out else root / "dist" / f"SkyrimDiag_{_timestamp()}.zip"
@@ -115,6 +119,7 @@ def main(argv: list[str]) -> int:
         shutil.copy2(dump_tool_exe, plugins_dir / "SkyrimDiagDumpTool.exe")
         shutil.copy2(ini_plugin, plugins_dir / "SkyrimDiag.ini")
         shutil.copy2(ini_helper, plugins_dir / "SkyrimDiagHelper.ini")
+        shutil.copy2(ini_dump_tool, plugins_dir / "SkyrimDiagDumpTool.ini")
 
         if plugin_pdb and plugin_pdb.is_file():
             shutil.copy2(plugin_pdb, plugins_dir / "SkyrimDiag.pdb")

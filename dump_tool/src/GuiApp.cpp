@@ -1,4 +1,5 @@
 #include "GuiApp.h"
+#include "DumpToolConfig.h"
 #include "OutputWriter.h"
 #include "Utf.h"
 
@@ -71,6 +72,7 @@ enum : int
   kIdBtnOpenFolder = 201,
   kIdBtnOpenDump = 202,
   kIdBtnCopyChecklist = 203,
+  kIdBtnLanguage = 204,
 };
 
 struct AppState
@@ -84,6 +86,7 @@ struct AppState
 
   HFONT uiFont = nullptr;
   HFONT uiFontSemibold = nullptr;
+  HFONT uiFontMono = nullptr;
 
   HBRUSH bgBaseBrush = nullptr;
   HBRUSH bgCardBrush = nullptr;
@@ -118,6 +121,11 @@ int ScalePx(HWND hwnd, int px96)
 {
   const UINT dpi = hwnd ? GetDpiForWindowCompat(hwnd) : 96;
   return MulDiv(px96, static_cast<int>(dpi), 96);
+}
+
+const wchar_t* LText(i18n::Language lang, const wchar_t* en, const wchar_t* ko)
+{
+  return (lang == i18n::Language::kEnglish) ? en : ko;
 }
 
 HFONT CreateUiFont(HWND hwnd)
@@ -160,6 +168,27 @@ HFONT CreateUiFontSemibold(HWND hwnd)
     CLEARTYPE_QUALITY,
     DEFAULT_PITCH | FF_DONTCARE,
     L"Segoe UI");
+}
+
+HFONT CreateUiFontMono(HWND hwnd)
+{
+  const UINT dpi = hwnd ? GetDpiForWindowCompat(hwnd) : 96;
+  const int height = -MulDiv(9, static_cast<int>(dpi), 72);
+  return CreateFontW(
+    height,
+    0,
+    0,
+    0,
+    FW_NORMAL,
+    FALSE,
+    FALSE,
+    FALSE,
+    DEFAULT_CHARSET,
+    OUT_DEFAULT_PRECIS,
+    CLIP_DEFAULT_PRECIS,
+    CLEARTYPE_QUALITY,
+    DEFAULT_PITCH | FF_DONTCARE,
+    L"Consolas");
 }
 
 void ApplyFont(HWND w, HFONT f)
@@ -220,6 +249,21 @@ void EnableDarkMode(HWND hwnd)
   
   BOOL dark = TRUE;
   DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+
+  // Windows 11: rounded corners (best-effort; ignore failures on older builds).
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWCP_ROUND
+  typedef enum DWM_WINDOW_CORNER_PREFERENCE {
+    DWMWCP_DEFAULT = 0,
+    DWMWCP_DONOTROUND = 1,
+    DWMWCP_ROUND = 2,
+    DWMWCP_ROUNDSMALL = 3,
+  } DWM_WINDOW_CORNER_PREFERENCE;
+#endif
+  const DWM_WINDOW_CORNER_PREFERENCE cornerPref = DWMWCP_ROUND;
+  DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &cornerPref, sizeof(cornerPref));
   
   // Set dark mode for the window theme
   SetWindowTheme(hwnd, L"DarkMode", nullptr);
@@ -246,6 +290,96 @@ void ApplyDarkTab(HWND tab)
   SetWindowTheme(tab, L"DarkMode", nullptr);
 }
 
+void ApplyEditPadding(HWND edit, int px)
+{
+  if (!edit) {
+    return;
+  }
+  SendMessageW(
+    edit,
+    EM_SETMARGINS,
+    EC_LEFTMARGIN | EC_RIGHTMARGIN,
+    MAKELPARAM(px, px));
+}
+
+void DrawModernButton(const AppState* st, const DRAWITEMSTRUCT* dis, bool isPrimary)
+{
+  if (!st || !dis) {
+    return;
+  }
+
+  wchar_t text[256]{};
+  GetWindowTextW(dis->hwndItem, text, static_cast<int>(sizeof(text) / sizeof(text[0])));
+
+  const bool isDisabled = (dis->itemState & ODS_DISABLED) != 0;
+  const bool isPressed = (dis->itemState & ODS_SELECTED) != 0;
+  const bool isHot = (dis->itemState & ODS_HOTLIGHT) != 0;
+  const bool isFocused = (dis->itemState & ODS_FOCUS) != 0;
+
+  COLORREF bg = theme::BG_INPUT;
+  COLORREF border = theme::BORDER;
+  COLORREF fg = theme::TEXT_PRIMARY;
+
+  if (isPrimary) {
+    // Primary: "gold" action button (Skyrim vibe, but still clean).
+    bg = RGB(88, 65, 25);
+    border = theme::ACCENT_GOLD;
+    fg = RGB(255, 255, 255);
+    if (isHot) {
+      bg = RGB(107, 79, 31);
+    }
+    if (isPressed) {
+      bg = RGB(70, 52, 20);
+    }
+  } else {
+    // Secondary buttons.
+    bg = theme::BG_INPUT;
+    border = theme::BORDER;
+    fg = theme::TEXT_PRIMARY;
+    if (isHot) {
+      bg = RGB(51, 65, 85);
+    }
+    if (isPressed) {
+      bg = theme::BG_CARD;
+    }
+  }
+
+  if (isDisabled) {
+    bg = theme::BG_CARD;
+    border = theme::BORDER;
+    fg = theme::TEXT_MUTED;
+  }
+
+  HDC hdc = dis->hDC;
+  RECT rc = dis->rcItem;
+
+  // Background.
+  HBRUSH bgBrush = CreateSolidBrush(bg);
+  HPEN borderPen = CreatePen(PS_SOLID, 1, border);
+  HGDIOBJ oldBrush = SelectObject(hdc, bgBrush);
+  HGDIOBJ oldPen = SelectObject(hdc, borderPen);
+
+  const int radius = ScalePx(st->hwnd, 8);
+  RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
+
+  // Text.
+  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(hdc, fg);
+  DrawTextW(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+  // Focus ring.
+  if (isFocused && !isPressed) {
+    RECT frc = rc;
+    InflateRect(&frc, -2, -2);
+    DrawFocusRect(hdc, &frc);
+  }
+
+  SelectObject(hdc, oldPen);
+  SelectObject(hdc, oldBrush);
+  DeleteObject(borderPen);
+  DeleteObject(bgBrush);
+}
+
 LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
 {
   if (!st || !cd) {
@@ -259,20 +393,38 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
       return CDRF_NOTIFYSUBITEMDRAW;
     case (CDDS_SUBITEM | CDDS_ITEMPREPAINT): {
       const int col = cd->iSubItem;
+      const bool isSelected = (cd->nmcd.uItemState & CDIS_SELECTED) != 0;
+      const bool isHot = (cd->nmcd.uItemState & CDIS_HOT) != 0;
+
+      // Subtle row striping helps readability in long evidence lists.
+      COLORREF rowBg = ((cd->nmcd.dwItemSpec % 2) == 0) ? theme::BG_CARD : theme::BG_INPUT;
+      if (isSelected) {
+        rowBg = RGB(30, 58, 138);  // deep blue selection
+      } else if (isHot) {
+        rowBg = RGB(51, 65, 85);  // hover (slightly brighter than BG_CARD)
+      }
 
       if (col == 0) {
         wchar_t text[32]{};
         ListView_GetItemText(cd->nmcd.hdr.hwndFrom, static_cast<int>(cd->nmcd.dwItemSpec), 0, text, 32);
 
         // Dark theme confidence badge colors (Dragonfire theme)
-        COLORREF fg = theme::CONF_LOW_FG;
-        COLORREF bg = theme::CONF_LOW_BG;
-        if (wcscmp(text, L"높음") == 0) {
+        const auto level = static_cast<i18n::ConfidenceLevel>(cd->nmcd.lItemlParam);
+        COLORREF fg = theme::TEXT_SECONDARY;
+        COLORREF bg = theme::BG_INPUT;
+        COLORREF border = theme::BORDER;
+        if (level == i18n::ConfidenceLevel::kHigh) {
           fg = theme::CONF_HIGH_FG;
           bg = theme::CONF_HIGH_BG;
-        } else if (wcscmp(text, L"중간") == 0) {
+          border = fg;
+        } else if (level == i18n::ConfidenceLevel::kMedium) {
           fg = theme::CONF_MED_FG;
           bg = theme::CONF_MED_BG;
+          border = fg;
+        } else if (level == i18n::ConfidenceLevel::kLow) {
+          fg = theme::CONF_LOW_FG;
+          bg = theme::CONF_LOW_BG;
+          border = fg;
         }
 
         // Theme'd listviews on modern Windows can ignore clrTextBk for subitems.
@@ -297,8 +449,8 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
           oldFont = static_cast<HFONT>(SelectObject(hdc, st->uiFontSemibold));
         }
 
-        // Base cell background (dark card).
-        HBRUSH cellBg = CreateSolidBrush(theme::BG_CARD);
+        // Base cell background (striped/selection-aware).
+        HBRUSH cellBg = CreateSolidBrush(rowBg);
         FillRect(hdc, &rc, cellBg);
         DeleteObject(cellBg);
 
@@ -323,7 +475,7 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
 
         const int radius = ScalePx(st->hwnd, 10);
         HBRUSH badgeBrush = CreateSolidBrush(bg);
-        HPEN badgePen = CreatePen(PS_SOLID, 1, fg);
+        HPEN badgePen = CreatePen(PS_SOLID, 1, border);
         HGDIOBJ oldBrush = SelectObject(hdc, badgeBrush);
         HGDIOBJ oldPen = SelectObject(hdc, badgePen);
         RoundRect(hdc, badge.left, badge.top, badge.right, badge.bottom, radius, radius);
@@ -343,7 +495,7 @@ LRESULT HandleEvidenceCustomDraw(AppState* st, LPNMLVCUSTOMDRAW cd)
 
       // Default text colors for other columns (dark theme).
       cd->clrText = theme::TEXT_PRIMARY;
-      cd->clrTextBk = theme::BG_CARD;
+      cd->clrTextBk = rowBg;
       return CDRF_DODEFAULT;
     }
   }
@@ -478,8 +630,9 @@ std::wstring WrapLines(std::wstring_view s, std::size_t width, std::wstring_view
 
 std::wstring FormatWctText(const AnalysisResult& r)
 {
+  const auto lang = r.language;
   if (!r.has_wct || r.wct_json_utf8.empty()) {
-    return L"(WCT 정보 없음)";
+    return std::wstring(LText(lang, L"(No WCT data)", L"(WCT 정보 없음)"));
   }
 
   try {
@@ -516,11 +669,17 @@ std::wstring FormatWctText(const AnalysisResult& r)
     });
 
     std::wstring out;
-    out += L"WCT (Wait Chain) 보기\r\n";
+    out += LText(lang, L"WCT (Wait Chain) Overview\r\n", L"WCT (Wait Chain) 보기\r\n");
     out += L"- threads=" + std::to_wstring(threads.size()) + L"\r\n";
     out += L"- isCycle=true threads=" + std::to_wstring(cycles) + L"\r\n";
-    out += L"- isCycle=true면 데드락 가능성이 큽니다.\r\n";
-    out += L"- 이 화면은 '프리징/무한로딩' 진단용입니다.\r\n";
+    out += LText(
+      lang,
+      L"- isCycle=true suggests a likely deadlock.\r\n",
+      L"- isCycle=true면 데드락 가능성이 큽니다.\r\n");
+    out += LText(
+      lang,
+      L"- Use this tab to diagnose freezes/infinite loading.\r\n",
+      L"- 이 화면은 '프리징/무한로딩' 진단용입니다.\r\n");
     out += L"\r\n";
 
     const std::size_t maxThreads = 20;
@@ -534,7 +693,7 @@ std::wstring FormatWctText(const AnalysisResult& r)
       out += L")\r\n";
 
       if (!t.nodes.is_array() || t.nodes.empty()) {
-        out += L"  (nodes 없음)\r\n\r\n";
+        out += LText(lang, L"  (no nodes)\r\n\r\n", L"  (nodes 없음)\r\n\r\n");
         continue;
       }
 
@@ -579,12 +738,16 @@ std::wstring FormatWctText(const AnalysisResult& r)
         }
       }
       if (t.nodes.size() > nodeN) {
-        out += L"  ... (노드 " + std::to_wstring(t.nodes.size() - nodeN) + L"개 생략)\r\n";
+        out += LText(lang, L"  ... (", L"  ... (노드 ");
+        out += std::to_wstring(t.nodes.size() - nodeN);
+        out += LText(lang, L" nodes omitted)\r\n", L"개 생략)\r\n");
       }
       out += L"\r\n";
     }
     if (threads.size() > showN) {
-      out += L"... (스레드 " + std::to_wstring(threads.size() - showN) + L"개 생략)\r\n";
+      out += LText(lang, L"... (", L"... (스레드 ");
+      out += std::to_wstring(threads.size() - showN);
+      out += LText(lang, L" threads omitted)\r\n", L"개 생략)\r\n");
     }
 
     return out;
@@ -614,13 +777,14 @@ std::wstring FormatSummaryText(const AnalysisResult& r)
     return out;
   };
 
+  const auto lang = r.language;
   std::wstring s;
-  s += L"결론\n";
+  s += LText(lang, L"Conclusion\r\n", L"결론\r\n");
   s += L"- ";
-  s += r.summary_sentence.empty() ? L"(없음)" : r.summary_sentence;
+  s += r.summary_sentence.empty() ? std::wstring(LText(lang, L"(none)", L"(없음)")) : r.summary_sentence;
   s += L"\r\n\r\n";
 
-  s += L"기본 정보\r\n";
+  s += LText(lang, L"Basic info\r\n", L"기본 정보\r\n");
   s += L"- Dump: ";
   s += r.dump_path;
   s += L"\r\n";
@@ -630,30 +794,62 @@ std::wstring FormatSummaryText(const AnalysisResult& r)
   s += L"\r\n";
 
   if (!r.inferred_mod_name.empty()) {
-    s += L"- 추정 모드: ";
+    s += L"- ";
+    s += LText(lang, L"Inferred mod", L"추정 모드");
+    s += L": ";
     s += r.inferred_mod_name;
     s += L"\r\n";
   }
 
   if (!r.crash_logger_log_path.empty()) {
-    s += L"- Crash Logger 로그: ";
+    s += L"- ";
+    s += LText(lang, L"Crash Logger log", L"Crash Logger 로그");
+    s += L": ";
     s += r.crash_logger_log_path;
     s += L"\r\n";
   }
 
   if (!r.crash_logger_top_modules.empty()) {
-    s += L"- Crash Logger 상위 모듈: ";
+    s += L"- ";
+    s += LText(lang, L"Crash Logger top modules", L"Crash Logger 상위 모듈");
+    s += L": ";
     s += join(r.crash_logger_top_modules, 6, L", ");
     s += L"\r\n";
   }
 
+  if (!r.crash_logger_cpp_exception_type.empty() ||
+      !r.crash_logger_cpp_exception_info.empty() ||
+      !r.crash_logger_cpp_exception_throw_location.empty() ||
+      !r.crash_logger_cpp_exception_module.empty()) {
+    std::vector<std::wstring> parts;
+    if (!r.crash_logger_cpp_exception_type.empty()) {
+      parts.push_back(L"Type: " + r.crash_logger_cpp_exception_type);
+    }
+    if (!r.crash_logger_cpp_exception_info.empty()) {
+      parts.push_back(L"Info: " + r.crash_logger_cpp_exception_info);
+    }
+    if (!r.crash_logger_cpp_exception_throw_location.empty()) {
+      parts.push_back(L"Throw: " + r.crash_logger_cpp_exception_throw_location);
+    }
+    if (!r.crash_logger_cpp_exception_module.empty()) {
+      parts.push_back(L"Module: " + r.crash_logger_cpp_exception_module);
+    }
+    s += L"- ";
+    s += LText(lang, L"Crash Logger C++ exception", L"Crash Logger C++ 예외");
+    s += L": ";
+    s += join(parts, 8, L" | ");
+    s += L"\r\n";
+  }
+
   if (!r.suspects.empty()) {
-    s += L"- 스택 스캔 후보(Top 5):\r\n";
+    s += L"- ";
+    s += LText(lang, L"Stack scan candidates (Top 5)", L"스택 스캔 후보(Top 5)");
+    s += L":\r\n";
     const std::size_t n = std::min<std::size_t>(r.suspects.size(), 5);
     for (std::size_t i = 0; i < n; i++) {
       const auto& sus = r.suspects[i];
       s += L"  - [";
-      s += sus.confidence.empty() ? L"중간" : sus.confidence;
+      s += sus.confidence.empty() ? std::wstring(i18n::ConfidenceLabel(lang, sus.confidence_level)) : sus.confidence;
       s += L"] ";
       if (!sus.inferred_mod_name.empty()) {
         s += sus.inferred_mod_name;
@@ -677,7 +873,9 @@ std::wstring FormatSummaryText(const AnalysisResult& r)
       const auto& rr = r.resources[i];
       items.push_back(rr.path);
     }
-    s += L"- 최근 리소스(.nif/.hkx/.tri): ";
+    s += L"- ";
+    s += LText(lang, L"Recent assets (.nif/.hkx/.tri)", L"최근 리소스(.nif/.hkx/.tri)");
+    s += L": ";
     s += join(items, 6, L", ");
     s += L"\r\n";
   }
@@ -695,9 +893,12 @@ std::wstring FormatSummaryText(const AnalysisResult& r)
   swprintf_s(buf, L"- StateFlags: %u\r\n", r.state_flags);
   s += buf;
 
-  s += L"\r\n권장 조치(요약)\r\n";
+  s += L"\r\n";
+  s += LText(lang, L"Recommended actions (summary)\r\n", L"권장 조치(요약)\r\n");
   if (r.recommendations.empty()) {
-    s += L"- (없음)\r\n";
+    s += L"- ";
+    s += LText(lang, L"(none)", L"(없음)");
+    s += L"\r\n";
   } else {
     const std::size_t n = std::min<std::size_t>(r.recommendations.size(), 6);
     for (std::size_t i = 0; i < n; i++) {
@@ -706,7 +907,9 @@ std::wstring FormatSummaryText(const AnalysisResult& r)
       s += L"\r\n";
     }
     if (r.recommendations.size() > n) {
-      s += L"- (나머지는 근거 탭의 체크리스트에서 확인)\r\n";
+      s += L"- ";
+      s += LText(lang, L"(See the Evidence tab for the full checklist)", L"(나머지는 근거 탭의 체크리스트에서 확인)");
+      s += L"\r\n";
     }
   }
 
@@ -789,6 +992,10 @@ void Layout(AppState* st)
   MoveWindow(GetDlgItem(st->hwnd, kIdBtnCopy), x, y, btnW, btnH, TRUE);
   x += btnW + btnGap;
   MoveWindow(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), x, y, btnW, btnH, TRUE);
+
+  const int langBtnW = ScalePx(st->hwnd, 90);
+  const int langX = rc.right - padding - langBtnW;
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnLanguage), langX, y, langBtnW, btnH, TRUE);
 }
 
 void ListViewAddColumn(HWND lv, int col, int width, const wchar_t* title)
@@ -801,6 +1008,68 @@ void ListViewAddColumn(HWND lv, int col, int width, const wchar_t* title)
   ListView_InsertColumn(lv, col, &c);
 }
 
+void SetListViewColumnTitle(HWND lv, int col, const wchar_t* title)
+{
+  if (!lv) {
+    return;
+  }
+  LVCOLUMNW c{};
+  c.mask = LVCF_TEXT;
+  c.pszText = const_cast<wchar_t*>(title);
+  ListView_SetColumn(lv, col, &c);
+}
+
+void ApplyUiLanguage(AppState* st)
+{
+  if (!st) {
+    return;
+  }
+  const auto lang = st->analyzeOpt.language;
+
+  // Tabs
+  if (st->tab) {
+    TCITEMW ti{};
+    ti.mask = TCIF_TEXT;
+    ti.pszText = const_cast<wchar_t*>(LText(lang, L"Summary", L"요약"));
+    TabCtrl_SetItem(st->tab, 0, &ti);
+    ti.pszText = const_cast<wchar_t*>(LText(lang, L"Evidence", L"근거"));
+    TabCtrl_SetItem(st->tab, 1, &ti);
+    ti.pszText = const_cast<wchar_t*>(LText(lang, L"Events", L"이벤트"));
+    TabCtrl_SetItem(st->tab, 2, &ti);
+    ti.pszText = const_cast<wchar_t*>(LText(lang, L"Resources", L"리소스"));
+    TabCtrl_SetItem(st->tab, 3, &ti);
+    ti.pszText = const_cast<wchar_t*>(L"WCT");
+    TabCtrl_SetItem(st->tab, 4, &ti);
+  }
+
+  // Evidence list columns
+  SetListViewColumnTitle(st->evidenceList, 0, LText(lang, L"Confidence", L"신뢰도"));
+  SetListViewColumnTitle(st->evidenceList, 1, LText(lang, L"Finding", L"판단"));
+  SetListViewColumnTitle(st->evidenceList, 2, LText(lang, L"Evidence", L"근거"));
+
+  // Checklist column
+  SetListViewColumnTitle(st->recoList, 0, LText(lang, L"Recommended actions (checklist)", L"권장 조치(체크리스트)"));
+
+  // Event filter cue banner
+  if (st->eventsFilterEdit) {
+    SendMessageW(
+      st->eventsFilterEdit,
+      EM_SETCUEBANNER,
+      TRUE,
+      reinterpret_cast<LPARAM>(LText(lang, L"Filter events (type/tid/a/b/c/d)", L"이벤트 검색 (type/tid/a/b/c/d)")));
+  }
+
+  // Bottom buttons
+  SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnOpenDump), LText(lang, L"Open dump", L"덤프 열기"));
+  SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnOpenFolder), LText(lang, L"Open folder", L"폴더 열기"));
+  SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnCopy), LText(lang, L"Copy summary", L"요약 복사"));
+  SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), LText(lang, L"Copy checklist", L"체크리스트 복사"));
+
+  std::wstring langBtn = L"Lang: ";
+  langBtn += (lang == i18n::Language::kEnglish) ? L"EN" : L"KO";
+  SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnLanguage), langBtn.c_str());
+}
+
 std::wstring ToW(double v);
 std::wstring ToW64(std::uint64_t v);
 
@@ -810,9 +1079,10 @@ void PopulateEvidence(HWND lv, const AnalysisResult& r)
   for (int i = 0; i < static_cast<int>(r.evidence.size()); i++) {
     const auto& e = r.evidence[static_cast<std::size_t>(i)];
     LVITEMW it{};
-    it.mask = LVIF_TEXT;
+    it.mask = LVIF_TEXT | LVIF_PARAM;
     it.iItem = i;
     it.pszText = const_cast<wchar_t*>(e.confidence.c_str());
+    it.lParam = static_cast<LPARAM>(e.confidence_level);
     ListView_InsertItem(lv, &it);
     ListView_SetItemText(lv, i, 1, const_cast<wchar_t*>(e.title.c_str()));
     ListView_SetItemText(lv, i, 2, const_cast<wchar_t*>(e.details.c_str()));
@@ -1052,6 +1322,8 @@ void RefreshUi(AppState* st)
     return;
   }
 
+  ApplyUiLanguage(st);
+
   const std::wstring summary = FormatSummaryText(st->r);
   SetWindowTextW(st->summaryEdit, summary.c_str());
   PopulateEvidence(st->evidenceList, st->r);
@@ -1065,7 +1337,7 @@ void RefreshUi(AppState* st)
   const std::wstring wctText = FormatWctText(st->r);
   SetWindowTextW(st->wctEdit, wctText.c_str());
 
-  std::wstring title = L"SkyrimDiag Viewer";
+  std::wstring title = LText(st->analyzeOpt.language, L"Tullius CTD Logger - Viewer", L"툴리우스 CTD 로거 - 뷰어");
   if (!st->r.dump_path.empty()) {
     title += L" - ";
     title += std::filesystem::path(st->r.dump_path).filename().wstring();
@@ -1079,6 +1351,7 @@ bool AnalyzeAndUpdate(AppState* st, const std::wstring& dumpPath)
     return false;
   }
 
+  const auto lang = st->analyzeOpt.language;
   const std::filesystem::path dp(dumpPath);
   const std::filesystem::path out = st->r.out_dir.empty() ? dp.parent_path() : std::filesystem::path(st->r.out_dir);
 
@@ -1086,13 +1359,21 @@ bool AnalyzeAndUpdate(AppState* st, const std::wstring& dumpPath)
   std::wstring err;
   if (!AnalyzeDump(dumpPath, out.wstring(), st->analyzeOpt, r, &err)) {
     st->lastError = err;
-    MessageBoxW(st->hwnd, (L"덤프 분석 실패:\n" + err).c_str(), L"SkyrimDiagDumpTool", MB_ICONERROR);
+    MessageBoxW(
+      st->hwnd,
+      (std::wstring(LText(lang, L"Dump analysis failed:\n", L"덤프 분석 실패:\n")) + err).c_str(),
+      L"SkyrimDiagDumpTool",
+      MB_ICONERROR);
     return false;
   }
 
   if (!WriteOutputs(r, &err)) {
     st->lastError = err;
-    MessageBoxW(st->hwnd, (L"결과 파일 생성 실패:\n" + err).c_str(), L"SkyrimDiagDumpTool", MB_ICONERROR);
+    MessageBoxW(
+      st->hwnd,
+      (std::wstring(LText(lang, L"Failed to write output files:\n", L"결과 파일 생성 실패:\n")) + err).c_str(),
+      L"SkyrimDiagDumpTool",
+      MB_ICONERROR);
     return false;
   }
 
@@ -1157,6 +1438,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
       st->uiFont = CreateUiFont(hwnd);
       st->uiFontSemibold = CreateUiFontSemibold(hwnd);
+      st->uiFontMono = CreateUiFontMono(hwnd);
       // Skyrim Dark Fantasy Theme brushes
       st->bgBaseBrush = CreateSolidBrush(theme::BG_BASE);
       st->bgCardBrush = CreateSolidBrush(theme::BG_INPUT);
@@ -1180,15 +1462,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
       TabCtrl_SetPadding(st->tab, ScalePx(hwnd, 12), ScalePx(hwnd, 6));
 
+      const auto lang = st->analyzeOpt.language;
+
       TCITEMW ti{};
       ti.mask = TCIF_TEXT;
-      ti.pszText = const_cast<wchar_t*>(L"요약");
+      ti.pszText = const_cast<wchar_t*>(LText(lang, L"Summary", L"요약"));
       TabCtrl_InsertItem(st->tab, 0, &ti);
-      ti.pszText = const_cast<wchar_t*>(L"근거");
+      ti.pszText = const_cast<wchar_t*>(LText(lang, L"Evidence", L"근거"));
       TabCtrl_InsertItem(st->tab, 1, &ti);
-      ti.pszText = const_cast<wchar_t*>(L"이벤트");
+      ti.pszText = const_cast<wchar_t*>(LText(lang, L"Events", L"이벤트"));
       TabCtrl_InsertItem(st->tab, 2, &ti);
-      ti.pszText = const_cast<wchar_t*>(L"리소스");
+      ti.pszText = const_cast<wchar_t*>(LText(lang, L"Resources", L"리소스"));
       TabCtrl_InsertItem(st->tab, 3, &ti);
       ti.pszText = const_cast<wchar_t*>(L"WCT");
       TabCtrl_InsertItem(st->tab, 4, &ti);
@@ -1207,6 +1491,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         cs->hInstance,
         nullptr);
       ApplyDarkEdit(st->summaryEdit);
+      ApplyEditPadding(st->summaryEdit, ScalePx(hwnd, 10));
 
       st->evidenceList = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -1222,9 +1507,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         cs->hInstance,
         nullptr);
       ApplyListViewModernStyle(st->evidenceList);
-      ListViewAddColumn(st->evidenceList, 0, 70, L"신뢰도");
-      ListViewAddColumn(st->evidenceList, 1, 240, L"판단");
-      ListViewAddColumn(st->evidenceList, 2, 800, L"근거");
+      ListViewAddColumn(st->evidenceList, 0, 70, LText(lang, L"Confidence", L"신뢰도"));
+      ListViewAddColumn(st->evidenceList, 1, 240, LText(lang, L"Finding", L"판단"));
+      ListViewAddColumn(st->evidenceList, 2, 800, LText(lang, L"Evidence", L"근거"));
 
       st->evidenceSplitter = CreateWindowExW(
         0,
@@ -1262,7 +1547,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         st->recoList,
         LVS_EX_FULLROWSELECT | LVS_EX_CHECKBOXES | LVS_EX_DOUBLEBUFFER);
       ApplyListViewModernStyle(st->recoList);
-      ListViewAddColumn(st->recoList, 0, 1000, L"권장 조치(체크리스트)");
+      ListViewAddColumn(st->recoList, 0, 1000, LText(lang, L"Recommended actions (checklist)", L"권장 조치(체크리스트)"));
 
       st->eventsFilterEdit = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -1278,11 +1563,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         cs->hInstance,
         nullptr);
       ApplyDarkEdit(st->eventsFilterEdit);
+      ApplyEditPadding(st->eventsFilterEdit, ScalePx(hwnd, 10));
       SendMessageW(
         st->eventsFilterEdit,
         EM_SETCUEBANNER,
         TRUE,
-        reinterpret_cast<LPARAM>(L"이벤트 검색 (type/tid/a/b/c/d)"));
+        reinterpret_cast<LPARAM>(LText(lang, L"Filter events (type/tid/a/b/c/d)", L"이벤트 검색 (type/tid/a/b/c/d)")));
 
       st->eventsList = CreateWindowExW(
         WS_EX_CLIENTEDGE,
@@ -1340,12 +1626,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         cs->hInstance,
         nullptr);
       ApplyDarkEdit(st->wctEdit);
+      ApplyEditPadding(st->wctEdit, ScalePx(hwnd, 10));
 
       CreateWindowExW(
         0,
         L"BUTTON",
-        L"덤프 열기",
-        WS_CHILD | WS_VISIBLE,
+        LText(lang, L"Open dump", L"덤프 열기"),
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0,
         0,
         100,
@@ -1358,8 +1645,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       CreateWindowExW(
         0,
         L"BUTTON",
-        L"폴더 열기",
-        WS_CHILD | WS_VISIBLE,
+        LText(lang, L"Open folder", L"폴더 열기"),
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0,
         0,
         100,
@@ -1372,8 +1659,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       CreateWindowExW(
         0,
         L"BUTTON",
-        L"요약 복사",
-        WS_CHILD | WS_VISIBLE,
+        LText(lang, L"Copy summary", L"요약 복사"),
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0,
         0,
         100,
@@ -1386,8 +1673,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       CreateWindowExW(
         0,
         L"BUTTON",
-        L"체크리스트 복사",
-        WS_CHILD | WS_VISIBLE,
+        LText(lang, L"Copy checklist", L"체크리스트 복사"),
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0,
         0,
         120,
@@ -1397,11 +1684,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         cs->hInstance,
         nullptr);
 
+      CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"Lang: EN",
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        0,
+        0,
+        90,
+        28,
+        hwnd,
+        reinterpret_cast<HMENU>(kIdBtnLanguage),
+        cs->hInstance,
+        nullptr);
+
       ApplyDarkTab(st->tab);
-      ApplyExplorerTheme(st->evidenceList);
-      ApplyExplorerTheme(st->recoList);
-      ApplyExplorerTheme(st->eventsList);
-      ApplyExplorerTheme(st->resourcesList);
 
       ApplyFont(st->tab, st->uiFont);
       ApplyFont(st->summaryEdit, st->uiFont);
@@ -1410,9 +1707,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->eventsFilterEdit, st->uiFont);
       ApplyFont(st->eventsList, st->uiFont);
       ApplyFont(st->resourcesList, st->uiFont);
-      ApplyFont(st->wctEdit, st->uiFont);
+      ApplyFont(st->wctEdit, st->uiFontMono ? st->uiFontMono : st->uiFont);
 
-      for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist }) {
+      for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist, kIdBtnLanguage }) {
         HWND btn = GetDlgItem(hwnd, bid);
         ApplyFont(btn, st->uiFont);
         ApplyDarkButton(btn);
@@ -1433,6 +1730,24 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       SetTabVisible(st, 0);
       RefreshUi(st);
       return 0;
+    }
+
+    case WM_DRAWITEM: {
+      if (!st) {
+        break;
+      }
+      const auto* dis = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+      if (!dis) {
+        break;
+      }
+      if (dis->CtlType != ODT_BUTTON) {
+        break;
+      }
+
+      const int id = static_cast<int>(dis->CtlID);
+      const bool isPrimary = (id == kIdBtnOpenDump);
+      DrawModernButton(st, dis, isPrimary);
+      return TRUE;
     }
 
     case WM_SIZE: {
@@ -1467,6 +1782,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
       st->uiFontSemibold = CreateUiFontSemibold(hwnd);
 
+      if (st->uiFontMono) {
+        DeleteObject(st->uiFontMono);
+      }
+      st->uiFontMono = CreateUiFontMono(hwnd);
+
       TabCtrl_SetPadding(st->tab, ScalePx(hwnd, 12), ScalePx(hwnd, 6));
 
       ApplyFont(st->tab, st->uiFont);
@@ -1476,8 +1796,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->eventsFilterEdit, st->uiFont);
       ApplyFont(st->eventsList, st->uiFont);
       ApplyFont(st->resourcesList, st->uiFont);
-      ApplyFont(st->wctEdit, st->uiFont);
-      for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist }) {
+      ApplyFont(st->wctEdit, st->uiFontMono ? st->uiFontMono : st->uiFont);
+      ApplyEditPadding(st->summaryEdit, ScalePx(hwnd, 10));
+      ApplyEditPadding(st->eventsFilterEdit, ScalePx(hwnd, 10));
+      ApplyEditPadding(st->wctEdit, ScalePx(hwnd, 10));
+      for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist, kIdBtnLanguage }) {
         ApplyFont(GetDlgItem(hwnd, bid), st->uiFont);
       }
 
@@ -1522,6 +1845,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       if (!st) {
         break;
       }
+      const auto lang = st->analyzeOpt.language;
 
       if (id == kIdEventsFilterEdit && HIWORD(wParam) == EN_CHANGE) {
         wchar_t filterBuf[512]{};
@@ -1546,17 +1870,45 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       if (id == kIdBtnCopy) {
         const std::wstring summary = FormatSummaryText(st->r);
         CopyTextToClipboard(hwnd, summary);
-        MessageBoxW(hwnd, L"클립보드로 복사했습니다.", L"SkyrimDiagDumpTool", MB_ICONINFORMATION);
+        MessageBoxW(hwnd, LText(lang, L"Copied to clipboard.", L"클립보드로 복사했습니다."), L"SkyrimDiagDumpTool", MB_ICONINFORMATION);
         return 0;
       }
       if (id == kIdBtnCopyChecklist) {
         const std::wstring s = CollectCheckedRecommendations(st->recoList);
         if (s.empty()) {
-          MessageBoxW(hwnd, L"체크된 항목이 없습니다.", L"SkyrimDiagDumpTool", MB_ICONINFORMATION);
+          MessageBoxW(hwnd, LText(lang, L"No items checked.", L"체크된 항목이 없습니다."), L"SkyrimDiagDumpTool", MB_ICONINFORMATION);
           return 0;
         }
         CopyTextToClipboard(hwnd, s);
-        MessageBoxW(hwnd, L"체크리스트를 클립보드로 복사했습니다.", L"SkyrimDiagDumpTool", MB_ICONINFORMATION);
+        MessageBoxW(
+          hwnd,
+          LText(lang, L"Copied checklist to clipboard.", L"체크리스트를 클립보드로 복사했습니다."),
+          L"SkyrimDiagDumpTool",
+          MB_ICONINFORMATION);
+        return 0;
+      }
+      if (id == kIdBtnLanguage) {
+        st->analyzeOpt.language = (st->analyzeOpt.language == i18n::Language::kEnglish)
+          ? i18n::Language::kKorean
+          : i18n::Language::kEnglish;
+
+        DumpToolConfig cfg{};
+        cfg.language = st->analyzeOpt.language;
+        std::wstring cfgErr;
+        if (!SaveDumpToolConfig(cfg, &cfgErr)) {
+          MessageBoxW(
+            hwnd,
+            (std::wstring(LText(st->analyzeOpt.language, L"Failed to save config:\n", L"설정 저장 실패:\n")) + cfgErr).c_str(),
+            L"SkyrimDiagDumpTool",
+            MB_ICONWARNING);
+        }
+
+        ApplyUiLanguage(st);
+        if (!st->r.dump_path.empty()) {
+          AnalyzeAndUpdate(st, st->r.dump_path);
+        } else {
+          RefreshUi(st);
+        }
         return 0;
       }
       break;
@@ -1583,6 +1935,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       if (st && st->uiFontSemibold) {
         DeleteObject(st->uiFontSemibold);
         st->uiFontSemibold = nullptr;
+      }
+      if (st && st->uiFontMono) {
+        DeleteObject(st->uiFontMono);
+        st->uiFontMono = nullptr;
       }
       if (st && st->bgBaseBrush) {
         DeleteObject(st->bgBaseBrush);
@@ -1634,7 +1990,7 @@ int RunGuiViewer(HINSTANCE hInst, const GuiOptions& opt, const AnalyzeOptions& a
   HWND hwnd = CreateWindowExW(
     0,
     kWndClassName,
-    L"툴리우스 CTD 로거 - SkyrimDiag Viewer",
+    LText(analyzeOpt.language, L"Tullius CTD Logger - Viewer", L"툴리우스 CTD 로거 - 뷰어"),
     WS_OVERLAPPEDWINDOW,
     CW_USEDEFAULT,
     CW_USEDEFAULT,

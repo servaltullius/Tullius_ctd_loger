@@ -11,6 +11,7 @@
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
+#include "SkyrimDiagHelper/HangSuppression.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
@@ -308,6 +309,9 @@ int wmain(int argc, wchar_t** argv)
   bool heartbeatEverAdvanced = false;
   bool warnedHeartbeatStale = false;
   bool hangSuppressedNotForegroundThisEpisode = false;
+  bool hangSuppressedForegroundGraceThisEpisode = false;
+  bool hangSuppressedForegroundResponsiveThisEpisode = false;
+  skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;
 
   bool wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
@@ -514,6 +518,9 @@ int wmain(int argc, wchar_t** argv)
     if (!decision.isHang) {
       hangCapturedThisEpisode = false;
       hangSuppressedNotForegroundThisEpisode = false;
+      hangSuppressedForegroundGraceThisEpisode = false;
+      hangSuppressedForegroundResponsiveThisEpisode = false;
+      hangSuppressionState = {};
       continue;
     }
 
@@ -533,8 +540,23 @@ int wmain(int argc, wchar_t** argv)
     // (Optional) If suppression is disabled, we still try to detect "background pause" by checking
     // whether the game window is responsive.
     const bool isForeground = IsPidInForeground(proc.pid);
-    if (!isForeground) {
-      if (cfg.suppressHangWhenNotForeground) {
+    if (!targetWindow || !IsWindow(targetWindow)) {
+      targetWindow = FindMainWindowForPid(proc.pid);
+    }
+    const bool isWindowResponsive = targetWindow && IsWindowResponsive(targetWindow, 250);
+    const auto hangSup = skydiag::helper::EvaluateHangSuppression(
+      hangSuppressionState,
+      decision.isHang,
+      isForeground,
+      decision.isLoading,
+      isWindowResponsive,
+      cfg.suppressHangWhenNotForeground,
+      static_cast<std::uint64_t>(now.QuadPart),
+      proc.shm->header.last_heartbeat_qpc,
+      proc.shm->header.qpc_freq,
+      cfg.foregroundGraceSec);
+    if (hangSup.suppress) {
+      if (hangSup.reason == skydiag::helper::HangSuppressionReason::kNotForeground) {
         if (!hangSuppressedNotForegroundThisEpisode) {
           hangSuppressedNotForegroundThisEpisode = true;
           const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
@@ -544,10 +566,22 @@ int wmain(int argc, wchar_t** argv)
             L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) +
             L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
         }
-        hangCapturedThisEpisode = false;
-        continue;
+      } else if (hangSup.reason == skydiag::helper::HangSuppressionReason::kForegroundGrace) {
+        if (!hangSuppressedForegroundGraceThisEpisode) {
+          hangSuppressedForegroundGraceThisEpisode = true;
+          AppendLogLine(outBase, L"Hang detected after returning to foreground, but heartbeat has not advanced yet; waiting for grace period before capturing hang dump.");
+        }
+      } else if (hangSup.reason == skydiag::helper::HangSuppressionReason::kForegroundResponsive) {
+        if (!hangSuppressedForegroundResponsiveThisEpisode) {
+          hangSuppressedForegroundResponsiveThisEpisode = true;
+          AppendLogLine(outBase, L"Hang detected after returning to foreground, but the window is responsive; assuming Alt-Tab/pause and skipping hang dump.");
+        }
       }
+      hangCapturedThisEpisode = false;
+      continue;
+    }
 
+    if (!isForeground) {
       if (!targetWindow || !IsWindow(targetWindow)) {
         targetWindow = FindMainWindowForPid(proc.pid);
       }
@@ -564,8 +598,6 @@ int wmain(int argc, wchar_t** argv)
         hangCapturedThisEpisode = false;
         continue;
       }
-    } else {
-      hangSuppressedNotForegroundThisEpisode = false;
     }
 
     // Avoid generating hang dumps during normal shutdown or transient stalls:
@@ -604,12 +636,30 @@ int wmain(int argc, wchar_t** argv)
       AppendLogLine(outBase, L"Hang detected but recovered during grace period; skipping hang dump.");
       hangCapturedThisEpisode = false;
       hangSuppressedNotForegroundThisEpisode = false;
+      hangSuppressedForegroundGraceThisEpisode = false;
+      hangSuppressedForegroundResponsiveThisEpisode = false;
+      hangSuppressionState = {};
       continue;
     }
 
     const bool isForeground2 = IsPidInForeground(proc.pid);
-    if (!isForeground2) {
-      if (cfg.suppressHangWhenNotForeground) {
+    if (!targetWindow || !IsWindow(targetWindow)) {
+      targetWindow = FindMainWindowForPid(proc.pid);
+    }
+    const bool isWindowResponsive2 = targetWindow && IsWindowResponsive(targetWindow, 250);
+    const auto hangSup2 = skydiag::helper::EvaluateHangSuppression(
+      hangSuppressionState,
+      decision2.isHang,
+      isForeground2,
+      decision2.isLoading,
+      isWindowResponsive2,
+      cfg.suppressHangWhenNotForeground,
+      static_cast<std::uint64_t>(now2.QuadPart),
+      proc.shm->header.last_heartbeat_qpc,
+      proc.shm->header.qpc_freq,
+      cfg.foregroundGraceSec);
+    if (hangSup2.suppress) {
+      if (hangSup2.reason == skydiag::helper::HangSuppressionReason::kNotForeground) {
         if (!hangSuppressedNotForegroundThisEpisode) {
           hangSuppressedNotForegroundThisEpisode = true;
           const bool inMenu = (stateFlags2 & skydiag::kState_InMenu) != 0u;
@@ -619,10 +669,22 @@ int wmain(int argc, wchar_t** argv)
             L", loading=" + std::to_wstring(decision2.isLoading ? 1 : 0) +
             L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
         }
-        hangCapturedThisEpisode = false;
-        continue;
+      } else if (hangSup2.reason == skydiag::helper::HangSuppressionReason::kForegroundGrace) {
+        if (!hangSuppressedForegroundGraceThisEpisode) {
+          hangSuppressedForegroundGraceThisEpisode = true;
+          AppendLogLine(outBase, L"Hang confirmed after returning to foreground, but heartbeat has not advanced yet; waiting for grace period before capturing hang dump.");
+        }
+      } else if (hangSup2.reason == skydiag::helper::HangSuppressionReason::kForegroundResponsive) {
+        if (!hangSuppressedForegroundResponsiveThisEpisode) {
+          hangSuppressedForegroundResponsiveThisEpisode = true;
+          AppendLogLine(outBase, L"Hang confirmed after returning to foreground, but the window is responsive; assuming Alt-Tab/pause and skipping hang dump.");
+        }
       }
+      hangCapturedThisEpisode = false;
+      continue;
+    }
 
+    if (!isForeground2) {
       if (!targetWindow || !IsWindow(targetWindow)) {
         targetWindow = FindMainWindowForPid(proc.pid);
       }
@@ -639,8 +701,6 @@ int wmain(int argc, wchar_t** argv)
         hangCapturedThisEpisode = false;
         continue;
       }
-    } else {
-      hangSuppressedNotForegroundThisEpisode = false;
     }
 
     const auto ts = Timestamp();
