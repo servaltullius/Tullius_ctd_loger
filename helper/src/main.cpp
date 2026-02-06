@@ -244,11 +244,6 @@ std::filesystem::path ResolveDumpToolExe(const skydiag::helper::HelperConfig& cf
     return fallbackWinUiFlat;
   }
 
-  const std::filesystem::path fallbackLegacy = baseDir / L"SkyrimDiagDumpTool.exe";
-  if (std::filesystem::exists(fallbackLegacy)) {
-    return fallbackLegacy;
-  }
-
   // Last-resort behavior: return configured path even if missing so error logging
   // still reports the intended executable path.
   return resolved;

@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.5 (2026-02-06)
+
+### Added
+- Native analyzer bridge DLL for WinUI (`SkyrimDiagDumpToolNative.dll`) with exported C ABI (`SkyrimDiagAnalyzeDumpW`) so WinUI can analyze dumps directly without launching legacy UI executable.
+- Built-in advanced analysis panels in WinUI (callstack, evidence, resources, blackbox events, WCT JSON, report text) in the same window as beginner summary.
+
+### Changed
+- WinUI headless mode now runs native analysis directly (no process delegation to `SkyrimDiagDumpTool.exe`).
+- Helper dump-tool resolution no longer falls back to legacy executable.
+- Packaging now ships full-replacement WinUI set:
+  - includes `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+  - includes `SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
+  - no longer requires or packages `SkyrimDiagDumpTool.exe` / `SkyrimDiagDumpTool.ini`
+
 ## v0.2.4 (2026-02-06)
 
 ### Added

@@ -17,9 +17,9 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
 - **Helper(외부 프로세스)**: `SKSE/Plugins/SkyrimDiagHelper.exe`
   - 게임 프로세스 attach → 프리징/무한로딩 감지 → 덤프 + WCT 저장
 - **DumpTool(뷰어/분석기)**:
-  - 기본(현대 UI): `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-  - 고급/레거시 뷰어: `SKSE/Plugins/SkyrimDiagDumpTool.exe`
-  - WinUI가 내부적으로 기존 분석 파이프라인을 재사용해 `.dmp` 결과를 초보 친화적으로 표시
+  - WinUI 앱: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+  - 네이티브 분석 엔진 DLL: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
+  - 초보/고급 분석을 모두 WinUI 단일 창에서 제공
 
 ### 3) 설치 (MO2)
 
@@ -30,7 +30,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
    - `SKSE/Plugins/SkyrimDiagHelper.exe`
    - `SKSE/Plugins/SkyrimDiagHelper.ini`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-   - `SKSE/Plugins/SkyrimDiagDumpTool.exe`
+   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3) MO2에서 **SKSE로 실행**
 
 ### 4) 출력 위치
@@ -69,13 +69,11 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
 - 또는 `.dmp`를 `SkyrimDiagDumpToolWinUI.exe`에 드래그&드롭합니다.
 - 기본 화면은 **초보 보기**입니다.
   - 핵심 CTA: Top 원인 후보 + 추천 조치
-  - `Open advanced viewer` 버튼으로 기존 탭형 뷰어(요약/근거/이벤트/리소스/WCT) 실행
+  - 같은 창에서 고급 분석(콜스택/근거/리소스/이벤트/WCT/리포트)까지 확인
 - DumpTool 언어:
-  - 기본: 영어(넥서스 배포용). `Lang: EN/KO` 버튼으로 한국어 토글 가능
-  - 영구 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] Language=en|ko`
-  - 초보/고급 기본 화면 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] BeginnerMode=1|0`
+  - 기본: 영어(넥서스 배포용)
   - CLI(WinUI): `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
-  - CLI UI 강제(호환): `SkyrimDiagDumpToolWinUI.exe --simple-ui <dump>` 또는 `--advanced-ui <dump>`
+  - 호환 플래그: `--simple-ui` / `--advanced-ui` (입력 호환용)
 - 탭:
   - **요약**: 결론 1문장 + 신뢰도
   - **근거**: 콜스택/스택스캔/리소스 충돌/WCT 등 단서
@@ -89,7 +87,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
-  - `DumpToolExe` 기본값은 `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`이며, 파일이 없으면 helper가 `SkyrimDiagDumpTool.exe`로 자동 폴백
+  - `DumpToolExe` 기본값: `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
   - DumpTool 자동 열기 정책(초보 기본값)
     - `AutoOpenViewerOnCrash=1` : CTD 덤프 생성 직후 뷰어 자동 표시
     - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1` : 프리징 덤프는 게임 종료 후 자동 표시
@@ -171,9 +169,9 @@ This repository contains an MVP implementation of the design in:
   - Optional: recent resource load log (e.g. `.nif/.hkx/.tri`)
   - Optional: best-effort hitch/stutter signal (PerfHitch)
 - **Helper (EXE)**: attach/monitor, hang detection, WCT capture, MiniDumpWriteDump with user streams (blackbox + WCT JSON)
-- **DumpTool (EXE)**: reads `.dmp`, extracts SkyrimDiag user streams, writes a human-friendly summary + blackbox timeline
-  - Modern UI shell: `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-  - Legacy analyzer/viewer backend: `SkyrimDiagDumpTool.exe`
+- **DumpTool (WinUI + Native DLL)**:
+  - WinUI shell: `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+  - Native analyzer: `SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 
 ## Install (MO2)
 
@@ -183,7 +181,7 @@ This repository contains an MVP implementation of the design in:
   - `SKSE/Plugins/SkyrimDiagHelper.exe`
   - `SKSE/Plugins/SkyrimDiagHelper.ini`
   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-  - `SKSE/Plugins/SkyrimDiagDumpTool.exe`
+  - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 - Default behavior: launching SKSE will auto-start the helper (`AutoStartHelper=1` in `SkyrimDiag.ini`).
 
 ## Use
@@ -210,7 +208,7 @@ This repository contains an MVP implementation of the design in:
 - Dump analysis (no WinDbg required):
   - Easiest (default): after a dump is written, the helper auto-runs the DumpTool and creates human-friendly files next to the dump.
     - Toggle in `SkyrimDiagHelper.ini`: `AutoAnalyzeDump=1`
-    - Default executable: `DumpToolExe=SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe` (auto-fallback to `SkyrimDiagDumpTool.exe` if missing)
+    - Default executable: `DumpToolExe=SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
   - Viewer auto-open policy (beginner-friendly defaults):
     - `AutoOpenViewerOnCrash=1`: open viewer immediately for crash dumps.
     - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1`: queue latest hang dump and open viewer after Skyrim exits.
@@ -219,13 +217,11 @@ This repository contains an MVP implementation of the design in:
     - `AutoOpenViewerBeginnerMode=1`: auto-open starts in beginner view.
   - Manual:
     - Drag-and-drop a `.dmp` onto `SkyrimDiagDumpToolWinUI.exe`, or double-click it to pick a dump file.
-    - WinUI opens beginner-first results and can open legacy advanced tabs on demand.
+    - WinUI shows beginner and advanced diagnostics in one app window.
   - Language (DumpTool):
-    - Default: English (for Nexus). Toggle in-app via the `Lang: EN/KO` button.
-    - Persist via `SkyrimDiagDumpTool.ini`: `[SkyrimDiagDumpTool] Language=en|ko`
+    - Default: English (for Nexus).
     - CLI override: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
-    - Default UI mode: `SkyrimDiagDumpTool.ini` `[SkyrimDiagDumpTool] BeginnerMode=1|0`
-    - CLI UI override: `SkyrimDiagDumpToolWinUI.exe --simple-ui <dump>` or `--advanced-ui <dump>`
+    - Compatibility flags accepted: `--simple-ui`, `--advanced-ui`
   - Output files:
     - `<stem>_SkyrimDiagSummary.json` (exception + module+offset, flags, etc.)
     - `<stem>_SkyrimDiagReport.txt` (quick human-readable report)
@@ -266,7 +262,7 @@ After building on Windows, create an MO2-friendly zip:
 ```powershell
 python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
 ```
-The packager auto-includes WinUI files when found in `build-winui` (override with `--winui-dir`, disable with `--no-winui`).
+The packager requires WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes both `SkyrimDiagDumpToolWinUI.exe` and `SkyrimDiagDumpToolNative.dll`.
 
 ## Build (Windows)
 

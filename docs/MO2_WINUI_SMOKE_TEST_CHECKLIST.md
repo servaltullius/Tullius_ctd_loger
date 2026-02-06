@@ -2,7 +2,7 @@
 
 ## Scope
 
-This checklist verifies that the WinUI-first DumpTool flow works for real MO2 users, while legacy fallback remains safe.
+This checklist verifies that the full-replacement WinUI DumpTool flow works for real MO2 users (no legacy viewer dependency).
 
 Target build:
 - `dist/Tullius_ctd_loger.zip`
@@ -16,8 +16,8 @@ Target audience:
 2. Confirm these files exist under the mod:
    - `SKSE/Plugins/SkyrimDiag.dll`
    - `SKSE/Plugins/SkyrimDiagHelper.exe`
-   - `SKSE/Plugins/SkyrimDiagDumpTool.exe`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3. Confirm `SkyrimDiagHelper.ini` contains:
    - `DumpToolExe=SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
 
@@ -70,26 +70,16 @@ Expected (default config):
 1. Open `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`.
 2. Pick a dump manually.
 3. Click `Analyze now`.
-4. Click `Open advanced viewer`.
-5. Click `Open report folder`.
+4. Scroll to `Advanced Analysis (Built-in)` section.
+5. Confirm callstack/evidence/resources/events/WCT/report are visible.
+6. Click `Open report folder`.
 
 Expected:
 - Analysis completes with status message.
-- Advanced button opens legacy tabbed viewer.
+- Advanced diagnostics are shown inside the same WinUI window.
 - Output folder opens in Explorer.
 
-## 7) Legacy Fallback Safety
-
-1. Temporarily rename `SKSE/Plugins/SkyrimDiagWinUI` to `SkyrimDiagWinUI_OFF`.
-2. Trigger one crash/hang capture again.
-
-Expected:
-- Helper falls back to `SkyrimDiagDumpTool.exe` automatically.
-- Analysis/report generation still works.
-
-3. Restore folder name to `SkyrimDiagWinUI`.
-
-## 8) Output Artifact Check
+## 7) Output Artifact Check
 
 For at least one captured dump, verify:
 - `<stem>_SkyrimDiagSummary.json`
@@ -100,18 +90,17 @@ For at least one captured dump, verify:
 Expected:
 - JSON and text report files are generated and readable.
 
-## 9) Pass/Fail Rule
+## 8) Pass/Fail Rule
 
 Pass:
-- All 8 sections pass without manual file surgery beyond test setup.
+- All 7 sections pass without manual file surgery beyond test setup.
 
 Fail:
 - Any of:
   - viewer launch failure on CTD/hang
   - missing summary/report output
-  - fallback to legacy viewer fails when WinUI is absent
 
-## 10) Bug Report Template (Quick)
+## 9) Bug Report Template (Quick)
 
 If failed, report:
 - Which checklist section failed

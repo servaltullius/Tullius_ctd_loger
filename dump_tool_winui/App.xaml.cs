@@ -17,24 +17,20 @@ public partial class App : Application
 
         if (options.Headless)
         {
-            var exitCode = await LegacyAnalyzerRunner.RunHeadlessAsync(options, CancellationToken.None);
+            var (exitCode, error) = await NativeAnalyzerBridge.RunAnalyzeAsync(options, CancellationToken.None);
+            if (exitCode != 0 && !string.IsNullOrWhiteSpace(error))
+            {
+                Console.Error.WriteLine(error);
+            }
             Environment.Exit(exitCode);
             return;
         }
 
         string? startupWarning = null;
-        if (options.ForceAdvancedUi && !string.IsNullOrWhiteSpace(options.DumpPath))
-        {
-            if (LegacyAnalyzerRunner.TryLaunchAdvancedViewer(options, out startupWarning))
-            {
-                Environment.Exit(0);
-                return;
-            }
-        }
 
-        if (LegacyAnalyzerRunner.ResolveLegacyAnalyzerPath() is null)
+        if (NativeAnalyzerBridge.ResolveNativeAnalyzerPath() is null)
         {
-            startupWarning = "SkyrimDiagDumpTool.exe was not found next to SkyrimDiagDumpToolWinUI.exe.";
+            startupWarning = "SkyrimDiagDumpToolNative.dll was not found next to SkyrimDiagDumpToolWinUI.exe.";
         }
 
         _window = new MainWindow(options, startupWarning);

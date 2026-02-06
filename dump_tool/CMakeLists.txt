@@ -13,6 +13,7 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/CrashLogger.h
   src/Mo2Index.cpp
   src/Mo2Index.h
+  src/NativeApi.h
   src/Utf.cpp
   src/Utf.h
   src/OutputWriter.cpp
@@ -31,6 +32,21 @@ target_compile_definitions(SkyrimDiagDumpToolCore
     UNICODE)
 
 set_property(TARGET SkyrimDiagDumpToolCore PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+
+add_library(SkyrimDiagDumpToolNative SHARED
+  src/NativeApi.cpp
+  src/NativeApi.h)
+
+target_link_libraries(SkyrimDiagDumpToolNative
+  PRIVATE
+    SkyrimDiagDumpToolCore)
+
+target_compile_definitions(SkyrimDiagDumpToolNative
+  PRIVATE
+    _UNICODE
+    UNICODE)
+
+set_property(TARGET SkyrimDiagDumpToolNative PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
 
 add_executable(SkyrimDiagDumpTool WIN32
   resources/SkyrimDiagDumpTool.rc

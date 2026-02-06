@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Text.Json;
 
 using Microsoft.UI.Xaml;
 
@@ -12,6 +13,10 @@ public sealed partial class MainWindow : Window
     private readonly DumpToolInvocationOptions _startupOptions;
     private readonly ObservableCollection<SuspectItem> _suspects = new();
     private readonly ObservableCollection<string> _recommendations = new();
+    private readonly ObservableCollection<string> _callstackFrames = new();
+    private readonly ObservableCollection<EvidenceViewItem> _evidenceItems = new();
+    private readonly ObservableCollection<ResourceViewItem> _resourceItems = new();
+    private readonly ObservableCollection<string> _eventItems = new();
     private readonly bool _isKorean;
 
     private string? _currentDumpPath;
@@ -26,6 +31,10 @@ public sealed partial class MainWindow : Window
 
         SuspectsList.ItemsSource = _suspects;
         RecommendationsList.ItemsSource = _recommendations;
+        CallstackList.ItemsSource = _callstackFrames;
+        EvidenceList.ItemsSource = _evidenceItems;
+        ResourcesList.ItemsSource = _resourceItems;
+        EventsList.ItemsSource = _eventItems;
 
         if (!string.IsNullOrWhiteSpace(startupOptions.DumpPath))
         {
@@ -68,20 +77,26 @@ public sealed partial class MainWindow : Window
         }
 
         var options = BuildCurrentInvocationOptions(dumpPath, true);
-        var outDir = LegacyAnalyzerRunner.ResolveOutputDirectory(dumpPath, options.OutDir);
+        var outDir = NativeAnalyzerBridge.ResolveOutputDirectory(dumpPath, options.OutDir);
         _currentDumpPath = dumpPath;
         _currentOutDir = outDir;
 
-        SetBusy(true, T("Analyzing dump with legacy engine...", "기존 분석 엔진으로 덤프를 분석 중입니다..."));
+        SetBusy(true, T("Analyzing dump with native engine...", "네이티브 엔진으로 덤프를 분석 중입니다..."));
 
-        var exitCode = await LegacyAnalyzerRunner.RunHeadlessAsync(options, CancellationToken.None);
+        var (exitCode, nativeErr) = await NativeAnalyzerBridge.RunAnalyzeAsync(options, CancellationToken.None);
         if (exitCode != 0)
         {
-            SetBusy(false, T("Analysis failed. Legacy analyzer exit code: ", "분석 실패. 분석기 종료 코드: ") + exitCode);
+            var prefix = T("Analysis failed. Exit code: ", "분석 실패. 종료 코드: ");
+            var msg = prefix + exitCode;
+            if (!string.IsNullOrWhiteSpace(nativeErr))
+            {
+                msg += "\n" + nativeErr;
+            }
+            SetBusy(false, msg);
             return;
         }
 
-        var summaryPath = LegacyAnalyzerRunner.ResolveSummaryPath(dumpPath, outDir);
+        var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
         if (!File.Exists(summaryPath))
         {
             SetBusy(false, T("Analysis finished but summary file is missing: ", "분석은 끝났지만 요약 파일이 없습니다: ") + summaryPath);
@@ -92,6 +107,7 @@ public sealed partial class MainWindow : Window
         {
             var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
             RenderSummary(summary);
+            RenderAdvancedArtifacts(dumpPath, outDir);
             SetBusy(false, T("Analysis complete. Review the candidates and checklist.", "분석 완료. 원인 후보와 체크리스트를 확인하세요."));
         }
         catch (Exception ex)
@@ -139,6 +155,92 @@ public sealed partial class MainWindow : Window
         if (_recommendations.Count == 0)
         {
             _recommendations.Add(T("No recommendation text was generated.", "권장 조치 문구가 생성되지 않았습니다."));
+        }
+
+        _callstackFrames.Clear();
+        foreach (var frame in summary.CallstackFrames.Take(160))
+        {
+            _callstackFrames.Add(frame);
+        }
+        if (_callstackFrames.Count == 0)
+        {
+            _callstackFrames.Add(T("No callstack frames were extracted.", "콜스택 프레임을 추출하지 못했습니다."));
+        }
+
+        _evidenceItems.Clear();
+        foreach (var evidence in summary.EvidenceItems.Take(80))
+        {
+            _evidenceItems.Add(evidence);
+        }
+        if (_evidenceItems.Count == 0)
+        {
+            _evidenceItems.Add(new EvidenceViewItem(
+                T("Unknown", "알 수 없음"),
+                T("No evidence list was generated.", "근거 목록이 생성되지 않았습니다."),
+                ""));
+        }
+
+        _resourceItems.Clear();
+        foreach (var resource in summary.ResourceItems.Take(120))
+        {
+            _resourceItems.Add(resource);
+        }
+        if (_resourceItems.Count == 0)
+        {
+            _resourceItems.Add(new ResourceViewItem(
+                "resource",
+                T("No resource traces were found.", "리소스 추적이 없습니다."),
+                "-",
+                ""));
+        }
+    }
+
+    private void RenderAdvancedArtifacts(string dumpPath, string outDir)
+    {
+        _eventItems.Clear();
+
+        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
+        if (File.Exists(blackboxPath))
+        {
+            var lines = File.ReadAllLines(blackboxPath);
+            foreach (var line in lines.Skip(Math.Max(0, lines.Length - 200)))
+            {
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    _eventItems.Add(line);
+                }
+            }
+        }
+        if (_eventItems.Count == 0)
+        {
+            _eventItems.Add(T("No blackbox events were found.", "블랙박스 이벤트를 찾지 못했습니다."));
+        }
+
+        var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
+        ReportTextBox.Text = File.Exists(reportPath)
+            ? File.ReadAllText(reportPath)
+            : T("Report file not found.", "리포트 파일이 없습니다.");
+
+        var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
+        if (File.Exists(wctPath))
+        {
+            var raw = File.ReadAllText(wctPath);
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                WctTextBox.Text = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                });
+            }
+            catch
+            {
+                WctTextBox.Text = raw;
+            }
+        }
+        else
+        {
+            WctTextBox.Text = T("WCT file not found for this dump.", "이 덤프에 대한 WCT 파일이 없습니다.");
         }
     }
 
@@ -196,28 +298,6 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OpenAdvancedButton_Click(object sender, RoutedEventArgs e)
-    {
-        var dumpPath = !string.IsNullOrWhiteSpace(_currentDumpPath) ? _currentDumpPath : DumpPathBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(dumpPath))
-        {
-            StatusText.Text = T("Select a dump first.", "먼저 덤프를 선택하세요.");
-            return;
-        }
-
-        var options = BuildCurrentInvocationOptions(dumpPath, false);
-        options.ForceAdvancedUi = true;
-        options.ForceSimpleUi = false;
-
-        if (!LegacyAnalyzerRunner.TryLaunchAdvancedViewer(options, out var err))
-        {
-            StatusText.Text = T("Failed to open advanced viewer: ", "고급 뷰어 실행 실패: ") + err;
-            return;
-        }
-
-        StatusText.Text = T("Advanced viewer opened.", "고급 뷰어를 열었습니다.");
-    }
-
     private DumpToolInvocationOptions BuildCurrentInvocationOptions(string dumpPath, bool headless)
     {
         var outDir = OutputDirBox.Text.Trim();
@@ -231,6 +311,7 @@ public sealed partial class MainWindow : Window
             OutDir = string.IsNullOrWhiteSpace(outDir) ? null : outDir,
             Language = lang,
             Headless = headless,
+            Debug = _startupOptions.Debug,
             ForceAdvancedUi = _startupOptions.ForceAdvancedUi,
             ForceSimpleUi = _startupOptions.ForceSimpleUi,
         };
@@ -240,7 +321,6 @@ public sealed partial class MainWindow : Window
     {
         BusyRing.IsActive = isBusy;
         AnalyzeButton.IsEnabled = !isBusy;
-        OpenAdvancedButton.IsEnabled = !isBusy;
         OpenOutputButton.IsEnabled = !isBusy;
         StatusText.Text = message;
     }

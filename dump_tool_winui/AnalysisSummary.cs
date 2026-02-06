@@ -10,6 +10,9 @@ internal sealed class AnalysisSummary
     public required string InferredModName { get; init; }
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
+    public required IReadOnlyList<string> CallstackFrames { get; init; }
+    public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
+    public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
     {
@@ -54,6 +57,72 @@ internal sealed class AnalysisSummary
             }
         }
 
+        var callstackFrames = new List<string>();
+        if (root.TryGetProperty("callstack", out var callstackNode) &&
+            callstackNode.ValueKind == JsonValueKind.Object &&
+            callstackNode.TryGetProperty("frames", out var frameNode) &&
+            frameNode.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in frameNode.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    var frame = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(frame))
+                    {
+                        callstackFrames.Add(frame.Trim());
+                    }
+                }
+            }
+        }
+
+        var evidenceItems = new List<EvidenceViewItem>();
+        if (root.TryGetProperty("evidence", out var evidenceNode) &&
+            evidenceNode.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in evidenceNode.EnumerateArray())
+            {
+                evidenceItems.Add(new EvidenceViewItem(
+                    ReadString(item, "confidence"),
+                    ReadString(item, "title"),
+                    ReadString(item, "details")));
+            }
+        }
+
+        var resourceItems = new List<ResourceViewItem>();
+        if (root.TryGetProperty("resources", out var resourcesNode) &&
+            resourcesNode.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in resourcesNode.EnumerateArray())
+            {
+                var providers = new List<string>();
+                if (item.TryGetProperty("providers", out var providersNode) &&
+                    providersNode.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var p in providersNode.EnumerateArray())
+                    {
+                        if (p.ValueKind == JsonValueKind.String)
+                        {
+                            var s = p.GetString();
+                            if (!string.IsNullOrWhiteSpace(s))
+                            {
+                                providers.Add(s.Trim());
+                            }
+                        }
+                    }
+                }
+
+                var kind = ReadString(item, "kind");
+                var path = ReadString(item, "path");
+                var conflict = ReadBool(item, "is_conflict");
+                resourceItems.Add(new ResourceViewItem(
+                    string.IsNullOrWhiteSpace(kind) ? "resource" : kind,
+                    path,
+                    providers.Count == 0 ? "-" : string.Join(", ", providers),
+                    conflict ? "conflict" : ""));
+            }
+        }
+
         return new AnalysisSummary
         {
             SummarySentence = ReadString(root, "summary_sentence"),
@@ -64,6 +133,9 @@ internal sealed class AnalysisSummary
                 suspects.FirstOrDefault()?.Module ?? string.Empty),
             Suspects = suspects,
             Recommendations = recommendations,
+            CallstackFrames = callstackFrames,
+            EvidenceItems = evidenceItems,
+            ResourceItems = resourceItems,
         };
     }
 
@@ -79,6 +151,19 @@ internal sealed class AnalysisSummary
         return child.ValueKind == JsonValueKind.String ? child.GetString() ?? string.Empty : string.Empty;
     }
 
+    private static bool ReadBool(JsonElement node, string name)
+    {
+        if (node.ValueKind == JsonValueKind.Undefined ||
+            node.ValueKind == JsonValueKind.Null ||
+            !node.TryGetProperty(name, out var child))
+        {
+            return false;
+        }
+
+        return child.ValueKind == JsonValueKind.True ||
+               (child.ValueKind == JsonValueKind.Number && child.TryGetInt32(out var n) && n != 0);
+    }
+
     private static string FirstNonEmpty(params string[] values)
     {
         foreach (var value in values)
@@ -92,4 +177,6 @@ internal sealed class AnalysisSummary
     }
 }
 
-internal sealed record SuspectItem(string Confidence, string Module, string Reason);
+public sealed record SuspectItem(string Confidence, string Module, string Reason);
+public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
+public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
