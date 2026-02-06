@@ -19,7 +19,7 @@ struct HelperConfig {
   std::wstring outputDir;  // empty => next to exe
   bool enableManualCaptureHotkey = true;
   bool autoAnalyzeDump = true;
-  std::wstring dumpToolExe = L"SkyrimDiagDumpTool.exe";
+  std::wstring dumpToolExe = L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe";
   bool autoOpenViewerOnCrash = true;
   bool autoOpenViewerOnHang = true;
   bool autoOpenViewerOnManualCapture = false;

@@ -1,0 +1,12 @@
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\SkyrimDiagDumpToolWinUI.csproj.AssemblyReference.cache
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\App.g.i.cs
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\App.g.cs
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\MainWindow.g.i.cs
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\MainWindow.g.cs
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\XamlTypeInfo.g.cs
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\App.xaml
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\MainWindow.xaml
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\App.xbf
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\MainWindow.xbf
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\XamlSaveStateFile.xml
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\dump_tool_winui\obj\Release\net8.0-windows10.0.19041.0\win-x64\SkyrimDiagDumpToolWinUI.GeneratedMSBuildEditorConfig.editorconfig

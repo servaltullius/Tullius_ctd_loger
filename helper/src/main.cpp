@@ -218,11 +218,40 @@ bool StopEtwCaptureForHang(
 
 std::filesystem::path ResolveDumpToolExe(const skydiag::helper::HelperConfig& cfg)
 {
-  std::filesystem::path exe(cfg.dumpToolExe.empty() ? L"SkyrimDiagDumpTool.exe" : cfg.dumpToolExe);
-  if (exe.is_relative()) {
-    exe = GetThisExeDir() / exe;
+  const auto baseDir = GetThisExeDir();
+
+  auto toAbs = [&](const std::filesystem::path& p) {
+    if (p.empty()) {
+      return std::filesystem::path{};
+    }
+    return p.is_relative() ? (baseDir / p) : p;
+  };
+
+  std::filesystem::path configured =
+    cfg.dumpToolExe.empty() ? L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe" : cfg.dumpToolExe;
+  std::filesystem::path resolved = toAbs(configured);
+  if (!resolved.empty() && std::filesystem::exists(resolved)) {
+    return resolved;
   }
-  return exe;
+
+  const std::filesystem::path fallbackWinUiSubdir = baseDir / L"SkyrimDiagWinUI" / L"SkyrimDiagDumpToolWinUI.exe";
+  if (std::filesystem::exists(fallbackWinUiSubdir)) {
+    return fallbackWinUiSubdir;
+  }
+
+  const std::filesystem::path fallbackWinUiFlat = baseDir / L"SkyrimDiagDumpToolWinUI.exe";
+  if (std::filesystem::exists(fallbackWinUiFlat)) {
+    return fallbackWinUiFlat;
+  }
+
+  const std::filesystem::path fallbackLegacy = baseDir / L"SkyrimDiagDumpTool.exe";
+  if (std::filesystem::exists(fallbackLegacy)) {
+    return fallbackLegacy;
+  }
+
+  // Last-resort behavior: return configured path even if missing so error logging
+  // still reports the intended executable path.
+  return resolved;
 }
 
 bool StartDumpToolProcess(

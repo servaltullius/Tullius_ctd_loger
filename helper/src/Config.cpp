@@ -59,7 +59,13 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.autoAnalyzeDump = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoAnalyzeDump", 1, path.c_str()) != 0;
   wchar_t dumpToolExe[MAX_PATH]{};
-  GetPrivateProfileStringW(L"SkyrimDiagHelper", L"DumpToolExe", L"SkyrimDiagDumpTool.exe", dumpToolExe, MAX_PATH, path.c_str());
+  GetPrivateProfileStringW(
+    L"SkyrimDiagHelper",
+    L"DumpToolExe",
+    L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe",
+    dumpToolExe,
+    MAX_PATH,
+    path.c_str());
   cfg.dumpToolExe = dumpToolExe;
   cfg.autoOpenViewerOnCrash = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnCrash", 1, path.c_str()) != 0;
   cfg.autoOpenViewerOnHang = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnHang", 1, path.c_str()) != 0;

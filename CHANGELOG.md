@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.4 (2026-02-06)
+
+### Added
+- New modern WinUI 3 viewer shell (`SkyrimDiagDumpToolWinUI.exe`) with beginner-first layout:
+  - dump picker + one-click analysis
+  - crash snapshot card (summary/bucket/module/mod hint)
+  - top cause candidates list
+  - recommended next-step checklist
+  - quick action to open legacy advanced viewer
+- Windows helper script `scripts/build-winui.cmd` to publish WinUI viewer in self-contained mode.
+- Packaging enhancement: `scripts/package.py` now auto-includes WinUI publish artifacts when found (configurable with `--winui-dir` and `--no-winui`).
+
+### Changed
+- Helper default dump viewer executable changed to `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`.
+- Helper executable resolution now safely falls back to legacy `SkyrimDiagDumpTool.exe` if WinUI executable is missing.
+- README and default ini guidance updated for WinUI-first workflow.
+
 ## v0.2.3 (2026-02-06)
 
 ### Added

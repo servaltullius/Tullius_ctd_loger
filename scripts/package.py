@@ -58,6 +58,16 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Package SkyrimDiag as an MO2-friendly zip.")
     parser.add_argument("--build-dir", default="build", help="CMake build directory (default: build)")
     parser.add_argument("--bin-dir", default="", help="Override binary output directory (optional)")
+    parser.add_argument(
+        "--winui-dir",
+        default="build-winui",
+        help="Optional WinUI publish directory (default: build-winui). Ignored when --no-winui is set.",
+    )
+    parser.add_argument(
+        "--no-winui",
+        action="store_true",
+        help="Do not package WinUI viewer files even if found.",
+    )
     parser.add_argument("--out", default="", help="Output zip path (default: dist/SkyrimDiag_<timestamp>.zip)")
     parser.add_argument(
         "--no-pdb",
@@ -69,6 +79,7 @@ def main(argv: list[str]) -> int:
     root = Path(__file__).resolve().parents[1]
     build_dir = (root / args.build_dir).resolve()
     bin_dir = (root / args.bin_dir).resolve() if args.bin_dir else None
+    winui_dir = None if args.no_winui else (root / args.winui_dir).resolve()
 
     if not build_dir.exists():
         print(f"ERROR: build dir not found: {build_dir}", file=sys.stderr)
@@ -91,6 +102,13 @@ def main(argv: list[str]) -> int:
     plugin_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiag.pdb")
     helper_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiagHelper.pdb")
     dump_tool_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpTool.pdb")
+
+    winui_exe = None
+    winui_publish_dir = None
+    if winui_dir and winui_dir.exists():
+        winui_exe = _find_artifact(winui_dir, None, "SkyrimDiagDumpToolWinUI.exe")
+        if winui_exe:
+            winui_publish_dir = winui_exe.parent
 
     ini_plugin = root / "dist" / "SkyrimDiag.ini"
     ini_helper = root / "dist" / "SkyrimDiagHelper.ini"
@@ -128,12 +146,33 @@ def main(argv: list[str]) -> int:
         if dump_tool_pdb and dump_tool_pdb.is_file():
             shutil.copy2(dump_tool_pdb, plugins_dir / "SkyrimDiagDumpTool.pdb")
 
+        if winui_exe and winui_publish_dir:
+            copied_winui = 0
+            winui_plugins_dir = plugins_dir / "SkyrimDiagWinUI"
+            winui_plugins_dir.mkdir(parents=True, exist_ok=True)
+            for item in winui_publish_dir.iterdir():
+                if not item.is_file():
+                    continue
+                if args.no_pdb and item.suffix.lower() == ".pdb":
+                    continue
+                shutil.copy2(item, winui_plugins_dir / item.name)
+                copied_winui += 1
+            if copied_winui == 0:
+                print(
+                    f"WARNING: WinUI publish folder found but no files copied: {winui_publish_dir}",
+                    file=sys.stderr,
+                )
+
         _zip_dir(pkg_root, out_zip)
 
     print(f"Wrote: {out_zip}")
     print(f"- Plugin: {plugin_dll}")
     print(f"- Helper: {helper_exe}")
     print(f"- DumpTool: {dump_tool_exe}")
+    if winui_exe:
+        print(f"- DumpToolWinUI: {winui_exe}")
+    elif winui_dir and not args.no_winui:
+        print(f"- DumpToolWinUI: not found under {winui_dir} (legacy-only package)")
     return 0
 
 
