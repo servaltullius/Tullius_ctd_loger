@@ -258,6 +258,7 @@ ctest --test-dir build-linux --output-on-failure
 리포트의 **신뢰도(높음/중간/낮음)** 표기를 참고해주세요.
 
 - 베타 테스터 가이드: `docs/BETA_TESTING.md`
+- MO2 WinUI 스모크 테스트 체크리스트: `docs/MO2_WINUI_SMOKE_TEST_CHECKLIST.md`
 
 ## Package (zip)
 
