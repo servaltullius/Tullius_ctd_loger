@@ -104,6 +104,46 @@ static void Test_ParseCppExceptionDetails()
   assert(ex->module == "SomeMod.dll");
 }
 
+static void Test_ParseCppExceptionDetails_WithFlexibleSpacing()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.18.0\n"
+    "CRASH TIME: 2026-02-06 03:21:00\n"
+    "PROBABLE CALL STACK:\n"
+    "  AnotherMod.dll+0x10\n"
+    "\n"
+    "C++ EXCEPTION:\n"
+    " \tType:   std::bad_alloc   \n"
+    "\tInfo:    allocation failed \n"
+    " \tThrow Location:   AnotherMod.dll+0x4567  \n"
+    "\tModule:   AnotherMod.dll   \n"
+    "\n";
+
+  const auto ex = ParseCrashLoggerCppExceptionDetailsAscii(s);
+  assert(ex);
+  assert(ex->type == "std::bad_alloc");
+  assert(ex->info == "allocation failed");
+  assert(ex->throw_location == "AnotherMod.dll+0x4567");
+  assert(ex->module == "AnotherMod.dll");
+}
+
+static void Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.18.0\n"
+    "THREAD DUMP (Manual Trigger)\n"
+    "===== THREAD 1 (ID: 123) =====\n"
+    "\tCALLSTACK:\n"
+    "\t\tSkyrimSE.exe+0x100\n"
+    "\t\tkernel32.dll+0x200\n"
+    "\t\tUsefulMod.dll+0x300\n"
+    "\t\tUsefulMod.dll+0x400\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
+  assert(mods.size() == 1);
+  assert(mods[0] == "usefulmod.dll");
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -112,5 +152,7 @@ int main()
   Test_ParseTopModules_ThreadDump();
   Test_StackCorruptionWarning_DoesNotCrash();
   Test_ParseCppExceptionDetails();
+  Test_ParseCppExceptionDetails_WithFlexibleSpacing();
+  Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe();
   return 0;
 }

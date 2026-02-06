@@ -182,6 +182,87 @@ static void Test_Clears_WhenHeartbeatAdvances()
   assert(s.foregroundResumeQpc == 0);
 }
 
+static void Test_NoGraceConfigured_DoesNotSuppressInForeground()
+{
+  HangSuppressionState s{};
+
+  (void)EvaluateHangSuppression(
+    s,
+    /*isHang=*/true,
+    /*isForeground=*/false,
+    /*isLoading=*/false,
+    /*isWindowResponsive=*/false,
+    /*suppressHangWhenNotForeground=*/true,
+    /*nowQpc=*/1000,
+    /*heartbeatQpc=*/200,
+    /*qpcFreq=*/100,
+    /*foregroundGraceSec=*/5);
+
+  const auto r = EvaluateHangSuppression(
+    s,
+    /*isHang=*/true,
+    /*isForeground=*/true,
+    /*isLoading=*/false,
+    /*isWindowResponsive=*/false,
+    /*suppressHangWhenNotForeground=*/true,
+    /*nowQpc=*/1100,
+    /*heartbeatQpc=*/200,
+    /*qpcFreq=*/100,
+    /*foregroundGraceSec=*/0);
+
+  assert(!r.suppress);
+  assert(r.reason == HangSuppressionReason::kNone);
+}
+
+static void Test_ZeroQpcFreq_DoesNotGetStuckSuppressed()
+{
+  HangSuppressionState s{};
+
+  (void)EvaluateHangSuppression(
+    s,
+    /*isHang=*/true,
+    /*isForeground=*/false,
+    /*isLoading=*/false,
+    /*isWindowResponsive=*/false,
+    /*suppressHangWhenNotForeground=*/true,
+    /*nowQpc=*/1000,
+    /*heartbeatQpc=*/200,
+    /*qpcFreq=*/100,
+    /*foregroundGraceSec=*/5);
+
+  const auto r = EvaluateHangSuppression(
+    s,
+    /*isHang=*/true,
+    /*isForeground=*/true,
+    /*isLoading=*/false,
+    /*isWindowResponsive=*/true,
+    /*suppressHangWhenNotForeground=*/true,
+    /*nowQpc=*/1100,
+    /*heartbeatQpc=*/200,
+    /*qpcFreq=*/0,
+    /*foregroundGraceSec=*/5);
+
+  assert(!r.suppress);
+  assert(r.reason == HangSuppressionReason::kNone);
+
+  const auto r2 = EvaluateHangSuppression(
+    s,
+    /*isHang=*/true,
+    /*isForeground=*/true,
+    /*isLoading=*/false,
+    /*isWindowResponsive=*/false,
+    /*suppressHangWhenNotForeground=*/true,
+    /*nowQpc=*/1200,
+    /*heartbeatQpc=*/250,
+    /*qpcFreq=*/100,
+    /*foregroundGraceSec=*/5);
+
+  assert(!r2.suppress);
+  assert(r2.reason == HangSuppressionReason::kNone);
+  assert(s.suppressedHeartbeatQpc == 0);
+  assert(s.foregroundResumeQpc == 0);
+}
+
 static void Test_Resets_WhenNoHang()
 {
   HangSuppressionState s{};
@@ -211,6 +292,8 @@ int main()
   Test_AltTab_Back_Foreground_Grace();
   Test_AltTab_Back_Foreground_StaysSuppressed_WhenResponsive();
   Test_Clears_WhenHeartbeatAdvances();
+  Test_NoGraceConfigured_DoesNotSuppressInForeground();
+  Test_ZeroQpcFreq_DoesNotGetStuckSuppressed();
   Test_Resets_WhenNoHang();
   return 0;
 }

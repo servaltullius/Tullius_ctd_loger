@@ -206,6 +206,20 @@ For in-game validation without waiting:
   - `Ctrl+Shift+F10` → intentional crash (tests crash capture)
   - `Ctrl+Shift+F11` → intentional hang on the main thread (tests hang detection + WCT/dump)
 
+## CI (GitHub Actions)
+
+- Workflow: `.github/workflows/ci.yml`
+- Scope: Linux smoke/unit tests for parser + hang suppression + i18n core
+- Trigger: `push`, `pull_request`
+- Manual Windows packaging job: `workflow_dispatch` (build + package zip artifact upload on `windows-2022`)
+
+Equivalent local commands:
+```bash
+cmake -S . -B build-linux -G Ninja
+cmake --build build-linux --target skydiag_hang_suppression_tests skydiag_crashlogger_parser_tests skydiag_i18n_core_tests
+ctest --test-dir build-linux --output-on-failure
+```
+
 ## Beta testing
 
 베타 배포 목적은 “원인 모드 특정”을 **최대한 유저 친화적으로** 돕는 것입니다. 다만 덤프 기반 추정은 본질적으로 한계가 있으므로,
