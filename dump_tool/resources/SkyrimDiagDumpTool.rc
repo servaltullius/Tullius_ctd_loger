@@ -1,5 +1,0 @@
-#include <winres.h>
-
-#define IDR_APP_MANIFEST 1
-
-IDR_APP_MANIFEST RT_MANIFEST "SkyrimDiagDumpTool.manifest"

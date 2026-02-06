@@ -34,7 +34,8 @@ Superpowers (invoke via `~/.codex/superpowers/.codex/superpowers-codex use-skill
 - **Components**
   - `plugin/` : `SkyrimDiag.dll` (SKSE 플러그인, 블랙박스 이벤트/리소스 기록)
   - `helper/` : `SkyrimDiagHelper.exe` (out-of-proc, CTD/프리징 감지 및 덤프 생성)
-  - `dump_tool/` : `SkyrimDiagDumpTool.exe` (덤프/스트림 분석 + UI 뷰어)
+  - `dump_tool/` : `SkyrimDiagDumpToolNative.dll` (덤프/스트림 분석 엔진)
+  - `dump_tool_winui/` : `SkyrimDiagDumpToolWinUI.exe` (WinUI 뷰어 셸)
 
 ## Build / Package (Windows)
 

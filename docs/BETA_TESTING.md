@@ -11,7 +11,8 @@
   - `SKSE/Plugins/SkyrimDiag.ini`
   - `SKSE/Plugins/SkyrimDiagHelper.exe`
   - `SKSE/Plugins/SkyrimDiagHelper.ini`
-  - `SKSE/Plugins/SkyrimDiagDumpTool.exe`
+  - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+  - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 
 ## 2) 기본 동작
 
@@ -64,11 +65,10 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 
 ## 4) DumpTool로 보는 법(유저 기준)
 
-- `.dmp`를 `SkyrimDiagDumpTool.exe`에 드래그 앤 드롭하거나 실행 후 파일을 선택합니다.
+- `.dmp`를 `SkyrimDiagDumpToolWinUI.exe`에 드래그 앤 드롭하거나 실행 후 파일을 선택합니다.
 - DumpTool 언어:
-  - 기본: 영어(넥서스 배포용). `Lang: EN/KO` 버튼으로 한국어 토글 가능
-  - 영구 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] Language=en|ko`
-  - CLI: `SkyrimDiagDumpTool.exe --lang en|ko <dump>`
+  - 기본: 영어(넥서스 배포용)
+  - CLI: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
 - 탭 가이드:
   - **요약**: “결론”을 한 문장으로 표시(신뢰도 포함)
   - **근거**: 왜 그렇게 판단했는지(콜스택/스택 스캔/리소스 충돌/WCT 등)

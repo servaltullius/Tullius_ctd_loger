@@ -9,8 +9,9 @@
   - 게임 내부 이벤트/상태(블랙박스), heartbeat, (옵션) 리소스(.nif/.hkx/.tri) 기록
 - **Helper(외부 프로세스)**: `SKSE/Plugins/SkyrimDiagHelper.exe`
   - 게임 프로세스에 attach → CTD/프리징/무한로딩 감지 → 덤프 + WCT(Wait Chain) 저장
-- **DumpTool(뷰어/분석기)**: `SKSE/Plugins/SkyrimDiagDumpTool.exe`
-  - `.dmp`를 WinDbg 없이 읽고 **요약/근거/이벤트/리소스/WCT** 형태로 보기 쉽게 표시
+- **DumpTool(뷰어/분석기, WinUI)**: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+  - 네이티브 분석 엔진 DLL `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`을 직접 호출해
+    `.dmp`를 WinDbg 없이 읽고 **요약/근거/이벤트/리소스/WCT**를 표시
 
 ## 설치 (MO2)
 
@@ -20,7 +21,8 @@
    - `SKSE/Plugins/SkyrimDiag.ini`
    - `SKSE/Plugins/SkyrimDiagHelper.exe`
    - `SKSE/Plugins/SkyrimDiagHelper.ini`
-   - `SKSE/Plugins/SkyrimDiagDumpTool.exe`
+   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3) 모드를 활성화한 뒤 **SKSE로 게임을 실행**합니다.
 
 ## 기본 동작/출력 위치
@@ -53,7 +55,7 @@
 
 ## DumpTool(뷰어) 사용법
 
-- `.dmp`를 `SkyrimDiagDumpTool.exe`에 드래그&드롭하거나, 실행 후 파일을 선택합니다.
+- `.dmp`를 `SkyrimDiagDumpToolWinUI.exe`에 드래그&드롭하거나, 실행 후 파일을 선택합니다.
 - 탭:
   - **요약**: 결론 1문장 + 신뢰도
   - **근거**: 콜스택/스택스캔/리소스 충돌/WCT 등 단서

@@ -47,35 +47,3 @@ target_compile_definitions(SkyrimDiagDumpToolNative
     UNICODE)
 
 set_property(TARGET SkyrimDiagDumpToolNative PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
-
-add_executable(SkyrimDiagDumpTool WIN32
-  resources/SkyrimDiagDumpTool.rc
-  src/DumpToolConfig.cpp
-  src/DumpToolConfig.h
-  src/GuiApp.cpp
-  src/GuiApp.h
-  src/main.cpp)
-
-target_link_libraries(SkyrimDiagDumpTool
-  PRIVATE
-    SkyrimDiagDumpToolCore
-    Comdlg32
-    Comctl32
-    Shell32
-    Ole32
-    User32
-    UxTheme
-    Dwmapi)
-
-target_compile_definitions(SkyrimDiagDumpTool
-  PRIVATE
-    _UNICODE
-    UNICODE)
-
-set_property(TARGET SkyrimDiagDumpTool PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
-
-if (MSVC)
-  # We embed our own RT_MANIFEST via resources/SkyrimDiagDumpTool.rc.
-  # Disable the linker's default manifest generation to avoid duplicate manifest resources.
-  target_link_options(SkyrimDiagDumpTool PRIVATE /MANIFEST:NO)
-endif()
