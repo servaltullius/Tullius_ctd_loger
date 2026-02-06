@@ -25,6 +25,14 @@
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3) 모드를 활성화한 뒤 **SKSE로 게임을 실행**합니다.
 
+## 필수 런타임 (경량 WinUI 배포)
+
+- 이 배포본은 WinUI를 **framework-dependent(경량)** 로 배포합니다.
+- 사용자 PC에 아래 런타임이 설치되어 있어야 합니다:
+  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+  - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+
 ## 기본 동작/출력 위치
 
 - 기본 설정에서 SKSE로 실행하면 Helper가 자동으로 붙습니다.

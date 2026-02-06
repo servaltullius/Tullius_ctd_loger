@@ -14,6 +14,14 @@
   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 
+### 필수 런타임 (경량 WinUI 배포)
+
+- 이 배포본은 WinUI를 framework-dependent 방식으로 배포합니다.
+- 아래 런타임이 설치되어 있어야 실행됩니다:
+  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+  - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+
 ## 2) 기본 동작
 
 - SKSE로 게임을 실행하면(기본 설정 기준) Helper가 자동으로 붙어서 모니터링합니다.

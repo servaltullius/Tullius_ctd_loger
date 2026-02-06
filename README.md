@@ -33,6 +33,14 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3) MO2에서 **SKSE로 실행**
 
+### 3-1) 필수 런타임 (경량 WinUI 배포)
+
+- 이 배포본은 WinUI를 **framework-dependent(경량)** 로 배포합니다.
+- 사용자 PC에 아래 런타임이 설치되어 있어야 합니다:
+  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+  - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+
 ### 4) 출력 위치
 
 - 기본적으로 결과(덤프/리포트)는 보통 MO2 `overwrite\\SKSE\\Plugins\\`에 생성됩니다.
@@ -183,6 +191,10 @@ This repository contains an MVP implementation of the design in:
   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 - Default behavior: launching SKSE will auto-start the helper (`AutoStartHelper=1` in `SkyrimDiag.ini`).
+- Runtime prerequisites for lightweight WinUI distribution:
+  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+  - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
 
 ## Use
 
@@ -276,7 +288,7 @@ cmake -S . -B build --preset default
 cmake --build build --preset default
 ```
 
-Publish modern WinUI viewer (self-contained, recommended for release zips):
+Publish modern WinUI viewer (framework-dependent / lightweight):
 ```powershell
 scripts\build-winui.cmd
 ```

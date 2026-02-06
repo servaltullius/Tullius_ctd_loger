@@ -10,9 +10,11 @@ if not exist "%PROJECT%" (
   exit /b 2
 )
 
-dotnet publish "%PROJECT%" -c Release -r win-x64 --self-contained true ^
-  -p:WindowsAppSDKSelfContained=true ^
-  -p:WindowsAppSdkUndockedRegFreeWinRTInitialize=true ^
+rem Lightweight publish (framework-dependent):
+rem - Smaller package size
+rem - Requires user machine runtimes (.NET Desktop Runtime 8 + Windows App Runtime)
+dotnet publish "%PROJECT%" -c Release -r win-x64 --self-contained false ^
+  -p:WindowsAppSDKSelfContained=false ^
   -o "%OUT%"
 if errorlevel 1 exit /b 1
 

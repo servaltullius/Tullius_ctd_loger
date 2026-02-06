@@ -10,6 +10,7 @@
 - WinUI headless mode now runs native analysis directly (no process delegation to `SkyrimDiagDumpTool.exe`).
 - Helper dump-tool resolution no longer falls back to legacy executable.
 - CMake build no longer defines the legacy `SkyrimDiagDumpTool` Win32 executable target (native DLL + WinUI only).
+- WinUI publish switched to framework-dependent/lightweight output (`scripts/build-winui.cmd`), reducing package size but requiring user runtimes.
 - Packaging now ships full-replacement WinUI set:
   - includes `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
   - includes `SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
