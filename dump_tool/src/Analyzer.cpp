@@ -1,4 +1,5 @@
 #include "Analyzer.h"
+#include "Bucket.h"
 #include "EvidenceBuilder.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
@@ -961,6 +962,49 @@ std::wstring FormatModulePlusOffset(const std::vector<ModuleInfo>& modules, std:
   return buf;
 }
 
+std::wstring FormatSymbolizedFrame(HANDLE process, const std::vector<ModuleInfo>& modules, std::uint64_t addr)
+{
+  const std::wstring fallback = FormatModulePlusOffset(modules, addr);
+  if (!process || addr == 0) {
+    return fallback;
+  }
+
+  alignas(SYMBOL_INFOW) unsigned char symBuf[sizeof(SYMBOL_INFOW) + (MAX_SYM_NAME * sizeof(wchar_t))]{};
+  auto* sym = reinterpret_cast<PSYMBOL_INFOW>(symBuf);
+  sym->SizeOfStruct = sizeof(SYMBOL_INFOW);
+  sym->MaxNameLen = MAX_SYM_NAME;
+
+  DWORD64 displacement = 0;
+  if (!SymFromAddrW(process, static_cast<DWORD64>(addr), &displacement, sym) || sym->NameLen == 0) {
+    return fallback;
+  }
+
+  std::wstring frame;
+  if (auto idx = FindModuleIndexForAddress(modules, addr)) {
+    frame = modules[*idx].filename;
+    frame += L"!";
+  }
+  frame.append(sym->Name, sym->NameLen);
+
+  wchar_t offBuf[64]{};
+  swprintf_s(offBuf, L"+0x%llx", static_cast<unsigned long long>(displacement));
+  frame += offBuf;
+
+  IMAGEHLP_LINEW64 line{};
+  line.SizeOfStruct = sizeof(line);
+  DWORD lineDisp = 0;
+  if (SymGetLineFromAddrW64(process, static_cast<DWORD64>(addr), &lineDisp, &line) && line.FileName && line.LineNumber > 0) {
+    std::filesystem::path src(line.FileName);
+    frame += L" [";
+    frame += src.filename().wstring();
+    frame += L":";
+    frame += std::to_wstring(line.LineNumber);
+    frame += L"]";
+  }
+
+  return frame;
+}
+
 std::vector<std::uint64_t> StackWalkAddrsForContext(
   HANDLE process,
   const MinidumpMemoryView& mem,
@@ -1144,7 +1188,11 @@ bool TryReadContextFromLocation(void* dumpBase, std::uint64_t dumpSize, const MI
   return true;
 }
 
-std::vector<std::wstring> FormatCallstackForDisplay(const std::vector<ModuleInfo>& modules, const std::vector<std::uint64_t>& pcs, std::size_t maxFrames)
+std::vector<std::wstring> FormatCallstackForDisplay(
+  HANDLE process,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames)
 {
   std::vector<std::wstring> out;
   if (pcs.empty() || maxFrames == 0) {
@@ -1168,7 +1216,7 @@ std::vector<std::wstring> FormatCallstackForDisplay(const std::vector<ModuleInfo
   const std::size_t end = std::min<std::size_t>(pcs.size(), start + maxFrames);
   out.reserve(end - start);
   for (std::size_t i = start; i < end; i++) {
-    out.push_back(FormatModulePlusOffset(modules, pcs[i]));
+    out.push_back(FormatSymbolizedFrame(process, modules, pcs[i]));
   }
   return out;
 }
@@ -1256,7 +1304,7 @@ bool TryComputeStackwalkSuspects(
   if (best.suspects.empty()) {
     if (!bestAny.pcs.empty()) {
       out.stackwalk_primary_tid = bestAny.tid;
-      out.stackwalk_primary_frames = FormatCallstackForDisplay(modules, bestAny.pcs, /*maxFrames=*/12);
+      out.stackwalk_primary_frames = FormatCallstackForDisplay(sym.process, modules, bestAny.pcs, /*maxFrames=*/12);
     }
     return false;
   }
@@ -1287,8 +1335,31 @@ bool TryComputeStackwalkSuspects(
   out.suspects_from_stackwalk = true;
   out.suspects = std::move(best.suspects);
   out.stackwalk_primary_tid = best.tid;
-  out.stackwalk_primary_frames = FormatCallstackForDisplay(modules, best.pcs, /*maxFrames=*/12);
+  out.stackwalk_primary_frames = FormatCallstackForDisplay(sym.process, modules, best.pcs, /*maxFrames=*/12);
   return true;
+}
+
+void ComputeCrashBucket(AnalysisResult& out)
+{
+  std::vector<std::wstring> bucketFrames;
+  if (!out.stackwalk_primary_frames.empty()) {
+    const std::size_t n = std::min<std::size_t>(out.stackwalk_primary_frames.size(), 6);
+    bucketFrames.assign(out.stackwalk_primary_frames.begin(), out.stackwalk_primary_frames.begin() + n);
+  } else if (!out.suspects.empty()) {
+    const std::size_t n = std::min<std::size_t>(out.suspects.size(), 4);
+    bucketFrames.reserve(n);
+    for (std::size_t i = 0; i < n; i++) {
+      bucketFrames.push_back(out.suspects[i].module_filename);
+    }
+  } else if (!out.fault_module_plus_offset.empty()) {
+    bucketFrames.push_back(out.fault_module_plus_offset);
+  }
+
+  std::wstring faultModule = out.fault_module_filename;
+  if (faultModule.empty()) {
+    faultModule = out.fault_module_plus_offset;
+  }
+  out.crash_bucket_key = ComputeCrashBucketKey(out.exc_code, faultModule, bucketFrames);
 }
 
 #if 0  // moved to EvidenceBuilder.cpp
@@ -1617,6 +1688,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
+  ComputeCrashBucket(out);
   BuildEvidenceAndSummary(out, opt.language);
   if (err) err->clear();
   return true;

@@ -63,10 +63,15 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
 ### B. DumpTool(뷰어)로 보는 법
 
 - `.dmp`를 `SkyrimDiagDumpTool.exe`에 드래그&드롭하거나 실행 후 파일을 선택합니다.
+- 기본 화면은 **초보 보기**입니다.
+  - 핵심 CTA: `원인 후보 확인하기` (Top 5 후보 + 근거 표시)
+  - `고급 분석 보기` 버튼으로 기존 탭(요약/근거/이벤트/리소스/WCT)으로 전환
 - DumpTool 언어:
   - 기본: 영어(넥서스 배포용). `Lang: EN/KO` 버튼으로 한국어 토글 가능
   - 영구 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] Language=en|ko`
+  - 초보/고급 기본 화면 설정: `SkyrimDiagDumpTool.ini` → `[SkyrimDiagDumpTool] BeginnerMode=1|0`
   - CLI: `SkyrimDiagDumpTool.exe --lang en|ko <dump>`
+  - CLI UI 강제: `SkyrimDiagDumpTool.exe --simple-ui <dump>` 또는 `--advanced-ui <dump>`
 - 탭:
   - **요약**: 결론 1문장 + 신뢰도
   - **근거**: 콜스택/스택스캔/리소스 충돌/WCT 등 단서
@@ -80,10 +85,19 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
+  - DumpTool 자동 열기 정책(초보 기본값)
+    - `AutoOpenViewerOnCrash=1` : CTD 덤프 생성 직후 뷰어 자동 표시
+    - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1` : 프리징 덤프는 게임 종료 후 자동 표시
+    - `AutoOpenHangDelayMs=2000` : 종료 후 2초 지연
+    - `AutoOpenViewerOnManualCapture=0` : 수동 캡처는 자동 팝업 안 함
+    - `AutoOpenViewerBeginnerMode=1` : 자동 오픈 시 초보 화면으로 시작
   - Alt-Tab/백그라운드 일시정지 오탐 방지(기본값 권장)
     - `SuppressHangWhenNotForeground=1`
     - `ForegroundGraceSec=5` (포그라운드로 돌아온 직후 잠깐 기다렸다가 캡처)
     - 포그라운드 복귀 후에도 창이 정상 응답 중이면 행 덤프를 계속 억제(Alt-Tab 오탐 추가 감소)
+  - 고급 옵션(기본 OFF): `EnableEtwCaptureOnHang=1`
+    - `wpr.exe`로 hang 캡처 전후 ETW를 짧게 수집해 추가 단서(`*.etl`)를 남김
+    - ETW 수집 실패해도 dump/WCT는 계속 생성됨(best-effort)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
 
 ### D. “빠른 재현” 테스트(가능한 경우)
@@ -173,6 +187,7 @@ This repository contains an MVP implementation of the design in:
   - `SuppressHangWhenNotForeground=1` avoids false hang dumps while Skyrim is paused in the background (Alt-Tab).
   - `ForegroundGraceSec=5` waits briefly after returning to foreground before capturing a hang, so momentary resume delays don’t spam dumps.
   - After returning to foreground, hang dumps stay suppressed while the game window is responsive (and not in a loading screen), until the heartbeat advances.
+  - Advanced (default OFF): `EnableEtwCaptureOnHang=1` captures a short ETW trace (`*.etl`) around hang dump generation via `wpr.exe` (best-effort; dump/WCT flow continues even if ETW fails).
 - Crash hook behavior (in `SkyrimDiag.ini`):
   - `CrashHookMode=0` Off
   - `CrashHookMode=1` Fatal exceptions only (recommended; reduces false “Crash_*.dmp” during normal play/loading)
@@ -187,13 +202,23 @@ This repository contains an MVP implementation of the design in:
 - Dump analysis (no WinDbg required):
   - Easiest (default): after a dump is written, the helper auto-runs the DumpTool and creates human-friendly files next to the dump.
     - Toggle in `SkyrimDiagHelper.ini`: `AutoAnalyzeDump=1`
+  - Viewer auto-open policy (beginner-friendly defaults):
+    - `AutoOpenViewerOnCrash=1`: open viewer immediately for crash dumps.
+    - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1`: queue latest hang dump and open viewer after Skyrim exits.
+    - `AutoOpenHangDelayMs=2000`: delay opening for 2 seconds after process exit.
+    - `AutoOpenViewerOnManualCapture=0`: manual hotkey captures stay headless by default.
+    - `AutoOpenViewerBeginnerMode=1`: auto-open starts in beginner view.
   - Manual:
     - Drag-and-drop a `.dmp` onto `SkyrimDiagDumpTool.exe`, or double-click it to pick a dump file.
-    - The DumpTool opens a viewer UI (tabs: summary/evidence/events/resources/WCT).
+    - The DumpTool opens a beginner-first UI:
+      - Primary CTA: `Check Cause Candidates` (Top 5 candidates + immediate evidence).
+      - `Advanced analysis` switches to tabs (summary/evidence/events/resources/WCT).
   - Language (DumpTool):
     - Default: English (for Nexus). Toggle in-app via the `Lang: EN/KO` button.
     - Persist via `SkyrimDiagDumpTool.ini`: `[SkyrimDiagDumpTool] Language=en|ko`
     - CLI override: `SkyrimDiagDumpTool.exe --lang en|ko <dump>`
+    - Default UI mode: `SkyrimDiagDumpTool.ini` `[SkyrimDiagDumpTool] BeginnerMode=1|0`
+    - CLI UI override: `SkyrimDiagDumpTool.exe --simple-ui <dump>` or `--advanced-ui <dump>`
   - Output files:
     - `<stem>_SkyrimDiagSummary.json` (exception + module+offset, flags, etc.)
     - `<stem>_SkyrimDiagReport.txt` (quick human-readable report)

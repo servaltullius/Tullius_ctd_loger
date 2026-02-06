@@ -75,6 +75,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
   std::wstring cfgErr;
   const DumpToolConfig cfg = LoadDumpToolConfig(&cfgErr);
   Language lang = cfg.language;
+  bool beginnerMode = cfg.beginnerMode;
 
   for (int i = 1; i < argc; i++) {
     const std::wstring_view a = argv[i];
@@ -104,6 +105,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
     }
     if (a == L"--debug") {
       debug = true;
+      continue;
+    }
+    if (a == L"--simple-ui") {
+      beginnerMode = true;
+      continue;
+    }
+    if (a == L"--advanced-ui") {
+      beginnerMode = false;
       continue;
     }
     if (!a.empty() && a[0] == L'-') {
@@ -139,7 +148,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
       L"Options:\n"
       L"  --out-dir <dir>\n"
       L"  --headless\n"
-      L"  --lang en|ko\n";
+      L"  --lang en|ko\n"
+      L"  --simple-ui | --advanced-ui\n";
 
     const wchar_t* msg_ko =
       L"SkyrimDiagDumpTool (Viewer)\n\n"
@@ -150,7 +160,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
       L"옵션:\n"
       L"  --out-dir <dir>\n"
       L"  --headless\n"
-      L"  --lang en|ko\n";
+      L"  --lang en|ko\n"
+      L"  --simple-ui | --advanced-ui\n";
 
     MessageBoxW(nullptr, (lang == Language::kKorean) ? msg_ko : msg_en, L"SkyrimDiagDumpTool", MB_ICONINFORMATION);
     LocalFree(argv);
@@ -163,6 +174,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
   AnalyzeOptions analyzeOpt{};
   analyzeOpt.debug = debug;
   analyzeOpt.language = lang;
+  GuiOptions guiOpt{};
+  guiOpt.debug = debug;
+  guiOpt.beginnerMode = beginnerMode;
+
+  if (!headless) {
+    std::wstring reuseErr;
+    if (TryReuseExistingViewerForDump(dumpPath, analyzeOpt, guiOpt, &reuseErr)) {
+      LocalFree(argv);
+      return 0;
+    }
+  }
 
   AnalysisResult r{};
   std::wstring err;
@@ -192,9 +214,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int)
     LocalFree(argv);
     return 0;
   }
-
-  GuiOptions guiOpt{};
-  guiOpt.debug = debug;
 
   const int rc = RunGuiViewer(hInst, guiOpt, analyzeOpt, std::move(r), &err);
   LocalFree(argv);

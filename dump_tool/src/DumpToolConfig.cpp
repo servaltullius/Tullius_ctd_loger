@@ -42,6 +42,7 @@ DumpToolConfig LoadDumpToolConfig(std::wstring* err)
   wchar_t lang[64]{};
   GetPrivateProfileStringW(L"SkyrimDiagDumpTool", L"Language", L"en", lang, 64, path.c_str());
   cfg.language = ParseLanguageTokenWide(lang);
+  cfg.beginnerMode = GetPrivateProfileIntW(L"SkyrimDiagDumpTool", L"BeginnerMode", 1, path.c_str()) != 0;
 
   if (err) err->clear();
   return cfg;
@@ -52,8 +53,14 @@ bool SaveDumpToolConfig(const DumpToolConfig& cfg, std::wstring* err)
   const std::wstring path = DumpToolIniPath();
   const std::wstring code = std::wstring(i18n::LanguageCode(cfg.language));
 
-  const BOOL ok = WritePrivateProfileStringW(L"SkyrimDiagDumpTool", L"Language", code.c_str(), path.c_str());
-  if (!ok) {
+  const BOOL okLang = WritePrivateProfileStringW(L"SkyrimDiagDumpTool", L"Language", code.c_str(), path.c_str());
+  if (!okLang) {
+    if (err) *err = L"WritePrivateProfileStringW failed: " + std::to_wstring(GetLastError());
+    return false;
+  }
+  const BOOL okBeginner =
+    WritePrivateProfileStringW(L"SkyrimDiagDumpTool", L"BeginnerMode", cfg.beginnerMode ? L"1" : L"0", path.c_str());
+  if (!okBeginner) {
     if (err) *err = L"WritePrivateProfileStringW failed: " + std::to_wstring(GetLastError());
     return false;
   }

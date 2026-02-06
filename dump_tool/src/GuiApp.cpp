@@ -11,12 +11,14 @@
 #include <vsstyle.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cwctype>
 #include <cstring>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -56,6 +58,18 @@ namespace skydiag::dump_tool {
 namespace {
 
 constexpr wchar_t kWndClassName[] = L"SkyrimDiagDumpToolViewer";
+constexpr ULONG_PTR kViewerCopyDataOpenDump = 0x53444744;  // 'SGDD'
+constexpr std::uint32_t kViewerOpenDumpPayloadVersion = 1;
+constexpr std::uint32_t kViewerFlagForceBeginner = 1u << 0;
+constexpr std::uint32_t kViewerFlagForceAdvanced = 1u << 1;
+
+struct ViewerOpenDumpPayloadHeader
+{
+  std::uint32_t version = kViewerOpenDumpPayloadVersion;
+  std::uint32_t flags = 0;
+  std::uint32_t language = 0;  // 0=keep, 1=en, 2=ko
+  std::uint32_t dumpPathChars = 0;  // includes trailing NUL
+};
 
 enum : int
 {
@@ -73,6 +87,10 @@ enum : int
   kIdBtnOpenDump = 202,
   kIdBtnCopyChecklist = 203,
   kIdBtnLanguage = 204,
+  kIdBtnRevealCandidates = 205,
+  kIdBtnToggleAdvanced = 206,
+  kIdBeginnerSummaryEdit = 300,
+  kIdBeginnerCandidatesList = 301,
 };
 
 struct AppState
@@ -80,6 +98,8 @@ struct AppState
   GuiOptions guiOpt{};
   AnalyzeOptions analyzeOpt{};
   AnalysisResult r{};
+  bool showAdvanced = false;
+  bool beginnerCandidatesExpanded = false;
 
   HWND hwnd = nullptr;
   HWND tab = nullptr;
@@ -101,6 +121,8 @@ struct AppState
   HWND eventsFilterEdit = nullptr;
   HWND resourcesList = nullptr;
   HWND wctEdit = nullptr;
+  HWND beginnerSummaryEdit = nullptr;
+  HWND beginnerCandidatesList = nullptr;
 
   int evidenceSplitPercent = 55;
   bool evidenceSplitDragging = false;
@@ -126,6 +148,48 @@ int ScalePx(HWND hwnd, int px96)
 const wchar_t* LText(i18n::Language lang, const wchar_t* en, const wchar_t* ko)
 {
   return (lang == i18n::Language::kEnglish) ? en : ko;
+}
+
+std::uint32_t EncodeLanguageForPayload(i18n::Language lang)
+{
+  if (lang == i18n::Language::kEnglish) {
+    return 1;
+  }
+  if (lang == i18n::Language::kKorean) {
+    return 2;
+  }
+  return 0;
+}
+
+i18n::Language DecodeLanguageFromPayload(std::uint32_t code, i18n::Language fallback)
+{
+  if (code == 1) {
+    return i18n::Language::kEnglish;
+  }
+  if (code == 2) {
+    return i18n::Language::kKorean;
+  }
+  return fallback;
+}
+
+std::vector<std::uint8_t> BuildViewerOpenDumpPayload(
+  const std::wstring& dumpPath,
+  i18n::Language language,
+  bool beginnerMode)
+{
+  ViewerOpenDumpPayloadHeader h{};
+  h.version = kViewerOpenDumpPayloadVersion;
+  h.flags = beginnerMode ? kViewerFlagForceBeginner : kViewerFlagForceAdvanced;
+  h.language = EncodeLanguageForPayload(language);
+  h.dumpPathChars = static_cast<std::uint32_t>(dumpPath.size() + 1);
+
+  const std::size_t bytes =
+    sizeof(ViewerOpenDumpPayloadHeader) + static_cast<std::size_t>(h.dumpPathChars) * sizeof(wchar_t);
+
+  std::vector<std::uint8_t> payload(bytes, 0);
+  std::memcpy(payload.data(), &h, sizeof(h));
+  std::memcpy(payload.data() + sizeof(h), dumpPath.c_str(), static_cast<std::size_t>(h.dumpPathChars) * sizeof(wchar_t));
+  return payload;
 }
 
 HFONT CreateUiFont(HWND hwnd)
@@ -916,9 +980,135 @@ std::wstring FormatSummaryText(const AnalysisResult& r)
   return s;
 }
 
+struct BeginnerCandidate
+{
+  std::wstring confidence;
+  std::wstring candidate;
+  std::wstring evidence;
+};
+
+std::vector<BeginnerCandidate> BuildBeginnerCandidates(const AnalysisResult& r)
+{
+  std::vector<BeginnerCandidate> out;
+  out.reserve(5);
+
+  const std::size_t suspectN = std::min<std::size_t>(r.suspects.size(), 5);
+  for (std::size_t i = 0; i < suspectN; i++) {
+    const auto& s = r.suspects[i];
+    BeginnerCandidate row{};
+    row.confidence = s.confidence.empty() ? std::wstring(i18n::ConfidenceLabel(r.language, s.confidence_level)) : s.confidence;
+    if (!s.inferred_mod_name.empty()) {
+      row.candidate = s.inferred_mod_name;
+      if (!s.module_filename.empty()) {
+        row.candidate += L" (" + s.module_filename + L")";
+      }
+    } else if (!s.module_filename.empty()) {
+      row.candidate = s.module_filename;
+    } else {
+      row.candidate = (r.language == i18n::Language::kEnglish) ? L"(unknown module)" : L"(모듈 미상)";
+    }
+    row.evidence = s.reason;
+    out.push_back(std::move(row));
+  }
+
+  if (!out.empty()) {
+    return out;
+  }
+
+  const std::size_t evidenceN = std::min<std::size_t>(r.evidence.size(), 5);
+  for (std::size_t i = 0; i < evidenceN; i++) {
+    const auto& e = r.evidence[i];
+    BeginnerCandidate row{};
+    row.confidence = e.confidence.empty() ? std::wstring(i18n::ConfidenceLabel(r.language, e.confidence_level)) : e.confidence;
+    row.candidate = e.title;
+    row.evidence = e.details;
+    out.push_back(std::move(row));
+  }
+  return out;
+}
+
+std::wstring BuildBeginnerSummaryText(const AnalysisResult& r)
+{
+  const bool en = (r.language == i18n::Language::kEnglish);
+  std::wstring out;
+
+  out += en ? L"What happened?\r\n" : L"무슨 일이 발생했나요?\r\n";
+  out += L"- ";
+  out += r.summary_sentence.empty() ? (en ? L"(no summary)" : L"(요약 없음)") : r.summary_sentence;
+  out += L"\r\n\r\n";
+
+  out += en ? L"Quick info\r\n" : L"빠른 정보\r\n";
+  out += L"- ";
+  out += en ? L"Dump: " : L"덤프: ";
+  out += r.dump_path;
+  out += L"\r\n";
+  out += L"- ";
+  out += en ? L"Module+Offset: " : L"모듈+오프셋: ";
+  out += r.fault_module_plus_offset.empty() ? (en ? L"(unknown)" : L"(미상)") : r.fault_module_plus_offset;
+  out += L"\r\n";
+  if (!r.crash_bucket_key.empty()) {
+    out += L"- ";
+    out += en ? L"Crash bucket key: " : L"크래시 버킷 키: ";
+    out += r.crash_bucket_key;
+    out += L"\r\n";
+  }
+
+  out += L"\r\n";
+  out += en ? L"Next steps\r\n" : L"다음 단계\r\n";
+  if (r.recommendations.empty()) {
+    out += L"- ";
+    out += en ? L"(No recommendation)" : L"(권장 조치 없음)";
+    out += L"\r\n";
+  } else {
+    const std::size_t n = std::min<std::size_t>(r.recommendations.size(), 3);
+    for (std::size_t i = 0; i < n; i++) {
+      out += L"- ";
+      out += r.recommendations[i];
+      out += L"\r\n";
+    }
+  }
+
+  return out;
+}
+
+void PopulateBeginnerCandidates(HWND lv, const AnalysisResult& r)
+{
+  if (!lv) {
+    return;
+  }
+  ListView_DeleteAllItems(lv);
+  const auto candidates = BuildBeginnerCandidates(r);
+  for (int i = 0; i < static_cast<int>(candidates.size()); i++) {
+    const auto& row = candidates[static_cast<std::size_t>(i)];
+    LVITEMW it{};
+    it.mask = LVIF_TEXT;
+    it.iItem = i;
+    it.pszText = const_cast<wchar_t*>(row.confidence.c_str());
+    ListView_InsertItem(lv, &it);
+    ListView_SetItemText(lv, i, 1, const_cast<wchar_t*>(row.candidate.c_str()));
+    ListView_SetItemText(lv, i, 2, const_cast<wchar_t*>(row.evidence.c_str()));
+  }
+}
+
+bool IsSimpleModeVisible(const AppState* st)
+{
+  return st && !st->showAdvanced;
+}
+
 void SetTabVisible(AppState* st, int tabIndex)
 {
   if (!st) {
+    return;
+  }
+  if (IsSimpleModeVisible(st)) {
+    ShowWindow(st->summaryEdit, SW_HIDE);
+    ShowWindow(st->evidenceList, SW_HIDE);
+    ShowWindow(st->evidenceSplitter, SW_HIDE);
+    ShowWindow(st->recoList, SW_HIDE);
+    ShowWindow(st->eventsFilterEdit, SW_HIDE);
+    ShowWindow(st->eventsList, SW_HIDE);
+    ShowWindow(st->resourcesList, SW_HIDE);
+    ShowWindow(st->wctEdit, SW_HIDE);
     return;
   }
   ShowWindow(st->summaryEdit, (tabIndex == 0) ? SW_SHOW : SW_HIDE);
@@ -946,6 +1136,69 @@ void Layout(AppState* st)
   GetClientRect(st->hwnd, &rc);
 
   const int bottom = rc.bottom - padding;
+  const bool simpleMode = IsSimpleModeVisible(st);
+  const int y = bottom - btnH;
+
+  const int langBtnW = ScalePx(st->hwnd, 90);
+  const int toggleBtnW = ScalePx(st->hwnd, 130);
+  const int rightStart = rc.right - padding - langBtnW - btnGap - toggleBtnW;
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnToggleAdvanced), rightStart, y, toggleBtnW, btnH, TRUE);
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnLanguage), rc.right - padding - langBtnW, y, langBtnW, btnH, TRUE);
+
+  int x = padding;
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnOpenDump), x, y, btnW, btnH, TRUE);
+  x += btnW + btnGap;
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnOpenFolder), x, y, btnW, btnH, TRUE);
+  x += btnW + btnGap;
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnCopy), x, y, btnW, btnH, TRUE);
+  x += btnW + btnGap;
+  MoveWindow(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), x, y, btnW, btnH, TRUE);
+
+  if (simpleMode) {
+    ShowWindow(st->tab, SW_HIDE);
+    ShowWindow(st->summaryEdit, SW_HIDE);
+    ShowWindow(st->evidenceList, SW_HIDE);
+    ShowWindow(st->evidenceSplitter, SW_HIDE);
+    ShowWindow(st->recoList, SW_HIDE);
+    ShowWindow(st->eventsFilterEdit, SW_HIDE);
+    ShowWindow(st->eventsList, SW_HIDE);
+    ShowWindow(st->resourcesList, SW_HIDE);
+    ShowWindow(st->wctEdit, SW_HIDE);
+
+    ShowWindow(st->beginnerSummaryEdit, SW_SHOW);
+    ShowWindow(GetDlgItem(st->hwnd, kIdBtnRevealCandidates), SW_SHOW);
+    ShowWindow(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), SW_HIDE);
+    ShowWindow(st->beginnerCandidatesList, st->beginnerCandidatesExpanded ? SW_SHOW : SW_HIDE);
+
+    const int panelTop = padding;
+    const int panelBottom = y - padding;
+    const int panelH = std::max(0, panelBottom - panelTop);
+    const int panelW = std::max(0, static_cast<int>(rc.right) - padding * 2);
+    const int ctaH = ScalePx(st->hwnd, 34);
+    const int gap = ScalePx(st->hwnd, 10);
+
+    int summaryH = st->beginnerCandidatesExpanded ? (panelH * 45 / 100) : (panelH - ctaH - gap);
+    summaryH = ClampInt(summaryH, ScalePx(st->hwnd, 140), std::max(ScalePx(st->hwnd, 140), panelH - ctaH - gap));
+    summaryH = std::min(summaryH, std::max(0, panelH));
+
+    const int summaryY = panelTop;
+    const int ctaY = std::min(panelBottom - ctaH, summaryY + summaryH + gap);
+    MoveWindow(st->beginnerSummaryEdit, padding, summaryY, panelW, summaryH, TRUE);
+    MoveWindow(GetDlgItem(st->hwnd, kIdBtnRevealCandidates), padding, ctaY, panelW, ctaH, TRUE);
+
+    if (st->beginnerCandidatesExpanded) {
+      const int listTop = ctaY + ctaH + gap;
+      const int listH = std::max(0, panelBottom - listTop);
+      MoveWindow(st->beginnerCandidatesList, padding, listTop, panelW, listH, TRUE);
+    }
+    return;
+  }
+
+  ShowWindow(st->tab, SW_SHOW);
+  ShowWindow(st->beginnerSummaryEdit, SW_HIDE);
+  ShowWindow(st->beginnerCandidatesList, SW_HIDE);
+  ShowWindow(GetDlgItem(st->hwnd, kIdBtnRevealCandidates), SW_HIDE);
+  ShowWindow(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), SW_SHOW);
 
   const int tabTop = padding;
   const int tabLeft = padding;
@@ -983,19 +1236,8 @@ void Layout(AppState* st)
   MoveWindow(st->resourcesList, baseX, baseY, w, h, TRUE);
   MoveWindow(st->wctEdit, baseX, baseY, w, h, TRUE);
 
-  const int y = bottom - btnH;
-  int x = padding;
-  MoveWindow(GetDlgItem(st->hwnd, kIdBtnOpenDump), x, y, btnW, btnH, TRUE);
-  x += btnW + btnGap;
-  MoveWindow(GetDlgItem(st->hwnd, kIdBtnOpenFolder), x, y, btnW, btnH, TRUE);
-  x += btnW + btnGap;
-  MoveWindow(GetDlgItem(st->hwnd, kIdBtnCopy), x, y, btnW, btnH, TRUE);
-  x += btnW + btnGap;
-  MoveWindow(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), x, y, btnW, btnH, TRUE);
-
-  const int langBtnW = ScalePx(st->hwnd, 90);
-  const int langX = rc.right - padding - langBtnW;
-  MoveWindow(GetDlgItem(st->hwnd, kIdBtnLanguage), langX, y, langBtnW, btnH, TRUE);
+  const int selectedTab = TabCtrl_GetCurSel(st->tab);
+  SetTabVisible(st, selectedTab >= 0 ? selectedTab : 0);
 }
 
 void ListViewAddColumn(HWND lv, int col, int width, const wchar_t* title)
@@ -1049,6 +1291,9 @@ void ApplyUiLanguage(AppState* st)
 
   // Checklist column
   SetListViewColumnTitle(st->recoList, 0, LText(lang, L"Recommended actions (checklist)", L"권장 조치(체크리스트)"));
+  SetListViewColumnTitle(st->beginnerCandidatesList, 0, LText(lang, L"Confidence", L"신뢰도"));
+  SetListViewColumnTitle(st->beginnerCandidatesList, 1, LText(lang, L"Candidate", L"원인 후보"));
+  SetListViewColumnTitle(st->beginnerCandidatesList, 2, LText(lang, L"Why this candidate", L"근거"));
 
   // Event filter cue banner
   if (st->eventsFilterEdit) {
@@ -1064,6 +1309,10 @@ void ApplyUiLanguage(AppState* st)
   SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnOpenFolder), LText(lang, L"Open folder", L"폴더 열기"));
   SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnCopy), LText(lang, L"Copy summary", L"요약 복사"));
   SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnCopyChecklist), LText(lang, L"Copy checklist", L"체크리스트 복사"));
+  SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnRevealCandidates), LText(lang, L"Check Cause Candidates", L"원인 후보 확인하기"));
+  SetWindowTextW(
+    GetDlgItem(st->hwnd, kIdBtnToggleAdvanced),
+    st->showAdvanced ? LText(lang, L"Beginner view", L"초보 보기") : LText(lang, L"Advanced analysis", L"고급 분석 보기"));
 
   std::wstring langBtn = L"Lang: ";
   langBtn += (lang == i18n::Language::kEnglish) ? L"EN" : L"KO";
@@ -1326,7 +1575,10 @@ void RefreshUi(AppState* st)
 
   const std::wstring summary = FormatSummaryText(st->r);
   SetWindowTextW(st->summaryEdit, summary.c_str());
+  const std::wstring beginnerSummary = BuildBeginnerSummaryText(st->r);
+  SetWindowTextW(st->beginnerSummaryEdit, beginnerSummary.c_str());
   PopulateEvidence(st->evidenceList, st->r);
+  PopulateBeginnerCandidates(st->beginnerCandidatesList, st->r);
   PopulateRecommendations(st->recoList, st->r);
   wchar_t filterBuf[512]{};
   GetWindowTextW(st->eventsFilterEdit, filterBuf, static_cast<int>(sizeof(filterBuf) / sizeof(filterBuf[0])));
@@ -1349,6 +1601,10 @@ bool AnalyzeAndUpdate(AppState* st, const std::wstring& dumpPath)
 {
   if (!st) {
     return false;
+  }
+
+  if (IsSimpleModeVisible(st)) {
+    st->beginnerCandidatesExpanded = false;
   }
 
   const auto lang = st->analyzeOpt.language;
@@ -1378,6 +1634,7 @@ bool AnalyzeAndUpdate(AppState* st, const std::wstring& dumpPath)
   }
 
   st->r = std::move(r);
+  Layout(st);
   RefreshUi(st);
   return true;
 }
@@ -1405,7 +1662,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
       const HWND ctl = reinterpret_cast<HWND>(lParam);
       const HDC hdc = reinterpret_cast<HDC>(wParam);
-      if ((ctl == st->summaryEdit || ctl == st->wctEdit || ctl == st->eventsFilterEdit) && st->bgCardBrush) {
+      if ((ctl == st->summaryEdit || ctl == st->wctEdit || ctl == st->eventsFilterEdit || ctl == st->beginnerSummaryEdit) &&
+          st->bgCardBrush) {
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, theme::TEXT_PRIMARY);
         SetBkColor(hdc, theme::BG_INPUT);
@@ -1435,6 +1693,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       st = reinterpret_cast<AppState*>(cs->lpCreateParams);
       st->hwnd = hwnd;
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(st));
+      st->showAdvanced = !st->guiOpt.beginnerMode;
+      st->beginnerCandidatesExpanded = false;
 
       st->uiFont = CreateUiFont(hwnd);
       st->uiFontSemibold = CreateUiFontSemibold(hwnd);
@@ -1628,6 +1888,40 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyDarkEdit(st->wctEdit);
       ApplyEditPadding(st->wctEdit, ScalePx(hwnd, 10));
 
+      st->beginnerSummaryEdit = CreateWindowExW(
+        WS_EX_CLIENTEDGE,
+        L"EDIT",
+        L"",
+        WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | WS_VSCROLL,
+        0,
+        0,
+        100,
+        100,
+        hwnd,
+        reinterpret_cast<HMENU>(kIdBeginnerSummaryEdit),
+        cs->hInstance,
+        nullptr);
+      ApplyDarkEdit(st->beginnerSummaryEdit);
+      ApplyEditPadding(st->beginnerSummaryEdit, ScalePx(hwnd, 10));
+
+      st->beginnerCandidatesList = CreateWindowExW(
+        WS_EX_CLIENTEDGE,
+        WC_LISTVIEWW,
+        L"",
+        WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL,
+        0,
+        0,
+        100,
+        100,
+        hwnd,
+        reinterpret_cast<HMENU>(kIdBeginnerCandidatesList),
+        cs->hInstance,
+        nullptr);
+      ApplyListViewModernStyle(st->beginnerCandidatesList);
+      ListViewAddColumn(st->beginnerCandidatesList, 0, 90, LText(lang, L"Confidence", L"신뢰도"));
+      ListViewAddColumn(st->beginnerCandidatesList, 1, 260, LText(lang, L"Candidate", L"원인 후보"));
+      ListViewAddColumn(st->beginnerCandidatesList, 2, 820, LText(lang, L"Why this candidate", L"근거"));
+
       CreateWindowExW(
         0,
         L"BUTTON",
@@ -1687,6 +1981,34 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       CreateWindowExW(
         0,
         L"BUTTON",
+        LText(lang, L"Check Cause Candidates", L"원인 후보 확인하기"),
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        0,
+        0,
+        180,
+        32,
+        hwnd,
+        reinterpret_cast<HMENU>(kIdBtnRevealCandidates),
+        cs->hInstance,
+        nullptr);
+
+      CreateWindowExW(
+        0,
+        L"BUTTON",
+        LText(lang, L"Advanced analysis", L"고급 분석 보기"),
+        WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
+        0,
+        0,
+        120,
+        28,
+        hwnd,
+        reinterpret_cast<HMENU>(kIdBtnToggleAdvanced),
+        cs->hInstance,
+        nullptr);
+
+      CreateWindowExW(
+        0,
+        L"BUTTON",
         L"Lang: EN",
         WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
         0,
@@ -1708,8 +2030,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->eventsList, st->uiFont);
       ApplyFont(st->resourcesList, st->uiFont);
       ApplyFont(st->wctEdit, st->uiFontMono ? st->uiFontMono : st->uiFont);
+      ApplyFont(st->beginnerSummaryEdit, st->uiFont);
+      ApplyFont(st->beginnerCandidatesList, st->uiFont);
 
-      for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist, kIdBtnLanguage }) {
+      for (int bid : {
+             kIdBtnOpenDump,
+             kIdBtnOpenFolder,
+             kIdBtnCopy,
+             kIdBtnCopyChecklist,
+             kIdBtnRevealCandidates,
+             kIdBtnToggleAdvanced,
+             kIdBtnLanguage }) {
         HWND btn = GetDlgItem(hwnd, bid);
         ApplyFont(btn, st->uiFont);
         ApplyDarkButton(btn);
@@ -1723,6 +2054,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         ListView_SetImageList(st->recoList, st->rowHeightImages, LVSIL_SMALL);
         ListView_SetImageList(st->eventsList, st->rowHeightImages, LVSIL_SMALL);
         ListView_SetImageList(st->resourcesList, st->rowHeightImages, LVSIL_SMALL);
+        ListView_SetImageList(st->beginnerCandidatesList, st->rowHeightImages, LVSIL_SMALL);
       }
 
       DragAcceptFiles(hwnd, TRUE);
@@ -1745,7 +2077,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
 
       const int id = static_cast<int>(dis->CtlID);
-      const bool isPrimary = (id == kIdBtnOpenDump);
+      const bool isPrimary = (id == kIdBtnRevealCandidates) || (id == kIdBtnOpenDump && !IsSimpleModeVisible(st));
       DrawModernButton(st, dis, isPrimary);
       return TRUE;
     }
@@ -1797,10 +2129,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->eventsList, st->uiFont);
       ApplyFont(st->resourcesList, st->uiFont);
       ApplyFont(st->wctEdit, st->uiFontMono ? st->uiFontMono : st->uiFont);
+      ApplyFont(st->beginnerSummaryEdit, st->uiFont);
+      ApplyFont(st->beginnerCandidatesList, st->uiFont);
       ApplyEditPadding(st->summaryEdit, ScalePx(hwnd, 10));
       ApplyEditPadding(st->eventsFilterEdit, ScalePx(hwnd, 10));
       ApplyEditPadding(st->wctEdit, ScalePx(hwnd, 10));
-      for (int bid : { kIdBtnOpenDump, kIdBtnOpenFolder, kIdBtnCopy, kIdBtnCopyChecklist, kIdBtnLanguage }) {
+      ApplyEditPadding(st->beginnerSummaryEdit, ScalePx(hwnd, 10));
+      for (int bid : {
+             kIdBtnOpenDump,
+             kIdBtnOpenFolder,
+             kIdBtnCopy,
+             kIdBtnCopyChecklist,
+             kIdBtnRevealCandidates,
+             kIdBtnToggleAdvanced,
+             kIdBtnLanguage }) {
         ApplyFont(GetDlgItem(hwnd, bid), st->uiFont);
       }
 
@@ -1815,6 +2157,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         ListView_SetImageList(st->recoList, st->rowHeightImages, LVSIL_SMALL);
         ListView_SetImageList(st->eventsList, st->rowHeightImages, LVSIL_SMALL);
         ListView_SetImageList(st->resourcesList, st->rowHeightImages, LVSIL_SMALL);
+        ListView_SetImageList(st->beginnerCandidatesList, st->rowHeightImages, LVSIL_SMALL);
       }
 
       Layout(st);
@@ -1838,6 +2181,47 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return HandleEvidenceCustomDraw(st, reinterpret_cast<LPNMLVCUSTOMDRAW>(lParam));
       }
       break;
+    }
+
+    case WM_COPYDATA: {
+      if (!st || !lParam) {
+        return FALSE;
+      }
+      const auto* cds = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
+      if (!cds || cds->dwData != kViewerCopyDataOpenDump || cds->cbData < sizeof(ViewerOpenDumpPayloadHeader)) {
+        return FALSE;
+      }
+
+      const auto* header = reinterpret_cast<const ViewerOpenDumpPayloadHeader*>(cds->lpData);
+      if (!header || header->version != kViewerOpenDumpPayloadVersion || header->dumpPathChars == 0) {
+        return FALSE;
+      }
+
+      const std::size_t requiredBytes =
+        sizeof(ViewerOpenDumpPayloadHeader) + static_cast<std::size_t>(header->dumpPathChars) * sizeof(wchar_t);
+      if (cds->cbData < requiredBytes) {
+        return FALSE;
+      }
+
+      const auto* dumpPathW = reinterpret_cast<const wchar_t*>(
+        static_cast<const std::uint8_t*>(cds->lpData) + sizeof(ViewerOpenDumpPayloadHeader));
+      if (!dumpPathW || dumpPathW[header->dumpPathChars - 1] != L'\0') {
+        return FALSE;
+      }
+
+      st->analyzeOpt.language = DecodeLanguageFromPayload(header->language, st->analyzeOpt.language);
+      if ((header->flags & kViewerFlagForceBeginner) != 0u) {
+        st->showAdvanced = false;
+      } else if ((header->flags & kViewerFlagForceAdvanced) != 0u) {
+        st->showAdvanced = true;
+      }
+
+      const bool ok = AnalyzeAndUpdate(st, std::wstring(dumpPathW));
+      if (ok) {
+        ShowWindow(hwnd, IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(hwnd);
+      }
+      return ok ? TRUE : FALSE;
     }
 
     case WM_COMMAND: {
@@ -1887,6 +2271,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
           MB_ICONINFORMATION);
         return 0;
       }
+      if (id == kIdBtnRevealCandidates) {
+        st->beginnerCandidatesExpanded = true;
+        Layout(st);
+        return 0;
+      }
+      if (id == kIdBtnToggleAdvanced) {
+        st->showAdvanced = !st->showAdvanced;
+        if (!st->showAdvanced) {
+          st->beginnerCandidatesExpanded = false;
+        } else {
+          TabCtrl_SetCurSel(st->tab, 1);
+          SetTabVisible(st, 1);
+        }
+
+        DumpToolConfig cfg{};
+        cfg.language = st->analyzeOpt.language;
+        cfg.beginnerMode = !st->showAdvanced;
+        std::wstring cfgErr;
+        if (!SaveDumpToolConfig(cfg, &cfgErr)) {
+          MessageBoxW(
+            hwnd,
+            (std::wstring(LText(st->analyzeOpt.language, L"Failed to save config:\n", L"설정 저장 실패:\n")) + cfgErr).c_str(),
+            L"SkyrimDiagDumpTool",
+            MB_ICONWARNING);
+        }
+
+        ApplyUiLanguage(st);
+        Layout(st);
+        return 0;
+      }
       if (id == kIdBtnLanguage) {
         st->analyzeOpt.language = (st->analyzeOpt.language == i18n::Language::kEnglish)
           ? i18n::Language::kKorean
@@ -1894,6 +2308,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         DumpToolConfig cfg{};
         cfg.language = st->analyzeOpt.language;
+        cfg.beginnerMode = !st->showAdvanced;
         std::wstring cfgErr;
         if (!SaveDumpToolConfig(cfg, &cfgErr)) {
           MessageBoxW(
@@ -1960,6 +2375,53 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 }  // namespace
+
+bool TryReuseExistingViewerForDump(
+  const std::wstring& dumpPath,
+  const AnalyzeOptions& analyzeOpt,
+  const GuiOptions& guiOpt,
+  std::wstring* err)
+{
+  if (dumpPath.empty()) {
+    if (err) *err = L"Dump path is empty.";
+    return false;
+  }
+
+  HWND existing = FindWindowW(kWndClassName, nullptr);
+  if (!existing) {
+    if (err) err->clear();
+    return false;
+  }
+
+  auto payload = BuildViewerOpenDumpPayload(dumpPath, analyzeOpt.language, guiOpt.beginnerMode);
+  COPYDATASTRUCT cds{};
+  cds.dwData = kViewerCopyDataOpenDump;
+  cds.cbData = static_cast<DWORD>(payload.size());
+  cds.lpData = payload.data();
+
+  DWORD_PTR msgResult = 0;
+  const LRESULT sent = SendMessageTimeoutW(
+    existing,
+    WM_COPYDATA,
+    0,
+    reinterpret_cast<LPARAM>(&cds),
+    SMTO_ABORTIFHUNG | SMTO_BLOCK,
+    5000,
+    &msgResult);
+  if (!sent) {
+    if (err) *err = L"WM_COPYDATA send failed: " + std::to_wstring(GetLastError());
+    return false;
+  }
+  if (msgResult != TRUE) {
+    if (err) *err = L"Existing viewer rejected dump update.";
+    return false;
+  }
+
+  ShowWindow(existing, IsIconic(existing) ? SW_RESTORE : SW_SHOW);
+  SetForegroundWindow(existing);
+  if (err) err->clear();
+  return true;
+}
 
 int RunGuiViewer(HINSTANCE hInst, const GuiOptions& opt, const AnalyzeOptions& analyzeOpt, AnalysisResult initial, std::wstring* err)
 {

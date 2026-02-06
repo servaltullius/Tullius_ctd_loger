@@ -61,6 +61,16 @@ HelperConfig LoadConfig(std::wstring* err)
   wchar_t dumpToolExe[MAX_PATH]{};
   GetPrivateProfileStringW(L"SkyrimDiagHelper", L"DumpToolExe", L"SkyrimDiagDumpTool.exe", dumpToolExe, MAX_PATH, path.c_str());
   cfg.dumpToolExe = dumpToolExe;
+  cfg.autoOpenViewerOnCrash = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnCrash", 1, path.c_str()) != 0;
+  cfg.autoOpenViewerOnHang = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnHang", 1, path.c_str()) != 0;
+  cfg.autoOpenViewerOnManualCapture =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnManualCapture", 0, path.c_str()) != 0;
+  cfg.autoOpenHangAfterProcessExit =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenHangAfterProcessExit", 1, path.c_str()) != 0;
+  cfg.autoOpenHangDelayMs = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, path.c_str()));
+  cfg.autoOpenViewerBeginnerMode =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerBeginnerMode", 1, path.c_str()) != 0;
 
   cfg.enableAdaptiveLoadingThreshold =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableAdaptiveLoadingThreshold", 1, path.c_str()) != 0;
@@ -76,6 +86,19 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.foregroundGraceSec = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"ForegroundGraceSec", 5, path.c_str()));
+
+  cfg.enableEtwCaptureOnHang =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableEtwCaptureOnHang", 0, path.c_str()) != 0;
+  wchar_t etwWprExe[MAX_PATH]{};
+  GetPrivateProfileStringW(L"SkyrimDiagHelper", L"EtwWprExe", L"wpr.exe", etwWprExe, MAX_PATH, path.c_str());
+  cfg.etwWprExe = etwWprExe;
+
+  wchar_t etwProfile[128]{};
+  GetPrivateProfileStringW(L"SkyrimDiagHelper", L"EtwProfile", L"GeneralProfile", etwProfile, static_cast<DWORD>(std::size(etwProfile)), path.c_str());
+  cfg.etwProfile = etwProfile;
+
+  cfg.etwMaxDurationSec = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, path.c_str()));
 
   if (cfg.outputDir.empty()) {
     cfg.outputDir = ExeDir();

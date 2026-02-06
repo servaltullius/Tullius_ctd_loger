@@ -109,28 +109,133 @@ void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
   }
 }
 
-void StartDumpToolIfConfigured(const skydiag::helper::HelperConfig& cfg, const std::wstring& dumpPath, const std::filesystem::path& outBase)
+std::wstring QuoteArg(std::wstring_view s)
 {
-  if (!cfg.autoAnalyzeDump) {
-    return;
+  std::wstring out;
+  out.reserve(s.size() + 2);
+  out.push_back(L'"');
+  for (const wchar_t c : s) {
+    if (c == L'"') {
+      out.push_back(L'\\');
+    }
+    out.push_back(c);
   }
+  out.push_back(L'"');
+  return out;
+}
 
-  std::filesystem::path exe(cfg.dumpToolExe);
-  if (exe.is_relative()) {
-    exe = GetThisExeDir() / exe;
+DWORD EtwTimeoutMs(const skydiag::helper::HelperConfig& cfg)
+{
+  std::uint32_t sec = cfg.etwMaxDurationSec;
+  if (sec < 10u) {
+    sec = 10u;
   }
+  if (sec > 120u) {
+    sec = 120u;
+  }
+  return static_cast<DWORD>(sec * 1000u);
+}
 
-  std::wstring cmd = L"\"";
-  cmd += exe.wstring();
-  cmd += L"\" \"";
-  cmd += dumpPath;
-  cmd += L"\" --out-dir \"";
-  cmd += outBase.wstring();
-  cmd += L"\" --headless";
-
+bool RunHiddenProcessAndWait(std::wstring cmdLine, const std::filesystem::path& cwd, DWORD timeoutMs, std::wstring* err)
+{
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
+
+  std::wstring cwdW = cwd.wstring();
+  const BOOL ok = CreateProcessW(
+    /*lpApplicationName=*/nullptr,
+    cmdLine.data(),
+    nullptr,
+    nullptr,
+    FALSE,
+    CREATE_NO_WINDOW,
+    nullptr,
+    cwdW.empty() ? nullptr : cwdW.c_str(),
+    &si,
+    &pi);
+
+  if (!ok) {
+    if (err) *err = L"CreateProcessW failed: " + std::to_wstring(GetLastError());
+    return false;
+  }
+
+  CloseHandle(pi.hThread);
+
+  const DWORD w = WaitForSingleObject(pi.hProcess, timeoutMs);
+  if (w == WAIT_TIMEOUT) {
+    TerminateProcess(pi.hProcess, 1);
+    CloseHandle(pi.hProcess);
+    if (err) *err = L"Process timeout";
+    return false;
+  }
+  if (w == WAIT_FAILED) {
+    const DWORD le = GetLastError();
+    CloseHandle(pi.hProcess);
+    if (err) *err = L"WaitForSingleObject failed: " + std::to_wstring(le);
+    return false;
+  }
+
+  DWORD exitCode = 0;
+  if (!GetExitCodeProcess(pi.hProcess, &exitCode)) {
+    const DWORD le = GetLastError();
+    CloseHandle(pi.hProcess);
+    if (err) *err = L"GetExitCodeProcess failed: " + std::to_wstring(le);
+    return false;
+  }
+  CloseHandle(pi.hProcess);
+
+  if (exitCode != 0) {
+    if (err) *err = L"Process exited with code: " + std::to_wstring(exitCode);
+    return false;
+  }
+
+  if (err) err->clear();
+  return true;
+}
+
+bool StartEtwCaptureForHang(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  std::wstring* err)
+{
+  const std::wstring wprExe = cfg.etwWprExe.empty() ? L"wpr.exe" : cfg.etwWprExe;
+  const std::wstring profile = cfg.etwProfile.empty() ? L"GeneralProfile" : cfg.etwProfile;
+  std::wstring cmd = QuoteArg(wprExe) + L" -start " + QuoteArg(profile) + L" -filemode";
+  return RunHiddenProcessAndWait(std::move(cmd), outBase, EtwTimeoutMs(cfg), err);
+}
+
+bool StopEtwCaptureForHang(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  const std::filesystem::path& etlPath,
+  std::wstring* err)
+{
+  const std::wstring wprExe = cfg.etwWprExe.empty() ? L"wpr.exe" : cfg.etwWprExe;
+  std::wstring cmd = QuoteArg(wprExe) + L" -stop " + QuoteArg(etlPath.wstring());
+  return RunHiddenProcessAndWait(std::move(cmd), outBase, EtwTimeoutMs(cfg), err);
+}
+
+std::filesystem::path ResolveDumpToolExe(const skydiag::helper::HelperConfig& cfg)
+{
+  std::filesystem::path exe(cfg.dumpToolExe.empty() ? L"SkyrimDiagDumpTool.exe" : cfg.dumpToolExe);
+  if (exe.is_relative()) {
+    exe = GetThisExeDir() / exe;
+  }
+  return exe;
+}
+
+bool StartDumpToolProcess(
+  const std::filesystem::path& exe,
+  std::wstring cmd,
+  const std::filesystem::path& outBase,
+  DWORD createFlags,
+  std::wstring* err)
+{
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  const std::wstring cwd = outBase.wstring();
 
   const BOOL ok = CreateProcessW(
     exe.c_str(),
@@ -138,19 +243,56 @@ void StartDumpToolIfConfigured(const skydiag::helper::HelperConfig& cfg, const s
     nullptr,
     nullptr,
     FALSE,
-    CREATE_NO_WINDOW,
+    createFlags,
     nullptr,
-    outBase.wstring().c_str(),
+    cwd.empty() ? nullptr : cwd.c_str(),
     &si,
     &pi);
 
   if (!ok) {
-    std::wcerr << L"[SkyrimDiagHelper] Warning: failed to start DumpTool (err=" << GetLastError() << L")\n";
-    return;
+    if (err) *err = L"CreateProcessW failed: " + std::to_wstring(GetLastError());
+    return false;
   }
 
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
+  if (err) err->clear();
+  return true;
+}
+
+void StartDumpToolHeadlessIfConfigured(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::wstring& dumpPath,
+  const std::filesystem::path& outBase)
+{
+  if (!cfg.autoAnalyzeDump) {
+    return;
+  }
+
+  const auto exe = ResolveDumpToolExe(cfg);
+  std::wstring cmd =
+    QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
+
+  std::wstring err;
+  if (!StartDumpToolProcess(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, &err)) {
+    std::wcerr << L"[SkyrimDiagHelper] Warning: failed to start DumpTool headless: " << err << L"\n";
+  }
+}
+
+void StartDumpToolViewer(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::wstring& dumpPath,
+  const std::filesystem::path& outBase,
+  std::wstring_view reason)
+{
+  const auto exe = ResolveDumpToolExe(cfg);
+  std::wstring cmd = QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring());
+  cmd += cfg.autoOpenViewerBeginnerMode ? L" --simple-ui" : L" --advanced-ui";
+
+  std::wstring err;
+  if (!StartDumpToolProcess(exe, std::move(cmd), outBase, 0, &err)) {
+    std::wcerr << L"[SkyrimDiagHelper] Warning: failed to start DumpTool viewer (" << reason << L"): " << err << L"\n";
+  }
 }
 
 bool IsPidInForeground(DWORD pid)
@@ -313,6 +455,7 @@ int wmain(int argc, wchar_t** argv)
   bool hangSuppressedForegroundResponsiveThisEpisode = false;
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;
+  std::wstring pendingHangViewerDumpPath;
 
   bool wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
   std::uint64_t loadStartQpc = wasLoading ? proc.shm->header.start_qpc : 0;
@@ -388,7 +531,10 @@ int wmain(int argc, wchar_t** argv)
       std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
       AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
       AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
-      StartDumpToolIfConfigured(cfg, dumpPath, outBase);
+      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      if (cfg.autoOpenViewerOnManualCapture) {
+        StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+      }
     }
   };
 
@@ -417,6 +563,14 @@ int wmain(int argc, wchar_t** argv)
       if (w == WAIT_OBJECT_0) {
         std::wcerr << L"[SkyrimDiagHelper] Target process exited.\n";
         AppendLogLine(outBase, L"Target process exited.");
+        if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
+          const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
+          if (delayMs > 0) {
+            Sleep(delayMs);
+          }
+          StartDumpToolViewer(cfg, pendingHangViewerDumpPath, outBase, L"hang_exit");
+          AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
+        }
         break;
       }
       if (w == WAIT_FAILED) {
@@ -438,6 +592,7 @@ int wmain(int argc, wchar_t** argv)
 
         const auto ts = Timestamp();
         const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
+        pendingHangViewerDumpPath.clear();
 
         std::wstring dumpErr;
         if (!skydiag::helper::WriteDumpWithStreams(
@@ -453,7 +608,10 @@ int wmain(int argc, wchar_t** argv)
           std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
         } else {
           std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
-          StartDumpToolIfConfigured(cfg, dumpPath, outBase);
+          StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+          if (cfg.autoOpenViewerOnCrash) {
+            StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
+          }
         }
 
         crashCaptured = true;
@@ -706,6 +864,18 @@ int wmain(int argc, wchar_t** argv)
     const auto ts = Timestamp();
     const auto wctPath = outBase / (L"SkyrimDiag_WCT_" + ts + L".json");
     const auto dumpPath = (outBase / (L"SkyrimDiag_Hang_" + ts + L".dmp")).wstring();
+    const auto etwPath = outBase / (L"SkyrimDiag_Hang_" + ts + L".etl");
+
+    bool etwStarted = false;
+    if (cfg.enableEtwCaptureOnHang) {
+      std::wstring etwErr;
+      if (StartEtwCaptureForHang(cfg, outBase, &etwErr)) {
+        etwStarted = true;
+        AppendLogLine(outBase, L"ETW hang capture started.");
+      } else {
+        AppendLogLine(outBase, L"ETW hang capture start failed: " + etwErr);
+      }
+    }
 
     nlohmann::json wctJson;
     std::wstring wctErr;
@@ -752,7 +922,24 @@ int wmain(int argc, wchar_t** argv)
       AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
       AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
         L" threshold=" + std::to_wstring(decision2.thresholdSec) + L" loading=" + std::to_wstring(decision2.isLoading ? 1 : 0));
-      StartDumpToolIfConfigured(cfg, dumpPath, outBase);
+      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      if (cfg.autoOpenViewerOnHang) {
+        if (cfg.autoOpenHangAfterProcessExit) {
+          pendingHangViewerDumpPath = dumpPath;
+          AppendLogLine(outBase, L"Queued hang dump for viewer auto-open on process exit.");
+        } else {
+          StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
+        }
+      }
+    }
+
+    if (etwStarted) {
+      std::wstring etwErr;
+      if (StopEtwCaptureForHang(cfg, outBase, etwPath, &etwErr)) {
+        AppendLogLine(outBase, L"ETW hang capture written: " + etwPath.wstring());
+      } else {
+        AppendLogLine(outBase, L"ETW hang capture stop failed: " + etwErr);
+      }
     }
 
     hangCapturedThisEpisode = true;

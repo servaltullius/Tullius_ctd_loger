@@ -62,6 +62,7 @@ struct AnalysisResult
   std::uint32_t exc_code = 0;
   std::uint32_t exc_tid = 0;
   std::uint64_t exc_addr = 0;
+  std::wstring crash_bucket_key;  // stable key for repeated CTD grouping (best-effort)
 
   std::wstring fault_module_path;      // full path if available
   std::wstring fault_module_filename;  // basename

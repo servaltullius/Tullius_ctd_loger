@@ -83,6 +83,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   summary["pid"] = r.pid;
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
+  summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
 
   summary["exception"] = nlohmann::json::object();
   summary["exception"]["code"] = r.exc_code;
@@ -168,6 +169,9 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   rpt << (en ? "SkyrimDiag Report\n" : "SkyrimDiag 리포트\n");
   rpt << (en ? "Dump: " : "덤프: ") << WideToUtf8(r.dump_path) << "\n";
   rpt << (en ? "Summary: " : "결론: ") << WideToUtf8(r.summary_sentence) << "\n";
+  if (!r.crash_bucket_key.empty()) {
+    rpt << (en ? "CrashBucketKey: " : "크래시 버킷 키: ") << WideToUtf8(r.crash_bucket_key) << "\n";
+  }
   rpt << "\n";
   rpt << (en ? "ExceptionCode: 0x" : "ExceptionCode: 0x") << std::hex << r.exc_code << std::dec << "\n";
   rpt << (en ? "ExceptionAddress: 0x" : "ExceptionAddress: 0x") << std::hex << r.exc_addr << std::dec << "\n";
