@@ -139,12 +139,15 @@ def main(argv: list[str]) -> int:
         copied_winui = 0
         winui_plugins_dir = plugins_dir / "SkyrimDiagWinUI"
         winui_plugins_dir.mkdir(parents=True, exist_ok=True)
-        for item in winui_publish_dir.iterdir():
+        for item in winui_publish_dir.rglob("*"):
             if not item.is_file():
                 continue
             if args.no_pdb and item.suffix.lower() == ".pdb":
                 continue
-            shutil.copy2(item, winui_plugins_dir / item.name)
+            rel = item.relative_to(winui_publish_dir)
+            dst = winui_plugins_dir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(item, dst)
             copied_winui += 1
         if copied_winui == 0:
             print(
