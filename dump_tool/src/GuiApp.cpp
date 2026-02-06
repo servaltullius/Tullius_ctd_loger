@@ -11,10 +11,12 @@
 #include <vsstyle.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cwctype>
 #include <cstring>
 #include <filesystem>
+#include <future>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -91,6 +93,22 @@ enum : int
   kIdBtnToggleAdvanced = 206,
   kIdBeginnerSummaryEdit = 300,
   kIdBeginnerCandidatesList = 301,
+  kIdAnalyzeStatus = 302,
+  kIdAnalyzeTimer = 500,
+};
+
+enum class AnalyzeFailStage
+{
+  kAnalyze,
+  kWriteOutputs,
+};
+
+struct AsyncAnalyzeResult
+{
+  bool ok = false;
+  AnalyzeFailStage failStage = AnalyzeFailStage::kAnalyze;
+  AnalysisResult result{};
+  std::wstring error;
 };
 
 struct AppState
@@ -123,9 +141,14 @@ struct AppState
   HWND wctEdit = nullptr;
   HWND beginnerSummaryEdit = nullptr;
   HWND beginnerCandidatesList = nullptr;
+  HWND analyzeStatus = nullptr;
 
   int evidenceSplitPercent = 55;
   bool evidenceSplitDragging = false;
+  bool isAnalyzing = false;
+  int analyzingTick = 0;
+  std::wstring queuedDumpPath;
+  std::future<AsyncAnalyzeResult> analyzeFuture;
 
   std::wstring lastError;
 };
@@ -279,6 +302,9 @@ int ClampInt(int v, int lo, int hi)
 }
 
 void Layout(AppState* st);
+void UpdateAnalyzeStatusText(AppState* st);
+void SetUiBusy(AppState* st, bool busy);
+bool BeginAnalyzeAsync(AppState* st, const std::wstring& dumpPath);
 
 void ApplyListViewModernStyle(HWND lv, bool dark = true)
 {
@@ -1137,7 +1163,16 @@ void Layout(AppState* st)
 
   const int bottom = rc.bottom - padding;
   const bool simpleMode = IsSimpleModeVisible(st);
+  const int statusGap = ScalePx(st->hwnd, 6);
+  const int statusH = st->isAnalyzing ? ScalePx(st->hwnd, 22) : 0;
   const int y = bottom - btnH;
+  const int statusTop = st->isAnalyzing ? (y - statusGap - statusH) : y;
+  const int contentBottom = statusTop - padding;
+
+  if (st->analyzeStatus) {
+    MoveWindow(st->analyzeStatus, padding, statusTop, std::max(0, static_cast<int>(rc.right) - padding * 2), statusH, TRUE);
+    ShowWindow(st->analyzeStatus, st->isAnalyzing ? SW_SHOW : SW_HIDE);
+  }
 
   const int langBtnW = ScalePx(st->hwnd, 90);
   const int toggleBtnW = ScalePx(st->hwnd, 130);
@@ -1171,7 +1206,7 @@ void Layout(AppState* st)
     ShowWindow(st->beginnerCandidatesList, st->beginnerCandidatesExpanded ? SW_SHOW : SW_HIDE);
 
     const int panelTop = padding;
-    const int panelBottom = y - padding;
+    const int panelBottom = contentBottom;
     const int panelH = std::max(0, panelBottom - panelTop);
     const int panelW = std::max(0, static_cast<int>(rc.right) - padding * 2);
     const int ctaH = ScalePx(st->hwnd, 34);
@@ -1203,7 +1238,7 @@ void Layout(AppState* st)
   const int tabTop = padding;
   const int tabLeft = padding;
   const int tabRight = rc.right - padding;
-  const int tabBottom = bottom - btnH - padding;
+  const int tabBottom = contentBottom;
 
   MoveWindow(st->tab, tabLeft, tabTop, tabRight - tabLeft, tabBottom - tabTop, TRUE);
 
@@ -1317,6 +1352,8 @@ void ApplyUiLanguage(AppState* st)
   std::wstring langBtn = L"Lang: ";
   langBtn += (lang == i18n::Language::kEnglish) ? L"EN" : L"KO";
   SetWindowTextW(GetDlgItem(st->hwnd, kIdBtnLanguage), langBtn.c_str());
+
+  UpdateAnalyzeStatusText(st);
 }
 
 std::wstring ToW(double v);
@@ -1565,6 +1602,71 @@ void OpenFolder(const std::wstring& path)
   ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
+std::wstring BuildAnalyzeStatusText(const AppState* st)
+{
+  if (!st) {
+    return {};
+  }
+  const auto lang = st->analyzeOpt.language;
+  static constexpr const wchar_t* kDots[] = { L"", L".", L"..", L"..." };
+  const wchar_t* dots = kDots[st->analyzingTick % 4];
+
+  std::wstring s = LText(lang, L"Analyzing dump", L"덤프 분석 중");
+  s += dots;
+  s += L"  ";
+  s += LText(lang, L"(Viewer remains responsive)", L"(창은 계속 사용할 수 있습니다)");
+  if (!st->queuedDumpPath.empty()) {
+    s += L"  ";
+    s += LText(lang, L"[Latest request queued]", L"[최신 요청 대기 중]");
+  }
+  return s;
+}
+
+void UpdateAnalyzeStatusText(AppState* st)
+{
+  if (!st || !st->analyzeStatus) {
+    return;
+  }
+  if (!st->isAnalyzing) {
+    SetWindowTextW(st->analyzeStatus, L"");
+    return;
+  }
+  const std::wstring s = BuildAnalyzeStatusText(st);
+  SetWindowTextW(st->analyzeStatus, s.c_str());
+}
+
+void SetUiBusy(AppState* st, bool busy)
+{
+  if (!st) {
+    return;
+  }
+  st->isAnalyzing = busy;
+  if (!busy) {
+    st->analyzingTick = 0;
+  }
+
+  for (int id : {
+         kIdBtnOpenDump,
+         kIdBtnOpenFolder,
+         kIdBtnCopy,
+         kIdBtnCopyChecklist,
+         kIdBtnRevealCandidates,
+         kIdBtnToggleAdvanced,
+         kIdBtnLanguage }) {
+    EnableWindow(GetDlgItem(st->hwnd, id), busy ? FALSE : TRUE);
+  }
+  if (st->tab) {
+    EnableWindow(st->tab, busy ? FALSE : TRUE);
+  }
+  if (st->eventsFilterEdit) {
+    EnableWindow(st->eventsFilterEdit, busy ? FALSE : TRUE);
+  }
+
+  DragAcceptFiles(st->hwnd, busy ? FALSE : TRUE);
+  UpdateAnalyzeStatusText(st);
+  Layout(st);
+}
+
 void RefreshUi(AppState* st)
 {
   if (!st) {
@@ -1597,45 +1699,55 @@ void RefreshUi(AppState* st)
   SetWindowTextW(st->hwnd, title.c_str());
 }
 
-bool AnalyzeAndUpdate(AppState* st, const std::wstring& dumpPath)
+bool BeginAnalyzeAsync(AppState* st, const std::wstring& dumpPath)
 {
-  if (!st) {
+  if (!st || dumpPath.empty()) {
     return false;
+  }
+
+  if (st->isAnalyzing) {
+    st->queuedDumpPath = dumpPath;
+    UpdateAnalyzeStatusText(st);
+    return true;
   }
 
   if (IsSimpleModeVisible(st)) {
     st->beginnerCandidatesExpanded = false;
   }
 
-  const auto lang = st->analyzeOpt.language;
   const std::filesystem::path dp(dumpPath);
   const std::filesystem::path out = st->r.out_dir.empty() ? dp.parent_path() : std::filesystem::path(st->r.out_dir);
+  const std::wstring outW = out.wstring();
+  const AnalyzeOptions opt = st->analyzeOpt;
 
-  AnalysisResult r{};
-  std::wstring err;
-  if (!AnalyzeDump(dumpPath, out.wstring(), st->analyzeOpt, r, &err)) {
-    st->lastError = err;
-    MessageBoxW(
-      st->hwnd,
-      (std::wstring(LText(lang, L"Dump analysis failed:\n", L"덤프 분석 실패:\n")) + err).c_str(),
-      L"SkyrimDiagDumpTool",
-      MB_ICONERROR);
-    return false;
-  }
+  st->queuedDumpPath.clear();
+  st->analyzingTick = 0;
+  SetUiBusy(st, true);
 
-  if (!WriteOutputs(r, &err)) {
-    st->lastError = err;
-    MessageBoxW(
-      st->hwnd,
-      (std::wstring(LText(lang, L"Failed to write output files:\n", L"결과 파일 생성 실패:\n")) + err).c_str(),
-      L"SkyrimDiagDumpTool",
-      MB_ICONERROR);
-    return false;
-  }
+  st->analyzeFuture = std::async(std::launch::async, [dumpPath, outW, opt]() -> AsyncAnalyzeResult {
+    AsyncAnalyzeResult async{};
 
-  st->r = std::move(r);
-  Layout(st);
-  RefreshUi(st);
+    AnalysisResult r{};
+    std::wstring err;
+    if (!AnalyzeDump(dumpPath, outW, opt, r, &err)) {
+      async.ok = false;
+      async.failStage = AnalyzeFailStage::kAnalyze;
+      async.error = std::move(err);
+      return async;
+    }
+    if (!WriteOutputs(r, &err)) {
+      async.ok = false;
+      async.failStage = AnalyzeFailStage::kWriteOutputs;
+      async.error = std::move(err);
+      return async;
+    }
+
+    async.ok = true;
+    async.result = std::move(r);
+    return async;
+  });
+
+  SetTimer(st->hwnd, kIdAnalyzeTimer, 120, nullptr);
   return true;
 }
 
@@ -1662,6 +1774,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       }
       const HWND ctl = reinterpret_cast<HWND>(lParam);
       const HDC hdc = reinterpret_cast<HDC>(wParam);
+      if (ctl == st->analyzeStatus && st->bgBaseBrush) {
+        SetBkMode(hdc, TRANSPARENT);
+        SetTextColor(hdc, theme::ACCENT_CYAN);
+        SetBkColor(hdc, theme::BG_BASE);
+        return reinterpret_cast<INT_PTR>(st->bgBaseBrush);
+      }
       if ((ctl == st->summaryEdit || ctl == st->wctEdit || ctl == st->eventsFilterEdit || ctl == st->beginnerSummaryEdit) &&
           st->bgCardBrush) {
         SetBkMode(hdc, TRANSPARENT);
@@ -1922,6 +2040,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ListViewAddColumn(st->beginnerCandidatesList, 1, 260, LText(lang, L"Candidate", L"원인 후보"));
       ListViewAddColumn(st->beginnerCandidatesList, 2, 820, LText(lang, L"Why this candidate", L"근거"));
 
+      st->analyzeStatus = CreateWindowExW(
+        0,
+        L"STATIC",
+        L"",
+        WS_CHILD | SS_LEFT,
+        0,
+        0,
+        100,
+        20,
+        hwnd,
+        reinterpret_cast<HMENU>(kIdAnalyzeStatus),
+        cs->hInstance,
+        nullptr);
+
       CreateWindowExW(
         0,
         L"BUTTON",
@@ -2032,6 +2164,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->wctEdit, st->uiFontMono ? st->uiFontMono : st->uiFont);
       ApplyFont(st->beginnerSummaryEdit, st->uiFont);
       ApplyFont(st->beginnerCandidatesList, st->uiFont);
+      ApplyFont(st->analyzeStatus, st->uiFont);
 
       for (int bid : {
              kIdBtnOpenDump,
@@ -2131,6 +2264,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       ApplyFont(st->wctEdit, st->uiFontMono ? st->uiFontMono : st->uiFont);
       ApplyFont(st->beginnerSummaryEdit, st->uiFont);
       ApplyFont(st->beginnerCandidatesList, st->uiFont);
+      ApplyFont(st->analyzeStatus, st->uiFont);
       ApplyEditPadding(st->summaryEdit, ScalePx(hwnd, 10));
       ApplyEditPadding(st->eventsFilterEdit, ScalePx(hwnd, 10));
       ApplyEditPadding(st->wctEdit, ScalePx(hwnd, 10));
@@ -2162,6 +2296,46 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
       Layout(st);
       RefreshUi(st);
+      return 0;
+    }
+
+    case WM_TIMER: {
+      if (!st || static_cast<int>(wParam) != kIdAnalyzeTimer) {
+        break;
+      }
+      if (!st->isAnalyzing || !st->analyzeFuture.valid()) {
+        KillTimer(hwnd, kIdAnalyzeTimer);
+        return 0;
+      }
+
+      st->analyzingTick++;
+      UpdateAnalyzeStatusText(st);
+
+      if (st->analyzeFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+        return 0;
+      }
+
+      KillTimer(hwnd, kIdAnalyzeTimer);
+      AsyncAnalyzeResult async = st->analyzeFuture.get();
+      SetUiBusy(st, false);
+
+      if (!async.ok) {
+        st->lastError = async.error;
+        const auto lang = st->analyzeOpt.language;
+        const wchar_t* prefix = (async.failStage == AnalyzeFailStage::kAnalyze)
+          ? LText(lang, L"Dump analysis failed:\n", L"덤프 분석 실패:\n")
+          : LText(lang, L"Failed to write output files:\n", L"결과 파일 생성 실패:\n");
+        MessageBoxW(hwnd, (std::wstring(prefix) + async.error).c_str(), L"SkyrimDiagDumpTool", MB_ICONERROR);
+      } else {
+        st->r = std::move(async.result);
+        RefreshUi(st);
+      }
+
+      if (!st->queuedDumpPath.empty()) {
+        std::wstring next = st->queuedDumpPath;
+        st->queuedDumpPath.clear();
+        BeginAnalyzeAsync(st, next);
+      }
       return 0;
     }
 
@@ -2216,7 +2390,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         st->showAdvanced = true;
       }
 
-      const bool ok = AnalyzeAndUpdate(st, std::wstring(dumpPathW));
+      const bool ok = BeginAnalyzeAsync(st, std::wstring(dumpPathW));
       if (ok) {
         ShowWindow(hwnd, IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(hwnd);
@@ -2241,7 +2415,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       if (id == kIdBtnOpenDump) {
         auto picked = PickDumpFile(hwnd);
         if (picked) {
-          AnalyzeAndUpdate(st, *picked);
+          BeginAnalyzeAsync(st, *picked);
         }
         return 0;
       }
@@ -2320,7 +2494,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
         ApplyUiLanguage(st);
         if (!st->r.dump_path.empty()) {
-          AnalyzeAndUpdate(st, st->r.dump_path);
+          BeginAnalyzeAsync(st, st->r.dump_path);
         } else {
           RefreshUi(st);
         }
@@ -2336,13 +2510,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
       HDROP h = reinterpret_cast<HDROP>(wParam);
       wchar_t buf[MAX_PATH]{};
       if (DragQueryFileW(h, 0, buf, MAX_PATH) > 0) {
-        AnalyzeAndUpdate(st, buf);
+        BeginAnalyzeAsync(st, buf);
       }
       DragFinish(h);
       return 0;
     }
 
     case WM_DESTROY:
+      if (st) {
+        KillTimer(hwnd, kIdAnalyzeTimer);
+        if (st->analyzeFuture.valid()) {
+          st->analyzeFuture.wait();
+        }
+      }
       if (st && st->uiFont) {
         DeleteObject(st->uiFont);
         st->uiFont = nullptr;
