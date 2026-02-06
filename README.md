@@ -288,7 +288,7 @@ cmake -S . -B build --preset default
 cmake --build build --preset default
 ```
 
-Publish modern WinUI viewer (framework-dependent / lightweight):
+Build modern WinUI viewer output (framework-dependent / lightweight):
 ```powershell
 scripts\build-winui.cmd
 ```
