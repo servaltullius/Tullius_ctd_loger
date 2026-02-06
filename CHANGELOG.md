@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.2.3 (2026-02-06)
+
+### Added
+- Crash bucketing key (`crash_bucket_key`) output in Summary JSON/Report, plus callstack symbolization improvements to better group repeated CTDs by signature.
+- Beginner-first DumpTool UX:
+  - Default beginner view with primary CTA (`Check Cause Candidates` / `원인 후보 확인하기`)
+  - Top-5 candidate + evidence presentation
+  - Explicit `Advanced analysis` toggle to access full tabs.
+- DumpTool single-window reuse path: when already open, new dump opens in the same window via inter-process message handoff (`WM_COPYDATA`) instead of creating extra windows.
+- New helper viewer auto-open policy options in `SkyrimDiagHelper.ini`:
+  - `AutoOpenViewerOnCrash`
+  - `AutoOpenViewerOnHang`
+  - `AutoOpenViewerOnManualCapture`
+  - `AutoOpenHangAfterProcessExit`
+  - `AutoOpenHangDelayMs`
+  - `AutoOpenViewerBeginnerMode`
+- Optional ETW capture around hang dumps (`EnableEtwCaptureOnHang`, `EtwWprExe`, `EtwProfile`, `EtwMaxDurationSec`) as best-effort diagnostics.
+- New bucket unit test target (`skydiag_bucket_tests`) and test source (`tests/bucket_tests.cpp`).
+
+### Changed
+- Helper dump flow now separates headless analysis from viewer launch:
+  - Crash: viewer can open immediately
+  - Hang: latest hang dump can be queued and auto-opened after process exit (with configurable delay)
+  - Manual capture: viewer auto-open remains off by default.
+- DumpTool now persists beginner/advanced default mode in `SkyrimDiagDumpTool.ini` (`BeginnerMode=1|0`) and supports CLI overrides (`--simple-ui`, `--advanced-ui`).
+
 ## v0.2.2 (2026-02-03)
 
 ### Fixed
