@@ -62,6 +62,7 @@ struct AnalysisResult
   std::uint32_t exc_code = 0;
   std::uint32_t exc_tid = 0;
   std::uint64_t exc_addr = 0;
+  std::vector<std::uint64_t> exc_info;  // MINIDUMP_EXCEPTION.ExceptionInformation (best-effort)
   std::wstring crash_bucket_key;  // stable key for repeated CTD grouping (best-effort)
 
   std::wstring fault_module_path;      // full path if available
@@ -71,6 +72,7 @@ struct AnalysisResult
 
   // Optional: Crash Logger SSE/AE integration (best-effort)
   std::wstring crash_logger_log_path;
+  std::wstring crash_logger_version;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
   std::wstring crash_logger_cpp_exception_type;
   std::wstring crash_logger_cpp_exception_info;

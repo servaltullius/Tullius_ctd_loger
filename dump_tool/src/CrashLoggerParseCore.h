@@ -30,6 +30,49 @@ inline std::string AsciiLower(std::string_view s)
   return out;
 }
 
+inline std::optional<std::string> ParseCrashLoggerVersionAscii(std::string_view logUtf8)
+{
+  std::istringstream iss{ std::string(logUtf8) };
+  std::string line;
+
+  // The first line is typically: "CrashLoggerSSE vX.Y.Z"
+  for (int i = 0; i < 32 && std::getline(iss, line); i++) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+
+    const std::string lower = AsciiLower(line);
+    const auto clPos = lower.find("crashloggersse");
+    if (clPos == std::string::npos) {
+      continue;
+    }
+
+    const auto vPos = lower.find('v', clPos);
+    if (vPos == std::string::npos || vPos + 1 >= lower.size()) {
+      continue;
+    }
+    if (!std::isdigit(static_cast<unsigned char>(lower[vPos + 1]))) {
+      continue;
+    }
+
+    std::size_t end = vPos + 1;
+    while (end < lower.size()) {
+      const unsigned char c = static_cast<unsigned char>(lower[end]);
+      if (!(std::isdigit(c) || c == '.' || c == '-' || std::isalpha(c))) {
+        break;
+      }
+      end++;
+    }
+
+    if (end <= vPos + 1) {
+      continue;
+    }
+    return line.substr(vPos, end - vPos);
+  }
+
+  return std::nullopt;
+}
+
 inline std::string_view TrimLeftAscii(std::string_view s)
 {
   std::size_t i = 0;
@@ -306,7 +349,12 @@ inline std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string
   for (const auto& [k, v] : freq) {
     rows.push_back(Row{ k, v });
   }
-  std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.count > b.count; });
+  std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+    if (a.count != b.count) {
+      return a.count > b.count;
+    }
+    return a.moduleLower < b.moduleLower;
+  });
 
   std::vector<std::string> out;
   out.reserve(std::min<std::size_t>(rows.size(), 8));
@@ -326,6 +374,7 @@ inline std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string
 }  // namespace crashlogger_core
 
 using crashlogger_core::LooksLikeCrashLoggerLogTextCore;
+using crashlogger_core::ParseCrashLoggerVersionAscii;
 using crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii;
 using crashlogger_core::ParseCrashLoggerTopModulesAsciiLower;
 

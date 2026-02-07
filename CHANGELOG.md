@@ -1,10 +1,29 @@
 # Changelog
 
+## v0.2.6 (2026-02-07)
+
+### Added
+- Helper retention/disk cleanup options in `SkyrimDiagHelper.ini`:
+  - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
+  - `MaxHelperLogBytes`, `MaxHelperLogFiles`
+- Crash viewer popup suppression options in `SkyrimDiagHelper.ini`:
+  - `AutoOpenCrashOnlyIfProcessExited`, `AutoOpenCrashWaitForExitMs`
+- DumpTool evidence: exception parameter analysis for common codes (e.g., access violation read/write/execute + address).
+- CrashLogger integration: detect and report CrashLogger version string (e.g., `CrashLoggerSSE v1.19.0`) when a log is auto-detected.
+- WinUI: added a "Copy summary" action for quick sharing.
+
+### Fixed
+- CI Linux workflow now builds all unit test targets before running `ctest`.
+- CI Windows manual workflow builds the WinUI shell before packaging.
+
 ## v0.2.5 (2026-02-06)
 
 ### Fixed
 - Packaging bug in `scripts/package.py`: WinUI publish output is now copied recursively, preventing runtime file loss when publish layouts include nested files/directories.
 - WinUI packaging crash fix: `scripts/build-winui.cmd` now stages from WinUI build output (includes required `.pri/.xbf` assets) instead of stripped publish output.
+- WinUI visual quality improvements: enabled Per-Monitor V2 DPI awareness via app manifest for sharper rendering on high-DPI displays.
+- WinUI scrolling reliability: when nested controls consume mouse wheel input, wheel events are chained to the root scroll viewer for smoother page scrolling.
+- WinUI localization polish: static UI labels/buttons now switch between English/Korean (`--lang ko` or system UI language Korean).
 
 ### Added
 - Native analyzer bridge DLL for WinUI (`SkyrimDiagDumpToolNative.dll`) with exported C ABI (`SkyrimDiagAnalyzeDumpW`) so WinUI can analyze dumps directly without launching legacy UI executable.
@@ -15,6 +34,13 @@
 - Helper dump-tool resolution no longer falls back to legacy executable.
 - CMake build no longer defines the legacy `SkyrimDiagDumpTool` Win32 executable target (native DLL + WinUI only).
 - WinUI publish switched to framework-dependent/lightweight output (`scripts/build-winui.cmd`), reducing package size but requiring user runtimes.
+- WinUI viewer visuals refreshed (typography, spacing, card styling, and list readability) while preserving existing dump-analysis workflow.
+- WinUI viewer theme refreshed with a Skyrim-inspired parchment + dark stone look.
+- WinUI viewer redesigned again using current Fluent/observability UI patterns:
+  - fixed left navigation pane visibility (always expanded labels, no icon-only collapse)
+  - added quick triage strip (primary suspect/confidence/actions/events)
+  - added explicit 3-step workflow cards in Analyze panel
+  - increased visual depth with layered surface tokens (`Window/Pane/Hero/Section/Elevated`)
 - Packaging now ships full-replacement WinUI set:
   - includes `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
   - includes `SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`

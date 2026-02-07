@@ -1,6 +1,7 @@
 #include "EvidenceBuilder.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <cwctype>
 #include <filesystem>
 #include <optional>
@@ -55,6 +56,60 @@ std::wstring ToWideAscii(std::string_view s)
     out.push_back(static_cast<wchar_t>(c));
   }
   return out;
+}
+
+std::wstring Hex64(std::uint64_t v)
+{
+  wchar_t buf[32]{};
+  swprintf_s(buf, L"0x%llX", static_cast<unsigned long long>(v));
+  return buf;
+}
+
+std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, bool en)
+{
+  if (r.exc_info.empty()) {
+    return std::nullopt;
+  }
+
+  auto accessKind = [&](std::uint64_t k) -> std::wstring {
+    switch (k) {
+      case 0:
+        return en ? L"read" : L"읽기";
+      case 1:
+        return en ? L"write" : L"쓰기";
+      case 8:
+        return en ? L"execute" : L"실행";
+      default:
+        return en ? L"unknown" : L"알 수 없음";
+    }
+  };
+
+  // https://learn.microsoft.com/en-us/windows/win32/debug/structured-exception-handling
+  // EXCEPTION_ACCESS_VIOLATION (0xC0000005):
+  //   [0] = 0 read, 1 write, 8 execute
+  //   [1] = address being accessed
+  if (r.exc_code == 0xC0000005u && r.exc_info.size() >= 2) {
+    const auto kind = accessKind(r.exc_info[0]);
+    const auto addr = Hex64(r.exc_info[1]);
+    return en
+      ? (L"EXCEPTION_ACCESS_VIOLATION: " + kind + L" at " + addr)
+      : (L"접근 위반: " + kind + L" 주소=" + addr);
+  }
+
+  // EXCEPTION_IN_PAGE_ERROR (0xC0000006):
+  //   [0] = 0 read, 1 write, 8 execute
+  //   [1] = address being accessed
+  //   [2] = NTSTATUS
+  if (r.exc_code == 0xC0000006u && r.exc_info.size() >= 3) {
+    const auto kind = accessKind(r.exc_info[0]);
+    const auto addr = Hex64(r.exc_info[1]);
+    const auto status = Hex64(r.exc_info[2]);
+    return en
+      ? (L"EXCEPTION_IN_PAGE_ERROR: " + kind + L" at " + addr + L" (NTSTATUS " + status + L")")
+      : (L"페이지 오류: " + kind + L" 주소=" + addr + L" (NTSTATUS " + status + L")");
+  }
+
+  return std::nullopt;
 }
 
 bool IsSystemishModule(std::wstring_view filename)
@@ -404,6 +459,17 @@ void BuildEvidenceAndSummary(AnalysisResult& r, i18n::Language lang)
     ? (en ? L"callstack" : L"콜스택")
     : (en ? L"stack scan" : L"스택 스캔");
 
+  if (hasException) {
+    if (auto info = TryExplainExceptionInfo(r, en)) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kHigh;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = en ? L"Exception parameter analysis" : L"예외 파라미터 분석";
+      e.details = *info;
+      r.evidence.push_back(std::move(e));
+    }
+  }
+
   if (isSnapshotLike) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kHigh;
@@ -429,6 +495,9 @@ void BuildEvidenceAndSummary(AnalysisResult& r, i18n::Language lang)
       ? L"Crash Logger SSE/AE log auto-detected"
       : L"Crash Logger SSE/AE 로그를 자동으로 찾음";
     e.details = std::filesystem::path(r.crash_logger_log_path).filename().wstring();
+    if (!r.crash_logger_version.empty()) {
+      e.details += L" (" + r.crash_logger_version + L")";
+    }
     r.evidence.push_back(std::move(e));
   }
 

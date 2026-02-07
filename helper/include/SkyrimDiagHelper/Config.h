@@ -21,6 +21,8 @@ struct HelperConfig {
   bool autoAnalyzeDump = true;
   std::wstring dumpToolExe = L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe";
   bool autoOpenViewerOnCrash = true;
+  bool autoOpenCrashOnlyIfProcessExited = true;
+  std::uint32_t autoOpenCrashWaitForExitMs = 2000;
   bool autoOpenViewerOnHang = true;
   bool autoOpenViewerOnManualCapture = false;
   bool autoOpenHangAfterProcessExit = true;
@@ -36,6 +38,16 @@ struct HelperConfig {
   std::wstring etwWprExe = L"wpr.exe";
   std::wstring etwProfile = L"GeneralProfile";
   std::uint32_t etwMaxDurationSec = 20;
+
+  // Retention / disk cleanup (0 = unlimited)
+  std::uint32_t maxCrashDumps = 20;
+  std::uint32_t maxHangDumps = 20;
+  std::uint32_t maxManualDumps = 20;
+  std::uint32_t maxEtwTraces = 5;
+
+  // Helper log rotation (0 = unlimited/disabled)
+  std::uint32_t maxHelperLogBytes = 8u * 1024u * 1024u;
+  std::uint32_t maxHelperLogFiles = 3;
 };
 
 HelperConfig LoadConfig(std::wstring* err);

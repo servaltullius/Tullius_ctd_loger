@@ -68,6 +68,10 @@ HelperConfig LoadConfig(std::wstring* err)
     path.c_str());
   cfg.dumpToolExe = dumpToolExe;
   cfg.autoOpenViewerOnCrash = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnCrash", 1, path.c_str()) != 0;
+  cfg.autoOpenCrashOnlyIfProcessExited =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashOnlyIfProcessExited", 1, path.c_str()) != 0;
+  cfg.autoOpenCrashWaitForExitMs = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashWaitForExitMs", 2000, path.c_str()));
   cfg.autoOpenViewerOnHang = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnHang", 1, path.c_str()) != 0;
   cfg.autoOpenViewerOnManualCapture =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnManualCapture", 0, path.c_str()) != 0;
@@ -105,6 +109,20 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.etwMaxDurationSec = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, path.c_str()));
+
+  cfg.maxCrashDumps = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxCrashDumps", 20, path.c_str()));
+  cfg.maxHangDumps = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxHangDumps", 20, path.c_str()));
+  cfg.maxManualDumps = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxManualDumps", 20, path.c_str()));
+  cfg.maxEtwTraces = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxEtwTraces", 5, path.c_str()));
+
+  cfg.maxHelperLogBytes = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxHelperLogBytes", 8 * 1024 * 1024, path.c_str()));
+  cfg.maxHelperLogFiles = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxHelperLogFiles", 3, path.c_str()));
 
   if (cfg.outputDir.empty()) {
     cfg.outputDir = ExeDir();

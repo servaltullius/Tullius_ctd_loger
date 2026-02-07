@@ -1407,6 +1407,17 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.exc_code = es->ExceptionRecord.ExceptionCode;
     out.exc_tid = es->ThreadId;
     out.exc_addr = es->ExceptionRecord.ExceptionAddress;
+    out.exc_info.clear();
+    {
+      const ULONG n = es->ExceptionRecord.NumberParameters;
+      constexpr ULONG kMaxN =
+        static_cast<ULONG>(sizeof(es->ExceptionRecord.ExceptionInformation) / sizeof(es->ExceptionRecord.ExceptionInformation[0]));
+      const ULONG take = (n < kMaxN) ? n : kMaxN;
+      out.exc_info.reserve(take);
+      for (ULONG i = 0; i < take; i++) {
+        out.exc_info.push_back(static_cast<std::uint64_t>(es->ExceptionRecord.ExceptionInformation[i]));
+      }
+    }
     CONTEXT ctx{};
     if (TryReadContextFromLocation(dumpBase, dumpSize, es->ThreadContext, ctx)) {
       excCtx = ctx;
@@ -1630,6 +1641,10 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         std::wstring readErr;
         auto logUtf8 = ReadWholeFileUtf8(*logPath, &readErr);
         if (logUtf8) {
+          if (auto ver = crashlogger_core::ParseCrashLoggerVersionAscii(*logUtf8)) {
+            out.crash_logger_version = Utf8ToWide(*ver);
+          }
+
           std::unordered_map<std::wstring, std::wstring> canonicalByLower;
           canonicalByLower.reserve(allModules.size());
           for (const auto& m : allModules) {

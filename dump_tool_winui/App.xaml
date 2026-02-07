@@ -2,17 +2,116 @@
     x:Class="SkyrimDiagDumpToolWinUI.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    RequestedTheme="Dark">
   <Application.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <controls:XamlControlsResources />
       </ResourceDictionary.MergedDictionaries>
-      <SolidColorBrush x:Key="CardBackgroundBrush" Color="#F5FFFFFF" />
-      <SolidColorBrush x:Key="CardBorderBrush" Color="#220A1A3A" />
-      <SolidColorBrush x:Key="HeaderBrush" Color="#FF0E243B" />
-      <SolidColorBrush x:Key="SubtleTextBrush" Color="#AA1E2B3A" />
-      <SolidColorBrush x:Key="AccentBrush" Color="#FF0078D4" />
+
+      <!-- Skyrim-inspired visual language -->
+      <Color x:Key="SystemAccentColor">#FF6ED8FF</Color>
+
+      <SolidColorBrush x:Key="CardBackgroundBrush"         Color="#D4121822" />
+      <SolidColorBrush x:Key="ElevatedBackgroundBrush"     Color="#E51C2432" />
+      <SolidColorBrush x:Key="CardBorderBrush"             Color="#AE725635" />
+      <SolidColorBrush x:Key="HeaderBrush"                 Color="#FFF7EDD8" />
+      <SolidColorBrush x:Key="HeroBrush"                   Color="#FFD7AE66" />
+      <SolidColorBrush x:Key="SubtleTextBrush"             Color="#FFD4BC8E" />
+      <SolidColorBrush x:Key="AccentBrush"                 Color="#FF6ED8FF" />
+      <SolidColorBrush x:Key="AccentSoftBrush"             Color="#2B6ED8FF" />
+      <SolidColorBrush x:Key="BodyTextBrush"               Color="#FFF8EDD9" />
+      <SolidColorBrush x:Key="InputBackgroundBrush"        Color="#CC0F151D" />
+      <SolidColorBrush x:Key="ItemBackgroundBrush"         Color="#9D2A3341" />
+      <SolidColorBrush x:Key="ItemBorderBrush"             Color="#AA755C3C" />
+      <SolidColorBrush x:Key="StatusBackgroundBrush"       Color="#CC111822" />
+      <SolidColorBrush x:Key="StatusBorderBrush"           Color="#AA84653B" />
+      <SolidColorBrush x:Key="BadgeBackgroundBrush"        Color="#3F2F3A34" />
+      <SolidColorBrush x:Key="BadgeBorderBrush"            Color="#CCA17B42" />
+      <SolidColorBrush x:Key="PaneBackgroundBrush"         Color="#D4111419" />
+      <SolidColorBrush x:Key="ConflictBrush"               Color="#FFFF6A5E" />
+      <SolidColorBrush x:Key="TimelineNeutralBrush"        Color="#665F5644" />
+      <SolidColorBrush x:Key="TimelineDangerBrush"         Color="#FF8E3A33" />
+      <SolidColorBrush x:Key="TimelineGoodBrush"           Color="#FF4E855A" />
+      <SolidColorBrush x:Key="PaneOrnamentBrush"           Color="#4CA28553" />
+      <SolidColorBrush x:Key="CardDeepShadowBrush"         Color="#6A070A0F" />
+      <SolidColorBrush x:Key="CardEdgeHighlightBrush"      Color="#3DE6D4AF" />
+
+      <LinearGradientBrush x:Key="WindowBackgroundBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF090C11" Offset="0" />
+        <GradientStop Color="#FF141B26" Offset="0.55" />
+        <GradientStop Color="#FF1B2432" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="PaneGradientBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#E4161D27" Offset="0" />
+        <GradientStop Color="#EE0C1118" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="ParchmentBackdropBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FFC6AC7C" Offset="0" />
+        <GradientStop Color="#FFB99A6A" Offset="0.45" />
+        <GradientStop Color="#FFAA8959" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="ParchmentVeinBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#36F7E0B8" Offset="0" />
+        <GradientStop Color="#14BD9564" Offset="0.5" />
+        <GradientStop Color="#2A866744" Offset="1" />
+      </LinearGradientBrush>
+
+      <SolidColorBrush x:Key="ParchmentFrameBrush" Color="#FF584225" />
+      <SolidColorBrush x:Key="ParchmentFrameInnerBrush" Color="#FF7D6037" />
+
+      <LinearGradientBrush x:Key="HeroCardBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#EE1C232D" Offset="0" />
+        <GradientStop Color="#EE10151C" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="SectionCardBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#D319202A" Offset="0" />
+        <GradientStop Color="#D30F151D" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="ElevatedCardBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#E3293240" Offset="0" />
+        <GradientStop Color="#E319222E" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="PrimaryActionFillBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFF1CC7E" Offset="0" />
+        <GradientStop Color="#FFE2B664" Offset="0.35" />
+        <GradientStop Color="#FFC8893E" Offset="1" />
+      </LinearGradientBrush>
+
+      <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16,9" />
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="Background" Value="{ThemeResource ElevatedCardBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource BodyTextBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ItemBorderBrush}" />
+      </Style>
+
+      <Style x:Key="PrimaryActionButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Background" Value="{ThemeResource PrimaryActionFillBrush}" />
+        <Setter Property="Foreground" Value="#FF241507" />
+        <Setter Property="BorderBrush" Value="#FFD1A15D" />
+        <Setter Property="Padding" Value="24,11" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="FontSize" Value="19" />
+        <Setter Property="FontFamily" Value="Palatino Linotype" />
+      </Style>
+
+      <Style TargetType="TextBox" BasedOn="{StaticResource DefaultTextBoxStyle}">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="12,8" />
+        <Setter Property="Background" Value="{ThemeResource InputBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource ItemBorderBrush}" />
+        <Setter Property="Foreground" Value="{ThemeResource BodyTextBrush}" />
+      </Style>
     </ResourceDictionary>
   </Application.Resources>
 </Application>

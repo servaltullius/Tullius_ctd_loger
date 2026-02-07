@@ -5,6 +5,7 @@
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <RootNamespace>SkyrimDiagDumpToolWinUI</RootNamespace>
     <AssemblyName>SkyrimDiagDumpToolWinUI</AssemblyName>
     <Nullable>enable</Nullable>

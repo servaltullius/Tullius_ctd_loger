@@ -15,6 +15,7 @@
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
+#include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagHelper/WctCapture.h"
 #include "SkyrimDiagShared.h"
 
@@ -90,12 +91,16 @@ std::string WideToUtf8(std::wstring_view s)
   return out;
 }
 
+std::uint64_t g_maxHelperLogBytes = 0;
+std::uint32_t g_maxHelperLogFiles = 0;
+
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
 {
   std::error_code ec;
   std::filesystem::create_directories(outBase, ec);
 
   const auto path = outBase / L"SkyrimDiagHelper.log";
+  skydiag::helper::RotateLogFileIfNeeded(path, g_maxHelperLogBytes, g_maxHelperLogFiles);
   std::ofstream f(path, std::ios::binary | std::ios::app);
   if (!f) {
     return;
@@ -403,6 +408,8 @@ int wmain(int argc, wchar_t** argv)
 
   std::wstring err;
   const auto cfg = skydiag::helper::LoadConfig(&err);
+  g_maxHelperLogBytes = cfg.maxHelperLogBytes;
+  g_maxHelperLogFiles = cfg.maxHelperLogFiles;
   if (!err.empty()) {
     std::wcerr << L"[SkyrimDiagHelper] Config warning: " << err << L"\n";
   }
@@ -440,6 +447,15 @@ int wmain(int argc, wchar_t** argv)
   AppendLogLine(outBase, L"Attached to pid=" + std::to_wstring(proc.pid) + L", output=" + outBase.wstring());
   if (!err.empty()) {
     AppendLogLine(outBase, L"Config warning: " + err);
+  }
+
+  {
+    skydiag::helper::RetentionLimits limits{};
+    limits.maxCrashDumps = cfg.maxCrashDumps;
+    limits.maxHangDumps = cfg.maxHangDumps;
+    limits.maxManualDumps = cfg.maxManualDumps;
+    limits.maxEtwTraces = cfg.maxEtwTraces;
+    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
   }
 
   skydiag::helper::LoadStats loadStats;
@@ -553,14 +569,20 @@ int wmain(int argc, wchar_t** argv)
     } else {
       std::wcout << L"[SkyrimDiagHelper] Manual dump written: " << dumpPath << L"\n";
       std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
-      AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
-      AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
-      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-      if (cfg.autoOpenViewerOnManualCapture) {
-        StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
-      }
-    }
-  };
+	      AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
+	      AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
+	      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+	      if (cfg.autoOpenViewerOnManualCapture) {
+	        StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+	      }
+	      skydiag::helper::RetentionLimits limits{};
+	      limits.maxCrashDumps = cfg.maxCrashDumps;
+	      limits.maxHangDumps = cfg.maxHangDumps;
+	      limits.maxManualDumps = cfg.maxManualDumps;
+	      limits.maxEtwTraces = cfg.maxEtwTraces;
+	      skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+	    }
+	  };
 
   for (;;) {
     MSG msg{};
@@ -631,16 +653,38 @@ int wmain(int argc, wchar_t** argv)
               &dumpErr)) {
           std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
         } else {
-          std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
-          StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-          if (cfg.autoOpenViewerOnCrash) {
-            StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
-          }
-        }
+		          std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
+		          StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+		          if (cfg.autoOpenViewerOnCrash) {
+	            if (!cfg.autoOpenCrashOnlyIfProcessExited) {
+	              StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
+	            } else if (proc.process) {
+	              const DWORD waitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
+	              const DWORD wExit = WaitForSingleObject(proc.process, waitMs);
+	              if (wExit == WAIT_OBJECT_0) {
+	                StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
+	                AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash after process exit.");
+	              } else if (wExit == WAIT_TIMEOUT) {
+	                AppendLogLine(outBase, L"Crash dump captured but process is still running; skipping viewer auto-open.");
+	              } else {
+	                const DWORD le = GetLastError();
+	                AppendLogLine(outBase, L"Crash viewer auto-open suppressed due to wait failure: " + std::to_wstring(le));
+	              }
+	            } else {
+	              AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
+		            }
+		          }
+		          skydiag::helper::RetentionLimits limits{};
+		          limits.maxCrashDumps = cfg.maxCrashDumps;
+		          limits.maxHangDumps = cfg.maxHangDumps;
+		          limits.maxManualDumps = cfg.maxManualDumps;
+		          limits.maxEtwTraces = cfg.maxEtwTraces;
+		          skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+		        }
 
-        crashCaptured = true;
-        AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
-        continue;
+	        crashCaptured = true;
+	        AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
+	        continue;
       }
     } else {
       Sleep(waitMs);
@@ -946,18 +990,24 @@ int wmain(int argc, wchar_t** argv)
       AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
       AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
         L" threshold=" + std::to_wstring(decision2.thresholdSec) + L" loading=" + std::to_wstring(decision2.isLoading ? 1 : 0));
-      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-      if (cfg.autoOpenViewerOnHang) {
-        if (cfg.autoOpenHangAfterProcessExit) {
-          pendingHangViewerDumpPath = dumpPath;
-          AppendLogLine(outBase, L"Queued hang dump for viewer auto-open on process exit.");
-        } else {
-          StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
-        }
-      }
-    }
+	      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+	      if (cfg.autoOpenViewerOnHang) {
+	        if (cfg.autoOpenHangAfterProcessExit) {
+	          pendingHangViewerDumpPath = dumpPath;
+	          AppendLogLine(outBase, L"Queued hang dump for viewer auto-open on process exit.");
+	        } else {
+	          StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
+	        }
+	      }
+	      skydiag::helper::RetentionLimits limits{};
+	      limits.maxCrashDumps = cfg.maxCrashDumps;
+	      limits.maxHangDumps = cfg.maxHangDumps;
+	      limits.maxManualDumps = cfg.maxManualDumps;
+	      limits.maxEtwTraces = cfg.maxEtwTraces;
+	      skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+	    }
 
-    if (etwStarted) {
+	    if (etwStarted) {
       std::wstring etwErr;
       if (StopEtwCaptureForHang(cfg, outBase, etwPath, &etwErr)) {
         AppendLogLine(outBase, L"ETW hang capture written: " + etwPath.wstring());

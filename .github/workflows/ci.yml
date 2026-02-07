@@ -22,7 +22,11 @@ jobs:
           cmake --build build-linux --target \
             skydiag_hang_suppression_tests \
             skydiag_crashlogger_parser_tests \
-            skydiag_i18n_core_tests
+            skydiag_i18n_core_tests \
+            skydiag_bucket_tests \
+            skydiag_winui_xaml_tests \
+            skydiag_helper_crash_autopen_config_tests \
+            skydiag_retention_tests
 
       - name: Run tests
         run: ctest --test-dir build-linux --output-on-failure
@@ -40,6 +44,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -61,6 +70,10 @@ jobs:
       - name: Build (RelWithDebInfo)
         shell: pwsh
         run: cmake --build build-win --config RelWithDebInfo
+
+      - name: Build WinUI shell
+        shell: cmd
+        run: scripts\build-winui.cmd
 
       - name: Package zip artifacts
         shell: pwsh

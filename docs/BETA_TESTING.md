@@ -35,6 +35,10 @@
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
+  - 저장/로드 중 팝업이 거슬리면 `AutoOpenCrashOnlyIfProcessExited=1` 유지(기본): 게임이 종료될 때만 크래시 뷰어 자동 오픈
+  - 디스크 정리(기본값 권장, `0`=무제한):
+    - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
+    - `MaxHelperLogBytes`, `MaxHelperLogFiles`
   - `HangThresholdInMenuSec` : 메뉴/종료 직전 같은 “메뉴 상태”에서의 프리징 기준(기본 30초)
     - 정상 종료 직전에 일시적으로 heartbeat가 멈춰도 hang dump가 쌓이지 않도록, 메뉴 상태에서는 더 높은 임계값을 사용합니다.
 

@@ -6,6 +6,7 @@
 
 using skydiag::dump_tool::LooksLikeCrashLoggerLogTextCore;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii;
+using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerVersionAscii;
 using skydiag::dump_tool::ParseCrashLoggerTopModulesAsciiLower;
 
 static void Test_LooksLikeCrashLogger_CrashLog()
@@ -65,6 +66,22 @@ static void Test_ParseTopModules_ThreadDump()
   assert(mods.size() == 2);
   assert(mods[0] == "prismaui.dll");
   assert(mods[1] == "sanguinesymphony.dll");
+}
+
+static void Test_ParseTopModules_ThreadDump_TieBreaksAlphabetically()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.18.0\n"
+    "THREAD DUMP (Manual Trigger)\n"
+    "===== THREAD 1 (ID: 123) =====\n"
+    "\tCALLSTACK:\n"
+    "\t\tmoda.dll+0x222\n"
+    "\t\tmodb.dll+0x333\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
+  assert(mods.size() == 2);
+  assert(mods[0] == "moda.dll");
+  assert(mods[1] == "modb.dll");
 }
 
 static void Test_StackCorruptionWarning_DoesNotCrash()
@@ -127,6 +144,17 @@ static void Test_ParseCppExceptionDetails_WithFlexibleSpacing()
   assert(ex->module == "AnotherMod.dll");
 }
 
+static void Test_ParseCrashLoggerVersion()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.19.0\n"
+    "CRASH TIME: 2026-02-07 12:34:56\n";
+
+  const auto ver = ParseCrashLoggerVersionAscii(s);
+  assert(ver);
+  assert(*ver == "v1.19.0");
+}
+
 static void Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe()
 {
   const std::string s =
@@ -150,9 +178,11 @@ int main()
   Test_LooksLikeCrashLogger_ThreadDump();
   Test_ParseTopModules_CrashLog();
   Test_ParseTopModules_ThreadDump();
+  Test_ParseTopModules_ThreadDump_TieBreaksAlphabetically();
   Test_StackCorruptionWarning_DoesNotCrash();
   Test_ParseCppExceptionDetails();
   Test_ParseCppExceptionDetails_WithFlexibleSpacing();
+  Test_ParseCrashLoggerVersion();
   Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe();
   return 0;
 }

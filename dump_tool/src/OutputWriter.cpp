@@ -95,6 +95,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
 
   summary["crash_logger"] = nlohmann::json::object();
   summary["crash_logger"]["log_path"] = WideToUtf8(r.crash_logger_log_path);
+  summary["crash_logger"]["version"] = WideToUtf8(r.crash_logger_version);
   summary["crash_logger"]["top_modules"] = nlohmann::json::array();
   for (const auto& m : r.crash_logger_top_modules) {
     summary["crash_logger"]["top_modules"].push_back(WideToUtf8(m));
@@ -182,6 +183,9 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   }
   if (!r.crash_logger_log_path.empty()) {
     rpt << (en ? "CrashLoggerLog: " : "Crash Logger 로그: ") << WideToUtf8(r.crash_logger_log_path) << "\n";
+  }
+  if (!r.crash_logger_version.empty()) {
+    rpt << (en ? "CrashLoggerVersion: " : "Crash Logger 버전: ") << WideToUtf8(r.crash_logger_version) << "\n";
   }
   if (!r.crash_logger_top_modules.empty()) {
     rpt << (en ? "CrashLoggerTopModules: " : "Crash Logger 상위 모듈: ")

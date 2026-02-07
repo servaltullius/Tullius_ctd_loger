@@ -6,223 +6,839 @@
     xmlns:local="using:SkyrimDiagDumpToolWinUI"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
-    Title="Tullius CTD Logger - Modern Viewer">
+    Title="Tullius CTD Logger">
 
-  <Grid>
-    <Grid.Background>
-      <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Color="#FFF1F7FF" Offset="0" />
-        <GradientStop Color="#FFE5F2FF" Offset="0.55" />
-        <GradientStop Color="#FFF2F8F5" Offset="1" />
-      </LinearGradientBrush>
-    </Grid.Background>
+  <Grid x:Name="RootGrid" Background="{ThemeResource WindowBackgroundBrush}">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-      <StackPanel Margin="20" Spacing="14">
-        <Border
-            Background="{ThemeResource CardBackgroundBrush}"
-            BorderBrush="{ThemeResource CardBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="16"
-            Padding="18">
-          <StackPanel Spacing="4">
-            <TextBlock FontFamily="Bahnschrift" FontSize="30" FontWeight="SemiBold" Foreground="{ThemeResource HeaderBrush}">
-              Tullius CTD Logger
+    <!-- Atmospheric glow (renders above Mica, below content) -->
+    <Canvas IsHitTestVisible="False">
+      <Ellipse Width="540" Height="540" Canvas.Left="-220" Canvas.Top="-260" Opacity="0.17">
+        <Ellipse.Fill>
+          <RadialGradientBrush>
+            <GradientStop Color="#FF76D3FF" Offset="0" />
+            <GradientStop Color="#0076D3FF" Offset="1" />
+          </RadialGradientBrush>
+        </Ellipse.Fill>
+      </Ellipse>
+      <Ellipse Width="500" Height="500" Canvas.Left="980" Canvas.Top="160" Opacity="0.12">
+        <Ellipse.Fill>
+          <RadialGradientBrush>
+            <GradientStop Color="#FFE3BE74" Offset="0" />
+            <GradientStop Color="#00E3BE74" Offset="1" />
+          </RadialGradientBrush>
+        </Ellipse.Fill>
+      </Ellipse>
+      <Ellipse Width="420" Height="420" Canvas.Left="520" Canvas.Top="620" Opacity="0.08">
+        <Ellipse.Fill>
+          <RadialGradientBrush>
+            <GradientStop Color="#FF4EA8D1" Offset="0" />
+            <GradientStop Color="#004EA8D1" Offset="1" />
+          </RadialGradientBrush>
+        </Ellipse.Fill>
+      </Ellipse>
+    </Canvas>
+
+    <!-- Navigation shell -->
+    <NavigationView
+        x:Name="NavView"
+        PaneDisplayMode="Left"
+        IsPaneOpen="True"
+        IsPaneToggleButtonVisible="False"
+        OpenPaneLength="228"
+        CompactPaneLength="52"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        SelectionChanged="NavView_SelectionChanged"
+        Background="{ThemeResource PaneGradientBrush}">
+
+      <NavigationView.PaneHeader>
+        <StackPanel Margin="12,12,12,6">
+          <TextBlock Text="Tullius"
+                     FontFamily="Palatino Linotype"
+                     FontSize="22" FontWeight="SemiBold"
+                     Foreground="{ThemeResource HeroBrush}" />
+          <TextBlock Text="CTD Logger"
+                     FontSize="11"
+                     Foreground="{ThemeResource SubtleTextBrush}" />
+          <Grid Margin="0,10,0,0">
+            <Rectangle Height="1"
+                       VerticalAlignment="Center"
+                       Fill="{ThemeResource PaneOrnamentBrush}" />
+            <TextBlock HorizontalAlignment="Center"
+                       Padding="6,0"
+                       FontFamily="Palatino Linotype"
+                       FontSize="10"
+                       Foreground="{ThemeResource HeroBrush}">
+              &lt;|&gt; &lt;|&gt; &lt;|&gt;
             </TextBlock>
-            <TextBlock FontSize="15" Foreground="{ThemeResource SubtleTextBrush}" TextWrapping="Wrap">
-              Full WinUI viewer: beginner summary plus advanced diagnostics in one window.
-            </TextBlock>
-          </StackPanel>
-        </Border>
+          </Grid>
+        </StackPanel>
+      </NavigationView.PaneHeader>
 
-        <Border
-            Background="{ThemeResource CardBackgroundBrush}"
-            BorderBrush="{ThemeResource CardBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="16"
-            Padding="16">
-          <StackPanel Spacing="10">
-            <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="{ThemeResource HeaderBrush}">
-              Analyze Dump
-            </TextBlock>
+      <NavigationView.MenuItems>
+        <NavigationViewItem x:Name="NavAnalyze" Tag="analyze" Content="Analyze" IsSelected="True">
+          <NavigationViewItem.Icon><SymbolIcon Symbol="OpenFile" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem x:Name="NavSummary" Tag="summary" Content="Crash Summary">
+          <NavigationViewItem.Icon><SymbolIcon Symbol="Important" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem x:Name="NavEvidence" Tag="evidence" Content="Evidence">
+          <NavigationViewItem.Icon><SymbolIcon Symbol="Find" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem x:Name="NavEvents" Tag="events" Content="Events">
+          <NavigationViewItem.Icon><SymbolIcon Symbol="Clock" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+        <NavigationViewItem x:Name="NavReport" Tag="report" Content="Report">
+          <NavigationViewItem.Icon><SymbolIcon Symbol="Document" /></NavigationViewItem.Icon>
+        </NavigationViewItem>
+      </NavigationView.MenuItems>
+      <!-- Scrollable content area -->
+      <ScrollViewer
+          x:Name="RootScrollViewer"
+          HorizontalContentAlignment="Center"
+          VerticalScrollBarVisibility="Auto"
+          HorizontalScrollBarVisibility="Disabled">
+        <Grid x:Name="RootContentGrid"
+              MaxWidth="1240"
+              MinWidth="1060"
+              Padding="22,18,22,18"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Top">
+          <Border Background="{ThemeResource ParchmentBackdropBrush}"
+                  BorderBrush="{ThemeResource ParchmentFrameBrush}"
+                  BorderThickness="3" CornerRadius="8" Padding="12" VerticalAlignment="Top">
+            <Border BorderBrush="{ThemeResource ParchmentFrameInnerBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="14">
+              <Grid>
+                <Rectangle Fill="{ThemeResource ParchmentVeinBrush}" RadiusX="6" RadiusY="6" />
+                <Grid Margin="8">
 
-            <Grid ColumnSpacing="8">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-              <TextBox x:Name="DumpPathBox" PlaceholderText="Select a .dmp file" />
-              <Button Grid.Column="1" Click="BrowseDump_Click" Content="Browse dump" />
+          <!-- ════════════════════════════════════════════
+               ANALYZE PANEL
+               ════════════════════════════════════════════ -->
+          <StackPanel x:Name="AnalyzePanel" Spacing="18" Visibility="Visible" HorizontalAlignment="Stretch">
+
+            <!-- Status ribbon -->
+            <Grid>
+              <Border Margin="0,3,0,0"
+                      Background="{ThemeResource CardDeepShadowBrush}"
+                      CornerRadius="8" />
+              <Border Background="{ThemeResource HeroCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="14,9">
+                <Grid>
+                  <Rectangle Height="1"
+                             VerticalAlignment="Top"
+                             Fill="{ThemeResource CardEdgeHighlightBrush}" />
+                  <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="HeaderSubtitleText"
+                               FontSize="15" FontWeight="SemiBold"
+                               Foreground="{ThemeResource BodyTextBrush}"
+                               TextWrapping="WrapWholeWords"
+                               VerticalAlignment="Center">
+                      Skyrim SE 1.6.x detected. Ready for dump triage.
+                    </TextBlock>
+                    <Border Grid.Column="1" CornerRadius="999" Padding="12,4"
+                            BorderBrush="{ThemeResource BadgeBorderBrush}" BorderThickness="1"
+                            Background="{ThemeResource BadgeBackgroundBrush}" VerticalAlignment="Center">
+                      <TextBlock x:Name="HeaderBadgeText"
+                                 FontSize="12" FontWeight="SemiBold"
+                                 Foreground="{ThemeResource HeroBrush}"
+                                 Text="STATUS READY" />
+                    </Border>
+                  </Grid>
+                </Grid>
+              </Border>
             </Grid>
 
-            <Grid ColumnSpacing="8">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-              <TextBox x:Name="OutputDirBox" PlaceholderText="Optional output directory (empty = dump folder)" />
-              <Button Grid.Column="1" Click="BrowseOutputFolder_Click" Content="Browse folder" />
+            <!-- Hero -->
+            <Grid>
+              <Border Margin="0,4,0,0"
+                      Background="{ThemeResource CardDeepShadowBrush}"
+                      CornerRadius="10" />
+              <Border Background="{ThemeResource HeroCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1.5" CornerRadius="10" Padding="24">
+                <Grid>
+                  <Rectangle Height="1"
+                             VerticalAlignment="Top"
+                             Fill="{ThemeResource CardEdgeHighlightBrush}" />
+                  <Grid ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="164" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" CornerRadius="6"
+                            BorderBrush="{ThemeResource CardBorderBrush}" BorderThickness="1"
+                            Background="{ThemeResource ElevatedCardBrush}" Padding="12">
+                      <Grid>
+                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontFamily="Palatino Linotype" FontSize="56"
+                                   Foreground="{ThemeResource HeroBrush}" Opacity="0.85">
+                          DR
+                        </TextBlock>
+                        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                   Margin="0,0,0,2"
+                                   FontSize="11" Foreground="{ThemeResource SubtleTextBrush}">
+                          Dragon Rune
+                        </TextBlock>
+                      </Grid>
+                    </Border>
+
+                    <StackPanel Grid.Column="1" Spacing="6">
+                      <TextBlock x:Name="HeaderTitleText"
+                                 FontFamily="Palatino Linotype" FontSize="50" FontWeight="Bold"
+                                 TextWrapping="Wrap"
+                                 Foreground="{ThemeResource HeroBrush}">
+                        Recent Crash
+                      </TextBlock>
+                      <TextBlock FontSize="20" FontWeight="SemiBold" Foreground="{ThemeResource HeroBrush}">
+                        WARNING Crash signal detected.
+                      </TextBlock>
+                      <TextBlock FontSize="36"
+                                 FontFamily="Palatino Linotype" FontWeight="SemiBold"
+                                 Foreground="{ThemeResource HeroBrush}">
+                        [ ANALYZE NOW ]
+                      </TextBlock>
+                    </StackPanel>
+                  </Grid>
+                </Grid>
+              </Border>
             </Grid>
 
-            <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button x:Name="AnalyzeButton" Click="AnalyzeButton_Click" Content="Analyze now" />
-              <Button x:Name="OpenOutputButton" Click="OpenOutputButton_Click" Content="Open report folder" />
-            </StackPanel>
+            <!-- Analysis controls -->
+            <Grid>
+              <Border Margin="0,4,0,0"
+                      Background="{ThemeResource CardDeepShadowBrush}"
+                      CornerRadius="8" />
+              <Border Background="{ThemeResource SectionCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="22">
+                <Grid>
+                  <Rectangle Height="1"
+                             VerticalAlignment="Top"
+                             Fill="{ThemeResource CardEdgeHighlightBrush}" />
+                  <StackPanel Spacing="12">
+                    <TextBlock x:Name="AnalyzeSectionTitleText"
+                               FontSize="26" FontWeight="SemiBold"
+                               Foreground="{ThemeResource HeaderBrush}">
+                      Analyze Dump
+                    </TextBlock>
+                    <Border Width="132" Height="3"
+                            HorizontalAlignment="Left"
+                            Background="{ThemeResource AccentBrush}"
+                            CornerRadius="2" Opacity="0.68" />
 
-            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-              <ProgressRing x:Name="BusyRing" Width="20" Height="20" IsActive="False" />
-              <TextBlock x:Name="StatusText" Foreground="{ThemeResource SubtleTextBrush}" Text="Ready." TextWrapping="Wrap" />
-            </StackPanel>
+                    <Grid ColumnSpacing="8">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <TextBox x:Name="DumpPathBox"
+                               PlaceholderText="Select a .dmp file" MinHeight="42"
+                               Background="{ThemeResource InputBackgroundBrush}"
+                               Foreground="{ThemeResource BodyTextBrush}" />
+                      <Button x:Name="BrowseDumpButton" Grid.Column="1"
+                              Click="BrowseDump_Click" Content="Browse dump" />
+                    </Grid>
+
+                    <Grid ColumnSpacing="8">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <TextBox x:Name="OutputDirBox"
+                               PlaceholderText="Optional output directory (empty = dump folder)" MinHeight="42"
+                               Background="{ThemeResource InputBackgroundBrush}"
+                               Foreground="{ThemeResource BodyTextBrush}" />
+                      <Button x:Name="BrowseOutputButton" Grid.Column="1"
+                              Click="BrowseOutputFolder_Click" Content="Browse folder" />
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button x:Name="AnalyzeButton" Click="AnalyzeButton_Click"
+                              Content="ANALYZE NOW"
+                              Style="{StaticResource PrimaryActionButtonStyle}" />
+                      <Button x:Name="OpenOutputButton" Click="OpenOutputButton_Click"
+                              Content="Open report folder" />
+                    </StackPanel>
+
+                    <!-- Status -->
+                    <Border CornerRadius="6"
+                            BorderBrush="{ThemeResource StatusBorderBrush}" BorderThickness="1"
+                            Background="{ThemeResource StatusBackgroundBrush}" Padding="12,8">
+                      <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <ProgressRing x:Name="BusyRing" Width="18" Height="18" IsActive="False" />
+                        <TextBlock x:Name="StatusText" FontSize="14"
+                                   Foreground="{ThemeResource BodyTextBrush}"
+                                   Text="Ready." TextWrapping="WrapWholeWords" />
+                      </StackPanel>
+                    </Border>
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </Grid>
+
+            <!-- Timeline + workflow -->
+            <Grid>
+              <Border Margin="0,4,0,0"
+                      Background="{ThemeResource CardDeepShadowBrush}"
+                      CornerRadius="8" />
+              <Border Background="{ThemeResource SectionCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="22">
+                <Grid>
+                  <Rectangle Height="1"
+                             VerticalAlignment="Top"
+                             Fill="{ThemeResource CardEdgeHighlightBrush}" />
+                  <StackPanel Spacing="12">
+                    <TextBlock x:Name="WorkflowSectionTitleText"
+                               FontSize="28" FontWeight="SemiBold"
+                               Foreground="{ThemeResource HeaderBrush}">
+                      Crash History Timeline
+                    </TextBlock>
+                    <Border Width="178" Height="3"
+                            HorizontalAlignment="Left"
+                            Background="{ThemeResource AccentBrush}"
+                            CornerRadius="2" Opacity="0.68" />
+
+                    <Grid Margin="8,2,8,10">
+                      <Rectangle Height="3"
+                                 VerticalAlignment="Center"
+                                 Fill="{ThemeResource TimelineNeutralBrush}" />
+                      <Grid ColumnSpacing="0">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Ellipse Grid.Column="0" Width="26" Height="26"
+                                 Fill="{ThemeResource AccentBrush}"
+                                 Stroke="{ThemeResource CardBorderBrush}" StrokeThickness="2"
+                                 HorizontalAlignment="Center" />
+                        <Ellipse Grid.Column="1" Width="26" Height="26"
+                                 Fill="{ThemeResource TimelineDangerBrush}"
+                                 Stroke="{ThemeResource CardBorderBrush}" StrokeThickness="2"
+                                 HorizontalAlignment="Center" />
+                        <Ellipse Grid.Column="2" Width="26" Height="26"
+                                 Fill="{ThemeResource TimelineDangerBrush}"
+                                 Stroke="{ThemeResource CardBorderBrush}" StrokeThickness="2"
+                                 HorizontalAlignment="Center" />
+                        <Ellipse Grid.Column="3" Width="26" Height="26"
+                                 Fill="{ThemeResource TimelineDangerBrush}"
+                                 Stroke="{ThemeResource CardBorderBrush}" StrokeThickness="2"
+                                 HorizontalAlignment="Center" />
+                        <Ellipse Grid.Column="4" Width="26" Height="26"
+                                 Fill="{ThemeResource TimelineGoodBrush}"
+                                 Stroke="{ThemeResource CardBorderBrush}" StrokeThickness="2"
+                                 HorizontalAlignment="Center" />
+                      </Grid>
+                    </Grid>
+
+                    <Grid ColumnSpacing="8">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+
+                      <Border Grid.Column="0"
+                              Background="{ThemeResource ElevatedCardBrush}"
+                              BorderBrush="{ThemeResource CardBorderBrush}"
+                              BorderThickness="1" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock x:Name="StepOneTitleText"
+                                     FontSize="14" FontWeight="SemiBold"
+                                     Foreground="{ThemeResource AccentBrush}">
+                            01 Select Dump
+                          </TextBlock>
+                          <TextBlock x:Name="StepOneDescText"
+                                     FontSize="13"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource SubtleTextBrush}">
+                            Choose latest crash dump from your mod profile.
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+
+                      <Border Grid.Column="1"
+                              Background="{ThemeResource ElevatedCardBrush}"
+                              BorderBrush="{ThemeResource CardBorderBrush}"
+                              BorderThickness="1" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock x:Name="StepTwoTitleText"
+                                     FontSize="14" FontWeight="SemiBold"
+                                     Foreground="{ThemeResource AccentBrush}">
+                            02 Analyze
+                          </TextBlock>
+                          <TextBlock x:Name="StepTwoDescText"
+                                     FontSize="13"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource SubtleTextBrush}">
+                            Parse bucket, callstack, and evidence chains.
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+
+                      <Border Grid.Column="2"
+                              Background="{ThemeResource ElevatedCardBrush}"
+                              BorderBrush="{ThemeResource CardBorderBrush}"
+                              BorderThickness="1" CornerRadius="8" Padding="12">
+                        <StackPanel Spacing="4">
+                          <TextBlock x:Name="StepThreeTitleText"
+                                     FontSize="14" FontWeight="SemiBold"
+                                     Foreground="{ThemeResource AccentBrush}">
+                            03 Triage
+                          </TextBlock>
+                          <TextBlock x:Name="StepThreeDescText"
+                                     FontSize="13"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource SubtleTextBrush}">
+                            Start with suspect list, then drill into evidence.
+                          </TextBlock>
+                        </StackPanel>
+                      </Border>
+                    </Grid>
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </Grid>
           </StackPanel>
-        </Border>
 
-        <Grid ColumnSpacing="12">
-          <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="1.2*" />
-            <ColumnDefinition Width="*" />
-          </Grid.ColumnDefinitions>
+          <!-- ════════════════════════════════════════════
+               SUMMARY PANEL
+               ════════════════════════════════════════════ -->
+	          <StackPanel x:Name="SummaryPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+	
+	            <Grid ColumnSpacing="12">
+	              <Grid.ColumnDefinitions>
+	                <ColumnDefinition Width="*" />
+	                <ColumnDefinition Width="Auto" />
+	              </Grid.ColumnDefinitions>
+	              <TextBlock x:Name="SnapshotSectionTitleText"
+	                         Grid.Column="0"
+	                         FontSize="30" FontWeight="SemiBold"
+	                         Foreground="{ThemeResource HeaderBrush}">
+	                Crash Summary
+	              </TextBlock>
+	              <Button x:Name="CopySummaryButton"
+	                      Grid.Column="1"
+	                      Click="CopySummaryButton_Click"
+	                      VerticalAlignment="Center"
+	                      Padding="14,8"
+	                      FontSize="13"
+	                      Content="Copy summary" />
+	            </Grid>
+	            <Border Width="132" Height="3"
+	                    HorizontalAlignment="Left"
+	                    Background="{ThemeResource AccentBrush}"
+	                    CornerRadius="2" Opacity="0.75" />
 
-          <Border
-              Grid.Column="0"
-              Background="{ThemeResource CardBackgroundBrush}"
-              BorderBrush="{ThemeResource CardBorderBrush}"
-              BorderThickness="1"
-              CornerRadius="16"
-              Padding="16">
-            <StackPanel Spacing="8">
-              <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource HeaderBrush}">
-                Crash Snapshot
-              </TextBlock>
-              <TextBlock x:Name="SummarySentenceText" Text="No analysis yet." TextWrapping="WrapWholeWords" FontSize="16" />
-              <TextBlock x:Name="BucketText" Foreground="{ThemeResource SubtleTextBrush}" TextWrapping="WrapWholeWords" />
-              <TextBlock x:Name="ModuleText" Foreground="{ThemeResource SubtleTextBrush}" TextWrapping="WrapWholeWords" />
-              <TextBlock x:Name="ModNameText" Foreground="{ThemeResource SubtleTextBrush}" TextWrapping="WrapWholeWords" />
-            </StackPanel>
-          </Border>
+            <Grid ColumnSpacing="12">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Border Grid.Column="0"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="4">
+                  <TextBlock x:Name="QuickPrimaryLabelText"
+                             FontSize="12" Foreground="{ThemeResource SubtleTextBrush}">
+                    Primary suspect
+                  </TextBlock>
+                  <TextBlock x:Name="QuickPrimaryValueText"
+                             FontSize="18" FontWeight="SemiBold"
+                             TextWrapping="WrapWholeWords"
+                             Foreground="{ThemeResource BodyTextBrush}">
+                    -
+                  </TextBlock>
+                </StackPanel>
+              </Border>
+              <Border Grid.Column="1"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="4">
+                  <TextBlock x:Name="QuickConfidenceLabelText"
+                             FontSize="12" Foreground="{ThemeResource SubtleTextBrush}">
+                    Confidence
+                  </TextBlock>
+                  <TextBlock x:Name="QuickConfidenceValueText"
+                             FontSize="18" FontWeight="SemiBold"
+                             Foreground="{ThemeResource AccentBrush}">
+                    -
+                  </TextBlock>
+                </StackPanel>
+              </Border>
+              <Border Grid.Column="2"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="4">
+                  <TextBlock x:Name="QuickActionsLabelText"
+                             FontSize="12" Foreground="{ThemeResource SubtleTextBrush}">
+                    Next actions
+                  </TextBlock>
+                  <TextBlock x:Name="QuickActionsValueText"
+                             FontSize="18" FontWeight="SemiBold"
+                             Foreground="{ThemeResource BodyTextBrush}">
+                    -
+                  </TextBlock>
+                </StackPanel>
+              </Border>
+              <Border Grid.Column="3"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="14">
+                <StackPanel Spacing="4">
+                  <TextBlock x:Name="QuickEventsLabelText"
+                             FontSize="12" Foreground="{ThemeResource SubtleTextBrush}">
+                    Blackbox events
+                  </TextBlock>
+                  <TextBlock x:Name="QuickEventsValueText"
+                             FontSize="18" FontWeight="SemiBold"
+                             Foreground="{ThemeResource BodyTextBrush}">
+                    -
+                  </TextBlock>
+                </StackPanel>
+              </Border>
+            </Grid>
 
-          <Border
-              Grid.Column="1"
-              Background="{ThemeResource CardBackgroundBrush}"
-              BorderBrush="{ThemeResource CardBorderBrush}"
-              BorderThickness="1"
-              CornerRadius="16"
-              Padding="16">
-            <StackPanel Spacing="8">
-              <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource HeaderBrush}">
-                Recommended Next Steps
-              </TextBlock>
-              <ListView x:Name="RecommendationsList" MaxHeight="280" SelectionMode="None">
+            <!-- Summary sentence -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <TextBlock x:Name="SummarySentenceText"
+                         Text="No analysis yet." TextWrapping="WrapWholeWords" FontSize="18"
+                         Foreground="{ThemeResource BodyTextBrush}" />
+            </Border>
+
+            <!-- Stat cards row -->
+            <Grid ColumnSpacing="12">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Border Grid.Column="0"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="16">
+                <TextBlock x:Name="BucketText" FontSize="13"
+                           TextWrapping="WrapWholeWords"
+                           Foreground="{ThemeResource BodyTextBrush}" />
+              </Border>
+              <Border Grid.Column="1"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="16">
+                <TextBlock x:Name="ModuleText" FontSize="13"
+                           TextWrapping="WrapWholeWords"
+                           Foreground="{ThemeResource BodyTextBrush}" />
+              </Border>
+              <Border Grid.Column="2"
+                      Background="{ThemeResource ElevatedCardBrush}"
+                      BorderBrush="{ThemeResource CardBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="16">
+                <TextBlock x:Name="ModNameText" FontSize="13"
+                           TextWrapping="WrapWholeWords"
+                           Foreground="{ThemeResource BodyTextBrush}" />
+              </Border>
+            </Grid>
+
+            <!-- Suspects -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <StackPanel Spacing="10">
+                <TextBlock x:Name="SuspectsSectionTitleText"
+                           FontSize="22" FontWeight="SemiBold"
+                           Foreground="{ThemeResource HeaderBrush}">
+                  Top Cause Candidates
+                </TextBlock>
+                <ListView x:Name="SuspectsList" SelectionMode="None" MaxHeight="320"
+                          Background="Transparent" BorderThickness="0">
+                  <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:SuspectItem">
+                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <Grid ColumnSpacing="12">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                          </Grid.ColumnDefinitions>
+                          <Border Grid.Column="0" CornerRadius="999"
+                                  Padding="10,4" VerticalAlignment="Top"
+                                  Background="{ThemeResource AccentSoftBrush}">
+                            <TextBlock FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource AccentBrush}"
+                                       Text="{x:Bind Confidence}" />
+                          </Border>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock FontWeight="SemiBold"
+                                       Text="{x:Bind Module}" TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource BodyTextBrush}" />
+                            <TextBlock FontSize="13" Text="{x:Bind Reason}"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource SubtleTextBrush}" />
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </StackPanel>
+            </Border>
+
+            <!-- Recommendations -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <StackPanel Spacing="10">
+                <TextBlock x:Name="NextStepsSectionTitleText"
+                           FontSize="22" FontWeight="SemiBold"
+                           Foreground="{ThemeResource HeaderBrush}">
+                  Recommended Next Steps
+                </TextBlock>
+                <ListView x:Name="RecommendationsList" SelectionMode="None" MaxHeight="320"
+                          Background="Transparent" BorderThickness="0">
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                   FontSize="13"
+                                   Foreground="{ThemeResource BodyTextBrush}" />
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- ════════════════════════════════════════════
+               EVIDENCE PANEL
+               ════════════════════════════════════════════ -->
+          <StackPanel x:Name="EvidencePanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+
+            <TextBlock x:Name="AdvancedSectionTitleText"
+                       FontSize="30" FontWeight="SemiBold"
+                       Foreground="{ThemeResource HeaderBrush}">
+              Evidence &amp; Analysis
+            </TextBlock>
+            <Border Width="144" Height="3"
+                    HorizontalAlignment="Left"
+                    Background="{ThemeResource AccentBrush}"
+                    CornerRadius="2" Opacity="0.75" />
+
+            <!-- Callstack -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="8">
+              <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        IsExpanded="True">
+                <Expander.Header>
+                  <TextBlock x:Name="CallstackLabelText" Text="Callstack"
+                             FontWeight="SemiBold" FontSize="17"
+                             Foreground="{ThemeResource HeaderBrush}" />
+                </Expander.Header>
+                <ListView x:Name="CallstackList" MaxHeight="500" SelectionMode="None"
+                          Background="Transparent" BorderThickness="0">
+                  <ListView.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                 FontFamily="Cascadia Mono" FontSize="12" Margin="0,0,0,4"
+                                 Foreground="{ThemeResource BodyTextBrush}" />
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Expander>
+            </Border>
+
+            <!-- Evidence items -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="8">
+              <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        IsExpanded="False">
+                <Expander.Header>
+                  <TextBlock x:Name="EvidenceLabelText" Text="Evidence"
+                             FontWeight="SemiBold" FontSize="17"
+                             Foreground="{ThemeResource HeaderBrush}" />
+                </Expander.Header>
+                <ListView x:Name="EvidenceList" MaxHeight="500" SelectionMode="None"
+                          Background="Transparent" BorderThickness="0">
+                  <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:EvidenceViewItem">
+                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <Grid ColumnSpacing="12">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                          </Grid.ColumnDefinitions>
+                          <Border Grid.Column="0" CornerRadius="999"
+                                  Padding="10,4" VerticalAlignment="Top"
+                                  Background="{ThemeResource AccentSoftBrush}">
+                            <TextBlock FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource AccentBrush}"
+                                       Text="{x:Bind Confidence}" />
+                          </Border>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock FontWeight="SemiBold"
+                                       Text="{x:Bind Title}" TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource BodyTextBrush}" />
+                            <TextBlock FontSize="13" Text="{x:Bind Details}"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource SubtleTextBrush}" />
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Expander>
+            </Border>
+
+            <!-- Resources -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="8">
+              <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        IsExpanded="False">
+                <Expander.Header>
+                  <TextBlock x:Name="ResourcesLabelText" Text="Recent Resources"
+                             FontWeight="SemiBold" FontSize="17"
+                             Foreground="{ThemeResource HeaderBrush}" />
+                </Expander.Header>
+                <ListView x:Name="ResourcesList" MaxHeight="500" SelectionMode="None"
+                          Background="Transparent" BorderThickness="0">
+                  <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:ResourceViewItem">
+                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <StackPanel Spacing="2">
+                          <TextBlock FontWeight="SemiBold"
+                                     Text="{x:Bind Path}" TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource BodyTextBrush}" />
+                          <TextBlock FontSize="12" Text="{x:Bind Kind}"
+                                     Foreground="{ThemeResource AccentBrush}" />
+                          <TextBlock FontSize="12" Text="{x:Bind Providers}"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource SubtleTextBrush}" />
+                          <TextBlock FontSize="12" Text="{x:Bind Conflict}"
+                                     Foreground="{ThemeResource ConflictBrush}" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+              </Expander>
+            </Border>
+          </StackPanel>
+
+          <!-- ════════════════════════════════════════════
+               EVENTS PANEL
+               ════════════════════════════════════════════ -->
+          <StackPanel x:Name="EventsPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+
+            <TextBlock x:Name="EventsLabelText"
+                       FontSize="30" FontWeight="SemiBold"
+                       Foreground="{ThemeResource HeaderBrush}">
+              Events (Blackbox)
+            </TextBlock>
+            <Border Width="116" Height="3"
+                    HorizontalAlignment="Left"
+                    Background="{ThemeResource AccentBrush}"
+                    CornerRadius="2" Opacity="0.75" />
+
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16">
+              <ListView x:Name="EventsList" MaxHeight="600" SelectionMode="None"
+                        Background="Transparent" BorderThickness="0">
                 <ListView.ItemTemplate>
                   <DataTemplate>
-                    <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords" />
+                    <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                               FontFamily="Cascadia Mono" FontSize="12" Margin="0,0,0,4"
+                               Foreground="{ThemeResource BodyTextBrush}" />
                   </DataTemplate>
                 </ListView.ItemTemplate>
               </ListView>
-            </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- ════════════════════════════════════════════
+               REPORT PANEL
+               ════════════════════════════════════════════ -->
+          <StackPanel x:Name="ReportPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+
+            <TextBlock FontSize="30" FontWeight="SemiBold"
+                       Foreground="{ThemeResource HeaderBrush}">
+              Reports &amp; Raw Data
+            </TextBlock>
+            <Border Width="140" Height="3"
+                    HorizontalAlignment="Left"
+                    Background="{ThemeResource AccentBrush}"
+                    CornerRadius="2" Opacity="0.75" />
+
+            <!-- WCT JSON -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <StackPanel Spacing="10">
+                <TextBlock x:Name="WctLabelText" Text="WCT JSON"
+                           FontSize="22" FontWeight="SemiBold"
+                           Foreground="{ThemeResource HeaderBrush}" />
+                <TextBox x:Name="WctTextBox"
+                         IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+                         FontFamily="Cascadia Mono" FontSize="12"
+                         Background="{ThemeResource InputBackgroundBrush}"
+                         Foreground="{ThemeResource BodyTextBrush}"
+                         MinHeight="200" MaxHeight="400" />
+              </StackPanel>
+            </Border>
+
+            <!-- Full report -->
+            <Border Background="{ThemeResource SectionCardBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <StackPanel Spacing="10">
+                <TextBlock x:Name="ReportLabelText" Text="Report"
+                           FontSize="22" FontWeight="SemiBold"
+                           Foreground="{ThemeResource HeaderBrush}" />
+                <TextBox x:Name="ReportTextBox"
+                         IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         FontSize="13"
+                         Background="{ThemeResource InputBackgroundBrush}"
+                         Foreground="{ThemeResource BodyTextBrush}"
+                         MinHeight="200" MaxHeight="500" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+                </Grid>
+              </Grid>
+            </Border>
           </Border>
         </Grid>
-
-        <Border
-            Background="{ThemeResource CardBackgroundBrush}"
-            BorderBrush="{ThemeResource CardBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="16"
-            Padding="16">
-          <StackPanel Spacing="8">
-            <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource HeaderBrush}">
-              Top Cause Candidates
-            </TextBlock>
-            <ListView x:Name="SuspectsList" SelectionMode="None">
-              <ListView.ItemTemplate>
-                <DataTemplate x:DataType="local:SuspectItem">
-                  <StackPanel Spacing="3" Margin="0,0,0,8">
-                    <TextBlock FontWeight="SemiBold" Text="{x:Bind Module}" TextWrapping="WrapWholeWords" />
-                    <TextBlock Foreground="{ThemeResource AccentBrush}" Text="{x:Bind Confidence}" />
-                    <TextBlock Text="{x:Bind Reason}" TextWrapping="WrapWholeWords" />
-                  </StackPanel>
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-          </StackPanel>
-        </Border>
-
-        <Border
-            Background="{ThemeResource CardBackgroundBrush}"
-            BorderBrush="{ThemeResource CardBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="16"
-            Padding="16">
-          <StackPanel Spacing="10">
-            <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource HeaderBrush}">
-              Advanced Analysis (Built-in)
-            </TextBlock>
-
-            <TextBlock FontWeight="SemiBold" Text="Callstack" />
-            <ListView x:Name="CallstackList" MaxHeight="200" SelectionMode="None">
-              <ListView.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords" FontFamily="Cascadia Mono" />
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-
-            <TextBlock FontWeight="SemiBold" Text="Evidence" />
-            <ListView x:Name="EvidenceList" MaxHeight="220" SelectionMode="None">
-              <ListView.ItemTemplate>
-                <DataTemplate x:DataType="local:EvidenceViewItem">
-                  <StackPanel Spacing="2" Margin="0,0,0,8">
-                    <TextBlock Foreground="{ThemeResource AccentBrush}" Text="{x:Bind Confidence}" />
-                    <TextBlock FontWeight="SemiBold" Text="{x:Bind Title}" TextWrapping="WrapWholeWords" />
-                    <TextBlock Text="{x:Bind Details}" TextWrapping="WrapWholeWords" />
-                  </StackPanel>
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-
-            <TextBlock FontWeight="SemiBold" Text="Recent Resources" />
-            <ListView x:Name="ResourcesList" MaxHeight="220" SelectionMode="None">
-              <ListView.ItemTemplate>
-                <DataTemplate x:DataType="local:ResourceViewItem">
-                  <StackPanel Spacing="2" Margin="0,0,0,8">
-                    <TextBlock FontWeight="SemiBold" Text="{x:Bind Path}" TextWrapping="WrapWholeWords" />
-                    <TextBlock Text="{x:Bind Kind}" Foreground="{ThemeResource AccentBrush}" />
-                    <TextBlock Text="{x:Bind Providers}" TextWrapping="WrapWholeWords" />
-                    <TextBlock Text="{x:Bind Conflict}" Foreground="#FFB00020" />
-                  </StackPanel>
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-
-            <TextBlock FontWeight="SemiBold" Text="Events (Blackbox)" />
-            <ListView x:Name="EventsList" MaxHeight="220" SelectionMode="None">
-              <ListView.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords" FontFamily="Cascadia Mono" />
-                </DataTemplate>
-              </ListView.ItemTemplate>
-            </ListView>
-
-            <TextBlock FontWeight="SemiBold" Text="WCT JSON" />
-            <TextBox
-                x:Name="WctTextBox"
-                IsReadOnly="True"
-                AcceptsReturn="True"
-                TextWrapping="NoWrap"
-                FontFamily="Cascadia Mono"
-                MinHeight="120"
-                MaxHeight="260" />
-
-            <TextBlock FontWeight="SemiBold" Text="Report" />
-            <TextBox
-                x:Name="ReportTextBox"
-                IsReadOnly="True"
-                AcceptsReturn="True"
-                TextWrapping="Wrap"
-                MinHeight="140"
-                MaxHeight="300" />
-          </StackPanel>
-        </Border>
-      </StackPanel>
-    </ScrollViewer>
+      </ScrollViewer>
+    </NavigationView>
   </Grid>
 </Window>

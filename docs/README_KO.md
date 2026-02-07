@@ -40,6 +40,20 @@
   - `overwrite\\SKSE\\Plugins\\` 에 생성됩니다.
 - 한 곳으로 모으고 싶으면 `SkyrimDiagHelper.ini`의 `OutputDir=`를 설정하세요.
 
+## “저장/로드 중 창이 뜨는데 게임은 계속됨” 케이스
+
+- SkyrimDiag는 CTD(프로세스 종료)뿐 아니라 저장/코세이브 과정에서 발생한 예외가 훅에 잡히면 덤프/리포트를 만들 수 있습니다.
+- 예외가 내부에서 처리(handled)되면 게임이 계속 진행될 수 있습니다. 이 경우 “유력 후보”는 **확정 원인**이라기보다, 해당 시점에 예외를 유발한 **위험 신호**로 보는 게 안전합니다.
+- 팝업을 줄이려면 `SkyrimDiagHelper.ini`에서:
+  - `AutoOpenCrashOnlyIfProcessExited=1` (기본): 게임이 곧바로 종료될 때만 크래시 뷰어 자동 오픈
+  - `AutoOpenViewerOnCrash=0`: 크래시에서도 자동 오픈 완전 끄기
+
+## 덤프/로그 보관(디스크 정리)
+
+- `SkyrimDiagHelper.ini`의 아래 값으로 오래된 덤프/아티팩트(WCT JSON, ETL, Summary/Report/Blackbox 등)를 자동 정리합니다. (`0` = 무제한)
+  - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
+  - `MaxHelperLogBytes`, `MaxHelperLogFiles` (Helper 로그 로테이션)
+
 ## 성능 영향(오버헤드) 안내
 
 - 이 도구는 “상시 FPS 측정/상시 스택워크” 같은 무거운 방식이 아니라, **최소 신호 기록 + 필요 시 덤프 캡처** 구조를 목표로 합니다.
