@@ -3,12 +3,26 @@
 > **한국어 안내(메인)** + **베타 테스터 가이드** 포함  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 
+## Quick Intro (English)
+
+Tullius CTD Logger (SkyrimDiag) is a best-effort diagnostics tool for Skyrim SE/AE that captures **CTD / hang / infinite loading** and produces a readable report (summary + evidence + checklist) without requiring WinDbg.
+
+- Components: SKSE plugin + out-of-proc helper + WinUI DumpTool (viewer) backed by a native analyzer.
+- CrashLoggerSSE integration: auto-detects `crash-*.log` / `threaddump-*.log` and surfaces top callstack modules, C++ exception blocks, and the CrashLogger version string.
+- Extra evidence: interprets minidump exception parameters for common codes (e.g. access violation read/write/execute + address).
+- Notes: some exceptions are handled and the game may keep running. To reduce “viewer popups while the game continues”, keep `AutoOpenCrashOnlyIfProcessExited=1` (default) or disable crash auto-open with `AutoOpenViewerOnCrash=0`.
+- Retention: helper can auto-clean old dumps and derived artifacts (`MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`) and rotate its own log (`MaxHelperLogBytes`, `MaxHelperLogFiles`).
+
 ## 한국어 안내
 
 ### 1) 무엇인가요?
 
 Skyrim SE/AE 환경에서 **CTD(크래시) / 프리징 / 무한로딩** 상황을 best-effort로 캡처하고,
 WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태로 보여주는 진단 도구입니다.
+
+- CrashLoggerSSE 로그도 자동으로 찾아서 함께 표시합니다(상위 모듈/ C++ 예외 블록/ CrashLogger 버전).
+- 예외 파라미터 분석(예: 접근 위반 read/write/execute + 주소)을 근거로 추가합니다.
+- 덤프/아티팩트가 쌓이지 않도록 Helper에서 보관(정리) + 로그 로테이션을 지원합니다.
 
 ### 2) 구성 요소
 
@@ -98,10 +112,14 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `DumpToolExe` 기본값: `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
   - DumpTool 자동 열기 정책(초보 기본값)
     - `AutoOpenViewerOnCrash=1` : CTD 덤프 생성 직후 뷰어 자동 표시
+    - `AutoOpenCrashOnlyIfProcessExited=1` : 게임이 곧바로 종료될 때만 크래시 뷰어 자동 오픈(저장/로드 중 팝업 감소)
+    - `AutoOpenCrashWaitForExitMs=2000` : 위 정책의 “종료로 판정” 대기 시간(ms)
     - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1` : 프리징 덤프는 게임 종료 후 자동 표시
     - `AutoOpenHangDelayMs=2000` : 종료 후 2초 지연
     - `AutoOpenViewerOnManualCapture=0` : 수동 캡처는 자동 팝업 안 함
     - `AutoOpenViewerBeginnerMode=1` : 자동 오픈 시 초보 화면으로 시작
+  - 덤프/아티팩트 보관(0=무제한): `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
+  - Helper 로그 로테이션(0=무제한): `MaxHelperLogBytes`, `MaxHelperLogFiles`
   - Alt-Tab/백그라운드 일시정지 오탐 방지(기본값 권장)
     - `SuppressHangWhenNotForeground=1`
     - `ForegroundGraceSec=5` (포그라운드로 돌아온 직후 잠깐 기다렸다가 캡처)
@@ -129,6 +147,7 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
   - `SkyrimDiag_WCT_*.json` (있다면)
 - (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
   - v1.18.0+의 `C++ EXCEPTION:` 블록(throw 타입/정보/위치/모듈)이 있으면 DumpTool에서 함께 표시됩니다.
+  - `CrashLoggerSSE vX.Y.Z` 버전 문자열도 함께 표시됩니다.
 
 ### F. 이슈 템플릿(복사해서 사용)
 
@@ -223,10 +242,15 @@ This repository contains an MVP implementation of the design in:
     - Default executable: `DumpToolExe=SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
   - Viewer auto-open policy (beginner-friendly defaults):
     - `AutoOpenViewerOnCrash=1`: open viewer immediately for crash dumps.
+    - `AutoOpenCrashOnlyIfProcessExited=1`: only auto-open crash viewer if Skyrim exits quickly (reduces popups for handled exceptions).
+    - `AutoOpenCrashWaitForExitMs=2000`: “exit soon” wait window in milliseconds.
     - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1`: queue latest hang dump and open viewer after Skyrim exits.
     - `AutoOpenHangDelayMs=2000`: delay opening for 2 seconds after process exit.
     - `AutoOpenViewerOnManualCapture=0`: manual hotkey captures stay headless by default.
     - `AutoOpenViewerBeginnerMode=1`: auto-open starts in beginner view.
+  - Retention (0 = unlimited):
+    - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
+    - Helper log rotation: `MaxHelperLogBytes`, `MaxHelperLogFiles`
   - Manual:
     - Drag-and-drop a `.dmp` onto `SkyrimDiagDumpToolWinUI.exe`, or double-click it to pick a dump file.
     - WinUI shows beginner and advanced diagnostics in one app window.
@@ -249,14 +273,14 @@ For in-game validation without waiting:
 ## CI (GitHub Actions)
 
 - Workflow: `.github/workflows/ci.yml`
-- Scope: Linux smoke/unit tests for parser + hang suppression + i18n core
+- Scope: Linux smoke/unit tests for parser + hang suppression + i18n core + bucket + retention/config checks + XAML sanity
 - Trigger: `push`, `pull_request`
 - Manual Windows packaging job: `workflow_dispatch` (build + package zip artifact upload on `windows-2022`)
 
 Equivalent local commands:
 ```bash
 cmake -S . -B build-linux -G Ninja
-cmake --build build-linux --target skydiag_hang_suppression_tests skydiag_crashlogger_parser_tests skydiag_i18n_core_tests
+cmake --build build-linux
 ctest --test-dir build-linux --output-on-failure
 ```
 
