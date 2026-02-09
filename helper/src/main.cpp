@@ -1,15 +1,21 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cctype>
+#include <ctime>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 
 #include <nlohmann/json.hpp>
 
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/CrashRecapturePolicy.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangSuppression.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -51,6 +57,208 @@ void WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
 {
   std::ofstream f(path, std::ios::binary);
   f.write(s.data(), static_cast<std::streamsize>(s.size()));
+}
+
+bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
+{
+  if (out) {
+    out->clear();
+  }
+  std::ifstream f(path, std::ios::binary);
+  if (!f) {
+    return false;
+  }
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  if (out) {
+    *out = ss.str();
+  }
+  return true;
+}
+
+std::string TrimAscii(std::string_view s)
+{
+  std::size_t b = 0;
+  std::size_t e = s.size();
+  while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) {
+    b++;
+  }
+  while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) {
+    e--;
+  }
+  return std::string(s.substr(b, e - b));
+}
+
+std::string LowerAscii(std::string_view s)
+{
+  std::string out;
+  out.reserve(s.size());
+  for (const unsigned char c : s) {
+    out.push_back(static_cast<char>(std::tolower(c)));
+  }
+  return out;
+}
+
+bool EqualsIgnoreCase(std::wstring_view a, std::wstring_view b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.size(); i++) {
+    if (std::towlower(a[i]) != std::towlower(b[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsUnknownModuleField(std::string_view modulePlusOffset)
+{
+  const std::string lower = LowerAscii(TrimAscii(modulePlusOffset));
+  return lower.empty() || lower == "unknown" || lower == "<unknown>" || lower == "n/a" || lower == "none";
+}
+
+struct CrashSummaryInfo
+{
+  std::uint32_t schemaVersion = 1;
+  std::string bucketKey;
+  bool unknownFaultModule = true;
+};
+
+constexpr std::uint32_t kMinSupportedSummarySchemaVersion = 1;
+constexpr std::uint32_t kMaxSupportedSummarySchemaVersion = 2;
+
+std::filesystem::path SummaryPathForDump(const std::wstring& dumpPath, const std::filesystem::path& outBase)
+{
+  const std::filesystem::path dumpFs(dumpPath);
+  const std::wstring stem = dumpFs.stem().wstring();
+  return outBase / (stem + L"_SkyrimDiagSummary.json");
+}
+
+bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSummaryInfo* out, std::wstring* err)
+{
+  if (out) {
+    *out = CrashSummaryInfo{};
+  }
+  std::string txt;
+  if (!ReadTextFileUtf8(summaryPath, &txt)) {
+    if (err) *err = L"summary not found/readable: " + summaryPath.wstring();
+    return false;
+  }
+  const auto root = nlohmann::json::parse(txt, nullptr, false);
+  if (root.is_discarded() || !root.is_object()) {
+    if (err) *err = L"summary json parse failed: " + summaryPath.wstring();
+    return false;
+  }
+
+  CrashSummaryInfo info{};
+  if (root.contains("schema") && root["schema"].is_object()) {
+    const auto& schema = root["schema"];
+    info.schemaVersion = schema.value("version", info.schemaVersion);
+  }
+  if (info.schemaVersion < kMinSupportedSummarySchemaVersion || info.schemaVersion > kMaxSupportedSummarySchemaVersion) {
+    if (err) {
+      *err = L"unsupported summary schema version: " + std::to_wstring(info.schemaVersion);
+    }
+    return false;
+  }
+
+  info.bucketKey = TrimAscii(root.value("crash_bucket_key", std::string{}));
+
+  std::optional<bool> unknownFromField;
+  if (root.contains("exception") && root["exception"].is_object()) {
+    const auto& exceptionObj = root["exception"];
+    if (exceptionObj.contains("fault_module_unknown") && exceptionObj["fault_module_unknown"].is_boolean()) {
+      unknownFromField = exceptionObj["fault_module_unknown"].get<bool>();
+    }
+    if (!unknownFromField.has_value()) {
+      const std::string modulePlusOffset = exceptionObj.value("module_plus_offset", std::string{});
+      unknownFromField = IsUnknownModuleField(modulePlusOffset);
+    }
+  }
+  info.unknownFaultModule = unknownFromField.value_or(true);
+
+  if (out) {
+    *out = std::move(info);
+  }
+  if (err) {
+    err->clear();
+  }
+  return true;
+}
+
+std::filesystem::path CrashBucketStatsPath(const std::filesystem::path& outBase)
+{
+  return outBase / L"SkyrimDiag_CrashBucketStats.json";
+}
+
+bool UpdateCrashBucketStats(
+  const std::filesystem::path& outBase,
+  const CrashSummaryInfo& info,
+  std::uint32_t* outUnknownStreak,
+  std::wstring* err)
+{
+  if (outUnknownStreak) {
+    *outUnknownStreak = 0;
+  }
+  if (info.bucketKey.empty()) {
+    if (err) {
+      *err = L"missing crash bucket key";
+    }
+    return false;
+  }
+
+  const auto path = CrashBucketStatsPath(outBase);
+
+  nlohmann::json root = nlohmann::json::object();
+  if (std::filesystem::exists(path)) {
+    std::string txt;
+    if (ReadTextFileUtf8(path, &txt)) {
+      const auto parsed = nlohmann::json::parse(txt, nullptr, false);
+      if (!parsed.is_discarded() && parsed.is_object()) {
+        root = parsed;
+      }
+    }
+  }
+  if (!root.contains("version")) {
+    root["version"] = 1;
+  }
+  if (!root.contains("buckets") || !root["buckets"].is_object()) {
+    root["buckets"] = nlohmann::json::object();
+  }
+
+  auto& bucket = root["buckets"][info.bucketKey];
+  if (!bucket.is_object()) {
+    bucket = nlohmann::json::object();
+  }
+
+  std::uint32_t seenTotal = bucket.value("seen_total", 0u);
+  std::uint32_t unknownTotal = bucket.value("unknown_total", 0u);
+  std::uint32_t unknownStreak = bucket.value("unknown_streak", 0u);
+
+  seenTotal++;
+  if (info.unknownFaultModule) {
+    unknownTotal++;
+    unknownStreak++;
+  } else {
+    unknownStreak = 0;
+  }
+
+  bucket["seen_total"] = seenTotal;
+  bucket["unknown_total"] = unknownTotal;
+  bucket["unknown_streak"] = unknownStreak;
+  bucket["last_unknown_fault_module"] = info.unknownFaultModule;
+  bucket["updated_at_epoch"] = static_cast<std::int64_t>(std::time(nullptr));
+
+  if (outUnknownStreak) {
+    *outUnknownStreak = unknownStreak;
+  }
+
+  WriteTextFileUtf8(path, root.dump(2));
+  if (err) {
+    err->clear();
+  }
+  return true;
 }
 
 std::filesystem::path GetThisExeDir()
@@ -199,15 +407,63 @@ bool RunHiddenProcessAndWait(std::wstring cmdLine, const std::filesystem::path& 
   return true;
 }
 
-bool StartEtwCaptureForHang(
+bool StartEtwCaptureWithProfile(
   const skydiag::helper::HelperConfig& cfg,
   const std::filesystem::path& outBase,
+  std::wstring_view profile,
   std::wstring* err)
 {
   const std::wstring wprExe = cfg.etwWprExe.empty() ? L"wpr.exe" : cfg.etwWprExe;
-  const std::wstring profile = cfg.etwProfile.empty() ? L"GeneralProfile" : cfg.etwProfile;
-  std::wstring cmd = QuoteArg(wprExe) + L" -start " + QuoteArg(profile) + L" -filemode";
+  const std::wstring effectiveProfile = profile.empty() ? L"GeneralProfile" : std::wstring(profile);
+  std::wstring cmd = QuoteArg(wprExe) + L" -start " + QuoteArg(effectiveProfile) + L" -filemode";
   return RunHiddenProcessAndWait(std::move(cmd), outBase, EtwTimeoutMs(cfg), err);
+}
+
+bool StartEtwCaptureForHang(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  std::wstring* outUsedProfile,
+  std::wstring* err)
+{
+  if (outUsedProfile) {
+    outUsedProfile->clear();
+  }
+
+  const std::wstring primaryProfile = cfg.etwHangProfile.empty() ? L"GeneralProfile" : cfg.etwHangProfile;
+  std::wstring primaryErr;
+  if (StartEtwCaptureWithProfile(cfg, outBase, primaryProfile, &primaryErr)) {
+    if (outUsedProfile) {
+      *outUsedProfile = primaryProfile;
+    }
+    if (err) {
+      err->clear();
+    }
+    return true;
+  }
+
+  const std::wstring fallbackProfile = cfg.etwHangFallbackProfile;
+  if (!fallbackProfile.empty() && !EqualsIgnoreCase(primaryProfile, fallbackProfile)) {
+    std::wstring fallbackErr;
+    if (StartEtwCaptureWithProfile(cfg, outBase, fallbackProfile, &fallbackErr)) {
+      if (outUsedProfile) {
+        *outUsedProfile = fallbackProfile;
+      }
+      if (err) {
+        err->clear();
+      }
+      return true;
+    }
+    if (err) {
+      *err = L"primary(" + primaryProfile + L") failed: " + primaryErr + L"; fallback(" + fallbackProfile +
+        L") failed: " + fallbackErr;
+    }
+    return false;
+  }
+
+  if (err) {
+    *err = L"primary(" + primaryProfile + L") failed: " + primaryErr;
+  }
+  return false;
 }
 
 bool StopEtwCaptureForHang(
@@ -254,13 +510,17 @@ std::filesystem::path ResolveDumpToolExe(const skydiag::helper::HelperConfig& cf
   return resolved;
 }
 
-bool StartDumpToolProcess(
+bool StartDumpToolProcessWithHandle(
   const std::filesystem::path& exe,
   std::wstring cmd,
   const std::filesystem::path& outBase,
   DWORD createFlags,
+  HANDLE* outProcess,
   std::wstring* err)
 {
+  if (outProcess) {
+    *outProcess = nullptr;
+  }
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
@@ -284,9 +544,23 @@ bool StartDumpToolProcess(
   }
 
   CloseHandle(pi.hThread);
-  CloseHandle(pi.hProcess);
+  if (outProcess) {
+    *outProcess = pi.hProcess;
+  } else {
+    CloseHandle(pi.hProcess);
+  }
   if (err) err->clear();
   return true;
+}
+
+bool StartDumpToolProcess(
+  const std::filesystem::path& exe,
+  std::wstring cmd,
+  const std::filesystem::path& outBase,
+  DWORD createFlags,
+  std::wstring* err)
+{
+  return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, createFlags, nullptr, err);
 }
 
 void StartDumpToolHeadlessIfConfigured(
@@ -306,6 +580,236 @@ void StartDumpToolHeadlessIfConfigured(
   if (!StartDumpToolProcess(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, &err)) {
     std::wcerr << L"[SkyrimDiagHelper] Warning: failed to start DumpTool headless: " << err << L"\n";
   }
+}
+
+bool StartDumpToolHeadlessAsync(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::wstring& dumpPath,
+  const std::filesystem::path& outBase,
+  HANDLE* outProcess,
+  std::wstring* err)
+{
+  if (outProcess) {
+    *outProcess = nullptr;
+  }
+  if (!cfg.autoAnalyzeDump) {
+    if (err) {
+      *err = L"autoAnalyzeDump disabled";
+    }
+    return false;
+  }
+
+  const auto exe = ResolveDumpToolExe(cfg);
+  std::wstring cmd =
+    QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
+  return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, outProcess, err);
+}
+
+struct PendingCrashAnalysis
+{
+  bool active = false;
+  std::wstring dumpPath;
+  HANDLE process = nullptr;
+  ULONGLONG startedAtTick64 = 0;
+  DWORD timeoutMs = 0;
+};
+
+bool IsProcessStillAlive(HANDLE process, std::wstring* err);
+
+DWORD CrashAnalysisTimeoutMs(const skydiag::helper::HelperConfig& cfg)
+{
+  std::uint32_t sec = cfg.autoRecaptureAnalysisTimeoutSec;
+  if (sec < 5u) {
+    sec = 5u;
+  }
+  if (sec > 180u) {
+    sec = 180u;
+  }
+  return static_cast<DWORD>(sec * 1000u);
+}
+
+void ClearPendingCrashAnalysis(PendingCrashAnalysis* task)
+{
+  if (!task) {
+    return;
+  }
+  if (task->process) {
+    CloseHandle(task->process);
+    task->process = nullptr;
+  }
+  task->active = false;
+  task->dumpPath.clear();
+  task->startedAtTick64 = 0;
+  task->timeoutMs = 0;
+}
+
+bool StartPendingCrashAnalysisTask(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::wstring& dumpPath,
+  const std::filesystem::path& outBase,
+  PendingCrashAnalysis* task,
+  std::wstring* err)
+{
+  if (!task) {
+    if (err) {
+      *err = L"missing pending task state";
+    }
+    return false;
+  }
+  if (task->active) {
+    ClearPendingCrashAnalysis(task);
+  }
+
+  HANDLE processHandle = nullptr;
+  if (!StartDumpToolHeadlessAsync(cfg, dumpPath, outBase, &processHandle, err)) {
+    return false;
+  }
+  task->active = true;
+  task->dumpPath = dumpPath;
+  task->process = processHandle;
+  task->startedAtTick64 = GetTickCount64();
+  task->timeoutMs = CrashAnalysisTimeoutMs(cfg);
+  if (err) {
+    err->clear();
+  }
+  return true;
+}
+
+void FinalizePendingCrashAnalysisIfReady(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  PendingCrashAnalysis* task)
+{
+  if (!task || !task->active || !task->process) {
+    return;
+  }
+
+  if (task->timeoutMs > 0) {
+    const ULONGLONG nowTick = GetTickCount64();
+    if (nowTick >= task->startedAtTick64 &&
+        (nowTick - task->startedAtTick64) > static_cast<ULONGLONG>(task->timeoutMs)) {
+      TerminateProcess(task->process, 1);
+      AppendLogLine(outBase, L"Crash headless analysis timeout; process terminated.");
+      ClearPendingCrashAnalysis(task);
+      return;
+    }
+  }
+
+  const DWORD w = WaitForSingleObject(task->process, 0);
+  if (w == WAIT_TIMEOUT) {
+    return;
+  }
+  if (w == WAIT_FAILED) {
+    AppendLogLine(outBase, L"Crash headless analysis wait failed: " + std::to_wstring(GetLastError()));
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+
+  DWORD exitCode = 0;
+  if (!GetExitCodeProcess(task->process, &exitCode)) {
+    AppendLogLine(outBase, L"Crash headless analysis exit code read failed: " + std::to_wstring(GetLastError()));
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+  if (exitCode != 0) {
+    AppendLogLine(outBase, L"Crash headless analysis finished with non-zero exit code: " + std::to_wstring(exitCode));
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+
+  const auto summaryPath = SummaryPathForDump(task->dumpPath, outBase);
+  CrashSummaryInfo summaryInfo{};
+  std::wstring summaryErr;
+  if (!TryLoadCrashSummaryInfo(summaryPath, &summaryInfo, &summaryErr)) {
+    AppendLogLine(outBase, L"Crash summary parse failed for recapture policy: " + summaryErr);
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+  if (summaryInfo.bucketKey.empty()) {
+    AppendLogLine(outBase, L"Crash summary has empty crash_bucket_key; recapture policy skipped.");
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+
+  std::uint32_t unknownStreak = 0;
+  std::wstring statsErr;
+  if (!UpdateCrashBucketStats(outBase, summaryInfo, &unknownStreak, &statsErr)) {
+    AppendLogLine(outBase, L"Crash bucket stats update failed: " + statsErr);
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+
+  const std::wstring bucketW(summaryInfo.bucketKey.begin(), summaryInfo.bucketKey.end());
+  AppendLogLine(
+    outBase,
+    L"Crash bucket stats updated: bucket=" + bucketW +
+      L", schemaVersion=" + std::to_wstring(summaryInfo.schemaVersion) +
+      L", unknownFaultModule=" + std::to_wstring(summaryInfo.unknownFaultModule ? 1 : 0) +
+      L", unknownStreak=" + std::to_wstring(unknownStreak));
+
+  const auto recaptureDecision = skydiag::helper::DecideCrashFullRecapture(
+    cfg.enableAutoRecaptureOnUnknownCrash,
+    cfg.autoAnalyzeDump,
+    summaryInfo.unknownFaultModule,
+    unknownStreak,
+    cfg.autoRecaptureUnknownBucketThreshold,
+    cfg.dumpMode);
+  if (recaptureDecision.shouldRecaptureFullDump) {
+    std::wstring aliveErr;
+    if (IsProcessStillAlive(proc.process, &aliveErr)) {
+      const auto tsFull = Timestamp();
+      const auto fullDumpPath = (outBase / (L"SkyrimDiag_Crash_" + tsFull + L"_Full.dmp")).wstring();
+      std::wstring fullDumpErr;
+      if (!skydiag::helper::WriteDumpWithStreams(
+            proc.process,
+            proc.pid,
+            fullDumpPath,
+            proc.shm,
+            proc.shmSize,
+            /*wctJsonUtf8=*/{},
+            /*isCrash=*/true,
+            skydiag::helper::DumpMode::kFull,
+            &fullDumpErr)) {
+        AppendLogLine(outBase, L"Crash full recapture failed: " + fullDumpErr);
+      } else {
+        AppendLogLine(outBase, L"Crash full recapture written: " + fullDumpPath);
+        StartDumpToolHeadlessIfConfigured(cfg, fullDumpPath, outBase);
+      }
+    } else {
+      AppendLogLine(outBase, L"Crash full recapture skipped: " + aliveErr);
+    }
+  }
+
+  ClearPendingCrashAnalysis(task);
+}
+
+bool IsProcessStillAlive(HANDLE process, std::wstring* err)
+{
+  if (!process) {
+    if (err) {
+      *err = L"missing process handle";
+    }
+    return false;
+  }
+  const DWORD w = WaitForSingleObject(process, 0);
+  if (w == WAIT_TIMEOUT) {
+    if (err) {
+      err->clear();
+    }
+    return true;
+  }
+  if (w == WAIT_OBJECT_0) {
+    if (err) {
+      *err = L"process already exited";
+    }
+    return false;
+  }
+  const DWORD le = GetLastError();
+  if (err) {
+    *err = L"WaitForSingleObject failed: " + std::to_wstring(le);
+  }
+  return false;
 }
 
 void StartDumpToolViewer(
@@ -496,6 +1000,7 @@ int wmain(int argc, wchar_t** argv)
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;
   std::wstring pendingHangViewerDumpPath;
+  PendingCrashAnalysis pendingCrashAnalysis{};
 
   bool wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
   std::uint64_t loadStartQpc = wasLoading ? proc.shm->header.start_qpc : 0;
@@ -604,6 +1109,8 @@ int wmain(int argc, wchar_t** argv)
       }
     }
 
+    FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &pendingCrashAnalysis);
+
     if (proc.process) {
       const DWORD w = WaitForSingleObject(proc.process, 0);
       if (w == WAIT_OBJECT_0) {
@@ -653,34 +1160,49 @@ int wmain(int argc, wchar_t** argv)
               &dumpErr)) {
           std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
         } else {
-		          std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
-		          StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-		          if (cfg.autoOpenViewerOnCrash) {
-	            if (!cfg.autoOpenCrashOnlyIfProcessExited) {
-	              StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
-	            } else if (proc.process) {
-	              const DWORD waitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
-	              const DWORD wExit = WaitForSingleObject(proc.process, waitMs);
-	              if (wExit == WAIT_OBJECT_0) {
-	                StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
-	                AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash after process exit.");
-	              } else if (wExit == WAIT_TIMEOUT) {
-	                AppendLogLine(outBase, L"Crash dump captured but process is still running; skipping viewer auto-open.");
-	              } else {
-	                const DWORD le = GetLastError();
-	                AppendLogLine(outBase, L"Crash viewer auto-open suppressed due to wait failure: " + std::to_wstring(le));
-	              }
-	            } else {
-	              AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
-		            }
-		          }
-		          skydiag::helper::RetentionLimits limits{};
-		          limits.maxCrashDumps = cfg.maxCrashDumps;
-		          limits.maxHangDumps = cfg.maxHangDumps;
-		          limits.maxManualDumps = cfg.maxManualDumps;
-		          limits.maxEtwTraces = cfg.maxEtwTraces;
-		          skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
-		        }
+          std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
+
+          bool crashAnalysisQueued = false;
+          if (cfg.autoAnalyzeDump && cfg.enableAutoRecaptureOnUnknownCrash) {
+            std::wstring analyzeQueueErr;
+            if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, &pendingCrashAnalysis, &analyzeQueueErr)) {
+              crashAnalysisQueued = true;
+              AppendLogLine(outBase, L"Crash headless analysis queued for unknown-bucket recapture policy.");
+            } else {
+              AppendLogLine(outBase, L"Crash headless analysis queue failed: " + analyzeQueueErr);
+            }
+          }
+
+          if (!crashAnalysisQueued) {
+            StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+          }
+
+          if (cfg.autoOpenViewerOnCrash) {
+            if (!cfg.autoOpenCrashOnlyIfProcessExited) {
+              StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
+            } else if (proc.process) {
+              const DWORD waitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
+              const DWORD wExit = WaitForSingleObject(proc.process, waitMs);
+              if (wExit == WAIT_OBJECT_0) {
+                StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
+                AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash after process exit.");
+              } else if (wExit == WAIT_TIMEOUT) {
+                AppendLogLine(outBase, L"Crash dump captured but process is still running; skipping viewer auto-open.");
+              } else {
+                const DWORD le = GetLastError();
+                AppendLogLine(outBase, L"Crash viewer auto-open suppressed due to wait failure: " + std::to_wstring(le));
+              }
+            } else {
+              AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
+            }
+          }
+          skydiag::helper::RetentionLimits limits{};
+          limits.maxCrashDumps = cfg.maxCrashDumps;
+          limits.maxHangDumps = cfg.maxHangDumps;
+          limits.maxManualDumps = cfg.maxManualDumps;
+          limits.maxEtwTraces = cfg.maxEtwTraces;
+          skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+        }
 
 	        crashCaptured = true;
 	        AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
@@ -936,10 +1458,11 @@ int wmain(int argc, wchar_t** argv)
 
     bool etwStarted = false;
     if (cfg.enableEtwCaptureOnHang) {
+      std::wstring etwUsedProfile;
       std::wstring etwErr;
-      if (StartEtwCaptureForHang(cfg, outBase, &etwErr)) {
+      if (StartEtwCaptureForHang(cfg, outBase, &etwUsedProfile, &etwErr)) {
         etwStarted = true;
-        AppendLogLine(outBase, L"ETW hang capture started.");
+        AppendLogLine(outBase, L"ETW hang capture started (profile=" + etwUsedProfile + L").");
       } else {
         AppendLogLine(outBase, L"ETW hang capture start failed: " + etwErr);
       }
@@ -1021,6 +1544,11 @@ int wmain(int argc, wchar_t** argv)
 
   if (cfg.enableManualCaptureHotkey) {
     UnregisterHotKey(nullptr, kHotkeyId);
+  }
+
+  if (pendingCrashAnalysis.active) {
+    AppendLogLine(outBase, L"Helper shutting down while crash analysis is still running; detaching from pending recapture task.");
+    ClearPendingCrashAnalysis(&pendingCrashAnalysis);
   }
 
   skydiag::helper::Detach(proc);

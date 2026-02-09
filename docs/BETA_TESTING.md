@@ -35,12 +35,20 @@
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
+  - 반복 버킷 자동 재캡처(기본 OFF):
+    - `EnableAutoRecaptureOnUnknownCrash=1`
+    - `AutoRecaptureUnknownBucketThreshold=2`
+    - `AutoRecaptureAnalysisTimeoutSec=20`
+    - 같은 crash bucket에서 fault module 미확정이 반복되면, 프로세스가 살아있는 경우 FullMemory crash dump를 1회 추가 캡처
   - 저장/로드 중 팝업이 거슬리면 `AutoOpenCrashOnlyIfProcessExited=1` 유지(기본): 게임이 종료될 때만 크래시 뷰어 자동 오픈
   - 디스크 정리(기본값 권장, `0`=무제한):
     - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
     - `MaxHelperLogBytes`, `MaxHelperLogFiles`
   - `HangThresholdInMenuSec` : 메뉴/종료 직전 같은 “메뉴 상태”에서의 프리징 기준(기본 30초)
     - 정상 종료 직전에 일시적으로 heartbeat가 멈춰도 hang dump가 쌓이지 않도록, 메뉴 상태에서는 더 높은 임계값을 사용합니다.
+  - ETW hang 프로필:
+    - `EtwHangProfile` 기본 프로필
+    - `EtwHangFallbackProfile` (선택) 기본 프로필 실패 시 재시도
 
 ## 3) 캡처 방식
 
@@ -81,6 +89,8 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 - DumpTool 언어:
   - 기본: 영어(넥서스 배포용)
   - CLI: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
+- `*_SkyrimDiagSummary.json`에는 `schema`(버전 메타데이터)와 `triage`(수동 라벨링) 필드가 포함됩니다.
+  - 같은 덤프를 재분석해도 기존 `triage` 값은 보존됩니다.
 - 탭 가이드:
   - **요약**: “결론”을 한 문장으로 표시(신뢰도 포함)
   - **근거**: 왜 그렇게 판단했는지(콜스택/스택 스캔/리소스 충돌/WCT 등)

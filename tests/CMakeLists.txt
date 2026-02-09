@@ -101,3 +101,36 @@ set_target_properties(skydiag_retention_tests PROPERTIES
 )
 
 add_test(NAME skydiag_retention_tests COMMAND skydiag_retention_tests)
+
+add_executable(skydiag_summary_schema_fields_tests
+  summary_schema_fields_tests.cpp
+)
+
+set_target_properties(skydiag_summary_schema_fields_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_summary_schema_fields_tests COMMAND skydiag_summary_schema_fields_tests)
+
+add_executable(skydiag_crash_recapture_policy_tests
+  crash_recapture_policy_tests.cpp
+)
+
+target_include_directories(skydiag_crash_recapture_policy_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+
+set_target_properties(skydiag_crash_recapture_policy_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_crash_recapture_policy_tests COMMAND skydiag_crash_recapture_policy_tests)
+
+add_test(
+  NAME skydiag_bucket_quality_script_tests
+  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
+)

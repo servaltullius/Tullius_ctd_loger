@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <limits>
@@ -909,10 +910,79 @@ BOOL CALLBACK ReadProcessMemoryFromMinidump64(HANDLE, DWORD64 baseAddr, PVOID bu
   return ok ? TRUE : FALSE;
 }
 
+std::wstring ReadEnvVar(const wchar_t* name)
+{
+  if (!name || !*name) {
+    return {};
+  }
+  const DWORD need = GetEnvironmentVariableW(name, nullptr, 0);
+  if (need == 0) {
+    return {};
+  }
+  std::wstring out(static_cast<std::size_t>(need - 1), L'\0');
+  if (!out.empty()) {
+    GetEnvironmentVariableW(name, out.data(), need);
+  }
+  return out;
+}
+
+std::wstring ResolveDefaultSymbolCacheDir()
+{
+  std::wstring fromEnv = ReadEnvVar(L"SKYRIMDIAG_SYMBOL_CACHE_DIR");
+  if (!fromEnv.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(fromEnv, ec);
+    return fromEnv;
+  }
+
+  std::filesystem::path cacheDir;
+  if (const std::wstring localAppData = ReadEnvVar(L"LOCALAPPDATA"); !localAppData.empty()) {
+    cacheDir = std::filesystem::path(localAppData) / L"SkyrimDiag" / L"SymbolCache";
+  } else {
+    wchar_t tmp[MAX_PATH]{};
+    const DWORD n = GetTempPathW(MAX_PATH, tmp);
+    if (n > 0 && n < MAX_PATH) {
+      cacheDir = std::filesystem::path(tmp) / L"SkyrimDiagSymbolCache";
+    }
+  }
+
+  if (!cacheDir.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(cacheDir, ec);
+  }
+  return cacheDir.wstring();
+}
+
+std::wstring ResolveSymbolSearchPath(std::wstring* outCachePath)
+{
+  if (outCachePath) {
+    outCachePath->clear();
+  }
+
+  if (const std::wstring explicitPath = ReadEnvVar(L"SKYRIMDIAG_SYMBOL_PATH"); !explicitPath.empty()) {
+    return explicitPath;
+  }
+
+  if (const std::wstring ntSymbolPath = ReadEnvVar(L"_NT_SYMBOL_PATH"); !ntSymbolPath.empty()) {
+    return ntSymbolPath;
+  }
+
+  const std::wstring cachePath = ResolveDefaultSymbolCacheDir();
+  if (outCachePath) {
+    *outCachePath = cachePath;
+  }
+  if (cachePath.empty()) {
+    return {};
+  }
+  return L"srv*" + cachePath + L"*https://msdl.microsoft.com/download/symbols";
+}
+
 struct SymSession
 {
   HANDLE process = nullptr;
   bool ok = false;
+  std::wstring searchPath;
+  std::wstring cachePath;
 
   explicit SymSession(const std::vector<ModuleInfo>& modules)
   {
@@ -925,9 +995,16 @@ struct SymSession
     opts |= SYMOPT_NO_PROMPTS;
     SymSetOptions(opts);
 
-    ok = SymInitializeW(process, nullptr, FALSE) ? true : false;
+    searchPath = ResolveSymbolSearchPath(&cachePath);
+    ok = SymInitializeW(process, searchPath.empty() ? nullptr : searchPath.c_str(), FALSE) ? true : false;
     if (!ok) {
       return;
+    }
+
+    wchar_t actualSearchPath[4096]{};
+    if (SymGetSearchPathW(process, actualSearchPath, static_cast<DWORD>(std::size(actualSearchPath))) &&
+        actualSearchPath[0] != L'\0') {
+      searchPath = actualSearchPath;
     }
 
     for (const auto& m : modules) {
@@ -962,8 +1039,20 @@ std::wstring FormatModulePlusOffset(const std::vector<ModuleInfo>& modules, std:
   return buf;
 }
 
-std::wstring FormatSymbolizedFrame(HANDLE process, const std::vector<ModuleInfo>& modules, std::uint64_t addr)
+std::wstring FormatSymbolizedFrame(
+  HANDLE process,
+  const std::vector<ModuleInfo>& modules,
+  std::uint64_t addr,
+  bool* outHasSymbol,
+  bool* outHasSourceLine)
 {
+  if (outHasSymbol) {
+    *outHasSymbol = false;
+  }
+  if (outHasSourceLine) {
+    *outHasSourceLine = false;
+  }
+
   const std::wstring fallback = FormatModulePlusOffset(modules, addr);
   if (!process || addr == 0) {
     return fallback;
@@ -977,6 +1066,9 @@ std::wstring FormatSymbolizedFrame(HANDLE process, const std::vector<ModuleInfo>
   DWORD64 displacement = 0;
   if (!SymFromAddrW(process, static_cast<DWORD64>(addr), &displacement, sym) || sym->NameLen == 0) {
     return fallback;
+  }
+  if (outHasSymbol) {
+    *outHasSymbol = true;
   }
 
   std::wstring frame;
@@ -994,6 +1086,9 @@ std::wstring FormatSymbolizedFrame(HANDLE process, const std::vector<ModuleInfo>
   line.SizeOfStruct = sizeof(line);
   DWORD lineDisp = 0;
   if (SymGetLineFromAddrW64(process, static_cast<DWORD64>(addr), &lineDisp, &line) && line.FileName && line.LineNumber > 0) {
+    if (outHasSourceLine) {
+      *outHasSourceLine = true;
+    }
     std::filesystem::path src(line.FileName);
     frame += L" [";
     frame += src.filename().wstring();
@@ -1192,8 +1287,21 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   HANDLE process,
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
-  std::size_t maxFrames)
+  std::size_t maxFrames,
+  std::uint32_t* outTotalFrames,
+  std::uint32_t* outSymbolizedFrames,
+  std::uint32_t* outSourceLineFrames)
 {
+  if (outTotalFrames) {
+    *outTotalFrames = 0;
+  }
+  if (outSymbolizedFrames) {
+    *outSymbolizedFrames = 0;
+  }
+  if (outSourceLineFrames) {
+    *outSourceLineFrames = 0;
+  }
+
   std::vector<std::wstring> out;
   if (pcs.empty() || maxFrames == 0) {
     return out;
@@ -1216,7 +1324,18 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   const std::size_t end = std::min<std::size_t>(pcs.size(), start + maxFrames);
   out.reserve(end - start);
   for (std::size_t i = start; i < end; i++) {
-    out.push_back(FormatSymbolizedFrame(process, modules, pcs[i]));
+    bool hasSymbol = false;
+    bool hasSourceLine = false;
+    out.push_back(FormatSymbolizedFrame(process, modules, pcs[i], &hasSymbol, &hasSourceLine));
+    if (outTotalFrames) {
+      *outTotalFrames += 1;
+    }
+    if (hasSymbol && outSymbolizedFrames) {
+      *outSymbolizedFrames += 1;
+    }
+    if (hasSourceLine && outSourceLineFrames) {
+      *outSourceLineFrames += 1;
+    }
   }
   return out;
 }
@@ -1242,6 +1361,8 @@ bool TryComputeStackwalkSuspects(
   }
 
   SymSession sym(modules);
+  out.symbol_search_path = sym.searchPath;
+  out.symbol_cache_path = sym.cachePath;
   if (!sym.ok) {
     return false;
   }
@@ -1304,7 +1425,14 @@ bool TryComputeStackwalkSuspects(
   if (best.suspects.empty()) {
     if (!bestAny.pcs.empty()) {
       out.stackwalk_primary_tid = bestAny.tid;
-      out.stackwalk_primary_frames = FormatCallstackForDisplay(sym.process, modules, bestAny.pcs, /*maxFrames=*/12);
+      out.stackwalk_primary_frames = FormatCallstackForDisplay(
+        sym.process,
+        modules,
+        bestAny.pcs,
+        /*maxFrames=*/12,
+        &out.stackwalk_total_frames,
+        &out.stackwalk_symbolized_frames,
+        &out.stackwalk_source_line_frames);
     }
     return false;
   }
@@ -1335,7 +1463,14 @@ bool TryComputeStackwalkSuspects(
   out.suspects_from_stackwalk = true;
   out.suspects = std::move(best.suspects);
   out.stackwalk_primary_tid = best.tid;
-  out.stackwalk_primary_frames = FormatCallstackForDisplay(sym.process, modules, best.pcs, /*maxFrames=*/12);
+  out.stackwalk_primary_frames = FormatCallstackForDisplay(
+    sym.process,
+    modules,
+    best.pcs,
+    /*maxFrames=*/12,
+    &out.stackwalk_total_frames,
+    &out.stackwalk_symbolized_frames,
+    &out.stackwalk_source_line_frames);
   return true;
 }
 

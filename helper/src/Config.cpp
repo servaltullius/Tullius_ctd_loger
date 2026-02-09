@@ -72,6 +72,12 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashOnlyIfProcessExited", 1, path.c_str()) != 0;
   cfg.autoOpenCrashWaitForExitMs = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashWaitForExitMs", 2000, path.c_str()));
+  cfg.enableAutoRecaptureOnUnknownCrash =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableAutoRecaptureOnUnknownCrash", 0, path.c_str()) != 0;
+  cfg.autoRecaptureUnknownBucketThreshold = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoRecaptureUnknownBucketThreshold", 2, path.c_str()));
+  cfg.autoRecaptureAnalysisTimeoutSec = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoRecaptureAnalysisTimeoutSec", 20, path.c_str()));
   cfg.autoOpenViewerOnHang = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnHang", 1, path.c_str()) != 0;
   cfg.autoOpenViewerOnManualCapture =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnManualCapture", 0, path.c_str()) != 0;
@@ -103,9 +109,35 @@ HelperConfig LoadConfig(std::wstring* err)
   GetPrivateProfileStringW(L"SkyrimDiagHelper", L"EtwWprExe", L"wpr.exe", etwWprExe, MAX_PATH, path.c_str());
   cfg.etwWprExe = etwWprExe;
 
-  wchar_t etwProfile[128]{};
-  GetPrivateProfileStringW(L"SkyrimDiagHelper", L"EtwProfile", L"GeneralProfile", etwProfile, static_cast<DWORD>(std::size(etwProfile)), path.c_str());
-  cfg.etwProfile = etwProfile;
+  wchar_t etwHangProfile[128]{};
+  GetPrivateProfileStringW(
+    L"SkyrimDiagHelper",
+    L"EtwHangProfile",
+    L"",
+    etwHangProfile,
+    static_cast<DWORD>(std::size(etwHangProfile)),
+    path.c_str());
+  if (etwHangProfile[0] == L'\0') {
+    // Backward compatibility for older ini files.
+    GetPrivateProfileStringW(
+      L"SkyrimDiagHelper",
+      L"EtwProfile",
+      L"GeneralProfile",
+      etwHangProfile,
+      static_cast<DWORD>(std::size(etwHangProfile)),
+      path.c_str());
+  }
+  cfg.etwHangProfile = etwHangProfile;
+
+  wchar_t etwHangFallbackProfile[128]{};
+  GetPrivateProfileStringW(
+    L"SkyrimDiagHelper",
+    L"EtwHangFallbackProfile",
+    L"",
+    etwHangFallbackProfile,
+    static_cast<DWORD>(std::size(etwHangFallbackProfile)),
+    path.c_str());
+  cfg.etwHangFallbackProfile = etwHangFallbackProfile;
 
   cfg.etwMaxDurationSec = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, path.c_str()));

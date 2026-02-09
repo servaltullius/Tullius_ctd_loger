@@ -23,6 +23,9 @@ struct HelperConfig {
   bool autoOpenViewerOnCrash = true;
   bool autoOpenCrashOnlyIfProcessExited = true;
   std::uint32_t autoOpenCrashWaitForExitMs = 2000;
+  bool enableAutoRecaptureOnUnknownCrash = false;
+  std::uint32_t autoRecaptureUnknownBucketThreshold = 2;
+  std::uint32_t autoRecaptureAnalysisTimeoutSec = 20;
   bool autoOpenViewerOnHang = true;
   bool autoOpenViewerOnManualCapture = false;
   bool autoOpenHangAfterProcessExit = true;
@@ -36,7 +39,8 @@ struct HelperConfig {
   std::uint32_t foregroundGraceSec = 5;
   bool enableEtwCaptureOnHang = false;
   std::wstring etwWprExe = L"wpr.exe";
-  std::wstring etwProfile = L"GeneralProfile";
+  std::wstring etwHangProfile = L"GeneralProfile";
+  std::wstring etwHangFallbackProfile;
   std::uint32_t etwMaxDurationSec = 20;
 
   // Retention / disk cleanup (0 = unlimited)

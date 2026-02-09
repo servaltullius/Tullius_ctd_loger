@@ -29,6 +29,11 @@ int main()
   // Option: avoid popping the viewer for first-chance exceptions when the game is still running.
   AssertContains(ini, "AutoOpenCrashOnlyIfProcessExited", "Missing crash viewer gating option in ini");
   AssertContains(ini, "AutoOpenCrashWaitForExitMs", "Missing crash exit wait timeout option in ini");
+  AssertContains(ini, "EnableAutoRecaptureOnUnknownCrash", "Missing unknown crash auto-recapture toggle in ini");
+  AssertContains(ini, "AutoRecaptureUnknownBucketThreshold", "Missing unknown crash bucket threshold in ini");
+  AssertContains(ini, "AutoRecaptureAnalysisTimeoutSec", "Missing unknown crash analysis timeout in ini");
+  AssertContains(ini, "EtwHangProfile", "Missing ETW hang primary profile key in ini");
+  AssertContains(ini, "EtwHangFallbackProfile", "Missing ETW hang fallback profile key in ini");
 
   const std::filesystem::path configCppPath = repoRoot / "helper" / "src" / "Config.cpp";
   assert(std::filesystem::exists(configCppPath) && "Config.cpp not found");
@@ -37,6 +42,10 @@ int main()
   // Ensure the helper actually reads the INI keys.
   AssertContains(configCpp, "AutoOpenCrashOnlyIfProcessExited", "Helper config loader does not read crash gating option");
   AssertContains(configCpp, "AutoOpenCrashWaitForExitMs", "Helper config loader does not read crash wait timeout option");
+  AssertContains(configCpp, "EnableAutoRecaptureOnUnknownCrash", "Helper config loader does not read unknown crash auto-recapture toggle");
+  AssertContains(configCpp, "AutoRecaptureUnknownBucketThreshold", "Helper config loader does not read unknown crash bucket threshold");
+  AssertContains(configCpp, "AutoRecaptureAnalysisTimeoutSec", "Helper config loader does not read unknown crash analysis timeout");
+  AssertContains(configCpp, "EtwHangProfile", "Helper config loader does not read ETW hang primary profile key");
+  AssertContains(configCpp, "EtwHangFallbackProfile", "Helper config loader does not read ETW hang fallback profile key");
   return 0;
 }
-

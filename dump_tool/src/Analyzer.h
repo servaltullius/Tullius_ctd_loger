@@ -86,6 +86,11 @@ struct AnalysisResult
   // Best-effort callstack (primary thread: crash thread, WCT cycle thread, or inferred main thread)
   std::uint32_t stackwalk_primary_tid = 0;
   std::vector<std::wstring> stackwalk_primary_frames;
+  std::uint32_t stackwalk_total_frames = 0;
+  std::uint32_t stackwalk_symbolized_frames = 0;
+  std::uint32_t stackwalk_source_line_frames = 0;
+  std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
+  std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
 
   bool has_blackbox = false;
   std::vector<EventRow> events;

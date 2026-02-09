@@ -125,8 +125,14 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
     - `ForegroundGraceSec=5` (포그라운드로 돌아온 직후 잠깐 기다렸다가 캡처)
     - 포그라운드 복귀 후에도 창이 정상 응답 중이면 행 덤프를 계속 억제(Alt-Tab 오탐 추가 감소)
   - 고급 옵션(기본 OFF): `EnableEtwCaptureOnHang=1`
+    - `EtwHangProfile`(기본) → 실패 시 `EtwHangFallbackProfile`(선택) 순으로 ETW 시작 재시도
     - `wpr.exe`로 hang 캡처 전후 ETW를 짧게 수집해 추가 단서(`*.etl`)를 남김
     - ETW 수집 실패해도 dump/WCT는 계속 생성됨(best-effort)
+  - 반복 버킷 자동 재캡처(기본 OFF)
+    - `EnableAutoRecaptureOnUnknownCrash=1`
+    - `AutoRecaptureUnknownBucketThreshold=2` (같은 bucket에서 fault module 미확정이 2회 연속이면)
+    - `AutoRecaptureAnalysisTimeoutSec=20` (동기 분석 대기)
+    - 조건 충족 시 프로세스가 살아있는 경우에 한해 FullMemory crash dump 1회 추가 캡처(best-effort)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
 
 ### D. “빠른 재현” 테스트(가능한 경우)
@@ -259,9 +265,16 @@ This repository contains an MVP implementation of the design in:
     - CLI override: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
     - Compatibility flags accepted: `--simple-ui`, `--advanced-ui`
   - Output files:
-    - `<stem>_SkyrimDiagSummary.json` (exception + module+offset, flags, etc.)
+    - `<stem>_SkyrimDiagSummary.json` (exception + module+offset, flags, triage/symbolization metadata 포함)
+      - `schema.name/version` 메타데이터 포함(현재 version 2)
+      - 재분석 시 기존 `triage` 라벨(리뷰 상태/ground truth)를 보존
     - `<stem>_SkyrimDiagReport.txt` (quick human-readable report)
     - `<stem>_SkyrimDiagBlackbox.jsonl` (timeline of recent in-game events)
+  - Triage/quality workflow:
+    - `Summary.json`의 `triage` 필드(`review_status`, `ground_truth_mod` 등)에 사후 확정 정보를 기입
+    - `python scripts/analyze_bucket_quality.py --root <output-dir> --out-json <report.json>`
+    - bucket별 unknown-rate, 리뷰된 케이스 기준 top1 precision을 집계
+      - `ground_truth_mod`는 `suspects[0].inferred_mod_name` 우선, 없으면 `module_filename`과 매칭
 
 ## Validate (optional)
 

@@ -4,6 +4,8 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -53,6 +55,91 @@ bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content
   return true;
 }
 
+bool ReadTextUtf8(const std::filesystem::path& path, std::string* out)
+{
+  if (out) {
+    out->clear();
+  }
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return false;
+  }
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  if (out) {
+    *out = ss.str();
+  }
+  return true;
+}
+
+nlohmann::json DefaultTriageFields()
+{
+  return {
+    { "review_status", "unreviewed" },
+    { "ground_truth_cause", "" },
+    { "ground_truth_mod", "" },
+    { "reviewer", "" },
+    { "reviewed_at_utc", "" },
+    { "notes", "" },
+  };
+}
+
+void LoadExistingSummaryTriage(const std::filesystem::path& summaryPath, nlohmann::json* triage)
+{
+  if (!triage) {
+    return;
+  }
+
+  *triage = DefaultTriageFields();
+  std::string existingText;
+  if (!ReadTextUtf8(summaryPath, &existingText)) {
+    return;
+  }
+  const auto existing = nlohmann::json::parse(existingText, nullptr, false);
+  if (existing.is_discarded() || !existing.is_object()) {
+    return;
+  }
+  const auto it = existing.find("triage");
+  if (it == existing.end() || !it->is_object()) {
+    return;
+  }
+
+  for (const auto& [k, v] : it->items()) {
+    (*triage)[k] = v;
+  }
+  for (const auto& [k, v] : DefaultTriageFields().items()) {
+    if (!triage->contains(k)) {
+      (*triage)[k] = v;
+    }
+  }
+}
+
+bool IsUnknownModuleField(std::wstring_view modulePlusOffset)
+{
+  if (modulePlusOffset.empty()) {
+    return true;
+  }
+  std::wstring normalized;
+  normalized.reserve(modulePlusOffset.size());
+  for (const wchar_t ch : modulePlusOffset) {
+    normalized.push_back(static_cast<wchar_t>(std::towlower(ch)));
+  }
+  auto trimPred = [](wchar_t c) {
+    return c == L' ' || c == L'\t' || c == L'\r' || c == L'\n';
+  };
+  while (!normalized.empty() && trimPred(normalized.front())) {
+    normalized.erase(normalized.begin());
+  }
+  while (!normalized.empty() && trimPred(normalized.back())) {
+    normalized.pop_back();
+  }
+  return normalized.empty() ||
+    normalized == L"unknown" ||
+    normalized == L"<unknown>" ||
+    normalized == L"n/a" ||
+    normalized == L"none";
+}
+
 std::filesystem::path DefaultOutDirForDump(const std::filesystem::path& dumpPath)
 {
   if (dumpPath.has_parent_path()) {
@@ -79,17 +166,26 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   const auto wctPath = outBase / (stem + L"_SkyrimDiagWct.json");
 
   nlohmann::json summary = nlohmann::json::object();
+  constexpr std::uint32_t kSummarySchemaVersion = 2;
+  summary["schema"] = {
+    { "name", "SkyrimDiagSummary" },
+    { "version", kSummarySchemaVersion },
+  };
   summary["dump_path"] = WideToUtf8(r.dump_path);
   summary["pid"] = r.pid;
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
+  nlohmann::json triage;
+  LoadExistingSummaryTriage(summaryPath, &triage);
+  summary["triage"] = std::move(triage);
 
   summary["exception"] = nlohmann::json::object();
   summary["exception"]["code"] = r.exc_code;
   summary["exception"]["thread_id"] = r.exc_tid;
   summary["exception"]["address"] = r.exc_addr;
   summary["exception"]["module_plus_offset"] = WideToUtf8(r.fault_module_plus_offset);
+  summary["exception"]["fault_module_unknown"] = IsUnknownModuleField(r.fault_module_plus_offset);
   summary["exception"]["module_path"] = WideToUtf8(r.fault_module_path);
   summary["exception"]["inferred_mod_name"] = WideToUtf8(r.inferred_mod_name);
 
@@ -129,6 +225,13 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   for (const auto& f : r.stackwalk_primary_frames) {
     summary["callstack"]["frames"].push_back(WideToUtf8(f));
   }
+  summary["symbolization"] = {
+    { "search_path", WideToUtf8(r.symbol_search_path) },
+    { "cache_path", WideToUtf8(r.symbol_cache_path) },
+    { "total_frames", r.stackwalk_total_frames },
+    { "symbolized_frames", r.stackwalk_symbolized_frames },
+    { "source_line_frames", r.stackwalk_source_line_frames },
+  };
 
   summary["resources"] = nlohmann::json::array();
   for (const auto& rr : r.resources) {
