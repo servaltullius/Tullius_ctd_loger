@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <filesystem>
+#include <iterator>
 
 namespace skydiag::helper {
 namespace {
@@ -142,6 +143,39 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.etwMaxDurationSec = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, path.c_str()));
+
+  cfg.enableEtwCaptureOnCrash =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableEtwCaptureOnCrash", 0, path.c_str()) != 0;
+
+  wchar_t etwCrashProfile[128]{};
+  GetPrivateProfileStringW(
+    L"SkyrimDiagHelper",
+    L"EtwCrashProfile",
+    L"GeneralProfile",
+    etwCrashProfile,
+    static_cast<DWORD>(std::size(etwCrashProfile)),
+    path.c_str());
+  if (etwCrashProfile[0] == L'\0') {
+    // Treat empty as default for safer behavior.
+    cfg.etwCrashProfile = L"GeneralProfile";
+  } else {
+    cfg.etwCrashProfile = etwCrashProfile;
+  }
+
+  std::uint32_t etwCrashCaptureSeconds = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwCrashCaptureSeconds", 8, path.c_str()));
+  // Clamp to a small range to avoid excessive capture time from config mistakes.
+  if (etwCrashCaptureSeconds < 1) {
+    etwCrashCaptureSeconds = 1;
+  } else if (etwCrashCaptureSeconds > 30) {
+    etwCrashCaptureSeconds = 30;
+  }
+  cfg.etwCrashCaptureSeconds = etwCrashCaptureSeconds;
+
+  cfg.enableIncidentManifest =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableIncidentManifest", 1, path.c_str()) != 0;
+  cfg.incidentManifestIncludeConfigSnapshot =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"IncidentManifestIncludeConfigSnapshot", 1, path.c_str()) != 0;
 
   cfg.maxCrashDumps = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxCrashDumps", 20, path.c_str()));
