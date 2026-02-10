@@ -88,6 +88,18 @@ python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
 
 The packager requires WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes both `SkyrimDiagDumpToolWinUI.exe` and `SkyrimDiagDumpToolNative.dll`.
 
+## Release (GitHub)
+
+Policy:
+- GitHub Release patch notes are written in **Korean (required)**.
+- English is optional, but put Korean first.
+
+Suggested checklist:
+1) Update version + changelog
+2) Run tests (Linux + Windows)
+3) Build + package zip on Windows
+4) Tag + push, then create GitHub Release and upload `dist/Tullius_ctd_loger.zip`
+
 ## Build (Windows)
 
 Prereqs:

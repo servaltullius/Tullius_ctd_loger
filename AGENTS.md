@@ -60,6 +60,11 @@ ctest --test-dir build-linux-test --output-on-failure
 
 이 레포는 WSL에서 편집하지만, **Windows/MSVC로 빌드 + zip 패키징**합니다.
 
+## Release Notes Policy
+
+- GitHub Release 패치노트(Release notes)는 **한국어(KO)를 필수**로 작성합니다.
+- 영어가 필요하면 한국어 아래에 짧게 추가(선택)하되, **한국어를 우선**합니다.
+
 ### Windows 빌드 워크스페이스(현재 기준)
 
 - **Windows mirror 소스:** `C:\Users\kdw73\Tullius_ctd_loger`
