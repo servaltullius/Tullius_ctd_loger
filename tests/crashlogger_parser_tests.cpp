@@ -48,6 +48,26 @@ static void Test_ParseTopModules_CrashLog()
   assert(mods[0] == "prismaui.dll");
 }
 
+static void Test_ParseTopModules_CrashLog_NewCallstackFormat()
+{
+  // CrashLoggerSSE (v1.19+/v1.20) prints indexed callstack rows with an address column:
+  //   [0] 0x00007FF... SomeMod.dll+0000123 <details>
+  // We only care about extracting module names reliably.
+  const std::string s =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-02-10 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612345678 ExampleMod.dll+0000123\tmov eax, eax | ExampleFunc\n"
+    "\t[ 1] 0x00007FF612345678 kernel32.dll+0000123\n"
+    "\t[ 2] 0x00007FF612345678 SkyrimSE.exe+0000123\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
+  assert(mods.size() == 1);
+  assert(mods[0] == "examplemod.dll");
+}
+
 static void Test_ParseTopModules_ThreadDump()
 {
   const std::string s =
@@ -61,6 +81,28 @@ static void Test_ParseTopModules_ThreadDump()
     "===== THREAD 2 (ID: 456) =====\n"
     "\tCALLSTACK:\n"
     "\t\tSanguineSymphony.dll+0x333\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
+  assert(mods.size() == 2);
+  assert(mods[0] == "prismaui.dll");
+  assert(mods[1] == "sanguinesymphony.dll");
+}
+
+static void Test_ParseTopModules_ThreadDump_NewCallstackFormat()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "========================================\n"
+    "THREAD DUMP (Manual Trigger)\n"
+    "========================================\n"
+    "TIME: 2026-02-10 12:34:56\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x00007FF612345678 PrismaUI.dll+0000123\tmov eax, eax\n"
+    "\t[ 1] 0x00007FF612345678 ntdll.dll+0000123\n"
+    "\n"
+    "===== THREAD 2 (ID: 456) =====\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x00007FF612345678 SanguineSymphony.dll+0000123\n";
 
   const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
   assert(mods.size() == 2);
@@ -177,7 +219,9 @@ int main()
   Test_LooksLikeCrashLogger_CrashLog();
   Test_LooksLikeCrashLogger_ThreadDump();
   Test_ParseTopModules_CrashLog();
+  Test_ParseTopModules_CrashLog_NewCallstackFormat();
   Test_ParseTopModules_ThreadDump();
+  Test_ParseTopModules_ThreadDump_NewCallstackFormat();
   Test_ParseTopModules_ThreadDump_TieBreaksAlphabetically();
   Test_StackCorruptionWarning_DoesNotCrash();
   Test_ParseCppExceptionDetails();
