@@ -19,6 +19,7 @@ class VibeConfig:
     critical_tags: list[str]
     latest_file: Path
     max_recent_files: int
+    context_commands: dict[str, str]
     checks: dict[str, Any]
     quality_gates: dict[str, Any]
     placeholders: dict[str, Any]
@@ -43,6 +44,17 @@ def load_config() -> VibeConfig:
     context = data.get("context") or {}
     latest_file = root / str(context.get("latest_file", ".vibe/context/LATEST_CONTEXT.md"))
     max_recent_files = int(context.get("max_recent_files", 12))
+    context_commands: dict[str, str] = {}
+    raw_commands = context.get("commands")
+    if isinstance(raw_commands, dict):
+        for key, val in raw_commands.items():
+            if not isinstance(key, str) or not isinstance(val, str):
+                continue
+            k = key.strip().lower()
+            v = val.strip()
+            if not k or not v:
+                continue
+            context_commands[k] = v
 
     return VibeConfig(
         project_name=str(data.get("project_name", root.name)),
@@ -52,6 +64,7 @@ def load_config() -> VibeConfig:
         critical_tags=list(data.get("critical_tags") or ["@critical", "CRITICAL:"]),
         latest_file=latest_file,
         max_recent_files=max_recent_files,
+        context_commands=context_commands,
         checks=dict(data.get("checks") or {}),
         quality_gates=dict(data.get("quality_gates") or {}),
         placeholders=dict(data.get("placeholders") or {}),

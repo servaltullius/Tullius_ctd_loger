@@ -20,7 +20,17 @@
 - 영향도 분석: `python3 scripts/vibe.py impact <path>`
 - 아키텍처 경계 위반(레이어/모듈 간 금지 의존성) 체크: `python3 scripts/vibe.py boundaries`
 - 변경 결합(change coupling, 설계/디커플링 도움): `python3 scripts/vibe.py coupling`
+  - (옵션) 리네임/이동 보정: `python3 scripts/vibe.py coupling --detect-renames`
+  - (옵션) 포맷팅/대량 수정 커밋 노이즈 완화: `python3 scripts/vibe.py coupling --max-churn-per-commit 5000`
+  - (결과) playbooks 문서: `.vibe/reports/decoupling_suggestions.md`
 - 요약팩 생성: `python3 scripts/vibe.py pack --scope=staged|changed|path|recent --out .vibe/context/PACK.md`
+
+## 설계/리팩터링에 쓰는 법(추천 루틴)
+1) 먼저: `python3 scripts/vibe.py doctor --full`
+2) 경계 점검(선택): `python3 scripts/vibe.py boundaries`
+   - 위반이 있다면 `.vibe/reports/boundaries.md`에서 “금지 의존성”부터 줄이기
+3) 디커플링 후보 찾기(선택): `python3 scripts/vibe.py coupling`
+   - `.vibe/reports/decoupling_suggestions.md`에서 leak 1개를 고르고 playbook 1개로 **작은 PR**부터 시작
 
 ## 커스텀(레포별)
 - 설정은 `.vibe/config.json`에서 합니다 (`exclude_dirs`, `include_globs`, `quality_gates`, `checks` 등).

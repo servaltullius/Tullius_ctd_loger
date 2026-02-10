@@ -1,3 +1,5 @@
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
 add_executable(skydiag_hang_suppression_tests
   hang_suppression_tests.cpp
 )
@@ -130,7 +132,31 @@ set_target_properties(skydiag_crash_recapture_policy_tests PROPERTIES
 
 add_test(NAME skydiag_crash_recapture_policy_tests COMMAND skydiag_crash_recapture_policy_tests)
 
+add_executable(skydiag_symbol_privacy_controls_tests
+  symbol_privacy_controls_tests.cpp
+)
+
+set_target_properties(skydiag_symbol_privacy_controls_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_symbol_privacy_controls_tests COMMAND skydiag_symbol_privacy_controls_tests)
+
+add_executable(skydiag_crash_hook_mode_guard_tests
+  crash_hook_mode_guard_tests.cpp
+)
+
+set_target_properties(skydiag_crash_hook_mode_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_crash_hook_mode_guard_tests COMMAND skydiag_crash_hook_mode_guard_tests)
+
 add_test(
   NAME skydiag_bucket_quality_script_tests
-  COMMAND python3 "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
 )

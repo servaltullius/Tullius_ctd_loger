@@ -91,6 +91,9 @@ struct AnalysisResult
   std::uint32_t stackwalk_source_line_frames = 0;
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
+  bool online_symbol_source_allowed = false;
+  bool online_symbol_source_used = false;
+  bool path_redaction_applied = true;
 
   bool has_blackbox = false;
   std::vector<EventRow> events;
@@ -109,6 +112,8 @@ struct AnalysisResult
 struct AnalyzeOptions
 {
   bool debug = false;
+  bool allow_online_symbols = false;
+  bool redact_paths = true;
   i18n::Language language = i18n::DefaultLanguage();
 };
 

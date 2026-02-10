@@ -23,6 +23,7 @@ struct PluginConfig
 {
   std::uint32_t heartbeatIntervalMs = 100;
   std::uint32_t crashHookMode = 1;
+  bool enableUnsafeCrashHookMode2 = false;
   bool logMenus = true;
   bool autoStartHelper = true;
   std::wstring helperExe = L"SkyrimDiagHelper.exe";
@@ -54,6 +55,11 @@ PluginConfig LoadConfig()
 
   {
     int mode = GetPrivateProfileIntW(L"SkyrimDiag", L"CrashHookMode", 1, iniPath);
+    cfg.enableUnsafeCrashHookMode2 =
+      GetPrivateProfileIntW(L"SkyrimDiag", L"EnableUnsafeCrashHookMode2", 0, iniPath) != 0;
+    if (mode == 2 && !cfg.enableUnsafeCrashHookMode2) {
+      mode = 1;
+    }
     if (mode < 0) mode = 0;
     if (mode > 2) mode = 2;
     cfg.crashHookMode = static_cast<std::uint32_t>(mode);

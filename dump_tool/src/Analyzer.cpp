@@ -953,7 +953,7 @@ std::wstring ResolveDefaultSymbolCacheDir()
   return cacheDir.wstring();
 }
 
-std::wstring ResolveSymbolSearchPath(std::wstring* outCachePath)
+std::wstring ResolveSymbolSearchPath(std::wstring* outCachePath, bool allowOnlineSymbols)
 {
   if (outCachePath) {
     outCachePath->clear();
@@ -974,6 +974,9 @@ std::wstring ResolveSymbolSearchPath(std::wstring* outCachePath)
   if (cachePath.empty()) {
     return {};
   }
+  if (!allowOnlineSymbols) {
+    return cachePath;
+  }
   return L"srv*" + cachePath + L"*https://msdl.microsoft.com/download/symbols";
 }
 
@@ -983,8 +986,9 @@ struct SymSession
   bool ok = false;
   std::wstring searchPath;
   std::wstring cachePath;
+  bool usedOnlineSymbolSource = false;
 
-  explicit SymSession(const std::vector<ModuleInfo>& modules)
+  explicit SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineSymbols)
   {
     process = GetCurrentProcess();
 
@@ -995,7 +999,7 @@ struct SymSession
     opts |= SYMOPT_NO_PROMPTS;
     SymSetOptions(opts);
 
-    searchPath = ResolveSymbolSearchPath(&cachePath);
+    searchPath = ResolveSymbolSearchPath(&cachePath, allowOnlineSymbols);
     ok = SymInitializeW(process, searchPath.empty() ? nullptr : searchPath.c_str(), FALSE) ? true : false;
     if (!ok) {
       return;
@@ -1006,6 +1010,7 @@ struct SymSession
         actualSearchPath[0] != L'\0') {
       searchPath = actualSearchPath;
     }
+    usedOnlineSymbolSource = (searchPath.find(L"https://") != std::wstring::npos);
 
     for (const auto& m : modules) {
       if (m.path.empty() || m.base == 0 || m.end <= m.base) {
@@ -1360,9 +1365,10 @@ bool TryComputeStackwalkSuspects(
     return false;
   }
 
-  SymSession sym(modules);
+  SymSession sym(modules, out.online_symbol_source_allowed);
   out.symbol_search_path = sym.searchPath;
   out.symbol_cache_path = sym.cachePath;
+  out.online_symbol_source_used = sym.usedOnlineSymbolSource;
   if (!sym.ok) {
     return false;
   }
@@ -1509,6 +1515,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   out.language = opt.language;
   out.dump_path = dumpPath;
   out.out_dir = outDir;
+  out.online_symbol_source_allowed = opt.allow_online_symbols;
+  out.path_redaction_applied = opt.redact_paths;
 
   const std::wstring dumpNameLower = WideLower(std::filesystem::path(dumpPath).filename().wstring());
   const bool nameCrash = (dumpNameLower.find(L"_crash_") != std::wstring::npos);

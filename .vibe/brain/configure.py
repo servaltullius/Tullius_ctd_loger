@@ -104,6 +104,59 @@ def _read_text_best_effort(path: Path) -> str:
         return ""
 
 
+def _collect_dotnet_targets(root: Path, exclude_dirs: set[str]) -> tuple[list[Path], list[Path]]:
+    slns: list[Path] = []
+    projects: list[Path] = []
+    for p in _walk_repo_files(root, exclude_dirs):
+        suf = p.suffix.lower()
+        if suf == ".sln":
+            slns.append(p)
+        elif suf in {".csproj", ".fsproj", ".vbproj"}:
+            projects.append(p)
+    slns.sort(key=lambda p: p.as_posix())
+    projects.sort(key=lambda p: p.as_posix())
+    return slns, projects
+
+
+def _pick_dotnet_target(root: Path, exclude_dirs: set[str]) -> str | None:
+    slns, projects = _collect_dotnet_targets(root, exclude_dirs)
+    if slns:
+        root_slns = [p for p in slns if p.parent == root]
+        pick = root_slns[0] if root_slns else slns[0]
+        return pick.relative_to(root).as_posix()
+
+    if not projects:
+        return None
+
+    def score(p: Path) -> int:
+        s = 0
+        name = p.name.lower()
+        path = p.as_posix().lower()
+        if "core" in name:
+            s += 50
+        if "lib" in name or "library" in name:
+            s += 30
+        if "/tests/" in path or ".tests" in name:
+            s -= 100
+        if "test" in name:
+            s -= 80
+        if "/src/" in path:
+            s += 10
+        return s
+
+    pick = sorted(projects, key=lambda p: (-score(p), p.as_posix()))[0]
+    return pick.relative_to(root).as_posix()
+
+
+def _detect_pyright(root: Path) -> bool:
+    if (root / "pyrightconfig.json").exists():
+        return True
+    pyproject = root / "pyproject.toml"
+    if pyproject.exists():
+        return "[tool.pyright]" in _read_text_best_effort(pyproject)
+    return False
+
+
 def _detect_package_manager(root: Path, package_json: dict[str, Any]) -> tuple[str, str]:
     raw_pm = package_json.get("packageManager")
     if isinstance(raw_pm, str) and raw_pm.strip():
@@ -133,15 +186,16 @@ def _pick_typecheck_recommendation(
 ) -> tuple[list[str] | None, list[str] | None, dict[str, Any]]:
     meta: dict[str, Any] = {}
 
-    dotnet_present = False
-    for p in _walk_repo_files(root, exclude_dirs):
-        suf = p.suffix.lower()
-        if suf in {".sln", ".csproj", ".fsproj", ".vbproj"}:
-            dotnet_present = True
-            break
+    dotnet_target = _pick_dotnet_target(root, exclude_dirs)
+    dotnet_present = dotnet_target is not None
     meta["dotnet_present"] = dotnet_present
     if dotnet_present:
-        return None, None, meta
+        meta["dotnet_target"] = dotnet_target
+        return (
+            ["dotnet", "build", str(dotnet_target), "-c", "Release"],
+            ["**/*.cs", "**/*.csproj", "**/*.fsproj", "**/*.vbproj", "**/*.sln", "Directory.Build.props", "Directory.Build.targets", "global.json"],
+            meta,
+        )
 
     if package_json is not None and pm:
         scripts = package_json.get("scripts")
@@ -163,6 +217,11 @@ def _pick_typecheck_recommendation(
     if mypy_present:
         return ["mypy", "."], ["**/*.py"], meta
 
+    pyright_present = _detect_pyright(root)
+    meta["pyright_present"] = bool(pyright_present)
+    if pyright_present:
+        return ["pyright"], ["**/*.py", "pyproject.toml", "pyrightconfig.json"], meta
+
     go_present = (root / "go.mod").exists() or _repo_has_any_named_file(root, exclude_dirs, {"go.mod"})
     meta["go_present"] = bool(go_present)
     if go_present:
@@ -172,6 +231,25 @@ def _pick_typecheck_recommendation(
     meta["rust_present"] = bool(rust_present)
     if rust_present:
         return ["cargo", "check"], ["**/*.rs", "Cargo.toml", "Cargo.lock"], meta
+
+    maven_present = (root / "pom.xml").exists() or _repo_has_any_named_file(root, exclude_dirs, {"pom.xml"})
+    meta["maven_present"] = bool(maven_present)
+    if maven_present:
+        return ["mvn", "-q", "-DskipTests", "compile"], ["pom.xml", "**/*.java", "**/*.kt"], meta
+
+    gradle_present = any((root / p).exists() for p in ("gradlew", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"))
+    if not gradle_present:
+        gradle_present = _repo_has_any_named_file(
+            root,
+            exclude_dirs,
+            {"gradlew", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"},
+        )
+    meta["gradle_present"] = bool(gradle_present)
+    if gradle_present:
+        has_wrapper = (root / "gradlew").exists()
+        meta["gradle_has_wrapper"] = bool(has_wrapper)
+        cmd = ["./gradlew", "-q", "classes"] if has_wrapper else ["gradle", "-q", "classes"]
+        return cmd, ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "**/*.java", "**/*.kt"], meta
 
     return None, None, meta
 

@@ -30,3 +30,4 @@ __pycache__/
 # WinUI build outputs
 dump_tool_winui/bin/
 dump_tool_winui/obj/
+

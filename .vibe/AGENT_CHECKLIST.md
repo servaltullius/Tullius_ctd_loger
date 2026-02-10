@@ -12,10 +12,16 @@
 - Check impact for shared/core files: `python3 scripts/vibe.py impact <path>`
 - Find entry points fast: `python3 scripts/vibe.py search "<keyword>"`
 - (Optional) Detect boundary violations (architecture rules): `python3 scripts/vibe.py boundaries`
+  - See: `.vibe/reports/boundaries.md`
 - (Optional) Find logical coupling from git history: `python3 scripts/vibe.py coupling`
+  - Useful options: `--detect-renames`, `--max-churn-per-commit 5000`
+  - Decoupling playbooks: `.vibe/reports/decoupling_suggestions.md`
 - (Optional) Configure repo-specific checks in `.vibe/config.json` (`checks.doctor`, `checks.precommit`).
 - (Optional) Make a compact context pack for an agent:
   - `python3 scripts/vibe.py pack --scope=staged|changed|path|recent --out .vibe/context/PACK.md`
+- (Optional) Validate agent entrypoints are wired:
+  - `python3 scripts/vibe.py agents doctor`
+  - CI/strict mode: `python3 scripts/vibe.py agents doctor --fail`
 
 ## While coding
 - Keep changes small and localized.

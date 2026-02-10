@@ -58,6 +58,7 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableManualCaptureHotkey", 1, path.c_str()) != 0;
 
   cfg.autoAnalyzeDump = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoAnalyzeDump", 1, path.c_str()) != 0;
+  cfg.allowOnlineSymbols = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AllowOnlineSymbols", 0, path.c_str()) != 0;
   wchar_t dumpToolExe[MAX_PATH]{};
   GetPrivateProfileStringW(
     L"SkyrimDiagHelper",

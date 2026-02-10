@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.2.8 (2026-02-10)
+
+### Added
+- Crash hook safety guard option in `dist/SkyrimDiag.ini`:
+  - `EnableUnsafeCrashHookMode2=1` is now required to use `CrashHookMode=2`.
+- Online symbol source control in `dist/SkyrimDiagHelper.ini`:
+  - `AllowOnlineSymbols=0|1` with default `0` (offline/local cache).
+- DumpTool privacy telemetry fields in summary/report outputs:
+  - `path_redaction_applied`
+  - `online_symbol_source_allowed`
+  - `online_symbol_source_used`
+- New regression tests:
+  - `tests/crash_hook_mode_guard_tests.cpp`
+  - `tests/symbol_privacy_controls_tests.cpp`
+- Added vibe-kit guard workflow and doctor script scaffolding:
+  - `.github/workflows/vibekit-guard.yml`
+  - `.vibe/brain/agents_doctor.py`
+
+### Changed
+- DumpTool symbolization now defaults to offline/local cache unless explicitly opted in.
+- Helper now passes explicit symbol policy flags (`--allow-online-symbols` / `--no-online-symbols`) to WinUI analyzer path.
+- Path redaction is applied more consistently in outputs, including resource path lines.
+- Test runner wiring now uses `Python3_EXECUTABLE` and `sys.executable` for cross-platform Python invocation.
+- Vibe-kit seed/config scripts and docs were refreshed:
+  - `.vibe/config.json`
+  - `.vibe/README.md`
+  - `.vibe/brain/*`
+  - `scripts/setup_vibe_env.py`
+  - `scripts/vibe.py`
+
+### Fixed
+- Windows `ctest` compatibility issue caused by hardcoded `python3` in bucket quality script tests.
+
 ## v0.2.6 (2026-02-07)
 
 ### Added

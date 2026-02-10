@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,9 +17,10 @@ def _write_summary(path: Path, payload: dict) -> None:
 def _run_script(root: Path, out_json: Path) -> dict:
     repo_root = Path(__file__).resolve().parent.parent
     script = repo_root / "scripts" / "analyze_bucket_quality.py"
+    python = sys.executable or "python3"
     subprocess.check_call(
         [
-            "python3",
+            python,
             str(script),
             "--root",
             str(root),
@@ -61,4 +63,3 @@ def test_ground_truth_mod_matches_inferred_mod_name() -> None:
 if __name__ == "__main__":
     test_ground_truth_mod_matches_inferred_mod_name()
     print("bucket_quality_script_tests: OK")
-

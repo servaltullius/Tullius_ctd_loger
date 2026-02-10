@@ -140,6 +140,52 @@ bool IsUnknownModuleField(std::wstring_view modulePlusOffset)
     normalized == L"none";
 }
 
+bool LooksLikeAbsolutePath(std::wstring_view path)
+{
+  if (path.size() >= 3 &&
+      ((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) &&
+      path[1] == L':' &&
+      (path[2] == L'\\' || path[2] == L'/')) {
+    return true;
+  }
+  if (path.size() >= 2 &&
+      ((path[0] == L'\\' && path[1] == L'\\') || (path[0] == L'/' && path[1] == L'/'))) {
+    return true;
+  }
+  return false;
+}
+
+std::wstring RedactPathValue(std::wstring_view path)
+{
+  const std::filesystem::path p(path);
+  const std::wstring filename = p.filename().wstring();
+  if (filename.empty()) {
+    return L"<redacted>";
+  }
+  return L"<redacted>\\" + filename;
+}
+
+std::wstring MaybeRedactPath(std::wstring_view path, bool redactPaths)
+{
+  if (!redactPaths || path.empty() || !LooksLikeAbsolutePath(path)) {
+    return std::wstring(path);
+  }
+  return RedactPathValue(path);
+}
+
+std::wstring ReplaceAll(std::wstring text, std::wstring_view from, std::wstring_view to)
+{
+  if (text.empty() || from.empty()) {
+    return text;
+  }
+  std::size_t pos = 0;
+  while ((pos = text.find(from, pos)) != std::wstring::npos) {
+    text.replace(pos, from.size(), to);
+    pos += to.size();
+  }
+  return text;
+}
+
 std::filesystem::path DefaultOutDirForDump(const std::filesystem::path& dumpPath)
 {
   if (dumpPath.has_parent_path()) {
@@ -159,6 +205,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
 
   const std::wstring stem = dumpFs.stem().wstring();
   const bool en = (r.language == i18n::Language::kEnglish);
+  const bool redactPaths = r.path_redaction_applied;
 
   const auto summaryPath = outBase / (stem + L"_SkyrimDiagSummary.json");
   const auto reportPath = outBase / (stem + L"_SkyrimDiagReport.txt");
@@ -171,11 +218,16 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     { "name", "SkyrimDiagSummary" },
     { "version", kSummarySchemaVersion },
   };
-  summary["dump_path"] = WideToUtf8(r.dump_path);
+  summary["dump_path"] = WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths));
   summary["pid"] = r.pid;
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
+  summary["privacy"] = {
+    { "path_redaction_applied", redactPaths },
+    { "online_symbol_source_allowed", r.online_symbol_source_allowed },
+    { "online_symbol_source_used", r.online_symbol_source_used },
+  };
   nlohmann::json triage;
   LoadExistingSummaryTriage(summaryPath, &triage);
   summary["triage"] = std::move(triage);
@@ -186,11 +238,11 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   summary["exception"]["address"] = r.exc_addr;
   summary["exception"]["module_plus_offset"] = WideToUtf8(r.fault_module_plus_offset);
   summary["exception"]["fault_module_unknown"] = IsUnknownModuleField(r.fault_module_plus_offset);
-  summary["exception"]["module_path"] = WideToUtf8(r.fault_module_path);
+  summary["exception"]["module_path"] = WideToUtf8(MaybeRedactPath(r.fault_module_path, redactPaths));
   summary["exception"]["inferred_mod_name"] = WideToUtf8(r.inferred_mod_name);
 
   summary["crash_logger"] = nlohmann::json::object();
-  summary["crash_logger"]["log_path"] = WideToUtf8(r.crash_logger_log_path);
+  summary["crash_logger"]["log_path"] = WideToUtf8(MaybeRedactPath(r.crash_logger_log_path, redactPaths));
   summary["crash_logger"]["version"] = WideToUtf8(r.crash_logger_version);
   summary["crash_logger"]["top_modules"] = nlohmann::json::array();
   for (const auto& m : r.crash_logger_top_modules) {
@@ -212,7 +264,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     summary["suspects"].push_back({
       { "confidence", WideToUtf8(s.confidence) },
       { "module_filename", WideToUtf8(s.module_filename) },
-      { "module_path", WideToUtf8(s.module_path) },
+      { "module_path", WideToUtf8(MaybeRedactPath(s.module_path, redactPaths)) },
       { "inferred_mod_name", WideToUtf8(s.inferred_mod_name) },
       { "score", s.score },
       { "reason", WideToUtf8(s.reason) },
@@ -225,12 +277,19 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   for (const auto& f : r.stackwalk_primary_frames) {
     summary["callstack"]["frames"].push_back(WideToUtf8(f));
   }
+  const std::wstring redactedSymbolCachePath = MaybeRedactPath(r.symbol_cache_path, redactPaths);
+  const std::wstring redactedSymbolSearchPath = ReplaceAll(
+    std::wstring(r.symbol_search_path),
+    std::wstring_view(r.symbol_cache_path),
+    std::wstring_view(redactedSymbolCachePath));
   summary["symbolization"] = {
-    { "search_path", WideToUtf8(r.symbol_search_path) },
-    { "cache_path", WideToUtf8(r.symbol_cache_path) },
+    { "search_path", WideToUtf8(redactedSymbolSearchPath) },
+    { "cache_path", WideToUtf8(redactedSymbolCachePath) },
     { "total_frames", r.stackwalk_total_frames },
     { "symbolized_frames", r.stackwalk_symbolized_frames },
     { "source_line_frames", r.stackwalk_source_line_frames },
+    { "online_symbol_source_allowed", r.online_symbol_source_allowed },
+    { "online_symbol_source_used", r.online_symbol_source_used },
   };
 
   summary["resources"] = nlohmann::json::array();
@@ -243,7 +302,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
       { "t_ms", rr.t_ms },
       { "tid", rr.tid },
       { "kind", WideToUtf8(rr.kind) },
-      { "path", WideToUtf8(rr.path) },
+      { "path", WideToUtf8(MaybeRedactPath(rr.path, redactPaths)) },
       { "providers", std::move(providers) },
       { "is_conflict", rr.is_conflict },
     });
@@ -271,8 +330,11 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   // Report (human-friendly)
   std::ostringstream rpt;
   rpt << (en ? "SkyrimDiag Report\n" : "SkyrimDiag 리포트\n");
-  rpt << (en ? "Dump: " : "덤프: ") << WideToUtf8(r.dump_path) << "\n";
+  rpt << (en ? "Dump: " : "덤프: ") << WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths)) << "\n";
   rpt << (en ? "Summary: " : "결론: ") << WideToUtf8(r.summary_sentence) << "\n";
+  rpt << (en ? "PathRedactionApplied: " : "경로 마스킹 적용: ") << (redactPaths ? "1" : "0") << "\n";
+  rpt << (en ? "OnlineSymbolSourceAllowed: " : "온라인 심볼 소스 허용: ") << (r.online_symbol_source_allowed ? "1" : "0") << "\n";
+  rpt << (en ? "OnlineSymbolSourceUsed: " : "온라인 심볼 소스 사용: ") << (r.online_symbol_source_used ? "1" : "0") << "\n";
   if (!r.crash_bucket_key.empty()) {
     rpt << (en ? "CrashBucketKey: " : "크래시 버킷 키: ") << WideToUtf8(r.crash_bucket_key) << "\n";
   }
@@ -285,7 +347,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     rpt << (en ? "InferredMod: " : "추정 모드: ") << WideToUtf8(r.inferred_mod_name) << "\n";
   }
   if (!r.crash_logger_log_path.empty()) {
-    rpt << (en ? "CrashLoggerLog: " : "Crash Logger 로그: ") << WideToUtf8(r.crash_logger_log_path) << "\n";
+    rpt << (en ? "CrashLoggerLog: " : "Crash Logger 로그: ") << WideToUtf8(MaybeRedactPath(r.crash_logger_log_path, redactPaths)) << "\n";
   }
   if (!r.crash_logger_version.empty()) {
     rpt << (en ? "CrashLoggerVersion: " : "Crash Logger 버전: ") << WideToUtf8(r.crash_logger_version) << "\n";
@@ -329,14 +391,15 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
       rpt << " score=" << s.score << "\n";
       rpt << "  " << WideToUtf8(s.reason) << "\n";
       if (!s.module_path.empty()) {
-        rpt << "  path=" << WideToUtf8(s.module_path) << "\n";
+        rpt << "  path=" << WideToUtf8(MaybeRedactPath(s.module_path, redactPaths)) << "\n";
       }
     }
   }
   if (!r.resources.empty()) {
     rpt << (en ? "\nRecent resources (.nif/.hkx/.tri):\n" : "\n최근 리소스(.nif/.hkx/.tri):\n");
     for (const auto& rr : r.resources) {
-      rpt << "- t_ms=" << rr.t_ms << " tid=" << rr.tid << " [" << WideToUtf8(rr.kind) << "] " << WideToUtf8(rr.path);
+      rpt << "- t_ms=" << rr.t_ms << " tid=" << rr.tid << " [" << WideToUtf8(rr.kind) << "] "
+          << WideToUtf8(MaybeRedactPath(rr.path, redactPaths));
       if (!rr.providers.empty()) {
         rpt << " providers=" << WideToUtf8(JoinList(rr.providers, 10, L", "));
       }

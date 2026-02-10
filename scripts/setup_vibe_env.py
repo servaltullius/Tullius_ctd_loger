@@ -76,7 +76,14 @@ DEFAULT_CONFIG = {
         "**/*.xml",
     ],
     "critical_tags": ["@critical", "CRITICAL:"],
-    "context": {"latest_file": ".vibe/context/LATEST_CONTEXT.md", "max_recent_files": 12},
+    "context": {
+        "latest_file": ".vibe/context/LATEST_CONTEXT.md",
+        "max_recent_files": 12,
+        "commands": {
+            "doctor": "python3 scripts/vibe.py doctor --full",
+            "search": "python3 scripts/vibe.py search <query>",
+        },
+    },
     "checks": {"doctor": [], "precommit": []},
     "quality_gates": {
         "cycle_block": True,
@@ -101,6 +108,24 @@ DEFAULT_CONFIG = {
     },
     "profiling": {"enabled_by_default": False, "mode": "dotnet", "entry": None},
 }
+
+
+BOUNDARIES_TEMPLATE_RULES = [
+    {
+        "name": "no_domain_to_infra",
+        "from_globs": ["src/domain/**", "domain/**"],
+        "to_globs": ["src/infra/**", "infra/**"],
+        "kinds": ["py_import", "py_from", "js_import"],
+        "reason": "Domain logic should not depend on infrastructure internals.",
+    },
+    {
+        "name": "no_ui_to_infra",
+        "from_globs": ["src/ui/**", "ui/**", "src/presentation/**", "presentation/**"],
+        "to_globs": ["src/infra/**", "infra/**"],
+        "kinds": ["py_import", "py_from", "js_import"],
+        "reason": "UI/presentation should use app/domain entrypoints instead of infra internals.",
+    },
+]
 
 
 DEFAULT_REQUIREMENTS = """watchdog>=4.0.0
@@ -134,9 +159,14 @@ DEFAULT_AGENT_CHECKLIST = """# AGENT_CHECKLIST (vibe-kit)
   - `python3 scripts/vibe.py search "<keyword>"`
 - (Optional) Detect boundary violations (architecture rules): `python3 scripts/vibe.py boundaries`
 - (Optional) Find logical coupling from git history: `python3 scripts/vibe.py coupling`
+  - Useful options: `--detect-renames`, `--max-churn-per-commit 5000`
+  - Decoupling playbooks: `.vibe/reports/decoupling_suggestions.md`
 - (Optional) Configure repo-specific checks in `.vibe/config.json` (`checks.doctor`, `checks.precommit`).
 - (Optional) Make a compact context pack for an agent:
   - `python3 scripts/vibe.py pack --scope=staged|changed|path|recent --out .vibe/context/PACK.md`
+- (Optional) Validate agent entrypoints are wired:
+  - `python3 scripts/vibe.py agents doctor`
+  - CI/strict mode: `python3 scripts/vibe.py agents doctor --fail`
 
 ## While coding
 - Keep changes small and localized.
@@ -183,6 +213,32 @@ def _write_json_if_missing(path: Path, obj: object) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return True
+
+
+def ensure_boundaries_template(config: dict) -> tuple[bool, str]:
+    """
+    Safely initialize starter architecture boundary rules.
+
+    - Idempotent: repeated calls do not duplicate rules.
+    - Non-destructive: existing non-empty architecture.rules are preserved.
+    """
+    arch = config.get("architecture")
+    if not isinstance(arch, dict):
+        arch = {}
+        config["architecture"] = arch
+
+    rules = arch.get("rules")
+    if isinstance(rules, list) and rules:
+        return False, "architecture.rules already configured; leaving existing rules unchanged"
+
+    arch.setdefault("enabled", True)
+    if not isinstance(arch.get("python_roots"), list) or not arch.get("python_roots"):
+        arch["python_roots"] = ["src", "."]
+    if not isinstance(arch.get("js_aliases"), dict):
+        arch["js_aliases"] = {}
+
+    arch["rules"] = json.loads(json.dumps(BOUNDARIES_TEMPLATE_RULES))
+    return True, f"added {len(BOUNDARIES_TEMPLATE_RULES)} starter architecture.rules entries"
 
 
 def main(argv: list[str]) -> int:

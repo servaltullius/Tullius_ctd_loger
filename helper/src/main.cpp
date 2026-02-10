@@ -563,6 +563,14 @@ bool StartDumpToolProcess(
   return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, createFlags, nullptr, err);
 }
 
+void AppendOnlineSymbolFlag(std::wstring* cmd, bool allowOnlineSymbols)
+{
+  if (!cmd) {
+    return;
+  }
+  *cmd += allowOnlineSymbols ? L" --allow-online-symbols" : L" --no-online-symbols";
+}
+
 void StartDumpToolHeadlessIfConfigured(
   const skydiag::helper::HelperConfig& cfg,
   const std::wstring& dumpPath,
@@ -575,6 +583,7 @@ void StartDumpToolHeadlessIfConfigured(
   const auto exe = ResolveDumpToolExe(cfg);
   std::wstring cmd =
     QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
+  AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
 
   std::wstring err;
   if (!StartDumpToolProcess(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, &err)) {
@@ -602,6 +611,7 @@ bool StartDumpToolHeadlessAsync(
   const auto exe = ResolveDumpToolExe(cfg);
   std::wstring cmd =
     QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
+  AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
   return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, outProcess, err);
 }
 
@@ -820,6 +830,7 @@ void StartDumpToolViewer(
 {
   const auto exe = ResolveDumpToolExe(cfg);
   std::wstring cmd = QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring());
+  AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
   cmd += cfg.autoOpenViewerBeginnerMode ? L" --simple-ui" : L" --advanced-ui";
 
   std::wstring err;

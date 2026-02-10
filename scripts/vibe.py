@@ -5,12 +5,18 @@ import argparse
 import base64
 import hashlib
 import io
+import json
 import subprocess
 import sys
 import textwrap
 import time
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
+
+try:
+    from setup_vibe_env import ensure_boundaries_template
+except ModuleNotFoundError:
+    from scripts.setup_vibe_env import ensure_boundaries_template
 
 
 def _repo_root() -> Path:
@@ -28,6 +34,38 @@ def _ensure_bootstrap(root: Path) -> None:
 def _run(script: Path, argv: list[str]) -> int:
     root = _repo_root()
     return subprocess.call([sys.executable, str(script), *argv], cwd=str(root))
+
+
+def _init_boundaries_template(root: Path) -> int:
+    cfg_path = root / ".vibe" / "config.json"
+    try:
+        cfg_raw = cfg_path.read_text(encoding="utf-8")
+        cfg_data = json.loads(cfg_raw)
+    except FileNotFoundError:
+        print(f"[boundaries] missing config: {cfg_path}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as e:
+        print(f"[boundaries] invalid JSON in {cfg_path}: {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"[boundaries] failed to read {cfg_path}: {e}", file=sys.stderr)
+        return 2
+
+    if not isinstance(cfg_data, dict):
+        print(f"[boundaries] invalid config root (expected object): {cfg_path}", file=sys.stderr)
+        return 2
+
+    changed, reason = ensure_boundaries_template(cfg_data)
+    if changed:
+        try:
+            cfg_path.write_text(json.dumps(cfg_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError as e:
+            print(f"[boundaries] failed to write {cfg_path}: {e}", file=sys.stderr)
+            return 2
+        print(f"[boundaries] initialized starter template in {cfg_path}")
+    else:
+        print(f"[boundaries] template unchanged: {reason}")
+    return 0
 
 
 def _seed_collect_files(root: Path) -> list[Path]:
@@ -94,17 +132,22 @@ def _seed_render_markdown(payload_zip: bytes, included_files: list[str]) -> str:
         "- It is **not** an AI agent runner/sandbox.\n"
         "- It makes **no network/API calls** by default.\n\n"
         f"- Created: `{created}`\n"
-        f"- Payload sha256: `{sha}`\n\n"
+        f"- Payload zip sha256 (internal; not for `--expected-seed-sha256`): `{sha}`\n"
+        "- `--expected-seed-sha256` must be the SHA256 of this markdown seed file from `SHA256SUMS`.\n\n"
         "## Install\n\n"
         "Download `vibekit_seed_install.py` and `SHA256SUMS` from the same GitHub Release as this seed file.\n\n"
+        "Use the exact seed filename you downloaded (typically `VIBEKIT_SEED-<version>-<sha256>.md`).\n\n"
         "**Linux/macOS:**\n\n"
         "1) Verify: `sha256sum -c SHA256SUMS`\n"
-        "2) Dry-run: `python3 vibekit_seed_install.py install VIBEKIT_SEED.md --root . --expected-seed-sha256 <sha256>`\n"
-        "3) Apply: `python3 vibekit_seed_install.py install VIBEKIT_SEED.md --root . --expected-seed-sha256 <sha256> --apply`\n\n"
+        "2) Dry-run: `python3 vibekit_seed_install.py install <seed-file> --root . --expected-seed-sha256 <seed-file-sha256>`\n"
+        "3) Apply: `python3 vibekit_seed_install.py install <seed-file> --root . --expected-seed-sha256 <seed-file-sha256> --apply`\n\n"
         "**Windows (PowerShell):**\n\n"
-        "1) Verify: `Get-FileHash .\\VIBEKIT_SEED.md -Algorithm SHA256`\n"
-        "2) Dry-run: `py vibekit_seed_install.py install VIBEKIT_SEED.md --root . --expected-seed-sha256 <sha256>`\n"
-        "3) Apply: `py vibekit_seed_install.py install VIBEKIT_SEED.md --root . --expected-seed-sha256 <sha256> --apply`\n\n"
+        "1) Verify: `Get-FileHash .\\<seed-file> -Algorithm SHA256`\n"
+        "2) Dry-run: `py vibekit_seed_install.py install <seed-file> --root . --expected-seed-sha256 <seed-file-sha256>`\n"
+        "3) Apply: `py vibekit_seed_install.py install <seed-file> --root . --expected-seed-sha256 <seed-file-sha256> --apply`\n\n"
+        "## Agent-safe sharing (important)\n\n"
+        "If you show this seed to an AI agent, share only the instruction/header section.\n"
+        "Do not include the long base64 payload block between `VIBEKIT_PAYLOAD_BASE64_BEGIN/END`.\n\n"
         "> Tip: Add `--agent codex|claude|copilot|cursor|gemini` to generate one agent instruction file.\n\n"
         "## Included files\n\n"
         f"{file_list}\n\n"
@@ -178,7 +221,21 @@ def main(argv: list[str]) -> int:
     p_bound.add_argument("--out", default=".vibe/reports/boundaries.json")
     p_bound.add_argument("--md-out", default=".vibe/reports/boundaries.md")
     p_bound.add_argument("--max-violations", type=int, default=200)
-    p_bound.add_argument("--best-effort", action="store_true", help="Never fail the process (exit 0).")
+    p_bound.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail when any boundary violation exists (takes precedence over --best-effort).",
+    )
+    p_bound.add_argument(
+        "--best-effort",
+        action="store_true",
+        help="Never fail the process (exit 0); ignored when --strict is set.",
+    )
+    p_bound.add_argument(
+        "--init-template",
+        action="store_true",
+        help="Initialize starter architecture.rules in `.vibe/config.json` when rules are empty.",
+    )
 
     p_qa = sub.add_parser("qa", help="Placeholder QA for xTranslator XML.")
     p_qa.add_argument("xml_path")
@@ -192,7 +249,7 @@ def main(argv: list[str]) -> int:
     p_pack.add_argument("--symbols-per-file", type=int, default=5)
     p_pack.add_argument("--refresh-index", action="store_true")
 
-    p_seed = sub.add_parser("seed", help="Export a single-file `VIBEKIT_SEED.md` (portable bootstrap).")
+    p_seed = sub.add_parser("seed", help="Export a portable single-file seed markdown.")
     p_seed.add_argument("--out", default="VIBEKIT_SEED.md")
     p_seed.add_argument("--force", action="store_true", help="Overwrite output file if it exists.")
 
@@ -201,6 +258,11 @@ def main(argv: list[str]) -> int:
     p_agents_lint = agents_sub.add_parser("lint", help="Warn if AGENTS.md files are near/over the Codex size limit.")
     p_agents_lint.add_argument("--max-kb", type=int, default=32)
     p_agents_lint.add_argument("--fail", action="store_true")
+    p_agents_doctor = agents_sub.add_parser(
+        "doctor",
+        help="Check agent instruction files include vibe-kit first-action entrypoints.",
+    )
+    p_agents_doctor.add_argument("--fail", action="store_true")
 
     p_precommit = sub.add_parser("precommit", help="Run staged-only precommit chain (if git exists).")
     p_precommit.add_argument("--run-tests", action="store_true", help="Also run core tests (slower).")
@@ -286,11 +348,17 @@ def main(argv: list[str]) -> int:
         return _run(brain / "change_coupling.py", coup_args)
 
     if args.cmd == "boundaries":
+        if args.init_template:
+            rc = _init_boundaries_template(root)
+            if rc:
+                return rc
         bound_args = [
             f"--out={args.out}",
             f"--md-out={args.md_out}",
             f"--max-violations={args.max_violations}",
         ]
+        if args.strict:
+            bound_args.append("--strict")
         if args.best_effort:
             bound_args.append("--best-effort")
         return _run(brain / "check_boundaries.py", bound_args)
@@ -335,6 +403,11 @@ def main(argv: list[str]) -> int:
             if args.fail:
                 lint_args.append("--fail")
             return _run(brain / "agents_lint.py", lint_args)
+        if args.agents_cmd == "doctor":
+            doctor_args: list[str] = []
+            if args.fail:
+                doctor_args.append("--fail")
+            return _run(brain / "agents_doctor.py", doctor_args)
         raise RuntimeError(f"unknown agents cmd: {args.agents_cmd}")
 
     raise RuntimeError(f"unknown cmd: {args.cmd}")

@@ -7,6 +7,7 @@ internal sealed class DumpToolInvocationOptions
     public string? Language { get; set; }
     public bool Headless { get; set; }
     public bool Debug { get; set; }
+    public bool AllowOnlineSymbols { get; set; }
     public bool ForceSimpleUi { get; set; }
     public bool ForceAdvancedUi { get; set; }
 
@@ -40,6 +41,18 @@ internal sealed class DumpToolInvocationOptions
             if (string.Equals(a, "--debug", StringComparison.OrdinalIgnoreCase))
             {
                 options.Debug = true;
+                continue;
+            }
+
+            if (string.Equals(a, "--allow-online-symbols", StringComparison.OrdinalIgnoreCase))
+            {
+                options.AllowOnlineSymbols = true;
+                continue;
+            }
+
+            if (string.Equals(a, "--no-online-symbols", StringComparison.OrdinalIgnoreCase))
+            {
+                options.AllowOnlineSymbols = false;
                 continue;
             }
 

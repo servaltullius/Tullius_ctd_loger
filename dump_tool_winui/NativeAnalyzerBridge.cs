@@ -94,14 +94,25 @@ internal static class NativeAnalyzerBridge
             return await Task.Run(() =>
             {
                 var err = new StringBuilder(4096);
-                var rc = SkyrimDiagAnalyzeDumpW(
-                    dumpPath,
-                    outDir,
-                    options.Language,
-                    options.Debug ? 1 : 0,
-                    err,
-                    err.Capacity);
-                return (rc, err.ToString());
+                var previous = Environment.GetEnvironmentVariable("SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS");
+                Environment.SetEnvironmentVariable(
+                    "SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS",
+                    options.AllowOnlineSymbols ? "1" : "0");
+                try
+                {
+                    var rc = SkyrimDiagAnalyzeDumpW(
+                        dumpPath,
+                        outDir,
+                        options.Language,
+                        options.Debug ? 1 : 0,
+                        err,
+                        err.Capacity);
+                    return (rc, err.ToString());
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable("SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS", previous);
+                }
             }, cancellationToken);
         }
         catch (DllNotFoundException ex)
@@ -118,4 +129,3 @@ internal static class NativeAnalyzerBridge
         }
     }
 }
-

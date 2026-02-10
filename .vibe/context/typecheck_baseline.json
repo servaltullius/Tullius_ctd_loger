@@ -1,0 +1,15 @@
+{
+  "timestamp": 1770372142.0270073,
+  "cmd": [
+    "dotnet",
+    "build",
+    "dump_tool_winui/SkyrimDiagDumpToolWinUI.csproj",
+    "-c",
+    "Release"
+  ],
+  "errors_count": 0,
+  "warnings_count": 0,
+  "errors": [],
+  "warnings": [],
+  "cmd_rc": 0
+}

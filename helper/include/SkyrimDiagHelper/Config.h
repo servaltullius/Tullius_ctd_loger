@@ -20,6 +20,7 @@ struct HelperConfig {
   bool enableManualCaptureHotkey = true;
   bool autoAnalyzeDump = true;
   std::wstring dumpToolExe = L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe";
+  bool allowOnlineSymbols = false;
   bool autoOpenViewerOnCrash = true;
   bool autoOpenCrashOnlyIfProcessExited = true;
   std::uint32_t autoOpenCrashWaitForExitMs = 2000;

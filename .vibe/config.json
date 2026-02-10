@@ -84,7 +84,24 @@
     "complexity_warn_threshold": 15,
     "max_method_lines_warn": 50,
     "max_nesting_warn": 4,
-    "max_params_warn": 5
+    "max_params_warn": 5,
+    "typecheck_cmd": [
+      "dotnet",
+      "build",
+      "dump_tool_winui/SkyrimDiagDumpToolWinUI.csproj",
+      "-c",
+      "Release"
+    ],
+    "typecheck_when_any_glob": [
+      "**/*.cs",
+      "**/*.csproj",
+      "**/*.fsproj",
+      "**/*.vbproj",
+      "**/*.sln",
+      "Directory.Build.props",
+      "Directory.Build.targets",
+      "global.json"
+    ]
   },
   "architecture": {
     "enabled": true,

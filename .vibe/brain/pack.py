@@ -154,6 +154,107 @@ def _files_recent(con, limit: int) -> list[str]:
     return [r["path"] for r in rows]
 
 
+def _has_any_glob(root: Path, patterns: list[str]) -> bool:
+    for pattern in patterns:
+        try:
+            next(root.rglob(pattern))
+            return True
+        except StopIteration:
+            continue
+        except Exception:
+            continue
+    return False
+
+
+def _detect_node_package_manager(root: Path) -> str:
+    package_json = root / "package.json"
+    if package_json.exists():
+        try:
+            data = json.loads(package_json.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        raw = data.get("packageManager")
+        if isinstance(raw, str) and raw.strip():
+            name = raw.strip().split("@", 1)[0].strip().lower()
+            if name in {"npm", "pnpm", "yarn", "bun"}:
+                return name
+
+    if (root / "bun.lock").exists() or (root / "bun.lockb").exists():
+        return "bun"
+    if (root / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (root / "yarn.lock").exists():
+        return "yarn"
+    if (root / "package-lock.json").exists():
+        return "npm"
+    return "npm"
+
+
+def _default_test_command(root: Path) -> str:
+    if _has_any_glob(root, ["*.sln", "*.csproj", "*.fsproj", "*.vbproj"]):
+        return "dotnet test"
+    if (root / "go.mod").exists():
+        return "go test ./..."
+    if (root / "Cargo.toml").exists():
+        return "cargo test"
+    if (root / "package.json").exists():
+        pm = _detect_node_package_manager(root)
+        if pm == "pnpm":
+            return "pnpm test"
+        if pm == "yarn":
+            return "yarn test"
+        if pm == "bun":
+            return "bun test"
+        return "npm test"
+    if (root / "pom.xml").exists():
+        return "mvn test"
+    if any(
+        (root / p).exists()
+        for p in ("gradlew", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts")
+    ):
+        return "./gradlew test" if (root / "gradlew").exists() else "gradle test"
+    if (root / "pytest.ini").exists():
+        return "pytest -q"
+
+    pyproject = root / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            text = pyproject.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            text = ""
+        if "[tool.pytest" in text:
+            return "pytest -q"
+
+    return "python3 -m unittest discover -s tests -p 'test*.py' -v"
+
+
+def _default_command_hints(root: Path) -> dict[str, str]:
+    test_cmd = _default_test_command(root)
+    has_vibe_cli = (root / "scripts" / "vibe.py").exists()
+    doctor_cmd = "python3 scripts/vibe.py doctor --full" if has_vibe_cli else test_cmd
+    search_cmd = "python3 scripts/vibe.py search <query>" if has_vibe_cli else "rg -n \"<query>\" ."
+    return {
+        "doctor": doctor_cmd,
+        "tests": test_cmd,
+        "search": search_cmd,
+    }
+
+
+def _resolve_command_hints(cfg) -> dict[str, str]:
+    hints = _default_command_hints(cfg.root)
+    raw = getattr(cfg, "context_commands", None) or {}
+    if not isinstance(raw, dict):
+        return hints
+    for key, val in raw.items():
+        if not isinstance(key, str) or not isinstance(val, str):
+            continue
+        k = key.strip().lower()
+        v = val.strip()
+        if k in hints and v:
+            hints[k] = v
+    return hints
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description="Generate a compact context PACK.md for LLMs.")
     ap.add_argument("--scope", choices=["staged", "changed", "path", "recent"], default="staged")
@@ -170,24 +271,30 @@ def main(argv: list[str]) -> int:
 
     con = connect()
     try:
+        if args.scope == "path" and not args.path:
+            print("[pack] --path is required for --scope=path", file=sys.stderr)
+            return 2
+
+        def _resolve_scope_files(scope_name: str) -> list[str]:
+            if scope_name == "staged":
+                return _files_staged(root)
+            if scope_name == "changed":
+                return _files_changed(root)
+            if scope_name == "recent":
+                return _files_recent(con, cfg.max_recent_files)
+            return _files_from_path(root, cfg, args.path)
+
         scope = args.scope
         if scope in ("staged", "changed") and not _git_available(root):
             print(f"[pack] scope={scope} requires git; falling back to scope=recent", file=sys.stderr)
             scope = "recent"
 
-        if scope == "staged":
-            rel_paths = _files_staged(root)
-        elif scope == "changed":
-            rel_paths = _files_changed(root)
-        elif scope == "recent":
-            rel_paths = _files_recent(con, cfg.max_recent_files)
-        else:
-            if not args.path:
-                print("[pack] --path is required for --scope=path", file=sys.stderr)
-                return 2
-            rel_paths = _files_from_path(root, cfg, args.path)
+        rel_paths = _filter_repo_files(root, cfg, _resolve_scope_files(scope))
+        if not rel_paths and scope in ("staged", "changed"):
+            print(f"[pack] scope={scope} resolved to no files; falling back to scope=recent", file=sys.stderr)
+            scope = "recent"
+            rel_paths = _filter_repo_files(root, cfg, _resolve_scope_files(scope))
 
-        rel_paths = _filter_repo_files(root, cfg, rel_paths)
         if not rel_paths:
             print("[pack] no matching files for scope", file=sys.stderr)
             return 2
@@ -260,12 +367,13 @@ def main(argv: list[str]) -> int:
 
         b.add("")
         b.add("## Commands")
-        b.add("- Full scan: `python3 scripts/vibe.py doctor --full`")
-        b.add("- Tests: `dotnet test tests/XTranslatorAi.Tests/XTranslatorAi.Tests.csproj -c Release`")
-        b.add("- Search: `python3 scripts/vibe.py search <query>`")
+        hints = _resolve_command_hints(cfg)
+        b.add(f"- Doctor: `{hints['doctor']}`")
+        b.add(f"- Tests: `{hints['tests']}`")
+        b.add(f"- Search: `{hints['search']}`")
         b.add("")
         b.add("## Notes")
-        b.add("- Treat runtime placeholders/tokens as a contract (`<mag>`, `<dur>`, `__XT_*__`, `[pagebreak]`).")
+        b.add("- Treat runtime placeholders/tokens as a contract (`<...>`, `{0}`, `%s`, `__TOKEN__`).")
 
         out_path = root / args.out
         out_path.parent.mkdir(parents=True, exist_ok=True)

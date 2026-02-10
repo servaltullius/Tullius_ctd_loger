@@ -16,4 +16,3 @@ __declspec(dllexport) int __stdcall SkyrimDiagAnalyzeDumpW(
   int errorBufChars);
 
 }
-

@@ -525,6 +525,7 @@ public sealed partial class MainWindow : Window
             Language = lang,
             Headless = headless,
             Debug = _startupOptions.Debug,
+            AllowOnlineSymbols = _startupOptions.AllowOnlineSymbols,
             ForceAdvancedUi = _startupOptions.ForceAdvancedUi,
             ForceSimpleUi = _startupOptions.ForceSimpleUi,
         };
