@@ -23,7 +23,9 @@ When doing code review / refactoring / decoupling / architecture work on this re
 - `architecture-decision-records`: Write/maintain ADRs for major design decisions.
 - `c4-architecture`: Generate C4 Mermaid diagrams for documentation.
 
-Superpowers (invoke via `~/.codex/superpowers/.codex/superpowers-codex use-skill <name>`):
+Superpowers:
+- Superpowers skills are available under `~/.agents/skills/superpowers/` (auto-discovered).
+- Open the corresponding `SKILL.md` and follow the checklist.
 - `superpowers:systematic-debugging`: Root-cause-first bug fixing.
 - `superpowers:verification-before-completion`: Evidence before “fixed”.
 - `superpowers:test-driven-development`: Add minimal failing tests before fixes.
@@ -35,7 +37,24 @@ Superpowers (invoke via `~/.codex/superpowers/.codex/superpowers-codex use-skill
   - `plugin/` : `SkyrimDiag.dll` (SKSE 플러그인, 블랙박스 이벤트/리소스 기록)
   - `helper/` : `SkyrimDiagHelper.exe` (out-of-proc, CTD/프리징 감지 및 덤프 생성)
   - `dump_tool/` : `SkyrimDiagDumpToolNative.dll` (덤프/스트림 분석 엔진)
+  - `dump_tool_cli/` : `SkyrimDiagDumpToolCli.exe` (헤드리스 분석기, 창 없음)
   - `dump_tool_winui/` : `SkyrimDiagDumpToolWinUI.exe` (WinUI 뷰어 셸)
+
+## Docs (Quick Links)
+
+- End-users:
+  - `README.md` (KO main)
+  - `docs/README_KO.md` (KO expanded)
+  - `docs/BETA_TESTING.md` (issue template / reporting guide)
+- Contributors:
+  - `docs/DEVELOPMENT.md`
+
+## Tests (Fast)
+
+Linux:
+```bash
+ctest --test-dir build-linux-test --output-on-failure
+```
 
 ## Build / Package (Windows)
 
@@ -52,6 +71,7 @@ Superpowers (invoke via `~/.codex/superpowers/.codex/superpowers-codex use-skill
 ### Build
 
 - Run: `scripts\build-win.cmd`
+- WinUI: `scripts\build-winui.cmd`
 - Output build dir: `C:\Users\kdw73\SkyrimDiag\build-win`
 
 ### Package (MO2 설치용 zip)
