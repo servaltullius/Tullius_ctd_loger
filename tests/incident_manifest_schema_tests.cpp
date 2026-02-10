@@ -33,18 +33,35 @@ int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
 
-  const std::filesystem::path helperMainPath = repoRoot / "helper" / "src" / "main.cpp";
-  if (!std::filesystem::exists(helperMainPath)) {
-    std::cerr << "ERROR: helper/src/main.cpp not found at: " << helperMainPath << "\n";
+  const std::filesystem::path helperSrcDir = repoRoot / "helper" / "src";
+  if (!std::filesystem::exists(helperSrcDir) || !std::filesystem::is_directory(helperSrcDir)) {
+    std::cerr << "ERROR: helper/src not found at: " << helperSrcDir << "\n";
     return 1;
   }
-  std::string helperMain;
-  if (!ReadAllText(helperMainPath, &helperMain)) {
-    std::cerr << "ERROR: failed to read: " << helperMainPath << "\n";
-    return 1;
+  bool foundIncidentNaming = false;
+  std::size_t scannedFiles = 0;
+  for (const auto& entry : std::filesystem::directory_iterator(helperSrcDir)) {
+    if (!entry.is_regular_file()) {
+      continue;
+    }
+    const auto path = entry.path();
+    const auto ext = path.extension().string();
+    if (ext != ".cpp" && ext != ".h") {
+      continue;
+    }
+    std::string txt;
+    if (!ReadAllText(path, &txt)) {
+      std::cerr << "ERROR: failed to read: " << path << "\n";
+      return 1;
+    }
+    scannedFiles++;
+    if (Contains(txt, "SkyrimDiag_Incident_")) {
+      foundIncidentNaming = true;
+      break;
+    }
   }
-  if (!Contains(helperMain, "SkyrimDiag_Incident_")) {
-    std::cerr << "ERROR: Helper output naming must include SkyrimDiag_Incident_\n";
+  if (!foundIncidentNaming) {
+    std::cerr << "ERROR: Helper output naming must include SkyrimDiag_Incident_ (scanned " << scannedFiles << " files)\n";
     return 1;
   }
 

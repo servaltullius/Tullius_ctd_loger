@@ -6,11 +6,23 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME}
   src/Config.cpp
+  src/CrashEtwCapture.cpp
+  src/CrashCapture.cpp
+  src/DumpToolLaunch.cpp
   src/DumpWriter.cpp
+  src/EtwCapture.cpp
+  src/HangCapture.cpp
+  src/HelperCommon.cpp
+  src/HelperLog.cpp
   src/HangDetect.cpp
+  src/IncidentManifest.cpp
   src/LoadStats.cpp
+  src/ManualCapture.cpp
+  src/PendingCrashAnalysis.cpp
   src/ProcessAttach.cpp
+  src/ProcessUtil.cpp
   src/WctCapture.cpp
+  src/WindowHeuristics.cpp
   src/main.cpp
   include/SkyrimDiagHelper/Config.h
   include/SkyrimDiagHelper/DumpWriter.h
