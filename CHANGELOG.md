@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.13 (2026-02-10)
+
+### Changed
+- Internal refactor only: split DumpTool evidence builder internals into smaller modules (no behavior changes).
+
+### Added
+- Internal regression tests: harden CrashLogger parser fixtures for v1.20 format variations (callstack rows + version header variants).
+
 ## v0.2.12 (2026-02-10)
 
 ### Changed
