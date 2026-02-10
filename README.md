@@ -3,8 +3,8 @@
 > **한국어 안내(메인)** + **이슈 리포팅 가이드** 포함  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> Latest release: `v0.2.10`  
-> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.10
+> Latest release: `v0.2.11`  
+> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.11
 
 ## Quick Intro (English)
 

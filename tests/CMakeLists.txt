@@ -212,6 +212,22 @@ set_target_properties(skydiag_dump_tool_headless_resolver_tests PROPERTIES
 
 add_test(NAME skydiag_dump_tool_headless_resolver_tests COMMAND skydiag_dump_tool_headless_resolver_tests)
 
+add_executable(skydiag_headless_analysis_policy_tests
+  headless_analysis_policy_tests.cpp
+)
+
+target_include_directories(skydiag_headless_analysis_policy_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+
+set_target_properties(skydiag_headless_analysis_policy_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_headless_analysis_policy_tests COMMAND skydiag_headless_analysis_policy_tests)
+
 add_test(
   NAME skydiag_bucket_quality_script_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"

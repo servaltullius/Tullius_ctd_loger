@@ -16,6 +16,7 @@
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/CrashRecapturePolicy.h"
+#include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/DumpToolResolve.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangSuppression.h"
@@ -1283,9 +1284,14 @@ int wmain(int argc, wchar_t** argv)
         AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
       }
 
-      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-      if (cfg.autoOpenViewerOnManualCapture) {
+      const bool viewerNow = cfg.autoOpenViewerOnManualCapture;
+      if (viewerNow) {
         StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+      }
+      if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
+        StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      } else if (viewerNow && cfg.autoAnalyzeDump) {
+        AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
       }
       skydiag::helper::RetentionLimits limits{};
       limits.maxCrashDumps = cfg.maxCrashDumps;
@@ -1475,18 +1481,17 @@ int wmain(int argc, wchar_t** argv)
             }
           }
 
-          if (!crashAnalysisQueued) {
-            StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-          }
-
+          bool viewerNow = false;
           if (cfg.autoOpenViewerOnCrash) {
             if (!cfg.autoOpenCrashOnlyIfProcessExited) {
               StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
+              viewerNow = true;
             } else if (proc.process) {
               const DWORD waitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
               const DWORD wExit = WaitForSingleObject(proc.process, waitMs);
               if (wExit == WAIT_OBJECT_0) {
                 StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
+                viewerNow = true;
                 AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash after process exit.");
               } else if (wExit == WAIT_TIMEOUT) {
                 AppendLogLine(outBase, L"Crash dump captured but process is still running; skipping viewer auto-open.");
@@ -1496,6 +1501,14 @@ int wmain(int argc, wchar_t** argv)
               }
             } else {
               AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
+            }
+          }
+
+          if (!crashAnalysisQueued) {
+            if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
+              StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+            } else if (viewerNow && cfg.autoAnalyzeDump) {
+              AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
             }
           }
           skydiag::helper::RetentionLimits limits{};
@@ -1843,7 +1856,7 @@ int wmain(int argc, wchar_t** argv)
         manifestWritten = true;
       }
 
-      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      const bool viewerNow = cfg.autoOpenViewerOnHang && !cfg.autoOpenHangAfterProcessExit;
       if (cfg.autoOpenViewerOnHang) {
         if (cfg.autoOpenHangAfterProcessExit) {
           pendingHangViewerDumpPath = dumpPath;
@@ -1851,6 +1864,11 @@ int wmain(int argc, wchar_t** argv)
         } else {
           StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
         }
+      }
+      if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
+        StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      } else if (viewerNow && cfg.autoAnalyzeDump) {
+        AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
       }
       skydiag::helper::RetentionLimits limits{};
       limits.maxCrashDumps = cfg.maxCrashDumps;

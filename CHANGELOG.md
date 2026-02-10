@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.11 (2026-02-10)
+
+### Changed
+- Avoid duplicate analysis: when Helper auto-opens the WinUI viewer for a dump, it now skips headless auto-analysis for that same dump.
+
+### Added
+- New regression test: `tests/headless_analysis_policy_tests.cpp`
+
 ## v0.2.10 (2026-02-10)
 
 ### Added
