@@ -3,7 +3,7 @@
 > **한국어 안내(메인)** (플레이어/사용자용)  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> Latest release: `v0.2.12` (stable)  
+> Latest release: `v0.2.15`  
 > Download: https://github.com/servaltullius/Tullius_ctd_loger/releases/latest  
 > 참고: GitHub Releases 화면 왼쪽의 "tags N"은 **태그 개수 표시**이며, 릴리즈 목록/안정판 여부와는 별개입니다.
 
@@ -19,7 +19,46 @@ Tullius CTD Logger (SkyrimDiag) is a best-effort diagnostics tool for Skyrim SE/
 - Notes: some exceptions are handled and the game may keep running. To reduce “viewer popups while the game continues”, keep `AutoOpenCrashOnlyIfProcessExited=1` (default) or disable crash auto-open with `AutoOpenViewerOnCrash=0`.
 - Retention: helper can auto-clean old dumps and derived artifacts (`MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`) and rotate its own log (`MaxHelperLogBytes`, `MaxHelperLogFiles`).
 
+### Requirements (English)
+
+- Skyrim SE/AE (Windows)
+- SKSE64: https://skse.silverlock.org/
+- Address Library for SKSE Plugins: https://www.nexusmods.com/skyrimspecialedition/mods/32444
+- WinUI viewer prerequisites:
+  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+  - Windows App Runtime 1.8 (x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+- Optional (recommended): Crash Logger SSE AE VR - PDB support: https://www.nexusmods.com/skyrimspecialedition/mods/59818
+
+### Quick Start (English)
+
+1) Install the requirements above  
+2) Install the release zip in MO2/Vortex as a mod and enable it  
+3) Launch Skyrim via SKSE  
+4) When a crash/hang happens, check MO2 overwrite `overwrite\\SKSE\\Plugins\\` for `*.dmp` and open it with `SkyrimDiagDumpToolWinUI.exe` (drag & drop)  
+5) Manual snapshot hotkey: `Ctrl+Shift+F12`
+   - Manual snapshots taken during normal gameplay may produce low-confidence reports.
+   - Best used when the game is already stuck (hang/ILS) or right before a CTD.
+
+### Language (English/Korean)
+
+- The WinUI DumpTool UI follows your Windows UI language by default.
+- Override via command line:
+  - Korean: `SkyrimDiagDumpToolWinUI.exe --lang ko`
+  - English: `SkyrimDiagDumpToolWinUI.exe --lang en`
+
 ## 한국어 안내
+
+### 0) 필수 선행(요구사항)
+
+- Skyrim SE/AE (Windows)
+- SKSE64: https://skse.silverlock.org/
+- Address Library for SKSE Plugins: https://www.nexusmods.com/skyrimspecialedition/mods/32444
+- WinUI 뷰어 선행 런타임:
+  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
+  - Windows App Runtime 1.8 (x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+- (선택/권장) Crash Logger SSE AE VR - PDB support: https://www.nexusmods.com/skyrimspecialedition/mods/59818
 
 ### 1) 무엇인가요?
 
@@ -71,6 +110,24 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
   - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
 
+### 3-2) 사용법 (가장 쉬운 흐름)
+
+- CTD/프리징/무한로딩이 발생하면 덤프(`*.dmp`)와 리포트가 생성됩니다.
+- WinUI DumpTool로 열기:
+  - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe` 실행
+  - `.dmp`를 드래그&드롭(또는 “덤프 선택”) → “지금 분석”
+- 수동 스냅샷 캡처:
+  - 핫키: `Ctrl+Shift+F12`
+  - 정상 플레이 중 찍은 스냅샷 덤프는 예외 스트림이 없을 수 있어 “유력 후보”를 특정하기 어렵고 신뢰도가 낮게 나올 수 있습니다.
+  - 프리징/무한로딩/CTD 직전 등 “문제 상황”에서 찍는 것이 가장 유효합니다.
+
+### 3-3) 언어 (한국어/영어)
+
+- WinUI DumpTool UI는 기본적으로 Windows UI 언어를 따릅니다.
+- 강제(명령행):
+  - 한국어: `SkyrimDiagDumpToolWinUI.exe --lang ko`
+  - 영어: `SkyrimDiagDumpToolWinUI.exe --lang en`
+
 ### 4) 출력 위치
 
 - 기본적으로 결과(덤프/리포트)는 보통 MO2 `overwrite\\SKSE\\Plugins\\`에 생성됩니다.
@@ -95,6 +152,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `*_SkyrimDiagReport.txt`
   - `*_SkyrimDiagSummary.json`
   - `SkyrimDiag_Incident_*.json`
+  - (있다면) `*_SkyrimDiagNativeException.log`
   - (있다면) `*_SkyrimDiagBlackbox.jsonl`, `SkyrimDiag_WCT_*.json`, `SkyrimDiag_Crash_*.etl` / `SkyrimDiag_Hang_*.etl`
 - (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
 

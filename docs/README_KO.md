@@ -3,8 +3,15 @@
 > 이 프로젝트는 **Skyrim SE/AE** 환경에서 CTD(크래시) / 프리징 / 무한로딩을 **best-effort**로 진단하기 위한 도구입니다.  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> 최신 릴리즈: `v0.2.12` (stable)  
+> 최신 릴리즈: `v0.2.15`  
 > https://github.com/servaltullius/Tullius_ctd_loger/releases/latest
+
+## 필수 선행(요구사항)
+
+- Skyrim SE/AE (Windows)
+- SKSE64: https://skse.silverlock.org/
+- Address Library for SKSE Plugins: https://www.nexusmods.com/skyrimspecialedition/mods/32444
+- (선택/권장) Crash Logger SSE AE VR - PDB support: https://www.nexusmods.com/skyrimspecialedition/mods/59818
 
 ## 구성 요소
 
@@ -45,6 +52,13 @@
   - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
   - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
   - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+
+## 언어 (한국어/영어)
+
+- WinUI DumpTool UI는 기본적으로 Windows UI 언어를 따릅니다.
+- 강제(명령행):
+  - 한국어: `SkyrimDiagDumpToolWinUI.exe --lang ko`
+  - 영어: `SkyrimDiagDumpToolWinUI.exe --lang en`
 
 ## 기본 동작/출력 위치
 
