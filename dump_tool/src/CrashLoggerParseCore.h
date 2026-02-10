@@ -132,6 +132,84 @@ inline bool StartsWithCaseInsensitiveAscii(std::string_view s, std::string_view 
   return true;
 }
 
+inline bool EqualsCaseInsensitiveAscii(std::string_view a, std::string_view b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  return StartsWithCaseInsensitiveAscii(a, b);
+}
+
+inline std::optional<std::string> ParseCrashLoggerIniCrashlogDirectoryAscii(std::string_view iniUtf8)
+{
+  // CrashLogger.ini uses [Debug] Crashlog Directory=... to override output directory.
+  // We parse this ourselves (best-effort) to improve offline log discovery when users customize the location.
+  std::istringstream iss{ std::string(iniUtf8) };
+  std::string line;
+
+  bool inDebug = false;
+  while (std::getline(iss, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+
+    std::string_view s = TrimAscii(line);
+    if (s.empty()) {
+      continue;
+    }
+    const char c0 = s.front();
+    if (c0 == ';' || c0 == '#') {
+      continue;
+    }
+
+    if (c0 == '[' && s.back() == ']') {
+      const std::string_view sec = TrimAscii(s.substr(1, s.size() - 2));
+      inDebug = EqualsCaseInsensitiveAscii(sec, "debug");
+      continue;
+    }
+
+    if (!inDebug) {
+      continue;
+    }
+
+    const auto eq = s.find('=');
+    if (eq == std::string_view::npos) {
+      continue;
+    }
+    const std::string_view key = TrimRightAscii(s.substr(0, eq));
+    std::string_view val = TrimAscii(s.substr(eq + 1));
+
+    if (!EqualsCaseInsensitiveAscii(key, "crashlog directory")) {
+      continue;
+    }
+
+    // Strip quotes and/or inline comments.
+    if (!val.empty() && val.front() == '"') {
+      // Handle: "C:\path with spaces" ; comment
+      const auto endq = val.find('"', 1);
+      if (endq != std::string_view::npos) {
+        val = val.substr(1, endq - 1);
+      } else {
+        val.remove_prefix(1);
+      }
+      val = TrimAscii(val);
+    } else {
+      // Handle: C:\path ; comment
+      const auto cut = val.find_first_of(";#");
+      if (cut != std::string_view::npos) {
+        val = TrimRightAscii(val.substr(0, cut));
+      }
+    }
+
+    if (val.empty()) {
+      return std::nullopt;
+    }
+    return std::string(val);
+  }
+
+  return std::nullopt;
+}
+
 inline bool IsSystemishModuleAsciiLower(std::string_view filenameLower)
 {
   const char* k[] = {

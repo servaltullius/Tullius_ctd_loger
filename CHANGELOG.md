@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.14 (2026-02-10)
+
+### Changed
+- CrashLogger integration: if CrashLogger.ini sets `Crashlog Directory`, SkyrimDiag will also search that folder when auto-detecting CrashLogger logs (best-effort).
+
+### Added
+- Internal regression tests: parse CrashLogger.ini `Crashlog Directory` (quotes/spacing/comments).
+
 ## v0.2.13 (2026-02-10)
 
 ### Changed

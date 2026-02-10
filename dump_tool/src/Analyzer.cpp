@@ -314,8 +314,20 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     if (shouldSearchCrashLogger) {
       std::wstring clErr;
       const auto dumpFs = std::filesystem::path(dumpPath);
+      std::optional<std::filesystem::path> gameRootDir;
+      for (const auto& m : allModules) {
+        if (m.path.empty() || m.filename.empty()) {
+          continue;
+        }
+        const std::wstring lower = WideLower(m.filename);
+        if (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe") {
+          gameRootDir = std::filesystem::path(m.path).parent_path();
+          break;
+        }
+      }
+
       const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
-      if (auto logPath = TryFindCrashLoggerLogForDump(dumpFs, mo2Base, &clErr)) {
+      if (auto logPath = TryFindCrashLoggerLogForDump(dumpFs, mo2Base, mo2Index ? &*mo2Index : nullptr, gameRootDir, &clErr)) {
         out.crash_logger_log_path = logPath->wstring();
 
         std::wstring readErr;

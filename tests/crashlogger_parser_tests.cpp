@@ -6,6 +6,7 @@
 
 using skydiag::dump_tool::LooksLikeCrashLoggerLogTextCore;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii;
+using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerIniCrashlogDirectoryAscii;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerVersionAscii;
 using skydiag::dump_tool::ParseCrashLoggerTopModulesAsciiLower;
 
@@ -230,6 +231,42 @@ static void Test_ParseCrashLoggerVersion_WithFourPartDottedVersion()
   assert(*ver == "v1.20.0.0");
 }
 
+static void Test_ParseCrashLoggerIni_CrashlogDirectory_Basic()
+{
+  const std::string s =
+    "; comment\n"
+    "[Debug]\n"
+    "Crashlog Directory=C:\\\\Logs\\\\CrashLogger\n";
+
+  const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
+  assert(dir);
+  assert(*dir == "C:\\\\Logs\\\\CrashLogger");
+}
+
+static void Test_ParseCrashLoggerIni_CrashlogDirectory_QuotedAndSpaced()
+{
+  const std::string s =
+    "[Other]\n"
+    "Crashlog Directory=C:\\\\Wrong\n"
+    "\n"
+    "[debug]\n"
+    " Crashlog Directory =  \"D:\\\\Custom Logs\\\\CrashLogger\"  \n";
+
+  const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
+  assert(dir);
+  assert(*dir == "D:\\\\Custom Logs\\\\CrashLogger");
+}
+
+static void Test_ParseCrashLoggerIni_CrashlogDirectory_EmptyIsNone()
+{
+  const std::string s =
+    "[Debug]\n"
+    "Crashlog Directory=\n";
+
+  const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
+  assert(!dir);
+}
+
 static void Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe()
 {
   const std::string s =
@@ -263,6 +300,9 @@ int main()
   Test_ParseCrashLoggerVersion_WithBuildTime();
   Test_ParseCrashLoggerVersion_WithHyphensAndBuildTime();
   Test_ParseCrashLoggerVersion_WithFourPartDottedVersion();
+  Test_ParseCrashLoggerIni_CrashlogDirectory_Basic();
+  Test_ParseCrashLoggerIni_CrashlogDirectory_QuotedAndSpaced();
+  Test_ParseCrashLoggerIni_CrashlogDirectory_EmptyIsNone();
   Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe();
   return 0;
 }

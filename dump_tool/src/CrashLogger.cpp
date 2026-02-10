@@ -1,5 +1,6 @@
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
+#include "Mo2Index.h"
 #include "Utf.h"
 
 #include <Windows.h>
@@ -337,15 +338,128 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
   return dirs;
 }
 
+std::optional<std::filesystem::path> TryFindCrashLoggerIniPath(const Mo2Index* mo2Index, const std::optional<std::filesystem::path>& gameRootDir)
+{
+  std::error_code ec;
+
+  const auto tryPath = [&](const std::filesystem::path& p) -> std::optional<std::filesystem::path> {
+    if (p.empty()) {
+      return std::nullopt;
+    }
+    if (std::filesystem::is_regular_file(p, ec)) {
+      return p;
+    }
+    return std::nullopt;
+  };
+
+  const std::filesystem::path relVariants[] = {
+    std::filesystem::path(L"SKSE") / L"Plugins" / L"CrashLogger.ini",
+    std::filesystem::path(L"Data") / L"SKSE" / L"Plugins" / L"CrashLogger.ini",
+  };
+
+  // MO2: overwrite wins, then enabled mods by priority (winner-first ordering).
+  if (mo2Index) {
+    for (const auto& rel : relVariants) {
+      if (auto p = tryPath(mo2Index->overwriteDir / rel)) {
+        return p;
+      }
+    }
+    for (const auto& modDir : mo2Index->modDirs) {
+      for (const auto& rel : relVariants) {
+        if (auto p = tryPath(modDir / rel)) {
+          return p;
+        }
+      }
+    }
+  }
+
+  // Non-MO2 / fallback: game root Data/SKSE/Plugins/CrashLogger.ini.
+  if (gameRootDir) {
+    if (auto p = tryPath((*gameRootDir) / L"Data" / L"SKSE" / L"Plugins" / L"CrashLogger.ini")) {
+      return p;
+    }
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::filesystem::path> TryReadCrashLoggerCrashlogDirFromIni(
+  const Mo2Index* mo2Index,
+  const std::optional<std::filesystem::path>& gameRootDir)
+{
+  const auto iniPath = TryFindCrashLoggerIniPath(mo2Index, gameRootDir);
+  if (!iniPath) {
+    return std::nullopt;
+  }
+
+  std::wstring readErr;
+  const auto iniUtf8 = ReadWholeFileUtf8(*iniPath, &readErr);
+  if (!iniUtf8) {
+    return std::nullopt;
+  }
+
+  const auto dirUtf8 = crashlogger_core::ParseCrashLoggerIniCrashlogDirectoryAscii(*iniUtf8);
+  if (!dirUtf8 || dirUtf8->empty()) {
+    return std::nullopt;
+  }
+
+  std::wstring w = Utf8ToWide(*dirUtf8);
+  while (!w.empty() && (w.front() == L' ' || w.front() == L'\t')) {
+    w.erase(w.begin());
+  }
+  while (!w.empty() && (w.back() == L' ' || w.back() == L'\t')) {
+    w.pop_back();
+  }
+  if (w.empty()) {
+    return std::nullopt;
+  }
+
+  std::filesystem::path p(w);
+  if (p.empty()) {
+    return std::nullopt;
+  }
+
+  // CrashLogger treats a relative Crashlog Directory as relative to the game process working directory (typically the game root).
+  // For offline analysis, only resolve relative paths when we have a gameRootDir hint.
+  if (p.is_relative()) {
+    if (gameRootDir) {
+      return (*gameRootDir) / p;
+    }
+    return std::nullopt;
+  }
+
+  return p;
+}
+
 }  // namespace
 
 std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   const std::filesystem::path& dumpPath,
   const std::optional<std::filesystem::path>& mo2BaseDir,
+  const Mo2Index* mo2Index,
+  const std::optional<std::filesystem::path>& gameRootDir,
   std::wstring* err)
 {
   const std::uint64_t targetTime = BestEffortDumpTimestampFileTimeUtc(dumpPath);
-  const auto dirs = BuildCrashLoggerCandidateDirs(mo2BaseDir);
+  auto dirs = BuildCrashLoggerCandidateDirs(mo2BaseDir);
+
+  // If the user configured CrashLogger.ini Crashlog Directory, also search there.
+  if (auto customDir = TryReadCrashLoggerCrashlogDirFromIni(mo2Index, gameRootDir)) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(*customDir, ec)) {
+      const std::wstring lower = WideLower(customDir->wstring());
+      bool already = false;
+      for (const auto& d : dirs) {
+        if (WideLower(d.wstring()) == lower) {
+          already = true;
+          break;
+        }
+      }
+      if (!already) {
+        dirs.push_back(*customDir);
+      }
+    }
+  }
 
   // Crash Logger logs should be created around the crash moment. If nothing is close in time, don't attach an older
   // unrelated log (confusing).

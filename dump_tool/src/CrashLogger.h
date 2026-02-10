@@ -9,11 +9,17 @@
 
 namespace skydiag::dump_tool {
 
+struct Mo2Index;
+
 // Best-effort: locate the Crash Logger SSE/AE log file closest in time to the given dump.
 // mo2BaseDir is optional; if provided, we also search typical MO2 folders (overwrite/profiles).
+// mo2Index is optional; if provided, we can consult the active MO2 left-pane ordering for config files.
+// gameRootDir is optional; if provided, it is used to resolve CrashLogger.ini and relative Crashlog Directory paths.
 std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   const std::filesystem::path& dumpPath,
   const std::optional<std::filesystem::path>& mo2BaseDir,
+  const Mo2Index* mo2Index,
+  const std::optional<std::filesystem::path>& gameRootDir,
   std::wstring* err);
 
 // Reads a whole text file as UTF-8/bytes (Crash Logger logs are typically ASCII/UTF-8).
@@ -26,4 +32,3 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower);
 
 }  // namespace skydiag::dump_tool
-
