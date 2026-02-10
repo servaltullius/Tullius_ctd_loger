@@ -197,6 +197,39 @@ static void Test_ParseCrashLoggerVersion()
   assert(*ver == "v1.19.0");
 }
 
+static void Test_ParseCrashLoggerVersion_WithBuildTime()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-02-10 12:34:56\n";
+
+  const auto ver = ParseCrashLoggerVersionAscii(s);
+  assert(ver);
+  assert(*ver == "v1.20.0");
+}
+
+static void Test_ParseCrashLoggerVersion_WithHyphensAndBuildTime()
+{
+  const std::string s =
+    "CrashLoggerSSE v1-20-0-0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-02-10 12:34:56\n";
+
+  const auto ver = ParseCrashLoggerVersionAscii(s);
+  assert(ver);
+  assert(*ver == "v1-20-0-0");
+}
+
+static void Test_ParseCrashLoggerVersion_WithFourPartDottedVersion()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.20.0.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-02-10 12:34:56\n";
+
+  const auto ver = ParseCrashLoggerVersionAscii(s);
+  assert(ver);
+  assert(*ver == "v1.20.0.0");
+}
+
 static void Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe()
 {
   const std::string s =
@@ -227,6 +260,9 @@ int main()
   Test_ParseCppExceptionDetails();
   Test_ParseCppExceptionDetails_WithFlexibleSpacing();
   Test_ParseCrashLoggerVersion();
+  Test_ParseCrashLoggerVersion_WithBuildTime();
+  Test_ParseCrashLoggerVersion_WithHyphensAndBuildTime();
+  Test_ParseCrashLoggerVersion_WithFourPartDottedVersion();
   Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe();
   return 0;
 }
