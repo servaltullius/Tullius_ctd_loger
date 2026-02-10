@@ -3,13 +3,15 @@
 > **한국어 안내(메인)** + **이슈 리포팅 가이드** 포함  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> Latest release: `v0.2.8`  
-> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.8
+> Latest release: `v0.2.9`  
+> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.9
 
 ## Quick Intro (English)
 
 Tullius CTD Logger (SkyrimDiag) is a best-effort diagnostics tool for Skyrim SE/AE that captures **CTD / hang / infinite loading** and produces a readable report (summary + evidence + checklist) without requiring WinDbg.
 
+- Important: this is **not** a crash-prevention mod. It records signals and captures evidence, but it does not swallow exceptions or try to “recover and keep playing”.
+- No uploads/telemetry: outputs are written locally. Online symbol downloads are **OFF** by default (`AllowOnlineSymbols=0`).
 - Components: SKSE plugin + out-of-proc helper + WinUI DumpTool (viewer) backed by a native analyzer.
 - CrashLoggerSSE integration: auto-detects `crash-*.log` / `threaddump-*.log` and surfaces top callstack modules, C++ exception blocks, and the CrashLogger version string.
 - Extra evidence: interprets minidump exception parameters for common codes (e.g. access violation read/write/execute + address).
@@ -23,6 +25,8 @@ Tullius CTD Logger (SkyrimDiag) is a best-effort diagnostics tool for Skyrim SE/
 Skyrim SE/AE 환경에서 **CTD(크래시) / 프리징 / 무한로딩** 상황을 best-effort로 캡처하고,
 WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태로 보여주는 진단 도구입니다.
 
+- **크래시를 막아주는 모드가 아닙니다.** 예외를 삼키거나(access violation을 무시하고) 실행을 계속하려고 하지 않습니다.
+- **업로드/텔레메트리 없음.** 결과물은 로컬에 저장되며, 온라인 심볼 다운로드는 기본 OFF(`AllowOnlineSymbols=0`) 입니다.
 - CrashLoggerSSE 로그도 자동으로 찾아서 함께 표시합니다(상위 모듈/ C++ 예외 블록/ CrashLogger 버전).
 - 예외 파라미터 분석(예: 접근 위반 read/write/execute + 주소)을 근거로 추가합니다.
 - 덤프/아티팩트가 쌓이지 않도록 Helper에서 보관(정리) + 로그 로테이션을 지원합니다.
@@ -135,6 +139,12 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
     - `EtwHangProfile`(기본) → 실패 시 `EtwHangFallbackProfile`(선택) 순으로 ETW 시작 재시도
     - `wpr.exe`로 hang 캡처 전후 ETW를 짧게 수집해 추가 단서(`*.etl`)를 남김
     - ETW 수집 실패해도 dump/WCT는 계속 생성됨(best-effort)
+  - 고급 옵션(기본 OFF): `EnableEtwCaptureOnCrash=1`
+    - 크래시 이벤트 감지 시 `wpr.exe`로 짧은 ETW를 수집해 `SkyrimDiag_Crash_*.etl`을 남깁니다(best-effort).
+    - `EtwCrashProfile`(프로파일), `EtwCrashCaptureSeconds`(1..30초)로 동작을 조절합니다.
+  - Incident manifest (기본 ON)
+    - `EnableIncidentManifest=1`일 때 `SkyrimDiag_Incident_*.json`(작은 사이드카)을 생성해 덤프/아티팩트 관계를 연결합니다.
+    - `IncidentManifestIncludeConfigSnapshot=1`은 **절대경로를 제외한**(privacy-safe) 설정 스냅샷을 포함합니다.
   - 반복 버킷 자동 재캡처(기본 OFF)
     - `EnableAutoRecaptureOnUnknownCrash=1`
     - `AutoRecaptureUnknownBucketThreshold=2` (같은 bucket에서 fault module 미확정이 2회 연속이면)
@@ -158,6 +168,8 @@ CTD가 잘 안 나는 모드팩에서는, “기능이 동작하는지”만 빠
   - `*_SkyrimDiagSummary.json`
   - `*_SkyrimDiagBlackbox.jsonl` (있다면)
   - `SkyrimDiag_WCT_*.json` (있다면)
+  - `SkyrimDiag_Incident_*.json` (기본 생성)
+  - `SkyrimDiag_Crash_*.etl` / `SkyrimDiag_Hang_*.etl` (ETW를 켠 경우)
 - (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
   - v1.18.0+의 `C++ EXCEPTION:` 블록(throw 타입/정보/위치/모듈)이 있으면 DumpTool에서 함께 표시됩니다.
   - `CrashLoggerSSE vX.Y.Z` 버전 문자열도 함께 표시됩니다.
@@ -183,6 +195,8 @@ CTD가 잘 안 나는 모드팩에서는, “기능이 동작하는지”만 빠
 - *_SkyrimDiagSummary.json:
 - *_SkyrimDiagBlackbox.jsonl: (있으면)
 - SkyrimDiag_WCT_*.json: (있으면)
+- SkyrimDiag_Incident_*.json: (기본 생성)
+- SkyrimDiag_Crash_*.etl / SkyrimDiag_Hang_*.etl: (ETW를 켠 경우)
 - Crash Logger crash-*.log / threaddump-*.log: (있으면)
 
 [추가 메모]
@@ -240,6 +254,8 @@ This repository contains an MVP implementation of the design in:
   - `ForegroundGraceSec=5` waits briefly after returning to foreground before capturing a hang, so momentary resume delays don’t spam dumps.
   - After returning to foreground, hang dumps stay suppressed while the game window is responsive (and not in a loading screen), until the heartbeat advances.
   - Advanced (default OFF): `EnableEtwCaptureOnHang=1` captures a short ETW trace (`*.etl`) around hang dump generation via `wpr.exe` (best-effort; dump/WCT flow continues even if ETW fails).
+  - Advanced (default OFF): `EnableEtwCaptureOnCrash=1` captures a short crash-window ETW trace (`SkyrimDiag_Crash_*.etl`) via `wpr.exe` (best-effort; dump capture does not depend on ETW).
+  - Incident manifest (default ON): `EnableIncidentManifest=1` writes `SkyrimDiag_Incident_*.json` to link artifacts (dump/WCT/ETW) with privacy-safe defaults (filenames only; no absolute paths).
 - Crash hook behavior (in `SkyrimDiag.ini`):
   - `CrashHookMode=0` Off
   - `CrashHookMode=1` Fatal exceptions only (recommended; reduces false “Crash_*.dmp” during normal play/loading)

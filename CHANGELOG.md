@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.9 (2026-02-10)
+
+### Added
+- Incident manifest sidecar JSON per capture (enabled by default):
+  - `SkyrimDiag_Incident_Crash_*.json`
+  - `SkyrimDiag_Incident_Hang_*.json`
+  - `SkyrimDiag_Incident_Manual_*.json`
+  - Includes `incident_id`, `capture_kind`, artifact filenames, ETW status, and an optional privacy-safe config snapshot.
+- Optional crash-window ETW capture in `SkyrimDiagHelper.ini` (advanced, OFF by default):
+  - `EnableEtwCaptureOnCrash`
+  - `EtwCrashProfile`
+  - `EtwCrashCaptureSeconds` (1..30)
+- DumpTool now surfaces incident context in summary/report when a manifest is present (`summary.incident.*`).
+
+### Changed
+- Retention cleanup now prunes incident manifests alongside their corresponding dumps, and will remove `SkyrimDiag_Crash_*.etl` traces when pruning crash dumps.
+
 ## v0.2.8 (2026-02-10)
 
 ### Added

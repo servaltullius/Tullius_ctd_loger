@@ -5,11 +5,10 @@
 using namespace std::literals;
 
 SKSEPluginInfo(
-  .Version = REL::Version{ 0, 1, 0, 0 },
+  .Version = REL::Version{ 0, 2, 9, 0 },
   .Name = "SkyrimDiag"sv,
   .Author = ""sv,
   .SupportEmail = ""sv,
   .StructCompatibility = SKSE::StructCompatibility::Independent,
   .RuntimeCompatibility = SKSE::VersionIndependence::AddressLibrary,
   .MinimumSKSEVersion = REL::Version{ 0, 0, 0, 0 })
-
