@@ -161,11 +161,6 @@ void LoadExistingSummaryTriage(const std::filesystem::path& summaryPath, nlohman
   for (const auto& [k, v] : it->items()) {
     (*triage)[k] = v;
   }
-  for (const auto& [k, v] : DefaultTriageFields().items()) {
-    if (!triage->contains(k)) {
-      (*triage)[k] = v;
-    }
-  }
 }
 
 bool IsUnknownModuleField(std::wstring_view modulePlusOffset)

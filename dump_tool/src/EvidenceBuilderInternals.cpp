@@ -35,18 +35,22 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     }
   }
 
-  const bool hasException = (r.exc_code != 0u);
-  const bool isCrashLike = nameCrash || hasException || hasCrashEvent;
   const auto wct = (r.has_wct && !r.wct_json_utf8.empty()) ? TrySummarizeWct(r.wct_json_utf8) : std::nullopt;
   constexpr double kNotHangHeartbeatAgeSec = 5.0;
   const auto hbAge = InferHeartbeatAgeFromResultSec(r);
   const bool heartbeatSuggestsNotHang = hbAge && (*hbAge < kNotHangHeartbeatAgeSec);
   const bool manualFromWct = wct && wct->has_capture && (wct->capture_kind == "manual");
   const bool wctSuggestsHang = wct && ((wct->cycles > 0) || wct->suggestsHang);
+  const bool manualCaptureHint = nameManual || manualFromWct;
+
+  const bool hasException = (r.exc_code != 0u);
+  // A manual capture can include a "Crash" blackbox marker due to handled exceptions (or false triggers),
+  // but that does not necessarily mean the game actually CTD'd. Prefer exception stream presence for crash classification.
+  const bool isCrashLike = nameCrash || hasException || (hasCrashEvent && !manualCaptureHint);
   const bool nameHangEffective = nameHang && !manualFromWct && !heartbeatSuggestsNotHang;
   const bool isHangLike = nameHangEffective || hasHangEvent || wctSuggestsHang;
   const bool isSnapshotLike = !isCrashLike && !isHangLike;
-  const bool isManualCapture = nameManual || manualFromWct || (nameHang && isSnapshotLike);
+  const bool isManualCapture = manualCaptureHint || (nameHang && isSnapshotLike);
 
   const bool isSystem = IsSystemishModule(r.fault_module_filename);
   const bool hasModule = !r.fault_module_filename.empty();
@@ -77,4 +81,3 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 }
 
 }  // namespace skydiag::dump_tool::internal
-

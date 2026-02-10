@@ -125,7 +125,24 @@ internal static class NativeAnalyzerBridge
         }
         catch (Exception ex)
         {
-            return (6, ex.Message);
+            var logPath = Path.Combine(
+                outDir,
+                Path.GetFileNameWithoutExtension(dumpPath) + "_SkyrimDiagNativeException.log");
+            try
+            {
+                File.WriteAllText(logPath, ex.ToString());
+            }
+            catch
+            {
+                // Best-effort logging only.
+            }
+
+            var details = $"{ex.GetType().FullName} (0x{ex.HResult:X8}): {ex.Message}";
+            if (!string.IsNullOrWhiteSpace(logPath))
+            {
+                details += "\nLog: " + logPath;
+            }
+            return (6, details);
         }
     }
 }

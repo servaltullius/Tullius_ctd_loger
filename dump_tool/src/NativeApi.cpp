@@ -2,9 +2,11 @@
 
 #include "Analyzer.h"
 #include "OutputWriter.h"
+#include "Utf.h"
 
 #include <cwchar>
 #include <cwctype>
+#include <exception>
 #include <string>
 
 namespace {
@@ -68,6 +70,17 @@ bool ReadEnvBool(const wchar_t* key, bool defaultValue)
   return ParseBoolText(value, defaultValue);
 }
 
+std::wstring DescribeStdException(const std::exception& ex)
+{
+  const char* what = ex.what();
+  if (!what || !*what) {
+    return L"(std::exception with empty what())";
+  }
+  // Best-effort: most of our dependencies format exceptions as UTF-8.
+  const std::wstring w = skydiag::dump_tool::Utf8ToWide(std::string_view(what));
+  return w.empty() ? L"(std::exception message decode failed)" : w;
+}
+
 }  // namespace
 
 int __stdcall SkyrimDiagAnalyzeDumpW(
@@ -100,13 +113,31 @@ int __stdcall SkyrimDiagAnalyzeDumpW(
   const std::wstring dumpPathW(dumpPath);
   const std::wstring outDirW = (outDir ? std::wstring(outDir) : std::wstring{});
 
-  if (!AnalyzeDump(dumpPathW, outDirW, opt, result, &err)) {
-    SetError(err, errorBuf, errorBufChars);
+  try {
+    if (!AnalyzeDump(dumpPathW, outDirW, opt, result, &err)) {
+      SetError(err, errorBuf, errorBufChars);
+      return 3;
+    }
+  } catch (const std::exception& ex) {
+    const std::wstring msg = L"Native exception during AnalyzeDump: " + DescribeStdException(ex);
+    SetError(msg, errorBuf, errorBufChars);
+    return 3;
+  } catch (...) {
+    SetError(L"Native exception during AnalyzeDump (non-std exception)", errorBuf, errorBufChars);
     return 3;
   }
 
-  if (!WriteOutputs(result, &err)) {
-    SetError(err, errorBuf, errorBufChars);
+  try {
+    if (!WriteOutputs(result, &err)) {
+      SetError(err, errorBuf, errorBufChars);
+      return 4;
+    }
+  } catch (const std::exception& ex) {
+    const std::wstring msg = L"Native exception during WriteOutputs: " + DescribeStdException(ex);
+    SetError(msg, errorBuf, errorBufChars);
+    return 4;
+  } catch (...) {
+    SetError(L"Native exception during WriteOutputs (non-std exception)", errorBuf, errorBufChars);
     return 4;
   }
 

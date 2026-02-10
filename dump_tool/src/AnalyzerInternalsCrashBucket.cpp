@@ -8,6 +8,16 @@ namespace skydiag::dump_tool::internal {
 
 void ComputeCrashBucket(AnalysisResult& out)
 {
+  // Avoid generating a misleading "always the same" bucket key for snapshot/manual dumps that
+  // contain no exception/module/callstack information.
+  if (out.exc_code == 0u &&
+      out.stackwalk_primary_frames.empty() &&
+      out.suspects.empty() &&
+      out.fault_module_plus_offset.empty()) {
+    out.crash_bucket_key.clear();
+    return;
+  }
+
   std::vector<std::wstring> bucketFrames;
   if (!out.stackwalk_primary_frames.empty()) {
     const std::size_t n = std::min<std::size_t>(out.stackwalk_primary_frames.size(), 6);
@@ -30,4 +40,3 @@ void ComputeCrashBucket(AnalysisResult& out)
 }
 
 }  // namespace skydiag::dump_tool::internal
-
