@@ -1,7 +1,10 @@
-# Tullius CTD Logger — 한국어 안내 (Beta)
+# Tullius CTD Logger — 한국어 안내
 
 > 이 프로젝트는 **Skyrim SE/AE** 환경에서 CTD(크래시) / 프리징 / 무한로딩을 **best-effort**로 진단하기 위한 도구입니다.  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
+>
+> 최신 릴리즈: `v0.2.8`  
+> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.8
 
 ## 구성 요소
 
@@ -62,6 +65,10 @@
     → 의심되면 **가장 먼저 `EnableResourceLog=0`** 로 테스트하세요.
   - `EnablePerfHitchLog=1` : 메인 스레드 스톨(히치) 단서 기록(가벼움) → 필요 없으면 끌 수 있습니다.
   - `CrashHookMode=2` : 모든 예외 기록(권장하지 않음) → **기본값 `CrashHookMode=1` 유지 권장**
+  - `CrashHookMode=2`는 보호 옵션이 켜져야만 동작합니다:
+    - `EnableUnsafeCrashHookMode2=0` (기본)
+    - `EnableUnsafeCrashHookMode2=1`일 때만 mode 2 허용
+  - `AllowOnlineSymbols=0` (기본): 온라인 심볼 서버 사용 없이 로컬/오프라인 캐시 우선 분석
 
 ## 캡처 방식
 
@@ -85,7 +92,14 @@
   - **리소스**: 최근 로드된 `.nif/.hkx/.tri` 및 MO2 제공자(충돌 단서)
   - **WCT**: 스레드 대기 관계(데드락/바쁜 대기 추정)
 
-## 베타 테스트 / 제보
+## 이슈 제보 / 트러블슈팅
 
 - 자세한 제보 양식: `docs/BETA_TESTING.md`
 - 원인 판정은 “확정”이 아니라 **best-effort 추정 + 신뢰도 표기**입니다.
+
+## 개인정보/보안 주의
+
+- Summary/Report 출력은 기본적으로 경로 마스킹이 적용됩니다.
+  - `privacy.path_redaction_applied=1` 여부로 확인 가능
+- 다만 원본 덤프(`*.dmp`)와 외부 로그(CrashLogger 등)에는 PC 경로(드라이브 문자/유저명)가 포함될 수 있습니다.
+- 공개 업로드 시에는 원본 파일 공유 범위를 최소화하고, 필요 시 경로/식별자 마스킹 후 공유하세요.

@@ -1,7 +1,10 @@
-# Tullius CTD Logger (SkyrimDiag) — Beta
+# Tullius CTD Logger (SkyrimDiag)
 
-> **한국어 안내(메인)** + **베타 테스터 가이드** 포함  
+> **한국어 안내(메인)** + **이슈 리포팅 가이드** 포함  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
+>
+> Latest release: `v0.2.8`  
+> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.8
 
 ## Quick Intro (English)
 
@@ -69,7 +72,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `EnablePerfHitchLog=1` : 메인 스레드 스톨(히치) 단서 기록(가벼움) → 필요 없으면 끌 수 있습니다.
   - `CrashHookMode=2` : 모든 예외 기록(권장하지 않음) → **기본값 `CrashHookMode=1` 유지 권장**
 
-## 베타 테스터 가이드 (README 버전)
+## 이슈 리포팅 가이드 (README 버전)
 
 > 자세한 버전: `docs/BETA_TESTING.md`
 
@@ -103,12 +106,16 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - **리소스**: 최근 로드된 `.nif/.hkx/.tri` 및 MO2 제공자(충돌 단서)
   - **WCT**: 스레드 대기 관계(데드락/바쁜 대기 추정)
 
-### C. 추천 설정(베타용)
+### C. 추천 설정(정식 릴리즈 기본값 기준)
 
 - `SkyrimDiag.ini`
   - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
+  - `CrashHookMode=2`는 기본 비활성 보호가 적용됩니다.
+    - `EnableUnsafeCrashHookMode2=0` (기본)
+    - `EnableUnsafeCrashHookMode2=1`일 때만 mode 2 허용
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
+  - `AllowOnlineSymbols=0` 기본 권장 (오프라인/로컬 캐시 기반 분석)
   - `DumpToolExe` 기본값: `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
   - DumpTool 자동 열기 정책(초보 기본값)
     - `AutoOpenViewerOnCrash=1` : CTD 덤프 생성 직후 뷰어 자동 표시
@@ -137,7 +144,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
 
 ### D. “빠른 재현” 테스트(가능한 경우)
 
-CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 동작하는지”만 빠르게 확인할 수 있습니다.
+CTD가 잘 안 나는 모드팩에서는, “기능이 동작하는지”만 빠르게 확인할 수 있습니다.
 
 - `SkyrimDiag.ini`에서 `EnableTestHotkeys=1`
   - `Ctrl+Shift+F10` : 의도적 크래시(CTD 덤프 생성 확인)
@@ -185,8 +192,10 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 
 ### G. 개인정보/보안 주의
 
-- 덤프/로그에는 PC 경로(드라이브 문자/유저명)가 포함될 수 있습니다.
-- 공개 업로드가 부담되면, 경로가 보이는 부분은 마스킹 후 공유해주세요.
+- Summary/Report 출력은 기본적으로 경로 마스킹이 적용됩니다.
+  - `privacy.path_redaction_applied=1` 여부로 확인 가능
+- 다만 원본 덤프(`*.dmp`)와 외부 로그(CrashLogger 등)에는 PC 경로(드라이브 문자/유저명)가 포함될 수 있습니다.
+- 공개 업로드 시에는 원본 파일 공유 범위를 최소화하고, 필요 시 경로/식별자 마스킹 후 공유해주세요.
 
 ---
 
@@ -235,6 +244,7 @@ This repository contains an MVP implementation of the design in:
   - `CrashHookMode=0` Off
   - `CrashHookMode=1` Fatal exceptions only (recommended; reduces false “Crash_*.dmp” during normal play/loading)
   - `CrashHookMode=2` All exceptions (can false-trigger; only if you understand the trade-off)
+  - Safety guard: mode 2 is ignored unless `EnableUnsafeCrashHookMode2=1` (default `0`)
 - Resource tracking (in `SkyrimDiag.ini`):
   - `EnableResourceLog=1` logs recent loads (e.g. `.nif/.hkx/.tri`) into the dump so the viewer can show “recent assets” and MO2 provider conflicts (best-effort).
 - Performance hitch tracking (in `SkyrimDiag.ini`):
@@ -245,6 +255,7 @@ This repository contains an MVP implementation of the design in:
 - Dump analysis (no WinDbg required):
   - Easiest (default): after a dump is written, the helper auto-runs the DumpTool and creates human-friendly files next to the dump.
     - Toggle in `SkyrimDiagHelper.ini`: `AutoAnalyzeDump=1`
+    - Online symbol source policy: `AllowOnlineSymbols=0` (default, local/offline cache only)
     - Default executable: `DumpToolExe=SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
   - Viewer auto-open policy (beginner-friendly defaults):
     - `AutoOpenViewerOnCrash=1`: open viewer immediately for crash dumps.
@@ -297,12 +308,12 @@ cmake --build build-linux
 ctest --test-dir build-linux --output-on-failure
 ```
 
-## Beta testing
+## Issue Reporting / Troubleshooting
 
-베타 배포 목적은 “원인 모드 특정”을 **최대한 유저 친화적으로** 돕는 것입니다. 다만 덤프 기반 추정은 본질적으로 한계가 있으므로,
+릴리즈 목적은 “원인 모드 특정”을 **최대한 유저 친화적으로** 돕는 것입니다. 다만 덤프 기반 추정은 본질적으로 한계가 있으므로,
 리포트의 **신뢰도(높음/중간/낮음)** 표기를 참고해주세요.
 
-- 베타 테스터 가이드: `docs/BETA_TESTING.md`
+- 이슈 제보 가이드: `docs/BETA_TESTING.md`
 - MO2 WinUI 스모크 테스트 체크리스트: `docs/MO2_WINUI_SMOKE_TEST_CHECKLIST.md`
 
 ## Package (zip)
