@@ -1,10 +1,11 @@
 # Tullius CTD Logger (SkyrimDiag)
 
-> **한국어 안내(메인)** + **이슈 리포팅 가이드** 포함  
+> **한국어 안내(메인)** (플레이어/사용자용)  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> Latest release: `v0.2.11`  
-> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.11
+> Latest release: `v0.2.11` (stable)  
+> Download: https://github.com/servaltullius/Tullius_ctd_loger/releases/latest  
+> 참고: GitHub Releases 화면 왼쪽의 "tags N"은 **태그 개수 표시**이며, 릴리즈 목록/안정판 여부와는 별개입니다.
 
 ## Quick Intro (English)
 
@@ -43,6 +44,12 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - 네이티브 분석 엔진 DLL: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
   - 초보/고급 분석을 모두 WinUI 단일 창에서 제공
 
+### 2-1) "창이 하나 더 뜨나요?" (CLI vs WinUI)
+
+- `SkyrimDiagDumpToolCli.exe`는 **헤드리스(창 없음)** 분석기입니다. Helper가 백그라운드에서 실행해 Summary/Report 같은 결과 파일을 생성합니다.
+- `SkyrimDiagDumpToolWinUI.exe`는 **뷰어(UI)** 입니다. 사용자가 직접 보는 창은 보통 이 WinUI 1개입니다.
+- `v0.2.11`부터: Helper가 덤프를 자동으로 WinUI로 열 때는, 같은 덤프에 대해 CLI 자동 분석을 건너뜁니다(중복 실행 방지).
+
 ### 3) 설치 (MO2)
 
 1) GitHub Releases의 zip를 **MO2에서 “모드로 설치”** 후 활성화  
@@ -78,141 +85,21 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - `EnablePerfHitchLog=1` : 메인 스레드 스톨(히치) 단서 기록(가벼움) → 필요 없으면 끌 수 있습니다.
   - `CrashHookMode=2` : 모든 예외 기록(권장하지 않음) → **기본값 `CrashHookMode=1` 유지 권장**
 
-## 이슈 리포팅 가이드 (README 버전)
+## 이슈 리포팅 (요약)
 
-> 자세한 버전: `docs/BETA_TESTING.md`
+자세한 가이드: `docs/BETA_TESTING.md`
 
-### A. 캡처 종류
-
-- **CTD(게임이 튕김)**: `*_Crash_*.dmp`
-- **프리징/무한로딩(자동 감지)**: 기준 시간 이상 멈추면 `*_Hang_*.dmp`
-  - 기준 시간은 `SkyrimDiagHelper.ini`에서 조절:
-    - `HangThresholdInGameSec` (인게임)
-    - `HangThresholdLoadingSec` (로딩 화면)
-    - `EnableAdaptiveLoadingThreshold=1` (로딩 시간 자동 학습/보정, 추천)
-- **수동 스냅샷(핫키)**: `Ctrl+Shift+F12`
-  - 정상 상태에서 찍은 수동 캡처는 “문제”가 아닐 수 있습니다.
-  - **문제 상황(프리징/무한로딩/CTD 직전)** 에서 찍는 것이 진단에 가장 유효합니다.
-
-### B. DumpTool(뷰어)로 보는 법
-
-- 기본 권장: `SkyrimDiagDumpToolWinUI.exe`를 실행해 `.dmp`를 선택합니다.
-- 또는 `.dmp`를 `SkyrimDiagDumpToolWinUI.exe`에 드래그&드롭합니다.
-- 기본 화면은 **초보 보기**입니다.
-  - 핵심 CTA: Top 원인 후보 + 추천 조치
-  - 같은 창에서 고급 분석(콜스택/근거/리소스/이벤트/WCT/리포트)까지 확인
-- DumpTool 언어:
-  - 기본: 영어(넥서스 배포용)
-  - 헤드리스 CLI: `SkyrimDiagDumpToolCli.exe --lang en|ko <dump> [--out-dir <dir>]`
-  - WinUI: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
-  - 호환 플래그: `--simple-ui` / `--advanced-ui` (입력 호환용)
-- 탭:
-  - **요약**: 결론 1문장 + 신뢰도
-  - **근거**: 콜스택/스택스캔/리소스 충돌/WCT 등 단서
-  - **이벤트**: 직전 이벤트(상관관계 단서)
-  - **리소스**: 최근 로드된 `.nif/.hkx/.tri` 및 MO2 제공자(충돌 단서)
-  - **WCT**: 스레드 대기 관계(데드락/바쁜 대기 추정)
-
-### C. 추천 설정(정식 릴리즈 기본값 기준)
-
-- `SkyrimDiag.ini`
-  - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
-  - `CrashHookMode=2`는 기본 비활성 보호가 적용됩니다.
-    - `EnableUnsafeCrashHookMode2=0` (기본)
-    - `EnableUnsafeCrashHookMode2=1`일 때만 mode 2 허용
-- `SkyrimDiagHelper.ini`
-  - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
-  - `AllowOnlineSymbols=0` 기본 권장 (오프라인/로컬 캐시 기반 분석)
-  - `DumpToolExe` 기본값: `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
-  - DumpTool 자동 열기 정책(초보 기본값)
-    - `AutoOpenViewerOnCrash=1` : CTD 덤프 생성 직후 뷰어 자동 표시
-    - `AutoOpenCrashOnlyIfProcessExited=1` : 게임이 곧바로 종료될 때만 크래시 뷰어 자동 오픈(저장/로드 중 팝업 감소)
-    - `AutoOpenCrashWaitForExitMs=2000` : 위 정책의 “종료로 판정” 대기 시간(ms)
-    - `AutoOpenViewerOnHang=1` + `AutoOpenHangAfterProcessExit=1` : 프리징 덤프는 게임 종료 후 자동 표시
-    - `AutoOpenHangDelayMs=2000` : 종료 후 2초 지연
-    - `AutoOpenViewerOnManualCapture=0` : 수동 캡처는 자동 팝업 안 함
-    - `AutoOpenViewerBeginnerMode=1` : 자동 오픈 시 초보 화면으로 시작
-  - 덤프/아티팩트 보관(0=무제한): `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
-  - Helper 로그 로테이션(0=무제한): `MaxHelperLogBytes`, `MaxHelperLogFiles`
-  - Alt-Tab/백그라운드 일시정지 오탐 방지(기본값 권장)
-    - `SuppressHangWhenNotForeground=1`
-    - `ForegroundGraceSec=5` (포그라운드로 돌아온 직후 잠깐 기다렸다가 캡처)
-    - 포그라운드 복귀 후에도 창이 정상 응답 중이면 행 덤프를 계속 억제(Alt-Tab 오탐 추가 감소)
-  - 고급 옵션(기본 OFF): `EnableEtwCaptureOnHang=1`
-    - `EtwHangProfile`(기본) → 실패 시 `EtwHangFallbackProfile`(선택) 순으로 ETW 시작 재시도
-    - `wpr.exe`로 hang 캡처 전후 ETW를 짧게 수집해 추가 단서(`*.etl`)를 남김
-    - ETW 수집 실패해도 dump/WCT는 계속 생성됨(best-effort)
-  - 고급 옵션(기본 OFF): `EnableEtwCaptureOnCrash=1`
-    - 크래시 이벤트 감지 시 `wpr.exe`로 짧은 ETW를 수집해 `SkyrimDiag_Crash_*.etl`을 남깁니다(best-effort).
-    - `EtwCrashProfile`(프로파일), `EtwCrashCaptureSeconds`(1..30초)로 동작을 조절합니다.
-  - Incident manifest (기본 ON)
-    - `EnableIncidentManifest=1`일 때 `SkyrimDiag_Incident_*.json`(작은 사이드카)을 생성해 덤프/아티팩트 관계를 연결합니다.
-    - `IncidentManifestIncludeConfigSnapshot=1`은 **절대경로를 제외한**(privacy-safe) 설정 스냅샷을 포함합니다.
-  - 반복 버킷 자동 재캡처(기본 OFF)
-    - `EnableAutoRecaptureOnUnknownCrash=1`
-    - `AutoRecaptureUnknownBucketThreshold=2` (같은 bucket에서 fault module 미확정이 2회 연속이면)
-    - `AutoRecaptureAnalysisTimeoutSec=20` (동기 분석 대기)
-    - 조건 충족 시 프로세스가 살아있는 경우에 한해 FullMemory crash dump 1회 추가 캡처(best-effort)
-  - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
-
-### D. “빠른 재현” 테스트(가능한 경우)
-
-CTD가 잘 안 나는 모드팩에서는, “기능이 동작하는지”만 빠르게 확인할 수 있습니다.
-
-- `SkyrimDiag.ini`에서 `EnableTestHotkeys=1`
-  - `Ctrl+Shift+F10` : 의도적 크래시(CTD 덤프 생성 확인)
-  - `Ctrl+Shift+F11` : 의도적 행(프리징) 유발(행 감지/WCT/덤프 생성 확인)
-
-### E. 이슈 제보 시 필수 첨부
-
+필수 첨부(가능한 한 같이):
 - 문제 상황의 `*.dmp` 1개
 - 같은 이름의:
   - `*_SkyrimDiagReport.txt`
   - `*_SkyrimDiagSummary.json`
-  - `*_SkyrimDiagBlackbox.jsonl` (있다면)
-  - `SkyrimDiag_WCT_*.json` (있다면)
-  - `SkyrimDiag_Incident_*.json` (기본 생성)
-  - `SkyrimDiag_Crash_*.etl` / `SkyrimDiag_Hang_*.etl` (ETW를 켠 경우)
+  - `SkyrimDiag_Incident_*.json`
+  - (있다면) `*_SkyrimDiagBlackbox.jsonl`, `SkyrimDiag_WCT_*.json`, `SkyrimDiag_Crash_*.etl` / `SkyrimDiag_Hang_*.etl`
 - (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
-  - v1.18.0+의 `C++ EXCEPTION:` 블록(throw 타입/정보/위치/모듈)이 있으면 DumpTool에서 함께 표시됩니다.
-  - `CrashLoggerSSE vX.Y.Z` 버전 문자열도 함께 표시됩니다.
 
-### F. 이슈 템플릿(복사해서 사용)
-
-```text
-[환경]
-- 게임: SE/AE/VR, 버전:
-- SKSE 버전:
-- MO2 사용: 예/아니오
-- 단일 프로필: 예/아니오
-
-[문제 유형]
-- CTD / 프리징 / 무한로딩 / 히치
-
-[재현 방법]
-- (가능하면 단계별로)
-
-[첨부]
-- *.dmp:
-- *_SkyrimDiagReport.txt:
-- *_SkyrimDiagSummary.json:
-- *_SkyrimDiagBlackbox.jsonl: (있으면)
-- SkyrimDiag_WCT_*.json: (있으면)
-- SkyrimDiag_Incident_*.json: (기본 생성)
-- SkyrimDiag_Crash_*.etl / SkyrimDiag_Hang_*.etl: (ETW를 켠 경우)
-- Crash Logger crash-*.log / threaddump-*.log: (있으면)
-
-[추가 메모]
-- 최근 설치/업데이트한 모드/플러그인:
-- 추정 원인 또는 의심 모드:
-```
-
-### G. 개인정보/보안 주의
-
-- Summary/Report 출력은 기본적으로 경로 마스킹이 적용됩니다.
-  - `privacy.path_redaction_applied=1` 여부로 확인 가능
-- 다만 원본 덤프(`*.dmp`)와 외부 로그(CrashLogger 등)에는 PC 경로(드라이브 문자/유저명)가 포함될 수 있습니다.
-- 공개 업로드 시에는 원본 파일 공유 범위를 최소화하고, 필요 시 경로/식별자 마스킹 후 공유해주세요.
+개인정보 주의:
+- 덤프/외부 로그에는 PC 경로(유저명 등)가 포함될 수 있어요. 공개 업로드 전 점검/마스킹을 권장합니다.
 
 ---
 

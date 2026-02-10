@@ -3,8 +3,8 @@
 > 이 프로젝트는 **Skyrim SE/AE** 환경에서 CTD(크래시) / 프리징 / 무한로딩을 **best-effort**로 진단하기 위한 도구입니다.  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> 최신 릴리즈: `v0.2.8`  
-> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.8
+> 최신 릴리즈: `v0.2.11` (stable)  
+> https://github.com/servaltullius/Tullius_ctd_loger/releases/latest
 
 ## 구성 요소
 
@@ -12,9 +12,18 @@
   - 게임 내부 이벤트/상태(블랙박스), heartbeat, (옵션) 리소스(.nif/.hkx/.tri) 기록
 - **Helper(외부 프로세스)**: `SKSE/Plugins/SkyrimDiagHelper.exe`
   - 게임 프로세스에 attach → CTD/프리징/무한로딩 감지 → 덤프 + WCT(Wait Chain) 저장
-- **DumpTool(뷰어/분석기, WinUI)**: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-  - 네이티브 분석 엔진 DLL `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`을 직접 호출해
-    `.dmp`를 WinDbg 없이 읽고 **요약/근거/이벤트/리소스/WCT**를 표시
+- **DumpTool(분석기/뷰어)**:
+  - **헤드리스 CLI(창 없음)**: `SKSE/Plugins/SkyrimDiagDumpToolCli.exe`
+    - Helper가 자동 분석에 사용합니다(사용자가 직접 창을 볼 필요 없음)
+  - **WinUI 뷰어(UI)**: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+    - 네이티브 분석 엔진 DLL `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`을 직접 호출해
+      `.dmp`를 WinDbg 없이 읽고 **요약/근거/이벤트/리소스/WCT**를 표시합니다.
+
+## "창이 하나 더 뜨나요?" (CLI vs WinUI)
+
+- CLI(`SkyrimDiagDumpToolCli.exe`)는 **헤드리스**라서 창이 뜨지 않습니다.
+- WinUI(`SkyrimDiagDumpToolWinUI.exe`)가 실제로 “결과를 보여주는 창” 입니다.
+- `v0.2.11`부터는 Helper가 덤프를 자동으로 WinUI로 열 때, 같은 덤프에 대해 CLI 자동 분석을 건너뜁니다(중복 실행 방지).
 
 ## 설치 (MO2)
 
@@ -24,6 +33,7 @@
    - `SKSE/Plugins/SkyrimDiag.ini`
    - `SKSE/Plugins/SkyrimDiagHelper.exe`
    - `SKSE/Plugins/SkyrimDiagHelper.ini`
+   - `SKSE/Plugins/SkyrimDiagDumpToolCli.exe`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3) 모드를 활성화한 뒤 **SKSE로 게임을 실행**합니다.
