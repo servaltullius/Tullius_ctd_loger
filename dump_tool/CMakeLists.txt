@@ -22,6 +22,11 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/EvidenceBuilder.h
   src/EvidenceBuilderInternals.cpp
   src/EvidenceBuilderInternals.h
+  src/EvidenceBuilderInternalsEvidence.cpp
+  src/EvidenceBuilderInternalsPriv.h
+  src/EvidenceBuilderInternalsRecommendations.cpp
+  src/EvidenceBuilderInternalsSummary.cpp
+  src/EvidenceBuilderInternalsUtil.cpp
   src/CrashLogger.cpp
   src/CrashLogger.h
   src/Mo2Index.cpp
