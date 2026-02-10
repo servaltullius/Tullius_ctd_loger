@@ -5,7 +5,7 @@
 using namespace std::literals;
 
 SKSEPluginInfo(
-  .Version = REL::Version{ 0, 2, 9, 0 },
+  .Version = REL::Version{ 0, 2, 10, 0 },
   .Name = "SkyrimDiag"sv,
   .Author = ""sv,
   .SupportEmail = ""sv,

@@ -83,6 +83,7 @@ def main(argv: list[str]) -> int:
     plugin_dll = _find_artifact(build_dir, bin_dir, "SkyrimDiag.dll")
     helper_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagHelper.exe")
     native_dll = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolNative.dll")
+    cli_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.exe")
 
     if not plugin_dll:
         print("ERROR: could not find SkyrimDiag.dll. Build the project first.", file=sys.stderr)
@@ -93,10 +94,14 @@ def main(argv: list[str]) -> int:
     if not native_dll:
         print("ERROR: could not find SkyrimDiagDumpToolNative.dll. Build the project first.", file=sys.stderr)
         return 3
+    if not cli_exe:
+        print("ERROR: could not find SkyrimDiagDumpToolCli.exe. Build the project first.", file=sys.stderr)
+        return 3
 
     plugin_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiag.pdb")
     helper_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiagHelper.pdb")
     native_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolNative.pdb")
+    cli_pdb = None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.pdb")
 
     winui_exe = None
     winui_publish_dir = None
@@ -128,6 +133,7 @@ def main(argv: list[str]) -> int:
 
         shutil.copy2(plugin_dll, plugins_dir / "SkyrimDiag.dll")
         shutil.copy2(helper_exe, plugins_dir / "SkyrimDiagHelper.exe")
+        shutil.copy2(cli_exe, plugins_dir / "SkyrimDiagDumpToolCli.exe")
         shutil.copy2(ini_plugin, plugins_dir / "SkyrimDiag.ini")
         shutil.copy2(ini_helper, plugins_dir / "SkyrimDiagHelper.ini")
 
@@ -135,6 +141,8 @@ def main(argv: list[str]) -> int:
             shutil.copy2(plugin_pdb, plugins_dir / "SkyrimDiag.pdb")
         if helper_pdb and helper_pdb.is_file():
             shutil.copy2(helper_pdb, plugins_dir / "SkyrimDiagHelper.pdb")
+        if cli_pdb and cli_pdb.is_file():
+            shutil.copy2(cli_pdb, plugins_dir / "SkyrimDiagDumpToolCli.pdb")
 
         copied_winui = 0
         winui_plugins_dir = plugins_dir / "SkyrimDiagWinUI"
@@ -165,6 +173,7 @@ def main(argv: list[str]) -> int:
     print(f"Wrote: {out_zip}")
     print(f"- Plugin: {plugin_dll}")
     print(f"- Helper: {helper_exe}")
+    print(f"- DumpToolCli: {cli_exe}")
     print(f"- DumpToolWinUI: {winui_exe}")
     print(f"- DumpToolNative: {native_dll}")
     return 0

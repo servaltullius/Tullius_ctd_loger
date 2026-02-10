@@ -180,7 +180,44 @@ set_target_properties(skydiag_incident_manifest_schema_tests PROPERTIES
 
 add_test(NAME skydiag_incident_manifest_schema_tests COMMAND skydiag_incident_manifest_schema_tests)
 
+add_executable(skydiag_dump_tool_cli_args_tests
+  dump_tool_cli_args_tests.cpp
+)
+
+target_include_directories(skydiag_dump_tool_cli_args_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+set_target_properties(skydiag_dump_tool_cli_args_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_dump_tool_cli_args_tests COMMAND skydiag_dump_tool_cli_args_tests)
+
+add_executable(skydiag_dump_tool_headless_resolver_tests
+  dump_tool_headless_resolver_tests.cpp
+)
+
+target_include_directories(skydiag_dump_tool_headless_resolver_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+
+set_target_properties(skydiag_dump_tool_headless_resolver_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_dump_tool_headless_resolver_tests COMMAND skydiag_dump_tool_headless_resolver_tests)
+
 add_test(
   NAME skydiag_bucket_quality_script_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
+)
+
+add_test(
+  NAME skydiag_packaging_includes_cli_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
 )

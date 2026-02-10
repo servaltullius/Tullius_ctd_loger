@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.10 (2026-02-10)
+
+### Added
+- Headless analyzer CLI: `SkyrimDiagDumpToolCli.exe` (no WinUI dependency) for post-incident analysis.
+- Helper now prefers the headless CLI for auto-analysis when available, and falls back to the WinUI exe for backward compatibility.
+- Packaging now ships `SkyrimDiagDumpToolCli.exe` next to `SkyrimDiagHelper.exe`.
+- New tests:
+  - `tests/dump_tool_cli_args_tests.cpp`
+  - `tests/dump_tool_headless_resolver_tests.cpp`
+  - `tests/packaging_includes_cli_tests.py`
+
 ## v0.2.9 (2026-02-10)
 
 ### Added

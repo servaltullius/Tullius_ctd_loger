@@ -3,8 +3,8 @@
 > **한국어 안내(메인)** + **이슈 리포팅 가이드** 포함  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> Latest release: `v0.2.9`  
-> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.9
+> Latest release: `v0.2.10`  
+> https://github.com/servaltullius/Tullius_ctd_loger/releases/tag/v0.2.10
 
 ## Quick Intro (English)
 
@@ -12,7 +12,7 @@ Tullius CTD Logger (SkyrimDiag) is a best-effort diagnostics tool for Skyrim SE/
 
 - Important: this is **not** a crash-prevention mod. It records signals and captures evidence, but it does not swallow exceptions or try to “recover and keep playing”.
 - No uploads/telemetry: outputs are written locally. Online symbol downloads are **OFF** by default (`AllowOnlineSymbols=0`).
-- Components: SKSE plugin + out-of-proc helper + WinUI DumpTool (viewer) backed by a native analyzer.
+- Components: SKSE plugin + out-of-proc helper + headless analyzer CLI + WinUI DumpTool (viewer) backed by a native analyzer.
 - CrashLoggerSSE integration: auto-detects `crash-*.log` / `threaddump-*.log` and surfaces top callstack modules, C++ exception blocks, and the CrashLogger version string.
 - Extra evidence: interprets minidump exception parameters for common codes (e.g. access violation read/write/execute + address).
 - Notes: some exceptions are handled and the game may keep running. To reduce “viewer popups while the game continues”, keep `AutoOpenCrashOnlyIfProcessExited=1` (default) or disable crash auto-open with `AutoOpenViewerOnCrash=0`.
@@ -38,6 +38,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
 - **Helper(외부 프로세스)**: `SKSE/Plugins/SkyrimDiagHelper.exe`
   - 게임 프로세스 attach → 프리징/무한로딩 감지 → 덤프 + WCT 저장
 - **DumpTool(뷰어/분석기)**:
+  - 헤드리스 CLI: `SKSE/Plugins/SkyrimDiagDumpToolCli.exe` (UI 없이 분석만 실행, Helper 자동 분석에 사용)
   - WinUI 앱: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
   - 네이티브 분석 엔진 DLL: `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
   - 초보/고급 분석을 모두 WinUI 단일 창에서 제공
@@ -50,6 +51,7 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
    - `SKSE/Plugins/SkyrimDiag.ini`
    - `SKSE/Plugins/SkyrimDiagHelper.exe`
    - `SKSE/Plugins/SkyrimDiagHelper.ini`
+   - `SKSE/Plugins/SkyrimDiagDumpToolCli.exe`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
 3) MO2에서 **SKSE로 실행**
@@ -101,7 +103,8 @@ WinDbg 없이도 “왜 그런지”를 **요약/근거/체크리스트** 형태
   - 같은 창에서 고급 분석(콜스택/근거/리소스/이벤트/WCT/리포트)까지 확인
 - DumpTool 언어:
   - 기본: 영어(넥서스 배포용)
-  - CLI(WinUI): `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
+  - 헤드리스 CLI: `SkyrimDiagDumpToolCli.exe --lang en|ko <dump> [--out-dir <dir>]`
+  - WinUI: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
   - 호환 플래그: `--simple-ui` / `--advanced-ui` (입력 호환용)
 - 탭:
   - **요약**: 결론 1문장 + 신뢰도

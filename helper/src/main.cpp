@@ -16,6 +16,7 @@
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/CrashRecapturePolicy.h"
+#include "SkyrimDiagHelper/DumpToolResolve.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangSuppression.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -659,6 +660,14 @@ std::filesystem::path ResolveDumpToolExe(const skydiag::helper::HelperConfig& cf
   return resolved;
 }
 
+std::filesystem::path ResolveDumpToolHeadlessExeForConfig(const skydiag::helper::HelperConfig& cfg)
+{
+  const auto baseDir = GetThisExeDir();
+  const auto winuiExe = ResolveDumpToolExe(cfg);
+  const auto headless = skydiag::helper::ResolveDumpToolHeadlessExe(baseDir, winuiExe, /*overrideExe=*/{});
+  return headless.empty() ? winuiExe : headless;
+}
+
 bool StartDumpToolProcessWithHandle(
   const std::filesystem::path& exe,
   std::wstring cmd,
@@ -729,7 +738,7 @@ void StartDumpToolHeadlessIfConfigured(
     return;
   }
 
-  const auto exe = ResolveDumpToolExe(cfg);
+  const auto exe = ResolveDumpToolHeadlessExeForConfig(cfg);
   std::wstring cmd =
     QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
   AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
@@ -757,7 +766,7 @@ bool StartDumpToolHeadlessAsync(
     return false;
   }
 
-  const auto exe = ResolveDumpToolExe(cfg);
+  const auto exe = ResolveDumpToolHeadlessExeForConfig(cfg);
   std::wstring cmd =
     QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
   AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
