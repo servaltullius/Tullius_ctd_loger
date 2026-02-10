@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.15 (2026-02-10)
+
+### Fixed
+- WinUI DumpTool: surface native analysis exceptions with actionable messages instead of a generic "External component has thrown an exception."
+  - When a managed exception occurs during native interop, a `*_SkyrimDiagNativeException.log` is written to the output folder (best-effort).
+- DumpTool: fix a rare analysis failure when merging existing summary triage (`[json.exception.invalid_iterator.214] cannot get value`).
+- DumpTool: manual snapshot captures (`SkyrimDiag_Manual_*.dmp`) are now more reliably classified as snapshots (not CTDs) unless an exception stream is present.
+- DumpTool: do not generate a misleading crash bucket key for snapshot dumps that have no exception/module/callstack information.
+
 ## v0.2.14 (2026-02-10)
 
 ### Changed
