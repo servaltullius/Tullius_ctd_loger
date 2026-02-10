@@ -86,6 +86,20 @@ struct DatedFile {
   std::string ts;
 };
 
+inline std::string_view IncidentKindForDumpPrefix(std::string_view dumpPrefix)
+{
+  if (dumpPrefix == "SkyrimDiag_Crash_") {
+    return "Crash";
+  }
+  if (dumpPrefix == "SkyrimDiag_Hang_") {
+    return "Hang";
+  }
+  if (dumpPrefix == "SkyrimDiag_Manual_") {
+    return "Manual";
+  }
+  return {};
+}
+
 inline std::vector<DatedFile> CollectFilesByPrefixAndExt(
   const std::filesystem::path& dir,
   std::string_view prefix,
@@ -142,6 +156,7 @@ inline void PruneDumpFiles(
   }
 
   std::error_code ec;
+  const std::string_view incidentKind = IncidentKindForDumpPrefix(dumpPrefix);
   for (std::size_t i = maxCount; i < dumps.size(); i++) {
     const auto p = dumps[i].path;
     const auto stem = p.stem().string();
@@ -153,6 +168,11 @@ inline void PruneDumpFiles(
       auto etl = p;
       etl.replace_extension(".etl");
       std::filesystem::remove(etl, ec);
+    }
+
+    if (!incidentKind.empty()) {
+      const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dumps[i].ts + ".json");
+      std::filesystem::remove(manifest, ec);
     }
 
     if (deleteWctForTimestamp) {
@@ -172,8 +192,18 @@ inline void PruneEtwTraces(const std::filesystem::path& dir, std::uint32_t maxCo
     return;  // unlimited
   }
 
-  // ETW traces are created for hang captures and match the hang dump timestamp.
+  // ETW traces are created for hang and (optionally) crash captures and match the dump timestamp.
   auto etls = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Hang_", ".etl");
+  {
+    auto crash = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Crash_", ".etl");
+    etls.insert(etls.end(), crash.begin(), crash.end());
+    std::sort(etls.begin(), etls.end(), [](const DatedFile& a, const DatedFile& b) {
+      if (a.ts != b.ts) {
+        return a.ts > b.ts;
+      }
+      return a.path.filename().string() < b.path.filename().string();
+    });
+  }
   if (etls.size() <= static_cast<std::size_t>(maxCount)) {
     return;
   }
@@ -200,7 +230,7 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
     limits.maxCrashDumps,
     /*deleteWctForTimestamp=*/false,
     /*deleteManualWctForTimestamp=*/false,
-    /*deleteEtlForStem=*/false);
+    /*deleteEtlForStem=*/true);
 
   PruneDumpFiles(
     outBase,
