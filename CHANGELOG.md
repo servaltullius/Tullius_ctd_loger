@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.12 (2026-02-10)
+
+### Changed
+- Internal refactor only: split DumpTool analyzer internals into smaller modules (no behavior changes).
+- Internal refactor only: split Helper main into smaller modules (no behavior changes).
+
 ## v0.2.11 (2026-02-10)
 
 ### Changed

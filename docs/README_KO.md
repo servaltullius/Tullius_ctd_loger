@@ -3,7 +3,7 @@
 > 이 프로젝트는 **Skyrim SE/AE** 환경에서 CTD(크래시) / 프리징 / 무한로딩을 **best-effort**로 진단하기 위한 도구입니다.  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> 최신 릴리즈: `v0.2.11` (stable)  
+> 최신 릴리즈: `v0.2.12` (stable)  
 > https://github.com/servaltullius/Tullius_ctd_loger/releases/latest
 
 ## 구성 요소
