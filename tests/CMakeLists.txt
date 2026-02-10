@@ -156,6 +156,30 @@ set_target_properties(skydiag_crash_hook_mode_guard_tests PROPERTIES
 
 add_test(NAME skydiag_crash_hook_mode_guard_tests COMMAND skydiag_crash_hook_mode_guard_tests)
 
+add_executable(skydiag_tier2_hybrid_config_tests
+  tier2_hybrid_config_tests.cpp
+)
+
+set_target_properties(skydiag_tier2_hybrid_config_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_tier2_hybrid_config_tests COMMAND skydiag_tier2_hybrid_config_tests)
+
+add_executable(skydiag_incident_manifest_schema_tests
+  incident_manifest_schema_tests.cpp
+)
+
+set_target_properties(skydiag_incident_manifest_schema_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_incident_manifest_schema_tests COMMAND skydiag_incident_manifest_schema_tests)
+
 add_test(
   NAME skydiag_bucket_quality_script_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"

@@ -299,6 +299,155 @@ std::string WideToUtf8(std::wstring_view s)
   return out;
 }
 
+std::string DumpModeToString(skydiag::helper::DumpMode mode)
+{
+  switch (mode) {
+    case skydiag::helper::DumpMode::kMini:
+      return "mini";
+    case skydiag::helper::DumpMode::kDefault:
+      return "default";
+    case skydiag::helper::DumpMode::kFull:
+      return "full";
+  }
+  return "default";
+}
+
+nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfig& cfg)
+{
+  // Keep this snapshot privacy-safe: avoid absolute paths (OutputDir, DumpToolExe, EtwWprExe).
+  nlohmann::json j = nlohmann::json::object();
+  j["dump_mode"] = DumpModeToString(cfg.dumpMode);
+
+  j["hang_threshold_in_game_sec"] = cfg.hangThresholdInGameSec;
+  j["hang_threshold_in_menu_sec"] = cfg.hangThresholdInMenuSec;
+  j["hang_threshold_loading_sec"] = cfg.hangThresholdLoadingSec;
+  j["suppress_hang_when_not_foreground"] = cfg.suppressHangWhenNotForeground;
+  j["foreground_grace_sec"] = cfg.foregroundGraceSec;
+
+  j["enable_manual_capture_hotkey"] = cfg.enableManualCaptureHotkey;
+  j["auto_analyze_dump"] = cfg.autoAnalyzeDump;
+  j["allow_online_symbols"] = cfg.allowOnlineSymbols;
+
+  j["auto_open_viewer_on_crash"] = cfg.autoOpenViewerOnCrash;
+  j["auto_open_crash_only_if_process_exited"] = cfg.autoOpenCrashOnlyIfProcessExited;
+  j["auto_open_crash_wait_for_exit_ms"] = cfg.autoOpenCrashWaitForExitMs;
+  j["enable_auto_recapture_on_unknown_crash"] = cfg.enableAutoRecaptureOnUnknownCrash;
+  j["auto_recapture_unknown_bucket_threshold"] = cfg.autoRecaptureUnknownBucketThreshold;
+  j["auto_recapture_analysis_timeout_sec"] = cfg.autoRecaptureAnalysisTimeoutSec;
+
+  j["auto_open_viewer_on_hang"] = cfg.autoOpenViewerOnHang;
+  j["auto_open_viewer_on_manual_capture"] = cfg.autoOpenViewerOnManualCapture;
+  j["auto_open_hang_after_process_exit"] = cfg.autoOpenHangAfterProcessExit;
+  j["auto_open_hang_delay_ms"] = cfg.autoOpenHangDelayMs;
+  j["auto_open_viewer_beginner_mode"] = cfg.autoOpenViewerBeginnerMode;
+
+  j["enable_adaptive_loading_threshold"] = cfg.enableAdaptiveLoadingThreshold;
+  j["adaptive_loading_min_sec"] = cfg.adaptiveLoadingMinSec;
+  j["adaptive_loading_min_extra_sec"] = cfg.adaptiveLoadingMinExtraSec;
+  j["adaptive_loading_max_sec"] = cfg.adaptiveLoadingMaxSec;
+
+  j["enable_etw_capture_on_hang"] = cfg.enableEtwCaptureOnHang;
+  j["etw_hang_profile"] = WideToUtf8(cfg.etwHangProfile);
+  j["etw_hang_fallback_profile"] = WideToUtf8(cfg.etwHangFallbackProfile);
+  j["etw_max_duration_sec"] = cfg.etwMaxDurationSec;
+
+  j["enable_etw_capture_on_crash"] = cfg.enableEtwCaptureOnCrash;
+  j["etw_crash_profile"] = WideToUtf8(cfg.etwCrashProfile);
+  j["etw_crash_capture_seconds"] = cfg.etwCrashCaptureSeconds;
+
+  j["enable_incident_manifest"] = cfg.enableIncidentManifest;
+  j["incident_manifest_include_config_snapshot"] = cfg.incidentManifestIncludeConfigSnapshot;
+
+  j["retention"] = {
+    { "max_crash_dumps", cfg.maxCrashDumps },
+    { "max_hang_dumps", cfg.maxHangDumps },
+    { "max_manual_dumps", cfg.maxManualDumps },
+    { "max_etw_traces", cfg.maxEtwTraces },
+  };
+
+  return j;
+}
+
+std::string MakeIncidentId(std::string_view captureKind, std::wstring_view ts, DWORD pid)
+{
+  return std::string(captureKind) + "_" + WideToUtf8(ts) + "_pid" + std::to_string(static_cast<std::uint32_t>(pid));
+}
+
+nlohmann::json MakeIncidentManifestV1(
+  std::string_view captureKind,
+  std::wstring_view ts,
+  DWORD pid,
+  const std::filesystem::path& dumpPath,
+  const std::optional<std::filesystem::path>& wctPath,
+  const std::optional<std::filesystem::path>& etwPath,
+  std::string_view etwStatus,
+  std::uint32_t stateFlags,
+  const nlohmann::json& context,
+  const skydiag::helper::HelperConfig& cfg,
+  bool includeConfigSnapshot)
+{
+  nlohmann::json j = nlohmann::json::object();
+  j["schema"] = {
+    { "name", "SkyrimDiagIncident" },
+    { "version", 1 },
+  };
+  j["incident_id"] = MakeIncidentId(captureKind, ts, pid);
+  j["capture_kind"] = std::string(captureKind);
+  j["timestamp_local"] = WideToUtf8(ts);
+  j["pid"] = static_cast<std::uint32_t>(pid);
+  j["state_flags"] = stateFlags;
+  j["artifacts"] = nlohmann::json::object();
+  j["artifacts"]["dump"] = WideToUtf8(dumpPath.filename().wstring());
+  j["artifacts"]["wct"] = wctPath ? WideToUtf8(wctPath->filename().wstring()) : "";
+  j["artifacts"]["etw"] = etwPath ? WideToUtf8(etwPath->filename().wstring()) : "";
+  j["artifacts"]["etw_status"] = std::string(etwStatus);
+  j["artifacts"]["helper_log"] = "SkyrimDiagHelper.log";
+  j["privacy"] = {
+    { "paths", "filenames_only" },
+    { "contains_user_paths", false },
+    { "contains_config_paths", false },
+  };
+  if (context.is_object() && !context.empty()) {
+    j["context"] = context;
+  }
+  if (includeConfigSnapshot) {
+    j["config_snapshot"] = MakeIncidentConfigSnapshotSafe(cfg);
+  }
+  return j;
+}
+
+bool TryUpdateIncidentManifestEtw(
+  const std::filesystem::path& manifestPath,
+  const std::filesystem::path& etwPath,
+  std::string_view etwStatus,
+  std::wstring* err)
+{
+  std::string txt;
+  if (!ReadTextFileUtf8(manifestPath, &txt)) {
+    if (err) {
+      *err = L"manifest read failed";
+    }
+    return false;
+  }
+  auto j = nlohmann::json::parse(txt, nullptr, false);
+  if (j.is_discarded() || !j.is_object()) {
+    if (err) {
+      *err = L"manifest parse failed";
+    }
+    return false;
+  }
+  if (!j.contains("artifacts") || !j["artifacts"].is_object()) {
+    j["artifacts"] = nlohmann::json::object();
+  }
+  j["artifacts"]["etw"] = WideToUtf8(etwPath.filename().wstring());
+  j["artifacts"]["etw_status"] = std::string(etwStatus);
+  WriteTextFileUtf8(manifestPath, j.dump(2));
+  if (err) {
+    err->clear();
+  }
+  return true;
+}
+
 std::uint64_t g_maxHelperLogBytes = 0;
 std::uint32_t g_maxHelperLogFiles = 0;
 
@@ -466,7 +615,7 @@ bool StartEtwCaptureForHang(
   return false;
 }
 
-bool StopEtwCaptureForHang(
+bool StopEtwCaptureToPath(
   const skydiag::helper::HelperConfig& cfg,
   const std::filesystem::path& outBase,
   const std::filesystem::path& etlPath,
@@ -1013,6 +1162,18 @@ int wmain(int argc, wchar_t** argv)
   std::wstring pendingHangViewerDumpPath;
   PendingCrashAnalysis pendingCrashAnalysis{};
 
+  struct PendingCrashEtwCapture
+  {
+    bool active = false;
+    std::filesystem::path etwPath;
+    std::filesystem::path manifestPath;
+    ULONGLONG startedAtTick64 = 0;
+    std::uint32_t captureSeconds = 0;
+    std::wstring profileUsed;
+  };
+
+  PendingCrashEtwCapture pendingCrashEtw{};
+
   bool wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
   std::uint64_t loadStartQpc = wasLoading ? proc.shm->header.start_qpc : 0;
 
@@ -1085,20 +1246,90 @@ int wmain(int argc, wchar_t** argv)
     } else {
       std::wcout << L"[SkyrimDiagHelper] Manual dump written: " << dumpPath << L"\n";
       std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
-	      AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
-	      AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
-	      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-	      if (cfg.autoOpenViewerOnManualCapture) {
-	        StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
-	      }
-	      skydiag::helper::RetentionLimits limits{};
-	      limits.maxCrashDumps = cfg.maxCrashDumps;
-	      limits.maxHangDumps = cfg.maxHangDumps;
-	      limits.maxManualDumps = cfg.maxManualDumps;
-	      limits.maxEtwTraces = cfg.maxEtwTraces;
-	      skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
-	    }
-	  };
+      AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
+      AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
+
+      if (cfg.enableIncidentManifest) {
+        const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Manual_" + ts + L".json");
+        nlohmann::json ctx = nlohmann::json::object();
+        ctx["trigger"] = WideToUtf8(trigger);
+        ctx["seconds_since_heartbeat"] = decision.secondsSinceHeartbeat;
+        ctx["threshold_sec"] = decision.thresholdSec;
+        ctx["is_loading"] = decision.isLoading;
+        ctx["in_menu"] = inMenu;
+
+        const auto manifest = MakeIncidentManifestV1(
+          "manual",
+          ts,
+          proc.pid,
+          std::filesystem::path(dumpPath),
+          std::optional<std::filesystem::path>(wctPath),
+          /*etwPath=*/std::nullopt,
+          /*etwStatus=*/"disabled",
+          stateFlags,
+          ctx,
+          cfg,
+          cfg.incidentManifestIncludeConfigSnapshot);
+        WriteTextFileUtf8(manifestPath, manifest.dump(2));
+        AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
+      }
+
+      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      if (cfg.autoOpenViewerOnManualCapture) {
+        StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+      }
+      skydiag::helper::RetentionLimits limits{};
+      limits.maxCrashDumps = cfg.maxCrashDumps;
+      limits.maxHangDumps = cfg.maxHangDumps;
+      limits.maxManualDumps = cfg.maxManualDumps;
+      limits.maxEtwTraces = cfg.maxEtwTraces;
+      skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+    }
+  };
+
+  auto maybeStopPendingCrashEtw = [&](bool force) {
+    if (!pendingCrashEtw.active) {
+      return;
+    }
+
+    bool procExited = false;
+    if (proc.process) {
+      const DWORD w = WaitForSingleObject(proc.process, 0);
+      procExited = (w == WAIT_OBJECT_0);
+    }
+
+    const ULONGLONG nowTick = GetTickCount64();
+    bool timeUp = false;
+    if (pendingCrashEtw.captureSeconds > 0 && nowTick >= pendingCrashEtw.startedAtTick64) {
+      const ULONGLONG elapsedMs = nowTick - pendingCrashEtw.startedAtTick64;
+      timeUp = elapsedMs >= (static_cast<ULONGLONG>(pendingCrashEtw.captureSeconds) * 1000ull);
+    }
+
+    if (!force && !procExited && !timeUp) {
+      return;
+    }
+
+    std::wstring etwErr;
+    if (StopEtwCaptureToPath(cfg, outBase, pendingCrashEtw.etwPath, &etwErr)) {
+      AppendLogLine(outBase, L"ETW crash capture written: " + pendingCrashEtw.etwPath.wstring());
+      if (cfg.enableIncidentManifest && !pendingCrashEtw.manifestPath.empty()) {
+        std::wstring updErr;
+        if (!TryUpdateIncidentManifestEtw(pendingCrashEtw.manifestPath, pendingCrashEtw.etwPath, "written", &updErr)) {
+          AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
+        }
+      }
+    } else {
+      AppendLogLine(outBase, L"ETW crash capture stop failed: " + etwErr);
+      if (cfg.enableIncidentManifest && !pendingCrashEtw.manifestPath.empty()) {
+        std::wstring updErr;
+        if (!TryUpdateIncidentManifestEtw(pendingCrashEtw.manifestPath, pendingCrashEtw.etwPath, "stop_failed", &updErr)) {
+          AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
+        }
+      }
+    }
+
+    pendingCrashEtw.active = false;
+  };
 
   for (;;) {
     MSG msg{};
@@ -1121,10 +1352,12 @@ int wmain(int argc, wchar_t** argv)
     }
 
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &pendingCrashAnalysis);
+    maybeStopPendingCrashEtw(/*force=*/false);
 
     if (proc.process) {
       const DWORD w = WaitForSingleObject(proc.process, 0);
       if (w == WAIT_OBJECT_0) {
+        maybeStopPendingCrashEtw(/*force=*/true);
         std::wcerr << L"[SkyrimDiagHelper] Target process exited.\n";
         AppendLogLine(outBase, L"Target process exited.");
         if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
@@ -1138,6 +1371,7 @@ int wmain(int argc, wchar_t** argv)
         break;
       }
       if (w == WAIT_FAILED) {
+        maybeStopPendingCrashEtw(/*force=*/true);
         const DWORD le = GetLastError();
         std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";
         AppendLogLine(outBase, L"Target process wait failed: " + std::to_wstring(le));
@@ -1156,6 +1390,8 @@ int wmain(int argc, wchar_t** argv)
 
         const auto ts = Timestamp();
         const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
+        const auto etwPath = outBase / (L"SkyrimDiag_Crash_" + ts + L".etl");
+        const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Crash_" + ts + L".json");
         pendingHangViewerDumpPath.clear();
 
         std::wstring dumpErr;
@@ -1172,6 +1408,52 @@ int wmain(int argc, wchar_t** argv)
           std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
         } else {
           std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
+
+          const auto stateFlags = proc.shm->header.state_flags;
+
+          bool etwStarted = false;
+          std::string etwStatus = cfg.enableEtwCaptureOnCrash ? "start_failed" : "disabled";
+          if (cfg.enableEtwCaptureOnCrash && !pendingCrashEtw.active) {
+            const std::wstring effectiveProfile = cfg.etwCrashProfile.empty() ? L"GeneralProfile" : cfg.etwCrashProfile;
+            std::wstring etwErr;
+            if (StartEtwCaptureWithProfile(cfg, outBase, effectiveProfile, &etwErr)) {
+              etwStarted = true;
+              etwStatus = "recording";
+
+              pendingCrashEtw.active = true;
+              pendingCrashEtw.etwPath = etwPath;
+              pendingCrashEtw.manifestPath = cfg.enableIncidentManifest ? manifestPath : std::filesystem::path{};
+              pendingCrashEtw.startedAtTick64 = GetTickCount64();
+              pendingCrashEtw.captureSeconds = cfg.etwCrashCaptureSeconds;
+              pendingCrashEtw.profileUsed = effectiveProfile;
+
+              AppendLogLine(
+                outBase,
+                L"ETW crash capture started (profile=" + effectiveProfile +
+                  L", seconds=" + std::to_wstring(pendingCrashEtw.captureSeconds) + L").");
+            } else {
+              AppendLogLine(outBase, L"ETW crash capture start failed: " + etwErr);
+            }
+          }
+
+          if (cfg.enableIncidentManifest) {
+            nlohmann::json ctx = nlohmann::json::object();
+            ctx["reason"] = "crash_event";
+            const auto manifest = MakeIncidentManifestV1(
+              "crash",
+              ts,
+              proc.pid,
+              std::filesystem::path(dumpPath),
+              /*wctPath=*/std::nullopt,
+              etwStarted ? std::optional<std::filesystem::path>(etwPath) : std::nullopt,
+              etwStatus,
+              stateFlags,
+              ctx,
+              cfg,
+              cfg.incidentManifestIncludeConfigSnapshot);
+            WriteTextFileUtf8(manifestPath, manifest.dump(2));
+            AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
+          }
 
           bool crashAnalysisQueued = false;
           if (cfg.autoAnalyzeDump && cfg.enableAutoRecaptureOnUnknownCrash) {
@@ -1215,9 +1497,9 @@ int wmain(int argc, wchar_t** argv)
           skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
         }
 
-	        crashCaptured = true;
-	        AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
-	        continue;
+        crashCaptured = true;
+        AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
+        continue;
       }
     } else {
       Sleep(waitMs);
@@ -1466,6 +1748,8 @@ int wmain(int argc, wchar_t** argv)
     const auto wctPath = outBase / (L"SkyrimDiag_WCT_" + ts + L".json");
     const auto dumpPath = (outBase / (L"SkyrimDiag_Hang_" + ts + L".dmp")).wstring();
     const auto etwPath = outBase / (L"SkyrimDiag_Hang_" + ts + L".etl");
+    const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Hang_" + ts + L".json");
+    bool manifestWritten = false;
 
     bool etwStarted = false;
     if (cfg.enableEtwCaptureOnHang) {
@@ -1478,6 +1762,7 @@ int wmain(int argc, wchar_t** argv)
         AppendLogLine(outBase, L"ETW hang capture start failed: " + etwErr);
       }
     }
+    std::string etwStatus = cfg.enableEtwCaptureOnHang ? (etwStarted ? "recording" : "start_failed") : "disabled";
 
     nlohmann::json wctJson;
     std::wstring wctErr;
@@ -1524,34 +1809,75 @@ int wmain(int argc, wchar_t** argv)
       AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
       AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
         L" threshold=" + std::to_wstring(decision2.thresholdSec) + L" loading=" + std::to_wstring(decision2.isLoading ? 1 : 0));
-	      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-	      if (cfg.autoOpenViewerOnHang) {
-	        if (cfg.autoOpenHangAfterProcessExit) {
-	          pendingHangViewerDumpPath = dumpPath;
-	          AppendLogLine(outBase, L"Queued hang dump for viewer auto-open on process exit.");
-	        } else {
-	          StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
-	        }
-	      }
-	      skydiag::helper::RetentionLimits limits{};
-	      limits.maxCrashDumps = cfg.maxCrashDumps;
-	      limits.maxHangDumps = cfg.maxHangDumps;
-	      limits.maxManualDumps = cfg.maxManualDumps;
-	      limits.maxEtwTraces = cfg.maxEtwTraces;
-	      skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
-	    }
+      if (cfg.enableIncidentManifest) {
+        const bool inMenu2 = (stateFlags2 & skydiag::kState_InMenu) != 0u;
+        nlohmann::json ctx = nlohmann::json::object();
+        ctx["seconds_since_heartbeat"] = decision2.secondsSinceHeartbeat;
+        ctx["threshold_sec"] = decision2.thresholdSec;
+        ctx["is_loading"] = decision2.isLoading;
+        ctx["in_menu"] = inMenu2;
 
-	    if (etwStarted) {
+        const auto manifest = MakeIncidentManifestV1(
+          "hang",
+          ts,
+          proc.pid,
+          std::filesystem::path(dumpPath),
+          std::optional<std::filesystem::path>(wctPath),
+          etwStarted ? std::optional<std::filesystem::path>(etwPath) : std::nullopt,
+          etwStatus,
+          stateFlags2,
+          ctx,
+          cfg,
+          cfg.incidentManifestIncludeConfigSnapshot);
+        WriteTextFileUtf8(manifestPath, manifest.dump(2));
+        AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
+        manifestWritten = true;
+      }
+
+      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      if (cfg.autoOpenViewerOnHang) {
+        if (cfg.autoOpenHangAfterProcessExit) {
+          pendingHangViewerDumpPath = dumpPath;
+          AppendLogLine(outBase, L"Queued hang dump for viewer auto-open on process exit.");
+        } else {
+          StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
+        }
+      }
+      skydiag::helper::RetentionLimits limits{};
+      limits.maxCrashDumps = cfg.maxCrashDumps;
+      limits.maxHangDumps = cfg.maxHangDumps;
+      limits.maxManualDumps = cfg.maxManualDumps;
+      limits.maxEtwTraces = cfg.maxEtwTraces;
+      skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+    }
+
+    if (etwStarted) {
       std::wstring etwErr;
-      if (StopEtwCaptureForHang(cfg, outBase, etwPath, &etwErr)) {
+      if (StopEtwCaptureToPath(cfg, outBase, etwPath, &etwErr)) {
         AppendLogLine(outBase, L"ETW hang capture written: " + etwPath.wstring());
+        etwStatus = "written";
+        if (manifestWritten) {
+          std::wstring updErr;
+          if (!TryUpdateIncidentManifestEtw(manifestPath, etwPath, "written", &updErr)) {
+            AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
+          }
+        }
       } else {
         AppendLogLine(outBase, L"ETW hang capture stop failed: " + etwErr);
+        etwStatus = "stop_failed";
+        if (manifestWritten) {
+          std::wstring updErr;
+          if (!TryUpdateIncidentManifestEtw(manifestPath, etwPath, "stop_failed", &updErr)) {
+            AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
+          }
+        }
       }
     }
 
     hangCapturedThisEpisode = true;
   }
+
+  maybeStopPendingCrashEtw(/*force=*/true);
 
   if (cfg.enableManualCaptureHotkey) {
     UnregisterHotKey(nullptr, kHotkeyId);

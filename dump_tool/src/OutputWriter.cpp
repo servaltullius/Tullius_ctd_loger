@@ -194,6 +194,80 @@ std::filesystem::path DefaultOutDirForDump(const std::filesystem::path& dumpPath
   return std::filesystem::current_path();
 }
 
+std::optional<std::wstring> TryExtractTimestampTokenW(std::wstring_view s)
+{
+  // Search for pattern: YYYYMMDD_HHMMSS (15 chars)
+  auto is_digits = [](std::wstring_view v) {
+    for (const wchar_t c : v) {
+      if (!std::iswdigit(c)) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  std::optional<std::wstring> best;
+  for (std::size_t i = 0; i + 15 <= s.size(); i++) {
+    const std::wstring_view date = s.substr(i, 8);
+    if (!is_digits(date)) {
+      continue;
+    }
+    if (s[i + 8] != L'_') {
+      continue;
+    }
+    const std::wstring_view time = s.substr(i + 9, 6);
+    if (!is_digits(time)) {
+      continue;
+    }
+    best = std::wstring(s.substr(i, 15));
+  }
+  return best;
+}
+
+std::filesystem::path FindIncidentManifestForDump(const std::filesystem::path& outBase, std::wstring_view dumpStem)
+{
+  const auto tsOpt = TryExtractTimestampTokenW(dumpStem);
+  if (!tsOpt) {
+    return {};
+  }
+  const std::wstring& ts = *tsOpt;
+
+  const std::wstring candidates[] = {
+    L"SkyrimDiag_Incident_Crash_" + ts + L".json",
+    L"SkyrimDiag_Incident_Hang_" + ts + L".json",
+    L"SkyrimDiag_Incident_Manual_" + ts + L".json",
+  };
+
+  std::error_code ec;
+  for (const auto& name : candidates) {
+    const auto p = outBase / name;
+    if (std::filesystem::exists(p, ec) && std::filesystem::is_regular_file(p, ec)) {
+      return p;
+    }
+  }
+
+  return {};
+}
+
+bool TryLoadIncidentManifestJson(const std::filesystem::path& path, nlohmann::json* out)
+{
+  if (out) {
+    *out = nlohmann::json();
+  }
+  std::string txt;
+  if (!ReadTextUtf8(path, &txt)) {
+    return false;
+  }
+  const auto j = nlohmann::json::parse(txt, nullptr, false);
+  if (j.is_discarded() || !j.is_object()) {
+    return false;
+  }
+  if (out) {
+    *out = j;
+  }
+  return true;
+}
+
 }  // namespace
 
 bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
@@ -228,6 +302,31 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     { "online_symbol_source_allowed", r.online_symbol_source_allowed },
     { "online_symbol_source_used", r.online_symbol_source_used },
   };
+  const auto incidentManifestPath = FindIncidentManifestForDump(outBase, stem);
+  nlohmann::json incidentManifest;
+  if (!incidentManifestPath.empty() && TryLoadIncidentManifestJson(incidentManifestPath, &incidentManifest)) {
+    nlohmann::json artifacts = nlohmann::json::object();
+    if (incidentManifest.contains("artifacts") && incidentManifest["artifacts"].is_object()) {
+      artifacts = incidentManifest["artifacts"];
+    }
+    // Ensure stable schema keys in the output even if the manifest is missing fields.
+    if (!artifacts.contains("etw")) {
+      artifacts["etw"] = "";
+    }
+
+    nlohmann::json privacy = nlohmann::json::object();
+    if (incidentManifest.contains("privacy") && incidentManifest["privacy"].is_object()) {
+      privacy = incidentManifest["privacy"];
+    }
+
+    summary["incident"] = {
+      { "incident_id", incidentManifest.value("incident_id", "") },
+      { "capture_kind", incidentManifest.value("capture_kind", "") },
+      { "artifacts", std::move(artifacts) },
+      { "manifest_path", WideToUtf8(MaybeRedactPath(incidentManifestPath.wstring(), redactPaths)) },
+      { "privacy", std::move(privacy) },
+    };
+  }
   nlohmann::json triage;
   LoadExistingSummaryTriage(summaryPath, &triage);
   summary["triage"] = std::move(triage);
@@ -335,6 +434,24 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   rpt << (en ? "PathRedactionApplied: " : "경로 마스킹 적용: ") << (redactPaths ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceAllowed: " : "온라인 심볼 소스 허용: ") << (r.online_symbol_source_allowed ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceUsed: " : "온라인 심볼 소스 사용: ") << (r.online_symbol_source_used ? "1" : "0") << "\n";
+  if (summary.contains("incident") && summary["incident"].is_object()) {
+    const auto& inc = summary["incident"];
+    if (inc.contains("incident_id") && inc["incident_id"].is_string()) {
+      rpt << (en ? "IncidentId: " : "IncidentId: ") << inc["incident_id"].get<std::string>() << "\n";
+    }
+    if (inc.contains("capture_kind") && inc["capture_kind"].is_string()) {
+      rpt << (en ? "CaptureKind: " : "CaptureKind: ") << inc["capture_kind"].get<std::string>() << "\n";
+    }
+    if (inc.contains("manifest_path") && inc["manifest_path"].is_string()) {
+      rpt << (en ? "IncidentManifest: " : "Incident manifest: ") << inc["manifest_path"].get<std::string>() << "\n";
+    }
+    if (inc.contains("artifacts") && inc["artifacts"].is_object()) {
+      const auto& art = inc["artifacts"];
+      if (art.contains("etw") && art["etw"].is_string() && !art["etw"].get<std::string>().empty()) {
+        rpt << (en ? "ETW: " : "ETW: ") << art["etw"].get<std::string>() << "\n";
+      }
+    }
+  }
   if (!r.crash_bucket_key.empty()) {
     rpt << (en ? "CrashBucketKey: " : "크래시 버킷 키: ") << WideToUtf8(r.crash_bucket_key) << "\n";
   }

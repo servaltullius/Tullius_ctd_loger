@@ -43,6 +43,11 @@ struct HelperConfig {
   std::wstring etwHangProfile = L"GeneralProfile";
   std::wstring etwHangFallbackProfile;
   std::uint32_t etwMaxDurationSec = 20;
+  bool enableEtwCaptureOnCrash = false;
+  std::wstring etwCrashProfile = L"GeneralProfile";
+  std::uint32_t etwCrashCaptureSeconds = 8;
+  bool enableIncidentManifest = true;
+  bool incidentManifestIncludeConfigSnapshot = true;
 
   // Retention / disk cleanup (0 = unlimited)
   std::uint32_t maxCrashDumps = 20;
