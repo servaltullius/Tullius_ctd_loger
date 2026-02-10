@@ -7,17 +7,34 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(SkyrimDiagDumpToolCore STATIC
   src/Analyzer.cpp
   src/Analyzer.h
+  src/AnalyzerInternals.cpp
+  src/AnalyzerInternals.h
+  src/AnalyzerInternalsCrashBucket.cpp
+  src/AnalyzerInternalsStackScan.cpp
+  src/AnalyzerInternalsWct.cpp
+  src/AnalyzerInternalsStackwalk.cpp
+  src/AnalyzerInternalsStackwalkFormat.cpp
+  src/AnalyzerInternalsStackwalkScoring.cpp
+  src/AnalyzerInternalsStackwalkMemory.cpp
+  src/AnalyzerInternalsStackwalkPriv.h
+  src/AnalyzerInternalsStackwalkSymbols.cpp
   src/EvidenceBuilder.cpp
   src/EvidenceBuilder.h
+  src/EvidenceBuilderInternals.cpp
+  src/EvidenceBuilderInternals.h
   src/CrashLogger.cpp
   src/CrashLogger.h
   src/Mo2Index.cpp
   src/Mo2Index.h
+  src/MinidumpUtil.cpp
+  src/MinidumpUtil.h
   src/NativeApi.h
   src/Utf.cpp
   src/Utf.h
   src/OutputWriter.cpp
-  src/OutputWriter.h)
+  src/OutputWriter.h
+  src/OutputWriterInternals.cpp
+  src/OutputWriterInternals.h)
 
 target_link_libraries(SkyrimDiagDumpToolCore
   PUBLIC
