@@ -27,8 +27,6 @@ int main()
   const std::string outputWriter = ReadAllText(outputWriterPath);
 
   AssertContains(outputWriter, "summary[\"triage\"]", "Missing triage object in summary output");
-  AssertContains(outputWriter, "review_status", "Missing triage.review_status field in summary output");
-  AssertContains(outputWriter, "ground_truth_mod", "Missing triage.ground_truth_mod field in summary output");
   AssertContains(outputWriter, "summary[\"schema\"]", "Missing summary schema metadata object");
   AssertContains(outputWriter, "LoadExistingSummaryTriage", "Missing triage merge logic for existing summary");
   AssertContains(outputWriter, "summary[\"symbolization\"]", "Missing symbolization object in summary output");

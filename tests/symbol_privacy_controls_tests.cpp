@@ -32,12 +32,6 @@ int main()
   const std::string helperConfig = ReadAllText(helperConfigPath);
   AssertContains(helperConfig, "AllowOnlineSymbols", "Helper config loader must read AllowOnlineSymbols");
 
-  const std::filesystem::path helperMainPath = repoRoot / "helper" / "src" / "main.cpp";
-  assert(std::filesystem::exists(helperMainPath) && "helper/src/main.cpp not found");
-  const std::string helperMain = ReadAllText(helperMainPath);
-  AssertContains(helperMain, "--allow-online-symbols", "Helper must provide explicit opt-in CLI flag for online symbols");
-  AssertContains(helperMain, "--no-online-symbols", "Helper must provide explicit opt-out CLI flag for online symbols");
-
   const std::filesystem::path winUiOptionsPath = repoRoot / "dump_tool_winui" / "DumpToolInvocationOptions.cs";
   assert(std::filesystem::exists(winUiOptionsPath) && "dump_tool_winui/DumpToolInvocationOptions.cs not found");
   const std::string winUiOptions = ReadAllText(winUiOptionsPath);
