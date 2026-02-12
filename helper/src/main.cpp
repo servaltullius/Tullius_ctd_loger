@@ -170,6 +170,10 @@ int wmain(int argc, wchar_t** argv)
     if (proc.process) {
       const DWORD w = WaitForSingleObject(proc.process, 0);
       if (w == WAIT_OBJECT_0) {
+        // Drain any pending crash event before exiting — fixes race where
+        // the process terminates before the next HandleCrashEventTick poll.
+        HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
+          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath);
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         std::wcerr << L"[SkyrimDiagHelper] Target process exited.\n";
         AppendLogLine(outBase, L"Target process exited.");
@@ -184,6 +188,8 @@ int wmain(int argc, wchar_t** argv)
         break;
       }
       if (w == WAIT_FAILED) {
+        HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
+          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath);
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         const DWORD le = GetLastError();
         std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";

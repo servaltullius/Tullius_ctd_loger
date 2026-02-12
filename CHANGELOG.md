@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.16 (2026-02-13)
+
+### Fixed
+- Helper: fix race condition where crash event was missed if the game process terminated before the next poll cycle. On process exit, the helper now drains any pending crash event (non-blocking) before shutting down.
+
 ## v0.2.15 (2026-02-10)
 
 ### Fixed
