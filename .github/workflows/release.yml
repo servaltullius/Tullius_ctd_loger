@@ -21,15 +21,7 @@ jobs:
         run: cmake -S . -B build-linux -G Ninja
 
       - name: Build tests
-        run: |
-          cmake --build build-linux --target \
-            skydiag_hang_suppression_tests \
-            skydiag_crashlogger_parser_tests \
-            skydiag_i18n_core_tests \
-            skydiag_bucket_tests \
-            skydiag_winui_xaml_tests \
-            skydiag_helper_crash_autopen_config_tests \
-            skydiag_retention_tests
+        run: cmake --build build-linux
 
       - name: Run tests
         run: ctest --test-dir build-linux --output-on-failure
