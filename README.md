@@ -3,7 +3,7 @@
 > **한국어 안내(메인)** (플레이어/사용자용)  
 > 내부 파일명/바이너리는 아직 `SkyrimDiag.*` 로 남아있을 수 있습니다(호환/개발 편의 목적).
 >
-> Latest release: `v0.2.15`  
+> Latest release: `v0.2.16`  
 > Download: https://github.com/servaltullius/Tullius_ctd_loger/releases/latest  
 > 참고: GitHub Releases 화면 왼쪽의 "tags N"은 **태그 개수 표시**이며, 릴리즈 목록/안정판 여부와는 별개입니다.
 
