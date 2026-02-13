@@ -19,8 +19,7 @@ namespace skydiag::helper::internal {
 struct HangCaptureState
 {
   bool hangCapturedThisEpisode = false;
-  bool heartbeatEverAdvanced = false;
-  bool warnedHeartbeatStale = false;
+  bool warnedHeartbeatNotInitialized = false;
 
   bool hangSuppressedNotForegroundThisEpisode = false;
   bool hangSuppressedForegroundGraceThisEpisode = false;

@@ -7,7 +7,7 @@ using skydiag::helper::EvaluateHangSuppression;
 using skydiag::helper::HangSuppressionReason;
 using skydiag::helper::HangSuppressionState;
 
-static void Test_Suppresses_WhenNotForeground()
+static void Test_Suppresses_WhenNotForeground_AndResponsive()
 {
   HangSuppressionState s{};
   const auto r = EvaluateHangSuppression(
@@ -15,7 +15,7 @@ static void Test_Suppresses_WhenNotForeground()
     /*isHang=*/true,
     /*isForeground=*/false,
     /*isLoading=*/false,
-    /*isWindowResponsive=*/false,
+    /*isWindowResponsive=*/true,  // responsive → normal Alt-Tab, suppress
     /*suppressHangWhenNotForeground=*/true,
     /*nowQpc=*/1000,
     /*heartbeatQpc=*/200,
@@ -28,17 +28,39 @@ static void Test_Suppresses_WhenNotForeground()
   assert(s.foregroundResumeQpc == 0);
 }
 
+static void Test_DoesNotSuppress_WhenNotForeground_AndUnresponsive()
+{
+  // When the window is unresponsive AND not foreground, the game is likely
+  // truly frozen (user Alt-Tabbed away from a freeze).  Do NOT suppress.
+  HangSuppressionState s{};
+  const auto r = EvaluateHangSuppression(
+    s,
+    /*isHang=*/true,
+    /*isForeground=*/false,
+    /*isLoading=*/false,
+    /*isWindowResponsive=*/false,  // unresponsive → real freeze, allow capture
+    /*suppressHangWhenNotForeground=*/true,
+    /*nowQpc=*/1000,
+    /*heartbeatQpc=*/200,
+    /*qpcFreq=*/100,
+    /*foregroundGraceSec=*/5);
+
+  assert(!r.suppress);
+  assert(r.reason == HangSuppressionReason::kNone);
+  assert(s.suppressedHeartbeatQpc == 0);  // Not set because no suppression
+}
+
 static void Test_AltTab_Back_Foreground_Grace()
 {
   HangSuppressionState s{};
 
-  // Background hang suppression begins.
+  // Background hang suppression begins (window responsive = normal Alt-Tab).
   (void)EvaluateHangSuppression(
     s,
     /*isHang=*/true,
     /*isForeground=*/false,
     /*isLoading=*/false,
-    /*isWindowResponsive=*/false,
+    /*isWindowResponsive=*/true,
     /*suppressHangWhenNotForeground=*/true,
     /*nowQpc=*/1000,
     /*heartbeatQpc=*/200,
@@ -103,13 +125,13 @@ static void Test_AltTab_Back_Foreground_StaysSuppressed_WhenResponsive()
 {
   HangSuppressionState s{};
 
-  // Background hang suppression begins.
+  // Background hang suppression begins (window responsive = normal Alt-Tab).
   (void)EvaluateHangSuppression(
     s,
     /*isHang=*/true,
     /*isForeground=*/false,
     /*isLoading=*/false,
-    /*isWindowResponsive=*/false,
+    /*isWindowResponsive=*/true,
     /*suppressHangWhenNotForeground=*/true,
     /*nowQpc=*/1000,
     /*heartbeatQpc=*/200,
@@ -157,7 +179,7 @@ static void Test_Clears_WhenHeartbeatAdvances()
     /*isHang=*/true,
     /*isForeground=*/false,
     /*isLoading=*/false,
-    /*isWindowResponsive=*/false,
+    /*isWindowResponsive=*/true,
     /*suppressHangWhenNotForeground=*/true,
     /*nowQpc=*/1000,
     /*heartbeatQpc=*/200,
@@ -191,7 +213,7 @@ static void Test_NoGraceConfigured_DoesNotSuppressInForeground()
     /*isHang=*/true,
     /*isForeground=*/false,
     /*isLoading=*/false,
-    /*isWindowResponsive=*/false,
+    /*isWindowResponsive=*/true,
     /*suppressHangWhenNotForeground=*/true,
     /*nowQpc=*/1000,
     /*heartbeatQpc=*/200,
@@ -223,7 +245,7 @@ static void Test_ZeroQpcFreq_DoesNotGetStuckSuppressed()
     /*isHang=*/true,
     /*isForeground=*/false,
     /*isLoading=*/false,
-    /*isWindowResponsive=*/false,
+    /*isWindowResponsive=*/true,
     /*suppressHangWhenNotForeground=*/true,
     /*nowQpc=*/1000,
     /*heartbeatQpc=*/200,
@@ -288,7 +310,8 @@ static void Test_Resets_WhenNoHang()
 
 int main()
 {
-  Test_Suppresses_WhenNotForeground();
+  Test_Suppresses_WhenNotForeground_AndResponsive();
+  Test_DoesNotSuppress_WhenNotForeground_AndUnresponsive();
   Test_AltTab_Back_Foreground_Grace();
   Test_AltTab_Back_Foreground_StaysSuppressed_WhenResponsive();
   Test_Clears_WhenHeartbeatAdvances();

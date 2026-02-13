@@ -147,15 +147,24 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (!ShouldChainToRootScrollViewer(e.OriginalSource as DependencyObject))
-        {
-            return;
-        }
-
         var delta = e.GetCurrentPoint(RootScrollViewer).Properties.MouseWheelDelta;
         if (delta == 0)
         {
             return;
+        }
+
+        // Find the innermost ScrollViewer (e.g. inside a ListView) that is not
+        // the root.  If it still has room to scroll in the wheel direction, let
+        // it consume the event exclusively — do NOT chain to the root.
+        var inner = FindInnerScrollViewer(e.OriginalSource as DependencyObject);
+        if (inner != null && inner.ScrollableHeight > 0)
+        {
+            bool atEdge = (delta > 0 && inner.VerticalOffset <= 0)
+                       || (delta < 0 && inner.VerticalOffset >= inner.ScrollableHeight - 0.5);
+            if (!atEdge)
+            {
+                return;
+            }
         }
 
         var targetOffset = Math.Clamp(
@@ -171,17 +180,22 @@ public sealed partial class MainWindow : Window
         RootScrollViewer.ChangeView(horizontalOffset: null, verticalOffset: targetOffset, zoomFactor: null, disableAnimation: true);
     }
 
-    private static bool ShouldChainToRootScrollViewer(DependencyObject? source)
+    private ScrollViewer? FindInnerScrollViewer(DependencyObject? source)
     {
         for (var current = source; current is not null; current = VisualTreeHelper.GetParent(current))
         {
-            if (current is TextBox or ListView or ScrollViewer)
+            if (current is ScrollViewer sv && sv != RootScrollViewer)
             {
-                return true;
+                return sv;
+            }
+
+            if (current == RootScrollViewer || current == RootGrid)
+            {
+                break;
             }
         }
 
-        return false;
+        return null;
     }
 
     private async void AnalyzeButton_Click(object sender, RoutedEventArgs e)

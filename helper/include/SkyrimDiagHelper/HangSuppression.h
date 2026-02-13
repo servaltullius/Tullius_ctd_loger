@@ -42,6 +42,12 @@ inline HangSuppressionResult EvaluateHangSuppression(
   }
 
   if (suppressHangWhenNotForeground && !isForeground) {
+    // If the window is unresponsive while not foreground, treat as a real
+    // freeze (user Alt-Tabbed away from a frozen game) and allow capture.
+    if (!isWindowResponsive) {
+      return {};
+    }
+    // Window is responsive but not foreground — likely normal Alt-Tab pause.
     state.suppressedHeartbeatQpc = heartbeatQpc;
     state.foregroundResumeQpc = 0;
     return { true, HangSuppressionReason::kNotForeground };

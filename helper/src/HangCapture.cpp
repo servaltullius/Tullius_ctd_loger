@@ -41,6 +41,8 @@ HangTickResult HandleHangTick(
   std::wstring* pendingHangViewerDumpPath,
   HangCaptureState* state)
 {
+  (void)attachHeartbeatQpc;  // No longer used; kept for API compatibility.
+
   if (!state || !adaptiveLoadingThresholdSec || !loadStats) {
     // Helper should always have these; keep behavior safe if wiring is wrong.
     return HangTickResult::kContinue;
@@ -75,16 +77,20 @@ HangTickResult HandleHangTick(
     ? *adaptiveLoadingThresholdSec
     : cfg.hangThresholdLoadingSec;
 
-  if (!state->heartbeatEverAdvanced && proc.shm->header.last_heartbeat_qpc > attachHeartbeatQpc) {
-    state->heartbeatEverAdvanced = true;
-  }
-  if (!state->heartbeatEverAdvanced && !state->warnedHeartbeatStale && proc.shm->header.qpc_freq != 0) {
-    const std::uint64_t deltaQpc = static_cast<std::uint64_t>(now.QuadPart) - attachNowQpc;
-    const double secondsSinceAttach = static_cast<double>(deltaQpc) / static_cast<double>(proc.shm->header.qpc_freq);
-    if (secondsSinceAttach >= 5.0) {
-      state->warnedHeartbeatStale = true;
-      AppendLogLine(outBase, L"Warning: heartbeat not advancing since attach; auto hang capture disabled (manual capture still works).");
+  // Check plugin heartbeat initialization: if last_heartbeat_qpc is still 0,
+  // the plugin hasn't started its heartbeat scheduler yet.  Auto hang capture
+  // is unreliable without a working heartbeat, so skip until it initializes.
+  if (proc.shm->header.last_heartbeat_qpc == 0) {
+    if (!state->warnedHeartbeatNotInitialized && proc.shm->header.qpc_freq != 0) {
+      const std::uint64_t deltaQpc = static_cast<std::uint64_t>(now.QuadPart) - attachNowQpc;
+      const double secondsSinceAttach = static_cast<double>(deltaQpc) / static_cast<double>(proc.shm->header.qpc_freq);
+      if (secondsSinceAttach >= 10.0) {
+        state->warnedHeartbeatNotInitialized = true;
+        AppendLogLine(outBase, L"Warning: plugin heartbeat not initialized (last_heartbeat_qpc=0); "
+          L"auto hang capture unavailable until heartbeat starts.");
+      }
     }
+    return HangTickResult::kContinue;
   }
 
   const auto decision = skydiag::helper::EvaluateHang(
@@ -103,12 +109,6 @@ HangTickResult HandleHangTick(
     state->hangSuppressedForegroundGraceThisEpisode = false;
     state->hangSuppressedForegroundResponsiveThisEpisode = false;
     state->hangSuppressionState = {};
-    return HangTickResult::kContinue;
-  }
-
-  // If heartbeat never advanced after attach, treat hang detection as unreliable and avoid auto-captures.
-  // Users can still capture a snapshot with the manual hotkey (Ctrl+Shift+F12).
-  if (!state->heartbeatEverAdvanced) {
     return HangTickResult::kContinue;
   }
 
@@ -161,25 +161,6 @@ HangTickResult HandleHangTick(
     }
     state->hangCapturedThisEpisode = false;
     return HangTickResult::kContinue;
-  }
-
-  if (!isForeground) {
-    if (!state->targetWindow || !IsWindow(state->targetWindow)) {
-      state->targetWindow = FindMainWindowForPid(proc.pid);
-    }
-    if (state->targetWindow && IsWindowResponsive(state->targetWindow, 250)) {
-      if (!state->hangSuppressedNotForegroundThisEpisode) {
-        state->hangSuppressedNotForegroundThisEpisode = true;
-        const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
-        AppendLogLine(outBase, L"Hang detected but target window is responsive and not foreground; assuming Alt-Tab/pause and skipping hang dump. "
-          L"(secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
-          L", threshold=" + std::to_wstring(decision.thresholdSec) +
-          L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) +
-          L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
-      }
-      state->hangCapturedThisEpisode = false;
-      return HangTickResult::kContinue;
-    }
   }
 
   // Avoid generating hang dumps during normal shutdown or transient stalls:
@@ -264,25 +245,6 @@ HangTickResult HandleHangTick(
     }
     state->hangCapturedThisEpisode = false;
     return HangTickResult::kContinue;
-  }
-
-  if (!isForeground2) {
-    if (!state->targetWindow || !IsWindow(state->targetWindow)) {
-      state->targetWindow = FindMainWindowForPid(proc.pid);
-    }
-    if (state->targetWindow && IsWindowResponsive(state->targetWindow, 250)) {
-      if (!state->hangSuppressedNotForegroundThisEpisode) {
-        state->hangSuppressedNotForegroundThisEpisode = true;
-        const bool inMenu = (stateFlags2 & skydiag::kState_InMenu) != 0u;
-        AppendLogLine(outBase, L"Hang confirmed but target window is responsive and not foreground; assuming Alt-Tab/pause and skipping hang dump. "
-          L"(secondsSinceHeartbeat=" + std::to_wstring(decision2.secondsSinceHeartbeat) +
-          L", threshold=" + std::to_wstring(decision2.thresholdSec) +
-          L", loading=" + std::to_wstring(decision2.isLoading ? 1 : 0) +
-          L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
-      }
-      state->hangCapturedThisEpisode = false;
-      return HangTickResult::kContinue;
-    }
   }
 
   const auto ts = Timestamp();
