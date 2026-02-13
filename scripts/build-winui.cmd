@@ -34,3 +34,4 @@ robocopy "%BUILD_OUT%" "%OUT%" /E /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 exit /b 1
 
 echo WinUI build output: %OUT%
+exit /b 0
