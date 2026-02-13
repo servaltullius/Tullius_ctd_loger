@@ -62,7 +62,21 @@ bool HandleCrashEventTick(
       }
       // Non-zero exit code: process crashed and terminated. Proceed with dump.
     }
-    // WAIT_TIMEOUT: process still running (real crash). Proceed with dump.
+    // WAIT_TIMEOUT: process still running.  Could be a real crash (main thread
+    // stuck) or a handled first-chance exception (game continues normally).
+    // Distinguish by checking whether the main-thread heartbeat advances.
+    if (pw == WAIT_TIMEOUT && proc.shm) {
+      const auto hb0 = proc.shm->header.last_heartbeat_qpc;
+      Sleep(1500);
+      const auto hb1 = proc.shm->header.last_heartbeat_qpc;
+      if (hb1 > hb0) {
+        AppendLogLine(outBase, L"Crash event received but heartbeat is still advancing (hb0="
+          + std::to_wstring(hb0) + L" hb1=" + std::to_wstring(hb1)
+          + L"); skipping crash dump (likely handled first-chance exception).");
+        return false;
+      }
+      // Heartbeat stalled: real crash / freeze. Proceed with dump.
+    }
   }
 
   if (crashCaptured && *crashCaptured) {
