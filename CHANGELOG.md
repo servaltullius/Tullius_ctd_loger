@@ -16,10 +16,6 @@
 - Helper: 게임이 프리즈된 상태에서 Alt-Tab하면 포그라운드 억제(`SuppressHangWhenNotForeground`)로 행 덤프가 생성되지 않던 캐치-22 수정. 포그라운드가 아닐 때 윈도우 응답성(`IsWindowResponsive`)을 함께 확인하여, 윈도우가 무응답이면(진짜 프리즈) 억제하지 않고 캡처 진행.
 - WinUI: 내부 리스트(증거/콜스택/이벤트 등)와 외부 페이지 스크롤이 동시에 굴러가던 문제 수정. 내부 리스트가 스크롤 경계(상단/하단)에 도달했을 때만 외부 스크롤로 전환.
 
-### 변경
-- WinUI 빌드: Self-contained 배포로 전환 (`SelfContained=true`, `WindowsAppSdkSelfContained=true`). 사용자 PC에 .NET Runtime / Windows App Runtime 별도 설치 불필요.
-- WinUI 빌드: `dotnet publish`로 전환하고, 빌드 후 명확히 불필요한 Microsoft.*.dll(AI, ML, OAuth, WebView2 등)을 자동 정리하여 배포 크기 감소.
-
 ## v0.2.21 (2026-02-14)
 
 ### 수정
