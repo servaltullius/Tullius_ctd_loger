@@ -45,6 +45,7 @@ struct EvidenceBuildContext
   bool hasModule = false;
   bool isSystem = false;
   bool isGameExe = false;
+  bool isHookFramework = false;
 
   bool wctSuggestsHang = false;
 
@@ -63,6 +64,7 @@ std::wstring Hex64(std::uint64_t v);
 std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, bool en);
 bool IsSystemishModule(std::wstring_view filename);
 bool IsGameExeModule(std::wstring_view filename);
+bool IsKnownHookFramework(std::wstring_view filename);
 
 std::optional<WctInfo> TrySummarizeWct(std::string_view utf8);
 HitchSummary ComputeHitchSummary(const std::vector<EventRow>& events);

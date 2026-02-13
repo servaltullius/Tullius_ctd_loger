@@ -42,6 +42,7 @@ std::wstring WideLower(std::wstring_view s);
 
 bool IsSystemishModule(std::wstring_view filename);
 bool IsGameExeModule(std::wstring_view filename);
+bool IsKnownHookFramework(std::wstring_view filename);
 
 struct ModuleInfo
 {
@@ -52,6 +53,7 @@ struct ModuleInfo
   std::wstring inferred_mod_name;
   bool is_systemish = false;
   bool is_game_exe = false;
+  bool is_known_hook_framework = false;
 };
 
 std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize);

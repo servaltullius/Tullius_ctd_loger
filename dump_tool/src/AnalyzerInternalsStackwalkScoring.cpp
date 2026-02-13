@@ -106,7 +106,18 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
 
   const std::uint32_t topScore = rows[0].score;
   const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
-  const auto confTop = ConfidenceForTopSuspectCallstackLevel(topScore, secondScore, rows[0].firstDepth);
+  auto confTop = ConfidenceForTopSuspectCallstackLevel(topScore, secondScore, rows[0].firstDepth);
+
+  // Known hook framework modules are often victims of other mods' memory corruption.
+  // Downgrade confidence by one level when the top suspect is a hook framework.
+  if (modules[rows[0].modIndex].is_known_hook_framework) {
+    if (confTop == i18n::ConfidenceLevel::kHigh) {
+      confTop = i18n::ConfidenceLevel::kMedium;
+    } else if (confTop == i18n::ConfidenceLevel::kMedium) {
+      confTop = i18n::ConfidenceLevel::kLow;
+    }
+  }
+
   const bool en = (lang == i18n::Language::kEnglish);
 
   const std::size_t n = std::min<std::size_t>(rows.size(), 5);

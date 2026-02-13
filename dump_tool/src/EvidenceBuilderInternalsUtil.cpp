@@ -135,6 +135,28 @@ bool IsGameExeModule(std::wstring_view filename)
   return (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe");
 }
 
+bool IsKnownHookFramework(std::wstring_view filename)
+{
+  const std::wstring lower = WideLower(filename);
+  const wchar_t* k[] = {
+    L"enginefixes.dll",
+    L"ssedisplaytweaks.dll",
+    L"po3_tweaks.dll",
+    L"hdtssephysics.dll",
+    L"hdtsmp64.dll",
+    L"storageutil.dll",
+    L"crashloggersse.dll",
+    L"skse64_loader.dll",
+    L"skse64_steam_loader.dll",
+  };
+  for (const auto* m : k) {
+    if (lower == m) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::optional<WctInfo> TrySummarizeWct(std::string_view utf8)
 {
   if (utf8.empty()) {

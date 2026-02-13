@@ -53,6 +53,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
+  if (ctx.isHookFramework) {
+    r.recommendations.push_back(en
+      ? L"[Hook framework] This mod extensively hooks the game engine. It may be a victim of memory corruption caused by another mod, not the root cause itself. Check other suspect candidates first."
+      : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
+  }
+
   if (!r.inferred_mod_name.empty()) {
     r.recommendations.push_back(en
       ? (L"[Top suspect] Reproduce after updating/reinstalling '" + r.inferred_mod_name + L"'.")

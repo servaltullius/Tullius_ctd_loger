@@ -48,6 +48,10 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       : (en
           ? L"Looks like a snapshot dump (not a crash/hang). Useful for state inspection, not root cause. (Confidence: High)"
           : L"스냅샷 덤프(크래시/행 아님)로 보입니다. 원인 판정용이 아니라 '상태 확인'에 유용합니다. (신뢰도: 높음)");
+  } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
+    summary = en
+      ? (L"Top suspect: " + who + L" (known hook framework; may be a victim of another mod's corruption) — the crash appears to occur inside this DLL. (Confidence: Medium)")
+      : (L"유력 후보: " + who + L" (알려진 훅 프레임워크; 다른 모드의 메모리 오염 피해자일 수 있음) — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 중간)");
   } else if (hasModule && !isSystem && !isGameExe) {
     summary = en
       ? (L"Top suspect: " + who + L" — the crash appears to occur inside this DLL. (Confidence: High)")

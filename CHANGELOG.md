@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.20 (2026-02-13)
+
+### 추가
+- DumpTool: 알려진 훅 프레임워크 모드(EngineFixes, SSE Display Tweaks, po3_Tweaks, HDT-SMP, CrashLoggerSSE 등)가 fault module일 때 confidence를 한 단계 낮추고, "다른 모드의 메모리 오염 피해자일 수 있음" 경고를 Summary와 Recommendations에 표시. 훅 모드가 단순히 크래시 발생 위치일 뿐 진짜 원인이 아닐 수 있음을 사용자에게 안내.
+
 ## v0.2.19 (2026-02-13)
 
 ### 수정

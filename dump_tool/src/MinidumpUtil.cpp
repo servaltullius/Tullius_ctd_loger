@@ -246,6 +246,28 @@ bool IsGameExeModule(std::wstring_view filename)
   return (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe");
 }
 
+bool IsKnownHookFramework(std::wstring_view filename)
+{
+  const std::wstring lower = WideLower(filename);
+  const wchar_t* k[] = {
+    L"enginefixes.dll",
+    L"ssedisplaytweaks.dll",
+    L"po3_tweaks.dll",
+    L"hdtssephysics.dll",
+    L"hdtsmp64.dll",
+    L"storageutil.dll",
+    L"crashloggersse.dll",
+    L"skse64_loader.dll",
+    L"skse64_steam_loader.dll",
+  };
+  for (const auto* m : k) {
+    if (lower == m) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
 {
   std::vector<ModuleInfo> out;
@@ -280,6 +302,7 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     mi.inferred_mod_name = InferMo2ModNameFromPath(mi.path);
     mi.is_systemish = IsSystemishModule(mi.filename);
     mi.is_game_exe = IsGameExeModule(mi.filename);
+    mi.is_known_hook_framework = IsKnownHookFramework(mi.filename);
     out.push_back(std::move(mi));
   }
 

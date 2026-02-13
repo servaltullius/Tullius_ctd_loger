@@ -55,6 +55,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   const bool isSystem = IsSystemishModule(r.fault_module_filename);
   const bool hasModule = !r.fault_module_filename.empty();
   const bool isGameExe = IsGameExeModule(r.fault_module_filename);
+  const bool isHookFramework = IsKnownHookFramework(r.fault_module_filename);
   const auto hitch = ComputeHitchSummary(r.events);
   const std::wstring suspectBasis = r.suspects_from_stackwalk
     ? (en ? L"callstack" : L"콜스택")
@@ -70,6 +71,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.hasModule = hasModule;
   ctx.isSystem = isSystem;
   ctx.isGameExe = isGameExe;
+  ctx.isHookFramework = isHookFramework;
   ctx.wctSuggestsHang = wctSuggestsHang;
   ctx.hitch = hitch;
   ctx.wct = wct;
