@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.23 (2026-02-14)
+
+### 수정
+- Helper: `SkyrimDiagHelper.log`가 게임 세션 간에 계속 누적되던 문제 수정. 새 게임 세션(프로세스 어태치) 시 로그 파일을 초기화하여 매번 깨끗한 로그로 시작.
+
+### 내부 개선
+- Helper: 미사용 파라미터 `attachHeartbeatQpc` 제거 (내부 API 정리).
+- Helper: 하트비트 초기화 경고 지연시간을 명명된 상수 `kHeartbeatInitWarnDelaySec`로 추출.
+
 ## v0.2.22 (2026-02-14)
 
 ### 수정
