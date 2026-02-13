@@ -21,6 +21,16 @@ void SetHelperLogRotation(std::uint64_t maxBytes, std::uint32_t maxFiles)
   g_maxHelperLogFiles = maxFiles;
 }
 
+void ClearLog(const std::filesystem::path& outBase)
+{
+  std::error_code ec;
+  const auto path = outBase / L"SkyrimDiagHelper.log";
+  if (std::filesystem::exists(path, ec)) {
+    // Truncate: open in non-append mode and immediately close.
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  }
+}
+
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
 {
   std::error_code ec;

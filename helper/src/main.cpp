@@ -90,6 +90,7 @@ int wmain(int argc, wchar_t** argv)
   }
 
   const auto outBase = MakeOutputBase(cfg);
+  skydiag::helper::internal::ClearLog(outBase);
   std::wcout << L"[SkyrimDiagHelper] Attached to pid=" << proc.pid << L", output=" << outBase.wstring() << L"\n";
   AppendLogLine(outBase, L"Attached to pid=" + std::to_wstring(proc.pid) + L", output=" + outBase.wstring());
   if (!err.empty()) {
