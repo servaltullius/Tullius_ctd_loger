@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.2.18 (2026-02-13)
+
+### Fixed
+- Helper: skip crash dump when the game exits normally. During normal shutdown, DLL cleanup can raise exceptions that the VEH intercepts; the helper now checks the process exit code and suppresses the dump when exit code is 0.
+
 ## v0.2.17 (2026-02-13)
 
 ### Fixed
