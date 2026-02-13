@@ -72,11 +72,37 @@ for %%F in (
   "Microsoft.Windows.AppNotifications.Builder.Projection.dll"
   "Microsoft.Graphics.Imaging.Projection.dll"
   "Microsoft.InteractiveExperiences.Projection.dll"
+  "onnxruntime.dll"
+  "onnxruntime_providers_shared.dll"
+  "DirectML.dll"
+  "Microsoft.DiaSymReader.Native.amd64.dll"
+  "WebView2Loader.dll"
+  "Microsoft.Windows.Widgets.dll"
+  "Microsoft.Windows.Widgets.Projection.dll"
+  "Microsoft.Windows.Workloads.dll"
+  "Microsoft.Windows.Workloads.Resources.dll"
+  "Microsoft.Windows.Workloads.Resources_ec.dll"
+  "SessionHandleIPCProxyStub.dll"
+  "PushNotificationsLongRunningTask.ProxyStub.dll"
+  "WindowsAppSdk.AppxDeploymentExtensions.Desktop.dll"
+  "WindowsAppSdk.AppxDeploymentExtensions.Desktop-EventLog-Instrumentation.dll"
+  "WindowsAppRuntime.DeploymentExtensions.OneCore.dll"
+  "Microsoft.WindowsAppRuntime.Insights.Resource.dll"
 ) do (
   if exist "%OUT%\%%~F" del /q "%OUT%\%%~F" 2>nul
 )
 rem Wildcard patterns need a for /r loop
 for /r "%OUT%" %%F in (Microsoft.Windows.AI.*.dll) do del /q "%%F" 2>nul
+rem Remove AI/ML/Vision/SemanticSearch winmd metadata files
+for /r "%OUT%" %%F in (Microsoft.Windows.AI.*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (Microsoft.Windows.Vision*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (Microsoft.Windows.SemanticSearch*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (Microsoft.Windows.Private*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (Microsoft.Graphics.Imaging*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (Microsoft.Graphics.ImagingInternal*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (Microsoft.Windows.Globalization*.winmd) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (workloads*.json) do del /q "%%F" 2>nul
+for /r "%OUT%" %%F in (workloads*.stx.json) do del /q "%%F" 2>nul
 
 echo WinUI build output: %OUT%
 exit /b 0
