@@ -140,6 +140,7 @@ int wmain(int argc, wchar_t** argv)
   hangState.loadStartQpc = hangState.wasLoading ? proc.shm->header.start_qpc : 0;
 
   std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
   PendingCrashAnalysis pendingCrashAnalysis{};
 
   PendingCrashEtwCapture pendingCrashEtw{};
@@ -178,13 +179,19 @@ int wmain(int argc, wchar_t** argv)
           // Drain any pending crash event before exiting — fixes race where
           // the process terminates before the next HandleCrashEventTick poll.
           HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-            &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath);
+            &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath,
+            &pendingCrashViewerDumpPath);
         } else {
           AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
         }
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
         AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
+        if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash) {
+          StartDumpToolViewer(cfg, pendingCrashViewerDumpPath, outBase, L"crash_deferred_exit");
+          AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash dump after deferred process exit.");
+          pendingCrashViewerDumpPath.clear();
+        }
         if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
           const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
           if (delayMs > 0) {
@@ -197,7 +204,8 @@ int wmain(int argc, wchar_t** argv)
       }
       if (w == WAIT_FAILED) {
         HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath);
+          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath,
+          &pendingCrashViewerDumpPath);
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         const DWORD le = GetLastError();
         std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";
@@ -215,7 +223,8 @@ int wmain(int argc, wchar_t** argv)
           &crashCaptured,
           &pendingCrashEtw,
           &pendingCrashAnalysis,
-          &pendingHangViewerDumpPath)) {
+          &pendingHangViewerDumpPath,
+          &pendingCrashViewerDumpPath)) {
       continue;
     }
     if (HandleHangTick(

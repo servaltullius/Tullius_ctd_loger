@@ -33,7 +33,8 @@ bool HandleCrashEventTick(
   bool* crashCaptured,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
-  std::wstring* pendingHangViewerDumpPath)
+  std::wstring* pendingHangViewerDumpPath,
+  std::wstring* pendingCrashViewerDumpPath)
 {
   if (!proc.crashEvent) {
     Sleep(waitMs);
@@ -50,7 +51,7 @@ bool HandleCrashEventTick(
   // exits within a short window with exit code 0, treat it as a benign
   // shutdown exception rather than a real crash.
   if (proc.process) {
-    const DWORD pw = WaitForSingleObject(proc.process, 500);
+    const DWORD pw = WaitForSingleObject(proc.process, 3000);
     if (pw == WAIT_OBJECT_0) {
       DWORD exitCode = STILL_ACTIVE;
       GetExitCodeProcess(proc.process, &exitCode);
@@ -162,7 +163,10 @@ bool HandleCrashEventTick(
           viewerNow = true;
           AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash after process exit.");
         } else if (wExit == WAIT_TIMEOUT) {
-          AppendLogLine(outBase, L"Crash dump captured but process is still running; skipping viewer auto-open.");
+          if (pendingCrashViewerDumpPath) {
+            *pendingCrashViewerDumpPath = dumpPath;
+          }
+          AppendLogLine(outBase, L"Crash dump captured but process is still running; deferring viewer to process exit.");
         } else {
           const DWORD le = GetLastError();
           AppendLogLine(outBase, L"Crash viewer auto-open suppressed due to wait failure: " + std::to_wstring(le));
