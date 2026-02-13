@@ -15,6 +15,17 @@ def _timestamp() -> str:
     return time.strftime("%Y%m%d_%H%M%S", time.localtime())
 
 
+def _read_version(root: Path) -> str:
+    """Read project version from CMakeLists.txt."""
+    import re
+    cml = root / "CMakeLists.txt"
+    if cml.is_file():
+        m = re.search(r"VERSION\s+(\d+\.\d+\.\d+)", cml.read_text())
+        if m:
+            return m.group(1)
+    return _timestamp()  # fallback
+
+
 def _find_artifact(build_dir: Path, bin_dir: Path | None, filename: str) -> Path | None:
     candidates: list[Path] = []
 
@@ -122,7 +133,7 @@ def main(argv: list[str]) -> int:
         print(f"ERROR: missing {ini_helper}", file=sys.stderr)
         return 4
 
-    out_zip = Path(args.out) if args.out else root / "dist" / f"SkyrimDiag_{_timestamp()}.zip"
+    out_zip = Path(args.out) if args.out else root / "dist" / f"Tullius_ctd_loger_v{_read_version(root)}.zip"
     if not out_zip.is_absolute():
         out_zip = (root / out_zip).resolve()
 
