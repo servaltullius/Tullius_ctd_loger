@@ -104,5 +104,22 @@ for /r "%OUT%" %%F in (Microsoft.Windows.Globalization*.winmd) do del /q "%%F" 2
 for /r "%OUT%" %%F in (workloads*.json) do del /q "%%F" 2>nul
 for /r "%OUT%" %%F in (workloads*.stx.json) do del /q "%%F" 2>nul
 
+rem Remove locale satellite assemblies except en-us, ko-KR, and SDK folders.
+rem These are .NET/WinUI resource DLLs for 80+ languages we don't use.
+rem Use call :subroutine to avoid delayed expansion issues.
+for /d %%D in ("%OUT%\*") do call :check_locale "%%D"
+goto :after_locale
+
+:check_locale
+set "_DIR=%~nx1"
+if /i "%_DIR%"=="en-us" goto :eof
+if /i "%_DIR%"=="ko-KR" goto :eof
+if /i "%_DIR%"=="Microsoft.UI.Xaml" goto :eof
+if /i "%_DIR%"=="NpuDetect" goto :eof
+if exist "%~1\*.dll" rmdir /s /q "%~1" 2>nul
+goto :eof
+
+:after_locale
+
 echo WinUI build output: %OUT%
 exit /b 0
