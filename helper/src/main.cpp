@@ -132,7 +132,6 @@ int wmain(int argc, wchar_t** argv)
   LARGE_INTEGER attachNow{};
   QueryPerformanceCounter(&attachNow);
   const std::uint64_t attachNowQpc = static_cast<std::uint64_t>(attachNow.QuadPart);
-  const std::uint64_t attachHeartbeatQpc = proc.shm->header.last_heartbeat_qpc;
 
   bool crashCaptured = false;
 
@@ -236,7 +235,6 @@ int wmain(int argc, wchar_t** argv)
           loadStatsPath,
           &adaptiveLoadingThresholdSec,
           attachNowQpc,
-          attachHeartbeatQpc,
           &pendingHangViewerDumpPath,
           &hangState) == HangTickResult::kBreak) {
       break;

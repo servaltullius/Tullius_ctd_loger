@@ -37,11 +37,9 @@ HangTickResult HandleHangTick(
   const std::filesystem::path& loadStatsPath,
   std::uint32_t* adaptiveLoadingThresholdSec,
   std::uint64_t attachNowQpc,
-  std::uint64_t attachHeartbeatQpc,
   std::wstring* pendingHangViewerDumpPath,
   HangCaptureState* state)
 {
-  (void)attachHeartbeatQpc;  // No longer used; kept for API compatibility.
 
   if (!state || !adaptiveLoadingThresholdSec || !loadStats) {
     // Helper should always have these; keep behavior safe if wiring is wrong.
@@ -80,11 +78,16 @@ HangTickResult HandleHangTick(
   // Check plugin heartbeat initialization: if last_heartbeat_qpc is still 0,
   // the plugin hasn't started its heartbeat scheduler yet.  Auto hang capture
   // is unreliable without a working heartbeat, so skip until it initializes.
+  //
+  // Warn after kHeartbeatInitWarnDelaySec so that the plugin has enough time
+  // to register its SKSE task-queue callback and send the first heartbeat.
+  // 10s is generous; typical init is < 3s even with heavy mod lists.
+  constexpr double kHeartbeatInitWarnDelaySec = 10.0;
   if (proc.shm->header.last_heartbeat_qpc == 0) {
     if (!state->warnedHeartbeatNotInitialized && proc.shm->header.qpc_freq != 0) {
       const std::uint64_t deltaQpc = static_cast<std::uint64_t>(now.QuadPart) - attachNowQpc;
       const double secondsSinceAttach = static_cast<double>(deltaQpc) / static_cast<double>(proc.shm->header.qpc_freq);
-      if (secondsSinceAttach >= 10.0) {
+      if (secondsSinceAttach >= kHeartbeatInitWarnDelaySec) {
         state->warnedHeartbeatNotInitialized = true;
         AppendLogLine(outBase, L"Warning: plugin heartbeat not initialized (last_heartbeat_qpc=0); "
           L"auto hang capture unavailable until heartbeat starts.");

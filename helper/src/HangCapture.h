@@ -45,7 +45,6 @@ HangTickResult HandleHangTick(
   const std::filesystem::path& loadStatsPath,
   std::uint32_t* adaptiveLoadingThresholdSec,
   std::uint64_t attachNowQpc,
-  std::uint64_t attachHeartbeatQpc,
   std::wstring* pendingHangViewerDumpPath,
   HangCaptureState* state);
 
