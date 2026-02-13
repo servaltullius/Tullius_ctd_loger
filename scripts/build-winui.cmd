@@ -1,7 +1,8 @@
 @echo off
 setlocal
 
-set "SRC=%~dp0.."
+rem Resolve SRC to an absolute path (handles UNC paths and trailing ..)
+for %%I in ("%~dp0..") do set "SRC=%%~fI"
 set "PROJECT=%SRC%\dump_tool_winui\SkyrimDiagDumpToolWinUI.csproj"
 set "OUT=%SRC%\build-winui"
 set "RID=win-x64"
