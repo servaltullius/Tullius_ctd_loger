@@ -170,13 +170,21 @@ int wmain(int argc, wchar_t** argv)
     if (proc.process) {
       const DWORD w = WaitForSingleObject(proc.process, 0);
       if (w == WAIT_OBJECT_0) {
-        // Drain any pending crash event before exiting — fixes race where
-        // the process terminates before the next HandleCrashEventTick poll.
-        HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath);
+        // Check exit code: normal exit (0) means shutdown exceptions should
+        // be ignored; non-zero means a real crash occurred.
+        DWORD exitCode = STILL_ACTIVE;
+        GetExitCodeProcess(proc.process, &exitCode);
+        if (exitCode != 0) {
+          // Drain any pending crash event before exiting — fixes race where
+          // the process terminates before the next HandleCrashEventTick poll.
+          HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
+            &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath);
+        } else {
+          AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
+        }
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
-        std::wcerr << L"[SkyrimDiagHelper] Target process exited.\n";
-        AppendLogLine(outBase, L"Target process exited.");
+        std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
+        AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
         if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
           const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
           if (delayMs > 0) {

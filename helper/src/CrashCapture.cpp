@@ -45,6 +45,25 @@ bool HandleCrashEventTick(
     return false;
   }
 
+  // Guard against shutdown exceptions: during normal process exit, DLL
+  // cleanup can raise exceptions that the VEH intercepts.  If the process
+  // exits within a short window with exit code 0, treat it as a benign
+  // shutdown exception rather than a real crash.
+  if (proc.process) {
+    const DWORD pw = WaitForSingleObject(proc.process, 500);
+    if (pw == WAIT_OBJECT_0) {
+      DWORD exitCode = STILL_ACTIVE;
+      GetExitCodeProcess(proc.process, &exitCode);
+      if (exitCode == 0) {
+        AppendLogLine(outBase, L"Crash event received but process exited normally (exit_code=0); "
+          L"skipping crash dump (likely shutdown exception).");
+        return false;
+      }
+      // Non-zero exit code: process crashed and terminated. Proceed with dump.
+    }
+    // WAIT_TIMEOUT: process still running (real crash). Proceed with dump.
+  }
+
   if (crashCaptured && *crashCaptured) {
     AppendLogLine(outBase, L"Crash event signaled again; ignoring (already captured).");
     return true;
