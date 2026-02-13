@@ -42,7 +42,7 @@ target_compile_definitions(${TARGET_NAME}
     _UNICODE
     UNICODE)
 
-set_property(TARGET ${TARGET_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+set_property(TARGET ${TARGET_NAME} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 if(DEFINED ENV{SKYRIM_FOLDER})
   set(_skyrim_plugins "$ENV{SKYRIM_FOLDER}/Data/SKSE/Plugins")

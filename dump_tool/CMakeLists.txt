@@ -53,7 +53,7 @@ target_compile_definitions(SkyrimDiagDumpToolCore
     _UNICODE
     UNICODE)
 
-set_property(TARGET SkyrimDiagDumpToolCore PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+set_property(TARGET SkyrimDiagDumpToolCore PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 add_library(SkyrimDiagDumpToolNative SHARED
   src/NativeApi.cpp
@@ -68,7 +68,7 @@ target_compile_definitions(SkyrimDiagDumpToolNative
     _UNICODE
     UNICODE)
 
-set_property(TARGET SkyrimDiagDumpToolNative PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+set_property(TARGET SkyrimDiagDumpToolNative PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 add_executable(SkyrimDiagDumpToolCli
   src/DumpToolCliMain.cpp
@@ -85,4 +85,4 @@ target_compile_definitions(SkyrimDiagDumpToolCli
     UNICODE
 )
 
-set_property(TARGET SkyrimDiagDumpToolCli PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>")
+set_property(TARGET SkyrimDiagDumpToolCli PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
