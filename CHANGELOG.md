@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.17 (2026-02-13)
+
+### Fixed
+- Build: correct MSVC runtime library generator expression in CMake.
+- Build: add `/utf-8` compiler flag for MSVC to satisfy fmt v11 requirement.
+- Build: handle x64 platform subfolder in WinUI output path.
+- Build: explicit exit code 0 after robocopy in `build-winui.cmd`.
+- CI: build all test targets instead of hardcoded list.
+- CI: add tag-triggered release workflow.
+- Tests: remove assertions for unimplemented features.
+
 ## v0.2.16 (2026-02-13)
 
 ### Fixed
