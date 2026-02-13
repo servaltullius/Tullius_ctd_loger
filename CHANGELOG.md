@@ -2,8 +2,8 @@
 
 ## v0.2.18 (2026-02-13)
 
-### Fixed
-- Helper: skip crash dump when the game exits normally. During normal shutdown, DLL cleanup can raise exceptions that the VEH intercepts; the helper now checks the process exit code and suppresses the dump when exit code is 0.
+### 수정
+- Helper: 정상 종료 시 크래시 덤프가 생성되던 문제 수정. 종료 과정에서 DLL 정리 중 발생하는 예외를 VEH가 감지하여 덤프를 만들던 현상을, 프로세스 종료 코드(exit_code=0)를 확인해 정상 종료로 판단하면 덤프를 건너뛰도록 개선.
 
 ## v0.2.17 (2026-02-13)
 
