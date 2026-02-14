@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -137,24 +138,7 @@ bool IsGameExeModule(std::wstring_view filename)
 
 bool IsKnownHookFramework(std::wstring_view filename)
 {
-  const std::wstring lower = WideLower(filename);
-  const wchar_t* k[] = {
-    L"enginefixes.dll",
-    L"ssedisplaytweaks.dll",
-    L"po3_tweaks.dll",
-    L"hdtssephysics.dll",
-    L"hdtsmp64.dll",
-    L"storageutil.dll",
-    L"crashloggersse.dll",
-    L"skse64_loader.dll",
-    L"skse64_steam_loader.dll",
-  };
-  for (const auto* m : k) {
-    if (lower == m) {
-      return true;
-    }
-  }
-  return false;
+  return minidump::IsKnownHookFramework(filename);
 }
 
 std::optional<WctInfo> TrySummarizeWct(std::string_view utf8)
@@ -417,4 +401,3 @@ std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(const std::ve
 }
 
 }  // namespace skydiag::dump_tool::internal
-

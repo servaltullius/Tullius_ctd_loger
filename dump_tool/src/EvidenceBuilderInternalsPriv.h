@@ -46,6 +46,7 @@ struct EvidenceBuildContext
   bool isSystem = false;
   bool isGameExe = false;
   bool isHookFramework = false;
+  bool hasSignatureMatch = false;
 
   bool wctSuggestsHang = false;
 
@@ -91,4 +92,3 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 
 }  // namespace skydiag::dump_tool::internal
-

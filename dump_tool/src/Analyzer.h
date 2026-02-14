@@ -1,10 +1,14 @@
 #pragma once
 
+#include "CrashHistory.h"
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "I18nCore.h"
+#include "SignatureDatabase.h"
 
 namespace skydiag::dump_tool {
 
@@ -62,8 +66,10 @@ struct AnalysisResult
   std::uint32_t exc_code = 0;
   std::uint32_t exc_tid = 0;
   std::uint64_t exc_addr = 0;
+  std::uint64_t fault_module_offset = 0;  // offset in fault module (if resolved)
   std::vector<std::uint64_t> exc_info;  // MINIDUMP_EXCEPTION.ExceptionInformation (best-effort)
   std::wstring crash_bucket_key;  // stable key for repeated CTD grouping (best-effort)
+  std::string game_version;  // best-effort game executable version (e.g. "1.5.97.0")
 
   std::wstring fault_module_path;      // full path if available
   std::wstring fault_module_filename;  // basename
@@ -82,6 +88,9 @@ struct AnalysisResult
   // Heuristic: suspects inferred from stack/module scanning
   std::vector<SuspectItem> suspects;
   bool suspects_from_stackwalk = false;
+  std::optional<SignatureMatch> signature_match;
+  std::unordered_map<std::uint64_t, std::string> resolved_functions;
+  std::vector<ModuleStats> history_stats;
 
   // Best-effort callstack (primary thread: crash thread, WCT cycle thread, or inferred main thread)
   std::uint32_t stackwalk_primary_tid = 0;
@@ -114,6 +123,9 @@ struct AnalyzeOptions
   bool debug = false;
   bool allow_online_symbols = false;
   bool redact_paths = true;
+  std::wstring data_dir;  // Optional analyzer data directory (e.g. "<exe>/data")
+  std::string game_version;  // Optional override (e.g. "1.6.640.0")
+  std::wstring output_dir;   // Optional output base directory for crash history
   i18n::Language language = i18n::DefaultLanguage();
 };
 

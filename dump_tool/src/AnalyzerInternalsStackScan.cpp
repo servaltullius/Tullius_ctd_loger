@@ -23,13 +23,27 @@ std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
 
 i18n::ConfidenceLevel ConfidenceForTopSuspectLevel(std::uint32_t topScore, std::uint32_t secondScore)
 {
-  if (topScore >= 128u || (topScore >= 48u && topScore >= (secondScore * 2u))) {
+  if (topScore >= 256u || (topScore >= 96u && topScore >= (secondScore * 2u))) {
     return i18n::ConfidenceLevel::kHigh;
   }
-  if (topScore >= 20u) {
+  if (topScore >= 40u) {
     return i18n::ConfidenceLevel::kMedium;
   }
   return i18n::ConfidenceLevel::kLow;
+}
+
+std::uint32_t StackScanSlotWeight(std::size_t slotIndex)
+{
+  if (slotIndex < 4) {
+    return 8;
+  }
+  if (slotIndex < 16) {
+    return 4;
+  }
+  if (slotIndex < 64) {
+    return 2;
+  }
+  return 1;
 }
 
 }  // namespace
@@ -86,7 +100,8 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
       if (!mi) {
         continue;
       }
-      scoreByModule[*mi] += 1;
+      const std::size_t slotIndex = (off - startOff) / sizeof(std::uint64_t);
+      scoreByModule[*mi] += StackScanSlotWeight(slotIndex);
     }
   }
 

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "description": "Key Skyrim SE/AE offsets for crash analysis. Values are progressively expanded.",
+  "game_versions": {
+    "1.5.97.0": {
+      "0xD6DDDA": "BSBatchRenderer::Draw",
+      "0x69E350": "BSTriShape::Load",
+      "0x194230": "TESObjectREFR::Load3D",
+      "0x3DA680": "BSFaceGenNiNode::AdjustHeadMorph",
+      "0x12F3B0": "TESForm::GetFormEditorID",
+      "0xC26D40": "hkbCharacter::update",
+      "0xDC5530": "NiNode::AttachChild",
+      "0x5BAF70": "ActorEquipManager::EquipObject",
+      "0xD78560": "BSLightingShaderProperty::LoadBinary",
+      "0x1952A0": "TESObjectREFR::SetPosition"
+    },
+    "1.6.640.0": {
+      "0xE12F50": "BSBatchRenderer::Draw",
+      "0x6E8A10": "BSTriShape::Load",
+      "0x1DB3C0": "TESObjectREFR::Load3D",
+      "0x417E90": "BSFaceGenNiNode::AdjustHeadMorph"
+    }
+  }
+}

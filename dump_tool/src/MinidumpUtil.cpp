@@ -8,8 +8,53 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <mutex>
+
+#include <nlohmann/json.hpp>
 
 namespace skydiag::dump_tool::minidump {
+
+namespace {
+
+std::wstring LowerCopy(std::wstring_view s)
+{
+  std::wstring out(s);
+  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+  return out;
+}
+
+std::vector<std::wstring> DefaultHookFrameworkDlls()
+{
+  return {
+    L"enginefixes.dll",
+    L"ssedisplaytweaks.dll",
+    L"po3_tweaks.dll",
+    L"hdtssephysics.dll",
+    L"hdtsmp64.dll",
+    L"storageutil.dll",
+    L"crashloggersse.dll",
+    L"skse64_loader.dll",
+    L"skse64_steam_loader.dll",
+  };
+}
+
+std::string ModuleVersionString(const VS_FIXEDFILEINFO& info)
+{
+  if (info.dwSignature != VS_FFI_SIGNATURE) {
+    return {};
+  }
+  const auto major = static_cast<unsigned>(HIWORD(info.dwFileVersionMS));
+  const auto minor = static_cast<unsigned>(LOWORD(info.dwFileVersionMS));
+  const auto build = static_cast<unsigned>(HIWORD(info.dwFileVersionLS));
+  const auto revision = static_cast<unsigned>(LOWORD(info.dwFileVersionLS));
+  return std::to_string(major) + "." + std::to_string(minor) + "." + std::to_string(build) + "." + std::to_string(revision);
+}
+
+std::mutex g_hookFrameworksMutex;
+std::vector<std::wstring> g_hookFrameworkDlls = DefaultHookFrameworkDlls();
+
+}  // namespace
 
 bool MappedFile::Open(const std::wstring& path, std::wstring* err)
 {
@@ -246,21 +291,53 @@ bool IsGameExeModule(std::wstring_view filename)
   return (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe");
 }
 
+void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath)
+{
+  if (jsonPath.empty()) {
+    return;
+  }
+
+  try {
+    std::ifstream f(jsonPath);
+    if (!f.is_open()) {
+      return;
+    }
+
+    const auto j = nlohmann::json::parse(f, nullptr, /*allow_exceptions=*/true);
+    if (!j.is_object() || !j.contains("frameworks") || !j["frameworks"].is_array()) {
+      return;
+    }
+
+    std::vector<std::wstring> loaded;
+    loaded.reserve(j["frameworks"].size());
+    for (const auto& fw : j["frameworks"]) {
+      if (!fw.is_object()) {
+        continue;
+      }
+      const auto it = fw.find("dll");
+      if (it == fw.end() || !it->is_string()) {
+        continue;
+      }
+      const std::wstring lower = LowerCopy(Utf8ToWide(it->get<std::string>()));
+      if (!lower.empty()) {
+        loaded.push_back(lower);
+      }
+    }
+
+    if (!loaded.empty()) {
+      std::lock_guard<std::mutex> lock(g_hookFrameworksMutex);
+      g_hookFrameworkDlls = std::move(loaded);
+    }
+  } catch (...) {
+    // Keep defaults on parse/IO errors.
+  }
+}
+
 bool IsKnownHookFramework(std::wstring_view filename)
 {
-  const std::wstring lower = WideLower(filename);
-  const wchar_t* k[] = {
-    L"enginefixes.dll",
-    L"ssedisplaytweaks.dll",
-    L"po3_tweaks.dll",
-    L"hdtssephysics.dll",
-    L"hdtsmp64.dll",
-    L"storageutil.dll",
-    L"crashloggersse.dll",
-    L"skse64_loader.dll",
-    L"skse64_steam_loader.dll",
-  };
-  for (const auto* m : k) {
+  const std::wstring lower = LowerCopy(filename);
+  std::lock_guard<std::mutex> lock(g_hookFrameworksMutex);
+  for (const auto& m : g_hookFrameworkDlls) {
     if (lower == m) {
       return true;
     }
@@ -297,6 +374,7 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     ModuleInfo mi{};
     mi.base = mod.BaseOfImage;
     mi.end = mi.base + mod.SizeOfImage;
+    mi.version = ModuleVersionString(mod.VersionInfo);
     mi.path = Utf8ToWide(utf8);
     mi.filename = std::filesystem::path(mi.path).filename().wstring();
     mi.inferred_mod_name = InferMo2ModNameFromPath(mi.path);
@@ -405,4 +483,3 @@ bool GetThreadStackBytes(
 }
 
 }  // namespace skydiag::dump_tool::minidump
-

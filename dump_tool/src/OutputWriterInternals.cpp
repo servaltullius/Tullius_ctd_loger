@@ -37,8 +37,12 @@ nlohmann::json DefaultTriageFields()
 {
   return {
     { "review_status", "unreviewed" },
+    { "reviewed", false },
+    { "verdict", "" },
+    { "actual_cause", "" },
     { "ground_truth_cause", "" },
     { "ground_truth_mod", "" },
+    { "signature_matched", false },
     { "reviewer", "" },
     { "reviewed_at_utc", "" },
     { "notes", "" },

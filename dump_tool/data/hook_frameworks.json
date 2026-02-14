@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "frameworks": [
+    { "dll": "enginefixes.dll", "reason_ko": "엔진 함수 광범위 패치", "reason_en": "Broad engine function patches" },
+    { "dll": "ssedisplaytweaks.dll", "reason_ko": "렌더링/프레임 속도 훅", "reason_en": "Rendering/framerate hooks" },
+    { "dll": "po3_tweaks.dll", "reason_ko": "범용 게임 함수 훅", "reason_en": "General game function hooks" },
+    { "dll": "hdtssephysics.dll", "reason_ko": "물리 시뮬레이션 훅", "reason_en": "Physics simulation hooks" },
+    { "dll": "hdtsmp64.dll", "reason_ko": "물리 시뮬레이션 훅", "reason_en": "Physics simulation hooks" },
+    { "dll": "storageutil.dll", "reason_ko": "Papyrus 데이터 저장 인터셉트", "reason_en": "Papyrus data storage intercept" },
+    { "dll": "crashloggersse.dll", "reason_ko": "VEH 크래시 핸들러", "reason_en": "VEH crash handler" },
+    { "dll": "skse64_loader.dll", "reason_ko": "SKSE 로더", "reason_en": "SKSE loader" },
+    { "dll": "skse64_steam_loader.dll", "reason_ko": "SKSE Steam 로더", "reason_en": "SKSE Steam loader" },
+    { "dll": "d3d11.dll", "reason_ko": "렌더링 인젝션 (ENB/ReShade)", "reason_en": "Rendering injection (ENB/ReShade)" },
+    { "dll": "dxgi.dll", "reason_ko": "렌더링 인젝션", "reason_en": "Rendering injection" },
+    { "dll": "dinput8.dll", "reason_ko": "입력 인젝션", "reason_en": "Input injection" },
+    { "dll": "d3dcompiler_46e.dll", "reason_ko": "ENB 셰이더 컴파일러", "reason_en": "ENB shader compiler" },
+    { "dll": "tbbmalloc.dll", "reason_ko": "메모리 할당자 교체", "reason_en": "Memory allocator replacement" }
+  ]
+}

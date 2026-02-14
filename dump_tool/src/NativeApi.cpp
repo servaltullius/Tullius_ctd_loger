@@ -7,7 +7,9 @@
 #include <cwchar>
 #include <cwctype>
 #include <exception>
+#include <filesystem>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -70,6 +72,32 @@ bool ReadEnvBool(const wchar_t* key, bool defaultValue)
   return ParseBoolText(value, defaultValue);
 }
 
+std::wstring ReadEnvString(const wchar_t* key)
+{
+  if (!key || !*key) {
+    return {};
+  }
+  const DWORD need = GetEnvironmentVariableW(key, nullptr, 0);
+  if (need == 0) {
+    return {};
+  }
+  std::wstring value(static_cast<std::size_t>(need - 1), L'\0');
+  if (!value.empty()) {
+    GetEnvironmentVariableW(key, value.data(), need);
+  }
+  return value;
+}
+
+std::wstring GetCurrentExeDir()
+{
+  std::vector<wchar_t> buf(32768, L'\0');
+  const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+  if (n == 0 || n >= buf.size()) {
+    return {};
+  }
+  return std::filesystem::path(std::wstring_view(buf.data(), n)).parent_path().wstring();
+}
+
 std::wstring DescribeStdException(const std::exception& ex)
 {
   const char* what = ex.what();
@@ -105,6 +133,17 @@ int __stdcall SkyrimDiagAnalyzeDumpW(
   if (languageToken && languageToken[0] != L'\0') {
     const std::string ascii = ToAscii(languageToken);
     opt.language = i18n::ParseLanguageTokenAscii(ascii);
+  }
+  const std::wstring exeDir = GetCurrentExeDir();
+  if (!exeDir.empty()) {
+    opt.data_dir = (std::filesystem::path(exeDir) / L"data").wstring();
+  }
+  if (outDir && outDir[0] != L'\0') {
+    opt.output_dir = outDir;
+  }
+  const std::wstring gameVersionW = ReadEnvString(L"SKYRIMDIAG_GAME_VERSION");
+  if (!gameVersionW.empty()) {
+    opt.game_version = ToAscii(gameVersionW);
   }
 
   AnalysisResult result{};

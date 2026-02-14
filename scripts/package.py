@@ -126,6 +126,12 @@ def main(argv: list[str]) -> int:
 
     ini_plugin = root / "dist" / "SkyrimDiag.ini"
     ini_helper = root / "dist" / "SkyrimDiagHelper.ini"
+    data_root = root / "dump_tool" / "data"
+    dump_tool_data_files = [
+        "hook_frameworks.json",
+        "crash_signatures.json",
+        "address_db/skyrimse_functions.json",
+    ]
     if not ini_plugin.is_file():
         print(f"ERROR: missing {ini_plugin}", file=sys.stderr)
         return 4
@@ -147,6 +153,13 @@ def main(argv: list[str]) -> int:
         shutil.copy2(cli_exe, plugins_dir / "SkyrimDiagDumpToolCli.exe")
         shutil.copy2(ini_plugin, plugins_dir / "SkyrimDiag.ini")
         shutil.copy2(ini_helper, plugins_dir / "SkyrimDiagHelper.ini")
+        for rel in dump_tool_data_files:
+            src = data_root / rel
+            if not src.is_file():
+                continue
+            dst = plugins_dir / "data" / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
 
         if plugin_pdb and plugin_pdb.is_file():
             shutil.copy2(plugin_pdb, plugins_dir / "SkyrimDiag.pdb")
@@ -176,6 +189,13 @@ def main(argv: list[str]) -> int:
             return 5
 
         shutil.copy2(native_dll, winui_plugins_dir / "SkyrimDiagDumpToolNative.dll")
+        for rel in dump_tool_data_files:
+            src = data_root / rel
+            if not src.is_file():
+                continue
+            dst = winui_plugins_dir / "data" / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
         if native_pdb and native_pdb.is_file():
             shutil.copy2(native_pdb, winui_plugins_dir / "SkyrimDiagDumpToolNative.pdb")
 

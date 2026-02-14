@@ -24,6 +24,14 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     hasStackCandidate &&
     !IsKnownHookFramework(r.suspects[0].module_filename);
 
+  if (r.signature_match.has_value()) {
+    for (const auto& rec : r.signature_match->recommendations) {
+      if (!rec.empty()) {
+        r.recommendations.push_back(rec);
+      }
+    }
+  }
+
   // Recommendations (checklist)
   if (isSnapshotLike) {
     r.recommendations.push_back(en

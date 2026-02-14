@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "signatures": [
+    {
+      "id": "D6DDDA_VRAM",
+      "match": {
+        "exc_code": "0xC0000005",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset_regex": "^[Dd]6[Dd][Dd]..$"
+      },
+      "diagnosis": {
+        "cause_ko": "RAM/VRAM 초과 또는 손상된 메시/텍스처",
+        "cause_en": "RAM/VRAM exhaustion or corrupted mesh/texture",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[리소스] BethINI으로 텍스처 품질을 낮추거나 SSE Display Tweaks의 VRAM 제한을 확인하세요.",
+          "[메시 검사] NifScan으로 손상된 메시(.nif)를 점검하세요.",
+          "[메모리] 모드가 많다면 4K 텍스처를 2K로 낮춰 재현 여부를 확인하세요."
+        ],
+        "recommendations_en": [
+          "[Resources] Lower texture quality via BethINI or check SSE Display Tweaks VRAM limit.",
+          "[Mesh check] Scan for corrupted meshes (.nif) with NifScan.",
+          "[Memory] If running many mods, consider downscaling 4K textures to 2K."
+        ]
+      }
+    },
+    {
+      "id": "CPP_EXCEPTION_HANDLED",
+      "match": {
+        "exc_code": "0xE06D7363",
+        "fault_module_is_system": true
+      },
+      "diagnosis": {
+        "cause_ko": "C++ 예외(throw/catch)로 보이며, 실제 CTD가 아니라면 오탐일 수 있습니다",
+        "cause_en": "C++ exception (throw/catch); may be a false positive if no real CTD happened",
+        "confidence": "low",
+        "recommendations_ko": [
+          "[해석] 0xE06D7363은 흔한 C++ 예외 코드입니다. 게임이 정상 동작했다면 무시할 수 있습니다.",
+          "[설정] SkyrimDiag.ini에서 CrashHookMode=1(치명 예외만)로 설정해 오탐을 줄이세요."
+        ],
+        "recommendations_en": [
+          "[Interpretation] 0xE06D7363 is a common C++ exception code. If the game ran normally, this may be ignored.",
+          "[Setting] Set CrashHookMode=1 in SkyrimDiag.ini to reduce such false positives."
+        ]
+      }
+    },
+    {
+      "id": "ACCESS_VIOLATION_NULL",
+      "match": {
+        "exc_code": "0xC0000005",
+        "exc_address_near_zero": true
+      },
+      "diagnosis": {
+        "cause_ko": "NULL 포인터 역참조 — 초기화되지 않거나 해제된 객체 접근",
+        "cause_en": "NULL pointer dereference — accessing an uninitialized or freed object",
+        "confidence": "medium",
+        "recommendations_ko": [
+          "[모드 점검] 유력 후보 모드를 업데이트/재설치하고 재현 여부를 확인하세요.",
+          "[로드 순서] 모드 의존성 충돌 가능성이 있으니 LOOT으로 로드 순서를 정리하세요."
+        ],
+        "recommendations_en": [
+          "[Mod check] Update/reinstall the top suspect mod and retest.",
+          "[Load order] This can be a dependency conflict; sort with LOOT and retest."
+        ]
+      }
+    },
+    {
+      "id": "IN_PAGE_ERROR",
+      "match": {
+        "exc_code": "0xC0000006"
+      },
+      "diagnosis": {
+        "cause_ko": "디스크 I/O 오류 (In-Page Error) — 파일 읽기 실패",
+        "cause_en": "Disk I/O error (In-Page Error) — failed to read required file from disk",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[디스크] SSD/HDD 상태를 점검하세요.",
+          "[파일] Steam 무결성 검사를 실행하세요.",
+          "[보안] 백신/보안툴 예외 목록에 게임 경로를 추가하세요."
+        ],
+        "recommendations_en": [
+          "[Disk] Check SSD/HDD health.",
+          "[Files] Verify game file integrity via Steam.",
+          "[Security] Add game folders to antivirus exclusions."
+        ]
+      }
+    },
+    {
+      "id": "STACK_OVERFLOW",
+      "match": {
+        "exc_code": "0xC00000FD"
+      },
+      "diagnosis": {
+        "cause_ko": "스택 오버플로우 — 무한 재귀 또는 과도한 스크립트 중첩",
+        "cause_en": "Stack overflow — infinite recursion or excessive script nesting",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[스크립트] 최근 추가한 스크립트 모드/Papyrus 루프를 우선 점검하세요.",
+          "[세이브] FallrimTools 등으로 세이브 정리를 시도하세요."
+        ],
+        "recommendations_en": [
+          "[Scripts] Check recently added script mods and possible Papyrus recursion loops.",
+          "[Save] Try cleaning the save with tools such as FallrimTools."
+        ]
+      }
+    },
+    {
+      "id": "HEAP_CORRUPTION",
+      "match": {
+        "exc_code": "0xC0000374"
+      },
+      "diagnosis": {
+        "cause_ko": "힙 손상 — 메모리 관리 충돌 가능성",
+        "cause_en": "Heap corruption — probable memory management conflict",
+        "confidence": "medium",
+        "recommendations_ko": [
+          "[모드 충돌] 최근 변경 모드를 이진 탐색으로 좁혀보세요.",
+          "[기반 모드] SSE Engine Fixes/Address Library 버전을 확인하세요."
+        ],
+        "recommendations_en": [
+          "[Mod conflict] Narrow down recent changes with binary search.",
+          "[Core mods] Verify SSE Engine Fixes and Address Library versions."
+        ]
+      }
+    }
+  ]
+}

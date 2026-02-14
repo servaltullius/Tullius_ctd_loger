@@ -42,12 +42,16 @@ std::wstring WideLower(std::wstring_view s);
 
 bool IsSystemishModule(std::wstring_view filename);
 bool IsGameExeModule(std::wstring_view filename);
+// Best-effort override for known hook framework DLL list.
+// If JSON load fails or provides no valid entries, built-in defaults stay active.
+void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath);
 bool IsKnownHookFramework(std::wstring_view filename);
 
 struct ModuleInfo
 {
   std::uint64_t base = 0;
   std::uint64_t end = 0;
+  std::string version;
   std::wstring path;
   std::wstring filename;
   std::wstring inferred_mod_name;
@@ -77,4 +81,3 @@ bool GetThreadStackBytes(
   std::uint64_t& outBaseAddr);
 
 }  // namespace skydiag::dump_tool::minidump
-

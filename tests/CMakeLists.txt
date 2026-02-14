@@ -140,6 +140,115 @@ set_target_properties(skydiag_hook_framework_guard_tests PROPERTIES
 
 add_test(NAME skydiag_hook_framework_guard_tests COMMAND skydiag_hook_framework_guard_tests)
 
+add_executable(skydiag_hook_framework_json_tests
+  hook_framework_json_tests.cpp
+)
+
+set_target_properties(skydiag_hook_framework_json_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+target_compile_definitions(skydiag_hook_framework_json_tests PRIVATE
+  SKYDIAG_PROJECT_ROOT="${CMAKE_SOURCE_DIR}"
+)
+
+add_test(NAME skydiag_hook_framework_json_tests COMMAND skydiag_hook_framework_json_tests)
+set_tests_properties(skydiag_hook_framework_json_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_scoring_logic_tests
+  scoring_logic_tests.cpp
+)
+
+set_target_properties(skydiag_scoring_logic_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_scoring_logic_tests COMMAND skydiag_scoring_logic_tests)
+set_tests_properties(skydiag_scoring_logic_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_stack_scan_weight_tests
+  stack_scan_weight_tests.cpp
+)
+
+set_target_properties(skydiag_stack_scan_weight_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_stack_scan_weight_tests COMMAND skydiag_stack_scan_weight_tests)
+set_tests_properties(skydiag_stack_scan_weight_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_signature_database_tests
+  signature_database_tests.cpp
+)
+
+set_target_properties(skydiag_signature_database_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_signature_database_tests COMMAND skydiag_signature_database_tests)
+set_tests_properties(skydiag_signature_database_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_address_resolver_tests
+  address_resolver_tests.cpp
+)
+
+set_target_properties(skydiag_address_resolver_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_address_resolver_tests COMMAND skydiag_address_resolver_tests)
+set_tests_properties(skydiag_address_resolver_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_crash_history_tests
+  crash_history_tests.cpp
+)
+
+set_target_properties(skydiag_crash_history_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_crash_history_tests COMMAND skydiag_crash_history_tests)
+set_tests_properties(skydiag_crash_history_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_triage_fields_tests
+  triage_fields_tests.cpp
+)
+
+set_target_properties(skydiag_triage_fields_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_triage_fields_tests COMMAND skydiag_triage_fields_tests)
+set_tests_properties(skydiag_triage_fields_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
 add_executable(skydiag_crash_recapture_policy_tests
   crash_recapture_policy_tests.cpp
 )

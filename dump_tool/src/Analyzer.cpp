@@ -1,5 +1,7 @@
 #include "Analyzer.h"
+#include "AddressResolver.h"
 #include "Bucket.h"
+#include "CrashHistory.h"
 #include "EvidenceBuilder.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
@@ -17,6 +19,7 @@
 #include <cstddef>
 #include <cctype>
 #include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -36,6 +39,9 @@ namespace skydiag::dump_tool {
 
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::GetThreadStackBytes;
+using skydiag::dump_tool::minidump::IsGameExeModule;
+using skydiag::dump_tool::minidump::IsSystemishModule;
+using skydiag::dump_tool::minidump::LoadHookFrameworksFromJson;
 using skydiag::dump_tool::minidump::LoadAllModules;
 using skydiag::dump_tool::minidump::LoadThreads;
 using skydiag::dump_tool::minidump::MappedFile;
@@ -45,6 +51,23 @@ using skydiag::dump_tool::minidump::ReadStreamSized;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
 using skydiag::dump_tool::minidump::ThreadRecord;
 using skydiag::dump_tool::minidump::WideLower;
+
+std::string NowIso8601Utc()
+{
+  const std::time_t now = std::time(nullptr);
+  if (now == static_cast<std::time_t>(-1)) {
+    return {};
+  }
+  std::tm tmUtc{};
+  if (gmtime_s(&tmUtc, &now) != 0) {
+    return {};
+  }
+  char buf[32]{};
+  if (std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tmUtc) == 0) {
+    return {};
+  }
+  return buf;
+}
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
 {
@@ -67,7 +90,23 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   const std::uint64_t dumpSize = mf.size;
   void* dumpBase = mf.view;
 
+  // Optional: allow external hook-framework list override.
+  if (!opt.data_dir.empty()) {
+    LoadHookFrameworksFromJson(std::filesystem::path(opt.data_dir) / L"hook_frameworks.json");
+  }
+
   const auto allModules = LoadAllModules(dumpBase, dumpSize);
+  if (!opt.game_version.empty()) {
+    out.game_version = opt.game_version;
+  } else {
+    for (const auto& m : allModules) {
+      if (m.is_game_exe && !m.version.empty()) {
+        out.game_version = m.version;
+        break;
+      }
+    }
+  }
+
   std::vector<std::wstring> modulePaths;
   modulePaths.reserve(allModules.size());
   for (const auto& m : allModules) {
@@ -111,6 +150,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       out.fault_module_path = m.path;
       out.fault_module_filename = m.filename;
       const std::uint64_t off = out.exc_addr - m.base;
+      out.fault_module_offset = off;
       wchar_t buf[1024]{};
       swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(), static_cast<unsigned long long>(off));
       out.fault_module_plus_offset = buf;
@@ -396,6 +436,80 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
 
   internal::ComputeCrashBucket(out);
+
+  // Signature matching from external pattern DB.
+  if (!opt.data_dir.empty()) {
+    SignatureDatabase sigDb;
+    const auto sigPath = std::filesystem::path(opt.data_dir) / L"crash_signatures.json";
+    if (sigDb.LoadFromJson(sigPath)) {
+      SignatureMatchInput input{};
+      input.exc_code = out.exc_code;
+      input.fault_module = out.fault_module_filename;
+      input.fault_offset = out.fault_module_offset;
+      input.exc_address = out.exc_addr;
+      input.fault_module_is_system = IsSystemishModule(out.fault_module_filename);
+      input.callstack_modules.reserve(out.suspects.size());
+      for (const auto& s : out.suspects) {
+        if (!s.module_filename.empty()) {
+          input.callstack_modules.push_back(s.module_filename);
+        }
+      }
+      out.signature_match = sigDb.Match(input, opt.language == i18n::Language::kKorean);
+    }
+  }
+
+  // Resolve game EXE offsets to known function names (best-effort).
+  if (!opt.data_dir.empty() && !out.game_version.empty()) {
+    AddressResolver resolver;
+    const auto addrDb = std::filesystem::path(opt.data_dir) / L"address_db" / L"skyrimse_functions.json";
+    if (resolver.LoadFromJson(addrDb, out.game_version)) {
+      if (!out.fault_module_filename.empty() && IsGameExeModule(out.fault_module_filename)) {
+        if (auto fn = resolver.Resolve(out.fault_module_offset)) {
+          out.resolved_functions[out.fault_module_offset] = *fn;
+        }
+      }
+    }
+  }
+
+  // Persist short rolling history and compute repeated-suspect stats.
+  {
+    std::filesystem::path historyDir;
+    if (!opt.output_dir.empty()) {
+      historyDir = opt.output_dir;
+    } else if (!outDir.empty()) {
+      historyDir = outDir;
+    } else {
+      historyDir = std::filesystem::path(dumpPath).parent_path();
+    }
+
+    if (!historyDir.empty()) {
+      CrashHistory history;
+      const auto historyPath = historyDir / "crash_history.json";
+      history.LoadFromFile(historyPath);
+
+      CrashHistoryEntry entry{};
+      entry.timestamp_utc = NowIso8601Utc();
+      entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
+      entry.bucket_key = WideToUtf8(out.crash_bucket_key);
+      if (!out.suspects.empty()) {
+        entry.top_suspect = WideToUtf8(out.suspects[0].module_filename);
+        entry.confidence = WideToUtf8(out.suspects[0].confidence);
+        for (const auto& s : out.suspects) {
+          if (!s.module_filename.empty()) {
+            entry.all_suspects.push_back(WideToUtf8(s.module_filename));
+          }
+        }
+      }
+      if (out.signature_match) {
+        entry.signature_id = out.signature_match->id;
+      }
+
+      history.AddEntry(std::move(entry));
+      history.SaveToFile(historyPath);
+      out.history_stats = history.GetModuleStats(20);
+    }
+  }
+
   BuildEvidenceAndSummary(out, opt.language);
   if (err) err->clear();
   return true;

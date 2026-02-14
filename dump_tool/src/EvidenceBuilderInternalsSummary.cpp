@@ -7,6 +7,13 @@ namespace skydiag::dump_tool::internal {
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
+  if (r.signature_match.has_value()) {
+    const auto& sig = *r.signature_match;
+    return en
+      ? (L"Known pattern [" + ToWideAscii(sig.id) + L"]: " + sig.cause + L" (Confidence: " + sig.confidence + L")")
+      : (L"알려진 패턴 [" + ToWideAscii(sig.id) + L"]: " + sig.cause + L" (신뢰도: " + sig.confidence + L")");
+  }
+
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
   const bool isManualCapture = ctx.isManualCapture;

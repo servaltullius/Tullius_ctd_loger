@@ -5,6 +5,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdint>
 #include <cwctype>
 #include <filesystem>
@@ -92,15 +93,27 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   nlohmann::json triage;
   LoadExistingSummaryTriage(summaryPath, &triage);
   summary["triage"] = std::move(triage);
+  summary["triage"]["signature_matched"] = r.signature_match.has_value();
+  if (!summary["triage"].contains("reviewed")) {
+    summary["triage"]["reviewed"] = false;
+  }
+  if (!summary["triage"].contains("verdict")) {
+    summary["triage"]["verdict"] = "";
+  }
+  if (!summary["triage"].contains("actual_cause")) {
+    summary["triage"]["actual_cause"] = "";
+  }
 
   summary["exception"] = nlohmann::json::object();
   summary["exception"]["code"] = r.exc_code;
   summary["exception"]["thread_id"] = r.exc_tid;
   summary["exception"]["address"] = r.exc_addr;
+  summary["exception"]["fault_module_offset"] = r.fault_module_offset;
   summary["exception"]["module_plus_offset"] = WideToUtf8(r.fault_module_plus_offset);
   summary["exception"]["fault_module_unknown"] = IsUnknownModuleField(r.fault_module_plus_offset);
   summary["exception"]["module_path"] = WideToUtf8(MaybeRedactPath(r.fault_module_path, redactPaths));
   summary["exception"]["inferred_mod_name"] = WideToUtf8(r.inferred_mod_name);
+  summary["game_version"] = r.game_version;
 
   summary["crash_logger"] = nlohmann::json::object();
   summary["crash_logger"]["log_path"] = WideToUtf8(MaybeRedactPath(r.crash_logger_log_path, redactPaths));
@@ -118,6 +131,26 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     summary["crash_logger"]["cpp_exception"]["info"] = WideToUtf8(r.crash_logger_cpp_exception_info);
     summary["crash_logger"]["cpp_exception"]["throw_location"] = WideToUtf8(r.crash_logger_cpp_exception_throw_location);
     summary["crash_logger"]["cpp_exception"]["module"] = WideToUtf8(r.crash_logger_cpp_exception_module);
+  }
+
+  if (r.signature_match.has_value()) {
+    summary["signature_match"] = {
+      { "id", r.signature_match->id },
+      { "cause", WideToUtf8(r.signature_match->cause) },
+      { "confidence", WideToUtf8(r.signature_match->confidence) },
+    };
+  } else {
+    summary["signature_match"] = nullptr;
+  }
+
+  if (!r.resolved_functions.empty()) {
+    nlohmann::json funcs = nlohmann::json::object();
+    for (const auto& [offset, name] : r.resolved_functions) {
+      char key[32]{};
+      std::snprintf(key, sizeof(key), "0x%llX", static_cast<unsigned long long>(offset));
+      funcs[key] = name;
+    }
+    summary["resolved_functions"] = std::move(funcs);
   }
 
   summary["suspects"] = nlohmann::json::array();
@@ -180,6 +213,19 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   summary["recommendations"] = nlohmann::json::array();
   for (const auto& s : r.recommendations) {
     summary["recommendations"].push_back(WideToUtf8(s));
+  }
+
+  if (!r.history_stats.empty()) {
+    auto stats = nlohmann::json::array();
+    for (const auto& ms : r.history_stats) {
+      stats.push_back({
+        { "module", ms.module_name },
+        { "total_appearances", ms.total_appearances },
+        { "as_top_suspect", ms.as_top_suspect },
+        { "total_crashes", ms.total_crashes },
+      });
+    }
+    summary["crash_history_stats"] = std::move(stats);
   }
 
   std::wstring writeErr;

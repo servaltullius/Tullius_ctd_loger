@@ -72,6 +72,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.isSystem = isSystem;
   ctx.isGameExe = isGameExe;
   ctx.isHookFramework = isHookFramework;
+  ctx.hasSignatureMatch = r.signature_match.has_value();
   ctx.wctSuggestsHang = wctSuggestsHang;
   ctx.hitch = hitch;
   ctx.wct = wct;

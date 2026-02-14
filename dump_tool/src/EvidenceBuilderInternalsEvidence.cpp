@@ -1,5 +1,6 @@
 #include "EvidenceBuilderInternalsPriv.h"
 
+#include <algorithm>
 #include <cwchar>
 #include <filesystem>
 #include <vector>
@@ -24,6 +25,18 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
   const auto& wct = ctx.wct;
   const auto hitch = ctx.hitch;
   const bool wctSuggestsHang = ctx.wctSuggestsHang;
+
+  if (r.signature_match.has_value()) {
+    const auto& sig = *r.signature_match;
+    EvidenceItem e{};
+    e.confidence_level = sig.confidence_level;
+    e.confidence = sig.confidence.empty() ? ConfidenceText(lang, sig.confidence_level) : sig.confidence;
+    e.title = ctx.en
+      ? (L"Known crash pattern: " + ToWideAscii(sig.id))
+      : (L"알려진 크래시 패턴: " + ToWideAscii(sig.id));
+    e.details = sig.cause;
+    r.evidence.push_back(std::move(e));
+  }
 
   if (hasException) {
     if (auto info = TryExplainExceptionInfo(r, en)) {
@@ -324,6 +337,21 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     r.evidence.push_back(std::move(e));
   }
 
+  if (isGameExe && !r.resolved_functions.empty()) {
+    const auto it = r.resolved_functions.find(r.fault_module_offset);
+    if (it != r.resolved_functions.end()) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kMedium;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = ctx.en ? L"Game function identified" : L"게임 함수 식별";
+      const std::wstring fn = ToWideAscii(it->second);
+      e.details = ctx.en
+        ? (L"Crash occurred in or near: " + fn)
+        : (L"크래시 발생 위치(또는 근처): " + fn);
+      r.evidence.push_back(std::move(e));
+    }
+  }
+
   if (!r.inferred_mod_name.empty()) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kMedium;
@@ -397,7 +425,36 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = buf;
     r.evidence.push_back(std::move(e));
   }
+
+  if (!r.history_stats.empty()) {
+    std::wstring details;
+    const std::size_t showN = std::min<std::size_t>(r.history_stats.size(), 3);
+    for (std::size_t i = 0; i < showN; ++i) {
+      const auto& ms = r.history_stats[i];
+      if (ms.module_name.empty()) {
+        continue;
+      }
+      if (!details.empty()) {
+        details += L"\n";
+      }
+      const std::wstring modW = ToWideAscii(ms.module_name);
+      if (ctx.en) {
+        details += modW + L": " + std::to_wstring(ms.total_appearances) + L"/" +
+          std::to_wstring(ms.total_crashes) + L" crashes, top " + std::to_wstring(ms.as_top_suspect) + L"x";
+      } else {
+        details += modW + L": " + std::to_wstring(ms.total_crashes) + L"회 중 " +
+          std::to_wstring(ms.total_appearances) + L"회 등장, 1위 " + std::to_wstring(ms.as_top_suspect) + L"회";
+      }
+    }
+    if (!details.empty()) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kMedium;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = ctx.en ? L"Crash history pattern" : L"크래시 이력 패턴";
+      e.details = details;
+      r.evidence.push_back(std::move(e));
+    }
+  }
 }
 
 }  // namespace skydiag::dump_tool::internal
-

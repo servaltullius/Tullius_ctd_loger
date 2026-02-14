@@ -7,6 +7,7 @@
 
 #include <cwchar>
 #include <cwctype>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -62,6 +63,32 @@ bool ReadEnvBool(const wchar_t* key, bool defaultValue)
   return ParseBoolText(value, defaultValue);
 }
 
+std::wstring ReadEnvString(const wchar_t* key)
+{
+  if (!key || !*key) {
+    return {};
+  }
+  const DWORD need = GetEnvironmentVariableW(key, nullptr, 0);
+  if (need == 0) {
+    return {};
+  }
+  std::wstring value(static_cast<std::size_t>(need - 1), L'\0');
+  if (!value.empty()) {
+    GetEnvironmentVariableW(key, value.data(), need);
+  }
+  return value;
+}
+
+std::wstring GetCurrentExeDir()
+{
+  std::vector<wchar_t> buf(32768, L'\0');
+  const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+  if (n == 0 || n >= buf.size()) {
+    return {};
+  }
+  return std::filesystem::path(std::wstring_view(buf.data(), n)).parent_path().wstring();
+}
+
 void BestEffortLowerPriority()
 {
   // Headless analysis is post-incident; prefer to be a "good citizen" if other
@@ -111,6 +138,17 @@ int wmain(int argc, wchar_t** argv)
   if (!a.lang_token.empty()) {
     opt.language = i18n::ParseLanguageTokenAscii(ToAscii(a.lang_token));
   }
+  const std::wstring exeDir = GetCurrentExeDir();
+  if (!exeDir.empty()) {
+    opt.data_dir = (std::filesystem::path(exeDir) / L"data").wstring();
+  }
+  if (!a.out_dir.empty()) {
+    opt.output_dir = a.out_dir;
+  }
+  const std::wstring gameVersionW = ReadEnvString(L"SKYRIMDIAG_GAME_VERSION");
+  if (!gameVersionW.empty()) {
+    opt.game_version = ToAscii(gameVersionW);
+  }
 
   AnalysisResult result{};
   std::wstring err;
@@ -125,4 +163,3 @@ int wmain(int argc, wchar_t** argv)
 
   return 0;
 }
-
