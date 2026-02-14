@@ -13,6 +13,7 @@ using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext
 using skydiag::dump_tool::internal::stackwalk_internal::SymSession;
 
 using skydiag::dump_tool::minidump::ModuleInfo;
+using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
 using skydiag::dump_tool::minidump::ThreadRecord;
 using skydiag::dump_tool::minidump::WideLower;
@@ -158,8 +159,11 @@ bool TryComputeStackwalkSuspects(
     return false;
   }
 
+  const bool topIsHookFramework = !best.suspects.empty() && IsKnownHookFramework(best.suspects[0].module_filename);
+
   // Boost confidence when Crash Logger agrees with our top module (best-effort).
-  if (!out.crash_logger_top_modules.empty() && !best.suspects.empty()) {
+  // Skip this boost for hook frameworks to avoid over-crediting frame owners like CrashLogger itself.
+  if (!out.crash_logger_top_modules.empty() && !best.suspects.empty() && !topIsHookFramework) {
     const auto topLower = WideLower(best.suspects[0].module_filename);
     for (const auto& m : out.crash_logger_top_modules) {
       if (WideLower(m) == topLower) {
@@ -172,7 +176,8 @@ bool TryComputeStackwalkSuspects(
   }
 
   // Also boost when Crash Logger provides an explicit C++ exception module that matches our top suspect.
-  if (!out.crash_logger_cpp_exception_module.empty() && !best.suspects.empty()) {
+  // Skip this boost for hook frameworks to keep confidence conservative.
+  if (!out.crash_logger_cpp_exception_module.empty() && !best.suspects.empty() && !topIsHookFramework) {
     const auto topLower = WideLower(best.suspects[0].module_filename);
     if (WideLower(out.crash_logger_cpp_exception_module) == topLower) {
       best.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;

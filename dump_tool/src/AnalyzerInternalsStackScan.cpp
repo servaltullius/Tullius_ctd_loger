@@ -118,9 +118,34 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     return out;
   }
 
+  // Same policy as callstack scoring: when the top hit is a hook framework
+  // (especially CrashLoggerSSE), prefer a non-hook candidate if available.
+  bool promotedHookTop = false;
+  if (rows.size() > 1 && modules[rows[0].modIndex].is_known_hook_framework) {
+    const auto fallbackIt = std::find_if(rows.begin() + 1, rows.end(), [&](const Row& r) {
+      return !modules[r.modIndex].is_known_hook_framework;
+    });
+    if (fallbackIt != rows.end()) {
+      const std::wstring topLower = WideLower(modules[rows[0].modIndex].filename);
+      const bool topIsCrashLogger = (topLower == L"crashloggersse.dll");
+      const bool nearTie = (fallbackIt->score + 8u) >= rows[0].score;
+      if (topIsCrashLogger || nearTie) {
+        std::iter_swap(rows.begin(), fallbackIt);
+        promotedHookTop = true;
+      }
+    }
+  }
+
   const std::uint32_t topScore = rows[0].score;
   const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
-  const auto confTop = ConfidenceForTopSuspectLevel(topScore, secondScore);
+  auto confTop = ConfidenceForTopSuspectLevel(topScore, secondScore);
+  if (modules[rows[0].modIndex].is_known_hook_framework) {
+    if (confTop == i18n::ConfidenceLevel::kHigh) {
+      confTop = i18n::ConfidenceLevel::kMedium;
+    } else if (confTop == i18n::ConfidenceLevel::kMedium) {
+      confTop = i18n::ConfidenceLevel::kLow;
+    }
+  }
   const bool en = (lang == i18n::Language::kEnglish);
 
   const std::size_t n = std::min<std::size_t>(rows.size(), 5);
@@ -139,6 +164,11 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     si.reason = en
       ? (L"Observed " + std::to_wstring(row.score) + L" hit(s) in stack scan")
       : (L"스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측");
+    if (i == 0 && promotedHookTop) {
+      si.reason += en
+        ? L" (primary candidate promoted over hook framework hit owner)"
+        : L" (훅 프레임워크 히트 소유자보다 우선 후보로 승격)";
+    }
     out.push_back(std::move(si));
   }
 
@@ -146,4 +176,3 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
 }
 
 }  // namespace skydiag::dump_tool::internal
-

@@ -104,6 +104,24 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     return an < bn;
   });
 
+  // If the top frame owner is a hook framework (especially CrashLoggerSSE), prefer a
+  // non-hook candidate when one is available to reduce common victim-as-culprit false positives.
+  bool promotedHookTop = false;
+  if (rows.size() > 1 && modules[rows[0].modIndex].is_known_hook_framework) {
+    const auto fallbackIt = std::find_if(rows.begin() + 1, rows.end(), [&](const Row& r) {
+      return !modules[r.modIndex].is_known_hook_framework;
+    });
+    if (fallbackIt != rows.end()) {
+      const std::wstring topLower = WideLower(modules[rows[0].modIndex].filename);
+      const bool topIsCrashLogger = (topLower == L"crashloggersse.dll");
+      const bool nearTie = (fallbackIt->score + 4u) >= rows[0].score;
+      if (topIsCrashLogger || nearTie) {
+        std::iter_swap(rows.begin(), fallbackIt);
+        promotedHookTop = true;
+      }
+    }
+  }
+
   const std::uint32_t topScore = rows[0].score;
   const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
   auto confTop = ConfidenceForTopSuspectCallstackLevel(topScore, secondScore, rows[0].firstDepth);
@@ -136,6 +154,11 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     si.reason = en
       ? (L"Callstack weight=" + std::to_wstring(row.score) + L", first depth=" + std::to_wstring(row.firstDepth))
       : (L"콜스택 상위 프레임에서 가중치=" + std::to_wstring(row.score) + L", 최초 깊이=" + std::to_wstring(row.firstDepth));
+    if (i == 0 && promotedHookTop) {
+      si.reason += en
+        ? L" (primary candidate promoted over hook framework frame owner)"
+        : L" (훅 프레임워크 프레임 소유자보다 우선 후보로 승격)";
+    }
     out.push_back(std::move(si));
   }
 
@@ -143,4 +166,3 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
 }
 
 }  // namespace skydiag::dump_tool::internal::stackwalk
-

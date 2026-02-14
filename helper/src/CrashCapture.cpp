@@ -46,6 +46,12 @@ bool HandleCrashEventTick(
     return false;
   }
 
+  // Consume the manual-reset crash event immediately to avoid re-handling the
+  // same signal in subsequent ticks.
+  if (!ResetEvent(proc.crashEvent)) {
+    AppendLogLine(outBase, L"Failed to reset crash event: " + std::to_wstring(GetLastError()));
+  }
+
   if (crashCaptured && *crashCaptured) {
     AppendLogLine(outBase, L"Crash event signaled again; ignoring (already captured).");
     return true;
@@ -118,19 +124,52 @@ bool HandleCrashEventTick(
 
     // (2) Handled first-chance exception filter: if the process is still
     //     running and the main-thread heartbeat advances, the game recovered.
+    //     Heavy transitions (e.g. returning to main menu with many mods) can
+    //     stall the main thread for several seconds while cell/world unloads,
+    //     so we check heartbeat multiple times over an extended window.
     if (pw == WAIT_TIMEOUT && proc.shm) {
-      const auto hb0 = proc.shm->header.last_heartbeat_qpc;
-      Sleep(1500);
-      const auto hb1 = proc.shm->header.last_heartbeat_qpc;
-      if (hb1 > hb0) {
-        AppendLogLine(outBase, L"Crash event received but heartbeat is still advancing (hb0="
-          + std::to_wstring(hb0) + L" hb1=" + std::to_wstring(hb1)
-          + L"); deleting dump (likely handled first-chance exception).");
-        std::error_code ec;
-        std::filesystem::remove(dumpPath, ec);
+      constexpr int kMaxHeartbeatChecks = 4;
+      constexpr DWORD kHeartbeatCheckIntervalMs = 2000;
+      constexpr int kRequiredHeartbeatAdvances = 2;
+      bool recovered = false;
+      int heartbeatAdvanceCount = 0;
+      for (int attempt = 0; attempt < kMaxHeartbeatChecks; ++attempt) {
+        const auto hb0 = proc.shm->header.last_heartbeat_qpc;
+        Sleep(kHeartbeatCheckIntervalMs);
+        const auto hb1 = proc.shm->header.last_heartbeat_qpc;
+        if (hb1 > hb0) {
+          ++heartbeatAdvanceCount;
+          if (heartbeatAdvanceCount >= kRequiredHeartbeatAdvances) {
+            AppendLogLine(outBase, L"Crash event received but heartbeat is still advancing across multiple checks (hb0="
+              + std::to_wstring(hb0) + L" hb1=" + std::to_wstring(hb1)
+              + L", check=" + std::to_wstring(attempt + 1)
+              + L", advances=" + std::to_wstring(heartbeatAdvanceCount)
+              + L"); deleting dump (likely handled first-chance exception).");
+            std::error_code ec;
+            std::filesystem::remove(dumpPath, ec);
+            recovered = true;
+            break;
+          }
+        }
+        // Process may have exited normally during our extended check.
+        if (WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0) {
+          DWORD exitCode = STILL_ACTIVE;
+          GetExitCodeProcess(proc.process, &exitCode);
+          if (exitCode == 0) {
+            AppendLogLine(outBase, L"Crash event received but process exited normally during "
+              L"heartbeat check (exit_code=0, check=" + std::to_wstring(attempt + 1)
+              + L"); deleting dump (likely shutdown exception).");
+            std::error_code ec;
+            std::filesystem::remove(dumpPath, ec);
+            recovered = true;
+          }
+          break;  // Non-zero exit: real crash. Stop checking.
+        }
+      }
+      if (recovered) {
         return false;
       }
-      // Heartbeat stalled: real crash / freeze. Keep the dump.
+      // Heartbeat stalled for entire extended window: real crash / freeze.
     }
   }
 
@@ -245,4 +284,3 @@ bool HandleCrashEventTick(
 }
 
 }  // namespace skydiag::helper::internal
-

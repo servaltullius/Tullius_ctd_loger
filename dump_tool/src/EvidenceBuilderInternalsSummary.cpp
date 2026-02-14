@@ -28,6 +28,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       suspectWho = s0.module_filename;
     }
   }
+  const bool hasNonHookSuspect = hasSuspect && !IsKnownHookFramework(r.suspects[0].module_filename);
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -49,9 +50,17 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           ? L"Looks like a snapshot dump (not a crash/hang). Useful for state inspection, not root cause. (Confidence: High)"
           : L"스냅샷 덤프(크래시/행 아님)로 보입니다. 원인 판정용이 아니라 '상태 확인'에 유용합니다. (신뢰도: 높음)");
   } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
-    summary = en
-      ? (L"Top suspect: " + who + L" (known hook framework; may be a victim of another mod's corruption) — the crash appears to occur inside this DLL. (Confidence: Medium)")
-      : (L"유력 후보: " + who + L" (알려진 훅 프레임워크; 다른 모드의 메모리 오염 피해자일 수 있음) — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 중간)");
+    if (hasNonHookSuspect && !suspectWho.empty()) {
+      summary = en
+        ? (L"Crash is reported in " + who + L" (known hook framework), but " + suspectBasis + L" points to " + suspectWho +
+            L". (Confidence: " + suspectConf + L")")
+        : (L"크래시 위치가 " + who + L"(알려진 훅 프레임워크)로 보고되었지만, " + suspectBasis + L"에서는 " + suspectWho +
+            L" 가 유력합니다. (신뢰도: " + suspectConf + L")");
+    } else {
+      summary = en
+        ? (L"Top suspect: " + who + L" (known hook framework; may be a victim of another mod's corruption) — the crash appears to occur inside this DLL. (Confidence: Medium)")
+        : (L"유력 후보: " + who + L" (알려진 훅 프레임워크; 다른 모드의 메모리 오염 피해자일 수 있음) — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 중간)");
+    }
   } else if (hasModule && !isSystem && !isGameExe) {
     summary = en
       ? (L"Top suspect: " + who + L" — the crash appears to occur inside this DLL. (Confidence: High)")
@@ -125,4 +134,3 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
 }
 
 }  // namespace skydiag::dump_tool::internal
-

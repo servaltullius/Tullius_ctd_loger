@@ -107,7 +107,9 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
     }
   }
 
-  out.crashEvent = OpenEventW(SYNCHRONIZE, FALSE, crashEventName.c_str());
+  // Need EVENT_MODIFY_STATE to consume manual-reset crash events via ResetEvent
+  // after handling, otherwise the helper can re-handle the same signal repeatedly.
+  out.crashEvent = OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, crashEventName.c_str());
   if (!out.crashEvent) {
     // Not fatal for hang-only mode; still allow attach.
     if (err) err->clear();

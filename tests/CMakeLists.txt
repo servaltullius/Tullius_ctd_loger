@@ -88,6 +88,18 @@ set_target_properties(skydiag_helper_crash_autopen_config_tests PROPERTIES
 
 add_test(NAME skydiag_helper_crash_autopen_config_tests COMMAND skydiag_helper_crash_autopen_config_tests)
 
+add_executable(skydiag_crash_capture_false_positive_guard_tests
+  crash_capture_false_positive_guard_tests.cpp
+)
+
+set_target_properties(skydiag_crash_capture_false_positive_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_crash_capture_false_positive_guard_tests COMMAND skydiag_crash_capture_false_positive_guard_tests)
+
 add_executable(skydiag_retention_tests
   retention_tests.cpp
 )
@@ -115,6 +127,18 @@ set_target_properties(skydiag_summary_schema_fields_tests PROPERTIES
 )
 
 add_test(NAME skydiag_summary_schema_fields_tests COMMAND skydiag_summary_schema_fields_tests)
+
+add_executable(skydiag_hook_framework_guard_tests
+  hook_framework_guard_tests.cpp
+)
+
+set_target_properties(skydiag_hook_framework_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_hook_framework_guard_tests COMMAND skydiag_hook_framework_guard_tests)
 
 add_executable(skydiag_crash_recapture_policy_tests
   crash_recapture_policy_tests.cpp
