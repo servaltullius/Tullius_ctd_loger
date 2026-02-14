@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.26 (2026-02-15)
+
+### 추가
+- DumpTool: 크래시 시그니처 데이터베이스 도입 (`dump_tool/data/crash_signatures.json`) 및 분석 파이프라인 통합. 예외 코드/모듈/오프셋/콜스택 패턴을 기반으로 알려진 크래시 패턴을 우선 진단.
+- DumpTool: 게임 EXE 오프셋 해석기(Address Resolver) 도입 (`dump_tool/data/address_db/skyrimse_functions.json`). 알려진 함수와 매칭되면 증거/요약 JSON에 함수명을 출력.
+- DumpTool: 크래시 이력 저장/통계 엔진 도입 (`crash_history.json`). 최근 반복 발생 모듈 통계를 증거와 요약 JSON에 포함.
+- 테스트: 핵심 분석 엔진 런타임 테스트 추가 (`tests/analysis_engine_runtime_tests.cpp`) 및 스코어링/시그니처/주소해석/이력 관련 가드 테스트 확장.
+
+### 개선
+- 훅 프레임워크 목록을 JSON으로 외부화하고 분석기/패키징 경로를 통합하여 하드코딩 중복 제거.
+- 스택 스캔 점수 계산에 RSP 근접 가중치(8/4/2/1)를 적용하고 임계값을 재보정하여 오탐을 완화.
+- 결과 JSON(`*_SkyrimDiagSummary.json`)에 `signature_match`, `resolved_functions`, `crash_history_stats`, triage 확장 필드를 추가.
+
+### 수정
+- Fallback 모듈 탐지 경로에서 `fault_module_offset`가 누락되던 문제 수정(시그니처 매칭/주소 해석 정확도 개선).
+- 시그니처 `callstack_contains` 매칭 입력을 실제 콜스택 프레임 기반으로 보강(기존 suspect 모듈명 중심 입력의 한계 보완).
+
 ## v0.2.25 (2026-02-14)
 
 ### 수정
