@@ -51,11 +51,19 @@ static void TestBilingualFieldsPresent()
   assert(content.find("recommendations_en") != std::string::npos);
 }
 
+static void TestAnalyzerUsesRealCallstackForSignatureInput()
+{
+  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  assert(analyzer.find("out.stackwalk_primary_frames") != std::string::npos);
+  assert(analyzer.find("input.callstack_modules.push_back(frame)") != std::string::npos);
+}
+
 int main()
 {
   TestSignatureJsonExists();
   TestSignatureDatabaseApiExists();
   TestKnownSignaturePresent();
   TestBilingualFieldsPresent();
+  TestAnalyzerUsesRealCallstackForSignatureInput();
   return 0;
 }

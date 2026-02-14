@@ -1,12 +1,12 @@
 #include "SignatureDatabase.h"
 
-#include "Utf.h"
-
 #include <algorithm>
 #include <cctype>
+#include <codecvt>
 #include <cstdio>
 #include <cwctype>
 #include <fstream>
+#include <locale>
 #include <regex>
 #include <string_view>
 
@@ -50,6 +50,25 @@ std::uint32_t ParseHexU32(const std::string& s)
   return static_cast<std::uint32_t>(std::stoul(s, nullptr, 0));
 }
 
+std::wstring Utf8ToWidePortable(const std::string& s)
+{
+  if (s.empty()) {
+    return {};
+  }
+  try {
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> conv;
+    return conv.from_bytes(s);
+  } catch (...) {
+    // Fallback keeps ASCII diagnostics readable even when conversion fails.
+    std::wstring out;
+    out.reserve(s.size());
+    for (const unsigned char c : s) {
+      out.push_back(static_cast<wchar_t>(c));
+    }
+    return out;
+  }
+}
+
 }  // namespace
 
 struct SignatureDatabase::Signature
@@ -76,6 +95,16 @@ struct SignatureDatabase::Signature
   std::vector<std::wstring> recommendations_ko;
   std::vector<std::wstring> recommendations_en;
 };
+
+SignatureDatabase::SignatureDatabase() = default;
+SignatureDatabase::~SignatureDatabase() = default;
+SignatureDatabase::SignatureDatabase(SignatureDatabase&&) noexcept = default;
+SignatureDatabase& SignatureDatabase::operator=(SignatureDatabase&&) noexcept = default;
+
+std::size_t SignatureDatabase::Size() const
+{
+  return m_signatures.size();
+}
 
 bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
 {
@@ -108,7 +137,7 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
         sig.has_exc_code = true;
       }
       if (m.contains("fault_module") && m["fault_module"].is_string()) {
-        sig.fault_module = WideLower(Utf8ToWide(m["fault_module"].get<std::string>()));
+        sig.fault_module = WideLower(Utf8ToWidePortable(m["fault_module"].get<std::string>()));
       }
       if (m.contains("fault_offset_regex") && m["fault_offset_regex"].is_string()) {
         sig.fault_offset_regex = m["fault_offset_regex"].get<std::string>();
@@ -124,7 +153,7 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
       if (m.contains("callstack_contains") && m["callstack_contains"].is_array()) {
         for (const auto& v : m["callstack_contains"]) {
           if (v.is_string()) {
-            const std::wstring token = WideLower(Utf8ToWide(v.get<std::string>()));
+            const std::wstring token = WideLower(Utf8ToWidePortable(v.get<std::string>()));
             if (!token.empty()) {
               sig.callstack_contains.push_back(token);
             }
@@ -133,21 +162,21 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
       }
 
       const auto& d = s.at("diagnosis");
-      sig.cause_ko = Utf8ToWide(d.value("cause_ko", ""));
-      sig.cause_en = Utf8ToWide(d.value("cause_en", ""));
+      sig.cause_ko = Utf8ToWidePortable(d.value("cause_ko", ""));
+      sig.cause_en = Utf8ToWidePortable(d.value("cause_en", ""));
       sig.confidence_level = ParseConfidence(d.value("confidence", ""));
 
       if (d.contains("recommendations_ko") && d["recommendations_ko"].is_array()) {
         for (const auto& r : d["recommendations_ko"]) {
           if (r.is_string()) {
-            sig.recommendations_ko.push_back(Utf8ToWide(r.get<std::string>()));
+            sig.recommendations_ko.push_back(Utf8ToWidePortable(r.get<std::string>()));
           }
         }
       }
       if (d.contains("recommendations_en") && d["recommendations_en"].is_array()) {
         for (const auto& r : d["recommendations_en"]) {
           if (r.is_string()) {
-            sig.recommendations_en.push_back(Utf8ToWide(r.get<std::string>()));
+            sig.recommendations_en.push_back(Utf8ToWidePortable(r.get<std::string>()));
           }
         }
       }

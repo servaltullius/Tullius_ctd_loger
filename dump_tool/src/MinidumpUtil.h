@@ -31,6 +31,7 @@ bool ReadMinidumpStringUtf8(void* dumpBase, std::uint64_t dumpSize, RVA rva, std
 
 struct ModuleHit
 {
+  std::uint64_t base = 0;
   std::wstring path;
   std::wstring filename;
   std::wstring plusOffset;

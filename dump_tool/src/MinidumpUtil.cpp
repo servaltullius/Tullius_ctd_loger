@@ -251,6 +251,7 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
     swprintf_s(buf, L"%s+0x%llx", file.c_str(), static_cast<unsigned long long>(off));
 
     ModuleHit hit{};
+    hit.base = base;
     hit.path = wpath;
     hit.filename = file;
     hit.plusOffset = buf;

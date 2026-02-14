@@ -159,6 +159,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       out.fault_module_path = m->path;
       out.fault_module_filename = m->filename;
       out.fault_module_plus_offset = m->plusOffset;
+      if (out.exc_addr >= m->base) {
+        out.fault_module_offset = (out.exc_addr - m->base);
+      }
       out.inferred_mod_name = InferMo2ModNameFromPath(out.fault_module_path);
     }
   }
@@ -448,7 +451,20 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       input.fault_offset = out.fault_module_offset;
       input.exc_address = out.exc_addr;
       input.fault_module_is_system = IsSystemishModule(out.fault_module_filename);
-      input.callstack_modules.reserve(out.suspects.size());
+      input.callstack_modules.reserve(
+        out.stackwalk_primary_frames.size() +
+        out.crash_logger_top_modules.size() +
+        out.suspects.size());
+      for (const auto& frame : out.stackwalk_primary_frames) {
+        if (!frame.empty()) {
+          input.callstack_modules.push_back(frame);
+        }
+      }
+      for (const auto& m : out.crash_logger_top_modules) {
+        if (!m.empty()) {
+          input.callstack_modules.push_back(m);
+        }
+      }
       for (const auto& s : out.suspects) {
         if (!s.module_filename.empty()) {
           input.callstack_modules.push_back(s.module_filename);

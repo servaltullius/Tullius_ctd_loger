@@ -32,9 +32,16 @@ struct SignatureMatchInput
 class SignatureDatabase
 {
 public:
+  SignatureDatabase();
+  ~SignatureDatabase();
+  SignatureDatabase(SignatureDatabase&&) noexcept;
+  SignatureDatabase& operator=(SignatureDatabase&&) noexcept;
+  SignatureDatabase(const SignatureDatabase&) = delete;
+  SignatureDatabase& operator=(const SignatureDatabase&) = delete;
+
   bool LoadFromJson(const std::filesystem::path& jsonPath);
   std::optional<SignatureMatch> Match(const SignatureMatchInput& input, bool useKorean) const;
-  std::size_t Size() const { return m_signatures.size(); }
+  std::size_t Size() const;
 
 private:
   struct Signature;
