@@ -1,6 +1,6 @@
 {
   "name": "skyrimdiag",
-  "version-string": "0.2.16",
+  "version-string": "0.2.24",
   "dependencies": [
     "commonlibsse-ng",
     "nlohmann-json"
