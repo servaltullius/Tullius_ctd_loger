@@ -249,27 +249,33 @@ set_tests_properties(skydiag_triage_fields_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
 
-add_executable(skydiag_analysis_engine_runtime_tests
-  analysis_engine_runtime_tests.cpp
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/SignatureDatabase.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressResolver.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashHistory.cpp"
-)
+include(CheckIncludeFileCXX)
+check_include_file_cxx("nlohmann/json.hpp" SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
+if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
+  add_executable(skydiag_analysis_engine_runtime_tests
+    analysis_engine_runtime_tests.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/SignatureDatabase.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressResolver.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashHistory.cpp"
+  )
 
-target_include_directories(skydiag_analysis_engine_runtime_tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-)
+  target_include_directories(skydiag_analysis_engine_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
 
-set_target_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
+  set_target_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+  )
 
-add_test(NAME skydiag_analysis_engine_runtime_tests COMMAND skydiag_analysis_engine_runtime_tests)
-set_tests_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
-  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
-)
+  add_test(NAME skydiag_analysis_engine_runtime_tests COMMAND skydiag_analysis_engine_runtime_tests)
+  set_tests_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
+    ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+  )
+else()
+  message(STATUS "skydiag_analysis_engine_runtime_tests skipped: nlohmann/json.hpp not found")
+endif()
 
 add_executable(skydiag_crash_recapture_policy_tests
   crash_recapture_policy_tests.cpp
