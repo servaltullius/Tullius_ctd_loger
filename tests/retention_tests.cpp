@@ -107,6 +107,56 @@ static void Test_PrunesHangWctAndEtlWithDump()
   assert(Exists(dir / (std::string("SkyrimDiag_WCT_") + ts1 + ".json")));
 }
 
+static void Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp()
+{
+  const auto dir = MakeTempDir();
+  const char* ts = "20260101_020000";
+
+  const auto miniStem = std::string("SkyrimDiag_Crash_") + ts;
+  const auto fullStem = miniStem + "_Full";
+  const auto manifest = std::string("SkyrimDiag_Incident_Crash_") + ts + ".json";
+
+  WriteFile(dir / (miniStem + ".dmp"));
+  WriteFile(dir / (fullStem + ".dmp"));
+  WriteFile(dir / manifest);
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  const bool miniExists = Exists(dir / (miniStem + ".dmp"));
+  const bool fullExists = Exists(dir / (fullStem + ".dmp"));
+  assert(miniExists != fullExists);
+  assert(Exists(dir / manifest));
+}
+
+static void Test_PrunesEtwTracesAcrossCrashAndHangPrefixes()
+{
+  const auto dir = MakeTempDir();
+
+  const auto hang0 = std::string("SkyrimDiag_Hang_20260101_030000.etl");
+  const auto crash1 = std::string("SkyrimDiag_Crash_20260101_030001.etl");
+  const auto hang2 = std::string("SkyrimDiag_Hang_20260101_030002.etl");
+
+  WriteFile(dir / hang0);
+  WriteFile(dir / crash1);
+  WriteFile(dir / hang2);
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 0;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 2;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(dir / hang0));
+  assert(Exists(dir / crash1));
+  assert(Exists(dir / hang2));
+}
+
 static void Test_RotatesHelperLog()
 {
   const auto dir = MakeTempDir();
@@ -124,7 +174,8 @@ int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
   Test_PrunesHangWctAndEtlWithDump();
+  Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();
+  Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();
   Test_RotatesHelperLog();
   return 0;
 }
-

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.28 (2026-02-15)
+
+### 수정
+- Retention: `Crash`/`Crash_Full` 덤프가 같은 timestamp를 공유할 때, 한쪽 덤프만 정리되어도 incident manifest(`SkyrimDiag_Incident_Crash_<ts>.json`)가 같이 삭제되던 문제 수정. 동일 timestamp의 다른 덤프가 남아 있으면 manifest를 유지.
+- Helper(Hang): ETW 파일 저장 전에 retention이 먼저 실행되어 ETW 개수 제한이 즉시 반영되지 않던 순서 문제 수정. ETW stop/write 이후 retention을 적용하도록 조정.
+- Helper(Crash): 비동기 Crash ETW stop 완료 시점과 자동 Full 재캡처 생성 시점에 retention을 즉시 재적용하도록 보완하여, 세션 중에도 덤프/ETW 보관 개수 제한을 더 일관되게 유지.
+
+### 테스트
+- `skydiag_retention_tests` 보강:
+  - 동일 timestamp sibling crash dump(`Crash` + `Crash_Full`) 시 manifest 유지 회귀 테스트 추가.
+  - Crash/Hang ETW trace를 통합 대상으로 개수 제한 prune 동작을 검증하는 테스트 추가.
+
 ## v0.2.27 (2026-02-15)
 
 ### 수정

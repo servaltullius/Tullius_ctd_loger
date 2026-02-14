@@ -293,6 +293,7 @@ HangTickResult HandleHangTick(
   const std::string wctUtf8 = wctJson.dump(2);
   WriteTextFileUtf8(wctPath, wctUtf8);
 
+  bool dumpWritten = false;
   std::wstring dumpErr;
   if (!skydiag::helper::WriteDumpWithStreams(
         proc.process,
@@ -307,6 +308,7 @@ HangTickResult HandleHangTick(
     std::wcerr << L"[SkyrimDiagHelper] Hang dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Hang dump failed: " + dumpErr);
   } else {
+    dumpWritten = true;
     std::wcout << L"[SkyrimDiagHelper] Hang dump written: " << dumpPath << L"\n";
     std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
     std::wcout << L"[SkyrimDiagHelper] Hang decision: secondsSinceHeartbeat=" << decision2.secondsSinceHeartbeat
@@ -356,12 +358,6 @@ HangTickResult HandleHangTick(
     } else if (viewerNow && cfg.autoAnalyzeDump) {
       AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
     }
-    skydiag::helper::RetentionLimits limits{};
-    limits.maxCrashDumps = cfg.maxCrashDumps;
-    limits.maxHangDumps = cfg.maxHangDumps;
-    limits.maxManualDumps = cfg.maxManualDumps;
-    limits.maxEtwTraces = cfg.maxEtwTraces;
-    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
   }
 
   if (etwStarted) {
@@ -387,9 +383,17 @@ HangTickResult HandleHangTick(
     }
   }
 
+  if (dumpWritten) {
+    skydiag::helper::RetentionLimits limits{};
+    limits.maxCrashDumps = cfg.maxCrashDumps;
+    limits.maxHangDumps = cfg.maxHangDumps;
+    limits.maxManualDumps = cfg.maxManualDumps;
+    limits.maxEtwTraces = cfg.maxEtwTraces;
+    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+  }
+
   state->hangCapturedThisEpisode = true;
   return HangTickResult::kContinue;
 }
 
 }  // namespace skydiag::helper::internal
-

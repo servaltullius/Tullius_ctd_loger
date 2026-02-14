@@ -13,6 +13,7 @@
 #include "SkyrimDiagHelper/CrashRecapturePolicy.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
+#include "SkyrimDiagHelper/Retention.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -186,6 +187,7 @@ void FinalizePendingCrashAnalysisIfReady(
     unknownStreak,
     cfg.autoRecaptureUnknownBucketThreshold,
     cfg.dumpMode);
+  bool fullDumpWritten = false;
   if (recaptureDecision.shouldRecaptureFullDump) {
     std::wstring aliveErr;
     if (IsProcessStillAlive(proc.process, &aliveErr)) {
@@ -204,6 +206,7 @@ void FinalizePendingCrashAnalysisIfReady(
             &fullDumpErr)) {
         AppendLogLine(outBase, L"Crash full recapture failed: " + fullDumpErr);
       } else {
+        fullDumpWritten = true;
         AppendLogLine(outBase, L"Crash full recapture written: " + fullDumpPath);
         StartDumpToolHeadlessIfConfigured(cfg, fullDumpPath, outBase);
       }
@@ -212,8 +215,16 @@ void FinalizePendingCrashAnalysisIfReady(
     }
   }
 
+  if (fullDumpWritten) {
+    skydiag::helper::RetentionLimits limits{};
+    limits.maxCrashDumps = cfg.maxCrashDumps;
+    limits.maxHangDumps = cfg.maxHangDumps;
+    limits.maxManualDumps = cfg.maxManualDumps;
+    limits.maxEtwTraces = cfg.maxEtwTraces;
+    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+  }
+
   ClearPendingCrashAnalysis(task);
 }
 
 }  // namespace skydiag::helper::internal
-

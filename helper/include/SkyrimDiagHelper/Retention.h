@@ -86,6 +86,33 @@ struct DatedFile {
   std::string ts;
 };
 
+inline bool HasDumpWithPrefixAndTimestamp(
+  const std::filesystem::path& dir,
+  std::string_view dumpPrefix,
+  std::string_view ts)
+{
+  std::error_code ec;
+  for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!ent.is_regular_file(ec)) {
+      continue;
+    }
+    const auto p = ent.path();
+    const auto name = p.filename().string();
+    if (!StartsWith(name, dumpPrefix) || !EndsWith(name, ".dmp")) {
+      continue;
+    }
+    const auto stem = p.stem().string();
+    auto tsOpt = TryExtractTimestampToken(stem);
+    if (tsOpt && *tsOpt == ts) {
+      return true;
+    }
+  }
+  return false;
+}
+
 inline std::string_view IncidentKindForDumpPrefix(std::string_view dumpPrefix)
 {
   if (dumpPrefix == "SkyrimDiag_Crash_") {
@@ -170,7 +197,7 @@ inline void PruneDumpFiles(
       std::filesystem::remove(etl, ec);
     }
 
-    if (!incidentKind.empty()) {
+    if (!incidentKind.empty() && !HasDumpWithPrefixAndTimestamp(dir, dumpPrefix, dumps[i].ts)) {
       const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dumps[i].ts + ".json");
       std::filesystem::remove(manifest, ec);
     }
