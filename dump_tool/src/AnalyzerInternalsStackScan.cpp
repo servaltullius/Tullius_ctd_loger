@@ -142,7 +142,7 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     });
     if (fallbackIt != rows.end()) {
       const std::wstring topLower = WideLower(modules[rows[0].modIndex].filename);
-      const bool topIsCrashLogger = (topLower == L"crashloggersse.dll");
+      const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
       const bool nearTie = (fallbackIt->score + 8u) >= rows[0].score;
       if (topIsCrashLogger || nearTie) {
         std::iter_swap(rows.begin(), fallbackIt);

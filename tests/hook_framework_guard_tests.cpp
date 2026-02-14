@@ -40,6 +40,10 @@ int main()
     "Stackwalk scoring must explicitly treat CrashLogger as a special hook-framework false-positive case.");
   AssertContains(
     stackwalkScoring,
+    "crashlogger.dll",
+    "Stackwalk scoring must include CrashLogger.dll alias handling.");
+  AssertContains(
+    stackwalkScoring,
     "promotedHookTop",
     "Stackwalk scoring must keep non-hook promotion marker logic.");
 
@@ -58,6 +62,10 @@ int main()
     "Stack-scan scoring must explicitly treat CrashLogger as a special hook-framework false-positive case.");
   AssertContains(
     stackScan,
+    "crashlogger.dll",
+    "Stack-scan scoring must include CrashLogger.dll alias handling.");
+  AssertContains(
+    stackScan,
     "is_known_hook_framework",
     "Stack-scan scoring must keep hook-framework confidence downgrade logic.");
 
@@ -66,10 +74,13 @@ int main()
     "hasNonHookSuspect",
     "Summary builder must distinguish non-hook stack candidates when fault module is a hook framework.");
   AssertContains(
+    summary,
+    "topSuspectIsHookFramework",
+    "Summary builder must avoid over-blaming hook-framework top suspects for game/system module crashes.");
+  AssertContains(
     rec,
     "preferStackCandidateOverFault",
     "Recommendations must prefer stack candidates over hook-framework fault modules.");
 
   return 0;
 }
-

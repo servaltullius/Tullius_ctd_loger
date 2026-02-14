@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   SkyrimDiag
-  VERSION 0.2.28
+  VERSION 0.2.29
   LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)

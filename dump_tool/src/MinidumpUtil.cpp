@@ -33,6 +33,7 @@ std::vector<std::wstring> DefaultHookFrameworkDlls()
     L"hdtssephysics.dll",
     L"hdtsmp64.dll",
     L"storageutil.dll",
+    L"crashlogger.dll",
     L"crashloggersse.dll",
     L"skse64_loader.dll",
     L"skse64_steam_loader.dll",

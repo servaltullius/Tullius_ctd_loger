@@ -34,6 +34,7 @@ static void TestKnownDllsPresent()
 
   // Original hardcoded core list.
   assert(content.find("enginefixes.dll") != std::string::npos);
+  assert(content.find("crashlogger.dll") != std::string::npos);
   assert(content.find("crashloggersse.dll") != std::string::npos);
   assert(content.find("po3_tweaks.dll") != std::string::npos);
   assert(content.find("hdtsmp64.dll") != std::string::npos);
@@ -60,4 +61,3 @@ int main()
   TestEvidenceBuilderDelegatesToMinidumpUtil();
   return 0;
 }
-

@@ -19,10 +19,20 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const auto& wct = ctx.wct;
   const std::wstring& suspectBasis = ctx.suspectBasis;
   const bool hasStackCandidate = !r.suspects.empty();
+  const SuspectItem* firstNonHookStackCandidate = nullptr;
+  if (hasStackCandidate) {
+    for (const auto& s : r.suspects) {
+      if (!IsKnownHookFramework(s.module_filename)) {
+        firstNonHookStackCandidate = &s;
+        break;
+      }
+    }
+  }
+  const bool hasNonHookStackCandidate = (firstNonHookStackCandidate != nullptr);
+  const bool topStackCandidateIsHookFramework = hasStackCandidate && IsKnownHookFramework(r.suspects[0].module_filename);
   const bool preferStackCandidateOverFault =
     ctx.isHookFramework &&
-    hasStackCandidate &&
-    !IsKnownHookFramework(r.suspects[0].module_filename);
+    hasNonHookStackCandidate;
 
   if (r.signature_match.has_value()) {
     for (const auto& rec : r.signature_match->recommendations) {
@@ -81,8 +91,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : (L"[유력 후보] 동일 크래시가 반복되면 '" + r.inferred_mod_name + L"' 모드(또는 해당 모드의 SKSE 플러그인 DLL)를 비활성화 후 재현 여부 확인"));
   }
 
-  if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && !r.suspects.empty()) {
-    const auto& s0 = r.suspects[0];
+  if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
+    const auto& s0 = *firstNonHookStackCandidate;
     if (!s0.inferred_mod_name.empty()) {
       r.recommendations.push_back(en
         ? (L"[Top suspect] " + suspectBasis + L" candidate: reproduce after updating/reinstalling '" + s0.inferred_mod_name + L"'.")
@@ -95,6 +105,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? (L"[Top suspect] " + suspectBasis + L" candidate DLL: " + s0.module_filename + L" — check the providing mod first.")
         : (L"[유력 후보] " + suspectBasis + L" 기반 후보 DLL: " + s0.module_filename + L" — 포함된 모드를 우선 점검"));
     }
+  } else if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
+    r.recommendations.push_back(en
+      ? L"[Top suspect] The current top stack candidate is a known hook framework DLL. Treat it as a victim location first and prioritize non-hook candidates/resources/conflicts."
+      : L"[유력 후보] 현재 스택 1순위 후보가 알려진 훅 프레임워크 DLL입니다. 우선은 피해 위치로 보고, 비-훅 후보/리소스/충돌 단서를 먼저 점검하세요.");
   }
 
   if (!r.resources.empty()) {

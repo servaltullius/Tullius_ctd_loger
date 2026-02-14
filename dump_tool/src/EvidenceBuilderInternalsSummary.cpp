@@ -24,18 +24,40 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const std::wstring& suspectBasis = ctx.suspectBasis;
 
   const bool hasSuspect = !r.suspects.empty();
-  std::wstring suspectWho;
-  std::wstring suspectConf;
+  const SuspectItem* topSuspect = hasSuspect ? &r.suspects[0] : nullptr;
+  const SuspectItem* firstNonHookSuspect = nullptr;
   if (hasSuspect) {
-    const auto& s0 = r.suspects[0];
-    suspectConf = s0.confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : s0.confidence;
-    if (!s0.inferred_mod_name.empty()) {
-      suspectWho = s0.inferred_mod_name + L" (" + s0.module_filename + L")";
-    } else {
-      suspectWho = s0.module_filename;
+    for (const auto& s : r.suspects) {
+      if (!IsKnownHookFramework(s.module_filename)) {
+        firstNonHookSuspect = &s;
+        break;
+      }
     }
   }
-  const bool hasNonHookSuspect = hasSuspect && !IsKnownHookFramework(r.suspects[0].module_filename);
+
+  auto suspectDisplayName = [&](const SuspectItem& s) {
+    if (!s.inferred_mod_name.empty()) {
+      return s.inferred_mod_name + L" (" + s.module_filename + L")";
+    }
+    return s.module_filename;
+  };
+
+  std::wstring suspectWho;
+  std::wstring suspectConf;
+  if (topSuspect) {
+    suspectConf = topSuspect->confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : topSuspect->confidence;
+    suspectWho = suspectDisplayName(*topSuspect);
+  }
+
+  std::wstring nonHookSuspectWho;
+  std::wstring nonHookSuspectConf;
+  if (firstNonHookSuspect) {
+    nonHookSuspectConf =
+      firstNonHookSuspect->confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : firstNonHookSuspect->confidence;
+    nonHookSuspectWho = suspectDisplayName(*firstNonHookSuspect);
+  }
+  const bool hasNonHookSuspect = (firstNonHookSuspect != nullptr);
+  const bool topSuspectIsHookFramework = (topSuspect != nullptr) && IsKnownHookFramework(topSuspect->module_filename);
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -57,12 +79,12 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           ? L"Looks like a snapshot dump (not a crash/hang). Useful for state inspection, not root cause. (Confidence: High)"
           : L"스냅샷 덤프(크래시/행 아님)로 보입니다. 원인 판정용이 아니라 '상태 확인'에 유용합니다. (신뢰도: 높음)");
   } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
-    if (hasNonHookSuspect && !suspectWho.empty()) {
+    if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in " + who + L" (known hook framework), but " + suspectBasis + L" points to " + suspectWho +
-            L". (Confidence: " + suspectConf + L")")
-        : (L"크래시 위치가 " + who + L"(알려진 훅 프레임워크)로 보고되었지만, " + suspectBasis + L"에서는 " + suspectWho +
-            L" 가 유력합니다. (신뢰도: " + suspectConf + L")");
+        ? (L"Crash is reported in " + who + L" (known hook framework), but " + suspectBasis + L" points to " + nonHookSuspectWho +
+            L". (Confidence: " + nonHookSuspectConf + L")")
+        : (L"크래시 위치가 " + who + L"(알려진 훅 프레임워크)로 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
+            L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
     } else {
       summary = en
         ? (L"Top suspect: " + who + L" (known hook framework; may be a victim of another mod's corruption) — the crash appears to occur inside this DLL. (Confidence: Medium)")
@@ -73,12 +95,18 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       ? (L"Top suspect: " + who + L" — the crash appears to occur inside this DLL. (Confidence: High)")
       : (L"유력 후보: " + who + L" — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 높음)");
   } else if (hasModule && isSystem) {
-    if (hasSuspect && !suspectWho.empty()) {
+    if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in a Windows system DLL, but " + suspectBasis + L" points to " + suspectWho +
-            L". (Confidence: " + suspectConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + suspectBasis + L"에서는 " + suspectWho +
-            L" 가 유력합니다. (신뢰도: " + suspectConf + L")");
+        ? (L"Crash is reported in a Windows system DLL, but " + suspectBasis + L" points to " + nonHookSuspectWho +
+            L". (Confidence: " + nonHookSuspectConf + L")")
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
+            L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
+    } else if (hasSuspect && !suspectWho.empty()) {
+      summary = en
+        ? (L"Crash is reported in a Windows system DLL, and the top stack candidate is " + suspectWho +
+            L". This can still be a victim location rather than the root cause. (Confidence: Low)")
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었고, 스택 후보 1순위는 " + suspectWho +
+            L" 입니다. 이 경우에도 실제 원인은 다른 DLL/모드일 수 있습니다. (신뢰도: 낮음)");
     } else if (r.exc_code == 0xE06D7363u) {
       summary = en
         ? L"Reported in a Windows system DLL with 0xE06D7363 (C++ exception). Could be normal throw/catch; confirm this was an actual CTD. (Confidence: Low)"
@@ -89,11 +117,23 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : L"크래시가 Windows 시스템 DLL에서 보고되었습니다. 실제 원인은 다른 모드/DLL일 수 있습니다. (신뢰도: 낮음)";
     }
   } else if (hasModule && isGameExe) {
-    if (hasSuspect && !suspectWho.empty()) {
+    if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in the game executable, but " + suspectBasis + L" points to " + suspectWho +
+        ? (L"Crash is reported in the game executable, but " + suspectBasis + L" points to " + nonHookSuspectWho +
+            L". (Confidence: " + nonHookSuspectConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)로 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
+            L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
+    } else if (topSuspectIsHookFramework && !suspectWho.empty()) {
+      summary = en
+        ? (L"Crash is reported in the game executable, and the top stack candidate is " + suspectWho +
+            L" (known hook framework). This DLL is often a victim frame owner, so avoid treating it as root cause by itself. (Confidence: Low)")
+        : (L"크래시 위치가 게임 본체(EXE)로 보고되었고, 스택 후보 1순위는 " + suspectWho +
+            L"(알려진 훅 프레임워크)입니다. 이 DLL은 피해 프레임 소유자로 자주 나타나므로 단독 원인으로 단정하기 어렵습니다. (신뢰도: 낮음)");
+    } else if (hasSuspect && !suspectWho.empty()) {
+      summary = en
+        ? (L"Crash is reported in the game executable, and " + suspectBasis + L" points to " + suspectWho +
             L". (Confidence: " + suspectConf + L")")
-        : (L"크래시 위치가 게임 본체(EXE)로 보고되었지만, " + suspectBasis + L"에서는 " + suspectWho +
+        : (L"크래시 위치가 게임 본체(EXE)로 보고되었고, " + suspectBasis + L"에서는 " + suspectWho +
             L" 가 유력합니다. (신뢰도: " + suspectConf + L")");
     } else {
       summary = en

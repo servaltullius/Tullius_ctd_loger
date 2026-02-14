@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.29 (2026-02-15)
+
+### 수정
+- DumpTool: `CrashLogger.dll`(구/별칭 파일명)도 `crashloggersse.dll`과 동일하게 훅 프레임워크 목록으로 분류하도록 보완. 기존에는 별칭이 목록에 없어 스택 후보 1순위로 과도 지목되는 오탐 케이스가 발생할 수 있었음.
+- DumpTool: 스택 기반 후보 승격 로직에서 CrashLogger 특수 처리에 `CrashLogger.dll` 별칭을 추가하여, 비-훅 후보가 있을 때 피해 프레임 소유자를 원인으로 과도 지목하지 않도록 개선.
+- 요약/권장 문구: `SkyrimSE.exe` 또는 시스템 모듈 크래시에서 스택 1순위가 훅 프레임워크(`CrashLogger.dll` 포함)인 경우, 단독 원인으로 단정하지 않고 "피해 위치 가능성"을 명시하도록 보수화.
+- 권장 조치: 비-훅 스택 후보가 존재하면 해당 후보를 우선 안내하고, 훅 프레임워크 후보만 남을 때는 리소스/충돌/비-훅 단서 우선 점검 가이드를 제공.
+
+### 테스트
+- `hook_frameworks.json`에 `crashlogger.dll` 항목 존재를 검증하는 테스트 추가.
+- 훅 프레임워크 가드 테스트에 `CrashLogger.dll` 별칭 처리/요약 보수화 가드 케이스 추가.
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과.
+
 ## v0.2.28 (2026-02-15)
 
 ### 수정
