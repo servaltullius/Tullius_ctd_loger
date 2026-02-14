@@ -46,44 +46,20 @@ bool HandleCrashEventTick(
     return false;
   }
 
-  // Guard against shutdown exceptions: during normal process exit, DLL
-  // cleanup can raise exceptions that the VEH intercepts.  If the process
-  // exits within a short window with exit code 0, treat it as a benign
-  // shutdown exception rather than a real crash.
-  if (proc.process) {
-    const DWORD pw = WaitForSingleObject(proc.process, 3000);
-    if (pw == WAIT_OBJECT_0) {
-      DWORD exitCode = STILL_ACTIVE;
-      GetExitCodeProcess(proc.process, &exitCode);
-      if (exitCode == 0) {
-        AppendLogLine(outBase, L"Crash event received but process exited normally (exit_code=0); "
-          L"skipping crash dump (likely shutdown exception).");
-        return false;
-      }
-      // Non-zero exit code: process crashed and terminated. Proceed with dump.
-    }
-    // WAIT_TIMEOUT: process still running.  Could be a real crash (main thread
-    // stuck) or a handled first-chance exception (game continues normally).
-    // Distinguish by checking whether the main-thread heartbeat advances.
-    if (pw == WAIT_TIMEOUT && proc.shm) {
-      const auto hb0 = proc.shm->header.last_heartbeat_qpc;
-      Sleep(1500);
-      const auto hb1 = proc.shm->header.last_heartbeat_qpc;
-      if (hb1 > hb0) {
-        AppendLogLine(outBase, L"Crash event received but heartbeat is still advancing (hb0="
-          + std::to_wstring(hb0) + L" hb1=" + std::to_wstring(hb1)
-          + L"); skipping crash dump (likely handled first-chance exception).");
-        return false;
-      }
-      // Heartbeat stalled: real crash / freeze. Proceed with dump.
-    }
-  }
-
   if (crashCaptured && *crashCaptured) {
     AppendLogLine(outBase, L"Crash event signaled again; ignoring (already captured).");
     return true;
   }
 
+  // ---- Dump-first strategy ------------------------------------------------
+  // Write the dump IMMEDIATELY while the process is (likely) still alive.
+  // Filtering for false positives (shutdown exceptions, handled first-chance
+  // exceptions) happens AFTER the dump, deleting it if unnecessary.
+  //
+  // Previous approach waited up to 4.5 s before dumping, which caused a race:
+  // fast-terminating crashes killed the process before MiniDumpWriteDump ran,
+  // producing 0-byte files.
+  // --------------------------------------------------------------------------
   const auto ts = Timestamp();
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
   const auto etwPath = outBase / (L"SkyrimDiag_Crash_" + ts + L".etl");
@@ -93,18 +69,73 @@ bool HandleCrashEventTick(
   }
 
   std::wstring dumpErr;
-  if (!skydiag::helper::WriteDumpWithStreams(
-        proc.process,
-        proc.pid,
-        dumpPath,
-        proc.shm,
-        proc.shmSize,
-        /*wctJsonUtf8=*/{},
-        /*isCrash=*/true,
-        cfg.dumpMode,
-        &dumpErr)) {
+  const bool dumpOk = skydiag::helper::WriteDumpWithStreams(
+    proc.process,
+    proc.pid,
+    dumpPath,
+    proc.shm,
+    proc.shmSize,
+    /*wctJsonUtf8=*/{},
+    /*isCrash=*/true,
+    cfg.dumpMode,
+    &dumpErr);
+
+  if (!dumpOk) {
+    AppendLogLine(outBase, L"Crash dump failed: " + dumpErr);
     std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
-  } else {
+    // Remove the empty/partial dump file so it doesn't confuse users.
+    std::error_code ec;
+    std::filesystem::remove(dumpPath, ec);
+    // Even though the dump failed, still mark as captured so we don't
+    // retry on subsequent crash events for the same incident.
+    if (crashCaptured) {
+      *crashCaptured = true;
+    }
+    return true;
+  }
+
+  // ---- Post-dump false-positive filtering ----------------------------------
+  // Now that the dump is safely written, check whether this was actually a
+  // benign event and delete the dump if so.
+  // --------------------------------------------------------------------------
+  if (proc.process) {
+    // (1) Shutdown-exception filter: during normal exit, DLL cleanup can raise
+    //     exceptions that the VEH intercepts.  If the process exits with
+    //     exit_code 0, treat it as benign.
+    const DWORD pw = WaitForSingleObject(proc.process, 3000);
+    if (pw == WAIT_OBJECT_0) {
+      DWORD exitCode = STILL_ACTIVE;
+      GetExitCodeProcess(proc.process, &exitCode);
+      if (exitCode == 0) {
+        AppendLogLine(outBase, L"Crash event received but process exited normally (exit_code=0); "
+          L"deleting dump (likely shutdown exception).");
+        std::error_code ec;
+        std::filesystem::remove(dumpPath, ec);
+        return false;
+      }
+      // Non-zero exit code: real crash. Keep the dump.
+    }
+
+    // (2) Handled first-chance exception filter: if the process is still
+    //     running and the main-thread heartbeat advances, the game recovered.
+    if (pw == WAIT_TIMEOUT && proc.shm) {
+      const auto hb0 = proc.shm->header.last_heartbeat_qpc;
+      Sleep(1500);
+      const auto hb1 = proc.shm->header.last_heartbeat_qpc;
+      if (hb1 > hb0) {
+        AppendLogLine(outBase, L"Crash event received but heartbeat is still advancing (hb0="
+          + std::to_wstring(hb0) + L" hb1=" + std::to_wstring(hb1)
+          + L"); deleting dump (likely handled first-chance exception).");
+        std::error_code ec;
+        std::filesystem::remove(dumpPath, ec);
+        return false;
+      }
+      // Heartbeat stalled: real crash / freeze. Keep the dump.
+    }
+  }
+
+  // ---- Dump is valid — proceed with post-processing ------------------------
+  {
     std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
 
     const auto stateFlags = proc.shm->header.state_flags;
@@ -204,12 +235,12 @@ bool HandleCrashEventTick(
     limits.maxManualDumps = cfg.maxManualDumps;
     limits.maxEtwTraces = cfg.maxEtwTraces;
     skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
-  }
 
-  if (crashCaptured) {
-    *crashCaptured = true;
+    if (crashCaptured) {
+      *crashCaptured = true;
+    }
+    AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
   }
-  AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
   return true;
 }
 
