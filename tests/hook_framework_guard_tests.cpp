@@ -87,6 +87,10 @@ int main()
     "skse64_",
     "Minidump util must keep SKSE runtime-pattern detection.");
   AssertContains(
+    minidumpUtil,
+    "sl.interposer.dll",
+    "Minidump util fallback hook-framework list must include Streamline interposer alias.");
+  AssertContains(
     stackScan,
     "is_known_hook_framework",
     "Stack-scan scoring must keep hook-framework confidence downgrade logic.");

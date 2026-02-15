@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -22,6 +23,7 @@
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagHelper/Retention.h"
+#include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
 
@@ -100,6 +102,10 @@ bool HandleCrashEventTick(
     return true;
   }
 
+  const std::uint32_t stateFlagsAtCrash = proc.shm ? proc.shm->header.state_flags : 0u;
+  const bool inMenuAtCrash = (stateFlagsAtCrash & skydiag::kState_InMenu) != 0u;
+  bool suppressCrashAutomationForLikelyShutdownException = false;
+
   // ---- Post-dump false-positive filtering ----------------------------------
   // Now that the dump is safely written, check whether this was actually a
   // benign event and delete the dump if so.
@@ -119,7 +125,18 @@ bool HandleCrashEventTick(
         std::filesystem::remove(dumpPath, ec);
         return false;
       }
-      // Non-zero exit code: real crash. Keep the dump.
+      // Non-zero exit code near menu/shutdown can still be a benign quit path.
+      // Keep the dump for manual forensics, but suppress aggressive auto-actions.
+      if (inMenuAtCrash) {
+        suppressCrashAutomationForLikelyShutdownException = true;
+        AppendLogLine(
+          outBase,
+          L"Crash event received near menu/shutdown boundary (exit_code="
+            + std::to_wstring(exitCode)
+            + L", state_flags="
+            + std::to_wstring(stateFlagsAtCrash)
+            + L"); keeping dump but suppressing crash auto-actions.");
+      }
     }
 
     // (2) Handled first-chance exception filter: if the process is still
@@ -177,7 +194,7 @@ bool HandleCrashEventTick(
   {
     std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
 
-    const auto stateFlags = proc.shm->header.state_flags;
+    const auto stateFlags = stateFlagsAtCrash;
 
     bool etwStarted = false;
     std::string etwStatus = cfg.enableEtwCaptureOnCrash ? "start_failed" : "disabled";
@@ -224,7 +241,7 @@ bool HandleCrashEventTick(
     }
 
     bool crashAnalysisQueued = false;
-    if (cfg.autoAnalyzeDump && cfg.enableAutoRecaptureOnUnknownCrash) {
+    if (cfg.autoAnalyzeDump && cfg.enableAutoRecaptureOnUnknownCrash && !suppressCrashAutomationForLikelyShutdownException) {
       std::wstring analyzeQueueErr;
       if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, pendingCrashAnalysis, &analyzeQueueErr)) {
         crashAnalysisQueued = true;
@@ -232,10 +249,12 @@ bool HandleCrashEventTick(
       } else {
         AppendLogLine(outBase, L"Crash headless analysis queue failed: " + analyzeQueueErr);
       }
+    } else if (cfg.autoAnalyzeDump && suppressCrashAutomationForLikelyShutdownException) {
+      AppendLogLine(outBase, L"Crash headless analysis suppressed for likely shutdown/menu exception.");
     }
 
     bool viewerNow = false;
-    if (cfg.autoOpenViewerOnCrash) {
+    if (cfg.autoOpenViewerOnCrash && !suppressCrashAutomationForLikelyShutdownException) {
       if (!cfg.autoOpenCrashOnlyIfProcessExited) {
         StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
         viewerNow = true;
@@ -258,14 +277,18 @@ bool HandleCrashEventTick(
       } else {
         AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
       }
+    } else if (cfg.autoOpenViewerOnCrash && suppressCrashAutomationForLikelyShutdownException) {
+      AppendLogLine(outBase, L"Crash viewer auto-open suppressed for likely shutdown/menu exception.");
     }
 
-    if (!crashAnalysisQueued) {
+    if (!crashAnalysisQueued && !suppressCrashAutomationForLikelyShutdownException) {
       if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
         StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
       } else if (viewerNow && cfg.autoAnalyzeDump) {
         AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
       }
+    } else if (cfg.autoAnalyzeDump && suppressCrashAutomationForLikelyShutdownException) {
+      AppendLogLine(outBase, L"Skipped fallback headless analysis for likely shutdown/menu exception.");
     }
 
     skydiag::helper::RetentionLimits limits{};

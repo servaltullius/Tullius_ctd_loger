@@ -83,6 +83,7 @@ std::vector<std::wstring> DefaultHookFrameworkDlls()
     L"storageutil.dll",
     L"crashlogger.dll",
     L"crashloggersse.dll",
+    L"sl.interposer.dll",
     L"skse64.dll",
     L"skse64_loader.dll",
     L"skse64_steam_loader.dll",

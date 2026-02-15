@@ -46,6 +46,15 @@ int main()
     "kRequiredHeartbeatAdvances = 2",
     "Handled-exception filter must require multiple heartbeat advances before deleting a dump.");
 
+  AssertContains(
+    crashCapture,
+    "kState_InMenu",
+    "Crash capture must reference in-menu state to suppress shutdown-boundary false positives.");
+
+  AssertContains(
+    crashCapture,
+    "suppressCrashAutomationForLikelyShutdownException",
+    "Crash capture must keep a dedicated suppression flag for shutdown/menu boundary auto-actions.");
+
   return 0;
 }
-

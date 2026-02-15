@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.33 (2026-02-15)
+
+### 수정
+- DumpTool: `sl.interposer.dll`(Streamline/DLSS interposer)을 훅 프레임워크 목록으로 분류하도록 보강. 이제 `sl.interposer.dll`을 단독 원인으로 과도 지목하는 오탐을 줄이고, 비-훅 후보/리소스 충돌 단서를 우선 보도록 유도.
+- Helper: 크래시 이벤트 직후 3초 내 프로세스가 종료되고, 크래시 시점 상태가 메뉴(`kState_InMenu`)였던 경우를 종료 경계 케이스로 간주하여 자동 액션을 억제. 덤프는 보존하되 자동 뷰어 팝업/자동 headless 분석을 건너뛰어 "게임 종료했는데 크래시 창이 뜨는" 피드백을 완화.
+- Helper: incident manifest의 `state_flags`를 크래시 시점 스냅샷으로 고정해 종료 직후 상태 변동으로 인한 맥락 왜곡을 줄임.
+
+### 테스트
+- 훅 프레임워크 JSON/가드 테스트에 `sl.interposer.dll` 회귀 방지 검증 추가.
+- 크래시 오탐 가드 테스트에 메뉴 경계 억제 플래그(`suppressCrashAutomationForLikelyShutdownException`) 검증 추가.
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(29/29).
+
 ## v0.2.32 (2026-02-15)
 
 ### 수정
