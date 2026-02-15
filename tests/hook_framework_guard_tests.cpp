@@ -44,6 +44,10 @@ int main()
     "Stackwalk scoring must include CrashLogger.dll alias handling.");
   AssertContains(
     stackwalkScoring,
+    "topIsSkseLoader",
+    "Stackwalk scoring must include SKSE loader alias handling.");
+  AssertContains(
+    stackwalkScoring,
     "promotedHookTop",
     "Stackwalk scoring must keep non-hook promotion marker logic.");
 
@@ -64,6 +68,10 @@ int main()
     stackScan,
     "crashlogger.dll",
     "Stack-scan scoring must include CrashLogger.dll alias handling.");
+  AssertContains(
+    stackScan,
+    "topIsSkseLoader",
+    "Stack-scan scoring must include SKSE loader alias handling.");
   AssertContains(
     stackScan,
     "is_known_hook_framework",

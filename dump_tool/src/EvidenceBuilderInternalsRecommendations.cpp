@@ -33,6 +33,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool preferStackCandidateOverFault =
     ctx.isHookFramework &&
     hasNonHookStackCandidate;
+  const bool allowFaultModuleTopSuspectRecommendations =
+    !ctx.isHookFramework || hasNonHookStackCandidate;
 
   if (r.signature_match.has_value()) {
     for (const auto& rec : r.signature_match->recommendations) {
@@ -82,7 +84,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
-  if (!r.inferred_mod_name.empty() && !preferStackCandidateOverFault) {
+  if (!r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? (L"[Top suspect] Reproduce after updating/reinstalling '" + r.inferred_mod_name + L"'.")
       : (L"[유력 후보] '" + r.inferred_mod_name + L"' 모드를 업데이트/재설치 후 재현 여부 확인"));
@@ -141,7 +143,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if (hasModule && !isSystem && !isGameExe && !preferStackCandidateOverFault) {
+  if (hasModule && !isSystem && !isGameExe && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? L"[Top suspect] Verify prerequisites/versions for the mod containing this DLL (SKSE / Address Library / game runtime)."
       : L"[유력 후보] 해당 DLL이 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전) 충족 여부 확인");

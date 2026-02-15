@@ -87,8 +87,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
     } else {
       summary = en
-        ? (L"Top suspect: " + who + L" (known hook framework; may be a victim of another mod's corruption) — the crash appears to occur inside this DLL. (Confidence: Medium)")
-        : (L"유력 후보: " + who + L" (알려진 훅 프레임워크; 다른 모드의 메모리 오염 피해자일 수 있음) — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 중간)");
+        ? (L"Crash is reported in " + who + L" (known hook framework). This is often a victim location, so avoid treating it as a standalone root cause. (Confidence: Low)")
+        : (L"크래시 위치가 " + who + L"(알려진 훅 프레임워크)로 보고되었습니다. 이 경우 피해 위치로 잡히는 일이 많아 단독 원인으로 단정하기 어렵습니다. (신뢰도: 낮음)");
     }
   } else if (hasModule && !isSystem && !isGameExe) {
     summary = en
