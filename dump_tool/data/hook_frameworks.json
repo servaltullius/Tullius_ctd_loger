@@ -9,6 +9,7 @@
     { "dll": "storageutil.dll", "reason_ko": "Papyrus 데이터 저장 인터셉트", "reason_en": "Papyrus data storage intercept" },
     { "dll": "crashlogger.dll", "reason_ko": "VEH 크래시 핸들러", "reason_en": "VEH crash handler" },
     { "dll": "crashloggersse.dll", "reason_ko": "VEH 크래시 핸들러", "reason_en": "VEH crash handler" },
+    { "dll": "skse64.dll", "reason_ko": "SKSE 런타임 훅", "reason_en": "SKSE runtime hooks" },
     { "dll": "skse64_loader.dll", "reason_ko": "SKSE 로더", "reason_en": "SKSE loader" },
     { "dll": "skse64_steam_loader.dll", "reason_ko": "SKSE Steam 로더", "reason_en": "SKSE Steam loader" },
     { "dll": "d3d11.dll", "reason_ko": "렌더링 인젝션 (ENB/ReShade)", "reason_en": "Rendering injection (ENB/ReShade)" },

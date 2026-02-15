@@ -25,12 +25,14 @@ int main()
   const auto stackwalkScoringPath = repoRoot / "dump_tool" / "src" / "AnalyzerInternalsStackwalkScoring.cpp";
   const auto stackwalkPath = repoRoot / "dump_tool" / "src" / "AnalyzerInternalsStackwalk.cpp";
   const auto stackScanPath = repoRoot / "dump_tool" / "src" / "AnalyzerInternalsStackScan.cpp";
+  const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
   const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsSummary.cpp";
   const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsRecommendations.cpp";
 
   const std::string stackwalkScoring = ReadAllText(stackwalkScoringPath);
   const std::string stackwalk = ReadAllText(stackwalkPath);
   const std::string stackScan = ReadAllText(stackScanPath);
+  const std::string minidumpUtil = ReadAllText(minidumpUtilPath);
   const std::string summary = ReadAllText(summaryPath);
   const std::string rec = ReadAllText(recPath);
 
@@ -44,8 +46,12 @@ int main()
     "Stackwalk scoring must include CrashLogger.dll alias handling.");
   AssertContains(
     stackwalkScoring,
-    "topIsSkseLoader",
-    "Stackwalk scoring must include SKSE loader alias handling.");
+    "topIsSkseRuntime",
+    "Stackwalk scoring must include SKSE runtime alias handling.");
+  AssertContains(
+    stackwalkScoring,
+    "IsSkseModule",
+    "Stackwalk scoring must use shared SKSE module detection.");
   AssertContains(
     stackwalkScoring,
     "promotedHookTop",
@@ -70,8 +76,16 @@ int main()
     "Stack-scan scoring must include CrashLogger.dll alias handling.");
   AssertContains(
     stackScan,
-    "topIsSkseLoader",
-    "Stack-scan scoring must include SKSE loader alias handling.");
+    "topIsSkseRuntime",
+    "Stack-scan scoring must include SKSE runtime alias handling.");
+  AssertContains(
+    stackScan,
+    "IsSkseModule",
+    "Stack-scan scoring must use shared SKSE module detection.");
+  AssertContains(
+    minidumpUtil,
+    "skse64_",
+    "Minidump util must keep SKSE runtime-pattern detection.");
   AssertContains(
     stackScan,
     "is_known_hook_framework",

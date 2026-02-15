@@ -43,6 +43,7 @@ std::wstring WideLower(std::wstring_view s);
 
 bool IsSystemishModule(std::wstring_view filename);
 bool IsGameExeModule(std::wstring_view filename);
+bool IsSkseModule(std::wstring_view filename);
 // Best-effort override for known hook framework DLL list.
 // If JSON load fails or provides no valid entries, built-in defaults stay active.
 void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath);

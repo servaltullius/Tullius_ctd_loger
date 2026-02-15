@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.31 (2026-02-15)
+
+### 수정
+- DumpTool: `skse64_loader.dll`/`skse64_steam_loader.dll`뿐 아니라 `skse64_1_6_1170.dll` 형태의 SKSE 런타임 DLL(`skse64_*.dll`)도 훅 프레임워크로 판별하도록 보완. 기존에는 런타임 DLL이 일반 원인 후보로 승격되는 오탐이 남아있을 수 있었음.
+- DumpTool: 콜스택/스택스캔의 훅 프레임워크 우선순위 완화 로직에서 SKSE 로더 별칭이 아니라 SKSE 런타임 패턴 공통 판별(`IsSkseModule`)을 사용하도록 변경.
+- 데이터: `hook_frameworks.json` 기본 목록에 `skse64.dll` 항목 추가.
+
+### 테스트
+- 훅 프레임워크 가드 테스트를 SKSE 런타임 공통 판별(`topIsSkseRuntime`, `IsSkseModule`) 기준으로 갱신.
+- `hook_frameworks.json` 테스트에 `skse64.dll` 항목 검증 추가.
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과.
+
 ## v0.2.30 (2026-02-15)
 
 ### 수정

@@ -24,6 +24,36 @@ std::wstring LowerCopy(std::wstring_view s)
   return out;
 }
 
+bool StartsWith(std::wstring_view s, std::wstring_view prefix)
+{
+  return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool EndsWith(std::wstring_view s, std::wstring_view suffix)
+{
+  return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool IsSkseModuleLower(std::wstring_view lower)
+{
+  if (lower == L"skse64_loader.dll" || lower == L"skse64_steam_loader.dll" || lower == L"skse64.dll") {
+    return true;
+  }
+
+  // SKSE runtime binaries usually follow skse64_<runtime>.dll, e.g. skse64_1_6_1170.dll.
+  if (StartsWith(lower, L"skse64_") && EndsWith(lower, L".dll")) {
+    const std::size_t runtimePos = std::size_t{ 7 };  // length of "skse64_"
+    if (lower.size() > runtimePos + std::size_t{ 4 }) {
+      const wchar_t c = lower[runtimePos];
+      if (c >= L'0' && c <= L'9') {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 std::vector<std::wstring> DefaultHookFrameworkDlls()
 {
   return {
@@ -35,6 +65,7 @@ std::vector<std::wstring> DefaultHookFrameworkDlls()
     L"storageutil.dll",
     L"crashlogger.dll",
     L"crashloggersse.dll",
+    L"skse64.dll",
     L"skse64_loader.dll",
     L"skse64_steam_loader.dll",
   };
@@ -338,6 +369,9 @@ void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath)
 bool IsKnownHookFramework(std::wstring_view filename)
 {
   const std::wstring lower = LowerCopy(filename);
+  if (IsSkseModuleLower(lower)) {
+    return true;
+  }
   std::lock_guard<std::mutex> lock(g_hookFrameworksMutex);
   for (const auto& m : g_hookFrameworkDlls) {
     if (lower == m) {
@@ -345,6 +379,11 @@ bool IsKnownHookFramework(std::wstring_view filename)
     }
   }
   return false;
+}
+
+bool IsSkseModule(std::wstring_view filename)
+{
+  return IsSkseModuleLower(LowerCopy(filename));
 }
 
 std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)

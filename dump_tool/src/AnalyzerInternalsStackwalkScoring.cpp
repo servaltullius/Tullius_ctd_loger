@@ -10,6 +10,7 @@ namespace skydiag::dump_tool::internal::stackwalk {
 namespace {
 
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
+using skydiag::dump_tool::minidump::IsSkseModule;
 using skydiag::dump_tool::minidump::ModuleInfo;
 using skydiag::dump_tool::minidump::WideLower;
 
@@ -114,9 +115,9 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     if (fallbackIt != rows.end()) {
       const std::wstring topLower = WideLower(modules[rows[0].modIndex].filename);
       const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
-      const bool topIsSkseLoader = (topLower == L"skse64_loader.dll" || topLower == L"skse64_steam_loader.dll");
+      const bool topIsSkseRuntime = IsSkseModule(topLower);
       const bool nearTie = (fallbackIt->score + 4u) >= rows[0].score;
-      if (topIsCrashLogger || topIsSkseLoader || nearTie) {
+      if (topIsCrashLogger || topIsSkseRuntime || nearTie) {
         std::iter_swap(rows.begin(), fallbackIt);
         promotedHookTop = true;
       }
