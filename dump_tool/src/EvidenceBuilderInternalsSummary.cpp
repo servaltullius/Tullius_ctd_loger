@@ -26,9 +26,15 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const bool hasSuspect = !r.suspects.empty();
   const SuspectItem* topSuspect = hasSuspect ? &r.suspects[0] : nullptr;
   const SuspectItem* firstNonHookSuspect = nullptr;
+  auto isActionableSuspect = [&](const SuspectItem& s) {
+    return !IsKnownHookFramework(s.module_filename) &&
+           !IsSystemishModule(s.module_filename) &&
+           !IsLikelyWindowsSystemModulePath(s.module_path) &&
+           !IsGameExeModule(s.module_filename);
+  };
   if (hasSuspect) {
     for (const auto& s : r.suspects) {
-      if (!IsKnownHookFramework(s.module_filename)) {
+      if (isActionableSuspect(s)) {
         firstNonHookSuspect = &s;
         break;
       }
@@ -58,6 +64,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   }
   const bool hasNonHookSuspect = (firstNonHookSuspect != nullptr);
   const bool topSuspectIsHookFramework = (topSuspect != nullptr) && IsKnownHookFramework(topSuspect->module_filename);
+  const bool topSuspectIsSystem = (topSuspect != nullptr) &&
+    (IsSystemishModule(topSuspect->module_filename) || IsLikelyWindowsSystemModulePath(topSuspect->module_path));
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -156,9 +164,17 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       }
 
       if (hasSuspect && !suspectWho.empty()) {
-        summary = en
-          ? (hangPrefix + L" Candidate: " + suspectWho + L" — based on " + suspectBasis + L" heuristic. (Confidence: " + suspectConf + L")")
-          : (hangPrefix + L" 후보: " + suspectWho + L" — " + suspectBasis + L" 기반 추정입니다. (신뢰도: " + suspectConf + L")");
+        if (topSuspectIsSystem) {
+          summary = en
+            ? (hangPrefix + L" Top stack candidate is a Windows system DLL (" + suspectWho +
+                L"), which is often a waiting/victim location. Dump alone is not enough to identify a root cause. (Confidence: Low)")
+            : (hangPrefix + L" 스택 후보 1순위가 Windows 시스템 DLL(" + suspectWho +
+                L")입니다. 이 경우 대기/피해 위치일 가능성이 높아 덤프만으로 원인을 단정하기 어렵습니다. (신뢰도: 낮음)");
+        } else {
+          summary = en
+            ? (hangPrefix + L" Candidate: " + suspectWho + L" — based on " + suspectBasis + L" heuristic. (Confidence: " + suspectConf + L")")
+            : (hangPrefix + L" 후보: " + suspectWho + L" — " + suspectBasis + L" 기반 추정입니다. (신뢰도: " + suspectConf + L")");
+        }
       } else {
         summary = en
           ? (hangPrefix + L" Dump alone isn't enough to identify a candidate. (Confidence: Low)")

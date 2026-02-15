@@ -114,20 +114,12 @@ std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, boo
 
 bool IsSystemishModule(std::wstring_view filename)
 {
-  std::wstring lower(filename);
-  std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+  return minidump::IsSystemishModule(filename);
+}
 
-  const wchar_t* k[] = {
-    L"kernelbase.dll", L"ntdll.dll",     L"kernel32.dll",  L"ucrtbase.dll",
-    L"msvcp140.dll",   L"vcruntime140.dll", L"vcruntime140_1.dll", L"concrt140.dll", L"user32.dll",
-    L"gdi32.dll",      L"combase.dll",   L"ole32.dll",     L"ws2_32.dll",
-  };
-  for (const auto* m : k) {
-    if (lower == m) {
-      return true;
-    }
-  }
-  return false;
+bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath)
+{
+  return minidump::IsLikelyWindowsSystemModulePath(modulePath);
 }
 
 bool IsGameExeModule(std::wstring_view filename)

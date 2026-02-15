@@ -42,6 +42,7 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
 std::wstring WideLower(std::wstring_view s);
 
 bool IsSystemishModule(std::wstring_view filename);
+bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath);
 bool IsGameExeModule(std::wstring_view filename);
 bool IsSkseModule(std::wstring_view filename);
 // Best-effort override for known hook framework DLL list.

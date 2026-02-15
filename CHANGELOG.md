@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.32 (2026-02-15)
+
+### 수정
+- Hang 분석 오탐 완화: `win32u.dll`을 시스템 DLL 목록에 추가하고, Windows 시스템 경로(`...\Windows\System32\...` 등) 기반 분류를 도입해 스택 후보에서 시스템 DLL이 유력 후보로 과도하게 노출되는 케이스를 줄임.
+- 요약 문구 보수화: hang 캡처에서 스택 1순위가 Windows 시스템 DLL일 경우, `유력 원인`으로 단정하지 않고 "대기/피해 위치 가능성, 덤프 단독으로 원인 단정 어려움"으로 안내하도록 조정.
+- 권장 조치 보수화: 스택 1순위가 시스템 DLL이면 모드 재설치/비활성화 단정 안내 대신 비-시스템 후보/리소스/충돌 단서 우선 점검을 유도.
+- `InferredMod` 안전장치: fault module이 시스템/게임 모듈이거나 추정명이 DLL/EXE 이름 형태일 때는 `inferred_mod_name`을 비워 잘못된 `InferredMod: win32u.dll` 출력 가능성을 차단.
+- CrashLogger 파서/후처리의 시스템 DLL 필터에도 `win32u.dll`을 반영해 결과 일관성을 개선.
+
+### 테스트
+- 시스템 DLL 오탐 회귀 방지 가드 테스트 추가(`tests/system_module_guard_tests.cpp`).
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(29/29).
+
 ## v0.2.31 (2026-02-15)
 
 ### 수정

@@ -20,9 +20,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const std::wstring& suspectBasis = ctx.suspectBasis;
   const bool hasStackCandidate = !r.suspects.empty();
   const SuspectItem* firstNonHookStackCandidate = nullptr;
+  auto isActionableStackCandidate = [&](const SuspectItem& s) {
+    return !IsKnownHookFramework(s.module_filename) &&
+           !IsSystemishModule(s.module_filename) &&
+           !IsLikelyWindowsSystemModulePath(s.module_path) &&
+           !IsGameExeModule(s.module_filename);
+  };
   if (hasStackCandidate) {
     for (const auto& s : r.suspects) {
-      if (!IsKnownHookFramework(s.module_filename)) {
+      if (isActionableStackCandidate(s)) {
         firstNonHookStackCandidate = &s;
         break;
       }
@@ -30,6 +36,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   }
   const bool hasNonHookStackCandidate = (firstNonHookStackCandidate != nullptr);
   const bool topStackCandidateIsHookFramework = hasStackCandidate && IsKnownHookFramework(r.suspects[0].module_filename);
+  const bool topStackCandidateIsSystem =
+    hasStackCandidate &&
+    (IsSystemishModule(r.suspects[0].module_filename) || IsLikelyWindowsSystemModulePath(r.suspects[0].module_path));
   const bool preferStackCandidateOverFault =
     ctx.isHookFramework &&
     hasNonHookStackCandidate;
@@ -111,6 +120,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a known hook framework DLL. Treat it as a victim location first and prioritize non-hook candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 알려진 훅 프레임워크 DLL입니다. 우선은 피해 위치로 보고, 비-훅 후보/리소스/충돌 단서를 먼저 점검하세요.");
+  } else if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
+    r.recommendations.push_back(en
+      ? L"[Top suspect] The current top stack candidate is a Windows system DLL. For hang captures this is often a waiting/victim location, so prioritize non-system candidates/resources/conflicts."
+      : L"[유력 후보] 현재 스택 1순위 후보가 Windows 시스템 DLL입니다. 행 캡처에서는 대기/피해 위치인 경우가 많으므로 비-시스템 후보/리소스/충돌 단서를 우선 점검하세요.");
   }
 
   if (!r.resources.empty()) {

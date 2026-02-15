@@ -159,6 +159,18 @@ set_tests_properties(skydiag_hook_framework_json_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
 
+add_executable(skydiag_system_module_guard_tests
+  system_module_guard_tests.cpp
+)
+
+set_target_properties(skydiag_system_module_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_system_module_guard_tests COMMAND skydiag_system_module_guard_tests)
+
 add_executable(skydiag_scoring_logic_tests
   scoring_logic_tests.cpp
 )

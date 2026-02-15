@@ -52,7 +52,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   const bool isSnapshotLike = !isCrashLike && !isHangLike;
   const bool isManualCapture = manualCaptureHint || (nameHang && isSnapshotLike);
 
-  const bool isSystem = IsSystemishModule(r.fault_module_filename);
+  const bool isSystem = IsSystemishModule(r.fault_module_filename) || IsLikelyWindowsSystemModulePath(r.fault_module_path);
   const bool hasModule = !r.fault_module_filename.empty();
   const bool isGameExe = IsGameExeModule(r.fault_module_filename);
   const bool isHookFramework = IsKnownHookFramework(r.fault_module_filename);

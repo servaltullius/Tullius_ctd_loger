@@ -40,6 +40,7 @@ namespace skydiag::dump_tool {
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::GetThreadStackBytes;
 using skydiag::dump_tool::minidump::IsGameExeModule;
+using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
 using skydiag::dump_tool::minidump::IsSystemishModule;
 using skydiag::dump_tool::minidump::LoadHookFrameworksFromJson;
 using skydiag::dump_tool::minidump::LoadAllModules;
@@ -163,6 +164,20 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         out.fault_module_offset = (out.exc_addr - m->base);
       }
       out.inferred_mod_name = InferMo2ModNameFromPath(out.fault_module_path);
+    }
+  }
+
+  // Guard against treating system/game binary names as inferred mod names.
+  if (!out.inferred_mod_name.empty()) {
+    const std::wstring inferredLower = WideLower(out.inferred_mod_name);
+    const std::wstring faultLower = WideLower(out.fault_module_filename);
+    const bool inferredLooksBinaryName =
+      (inferredLower.size() >= 4 && inferredLower.substr(inferredLower.size() - 4) == L".dll") ||
+      (inferredLower.size() >= 4 && inferredLower.substr(inferredLower.size() - 4) == L".exe");
+    const bool faultIsSystem =
+      IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
+    if (faultIsSystem || IsGameExeModule(out.fault_module_filename) || inferredLooksBinaryName || inferredLower == faultLower) {
+      out.inferred_mod_name.clear();
     }
   }
 
@@ -450,7 +465,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       input.fault_module = out.fault_module_filename;
       input.fault_offset = out.fault_module_offset;
       input.exc_address = out.exc_addr;
-      input.fault_module_is_system = IsSystemishModule(out.fault_module_filename);
+      input.fault_module_is_system =
+        IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
       input.callstack_modules.reserve(
         out.stackwalk_primary_frames.size() +
         out.crash_logger_top_modules.size() +

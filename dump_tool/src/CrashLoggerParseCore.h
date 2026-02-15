@@ -216,7 +216,7 @@ inline bool IsSystemishModuleAsciiLower(std::string_view filenameLower)
     "kernelbase.dll", "ntdll.dll",       "kernel32.dll",      "ucrtbase.dll",
     "msvcp140.dll",   "vcruntime140.dll","vcruntime140_1.dll","concrt140.dll",
     "user32.dll",     "gdi32.dll",       "combase.dll",       "ole32.dll",
-    "ws2_32.dll",
+    "ws2_32.dll",     "win32u.dll",
   };
   for (const auto* m : k) {
     if (filenameLower == m) {

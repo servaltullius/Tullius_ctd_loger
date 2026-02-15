@@ -39,6 +39,7 @@ bool IsSystemishModule(std::wstring_view filename)
     L"kernelbase.dll", L"ntdll.dll",     L"kernel32.dll",  L"ucrtbase.dll",
     L"msvcp140.dll",   L"vcruntime140.dll", L"vcruntime140_1.dll", L"concrt140.dll", L"user32.dll",
     L"gdi32.dll",      L"combase.dll",   L"ole32.dll",     L"ws2_32.dll",
+    L"win32u.dll",
   };
   for (const auto* m : k) {
     if (lower == m) {

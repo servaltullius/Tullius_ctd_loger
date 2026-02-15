@@ -54,6 +54,24 @@ bool IsSkseModuleLower(std::wstring_view lower)
   return false;
 }
 
+bool IsLikelyWindowsSystemModulePathLower(std::wstring_view lowerPath)
+{
+  if (lowerPath.empty()) {
+    return false;
+  }
+
+  // Typical module paths in dumps:
+  // - C:\Windows\System32\...
+  // - \??\C:\Windows\System32\...
+  // - \SystemRoot\System32\...
+  const bool hasWindowsSystemDir =
+    (lowerPath.find(L"\\windows\\system32\\") != std::wstring::npos) ||
+    (lowerPath.find(L"\\windows\\syswow64\\") != std::wstring::npos) ||
+    (lowerPath.find(L"\\windows\\winsxs\\") != std::wstring::npos) ||
+    (lowerPath.find(L"\\systemroot\\system32\\") != std::wstring::npos);
+  return hasWindowsSystemDir;
+}
+
 std::vector<std::wstring> DefaultHookFrameworkDlls()
 {
   return {
@@ -309,6 +327,7 @@ bool IsSystemishModule(std::wstring_view filename)
     L"kernelbase.dll", L"ntdll.dll",     L"kernel32.dll",  L"ucrtbase.dll",
     L"msvcp140.dll",   L"vcruntime140.dll", L"vcruntime140_1.dll", L"concrt140.dll", L"user32.dll",
     L"gdi32.dll",      L"combase.dll",   L"ole32.dll",     L"ws2_32.dll",
+    L"win32u.dll",
   };
   for (const auto* m : k) {
     if (lower == m) {
@@ -316,6 +335,12 @@ bool IsSystemishModule(std::wstring_view filename)
     }
   }
   return false;
+}
+
+bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath)
+{
+  const std::wstring lower = LowerCopy(modulePath);
+  return IsLikelyWindowsSystemModulePathLower(lower);
 }
 
 bool IsGameExeModule(std::wstring_view filename)
@@ -419,7 +444,7 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     mi.path = Utf8ToWide(utf8);
     mi.filename = std::filesystem::path(mi.path).filename().wstring();
     mi.inferred_mod_name = InferMo2ModNameFromPath(mi.path);
-    mi.is_systemish = IsSystemishModule(mi.filename);
+    mi.is_systemish = IsSystemishModule(mi.filename) || IsLikelyWindowsSystemModulePathLower(WideLower(mi.path));
     mi.is_game_exe = IsGameExeModule(mi.filename);
     mi.is_known_hook_framework = IsKnownHookFramework(mi.filename);
     out.push_back(std::move(mi));
