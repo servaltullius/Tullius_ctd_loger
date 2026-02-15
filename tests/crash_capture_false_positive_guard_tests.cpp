@@ -56,5 +56,10 @@ int main()
     "suppressCrashAutomationForLikelyShutdownException",
     "Crash capture must keep a dedicated suppression flag for shutdown/menu boundary auto-actions.");
 
+  AssertContains(
+    crashCapture,
+    "near menu/shutdown boundary during heartbeat check",
+    "Crash capture must suppress delayed menu-exit false positives discovered during heartbeat checks.");
+
   return 0;
 }
