@@ -179,8 +179,19 @@ bool HandleCrashEventTick(
             std::error_code ec;
             std::filesystem::remove(dumpPath, ec);
             recovered = true;
+          } else if (inMenuAtCrash) {
+            suppressCrashAutomationForLikelyShutdownException = true;
+            AppendLogLine(
+              outBase,
+              L"Crash event received near menu/shutdown boundary during heartbeat check (exit_code="
+                + std::to_wstring(exitCode)
+                + L", check="
+                + std::to_wstring(attempt + 1)
+                + L", state_flags="
+                + std::to_wstring(stateFlagsAtCrash)
+                + L"); keeping dump but suppressing crash auto-actions.");
           }
-          break;  // Non-zero exit: real crash. Stop checking.
+          break;
         }
       }
       if (recovered) {
