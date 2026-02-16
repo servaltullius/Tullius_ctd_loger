@@ -48,7 +48,10 @@ using skydiag::helper::internal::HandleHangTick;
 
 using skydiag::helper::internal::StartDumpToolViewer;
 
-std::uint32_t RemoveCrashArtifactsForDump(const std::filesystem::path& outBase, std::wstring_view dumpPath)
+std::uint32_t RemoveCrashArtifactsForDump(
+  const std::filesystem::path& outBase,
+  std::wstring_view dumpPath,
+  const std::filesystem::path& extraArtifactPath = {})
 {
   if (dumpPath.empty()) {
     return 0;
@@ -80,11 +83,24 @@ std::uint32_t RemoveCrashArtifactsForDump(const std::filesystem::path& outBase, 
       artifacts.push_back(outBase / (L"SkyrimDiag_Incident_Crash_" + ts + L".json"));
     }
   }
+  if (!extraArtifactPath.empty()) {
+    artifacts.push_back(extraArtifactPath);
+  }
 
   std::uint32_t removedCount = 0;
   for (const auto& path : artifacts) {
+    if (path.empty()) {
+      continue;
+    }
     std::error_code ec;
     const bool removed = std::filesystem::remove(path, ec);
+    if (ec) {
+      AppendLogLine(
+        outBase,
+        L"Failed to remove crash artifact: " + path.wstring()
+          + L" (err=" + std::to_wstring(ec.value()) + L")");
+      continue;
+    }
     if (!ec && removed) {
       ++removedCount;
     }
@@ -241,11 +257,16 @@ int wmain(int argc, wchar_t** argv)
               ClearPendingCrashAnalysis(&pendingCrashAnalysis);
             }
 
+            // Stop crash ETW first so the finalized .etl can be pruned together
+            // with dump sidecars in this normal-exit false-positive path.
+            const std::filesystem::path crashEtwPath = pendingCrashEtw.etwPath;
+            MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
+
             if (capturedCrashDumpPath.empty() && !pendingCrashViewerDumpPath.empty()) {
               capturedCrashDumpPath = pendingCrashViewerDumpPath;
             }
             if (!capturedCrashDumpPath.empty()) {
-              const std::uint32_t removed = RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath);
+              const std::uint32_t removed = RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath, crashEtwPath);
               AppendLogLine(
                 outBase,
                 L"exit_code=0 after crash capture; removed "

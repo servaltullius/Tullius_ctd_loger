@@ -74,5 +74,21 @@ int main()
     "exit_code=0 after crash capture; removed",
     "Helper main loop must log normal-exit crash artifact cleanup.");
 
+  AssertContains(
+    helperMain,
+    "Failed to remove crash artifact",
+    "Crash artifact cleanup must log per-file deletion failures for diagnostics.");
+
+  const auto crashCapturedBranchPos = helperMain.find("if (crashCaptured) {");
+  assert(crashCapturedBranchPos != std::string::npos && "Missing crashCaptured branch in helper main loop");
+  const auto forceEtwStopPos =
+    helperMain.find("MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);", crashCapturedBranchPos);
+  const auto cleanupPos = helperMain.find("RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath", crashCapturedBranchPos);
+  assert(forceEtwStopPos != std::string::npos && "Helper must force-stop crash ETW in the normal-exit cleanup branch.");
+  assert(cleanupPos != std::string::npos && "Helper must clean up crash artifacts in the normal-exit cleanup branch.");
+  assert(
+    forceEtwStopPos < cleanupPos &&
+    "Helper must stop crash ETW before removing crash artifacts to avoid orphan ETL files/manifest update races.");
+
   return 0;
 }
