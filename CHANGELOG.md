@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.34 (2026-02-16)
+
+### 수정
+- Helper: 크래시 이벤트로 덤프를 생성한 뒤에도 대상 프로세스가 `exit_code=0`으로 정상 종료하면, 해당 크래시 산출물(`.dmp`, `*_SkyrimDiagSummary.json`, `*_SkyrimDiagReport.txt`, incident manifest 등)을 종료 직전에 정리하도록 보강. 이제 "게임은 정상 종료했는데 CTD 리포트/뷰어가 뜨는" 오탐 체감을 줄임.
+- Helper: 정상 종료(`exit_code=0`) 경로에서 deferred crash viewer 자동 오픈을 차단하여, 종료 경계 예외로 남은 크래시 덤프 팝업이 뜨지 않도록 조정.
+
+### 테스트
+- 크래시 오탐 가드 테스트에 정상 종료 후 산출물 정리 로직 문자열 가드 추가 (`tests/crash_capture_false_positive_guard_tests.cpp`).
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(29/29).
+
 ## v0.2.33 (2026-02-15)
 
 ### 수정

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
@@ -46,6 +47,50 @@ using skydiag::helper::internal::HangTickResult;
 using skydiag::helper::internal::HandleHangTick;
 
 using skydiag::helper::internal::StartDumpToolViewer;
+
+std::uint32_t RemoveCrashArtifactsForDump(const std::filesystem::path& outBase, std::wstring_view dumpPath)
+{
+  if (dumpPath.empty()) {
+    return 0;
+  }
+
+  const std::filesystem::path dumpFs(dumpPath);
+  const std::wstring stem = dumpFs.stem().wstring();
+  if (stem.empty()) {
+    return 0;
+  }
+
+  std::vector<std::filesystem::path> artifacts;
+  artifacts.reserve(7);
+  artifacts.push_back(dumpFs);
+  artifacts.push_back(outBase / (stem + L"_SkyrimDiagBlackbox.jsonl"));
+  artifacts.push_back(outBase / (stem + L"_SkyrimDiagReport.txt"));
+  artifacts.push_back(outBase / (stem + L"_SkyrimDiagSummary.json"));
+  artifacts.push_back(outBase / (stem + L"_SkyrimDiagWct.json"));
+  artifacts.push_back(outBase / (stem + L".etl"));
+
+  const std::wstring kCrashStemPrefix = L"SkyrimDiag_Crash_";
+  if (stem.rfind(kCrashStemPrefix, 0) == 0) {
+    std::wstring ts = stem.substr(kCrashStemPrefix.size());
+    const std::wstring kFullSuffix = L"_Full";
+    if (ts.size() > kFullSuffix.size() && ts.compare(ts.size() - kFullSuffix.size(), kFullSuffix.size(), kFullSuffix) == 0) {
+      ts.resize(ts.size() - kFullSuffix.size());
+    }
+    if (!ts.empty()) {
+      artifacts.push_back(outBase / (L"SkyrimDiag_Incident_Crash_" + ts + L".json"));
+    }
+  }
+
+  std::uint32_t removedCount = 0;
+  for (const auto& path : artifacts) {
+    std::error_code ec;
+    const bool removed = std::filesystem::remove(path, ec);
+    if (!ec && removed) {
+      ++removedCount;
+    }
+  }
+  return removedCount;
+}
 
 }  // namespace
 
@@ -141,6 +186,7 @@ int wmain(int argc, wchar_t** argv)
 
   std::wstring pendingHangViewerDumpPath;
   std::wstring pendingCrashViewerDumpPath;
+  std::wstring capturedCrashDumpPath;
   PendingCrashAnalysis pendingCrashAnalysis{};
 
   PendingCrashEtwCapture pendingCrashEtw{};
@@ -179,15 +225,44 @@ int wmain(int argc, wchar_t** argv)
           // Drain any pending crash event before exiting — fixes race where
           // the process terminates before the next HandleCrashEventTick poll.
           HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-            &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath,
+            &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
             &pendingCrashViewerDumpPath);
         } else {
+          if (crashCaptured) {
+            if (pendingCrashAnalysis.active && pendingCrashAnalysis.process) {
+              if (!TerminateProcess(pendingCrashAnalysis.process, 1)) {
+                AppendLogLine(
+                  outBase,
+                  L"exit_code=0 after crash capture; failed to terminate pending crash analysis process: "
+                    + std::to_wstring(GetLastError()));
+              } else {
+                AppendLogLine(outBase, L"exit_code=0 after crash capture; terminated pending crash analysis process.");
+              }
+              ClearPendingCrashAnalysis(&pendingCrashAnalysis);
+            }
+
+            if (capturedCrashDumpPath.empty() && !pendingCrashViewerDumpPath.empty()) {
+              capturedCrashDumpPath = pendingCrashViewerDumpPath;
+            }
+            if (!capturedCrashDumpPath.empty()) {
+              const std::uint32_t removed = RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath);
+              AppendLogLine(
+                outBase,
+                L"exit_code=0 after crash capture; removed "
+                  + std::to_wstring(removed)
+                  + L" crash artifact(s): "
+                  + std::filesystem::path(capturedCrashDumpPath).filename().wstring());
+            }
+            capturedCrashDumpPath.clear();
+            pendingCrashViewerDumpPath.clear();
+            crashCaptured = false;
+          }
           AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
         }
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
         AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
-        if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash) {
+        if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && exitCode != 0) {
           StartDumpToolViewer(cfg, pendingCrashViewerDumpPath, outBase, L"crash_deferred_exit");
           AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash dump after deferred process exit.");
           pendingCrashViewerDumpPath.clear();
@@ -204,7 +279,7 @@ int wmain(int argc, wchar_t** argv)
       }
       if (w == WAIT_FAILED) {
         HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &pendingHangViewerDumpPath,
+          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
           &pendingCrashViewerDumpPath);
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         const DWORD le = GetLastError();
@@ -223,6 +298,7 @@ int wmain(int argc, wchar_t** argv)
           &crashCaptured,
           &pendingCrashEtw,
           &pendingCrashAnalysis,
+          &capturedCrashDumpPath,
           &pendingHangViewerDumpPath,
           &pendingCrashViewerDumpPath)) {
       continue;

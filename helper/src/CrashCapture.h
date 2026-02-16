@@ -24,8 +24,8 @@ bool HandleCrashEventTick(
   bool* crashCaptured,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
+  std::wstring* lastCrashDumpPath,
   std::wstring* pendingHangViewerDumpPath,
   std::wstring* pendingCrashViewerDumpPath);
 
 }  // namespace skydiag::helper::internal
-

@@ -35,6 +35,7 @@ bool HandleCrashEventTick(
   bool* crashCaptured,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
+  std::wstring* lastCrashDumpPath,
   std::wstring* pendingHangViewerDumpPath,
   std::wstring* pendingCrashViewerDumpPath)
 {
@@ -94,12 +95,19 @@ bool HandleCrashEventTick(
     // Remove the empty/partial dump file so it doesn't confuse users.
     std::error_code ec;
     std::filesystem::remove(dumpPath, ec);
+    if (lastCrashDumpPath) {
+      lastCrashDumpPath->clear();
+    }
     // Even though the dump failed, still mark as captured so we don't
     // retry on subsequent crash events for the same incident.
     if (crashCaptured) {
       *crashCaptured = true;
     }
     return true;
+  }
+
+  if (lastCrashDumpPath) {
+    *lastCrashDumpPath = dumpPath;
   }
 
   const std::uint32_t stateFlagsAtCrash = proc.shm ? proc.shm->header.state_flags : 0u;
@@ -123,6 +131,9 @@ bool HandleCrashEventTick(
           L"deleting dump (likely shutdown exception).");
         std::error_code ec;
         std::filesystem::remove(dumpPath, ec);
+        if (lastCrashDumpPath) {
+          lastCrashDumpPath->clear();
+        }
         return false;
       }
       // Non-zero exit code near menu/shutdown can still be a benign quit path.
@@ -178,6 +189,9 @@ bool HandleCrashEventTick(
               + L"); deleting dump (likely shutdown exception).");
             std::error_code ec;
             std::filesystem::remove(dumpPath, ec);
+            if (lastCrashDumpPath) {
+              lastCrashDumpPath->clear();
+            }
             recovered = true;
           } else if (inMenuAtCrash) {
             suppressCrashAutomationForLikelyShutdownException = true;
@@ -195,6 +209,9 @@ bool HandleCrashEventTick(
         }
       }
       if (recovered) {
+        if (lastCrashDumpPath) {
+          lastCrashDumpPath->clear();
+        }
         return false;
       }
       // Heartbeat stalled for entire extended window: real crash / freeze.

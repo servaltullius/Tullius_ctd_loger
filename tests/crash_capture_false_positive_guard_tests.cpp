@@ -24,12 +24,15 @@ int main()
 
   const std::filesystem::path processAttachPath = repoRoot / "helper" / "src" / "ProcessAttach.cpp";
   const std::filesystem::path crashCapturePath = repoRoot / "helper" / "src" / "CrashCapture.cpp";
+  const std::filesystem::path helperMainPath = repoRoot / "helper" / "src" / "main.cpp";
 
   assert(std::filesystem::exists(processAttachPath) && "helper/src/ProcessAttach.cpp not found");
   assert(std::filesystem::exists(crashCapturePath) && "helper/src/CrashCapture.cpp not found");
+  assert(std::filesystem::exists(helperMainPath) && "helper/src/main.cpp not found");
 
   const std::string processAttach = ReadAllText(processAttachPath);
   const std::string crashCapture = ReadAllText(crashCapturePath);
+  const std::string helperMain = ReadAllText(helperMainPath);
 
   AssertContains(
     processAttach,
@@ -60,6 +63,16 @@ int main()
     crashCapture,
     "near menu/shutdown boundary during heartbeat check",
     "Crash capture must suppress delayed menu-exit false positives discovered during heartbeat checks.");
+
+  AssertContains(
+    helperMain,
+    "RemoveCrashArtifactsForDump",
+    "Helper main loop must remove crash artifacts if a prior crash capture is followed by exit_code=0.");
+
+  AssertContains(
+    helperMain,
+    "exit_code=0 after crash capture; removed",
+    "Helper main loop must log normal-exit crash artifact cleanup.");
 
   return 0;
 }
