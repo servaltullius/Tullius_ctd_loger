@@ -8,6 +8,25 @@
 
 **Tech Stack:** C++20, nlohmann/json (이미 의존성), Win32/DbgHelp, CTest, std::filesystem.
 
+## Review Corrections (Must Apply Before Coding)
+
+1. UTF-8 변환은 직접 `std::wstring(s.begin(), s.end())`로 구현하지 말고 기존 `dump_tool/src/Utf.h`의 `Utf8ToWide`/`WideToUtf8`를 반드시 사용.
+2. 게임 버전 비교는 문자열 사전식 비교(`"1.6.640" < "1.6.1130"`)를 금지하고, 숫자 파싱 기반 비교 유틸을 사용.
+3. `WriteDumpWithStreams` 시그니처 변경 시 호출처 전부 수정:
+   - `helper/src/CrashCapture.cpp`
+   - `helper/src/HangCapture.cpp`
+   - `helper/src/ManualCapture.cpp`
+   - `helper/src/PendingCrashAnalysis.cpp`
+4. `plugin_rules.json`은 생성만 하지 말고, Analyzer에서 실제로 로딩/평가하도록 구현. 규칙을 `Analyzer.cpp`에 하드코딩하지 않음.
+5. `SHGetKnownFolderPath`/`CoTaskMemFree` 사용 시 Windows 링크 라이브러리(`Shell32`, `Ole32`)를 `helper/CMakeLists.txt`에 명시적으로 추가.
+6. MO2 탐지는 `usvfs_x64.dll` 뿐 아니라 `uvsfs64.dll` 별칭도 함께 처리.
+7. `OutputWriter.cpp` 삽입 예시는 실제 함수 인자명(`r`)을 사용. `out` 변수명 사용 금지.
+8. TES4 플러그인 `header_version`은 레코드 헤더 오프셋에서 읽지 말고 `HEDR` 서브레코드(첫 4바이트 float)에서 파싱.
+9. `plugins.txt` 파싱은 `*` prefix 형식만 가정하지 말고, 별표 라인이 하나도 없으면 레거시 형식(비주석 라인)을 active로 처리하는 fallback을 둔다.
+10. Task 7 예시는 placeholder 함수 호출(`TryResolveGameExeDirFromProcess`) 상태로 남기지 말고, `QueryFullProcessImageNameW` 기반 실제 코드 스니펫으로 교체.
+11. `OutputWriter`에서 `plugin_scan` JSON 파싱 시 `is_discarded()` 가드를 두고, 실패 시 raw 텍스트 fallback 필드를 기록.
+12. 최종 검증은 Linux 테스트만으로 완료 처리하지 말고 Windows 빌드/패키징/WinUI 실행 스모크 테스트를 필수 게이트로 추가.
+
 ---
 
 ## Phase 4A: ENB/ReShade/주입 DLL 진단
@@ -403,6 +422,7 @@ Create `dump_tool/src/GraphicsInjectionDiag.cpp`:
 #include <cwctype>
 #include <fstream>
 
+#include "Utf.h"
 #include <nlohmann/json.hpp>
 
 namespace skydiag::dump_tool {
@@ -416,9 +436,9 @@ std::wstring WideLower(std::wstring_view sv)
     return s;
 }
 
-std::wstring Utf8ToWide(const std::string& s)
+std::wstring Utf8ToWideStrict(const std::string& s)
 {
-    return std::wstring(s.begin(), s.end());
+    return skydiag::dump_tool::Utf8ToWide(s);
 }
 
 bool ContainsModule(const std::vector<std::wstring>& moduleFilenames,
@@ -471,9 +491,9 @@ bool GraphicsInjectionDiag::LoadRules(const std::filesystem::path& jsonPath)
         if (j.contains("detection_modules")) {
             for (const auto& [name, dlls] : j["detection_modules"].items()) {
                 DetectionGroup g;
-                g.name = Utf8ToWide(name);
+                g.name = Utf8ToWideStrict(name);
                 for (const auto& d : dlls) {
-                    g.dlls.push_back(WideLower(Utf8ToWide(d.get<std::string>())));
+                    g.dlls.push_back(WideLower(Utf8ToWideStrict(d.get<std::string>())));
                 }
                 m_groups.push_back(std::move(g));
             }
@@ -487,29 +507,29 @@ bool GraphicsInjectionDiag::LoadRules(const std::filesystem::path& jsonPath)
             const auto& det = r.at("detect");
             if (det.contains("modules_any")) {
                 for (const auto& m : det["modules_any"]) {
-                    rule.modules_any.push_back(WideLower(Utf8ToWide(m.get<std::string>())));
+                    rule.modules_any.push_back(WideLower(Utf8ToWideStrict(m.get<std::string>())));
                 }
             }
             if (det.contains("modules_all")) {
                 for (const auto& m : det["modules_all"]) {
-                    rule.modules_all.push_back(WideLower(Utf8ToWide(m.get<std::string>())));
+                    rule.modules_all.push_back(WideLower(Utf8ToWideStrict(m.get<std::string>())));
                 }
             }
             if (det.contains("fault_module_any")) {
                 for (const auto& m : det["fault_module_any"]) {
-                    rule.fault_module_any.push_back(WideLower(Utf8ToWide(m.get<std::string>())));
+                    rule.fault_module_any.push_back(WideLower(Utf8ToWideStrict(m.get<std::string>())));
                 }
             }
 
             const auto& diag = r.at("diagnosis");
-            rule.cause_ko = Utf8ToWide(diag.at("cause_ko").get<std::string>());
-            rule.cause_en = Utf8ToWide(diag.at("cause_en").get<std::string>());
+            rule.cause_ko = Utf8ToWideStrict(diag.at("cause_ko").get<std::string>());
+            rule.cause_en = Utf8ToWideStrict(diag.at("cause_en").get<std::string>());
             rule.confidence = diag.at("confidence").get<std::string>();
             for (const auto& rec : diag.at("recommendations_ko")) {
-                rule.recommendations_ko.push_back(Utf8ToWide(rec.get<std::string>()));
+                rule.recommendations_ko.push_back(Utf8ToWideStrict(rec.get<std::string>()));
             }
             for (const auto& rec : diag.at("recommendations_en")) {
-                rule.recommendations_en.push_back(Utf8ToWide(rec.get<std::string>()));
+                rule.recommendations_en.push_back(Utf8ToWideStrict(rec.get<std::string>()));
             }
             m_rules.push_back(std::move(rule));
         }
@@ -961,14 +981,14 @@ Create `tests/data/test_plugin_esl.bin` — this is a binary file. Use a script 
 ```bash
 python3 -c "
 import struct
-# TES4 record: type(4) + data_size(4) + flags(4) + formid(4) + vc(4) + header_version(4) = 24 bytes header
-# Then HEDR subrecord: type(4) + size(2) + data(12) = 18 bytes
+# TES4 record header is 24 bytes total.
+# HEDR version (1.71 등)은 레코드 헤더가 아니라 HEDR subrecord payload에 있음.
 data = b'TES4'                          # record type
 data += struct.pack('<I', 18)            # data size (HEDR subrecord)
 data += struct.pack('<I', 0x0200)        # flags: ESL set
 data += struct.pack('<I', 0)             # formid
-data += struct.pack('<I', 0)             # vc info
-data += struct.pack('<f', 1.71)          # header version
+data += struct.pack('<I', 0)             # version control / timestamp
+data += struct.pack('<I', 0)             # form version + unknown (not HEDR version)
 data += b'HEDR'                          # subrecord type
 data += struct.pack('<H', 12)            # subrecord size
 data += struct.pack('<f', 1.71)          # hedr version
@@ -1059,7 +1079,7 @@ std::wstring WideLower(std::wstring_view sv)
 
 bool HasModule(const std::vector<std::wstring>& modules, const wchar_t* name)
 {
-    const std::wstring lower(name);
+    const std::wstring lower = WideLower(name);
     for (const auto& m : modules) {
         if (WideLower(m) == lower) return true;
     }
@@ -1070,7 +1090,7 @@ bool HasModule(const std::vector<std::wstring>& modules, const wchar_t* name)
 
 bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out)
 {
-    // Minimum: 4 (type) + 4 (data_size) + 4 (flags) + 4 (formid) + 4 (vc) + 4 (header_version) = 24
+    // TES4 record header minimum size.
     if (!data || size < 24) return false;
     if (std::memcmp(data, "TES4", 4) != 0) return false;
 
@@ -1080,10 +1100,6 @@ bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out
     std::uint32_t flags = 0;
     std::memcpy(&flags, data + 8, 4);
     out.is_esl = (flags & 0x0200u) != 0;
-
-    float headerVer = 0.0f;
-    std::memcpy(&headerVer, data + 20, 4);
-    out.header_version = headerVer;
 
     // Parse sub-records for MAST entries
     const std::size_t headerEnd = 24;
@@ -1096,6 +1112,11 @@ bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out
         std::memcpy(&subSize, data + pos + 4, 2);
         pos += 6;
 
+        if (std::strcmp(subType, "HEDR") == 0 && subSize >= 4 && pos + subSize <= recordEnd) {
+            float hv = 0.0f;
+            std::memcpy(&hv, data + pos, 4);
+            out.header_version = hv;
+        }
         if (std::strcmp(subType, "MAST") == 0 && subSize > 0 && pos + subSize <= recordEnd) {
             std::string master(reinterpret_cast<const char*>(data + pos), subSize);
             // Remove null terminator if present
@@ -1113,21 +1134,37 @@ bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out
 std::vector<std::string> ParsePluginsTxt(const std::string& content)
 {
     std::vector<std::string> active;
+    std::vector<std::string> legacyActive;
+    bool hasStarredLines = false;
     std::istringstream stream(content);
     std::string line;
-    while (std::getline(stream, line)) {
-        // Trim
-        while (!line.empty() && (line.back() == '\r' || line.back() == '\n' || line.back() == ' ')) {
-            line.pop_back();
+
+    auto trim = [](std::string& s) {
+        while (!s.empty() && (s.back() == '\r' || s.back() == '\n' || s.back() == ' ' || s.back() == '\t')) {
+            s.pop_back();
         }
+        std::size_t i = 0;
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) {
+            ++i;
+        }
+        if (i > 0) s.erase(0, i);
+    };
+
+    while (std::getline(stream, line)) {
+        trim(line);
         if (line.empty() || line[0] == '#') continue;
 
         if (line[0] == '*') {
-            active.push_back(line.substr(1));
+            hasStarredLines = true;
+            auto name = line.substr(1);
+            trim(name);
+            if (!name.empty()) active.push_back(std::move(name));
+        } else {
+            // Legacy format fallback (no '*' prefix).
+            legacyActive.push_back(line);
         }
-        // Lines without '*' prefix are inactive — skip
     }
-    return active;
+    return hasStarredLines ? active : legacyActive;
 }
 
 PluginScanResult ScanPlugins(
@@ -1135,7 +1172,8 @@ PluginScanResult ScanPlugins(
     const std::vector<std::wstring>& moduleFilenames)
 {
     PluginScanResult result;
-    result.mo2_detected = HasModule(moduleFilenames, L"usvfs_x64.dll");
+    result.mo2_detected = HasModule(moduleFilenames, L"usvfs_x64.dll") ||
+      HasModule(moduleFilenames, L"uvsfs64.dll");
 
     // 1. Find plugins.txt
     std::filesystem::path pluginsTxtPath;
@@ -1201,7 +1239,8 @@ PluginScanResult ScanPlugins(
 
     // 3. Parse TES4 headers for each active plugin
     const auto dataDir = gameExeDir / "Data";
-    // For MO2, we might also need to search mods/ folders — but Data may have overwrite
+    // Note: in MO2 VFS mode, many plugin files are not physically present in Data/.
+    // Keep this scan best-effort and never fail dump capture if headers cannot be read.
     for (const auto& pluginName : activePlugins) {
         PluginMeta meta;
         meta.filename = pluginName;
@@ -1259,6 +1298,15 @@ Modify `helper/CMakeLists.txt:7-32` — add after line 12 (`src/DumpWriter.cpp`)
   src/PluginScanner.h
 ```
 
+Also add Windows link libs if not present:
+```cmake
+target_link_libraries(${PROJECT_NAME}
+  PRIVATE
+    Shell32
+    Ole32
+)
+```
+
 **Step 7: Generate test binary data**
 
 Run:
@@ -1270,7 +1318,7 @@ data += struct.pack('<I', 18)
 data += struct.pack('<I', 0x0200)
 data += struct.pack('<I', 0)
 data += struct.pack('<I', 0)
-data += struct.pack('<f', 1.71)
+data += struct.pack('<I', 0)
 data += b'HEDR'
 data += struct.pack('<H', 12)
 data += struct.pack('<f', 1.71)
@@ -1417,7 +1465,14 @@ Update the corresponding header `helper/include/SkyrimDiagHelper/DumpWriter.h` t
 
 **Step 4: Update callers of WriteDumpWithStreams**
 
-Search for all call sites of `WriteDumpWithStreams` in `helper/src/` and add the new parameter. Typically called from `CrashCapture.cpp` and `HangCapture.cpp`. Pass an empty string `""` initially — the actual plugin scan call will be integrated in a follow-up.
+Search for all call sites of `WriteDumpWithStreams` in `helper/src/` and add the new parameter.
+Must update all current call sites:
+- `helper/src/CrashCapture.cpp`
+- `helper/src/HangCapture.cpp`
+- `helper/src/ManualCapture.cpp`
+- `helper/src/PendingCrashAnalysis.cpp`
+
+Pass an empty string `""` initially — the actual plugin scan call will be integrated in a follow-up.
 
 **Step 5: Run tests to verify GREEN**
 
@@ -1430,7 +1485,7 @@ Expected: PASS.
 **Step 6: Commit**
 
 ```bash
-git add helper/src/DumpWriter.cpp helper/include/SkyrimDiagHelper/DumpWriter.h helper/src/CrashCapture.cpp helper/src/HangCapture.cpp helper/src/ManualCapture.cpp tests/plugin_stream_tests.cpp tests/CMakeLists.txt
+git add helper/src/DumpWriter.cpp helper/include/SkyrimDiagHelper/DumpWriter.h helper/src/CrashCapture.cpp helper/src/HangCapture.cpp helper/src/ManualCapture.cpp helper/src/PendingCrashAnalysis.cpp tests/plugin_stream_tests.cpp tests/CMakeLists.txt
 git commit -m "feat: add PluginInfo user stream to DumpWriter"
 ```
 
@@ -1452,21 +1507,45 @@ In each capture file, before the `WriteDumpWithStreams` call:
 // Before WriteDumpWithStreams call:
 std::string pluginScanJson;
 {
-    auto gameExeDir = std::filesystem::path(/* get game exe path from process handle */);
-    // Note: the implementer needs to get the game EXE path using QueryFullProcessImageNameW
-    // and extract the parent directory
-    std::vector<std::wstring> moduleNames;  // from shared memory or enumerate
-    auto scanResult = ScanPlugins(gameExeDir, moduleNames);
-    scanResult.game_exe_version = /* game version from shared memory or module version */;
-    pluginScanJson = SerializePluginScanResult(scanResult);
+    auto TryResolveGameExeDir = [](HANDLE processHandle, std::filesystem::path& outDir) -> bool {
+        DWORD n = 32768;
+        std::wstring buf(n, L'\0');
+        if (!QueryFullProcessImageNameW(processHandle, 0, buf.data(), &n) || n == 0) {
+            return false;
+        }
+        buf.resize(n);
+        const std::filesystem::path exePath(buf);
+        if (!exePath.has_parent_path()) {
+            return false;
+        }
+        outDir = exePath.parent_path();
+        return true;
+    };
+
+    std::filesystem::path gameExeDir;
+    std::vector<std::wstring> moduleNames;
+
+    // Optional best-effort: fill moduleNames via EnumProcessModulesEx if available.
+    // If module enumeration fails, keep moduleNames empty and continue.
+    if (TryResolveGameExeDir(proc.process, gameExeDir)) {
+        auto scanResult = ScanPlugins(gameExeDir, moduleNames);
+        // Keep empty if no trusted version source is available in this capture path.
+        scanResult.game_exe_version.clear();
+        pluginScanJson = SerializePluginScanResult(scanResult);
+    } else {
+        // Keep pluginScanJson empty; dump writing must continue.
+        pluginScanJson.clear();
+    }
 }
 ```
 
 The exact integration depends on how each capture function obtains the process handle and game path. The implementer should:
 1. Use `QueryFullProcessImageNameW(processHandle, 0, buf, &size)` to get the EXE path
 2. Extract parent directory
-3. Get module list from the shared memory header or use EnumProcessModules
+3. Get module list from the shared memory header or use `EnumProcessModules` (best-effort)
 4. Pass the serialized JSON to `WriteDumpWithStreams`
+5. If scan fails, log and continue dump capture (do not block)
+6. Placeholder 함수명/주석(`TODO fill later`)을 커밋에 남기지 않는다.
 
 **Step 2: Commit**
 
@@ -1655,7 +1734,20 @@ Add after the WCT stream reading block in Analyzer.cpp (search for `kMinidumpUse
   }
 ```
 
-Then after the graphics diagnostics block, add plugin rule application:
+Then after the graphics diagnostics block, add plugin rule application.
+
+**Important:** 아래 로직은 `plugin_rules.json` 기반으로 평가해야 하며, Analyzer 내부 하드코딩 분기만으로 끝내지 않는다.  
+권장: `dump_tool/src/PluginRules.h/.cpp`를 추가해 JSON 로딩 + 조건 평가를 분리.
+
+```cpp
+// Pseudocode: load plugin rules once and evaluate.
+PluginRules rules;
+if (rules.LoadFromJson(std::filesystem::path(opt.data_dir) / L"plugin_rules.json")) {
+    rules.Evaluate(out, allModules, opt.language);
+}
+```
+
+If you still stage temporary inline checks first, use this skeleton:
 ```cpp
   // Apply plugin diagnostic rules.
   if (out.has_plugin_scan && !out.plugin_scan_json_utf8.empty()) {
@@ -1677,20 +1769,19 @@ Then after the graphics diagnostics block, add plugin rule application:
           std::string masterLower = master;
           std::transform(masterLower.begin(), masterLower.end(), masterLower.begin(), [](char c) { return static_cast<char>(std::tolower(c)); });
           if (activeSet.find(masterLower) == activeSet.end()) {
-            out.missing_masters.push_back(Utf8ToWide(master));
+            out.missing_masters.push_back(skydiag::dump_tool::Utf8ToWide(master));
           }
         }
       }
 
-      // Check BEES requirement
+      // Check BEES requirement (semantic version compare; DO NOT use lexicographic string compare)
       bool has171 = false;
       for (const auto& p : plugins) {
         if (p["header_version"].get<float>() >= 1.709f) { has171 = true; break; }
       }
       bool gameLt1130 = false;
       if (!out.game_version.empty()) {
-        // Simple version comparison
-        gameLt1130 = (out.game_version < "1.6.1130");
+        gameLt1130 = IsGameVersionLessThan(out.game_version, "1.6.1130");
       }
       bool hasBees = false;
       for (const auto& m : allModules) {
@@ -1711,14 +1802,20 @@ Follow same pattern as graphics — add evidence items for missing masters and B
 
 Modify `dump_tool/src/OutputWriter.cpp` — add after `graphics_diagnosis`:
 ```cpp
-  if (out.has_plugin_scan) {
-    summary["plugin_scan"] = nlohmann::json::parse(out.plugin_scan_json_utf8, nullptr, false);
-    if (!out.missing_masters.empty()) {
+  if (r.has_plugin_scan) {
+    auto parsedPluginScan = nlohmann::json::parse(r.plugin_scan_json_utf8, nullptr, false);
+    if (parsedPluginScan.is_discarded()) {
+      summary["plugin_scan"] = nullptr;
+      summary["plugin_scan_raw"] = r.plugin_scan_json_utf8;
+    } else {
+      summary["plugin_scan"] = std::move(parsedPluginScan);
+    }
+    if (!r.missing_masters.empty()) {
       auto mm = nlohmann::json::array();
-      for (const auto& m : out.missing_masters) mm.push_back(WideToUtf8(m));
+      for (const auto& m : r.missing_masters) mm.push_back(WideToUtf8(m));
       summary["missing_masters"] = std::move(mm);
     }
-    summary["needs_bees"] = out.needs_bees;
+    summary["needs_bees"] = r.needs_bees;
   }
 ```
 
@@ -1756,7 +1853,7 @@ git commit -m "feat: integrate plugin scan diagnostics (ESL/BEES/Missing Masters
 
 **Files:** (No new files)
 
-**Step 1: Full build + test**
+**Step 1: Linux test gate (fast regression check)**
 
 Run:
 ```bash
@@ -1764,14 +1861,33 @@ cmake -S . -B build-linux-test -DCMAKE_BUILD_TYPE=Debug && cmake --build build-l
 ```
 Expected: ALL PASS.
 
-**Step 2: Verify all new files exist**
+**Step 2: Windows build/package gate (required)**
+
+Run on Windows mirror (`C:\Users\kdw73\Tullius_ctd_loger`):
+```bat
+cd /d C:\Users\kdw73\Tullius_ctd_loger
+scripts\build-win.cmd
+scripts\build-winui.cmd
+python scripts\package.py --build-dir build-win --out dist\Tullius_ctd_loger.zip --no-pdb
+```
+Expected: helper/dump_tool/winui build success + zip output generated.
+
+Optional WinUI smoke check (0.2.34 회귀 방지):
+```powershell
+$p = Start-Process -FilePath "C:\Users\kdw73\SkyrimDiag\build-win\bin\RelWithDebInfo\SkyrimDiagDumpToolWinUI.exe" -PassThru
+Start-Sleep -Seconds 5
+if ($p.HasExited) { throw "WinUI exited too early" }
+Stop-Process -Id $p.Id -Force
+```
+
+**Step 3: Verify all new files exist**
 
 Run:
 ```bash
 ls -la dump_tool/data/graphics_injection_rules.json dump_tool/data/plugin_rules.json dump_tool/src/GraphicsInjectionDiag.h dump_tool/src/GraphicsInjectionDiag.cpp helper/src/PluginScanner.h helper/src/PluginScanner.cpp tests/data/test_plugin_esl.bin
 ```
 
-**Step 3: Verify new test count**
+**Step 4: Verify new test count**
 
 Run:
 ```bash
@@ -1779,15 +1895,16 @@ ctest --test-dir build-linux-test --show-only 2>&1 | grep -c "Test #"
 ```
 Expected: Original count + 6 new tests (graphics_injection_rules, graphics_injection_diag, graphics_injection_integration, plugin_scanner, plugin_stream, plugin_rules).
 
-**Step 4: Check no unrelated changes**
+**Step 5: Check no unrelated changes**
 
 Run:
 ```bash
-git diff --stat HEAD~8..HEAD
+git status --short
+git diff --stat origin/main...HEAD
 ```
 
-**Step 5: Final commit (if cleanup needed)**
+**Step 6: Final commit (if cleanup needed)**
 
 ```bash
-git add -A && git commit -m "chore: final cleanup for environment diagnostics (Phase 4)"
+git add <phase4-related-files-only> && git commit -m "chore: final cleanup for environment diagnostics (Phase 4)"
 ```
