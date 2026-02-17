@@ -35,6 +35,20 @@ void TestPluginScannerImplExists()
   assert(impl.find("0x0200") != std::string::npos);
 }
 
+void TestMo2SelectedProfileByteArraySupportExists()
+{
+  const auto impl = ReadFile("helper/src/PluginScanner.cpp");
+  assert(impl.find("@ByteArray(") != std::string::npos);
+  assert(impl.find("ParseSelectedProfileValue") != std::string::npos);
+}
+
+void TestPluginsTxtBomHandlingExists()
+{
+  const auto impl = ReadFile("helper/src/PluginScanner.cpp");
+  assert(impl.find("StripUtf8BomInPlace") != std::string::npos);
+  assert(impl.find("ParsePluginsTxt") != std::string::npos);
+}
+
 void TestTestDataExists()
 {
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
@@ -50,6 +64,8 @@ int main()
 {
   TestPluginScannerHeaderExists();
   TestPluginScannerImplExists();
+  TestMo2SelectedProfileByteArraySupportExists();
+  TestPluginsTxtBomHandlingExists();
   TestTestDataExists();
   return 0;
 }

@@ -74,20 +74,9 @@ bool HandleCrashEventTick(
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
   const auto etwPath = outBase / (L"SkyrimDiag_Crash_" + ts + L".etl");
   const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Crash_" + ts + L".json");
+  const std::filesystem::path dumpFs(dumpPath);
   if (pendingHangViewerDumpPath) {
     pendingHangViewerDumpPath->clear();
-  }
-
-  std::string pluginScanJson;
-  {
-    std::filesystem::path gameExeDir;
-    if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
-      const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
-      auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
-      pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
-    } else {
-      AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
-    }
   }
 
   std::wstring dumpErr;
@@ -98,7 +87,7 @@ bool HandleCrashEventTick(
     proc.shm,
     proc.shmSize,
     /*wctJsonUtf8=*/{},
-    pluginScanJson,
+    /*pluginScanJson=*/{},
     /*isCrash=*/true,
     cfg.dumpMode,
     &dumpErr);
@@ -235,6 +224,22 @@ bool HandleCrashEventTick(
   // ---- Dump is valid — proceed with post-processing ------------------------
   {
     std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
+
+    {
+      std::filesystem::path gameExeDir;
+      if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+        const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
+        auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+        const std::string pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
+        if (!pluginScanJson.empty()) {
+          const auto pluginScanPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
+          WriteTextFileUtf8(pluginScanPath, pluginScanJson);
+          AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
+        }
+      } else {
+        AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
+      }
+    }
 
     const auto stateFlags = stateFlagsAtCrash;
 

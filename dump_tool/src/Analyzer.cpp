@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <optional>
@@ -69,6 +70,24 @@ std::string NowIso8601Utc()
     return {};
   }
   return buf;
+}
+
+bool TryReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
+{
+  if (!out) {
+    return false;
+  }
+  out->clear();
+
+  std::ifstream f(path, std::ios::binary);
+  if (!f.is_open()) {
+    return false;
+  }
+
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  *out = ss.str();
+  return true;
 }
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
@@ -351,6 +370,15 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       pluginPtr && pluginSize > 0) {
     out.has_plugin_scan = true;
     out.plugin_scan_json_utf8.assign(static_cast<const char*>(pluginPtr), static_cast<std::size_t>(pluginSize));
+  }
+  if (!out.has_plugin_scan) {
+    const std::filesystem::path dumpFs(dumpPath);
+    const auto sidecarPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
+    std::string sidecarJson;
+    if (TryReadTextFileUtf8(sidecarPath, &sidecarJson) && !sidecarJson.empty()) {
+      out.has_plugin_scan = true;
+      out.plugin_scan_json_utf8 = std::move(sidecarJson);
+    }
   }
 
   ParsedPluginScan parsedPluginScan{};

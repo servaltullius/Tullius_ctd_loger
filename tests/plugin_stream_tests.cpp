@@ -34,6 +34,29 @@ void TestDumpWriterHeaderHasPluginParam()
   assert(header.find("pluginScanJson") != std::string::npos);
 }
 
+void TestCrashPathIsDumpFirst()
+{
+  const auto impl = ReadFile("helper/src/CrashCapture.cpp");
+  const auto writePos = impl.find("WriteDumpWithStreams(");
+  const auto scanPos = impl.find("ScanPlugins(");
+  assert(writePos != std::string::npos);
+  assert(scanPos != std::string::npos);
+  assert(writePos < scanPos && "Crash capture must write dump before plugin scanning");
+}
+
+void TestCrashPathWritesPluginScanSidecar()
+{
+  const auto impl = ReadFile("helper/src/CrashCapture.cpp");
+  assert(impl.find("_PluginScan.json") != std::string::npos);
+}
+
+void TestAnalyzerHasPluginSidecarFallback()
+{
+  const auto impl = ReadFile("dump_tool/src/Analyzer.cpp");
+  assert(impl.find("_PluginScan.json") != std::string::npos);
+  assert(impl.find("TryReadTextFileUtf8") != std::string::npos);
+}
+
 }  // namespace
 
 int main()
@@ -41,5 +64,8 @@ int main()
   TestDumpWriterIncludesPluginStream();
   TestDumpWriterReservesThreeStreams();
   TestDumpWriterHeaderHasPluginParam();
+  TestCrashPathIsDumpFirst();
+  TestCrashPathWritesPluginScanSidecar();
+  TestAnalyzerHasPluginSidecarFallback();
   return 0;
 }

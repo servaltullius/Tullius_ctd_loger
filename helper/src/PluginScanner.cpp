@@ -19,6 +19,16 @@
 namespace skydiag::helper {
 namespace {
 
+void StripUtf8BomInPlace(std::string& s)
+{
+  if (s.size() >= 3 &&
+      static_cast<unsigned char>(s[0]) == 0xEF &&
+      static_cast<unsigned char>(s[1]) == 0xBB &&
+      static_cast<unsigned char>(s[2]) == 0xBF) {
+    s.erase(0, 3);
+  }
+}
+
 std::wstring WideLower(std::wstring_view s)
 {
   std::wstring out(s);
@@ -72,6 +82,31 @@ bool HasModule(const std::vector<std::wstring>& modules, const wchar_t* moduleNa
     }
   }
   return false;
+}
+
+std::string ParseSelectedProfileValue(std::string raw)
+{
+  StripUtf8BomInPlace(raw);
+  TrimAsciiInPlace(raw);
+
+  constexpr std::string_view kByteArrayPrefix = "@ByteArray(";
+  if (raw.size() >= kByteArrayPrefix.size() + 1 &&
+      raw.rfind(kByteArrayPrefix, 0) == 0 &&
+      raw.back() == ')') {
+    raw = raw.substr(kByteArrayPrefix.size(), raw.size() - kByteArrayPrefix.size() - 1);
+    TrimAsciiInPlace(raw);
+  }
+
+  if (raw.size() >= 2) {
+    const char first = raw.front();
+    const char last = raw.back();
+    if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+      raw = raw.substr(1, raw.size() - 2);
+      TrimAsciiInPlace(raw);
+    }
+  }
+
+  return raw;
 }
 
 }  // namespace
@@ -133,10 +168,15 @@ std::vector<std::string> ParsePluginsTxt(const std::string& content)
   std::vector<std::string> active;
   std::vector<std::string> legacyActive;
   bool hasStarredLines = false;
+  bool firstLine = true;
 
   std::istringstream stream(content);
   std::string line;
   while (std::getline(stream, line)) {
+    if (firstLine) {
+      StripUtf8BomInPlace(line);
+      firstLine = false;
+    }
     TrimAsciiInPlace(line);
     if (line.empty() || line[0] == '#') {
       continue;
@@ -227,10 +267,19 @@ PluginScanResult ScanPlugins(
       std::ifstream ini(moIni);
       std::string line;
       std::string selectedProfile;
+      bool firstLine = true;
+      constexpr std::string_view kSelectedProfileKey = "selected_profile=";
       while (std::getline(ini, line)) {
-        if (line.rfind("selected_profile=", 0) == 0) {
-          selectedProfile = line.substr(17);
-          TrimAsciiInPlace(selectedProfile);
+        if (firstLine) {
+          StripUtf8BomInPlace(line);
+          firstLine = false;
+        }
+        TrimAsciiInPlace(line);
+        if (line.empty() || line[0] == '#' || line[0] == ';') {
+          continue;
+        }
+        if (line.rfind(kSelectedProfileKey, 0) == 0) {
+          selectedProfile = ParseSelectedProfileValue(line.substr(kSelectedProfileKey.size()));
           break;
         }
       }
