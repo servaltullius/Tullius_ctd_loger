@@ -106,7 +106,14 @@ ctest --test-dir build-linux-test --output-on-failure
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri`
    - `SKSE/Plugins/SkyrimDiagWinUI/App.xbf`
    - `SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf`
-5. 위 1~4 중 하나라도 실패하면 원인 수정 후 재빌드/재패키징. 예외 없이 릴리즈 업로드 중단.
+5. ZIP 용량 가드(중복 패키징 회귀 방지):
+   - `ls -lh /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip`
+   - 정상 범위 가이드: 대략 `8MB ~ 25MB`
+   - `25MB` 초과 시 릴리즈 업로드 금지(중첩 산출물 포함 여부 재점검 후 재패키징)
+6. ZIP 중첩 경로 가드(WinUI 중복 파일 금지):
+   - `unzip -l /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip | rg "SKSE/Plugins/SkyrimDiagWinUI/(publish|win-x64|x64)/"`
+   - 출력이 한 줄이라도 있으면 릴리즈 업로드 금지
+7. 위 1~6 중 하나라도 실패하면 원인 수정 후 재빌드/재패키징. 예외 없이 릴리즈 업로드 중단.
 
 ## Runtime Notes (MO2)
 
