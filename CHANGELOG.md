@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.36 (2026-02-17)
+
+### 수정
+- DumpTool: `usvfs_x64.dll` / `uvsfs64.dll`(MO2 VFS 훅 계층)을 훅 프레임워크 목록으로 분류하도록 보강. 해당 모듈이 크래시 원인으로 과도 지목되던 오탐 가능성을 완화.
+- DumpTool: 콜스택/스택 스캔 후보 승격 로직에서 MO2 VFS 훅 모듈(`usvfs_x64.dll`, `uvsfs64.dll`)을 CrashLogger/SKSE 런타임과 동일한 특별 처리 대상으로 추가. 비-훅 후보가 있을 때 피해 프레임 소유자를 1순위 원인으로 과도 지목하지 않도록 조정.
+
+### 테스트
+- 훅 프레임워크 JSON 테스트에 `usvfs_x64.dll`, `uvsfs64.dll` 항목 검증 추가.
+- 훅 프레임워크 가드 테스트에 MO2 VFS 특별 처리(`topIsMo2Vfs`) 회귀 방지 검증 추가.
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(29/29).
+
 ## v0.2.35 (2026-02-17)
 
 ### 수정
