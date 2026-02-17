@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.37 (2026-02-17)
+
+### 수정
+- Packaging: WinUI 폴더 복사 시 중첩 빌드 산출물(`publish/`, `win-x64/`, `x64/`)이 함께 ZIP에 들어가던 문제 수정. `scripts/package.py`에서 중첩 산출물을 제외하도록 보강해 릴리즈 ZIP 용량 급증(파일 중복 포함) 회귀를 해결.
+
+### 테스트
+- `tests/packaging_includes_cli_tests.py`에 중첩 WinUI 산출물(`publish`, `win-x64`) 미포함 검증 추가.
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(29/29).
+
 ## v0.2.36 (2026-02-17)
 
 ### 수정

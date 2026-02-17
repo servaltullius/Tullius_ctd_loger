@@ -184,12 +184,16 @@ def main(argv: list[str]) -> int:
         copied_winui = 0
         winui_plugins_dir = plugins_dir / "SkyrimDiagWinUI"
         winui_plugins_dir.mkdir(parents=True, exist_ok=True)
+        excluded_top_level_dirs = {"publish", "win-x64", "x64"}
         for item in winui_publish_dir.rglob("*"):
             if not item.is_file():
                 continue
             if args.no_pdb and item.suffix.lower() == ".pdb":
                 continue
             rel = item.relative_to(winui_publish_dir)
+            if rel.parts and rel.parts[0].lower() in excluded_top_level_dirs:
+                # Avoid packaging nested build/publish outputs that duplicate WinUI runtime files.
+                continue
             dst = winui_plugins_dir / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, dst)

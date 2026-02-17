@@ -32,6 +32,9 @@ def main() -> int:
         _touch(winui_dir / "SkyrimDiagDumpToolWinUI.pri")
         _touch(winui_dir / "App.xbf")
         _touch(winui_dir / "MainWindow.xbf")
+        # Nested build/publish output should be ignored by the packager.
+        _touch(winui_dir / "publish" / "SkyrimDiagDumpToolWinUI.exe")
+        _touch(winui_dir / "win-x64" / "SkyrimDiagDumpToolWinUI.exe")
 
         proc = subprocess.run(
             [
@@ -70,6 +73,12 @@ def main() -> int:
         assert (
             "SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf" in names
         ), "Expected WinUI MainWindow.xbf asset to be packaged"
+        assert (
+            "SKSE/Plugins/SkyrimDiagWinUI/publish/SkyrimDiagDumpToolWinUI.exe" not in names
+        ), "Nested publish output must not be packaged"
+        assert (
+            "SKSE/Plugins/SkyrimDiagWinUI/win-x64/SkyrimDiagDumpToolWinUI.exe" not in names
+        ), "Nested RID output must not be packaged"
 
     return 0
 
