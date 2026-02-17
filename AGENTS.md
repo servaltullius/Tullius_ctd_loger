@@ -85,6 +85,29 @@ ctest --test-dir build-linux-test --output-on-failure
 - **ZIP output (필수 경로):** `C:\Users\kdw73\Tullius_ctd_loger\dist\Tullius_ctd_loger.zip`
 - **WSL 경로:** `/mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip`
 
+### Release Hard Gate (WinUI 실행 회귀 방지)
+
+아래 항목을 **모두 통과하기 전에는 릴리즈(프리/정식) 생성 금지**.
+
+1. WSL -> Windows mirror 스크립트 동기화 확인(최소 아래 2개):
+   - `scripts/build-winui.cmd`
+   - `scripts/package.py`
+   - 권장: `sha256sum /home/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd`
+   - 권장: `sha256sum /home/kdw73/Tullius_ctd_loger/scripts/package.py /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/package.py`
+2. WinUI 빌드 산출물 필수 파일 존재 확인(`build-winui`):
+   - `SkyrimDiagDumpToolWinUI.exe`
+   - `SkyrimDiagDumpToolWinUI.pri`
+   - `App.xbf`
+   - `MainWindow.xbf`
+3. 패키징은 기본적으로 `--no-pdb` 사용:
+   - `python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb`
+4. ZIP 내부 필수 파일 검증:
+   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri`
+   - `SKSE/Plugins/SkyrimDiagWinUI/App.xbf`
+   - `SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf`
+5. 위 1~4 중 하나라도 실패하면 원인 수정 후 재빌드/재패키징. 예외 없이 릴리즈 업로드 중단.
+
 ## Runtime Notes (MO2)
 
 - MO2에서 zip를 모드로 설치하면 기본적으로 `SKSE/Plugins/`에 배치됩니다.
