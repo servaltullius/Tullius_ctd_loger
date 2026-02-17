@@ -27,6 +27,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/EvidenceBuilderInternalsRecommendations.cpp
   src/EvidenceBuilderInternalsSummary.cpp
   src/EvidenceBuilderInternalsUtil.cpp
+  src/GraphicsInjectionDiag.cpp
+  src/GraphicsInjectionDiag.h
   src/CrashLogger.cpp
   src/CrashLogger.h
   src/Mo2Index.cpp
@@ -35,6 +37,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/MinidumpUtil.h
   src/SignatureDatabase.cpp
   src/SignatureDatabase.h
+  src/PluginRules.cpp
+  src/PluginRules.h
   src/AddressResolver.cpp
   src/AddressResolver.h
   src/CrashHistory.cpp
@@ -97,6 +101,8 @@ set(SKYDIAG_DUMP_TOOL_DATA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/data")
 set(SKYDIAG_DUMP_TOOL_DATA_FILES
   "hook_frameworks.json"
   "crash_signatures.json"
+  "graphics_injection_rules.json"
+  "plugin_rules.json"
   "address_db/skyrimse_functions.json"
 )
 

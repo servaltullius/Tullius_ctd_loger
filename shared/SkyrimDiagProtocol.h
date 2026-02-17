@@ -12,6 +12,6 @@ inline constexpr wchar_t kKernelObjectSuffix_CrashEvent[] = L"_CRASH";
 // Custom minidump user stream types must be > MINIDUMP_STREAM_TYPE::LastReservedStream (0xffff).
 inline constexpr std::uint32_t kMinidumpUserStream_Blackbox = 0x10000u + 0x5344u;  // arbitrary
 inline constexpr std::uint32_t kMinidumpUserStream_WctJson = 0x10000u + 0x5743u;   // arbitrary
+inline constexpr std::uint32_t kMinidumpUserStream_PluginInfo = 0x10000u + 0x504Cu;  // arbitrary "PL"
 
 }  // namespace skydiag::protocol
-

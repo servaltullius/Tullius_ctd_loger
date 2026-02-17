@@ -38,6 +38,55 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     r.evidence.push_back(std::move(e));
   }
 
+  if (r.graphics_diag.has_value()) {
+    const auto& gd = *r.graphics_diag;
+    EvidenceItem e{};
+    e.confidence_level = gd.confidence_level;
+    e.confidence = gd.confidence.empty() ? ConfidenceText(lang, gd.confidence_level) : gd.confidence;
+    e.title = en
+      ? (L"Graphics injection crash: " + ToWideAscii(gd.rule_id))
+      : (L"그래픽 인젝션 크래시: " + ToWideAscii(gd.rule_id));
+    e.details = gd.cause;
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (!r.plugin_diagnostics.empty()) {
+    for (const auto& pd : r.plugin_diagnostics) {
+      EvidenceItem e{};
+      e.confidence_level = pd.confidence_level;
+      e.confidence = pd.confidence.empty() ? ConfidenceText(lang, pd.confidence_level) : pd.confidence;
+      e.title = en
+        ? (L"Plugin diagnostics: " + ToWideAscii(pd.rule_id))
+        : (L"플러그인 진단: " + ToWideAscii(pd.rule_id));
+      e.details = pd.cause;
+      r.evidence.push_back(std::move(e));
+    }
+  }
+
+  if (!r.missing_masters.empty()) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Missing plugin masters detected"
+      : L"누락된 마스터 플러그인 감지";
+    e.details = JoinList(r.missing_masters, 4, L", ");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.needs_bees) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"BEES requirement detected"
+      : L"BEES 필요 조건 감지";
+    e.details = en
+      ? L"Header 1.71 plugin(s) found on pre-1.6.1130 runtime without bees.dll."
+      : L"1.71 헤더 플러그인이 있으나 1.6.1130 미만 런타임에서 bees.dll이 로드되지 않았습니다.";
+    r.evidence.push_back(std::move(e));
+  }
+
   if (hasException) {
     if (auto info = TryExplainExceptionInfo(r, en)) {
       EvidenceItem e{};

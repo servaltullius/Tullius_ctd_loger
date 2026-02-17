@@ -19,6 +19,7 @@ add_executable(${PROJECT_NAME}
   src/LoadStats.cpp
   src/ManualCapture.cpp
   src/PendingCrashAnalysis.cpp
+  src/PluginScanner.cpp
   src/ProcessAttach.cpp
   src/ProcessUtil.cpp
   src/WctCapture.cpp
@@ -28,6 +29,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/DumpWriter.h
   include/SkyrimDiagHelper/HangDetect.h
   include/SkyrimDiagHelper/LoadStats.h
+  include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
   include/SkyrimDiagHelper/WctCapture.h)
 
@@ -41,7 +43,9 @@ target_link_libraries(${PROJECT_NAME}
     nlohmann_json::nlohmann_json
     Advapi32
     User32
-    Dbghelp)
+    Dbghelp
+    Shell32
+    Ole32)
 
 target_compile_definitions(${PROJECT_NAME}
   PRIVATE

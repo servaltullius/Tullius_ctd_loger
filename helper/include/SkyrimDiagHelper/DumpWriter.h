@@ -17,6 +17,7 @@ bool WriteDumpWithStreams(
   const skydiag::SharedLayout* shmSnapshot,
   std::size_t shmSnapshotBytes,
   const std::string& wctJsonUtf8,
+  const std::string& pluginScanJson,
   bool isCrash,
   DumpMode dumpMode,
   std::wstring* err);

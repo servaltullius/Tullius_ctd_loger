@@ -3,6 +3,7 @@
 #include "Bucket.h"
 #include "CrashHistory.h"
 #include "EvidenceBuilder.h"
+#include "GraphicsInjectionDiag.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
 #include "AnalyzerInternals.h"
@@ -181,6 +182,26 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
+  // Graphics injection diagnostics (best-effort, data-driven via JSON rules).
+  if (!opt.data_dir.empty()) {
+    GraphicsInjectionDiag graphicsDiag;
+    const auto rulesPath = std::filesystem::path(opt.data_dir) / L"graphics_injection_rules.json";
+    if (graphicsDiag.LoadRules(rulesPath)) {
+      std::vector<std::wstring> moduleFilenames;
+      moduleFilenames.reserve(allModules.size());
+      for (const auto& m : allModules) {
+        if (!m.filename.empty()) {
+          moduleFilenames.push_back(m.filename);
+        }
+      }
+      out.graphics_env = graphicsDiag.DetectEnvironment(moduleFilenames);
+      out.graphics_diag = graphicsDiag.Diagnose(
+        moduleFilenames,
+        out.fault_module_filename,
+        opt.language == i18n::Language::kKorean);
+    }
+  }
+
   // SkyrimDiag blackbox (optional)
   void* bbPtr = nullptr;
   ULONG bbSize = 0;
@@ -321,6 +342,57 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_WctJson, &wctPtr, &wctSize) && wctPtr && wctSize > 0) {
     out.has_wct = true;
     out.wct_json_utf8.assign(static_cast<const char*>(wctPtr), static_cast<std::size_t>(wctSize));
+  }
+
+  // Plugin scan stream (optional).
+  void* pluginPtr = nullptr;
+  ULONG pluginSize = 0;
+  if (ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_PluginInfo, &pluginPtr, &pluginSize) &&
+      pluginPtr && pluginSize > 0) {
+    out.has_plugin_scan = true;
+    out.plugin_scan_json_utf8.assign(static_cast<const char*>(pluginPtr), static_cast<std::size_t>(pluginSize));
+  }
+
+  ParsedPluginScan parsedPluginScan{};
+  bool parsedPluginScanOk = false;
+  if (out.has_plugin_scan && !out.plugin_scan_json_utf8.empty()) {
+    parsedPluginScanOk = ParsePluginScanJson(out.plugin_scan_json_utf8, &parsedPluginScan);
+    if (parsedPluginScanOk) {
+      out.missing_masters = ComputeMissingMasters(parsedPluginScan);
+
+      const bool hasHeader171 = AnyPluginHeaderVersionGte(parsedPluginScan, 1.71);
+      bool hasBees = false;
+      for (const auto& m : allModules) {
+        if (WideLower(m.filename) == L"bees.dll") {
+          hasBees = true;
+          break;
+        }
+      }
+      bool gameVersionLt1130 = false;
+      if (!out.game_version.empty()) {
+        gameVersionLt1130 = IsGameVersionLessThan(out.game_version, "1.6.1130");
+      }
+      out.needs_bees = hasHeader171 && gameVersionLt1130 && !hasBees;
+    }
+  }
+
+  if (parsedPluginScanOk && !opt.data_dir.empty()) {
+    PluginRules pluginRules;
+    const auto rulesPath = std::filesystem::path(opt.data_dir) / L"plugin_rules.json";
+    if (pluginRules.LoadFromJson(rulesPath)) {
+      PluginRulesContext ctx{};
+      ctx.scan = &parsedPluginScan;
+      ctx.game_version = out.game_version;
+      ctx.use_korean = (opt.language == i18n::Language::kKorean);
+      ctx.missing_masters = out.missing_masters;
+      ctx.loaded_module_filenames.reserve(allModules.size());
+      for (const auto& m : allModules) {
+        if (!m.filename.empty()) {
+          ctx.loaded_module_filenames.push_back(m.filename);
+        }
+      }
+      out.plugin_diagnostics = pluginRules.Evaluate(ctx);
+    }
   }
 
   bool hasHangEvent = false;

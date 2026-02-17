@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CrashHistory.h"
+#include "GraphicsInjectionDiag.h"
+#include "PluginRules.h"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -91,6 +93,13 @@ struct AnalysisResult
   std::optional<SignatureMatch> signature_match;
   std::unordered_map<std::uint64_t, std::string> resolved_functions;
   std::vector<ModuleStats> history_stats;
+  GraphicsEnvironment graphics_env;
+  std::optional<GraphicsDiagResult> graphics_diag;
+  bool has_plugin_scan = false;
+  std::string plugin_scan_json_utf8;
+  std::vector<std::wstring> missing_masters;
+  bool needs_bees = false;
+  std::vector<PluginRuleDiagnosis> plugin_diagnostics;
 
   // Best-effort callstack (primary thread: crash thread, WCT cycle thread, or inferred main thread)
   std::uint32_t stackwalk_primary_tid = 0;

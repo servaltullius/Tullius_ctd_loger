@@ -37,6 +37,7 @@ bool WriteDumpWithStreams(
   const skydiag::SharedLayout* shmSnapshot,
   std::size_t shmSnapshotBytes,
   const std::string& wctJsonUtf8,
+  const std::string& pluginScanJson,
   bool isCrash,
   DumpMode dumpMode,
   std::wstring* err)
@@ -69,7 +70,7 @@ bool WriteDumpWithStreams(
   }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
-  streams.reserve(2);
+  streams.reserve(3);
 
   MINIDUMP_USER_STREAM s1{};
   s1.Type = skydiag::protocol::kMinidumpUserStream_Blackbox;
@@ -83,6 +84,14 @@ bool WriteDumpWithStreams(
     s2.BufferSize = static_cast<ULONG>(wctJsonUtf8.size());
     s2.Buffer = const_cast<char*>(wctJsonUtf8.data());
     streams.push_back(s2);
+  }
+
+  MINIDUMP_USER_STREAM s3{};
+  if (!pluginScanJson.empty()) {
+    s3.Type = skydiag::protocol::kMinidumpUserStream_PluginInfo;
+    s3.BufferSize = static_cast<ULONG>(pluginScanJson.size());
+    s3.Buffer = const_cast<char*>(pluginScanJson.data());
+    streams.push_back(s3);
   }
 
   MINIDUMP_USER_STREAM_INFORMATION usi{};

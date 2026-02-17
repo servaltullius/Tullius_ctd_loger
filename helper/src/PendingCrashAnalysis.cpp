@@ -9,6 +9,7 @@
 #include "DumpToolLaunch.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
+#include "PluginScanner.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/CrashRecapturePolicy.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
@@ -193,6 +194,19 @@ void FinalizePendingCrashAnalysisIfReady(
     if (IsProcessStillAlive(proc.process, &aliveErr)) {
       const auto tsFull = Timestamp();
       const auto fullDumpPath = (outBase / (L"SkyrimDiag_Crash_" + tsFull + L"_Full.dmp")).wstring();
+
+      std::string pluginScanJson;
+      {
+        std::filesystem::path gameExeDir;
+        if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+          const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
+          auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+          pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
+        } else {
+          AppendLogLine(outBase, L"PluginScanner skipped for full recapture: failed to resolve game exe directory.");
+        }
+      }
+
       std::wstring fullDumpErr;
       if (!skydiag::helper::WriteDumpWithStreams(
             proc.process,
@@ -201,6 +215,7 @@ void FinalizePendingCrashAnalysisIfReady(
             proc.shm,
             proc.shmSize,
             /*wctJsonUtf8=*/{},
+            pluginScanJson,
             /*isCrash=*/true,
             skydiag::helper::DumpMode::kFull,
             &fullDumpErr)) {

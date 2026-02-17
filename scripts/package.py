@@ -143,6 +143,8 @@ def main(argv: list[str]) -> int:
     dump_tool_data_files = [
         "hook_frameworks.json",
         "crash_signatures.json",
+        "graphics_injection_rules.json",
+        "plugin_rules.json",
         "address_db/skyrimse_functions.json",
     ]
     if not ini_plugin.is_file():

@@ -143,6 +143,58 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     summary["signature_match"] = nullptr;
   }
 
+  summary["graphics_environment"] = {
+    { "enb_detected", r.graphics_env.enb_detected },
+    { "reshade_detected", r.graphics_env.reshade_detected },
+    { "dxvk_detected", r.graphics_env.dxvk_detected },
+  };
+  summary["graphics_environment"]["injection_modules"] = nlohmann::json::array();
+  for (const auto& mod : r.graphics_env.injection_modules) {
+    summary["graphics_environment"]["injection_modules"].push_back(WideToUtf8(mod));
+  }
+  if (r.graphics_diag.has_value()) {
+    summary["graphics_diagnosis"] = {
+      { "rule_id", r.graphics_diag->rule_id },
+      { "cause", WideToUtf8(r.graphics_diag->cause) },
+      { "confidence", WideToUtf8(r.graphics_diag->confidence) },
+    };
+  } else {
+    summary["graphics_diagnosis"] = nullptr;
+  }
+
+  if (r.has_plugin_scan) {
+    auto parsedPluginScan = nlohmann::json::parse(r.plugin_scan_json_utf8, nullptr, false);
+    if (parsedPluginScan.is_discarded()) {
+      summary["plugin_scan"] = nullptr;
+      summary["plugin_scan_raw"] = r.plugin_scan_json_utf8;
+    } else {
+      summary["plugin_scan"] = std::move(parsedPluginScan);
+    }
+
+    if (!r.missing_masters.empty()) {
+      auto mm = nlohmann::json::array();
+      for (const auto& m : r.missing_masters) {
+        mm.push_back(WideToUtf8(m));
+      }
+      summary["missing_masters"] = std::move(mm);
+    } else {
+      summary["missing_masters"] = nlohmann::json::array();
+    }
+    summary["needs_bees"] = r.needs_bees;
+
+    if (!r.plugin_diagnostics.empty()) {
+      auto diags = nlohmann::json::array();
+      for (const auto& d : r.plugin_diagnostics) {
+        diags.push_back({
+          { "rule_id", d.rule_id },
+          { "cause", WideToUtf8(d.cause) },
+          { "confidence", WideToUtf8(d.confidence) },
+        });
+      }
+      summary["plugin_diagnostics"] = std::move(diags);
+    }
+  }
+
   if (!r.resolved_functions.empty()) {
     nlohmann::json funcs = nlohmann::json::object();
     for (const auto& [offset, name] : r.resolved_functions) {
@@ -262,6 +314,25 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   }
   if (!r.crash_bucket_key.empty()) {
     rpt << (en ? "CrashBucketKey: " : "크래시 버킷 키: ") << WideToUtf8(r.crash_bucket_key) << "\n";
+  }
+  if (r.has_plugin_scan) {
+    rpt << (en ? "PluginScan: 1" : "플러그인 스캔: 1") << "\n";
+  }
+  if (!r.missing_masters.empty()) {
+    rpt << (en ? "MissingMasters: " : "누락 마스터: ")
+        << WideToUtf8(JoinList(r.missing_masters, 8, L", ")) << "\n";
+  }
+  if (r.needs_bees) {
+    rpt << (en ? "NeedsBEES: 1" : "BEES 필요: 1") << "\n";
+  }
+  if (!r.plugin_diagnostics.empty()) {
+    std::vector<std::wstring> diagIds;
+    diagIds.reserve(r.plugin_diagnostics.size());
+    for (const auto& d : r.plugin_diagnostics) {
+      diagIds.push_back(Utf8ToWide(d.rule_id));
+    }
+    rpt << (en ? "PluginRules: " : "플러그인 규칙: ")
+        << WideToUtf8(JoinList(diagIds, 8, L", ")) << "\n";
   }
   rpt << "\n";
   rpt << (en ? "ExceptionCode: 0x" : "ExceptionCode: 0x") << std::hex << r.exc_code << std::dec << "\n";

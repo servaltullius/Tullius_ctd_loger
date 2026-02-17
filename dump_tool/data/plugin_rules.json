@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "HEADER_171_WITHOUT_BEES",
+      "condition": {
+        "any_plugin_header_version_gte": 1.71,
+        "game_version_lt": "1.6.1130",
+        "module_not_loaded": "bees.dll"
+      },
+      "diagnosis": {
+        "cause_ko": "헤더 버전 1.71 플러그인이 있으나 BEES가 설치되지 않음 - 구버전 런타임에서 크래시 가능",
+        "cause_en": "Header version 1.71 plugin found but BEES not installed - may crash on older runtime",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[BEES] BEES (Backported Extended ESL Support) 모드를 설치하세요",
+          "[대안] 게임을 1.6.1130 이상으로 업데이트하세요"
+        ],
+        "recommendations_en": [
+          "[BEES] Install BEES (Backported Extended ESL Support) mod",
+          "[Alternative] Update game to 1.6.1130 or later"
+        ]
+      }
+    },
+    {
+      "id": "MISSING_MASTER",
+      "condition": {
+        "has_missing_master": true
+      },
+      "diagnosis": {
+        "cause_ko": "플러그인의 마스터 파일이 누락됨 - 로드 시 CTD 확정",
+        "cause_en": "Plugin master file is missing - guaranteed CTD on load",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[필수] 누락된 마스터 모드를 설치하거나, 해당 플러그인을 비활성화하세요",
+          "[도구] LOOT 또는 Wrye Bash로 마스터 누락을 확인하세요"
+        ],
+        "recommendations_en": [
+          "[Required] Install the missing master mod or deactivate the plugin",
+          "[Tool] Use LOOT or Wrye Bash to check missing masters"
+        ]
+      }
+    },
+    {
+      "id": "ESL_SLOT_NEAR_LIMIT",
+      "condition": {
+        "esl_count_gte": 3800
+      },
+      "diagnosis": {
+        "cause_ko": "ESL 플러그인 수가 슬롯 한계(4096)에 근접 - 불안정할 수 있음",
+        "cause_en": "ESL plugin count approaching slot limit (4096) - may become unstable",
+        "confidence": "low",
+        "recommendations_ko": [
+          "[최적화] 불필요한 ESL 플러그인 정리 또는 병합을 고려하세요"
+        ],
+        "recommendations_en": [
+          "[Optimization] Consider removing or merging unnecessary ESL plugins"
+        ]
+      }
+    }
+  ]
+}

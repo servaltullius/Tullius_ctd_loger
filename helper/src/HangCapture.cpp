@@ -15,6 +15,7 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
+#include "PluginScanner.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -293,6 +294,18 @@ HangTickResult HandleHangTick(
   const std::string wctUtf8 = wctJson.dump(2);
   WriteTextFileUtf8(wctPath, wctUtf8);
 
+  std::string pluginScanJson;
+  {
+    std::filesystem::path gameExeDir;
+    if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+      const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
+      auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+      pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
+    } else {
+      AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
+    }
+  }
+
   bool dumpWritten = false;
   std::wstring dumpErr;
   if (!skydiag::helper::WriteDumpWithStreams(
@@ -302,6 +315,7 @@ HangTickResult HandleHangTick(
         proc.shm,
         proc.shmSize,
         wctUtf8,
+        pluginScanJson,
         /*isCrash=*/false,
         cfg.dumpMode,
         &dumpErr)) {

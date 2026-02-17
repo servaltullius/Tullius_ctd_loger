@@ -410,3 +410,93 @@ add_test(
   NAME skydiag_packaging_includes_cli_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
 )
+
+add_executable(skydiag_graphics_injection_rules_tests
+  graphics_injection_rules_tests.cpp
+)
+
+set_target_properties(skydiag_graphics_injection_rules_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_graphics_injection_rules_tests COMMAND skydiag_graphics_injection_rules_tests)
+set_tests_properties(skydiag_graphics_injection_rules_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_graphics_injection_diag_tests
+  graphics_injection_diag_tests.cpp
+)
+
+set_target_properties(skydiag_graphics_injection_diag_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_graphics_injection_diag_tests COMMAND skydiag_graphics_injection_diag_tests)
+set_tests_properties(skydiag_graphics_injection_diag_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_graphics_injection_integration_tests
+  graphics_injection_integration_tests.cpp
+)
+
+set_target_properties(skydiag_graphics_injection_integration_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_graphics_injection_integration_tests COMMAND skydiag_graphics_injection_integration_tests)
+set_tests_properties(skydiag_graphics_injection_integration_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_plugin_scanner_tests
+  plugin_scanner_tests.cpp
+)
+
+set_target_properties(skydiag_plugin_scanner_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_plugin_scanner_tests COMMAND skydiag_plugin_scanner_tests)
+set_tests_properties(skydiag_plugin_scanner_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_plugin_stream_tests
+  plugin_stream_tests.cpp
+)
+
+set_target_properties(skydiag_plugin_stream_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_plugin_stream_tests COMMAND skydiag_plugin_stream_tests)
+set_tests_properties(skydiag_plugin_stream_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(skydiag_plugin_rules_tests
+  plugin_rules_tests.cpp
+)
+
+set_target_properties(skydiag_plugin_rules_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_plugin_rules_tests COMMAND skydiag_plugin_rules_tests)
+set_tests_properties(skydiag_plugin_rules_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)

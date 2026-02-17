@@ -18,6 +18,7 @@
 #include "HelperLog.h"
 #include "IncidentManifest.h"
 #include "PendingCrashAnalysis.h"
+#include "PluginScanner.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
@@ -77,6 +78,18 @@ bool HandleCrashEventTick(
     pendingHangViewerDumpPath->clear();
   }
 
+  std::string pluginScanJson;
+  {
+    std::filesystem::path gameExeDir;
+    if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+      const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
+      auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+      pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
+    } else {
+      AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
+    }
+  }
+
   std::wstring dumpErr;
   const bool dumpOk = skydiag::helper::WriteDumpWithStreams(
     proc.process,
@@ -85,6 +98,7 @@ bool HandleCrashEventTick(
     proc.shm,
     proc.shmSize,
     /*wctJsonUtf8=*/{},
+    pluginScanJson,
     /*isCrash=*/true,
     cfg.dumpMode,
     &dumpErr);

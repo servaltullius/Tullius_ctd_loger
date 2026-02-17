@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "detection_modules": {
+    "enb": [
+      "d3d11.dll",
+      "d3dcompiler_46e.dll"
+    ],
+    "reshade": [
+      "reshade.dll",
+      "reshade64.dll",
+      "dxgi.dll"
+    ],
+    "dxvk": [
+      "d3d9.dll",
+      "dxvk_d3d11.dll"
+    ]
+  },
+  "rules": [
+    {
+      "id": "CRASH_IN_ENB",
+      "detect": {
+        "modules_any": [
+          "d3d11.dll",
+          "d3dcompiler_46e.dll"
+        ],
+        "fault_module_any": [
+          "d3d11.dll",
+          "d3dcompiler_46e.dll"
+        ]
+      },
+      "diagnosis": {
+        "cause_ko": "ENB/렌더링 인젝션 DLL 내부에서 크래시 발생",
+        "cause_en": "Crash occurred inside ENB/rendering injection DLL",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[ENB] enblocal.ini 설정(VideoMemorySizeMb, EnableOcclusionCulling 등) 점검",
+          "[ENB] 최신 ENB 바이너리로 업데이트 시도",
+          "[ENB] ENB를 일시 제거하고 크래시 재현 여부 확인"
+        ],
+        "recommendations_en": [
+          "[ENB] Check enblocal.ini settings (VideoMemorySizeMb, EnableOcclusionCulling, etc.)",
+          "[ENB] Try updating to the latest ENB binaries",
+          "[ENB] Temporarily remove ENB and check if crash reproduces"
+        ]
+      }
+    },
+    {
+      "id": "CRASH_IN_RESHADE",
+      "detect": {
+        "modules_any": [
+          "reshade.dll",
+          "reshade64.dll",
+          "dxgi.dll"
+        ],
+        "fault_module_any": [
+          "reshade.dll",
+          "reshade64.dll",
+          "dxgi.dll"
+        ]
+      },
+      "diagnosis": {
+        "cause_ko": "ReShade/렌더링 인젝션 DLL 내부에서 크래시 발생",
+        "cause_en": "Crash occurred inside ReShade/rendering injection DLL",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[ReShade] ReShade 버전 업데이트 또는 프리셋 변경 시도",
+          "[ReShade] ReShade를 일시 제거하고 크래시 재현 여부 확인"
+        ],
+        "recommendations_en": [
+          "[ReShade] Try updating ReShade or changing presets",
+          "[ReShade] Temporarily remove ReShade and check if crash reproduces"
+        ]
+      }
+    },
+    {
+      "id": "CRASH_IN_INPUT_INJECTION",
+      "detect": {
+        "modules_any": [
+          "dinput8.dll"
+        ],
+        "fault_module_any": [
+          "dinput8.dll"
+        ]
+      },
+      "diagnosis": {
+        "cause_ko": "입력 인젝션 DLL(dinput8.dll) 내부에서 크래시 발생",
+        "cause_en": "Crash occurred inside input injection DLL (dinput8.dll)",
+        "confidence": "medium",
+        "recommendations_ko": [
+          "[입력] dinput8.dll을 사용하는 모드(컨트롤러 모드 등) 점검",
+          "[입력] dinput8.dll을 일시 제거하고 크래시 재현 여부 확인"
+        ],
+        "recommendations_en": [
+          "[Input] Check mods using dinput8.dll (controller mods, etc.)",
+          "[Input] Temporarily remove dinput8.dll and check if crash reproduces"
+        ]
+      }
+    }
+  ]
+}

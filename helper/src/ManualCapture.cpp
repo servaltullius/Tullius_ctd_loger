@@ -14,6 +14,7 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
+#include "PluginScanner.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -86,6 +87,18 @@ void DoManualCapture(
   const std::string wctUtf8 = wctJson.dump(2);
   WriteTextFileUtf8(wctPath, wctUtf8);
 
+  std::string pluginScanJson;
+  {
+    std::filesystem::path gameExeDir;
+    if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+      const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
+      auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+      pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
+    } else {
+      AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
+    }
+  }
+
   std::wstring dumpErr;
   if (!skydiag::helper::WriteDumpWithStreams(
         proc.process,
@@ -94,6 +107,7 @@ void DoManualCapture(
         proc.shm,
         proc.shmSize,
         wctUtf8,
+        pluginScanJson,
         /*isCrash=*/false,
         cfg.dumpMode,
         &dumpErr)) {
@@ -149,4 +163,3 @@ void DoManualCapture(
 }
 
 }  // namespace skydiag::helper::internal
-
