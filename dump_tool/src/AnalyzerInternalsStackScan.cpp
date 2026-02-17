@@ -145,8 +145,9 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
       const std::wstring topLower = WideLower(modules[rows[0].modIndex].filename);
       const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
       const bool topIsSkseRuntime = IsSkseModule(topLower);
+      const bool topIsMo2Vfs = (topLower == L"usvfs_x64.dll" || topLower == L"uvsfs64.dll");
       const bool nearTie = (fallbackIt->score + 8u) >= rows[0].score;
-      if (topIsCrashLogger || topIsSkseRuntime || nearTie) {
+      if (topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs || nearTie) {
         std::iter_swap(rows.begin(), fallbackIt);
         promotedHookTop = true;
       }

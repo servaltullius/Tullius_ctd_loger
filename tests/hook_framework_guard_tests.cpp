@@ -50,6 +50,10 @@ int main()
     "Stackwalk scoring must include SKSE runtime alias handling.");
   AssertContains(
     stackwalkScoring,
+    "topIsMo2Vfs",
+    "Stackwalk scoring must include MO2 VFS alias handling.");
+  AssertContains(
+    stackwalkScoring,
     "IsSkseModule",
     "Stackwalk scoring must use shared SKSE module detection.");
   AssertContains(
@@ -80,6 +84,10 @@ int main()
     "Stack-scan scoring must include SKSE runtime alias handling.");
   AssertContains(
     stackScan,
+    "topIsMo2Vfs",
+    "Stack-scan scoring must include MO2 VFS alias handling.");
+  AssertContains(
+    stackScan,
     "IsSkseModule",
     "Stack-scan scoring must use shared SKSE module detection.");
   AssertContains(
@@ -90,6 +98,10 @@ int main()
     minidumpUtil,
     "sl.interposer.dll",
     "Minidump util fallback hook-framework list must include Streamline interposer alias.");
+  AssertContains(
+    minidumpUtil,
+    "usvfs_x64.dll",
+    "Minidump util fallback hook-framework list must include MO2 usvfs alias.");
   AssertContains(
     stackScan,
     "is_known_hook_framework",

@@ -9,6 +9,8 @@
     { "dll": "storageutil.dll", "reason_ko": "Papyrus 데이터 저장 인터셉트", "reason_en": "Papyrus data storage intercept" },
     { "dll": "crashlogger.dll", "reason_ko": "VEH 크래시 핸들러", "reason_en": "VEH crash handler" },
     { "dll": "crashloggersse.dll", "reason_ko": "VEH 크래시 핸들러", "reason_en": "VEH crash handler" },
+    { "dll": "usvfs_x64.dll", "reason_ko": "MO2 가상 파일시스템 훅", "reason_en": "MO2 virtual filesystem hook" },
+    { "dll": "uvsfs64.dll", "reason_ko": "MO2 VFS 호환/별칭 훅", "reason_en": "MO2 VFS compatibility/alias hook" },
     { "dll": "sl.interposer.dll", "reason_ko": "Streamline/DLSS 인터포저 훅", "reason_en": "Streamline/DLSS interposer hook" },
     { "dll": "skse64.dll", "reason_ko": "SKSE 런타임 훅", "reason_en": "SKSE runtime hooks" },
     { "dll": "skse64_loader.dll", "reason_ko": "SKSE 로더", "reason_en": "SKSE loader" },

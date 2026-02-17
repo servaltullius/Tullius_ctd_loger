@@ -36,6 +36,8 @@ static void TestKnownDllsPresent()
   assert(content.find("enginefixes.dll") != std::string::npos);
   assert(content.find("crashlogger.dll") != std::string::npos);
   assert(content.find("crashloggersse.dll") != std::string::npos);
+  assert(content.find("usvfs_x64.dll") != std::string::npos);
+  assert(content.find("uvsfs64.dll") != std::string::npos);
   assert(content.find("sl.interposer.dll") != std::string::npos);
   assert(content.find("skse64.dll") != std::string::npos);
   assert(content.find("po3_tweaks.dll") != std::string::npos);
