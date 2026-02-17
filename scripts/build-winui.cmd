@@ -9,6 +9,7 @@ set "RID=win-x64"
 set "TFM=net8.0-windows10.0.19041.0"
 set "BUILD_OUT=%SRC%\dump_tool_winui\bin\Release\%TFM%\%RID%"
 set "BUILD_OUT_X64=%SRC%\dump_tool_winui\bin\x64\Release\%TFM%\%RID%"
+set "BUILD_OUT_BASE=%SRC%\dump_tool_winui\bin\Release\%TFM%"
 
 if not exist "%PROJECT%" (
   echo ERROR: WinUI project not found: %PROJECT%
@@ -21,18 +22,33 @@ rem - Much smaller output (~29 MB zipped vs ~57 MB self-contained)
 dotnet build "%PROJECT%" -c Release -r %RID%
 if errorlevel 1 exit /b 1
 
-rem Check build output paths (with/without platform subfolder)
-if exist "%BUILD_OUT_X64%\SkyrimDiagDumpToolWinUI.exe" (
-  set "FINAL_OUT=%BUILD_OUT_X64%"
-  goto :copy_output
-)
-if exist "%BUILD_OUT%\SkyrimDiagDumpToolWinUI.exe" (
-  set "FINAL_OUT=%BUILD_OUT%"
-  goto :copy_output
-)
+set "FINAL_OUT="
 
-echo ERROR: expected WinUI output not found
+rem Prefer output that includes required WinUI XAML artifacts.
+call :set_candidate "%BUILD_OUT%"
+if defined FINAL_OUT goto :copy_output
+
+call :set_candidate "%BUILD_OUT_BASE%"
+if defined FINAL_OUT goto :copy_output
+
+call :set_candidate "%BUILD_OUT_X64%"
+if defined FINAL_OUT goto :copy_output
+
+echo ERROR: expected WinUI output not found ^(or missing App.xbf/MainWindow.xbf/.pri^)
+echo Tried:
+echo   %BUILD_OUT%
+echo   %BUILD_OUT_BASE%
+echo   %BUILD_OUT_X64%
 exit /b 3
+
+:set_candidate
+set "CAND=%~1"
+if not exist "%CAND%\SkyrimDiagDumpToolWinUI.exe" goto :eof
+if not exist "%CAND%\SkyrimDiagDumpToolWinUI.pri" goto :eof
+if not exist "%CAND%\App.xbf" goto :eof
+if not exist "%CAND%\MainWindow.xbf" goto :eof
+set "FINAL_OUT=%CAND%"
+goto :eof
 
 :copy_output
 if exist "%OUT%" rmdir /s /q "%OUT%"

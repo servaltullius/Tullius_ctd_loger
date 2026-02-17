@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.35 (2026-02-17)
+
+### 수정
+- Packaging/WinUI: `scripts/build-winui.cmd`의 출력 폴더 선택 로직을 보강해, `App.xbf` / `MainWindow.xbf` / `SkyrimDiagDumpToolWinUI.pri`가 포함된 경로만 패키징 대상으로 채택하도록 수정. 일부 환경에서 `x64` 경로가 우선 선택되며 XBF 자산이 빠져 WinUI가 실행 직후 종료되던 회귀를 수정.
+- Packaging: `scripts/package.py`에 WinUI 필수 자산 사전 검증을 추가. `App.xbf` / `MainWindow.xbf` / `.pri` 누락 시 ZIP 생성을 실패시켜 깨진 릴리즈 산출물이 배포되지 않도록 가드.
+
+### 테스트
+- `tests/packaging_includes_cli_tests.py`를 확장해 WinUI 필수 자산(`App.xbf`, `MainWindow.xbf`, `.pri`)이 ZIP에 포함되는지 검증 추가.
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(29/29).
+
 ## v0.2.34 (2026-02-16)
 
 ### 수정

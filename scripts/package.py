@@ -123,6 +123,19 @@ def main(argv: list[str]) -> int:
     if not winui_exe or not winui_publish_dir:
         print(f"ERROR: could not find SkyrimDiagDumpToolWinUI.exe under {winui_dir}", file=sys.stderr)
         return 3
+    required_winui_assets = [
+        "SkyrimDiagDumpToolWinUI.pri",
+        "App.xbf",
+        "MainWindow.xbf",
+    ]
+    for rel in required_winui_assets:
+        required_path = winui_publish_dir / rel
+        if not required_path.is_file():
+            print(
+                f"ERROR: required WinUI asset missing from {winui_publish_dir}: {rel}",
+                file=sys.stderr,
+            )
+            return 6
 
     ini_plugin = root / "dist" / "SkyrimDiag.ini"
     ini_helper = root / "dist" / "SkyrimDiagHelper.ini"

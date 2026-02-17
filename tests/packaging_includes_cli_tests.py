@@ -29,6 +29,9 @@ def main() -> int:
 
         # Minimal fake WinUI publish folder.
         _touch(winui_dir / "SkyrimDiagDumpToolWinUI.exe")
+        _touch(winui_dir / "SkyrimDiagDumpToolWinUI.pri")
+        _touch(winui_dir / "App.xbf")
+        _touch(winui_dir / "MainWindow.xbf")
 
         proc = subprocess.run(
             [
@@ -58,10 +61,18 @@ def main() -> int:
         assert (
             "SKSE/Plugins/SkyrimDiagDumpToolCli.exe" in names
         ), "Expected headless CLI exe to be packaged next to helper"
+        assert (
+            "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri" in names
+        ), "Expected WinUI PRI asset to be packaged"
+        assert (
+            "SKSE/Plugins/SkyrimDiagWinUI/App.xbf" in names
+        ), "Expected WinUI App.xbf asset to be packaged"
+        assert (
+            "SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf" in names
+        ), "Expected WinUI MainWindow.xbf asset to be packaged"
 
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
