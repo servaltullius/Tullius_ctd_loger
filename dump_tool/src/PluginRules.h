@@ -60,7 +60,22 @@ public:
   std::size_t RuleCount() const;
 
 private:
-  struct Rule;
+  struct Rule
+  {
+    std::string id;
+
+    std::optional<double> any_plugin_header_version_gte;
+    std::optional<std::string> game_version_lt;
+    std::optional<std::wstring> module_not_loaded_lower;
+    std::optional<bool> has_missing_master;
+    std::optional<std::size_t> esl_count_gte;
+
+    std::wstring cause_ko;
+    std::wstring cause_en;
+    std::string confidence;
+    std::vector<std::wstring> recommendations_ko;
+    std::vector<std::wstring> recommendations_en;
+  };
   std::vector<Rule> m_rules;
 };
 
