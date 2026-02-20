@@ -64,6 +64,8 @@ def main() -> int:
         assert (
             "SKSE/Plugins/SkyrimDiagDumpToolCli.exe" in names
         ), "Expected headless CLI exe to be packaged next to helper"
+        assert "SKSE/Plugins/SkyrimDiag.ini" in names, "Expected SkyrimDiag.ini to be packaged"
+        assert "SKSE/Plugins/SkyrimDiagHelper.ini" in names, "Expected SkyrimDiagHelper.ini to be packaged"
         assert (
             "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri" in names
         ), "Expected WinUI PRI asset to be packaged"
@@ -79,6 +81,19 @@ def main() -> int:
         assert (
             "SKSE/Plugins/SkyrimDiagWinUI/win-x64/SkyrimDiagDumpToolWinUI.exe" not in names
         ), "Nested RID output must not be packaged"
+
+        data_root = repo_root / "dump_tool" / "data"
+        expected_data = [
+            p.relative_to(data_root).as_posix()
+            for p in data_root.rglob("*")
+            if p.is_file()
+        ]
+        assert expected_data, "Expected at least one dump_tool/data file in repository"
+        for rel in expected_data:
+            plugin_data_path = f"SKSE/Plugins/data/{rel}"
+            winui_data_path = f"SKSE/Plugins/SkyrimDiagWinUI/data/{rel}"
+            assert plugin_data_path in names, f"Missing plugin data file in zip: {plugin_data_path}"
+            assert winui_data_path in names, f"Missing WinUI data file in zip: {winui_data_path}"
 
     return 0
 

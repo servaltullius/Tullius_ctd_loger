@@ -128,7 +128,7 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan)
   std::unordered_set<std::string> active;
   active.reserve(scan.plugins.size());
   for (const auto& plugin : scan.plugins) {
-    if (plugin.filename.empty()) {
+    if (!plugin.is_active || plugin.filename.empty()) {
       continue;
     }
     active.insert(AsciiLower(plugin.filename));
@@ -137,6 +137,9 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan)
   std::unordered_set<std::string> added;
   std::vector<std::wstring> missing;
   for (const auto& plugin : scan.plugins) {
+    if (!plugin.is_active) {
+      continue;
+    }
     for (const auto& master : plugin.masters) {
       if (master.empty()) {
         continue;

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <locale>
 #include <regex>
+#include <stdexcept>
 #include <string_view>
 
 #include <nlohmann/json.hpp>
@@ -47,7 +48,12 @@ i18n::ConfidenceLevel ParseConfidence(std::string_view s)
 
 std::uint32_t ParseHexU32(const std::string& s)
 {
-  return static_cast<std::uint32_t>(std::stoul(s, nullptr, 0));
+  std::size_t parsed = 0;
+  const auto value = std::stoul(s, &parsed, 0);
+  if (parsed != s.size()) {
+    throw std::invalid_argument("trailing characters in hex value");
+  }
+  return static_cast<std::uint32_t>(value);
 }
 
 std::wstring Utf8ToWidePortable(const std::string& s)
@@ -80,6 +86,7 @@ struct SignatureDatabase::Signature
 
   std::wstring fault_module;      // lowercase, empty = any
   std::string fault_offset_regex;  // empty = any
+  std::optional<std::regex> fault_offset_re;
 
   bool fault_module_is_system = false;
   bool has_fault_module_is_system = false;
@@ -125,22 +132,42 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
       if (!s.is_object()) {
         continue;
       }
+
       Signature sig{};
       sig.id = s.value("id", "");
       if (sig.id.empty()) {
         continue;
       }
 
-      const auto& m = s.at("match");
+      const auto itMatch = s.find("match");
+      const auto itDiagnosis = s.find("diagnosis");
+      if (itMatch == s.end() || !itMatch->is_object() ||
+          itDiagnosis == s.end() || !itDiagnosis->is_object()) {
+        continue;
+      }
+      const auto& m = *itMatch;
+      bool valid = true;
+
       if (m.contains("exc_code") && m["exc_code"].is_string()) {
-        sig.exc_code = ParseHexU32(m["exc_code"].get<std::string>());
-        sig.has_exc_code = true;
+        try {
+          sig.exc_code = ParseHexU32(m["exc_code"].get<std::string>());
+          sig.has_exc_code = true;
+        } catch (...) {
+          valid = false;
+        }
       }
       if (m.contains("fault_module") && m["fault_module"].is_string()) {
         sig.fault_module = WideLower(Utf8ToWidePortable(m["fault_module"].get<std::string>()));
       }
       if (m.contains("fault_offset_regex") && m["fault_offset_regex"].is_string()) {
         sig.fault_offset_regex = m["fault_offset_regex"].get<std::string>();
+        if (!sig.fault_offset_regex.empty()) {
+          try {
+            sig.fault_offset_re.emplace(sig.fault_offset_regex, std::regex::icase);
+          } catch (...) {
+            valid = false;
+          }
+        }
       }
       if (m.contains("fault_module_is_system") && m["fault_module_is_system"].is_boolean()) {
         sig.fault_module_is_system = m["fault_module_is_system"].get<bool>();
@@ -161,7 +188,11 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
         }
       }
 
-      const auto& d = s.at("diagnosis");
+      if (!valid) {
+        continue;
+      }
+
+      const auto& d = *itDiagnosis;
       sig.cause_ko = Utf8ToWidePortable(d.value("cause_ko", ""));
       sig.cause_en = Utf8ToWidePortable(d.value("cause_en", ""));
       sig.confidence_level = ParseConfidence(d.value("confidence", ""));
@@ -202,11 +233,10 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
       continue;
     }
 
-    if (!sig.fault_offset_regex.empty()) {
+    if (sig.fault_offset_re) {
       char offsetHex[32]{};
       std::snprintf(offsetHex, sizeof(offsetHex), "%llX", static_cast<unsigned long long>(input.fault_offset));
-      std::regex re(sig.fault_offset_regex, std::regex::icase);
-      if (!std::regex_search(offsetHex, re)) {
+      if (!std::regex_search(offsetHex, *sig.fault_offset_re)) {
         continue;
       }
     }

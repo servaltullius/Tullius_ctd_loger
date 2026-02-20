@@ -95,6 +95,75 @@ void TestSignatureCallstackContainsRuntime()
   std::filesystem::remove(tempPath, ec);
 }
 
+void TestSignatureDatabaseToleratesMalformedEntries()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_malformed_runtime_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"signatures\": [\n"
+      "    {\n"
+      "      \"id\": \"BAD_REGEX\",\n"
+      "      \"match\": {\n"
+      "        \"exc_code\": \"0xC0000005\",\n"
+      "        \"fault_offset_regex\": \"[\"\n"
+      "      },\n"
+      "      \"diagnosis\": {\n"
+      "        \"cause_ko\": \"bad\",\n"
+      "        \"cause_en\": \"bad\",\n"
+      "        \"confidence\": \"low\",\n"
+      "        \"recommendations_ko\": [],\n"
+      "        \"recommendations_en\": []\n"
+      "      }\n"
+      "    },\n"
+      "    {\n"
+      "      \"id\": \"BAD_HEX\",\n"
+      "      \"match\": {\n"
+      "        \"exc_code\": \"0xGG\"\n"
+      "      },\n"
+      "      \"diagnosis\": {\n"
+      "        \"cause_ko\": \"bad\",\n"
+      "        \"cause_en\": \"bad\",\n"
+      "        \"confidence\": \"low\",\n"
+      "        \"recommendations_ko\": [],\n"
+      "        \"recommendations_en\": []\n"
+      "      }\n"
+      "    },\n"
+      "    {\n"
+      "      \"id\": \"GOOD\",\n"
+      "      \"match\": {\n"
+      "        \"exc_code\": \"0xC0000005\",\n"
+      "        \"fault_module\": \"SkyrimSE.exe\"\n"
+      "      },\n"
+      "      \"diagnosis\": {\n"
+      "        \"cause_ko\": \"jeongsang\",\n"
+      "        \"cause_en\": \"good\",\n"
+      "        \"confidence\": \"medium\",\n"
+      "        \"recommendations_ko\": [],\n"
+      "        \"recommendations_en\": []\n"
+      "      }\n"
+      "    }\n"
+      "  ]\n"
+      "}\n";
+  }
+
+  SignatureDatabase db;
+  assert(db.LoadFromJson(tempPath));
+  assert(db.Size() == 1);
+
+  SignatureMatchInput input{};
+  input.exc_code = 0xC0000005u;
+  input.fault_module = L"SkyrimSE.exe";
+  const auto matched = db.Match(input, /*useKorean=*/false);
+  assert(matched.has_value());
+  assert(matched->id == "GOOD");
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
+}
+
 void TestAddressResolverRuntime()
 {
   AddressResolver resolver;
@@ -157,6 +226,7 @@ int main()
 {
   TestSignatureDatabaseRuntime();
   TestSignatureCallstackContainsRuntime();
+  TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
   TestCrashHistoryRuntime();
   return 0;

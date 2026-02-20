@@ -61,6 +61,13 @@ const char* kScanJson = R"JSON(
       "is_esl": true,
       "is_active": true,
       "masters": ["A.esm", "MissingMaster.esm"]
+    },
+    {
+      "filename": "DisabledPatch.esp",
+      "header_version": 1.0,
+      "is_esl": false,
+      "is_active": false,
+      "masters": ["InactiveOnlyMissing.esm"]
     }
   ]
 }
@@ -78,12 +85,33 @@ void TestParseAndMissingMasters()
 {
   ParsedPluginScan scan{};
   assert(ParsePluginScanJson(kScanJson, &scan));
-  assert(scan.plugins.size() == 2);
+  assert(scan.plugins.size() == 3);
   assert(scan.plugins[1].header_version >= 1.70f);
   assert(scan.plugins[1].is_esl);
   const auto missing = ComputeMissingMasters(scan);
   assert(missing.size() == 1);
   assert(missing[0] == L"MissingMaster.esm");
+}
+
+void TestMissingMastersIgnoreInactivePlugins()
+{
+  const char* inactiveOnlyJson = R"JSON(
+{
+  "plugins": [
+    {
+      "filename": "OnlyInactive.esp",
+      "header_version": 1.0,
+      "is_esl": false,
+      "is_active": false,
+      "masters": ["ShouldNotCount.esm"]
+    }
+  ]
+}
+)JSON";
+  ParsedPluginScan scan{};
+  assert(ParsePluginScanJson(inactiveOnlyJson, &scan));
+  const auto missing = ComputeMissingMasters(scan);
+  assert(missing.empty());
 }
 
 void TestRulesEvaluateFromJson()
@@ -169,7 +197,7 @@ int main()
 {
   TestVersionCompare();
   TestParseAndMissingMasters();
+  TestMissingMastersIgnoreInactivePlugins();
   TestRulesEvaluateFromJson();
   return 0;
 }
-

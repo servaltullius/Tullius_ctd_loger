@@ -100,6 +100,30 @@ set_target_properties(skydiag_crash_capture_false_positive_guard_tests PROPERTIE
 
 add_test(NAME skydiag_crash_capture_false_positive_guard_tests COMMAND skydiag_crash_capture_false_positive_guard_tests)
 
+add_executable(skydiag_pending_crash_analysis_guard_tests
+  pending_crash_analysis_guard_tests.cpp
+)
+
+set_target_properties(skydiag_pending_crash_analysis_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_pending_crash_analysis_guard_tests COMMAND skydiag_pending_crash_analysis_guard_tests)
+
+add_executable(skydiag_plugin_runtime_guard_tests
+  plugin_runtime_guard_tests.cpp
+)
+
+set_target_properties(skydiag_plugin_runtime_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_plugin_runtime_guard_tests COMMAND skydiag_plugin_runtime_guard_tests)
+
 add_executable(skydiag_retention_tests
   retention_tests.cpp
 )

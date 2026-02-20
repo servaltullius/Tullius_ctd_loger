@@ -38,6 +38,46 @@ bool IsSlash(char c) noexcept
   return c == '\\' || c == '/';
 }
 
+constexpr char ToLowerAscii(char c) noexcept
+{
+  if (c >= 'A' && c <= 'Z') {
+    return static_cast<char>(c + ('a' - 'A'));
+  }
+  return c;
+}
+
+bool EndsWithCaseInsensitiveAscii(const char* s, const char* suffix) noexcept
+{
+  if (!s || !suffix) {
+    return false;
+  }
+  std::size_t sLen = 0;
+  while (s[sLen] != '\0') {
+    ++sLen;
+  }
+  std::size_t sufLen = 0;
+  while (suffix[sufLen] != '\0') {
+    ++sufLen;
+  }
+  if (sufLen == 0 || sufLen > sLen) {
+    return false;
+  }
+  const std::size_t start = sLen - sufLen;
+  for (std::size_t i = 0; i < sufLen; ++i) {
+    if (ToLowerAscii(s[start + i]) != ToLowerAscii(suffix[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool IsInterestingResourceName(const char* fileName) noexcept
+{
+  return EndsWithCaseInsensitiveAscii(fileName, ".nif") ||
+         EndsWithCaseInsensitiveAscii(fileName, ".hkx") ||
+         EndsWithCaseInsensitiveAscii(fileName, ".tri");
+}
+
 std::size_t AppendPathPart(char* dst, std::size_t cap, std::size_t pos, const char* part) noexcept
 {
   if (!dst || cap == 0 || !part || part[0] == '\0') {
@@ -70,11 +110,16 @@ ErrorCode LooseFileDoOpen_Hook(RE::BSResource::LooseFileStream* self)
     return rc;
   }
 
+  const char* fileName = self->fileName.c_str();
+  if (!IsInterestingResourceName(fileName)) {
+    return rc;
+  }
+
   char buf[512]{};
   std::size_t n = 0;
   n = AppendPathPart(buf, sizeof(buf), n, self->prefix.c_str());
   n = AppendPathPart(buf, sizeof(buf), n, self->dirName.c_str());
-  n = AppendPathPart(buf, sizeof(buf), n, self->fileName.c_str());
+  n = AppendPathPart(buf, sizeof(buf), n, fileName);
 
   if (n > 0 && buf[0] != '\0') {
     NoteResourceOpen(std::string_view(buf, n));

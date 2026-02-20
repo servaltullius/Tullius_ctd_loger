@@ -67,6 +67,12 @@ void ClearPendingCrashAnalysis(PendingCrashAnalysis* task)
     return;
   }
   if (task->process) {
+    const DWORD waitState = WaitForSingleObject(task->process, 0);
+    if (waitState == WAIT_TIMEOUT) {
+      // Ensure no stale headless analyzer process survives across crashes.
+      TerminateProcess(task->process, 1);
+      WaitForSingleObject(task->process, 1000);
+    }
     CloseHandle(task->process);
     task->process = nullptr;
   }

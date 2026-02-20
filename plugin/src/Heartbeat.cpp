@@ -89,7 +89,12 @@ void QueueHeartbeatTask() noexcept
 
   if (auto* ti = SKSE::GetTaskInterface()) {
     // Must run on the game/UI thread so a frozen main thread stops heartbeats.
-    ti->AddUITask([]() { HeartbeatTaskOnMainThread(); });
+    try {
+      ti->AddUITask([]() { HeartbeatTaskOnMainThread(); });
+    } catch (...) {
+      // Never leave the scheduler stuck in pending=true if task enqueue throws.
+      g_taskPending.store(false);
+    }
   } else {
     g_taskPending.store(false);
   }

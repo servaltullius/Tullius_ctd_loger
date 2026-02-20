@@ -65,6 +65,14 @@ def _zip_dir(src_dir: Path, out_zip: Path) -> None:
             zf.write(path, rel)
 
 
+def _collect_data_files(data_root: Path) -> list[Path]:
+    if not data_root.is_dir():
+        return []
+    files = [p.relative_to(data_root) for p in data_root.rglob("*") if p.is_file()]
+    files.sort()
+    return files
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Package SkyrimDiag as an MO2-friendly zip.")
     parser.add_argument("--build-dir", default="build", help="CMake build directory (default: build)")
@@ -140,18 +148,15 @@ def main(argv: list[str]) -> int:
     ini_plugin = root / "dist" / "SkyrimDiag.ini"
     ini_helper = root / "dist" / "SkyrimDiagHelper.ini"
     data_root = root / "dump_tool" / "data"
-    dump_tool_data_files = [
-        "hook_frameworks.json",
-        "crash_signatures.json",
-        "graphics_injection_rules.json",
-        "plugin_rules.json",
-        "address_db/skyrimse_functions.json",
-    ]
+    dump_tool_data_files = _collect_data_files(data_root)
     if not ini_plugin.is_file():
         print(f"ERROR: missing {ini_plugin}", file=sys.stderr)
         return 4
     if not ini_helper.is_file():
         print(f"ERROR: missing {ini_helper}", file=sys.stderr)
+        return 4
+    if not dump_tool_data_files:
+        print(f"ERROR: no dump tool data files found under {data_root}", file=sys.stderr)
         return 4
 
     out_zip = Path(args.out) if args.out else root / "dist" / f"Tullius_ctd_loger_v{_read_version(root)}.zip"
@@ -170,8 +175,6 @@ def main(argv: list[str]) -> int:
         shutil.copy2(ini_helper, plugins_dir / "SkyrimDiagHelper.ini")
         for rel in dump_tool_data_files:
             src = data_root / rel
-            if not src.is_file():
-                continue
             dst = plugins_dir / "data" / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -210,8 +213,6 @@ def main(argv: list[str]) -> int:
         shutil.copy2(native_dll, winui_plugins_dir / "SkyrimDiagDumpToolNative.dll")
         for rel in dump_tool_data_files:
             src = data_root / rel
-            if not src.is_file():
-                continue
             dst = winui_plugins_dir / "data" / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)

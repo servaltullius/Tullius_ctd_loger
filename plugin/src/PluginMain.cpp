@@ -215,9 +215,13 @@ void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
         spdlog::warn("SkyrimDiag: test hotkey -> intentional crash");
         skydiag::plugin::Note(/*tag=*/0x544553545F435241ull);  // "TEST_CRA"
         if (auto* ti = SKSE::GetTaskInterface()) {
-          ti->AddUITask([]() {
-            *reinterpret_cast<volatile int*>(0) = 0;
-          });
+          try {
+            ti->AddUITask([]() {
+              *reinterpret_cast<volatile int*>(0) = 0;
+            });
+          } catch (...) {
+            spdlog::warn("SkyrimDiag: failed to enqueue crash hotkey UI task");
+          }
         }
       }
 
@@ -226,11 +230,15 @@ void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
         spdlog::warn("SkyrimDiag: test hotkey -> intentional hang (main thread)");
         skydiag::plugin::Note(/*tag=*/0x544553545F48414Eull);  // "TEST_HAN"
         if (auto* ti = SKSE::GetTaskInterface()) {
-          ti->AddUITask([]() {
-            for (;;) {
-              Sleep(1000);
-            }
-          });
+          try {
+            ti->AddUITask([]() {
+              for (;;) {
+                Sleep(1000);
+              }
+            });
+          } catch (...) {
+            spdlog::warn("SkyrimDiag: failed to enqueue hang hotkey UI task");
+          }
         }
       }
 
