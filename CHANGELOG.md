@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.38-rc3 (2026-02-20)
+
+### 수정
+- Helper: pending crash 분석 태스크 정리 시 analyzer 프로세스가 살아 있으면 종료 후 핸들을 닫도록 보강하여, 잔존 프로세스로 인한 재진입/충돌 가능성을 완화.
+- Plugin: UI 작업 큐(`AddUITask`) enqueue 실패 예외 가드를 추가해 pending 플래그가 고착되는 런타임 데드락 가능성을 완화.
+- Plugin: 리소스 훅에서 관심 확장자(.nif/.hkx/.tri) 선필터를 추가해 불필요한 경로 조합/문자열 처리 오버헤드를 줄임.
+- DumpTool: 시그니처 DB 로더를 항목 단위 내결함으로 개선(잘못된 hex/regex/구조 항목 스킵)하고, regex 사전 컴파일을 도입해 매칭 경로 안정성/성능을 보강.
+- DumpTool: missing masters 계산 시 비활성 플러그인으로 인한 false positive를 제거.
+- Packaging: `dump_tool/data` 하위 파일을 재귀 수집하도록 변경해 신규 데이터 파일이 패키지에서 누락되지 않도록 개선.
+
+### 테스트
+- 신규 가드 테스트 추가:
+  - `tests/pending_crash_analysis_guard_tests.cpp`
+  - `tests/plugin_runtime_guard_tests.cpp`
+- 런타임/로직/패키징 회귀 테스트 확장:
+  - `tests/analysis_engine_runtime_tests.cpp`
+  - `tests/plugin_rules_logic_tests.cpp`
+  - `tests/packaging_includes_cli_tests.py`
+- 전체 Linux 테스트 재실행: `ctest --test-dir build-linux-test --output-on-failure` 통과(38/38).
+- Windows 빌드/패키징 + 릴리즈 하드게이트(WinUI 필수 파일, ZIP 필수 엔트리, 용량/중첩 경로 가드) 통과.
+
 ## v0.2.37 (2026-02-17)
 
 ### 수정

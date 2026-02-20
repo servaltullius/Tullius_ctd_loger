@@ -83,10 +83,11 @@ ctest --test-dir build-linux --output-on-failure
 
 After building on Windows, create an MO2-friendly zip:
 ```powershell
-python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
+python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
 ```
 
 The packager requires WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes both `SkyrimDiagDumpToolWinUI.exe` and `SkyrimDiagDumpToolNative.dll`.
+It also packages `dump_tool/data` recursively (for both plugin path and WinUI path), so newly added data files do not require manual script edits.
 
 ## Release (GitHub)
 
@@ -97,8 +98,27 @@ Policy:
 Suggested checklist:
 1) Update version + changelog
 2) Run tests (Linux + Windows)
-3) Build + package zip on Windows
+3) Build + package zip on Windows (`--no-pdb`)
 4) Tag + push, then create GitHub Release and upload `dist/Tullius_ctd_loger.zip`
+
+Release hard-gate quick checks:
+```bash
+# 1) scripts sync (WSL repo <-> Windows mirror)
+sha256sum /home/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd
+sha256sum /home/kdw73/Tullius_ctd_loger/scripts/package.py /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/package.py
+
+# 2) required WinUI outputs
+ls /mnt/c/Users/kdw73/Tullius_ctd_loger/build-winui/{SkyrimDiagDumpToolWinUI.exe,SkyrimDiagDumpToolWinUI.pri,App.xbf,MainWindow.xbf}
+
+# 3) zip required entries
+unzip -Z1 /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip | rg '^SKSE/Plugins/SkyrimDiagWinUI/(SkyrimDiagDumpToolWinUI.exe|SkyrimDiagDumpToolWinUI.pri|App.xbf|MainWindow.xbf)$'
+
+# 4) zip size guard (guide: 8MB ~ 25MB)
+ls -lh /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip
+
+# 5) nested-path guard (must be empty)
+unzip -Z1 /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip | rg '^SKSE/Plugins/SkyrimDiagWinUI/(publish|win-x64|x64)/'
+```
 
 ## Build (Windows)
 
