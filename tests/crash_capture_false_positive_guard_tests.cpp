@@ -25,14 +25,17 @@ int main()
   const std::filesystem::path processAttachPath = repoRoot / "helper" / "src" / "ProcessAttach.cpp";
   const std::filesystem::path crashCapturePath = repoRoot / "helper" / "src" / "CrashCapture.cpp";
   const std::filesystem::path helperMainPath = repoRoot / "helper" / "src" / "main.cpp";
+  const std::filesystem::path dumpToolLaunchPath = repoRoot / "helper" / "src" / "DumpToolLaunch.cpp";
 
   assert(std::filesystem::exists(processAttachPath) && "helper/src/ProcessAttach.cpp not found");
   assert(std::filesystem::exists(crashCapturePath) && "helper/src/CrashCapture.cpp not found");
   assert(std::filesystem::exists(helperMainPath) && "helper/src/main.cpp not found");
+  assert(std::filesystem::exists(dumpToolLaunchPath) && "helper/src/DumpToolLaunch.cpp not found");
 
   const std::string processAttach = ReadAllText(processAttachPath);
   const std::string crashCapture = ReadAllText(crashCapturePath);
   const std::string helperMain = ReadAllText(helperMainPath);
+  const std::string dumpToolLaunch = ReadAllText(dumpToolLaunchPath);
 
   AssertContains(
     processAttach,
@@ -56,13 +59,18 @@ int main()
 
   AssertContains(
     crashCapture,
-    "suppressCrashAutomationForLikelyShutdownException",
-    "Crash capture must keep a dedicated suppression flag for shutdown/menu boundary auto-actions.");
+    "keeping dump and preserving crash auto-actions",
+    "Crash capture must keep crash auto-actions enabled for non-zero exits near menu/shutdown boundary.");
 
   AssertContains(
     crashCapture,
-    "near menu/shutdown boundary during heartbeat check",
-    "Crash capture must suppress delayed menu-exit false positives discovered during heartbeat checks.");
+    "menu/shutdown boundary during heartbeat check with non-zero exit",
+    "Crash capture must preserve crash auto-actions even when non-zero exits happen during heartbeat checks.");
+
+  AssertContains(
+    crashCapture,
+    "after auto-open wait (wait_ms=",
+    "Crash capture must log deferred crash viewer decisions with explicit wait timeout details.");
 
   AssertContains(
     helperMain,
@@ -78,6 +86,26 @@ int main()
     helperMain,
     "Failed to remove crash artifact",
     "Crash artifact cleanup must log per-file deletion failures for diagnostics.");
+
+  AssertContains(
+    helperMain,
+    "Deferred crash viewer launch attempted after process exit (exit_code=",
+    "Helper main loop must log deferred crash viewer launch attempts with exit code context.");
+
+  AssertContains(
+    dumpToolLaunch,
+    "DumpTool viewer launch failed (reason=",
+    "DumpTool viewer launch failures must be persisted to helper log for diagnosis.");
+
+  AssertContains(
+    dumpToolLaunch,
+    "win32_error=",
+    "DumpTool viewer launch failure logs must include Win32 error code.");
+
+  AssertContains(
+    dumpToolLaunch,
+    ", exe=",
+    "DumpTool viewer launch diagnostics must include resolved executable path.");
 
   const auto crashCapturedBranchPos = helperMain.find("if (crashCaptured) {");
   assert(crashCapturedBranchPos != std::string::npos && "Missing crashCaptured branch in helper main loop");

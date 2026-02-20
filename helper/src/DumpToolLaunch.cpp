@@ -7,6 +7,7 @@
 #include <string>
 
 #include "ProcessUtil.h"
+#include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpToolResolve.h"
 
@@ -68,10 +69,14 @@ bool StartDumpToolProcessWithHandle(
   const std::filesystem::path& outBase,
   DWORD createFlags,
   HANDLE* outProcess,
-  std::wstring* err)
+  std::wstring* err,
+  DWORD* outLastError)
 {
   if (outProcess) {
     *outProcess = nullptr;
+  }
+  if (outLastError) {
+    *outLastError = ERROR_SUCCESS;
   }
   STARTUPINFOW si{};
   si.cb = sizeof(si);
@@ -91,7 +96,13 @@ bool StartDumpToolProcessWithHandle(
     &pi);
 
   if (!ok) {
-    if (err) *err = L"CreateProcessW failed: " + std::to_wstring(GetLastError());
+    const DWORD le = GetLastError();
+    if (outLastError) {
+      *outLastError = le;
+    }
+    if (err) {
+      *err = L"CreateProcessW failed: " + std::to_wstring(le);
+    }
     return false;
   }
 
@@ -110,9 +121,10 @@ bool StartDumpToolProcess(
   std::wstring cmd,
   const std::filesystem::path& outBase,
   DWORD createFlags,
-  std::wstring* err)
+  std::wstring* err,
+  DWORD* outLastError = nullptr)
 {
-  return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, createFlags, nullptr, err);
+  return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, createFlags, nullptr, err, outLastError);
 }
 
 void AppendOnlineSymbolFlag(std::wstring* cmd, bool allowOnlineSymbols)
@@ -166,7 +178,7 @@ bool StartDumpToolHeadlessAsync(
   std::wstring cmd =
     QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
   AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
-  return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, outProcess, err);
+  return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, outProcess, err, nullptr);
 }
 
 void StartDumpToolViewer(
@@ -181,10 +193,34 @@ void StartDumpToolViewer(
   cmd += cfg.autoOpenViewerBeginnerMode ? L" --simple-ui" : L" --advanced-ui";
 
   std::wstring err;
-  if (!StartDumpToolProcess(exe, std::move(cmd), outBase, 0, &err)) {
+  DWORD launchError = ERROR_SUCCESS;
+  if (!StartDumpToolProcess(exe, std::move(cmd), outBase, 0, &err, &launchError)) {
+    AppendLogLine(
+      outBase,
+      L"DumpTool viewer launch failed (reason="
+        + std::wstring(reason)
+        + L", dump="
+        + std::filesystem::path(dumpPath).filename().wstring()
+        + L", exe="
+        + exe.wstring()
+        + L", win32_error="
+        + std::to_wstring(launchError)
+        + L", detail="
+        + err
+        + L").");
     std::wcerr << L"[SkyrimDiagHelper] Warning: failed to start DumpTool viewer (" << reason << L"): " << err << L"\n";
+    return;
   }
+
+  AppendLogLine(
+    outBase,
+    L"DumpTool viewer launch succeeded (reason="
+      + std::wstring(reason)
+      + L", dump="
+      + std::filesystem::path(dumpPath).filename().wstring()
+      + L", exe="
+      + exe.wstring()
+      + L").");
 }
 
 }  // namespace skydiag::helper::internal
-

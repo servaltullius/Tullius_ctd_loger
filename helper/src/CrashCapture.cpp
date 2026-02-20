@@ -115,7 +115,6 @@ bool HandleCrashEventTick(
 
   const std::uint32_t stateFlagsAtCrash = proc.shm ? proc.shm->header.state_flags : 0u;
   const bool inMenuAtCrash = (stateFlagsAtCrash & skydiag::kState_InMenu) != 0u;
-  bool suppressCrashAutomationForLikelyShutdownException = false;
 
   // ---- Post-dump false-positive filtering ----------------------------------
   // Now that the dump is safely written, check whether this was actually a
@@ -139,17 +138,14 @@ bool HandleCrashEventTick(
         }
         return false;
       }
-      // Non-zero exit code near menu/shutdown can still be a benign quit path.
-      // Keep the dump for manual forensics, but suppress aggressive auto-actions.
       if (inMenuAtCrash) {
-        suppressCrashAutomationForLikelyShutdownException = true;
         AppendLogLine(
           outBase,
-          L"Crash event received near menu/shutdown boundary (exit_code="
+          L"Crash event reached menu/shutdown boundary with non-zero exit (exit_code="
             + std::to_wstring(exitCode)
             + L", state_flags="
             + std::to_wstring(stateFlagsAtCrash)
-            + L"); keeping dump but suppressing crash auto-actions.");
+            + L"); keeping dump and preserving crash auto-actions.");
       }
     }
 
@@ -197,16 +193,15 @@ bool HandleCrashEventTick(
             }
             recovered = true;
           } else if (inMenuAtCrash) {
-            suppressCrashAutomationForLikelyShutdownException = true;
             AppendLogLine(
               outBase,
-              L"Crash event received near menu/shutdown boundary during heartbeat check (exit_code="
+              L"Crash event reached menu/shutdown boundary during heartbeat check with non-zero exit (exit_code="
                 + std::to_wstring(exitCode)
                 + L", check="
                 + std::to_wstring(attempt + 1)
                 + L", state_flags="
                 + std::to_wstring(stateFlagsAtCrash)
-                + L"); keeping dump but suppressing crash auto-actions.");
+                + L"); keeping dump and preserving crash auto-actions.");
           }
           break;
         }
@@ -288,7 +283,7 @@ bool HandleCrashEventTick(
     }
 
     bool crashAnalysisQueued = false;
-    if (cfg.autoAnalyzeDump && cfg.enableAutoRecaptureOnUnknownCrash && !suppressCrashAutomationForLikelyShutdownException) {
+    if (cfg.autoAnalyzeDump && cfg.enableAutoRecaptureOnUnknownCrash) {
       std::wstring analyzeQueueErr;
       if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, pendingCrashAnalysis, &analyzeQueueErr)) {
         crashAnalysisQueued = true;
@@ -296,12 +291,10 @@ bool HandleCrashEventTick(
       } else {
         AppendLogLine(outBase, L"Crash headless analysis queue failed: " + analyzeQueueErr);
       }
-    } else if (cfg.autoAnalyzeDump && suppressCrashAutomationForLikelyShutdownException) {
-      AppendLogLine(outBase, L"Crash headless analysis suppressed for likely shutdown/menu exception.");
     }
 
     bool viewerNow = false;
-    if (cfg.autoOpenViewerOnCrash && !suppressCrashAutomationForLikelyShutdownException) {
+    if (cfg.autoOpenViewerOnCrash) {
       if (!cfg.autoOpenCrashOnlyIfProcessExited) {
         StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
         viewerNow = true;
@@ -311,31 +304,45 @@ bool HandleCrashEventTick(
         if (wExit == WAIT_OBJECT_0) {
           StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
           viewerNow = true;
-          AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash after process exit.");
+          AppendLogLine(
+            outBase,
+            L"Auto-opened DumpTool viewer for crash after process exit during wait window (wait_ms="
+              + std::to_wstring(waitExitMs)
+              + L", dump="
+              + dumpFs.filename().wstring()
+              + L").");
         } else if (wExit == WAIT_TIMEOUT) {
           if (pendingCrashViewerDumpPath) {
             *pendingCrashViewerDumpPath = dumpPath;
           }
-          AppendLogLine(outBase, L"Crash dump captured but process is still running; deferring viewer to process exit.");
+          AppendLogLine(
+            outBase,
+            L"Crash dump captured but process is still running after auto-open wait (wait_ms="
+              + std::to_wstring(waitExitMs)
+              + L", dump="
+              + dumpFs.filename().wstring()
+              + L"); deferring viewer to process exit.");
         } else {
           const DWORD le = GetLastError();
-          AppendLogLine(outBase, L"Crash viewer auto-open suppressed due to wait failure: " + std::to_wstring(le));
+          AppendLogLine(
+            outBase,
+            L"Crash viewer auto-open suppressed due to wait failure (wait_ms="
+              + std::to_wstring(waitExitMs)
+              + L", err="
+              + std::to_wstring(le)
+              + L").");
         }
       } else {
         AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
       }
-    } else if (cfg.autoOpenViewerOnCrash && suppressCrashAutomationForLikelyShutdownException) {
-      AppendLogLine(outBase, L"Crash viewer auto-open suppressed for likely shutdown/menu exception.");
     }
 
-    if (!crashAnalysisQueued && !suppressCrashAutomationForLikelyShutdownException) {
+    if (!crashAnalysisQueued) {
       if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
         StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
       } else if (viewerNow && cfg.autoAnalyzeDump) {
         AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
       }
-    } else if (cfg.autoAnalyzeDump && suppressCrashAutomationForLikelyShutdownException) {
-      AppendLogLine(outBase, L"Skipped fallback headless analysis for likely shutdown/menu exception.");
     }
 
     skydiag::helper::RetentionLimits limits{};

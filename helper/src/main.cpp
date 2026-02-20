@@ -284,8 +284,15 @@ int wmain(int argc, wchar_t** argv)
         std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
         AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
         if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && exitCode != 0) {
-          StartDumpToolViewer(cfg, pendingCrashViewerDumpPath, outBase, L"crash_deferred_exit");
-          AppendLogLine(outBase, L"Auto-opened DumpTool viewer for crash dump after deferred process exit.");
+          const std::wstring deferredDumpPath = pendingCrashViewerDumpPath;
+          StartDumpToolViewer(cfg, deferredDumpPath, outBase, L"crash_deferred_exit");
+          AppendLogLine(
+            outBase,
+            L"Deferred crash viewer launch attempted after process exit (exit_code="
+              + std::to_wstring(exitCode)
+              + L", dump="
+              + std::filesystem::path(deferredDumpPath).filename().wstring()
+              + L").");
           pendingCrashViewerDumpPath.clear();
         }
         if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
