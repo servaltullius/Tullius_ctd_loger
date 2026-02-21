@@ -538,20 +538,24 @@ set_tests_properties(skydiag_plugin_rules_tests PROPERTIES
 )
 
 if(NOT WIN32)
-  add_executable(skydiag_plugin_rules_logic_tests
-    plugin_rules_logic_tests.cpp
-    ../dump_tool/src/PluginRules.cpp
-  )
+  if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
+    add_executable(skydiag_plugin_rules_logic_tests
+      plugin_rules_logic_tests.cpp
+      ../dump_tool/src/PluginRules.cpp
+    )
 
-  target_include_directories(skydiag_plugin_rules_logic_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-  )
+    target_include_directories(skydiag_plugin_rules_logic_tests PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+    )
 
-  set_target_properties(skydiag_plugin_rules_logic_tests PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-  )
+    set_target_properties(skydiag_plugin_rules_logic_tests PROPERTIES
+      CXX_STANDARD 20
+      CXX_STANDARD_REQUIRED ON
+      CXX_EXTENSIONS OFF
+    )
 
-  add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
+    add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
+  else()
+    message(STATUS "skydiag_plugin_rules_logic_tests skipped: nlohmann/json.hpp not found")
+  endif()
 endif()

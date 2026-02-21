@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.39-rc3 (2026-02-21)
+
+### 수정
+- CI: 릴리즈 파이프라인(Linux Unit Tests)에서 `nlohmann/json.hpp`가 없는 환경에서도 빌드가 되도록, `skydiag_plugin_rules_logic_tests`를 조건부로 활성화하도록 수정.
+- Helper: 크래시 이벤트 후 프로세스가 `exit_code=0`으로 종료된 경우에도, 강한 예외 코드가 감지되면 덤프/자동 뷰어 오픈을 억제하지 않도록 보강(CTD인데 뷰어가 안 뜨는 체감 완화).
+- Helper: DumpTool 뷰어 실행이 즉시 종료되는 케이스를 감지해 `SkyrimDiagHelper.log`에 런타임/시작 크래시 힌트를 남기도록 진단 로그를 보강.
+- Release: `-rc` 태그는 GitHub Release를 pre-release로 생성하도록 워크플로우를 보강.
+
+### 테스트
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+
 ## v0.2.39-rc2 (2026-02-21)
 
 ### 수정
