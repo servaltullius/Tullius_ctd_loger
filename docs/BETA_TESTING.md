@@ -40,6 +40,12 @@
     - `AutoRecaptureUnknownBucketThreshold=2`
     - `AutoRecaptureAnalysisTimeoutSec=20`
     - 같은 crash bucket에서 fault module 미확정이 반복되면, 프로세스가 살아있는 경우 FullMemory crash dump를 1회 추가 캡처
+  - 시작 호환성 점검(기본 ON):
+    - `EnableCompatibilityPreflight=1`
+    - 결과 파일: `SkyrimDiag_Preflight.json` (Crash Logger 중복/BEES 위험/플러그인 스캔 상태 점검)
+  - 덤프 실패 시 WER fallback 힌트(기본 ON):
+    - `EnableWerDumpFallbackHint=1`
+    - 실패 시 `SkyrimDiag_WER_LocalDumps_Hint.txt` 생성
   - 저장/로드 중 팝업이 거슬리면 `AutoOpenCrashOnlyIfProcessExited=1` 유지(기본): 게임이 종료될 때만 크래시 뷰어 자동 오픈
   - 디스크 정리(기본값 권장, `0`=무제한):
     - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
@@ -116,6 +122,7 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
   - `*_SkyrimDiagSummary.json`
   - `*_SkyrimDiagBlackbox.jsonl` (있다면)
   - `SkyrimDiag_WCT_*.json` (있다면)
+  - `SkyrimDiag_Preflight.json` (있다면)
 - (있다면) Crash Logger SSE/AE의 `crash-*.log` 또는 `threaddump-*.log`
 
 ### 함께 적어주세요
@@ -147,6 +154,7 @@ CTD가 잘 안 나는 모드팩에서는, 베타 검증을 위해 “기능이 �
 - *_SkyrimDiagSummary.json:
 - *_SkyrimDiagBlackbox.jsonl: (있으면)
 - SkyrimDiag_WCT_*.json: (있으면)
+- SkyrimDiag_Preflight.json: (있으면)
 - Crash Logger crash-*.log / threaddump-*.log: (있으면)
 
 [추가 메모]

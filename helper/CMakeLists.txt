@@ -5,6 +5,7 @@ project(SkyrimDiagHelper LANGUAGES CXX)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME}
+  src/CompatibilityPreflight.cpp
   src/Config.cpp
   src/CrashEtwCapture.cpp
   src/CrashCapture.cpp
@@ -25,6 +26,7 @@ add_executable(${PROJECT_NAME}
   src/WctCapture.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
+  src/CompatibilityPreflight.h
   include/SkyrimDiagHelper/Config.h
   include/SkyrimDiagHelper/DumpWriter.h
   include/SkyrimDiagHelper/HangDetect.h
@@ -44,6 +46,7 @@ target_link_libraries(${PROJECT_NAME}
     Advapi32
     User32
     Dbghelp
+    Version
     Shell32
     Ole32)
 

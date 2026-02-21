@@ -128,6 +128,20 @@ bool CaptureWct(std::uint32_t pid, nlohmann::json& out, std::wstring* err)
     return false;
   }
 
+  // Best-effort COM wait-chain support.
+  bool comCallbackRegistered = false;
+  if (HMODULE ole32 = GetModuleHandleW(L"ole32.dll"); ole32) {
+    const auto pCoGetCallState = GetProcAddress(ole32, "CoGetCallState");
+    const auto pCoGetActivationState = GetProcAddress(ole32, "CoGetActivationState");
+    if (pCoGetCallState && pCoGetActivationState) {
+      RegisterWaitChainCOMCallback(
+        reinterpret_cast<PCOGETCALLSTATE>(pCoGetCallState),
+        reinterpret_cast<PCOGETACTIVATIONSTATE>(pCoGetActivationState));
+      comCallbackRegistered = true;
+    }
+  }
+  out["comCallbackRegistered"] = comCallbackRegistered;
+
   const auto tids = EnumerateThreads(pid);
   for (const auto tid : tids) {
     DWORD nodeCount = WCT_MAX_NODE_COUNT;

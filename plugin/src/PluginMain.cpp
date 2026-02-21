@@ -29,6 +29,9 @@ struct PluginConfig
   std::wstring helperExe = L"SkyrimDiagHelper.exe";
   bool enableTestHotkeys = false;
   bool enableResourceLog = true;
+  bool enableAdaptiveResourceLogThrottle = true;
+  std::uint32_t resourceLogThrottleHighWatermarkPerSec = 1500;
+  std::uint32_t resourceLogThrottleMaxSampleDivisor = 8;
   bool enablePerfHitchLog = true;
   std::uint32_t perfHitchThresholdMs = 250;
   std::uint32_t perfHitchCooldownMs = 3000;
@@ -69,6 +72,12 @@ PluginConfig LoadConfig()
   cfg.helperExe = ReadIniString(L"SkyrimDiag", L"HelperExe", L"SkyrimDiagHelper.exe", iniPath);
   cfg.enableTestHotkeys = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableTestHotkeys", 0, iniPath) != 0;
   cfg.enableResourceLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableResourceLog", 1, iniPath) != 0;
+  cfg.enableAdaptiveResourceLogThrottle =
+    GetPrivateProfileIntW(L"SkyrimDiag", L"EnableAdaptiveResourceLogThrottle", 1, iniPath) != 0;
+  cfg.resourceLogThrottleHighWatermarkPerSec = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiag", L"ResourceLogThrottleHighWatermarkPerSec", 1500, iniPath));
+  cfg.resourceLogThrottleMaxSampleDivisor = static_cast<std::uint32_t>(
+    GetPrivateProfileIntW(L"SkyrimDiag", L"ResourceLogThrottleMaxSampleDivisor", 8, iniPath));
   cfg.enablePerfHitchLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnablePerfHitchLog", 1, iniPath) != 0;
   cfg.perfHitchThresholdMs = static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiag", L"PerfHitchThresholdMs", 250, iniPath));
   cfg.perfHitchCooldownMs = static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiag", L"PerfHitchCooldownMs", 3000, iniPath));
@@ -274,8 +283,18 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   StartHelperIfConfigured(g_cfg);
   StartTestHotkeysIfEnabled(g_cfg);
   if (g_cfg.enableResourceLog) {
+    skydiag::plugin::ConfigureResourceLogThrottle(
+      g_cfg.enableAdaptiveResourceLogThrottle,
+      g_cfg.resourceLogThrottleHighWatermarkPerSec,
+      g_cfg.resourceLogThrottleMaxSampleDivisor);
     if (!skydiag::plugin::InstallResourceHooks()) {
       spdlog::warn("SkyrimDiag: resource hook install failed (resource logging disabled)");
+    } else {
+      spdlog::info(
+        "SkyrimDiag: resource log throttle adaptive={} highWatermarkPerSec={} maxDivisor={}",
+        g_cfg.enableAdaptiveResourceLogThrottle ? 1 : 0,
+        g_cfg.resourceLogThrottleHighWatermarkPerSec,
+        g_cfg.resourceLogThrottleMaxSampleDivisor);
     }
   }
 

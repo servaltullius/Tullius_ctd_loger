@@ -41,8 +41,10 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
   j["foreground_grace_sec"] = cfg.foregroundGraceSec;
 
   j["enable_manual_capture_hotkey"] = cfg.enableManualCaptureHotkey;
+  j["enable_compatibility_preflight"] = cfg.enableCompatibilityPreflight;
   j["auto_analyze_dump"] = cfg.autoAnalyzeDump;
   j["allow_online_symbols"] = cfg.allowOnlineSymbols;
+  j["enable_wer_dump_fallback_hint"] = cfg.enableWerDumpFallbackHint;
 
   j["auto_open_viewer_on_crash"] = cfg.autoOpenViewerOnCrash;
   j["auto_open_crash_only_if_process_exited"] = cfg.autoOpenCrashOnlyIfProcessExited;
@@ -167,4 +169,3 @@ bool TryUpdateIncidentManifestEtw(
 }
 
 }  // namespace skydiag::helper::internal
-

@@ -18,9 +18,11 @@ struct HelperConfig {
   DumpMode dumpMode = DumpMode::kDefault;
   std::wstring outputDir;  // empty => next to exe
   bool enableManualCaptureHotkey = true;
+  bool enableCompatibilityPreflight = true;
   bool autoAnalyzeDump = true;
   std::wstring dumpToolExe = L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe";
   bool allowOnlineSymbols = false;
+  bool enableWerDumpFallbackHint = true;
   bool autoOpenViewerOnCrash = true;
   bool autoOpenCrashOnlyIfProcessExited = true;
   std::uint32_t autoOpenCrashWaitForExitMs = 2000;

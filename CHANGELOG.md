@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.2.39-rc1 (2026-02-21)
+
+### 개선
+- Helper: 시작 시 `SkyrimDiag_Preflight.json`을 생성하는 호환성 프리플라이트 추가. Crash Logger 중복, BEES 필요 조건, 플러그인 스캔 상태를 사전 점검.
+- Helper/WCT: COM wait-chain 콜백 등록을 best-effort로 추가해 프리징 분석 맥락을 확장.
+- Helper: 덤프 생성 실패 시 `SkyrimDiag_WER_LocalDumps_Hint.txt`를 자동 생성해 WER LocalDumps fallback 가이드를 제공.
+- Plugin: 리소스 로깅에 적응형 스로틀 추가(`EnableAdaptiveResourceLogThrottle`)로 대량 loose-file burst 환경에서 오버헤드 완화.
+- Plugin/Helper 설정: 신규 옵션(`EnableCompatibilityPreflight`, `EnableWerDumpFallbackHint`, 리소스 스로틀 키) 추가 및 manifest snapshot 반영.
+- Release tooling: `scripts/verify_release_gate.sh` 추가로 릴리즈 하드게이트(스크립트 해시/필수 파일/ZIP 엔트리/용량/중첩 경로)를 원샷 검증 가능하게 개선.
+
+### 테스트
+- 신규 가드 테스트 추가:
+  - `tests/helper_preflight_guard_tests.cpp`
+- 기존 가드 테스트 확장:
+  - `tests/helper_crash_autopen_config_tests.cpp`
+  - `tests/crash_hook_mode_guard_tests.cpp`
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+- Windows: `scripts\\build-win.cmd` 성공, 신규 가드 exe 3종 수동 실행 통과.
+- Packaging/Release gate:
+  - `python scripts\\package.py --build-dir build-win --out dist\\Tullius_ctd_loger.zip --no-pdb` 성공
+  - `bash scripts/verify_release_gate.sh` 통과
+
 ## v0.2.38-rc3 (2026-02-20)
 
 ### 수정

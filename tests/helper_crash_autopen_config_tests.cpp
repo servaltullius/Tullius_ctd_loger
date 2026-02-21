@@ -32,6 +32,8 @@ int main()
   AssertContains(ini, "EnableAutoRecaptureOnUnknownCrash", "Missing unknown crash auto-recapture toggle in ini");
   AssertContains(ini, "AutoRecaptureUnknownBucketThreshold", "Missing unknown crash bucket threshold in ini");
   AssertContains(ini, "AutoRecaptureAnalysisTimeoutSec", "Missing unknown crash analysis timeout in ini");
+  AssertContains(ini, "EnableCompatibilityPreflight", "Missing compatibility preflight toggle in ini");
+  AssertContains(ini, "EnableWerDumpFallbackHint", "Missing WER fallback hint toggle in ini");
   AssertContains(ini, "EtwHangProfile", "Missing ETW hang primary profile key in ini");
   AssertContains(ini, "EtwHangFallbackProfile", "Missing ETW hang fallback profile key in ini");
 
@@ -45,6 +47,8 @@ int main()
   AssertContains(configCpp, "EnableAutoRecaptureOnUnknownCrash", "Helper config loader does not read unknown crash auto-recapture toggle");
   AssertContains(configCpp, "AutoRecaptureUnknownBucketThreshold", "Helper config loader does not read unknown crash bucket threshold");
   AssertContains(configCpp, "AutoRecaptureAnalysisTimeoutSec", "Helper config loader does not read unknown crash analysis timeout");
+  AssertContains(configCpp, "EnableCompatibilityPreflight", "Helper config loader does not read compatibility preflight toggle");
+  AssertContains(configCpp, "EnableWerDumpFallbackHint", "Helper config loader does not read WER fallback hint toggle");
   AssertContains(configCpp, "EtwHangProfile", "Helper config loader does not read ETW hang primary profile key");
   AssertContains(configCpp, "EtwHangFallbackProfile", "Helper config loader does not read ETW hang fallback profile key");
   return 0;

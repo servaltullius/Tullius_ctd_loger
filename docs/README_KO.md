@@ -61,6 +61,7 @@ WinDbg 없이 **요약 / 근거 / 체크리스트** 형태로 보여주는 진�
 
 - 기본: MO2 `overwrite\SKSE\Plugins\`
 - 변경: `SkyrimDiagHelper.ini`에서 `OutputDir=` 설정
+- 시작 시 호환성 점검 결과: `SkyrimDiag_Preflight.json` (설정 `EnableCompatibilityPreflight=1`)
 
 ## 캡처 방식
 
@@ -97,6 +98,7 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 | 옵션 | 기본값 | 참고 |
 |------|--------|------|
 | `EnableResourceLog` | `1` | 리소스 후킹 (.nif/.hkx/.tri). 의심 시 가장 먼저 `0`으로 테스트. |
+| `EnableAdaptiveResourceLogThrottle` | `1` | 대량 리소스 burst 시 샘플링으로 오버헤드 완화. |
 | `EnablePerfHitchLog` | `1` | 메인 스레드 스톨 기록 (가벼움). |
 | `CrashHookMode` | `1` | **1 유지 권장.** 2 = 모든 예외 기록 (비권장). |
 | `AllowOnlineSymbols` | `0` | 로컬/오프라인 캐시 우선 분석. |

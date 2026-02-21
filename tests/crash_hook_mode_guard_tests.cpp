@@ -26,11 +26,31 @@ int main()
   assert(std::filesystem::exists(pluginIniPath) && "dist/SkyrimDiag.ini not found");
   const std::string pluginIni = ReadAllText(pluginIniPath);
   AssertContains(pluginIni, "EnableUnsafeCrashHookMode2=0", "Missing explicit unsafe mode guard key in plugin ini");
+  AssertContains(
+    pluginIni,
+    "EnableAdaptiveResourceLogThrottle",
+    "Missing adaptive resource log throttle toggle in plugin ini");
+  AssertContains(
+    pluginIni,
+    "ResourceLogThrottleHighWatermarkPerSec",
+    "Missing resource log throttle high-watermark key in plugin ini");
+  AssertContains(
+    pluginIni,
+    "ResourceLogThrottleMaxSampleDivisor",
+    "Missing resource log throttle divisor key in plugin ini");
 
   const std::filesystem::path pluginMainPath = repoRoot / "plugin" / "src" / "PluginMain.cpp";
   assert(std::filesystem::exists(pluginMainPath) && "plugin/src/PluginMain.cpp not found");
   const std::string pluginMain = ReadAllText(pluginMainPath);
   AssertContains(pluginMain, "EnableUnsafeCrashHookMode2", "Plugin config loader must read unsafe mode guard key");
   AssertContains(pluginMain, "mode == 2", "Plugin config must check mode==2 before allowing all-exception hook mode");
+  AssertContains(
+    pluginMain,
+    "EnableAdaptiveResourceLogThrottle",
+    "Plugin config loader must read adaptive resource log throttle toggle");
+  AssertContains(
+    pluginMain,
+    "ConfigureResourceLogThrottle(",
+    "Plugin must apply resource log throttle config before installing resource hooks");
   return 0;
 }

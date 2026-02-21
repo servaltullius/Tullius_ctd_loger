@@ -16,6 +16,7 @@
 #include "SkyrimDiagShared.h"
 
 #include "CrashCapture.h"
+#include "CompatibilityPreflight.h"
 #include "CrashEtwCapture.h"
 #include "DumpToolLaunch.h"
 #include "HangCapture.h"
@@ -30,6 +31,7 @@ using skydiag::helper::internal::MakeOutputBase;
 
 using skydiag::helper::internal::AppendLogLine;
 using skydiag::helper::internal::SetHelperLogRotation;
+using skydiag::helper::internal::RunCompatibilityPreflight;
 
 using skydiag::helper::internal::PendingCrashAnalysis;
 using skydiag::helper::internal::ClearPendingCrashAnalysis;
@@ -157,6 +159,8 @@ int wmain(int argc, wchar_t** argv)
   if (!err.empty()) {
     AppendLogLine(outBase, L"Config warning: " + err);
   }
+
+  RunCompatibilityPreflight(cfg, proc, outBase);
 
   {
     skydiag::helper::RetentionLimits limits{};

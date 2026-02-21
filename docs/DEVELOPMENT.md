@@ -103,6 +103,9 @@ Suggested checklist:
 
 Release hard-gate quick checks:
 ```bash
+# one-shot gate script (recommended)
+bash scripts/verify_release_gate.sh
+
 # 1) scripts sync (WSL repo <-> Windows mirror)
 sha256sum /home/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd
 sha256sum /home/kdw73/Tullius_ctd_loger/scripts/package.py /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/package.py
@@ -142,3 +145,11 @@ Notes:
 - Optional env vars for post-build copy:
   - `SKYRIM_FOLDER` copies `SkyrimDiag.dll` + `SkyrimDiag.ini` into `Data/SKSE/Plugins`
   - `SKYRIM_MODS_FOLDER` copies into `<mods>/<ProjectName>/SKSE/Plugins`
+
+## Dependency Refresh (Recommended)
+
+For stability on new Skyrim runtimes, run a periodic dependency refresh cycle (for example, monthly):
+
+1) Update vcpkg baselines in `vcpkg-configuration.json` and dependency versions in `vcpkg.json`.
+2) Rebuild Windows targets (`scripts\\build-win.cmd`) and run Linux tests (`ctest --test-dir build-linux-test --output-on-failure`).
+3) Validate package/release gates (`bash scripts/verify_release_gate.sh`) before shipping.

@@ -27,6 +27,23 @@
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
+namespace {
+
+void WriteWerFallbackHint(const std::filesystem::path& outBase)
+{
+  const std::string hint =
+    "SkyrimDiag dump capture failed. As a fallback, you can enable Windows Error Reporting LocalDumps.\n"
+    "Registry path:\n"
+    "  HKLM\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps\\SkyrimSE.exe\n"
+    "Recommended values:\n"
+    "  DumpType (DWORD) = 2   ; full dump\n"
+    "  DumpCount (DWORD) = 10\n"
+    "  DumpFolder (EXPAND_SZ) = <your output folder>\n"
+    "Reference: https://learn.microsoft.com/windows/win32/wer/collecting-user-mode-dumps\n";
+  WriteTextFileUtf8(outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt", hint);
+}
+
+}  // namespace
 
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,
@@ -95,6 +112,12 @@ bool HandleCrashEventTick(
   if (!dumpOk) {
     AppendLogLine(outBase, L"Crash dump failed: " + dumpErr);
     std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
+    if (cfg.enableWerDumpFallbackHint) {
+      WriteWerFallbackHint(outBase);
+      AppendLogLine(
+        outBase,
+        L"Wrote WER LocalDumps fallback hint: " + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+    }
     // Remove the empty/partial dump file so it doesn't confuse users.
     std::error_code ec;
     std::filesystem::remove(dumpPath, ec);

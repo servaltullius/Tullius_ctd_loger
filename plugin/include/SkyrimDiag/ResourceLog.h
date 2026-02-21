@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 namespace skydiag::plugin {
@@ -11,5 +12,10 @@ void NoteResourceOpen(std::string_view pathUtf8) noexcept;
 // Install lightweight resource hooks (best-effort).
 bool InstallResourceHooks() noexcept;
 
-}  // namespace skydiag::plugin
+// Adaptive sampling to reduce overhead on heavy loose-file bursts.
+void ConfigureResourceLogThrottle(
+  bool enableAdaptive,
+  std::uint32_t highWatermarkPerSec,
+  std::uint32_t maxSampleDivisor) noexcept;
 
+}  // namespace skydiag::plugin

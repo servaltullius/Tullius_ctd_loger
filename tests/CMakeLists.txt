@@ -124,6 +124,18 @@ set_target_properties(skydiag_plugin_runtime_guard_tests PROPERTIES
 
 add_test(NAME skydiag_plugin_runtime_guard_tests COMMAND skydiag_plugin_runtime_guard_tests)
 
+add_executable(skydiag_helper_preflight_guard_tests
+  helper_preflight_guard_tests.cpp
+)
+
+set_target_properties(skydiag_helper_preflight_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_helper_preflight_guard_tests COMMAND skydiag_helper_preflight_guard_tests)
+
 add_executable(skydiag_retention_tests
   retention_tests.cpp
 )

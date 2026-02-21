@@ -109,6 +109,49 @@ std::string ParseSelectedProfileValue(std::string raw)
   return raw;
 }
 
+std::filesystem::path ResolveGameExePathFromDir(const std::filesystem::path& gameExeDir)
+{
+  for (const wchar_t* name : { L"SkyrimSE.exe", L"SkyrimVR.exe", L"Skyrim.exe" }) {
+    const auto candidate = gameExeDir / name;
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return {};
+}
+
+std::string QueryFileVersionString(const std::filesystem::path& filePath)
+{
+  if (filePath.empty()) {
+    return {};
+  }
+  DWORD handle = 0;
+  const DWORD size = GetFileVersionInfoSizeW(filePath.c_str(), &handle);
+  if (size == 0) {
+    return {};
+  }
+
+  std::vector<std::uint8_t> buffer(size);
+  if (!GetFileVersionInfoW(filePath.c_str(), handle, size, buffer.data())) {
+    return {};
+  }
+
+  VS_FIXEDFILEINFO* ffi = nullptr;
+  UINT ffiSize = 0;
+  if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<LPVOID*>(&ffi), &ffiSize) ||
+      !ffi ||
+      ffiSize < sizeof(VS_FIXEDFILEINFO)) {
+    return {};
+  }
+
+  const std::uint32_t ms = ffi->dwFileVersionMS;
+  const std::uint32_t ls = ffi->dwFileVersionLS;
+  return std::to_string(HIWORD(ms)) + "."
+       + std::to_string(LOWORD(ms)) + "."
+       + std::to_string(HIWORD(ls)) + "."
+       + std::to_string(LOWORD(ls));
+}
+
 }  // namespace
 
 bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out)
@@ -254,6 +297,7 @@ PluginScanResult ScanPlugins(
   const std::vector<std::wstring>& moduleFilenames)
 {
   PluginScanResult result{};
+  result.game_exe_version = QueryFileVersionString(ResolveGameExePathFromDir(gameExeDir));
   result.mo2_detected = HasModule(moduleFilenames, L"usvfs_x64.dll") || HasModule(moduleFilenames, L"uvsfs64.dll");
 
   std::filesystem::path pluginsTxtPath;

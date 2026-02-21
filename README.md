@@ -46,6 +46,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 - By default: MO2 `overwrite\SKSE\Plugins\`
 - To redirect: set `OutputDir=` in `SkyrimDiagHelper.ini`
+- Startup compatibility snapshot: `SkyrimDiag_Preflight.json` (`EnableCompatibilityPreflight=1`)
 
 ## Capture Methods
 
@@ -76,6 +77,7 @@ Options that may have marginal impact on heavy modpacks:
 | Option | Default | Note |
 |--------|---------|------|
 | `EnableResourceLog` | `1` | Hooks loose file opens (.nif/.hkx/.tri). Disable first if you suspect overhead. |
+| `EnableAdaptiveResourceLogThrottle` | `1` | Samples resource events during heavy loose-file bursts to reduce hook overhead. |
 | `EnablePerfHitchLog` | `1` | Logs main-thread stalls (lightweight). |
 | `CrashHookMode` | `1` | **Keep at 1.** Mode 2 (all exceptions) is not recommended. |
 | `AllowOnlineSymbols` | `0` | Offline/local cache analysis by default. |
