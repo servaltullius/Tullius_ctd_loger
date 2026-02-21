@@ -42,6 +42,8 @@ Runtime prerequisites for lightweight WinUI distribution:
 
 - Outputs:
   - Dumps/WCT/stats are written by the helper. Set `OutputDir` in `SkyrimDiagHelper.ini` for an easy-to-find folder.
+  - Startup preflight output: `SkyrimDiag_Preflight.json` (`EnableCompatibilityPreflight=1`)
+  - Dump-failure fallback hint: `SkyrimDiag_WER_LocalDumps_Hint.txt` (`EnableWerDumpFallbackHint=1`)
 - Manual capture:
   - `Ctrl+Shift+F12` writes a dump + WCT JSON (snapshot / capture evidence during a problematic moment).
 - Dump analysis (no WinDbg required):

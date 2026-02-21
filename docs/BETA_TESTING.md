@@ -32,6 +32,10 @@
 
 - `SkyrimDiag.ini`
   - `CrashHookMode=1` 권장 (정상 동작 중 C++ 예외 throw/catch 같은 오탐을 줄이는 데 도움)
+  - 리소스 burst 구간 오버헤드 완화(기본값 권장):
+    - `EnableAdaptiveResourceLogThrottle=1`
+    - `ResourceLogThrottleHighWatermarkPerSec=1500`
+    - `ResourceLogThrottleMaxSampleDivisor=8`
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처

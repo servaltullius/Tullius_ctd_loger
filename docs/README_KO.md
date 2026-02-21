@@ -62,6 +62,7 @@ WinDbg 없이 **요약 / 근거 / 체크리스트** 형태로 보여주는 진�
 - 기본: MO2 `overwrite\SKSE\Plugins\`
 - 변경: `SkyrimDiagHelper.ini`에서 `OutputDir=` 설정
 - 시작 시 호환성 점검 결과: `SkyrimDiag_Preflight.json` (설정 `EnableCompatibilityPreflight=1`)
+- 덤프 실패 fallback 힌트: `SkyrimDiag_WER_LocalDumps_Hint.txt` (설정 `EnableWerDumpFallbackHint=1`)
 
 ## 캡처 방식
 
@@ -99,9 +100,18 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 |------|--------|------|
 | `EnableResourceLog` | `1` | 리소스 후킹 (.nif/.hkx/.tri). 의심 시 가장 먼저 `0`으로 테스트. |
 | `EnableAdaptiveResourceLogThrottle` | `1` | 대량 리소스 burst 시 샘플링으로 오버헤드 완화. |
+| `ResourceLogThrottleHighWatermarkPerSec` | `1500` | 초당 이벤트 임계값. 초과 시 적응형 샘플링 시작. |
+| `ResourceLogThrottleMaxSampleDivisor` | `8` | burst 상황 최대 샘플링 배수(값이 클수록 오버헤드↓, 세부 로그↓). |
 | `EnablePerfHitchLog` | `1` | 메인 스레드 스톨 기록 (가벼움). |
 | `CrashHookMode` | `1` | **1 유지 권장.** 2 = 모든 예외 기록 (비권장). |
 | `AllowOnlineSymbols` | `0` | 로컬/오프라인 캐시 우선 분석. |
+
+Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
+
+| 옵션 | 기본값 | 참고 |
+|------|--------|------|
+| `EnableCompatibilityPreflight` | `1` | 시작 시 `SkyrimDiag_Preflight.json` 생성(호환성 사전 점검). |
+| `EnableWerDumpFallbackHint` | `1` | 덤프 실패 시 `SkyrimDiag_WER_LocalDumps_Hint.txt` 생성. |
 
 ## 덤프 보관 / 디스크 정리
 
