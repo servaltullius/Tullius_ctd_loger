@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cwchar>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -19,6 +20,7 @@
 #include "IncidentManifest.h"
 #include "PendingCrashAnalysis.h"
 #include "PluginScanner.h"
+#include "SkyrimDiagHelper/CrashHeuristics.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
@@ -41,6 +43,20 @@ void WriteWerFallbackHint(const std::filesystem::path& outBase)
     "  DumpFolder (EXPAND_SZ) = <your output folder>\n"
     "Reference: https://learn.microsoft.com/windows/win32/wer/collecting-user-mode-dumps\n";
   WriteTextFileUtf8(outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt", hint);
+}
+
+std::wstring Hex32(std::uint32_t v)
+{
+  wchar_t buf[11]{};
+  std::swprintf(buf, 11, L"0x%08X", static_cast<unsigned int>(v));
+  return buf;
+}
+
+std::wstring Hex64(std::uint64_t v)
+{
+  wchar_t buf[19]{};
+  std::swprintf(buf, 19, L"0x%016llX", static_cast<unsigned long long>(v));
+  return buf;
 }
 
 }  // namespace
@@ -77,6 +93,18 @@ bool HandleCrashEventTick(
     AppendLogLine(outBase, L"Crash event signaled again; ignoring (already captured).");
     return true;
   }
+
+  const std::uint32_t exceptionCodeAtCrash = proc.shm ? proc.shm->header.crash.exception_code : 0u;
+  const std::uint64_t exceptionAddrAtCrash = proc.shm ? proc.shm->header.crash.exception_addr : 0ull;
+  const std::uint32_t faultingTidAtCrash = proc.shm ? proc.shm->header.crash.faulting_tid : 0u;
+  AppendLogLine(
+    outBase,
+    L"Crash event signaled (exception_code=" + Hex32(exceptionCodeAtCrash)
+      + L", exception_addr=" + Hex64(exceptionAddrAtCrash)
+      + L", tid=" + std::to_wstring(faultingTidAtCrash)
+      + L").");
+
+  const bool strongExceptionAtCrash = skydiag::helper::IsStrongCrashException(exceptionCodeAtCrash);
 
   // ---- Dump-first strategy ------------------------------------------------
   // Write the dump IMMEDIATELY while the process is (likely) still alive.
@@ -151,7 +179,7 @@ bool HandleCrashEventTick(
     if (pw == WAIT_OBJECT_0) {
       DWORD exitCode = STILL_ACTIVE;
       GetExitCodeProcess(proc.process, &exitCode);
-      if (exitCode == 0) {
+      if (exitCode == 0 && !strongExceptionAtCrash) {
         AppendLogLine(outBase, L"Crash event received but process exited normally (exit_code=0); "
           L"deleting dump (likely shutdown exception).");
         std::error_code ec;
@@ -161,7 +189,14 @@ bool HandleCrashEventTick(
         }
         return false;
       }
-      if (inMenuAtCrash) {
+      if (exitCode == 0 && strongExceptionAtCrash) {
+        AppendLogLine(
+          outBase,
+          L"Crash event received but process exited with exit_code=0 and strong exception_code="
+            + Hex32(exceptionCodeAtCrash)
+            + L"; keeping dump and preserving crash auto-actions.");
+      }
+      if (inMenuAtCrash && exitCode != 0) {
         AppendLogLine(
           outBase,
           L"Crash event reached menu/shutdown boundary with non-zero exit (exit_code="
@@ -205,7 +240,7 @@ bool HandleCrashEventTick(
         if (WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0) {
           DWORD exitCode = STILL_ACTIVE;
           GetExitCodeProcess(proc.process, &exitCode);
-          if (exitCode == 0) {
+          if (exitCode == 0 && !strongExceptionAtCrash) {
             AppendLogLine(outBase, L"Crash event received but process exited normally during "
               L"heartbeat check (exit_code=0, check=" + std::to_wstring(attempt + 1)
               + L"); deleting dump (likely shutdown exception).");
@@ -215,6 +250,12 @@ bool HandleCrashEventTick(
               lastCrashDumpPath->clear();
             }
             recovered = true;
+          } else if (exitCode == 0 && strongExceptionAtCrash) {
+            AppendLogLine(
+              outBase,
+              L"Crash event saw exit_code=0 during heartbeat check but exception_code="
+                + Hex32(exceptionCodeAtCrash)
+                + L" is strong; keeping dump and preserving crash auto-actions.");
           } else if (inMenuAtCrash) {
             AppendLogLine(
               outBase,

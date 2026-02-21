@@ -194,7 +194,8 @@ void StartDumpToolViewer(
 
   std::wstring err;
   DWORD launchError = ERROR_SUCCESS;
-  if (!StartDumpToolProcess(exe, std::move(cmd), outBase, 0, &err, &launchError)) {
+  HANDLE process = nullptr;
+  if (!StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, 0, &process, &err, &launchError)) {
     AppendLogLine(
       outBase,
       L"DumpTool viewer launch failed (reason="
@@ -221,6 +222,31 @@ void StartDumpToolViewer(
       + L", exe="
       + exe.wstring()
       + L").");
+
+  // Distinguish "launch succeeded but viewer immediately exited" from true success.
+  // This is commonly caused by missing WinUI/.NET runtimes or a startup crash.
+  if (process) {
+    const DWORD w = WaitForSingleObject(process, 500);
+    if (w == WAIT_OBJECT_0) {
+      DWORD exitCode = 0;
+      if (!GetExitCodeProcess(process, &exitCode)) {
+        exitCode = 0xFFFFFFFFu;
+      }
+      AppendLogLine(
+        outBase,
+        L"DumpTool viewer exited immediately (reason="
+          + std::wstring(reason)
+          + L", exit_code="
+          + std::to_wstring(exitCode)
+          + L", dump="
+          + std::filesystem::path(dumpPath).filename().wstring()
+          + L", exe="
+          + exe.wstring()
+          + L"). Possible missing runtime (.NET Desktop Runtime 8 x64 / Windows App Runtime 1.8 x64) or startup crash "
+            L"(check SkyrimDiagDumpToolWinUI_startup_error.log next to the viewer).");
+    }
+    CloseHandle(process);
+  }
 }
 
 }  // namespace skydiag::helper::internal

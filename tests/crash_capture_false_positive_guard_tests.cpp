@@ -93,6 +93,21 @@ int main()
     "Helper main loop must log deferred crash viewer launch attempts with exit code context.");
 
   AssertContains(
+    crashCapture,
+    "IsStrongCrashException",
+    "Crash capture must consult IsStrongCrashException to avoid suppressing real CTDs when exit_code=0 is misleading.");
+
+  AssertContains(
+    helperMain,
+    "exit_code=0 after crash capture but exception_code=",
+    "Helper must preserve crash artifacts when a strong crash exception is paired with exit_code=0.");
+
+  AssertContains(
+    helperMain,
+    "crash_deferred_exit_code0_strong",
+    "Helper must attempt deferred crash viewer launch for strong crash exceptions even when exit_code=0.");
+
+  AssertContains(
     dumpToolLaunch,
     "DumpTool viewer launch failed (reason=",
     "DumpTool viewer launch failures must be persisted to helper log for diagnosis.");

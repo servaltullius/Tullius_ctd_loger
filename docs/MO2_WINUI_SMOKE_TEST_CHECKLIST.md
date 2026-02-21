@@ -105,6 +105,6 @@ Fail:
 If failed, report:
 - Which checklist section failed
 - Exact timestamp (local time)
-- `SkyrimDiagHelper.log` excerpt near failure
+- `SkyrimDiagHelper.log` excerpt near failure (include `Target process exited (exit_code=...)` and `DumpTool viewer launch ...` lines)
 - Related dump/report filenames
 - MO2 profile name + Skyrim SE/AE version

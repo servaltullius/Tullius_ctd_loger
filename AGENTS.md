@@ -120,3 +120,46 @@ ctest --test-dir build-linux-test --output-on-failure
 - MO2에서 zip를 모드로 설치하면 기본적으로 `SKSE/Plugins/`에 배치됩니다.
 - 결과물(덤프/JSON 등)은 보통 MO2 `overwrite\SKSE\Plugins\`에 생성됩니다.
 - **수동 캡처 핫키:** `Ctrl+Shift+F12`
+
+
+## Planning mode policy
+- 모든 작업은 시작 전에 반드시 Plan Mode에서 계획을 수립한다.
+- 구현/수정/실행(변경을 유발하는 작업)은 사용자가 명시적으로 "플랜 종료" 또는 "실행"을 지시한 후에만 진행한다.
+- 하나의 플랜이 완료되어도 자동 전환하지 않고, 다음 작업도 기본적으로 Plan Mode에서 시작한다.
+- 상위 시스템/플랫폼 정책이 강제하는 경우에는 해당 정책을 우선 적용한다.
+
+## Experimental Features (Codex)
+
+- Experimental toggles in `config.toml` control feature availability.
+- If enabled, the agent may use these features when relevant even if not explicitly listed in this repo file.
+- Usage policy still follows user request + AGENTS policy precedence.
+- `use_linux_sandbox_bwrap`: prefer on Linux for safer command isolation.
+- `multi_agent`: use only for independent parallel tasks (no shared state/conflicting edits).
+- `apps`: use only when installed/connected; prefer explicit user intent (for example `$AppName`).
+
+## Multi-agent Practical Ops (Recommended)
+
+<IMPORTANT>
+This section defines operational defaults so `multi_agent` is used aggressively where it helps, and avoided where it hurts.
+
+Decision rule:
+- Use multi-agent when there are 2+ independent tasks with no shared state, no file ownership conflict, and no strict ordering dependency.
+- Use single-agent when tasks are tightly coupled, touch the same files, or require sequential architecture decisions.
+
+Execution playbook:
+1) Triage first: split work into independent domains and identify shared-risk areas.
+2) Dispatch in parallel for exploration/investigation tasks.
+3) Dispatch in parallel for implementation only when modules are independent and ownership is explicit.
+4) Integrate under one owner agent to resolve conflicts and keep design consistency.
+5) Final verification stays single-owner: run full tests/lint/typecheck/build once after integration.
+
+Default operating stance:
+- Exploration/analysis phase: aggressively use multi-agent.
+- Implementation phase: use multi-agent only for independent modules.
+- Integration/verification phase: one owner agent finalizes.
+
+Guardrails:
+- Prefer a small number of focused agents over many broad agents.
+- If overlap is discovered mid-run, stop parallel edits and switch to single-owner integration.
+- Report per-agent outcomes and a single merged verification summary.
+</IMPORTANT>

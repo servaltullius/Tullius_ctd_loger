@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "SkyrimDiagHelper/CrashHeuristics.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
@@ -49,6 +50,13 @@ using skydiag::helper::internal::HangTickResult;
 using skydiag::helper::internal::HandleHangTick;
 
 using skydiag::helper::internal::StartDumpToolViewer;
+
+std::wstring Hex32(std::uint32_t v)
+{
+  wchar_t buf[11]{};
+  std::swprintf(buf, 11, L"0x%08X", static_cast<unsigned int>(v));
+  return buf;
+}
 
 std::uint32_t RemoveCrashArtifactsForDump(
   const std::filesystem::path& outBase,
@@ -241,6 +249,12 @@ int wmain(int argc, wchar_t** argv)
         // be ignored; non-zero means a real crash occurred.
         DWORD exitCode = STILL_ACTIVE;
         GetExitCodeProcess(proc.process, &exitCode);
+        const std::uint32_t exceptionCode =
+          (proc.shm ? proc.shm->header.crash.exception_code : 0u);
+        const bool exitCode0StrongCrash =
+          (exitCode == 0) &&
+          crashCaptured &&
+          skydiag::helper::IsStrongCrashException(exceptionCode);
         if (exitCode != 0) {
           // Drain any pending crash event before exiting — fixes race where
           // the process terminates before the next HandleCrashEventTick poll.
@@ -248,7 +262,13 @@ int wmain(int argc, wchar_t** argv)
             &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
             &pendingCrashViewerDumpPath);
         } else {
-          if (crashCaptured) {
+          if (exitCode0StrongCrash) {
+            AppendLogLine(
+              outBase,
+              L"exit_code=0 after crash capture but exception_code="
+                + Hex32(exceptionCode)
+                + L" is strong; preserving crash artifacts and crash auto-actions.");
+          } else if (crashCaptured) {
             if (pendingCrashAnalysis.active && pendingCrashAnalysis.process) {
               if (!TerminateProcess(pendingCrashAnalysis.process, 1)) {
                 AppendLogLine(
@@ -282,14 +302,23 @@ int wmain(int argc, wchar_t** argv)
             pendingCrashViewerDumpPath.clear();
             crashCaptured = false;
           }
-          AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
+          if (exitCode0StrongCrash) {
+            AppendLogLine(
+              outBase,
+              L"Process exited with exit_code=0 but crash exception_code="
+                + Hex32(exceptionCode)
+                + L" is strong; treating as crash for viewer/deferred behavior.");
+          } else {
+            AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
+          }
         }
         MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
         std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
         AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
-        if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && exitCode != 0) {
+        if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && (exitCode != 0 || exitCode0StrongCrash)) {
           const std::wstring deferredDumpPath = pendingCrashViewerDumpPath;
-          StartDumpToolViewer(cfg, deferredDumpPath, outBase, L"crash_deferred_exit");
+          StartDumpToolViewer(cfg, deferredDumpPath, outBase,
+            exitCode0StrongCrash ? L"crash_deferred_exit_code0_strong" : L"crash_deferred_exit");
           AppendLogLine(
             outBase,
             L"Deferred crash viewer launch attempted after process exit (exit_code="

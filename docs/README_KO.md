@@ -92,6 +92,18 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
   - `AutoOpenCrashOnlyIfProcessExited=1` (기본) — 게임 종료 시에만 뷰어 자동 오픈
   - `AutoOpenViewerOnCrash=0` — 자동 오픈 완전 끄기
 
+## "CTD 났는데 DumpTool 창이 안 뜸"
+
+아래 파일부터 확인하면 원인 분류가 빠릅니다:
+
+- MO2 `overwrite\\SKSE\\Plugins\\SkyrimDiagHelper.log`
+  - `DumpTool viewer launch failed ... win32_error=...` : 실행 실패(경로/파일 누락/권한)
+  - `DumpTool viewer launch succeeded ...` 뒤에 `DumpTool viewer exited immediately ...` : 런타임 미설치 또는 뷰어 시작 크래시 가능성
+- 뷰어 폴더(`SKSE\\Plugins\\SkyrimDiagWinUI\\`)의 `SkyrimDiagDumpToolWinUI_startup_error.log` (있으면 내용 첨부)
+- WinUI 뷰어는 아래 런타임이 필요합니다:
+  - .NET Desktop Runtime 8 (x64)
+  - Windows App Runtime 1.8 (x64)
+
 ## 성능 영향
 
 **최소 신호 기록 + 필요 시 덤프 캡처** 구조로, 보통 체감 성능 저하는 크지 않습니다.
