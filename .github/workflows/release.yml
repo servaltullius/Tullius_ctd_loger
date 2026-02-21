@@ -114,7 +114,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          gh release create "${{ github.ref_name }}" `
-            --title "${{ github.ref_name }}" `
-            --notes-file release_notes.md `
-            dist/Tullius_ctd_loger.zip
+          $tag = "${{ github.ref_name }}"
+          $args = @("release", "create", $tag, "--title", $tag, "--notes-file", "release_notes.md")
+          if ($tag -match "-rc") {
+            $args += "--prerelease"
+          }
+          $args += "dist/Tullius_ctd_loger.zip"
+          gh @args
