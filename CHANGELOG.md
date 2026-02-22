@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.39-rc4 (2026-02-22)
+
+### 수정
+- Helper: DumpTool 뷰어 auto-open이 실패하거나 즉시 종료되는 경우에도, headless 분석을 스킵하지 않도록 `viewerNow` 판단을 "실제 런치 성공" 기준으로 보강.
+- Helper: 프로세스 종료 후 Hang 뷰어 auto-open 로그가 실제 런치 결과를 반영하도록 수정(실패 케이스에서 오해 방지).
+- WinUI: Helper가 headless 분석 산출물(Summary/Report 등)을 생성한 직후 뷰어를 auto-open하는 경우, 뷰어가 재분석을 중복 수행하지 않고 기존 산출물을 먼저 로드하도록 개선(필요 시 "지금 분석"으로 재실행 가능).
+
+### 테스트
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+
 ## v0.2.39-rc3 (2026-02-21)
 
 ### 수정
