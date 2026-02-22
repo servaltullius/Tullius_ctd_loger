@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.39 (2026-02-22)
+
+### 수정
+- Helper/WinUI: CTD/프리징 이후 DumpTool 뷰어 auto-open 경로를 보강(실패/즉시 종료 시에도 headless 분석이 스킵되지 않도록)하고, 뷰어가 열릴 때 기존 분석 산출물을 우선 로드해 중복 분석을 줄임.
+
+### 테스트
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+
 ## v0.2.39-rc4 (2026-02-22)
 
 ### 수정
