@@ -333,8 +333,12 @@ int wmain(int argc, wchar_t** argv)
           if (delayMs > 0) {
             Sleep(delayMs);
           }
-          StartDumpToolViewer(cfg, pendingHangViewerDumpPath, outBase, L"hang_exit");
-          AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
+          const auto launch = StartDumpToolViewer(cfg, pendingHangViewerDumpPath, outBase, L"hang_exit");
+          if (launch == skydiag::helper::internal::DumpToolViewerLaunchResult::kLaunched) {
+            AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
+          } else {
+            AppendLogLine(outBase, L"Hang viewer auto-open attempt failed after process exit.");
+          }
         }
         break;
       }

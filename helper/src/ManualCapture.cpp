@@ -144,9 +144,10 @@ void DoManualCapture(
       AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
     }
 
-    const bool viewerNow = cfg.autoOpenViewerOnManualCapture;
+    bool viewerNow = cfg.autoOpenViewerOnManualCapture;
     if (viewerNow) {
-      StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+      const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+      viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
     }
     if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
       StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);

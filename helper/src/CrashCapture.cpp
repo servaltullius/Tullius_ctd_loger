@@ -360,21 +360,31 @@ bool HandleCrashEventTick(
     bool viewerNow = false;
     if (cfg.autoOpenViewerOnCrash) {
       if (!cfg.autoOpenCrashOnlyIfProcessExited) {
-        StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
-        viewerNow = true;
+        const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
+        viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
       } else if (proc.process) {
         const DWORD waitExitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
         const DWORD wExit = WaitForSingleObject(proc.process, waitExitMs);
         if (wExit == WAIT_OBJECT_0) {
-          StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
-          viewerNow = true;
-          AppendLogLine(
-            outBase,
-            L"Auto-opened DumpTool viewer for crash after process exit during wait window (wait_ms="
-              + std::to_wstring(waitExitMs)
-              + L", dump="
-              + dumpFs.filename().wstring()
-              + L").");
+          const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
+          viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
+          if (viewerNow) {
+            AppendLogLine(
+              outBase,
+              L"Auto-opened DumpTool viewer for crash after process exit during wait window (wait_ms="
+                + std::to_wstring(waitExitMs)
+                + L", dump="
+                + dumpFs.filename().wstring()
+                + L").");
+          } else {
+            AppendLogLine(
+              outBase,
+              L"Crash viewer auto-open attempt failed after process exit during wait window (wait_ms="
+                + std::to_wstring(waitExitMs)
+                + L", dump="
+                + dumpFs.filename().wstring()
+                + L").");
+          }
         } else if (wExit == WAIT_TIMEOUT) {
           if (pendingCrashViewerDumpPath) {
             *pendingCrashViewerDumpPath = dumpPath;

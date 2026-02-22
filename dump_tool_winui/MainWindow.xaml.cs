@@ -70,7 +70,7 @@ public sealed partial class MainWindow : Window
 
         if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
         {
-            DispatcherQueue.TryEnqueue(async () => await AnalyzeAsync());
+            DispatcherQueue.TryEnqueue(async () => await AnalyzeAsync(preferExistingArtifacts: true));
         }
 
         ApplyAdaptiveLayout();
@@ -200,10 +200,48 @@ public sealed partial class MainWindow : Window
 
     private async void AnalyzeButton_Click(object sender, RoutedEventArgs e)
     {
-        await AnalyzeAsync();
+        await AnalyzeAsync(preferExistingArtifacts: false);
     }
 
-    private async Task AnalyzeAsync()
+    private async Task<bool> TryLoadExistingAnalysisAsync(string dumpPath, string outDir)
+    {
+        var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
+
+        // Helper may launch the viewer immediately after headless analysis, so the summary
+        // can appear shortly after startup. Wait a bit to avoid duplicate analysis work.
+        for (var i = 0; i < 15 && !File.Exists(summaryPath); i++)
+        {
+            await Task.Delay(100);
+        }
+
+        if (!File.Exists(summaryPath))
+        {
+            return false;
+        }
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
+                RenderSummary(summary);
+                RenderAdvancedArtifacts(dumpPath, outDir);
+                SetBusy(false, T(
+                    "Loaded existing analysis artifacts. Click Analyze to refresh.",
+                    "기존 분석 결과를 불러왔습니다. 다시 분석하려면 \"지금 분석\"을 누르세요."));
+                NavView.SelectedItem = NavSummary;
+                return true;
+            }
+            catch
+            {
+                await Task.Delay(100);
+            }
+        }
+
+        return false;
+    }
+
+    private async Task AnalyzeAsync(bool preferExistingArtifacts)
     {
         var dumpPath = DumpPathBox.Text.Trim();
         if (string.IsNullOrWhiteSpace(dumpPath))
@@ -223,6 +261,17 @@ public sealed partial class MainWindow : Window
         var outDir = NativeAnalyzerBridge.ResolveOutputDirectory(dumpPath, options.OutDir);
         _currentDumpPath = dumpPath;
         _currentOutDir = outDir;
+
+        if (preferExistingArtifacts)
+        {
+            SetBusy(true, T(
+                "Checking for existing analysis artifacts...",
+                "기존 분석 결과를 확인 중입니다..."));
+            if (await TryLoadExistingAnalysisAsync(dumpPath, outDir))
+            {
+                return;
+            }
+        }
 
         SetBusy(true, T("Analyzing dump with native engine...", "네이티브 엔진으로 덤프를 분석 중입니다..."));
 

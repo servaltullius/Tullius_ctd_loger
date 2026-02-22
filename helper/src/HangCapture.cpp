@@ -356,7 +356,7 @@ HangTickResult HandleHangTick(
       manifestWritten = true;
     }
 
-    const bool viewerNow = cfg.autoOpenViewerOnHang && !cfg.autoOpenHangAfterProcessExit;
+    bool viewerNow = cfg.autoOpenViewerOnHang && !cfg.autoOpenHangAfterProcessExit;
     if (cfg.autoOpenViewerOnHang) {
       if (cfg.autoOpenHangAfterProcessExit) {
         if (pendingHangViewerDumpPath) {
@@ -364,7 +364,8 @@ HangTickResult HandleHangTick(
         }
         AppendLogLine(outBase, L"Queued hang dump for viewer auto-open on process exit.");
       } else {
-        StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
+        const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"hang");
+        viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
       }
     }
     if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
