@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.41-rc3 (2026-02-24)
+
+### 추가 (이벤트 로그 가독성 개선 — 베타 테스터 피드백 반영)
+- DumpTool: `EventRow`에 `detail` 필드 추가 — 이벤트별 사람이 읽을 수 있는 요약 텍스트 자동 생성.
+- DumpTool: `FormatEventDetail` 구현 — PerfHitch(`hitch=105.8s flags=Loading interval=1000ms`), MenuOpen/Close(FNV-1a 해시 → `Loading Menu` 등 32개 알려진 메뉴 이름 역해석), Heartbeat/CellChange 포맷.
+- DumpTool: 텍스트 리포트 및 JSONL 블랙박스 출력에 `detail` 필드 포함.
+- DumpTool: 프리징/큰 히치 직전 이벤트 컨텍스트 요약을 Evidence에 추가 — 10초 이내 주요 이벤트 흐름(`MenuOpen(Loading Menu) → PerfHitch(hitch=2.3s) → ...`) 표시.
+- WinUI: 이벤트 탭에서 JSONL 파싱 후 `detail` 필드 기반 가독성 높은 포맷으로 표시 (기존 raw JSON 대체).
+
+### 테스트
+- 이벤트 가독성 가드 테스트 8개 추가 (`event_detail_guard_tests`).
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`41/41`).
+
 ## v0.2.41-rc2 (2026-02-23)
 
 ### 추가 (Phase 1 — Quick Wins)
