@@ -43,7 +43,9 @@ bool IsImplicitRuntimeMaster(std::string_view masterLower)
          masterLower == "ccbgssse001-fish.esm" ||
          masterLower == "ccqdrsse001-survivalmode.esl" ||
          masterLower == "ccbgssse037-curios.esl" ||
-         masterLower == "ccbgssse025-advdsgs.esm";
+         masterLower == "ccbgssse025-advdsgs.esm" ||
+         masterLower == "_resourcepack.esl" ||
+         masterLower == "resourcepack.esl";
 }
 
 i18n::ConfidenceLevel ParseConfidenceLevel(std::string_view s)

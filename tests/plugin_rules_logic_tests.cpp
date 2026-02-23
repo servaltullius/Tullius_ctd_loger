@@ -134,6 +134,8 @@ void TestMissingMastersIgnoreImplicitRuntimeMasters()
         "CCQDRSSE001-SURVIVALMODE.ESL",
         "ccbgssse037-curios.esl",
         "ccbgssse025-advdsgs.esm",
+        "_ResourcePack.esl",
+        "ResourcePack.esl",
         "ActuallyMissing.esm"
       ]
     }

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.2.41-rc1 (2026-02-23)
+
+### 수정
+- DumpTool: `MissingMasters` 판정의 암묵 런타임 마스터 예외 목록에 `_ResourcePack.esl`/`ResourcePack.esl`를 추가해 false positive를 완화.
+- Diagnostics: 프리징 덤프에서 `_ResourcePack.esl` 단독 누락으로 `MISSING_MASTER`가 과도하게 트리거되던 사용자 피드백 케이스를 재현 기준으로 보정.
+
+### 테스트
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+
 ## v0.2.40 (2026-02-23)
 
 ### 수정
