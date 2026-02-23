@@ -141,4 +141,24 @@ std::vector<ModuleStats> CrashHistory::GetModuleStats(std::size_t lastN) const
   return result;
 }
 
+BucketStats CrashHistory::GetBucketStats(const std::string& bucketKey) const
+{
+  BucketStats result{};
+  if (bucketKey.empty()) {
+    return result;
+  }
+  for (const auto& e : m_entries) {
+    if (e.bucket_key == bucketKey) {
+      result.count += 1;
+      if (result.first_seen.empty() || e.timestamp_utc < result.first_seen) {
+        result.first_seen = e.timestamp_utc;
+      }
+      if (result.last_seen.empty() || e.timestamp_utc > result.last_seen) {
+        result.last_seen = e.timestamp_utc;
+      }
+    }
+  }
+  return result;
+}
+
 }  // namespace skydiag::dump_tool

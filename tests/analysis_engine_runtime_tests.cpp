@@ -14,6 +14,7 @@ using skydiag::dump_tool::AddressResolver;
 using skydiag::dump_tool::CrashHistory;
 using skydiag::dump_tool::CrashHistoryEntry;
 using skydiag::dump_tool::ModuleStats;
+using skydiag::dump_tool::BucketStats;
 using skydiag::dump_tool::SignatureDatabase;
 using skydiag::dump_tool::SignatureMatchInput;
 
@@ -220,6 +221,51 @@ void TestCrashHistoryRuntime()
   std::filesystem::remove(historyPath, ec);
 }
 
+void TestCrashHistoryBucketCorrelation()
+{
+  CrashHistory history;
+
+  // Add 3 entries with bucket-a
+  for (int i = 0; i < 3; ++i) {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T0" + std::to_string(i) + ":00:00Z";
+    e.dump_file = "dump_" + std::to_string(i) + ".dmp";
+    e.bucket_key = "bucket-a";
+    e.top_suspect = "modA.dll";
+    e.all_suspects = { "modA.dll" };
+    history.AddEntry(std::move(e));
+  }
+
+  // Add 1 entry with bucket-b
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T03:00:00Z";
+    e.dump_file = "dump_3.dmp";
+    e.bucket_key = "bucket-b";
+    e.top_suspect = "modB.dll";
+    e.all_suspects = { "modB.dll" };
+    history.AddEntry(std::move(e));
+  }
+
+  // bucket-a should have 3 occurrences
+  const auto corrA = history.GetBucketStats("bucket-a");
+  assert(corrA.count == 3);
+  assert(corrA.first_seen == "2026-02-23T00:00:00Z");
+  assert(corrA.last_seen == "2026-02-23T02:00:00Z");
+
+  // bucket-b should have 1 occurrence
+  const auto corrB = history.GetBucketStats("bucket-b");
+  assert(corrB.count == 1);
+
+  // unknown bucket should have 0 occurrences
+  const auto corrC = history.GetBucketStats("bucket-c");
+  assert(corrC.count == 0);
+
+  // empty bucket key should have 0 occurrences
+  const auto corrEmpty = history.GetBucketStats("");
+  assert(corrEmpty.count == 0);
+}
+
 }  // namespace
 
 int main()
@@ -229,5 +275,6 @@ int main()
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
   TestCrashHistoryRuntime();
+  TestCrashHistoryBucketCorrelation();
   return 0;
 }

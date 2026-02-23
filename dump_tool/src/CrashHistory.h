@@ -26,6 +26,13 @@ struct ModuleStats
   std::size_t total_crashes = 0;
 };
 
+struct BucketStats
+{
+  std::size_t count = 0;
+  std::string first_seen;
+  std::string last_seen;
+};
+
 class CrashHistory
 {
 public:
@@ -36,6 +43,7 @@ public:
 
   void AddEntry(CrashHistoryEntry entry);
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
+  BucketStats GetBucketStats(const std::string& bucketKey) const;
 
   std::size_t Size() const { return m_entries.size(); }
 
