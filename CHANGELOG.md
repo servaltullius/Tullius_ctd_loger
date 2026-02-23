@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.41-rc4 (2026-02-24)
+
+### 추가 (모드 메뉴 이름 자동 표시 — 베타 테스터 피드백 반영)
+- Plugin: MenuOpen/Close 이벤트의 미사용 payload 24바이트(b+c+d)에 메뉴 이름 UTF-8 문자열을 인라인 저장 — 모든 모드 메뉴가 해시 대신 실제 이름(`SKI_WidgetMenu`, `TrueHUD` 등)으로 표시됨.
+- DumpTool: 임베디드 메뉴 이름이 있으면 직접 표시, 없으면 기존 해시 룩업 테이블로 폴백 (구버전 덤프 하위 호환).
+
+### 테스트
+- 메뉴 이름 인라인 저장 가드 테스트 2개 추가 (`event_detail_guard_tests`).
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`41/41`).
+
 ## v0.2.41-rc3 (2026-02-24)
 
 ### 추가 (이벤트 로그 가독성 개선 — 베타 테스터 피드백 반영)
