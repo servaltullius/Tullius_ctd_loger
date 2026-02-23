@@ -32,9 +32,23 @@ static void TestAnalyzerHasHistoryCorrelationField()
   assert(header.find("history_correlation") != std::string::npos);
 }
 
+static void TestEvidenceHasCorrelationDisplay()
+{
+  const auto src = ReadFile("dump_tool/src/EvidenceBuilderInternalsEvidence.cpp");
+  assert(src.find("history_correlation") != std::string::npos);
+}
+
+static void TestOutputWriterHasHistoryCorrelation()
+{
+  const auto src = ReadFile("dump_tool/src/OutputWriter.cpp");
+  assert(src.find("history_correlation") != std::string::npos);
+}
+
 int main()
 {
   TestCrashHistoryApiExists();
   TestAnalyzerHasHistoryCorrelationField();
+  TestEvidenceHasCorrelationDisplay();
+  TestOutputWriterHasHistoryCorrelation();
   return 0;
 }

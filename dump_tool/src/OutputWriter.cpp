@@ -280,6 +280,15 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     summary["crash_history_stats"] = std::move(stats);
   }
 
+  if (r.history_correlation.count > 1) {
+    summary["history_correlation"] = {
+      { "bucket_key", WideToUtf8(r.crash_bucket_key) },
+      { "count", r.history_correlation.count },
+      { "first_seen", r.history_correlation.first_seen },
+      { "last_seen", r.history_correlation.last_seen },
+    };
+  }
+
   std::wstring writeErr;
   if (!WriteTextUtf8(summaryPath, summary.dump(2), &writeErr)) {
     if (err) *err = writeErr;

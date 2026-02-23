@@ -504,6 +504,21 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       r.evidence.push_back(std::move(e));
     }
   }
+
+  if (r.history_correlation.count > 1) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = ctx.en ? L"Repeated crash pattern" : L"반복 크래시 패턴";
+    wchar_t buf[256]{};
+    swprintf_s(buf,
+      ctx.en ? L"Same bucket_key matched %zu times (first: %s)"
+             : L"동일 패턴이 %zu회 발생 (최초: %s)",
+      r.history_correlation.count,
+      ToWideAscii(r.history_correlation.first_seen).c_str());
+    e.details = buf;
+    r.evidence.push_back(std::move(e));
+  }
 }
 
 }  // namespace skydiag::dump_tool::internal
