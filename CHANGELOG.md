@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.40 (2026-02-23)
+
+### 수정
+- `v0.2.40-rc3`의 누락 마스터(false positive) 완화와 `v0.2.40-rc4`의 Helper/WinUI 안정화 개선을 정식 반영.
+- Helper: crash event 재연결 재시도, hang-only 모드 가시화 로그, 프로세스별 singleton mutex 및 plugin watchdog 기반 재기동 경로를 적용.
+- WinUI: 분석 취소 경로(out-of-proc headless 포함)와 대용량 아티팩트 비동기 로딩을 적용해 프리징 체감 개선.
+- Helper: retention 정리를 백그라운드 워커로 분리해 캡처 핫패스 블로킹을 완화.
+
+### 테스트
+- Linux: `cmake --build build-linux-test -j` 성공.
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+- Windows: `scripts\\build-win.cmd` 성공.
+- Packaging/Release gate: `scripts\\build-winui.cmd` + `python scripts\\package.py --build-dir build-win --out dist\\Tullius_ctd_loger.zip --no-pdb` + `bash scripts/verify_release_gate.sh /home/kdw73/Tullius_ctd_loger /mnt/c/Users/kdw73/Tullius_ctd_loger` 통과.
+
 ## v0.2.40-rc4 (2026-02-23)
 
 ### 수정
