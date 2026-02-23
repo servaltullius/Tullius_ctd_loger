@@ -49,6 +49,11 @@ int main()
 
   AssertContains(
     crashCapture,
+    "Crash event wait failed:",
+    "Crash capture flow must log WAIT_FAILED from crash event wait for diagnostics.");
+
+  AssertContains(
+    crashCapture,
     "kRequiredHeartbeatAdvances = 2",
     "Handled-exception filter must require multiple heartbeat advances before deleting a dump.");
 
@@ -71,6 +76,16 @@ int main()
     crashCapture,
     "after auto-open wait (wait_ms=",
     "Crash capture must log deferred crash viewer decisions with explicit wait timeout details.");
+
+  AssertContains(
+    crashCapture,
+    "Crash viewer auto-open wait failed (wait_ms=",
+    "Crash capture must preserve diagnostics when process-exit wait fails during crash viewer auto-open.");
+
+  AssertContains(
+    crashCapture,
+    "Deferred crash viewer already queued for previous dump",
+    "Crash capture must keep the first deferred viewer target instead of overwriting it with later crash signals.");
 
   AssertContains(
     helperMain,

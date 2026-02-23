@@ -1,6 +1,8 @@
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -18,20 +20,39 @@ static void AssertContains(const std::string& haystack, const char* needle, cons
   assert(haystack.find(needle) != std::string::npos && message);
 }
 
+[[noreturn]] static void FailNow(const char* message)
+{
+  std::cerr << message << "\n";
+  std::exit(1);
+}
+
+static void Require(bool condition, const char* message)
+{
+  if (!condition) {
+    FailNow(message);
+  }
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const auto heartbeatPath = repoRoot / "plugin" / "src" / "Heartbeat.cpp";
   const auto resourceHooksPath = repoRoot / "plugin" / "src" / "ResourceHooks.cpp";
   const auto pluginMainPath = repoRoot / "plugin" / "src" / "PluginMain.cpp";
+  const auto sharedMemoryPath = repoRoot / "plugin" / "src" / "SharedMemory.cpp";
+  const auto crashHandlerPath = repoRoot / "plugin" / "src" / "CrashHandler.cpp";
 
   assert(std::filesystem::exists(heartbeatPath) && "plugin/src/Heartbeat.cpp not found");
   assert(std::filesystem::exists(resourceHooksPath) && "plugin/src/ResourceHooks.cpp not found");
   assert(std::filesystem::exists(pluginMainPath) && "plugin/src/PluginMain.cpp not found");
+  assert(std::filesystem::exists(sharedMemoryPath) && "plugin/src/SharedMemory.cpp not found");
+  assert(std::filesystem::exists(crashHandlerPath) && "plugin/src/CrashHandler.cpp not found");
 
   const std::string heartbeat = ReadAllText(heartbeatPath);
   const std::string resourceHooks = ReadAllText(resourceHooksPath);
   const std::string pluginMain = ReadAllText(pluginMainPath);
+  const std::string sharedMemory = ReadAllText(sharedMemoryPath);
+  const std::string crashHandler = ReadAllText(crashHandlerPath);
 
   AssertContains(
     heartbeat,
@@ -73,6 +94,28 @@ int main()
     pluginMain,
     "failed to enqueue hang hotkey UI task",
     "Test hotkey hang path must log enqueue failures.");
+
+  AssertContains(
+    sharedMemory,
+    "if (!g_crashEvent)",
+    "Shared memory init must fail fast when crash event creation fails.");
+
+  const auto createEventPos = sharedMemory.find("g_crashEvent = CreateEventW(");
+  const auto crashEventFailPos = sharedMemory.find("if (!g_crashEvent)");
+  const auto unmapOnFailPos = sharedMemory.find("UnmapViewOfFile(g_shared);", crashEventFailPos);
+  const auto closeMappingOnFailPos = sharedMemory.find("CloseHandle(g_mapping);", crashEventFailPos);
+  Require(createEventPos != std::string::npos, "CreateEventW call not found in shared memory init.");
+  Require(crashEventFailPos != std::string::npos, "Missing crash event failure branch in shared memory init.");
+  Require(unmapOnFailPos != std::string::npos, "Crash event failure branch must unmap shared memory view.");
+  Require(closeMappingOnFailPos != std::string::npos, "Crash event failure branch must close mapping handle.");
+  Require(createEventPos < crashEventFailPos, "Crash event failure branch must appear after event creation.");
+
+  Require(
+    crashHandler.find("InterlockedIncrement(") != std::string::npos,
+    "Crash handler must bump crash_seq for each captured crash signal so recovery does not permanently disable capture.");
+  Require(
+    crashHandler.find("InterlockedCompareExchange(") == std::string::npos,
+    "Crash handler must not use one-shot crash_seq latch because it blocks future captures after recovery.");
 
   return 0;
 }

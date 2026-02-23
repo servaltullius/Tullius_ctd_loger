@@ -38,7 +38,10 @@ void TestCrashPathIsDumpFirst()
 {
   const auto impl = ReadFile("helper/src/CrashCapture.cpp");
   const auto writePos = impl.find("WriteDumpWithStreams(");
-  const auto scanPos = impl.find("ScanPlugins(");
+  auto scanPos = impl.find("CollectPluginScanJson(");
+  if (scanPos == std::string::npos) {
+    scanPos = impl.find("ScanPlugins(");
+  }
   assert(writePos != std::string::npos);
   assert(scanPos != std::string::npos);
   assert(writePos < scanPos && "Crash capture must write dump before plugin scanning");

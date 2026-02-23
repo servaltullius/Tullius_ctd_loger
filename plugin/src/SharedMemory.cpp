@@ -61,6 +61,13 @@ bool InitSharedMemory()
   std::memset(g_shared, 0, sizeof(skydiag::SharedLayout));
 
   g_crashEvent = CreateEventW(nullptr, /*bManualReset=*/TRUE, /*bInitialState=*/FALSE, crashEventName.c_str());
+  if (!g_crashEvent) {
+    UnmapViewOfFile(g_shared);
+    g_shared = nullptr;
+    CloseHandle(g_mapping);
+    g_mapping = nullptr;
+    return false;
+  }
 
   LARGE_INTEGER freq{};
   LARGE_INTEGER now{};

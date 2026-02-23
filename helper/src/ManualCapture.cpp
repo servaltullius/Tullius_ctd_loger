@@ -10,18 +10,17 @@
 
 #include <nlohmann/json.hpp>
 
+#include "CaptureCommon.h"
 #include "DumpToolLaunch.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
-#include "PluginScanner.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
-#include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagHelper/WctCapture.h"
 #include "SkyrimDiagShared.h"
 
@@ -87,17 +86,7 @@ void DoManualCapture(
   const std::string wctUtf8 = wctJson.dump(2);
   WriteTextFileUtf8(wctPath, wctUtf8);
 
-  std::string pluginScanJson;
-  {
-    std::filesystem::path gameExeDir;
-    if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
-      const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
-      auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
-      pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
-    } else {
-      AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
-    }
-  }
+  const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
 
   std::wstring dumpErr;
   if (!skydiag::helper::WriteDumpWithStreams(
@@ -154,12 +143,7 @@ void DoManualCapture(
     } else if (viewerNow && cfg.autoAnalyzeDump) {
       AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
     }
-    skydiag::helper::RetentionLimits limits{};
-    limits.maxCrashDumps = cfg.maxCrashDumps;
-    limits.maxHangDumps = cfg.maxHangDumps;
-    limits.maxManualDumps = cfg.maxManualDumps;
-    limits.maxEtwTraces = cfg.maxEtwTraces;
-    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+    ApplyRetentionFromConfig(cfg, outBase);
   }
 }
 

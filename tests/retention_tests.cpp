@@ -157,6 +157,36 @@ static void Test_PrunesEtwTracesAcrossCrashAndHangPrefixes()
   assert(Exists(dir / hang2));
 }
 
+static void Test_PrunesCrashManifestWithPrecisionTimestamp()
+{
+  const auto dir = MakeTempDir();
+
+  const char* ts0 = "20260101_040000_123";
+  const char* ts1 = "20260101_040000_456";
+
+  const auto stem0 = std::string("SkyrimDiag_Crash_") + ts0;
+  const auto stem1 = std::string("SkyrimDiag_Crash_") + ts1;
+  const auto manifest0 = std::string("SkyrimDiag_Incident_Crash_") + ts0 + ".json";
+  const auto manifest1 = std::string("SkyrimDiag_Incident_Crash_") + ts1 + ".json";
+
+  WriteFile(dir / (stem0 + ".dmp"));
+  WriteFile(dir / (stem1 + ".dmp"));
+  WriteFile(dir / manifest0);
+  WriteFile(dir / manifest1);
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(dir / (stem0 + ".dmp")));
+  assert(!Exists(dir / manifest0));
+  assert(Exists(dir / (stem1 + ".dmp")));
+  assert(Exists(dir / manifest1));
+}
+
 static void Test_RotatesHelperLog()
 {
   const auto dir = MakeTempDir();
@@ -176,6 +206,7 @@ int main()
   Test_PrunesHangWctAndEtlWithDump();
   Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();
   Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();
+  Test_PrunesCrashManifestWithPrecisionTimestamp();
   Test_RotatesHelperLog();
   return 0;
 }

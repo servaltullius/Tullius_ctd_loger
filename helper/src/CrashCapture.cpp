@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CrashEtwCapture.h"
+#include "CaptureCommon.h"
 #include "DumpToolLaunch.h"
 #include "EtwCapture.h"
 #include "HelperCommon.h"
@@ -25,7 +26,6 @@
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
-#include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
@@ -79,6 +79,13 @@ bool HandleCrashEventTick(
   }
 
   const DWORD w = WaitForSingleObject(proc.crashEvent, waitMs);
+  if (w == WAIT_FAILED) {
+    AppendLogLine(outBase, L"Crash event wait failed: " + std::to_wstring(GetLastError()));
+    if (waitMs > 0) {
+      Sleep(waitMs);
+    }
+    return false;
+  }
   if (w != WAIT_OBJECT_0) {
     return false;
   }
@@ -285,18 +292,11 @@ bool HandleCrashEventTick(
     std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
 
     {
-      std::filesystem::path gameExeDir;
-      if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
-        const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
-        auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
-        const std::string pluginScanJson = skydiag::helper::SerializePluginScanResult(scanResult);
-        if (!pluginScanJson.empty()) {
-          const auto pluginScanPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
-          WriteTextFileUtf8(pluginScanPath, pluginScanJson);
-          AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
-        }
-      } else {
-        AppendLogLine(outBase, L"PluginScanner skipped: failed to resolve game exe directory.");
+      const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
+      if (!pluginScanJson.empty()) {
+        const auto pluginScanPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
+        WriteTextFileUtf8(pluginScanPath, pluginScanJson);
+        AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
       }
     }
 
@@ -359,6 +359,34 @@ bool HandleCrashEventTick(
 
     bool viewerNow = false;
     if (cfg.autoOpenViewerOnCrash) {
+      const auto queueDeferredCrashViewer = [&](std::wstring_view reasonTag) -> bool {
+        if (!pendingCrashViewerDumpPath) {
+          AppendLogLine(
+            outBase,
+            L"Crash viewer defer skipped: pending path state missing (reason="
+              + std::wstring(reasonTag)
+              + L").");
+          return false;
+        }
+        if (pendingCrashViewerDumpPath->empty()) {
+          *pendingCrashViewerDumpPath = dumpPath;
+          return true;
+        }
+        if (*pendingCrashViewerDumpPath == dumpPath) {
+          return true;
+        }
+        AppendLogLine(
+          outBase,
+          L"Deferred crash viewer already queued for previous dump; keeping existing queue (existing="
+            + std::filesystem::path(*pendingCrashViewerDumpPath).filename().wstring()
+            + L", ignored="
+            + dumpFs.filename().wstring()
+            + L", reason="
+            + std::wstring(reasonTag)
+            + L").");
+        return false;
+      };
+
       if (!cfg.autoOpenCrashOnlyIfProcessExited) {
         const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
         viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
@@ -386,25 +414,26 @@ bool HandleCrashEventTick(
                 + L").");
           }
         } else if (wExit == WAIT_TIMEOUT) {
-          if (pendingCrashViewerDumpPath) {
-            *pendingCrashViewerDumpPath = dumpPath;
-          }
+          const bool deferred = queueDeferredCrashViewer(L"wait_timeout");
           AppendLogLine(
             outBase,
             L"Crash dump captured but process is still running after auto-open wait (wait_ms="
               + std::to_wstring(waitExitMs)
               + L", dump="
               + dumpFs.filename().wstring()
-              + L"); deferring viewer to process exit.");
+              + L"); "
+              + (deferred ? L"deferring viewer to process exit." : L"deferred viewer queue unchanged."));
         } else {
           const DWORD le = GetLastError();
+          const bool deferred = queueDeferredCrashViewer(L"wait_failed");
           AppendLogLine(
             outBase,
-            L"Crash viewer auto-open suppressed due to wait failure (wait_ms="
+            L"Crash viewer auto-open wait failed (wait_ms="
               + std::to_wstring(waitExitMs)
               + L", err="
               + std::to_wstring(le)
-              + L").");
+              + L"); "
+              + (deferred ? L"deferring viewer to process exit." : L"deferred viewer queue unchanged."));
         }
       } else {
         AppendLogLine(outBase, L"Crash viewer auto-open suppressed: missing process handle.");
@@ -419,12 +448,7 @@ bool HandleCrashEventTick(
       }
     }
 
-    skydiag::helper::RetentionLimits limits{};
-    limits.maxCrashDumps = cfg.maxCrashDumps;
-    limits.maxHangDumps = cfg.maxHangDumps;
-    limits.maxManualDumps = cfg.maxManualDumps;
-    limits.maxEtwTraces = cfg.maxEtwTraces;
-    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+    ApplyRetentionFromConfig(cfg, outBase);
 
     if (crashCaptured) {
       *crashCaptured = true;

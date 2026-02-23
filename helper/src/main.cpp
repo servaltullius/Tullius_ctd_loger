@@ -13,10 +13,10 @@
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
-#include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagShared.h"
 
 #include "CrashCapture.h"
+#include "CaptureCommon.h"
 #include "CompatibilityPreflight.h"
 #include "CrashEtwCapture.h"
 #include "DumpToolLaunch.h"
@@ -33,6 +33,7 @@ using skydiag::helper::internal::MakeOutputBase;
 using skydiag::helper::internal::AppendLogLine;
 using skydiag::helper::internal::SetHelperLogRotation;
 using skydiag::helper::internal::RunCompatibilityPreflight;
+using skydiag::helper::internal::ApplyRetentionFromConfig;
 
 using skydiag::helper::internal::PendingCrashAnalysis;
 using skydiag::helper::internal::ClearPendingCrashAnalysis;
@@ -118,6 +119,287 @@ std::uint32_t RemoveCrashArtifactsForDump(
   return removedCount;
 }
 
+constexpr int kHotkeyId = 0x5344;  // 'SD' (arbitrary)
+
+struct HelperLoopState
+{
+  bool crashCaptured = false;
+  HangCaptureState hangState{};
+  std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
+  std::wstring capturedCrashDumpPath;
+  PendingCrashAnalysis pendingCrashAnalysis{};
+  PendingCrashEtwCapture pendingCrashEtw{};
+};
+
+void InitializeLoopState(const skydiag::helper::AttachedProcess& proc, HelperLoopState* state)
+{
+  if (!state) {
+    return;
+  }
+  state->hangState.wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
+  state->hangState.loadStartQpc = state->hangState.wasLoading ? proc.shm->header.start_qpc : 0;
+}
+
+void RegisterManualCaptureHotkeyIfEnabled(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase)
+{
+  if (!cfg.enableManualCaptureHotkey) {
+    return;
+  }
+
+  if (!RegisterHotKey(nullptr, kHotkeyId, MOD_CONTROL | MOD_SHIFT, VK_F12)) {
+    const DWORD le = GetLastError();
+    std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " << le << L"\n";
+    AppendLogLine(outBase, L"Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " + std::to_wstring(le) +
+      L" (falling back to GetAsyncKeyState polling)");
+  } else {
+    std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: Ctrl+Shift+F12\n";
+    AppendLogLine(outBase, L"Manual capture hotkey registered: Ctrl+Shift+F12");
+  }
+}
+
+void UnregisterManualCaptureHotkeyIfEnabled(const skydiag::helper::HelperConfig& cfg)
+{
+  if (!cfg.enableManualCaptureHotkey) {
+    return;
+  }
+  UnregisterHotKey(nullptr, kHotkeyId);
+}
+
+void PumpManualCaptureInputs(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  skydiag::helper::LoadStats* loadStats,
+  std::uint32_t adaptiveLoadingThresholdSec)
+{
+  if (!loadStats) {
+    return;
+  }
+
+  MSG msg{};
+  while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+    if (msg.message == WM_HOTKEY && static_cast<int>(msg.wParam) == kHotkeyId) {
+      DoManualCapture(cfg, proc, outBase, *loadStats, adaptiveLoadingThresholdSec, L"WM_HOTKEY");
+    }
+    TranslateMessage(&msg);
+    DispatchMessageW(&msg);
+  }
+
+  // Fallback manual hotkey detection: some environments can miss WM_HOTKEY even when RegisterHotKey succeeds.
+  // Polling is low overhead (once per loop) and makes manual capture more reliable.
+  if (cfg.enableManualCaptureHotkey) {
+    const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    if (ctrl && shift && ((GetAsyncKeyState(VK_F12) & 1) != 0)) {
+      DoManualCapture(cfg, proc, outBase, *loadStats, adaptiveLoadingThresholdSec, L"GetAsyncKeyState");
+    }
+  }
+}
+
+bool HandleProcessExitTick(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state)
+{
+  if (!state || !proc.process) {
+    return false;
+  }
+
+  bool& crashCaptured = state->crashCaptured;
+  auto& pendingCrashEtw = state->pendingCrashEtw;
+  auto& pendingCrashAnalysis = state->pendingCrashAnalysis;
+  auto& capturedCrashDumpPath = state->capturedCrashDumpPath;
+  auto& pendingHangViewerDumpPath = state->pendingHangViewerDumpPath;
+  auto& pendingCrashViewerDumpPath = state->pendingCrashViewerDumpPath;
+
+  const DWORD w = WaitForSingleObject(proc.process, 0);
+  if (w == WAIT_OBJECT_0) {
+    // Check exit code: normal exit (0) means shutdown exceptions should
+    // be ignored; non-zero means a real crash occurred.
+    DWORD exitCode = STILL_ACTIVE;
+    GetExitCodeProcess(proc.process, &exitCode);
+    const std::uint32_t exceptionCode =
+      (proc.shm ? proc.shm->header.crash.exception_code : 0u);
+    const bool exitCode0StrongCrash =
+      (exitCode == 0) &&
+      crashCaptured &&
+      skydiag::helper::IsStrongCrashException(exceptionCode);
+    if (exitCode != 0) {
+      // Drain any pending crash event before exiting — fixes race where
+      // the process terminates before the next HandleCrashEventTick poll.
+      HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
+        &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
+        &pendingCrashViewerDumpPath);
+    } else {
+      if (exitCode0StrongCrash) {
+        AppendLogLine(
+          outBase,
+          L"exit_code=0 after crash capture but exception_code="
+            + Hex32(exceptionCode)
+            + L" is strong; preserving crash artifacts and crash auto-actions.");
+      } else if (crashCaptured) {
+        if (pendingCrashAnalysis.active && pendingCrashAnalysis.process) {
+          if (!TerminateProcess(pendingCrashAnalysis.process, 1)) {
+            AppendLogLine(
+              outBase,
+              L"exit_code=0 after crash capture; failed to terminate pending crash analysis process: "
+                + std::to_wstring(GetLastError()));
+          } else {
+            AppendLogLine(outBase, L"exit_code=0 after crash capture; terminated pending crash analysis process.");
+          }
+          ClearPendingCrashAnalysis(&pendingCrashAnalysis);
+        }
+
+        // Stop crash ETW first so the finalized .etl can be pruned together
+        // with dump sidecars in this normal-exit false-positive path.
+        const std::filesystem::path crashEtwPath = pendingCrashEtw.etwPath;
+        MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
+
+        if (capturedCrashDumpPath.empty() && !pendingCrashViewerDumpPath.empty()) {
+          capturedCrashDumpPath = pendingCrashViewerDumpPath;
+        }
+        if (!capturedCrashDumpPath.empty()) {
+          const std::uint32_t removed = RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath, crashEtwPath);
+          AppendLogLine(
+            outBase,
+            L"exit_code=0 after crash capture; removed "
+              + std::to_wstring(removed)
+              + L" crash artifact(s): "
+              + std::filesystem::path(capturedCrashDumpPath).filename().wstring());
+        }
+        capturedCrashDumpPath.clear();
+        pendingCrashViewerDumpPath.clear();
+        crashCaptured = false;
+      }
+      if (exitCode0StrongCrash) {
+        AppendLogLine(
+          outBase,
+          L"Process exited with exit_code=0 but crash exception_code="
+            + Hex32(exceptionCode)
+            + L" is strong; treating as crash for viewer/deferred behavior.");
+      } else {
+        AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
+      }
+    }
+    MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
+    std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
+    AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
+    if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && (exitCode != 0 || exitCode0StrongCrash)) {
+      const std::wstring deferredDumpPath = pendingCrashViewerDumpPath;
+      StartDumpToolViewer(cfg, deferredDumpPath, outBase,
+        exitCode0StrongCrash ? L"crash_deferred_exit_code0_strong" : L"crash_deferred_exit");
+      AppendLogLine(
+        outBase,
+        L"Deferred crash viewer launch attempted after process exit (exit_code="
+          + std::to_wstring(exitCode)
+          + L", dump="
+          + std::filesystem::path(deferredDumpPath).filename().wstring()
+          + L").");
+      pendingCrashViewerDumpPath.clear();
+    }
+    if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
+      const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
+      if (delayMs > 0) {
+        Sleep(delayMs);
+      }
+      const auto launch = StartDumpToolViewer(cfg, pendingHangViewerDumpPath, outBase, L"hang_exit");
+      if (launch == skydiag::helper::internal::DumpToolViewerLaunchResult::kLaunched) {
+        AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
+      } else {
+        AppendLogLine(outBase, L"Hang viewer auto-open attempt failed after process exit.");
+      }
+    }
+    return true;
+  }
+  if (w == WAIT_FAILED) {
+    const DWORD le = GetLastError();
+    HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
+      &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
+      &pendingCrashViewerDumpPath);
+    MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
+    std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";
+    AppendLogLine(outBase, L"Target process wait failed: " + std::to_wstring(le));
+    return true;
+  }
+  return false;
+}
+
+void RunHelperLoop(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  skydiag::helper::LoadStats* loadStats,
+  const std::filesystem::path& loadStatsPath,
+  std::uint32_t* adaptiveLoadingThresholdSec,
+  std::uint64_t attachNowQpc,
+  HelperLoopState* state)
+{
+  if (!loadStats || !adaptiveLoadingThresholdSec || !state) {
+    return;
+  }
+
+  for (;;) {
+    PumpManualCaptureInputs(cfg, proc, outBase, loadStats, *adaptiveLoadingThresholdSec);
+
+    FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &state->pendingCrashAnalysis);
+    MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &state->pendingCrashEtw);
+
+    if (HandleProcessExitTick(cfg, proc, outBase, state)) {
+      break;
+    }
+
+    const DWORD waitMs = 250;
+    if (HandleCrashEventTick(
+          cfg,
+          proc,
+          outBase,
+          waitMs,
+          &state->crashCaptured,
+          &state->pendingCrashEtw,
+          &state->pendingCrashAnalysis,
+          &state->capturedCrashDumpPath,
+          &state->pendingHangViewerDumpPath,
+          &state->pendingCrashViewerDumpPath)) {
+      continue;
+    }
+    if (HandleHangTick(
+          cfg,
+          proc,
+          outBase,
+          loadStats,
+          loadStatsPath,
+          adaptiveLoadingThresholdSec,
+          attachNowQpc,
+          &state->pendingHangViewerDumpPath,
+          &state->hangState) == HangTickResult::kBreak) {
+      break;
+    }
+  }
+}
+
+void ShutdownLoopState(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state)
+{
+  if (!state) {
+    return;
+  }
+
+  MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
+  UnregisterManualCaptureHotkeyIfEnabled(cfg);
+
+  if (state->pendingCrashAnalysis.active) {
+    AppendLogLine(outBase, L"Helper shutting down while crash analysis is still running; detaching from pending recapture task.");
+    ClearPendingCrashAnalysis(&state->pendingCrashAnalysis);
+  }
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -170,14 +452,7 @@ int wmain(int argc, wchar_t** argv)
 
   RunCompatibilityPreflight(cfg, proc, outBase);
 
-  {
-    skydiag::helper::RetentionLimits limits{};
-    limits.maxCrashDumps = cfg.maxCrashDumps;
-    limits.maxHangDumps = cfg.maxHangDumps;
-    limits.maxManualDumps = cfg.maxManualDumps;
-    limits.maxEtwTraces = cfg.maxEtwTraces;
-    skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
-  }
+  ApplyRetentionFromConfig(cfg, outBase);
 
   skydiag::helper::LoadStats loadStats;
   std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
@@ -189,209 +464,24 @@ int wmain(int argc, wchar_t** argv)
                << adaptiveLoadingThresholdSec << L"s (fallback=" << cfg.hangThresholdLoadingSec << L"s)\n";
   }
 
-  constexpr int kHotkeyId = 0x5344;  // 'SD' (arbitrary)
-  if (cfg.enableManualCaptureHotkey) {
-    if (!RegisterHotKey(nullptr, kHotkeyId, MOD_CONTROL | MOD_SHIFT, VK_F12)) {
-      const DWORD le = GetLastError();
-      std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " << le << L"\n";
-      AppendLogLine(outBase, L"Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " + std::to_wstring(le) +
-        L" (falling back to GetAsyncKeyState polling)");
-    } else {
-      std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: Ctrl+Shift+F12\n";
-      AppendLogLine(outBase, L"Manual capture hotkey registered: Ctrl+Shift+F12");
-    }
-  }
+  RegisterManualCaptureHotkeyIfEnabled(cfg, outBase);
 
   LARGE_INTEGER attachNow{};
   QueryPerformanceCounter(&attachNow);
   const std::uint64_t attachNowQpc = static_cast<std::uint64_t>(attachNow.QuadPart);
 
-  bool crashCaptured = false;
-
-  HangCaptureState hangState{};
-  hangState.wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
-  hangState.loadStartQpc = hangState.wasLoading ? proc.shm->header.start_qpc : 0;
-
-  std::wstring pendingHangViewerDumpPath;
-  std::wstring pendingCrashViewerDumpPath;
-  std::wstring capturedCrashDumpPath;
-  PendingCrashAnalysis pendingCrashAnalysis{};
-
-  PendingCrashEtwCapture pendingCrashEtw{};
-
-  for (;;) {
-    MSG msg{};
-    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-      if (msg.message == WM_HOTKEY && static_cast<int>(msg.wParam) == kHotkeyId) {
-        DoManualCapture(cfg, proc, outBase, loadStats, adaptiveLoadingThresholdSec, L"WM_HOTKEY");
-      }
-      TranslateMessage(&msg);
-      DispatchMessageW(&msg);
-    }
-
-    // Fallback manual hotkey detection: some environments can miss WM_HOTKEY even when RegisterHotKey succeeds.
-    // Polling is low overhead (once per loop) and makes manual capture more reliable.
-    if (cfg.enableManualCaptureHotkey) {
-      const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-      const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-      if (ctrl && shift && ((GetAsyncKeyState(VK_F12) & 1) != 0)) {
-        DoManualCapture(cfg, proc, outBase, loadStats, adaptiveLoadingThresholdSec, L"GetAsyncKeyState");
-      }
-    }
-
-    FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &pendingCrashAnalysis);
-    MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &pendingCrashEtw);
-
-    if (proc.process) {
-      const DWORD w = WaitForSingleObject(proc.process, 0);
-      if (w == WAIT_OBJECT_0) {
-        // Check exit code: normal exit (0) means shutdown exceptions should
-        // be ignored; non-zero means a real crash occurred.
-        DWORD exitCode = STILL_ACTIVE;
-        GetExitCodeProcess(proc.process, &exitCode);
-        const std::uint32_t exceptionCode =
-          (proc.shm ? proc.shm->header.crash.exception_code : 0u);
-        const bool exitCode0StrongCrash =
-          (exitCode == 0) &&
-          crashCaptured &&
-          skydiag::helper::IsStrongCrashException(exceptionCode);
-        if (exitCode != 0) {
-          // Drain any pending crash event before exiting — fixes race where
-          // the process terminates before the next HandleCrashEventTick poll.
-          HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-            &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
-            &pendingCrashViewerDumpPath);
-        } else {
-          if (exitCode0StrongCrash) {
-            AppendLogLine(
-              outBase,
-              L"exit_code=0 after crash capture but exception_code="
-                + Hex32(exceptionCode)
-                + L" is strong; preserving crash artifacts and crash auto-actions.");
-          } else if (crashCaptured) {
-            if (pendingCrashAnalysis.active && pendingCrashAnalysis.process) {
-              if (!TerminateProcess(pendingCrashAnalysis.process, 1)) {
-                AppendLogLine(
-                  outBase,
-                  L"exit_code=0 after crash capture; failed to terminate pending crash analysis process: "
-                    + std::to_wstring(GetLastError()));
-              } else {
-                AppendLogLine(outBase, L"exit_code=0 after crash capture; terminated pending crash analysis process.");
-              }
-              ClearPendingCrashAnalysis(&pendingCrashAnalysis);
-            }
-
-            // Stop crash ETW first so the finalized .etl can be pruned together
-            // with dump sidecars in this normal-exit false-positive path.
-            const std::filesystem::path crashEtwPath = pendingCrashEtw.etwPath;
-            MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
-
-            if (capturedCrashDumpPath.empty() && !pendingCrashViewerDumpPath.empty()) {
-              capturedCrashDumpPath = pendingCrashViewerDumpPath;
-            }
-            if (!capturedCrashDumpPath.empty()) {
-              const std::uint32_t removed = RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath, crashEtwPath);
-              AppendLogLine(
-                outBase,
-                L"exit_code=0 after crash capture; removed "
-                  + std::to_wstring(removed)
-                  + L" crash artifact(s): "
-                  + std::filesystem::path(capturedCrashDumpPath).filename().wstring());
-            }
-            capturedCrashDumpPath.clear();
-            pendingCrashViewerDumpPath.clear();
-            crashCaptured = false;
-          }
-          if (exitCode0StrongCrash) {
-            AppendLogLine(
-              outBase,
-              L"Process exited with exit_code=0 but crash exception_code="
-                + Hex32(exceptionCode)
-                + L" is strong; treating as crash for viewer/deferred behavior.");
-          } else {
-            AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
-          }
-        }
-        MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
-        std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
-        AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
-        if (!pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && (exitCode != 0 || exitCode0StrongCrash)) {
-          const std::wstring deferredDumpPath = pendingCrashViewerDumpPath;
-          StartDumpToolViewer(cfg, deferredDumpPath, outBase,
-            exitCode0StrongCrash ? L"crash_deferred_exit_code0_strong" : L"crash_deferred_exit");
-          AppendLogLine(
-            outBase,
-            L"Deferred crash viewer launch attempted after process exit (exit_code="
-              + std::to_wstring(exitCode)
-              + L", dump="
-              + std::filesystem::path(deferredDumpPath).filename().wstring()
-              + L").");
-          pendingCrashViewerDumpPath.clear();
-        }
-        if (!pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
-          const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
-          if (delayMs > 0) {
-            Sleep(delayMs);
-          }
-          const auto launch = StartDumpToolViewer(cfg, pendingHangViewerDumpPath, outBase, L"hang_exit");
-          if (launch == skydiag::helper::internal::DumpToolViewerLaunchResult::kLaunched) {
-            AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
-          } else {
-            AppendLogLine(outBase, L"Hang viewer auto-open attempt failed after process exit.");
-          }
-        }
-        break;
-      }
-      if (w == WAIT_FAILED) {
-        HandleCrashEventTick(cfg, proc, outBase, /*waitMs=*/0,
-          &crashCaptured, &pendingCrashEtw, &pendingCrashAnalysis, &capturedCrashDumpPath, &pendingHangViewerDumpPath,
-          &pendingCrashViewerDumpPath);
-        MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
-        const DWORD le = GetLastError();
-        std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";
-        AppendLogLine(outBase, L"Target process wait failed: " + std::to_wstring(le));
-        break;
-      }
-    }
-
-    const DWORD waitMs = 250;
-    if (HandleCrashEventTick(
-          cfg,
-          proc,
-          outBase,
-          waitMs,
-          &crashCaptured,
-          &pendingCrashEtw,
-          &pendingCrashAnalysis,
-          &capturedCrashDumpPath,
-          &pendingHangViewerDumpPath,
-          &pendingCrashViewerDumpPath)) {
-      continue;
-    }
-    if (HandleHangTick(
-          cfg,
-          proc,
-          outBase,
-          &loadStats,
-          loadStatsPath,
-          &adaptiveLoadingThresholdSec,
-          attachNowQpc,
-          &pendingHangViewerDumpPath,
-          &hangState) == HangTickResult::kBreak) {
-      break;
-    }
-  }
-
-  MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
-
-  if (cfg.enableManualCaptureHotkey) {
-    UnregisterHotKey(nullptr, kHotkeyId);
-  }
-
-  if (pendingCrashAnalysis.active) {
-    AppendLogLine(outBase, L"Helper shutting down while crash analysis is still running; detaching from pending recapture task.");
-    ClearPendingCrashAnalysis(&pendingCrashAnalysis);
-  }
+  HelperLoopState loopState{};
+  InitializeLoopState(proc, &loopState);
+  RunHelperLoop(
+    cfg,
+    proc,
+    outBase,
+    &loadStats,
+    loadStatsPath,
+    &adaptiveLoadingThresholdSec,
+    attachNowQpc,
+    &loopState);
+  ShutdownLoopState(cfg, proc, outBase, &loopState);
 
   skydiag::helper::Detach(proc);
   return 0;

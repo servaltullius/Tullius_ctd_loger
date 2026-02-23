@@ -62,20 +62,13 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     return EXCEPTION_CONTINUE_SEARCH;
   }
 
-  const LONG prev = InterlockedCompareExchange(
-    reinterpret_cast<volatile LONG*>(&shm->header.crash_seq),
-    1,
-    0);
-  if (prev != 0) {
-    return EXCEPTION_CONTINUE_SEARCH;
-  }
-
   shm->header.crash.exception_code = code;
   shm->header.crash.exception_addr = reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress);
   shm->header.crash.faulting_tid = GetCurrentThreadId();
 
   std::memcpy(&shm->header.crash.exception_record, ep->ExceptionRecord, sizeof(EXCEPTION_RECORD));
   std::memcpy(&shm->header.crash.context, ep->ContextRecord, sizeof(CONTEXT));
+  (void)InterlockedIncrement(reinterpret_cast<volatile LONG*>(&shm->header.crash_seq));
 
   skydiag::EventPayload p{};
   p.a = shm->header.crash.exception_code;

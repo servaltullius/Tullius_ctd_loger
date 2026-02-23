@@ -5,12 +5,12 @@
 #include <filesystem>
 #include <string>
 
+#include "CaptureCommon.h"
 #include "EtwCapture.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
-#include "SkyrimDiagHelper/Retention.h"
 
 namespace skydiag::helper::internal {
 
@@ -63,12 +63,7 @@ void MaybeStopPendingCrashEtwCapture(
 
   pending->active = false;
 
-  skydiag::helper::RetentionLimits limits{};
-  limits.maxCrashDumps = cfg.maxCrashDumps;
-  limits.maxHangDumps = cfg.maxHangDumps;
-  limits.maxManualDumps = cfg.maxManualDumps;
-  limits.maxEtwTraces = cfg.maxEtwTraces;
-  skydiag::helper::ApplyRetentionToOutputDir(outBase, limits);
+  ApplyRetentionFromConfig(cfg, outBase);
 }
 
 }  // namespace skydiag::helper::internal

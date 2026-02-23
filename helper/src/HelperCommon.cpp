@@ -35,16 +35,17 @@ std::wstring Timestamp()
   SYSTEMTIME st{};
   GetLocalTime(&st);
 
-  wchar_t buf[64]{};
+  wchar_t buf[80]{};
   swprintf_s(
     buf,
-    L"%04u%02u%02u_%02u%02u%02u",
+    L"%04u%02u%02u_%02u%02u%02u_%03u",
     st.wYear,
     st.wMonth,
     st.wDay,
     st.wHour,
     st.wMinute,
-    st.wSecond);
+    st.wSecond,
+    st.wMilliseconds);
   return buf;
 }
 

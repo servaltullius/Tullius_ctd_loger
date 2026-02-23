@@ -32,6 +32,8 @@ inline bool EndsWith(std::string_view s, std::string_view suffix)
 inline std::optional<std::string> TryExtractTimestampToken(std::string_view s)
 {
   // Search for pattern: YYYYMMDD_HHMMSS (15 chars)
+  // Optional precision suffix is supported: YYYYMMDD_HHMMSS_<digits>
+  // (e.g., milliseconds as YYYYMMDD_HHMMSS_123).
   auto is_digits = [](std::string_view v) {
     for (const char c : v) {
       const unsigned char uc = static_cast<unsigned char>(c);
@@ -55,7 +57,23 @@ inline std::optional<std::string> TryExtractTimestampToken(std::string_view s)
     if (!is_digits(time)) {
       continue;
     }
-    best = std::string(s.substr(i, 15));
+    std::size_t tokenLen = 15;
+    const std::size_t suffixSep = i + tokenLen;
+    if (suffixSep < s.size() && s[suffixSep] == '_') {
+      std::size_t suffixEnd = suffixSep + 1;
+      while (suffixEnd < s.size()) {
+        const unsigned char uc = static_cast<unsigned char>(s[suffixEnd]);
+        if (!std::isdigit(uc)) {
+          break;
+        }
+        suffixEnd++;
+      }
+      if (suffixEnd > suffixSep + 1) {
+        tokenLen = suffixEnd - i;
+      }
+    }
+
+    best = std::string(s.substr(i, tokenLen));
   }
   return best;
 }
