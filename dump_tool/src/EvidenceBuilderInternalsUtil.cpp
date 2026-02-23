@@ -196,6 +196,63 @@ std::optional<double> FindLastEventTimeMsByType(const std::vector<EventRow>& eve
   return std::nullopt;
 }
 
+std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool en)
+{
+  if (events.empty()) return {};
+
+  // Find the last PerfHitch with a >= 2000ms (big hitch = potential freeze)
+  const EventRow* lastBigHitch = nullptr;
+  for (auto it = events.rbegin(); it != events.rend(); ++it) {
+    if (it->type == static_cast<std::uint16_t>(skydiag::EventType::kPerfHitch) && it->a >= 2000) {
+      lastBigHitch = &(*it);
+      break;
+    }
+  }
+
+  if (!lastBigHitch) return {};
+
+  // Collect interesting events in the 10 seconds before the big hitch
+  const double hitchTime = lastBigHitch->t_ms;
+  const double windowMs = 10000.0;
+
+  std::vector<std::wstring> context;
+  for (const auto& e : events) {
+    if (e.t_ms > hitchTime) break;
+    if (e.t_ms < hitchTime - windowMs) continue;
+    if (&e == lastBigHitch) break;
+
+    switch (static_cast<skydiag::EventType>(e.type)) {
+      case skydiag::EventType::kMenuOpen:
+      case skydiag::EventType::kMenuClose:
+      case skydiag::EventType::kLoadStart:
+      case skydiag::EventType::kLoadEnd:
+      case skydiag::EventType::kCellChange:
+      case skydiag::EventType::kPerfHitch: {
+        std::wstring line = e.type_name;
+        if (!e.detail.empty()) {
+          line += L"(" + e.detail + L")";
+        }
+        context.push_back(std::move(line));
+        break;
+      }
+      default:
+        break;
+    }
+    if (context.size() >= 5) break;
+  }
+
+  if (context.empty()) return {};
+
+  std::wstring result;
+  for (std::size_t i = 0; i < context.size(); i++) {
+    if (i > 0) result += L" \u2192 ";
+    result += context[i];
+  }
+  result += L" \u2192 PerfHitch(" + lastBigHitch->detail + L")";
+
+  return result;
+}
+
 std::optional<double> InferCaptureAnchorMs(const AnalysisResult& r)
 {
   // Prefer explicit crash/hang marks when available, otherwise fall back to the last recorded timestamp.

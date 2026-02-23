@@ -83,6 +83,8 @@ std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(
   const std::vector<EventRow>& events,
   const std::vector<ResourceRow>& resources);
 
+std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool en);
+
 // Split parts of BuildEvidenceAndSummaryImpl.
 void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

@@ -349,6 +349,21 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     }
   }
 
+  // Pre-freeze context: summarize events before the biggest hitch
+  if (isHangLike || (hitch.count > 0 && hitch.maxMs >= 2000)) {
+    const auto preFreeze = BuildPreFreezeContextLine(r.events, en);
+    if (!preFreeze.empty()) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kMedium;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = en
+        ? L"Context before freeze / big hitch (pre-freeze context)"
+        : L"\ud504\ub9ac\uc9d5/\ud070 \ud788\uce58 \uc9c1\uc804 \uc0c1\ud669";
+      e.details = preFreeze;
+      r.evidence.push_back(std::move(e));
+    }
+  }
+
   if (hasModule && !isSystem && !isGameExe) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kHigh;
