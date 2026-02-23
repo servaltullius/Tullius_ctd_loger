@@ -27,6 +27,20 @@ static void TestMainWindowHasCorrelationBadge()
   assert(summary.find("HistoryCorrelationCount") != std::string::npos);
 }
 
+static void TestMainWindowHasTroubleshootingSection()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  assert(xaml.find("TroubleshootingExpander") != std::string::npos);
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  assert(cs.find("TroubleshootingSteps") != std::string::npos || cs.find("troubleshooting_steps") != std::string::npos);
+
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  assert(summary.find("TroubleshootingSteps") != std::string::npos);
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -44,6 +58,7 @@ int main()
   assert(xaml.find("CopyShareButton_Click") != std::string::npos && "Community share click handler not wired in XAML");
 
   TestMainWindowHasCorrelationBadge();
+  TestMainWindowHasTroubleshootingSection();
   return 0;
 }
 

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 using System.Text.Json;
 
 using Microsoft.UI;
@@ -420,6 +421,22 @@ public sealed partial class MainWindow : Window
         QuickActionsValueText.Text = recommendationCount == 0
             ? T("None", "없음")
             : $"{recommendationCount} {T("items", "개 항목")}";
+
+        if (summary.TroubleshootingSteps.Count > 0)
+        {
+            TroubleshootingExpander.Header = string.IsNullOrWhiteSpace(summary.TroubleshootingTitle)
+                ? T("Troubleshooting", "트러블슈팅 가이드")
+                : summary.TroubleshootingTitle;
+            TroubleshootingExpander.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            var numberedSteps = summary.TroubleshootingSteps
+                .Select((step, i) => $"{i + 1}. {step}")
+                .ToList();
+            TroubleshootingList.ItemsSource = numberedSteps;
+        }
+        else
+        {
+            TroubleshootingExpander.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+        }
 
         _callstackFrames.Clear();
         foreach (var frame in summary.CallstackFrames.Take(160))

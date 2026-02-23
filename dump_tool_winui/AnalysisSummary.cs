@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text.Json;
 
 namespace SkyrimDiagDumpToolWinUI;
@@ -14,6 +15,8 @@ internal sealed class AnalysisSummary
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
     public int HistoryCorrelationCount { get; init; }
+    public string TroubleshootingTitle { get; init; } = string.Empty;
+    public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
     {
@@ -124,6 +127,9 @@ internal sealed class AnalysisSummary
             }
         }
 
+        var tsElement = root.TryGetProperty("troubleshooting_steps", out var tsTemp)
+            && tsTemp.ValueKind == JsonValueKind.Object ? tsTemp : default;
+
         return new AnalysisSummary
         {
             SummarySentence = ReadString(root, "summary_sentence"),
@@ -141,6 +147,17 @@ internal sealed class AnalysisSummary
                 && histCorr.ValueKind == JsonValueKind.Object
                 && histCorr.TryGetProperty("count", out var countNode)
                 && countNode.TryGetInt32(out var hcCount) ? hcCount : 0,
+            TroubleshootingTitle = tsElement.ValueKind != JsonValueKind.Undefined
+                ? ReadString(tsElement, "title") : string.Empty,
+            TroubleshootingSteps = tsElement.ValueKind != JsonValueKind.Undefined
+                && tsElement.TryGetProperty("steps", out var stepsArr)
+                && stepsArr.ValueKind == JsonValueKind.Array
+                ? stepsArr.EnumerateArray()
+                    .Where(s => s.ValueKind == JsonValueKind.String)
+                    .Select(s => s.GetString() ?? string.Empty)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .ToList()
+                : new List<string>(),
         };
     }
 

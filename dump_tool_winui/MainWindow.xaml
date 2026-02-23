@@ -642,6 +642,17 @@
                 </ListView>
               </StackPanel>
             </Border>
+
+            <!-- Troubleshooting checklist -->
+            <Expander x:Name="TroubleshootingExpander" Header="Troubleshooting" IsExpanded="False" Visibility="Collapsed" Margin="0,8,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <ItemsControl x:Name="TroubleshootingList" Margin="8,4">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Expander>
           </StackPanel>
 
           <!-- ════════════════════════════════════════════
