@@ -549,6 +549,21 @@ set_tests_properties(skydiag_plugin_rules_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
 
+add_executable(skydiag_event_detail_guard_tests
+  event_detail_guard_tests.cpp
+)
+
+set_target_properties(skydiag_event_detail_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_event_detail_guard_tests COMMAND skydiag_event_detail_guard_tests)
+set_tests_properties(skydiag_event_detail_guard_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
 if(NOT WIN32)
   if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
     add_executable(skydiag_plugin_rules_logic_tests

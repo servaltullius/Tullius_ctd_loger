@@ -17,6 +17,8 @@ namespace skydiag::dump_tool::internal {
 
 std::wstring EventTypeName(std::uint16_t t);
 
+std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d);
+
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN);
 
 struct WctCaptureDecision

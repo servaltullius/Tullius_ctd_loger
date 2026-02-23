@@ -44,6 +44,7 @@ struct EventRow
   std::uint64_t b = 0;
   std::uint64_t c = 0;
   std::uint64_t d = 0;
+  std::wstring detail;  // human-readable summary (e.g. "hitch=105.8s flags=Loading interval=100ms")
 };
 
 struct ResourceRow
