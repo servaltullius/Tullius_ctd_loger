@@ -271,6 +271,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         row.b = tmp.payload.b;
         row.c = tmp.payload.c;
         row.d = tmp.payload.d;
+        row.detail = internal::FormatEventDetail(row.type, row.a, row.b, row.c, row.d);
         row.t_ms = (tmp.qpc >= start)
           ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
           : 0.0;

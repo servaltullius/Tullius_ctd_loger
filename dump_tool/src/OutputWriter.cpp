@@ -431,8 +431,11 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   }
   rpt << (en ? "\nLast events (most recent last):\n" : "\n최근 이벤트(최신이 마지막):\n");
   for (const auto& ev : r.events) {
-    rpt << "[" << ev.i << "] t_ms=" << ev.t_ms << " tid=" << ev.tid << " " << WideToUtf8(ev.type_name)
-        << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
+    rpt << "[" << ev.i << "] t_ms=" << ev.t_ms << " tid=" << ev.tid << " " << WideToUtf8(ev.type_name);
+    if (!ev.detail.empty()) {
+      rpt << " | " << WideToUtf8(ev.detail);
+    }
+    rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
   }
 
   if (!WriteTextUtf8(reportPath, rpt.str(), &writeErr)) {
@@ -454,6 +457,9 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
       j["b"] = ev.b;
       j["c"] = ev.c;
       j["d"] = ev.d;
+      if (!ev.detail.empty()) {
+        j["detail"] = WideToUtf8(ev.detail);
+      }
       bb << j.dump() << "\n";
     }
     if (!WriteTextUtf8(blackboxPath, bb.str(), &writeErr)) {
