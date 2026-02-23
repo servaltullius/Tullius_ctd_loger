@@ -112,26 +112,6 @@ std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, boo
   return std::nullopt;
 }
 
-bool IsSystemishModule(std::wstring_view filename)
-{
-  return minidump::IsSystemishModule(filename);
-}
-
-bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath)
-{
-  return minidump::IsLikelyWindowsSystemModulePath(modulePath);
-}
-
-bool IsGameExeModule(std::wstring_view filename)
-{
-  const std::wstring lower = WideLower(filename);
-  return (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe");
-}
-
-bool IsKnownHookFramework(std::wstring_view filename)
-{
-  return minidump::IsKnownHookFramework(filename);
-}
 
 std::optional<WctInfo> TrySummarizeWct(std::string_view utf8)
 {

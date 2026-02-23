@@ -2,6 +2,8 @@
 
 #include <cwchar>
 
+#include "MinidumpUtil.h"
+
 namespace skydiag::dump_tool::internal {
 
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -27,10 +29,10 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const SuspectItem* topSuspect = hasSuspect ? &r.suspects[0] : nullptr;
   const SuspectItem* firstNonHookSuspect = nullptr;
   auto isActionableSuspect = [&](const SuspectItem& s) {
-    return !IsKnownHookFramework(s.module_filename) &&
-           !IsSystemishModule(s.module_filename) &&
-           !IsLikelyWindowsSystemModulePath(s.module_path) &&
-           !IsGameExeModule(s.module_filename);
+    return !minidump::IsKnownHookFramework(s.module_filename) &&
+           !minidump::IsSystemishModule(s.module_filename) &&
+           !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+           !minidump::IsGameExeModule(s.module_filename);
   };
   if (hasSuspect) {
     for (const auto& s : r.suspects) {
@@ -63,9 +65,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     nonHookSuspectWho = suspectDisplayName(*firstNonHookSuspect);
   }
   const bool hasNonHookSuspect = (firstNonHookSuspect != nullptr);
-  const bool topSuspectIsHookFramework = (topSuspect != nullptr) && IsKnownHookFramework(topSuspect->module_filename);
+  const bool topSuspectIsHookFramework = (topSuspect != nullptr) && minidump::IsKnownHookFramework(topSuspect->module_filename);
   const bool topSuspectIsSystem = (topSuspect != nullptr) &&
-    (IsSystemishModule(topSuspect->module_filename) || IsLikelyWindowsSystemModulePath(topSuspect->module_path));
+    (minidump::IsSystemishModule(topSuspect->module_filename) || minidump::IsLikelyWindowsSystemModulePath(topSuspect->module_path));
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {

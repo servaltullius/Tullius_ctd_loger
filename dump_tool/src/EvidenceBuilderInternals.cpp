@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include "EvidenceBuilderInternalsPriv.h"
+#include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -52,10 +53,10 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   const bool isSnapshotLike = !isCrashLike && !isHangLike;
   const bool isManualCapture = manualCaptureHint || (nameHang && isSnapshotLike);
 
-  const bool isSystem = IsSystemishModule(r.fault_module_filename) || IsLikelyWindowsSystemModulePath(r.fault_module_path);
+  const bool isSystem = minidump::IsSystemishModule(r.fault_module_filename) || minidump::IsLikelyWindowsSystemModulePath(r.fault_module_path);
   const bool hasModule = !r.fault_module_filename.empty();
-  const bool isGameExe = IsGameExeModule(r.fault_module_filename);
-  const bool isHookFramework = IsKnownHookFramework(r.fault_module_filename);
+  const bool isGameExe = minidump::IsGameExeModule(r.fault_module_filename);
+  const bool isHookFramework = minidump::IsKnownHookFramework(r.fault_module_filename);
   const auto hitch = ComputeHitchSummary(r.events);
   const std::wstring suspectBasis = r.suspects_from_stackwalk
     ? (en ? L"callstack" : L"콜스택")

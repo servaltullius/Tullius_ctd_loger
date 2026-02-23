@@ -2,6 +2,7 @@
 
 #include <cwchar>
 
+#include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -21,10 +22,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool hasStackCandidate = !r.suspects.empty();
   const SuspectItem* firstNonHookStackCandidate = nullptr;
   auto isActionableStackCandidate = [&](const SuspectItem& s) {
-    return !IsKnownHookFramework(s.module_filename) &&
-           !IsSystemishModule(s.module_filename) &&
-           !IsLikelyWindowsSystemModulePath(s.module_path) &&
-           !IsGameExeModule(s.module_filename);
+    return !minidump::IsKnownHookFramework(s.module_filename) &&
+           !minidump::IsSystemishModule(s.module_filename) &&
+           !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+           !minidump::IsGameExeModule(s.module_filename);
   };
   if (hasStackCandidate) {
     for (const auto& s : r.suspects) {
@@ -35,10 +36,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
   const bool hasNonHookStackCandidate = (firstNonHookStackCandidate != nullptr);
-  const bool topStackCandidateIsHookFramework = hasStackCandidate && IsKnownHookFramework(r.suspects[0].module_filename);
+  const bool topStackCandidateIsHookFramework = hasStackCandidate && minidump::IsKnownHookFramework(r.suspects[0].module_filename);
   const bool topStackCandidateIsSystem =
     hasStackCandidate &&
-    (IsSystemishModule(r.suspects[0].module_filename) || IsLikelyWindowsSystemModulePath(r.suspects[0].module_path));
+    (minidump::IsSystemishModule(r.suspects[0].module_filename) || minidump::IsLikelyWindowsSystemModulePath(r.suspects[0].module_path));
   const bool preferStackCandidateOverFault =
     ctx.isHookFramework &&
     hasNonHookStackCandidate;

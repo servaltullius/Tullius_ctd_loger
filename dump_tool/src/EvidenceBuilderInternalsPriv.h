@@ -63,10 +63,6 @@ std::wstring ToWideAscii(std::string_view s);
 std::wstring Hex64(std::uint64_t v);
 
 std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, bool en);
-bool IsSystemishModule(std::wstring_view filename);
-bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath);
-bool IsGameExeModule(std::wstring_view filename);
-bool IsKnownHookFramework(std::wstring_view filename);
 
 std::optional<WctInfo> TrySummarizeWct(std::string_view utf8);
 HitchSummary ComputeHitchSummary(const std::vector<EventRow>& events);
