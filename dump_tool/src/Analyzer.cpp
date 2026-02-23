@@ -649,6 +649,66 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
+  // Best-effort troubleshooting guide matching.
+  if (!opt.data_dir.empty()) {
+    const auto guidesPath = std::filesystem::path(opt.data_dir) / L"troubleshooting_guides.json";
+    try {
+      std::ifstream gf(guidesPath);
+      if (gf.is_open()) {
+        const auto gj = nlohmann::json::parse(gf, nullptr, true);
+        if (gj.contains("guides") && gj["guides"].is_array()) {
+          const bool en = (opt.language == i18n::Language::kEnglish);
+          const std::string excHex = [&]() {
+            char buf[32]{};
+            if (out.exc_code != 0) {
+              snprintf(buf, sizeof(buf), "0x%08X", out.exc_code);
+            }
+            return std::string(buf);
+          }();
+          const std::string sigId = out.signature_match ? out.signature_match->id : "";
+          const bool isHang = hangLike;
+          const bool isLoading = (out.state_flags & skydiag::kState_Loading) != 0u;
+          const bool isSnapshot = (out.exc_code == 0 && !hangLike);
+
+          for (const auto& guide : gj["guides"]) {
+            if (!guide.is_object() || !guide.contains("match")) continue;
+            const auto& match = guide["match"];
+            bool matched = true;
+
+            if (match.contains("exc_code")) {
+              if (match.value("exc_code", "") != excHex) { matched = false; }
+            }
+            if (matched && match.contains("signature_id")) {
+              if (match.value("signature_id", "") != sigId) { matched = false; }
+            }
+            if (matched && match.contains("state_flags_contains")) {
+              const auto req = match.value("state_flags_contains", "");
+              if (req == "hang" && !isHang) { matched = false; }
+              if (req == "loading" && !isLoading) { matched = false; }
+              if (req == "snapshot" && !isSnapshot) { matched = false; }
+            }
+
+            if (matched) {
+              const std::string titleKey = en ? "title_en" : "title_ko";
+              const std::string stepsKey = en ? "steps_en" : "steps_ko";
+              out.troubleshooting_title = Utf8ToWide(guide.value(titleKey, guide.value("title_en", "")));
+              if (guide.contains(stepsKey) && guide[stepsKey].is_array()) {
+                for (const auto& step : guide[stepsKey]) {
+                  if (step.is_string()) {
+                    out.troubleshooting_steps.push_back(Utf8ToWide(step.get<std::string>()));
+                  }
+                }
+              }
+              break;  // first match wins
+            }
+          }
+        }
+      }
+    } catch (...) {
+      // Best-effort; silently skip on failure.
+    }
+  }
+
   BuildEvidenceAndSummary(out, opt.language);
   if (err) err->clear();
   return true;

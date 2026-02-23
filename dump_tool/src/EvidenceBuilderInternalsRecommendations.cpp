@@ -261,6 +261,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : L"[수동] 수동 캡처에는 WCT가 포함됩니다. 실제 프리징/무한로딩 중 캡처한 덤프에서 WCT 탭을 참고하세요.");
     }
   }
+
+  if (!r.troubleshooting_steps.empty()) {
+    r.recommendations.push_back(en
+      ? (L"[Troubleshooting] See the troubleshooting checklist (" + std::to_wstring(r.troubleshooting_steps.size()) + L" steps) for this crash type.")
+      : (L"[트러블슈팅] 이 크래시 유형에 대한 단계별 체크리스트(" + std::to_wstring(r.troubleshooting_steps.size()) + L"단계)를 확인하세요."));
+  }
 }
 
 }  // namespace skydiag::dump_tool::internal

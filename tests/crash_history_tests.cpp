@@ -44,11 +44,24 @@ static void TestOutputWriterHasHistoryCorrelation()
   assert(src.find("history_correlation") != std::string::npos);
 }
 
+static void TestRecommendationsHasTroubleshootingGuide()
+{
+  const auto rec = ReadFile("dump_tool/src/EvidenceBuilderInternalsRecommendations.cpp");
+  assert(rec.find("troubleshooting") != std::string::npos || rec.find("Troubleshooting") != std::string::npos);
+
+  const auto header = ReadFile("dump_tool/src/Analyzer.h");
+  assert(header.find("troubleshooting_steps") != std::string::npos);
+
+  const auto writer = ReadFile("dump_tool/src/OutputWriter.cpp");
+  assert(writer.find("troubleshooting_steps") != std::string::npos);
+}
+
 int main()
 {
   TestCrashHistoryApiExists();
   TestAnalyzerHasHistoryCorrelationField();
   TestEvidenceHasCorrelationDisplay();
   TestOutputWriterHasHistoryCorrelation();
+  TestRecommendationsHasTroubleshootingGuide();
   return 0;
 }

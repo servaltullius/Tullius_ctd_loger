@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "guides": [
+    {
+      "id": "D6DDDA_VRAM",
+      "match": { "exc_code": "0xC0000005", "signature_id": "D6DDDA_VRAM" },
+      "title_en": "VRAM Exhaustion (D6DDDA)",
+      "title_ko": "VRAM 부족 (D6DDDA)",
+      "steps_en": [
+        "Check your GPU VRAM usage — this crash typically means VRAM is exhausted",
+        "Lower texture quality in ENB/SkyrimPrefs.ini",
+        "Reduce 4K texture mods or switch to 2K alternatives",
+        "Close background apps using GPU (browsers, Discord overlay)",
+        "If using ENB, try disabling post-processing effects one by one"
+      ],
+      "steps_ko": [
+        "GPU VRAM 사용량을 확인하세요 — 이 크래시는 보통 VRAM 부족을 의미합니다",
+        "ENB/SkyrimPrefs.ini에서 텍스처 품질을 낮추세요",
+        "4K 텍스처 모드를 줄이거나 2K 대안으로 교체하세요",
+        "GPU를 사용하는 백그라운드 앱(브라우저, Discord 오버레이)을 닫으세요",
+        "ENB 사용 시 후처리 효과를 하나씩 꺼보세요"
+      ]
+    },
+    {
+      "id": "CPP_EXCEPTION",
+      "match": { "exc_code": "0xE06D7363" },
+      "title_en": "C++ Exception (0xE06D7363)",
+      "title_ko": "C++ 예외 (0xE06D7363)",
+      "steps_en": [
+        "Confirm this was an actual CTD (not a handled exception false positive)",
+        "Consider setting CrashHookMode=1 in SkyrimDiag.ini to filter handled exceptions",
+        "Check the C++ Exception section for type and info details",
+        "If DXGI_ERROR_DEVICE_REMOVED: likely a GPU driver crash — update GPU drivers",
+        "If std::bad_alloc: RAM/VRAM exhaustion — reduce mod payload"
+      ],
+      "steps_ko": [
+        "실제 CTD인지 확인하세요 (handled exception 오탐이 아닌지)",
+        "SkyrimDiag.ini에서 CrashHookMode=1로 설정하여 handled exception을 필터링해 보세요",
+        "C++ Exception 섹션에서 type과 info 세부 정보를 확인하세요",
+        "DXGI_ERROR_DEVICE_REMOVED인 경우: GPU 드라이버 크래시 — 드라이버 업데이트",
+        "std::bad_alloc인 경우: RAM/VRAM 부족 — 모드 부하를 줄이세요"
+      ]
+    },
+    {
+      "id": "FREEZE_HANG",
+      "match": { "state_flags_contains": "hang" },
+      "title_en": "Freeze / Infinite Loading",
+      "title_ko": "프리징 / 무한 로딩",
+      "steps_en": [
+        "Check the WCT tab for deadlock indicators (isCycle=true)",
+        "If deadlock: identify which DLLs hold the locks from the WCT thread chains",
+        "If no deadlock: likely an infinite loop or busy wait — check the callstack for looping code",
+        "Review the Events tab for what happened just before the freeze",
+        "Disable recently added mods that affect scripting/animation/physics"
+      ],
+      "steps_ko": [
+        "WCT 탭에서 데드락 표시(isCycle=true)를 확인하세요",
+        "데드락인 경우: WCT 스레드 체인에서 어떤 DLL이 잠금을 보유하는지 확인하세요",
+        "데드락이 아닌 경우: 무한 루프 또는 바쁜 대기일 가능성 — 콜스택에서 반복 코드 확인",
+        "이벤트 탭에서 프리징 직전에 무엇이 일어났는지 확인하세요",
+        "스크립팅/애니메이션/물리에 영향을 주는 최근 추가 모드를 비활성화하세요"
+      ]
+    },
+    {
+      "id": "LOADING_CRASH",
+      "match": { "state_flags_contains": "loading" },
+      "title_en": "Crash During Loading",
+      "title_ko": "로딩 중 크래시",
+      "steps_en": [
+        "Loading crashes often involve animation/mesh/texture/skeleton/script initialization",
+        "Check the Resources tab for recently loaded .nif/.hkx/.tri files",
+        "If a specific resource appears suspicious, identify its providing mod",
+        "Check for asset conflicts in MO2 (multiple mods providing the same file)",
+        "Disable animation/skeleton/body/physics/precaching mods one by one"
+      ],
+      "steps_ko": [
+        "로딩 중 크래시는 보통 애니메이션/메쉬/텍스처/스켈레톤/스크립트 초기화와 관련됩니다",
+        "리소스 탭에서 최근 로드된 .nif/.hkx/.tri 파일을 확인하세요",
+        "의심되는 리소스가 있으면 제공 모드를 확인하세요",
+        "MO2에서 에셋 충돌(여러 모드가 같은 파일 제공)을 확인하세요",
+        "애니메이션/스켈레톤/바디/물리/프리캐시 모드를 하나씩 비활성화하세요"
+      ]
+    },
+    {
+      "id": "SNAPSHOT",
+      "match": { "state_flags_contains": "snapshot" },
+      "title_en": "Snapshot Dump (Not a Crash)",
+      "title_ko": "스냅샷 덤프 (크래시 아님)",
+      "steps_en": [
+        "This dump was captured without an actual crash/hang",
+        "It is useful for state inspection but NOT for identifying crash causes",
+        "To diagnose a real issue, capture during an actual CTD or freeze",
+        "For freezes: use Ctrl+Shift+F12 or wait for auto hang detection"
+      ],
+      "steps_ko": [
+        "이 덤프는 실제 크래시/행 없이 캡처되었습니다",
+        "상태 검사에는 유용하지만 크래시 원인을 판별하기에는 부적합합니다",
+        "실제 문제를 진단하려면 실제 CTD 또는 프리징 중에 캡처하세요",
+        "프리징의 경우: Ctrl+Shift+F12를 사용하거나 자동 행 감지를 기다리세요"
+      ]
+    },
+    {
+      "id": "ACCESS_VIOLATION",
+      "match": { "exc_code": "0xC0000005" },
+      "title_en": "Access Violation (0xC0000005)",
+      "title_ko": "접근 위반 (0xC0000005)",
+      "steps_en": [
+        "Identify the fault module from the summary",
+        "Check if the mod has a known update for your game version",
+        "Reinstall the mod and verify SKSE/Address Library compatibility",
+        "If the fault module is a hook framework DLL, check other suspect candidates first",
+        "Disable the suspect mod, reproduce, and confirm the crash is gone"
+      ],
+      "steps_ko": [
+        "요약에서 원인 모듈을 확인하세요",
+        "해당 모드가 현재 게임 버전에 맞는 업데이트가 있는지 확인하세요",
+        "모드를 재설치하고 SKSE/Address Library 호환성을 확인하세요",
+        "원인 모듈이 훅 프레임워크 DLL이면 다른 의심 후보를 먼저 점검하세요",
+        "의심 모드를 비활성화 후 재현해서 크래시가 사라지는지 확인하세요"
+      ]
+    }
+  ]
+}

@@ -289,6 +289,17 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     };
   }
 
+  if (!r.troubleshooting_steps.empty()) {
+    auto steps = nlohmann::json::array();
+    for (const auto& step : r.troubleshooting_steps) {
+      steps.push_back(WideToUtf8(step));
+    }
+    summary["troubleshooting_steps"] = {
+      { "title", WideToUtf8(r.troubleshooting_title) },
+      { "steps", std::move(steps) },
+    };
+  }
+
   std::wstring writeErr;
   if (!WriteTextUtf8(summaryPath, summary.dump(2), &writeErr)) {
     if (err) *err = writeErr;

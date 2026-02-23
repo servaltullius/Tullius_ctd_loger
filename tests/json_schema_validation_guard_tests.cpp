@@ -18,6 +18,14 @@ static void AssertContains(const std::string& haystack, const char* needle, cons
   assert(haystack.find(needle) != std::string::npos && message);
 }
 
+static void TestTroubleshootingGuidesJsonHasVersionField()
+{
+  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  auto src = ReadAllText(repoRoot / "dump_tool" / "data" / "troubleshooting_guides.json");
+  AssertContains(src, "\"version\"", "troubleshooting_guides.json must have version field");
+  AssertContains(src, "\"guides\"", "troubleshooting_guides.json must have guides array");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -41,6 +49,8 @@ int main()
   AssertContains(minidumpUtil, "\"version\"", "LoadHookFrameworksFromJson must validate version field.");
   AssertContains(pluginRules, "\"version\"", "PluginRules::LoadFromJson must validate version field.");
   AssertContains(sigDb, "\"version\"", "SignatureDatabase::LoadFromJson must validate version field.");
+
+  TestTroubleshootingGuidesJsonHasVersionField();
 
   return 0;
 }

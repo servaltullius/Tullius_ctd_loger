@@ -133,6 +133,8 @@ struct AnalysisResult
   std::wstring summary_sentence;
   std::vector<EvidenceItem> evidence;
   std::vector<std::wstring> recommendations;
+  std::vector<std::wstring> troubleshooting_steps;
+  std::wstring troubleshooting_title;
 };
 
 struct AnalyzeOptions
