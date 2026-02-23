@@ -228,6 +228,9 @@ bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)
     if (!j.is_object() || !j.contains("rules") || !j["rules"].is_array()) {
       return false;
     }
+    if (!j.contains("version") || !j["version"].is_number_unsigned()) {
+      return false;
+    }
 
     std::vector<Rule> rules;
     rules.reserve(j["rules"].size());

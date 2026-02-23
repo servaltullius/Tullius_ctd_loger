@@ -124,6 +124,9 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
     if (!j.is_object() || !j.contains("signatures") || !j["signatures"].is_array()) {
       return false;
     }
+    if (!j.contains("version") || !j["version"].is_number_unsigned()) {
+      return false;
+    }
 
     std::vector<Signature> loaded;
     loaded.reserve(j["signatures"].size());

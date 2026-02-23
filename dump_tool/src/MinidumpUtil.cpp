@@ -368,6 +368,9 @@ void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath)
     if (!j.is_object() || !j.contains("frameworks") || !j["frameworks"].is_array()) {
       return;
     }
+    if (!j.contains("version") || !j["version"].is_number_unsigned()) {
+      return;  // Reject files without version tag.
+    }
 
     std::vector<std::wstring> loaded;
     loaded.reserve(j["frameworks"].size());
