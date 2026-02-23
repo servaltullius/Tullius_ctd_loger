@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window
         EventsList.ItemsSource = _eventItems;
 
         CopySummaryButton.IsEnabled = false;
+        CopyShareButton.IsEnabled = false;
 
         if (!string.IsNullOrWhiteSpace(startupOptions.DumpPath))
         {
@@ -140,6 +141,7 @@ public sealed partial class MainWindow : Window
         CancelAnalyzeButton.Content = T("Cancel analysis", "분석 취소");
         OpenOutputButton.Content = T("Open report folder", "리포트 폴더 열기");
         CopySummaryButton.Content = T("Copy summary", "요약 복사");
+        CopyShareButton.Content = T("📋 Share", "📋 공유");
     }
 
     private void HookWheelChainingForNestedControls()
@@ -371,6 +373,7 @@ public sealed partial class MainWindow : Window
             : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
 
         CopySummaryButton.IsEnabled = true;
+        CopyShareButton.IsEnabled = true;
 
         _suspects.Clear();
         foreach (var suspect in summary.Suspects.Take(5))
@@ -467,6 +470,29 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void CopyShareButton_Click(object sender, RoutedEventArgs e)
+    {
+        var text = BuildCommunityShareText();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            StatusText.Text = T("No summary to share yet.", "아직 공유할 요약이 없습니다.");
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(text);
+            Clipboard.SetContent(dataPackage);
+            Clipboard.Flush();
+            StatusText.Text = T("Copied community share text to clipboard.", "커뮤니티 공유용 요약을 클립보드에 복사했습니다.");
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T("Failed to copy to clipboard: ", "클립보드 복사 실패: ") + ex.Message;
+        }
+    }
+
     private string? BuildSummaryClipboardText()
     {
         var summary = _currentSummary;
@@ -504,6 +530,52 @@ public sealed partial class MainWindow : Window
         {
             lines.Add((_isKorean ? "추정 모드: " : "Inferred mod: ") + summary.InferredModName);
         }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private string? BuildCommunityShareText()
+    {
+        var summary = _currentSummary;
+        if (summary is null)
+        {
+            return null;
+        }
+
+        var lines = new List<string>();
+
+        lines.Add(_isKorean
+            ? "🔴 Skyrim CTD 리포트 — SkyrimDiag"
+            : "🔴 Skyrim CTD Report — SkyrimDiag");
+
+        if (summary.Suspects.Count > 0)
+        {
+            var top = summary.Suspects[0];
+            var conf = !string.IsNullOrWhiteSpace(top.Confidence) ? top.Confidence : "?";
+            lines.Add($"📌 {(_isKorean ? "유력 원인" : "Primary suspect")}: {top.Module} ({conf})");
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
+        {
+            lines.Add($"🔍 {(_isKorean ? "유형" : "Type")}: {summary.CrashBucketKey}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.ModulePlusOffset))
+        {
+            lines.Add($"📍 Module+Offset: {summary.ModulePlusOffset}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.SummarySentence))
+        {
+            lines.Add($"💡 {(_isKorean ? "결론" : "Conclusion")}: {summary.SummarySentence}");
+        }
+
+        if (summary.Recommendations.Count > 0)
+        {
+            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {summary.Recommendations[0]}");
+        }
+
+        lines.Add("— Tullius CTD Logger");
 
         return string.Join(Environment.NewLine, lines);
     }

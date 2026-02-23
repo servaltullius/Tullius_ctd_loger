@@ -24,6 +24,10 @@ int main()
   // Triage UX: allow users to copy the crash summary section quickly for sharing.
   assert(xaml.find("CopySummaryButton") != std::string::npos && "Copy summary button missing in XAML");
   assert(xaml.find("CopySummaryButton_Click") != std::string::npos && "Copy summary click handler not wired in XAML");
+
+  // Community share copy button for Discord/Reddit
+  assert(xaml.find("CopyShareButton") != std::string::npos && "Community share copy button missing in XAML");
+  assert(xaml.find("CopyShareButton_Click") != std::string::npos && "Community share click handler not wired in XAML");
   return 0;
 }
 

@@ -424,6 +424,7 @@
 	              <Grid.ColumnDefinitions>
 	                <ColumnDefinition Width="*" />
 	                <ColumnDefinition Width="Auto" />
+	                <ColumnDefinition Width="Auto" />
 	              </Grid.ColumnDefinitions>
 	              <TextBlock x:Name="SnapshotSectionTitleText"
 	                         Grid.Column="0"
@@ -438,6 +439,13 @@
 	                      Padding="14,8"
 	                      FontSize="13"
 	                      Content="Copy summary" />
+	              <Button x:Name="CopyShareButton"
+	                      Grid.Column="2"
+	                      Click="CopyShareButton_Click"
+	                      VerticalAlignment="Center"
+	                      Padding="14,8"
+	                      FontSize="13"
+	                      Content="📋 Share" />
 	            </Grid>
 	            <Border Width="132" Height="3"
 	                    HorizontalAlignment="Left"
