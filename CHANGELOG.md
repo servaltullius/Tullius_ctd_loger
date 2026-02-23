@@ -13,6 +13,8 @@
 ### 테스트
 - Linux: `cmake --build build-linux-test -j` 성공.
 - Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+- Windows: `scripts\\build-win.cmd` 성공.
+- Packaging/Release gate: `scripts\\build-winui.cmd` + `python scripts\\package.py --build-dir build-win --out dist\\Tullius_ctd_loger.zip --no-pdb` + `bash scripts/verify_release_gate.sh /home/kdw73/Tullius_ctd_loger /mnt/c/Users/kdw73/Tullius_ctd_loger` 통과.
 
 ## v0.2.40-rc3 (2026-02-23)
 
