@@ -55,7 +55,8 @@ struct MenuHashEntry {
 constexpr MenuHashEntry kKnownMenuHashes[] = {
   {Fnv1a64(""), L"(empty)"},
   // Core UI
-  {Fnv1a64("Console Native UI Menu"), L"Console"},
+  {Fnv1a64("Console"), L"Console"},
+  {Fnv1a64("Console Native UI Menu"), L"Console Native UI Menu"},
   {Fnv1a64("Loading Menu"), L"Loading Menu"},
   {Fnv1a64("Main Menu"), L"Main Menu"},
   {Fnv1a64("Mist Menu"), L"Mist Menu"},
