@@ -56,6 +56,13 @@ struct ResourceRow
   bool is_conflict = false;  // providers.size() >= 2
 };
 
+struct BucketCorrelation
+{
+  std::size_t count = 0;
+  std::string first_seen;
+  std::string last_seen;
+};
+
 struct AnalysisResult
 {
   i18n::Language language = i18n::DefaultLanguage();
@@ -93,6 +100,7 @@ struct AnalysisResult
   std::optional<SignatureMatch> signature_match;
   std::unordered_map<std::uint64_t, std::string> resolved_functions;
   std::vector<ModuleStats> history_stats;
+  BucketCorrelation history_correlation;
   GraphicsEnvironment graphics_env;
   std::optional<GraphicsDiagResult> graphics_diag;
   bool has_plugin_scan = false;

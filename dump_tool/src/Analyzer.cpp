@@ -639,6 +639,13 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       history.AddEntry(std::move(entry));
       history.SaveToFile(historyPath);
       out.history_stats = history.GetModuleStats(20);
+
+      const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
+      if (bucketStats.count > 1) {
+        out.history_correlation.count = bucketStats.count;
+        out.history_correlation.first_seen = bucketStats.first_seen;
+        out.history_correlation.last_seen = bucketStats.last_seen;
+      }
     }
   }
 

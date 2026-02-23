@@ -25,8 +25,16 @@ static void TestCrashHistoryApiExists()
   assert(header.find("GetModuleStats") != std::string::npos);
 }
 
+static void TestAnalyzerHasHistoryCorrelationField()
+{
+  const auto header = ReadFile("dump_tool/src/Analyzer.h");
+  assert(header.find("BucketCorrelation") != std::string::npos);
+  assert(header.find("history_correlation") != std::string::npos);
+}
+
 int main()
 {
   TestCrashHistoryApiExists();
+  TestAnalyzerHasHistoryCorrelationField();
   return 0;
 }
