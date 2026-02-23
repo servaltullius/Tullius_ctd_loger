@@ -241,7 +241,7 @@ void RunCompatibilityPreflight(
     !pluginScan.game_exe_version.empty() && VersionLessThan(pluginScan.game_exe_version, "1.6.1130");
 
   std::vector<PreflightCheck> checks;
-  checks.reserve(4);
+  checks.reserve(6);
 
   checks.push_back(PreflightCheck{
     "PLUGIN_SCAN_SOURCE",
@@ -290,6 +290,49 @@ void RunCompatibilityPreflight(
       ? "Online symbol source is enabled; review privacy/reproducibility policy."
       : "Offline symbol policy (recommended) is active.",
   });
+
+  // Non-ESL (full) plugin slot limit check.
+  {
+    std::size_t fullPluginCount = 0;
+    for (const auto& p : pluginScan.plugins) {
+      if (p.is_active && !p.is_esl) {
+        ++fullPluginCount;
+      }
+    }
+    const bool nearLimit = (fullPluginCount >= 240);
+    checks.push_back(PreflightCheck{
+      "FULL_PLUGIN_SLOT_LIMIT",
+      nearLimit ? "warn" : "ok",
+      nearLimit ? "high" : "low",
+      nearLimit
+        ? ("비-ESL 플러그인 " + std::to_string(fullPluginCount) + "개 — 254 슬롯 한계에 근접합니다.")
+        : ("비-ESL 플러그인 " + std::to_string(fullPluginCount) + "개 — 슬롯 여유 있음."),
+      nearLimit
+        ? ("Non-ESL plugin count " + std::to_string(fullPluginCount) + " — approaching 254 slot limit.")
+        : ("Non-ESL plugin count " + std::to_string(fullPluginCount) + " — within safe range."),
+    });
+  }
+
+  // Known incompatible mod combinations.
+  {
+    const bool hasMultiplePhysics =
+      HasModuleAny(moduleNames, { L"hdtssephysics.dll" }) &&
+      HasModuleAny(moduleNames, { L"hdtsmp64.dll" });
+    const bool hasIncompatCombo = hasMultiplePhysics;
+    std::string detailKo = "알려진 비호환 모드 조합이 감지되지 않았습니다.";
+    std::string detailEn = "No known incompatible mod combinations detected.";
+    if (hasMultiplePhysics) {
+      detailKo = "HDT-SMP와 HDT-SMP (Faster) 물리 모드가 동시 로드 — 충돌 가능성이 높습니다.";
+      detailEn = "HDT-SMP and HDT-SMP (Faster) physics mods loaded simultaneously — likely conflict.";
+    }
+    checks.push_back(PreflightCheck{
+      "KNOWN_INCOMPATIBLE_COMBO",
+      hasIncompatCombo ? "warn" : "ok",
+      hasIncompatCombo ? "high" : "low",
+      detailKo,
+      detailEn,
+    });
+  }
 
   int warnCount = 0;
   int errorCount = 0;

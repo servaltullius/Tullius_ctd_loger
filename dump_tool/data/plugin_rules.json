@@ -57,6 +57,25 @@
           "[Optimization] Consider removing or merging unnecessary ESL plugins"
         ]
       }
+    },
+    {
+      "id": "ESP_FULL_SLOT_NEAR_LIMIT",
+      "condition": {
+        "full_plugin_count_gte": 240
+      },
+      "diagnosis": {
+        "cause_ko": "비-ESL 플러그인 수가 슬롯 한계(254)에 근접 — 크래시 위험 높음",
+        "cause_en": "Non-ESL plugin count approaching slot limit (254) — high crash risk",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[필수] 불필요한 ESP를 ESL 플래그로 변환하거나 제거하세요",
+          "[도구] SSEEdit의 'Compact FormIDs for ESL' 기능을 활용하세요"
+        ],
+        "recommendations_en": [
+          "[Required] Convert unnecessary ESPs to ESL-flagged or remove them",
+          "[Tool] Use SSEEdit's 'Compact FormIDs for ESL' feature"
+        ]
+      }
     }
   ]
 }

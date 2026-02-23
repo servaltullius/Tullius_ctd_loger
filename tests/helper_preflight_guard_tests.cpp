@@ -68,6 +68,15 @@ int main()
     "comCallbackRegistered",
     "WCT output must include COM callback registration status.");
 
+  AssertContains(
+    preflightCppText,
+    "FULL_PLUGIN_SLOT_LIMIT",
+    "Preflight must warn when non-ESL plugin count approaches 254 limit.");
+  AssertContains(
+    preflightCppText,
+    "KNOWN_INCOMPATIBLE_COMBO",
+    "Preflight must check known incompatible mod combinations.");
+
   return 0;
 }
 
