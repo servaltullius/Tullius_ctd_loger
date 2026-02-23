@@ -114,6 +114,39 @@ void TestMissingMastersIgnoreInactivePlugins()
   assert(missing.empty());
 }
 
+void TestMissingMastersIgnoreImplicitRuntimeMasters()
+{
+  const char* implicitMastersJson = R"JSON(
+{
+  "plugins": [
+    {
+      "filename": "MyPatch.esp",
+      "header_version": 1.0,
+      "is_esl": false,
+      "is_active": true,
+      "masters": [
+        "Skyrim.esm",
+        "Update.esm",
+        "Dawnguard.esm",
+        "HearthFires.esm",
+        "Dragonborn.esm",
+        "ccbgssse001-fish.esm",
+        "CCQDRSSE001-SURVIVALMODE.ESL",
+        "ccbgssse037-curios.esl",
+        "ccbgssse025-advdsgs.esm",
+        "ActuallyMissing.esm"
+      ]
+    }
+  ]
+}
+)JSON";
+  ParsedPluginScan scan{};
+  assert(ParsePluginScanJson(implicitMastersJson, &scan));
+  const auto missing = ComputeMissingMasters(scan);
+  assert(missing.size() == 1);
+  assert(missing[0] == L"ActuallyMissing.esm");
+}
+
 void TestRulesEvaluateFromJson()
 {
   const auto tmp = std::filesystem::temp_directory_path() / "skydiag_plugin_rules_logic_test.json";
@@ -198,6 +231,7 @@ int main()
   TestVersionCompare();
   TestParseAndMissingMasters();
   TestMissingMastersIgnoreInactivePlugins();
+  TestMissingMastersIgnoreImplicitRuntimeMasters();
   TestRulesEvaluateFromJson();
   return 0;
 }

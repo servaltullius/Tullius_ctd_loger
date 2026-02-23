@@ -33,6 +33,19 @@ std::string AsciiLower(std::string_view s)
   return out;
 }
 
+bool IsImplicitRuntimeMaster(std::string_view masterLower)
+{
+  return masterLower == "skyrim.esm" ||
+         masterLower == "update.esm" ||
+         masterLower == "dawnguard.esm" ||
+         masterLower == "hearthfires.esm" ||
+         masterLower == "dragonborn.esm" ||
+         masterLower == "ccbgssse001-fish.esm" ||
+         masterLower == "ccqdrsse001-survivalmode.esl" ||
+         masterLower == "ccbgssse037-curios.esl" ||
+         masterLower == "ccbgssse025-advdsgs.esm";
+}
+
 i18n::ConfidenceLevel ParseConfidenceLevel(std::string_view s)
 {
   const std::string lower = AsciiLower(s);
@@ -146,6 +159,12 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan)
       }
       const std::string masterLower = AsciiLower(master);
       if (active.find(masterLower) != active.end()) {
+        continue;
+      }
+      // Base game/DLC and mandatory free CC masters can be implicitly loaded even when
+      // they are not listed in plugins.txt (depends on manager/runtime), so do not
+      // flag them as missing based on active-list comparison alone.
+      if (IsImplicitRuntimeMaster(masterLower)) {
         continue;
       }
       if (added.insert(masterLower).second) {
