@@ -13,6 +13,7 @@ internal sealed class AnalysisSummary
     public required IReadOnlyList<string> CallstackFrames { get; init; }
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
+    public int HistoryCorrelationCount { get; init; }
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
     {
@@ -136,6 +137,10 @@ internal sealed class AnalysisSummary
             CallstackFrames = callstackFrames,
             EvidenceItems = evidenceItems,
             ResourceItems = resourceItems,
+            HistoryCorrelationCount = root.TryGetProperty("history_correlation", out var histCorr)
+                && histCorr.ValueKind == JsonValueKind.Object
+                && histCorr.TryGetProperty("count", out var countNode)
+                && countNode.TryGetInt32(out var hcCount) ? hcCount : 0,
         };
     }
 

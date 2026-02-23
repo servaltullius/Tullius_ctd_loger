@@ -546,9 +546,12 @@
                       Background="{ThemeResource ElevatedCardBrush}"
                       BorderBrush="{ThemeResource CardBorderBrush}"
                       BorderThickness="1" CornerRadius="8" Padding="16">
-                <TextBlock x:Name="BucketText" FontSize="13"
-                           TextWrapping="WrapWholeWords"
-                           Foreground="{ThemeResource BodyTextBrush}" />
+                <StackPanel>
+                  <TextBlock x:Name="BucketText" FontSize="13"
+                             TextWrapping="WrapWholeWords"
+                             Foreground="{ThemeResource BodyTextBrush}" />
+                  <TextBlock x:Name="CorrelationBadge" FontSize="13" Foreground="OrangeRed" Visibility="Collapsed" Margin="0,4,0,0" />
+                </StackPanel>
               </Border>
               <Border Grid.Column="1"
                       Background="{ThemeResource ElevatedCardBrush}"

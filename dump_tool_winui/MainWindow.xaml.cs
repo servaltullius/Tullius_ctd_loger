@@ -364,6 +364,18 @@ public sealed partial class MainWindow : Window
             ? T("Crash bucket: unavailable", "크래시 버킷: 없음")
             : T("Crash bucket: ", "크래시 버킷: ") + summary.CrashBucketKey;
 
+        if (summary.HistoryCorrelationCount > 1)
+        {
+            CorrelationBadge.Text = _isKorean
+                ? $"\u26a0 동일 패턴 {summary.HistoryCorrelationCount}회 반복 발생"
+                : $"\u26a0 Same pattern repeated {summary.HistoryCorrelationCount} times";
+            CorrelationBadge.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+        }
+        else
+        {
+            CorrelationBadge.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+        }
+
         ModuleText.Text = string.IsNullOrWhiteSpace(summary.ModulePlusOffset)
             ? T("Fault module: unavailable", "오류 모듈: 없음")
             : T("Fault module: ", "오류 모듈: ") + summary.ModulePlusOffset;

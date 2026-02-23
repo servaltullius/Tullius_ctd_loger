@@ -13,6 +13,20 @@ static std::string ReadAllText(const std::filesystem::path& path)
   return ss.str();
 }
 
+static void TestMainWindowHasCorrelationBadge()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  assert(xaml.find("CorrelationBadge") != std::string::npos);
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  assert(cs.find("CorrelationBadge") != std::string::npos);
+
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  assert(summary.find("HistoryCorrelationCount") != std::string::npos);
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -28,6 +42,8 @@ int main()
   // Community share copy button for Discord/Reddit
   assert(xaml.find("CopyShareButton") != std::string::npos && "Community share copy button missing in XAML");
   assert(xaml.find("CopyShareButton_Click") != std::string::npos && "Community share click handler not wired in XAML");
+
+  TestMainWindowHasCorrelationBadge();
   return 0;
 }
 
