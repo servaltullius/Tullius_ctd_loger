@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.41-rc2 (2026-02-23)
+
+### 추가 (Phase 1 — Quick Wins)
+- DumpTool: `internal::` 래퍼 함수 4개를 제거하고 `minidump::` 단일 네임스페이스로 통합해 동기화 리스크 제거 (C4).
+- DumpTool: `hook_frameworks.json`, `crash_signatures.json`, `plugin_rules.json` 로드 시 `version` 필드 필수화 + 잘못된 항목 스킵/경고 로그 (C2).
+- Helper: Preflight에 비-ESL 플러그인 240개 초과 경고(`FULL_PLUGIN_SLOT_LIMIT`)와 알려진 비호환 모드 조합(`KNOWN_INCOMPATIBLE_COMBO`) 체크 추가 (A4).
+- WinUI: Discord/Reddit 커뮤니티 공유용 이모지+마크다운 포맷 복사 버튼(`CopyShareButton`) 추가 (B1).
+
+### 추가 (Phase 2 — 중간 공수)
+- DumpTool: 크래시 히스토리 bucket-key 상관 분석 — 동일 `crash_bucket_key` 반복 발생 시 Evidence에 "반복 크래시 패턴" 표시 + Summary JSON에 `history_correlation` 필드 출력 (A1).
+- WinUI: 동일 패턴 반복 시 "⚠ 동일 패턴 N회 반복 발생" 배지 표시 (A1).
+- DumpTool: `troubleshooting_guides.json` 신규 데이터 파일 — 크래시 유형별(ACCESS_VIOLATION, D6DDDA, C++ Exception, 프리징, 로딩 중 크래시, 스냅샷) 단계별 트러블슈팅 가이드 6개 (B3).
+- DumpTool: Analyzer에서 트러블슈팅 가이드 자동 매칭 → Summary JSON에 `troubleshooting_steps` 출력 (B3).
+- WinUI: 접이식 트러블슈팅 체크리스트 UI(`TroubleshootingExpander`) 추가 (B3).
+
+### 테스트
+- CrashLogger 파서 엣지케이스 테스트 20개 추가 — 기존 18개 → 38개로 커버리지 대폭 보강 (C3).
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`40/40`).
+
 ## v0.2.41-rc1 (2026-02-23)
 
 ### 수정
