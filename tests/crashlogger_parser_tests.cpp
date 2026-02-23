@@ -9,6 +9,9 @@ using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerCppExceptionDetailsA
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerIniCrashlogDirectoryAscii;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerVersionAscii;
 using skydiag::dump_tool::ParseCrashLoggerTopModulesAsciiLower;
+using skydiag::dump_tool::crashlogger_core::TryExtractModulePlusOffsetTokenAscii;
+using skydiag::dump_tool::crashlogger_core::IsSystemishModuleAsciiLower;
+using skydiag::dump_tool::crashlogger_core::IsGameExeModuleAsciiLower;
 
 static void Test_LooksLikeCrashLogger_CrashLog()
 {
@@ -284,6 +287,183 @@ static void Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe()
   assert(mods[0] == "usefulmod.dll");
 }
 
+// ── Group 1: LooksLikeCrashLogger edge cases ──
+
+static void Test_LooksLikeCrashLogger_ProcessInfo()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.20.0\n"
+    "PROCESS INFO:\n"
+    "  SkyrimSE.exe version 1.6.1170\n";
+  assert(LooksLikeCrashLoggerLogTextCore(s));
+}
+
+static void Test_LooksLikeCrashLogger_NotCrashLogger()
+{
+  const std::string s = "Some random log file\nWith multiple lines\n";
+  assert(!LooksLikeCrashLoggerLogTextCore(s));
+}
+
+static void Test_LooksLikeCrashLogger_Empty()
+{
+  assert(!LooksLikeCrashLoggerLogTextCore(""));
+}
+
+// ── Group 2: ParseVersion edge cases ──
+
+static void Test_ParseCrashLoggerVersion_Missing()
+{
+  const std::string s = "Some random text\nNo version here\n";
+  const auto ver = ParseCrashLoggerVersionAscii(s);
+  assert(!ver);
+}
+
+static void Test_ParseCrashLoggerVersion_Empty()
+{
+  const auto ver = ParseCrashLoggerVersionAscii("");
+  assert(!ver);
+}
+
+// ── Group 3: C++ Exception edge cases ──
+
+static void Test_ParseCppExceptionDetails_NoBlock()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.18.0\n"
+    "CRASH TIME: 2026-02-23 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "  SomeMod.dll+0x111\n"
+    "\n"
+    "REGISTERS:\n";
+  const auto ex = ParseCrashLoggerCppExceptionDetailsAscii(s);
+  assert(!ex);
+}
+
+// ── Group 4: TopModules edge cases ──
+
+static void Test_ParseTopModules_EmptyInput()
+{
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower("");
+  assert(mods.empty());
+}
+
+static void Test_ParseTopModules_CrashLog_NoModulesOnlyWarning()
+{
+  const std::string s =
+    "CrashLoggerSSE v1.17.0\n"
+    "CRASH TIME: 2026-01-31 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "WARNING: Stack trace capture failed - the call stack was likely corrupted.\n"
+    "REGISTERS:\n";
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
+  assert(mods.empty());
+}
+
+static void Test_ParseTopModules_ManyModules_CappedAt8()
+{
+  std::string s =
+    "CrashLoggerSSE v1.17.0\n"
+    "CRASH TIME: 2026-02-23 12:34:56\n"
+    "PROBABLE CALL STACK:\n";
+  for (int i = 0; i < 12; ++i) {
+    s += "  mod" + std::to_string(i) + ".dll+0x100\n";
+  }
+  s += "REGISTERS:\n";
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(s);
+  assert(mods.size() <= 8);
+}
+
+// ── Group 5: INI parsing edge cases ──
+
+static void Test_ParseCrashLoggerIni_HashComment()
+{
+  const std::string s =
+    "# comment line\n"
+    "[Debug]\n"
+    "Crashlog Directory=C:\\\\Logs # inline comment\n";
+  const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
+  assert(dir);
+  assert(*dir == "C:\\\\Logs");
+}
+
+static void Test_ParseCrashLoggerIni_NoDebugSection()
+{
+  const std::string s =
+    "[General]\n"
+    "Crashlog Directory=C:\\\\Wrong\n";
+  const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
+  assert(!dir);
+}
+
+// ── Group 6: TryExtractModulePlusOffsetTokenAscii direct tests ──
+
+static void Test_TryExtractToken_ValidDll()
+{
+  const auto tok = TryExtractModulePlusOffsetTokenAscii("  ExampleMod.dll+0x1234");
+  assert(tok.has_value());
+  assert(tok->find("ExampleMod.dll+") != std::string_view::npos);
+}
+
+static void Test_TryExtractToken_ValidExe()
+{
+  const auto tok = TryExtractModulePlusOffsetTokenAscii("SkyrimSE.exe+0xABCD");
+  assert(tok.has_value());
+  assert(tok->find("SkyrimSE.exe+") != std::string_view::npos);
+}
+
+static void Test_TryExtractToken_NoModule()
+{
+  const auto tok = TryExtractModulePlusOffsetTokenAscii("just some text");
+  assert(!tok.has_value());
+}
+
+static void Test_TryExtractToken_Empty()
+{
+  const auto tok = TryExtractModulePlusOffsetTokenAscii("");
+  assert(!tok.has_value());
+}
+
+static void Test_TryExtractToken_NewFormat()
+{
+  const auto tok = TryExtractModulePlusOffsetTokenAscii("\t[ 0] 0x00007FF612345678 ExampleMod.dll+0000123\tmov eax, eax");
+  assert(tok.has_value());
+  assert(tok->find("ExampleMod.dll+") != std::string_view::npos);
+}
+
+// ── Group 7: IsSystemish/IsGameExe direct tests ──
+
+static void Test_IsSystemish_KnownModules()
+{
+  assert(IsSystemishModuleAsciiLower("kernelbase.dll"));
+  assert(IsSystemishModuleAsciiLower("ntdll.dll"));
+  assert(IsSystemishModuleAsciiLower("kernel32.dll"));
+  assert(IsSystemishModuleAsciiLower("ucrtbase.dll"));
+  assert(IsSystemishModuleAsciiLower("user32.dll"));
+  assert(IsSystemishModuleAsciiLower("win32u.dll"));
+}
+
+static void Test_IsSystemish_NotSystem()
+{
+  assert(!IsSystemishModuleAsciiLower("mymod.dll"));
+  assert(!IsSystemishModuleAsciiLower("hdtsmp64.dll"));
+  assert(!IsSystemishModuleAsciiLower(""));
+}
+
+static void Test_IsGameExe_KnownExes()
+{
+  assert(IsGameExeModuleAsciiLower("skyrimse.exe"));
+  assert(IsGameExeModuleAsciiLower("skyrimae.exe"));
+  assert(IsGameExeModuleAsciiLower("skyrimvr.exe"));
+  assert(IsGameExeModuleAsciiLower("skyrim.exe"));
+}
+
+static void Test_IsGameExe_NotGameExe()
+{
+  assert(!IsGameExeModuleAsciiLower("mymod.dll"));
+  assert(!IsGameExeModuleAsciiLower(""));
+  assert(!IsGameExeModuleAsciiLower("skyrimse.dll"));
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -304,5 +484,40 @@ int main()
   Test_ParseCrashLoggerIni_CrashlogDirectory_QuotedAndSpaced();
   Test_ParseCrashLoggerIni_CrashlogDirectory_EmptyIsNone();
   Test_ParseTopModules_ThreadDump_FiltersSystemAndGameExe();
+
+  // Group 1: LooksLikeCrashLogger edge cases
+  Test_LooksLikeCrashLogger_ProcessInfo();
+  Test_LooksLikeCrashLogger_NotCrashLogger();
+  Test_LooksLikeCrashLogger_Empty();
+
+  // Group 2: ParseVersion edge cases
+  Test_ParseCrashLoggerVersion_Missing();
+  Test_ParseCrashLoggerVersion_Empty();
+
+  // Group 3: C++ Exception edge cases
+  Test_ParseCppExceptionDetails_NoBlock();
+
+  // Group 4: TopModules edge cases
+  Test_ParseTopModules_EmptyInput();
+  Test_ParseTopModules_CrashLog_NoModulesOnlyWarning();
+  Test_ParseTopModules_ManyModules_CappedAt8();
+
+  // Group 5: INI parsing edge cases
+  Test_ParseCrashLoggerIni_HashComment();
+  Test_ParseCrashLoggerIni_NoDebugSection();
+
+  // Group 6: TryExtractToken direct tests
+  Test_TryExtractToken_ValidDll();
+  Test_TryExtractToken_ValidExe();
+  Test_TryExtractToken_NoModule();
+  Test_TryExtractToken_Empty();
+  Test_TryExtractToken_NewFormat();
+
+  // Group 7: IsSystemish/IsGameExe direct tests
+  Test_IsSystemish_KnownModules();
+  Test_IsSystemish_NotSystem();
+  Test_IsGameExe_KnownExes();
+  Test_IsGameExe_NotGameExe();
+
   return 0;
 }
