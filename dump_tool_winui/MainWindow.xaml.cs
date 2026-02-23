@@ -665,7 +665,34 @@ public sealed partial class MainWindow : Window
                 {
                     tail.Dequeue();
                 }
-                tail.Enqueue(line);
+
+                try
+                {
+                    using var jDoc = JsonDocument.Parse(line);
+                    var root = jDoc.RootElement;
+                    var idx = root.GetProperty("i").GetInt32();
+                    var tMs = root.GetProperty("t_ms").GetDouble();
+                    var tid = root.GetProperty("tid").GetUInt32();
+                    var typeName = root.GetProperty("type_name").GetString() ?? "?";
+                    var detail = root.TryGetProperty("detail", out var detProp) ? detProp.GetString() : null;
+
+                    string formatted;
+                    if (!string.IsNullOrEmpty(detail))
+                    {
+                        formatted = $"[{idx}] t={tMs:F0}ms tid={tid} {typeName} | {detail}";
+                    }
+                    else
+                    {
+                        var a = root.GetProperty("a").GetUInt64();
+                        var b = root.GetProperty("b").GetUInt64();
+                        formatted = $"[{idx}] t={tMs:F0}ms tid={tid} {typeName} a={a} b={b}";
+                    }
+                    tail.Enqueue(formatted);
+                }
+                catch
+                {
+                    tail.Enqueue(line);  // fallback: raw line
+                }
             }
             data.EventLines.AddRange(tail);
             data.EventCount = data.EventLines.Count;
