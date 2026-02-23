@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.2.40-rc3 (2026-02-23)
+
+### 수정
+- DumpTool: `MissingMasters` 계산에서 런타임/매니저 상태에 따라 `plugins.txt`에 명시되지 않을 수 있는 기본 마스터(`Skyrim.esm`, `Update.esm`, DLC 3종, 무료 CC 4종)를 암묵 로드 예외로 처리해 false positive를 완화.
+- Diagnostics: 프리징 리포트에서 기본 마스터가 대량 누락으로 표시되며 `MISSING_MASTER`가 과도하게 트리거되던 사례를 재현 기준으로 교정.
+
+### 테스트
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+- Windows: `scripts\\build-win.cmd` 성공.
+- Packaging/Release gate: `scripts\\build-winui.cmd` + `python scripts\\package.py --build-dir build-win --out dist\\Tullius_ctd_loger.zip --no-pdb` + `bash scripts/verify_release_gate.sh` 통과.
+
 ## v0.2.40-rc2 (2026-02-23)
 
 ### 수정
