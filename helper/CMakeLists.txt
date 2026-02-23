@@ -23,6 +23,7 @@ add_executable(${PROJECT_NAME}
   src/PluginScanner.cpp
   src/ProcessAttach.cpp
   src/ProcessUtil.cpp
+  src/RetentionWorker.cpp
   src/WctCapture.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
@@ -33,6 +34,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/LoadStats.h
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
+  src/RetentionWorker.h
   include/SkyrimDiagHelper/WctCapture.h)
 
 target_include_directories(${PROJECT_NAME}

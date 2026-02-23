@@ -19,10 +19,12 @@ struct AttachedProcess {
   std::size_t shmSize = 0;  // mapped bytes (best-effort)
 
   HANDLE crashEvent = nullptr;
+  std::uint32_t crashEventOpenError = ERROR_SUCCESS;
 };
 
 bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err);
 bool FindAndAttach(AttachedProcess& out, std::wstring* err);
+bool TryAttachCrashEvent(AttachedProcess& proc, std::wstring* err);
 void Detach(AttachedProcess& p);
 
 }  // namespace skydiag::helper

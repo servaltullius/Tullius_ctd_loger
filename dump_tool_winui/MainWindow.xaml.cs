@@ -25,10 +25,19 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<string> _eventItems = new();
     private readonly bool _isKorean;
     private bool _isCompactLayout;
+    private CancellationTokenSource? _analysisCts;
 
     private string? _currentDumpPath;
     private string? _currentOutDir;
     private AnalysisSummary? _currentSummary;
+
+    private sealed class AdvancedArtifactsData
+    {
+        public List<string> EventLines { get; } = new();
+        public int EventCount { get; set; }
+        public string ReportText { get; set; } = string.Empty;
+        public string WctText { get; set; } = string.Empty;
+    }
 
     internal MainWindow(DumpToolInvocationOptions startupOptions, string? startupWarning)
     {
@@ -128,6 +137,7 @@ public sealed partial class MainWindow : Window
         BrowseDumpButton.Content = T("Select dump", "덤프 선택");
         BrowseOutputButton.Content = T("Select folder", "폴더 선택");
         AnalyzeButton.Content = T("ANALYZE NOW", "지금 분석");
+        CancelAnalyzeButton.Content = T("Cancel analysis", "분석 취소");
         OpenOutputButton.Content = T("Open report folder", "리포트 폴더 열기");
         CopySummaryButton.Content = T("Copy summary", "요약 복사");
     }
@@ -203,7 +213,12 @@ public sealed partial class MainWindow : Window
         await AnalyzeAsync(preferExistingArtifacts: false);
     }
 
-    private async Task<bool> TryLoadExistingAnalysisAsync(string dumpPath, string outDir)
+    private void CancelAnalyzeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _analysisCts?.Cancel();
+    }
+
+    private async Task<bool> TryLoadExistingAnalysisAsync(string dumpPath, string outDir, CancellationToken cancellationToken)
     {
         var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
 
@@ -211,7 +226,8 @@ public sealed partial class MainWindow : Window
         // can appear shortly after startup. Wait a bit to avoid duplicate analysis work.
         for (var i = 0; i < 15 && !File.Exists(summaryPath); i++)
         {
-            await Task.Delay(100);
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(100, cancellationToken);
         }
 
         if (!File.Exists(summaryPath))
@@ -223,9 +239,10 @@ public sealed partial class MainWindow : Window
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
                 RenderSummary(summary);
-                RenderAdvancedArtifacts(dumpPath, outDir);
+                await RenderAdvancedArtifactsAsync(dumpPath, outDir, cancellationToken);
                 SetBusy(false, T(
                     "Loaded existing analysis artifacts. Click Analyze to refresh.",
                     "기존 분석 결과를 불러왔습니다. 다시 분석하려면 \"지금 분석\"을 누르세요."));
@@ -234,7 +251,7 @@ public sealed partial class MainWindow : Window
             }
             catch
             {
-                await Task.Delay(100);
+                await Task.Delay(100, cancellationToken);
             }
         }
 
@@ -257,55 +274,79 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var options = BuildCurrentInvocationOptions(dumpPath, true);
+        _analysisCts?.Cancel();
+        _analysisCts?.Dispose();
+        using var analysisCts = new CancellationTokenSource();
+        _analysisCts = analysisCts;
+        var cancellationToken = analysisCts.Token;
+
+        var options = BuildCurrentInvocationOptions(dumpPath, false);
         var outDir = NativeAnalyzerBridge.ResolveOutputDirectory(dumpPath, options.OutDir);
         _currentDumpPath = dumpPath;
         _currentOutDir = outDir;
 
-        if (preferExistingArtifacts)
-        {
-            SetBusy(true, T(
-                "Checking for existing analysis artifacts...",
-                "기존 분석 결과를 확인 중입니다..."));
-            if (await TryLoadExistingAnalysisAsync(dumpPath, outDir))
-            {
-                return;
-            }
-        }
-
-        SetBusy(true, T("Analyzing dump with native engine...", "네이티브 엔진으로 덤프를 분석 중입니다..."));
-
-        var (exitCode, nativeErr) = await NativeAnalyzerBridge.RunAnalyzeAsync(options, CancellationToken.None);
-        if (exitCode != 0)
-        {
-            var prefix = T("Analysis failed. Exit code: ", "분석 실패. 종료 코드: ");
-            var msg = prefix + exitCode;
-            if (!string.IsNullOrWhiteSpace(nativeErr))
-            {
-                msg += "\n" + nativeErr;
-            }
-            SetBusy(false, msg);
-            return;
-        }
-
-        var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
-        if (!File.Exists(summaryPath))
-        {
-            SetBusy(false, T("Analysis finished but summary file is missing: ", "분석은 끝났지만 요약 파일이 없습니다: ") + summaryPath);
-            return;
-        }
-
         try
         {
+            if (preferExistingArtifacts)
+            {
+                SetBusy(true, T(
+                    "Checking for existing analysis artifacts...",
+                    "기존 분석 결과를 확인 중입니다..."));
+                if (await TryLoadExistingAnalysisAsync(dumpPath, outDir, cancellationToken))
+                {
+                    return;
+                }
+            }
+
+            SetBusy(true, T("Analyzing dump with native engine...", "네이티브 엔진으로 덤프를 분석 중입니다..."));
+
+            var (exitCode, nativeErr) = await NativeAnalyzerBridge.RunAnalyzeAsync(options, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (exitCode == NativeAnalyzerBridge.UserCanceledExitCode)
+            {
+                SetBusy(false, T("Analysis canceled.", "분석이 취소되었습니다."));
+                return;
+            }
+
+            if (exitCode != 0)
+            {
+                var prefix = T("Analysis failed. Exit code: ", "분석 실패. 종료 코드: ");
+                var msg = prefix + exitCode;
+                if (!string.IsNullOrWhiteSpace(nativeErr))
+                {
+                    msg += "\n" + nativeErr;
+                }
+                SetBusy(false, msg);
+                return;
+            }
+
+            var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
+            if (!File.Exists(summaryPath))
+            {
+                SetBusy(false, T("Analysis finished but summary file is missing: ", "분석은 끝났지만 요약 파일이 없습니다: ") + summaryPath);
+                return;
+            }
+
             var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
             RenderSummary(summary);
-            RenderAdvancedArtifacts(dumpPath, outDir);
+            await RenderAdvancedArtifactsAsync(dumpPath, outDir, cancellationToken);
             SetBusy(false, T("Analysis complete. Review the candidates and checklist.", "분석 완료. 원인 후보와 체크리스트를 확인하세요."));
             NavView.SelectedItem = NavSummary;
+        }
+        catch (OperationCanceledException)
+        {
+            SetBusy(false, T("Analysis canceled.", "분석이 취소되었습니다."));
         }
         catch (Exception ex)
         {
             SetBusy(false, T("Failed to read summary JSON: ", "요약 JSON을 읽지 못했습니다: ") + ex.Message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_analysisCts, analysisCts))
+            {
+                _analysisCts = null;
+            }
         }
     }
 
@@ -467,23 +508,25 @@ public sealed partial class MainWindow : Window
         return string.Join(Environment.NewLine, lines);
     }
 
-    private void RenderAdvancedArtifacts(string dumpPath, string outDir)
+    private async Task RenderAdvancedArtifactsAsync(string dumpPath, string outDir, CancellationToken cancellationToken)
     {
-        _eventItems.Clear();
+        var artifacts = await Task.Run(
+            () => LoadAdvancedArtifactsCore(
+                dumpPath,
+                outDir,
+                T("Report file not found.", "리포트 파일이 없습니다."),
+                T("WCT file not found for this dump.", "이 덤프에 대한 WCT 파일이 없습니다."),
+                cancellationToken),
+            cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
-        if (File.Exists(blackboxPath))
+        _eventItems.Clear();
+        foreach (var line in artifacts.EventLines)
         {
-            var lines = File.ReadAllLines(blackboxPath);
-            foreach (var line in lines.Skip(Math.Max(0, lines.Length - 200)))
-            {
-                if (!string.IsNullOrWhiteSpace(line))
-                {
-                    _eventItems.Add(line);
-                }
-            }
+            _eventItems.Add(line);
         }
-        var eventCount = _eventItems.Count;
+
+        var eventCount = artifacts.EventCount;
         if (_eventItems.Count == 0)
         {
             _eventItems.Add(T("No blackbox events were found.", "블랙박스 이벤트를 찾지 못했습니다."));
@@ -492,10 +535,45 @@ public sealed partial class MainWindow : Window
             ? T("0 events", "0개")
             : $"{eventCount} {T("events", "개")}";
 
+        ReportTextBox.Text = artifacts.ReportText;
+        WctTextBox.Text = artifacts.WctText;
+    }
+
+    private static AdvancedArtifactsData LoadAdvancedArtifactsCore(
+        string dumpPath,
+        string outDir,
+        string missingReportText,
+        string missingWctText,
+        CancellationToken cancellationToken)
+    {
+        var data = new AdvancedArtifactsData();
+
+        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
+        if (File.Exists(blackboxPath))
+        {
+            var tail = new Queue<string>(capacity: 200);
+            foreach (var line in File.ReadLines(blackboxPath))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+
+                if (tail.Count == 200)
+                {
+                    tail.Dequeue();
+                }
+                tail.Enqueue(line);
+            }
+            data.EventLines.AddRange(tail);
+            data.EventCount = data.EventLines.Count;
+        }
+
         var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
-        ReportTextBox.Text = File.Exists(reportPath)
+        data.ReportText = File.Exists(reportPath)
             ? File.ReadAllText(reportPath)
-            : T("Report file not found.", "리포트 파일이 없습니다.");
+            : missingReportText;
 
         var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
         if (File.Exists(wctPath))
@@ -504,20 +582,21 @@ public sealed partial class MainWindow : Window
             try
             {
                 using var doc = JsonDocument.Parse(raw);
-                WctTextBox.Text = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
+                data.WctText = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
                 {
                     WriteIndented = true,
                 });
             }
             catch
             {
-                WctTextBox.Text = raw;
+                data.WctText = raw;
             }
         }
         else
         {
-            WctTextBox.Text = T("WCT file not found for this dump.", "이 덤프에 대한 WCT 파일이 없습니다.");
+            data.WctText = missingWctText;
         }
+        return data;
     }
 
     private async void BrowseDump_Click(object sender, RoutedEventArgs e)
@@ -696,6 +775,11 @@ public sealed partial class MainWindow : Window
     {
         BusyRing.IsActive = isBusy;
         AnalyzeButton.IsEnabled = !isBusy;
+        CancelAnalyzeButton.IsEnabled = isBusy;
+        BrowseDumpButton.IsEnabled = !isBusy;
+        BrowseOutputButton.IsEnabled = !isBusy;
+        DumpPathBox.IsEnabled = !isBusy;
+        OutputDirBox.IsEnabled = !isBusy;
         OpenOutputButton.IsEnabled = !isBusy;
         StatusText.Text = message;
     }

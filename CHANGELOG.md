@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.2.40-rc4 (2026-02-23)
+
+### 수정
+- Helper: crash event 핸들 열기 실패를 상태로 보존하고, 런타임에서 주기적으로 재연결을 시도하도록 보강. crash event 부재 시 hang-only 모드 경고를 로그에 명확히 표기.
+- Helper: 프로세스별 singleton mutex를 도입해 중복 helper 실행을 억제하고, plugin/watchdog와의 생명주기 동기화를 강화.
+- Plugin: helper auto-start 경로를 재사용 가능한 함수로 정리하고, helper가 내려갔을 때 지수 백오프로 재기동하는 watchdog을 추가.
+- Helper: retention 정리를 캡처 핫패스에서 분리해 백그라운드 워커(큐)로 비동기 처리하도록 변경.
+- WinUI: 분석 취소 버튼/취소 토큰 경로를 추가하고, 블랙박스·리포트·WCT 로딩을 백그라운드로 이동해 대용량 아티팩트에서 UI 프리징을 완화.
+- WinUI: 분석 실행을 out-of-proc headless 경로로 확장해 취소 시 분석 프로세스를 종료할 수 있도록 개선.
+
+### 테스트
+- Linux: `cmake --build build-linux-test -j` 성공.
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+
 ## v0.2.40-rc3 (2026-02-23)
 
 ### 수정

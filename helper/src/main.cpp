@@ -13,6 +13,7 @@
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
+#include "SkyrimDiagProtocol.h"
 #include "SkyrimDiagShared.h"
 
 #include "CrashCapture.h"
@@ -25,6 +26,7 @@
 #include "HelperLog.h"
 #include "ManualCapture.h"
 #include "PendingCrashAnalysis.h"
+#include "RetentionWorker.h"
 
 namespace {
 
@@ -34,6 +36,7 @@ using skydiag::helper::internal::AppendLogLine;
 using skydiag::helper::internal::SetHelperLogRotation;
 using skydiag::helper::internal::RunCompatibilityPreflight;
 using skydiag::helper::internal::ApplyRetentionFromConfig;
+using skydiag::helper::internal::ShutdownRetentionWorker;
 
 using skydiag::helper::internal::PendingCrashAnalysis;
 using skydiag::helper::internal::ClearPendingCrashAnalysis;
@@ -57,6 +60,50 @@ std::wstring Hex32(std::uint32_t v)
   wchar_t buf[11]{};
   std::swprintf(buf, 11, L"0x%08X", static_cast<unsigned int>(v));
   return buf;
+}
+
+std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)
+{
+  std::wstring name;
+  name.reserve(64);
+  name.append(skydiag::protocol::kKernelObjectPrefix);
+  name.append(std::to_wstring(pid));
+  name.append(suffix);
+  return name;
+}
+
+HANDLE AcquireHelperSingletonMutex(std::uint32_t pid, std::wstring* err)
+{
+  const auto mutexName = MakeKernelName(pid, skydiag::protocol::kKernelObjectSuffix_HelperMutex);
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, mutexName.c_str());
+  if (!mutex) {
+    if (err) {
+      *err = L"CreateMutexW failed: " + std::to_wstring(GetLastError());
+    }
+    return nullptr;
+  }
+
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (err) {
+      *err = L"Helper singleton mutex already exists.";
+    }
+    CloseHandle(mutex);
+    return INVALID_HANDLE_VALUE;
+  }
+
+  if (err) {
+    err->clear();
+  }
+  return mutex;
+}
+
+std::wstring BuildCrashEventUnavailableMessage(const skydiag::helper::AttachedProcess& proc, std::wstring_view prefix)
+{
+  std::wstring message(prefix);
+  if (proc.crashEventOpenError != ERROR_SUCCESS) {
+    message += L" (err=" + std::to_wstring(proc.crashEventOpenError) + L")";
+  }
+  return message;
 }
 
 std::uint32_t RemoveCrashArtifactsForDump(
@@ -120,6 +167,8 @@ std::uint32_t RemoveCrashArtifactsForDump(
 }
 
 constexpr int kHotkeyId = 0x5344;  // 'SD' (arbitrary)
+constexpr std::uint64_t kCrashEventRetryIntervalMs = 2000;
+constexpr std::uint64_t kCrashEventWarnIntervalMs = 30000;
 
 struct HelperLoopState
 {
@@ -130,6 +179,8 @@ struct HelperLoopState
   std::wstring capturedCrashDumpPath;
   PendingCrashAnalysis pendingCrashAnalysis{};
   PendingCrashEtwCapture pendingCrashEtw{};
+  std::uint64_t nextCrashEventRetryTick64 = 0;
+  std::uint64_t nextCrashEventWarnTick64 = 0;
 };
 
 void InitializeLoopState(const skydiag::helper::AttachedProcess& proc, HelperLoopState* state)
@@ -139,6 +190,8 @@ void InitializeLoopState(const skydiag::helper::AttachedProcess& proc, HelperLoo
   }
   state->hangState.wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
   state->hangState.loadStartQpc = state->hangState.wasLoading ? proc.shm->header.start_qpc : 0;
+  state->nextCrashEventRetryTick64 = GetTickCount64();
+  state->nextCrashEventWarnTick64 = 0;
 }
 
 void RegisterManualCaptureHotkeyIfEnabled(
@@ -390,7 +443,7 @@ bool HandleProcessExitTick(
 
 void RunHelperLoop(
   const skydiag::helper::HelperConfig& cfg,
-  const skydiag::helper::AttachedProcess& proc,
+  skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
   skydiag::helper::LoadStats* loadStats,
   const std::filesystem::path& loadStatsPath,
@@ -410,6 +463,26 @@ void RunHelperLoop(
 
     if (HandleProcessExitTick(cfg, proc, outBase, state)) {
       break;
+    }
+
+    if (!proc.crashEvent) {
+      const auto nowTick = GetTickCount64();
+      if (state->nextCrashEventRetryTick64 == 0 || nowTick >= state->nextCrashEventRetryTick64) {
+        if (skydiag::helper::TryAttachCrashEvent(proc, nullptr)) {
+          AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
+          state->nextCrashEventWarnTick64 = 0;
+        } else {
+          state->nextCrashEventRetryTick64 = nowTick + kCrashEventRetryIntervalMs;
+          if (state->nextCrashEventWarnTick64 == 0 || nowTick >= state->nextCrashEventWarnTick64) {
+            AppendLogLine(
+              outBase,
+              BuildCrashEventUnavailableMessage(
+                proc,
+                L"Crash event still unavailable; helper continues in hang-only mode and will retry."));
+            state->nextCrashEventWarnTick64 = nowTick + kCrashEventWarnIntervalMs;
+          }
+        }
+      }
     }
 
     const DWORD waitMs = 250;
@@ -509,6 +582,23 @@ int wmain(int argc, wchar_t** argv)
   if (!err.empty()) {
     AppendLogLine(outBase, L"Config warning: " + err);
   }
+  if (!proc.crashEvent) {
+    AppendLogLine(
+      outBase,
+      BuildCrashEventUnavailableMessage(
+        proc,
+        L"Warning: crash event unavailable; helper is running in hang-only mode and will keep retrying."));
+  }
+
+  HANDLE helperSingletonMutex = AcquireHelperSingletonMutex(proc.pid, &err);
+  if (helperSingletonMutex == INVALID_HANDLE_VALUE) {
+    AppendLogLine(outBase, L"Another helper instance is already active for this pid; exiting duplicate helper.");
+    skydiag::helper::Detach(proc);
+    return 0;
+  }
+  if (!helperSingletonMutex && !err.empty()) {
+    AppendLogLine(outBase, L"Warning: helper singleton mutex unavailable: " + err);
+  }
 
   RunCompatibilityPreflight(cfg, proc, outBase);
 
@@ -542,7 +632,11 @@ int wmain(int argc, wchar_t** argv)
     attachNowQpc,
     &loopState);
   ShutdownLoopState(cfg, proc, outBase, &loopState);
+  ShutdownRetentionWorker();
 
+  if (helperSingletonMutex && helperSingletonMutex != INVALID_HANDLE_VALUE) {
+    CloseHandle(helperSingletonMutex);
+  }
   skydiag::helper::Detach(proc);
   return 0;
 }

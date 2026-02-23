@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <string>
 #include <thread>
@@ -16,6 +18,7 @@
 #include "SkyrimDiag/Heartbeat.h"
 #include "SkyrimDiag/ResourceLog.h"
 #include "SkyrimDiag/SharedMemory.h"
+#include "SkyrimDiagProtocol.h"
 
 namespace {
 
@@ -157,19 +160,51 @@ std::filesystem::path GetThisModulePath()
   return std::filesystem::path(buf, buf + n);
 }
 
-bool StartHelperIfConfigured(const PluginConfig& cfg)
+std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)
 {
-  if (!cfg.autoStartHelper) {
-    return true;
-  }
+  std::wstring name;
+  name.reserve(64);
+  name.append(skydiag::protocol::kKernelObjectPrefix);
+  name.append(std::to_wstring(pid));
+  name.append(suffix);
+  return name;
+}
 
-  const auto pid = GetCurrentProcessId();
+bool IsHelperSingletonPresent(std::uint32_t pid)
+{
+  const auto mutexName = MakeKernelName(pid, skydiag::protocol::kKernelObjectSuffix_HelperMutex);
+  HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, mutexName.c_str());
+  if (!h) {
+    return false;
+  }
+  CloseHandle(h);
+  return true;
+}
+
+std::filesystem::path ResolveHelperPath(const PluginConfig& cfg)
+{
   const auto dllPath = GetThisModulePath();
   const auto dllDir = dllPath.parent_path();
-
   std::filesystem::path helperPath(cfg.helperExe);
   if (helperPath.is_relative()) {
     helperPath = dllDir / helperPath;
+  }
+  return helperPath;
+}
+
+bool StartHelperProcess(const std::filesystem::path& helperPath, std::uint32_t pid, DWORD* helperPidOut = nullptr)
+{
+  if (helperPidOut) {
+    *helperPidOut = 0;
+  }
+
+  std::error_code pathEc;
+  if (!std::filesystem::exists(helperPath, pathEc)) {
+    spdlog::warn("SkyrimDiag: helper path does not exist: {}", helperPath.string());
+    if (pathEc) {
+      spdlog::warn("SkyrimDiag: helper path check error={} for {}", pathEc.value(), helperPath.string());
+    }
+    return false;
   }
 
   std::wstring cmd = L"\"";
@@ -199,10 +234,100 @@ bool StartHelperIfConfigured(const PluginConfig& cfg)
     return false;
   }
 
+  if (helperPidOut) {
+    *helperPidOut = pi.dwProcessId;
+  }
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
-  spdlog::info("SkyrimDiag: helper started (helperPid={})", pi.dwProcessId);
   return true;
+}
+
+bool StartHelperIfConfigured(const PluginConfig& cfg)
+{
+  if (!cfg.autoStartHelper) {
+    return true;
+  }
+
+  const auto pid = GetCurrentProcessId();
+  if (IsHelperSingletonPresent(pid)) {
+    spdlog::info("SkyrimDiag: helper already active (pid={})", pid);
+    return true;
+  }
+
+  DWORD helperPid = 0;
+  const auto helperPath = ResolveHelperPath(cfg);
+  if (!StartHelperProcess(helperPath, pid, &helperPid)) {
+    return false;
+  }
+
+  spdlog::info("SkyrimDiag: helper started (helperPid={})", helperPid);
+  return true;
+}
+
+void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
+{
+  if (!cfg.autoStartHelper) {
+    return;
+  }
+
+  static std::atomic<bool> started{ false };
+  if (started.exchange(true)) {
+    return;
+  }
+
+  std::thread([cfg]() {
+    constexpr std::uint32_t kRetryMinMs = 1000;
+    constexpr std::uint32_t kRetryMaxMs = 30000;
+    constexpr std::uint32_t kLoopSleepMs = 1000;
+    constexpr std::uint32_t kInitialGraceMs = 3000;
+    constexpr int kHelperConfirmPollCount = 15;
+    constexpr std::uint32_t kHelperConfirmPollSleepMs = 100;
+
+    const auto pid = GetCurrentProcessId();
+    std::uint32_t retryBackoffMs = kRetryMinMs;
+    ULONGLONG nextAttemptTick = GetTickCount64() + kInitialGraceMs;
+
+    for (;;) {
+      if (IsHelperSingletonPresent(pid)) {
+        retryBackoffMs = kRetryMinMs;
+        nextAttemptTick = 0;
+        Sleep(kLoopSleepMs);
+        continue;
+      }
+
+      const ULONGLONG now = GetTickCount64();
+      if (nextAttemptTick != 0 && now < nextAttemptTick) {
+        Sleep(kLoopSleepMs);
+        continue;
+      }
+
+      DWORD helperPid = 0;
+      const auto helperPath = ResolveHelperPath(cfg);
+      if (StartHelperProcess(helperPath, pid, &helperPid)) {
+        bool confirmed = false;
+        for (int i = 0; i < kHelperConfirmPollCount; ++i) {
+          if (IsHelperSingletonPresent(pid)) {
+            confirmed = true;
+            break;
+          }
+          Sleep(kHelperConfirmPollSleepMs);
+        }
+        if (confirmed) {
+          spdlog::info("SkyrimDiag: helper watchdog confirmed helper running (helperPid={})", helperPid);
+        } else {
+          spdlog::warn("SkyrimDiag: helper watchdog launched helper but singleton mutex not observed yet");
+        }
+        retryBackoffMs = kRetryMinMs;
+        nextAttemptTick = 0;
+      } else {
+        nextAttemptTick = GetTickCount64() + retryBackoffMs;
+        spdlog::warn("SkyrimDiag: helper watchdog retry in {} ms", retryBackoffMs);
+        retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
+      }
+
+      Sleep(kLoopSleepMs);
+    }
+  }).detach();
 }
 
 void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
@@ -281,6 +406,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   });
 
   StartHelperIfConfigured(g_cfg);
+  StartHelperWatchdogIfConfigured(g_cfg);
   StartTestHotkeysIfEnabled(g_cfg);
   if (g_cfg.enableResourceLog) {
     skydiag::plugin::ConfigureResourceLogThrottle(

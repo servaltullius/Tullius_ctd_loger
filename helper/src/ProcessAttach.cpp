@@ -71,8 +71,6 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
   Detach(out);
 
   const std::wstring shmName = MakeKernelName(pid, skydiag::protocol::kKernelObjectSuffix_SharedMemory);
-  const std::wstring crashEventName = MakeKernelName(pid, skydiag::protocol::kKernelObjectSuffix_CrashEvent);
-
   // Include SYNCHRONIZE so the helper can detect process exit via WaitForSingleObject.
   out.process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
   if (!out.process) {
@@ -107,15 +105,8 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
     }
   }
 
-  // Need EVENT_MODIFY_STATE to consume manual-reset crash events via ResetEvent
-  // after handling, otherwise the helper can re-handle the same signal repeatedly.
-  out.crashEvent = OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, crashEventName.c_str());
-  if (!out.crashEvent) {
-    // Not fatal for hang-only mode; still allow attach.
-    if (err) err->clear();
-  }
-
   out.pid = pid;
+  TryAttachCrashEvent(out, nullptr);
   if (err) err->clear();
   return true;
 }
@@ -134,6 +125,40 @@ bool FindAndAttach(AttachedProcess& out, std::wstring* err)
     *err = L"Could not find a running Skyrim process with an active SkyrimDiag shared memory mapping.";
   }
   return false;
+}
+
+bool TryAttachCrashEvent(AttachedProcess& proc, std::wstring* err)
+{
+  if (proc.crashEvent) {
+    proc.crashEventOpenError = ERROR_SUCCESS;
+    if (err) {
+      err->clear();
+    }
+    return true;
+  }
+  if (proc.pid == 0) {
+    proc.crashEventOpenError = ERROR_INVALID_PARAMETER;
+    if (err) {
+      *err = L"Cannot open crash event before pid is initialized.";
+    }
+    return false;
+  }
+
+  const std::wstring crashEventName = MakeKernelName(proc.pid, skydiag::protocol::kKernelObjectSuffix_CrashEvent);
+  proc.crashEvent = OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, crashEventName.c_str());
+  if (!proc.crashEvent) {
+    proc.crashEventOpenError = GetLastError();
+    if (err) {
+      *err = L"OpenEventW failed: " + std::to_wstring(proc.crashEventOpenError);
+    }
+    return false;
+  }
+
+  proc.crashEventOpenError = ERROR_SUCCESS;
+  if (err) {
+    err->clear();
+  }
+  return true;
 }
 
 void Detach(AttachedProcess& p)
@@ -156,6 +181,7 @@ void Detach(AttachedProcess& p)
   }
   p.pid = 0;
   p.shmSize = 0;
+  p.crashEventOpenError = ERROR_SUCCESS;
 }
 
 }  // namespace skydiag::helper

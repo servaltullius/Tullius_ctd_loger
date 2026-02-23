@@ -264,6 +264,9 @@
                       <Button x:Name="AnalyzeButton" Click="AnalyzeButton_Click"
                               Content="ANALYZE NOW"
                               Style="{StaticResource PrimaryActionButtonStyle}" />
+                      <Button x:Name="CancelAnalyzeButton" Click="CancelAnalyzeButton_Click"
+                              Content="Cancel analysis"
+                              IsEnabled="False" />
                       <Button x:Name="OpenOutputButton" Click="OpenOutputButton_Click"
                               Content="Open report folder" />
                     </StackPanel>

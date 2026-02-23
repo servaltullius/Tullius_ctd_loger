@@ -9,6 +9,7 @@
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagHelper/Retention.h"
+#include "RetentionWorker.h"
 
 namespace skydiag::helper::internal {
 
@@ -24,7 +25,7 @@ inline skydiag::helper::RetentionLimits BuildRetentionLimits(const skydiag::help
 
 inline void ApplyRetentionFromConfig(const skydiag::helper::HelperConfig& cfg, const std::filesystem::path& outBase)
 {
-  skydiag::helper::ApplyRetentionToOutputDir(outBase, BuildRetentionLimits(cfg));
+  QueueRetentionSweep(outBase, BuildRetentionLimits(cfg));
 }
 
 inline std::string CollectPluginScanJson(

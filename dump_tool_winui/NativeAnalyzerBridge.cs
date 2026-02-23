@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -6,6 +7,7 @@ namespace SkyrimDiagDumpToolWinUI;
 internal static class NativeAnalyzerBridge
 {
     private const string NativeDllName = "SkyrimDiagDumpToolNative.dll";
+    public const int UserCanceledExitCode = 1223;
 
     [DllImport(NativeDllName, CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Unicode, EntryPoint = "SkyrimDiagAnalyzeDumpW")]
     private static extern int SkyrimDiagAnalyzeDumpW(
@@ -89,10 +91,134 @@ internal static class NativeAnalyzerBridge
         var outDir = ResolveOutputDirectory(dumpPath, options.OutDir);
         Directory.CreateDirectory(outDir);
 
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return (UserCanceledExitCode, "analysis canceled");
+        }
+
+        if (!options.Headless)
+        {
+            return await RunAnalyzeOutOfProcessAsync(options, dumpPath, outDir, cancellationToken);
+        }
+
+        return await RunAnalyzeInProcessAsync(options, dumpPath, outDir, cancellationToken);
+    }
+
+    private static async Task<(int exitCode, string error)> RunAnalyzeOutOfProcessAsync(
+        DumpToolInvocationOptions options,
+        string dumpPath,
+        string outDir,
+        CancellationToken cancellationToken)
+    {
+        var hostPath = ResolveHeadlessHostPath();
+        if (string.IsNullOrWhiteSpace(hostPath) || !File.Exists(hostPath))
+        {
+            return await RunAnalyzeInProcessAsync(options, dumpPath, outDir, cancellationToken);
+        }
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = hostPath,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(hostPath) ?? AppContext.BaseDirectory,
+        };
+
+        startInfo.ArgumentList.Add("--headless");
+        startInfo.ArgumentList.Add("--out-dir");
+        startInfo.ArgumentList.Add(outDir);
+
+        if (!string.IsNullOrWhiteSpace(options.Language))
+        {
+            startInfo.ArgumentList.Add("--lang");
+            startInfo.ArgumentList.Add(options.Language!);
+        }
+        if (options.Debug)
+        {
+            startInfo.ArgumentList.Add("--debug");
+        }
+        startInfo.ArgumentList.Add(options.AllowOnlineSymbols ? "--allow-online-symbols" : "--no-online-symbols");
+        startInfo.ArgumentList.Add(dumpPath);
+
+        using var process = new Process
+        {
+            StartInfo = startInfo,
+        };
+
+        try
+        {
+            if (!process.Start())
+            {
+                return (6, "Failed to start headless analysis host.");
+            }
+
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+
+            using var registration = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch
+                {
+                }
+            });
+
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch
+                {
+                }
+                await process.WaitForExitAsync(CancellationToken.None);
+                _ = await stderrTask;
+                _ = await stdoutTask;
+                return (UserCanceledExitCode, "analysis canceled");
+            }
+
+            var stderr = (await stderrTask).Trim();
+            var stdout = (await stdoutTask).Trim();
+            var message = !string.IsNullOrWhiteSpace(stderr) ? stderr : stdout;
+            return (process.ExitCode, message);
+        }
+        catch (OperationCanceledException)
+        {
+            return (UserCanceledExitCode, "analysis canceled");
+        }
+        catch (Exception ex)
+        {
+            return (6, "Headless process execution failed: " + ex.Message);
+        }
+    }
+
+    private static async Task<(int exitCode, string error)> RunAnalyzeInProcessAsync(
+        DumpToolInvocationOptions options,
+        string dumpPath,
+        string outDir,
+        CancellationToken cancellationToken)
+    {
         try
         {
             return await Task.Run(() =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var err = new StringBuilder(4096);
                 var previous = Environment.GetEnvironmentVariable("SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS");
                 Environment.SetEnvironmentVariable(
@@ -114,6 +240,10 @@ internal static class NativeAnalyzerBridge
                     Environment.SetEnvironmentVariable("SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS", previous);
                 }
             }, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return (UserCanceledExitCode, "analysis canceled");
         }
         catch (DllNotFoundException ex)
         {
@@ -144,5 +274,17 @@ internal static class NativeAnalyzerBridge
             }
             return (6, details);
         }
+    }
+
+    private static string? ResolveHeadlessHostPath()
+    {
+        var processPath = Environment.ProcessPath;
+        if (!string.IsNullOrWhiteSpace(processPath))
+        {
+            return processPath;
+        }
+
+        var candidate = Path.Combine(AppContext.BaseDirectory, "SkyrimDiagDumpToolWinUI.exe");
+        return File.Exists(candidate) ? candidate : null;
     }
 }

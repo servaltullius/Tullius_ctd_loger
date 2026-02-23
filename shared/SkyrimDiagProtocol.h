@@ -8,6 +8,7 @@ namespace skydiag::protocol {
 inline constexpr wchar_t kKernelObjectPrefix[] = L"Local\\SkyrimDiag_";
 inline constexpr wchar_t kKernelObjectSuffix_SharedMemory[] = L"_SHM";
 inline constexpr wchar_t kKernelObjectSuffix_CrashEvent[] = L"_CRASH";
+inline constexpr wchar_t kKernelObjectSuffix_HelperMutex[] = L"_HELPER_MUTEX";
 
 // Custom minidump user stream types must be > MINIDUMP_STREAM_TYPE::LastReservedStream (0xffff).
 inline constexpr std::uint32_t kMinidumpUserStream_Blackbox = 0x10000u + 0x5344u;  // arbitrary
