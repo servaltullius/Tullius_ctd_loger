@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.40-rc2 (2026-02-23)
+
+### 수정
+- Helper(Hang): foreground/not-foreground 억제 판단과 로그 경로를 공통 헬퍼로 정리해 감지/확정 단계 중복 코드를 제거.
+- Helper(Process Exit): 종료 처리 분기를 `Drain/Cleanup/Launch` 보조 함수로 분해해 CTD/정상종료 경계 로직의 가독성과 유지보수성을 개선.
+- Retention: 출력 디렉터리를 1회 스캔한 결과를 재사용하고 timestamp refcount로 incident manifest 삭제 조건을 계산해 불필요한 재스캔을 제거.
+- Tests: 소스 가드 테스트 공통 유틸(`SourceGuardTestUtils.h`)을 도입하고 구조 기반(assert order/body) 검증으로 문자열 취약 가드를 보강.
+
+### 테스트
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+- Windows: `scripts\\build-win.cmd` 성공.
+- Packaging/Release gate: `scripts\\build-winui.cmd` + `python scripts\\package.py --build-dir build-win --out dist\\Tullius_ctd_loger.zip --no-pdb` + `bash scripts/verify_release_gate.sh` 통과.
+
 ## v0.2.39 (2026-02-22)
 
 ### 수정
