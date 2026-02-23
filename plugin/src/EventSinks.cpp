@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <cstring>
 #include <string_view>
 
 #include <RE/Skyrim.h>
@@ -35,6 +36,17 @@ public:
 
     skydiag::EventPayload p{};
     p.a = menuHash;
+
+    // Pack menu name UTF-8 into b+c+d (24 bytes, null-terminated, truncated if longer)
+    static_assert(sizeof(p.b) + sizeof(p.c) + sizeof(p.d) == 24);
+    constexpr std::size_t kMenuNameMaxBytes = 24;
+    char* dst = reinterpret_cast<char*>(&p.b);
+    const std::size_t len = menuName.size();
+    if (len > 0) {
+      const std::size_t copyLen = (len < kMenuNameMaxBytes) ? len : (kMenuNameMaxBytes - 1);
+      std::memcpy(dst, menuName.data(), copyLen);
+      dst[copyLen] = '\0';
+    }
 
     if (e->opening) {
       PushEvent(skydiag::EventType::kMenuOpen, p, sizeof(p));

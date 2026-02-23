@@ -68,6 +68,18 @@ static void TestPreFreezeContextEvidence()
       || src.find("\xec\xa7\x81\xec\xa0\x84 \xec\x83\x81\xed\x99\xa9") != std::string::npos);
 }
 
+static void TestPluginStoresMenuNameInPayload()
+{
+  const auto src = ReadFile("plugin/src/EventSinks.cpp");
+  assert(src.find("memcpy") != std::string::npos);
+}
+
+static void TestAnalyzerExtractsMenuNameFromPayload()
+{
+  const auto src = ReadFile("dump_tool/src/AnalyzerInternals.cpp");
+  assert(src.find("menuBuf") != std::string::npos);
+}
+
 int main()
 {
   TestEventRowHasDetailField();
@@ -78,5 +90,7 @@ int main()
   TestOutputWriterEmitsDetail();
   TestAnalyzerPopulatesDetail();
   TestPreFreezeContextEvidence();
+  TestPluginStoresMenuNameInPayload();
+  TestAnalyzerExtractsMenuNameFromPayload();
   return 0;
 }

@@ -1,6 +1,7 @@
 #include "AnalyzerInternals.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cwchar>
 #include <filesystem>
 #include <string_view>
@@ -140,14 +141,30 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
 
     case EventType::kMenuOpen:
     case EventType::kMenuClose: {
-      // a = FNV-1a 64-bit hash of menu name
+      // Try embedded menu name string first (b+c+d = 24 bytes UTF-8)
+      char menuBuf[24]{};
+      std::memcpy(menuBuf, &b, 8);
+      std::memcpy(menuBuf + 8, &c, 8);
+      std::memcpy(menuBuf + 16, &d, 8);
+      menuBuf[23] = '\0';  // safety null
+      if (menuBuf[0] != '\0') {
+        const std::string_view sv(menuBuf);
+        std::wstring ws;
+        ws.reserve(sv.size());
+        for (char ch : sv) {
+          ws += static_cast<wchar_t>(static_cast<unsigned char>(ch));
+        }
+        return ws;
+      }
+
+      // Fallback: hash lookup (for old dumps without embedded name)
       const wchar_t* name = LookupMenuName(a);
       if (name) {
         return name;
       }
-      wchar_t buf[32];
-      std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"hash=0x%016llX", static_cast<unsigned long long>(a));
-      return buf;
+      wchar_t hexBuf[32];
+      std::swprintf(hexBuf, sizeof(hexBuf) / sizeof(hexBuf[0]), L"hash=0x%016llX", static_cast<unsigned long long>(a));
+      return hexBuf;
     }
 
     case EventType::kHeartbeat: {
