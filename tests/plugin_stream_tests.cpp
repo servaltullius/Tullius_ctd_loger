@@ -4,7 +4,12 @@
 #include <fstream>
 #include <string>
 
+#include "SourceGuardTestUtils.h"
+
 namespace {
+
+using skydiag::tests::source_guard::AssertOrdered;
+using skydiag::tests::source_guard::ExtractFunctionBody;
 
 std::string ReadFile(const char* relPath)
 {
@@ -22,10 +27,14 @@ void TestDumpWriterIncludesPluginStream()
   assert(impl.find("kMinidumpUserStream_PluginInfo") != std::string::npos);
 }
 
-void TestDumpWriterReservesThreeStreams()
+void TestDumpWriterPopulatesExpectedStreams()
 {
-  const auto impl = ReadFile("helper/src/DumpWriter.cpp");
-  assert(impl.find("reserve(3)") != std::string::npos);
+  const auto dumpWriter = ReadFile("helper/src/DumpWriter.cpp");
+  const auto writeDumpBody = ExtractFunctionBody(dumpWriter, "bool WriteDumpWithStreams(");
+  assert(writeDumpBody.find("kMinidumpUserStream_Blackbox") != std::string::npos);
+  assert(writeDumpBody.find("kMinidumpUserStream_WctJson") != std::string::npos);
+  assert(writeDumpBody.find("kMinidumpUserStream_PluginInfo") != std::string::npos);
+  assert(writeDumpBody.find("if (!pluginScanJson.empty())") != std::string::npos);
 }
 
 void TestDumpWriterHeaderHasPluginParam()
@@ -50,7 +59,13 @@ void TestCrashPathIsDumpFirst()
 void TestCrashPathWritesPluginScanSidecar()
 {
   const auto impl = ReadFile("helper/src/CrashCapture.cpp");
-  assert(impl.find("_PluginScan.json") != std::string::npos);
+  const auto crashTickBody = ExtractFunctionBody(impl, "bool HandleCrashEventTick(");
+  assert(crashTickBody.find("_PluginScan.json") != std::string::npos);
+  AssertOrdered(
+    crashTickBody,
+    "CollectPluginScanJson(",
+    "WriteTextFileUtf8(pluginScanPath, pluginScanJson)",
+    "Crash path must write plugin scan sidecar when collected.");
 }
 
 void TestAnalyzerHasPluginSidecarFallback()
@@ -65,7 +80,7 @@ void TestAnalyzerHasPluginSidecarFallback()
 int main()
 {
   TestDumpWriterIncludesPluginStream();
-  TestDumpWriterReservesThreeStreams();
+  TestDumpWriterPopulatesExpectedStreams();
   TestDumpWriterHeaderHasPluginParam();
   TestCrashPathIsDumpFirst();
   TestCrashPathWritesPluginScanSidecar();

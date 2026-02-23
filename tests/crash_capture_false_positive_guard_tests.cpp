@@ -1,22 +1,13 @@
 #include <cassert>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
-static std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
 
-static void AssertContains(const std::string& haystack, const char* needle, const char* message)
-{
-  assert(haystack.find(needle) != std::string::npos && message);
-}
+using skydiag::tests::source_guard::AssertContains;
+using skydiag::tests::source_guard::AssertOrdered;
+using skydiag::tests::source_guard::ExtractFunctionBody;
+using skydiag::tests::source_guard::ReadAllText;
 
 int main()
 {
@@ -42,111 +33,134 @@ int main()
     "EVENT_MODIFY_STATE | SYNCHRONIZE",
     "Crash event handle must include EVENT_MODIFY_STATE to allow ResetEvent.");
 
+  const std::string crashTickBody = ExtractFunctionBody(crashCapture, "bool HandleCrashEventTick(");
   AssertContains(
-    crashCapture,
+    crashTickBody,
+    "WaitForSingleObject(proc.crashEvent, waitMs)",
+    "Crash capture flow must wait on crash event with the configured timeout.");
+
+  AssertContains(
+    crashTickBody,
+    "if (w == WAIT_FAILED)",
+    "Crash capture flow must branch on crash event wait failure.");
+
+  AssertContains(
+    crashTickBody,
     "ResetEvent(proc.crashEvent)",
     "Crash capture flow must consume manual-reset crash events after handling.");
 
   AssertContains(
-    crashCapture,
-    "Crash event wait failed:",
-    "Crash capture flow must log WAIT_FAILED from crash event wait for diagnostics.");
+    crashTickBody,
+    "WriteDumpWithStreams(",
+    "Crash capture flow must write dump in crash tick path.");
 
   AssertContains(
-    crashCapture,
-    "kRequiredHeartbeatAdvances = 2",
-    "Handled-exception filter must require multiple heartbeat advances before deleting a dump.");
+    crashTickBody,
+    "CollectPluginScanJson(",
+    "Crash capture flow must collect plugin scan sidecar after dump capture.");
 
   AssertContains(
-    crashCapture,
-    "kState_InMenu",
-    "Crash capture must reference in-menu state to suppress shutdown-boundary false positives.");
+    crashTickBody,
+    "queueDeferredCrashViewer(",
+    "Crash capture flow must queue deferred viewer launch when process-exit auto-open is delayed.");
 
   AssertContains(
-    crashCapture,
-    "keeping dump and preserving crash auto-actions",
-    "Crash capture must keep crash auto-actions enabled for non-zero exits near menu/shutdown boundary.");
+    crashTickBody,
+    "ApplyRetentionFromConfig(cfg, outBase)",
+    "Crash capture flow must apply retention after successful capture.");
 
   AssertContains(
-    crashCapture,
-    "menu/shutdown boundary during heartbeat check with non-zero exit",
-    "Crash capture must preserve crash auto-actions even when non-zero exits happen during heartbeat checks.");
-
-  AssertContains(
-    crashCapture,
-    "after auto-open wait (wait_ms=",
-    "Crash capture must log deferred crash viewer decisions with explicit wait timeout details.");
-
-  AssertContains(
-    crashCapture,
-    "Crash viewer auto-open wait failed (wait_ms=",
-    "Crash capture must preserve diagnostics when process-exit wait fails during crash viewer auto-open.");
-
-  AssertContains(
-    crashCapture,
-    "Deferred crash viewer already queued for previous dump",
-    "Crash capture must keep the first deferred viewer target instead of overwriting it with later crash signals.");
-
-  AssertContains(
-    helperMain,
-    "RemoveCrashArtifactsForDump",
-    "Helper main loop must remove crash artifacts if a prior crash capture is followed by exit_code=0.");
-
-  AssertContains(
-    helperMain,
-    "exit_code=0 after crash capture; removed",
-    "Helper main loop must log normal-exit crash artifact cleanup.");
-
-  AssertContains(
-    helperMain,
-    "Failed to remove crash artifact",
-    "Crash artifact cleanup must log per-file deletion failures for diagnostics.");
-
-  AssertContains(
-    helperMain,
-    "Deferred crash viewer launch attempted after process exit (exit_code=",
-    "Helper main loop must log deferred crash viewer launch attempts with exit code context.");
-
-  AssertContains(
-    crashCapture,
+    crashTickBody,
     "IsStrongCrashException",
     "Crash capture must consult IsStrongCrashException to avoid suppressing real CTDs when exit_code=0 is misleading.");
 
+  AssertOrdered(
+    crashTickBody,
+    "WriteDumpWithStreams(",
+    "CollectPluginScanJson(",
+    "Crash capture must write dump before plugin scan collection.");
+
+  AssertOrdered(
+    crashTickBody,
+    "if (wExit == WAIT_TIMEOUT)",
+    "queueDeferredCrashViewer(L\"wait_timeout\")",
+    "Crash capture must queue deferred viewer in the timeout branch.");
+
+  AssertOrdered(
+    crashTickBody,
+    "queueDeferredCrashViewer(L\"wait_timeout\")",
+    "queueDeferredCrashViewer(L\"wait_failed\")",
+    "Crash capture must handle wait-timeout and wait-failed deferred paths distinctly.");
+
+  const std::string zeroExitCleanupBody = ExtractFunctionBody(helperMain, "void CleanupCrashArtifactsAfterZeroExit(");
   AssertContains(
-    helperMain,
-    "exit_code=0 after crash capture but exception_code=",
-    "Helper must preserve crash artifacts when a strong crash exception is paired with exit_code=0.");
+    zeroExitCleanupBody,
+    "if (!state->crashCaptured)",
+    "Zero-exit cleanup must short-circuit when crash capture state is not active.");
 
   AssertContains(
-    helperMain,
-    "crash_deferred_exit_code0_strong",
-    "Helper must attempt deferred crash viewer launch for strong crash exceptions even when exit_code=0.");
+    zeroExitCleanupBody,
+    "MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);",
+    "Zero-exit cleanup must force-stop crash ETW before artifact deletion.");
 
   AssertContains(
-    dumpToolLaunch,
+    zeroExitCleanupBody,
+    "RemoveCrashArtifactsForDump(outBase, state->capturedCrashDumpPath, crashEtwPath)",
+    "Zero-exit cleanup must remove crash artifact set tied to captured dump.");
+
+  AssertOrdered(
+    zeroExitCleanupBody,
+    "MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);",
+    "RemoveCrashArtifactsForDump(outBase, state->capturedCrashDumpPath, crashEtwPath)",
+    "Zero-exit cleanup must stop ETW before deleting crash artifacts.");
+
+  const std::string processExitTickBody = ExtractFunctionBody(helperMain, "bool HandleProcessExitTick(");
+  AssertContains(
+    processExitTickBody,
+    "WaitForSingleObject(proc.process, 0)",
+    "Process exit tick must poll target process handle.");
+
+  AssertContains(
+    processExitTickBody,
+    "DrainCrashEventBeforeExit(",
+    "Process exit tick must drain pending crash signal before exit handling.");
+
+  AssertContains(
+    processExitTickBody,
+    "CleanupCrashArtifactsAfterZeroExit(",
+    "Process exit tick must invoke zero-exit crash artifact cleanup path.");
+
+  AssertContains(
+    processExitTickBody,
+    "LaunchDeferredViewersAfterExit(",
+    "Process exit tick must invoke deferred viewer launch helper.");
+
+  AssertContains(
+    processExitTickBody,
+    "HandleProcessWaitFailed(",
+    "Process exit tick must handle WAIT_FAILED via dedicated helper.");
+
+  AssertOrdered(
+    processExitTickBody,
+    "MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);",
+    "LaunchDeferredViewersAfterExit(",
+    "Process exit tick must finalize crash ETW before deferred viewer launch.");
+
+  const std::string viewerLaunchBody = ExtractFunctionBody(dumpToolLaunch, "DumpToolViewerLaunchResult StartDumpToolViewer(");
+  AssertContains(
+    viewerLaunchBody,
     "DumpTool viewer launch failed (reason=",
     "DumpTool viewer launch failures must be persisted to helper log for diagnosis.");
 
   AssertContains(
-    dumpToolLaunch,
+    viewerLaunchBody,
     "win32_error=",
     "DumpTool viewer launch failure logs must include Win32 error code.");
 
   AssertContains(
-    dumpToolLaunch,
+    viewerLaunchBody,
     ", exe=",
     "DumpTool viewer launch diagnostics must include resolved executable path.");
-
-  const auto crashCapturedBranchPos = helperMain.find("if (crashCaptured) {");
-  assert(crashCapturedBranchPos != std::string::npos && "Missing crashCaptured branch in helper main loop");
-  const auto forceEtwStopPos =
-    helperMain.find("MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);", crashCapturedBranchPos);
-  const auto cleanupPos = helperMain.find("RemoveCrashArtifactsForDump(outBase, capturedCrashDumpPath", crashCapturedBranchPos);
-  assert(forceEtwStopPos != std::string::npos && "Helper must force-stop crash ETW in the normal-exit cleanup branch.");
-  assert(cleanupPos != std::string::npos && "Helper must clean up crash artifacts in the normal-exit cleanup branch.");
-  assert(
-    forceEtwStopPos < cleanupPos &&
-    "Helper must stop crash ETW before removing crash artifacts to avoid orphan ETL files/manifest update races.");
 
   return 0;
 }

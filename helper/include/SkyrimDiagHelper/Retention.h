@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace skydiag::helper {
@@ -104,11 +105,9 @@ struct DatedFile {
   std::string ts;
 };
 
-inline bool HasDumpWithPrefixAndTimestamp(
-  const std::filesystem::path& dir,
-  std::string_view dumpPrefix,
-  std::string_view ts)
+inline std::vector<std::filesystem::path> CollectRegularFiles(const std::filesystem::path& dir)
 {
+  std::vector<std::filesystem::path> files;
   std::error_code ec;
   for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
     if (ec) {
@@ -117,18 +116,9 @@ inline bool HasDumpWithPrefixAndTimestamp(
     if (!ent.is_regular_file(ec)) {
       continue;
     }
-    const auto p = ent.path();
-    const auto name = p.filename().string();
-    if (!StartsWith(name, dumpPrefix) || !EndsWith(name, ".dmp")) {
-      continue;
-    }
-    const auto stem = p.stem().string();
-    auto tsOpt = TryExtractTimestampToken(stem);
-    if (tsOpt && *tsOpt == ts) {
-      return true;
-    }
+    files.push_back(ent.path());
   }
-  return false;
+  return files;
 }
 
 inline std::string_view IncidentKindForDumpPrefix(std::string_view dumpPrefix)
@@ -146,21 +136,12 @@ inline std::string_view IncidentKindForDumpPrefix(std::string_view dumpPrefix)
 }
 
 inline std::vector<DatedFile> CollectFilesByPrefixAndExt(
-  const std::filesystem::path& dir,
+  const std::vector<std::filesystem::path>& files,
   std::string_view prefix,
   std::string_view ext)
 {
   std::vector<DatedFile> out;
-  std::error_code ec;
-  for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
-    if (ec) {
-      break;
-    }
-    if (!ent.is_regular_file(ec)) {
-      continue;
-    }
-
-    const auto p = ent.path();
+  for (const auto& p : files) {
     const auto name = p.filename().string();
     if (!StartsWith(name, prefix) || !EndsWith(name, ext)) {
       continue;
@@ -183,25 +164,41 @@ inline std::vector<DatedFile> CollectFilesByPrefixAndExt(
   return out;
 }
 
-inline void PruneDumpFiles(
+inline std::vector<DatedFile> CollectFilesByPrefixAndExt(
   const std::filesystem::path& dir,
+  std::string_view prefix,
+  std::string_view ext)
+{
+  const auto files = CollectRegularFiles(dir);
+  return CollectFilesByPrefixAndExt(files, prefix, ext);
+}
+
+inline std::unordered_map<std::string, std::uint32_t> BuildTimestampRefCounts(const std::vector<DatedFile>& dumps)
+{
+  std::unordered_map<std::string, std::uint32_t> refs;
+  refs.reserve(dumps.size());
+  for (const auto& dump : dumps) {
+    refs[dump.ts] += 1u;
+  }
+  return refs;
+}
+
+inline void PruneDumpFilesFromCollected(
+  const std::filesystem::path& dir,
+  const std::vector<DatedFile>& dumps,
   std::string_view dumpPrefix,
   std::uint32_t maxCount,
   bool deleteWctForTimestamp,
   bool deleteManualWctForTimestamp,
   bool deleteEtlForStem)
 {
-  if (maxCount == 0) {
-    return;  // unlimited
-  }
-
-  auto dumps = CollectFilesByPrefixAndExt(dir, dumpPrefix, ".dmp");
-  if (dumps.size() <= static_cast<std::size_t>(maxCount)) {
+  if (maxCount == 0 || dumps.size() <= static_cast<std::size_t>(maxCount)) {
     return;
   }
 
   std::error_code ec;
   const std::string_view incidentKind = IncidentKindForDumpPrefix(dumpPrefix);
+  auto tsRefs = BuildTimestampRefCounts(dumps);
   for (std::size_t i = maxCount; i < dumps.size(); i++) {
     const auto p = dumps[i].path;
     const auto stem = p.stem().string();
@@ -215,9 +212,17 @@ inline void PruneDumpFiles(
       std::filesystem::remove(etl, ec);
     }
 
-    if (!incidentKind.empty() && !HasDumpWithPrefixAndTimestamp(dir, dumpPrefix, dumps[i].ts)) {
-      const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dumps[i].ts + ".json");
-      std::filesystem::remove(manifest, ec);
+    if (!incidentKind.empty()) {
+      auto it = tsRefs.find(dumps[i].ts);
+      if (it != tsRefs.end()) {
+        if (it->second > 0) {
+          --it->second;
+        }
+        if (it->second == 0) {
+          const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dumps[i].ts + ".json");
+          std::filesystem::remove(manifest, ec);
+        }
+      }
     }
 
     if (deleteWctForTimestamp) {
@@ -231,32 +236,49 @@ inline void PruneDumpFiles(
   }
 }
 
-inline void PruneEtwTraces(const std::filesystem::path& dir, std::uint32_t maxCount)
+inline void PruneDumpFiles(
+  const std::filesystem::path& dir,
+  std::string_view dumpPrefix,
+  std::uint32_t maxCount,
+  bool deleteWctForTimestamp,
+  bool deleteManualWctForTimestamp,
+  bool deleteEtlForStem)
 {
-  if (maxCount == 0) {
-    return;  // unlimited
-  }
+  const auto dumps = CollectFilesByPrefixAndExt(dir, dumpPrefix, ".dmp");
+  PruneDumpFilesFromCollected(
+    dir,
+    dumps,
+    dumpPrefix,
+    maxCount,
+    deleteWctForTimestamp,
+    deleteManualWctForTimestamp,
+    deleteEtlForStem);
+}
 
-  // ETW traces are created for hang and (optionally) crash captures and match the dump timestamp.
-  auto etls = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Hang_", ".etl");
-  {
-    auto crash = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Crash_", ".etl");
-    etls.insert(etls.end(), crash.begin(), crash.end());
-    std::sort(etls.begin(), etls.end(), [](const DatedFile& a, const DatedFile& b) {
-      if (a.ts != b.ts) {
-        return a.ts > b.ts;
-      }
-      return a.path.filename().string() < b.path.filename().string();
-    });
-  }
-  if (etls.size() <= static_cast<std::size_t>(maxCount)) {
+inline void PruneEtwTracesFromCollected(std::vector<DatedFile> etls, std::uint32_t maxCount)
+{
+  if (maxCount == 0 || etls.size() <= static_cast<std::size_t>(maxCount)) {
     return;
   }
+  std::sort(etls.begin(), etls.end(), [](const DatedFile& a, const DatedFile& b) {
+    if (a.ts != b.ts) {
+      return a.ts > b.ts;
+    }
+    return a.path.filename().string() < b.path.filename().string();
+  });
 
   std::error_code ec;
   for (std::size_t i = maxCount; i < etls.size(); i++) {
     std::filesystem::remove(etls[i].path, ec);
   }
+}
+
+inline void PruneEtwTraces(const std::filesystem::path& dir, std::uint32_t maxCount)
+{
+  auto etls = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Hang_", ".etl");
+  auto crash = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Crash_", ".etl");
+  etls.insert(etls.end(), crash.begin(), crash.end());
+  PruneEtwTracesFromCollected(std::move(etls), maxCount);
 }
 
 inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, const RetentionLimits& limits)
@@ -269,31 +291,42 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
     return;
   }
 
-  PruneDumpFiles(
+  const auto files = CollectRegularFiles(outBase);
+  const auto crashDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".dmp");
+  const auto hangDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Hang_", ".dmp");
+  const auto manualDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Manual_", ".dmp");
+
+  PruneDumpFilesFromCollected(
     outBase,
+    crashDumps,
     "SkyrimDiag_Crash_",
     limits.maxCrashDumps,
     /*deleteWctForTimestamp=*/false,
     /*deleteManualWctForTimestamp=*/false,
     /*deleteEtlForStem=*/true);
 
-  PruneDumpFiles(
+  PruneDumpFilesFromCollected(
     outBase,
+    hangDumps,
     "SkyrimDiag_Hang_",
     limits.maxHangDumps,
     /*deleteWctForTimestamp=*/true,
     /*deleteManualWctForTimestamp=*/false,
     /*deleteEtlForStem=*/true);
 
-  PruneDumpFiles(
+  PruneDumpFilesFromCollected(
     outBase,
+    manualDumps,
     "SkyrimDiag_Manual_",
     limits.maxManualDumps,
     /*deleteWctForTimestamp=*/false,
     /*deleteManualWctForTimestamp=*/true,
     /*deleteEtlForStem=*/false);
 
-  PruneEtwTraces(outBase, limits.maxEtwTraces);
+  auto etls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Hang_", ".etl");
+  auto crashEtls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".etl");
+  etls.insert(etls.end(), crashEtls.begin(), crashEtls.end());
+  PruneEtwTracesFromCollected(std::move(etls), limits.maxEtwTraces);
 }
 
 inline void RotateLogFileIfNeeded(const std::filesystem::path& path, std::uint64_t maxBytes, std::uint32_t maxFiles)
