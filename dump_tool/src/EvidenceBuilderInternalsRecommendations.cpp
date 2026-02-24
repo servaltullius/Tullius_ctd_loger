@@ -10,6 +10,7 @@ namespace skydiag::dump_tool::internal {
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
+  const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
   const bool isManualCapture = ctx.isManualCapture;
@@ -72,7 +73,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if (r.needs_bees) {
+  if (r.needs_bees && isCrashLike) {
     r.recommendations.push_back(en
       ? L"[BEES] Install BEES or update the game runtime to 1.6.1130+."
       : L"[BEES] BEES를 설치하거나 게임 런타임을 1.6.1130 이상으로 업데이트하세요.");
@@ -124,7 +125,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
-  if (!r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
+  const bool allowTopSuspectActionRecommendations = !isSnapshotLike;
+  if (allowTopSuspectActionRecommendations && !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? (L"[Top suspect] Reproduce after updating/reinstalling '" + r.inferred_mod_name + L"'.")
       : (L"[유력 후보] '" + r.inferred_mod_name + L"' 모드를 업데이트/재설치 후 재현 여부 확인"));
@@ -133,7 +135,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : (L"[유력 후보] 동일 크래시가 반복되면 '" + r.inferred_mod_name + L"' 모드(또는 해당 모드의 SKSE 플러그인 DLL)를 비활성화 후 재현 여부 확인"));
   }
 
-  if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
+  if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
     const auto& s0 = *firstNonHookStackCandidate;
     if (!s0.inferred_mod_name.empty()) {
       r.recommendations.push_back(en
@@ -147,11 +149,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? (L"[Top suspect] actionable " + suspectBasis + L" candidate DLL: " + s0.module_filename + L" — check the providing mod first.")
         : (L"[유력 후보] 실행 우선 " + suspectBasis + L" 기반 후보 DLL: " + s0.module_filename + L" — 포함된 모드를 우선 점검"));
     }
-  } else if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
+  } else if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a known hook framework DLL. Treat it as a victim location first and prioritize non-hook candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 알려진 훅 프레임워크 DLL입니다. 우선은 피해 위치로 보고, 비-훅 후보/리소스/충돌 단서를 먼저 점검하세요.");
-  } else if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
+  } else if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a Windows system DLL. For hang captures this is often a waiting/victim location, so prioritize non-system candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 Windows 시스템 DLL입니다. 행 캡처에서는 대기/피해 위치인 경우가 많으므로 비-시스템 후보/리소스/충돌 단서를 우선 점검하세요.");
@@ -187,21 +189,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if (hasModule && !isSystem && !isGameExe && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
+  if (allowTopSuspectActionRecommendations && hasModule && !isSystem && !isGameExe && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? L"[Top suspect] Verify prerequisites/versions for the mod containing this DLL (SKSE / Address Library / game runtime)."
       : L"[유력 후보] 해당 DLL이 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전) 충족 여부 확인");
     r.recommendations.push_back(en
       ? L"[Top suspect] Attach this report (*_SkyrimDiagReport.txt) and dump (*.dmp) when reporting to the mod author."
       : L"[유력 후보] 이 리포트 파일(*_SkyrimDiagReport.txt)과 덤프(*.dmp)를 모드 제작자에게 첨부");
-  } else if (hasModule && isGameExe) {
+  } else if (allowTopSuspectActionRecommendations && hasModule && isGameExe) {
     r.recommendations.push_back(en
       ? L"[Check] Crash location is the game executable. Version mismatch (Address Library/SKSE) or hook conflicts are likely."
       : L"[점검] 크래시 위치가 게임 본체(EXE)로 나옵니다. Address Library/ SKSE 버전 불일치 또는 후킹 충돌 가능성이 큽니다.");
     r.recommendations.push_back(en
       ? L"[Check] Disable recently added/updated SKSE plugin DLLs one by one and retest."
       : L"[점검] 최근 추가/업데이트한 SKSE 플러그인(DLL)부터 하나씩 제외하며 재현 여부 확인");
-  } else if (hasModule && isSystem) {
+  } else if (allowTopSuspectActionRecommendations && hasModule && isSystem) {
     r.recommendations.push_back(en
       ? L"[Check] When a Windows system DLL is shown, the real culprit is often another mod/DLL."
       : L"[점검] Windows 시스템 DLL로 표시될 때는 실제 원인이 다른 모드/DLL인 경우가 많습니다.");

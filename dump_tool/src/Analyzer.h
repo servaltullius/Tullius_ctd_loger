@@ -131,6 +131,11 @@ struct AnalysisResult
   bool has_wct = false;
   std::string wct_json_utf8;
 
+  bool is_crash_like = false;
+  bool is_hang_like = false;
+  bool is_snapshot_like = false;
+  bool is_manual_capture = false;
+
   std::wstring summary_sentence;
   std::vector<EvidenceItem> evidence;
   std::vector<std::wstring> recommendations;

@@ -25,6 +25,9 @@ static void TestMainWindowHasCorrelationBadge()
 
   const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
   assert(summary.find("HistoryCorrelationCount") != std::string::npos);
+  assert(summary.find("is_snapshot_like") != std::string::npos);
+  assert(summary.find("is_hang_like") != std::string::npos);
+  assert(summary.find("is_crash_like") != std::string::npos);
 }
 
 static void TestMainWindowHasTroubleshootingSection()
@@ -57,8 +60,11 @@ int main()
   assert(xaml.find("CopyShareButton") != std::string::npos && "Community share copy button missing in XAML");
   assert(xaml.find("CopyShareButton_Click") != std::string::npos && "Community share click handler not wired in XAML");
 
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  assert(cs.find("Skyrim Snapshot Report") != std::string::npos && "Snapshot community share headline missing");
+  assert(cs.find("Skyrim Freeze/ILS Report") != std::string::npos && "Hang community share headline missing");
+
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();
   return 0;
 }
-

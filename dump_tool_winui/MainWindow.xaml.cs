@@ -573,20 +573,65 @@ public sealed partial class MainWindow : Window
 
         var lines = new List<string>();
 
-        lines.Add(_isKorean
-            ? "🔴 Skyrim CTD 리포트 — SkyrimDiag"
-            : "🔴 Skyrim CTD Report — SkyrimDiag");
+        static bool HasAnyPrefix(IEnumerable<string> values, params string[] prefixes)
+        {
+            foreach (var v in values)
+            {
+                if (string.IsNullOrWhiteSpace(v))
+                {
+                    continue;
+                }
+
+                foreach (var p in prefixes)
+                {
+                    if (v.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        var recs = summary.Recommendations;
+        var looksSnapshotByText = summary.SummarySentence.Contains("snapshot", StringComparison.OrdinalIgnoreCase) ||
+                                  summary.SummarySentence.Contains("스냅샷", StringComparison.Ordinal);
+        var looksHangByText = summary.SummarySentence.Contains("freeze", StringComparison.OrdinalIgnoreCase) ||
+                              summary.SummarySentence.Contains("infinite loading", StringComparison.OrdinalIgnoreCase) ||
+                              summary.SummarySentence.Contains("프리징", StringComparison.Ordinal) ||
+                              summary.SummarySentence.Contains("무한로딩", StringComparison.Ordinal);
+
+        var isSnapshotLike = summary.IsSnapshotLike ||
+                             looksSnapshotByText ||
+                             HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]");
+        var isHangLike = !isSnapshotLike &&
+                         (summary.IsHangLike || looksHangByText || HasAnyPrefix(recs, "[Hang]", "[프리징]"));
+        var isCrashLike = !isSnapshotLike && !isHangLike && summary.IsCrashLike;
+
+        lines.Add(isSnapshotLike
+            ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
+            : isHangLike
+                ? (_isKorean ? "🟠 Skyrim 프리징/무한로딩 리포트 — SkyrimDiag" : "🟠 Skyrim Freeze/ILS Report — SkyrimDiag")
+                : (_isKorean ? "🔴 Skyrim CTD 리포트 — SkyrimDiag" : "🔴 Skyrim CTD Report — SkyrimDiag"));
 
         if (summary.Suspects.Count > 0)
         {
             var top = summary.Suspects[0];
             var conf = !string.IsNullOrWhiteSpace(top.Confidence) ? top.Confidence : "?";
-            lines.Add($"📌 {(_isKorean ? "유력 원인" : "Primary suspect")}: {top.Module} ({conf})");
+            lines.Add($"📌 {(_isKorean ? (isSnapshotLike ? "참고 후보" : "유력 원인") : (isSnapshotLike ? "Reference candidate" : "Primary suspect"))}: {top.Module} ({conf})");
         }
 
         if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
         {
-            lines.Add($"🔍 {(_isKorean ? "유형" : "Type")}: {summary.CrashBucketKey}");
+            var typeLabel = isSnapshotLike
+                ? (_isKorean ? "분류" : "Category")
+                : (_isKorean ? "유형" : "Type");
+            var typeValue = isSnapshotLike
+                ? (_isKorean ? "SNAPSHOT" : "SNAPSHOT")
+                : isHangLike
+                    ? (_isKorean ? "HANG" : "HANG")
+                    : summary.CrashBucketKey;
+            lines.Add($"🔍 {typeLabel}: {typeValue}");
         }
 
         if (!string.IsNullOrWhiteSpace(summary.ModulePlusOffset))
@@ -601,7 +646,26 @@ public sealed partial class MainWindow : Window
 
         if (summary.Recommendations.Count > 0)
         {
-            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {summary.Recommendations[0]}");
+            string firstAction;
+            if (isSnapshotLike)
+            {
+                firstAction = summary.Recommendations.FirstOrDefault(r =>
+                    r.StartsWith("[Snapshot]", StringComparison.OrdinalIgnoreCase) ||
+                    r.StartsWith("[정상/스냅샷]", StringComparison.Ordinal) ||
+                    r.StartsWith("[Manual]", StringComparison.OrdinalIgnoreCase) ||
+                    r.StartsWith("[수동]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
+            }
+            else if (isHangLike)
+            {
+                firstAction = summary.Recommendations.FirstOrDefault(r =>
+                    r.StartsWith("[Hang]", StringComparison.OrdinalIgnoreCase) ||
+                    r.StartsWith("[프리징]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
+            }
+            else
+            {
+                firstAction = summary.Recommendations[0];
+            }
+            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {firstAction}");
         }
 
         lines.Add("— Tullius CTD Logger");

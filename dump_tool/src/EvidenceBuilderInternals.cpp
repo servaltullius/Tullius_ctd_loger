@@ -45,13 +45,21 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   const bool manualCaptureHint = nameManual || manualFromWct;
 
   const bool hasException = (r.exc_code != 0u);
+  const bool handledCppException = (r.exc_code == 0xE06D7363u);
+  const bool likelyHandledExceptionFalsePositive =
+    handledCppException && !nameCrash && !hasCrashEvent && (manualCaptureHint || heartbeatSuggestsNotHang);
   // A manual capture can include a "Crash" blackbox marker due to handled exceptions (or false triggers),
   // but that does not necessarily mean the game actually CTD'd. Prefer exception stream presence for crash classification.
-  const bool isCrashLike = nameCrash || hasException || (hasCrashEvent && !manualCaptureHint);
+  const bool isCrashLike = nameCrash || (hasException && !likelyHandledExceptionFalsePositive) || (hasCrashEvent && !manualCaptureHint);
   const bool nameHangEffective = nameHang && !manualFromWct && !heartbeatSuggestsNotHang;
   const bool isHangLike = nameHangEffective || hasHangEvent || wctSuggestsHang;
   const bool isSnapshotLike = !isCrashLike && !isHangLike;
   const bool isManualCapture = manualCaptureHint || (nameHang && isSnapshotLike);
+
+  r.is_crash_like = isCrashLike;
+  r.is_hang_like = isHangLike;
+  r.is_snapshot_like = isSnapshotLike;
+  r.is_manual_capture = isManualCapture;
 
   const bool isSystem = minidump::IsSystemishModule(r.fault_module_filename) || minidump::IsLikelyWindowsSystemModulePath(r.fault_module_path);
   const bool hasModule = !r.fault_module_filename.empty();

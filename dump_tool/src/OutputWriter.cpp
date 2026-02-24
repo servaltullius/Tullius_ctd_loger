@@ -60,6 +60,12 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
+  summary["analysis"] = {
+    { "is_crash_like", r.is_crash_like },
+    { "is_hang_like", r.is_hang_like },
+    { "is_snapshot_like", r.is_snapshot_like },
+    { "is_manual_capture", r.is_manual_capture },
+  };
   summary["privacy"] = {
     { "path_redaction_applied", redactPaths },
     { "online_symbol_source_allowed", r.online_symbol_source_allowed },

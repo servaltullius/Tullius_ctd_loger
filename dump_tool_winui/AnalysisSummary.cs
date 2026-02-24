@@ -9,6 +9,10 @@ internal sealed class AnalysisSummary
     public required string CrashBucketKey { get; init; }
     public required string ModulePlusOffset { get; init; }
     public required string InferredModName { get; init; }
+    public required bool IsCrashLike { get; init; }
+    public required bool IsHangLike { get; init; }
+    public required bool IsSnapshotLike { get; init; }
+    public required bool IsManualCapture { get; init; }
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
     public required IReadOnlyList<string> CallstackFrames { get; init; }
@@ -25,6 +29,7 @@ internal sealed class AnalysisSummary
         var root = doc.RootElement;
 
         var exception = root.TryGetProperty("exception", out var exNode) ? exNode : default;
+        var analysis = root.TryGetProperty("analysis", out var analysisNode) ? analysisNode : default;
 
         var suspects = new List<SuspectItem>();
         if (root.TryGetProperty("suspects", out var suspectsNode) &&
@@ -138,6 +143,10 @@ internal sealed class AnalysisSummary
             InferredModName = FirstNonEmpty(
                 ReadString(exception, "inferred_mod_name"),
                 suspects.FirstOrDefault()?.Module ?? string.Empty),
+            IsCrashLike = ReadBool(analysis, "is_crash_like"),
+            IsHangLike = ReadBool(analysis, "is_hang_like"),
+            IsSnapshotLike = ReadBool(analysis, "is_snapshot_like"),
+            IsManualCapture = ReadBool(analysis, "is_manual_capture"),
             Suspects = suspects,
             Recommendations = recommendations,
             CallstackFrames = callstackFrames,

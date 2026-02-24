@@ -130,6 +130,14 @@ int main()
     "actionable ",
     "Recommendations must label actionable stack candidates explicitly.");
   AssertContains(
+    rec,
+    "r.needs_bees && isCrashLike",
+    "BEES recommendation must be gated to crash-like incidents to avoid snapshot false positives.");
+  AssertContains(
+    rec,
+    "allowTopSuspectActionRecommendations",
+    "Top-suspect action recommendations must be gated off for snapshot-like incidents.");
+  AssertContains(
     evidence,
     "selectedTop",
     "Evidence builder must align displayed top suspect with actionable candidate selection when victim-like tops are present.");
