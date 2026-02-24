@@ -45,6 +45,7 @@ inline constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
 inline constexpr std::uint32_t kStatusCppException = 0xE06D7363u;
 inline constexpr std::uint32_t kStatusClrException = 0xE0434F4Du;
 inline constexpr std::uint32_t kStatusBreakpoint = 0x80000003u;
+inline constexpr std::uint32_t kStatusControlCExit = 0xC000013Au;
 inline constexpr std::uint32_t kStateInMenu = 1u << 2;
 
 inline bool IsStrongCrashExceptionCode(std::uint32_t code) noexcept
@@ -55,7 +56,8 @@ inline bool IsStrongCrashExceptionCode(std::uint32_t code) noexcept
   if (code == kStatusInvalidHandle ||
       code == kStatusCppException ||
       code == kStatusClrException ||
-      code == kStatusBreakpoint) {
+      code == kStatusBreakpoint ||
+      code == kStatusControlCExit) {
     return false;
   }
   return true;

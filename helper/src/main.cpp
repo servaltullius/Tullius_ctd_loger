@@ -359,7 +359,7 @@ void LaunchDeferredViewersAfterExit(
 
   if (!state->pendingCrashViewerDumpPath.empty() &&
       cfg.autoOpenViewerOnCrash &&
-      (exitCode != 0 || exitCode0StrongCrash)) {
+      (exitCode != 0)) {
     const std::wstring deferredDumpPath = state->pendingCrashViewerDumpPath;
     StartDumpToolViewer(
       cfg,
@@ -372,6 +372,13 @@ void LaunchDeferredViewersAfterExit(
         + std::to_wstring(exitCode)
         + L", dump="
         + std::filesystem::path(deferredDumpPath).filename().wstring()
+        + L").");
+    state->pendingCrashViewerDumpPath.clear();
+  } else if (!state->pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && exitCode == 0) {
+    AppendLogLine(
+      outBase,
+      L"Suppressed deferred crash viewer launch on normal process exit (exit_code=0, dump="
+        + std::filesystem::path(state->pendingCrashViewerDumpPath).filename().wstring()
         + L").");
     state->pendingCrashViewerDumpPath.clear();
   }

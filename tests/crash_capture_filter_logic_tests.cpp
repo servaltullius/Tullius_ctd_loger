@@ -57,6 +57,12 @@ static void TestClassifyExitCodeVerdict_DeleteBenignForBreakpointWeak()
   assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
 }
 
+static void TestClassifyExitCodeVerdict_DeleteBenignForControlCExitWeak()
+{
+  const auto info = BuildCrashEventInfo(skydiag::helper::internal::kStatusControlCExit, 0u, 0u, 0u);
+  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
+}
+
 static void TestClassifyExitCodeVerdict_KeepDumpForAccessViolationStrong()
 {
   const auto info = BuildCrashEventInfo(0xC0000005u, 0u, 0u, 0u);
@@ -135,6 +141,7 @@ int main()
   TestClassifyExitCodeVerdict_DeleteBenignForCppExceptionWeak();
   TestClassifyExitCodeVerdict_DeleteBenignForClrExceptionWeak();
   TestClassifyExitCodeVerdict_DeleteBenignForBreakpointWeak();
+  TestClassifyExitCodeVerdict_DeleteBenignForControlCExitWeak();
   TestClassifyExitCodeVerdict_KeepDumpForAccessViolationStrong();
 
   TestExtractLikeInfo_DefaultValues();

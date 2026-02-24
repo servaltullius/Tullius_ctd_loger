@@ -17,16 +17,28 @@ int main()
   const std::filesystem::path crashCapturePath = repoRoot / "helper" / "src" / "CrashCapture.cpp";
   const std::filesystem::path helperMainPath = repoRoot / "helper" / "src" / "main.cpp";
   const std::filesystem::path dumpToolLaunchPath = repoRoot / "helper" / "src" / "DumpToolLaunch.cpp";
+  const std::filesystem::path crashHeuristicsPath = repoRoot / "helper" / "include" / "SkyrimDiagHelper" / "CrashHeuristics.h";
 
   assert(std::filesystem::exists(processAttachPath) && "helper/src/ProcessAttach.cpp not found");
   assert(std::filesystem::exists(crashCapturePath) && "helper/src/CrashCapture.cpp not found");
   assert(std::filesystem::exists(helperMainPath) && "helper/src/main.cpp not found");
   assert(std::filesystem::exists(dumpToolLaunchPath) && "helper/src/DumpToolLaunch.cpp not found");
+  assert(std::filesystem::exists(crashHeuristicsPath) && "helper/include/SkyrimDiagHelper/CrashHeuristics.h not found");
 
   const std::string processAttach = ReadAllText(processAttachPath);
   const std::string crashCapture = ReadAllText(crashCapturePath);
   const std::string helperMain = ReadAllText(helperMainPath);
   const std::string dumpToolLaunch = ReadAllText(dumpToolLaunchPath);
+  const std::string crashHeuristics = ReadAllText(crashHeuristicsPath);
+
+  AssertContains(
+    crashHeuristics,
+    "kStatusControlCExit",
+    "Strong crash heuristic must treat STATUS_CONTROL_C_EXIT as weak for normal-exit filtering.");
+  AssertContains(
+    crashHeuristics,
+    "kStatusCppException",
+    "Strong crash heuristic must include handled C++ exception code in weak set.");
 
   AssertContains(
     processAttach,
@@ -145,6 +157,16 @@ int main()
     processExitTickBody,
     "LaunchDeferredViewersAfterExit(",
     "Process exit tick must invoke deferred viewer launch helper.");
+
+  const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
+  AssertContains(
+    deferredViewerBody,
+    "(exitCode != 0)",
+    "Deferred crash viewer launch must not trigger on normal exit_code=0.");
+  AssertContains(
+    deferredViewerBody,
+    "Suppressed deferred crash viewer launch on normal process exit",
+    "Normal exit path must explicitly suppress deferred crash viewer popup.");
 
   AssertContains(
     processExitTickBody,
