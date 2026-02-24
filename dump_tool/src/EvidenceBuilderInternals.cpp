@@ -47,10 +47,10 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   const bool hasException = (r.exc_code != 0u);
   const bool handledCppException = (r.exc_code == 0xE06D7363u);
   const bool likelyHandledExceptionFalsePositive =
-    handledCppException && !nameCrash && !hasCrashEvent && (manualCaptureHint || heartbeatSuggestsNotHang);
+    handledCppException && !wctSuggestsHang && (manualCaptureHint || heartbeatSuggestsNotHang || nameCrash);
   // A manual capture can include a "Crash" blackbox marker due to handled exceptions (or false triggers),
   // but that does not necessarily mean the game actually CTD'd. Prefer exception stream presence for crash classification.
-  const bool isCrashLike = nameCrash || (hasException && !likelyHandledExceptionFalsePositive) || (hasCrashEvent && !manualCaptureHint);
+  const bool isCrashLike = nameCrash || (hasException && !likelyHandledExceptionFalsePositive) || (hasCrashEvent && !manualCaptureHint && !handledCppException);
   const bool nameHangEffective = nameHang && !manualFromWct && !heartbeatSuggestsNotHang;
   const bool isHangLike = nameHangEffective || hasHangEvent || wctSuggestsHang;
   const bool isSnapshotLike = !isCrashLike && !isHangLike;

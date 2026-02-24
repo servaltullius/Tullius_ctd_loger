@@ -75,7 +75,7 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     r.evidence.push_back(std::move(e));
   }
 
-  if (r.needs_bees) {
+  if (r.needs_bees && isCrashLike) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kHigh;
     e.confidence = ConfidenceText(lang, e.confidence_level);

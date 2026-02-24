@@ -67,6 +67,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     for (const auto& pd : r.plugin_diagnostics) {
       for (const auto& rec : pd.recommendations) {
         if (!rec.empty()) {
+          if (!isCrashLike &&
+              (rec.find(L"[BEES]") != std::wstring::npos ||
+               rec.find(L"bees.dll") != std::wstring::npos ||
+               rec.find(L"1.6.1130") != std::wstring::npos)) {
+            continue;
+          }
           r.recommendations.push_back(rec);
         }
       }

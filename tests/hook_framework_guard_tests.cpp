@@ -138,9 +138,21 @@ int main()
     "allowTopSuspectActionRecommendations",
     "Top-suspect action recommendations must be gated off for snapshot-like incidents.");
   AssertContains(
+    rec,
+    "!isCrashLike &&",
+    "Recommendation builder must guard crash-only BEES guidance for non-crash incidents.");
+  AssertContains(
+    rec,
+    "rec.find(L\"[BEES]\")",
+    "Recommendation builder must filter plugin-rule BEES strings on non-crash incidents.");
+  AssertContains(
     evidence,
     "selectedTop",
     "Evidence builder must align displayed top suspect with actionable candidate selection when victim-like tops are present.");
+  AssertContains(
+    evidence,
+    "r.needs_bees && isCrashLike",
+    "Evidence builder must gate BEES evidence cards to crash-like incidents.");
 
   return 0;
 }

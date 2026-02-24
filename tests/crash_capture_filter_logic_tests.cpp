@@ -39,6 +39,24 @@ static void TestClassifyExitCodeVerdict_DeleteBenignForInvalidHandleWeak()
   assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
 }
 
+static void TestClassifyExitCodeVerdict_DeleteBenignForCppExceptionWeak()
+{
+  const auto info = BuildCrashEventInfo(skydiag::helper::internal::kStatusCppException, 0u, 0u, 0u);
+  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
+}
+
+static void TestClassifyExitCodeVerdict_DeleteBenignForClrExceptionWeak()
+{
+  const auto info = BuildCrashEventInfo(skydiag::helper::internal::kStatusClrException, 0u, 0u, 0u);
+  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
+}
+
+static void TestClassifyExitCodeVerdict_DeleteBenignForBreakpointWeak()
+{
+  const auto info = BuildCrashEventInfo(skydiag::helper::internal::kStatusBreakpoint, 0u, 0u, 0u);
+  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
+}
+
 static void TestClassifyExitCodeVerdict_KeepDumpForAccessViolationStrong()
 {
   const auto info = BuildCrashEventInfo(0xC0000005u, 0u, 0u, 0u);
@@ -114,6 +132,9 @@ int main()
   TestClassifyExitCodeVerdict_KeepDumpInMenuNonZeroExit();
   TestClassifyExitCodeVerdict_KeepDumpOutsideMenuNonZeroExit();
   TestClassifyExitCodeVerdict_DeleteBenignForInvalidHandleWeak();
+  TestClassifyExitCodeVerdict_DeleteBenignForCppExceptionWeak();
+  TestClassifyExitCodeVerdict_DeleteBenignForClrExceptionWeak();
+  TestClassifyExitCodeVerdict_DeleteBenignForBreakpointWeak();
   TestClassifyExitCodeVerdict_KeepDumpForAccessViolationStrong();
 
   TestExtractLikeInfo_DefaultValues();

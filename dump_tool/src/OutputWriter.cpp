@@ -186,7 +186,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     } else {
       summary["missing_masters"] = nlohmann::json::array();
     }
-    summary["needs_bees"] = r.needs_bees;
+    summary["needs_bees"] = r.needs_bees && r.is_crash_like;
 
     if (!r.plugin_diagnostics.empty()) {
       auto diags = nlohmann::json::array();
@@ -348,7 +348,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     rpt << (en ? "MissingMasters: " : "누락 마스터: ")
         << WideToUtf8(JoinList(r.missing_masters, 8, L", ")) << "\n";
   }
-  if (r.needs_bees) {
+  if (r.needs_bees && r.is_crash_like) {
     rpt << (en ? "NeedsBEES: 1" : "BEES 필요: 1") << "\n";
   }
   if (!r.plugin_diagnostics.empty()) {
