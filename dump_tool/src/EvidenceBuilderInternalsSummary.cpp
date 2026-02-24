@@ -166,7 +166,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       }
 
       if (hasSuspect && !suspectWho.empty()) {
-        if (topSuspectIsSystem) {
+        if ((topSuspectIsHookFramework || topSuspectIsSystem) && hasNonHookSuspect && !nonHookSuspectWho.empty()) {
+          summary = en
+            ? (hangPrefix + L" Top stack candidate is likely a victim location; actionable candidate: " + nonHookSuspectWho
+                + L" — based on " + suspectBasis + L" heuristic. (Confidence: " + nonHookSuspectConf + L")")
+            : (hangPrefix + L" 스택 1순위 후보는 피해 위치일 가능성이 높아, 실행 우선 후보를 " + nonHookSuspectWho
+                + L" 로 제시합니다. (" + suspectBasis + L" 기반, 신뢰도: " + nonHookSuspectConf + L")");
+        } else if (topSuspectIsSystem) {
           summary = en
             ? (hangPrefix + L" Top stack candidate is a Windows system DLL (" + suspectWho +
                 L"), which is often a waiting/victim location. Dump alone is not enough to identify a root cause. (Confidence: Low)")

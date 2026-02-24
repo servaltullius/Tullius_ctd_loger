@@ -180,6 +180,35 @@ HitchSummary ComputeHitchSummary(const std::vector<EventRow>& events)
   return out;
 }
 
+HitchSummary ComputeHitchSummaryInRange(const std::vector<EventRow>& events, double fromMs, double toMs)
+{
+  HitchSummary out{};
+  std::vector<std::uint64_t> ms;
+  for (const auto& e : events) {
+    if (e.type != static_cast<std::uint16_t>(skydiag::EventType::kPerfHitch)) {
+      continue;
+    }
+    if (e.a == 0) {
+      continue;
+    }
+    if (e.t_ms < fromMs || e.t_ms > toMs) {
+      continue;
+    }
+    ms.push_back(e.a);
+    out.count++;
+    out.maxMs = std::max<std::uint64_t>(out.maxMs, e.a);
+  }
+
+  if (ms.empty()) {
+    return out;
+  }
+
+  std::sort(ms.begin(), ms.end());
+  const std::size_t idx = (ms.size() - 1) * 95 / 100;
+  out.p95Ms = ms[std::min<std::size_t>(idx, ms.size() - 1)];
+  return out;
+}
+
 bool IsKeyResourceKind(std::wstring_view kind)
 {
   // Focus on the most common "crash-prone" asset types in Skyrim modpacks.

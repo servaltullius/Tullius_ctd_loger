@@ -28,6 +28,7 @@ int main()
   const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
   const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsSummary.cpp";
   const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsRecommendations.cpp";
+  const auto evidencePath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsEvidence.cpp";
 
   const std::string stackwalkScoring = ReadAllText(stackwalkScoringPath);
   const std::string stackwalk = ReadAllText(stackwalkPath);
@@ -35,6 +36,7 @@ int main()
   const std::string minidumpUtil = ReadAllText(minidumpUtilPath);
   const std::string summary = ReadAllText(summaryPath);
   const std::string rec = ReadAllText(recPath);
+  const std::string evidence = ReadAllText(evidencePath);
 
   AssertContains(
     stackwalkScoring,
@@ -116,9 +118,21 @@ int main()
     "topSuspectIsHookFramework",
     "Summary builder must avoid over-blaming hook-framework top suspects for game/system module crashes.");
   AssertContains(
+    summary,
+    "actionable candidate",
+    "Summary builder must expose an actionable non-victim candidate when hook/system top suspect is likely a victim location.");
+  AssertContains(
     rec,
     "preferStackCandidateOverFault",
     "Recommendations must prefer stack candidates over hook-framework fault modules.");
+  AssertContains(
+    rec,
+    "actionable ",
+    "Recommendations must label actionable stack candidates explicitly.");
+  AssertContains(
+    evidence,
+    "selectedTop",
+    "Evidence builder must align displayed top suspect with actionable candidate selection when victim-like tops are present.");
 
   return 0;
 }

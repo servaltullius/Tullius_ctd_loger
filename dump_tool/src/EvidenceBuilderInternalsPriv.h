@@ -66,6 +66,7 @@ std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, boo
 
 std::optional<WctInfo> TrySummarizeWct(std::string_view utf8);
 HitchSummary ComputeHitchSummary(const std::vector<EventRow>& events);
+HitchSummary ComputeHitchSummaryInRange(const std::vector<EventRow>& events, double fromMs, double toMs);
 
 bool IsKeyResourceKind(std::wstring_view kind);
 std::optional<double> FindLastEventTimeMsByType(const std::vector<EventRow>& events, std::uint16_t type);

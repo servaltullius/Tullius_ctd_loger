@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <vector>
 
+#include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -180,15 +181,36 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
   }
 
   if (!r.suspects.empty()) {
+    auto isActionableSuspect = [&](const SuspectItem& s) {
+      return !minidump::IsKnownHookFramework(s.module_filename) &&
+             !minidump::IsSystemishModule(s.module_filename) &&
+             !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+             !minidump::IsGameExeModule(s.module_filename);
+    };
+    const SuspectItem* selectedTop = &r.suspects[0];
+    const bool topIsVictimish =
+      minidump::IsKnownHookFramework(r.suspects[0].module_filename) ||
+      minidump::IsSystemishModule(r.suspects[0].module_filename) ||
+      minidump::IsLikelyWindowsSystemModulePath(r.suspects[0].module_path) ||
+      minidump::IsGameExeModule(r.suspects[0].module_filename);
+    if (topIsVictimish) {
+      for (const auto& s : r.suspects) {
+        if (isActionableSuspect(s)) {
+          selectedTop = &s;
+          break;
+        }
+      }
+    }
+
     EvidenceItem e{};
-    e.confidence_level = r.suspects[0].confidence_level;
-    e.confidence = r.suspects[0].confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : r.suspects[0].confidence;
+    e.confidence_level = selectedTop->confidence_level;
+    e.confidence = selectedTop->confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : selectedTop->confidence;
     e.title = en
       ? (r.suspects_from_stackwalk ? L"Top suspect (callstack-based)" : L"Top suspect (stack-scan-based)")
       : (r.suspects_from_stackwalk ? L"콜스택 기반 유력 후보" : L"스택 스캔 기반 유력 후보");
 
     std::vector<std::wstring> display;
-    for (const auto& s : r.suspects) {
+    auto appendDisplay = [&](const SuspectItem& s) {
       std::wstring who;
       if (!s.inferred_mod_name.empty()) {
         who = s.inferred_mod_name + L" (" + s.module_filename + L")";
@@ -196,6 +218,14 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
         who = s.module_filename;
       }
       display.push_back(who);
+    };
+
+    appendDisplay(*selectedTop);
+    for (const auto& s : r.suspects) {
+      if (&s == selectedTop) {
+        continue;
+      }
+      appendDisplay(s);
       if (display.size() >= 3) {
         break;
       }
@@ -345,6 +375,31 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
           : L"히치 시점 근처 리소스를 제공한 모드(상관분석)";
         s.details = JoinList(suspects, 5, L", ");
         r.evidence.push_back(std::move(s));
+      }
+    }
+
+    if (auto anchor = InferCaptureAnchorMs(r)) {
+      constexpr double kRecentWindowBeforeMs = 10000.0;
+      constexpr double kRecentWindowAfterMs = 300.0;
+      const auto recent = ComputeHitchSummaryInRange(
+        r.events,
+        *anchor - kRecentWindowBeforeMs,
+        *anchor + kRecentWindowAfterMs);
+      if (recent.count > 0) {
+        EvidenceItem rw{};
+        rw.confidence_level = i18n::ConfidenceLevel::kMedium;
+        rw.confidence = ConfidenceText(lang, rw.confidence_level);
+        rw.title = en
+          ? L"Recent-window hitch stats (separate from overall)"
+          : L"최근 구간 히치 통계(전체 통계와 분리)";
+        rw.details = en
+          ? (L"window=10s_before_to_0.3s_after_capture, count=" + std::to_wstring(recent.count)
+              + L", max=" + std::to_wstring(recent.maxMs) + L"ms, p95=" + std::to_wstring(recent.p95Ms)
+              + L"ms (overall max=" + std::to_wstring(hitch.maxMs) + L"ms)")
+          : (L"캡처 기준 -10초~+0.3초, count=" + std::to_wstring(recent.count)
+              + L", max=" + std::to_wstring(recent.maxMs) + L"ms, p95=" + std::to_wstring(recent.p95Ms)
+              + L"ms (전체 max=" + std::to_wstring(hitch.maxMs) + L"ms)");
+        r.evidence.push_back(std::move(rw));
       }
     }
   }

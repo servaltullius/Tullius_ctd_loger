@@ -137,15 +137,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     const auto& s0 = *firstNonHookStackCandidate;
     if (!s0.inferred_mod_name.empty()) {
       r.recommendations.push_back(en
-        ? (L"[Top suspect] " + suspectBasis + L" candidate: reproduce after updating/reinstalling '" + s0.inferred_mod_name + L"'.")
-        : (L"[유력 후보] " + suspectBasis + L" 기반 후보: '" + s0.inferred_mod_name + L"' 모드 업데이트/재설치 후 재현 여부 확인"));
+        ? (L"[Top suspect] actionable " + suspectBasis + L" candidate: reproduce after updating/reinstalling '" + s0.inferred_mod_name + L"'.")
+        : (L"[유력 후보] 실행 우선 " + suspectBasis + L" 기반 후보: '" + s0.inferred_mod_name + L"' 모드 업데이트/재설치 후 재현 여부 확인"));
       r.recommendations.push_back(en
         ? (L"[Top suspect] If it repeats, disable the mod (or its SKSE plugin DLL) and retest: '" + s0.inferred_mod_name + L"'.")
         : (L"[유력 후보] 동일 문제가 반복되면 '" + s0.inferred_mod_name + L"' 모드(또는 해당 모드의 SKSE 플러그인 DLL)를 비활성화 후 재현 여부 확인"));
     } else if (!s0.module_filename.empty()) {
       r.recommendations.push_back(en
-        ? (L"[Top suspect] " + suspectBasis + L" candidate DLL: " + s0.module_filename + L" — check the providing mod first.")
-        : (L"[유력 후보] " + suspectBasis + L" 기반 후보 DLL: " + s0.module_filename + L" — 포함된 모드를 우선 점검"));
+        ? (L"[Top suspect] actionable " + suspectBasis + L" candidate DLL: " + s0.module_filename + L" — check the providing mod first.")
+        : (L"[유력 후보] 실행 우선 " + suspectBasis + L" 기반 후보 DLL: " + s0.module_filename + L" — 포함된 모드를 우선 점검"));
     }
   } else if ((r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
     r.recommendations.push_back(en
