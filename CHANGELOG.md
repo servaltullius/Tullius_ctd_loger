@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.2.41-rc7 (2026-02-24)
+
+### 수정 (크래시 감지 누락 — 베타 테스터 피드백 반영)
+- Plugin: 크래시 예외 필터를 화이트리스트(15개 코드) → 블랙리스트(5개 무해 코드 제외)로 전환 — `EXCEPTION_NONCONTINUABLE_EXCEPTION`, `STATUS_FATAL_APP_EXIT`, 모드 커스텀 예외 등 이전에 누락되던 크래시를 자동 감지.
+- Helper: `PreserveFilteredCrashDumps=1` INI 옵션 추가 — 거짓양성 필터가 삭제하려는 덤프를 보존하여 크래시 미감지 원인 진단 가능 (기본값: 0, 기존 동작 유지).
+
+### 리팩터링
+- Helper: `HandleCrashEventTick()` 395줄 → ~130줄로 축소 — `ExtractCrashInfo`, `ClassifyExitCodeVerdict`, `FilterShutdownException`, `FilterFirstChanceException`, `ProcessValidCrashDump`, `QueueDeferredCrashViewer` 6개 함수 추출.
+- Helper: 종료 예외 판정 로직 중복 제거 (`ClassifyExitCodeVerdictWithContext`로 통합).
+
+### 테스트
+- 크래시 캡처 필터 로직 유닛 테스트 추가 (`crash_capture_filter_logic_tests`).
+- 리팩터링 후 구조 검증 가드 테스트 추가 (`crash_capture_refactored_guard_tests`).
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`43/43`).
+
 ## v0.2.41-rc4 (2026-02-24)
 
 ### 추가 (모드 메뉴 이름 자동 표시 — 베타 테스터 피드백 반영)
