@@ -100,6 +100,34 @@ set_target_properties(skydiag_crash_capture_false_positive_guard_tests PROPERTIE
 
 add_test(NAME skydiag_crash_capture_false_positive_guard_tests COMMAND skydiag_crash_capture_false_positive_guard_tests)
 
+add_executable(skydiag_crash_capture_filter_logic_tests
+  crash_capture_filter_logic_tests.cpp
+)
+
+target_include_directories(skydiag_crash_capture_filter_logic_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+)
+
+set_target_properties(skydiag_crash_capture_filter_logic_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_crash_capture_filter_logic_tests COMMAND skydiag_crash_capture_filter_logic_tests)
+
+add_executable(skydiag_crash_capture_refactored_guard_tests
+  crash_capture_refactored_guard_tests.cpp
+)
+
+set_target_properties(skydiag_crash_capture_refactored_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_crash_capture_refactored_guard_tests COMMAND skydiag_crash_capture_refactored_guard_tests)
+
 add_executable(skydiag_pending_crash_analysis_guard_tests
   pending_crash_analysis_guard_tests.cpp
 )

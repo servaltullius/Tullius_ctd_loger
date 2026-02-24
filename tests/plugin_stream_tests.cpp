@@ -46,23 +46,21 @@ void TestDumpWriterHeaderHasPluginParam()
 void TestCrashPathIsDumpFirst()
 {
   const auto impl = ReadFile("helper/src/CrashCapture.cpp");
-  const auto writePos = impl.find("WriteDumpWithStreams(");
-  auto scanPos = impl.find("CollectPluginScanJson(");
-  if (scanPos == std::string::npos) {
-    scanPos = impl.find("ScanPlugins(");
-  }
+  const auto crashTickBody = ExtractFunctionBody(impl, "bool HandleCrashEventTick(");
+  const auto writePos = crashTickBody.find("WriteDumpWithStreams(");
+  const auto processPos = crashTickBody.find("ProcessValidCrashDump(");
   assert(writePos != std::string::npos);
-  assert(scanPos != std::string::npos);
-  assert(writePos < scanPos && "Crash capture must write dump before plugin scanning");
+  assert(processPos != std::string::npos);
+  assert(writePos < processPos && "Crash capture must write dump before post-processing");
 }
 
 void TestCrashPathWritesPluginScanSidecar()
 {
   const auto impl = ReadFile("helper/src/CrashCapture.cpp");
-  const auto crashTickBody = ExtractFunctionBody(impl, "bool HandleCrashEventTick(");
-  assert(crashTickBody.find("_PluginScan.json") != std::string::npos);
+  const auto processValidBody = ExtractFunctionBody(impl, "void ProcessValidCrashDump(");
+  assert(processValidBody.find("_PluginScan.json") != std::string::npos);
   AssertOrdered(
-    crashTickBody,
+    processValidBody,
     "CollectPluginScanJson(",
     "WriteTextFileUtf8(pluginScanPath, pluginScanJson)",
     "Crash path must write plugin scan sidecar when collected.");

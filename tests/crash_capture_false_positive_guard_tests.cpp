@@ -56,41 +56,52 @@ int main()
 
   AssertContains(
     crashTickBody,
-    "CollectPluginScanJson(",
-    "Crash capture flow must collect plugin scan sidecar after dump capture.");
+    "ExtractCrashInfo(",
+    "Crash capture flow must extract crash event information through helper struct conversion.");
 
   AssertContains(
     crashTickBody,
-    "queueDeferredCrashViewer(",
-    "Crash capture flow must queue deferred viewer launch when process-exit auto-open is delayed.");
+    "FilterShutdownException(",
+    "Crash capture flow must apply shutdown-exception filter after dump capture.");
 
   AssertContains(
     crashTickBody,
-    "ApplyRetentionFromConfig(cfg, outBase)",
-    "Crash capture flow must apply retention after successful capture.");
-
-  AssertContains(
-    crashTickBody,
-    "IsStrongCrashException",
-    "Crash capture must consult IsStrongCrashException to avoid suppressing real CTDs when exit_code=0 is misleading.");
+    "ProcessValidCrashDump(",
+    "Crash capture flow must route valid dump post-processing through extracted helper.");
 
   AssertOrdered(
     crashTickBody,
     "WriteDumpWithStreams(",
+    "FilterShutdownException(",
+    "Crash capture must write dump before shutdown filtering (dump-first policy).");
+
+  AssertOrdered(
+    crashTickBody,
+    "FilterShutdownException(",
+    "ProcessValidCrashDump(",
+    "Crash capture must run post-processing only after filtering keeps the dump.");
+
+  const std::string processValidBody = ExtractFunctionBody(crashCapture, "void ProcessValidCrashDump(");
+  AssertContains(
+    processValidBody,
     "CollectPluginScanJson(",
-    "Crash capture must write dump before plugin scan collection.");
+    "Post-processing helper must collect plugin scan sidecar.");
+
+  AssertContains(
+    processValidBody,
+    "QueueDeferredCrashViewer(",
+    "Post-processing helper must queue deferred viewer launch when process-exit auto-open is delayed.");
+
+  AssertContains(
+    processValidBody,
+    "ApplyRetentionFromConfig(cfg, outBase)",
+    "Post-processing helper must apply retention after successful capture.");
 
   AssertOrdered(
-    crashTickBody,
-    "if (wExit == WAIT_TIMEOUT)",
-    "queueDeferredCrashViewer(L\"wait_timeout\")",
-    "Crash capture must queue deferred viewer in the timeout branch.");
-
-  AssertOrdered(
-    crashTickBody,
-    "queueDeferredCrashViewer(L\"wait_timeout\")",
-    "queueDeferredCrashViewer(L\"wait_failed\")",
-    "Crash capture must handle wait-timeout and wait-failed deferred paths distinctly.");
+    processValidBody,
+    "StartEtwCaptureWithProfile(",
+    "MakeIncidentManifestV1(",
+    "Post-processing helper must start ETW capture before writing incident manifest.");
 
   const std::string zeroExitCleanupBody = ExtractFunctionBody(helperMain, "void CleanupCrashArtifactsAfterZeroExit(");
   AssertContains(
