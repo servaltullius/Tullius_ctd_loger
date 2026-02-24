@@ -23,6 +23,7 @@ struct HelperConfig {
   std::wstring dumpToolExe = L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe";
   bool allowOnlineSymbols = false;
   bool enableWerDumpFallbackHint = true;
+  bool preserveFilteredCrashDumps = false;  // If true, never delete crash dumps even if false-positive filter triggers
   bool autoOpenViewerOnCrash = true;
   bool autoOpenCrashOnlyIfProcessExited = true;
   std::uint32_t autoOpenCrashWaitForExitMs = 2000;

@@ -431,12 +431,18 @@ bool HandleCrashEventTick(
       verdict = FilterFirstChanceException(proc.process, &proc.shm->header, info, outBase);
     }
     if (verdict != FilterVerdict::kKeepDump) {
-      std::error_code ec;
-      std::filesystem::remove(dumpPath, ec);
-      if (lastCrashDumpPath) {
-        lastCrashDumpPath->clear();
+      if (cfg.preserveFilteredCrashDumps) {
+        AppendLogLine(
+          outBase,
+          L"Crash dump would have been deleted by false-positive filter but preserved (PreserveFilteredCrashDumps=1).");
+      } else {
+        std::error_code ec;
+        std::filesystem::remove(dumpPath, ec);
+        if (lastCrashDumpPath) {
+          lastCrashDumpPath->clear();
+        }
+        return false;
       }
-      return false;
     }
   }
 

@@ -296,6 +296,10 @@ void CleanupCrashArtifactsAfterZeroExit(
   if (!state->crashCaptured) {
     return;
   }
+  if (cfg.preserveFilteredCrashDumps) {
+    AppendLogLine(outBase, L"exit_code=0 after crash capture; dump preserved (PreserveFilteredCrashDumps=1).");
+    return;
+  }
 
   if (state->pendingCrashAnalysis.active && state->pendingCrashAnalysis.process) {
     if (!TerminateProcess(state->pendingCrashAnalysis.process, 1)) {

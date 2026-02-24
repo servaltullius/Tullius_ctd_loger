@@ -14,37 +14,34 @@ namespace {
 
 std::uint32_t g_crashHookMode = 1;
 
-bool IsProbablyFatalException(DWORD code) noexcept
+bool IsIgnorableException(DWORD code) noexcept
 {
+  // Benign exceptions: first-chance C++ SEH, OutputDebugString, thread naming,
+  // breakpoints in debuggers, etc.
   switch (code) {
-    case EXCEPTION_ACCESS_VIOLATION:        // 0xC0000005
-    case EXCEPTION_IN_PAGE_ERROR:           // 0xC0000006
-    case EXCEPTION_ILLEGAL_INSTRUCTION:     // 0xC000001D
-    case EXCEPTION_PRIV_INSTRUCTION:        // 0xC0000096
-    case EXCEPTION_STACK_OVERFLOW:          // 0xC00000FD
-    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:   // 0xC000008C
-    case EXCEPTION_INT_DIVIDE_BY_ZERO:      // 0xC0000094
-    case EXCEPTION_INT_OVERFLOW:            // 0xC0000095
-    case EXCEPTION_FLT_DIVIDE_BY_ZERO:      // 0xC000008E
-    case EXCEPTION_FLT_INVALID_OPERATION:   // 0xC0000090
-    case EXCEPTION_FLT_OVERFLOW:            // 0xC0000091
-    case EXCEPTION_FLT_UNDERFLOW:           // 0xC0000093
-    case STATUS_HEAP_CORRUPTION:            // 0xC0000374
-    case STATUS_STACK_BUFFER_OVERRUN:       // 0xC0000409
-    case STATUS_INVALID_HANDLE:             // 0xC0000008
+    case 0xE06D7363:                     // MSVC C++ exception (SEH __CxxThrowException)
+    case 0x406D1388:                     // SetThreadName via RaiseException (legacy)
+    case EXCEPTION_BREAKPOINT:           // 0x80000003 — debugger breakpoint
+    case EXCEPTION_SINGLE_STEP:          // 0x80000004 — single step (debugger)
+    case 0x4001000A:                     // OutputDebugStringW
       return true;
     default:
       return false;
   }
 }
 
+// Mode 1 (recommended): record all exceptions EXCEPT known-benign ones.
+// This catches real crashes regardless of exception code, while filtering out
+// routine first-chance exceptions (C++ SEH, debugger breakpoints, thread naming).
+//
+// Mode 2 (legacy/unsafe): record everything including known-benign exceptions.
 bool ShouldRecordException(DWORD code) noexcept
 {
   switch (g_crashHookMode) {
     case 2:  // All exceptions (legacy behavior; can false-trigger).
       return true;
-    case 1:  // Fatal only (recommended).
-      return IsProbablyFatalException(code);
+    case 1:  // Blacklist: record everything except known-benign.
+      return !IsIgnorableException(code);
     default:  // Off / unknown.
       return false;
   }

@@ -64,6 +64,8 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.allowOnlineSymbols = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AllowOnlineSymbols", 0, path.c_str()) != 0;
   cfg.enableWerDumpFallbackHint =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableWerDumpFallbackHint", 1, path.c_str()) != 0;
+  cfg.preserveFilteredCrashDumps =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"PreserveFilteredCrashDumps", 0, path.c_str()) != 0;
   wchar_t dumpToolExe[MAX_PATH]{};
   GetPrivateProfileStringW(
     L"SkyrimDiagHelper",
