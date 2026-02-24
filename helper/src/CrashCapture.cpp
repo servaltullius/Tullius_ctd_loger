@@ -265,24 +265,38 @@ void ProcessValidCrashDump(
       const DWORD waitExitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
       const DWORD wExit = WaitForSingleObject(proc.process, waitExitMs);
       if (wExit == WAIT_OBJECT_0) {
-        const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
-        viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
-        if (viewerNow) {
+        DWORD processExitCode = STILL_ACTIVE;
+        if (!GetExitCodeProcess(proc.process, &processExitCode)) {
+          processExitCode = 0xFFFFFFFFu;
+        }
+        if (processExitCode == 0) {
           AppendLogLine(
             outBase,
-            L"Auto-opened DumpTool viewer for crash after process exit during wait window (wait_ms="
+            L"Crash viewer auto-open suppressed after process exit during wait window (exit_code=0, wait_ms="
               + std::to_wstring(waitExitMs)
               + L", dump="
               + dumpFs.filename().wstring()
               + L").");
         } else {
-          AppendLogLine(
-            outBase,
-            L"Crash viewer auto-open attempt failed after process exit during wait window (wait_ms="
-              + std::to_wstring(waitExitMs)
-              + L", dump="
-              + dumpFs.filename().wstring()
-              + L").");
+          const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"crash_exit");
+          viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
+          if (viewerNow) {
+            AppendLogLine(
+              outBase,
+              L"Auto-opened DumpTool viewer for crash after process exit during wait window (wait_ms="
+                + std::to_wstring(waitExitMs)
+                + L", dump="
+                + dumpFs.filename().wstring()
+                + L").");
+          } else {
+            AppendLogLine(
+              outBase,
+              L"Crash viewer auto-open attempt failed after process exit during wait window (wait_ms="
+                + std::to_wstring(waitExitMs)
+                + L", dump="
+                + dumpFs.filename().wstring()
+                + L").");
+          }
         }
       } else if (wExit == WAIT_TIMEOUT) {
         const bool deferred = QueueDeferredCrashViewer(dumpPath, pendingCrashViewerDumpPath);

@@ -109,6 +109,11 @@ int main()
     "ApplyRetentionFromConfig(cfg, outBase)",
     "Post-processing helper must apply retention after successful capture.");
 
+  AssertContains(
+    processValidBody,
+    "Crash viewer auto-open suppressed after process exit during wait window (exit_code=0",
+    "Post-processing helper must suppress crash viewer auto-open when process exits with exit_code=0 during wait window.");
+
   AssertOrdered(
     processValidBody,
     "StartEtwCaptureWithProfile(",
