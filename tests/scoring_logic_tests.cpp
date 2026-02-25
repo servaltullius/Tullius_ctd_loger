@@ -65,6 +65,15 @@ static void TestConfidenceDowngradePresent()
   assert(stackscan.find("is_known_hook_framework") != std::string::npos);
 }
 
+static void TestCrashLoggerCorroborationRankingPresent()
+{
+  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects") != std::string::npos);
+  assert(analyzer.find("CrashLoggerRankBonus") != std::string::npos);
+  assert(analyzer.find("Crash Logger corroboration bonus=+") != std::string::npos);
+  assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out)") != std::string::npos);
+}
+
 int main()
 {
   TestCallstackFrameWeightConstants();
@@ -73,5 +82,6 @@ int main()
   TestStackScanConfidenceThresholds();
   TestStackScanHookPromotionThreshold();
   TestConfidenceDowngradePresent();
+  TestCrashLoggerCorroborationRankingPresent();
   return 0;
 }

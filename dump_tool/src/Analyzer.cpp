@@ -42,6 +42,7 @@ namespace skydiag::dump_tool {
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::GetThreadStackBytes;
 using skydiag::dump_tool::minidump::IsGameExeModule;
+using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
 using skydiag::dump_tool::minidump::IsSystemishModule;
 using skydiag::dump_tool::minidump::LoadHookFrameworksFromJson;
@@ -88,6 +89,127 @@ bool TryReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
   ss << f.rdbuf();
   *out = ss.str();
   return true;
+}
+
+std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
+{
+  return std::wstring(i18n::ConfidenceLabel(lang, level));
+}
+
+std::uint32_t CrashLoggerRankBonus(std::size_t rank)
+{
+  if (rank == 0) {
+    return 18u;
+  }
+  if (rank == 1) {
+    return 14u;
+  }
+  if (rank == 2) {
+    return 10u;
+  }
+  if (rank <= 4) {
+    return 8u;
+  }
+  return 6u;
+}
+
+void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
+{
+  if (!out || out->suspects.empty() || out->crash_logger_top_modules.empty()) {
+    return;
+  }
+
+  std::unordered_map<std::wstring, std::size_t> rankByModule;
+  rankByModule.reserve(out->crash_logger_top_modules.size());
+  for (std::size_t i = 0; i < out->crash_logger_top_modules.size(); ++i) {
+    const auto key = WideLower(out->crash_logger_top_modules[i]);
+    if (key.empty()) {
+      continue;
+    }
+    if (rankByModule.find(key) == rankByModule.end()) {
+      rankByModule.emplace(key, i);
+    }
+  }
+  if (rankByModule.empty()) {
+    return;
+  }
+
+  const std::wstring cppModuleLower = WideLower(out->crash_logger_cpp_exception_module);
+  struct Ranked
+  {
+    std::size_t index = 0;
+    std::uint32_t score = 0;
+    std::uint32_t bonus = 0;
+    std::uint32_t effective = 0;
+    bool matchedCppModule = false;
+    std::size_t crashLoggerRank = 0;
+  };
+
+  std::vector<Ranked> rows;
+  rows.reserve(out->suspects.size());
+  for (std::size_t i = 0; i < out->suspects.size(); ++i) {
+    const auto key = WideLower(out->suspects[i].module_filename);
+    const auto it = rankByModule.find(key);
+    if (it == rankByModule.end()) {
+      rows.push_back(Ranked{ i, out->suspects[i].score, 0u, out->suspects[i].score, false, 0u });
+      continue;
+    }
+
+    const bool matchedCpp = !cppModuleLower.empty() && (cppModuleLower == key);
+    std::uint32_t bonus = CrashLoggerRankBonus(it->second);
+    if (matchedCpp) {
+      bonus += 10u;
+    }
+    rows.push_back(Ranked{ i, out->suspects[i].score, bonus, out->suspects[i].score + bonus, matchedCpp, it->second });
+  }
+
+  std::stable_sort(rows.begin(), rows.end(), [&](const Ranked& a, const Ranked& b) {
+    if (a.effective != b.effective) {
+      return a.effective > b.effective;
+    }
+    if (a.bonus != b.bonus) {
+      return a.bonus > b.bonus;
+    }
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    return a.index < b.index;
+  });
+
+  std::vector<SuspectItem> reordered;
+  reordered.reserve(out->suspects.size());
+  const bool en = (out->language == i18n::Language::kEnglish);
+  for (const auto& r : rows) {
+    auto item = out->suspects[r.index];
+    if (r.bonus > 0) {
+      item.reason += en
+        ? (L" (Crash Logger corroboration bonus=+" + std::to_wstring(r.bonus)
+          + L", rank=" + std::to_wstring(r.crashLoggerRank + 1u) + L")")
+        : (L" (Crash Logger 교차검증 보정=+" + std::to_wstring(r.bonus)
+          + L", 순위=" + std::to_wstring(r.crashLoggerRank + 1u) + L")");
+      if (r.matchedCppModule) {
+        item.reason += en
+          ? L" (Crash Logger C++ exception module match)"
+          : L" (Crash Logger C++ 예외 모듈 일치)";
+      }
+    }
+    reordered.push_back(std::move(item));
+  }
+
+  out->suspects = std::move(reordered);
+
+  if (!out->suspects.empty() &&
+      !IsKnownHookFramework(out->suspects[0].module_filename) &&
+      rankByModule.find(WideLower(out->suspects[0].module_filename)) != rankByModule.end()) {
+    const auto topKey = WideLower(out->suspects[0].module_filename);
+    const auto rank = rankByModule[topKey];
+    if (rank <= 1 || (!cppModuleLower.empty() && topKey == cppModuleLower)) {
+      out->suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+    } else if (out->suspects[0].confidence_level == i18n::ConfidenceLevel::kLow) {
+      out->suspects[0].confidence_level = i18n::ConfidenceLevel::kMedium;
+    }
+    out->suspects[0].confidence = ConfidenceText(out->language, out->suspects[0].confidence_level);
+  }
 }
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
@@ -553,6 +675,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       }
     }
   }
+
+  ApplyCrashLoggerCorroborationToSuspects(&out);
 
   internal::ComputeCrashBucket(out);
 
