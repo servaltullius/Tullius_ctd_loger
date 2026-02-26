@@ -1,9 +1,30 @@
-import os
+import importlib.util
 import subprocess
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+
+
+def _load_release_contract():
+    contract_path = SCRIPTS_DIR / "release_contract.py"
+    spec = importlib.util.spec_from_file_location("release_contract", contract_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load release contract module: {contract_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_RELEASE_CONTRACT = _load_release_contract()
+REQUIRED_ZIP_ENTRIES = tuple(_RELEASE_CONTRACT.REQUIRED_ZIP_ENTRIES)
+EXCLUDED_WINUI_TOP_LEVEL_DIRS = frozenset(
+    _RELEASE_CONTRACT.EXCLUDED_WINUI_TOP_LEVEL_DIRS
+)
 
 
 def _touch(path: Path) -> None:
@@ -12,8 +33,7 @@ def _touch(path: Path) -> None:
 
 
 def main() -> int:
-    repo_root = Path(__file__).resolve().parents[1]
-    package_py = repo_root / "scripts" / "package.py"
+    package_py = REPO_ROOT / "scripts" / "package.py"
 
     with tempfile.TemporaryDirectory(prefix="skydiag_pkg_test_") as td:
         td_path = Path(td)
@@ -48,41 +68,38 @@ def main() -> int:
                 str(out_zip),
                 "--no-pdb",
             ],
-            cwd=str(repo_root),
+            cwd=str(REPO_ROOT),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
         if proc.returncode != 0:
-            raise AssertionError(f"package.py failed ({proc.returncode})\\nstdout:\\n{proc.stdout}\\nstderr:\\n{proc.stderr}")
+            raise AssertionError(
+                f"package.py failed ({proc.returncode})\\nstdout:\\n{proc.stdout}\\nstderr:\\n{proc.stderr}"
+            )
 
         assert out_zip.is_file(), "package.py did not produce zip"
 
         with zipfile.ZipFile(out_zip, "r") as zf:
             names = set(zf.namelist())
 
-        assert (
-            "SKSE/Plugins/SkyrimDiagDumpToolCli.exe" in names
-        ), "Expected headless CLI exe to be packaged next to helper"
-        assert "SKSE/Plugins/SkyrimDiag.ini" in names, "Expected SkyrimDiag.ini to be packaged"
-        assert "SKSE/Plugins/SkyrimDiagHelper.ini" in names, "Expected SkyrimDiagHelper.ini to be packaged"
-        assert (
-            "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri" in names
-        ), "Expected WinUI PRI asset to be packaged"
-        assert (
-            "SKSE/Plugins/SkyrimDiagWinUI/App.xbf" in names
-        ), "Expected WinUI App.xbf asset to be packaged"
-        assert (
-            "SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf" in names
-        ), "Expected WinUI MainWindow.xbf asset to be packaged"
-        assert (
-            "SKSE/Plugins/SkyrimDiagWinUI/publish/SkyrimDiagDumpToolWinUI.exe" not in names
-        ), "Nested publish output must not be packaged"
-        assert (
-            "SKSE/Plugins/SkyrimDiagWinUI/win-x64/SkyrimDiagDumpToolWinUI.exe" not in names
-        ), "Nested RID output must not be packaged"
+        for entry in REQUIRED_ZIP_ENTRIES:
+            assert entry in names, f"Missing required zip entry in zip: {entry}"
 
-        data_root = repo_root / "dump_tool" / "data"
+        assert "SKSE/Plugins/SkyrimDiag.ini" in names, (
+            "Expected SkyrimDiag.ini to be packaged"
+        )
+        assert "SKSE/Plugins/SkyrimDiagHelper.ini" in names, (
+            "Expected SkyrimDiagHelper.ini to be packaged"
+        )
+
+        for nested_dir in sorted(EXCLUDED_WINUI_TOP_LEVEL_DIRS):
+            forbidden_prefix = f"SKSE/Plugins/SkyrimDiagWinUI/{nested_dir}/"
+            assert not any(name.startswith(forbidden_prefix) for name in names), (
+                f"Nested WinUI output must not be packaged: {forbidden_prefix}"
+            )
+
+        data_root = REPO_ROOT / "dump_tool" / "data"
         expected_data = [
             p.relative_to(data_root).as_posix()
             for p in data_root.rglob("*")
@@ -92,8 +109,12 @@ def main() -> int:
         for rel in expected_data:
             plugin_data_path = f"SKSE/Plugins/data/{rel}"
             winui_data_path = f"SKSE/Plugins/SkyrimDiagWinUI/data/{rel}"
-            assert plugin_data_path in names, f"Missing plugin data file in zip: {plugin_data_path}"
-            assert winui_data_path in names, f"Missing WinUI data file in zip: {winui_data_path}"
+            assert plugin_data_path in names, (
+                f"Missing plugin data file in zip: {plugin_data_path}"
+            )
+            assert winui_data_path in names, (
+                f"Missing WinUI data file in zip: {winui_data_path}"
+            )
 
     return 0
 
