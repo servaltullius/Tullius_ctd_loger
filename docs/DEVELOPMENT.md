@@ -100,13 +100,17 @@ Policy:
 Suggested checklist:
 1) Update version + changelog
 2) Run tests (Linux + Windows)
-3) Build + package zip on Windows (`--no-pdb`)
-4) Tag + push, then create GitHub Release and upload `dist/Tullius_ctd_loger.zip`
+3) Confirm compatibility preflight is required by default (`dist/SkyrimDiagHelper.ini` has `EnableCompatibilityPreflight=1`)
+4) Build + package zip on Windows (`--no-pdb`)
+5) Tag + push, then create GitHub Release and upload `dist/Tullius_ctd_loger.zip`
 
 Release hard-gate quick checks:
 ```bash
 # one-shot gate script (recommended)
 bash scripts/verify_release_gate.sh
+
+# 0) compatibility preflight default must stay enabled
+grep -E '^EnableCompatibilityPreflight=1$' /home/kdw73/Tullius_ctd_loger/dist/SkyrimDiagHelper.ini
 
 # 1) scripts sync (WSL repo <-> Windows mirror)
 sha256sum /home/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd
@@ -115,14 +119,41 @@ sha256sum /home/kdw73/Tullius_ctd_loger/scripts/package.py /mnt/c/Users/kdw73/Tu
 # 2) required WinUI outputs
 ls /mnt/c/Users/kdw73/Tullius_ctd_loger/build-winui/{SkyrimDiagDumpToolWinUI.exe,SkyrimDiagDumpToolWinUI.pri,App.xbf,MainWindow.xbf}
 
-# 3) zip required entries
-unzip -Z1 /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip | rg '^SKSE/Plugins/SkyrimDiagWinUI/(SkyrimDiagDumpToolWinUI.exe|SkyrimDiagDumpToolWinUI.pri|App.xbf|MainWindow.xbf)$'
+# 3) zip required entries (authoritative list: scripts/release_contract.py)
+python3 - <<'PY'
+import subprocess
+import sys
+
+sys.path.insert(0, "/home/kdw73/Tullius_ctd_loger/scripts")
+from release_contract import REQUIRED_ZIP_ENTRIES
+
+zip_path = "/mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip"
+entries = set(subprocess.check_output(["unzip", "-Z1", zip_path], text=True).splitlines())
+missing = [entry for entry in REQUIRED_ZIP_ENTRIES if entry not in entries]
+if missing:
+    raise SystemExit("missing zip entries: " + ", ".join(missing))
+print("zip required entries: OK")
+PY
 
 # 4) zip size guard (guide: 8MB ~ 25MB)
 ls -lh /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip
 
-# 5) nested-path guard (must be empty)
-unzip -Z1 /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip | rg '^SKSE/Plugins/SkyrimDiagWinUI/(publish|win-x64|x64)/'
+# 5) nested-path guard (must be empty; regex from scripts/release_contract.py)
+python3 - <<'PY'
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, "/home/kdw73/Tullius_ctd_loger/scripts")
+from release_contract import nested_winui_path_regex
+
+zip_path = "/mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip"
+pattern = re.compile(nested_winui_path_regex())
+bad = [line for line in subprocess.check_output(["unzip", "-Z1", zip_path], text=True).splitlines() if pattern.match(line)]
+if bad:
+    raise SystemExit("nested winui output detected: " + ", ".join(bad))
+print("nested-path guard: OK")
+PY
 ```
 
 ## Build (Windows)
