@@ -25,9 +25,8 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build-linux --output-on-failure
 
-  windows-build-manual:
-    name: Windows Build + Package (Manual)
-    if: github.event_name == 'workflow_dispatch'
+  windows-validate:
+    name: Windows Validate (Build + Package + Gate)
     runs-on: windows-2022
 
     steps:
@@ -69,17 +68,38 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
-      - name: Package zip artifacts
+      - name: Package release zip (no PDB)
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
-          python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger-no-pdb.zip --no-pdb
+          python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
+
+      - name: Run release hard gate
+        shell: bash
+        run: bash scripts/verify_release_gate.sh "$PWD" "$PWD"
+
+      - name: WinUI headless interop smoke
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE "build-winui\SkyrimDiagDumpToolWinUI.exe"
+          if (-not (Test-Path $exe)) {
+            throw "WinUI executable not found: $exe"
+          }
+
+          $missingDump = Join-Path $env:GITHUB_WORKSPACE "dist\does-not-exist.dmp"
+          $smokeOutDir = Join-Path $env:GITHUB_WORKSPACE "dist\headless-smoke"
+          New-Item -ItemType Directory -Path $smokeOutDir -Force | Out-Null
+
+          & $exe --headless --no-online-symbols --out-dir $smokeOutDir $missingDump
+          $code = $LASTEXITCODE
+          if ($code -ne 2) {
+            throw "Headless smoke expected exit code 2 for missing dump, got $code"
+          }
 
       - name: Upload zip artifacts
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: tullius-ctd-logger-windows-zips
+          name: tullius-ctd-logger-windows-zip
           path: |
             dist/Tullius_ctd_loger.zip
-            dist/Tullius_ctd_loger-no-pdb.zip
           if-no-files-found: error
