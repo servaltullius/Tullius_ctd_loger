@@ -40,10 +40,21 @@ int main()
     "Missing resource log throttle divisor key in plugin ini");
 
   const std::filesystem::path pluginMainPath = repoRoot / "plugin" / "src" / "PluginMain.cpp";
+  const std::filesystem::path crashHandlerPath = repoRoot / "plugin" / "src" / "CrashHandler.cpp";
   assert(std::filesystem::exists(pluginMainPath) && "plugin/src/PluginMain.cpp not found");
+  assert(std::filesystem::exists(crashHandlerPath) && "plugin/src/CrashHandler.cpp not found");
   const std::string pluginMain = ReadAllText(pluginMainPath);
+  const std::string crashHandler = ReadAllText(crashHandlerPath);
   AssertContains(pluginMain, "EnableUnsafeCrashHookMode2", "Plugin config loader must read unsafe mode guard key");
   AssertContains(pluginMain, "mode == 2", "Plugin config must check mode==2 before allowing all-exception hook mode");
+  AssertContains(
+    crashHandler,
+    "IsFatalExceptionCode(",
+    "Crash handler mode 1 must route through fatal-only classification.");
+  AssertContains(
+    crashHandler,
+    "return IsFatalExceptionCode(code);",
+    "Crash handler mode 1 must not record every non-ignorable first-chance exception.");
   AssertContains(
     pluginMain,
     "EnableAdaptiveResourceLogThrottle",

@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ struct SymSession
   std::wstring searchPath;
   std::wstring cachePath;
   bool usedOnlineSymbolSource = false;
+  std::unique_lock<std::mutex> dbghelp_lock;
 
   explicit SymSession(const std::vector<minidump::ModuleInfo>& modules, bool allowOnlineSymbols);
   ~SymSession();
@@ -44,4 +46,3 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   std::size_t maxFrames);
 
 }  // namespace skydiag::dump_tool::internal::stackwalk_internal
-

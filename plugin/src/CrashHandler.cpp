@@ -30,18 +30,46 @@ bool IsIgnorableException(DWORD code) noexcept
   }
 }
 
-// Mode 1 (recommended): record all exceptions EXCEPT known-benign ones.
-// This catches real crashes regardless of exception code, while filtering out
-// routine first-chance exceptions (C++ SEH, debugger breakpoints, thread naming).
-//
-// Mode 2 (legacy/unsafe): record everything including known-benign exceptions.
+bool IsFatalExceptionCode(DWORD code) noexcept
+{
+  if (IsIgnorableException(code)) {
+    return false;
+  }
+  switch (code) {
+    case EXCEPTION_ACCESS_VIOLATION:
+    case EXCEPTION_IN_PAGE_ERROR:
+    case EXCEPTION_ILLEGAL_INSTRUCTION:
+    case EXCEPTION_PRIV_INSTRUCTION:
+    case EXCEPTION_STACK_OVERFLOW:
+    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+    case EXCEPTION_DATATYPE_MISALIGNMENT:
+    case EXCEPTION_FLT_DENORMAL_OPERAND:
+    case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+    case EXCEPTION_FLT_INVALID_OPERATION:
+    case EXCEPTION_FLT_OVERFLOW:
+    case EXCEPTION_FLT_STACK_CHECK:
+    case EXCEPTION_FLT_UNDERFLOW:
+    case EXCEPTION_INT_DIVIDE_BY_ZERO:
+    case EXCEPTION_INT_OVERFLOW:
+    case EXCEPTION_NONCONTINUABLE_EXCEPTION:
+    case EXCEPTION_INVALID_DISPOSITION:
+    case 0xC0000374:  // STATUS_HEAP_CORRUPTION
+    case 0xC0000409:  // STATUS_STACK_BUFFER_OVERRUN
+      return true;
+    default:
+      return false;
+  }
+}
+
+// Mode 1 (recommended): fatal exceptions only.
+// Mode 2 (unsafe): record all exceptions, including handled first-chance exceptions.
 bool ShouldRecordException(DWORD code) noexcept
 {
   switch (g_crashHookMode) {
     case 2:  // All exceptions (legacy behavior; can false-trigger).
       return true;
-    case 1:  // Blacklist: record everything except known-benign.
-      return !IsIgnorableException(code);
+    case 1:  // Fatal exceptions only.
+      return IsFatalExceptionCode(code);
     default:  // Off / unknown.
       return false;
   }

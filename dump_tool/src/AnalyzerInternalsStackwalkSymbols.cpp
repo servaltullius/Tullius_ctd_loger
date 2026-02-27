@@ -3,11 +3,18 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 
 namespace skydiag::dump_tool::internal::stackwalk_internal {
 namespace {
 
 using skydiag::dump_tool::minidump::ModuleInfo;
+
+std::mutex& DbgHelpGlobalMutex()
+{
+  static std::mutex m;
+  return m;
+}
 
 std::wstring ReadEnvVar(const wchar_t* name)
 {
@@ -83,6 +90,7 @@ std::wstring ResolveSymbolSearchPath(std::wstring* outCachePath, bool allowOnlin
 
 SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineSymbols)
 {
+  dbghelp_lock = std::unique_lock<std::mutex>(DbgHelpGlobalMutex());
   process = GetCurrentProcess();
 
   DWORD opts = SymGetOptions();
@@ -123,4 +131,3 @@ SymSession::~SymSession()
 }
 
 }  // namespace skydiag::dump_tool::internal::stackwalk_internal
-

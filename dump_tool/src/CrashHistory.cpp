@@ -71,13 +71,30 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
 
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
+    auto tempPath = path;
+    tempPath += L".tmp";
 
-    std::ofstream out(path, std::ios::binary);
-    if (!out) {
+    {
+      std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+      if (!out) {
+        return false;
+      }
+      out << j.dump(2);
+      if (!out) {
+        return false;
+      }
+    }
+
+    // Best-effort atomic replacement under caller-side lock.
+    std::filesystem::remove(path, ec);
+    ec.clear();
+    std::filesystem::rename(tempPath, path, ec);
+    if (ec) {
+      std::error_code cleanupEc;
+      std::filesystem::remove(tempPath, cleanupEc);
       return false;
     }
-    out << j.dump(2);
-    return static_cast<bool>(out);
+    return true;
   } catch (...) {
     return false;
   }

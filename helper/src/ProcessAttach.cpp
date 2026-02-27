@@ -72,7 +72,8 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
 
   const std::wstring shmName = MakeKernelName(pid, skydiag::protocol::kKernelObjectSuffix_SharedMemory);
   // Include SYNCHRONIZE so the helper can detect process exit via WaitForSingleObject.
-  out.process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
+  // Include PROCESS_DUP_HANDLE for MiniDumpWithHandleData compatibility.
+  out.process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE | SYNCHRONIZE, FALSE, pid);
   if (!out.process) {
     if (err) *err = L"OpenProcess failed: " + std::to_wstring(GetLastError());
     return false;

@@ -30,6 +30,7 @@
 #include <optional>
 #include <sstream>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
@@ -72,6 +73,50 @@ std::string NowIso8601Utc()
   }
   return buf;
 }
+
+class ScopedHistoryFileLock
+{
+public:
+  explicit ScopedHistoryFileLock(const std::filesystem::path& historyPath)
+    : m_lockDir(historyPath.wstring() + L".lock")
+  {
+  }
+
+  bool Acquire(DWORD timeoutMs, DWORD pollMs = 25)
+  {
+    if (m_acquired) {
+      return true;
+    }
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    for (;;) {
+      std::error_code ec;
+      if (std::filesystem::create_directory(m_lockDir, ec)) {
+        m_acquired = true;
+        return true;
+      }
+      if (ec && ec != std::errc::file_exists) {
+        return false;
+      }
+      if (GetTickCount64() >= deadline) {
+        return false;
+      }
+      Sleep(pollMs);
+    }
+  }
+
+  ~ScopedHistoryFileLock()
+  {
+    if (!m_acquired) {
+      return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(m_lockDir, ec);
+  }
+
+private:
+  std::filesystem::path m_lockDir;
+  bool m_acquired = false;
+};
 
 bool TryReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
 {
@@ -740,36 +785,39 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
 
     if (!historyDir.empty()) {
-      CrashHistory history;
       const auto historyPath = historyDir / "crash_history.json";
-      history.LoadFromFile(historyPath);
+      ScopedHistoryFileLock historyLock(historyPath);
+      if (historyLock.Acquire(/*timeoutMs=*/2000)) {
+        CrashHistory history;
+        history.LoadFromFile(historyPath);
 
-      CrashHistoryEntry entry{};
-      entry.timestamp_utc = NowIso8601Utc();
-      entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
-      entry.bucket_key = WideToUtf8(out.crash_bucket_key);
-      if (!out.suspects.empty()) {
-        entry.top_suspect = WideToUtf8(out.suspects[0].module_filename);
-        entry.confidence = WideToUtf8(out.suspects[0].confidence);
-        for (const auto& s : out.suspects) {
-          if (!s.module_filename.empty()) {
-            entry.all_suspects.push_back(WideToUtf8(s.module_filename));
+        CrashHistoryEntry entry{};
+        entry.timestamp_utc = NowIso8601Utc();
+        entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
+        entry.bucket_key = WideToUtf8(out.crash_bucket_key);
+        if (!out.suspects.empty()) {
+          entry.top_suspect = WideToUtf8(out.suspects[0].module_filename);
+          entry.confidence = WideToUtf8(out.suspects[0].confidence);
+          for (const auto& s : out.suspects) {
+            if (!s.module_filename.empty()) {
+              entry.all_suspects.push_back(WideToUtf8(s.module_filename));
+            }
           }
         }
-      }
-      if (out.signature_match) {
-        entry.signature_id = out.signature_match->id;
-      }
+        if (out.signature_match) {
+          entry.signature_id = out.signature_match->id;
+        }
 
-      history.AddEntry(std::move(entry));
-      history.SaveToFile(historyPath);
-      out.history_stats = history.GetModuleStats(20);
+        history.AddEntry(std::move(entry));
+        history.SaveToFile(historyPath);
+        out.history_stats = history.GetModuleStats(20);
 
-      const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
-      if (bucketStats.count > 1) {
-        out.history_correlation.count = bucketStats.count;
-        out.history_correlation.first_seen = bucketStats.first_seen;
-        out.history_correlation.last_seen = bucketStats.last_seen;
+        const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
+        if (bucketStats.count > 1) {
+          out.history_correlation.count = bucketStats.count;
+          out.history_correlation.first_seen = bucketStats.first_seen;
+          out.history_correlation.last_seen = bucketStats.last_seen;
+        }
       }
     }
   }

@@ -429,9 +429,7 @@ bool HandleCrashEventTick(
     if (lastCrashDumpPath) {
       lastCrashDumpPath->clear();
     }
-    if (crashCaptured) {
-      *crashCaptured = true;
-    }
+    AppendLogLine(outBase, L"Crash dump write failed; crash capture state remains re-tryable.");
     return true;
   }
 

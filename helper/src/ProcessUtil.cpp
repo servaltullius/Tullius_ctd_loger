@@ -19,13 +19,23 @@ std::wstring QuoteArg(std::wstring_view s)
 
 bool RunHiddenProcessAndWait(std::wstring cmdLine, const std::filesystem::path& cwd, DWORD timeoutMs, std::wstring* err)
 {
+  return RunHiddenProcessAndWait(std::wstring{}, std::move(cmdLine), cwd, timeoutMs, err);
+}
+
+bool RunHiddenProcessAndWait(
+  std::wstring applicationPath,
+  std::wstring cmdLine,
+  const std::filesystem::path& cwd,
+  DWORD timeoutMs,
+  std::wstring* err)
+{
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
 
   std::wstring cwdW = cwd.wstring();
   const BOOL ok = CreateProcessW(
-    /*lpApplicationName=*/nullptr,
+    /*lpApplicationName=*/applicationPath.empty() ? nullptr : applicationPath.c_str(),
     cmdLine.data(),
     nullptr,
     nullptr,
@@ -76,4 +86,3 @@ bool RunHiddenProcessAndWait(std::wstring cmdLine, const std::filesystem::path& 
 }
 
 }  // namespace skydiag::helper::internal
-
