@@ -76,6 +76,18 @@ set_target_properties(skydiag_winui_xaml_tests PROPERTIES
 
 add_test(NAME skydiag_winui_xaml_tests COMMAND skydiag_winui_xaml_tests)
 
+add_executable(skydiag_analysis_summary_helpers_tests
+  analysis_summary_helpers_tests.cpp
+)
+
+set_target_properties(skydiag_analysis_summary_helpers_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_analysis_summary_helpers_tests COMMAND skydiag_analysis_summary_helpers_tests)
+
 add_executable(skydiag_helper_crash_autopen_config_tests
   helper_crash_autopen_config_tests.cpp
 )
@@ -349,6 +361,7 @@ if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
 
   target_include_directories(skydiag_analysis_engine_runtime_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
   )
 
   set_target_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
@@ -601,6 +614,7 @@ if(NOT WIN32)
 
     target_include_directories(skydiag_plugin_rules_logic_tests PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
     )
 
     set_target_properties(skydiag_plugin_rules_logic_tests PROPERTIES
