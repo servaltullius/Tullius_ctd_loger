@@ -31,106 +31,32 @@ internal sealed class AnalysisSummary
         var exception = root.TryGetProperty("exception", out var exNode) ? exNode : default;
         var analysis = root.TryGetProperty("analysis", out var analysisNode) ? analysisNode : default;
 
-        var suspects = new List<SuspectItem>();
-        if (root.TryGetProperty("suspects", out var suspectsNode) &&
-            suspectsNode.ValueKind == JsonValueKind.Array)
+        var suspects = ParseObjectArray(root, "suspects", item => new SuspectItem(
+            ReadString(item, "confidence"),
+            FirstNonEmpty(
+                ReadString(item, "module_filename"),
+                ReadString(item, "module_path"),
+                ReadString(item, "inferred_mod_name")),
+            ReadString(item, "reason")));
+
+        var recommendations = ParseStringArray(root, "recommendations");
+        var callstackFrames = ParseStringArray(root, "callstack.frames");
+
+        var evidenceItems = ParseObjectArray(root, "evidence", item => new EvidenceViewItem(
+            ReadString(item, "confidence"),
+            ReadString(item, "title"),
+            ReadString(item, "details")));
+
+        var resourceItems = ParseObjectArray(root, "resources", item =>
         {
-            foreach (var item in suspectsNode.EnumerateArray())
-            {
-                var module = FirstNonEmpty(
-                    ReadString(item, "module_filename"),
-                    ReadString(item, "module_path"),
-                    ReadString(item, "inferred_mod_name"));
-
-                suspects.Add(new SuspectItem(
-                    ReadString(item, "confidence"),
-                    module,
-                    ReadString(item, "reason")));
-            }
-        }
-
-        var recommendations = new List<string>();
-        if (root.TryGetProperty("recommendations", out var recNode) &&
-            recNode.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in recNode.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    var line = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(line))
-                    {
-                        recommendations.Add(line.Trim());
-                    }
-                }
-            }
-        }
-
-        var callstackFrames = new List<string>();
-        if (root.TryGetProperty("callstack", out var callstackNode) &&
-            callstackNode.ValueKind == JsonValueKind.Object &&
-            callstackNode.TryGetProperty("frames", out var frameNode) &&
-            frameNode.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in frameNode.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    var frame = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(frame))
-                    {
-                        callstackFrames.Add(frame.Trim());
-                    }
-                }
-            }
-        }
-
-        var evidenceItems = new List<EvidenceViewItem>();
-        if (root.TryGetProperty("evidence", out var evidenceNode) &&
-            evidenceNode.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in evidenceNode.EnumerateArray())
-            {
-                evidenceItems.Add(new EvidenceViewItem(
-                    ReadString(item, "confidence"),
-                    ReadString(item, "title"),
-                    ReadString(item, "details")));
-            }
-        }
-
-        var resourceItems = new List<ResourceViewItem>();
-        if (root.TryGetProperty("resources", out var resourcesNode) &&
-            resourcesNode.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in resourcesNode.EnumerateArray())
-            {
-                var providers = new List<string>();
-                if (item.TryGetProperty("providers", out var providersNode) &&
-                    providersNode.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var p in providersNode.EnumerateArray())
-                    {
-                        if (p.ValueKind == JsonValueKind.String)
-                        {
-                            var s = p.GetString();
-                            if (!string.IsNullOrWhiteSpace(s))
-                            {
-                                providers.Add(s.Trim());
-                            }
-                        }
-                    }
-                }
-
-                var kind = ReadString(item, "kind");
-                var path = ReadString(item, "path");
-                var conflict = ReadBool(item, "is_conflict");
-                resourceItems.Add(new ResourceViewItem(
-                    string.IsNullOrWhiteSpace(kind) ? "resource" : kind,
-                    path,
-                    providers.Count == 0 ? "-" : string.Join(", ", providers),
-                    conflict ? "conflict" : ""));
-            }
-        }
+            var providers = ParseStringArray(item, "providers");
+            var kind = ReadString(item, "kind");
+            return new ResourceViewItem(
+                string.IsNullOrWhiteSpace(kind) ? "resource" : kind,
+                ReadString(item, "path"),
+                providers.Count == 0 ? "-" : string.Join(", ", providers),
+                ReadBool(item, "is_conflict") ? "conflict" : "");
+        });
 
         var tsElement = root.TryGetProperty("troubleshooting_steps", out var tsTemp)
             && tsTemp.ValueKind == JsonValueKind.Object ? tsTemp : default;
@@ -159,15 +85,45 @@ internal sealed class AnalysisSummary
             TroubleshootingTitle = tsElement.ValueKind != JsonValueKind.Undefined
                 ? ReadString(tsElement, "title") : string.Empty,
             TroubleshootingSteps = tsElement.ValueKind != JsonValueKind.Undefined
-                && tsElement.TryGetProperty("steps", out var stepsArr)
-                && stepsArr.ValueKind == JsonValueKind.Array
-                ? stepsArr.EnumerateArray()
-                    .Where(s => s.ValueKind == JsonValueKind.String)
-                    .Select(s => s.GetString() ?? string.Empty)
-                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                    .ToList()
+                ? ParseStringArray(tsElement, "steps")
                 : new List<string>(),
         };
+    }
+
+    private static List<string> ParseStringArray(JsonElement root, string propertyPath)
+    {
+        var result = new List<string>();
+        var current = root;
+        foreach (var segment in propertyPath.Split('.'))
+        {
+            if (current.ValueKind != JsonValueKind.Object &&
+                current.ValueKind != JsonValueKind.Array)
+                return result;
+            if (!current.TryGetProperty(segment, out current))
+                return result;
+        }
+        if (current.ValueKind != JsonValueKind.Array) return result;
+        foreach (var item in current.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String)
+            {
+                var s = item.GetString();
+                if (!string.IsNullOrWhiteSpace(s)) result.Add(s.Trim());
+            }
+        }
+        return result;
+    }
+
+    private static List<T> ParseObjectArray<T>(JsonElement root, string propertyName,
+        Func<JsonElement, T> mapper)
+    {
+        var result = new List<T>();
+        if (!root.TryGetProperty(propertyName, out var node) ||
+            node.ValueKind != JsonValueKind.Array)
+            return result;
+        foreach (var item in node.EnumerateArray())
+            result.Add(mapper(item));
+        return result;
     }
 
     private static string ReadString(JsonElement node, string name)
