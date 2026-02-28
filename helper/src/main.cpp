@@ -359,20 +359,30 @@ void LaunchDeferredViewersAfterExit(
 
   if (!state->pendingCrashViewerDumpPath.empty() &&
       cfg.autoOpenViewerOnCrash &&
-      (exitCode != 0)) {
+      (exitCode != 0 || exitCode0StrongCrash)) {
     const std::wstring deferredDumpPath = state->pendingCrashViewerDumpPath;
-    StartDumpToolViewer(
+    const auto launch = StartDumpToolViewer(
       cfg,
       deferredDumpPath,
       outBase,
       exitCode0StrongCrash ? L"crash_deferred_exit_code0_strong" : L"crash_deferred_exit");
-    AppendLogLine(
-      outBase,
-      L"Deferred crash viewer launch attempted after process exit (exit_code="
-        + std::to_wstring(exitCode)
-        + L", dump="
-        + std::filesystem::path(deferredDumpPath).filename().wstring()
-        + L").");
+    if (launch == skydiag::helper::internal::DumpToolViewerLaunchResult::kLaunched) {
+      AppendLogLine(
+        outBase,
+        L"Deferred crash viewer launched after process exit (exit_code="
+          + std::to_wstring(exitCode)
+          + L", dump="
+          + std::filesystem::path(deferredDumpPath).filename().wstring()
+          + L").");
+    } else {
+      AppendLogLine(
+        outBase,
+        L"Deferred crash viewer launch failed after process exit (exit_code="
+          + std::to_wstring(exitCode)
+          + L", dump="
+          + std::filesystem::path(deferredDumpPath).filename().wstring()
+          + L").");
+    }
     state->pendingCrashViewerDumpPath.clear();
   } else if (!state->pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && exitCode == 0) {
     AppendLogLine(

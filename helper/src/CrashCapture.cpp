@@ -270,9 +270,13 @@ void ProcessValidCrashDump(
           processExitCode = 0xFFFFFFFFu;
         }
         if (processExitCode == 0) {
+          const bool deferred = QueueDeferredCrashViewer(dumpPath, pendingCrashViewerDumpPath);
           AppendLogLine(
             outBase,
-            L"Crash viewer auto-open suppressed after process exit during wait window (exit_code=0, wait_ms="
+            L"Process exited with exit_code=0 during wait window; "
+              + std::wstring(deferred ? L"deferring viewer to post-exit strong-crash check"
+                                      : L"deferred viewer queue unchanged")
+              + L" (wait_ms="
               + std::to_wstring(waitExitMs)
               + L", dump="
               + dumpFs.filename().wstring()
