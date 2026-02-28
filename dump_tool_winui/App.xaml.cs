@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using System.Text;
 
@@ -92,9 +93,9 @@ public partial class App : Application
             sb.AppendLine();
             File.AppendAllText(path, sb.ToString(), Encoding.UTF8);
         }
-        catch
+        catch (Exception writeEx)
         {
-            // Never throw while handling startup crash logging.
+            Debug.WriteLine($"Startup crash log write failed: {writeEx.GetType().Name}: {writeEx.Message}");
         }
     }
 }

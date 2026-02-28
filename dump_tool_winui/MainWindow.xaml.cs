@@ -252,8 +252,13 @@ public sealed partial class MainWindow : Window
                 NavView.SelectedItem = NavSummary;
                 return true;
             }
-            catch
+            catch (OperationCanceledException)
             {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"TryLoadExistingAnalysisAsync attempt {attempt}: {ex.GetType().Name}: {ex.Message}");
                 await Task.Delay(100, cancellationToken);
             }
         }
@@ -753,8 +758,9 @@ public sealed partial class MainWindow : Window
                     }
                     tail.Enqueue(formatted);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Debug.WriteLine($"Blackbox line parse failed: {ex.GetType().Name}: {ex.Message}");
                     tail.Enqueue(line);  // fallback: raw line
                 }
             }
@@ -779,8 +785,9 @@ public sealed partial class MainWindow : Window
                     WriteIndented = true,
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"WCT JSON pretty-print failed: {ex.GetType().Name}: {ex.Message}");
                 data.WctText = raw;
             }
         }

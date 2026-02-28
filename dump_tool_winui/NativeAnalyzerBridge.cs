@@ -166,8 +166,9 @@ internal static class NativeAnalyzerBridge
                         process.Kill(entireProcessTree: true);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Debug.WriteLine($"Process kill on cancel failed: {ex.GetType().Name}: {ex.Message}");
                 }
             });
 
@@ -184,8 +185,9 @@ internal static class NativeAnalyzerBridge
                         process.Kill(entireProcessTree: true);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Debug.WriteLine($"Process kill after cancel failed: {ex.GetType().Name}: {ex.Message}");
                 }
                 await process.WaitForExitAsync(CancellationToken.None);
                 _ = await stderrTask;
@@ -262,9 +264,9 @@ internal static class NativeAnalyzerBridge
             {
                 File.WriteAllText(logPath, ex.ToString());
             }
-            catch
+            catch (Exception writeEx)
             {
-                // Best-effort logging only.
+                Debug.WriteLine($"Best-effort native exception log write failed: {writeEx.GetType().Name}: {writeEx.Message}");
             }
 
             var details = $"{ex.GetType().FullName} (0x{ex.HResult:X8}): {ex.Message}";
