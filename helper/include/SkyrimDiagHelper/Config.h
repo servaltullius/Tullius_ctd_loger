@@ -51,6 +51,7 @@ struct HelperConfig {
   std::uint32_t etwCrashCaptureSeconds = 8;
   bool enableIncidentManifest = true;
   bool incidentManifestIncludeConfigSnapshot = true;
+  bool suppressDuringGrassCaching = true;
 
   // Retention / disk cleanup (0 = unlimited)
   std::uint32_t maxCrashDumps = 20;

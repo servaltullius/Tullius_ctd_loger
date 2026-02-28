@@ -182,6 +182,8 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableIncidentManifest", 1, path.c_str()) != 0;
   cfg.incidentManifestIncludeConfigSnapshot =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"IncidentManifestIncludeConfigSnapshot", 1, path.c_str()) != 0;
+  cfg.suppressDuringGrassCaching =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"SuppressDuringGrassCaching", 1, path.c_str()) != 0;
 
   cfg.maxCrashDumps = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxCrashDumps", 20, path.c_str()));

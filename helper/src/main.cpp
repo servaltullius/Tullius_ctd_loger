@@ -12,6 +12,7 @@
 #include "SkyrimDiagHelper/CrashHeuristics.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
+#include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagProtocol.h"
 #include "SkyrimDiagShared.h"
@@ -554,6 +555,55 @@ void ShutdownLoopState(
   }
 }
 
+bool DetectGrassCacheMode(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase)
+{
+  if (!cfg.suppressDuringGrassCaching) {
+    return false;
+  }
+
+  std::filesystem::path gameExeDir;
+  if (!skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+    AppendLogLine(outBase, L"Grass cache detection skipped: failed to resolve game exe directory.");
+    return false;
+  }
+
+  const auto marker = gameExeDir / L"PrecacheGrass.txt";
+  std::error_code ec;
+  if (!std::filesystem::exists(marker, ec)) {
+    return false;
+  }
+
+  AppendLogLine(outBase, L"Grass cache mode detected (PrecacheGrass.txt found in " + gameExeDir.wstring() + L").");
+  std::wcout << L"[SkyrimDiagHelper] Grass cache mode detected; crash/hang handling suppressed.\n";
+  return true;
+}
+
+void RunGrassCacheLoop(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase)
+{
+  for (;;) {
+    const DWORD w = WaitForSingleObject(proc.process, 1000);
+    if (w == WAIT_OBJECT_0) {
+      DWORD exitCode = STILL_ACTIVE;
+      GetExitCodeProcess(proc.process, &exitCode);
+      AppendLogLine(
+        outBase,
+        L"Grass cache mode: target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
+      std::wcout << L"[SkyrimDiagHelper] Grass cache mode: target exited (exit_code=" << exitCode << L").\n";
+      return;
+    }
+    if (w == WAIT_FAILED) {
+      const DWORD le = GetLastError();
+      AppendLogLine(outBase, L"Grass cache mode: process wait failed (err=" + std::to_wstring(le) + L").");
+      return;
+    }
+  }
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -623,37 +673,45 @@ int wmain(int argc, wchar_t** argv)
 
   RunCompatibilityPreflight(cfg, proc, outBase);
 
-  ApplyRetentionFromConfig(cfg, outBase);
+  const bool grassCacheMode = DetectGrassCacheMode(cfg, proc, outBase);
 
-  skydiag::helper::LoadStats loadStats;
-  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
-  const auto loadStatsPath = outBase / L"SkyrimDiag_LoadStats.json";
-  if (cfg.enableAdaptiveLoadingThreshold) {
-    loadStats.LoadFromFile(loadStatsPath);
-    adaptiveLoadingThresholdSec = loadStats.SuggestedLoadingThresholdSec(cfg);
-    std::wcout << L"[SkyrimDiagHelper] Adaptive loading threshold: "
-               << adaptiveLoadingThresholdSec << L"s (fallback=" << cfg.hangThresholdLoadingSec << L"s)\n";
+  if (grassCacheMode) {
+    ApplyRetentionFromConfig(cfg, outBase);
+    RunGrassCacheLoop(proc, outBase);
+    ShutdownRetentionWorker();
+  } else {
+    ApplyRetentionFromConfig(cfg, outBase);
+
+    skydiag::helper::LoadStats loadStats;
+    std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+    const auto loadStatsPath = outBase / L"SkyrimDiag_LoadStats.json";
+    if (cfg.enableAdaptiveLoadingThreshold) {
+      loadStats.LoadFromFile(loadStatsPath);
+      adaptiveLoadingThresholdSec = loadStats.SuggestedLoadingThresholdSec(cfg);
+      std::wcout << L"[SkyrimDiagHelper] Adaptive loading threshold: "
+                 << adaptiveLoadingThresholdSec << L"s (fallback=" << cfg.hangThresholdLoadingSec << L"s)\n";
+    }
+
+    RegisterManualCaptureHotkeyIfEnabled(cfg, outBase);
+
+    LARGE_INTEGER attachNow{};
+    QueryPerformanceCounter(&attachNow);
+    const std::uint64_t attachNowQpc = static_cast<std::uint64_t>(attachNow.QuadPart);
+
+    HelperLoopState loopState{};
+    InitializeLoopState(proc, &loopState);
+    RunHelperLoop(
+      cfg,
+      proc,
+      outBase,
+      &loadStats,
+      loadStatsPath,
+      &adaptiveLoadingThresholdSec,
+      attachNowQpc,
+      &loopState);
+    ShutdownLoopState(cfg, proc, outBase, &loopState);
+    ShutdownRetentionWorker();
   }
-
-  RegisterManualCaptureHotkeyIfEnabled(cfg, outBase);
-
-  LARGE_INTEGER attachNow{};
-  QueryPerformanceCounter(&attachNow);
-  const std::uint64_t attachNowQpc = static_cast<std::uint64_t>(attachNow.QuadPart);
-
-  HelperLoopState loopState{};
-  InitializeLoopState(proc, &loopState);
-  RunHelperLoop(
-    cfg,
-    proc,
-    outBase,
-    &loadStats,
-    loadStatsPath,
-    &adaptiveLoadingThresholdSec,
-    attachNowQpc,
-    &loopState);
-  ShutdownLoopState(cfg, proc, outBase, &loopState);
-  ShutdownRetentionWorker();
 
   if (helperSingletonMutex && helperSingletonMutex != INVALID_HANDLE_VALUE) {
     CloseHandle(helperSingletonMutex);
