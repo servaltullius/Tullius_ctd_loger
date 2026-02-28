@@ -35,13 +35,13 @@ void TestAnalyzerCallsGraphicsDiag()
 
 void TestEvidenceUsesGraphicsDiag()
 {
-  const auto impl = ReadFile("dump_tool/src/EvidenceBuilderInternalsEvidence.cpp");
+  const auto impl = ReadFile("dump_tool/src/EvidenceBuilderEvidence.cpp");
   assert(impl.find("graphics_diag") != std::string::npos);
 }
 
 void TestRecommendationsUseGraphicsDiag()
 {
-  const auto impl = ReadFile("dump_tool/src/EvidenceBuilderInternalsRecommendations.cpp");
+  const auto impl = ReadFile("dump_tool/src/EvidenceBuilderRecommendations.cpp");
   assert(impl.find("graphics_diag") != std::string::npos);
 }
 

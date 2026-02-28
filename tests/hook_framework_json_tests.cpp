@@ -56,7 +56,7 @@ static void TestNoInternalWrapperForMinidumpFunctions()
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
   assert(root && "SKYDIAG_PROJECT_ROOT must be set");
 
-  const std::filesystem::path utilPath = std::filesystem::path(root) / "dump_tool" / "src" / "EvidenceBuilderInternalsUtil.cpp";
+  const std::filesystem::path utilPath = std::filesystem::path(root) / "dump_tool" / "src" / "EvidenceBuilderUtil.cpp";
   const std::string utilContent = ReadAllText(utilPath);
   // Wrapper functions should be removed from the util file.
   assert(utilContent.find("bool IsKnownHookFramework") == std::string::npos);
@@ -65,7 +65,7 @@ static void TestNoInternalWrapperForMinidumpFunctions()
   assert(utilContent.find("bool IsGameExeModule") == std::string::npos);
 
   // Callers should use minidump:: directly.
-  const std::filesystem::path callerPath = std::filesystem::path(root) / "dump_tool" / "src" / "EvidenceBuilderInternals.cpp";
+  const std::filesystem::path callerPath = std::filesystem::path(root) / "dump_tool" / "src" / "EvidenceBuilder.cpp";
   const std::string callerContent = ReadAllText(callerPath);
   assert(callerContent.find("minidump::IsKnownHookFramework") != std::string::npos);
   assert(callerContent.find("minidump::IsSystemishModule") != std::string::npos);

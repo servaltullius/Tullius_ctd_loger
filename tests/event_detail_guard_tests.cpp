@@ -61,7 +61,7 @@ static void TestAnalyzerPopulatesDetail()
 
 static void TestPreFreezeContextEvidence()
 {
-  const auto src = ReadFile("dump_tool/src/EvidenceBuilderInternalsEvidence.cpp");
+  const auto src = ReadFile("dump_tool/src/EvidenceBuilderEvidence.cpp");
   assert(src.find("pre-freeze") != std::string::npos
       || src.find("PreFreezeContext") != std::string::npos
       || src.find("context before") != std::string::npos

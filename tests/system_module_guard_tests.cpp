@@ -24,8 +24,8 @@ int main()
 
   const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
   const auto analyzerPath = repoRoot / "dump_tool" / "src" / "Analyzer.cpp";
-  const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsSummary.cpp";
-  const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsRecommendations.cpp";
+  const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
+  const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
   const auto crashLoggerPath = repoRoot / "dump_tool" / "src" / "CrashLogger.cpp";
   const auto crashLoggerParseCorePath = repoRoot / "dump_tool" / "src" / "CrashLoggerParseCore.h";
 
@@ -82,8 +82,8 @@ int main()
 
   AssertContains(
     crashLogger,
-    "win32u.dll",
-    "CrashLogger module filter must include win32u.dll as system module.");
+    "IsSystemishModule",
+    "CrashLogger module filter must delegate to IsSystemishModule for system module detection.");
   AssertContains(
     crashLoggerParseCore,
     "win32u.dll",

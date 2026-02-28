@@ -34,7 +34,7 @@ static void TestAnalyzerHasHistoryCorrelationField()
 
 static void TestEvidenceHasCorrelationDisplay()
 {
-  const auto src = ReadFile("dump_tool/src/EvidenceBuilderInternalsEvidence.cpp");
+  const auto src = ReadFile("dump_tool/src/EvidenceBuilderEvidence.cpp");
   assert(src.find("history_correlation") != std::string::npos);
 }
 
@@ -46,7 +46,7 @@ static void TestOutputWriterHasHistoryCorrelation()
 
 static void TestRecommendationsHasTroubleshootingGuide()
 {
-  const auto rec = ReadFile("dump_tool/src/EvidenceBuilderInternalsRecommendations.cpp");
+  const auto rec = ReadFile("dump_tool/src/EvidenceBuilderRecommendations.cpp");
   assert(rec.find("troubleshooting") != std::string::npos || rec.find("Troubleshooting") != std::string::npos);
 
   const auto header = ReadFile("dump_tool/src/Analyzer.h");

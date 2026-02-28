@@ -1,70 +1,42 @@
 # Changelog
 
-## v0.2.41-rc7 (2026-02-24)
+## v0.2.41 (2026-02-28)
 
-### 수정 (크래시 감지 누락 — 베타 테스터 피드백 반영)
-- Plugin: 크래시 예외 필터를 화이트리스트(15개 코드) → 블랙리스트(5개 무해 코드 제외)로 전환 — `EXCEPTION_NONCONTINUABLE_EXCEPTION`, `STATUS_FATAL_APP_EXIT`, 모드 커스텀 예외 등 이전에 누락되던 크래시를 자동 감지.
-- Helper: `PreserveFilteredCrashDumps=1` INI 옵션 추가 — 거짓양성 필터가 삭제하려는 덤프를 보존하여 크래시 미감지 원인 진단 가능 (기본값: 0, 기존 동작 유지).
-
-### 리팩터링
-- Helper: `HandleCrashEventTick()` 395줄 → ~130줄로 축소 — `ExtractCrashInfo`, `ClassifyExitCodeVerdict`, `FilterShutdownException`, `FilterFirstChanceException`, `ProcessValidCrashDump`, `QueueDeferredCrashViewer` 6개 함수 추출.
-- Helper: 종료 예외 판정 로직 중복 제거 (`ClassifyExitCodeVerdictWithContext`로 통합).
-
-### 테스트
-- 크래시 캡처 필터 로직 유닛 테스트 추가 (`crash_capture_filter_logic_tests`).
-- 리팩터링 후 구조 검증 가드 테스트 추가 (`crash_capture_refactored_guard_tests`).
-- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`43/43`).
-
-## v0.2.41-rc4 (2026-02-24)
-
-### 추가 (모드 메뉴 이름 자동 표시 — 베타 테스터 피드백 반영)
-- Plugin: MenuOpen/Close 이벤트의 미사용 payload 24바이트(b+c+d)에 메뉴 이름 UTF-8 문자열을 인라인 저장 — 모든 모드 메뉴가 해시 대신 실제 이름(`SKI_WidgetMenu`, `TrueHUD` 등)으로 표시됨.
-- DumpTool: 임베디드 메뉴 이름이 있으면 직접 표시, 없으면 기존 해시 룩업 테이블로 폴백 (구버전 덤프 하위 호환).
-
-### 테스트
-- 메뉴 이름 인라인 저장 가드 테스트 2개 추가 (`event_detail_guard_tests`).
-- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`41/41`).
-
-## v0.2.41-rc3 (2026-02-24)
-
-### 추가 (이벤트 로그 가독성 개선 — 베타 테스터 피드백 반영)
-- DumpTool: `EventRow`에 `detail` 필드 추가 — 이벤트별 사람이 읽을 수 있는 요약 텍스트 자동 생성.
-- DumpTool: `FormatEventDetail` 구현 — PerfHitch(`hitch=105.8s flags=Loading interval=1000ms`), MenuOpen/Close(FNV-1a 해시 → `Loading Menu` 등 32개 알려진 메뉴 이름 역해석), Heartbeat/CellChange 포맷.
-- DumpTool: 텍스트 리포트 및 JSONL 블랙박스 출력에 `detail` 필드 포함.
-- DumpTool: 프리징/큰 히치 직전 이벤트 컨텍스트 요약을 Evidence에 추가 — 10초 이내 주요 이벤트 흐름(`MenuOpen(Loading Menu) → PerfHitch(hitch=2.3s) → ...`) 표시.
-- WinUI: 이벤트 탭에서 JSONL 파싱 후 `detail` 필드 기반 가독성 높은 포맷으로 표시 (기존 raw JSON 대체).
-
-### 테스트
-- 이벤트 가독성 가드 테스트 8개 추가 (`event_detail_guard_tests`).
-- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`41/41`).
-
-## v0.2.41-rc2 (2026-02-23)
-
-### 추가 (Phase 1 — Quick Wins)
-- DumpTool: `internal::` 래퍼 함수 4개를 제거하고 `minidump::` 단일 네임스페이스로 통합해 동기화 리스크 제거 (C4).
-- DumpTool: `hook_frameworks.json`, `crash_signatures.json`, `plugin_rules.json` 로드 시 `version` 필드 필수화 + 잘못된 항목 스킵/경고 로그 (C2).
-- Helper: Preflight에 비-ESL 플러그인 240개 초과 경고(`FULL_PLUGIN_SLOT_LIMIT`)와 알려진 비호환 모드 조합(`KNOWN_INCOMPATIBLE_COMBO`) 체크 추가 (A4).
-- WinUI: Discord/Reddit 커뮤니티 공유용 이모지+마크다운 포맷 복사 버튼(`CopyShareButton`) 추가 (B1).
-
-### 추가 (Phase 2 — 중간 공수)
-- DumpTool: 크래시 히스토리 bucket-key 상관 분석 — 동일 `crash_bucket_key` 반복 발생 시 Evidence에 "반복 크래시 패턴" 표시 + Summary JSON에 `history_correlation` 필드 출력 (A1).
-- WinUI: 동일 패턴 반복 시 "⚠ 동일 패턴 N회 반복 발생" 배지 표시 (A1).
-- DumpTool: `troubleshooting_guides.json` 신규 데이터 파일 — 크래시 유형별(ACCESS_VIOLATION, D6DDDA, C++ Exception, 프리징, 로딩 중 크래시, 스냅샷) 단계별 트러블슈팅 가이드 6개 (B3).
-- DumpTool: Analyzer에서 트러블슈팅 가이드 자동 매칭 → Summary JSON에 `troubleshooting_steps` 출력 (B3).
-- WinUI: 접이식 트러블슈팅 체크리스트 UI(`TroubleshootingExpander`) 추가 (B3).
-
-### 테스트
-- CrashLogger 파서 엣지케이스 테스트 20개 추가 — 기존 18개 → 38개로 커버리지 대폭 보강 (C3).
-- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`40/40`).
-
-## v0.2.41-rc1 (2026-02-23)
+### 추가
+- **Plugin: 크래시 예외 필터를 블랙리스트 방식으로 전환** — 기존 화이트리스트(15개 코드) 대신 블랙리스트(5개 무해 코드 제외)를 적용. `EXCEPTION_NONCONTINUABLE_EXCEPTION`, `STATUS_FATAL_APP_EXIT`, 모드 커스텀 예외 등 이전에 누락되던 크래시를 자동 감지.
+- **Plugin: 모드 메뉴 이름 자동 표시** — MenuOpen/Close 이벤트 payload에 메뉴 이름 UTF-8 문자열을 인라인 저장. 모든 모드 메뉴가 해시 대신 실제 이름(`SKI_WidgetMenu`, `TrueHUD` 등)으로 표시됨 (구버전 덤프 하위 호환).
+- **DumpTool: 이벤트 로그 가독성 개선** — `FormatEventDetail` 구현으로 PerfHitch, MenuOpen/Close(FNV-1a 해시 → 알려진 메뉴 이름 역해석), Heartbeat/CellChange에 사람이 읽을 수 있는 요약 텍스트 자동 생성. 프리징 직전 10초 이내 이벤트 컨텍스트 요약을 Evidence에 추가.
+- **DumpTool: 크래시 히스토리 상관 분석** — 동일 `crash_bucket_key` 반복 발생 시 Evidence에 "반복 크래시 패턴" 표시 + Summary JSON에 `history_correlation` 필드 출력.
+- **DumpTool: 트러블슈팅 가이드 시스템** — 크래시 유형별(ACCESS_VIOLATION, D6DDDA, C++ Exception, 프리징, 로딩 중 크래시, 스냅샷) 단계별 가이드 6개를 자동 매칭.
+- Helper: `PreserveFilteredCrashDumps=1` INI 옵션 추가 — 거짓양성 필터가 삭제하려는 덤프를 보존하여 크래시 미감지 원인 진단 가능.
+- Helper: Preflight에 비-ESL 플러그인 240개 초과 경고 및 알려진 비호환 모드 조합 체크 추가.
+- WinUI: Discord/Reddit 커뮤니티 공유용 이모지+마크다운 포맷 복사 버튼 추가.
+- WinUI: 동일 패턴 반복 시 "동일 패턴 N회 반복 발생" 배지 표시.
+- WinUI: 접이식 트러블슈팅 체크리스트 UI 추가.
+- WinUI: 이벤트 탭에서 `detail` 필드 기반 가독성 높은 포맷으로 표시.
 
 ### 수정
-- DumpTool: `MissingMasters` 판정의 암묵 런타임 마스터 예외 목록에 `_ResourcePack.esl`/`ResourcePack.esl`를 추가해 false positive를 완화.
-- Diagnostics: 프리징 덤프에서 `_ResourcePack.esl` 단독 누락으로 `MISSING_MASTER`가 과도하게 트리거되던 사용자 피드백 케이스를 재현 기준으로 보정.
+- DumpTool: `MissingMasters` 판정의 암묵 런타임 마스터 예외 목록에 `_ResourcePack.esl`/`ResourcePack.esl`를 추가해 false positive 완화.
+- DumpTool: 정상 종료 덤프에 대한 CTD/BEES 힌트 억제 — 스냅샷 유사 인시던트에서 크래시 전용 라벨과 권장사항을 게이트.
+- DumpTool: CrashLogger 상관 용의자 순위를 우선하도록 랭킹 로직 보정.
+- DumpTool: JSON 데이터 파일 로드 시 `version` 필드 필수화 + 잘못된 항목 스킵/경고 로그.
+- Helper: 정상 종료(exit_code=0) 시 크래시 뷰어 팝업 억제 강화.
+- Helper: exit_code=0이면서 강한 크래시 증거(strong-crash)가 있는 경우 크래시 뷰어를 지연 실행하도록 개선.
+- Helper: 크래시 뷰어 실행 결과를 확인하고, 실패 시 Win32 에러코드/경로를 로그에 기록.
+- WinUI: bare catch 블록에 진단 로깅 추가.
+
+### 리팩터링
+- Helper: `HandleCrashEventTick()` 395줄 → ~130줄로 축소 — 6개 함수 추출 및 종료 예외 판정 로직 통합.
+- DumpTool: `internal::` 래퍼 함수 4개를 제거하고 `minidump::` 단일 네임스페이스로 통합.
+- DumpTool: EvidenceBuilder 파일 재구성 — `EvidenceBuilderInternals*` → `EvidenceBuilder*`로 간결화.
+- DumpTool: AnalysisSummary JSON 파싱 헬퍼 추출, `WideLower` 유틸 통합.
 
 ### 테스트
-- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`39/39`).
+- CrashLogger 파서 엣지케이스 테스트 20개 추가 (기존 18개 → 38개).
+- 크래시 캡처 필터/리팩터링 구조 검증 가드 테스트 추가.
+- 이벤트 가독성/메뉴 이름 인라인 저장 가드 테스트 10개 추가.
+- AnalysisSummary 헬퍼 구조 가드 테스트 추가.
+- Linux: `ctest --test-dir build-linux-test --output-on-failure` 통과(`44/44`).
 
 ## v0.2.40 (2026-02-23)
 

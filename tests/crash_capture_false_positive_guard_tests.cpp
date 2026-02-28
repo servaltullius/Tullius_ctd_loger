@@ -111,8 +111,8 @@ int main()
 
   AssertContains(
     processValidBody,
-    "Crash viewer auto-open suppressed after process exit during wait window (exit_code=0",
-    "Post-processing helper must suppress crash viewer auto-open when process exits with exit_code=0 during wait window.");
+    "Process exited with exit_code=0 during wait window",
+    "Post-processing helper must handle exit_code=0 during wait window with deferred viewer logic.");
 
   AssertOrdered(
     processValidBody,
@@ -166,8 +166,8 @@ int main()
   const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
   AssertContains(
     deferredViewerBody,
-    "(exitCode != 0)",
-    "Deferred crash viewer launch must not trigger on normal exit_code=0.");
+    "exitCode != 0 || exitCode0StrongCrash",
+    "Deferred crash viewer launch must trigger on non-zero exit or exit_code=0 with strong-crash evidence.");
   AssertContains(
     deferredViewerBody,
     "Suppressed deferred crash viewer launch on normal process exit",

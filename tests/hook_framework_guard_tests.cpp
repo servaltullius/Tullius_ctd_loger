@@ -26,9 +26,9 @@ int main()
   const auto stackwalkPath = repoRoot / "dump_tool" / "src" / "AnalyzerInternalsStackwalk.cpp";
   const auto stackScanPath = repoRoot / "dump_tool" / "src" / "AnalyzerInternalsStackScan.cpp";
   const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
-  const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsSummary.cpp";
-  const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsRecommendations.cpp";
-  const auto evidencePath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderInternalsEvidence.cpp";
+  const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
+  const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
+  const auto evidencePath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp";
 
   const std::string stackwalkScoring = ReadAllText(stackwalkScoringPath);
   const std::string stackwalk = ReadAllText(stackwalkPath);
