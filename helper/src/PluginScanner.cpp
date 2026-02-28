@@ -16,8 +16,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagStringUtil.h"
+
 namespace skydiag::helper {
 namespace {
+
+using skydiag::WideLower;
 
 void StripUtf8BomInPlace(std::string& s)
 {
@@ -27,13 +31,6 @@ void StripUtf8BomInPlace(std::string& s)
       static_cast<unsigned char>(s[2]) == 0xBF) {
     s.erase(0, 3);
   }
-}
-
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-  return out;
 }
 
 std::string AsciiLower(std::string_view s)

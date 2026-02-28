@@ -1,4 +1,5 @@
 #include "Mo2Index.h"
+#include "MinidumpUtil.h"
 #include "Utf.h"
 
 #include <algorithm>
@@ -14,12 +15,7 @@
 namespace skydiag::dump_tool {
 namespace {
 
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-  return out;
-}
+using minidump::WideLower;
 
 std::string_view Trim(std::string_view s)
 {

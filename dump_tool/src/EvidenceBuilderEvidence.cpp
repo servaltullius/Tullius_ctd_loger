@@ -1,4 +1,4 @@
-#include "EvidenceBuilderInternalsPriv.h"
+#include "EvidenceBuilderPrivate.h"
 
 #include <algorithm>
 #include <cwchar>

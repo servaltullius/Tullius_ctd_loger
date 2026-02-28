@@ -1,4 +1,5 @@
 #include "GraphicsInjectionDiag.h"
+#include "MinidumpUtil.h"
 
 #include <algorithm>
 #include <cctype>
@@ -15,12 +16,7 @@
 namespace skydiag::dump_tool {
 namespace {
 
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-  return out;
-}
+using minidump::WideLower;
 
 std::string AsciiLower(std::string_view s)
 {

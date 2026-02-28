@@ -1,4 +1,4 @@
-#include "EvidenceBuilderInternalsPriv.h"
+#include "EvidenceBuilderPrivate.h"
 
 #include <algorithm>
 #include <cwchar>
@@ -13,19 +13,15 @@
 
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
+#include "SkyrimDiagStringUtil.h"
 
 namespace skydiag::dump_tool::internal {
+
+using skydiag::WideLower;
 
 std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
 {
   return std::wstring(i18n::ConfidenceLabel(lang, level));
-}
-
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-  return out;
 }
 
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep)

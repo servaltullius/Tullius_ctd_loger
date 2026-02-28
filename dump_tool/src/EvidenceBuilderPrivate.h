@@ -1,6 +1,6 @@
 #pragma once
 
-// Private header for splitting EvidenceBuilderInternals.cpp into smaller translation units.
+// Private header shared by EvidenceBuilder translation units.
 // Not part of the public API; only used inside dump_tool.
 
 #include <cstdint>
@@ -57,7 +57,6 @@ struct EvidenceBuildContext
 
 // Shared utility helpers (moved out of the original monolithic .cpp).
 std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level);
-std::wstring WideLower(std::wstring_view s);
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep);
 std::wstring ToWideAscii(std::string_view s);
 std::wstring Hex64(std::uint64_t v);

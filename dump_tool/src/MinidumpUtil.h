@@ -11,6 +11,8 @@
 #include <string_view>
 #include <vector>
 
+#include "SkyrimDiagStringUtil.h"
+
 namespace skydiag::dump_tool::minidump {
 
 struct MappedFile
@@ -39,7 +41,7 @@ struct ModuleHit
 
 std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize, std::uint64_t addr);
 
-std::wstring WideLower(std::wstring_view s);
+inline std::wstring WideLower(std::wstring_view s) { return skydiag::WideLower(s); }
 
 bool IsSystemishModule(std::wstring_view filename);
 bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath);

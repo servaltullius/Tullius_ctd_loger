@@ -1,5 +1,6 @@
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
+#include "MinidumpUtil.h"
 #include "Mo2Index.h"
 #include "Utf.h"
 
@@ -23,37 +24,9 @@
 namespace skydiag::dump_tool {
 namespace {
 
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-  return out;
-}
-
-bool IsSystemishModule(std::wstring_view filename)
-{
-  std::wstring lower(filename);
-  std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-
-  const wchar_t* k[] = {
-    L"kernelbase.dll", L"ntdll.dll",     L"kernel32.dll",  L"ucrtbase.dll",
-    L"msvcp140.dll",   L"vcruntime140.dll", L"vcruntime140_1.dll", L"concrt140.dll", L"user32.dll",
-    L"gdi32.dll",      L"combase.dll",   L"ole32.dll",     L"ws2_32.dll",
-    L"win32u.dll",
-  };
-  for (const auto* m : k) {
-    if (lower == m) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool IsGameExeModule(std::wstring_view filename)
-{
-  const std::wstring lower = WideLower(filename);
-  return (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe");
-}
+using minidump::WideLower;
+using minidump::IsSystemishModule;
+using minidump::IsGameExeModule;
 
 std::optional<std::wstring> TryGetDocumentsKnownFolder()
 {

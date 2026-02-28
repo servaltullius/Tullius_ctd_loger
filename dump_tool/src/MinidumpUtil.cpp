@@ -314,13 +314,6 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
   return std::nullopt;
 }
 
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-  return out;
-}
-
 bool IsSystemishModule(std::wstring_view filename)
 {
   std::wstring lower(filename);

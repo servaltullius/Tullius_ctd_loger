@@ -20,13 +20,11 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsStackwalkSymbols.cpp
   src/EvidenceBuilder.cpp
   src/EvidenceBuilder.h
-  src/EvidenceBuilderInternals.cpp
-  src/EvidenceBuilderInternals.h
-  src/EvidenceBuilderInternalsEvidence.cpp
-  src/EvidenceBuilderInternalsPriv.h
-  src/EvidenceBuilderInternalsRecommendations.cpp
-  src/EvidenceBuilderInternalsSummary.cpp
-  src/EvidenceBuilderInternalsUtil.cpp
+  src/EvidenceBuilderEvidence.cpp
+  src/EvidenceBuilderPrivate.h
+  src/EvidenceBuilderRecommendations.cpp
+  src/EvidenceBuilderSummary.cpp
+  src/EvidenceBuilderUtil.cpp
   src/GraphicsInjectionDiag.cpp
   src/GraphicsInjectionDiag.h
   src/CrashLogger.cpp

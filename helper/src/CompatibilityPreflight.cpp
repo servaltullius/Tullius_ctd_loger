@@ -16,9 +16,12 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
+#include "SkyrimDiagStringUtil.h"
 
 namespace skydiag::helper::internal {
 namespace {
+
+using skydiag::WideLower;
 
 struct PreflightCheck
 {
@@ -35,15 +38,6 @@ std::string AsciiLower(std::string_view s)
   out.reserve(s.size());
   std::transform(s.begin(), s.end(), std::back_inserter(out), [](char c) {
     return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  });
-  return out;
-}
-
-std::wstring WideLower(std::wstring_view s)
-{
-  std::wstring out(s);
-  std::transform(out.begin(), out.end(), out.begin(), [](wchar_t c) {
-    return static_cast<wchar_t>(std::towlower(c));
   });
   return out;
 }
