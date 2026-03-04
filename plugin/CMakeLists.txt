@@ -20,6 +20,7 @@ set(sources
   src/CrashHandler.cpp
   src/EventSinks.cpp
   src/Heartbeat.cpp
+  src/MsvcRegexStub.cpp
   src/PluginInfo.cpp
   src/PluginMain.cpp
   src/ResourceHooks.cpp
