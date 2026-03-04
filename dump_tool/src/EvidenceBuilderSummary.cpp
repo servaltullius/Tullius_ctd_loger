@@ -127,31 +127,63 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : L"크래시가 Windows 시스템 DLL에서 보고되었습니다. 실제 원인은 다른 모드/DLL일 수 있습니다. (신뢰도: 낮음)";
     }
   } else if (hasModule && isGameExe) {
-    if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
-      summary = en
-        ? (L"Crash is reported in the game executable, but " + suspectBasis + L" points to " + nonHookSuspectWho +
-            L". (Confidence: " + nonHookSuspectConf + L")")
-        : (L"크래시 위치가 게임 본체(EXE)로 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
-            L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
+    const bool hasObjectRefs = !r.crash_logger_object_refs.empty();
+    const bool suspectsAreStackwalk = r.suspects_from_stackwalk;
+
+    // Priority 1: stackwalk-based non-hook suspect (high reliability)
+    if (hasNonHookSuspect && suspectsAreStackwalk && !nonHookSuspectWho.empty()) {
+      if (hasObjectRefs) {
+        const auto& topRef = r.crash_logger_object_refs[0];
+        summary = en
+          ? (L"Crash is reported in the game executable. Callstack points to " + nonHookSuspectWho +
+              L", while processing " + topRef.esp_name + L" object. (Confidence: " + nonHookSuspectConf + L")")
+          : (L"크래시 위치가 게임 본체(EXE)이며, 콜스택은 " + nonHookSuspectWho +
+              L"을(를) 가리킵니다. " + topRef.esp_name + L"의 오브젝트 처리 중이었습니다. (신뢰도: " + nonHookSuspectConf + L")");
+      } else {
+        summary = en
+          ? (L"Crash is reported in the game executable, but " + suspectBasis + L" points to " + nonHookSuspectWho +
+              L". (Confidence: " + nonHookSuspectConf + L")")
+          : (L"크래시 위치가 게임 본체(EXE)로 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
+              L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
+      }
+    // Priority 2: CrashLogger ESP/ESM object refs (more actionable than stack scan)
+    } else if (hasObjectRefs) {
+      const auto& topRef = r.crash_logger_object_refs[0];
+      if (hasSuspect && !suspectsAreStackwalk && !suspectWho.empty()) {
+        // Stack scan suspect exists but is low reliability — mention as supplementary
+        summary = en
+          ? (L"Crash is reported in the game executable, and was processing an object from " + topRef.esp_name +
+              L". Stack scan also shows " + suspectWho + L" nearby. (Confidence: Medium)")
+          : (L"크래시 위치가 게임 본체(EXE)이며, " + topRef.esp_name +
+              L"의 오브젝트를 처리 중이었습니다. 스택 스캔에서 " + suspectWho + L"도 인근에 감지되었습니다. (신뢰도: 중간)");
+      } else {
+        summary = en
+          ? (L"Crash is reported in the game executable, and was processing an object from " + topRef.esp_name +
+              L". (Confidence: Medium)")
+          : (L"크래시 위치가 게임 본체(EXE)로 보고되었으며, " + topRef.esp_name +
+              L"의 오브젝트를 처리 중이었습니다. (신뢰도: 중간)");
+      }
+    // Priority 3: hook framework suspect
     } else if (topSuspectIsHookFramework && !suspectWho.empty()) {
       summary = en
         ? (L"Crash is reported in the game executable, and the top stack candidate is " + suspectWho +
             L" (known hook framework). This DLL is often a victim frame owner, so avoid treating it as root cause by itself. (Confidence: Low)")
         : (L"크래시 위치가 게임 본체(EXE)로 보고되었고, 스택 후보 1순위는 " + suspectWho +
             L"(알려진 훅 프레임워크)입니다. 이 DLL은 피해 프레임 소유자로 자주 나타나므로 단독 원인으로 단정하기 어렵습니다. (신뢰도: 낮음)");
-    } else if (hasSuspect && !suspectWho.empty()) {
+    // Priority 4: stackwalk-based suspect (no non-hook candidate)
+    } else if (hasSuspect && suspectsAreStackwalk && !suspectWho.empty()) {
       summary = en
         ? (L"Crash is reported in the game executable, and " + suspectBasis + L" points to " + suspectWho +
             L". (Confidence: " + suspectConf + L")")
         : (L"크래시 위치가 게임 본체(EXE)로 보고되었고, " + suspectBasis + L"에서는 " + suspectWho +
             L" 가 유력합니다. (신뢰도: " + suspectConf + L")");
-    } else if (!r.crash_logger_object_refs.empty()) {
-      const auto& topRef = r.crash_logger_object_refs[0];
+    // Priority 5: stack scan only (low reliability, no ESP refs)
+    } else if (hasSuspect && !suspectsAreStackwalk && !suspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in the game executable, and was processing an object from " + topRef.esp_name +
-            L". (Confidence: Medium)")
-        : (L"크래시 위치가 게임 본체(EXE)로 보고되었으며, " + topRef.esp_name +
-            L"의 오브젝트를 처리 중이었습니다. (신뢰도: 중간)");
+        ? (L"Crash is reported in the game executable. Stack scan shows " + suspectWho +
+            L" nearby, but this is a weak signal. (Confidence: Low)")
+        : (L"크래시 위치가 게임 본체(EXE)로 보고되었습니다. 스택 스캔에서 " + suspectWho +
+            L"이(가) 감지되었으나 신뢰도가 낮습니다. (신뢰도: 낮음)");
     } else {
       summary = en
         ? L"Crash is reported in the game executable. Version mismatch/hook conflict is possible. (Confidence: Medium)"

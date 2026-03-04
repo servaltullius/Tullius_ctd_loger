@@ -210,6 +210,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? L"[Top suspect] Attach this report (*_SkyrimDiagReport.txt) and dump (*.dmp) when reporting to the mod author."
       : L"[유력 후보] 이 리포트 파일(*_SkyrimDiagReport.txt)과 덤프(*.dmp)를 모드 제작자에게 첨부");
   } else if (allowTopSuspectActionRecommendations && hasModule && isGameExe) {
+    if (!r.crash_logger_object_refs.empty()) {
+      // ESP/ESM reference is the primary clue for EXE crashes — already emitted above as [ESP/ESM]
+      if (hasStackCandidate && !r.suspects_from_stackwalk) {
+        // Stack scan suspect exists but is weak — note it as supplementary
+        r.recommendations.push_back(en
+          ? (L"[Stack scan] " + r.suspects[0].module_filename + L" was also detected nearby via stack scan, but this is a weak signal. Prioritize the ESP/ESM clue above.")
+          : (L"[스택 스캔] 스택 스캔에서 " + r.suspects[0].module_filename + L"도 감지되었으나 신뢰도가 낮습니다. 위의 ESP/ESM 단서를 우선 점검하세요."));
+      }
+    }
     r.recommendations.push_back(en
       ? L"[Check] Crash location is the game executable. Version mismatch (Address Library/SKSE) or hook conflicts are likely."
       : L"[점검] 크래시 위치가 게임 본체(EXE)로 나옵니다. Address Library/ SKSE 버전 불일치 또는 후킹 충돌 가능성이 큽니다.");
