@@ -145,6 +145,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L". (Confidence: " + suspectConf + L")")
         : (L"크래시 위치가 게임 본체(EXE)로 보고되었고, " + suspectBasis + L"에서는 " + suspectWho +
             L" 가 유력합니다. (신뢰도: " + suspectConf + L")");
+    } else if (!r.crash_logger_object_refs.empty()) {
+      const auto& topRef = r.crash_logger_object_refs[0];
+      summary = en
+        ? (L"Crash is reported in the game executable, and was processing an object from " + topRef.esp_name +
+            L". (Confidence: Medium)")
+        : (L"크래시 위치가 게임 본체(EXE)로 보고되었으며, " + topRef.esp_name +
+            L"의 오브젝트를 처리 중이었습니다. (신뢰도: 중간)");
     } else {
       summary = en
         ? L"Crash is reported in the game executable. Version mismatch/hook conflict is possible. (Confidence: Medium)"

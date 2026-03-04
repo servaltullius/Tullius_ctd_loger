@@ -165,6 +165,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[유력 후보] 현재 스택 1순위 후보가 Windows 시스템 DLL입니다. 행 캡처에서는 대기/피해 위치인 경우가 많으므로 비-시스템 후보/리소스/충돌 단서를 우선 점검하세요.");
   }
 
+  if (!r.crash_logger_object_refs.empty()) {
+    const auto& topRef = r.crash_logger_object_refs[0];
+    r.recommendations.push_back(en
+      ? (L"[ESP/ESM] At crash time, an object from " + topRef.esp_name + L" was being processed. Try disabling this mod to check if the crash reproduces.")
+      : (L"[ESP/ESM] 크래시 시점에 " + topRef.esp_name + L" 모드의 오브젝트가 처리 중이었습니다. 해당 모드를 비활성화하여 재현 여부를 확인하세요."));
+  }
+
   if (!r.resources.empty()) {
     bool hasConflict = false;
     for (const auto& rr : r.resources) {

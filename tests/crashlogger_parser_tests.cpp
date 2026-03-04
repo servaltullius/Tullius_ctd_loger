@@ -568,6 +568,290 @@ static void Test_CompactTimestamp_InvalidHour()
   assert(!ts.has_value());
 }
 
+// ── Group 9: ESP/ESM object reference parsing ──
+
+using skydiag::dump_tool::crashlogger_core::CrashLoggerObjectRef;
+using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerObjectRefsAscii;
+using skydiag::dump_tool::crashlogger_core::AggregateCrashLoggerObjectRefs;
+using skydiag::dump_tool::crashlogger_core::IsVanillaDlcEspAsciiLower;
+using skydiag::dump_tool::crashlogger_core::ExtractEspNamesFromLine;
+
+static void Test_ParseObjectRefs_BasicExample()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "CRASH TIME: 2026-03-05 00:09:15\n"
+    "PROBABLE CALL STACK:\n"
+    "\tSkyrimSE.exe+0x123\n"
+    "\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (Character*) \"\xEB\x8F\x84\xEB\xA1\x9C\xEB\xA1\xB1\" [0xFEAD081B] (\"AE_StellarBlade_Doro.esp\")\n"
+    "\tRSP+360: (TESObjectREFR*) [0x9D0F0C07] (\"DynDOLOD.esp\") [0x33133209] (DynDOLOD.esm)\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(!refs.empty());
+  // Should find AE_StellarBlade_Doro.esp and DynDOLOD.esp and DynDOLOD.esm
+  bool foundStellar = false, foundDynEsp = false, foundDynEsm = false;
+  for (const auto& r : refs) {
+    if (r.esp_name == "AE_StellarBlade_Doro.esp") foundStellar = true;
+    if (r.esp_name == "DynDOLOD.esp") foundDynEsp = true;
+    if (r.esp_name == "DynDOLOD.esm") foundDynEsm = true;
+  }
+  assert(foundStellar);
+  assert(foundDynEsp);
+  assert(foundDynEsm);
+}
+
+static void Test_ParseObjectRefs_NoEsp_SkipsLine()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (BSFadeNode*) [0x12345678]\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.empty());
+}
+
+static void Test_ParseObjectRefs_UnquotedEsp()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRSP+360: (TESObjectREFR*) [0x9D0F0C07] (DynDOLOD.esm)\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 1);
+  assert(refs[0].esp_name == "DynDOLOD.esm");
+}
+
+static void Test_ParseObjectRefs_FiltersVanillaEsp()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (TESObjectREFR*) [0x12345678] (\"Skyrim.esm\")\n"
+    "\tRSI: (Character*) [0xABCD0001] (\"MyMod.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  // Skyrim.esm should be filtered
+  assert(refs.size() == 1);
+  assert(refs[0].esp_name == "MyMod.esp");
+}
+
+static void Test_ParseObjectRefs_ModifiedBySkipped()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (Character*) [0xABCD0001] (\"MyMod.esp\")\n"
+    "\tModified by: (\"OverhaulMod.esp\")\n"
+    "\tModified by: (\"AnotherPatch.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  // Only MyMod.esp should be found, not the Modified by ones
+  assert(refs.size() == 1);
+  assert(refs[0].esp_name == "MyMod.esp");
+}
+
+static void Test_ParseObjectRefs_RegisterFileField()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "PROBABLE CALL STACK:\n"
+    "\tSkyrimSE.exe+0x1\n"
+    "\n"
+    "REGISTERS:\n"
+    "RDI: (TESForm*) [0x12345678] (\"SomeForm.esp\")\n"
+    "\tFile: \"DetailedMod.esp\"\n"
+    "\n"
+    "MODULES:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  bool foundSome = false, foundDetailed = false;
+  for (const auto& r : refs) {
+    if (r.esp_name == "SomeForm.esp") foundSome = true;
+    if (r.esp_name == "DetailedMod.esp") foundDetailed = true;
+  }
+  assert(foundSome);
+  assert(foundDetailed);
+}
+
+static void Test_ParseObjectRefs_RegisterRanksHigher()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (Character*) [0xABCD0001] (\"HighMod.esp\")\n"
+    "\tRSP+360: (TESObjectREFR*) [0x12345678] (\"LowMod.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 2);
+  // RDI (10) + Character* (8) = 18 should be higher than RSP+360 (3) + TESObjectREFR* (6) = 9
+  assert(refs[0].esp_name == "HighMod.esp");
+  assert(refs[0].relevance_score > refs[1].relevance_score);
+}
+
+static void Test_ParseObjectRefs_ActorRanksHigher()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (BSFadeNode*) [0xABCD0001] (\"LowType.esp\")\n"
+    "\tRSI: (Character*) [0x12345678] (\"HighType.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 2);
+  // RSI (10) + Character* (8) = 18 vs RDI (10) + BSFadeNode* (2) = 12
+  assert(refs[0].esp_name == "HighType.esp");
+}
+
+static void Test_AggregateObjectRefs_Dedup()
+{
+  std::vector<CrashLoggerObjectRef> refs;
+  {
+    CrashLoggerObjectRef r;
+    r.location = "RDI"; r.object_type = "Character*"; r.esp_name = "MyMod.esp";
+    r.object_name = "NPC1"; r.relevance_score = 18;
+    refs.push_back(r);
+  }
+  {
+    CrashLoggerObjectRef r;
+    r.location = "RSP+68"; r.object_type = "TESObjectREFR*"; r.esp_name = "mymod.esp";
+    r.relevance_score = 11;
+    refs.push_back(r);
+  }
+  {
+    CrashLoggerObjectRef r;
+    r.location = "RSI"; r.object_type = "Character*"; r.esp_name = "OtherMod.esp";
+    r.object_name = "NPC2"; r.relevance_score = 18;
+    refs.push_back(r);
+  }
+
+  const auto agg = AggregateCrashLoggerObjectRefs(refs);
+  // MyMod.esp and mymod.esp should merge
+  assert(agg.size() == 2);
+  // The merged one should have ref_count reflected in max_score (the highest)
+  bool foundMyMod = false;
+  for (const auto& a : agg) {
+    const std::string lower = skydiag::dump_tool::crashlogger_core::AsciiLower(a.esp_name);
+    if (lower == "mymod.esp") {
+      foundMyMod = true;
+      assert(a.relevance_score == 18);
+      assert(a.object_name == "NPC1");
+    }
+  }
+  assert(foundMyMod);
+}
+
+static void Test_ParseObjectRefs_EmptyInput()
+{
+  const auto refs = ParseCrashLoggerObjectRefsAscii("");
+  assert(refs.empty());
+}
+
+static void Test_ParseObjectRefs_UnicodeObjectName()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (Character*) \"\xEB\x8F\x84\xEB\xA1\x9C\xEB\xA1\xB1\" [0xFEAD081B] (\"AE_StellarBlade_Doro.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 1);
+  assert(refs[0].object_name == "\xEB\x8F\x84\xEB\xA1\x9C\xEB\xA1\xB1"); // 도로롱
+}
+
+static void Test_ParseObjectRefs_MixedQuotedUnquoted()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRSP+68: (TESObjectREFR*) [0x9D0F0C07] (\"QuotedMod.esp\") [0x33133209] (UnquotedMod.esm)\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 2);
+  bool foundQuoted = false, foundUnquoted = false;
+  for (const auto& r : refs) {
+    if (r.esp_name == "QuotedMod.esp") foundQuoted = true;
+    if (r.esp_name == "UnquotedMod.esm") foundUnquoted = true;
+  }
+  assert(foundQuoted);
+  assert(foundUnquoted);
+}
+
+static void Test_IsVanillaDlcEsp_AllKnown()
+{
+  assert(IsVanillaDlcEspAsciiLower("skyrim.esm"));
+  assert(IsVanillaDlcEspAsciiLower("update.esm"));
+  assert(IsVanillaDlcEspAsciiLower("dawnguard.esm"));
+  assert(IsVanillaDlcEspAsciiLower("hearthfires.esm"));
+  assert(IsVanillaDlcEspAsciiLower("dragonborn.esm"));
+  assert(!IsVanillaDlcEspAsciiLower("mymod.esp"));
+  assert(!IsVanillaDlcEspAsciiLower(""));
+}
+
+static void Test_ParseObjectRefs_MalformedQuotedParen_NoInfiniteLoop()
+{
+  // Malformed line with unclosed ("... — should not infinite loop
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (Character*) (\"BrokenNoClose\n"
+    "\tRSI: (TESObjectREFR*) [0xABCD0001] (\"GoodMod.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  // Should not hang; GoodMod.esp found on the next line
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  bool foundGood = false;
+  for (const auto& r : refs) {
+    if (r.esp_name == "GoodMod.esp") foundGood = true;
+  }
+  assert(foundGood);
+}
+
+static void Test_ExtractEspNames_NoParens()
+{
+  // No parens at all — should return empty
+  const auto names = ExtractEspNamesFromLine("just some text without parens");
+  assert(names.empty());
+}
+
+static void Test_ParseObjectRefs_CCContentFiltered()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (TESObjectREFR*) [0x12345678] (\"ccBGSSSE001-Fish.esm\")\n"
+    "\tRSI: (Character*) [0xABCD0001] (\"RealMod.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  // CC content should be filtered
+  assert(refs.size() == 1);
+  assert(refs[0].esp_name == "RealMod.esp");
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -637,6 +921,24 @@ int main()
   Test_CompactTimestamp_MultipleMatches_TakesFirst();
   Test_CompactTimestamp_InvalidMonth();
   Test_CompactTimestamp_InvalidHour();
+
+  // Group 9: ESP/ESM object reference parsing
+  Test_ParseObjectRefs_BasicExample();
+  Test_ParseObjectRefs_NoEsp_SkipsLine();
+  Test_ParseObjectRefs_UnquotedEsp();
+  Test_ParseObjectRefs_FiltersVanillaEsp();
+  Test_ParseObjectRefs_ModifiedBySkipped();
+  Test_ParseObjectRefs_RegisterFileField();
+  Test_ParseObjectRefs_RegisterRanksHigher();
+  Test_ParseObjectRefs_ActorRanksHigher();
+  Test_AggregateObjectRefs_Dedup();
+  Test_ParseObjectRefs_EmptyInput();
+  Test_ParseObjectRefs_UnicodeObjectName();
+  Test_ParseObjectRefs_MixedQuotedUnquoted();
+  Test_IsVanillaDlcEsp_AllKnown();
+  Test_ParseObjectRefs_MalformedQuotedParen_NoInfiniteLoop();
+  Test_ExtractEspNames_NoParens();
+  Test_ParseObjectRefs_CCContentFiltered();
 
   return 0;
 }

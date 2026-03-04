@@ -141,6 +141,35 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     r.evidence.push_back(std::move(e));
   }
 
+  if (!r.crash_logger_object_refs.empty()) {
+    EvidenceItem e{};
+    // Confidence: medium if top ref score >= 14, otherwise low
+    e.confidence_level = (r.crash_logger_object_refs[0].relevance_score >= 14)
+      ? i18n::ConfidenceLevel::kMedium
+      : i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Crash Logger: referenced game plugins (ESP/ESM)"
+      : L"Crash Logger: 참조된 게임 플러그인(ESP/ESM)";
+
+    std::wstring detail;
+    std::size_t shown = 0;
+    for (const auto& ref : r.crash_logger_object_refs) {
+      if (shown >= 4) break;
+      if (!detail.empty()) detail += L", ";
+      detail += ref.esp_name;
+      if (!ref.best_object_type.empty()) {
+        detail += L" [" + ref.best_object_type + L"]";
+      }
+      if (!ref.object_name.empty()) {
+        detail += L" \"" + ref.object_name + L"\"";
+      }
+      shown++;
+    }
+    e.details = detail;
+    r.evidence.push_back(std::move(e));
+  }
+
   if (!r.crash_logger_cpp_exception_type.empty() ||
       !r.crash_logger_cpp_exception_info.empty() ||
       !r.crash_logger_cpp_exception_throw_location.empty() ||

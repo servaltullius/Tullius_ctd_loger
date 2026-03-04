@@ -534,6 +534,407 @@ inline std::optional<ParsedTimestamp> TryExtractDashedTimestampFromStem(std::wst
   return std::nullopt;
 }
 
+// ── ESP/ESM object reference parsing ──
+
+struct CrashLoggerObjectRef {
+  std::string location;        // "RDI", "RSP+68"
+  std::string object_type;     // "Character*", "TESObjectREFR*"
+  std::string esp_name;        // "AE_StellarBlade_Doro.esp"
+  std::string object_name;     // "도로롱" (UTF-8, may be empty)
+  std::uint32_t relevance_score = 0;  // LocationWeight + TypeWeight
+};
+
+inline bool IsVanillaDlcEspAsciiLower(std::string_view espLower)
+{
+  // Core Bethesda masters
+  if (espLower == "skyrim.esm" || espLower == "update.esm" ||
+      espLower == "dawnguard.esm" || espLower == "hearthfires.esm" ||
+      espLower == "dragonborn.esm") {
+    return true;
+  }
+  // CC content: "cc" prefix (Bethesda-authored, users can't meaningfully act on these)
+  if (espLower.size() >= 3 && espLower[0] == 'c' && espLower[1] == 'c') {
+    return true;
+  }
+  return false;
+}
+
+inline std::uint32_t LocationWeight(std::string_view loc)
+{
+  const std::string lower = AsciiLower(loc);
+  // Function-argument registers
+  if (lower == "rcx" || lower == "rdx" || lower == "r8" || lower == "r9") return 12;
+  if (lower == "rdi" || lower == "rsi") return 10;
+  if (lower == "rax" || lower == "rbx") return 8;
+  // General-purpose registers R10-R15
+  if (lower.size() == 3 && lower[0] == 'r' && lower[1] == '1' &&
+      lower[2] >= '0' && lower[2] <= '5') return 6;
+  // Stack offsets
+  if (lower.size() >= 4 && lower.substr(0, 3) == "rsp") {
+    // Parse offset after "rsp+" or "rsp-"
+    auto plusPos = lower.find('+');
+    if (plusPos != std::string::npos && plusPos + 1 < lower.size()) {
+      unsigned long offset = 0;
+      try {
+        offset = std::stoul(lower.substr(plusPos + 1), nullptr, 16);
+      } catch (...) {
+        return 3;
+      }
+      if (offset <= 0xFF) return 5;
+      if (offset <= 0x3FF) return 3;
+      return 1;
+    }
+    return 5; // bare RSP
+  }
+  return 3; // unknown register
+}
+
+inline std::uint32_t TypeWeight(std::string_view objType)
+{
+  const std::string lower = AsciiLower(objType);
+  if (lower.find("character") != std::string::npos ||
+      lower.find("actor") != std::string::npos ||
+      lower.find("tesnpc") != std::string::npos) return 8;
+  if (lower.find("tesobjectrefr") != std::string::npos ||
+      lower.find("tescell") != std::string::npos ||
+      lower.find("tesworldspace") != std::string::npos) return 6;
+  if (lower.find("tes") != std::string::npos) return 4;
+  if (lower.find("bsfadenode") != std::string::npos ||
+      lower.find("ninode") != std::string::npos) return 2;
+  return 1;
+}
+
+// Check if a string looks like an ESP/ESM/ESL filename
+inline bool LooksLikePluginExtension(std::string_view s)
+{
+  if (s.size() < 5) return false;
+  const std::string lower = AsciiLower(s);
+  return lower.size() >= 4 &&
+    (lower.substr(lower.size() - 4) == ".esp" ||
+     lower.substr(lower.size() - 4) == ".esm" ||
+     lower.substr(lower.size() - 4) == ".esl");
+}
+
+// Extract all ESP/ESM names from a single line.
+// Patterns: ("ModName.esp"), (ModName.esm), File: "ModName.esp"
+// Uses a simple forward scan — each iteration always advances pos to avoid infinite loops.
+inline std::vector<std::string> ExtractEspNamesFromLine(std::string_view line)
+{
+  std::vector<std::string> results;
+  std::size_t pos = 0;
+
+  while (pos < line.size()) {
+    // Find the next '(' or 'F'/'f' (for File:)
+    auto nextParen = line.find('(', pos);
+    auto nextFile = line.find("File:", pos);
+    if (nextFile == std::string_view::npos) nextFile = line.find("file:", pos);
+
+    // Pick whichever comes first
+    if (nextParen == std::string_view::npos && nextFile == std::string_view::npos) break;
+
+    // Handle File: pattern if it comes before next paren
+    if (nextFile != std::string_view::npos &&
+        (nextParen == std::string_view::npos || nextFile < nextParen)) {
+      auto fq = line.find('"', nextFile + 5);
+      if (fq == std::string_view::npos) { pos = nextFile + 5; continue; }
+      auto fqe = line.find('"', fq + 1);
+      if (fqe == std::string_view::npos) { pos = fq + 1; continue; }
+      std::string_view name = line.substr(fq + 1, fqe - (fq + 1));
+      if (LooksLikePluginExtension(name) && name.find(' ') == std::string_view::npos) {
+        results.emplace_back(name);
+      }
+      pos = fqe + 1;
+      continue;
+    }
+
+    // Handle paren pattern: ("ModName.esp") or (ModName.esm)
+    auto cp = line.find(')', nextParen + 1);
+    if (cp == std::string_view::npos) { pos = nextParen + 1; continue; }
+
+    // Check for quoted: ("...")
+    if (nextParen + 1 < line.size() && line[nextParen + 1] == '"') {
+      // Look for closing ")
+      auto endq = line.find("\")", nextParen + 2);
+      if (endq != std::string_view::npos) {
+        std::string_view name = line.substr(nextParen + 2, endq - (nextParen + 2));
+        if (LooksLikePluginExtension(name) && name.find(' ') == std::string_view::npos) {
+          results.emplace_back(name);
+        }
+        pos = endq + 2;
+      } else {
+        pos = nextParen + 2; // malformed, skip past ("
+      }
+      continue;
+    }
+
+    // Unquoted: (ModName.esm)
+    std::string_view inside = line.substr(nextParen + 1, cp - (nextParen + 1));
+    while (!inside.empty() && (inside.front() == ' ' || inside.front() == '\t')) inside.remove_prefix(1);
+    while (!inside.empty() && (inside.back() == ' ' || inside.back() == '\t')) inside.remove_suffix(1);
+    if (LooksLikePluginExtension(inside) && inside.find(' ') == std::string_view::npos) {
+      results.emplace_back(inside);
+    }
+    pos = cp + 1;
+  }
+
+  return results;
+}
+
+// Extract object type from a line like: `(Character*) "Name" [0x...]`
+inline std::string ExtractObjectType(std::string_view line)
+{
+  // Find pattern: (TypeName*)
+  auto open = line.find('(');
+  while (open != std::string_view::npos) {
+    auto close = line.find(')', open + 1);
+    if (close == std::string_view::npos) break;
+    std::string_view inside = line.substr(open + 1, close - (open + 1));
+    // Check if it ends with '*' (pointer type) and is alphanumeric
+    if (!inside.empty() && inside.back() == '*') {
+      // Ensure it's not an ESP name
+      if (!LooksLikePluginExtension(inside)) {
+        return std::string(inside);
+      }
+    }
+    open = line.find('(', close + 1);
+  }
+  return {};
+}
+
+// Extract quoted object name from a line: "도로롱"
+inline std::string ExtractObjectName(std::string_view line)
+{
+  // Find pattern: ) "Name" [ — the name is between the type close-paren and a form ID bracket
+  auto typeEnd = line.find("*) ");
+  if (typeEnd == std::string_view::npos) return {};
+  auto afterType = line.substr(typeEnd + 3);
+  if (afterType.empty() || afterType[0] != '"') return {};
+  auto endq = afterType.find('"', 1);
+  if (endq == std::string_view::npos) return {};
+  return std::string(afterType.substr(1, endq - 1));
+}
+
+// Extract register/location from line start: "RDI:", "RSP+360:"
+inline std::string ExtractLocation(std::string_view trimmed)
+{
+  auto colon = trimmed.find(':');
+  if (colon == std::string_view::npos || colon == 0) return {};
+  std::string_view loc = trimmed.substr(0, colon);
+  // Trim whitespace from loc
+  while (!loc.empty() && (loc.back() == ' ' || loc.back() == '\t')) loc.remove_suffix(1);
+  return std::string(loc);
+}
+
+inline std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_view logUtf8)
+{
+  std::vector<CrashLoggerObjectRef> results;
+  if (logUtf8.empty()) return results;
+
+  std::istringstream iss{std::string(logUtf8)};
+  std::string line;
+
+  enum class Section { kNone, kPossibleObjects, kRegisters };
+  Section section = Section::kNone;
+  std::string currentRegister; // for REGISTERS sub-lines
+
+  while (std::getline(iss, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+
+    // Section detection
+    if (ContainsCaseInsensitiveAscii(line, "POSSIBLE RELEVANT OBJECTS")) {
+      section = Section::kPossibleObjects;
+      continue;
+    }
+    if (ContainsCaseInsensitiveAscii(line, "REGISTERS:")) {
+      section = Section::kRegisters;
+      currentRegister.clear();
+      continue;
+    }
+    // End of sections
+    if (section != Section::kNone) {
+      if (ContainsCaseInsensitiveAscii(line, "MODULES:") ||
+          ContainsCaseInsensitiveAscii(line, "PROBABLE CALL STACK") ||
+          ContainsCaseInsensitiveAscii(line, "STACK:") ||
+          ContainsCaseInsensitiveAscii(line, "C++ EXCEPTION:")) {
+        if (section == Section::kPossibleObjects) {
+          section = Section::kRegisters; // might follow
+          if (ContainsCaseInsensitiveAscii(line, "REGISTERS:")) {
+            currentRegister.clear();
+            continue;
+          }
+          section = Section::kNone;
+        } else {
+          section = Section::kNone;
+        }
+        continue;
+      }
+    }
+
+    if (section == Section::kPossibleObjects) {
+      const std::string_view trimmed = TrimLeftAscii(line);
+      if (trimmed.empty()) continue;
+
+      // Skip "Modified by:" lines — these track record edit chains, not ownership
+      if (StartsWithCaseInsensitiveAscii(trimmed, "Modified by:")) {
+        continue;
+      }
+
+      // Extract location (register name at line start)
+      std::string location = ExtractLocation(trimmed);
+      if (location.empty()) continue;
+
+      // Extract object type
+      std::string objType = ExtractObjectType(trimmed);
+
+      // Extract object name
+      std::string objName = ExtractObjectName(trimmed);
+
+      // Extract ESP names
+      auto espNames = ExtractEspNamesFromLine(trimmed);
+      if (espNames.empty()) continue;
+
+      for (const auto& esp : espNames) {
+        const std::string lower = AsciiLower(esp);
+        if (IsVanillaDlcEspAsciiLower(lower)) continue;
+
+        CrashLoggerObjectRef ref;
+        ref.location = location;
+        ref.object_type = objType;
+        ref.esp_name = esp;
+        ref.object_name = objName;
+        ref.relevance_score = LocationWeight(location) + TypeWeight(objType);
+        results.push_back(std::move(ref));
+      }
+    } else if (section == Section::kRegisters) {
+      const std::string_view trimmed = TrimLeftAscii(line);
+      if (trimmed.empty()) {
+        // Blank line might end REGISTERS section
+        section = Section::kNone;
+        continue;
+      }
+
+      // Top-level register line: "RDI: (Character*) ..."
+      // Sub-line (indented): "\tName: ...", "\tFile: ..."
+      bool isSubLine = (!line.empty() && (line[0] == '\t' || line[0] == ' '));
+
+      // If the top-level line has a colon and starts with a register name
+      if (!isSubLine) {
+        // Parse as register line
+        std::string location = ExtractLocation(trimmed);
+        if (!location.empty()) {
+          currentRegister = location;
+          // Try inline ESP extraction
+          auto espNames = ExtractEspNamesFromLine(trimmed);
+          std::string objType = ExtractObjectType(trimmed);
+          std::string objName = ExtractObjectName(trimmed);
+          for (const auto& esp : espNames) {
+            const std::string lower = AsciiLower(esp);
+            if (IsVanillaDlcEspAsciiLower(lower)) continue;
+            CrashLoggerObjectRef ref;
+            ref.location = currentRegister;
+            ref.object_type = objType;
+            ref.esp_name = esp;
+            ref.object_name = objName;
+            ref.relevance_score = LocationWeight(currentRegister) + TypeWeight(objType);
+            results.push_back(std::move(ref));
+          }
+        }
+      } else {
+        // Sub-line: check for File: pattern
+        if (!currentRegister.empty()) {
+          // Skip "Modified by:" sub-lines
+          if (StartsWithCaseInsensitiveAscii(trimmed, "Modified by:") ||
+              StartsWithCaseInsensitiveAscii(trimmed, "modified by:")) {
+            continue;
+          }
+          auto espNames = ExtractEspNamesFromLine(trimmed);
+          for (const auto& esp : espNames) {
+            const std::string lower = AsciiLower(esp);
+            if (IsVanillaDlcEspAsciiLower(lower)) continue;
+            CrashLoggerObjectRef ref;
+            ref.location = currentRegister;
+            ref.object_type = "";
+            ref.esp_name = esp;
+            ref.relevance_score = LocationWeight(currentRegister) + TypeWeight("");
+            results.push_back(std::move(ref));
+          }
+        }
+      }
+    }
+  }
+
+  // Sort by relevance_score descending
+  std::sort(results.begin(), results.end(), [](const CrashLoggerObjectRef& a, const CrashLoggerObjectRef& b) {
+    return a.relevance_score > b.relevance_score;
+  });
+
+  return results;
+}
+
+inline std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
+    const std::vector<CrashLoggerObjectRef>& refs)
+{
+  // Group by ESP name (case-insensitive)
+  struct Group {
+    std::string canonical_esp;
+    std::string best_object_type;
+    std::string best_location;
+    std::string object_name;
+    std::uint32_t ref_count = 0;
+    std::uint32_t max_score = 0;
+  };
+
+  std::unordered_map<std::string, std::size_t> indexByLower;
+  std::vector<Group> groups;
+
+  for (const auto& ref : refs) {
+    const std::string lower = AsciiLower(ref.esp_name);
+    auto it = indexByLower.find(lower);
+    if (it == indexByLower.end()) {
+      indexByLower[lower] = groups.size();
+      Group g;
+      g.canonical_esp = ref.esp_name;
+      g.best_object_type = ref.object_type;
+      g.best_location = ref.location;
+      g.object_name = ref.object_name;
+      g.ref_count = 1;
+      g.max_score = ref.relevance_score;
+      groups.push_back(std::move(g));
+    } else {
+      auto& g = groups[it->second];
+      g.ref_count++;
+      if (ref.relevance_score > g.max_score) {
+        g.max_score = ref.relevance_score;
+        g.best_object_type = ref.object_type;
+        g.best_location = ref.location;
+      }
+      if (g.object_name.empty() && !ref.object_name.empty()) {
+        g.object_name = ref.object_name;
+      }
+    }
+  }
+
+  // Sort by max_score descending
+  std::sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) {
+    return a.max_score > b.max_score;
+  });
+
+  // Return top 8 as CrashLoggerObjectRef
+  std::vector<CrashLoggerObjectRef> result;
+  result.reserve(std::min<std::size_t>(groups.size(), 8));
+  for (const auto& g : groups) {
+    if (result.size() >= 8) break;
+    CrashLoggerObjectRef r;
+    r.location = g.best_location;
+    r.object_type = g.best_object_type;
+    r.esp_name = g.canonical_esp;
+    r.object_name = g.object_name;
+    r.relevance_score = g.max_score;
+    result.push_back(std::move(r));
+  }
+  return result;
+}
+
 }  // namespace crashlogger_core
 
 using crashlogger_core::LooksLikeCrashLoggerLogTextCore;

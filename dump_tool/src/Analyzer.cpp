@@ -697,6 +697,28 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
               out.crash_logger_cpp_exception_module = (it != canonicalByLower.end()) ? it->second : mod;
             }
           }
+
+          // Parse referenced game objects (ESP/ESM) from CrashLogger log
+          {
+            auto rawRefs = crashlogger_core::ParseCrashLoggerObjectRefsAscii(*logUtf8);
+            auto aggRefs = crashlogger_core::AggregateCrashLoggerObjectRefs(rawRefs);
+            // Build ref_count from rawRefs (case-insensitive ESP grouping)
+            std::unordered_map<std::string, std::uint32_t> espCount;
+            for (const auto& raw : rawRefs) {
+              espCount[crashlogger_core::AsciiLower(raw.esp_name)]++;
+            }
+            for (const auto& agg : aggRefs) {
+              AnalysisResult::CrashLoggerModReference modRef;
+              modRef.esp_name = Utf8ToWide(agg.esp_name);
+              modRef.best_object_type = Utf8ToWide(agg.object_type);
+              modRef.best_location = Utf8ToWide(agg.location);
+              modRef.object_name = Utf8ToWide(agg.object_name);
+              auto cit = espCount.find(crashlogger_core::AsciiLower(agg.esp_name));
+              modRef.ref_count = (cit != espCount.end()) ? cit->second : 1;
+              modRef.relevance_score = agg.relevance_score;
+              out.crash_logger_object_refs.push_back(std::move(modRef));
+            }
+          }
         }
       }
     }

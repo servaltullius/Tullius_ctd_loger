@@ -139,6 +139,20 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     summary["crash_logger"]["cpp_exception"]["module"] = WideToUtf8(r.crash_logger_cpp_exception_module);
   }
 
+  if (!r.crash_logger_object_refs.empty()) {
+    summary["crash_logger"]["object_refs"] = nlohmann::json::array();
+    for (const auto& ref : r.crash_logger_object_refs) {
+      summary["crash_logger"]["object_refs"].push_back({
+        { "esp_name", WideToUtf8(ref.esp_name) },
+        { "best_object_type", WideToUtf8(ref.best_object_type) },
+        { "best_location", WideToUtf8(ref.best_location) },
+        { "object_name", WideToUtf8(ref.object_name) },
+        { "ref_count", ref.ref_count },
+        { "relevance_score", ref.relevance_score },
+      });
+    }
+  }
+
   if (r.signature_match.has_value()) {
     summary["signature_match"] = {
       { "id", r.signature_match->id },
@@ -386,6 +400,19 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     rpt << (en ? "CrashLoggerCppExceptionInfo: " : "Crash Logger C++ 예외 Info: ") << WideToUtf8(r.crash_logger_cpp_exception_info) << "\n";
     rpt << (en ? "CrashLoggerCppExceptionThrowLocation: " : "Crash Logger C++ 예외 Throw Location: ") << WideToUtf8(r.crash_logger_cpp_exception_throw_location) << "\n";
     rpt << (en ? "CrashLoggerCppExceptionModule: " : "Crash Logger C++ 예외 Module: ") << WideToUtf8(r.crash_logger_cpp_exception_module) << "\n";
+  }
+  if (!r.crash_logger_object_refs.empty()) {
+    rpt << (en ? "CrashLoggerObjectRefs: " : "Crash Logger 오브젝트 참조: ");
+    bool first = true;
+    for (const auto& ref : r.crash_logger_object_refs) {
+      if (!first) rpt << ", ";
+      rpt << WideToUtf8(ref.esp_name);
+      if (!ref.best_object_type.empty()) {
+        rpt << " [" << WideToUtf8(ref.best_object_type) << "]";
+      }
+      first = false;
+    }
+    rpt << "\n";
   }
   rpt << (en ? "StateFlags: " : "StateFlags: ") << r.state_flags << "\n";
   rpt << (en ? "HasBlackbox: " : "HasBlackbox: ") << (r.has_blackbox ? "1" : "0") << "\n";

@@ -95,6 +95,17 @@ struct AnalysisResult
   std::wstring crash_logger_cpp_exception_throw_location;
   std::wstring crash_logger_cpp_exception_module;
 
+  // CrashLogger: referenced game objects (ESP/ESM) at crash time
+  struct CrashLoggerModReference {
+    std::wstring esp_name;
+    std::wstring best_object_type;
+    std::wstring best_location;
+    std::wstring object_name;
+    std::uint32_t ref_count = 0;
+    std::uint32_t relevance_score = 0;
+  };
+  std::vector<CrashLoggerModReference> crash_logger_object_refs;
+
   // Heuristic: suspects inferred from stack/module scanning
   std::vector<SuspectItem> suspects;
   bool suspects_from_stackwalk = false;
