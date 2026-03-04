@@ -1,8 +1,9 @@
 # Changelog
 
-## v0.2.42 (2026-03-04)
+## v0.2.42 (2026-03-05)
 
 ### 추가
+- **DumpTool: CrashLogger ESP/ESM 오브젝트 참조 파싱** — CrashLogger의 POSSIBLE RELEVANT OBJECTS / REGISTERS 섹션에서 크래시 시점에 처리 중이던 게임 오브젝트의 소속 ESP/ESM을 파싱. 게임 EXE 내부 크래시에서 DLL 기반 용의자를 특정할 수 없을 때 "어떤 모드의 오브젝트를 처리 중이었는지" 증거와 권장 조치를 제공.
 - **Helper: NGIO 잔디 캐싱 모드 자동 감지** — Skyrim 루트에 `PrecacheGrass.txt`가 있으면 크래시/행 감지를 모두 억제하고 경량 대기 루프로 전환. MO2 GrassPrecacher의 자동 재시작 사이클이 Helper 팝업에 의해 방해받지 않음.
 - Helper: `SuppressDuringGrassCaching` INI 옵션 추가 (기본값 1). 0으로 설정 시 잔디 캐싱 모드 감지 비활성화.
 - DumpTool: `IsSystemishModule` D3D/DXGI/OpenGL/디버깅 DLL 13종 추가 — 그래픽 드라이버 DLL이 용의자로 잘못 표시되는 문제 완화.
@@ -22,6 +23,7 @@
 
 ### 테스트
 - CrashLogger 타임스탬프 파싱 테스트 13개 추가 (Compact/Dashed 포맷, 유효성 검증, 엣지케이스).
+- CrashLogger ESP/ESM 오브젝트 참조 파싱 테스트 16개 추가 (바닐라/CC 필터, Modified by 스킵, 유니코드 이름, 스코어링, 집계, malformed 입력 방어).
 
 ## v0.2.41 (2026-02-28)
 
