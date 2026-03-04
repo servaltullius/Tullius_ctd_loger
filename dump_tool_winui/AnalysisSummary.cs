@@ -21,6 +21,7 @@ internal sealed class AnalysisSummary
     public int HistoryCorrelationCount { get; init; }
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
+    public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
     {
@@ -38,6 +39,15 @@ internal sealed class AnalysisSummary
                 ReadString(item, "module_path"),
                 ReadString(item, "inferred_mod_name")),
             ReadString(item, "reason")));
+
+        var crashLoggerNode = root.TryGetProperty("crash_logger", out var clNode) ? clNode : default;
+        var crashLoggerRefs = ParseObjectArray(crashLoggerNode, "object_refs", item => new CrashLoggerRefItem(
+            ReadString(item, "esp_name"),
+            ReadString(item, "best_object_type"),
+            ReadString(item, "best_location"),
+            ReadString(item, "object_name"),
+            ReadInt32(item, "ref_count"),
+            ReadInt32(item, "relevance_score")));
 
         var recommendations = ParseStringArray(root, "recommendations");
         var callstackFrames = ParseStringArray(root, "callstack.frames");
@@ -67,6 +77,7 @@ internal sealed class AnalysisSummary
             CrashBucketKey = ReadString(root, "crash_bucket_key"),
             ModulePlusOffset = ReadString(exception, "module_plus_offset"),
             InferredModName = FirstNonEmpty(
+                crashLoggerRefs.FirstOrDefault()?.EspName ?? string.Empty,
                 ReadString(exception, "inferred_mod_name"),
                 suspects.FirstOrDefault()?.Module ?? string.Empty),
             IsCrashLike = ReadBool(analysis, "is_crash_like"),
@@ -77,6 +88,7 @@ internal sealed class AnalysisSummary
             Recommendations = recommendations,
             CallstackFrames = callstackFrames,
             EvidenceItems = evidenceItems,
+            CrashLoggerRefs = crashLoggerRefs,
             ResourceItems = resourceItems,
             HistoryCorrelationCount = root.TryGetProperty("history_correlation", out var histCorr)
                 && histCorr.ValueKind == JsonValueKind.Object
@@ -151,6 +163,15 @@ internal sealed class AnalysisSummary
                (child.ValueKind == JsonValueKind.Number && child.TryGetInt32(out var n) && n != 0);
     }
 
+    private static int ReadInt32(JsonElement node, string name)
+    {
+        if (node.ValueKind == JsonValueKind.Undefined ||
+            node.ValueKind == JsonValueKind.Null ||
+            !node.TryGetProperty(name, out var child))
+            return 0;
+        return child.TryGetInt32(out var n) ? n : 0;
+    }
+
     private static string FirstNonEmpty(params string[] values)
     {
         foreach (var value in values)
@@ -167,3 +188,6 @@ internal sealed class AnalysisSummary
 public sealed record SuspectItem(string Confidence, string Module, string Reason);
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
+public sealed record CrashLoggerRefItem(
+    string EspName, string ObjectType, string Location,
+    string ObjectName, int RefCount, int RelevanceScore);

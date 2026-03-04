@@ -386,18 +386,34 @@ public sealed partial class MainWindow : Window
             ? T("Fault module: unavailable", "오류 모듈: 없음")
             : T("Fault module: ", "오류 모듈: ") + summary.ModulePlusOffset;
 
-        ModNameText.Text = string.IsNullOrWhiteSpace(summary.InferredModName)
-            ? T("Inferred mod: unavailable", "추정 모드: 없음")
-            : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
+        if (summary.CrashLoggerRefs.Count > 0 && !string.IsNullOrWhiteSpace(summary.InferredModName))
+            ModNameText.Text = T("Referenced mod: ", "참조 모드: ") + summary.InferredModName;
+        else
+            ModNameText.Text = string.IsNullOrWhiteSpace(summary.InferredModName)
+                ? T("Inferred mod: unavailable", "추정 모드: 없음")
+                : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
 
         CopySummaryButton.IsEnabled = true;
         CopyShareButton.IsEnabled = true;
 
         _suspects.Clear();
-        foreach (var suspect in summary.Suspects.Take(5))
+
+        // CrashLogger ESP refs → SuspectItem (상위 3개)
+        foreach (var espRef in summary.CrashLoggerRefs.Take(3))
+        {
+            _suspects.Add(new SuspectItem(
+                MapRelevanceToConfidence(espRef.RelevanceScore),
+                espRef.EspName,
+                BuildEspRefReason(espRef)));
+        }
+
+        // DLL suspects (ESP와 합쳐 최대 7개)
+        var dllSlots = Math.Max(0, 7 - _suspects.Count);
+        foreach (var suspect in summary.Suspects.Take(dllSlots))
         {
             _suspects.Add(suspect);
         }
+
         if (_suspects.Count == 0)
         {
             _suspects.Add(new SuspectItem(
@@ -412,6 +428,11 @@ public sealed partial class MainWindow : Window
         QuickConfidenceValueText.Text = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
             ? T("Unrated", "미평가")
             : primarySuspect.Confidence;
+
+        if (summary.CrashLoggerRefs.Count > 0)
+            QuickPrimaryLabelText.Text = T("Referenced mod (ESP)", "참조 모드 (ESP)");
+        else
+            QuickPrimaryLabelText.Text = T("Primary suspect", "주요 원인");
 
         _recommendations.Clear();
         foreach (var recommendation in summary.Recommendations.Take(12))
@@ -565,6 +586,12 @@ public sealed partial class MainWindow : Window
             lines.Add((_isKorean ? "추정 모드: " : "Inferred mod: ") + summary.InferredModName);
         }
 
+        if (summary.CrashLoggerRefs.Count > 0)
+        {
+            var espNames = string.Join(", ", summary.CrashLoggerRefs.Select(r => r.EspName));
+            lines.Add((_isKorean ? "CrashLogger 참조 모드: " : "CrashLogger referenced mods: ") + espNames);
+        }
+
         return string.Join(Environment.NewLine, lines);
     }
 
@@ -619,7 +646,17 @@ public sealed partial class MainWindow : Window
                 ? (_isKorean ? "🟠 Skyrim 프리징/무한로딩 리포트 — SkyrimDiag" : "🟠 Skyrim Freeze/ILS Report — SkyrimDiag")
                 : (_isKorean ? "🔴 Skyrim CTD 리포트 — SkyrimDiag" : "🔴 Skyrim CTD Report — SkyrimDiag"));
 
-        if (summary.Suspects.Count > 0)
+        if (summary.CrashLoggerRefs.Count > 0)
+        {
+            lines.Add($"📌 {(_isKorean ? "참조 모드 (ESP)" : "Referenced mod (ESP)")}: {summary.CrashLoggerRefs[0].EspName}");
+            if (summary.Suspects.Count > 0)
+            {
+                var topSuspect = summary.Suspects[0];
+                var conf = !string.IsNullOrWhiteSpace(topSuspect.Confidence) ? topSuspect.Confidence : "?";
+                lines.Add($"🔧 {(_isKorean ? "DLL 후보" : "DLL suspect")}: {topSuspect.Module} ({conf})");
+            }
+        }
+        else if (summary.Suspects.Count > 0)
         {
             var top = summary.Suspects[0];
             var conf = !string.IsNullOrWhiteSpace(top.Confidence) ? top.Confidence : "?";
@@ -981,6 +1018,29 @@ public sealed partial class MainWindow : Window
         OutputDirBox.IsEnabled = !isBusy;
         OpenOutputButton.IsEnabled = !isBusy;
         StatusText.Text = message;
+    }
+
+    private string BuildEspRefReason(CrashLoggerRefItem espRef)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(espRef.ObjectType))
+            parts.Add(espRef.ObjectType);
+        if (!string.IsNullOrWhiteSpace(espRef.ObjectName))
+            parts.Add($"\"{espRef.ObjectName}\"");
+        if (!string.IsNullOrWhiteSpace(espRef.Location))
+            parts.Add(_isKorean ? $"{espRef.Location}에서 발견" : $"found in {espRef.Location}");
+        if (espRef.RefCount > 1)
+            parts.Add(_isKorean ? $"참조 {espRef.RefCount}건" : $"{espRef.RefCount} refs");
+        return parts.Count == 0
+            ? T("ESP/ESM object reference", "ESP/ESM 오브젝트 참조")
+            : string.Join(" — ", parts);
+    }
+
+    private string MapRelevanceToConfidence(int score)
+    {
+        if (score >= 16) return T("ESP ref (high)", "ESP 참조 (높음)");
+        if (score >= 10) return T("ESP ref", "ESP 참조");
+        return T("ESP ref (low)", "ESP 참조 (낮음)");
     }
 
     private string T(string en, string ko)

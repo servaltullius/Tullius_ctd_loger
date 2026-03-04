@@ -12,6 +12,7 @@
 - DumpTool: CrashLogger 타임스탬프 파싱 함수 (`TryExtractCompactTimestampFromStem`, `TryExtractDashedTimestampFromStem`) 추가 + 검증 테스트 13개.
 
 ### 수정
+- **WinUI: Quick Summary 카드에 CrashLogger ESP/ESM 우선 표시** — 기존에 DLL 스택 스캔만 표시하던 Quick Summary 카드, 후보 목록, 공유 텍스트를 CrashLogger ESP 참조 우선으로 개편. 요약 문장과 UI가 일치하도록 수정.
 - DumpTool: CrashLogger 시간 매칭 창 30분→5분 축소 — 무관한 과거 로그 매칭 방지.
 
 ### 리팩터링
