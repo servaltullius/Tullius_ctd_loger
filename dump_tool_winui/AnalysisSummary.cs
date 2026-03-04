@@ -130,7 +130,8 @@ internal sealed class AnalysisSummary
         Func<JsonElement, T> mapper)
     {
         var result = new List<T>();
-        if (!root.TryGetProperty(propertyName, out var node) ||
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty(propertyName, out var node) ||
             node.ValueKind != JsonValueKind.Array)
             return result;
         foreach (var item in node.EnumerateArray())
