@@ -17,11 +17,7 @@ using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
 using skydiag::dump_tool::minidump::ThreadRecord;
 using skydiag::dump_tool::minidump::WideLower;
-
-std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
-{
-  return std::wstring(i18n::ConfidenceLabel(lang, level));
-}
+using skydiag::dump_tool::i18n::ConfidenceText;
 
 }  // namespace
 

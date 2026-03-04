@@ -4,6 +4,7 @@
 #include "CrashHistory.h"
 #include "EvidenceBuilder.h"
 #include "GraphicsInjectionDiag.h"
+#include "TroubleshootingGuide.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
 #include "AnalyzerInternals.h"
@@ -25,6 +26,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -74,47 +76,56 @@ std::string NowIso8601Utc()
   return buf;
 }
 
+// Uses a Windows Named Mutex instead of a directory-based lock.
+// Named Mutex is automatically released by the OS when the owning process terminates,
+// preventing stale locks after crashes.
 class ScopedHistoryFileLock
 {
 public:
   explicit ScopedHistoryFileLock(const std::filesystem::path& historyPath)
-    : m_lockDir(historyPath.wstring() + L".lock")
   {
+    // Derive a unique mutex name from the history file path.
+    std::wstring name = L"Local\\SkyrimDiag_HistoryLock_";
+    // Use a simple hash of the path to keep the name short and unique.
+    std::hash<std::wstring> hasher;
+    name += std::to_wstring(hasher(historyPath.wstring()));
+    m_mutex = CreateMutexW(nullptr, FALSE, name.c_str());
   }
 
-  bool Acquire(DWORD timeoutMs, DWORD pollMs = 25)
+  bool Acquire(DWORD timeoutMs, [[maybe_unused]] DWORD pollMs = 25)
   {
     if (m_acquired) {
       return true;
     }
-    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
-    for (;;) {
-      std::error_code ec;
-      if (std::filesystem::create_directory(m_lockDir, ec)) {
-        m_acquired = true;
-        return true;
-      }
-      if (ec && ec != std::errc::file_exists) {
-        return false;
-      }
-      if (GetTickCount64() >= deadline) {
-        return false;
-      }
-      Sleep(pollMs);
+    if (!m_mutex) {
+      return false;
     }
+    const DWORD result = WaitForSingleObject(m_mutex, timeoutMs);
+    if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED) {
+      if (result == WAIT_ABANDONED) {
+        OutputDebugStringW(L"SkyrimDiag: history lock acquired via WAIT_ABANDONED (previous owner crashed)\n");
+      }
+      m_acquired = true;
+      return true;
+    }
+    return false;
   }
 
   ~ScopedHistoryFileLock()
   {
-    if (!m_acquired) {
-      return;
+    if (m_acquired && m_mutex) {
+      ReleaseMutex(m_mutex);
     }
-    std::error_code ec;
-    std::filesystem::remove(m_lockDir, ec);
+    if (m_mutex) {
+      CloseHandle(m_mutex);
+    }
   }
 
+  ScopedHistoryFileLock(const ScopedHistoryFileLock&) = delete;
+  ScopedHistoryFileLock& operator=(const ScopedHistoryFileLock&) = delete;
+
 private:
-  std::filesystem::path m_lockDir;
+  HANDLE m_mutex = nullptr;
   bool m_acquired = false;
 };
 
@@ -136,26 +147,21 @@ bool TryReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
   return true;
 }
 
-std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
-{
-  return std::wstring(i18n::ConfidenceLabel(lang, level));
-}
+// Bonus scores for Crash Logger top-module ranking.
+// Crash Logger already identifies likely suspects; higher rank → higher bonus.
+constexpr std::uint32_t kCrashLoggerBonusRank0 = 18u;  // top suspect
+constexpr std::uint32_t kCrashLoggerBonusRank1 = 14u;
+constexpr std::uint32_t kCrashLoggerBonusRank2 = 10u;
+constexpr std::uint32_t kCrashLoggerBonusRank3to4 = 8u;
+constexpr std::uint32_t kCrashLoggerBonusDeep   = 6u;  // rank > 4
 
 std::uint32_t CrashLoggerRankBonus(std::size_t rank)
 {
-  if (rank == 0) {
-    return 18u;
-  }
-  if (rank == 1) {
-    return 14u;
-  }
-  if (rank == 2) {
-    return 10u;
-  }
-  if (rank <= 4) {
-    return 8u;
-  }
-  return 6u;
+  if (rank == 0) return kCrashLoggerBonusRank0;
+  if (rank == 1) return kCrashLoggerBonusRank1;
+  if (rank == 2) return kCrashLoggerBonusRank2;
+  if (rank <= 4) return kCrashLoggerBonusRank3to4;
+  return kCrashLoggerBonusDeep;
 }
 
 void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
@@ -253,7 +259,7 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
     } else if (out->suspects[0].confidence_level == i18n::ConfidenceLevel::kLow) {
       out->suspects[0].confidence_level = i18n::ConfidenceLevel::kMedium;
     }
-    out->suspects[0].confidence = ConfidenceText(out->language, out->suspects[0].confidence_level);
+    out->suspects[0].confidence = i18n::ConfidenceText(out->language, out->suspects[0].confidence_level);
   }
 }
 
@@ -515,7 +521,10 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         }
 
         // Cap display size (best-effort) to keep UI/report manageable.
-        constexpr std::size_t kMaxKeep = 80;
+        // Keep the last N resources, which are closest to the crash anchor.
+        // When many resources exist, also ensure resources from key asset types
+        // (nif/hkx/tri) near the end are preserved since they're most relevant.
+        constexpr std::size_t kMaxKeep = 120;
         if (out.resources.size() > kMaxKeep) {
           out.resources.erase(out.resources.begin(), out.resources.end() - kMaxKeep);
         }
@@ -824,61 +833,19 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // Best-effort troubleshooting guide matching.
   if (!opt.data_dir.empty()) {
+    TroubleshootingGuideDatabase tsDb;
     const auto guidesPath = std::filesystem::path(opt.data_dir) / L"troubleshooting_guides.json";
-    try {
-      std::ifstream gf(guidesPath);
-      if (gf.is_open()) {
-        const auto gj = nlohmann::json::parse(gf, nullptr, true);
-        if (gj.contains("guides") && gj["guides"].is_array()) {
-          const bool en = (opt.language == i18n::Language::kEnglish);
-          const std::string excHex = [&]() {
-            char buf[32]{};
-            if (out.exc_code != 0) {
-              snprintf(buf, sizeof(buf), "0x%08X", out.exc_code);
-            }
-            return std::string(buf);
-          }();
-          const std::string sigId = out.signature_match ? out.signature_match->id : "";
-          const bool isHang = hangLike;
-          const bool isLoading = (out.state_flags & skydiag::kState_Loading) != 0u;
-          const bool isSnapshot = (out.exc_code == 0 && !hangLike);
-
-          for (const auto& guide : gj["guides"]) {
-            if (!guide.is_object() || !guide.contains("match")) continue;
-            const auto& match = guide["match"];
-            bool matched = true;
-
-            if (match.contains("exc_code")) {
-              if (match.value("exc_code", "") != excHex) { matched = false; }
-            }
-            if (matched && match.contains("signature_id")) {
-              if (match.value("signature_id", "") != sigId) { matched = false; }
-            }
-            if (matched && match.contains("state_flags_contains")) {
-              const auto req = match.value("state_flags_contains", "");
-              if (req == "hang" && !isHang) { matched = false; }
-              if (req == "loading" && !isLoading) { matched = false; }
-              if (req == "snapshot" && !isSnapshot) { matched = false; }
-            }
-
-            if (matched) {
-              const std::string titleKey = en ? "title_en" : "title_ko";
-              const std::string stepsKey = en ? "steps_en" : "steps_ko";
-              out.troubleshooting_title = Utf8ToWide(guide.value(titleKey, guide.value("title_en", "")));
-              if (guide.contains(stepsKey) && guide[stepsKey].is_array()) {
-                for (const auto& step : guide[stepsKey]) {
-                  if (step.is_string()) {
-                    out.troubleshooting_steps.push_back(Utf8ToWide(step.get<std::string>()));
-                  }
-                }
-              }
-              break;  // first match wins
-            }
-          }
-        }
+    if (tsDb.LoadFromJson(guidesPath)) {
+      TroubleshootingMatchInput tsInput{};
+      tsInput.exc_code = out.exc_code;
+      tsInput.signature_id = out.signature_match ? out.signature_match->id : "";
+      tsInput.is_hang = hangLike;
+      tsInput.is_loading = (out.state_flags & skydiag::kState_Loading) != 0u;
+      tsInput.is_snapshot = (out.exc_code == 0 && !hangLike);
+      if (auto result = tsDb.Match(tsInput, opt.language)) {
+        out.troubleshooting_title = std::move(result->title);
+        out.troubleshooting_steps = std::move(result->steps);
       }
-    } catch (...) {
-      // Best-effort; silently skip on failure.
     }
   }
 

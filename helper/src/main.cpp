@@ -19,6 +19,7 @@
 
 #include "CrashCapture.h"
 #include "CaptureCommon.h"
+#include "HexFormat.h"
 #include "CompatibilityPreflight.h"
 #include "CrashEtwCapture.h"
 #include "DumpToolLaunch.h"
@@ -55,23 +56,8 @@ using skydiag::helper::internal::HangTickResult;
 using skydiag::helper::internal::HandleHangTick;
 
 using skydiag::helper::internal::StartDumpToolViewer;
-
-std::wstring Hex32(std::uint32_t v)
-{
-  wchar_t buf[11]{};
-  std::swprintf(buf, 11, L"0x%08X", static_cast<unsigned int>(v));
-  return buf;
-}
-
-std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)
-{
-  std::wstring name;
-  name.reserve(64);
-  name.append(skydiag::protocol::kKernelObjectPrefix);
-  name.append(std::to_wstring(pid));
-  name.append(suffix);
-  return name;
-}
+using skydiag::helper::internal::Hex32;
+using skydiag::protocol::MakeKernelName;
 
 HANDLE AcquireHelperSingletonMutex(std::uint32_t pid, std::wstring* err)
 {

@@ -449,6 +449,91 @@ inline std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string
   return out;
 }
 
+// Parsed date/time components from a filename pattern.
+struct ParsedTimestamp
+{
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+};
+
+// Extract YYYYMMDD_HHMMSS from a filename stem. Returns the first valid match found.
+inline std::optional<ParsedTimestamp> TryExtractCompactTimestampFromStem(std::wstring_view stem)
+{
+  const auto is_digits = [](std::wstring_view s) {
+    for (wchar_t c : s) {
+      if (c < L'0' || c > L'9') return false;
+    }
+    return true;
+  };
+
+  for (std::size_t i = 0; i + 15 <= stem.size(); i++) {
+    const std::wstring_view date = stem.substr(i, 8);
+    if (!is_digits(date)) continue;
+    if (stem[i + 8] != L'_') continue;
+    const std::wstring_view time = stem.substr(i + 9, 6);
+    if (!is_digits(time)) continue;
+
+    ParsedTimestamp ts{};
+    ts.year   = std::stoi(std::wstring(stem.substr(i, 4)));
+    ts.month  = std::stoi(std::wstring(stem.substr(i + 4, 2)));
+    ts.day    = std::stoi(std::wstring(stem.substr(i + 6, 2)));
+    ts.hour   = std::stoi(std::wstring(stem.substr(i + 9, 2)));
+    ts.minute = std::stoi(std::wstring(stem.substr(i + 11, 2)));
+    ts.second = std::stoi(std::wstring(stem.substr(i + 13, 2)));
+
+    if (ts.month < 1 || ts.month > 12 || ts.day < 1 || ts.day > 31 ||
+        ts.hour < 0 || ts.hour > 23 || ts.minute < 0 || ts.minute > 59 ||
+        ts.second < 0 || ts.second > 59) continue;
+
+    return ts;
+  }
+  return std::nullopt;
+}
+
+// Extract YYYY-MM-DD-HH-MM-SS from a filename stem (Crash Logger format).
+inline std::optional<ParsedTimestamp> TryExtractDashedTimestampFromStem(std::wstring_view stem)
+{
+  const auto is_digits = [](std::wstring_view s) {
+    for (wchar_t c : s) {
+      if (c < L'0' || c > L'9') return false;
+    }
+    return true;
+  };
+
+  for (std::size_t i = 0; i + 19 <= stem.size(); i++) {
+    const std::wstring_view v = stem.substr(i, 19);
+    if (v[4] != L'-' || v[7] != L'-' || v[10] != L'-' || v[13] != L'-' || v[16] != L'-') continue;
+
+    const std::wstring_view yS  = v.substr(0, 4);
+    const std::wstring_view moS = v.substr(5, 2);
+    const std::wstring_view dS  = v.substr(8, 2);
+    const std::wstring_view hhS = v.substr(11, 2);
+    const std::wstring_view mmS = v.substr(14, 2);
+    const std::wstring_view ssS = v.substr(17, 2);
+    if (!is_digits(yS) || !is_digits(moS) || !is_digits(dS) ||
+        !is_digits(hhS) || !is_digits(mmS) || !is_digits(ssS)) continue;
+
+    ParsedTimestamp ts{};
+    ts.year   = std::stoi(std::wstring(yS));
+    ts.month  = std::stoi(std::wstring(moS));
+    ts.day    = std::stoi(std::wstring(dS));
+    ts.hour   = std::stoi(std::wstring(hhS));
+    ts.minute = std::stoi(std::wstring(mmS));
+    ts.second = std::stoi(std::wstring(ssS));
+
+    if (ts.month < 1 || ts.month > 12 || ts.day < 1 || ts.day > 31 ||
+        ts.hour < 0 || ts.hour > 23 || ts.minute < 0 || ts.minute > 59 ||
+        ts.second < 0 || ts.second > 59) continue;
+
+    return ts;
+  }
+  return std::nullopt;
+}
+
 }  // namespace crashlogger_core
 
 using crashlogger_core::LooksLikeCrashLoggerLogTextCore;

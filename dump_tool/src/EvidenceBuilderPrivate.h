@@ -55,8 +55,9 @@ struct EvidenceBuildContext
   std::wstring suspectBasis;
 };
 
-// Shared utility helpers (moved out of the original monolithic .cpp).
-std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level);
+// ConfidenceText is now defined in I18nCore.h as i18n::ConfidenceText.
+// It's found automatically via ADL when called with i18n::Language/ConfidenceLevel arguments.
+
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep);
 std::wstring ToWideAscii(std::string_view s);
 std::wstring Hex64(std::uint64_t v);

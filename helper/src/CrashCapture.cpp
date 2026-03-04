@@ -22,6 +22,7 @@
 #include "IncidentManifest.h"
 #include "PendingCrashAnalysis.h"
 #include "PluginScanner.h"
+#include "HexFormat.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
@@ -50,19 +51,8 @@ void WriteWerFallbackHint(const std::filesystem::path& outBase)
   WriteTextFileUtf8(outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt", hint);
 }
 
-std::wstring Hex32(std::uint32_t v)
-{
-  wchar_t buf[11]{};
-  std::swprintf(buf, 11, L"0x%08X", static_cast<unsigned int>(v));
-  return buf;
-}
-
-std::wstring Hex64(std::uint64_t v)
-{
-  wchar_t buf[19]{};
-  std::swprintf(buf, 19, L"0x%016llX", static_cast<unsigned long long>(v));
-  return buf;
-}
+using skydiag::helper::internal::Hex32;
+using skydiag::helper::internal::Hex64;
 
 FilterVerdict ClassifyExitCodeVerdictWithContext(
   std::uint32_t exitCode,

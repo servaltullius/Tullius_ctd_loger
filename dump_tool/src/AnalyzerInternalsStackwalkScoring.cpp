@@ -13,28 +13,45 @@ using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::IsSkseModule;
 using skydiag::dump_tool::minidump::ModuleInfo;
 using skydiag::dump_tool::minidump::WideLower;
+using skydiag::dump_tool::i18n::ConfidenceText;
 
-std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
-{
-  return std::wstring(i18n::ConfidenceLabel(lang, level));
-}
+// Callstack frame weights: frames closer to the crash point are weighted higher
+// to reflect their higher likelihood of being the actual crash cause.
+constexpr std::uint32_t kWeightDepth0      = 16;  // crash frame itself
+constexpr std::uint32_t kWeightDepth1      = 12;  // immediate caller
+constexpr std::uint32_t kWeightDepth2      = 8;   // 2nd caller
+constexpr std::uint32_t kWeightDepth3to5   = 4;   // near callers
+constexpr std::uint32_t kWeightDepth6to10  = 2;   // mid-range callers
+constexpr std::uint32_t kWeightDeepFrame   = 1;   // deep callers (depth > 10)
+
+// Confidence thresholds: empirically tuned against real Skyrim crash dumps.
+// "High" requires a near-top suspect with a clear margin over the runner-up.
+constexpr std::size_t   kHighConfMaxDepth     = 2;
+constexpr std::uint32_t kHighConfMinScore     = 24;
+constexpr std::uint32_t kHighConfMinMargin    = 12;
+constexpr std::size_t   kMedConfMaxDepth      = 6;
+constexpr std::uint32_t kMedConfMinScore      = 12;
+constexpr std::uint32_t kMedConfMinMargin     = 6;
+
+// Score proximity threshold for hook-framework demotion heuristic.
+constexpr std::uint32_t kHookFrameworkNearTieThreshold = 4;
 
 std::uint32_t CallstackFrameWeight(std::size_t depth)
 {
-  if (depth == 0) return 16;
-  if (depth == 1) return 12;
-  if (depth == 2) return 8;
-  if (depth <= 5) return 4;
-  if (depth <= 10) return 2;
-  return 1;
+  if (depth == 0) return kWeightDepth0;
+  if (depth == 1) return kWeightDepth1;
+  if (depth == 2) return kWeightDepth2;
+  if (depth <= 5) return kWeightDepth3to5;
+  if (depth <= 10) return kWeightDepth6to10;
+  return kWeightDeepFrame;
 }
 
 i18n::ConfidenceLevel ConfidenceForTopSuspectCallstackLevel(std::uint32_t topScore, std::uint32_t secondScore, std::size_t firstDepth)
 {
-  if (firstDepth <= 2 && (topScore >= 24u || topScore >= (secondScore + 12u))) {
+  if (firstDepth <= kHighConfMaxDepth && (topScore >= kHighConfMinScore || topScore >= (secondScore + kHighConfMinMargin))) {
     return i18n::ConfidenceLevel::kHigh;
   }
-  if (firstDepth <= 6 && (topScore >= 12u || topScore >= (secondScore + 6u))) {
+  if (firstDepth <= kMedConfMaxDepth && (topScore >= kMedConfMinScore || topScore >= (secondScore + kMedConfMinMargin))) {
     return i18n::ConfidenceLevel::kMedium;
   }
   return i18n::ConfidenceLevel::kLow;
@@ -117,7 +134,7 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
       const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
       const bool topIsSkseRuntime = IsSkseModule(topLower);
       const bool topIsMo2Vfs = (topLower == L"usvfs_x64.dll" || topLower == L"uvsfs64.dll");
-      const bool nearTie = (fallbackIt->score + 4u) >= rows[0].score;
+      const bool nearTie = (fallbackIt->score + kHookFrameworkNearTieThreshold) >= rows[0].score;
       if (topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs || nearTie) {
         std::iter_swap(rows.begin(), fallbackIt);
         promotedHookTop = true;

@@ -19,11 +19,6 @@ namespace skydiag::dump_tool::internal {
 
 using skydiag::WideLower;
 
-std::wstring ConfidenceText(i18n::Language lang, i18n::ConfidenceLevel level)
-{
-  return std::wstring(i18n::ConfidenceLabel(lang, level));
-}
-
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep)
 {
   if (items.empty() || maxN == 0) {

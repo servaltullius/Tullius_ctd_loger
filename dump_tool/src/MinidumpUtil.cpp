@@ -320,10 +320,16 @@ bool IsSystemishModule(std::wstring_view filename)
   std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
 
   const wchar_t* k[] = {
+    // Core Windows
     L"kernelbase.dll", L"ntdll.dll",     L"kernel32.dll",  L"ucrtbase.dll",
     L"msvcp140.dll",   L"vcruntime140.dll", L"vcruntime140_1.dll", L"concrt140.dll", L"user32.dll",
     L"gdi32.dll",      L"combase.dll",   L"ole32.dll",     L"ws2_32.dll",
-    L"win32u.dll",
+    L"win32u.dll",     L"advapi32.dll",  L"rpcrt4.dll",    L"sechost.dll",
+    // Graphics / DirectX runtime
+    L"d3d11.dll",      L"d3d12.dll",     L"dxgi.dll",      L"d3d9.dll",
+    L"opengl32.dll",   L"d3dcompiler_47.dll", L"dxcore.dll",
+    // Debugging
+    L"dbghelp.dll",    L"dbgcore.dll",
   };
   for (const auto* m : k) {
     if (lower == m) {

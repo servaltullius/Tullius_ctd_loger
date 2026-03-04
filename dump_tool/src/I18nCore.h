@@ -76,5 +76,11 @@ inline std::wstring_view LanguageCode(Language lang)
   return (lang == Language::kKorean) ? L"ko" : L"en";
 }
 
+// Convenience: return ConfidenceLabel as owning wstring (replaces duplicated ConfidenceText helpers).
+inline std::wstring ConfidenceText(Language lang, ConfidenceLevel level)
+{
+  return std::wstring(ConfidenceLabel(lang, level));
+}
+
 }  // namespace skydiag::dump_tool::i18n
 

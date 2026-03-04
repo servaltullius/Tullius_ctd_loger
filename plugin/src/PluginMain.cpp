@@ -160,15 +160,7 @@ std::filesystem::path GetThisModulePath()
   return std::filesystem::path(buf, buf + n);
 }
 
-std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)
-{
-  std::wstring name;
-  name.reserve(64);
-  name.append(skydiag::protocol::kKernelObjectPrefix);
-  name.append(std::to_wstring(pid));
-  name.append(suffix);
-  return name;
-}
+using skydiag::protocol::MakeKernelName;
 
 bool IsHelperSingletonPresent(std::uint32_t pid)
 {
@@ -264,6 +256,9 @@ bool StartHelperIfConfigured(const PluginConfig& cfg)
   return true;
 }
 
+// Store the watchdog jthread so its destructor can request a clean stop on DLL unload.
+static std::jthread g_watchdogThread;
+
 void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
 {
   if (!cfg.autoStartHelper) {
@@ -275,7 +270,7 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
     return;
   }
 
-  std::thread([cfg]() {
+  g_watchdogThread = std::jthread([cfg](std::stop_token stopToken) {
     constexpr std::uint32_t kRetryMinMs = 1000;
     constexpr std::uint32_t kRetryMaxMs = 30000;
     constexpr std::uint32_t kLoopSleepMs = 1000;
@@ -287,7 +282,7 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
     std::uint32_t retryBackoffMs = kRetryMinMs;
     ULONGLONG nextAttemptTick = GetTickCount64() + kInitialGraceMs;
 
-    for (;;) {
+    while (!stopToken.stop_requested()) {
       if (IsHelperSingletonPresent(pid)) {
         retryBackoffMs = kRetryMinMs;
         nextAttemptTick = 0;
@@ -306,6 +301,7 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
       if (StartHelperProcess(helperPath, pid, &helperPid)) {
         bool confirmed = false;
         for (int i = 0; i < kHelperConfirmPollCount; ++i) {
+          if (stopToken.stop_requested()) break;
           if (IsHelperSingletonPresent(pid)) {
             confirmed = true;
             break;
@@ -314,7 +310,7 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
         }
         if (confirmed) {
           spdlog::info("SkyrimDiag: helper watchdog confirmed helper running (helperPid={})", helperPid);
-        } else {
+        } else if (!stopToken.stop_requested()) {
           spdlog::warn("SkyrimDiag: helper watchdog launched helper but singleton mutex not observed yet");
         }
         retryBackoffMs = kRetryMinMs;
@@ -327,7 +323,7 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
 
       Sleep(kLoopSleepMs);
     }
-  }).detach();
+  });
 }
 
 void StartTestHotkeysIfEnabled(const PluginConfig& cfg)

@@ -12,6 +12,9 @@ using skydiag::dump_tool::ParseCrashLoggerTopModulesAsciiLower;
 using skydiag::dump_tool::crashlogger_core::TryExtractModulePlusOffsetTokenAscii;
 using skydiag::dump_tool::crashlogger_core::IsSystemishModuleAsciiLower;
 using skydiag::dump_tool::crashlogger_core::IsGameExeModuleAsciiLower;
+using skydiag::dump_tool::crashlogger_core::TryExtractCompactTimestampFromStem;
+using skydiag::dump_tool::crashlogger_core::TryExtractDashedTimestampFromStem;
+using skydiag::dump_tool::crashlogger_core::ParsedTimestamp;
 
 static void Test_LooksLikeCrashLogger_CrashLog()
 {
@@ -464,6 +467,107 @@ static void Test_IsGameExe_NotGameExe()
   assert(!IsGameExeModuleAsciiLower("skyrimse.dll"));
 }
 
+// ── Group 8: Timestamp parsing ──
+
+static void Test_CompactTimestamp_Standard()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"SkyrimDiag_crash_20260215_143022");
+  assert(ts.has_value());
+  assert(ts->year == 2026);
+  assert(ts->month == 2);
+  assert(ts->day == 15);
+  assert(ts->hour == 14);
+  assert(ts->minute == 30);
+  assert(ts->second == 22);
+}
+
+static void Test_CompactTimestamp_EmbeddedInLongName()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"prefix_stuff_20251231_235959_suffix");
+  assert(ts.has_value());
+  assert(ts->year == 2025);
+  assert(ts->month == 12);
+  assert(ts->day == 31);
+  assert(ts->hour == 23);
+  assert(ts->minute == 59);
+  assert(ts->second == 59);
+}
+
+static void Test_CompactTimestamp_NoMatch()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"no_timestamp_here");
+  assert(!ts.has_value());
+}
+
+static void Test_CompactTimestamp_Empty()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"");
+  assert(!ts.has_value());
+}
+
+static void Test_CompactTimestamp_PartialDigits()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"2026021X_143022");
+  assert(!ts.has_value());
+}
+
+static void Test_DashedTimestamp_Standard()
+{
+  const auto ts = TryExtractDashedTimestampFromStem(L"Crash-2026-02-15-14-30-22");
+  assert(ts.has_value());
+  assert(ts->year == 2026);
+  assert(ts->month == 2);
+  assert(ts->day == 15);
+  assert(ts->hour == 14);
+  assert(ts->minute == 30);
+  assert(ts->second == 22);
+}
+
+static void Test_DashedTimestamp_InvalidMonth()
+{
+  const auto ts = TryExtractDashedTimestampFromStem(L"Crash-2026-13-15-14-30-22");
+  assert(!ts.has_value());
+}
+
+static void Test_DashedTimestamp_NoMatch()
+{
+  const auto ts = TryExtractDashedTimestampFromStem(L"no_dashed_timestamp");
+  assert(!ts.has_value());
+}
+
+static void Test_DashedTimestamp_Empty()
+{
+  const auto ts = TryExtractDashedTimestampFromStem(L"");
+  assert(!ts.has_value());
+}
+
+static void Test_DashedTimestamp_InvalidHour()
+{
+  const auto ts = TryExtractDashedTimestampFromStem(L"Crash-2026-01-15-25-30-22");
+  assert(!ts.has_value());
+}
+
+static void Test_CompactTimestamp_MultipleMatches_TakesFirst()
+{
+  // Two valid compact patterns; function should return the FIRST one.
+  const auto ts = TryExtractCompactTimestampFromStem(L"20250101_000000_crash_20260215_143022");
+  assert(ts.has_value());
+  assert(ts->year == 2025);
+  assert(ts->month == 1);
+}
+
+static void Test_CompactTimestamp_InvalidMonth()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"20261301_143022");
+  assert(!ts.has_value());
+}
+
+static void Test_CompactTimestamp_InvalidHour()
+{
+  const auto ts = TryExtractCompactTimestampFromStem(L"20260215_253022");
+  assert(!ts.has_value());
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -518,6 +622,21 @@ int main()
   Test_IsSystemish_NotSystem();
   Test_IsGameExe_KnownExes();
   Test_IsGameExe_NotGameExe();
+
+  // Group 8: Timestamp parsing
+  Test_CompactTimestamp_Standard();
+  Test_CompactTimestamp_EmbeddedInLongName();
+  Test_CompactTimestamp_NoMatch();
+  Test_CompactTimestamp_Empty();
+  Test_CompactTimestamp_PartialDigits();
+  Test_DashedTimestamp_Standard();
+  Test_DashedTimestamp_InvalidMonth();
+  Test_DashedTimestamp_NoMatch();
+  Test_DashedTimestamp_Empty();
+  Test_DashedTimestamp_InvalidHour();
+  Test_CompactTimestamp_MultipleMatches_TakesFirst();
+  Test_CompactTimestamp_InvalidMonth();
+  Test_CompactTimestamp_InvalidHour();
 
   return 0;
 }

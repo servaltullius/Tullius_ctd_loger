@@ -35,6 +35,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/MinidumpUtil.h
   src/SignatureDatabase.cpp
   src/SignatureDatabase.h
+  src/TroubleshootingGuide.cpp
+  src/TroubleshootingGuide.h
   src/PluginRules.cpp
   src/PluginRules.h
   src/AddressResolver.cpp

@@ -1,10 +1,27 @@
 # Changelog
 
-## v0.2.42 (2026-03-01)
+## v0.2.42 (2026-03-04)
 
 ### 추가
 - **Helper: NGIO 잔디 캐싱 모드 자동 감지** — Skyrim 루트에 `PrecacheGrass.txt`가 있으면 크래시/행 감지를 모두 억제하고 경량 대기 루프로 전환. MO2 GrassPrecacher의 자동 재시작 사이클이 Helper 팝업에 의해 방해받지 않음.
 - Helper: `SuppressDuringGrassCaching` INI 옵션 추가 (기본값 1). 0으로 설정 시 잔디 캐싱 모드 감지 비활성화.
+- DumpTool: `IsSystemishModule` D3D/DXGI/OpenGL/디버깅 DLL 13종 추가 — 그래픽 드라이버 DLL이 용의자로 잘못 표시되는 문제 완화.
+- DumpTool: `TroubleshootingGuideDatabase` 클래스 추출 — 트러블슈팅 가이드 매칭 로직을 독립 클래스로 분리, 재사용 가능.
+- DumpTool: 리소스 로그 보존 상한 80→120 확대.
+- DumpTool: CrashLogger 타임스탬프 파싱 함수 (`TryExtractCompactTimestampFromStem`, `TryExtractDashedTimestampFromStem`) 추가 + 검증 테스트 13개.
+
+### 수정
+- DumpTool: CrashLogger 시간 매칭 창 30분→5분 축소 — 무관한 과거 로그 매칭 방지.
+
+### 리팩터링
+- **코드 중복 대폭 제거**: `ConfidenceText` 5곳→I18nCore.h 1곳, `MakeKernelName` 2곳→SkyrimDiagProtocol.h, `Hex32`/`Hex64` 2곳→HexFormat.h.
+- DumpTool: 스코어링 매직넘버 14개를 명명 상수로 전환 (`kWeightDepth0`, `kHighConfMinScore` 등).
+- DumpTool: `CrashLoggerRankBonus` 매직넘버 5개 상수화.
+- DumpTool: `ScopedHistoryFileLock` 디렉토리 기반→Windows Named Mutex 전환 — 프로세스 크래시 시 잠금 자동 해제.
+- Plugin: 워치독 스레드 `std::thread::detach()` → `std::jthread` + `stop_token` — DLL 언로드 시 안전한 종료.
+
+### 테스트
+- CrashLogger 타임스탬프 파싱 테스트 13개 추가 (Compact/Dashed 포맷, 유효성 검증, 엣지케이스).
 
 ## v0.2.41 (2026-02-28)
 

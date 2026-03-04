@@ -438,7 +438,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   // Crash Logger logs should be created around the crash moment. If nothing is close in time, don't attach an older
   // unrelated log (confusing).
   constexpr std::uint64_t kFileTimeTicksPerSec = 10'000'000ull;
-  constexpr std::uint64_t kMaxDiffSec = 30ull * 60ull;  // 30 minutes
+  constexpr std::uint64_t kMaxDiffSec = 5ull * 60ull;  // 5 minutes (narrower window to avoid matching unrelated logs)
   constexpr std::uint64_t kMaxDiff = kMaxDiffSec * kFileTimeTicksPerSec;
 
   std::optional<std::filesystem::path> best;
