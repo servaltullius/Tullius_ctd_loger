@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 
-using Microsoft.UI;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -52,7 +51,6 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new MicaBackdrop();
 
         ApplyLocalizedStaticText();
-        ApplyNavigationSelectionEmphasis(NavAnalyze);
         HookWheelChainingForNestedControls();
         RootGrid.SizeChanged += RootGrid_SizeChanged;
 
@@ -89,7 +87,7 @@ public sealed partial class MainWindow : Window
 
     private void ApplyLocalizedStaticText()
     {
-        Title = T("Tullius CTD Logger (Nordic UI)", "툴리우스 CTD 로거 (노르딕 UI)");
+        Title = T("Tullius CTD Logger", "툴리우스 CTD 로거");
 
         // Navigation items
         NavAnalyze.Content = T("Dashboard", "대시보드");
@@ -98,20 +96,12 @@ public sealed partial class MainWindow : Window
         NavEvents.Content = T("Events", "이벤트");
         NavReport.Content = T("Reports", "리포트");
 
-        HeaderTitleText.Text = T("Recent Crash", "최근 크래시");
         HeaderSubtitleText.Text = T(
             "Skyrim SE detected. Ready for dump triage.",
             "Skyrim SE가 감지되었습니다. 덤프 원인 분석을 시작할 수 있습니다.");
         HeaderBadgeText.Text = T("STATUS READY", "상태 준비됨");
 
         AnalyzeSectionTitleText.Text = T("Dump Intake", "덤프 입력");
-        WorkflowSectionTitleText.Text = T("Crash History Timeline", "크래시 히스토리 타임라인");
-        StepOneTitleText.Text = T("01 Select Dump", "01 덤프 선택");
-        StepOneDescText.Text = T("Choose latest crash dump from your mod profile.", "모드 프로필에서 최신 크래시 덤프를 선택하세요.");
-        StepTwoTitleText.Text = T("02 Analyze", "02 분석 실행");
-        StepTwoDescText.Text = T("Parse bucket, callstack, and evidence chains.", "버킷, 콜스택, 근거 체인을 분석합니다.");
-        StepThreeTitleText.Text = T("03 Triage", "03 원인 선별");
-        StepThreeDescText.Text = T("Start with suspect list, then drill into evidence.", "원인 후보부터 보고 근거를 순서대로 확인하세요.");
 
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
@@ -142,7 +132,7 @@ public sealed partial class MainWindow : Window
         CancelAnalyzeButton.Content = T("Cancel analysis", "분석 취소");
         OpenOutputButton.Content = T("Open report folder", "리포트 폴더 열기");
         CopySummaryButton.Content = T("Copy summary", "요약 복사");
-        CopyShareButton.Content = T("📋 Share", "📋 공유");
+        CopyShareButton.Content = T("Share", "공유");
     }
 
     private void HookWheelChainingForNestedControls()
@@ -913,39 +903,12 @@ public sealed partial class MainWindow : Window
     {
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
         {
-            ApplyNavigationSelectionEmphasis(item);
             AnalyzePanel.Visibility = tag == "analyze" ? Visibility.Visible : Visibility.Collapsed;
             SummaryPanel.Visibility = tag == "summary" ? Visibility.Visible : Visibility.Collapsed;
             EvidencePanel.Visibility = tag == "evidence" ? Visibility.Visible : Visibility.Collapsed;
             EventsPanel.Visibility = tag == "events" ? Visibility.Visible : Visibility.Collapsed;
             ReportPanel.Visibility = tag == "report" ? Visibility.Visible : Visibility.Collapsed;
         }
-    }
-
-    private void ApplyNavigationSelectionEmphasis(NavigationViewItem selectedItem)
-    {
-        SetNavItemVisual(NavAnalyze, selectedItem == NavAnalyze);
-        SetNavItemVisual(NavSummary, selectedItem == NavSummary);
-        SetNavItemVisual(NavEvidence, selectedItem == NavEvidence);
-        SetNavItemVisual(NavEvents, selectedItem == NavEvents);
-        SetNavItemVisual(NavReport, selectedItem == NavReport);
-    }
-
-    private static void SetNavItemVisual(NavigationViewItem item, bool isSelected)
-    {
-        if (isSelected)
-        {
-            item.Background = new SolidColorBrush(ColorHelper.FromArgb(0x85, 0x24, 0x32, 0x43));
-            item.Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xF5, 0xE8, 0xCC));
-            item.BorderBrush = new SolidColorBrush(ColorHelper.FromArgb(0xC6, 0x9D, 0x7A, 0x44));
-            item.BorderThickness = new Thickness(1);
-            return;
-        }
-
-        item.Background = new SolidColorBrush(ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00));
-        item.Foreground = new SolidColorBrush(ColorHelper.FromArgb(0xFF, 0xD2, 0xBC, 0x91));
-        item.BorderBrush = null;
-        item.BorderThickness = new Thickness(0);
     }
 
     private void RootGrid_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -971,16 +934,13 @@ public sealed partial class MainWindow : Window
         RootContentGrid.MinWidth = compact ? 920 : 1060;
         RootContentGrid.Padding = compact ? new Thickness(14, 12, 14, 12) : new Thickness(22, 18, 22, 18);
 
-        AnalyzePanel.Spacing = compact ? 12 : 18;
+        AnalyzePanel.Spacing = compact ? 12 : 16;
         SummaryPanel.Spacing = compact ? 12 : 16;
         EvidencePanel.Spacing = compact ? 12 : 16;
         EventsPanel.Spacing = compact ? 12 : 16;
         ReportPanel.Spacing = compact ? 12 : 16;
 
-        HeaderTitleText.FontSize = compact ? 42 : 50;
-        HeaderSubtitleText.FontSize = compact ? 14 : 15;
-        AnalyzeSectionTitleText.FontSize = compact ? 22 : 26;
-        WorkflowSectionTitleText.FontSize = compact ? 24 : 28;
+        AnalyzeSectionTitleText.FontSize = compact ? 22 : 24;
         SnapshotSectionTitleText.FontSize = compact ? 26 : 30;
         AdvancedSectionTitleText.FontSize = compact ? 26 : 30;
         EventsLabelText.FontSize = compact ? 26 : 30;
@@ -989,10 +949,6 @@ public sealed partial class MainWindow : Window
         QuickConfidenceValueText.FontSize = compact ? 16 : 18;
         QuickActionsValueText.FontSize = compact ? 16 : 18;
         QuickEventsValueText.FontSize = compact ? 16 : 18;
-
-        StepOneDescText.MaxLines = compact ? 1 : 2;
-        StepTwoDescText.MaxLines = compact ? 1 : 2;
-        StepThreeDescText.MaxLines = compact ? 1 : 2;
 
         SuspectsList.MaxHeight = compact ? 240 : 320;
         RecommendationsList.MaxHeight = compact ? 240 : 320;
