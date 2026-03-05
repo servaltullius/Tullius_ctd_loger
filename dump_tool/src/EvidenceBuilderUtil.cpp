@@ -449,4 +449,12 @@ std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(const std::ve
   return out;
 }
 
+bool IsActionableSuspect(const SuspectItem& s)
+{
+  return !minidump::IsKnownHookFramework(s.module_filename) &&
+         !minidump::IsSystemishModule(s.module_filename) &&
+         !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+         !minidump::IsGameExeModule(s.module_filename);
+}
+
 }  // namespace skydiag::dump_tool::internal

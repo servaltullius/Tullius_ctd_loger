@@ -29,6 +29,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/GraphicsInjectionDiag.h
   src/CrashLogger.cpp
   src/CrashLogger.h
+  src/CrashLoggerParseCore.cpp
+  src/CrashLoggerParseCore.h
   src/Mo2Index.cpp
   src/Mo2Index.h
   src/MinidumpUtil.cpp

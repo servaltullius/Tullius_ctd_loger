@@ -443,6 +443,21 @@ static void Test_IsSystemish_KnownModules()
   assert(IsSystemishModuleAsciiLower("ucrtbase.dll"));
   assert(IsSystemishModuleAsciiLower("user32.dll"));
   assert(IsSystemishModuleAsciiLower("win32u.dll"));
+  // Graphics / DirectX (synced with MinidumpUtil.cpp)
+  assert(IsSystemishModuleAsciiLower("d3d11.dll"));
+  assert(IsSystemishModuleAsciiLower("d3d12.dll"));
+  assert(IsSystemishModuleAsciiLower("dxgi.dll"));
+  assert(IsSystemishModuleAsciiLower("d3d9.dll"));
+  assert(IsSystemishModuleAsciiLower("opengl32.dll"));
+  assert(IsSystemishModuleAsciiLower("d3dcompiler_47.dll"));
+  assert(IsSystemishModuleAsciiLower("dxcore.dll"));
+  // Debugging
+  assert(IsSystemishModuleAsciiLower("dbghelp.dll"));
+  assert(IsSystemishModuleAsciiLower("dbgcore.dll"));
+  // Additional Windows core
+  assert(IsSystemishModuleAsciiLower("advapi32.dll"));
+  assert(IsSystemishModuleAsciiLower("rpcrt4.dll"));
+  assert(IsSystemishModuleAsciiLower("sechost.dll"));
 }
 
 static void Test_IsSystemish_NotSystem()

@@ -27,14 +27,14 @@ int main()
   const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
   const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
   const auto crashLoggerPath = repoRoot / "dump_tool" / "src" / "CrashLogger.cpp";
-  const auto crashLoggerParseCorePath = repoRoot / "dump_tool" / "src" / "CrashLoggerParseCore.h";
+  const auto crashLoggerParseCoreImplPath = repoRoot / "dump_tool" / "src" / "CrashLoggerParseCore.cpp";
 
   const std::string minidumpUtil = ReadAllText(minidumpUtilPath);
   const std::string analyzer = ReadAllText(analyzerPath);
   const std::string summary = ReadAllText(summaryPath);
   const std::string rec = ReadAllText(recPath);
   const std::string crashLogger = ReadAllText(crashLoggerPath);
-  const std::string crashLoggerParseCore = ReadAllText(crashLoggerParseCorePath);
+  const std::string crashLoggerParseCore = ReadAllText(crashLoggerParseCoreImplPath);
 
   AssertContains(
     minidumpUtil,

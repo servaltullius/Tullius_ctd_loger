@@ -17,6 +17,13 @@ cmake-build-*/
 dist/*.zip
 .worktrees/
 worktrees/
+.omc/
+
+# WinUI XAML compiled binaries (may appear in repo root)
+*.xbf
+
+# Windows Zone.Identifier ADS metadata
+*:Zone.Identifier
 
 # Python
 __pycache__/

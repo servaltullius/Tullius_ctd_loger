@@ -263,101 +263,65 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
   }
 }
 
-bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
+// ===== Extracted helpers for AnalyzeDump =====
+
+static std::optional<CONTEXT> ParseExceptionInfo(
+    void* dumpBase, std::uint64_t dumpSize,
+    AnalysisResult& out)
 {
-  out = AnalysisResult{};
-  out.language = opt.language;
-  out.dump_path = dumpPath;
-  out.out_dir = outDir;
-  out.online_symbol_source_allowed = opt.allow_online_symbols;
-  out.path_redaction_applied = opt.redact_paths;
-
-  const std::wstring dumpNameLower = WideLower(std::filesystem::path(dumpPath).filename().wstring());
-  const bool nameCrash = (dumpNameLower.find(L"_crash_") != std::wstring::npos);
-  const bool nameHang = (dumpNameLower.find(L"_hang_") != std::wstring::npos);
-
-  // Memory-map the dump to avoid loading large FullMemory dumps into RAM.
-  MappedFile mf{};
-  if (!mf.Open(dumpPath, err)) {
-    return false;
-  }
-  const std::uint64_t dumpSize = mf.size;
-  void* dumpBase = mf.view;
-
-  // Optional: allow external hook-framework list override.
-  if (!opt.data_dir.empty()) {
-    LoadHookFrameworksFromJson(std::filesystem::path(opt.data_dir) / L"hook_frameworks.json");
-  }
-
-  const auto allModules = LoadAllModules(dumpBase, dumpSize);
-  if (!opt.game_version.empty()) {
-    out.game_version = opt.game_version;
-  } else {
-    for (const auto& m : allModules) {
-      if (m.is_game_exe && !m.version.empty()) {
-        out.game_version = m.version;
-        break;
-      }
-    }
-  }
-
-  std::vector<std::wstring> modulePaths;
-  modulePaths.reserve(allModules.size());
-  for (const auto& m : allModules) {
-    if (!m.path.empty()) {
-      modulePaths.push_back(m.path);
-    }
-  }
-  const auto mo2Index = TryBuildMo2IndexFromModulePaths(modulePaths);
-  std::unordered_map<std::wstring, std::vector<std::wstring>> mo2ProvidersCache;
-
-  // Exception info
-  std::optional<CONTEXT> excCtx;
   void* excPtr = nullptr;
   ULONG excSize = 0;
-  if (ReadStreamSized(dumpBase, dumpSize, ExceptionStream, &excPtr, &excSize) && excPtr && excSize >= sizeof(MINIDUMP_EXCEPTION_STREAM)) {
-    const auto* es = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(excPtr);
-    out.exc_code = es->ExceptionRecord.ExceptionCode;
-    out.exc_tid = es->ThreadId;
-    out.exc_addr = es->ExceptionRecord.ExceptionAddress;
-    out.exc_info.clear();
-    {
-      const ULONG n = es->ExceptionRecord.NumberParameters;
-      constexpr ULONG kMaxN =
-        static_cast<ULONG>(sizeof(es->ExceptionRecord.ExceptionInformation) / sizeof(es->ExceptionRecord.ExceptionInformation[0]));
-      const ULONG take = (n < kMaxN) ? n : kMaxN;
-      out.exc_info.reserve(take);
-      for (ULONG i = 0; i < take; i++) {
-        out.exc_info.push_back(static_cast<std::uint64_t>(es->ExceptionRecord.ExceptionInformation[i]));
-      }
-    }
-    CONTEXT ctx{};
-    if (internal::TryReadContextFromLocation(dumpBase, dumpSize, es->ThreadContext, ctx)) {
-      excCtx = ctx;
+  if (!ReadStreamSized(dumpBase, dumpSize, ExceptionStream, &excPtr, &excSize) || !excPtr || excSize < sizeof(MINIDUMP_EXCEPTION_STREAM)) {
+    return std::nullopt;
+  }
+  const auto* es = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(excPtr);
+  out.exc_code = es->ExceptionRecord.ExceptionCode;
+  out.exc_tid = es->ThreadId;
+  out.exc_addr = es->ExceptionRecord.ExceptionAddress;
+  out.exc_info.clear();
+  {
+    const ULONG n = es->ExceptionRecord.NumberParameters;
+    constexpr ULONG kMaxN =
+      static_cast<ULONG>(sizeof(es->ExceptionRecord.ExceptionInformation) / sizeof(es->ExceptionRecord.ExceptionInformation[0]));
+    const ULONG take = (n < kMaxN) ? n : kMaxN;
+    out.exc_info.reserve(take);
+    for (ULONG i = 0; i < take; i++) {
+      out.exc_info.push_back(static_cast<std::uint64_t>(es->ExceptionRecord.ExceptionInformation[i]));
     }
   }
+  CONTEXT ctx{};
+  if (internal::TryReadContextFromLocation(dumpBase, dumpSize, es->ThreadContext, ctx)) {
+    return ctx;
+  }
+  return std::nullopt;
+}
 
-  // Fault module
-  if (out.exc_addr != 0) {
-    if (auto idx = FindModuleIndexForAddress(allModules, out.exc_addr)) {
-      const auto& m = allModules[*idx];
-      out.fault_module_path = m.path;
-      out.fault_module_filename = m.filename;
-      const std::uint64_t off = out.exc_addr - m.base;
-      out.fault_module_offset = off;
-      wchar_t buf[1024]{};
-      swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(), static_cast<unsigned long long>(off));
-      out.fault_module_plus_offset = buf;
-      out.inferred_mod_name = m.inferred_mod_name;
-    } else if (auto m = ModuleForAddress(dumpBase, dumpSize, out.exc_addr)) {  // fallback
-      out.fault_module_path = m->path;
-      out.fault_module_filename = m->filename;
-      out.fault_module_plus_offset = m->plusOffset;
-      if (out.exc_addr >= m->base) {
-        out.fault_module_offset = (out.exc_addr - m->base);
-      }
-      out.inferred_mod_name = InferMo2ModNameFromPath(out.fault_module_path);
+static void ResolveFaultModule(
+    void* dumpBase, std::uint64_t dumpSize,
+    const std::vector<ModuleInfo>& allModules,
+    AnalysisResult& out)
+{
+  if (out.exc_addr == 0) {
+    return;
+  }
+  if (auto idx = FindModuleIndexForAddress(allModules, out.exc_addr)) {
+    const auto& m = allModules[*idx];
+    out.fault_module_path = m.path;
+    out.fault_module_filename = m.filename;
+    const std::uint64_t off = out.exc_addr - m.base;
+    out.fault_module_offset = off;
+    wchar_t buf[1024]{};
+    swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(), static_cast<unsigned long long>(off));
+    out.fault_module_plus_offset = buf;
+    out.inferred_mod_name = m.inferred_mod_name;
+  } else if (auto m = ModuleForAddress(dumpBase, dumpSize, out.exc_addr)) {
+    out.fault_module_path = m->path;
+    out.fault_module_filename = m->filename;
+    out.fault_module_plus_offset = m->plusOffset;
+    if (out.exc_addr >= m->base) {
+      out.fault_module_offset = (out.exc_addr - m->base);
     }
+    out.inferred_mod_name = InferMo2ModNameFromPath(out.fault_module_path);
   }
 
   // Guard against treating system/game binary names as inferred mod names.
@@ -373,174 +337,163 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       out.inferred_mod_name.clear();
     }
   }
+}
 
-  // Graphics injection diagnostics (best-effort, data-driven via JSON rules).
-  if (!opt.data_dir.empty()) {
-    GraphicsInjectionDiag graphicsDiag;
-    const auto rulesPath = std::filesystem::path(opt.data_dir) / L"graphics_injection_rules.json";
-    if (graphicsDiag.LoadRules(rulesPath)) {
-      std::vector<std::wstring> moduleFilenames;
-      moduleFilenames.reserve(allModules.size());
-      for (const auto& m : allModules) {
-        if (!m.filename.empty()) {
-          moduleFilenames.push_back(m.filename);
-        }
-      }
-      out.graphics_env = graphicsDiag.DetectEnvironment(moduleFilenames);
-      out.graphics_diag = graphicsDiag.Diagnose(
-        moduleFilenames,
-        out.fault_module_filename,
-        opt.language == i18n::Language::kKorean);
-    }
-  }
-
-  // SkyrimDiag blackbox (optional)
+static void ParseBlackboxStream(
+    void* dumpBase, std::uint64_t dumpSize,
+    const std::optional<Mo2Index>& mo2Index,
+    const std::vector<std::wstring>& modulePaths,
+    AnalysisResult& out)
+{
   void* bbPtr = nullptr;
   ULONG bbSize = 0;
-  if (ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_Blackbox, &bbPtr, &bbSize) && bbPtr &&
-      bbSize >= offsetof(skydiag::SharedLayout, resources)) {
-    const auto* snap = static_cast<const skydiag::SharedLayout*>(bbPtr);
-    const auto ver = snap->header.version;
-    if (snap->header.magic == skydiag::kMagic && (ver == 1u || ver == skydiag::kVersion)) {
-      out.has_blackbox = true;
-      out.pid = snap->header.pid;
-      out.state_flags = snap->header.state_flags;
+  if (!ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_Blackbox, &bbPtr, &bbSize) || !bbPtr ||
+      bbSize < offsetof(skydiag::SharedLayout, resources)) {
+    return;
+  }
+  const auto* snap = static_cast<const skydiag::SharedLayout*>(bbPtr);
+  const auto ver = snap->header.version;
+  if (snap->header.magic != skydiag::kMagic || (ver != 1u && ver != skydiag::kVersion)) {
+    return;
+  }
 
-      std::uint32_t cap = snap->header.capacity;
-      if (cap == 0 || cap > skydiag::kEventCapacity) {
-        cap = skydiag::kEventCapacity;
-      }
-      const std::uint64_t freq = snap->header.qpc_freq ? snap->header.qpc_freq : 1;
-      const std::uint64_t start = snap->header.start_qpc;
-      const std::uint32_t writeIndex = snap->header.write_index;
-      const std::uint32_t begin = (writeIndex > cap) ? (writeIndex - cap) : 0;
+  out.has_blackbox = true;
+  out.pid = snap->header.pid;
+  out.state_flags = snap->header.state_flags;
 
-      out.events.clear();
-      out.events.reserve(static_cast<std::size_t>(std::min<std::uint32_t>(writeIndex, cap)));
-      for (std::uint32_t i = begin; i < writeIndex; i++) {
-        const auto& ev = snap->events[i % cap];
-        const std::uint32_t seq1 = ev.seq;
-        if ((seq1 & 1u) != 0u) {
-          continue;
-        }
+  std::uint32_t cap = snap->header.capacity;
+  if (cap == 0 || cap > skydiag::kEventCapacity) {
+    cap = skydiag::kEventCapacity;
+  }
+  const std::uint64_t freq = snap->header.qpc_freq ? snap->header.qpc_freq : 1;
+  const std::uint64_t start = snap->header.start_qpc;
+  const std::uint32_t writeIndex = snap->header.write_index;
+  const std::uint32_t begin = (writeIndex > cap) ? (writeIndex - cap) : 0;
 
-        skydiag::BlackboxEvent tmp{};
-        std::memcpy(&tmp, &ev, sizeof(tmp));
-        const std::uint32_t seq2 = ev.seq;
-        if (seq1 != seq2 || (seq2 & 1u) != 0u) {
-          continue;
-        }
-
-        if (tmp.type == static_cast<std::uint16_t>(skydiag::EventType::kInvalid)) {
-          continue;
-        }
-
-        EventRow row{};
-        row.i = i;
-        row.tid = tmp.tid;
-        row.type = tmp.type;
-        row.type_name = internal::EventTypeName(tmp.type);
-        row.a = tmp.payload.a;
-        row.b = tmp.payload.b;
-        row.c = tmp.payload.c;
-        row.d = tmp.payload.d;
-        row.detail = internal::FormatEventDetail(row.type, row.a, row.b, row.c, row.d);
-        row.t_ms = (tmp.qpc >= start)
-          ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
-          : 0.0;
-        out.events.push_back(std::move(row));
-      }
-
-      // Resource log (optional; v2+ includes it after the blackbox events).
-      out.resources.clear();
-      if (bbSize >= sizeof(skydiag::SharedLayout)) {
-        const auto& rl = snap->resources;
-        const std::uint32_t rCap = skydiag::kResourceCapacity;
-        const std::uint32_t rWrite = rl.write_index;
-        const std::uint32_t rBegin = (rWrite > rCap) ? (rWrite - rCap) : 0;
-
-        out.resources.reserve(static_cast<std::size_t>(std::min<std::uint32_t>(rWrite, rCap)));
-
-        const auto normMo2Key = [](std::wstring_view relPath) {
-          std::wstring key(relPath);
-          while (!key.empty() && (key.front() == L'\\' || key.front() == L'/')) {
-            key.erase(key.begin());
-          }
-          for (auto& ch : key) {
-            if (ch == L'/') {
-              ch = L'\\';
-            }
-            ch = static_cast<wchar_t>(towlower(ch));
-          }
-          return key;
-        };
-
-        for (std::uint32_t i = rBegin; i < rWrite; i++) {
-          const auto& ent = rl.entries[i % rCap];
-          const std::uint32_t seq1 = ent.seq;
-          if ((seq1 & 1u) != 0u) {
-            continue;
-          }
-
-          skydiag::ResourceEntry tmp{};
-          std::memcpy(&tmp, &ent, sizeof(tmp));
-          const std::uint32_t seq2 = ent.seq;
-          if (seq1 != seq2 || (seq2 & 1u) != 0u) {
-            continue;
-          }
-
-          const std::size_t maxN = sizeof(tmp.path_utf8);
-          std::size_t len = 0;
-          while (len < maxN && tmp.path_utf8[len] != '\0') {
-            len++;
-          }
-          if (len == 0) {
-            continue;
-          }
-
-          ResourceRow rr{};
-          rr.tid = tmp.tid;
-          rr.t_ms = (tmp.qpc >= start)
-            ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
-            : 0.0;
-          rr.path = Utf8ToWide(std::string_view(tmp.path_utf8, len));
-          rr.kind = internal::ResourceKindFromPath(rr.path);
-          if (mo2Index) {
-            // Provider mapping can be expensive in large modpacks. Cache by normalized rel-path.
-            const std::wstring key = normMo2Key(rr.path);
-            auto it = mo2ProvidersCache.find(key);
-            if (it == mo2ProvidersCache.end()) {
-              rr.providers = FindMo2ProvidersForDataPath(*mo2Index, rr.path, /*maxProviders=*/8);
-              it = mo2ProvidersCache.emplace(key, rr.providers).first;
-            } else {
-              rr.providers = it->second;
-            }
-            rr.is_conflict = rr.providers.size() >= 2;
-          }
-          out.resources.push_back(std::move(rr));
-        }
-
-        // Cap display size (best-effort) to keep UI/report manageable.
-        // Keep the last N resources, which are closest to the crash anchor.
-        // When many resources exist, also ensure resources from key asset types
-        // (nif/hkx/tri) near the end are preserved since they're most relevant.
-        constexpr std::size_t kMaxKeep = 120;
-        if (out.resources.size() > kMaxKeep) {
-          out.resources.erase(out.resources.begin(), out.resources.end() - kMaxKeep);
-        }
-      }
+  out.events.clear();
+  out.events.reserve(static_cast<std::size_t>(std::min<std::uint32_t>(writeIndex, cap)));
+  for (std::uint32_t i = begin; i < writeIndex; i++) {
+    const auto& ev = snap->events[i % cap];
+    const std::uint32_t seq1 = ev.seq;
+    if ((seq1 & 1u) != 0u) {
+      continue;
     }
+
+    skydiag::BlackboxEvent tmp{};
+    std::memcpy(&tmp, &ev, sizeof(tmp));
+    const std::uint32_t seq2 = ev.seq;
+    if (seq1 != seq2 || (seq2 & 1u) != 0u) {
+      continue;
+    }
+
+    if (tmp.type == static_cast<std::uint16_t>(skydiag::EventType::kInvalid)) {
+      continue;
+    }
+
+    EventRow row{};
+    row.i = i;
+    row.tid = tmp.tid;
+    row.type = tmp.type;
+    row.type_name = internal::EventTypeName(tmp.type);
+    row.a = tmp.payload.a;
+    row.b = tmp.payload.b;
+    row.c = tmp.payload.c;
+    row.d = tmp.payload.d;
+    row.detail = internal::FormatEventDetail(row.type, row.a, row.b, row.c, row.d);
+    row.t_ms = (tmp.qpc >= start)
+      ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
+      : 0.0;
+    out.events.push_back(std::move(row));
   }
 
-  // WCT stream (optional)
-  void* wctPtr = nullptr;
-  ULONG wctSize = 0;
-  if (ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_WctJson, &wctPtr, &wctSize) && wctPtr && wctSize > 0) {
-    out.has_wct = true;
-    out.wct_json_utf8.assign(static_cast<const char*>(wctPtr), static_cast<std::size_t>(wctSize));
+  // Resource log (optional; v2+ includes it after the blackbox events).
+  out.resources.clear();
+  if (bbSize < sizeof(skydiag::SharedLayout)) {
+    return;
   }
 
-  // Plugin scan stream (optional).
+  const auto& rl = snap->resources;
+  const std::uint32_t rCap = skydiag::kResourceCapacity;
+  const std::uint32_t rWrite = rl.write_index;
+  const std::uint32_t rBegin = (rWrite > rCap) ? (rWrite - rCap) : 0;
+
+  out.resources.reserve(static_cast<std::size_t>(std::min<std::uint32_t>(rWrite, rCap)));
+
+  std::unordered_map<std::wstring, std::vector<std::wstring>> mo2ProvidersCache;
+
+  const auto normMo2Key = [](std::wstring_view relPath) {
+    std::wstring key(relPath);
+    while (!key.empty() && (key.front() == L'\\' || key.front() == L'/')) {
+      key.erase(key.begin());
+    }
+    for (auto& ch : key) {
+      if (ch == L'/') {
+        ch = L'\\';
+      }
+      ch = static_cast<wchar_t>(towlower(ch));
+    }
+    return key;
+  };
+
+  for (std::uint32_t i = rBegin; i < rWrite; i++) {
+    const auto& ent = rl.entries[i % rCap];
+    const std::uint32_t seq1 = ent.seq;
+    if ((seq1 & 1u) != 0u) {
+      continue;
+    }
+
+    skydiag::ResourceEntry tmp{};
+    std::memcpy(&tmp, &ent, sizeof(tmp));
+    const std::uint32_t seq2 = ent.seq;
+    if (seq1 != seq2 || (seq2 & 1u) != 0u) {
+      continue;
+    }
+
+    const std::size_t maxN = sizeof(tmp.path_utf8);
+    std::size_t len = 0;
+    while (len < maxN && tmp.path_utf8[len] != '\0') {
+      len++;
+    }
+    if (len == 0) {
+      continue;
+    }
+
+    ResourceRow rr{};
+    rr.tid = tmp.tid;
+    rr.t_ms = (tmp.qpc >= start)
+      ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
+      : 0.0;
+    rr.path = Utf8ToWide(std::string_view(tmp.path_utf8, len));
+    rr.kind = internal::ResourceKindFromPath(rr.path);
+    if (mo2Index) {
+      // Provider mapping can be expensive in large modpacks. Cache by normalized rel-path.
+      const std::wstring key = normMo2Key(rr.path);
+      auto it = mo2ProvidersCache.find(key);
+      if (it == mo2ProvidersCache.end()) {
+        rr.providers = FindMo2ProvidersForDataPath(*mo2Index, rr.path, /*maxProviders=*/8);
+        it = mo2ProvidersCache.emplace(key, rr.providers).first;
+      } else {
+        rr.providers = it->second;
+      }
+      rr.is_conflict = rr.providers.size() >= 2;
+    }
+    out.resources.push_back(std::move(rr));
+  }
+
+  // Cap display size (best-effort) to keep UI/report manageable.
+  constexpr std::size_t kMaxKeep = 120;
+  if (out.resources.size() > kMaxKeep) {
+    out.resources.erase(out.resources.begin(), out.resources.end() - kMaxKeep);
+  }
+}
+
+static void IntegratePluginScan(
+    const std::wstring& dumpPath,
+    const std::vector<ModuleInfo>& allModules,
+    void* dumpBase, std::uint64_t dumpSize,
+    const AnalyzeOptions& opt,
+    AnalysisResult& out)
+{
   void* pluginPtr = nullptr;
   ULONG pluginSize = 0;
   if (ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_PluginInfo, &pluginPtr, &pluginSize) &&
@@ -599,7 +552,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       out.plugin_diagnostics = pluginRules.Evaluate(ctx);
     }
   }
+}
 
+static bool DetermineHangLike(
+    bool nameHang,
+    const AnalysisResult& out)
+{
   bool hasHangEvent = false;
   for (const auto& ev : out.events) {
     if (ev.type == static_cast<std::uint16_t>(skydiag::EventType::kHangMark)) {
@@ -608,7 +566,6 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
-  // Determine whether this looks like a hang/freeze capture.
   bool hangLike = false;
   bool capSaysHang = false;
   if (out.has_wct) {
@@ -626,7 +583,6 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
 
     // Best-effort override: some manual hotkey dumps are named "_Hang_" even when the game is fine.
-    // If the last heartbeat is very recent, treat it as a snapshot (not hang-like).
     if (!capSaysHang && !hasHangEvent) {
       constexpr double kNotHangHeartbeatAgeSec = 5.0;
       if (out.has_blackbox) {
@@ -641,117 +597,293 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     hangLike = nameHang || hasHangEvent;
   }
 
-  // Optional: Crash Logger SSE/AE log integration (best-effort)
+  return hangLike;
+}
+
+static void IntegrateCrashLoggerLog(
+    const std::wstring& dumpPath,
+    const std::vector<ModuleInfo>& allModules,
+    const std::vector<std::wstring>& modulePaths,
+    const std::optional<Mo2Index>& mo2Index,
+    AnalysisResult& out)
+{
+  std::wstring clErr;
+  const auto dumpFs = std::filesystem::path(dumpPath);
+  std::optional<std::filesystem::path> gameRootDir;
+  for (const auto& m : allModules) {
+    if (m.path.empty() || m.filename.empty()) {
+      continue;
+    }
+    const std::wstring lower = WideLower(m.filename);
+    if (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe") {
+      gameRootDir = std::filesystem::path(m.path).parent_path();
+      break;
+    }
+  }
+
+  const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
+  auto logPath = TryFindCrashLoggerLogForDump(dumpFs, mo2Base, mo2Index ? &*mo2Index : nullptr, gameRootDir, &clErr);
+  if (!logPath) {
+    return;
+  }
+
+  out.crash_logger_log_path = logPath->wstring();
+
+  std::wstring readErr;
+  auto logUtf8 = ReadWholeFileUtf8(*logPath, &readErr);
+  if (!logUtf8) {
+    return;
+  }
+
+  if (auto ver = crashlogger_core::ParseCrashLoggerVersionAscii(*logUtf8)) {
+    out.crash_logger_version = Utf8ToWide(*ver);
+  }
+
+  std::unordered_map<std::wstring, std::wstring> canonicalByLower;
+  canonicalByLower.reserve(allModules.size());
+  for (const auto& m : allModules) {
+    if (!m.filename.empty()) {
+      canonicalByLower.emplace(WideLower(m.filename), m.filename);
+    }
+  }
+  out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
+
+  if (auto cpp = crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii(*logUtf8)) {
+    if (!cpp->type.empty()) {
+      out.crash_logger_cpp_exception_type = Utf8ToWide(cpp->type);
+    }
+    if (!cpp->info.empty()) {
+      out.crash_logger_cpp_exception_info = Utf8ToWide(cpp->info);
+    }
+    if (!cpp->throw_location.empty()) {
+      out.crash_logger_cpp_exception_throw_location = Utf8ToWide(cpp->throw_location);
+    }
+    if (!cpp->module.empty()) {
+      std::wstring mod = Utf8ToWide(cpp->module);
+      const auto it = canonicalByLower.find(WideLower(mod));
+      out.crash_logger_cpp_exception_module = (it != canonicalByLower.end()) ? it->second : mod;
+    }
+  }
+
+  // Parse referenced game objects (ESP/ESM) from CrashLogger log
   {
-    // Manual snapshot dumps often include WCT even when the game is fine, so only search Crash Logger logs when the
-    // capture looks crash/hang-like.
+    auto rawRefs = crashlogger_core::ParseCrashLoggerObjectRefsAscii(*logUtf8);
+    auto aggRefs = crashlogger_core::AggregateCrashLoggerObjectRefs(rawRefs);
+    // Build ref_count from rawRefs (case-insensitive ESP grouping)
+    std::unordered_map<std::string, std::uint32_t> espCount;
+    for (const auto& raw : rawRefs) {
+      espCount[crashlogger_core::AsciiLower(raw.esp_name)]++;
+    }
+    for (const auto& agg : aggRefs) {
+      AnalysisResult::CrashLoggerModReference modRef;
+      modRef.esp_name = Utf8ToWide(agg.esp_name);
+      modRef.best_object_type = Utf8ToWide(agg.object_type);
+      modRef.best_location = Utf8ToWide(agg.location);
+      modRef.object_name = Utf8ToWide(agg.object_name);
+      modRef.form_id = Utf8ToWide(agg.form_id);
+      auto cit = espCount.find(crashlogger_core::AsciiLower(agg.esp_name));
+      modRef.ref_count = (cit != espCount.end()) ? cit->second : 1;
+      modRef.relevance_score = agg.relevance_score;
+      out.crash_logger_object_refs.push_back(std::move(modRef));
+    }
+  }
+}
+
+static void ComputeSuspects(
+    void* dumpBase, std::uint64_t dumpSize,
+    const std::vector<ModuleInfo>& allModules,
+    const std::optional<CONTEXT>& excCtx,
+    bool hangLike,
+    const AnalyzeOptions& opt,
+    AnalysisResult& out)
+{
+  const bool shouldAnalyzeStacks = (out.exc_tid != 0) || hangLike;
+  if (!shouldAnalyzeStacks) {
+    return;
+  }
+
+  std::vector<std::uint32_t> tids;
+  if (out.exc_tid != 0) {
+    tids.push_back(out.exc_tid);
+  } else if (out.has_wct) {
+    tids = internal::ExtractWctCandidateThreadIds(out.wct_json_utf8, /*maxN=*/8);
+  }
+  if (out.has_blackbox) {
+    if (auto mainTid = internal::InferMainThreadIdFromEvents(out.events)) {
+      tids.push_back(*mainTid);
+    }
+  }
+  if (tids.empty()) {
+    return;
+  }
+
+  // Dedup
+  std::sort(tids.begin(), tids.end());
+  tids.erase(std::unique(tids.begin(), tids.end()), tids.end());
+  const auto threads = LoadThreads(dumpBase, dumpSize);
+  if (!internal::TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, opt.language, out)) {
+    out.suspects_from_stackwalk = false;
+    out.suspects = internal::ComputeStackScanSuspects(dumpBase, dumpSize, allModules, tids, opt.language);
+  }
+}
+
+static void PersistCrashHistory(
+    const std::wstring& dumpPath,
+    const std::wstring& outDir,
+    const AnalyzeOptions& opt,
+    AnalysisResult& out)
+{
+  std::filesystem::path historyDir;
+  if (!opt.output_dir.empty()) {
+    historyDir = opt.output_dir;
+  } else if (!outDir.empty()) {
+    historyDir = outDir;
+  } else {
+    historyDir = std::filesystem::path(dumpPath).parent_path();
+  }
+
+  if (historyDir.empty()) {
+    return;
+  }
+
+  const auto historyPath = historyDir / "crash_history.json";
+  ScopedHistoryFileLock historyLock(historyPath);
+  if (!historyLock.Acquire(/*timeoutMs=*/2000)) {
+    return;
+  }
+
+  CrashHistory history;
+  history.LoadFromFile(historyPath);
+
+  CrashHistoryEntry entry{};
+  entry.timestamp_utc = NowIso8601Utc();
+  entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
+  entry.bucket_key = WideToUtf8(out.crash_bucket_key);
+  if (!out.suspects.empty()) {
+    entry.top_suspect = WideToUtf8(out.suspects[0].module_filename);
+    entry.confidence = WideToUtf8(out.suspects[0].confidence);
+    for (const auto& s : out.suspects) {
+      if (!s.module_filename.empty()) {
+        entry.all_suspects.push_back(WideToUtf8(s.module_filename));
+      }
+    }
+  }
+  if (out.signature_match) {
+    entry.signature_id = out.signature_match->id;
+  }
+
+  history.AddEntry(std::move(entry));
+  history.SaveToFile(historyPath);
+  out.history_stats = history.GetModuleStats(20);
+
+  const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
+  if (bucketStats.count > 1) {
+    out.history_correlation.count = bucketStats.count;
+    out.history_correlation.first_seen = bucketStats.first_seen;
+    out.history_correlation.last_seen = bucketStats.last_seen;
+  }
+}
+
+// ===== Main analysis orchestrator =====
+
+bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
+{
+  out = AnalysisResult{};
+  out.language = opt.language;
+  out.dump_path = dumpPath;
+  out.out_dir = outDir;
+  out.online_symbol_source_allowed = opt.allow_online_symbols;
+  out.path_redaction_applied = opt.redact_paths;
+
+  const std::wstring dumpNameLower = WideLower(std::filesystem::path(dumpPath).filename().wstring());
+  const bool nameCrash = (dumpNameLower.find(L"_crash_") != std::wstring::npos);
+  const bool nameHang = (dumpNameLower.find(L"_hang_") != std::wstring::npos);
+
+  // Memory-map the dump to avoid loading large FullMemory dumps into RAM.
+  MappedFile mf{};
+  if (!mf.Open(dumpPath, err)) {
+    return false;
+  }
+  const std::uint64_t dumpSize = mf.size;
+  void* dumpBase = mf.view;
+
+  // Optional: allow external hook-framework list override.
+  if (!opt.data_dir.empty()) {
+    LoadHookFrameworksFromJson(std::filesystem::path(opt.data_dir) / L"hook_frameworks.json");
+  }
+
+  const auto allModules = LoadAllModules(dumpBase, dumpSize);
+  if (!opt.game_version.empty()) {
+    out.game_version = opt.game_version;
+  } else {
+    for (const auto& m : allModules) {
+      if (m.is_game_exe && !m.version.empty()) {
+        out.game_version = m.version;
+        break;
+      }
+    }
+  }
+
+  std::vector<std::wstring> modulePaths;
+  modulePaths.reserve(allModules.size());
+  for (const auto& m : allModules) {
+    if (!m.path.empty()) {
+      modulePaths.push_back(m.path);
+    }
+  }
+  const auto mo2Index = TryBuildMo2IndexFromModulePaths(modulePaths);
+
+  // Exception info + fault module
+  const auto excCtx = ParseExceptionInfo(dumpBase, dumpSize, out);
+  ResolveFaultModule(dumpBase, dumpSize, allModules, out);
+
+  // Graphics injection diagnostics (best-effort, data-driven via JSON rules).
+  if (!opt.data_dir.empty()) {
+    GraphicsInjectionDiag graphicsDiag;
+    const auto rulesPath = std::filesystem::path(opt.data_dir) / L"graphics_injection_rules.json";
+    if (graphicsDiag.LoadRules(rulesPath)) {
+      std::vector<std::wstring> moduleFilenames;
+      moduleFilenames.reserve(allModules.size());
+      for (const auto& m : allModules) {
+        if (!m.filename.empty()) {
+          moduleFilenames.push_back(m.filename);
+        }
+      }
+      out.graphics_env = graphicsDiag.DetectEnvironment(moduleFilenames);
+      out.graphics_diag = graphicsDiag.Diagnose(
+        moduleFilenames,
+        out.fault_module_filename,
+        opt.language == i18n::Language::kKorean);
+    }
+  }
+
+  // SkyrimDiag blackbox (optional)
+  ParseBlackboxStream(dumpBase, dumpSize, mo2Index, modulePaths, out);
+
+  // WCT stream (optional)
+  void* wctPtr = nullptr;
+  ULONG wctSize = 0;
+  if (ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_WctJson, &wctPtr, &wctSize) && wctPtr && wctSize > 0) {
+    out.has_wct = true;
+    out.wct_json_utf8.assign(static_cast<const char*>(wctPtr), static_cast<std::size_t>(wctSize));
+  }
+
+  // Plugin scan + rules
+  IntegratePluginScan(dumpPath, allModules, dumpBase, dumpSize, opt, out);
+
+  // Hang detection
+  const bool hangLike = DetermineHangLike(nameHang, out);
+
+  // Crash Logger integration (best-effort)
+  {
     const bool shouldSearchCrashLogger = (out.exc_code != 0) || nameCrash || hangLike;
     if (shouldSearchCrashLogger) {
-      std::wstring clErr;
-      const auto dumpFs = std::filesystem::path(dumpPath);
-      std::optional<std::filesystem::path> gameRootDir;
-      for (const auto& m : allModules) {
-        if (m.path.empty() || m.filename.empty()) {
-          continue;
-        }
-        const std::wstring lower = WideLower(m.filename);
-        if (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe") {
-          gameRootDir = std::filesystem::path(m.path).parent_path();
-          break;
-        }
-      }
-
-      const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
-      if (auto logPath = TryFindCrashLoggerLogForDump(dumpFs, mo2Base, mo2Index ? &*mo2Index : nullptr, gameRootDir, &clErr)) {
-        out.crash_logger_log_path = logPath->wstring();
-
-        std::wstring readErr;
-        auto logUtf8 = ReadWholeFileUtf8(*logPath, &readErr);
-        if (logUtf8) {
-          if (auto ver = crashlogger_core::ParseCrashLoggerVersionAscii(*logUtf8)) {
-            out.crash_logger_version = Utf8ToWide(*ver);
-          }
-
-          std::unordered_map<std::wstring, std::wstring> canonicalByLower;
-          canonicalByLower.reserve(allModules.size());
-          for (const auto& m : allModules) {
-            if (!m.filename.empty()) {
-              canonicalByLower.emplace(WideLower(m.filename), m.filename);
-            }
-          }
-          out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
-
-          if (auto cpp = crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii(*logUtf8)) {
-            if (!cpp->type.empty()) {
-              out.crash_logger_cpp_exception_type = Utf8ToWide(cpp->type);
-            }
-            if (!cpp->info.empty()) {
-              out.crash_logger_cpp_exception_info = Utf8ToWide(cpp->info);
-            }
-            if (!cpp->throw_location.empty()) {
-              out.crash_logger_cpp_exception_throw_location = Utf8ToWide(cpp->throw_location);
-            }
-            if (!cpp->module.empty()) {
-              std::wstring mod = Utf8ToWide(cpp->module);
-              const auto it = canonicalByLower.find(WideLower(mod));
-              out.crash_logger_cpp_exception_module = (it != canonicalByLower.end()) ? it->second : mod;
-            }
-          }
-
-          // Parse referenced game objects (ESP/ESM) from CrashLogger log
-          {
-            auto rawRefs = crashlogger_core::ParseCrashLoggerObjectRefsAscii(*logUtf8);
-            auto aggRefs = crashlogger_core::AggregateCrashLoggerObjectRefs(rawRefs);
-            // Build ref_count from rawRefs (case-insensitive ESP grouping)
-            std::unordered_map<std::string, std::uint32_t> espCount;
-            for (const auto& raw : rawRefs) {
-              espCount[crashlogger_core::AsciiLower(raw.esp_name)]++;
-            }
-            for (const auto& agg : aggRefs) {
-              AnalysisResult::CrashLoggerModReference modRef;
-              modRef.esp_name = Utf8ToWide(agg.esp_name);
-              modRef.best_object_type = Utf8ToWide(agg.object_type);
-              modRef.best_location = Utf8ToWide(agg.location);
-              modRef.object_name = Utf8ToWide(agg.object_name);
-              modRef.form_id = Utf8ToWide(agg.form_id);
-              auto cit = espCount.find(crashlogger_core::AsciiLower(agg.esp_name));
-              modRef.ref_count = (cit != espCount.end()) ? cit->second : 1;
-              modRef.relevance_score = agg.relevance_score;
-              out.crash_logger_object_refs.push_back(std::move(modRef));
-            }
-          }
-        }
-      }
+      IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
     }
   }
 
   // Suspects (prefer callstack/stackwalk; fallback to stack scan)
-  {
-    const bool shouldAnalyzeStacks = (out.exc_tid != 0) || hangLike;
-    if (shouldAnalyzeStacks) {
-      std::vector<std::uint32_t> tids;
-      if (out.exc_tid != 0) {
-        tids.push_back(out.exc_tid);
-      } else if (out.has_wct) {
-        tids = internal::ExtractWctCandidateThreadIds(out.wct_json_utf8, /*maxN=*/8);
-      }
-      if (out.has_blackbox) {
-        if (auto mainTid = internal::InferMainThreadIdFromEvents(out.events)) {
-          tids.push_back(*mainTid);
-        }
-      }
-      if (!tids.empty()) {
-        // Dedup
-        std::sort(tids.begin(), tids.end());
-        tids.erase(std::unique(tids.begin(), tids.end()), tids.end());
-        const auto threads = LoadThreads(dumpBase, dumpSize);
-        if (!internal::TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, opt.language, out)) {
-          out.suspects_from_stackwalk = false;
-          out.suspects = internal::ComputeStackScanSuspects(dumpBase, dumpSize, allModules, tids, opt.language);
-        }
-      }
-    }
-  }
+  ComputeSuspects(dumpBase, dumpSize, allModules, excCtx, hangLike, opt, out);
 
   ApplyCrashLoggerCorroborationToSuspects(&out);
 
@@ -805,54 +937,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
-  // Persist short rolling history and compute repeated-suspect stats.
-  {
-    std::filesystem::path historyDir;
-    if (!opt.output_dir.empty()) {
-      historyDir = opt.output_dir;
-    } else if (!outDir.empty()) {
-      historyDir = outDir;
-    } else {
-      historyDir = std::filesystem::path(dumpPath).parent_path();
-    }
-
-    if (!historyDir.empty()) {
-      const auto historyPath = historyDir / "crash_history.json";
-      ScopedHistoryFileLock historyLock(historyPath);
-      if (historyLock.Acquire(/*timeoutMs=*/2000)) {
-        CrashHistory history;
-        history.LoadFromFile(historyPath);
-
-        CrashHistoryEntry entry{};
-        entry.timestamp_utc = NowIso8601Utc();
-        entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
-        entry.bucket_key = WideToUtf8(out.crash_bucket_key);
-        if (!out.suspects.empty()) {
-          entry.top_suspect = WideToUtf8(out.suspects[0].module_filename);
-          entry.confidence = WideToUtf8(out.suspects[0].confidence);
-          for (const auto& s : out.suspects) {
-            if (!s.module_filename.empty()) {
-              entry.all_suspects.push_back(WideToUtf8(s.module_filename));
-            }
-          }
-        }
-        if (out.signature_match) {
-          entry.signature_id = out.signature_match->id;
-        }
-
-        history.AddEntry(std::move(entry));
-        history.SaveToFile(historyPath);
-        out.history_stats = history.GetModuleStats(20);
-
-        const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
-        if (bucketStats.count > 1) {
-          out.history_correlation.count = bucketStats.count;
-          out.history_correlation.first_seen = bucketStats.first_seen;
-          out.history_correlation.last_seen = bucketStats.last_seen;
-        }
-      }
-    }
-  }
+  // Persist crash history and compute repeated-suspect stats.
+  PersistCrashHistory(dumpPath, outDir, opt, out);
 
   // Best-effort troubleshooting guide matching.
   if (!opt.data_dir.empty()) {

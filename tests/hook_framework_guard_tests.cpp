@@ -151,7 +151,7 @@ int main()
     "Evidence builder must align displayed top suspect with actionable candidate selection when victim-like tops are present.");
   AssertContains(
     evidence,
-    "r.needs_bees && isCrashLike",
+    "r.needs_bees && ctx.isCrashLike",
     "Evidence builder must gate BEES evidence cards to crash-like incidents.");
 
   return 0;

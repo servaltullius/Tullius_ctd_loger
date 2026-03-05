@@ -28,15 +28,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const bool hasSuspect = !r.suspects.empty();
   const SuspectItem* topSuspect = hasSuspect ? &r.suspects[0] : nullptr;
   const SuspectItem* firstNonHookSuspect = nullptr;
-  auto isActionableSuspect = [&](const SuspectItem& s) {
-    return !minidump::IsKnownHookFramework(s.module_filename) &&
-           !minidump::IsSystemishModule(s.module_filename) &&
-           !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
-           !minidump::IsGameExeModule(s.module_filename);
-  };
   if (hasSuspect) {
     for (const auto& s : r.suspects) {
-      if (isActionableSuspect(s)) {
+      if (IsActionableSuspect(s)) {
         firstNonHookSuspect = &s;
         break;
       }

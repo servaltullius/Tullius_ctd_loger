@@ -86,6 +86,9 @@ std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(
 
 std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool en);
 
+// True if a suspect is neither a hook framework, system DLL, nor game exe.
+bool IsActionableSuspect(const SuspectItem& s);
+
 // Split parts of BuildEvidenceAndSummaryImpl.
 void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

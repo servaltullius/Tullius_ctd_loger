@@ -31,24 +31,14 @@ using skydiag::dump_tool::internal::output_writer::ReplaceAll;
 using skydiag::dump_tool::internal::output_writer::TryLoadIncidentManifestJson;
 using skydiag::dump_tool::internal::output_writer::WriteTextUtf8;
 
-}  // namespace
+// ── Extracted helpers ────────────────────────────────────────────────
 
-bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
+static nlohmann::json BuildSummaryJson(
+  const AnalysisResult& r,
+  const std::filesystem::path& outBase,
+  const std::wstring& stem,
+  bool redactPaths)
 {
-  const std::filesystem::path dumpFs(r.dump_path);
-  std::filesystem::path outBase = r.out_dir.empty() ? DefaultOutDirForDump(dumpFs) : std::filesystem::path(r.out_dir);
-  std::error_code ec;
-  std::filesystem::create_directories(outBase, ec);
-
-  const std::wstring stem = dumpFs.stem().wstring();
-  const bool en = (r.language == i18n::Language::kEnglish);
-  const bool redactPaths = r.path_redaction_applied;
-
-  const auto summaryPath = outBase / (stem + L"_SkyrimDiagSummary.json");
-  const auto reportPath = outBase / (stem + L"_SkyrimDiagReport.txt");
-  const auto blackboxPath = outBase / (stem + L"_SkyrimDiagBlackbox.jsonl");
-  const auto wctPath = outBase / (stem + L"_SkyrimDiagWct.json");
-
   nlohmann::json summary = nlohmann::json::object();
   constexpr std::uint32_t kSummarySchemaVersion = 2;
   summary["schema"] = {
@@ -78,7 +68,6 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     if (incidentManifest.contains("artifacts") && incidentManifest["artifacts"].is_object()) {
       artifacts = incidentManifest["artifacts"];
     }
-    // Ensure stable schema keys in the output even if the manifest is missing fields.
     if (!artifacts.contains("etw")) {
       artifacts["etw"] = "";
     }
@@ -96,6 +85,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
       { "privacy", std::move(privacy) },
     };
   }
+  const auto summaryPath = outBase / (stem + L"_SkyrimDiagSummary.json");
   nlohmann::json triage;
   LoadExistingSummaryTriage(summaryPath, &triage);
   summary["triage"] = std::move(triage);
@@ -321,13 +311,16 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     };
   }
 
-  std::wstring writeErr;
-  if (!WriteTextUtf8(summaryPath, summary.dump(2), &writeErr)) {
-    if (err) *err = writeErr;
-    return false;
-  }
+  return summary;
+}
 
-  // Report (human-friendly)
+static std::string BuildReportText(
+  const AnalysisResult& r,
+  const nlohmann::json& summary,
+  bool redactPaths)
+{
+  const bool en = (r.language == i18n::Language::kEnglish);
+
   std::ostringstream rpt;
   rpt << (en ? "SkyrimDiag Report\n" : "SkyrimDiag 리포트\n");
   rpt << (en ? "Dump: " : "덤프: ") << WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths)) << "\n";
@@ -475,7 +468,35 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
   }
 
-  if (!WriteTextUtf8(reportPath, rpt.str(), &writeErr)) {
+  return rpt.str();
+}
+
+}  // namespace
+
+bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
+{
+  const std::filesystem::path dumpFs(r.dump_path);
+  std::filesystem::path outBase = r.out_dir.empty() ? DefaultOutDirForDump(dumpFs) : std::filesystem::path(r.out_dir);
+  std::error_code ec;
+  std::filesystem::create_directories(outBase, ec);
+
+  const std::wstring stem = dumpFs.stem().wstring();
+  const bool redactPaths = r.path_redaction_applied;
+
+  const auto summaryPath = outBase / (stem + L"_SkyrimDiagSummary.json");
+  const auto reportPath = outBase / (stem + L"_SkyrimDiagReport.txt");
+  const auto blackboxPath = outBase / (stem + L"_SkyrimDiagBlackbox.jsonl");
+  const auto wctPath = outBase / (stem + L"_SkyrimDiagWct.json");
+
+  nlohmann::json summary = BuildSummaryJson(r, outBase, stem, redactPaths);
+
+  std::wstring writeErr;
+  if (!WriteTextUtf8(summaryPath, summary.dump(2), &writeErr)) {
+    if (err) *err = writeErr;
+    return false;
+  }
+
+  if (!WriteTextUtf8(reportPath, BuildReportText(r, summary, redactPaths), &writeErr)) {
     if (err) *err = writeErr;
     return false;
   }

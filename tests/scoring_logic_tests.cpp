@@ -18,24 +18,35 @@ static std::string ReadFile(const char* relPath)
 static void TestCallstackFrameWeightConstants()
 {
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
-  assert(src.find("return 16") != std::string::npos);
-  assert(src.find("return 12") != std::string::npos);
-  assert(src.find("return 8") != std::string::npos);
+  // Named constants: kWeightDepth0=16, kWeightDepth1=12, kWeightDepth2=8
+  assert(src.find("kWeightDepth0") != std::string::npos);
+  assert(src.find("kWeightDepth1") != std::string::npos);
+  assert(src.find("kWeightDepth2") != std::string::npos);
+  assert(src.find("= 16") != std::string::npos);
+  assert(src.find("= 12") != std::string::npos);
+  assert(src.find("= 8") != std::string::npos);
 }
 
 static void TestStackwalkConfidenceThresholds()
 {
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
-  assert(src.find("firstDepth <= 2") != std::string::npos);
-  assert(src.find("topScore >= 24u") != std::string::npos);
-  assert(src.find("firstDepth <= 6") != std::string::npos);
-  assert(src.find("topScore >= 12u") != std::string::npos);
+  // Named constants for confidence thresholds
+  assert(src.find("kHighConfMaxDepth") != std::string::npos);
+  assert(src.find("kHighConfMinScore") != std::string::npos);
+  assert(src.find("kMedConfMaxDepth") != std::string::npos);
+  assert(src.find("kMedConfMinScore") != std::string::npos);
+  // Values
+  assert(src.find("= 2") != std::string::npos);   // kHighConfMaxDepth
+  assert(src.find("= 24") != std::string::npos);   // kHighConfMinScore
+  assert(src.find("= 6") != std::string::npos);    // kMedConfMaxDepth or kMedConfMinMargin
+  assert(src.find("= 12") != std::string::npos);   // kMedConfMinScore or kHighConfMinMargin
 }
 
 static void TestStackwalkHookPromotionThreshold()
 {
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
-  assert(src.find("score + 4u") != std::string::npos);
+  assert(src.find("kHookFrameworkNearTieThreshold") != std::string::npos);
+  assert(src.find("= 4") != std::string::npos);
 }
 
 static void TestStackScanConfidenceThresholds()

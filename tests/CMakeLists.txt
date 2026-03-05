@@ -18,6 +18,7 @@ add_test(NAME skydiag_hang_suppression_tests COMMAND skydiag_hang_suppression_te
 
 add_executable(skydiag_crashlogger_parser_tests
   crashlogger_parser_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashLoggerParseCore.cpp"
 )
 
 target_include_directories(skydiag_crashlogger_parser_tests PRIVATE

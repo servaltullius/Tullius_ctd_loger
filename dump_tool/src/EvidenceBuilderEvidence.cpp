@@ -10,111 +10,11 @@
 
 namespace skydiag::dump_tool::internal {
 
-void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+// ── Extracted evidence helpers ──────────────────────────────────────
+
+static void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
-  const bool hasException = ctx.hasException;
-  const bool isCrashLike = ctx.isCrashLike;
-  const bool isHangLike = ctx.isHangLike;
-  const bool isSnapshotLike = ctx.isSnapshotLike;
-  const bool isManualCapture = ctx.isManualCapture;
-
-  const bool hasModule = ctx.hasModule;
-  const bool isSystem = ctx.isSystem;
-  const bool isGameExe = ctx.isGameExe;
-
-  const auto& wct = ctx.wct;
-  const auto hitch = ctx.hitch;
-  const bool wctSuggestsHang = ctx.wctSuggestsHang;
-
-  if (r.signature_match.has_value()) {
-    const auto& sig = *r.signature_match;
-    EvidenceItem e{};
-    e.confidence_level = sig.confidence_level;
-    e.confidence = sig.confidence.empty() ? ConfidenceText(lang, sig.confidence_level) : sig.confidence;
-    e.title = ctx.en
-      ? (L"Known crash pattern: " + ToWideAscii(sig.id))
-      : (L"알려진 크래시 패턴: " + ToWideAscii(sig.id));
-    e.details = sig.cause;
-    r.evidence.push_back(std::move(e));
-  }
-
-  if (r.graphics_diag.has_value()) {
-    const auto& gd = *r.graphics_diag;
-    EvidenceItem e{};
-    e.confidence_level = gd.confidence_level;
-    e.confidence = gd.confidence.empty() ? ConfidenceText(lang, gd.confidence_level) : gd.confidence;
-    e.title = en
-      ? (L"Graphics injection crash: " + ToWideAscii(gd.rule_id))
-      : (L"그래픽 인젝션 크래시: " + ToWideAscii(gd.rule_id));
-    e.details = gd.cause;
-    r.evidence.push_back(std::move(e));
-  }
-
-  if (!r.plugin_diagnostics.empty()) {
-    for (const auto& pd : r.plugin_diagnostics) {
-      EvidenceItem e{};
-      e.confidence_level = pd.confidence_level;
-      e.confidence = pd.confidence.empty() ? ConfidenceText(lang, pd.confidence_level) : pd.confidence;
-      e.title = en
-        ? (L"Plugin diagnostics: " + ToWideAscii(pd.rule_id))
-        : (L"플러그인 진단: " + ToWideAscii(pd.rule_id));
-      e.details = pd.cause;
-      r.evidence.push_back(std::move(e));
-    }
-  }
-
-  if (!r.missing_masters.empty()) {
-    EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kHigh;
-    e.confidence = ConfidenceText(lang, e.confidence_level);
-    e.title = en
-      ? L"Missing plugin masters detected"
-      : L"누락된 마스터 플러그인 감지";
-    e.details = JoinList(r.missing_masters, 4, L", ");
-    r.evidence.push_back(std::move(e));
-  }
-
-  if (r.needs_bees && isCrashLike) {
-    EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kHigh;
-    e.confidence = ConfidenceText(lang, e.confidence_level);
-    e.title = en
-      ? L"BEES requirement detected"
-      : L"BEES 필요 조건 감지";
-    e.details = en
-      ? L"Header 1.71 plugin(s) found on pre-1.6.1130 runtime without bees.dll."
-      : L"1.71 헤더 플러그인이 있으나 1.6.1130 미만 런타임에서 bees.dll이 로드되지 않았습니다.";
-    r.evidence.push_back(std::move(e));
-  }
-
-  if (hasException) {
-    if (auto info = TryExplainExceptionInfo(r, en)) {
-      EvidenceItem e{};
-      e.confidence_level = i18n::ConfidenceLevel::kHigh;
-      e.confidence = ConfidenceText(lang, e.confidence_level);
-      e.title = en ? L"Exception parameter analysis" : L"예외 파라미터 분석";
-      e.details = *info;
-      r.evidence.push_back(std::move(e));
-    }
-  }
-
-  if (isSnapshotLike) {
-    EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kHigh;
-    e.confidence = ConfidenceText(lang, e.confidence_level);
-    e.title = en
-      ? L"This dump looks like a state snapshot (not a crash/hang dump)"
-      : L"이 덤프는 크래시 덤프가 아니라 '상태 스냅샷'으로 보임";
-    e.details = en
-      ? (isManualCapture
-          ? L"Likely a manual snapshot. This alone does not prove there is a problem. (For state inspection)"
-          : L"Captured without crash/hang signals. Treat it as a snapshot, not a root-cause dump.")
-      : (isManualCapture
-          ? L"수동 캡처로 추정됩니다. 이 결과만으로 '문제가 있다'고 단정할 수 없습니다. (상태 확인용)"
-          : L"크래시/행 신호 없이 캡처된 덤프입니다. 원인 확정용이 아니라 '상태 확인용'입니다.");
-    r.evidence.push_back(std::move(e));
-  }
 
   if (!r.crash_logger_log_path.empty()) {
     EvidenceItem e{};
@@ -143,7 +43,6 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
 
   if (!r.crash_logger_object_refs.empty()) {
     EvidenceItem e{};
-    // Confidence: medium if top ref score >= 14, otherwise low
     e.confidence_level = (r.crash_logger_object_refs[0].relevance_score >= 14)
       ? i18n::ConfidenceLevel::kMedium
       : i18n::ConfidenceLevel::kLow;
@@ -200,6 +99,11 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = JoinList(parts, 8, L" | ");
     r.evidence.push_back(std::move(e));
   }
+}
+
+static void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const bool en = ctx.en;
 
   if (!r.stackwalk_primary_frames.empty()) {
     EvidenceItem e{};
@@ -213,21 +117,11 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
   }
 
   if (!r.suspects.empty()) {
-    auto isActionableSuspect = [&](const SuspectItem& s) {
-      return !minidump::IsKnownHookFramework(s.module_filename) &&
-             !minidump::IsSystemishModule(s.module_filename) &&
-             !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
-             !minidump::IsGameExeModule(s.module_filename);
-    };
     const SuspectItem* selectedTop = &r.suspects[0];
-    const bool topIsVictimish =
-      minidump::IsKnownHookFramework(r.suspects[0].module_filename) ||
-      minidump::IsSystemishModule(r.suspects[0].module_filename) ||
-      minidump::IsLikelyWindowsSystemModulePath(r.suspects[0].module_path) ||
-      minidump::IsGameExeModule(r.suspects[0].module_filename);
+    const bool topIsVictimish = !IsActionableSuspect(r.suspects[0]);
     if (topIsVictimish) {
       for (const auto& s : r.suspects) {
-        if (isActionableSuspect(s)) {
+        if (IsActionableSuspect(s)) {
           selectedTop = &s;
           break;
         }
@@ -265,23 +159,32 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = JoinList(display, 3, L", ");
     r.evidence.push_back(std::move(e));
   }
+}
 
-  if (!r.resources.empty()) {
-    std::vector<std::wstring> recent;
-    const std::size_t n = std::min<std::size_t>(r.resources.size(), 4);
-    recent.reserve(n);
-    for (std::size_t i = r.resources.size() - n; i < r.resources.size(); i++) {
-      const auto& rr = r.resources[i];
-      std::wstring line = rr.path;
-      if (!rr.kind.empty() && rr.kind != L"(unknown)") {
-        line = L"[" + rr.kind + L"] " + line;
-      }
-      if (rr.is_conflict && !rr.providers.empty()) {
-        line += L" (providers: " + JoinList(rr.providers, 4, L", ") + L")";
-      }
-      recent.push_back(std::move(line));
+static void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  if (r.resources.empty()) return;
+
+  const bool en = ctx.en;
+  const bool isCrashLike = ctx.isCrashLike;
+  const bool isHangLike = ctx.isHangLike;
+
+  std::vector<std::wstring> recent;
+  const std::size_t n = std::min<std::size_t>(r.resources.size(), 4);
+  recent.reserve(n);
+  for (std::size_t i = r.resources.size() - n; i < r.resources.size(); i++) {
+    const auto& rr = r.resources[i];
+    std::wstring line = rr.path;
+    if (!rr.kind.empty() && rr.kind != L"(unknown)") {
+      line = L"[" + rr.kind + L"] " + line;
     }
+    if (rr.is_conflict && !rr.providers.empty()) {
+      line += L" (providers: " + JoinList(rr.providers, 4, L", ") + L")";
+    }
+    recent.push_back(std::move(line));
+  }
 
+  {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
@@ -290,100 +193,106 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       : L"최근 로드된 리소스(메쉬/애니) 기록";
     e.details = JoinList(recent, 4, L", ");
     r.evidence.push_back(std::move(e));
+  }
 
-    std::vector<std::wstring> conflicts;
-    for (const auto& rr : r.resources) {
-      if (!rr.is_conflict || rr.providers.size() < 2) {
-        continue;
-      }
-      std::wstring who = rr.path + L" <= " + JoinList(rr.providers, 6, L", ");
-      conflicts.push_back(std::move(who));
-      if (conflicts.size() >= 4) {
-        break;
-      }
+  std::vector<std::wstring> conflicts;
+  for (const auto& rr : r.resources) {
+    if (!rr.is_conflict || rr.providers.size() < 2) {
+      continue;
     }
-
-    if (!conflicts.empty()) {
-      EvidenceItem c{};
-      c.confidence_level = i18n::ConfidenceLevel::kMedium;
-      c.confidence = ConfidenceText(lang, c.confidence_level);
-      c.title = en
-        ? L"Same file provided by multiple mods (possible conflict)"
-        : L"동일 파일을 여러 모드가 제공(충돌 가능)";
-      c.details = JoinList(conflicts, 4, L" | ");
-      r.evidence.push_back(std::move(c));
+    std::wstring who = rr.path + L" <= " + JoinList(rr.providers, 6, L", ");
+    conflicts.push_back(std::move(who));
+    if (conflicts.size() >= 4) {
+      break;
     }
+  }
 
-    // For crashes/hangs, highlight resources that happened closest to capture time.
-    if (isCrashLike || isHangLike) {
-      if (auto anchorMs = InferCaptureAnchorMs(r)) {
-        const double windowBeforeMs = ((r.state_flags & skydiag::kState_Loading) != 0u) ? 15000.0 : 5000.0;
-        const double windowAfterMs = 300.0;
-        const auto hits = FindResourcesNearAnchor(r.resources, *anchorMs, windowBeforeMs, windowAfterMs);
-        if (!hits.empty()) {
-          std::vector<std::wstring> lines;
-          lines.reserve(std::min<std::size_t>(hits.size(), 4));
-          for (const auto* rr : hits) {
-            if (!rr) {
-              continue;
-            }
-            lines.push_back(FormatResourceHitLine(*rr, *anchorMs));
-            if (lines.size() >= 4) {
-              break;
-            }
-          }
+  if (!conflicts.empty()) {
+    EvidenceItem c{};
+    c.confidence_level = i18n::ConfidenceLevel::kMedium;
+    c.confidence = ConfidenceText(lang, c.confidence_level);
+    c.title = en
+      ? L"Same file provided by multiple mods (possible conflict)"
+      : L"동일 파일을 여러 모드가 제공(충돌 가능)";
+    c.details = JoinList(conflicts, 4, L" | ");
+    r.evidence.push_back(std::move(c));
+  }
 
-          if (!lines.empty()) {
-            EvidenceItem e{};
-            e.confidence_level = i18n::ConfidenceLevel::kLow;
-            e.confidence = ConfidenceText(lang, e.confidence_level);
-            e.title = en
-              ? (isCrashLike
-                  ? L"Resources loaded near the crash moment (heuristic)"
-                  : L"Resources loaded near the hang moment (heuristic)")
-              : (isCrashLike
-                  ? L"크래시 직전/직후 로드된 리소스(메쉬/애니) 추정"
-                  : L"프리징/무한로딩 시점 근처 로드된 리소스(메쉬/애니) 추정");
-            e.details = JoinList(lines, 4, L" | ");
-            r.evidence.push_back(std::move(e));
+  if (isCrashLike || isHangLike) {
+    if (auto anchorMs = InferCaptureAnchorMs(r)) {
+      const double windowBeforeMs = ((r.state_flags & skydiag::kState_Loading) != 0u) ? 15000.0 : 5000.0;
+      const double windowAfterMs = 300.0;
+      const auto hits = FindResourcesNearAnchor(r.resources, *anchorMs, windowBeforeMs, windowAfterMs);
+      if (!hits.empty()) {
+        std::vector<std::wstring> lines;
+        lines.reserve(std::min<std::size_t>(hits.size(), 4));
+        for (const auto* rr : hits) {
+          if (!rr) {
+            continue;
           }
+          lines.push_back(FormatResourceHitLine(*rr, *anchorMs));
+          if (lines.size() >= 4) {
+            break;
+          }
+        }
 
-          std::vector<std::wstring> nearConflicts;
-          for (const auto* rr : hits) {
-            if (!rr || !rr->is_conflict || rr->providers.size() < 2) {
-              continue;
-            }
-            nearConflicts.push_back(FormatResourceHitLine(*rr, *anchorMs));
-            if (nearConflicts.size() >= 3) {
-              break;
-            }
-          }
-          if (!nearConflicts.empty()) {
-            EvidenceItem c{};
-            c.confidence_level = i18n::ConfidenceLevel::kMedium;
-            c.confidence = ConfidenceText(lang, c.confidence_level);
-            c.title = en
-              ? L"Near-timestamp resources exist in multiple mods (possible conflict)"
-              : L"시점 근처 리소스가 여러 모드에 존재(충돌 가능)";
-            c.details = JoinList(nearConflicts, 3, L" | ");
-            r.evidence.push_back(std::move(c));
-          }
+        if (!lines.empty()) {
+          EvidenceItem e{};
+          e.confidence_level = i18n::ConfidenceLevel::kLow;
+          e.confidence = ConfidenceText(lang, e.confidence_level);
+          e.title = en
+            ? (isCrashLike
+                ? L"Resources loaded near the crash moment (heuristic)"
+                : L"Resources loaded near the hang moment (heuristic)")
+            : (isCrashLike
+                ? L"크래시 직전/직후 로드된 리소스(메쉬/애니) 추정"
+                : L"프리징/무한로딩 시점 근처 로드된 리소스(메쉬/애니) 추정");
+          e.details = JoinList(lines, 4, L" | ");
+          r.evidence.push_back(std::move(e));
+        }
 
-          const auto suspects = InferProviderScoresFromResources(hits);
-          if (!suspects.empty()) {
-            EvidenceItem s{};
-            s.confidence_level = i18n::ConfidenceLevel::kLow;
-            s.confidence = ConfidenceText(lang, s.confidence_level);
-            s.title = en
-              ? L"Mods providing near-timestamp resources (correlation)"
-              : L"시점 근처 리소스를 제공한 모드(상관분석)";
-            s.details = JoinList(suspects, 5, L", ");
-            r.evidence.push_back(std::move(s));
+        std::vector<std::wstring> nearConflicts;
+        for (const auto* rr : hits) {
+          if (!rr || !rr->is_conflict || rr->providers.size() < 2) {
+            continue;
           }
+          nearConflicts.push_back(FormatResourceHitLine(*rr, *anchorMs));
+          if (nearConflicts.size() >= 3) {
+            break;
+          }
+        }
+        if (!nearConflicts.empty()) {
+          EvidenceItem c{};
+          c.confidence_level = i18n::ConfidenceLevel::kMedium;
+          c.confidence = ConfidenceText(lang, c.confidence_level);
+          c.title = en
+            ? L"Near-timestamp resources exist in multiple mods (possible conflict)"
+            : L"시점 근처 리소스가 여러 모드에 존재(충돌 가능)";
+          c.details = JoinList(nearConflicts, 3, L" | ");
+          r.evidence.push_back(std::move(c));
+        }
+
+        const auto suspects = InferProviderScoresFromResources(hits);
+        if (!suspects.empty()) {
+          EvidenceItem s{};
+          s.confidence_level = i18n::ConfidenceLevel::kLow;
+          s.confidence = ConfidenceText(lang, s.confidence_level);
+          s.title = en
+            ? L"Mods providing near-timestamp resources (correlation)"
+            : L"시점 근처 리소스를 제공한 모드(상관분석)";
+          s.details = JoinList(suspects, 5, L", ");
+          r.evidence.push_back(std::move(s));
         }
       }
     }
   }
+}
+
+static void BuildHitchAndFreezeEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const bool en = ctx.en;
+  const auto hitch = ctx.hitch;
+  const bool isHangLike = ctx.isHangLike;
 
   if (hitch.count > 0) {
     EvidenceItem e{};
@@ -450,6 +359,14 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       r.evidence.push_back(std::move(e));
     }
   }
+}
+
+static void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const bool en = ctx.en;
+  const bool hasModule = ctx.hasModule;
+  const bool isSystem = ctx.isSystem;
+  const bool isGameExe = ctx.isGameExe;
 
   if (hasModule && !isSystem && !isGameExe) {
     EvidenceItem e{};
@@ -502,32 +419,15 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       r.evidence.push_back(std::move(e));
     }
   }
+}
 
-  if (!r.inferred_mod_name.empty()) {
-    EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kMedium;
-    e.confidence = ConfidenceText(lang, e.confidence_level);
-    e.title = en
-      ? L"Inferred mod name from MO2 mod path"
-      : L"MO2 모드 폴더 경로에서 모드명 추정";
-    e.details = en
-      ? (L"Detected a \\mods\\<modname>\\ path pattern; inferred '" + r.inferred_mod_name + L"'.")
-      : (L"모듈 경로에 \\mods\\<모드명>\\ 패턴이 있어 '" + r.inferred_mod_name + L"' 로 추정했습니다.");
-    r.evidence.push_back(std::move(e));
-  }
-
-  if ((r.state_flags & skydiag::kState_Loading) != 0u) {
-    EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kMedium;
-    e.confidence = ConfidenceText(lang, e.confidence_level);
-    e.title = en
-      ? L"Capture appears to have happened during loading"
-      : L"크래시 당시 로딩 상태로 추정";
-    e.details = en
-      ? L"The Loading flag is set in state_flags. (Likely mesh/texture/script init stage)"
-      : L"state_flags에 Loading 플래그가 설정되어 있습니다. (메쉬/텍스처/스크립트 초기화 단계일 수 있음)";
-    r.evidence.push_back(std::move(e));
-  }
+static void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const bool en = ctx.en;
+  const bool isSnapshotLike = ctx.isSnapshotLike;
+  const bool isManualCapture = ctx.isManualCapture;
+  const bool wctSuggestsHang = ctx.wctSuggestsHang;
+  const auto& wct = ctx.wct;
 
   if (r.has_wct) {
     EvidenceItem e{};
@@ -576,7 +476,10 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = buf;
     r.evidence.push_back(std::move(e));
   }
+}
 
+static void BuildHistoryEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
   if (!r.history_stats.empty()) {
     std::wstring details;
     const std::size_t showN = std::min<std::size_t>(r.history_stats.size(), 3);
@@ -621,6 +524,137 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = buf;
     r.evidence.push_back(std::move(e));
   }
+}
+
+// ── Main orchestrator ───────────────────────────────────────────────
+
+void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const bool en = ctx.en;
+
+  if (r.signature_match.has_value()) {
+    const auto& sig = *r.signature_match;
+    EvidenceItem e{};
+    e.confidence_level = sig.confidence_level;
+    e.confidence = sig.confidence.empty() ? ConfidenceText(lang, sig.confidence_level) : sig.confidence;
+    e.title = ctx.en
+      ? (L"Known crash pattern: " + ToWideAscii(sig.id))
+      : (L"알려진 크래시 패턴: " + ToWideAscii(sig.id));
+    e.details = sig.cause;
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.graphics_diag.has_value()) {
+    const auto& gd = *r.graphics_diag;
+    EvidenceItem e{};
+    e.confidence_level = gd.confidence_level;
+    e.confidence = gd.confidence.empty() ? ConfidenceText(lang, gd.confidence_level) : gd.confidence;
+    e.title = en
+      ? (L"Graphics injection crash: " + ToWideAscii(gd.rule_id))
+      : (L"그래픽 인젝션 크래시: " + ToWideAscii(gd.rule_id));
+    e.details = gd.cause;
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (!r.plugin_diagnostics.empty()) {
+    for (const auto& pd : r.plugin_diagnostics) {
+      EvidenceItem e{};
+      e.confidence_level = pd.confidence_level;
+      e.confidence = pd.confidence.empty() ? ConfidenceText(lang, pd.confidence_level) : pd.confidence;
+      e.title = en
+        ? (L"Plugin diagnostics: " + ToWideAscii(pd.rule_id))
+        : (L"플러그인 진단: " + ToWideAscii(pd.rule_id));
+      e.details = pd.cause;
+      r.evidence.push_back(std::move(e));
+    }
+  }
+
+  if (!r.missing_masters.empty()) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Missing plugin masters detected"
+      : L"누락된 마스터 플러그인 감지";
+    e.details = JoinList(r.missing_masters, 4, L", ");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.needs_bees && ctx.isCrashLike) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"BEES requirement detected"
+      : L"BEES 필요 조건 감지";
+    e.details = en
+      ? L"Header 1.71 plugin(s) found on pre-1.6.1130 runtime without bees.dll."
+      : L"1.71 헤더 플러그인이 있으나 1.6.1130 미만 런타임에서 bees.dll이 로드되지 않았습니다.";
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (ctx.hasException) {
+    if (auto info = TryExplainExceptionInfo(r, en)) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kHigh;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = en ? L"Exception parameter analysis" : L"예외 파라미터 분석";
+      e.details = *info;
+      r.evidence.push_back(std::move(e));
+    }
+  }
+
+  if (ctx.isSnapshotLike) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"This dump looks like a state snapshot (not a crash/hang dump)"
+      : L"이 덤프는 크래시 덤프가 아니라 '상태 스냅샷'으로 보임";
+    e.details = en
+      ? (ctx.isManualCapture
+          ? L"Likely a manual snapshot. This alone does not prove there is a problem. (For state inspection)"
+          : L"Captured without crash/hang signals. Treat it as a snapshot, not a root-cause dump.")
+      : (ctx.isManualCapture
+          ? L"수동 캡처로 추정됩니다. 이 결과만으로 '문제가 있다'고 단정할 수 없습니다. (상태 확인용)"
+          : L"크래시/행 신호 없이 캡처된 덤프입니다. 원인 확정용이 아니라 '상태 확인용'입니다.");
+    r.evidence.push_back(std::move(e));
+  }
+
+  BuildCrashLoggerEvidence(r, lang, ctx);
+  BuildSuspectEvidence(r, lang, ctx);
+  BuildResourceEvidence(r, lang, ctx);
+  BuildHitchAndFreezeEvidence(r, lang, ctx);
+  BuildModuleClassificationEvidence(r, lang, ctx);
+
+  if (!r.inferred_mod_name.empty()) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Inferred mod name from MO2 mod path"
+      : L"MO2 모드 폴더 경로에서 모드명 추정";
+    e.details = en
+      ? (L"Detected a \\mods\\<modname>\\ path pattern; inferred '" + r.inferred_mod_name + L"'.")
+      : (L"모듈 경로에 \\mods\\<모드명>\\ 패턴이 있어 '" + r.inferred_mod_name + L"' 로 추정했습니다.");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if ((r.state_flags & skydiag::kState_Loading) != 0u) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Capture appears to have happened during loading"
+      : L"크래시 당시 로딩 상태로 추정";
+    e.details = en
+      ? L"The Loading flag is set in state_flags. (Likely mesh/texture/script init stage)"
+      : L"state_flags에 Loading 플래그가 설정되어 있습니다. (메쉬/텍스처/스크립트 초기화 단계일 수 있음)";
+    r.evidence.push_back(std::move(e));
+  }
+
+  BuildWctEvidence(r, lang, ctx);
+  BuildHistoryEvidence(r, lang, ctx);
 }
 
 }  // namespace skydiag::dump_tool::internal
