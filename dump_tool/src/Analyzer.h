@@ -101,6 +101,7 @@ struct AnalysisResult
     std::wstring best_object_type;
     std::wstring best_location;
     std::wstring object_name;
+    std::wstring form_id;
     std::uint32_t ref_count = 0;
     std::uint32_t relevance_score = 0;
   };

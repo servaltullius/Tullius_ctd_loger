@@ -167,9 +167,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 
   if (!r.crash_logger_object_refs.empty()) {
     const auto& topRef = r.crash_logger_object_refs[0];
+    std::wstring espDesc = topRef.esp_name;
+    if (!topRef.form_id.empty()) {
+      espDesc += L" [" + topRef.form_id + L"]";
+    }
     r.recommendations.push_back(en
-      ? (L"[ESP/ESM] At crash time, an object from " + topRef.esp_name + L" was being processed. Try disabling this mod to check if the crash reproduces.")
-      : (L"[ESP/ESM] 크래시 시점에 " + topRef.esp_name + L" 모드의 오브젝트가 처리 중이었습니다. 해당 모드를 비활성화하여 재현 여부를 확인하세요."));
+      ? (L"[ESP/ESM] At crash time, an object from " + espDesc + L" was being processed. Try disabling this mod to check if the crash reproduces.")
+      : (L"[ESP/ESM] 크래시 시점에 " + espDesc + L" 모드의 오브젝트가 처리 중이었습니다. 해당 모드를 비활성화하여 재현 여부를 확인하세요."));
   }
 
   if (!r.resources.empty()) {

@@ -713,6 +713,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
               modRef.best_object_type = Utf8ToWide(agg.object_type);
               modRef.best_location = Utf8ToWide(agg.location);
               modRef.object_name = Utf8ToWide(agg.object_name);
+              modRef.form_id = Utf8ToWide(agg.form_id);
               auto cit = espCount.find(crashlogger_core::AsciiLower(agg.esp_name));
               modRef.ref_count = (cit != espCount.end()) ? cit->second : 1;
               modRef.relevance_score = agg.relevance_score;

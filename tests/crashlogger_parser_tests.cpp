@@ -575,6 +575,9 @@ using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerObjectRefsAscii;
 using skydiag::dump_tool::crashlogger_core::AggregateCrashLoggerObjectRefs;
 using skydiag::dump_tool::crashlogger_core::IsVanillaDlcEspAsciiLower;
 using skydiag::dump_tool::crashlogger_core::ExtractEspNamesFromLine;
+using skydiag::dump_tool::crashlogger_core::ExtractFormIdBefore;
+using skydiag::dump_tool::crashlogger_core::ExtractEspRefsFromLine;
+using skydiag::dump_tool::crashlogger_core::EspRefEntry;
 
 static void Test_ParseObjectRefs_BasicExample()
 {
@@ -852,6 +855,130 @@ static void Test_ParseObjectRefs_CCContentFiltered()
   assert(refs[0].esp_name == "RealMod.esp");
 }
 
+// ── Group 10: FormID extraction tests ──
+
+static void Test_ExtractFormIdBefore_Basic()
+{
+  // "[0xFEAD081B] ("AE_StellarBlade_Doro.esp")"
+  //               ^ pos at '('
+  std::string_view line = R"([0xFEAD081B] ("AE_StellarBlade_Doro.esp"))";
+  auto pos = line.find('(');
+  auto fid = ExtractFormIdBefore(line, pos);
+  assert(fid == "0xFEAD081B");
+}
+
+static void Test_ExtractFormIdBefore_NoFormId()
+{
+  std::string_view line = R"((Character*) ("SomeMod.esp"))";
+  auto pos = line.find("(\"Some");
+  auto fid = ExtractFormIdBefore(line, pos);
+  assert(fid.empty());
+}
+
+static void Test_ExtractFormIdBefore_WithSpaces()
+{
+  std::string_view line = R"([0xABCD1234]  ("MyMod.esp"))";
+  auto pos = line.find("(\"My");
+  auto fid = ExtractFormIdBefore(line, pos);
+  assert(fid == "0xABCD1234");
+}
+
+static void Test_ExtractFormIdBefore_AtStart()
+{
+  // No room before position 0
+  auto fid = ExtractFormIdBefore("(test)", 0);
+  assert(fid.empty());
+}
+
+static void Test_ExtractEspRefs_WithFormId()
+{
+  std::string_view line = R"(RDI: (Character*) "Doro" [0xFEAD081B] ("AE_StellarBlade_Doro.esp"))";
+  auto refs = ExtractEspRefsFromLine(line);
+  assert(refs.size() == 1);
+  assert(refs[0].esp_name == "AE_StellarBlade_Doro.esp");
+  assert(refs[0].form_id == "0xFEAD081B");
+}
+
+static void Test_ExtractEspRefs_MultipleEsps()
+{
+  std::string_view line = R"(RSP+360: (TESObjectREFR*) [0x9D0F0C07] ("DynDOLOD.esp") [0x33133209] (DynDOLOD.esm))";
+  auto refs = ExtractEspRefsFromLine(line);
+  assert(refs.size() == 2);
+  assert(refs[0].esp_name == "DynDOLOD.esp");
+  assert(refs[0].form_id == "0x9D0F0C07");
+  assert(refs[1].esp_name == "DynDOLOD.esm");
+  assert(refs[1].form_id == "0x33133209");
+}
+
+static void Test_ExtractEspRefs_NoFormId()
+{
+  std::string_view line = R"(RSI: (Character*) ("SomeMod.esp"))";
+  auto refs = ExtractEspRefsFromLine(line);
+  assert(refs.size() == 1);
+  assert(refs[0].esp_name == "SomeMod.esp");
+  assert(refs[0].form_id.empty());
+}
+
+static void Test_ParseObjectRefs_FormIdPropagated()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (Character*) \"\xEB\x8F\x84\xEB\xA1\x9C\xEB\xA1\xB1\" [0xFEAD081B] (\"AE_StellarBlade_Doro.esp\")\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 1);
+  assert(refs[0].form_id == "0xFEAD081B");
+  assert(refs[0].esp_name == "AE_StellarBlade_Doro.esp");
+}
+
+static void Test_AggregateObjectRefs_FormIdKept()
+{
+  std::vector<CrashLoggerObjectRef> refs;
+  {
+    CrashLoggerObjectRef r;
+    r.location = "RDI"; r.object_type = "Character*"; r.esp_name = "MyMod.esp";
+    r.object_name = "NPC1"; r.form_id = "0xDEAD0001"; r.relevance_score = 18;
+    refs.push_back(r);
+  }
+  {
+    CrashLoggerObjectRef r;
+    r.location = "RSP+68"; r.object_type = "TESObjectREFR*"; r.esp_name = "mymod.esp";
+    r.form_id = "0xDEAD0002"; r.relevance_score = 11;
+    refs.push_back(r);
+  }
+
+  const auto agg = AggregateCrashLoggerObjectRefs(refs);
+  assert(agg.size() == 1);
+  // best_form_id should be from the highest-scoring ref
+  assert(agg[0].form_id == "0xDEAD0001");
+}
+
+static void Test_ParseObjectRefs_RegisterFormId()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "PROBABLE CALL STACK:\n"
+    "\tSkyrimSE.exe+0x1\n"
+    "\n"
+    "REGISTERS:\n"
+    "RDI: (TESForm*) [0x12345678] (\"SomeForm.esp\")\n"
+    "\n"
+    "MODULES:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  bool found = false;
+  for (const auto& r : refs) {
+    if (r.esp_name == "SomeForm.esp") {
+      found = true;
+      assert(r.form_id == "0x12345678");
+    }
+  }
+  assert(found);
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -939,6 +1066,18 @@ int main()
   Test_ParseObjectRefs_MalformedQuotedParen_NoInfiniteLoop();
   Test_ExtractEspNames_NoParens();
   Test_ParseObjectRefs_CCContentFiltered();
+
+  // Group 10: FormID extraction tests
+  Test_ExtractFormIdBefore_Basic();
+  Test_ExtractFormIdBefore_NoFormId();
+  Test_ExtractFormIdBefore_WithSpaces();
+  Test_ExtractFormIdBefore_AtStart();
+  Test_ExtractEspRefs_WithFormId();
+  Test_ExtractEspRefs_MultipleEsps();
+  Test_ExtractEspRefs_NoFormId();
+  Test_ParseObjectRefs_FormIdPropagated();
+  Test_AggregateObjectRefs_FormIdKept();
+  Test_ParseObjectRefs_RegisterFormId();
 
   return 0;
 }

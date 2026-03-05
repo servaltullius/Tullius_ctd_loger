@@ -46,6 +46,7 @@ internal sealed class AnalysisSummary
             ReadString(item, "best_object_type"),
             ReadString(item, "best_location"),
             ReadString(item, "object_name"),
+            ReadString(item, "form_id"),
             ReadInt32(item, "ref_count"),
             ReadInt32(item, "relevance_score")));
 
@@ -191,4 +192,4 @@ public sealed record EvidenceViewItem(string Confidence, string Title, string De
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
 public sealed record CrashLoggerRefItem(
     string EspName, string ObjectType, string Location,
-    string ObjectName, int RefCount, int RelevanceScore);
+    string ObjectName, string FormId, int RefCount, int RelevanceScore);

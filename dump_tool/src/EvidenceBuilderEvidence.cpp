@@ -158,8 +158,11 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       if (shown >= 4) break;
       if (!detail.empty()) detail += L", ";
       detail += ref.esp_name;
+      if (!ref.form_id.empty()) {
+        detail += L" [" + ref.form_id + L"]";
+      }
       if (!ref.best_object_type.empty()) {
-        detail += L" [" + ref.best_object_type + L"]";
+        detail += L" (" + ref.best_object_type + L")";
       }
       if (!ref.object_name.empty()) {
         detail += L" \"" + ref.object_name + L"\"";

@@ -147,6 +147,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
         { "best_object_type", WideToUtf8(ref.best_object_type) },
         { "best_location", WideToUtf8(ref.best_location) },
         { "object_name", WideToUtf8(ref.object_name) },
+        { "form_id", WideToUtf8(ref.form_id) },
         { "ref_count", ref.ref_count },
         { "relevance_score", ref.relevance_score },
       });
@@ -407,8 +408,11 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     for (const auto& ref : r.crash_logger_object_refs) {
       if (!first) rpt << ", ";
       rpt << WideToUtf8(ref.esp_name);
+      if (!ref.form_id.empty()) {
+        rpt << " [" << WideToUtf8(ref.form_id) << "]";
+      }
       if (!ref.best_object_type.empty()) {
-        rpt << " [" << WideToUtf8(ref.best_object_type) << "]";
+        rpt << " (" << WideToUtf8(ref.best_object_type) << ")";
       }
       first = false;
     }

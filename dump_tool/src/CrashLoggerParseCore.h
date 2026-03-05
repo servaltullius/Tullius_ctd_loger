@@ -541,6 +541,7 @@ struct CrashLoggerObjectRef {
   std::string object_type;     // "Character*", "TESObjectREFR*"
   std::string esp_name;        // "AE_StellarBlade_Doro.esp"
   std::string object_name;     // "도로롱" (UTF-8, may be empty)
+  std::string form_id;         // "0xFEAD081B" or empty
   std::uint32_t relevance_score = 0;  // LocationWeight + TypeWeight
 };
 
@@ -615,21 +616,50 @@ inline bool LooksLikePluginExtension(std::string_view s)
      lower.substr(lower.size() - 4) == ".esl");
 }
 
-// Extract all ESP/ESM names from a single line.
-// Patterns: ("ModName.esp"), (ModName.esm), File: "ModName.esp"
-// Uses a simple forward scan — each iteration always advances pos to avoid infinite loops.
-inline std::vector<std::string> ExtractEspNamesFromLine(std::string_view line)
+// Entry with ESP name and optional FormID
+struct EspRefEntry {
+  std::string esp_name;
+  std::string form_id;  // "0xFEAD081B" or empty
+};
+
+// Extract a [0xHHHH...] FormID immediately before position `pos` in the line.
+// Scans backwards from `pos` (skipping whitespace) looking for a ']' then '[0x...'.
+inline std::string ExtractFormIdBefore(std::string_view line, std::size_t pos)
 {
-  std::vector<std::string> results;
+  if (pos == 0) return {};
+  // Skip whitespace before pos
+  std::size_t p = pos;
+  while (p > 0 && (line[p - 1] == ' ' || line[p - 1] == '\t')) --p;
+  if (p == 0 || line[p - 1] != ']') return {};
+  --p; // p now points at ']'
+  // Find matching '['
+  auto bracket = line.rfind('[', p);
+  if (bracket == std::string_view::npos || bracket >= p) return {};
+  std::string_view inside = line.substr(bracket + 1, p - bracket - 1);
+  // Trim whitespace
+  while (!inside.empty() && (inside.front() == ' ' || inside.front() == '\t')) inside.remove_prefix(1);
+  while (!inside.empty() && (inside.back() == ' ' || inside.back() == '\t')) inside.remove_suffix(1);
+  // Must start with "0x" or "0X"
+  if (inside.size() < 3 || inside[0] != '0' || (inside[1] != 'x' && inside[1] != 'X')) return {};
+  // Rest must be hex digits
+  for (std::size_t i = 2; i < inside.size(); ++i) {
+    if (!std::isxdigit(static_cast<unsigned char>(inside[i]))) return {};
+  }
+  return std::string(inside);
+}
+
+// Extract all ESP/ESM refs from a line, including FormID found before each ESP paren.
+// Returns EspRefEntry with esp_name and optional form_id.
+inline std::vector<EspRefEntry> ExtractEspRefsFromLine(std::string_view line)
+{
+  std::vector<EspRefEntry> results;
   std::size_t pos = 0;
 
   while (pos < line.size()) {
-    // Find the next '(' or 'F'/'f' (for File:)
     auto nextParen = line.find('(', pos);
     auto nextFile = line.find("File:", pos);
     if (nextFile == std::string_view::npos) nextFile = line.find("file:", pos);
 
-    // Pick whichever comes first
     if (nextParen == std::string_view::npos && nextFile == std::string_view::npos) break;
 
     // Handle File: pattern if it comes before next paren
@@ -641,42 +671,62 @@ inline std::vector<std::string> ExtractEspNamesFromLine(std::string_view line)
       if (fqe == std::string_view::npos) { pos = fq + 1; continue; }
       std::string_view name = line.substr(fq + 1, fqe - (fq + 1));
       if (LooksLikePluginExtension(name) && name.find(' ') == std::string_view::npos) {
-        results.emplace_back(name);
+        EspRefEntry entry;
+        entry.esp_name = std::string(name);
+        entry.form_id = ExtractFormIdBefore(line, nextFile);
+        results.push_back(std::move(entry));
       }
       pos = fqe + 1;
       continue;
     }
 
-    // Handle paren pattern: ("ModName.esp") or (ModName.esm)
+    // Handle paren pattern
     auto cp = line.find(')', nextParen + 1);
     if (cp == std::string_view::npos) { pos = nextParen + 1; continue; }
 
-    // Check for quoted: ("...")
     if (nextParen + 1 < line.size() && line[nextParen + 1] == '"') {
-      // Look for closing ")
       auto endq = line.find("\")", nextParen + 2);
       if (endq != std::string_view::npos) {
         std::string_view name = line.substr(nextParen + 2, endq - (nextParen + 2));
         if (LooksLikePluginExtension(name) && name.find(' ') == std::string_view::npos) {
-          results.emplace_back(name);
+          EspRefEntry entry;
+          entry.esp_name = std::string(name);
+          entry.form_id = ExtractFormIdBefore(line, nextParen);
+          results.push_back(std::move(entry));
         }
         pos = endq + 2;
       } else {
-        pos = nextParen + 2; // malformed, skip past ("
+        pos = nextParen + 2;
       }
       continue;
     }
 
-    // Unquoted: (ModName.esm)
+    // Unquoted
     std::string_view inside = line.substr(nextParen + 1, cp - (nextParen + 1));
     while (!inside.empty() && (inside.front() == ' ' || inside.front() == '\t')) inside.remove_prefix(1);
     while (!inside.empty() && (inside.back() == ' ' || inside.back() == '\t')) inside.remove_suffix(1);
     if (LooksLikePluginExtension(inside) && inside.find(' ') == std::string_view::npos) {
-      results.emplace_back(inside);
+      EspRefEntry entry;
+      entry.esp_name = std::string(inside);
+      entry.form_id = ExtractFormIdBefore(line, nextParen);
+      results.push_back(std::move(entry));
     }
     pos = cp + 1;
   }
 
+  return results;
+}
+
+// Extract all ESP/ESM names from a single line (thin wrapper over ExtractEspRefsFromLine).
+// Patterns: ("ModName.esp"), (ModName.esm), File: "ModName.esp"
+inline std::vector<std::string> ExtractEspNamesFromLine(std::string_view line)
+{
+  auto refs = ExtractEspRefsFromLine(line);
+  std::vector<std::string> results;
+  results.reserve(refs.size());
+  for (auto& r : refs) {
+    results.push_back(std::move(r.esp_name));
+  }
   return results;
 }
 
@@ -789,19 +839,20 @@ inline std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::st
       // Extract object name
       std::string objName = ExtractObjectName(trimmed);
 
-      // Extract ESP names
-      auto espNames = ExtractEspNamesFromLine(trimmed);
-      if (espNames.empty()) continue;
+      // Extract ESP refs (with FormID)
+      auto espRefs = ExtractEspRefsFromLine(trimmed);
+      if (espRefs.empty()) continue;
 
-      for (const auto& esp : espNames) {
-        const std::string lower = AsciiLower(esp);
+      for (const auto& entry : espRefs) {
+        const std::string lower = AsciiLower(entry.esp_name);
         if (IsVanillaDlcEspAsciiLower(lower)) continue;
 
         CrashLoggerObjectRef ref;
         ref.location = location;
         ref.object_type = objType;
-        ref.esp_name = esp;
+        ref.esp_name = entry.esp_name;
         ref.object_name = objName;
+        ref.form_id = entry.form_id;
         ref.relevance_score = LocationWeight(location) + TypeWeight(objType);
         results.push_back(std::move(ref));
       }
@@ -823,18 +874,19 @@ inline std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::st
         std::string location = ExtractLocation(trimmed);
         if (!location.empty()) {
           currentRegister = location;
-          // Try inline ESP extraction
-          auto espNames = ExtractEspNamesFromLine(trimmed);
+          // Try inline ESP extraction (with FormID)
+          auto espRefs = ExtractEspRefsFromLine(trimmed);
           std::string objType = ExtractObjectType(trimmed);
           std::string objName = ExtractObjectName(trimmed);
-          for (const auto& esp : espNames) {
-            const std::string lower = AsciiLower(esp);
+          for (const auto& entry : espRefs) {
+            const std::string lower = AsciiLower(entry.esp_name);
             if (IsVanillaDlcEspAsciiLower(lower)) continue;
             CrashLoggerObjectRef ref;
             ref.location = currentRegister;
             ref.object_type = objType;
-            ref.esp_name = esp;
+            ref.esp_name = entry.esp_name;
             ref.object_name = objName;
+            ref.form_id = entry.form_id;
             ref.relevance_score = LocationWeight(currentRegister) + TypeWeight(objType);
             results.push_back(std::move(ref));
           }
@@ -847,14 +899,15 @@ inline std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::st
               StartsWithCaseInsensitiveAscii(trimmed, "modified by:")) {
             continue;
           }
-          auto espNames = ExtractEspNamesFromLine(trimmed);
-          for (const auto& esp : espNames) {
-            const std::string lower = AsciiLower(esp);
+          auto espRefs = ExtractEspRefsFromLine(trimmed);
+          for (const auto& entry : espRefs) {
+            const std::string lower = AsciiLower(entry.esp_name);
             if (IsVanillaDlcEspAsciiLower(lower)) continue;
             CrashLoggerObjectRef ref;
             ref.location = currentRegister;
             ref.object_type = "";
-            ref.esp_name = esp;
+            ref.esp_name = entry.esp_name;
+            ref.form_id = entry.form_id;
             ref.relevance_score = LocationWeight(currentRegister) + TypeWeight("");
             results.push_back(std::move(ref));
           }
@@ -880,6 +933,7 @@ inline std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
     std::string best_object_type;
     std::string best_location;
     std::string object_name;
+    std::string best_form_id;
     std::uint32_t ref_count = 0;
     std::uint32_t max_score = 0;
   };
@@ -897,6 +951,7 @@ inline std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
       g.best_object_type = ref.object_type;
       g.best_location = ref.location;
       g.object_name = ref.object_name;
+      g.best_form_id = ref.form_id;
       g.ref_count = 1;
       g.max_score = ref.relevance_score;
       groups.push_back(std::move(g));
@@ -907,9 +962,13 @@ inline std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
         g.max_score = ref.relevance_score;
         g.best_object_type = ref.object_type;
         g.best_location = ref.location;
+        if (!ref.form_id.empty()) g.best_form_id = ref.form_id;
       }
       if (g.object_name.empty() && !ref.object_name.empty()) {
         g.object_name = ref.object_name;
+      }
+      if (g.best_form_id.empty() && !ref.form_id.empty()) {
+        g.best_form_id = ref.form_id;
       }
     }
   }
@@ -929,6 +988,7 @@ inline std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
     r.object_type = g.best_object_type;
     r.esp_name = g.canonical_esp;
     r.object_name = g.object_name;
+    r.form_id = g.best_form_id;
     r.relevance_score = g.max_score;
     result.push_back(std::move(r));
   }

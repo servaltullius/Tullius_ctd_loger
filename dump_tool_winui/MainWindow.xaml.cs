@@ -577,8 +577,9 @@ public sealed partial class MainWindow : Window
 
         if (summary.CrashLoggerRefs.Count > 0)
         {
-            var espNames = string.Join(", ", summary.CrashLoggerRefs.Select(r => r.EspName));
-            lines.Add((_isKorean ? "CrashLogger 참조 모드: " : "CrashLogger referenced mods: ") + espNames);
+            var espDescs = string.Join(", ", summary.CrashLoggerRefs.Select(r =>
+                !string.IsNullOrWhiteSpace(r.FormId) ? $"{r.EspName} [{r.FormId}]" : r.EspName));
+            lines.Add((_isKorean ? "CrashLogger 참조 모드: " : "CrashLogger referenced mods: ") + espDescs);
         }
 
         return string.Join(Environment.NewLine, lines);
@@ -637,7 +638,11 @@ public sealed partial class MainWindow : Window
 
         if (summary.CrashLoggerRefs.Count > 0)
         {
-            lines.Add($"📌 {(_isKorean ? "참조 모드 (ESP)" : "Referenced mod (ESP)")}: {summary.CrashLoggerRefs[0].EspName}");
+            var topEspRef = summary.CrashLoggerRefs[0];
+            var espLabel = !string.IsNullOrWhiteSpace(topEspRef.FormId)
+                ? $"{topEspRef.EspName} [{topEspRef.FormId}]"
+                : topEspRef.EspName;
+            lines.Add($"📌 {(_isKorean ? "참조 모드 (ESP)" : "Referenced mod (ESP)")}: {espLabel}");
             if (summary.Suspects.Count > 0)
             {
                 var topSuspect = summary.Suspects[0];
@@ -1021,6 +1026,8 @@ public sealed partial class MainWindow : Window
         var parts = new List<string>();
         if (!string.IsNullOrWhiteSpace(espRef.ObjectType))
             parts.Add(espRef.ObjectType);
+        if (!string.IsNullOrWhiteSpace(espRef.FormId))
+            parts.Add($"[{espRef.FormId}]");
         if (!string.IsNullOrWhiteSpace(espRef.ObjectName))
             parts.Add($"\"{espRef.ObjectName}\"");
         if (!string.IsNullOrWhiteSpace(espRef.Location))
