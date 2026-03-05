@@ -26,12 +26,26 @@
 - DumpTool: 스코어링 매직넘버 14개를 명명 상수로 전환 (`kWeightDepth0`, `kHighConfMinScore` 등).
 - DumpTool: `CrashLoggerRankBonus` 매직넘버 5개 상수화.
 - DumpTool: `ScopedHistoryFileLock` 디렉토리 기반→Windows Named Mutex 전환 — 프로세스 크래시 시 잠금 자동 해제.
+- DumpTool: `AnalyzeDump()` 550줄 → 11개 서브함수 분할 (`LoadSupportDatabases`, `IntegrateCrashLogger`, `RunStackwalk` 등).
+- DumpTool: `BuildEvidenceItems`/`WriteOutputs` 분리, `isActionableSuspect` 중복 제거, `CrashLoggerParseCore.h` → `.h/.cpp` 분리.
+- DumpTool: 진단 로깅 인프라 — `AnalysisResult.diagnostics` 벡터로 데이터 로드 실패, CrashLogger 통합 에러, 스택워크 폴백 등 8개 경로에서 best-effort 실패 메시지 수집. JSON/텍스트 출력 + WinUI 표시.
+- Helper: Win32 HANDLE RAII 래퍼 `UniqueHandle` 도입 — `CreateFileW`/`CreateMutexW`/`OpenProcess` 등 수동 `CloseHandle` 6곳 제거.
+- WinUI: **MVVM 패턴 적용** — `MainWindow.xaml.cs` 1053→465줄(56% 감소). 상태/컬렉션/텍스트 빌더를 `MainWindowViewModel.cs`로 분리. 코드비하인드는 UI 바인딩·이벤트 핸들러만 담당.
 - Plugin: 워치독 스레드 `std::thread::detach()` → `std::jthread` + `stop_token` — DLL 언로드 시 안전한 종료.
+
+### 인프라
+- `.clang-tidy` 정적 분석 설정 — bugprone/performance/modernize 규칙.
+- CI: ASan+UBSan 빌드 잡 추가 (`linux-asan`).
+- libFuzzer 퍼징 하네스 2개 추가 (`fuzz_crashlogger_parser`, `fuzz_wct_parser`) + 시드 코퍼스.
 
 ### 테스트
 - CrashLogger 타임스탬프 파싱 테스트 13개 추가 (Compact/Dashed 포맷, 유효성 검증, 엣지케이스).
 - CrashLogger ESP/ESM 오브젝트 참조 파싱 테스트 16개 추가 (바닐라/CC 필터, Modified by 스킵, 유니코드 이름, 스코어링, 집계, malformed 입력 방어).
 - CrashLogger FormID 파싱 테스트 10개 추가 (`ExtractFormIdBefore`, `ExtractEspRefsFromLine`, 전파/집계 검증).
+- WCT JSON 파싱 테스트 11개 추가 (빈 입력, 사이클 우선순위, maxN 제한, capture 파싱).
+- MO2 경로 추론 테스트 10개 추가 (대소문자, 역슬래시, 빈 입력 방어).
+- 진단 로깅 가드 테스트 추가 (소스 파일 내 diagnostics 인프라 존재 검증).
+- 총 테스트 수: 47개 (기존 26개 → 47개).
 
 ## v0.2.41 (2026-02-28)
 
