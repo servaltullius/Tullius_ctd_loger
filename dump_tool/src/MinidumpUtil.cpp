@@ -113,7 +113,7 @@ bool MappedFile::Open(const std::wstring& path, std::wstring* err)
 {
   Close();
 
-  file = CreateFileW(
+  HANDLE rawFile = CreateFileW(
     path.c_str(),
     GENERIC_READ,
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -121,46 +121,40 @@ bool MappedFile::Open(const std::wstring& path, std::wstring* err)
     OPEN_EXISTING,
     FILE_ATTRIBUTE_NORMAL,
     nullptr);
-  if (file == INVALID_HANDLE_VALUE) {
+  if (rawFile == INVALID_HANDLE_VALUE) {
     if (err) *err = L"CreateFileW failed: " + std::to_wstring(GetLastError());
     return false;
   }
+  skydiag::UniqueHandle fileGuard(rawFile);
 
   LARGE_INTEGER sz{};
-  if (!GetFileSizeEx(file, &sz)) {
-    const DWORD le = GetLastError();
-    CloseHandle(file);
-    file = INVALID_HANDLE_VALUE;
-    if (err) *err = L"GetFileSizeEx failed: " + std::to_wstring(le);
+  if (!GetFileSizeEx(fileGuard.get(), &sz)) {
+    if (err) *err = L"GetFileSizeEx failed: " + std::to_wstring(GetLastError());
     return false;
   }
   if (sz.QuadPart <= 0) {
-    CloseHandle(file);
-    file = INVALID_HANDLE_VALUE;
     if (err) *err = L"File is empty";
     return false;
   }
 
-  size = static_cast<std::uint64_t>(sz.QuadPart);
-  mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
-  if (!mapping) {
-    const DWORD le = GetLastError();
-    CloseHandle(file);
-    file = INVALID_HANDLE_VALUE;
-    if (err) *err = L"CreateFileMappingW failed: " + std::to_wstring(le);
+  skydiag::UniqueHandle mappingGuard(
+    CreateFileMappingW(fileGuard.get(), nullptr, PAGE_READONLY, 0, 0, nullptr));
+  if (!mappingGuard) {
+    if (err) *err = L"CreateFileMappingW failed: " + std::to_wstring(GetLastError());
     return false;
   }
 
-  view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
-  if (!view) {
-    const DWORD le = GetLastError();
-    CloseHandle(mapping);
-    mapping = nullptr;
-    CloseHandle(file);
-    file = INVALID_HANDLE_VALUE;
-    if (err) *err = L"MapViewOfFile failed: " + std::to_wstring(le);
+  void* rawView = MapViewOfFile(mappingGuard.get(), FILE_MAP_READ, 0, 0, 0);
+  if (!rawView) {
+    if (err) *err = L"MapViewOfFile failed: " + std::to_wstring(GetLastError());
     return false;
   }
+
+  // Success — transfer ownership to members.
+  file = std::move(fileGuard);
+  mapping = std::move(mappingGuard);
+  view = rawView;
+  size = static_cast<std::uint64_t>(sz.QuadPart);
 
   if (err) err->clear();
   return true;
@@ -172,14 +166,8 @@ void MappedFile::Close() noexcept
     UnmapViewOfFile(view);
     view = nullptr;
   }
-  if (mapping) {
-    CloseHandle(mapping);
-    mapping = nullptr;
-  }
-  if (file != INVALID_HANDLE_VALUE) {
-    CloseHandle(file);
-    file = INVALID_HANDLE_VALUE;
-  }
+  mapping.reset();
+  file.reset();
   size = 0;
 }
 

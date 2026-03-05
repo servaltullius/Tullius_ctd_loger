@@ -1,5 +1,7 @@
 #include "ProcessUtil.h"
 
+#include "SkyrimDiagHandle.h"
+
 namespace skydiag::helper::internal {
 
 std::wstring QuoteArg(std::wstring_view s)
@@ -51,30 +53,26 @@ bool RunHiddenProcessAndWait(
     return false;
   }
 
-  CloseHandle(pi.hThread);
+  skydiag::UniqueHandle thread(pi.hThread);
+  skydiag::UniqueHandle process(pi.hProcess);
+  thread.reset();  // not needed
 
-  const DWORD w = WaitForSingleObject(pi.hProcess, timeoutMs);
+  const DWORD w = WaitForSingleObject(process.get(), timeoutMs);
   if (w == WAIT_TIMEOUT) {
-    TerminateProcess(pi.hProcess, 1);
-    CloseHandle(pi.hProcess);
+    TerminateProcess(process.get(), 1);
     if (err) *err = L"Process timeout";
     return false;
   }
   if (w == WAIT_FAILED) {
-    const DWORD le = GetLastError();
-    CloseHandle(pi.hProcess);
-    if (err) *err = L"WaitForSingleObject failed: " + std::to_wstring(le);
+    if (err) *err = L"WaitForSingleObject failed: " + std::to_wstring(GetLastError());
     return false;
   }
 
   DWORD exitCode = 0;
-  if (!GetExitCodeProcess(pi.hProcess, &exitCode)) {
-    const DWORD le = GetLastError();
-    CloseHandle(pi.hProcess);
-    if (err) *err = L"GetExitCodeProcess failed: " + std::to_wstring(le);
+  if (!GetExitCodeProcess(process.get(), &exitCode)) {
+    if (err) *err = L"GetExitCodeProcess failed: " + std::to_wstring(GetLastError());
     return false;
   }
-  CloseHandle(pi.hProcess);
 
   if (exitCode != 0) {
     if (err) *err = L"Process exited with code: " + std::to_wstring(exitCode);

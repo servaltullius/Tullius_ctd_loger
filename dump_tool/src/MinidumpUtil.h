@@ -11,14 +11,15 @@
 #include <string_view>
 #include <vector>
 
+#include "SkyrimDiagHandle.h"
 #include "SkyrimDiagStringUtil.h"
 
 namespace skydiag::dump_tool::minidump {
 
 struct MappedFile
 {
-  HANDLE file = INVALID_HANDLE_VALUE;
-  HANDLE mapping = nullptr;
+  skydiag::UniqueHandle file;
+  skydiag::UniqueHandle mapping;
   void* view = nullptr;
   std::uint64_t size = 0;
 
