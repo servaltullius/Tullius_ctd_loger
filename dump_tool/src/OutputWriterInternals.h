@@ -11,6 +11,8 @@ namespace skydiag::dump_tool::internal::output_writer {
 
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep);
 
+bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out);
+
 bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content, std::wstring* err);
 
 void LoadExistingSummaryTriage(const std::filesystem::path& summaryPath, nlohmann::json* triage);

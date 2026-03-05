@@ -18,16 +18,7 @@ namespace skydiag::dump_tool {
 namespace {
 
 using skydiag::WideLower;
-
-std::string AsciiLower(std::string_view s)
-{
-  std::string out;
-  out.reserve(s.size());
-  std::transform(s.begin(), s.end(), std::back_inserter(out), [](char c) {
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  });
-  return out;
-}
+using i18n::AsciiLower;
 
 bool IsImplicitRuntimeMaster(std::string_view masterLower)
 {

@@ -4,6 +4,7 @@
 #include "CrashHistory.h"
 #include "EvidenceBuilder.h"
 #include "GraphicsInjectionDiag.h"
+#include "OutputWriterInternals.h"
 #include "TroubleshootingGuide.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
@@ -129,23 +130,7 @@ private:
   bool m_acquired = false;
 };
 
-bool TryReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
-{
-  if (!out) {
-    return false;
-  }
-  out->clear();
-
-  std::ifstream f(path, std::ios::binary);
-  if (!f.is_open()) {
-    return false;
-  }
-
-  std::ostringstream ss;
-  ss << f.rdbuf();
-  *out = ss.str();
-  return true;
-}
+using internal::output_writer::ReadTextFileUtf8;
 
 // Bonus scores for Crash Logger top-module ranking.
 // Crash Logger already identifies likely suspects; higher rank → higher bonus.
@@ -505,7 +490,7 @@ static void IntegratePluginScan(
     const std::filesystem::path dumpFs(dumpPath);
     const auto sidecarPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
     std::string sidecarJson;
-    if (TryReadTextFileUtf8(sidecarPath, &sidecarJson) && !sidecarJson.empty()) {
+    if (ReadTextFileUtf8(sidecarPath, &sidecarJson) && !sidecarJson.empty()) {
       out.has_plugin_scan = true;
       out.plugin_scan_json_utf8 = std::move(sidecarJson);
     }

@@ -14,9 +14,8 @@
 #include <nlohmann/json.hpp>
 
 namespace skydiag::dump_tool::internal::output_writer {
-namespace {
 
-bool ReadTextUtf8(const std::filesystem::path& path, std::string* out)
+bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
 {
   if (out) {
     out->clear();
@@ -32,6 +31,8 @@ bool ReadTextUtf8(const std::filesystem::path& path, std::string* out)
   }
   return true;
 }
+
+namespace {
 
 nlohmann::json DefaultTriageFields()
 {
@@ -150,7 +151,7 @@ void LoadExistingSummaryTriage(const std::filesystem::path& summaryPath, nlohman
 
   *triage = DefaultTriageFields();
   std::string existingText;
-  if (!ReadTextUtf8(summaryPath, &existingText)) {
+  if (!ReadTextFileUtf8(summaryPath, &existingText)) {
     return;
   }
   const auto existing = nlohmann::json::parse(existingText, nullptr, false);
@@ -253,7 +254,7 @@ bool TryLoadIncidentManifestJson(const std::filesystem::path& path, nlohmann::js
     *out = nlohmann::json();
   }
   std::string txt;
-  if (!ReadTextUtf8(path, &txt)) {
+  if (!ReadTextFileUtf8(path, &txt)) {
     return false;
   }
   const auto j = nlohmann::json::parse(txt, nullptr, false);

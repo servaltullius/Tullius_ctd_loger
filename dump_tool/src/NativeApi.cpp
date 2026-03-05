@@ -1,17 +1,17 @@
 #include "NativeApi.h"
 
 #include "Analyzer.h"
+#include "DumpToolStartupUtil.h"
 #include "OutputWriter.h"
 #include "Utf.h"
 
 #include <cwchar>
-#include <cwctype>
 #include <exception>
-#include <filesystem>
 #include <string>
-#include <vector>
 
 namespace {
+
+using namespace skydiag::dump_tool::startup;
 
 void SetError(std::wstring_view msg, wchar_t* buf, int cap)
 {
@@ -23,79 +23,6 @@ void SetError(std::wstring_view msg, wchar_t* buf, int cap)
     return;
   }
   _snwprintf_s(buf, static_cast<size_t>(cap), _TRUNCATE, L"%ls", msg.data());
-}
-
-std::string ToAscii(std::wstring_view w)
-{
-  std::string out;
-  out.reserve(w.size());
-  for (wchar_t c : w) {
-    if (c >= 0 && c <= 0x7f) {
-      out.push_back(static_cast<char>(c));
-    }
-  }
-  return out;
-}
-
-bool ParseBoolText(std::wstring_view text, bool defaultValue)
-{
-  if (text.empty()) {
-    return defaultValue;
-  }
-  std::wstring lower;
-  lower.reserve(text.size());
-  for (const wchar_t ch : text) {
-    lower.push_back(static_cast<wchar_t>(std::towlower(ch)));
-  }
-  if (lower == L"1" || lower == L"true" || lower == L"yes" || lower == L"on") {
-    return true;
-  }
-  if (lower == L"0" || lower == L"false" || lower == L"no" || lower == L"off") {
-    return false;
-  }
-  return defaultValue;
-}
-
-bool ReadEnvBool(const wchar_t* key, bool defaultValue)
-{
-  if (!key || !*key) {
-    return defaultValue;
-  }
-  const DWORD need = GetEnvironmentVariableW(key, nullptr, 0);
-  if (need == 0) {
-    return defaultValue;
-  }
-  std::wstring value(static_cast<std::size_t>(need - 1), L'\0');
-  if (!value.empty()) {
-    GetEnvironmentVariableW(key, value.data(), need);
-  }
-  return ParseBoolText(value, defaultValue);
-}
-
-std::wstring ReadEnvString(const wchar_t* key)
-{
-  if (!key || !*key) {
-    return {};
-  }
-  const DWORD need = GetEnvironmentVariableW(key, nullptr, 0);
-  if (need == 0) {
-    return {};
-  }
-  std::wstring value(static_cast<std::size_t>(need - 1), L'\0');
-  if (!value.empty()) {
-    GetEnvironmentVariableW(key, value.data(), need);
-  }
-  return value;
-}
-
-std::wstring GetCurrentExeDir()
-{
-  std::vector<wchar_t> buf(32768, L'\0');
-  const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
-  if (n == 0 || n >= buf.size()) {
-    return {};
-  }
-  return std::filesystem::path(std::wstring_view(buf.data(), n)).parent_path().wstring();
 }
 
 std::wstring DescribeStdException(const std::exception& ex)

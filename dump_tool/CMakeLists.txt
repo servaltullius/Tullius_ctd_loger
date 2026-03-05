@@ -105,6 +105,7 @@ set(SKYDIAG_DUMP_TOOL_DATA_FILES
   "crash_signatures.json"
   "graphics_injection_rules.json"
   "plugin_rules.json"
+  "troubleshooting_guides.json"
   "address_db/skyrimse_functions.json"
 )
 

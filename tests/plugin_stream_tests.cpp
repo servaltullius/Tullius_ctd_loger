@@ -70,7 +70,7 @@ void TestAnalyzerHasPluginSidecarFallback()
 {
   const auto impl = ReadFile("dump_tool/src/Analyzer.cpp");
   assert(impl.find("_PluginScan.json") != std::string::npos);
-  assert(impl.find("TryReadTextFileUtf8") != std::string::npos);
+  assert(impl.find("ReadTextFileUtf8") != std::string::npos);
 }
 
 }  // namespace
