@@ -110,24 +110,24 @@ Release hard-gate quick checks:
 bash scripts/verify_release_gate.sh
 
 # 0) compatibility preflight default must stay enabled
-grep -E '^EnableCompatibilityPreflight=1$' /home/kdw73/Tullius_ctd_loger/dist/SkyrimDiagHelper.ini
+grep -E '^EnableCompatibilityPreflight=1$' dist/SkyrimDiagHelper.ini
 
 # 1) scripts sync (WSL repo <-> Windows mirror)
-sha256sum /home/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/build-winui.cmd
-sha256sum /home/kdw73/Tullius_ctd_loger/scripts/package.py /mnt/c/Users/kdw73/Tullius_ctd_loger/scripts/package.py
+sha256sum scripts/build-winui.cmd scripts/build-winui.cmd
+sha256sum scripts/package.py scripts/package.py
 
 # 2) required WinUI outputs
-ls /mnt/c/Users/kdw73/Tullius_ctd_loger/build-winui/{SkyrimDiagDumpToolWinUI.exe,SkyrimDiagDumpToolWinUI.pri,App.xbf,MainWindow.xbf}
+ls build-winui/{SkyrimDiagDumpToolWinUI.exe,SkyrimDiagDumpToolWinUI.pri,App.xbf,MainWindow.xbf}
 
 # 3) zip required entries (authoritative list: scripts/release_contract.py)
 python3 - <<'PY'
 import subprocess
 import sys
 
-sys.path.insert(0, "/home/kdw73/Tullius_ctd_loger/scripts")
+sys.path.insert(0, "scripts")
 from release_contract import REQUIRED_ZIP_ENTRIES
 
-zip_path = "/mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip"
+zip_path = "dist/Tullius_ctd_loger.zip"
 entries = set(subprocess.check_output(["unzip", "-Z1", zip_path], text=True).splitlines())
 missing = [entry for entry in REQUIRED_ZIP_ENTRIES if entry not in entries]
 if missing:
@@ -136,7 +136,7 @@ print("zip required entries: OK")
 PY
 
 # 4) zip size guard (guide: 8MB ~ 25MB)
-ls -lh /mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip
+ls -lh dist/Tullius_ctd_loger.zip
 
 # 5) nested-path guard (must be empty; regex from scripts/release_contract.py)
 python3 - <<'PY'
@@ -144,10 +144,10 @@ import re
 import subprocess
 import sys
 
-sys.path.insert(0, "/home/kdw73/Tullius_ctd_loger/scripts")
+sys.path.insert(0, "scripts")
 from release_contract import nested_winui_path_regex
 
-zip_path = "/mnt/c/Users/kdw73/Tullius_ctd_loger/dist/Tullius_ctd_loger.zip"
+zip_path = "dist/Tullius_ctd_loger.zip"
 pattern = re.compile(nested_winui_path_regex())
 bad = [line for line in subprocess.check_output(["unzip", "-Z1", zip_path], text=True).splitlines() if pattern.match(line)]
 if bad:

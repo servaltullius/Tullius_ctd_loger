@@ -1,0 +1,50 @@
+name: Linux Tests (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      run_asan:
+        description: "Also run ASan + UBSan job"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  unit-tests:
+    name: Linux Unit Tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (Ninja)
+        run: cmake -S . -B build-linux -G Ninja
+
+      - name: Build tests
+        run: cmake --build build-linux
+
+      - name: Run tests
+        run: ctest --test-dir build-linux --output-on-failure
+
+  asan:
+    name: Linux ASan + UBSan
+    if: ${{ inputs.run_asan }}
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (Ninja, sanitizers)
+        run: >
+          cmake -S . -B build-asan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Run tests under sanitizers
+        run: ctest --test-dir build-asan --output-on-failure

@@ -9,26 +9,13 @@ permissions:
   contents: write
 
 jobs:
-  linux-tests:
-    name: Linux Unit Tests
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure (Ninja)
-        run: cmake -S . -B build-linux -G Ninja
-
-      - name: Build tests
-        run: cmake --build build-linux
-
-      - name: Run tests
-        run: ctest --test-dir build-linux --output-on-failure
+  linux:
+    name: Linux
+    uses: ./.github/workflows/linux-tests.yml
 
   release:
     name: Build + Release
-    needs: linux-tests
+    needs: linux
     runs-on: windows-2022
 
     steps:

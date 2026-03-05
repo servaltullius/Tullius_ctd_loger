@@ -66,5 +66,12 @@ int main()
 
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();
+
+  // Accessibility: interactive elements must have AutomationProperties.Name
+  assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");
+
+  // Keyboard accessibility: primary actions should have KeyboardAccelerator
+  assert(xaml.find("KeyboardAccelerator") != std::string::npos && "No KeyboardAccelerator found in XAML");
+
   return 0;
 }

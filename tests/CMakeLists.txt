@@ -1,3 +1,8 @@
+# All test targets share the same C++ standard
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 add_executable(skydiag_hang_suppression_tests
@@ -6,12 +11,6 @@ add_executable(skydiag_hang_suppression_tests
 
 target_include_directories(skydiag_hang_suppression_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
-)
-
-set_target_properties(skydiag_hang_suppression_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_hang_suppression_tests COMMAND skydiag_hang_suppression_tests)
@@ -25,12 +24,6 @@ target_include_directories(skydiag_crashlogger_parser_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
 )
 
-set_target_properties(skydiag_crashlogger_parser_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_crashlogger_parser_tests COMMAND skydiag_crashlogger_parser_tests)
 
 add_executable(skydiag_i18n_core_tests
@@ -39,12 +32,6 @@ add_executable(skydiag_i18n_core_tests
 
 target_include_directories(skydiag_i18n_core_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-)
-
-set_target_properties(skydiag_i18n_core_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_i18n_core_tests COMMAND skydiag_i18n_core_tests)
@@ -57,22 +44,10 @@ target_include_directories(skydiag_bucket_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
 )
 
-set_target_properties(skydiag_bucket_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_bucket_tests COMMAND skydiag_bucket_tests)
 
 add_executable(skydiag_winui_xaml_tests
   winui_xaml_tests.cpp
-)
-
-set_target_properties(skydiag_winui_xaml_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_winui_xaml_tests COMMAND skydiag_winui_xaml_tests)
@@ -81,34 +56,16 @@ add_executable(skydiag_analysis_summary_helpers_tests
   analysis_summary_helpers_tests.cpp
 )
 
-set_target_properties(skydiag_analysis_summary_helpers_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_analysis_summary_helpers_tests COMMAND skydiag_analysis_summary_helpers_tests)
 
 add_executable(skydiag_helper_crash_autopen_config_tests
   helper_crash_autopen_config_tests.cpp
 )
 
-set_target_properties(skydiag_helper_crash_autopen_config_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_helper_crash_autopen_config_tests COMMAND skydiag_helper_crash_autopen_config_tests)
 
 add_executable(skydiag_crash_capture_false_positive_guard_tests
   crash_capture_false_positive_guard_tests.cpp
-)
-
-set_target_properties(skydiag_crash_capture_false_positive_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_crash_capture_false_positive_guard_tests COMMAND skydiag_crash_capture_false_positive_guard_tests)
@@ -121,22 +78,10 @@ target_include_directories(skydiag_crash_capture_filter_logic_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
 )
 
-set_target_properties(skydiag_crash_capture_filter_logic_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_crash_capture_filter_logic_tests COMMAND skydiag_crash_capture_filter_logic_tests)
 
 add_executable(skydiag_crash_capture_refactored_guard_tests
   crash_capture_refactored_guard_tests.cpp
-)
-
-set_target_properties(skydiag_crash_capture_refactored_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_crash_capture_refactored_guard_tests COMMAND skydiag_crash_capture_refactored_guard_tests)
@@ -145,34 +90,16 @@ add_executable(skydiag_pending_crash_analysis_guard_tests
   pending_crash_analysis_guard_tests.cpp
 )
 
-set_target_properties(skydiag_pending_crash_analysis_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_pending_crash_analysis_guard_tests COMMAND skydiag_pending_crash_analysis_guard_tests)
 
 add_executable(skydiag_plugin_runtime_guard_tests
   plugin_runtime_guard_tests.cpp
 )
 
-set_target_properties(skydiag_plugin_runtime_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_plugin_runtime_guard_tests COMMAND skydiag_plugin_runtime_guard_tests)
 
 add_executable(skydiag_helper_preflight_guard_tests
   helper_preflight_guard_tests.cpp
-)
-
-set_target_properties(skydiag_helper_preflight_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_helper_preflight_guard_tests COMMAND skydiag_helper_preflight_guard_tests)
@@ -185,22 +112,10 @@ target_include_directories(skydiag_retention_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
 )
 
-set_target_properties(skydiag_retention_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_retention_tests COMMAND skydiag_retention_tests)
 
 add_executable(skydiag_summary_schema_fields_tests
   summary_schema_fields_tests.cpp
-)
-
-set_target_properties(skydiag_summary_schema_fields_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_summary_schema_fields_tests COMMAND skydiag_summary_schema_fields_tests)
@@ -209,22 +124,10 @@ add_executable(skydiag_hook_framework_guard_tests
   hook_framework_guard_tests.cpp
 )
 
-set_target_properties(skydiag_hook_framework_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_hook_framework_guard_tests COMMAND skydiag_hook_framework_guard_tests)
 
 add_executable(skydiag_hook_framework_json_tests
   hook_framework_json_tests.cpp
-)
-
-set_target_properties(skydiag_hook_framework_json_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 target_compile_definitions(skydiag_hook_framework_json_tests PRIVATE
@@ -240,34 +143,16 @@ add_executable(skydiag_json_schema_validation_guard_tests
   json_schema_validation_guard_tests.cpp
 )
 
-set_target_properties(skydiag_json_schema_validation_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_json_schema_validation_guard_tests COMMAND skydiag_json_schema_validation_guard_tests)
 
 add_executable(skydiag_system_module_guard_tests
   system_module_guard_tests.cpp
 )
 
-set_target_properties(skydiag_system_module_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_system_module_guard_tests COMMAND skydiag_system_module_guard_tests)
 
 add_executable(skydiag_scoring_logic_tests
   scoring_logic_tests.cpp
-)
-
-set_target_properties(skydiag_scoring_logic_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_scoring_logic_tests COMMAND skydiag_scoring_logic_tests)
@@ -279,12 +164,6 @@ add_executable(skydiag_stack_scan_weight_tests
   stack_scan_weight_tests.cpp
 )
 
-set_target_properties(skydiag_stack_scan_weight_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_stack_scan_weight_tests COMMAND skydiag_stack_scan_weight_tests)
 set_tests_properties(skydiag_stack_scan_weight_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -292,12 +171,6 @@ set_tests_properties(skydiag_stack_scan_weight_tests PROPERTIES
 
 add_executable(skydiag_signature_database_tests
   signature_database_tests.cpp
-)
-
-set_target_properties(skydiag_signature_database_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_signature_database_tests COMMAND skydiag_signature_database_tests)
@@ -309,12 +182,6 @@ add_executable(skydiag_address_resolver_tests
   address_resolver_tests.cpp
 )
 
-set_target_properties(skydiag_address_resolver_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_address_resolver_tests COMMAND skydiag_address_resolver_tests)
 set_tests_properties(skydiag_address_resolver_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -324,12 +191,6 @@ add_executable(skydiag_crash_history_tests
   crash_history_tests.cpp
 )
 
-set_target_properties(skydiag_crash_history_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_crash_history_tests COMMAND skydiag_crash_history_tests)
 set_tests_properties(skydiag_crash_history_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -337,12 +198,6 @@ set_tests_properties(skydiag_crash_history_tests PROPERTIES
 
 add_executable(skydiag_triage_fields_tests
   triage_fields_tests.cpp
-)
-
-set_target_properties(skydiag_triage_fields_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_triage_fields_tests COMMAND skydiag_triage_fields_tests)
@@ -365,13 +220,7 @@ if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
     "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
   )
 
-  set_target_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-  )
-
-  add_test(NAME skydiag_analysis_engine_runtime_tests COMMAND skydiag_analysis_engine_runtime_tests)
+    add_test(NAME skydiag_analysis_engine_runtime_tests COMMAND skydiag_analysis_engine_runtime_tests)
   set_tests_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
     ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
   )
@@ -387,22 +236,10 @@ target_include_directories(skydiag_crash_recapture_policy_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
 )
 
-set_target_properties(skydiag_crash_recapture_policy_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_crash_recapture_policy_tests COMMAND skydiag_crash_recapture_policy_tests)
 
 add_executable(skydiag_symbol_privacy_controls_tests
   symbol_privacy_controls_tests.cpp
-)
-
-set_target_properties(skydiag_symbol_privacy_controls_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_symbol_privacy_controls_tests COMMAND skydiag_symbol_privacy_controls_tests)
@@ -411,34 +248,16 @@ add_executable(skydiag_crash_hook_mode_guard_tests
   crash_hook_mode_guard_tests.cpp
 )
 
-set_target_properties(skydiag_crash_hook_mode_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_crash_hook_mode_guard_tests COMMAND skydiag_crash_hook_mode_guard_tests)
 
 add_executable(skydiag_tier2_hybrid_config_tests
   tier2_hybrid_config_tests.cpp
 )
 
-set_target_properties(skydiag_tier2_hybrid_config_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_tier2_hybrid_config_tests COMMAND skydiag_tier2_hybrid_config_tests)
 
 add_executable(skydiag_incident_manifest_schema_tests
   incident_manifest_schema_tests.cpp
-)
-
-set_target_properties(skydiag_incident_manifest_schema_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_incident_manifest_schema_tests COMMAND skydiag_incident_manifest_schema_tests)
@@ -451,12 +270,6 @@ target_include_directories(skydiag_dump_tool_cli_args_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
 )
 
-set_target_properties(skydiag_dump_tool_cli_args_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_dump_tool_cli_args_tests COMMAND skydiag_dump_tool_cli_args_tests)
 
 add_executable(skydiag_dump_tool_headless_resolver_tests
@@ -467,12 +280,6 @@ target_include_directories(skydiag_dump_tool_headless_resolver_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
 )
 
-set_target_properties(skydiag_dump_tool_headless_resolver_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_dump_tool_headless_resolver_tests COMMAND skydiag_dump_tool_headless_resolver_tests)
 
 add_executable(skydiag_headless_analysis_policy_tests
@@ -481,12 +288,6 @@ add_executable(skydiag_headless_analysis_policy_tests
 
 target_include_directories(skydiag_headless_analysis_policy_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
-)
-
-set_target_properties(skydiag_headless_analysis_policy_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_headless_analysis_policy_tests COMMAND skydiag_headless_analysis_policy_tests)
@@ -505,12 +306,6 @@ add_executable(skydiag_graphics_injection_rules_tests
   graphics_injection_rules_tests.cpp
 )
 
-set_target_properties(skydiag_graphics_injection_rules_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_graphics_injection_rules_tests COMMAND skydiag_graphics_injection_rules_tests)
 set_tests_properties(skydiag_graphics_injection_rules_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -518,12 +313,6 @@ set_tests_properties(skydiag_graphics_injection_rules_tests PROPERTIES
 
 add_executable(skydiag_graphics_injection_diag_tests
   graphics_injection_diag_tests.cpp
-)
-
-set_target_properties(skydiag_graphics_injection_diag_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_graphics_injection_diag_tests COMMAND skydiag_graphics_injection_diag_tests)
@@ -535,12 +324,6 @@ add_executable(skydiag_graphics_injection_integration_tests
   graphics_injection_integration_tests.cpp
 )
 
-set_target_properties(skydiag_graphics_injection_integration_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_graphics_injection_integration_tests COMMAND skydiag_graphics_injection_integration_tests)
 set_tests_properties(skydiag_graphics_injection_integration_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -548,12 +331,6 @@ set_tests_properties(skydiag_graphics_injection_integration_tests PROPERTIES
 
 add_executable(skydiag_plugin_scanner_tests
   plugin_scanner_tests.cpp
-)
-
-set_target_properties(skydiag_plugin_scanner_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_plugin_scanner_tests COMMAND skydiag_plugin_scanner_tests)
@@ -565,12 +342,6 @@ add_executable(skydiag_plugin_stream_tests
   plugin_stream_tests.cpp
 )
 
-set_target_properties(skydiag_plugin_stream_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_plugin_stream_tests COMMAND skydiag_plugin_stream_tests)
 set_tests_properties(skydiag_plugin_stream_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -580,12 +351,6 @@ add_executable(skydiag_plugin_rules_tests
   plugin_rules_tests.cpp
 )
 
-set_target_properties(skydiag_plugin_rules_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_plugin_rules_tests COMMAND skydiag_plugin_rules_tests)
 set_tests_properties(skydiag_plugin_rules_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
@@ -593,12 +358,6 @@ set_tests_properties(skydiag_plugin_rules_tests PROPERTIES
 
 add_executable(skydiag_event_detail_guard_tests
   event_detail_guard_tests.cpp
-)
-
-set_target_properties(skydiag_event_detail_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_event_detail_guard_tests COMMAND skydiag_event_detail_guard_tests)
@@ -618,13 +377,7 @@ if(NOT WIN32)
       "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
     )
 
-    set_target_properties(skydiag_plugin_rules_logic_tests PROPERTIES
-      CXX_STANDARD 20
-      CXX_STANDARD_REQUIRED ON
-      CXX_EXTENSIONS OFF
-    )
-
-    add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
+        add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
   else()
     message(STATUS "skydiag_plugin_rules_logic_tests skipped: nlohmann/json.hpp not found")
   endif()
@@ -632,12 +385,6 @@ endif()
 
 add_executable(skydiag_diagnostic_logging_guard_tests
   diagnostic_logging_guard_tests.cpp
-)
-
-set_target_properties(skydiag_diagnostic_logging_guard_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
 )
 
 add_test(NAME skydiag_diagnostic_logging_guard_tests COMMAND skydiag_diagnostic_logging_guard_tests)
@@ -654,12 +401,6 @@ target_include_directories(skydiag_mo2_index_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
-set_target_properties(skydiag_mo2_index_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-
 add_test(NAME skydiag_mo2_index_tests COMMAND skydiag_mo2_index_tests)
 
 # WCT JSON parsing tests (requires nlohmann/json)
@@ -674,13 +415,25 @@ if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
     "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
   )
 
-  set_target_properties(skydiag_wct_parsing_tests PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
-  )
-
-  add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
+    add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
 else()
   message(STATUS "skydiag_wct_parsing_tests skipped: nlohmann/json.hpp not found")
+endif()
+
+# E2E output snapshot / schema contract tests (requires nlohmann/json)
+if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
+  add_executable(skydiag_output_snapshot_tests
+    output_snapshot_tests.cpp
+  )
+
+  target_include_directories(skydiag_output_snapshot_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+
+    add_test(NAME skydiag_output_snapshot_tests COMMAND skydiag_output_snapshot_tests)
+  set_tests_properties(skydiag_output_snapshot_tests PROPERTIES
+    ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+  )
+else()
+  message(STATUS "skydiag_output_snapshot_tests skipped: nlohmann/json.hpp not found")
 endif()

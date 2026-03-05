@@ -1,0 +1,117 @@
+{
+  "schema": {
+    "name": "SkyrimDiagSummary",
+    "version": 2
+  },
+  "dump_path": "C:\\Crashes\\test_crash_20260115_143022.dmp",
+  "pid": 12345,
+  "state_flags": 0,
+  "summary_sentence": "Crash in hdtSMP64.dll (Access Violation 0xC0000005)",
+  "crash_bucket_key": "hdtSMP64.dll+0x1A2B3",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "privacy": {
+    "path_redaction_applied": false,
+    "online_symbol_source_allowed": false,
+    "online_symbol_source_used": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "code": 3221225477,
+    "thread_id": 7890,
+    "address": 5370822106,
+    "fault_module_offset": 107059,
+    "module_plus_offset": "hdtSMP64.dll+0x1A2B3",
+    "fault_module_unknown": false,
+    "module_path": "C:\\MO2\\mods\\HDT-SMP\\SKSE\\Plugins\\hdtSMP64.dll",
+    "inferred_mod_name": "HDT-SMP"
+  },
+  "game_version": "1.5.97.0",
+  "crash_logger": {
+    "log_path": "C:\\Crashes\\crash_20260115_143022.log",
+    "version": "4.26.1",
+    "top_modules": ["hdtSMP64.dll", "SkyrimSE.exe"],
+    "object_refs": [
+      {
+        "esp_name": "AE_StellarBlade_Doro.esp",
+        "best_object_type": "Character*",
+        "best_location": "RDI",
+        "object_name": "도로롱",
+        "form_id": "0xFEAD081B",
+        "ref_count": 3,
+        "relevance_score": 80
+      }
+    ]
+  },
+  "signature_match": null,
+  "graphics_environment": {
+    "enb_detected": true,
+    "reshade_detected": false,
+    "dxvk_detected": false,
+    "injection_modules": ["d3d11.dll", "d3dcompiler_46e.dll"]
+  },
+  "graphics_diagnosis": null,
+  "suspects": [
+    {
+      "confidence": "High",
+      "module_filename": "hdtSMP64.dll",
+      "module_path": "C:\\MO2\\mods\\HDT-SMP\\SKSE\\Plugins\\hdtSMP64.dll",
+      "inferred_mod_name": "HDT-SMP",
+      "score": 15,
+      "reason": "Fault module + top stack frames"
+    },
+    {
+      "confidence": "Low",
+      "module_filename": "cbp.dll",
+      "module_path": "C:\\MO2\\mods\\CBP-Physics\\SKSE\\Plugins\\cbp.dll",
+      "inferred_mod_name": "CBP-Physics",
+      "score": 3,
+      "reason": "Stack scan hit"
+    }
+  ],
+  "callstack": {
+    "thread_id": 7890,
+    "frames": [
+      "hdtSMP64.dll+0x1A2B3",
+      "hdtSMP64.dll+0x1B440",
+      "SkyrimSE.exe+0xD6DDDA",
+      "SkyrimSE.exe+0xD6DD10"
+    ]
+  },
+  "symbolization": {
+    "search_path": "C:\\Symbols",
+    "cache_path": "C:\\Symbols",
+    "total_frames": 42,
+    "symbolized_frames": 4,
+    "source_line_frames": 0,
+    "online_symbol_source_allowed": false,
+    "online_symbol_source_used": false
+  },
+  "resources": [],
+  "evidence": [
+    {
+      "confidence": "High",
+      "title": "Access Violation in hdtSMP64.dll",
+      "details": "Fault address within HDT-SMP physics module"
+    }
+  ],
+  "recommendations": [
+    "Update HDT-SMP to the latest version",
+    "Check for incompatible physics mods"
+  ]
+}

@@ -8,43 +8,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  linux-tests:
-    name: Linux Unit Tests
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure (Ninja)
-        run: cmake -S . -B build-linux -G Ninja
-
-      - name: Build tests
-        run: cmake --build build-linux
-
-      - name: Run tests
-        run: ctest --test-dir build-linux --output-on-failure
-
-  linux-asan:
-    name: Linux ASan + UBSan
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure (Ninja, sanitizers)
-        run: >
-          cmake -S . -B build-asan -G Ninja
-          -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
-          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
-
-      - name: Build
-        run: cmake --build build-asan
-
-      - name: Run tests under sanitizers
-        run: ctest --test-dir build-asan --output-on-failure
+  linux:
+    name: Linux
+    uses: ./.github/workflows/linux-tests.yml
+    with:
+      run_asan: true
 
   windows-validate:
     name: Windows Validate (Build + Package + Gate)
@@ -72,6 +40,14 @@ jobs:
         run: |
           git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE\vcpkg"
           & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
+
+      - name: Setup vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-archives-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-archives-
 
       - name: Configure (Visual Studio + vcpkg)
         shell: pwsh

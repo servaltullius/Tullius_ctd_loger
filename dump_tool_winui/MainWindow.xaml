@@ -108,9 +108,16 @@
                     <ColumnDefinition Width="Auto" />
                   </Grid.ColumnDefinitions>
                   <TextBox x:Name="DumpPathBox"
-                           PlaceholderText="Select a .dmp file" MinHeight="42" />
+                           PlaceholderText="Select a .dmp file" MinHeight="42"
+                           AutomationProperties.Name="Dump file path" />
                   <Button x:Name="BrowseDumpButton" Grid.Column="1"
-                          Click="BrowseDump_Click" Content="Browse dump" />
+                          Click="BrowseDump_Click" Content="Browse dump"
+                          AutomationProperties.Name="Browse dump file"
+                          ToolTipService.ToolTip="Browse dump file (Ctrl+O)">
+                    <Button.KeyboardAccelerators>
+                      <KeyboardAccelerator Modifiers="Control" Key="O" />
+                    </Button.KeyboardAccelerators>
+                  </Button>
                 </Grid>
 
                 <Grid ColumnSpacing="8">
@@ -119,20 +126,30 @@
                     <ColumnDefinition Width="Auto" />
                   </Grid.ColumnDefinitions>
                   <TextBox x:Name="OutputDirBox"
-                           PlaceholderText="Optional output directory (empty = dump folder)" MinHeight="42" />
+                           PlaceholderText="Optional output directory (empty = dump folder)" MinHeight="42"
+                           AutomationProperties.Name="Output directory path" />
                   <Button x:Name="BrowseOutputButton" Grid.Column="1"
-                          Click="BrowseOutputFolder_Click" Content="Browse folder" />
+                          Click="BrowseOutputFolder_Click" Content="Browse folder"
+                          AutomationProperties.Name="Browse output folder" />
                 </Grid>
 
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Button x:Name="AnalyzeButton" Click="AnalyzeButton_Click"
                           Content="ANALYZE NOW"
-                          Style="{StaticResource PrimaryActionButtonStyle}" />
+                          Style="{StaticResource PrimaryActionButtonStyle}"
+                          AutomationProperties.Name="Analyze dump file"
+                          ToolTipService.ToolTip="Analyze dump (F5)">
+                    <Button.KeyboardAccelerators>
+                      <KeyboardAccelerator Key="F5" />
+                    </Button.KeyboardAccelerators>
+                  </Button>
                   <Button x:Name="CancelAnalyzeButton" Click="CancelAnalyzeButton_Click"
                           Content="Cancel analysis"
-                          IsEnabled="False" />
+                          IsEnabled="False"
+                          AutomationProperties.Name="Cancel analysis" />
                   <Button x:Name="OpenOutputButton" Click="OpenOutputButton_Click"
-                          Content="Open report folder" />
+                          Content="Open report folder"
+                          AutomationProperties.Name="Open report folder" />
                 </StackPanel>
 
                 <!-- Status -->
@@ -174,14 +191,21 @@
                       VerticalAlignment="Center"
                       Padding="14,8"
                       FontSize="13"
-                      Content="Copy summary" />
+                      Content="Copy summary"
+                      AutomationProperties.Name="Copy summary to clipboard"
+                      ToolTipService.ToolTip="Copy summary (Ctrl+Shift+C)">
+                <Button.KeyboardAccelerators>
+                  <KeyboardAccelerator Modifiers="Control,Shift" Key="C" />
+                </Button.KeyboardAccelerators>
+              </Button>
               <Button x:Name="CopyShareButton"
                       Grid.Column="2"
                       Click="CopyShareButton_Click"
                       VerticalAlignment="Center"
                       Padding="14,8"
                       FontSize="13"
-                      Content="Share" />
+                      Content="Share"
+                      AutomationProperties.Name="Copy share text to clipboard" />
             </Grid>
 
             <!-- Summary sentence (full-width) -->
@@ -322,7 +346,8 @@
                         </TextBlock>
                       </StackPanel>
                       <ListView x:Name="SuspectsList" SelectionMode="None" MaxHeight="320"
-                                Background="Transparent" BorderThickness="0">
+                                Background="Transparent" BorderThickness="0"
+                                AutomationProperties.Name="Suspect modules list">
                         <ListView.ItemTemplate>
                           <DataTemplate x:DataType="local:SuspectItem">
                             <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
@@ -373,7 +398,8 @@
                       </StackPanel>
                     </Expander.Header>
                     <ListView x:Name="CallstackList" MaxHeight="500" SelectionMode="None"
-                              Background="Transparent" BorderThickness="0">
+                              Background="Transparent" BorderThickness="0"
+                              AutomationProperties.Name="Callstack frames">
                       <ListView.ItemTemplate>
                         <DataTemplate>
                           <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
@@ -401,7 +427,8 @@
                       </StackPanel>
                     </Expander.Header>
                     <ListView x:Name="EvidenceList" MaxHeight="500" SelectionMode="None"
-                              Background="Transparent" BorderThickness="0">
+                              Background="Transparent" BorderThickness="0"
+                              AutomationProperties.Name="Evidence items">
                       <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:EvidenceViewItem">
                           <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
@@ -451,7 +478,8 @@
                       </StackPanel>
                     </Expander.Header>
                     <ListView x:Name="ResourcesList" MaxHeight="500" SelectionMode="None"
-                              Background="Transparent" BorderThickness="0">
+                              Background="Transparent" BorderThickness="0"
+                              AutomationProperties.Name="Recent resources list">
                       <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:ResourceViewItem">
                           <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
@@ -492,7 +520,8 @@
                       </StackPanel>
                     </Expander.Header>
                     <ListView x:Name="EventsList" MaxHeight="600" SelectionMode="None"
-                              Background="Transparent" BorderThickness="0">
+                              Background="Transparent" BorderThickness="0"
+                              AutomationProperties.Name="Blackbox events list">
                       <ListView.ItemTemplate>
                         <DataTemplate>
                           <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
@@ -550,7 +579,8 @@
                       </StackPanel>
                     </Expander.Header>
                     <ListView x:Name="RecommendationsList" SelectionMode="None" MaxHeight="320"
-                              Background="Transparent" BorderThickness="0">
+                              Background="Transparent" BorderThickness="0"
+                              AutomationProperties.Name="Recommended actions list">
                       <ListView.ItemTemplate>
                         <DataTemplate>
                           <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
@@ -620,7 +650,8 @@
                 <TextBox x:Name="WctTextBox"
                          IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
                          FontFamily="Cascadia Code" FontSize="12"
-                         MinHeight="200" MaxHeight="400" />
+                         MinHeight="200" MaxHeight="400"
+                         AutomationProperties.Name="WCT JSON content" />
               </StackPanel>
             </Border>
 
@@ -635,7 +666,8 @@
                 <TextBox x:Name="ReportTextBox"
                          IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
                          FontSize="13"
-                         MinHeight="200" MaxHeight="500" />
+                         MinHeight="200" MaxHeight="500"
+                         AutomationProperties.Name="Analysis report text" />
               </StackPanel>
             </Border>
           </StackPanel>
