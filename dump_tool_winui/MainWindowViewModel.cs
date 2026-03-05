@@ -48,14 +48,22 @@ internal sealed class MainWindowViewModel
     public string TroubleshootingTitle { get; private set; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; private set; } = Array.Empty<string>();
     public bool ShowTroubleshooting { get; private set; }
-    public bool HasSummary => CurrentSummary is not null;
-
     // ── Populate from analysis result ─────────────────────────
 
     public void PopulateSummary(AnalysisSummary summary)
     {
         CurrentSummary = summary;
+        PopulateHeaderFields(summary);
+        PopulateSuspects(summary);
+        PopulateRecommendations(summary);
+        PopulateTroubleshooting(summary);
+        PopulateCallstack(summary);
+        PopulateEvidence(summary);
+        PopulateResources(summary);
+    }
 
+    private void PopulateHeaderFields(AnalysisSummary summary)
+    {
         SummarySentence = string.IsNullOrWhiteSpace(summary.SummarySentence)
             ? T("No summary sentence produced.", "요약 문장이 생성되지 않았습니다.")
             : summary.SummarySentence;
@@ -86,8 +94,10 @@ internal sealed class MainWindowViewModel
             ModNameText = string.IsNullOrWhiteSpace(summary.InferredModName)
                 ? T("Inferred mod: unavailable", "추정 모드: 없음")
                 : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
+    }
 
-        // Suspects
+    private void PopulateSuspects(AnalysisSummary summary)
+    {
         Suspects.Clear();
         foreach (var espRef in summary.CrashLoggerRefs.Take(3))
         {
@@ -120,8 +130,10 @@ internal sealed class MainWindowViewModel
         QuickPrimaryLabel = summary.CrashLoggerRefs.Count > 0
             ? T("Referenced mod (ESP)", "참조 모드 (ESP)")
             : T("Primary suspect", "주요 원인");
+    }
 
-        // Recommendations
+    private void PopulateRecommendations(AnalysisSummary summary)
+    {
         Recommendations.Clear();
         foreach (var recommendation in summary.Recommendations.Take(12))
         {
@@ -135,8 +147,10 @@ internal sealed class MainWindowViewModel
         QuickActionsValue = recommendationCount == 0
             ? T("None", "없음")
             : $"{recommendationCount} {T("items", "개 항목")}";
+    }
 
-        // Troubleshooting
+    private void PopulateTroubleshooting(AnalysisSummary summary)
+    {
         if (summary.TroubleshootingSteps.Count > 0)
         {
             TroubleshootingTitle = string.IsNullOrWhiteSpace(summary.TroubleshootingTitle)
@@ -151,8 +165,10 @@ internal sealed class MainWindowViewModel
         {
             ShowTroubleshooting = false;
         }
+    }
 
-        // Callstack
+    private void PopulateCallstack(AnalysisSummary summary)
+    {
         CallstackFrames.Clear();
         foreach (var frame in summary.CallstackFrames.Take(160))
         {
@@ -162,8 +178,10 @@ internal sealed class MainWindowViewModel
         {
             CallstackFrames.Add(T("No callstack frames were extracted.", "콜스택 프레임을 추출하지 못했습니다."));
         }
+    }
 
-        // Evidence
+    private void PopulateEvidence(AnalysisSummary summary)
+    {
         EvidenceItems.Clear();
         foreach (var evidence in summary.EvidenceItems.Take(80))
         {
@@ -176,8 +194,10 @@ internal sealed class MainWindowViewModel
                 T("No evidence list was generated.", "근거 목록이 생성되지 않았습니다."),
                 ""));
         }
+    }
 
-        // Resources
+    private void PopulateResources(AnalysisSummary summary)
+    {
         ResourceItems.Clear();
         foreach (var resource in summary.ResourceItems.Take(120))
         {
@@ -302,8 +322,6 @@ internal sealed class MainWindowViewModel
                              HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]");
         var isHangLike = !isSnapshotLike &&
                          (summary.IsHangLike || looksHangByText || HasAnyPrefix(recs, "[Hang]", "[프리징]"));
-        var isCrashLike = !isSnapshotLike && !isHangLike && summary.IsCrashLike;
-
         lines.Add(isSnapshotLike
             ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
             : isHangLike

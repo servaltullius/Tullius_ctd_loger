@@ -15,7 +15,6 @@ public sealed partial class MainWindow : Window
 {
     private readonly DumpToolInvocationOptions _startupOptions;
     private readonly MainWindowViewModel _vm;
-    private readonly bool _isKorean;
     private enum LayoutTier { Wide, Compact, Narrow }
     private LayoutTier _currentLayoutTier = (LayoutTier)(-1); // force first apply
     private CancellationTokenSource? _analysisCts;
@@ -23,10 +22,10 @@ public sealed partial class MainWindow : Window
     internal MainWindow(DumpToolInvocationOptions startupOptions, string? startupWarning)
     {
         _startupOptions = startupOptions;
-        _isKorean = string.Equals(_startupOptions.Language, "ko", StringComparison.OrdinalIgnoreCase) ||
-                    (string.IsNullOrWhiteSpace(_startupOptions.Language) &&
-                     string.Equals(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName, "ko", StringComparison.OrdinalIgnoreCase));
-        _vm = new MainWindowViewModel(_isKorean);
+        var isKorean = string.Equals(_startupOptions.Language, "ko", StringComparison.OrdinalIgnoreCase) ||
+                       (string.IsNullOrWhiteSpace(_startupOptions.Language) &&
+                        string.Equals(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName, "ko", StringComparison.OrdinalIgnoreCase));
+        _vm = new MainWindowViewModel(isKorean);
 
         InitializeComponent();
 
