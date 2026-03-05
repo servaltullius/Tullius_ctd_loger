@@ -60,9 +60,9 @@ int main()
   assert(xaml.find("CopyShareButton") != std::string::npos && "Community share copy button missing in XAML");
   assert(xaml.find("CopyShareButton_Click") != std::string::npos && "Community share click handler not wired in XAML");
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
-  assert(cs.find("Skyrim Snapshot Report") != std::string::npos && "Snapshot community share headline missing");
-  assert(cs.find("Skyrim Freeze/ILS Report") != std::string::npos && "Hang community share headline missing");
+  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  assert(vm.find("Skyrim Snapshot Report") != std::string::npos && "Snapshot community share headline missing");
+  assert(vm.find("Skyrim Freeze/ILS Report") != std::string::npos && "Hang community share headline missing");
 
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();
