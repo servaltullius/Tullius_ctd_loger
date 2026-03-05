@@ -2,7 +2,6 @@
 
 #include <Windows.h>
 
-#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>

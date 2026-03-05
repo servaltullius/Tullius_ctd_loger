@@ -73,12 +73,16 @@ void AssertIsType(const nlohmann::json& j, const char* key, const char* expected
   }
 }
 
-void TestGoldenJsonSchemaV2()
+nlohmann::json LoadGoldenJson()
 {
   const auto root = ProjectRoot();
   const auto goldenPath = root / "tests" / "data" / "golden_summary_v2.json";
   const std::string text = ReadFile(goldenPath);
-  const auto j = nlohmann::json::parse(text);
+  return nlohmann::json::parse(text);
+}
+
+void TestGoldenJsonSchemaV2(const nlohmann::json& j)
+{
 
   // ── Top-level required fields ──
   AssertIsType(j, "schema", "object", "root");
@@ -204,13 +208,8 @@ void TestGoldenJsonSchemaV2()
 
 // ── Value validation: check golden fixture data integrity ──
 
-void TestGoldenJsonValues()
+void TestGoldenJsonValues(const nlohmann::json& j)
 {
-  const auto root = ProjectRoot();
-  const auto goldenPath = root / "tests" / "data" / "golden_summary_v2.json";
-  const std::string text = ReadFile(goldenPath);
-  const auto j = nlohmann::json::parse(text);
-
   // Verify specific values to catch accidental golden file corruption
   assert(j["exception"]["code"].get<std::uint32_t>() == 0xC0000005u);
   assert(j["analysis"]["is_crash_like"].get<bool>() == true);
@@ -360,8 +359,9 @@ void TestOutputWriterWritesBothFiles()
 int main()
 {
   std::cout << "output_snapshot_tests:\n";
-  TestGoldenJsonSchemaV2();
-  TestGoldenJsonValues();
+  const auto golden = LoadGoldenJson();
+  TestGoldenJsonSchemaV2(golden);
+  TestGoldenJsonValues(golden);
   TestOutputWriterEmitsAllFields();
   TestOutputWriterReportTextSections();
   TestOutputWriterWritesBothFiles();

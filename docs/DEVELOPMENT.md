@@ -113,8 +113,9 @@ bash scripts/verify_release_gate.sh
 grep -E '^EnableCompatibilityPreflight=1$' dist/SkyrimDiagHelper.ini
 
 # 1) scripts sync (WSL repo <-> Windows mirror)
-sha256sum scripts/build-winui.cmd scripts/build-winui.cmd
-sha256sum scripts/package.py scripts/package.py
+# Compare the WSL repo copy against the Windows-side mirror (adjust paths as needed)
+sha256sum scripts/build-winui.cmd /mnt/c/Users/$USER/Tullius_ctd_loger/scripts/build-winui.cmd
+sha256sum scripts/package.py /mnt/c/Users/$USER/Tullius_ctd_loger/scripts/package.py
 
 # 2) required WinUI outputs
 ls build-winui/{SkyrimDiagDumpToolWinUI.exe,SkyrimDiagDumpToolWinUI.pri,App.xbf,MainWindow.xbf}
