@@ -27,7 +27,7 @@
         <StackPanel Margin="12,12,12,6">
           <TextBlock Text="Tullius"
                      FontSize="20" FontWeight="SemiBold"
-                     Foreground="{ThemeResource AccentBrush}" />
+                     Foreground="{ThemeResource AccentGradientBrush}" />
           <TextBlock Text="CTD Logger"
                      FontSize="11"
                      Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -35,19 +35,13 @@
       </NavigationView.PaneHeader>
 
       <NavigationView.MenuItems>
-        <NavigationViewItem x:Name="NavAnalyze" Tag="analyze" Content="Analyze" IsSelected="True">
+        <NavigationViewItem x:Name="NavAnalyze" Tag="analyze" Content="Dashboard" IsSelected="True">
           <NavigationViewItem.Icon><SymbolIcon Symbol="OpenFile" /></NavigationViewItem.Icon>
         </NavigationViewItem>
-        <NavigationViewItem x:Name="NavSummary" Tag="summary" Content="Crash Summary">
+        <NavigationViewItem x:Name="NavTriage" Tag="triage" Content="Triage">
           <NavigationViewItem.Icon><SymbolIcon Symbol="Important" /></NavigationViewItem.Icon>
         </NavigationViewItem>
-        <NavigationViewItem x:Name="NavEvidence" Tag="evidence" Content="Evidence">
-          <NavigationViewItem.Icon><SymbolIcon Symbol="Find" /></NavigationViewItem.Icon>
-        </NavigationViewItem>
-        <NavigationViewItem x:Name="NavEvents" Tag="events" Content="Events">
-          <NavigationViewItem.Icon><SymbolIcon Symbol="Clock" /></NavigationViewItem.Icon>
-        </NavigationViewItem>
-        <NavigationViewItem x:Name="NavReport" Tag="report" Content="Report">
+        <NavigationViewItem x:Name="NavRawData" Tag="rawdata" Content="Raw Data">
           <NavigationViewItem.Icon><SymbolIcon Symbol="Document" /></NavigationViewItem.Icon>
         </NavigationViewItem>
       </NavigationView.MenuItems>
@@ -60,7 +54,7 @@
           HorizontalScrollBarVisibility="Disabled">
         <Grid x:Name="RootContentGrid"
               MaxWidth="1240"
-              MinWidth="1060"
+              MinWidth="640"
               Padding="22,18,22,18"
               HorizontalAlignment="Center"
               VerticalAlignment="Top">
@@ -71,7 +65,7 @@
           <StackPanel x:Name="AnalyzePanel" Spacing="16" Visibility="Visible" HorizontalAlignment="Stretch">
 
             <!-- Status ribbon -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
+            <Border Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="14,9">
               <Grid ColumnSpacing="8">
@@ -98,7 +92,7 @@
             </Border>
 
             <!-- Analysis controls -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
+            <Border Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="22">
               <StackPanel Spacing="12">
@@ -157,10 +151,11 @@
           </StackPanel>
 
           <!-- ════════════════════════════════════════════
-               SUMMARY PANEL
+               TRIAGE PANEL  (Single-Page: Summary + Evidence + Events)
                ════════════════════════════════════════════ -->
-          <StackPanel x:Name="SummaryPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+          <StackPanel x:Name="TriagePanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
 
+            <!-- Header: title + action buttons -->
             <Grid ColumnSpacing="12">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -189,6 +184,20 @@
                       Content="Share" />
             </Grid>
 
+            <!-- Summary sentence (full-width) -->
+            <Border Background="{ThemeResource CardAcrylicBrush}"
+                    BorderBrush="{ThemeResource GlowBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <StackPanel Spacing="4">
+                <TextBlock x:Name="SummarySentenceText"
+                           TextWrapping="WrapWholeWords" FontSize="18"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="CorrelationBadge" FontSize="13" Foreground="OrangeRed"
+                           Visibility="Collapsed" />
+              </StackPanel>
+            </Border>
+
+            <!-- KPI 4-card row -->
             <Grid ColumnSpacing="12">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -197,351 +206,403 @@
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
               <Border Grid.Column="0"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="14">
-                <StackPanel Spacing="4">
-                  <TextBlock x:Name="QuickPrimaryLabelText"
-                             FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                    Primary suspect
-                  </TextBlock>
-                  <TextBlock x:Name="QuickPrimaryValueText"
-                             FontSize="18" FontWeight="SemiBold"
-                             TextWrapping="WrapWholeWords"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                    -
-                  </TextBlock>
+                      Background="{ThemeResource ElevatedAcrylicBrush}"
+                      BorderBrush="{ThemeResource GlowBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="0">
+                <StackPanel>
+                  <Border Height="2" CornerRadius="8,8,0,0"
+                          Background="{ThemeResource AccentGradientHorizontalBrush}" />
+                  <StackPanel Spacing="4" Padding="14">
+                    <TextBlock x:Name="QuickPrimaryLabelText"
+                               FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                      Primary suspect
+                    </TextBlock>
+                    <TextBlock x:Name="QuickPrimaryValueText"
+                               FontSize="18" FontWeight="SemiBold"
+                               TextWrapping="WrapWholeWords"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                      -
+                    </TextBlock>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border Grid.Column="1"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="14">
-                <StackPanel Spacing="4">
-                  <TextBlock x:Name="QuickConfidenceLabelText"
-                             FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                    Confidence
-                  </TextBlock>
-                  <TextBlock x:Name="QuickConfidenceValueText"
-                             FontSize="18" FontWeight="SemiBold"
-                             Foreground="{ThemeResource AccentBrush}">
-                    -
-                  </TextBlock>
+                      Background="{ThemeResource ElevatedAcrylicBrush}"
+                      BorderBrush="{ThemeResource GlowBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="0">
+                <StackPanel>
+                  <Border Height="2" CornerRadius="8,8,0,0"
+                          Background="{ThemeResource AccentGradientHorizontalBrush}" />
+                  <StackPanel Spacing="4" Padding="14">
+                    <TextBlock x:Name="QuickConfidenceLabelText"
+                               FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                      Confidence
+                    </TextBlock>
+                    <TextBlock x:Name="QuickConfidenceValueText"
+                               FontSize="18" FontWeight="SemiBold"
+                               Foreground="{ThemeResource AccentBrush}">
+                      -
+                    </TextBlock>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border Grid.Column="2"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="14">
-                <StackPanel Spacing="4">
-                  <TextBlock x:Name="QuickActionsLabelText"
-                             FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                    Next actions
-                  </TextBlock>
-                  <TextBlock x:Name="QuickActionsValueText"
-                             FontSize="18" FontWeight="SemiBold"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                    -
-                  </TextBlock>
+                      Background="{ThemeResource ElevatedAcrylicBrush}"
+                      BorderBrush="{ThemeResource GlowBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="0">
+                <StackPanel>
+                  <Border Height="2" CornerRadius="8,8,0,0"
+                          Background="{ThemeResource AccentGradientHorizontalBrush}" />
+                  <StackPanel Spacing="4" Padding="14">
+                    <TextBlock x:Name="QuickActionsLabelText"
+                               FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                      Next actions
+                    </TextBlock>
+                    <TextBlock x:Name="QuickActionsValueText"
+                               FontSize="18" FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                      -
+                    </TextBlock>
+                  </StackPanel>
                 </StackPanel>
               </Border>
               <Border Grid.Column="3"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="14">
-                <StackPanel Spacing="4">
-                  <TextBlock x:Name="QuickEventsLabelText"
-                             FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                    Blackbox events
-                  </TextBlock>
-                  <TextBlock x:Name="QuickEventsValueText"
-                             FontSize="18" FontWeight="SemiBold"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                    -
-                  </TextBlock>
-                </StackPanel>
-              </Border>
-            </Grid>
-
-            <!-- Summary sentence -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="20">
-              <TextBlock x:Name="SummarySentenceText"
-                         Text="No analysis yet." TextWrapping="WrapWholeWords" FontSize="18"
-                         Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-            </Border>
-
-            <!-- Stat cards row -->
-            <Grid ColumnSpacing="12">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <Border Grid.Column="0"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="16">
+                      Background="{ThemeResource ElevatedAcrylicBrush}"
+                      BorderBrush="{ThemeResource GlowBorderBrush}"
+                      BorderThickness="1" CornerRadius="8" Padding="0">
                 <StackPanel>
-                  <TextBlock x:Name="BucketText" FontSize="13"
-                             TextWrapping="WrapWholeWords"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                  <TextBlock x:Name="CorrelationBadge" FontSize="13" Foreground="OrangeRed" Visibility="Collapsed" Margin="0,4,0,0" />
+                  <Border Height="2" CornerRadius="8,8,0,0"
+                          Background="{ThemeResource AccentGradientHorizontalBrush}" />
+                  <StackPanel Spacing="4" Padding="14">
+                    <TextBlock x:Name="QuickEventsLabelText"
+                               FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                      Blackbox events
+                    </TextBlock>
+                    <TextBlock x:Name="QuickEventsValueText"
+                               FontSize="18" FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                      -
+                    </TextBlock>
+                  </StackPanel>
                 </StackPanel>
-              </Border>
-              <Border Grid.Column="1"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="16">
-                <TextBlock x:Name="ModuleText" FontSize="13"
-                           TextWrapping="WrapWholeWords"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-              </Border>
-              <Border Grid.Column="2"
-                      Background="{ThemeResource ElevatedBackgroundBrush}"
-                      BorderBrush="{ThemeResource CardBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="16">
-                <TextBlock x:Name="ModNameText" FontSize="13"
-                           TextWrapping="WrapWholeWords"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
               </Border>
             </Grid>
 
-            <!-- Suspects -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="20">
-              <StackPanel Spacing="10">
-                <TextBlock x:Name="SuspectsSectionTitleText"
-                           FontSize="22" FontWeight="SemiBold"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                  Top Cause Candidates
-                </TextBlock>
-                <ListView x:Name="SuspectsList" SelectionMode="None" MaxHeight="320"
-                          Background="Transparent" BorderThickness="0">
-                  <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:SuspectItem">
-                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
-                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
-                              Background="{ThemeResource ItemBackgroundBrush}">
-                        <Grid ColumnSpacing="12">
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                          </Grid.ColumnDefinitions>
-                          <Border Grid.Column="0" CornerRadius="999"
-                                  Padding="10,4" VerticalAlignment="Top"
-                                  Background="{ThemeResource AccentSoftBrush}">
-                            <TextBlock FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{ThemeResource AccentBrush}"
-                                       Text="{x:Bind Confidence}" />
-                          </Border>
-                          <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock FontWeight="SemiBold"
-                                       Text="{x:Bind Module}" TextWrapping="WrapWholeWords"
-                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock FontSize="13" Text="{x:Bind Reason}"
-                                       TextWrapping="WrapWholeWords"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                          </StackPanel>
-                        </Grid>
-                      </Border>
-                    </DataTemplate>
-                  </ListView.ItemTemplate>
-                </ListView>
-              </StackPanel>
-            </Border>
+            <!-- 2-column Master-Detail layout -->
+            <Grid x:Name="TriageTwoColumnGrid" ColumnSpacing="16">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
+              </Grid.ColumnDefinitions>
 
-            <!-- Recommendations -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="20">
-              <StackPanel Spacing="10">
-                <TextBlock x:Name="NextStepsSectionTitleText"
-                           FontSize="22" FontWeight="SemiBold"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                  Recommended Next Steps
-                </TextBlock>
-                <ListView x:Name="RecommendationsList" SelectionMode="None" MaxHeight="320"
-                          Background="Transparent" BorderThickness="0">
-                  <ListView.ItemTemplate>
-                    <DataTemplate>
-                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
-                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
-                              Background="{ThemeResource ItemBackgroundBrush}">
-                        <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
-                                   FontSize="13"
+              <!-- ── Main column ── -->
+              <Border x:Name="MainColumnDivider" Grid.Column="0" BorderThickness="0,0,1,0"
+                      BorderBrush="{ThemeResource GlowBorderBrush}" Padding="0">
+              <StackPanel Spacing="12">
+
+                <!-- Suspects (always visible, no Expander) -->
+                <Border Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource GlowBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="0">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="3" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" CornerRadius="8,0,0,8"
+                            Background="{ThemeResource AccentGradientBrush}" />
+                    <StackPanel Grid.Column="1" Spacing="10" Padding="20">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8D7;" FontSize="18"
+                                  Foreground="{ThemeResource AccentBrush}" />
+                        <TextBlock x:Name="SuspectsSectionTitleText"
+                                   FontSize="22" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                          Top Cause Candidates
+                        </TextBlock>
+                      </StackPanel>
+                      <ListView x:Name="SuspectsList" SelectionMode="None" MaxHeight="320"
+                                Background="Transparent" BorderThickness="0">
+                        <ListView.ItemTemplate>
+                          <DataTemplate x:DataType="local:SuspectItem">
+                            <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                    BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                    Background="{ThemeResource ItemBackgroundBrush}">
+                              <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="Auto" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" CornerRadius="999"
+                                        Padding="10,4" VerticalAlignment="Top"
+                                        Background="{ThemeResource AccentSoftBrush}">
+                                  <TextBlock FontSize="11" FontWeight="SemiBold"
+                                             Foreground="{ThemeResource AccentBrush}"
+                                             Text="{x:Bind Confidence}" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                  <TextBlock FontWeight="SemiBold"
+                                             Text="{x:Bind Module}" TextWrapping="WrapWholeWords"
+                                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                  <TextBlock FontSize="13" Text="{x:Bind Reason}"
+                                             TextWrapping="WrapWholeWords"
+                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ListView.ItemTemplate>
+                      </ListView>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+
+                <!-- Callstack (Expander, default expanded) -->
+                <Border Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            IsExpanded="True">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7B8;" FontSize="18"
+                                  Foreground="{ThemeResource AccentBrush}" />
+                        <TextBlock x:Name="CallstackLabelText" Text="Callstack"
+                                   FontWeight="SemiBold" FontSize="17"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                      </Border>
-                    </DataTemplate>
-                  </ListView.ItemTemplate>
-                </ListView>
-              </StackPanel>
-            </Border>
-
-            <!-- Troubleshooting checklist -->
-            <Expander x:Name="TroubleshootingExpander" Header="Troubleshooting" IsExpanded="False" Visibility="Collapsed" Margin="0,8,0,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                <ItemsControl x:Name="TroubleshootingList" Margin="8,4">
-                    <ItemsControl.ItemTemplate>
+                      </StackPanel>
+                    </Expander.Header>
+                    <ListView x:Name="CallstackList" MaxHeight="500" SelectionMode="None"
+                              Background="Transparent" BorderThickness="0">
+                      <ListView.ItemTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </Expander>
-          </StackPanel>
-
-          <!-- ════════════════════════════════════════════
-               EVIDENCE PANEL
-               ════════════════════════════════════════════ -->
-          <StackPanel x:Name="EvidencePanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
-
-            <TextBlock x:Name="AdvancedSectionTitleText"
-                       FontSize="30" FontWeight="SemiBold"
-                       Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-              Evidence &amp; Analysis
-            </TextBlock>
-
-            <!-- Callstack -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="8">
-              <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                        IsExpanded="True">
-                <Expander.Header>
-                  <TextBlock x:Name="CallstackLabelText" Text="Callstack"
-                             FontWeight="SemiBold" FontSize="17"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                </Expander.Header>
-                <ListView x:Name="CallstackList" MaxHeight="500" SelectionMode="None"
-                          Background="Transparent" BorderThickness="0">
-                  <ListView.ItemTemplate>
-                    <DataTemplate>
-                      <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
-                                 FontFamily="Cascadia Code" FontSize="12" Margin="0,0,0,4"
-                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                    </DataTemplate>
-                  </ListView.ItemTemplate>
-                </ListView>
-              </Expander>
-            </Border>
-
-            <!-- Evidence items -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="8">
-              <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                        IsExpanded="False">
-                <Expander.Header>
-                  <TextBlock x:Name="EvidenceLabelText" Text="Evidence"
-                             FontWeight="SemiBold" FontSize="17"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                </Expander.Header>
-                <ListView x:Name="EvidenceList" MaxHeight="500" SelectionMode="None"
-                          Background="Transparent" BorderThickness="0">
-                  <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:EvidenceViewItem">
-                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
-                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
-                              Background="{ThemeResource ItemBackgroundBrush}">
-                        <Grid ColumnSpacing="12">
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                          </Grid.ColumnDefinitions>
-                          <Border Grid.Column="0" CornerRadius="999"
-                                  Padding="10,4" VerticalAlignment="Top"
-                                  Background="{ThemeResource AccentSoftBrush}">
-                            <TextBlock FontSize="11" FontWeight="SemiBold"
-                                       Foreground="{ThemeResource AccentBrush}"
-                                       Text="{x:Bind Confidence}" />
-                          </Border>
-                          <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock FontWeight="SemiBold"
-                                       Text="{x:Bind Title}" TextWrapping="WrapWholeWords"
-                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                            <TextBlock FontSize="13" Text="{x:Bind Details}"
-                                       TextWrapping="WrapWholeWords"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                          </StackPanel>
-                        </Grid>
-                      </Border>
-                    </DataTemplate>
-                  </ListView.ItemTemplate>
-                </ListView>
-              </Expander>
-            </Border>
-
-            <!-- Resources -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="8">
-              <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                        IsExpanded="False">
-                <Expander.Header>
-                  <TextBlock x:Name="ResourcesLabelText" Text="Recent Resources"
-                             FontWeight="SemiBold" FontSize="17"
-                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                </Expander.Header>
-                <ListView x:Name="ResourcesList" MaxHeight="500" SelectionMode="None"
-                          Background="Transparent" BorderThickness="0">
-                  <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:ResourceViewItem">
-                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
-                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
-                              Background="{ThemeResource ItemBackgroundBrush}">
-                        <StackPanel Spacing="2">
-                          <TextBlock FontWeight="SemiBold"
-                                     Text="{x:Bind Path}" TextWrapping="WrapWholeWords"
+                          <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                     FontFamily="Cascadia Code" FontSize="12" Margin="0,0,0,4"
                                      Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                          <TextBlock FontSize="12" Text="{x:Bind Kind}"
-                                     Foreground="{ThemeResource AccentBrush}" />
-                          <TextBlock FontSize="12" Text="{x:Bind Providers}"
-                                     TextWrapping="WrapWholeWords"
-                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                          <TextBlock FontSize="12" Text="{x:Bind Conflict}"
-                                     Foreground="{ThemeResource ConflictBrush}" />
-                        </StackPanel>
-                      </Border>
-                    </DataTemplate>
-                  </ListView.ItemTemplate>
-                </ListView>
-              </Expander>
-            </Border>
-          </StackPanel>
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </Expander>
+                </Border>
 
-          <!-- ════════════════════════════════════════════
-               EVENTS PANEL
-               ════════════════════════════════════════════ -->
-          <StackPanel x:Name="EventsPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+                <!-- Evidence (Expander, default collapsed) -->
+                <Border Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            IsExpanded="False">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE773;" FontSize="18"
+                                  Foreground="{ThemeResource AccentBrush}" />
+                        <TextBlock x:Name="EvidenceLabelText" Text="Evidence"
+                                   FontWeight="SemiBold" FontSize="17"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <ListView x:Name="EvidenceList" MaxHeight="500" SelectionMode="None"
+                              Background="Transparent" BorderThickness="0">
+                      <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:EvidenceViewItem">
+                          <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                  BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                  Background="{ThemeResource ItemBackgroundBrush}">
+                            <Grid ColumnSpacing="12">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                              </Grid.ColumnDefinitions>
+                              <Border Grid.Column="0" CornerRadius="999"
+                                      Padding="10,4" VerticalAlignment="Top"
+                                      Background="{ThemeResource AccentSoftBrush}">
+                                <TextBlock FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource AccentBrush}"
+                                           Text="{x:Bind Confidence}" />
+                              </Border>
+                              <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock FontWeight="SemiBold"
+                                           Text="{x:Bind Title}" TextWrapping="WrapWholeWords"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                <TextBlock FontSize="13" Text="{x:Bind Details}"
+                                           TextWrapping="WrapWholeWords"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                              </StackPanel>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </Expander>
+                </Border>
 
-            <TextBlock x:Name="EventsLabelText"
-                       FontSize="30" FontWeight="SemiBold"
-                       Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-              Events (Blackbox)
-            </TextBlock>
+                <!-- Resources (Expander, default collapsed) -->
+                <Border Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            IsExpanded="False">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8B7;" FontSize="18"
+                                  Foreground="{ThemeResource AccentBrush}" />
+                        <TextBlock x:Name="ResourcesLabelText" Text="Recent Resources"
+                                   FontWeight="SemiBold" FontSize="17"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <ListView x:Name="ResourcesList" MaxHeight="500" SelectionMode="None"
+                              Background="Transparent" BorderThickness="0">
+                      <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:ResourceViewItem">
+                          <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                  BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                  Background="{ThemeResource ItemBackgroundBrush}">
+                            <StackPanel Spacing="2">
+                              <TextBlock FontWeight="SemiBold"
+                                         Text="{x:Bind Path}" TextWrapping="WrapWholeWords"
+                                         Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                              <TextBlock FontSize="12" Text="{x:Bind Kind}"
+                                         Foreground="{ThemeResource AccentBrush}" />
+                              <TextBlock FontSize="12" Text="{x:Bind Providers}"
+                                         TextWrapping="WrapWholeWords"
+                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                              <TextBlock FontSize="12" Text="{x:Bind Conflict}"
+                                         Foreground="{ThemeResource ConflictBrush}" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </Expander>
+                </Border>
 
-            <Border Background="{ThemeResource CardBackgroundBrush}"
-                    BorderBrush="{ThemeResource CardBorderBrush}"
-                    BorderThickness="1" CornerRadius="8" Padding="16">
-              <ListView x:Name="EventsList" MaxHeight="600" SelectionMode="None"
-                        Background="Transparent" BorderThickness="0">
-                <ListView.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
-                               FontFamily="Cascadia Code" FontSize="12" Margin="0,0,0,4"
+                <!-- Events (Expander, default collapsed) -->
+                <Border Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            IsExpanded="False">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE916;" FontSize="18"
+                                  Foreground="{ThemeResource AccentBrush}" />
+                        <TextBlock x:Name="EventsLabelText" Text="Events (Blackbox)"
+                                   FontWeight="SemiBold" FontSize="17"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <ListView x:Name="EventsList" MaxHeight="600" SelectionMode="None"
+                              Background="Transparent" BorderThickness="0">
+                      <ListView.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                     FontFamily="Cascadia Code" FontSize="12" Margin="0,0,0,4"
+                                     Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </Expander>
+                </Border>
+
+              </StackPanel>
+              </Border>
+
+              <!-- ── Sidebar column ── -->
+              <StackPanel x:Name="TriageSidebar" Grid.Column="1" Spacing="12">
+
+                <!-- Crash info card (always visible) -->
+                <Border Background="{ThemeResource ElevatedAcrylicBrush}"
+                        BorderBrush="{ThemeResource GlowBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="16">
+                  <StackPanel Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
+                      <FontIcon Glyph="&#xE946;" FontSize="16"
+                                Foreground="{ThemeResource PurpleAccentBrush}" />
+                      <TextBlock Text="Crash Info" FontSize="15" FontWeight="SemiBold"
+                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                    <TextBlock x:Name="BucketText" FontSize="13"
+                               TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                  </DataTemplate>
-                </ListView.ItemTemplate>
-              </ListView>
-            </Border>
+                    <TextBlock x:Name="ModuleText" FontSize="13"
+                               TextWrapping="WrapWholeWords"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <TextBlock x:Name="ModNameText" FontSize="13"
+                               TextWrapping="WrapWholeWords"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                  </StackPanel>
+                </Border>
+
+                <!-- Recommendations (Expander, default expanded) -->
+                <Border Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                            IsExpanded="True">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE8FB;" FontSize="18"
+                                  Foreground="{ThemeResource PurpleAccentBrush}" />
+                        <TextBlock x:Name="NextStepsSectionTitleText"
+                                   Text="Recommended Next Steps"
+                                   FontWeight="SemiBold" FontSize="17"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <ListView x:Name="RecommendationsList" SelectionMode="None" MaxHeight="320"
+                              Background="Transparent" BorderThickness="0">
+                      <ListView.ItemTemplate>
+                        <DataTemplate>
+                          <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                  BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                  Background="{ThemeResource ItemBackgroundBrush}">
+                            <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                       FontSize="13"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                          </Border>
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </Expander>
+                </Border>
+
+                <!-- Troubleshooting (Expander, default collapsed) -->
+                <Border x:Name="TroubleshootingCard"
+                        Background="{ThemeResource CardAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8"
+                        Visibility="Collapsed">
+                  <Expander x:Name="TroubleshootingExpander"
+                            IsExpanded="False"
+                            HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE90F;" FontSize="18"
+                                  Foreground="{ThemeResource PurpleAccentBrush}" />
+                        <TextBlock Text="Troubleshooting"
+                                   FontWeight="SemiBold" FontSize="17"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <ItemsControl x:Name="TroubleshootingList" Margin="8,4">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </Expander>
+                </Border>
+
+              </StackPanel>
+            </Grid>
+
           </StackPanel>
 
           <!-- ════════════════════════════════════════════
-               REPORT PANEL
+               RAW DATA PANEL
                ════════════════════════════════════════════ -->
-          <StackPanel x:Name="ReportPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
+          <StackPanel x:Name="RawDataPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
 
             <TextBlock FontSize="30" FontWeight="SemiBold"
                        Foreground="{ThemeResource TextFillColorPrimaryBrush}">
@@ -549,7 +610,7 @@
             </TextBlock>
 
             <!-- WCT JSON -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
+            <Border Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="10">
@@ -564,7 +625,7 @@
             </Border>
 
             <!-- Full report -->
-            <Border Background="{ThemeResource CardBackgroundBrush}"
+            <Border Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="10">

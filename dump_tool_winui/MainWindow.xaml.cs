@@ -24,7 +24,8 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<ResourceViewItem> _resourceItems = new();
     private readonly ObservableCollection<string> _eventItems = new();
     private readonly bool _isKorean;
-    private bool _isCompactLayout;
+    private enum LayoutTier { Wide, Compact, Narrow }
+    private LayoutTier _currentLayoutTier = (LayoutTier)(-1); // force first apply
     private CancellationTokenSource? _analysisCts;
 
     private string? _currentDumpPath;
@@ -91,10 +92,8 @@ public sealed partial class MainWindow : Window
 
         // Navigation items
         NavAnalyze.Content = T("Dashboard", "대시보드");
-        NavSummary.Content = T("Crash Summary", "크래시 요약");
-        NavEvidence.Content = T("Evidence", "근거");
-        NavEvents.Content = T("Events", "이벤트");
-        NavReport.Content = T("Reports", "리포트");
+        NavTriage.Content = T("Triage", "분석 결과");
+        NavRawData.Content = T("Raw Data", "원시 데이터");
 
         HeaderSubtitleText.Text = T(
             "Skyrim SE detected. Ready for dump triage.",
@@ -106,7 +105,6 @@ public sealed partial class MainWindow : Window
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
         SuspectsSectionTitleText.Text = T("Top Cause Candidates", "주요 원인 후보");
-        AdvancedSectionTitleText.Text = T("Evidence & Analysis", "근거 및 분석");
         QuickPrimaryLabelText.Text = T("Primary suspect", "주요 원인");
         QuickConfidenceLabelText.Text = T("Confidence", "신뢰도");
         QuickActionsLabelText.Text = T("Next actions", "권장 조치");
@@ -116,6 +114,7 @@ public sealed partial class MainWindow : Window
         QuickActionsValueText.Text = "-";
         QuickEventsValueText.Text = "-";
 
+        SummarySentenceText.Text = T("No analysis yet.", "아직 분석 결과가 없습니다.");
         CallstackLabelText.Text = T("Callstack", "콜스택");
         EvidenceLabelText.Text = T("Evidence", "근거");
         ResourcesLabelText.Text = T("Recent Resources", "최근 리소스");
@@ -239,7 +238,7 @@ public sealed partial class MainWindow : Window
                 SetBusy(false, T(
                     "Loaded existing analysis artifacts. Click Analyze to refresh.",
                     "기존 분석 결과를 불러왔습니다. 다시 분석하려면 \"지금 분석\"을 누르세요."));
-                NavView.SelectedItem = NavSummary;
+                NavView.SelectedItem = NavTriage;
                 return true;
             }
             catch (OperationCanceledException)
@@ -329,7 +328,7 @@ public sealed partial class MainWindow : Window
             RenderSummary(summary);
             await RenderAdvancedArtifactsAsync(dumpPath, outDir, cancellationToken);
             SetBusy(false, T("Analysis complete. Review the candidates and checklist.", "분석 완료. 원인 후보와 체크리스트를 확인하세요."));
-            NavView.SelectedItem = NavSummary;
+            NavView.SelectedItem = NavTriage;
         }
         catch (OperationCanceledException)
         {
@@ -443,7 +442,7 @@ public sealed partial class MainWindow : Window
             TroubleshootingExpander.Header = string.IsNullOrWhiteSpace(summary.TroubleshootingTitle)
                 ? T("Troubleshooting", "트러블슈팅 가이드")
                 : summary.TroubleshootingTitle;
-            TroubleshootingExpander.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
+            TroubleshootingCard.Visibility = Microsoft.UI.Xaml.Visibility.Visible;
             var numberedSteps = summary.TroubleshootingSteps
                 .Select((step, i) => $"{i + 1}. {step}")
                 .ToList();
@@ -451,7 +450,7 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            TroubleshootingExpander.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+            TroubleshootingCard.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
         }
 
         _callstackFrames.Clear();
@@ -904,10 +903,8 @@ public sealed partial class MainWindow : Window
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
         {
             AnalyzePanel.Visibility = tag == "analyze" ? Visibility.Visible : Visibility.Collapsed;
-            SummaryPanel.Visibility = tag == "summary" ? Visibility.Visible : Visibility.Collapsed;
-            EvidencePanel.Visibility = tag == "evidence" ? Visibility.Visible : Visibility.Collapsed;
-            EventsPanel.Visibility = tag == "events" ? Visibility.Visible : Visibility.Collapsed;
-            ReportPanel.Visibility = tag == "report" ? Visibility.Visible : Visibility.Collapsed;
+            TriagePanel.Visibility  = tag == "triage"  ? Visibility.Visible : Visibility.Collapsed;
+            RawDataPanel.Visibility = tag == "rawdata" ? Visibility.Visible : Visibility.Collapsed;
         }
     }
 
@@ -920,30 +917,73 @@ public sealed partial class MainWindow : Window
     {
         var width = RootGrid.ActualWidth;
         var height = RootGrid.ActualHeight;
-        var compact = width < 1550 || height < 900;
 
-        if (compact == _isCompactLayout)
+        LayoutTier tier;
+        if (width < 1100)
+            tier = LayoutTier.Narrow;
+        else if (width < 1550 || height < 900)
+            tier = LayoutTier.Compact;
+        else
+            tier = LayoutTier.Wide;
+
+        if (tier == _currentLayoutTier)
         {
             return;
         }
 
-        _isCompactLayout = compact;
+        _currentLayoutTier = tier;
+        var compact = tier != LayoutTier.Wide;
+        var narrow = tier == LayoutTier.Narrow;
 
-        NavView.OpenPaneLength = compact ? 206 : 228;
-        RootContentGrid.MaxWidth = compact ? 1140 : 1240;
-        RootContentGrid.MinWidth = compact ? 920 : 1060;
-        RootContentGrid.Padding = compact ? new Thickness(14, 12, 14, 12) : new Thickness(22, 18, 22, 18);
+        NavView.OpenPaneLength = narrow ? 52 : (compact ? 206 : 228);
+        NavView.IsPaneOpen = !narrow;
+        NavView.IsPaneToggleButtonVisible = narrow;
+
+        RootContentGrid.MaxWidth = narrow ? 960 : (compact ? 1140 : 1240);
+        RootContentGrid.MinWidth = narrow ? 480 : (compact ? 640 : 1060);
+        RootContentGrid.Padding = narrow
+            ? new Thickness(10, 8, 10, 8)
+            : compact ? new Thickness(14, 12, 14, 12) : new Thickness(22, 18, 22, 18);
 
         AnalyzePanel.Spacing = compact ? 12 : 16;
-        SummaryPanel.Spacing = compact ? 12 : 16;
-        EvidencePanel.Spacing = compact ? 12 : 16;
-        EventsPanel.Spacing = compact ? 12 : 16;
-        ReportPanel.Spacing = compact ? 12 : 16;
+        TriagePanel.Spacing = compact ? 12 : 16;
+        RawDataPanel.Spacing = compact ? 12 : 16;
 
         AnalyzeSectionTitleText.FontSize = compact ? 22 : 24;
-        SnapshotSectionTitleText.FontSize = compact ? 26 : 30;
-        AdvancedSectionTitleText.FontSize = compact ? 26 : 30;
-        EventsLabelText.FontSize = compact ? 26 : 30;
+        SnapshotSectionTitleText.FontSize = narrow ? 22 : (compact ? 26 : 30);
+
+        // Triage 2-column → 1-column adaptive
+        if (narrow)
+        {
+            // Single column: sidebar stacks below main
+            TriageTwoColumnGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+            TriageTwoColumnGrid.ColumnDefinitions[1].Width = new GridLength(0);
+
+            if (TriageTwoColumnGrid.RowDefinitions.Count < 2)
+            {
+                TriageTwoColumnGrid.RowDefinitions.Clear();
+                TriageTwoColumnGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                TriageTwoColumnGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            }
+            Grid.SetRow(TriageSidebar, 1);
+            Grid.SetColumn(TriageSidebar, 0);
+            MainColumnDivider.BorderThickness = new Thickness(0);
+        }
+        else
+        {
+            // Two columns
+            TriageTwoColumnGrid.RowDefinitions.Clear();
+            Grid.SetRow(TriageSidebar, 0);
+            Grid.SetColumn(TriageSidebar, 1);
+            MainColumnDivider.BorderThickness = new Thickness(0, 0, 1, 0);
+
+            TriageTwoColumnGrid.ColumnDefinitions[0].Width = compact
+                ? new GridLength(5, GridUnitType.Star)
+                : new GridLength(3, GridUnitType.Star);
+            TriageTwoColumnGrid.ColumnDefinitions[1].Width = compact
+                ? new GridLength(3, GridUnitType.Star)
+                : new GridLength(2, GridUnitType.Star);
+        }
 
         QuickPrimaryValueText.FontSize = compact ? 16 : 18;
         QuickConfidenceValueText.FontSize = compact ? 16 : 18;

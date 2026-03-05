@@ -15,7 +15,7 @@
 
       <SolidColorBrush x:Key="CardBackgroundBrush"        Color="#CC202020" />
       <SolidColorBrush x:Key="ElevatedBackgroundBrush"     Color="#E52A2A2A" />
-      <SolidColorBrush x:Key="CardBorderBrush"             Color="#33FFFFFF" />
+      <SolidColorBrush x:Key="CardBorderBrush"             Color="#40FFFFFF" />
       <SolidColorBrush x:Key="AccentBrush"                 Color="#FF60CDFF" />
       <SolidColorBrush x:Key="AccentSoftBrush"             Color="#2260CDFF" />
       <SolidColorBrush x:Key="InputBackgroundBrush"        Color="#CC1A1A1A" />
@@ -26,6 +26,36 @@
       <SolidColorBrush x:Key="BadgeBackgroundBrush"        Color="#3360CDFF" />
       <SolidColorBrush x:Key="BadgeBorderBrush"            Color="#6660CDFF" />
       <SolidColorBrush x:Key="ConflictBrush"               Color="#FFFF6A5E" />
+      <SolidColorBrush x:Key="PurpleAccentBrush"           Color="#FFC084FC" />
+      <SolidColorBrush x:Key="PurpleAccentSoftBrush"       Color="#22C084FC" />
+
+      <!-- Glassmorphism card backgrounds -->
+      <AcrylicBrush x:Key="CardAcrylicBrush"
+                    TintColor="#1A1A2E" TintOpacity="0.75"
+                    FallbackColor="#CC1A1A2E" />
+      <AcrylicBrush x:Key="ElevatedAcrylicBrush"
+                    TintColor="#16213E" TintOpacity="0.80"
+                    FallbackColor="#E516213E" />
+
+      <!-- Accent gradient: cyan → purple -->
+      <LinearGradientBrush x:Key="AccentGradientBrush"
+                           StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF60CDFF" Offset="0" />
+        <GradientStop Color="#FFC084FC" Offset="1" />
+      </LinearGradientBrush>
+
+      <LinearGradientBrush x:Key="AccentGradientHorizontalBrush"
+                           StartPoint="0,0.5" EndPoint="1,0.5">
+        <GradientStop Color="#FF60CDFF" Offset="0" />
+        <GradientStop Color="#FFC084FC" Offset="1" />
+      </LinearGradientBrush>
+
+      <!-- Soft glow border (lower opacity) -->
+      <LinearGradientBrush x:Key="GlowBorderBrush"
+                           StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#4460CDFF" Offset="0" />
+        <GradientStop Color="#44C084FC" Offset="1" />
+      </LinearGradientBrush>
 
       <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
         <Setter Property="CornerRadius" Value="8" />
@@ -36,9 +66,9 @@
 
       <Style x:Key="PrimaryActionButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
         <Setter Property="CornerRadius" Value="8" />
-        <Setter Property="Background" Value="{ThemeResource AccentBrush}" />
+        <Setter Property="Background" Value="{ThemeResource AccentGradientHorizontalBrush}" />
         <Setter Property="Foreground" Value="#FFFFFFFF" />
-        <Setter Property="BorderBrush" Value="{ThemeResource AccentBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource GlowBorderBrush}" />
         <Setter Property="Padding" Value="24,11" />
         <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="FontSize" Value="16" />

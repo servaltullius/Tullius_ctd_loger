@@ -11,6 +11,9 @@
 - DumpTool: 리소스 로그 보존 상한 80→120 확대.
 - DumpTool: CrashLogger 타임스탬프 파싱 함수 (`TryExtractCompactTimestampFromStem`, `TryExtractDashedTimestampFromStem`) 추가 + 검증 테스트 13개.
 
+### UI
+- **WinUI: Glassmorphism + Gradient 비주얼 향상** — AcrylicBrush 반투명 카드 배경, cyan→purple 그라데이션 악센트 바/보더, KPI 카드 상단 그라데이션 바, Suspects 좌측 그라데이션 스트라이프, 섹션 아이콘(FontIcon) 추가, 2컬럼 글로우 디바이더, ANALYZE NOW 버튼 그라데이션 적용.
+
 ### 수정
 - **WinUI: Quick Summary 카드에 CrashLogger ESP/ESM 우선 표시** — 기존에 DLL 스택 스캔만 표시하던 Quick Summary 카드, 후보 목록, 공유 텍스트를 CrashLogger ESP 참조 우선으로 개편. 요약 문장과 UI가 일치하도록 수정.
 - DumpTool: CrashLogger 시간 매칭 창 30분→5분 축소 — 무관한 과거 로그 매칭 방지.
