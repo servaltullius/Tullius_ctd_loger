@@ -629,3 +629,58 @@ if(NOT WIN32)
     message(STATUS "skydiag_plugin_rules_logic_tests skipped: nlohmann/json.hpp not found")
   endif()
 endif()
+
+add_executable(skydiag_diagnostic_logging_guard_tests
+  diagnostic_logging_guard_tests.cpp
+)
+
+set_target_properties(skydiag_diagnostic_logging_guard_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_diagnostic_logging_guard_tests COMMAND skydiag_diagnostic_logging_guard_tests)
+
+# Mo2Index string-only function tests (cross-platform)
+add_executable(skydiag_mo2_index_tests
+  mo2_index_tests.cpp
+  test_utf_stub.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/Mo2Index.cpp"
+)
+
+target_include_directories(skydiag_mo2_index_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+
+set_target_properties(skydiag_mo2_index_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+
+add_test(NAME skydiag_mo2_index_tests COMMAND skydiag_mo2_index_tests)
+
+# WCT JSON parsing tests (requires nlohmann/json)
+if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
+  add_executable(skydiag_wct_parsing_tests
+    wct_parsing_tests.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
+  )
+
+  target_include_directories(skydiag_wct_parsing_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+  )
+
+  set_target_properties(skydiag_wct_parsing_tests PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+  )
+
+  add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
+else()
+  message(STATUS "skydiag_wct_parsing_tests skipped: nlohmann/json.hpp not found")
+endif()

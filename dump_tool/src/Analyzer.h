@@ -153,6 +153,9 @@ struct AnalysisResult
   std::vector<std::wstring> recommendations;
   std::vector<std::wstring> troubleshooting_steps;
   std::wstring troubleshooting_title;
+
+  // Diagnostic messages from best-effort subsystems (data loading, CrashLogger integration, etc.)
+  std::vector<std::wstring> diagnostics;
 };
 
 struct AnalyzeOptions

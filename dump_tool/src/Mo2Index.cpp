@@ -1,5 +1,5 @@
 #include "Mo2Index.h"
-#include "MinidumpUtil.h"
+#include "SkyrimDiagStringUtil.h"
 #include "Utf.h"
 
 #include <algorithm>
@@ -15,7 +15,7 @@
 namespace skydiag::dump_tool {
 namespace {
 
-using minidump::WideLower;
+using skydiag::WideLower;
 
 std::string_view Trim(std::string_view s)
 {

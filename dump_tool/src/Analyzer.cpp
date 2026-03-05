@@ -537,7 +537,9 @@ static void IntegratePluginScan(
   if (parsedPluginScanOk && !opt.data_dir.empty()) {
     PluginRules pluginRules;
     const auto rulesPath = std::filesystem::path(opt.data_dir) / L"plugin_rules.json";
-    if (pluginRules.LoadFromJson(rulesPath)) {
+    if (!pluginRules.LoadFromJson(rulesPath)) {
+      out.diagnostics.push_back(L"[Data] failed to load plugin_rules.json");
+    } else {
       PluginRulesContext ctx{};
       ctx.scan = &parsedPluginScan;
       ctx.game_version = out.game_version;
@@ -624,6 +626,9 @@ static void IntegrateCrashLoggerLog(
   const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
   auto logPath = TryFindCrashLoggerLogForDump(dumpFs, mo2Base, mo2Index ? &*mo2Index : nullptr, gameRootDir, &clErr);
   if (!logPath) {
+    if (!clErr.empty()) {
+      out.diagnostics.push_back(L"[CrashLogger] log not found: " + clErr);
+    }
     return;
   }
 
@@ -632,6 +637,7 @@ static void IntegrateCrashLoggerLog(
   std::wstring readErr;
   auto logUtf8 = ReadWholeFileUtf8(*logPath, &readErr);
   if (!logUtf8) {
+    out.diagnostics.push_back(L"[CrashLogger] failed to read log: " + readErr);
     return;
   }
 
@@ -723,6 +729,7 @@ static void ComputeSuspects(
   const auto threads = LoadThreads(dumpBase, dumpSize);
   if (!internal::TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, opt.language, out)) {
     out.suspects_from_stackwalk = false;
+    out.diagnostics.push_back(L"[Stackwalk] DbgHelp stackwalk failed, falling back to stack scan");
     out.suspects = internal::ComputeStackScanSuspects(dumpBase, dumpSize, allModules, tids, opt.language);
   }
 }
@@ -749,6 +756,7 @@ static void PersistCrashHistory(
   const auto historyPath = historyDir / "crash_history.json";
   ScopedHistoryFileLock historyLock(historyPath);
   if (!historyLock.Acquire(/*timeoutMs=*/2000)) {
+    out.diagnostics.push_back(L"[History] failed to acquire lock for crash_history.json");
     return;
   }
 
@@ -773,7 +781,9 @@ static void PersistCrashHistory(
   }
 
   history.AddEntry(std::move(entry));
-  history.SaveToFile(historyPath);
+  if (!history.SaveToFile(historyPath)) {
+    out.diagnostics.push_back(L"[History] failed to save crash_history.json");
+  }
   out.history_stats = history.GetModuleStats(20);
 
   const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
@@ -841,7 +851,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!opt.data_dir.empty()) {
     GraphicsInjectionDiag graphicsDiag;
     const auto rulesPath = std::filesystem::path(opt.data_dir) / L"graphics_injection_rules.json";
-    if (graphicsDiag.LoadRules(rulesPath)) {
+    if (!graphicsDiag.LoadRules(rulesPath)) {
+      out.diagnostics.push_back(L"[Data] failed to load graphics_injection_rules.json");
+    } else {
       std::vector<std::wstring> moduleFilenames;
       moduleFilenames.reserve(allModules.size());
       for (const auto& m : allModules) {
@@ -893,7 +905,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!opt.data_dir.empty()) {
     SignatureDatabase sigDb;
     const auto sigPath = std::filesystem::path(opt.data_dir) / L"crash_signatures.json";
-    if (sigDb.LoadFromJson(sigPath)) {
+    if (!sigDb.LoadFromJson(sigPath)) {
+      out.diagnostics.push_back(L"[Data] failed to load crash_signatures.json");
+    } else {
       SignatureMatchInput input{};
       input.exc_code = out.exc_code;
       input.fault_module = out.fault_module_filename;
@@ -928,7 +942,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!opt.data_dir.empty() && !out.game_version.empty()) {
     AddressResolver resolver;
     const auto addrDb = std::filesystem::path(opt.data_dir) / L"address_db" / L"skyrimse_functions.json";
-    if (resolver.LoadFromJson(addrDb, out.game_version)) {
+    if (!resolver.LoadFromJson(addrDb, out.game_version)) {
+      out.diagnostics.push_back(L"[Data] failed to load address_db/skyrimse_functions.json");
+    } else {
       if (!out.fault_module_filename.empty() && IsGameExeModule(out.fault_module_filename)) {
         if (auto fn = resolver.Resolve(out.fault_module_offset)) {
           out.resolved_functions[out.fault_module_offset] = *fn;
@@ -944,7 +960,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!opt.data_dir.empty()) {
     TroubleshootingGuideDatabase tsDb;
     const auto guidesPath = std::filesystem::path(opt.data_dir) / L"troubleshooting_guides.json";
-    if (tsDb.LoadFromJson(guidesPath)) {
+    if (!tsDb.LoadFromJson(guidesPath)) {
+      out.diagnostics.push_back(L"[Data] failed to load troubleshooting_guides.json");
+    } else {
       TroubleshootingMatchInput tsInput{};
       tsInput.exc_code = out.exc_code;
       tsInput.signature_id = out.signature_match ? out.signature_match->id : "";

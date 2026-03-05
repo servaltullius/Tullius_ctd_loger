@@ -22,6 +22,7 @@ internal sealed class AnalysisSummary
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
+    public IReadOnlyList<string> Diagnostics { get; init; } = Array.Empty<string>();
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
     {
@@ -100,6 +101,7 @@ internal sealed class AnalysisSummary
             TroubleshootingSteps = tsElement.ValueKind != JsonValueKind.Undefined
                 ? ParseStringArray(tsElement, "steps")
                 : new List<string>(),
+            Diagnostics = ParseStringArray(root, "diagnostics"),
         };
     }
 

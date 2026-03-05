@@ -1,0 +1,1 @@
+{"capture":{"kind":"hang","secondsSinceHeartbeat":15.0,"thresholdSec":10,"isLoading":false},"threads":[{"tid":1234,"isCycle":true},{"tid":5678,"isCycle":false,"nodes":[{"thread":{"waitTime":500}}]}]}

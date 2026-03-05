@@ -1,0 +1,10 @@
+Crash Logger SSE v1.8.0
+Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x7FF6ABC12345
+
+Possible relevant objects (2)
+  [ 42] (BGSHeadPart*) "FemaleHead" [0x000800] ("Skyrim.esm")
+  [ 17] (TESObjectWEAP*) "IronSword" [0x00012EB7] ("Skyrim.esm")
+
+Registers:
+  RDI: (Character*) "TestNPC" [0xFEAD081B] ("TestMod.esp")
+  RSI: 0xDEADBEEF

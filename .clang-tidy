@@ -1,0 +1,25 @@
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-slicing,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  performance-for-range-copy,
+  performance-implicit-conversion-in-loop,
+  performance-unnecessary-copy-initialization,
+  performance-unnecessary-value-param,
+  readability-container-size-empty,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr,
+
+WarningsAsErrors: ''
+
+HeaderFilterRegex: '(dump_tool|helper|plugin|shared)/.*\.h$'
+
+FormatStyle: none

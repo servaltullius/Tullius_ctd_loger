@@ -2,6 +2,7 @@
 
 #include "Analyzer.h"
 #include "MinidumpUtil.h"
+#include "WctTypes.h"
 
 #include <Windows.h>
 
@@ -18,19 +19,6 @@ namespace skydiag::dump_tool::internal {
 std::wstring EventTypeName(std::uint16_t t);
 
 std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d);
-
-std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN);
-
-struct WctCaptureDecision
-{
-  bool has = false;
-  std::string kind;
-  double secondsSinceHeartbeat = 0.0;
-  std::uint32_t thresholdSec = 0;
-  bool isLoading = false;
-};
-
-std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wctJsonUtf8);
 
 std::optional<std::uint32_t> InferMainThreadIdFromEvents(const std::vector<EventRow>& events);
 

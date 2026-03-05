@@ -24,6 +24,13 @@ target_compile_definitions(skydiag_shared INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN
 enable_testing()
 add_subdirectory(tests)
 
+option(SKYDIAG_FUZZ "Build fuzzing harnesses (requires clang with libFuzzer)" OFF)
+if(SKYDIAG_FUZZ)
+  include(CheckIncludeFileCXX)
+  check_include_file_cxx("nlohmann/json.hpp" SKYDIAG_HAS_NLOHMANN_JSON_FOR_FUZZ)
+  add_subdirectory(fuzz)
+endif()
+
 if(NOT WIN32)
   message(STATUS "SkyrimDiag: Windows-only targets (plugin/helper) are skipped on non-Windows hosts.")
 else()

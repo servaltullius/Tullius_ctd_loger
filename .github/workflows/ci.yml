@@ -25,6 +25,27 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build-linux --output-on-failure
 
+  linux-asan:
+    name: Linux ASan + UBSan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (Ninja, sanitizers)
+        run: >
+          cmake -S . -B build-asan -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Run tests under sanitizers
+        run: ctest --test-dir build-asan --output-on-failure
+
   windows-validate:
     name: Windows Validate (Build + Package + Gate)
     runs-on: windows-2022

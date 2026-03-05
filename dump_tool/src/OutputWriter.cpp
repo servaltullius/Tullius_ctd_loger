@@ -311,6 +311,14 @@ static nlohmann::json BuildSummaryJson(
     };
   }
 
+  if (!r.diagnostics.empty()) {
+    auto diags = nlohmann::json::array();
+    for (const auto& d : r.diagnostics) {
+      diags.push_back(WideToUtf8(d));
+    }
+    summary["diagnostics"] = std::move(diags);
+  }
+
   return summary;
 }
 
@@ -466,6 +474,13 @@ static std::string BuildReportText(
       rpt << " | " << WideToUtf8(ev.detail);
     }
     rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
+  }
+
+  if (!r.diagnostics.empty()) {
+    rpt << (en ? "\nDiagnostics:\n" : "\n진단 로그:\n");
+    for (const auto& d : r.diagnostics) {
+      rpt << "  " << WideToUtf8(d) << "\n";
+    }
   }
 
   return rpt.str();

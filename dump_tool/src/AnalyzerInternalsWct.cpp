@@ -1,4 +1,4 @@
-#include "AnalyzerInternals.h"
+#include "WctTypes.h"
 
 #include <algorithm>
 
