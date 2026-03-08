@@ -5,12 +5,44 @@
 #include "DumpToolStartupUtil.h"
 #include "I18nCore.h"
 #include "OutputWriter.h"
+#include "Utf.h"
 
+#include <filesystem>
 #include <iostream>
 
 namespace {
 
 using namespace skydiag::dump_tool::startup;
+
+std::filesystem::path ResolveCliOutputDir(
+  const skydiag::dump_tool::cli::DumpToolCliArgs& args)
+{
+  if (!args.out_dir.empty()) {
+    return std::filesystem::path(args.out_dir);
+  }
+  const std::filesystem::path dumpPath(args.dump_path);
+  if (dumpPath.has_parent_path()) {
+    return dumpPath.parent_path();
+  }
+  return std::filesystem::current_path();
+}
+
+void PrintUtf8KeyValue(const char* key, std::wstring_view value)
+{
+  std::cout << key << "=" << skydiag::dump_tool::WideToUtf8(value) << "\n";
+}
+
+void PrintOutputPaths(const skydiag::dump_tool::cli::DumpToolCliArgs& args)
+{
+  const std::filesystem::path dumpPath(args.dump_path);
+  const std::filesystem::path outDir = ResolveCliOutputDir(args);
+  const std::wstring stem = dumpPath.stem().wstring();
+
+  std::cout << "ANALYSIS_OK=1\n";
+  PrintUtf8KeyValue("OUTPUT_DIR", outDir.wstring());
+  PrintUtf8KeyValue("SUMMARY_JSON", (outDir / (stem + L"_SkyrimDiagSummary.json")).wstring());
+  PrintUtf8KeyValue("REPORT_TXT", (outDir / (stem + L"_SkyrimDiagReport.txt")).wstring());
+}
 
 void BestEffortLowerPriority()
 {
@@ -84,5 +116,6 @@ int wmain(int argc, wchar_t** argv)
     return 4;
   }
 
+  PrintOutputPaths(a);
   return 0;
 }

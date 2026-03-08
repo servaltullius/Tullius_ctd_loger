@@ -68,8 +68,16 @@ echo "[gate] 1/5 script sync hashes"
 if [[ "${REPO_ROOT}" == "${WIN_ROOT}" ]]; then
   echo "  - same root path; sync hash comparison skipped"
 else
-  assert_synced "${REPO_ROOT}/scripts/build-winui.cmd" "${WIN_ROOT}/scripts/build-winui.cmd" "build-winui.cmd"
-  assert_synced "${REPO_ROOT}/scripts/package.py" "${WIN_ROOT}/scripts/package.py" "package.py"
+  sync_files=(
+    "scripts/build-win.cmd"
+    "scripts/build-winui.cmd"
+    "scripts/package.py"
+    "scripts/release_contract.py"
+    "scripts/verify_release_gate.sh"
+  )
+  for rel in "${sync_files[@]}"; do
+    assert_synced "${REPO_ROOT}/${rel}" "${WIN_ROOT}/${rel}" "${rel}"
+  done
 fi
 
 echo "[gate] 2/5 required WinUI files"

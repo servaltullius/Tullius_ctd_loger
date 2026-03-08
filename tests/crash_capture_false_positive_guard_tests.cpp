@@ -200,6 +200,27 @@ int main()
     "LaunchDeferredViewersAfterExit(",
     "Process exit tick must finalize crash ETW before deferred viewer launch.");
 
+  const std::string manualCaptureBody = ExtractFunctionBody(helperMain, "void PumpManualCaptureInputs(");
+  AssertContains(
+    manualCaptureBody,
+    "triggeredFromHotkeyMessage",
+    "Manual capture input pump must suppress fallback polling when WM_HOTKEY already fired.");
+  AssertContains(
+    manualCaptureBody,
+    "TryTriggerManualCapture(",
+    "Manual capture input pump must route both hotkey paths through a shared debounce helper.");
+  AssertContains(
+    helperMain,
+    "GetTickCount64()",
+    "Manual capture debounce must use wall-clock gating to avoid duplicate capture bursts.");
+
+  const std::string helperEntryBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
+  AssertOrdered(
+    helperEntryBody,
+    "HANDLE helperSingletonMutex = AcquireHelperSingletonMutex(proc.pid, &err);",
+    "skydiag::helper::internal::ClearLog(outBase);",
+    "Helper entry must acquire singleton mutex before clearing the helper log so duplicate helpers do not erase active diagnostics.");
+
   const std::string viewerLaunchBody = ExtractFunctionBody(dumpToolLaunch, "DumpToolViewerLaunchResult StartDumpToolViewer(");
   AssertContains(
     viewerLaunchBody,

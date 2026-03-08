@@ -25,6 +25,7 @@ REQUIRED_ZIP_ENTRIES = tuple(_RELEASE_CONTRACT.REQUIRED_ZIP_ENTRIES)
 EXCLUDED_WINUI_TOP_LEVEL_DIRS = frozenset(
     _RELEASE_CONTRACT.EXCLUDED_WINUI_TOP_LEVEL_DIRS
 )
+REQUIRED_WINUI_BUILD_OUTPUTS = tuple(_RELEASE_CONTRACT.REQUIRED_WINUI_BUILD_OUTPUTS)
 
 
 def _touch(path: Path) -> None:
@@ -34,6 +35,24 @@ def _touch(path: Path) -> None:
 
 def main() -> int:
     package_py = REPO_ROOT / "scripts" / "package.py"
+    gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
+    build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
+
+    assert "scripts/release_contract.py" in gate_script, (
+        "release gate must sync release_contract.py to catch mirror drift"
+    )
+    assert "scripts/verify_release_gate.sh" in gate_script, (
+        "release gate must sync verify_release_gate.sh to catch mirror drift"
+    )
+    assert "scripts/build-win.cmd" in gate_script, (
+        "release gate must sync build-win.cmd alongside packaging scripts"
+    )
+    assert "SkyrimDiagDumpToolWinUI.runtimeconfig.json" in build_winui_script, (
+        "build-winui.cmd must require WinUI runtimeconfig sidecar when selecting output"
+    )
+    assert "SkyrimDiagDumpToolWinUI.deps.json" in build_winui_script, (
+        "build-winui.cmd must require WinUI deps sidecar when selecting output"
+    )
 
     with tempfile.TemporaryDirectory(prefix="skydiag_pkg_test_") as td:
         td_path = Path(td)
@@ -50,6 +69,8 @@ def main() -> int:
         # Minimal fake WinUI publish folder.
         _touch(winui_dir / "SkyrimDiagDumpToolWinUI.exe")
         _touch(winui_dir / "SkyrimDiagDumpToolWinUI.pri")
+        _touch(winui_dir / "SkyrimDiagDumpToolWinUI.runtimeconfig.json")
+        _touch(winui_dir / "SkyrimDiagDumpToolWinUI.deps.json")
         _touch(winui_dir / "App.xbf")
         _touch(winui_dir / "MainWindow.xbf")
         # Nested build/publish output should be ignored by the packager.
@@ -79,6 +100,11 @@ def main() -> int:
             )
 
         assert out_zip.is_file(), "package.py did not produce zip"
+
+        for output in REQUIRED_WINUI_BUILD_OUTPUTS:
+            assert (winui_dir / output).is_file(), (
+                f"Expected fake WinUI build output for contract check: {output}"
+            )
 
         with zipfile.ZipFile(out_zip, "r") as zf:
             names = set(zf.namelist())

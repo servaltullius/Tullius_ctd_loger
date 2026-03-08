@@ -59,6 +59,8 @@ using skydiag::helper::internal::StartDumpToolViewer;
 using skydiag::helper::internal::Hex32;
 using skydiag::protocol::MakeKernelName;
 
+constexpr ULONGLONG kManualCaptureDebounceMs = 250;
+
 HANDLE AcquireHelperSingletonMutex(std::uint32_t pid, std::wstring* err)
 {
   const auto mutexName = MakeKernelName(pid, skydiag::protocol::kKernelObjectSuffix_HelperMutex);
@@ -208,6 +210,29 @@ void UnregisterManualCaptureHotkeyIfEnabled(const skydiag::helper::HelperConfig&
   UnregisterHotKey(nullptr, kHotkeyId);
 }
 
+bool TryTriggerManualCapture(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const skydiag::helper::LoadStats& loadStats,
+  std::uint32_t adaptiveLoadingThresholdSec,
+  std::wstring_view source,
+  ULONGLONG* lastManualCaptureTick)
+{
+  const ULONGLONG now = GetTickCount64();
+  if (lastManualCaptureTick &&
+      *lastManualCaptureTick != 0 &&
+      now - *lastManualCaptureTick < kManualCaptureDebounceMs) {
+    return false;
+  }
+
+  DoManualCapture(cfg, proc, outBase, loadStats, adaptiveLoadingThresholdSec, source);
+  if (lastManualCaptureTick) {
+    *lastManualCaptureTick = now;
+  }
+  return true;
+}
+
 void PumpManualCaptureInputs(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
@@ -219,10 +244,21 @@ void PumpManualCaptureInputs(
     return;
   }
 
+  static ULONGLONG s_lastManualCaptureTick = 0;
+  bool triggeredFromHotkeyMessage = false;
+
   MSG msg{};
   while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
     if (msg.message == WM_HOTKEY && static_cast<int>(msg.wParam) == kHotkeyId) {
-      DoManualCapture(cfg, proc, outBase, *loadStats, adaptiveLoadingThresholdSec, L"WM_HOTKEY");
+      triggeredFromHotkeyMessage =
+        TryTriggerManualCapture(
+          cfg,
+          proc,
+          outBase,
+          *loadStats,
+          adaptiveLoadingThresholdSec,
+          L"WM_HOTKEY",
+          &s_lastManualCaptureTick) || triggeredFromHotkeyMessage;
     }
     TranslateMessage(&msg);
     DispatchMessageW(&msg);
@@ -230,11 +266,18 @@ void PumpManualCaptureInputs(
 
   // Fallback manual hotkey detection: some environments can miss WM_HOTKEY even when RegisterHotKey succeeds.
   // Polling is low overhead (once per loop) and makes manual capture more reliable.
-  if (cfg.enableManualCaptureHotkey) {
+  if (cfg.enableManualCaptureHotkey && !triggeredFromHotkeyMessage) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     if (ctrl && shift && ((GetAsyncKeyState(VK_F12) & 1) != 0)) {
-      DoManualCapture(cfg, proc, outBase, *loadStats, adaptiveLoadingThresholdSec, L"GetAsyncKeyState");
+      TryTriggerManualCapture(
+        cfg,
+        proc,
+        outBase,
+        *loadStats,
+        adaptiveLoadingThresholdSec,
+        L"GetAsyncKeyState",
+        &s_lastManualCaptureTick);
     }
   }
 }
@@ -642,19 +685,8 @@ int wmain(int argc, wchar_t** argv)
   }
 
   const auto outBase = MakeOutputBase(cfg);
-  skydiag::helper::internal::ClearLog(outBase);
-  std::wcout << L"[SkyrimDiagHelper] Attached to pid=" << proc.pid << L", output=" << outBase.wstring() << L"\n";
-  AppendLogLine(outBase, L"Attached to pid=" + std::to_wstring(proc.pid) + L", output=" + outBase.wstring());
-  if (!err.empty()) {
-    AppendLogLine(outBase, L"Config warning: " + err);
-  }
-  if (!proc.crashEvent) {
-    AppendLogLine(
-      outBase,
-      BuildCrashEventUnavailableMessage(
-        proc,
-        L"Warning: crash event unavailable; helper is running in hang-only mode and will keep retrying."));
-  }
+  const std::wstring configWarning = err;
+  err.clear();
 
   HANDLE helperSingletonMutex = AcquireHelperSingletonMutex(proc.pid, &err);
   if (helperSingletonMutex == INVALID_HANDLE_VALUE) {
@@ -664,6 +696,20 @@ int wmain(int argc, wchar_t** argv)
   }
   if (!helperSingletonMutex && !err.empty()) {
     AppendLogLine(outBase, L"Warning: helper singleton mutex unavailable: " + err);
+  }
+
+  skydiag::helper::internal::ClearLog(outBase);
+  std::wcout << L"[SkyrimDiagHelper] Attached to pid=" << proc.pid << L", output=" << outBase.wstring() << L"\n";
+  AppendLogLine(outBase, L"Attached to pid=" + std::to_wstring(proc.pid) + L", output=" + outBase.wstring());
+  if (!configWarning.empty()) {
+    AppendLogLine(outBase, L"Config warning: " + configWarning);
+  }
+  if (!proc.crashEvent) {
+    AppendLogLine(
+      outBase,
+      BuildCrashEventUnavailableMessage(
+        proc,
+        L"Warning: crash event unavailable; helper is running in hang-only mode and will keep retrying."));
   }
 
   RunCompatibilityPreflight(cfg, proc, outBase);

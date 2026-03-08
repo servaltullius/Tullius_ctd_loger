@@ -37,7 +37,8 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 2. Download the latest release zip and install it as a mod in **MO2 / Vortex**
 3. Launch Skyrim via **SKSE**
 4. When a crash/freeze/ILS happens, a dump (`.dmp`) + report are generated
-5. Open the `.dmp` with `SkyrimDiagDumpToolWinUI.exe` (drag & drop)
+5. Open `SkyrimDiagDumpToolWinUI.exe`, click `Select dump`, and analyze the `.dmp`
+   - Or launch it from a command line: `SkyrimDiagDumpToolWinUI.exe "path\\to\\dump.dmp"`
 
 **Manual snapshot hotkey:** `Ctrl+Shift+F12`
 > Snapshots taken during normal gameplay may have low confidence. Best used when the game is already stuck (freeze / ILS) or right before a CTD.

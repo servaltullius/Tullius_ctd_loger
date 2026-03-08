@@ -72,6 +72,22 @@ std::wstring ReadIniString(const wchar_t* section, const wchar_t* key, const wch
   return def ? std::wstring(def) : std::wstring{};
 }
 
+std::uint32_t ReadIniUint32Clamped(
+  const wchar_t* section,
+  const wchar_t* key,
+  int def,
+  const wchar_t* path,
+  std::uint32_t minValue,
+  std::uint32_t maxValue)
+{
+  const int raw = GetPrivateProfileIntW(section, key, def, path);
+  const auto clamped = std::clamp<long long>(
+    static_cast<long long>(raw),
+    static_cast<long long>(minValue),
+    static_cast<long long>(maxValue));
+  return static_cast<std::uint32_t>(clamped);
+}
+
 PluginConfig LoadConfig()
 {
   PluginConfig cfg{};
@@ -79,8 +95,8 @@ PluginConfig LoadConfig()
   // Relative to game root when installed in Data/SKSE/Plugins.
   const wchar_t* iniPath = L"Data\\SKSE\\Plugins\\SkyrimDiag.ini";
 
-  cfg.heartbeatIntervalMs =
-    static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiag", L"HeartbeatIntervalMs", 100, iniPath));
+  cfg.heartbeatIntervalMs = ReadIniUint32Clamped(
+    L"SkyrimDiag", L"HeartbeatIntervalMs", 100, iniPath, 10, 5000);
 
   {
     int mode = GetPrivateProfileIntW(L"SkyrimDiag", L"CrashHookMode", 1, iniPath);
@@ -100,13 +116,15 @@ PluginConfig LoadConfig()
   cfg.enableResourceLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableResourceLog", 1, iniPath) != 0;
   cfg.enableAdaptiveResourceLogThrottle =
     GetPrivateProfileIntW(L"SkyrimDiag", L"EnableAdaptiveResourceLogThrottle", 1, iniPath) != 0;
-  cfg.resourceLogThrottleHighWatermarkPerSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiag", L"ResourceLogThrottleHighWatermarkPerSec", 1500, iniPath));
-  cfg.resourceLogThrottleMaxSampleDivisor = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiag", L"ResourceLogThrottleMaxSampleDivisor", 8, iniPath));
+  cfg.resourceLogThrottleHighWatermarkPerSec = ReadIniUint32Clamped(
+    L"SkyrimDiag", L"ResourceLogThrottleHighWatermarkPerSec", 1500, iniPath, 1, 100000);
+  cfg.resourceLogThrottleMaxSampleDivisor = ReadIniUint32Clamped(
+    L"SkyrimDiag", L"ResourceLogThrottleMaxSampleDivisor", 8, iniPath, 1, 64);
   cfg.enablePerfHitchLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnablePerfHitchLog", 1, iniPath) != 0;
-  cfg.perfHitchThresholdMs = static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiag", L"PerfHitchThresholdMs", 250, iniPath));
-  cfg.perfHitchCooldownMs = static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiag", L"PerfHitchCooldownMs", 3000, iniPath));
+  cfg.perfHitchThresholdMs = ReadIniUint32Clamped(
+    L"SkyrimDiag", L"PerfHitchThresholdMs", 250, iniPath, 1, 10000);
+  cfg.perfHitchCooldownMs = ReadIniUint32Clamped(
+    L"SkyrimDiag", L"PerfHitchCooldownMs", 3000, iniPath, 0, 60000);
 
   return cfg;
 }

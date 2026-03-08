@@ -24,7 +24,7 @@ if errorlevel 1 exit /b 1
 
 set "FINAL_OUT="
 
-rem Prefer output that includes required WinUI XAML artifacts.
+rem Prefer output that includes the full WinUI runtime asset set used by packaging/release gate.
 call :set_candidate "%BUILD_OUT%"
 if defined FINAL_OUT goto :copy_output
 
@@ -34,7 +34,7 @@ if defined FINAL_OUT goto :copy_output
 call :set_candidate "%BUILD_OUT_X64%"
 if defined FINAL_OUT goto :copy_output
 
-echo ERROR: expected WinUI output not found ^(or missing App.xbf/MainWindow.xbf/.pri^)
+echo ERROR: expected WinUI output not found ^(or missing required runtime assets^)
 echo Tried:
 echo   %BUILD_OUT%
 echo   %BUILD_OUT_BASE%
@@ -45,6 +45,8 @@ exit /b 3
 set "CAND=%~1"
 if not exist "%CAND%\SkyrimDiagDumpToolWinUI.exe" goto :eof
 if not exist "%CAND%\SkyrimDiagDumpToolWinUI.pri" goto :eof
+if not exist "%CAND%\SkyrimDiagDumpToolWinUI.runtimeconfig.json" goto :eof
+if not exist "%CAND%\SkyrimDiagDumpToolWinUI.deps.json" goto :eof
 if not exist "%CAND%\App.xbf" goto :eof
 if not exist "%CAND%\MainWindow.xbf" goto :eof
 set "FINAL_OUT=%CAND%"

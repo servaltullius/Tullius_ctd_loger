@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <cwchar>
 #include <filesystem>
 #include <iterator>
@@ -59,6 +60,22 @@ std::wstring IniPath()
   return dir;
 }
 
+std::uint32_t ReadIniUint32Clamped(
+  const std::wstring& path,
+  const wchar_t* section,
+  const wchar_t* key,
+  int def,
+  std::uint32_t minValue,
+  std::uint32_t maxValue)
+{
+  const int raw = GetPrivateProfileIntW(section, key, def, path.c_str());
+  const auto clamped = std::clamp<long long>(
+    static_cast<long long>(raw),
+    static_cast<long long>(minValue),
+    static_cast<long long>(maxValue));
+  return static_cast<std::uint32_t>(clamped);
+}
+
 }  // namespace
 
 HelperConfig LoadConfig(std::wstring* err)
@@ -67,15 +84,15 @@ HelperConfig LoadConfig(std::wstring* err)
 
   const std::wstring path = IniPath();
 
-  cfg.hangThresholdInGameSec =
-    static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"HangThresholdInGameSec", 10, path.c_str()));
-  cfg.hangThresholdInMenuSec =
-    static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"HangThresholdInMenuSec", 30, path.c_str()));
-  cfg.hangThresholdLoadingSec =
-    static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"HangThresholdLoadingSec", 600, path.c_str()));
+  cfg.hangThresholdInGameSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"HangThresholdInGameSec", 10, 1, 3600);
+  cfg.hangThresholdInMenuSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"HangThresholdInMenuSec", 30, 1, 7200);
+  cfg.hangThresholdLoadingSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"HangThresholdLoadingSec", 600, 1, 7200);
 
-  const auto dumpMode =
-    static_cast<std::uint32_t>(GetPrivateProfileIntW(L"SkyrimDiagHelper", L"DumpMode", 1, path.c_str()));
+  const auto dumpMode = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"DumpMode", 1, 0, 2);
   if (dumpMode == 0) {
     cfg.dumpMode = DumpMode::kMini;
   } else if (dumpMode == 2) {
@@ -105,38 +122,41 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.autoOpenViewerOnCrash = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnCrash", 1, path.c_str()) != 0;
   cfg.autoOpenCrashOnlyIfProcessExited =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashOnlyIfProcessExited", 1, path.c_str()) != 0;
-  cfg.autoOpenCrashWaitForExitMs = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashWaitForExitMs", 2000, path.c_str()));
+  cfg.autoOpenCrashWaitForExitMs = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AutoOpenCrashWaitForExitMs", 2000, 0, 60000);
   cfg.enableAutoRecaptureOnUnknownCrash =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableAutoRecaptureOnUnknownCrash", 0, path.c_str()) != 0;
-  cfg.autoRecaptureUnknownBucketThreshold = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoRecaptureUnknownBucketThreshold", 2, path.c_str()));
-  cfg.autoRecaptureAnalysisTimeoutSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoRecaptureAnalysisTimeoutSec", 20, path.c_str()));
+  cfg.autoRecaptureUnknownBucketThreshold = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AutoRecaptureUnknownBucketThreshold", 2, 1, 10);
+  cfg.autoRecaptureAnalysisTimeoutSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AutoRecaptureAnalysisTimeoutSec", 20, 1, 300);
   cfg.autoOpenViewerOnHang = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnHang", 1, path.c_str()) != 0;
   cfg.autoOpenViewerOnManualCapture =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnManualCapture", 0, path.c_str()) != 0;
   cfg.autoOpenHangAfterProcessExit =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenHangAfterProcessExit", 1, path.c_str()) != 0;
-  cfg.autoOpenHangDelayMs = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, path.c_str()));
+  cfg.autoOpenHangDelayMs = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, 0, 60000);
   cfg.autoOpenViewerBeginnerMode =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerBeginnerMode", 1, path.c_str()) != 0;
 
   cfg.enableAdaptiveLoadingThreshold =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableAdaptiveLoadingThreshold", 1, path.c_str()) != 0;
-  cfg.adaptiveLoadingMinSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AdaptiveLoadingMinSec", 120, path.c_str()));
-  cfg.adaptiveLoadingMinExtraSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AdaptiveLoadingMinExtraSec", 120, path.c_str()));
-  cfg.adaptiveLoadingMaxSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AdaptiveLoadingMaxSec", 1800, path.c_str()));
+  cfg.adaptiveLoadingMinSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AdaptiveLoadingMinSec", 120, 30, 3600);
+  cfg.adaptiveLoadingMinExtraSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AdaptiveLoadingMinExtraSec", 120, 0, 1800);
+  cfg.adaptiveLoadingMaxSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"AdaptiveLoadingMaxSec", 1800, 60, 7200);
+  if (cfg.adaptiveLoadingMaxSec < cfg.adaptiveLoadingMinSec) {
+    cfg.adaptiveLoadingMaxSec = cfg.adaptiveLoadingMinSec;
+  }
 
   cfg.suppressHangWhenNotForeground =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"SuppressHangWhenNotForeground", 1, path.c_str()) != 0;
 
-  cfg.foregroundGraceSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"ForegroundGraceSec", 5, path.c_str()));
+  cfg.foregroundGraceSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"ForegroundGraceSec", 5, 0, 60);
 
   cfg.enableEtwCaptureOnHang =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableEtwCaptureOnHang", 0, path.c_str()) != 0;
@@ -149,8 +169,8 @@ HelperConfig LoadConfig(std::wstring* err)
   }
   cfg.etwHangFallbackProfile = ReadIniString(path, L"SkyrimDiagHelper", L"EtwHangFallbackProfile", L"");
 
-  cfg.etwMaxDurationSec = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, path.c_str()));
+  cfg.etwMaxDurationSec = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, 1, 300);
 
   cfg.enableEtwCaptureOnCrash =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableEtwCaptureOnCrash", 0, path.c_str()) != 0;
@@ -161,14 +181,8 @@ HelperConfig LoadConfig(std::wstring* err)
     cfg.etwCrashProfile = L"GeneralProfile";
   }
 
-  std::uint32_t etwCrashCaptureSeconds = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwCrashCaptureSeconds", 8, path.c_str()));
-  // Clamp to a small range to avoid excessive capture time from config mistakes.
-  if (etwCrashCaptureSeconds < 1) {
-    etwCrashCaptureSeconds = 1;
-  } else if (etwCrashCaptureSeconds > 30) {
-    etwCrashCaptureSeconds = 30;
-  }
+  const std::uint32_t etwCrashCaptureSeconds = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"EtwCrashCaptureSeconds", 8, 1, 30);
   cfg.etwCrashCaptureSeconds = etwCrashCaptureSeconds;
 
   cfg.enableIncidentManifest =
@@ -178,19 +192,19 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.suppressDuringGrassCaching =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"SuppressDuringGrassCaching", 1, path.c_str()) != 0;
 
-  cfg.maxCrashDumps = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxCrashDumps", 20, path.c_str()));
-  cfg.maxHangDumps = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxHangDumps", 20, path.c_str()));
-  cfg.maxManualDumps = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxManualDumps", 20, path.c_str()));
-  cfg.maxEtwTraces = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxEtwTraces", 5, path.c_str()));
+  cfg.maxCrashDumps = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"MaxCrashDumps", 20, 0, 500);
+  cfg.maxHangDumps = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"MaxHangDumps", 20, 0, 500);
+  cfg.maxManualDumps = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"MaxManualDumps", 20, 0, 500);
+  cfg.maxEtwTraces = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"MaxEtwTraces", 5, 0, 100);
 
-  cfg.maxHelperLogBytes = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxHelperLogBytes", 8 * 1024 * 1024, path.c_str()));
-  cfg.maxHelperLogFiles = static_cast<std::uint32_t>(
-    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"MaxHelperLogFiles", 3, path.c_str()));
+  cfg.maxHelperLogBytes = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"MaxHelperLogBytes", 8 * 1024 * 1024, 0, 100 * 1024 * 1024);
+  cfg.maxHelperLogFiles = ReadIniUint32Clamped(
+    path, L"SkyrimDiagHelper", L"MaxHelperLogFiles", 3, 0, 20);
 
   if (cfg.outputDir.empty()) {
     cfg.outputDir = ExeDir();

@@ -26,6 +26,15 @@ static void TestTroubleshootingGuidesJsonHasVersionField()
   AssertContains(src, "\"guides\"", "troubleshooting_guides.json must have guides array");
 }
 
+static void TestTroubleshootingGuideLoaderValidatesSchema()
+{
+  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto src = ReadAllText(repoRoot / "dump_tool" / "src" / "TroubleshootingGuide.cpp");
+  AssertContains(src, "\"version\"", "TroubleshootingGuide loader must validate version field.");
+  AssertContains(src, "is_number_integer()", "TroubleshootingGuide loader must require integer schema version.");
+  AssertContains(src, "IsSupportedStateFlag", "TroubleshootingGuide loader must validate supported state flags.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -51,6 +60,7 @@ int main()
   AssertContains(sigDb, "\"version\"", "SignatureDatabase::LoadFromJson must validate version field.");
 
   TestTroubleshootingGuidesJsonHasVersionField();
+  TestTroubleshootingGuideLoaderValidatesSchema();
 
   return 0;
 }

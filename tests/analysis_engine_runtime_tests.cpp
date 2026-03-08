@@ -184,6 +184,37 @@ void TestAddressResolverRuntime()
   assert(!miss.has_value());
 }
 
+void TestAddressResolverToleratesMalformedEntries()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_address_resolver_malformed_runtime_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"game_versions\": {\n"
+      "    \"1.5.97.0\": {\n"
+      "      \"functions\": {\n"
+      "        \"D6DDDA\": \"BSBatchRenderer::Draw\",\n"
+      "        \"NOT_HEX\": \"BrokenEntry\",\n"
+      "        \"D6DD10\": 42\n"
+      "      }\n"
+      "    }\n"
+      "  }\n"
+      "}\n";
+  }
+
+  AddressResolver resolver;
+  assert(resolver.LoadFromJson(tempPath, "1.5.97.0"));
+  assert(resolver.Size() == 1);
+
+  const auto resolved = resolver.Resolve(0xD6DDDAull);
+  assert(resolved.has_value());
+  assert(resolved.value() == "BSBatchRenderer::Draw");
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
+}
+
 void TestCrashHistoryRuntime()
 {
   CrashHistory history;
@@ -274,6 +305,7 @@ int main()
   TestSignatureCallstackContainsRuntime();
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
+  TestAddressResolverToleratesMalformedEntries();
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();
   return 0;

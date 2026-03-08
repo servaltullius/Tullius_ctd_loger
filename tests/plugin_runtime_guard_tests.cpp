@@ -156,6 +156,16 @@ int main()
     "GetPrivateProfileStringW(",
     "Plugin config loader must still read helper path from ini.");
 
+  AssertContains(
+    pluginMain,
+    "ReadIniUint32Clamped(",
+    "Plugin config loader must clamp numeric INI values before casting to uint32_t.");
+
+  AssertContains(
+    pluginMain,
+    "HeartbeatIntervalMs",
+    "Plugin config clamp helper must cover heartbeat interval.");
+
   assert(
     pluginMain.find("GetModuleFileNameW(mod, buf, MAX_PATH)") == std::string::npos &&
     "Plugin path resolution must not use MAX_PATH-sized fixed buffers.");

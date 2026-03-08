@@ -1,6 +1,9 @@
 #include "DumpToolCliArgs.h"
 
 #include <cassert>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -86,12 +89,33 @@ static void Test_RejectsUnknownFlag()
   assert(!err.empty());
 }
 
+static std::string ReadAllText(const std::filesystem::path& path)
+{
+  std::ifstream in(path, std::ios::in | std::ios::binary);
+  assert(in && "Failed to open source file");
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+static void Test_CliMainPrintsMachineReadableOutputPaths()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto src = ReadAllText(repoRoot / "dump_tool" / "src" / "DumpToolCliMain.cpp");
+  assert(src.find("ANALYSIS_OK=1") != std::string::npos);
+  assert(src.find("\"SUMMARY_JSON\"") != std::string::npos);
+  assert(src.find("\"REPORT_TXT\"") != std::string::npos);
+  assert(src.find("PrintUtf8KeyValue") != std::string::npos);
+  assert(src.find("WideToUtf8") != std::string::npos);
+  assert(src.find("std::cout") != std::string::npos);
+}
+
 int main()
 {
   Test_ParsesDumpPathAndOutDir();
   Test_ParsesOnlineSymbolsFlags();
   Test_RejectsMissingDumpPath();
   Test_RejectsUnknownFlag();
+  Test_CliMainPrintsMachineReadableOutputPaths();
   return 0;
 }
-

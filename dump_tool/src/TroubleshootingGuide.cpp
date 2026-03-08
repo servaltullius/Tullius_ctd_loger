@@ -8,6 +8,55 @@
 #include <nlohmann/json.hpp>
 
 namespace skydiag::dump_tool {
+namespace {
+
+constexpr int kTroubleshootingGuideSchemaVersion = 1;
+
+bool TryReadOptionalString(const nlohmann::json& obj, const char* key, std::string* out)
+{
+  if (!out) {
+    return false;
+  }
+  out->clear();
+  if (!obj.contains(key)) {
+    return true;
+  }
+  const auto& value = obj[key];
+  if (!value.is_string()) {
+    return false;
+  }
+  *out = value.get<std::string>();
+  return true;
+}
+
+bool TryReadStepsArray(const nlohmann::json& guide, const char* key, std::vector<std::string>* out)
+{
+  if (!out) {
+    return false;
+  }
+  out->clear();
+  if (!guide.contains(key)) {
+    return true;
+  }
+  const auto& value = guide[key];
+  if (!value.is_array()) {
+    return false;
+  }
+  for (const auto& step : value) {
+    if (!step.is_string()) {
+      return false;
+    }
+    out->push_back(step.get<std::string>());
+  }
+  return true;
+}
+
+bool IsSupportedStateFlag(const std::string& stateFlag)
+{
+  return stateFlag.empty() || stateFlag == "hang" || stateFlag == "loading" || stateFlag == "snapshot";
+}
+
+}  // namespace
 
 struct TroubleshootingGuideDatabase::Guide
 {
@@ -36,39 +85,43 @@ bool TroubleshootingGuideDatabase::LoadFromJson(const std::filesystem::path& jso
     }
 
     const auto j = nlohmann::json::parse(f, nullptr, /*allow_exceptions=*/true);
-    if (!j.contains("guides") || !j["guides"].is_array()) {
+    if (!j.is_object() ||
+        !j.contains("version") ||
+        !j["version"].is_number_integer() ||
+        j["version"].get<int>() != kTroubleshootingGuideSchemaVersion ||
+        !j.contains("guides") ||
+        !j["guides"].is_array()) {
       return false;
     }
 
     for (const auto& guide : j["guides"]) {
-      if (!guide.is_object() || !guide.contains("match")) {
+      if (!guide.is_object() || !guide.contains("match") || !guide["match"].is_object()) {
         continue;
       }
 
       Guide g{};
       const auto& match = guide["match"];
-      g.match_exc_code = match.value("exc_code", "");
-      g.match_signature_id = match.value("signature_id", "");
-      g.match_state_flags = match.value("state_flags_contains", "");
-      g.title_en = guide.value("title_en", "");
-      g.title_ko = guide.value("title_ko", "");
+      if (!TryReadOptionalString(match, "exc_code", &g.match_exc_code) ||
+          !TryReadOptionalString(match, "signature_id", &g.match_signature_id) ||
+          !TryReadOptionalString(match, "state_flags_contains", &g.match_state_flags) ||
+          !TryReadOptionalString(guide, "title_en", &g.title_en) ||
+          !TryReadOptionalString(guide, "title_ko", &g.title_ko) ||
+          !TryReadStepsArray(guide, "steps_en", &g.steps_en) ||
+          !TryReadStepsArray(guide, "steps_ko", &g.steps_ko)) {
+        continue;
+      }
 
-      auto loadSteps = [&](const char* key, std::vector<std::string>& out) {
-        if (guide.contains(key) && guide[key].is_array()) {
-          for (const auto& step : guide[key]) {
-            if (step.is_string()) {
-              out.push_back(step.get<std::string>());
-            }
-          }
-        }
-      };
-      loadSteps("steps_en", g.steps_en);
-      loadSteps("steps_ko", g.steps_ko);
+      if ((g.match_exc_code.empty() && g.match_signature_id.empty() && g.match_state_flags.empty()) ||
+          !IsSupportedStateFlag(g.match_state_flags) ||
+          (g.title_en.empty() && g.title_ko.empty()) ||
+          (g.steps_en.empty() && g.steps_ko.empty())) {
+        continue;
+      }
 
       m_guides.push_back(std::move(g));
     }
 
-    return true;
+    return !m_guides.empty();
   } catch (...) {
     return false;
   }

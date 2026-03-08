@@ -34,8 +34,12 @@ bool AddressResolver::LoadFromJson(const std::filesystem::path& jsonPath, const 
       if (!name.is_string()) {
         continue;
       }
-      const std::uint64_t offset = std::stoull(offsetStr, nullptr, 16);
-      loaded[offset] = name.get<std::string>();
+      try {
+        const std::uint64_t offset = std::stoull(offsetStr, nullptr, 16);
+        loaded[offset] = name.get<std::string>();
+      } catch (...) {
+        continue;
+      }
     }
     if (loaded.empty()) {
       return false;

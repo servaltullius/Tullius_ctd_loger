@@ -3,6 +3,8 @@ from __future__ import annotations
 
 REQUIRED_WINUI_ASSETS = (
     "SkyrimDiagDumpToolWinUI.pri",
+    "SkyrimDiagDumpToolWinUI.runtimeconfig.json",
+    "SkyrimDiagDumpToolWinUI.deps.json",
     "App.xbf",
     "MainWindow.xbf",
 )
@@ -17,6 +19,8 @@ REQUIRED_ZIP_ENTRIES = (
     "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe",
     "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll",
     "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri",
+    "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.runtimeconfig.json",
+    "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.deps.json",
     "SKSE/Plugins/SkyrimDiagWinUI/App.xbf",
     "SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf",
 )
