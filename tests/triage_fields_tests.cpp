@@ -17,10 +17,16 @@ static std::string ReadFile(const char* relPath)
 
 static void TestOutputWriterHasTriageFields()
 {
-  const auto src = ReadFile("dump_tool/src/OutputWriter.cpp");
-  assert(src.find("\"triage\"") != std::string::npos);
-  assert(src.find("\"signature_matched\"") != std::string::npos);
-  assert(src.find("\"verdict\"") != std::string::npos);
+  const auto outputWriter = ReadFile("dump_tool/src/OutputWriter.cpp");
+  assert(outputWriter.find("\"triage\"") != std::string::npos);
+  assert(outputWriter.find("LoadExistingSummaryTriage") != std::string::npos);
+  assert(outputWriter.find("\"signature_matched\"") != std::string::npos);
+
+  const auto internals = ReadFile("dump_tool/src/OutputWriterInternals.cpp");
+  assert(internals.find("\"review_status\"") != std::string::npos);
+  assert(internals.find("\"verdict\"") != std::string::npos);
+  assert(internals.find("\"actual_cause\"") != std::string::npos);
+  assert(internals.find("\"ground_truth_mod\"") != std::string::npos);
 }
 
 static void TestBucketQualityScriptExists()

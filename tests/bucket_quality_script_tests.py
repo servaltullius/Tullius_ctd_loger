@@ -60,6 +60,27 @@ def test_ground_truth_mod_matches_inferred_mod_name() -> None:
         assert report["overall_top1_precision_vs_ground_truth_mod"] == 1.0
 
 
+def test_feedback_fields_mark_summary_as_reviewed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        summary = {
+            "crash_bucket_key": "bucket-b",
+            "triage": {
+                "review_status": "unreviewed",
+                "actual_cause": "Bad mesh in custom armor",
+                "verdict": "Confirmed mod-side CTD",
+                "notes": "Top suspect matched manual repro",
+            },
+            "exception": {"module_plus_offset": "SkyrimSE.exe+0xD6DDDA"},
+            "suspects": [],
+        }
+        _write_summary(root / "case2_SkyrimDiagSummary.json", summary)
+        report = _run_script(root=root, out_json=root / "report.json")
+
+        assert report["reviewed_total"] == 1
+
+
 if __name__ == "__main__":
     test_ground_truth_mod_matches_inferred_mod_name()
+    test_feedback_fields_mark_summary_as_reviewed()
     print("bucket_quality_script_tests: OK")

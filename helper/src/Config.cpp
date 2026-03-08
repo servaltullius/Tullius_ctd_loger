@@ -2,18 +2,51 @@
 
 #include <Windows.h>
 
+#include <cwchar>
 #include <filesystem>
 #include <iterator>
+#include <vector>
 
 namespace skydiag::helper {
 namespace {
 
 std::wstring ExeDir()
 {
-  wchar_t buf[MAX_PATH]{};
-  const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-  std::filesystem::path p(buf, buf + n);
+  std::vector<wchar_t> buf(32768, L'\0');
+  const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+  if (n == 0 || n >= buf.size()) {
+    return {};
+  }
+  std::filesystem::path p(buf.data(), buf.data() + n);
   return p.parent_path().wstring();
+}
+
+std::wstring ReadIniString(const std::wstring& path, const wchar_t* section, const wchar_t* key, const wchar_t* def)
+{
+  std::size_t capacity = 256;
+  if (def) {
+    const std::size_t defLen = std::wcslen(def) + 1;
+    if (defLen > capacity) {
+      capacity = defLen;
+    }
+  }
+
+  while (capacity <= 32768) {
+    std::vector<wchar_t> buf(capacity, L'\0');
+    const DWORD n = GetPrivateProfileStringW(
+      section,
+      key,
+      def,
+      buf.data(),
+      static_cast<DWORD>(buf.size()),
+      path.c_str());
+    if (n < (buf.size() - 1)) {
+      return std::wstring(buf.data(), n);
+    }
+    capacity *= 2;
+  }
+
+  return def ? std::wstring(def) : std::wstring{};
 }
 
 std::wstring IniPath()
@@ -51,9 +84,7 @@ HelperConfig LoadConfig(std::wstring* err)
     cfg.dumpMode = DumpMode::kDefault;
   }
 
-  wchar_t outDir[MAX_PATH]{};
-  GetPrivateProfileStringW(L"SkyrimDiagHelper", L"OutputDir", L"", outDir, MAX_PATH, path.c_str());
-  cfg.outputDir = outDir;
+  cfg.outputDir = ReadIniString(path, L"SkyrimDiagHelper", L"OutputDir", L"");
 
   cfg.enableManualCaptureHotkey =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableManualCaptureHotkey", 1, path.c_str()) != 0;
@@ -66,15 +97,11 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableWerDumpFallbackHint", 1, path.c_str()) != 0;
   cfg.preserveFilteredCrashDumps =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"PreserveFilteredCrashDumps", 0, path.c_str()) != 0;
-  wchar_t dumpToolExe[MAX_PATH]{};
-  GetPrivateProfileStringW(
+  cfg.dumpToolExe = ReadIniString(
+    path,
     L"SkyrimDiagHelper",
     L"DumpToolExe",
-    L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe",
-    dumpToolExe,
-    MAX_PATH,
-    path.c_str());
-  cfg.dumpToolExe = dumpToolExe;
+    L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe");
   cfg.autoOpenViewerOnCrash = GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerOnCrash", 1, path.c_str()) != 0;
   cfg.autoOpenCrashOnlyIfProcessExited =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenCrashOnlyIfProcessExited", 1, path.c_str()) != 0;
@@ -113,39 +140,14 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.enableEtwCaptureOnHang =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableEtwCaptureOnHang", 0, path.c_str()) != 0;
-  wchar_t etwWprExe[MAX_PATH]{};
-  GetPrivateProfileStringW(L"SkyrimDiagHelper", L"EtwWprExe", L"wpr.exe", etwWprExe, MAX_PATH, path.c_str());
-  cfg.etwWprExe = etwWprExe;
+  cfg.etwWprExe = ReadIniString(path, L"SkyrimDiagHelper", L"EtwWprExe", L"wpr.exe");
 
-  wchar_t etwHangProfile[128]{};
-  GetPrivateProfileStringW(
-    L"SkyrimDiagHelper",
-    L"EtwHangProfile",
-    L"",
-    etwHangProfile,
-    static_cast<DWORD>(std::size(etwHangProfile)),
-    path.c_str());
-  if (etwHangProfile[0] == L'\0') {
+  cfg.etwHangProfile = ReadIniString(path, L"SkyrimDiagHelper", L"EtwHangProfile", L"");
+  if (cfg.etwHangProfile.empty()) {
     // Backward compatibility for older ini files.
-    GetPrivateProfileStringW(
-      L"SkyrimDiagHelper",
-      L"EtwProfile",
-      L"GeneralProfile",
-      etwHangProfile,
-      static_cast<DWORD>(std::size(etwHangProfile)),
-      path.c_str());
+    cfg.etwHangProfile = ReadIniString(path, L"SkyrimDiagHelper", L"EtwProfile", L"GeneralProfile");
   }
-  cfg.etwHangProfile = etwHangProfile;
-
-  wchar_t etwHangFallbackProfile[128]{};
-  GetPrivateProfileStringW(
-    L"SkyrimDiagHelper",
-    L"EtwHangFallbackProfile",
-    L"",
-    etwHangFallbackProfile,
-    static_cast<DWORD>(std::size(etwHangFallbackProfile)),
-    path.c_str());
-  cfg.etwHangFallbackProfile = etwHangFallbackProfile;
+  cfg.etwHangFallbackProfile = ReadIniString(path, L"SkyrimDiagHelper", L"EtwHangFallbackProfile", L"");
 
   cfg.etwMaxDurationSec = static_cast<std::uint32_t>(
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EtwMaxDurationSec", 20, path.c_str()));
@@ -153,19 +155,10 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.enableEtwCaptureOnCrash =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableEtwCaptureOnCrash", 0, path.c_str()) != 0;
 
-  wchar_t etwCrashProfile[128]{};
-  GetPrivateProfileStringW(
-    L"SkyrimDiagHelper",
-    L"EtwCrashProfile",
-    L"GeneralProfile",
-    etwCrashProfile,
-    static_cast<DWORD>(std::size(etwCrashProfile)),
-    path.c_str());
-  if (etwCrashProfile[0] == L'\0') {
+  cfg.etwCrashProfile = ReadIniString(path, L"SkyrimDiagHelper", L"EtwCrashProfile", L"GeneralProfile");
+  if (cfg.etwCrashProfile.empty()) {
     // Treat empty as default for safer behavior.
     cfg.etwCrashProfile = L"GeneralProfile";
-  } else {
-    cfg.etwCrashProfile = etwCrashProfile;
   }
 
   std::uint32_t etwCrashCaptureSeconds = static_cast<std::uint32_t>(

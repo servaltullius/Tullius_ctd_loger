@@ -18,6 +18,7 @@ internal sealed class AnalysisSummary
     public required IReadOnlyList<string> CallstackFrames { get; init; }
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
+    public required TriageReview Triage { get; init; }
     public int HistoryCorrelationCount { get; init; }
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
@@ -72,6 +73,8 @@ internal sealed class AnalysisSummary
 
         var tsElement = root.TryGetProperty("troubleshooting_steps", out var tsTemp)
             && tsTemp.ValueKind == JsonValueKind.Object ? tsTemp : default;
+        var triageElement = root.TryGetProperty("triage", out var triageTemp)
+            && triageTemp.ValueKind == JsonValueKind.Object ? triageTemp : default;
 
         return new AnalysisSummary
         {
@@ -92,6 +95,7 @@ internal sealed class AnalysisSummary
             EvidenceItems = evidenceItems,
             CrashLoggerRefs = crashLoggerRefs,
             ResourceItems = resourceItems,
+            Triage = ParseTriage(triageElement),
             HistoryCorrelationCount = root.TryGetProperty("history_correlation", out var histCorr)
                 && histCorr.ValueKind == JsonValueKind.Object
                 && histCorr.TryGetProperty("count", out var countNode)
@@ -102,6 +106,35 @@ internal sealed class AnalysisSummary
                 ? ParseStringArray(tsElement, "steps")
                 : new List<string>(),
             Diagnostics = ParseStringArray(root, "diagnostics"),
+        };
+    }
+
+    private static TriageReview ParseTriage(JsonElement triage)
+    {
+        var parsed = new TriageReview
+        {
+            ReviewStatus = SummaryTriageStore.NormalizeReviewStatus(ReadString(triage, "review_status")),
+            Reviewed = ReadBool(triage, "reviewed"),
+            Verdict = ReadString(triage, "verdict"),
+            ActualCause = ReadString(triage, "actual_cause"),
+            GroundTruthCause = ReadString(triage, "ground_truth_cause"),
+            GroundTruthMod = ReadString(triage, "ground_truth_mod"),
+            Reviewer = ReadString(triage, "reviewer"),
+            ReviewedAtUtc = ReadString(triage, "reviewed_at_utc"),
+            Notes = ReadString(triage, "notes"),
+            SignatureMatched = ReadBool(triage, "signature_matched"),
+        };
+
+        var reviewStatus = parsed.ReviewStatus;
+        if (reviewStatus == TriageReview.UnreviewedStatus && SummaryTriageStore.IsReviewed(parsed))
+        {
+            reviewStatus = "reviewed";
+        }
+
+        return parsed with
+        {
+            ReviewStatus = reviewStatus,
+            Reviewed = SummaryTriageStore.IsReviewed(parsed),
         };
     }
 
@@ -192,6 +225,21 @@ internal sealed class AnalysisSummary
 public sealed record SuspectItem(string Confidence, string Module, string Reason);
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
+public sealed record TriageReview
+{
+    public const string UnreviewedStatus = "unreviewed";
+
+    public string ReviewStatus { get; init; } = UnreviewedStatus;
+    public bool Reviewed { get; init; }
+    public string Verdict { get; init; } = string.Empty;
+    public string ActualCause { get; init; } = string.Empty;
+    public string GroundTruthCause { get; init; } = string.Empty;
+    public string GroundTruthMod { get; init; } = string.Empty;
+    public bool SignatureMatched { get; init; }
+    public string Reviewer { get; init; } = string.Empty;
+    public string ReviewedAtUtc { get; init; } = string.Empty;
+    public string Notes { get; init; } = string.Empty;
+}
 public sealed record CrashLoggerRefItem(
     string EspName, string ObjectType, string Location,
     string ObjectName, string FormId, int RefCount, int RelevanceScore);

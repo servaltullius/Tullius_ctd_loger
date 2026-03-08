@@ -18,7 +18,13 @@ def _is_reviewed(triage: dict[str, Any]) -> bool:
     status = _normalize(str(triage.get("review_status", "")))
     if status in {"reviewed", "confirmed", "triaged", "done"}:
         return True
-    return bool(_normalize(str(triage.get("ground_truth_mod", ""))))
+    if _normalize(str(triage.get("ground_truth_mod", ""))):
+        return True
+    if _normalize(str(triage.get("actual_cause", ""))):
+        return True
+    if _normalize(str(triage.get("verdict", ""))):
+        return True
+    return bool(_normalize(str(triage.get("notes", ""))))
 
 
 def _is_unknown_module(summary: dict[str, Any]) -> bool:

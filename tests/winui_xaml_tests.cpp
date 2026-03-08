@@ -44,6 +44,34 @@ static void TestMainWindowHasTroubleshootingSection()
   assert(summary.find("TroubleshootingSteps") != std::string::npos);
 }
 
+static void TestMainWindowHasTriageReviewEditor()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  assert(xaml.find("ReviewStatusComboBox") != std::string::npos && "Review status selector missing in XAML");
+  assert(xaml.find("ReviewStatusConfirmedItem") != std::string::npos && "Confirmed review status option missing in XAML");
+  assert(xaml.find("ReviewStatusTriagedItem") != std::string::npos && "Triaged review status option missing in XAML");
+  assert(xaml.find("ReviewStatusDoneItem") != std::string::npos && "Done review status option missing in XAML");
+  assert(xaml.find("SaveTriageButton") != std::string::npos && "Save triage button missing in XAML");
+  assert(xaml.find("GroundTruthModBox") != std::string::npos && "Ground truth mod field missing in XAML");
+  assert(xaml.find("ReviewNotesBox") != std::string::npos && "Review notes field missing in XAML");
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  assert(cs.find("SaveTriageButton_Click") != std::string::npos && "Save triage click handler missing");
+  assert(cs.find("PopulateTriageEditor") != std::string::npos && "Triage editor population logic missing");
+  assert(cs.find("DescribeReviewStatus") != std::string::npos && "Review status formatter missing");
+
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  assert(summary.find("Triage = ParseTriage") != std::string::npos && "AnalysisSummary must load triage fields");
+
+  const auto store = ReadAllText(repoRoot / "dump_tool_winui" / "SummaryTriageStore.cs");
+  assert(store.find("SaveAsync") != std::string::npos && "Summary triage save helper missing");
+  assert(store.find("HasReviewContent") != std::string::npos && "Summary triage review-content helper missing");
+  assert(store.find("\"confirmed\" => \"confirmed\"") != std::string::npos && "Legacy review status values must round-trip");
+  assert(store.find("\"ground_truth_mod\"") != std::string::npos && "Summary triage save helper must persist ground_truth_mod");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -66,6 +94,7 @@ int main()
 
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();
+  TestMainWindowHasTriageReviewEditor();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

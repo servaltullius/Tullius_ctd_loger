@@ -155,6 +155,22 @@ int main()
 
   AssertContains(
     processExitTickBody,
+    "const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);",
+    "Process exit tick must preserve zero-exit crashes when shared memory still reports a strong exception.");
+
+  AssertContains(
+    processExitTickBody,
+    "(state->crashCaptured || sharedMemoryStrongCrash)",
+    "Process exit tick must keep zero-exit crash handling active even when the crash event was not consumed before exit.");
+
+  AssertOrdered(
+    processExitTickBody,
+    "const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);",
+    "DrainCrashEventBeforeExit(",
+    "Process exit tick must evaluate strong shared-memory crash evidence before deciding whether to drain the crash event.");
+
+  AssertContains(
+    processExitTickBody,
     "CleanupCrashArtifactsAfterZeroExit(",
     "Process exit tick must invoke zero-exit crash artifact cleanup path.");
 
@@ -199,6 +215,15 @@ int main()
     viewerLaunchBody,
     ", exe=",
     "DumpTool viewer launch diagnostics must include resolved executable path.");
+
+  AssertContains(
+    dumpToolLaunch,
+    "GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()))",
+    "DumpTool launcher must resolve its executable directory with a dynamic path buffer.");
+
+  assert(
+    dumpToolLaunch.find("GetModuleFileNameW(nullptr, buf, MAX_PATH)") == std::string::npos &&
+    "DumpTool launcher must not use MAX_PATH-sized fixed buffers.");
 
   return 0;
 }

@@ -85,6 +85,20 @@ int main()
     "StartHeartbeatScheduler(",
     "Plugin data-loaded path must start heartbeat scheduler.");
 
+  AssertContains(
+    pluginMain,
+    "static std::jthread g_testHotkeysThread;",
+    "Test hotkey worker must keep a managed jthread so DLL unload can request shutdown.");
+
+  AssertContains(
+    pluginMain,
+    "stop_requested()",
+    "Test hotkey worker must observe stop requests instead of spinning forever.");
+
+  assert(
+    pluginMain.find("}).detach();") == std::string::npos &&
+    "Test hotkey worker must not detach because detached DLL threads outlive unload.");
+
   const std::string initSharedMemoryBody = ExtractFunctionBody(sharedMemory, "bool InitSharedMemory()");
   AssertContains(
     initSharedMemoryBody,
@@ -131,6 +145,20 @@ int main()
   assert(
     vectoredHandlerBody.find("InterlockedCompareExchange(") == std::string::npos &&
     "Crash handler must not use one-shot crash_seq latch because it blocks future captures after recovery.");
+
+  AssertContains(
+    pluginMain,
+    "GetModuleFileNameW(mod, buf.data(), static_cast<DWORD>(buf.size()))",
+    "Plugin path resolution must use a dynamic buffer for long install paths.");
+
+  AssertContains(
+    pluginMain,
+    "GetPrivateProfileStringW(",
+    "Plugin config loader must still read helper path from ini.");
+
+  assert(
+    pluginMain.find("GetModuleFileNameW(mod, buf, MAX_PATH)") == std::string::npos &&
+    "Plugin path resolution must not use MAX_PATH-sized fixed buffers.");
 
   return 0;
 }

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "ProcessUtil.h"
 #include "HelperLog.h"
@@ -16,9 +17,12 @@ namespace {
 
 std::filesystem::path GetThisExeDir()
 {
-  wchar_t buf[MAX_PATH]{};
-  const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-  std::filesystem::path p(buf, buf + n);
+  std::vector<wchar_t> buf(32768, L'\0');
+  const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+  if (n == 0 || n >= buf.size()) {
+    return {};
+  }
+  std::filesystem::path p(buf.data(), buf.data() + n);
   return p.parent_path();
 }
 

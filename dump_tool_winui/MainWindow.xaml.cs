@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Linq;
 
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -44,6 +45,7 @@ public sealed partial class MainWindow : Window
 
         CopySummaryButton.IsEnabled = false;
         CopyShareButton.IsEnabled = false;
+        SetTriageEditorEnabled(false);
 
         if (!string.IsNullOrWhiteSpace(startupOptions.DumpPath))
         {
@@ -112,6 +114,25 @@ public sealed partial class MainWindow : Window
         OpenOutputButton.Content = T("Open report folder", "리포트 폴더 열기");
         CopySummaryButton.Content = T("Copy summary", "요약 복사");
         CopyShareButton.Content = T("Share", "공유");
+        TriageEditorTitleText.Text = T("Review Feedback", "검토 피드백");
+        ReviewStatusLabelText.Text = T("Review status", "검토 상태");
+        ReviewStatusUnreviewedItem.Content = T("Unreviewed", "미검토");
+        ReviewStatusReviewedItem.Content = T("Reviewed", "검토 완료");
+        ReviewStatusConfirmedItem.Content = T("Confirmed", "확인됨");
+        ReviewStatusTriagedItem.Content = T("Triaged", "분류됨");
+        ReviewStatusDoneItem.Content = T("Done", "완료");
+        VerdictLabelText.Text = T("Verdict", "판정");
+        VerdictBox.PlaceholderText = T("Top conclusion or short verdict", "최종 결론 또는 짧은 판정");
+        ActualCauseLabelText.Text = T("Actual cause", "실제 원인");
+        ActualCauseBox.PlaceholderText = T("What actually caused the CTD", "CTD의 실제 원인이 무엇이었는지");
+        GroundTruthModLabelText.Text = T("Ground truth mod", "확정 모드");
+        GroundTruthModBox.PlaceholderText = T("Confirmed mod/plugin if known", "확정된 모드/플러그인이 있으면 입력");
+        ReviewNotesLabelText.Text = T("Review notes", "검토 메모");
+        ReviewNotesBox.PlaceholderText = T("Why the top candidate was right or wrong", "상위 후보가 맞았는지 틀렸는지 이유를 기록");
+        SaveTriageButton.Content = T("Save review", "검토 저장");
+        TriageMetaText.Text = T(
+            "Run analysis first, then save review feedback into the summary JSON.",
+            "먼저 분석을 실행한 뒤, 검토 피드백을 요약 JSON에 저장하세요.");
     }
 
     private void HookWheelChainingForNestedControls()
@@ -366,6 +387,8 @@ public sealed partial class MainWindow : Window
         {
             TroubleshootingCard.Visibility = Visibility.Collapsed;
         }
+
+        PopulateTriageEditor(summary);
     }
 
     private void CopySummaryButton_Click(object sender, RoutedEventArgs e)
@@ -486,6 +509,40 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async void SaveTriageButton_Click(object sender, RoutedEventArgs e)
+    {
+        var summaryPath = ResolveCurrentSummaryPath();
+        if (string.IsNullOrWhiteSpace(summaryPath) || !File.Exists(summaryPath))
+        {
+            StatusText.Text = T(
+                "Summary JSON is not available yet. Analyze a dump first.",
+                "요약 JSON이 아직 없습니다. 먼저 덤프를 분석하세요.");
+            return;
+        }
+
+        try
+        {
+            SaveTriageButton.IsEnabled = false;
+            StatusText.Text = T("Saving review feedback...", "검토 피드백을 저장하는 중입니다...");
+
+            await SummaryTriageStore.SaveAsync(summaryPath, BuildTriageReviewFromEditor(), CancellationToken.None);
+
+            var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
+            RenderSummary(summary);
+            StatusText.Text = T(
+                "Review feedback saved to the summary JSON.",
+                "검토 피드백을 요약 JSON에 저장했습니다.");
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T("Failed to save review: ", "검토 저장 실패: ") + ex.Message;
+        }
+        finally
+        {
+            SaveTriageButton.IsEnabled = _vm.CurrentSummary is not null;
+        }
+    }
+
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string tag)
@@ -601,7 +658,106 @@ public sealed partial class MainWindow : Window
         DumpPathBox.IsEnabled = !isBusy;
         OutputDirBox.IsEnabled = !isBusy;
         OpenOutputButton.IsEnabled = !isBusy;
+        SetTriageEditorEnabled(!isBusy && _vm.CurrentSummary is not null);
         StatusText.Text = message;
+    }
+
+    private void PopulateTriageEditor(AnalysisSummary summary)
+    {
+        SelectReviewStatus(summary.Triage.ReviewStatus);
+        VerdictBox.Text = summary.Triage.Verdict;
+        ActualCauseBox.Text = summary.Triage.ActualCause;
+        GroundTruthModBox.Text = summary.Triage.GroundTruthMod;
+        ReviewNotesBox.Text = summary.Triage.Notes;
+        TriageMetaText.Text = FormatTriageMetadata(summary.Triage);
+        SetTriageEditorEnabled(true);
+    }
+
+    private void SetTriageEditorEnabled(bool isEnabled)
+    {
+        ReviewStatusComboBox.IsEnabled = isEnabled;
+        VerdictBox.IsEnabled = isEnabled;
+        ActualCauseBox.IsEnabled = isEnabled;
+        GroundTruthModBox.IsEnabled = isEnabled;
+        ReviewNotesBox.IsEnabled = isEnabled;
+        SaveTriageButton.IsEnabled = isEnabled;
+    }
+
+    private void SelectReviewStatus(string reviewStatus)
+    {
+        var normalized = SummaryTriageStore.NormalizeReviewStatus(reviewStatus);
+        foreach (var item in ReviewStatusComboBox.Items.OfType<ComboBoxItem>())
+        {
+            if (string.Equals(item.Tag as string, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                ReviewStatusComboBox.SelectedItem = item;
+                return;
+            }
+        }
+
+        ReviewStatusComboBox.SelectedIndex = 0;
+    }
+
+    private TriageReview BuildTriageReviewFromEditor()
+    {
+        var selectedStatus = ReviewStatusComboBox.SelectedItem as ComboBoxItem;
+        var reviewStatus = selectedStatus?.Tag as string ?? TriageReview.UnreviewedStatus;
+        var normalizedStatus = SummaryTriageStore.NormalizeReviewStatus(reviewStatus);
+        var draftReview = new TriageReview
+        {
+            ReviewStatus = normalizedStatus,
+            Reviewed = normalizedStatus != TriageReview.UnreviewedStatus,
+            Verdict = VerdictBox.Text ?? string.Empty,
+            ActualCause = ActualCauseBox.Text ?? string.Empty,
+            GroundTruthMod = GroundTruthModBox.Text ?? string.Empty,
+            Notes = ReviewNotesBox.Text ?? string.Empty,
+        };
+        var effectiveReviewed = SummaryTriageStore.IsReviewed(draftReview);
+        if (normalizedStatus == TriageReview.UnreviewedStatus && effectiveReviewed)
+        {
+            normalizedStatus = "reviewed";
+        }
+
+        return draftReview with
+        {
+            ReviewStatus = normalizedStatus,
+            Reviewed = effectiveReviewed,
+        };
+    }
+
+    private string? ResolveCurrentSummaryPath()
+    {
+        if (string.IsNullOrWhiteSpace(_vm.CurrentDumpPath) || string.IsNullOrWhiteSpace(_vm.CurrentOutDir))
+        {
+            return null;
+        }
+
+        return NativeAnalyzerBridge.ResolveSummaryPath(_vm.CurrentDumpPath, _vm.CurrentOutDir);
+    }
+
+    private string FormatTriageMetadata(TriageReview triage)
+    {
+        var reviewState = DescribeReviewStatus(triage.ReviewStatus);
+
+        if (string.IsNullOrWhiteSpace(triage.ReviewedAtUtc))
+        {
+            return T("Review status: ", "검토 상태: ") + reviewState;
+        }
+
+        return T("Review status: ", "검토 상태: ") + reviewState + " | "
+            + T("Last saved (UTC): ", "마지막 저장 (UTC): ") + triage.ReviewedAtUtc;
+    }
+
+    private string DescribeReviewStatus(string reviewStatus)
+    {
+        return SummaryTriageStore.NormalizeReviewStatus(reviewStatus) switch
+        {
+            "reviewed" => T("Reviewed", "검토 완료"),
+            "confirmed" => T("Confirmed", "확인됨"),
+            "triaged" => T("Triaged", "분류됨"),
+            "done" => T("Done", "완료"),
+            _ => T("Unreviewed", "미검토"),
+        };
     }
 
     private string T(string en, string ko) => _vm.T(en, ko);

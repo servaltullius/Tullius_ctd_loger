@@ -127,9 +127,16 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
 
   // ── triage sub-object ──
   const auto& triage = j["triage"];
+  AssertIsType(triage, "review_status", "string", "triage");
   AssertIsType(triage, "reviewed", "boolean", "triage");
   AssertIsType(triage, "verdict", "string", "triage");
+  AssertIsType(triage, "actual_cause", "string", "triage");
+  AssertIsType(triage, "ground_truth_cause", "string", "triage");
+  AssertIsType(triage, "ground_truth_mod", "string", "triage");
   AssertIsType(triage, "signature_matched", "boolean", "triage");
+  AssertIsType(triage, "reviewer", "string", "triage");
+  AssertIsType(triage, "reviewed_at_utc", "string", "triage");
+  AssertIsType(triage, "notes", "string", "triage");
 
   // ── exception sub-object ──
   const auto& exc = j["exception"];

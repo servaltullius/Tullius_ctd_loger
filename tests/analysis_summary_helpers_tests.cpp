@@ -30,9 +30,13 @@ int main()
   assert(src.find("ReadString(") != std::string::npos && "ReadString helper missing");
   assert(src.find("ReadBool(") != std::string::npos && "ReadBool helper missing");
   assert(src.find("FirstNonEmpty(") != std::string::npos && "FirstNonEmpty helper missing");
+  assert(src.find("ParseTriage(") != std::string::npos && "ParseTriage helper missing");
+  assert(src.find("TriageReview") != std::string::npos && "TriageReview model missing");
 
   // Verify dotted path support is used (callstack.frames)
   assert(src.find("\"callstack.frames\"") != std::string::npos && "Dotted path support for callstack.frames missing");
+  assert(src.find("\"review_status\"") != std::string::npos && "Triage review_status parsing missing");
+  assert(src.find("\"ground_truth_mod\"") != std::string::npos && "Triage ground_truth_mod parsing missing");
 
   return 0;
 }

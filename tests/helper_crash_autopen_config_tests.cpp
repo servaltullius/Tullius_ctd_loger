@@ -51,5 +51,19 @@ int main()
   AssertContains(configCpp, "EnableWerDumpFallbackHint", "Helper config loader does not read WER fallback hint toggle");
   AssertContains(configCpp, "EtwHangProfile", "Helper config loader does not read ETW hang primary profile key");
   AssertContains(configCpp, "EtwHangFallbackProfile", "Helper config loader does not read ETW hang fallback profile key");
+  AssertContains(
+    configCpp,
+    "GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()))",
+    "Helper config loader must resolve exe directory with a dynamic path buffer.");
+  AssertContains(
+    configCpp,
+    "cfg.dumpToolExe = ReadIniString(",
+    "Helper config loader must read long string values through the dynamic INI helper.");
+  assert(
+    configCpp.find("wchar_t outDir[MAX_PATH]{};") == std::string::npos &&
+    "Helper config loader must not truncate OutputDir via MAX_PATH fixed buffers.");
+  assert(
+    configCpp.find("wchar_t dumpToolExe[MAX_PATH]{};") == std::string::npos &&
+    "Helper config loader must not truncate DumpToolExe via MAX_PATH fixed buffers.");
   return 0;
 }

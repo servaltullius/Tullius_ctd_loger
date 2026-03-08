@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cwchar>
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
@@ -44,9 +46,30 @@ PluginConfig g_cfg{};
 
 std::wstring ReadIniString(const wchar_t* section, const wchar_t* key, const wchar_t* def, const wchar_t* path)
 {
-  wchar_t buf[MAX_PATH]{};
-  GetPrivateProfileStringW(section, key, def, buf, MAX_PATH, path);
-  return buf;
+  std::size_t capacity = 256;
+  if (def) {
+    const std::size_t defLen = std::wcslen(def) + 1;
+    if (defLen > capacity) {
+      capacity = defLen;
+    }
+  }
+
+  while (capacity <= 32768) {
+    std::vector<wchar_t> buf(capacity, L'\0');
+    const DWORD n = GetPrivateProfileStringW(
+      section,
+      key,
+      def,
+      buf.data(),
+      static_cast<DWORD>(buf.size()),
+      path);
+    if (n < (buf.size() - 1)) {
+      return std::wstring(buf.data(), n);
+    }
+    capacity *= 2;
+  }
+
+  return def ? std::wstring(def) : std::wstring{};
 }
 
 PluginConfig LoadConfig()
@@ -154,10 +177,13 @@ HMODULE GetThisModule() noexcept
 
 std::filesystem::path GetThisModulePath()
 {
-  wchar_t buf[MAX_PATH]{};
+  std::vector<wchar_t> buf(32768, L'\0');
   const HMODULE mod = GetThisModule();
-  const DWORD n = GetModuleFileNameW(mod, buf, MAX_PATH);
-  return std::filesystem::path(buf, buf + n);
+  const DWORD n = GetModuleFileNameW(mod, buf.data(), static_cast<DWORD>(buf.size()));
+  if (n == 0 || n >= buf.size()) {
+    return {};
+  }
+  return std::filesystem::path(buf.data(), buf.data() + n);
 }
 
 using skydiag::protocol::MakeKernelName;
@@ -258,6 +284,7 @@ bool StartHelperIfConfigured(const PluginConfig& cfg)
 
 // Store the watchdog jthread so its destructor can request a clean stop on DLL unload.
 static std::jthread g_watchdogThread;
+static std::jthread g_testHotkeysThread;
 
 void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
 {
@@ -332,11 +359,16 @@ void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
     return;
   }
 
-  std::thread([]() {
+  static std::atomic<bool> started{ false };
+  if (started.exchange(true)) {
+    return;
+  }
+
+  g_testHotkeysThread = std::jthread([](std::stop_token stopToken) {
     bool crashTriggered = false;
     bool hangTriggered = false;
 
-    while (true) {
+    while (!stopToken.stop_requested()) {
       const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
       const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
@@ -374,7 +406,7 @@ void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
 
       Sleep(50);
     }
-  }).detach();
+  });
 }
 
 }  // namespace

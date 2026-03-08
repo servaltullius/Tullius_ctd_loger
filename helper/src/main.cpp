@@ -261,6 +261,11 @@ void DrainCrashEventBeforeExit(
     &state->pendingCrashViewerDumpPath);
 }
 
+bool HasSharedMemoryStrongCrashEvidence(const skydiag::helper::AttachedProcess& proc)
+{
+  return proc.shm && skydiag::helper::IsStrongCrashException(proc.shm->header.crash.exception_code);
+}
+
 void CleanupCrashArtifactsAfterZeroExit(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
@@ -420,7 +425,6 @@ bool HandleProcessExitTick(
     return false;
   }
 
-  bool& crashCaptured = state->crashCaptured;
   auto& pendingCrashEtw = state->pendingCrashEtw;
 
   const DWORD w = WaitForSingleObject(proc.process, 0);
@@ -428,10 +432,15 @@ bool HandleProcessExitTick(
     DWORD exitCode = STILL_ACTIVE;
     GetExitCodeProcess(proc.process, &exitCode);
     const std::uint32_t exceptionCode = proc.shm ? proc.shm->header.crash.exception_code : 0u;
-    const bool exitCode0StrongCrash = (exitCode == 0) && crashCaptured && skydiag::helper::IsStrongCrashException(exceptionCode);
-    if (exitCode != 0) {
+    const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);
+    if (exitCode != 0 || sharedMemoryStrongCrash) {
       DrainCrashEventBeforeExit(cfg, proc, outBase, state);
-    } else {
+    }
+    const bool exitCode0StrongCrash =
+      (exitCode == 0) &&
+      (state->crashCaptured || sharedMemoryStrongCrash) &&
+      skydiag::helper::IsStrongCrashException(exceptionCode);
+    if (exitCode == 0) {
       CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, exitCode0StrongCrash, exceptionCode, state);
       AppendExitClassificationLog(outBase, exitCode0StrongCrash, exceptionCode);
     }
