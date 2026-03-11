@@ -88,28 +88,49 @@ internal sealed class MainWindowViewModel
             ? T("Fault module: unavailable", "오류 모듈: 없음")
             : T("Fault module: ", "오류 모듈: ") + summary.ModulePlusOffset;
 
-        if (summary.CrashLoggerRefs.Count > 0 && !string.IsNullOrWhiteSpace(summary.InferredModName))
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            ModNameText = DescribeActionableCandidateLabel(summary.ActionableCandidates[0]) + ": " + BuildPrimaryCandidateValue(summary);
+        }
+        else if (summary.CrashLoggerRefs.Count > 0 && !string.IsNullOrWhiteSpace(summary.InferredModName))
+        {
             ModNameText = T("Referenced mod: ", "참조 모드: ") + summary.InferredModName;
+        }
         else
+        {
             ModNameText = string.IsNullOrWhiteSpace(summary.InferredModName)
                 ? T("Inferred mod: unavailable", "추정 모드: 없음")
                 : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
+        }
     }
 
     private void PopulateSuspects(AnalysisSummary summary)
     {
         Suspects.Clear();
-        foreach (var espRef in summary.CrashLoggerRefs.Take(3))
+        if (summary.ActionableCandidates.Count > 0)
         {
-            Suspects.Add(new SuspectItem(
-                MapRelevanceToConfidence(espRef.RelevanceScore),
-                espRef.EspName,
-                BuildEspRefReason(espRef)));
+            foreach (var candidate in summary.ActionableCandidates.Take(5))
+            {
+                Suspects.Add(new SuspectItem(
+                    DescribeEvidenceAgreement(candidate),
+                    BuildCandidateDisplayName(candidate),
+                    BuildCandidateReason(candidate)));
+            }
         }
-        var dllSlots = Math.Max(0, 7 - Suspects.Count);
-        foreach (var suspect in summary.Suspects.Take(dllSlots))
+        else
         {
-            Suspects.Add(suspect);
+            foreach (var espRef in summary.CrashLoggerRefs.Take(3))
+            {
+                Suspects.Add(new SuspectItem(
+                    MapRelevanceToConfidence(espRef.RelevanceScore),
+                    espRef.EspName,
+                    BuildEspRefReason(espRef)));
+            }
+            var dllSlots = Math.Max(0, 7 - Suspects.Count);
+            foreach (var suspect in summary.Suspects.Take(dllSlots))
+            {
+                Suspects.Add(suspect);
+            }
         }
         if (Suspects.Count == 0)
         {
@@ -119,17 +140,27 @@ internal sealed class MainWindowViewModel
                 T("Try sharing the dump + report for deeper analysis.", "덤프 + 리포트를 공유해 추가 분석을 진행하세요.")));
         }
 
-        var primarySuspect = Suspects.FirstOrDefault();
-        QuickPrimaryValue = primarySuspect is null
-            ? T("Unknown", "알 수 없음")
-            : primarySuspect.Module;
-        QuickConfidenceValue = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
-            ? T("Unrated", "미평가")
-            : primarySuspect.Confidence;
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            var primaryCandidate = summary.ActionableCandidates[0];
+            QuickPrimaryValue = BuildPrimaryCandidateValue(summary);
+            QuickConfidenceValue = DescribeEvidenceAgreement(primaryCandidate);
+            QuickPrimaryLabel = DescribeActionableCandidateLabel(primaryCandidate);
+        }
+        else
+        {
+            var primarySuspect = Suspects.FirstOrDefault();
+            QuickPrimaryValue = primarySuspect is null
+                ? T("Unknown", "알 수 없음")
+                : primarySuspect.Module;
+            QuickConfidenceValue = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
+                ? T("Unrated", "미평가")
+                : primarySuspect.Confidence;
 
-        QuickPrimaryLabel = summary.CrashLoggerRefs.Count > 0
-            ? T("Referenced mod (ESP)", "참조 모드 (ESP)")
-            : T("Primary suspect", "주요 원인");
+            QuickPrimaryLabel = summary.CrashLoggerRefs.Count > 0
+                ? T("Referenced mod (ESP)", "참조 모드 (ESP)")
+                : T("Actionable candidate", "행동 우선 후보");
+        }
     }
 
     private void PopulateRecommendations(AnalysisSummary summary)
@@ -269,6 +300,13 @@ internal sealed class MainWindowViewModel
             lines.Add((_isKorean ? "추정 모드: " : "Inferred mod: ") + summary.InferredModName);
         }
 
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            var primaryCandidate = summary.ActionableCandidates[0];
+            lines.Add((_isKorean ? "행동 우선 후보: " : "Actionable candidate: ") + BuildPrimaryCandidateValue(summary));
+            lines.Add((_isKorean ? "근거 합의: " : "Evidence agreement: ") + DescribeEvidenceAgreement(primaryCandidate));
+        }
+
         if (summary.CrashLoggerRefs.Count > 0)
         {
             var espDescs = string.Join(", ", summary.CrashLoggerRefs.Select(r =>
@@ -328,7 +366,13 @@ internal sealed class MainWindowViewModel
                 ? (_isKorean ? "🟠 Skyrim 프리징/무한로딩 리포트 — SkyrimDiag" : "🟠 Skyrim Freeze/ILS Report — SkyrimDiag")
                 : (_isKorean ? "🔴 Skyrim CTD 리포트 — SkyrimDiag" : "🔴 Skyrim CTD Report — SkyrimDiag"));
 
-        if (summary.CrashLoggerRefs.Count > 0)
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            var primaryCandidate = summary.ActionableCandidates[0];
+            lines.Add($"📌 {DescribeActionableCandidateLabel(primaryCandidate)}: {BuildPrimaryCandidateValue(summary)}");
+            lines.Add($"🧭 {(_isKorean ? "근거 합의" : "Evidence agreement")}: {DescribeEvidenceAgreement(primaryCandidate)}");
+        }
+        else if (summary.CrashLoggerRefs.Count > 0)
         {
             var topEspRef = summary.CrashLoggerRefs[0];
             var espLabel = !string.IsNullOrWhiteSpace(topEspRef.FormId)
@@ -401,6 +445,97 @@ internal sealed class MainWindowViewModel
         return string.Join(Environment.NewLine, lines);
     }
 
+    private string DescribeActionableCandidateLabel(ActionableCandidateItem candidate) => candidate.StatusId switch
+    {
+        "cross_validated" => T("Cross-validated candidate", "교차검증된 후보"),
+        "conflicting" => T("Conflicting candidates", "복수 후보"),
+        "reference_clue" => T("Processing at crash", "사고 당시 처리 대상"),
+        _ => T("Actionable candidate", "행동 우선 후보"),
+    };
+
+    private string DescribeEvidenceAgreement(ActionableCandidateItem candidate)
+    {
+        if (candidate.StatusId == "conflicting" || candidate.HasConflict)
+        {
+            return T("Signals disagree", "신호 충돌");
+        }
+
+        if (candidate.StatusId == "reference_clue")
+        {
+            return T("Object ref only", "오브젝트 참조 단독");
+        }
+
+        if (candidate.FamilyCount > 0)
+        {
+            return _isKorean
+                ? $"{candidate.FamilyCount}개 계열 합의"
+                : $"{candidate.FamilyCount} signal families agree";
+        }
+
+        return string.IsNullOrWhiteSpace(candidate.Confidence)
+            ? T("Limited evidence", "제한된 근거")
+            : candidate.Confidence;
+    }
+
+    private string BuildPrimaryCandidateValue(AnalysisSummary summary)
+    {
+        var primaryCandidate = summary.ActionableCandidates[0];
+        if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
+            summary.ActionableCandidates.Count > 1)
+        {
+            return $"{BuildCandidateDisplayName(primaryCandidate)} / {BuildCandidateDisplayName(summary.ActionableCandidates[1])}";
+        }
+
+        return BuildCandidateDisplayName(primaryCandidate);
+    }
+
+    private string BuildCandidateDisplayName(ActionableCandidateItem candidate)
+    {
+        return FirstNonEmpty(
+            candidate.DisplayName,
+            candidate.PluginName,
+            candidate.ModName,
+            candidate.ModuleFilename);
+    }
+
+    private string BuildCandidateReason(ActionableCandidateItem candidate)
+    {
+        var families = candidate.SupportingFamilies
+            .Select(DescribeFamily)
+            .Where(family => !string.IsNullOrWhiteSpace(family))
+            .ToList();
+
+        var parts = new List<string>();
+        if (families.Count > 0)
+        {
+            parts.Add(string.Join(" + ", families));
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.Explanation))
+        {
+            parts.Add(candidate.Explanation);
+        }
+
+        if ((candidate.StatusId == "conflicting" || candidate.HasConflict) && candidate.ConflictingFamilies.Count > 0)
+        {
+            var conflicts = string.Join(", ", candidate.ConflictingFamilies.Select(DescribeFamily));
+            parts.Add(_isKorean ? $"충돌 신호: {conflicts}" : $"Conflicting signal: {conflicts}");
+        }
+
+        return parts.Count == 0
+            ? T("No consensus detail available.", "합의 세부 정보가 없습니다.")
+            : string.Join(" — ", parts);
+    }
+
+    private string DescribeFamily(string familyId) => familyId switch
+    {
+        "crash_logger_object_ref" => T("CrashLogger object ref", "CrashLogger 오브젝트 참조"),
+        "actionable_stack" => T("actionable stack", "실행 가능한 스택"),
+        "resource_provider" => T("near resource provider", "인접 리소스 provider"),
+        "history_repeat" => T("history repeat", "반복 기록"),
+        _ => familyId,
+    };
+
     public string BuildEspRefReason(CrashLoggerRefItem espRef)
     {
         var parts = new List<string>();
@@ -448,6 +583,18 @@ internal sealed class MainWindowViewModel
     }
 
     public string T(string en, string ko) => _isKorean ? ko : en;
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+        return string.Empty;
+    }
 
     // ── Advanced artifacts loading (static, no UI dependency) ─
 

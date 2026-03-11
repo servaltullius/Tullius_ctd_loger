@@ -265,6 +265,33 @@ static nlohmann::json BuildSummaryJson(
     });
   }
 
+  summary["actionable_candidates"] = nlohmann::json::array();
+  for (const auto& c : r.actionable_candidates) {
+    nlohmann::json supportingFamilies = nlohmann::json::array();
+    for (const auto& family : c.supporting_families) {
+      supportingFamilies.push_back(family);
+    }
+    nlohmann::json conflictingFamilies = nlohmann::json::array();
+    for (const auto& family : c.conflicting_families) {
+      conflictingFamilies.push_back(family);
+    }
+    summary["actionable_candidates"].push_back({
+      { "status_id", c.status_id },
+      { "confidence", WideToUtf8(c.confidence) },
+      { "display_name", WideToUtf8(c.display_name) },
+      { "plugin_name", WideToUtf8(c.plugin_name) },
+      { "mod_name", WideToUtf8(c.mod_name) },
+      { "module_filename", WideToUtf8(c.module_filename) },
+      { "explanation", WideToUtf8(c.explanation) },
+      { "family_count", c.family_count },
+      { "score", c.score },
+      { "cross_validated", c.cross_validated },
+      { "has_conflict", c.has_conflict },
+      { "supporting_families", std::move(supportingFamilies) },
+      { "conflicting_families", std::move(conflictingFamilies) },
+    });
+  }
+
   summary["evidence"] = nlohmann::json::array();
   for (const auto& e : r.evidence) {
     summary["evidence"].push_back({

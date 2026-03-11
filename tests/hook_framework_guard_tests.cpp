@@ -122,6 +122,10 @@ int main()
     "actionable candidate",
     "Summary builder must expose an actionable non-victim candidate when hook/system top suspect is likely a victim location.");
   AssertContains(
+    summary,
+    "topCandidateConf",
+    "Summary builder must use actionable-candidate confidence instead of hardcoded confidence for EXE candidate wording.");
+  AssertContains(
     rec,
     "preferStackCandidateOverFault",
     "Recommendations must prefer stack candidates over hook-framework fault modules.");

@@ -103,6 +103,7 @@
     "online_symbol_source_used": false
   },
   "resources": [],
+  "actionable_candidates": [],
   "evidence": [
     {
       "confidence": "High",

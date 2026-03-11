@@ -44,6 +44,13 @@ static void TestOutputWriterHasHistoryCorrelation()
   assert(src.find("history_correlation") != std::string::npos);
 }
 
+static void TestActionableCandidatesDoNotUseGlobalHistoryStats()
+{
+  const auto src = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
+  assert(src.find("AddHistorySignals(r, en, &signals);") == std::string::npos &&
+         "Actionable candidate scoring must not use global history stats until bucket-scoped history support exists.");
+}
+
 static void TestRecommendationsHasTroubleshootingGuide()
 {
   const auto rec = ReadFile("dump_tool/src/EvidenceBuilderRecommendations.cpp");
@@ -62,6 +69,7 @@ int main()
   TestAnalyzerHasHistoryCorrelationField();
   TestEvidenceHasCorrelationDisplay();
   TestOutputWriterHasHistoryCorrelation();
+  TestActionableCandidatesDoNotUseGlobalHistoryStats();
   TestRecommendationsHasTroubleshootingGuide();
   return 0;
 }

@@ -239,7 +239,7 @@
                   <StackPanel Spacing="4" Padding="14">
                     <TextBlock x:Name="QuickPrimaryLabelText"
                                FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Primary suspect
+                      Actionable candidate
                     </TextBlock>
                     <TextBlock x:Name="QuickPrimaryValueText"
                                FontSize="18" FontWeight="SemiBold"
@@ -260,7 +260,7 @@
                   <StackPanel Spacing="4" Padding="14">
                     <TextBlock x:Name="QuickConfidenceLabelText"
                                FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Confidence
+                      Evidence agreement
                     </TextBlock>
                     <TextBlock x:Name="QuickConfidenceValueText"
                                FontSize="18" FontWeight="SemiBold"
@@ -342,7 +342,7 @@
                         <TextBlock x:Name="SuspectsSectionTitleText"
                                    FontSize="22" FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                          Top Cause Candidates
+                          Actionable Candidates
                         </TextBlock>
                       </StackPanel>
                       <ListView x:Name="SuspectsList" SelectionMode="None" MaxHeight="320"

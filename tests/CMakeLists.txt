@@ -160,6 +160,17 @@ set_tests_properties(skydiag_scoring_logic_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
 
+add_executable(skydiag_candidate_consensus_tests
+  candidate_consensus_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CandidateConsensus.cpp"
+)
+
+target_include_directories(skydiag_candidate_consensus_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+add_test(NAME skydiag_candidate_consensus_tests COMMAND skydiag_candidate_consensus_tests)
+
 add_executable(skydiag_stack_scan_weight_tests
   stack_scan_weight_tests.cpp
 )

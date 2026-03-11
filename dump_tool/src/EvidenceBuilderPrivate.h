@@ -90,6 +90,7 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
 bool IsActionableSuspect(const SuspectItem& s);
 
 // Split parts of BuildEvidenceAndSummaryImpl.
+void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

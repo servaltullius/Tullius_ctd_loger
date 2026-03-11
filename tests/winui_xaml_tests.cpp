@@ -91,6 +91,13 @@ int main()
   const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
   assert(vm.find("Skyrim Snapshot Report") != std::string::npos && "Snapshot community share headline missing");
   assert(vm.find("Skyrim Freeze/ILS Report") != std::string::npos && "Hang community share headline missing");
+  assert(vm.find("Cross-validated candidate") != std::string::npos && "Community share text must expose cross-validated wording");
+  assert(vm.find("Actionable candidate") != std::string::npos && "View model must expose actionable-candidate wording");
+  assert(vm.find("Conflicting candidates") != std::string::npos && "View model must expose conflicting-candidates wording");
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  assert(cs.find("Actionable candidate") != std::string::npos && "Quick primary label must use actionable-candidate wording");
+  assert(cs.find("Evidence agreement") != std::string::npos && "Quick agreement label must use evidence-agreement wording");
 
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();

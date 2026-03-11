@@ -104,6 +104,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(j, "callstack", "object", "root");
   AssertIsType(j, "symbolization", "object", "root");
   AssertIsType(j, "resources", "array", "root");
+  AssertIsType(j, "actionable_candidates", "array", "root");
   AssertIsType(j, "evidence", "array", "root");
   AssertIsType(j, "recommendations", "array", "root");
 
@@ -205,6 +206,20 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
     AssertIsType(e, "details", "string", "evidence[]");
   }
 
+  // ── actionable candidates ──
+  for (const auto& c : j["actionable_candidates"]) {
+    AssertIsType(c, "status_id", "string", "actionable_candidates[]");
+    AssertIsType(c, "confidence", "string", "actionable_candidates[]");
+    AssertIsType(c, "display_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "plugin_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "mod_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "module_filename", "string", "actionable_candidates[]");
+    AssertIsType(c, "family_count", "number", "actionable_candidates[]");
+    AssertIsType(c, "score", "number", "actionable_candidates[]");
+    AssertIsType(c, "supporting_families", "array", "actionable_candidates[]");
+    AssertIsType(c, "conflicting_families", "array", "actionable_candidates[]");
+  }
+
   // ── recommendations ──
   for (const auto& r : j["recommendations"]) {
     assert(r.is_string());
@@ -264,6 +279,7 @@ void TestOutputWriterEmitsAllFields()
     "\"callstack\"",
     "\"symbolization\"",
     "\"resources\"",
+    "\"actionable_candidates\"",
     "\"evidence\"",
     "\"recommendations\"",
   };
@@ -296,6 +312,14 @@ void TestOutputWriterEmitsAllFields()
     "\"object_refs\"",
     "\"esp_name\"",
     "\"form_id\"",
+    "\"status_id\"",
+    "\"display_name\"",
+    "\"plugin_name\"",
+    "\"mod_name\"",
+    "\"module_filename\"",
+    "\"family_count\"",
+    "\"supporting_families\"",
+    "\"conflicting_families\"",
     "\"enb_detected\"",
     "\"reshade_detected\"",
     "\"dxvk_detected\"",

@@ -33,6 +33,24 @@ struct SuspectItem
   std::wstring reason;
 };
 
+struct ActionableCandidate
+{
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
+  std::wstring confidence;
+  std::string status_id;  // cross_validated / related / reference_clue / conflicting
+  std::wstring display_name;
+  std::wstring plugin_name;
+  std::wstring mod_name;
+  std::wstring module_filename;
+  std::wstring explanation;
+  std::vector<std::string> supporting_families;
+  std::vector<std::string> conflicting_families;
+  std::uint32_t score = 0;
+  std::uint32_t family_count = 0;
+  bool cross_validated = false;
+  bool has_conflict = false;
+};
+
 struct EventRow
 {
   std::uint32_t i = 0;
@@ -139,6 +157,9 @@ struct AnalysisResult
 
   // Optional: recent resource loads (best-effort; nif/hkx/tri)
   std::vector<ResourceRow> resources;
+
+  // Cross-signal actionable candidates (best-effort; mainly for EXE/system victim-like crashes)
+  std::vector<ActionableCandidate> actionable_candidates;
 
   bool has_wct = false;
   std::string wct_json_utf8;

@@ -18,6 +18,7 @@ internal sealed class AnalysisSummary
     public required IReadOnlyList<string> CallstackFrames { get; init; }
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
+    public required IReadOnlyList<ActionableCandidateItem> ActionableCandidates { get; init; }
     public required TriageReview Triage { get; init; }
     public int HistoryCorrelationCount { get; init; }
     public string TroubleshootingTitle { get; init; } = string.Empty;
@@ -60,6 +61,21 @@ internal sealed class AnalysisSummary
             ReadString(item, "title"),
             ReadString(item, "details")));
 
+        var actionableCandidates = ParseObjectArray(root, "actionable_candidates", item => new ActionableCandidateItem(
+            ReadString(item, "status_id"),
+            ReadString(item, "confidence"),
+            ReadString(item, "display_name"),
+            ReadString(item, "plugin_name"),
+            ReadString(item, "mod_name"),
+            ReadString(item, "module_filename"),
+            ReadString(item, "explanation"),
+            ReadInt32(item, "family_count"),
+            ReadInt32(item, "score"),
+            ReadBool(item, "cross_validated"),
+            ReadBool(item, "has_conflict"),
+            ParseStringArray(item, "supporting_families"),
+            ParseStringArray(item, "conflicting_families")));
+
         var resourceItems = ParseObjectArray(root, "resources", item =>
         {
             var providers = ParseStringArray(item, "providers");
@@ -93,6 +109,7 @@ internal sealed class AnalysisSummary
             Recommendations = recommendations,
             CallstackFrames = callstackFrames,
             EvidenceItems = evidenceItems,
+            ActionableCandidates = actionableCandidates,
             CrashLoggerRefs = crashLoggerRefs,
             ResourceItems = resourceItems,
             Triage = ParseTriage(triageElement),
@@ -225,6 +242,20 @@ internal sealed class AnalysisSummary
 public sealed record SuspectItem(string Confidence, string Module, string Reason);
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
+public sealed record ActionableCandidateItem(
+    string StatusId,
+    string Confidence,
+    string DisplayName,
+    string PluginName,
+    string ModName,
+    string ModuleFilename,
+    string Explanation,
+    int FamilyCount,
+    int Score,
+    bool CrossValidated,
+    bool HasConflict,
+    IReadOnlyList<string> SupportingFamilies,
+    IReadOnlyList<string> ConflictingFamilies);
 public sealed record TriageReview
 {
     public const string UnreviewedStatus = "unreviewed";

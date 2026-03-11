@@ -86,9 +86,9 @@ public sealed partial class MainWindow : Window
 
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
-        SuspectsSectionTitleText.Text = T("Top Cause Candidates", "주요 원인 후보");
-        QuickPrimaryLabelText.Text = T("Primary suspect", "주요 원인");
-        QuickConfidenceLabelText.Text = T("Confidence", "신뢰도");
+        SuspectsSectionTitleText.Text = T("Actionable Candidates", "행동 우선 후보");
+        QuickPrimaryLabelText.Text = T("Actionable candidate", "행동 우선 후보");
+        QuickConfidenceLabelText.Text = T("Evidence agreement", "근거 합의");
         QuickActionsLabelText.Text = T("Next actions", "권장 조치");
         QuickEventsLabelText.Text = T("Blackbox events", "블랙박스 이벤트");
         QuickPrimaryValueText.Text = "-";
