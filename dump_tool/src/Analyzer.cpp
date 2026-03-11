@@ -1,6 +1,7 @@
 #include "Analyzer.h"
 #include "AddressResolver.h"
 #include "Bucket.h"
+#include "CandidateConsensus.h"
 #include "CrashHistory.h"
 #include "EvidenceBuilder.h"
 #include "GraphicsInjectionDiag.h"
@@ -36,6 +37,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <nlohmann/json.hpp>
 
@@ -668,11 +670,10 @@ static void ComputeSuspects(
   }
 }
 
-static void PersistCrashHistory(
+static std::filesystem::path ResolveCrashHistoryPath(
     const std::wstring& dumpPath,
     const std::wstring& outDir,
-    const AnalyzeOptions& opt,
-    AnalysisResult& out)
+    const AnalyzeOptions& opt)
 {
   std::filesystem::path historyDir;
   if (!opt.output_dir.empty()) {
@@ -684,10 +685,101 @@ static void PersistCrashHistory(
   }
 
   if (historyDir.empty()) {
+    return {};
+  }
+
+  return historyDir / "crash_history.json";
+}
+
+static void AppendHistoryCandidateKey(
+    std::wstring_view rawValue,
+    std::unordered_set<std::string>* seen,
+    std::vector<std::string>* outKeys)
+{
+  if (!seen || !outKeys || rawValue.empty()) {
     return;
   }
 
-  const auto historyPath = historyDir / "crash_history.json";
+  const auto canonical = WideToUtf8(CanonicalCandidateKey(rawValue));
+  if (!canonical.empty() && seen->insert(canonical).second) {
+    outKeys->push_back(canonical);
+  }
+}
+
+static std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
+{
+  std::vector<std::string> keys;
+  std::unordered_set<std::string> seen;
+
+  if (!out.actionable_candidates.empty()) {
+    const auto limit = std::min<std::size_t>(out.actionable_candidates.size(), 5u);
+    for (std::size_t i = 0; i < limit; ++i) {
+      const auto& candidate = out.actionable_candidates[i];
+      AppendHistoryCandidateKey(candidate.plugin_name, &seen, &keys);
+      AppendHistoryCandidateKey(candidate.mod_name, &seen, &keys);
+      AppendHistoryCandidateKey(candidate.module_filename, &seen, &keys);
+      AppendHistoryCandidateKey(candidate.display_name, &seen, &keys);
+    }
+  }
+
+  if (keys.empty()) {
+    for (const auto& ref : out.crash_logger_object_refs) {
+      AppendHistoryCandidateKey(ref.esp_name, &seen, &keys);
+    }
+    for (const auto& suspect : out.suspects) {
+      AppendHistoryCandidateKey(!suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename, &seen, &keys);
+    }
+  }
+
+  return keys;
+}
+
+static void LoadCrashHistoryContext(
+    const std::filesystem::path& historyPath,
+    const std::string& analysisTimestamp,
+    AnalysisResult& out)
+{
+  if (historyPath.empty()) {
+    return;
+  }
+
+  ScopedHistoryFileLock historyLock(historyPath);
+  if (!historyLock.Acquire(/*timeoutMs=*/2000)) {
+    out.diagnostics.push_back(L"[History] failed to acquire lock for crash_history.json");
+    return;
+  }
+
+  CrashHistory history;
+  history.LoadFromFile(historyPath);
+
+  out.history_stats = history.GetModuleStats(20);
+
+  const auto bucketKey = WideToUtf8(out.crash_bucket_key);
+  for (const auto& stats : history.GetBucketCandidateStats(bucketKey)) {
+    if (stats.count == 0 || stats.candidate_key.empty()) {
+      continue;
+    }
+    out.bucket_candidate_repeats.push_back({ stats.candidate_key, stats.count });
+  }
+
+  const auto bucketStats = history.GetBucketStats(bucketKey);
+  if (bucketStats.count > 0) {
+    out.history_correlation.count = bucketStats.count + 1;
+    out.history_correlation.first_seen = bucketStats.first_seen.empty() ? analysisTimestamp : bucketStats.first_seen;
+    out.history_correlation.last_seen = analysisTimestamp;
+  }
+}
+
+static void AppendCrashHistoryEntry(
+    const std::filesystem::path& historyPath,
+    const std::wstring& dumpPath,
+    const std::string& analysisTimestamp,
+    AnalysisResult& out)
+{
+  if (historyPath.empty()) {
+    return;
+  }
+
   ScopedHistoryFileLock historyLock(historyPath);
   if (!historyLock.Acquire(/*timeoutMs=*/2000)) {
     out.diagnostics.push_back(L"[History] failed to acquire lock for crash_history.json");
@@ -698,7 +790,7 @@ static void PersistCrashHistory(
   history.LoadFromFile(historyPath);
 
   CrashHistoryEntry entry{};
-  entry.timestamp_utc = NowIso8601Utc();
+  entry.timestamp_utc = analysisTimestamp;
   entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
   entry.bucket_key = WideToUtf8(out.crash_bucket_key);
   if (!out.suspects.empty()) {
@@ -713,18 +805,11 @@ static void PersistCrashHistory(
   if (out.signature_match) {
     entry.signature_id = out.signature_match->id;
   }
+  entry.candidate_keys = CollectHistoryCandidateKeys(out);
 
   history.AddEntry(std::move(entry));
   if (!history.SaveToFile(historyPath)) {
     out.diagnostics.push_back(L"[History] failed to save crash_history.json");
-  }
-  out.history_stats = history.GetModuleStats(20);
-
-  const auto bucketStats = history.GetBucketStats(WideToUtf8(out.crash_bucket_key));
-  if (bucketStats.count > 1) {
-    out.history_correlation.count = bucketStats.count;
-    out.history_correlation.first_seen = bucketStats.first_seen;
-    out.history_correlation.last_seen = bucketStats.last_seen;
   }
 }
 
@@ -887,8 +972,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
-  // Persist crash history and compute repeated-suspect stats.
-  PersistCrashHistory(dumpPath, outDir, opt, out);
+  const auto analysisTimestamp = NowIso8601Utc();
+  const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
+  LoadCrashHistoryContext(historyPath, analysisTimestamp, out);
 
   // Best-effort troubleshooting guide matching.
   if (!opt.data_dir.empty()) {
@@ -911,6 +997,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
 
   BuildEvidenceAndSummary(out, opt.language);
+  AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out);
   if (err) err->clear();
   return true;
 }

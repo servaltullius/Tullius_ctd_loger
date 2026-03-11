@@ -89,7 +89,7 @@ public sealed partial class MainWindow : Window
         SuspectsSectionTitleText.Text = T("Actionable Candidates", "행동 우선 후보");
         QuickPrimaryLabelText.Text = T("Actionable candidate", "행동 우선 후보");
         QuickConfidenceLabelText.Text = T("Evidence agreement", "근거 합의");
-        QuickActionsLabelText.Text = T("Next actions", "권장 조치");
+        QuickActionsLabelText.Text = T("Next action", "다음 조치");
         QuickEventsLabelText.Text = T("Blackbox events", "블랙박스 이벤트");
         QuickPrimaryValueText.Text = "-";
         QuickConfidenceValueText.Text = "-";

@@ -1,6 +1,8 @@
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -15,7 +17,10 @@ static std::string ReadAllText(const std::filesystem::path& path)
 
 static void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
-  assert(haystack.find(needle) != std::string::npos && message);
+  if (haystack.find(needle) == std::string::npos) {
+    std::cerr << message << '\n';
+    std::exit(1);
+  }
 }
 
 int main()
@@ -141,6 +146,18 @@ int main()
     rec,
     "allowTopSuspectActionRecommendations",
     "Top-suspect action recommendations must be gated off for snapshot-like incidents.");
+  AssertContains(
+    rec,
+    "status_id == \"cross_validated\"",
+    "Recommendations must branch on cross-validated actionable candidates.");
+  AssertContains(
+    rec,
+    "status_id == \"conflicting\"",
+    "Recommendations must branch on conflicting actionable candidates.");
+  AssertContains(
+    rec,
+    "DumpMode=2",
+    "Conflict or weak-candidate recommendations must guide users toward a richer recapture when agreement is insufficient.");
   AssertContains(
     rec,
     "!isCrashLike &&",

@@ -16,6 +16,7 @@ struct CrashHistoryEntry
   std::string confidence;
   std::string signature_id;
   std::vector<std::string> all_suspects;
+  std::vector<std::string> candidate_keys;
 };
 
 struct ModuleStats
@@ -33,6 +34,12 @@ struct BucketStats
   std::string last_seen;
 };
 
+struct BucketCandidateStats
+{
+  std::string candidate_key;
+  std::size_t count = 0;
+};
+
 class CrashHistory
 {
 public:
@@ -44,6 +51,7 @@ public:
   void AddEntry(CrashHistoryEntry entry);
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
   BucketStats GetBucketStats(const std::string& bucketKey) const;
+  std::vector<BucketCandidateStats> GetBucketCandidateStats(const std::string& bucketKey) const;
 
   std::size_t Size() const { return m_entries.size(); }
 

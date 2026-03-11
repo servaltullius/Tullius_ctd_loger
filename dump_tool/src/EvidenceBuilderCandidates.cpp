@@ -10,6 +10,7 @@ namespace {
 
 constexpr std::size_t kMaxObjectRefs = 3;
 constexpr std::size_t kMaxActionableStackSignals = 3;
+constexpr std::size_t kMaxHistorySignals = 5;
 
 std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& ref)
 {
@@ -23,6 +24,17 @@ std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& r
     return 4u;
   }
   return 3u;
+}
+
+std::uint32_t HistoryWeight(std::size_t priorCount)
+{
+  if (priorCount >= 3u) {
+    return 3u;
+  }
+  if (priorCount >= 1u) {
+    return 2u;
+  }
+  return 0u;
 }
 
 void AddCrashLoggerSignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
@@ -155,6 +167,36 @@ void AddResourceSignals(const AnalysisResult& r, bool en, std::vector<CandidateS
   }
 }
 
+void AddHistorySignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  if (!out) {
+    return;
+  }
+
+  std::size_t added = 0;
+  for (const auto& repeat : r.bucket_candidate_repeats) {
+    if (added >= kMaxHistorySignals) {
+      break;
+    }
+
+    const auto weight = HistoryWeight(repeat.prior_count);
+    if (weight == 0u || repeat.candidate_key.empty()) {
+      continue;
+    }
+
+    CandidateSignal signal{};
+    signal.family_id = "history_repeat";
+    signal.candidate_key = ToWideAscii(repeat.candidate_key);
+    signal.display_name = ToWideAscii(repeat.candidate_key);
+    signal.detail = en
+      ? (L"Repeated in the same crash bucket (" + std::to_wstring(repeat.prior_count + 1u) + L" incidents total)")
+      : (L"같은 크래시 버킷에서 반복됨 (" + std::to_wstring(repeat.prior_count + 1u) + L"건)");
+    signal.weight = weight;
+    out->push_back(std::move(signal));
+    ++added;
+  }
+}
+
 }  // namespace
 
 void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -171,8 +213,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   AddCrashLoggerSignals(r, en, &signals);
   AddStackSignals(r, en, &signals);
   AddResourceSignals(r, en, &signals);
-  // History currently stores cross-incident module frequencies, not bucket-scoped candidate agreement.
-  // Keep it out of actionable-candidate scoring until bucket-specific support is available.
+  AddHistorySignals(r, en, &signals);
 
   r.actionable_candidates = BuildCandidateConsensus(signals, lang);
 }

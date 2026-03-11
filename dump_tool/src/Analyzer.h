@@ -82,6 +82,12 @@ struct BucketCorrelation
   std::string last_seen;
 };
 
+struct BucketCandidateRepeat
+{
+  std::string candidate_key;
+  std::size_t prior_count = 0;
+};
+
 struct AnalysisResult
 {
   i18n::Language language = i18n::DefaultLanguage();
@@ -132,6 +138,7 @@ struct AnalysisResult
   std::unordered_map<std::uint64_t, std::string> resolved_functions;
   std::vector<ModuleStats> history_stats;
   BucketCorrelation history_correlation;
+  std::vector<BucketCandidateRepeat> bucket_candidate_repeats;
   GraphicsEnvironment graphics_env;
   std::optional<GraphicsDiagResult> graphics_diag;
   bool has_plugin_scan = false;

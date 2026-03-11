@@ -170,10 +170,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
       const auto firstName = DescribeCandidate(*topCandidate);
       const auto secondName = DescribeCandidate(*secondCandidate);
+      const auto firstFamilies = JoinCandidateFamilies(*topCandidate, en);
+      const auto secondFamilies = JoinCandidateFamilies(*secondCandidate, en);
       summary = en
-        ? (L"Crash is reported in the game executable. Signals disagree between " + firstName + L" and " + secondName +
+        ? (L"Crash is reported in the game executable. Signals disagree between " + firstName + L" (" + firstFamilies + L") and " + secondName +
+            L" (" + secondFamilies + L")" +
             L", so treat them as conflicting candidates rather than a single root cause. (Confidence: " + topCandidateConf + L")")
-        : (L"크래시 위치가 게임 본체(EXE)이며, " + firstName + L" 과(와) " + secondName +
+        : (L"크래시 위치가 게임 본체(EXE)이며, " + firstName + L" (" + firstFamilies + L") 과(와) " + secondName +
+            L" (" + secondFamilies + L")" +
             L" 사이에 강한 신호 충돌이 있습니다. 단일 원인으로 확정하지 말고 복수 후보로 보세요. (신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "cross_validated") {
       const auto candidateName = DescribeCandidate(*topCandidate);

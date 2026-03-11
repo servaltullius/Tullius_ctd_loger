@@ -280,10 +280,10 @@
                   <StackPanel Spacing="4" Padding="14">
                     <TextBlock x:Name="QuickActionsLabelText"
                                FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Next actions
+                      Next action
                     </TextBlock>
                     <TextBlock x:Name="QuickActionsValueText"
-                               FontSize="18" FontWeight="SemiBold"
+                               FontSize="18" FontWeight="SemiBold" TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
                       -
                     </TextBlock>

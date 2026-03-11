@@ -6,6 +6,100 @@
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
+namespace {
+
+std::wstring DescribeCandidate(const ActionableCandidate& candidate)
+{
+  if (!candidate.display_name.empty()) {
+    return candidate.display_name;
+  }
+  if (!candidate.plugin_name.empty()) {
+    return candidate.plugin_name;
+  }
+  if (!candidate.mod_name.empty()) {
+    return candidate.mod_name;
+  }
+  return candidate.module_filename;
+}
+
+std::wstring DescribeFamily(std::string_view familyId, bool en)
+{
+  if (familyId == "crash_logger_object_ref") {
+    return en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조";
+  }
+  if (familyId == "actionable_stack") {
+    return en ? L"actionable stack" : L"실행 가능한 스택";
+  }
+  if (familyId == "resource_provider") {
+    return en ? L"near resource provider" : L"인접 리소스 provider";
+  }
+  if (familyId == "history_repeat") {
+    return en ? L"history repeat" : L"버킷 반복";
+  }
+  return en ? L"other signal" : L"기타 신호";
+}
+
+std::wstring JoinFamilies(const ActionableCandidate& candidate, bool en)
+{
+  std::vector<std::wstring> labels;
+  labels.reserve(candidate.supporting_families.size());
+  for (const auto& family : candidate.supporting_families) {
+    labels.push_back(DescribeFamily(family, en));
+  }
+  return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
+void AddActionableCandidateRecommendations(
+    AnalysisResult& r,
+    bool en,
+    const ActionableCandidate* topCandidate,
+    const ActionableCandidate* secondCandidate)
+{
+  if (!topCandidate) {
+    return;
+  }
+
+  const auto candidateName = DescribeCandidate(*topCandidate);
+  if (topCandidate->status_id == "cross_validated") {
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] Cross-validated signals point to " + candidateName +
+          L". Update/reinstall or isolate it before broader DLL triage.")
+      : (L"[행동 우선 후보] 교차검증 신호가 " + candidateName +
+          L" 쪽으로 모입니다. 광범위한 DLL 점검 전에 이 후보를 먼저 업데이트/격리하세요."));
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] If the crash repeats, disable " + candidateName +
+          L" (or the providing mod/DLL) and retest.")
+      : (L"[행동 우선 후보] 동일 문제가 반복되면 " + candidateName +
+          L" 또는 해당 모드/DLL을 비활성화하고 다시 테스트하세요."));
+  } else if (topCandidate->status_id == "related") {
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
+          L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+      : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
+          L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."));
+  } else if (topCandidate->status_id == "reference_clue") {
+    r.recommendations.push_back(en
+      ? (L"[Object ref] The game was processing " + candidateName +
+          L" at crash time, but no second independent signal agrees yet. Treat it as a clue first.")
+      : (L"[오브젝트 참조] 사고 당시 게임이 " + candidateName +
+          L" 을(를) 처리 중이었지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요."));
+    r.recommendations.push_back(en
+      ? L"[Object ref] If the clue stays isolated, capture another incident or recapture with DumpMode=2 for more evidence."
+      : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나 DumpMode=2로 재수집하세요.");
+  } else if (topCandidate->status_id == "conflicting" && secondCandidate) {
+    const auto secondName = DescribeCandidate(*secondCandidate);
+    r.recommendations.push_back(en
+      ? (L"[Conflict] Signals split between " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L") and " +
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L"). Disable/update one side at a time and retest.")
+      : (L"[충돌] 신호가 " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L")와 " +
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. 한쪽씩 순서대로 업데이트/비활성화하며 재현을 확인하세요."));
+    r.recommendations.push_back(en
+      ? L"[Conflict] If the split persists, capture another dump with DumpMode=2 (FullMemory) to break the tie."
+      : L"[충돌] 이 분리가 계속되면 DumpMode=2(FullMemory)로 다시 캡처해 근거를 더 모으세요.");
+  }
+}
+
+}  // namespace
 
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
@@ -46,6 +140,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     hasNonHookStackCandidate;
   const bool allowFaultModuleTopSuspectRecommendations =
     !ctx.isHookFramework || hasNonHookStackCandidate;
+  const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
+  const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
+  const bool hasActionableCandidates = (topCandidate != nullptr);
 
   if (r.signature_match.has_value()) {
     for (const auto& rec : r.signature_match->recommendations) {
@@ -131,8 +228,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
+  AddActionableCandidateRecommendations(r, en, topCandidate, secondCandidate);
+
   const bool allowTopSuspectActionRecommendations = !isSnapshotLike;
-  if (allowTopSuspectActionRecommendations && !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
+  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? (L"[Top suspect] Reproduce after updating/reinstalling '" + r.inferred_mod_name + L"'.")
       : (L"[유력 후보] '" + r.inferred_mod_name + L"' 모드를 업데이트/재설치 후 재현 여부 확인"));
@@ -141,7 +240,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : (L"[유력 후보] 동일 크래시가 반복되면 '" + r.inferred_mod_name + L"' 모드(또는 해당 모드의 SKSE 플러그인 DLL)를 비활성화 후 재현 여부 확인"));
   }
 
-  if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
+  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
     const auto& s0 = *firstNonHookStackCandidate;
     if (!s0.inferred_mod_name.empty()) {
       r.recommendations.push_back(en
@@ -155,17 +254,17 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? (L"[Top suspect] actionable " + suspectBasis + L" candidate DLL: " + s0.module_filename + L" — check the providing mod first.")
         : (L"[유력 후보] 실행 우선 " + suspectBasis + L" 기반 후보 DLL: " + s0.module_filename + L" — 포함된 모드를 우선 점검"));
     }
-  } else if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
+  } else if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a known hook framework DLL. Treat it as a victim location first and prioritize non-hook candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 알려진 훅 프레임워크 DLL입니다. 우선은 피해 위치로 보고, 비-훅 후보/리소스/충돌 단서를 먼저 점검하세요.");
-  } else if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
+  } else if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a Windows system DLL. For hang captures this is often a waiting/victim location, so prioritize non-system candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 Windows 시스템 DLL입니다. 행 캡처에서는 대기/피해 위치인 경우가 많으므로 비-시스템 후보/리소스/충돌 단서를 우선 점검하세요.");
   }
 
-  if (!r.crash_logger_object_refs.empty()) {
+  if (!hasActionableCandidates && !r.crash_logger_object_refs.empty()) {
     const auto& topRef = r.crash_logger_object_refs[0];
     std::wstring espDesc = topRef.esp_name;
     if (!topRef.form_id.empty()) {

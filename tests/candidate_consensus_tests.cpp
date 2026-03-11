@@ -117,6 +117,19 @@ void TestHistoryOnlyDoesNotCreateStandaloneCandidate()
   assert(candidates.empty());
 }
 
+void TestObjectRefAndHistoryRepeatBecomeRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"repeatmod", L"RepeatMod.esp", 6, L"RepeatMod.esp"),
+    MakeSignal("history_repeat", L"repeatmod", L"RepeatMod.esp", 2, L"RepeatMod.esp"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(candidates[0].family_count == 2);
+}
+
 }  // namespace
 
 int main()
@@ -127,5 +140,6 @@ int main()
   TestSecondaryObjectRefCanStillCrossValidate();
   TestObjectRefAndResourceNeedMediumOnly();
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
+  TestObjectRefAndHistoryRepeatBecomeRelated();
   return 0;
 }

@@ -144,7 +144,7 @@ internal sealed class MainWindowViewModel
         {
             var primaryCandidate = summary.ActionableCandidates[0];
             QuickPrimaryValue = BuildPrimaryCandidateValue(summary);
-            QuickConfidenceValue = DescribeEvidenceAgreement(primaryCandidate);
+            QuickConfidenceValue = BuildAgreementSummary(summary);
             QuickPrimaryLabel = DescribeActionableCandidateLabel(primaryCandidate);
         }
         else
@@ -170,14 +170,11 @@ internal sealed class MainWindowViewModel
         {
             Recommendations.Add(recommendation);
         }
-        var recommendationCount = Recommendations.Count;
         if (Recommendations.Count == 0)
         {
             Recommendations.Add(T("No recommendation text was generated.", "권장 조치 문구가 생성되지 않았습니다."));
         }
-        QuickActionsValue = recommendationCount == 0
-            ? T("None", "없음")
-            : $"{recommendationCount} {T("items", "개 항목")}";
+        QuickActionsValue = BuildNextActionSummary(summary);
     }
 
     private void PopulateTroubleshooting(AnalysisSummary summary)
@@ -304,7 +301,13 @@ internal sealed class MainWindowViewModel
         {
             var primaryCandidate = summary.ActionableCandidates[0];
             lines.Add((_isKorean ? "행동 우선 후보: " : "Actionable candidate: ") + BuildPrimaryCandidateValue(summary));
-            lines.Add((_isKorean ? "근거 합의: " : "Evidence agreement: ") + DescribeEvidenceAgreement(primaryCandidate));
+            lines.Add((_isKorean ? "근거 합의: " : "Evidence agreement: ") + BuildAgreementSummary(summary));
+            if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
+                summary.ActionableCandidates.Count > 1)
+            {
+                lines.Add((_isKorean ? "충돌 세부: " : "Conflict detail: ") + BuildConflictCandidateLine(primaryCandidate));
+                lines.Add((_isKorean ? "충돌 세부: " : "Conflict detail: ") + BuildConflictCandidateLine(summary.ActionableCandidates[1]));
+            }
         }
 
         if (summary.CrashLoggerRefs.Count > 0)
@@ -370,7 +373,13 @@ internal sealed class MainWindowViewModel
         {
             var primaryCandidate = summary.ActionableCandidates[0];
             lines.Add($"📌 {DescribeActionableCandidateLabel(primaryCandidate)}: {BuildPrimaryCandidateValue(summary)}");
-            lines.Add($"🧭 {(_isKorean ? "근거 합의" : "Evidence agreement")}: {DescribeEvidenceAgreement(primaryCandidate)}");
+            lines.Add($"🧭 {(_isKorean ? "근거 합의" : "Evidence agreement")}: {BuildAgreementSummary(summary)}");
+            if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
+                summary.ActionableCandidates.Count > 1)
+            {
+                lines.Add($"⚖️ {BuildConflictCandidateLine(primaryCandidate)}");
+                lines.Add($"⚖️ {BuildConflictCandidateLine(summary.ActionableCandidates[1])}");
+            }
         }
         else if (summary.CrashLoggerRefs.Count > 0)
         {
@@ -437,7 +446,7 @@ internal sealed class MainWindowViewModel
             {
                 firstAction = summary.Recommendations[0];
             }
-            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {firstAction}");
+            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {StripRecommendationTag(firstAction)}");
         }
 
         lines.Add("— Tullius CTD Logger");
@@ -475,6 +484,101 @@ internal sealed class MainWindowViewModel
         return string.IsNullOrWhiteSpace(candidate.Confidence)
             ? T("Limited evidence", "제한된 근거")
             : candidate.Confidence;
+    }
+
+    private string BuildAgreementSummary(AnalysisSummary summary)
+    {
+        var primaryCandidate = summary.ActionableCandidates[0];
+        if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
+            summary.ActionableCandidates.Count > 1)
+        {
+            return BuildConflictAgreementSummary(summary.ActionableCandidates[0], summary.ActionableCandidates[1]);
+        }
+
+        return DescribeEvidenceAgreement(primaryCandidate);
+    }
+
+    private string BuildConflictAgreementSummary(ActionableCandidateItem first, ActionableCandidateItem second)
+    {
+        return _isKorean
+            ? $"{BuildFamilySummary(first)} vs {BuildFamilySummary(second)}"
+            : $"{BuildFamilySummary(first)} vs {BuildFamilySummary(second)}";
+    }
+
+    private string BuildNextActionSummary(AnalysisSummary summary)
+    {
+        var taggedAction = summary.Recommendations.FirstOrDefault(IsPriorityActionRecommendation);
+        if (!string.IsNullOrWhiteSpace(taggedAction))
+        {
+            return StripRecommendationTag(taggedAction);
+        }
+
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            var primaryCandidate = summary.ActionableCandidates[0];
+            var candidateName = BuildPrimaryCandidateValue(summary);
+            return primaryCandidate.StatusId switch
+            {
+                "cross_validated" => T($"Update or isolate {candidateName} first", $"{candidateName} 업데이트/격리부터 확인"),
+                "related" => T($"Check {candidateName} before generic DLL triage", $"{candidateName} 쪽을 일반 DLL 점검보다 먼저 확인"),
+                "reference_clue" => T("Capture another dump or compare a second signal", "다른 덤프를 한 번 더 모으거나 두 번째 신호를 비교"),
+                "conflicting" => T($"Compare {candidateName} one side at a time", $"{candidateName} 후보를 한쪽씩 나눠 비교"),
+                _ => T("Review the first recommendation", "첫 번째 권장 조치를 확인"),
+            };
+        }
+
+        var firstRecommendation = summary.Recommendations.FirstOrDefault();
+        return string.IsNullOrWhiteSpace(firstRecommendation)
+            ? T("None", "없음")
+            : StripRecommendationTag(firstRecommendation);
+    }
+
+    private static bool IsPriorityActionRecommendation(string recommendation)
+    {
+        return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Object ref]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[오브젝트 참조]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Conflict]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[충돌]", StringComparison.Ordinal);
+    }
+
+    private string BuildConflictCandidateLine(ActionableCandidateItem candidate)
+    {
+        return $"{BuildCandidateDisplayName(candidate)} <- {BuildFamilySummary(candidate)}";
+    }
+
+    private string BuildFamilySummary(ActionableCandidateItem candidate)
+    {
+        var families = candidate.SupportingFamilies
+            .Select(DescribeFamily)
+            .Where(family => !string.IsNullOrWhiteSpace(family))
+            .Take(2)
+            .ToList();
+        if (families.Count == 0)
+        {
+            return T("limited evidence", "제한된 근거");
+        }
+        return string.Join(" + ", families);
+    }
+
+    private static string StripRecommendationTag(string recommendation)
+    {
+        if (string.IsNullOrWhiteSpace(recommendation))
+        {
+            return string.Empty;
+        }
+
+        if (recommendation.StartsWith("[", StringComparison.Ordinal))
+        {
+            var end = recommendation.IndexOf(']');
+            if (end >= 0 && end + 1 < recommendation.Length)
+            {
+                return recommendation[(end + 1)..].TrimStart();
+            }
+        }
+
+        return recommendation.Trim();
     }
 
     private string BuildPrimaryCandidateValue(AnalysisSummary summary)

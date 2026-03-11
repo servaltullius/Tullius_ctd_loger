@@ -1,6 +1,8 @@
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 
@@ -11,6 +13,14 @@ static std::string ReadAllText(const std::filesystem::path& path)
   std::ostringstream ss;
   ss << in.rdbuf();
   return ss.str();
+}
+
+static void RequireContains(const std::string& haystack, const char* needle, const char* message)
+{
+  if (haystack.find(needle) == std::string::npos) {
+    std::cerr << message << '\n';
+    std::exit(1);
+  }
 }
 
 static void TestMainWindowHasCorrelationBadge()
@@ -94,10 +104,13 @@ int main()
   assert(vm.find("Cross-validated candidate") != std::string::npos && "Community share text must expose cross-validated wording");
   assert(vm.find("Actionable candidate") != std::string::npos && "View model must expose actionable-candidate wording");
   assert(vm.find("Conflicting candidates") != std::string::npos && "View model must expose conflicting-candidates wording");
+  RequireContains(vm, "BuildNextActionSummary", "Quick actions card must summarize the next candidate-specific action.");
+  RequireContains(vm, "BuildConflictCandidateLine", "Conflict UX must explain each conflicting candidate separately in share/clipboard text.");
 
   const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
   assert(cs.find("Actionable candidate") != std::string::npos && "Quick primary label must use actionable-candidate wording");
   assert(cs.find("Evidence agreement") != std::string::npos && "Quick agreement label must use evidence-agreement wording");
+  RequireContains(cs, "Next action", "Quick actions label must focus on the next action, not only a count.");
 
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();

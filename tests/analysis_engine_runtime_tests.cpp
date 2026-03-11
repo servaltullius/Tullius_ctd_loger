@@ -297,6 +297,49 @@ void TestCrashHistoryBucketCorrelation()
   assert(corrEmpty.count == 0);
 }
 
+void TestCrashHistoryBucketCandidateStats()
+{
+  CrashHistory history;
+
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T00:00:00Z";
+    e.dump_file = "dump_0.dmp";
+    e.bucket_key = "bucket-a";
+    e.top_suspect = "modA.dll";
+    e.candidate_keys = { "repeatmod", "sharedcandidate" };
+    history.AddEntry(std::move(e));
+  }
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T01:00:00Z";
+    e.dump_file = "dump_1.dmp";
+    e.bucket_key = "bucket-a";
+    e.top_suspect = "modB.dll";
+    e.candidate_keys = { "repeatmod", "sharedcandidate", "repeatmod" };
+    history.AddEntry(std::move(e));
+  }
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T02:00:00Z";
+    e.dump_file = "dump_2.dmp";
+    e.bucket_key = "bucket-b";
+    e.top_suspect = "modC.dll";
+    e.candidate_keys = { "othercandidate" };
+    history.AddEntry(std::move(e));
+  }
+
+  const auto stats = history.GetBucketCandidateStats("bucket-a");
+  assert(!stats.empty());
+  assert(stats[0].candidate_key == "repeatmod");
+  assert(stats[0].count == 2u);
+  assert(stats[1].candidate_key == "sharedcandidate");
+  assert(stats[1].count == 2u);
+
+  const auto noStats = history.GetBucketCandidateStats("bucket-c");
+  assert(noStats.empty());
+}
+
 }  // namespace
 
 int main()
@@ -308,5 +351,6 @@ int main()
   TestAddressResolverToleratesMalformedEntries();
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();
+  TestCrashHistoryBucketCandidateStats();
   return 0;
 }

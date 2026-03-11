@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <string>
 
@@ -13,6 +14,14 @@ static std::string ReadFile(const char* relPath)
   std::ifstream in(p, std::ios::in | std::ios::binary);
   assert(in && "Failed to open file");
   return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+static void RequireContains(const std::string& haystack, const char* needle, const char* message)
+{
+  if (haystack.find(needle) == std::string::npos) {
+    std::cerr << message << '\n';
+    std::exit(1);
+  }
 }
 
 static void TestCrashHistoryApiExists()
@@ -47,8 +56,21 @@ static void TestOutputWriterHasHistoryCorrelation()
 static void TestActionableCandidatesDoNotUseGlobalHistoryStats()
 {
   const auto src = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
-  assert(src.find("AddHistorySignals(r, en, &signals);") == std::string::npos &&
-         "Actionable candidate scoring must not use global history stats until bucket-scoped history support exists.");
+  assert(src.find("history_stats") == std::string::npos &&
+         "Actionable candidate scoring must not read global history_stats; use bucket-scoped repeats instead.");
+}
+
+static void TestActionableCandidatesUseBucketScopedHistoryRepeats()
+{
+  const auto header = ReadFile("dump_tool/src/CrashHistory.h");
+  RequireContains(header, "GetBucketCandidateStats",
+                  "CrashHistory must expose bucket-scoped candidate repeat stats.");
+
+  const auto src = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
+  RequireContains(src, "bucket_candidate_repeats",
+                  "Actionable candidate scoring must consume bucket-scoped candidate repeat signals.");
+  RequireContains(src, "\"history_repeat\"",
+                  "Actionable candidate scoring must emit history_repeat family when bucket repeats support a candidate.");
 }
 
 static void TestRecommendationsHasTroubleshootingGuide()
@@ -70,6 +92,7 @@ int main()
   TestEvidenceHasCorrelationDisplay();
   TestOutputWriterHasHistoryCorrelation();
   TestActionableCandidatesDoNotUseGlobalHistoryStats();
+  TestActionableCandidatesUseBucketScopedHistoryRepeats();
   TestRecommendationsHasTroubleshootingGuide();
   return 0;
 }
