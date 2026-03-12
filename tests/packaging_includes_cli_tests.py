@@ -36,6 +36,7 @@ def _touch(path: Path) -> None:
 def main() -> int:
     package_py = REPO_ROOT / "scripts" / "package.py"
     gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
+    build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
 
     assert "scripts/release_contract.py" in gate_script, (
@@ -46,6 +47,18 @@ def main() -> int:
     )
     assert "scripts/build-win.cmd" in gate_script, (
         "release gate must sync build-win.cmd alongside packaging scripts"
+    )
+    assert 'pushd "%~dp0.."' in build_win_script, (
+        "build-win.cmd must self-map the repo root so WSL/UNC launches do not break cmd/lib.exe"
+    )
+    assert "popd" in build_win_script, (
+        "build-win.cmd must restore the working directory after UNC-safe pushd handling"
+    )
+    assert 'pushd "%~dp0.."' in build_winui_script, (
+        "build-winui.cmd must self-map the repo root so WSL/UNC launches stay on a drive path"
+    )
+    assert "popd" in build_winui_script, (
+        "build-winui.cmd must restore the working directory after UNC-safe pushd handling"
     )
     assert "SkyrimDiagDumpToolWinUI.runtimeconfig.json" in build_winui_script, (
         "build-winui.cmd must require WinUI runtimeconfig sidecar when selecting output"

@@ -1,5 +1,14 @@
 @echo off
 setlocal
+set "EXITCODE=0"
+
+pushd "%~dp0.." >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: failed to enter repo root from "%~dp0.."
+  exit /b 4
+)
+
+set "SRC=%CD%"
 
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VSROOT="
@@ -12,19 +21,23 @@ if exist "%VSWHERE%" (
 if not defined VSROOT set "VSROOT=C:\Program Files\Microsoft Visual Studio\2022\Community"
 if not exist "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat" (
   echo ERROR: vcvars64.bat not found under "%VSROOT%"
-  exit /b 2
+  set "EXITCODE=2"
+  goto :cleanup
 )
 
 call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
 
 if not defined VCPKG_ROOT set "VCPKG_ROOT=%VSROOT%\VC\vcpkg"
 if not exist "%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" (
   echo ERROR: vcpkg toolchain not found: "%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake"
-  exit /b 3
+  set "EXITCODE=3"
+  goto :cleanup
 )
 
-set "SRC=%~dp0.."
 set "BUILD=%SRC%\build-win"
 set "CMAKE=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"
 set "NINJA=%VSROOT%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja\ninja.exe"
@@ -35,9 +48,20 @@ if not exist "%NINJA%" set "NINJA=ninja"
   -DCMAKE_MAKE_PROGRAM="%NINJA%" ^
   -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
 
 "%CMAKE%" --build "%BUILD%"
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
 
 echo Built successfully: %BUILD%
+goto :cleanup
+
+:cleanup
+popd >nul
+exit /b %EXITCODE%

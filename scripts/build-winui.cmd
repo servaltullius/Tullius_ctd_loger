@@ -1,8 +1,14 @@
 @echo off
 setlocal
+set "EXITCODE=0"
 
-rem Resolve SRC to an absolute path (handles UNC paths and trailing ..)
-for %%I in ("%~dp0..") do set "SRC=%%~fI"
+pushd "%~dp0.." >nul 2>&1
+if errorlevel 1 (
+  echo ERROR: failed to enter repo root from "%~dp0.."
+  exit /b 4
+)
+
+set "SRC=%CD%"
 set "PROJECT=%SRC%\dump_tool_winui\SkyrimDiagDumpToolWinUI.csproj"
 set "OUT=%SRC%\build-winui"
 set "RID=win-x64"
@@ -13,14 +19,18 @@ set "BUILD_OUT_BASE=%SRC%\dump_tool_winui\bin\Release\%TFM%"
 
 if not exist "%PROJECT%" (
   echo ERROR: WinUI project not found: %PROJECT%
-  exit /b 2
+  set "EXITCODE=2"
+  goto :cleanup
 )
 
 rem Framework-dependent build (unpackaged WinUI):
 rem - User must install .NET 8 Desktop Runtime + Windows App Runtime
 rem - Much smaller output (~29 MB zipped vs ~57 MB self-contained)
 dotnet build "%PROJECT%" -c Release -r %RID%
-if errorlevel 1 exit /b 1
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
 
 set "FINAL_OUT="
 
@@ -39,7 +49,8 @@ echo Tried:
 echo   %BUILD_OUT%
 echo   %BUILD_OUT_BASE%
 echo   %BUILD_OUT_X64%
-exit /b 3
+set "EXITCODE=3"
+goto :cleanup
 
 :set_candidate
 set "CAND=%~1"
@@ -57,7 +68,14 @@ if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%"
 
 robocopy "%FINAL_OUT%" "%OUT%" /E /NFL /NDL /NJH /NJS /NP >nul
-if errorlevel 8 exit /b 1
+if errorlevel 8 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
 
 echo WinUI build output: %OUT%
-exit /b 0
+goto :cleanup
+
+:cleanup
+popd >nul
+exit /b %EXITCODE%
