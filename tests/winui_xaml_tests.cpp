@@ -103,6 +103,37 @@ static void TestMainWindowHasCrashLoggerFirstReadingPath()
   RequireContains(vm, "BuildConflictComparisonRows", "View model must build conflict comparison rows.");
 }
 
+static void TestAnalyzePanelHasDumpDiscoveryFlow()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  RequireContains(xaml, "RecentDumpsCard", "Analyze/start screen must expose a recent-dumps discovery card.");
+  RequireContains(xaml, "RecentDumpList", "Analyze/start screen must render discovered dumps in a list.");
+  RequireContains(xaml, "ManageDumpFoldersButton", "Analyze/start screen must expose a folder-management entry point.");
+  RequireContains(xaml, "RescanDumpsButton", "Analyze/start screen must expose a rescan action.");
+  RequireContains(xaml, "DirectSelectDumpButton", "Analyze/start screen must keep a direct dump-selection action.");
+  RequireContains(xaml, "MO2 overwrite", "Empty state guidance must directly mention MO2 overwrite.");
+  RequireContains(xaml, "덤프 검색 위치", "Folder-management UX must use dump-search-location wording.");
+
+  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  RequireContains(vm, "RecentDumps", "View model must expose recent dump items.");
+  RequireContains(vm, "DumpSearchLocations", "View model must expose registered dump search locations.");
+  RequireContains(vm, "DumpDiscoveryItem", "View model must define a recent-dump item model.");
+  RequireContains(vm, "DumpSearchLocationItem", "View model must define a dump-search-location item model.");
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  RequireContains(cs, "RefreshDiscoveredDumpsAsync", "Main window must refresh discovered dumps on startup and after folder changes.");
+  RequireContains(cs, "AnalyzeRecentDump_Click", "Analyze/start screen must let users analyze a discovered dump directly.");
+  RequireContains(cs, "ManageDumpFoldersButton_Click", "Folder-management entry point handler missing.");
+  RequireContains(cs, "AddDumpSearchLocation_Click", "Folder-management UI must let users add dump search locations.");
+  RequireContains(cs, "RemoveDumpSearchLocation_Click", "Folder-management UI must let users remove dump search locations.");
+
+  const auto store = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryStore.cs");
+  RequireContains(store, "RegisteredRoots", "Dump discovery store must persist registered search roots.");
+  RequireContains(store, "LearnedRoots", "Dump discovery store must persist learned search roots.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -139,6 +170,7 @@ int main()
   TestMainWindowHasTroubleshootingSection();
   TestMainWindowHasTriageReviewEditor();
   TestMainWindowHasCrashLoggerFirstReadingPath();
+  TestAnalyzePanelHasDumpDiscoveryFlow();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

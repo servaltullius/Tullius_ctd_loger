@@ -37,6 +37,8 @@ internal sealed class MainWindowViewModel
     public ObservableCollection<EvidenceViewItem> EvidenceItems { get; } = new();
     public ObservableCollection<ResourceViewItem> ResourceItems { get; } = new();
     public ObservableCollection<string> EventItems { get; } = new();
+    public ObservableCollection<DumpDiscoveryItem> RecentDumps { get; } = new();
+    public ObservableCollection<DumpSearchLocationItem> DumpSearchLocations { get; } = new();
 
     // ── Summary fields for UI ─────────────────────────────────
     public string SummarySentence { get; private set; } = string.Empty;
@@ -52,6 +54,7 @@ internal sealed class MainWindowViewModel
     public string QuickConfidenceValue { get; private set; } = string.Empty;
     public string QuickActionsValue { get; private set; } = string.Empty;
     public string QuickEventsValue { get; private set; } = string.Empty;
+    public string RecentDumpStatusText { get; private set; } = string.Empty;
     public string TroubleshootingTitle { get; private set; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; private set; } = Array.Empty<string>();
     public bool ShowTroubleshooting { get; private set; }
@@ -68,6 +71,26 @@ internal sealed class MainWindowViewModel
         PopulateCallstack(summary);
         PopulateEvidence(summary);
         PopulateResources(summary);
+    }
+
+    public void PopulateDumpDiscovery(
+        IReadOnlyList<DumpDiscoveryItem> recentDumps,
+        IReadOnlyList<DumpSearchLocationItem> dumpSearchLocations,
+        string statusText)
+    {
+        RecentDumps.Clear();
+        foreach (var item in recentDumps)
+        {
+            RecentDumps.Add(item);
+        }
+
+        DumpSearchLocations.Clear();
+        foreach (var item in dumpSearchLocations)
+        {
+            DumpSearchLocations.Add(item);
+        }
+
+        RecentDumpStatusText = statusText;
     }
 
     private void PopulateHeaderFields(AnalysisSummary summary)
@@ -1029,3 +1052,14 @@ internal sealed class MainWindowViewModel
         return data;
     }
 }
+
+public sealed record DumpDiscoveryItem(
+    string FileName,
+    string FullPath,
+    string SourceLabel,
+    string SourcePath,
+    string UpdatedText,
+    string SizeText,
+    string AnalyzeLabel);
+
+public sealed record DumpSearchLocationItem(string Path, string SourceLabel, bool IsRemovable);

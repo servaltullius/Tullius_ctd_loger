@@ -91,6 +91,186 @@
               </Grid>
             </Border>
 
+            <!-- Dump discovery -->
+            <Border x:Name="RecentDumpsCard"
+                    Background="{ThemeResource CardAcrylicBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="22">
+              <StackPanel Spacing="12">
+                <TextBlock x:Name="RecentDumpsTitleText"
+                           FontSize="24" FontWeight="SemiBold"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                  Recent discovered dumps
+                </TextBlock>
+                <TextBlock x:Name="RecentDumpsHintText"
+                           FontSize="13"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextWrapping="WrapWholeWords">
+                  We scan known dump locations and show the newest dumps first.
+                </TextBlock>
+                <TextBlock x:Name="RecentDumpsStatusText"
+                           FontSize="12"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextWrapping="WrapWholeWords" />
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button x:Name="RescanDumpsButton"
+                          Click="RescanDumpsButton_Click"
+                          Content="Rescan"
+                          AutomationProperties.Name="Rescan known dump locations" />
+                  <Button x:Name="ManageDumpFoldersButton"
+                          Click="ManageDumpFoldersButton_Click"
+                          Content="Manage folders"
+                          AutomationProperties.Name="Manage dump search locations" />
+                  <Button x:Name="DirectSelectDumpButton"
+                          Click="BrowseDump_Click"
+                          Content="Direct select"
+                          AutomationProperties.Name="Directly select a dump file"
+                          ToolTipService.ToolTip="Browse dump file (Ctrl+O)">
+                    <Button.KeyboardAccelerators>
+                      <KeyboardAccelerator Modifiers="Control" Key="O" />
+                    </Button.KeyboardAccelerators>
+                  </Button>
+                </StackPanel>
+
+                <ListView x:Name="RecentDumpList"
+                          Visibility="Collapsed"
+                          SelectionMode="None"
+                          MaxHeight="320"
+                          AutomationProperties.Name="Recent discovered dumps list">
+                  <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:DumpDiscoveryItem">
+                      <Border Margin="0,0,0,8"
+                              Padding="12"
+                              CornerRadius="8"
+                              Background="{ThemeResource ElevatedAcrylicBrush}"
+                              BorderBrush="{ThemeResource CardBorderBrush}"
+                              BorderThickness="1">
+                        <Grid ColumnSpacing="12">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="{x:Bind FileName}"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{x:Bind UpdatedText}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind SizeText}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind SourceLabel}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource AccentBrush}" />
+                            <TextBlock Text="{x:Bind SourcePath}"
+                                       FontSize="12"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                          </StackPanel>
+                          <Button Grid.Column="1"
+                                  VerticalAlignment="Top"
+                                  Content="{x:Bind AnalyzeLabel}"
+                                  Tag="{x:Bind FullPath}"
+                                  Click="AnalyzeRecentDump_Click"
+                                  AutomationProperties.Name="Analyze discovered dump" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+
+                <StackPanel x:Name="RecentDumpsEmptyState"
+                            Visibility="Collapsed"
+                            Spacing="8">
+                  <TextBlock x:Name="RecentDumpsEmptyTitleText"
+                             FontSize="16"
+                             FontWeight="SemiBold"
+                             Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                    No dumps were found.
+                  </TextBlock>
+                  <TextBlock x:Name="RecentDumpsEmptyHintText"
+                             FontSize="13"
+                             TextWrapping="WrapWholeWords"
+                             Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                    Add your MO2 overwrite folder or another custom dump location.
+                  </TextBlock>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="EmptyStateManageFoldersButton"
+                            Click="ManageDumpFoldersButton_Click"
+                            Content="Manage folders"
+                            AutomationProperties.Name="Manage dump search locations from empty state" />
+                    <Button x:Name="EmptyStateDirectSelectButton"
+                            Click="BrowseDump_Click"
+                            Content="Direct select"
+                            AutomationProperties.Name="Directly select a dump file from empty state" />
+                  </StackPanel>
+                </StackPanel>
+
+                <Border x:Name="DumpSearchLocationsPanel"
+                        Visibility="Collapsed"
+                        Padding="14"
+                        CornerRadius="8"
+                        Background="{ThemeResource ElevatedAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1">
+                  <StackPanel Spacing="10">
+                    <TextBlock x:Name="DumpSearchLocationsTitleText"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                      덤프 검색 위치
+                    </TextBlock>
+                    <TextBlock x:Name="DumpSearchLocationsHintText"
+                               FontSize="12"
+                               TextWrapping="WrapWholeWords"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                      You can register a broad folder such as MO2 overwrite. Subfolders are searched automatically.
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button x:Name="AddDumpSearchLocationButton"
+                              Click="AddDumpSearchLocation_Click"
+                              Content="Add location"
+                              AutomationProperties.Name="Add dump search location" />
+                      <Button x:Name="RemoveDumpSearchLocationButton"
+                              Click="RemoveDumpSearchLocation_Click"
+                              Content="Remove selected"
+                              IsEnabled="False"
+                              AutomationProperties.Name="Remove selected dump search location" />
+                    </StackPanel>
+                    <TextBlock x:Name="DumpSearchLocationsEmptyText"
+                               FontSize="12"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="WrapWholeWords">
+                      No dump search locations are saved yet.
+                    </TextBlock>
+                    <ListView x:Name="DumpSearchLocationsList"
+                              SelectionMode="Single"
+                              MaxHeight="220"
+                              SelectionChanged="DumpSearchLocationsList_SelectionChanged"
+                              AutomationProperties.Name="Saved dump search locations list">
+                      <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:DumpSearchLocationItem">
+                          <StackPanel Spacing="2" Margin="0,0,0,6">
+                            <TextBlock Text="{x:Bind SourceLabel}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource AccentBrush}" />
+                            <TextBlock Text="{x:Bind Path}"
+                                       FontSize="12"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Border>
+
             <!-- Analysis controls -->
             <Border Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
@@ -113,10 +293,7 @@
                   <Button x:Name="BrowseDumpButton" Grid.Column="1"
                           Click="BrowseDump_Click" Content="Browse dump"
                           AutomationProperties.Name="Browse dump file"
-                          ToolTipService.ToolTip="Browse dump file (Ctrl+O)">
-                    <Button.KeyboardAccelerators>
-                      <KeyboardAccelerator Modifiers="Control" Key="O" />
-                    </Button.KeyboardAccelerators>
+                          ToolTipService.ToolTip="Browse dump file">
                   </Button>
                 </Grid>
 

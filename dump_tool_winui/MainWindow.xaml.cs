@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly DumpToolInvocationOptions _startupOptions;
     private readonly MainWindowViewModel _vm;
+    private DumpDiscoveryState _dumpDiscoveryState = DumpDiscoveryStore.Load();
     private enum LayoutTier { Wide, Compact, Narrow }
     private LayoutTier _currentLayoutTier = (LayoutTier)(-1); // force first apply
     private CancellationTokenSource? _analysisCts;
@@ -45,10 +46,15 @@ public sealed partial class MainWindow : Window
         EvidenceList.ItemsSource = _vm.EvidenceItems;
         ResourcesList.ItemsSource = _vm.ResourceItems;
         EventsList.ItemsSource = _vm.EventItems;
+        RecentDumpList.ItemsSource = _vm.RecentDumps;
+        DumpSearchLocationsList.ItemsSource = _vm.DumpSearchLocations;
 
         CopySummaryButton.IsEnabled = false;
         CopyShareButton.IsEnabled = false;
         SetTriageEditorEnabled(false);
+        RecentDumpsEmptyState.Visibility = Visibility.Collapsed;
+        RecentDumpList.Visibility = Visibility.Collapsed;
+        DumpSearchLocationsPanel.Visibility = Visibility.Collapsed;
 
         if (!string.IsNullOrWhiteSpace(startupOptions.DumpPath))
         {
@@ -63,10 +69,14 @@ public sealed partial class MainWindow : Window
             StatusText.Text = startupWarning;
         }
 
-        if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
+        DispatcherQueue.TryEnqueue(async () =>
         {
-            DispatcherQueue.TryEnqueue(async () => await AnalyzeAsync(preferExistingArtifacts: true));
-        }
+            await RefreshDiscoveredDumpsAsync();
+            if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
+            {
+                await AnalyzeAsync(preferExistingArtifacts: true);
+            }
+        });
 
         ApplyAdaptiveLayout();
     }
@@ -85,7 +95,22 @@ public sealed partial class MainWindow : Window
             "Skyrim SE가 감지되었습니다. 덤프 원인 분석을 시작할 수 있습니다.");
         HeaderBadgeText.Text = T("STATUS READY", "상태 준비됨");
 
-        AnalyzeSectionTitleText.Text = T("Dump Intake", "덤프 입력");
+        AnalyzeSectionTitleText.Text = T("Direct dump path", "직접 덤프 경로");
+        RecentDumpsTitleText.Text = T("Recent discovered dumps", "최근 발견된 덤프");
+        RecentDumpsHintText.Text = T(
+            "We scan known dump locations and show the newest dumps first.",
+            "알려진 덤프 위치를 스캔하고 가장 최근 덤프를 먼저 보여줍니다.");
+        RecentDumpsEmptyTitleText.Text = T("No dumps were found.", "덤프를 찾지 못했습니다.");
+        RecentDumpsEmptyHintText.Text = T(
+            "Add your MO2 overwrite folder or another custom dump location.",
+            "MO2 overwrite 또는 사용자 지정 폴더를 추가하세요.");
+        DumpSearchLocationsTitleText.Text = T("Dump search locations", "덤프 검색 위치");
+        DumpSearchLocationsHintText.Text = T(
+            "You can register a broad folder such as MO2 overwrite. Subfolders are searched automatically.",
+            "MO2 overwrite 같은 상위 폴더도 선택할 수 있으며, 하위 폴더까지 자동 검색합니다.");
+        DumpSearchLocationsEmptyText.Text = T(
+            "No dump search locations are saved yet.",
+            "저장된 덤프 검색 위치가 아직 없습니다.");
 
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
@@ -115,6 +140,13 @@ public sealed partial class MainWindow : Window
         DumpPathBox.PlaceholderText = T("Select a .dmp file", ".dmp 파일을 선택하세요");
         OutputDirBox.PlaceholderText = T("Optional output directory (empty = dump folder)", "선택 출력 폴더 (비우면 덤프 폴더)");
 
+        RescanDumpsButton.Content = T("Rescan", "다시 스캔");
+        ManageDumpFoldersButton.Content = T("Manage folders", "폴더 관리");
+        EmptyStateManageFoldersButton.Content = T("Manage folders", "폴더 관리");
+        DirectSelectDumpButton.Content = T("Direct select", "직접 선택");
+        EmptyStateDirectSelectButton.Content = T("Direct select", "직접 선택");
+        AddDumpSearchLocationButton.Content = T("Add location", "위치 추가");
+        RemoveDumpSearchLocationButton.Content = T("Remove selected", "선택 제거");
         BrowseDumpButton.Content = T("Select dump", "덤프 선택");
         BrowseOutputButton.Content = T("Select folder", "폴더 선택");
         AnalyzeButton.Content = T("ANALYZE NOW", "지금 분석");
@@ -209,6 +241,127 @@ public sealed partial class MainWindow : Window
         return null;
     }
 
+    private async Task RefreshDiscoveredDumpsAsync()
+    {
+        var hintDumpPath = !string.IsNullOrWhiteSpace(DumpPathBox.Text)
+            ? DumpPathBox.Text.Trim()
+            : _startupOptions.DumpPath;
+
+        var recentDumps = DumpDiscoveryService.DiscoverRecentDumps(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
+        var searchLocations = DumpDiscoveryService.BuildSearchLocationItems(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
+        _vm.PopulateDumpDiscovery(recentDumps, searchLocations, BuildDumpDiscoveryStatusText(recentDumps.Count, searchLocations.Count));
+
+        RecentDumpsStatusText.Text = _vm.RecentDumpStatusText;
+        RecentDumpList.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        RecentDumpsEmptyState.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+        DumpSearchLocationsEmptyText.Visibility = _vm.DumpSearchLocations.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+        UpdateDumpSearchLocationSelectionState();
+        await Task.CompletedTask;
+    }
+
+    private string BuildDumpDiscoveryStatusText(int dumpCount, int searchLocationCount)
+    {
+        if (_vm.IsKorean)
+        {
+            return $"검색 위치 {searchLocationCount}곳, 최근 덤프 {dumpCount}개";
+        }
+
+        return $"{searchLocationCount} search roots, {dumpCount} recent dumps";
+    }
+
+    private async Task PromoteLearnedDumpLocationAsync(string dumpPath)
+    {
+        string? directoryPath;
+        try
+        {
+            directoryPath = Path.GetDirectoryName(Path.GetFullPath(dumpPath));
+        }
+        catch
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return;
+        }
+
+        _dumpDiscoveryState = DumpDiscoveryStore.PromoteLearnedRoot(_dumpDiscoveryState, directoryPath);
+        await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
+    }
+
+    private void UpdateDumpSearchLocationSelectionState()
+    {
+        RemoveDumpSearchLocationButton.IsEnabled =
+            DumpSearchLocationsList.IsEnabled &&
+            DumpSearchLocationsList.SelectedItem is DumpSearchLocationItem item &&
+            item.IsRemovable;
+    }
+
+    private async void RescanDumpsButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshDiscoveredDumpsAsync();
+        StatusText.Text = T("Rescanned known dump locations.", "알려진 덤프 위치를 다시 스캔했습니다.");
+    }
+
+    private void ManageDumpFoldersButton_Click(object sender, RoutedEventArgs e)
+    {
+        DumpSearchLocationsPanel.Visibility =
+            DumpSearchLocationsPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+        UpdateDumpSearchLocationSelectionState();
+    }
+
+    private async void AddDumpSearchLocation_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new FolderPicker();
+        picker.FileTypeFilter.Add("*");
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+
+        var folder = await picker.PickSingleFolderAsync();
+        if (folder is null)
+        {
+            return;
+        }
+
+        _dumpDiscoveryState = DumpDiscoveryStore.AddRegisteredRoot(_dumpDiscoveryState, folder.Path);
+        await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
+        DumpSearchLocationsPanel.Visibility = Visibility.Visible;
+        await RefreshDiscoveredDumpsAsync();
+        StatusText.Text = T("Dump search location saved.", "덤프 검색 위치를 저장했습니다.");
+    }
+
+    private async void RemoveDumpSearchLocation_Click(object sender, RoutedEventArgs e)
+    {
+        if (DumpSearchLocationsList.SelectedItem is not DumpSearchLocationItem item || !item.IsRemovable)
+        {
+            return;
+        }
+
+        _dumpDiscoveryState = DumpDiscoveryStore.RemoveRoot(_dumpDiscoveryState, item.Path);
+        await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
+        await RefreshDiscoveredDumpsAsync();
+        StatusText.Text = T("Removed dump search location.", "덤프 검색 위치를 제거했습니다.");
+    }
+
+    private void DumpSearchLocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UpdateDumpSearchLocationSelectionState();
+    }
+
+    private async void AnalyzeRecentDump_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button || button.Tag is not string dumpPath || string.IsNullOrWhiteSpace(dumpPath))
+        {
+            return;
+        }
+
+        DumpPathBox.Text = dumpPath;
+        await PromoteLearnedDumpLocationAsync(dumpPath);
+        await RefreshDiscoveredDumpsAsync();
+        await AnalyzeAsync(preferExistingArtifacts: true);
+    }
+
     private async void AnalyzeButton_Click(object sender, RoutedEventArgs e)
     {
         await AnalyzeAsync(preferExistingArtifacts: false);
@@ -279,6 +432,9 @@ public sealed partial class MainWindow : Window
             StatusText.Text = T("Dump file not found: ", "덤프 파일을 찾을 수 없습니다: ") + dumpPath;
             return;
         }
+
+        await PromoteLearnedDumpLocationAsync(dumpPath);
+        await RefreshDiscoveredDumpsAsync();
 
         _analysisCts?.Cancel();
         _analysisCts?.Dispose();
@@ -489,6 +645,8 @@ public sealed partial class MainWindow : Window
         if (file is not null)
         {
             DumpPathBox.Text = file.Path;
+            await PromoteLearnedDumpLocationAsync(file.Path);
+            await RefreshDiscoveredDumpsAsync();
             StatusText.Text = T("Dump selected.", "덤프 파일을 선택했습니다.");
         }
     }
@@ -618,6 +776,7 @@ public sealed partial class MainWindow : Window
         RawDataPanel.Spacing = compact ? 12 : 16;
 
         AnalyzeSectionTitleText.FontSize = compact ? 22 : 24;
+        RecentDumpsTitleText.FontSize = compact ? 22 : 24;
         SnapshotSectionTitleText.FontSize = narrow ? 22 : (compact ? 26 : 30);
 
         // Triage 2-column → 1-column adaptive
@@ -658,6 +817,8 @@ public sealed partial class MainWindow : Window
         QuickActionsValueText.FontSize = compact ? 16 : 18;
         QuickEventsValueText.FontSize = compact ? 16 : 18;
 
+        RecentDumpList.MaxHeight = compact ? 260 : 320;
+        DumpSearchLocationsList.MaxHeight = compact ? 180 : 220;
         SuspectsList.MaxHeight = compact ? 240 : 320;
         CallstackList.MaxHeight = compact ? 320 : 500;
         EvidenceList.MaxHeight = compact ? 320 : 500;
@@ -676,11 +837,20 @@ public sealed partial class MainWindow : Window
         AnalyzeButton.IsEnabled = !isBusy;
         CancelAnalyzeButton.IsEnabled = isBusy;
         BrowseDumpButton.IsEnabled = !isBusy;
+        DirectSelectDumpButton.IsEnabled = !isBusy;
+        EmptyStateDirectSelectButton.IsEnabled = !isBusy;
+        RescanDumpsButton.IsEnabled = !isBusy;
+        ManageDumpFoldersButton.IsEnabled = !isBusy;
+        EmptyStateManageFoldersButton.IsEnabled = !isBusy;
+        AddDumpSearchLocationButton.IsEnabled = !isBusy;
+        DumpSearchLocationsList.IsEnabled = !isBusy;
+        RecentDumpList.IsEnabled = !isBusy;
         BrowseOutputButton.IsEnabled = !isBusy;
         DumpPathBox.IsEnabled = !isBusy;
         OutputDirBox.IsEnabled = !isBusy;
         OpenOutputButton.IsEnabled = !isBusy;
         SetTriageEditorEnabled(!isBusy && _vm.CurrentSummary is not null);
+        UpdateDumpSearchLocationSelectionState();
         StatusText.Text = message;
     }
 
