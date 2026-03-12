@@ -28,6 +28,11 @@ internal sealed class MainWindowViewModel
     // ── Observable collections (bound to UI) ──────────────────
     public ObservableCollection<SuspectItem> Suspects { get; } = new();
     public ObservableCollection<string> Recommendations { get; } = new();
+    public ObservableCollection<RecommendationGroupItem> RecommendationGroups { get; } = new();
+    public ObservableCollection<string> ImmediateRecommendations { get; } = new();
+    public ObservableCollection<string> VerificationRecommendations { get; } = new();
+    public ObservableCollection<string> RecaptureRecommendations { get; } = new();
+    public ObservableCollection<ConflictComparisonRow> ConflictComparisonRows { get; } = new();
     public ObservableCollection<string> CallstackFrames { get; } = new();
     public ObservableCollection<EvidenceViewItem> EvidenceItems { get; } = new();
     public ObservableCollection<ResourceViewItem> ResourceItems { get; } = new();
@@ -38,6 +43,8 @@ internal sealed class MainWindowViewModel
     public string BucketText { get; private set; } = string.Empty;
     public string ModuleText { get; private set; } = string.Empty;
     public string ModNameText { get; private set; } = string.Empty;
+    public string CrashLoggerContextSummary { get; private set; } = string.Empty;
+    public string CrashContextSummary { get; private set; } = string.Empty;
     public bool ShowCorrelationBadge { get; private set; }
     public string CorrelationBadgeText { get; private set; } = string.Empty;
     public string QuickPrimaryLabel { get; private set; } = string.Empty;
@@ -56,6 +63,7 @@ internal sealed class MainWindowViewModel
         PopulateHeaderFields(summary);
         PopulateSuspects(summary);
         PopulateRecommendations(summary);
+        PopulateConflictComparison(summary);
         PopulateTroubleshooting(summary);
         PopulateCallstack(summary);
         PopulateEvidence(summary);
@@ -87,6 +95,8 @@ internal sealed class MainWindowViewModel
         ModuleText = string.IsNullOrWhiteSpace(summary.ModulePlusOffset)
             ? T("Fault module: unavailable", "오류 모듈: 없음")
             : T("Fault module: ", "오류 모듈: ") + summary.ModulePlusOffset;
+        CrashLoggerContextSummary = BuildCrashLoggerContextSummary(summary);
+        CrashContextSummary = BuildCrashContextSummary(summary);
 
         if (summary.ActionableCandidates.Count > 0)
         {
@@ -101,6 +111,24 @@ internal sealed class MainWindowViewModel
             ModNameText = string.IsNullOrWhiteSpace(summary.InferredModName)
                 ? T("Inferred mod: unavailable", "추정 모드: 없음")
                 : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
+        }
+
+        QuickPrimaryLabel = BuildCrashLoggerContextLabel(summary);
+        QuickPrimaryValue = CrashLoggerContextSummary;
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            QuickConfidenceValue = BuildAgreementSummary(summary);
+        }
+        else if (summary.CrashLoggerRefs.Count > 0)
+        {
+            QuickConfidenceValue = MapRelevanceToConfidence(summary.CrashLoggerRefs[0].RelevanceScore);
+        }
+        else
+        {
+            var primarySuspect = summary.Suspects.FirstOrDefault();
+            QuickConfidenceValue = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
+                ? T("Unrated", "미평가")
+                : primarySuspect.Confidence;
         }
     }
 
@@ -139,28 +167,6 @@ internal sealed class MainWindowViewModel
                 T("No strong suspect was extracted.", "강한 원인 후보를 추출하지 못했습니다."),
                 T("Try sharing the dump + report for deeper analysis.", "덤프 + 리포트를 공유해 추가 분석을 진행하세요.")));
         }
-
-        if (summary.ActionableCandidates.Count > 0)
-        {
-            var primaryCandidate = summary.ActionableCandidates[0];
-            QuickPrimaryValue = BuildPrimaryCandidateValue(summary);
-            QuickConfidenceValue = BuildAgreementSummary(summary);
-            QuickPrimaryLabel = DescribeActionableCandidateLabel(primaryCandidate);
-        }
-        else
-        {
-            var primarySuspect = Suspects.FirstOrDefault();
-            QuickPrimaryValue = primarySuspect is null
-                ? T("Unknown", "알 수 없음")
-                : primarySuspect.Module;
-            QuickConfidenceValue = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
-                ? T("Unrated", "미평가")
-                : primarySuspect.Confidence;
-
-            QuickPrimaryLabel = summary.CrashLoggerRefs.Count > 0
-                ? T("Referenced mod (ESP)", "참조 모드 (ESP)")
-                : T("Actionable candidate", "행동 우선 후보");
-        }
     }
 
     private void PopulateRecommendations(AnalysisSummary summary)
@@ -174,7 +180,107 @@ internal sealed class MainWindowViewModel
         {
             Recommendations.Add(T("No recommendation text was generated.", "권장 조치 문구가 생성되지 않았습니다."));
         }
+        PopulateRecommendationGroups();
         QuickActionsValue = BuildNextActionSummary(summary);
+    }
+
+    private void PopulateRecommendationGroups()
+    {
+        RecommendationGroups.Clear();
+        ImmediateRecommendations.Clear();
+        VerificationRecommendations.Clear();
+        RecaptureRecommendations.Clear();
+
+        var immediate = new List<string>();
+        var verification = new List<string>();
+        var recapture = new List<string>();
+
+        foreach (var recommendation in Recommendations)
+        {
+            var plain = StripRecommendationTag(recommendation);
+            if (string.IsNullOrWhiteSpace(plain))
+            {
+                continue;
+            }
+
+            if (IsRecaptureRecommendation(recommendation))
+            {
+                recapture.Add(plain);
+            }
+            else if (IsImmediateActionRecommendation(recommendation))
+            {
+                immediate.Add(plain);
+            }
+            else
+            {
+                verification.Add(plain);
+            }
+        }
+
+        var groups = BuildRecommendationGroups(immediate, verification, recapture);
+        foreach (var group in groups)
+        {
+            RecommendationGroups.Add(group);
+        }
+
+        foreach (var item in groups[0].Items)
+        {
+            ImmediateRecommendations.Add(item);
+        }
+        foreach (var item in groups[1].Items)
+        {
+            VerificationRecommendations.Add(item);
+        }
+        foreach (var item in groups[2].Items)
+        {
+            RecaptureRecommendations.Add(item);
+        }
+    }
+
+    private IReadOnlyList<RecommendationGroupItem> BuildRecommendationGroups(
+        IReadOnlyList<string> immediate,
+        IReadOnlyList<string> verification,
+        IReadOnlyList<string> recapture)
+    {
+        return new[]
+        {
+            new RecommendationGroupItem(T("Do This Now", "지금 바로"), immediate),
+            new RecommendationGroupItem(T("Verify Next", "추가 확인"), verification),
+            new RecommendationGroupItem(T("Recapture or Compare", "재수집 / 비교"), recapture),
+        };
+    }
+
+    private void PopulateConflictComparison(AnalysisSummary summary)
+    {
+        ConflictComparisonRows.Clear();
+        foreach (var row in BuildConflictComparisonRows(summary))
+        {
+            ConflictComparisonRows.Add(row);
+        }
+    }
+
+    private IReadOnlyList<ConflictComparisonRow> BuildConflictComparisonRows(AnalysisSummary summary)
+    {
+        var rows = new List<ConflictComparisonRow>();
+        if (summary.ActionableCandidates.Count < 2)
+        {
+            return rows;
+        }
+
+        var first = summary.ActionableCandidates[0];
+        if (first.StatusId != "conflicting" && !first.HasConflict)
+        {
+            return rows;
+        }
+
+        foreach (var candidate in summary.ActionableCandidates.Take(2))
+        {
+            rows.Add(new ConflictComparisonRow(
+                BuildCandidateDisplayName(candidate),
+                BuildFamilySummary(candidate),
+                BuildConflictComparisonDetail(candidate)));
+        }
+        return rows;
     }
 
     private void PopulateTroubleshooting(AnalysisSummary summary)
@@ -548,6 +654,82 @@ internal sealed class MainWindowViewModel
         return $"{BuildCandidateDisplayName(candidate)} <- {BuildFamilySummary(candidate)}";
     }
 
+    private string BuildCrashLoggerContextLabel(AnalysisSummary summary)
+    {
+        if (summary.CrashLoggerRefs.Count > 0)
+        {
+            if (summary.ActionableCandidates.Count > 0 &&
+                summary.ActionableCandidates[0].StatusId == "reference_clue")
+            {
+                return T("Processing at crash", "사고 당시 처리 대상");
+            }
+
+            return T("CrashLogger reference", "CrashLogger 참조");
+        }
+
+        return T("Actionable candidate", "행동 우선 후보");
+    }
+
+    private string BuildCrashLoggerContextSummary(AnalysisSummary summary)
+    {
+        if (summary.CrashLoggerRefs.Count > 0)
+        {
+            var topRef = summary.CrashLoggerRefs[0];
+            var espName = FirstNonEmpty(
+                topRef.EspName,
+                summary.InferredModName,
+                T("CrashLogger object ref", "CrashLogger 오브젝트 참조"));
+            var anchor = !string.IsNullOrWhiteSpace(topRef.FormId)
+                ? $"{espName} [{topRef.FormId}]"
+                : espName;
+
+            var details = new List<string>();
+            if (!string.IsNullOrWhiteSpace(topRef.ObjectName))
+            {
+                details.Add($"\"{topRef.ObjectName}\"");
+            }
+            else if (!string.IsNullOrWhiteSpace(topRef.ObjectType))
+            {
+                details.Add(topRef.ObjectType);
+            }
+
+            if (!string.IsNullOrWhiteSpace(topRef.Location))
+            {
+                details.Add(topRef.Location);
+            }
+
+            return details.Count == 0
+                ? anchor
+                : $"{anchor} — {string.Join(" — ", details.Take(2))}";
+        }
+
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            return BuildPrimaryCandidateValue(summary);
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.InferredModName))
+        {
+            return summary.InferredModName;
+        }
+
+        return T("No CrashLogger object ref was extracted.", "CrashLogger 오브젝트 참조를 추출하지 못했습니다.");
+    }
+
+    private string BuildCrashContextSummary(AnalysisSummary summary)
+    {
+        if (!string.IsNullOrWhiteSpace(summary.ModulePlusOffset) || !string.IsNullOrWhiteSpace(summary.CrashBucketKey))
+        {
+            return T(
+                "Fault module and crash bucket stay here as context, not first blame.",
+                "오류 모듈과 크래시 버킷은 1차 범인 지목이 아니라 참고용 컨텍스트입니다.");
+        }
+
+        return T(
+            "This capture has limited crash-context details.",
+            "이번 캡처에는 크래시 컨텍스트 정보가 제한적입니다.");
+    }
+
     private string BuildFamilySummary(ActionableCandidateItem candidate)
     {
         var families = candidate.SupportingFamilies
@@ -560,6 +742,16 @@ internal sealed class MainWindowViewModel
             return T("limited evidence", "제한된 근거");
         }
         return string.Join(" + ", families);
+    }
+
+    private string BuildConflictComparisonDetail(ActionableCandidateItem candidate)
+    {
+        if (!string.IsNullOrWhiteSpace(candidate.Explanation))
+        {
+            return candidate.Explanation;
+        }
+
+        return BuildCandidateReason(candidate);
     }
 
     private static string StripRecommendationTag(string recommendation)
@@ -629,6 +821,44 @@ internal sealed class MainWindowViewModel
         return parts.Count == 0
             ? T("No consensus detail available.", "합의 세부 정보가 없습니다.")
             : string.Join(" — ", parts);
+    }
+
+    private static bool IsImmediateActionRecommendation(string recommendation)
+    {
+        return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Top suspect]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[유력 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[ESP/ESM]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Object ref]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[오브젝트 참조]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Conflict]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[충돌]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Masters]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[마스터]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[BEES]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Check]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[점검]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Hook framework]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[훅 프레임워크]", StringComparison.Ordinal);
+    }
+
+    private static bool IsRecaptureRecommendation(string recommendation)
+    {
+        return recommendation.Contains("DumpMode=2", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("capture another", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("recapture", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("capture taken during", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("second signal", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("break the tie", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("다시 캡처", StringComparison.Ordinal) ||
+               recommendation.Contains("재수집", StringComparison.Ordinal) ||
+               recommendation.Contains("한 번 더", StringComparison.Ordinal) ||
+               recommendation.Contains("두 번째 신호", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Snapshot]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[정상/스냅샷]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Manual]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[수동]", StringComparison.Ordinal);
     }
 
     private string DescribeFamily(string familyId) => familyId switch

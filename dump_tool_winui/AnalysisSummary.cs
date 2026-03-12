@@ -242,6 +242,8 @@ internal sealed class AnalysisSummary
 public sealed record SuspectItem(string Confidence, string Module, string Reason);
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
+public sealed record RecommendationGroupItem(string Title, IReadOnlyList<string> Items);
+public sealed record ConflictComparisonRow(string Candidate, string Signals, string Detail);
 public sealed record ActionableCandidateItem(
     string StatusId,
     string Confidence,

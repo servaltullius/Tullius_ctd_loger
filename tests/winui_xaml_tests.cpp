@@ -59,6 +59,7 @@ static void TestMainWindowHasTriageReviewEditor()
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
 
   const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  assert(xaml.find("ReviewFeedbackExpander") != std::string::npos && "Review feedback should be wrapped in a secondary expander.");
   assert(xaml.find("ReviewStatusComboBox") != std::string::npos && "Review status selector missing in XAML");
   assert(xaml.find("ReviewStatusConfirmedItem") != std::string::npos && "Confirmed review status option missing in XAML");
   assert(xaml.find("ReviewStatusTriagedItem") != std::string::npos && "Triaged review status option missing in XAML");
@@ -80,6 +81,26 @@ static void TestMainWindowHasTriageReviewEditor()
   assert(store.find("HasReviewContent") != std::string::npos && "Summary triage review-content helper missing");
   assert(store.find("\"confirmed\" => \"confirmed\"") != std::string::npos && "Legacy review status values must round-trip");
   assert(store.find("\"ground_truth_mod\"") != std::string::npos && "Summary triage save helper must persist ground_truth_mod");
+}
+
+static void TestMainWindowHasCrashLoggerFirstReadingPath()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  RequireContains(xaml, "CrashLoggerContextCard", "Triage surface must show a dedicated CrashLogger-first context card.");
+  RequireContains(xaml, "CrashContextCard", "Fault-module details should live in a lower-priority crash-context card.");
+  RequireContains(xaml, "ConflictCandidatesPanel", "Conflicting candidates should be rendered in their own comparison block.");
+  RequireContains(xaml, "RecommendationGroupsPanel", "Recommendations should be grouped by action type, not only shown as a flat list.");
+  RequireContains(xaml, "Do This Now", "Grouped recommendation UI must expose an immediate-action heading.");
+  RequireContains(xaml, "Recapture or Compare", "Grouped recommendation UI must expose a recapture/compare heading.");
+
+  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  RequireContains(vm, "CrashLoggerContextSummary", "View model must expose a CrashLogger-first context summary.");
+  RequireContains(vm, "CrashContextSummary", "View model must expose a lower-priority crash context summary.");
+  RequireContains(vm, "RecommendationGroups", "View model must expose grouped recommendations.");
+  RequireContains(vm, "BuildRecommendationGroups", "View model must build grouped recommendations.");
+  RequireContains(vm, "BuildConflictComparisonRows", "View model must build conflict comparison rows.");
 }
 
 int main()
@@ -106,15 +127,18 @@ int main()
   assert(vm.find("Conflicting candidates") != std::string::npos && "View model must expose conflicting-candidates wording");
   RequireContains(vm, "BuildNextActionSummary", "Quick actions card must summarize the next candidate-specific action.");
   RequireContains(vm, "BuildConflictCandidateLine", "Conflict UX must explain each conflicting candidate separately in share/clipboard text.");
+  RequireContains(vm, "CrashLoggerContextSummary", "Top reading path must expose CrashLogger-first context.");
+  RequireContains(vm, "RecommendationGroups", "View model must expose grouped recommendation collections.");
 
   const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
-  assert(cs.find("Actionable candidate") != std::string::npos && "Quick primary label must use actionable-candidate wording");
+  assert(cs.find("CrashLogger context") != std::string::npos && "Quick primary label must use CrashLogger-first wording");
   assert(cs.find("Evidence agreement") != std::string::npos && "Quick agreement label must use evidence-agreement wording");
   RequireContains(cs, "Next action", "Quick actions label must focus on the next action, not only a count.");
 
   TestMainWindowHasCorrelationBadge();
   TestMainWindowHasTroubleshootingSection();
   TestMainWindowHasTriageReviewEditor();
+  TestMainWindowHasCrashLoggerFirstReadingPath();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

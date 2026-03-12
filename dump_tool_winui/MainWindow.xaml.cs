@@ -37,7 +37,10 @@ public sealed partial class MainWindow : Window
         RootGrid.SizeChanged += RootGrid_SizeChanged;
 
         SuspectsList.ItemsSource = _vm.Suspects;
-        RecommendationsList.ItemsSource = _vm.Recommendations;
+        ImmediateRecommendationsList.ItemsSource = _vm.ImmediateRecommendations;
+        VerificationRecommendationsList.ItemsSource = _vm.VerificationRecommendations;
+        RecaptureRecommendationsList.ItemsSource = _vm.RecaptureRecommendations;
+        ConflictCandidatesList.ItemsSource = _vm.ConflictComparisonRows;
         CallstackList.ItemsSource = _vm.CallstackFrames;
         EvidenceList.ItemsSource = _vm.EvidenceItems;
         ResourcesList.ItemsSource = _vm.ResourceItems;
@@ -87,10 +90,15 @@ public sealed partial class MainWindow : Window
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
         SuspectsSectionTitleText.Text = T("Actionable Candidates", "행동 우선 후보");
-        QuickPrimaryLabelText.Text = T("Actionable candidate", "행동 우선 후보");
+        QuickPrimaryLabelText.Text = T("CrashLogger context", "CrashLogger 기준");
         QuickConfidenceLabelText.Text = T("Evidence agreement", "근거 합의");
         QuickActionsLabelText.Text = T("Next action", "다음 조치");
         QuickEventsLabelText.Text = T("Blackbox events", "블랙박스 이벤트");
+        ConflictCandidatesTitleText.Text = T("Signal Comparison", "신호 비교");
+        CrashContextTitleText.Text = T("Crash context", "크래시 컨텍스트");
+        ImmediateRecommendationsTitleText.Text = T("Do This Now", "지금 바로");
+        VerificationRecommendationsTitleText.Text = T("Verify Next", "추가 확인");
+        RecaptureRecommendationsTitleText.Text = T("Recapture or Compare", "재수집 / 비교");
         QuickPrimaryValueText.Text = "-";
         QuickConfidenceValueText.Text = "-";
         QuickActionsValueText.Text = "-";
@@ -366,6 +374,7 @@ public sealed partial class MainWindow : Window
             CorrelationBadge.Visibility = Visibility.Collapsed;
         }
 
+        CrashContextSummaryText.Text = _vm.CrashContextSummary;
         ModuleText.Text = _vm.ModuleText;
         ModNameText.Text = _vm.ModNameText;
 
@@ -376,6 +385,20 @@ public sealed partial class MainWindow : Window
         QuickConfidenceValueText.Text = _vm.QuickConfidenceValue;
         QuickPrimaryLabelText.Text = _vm.QuickPrimaryLabel;
         QuickActionsValueText.Text = _vm.QuickActionsValue;
+        QuickEventsValueText.Text = _vm.QuickEventsValue;
+
+        ConflictCandidatesPanel.Visibility = _vm.ConflictComparisonRows.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ImmediateRecommendationsSection.Visibility = _vm.ImmediateRecommendations.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        VerificationRecommendationsSection.Visibility = _vm.VerificationRecommendations.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RecaptureRecommendationsSection.Visibility = _vm.RecaptureRecommendations.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         if (_vm.ShowTroubleshooting)
         {
@@ -636,7 +659,6 @@ public sealed partial class MainWindow : Window
         QuickEventsValueText.FontSize = compact ? 16 : 18;
 
         SuspectsList.MaxHeight = compact ? 240 : 320;
-        RecommendationsList.MaxHeight = compact ? 240 : 320;
         CallstackList.MaxHeight = compact ? 320 : 500;
         EvidenceList.MaxHeight = compact ? 320 : 500;
         ResourcesList.MaxHeight = compact ? 320 : 500;
