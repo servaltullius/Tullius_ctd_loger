@@ -34,10 +34,18 @@ def _touch(path: Path) -> None:
 
 
 def main() -> int:
+    agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    development_md = (REPO_ROOT / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
     package_py = REPO_ROOT / "scripts" / "package.py"
     gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
+    build_win_from_wsl = (REPO_ROOT / "scripts" / "build-win-from-wsl.sh").read_text(
+        encoding="utf-8"
+    )
+    build_winui_from_wsl = (
+        REPO_ROOT / "scripts" / "build-winui-from-wsl.sh"
+    ).read_text(encoding="utf-8")
 
     assert "scripts/release_contract.py" in gate_script, (
         "release gate must sync release_contract.py to catch mirror drift"
@@ -59,6 +67,33 @@ def main() -> int:
     )
     assert "popd" in build_winui_script, (
         "build-winui.cmd must restore the working directory after UNC-safe pushd handling"
+    )
+    assert "wslpath -w" in build_win_from_wsl, (
+        "build-win-from-wsl.sh must convert the batch path to a Windows absolute path"
+    )
+    assert "powershell.exe" in build_win_from_wsl, (
+        "build-win-from-wsl.sh must invoke Windows PowerShell with the absolute batch path"
+    )
+    assert "wslpath -w" in build_winui_from_wsl, (
+        "build-winui-from-wsl.sh must convert the batch path to a Windows absolute path"
+    )
+    assert "powershell.exe" in build_winui_from_wsl, (
+        "build-winui-from-wsl.sh must invoke Windows PowerShell with the absolute batch path"
+    )
+    assert "bash scripts/build-win-from-wsl.sh" in agents_md, (
+        "AGENTS build guide must document the WSL build wrapper entry point"
+    )
+    assert "bash scripts/build-winui-from-wsl.sh" in agents_md, (
+        "AGENTS build guide must document the WSL WinUI build wrapper entry point"
+    )
+    assert "bash scripts/build-win-from-wsl.sh" in development_md, (
+        "DEVELOPMENT.md must document the WSL build wrapper entry point"
+    )
+    assert "bash scripts/build-winui-from-wsl.sh" in development_md, (
+        "DEVELOPMENT.md must document the WSL WinUI build wrapper entry point"
+    )
+    assert "cmd.exe /c scripts\\\\build-win.cmd" in development_md, (
+        "DEVELOPMENT.md must explain that relative cmd.exe launches from WSL are not supported"
     )
     assert "SkyrimDiagDumpToolWinUI.runtimeconfig.json" in build_winui_script, (
         "build-winui.cmd must require WinUI runtimeconfig sidecar when selecting output"

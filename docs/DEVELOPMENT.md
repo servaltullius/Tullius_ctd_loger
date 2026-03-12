@@ -174,6 +174,16 @@ Build modern WinUI viewer output (framework-dependent / lightweight):
 scripts\\build-winui.cmd
 ```
 
+WSL entry points:
+```bash
+bash scripts/build-win-from-wsl.sh
+bash scripts/build-winui-from-wsl.sh
+```
+
+Notes:
+- The WSL wrappers convert the sibling batch path with `wslpath -w` and invoke Windows PowerShell with an absolute Windows path.
+- Relative launches such as `cmd.exe /c scripts\\build-win.cmd` are not supported from WSL because `cmd.exe` falls back from the UNC current directory before it can resolve the relative script path.
+
 Notes:
 - This project uses the CommonLibSSE-NG vcpkg port. See `vcpkg-configuration.json`.
 - Optional env vars for post-build copy:

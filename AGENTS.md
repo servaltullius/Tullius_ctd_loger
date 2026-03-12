@@ -9,10 +9,16 @@ cmake --build build-linux-test
 ctest --test-dir build-linux-test --output-on-failure
 ```
 
-## Windows builds
+## Windows builds (native Windows)
 ```bash
 scripts\\build-win.cmd
 scripts\\build-winui.cmd
+```
+
+## Windows builds from WSL
+```bash
+bash scripts/build-win-from-wsl.sh
+bash scripts/build-winui-from-wsl.sh
 ```
 
 ## Packaging
