@@ -367,6 +367,32 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[로딩 중] 해당 시점에 개입하는 모드(애니메이션/스켈레톤/바디/물리/프리캐시)를 우선 점검");
   }
 
+  if (r.freeze_analysis.has_analysis) {
+    if (r.freeze_analysis.state_id == "deadlock_likely") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] WCT cycle evidence makes deadlock the primary interpretation. Check synchronization-heavy mods and thread ownership first."
+        : L"[프리징] WCT cycle 근거가 있어 데드락 해석이 우선입니다. 동기화/후킹 성격이 강한 모드와 스레드 소유 관계를 먼저 확인하세요.");
+    } else if (r.freeze_analysis.state_id == "loader_stall_likely") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] Loading-context evidence points to a loader stall. Prioritize mesh/animation/physics/precache changes before generic DLL triage."
+        : L"[프리징] 로딩 문맥 근거가 있어 loader stall 가능성이 큽니다. 일반 DLL 점검보다 메쉬/애니메이션/물리/프리캐시 변경을 먼저 보세요.");
+    } else if (r.freeze_analysis.state_id == "freeze_candidate") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] Signals indicate a real freeze, but not a clean deadlock/stall classification yet. Compare related candidates and repeat capture during the issue."
+        : L"[프리징] 실제 프리징 신호는 있으나 데드락/로더 stall로 깔끔하게 분류되지는 않았습니다. 관련 후보를 비교하고 문제 상황에서 다시 캡처하세요.");
+    } else if (r.freeze_analysis.state_id == "freeze_ambiguous") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] Current freeze evidence is ambiguous. Prefer another capture during the issue and compare WCT/events before escalating."
+        : L"[프리징] 현재 프리징 근거가 애매합니다. 확대 해석 전에 문제 상황에서 다시 캡처해 WCT/이벤트와 비교하세요.");
+    }
+
+    if (r.freeze_analysis.support_quality == "snapshot_fallback") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] PSS snapshot was requested but capture fell back to live-process transport. Treat weak freeze conclusions more conservatively."
+        : L"[프리징] PSS snapshot을 요청했지만 live-process로 fallback되었습니다. 약한 프리징 결론은 더 보수적으로 해석하세요.");
+    }
+  }
+
   if (r.has_wct) {
     if (isHangLike) {
       if (wct) {

@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(skydiag_hang_suppression_tests
   hang_suppression_tests.cpp
@@ -182,6 +183,22 @@ target_include_directories(skydiag_candidate_consensus_tests PRIVATE
 )
 
 add_test(NAME skydiag_candidate_consensus_tests COMMAND skydiag_candidate_consensus_tests)
+
+add_executable(skydiag_freeze_candidate_consensus_tests
+  freeze_candidate_consensus_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/FreezeCandidateConsensus.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
+)
+
+target_include_directories(skydiag_freeze_candidate_consensus_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+target_link_libraries(skydiag_freeze_candidate_consensus_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
+
+add_test(NAME skydiag_freeze_candidate_consensus_tests COMMAND skydiag_freeze_candidate_consensus_tests)
 
 add_executable(skydiag_stack_scan_weight_tests
   stack_scan_weight_tests.cpp

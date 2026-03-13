@@ -373,6 +373,21 @@ void TestCaptureQualitySourceContracts()
   AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
 }
 
+void TestFreezeAnalysisSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
+  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+
+  AssertContains(analyzerHeader, "FreezeAnalysisResult", "AnalysisResult must define a freeze analysis model.");
+  AssertContains(analyzerHeader, "freeze_analysis", "AnalysisResult must store freeze analysis.");
+  AssertContains(analyzerHeader, "deadlock_likely", "Freeze analysis state ids must include deadlock_likely.");
+  AssertContains(analyzerHeader, "loader_stall_likely", "Freeze analysis state ids must include loader_stall_likely.");
+  AssertContains(analyzerHeader, "freeze_candidate", "Freeze analysis state ids must include freeze_candidate.");
+  AssertContains(analyzerHeader, "freeze_ambiguous", "Freeze analysis state ids must include freeze_ambiguous.");
+  AssertContains(analyzerCpp, "BuildFreezeCandidateConsensus", "Analyzer must call freeze candidate consensus.");
+}
+
 }  // namespace
 
 int main()
@@ -386,5 +401,6 @@ int main()
   TestCrashHistoryBucketCorrelation();
   TestCrashHistoryBucketCandidateStats();
   TestCaptureQualitySourceContracts();
+  TestFreezeAnalysisSourceContracts();
   return 0;
 }

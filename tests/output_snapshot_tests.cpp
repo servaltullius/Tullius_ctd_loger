@@ -105,6 +105,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(j, "symbolization", "object", "root");
   AssertIsType(j, "resources", "array", "root");
   AssertIsType(j, "actionable_candidates", "array", "root");
+  AssertIsType(j, "freeze_analysis", "object", "root");
   AssertIsType(j, "evidence", "array", "root");
   AssertIsType(j, "recommendations", "array", "root");
 
@@ -224,6 +225,14 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
     AssertIsType(c, "conflicting_families", "array", "actionable_candidates[]");
   }
 
+  // ── freeze_analysis ──
+  const auto& freeze = j["freeze_analysis"];
+  AssertIsType(freeze, "state_id", "string", "freeze_analysis");
+  AssertIsType(freeze, "confidence", "string", "freeze_analysis");
+  AssertIsType(freeze, "support_quality", "string", "freeze_analysis");
+  AssertIsType(freeze, "primary_reasons", "array", "freeze_analysis");
+  AssertIsType(freeze, "related_candidates", "array", "freeze_analysis");
+
   // ── recommendations ──
   for (const auto& r : j["recommendations"]) {
     assert(r.is_string());
@@ -245,6 +254,7 @@ void TestGoldenJsonValues(const nlohmann::json& j)
   assert(j["callstack"]["frames"].size() == 4);
   assert(j["evidence"].size() == 1);
   assert(j["recommendations"].size() == 2);
+  assert(j["freeze_analysis"]["state_id"].is_string());
 
   // CrashLogger object_refs with FormID
   assert(j["crash_logger"]["object_refs"].size() == 1);
@@ -284,6 +294,7 @@ void TestOutputWriterEmitsAllFields()
     "\"symbolization\"",
     "\"resources\"",
     "\"actionable_candidates\"",
+    "\"freeze_analysis\"",
     "\"evidence\"",
     "\"recommendations\"",
   };
@@ -324,6 +335,10 @@ void TestOutputWriterEmitsAllFields()
     "\"family_count\"",
     "\"supporting_families\"",
     "\"conflicting_families\"",
+    "\"state_id\"",
+    "\"support_quality\"",
+    "\"primary_reasons\"",
+    "\"related_candidates\"",
     "\"enb_detected\"",
     "\"reshade_detected\"",
     "\"dxvk_detected\"",
@@ -366,6 +381,7 @@ void TestOutputWriterReportTextSections()
     "Recommendations",
     "Callstack",
     "Suspects",
+    "FreezeAnalysis:",
     "HasBlackbox:",
     "HasWCT:",
   };

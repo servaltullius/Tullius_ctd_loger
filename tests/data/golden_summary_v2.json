@@ -110,6 +110,15 @@
   },
   "resources": [],
   "actionable_candidates": [],
+  "freeze_analysis": {
+    "state_id": "freeze_ambiguous",
+    "confidence": "Low",
+    "support_quality": "unknown",
+    "primary_reasons": [
+      "Freeze evidence was too weak or conflicting"
+    ],
+    "related_candidates": []
+  },
   "evidence": [
     {
       "confidence": "High",

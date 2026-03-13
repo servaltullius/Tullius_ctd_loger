@@ -51,6 +51,25 @@ struct ActionableCandidate
   bool has_conflict = false;
 };
 
+struct FreezeRelatedCandidate
+{
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
+  std::wstring confidence;
+  std::wstring display_name;
+};
+
+struct FreezeAnalysisResult
+{
+  // state ids: deadlock_likely / loader_stall_likely / freeze_candidate / freeze_ambiguous
+  bool has_analysis = false;
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
+  std::wstring confidence;
+  std::string state_id;
+  std::string support_quality;
+  std::vector<std::wstring> primary_reasons;
+  std::vector<FreezeRelatedCandidate> related_candidates;
+};
+
 struct EventRow
 {
   std::uint32_t i = 0;
@@ -177,6 +196,7 @@ struct AnalysisResult
 
   // Cross-signal actionable candidates (best-effort; mainly for EXE/system victim-like crashes)
   std::vector<ActionableCandidate> actionable_candidates;
+  FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;
   std::string wct_json_utf8;

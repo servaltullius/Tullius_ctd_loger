@@ -61,6 +61,20 @@ static std::wstring DescribeSymbolRuntimeEvidence(const AnalysisResult& r, bool 
   return JoinList(parts, parts.size(), L" | ");
 }
 
+static std::wstring DescribeFreezeSupportQuality(std::string_view supportQuality, bool en)
+{
+  if (supportQuality == "snapshot_backed") {
+    return en ? L"PSS snapshot-backed freeze capture" : L"PSS 스냅샷 기반 프리징 캡처";
+  }
+  if (supportQuality == "snapshot_fallback") {
+    return en ? L"PSS snapshot requested but live-process fallback was used" : L"PSS snapshot 요청 후 live-process fallback 사용";
+  }
+  if (supportQuality == "live_process") {
+    return en ? L"live-process capture quality" : L"live-process 캡처 품질";
+  }
+  return en ? L"unknown capture quality" : L"캡처 품질 정보 없음";
+}
+
 static void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
@@ -689,6 +703,22 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       : (ctx.isManualCapture
           ? L"수동 캡처로 추정됩니다. 이 결과만으로 '문제가 있다'고 단정할 수 없습니다. (상태 확인용)"
           : L"크래시/행 신호 없이 캡처된 덤프입니다. 원인 확정용이 아니라 '상태 확인용'입니다.");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.freeze_analysis.has_analysis) {
+    EvidenceItem e{};
+    e.confidence_level = r.freeze_analysis.confidence_level;
+    e.confidence = r.freeze_analysis.confidence.empty()
+      ? ConfidenceText(lang, r.freeze_analysis.confidence_level)
+      : r.freeze_analysis.confidence;
+    e.title = en ? L"Freeze analysis" : L"프리징 분석";
+    std::wstring details = ToWideAscii(r.freeze_analysis.state_id);
+    details += L" | " + DescribeFreezeSupportQuality(r.freeze_analysis.support_quality, en);
+    if (!r.freeze_analysis.primary_reasons.empty()) {
+      details += L" | " + JoinList(r.freeze_analysis.primary_reasons, 3, L" | ");
+    }
+    e.details = std::move(details);
     r.evidence.push_back(std::move(e));
   }
 

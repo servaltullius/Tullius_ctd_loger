@@ -28,6 +28,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/EvidenceBuilderUtil.cpp
   src/CandidateConsensus.cpp
   src/CandidateConsensus.h
+  src/FreezeCandidateConsensus.cpp
+  src/FreezeCandidateConsensus.h
   src/GraphicsInjectionDiag.cpp
   src/GraphicsInjectionDiag.h
   src/CrashLogger.cpp

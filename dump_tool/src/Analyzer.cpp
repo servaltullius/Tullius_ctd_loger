@@ -4,6 +4,7 @@
 #include "CandidateConsensus.h"
 #include "CrashHistory.h"
 #include "EvidenceBuilder.h"
+#include "FreezeCandidateConsensus.h"
 #include "GraphicsInjectionDiag.h"
 #include "OutputWriterInternals.h"
 #include "ScopedHistoryFileLock.h"
@@ -1035,6 +1036,17 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
 
   BuildEvidenceAndSummary(out, opt.language);
+  FreezeSignalInput freezeSignals{};
+  freezeSignals.is_hang_like = out.is_hang_like;
+  freezeSignals.is_snapshot_like = out.is_snapshot_like;
+  freezeSignals.is_manual_capture = out.is_manual_capture;
+  freezeSignals.loading_context = (out.state_flags & skydiag::kState_Loading) != 0u;
+  freezeSignals.wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8);
+  freezeSignals.actionable_candidates = out.actionable_candidates;
+  out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
+  if (out.freeze_analysis.has_analysis) {
+    BuildEvidenceAndSummary(out, opt.language);
+  }
   AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out);
   if (err) err->clear();
   return true;

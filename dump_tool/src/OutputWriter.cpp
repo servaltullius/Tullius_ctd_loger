@@ -314,6 +314,22 @@ static nlohmann::json BuildSummaryJson(
     });
   }
 
+  summary["freeze_analysis"] = nlohmann::json::object();
+  summary["freeze_analysis"]["state_id"] = r.freeze_analysis.state_id;
+  summary["freeze_analysis"]["confidence"] = WideToUtf8(r.freeze_analysis.confidence);
+  summary["freeze_analysis"]["support_quality"] = r.freeze_analysis.support_quality;
+  summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
+  for (const auto& reason : r.freeze_analysis.primary_reasons) {
+    summary["freeze_analysis"]["primary_reasons"].push_back(WideToUtf8(reason));
+  }
+  summary["freeze_analysis"]["related_candidates"] = nlohmann::json::array();
+  for (const auto& candidate : r.freeze_analysis.related_candidates) {
+    summary["freeze_analysis"]["related_candidates"].push_back({
+      { "confidence", WideToUtf8(candidate.confidence) },
+      { "display_name", WideToUtf8(candidate.display_name) },
+    });
+  }
+
   summary["evidence"] = nlohmann::json::array();
   for (const auto& e : r.evidence) {
     summary["evidence"].push_back({
@@ -490,6 +506,20 @@ static std::string BuildReportText(
   rpt << (en ? "HasWCT: " : "HasWCT: ") << (r.has_wct ? "1" : "0") << "\n";
   rpt << (en ? "Suspects: " : "후보 개수: ") << r.suspects.size() << "\n";
   rpt << (en ? "SuspectsFromStackwalk: " : "콜스택 기반 후보: ") << (r.suspects_from_stackwalk ? "1" : "0") << "\n";
+  if (r.freeze_analysis.has_analysis) {
+    rpt << (en ? "FreezeAnalysis: " : "FreezeAnalysis: ")
+        << r.freeze_analysis.state_id
+        << " confidence=" << WideToUtf8(r.freeze_analysis.confidence)
+        << " support_quality=" << r.freeze_analysis.support_quality
+        << "\n";
+    for (const auto& reason : r.freeze_analysis.primary_reasons) {
+      rpt << "  - " << WideToUtf8(reason) << "\n";
+    }
+    for (const auto& candidate : r.freeze_analysis.related_candidates) {
+      rpt << "  * " << WideToUtf8(candidate.display_name)
+          << " [" << WideToUtf8(candidate.confidence) << "]\n";
+    }
+  }
   rpt << (en ? "\nEvidence:\n" : "\n근거:\n");
   for (const auto& e : r.evidence) {
     rpt << "- [" << WideToUtf8(e.confidence) << "] " << WideToUtf8(e.title) << "\n";
