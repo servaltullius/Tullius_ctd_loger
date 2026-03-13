@@ -21,6 +21,12 @@ internal sealed class AnalysisSummary
     public required IReadOnlyList<ActionableCandidateItem> ActionableCandidates { get; init; }
     public required TriageReview Triage { get; init; }
     public int HistoryCorrelationCount { get; init; }
+    public bool HasRecaptureEvaluation { get; init; }
+    public bool RecaptureTriggered { get; init; }
+    public string RecaptureKind { get; init; } = string.Empty;
+    public string RecaptureTargetProfile { get; init; } = string.Empty;
+    public int RecaptureEscalationLevel { get; init; }
+    public IReadOnlyList<string> RecaptureReasons { get; init; } = Array.Empty<string>();
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
@@ -91,6 +97,11 @@ internal sealed class AnalysisSummary
             && tsTemp.ValueKind == JsonValueKind.Object ? tsTemp : default;
         var triageElement = root.TryGetProperty("triage", out var triageTemp)
             && triageTemp.ValueKind == JsonValueKind.Object ? triageTemp : default;
+        var incidentElement = root.TryGetProperty("incident", out var incidentTemp)
+            && incidentTemp.ValueKind == JsonValueKind.Object ? incidentTemp : default;
+        var recaptureElement = incidentElement.ValueKind == JsonValueKind.Object
+            && incidentElement.TryGetProperty("recapture_evaluation", out var recaptureTemp)
+            && recaptureTemp.ValueKind == JsonValueKind.Object ? recaptureTemp : default;
 
         return new AnalysisSummary
         {
@@ -122,6 +133,12 @@ internal sealed class AnalysisSummary
             TroubleshootingSteps = tsElement.ValueKind != JsonValueKind.Undefined
                 ? ParseStringArray(tsElement, "steps")
                 : new List<string>(),
+            HasRecaptureEvaluation = recaptureElement.ValueKind != JsonValueKind.Undefined,
+            RecaptureTriggered = ReadBool(recaptureElement, "triggered"),
+            RecaptureKind = ReadString(recaptureElement, "kind"),
+            RecaptureTargetProfile = ReadString(recaptureElement, "target_profile"),
+            RecaptureEscalationLevel = ReadInt32(recaptureElement, "escalation_level"),
+            RecaptureReasons = ParseStringArray(root, "incident.recapture_evaluation.reasons"),
             Diagnostics = ParseStringArray(root, "diagnostics"),
         };
     }

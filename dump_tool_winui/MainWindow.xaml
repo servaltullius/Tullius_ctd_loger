@@ -904,6 +904,26 @@
                       </StackPanel>
                     </Expander.Header>
                     <StackPanel x:Name="RecommendationGroupsPanel" Spacing="12" Margin="0,8,0,0">
+                      <Border x:Name="RecaptureContextCard"
+                              Visibility="Collapsed"
+                              Padding="12"
+                              CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}"
+                              BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <StackPanel Spacing="4">
+                          <TextBlock x:Name="RecaptureContextTitleText"
+                                     Text="Recapture context"
+                                     FontSize="13"
+                                     FontWeight="SemiBold"
+                                     Foreground="{ThemeResource AccentBrush}" />
+                          <TextBlock x:Name="RecaptureContextDetailsText"
+                                     TextWrapping="WrapWholeWords"
+                                     FontSize="13"
+                                     Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                      </Border>
+
                       <StackPanel x:Name="ImmediateRecommendationsSection" Spacing="6">
                         <TextBlock x:Name="ImmediateRecommendationsTitleText"
                                    Text="Do This Now"

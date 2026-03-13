@@ -124,6 +124,8 @@ public sealed partial class MainWindow : Window
         ImmediateRecommendationsTitleText.Text = T("Do This Now", "지금 바로");
         VerificationRecommendationsTitleText.Text = T("Verify Next", "추가 확인");
         RecaptureRecommendationsTitleText.Text = T("Recapture or Compare", "재수집 / 비교");
+        RecaptureContextTitleText.Text = T("Recapture context", "재수집 문맥");
+        RecaptureContextDetailsText.Text = "-";
         QuickPrimaryValueText.Text = "-";
         QuickConfidenceValueText.Text = "-";
         QuickActionsValueText.Text = "-";
@@ -547,6 +549,11 @@ public sealed partial class MainWindow : Window
         QuickPrimaryLabelText.Text = _vm.QuickPrimaryLabel;
         QuickActionsValueText.Text = _vm.QuickActionsValue;
         QuickEventsValueText.Text = _vm.QuickEventsValue;
+        RecaptureContextTitleText.Text = _vm.RecaptureContextTitle;
+        RecaptureContextDetailsText.Text = _vm.RecaptureContextDetails;
+        RecaptureContextCard.Visibility = _vm.ShowRecaptureContext
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         ConflictCandidatesPanel.Visibility = _vm.ConflictComparisonRows.Count > 0
             ? Visibility.Visible

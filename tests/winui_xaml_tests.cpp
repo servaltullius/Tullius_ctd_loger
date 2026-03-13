@@ -164,6 +164,33 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
   RequireContains(cs, "CanPromoteLearnedRoot", "Main window must not learn arbitrary direct-selected dump folders.");
 }
 
+static void TestWinUiConsumesRecaptureContext()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  RequireContains(summary, "HasRecaptureEvaluation", "AnalysisSummary must expose recapture-evaluation presence.");
+  RequireContains(summary, "RecaptureTriggered", "AnalysisSummary must expose recapture trigger state.");
+  RequireContains(summary, "RecaptureTargetProfile", "AnalysisSummary must expose recapture target profile.");
+  RequireContains(summary, "incident.recapture_evaluation", "AnalysisSummary must parse incident.recapture_evaluation.");
+
+  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  RequireContains(vm, "ShowRecaptureContext", "View model must expose recapture-context visibility.");
+  RequireContains(vm, "RecaptureContextTitle", "View model must expose recapture-context title.");
+  RequireContains(vm, "RecaptureContextDetails", "View model must expose recapture-context details.");
+  RequireContains(vm, "PopulateRecaptureContext", "View model must compute recapture context from summary metadata.");
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  RequireContains(xaml, "RecaptureContextCard", "Recommendations area must render a dedicated recapture-context card.");
+  RequireContains(xaml, "RecaptureContextTitleText", "Recapture context card must expose a title text element.");
+  RequireContains(xaml, "RecaptureContextDetailsText", "Recapture context card must expose a detail text element.");
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  RequireContains(cs, "RecaptureContextCard.Visibility", "Main window must toggle recapture context visibility when rendering.");
+  RequireContains(cs, "RecaptureContextTitleText.Text", "Main window must render the recapture-context title.");
+  RequireContains(cs, "RecaptureContextDetailsText.Text", "Main window must render the recapture-context details.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -202,6 +229,7 @@ int main()
   TestMainWindowHasCrashLoggerFirstReadingPath();
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
+  TestWinUiConsumesRecaptureContext();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

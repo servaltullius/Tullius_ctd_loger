@@ -55,6 +55,9 @@ internal sealed class MainWindowViewModel
     public string QuickActionsValue { get; private set; } = string.Empty;
     public string QuickEventsValue { get; private set; } = string.Empty;
     public string RecentDumpStatusText { get; private set; } = string.Empty;
+    public bool ShowRecaptureContext { get; private set; }
+    public string RecaptureContextTitle { get; private set; } = string.Empty;
+    public string RecaptureContextDetails { get; private set; } = string.Empty;
     public string TroubleshootingTitle { get; private set; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; private set; } = Array.Empty<string>();
     public bool ShowTroubleshooting { get; private set; }
@@ -66,6 +69,7 @@ internal sealed class MainWindowViewModel
         PopulateHeaderFields(summary);
         PopulateSuspects(summary);
         PopulateRecommendations(summary);
+        PopulateRecaptureContext(summary);
         PopulateConflictComparison(summary);
         PopulateTroubleshooting(summary);
         PopulateCallstack(summary);
@@ -258,6 +262,45 @@ internal sealed class MainWindowViewModel
         {
             RecaptureRecommendations.Add(item);
         }
+    }
+
+    private void PopulateRecaptureContext(AnalysisSummary summary)
+    {
+        if (!summary.HasRecaptureEvaluation || !summary.RecaptureTriggered)
+        {
+            ShowRecaptureContext = false;
+            RecaptureContextTitle = string.Empty;
+            RecaptureContextDetails = string.Empty;
+            return;
+        }
+
+        ShowRecaptureContext = true;
+        RecaptureContextTitle = T("Recapture context", "재수집 문맥");
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(summary.RecaptureTargetProfile))
+        {
+            parts.Add(T("target_profile=", "target_profile=") + summary.RecaptureTargetProfile);
+        }
+
+        if (summary.RecaptureEscalationLevel > 0)
+        {
+            parts.Add(T("escalation_level=", "escalation_level=") + summary.RecaptureEscalationLevel);
+        }
+
+        if (summary.RecaptureReasons.Count > 0)
+        {
+            parts.Add(T("reasons=", "reasons=") + string.Join(", ", summary.RecaptureReasons));
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.RecaptureKind))
+        {
+            parts.Add(T("kind=", "kind=") + summary.RecaptureKind);
+        }
+
+        RecaptureContextDetails = parts.Count == 0
+            ? T("Additional capture context is available.", "추가 캡처 문맥이 있습니다.")
+            : string.Join(" | ", parts);
     }
 
     private IReadOnlyList<RecommendationGroupItem> BuildRecommendationGroups(
