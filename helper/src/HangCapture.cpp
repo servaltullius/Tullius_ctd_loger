@@ -16,6 +16,7 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
+#include "PssSnapshot.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -321,18 +322,41 @@ HangTickResult HandleHangTick(
   wctJson["capture"]["isLoading"] = decision2.isLoading;
   wctJson["capture"]["stateFlags"] = stateFlags2;
 
-  const std::string wctUtf8 = wctJson.dump(2);
-  WriteTextFileUtf8(wctPath, wctUtf8);
-
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
   const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
     skydiag::helper::CaptureKind::Hang);
+  auto pssSnapshot = TryCapturePssSnapshotForFreeze(cfg.enablePssSnapshotForFreeze, proc.process);
+  if (pssSnapshot.requested) {
+    if (pssSnapshot.used) {
+      AppendLogLine(
+        outBase,
+        L"PSS snapshot captured for hang dump (durationMs="
+          + std::to_wstring(pssSnapshot.captureDurationMs)
+          + L").");
+    } else {
+      AppendLogLine(
+        outBase,
+        L"PSS snapshot unavailable for hang dump; falling back to live-process dump (status="
+          + pssSnapshot.status
+          + L").");
+    }
+  }
+
+  wctJson["capture"]["pss_snapshot_requested"] = pssSnapshot.requested;
+  wctJson["capture"]["pss_snapshot_used"] = pssSnapshot.used;
+  wctJson["capture"]["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
+  wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
+  wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
+
+  const std::string wctUtf8 = wctJson.dump(2);
+  WriteTextFileUtf8(wctPath, wctUtf8);
 
   bool dumpWritten = false;
   std::wstring dumpErr;
+  const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
   if (!skydiag::helper::WriteDumpWithStreams(
-        proc.process,
+        dumpSource,
         proc.pid,
         dumpPath,
         proc.shm,
@@ -341,10 +365,13 @@ HangTickResult HandleHangTick(
         pluginScanJson,
         /*isCrash=*/false,
         dumpProfile,
+        /*isProcessSnapshot=*/pssSnapshot.used,
         &dumpErr)) {
+    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     std::wcerr << L"[SkyrimDiagHelper] Hang dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Hang dump failed: " + dumpErr);
   } else {
+    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     dumpWritten = true;
     std::wcout << L"[SkyrimDiagHelper] Hang dump written: " << dumpPath << L"\n";
     std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
@@ -361,6 +388,11 @@ HangTickResult HandleHangTick(
       ctx["threshold_sec"] = decision2.thresholdSec;
       ctx["is_loading"] = decision2.isLoading;
       ctx["in_menu"] = inMenu2;
+      ctx["pss_snapshot_requested"] = pssSnapshot.requested;
+      ctx["pss_snapshot_used"] = pssSnapshot.used;
+      ctx["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
+      ctx["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
+      ctx["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
       const auto manifest = MakeIncidentManifestV1(
         "hang",

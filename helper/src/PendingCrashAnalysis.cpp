@@ -228,6 +228,7 @@ void FinalizePendingCrashAnalysisIfReady(
             pluginScanJson,
             /*isCrash=*/true,
             dumpProfile,
+            /*isProcessSnapshot=*/false,
             &fullDumpErr)) {
         AppendLogLine(outBase, L"Crash full recapture failed: " + fullDumpErr);
       } else {

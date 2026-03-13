@@ -36,6 +36,7 @@ int main()
   AssertContains(ini, "EnableWerDumpFallbackHint", "Missing WER fallback hint toggle in ini");
   AssertContains(ini, "EtwHangProfile", "Missing ETW hang primary profile key in ini");
   AssertContains(ini, "EtwHangFallbackProfile", "Missing ETW hang fallback profile key in ini");
+  AssertContains(ini, "EnablePssSnapshotForFreeze", "Missing PSS snapshot spike feature flag in ini");
 
   const std::filesystem::path configCppPath = repoRoot / "helper" / "src" / "Config.cpp";
   assert(std::filesystem::exists(configCppPath) && "Config.cpp not found");
@@ -51,6 +52,7 @@ int main()
   AssertContains(configCpp, "EnableWerDumpFallbackHint", "Helper config loader does not read WER fallback hint toggle");
   AssertContains(configCpp, "EtwHangProfile", "Helper config loader does not read ETW hang primary profile key");
   AssertContains(configCpp, "EtwHangFallbackProfile", "Helper config loader does not read ETW hang fallback profile key");
+  AssertContains(configCpp, "EnablePssSnapshotForFreeze", "Helper config loader does not read PSS snapshot feature flag");
   AssertContains(configCpp, "ReadIniUint32Clamped(", "Helper config loader must clamp numeric INI values before casting to uint32_t");
   AssertContains(configCpp, "HangThresholdInGameSec", "Helper config clamp helper must cover in-game hang threshold");
   AssertContains(configCpp, "AutoOpenCrashWaitForExitMs", "Helper config clamp helper must cover crash wait timeout");

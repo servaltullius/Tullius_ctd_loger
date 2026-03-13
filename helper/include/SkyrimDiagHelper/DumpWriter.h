@@ -21,6 +21,7 @@ bool WriteDumpWithStreams(
   const std::string& pluginScanJson,
   bool isCrash,
   const DumpProfile& dumpProfile,
+  bool isProcessSnapshot,
   std::wstring* err);
 
 }  // namespace skydiag::helper

@@ -139,6 +139,8 @@ HelperConfig LoadConfig(std::wstring* err)
     path, L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, 0, 60000);
   cfg.autoOpenViewerBeginnerMode =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerBeginnerMode", 1, path.c_str()) != 0;
+  cfg.enablePssSnapshotForFreeze =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnablePssSnapshotForFreeze", 0, path.c_str()) != 0;
 
   cfg.enableAdaptiveLoadingThreshold =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableAdaptiveLoadingThreshold", 1, path.c_str()) != 0;

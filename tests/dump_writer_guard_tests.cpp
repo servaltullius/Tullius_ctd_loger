@@ -28,6 +28,7 @@ int main()
 
   AssertContains(header, "DumpProfile", "DumpWriter must accept an effective DumpProfile.");
   AssertContains(header, "const DumpProfile& dumpProfile", "DumpWriter signature must take DumpProfile by const reference.");
+  AssertContains(header, "bool isProcessSnapshot", "DumpWriter must accept a process-snapshot marker for PSS exports.");
 
   AssertContains(impl, "ResolveDumpProfile", "DumpWriter implementation must resolve or consume dump profiles.");
   AssertContains(impl, "MINIDUMP_CALLBACK_INFORMATION", "DumpWriter must wire MiniDump callback information.");
@@ -35,6 +36,7 @@ int main()
   AssertContains(impl, "&callbackInfo", "MiniDumpWriteDump must receive callback information.");
   AssertContains(impl, "ApplyProfileToDumpType", "DumpWriter must derive dump flags from profile state.");
   AssertContains(impl, "MiniDumpCallback", "DumpWriter must define a callback routine.");
+  AssertContains(impl, "IsProcessSnapshotCallback", "DumpWriter callback must handle process snapshot exports.");
 
   AssertContains(crashCapture, "CaptureKind::Crash", "Crash capture must request the crash dump profile.");
   AssertContains(hangCapture, "CaptureKind::Hang", "Hang capture must request the hang dump profile.");

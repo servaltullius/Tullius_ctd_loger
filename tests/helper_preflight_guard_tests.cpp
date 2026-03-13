@@ -27,17 +27,28 @@ int main()
   const auto helperMain = repoRoot / "helper" / "src" / "main.cpp";
   const auto helperIni = repoRoot / "dist" / "SkyrimDiagHelper.ini";
   const auto wctCapture = repoRoot / "helper" / "src" / "WctCapture.cpp";
+  const auto hangCapture = repoRoot / "helper" / "src" / "HangCapture.cpp";
+  const auto manualCapture = repoRoot / "helper" / "src" / "ManualCapture.cpp";
+  const auto pssSnapshotCpp = repoRoot / "helper" / "src" / "PssSnapshot.cpp";
+  const auto pssSpikeDoc = repoRoot / "docs" / "spikes" / "pss-snapshot-evaluation.md";
 
   assert(std::filesystem::exists(preflightCpp) && "helper/src/CompatibilityPreflight.cpp not found");
   assert(std::filesystem::exists(preflightHeader) && "helper/src/CompatibilityPreflight.h not found");
   assert(std::filesystem::exists(helperMain) && "helper/src/main.cpp not found");
   assert(std::filesystem::exists(helperIni) && "dist/SkyrimDiagHelper.ini not found");
   assert(std::filesystem::exists(wctCapture) && "helper/src/WctCapture.cpp not found");
+  assert(std::filesystem::exists(hangCapture) && "helper/src/HangCapture.cpp not found");
+  assert(std::filesystem::exists(manualCapture) && "helper/src/ManualCapture.cpp not found");
+  assert(std::filesystem::exists(pssSnapshotCpp) && "helper/src/PssSnapshot.cpp not found");
+  assert(std::filesystem::exists(pssSpikeDoc) && "docs/spikes/pss-snapshot-evaluation.md not found");
 
   const auto preflightCppText = ReadAllText(preflightCpp);
   const auto helperMainText = ReadAllText(helperMain);
   const auto helperIniText = ReadAllText(helperIni);
   const auto wctCaptureText = ReadAllText(wctCapture);
+  const auto hangCaptureText = ReadAllText(hangCapture);
+  const auto manualCaptureText = ReadAllText(manualCapture);
+  const auto pssSnapshotCppText = ReadAllText(pssSnapshotCpp);
 
   AssertContains(
     preflightCppText,
@@ -100,6 +111,26 @@ int main()
     preflightCppText,
     "SYMBOL_CACHE_HEALTH",
     "Preflight must report symbol cache health.");
+  AssertContains(
+    helperIniText,
+    "EnablePssSnapshotForFreeze",
+    "Helper ini must expose the opt-in PSS snapshot freeze toggle.");
+  AssertContains(
+    pssSnapshotCppText,
+    "PssCaptureSnapshot",
+    "PSS spike helper must call PssCaptureSnapshot.");
+  AssertContains(
+    pssSnapshotCppText,
+    "PssFreeSnapshot",
+    "PSS spike helper must release snapshots with PssFreeSnapshot.");
+  AssertContains(
+    hangCaptureText,
+    "TryCapturePssSnapshotForFreeze",
+    "Hang capture spike must attempt PSS snapshot capture through the shared helper.");
+  AssertContains(
+    manualCaptureText,
+    "TryCapturePssSnapshotForFreeze",
+    "Manual capture spike must attempt PSS snapshot capture through the shared helper.");
 
   return 0;
 }

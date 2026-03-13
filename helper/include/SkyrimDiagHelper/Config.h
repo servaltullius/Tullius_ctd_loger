@@ -35,6 +35,7 @@ struct HelperConfig {
   bool autoOpenHangAfterProcessExit = true;
   std::uint32_t autoOpenHangDelayMs = 2000;
   bool autoOpenViewerBeginnerMode = true;
+  bool enablePssSnapshotForFreeze = false;
   bool enableAdaptiveLoadingThreshold = true;
   std::uint32_t adaptiveLoadingMinSec = 120;
   std::uint32_t adaptiveLoadingMinExtraSec = 120;

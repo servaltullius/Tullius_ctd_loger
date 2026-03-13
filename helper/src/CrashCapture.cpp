@@ -414,6 +414,7 @@ bool HandleCrashEventTick(
     {},
     true,
     dumpProfile,
+    /*isProcessSnapshot=*/false,
     &dumpErr);
 
   if (!dumpOk) {

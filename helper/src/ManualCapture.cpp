@@ -15,6 +15,7 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
+#include "PssSnapshot.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -83,17 +84,40 @@ void DoManualCapture(
   wctJson["capture"]["isLoading"] = decision.isLoading;
   wctJson["capture"]["stateFlags"] = stateFlags;
 
-  const std::string wctUtf8 = wctJson.dump(2);
-  WriteTextFileUtf8(wctPath, wctUtf8);
-
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
   const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
     skydiag::helper::CaptureKind::Manual);
+  auto pssSnapshot = TryCapturePssSnapshotForFreeze(cfg.enablePssSnapshotForFreeze, proc.process);
+  if (pssSnapshot.requested) {
+    if (pssSnapshot.used) {
+      AppendLogLine(
+        outBase,
+        L"PSS snapshot captured for manual dump (durationMs="
+          + std::to_wstring(pssSnapshot.captureDurationMs)
+          + L").");
+    } else {
+      AppendLogLine(
+        outBase,
+        L"PSS snapshot unavailable for manual dump; falling back to live-process dump (status="
+          + pssSnapshot.status
+          + L").");
+    }
+  }
+
+  wctJson["capture"]["pss_snapshot_requested"] = pssSnapshot.requested;
+  wctJson["capture"]["pss_snapshot_used"] = pssSnapshot.used;
+  wctJson["capture"]["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
+  wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
+  wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
+
+  const std::string wctUtf8 = wctJson.dump(2);
+  WriteTextFileUtf8(wctPath, wctUtf8);
 
   std::wstring dumpErr;
+  const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
   if (!skydiag::helper::WriteDumpWithStreams(
-        proc.process,
+        dumpSource,
         proc.pid,
         dumpPath,
         proc.shm,
@@ -102,10 +126,13 @@ void DoManualCapture(
         pluginScanJson,
         /*isCrash=*/false,
         dumpProfile,
+        /*isProcessSnapshot=*/pssSnapshot.used,
         &dumpErr)) {
+    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     std::wcerr << L"[SkyrimDiagHelper] Manual dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Manual dump failed: " + dumpErr);
   } else {
+    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     std::wcout << L"[SkyrimDiagHelper] Manual dump written: " << dumpPath << L"\n";
     std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
     AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
@@ -119,6 +146,11 @@ void DoManualCapture(
       ctx["threshold_sec"] = decision.thresholdSec;
       ctx["is_loading"] = decision.isLoading;
       ctx["in_menu"] = inMenu;
+      ctx["pss_snapshot_requested"] = pssSnapshot.requested;
+      ctx["pss_snapshot_used"] = pssSnapshot.used;
+      ctx["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
+      ctx["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
+      ctx["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
       const auto manifest = MakeIncidentManifestV1(
         "manual",

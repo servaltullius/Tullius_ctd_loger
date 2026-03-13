@@ -17,6 +17,7 @@ struct DumpCallbackContext
 {
   DumpProfile profile{};
   DWORD preferredThreadId = 0;
+  bool isProcessSnapshot = false;
 };
 
 MINIDUMP_TYPE ApplyProfileToDumpType(const DumpProfile& dumpProfile)
@@ -49,6 +50,10 @@ BOOL CALLBACK MiniDumpCallback(
   }
 
   const auto callbackType = callbackInput->CallbackType;
+  if (callbackType == IsProcessSnapshotCallback && callbackOutput) {
+    callbackOutput->Status = ctx->isProcessSnapshot ? S_FALSE : S_OK;
+    return TRUE;
+  }
   (void)callbackType;
   return TRUE;
 }
@@ -65,6 +70,7 @@ bool WriteDumpWithStreams(
   const std::string& pluginScanJson,
   bool isCrash,
   const DumpProfile& dumpProfile,
+  bool isProcessSnapshot,
   std::wstring* err)
 {
   if (!process) {
@@ -147,6 +153,7 @@ bool WriteDumpWithStreams(
   DumpCallbackContext callbackContext{};
   callbackContext.profile = effectiveProfile;
   callbackContext.preferredThreadId = mei.ThreadId;
+  callbackContext.isProcessSnapshot = isProcessSnapshot;
   MINIDUMP_CALLBACK_INFORMATION callbackInfo{};
   callbackInfo.CallbackRoutine = MiniDumpCallback;
   callbackInfo.CallbackParam = &callbackContext;
