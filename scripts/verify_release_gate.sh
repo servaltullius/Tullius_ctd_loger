@@ -20,6 +20,19 @@ for item in REQUIRED_WINUI_BUILD_OUTPUTS:
 PY
 )
 
+WINUI_BUILD_ROOT="$({
+  PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - "${WIN_ROOT}/build-winui" <<'PY'
+from pathlib import Path
+import sys
+
+from release_contract import find_winui_build_root
+
+root = find_winui_build_root(Path(sys.argv[1]))
+if root is not None:
+    print(root)
+PY
+})"
+
 readarray -t REQUIRED_ZIP_ENTRIES < <(
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
 from release_contract import REQUIRED_ZIP_ENTRIES
@@ -81,8 +94,12 @@ else
 fi
 
 echo "[gate] 2/5 required WinUI files"
+if [[ -z "${WINUI_BUILD_ROOT}" ]]; then
+  echo "missing WinUI publish root under: ${WIN_ROOT}/build-winui"
+  exit 1
+fi
 for asset in "${REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
-  f="${WIN_ROOT}/build-winui/${asset}"
+  f="${WINUI_BUILD_ROOT}/${asset}"
   [[ -f "${f}" ]] || { echo "missing: ${f}"; exit 1; }
 done
 

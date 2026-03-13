@@ -26,6 +26,7 @@ EXCLUDED_WINUI_TOP_LEVEL_DIRS = frozenset(
     _RELEASE_CONTRACT.EXCLUDED_WINUI_TOP_LEVEL_DIRS
 )
 REQUIRED_WINUI_BUILD_OUTPUTS = tuple(_RELEASE_CONTRACT.REQUIRED_WINUI_BUILD_OUTPUTS)
+find_winui_build_root = _RELEASE_CONTRACT.find_winui_build_root
 
 
 def _touch(path: Path) -> None:
@@ -41,6 +42,8 @@ def main() -> int:
     gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
+    linux_workflow = (REPO_ROOT / ".github" / "workflows" / "linux-tests.yml").read_text(encoding="utf-8")
+    vibe_py = (REPO_ROOT / "scripts" / "vibe.py").read_text(encoding="utf-8")
     build_win_from_wsl = (REPO_ROOT / "scripts" / "build-win-from-wsl.sh").read_text(
         encoding="utf-8"
     )
@@ -56,6 +59,21 @@ def main() -> int:
     )
     assert "scripts/build-win.cmd" in gate_script, (
         "release gate must sync build-win.cmd alongside packaging scripts"
+    )
+    assert "find_winui_build_root" in gate_script, (
+        "release gate must resolve the real WinUI publish root instead of assuming a flat top-level layout"
+    )
+    assert "nlohmann-json3-dev" in linux_workflow, (
+        "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
+    )
+    assert "_configure_fallback" in vibe_py, (
+        "vibe.py must provide a configure fallback when repo-local brain scripts are absent"
+    )
+    assert "_doctor_fallback" in vibe_py, (
+        "vibe.py must provide a doctor fallback when repo-local brain scripts are absent"
+    )
+    assert "_agents_doctor_fallback" in vibe_py, (
+        "vibe.py must provide an agents-doctor fallback when repo-local brain scripts are absent"
     )
     assert 'pushd "%~dp0.."' in build_win_script, (
         "build-win.cmd must self-map the repo root so WSL/UNC launches do not break cmd/lib.exe"
@@ -146,6 +164,17 @@ def main() -> int:
         # Nested build/publish output should be ignored by the packager.
         _touch(winui_dir / "publish" / "SkyrimDiagDumpToolWinUI.exe")
         _touch(winui_dir / "win-x64" / "SkyrimDiagDumpToolWinUI.exe")
+
+        nested_only_dir = td_path / "nested-winui"
+        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.exe")
+        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.pri")
+        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.runtimeconfig.json")
+        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.deps.json")
+        _touch(nested_only_dir / "publish" / "App.xbf")
+        _touch(nested_only_dir / "publish" / "MainWindow.xbf")
+        assert find_winui_build_root(nested_only_dir) == nested_only_dir / "publish", (
+            "release contract helper must locate nested WinUI publish roots for CI and release-gate parity"
+        )
 
         proc = subprocess.run(
             [

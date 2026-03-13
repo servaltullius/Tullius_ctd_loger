@@ -10,7 +10,11 @@ import time
 import zipfile
 from pathlib import Path
 
-from release_contract import EXCLUDED_WINUI_TOP_LEVEL_DIRS, REQUIRED_WINUI_ASSETS
+from release_contract import (
+    EXCLUDED_WINUI_TOP_LEVEL_DIRS,
+    REQUIRED_WINUI_ASSETS,
+    find_winui_build_root,
+)
 
 
 def _timestamp() -> str:
@@ -161,18 +165,14 @@ def main(argv: list[str]) -> int:
         else _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.pdb")
     )
 
-    winui_exe = None
-    winui_publish_dir = None
-    if winui_dir.exists():
-        winui_exe = _find_artifact(winui_dir, None, "SkyrimDiagDumpToolWinUI.exe")
-        if winui_exe:
-            winui_publish_dir = winui_exe.parent
-    if not winui_exe or not winui_publish_dir:
+    winui_publish_dir = find_winui_build_root(winui_dir)
+    if not winui_publish_dir:
         print(
             f"ERROR: could not find SkyrimDiagDumpToolWinUI.exe under {winui_dir}",
             file=sys.stderr,
         )
         return 3
+    winui_exe = winui_publish_dir / "SkyrimDiagDumpToolWinUI.exe"
     for rel in REQUIRED_WINUI_ASSETS:
         required_path = winui_publish_dir / rel
         if not required_path.is_file():

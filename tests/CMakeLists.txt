@@ -348,6 +348,11 @@ add_test(
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
 )
 
+add_test(
+  NAME skydiag_vibekit_smoke_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/vibekit_smoke_tests.py"
+)
+
 add_executable(skydiag_graphics_injection_rules_tests
   graphics_injection_rules_tests.cpp
 )

@@ -36,6 +36,14 @@ def _run(script: Path, argv: list[str]) -> int:
     return subprocess.call([sys.executable, str(script), *argv], cwd=str(root))
 
 
+def _brain_script(root: Path, name: str) -> Path:
+    return root / ".vibe" / "brain" / name
+
+
+def _has_brain_script(root: Path, name: str) -> bool:
+    return _brain_script(root, name).is_file()
+
+
 def _init_boundaries_template(root: Path) -> int:
     cfg_path = root / ".vibe" / "config.json"
     try:
@@ -65,6 +73,62 @@ def _init_boundaries_template(root: Path) -> int:
         print(f"[boundaries] initialized starter template in {cfg_path}")
     else:
         print(f"[boundaries] template unchanged: {reason}")
+    return 0
+
+
+def _configure_fallback(root: Path, apply: bool) -> int:
+    print("[vibe] configure fallback: bootstrap + starter architecture.rules")
+    if not apply:
+        print("[vibe] no changes applied (use --apply to write starter configuration)")
+        return 0
+    return _init_boundaries_template(root)
+
+
+def _doctor_fallback(root: Path, full: bool, profile: bool) -> int:
+    checks: list[tuple[bool, str]] = [
+        ((root / ".vibe" / "config.json").is_file(), ".vibe/config.json"),
+        ((root / ".vibe" / "AGENT_CHECKLIST.md").is_file(), ".vibe/AGENT_CHECKLIST.md"),
+        ((root / ".vibe" / "agent_memory" / "DONT_DO_THIS.md").is_file(), ".vibe/agent_memory/DONT_DO_THIS.md"),
+        ((root / ".vibe" / "context" / "LATEST_CONTEXT.md").is_file(), ".vibe/context/LATEST_CONTEXT.md"),
+        ((root / ".vibe" / "context" / "PROFILE_GUIDE.md").is_file(), ".vibe/context/PROFILE_GUIDE.md"),
+    ]
+    failed = [label for ok, label in checks if not ok]
+    if failed:
+        for label in failed:
+            print(f"[vibe] missing required file: {label}", file=sys.stderr)
+        return 2
+    mode = "--full" if full else "--basic"
+    if profile:
+        mode += " --profile"
+    print(f"[vibe] doctor fallback OK ({mode})")
+    return 0
+
+
+def _agents_doctor_fallback(root: Path, fail: bool) -> int:
+    required_markers = (
+        ".vibe/context/LATEST_CONTEXT.md",
+        "python3 scripts/vibe.py configure --apply",
+    )
+    files = [
+        root / "AGENTS.md",
+        root / ".github" / "copilot-instructions.md",
+    ]
+    issues: list[str] = []
+    for path in files:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "# BUILD GUIDE" in text and "build and verification entry points" in text:
+            continue
+        if not any(marker in text for marker in required_markers):
+            issues.append(f"{path.relative_to(root)} missing vibe-kit entrypoint guidance")
+
+    if issues:
+        for issue in issues:
+            print(f"[vibe] {issue}", file=sys.stderr)
+        return 2 if fail else 0
+
+    print("[vibe] agents doctor fallback OK")
     return 0
 
 
@@ -285,7 +349,9 @@ def main(argv: list[str]) -> int:
             conf_args.append("--apply")
         if args.force:
             conf_args.append("--force")
-        return _run(brain / "configure.py", conf_args)
+        if _has_brain_script(root, "configure.py"):
+            return _run(brain / "configure.py", conf_args)
+        return _configure_fallback(root, args.apply)
 
     if args.cmd == "init":
         rc = _run(brain / "indexer.py", ["--scan-all"])
@@ -314,7 +380,9 @@ def main(argv: list[str]) -> int:
             doc_args.append("--full")
         if args.profile:
             doc_args.append("--profile")
-        return _run(brain / "doctor.py", doc_args)
+        if _has_brain_script(root, "doctor.py"):
+            return _run(brain / "doctor.py", doc_args)
+        return _doctor_fallback(root, args.full, args.profile)
 
     if args.cmd == "watch":
         return _run(brain / "watcher.py", [f"--debounce-ms={args.debounce_ms}"])
@@ -402,12 +470,16 @@ def main(argv: list[str]) -> int:
             lint_args = [f"--max-kb={args.max_kb}"]
             if args.fail:
                 lint_args.append("--fail")
-            return _run(brain / "agents_lint.py", lint_args)
+            if _has_brain_script(root, "agents_lint.py"):
+                return _run(brain / "agents_lint.py", lint_args)
+            return 0
         if args.agents_cmd == "doctor":
             doctor_args: list[str] = []
             if args.fail:
                 doctor_args.append("--fail")
-            return _run(brain / "agents_doctor.py", doctor_args)
+            if _has_brain_script(root, "agents_doctor.py"):
+                return _run(brain / "agents_doctor.py", doctor_args)
+            return _agents_doctor_fallback(root, args.fail)
         raise RuntimeError(f"unknown agents cmd: {args.agents_cmd}")
 
     raise RuntimeError(f"unknown cmd: {args.cmd}")
