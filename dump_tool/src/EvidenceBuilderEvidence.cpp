@@ -730,6 +730,18 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
           : (L" | 최근 비시스템 모듈: " + JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 3, L", "));
       }
     }
+    if (r.freeze_analysis.first_chance_context.has_context) {
+      details += en
+        ? (L" | repeated suspicious first-chance=" + std::to_wstring(r.freeze_analysis.first_chance_context.repeated_signature_count) +
+            L", loading-window count=" + std::to_wstring(r.freeze_analysis.first_chance_context.loading_window_count))
+        : (L" | 반복 suspicious first-chance=" + std::to_wstring(r.freeze_analysis.first_chance_context.repeated_signature_count) +
+            L", loading-window count=" + std::to_wstring(r.freeze_analysis.first_chance_context.loading_window_count));
+      if (!r.freeze_analysis.first_chance_context.recent_non_system_modules.empty()) {
+        details += en
+          ? (L" | first-chance modules: " + JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 3, L", "))
+          : (L" | first-chance 모듈: " + JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 3, L", "));
+      }
+    }
     e.details = std::move(details);
     r.evidence.push_back(std::move(e));
   }

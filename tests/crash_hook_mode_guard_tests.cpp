@@ -56,6 +56,18 @@ int main()
     "return IsFatalExceptionCode(code);",
     "Crash handler mode 1 must not record every non-ignorable first-chance exception.");
   AssertContains(
+    crashHandler,
+    "PushFirstChanceExceptionEvent(",
+    "Crash handler must emit suspicious first-chance telemetry without widening crash capture policy.");
+  AssertContains(
+    crashHandler,
+    "IsBenignFirstChanceException(",
+    "Crash handler must explicitly filter benign first-chance exceptions.");
+  AssertContains(
+    crashHandler,
+    "ConsumeFirstChanceTelemetryBudget(",
+    "Crash handler must rate-limit or dedupe first-chance telemetry.");
+  AssertContains(
     pluginMain,
     "EnableAdaptiveResourceLogThrottle",
     "Plugin config loader must read adaptive resource log throttle toggle");

@@ -32,6 +32,7 @@ std::wstring EventTypeName(std::uint16_t t)
     case EventType::kModuleUnload: return L"ModuleUnload";
     case EventType::kThreadCreate: return L"ThreadCreate";
     case EventType::kThreadExit: return L"ThreadExit";
+    case EventType::kFirstChanceException: return L"FirstChanceException";
     case EventType::kCrash: return L"Crash";
     case EventType::kHangMark: return L"HangMark";
     default: return L"Unknown";
@@ -228,6 +229,18 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
       }
       if (c != 0u) {
         s += L" flags=" + DecodeStateFlags(c);
+      }
+      return s;
+    }
+
+    case EventType::kFirstChanceException: {
+      std::wstring s = L"code=0x";
+      wchar_t codeBuf[16];
+      std::swprintf(codeBuf, sizeof(codeBuf) / sizeof(codeBuf[0]), L"%08X", static_cast<unsigned>(a & 0xFFFFFFFFu));
+      s += codeBuf;
+      const auto label = DecodePackedShortText(b, c, d);
+      if (!label.empty()) {
+        s += L" module=" + label;
       }
       return s;
     }

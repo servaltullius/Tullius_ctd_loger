@@ -342,6 +342,17 @@ static nlohmann::json BuildSummaryJson(
   for (const auto& moduleName : r.freeze_analysis.blackbox_context.recent_non_system_modules) {
     summary["freeze_analysis"]["blackbox_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
   }
+  summary["freeze_analysis"]["first_chance_context"] = {
+    { "has_context", r.freeze_analysis.first_chance_context.has_context },
+    { "recent_count", r.freeze_analysis.first_chance_context.recent_count },
+    { "unique_signature_count", r.freeze_analysis.first_chance_context.unique_signature_count },
+    { "loading_window_count", r.freeze_analysis.first_chance_context.loading_window_count },
+    { "repeated_signature_count", r.freeze_analysis.first_chance_context.repeated_signature_count },
+    { "recent_non_system_modules", nlohmann::json::array() },
+  };
+  for (const auto& moduleName : r.freeze_analysis.first_chance_context.recent_non_system_modules) {
+    summary["freeze_analysis"]["first_chance_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
+  }
 
   summary["evidence"] = nlohmann::json::array();
   for (const auto& e : r.evidence) {
@@ -533,6 +544,18 @@ static std::string BuildReportText(
     if (!r.freeze_analysis.blackbox_context.recent_non_system_modules.empty()) {
       rpt << "  blackbox recent_non_system_modules="
           << WideToUtf8(JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", "))
+          << "\n";
+    }
+    rpt << "  first_chance recent=" << r.freeze_analysis.first_chance_context.recent_count
+        << " loading_window=" << r.freeze_analysis.first_chance_context.loading_window_count
+        << " repeated=" << r.freeze_analysis.first_chance_context.repeated_signature_count
+        << "\n";
+    if (r.freeze_analysis.first_chance_context.repeated_signature_count > 0u) {
+      rpt << "  repeated suspicious first-chance exceptions were observed before capture\n";
+    }
+    if (!r.freeze_analysis.first_chance_context.recent_non_system_modules.empty()) {
+      rpt << "  first_chance recent_non_system_modules="
+          << WideToUtf8(JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 4, L", "))
           << "\n";
     }
     for (const auto& reason : r.freeze_analysis.primary_reasons) {

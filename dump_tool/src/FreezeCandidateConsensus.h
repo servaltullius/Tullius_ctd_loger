@@ -15,6 +15,7 @@ struct FreezeSignalInput
   bool loading_context = false;
   std::optional<internal::WctFreezeSummary> wct;
   std::optional<BlackboxFreezeSummary> blackbox;
+  std::optional<FirstChanceSummary> first_chance;
   std::vector<ActionableCandidate> actionable_candidates;
 };
 

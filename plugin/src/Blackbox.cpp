@@ -128,4 +128,15 @@ void PushThreadLifecycleEvent(
   PushEvent(type, payload, sizeof(payload));
 }
 
+void PushFirstChanceExceptionEvent(
+  std::uint32_t exceptionCode,
+  std::uint32_t addressBucket,
+  std::string_view moduleBasenameUtf8) noexcept
+{
+  skydiag::EventPayload payload{};
+  payload.a = (static_cast<std::uint64_t>(addressBucket) << 32) | static_cast<std::uint64_t>(exceptionCode);
+  PackShortText(moduleBasenameUtf8, payload);
+  PushEvent(skydiag::EventType::kFirstChanceException, payload, sizeof(payload));
+}
+
 }  // namespace skydiag::plugin

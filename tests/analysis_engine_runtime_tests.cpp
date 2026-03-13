@@ -378,6 +378,7 @@ void TestFreezeAnalysisSourceContracts()
   const auto root = ProjectRoot();
   const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
   const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto analyzerInternalsHeader = ReadAllText(root / "dump_tool" / "src" / "AnalyzerInternals.h");
 
   AssertContains(analyzerHeader, "FreezeAnalysisResult", "AnalysisResult must define a freeze analysis model.");
   AssertContains(analyzerHeader, "freeze_analysis", "AnalysisResult must store freeze analysis.");
@@ -388,6 +389,10 @@ void TestFreezeAnalysisSourceContracts()
   AssertContains(analyzerHeader, "freeze_ambiguous", "Freeze analysis state ids must include freeze_ambiguous.");
   AssertContains(analyzerCpp, "BuildFreezeCandidateConsensus", "Analyzer must call freeze candidate consensus.");
   AssertContains(analyzerCpp, "BlackboxFreezeSummary", "Analyzer must build a blackbox freeze summary for loader-stall analysis.");
+  AssertContains(analyzerHeader, "FirstChanceSummary", "AnalysisResult contracts must define a first-chance aggregate.");
+  AssertContains(analyzerCpp, "first_chance_context", "Analyzer must attach first-chance context to analysis results.");
+  AssertContains(analyzerInternalsHeader, "BuildFirstChanceSummary", "Analyzer internals must expose a first-chance aggregate builder.");
+  AssertContains(analyzerCpp, "BuildFirstChanceSummary", "Analyzer must build a first-chance aggregate from blackbox events.");
 }
 
 }  // namespace

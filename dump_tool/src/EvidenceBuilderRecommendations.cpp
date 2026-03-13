@@ -385,6 +385,20 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
               JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", ") +
               L". 광범위한 DLL/플러그인 점검 전에 이 후보들을 먼저 확인하세요."));
       }
+      if (r.freeze_analysis.first_chance_context.repeated_signature_count > 0u) {
+        r.recommendations.push_back(en
+          ? L"[Freeze] repeated suspicious first-chance exceptions strengthen the loader-stall interpretation. Recheck the highlighted initialization path before broad deadlock triage."
+          : L"[프리징] 반복 suspicious first-chance 예외가 loader stall 해석을 강화합니다. 광범위한 데드락 점검 전에 강조된 초기화 경로를 다시 확인하세요.");
+      }
+      if (!r.freeze_analysis.first_chance_context.recent_non_system_modules.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[Freeze] first-chance context highlighted recent non-system modules: " +
+              JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 4, L", ") +
+              L". Compare them against the current loading pipeline first.")
+          : (L"[프리징] first-chance 문맥에서 최근 비시스템 모듈이 강조되었습니다: " +
+              JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 4, L", ") +
+              L". 현재 로딩 파이프라인과 먼저 대조하세요."));
+      }
     } else if (r.freeze_analysis.state_id == "freeze_candidate") {
       r.recommendations.push_back(en
         ? L"[Freeze] Signals indicate a real freeze, but not a clean deadlock/stall classification yet. Compare related candidates and repeat capture during the issue."

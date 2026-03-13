@@ -233,6 +233,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(freeze, "primary_reasons", "array", "freeze_analysis");
   AssertIsType(freeze, "related_candidates", "array", "freeze_analysis");
   AssertIsType(freeze, "blackbox_context", "object", "freeze_analysis");
+  AssertIsType(freeze, "first_chance_context", "object", "freeze_analysis");
   const auto& blackbox = freeze["blackbox_context"];
   AssertIsType(blackbox, "loading_window", "boolean", "freeze_analysis.blackbox_context");
   AssertIsType(blackbox, "recent_module_loads", "number", "freeze_analysis.blackbox_context");
@@ -242,6 +243,13 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(blackbox, "module_churn_score", "number", "freeze_analysis.blackbox_context");
   AssertIsType(blackbox, "thread_churn_score", "number", "freeze_analysis.blackbox_context");
   AssertIsType(blackbox, "recent_non_system_modules", "array", "freeze_analysis.blackbox_context");
+  const auto& firstChance = freeze["first_chance_context"];
+  AssertIsType(firstChance, "has_context", "boolean", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "recent_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "unique_signature_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "loading_window_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "repeated_signature_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "recent_non_system_modules", "array", "freeze_analysis.first_chance_context");
 
   // ── recommendations ──
   for (const auto& r : j["recommendations"]) {
@@ -265,6 +273,7 @@ void TestGoldenJsonValues(const nlohmann::json& j)
   assert(j["evidence"].size() == 1);
   assert(j["recommendations"].size() == 2);
   assert(j["freeze_analysis"]["state_id"].is_string());
+  assert(j["freeze_analysis"]["first_chance_context"].is_object());
 
   // CrashLogger object_refs with FormID
   assert(j["crash_logger"]["object_refs"].size() == 1);
@@ -350,6 +359,7 @@ void TestOutputWriterEmitsAllFields()
     "\"primary_reasons\"",
     "\"related_candidates\"",
     "\"blackbox_context\"",
+    "\"first_chance_context\"",
     "\"loading_window\"",
     "\"recent_module_loads\"",
     "\"recent_module_unloads\"",
@@ -358,6 +368,11 @@ void TestOutputWriterEmitsAllFields()
     "\"module_churn_score\"",
     "\"thread_churn_score\"",
     "\"recent_non_system_modules\"",
+    "\"has_context\"",
+    "\"recent_count\"",
+    "\"unique_signature_count\"",
+    "\"loading_window_count\"",
+    "\"repeated_signature_count\"",
     "\"enb_detected\"",
     "\"reshade_detected\"",
     "\"dxvk_detected\"",
@@ -405,6 +420,8 @@ void TestOutputWriterReportTextSections()
     "HasWCT:",
     "blackbox",
     "module churn",
+    "first_chance_context",
+    "repeated suspicious first-chance",
   };
 
   for (const auto& section : requiredSections) {

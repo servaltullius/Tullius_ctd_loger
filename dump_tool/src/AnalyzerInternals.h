@@ -28,6 +28,10 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   const std::vector<EventRow>& events,
   bool loadingContext);
 
+FirstChanceSummary BuildFirstChanceSummary(
+  const std::vector<EventRow>& events,
+  bool loadingContext);
+
 std::wstring ResourceKindFromPath(std::wstring_view path);
 
 std::vector<SuspectItem> ComputeStackScanSuspects(

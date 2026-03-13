@@ -20,6 +20,19 @@ std::wstring PickCandidateName(const ActionableCandidate& candidate)
   return candidate.module_filename;
 }
 
+std::wstring JoinModules(const std::vector<std::wstring>& items, std::size_t maxCount)
+{
+  std::wstring joined;
+  const std::size_t limit = std::min(items.size(), maxCount);
+  for (std::size_t i = 0; i < limit; ++i) {
+    if (i != 0u) {
+      joined += L", ";
+    }
+    joined += items[i];
+  }
+  return joined;
+}
+
 std::string DetermineSupportQuality(const FreezeSignalInput& input)
 {
   if (input.wct && input.wct->pss_snapshot_used) {
@@ -54,6 +67,14 @@ FreezeRelatedCandidate ToRelatedModuleCandidate(std::wstring name, i18n::Languag
   return row;
 }
 
+bool HasStrongFirstChanceLoaderSignal(const FreezeSignalInput& input, bool loadingSignal)
+{
+  return loadingSignal &&
+         input.first_chance.has_value() &&
+         input.first_chance->has_context &&
+         (input.first_chance->loading_window_count >= 2u || input.first_chance->repeated_signature_count > 0u);
+}
+
 }  // namespace
 
 FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& input, i18n::Language language)
@@ -71,12 +92,17 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   } else {
     result.blackbox_context.loading_window = input.loading_context;
   }
+  if (input.first_chance.has_value()) {
+    result.first_chance_context = *input.first_chance;
+  }
 
   const bool loadingSignal = input.loading_context || (input.wct && input.wct->isLoading);
   const bool hasBlackboxChurn = input.blackbox.has_value() &&
     (input.blackbox->module_churn_score > 0u || input.blackbox->thread_churn_score > 0u);
-  const bool strongLoaderContext = loadingSignal && input.blackbox.has_value() &&
-    input.blackbox->module_churn_score >= 3u;
+  const bool strongFirstChanceLoaderSignal = HasStrongFirstChanceLoaderSignal(input, loadingSignal);
+  const bool strongLoaderContext =
+    (loadingSignal && input.blackbox.has_value() && input.blackbox->module_churn_score >= 3u) ||
+    strongFirstChanceLoaderSignal;
 
   if (input.wct && input.wct->cycles > 0) {
     result.state_id = "deadlock_likely";
@@ -122,6 +148,22 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
             : (L"thread churn이 로딩 stall과 함께 관찰됨 (score=" + std::to_wstring(input.blackbox->thread_churn_score) + L")"));
       }
     }
+    if (strongFirstChanceLoaderSignal) {
+      result.primary_reasons.push_back(
+        language == i18n::Language::kEnglish
+          ? (L"repeated suspicious first-chance exceptions appeared during loading (count=" +
+              std::to_wstring(input.first_chance->loading_window_count) + L")")
+          : (L"로딩 중 반복적인 suspicious first-chance 예외가 관찰됨 (count=" +
+              std::to_wstring(input.first_chance->loading_window_count) + L")"));
+      if (!input.first_chance->recent_non_system_modules.empty()) {
+        result.primary_reasons.push_back(
+          language == i18n::Language::kEnglish
+            ? (L"first-chance context highlighted non-system modules: " +
+                JoinModules(input.first_chance->recent_non_system_modules, 3))
+            : (L"first-chance 문맥에서 비시스템 모듈이 강조됨: " +
+                JoinModules(input.first_chance->recent_non_system_modules, 3)));
+      }
+    }
   } else if (!input.actionable_candidates.empty()) {
     result.state_id = "freeze_candidate";
     result.confidence_level = i18n::ConfidenceLevel::kLow;
@@ -160,6 +202,18 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   }
   if (input.blackbox.has_value()) {
     for (const auto& moduleName : input.blackbox->recent_non_system_modules) {
+      if (moduleName.empty() || seenNames.contains(moduleName)) {
+        continue;
+      }
+      result.related_candidates.push_back(ToRelatedModuleCandidate(moduleName, language));
+      seenNames.insert(moduleName);
+      if (result.related_candidates.size() >= 4u) {
+        break;
+      }
+    }
+  }
+  if (input.first_chance.has_value()) {
+    for (const auto& moduleName : input.first_chance->recent_non_system_modules) {
       if (moduleName.empty() || seenNames.contains(moduleName)) {
         continue;
       }

@@ -27,6 +27,11 @@ void PushThreadLifecycleEvent(
   std::uint32_t threadId,
   std::uint32_t activeThreadCount = 0) noexcept;
 
+void PushFirstChanceExceptionEvent(
+  std::uint32_t exceptionCode,
+  std::uint32_t addressBucket,
+  std::string_view moduleBasenameUtf8) noexcept;
+
 inline void Note(std::uint64_t tag, std::uint64_t a = 0, std::uint64_t b = 0) noexcept
 {
   skydiag::EventPayload p{};

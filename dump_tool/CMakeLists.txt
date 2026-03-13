@@ -10,6 +10,7 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternals.cpp
   src/AnalyzerInternals.h
   src/AnalyzerInternalsBlackbox.cpp
+  src/AnalyzerInternalsFirstChance.cpp
   src/AnalyzerInternalsCrashBucket.cpp
   src/AnalyzerInternalsStackScan.cpp
   src/AnalyzerInternalsWct.cpp

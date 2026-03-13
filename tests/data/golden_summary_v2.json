@@ -127,6 +127,14 @@
       "module_churn_score": 0,
       "thread_churn_score": 0,
       "recent_non_system_modules": []
+    },
+    "first_chance_context": {
+      "has_context": false,
+      "recent_count": 0,
+      "unique_signature_count": 0,
+      "loading_window_count": 0,
+      "repeated_signature_count": 0,
+      "recent_non_system_modules": []
     }
   },
   "evidence": [

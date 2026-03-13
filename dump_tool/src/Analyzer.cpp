@@ -1042,6 +1042,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       (out.state_flags & skydiag::kState_Loading) != 0u);
   }
   out.blackbox_freeze_summary = std::move(blackboxFreezeSummary);
+  out.first_chance_summary = internal::BuildFirstChanceSummary(
+    out.events,
+    (out.state_flags & skydiag::kState_Loading) != 0u);
 
   BuildEvidenceAndSummary(out, opt.language);
   FreezeSignalInput freezeSignals{};
@@ -1053,8 +1056,10 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.blackbox_freeze_summary.has_context) {
     freezeSignals.blackbox = out.blackbox_freeze_summary;
   }
+  freezeSignals.first_chance = out.first_chance_summary;
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
+  out.freeze_analysis.first_chance_context = out.first_chance_summary;
   if (out.freeze_analysis.has_analysis) {
     BuildEvidenceAndSummary(out, opt.language);
   }

@@ -51,10 +51,12 @@ void TestSourceContracts()
   AssertContains(analyzerHeaderText, "freeze_ambiguous", "Freeze analysis state ids must include freeze_ambiguous.");
 
   AssertContains(freezeConsensusHeaderText, "BuildFreezeCandidateConsensus", "Freeze candidate consensus entry point must exist.");
+  AssertContains(freezeConsensusHeaderText, "first_chance", "Freeze candidate consensus input must accept first-chance context.");
   AssertContains(freezeConsensusCppText, "deadlock_likely", "Freeze candidate consensus must classify deadlock_likely.");
   AssertContains(freezeConsensusCppText, "loader_stall_likely", "Freeze candidate consensus must classify loader_stall_likely.");
   AssertContains(freezeConsensusCppText, "freeze_candidate", "Freeze candidate consensus must classify freeze_candidate.");
   AssertContains(freezeConsensusCppText, "freeze_ambiguous", "Freeze candidate consensus must classify freeze_ambiguous.");
+  AssertContains(freezeConsensusCppText, "repeated suspicious first-chance", "Freeze candidate consensus must explain repeated suspicious first-chance context.");
   AssertContains(analyzerCppText, "BuildFreezeCandidateConsensus", "Analyzer must invoke freeze candidate consensus for freeze-like dumps.");
 }
 
@@ -142,6 +144,31 @@ void TestConsensusLoaderStallWithBlackboxChurn()
   assert(!result.primary_reasons.empty());
 }
 
+void TestConsensusLoaderStallWithFirstChanceContext()
+{
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.loading_context = true;
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->isLoading = true;
+
+  skydiag::dump_tool::FirstChanceSummary firstChance{};
+  firstChance.has_context = true;
+  firstChance.recent_count = 4;
+  firstChance.loading_window_count = 4;
+  firstChance.repeated_signature_count = 2;
+  firstChance.recent_non_system_modules.push_back(L"po3_PapyrusExtender.dll");
+  input.first_chance = firstChance;
+
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.has_analysis);
+  assert(result.state_id == "loader_stall_likely");
+  assert(result.confidence_level == ConfidenceLevel::kHigh);
+  assert(!result.primary_reasons.empty());
+}
+
 void TestConsensusFreezeCandidateAndAmbiguous()
 {
   FreezeSignalInput candidateInput{};
@@ -172,6 +199,7 @@ int main()
   TestConsensusDeadlockLikely();
   TestConsensusLoaderStallLikely();
   TestConsensusLoaderStallWithBlackboxChurn();
+  TestConsensusLoaderStallWithFirstChanceContext();
   TestConsensusFreezeCandidateAndAmbiguous();
   return 0;
 }

@@ -2,10 +2,16 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <string>
+#include <string_view>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagShared.h"
 
@@ -13,8 +19,21 @@ namespace skydiag::plugin {
 namespace {
 
 std::uint32_t g_crashHookMode = 1;
+std::atomic<std::uint64_t> g_lastFirstChanceSignature{0};
+std::atomic<std::uint64_t> g_lastFirstChanceQpc{0};
+std::atomic<std::uint64_t> g_firstChanceWindowStartQpc{0};
+std::atomic<std::uint32_t> g_firstChanceWindowCount{0};
 
-bool IsIgnorableException(DWORD code) noexcept
+constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
+
+std::uint64_t QpcNow() noexcept
+{
+  LARGE_INTEGER li{};
+  QueryPerformanceCounter(&li);
+  return static_cast<std::uint64_t>(li.QuadPart);
+}
+
+bool IsBenignFirstChanceException(DWORD code) noexcept
 {
   // Benign exceptions: first-chance C++ SEH, OutputDebugString, thread naming,
   // breakpoints in debuggers, etc.
@@ -23,6 +42,7 @@ bool IsIgnorableException(DWORD code) noexcept
     case 0x406D1388:                     // SetThreadName via RaiseException (legacy)
     case EXCEPTION_BREAKPOINT:           // 0x80000003 — debugger breakpoint
     case EXCEPTION_SINGLE_STEP:          // 0x80000004 — single step (debugger)
+    case 0x40010006:                     // OutputDebugStringA
     case 0x4001000A:                     // OutputDebugStringW
       return true;
     default:
@@ -30,9 +50,115 @@ bool IsIgnorableException(DWORD code) noexcept
   }
 }
 
+std::string WideToUtf8(std::wstring_view text) noexcept
+{
+  if (text.empty()) {
+    return {};
+  }
+  const int needed = WideCharToMultiByte(
+    CP_UTF8,
+    0,
+    text.data(),
+    static_cast<int>(text.size()),
+    nullptr,
+    0,
+    nullptr,
+    nullptr);
+  if (needed <= 0) {
+    return {};
+  }
+  std::string out(static_cast<std::size_t>(needed), '\0');
+  const int written = WideCharToMultiByte(
+    CP_UTF8,
+    0,
+    text.data(),
+    static_cast<int>(text.size()),
+    out.data(),
+    needed,
+    nullptr,
+    nullptr);
+  if (written <= 0) {
+    return {};
+  }
+  out.resize(static_cast<std::size_t>(written));
+  return out;
+}
+
+std::string ResolveExceptionModuleBasenameUtf8(void* address) noexcept
+{
+  if (!address) {
+    return {};
+  }
+
+  HMODULE module{};
+  if (!GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        static_cast<LPCWSTR>(address),
+        &module) ||
+      !module) {
+    return {};
+  }
+
+  wchar_t pathBuf[MAX_PATH]{};
+  const DWORD len = GetModuleFileNameW(module, pathBuf, static_cast<DWORD>(std::size(pathBuf)));
+  if (len == 0 || len >= std::size(pathBuf)) {
+    return {};
+  }
+
+  const std::filesystem::path path(std::wstring_view(pathBuf, len));
+  return WideToUtf8(path.filename().wstring());
+}
+
+std::uint32_t BucketExceptionAddress(void* address) noexcept
+{
+  const auto raw = reinterpret_cast<std::uintptr_t>(address);
+  return static_cast<std::uint32_t>((raw >> 4) & 0xFFFFFFFFu);
+}
+
+std::uint64_t HashFirstChanceSignature(
+  DWORD code,
+  std::uint32_t addressBucket,
+  std::string_view moduleBasenameUtf8) noexcept
+{
+  std::uint64_t signature = static_cast<std::uint64_t>(code);
+  signature ^= (static_cast<std::uint64_t>(addressBucket) << 32);
+  signature ^= skydiag::hash::Fnv1a64(moduleBasenameUtf8);
+  return signature;
+}
+
+bool ConsumeFirstChanceTelemetryBudget(std::uint64_t signature, std::uint64_t nowQpc) noexcept
+{
+  auto* shm = GetShared();
+  const std::uint64_t qpcFreq = (shm && shm->header.qpc_freq != 0u) ? shm->header.qpc_freq : 10000000ull;
+  const std::uint64_t dedupeWindowQpc = std::max<std::uint64_t>(1ull, qpcFreq / 2ull);
+
+  const auto lastSignature = g_lastFirstChanceSignature.load(std::memory_order_relaxed);
+  const auto lastQpc = g_lastFirstChanceQpc.load(std::memory_order_relaxed);
+  if (lastSignature == signature && nowQpc >= lastQpc && (nowQpc - lastQpc) <= dedupeWindowQpc) {
+    return false;
+  }
+  g_lastFirstChanceSignature.store(signature, std::memory_order_relaxed);
+  g_lastFirstChanceQpc.store(nowQpc, std::memory_order_relaxed);
+
+  auto windowStart = g_firstChanceWindowStartQpc.load(std::memory_order_relaxed);
+  if (windowStart == 0u || nowQpc < windowStart || (nowQpc - windowStart) > qpcFreq) {
+    g_firstChanceWindowStartQpc.store(nowQpc, std::memory_order_relaxed);
+    g_firstChanceWindowCount.store(1u, std::memory_order_relaxed);
+    return true;
+  }
+
+  const auto count = g_firstChanceWindowCount.fetch_add(1u, std::memory_order_relaxed) + 1u;
+  return count <= kFirstChancePerSecondLimit;
+}
+
+bool ShouldEmitFirstChanceTelemetry(const EXCEPTION_RECORD* record) noexcept
+{
+  return record != nullptr && !IsBenignFirstChanceException(record->ExceptionCode);
+}
+
 bool IsFatalExceptionCode(DWORD code) noexcept
 {
-  if (IsIgnorableException(code)) {
+  if (IsBenignFirstChanceException(code)) {
     return false;
   }
   switch (code) {
@@ -83,6 +209,15 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
   }
 
   const DWORD code = ep->ExceptionRecord->ExceptionCode;
+  if (ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)) {
+    const auto qpcNow = QpcNow();
+    const auto addressBucket = BucketExceptionAddress(ep->ExceptionRecord->ExceptionAddress);
+    const auto moduleBasenameUtf8 = ResolveExceptionModuleBasenameUtf8(ep->ExceptionRecord->ExceptionAddress);
+    const auto signature = HashFirstChanceSignature(code, addressBucket, moduleBasenameUtf8);
+    if (ConsumeFirstChanceTelemetryBudget(signature, qpcNow)) {
+      PushFirstChanceExceptionEvent(code, addressBucket, moduleBasenameUtf8);
+    }
+  }
   if (!ShouldRecordException(code)) {
     return EXCEPTION_CONTINUE_SEARCH;
   }

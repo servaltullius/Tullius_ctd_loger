@@ -32,6 +32,7 @@ enum class EventType : std::uint16_t {
   kModuleUnload = 61,
   kThreadCreate = 70,
   kThreadExit = 71,
+  kFirstChanceException = 80,
 
   kCrash = 100,
   kHangMark = 200,

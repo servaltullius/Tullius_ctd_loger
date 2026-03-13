@@ -71,6 +71,16 @@ struct BlackboxFreezeSummary
   std::vector<std::wstring> recent_non_system_modules;
 };
 
+struct FirstChanceSummary
+{
+  bool has_context = false;
+  std::uint32_t recent_count = 0;
+  std::uint32_t unique_signature_count = 0;
+  std::uint32_t loading_window_count = 0;
+  std::uint32_t repeated_signature_count = 0;
+  std::vector<std::wstring> recent_non_system_modules;
+};
+
 struct FreezeAnalysisResult
 {
   // state ids: deadlock_likely / loader_stall_likely / freeze_candidate / freeze_ambiguous
@@ -82,6 +92,7 @@ struct FreezeAnalysisResult
   std::vector<std::wstring> primary_reasons;
   std::vector<FreezeRelatedCandidate> related_candidates;
   BlackboxFreezeSummary blackbox_context;
+  FirstChanceSummary first_chance_context;
 };
 
 struct EventRow
@@ -211,6 +222,7 @@ struct AnalysisResult
   // Cross-signal actionable candidates (best-effort; mainly for EXE/system victim-like crashes)
   std::vector<ActionableCandidate> actionable_candidates;
   BlackboxFreezeSummary blackbox_freeze_summary;
+  FirstChanceSummary first_chance_summary;
   FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;
