@@ -1035,6 +1035,14 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
+  BlackboxFreezeSummary blackboxFreezeSummary{};
+  if (out.has_blackbox) {
+    blackboxFreezeSummary = internal::BuildBlackboxFreezeSummary(
+      out.events,
+      (out.state_flags & skydiag::kState_Loading) != 0u);
+  }
+  out.blackbox_freeze_summary = std::move(blackboxFreezeSummary);
+
   BuildEvidenceAndSummary(out, opt.language);
   FreezeSignalInput freezeSignals{};
   freezeSignals.is_hang_like = out.is_hang_like;
@@ -1042,6 +1050,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   freezeSignals.is_manual_capture = out.is_manual_capture;
   freezeSignals.loading_context = (out.state_flags & skydiag::kState_Loading) != 0u;
   freezeSignals.wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8);
+  if (out.blackbox_freeze_summary.has_context) {
+    freezeSignals.blackbox = out.blackbox_freeze_summary;
+  }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   if (out.freeze_analysis.has_analysis) {

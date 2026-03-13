@@ -376,6 +376,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(en
         ? L"[Freeze] Loading-context evidence points to a loader stall. Prioritize mesh/animation/physics/precache changes before generic DLL triage."
         : L"[프리징] 로딩 문맥 근거가 있어 loader stall 가능성이 큽니다. 일반 DLL 점검보다 메쉬/애니메이션/물리/프리캐시 변경을 먼저 보세요.");
+      if (!r.freeze_analysis.blackbox_context.recent_non_system_modules.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[Freeze] blackbox module churn highlighted recent non-system modules: " +
+              JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", ") +
+              L". Check them before widening DLL/plugin triage.")
+          : (L"[프리징] blackbox module churn에서 최근 비시스템 모듈이 강조되었습니다: " +
+              JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", ") +
+              L". 광범위한 DLL/플러그인 점검 전에 이 후보들을 먼저 확인하세요."));
+      }
     } else if (r.freeze_analysis.state_id == "freeze_candidate") {
       r.recommendations.push_back(en
         ? L"[Freeze] Signals indicate a real freeze, but not a clean deadlock/stall classification yet. Compare related candidates and repeat capture during the issue."

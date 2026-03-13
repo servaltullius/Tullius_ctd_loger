@@ -381,11 +381,13 @@ void TestFreezeAnalysisSourceContracts()
 
   AssertContains(analyzerHeader, "FreezeAnalysisResult", "AnalysisResult must define a freeze analysis model.");
   AssertContains(analyzerHeader, "freeze_analysis", "AnalysisResult must store freeze analysis.");
+  AssertContains(analyzerHeader, "BlackboxFreezeSummary", "AnalysisResult contracts must define a blackbox freeze aggregate.");
   AssertContains(analyzerHeader, "deadlock_likely", "Freeze analysis state ids must include deadlock_likely.");
   AssertContains(analyzerHeader, "loader_stall_likely", "Freeze analysis state ids must include loader_stall_likely.");
   AssertContains(analyzerHeader, "freeze_candidate", "Freeze analysis state ids must include freeze_candidate.");
   AssertContains(analyzerHeader, "freeze_ambiguous", "Freeze analysis state ids must include freeze_ambiguous.");
   AssertContains(analyzerCpp, "BuildFreezeCandidateConsensus", "Analyzer must call freeze candidate consensus.");
+  AssertContains(analyzerCpp, "BlackboxFreezeSummary", "Analyzer must build a blackbox freeze summary for loader-stall analysis.");
 }
 
 }  // namespace

@@ -329,6 +329,19 @@ static nlohmann::json BuildSummaryJson(
       { "display_name", WideToUtf8(candidate.display_name) },
     });
   }
+  summary["freeze_analysis"]["blackbox_context"] = {
+    { "loading_window", r.freeze_analysis.blackbox_context.loading_window },
+    { "recent_module_loads", r.freeze_analysis.blackbox_context.recent_module_loads },
+    { "recent_module_unloads", r.freeze_analysis.blackbox_context.recent_module_unloads },
+    { "recent_thread_creates", r.freeze_analysis.blackbox_context.recent_thread_creates },
+    { "recent_thread_exits", r.freeze_analysis.blackbox_context.recent_thread_exits },
+    { "module_churn_score", r.freeze_analysis.blackbox_context.module_churn_score },
+    { "thread_churn_score", r.freeze_analysis.blackbox_context.thread_churn_score },
+    { "recent_non_system_modules", nlohmann::json::array() },
+  };
+  for (const auto& moduleName : r.freeze_analysis.blackbox_context.recent_non_system_modules) {
+    summary["freeze_analysis"]["blackbox_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
+  }
 
   summary["evidence"] = nlohmann::json::array();
   for (const auto& e : r.evidence) {
@@ -512,6 +525,16 @@ static std::string BuildReportText(
         << " confidence=" << WideToUtf8(r.freeze_analysis.confidence)
         << " support_quality=" << r.freeze_analysis.support_quality
         << "\n";
+    rpt << "  blackbox loading_window="
+        << (r.freeze_analysis.blackbox_context.loading_window ? "1" : "0")
+        << " module churn=" << r.freeze_analysis.blackbox_context.module_churn_score
+        << " thread churn=" << r.freeze_analysis.blackbox_context.thread_churn_score
+        << "\n";
+    if (!r.freeze_analysis.blackbox_context.recent_non_system_modules.empty()) {
+      rpt << "  blackbox recent_non_system_modules="
+          << WideToUtf8(JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", "))
+          << "\n";
+    }
     for (const auto& reason : r.freeze_analysis.primary_reasons) {
       rpt << "  - " << WideToUtf8(reason) << "\n";
     }

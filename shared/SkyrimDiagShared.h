@@ -28,6 +28,10 @@ enum class EventType : std::uint16_t {
   kCellChange = 30,
   kNote = 40,
   kPerfHitch = 50,  // long main-thread stall / stutter
+  kModuleLoad = 60,
+  kModuleUnload = 61,
+  kThreadCreate = 70,
+  kThreadExit = 71,
 
   kCrash = 100,
   kHangMark = 200,

@@ -116,6 +116,32 @@ void TestConsensusLoaderStallLikely()
   assert(result.confidence_level == ConfidenceLevel::kMedium);
 }
 
+void TestConsensusLoaderStallWithBlackboxChurn()
+{
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.loading_context = true;
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->isLoading = true;
+
+  skydiag::dump_tool::BlackboxFreezeSummary blackbox{};
+  blackbox.has_context = true;
+  blackbox.loading_window = true;
+  blackbox.recent_module_loads = 3;
+  blackbox.recent_module_unloads = 2;
+  blackbox.module_churn_score = 5;
+  blackbox.recent_non_system_modules.push_back(L"po3_PapyrusExtender.dll");
+  input.blackbox = blackbox;
+
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.has_analysis);
+  assert(result.state_id == "loader_stall_likely");
+  assert(result.confidence_level == ConfidenceLevel::kHigh);
+  assert(!result.primary_reasons.empty());
+}
+
 void TestConsensusFreezeCandidateAndAmbiguous()
 {
   FreezeSignalInput candidateInput{};
@@ -145,6 +171,7 @@ int main()
   TestWctFreezeSummaryParsing();
   TestConsensusDeadlockLikely();
   TestConsensusLoaderStallLikely();
+  TestConsensusLoaderStallWithBlackboxChurn();
   TestConsensusFreezeCandidateAndAmbiguous();
   return 0;
 }

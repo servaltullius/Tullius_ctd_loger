@@ -718,6 +718,18 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     if (!r.freeze_analysis.primary_reasons.empty()) {
       details += L" | " + JoinList(r.freeze_analysis.primary_reasons, 3, L" | ");
     }
+    if (r.freeze_analysis.blackbox_context.has_context) {
+      details += en
+        ? (L" | blackbox module churn=" + std::to_wstring(r.freeze_analysis.blackbox_context.module_churn_score) +
+            L", thread churn=" + std::to_wstring(r.freeze_analysis.blackbox_context.thread_churn_score))
+        : (L" | blackbox module churn=" + std::to_wstring(r.freeze_analysis.blackbox_context.module_churn_score) +
+            L", thread churn=" + std::to_wstring(r.freeze_analysis.blackbox_context.thread_churn_score));
+      if (!r.freeze_analysis.blackbox_context.recent_non_system_modules.empty()) {
+        details += en
+          ? (L" | recent non-system modules: " + JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 3, L", "))
+          : (L" | 최근 비시스템 모듈: " + JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 3, L", "));
+      }
+    }
     e.details = std::move(details);
     r.evidence.push_back(std::move(e));
   }

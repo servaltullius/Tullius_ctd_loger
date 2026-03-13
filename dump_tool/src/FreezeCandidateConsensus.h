@@ -14,6 +14,7 @@ struct FreezeSignalInput
   bool is_manual_capture = false;
   bool loading_context = false;
   std::optional<internal::WctFreezeSummary> wct;
+  std::optional<BlackboxFreezeSummary> blackbox;
   std::vector<ActionableCandidate> actionable_candidates;
 };
 

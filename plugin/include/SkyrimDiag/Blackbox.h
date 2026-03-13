@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "SkyrimDiagShared.h"
 
@@ -17,6 +18,15 @@ void PushEventAlways(
   const skydiag::EventPayload& payload,
   std::uint16_t usedBytes = sizeof(skydiag::EventPayload)) noexcept;
 
+void PushModuleLifecycleEvent(
+  skydiag::EventType type,
+  std::string_view moduleBasenameUtf8) noexcept;
+
+void PushThreadLifecycleEvent(
+  skydiag::EventType type,
+  std::uint32_t threadId,
+  std::uint32_t activeThreadCount = 0) noexcept;
+
 inline void Note(std::uint64_t tag, std::uint64_t a = 0, std::uint64_t b = 0) noexcept
 {
   skydiag::EventPayload p{};
@@ -27,4 +37,3 @@ inline void Note(std::uint64_t tag, std::uint64_t a = 0, std::uint64_t b = 0) no
 }
 
 }  // namespace skydiag::plugin
-

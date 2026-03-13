@@ -117,7 +117,17 @@
     "primary_reasons": [
       "Freeze evidence was too weak or conflicting"
     ],
-    "related_candidates": []
+    "related_candidates": [],
+    "blackbox_context": {
+      "loading_window": false,
+      "recent_module_loads": 0,
+      "recent_module_unloads": 0,
+      "recent_thread_creates": 0,
+      "recent_thread_exits": 0,
+      "module_churn_score": 0,
+      "thread_churn_score": 0,
+      "recent_non_system_modules": []
+    }
   },
   "evidence": [
     {

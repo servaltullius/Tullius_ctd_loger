@@ -200,6 +200,12 @@ target_link_libraries(skydiag_freeze_candidate_consensus_tests PRIVATE
 
 add_test(NAME skydiag_freeze_candidate_consensus_tests COMMAND skydiag_freeze_candidate_consensus_tests)
 
+add_executable(skydiag_blackbox_loader_stall_tests
+  blackbox_loader_stall_tests.cpp
+)
+
+add_test(NAME skydiag_blackbox_loader_stall_tests COMMAND skydiag_blackbox_loader_stall_tests)
+
 add_executable(skydiag_stack_scan_weight_tests
   stack_scan_weight_tests.cpp
 )

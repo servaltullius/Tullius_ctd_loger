@@ -232,6 +232,16 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(freeze, "support_quality", "string", "freeze_analysis");
   AssertIsType(freeze, "primary_reasons", "array", "freeze_analysis");
   AssertIsType(freeze, "related_candidates", "array", "freeze_analysis");
+  AssertIsType(freeze, "blackbox_context", "object", "freeze_analysis");
+  const auto& blackbox = freeze["blackbox_context"];
+  AssertIsType(blackbox, "loading_window", "boolean", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_module_loads", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_module_unloads", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_thread_creates", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_thread_exits", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "module_churn_score", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "thread_churn_score", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_non_system_modules", "array", "freeze_analysis.blackbox_context");
 
   // ── recommendations ──
   for (const auto& r : j["recommendations"]) {
@@ -339,6 +349,15 @@ void TestOutputWriterEmitsAllFields()
     "\"support_quality\"",
     "\"primary_reasons\"",
     "\"related_candidates\"",
+    "\"blackbox_context\"",
+    "\"loading_window\"",
+    "\"recent_module_loads\"",
+    "\"recent_module_unloads\"",
+    "\"recent_thread_creates\"",
+    "\"recent_thread_exits\"",
+    "\"module_churn_score\"",
+    "\"thread_churn_score\"",
+    "\"recent_non_system_modules\"",
     "\"enb_detected\"",
     "\"reshade_detected\"",
     "\"dxvk_detected\"",
@@ -384,6 +403,8 @@ void TestOutputWriterReportTextSections()
     "FreezeAnalysis:",
     "HasBlackbox:",
     "HasWCT:",
+    "blackbox",
+    "module churn",
   };
 
   for (const auto& section : requiredSections) {
