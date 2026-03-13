@@ -66,6 +66,9 @@ def main() -> int:
     assert "cygpath -u" in gate_script, (
         "release gate must normalize Windows publish paths before bash file existence checks"
     )
+    assert "%$'\\r'}" in gate_script, (
+        "release gate must trim Windows CRLF output from Python helper snippets before path checks"
+    )
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )

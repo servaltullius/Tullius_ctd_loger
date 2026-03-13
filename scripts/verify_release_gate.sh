@@ -19,6 +19,9 @@ for item in REQUIRED_WINUI_BUILD_OUTPUTS:
     print(item)
 PY
 )
+for i in "${!REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
+  REQUIRED_WINUI_BUILD_OUTPUTS[$i]="${REQUIRED_WINUI_BUILD_OUTPUTS[$i]%$'\r'}"
+done
 
 WINUI_BUILD_ROOT="$({
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - "${WIN_ROOT}/build-winui" <<'PY'
@@ -32,6 +35,7 @@ if root is not None:
     print(root)
 PY
 })"
+WINUI_BUILD_ROOT="${WINUI_BUILD_ROOT%$'\r'}"
 
 if [[ -n "${WINUI_BUILD_ROOT}" ]] && command -v cygpath >/dev/null 2>&1; then
   WINUI_BUILD_ROOT="$(cygpath -u "${WINUI_BUILD_ROOT}")"
@@ -45,6 +49,9 @@ for item in REQUIRED_ZIP_ENTRIES:
     print(item)
 PY
 )
+for i in "${!REQUIRED_ZIP_ENTRIES[@]}"; do
+  REQUIRED_ZIP_ENTRIES[$i]="${REQUIRED_ZIP_ENTRIES[$i]%$'\r'}"
+done
 
 NESTED_WINUI_REGEX="$({
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
@@ -53,6 +60,7 @@ from release_contract import nested_winui_path_regex
 print(nested_winui_path_regex())
 PY
 })"
+NESTED_WINUI_REGEX="${NESTED_WINUI_REGEX%$'\r'}"
 
 hash_of() {
   sha256sum "$1" | cut -d' ' -f1
