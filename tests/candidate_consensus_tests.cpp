@@ -1,4 +1,8 @@
 #include <cassert>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -10,6 +14,37 @@ using skydiag::dump_tool::CandidateSignal;
 using skydiag::dump_tool::i18n::Language;
 
 namespace {
+
+std::filesystem::path ProjectRoot()
+{
+  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
+  if (root && *root) {
+    return std::filesystem::path(root);
+  }
+  auto p = std::filesystem::current_path();
+  for (int i = 0; i < 5; ++i) {
+    if (std::filesystem::exists(p / "vcpkg.json")) {
+      return p;
+    }
+    p = p.parent_path();
+  }
+  assert(false && "Cannot find project root. Set SKYDIAG_PROJECT_ROOT.");
+  return {};
+}
+
+std::string ReadAllText(const std::filesystem::path& path)
+{
+  std::ifstream in(path, std::ios::in | std::ios::binary);
+  assert(in && "Failed to open file");
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+void AssertContains(const std::string& haystack, const char* needle, const char* message)
+{
+  assert(haystack.find(needle) != std::string::npos && message);
+}
 
 CandidateSignal MakeSignal(
   std::string familyId,
@@ -143,6 +178,51 @@ void TestWeakStackAgreementStaysRelated()
   assert(!candidates[0].cross_validated);
 }
 
+void TestFirstChanceOnlyDoesNotCreateStandaloneCandidate()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("first_chance_context", L"firstchanceonly", L"FirstChanceOnly.dll", 3, L"", L"", L"FirstChanceOnly.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.empty());
+}
+
+void TestObjectRefAndFirstChanceBecomeRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"firstchanceboost", L"FirstChanceBoost.esp", 6, L"FirstChanceBoost.esp"),
+    MakeSignal("first_chance_context", L"firstchanceboost", L"FirstChanceBoost", 3, L"", L"FirstChanceBoost", L"FirstChanceBoost.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+}
+
+void TestCrossValidatedCandidateRetainsFirstChanceFamily()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"firstchancecross", L"FirstChanceCross.esp", 6, L"FirstChanceCross.esp"),
+    MakeSignal("actionable_stack", L"firstchancecross", L"First Chance Cross", 5, L"", L"First Chance Cross", L"FirstChanceCross.dll"),
+    MakeSignal("first_chance_context", L"firstchancecross", L"First Chance Cross", 3, L"", L"First Chance Cross", L"FirstChanceCross.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "cross_validated");
+  assert(candidates[0].cross_validated);
+  assert(candidates[0].supporting_families.size() == 3);
+}
+
+void TestFirstChanceFamilySourceContract()
+{
+  const auto root = ProjectRoot();
+  const auto source = ReadAllText(root / "dump_tool" / "src" / "CandidateConsensus.cpp");
+  AssertContains(source, "first_chance_context", "Candidate consensus must recognize first_chance_context as a supporting family.");
+}
+
 }  // namespace
 
 int main()
@@ -155,5 +235,9 @@ int main()
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();
   TestWeakStackAgreementStaysRelated();
+  TestFirstChanceOnlyDoesNotCreateStandaloneCandidate();
+  TestObjectRefAndFirstChanceBecomeRelated();
+  TestCrossValidatedCandidateRetainsFirstChanceFamily();
+  TestFirstChanceFamilySourceContract();
   return 0;
 }

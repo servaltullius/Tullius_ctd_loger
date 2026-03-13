@@ -1,5 +1,6 @@
 #include "EvidenceBuilderPrivate.h"
 
+#include <algorithm>
 #include <cwchar>
 
 #include "MinidumpUtil.h"
@@ -36,6 +37,9 @@ std::wstring DescribeFamily(std::string_view familyId, bool en)
   if (familyId == "history_repeat") {
     return en ? L"history repeat" : L"버킷 반복";
   }
+  if (familyId == "first_chance_context") {
+    return en ? L"repeated first-chance context" : L"반복 first-chance 문맥";
+  }
   return en ? L"other signal" : L"기타 신호";
 }
 
@@ -47,6 +51,46 @@ std::wstring JoinFamilies(const ActionableCandidate& candidate, bool en)
     labels.push_back(DescribeFamily(family, en));
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
+bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
+{
+  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
+         candidate.supporting_families.end();
+}
+
+bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
+{
+  return summary.recent_count >= 3u &&
+         summary.loading_window_count >= 2u &&
+         summary.loading_window_count * 2u >= summary.recent_count;
+}
+
+bool HasScorableFirstChanceContext(const FirstChanceSummary& summary)
+{
+  return summary.has_context &&
+         !summary.recent_non_system_modules.empty() &&
+         (summary.repeated_signature_count > 0u || HasDenseFirstChanceLoadingWindow(summary));
+}
+
+std::wstring DescribeFirstChanceContext(const FirstChanceSummary& summary, bool en)
+{
+  if (!HasScorableFirstChanceContext(summary)) {
+    return {};
+  }
+
+  std::wstring detail = en
+    ? L"Repeated suspicious first-chance context was observed"
+    : L"반복 suspicious first-chance 문맥이 관측되었습니다";
+  detail += en
+    ? (L" (repeated=" + std::to_wstring(summary.repeated_signature_count) +
+        L", loading-window=" + std::to_wstring(summary.loading_window_count) + L")")
+    : (L" (반복=" + std::to_wstring(summary.repeated_signature_count) +
+        L", 로딩창=" + std::to_wstring(summary.loading_window_count) + L")");
+  if (!summary.recent_non_system_modules.empty()) {
+    detail += L": " + JoinList(summary.recent_non_system_modules, 3, L", ");
+  }
+  return detail;
 }
 
 void AddActionableCandidateRecommendations(
@@ -66,6 +110,14 @@ void AddActionableCandidateRecommendations(
           L". Update/reinstall or isolate it before broader DLL triage.")
       : (L"[행동 우선 후보] 교차검증 신호가 " + candidateName +
           L" 쪽으로 모입니다. 광범위한 DLL 점검 전에 이 후보를 먼저 업데이트/격리하세요."));
+    if (CandidateHasFamily(*topCandidate, "first_chance_context")) {
+      const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
+      if (!firstChanceDetail.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[First-chance] Inspect the repeated first-chance module path first: " + firstChanceDetail)
+          : (L"[First-chance] 반복 first-chance 모듈 경로를 먼저 확인하세요: " + firstChanceDetail));
+      }
+    }
     r.recommendations.push_back(en
       ? (L"[Actionable candidate] If the crash repeats, disable " + candidateName +
           L" (or the providing mod/DLL) and retest.")
@@ -77,6 +129,14 @@ void AddActionableCandidateRecommendations(
           L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
       : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
           L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."));
+    if (CandidateHasFamily(*topCandidate, "first_chance_context")) {
+      const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
+      if (!firstChanceDetail.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[First-chance] Repeated first-chance exceptions matched this candidate. Check that module path before broad EXE/system crash triage: " + firstChanceDetail)
+          : (L"[First-chance] 반복 first-chance 예외가 이 후보와 맞습니다. 광범위한 EXE/system 크래시 점검 전에 해당 모듈 경로부터 확인하세요: " + firstChanceDetail));
+      }
+    }
   } else if (topCandidate->status_id == "reference_clue") {
     r.recommendations.push_back(en
       ? (L"[Object ref] The game was processing " + candidateName +

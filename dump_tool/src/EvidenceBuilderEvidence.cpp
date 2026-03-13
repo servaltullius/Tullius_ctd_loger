@@ -75,6 +75,44 @@ static std::wstring DescribeFreezeSupportQuality(std::string_view supportQuality
   return en ? L"unknown capture quality" : L"캡처 품질 정보 없음";
 }
 
+static bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
+{
+  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
+         candidate.supporting_families.end();
+}
+
+static bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
+{
+  return summary.recent_count >= 3u &&
+         summary.loading_window_count >= 2u &&
+         summary.loading_window_count * 2u >= summary.recent_count;
+}
+
+static bool HasScorableFirstChanceContext(const FirstChanceSummary& summary)
+{
+  return summary.has_context &&
+         !summary.recent_non_system_modules.empty() &&
+         (summary.repeated_signature_count > 0u || HasDenseFirstChanceLoadingWindow(summary));
+}
+
+static std::wstring DescribeFirstChanceSupport(const FirstChanceSummary& summary, bool en)
+{
+  std::wstring detail = en
+    ? (L"Repeated suspicious first-chance exceptions were observed")
+    : (L"반복 suspicious first-chance 예외가 관측되었습니다");
+  detail += en
+    ? (L" (repeated=" + std::to_wstring(summary.repeated_signature_count) +
+        L", loading-window=" + std::to_wstring(summary.loading_window_count) + L")")
+    : (L" (반복=" + std::to_wstring(summary.repeated_signature_count) +
+        L", 로딩창=" + std::to_wstring(summary.loading_window_count) + L")");
+  if (!summary.recent_non_system_modules.empty()) {
+    detail += en
+      ? (L" | modules: " + JoinList(summary.recent_non_system_modules, 3, L", "))
+      : (L" | 모듈: " + JoinList(summary.recent_non_system_modules, 3, L", "));
+  }
+  return detail;
+}
+
 static void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
@@ -743,6 +781,23 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       }
     }
     e.details = std::move(details);
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (ctx.isCrashLike &&
+      !ctx.isHangLike &&
+      !ctx.isSnapshotLike &&
+      (ctx.isGameExe || ctx.isSystem) &&
+      !r.actionable_candidates.empty() &&
+      CandidateHasFamily(r.actionable_candidates[0], "first_chance_context") &&
+      HasScorableFirstChanceContext(r.first_chance_summary)) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Actionable candidate is supported by repeated suspicious first-chance context"
+      : L"행동 우선 후보가 반복 suspicious first-chance 문맥으로 보강됨";
+    e.details = DescribeFirstChanceSupport(r.first_chance_summary, en);
     r.evidence.push_back(std::move(e));
   }
 

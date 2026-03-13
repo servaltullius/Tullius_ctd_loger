@@ -42,6 +42,11 @@ void AssertContains(const std::string& haystack, const char* needle, const char*
   assert(haystack.find(needle) != std::string::npos && message);
 }
 
+void AssertNotContains(const std::string& haystack, const char* needle, const char* message)
+{
+  assert(haystack.find(needle) == std::string::npos && message);
+}
+
 const ModuleStats* FindModule(const std::vector<ModuleStats>& stats, const std::string& name)
 {
   for (const auto& s : stats) {
@@ -395,6 +400,31 @@ void TestFreezeAnalysisSourceContracts()
   AssertContains(analyzerCpp, "BuildFirstChanceSummary", "Analyzer must build a first-chance aggregate from blackbox events.");
 }
 
+void TestFirstChanceCtdCandidateSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto candidateBuilder = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(candidateBuilder, "first_chance_context",
+                 "CTD candidate aggregation must add a first_chance_context family.");
+  AssertContains(candidateBuilder, "repeated_signature_count > 0u",
+                 "CTD first-chance candidate boosts must require repeated suspicious signatures.");
+  AssertContains(candidateBuilder, "loading_window_count",
+                 "CTD first-chance candidate boosts must consider dense loading-window activity.");
+  AssertContains(candidateBuilder, "recent_non_system_modules",
+                 "CTD first-chance candidate boosts must link via repeated non-system modules.");
+  AssertContains(candidateBuilder, "ctx.isGameExe || ctx.isSystem",
+                 "CTD first-chance candidate boosts must be limited to EXE/system victims.");
+  AssertNotContains(candidateBuilder, "existing object-ref/stack/resource candidate already present",
+                    "CTD first-chance linkage must come from DLL/mod/plugin matches, not generic candidate presence.");
+  AssertContains(summaryCpp, "first_chance_context",
+                 "Summary family labels must include first_chance_context when it supports a CTD candidate.");
+  AssertContains(recommendationCpp, "first-chance",
+                 "Recommendations must explain repeated first-chance context for boosted CTD candidates.");
+}
+
 }  // namespace
 
 int main()
@@ -409,5 +439,6 @@ int main()
   TestCrashHistoryBucketCandidateStats();
   TestCaptureQualitySourceContracts();
   TestFreezeAnalysisSourceContracts();
+  TestFirstChanceCtdCandidateSourceContracts();
   return 0;
 }

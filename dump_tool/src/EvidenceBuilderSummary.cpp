@@ -37,6 +37,8 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
       labels.push_back(en ? L"near resource provider" : L"인접 리소스 provider");
     } else if (family == "history_repeat") {
       labels.push_back(en ? L"history repeat" : L"반복 기록");
+    } else if (family == "first_chance_context") {
+      labels.push_back(en ? L"repeated first-chance context" : L"반복 first-chance 문맥");
     }
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");

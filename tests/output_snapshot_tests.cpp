@@ -434,6 +434,21 @@ void TestOutputWriterReportTextSections()
   std::cout << "  [PASS] OutputWriter report text has all required sections\n";
 }
 
+void TestFirstChanceCandidateExplanationSourceGuards()
+{
+  const auto root = ProjectRoot();
+  const std::string evidenceSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const std::string recommendationSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+  const std::string summarySrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+
+  assert(evidenceSrc.find("first_chance_context") != std::string::npos);
+  assert(evidenceSrc.find("repeated suspicious first-chance") != std::string::npos);
+  assert(recommendationSrc.find("first-chance") != std::string::npos);
+  assert(summarySrc.find("first_chance_context") != std::string::npos);
+
+  std::cout << "  [PASS] CTD first-chance candidate explanation guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -459,6 +474,7 @@ int main()
   TestGoldenJsonValues(golden);
   TestOutputWriterEmitsAllFields();
   TestOutputWriterReportTextSections();
+  TestFirstChanceCandidateExplanationSourceGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;

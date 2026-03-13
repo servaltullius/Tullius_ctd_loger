@@ -11,6 +11,7 @@ namespace {
 constexpr std::size_t kMaxObjectRefs = 3;
 constexpr std::size_t kMaxActionableStackSignals = 3;
 constexpr std::size_t kMaxHistorySignals = 5;
+constexpr std::size_t kMaxFirstChanceSignals = 4;
 
 std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& ref)
 {
@@ -32,6 +33,31 @@ std::uint32_t HistoryWeight(std::size_t priorCount)
     return 3u;
   }
   if (priorCount >= 1u) {
+    return 2u;
+  }
+  return 0u;
+}
+
+bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
+{
+  return summary.recent_count >= 3u &&
+         summary.loading_window_count >= 2u &&
+         summary.loading_window_count * 2u >= summary.recent_count;
+}
+
+bool HasScorableFirstChanceContext(const FirstChanceSummary& summary)
+{
+  return summary.has_context &&
+         !summary.recent_non_system_modules.empty() &&
+         (summary.repeated_signature_count > 0u || HasDenseFirstChanceLoadingWindow(summary));
+}
+
+std::uint32_t FirstChanceWeight(const FirstChanceSummary& summary)
+{
+  if (summary.repeated_signature_count > 0u) {
+    return 3u;
+  }
+  if (HasDenseFirstChanceLoadingWindow(summary)) {
     return 2u;
   }
   return 0u;
@@ -197,6 +223,139 @@ void AddHistorySignals(const AnalysisResult& r, bool en, std::vector<CandidateSi
   }
 }
 
+void AddFirstChanceSignalForCandidate(
+  std::wstring_view candidateKey,
+  std::wstring_view displayName,
+  std::wstring_view pluginName,
+  std::wstring_view modName,
+  std::wstring_view moduleFilename,
+  std::uint32_t weight,
+  const std::wstring& detail,
+  std::unordered_map<std::wstring, CandidateSignal>* byKey)
+{
+  if (!byKey || candidateKey.empty() || weight == 0u) {
+    return;
+  }
+
+  CandidateSignal signal{};
+  signal.family_id = "first_chance_context";
+  signal.candidate_key = std::wstring(candidateKey);
+  signal.display_name = std::wstring(displayName);
+  signal.plugin_name = std::wstring(pluginName);
+  signal.mod_name = std::wstring(modName);
+  signal.module_filename = std::wstring(moduleFilename);
+  signal.detail = detail;
+  signal.weight = weight;
+
+  auto [it, inserted] = byKey->emplace(signal.candidate_key, signal);
+  if (!inserted && weight > it->second.weight) {
+    it->second = std::move(signal);
+  }
+}
+
+void AddFirstChanceSignals(
+  const AnalysisResult& r,
+  bool en,
+  const EvidenceBuildContext& ctx,
+  std::vector<CandidateSignal>* out)
+{
+  if (!out) {
+    return;
+  }
+  if (!(ctx.isGameExe || ctx.isSystem) || !ctx.isCrashLike || ctx.isHangLike || ctx.isSnapshotLike) {
+    return;
+  }
+  if (!HasScorableFirstChanceContext(r.first_chance_summary)) {
+    return;
+  }
+
+  const auto weight = FirstChanceWeight(r.first_chance_summary);
+  if (weight == 0u) {
+    return;
+  }
+
+  std::unordered_map<std::wstring, CandidateSignal> byKey;
+  byKey.reserve(kMaxFirstChanceSignals);
+  for (const auto& moduleName : r.first_chance_summary.recent_non_system_modules) {
+    if (byKey.size() >= kMaxFirstChanceSignals) {
+      break;
+    }
+
+    const auto moduleKey = CanonicalCandidateKey(moduleName);
+    if (moduleKey.empty()) {
+      continue;
+    }
+
+    const std::wstring detail = en
+      ? (L"Repeated suspicious first-chance context matched " + moduleName)
+      : (L"반복 suspicious first-chance 문맥이 " + moduleName + L" 과(와) 연결됨");
+
+    AddFirstChanceSignalForCandidate(
+      moduleKey,
+      moduleName,
+      L"",
+      L"",
+      moduleName,
+      weight,
+      detail,
+      &byKey);
+
+    for (const auto& ref : r.crash_logger_object_refs) {
+      if (CanonicalCandidateKey(ref.esp_name) != moduleKey) {
+        continue;
+      }
+      AddFirstChanceSignalForCandidate(
+        CanonicalCandidateKey(ref.esp_name),
+        ref.esp_name,
+        ref.esp_name,
+        L"",
+        moduleName,
+        weight,
+        detail,
+        &byKey);
+    }
+
+    for (const auto& suspect : r.suspects) {
+      if (!IsActionableSuspect(suspect)) {
+        continue;
+      }
+      const auto suspectModuleKey = CanonicalCandidateKey(suspect.module_filename);
+      const auto suspectModKey = CanonicalCandidateKey(suspect.inferred_mod_name);
+      if (suspectModuleKey != moduleKey && suspectModKey != moduleKey) {
+        continue;
+      }
+      const auto candidateKey = CanonicalCandidateKey(
+        !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename);
+      AddFirstChanceSignalForCandidate(
+        candidateKey,
+        !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename,
+        L"",
+        suspect.inferred_mod_name,
+        suspect.module_filename,
+        weight,
+        detail,
+        &byKey);
+    }
+  }
+
+  std::vector<CandidateSignal> ranked;
+  ranked.reserve(byKey.size());
+  for (auto& [_, signal] : byKey) {
+    ranked.push_back(std::move(signal));
+  }
+  std::sort(ranked.begin(), ranked.end(), [](const CandidateSignal& lhs, const CandidateSignal& rhs) {
+    if (lhs.weight != rhs.weight) {
+      return lhs.weight > rhs.weight;
+    }
+    return lhs.display_name < rhs.display_name;
+  });
+
+  const auto limit = std::min<std::size_t>(ranked.size(), kMaxFirstChanceSignals);
+  for (std::size_t i = 0; i < limit; ++i) {
+    out->push_back(std::move(ranked[i]));
+  }
+}
+
 }  // namespace
 
 void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -214,6 +373,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   AddStackSignals(r, en, &signals);
   AddResourceSignals(r, en, &signals);
   AddHistorySignals(r, en, &signals);
+  AddFirstChanceSignals(r, en, ctx, &signals);
 
   r.actionable_candidates = BuildCandidateConsensus(signals, lang);
 }

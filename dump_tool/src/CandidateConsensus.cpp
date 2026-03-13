@@ -12,6 +12,7 @@ constexpr const char* kFamilyCrashLogger = "crash_logger_object_ref";
 constexpr const char* kFamilyStack = "actionable_stack";
 constexpr const char* kFamilyResource = "resource_provider";
 constexpr const char* kFamilyHistory = "history_repeat";
+constexpr const char* kFamilyFirstChance = "first_chance_context";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
 
 struct CandidateRow
