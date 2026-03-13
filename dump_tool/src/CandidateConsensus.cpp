@@ -69,13 +69,30 @@ std::wstring PickDisplayName(const ActionableCandidate& candidate)
   if (!candidate.plugin_name.empty()) {
     return candidate.plugin_name;
   }
-  if (!candidate.mod_name.empty()) {
-    return candidate.mod_name;
-  }
   if (!candidate.module_filename.empty()) {
     return candidate.module_filename;
   }
+  if (!candidate.mod_name.empty()) {
+    return candidate.mod_name;
+  }
   return candidate.display_name;
+}
+
+std::wstring PickSecondaryLabel(const ActionableCandidate& candidate, std::wstring_view primaryIdentifier, std::wstring_view fallbackLabel)
+{
+  const std::wstring_view candidates[] = {
+    fallbackLabel,
+    candidate.mod_name,
+    candidate.plugin_name,
+    candidate.module_filename,
+  };
+
+  for (const auto& value : candidates) {
+    if (!value.empty() && value != primaryIdentifier) {
+      return std::wstring(value);
+    }
+  }
+  return L"";
 }
 
 void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
@@ -94,7 +111,10 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   }
   std::sort(candidate.supporting_families.begin(), candidate.supporting_families.end());
   candidate.family_count = static_cast<std::uint32_t>(candidate.supporting_families.size());
-  candidate.display_name = PickDisplayName(candidate);
+  const std::wstring fallbackLabel = candidate.display_name;
+  candidate.primary_identifier = PickDisplayName(candidate);
+  candidate.secondary_label = PickSecondaryLabel(candidate, candidate.primary_identifier, fallbackLabel);
+  candidate.display_name = candidate.primary_identifier;
 
   const bool hasCrashLogger = HasFamily(candidate, kFamilyCrashLogger);
   const bool hasStack = HasFamily(candidate, kFamilyStack);

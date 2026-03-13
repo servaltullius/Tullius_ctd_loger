@@ -129,6 +129,33 @@ void TestSecondaryObjectRefCanStillCrossValidate()
   assert(candidates[0].display_name == L"PluginY.esp");
 }
 
+void TestRepresentativeNamePrefersPluginFilenameOverFriendlyLabel()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"factionranks", L"Faction Ranks", 6, L"FactionRanks.esp"),
+    MakeSignal("actionable_stack", L"factionranks", L"Faction Ranks", 5, L"", L"Faction Ranks", L"paragon-perks.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  assert(candidates[0].display_name == L"FactionRanks.esp");
+  assert(candidates[0].primary_identifier == L"FactionRanks.esp");
+  assert(candidates[0].secondary_label == L"Faction Ranks");
+}
+
+void TestRepresentativeNamePrefersDllFilenameOverModFolderName()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("actionable_stack", L"paragonperks", L"Faction Ranks", 5, L"", L"Faction Ranks", L"paragon-perks.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  assert(candidates[0].display_name == L"paragon-perks.dll");
+  assert(candidates[0].primary_identifier == L"paragon-perks.dll");
+  assert(candidates[0].secondary_label == L"Faction Ranks");
+}
+
 void TestObjectRefAndResourceNeedMediumOnly()
 {
   const std::vector<CandidateSignal> signals = {
@@ -231,6 +258,8 @@ int main()
   TestObjectRefOnlyStaysReferenceClue();
   TestObjectRefAndStackConflictStayConflicting();
   TestSecondaryObjectRefCanStillCrossValidate();
+  TestRepresentativeNamePrefersPluginFilenameOverFriendlyLabel();
+  TestRepresentativeNamePrefersDllFilenameOverModFolderName();
   TestObjectRefAndResourceNeedMediumOnly();
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();

@@ -39,6 +39,8 @@ struct ActionableCandidate
   std::wstring confidence;
   std::string status_id;  // cross_validated / related / reference_clue / conflicting
   std::wstring display_name;
+  std::wstring primary_identifier;
+  std::wstring secondary_label;
   std::wstring plugin_name;
   std::wstring mod_name;
   std::wstring module_filename;

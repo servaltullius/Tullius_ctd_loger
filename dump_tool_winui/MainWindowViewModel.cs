@@ -854,6 +854,7 @@ internal sealed class MainWindowViewModel
     private string BuildCandidateDisplayName(ActionableCandidateItem candidate)
     {
         return FirstNonEmpty(
+            candidate.PrimaryIdentifier,
             candidate.DisplayName,
             candidate.PluginName,
             candidate.ModName,
@@ -871,6 +872,13 @@ internal sealed class MainWindowViewModel
         if (families.Count > 0)
         {
             parts.Add(string.Join(" + ", families));
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.SecondaryLabel))
+        {
+            parts.Add(_isKorean
+                ? $"표시명: {candidate.SecondaryLabel}"
+                : $"Label: {candidate.SecondaryLabel}");
         }
 
         if (!string.IsNullOrWhiteSpace(candidate.Explanation))

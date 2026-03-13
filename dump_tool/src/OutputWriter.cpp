@@ -319,6 +319,8 @@ static nlohmann::json BuildSummaryJson(
       { "status_id", c.status_id },
       { "confidence", WideToUtf8(c.confidence) },
       { "display_name", WideToUtf8(c.display_name) },
+      { "primary_identifier", WideToUtf8(c.primary_identifier) },
+      { "secondary_label", WideToUtf8(c.secondary_label) },
       { "plugin_name", WideToUtf8(c.plugin_name) },
       { "mod_name", WideToUtf8(c.mod_name) },
       { "module_filename", WideToUtf8(c.module_filename) },
@@ -619,6 +621,16 @@ static std::string BuildReportText(
     for (const auto& candidate : r.freeze_analysis.related_candidates) {
       rpt << "  * " << WideToUtf8(candidate.display_name)
           << " [" << WideToUtf8(candidate.confidence) << "]\n";
+    }
+  }
+  if (!r.actionable_candidates.empty()) {
+    rpt << (en ? "\nActionable candidates:\n" : "\n행동 우선 후보:\n");
+    for (const auto& candidate : r.actionable_candidates) {
+      rpt << "  * " << WideToUtf8(candidate.primary_identifier.empty() ? candidate.display_name : candidate.primary_identifier);
+      if (!candidate.secondary_label.empty()) {
+        rpt << " (" << WideToUtf8(candidate.secondary_label) << ")";
+      }
+      rpt << " [" << WideToUtf8(candidate.confidence) << "]\n";
     }
   }
   rpt << (en ? "\nEvidence:\n" : "\n근거:\n");

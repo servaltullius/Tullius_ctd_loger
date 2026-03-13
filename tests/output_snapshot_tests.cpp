@@ -217,6 +217,8 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
     AssertIsType(c, "status_id", "string", "actionable_candidates[]");
     AssertIsType(c, "confidence", "string", "actionable_candidates[]");
     AssertIsType(c, "display_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "primary_identifier", "string", "actionable_candidates[]");
+    AssertIsType(c, "secondary_label", "string", "actionable_candidates[]");
     AssertIsType(c, "plugin_name", "string", "actionable_candidates[]");
     AssertIsType(c, "mod_name", "string", "actionable_candidates[]");
     AssertIsType(c, "module_filename", "string", "actionable_candidates[]");
@@ -350,6 +352,8 @@ void TestOutputWriterEmitsAllFields()
     "\"form_id\"",
     "\"status_id\"",
     "\"display_name\"",
+    "\"primary_identifier\"",
+    "\"secondary_label\"",
     "\"plugin_name\"",
     "\"mod_name\"",
     "\"module_filename\"",

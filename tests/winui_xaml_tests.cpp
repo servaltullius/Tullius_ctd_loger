@@ -191,6 +191,21 @@ static void TestWinUiConsumesRecaptureContext()
   RequireContains(cs, "RecaptureContextDetailsText.Text", "Main window must render the recapture-context details.");
 }
 
+static void TestWinUiUsesRepresentativeCandidateIdentifiers()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  RequireContains(summary, "ReadString(item, \"primary_identifier\")", "AnalysisSummary must parse actionable candidate primary_identifier.");
+  RequireContains(summary, "ReadString(item, \"secondary_label\")", "AnalysisSummary must parse actionable candidate secondary_label.");
+  RequireContains(summary, "string PrimaryIdentifier", "ActionableCandidateItem must expose primary_identifier.");
+  RequireContains(summary, "string SecondaryLabel", "ActionableCandidateItem must expose secondary_label.");
+
+  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  RequireContains(vm, "candidate.PrimaryIdentifier", "WinUI titles must prefer the representative primary identifier.");
+  RequireContains(vm, "candidate.SecondaryLabel", "WinUI subordinate text must retain the secondary label.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -230,6 +245,7 @@ int main()
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
   TestWinUiConsumesRecaptureContext();
+  TestWinUiUsesRepresentativeCandidateIdentifiers();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");
