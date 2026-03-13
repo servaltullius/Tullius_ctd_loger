@@ -63,6 +63,9 @@ def main() -> int:
     assert "find_winui_build_root" in gate_script, (
         "release gate must resolve the real WinUI publish root instead of assuming a flat top-level layout"
     )
+    assert "cygpath -u" in gate_script, (
+        "release gate must normalize Windows publish paths before bash file existence checks"
+    )
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )

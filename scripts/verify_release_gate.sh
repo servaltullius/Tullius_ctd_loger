@@ -33,6 +33,10 @@ if root is not None:
 PY
 })"
 
+if [[ -n "${WINUI_BUILD_ROOT}" ]] && command -v cygpath >/dev/null 2>&1; then
+  WINUI_BUILD_ROOT="$(cygpath -u "${WINUI_BUILD_ROOT}")"
+fi
+
 readarray -t REQUIRED_ZIP_ENTRIES < <(
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
 from release_contract import REQUIRED_ZIP_ENTRIES
