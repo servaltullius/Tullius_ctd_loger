@@ -108,6 +108,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(j, "freeze_analysis", "object", "root");
   AssertIsType(j, "evidence", "array", "root");
   AssertIsType(j, "recommendations", "array", "root");
+  AssertIsType(j, "first_chance_context", "object", "root");
 
   // ── schema block ──
   const auto& schema = j["schema"];
@@ -314,6 +315,7 @@ void TestOutputWriterEmitsAllFields()
     "\"resources\"",
     "\"actionable_candidates\"",
     "\"freeze_analysis\"",
+    "\"first_chance_context\"",
     "\"evidence\"",
     "\"recommendations\"",
   };
@@ -384,6 +386,11 @@ void TestOutputWriterEmitsAllFields()
     "\"dbghelp_version\"",
     "\"msdia_available\"",
     "\"runtime_degraded\"",
+    "\"recapture_evaluation\"",
+    "\"triggered\"",
+    "\"target_profile\"",
+    "\"reasons\"",
+    "\"escalation_level\"",
   };
 
   for (const auto& key : nestedKeys) {
@@ -411,6 +418,10 @@ void TestOutputWriterReportTextSections()
     "Module+Offset:",
     "CaptureProfileBaseMode:",
     "CaptureProfileFullMemory:",
+    "RecaptureTriggered:",
+    "RecaptureTargetProfile:",
+    "RecaptureReasons:",
+    "RecaptureEscalationLevel:",
     "Evidence:",
     "Recommendations",
     "Callstack",
@@ -449,6 +460,24 @@ void TestFirstChanceCandidateExplanationSourceGuards()
   std::cout << "  [PASS] CTD first-chance candidate explanation guards\n";
 }
 
+void TestRecaptureEvaluationConsumptionSourceGuards()
+{
+  const auto root = ProjectRoot();
+  const std::string outputSrc = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string evidenceSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const std::string recommendationSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  assert(outputSrc.find("RecaptureReasons:") != std::string::npos);
+  assert(outputSrc.find("RecaptureEscalationLevel:") != std::string::npos);
+  assert(outputSrc.find("\"recapture_evaluation\"") != std::string::npos);
+  assert(evidenceSrc.find("Capture recapture context") != std::string::npos);
+  assert(evidenceSrc.find("incident_recapture_target_profile") != std::string::npos);
+  assert(recommendationSrc.find("[Recapture]") != std::string::npos);
+  assert(recommendationSrc.find("freeze_snapshot_richer") != std::string::npos);
+
+  std::cout << "  [PASS] Recapture evaluation consumption guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -475,6 +504,7 @@ int main()
   TestOutputWriterEmitsAllFields();
   TestOutputWriterReportTextSections();
   TestFirstChanceCandidateExplanationSourceGuards();
+  TestRecaptureEvaluationConsumptionSourceGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;

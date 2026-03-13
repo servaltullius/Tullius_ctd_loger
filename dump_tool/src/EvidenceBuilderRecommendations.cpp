@@ -93,6 +93,37 @@ std::wstring DescribeFirstChanceContext(const FirstChanceSummary& summary, bool 
   return detail;
 }
 
+std::wstring DescribeRecaptureReasons(const AnalysisResult& r, bool en)
+{
+  std::vector<std::wstring> labels;
+  labels.reserve(r.incident_recapture_reasons.size());
+  for (const auto& reason : r.incident_recapture_reasons) {
+    if (reason == "unknown_fault_module") {
+      labels.push_back(en ? L"unknown fault module" : L"fault module 미확정");
+    } else if (reason == "candidate_conflict") {
+      labels.push_back(en ? L"candidate conflict" : L"후보 충돌");
+    } else if (reason == "reference_clue_only") {
+      labels.push_back(en ? L"reference clue only" : L"참조 단서 단독");
+    } else if (reason == "stackwalk_degraded") {
+      labels.push_back(en ? L"stackwalk degraded" : L"stackwalk 저하");
+    } else if (reason == "symbol_runtime_degraded") {
+      labels.push_back(en ? L"symbol runtime degraded" : L"심볼 런타임 저하");
+    } else if (reason == "first_chance_candidate_weak") {
+      labels.push_back(en ? L"first-chance candidate weak" : L"first-chance 후보 약함");
+    } else if (reason == "freeze_ambiguous") {
+      labels.push_back(en ? L"freeze ambiguous" : L"프리징 해석 애매");
+    } else if (reason == "freeze_snapshot_fallback") {
+      labels.push_back(en ? L"freeze snapshot fallback" : L"프리징 snapshot fallback");
+    } else if (reason == "freeze_candidate_weak") {
+      labels.push_back(en ? L"freeze candidate weak" : L"프리징 후보 약함");
+    } else {
+      labels.push_back(ToWideAscii(reason));
+    }
+  }
+  return labels.empty() ? (en ? L"weak analysis context" : L"약한 분석 문맥")
+                        : JoinList(labels, labels.size(), L", ");
+}
+
 void AddActionableCandidateRecommendations(
     AnalysisResult& r,
     bool en,
@@ -246,6 +277,28 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Recapture] This dump already came from a richer crash recapture profile. Escalate to FullMemory only if the evidence still stays weak."
       : L"[재수집] 이 덤프는 이미 richer crash recapture profile로 다시 수집된 결과입니다. 근거가 여전히 약할 때만 FullMemory로 올리세요.");
+  }
+  if (r.incident_recapture_evaluation_present && r.incident_recapture_triggered) {
+    const auto reasons = DescribeRecaptureReasons(r, en);
+    if (r.incident_recapture_target_profile == "crash_richer") {
+      r.recommendations.push_back(en
+        ? (L"[Recapture] Helper selected crash_richer because prior analysis stayed weak (" + reasons +
+            L"). Use crash_full only if the richer recapture is still ambiguous.")
+        : (L"[재수집] 이전 분석이 약해서 helper가 crash_richer를 선택했습니다 (" + reasons +
+            L"). richer recapture 이후에도 애매할 때만 crash_full로 올리세요."));
+    } else if (r.incident_recapture_target_profile == "crash_full") {
+      r.recommendations.push_back(en
+        ? (L"[Recapture] Helper escalated to crash_full after repeated weak analysis (" + reasons +
+            L"). Focus on why the richer stage was insufficient before asking for another full dump.")
+        : (L"[재수집] 약한 분석이 반복되어 helper가 crash_full까지 올렸습니다 (" + reasons +
+            L"). 추가 full dump를 요구하기 전에 왜 richer 단계가 부족했는지 먼저 확인하세요."));
+    } else if (r.incident_recapture_target_profile == "freeze_snapshot_richer") {
+      r.recommendations.push_back(en
+        ? (L"[Recapture] Helper selected freeze_snapshot_richer because freeze quality stayed weak (" + reasons +
+            L"). Reproduce the stall with snapshot-backed capture before broad deadlock triage.")
+        : (L"[재수집] 프리징 품질이 약해서 helper가 freeze_snapshot_richer를 선택했습니다 (" + reasons +
+            L"). 광범위한 데드락 점검 전에 snapshot 기반으로 다시 재현해 보세요."));
+    }
   }
 
   if (r.needs_bees && isCrashLike) {

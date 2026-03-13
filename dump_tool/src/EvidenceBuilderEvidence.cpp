@@ -37,6 +37,55 @@ static std::wstring DescribeCaptureProfileEvidence(const AnalysisResult& r, bool
         L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") + L").");
 }
 
+static std::wstring DescribeRecaptureReason(std::string_view reasonId, bool en)
+{
+  if (reasonId == "unknown_fault_module") {
+    return en ? L"unknown fault module" : L"fault module 미확정";
+  }
+  if (reasonId == "candidate_conflict") {
+    return en ? L"candidate conflict" : L"후보 충돌";
+  }
+  if (reasonId == "reference_clue_only") {
+    return en ? L"reference clue only" : L"참조 단서 단독";
+  }
+  if (reasonId == "stackwalk_degraded") {
+    return en ? L"stackwalk degraded" : L"stackwalk 저하";
+  }
+  if (reasonId == "symbol_runtime_degraded") {
+    return en ? L"symbol runtime degraded" : L"심볼 런타임 저하";
+  }
+  if (reasonId == "first_chance_candidate_weak") {
+    return en ? L"first-chance candidate weak" : L"first-chance 후보 약함";
+  }
+  if (reasonId == "freeze_ambiguous") {
+    return en ? L"freeze ambiguous" : L"프리징 해석 애매";
+  }
+  if (reasonId == "freeze_snapshot_fallback") {
+    return en ? L"freeze snapshot fallback" : L"프리징 snapshot fallback";
+  }
+  if (reasonId == "freeze_candidate_weak") {
+    return en ? L"freeze candidate weak" : L"프리징 후보 약함";
+  }
+  return ToWideAscii(reasonId);
+}
+
+static std::wstring DescribeRecaptureEvaluationEvidence(const AnalysisResult& r, bool en)
+{
+  std::vector<std::wstring> parts;
+  parts.push_back((en ? L"target_profile=" : L"target_profile=") + ToWideAscii(r.incident_recapture_target_profile));
+  parts.push_back((en ? L"escalation_level=" : L"escalation_level=") +
+                  std::to_wstring(r.incident_recapture_escalation_level));
+  if (!r.incident_recapture_reasons.empty()) {
+    std::vector<std::wstring> reasonLabels;
+    reasonLabels.reserve(r.incident_recapture_reasons.size());
+    for (const auto& reason : r.incident_recapture_reasons) {
+      reasonLabels.push_back(DescribeRecaptureReason(reason, en));
+    }
+    parts.push_back((en ? L"reasons=" : L"reasons=") + JoinList(reasonLabels, reasonLabels.size(), L", "));
+  }
+  return JoinList(parts, parts.size(), L" | ");
+}
+
 static std::wstring DescribeSymbolRuntimeEvidence(const AnalysisResult& r, bool en)
 {
   std::vector<std::wstring> parts;
@@ -702,6 +751,15 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       ? L"Capture profile metadata"
       : L"캡처 프로필 메타데이터";
     e.details = DescribeCaptureProfileEvidence(r, en);
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.incident_recapture_evaluation_present && r.incident_recapture_triggered) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Capture recapture context" : L"재수집 캡처 문맥";
+    e.details = DescribeRecaptureEvaluationEvidence(r, en);
     r.evidence.push_back(std::move(e));
   }
 

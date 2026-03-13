@@ -724,6 +724,22 @@ static void LoadIncidentCaptureProfile(
     out.incident_capture_profile_base_mode = capture_profile.value("base_mode", "");
     out.incident_capture_profile_full_memory = capture_profile.value("include_full_memory", false);
   }
+  if (incidentManifest.contains("recapture_evaluation") && incidentManifest["recapture_evaluation"].is_object()) {
+    const auto& recapture_evaluation = incidentManifest["recapture_evaluation"];
+    out.incident_recapture_evaluation_present = true;
+    out.incident_recapture_triggered = recapture_evaluation.value("triggered", false);
+    out.incident_recapture_kind = recapture_evaluation.value("kind", "");
+    out.incident_recapture_target_profile = recapture_evaluation.value("target_profile", "");
+    out.incident_recapture_escalation_level = recapture_evaluation.value("escalation_level", 0u);
+    out.incident_recapture_reasons.clear();
+    if (recapture_evaluation.contains("reasons") && recapture_evaluation["reasons"].is_array()) {
+      for (const auto& reason : recapture_evaluation["reasons"]) {
+        if (reason.is_string()) {
+          out.incident_recapture_reasons.push_back(reason.get<std::string>());
+        }
+      }
+    }
+  }
 }
 
 static void AppendHistoryCandidateKey(

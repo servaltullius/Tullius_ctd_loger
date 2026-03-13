@@ -425,6 +425,27 @@ void TestFirstChanceCtdCandidateSourceContracts()
                  "Recommendations must explain repeated first-chance context for boosted CTD candidates.");
 }
 
+void TestRecaptureEvaluationConsumptionSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
+  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto outputWriter = ReadAllText(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const auto evidenceCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(analyzerHeader, "incident_recapture_target_profile", "AnalysisResult must expose recapture target profile metadata.");
+  AssertContains(analyzerHeader, "incident_recapture_reasons", "AnalysisResult must expose recapture reason metadata.");
+  AssertContains(analyzerCpp, "recapture_evaluation", "Analyzer must load incident recapture metadata from the manifest.");
+  AssertContains(outputWriter, "recapture_evaluation", "OutputWriter must consume incident recapture metadata.");
+  AssertContains(outputWriter, "RecaptureReasons:", "Report text must print recapture reasons.");
+  AssertContains(outputWriter, "RecaptureEscalationLevel:", "Report text must print recapture escalation level.");
+  AssertContains(evidenceCpp, "Capture recapture context", "Evidence must explain why a recapture profile was chosen.");
+  AssertContains(evidenceCpp, "incident_recapture_target_profile", "Evidence recapture explanations must read the chosen target profile.");
+  AssertContains(recommendationCpp, "freeze_snapshot_richer", "Recommendations must explain freeze snapshot richer recapture intent.");
+  AssertContains(recommendationCpp, "crash_full", "Recommendations must explain crash_full recapture intent.");
+}
+
 }  // namespace
 
 int main()
@@ -440,5 +461,6 @@ int main()
   TestCaptureQualitySourceContracts();
   TestFreezeAnalysisSourceContracts();
   TestFirstChanceCtdCandidateSourceContracts();
+  TestRecaptureEvaluationConsumptionSourceContracts();
   return 0;
 }

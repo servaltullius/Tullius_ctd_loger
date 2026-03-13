@@ -490,6 +490,20 @@ static std::string BuildReportText(
         rpt << (en ? "RecaptureTargetProfile: " : "RecaptureTargetProfile: ")
             << recapture["target_profile"].get<std::string>() << "\n";
       }
+      if (recapture.contains("reasons") && recapture["reasons"].is_array()) {
+        std::vector<std::wstring> reasons;
+        for (const auto& reason : recapture["reasons"]) {
+          if (reason.is_string()) {
+            reasons.push_back(Utf8ToWide(reason.get<std::string>()));
+          }
+        }
+        rpt << (en ? "RecaptureReasons: " : "RecaptureReasons: ")
+            << WideToUtf8(JoinList(reasons, reasons.size(), L", ")) << "\n";
+      }
+      if (recapture.contains("escalation_level") && recapture["escalation_level"].is_number_unsigned()) {
+        rpt << (en ? "RecaptureEscalationLevel: " : "RecaptureEscalationLevel: ")
+            << recapture["escalation_level"].get<std::uint32_t>() << "\n";
+      }
     }
     if (inc.contains("manifest_path") && inc["manifest_path"].is_string()) {
       rpt << (en ? "IncidentManifest: " : "Incident manifest: ") << inc["manifest_path"].get<std::string>() << "\n";

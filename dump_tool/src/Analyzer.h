@@ -209,6 +209,12 @@ struct AnalysisResult
   std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
   std::string incident_capture_profile_base_mode;  // mini / default / full
   bool incident_capture_profile_full_memory = false;
+  bool incident_recapture_evaluation_present = false;
+  bool incident_recapture_triggered = false;
+  std::string incident_recapture_kind;            // crash / freeze
+  std::string incident_recapture_target_profile;  // none / crash_richer / crash_full / freeze_snapshot_richer
+  std::uint32_t incident_recapture_escalation_level = 0;
+  std::vector<std::string> incident_recapture_reasons;
   bool online_symbol_source_allowed = false;
   bool online_symbol_source_used = false;
   bool path_redaction_applied = true;
