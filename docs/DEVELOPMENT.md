@@ -96,13 +96,34 @@ It also packages `dump_tool/data` recursively (for both plugin path and WinUI pa
 Policy:
 - GitHub Release patch notes are written in **Korean (required)**.
 - English is optional, but put Korean first.
+- Use the canonical prerelease notes template:
+  - `docs/release/PRERELEASE_NOTES_TEMPLATE.md`
 
 Suggested checklist:
 1) Update version + changelog
 2) Run tests (Linux + Windows)
 3) Confirm compatibility preflight is required by default (`dist/SkyrimDiagHelper.ini` has `EnableCompatibilityPreflight=1`)
 4) Build + package zip on Windows (`--no-pdb`)
-5) Tag + push, then create GitHub Release and upload `dist/Tullius_ctd_loger.zip`
+5) Copy the template to a versioned draft and fill it in
+6) Tag + push, then create or edit GitHub Release with `--notes-file`
+7) Upload `dist/Tullius_ctd_loger.zip`
+
+Suggested release-notes flow:
+```bash
+mkdir -p docs/release/drafts
+cp docs/release/PRERELEASE_NOTES_TEMPLATE.md docs/release/drafts/v0.2.42-rcN.md
+# edit docs/release/drafts/v0.2.42-rcN.md
+
+gh release create v0.2.42-rcN dist/Tullius_ctd_loger_v0.2.42-rcN.zip \
+  --prerelease \
+  --title "v0.2.42-rcN — <요약 제목>" \
+  --notes-file docs/release/drafts/v0.2.42-rcN.md
+
+# or update an existing prerelease body
+gh release edit v0.2.42-rcN \
+  --title "v0.2.42-rcN — <요약 제목>" \
+  --notes-file docs/release/drafts/v0.2.42-rcN.md
+```
 
 Release hard-gate quick checks:
 ```bash

@@ -36,6 +36,7 @@ def _touch(path: Path) -> None:
 def main() -> int:
     agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     development_md = (REPO_ROOT / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
+    prerelease_template_path = REPO_ROOT / "docs" / "release" / "PRERELEASE_NOTES_TEMPLATE.md"
     package_py = REPO_ROOT / "scripts" / "package.py"
     gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
@@ -100,6 +101,27 @@ def main() -> int:
     )
     assert "SkyrimDiagDumpToolWinUI.deps.json" in build_winui_script, (
         "build-winui.cmd must require WinUI deps sidecar when selecting output"
+    )
+    assert prerelease_template_path.is_file(), (
+        "prerelease release-notes template must exist at docs/release/PRERELEASE_NOTES_TEMPLATE.md"
+    )
+    prerelease_template = prerelease_template_path.read_text(encoding="utf-8")
+    for heading in (
+        "## 핵심 변경",
+        "## WinUI / 사용성",
+        "## 엔진 변경",
+        "## 빌드 / 운영",
+        "## 주의사항",
+        "## 검증",
+    ):
+        assert heading in prerelease_template, (
+            f"prerelease template must include required section heading: {heading}"
+        )
+    assert "PRERELEASE_NOTES_TEMPLATE.md" in development_md, (
+        "DEVELOPMENT.md must point to the prerelease release-notes template"
+    )
+    assert "--notes-file" in development_md, (
+        "DEVELOPMENT.md must document the gh release --notes-file flow"
     )
 
     with tempfile.TemporaryDirectory(prefix="skydiag_pkg_test_") as td:
