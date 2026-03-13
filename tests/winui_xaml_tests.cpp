@@ -23,6 +23,14 @@ static void RequireContains(const std::string& haystack, const char* needle, con
   }
 }
 
+static void RequireNotContains(const std::string& haystack, const char* needle, const char* message)
+{
+  if (haystack.find(needle) != std::string::npos) {
+    std::cerr << message << '\n';
+    std::exit(1);
+  }
+}
+
 static void TestMainWindowHasCorrelationBadge()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -114,7 +122,7 @@ static void TestAnalyzePanelHasDumpDiscoveryFlow()
   RequireContains(xaml, "RescanDumpsButton", "Analyze/start screen must expose a rescan action.");
   RequireContains(xaml, "DirectSelectDumpButton", "Analyze/start screen must keep a direct dump-selection action.");
   RequireContains(xaml, "MO2 overwrite", "Empty state guidance must directly mention MO2 overwrite.");
-  RequireContains(xaml, "덤프 검색 위치", "Folder-management UX must use dump-search-location wording.");
+  RequireContains(xaml, "덤프 출력 위치", "Folder-management UX must use dump-output-location wording.");
 
   const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
   RequireContains(vm, "RecentDumps", "View model must expose recent dump items.");
@@ -132,6 +140,28 @@ static void TestAnalyzePanelHasDumpDiscoveryFlow()
   const auto store = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryStore.cs");
   RequireContains(store, "RegisteredRoots", "Dump discovery store must persist registered search roots.");
   RequireContains(store, "LearnedRoots", "Dump discovery store must persist learned search roots.");
+}
+
+static void TestDumpDiscoveryUsesOutputLocationsOnly()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto service = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryService.cs");
+  RequireContains(service, "SkyrimDiagHelper.ini", "Discovery service must inspect SkyrimDiagHelper.ini to infer the real output root.");
+  RequireContains(service, "OutputDir", "Discovery service must honor SkyrimDiagHelper.ini OutputDir.");
+  RequireContains(service, "overwrite", "Discovery service must infer MO2 overwrite when OutputDir is blank.");
+  RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");
+
+  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  RequireContains(cs, "덤프 출력 위치", "User-facing copy must talk about dump output locations.");
+  RequireContains(cs, "OutputDir", "Empty-state/help copy must mention OutputDir for custom output roots.");
+
+  const auto store = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryStore.cs");
+  RequireContains(store, "CrashDumps", "Store migration must recognize the legacy CrashDumps root.");
+  RequireContains(store, "IsLegacyExcludedRoot", "Store must sanitize legacy non-output roots from persisted state.");
+
+  RequireContains(service, "CanPromoteLearnedRoot", "Discovery service must gate learned-root promotion to supported output roots.");
+  RequireContains(cs, "CanPromoteLearnedRoot", "Main window must not learn arbitrary direct-selected dump folders.");
 }
 
 int main()
@@ -171,6 +201,7 @@ int main()
   TestMainWindowHasTriageReviewEditor();
   TestMainWindowHasCrashLoggerFirstReadingPath();
   TestAnalyzePanelHasDumpDiscoveryFlow();
+  TestDumpDiscoveryUsesOutputLocationsOnly();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

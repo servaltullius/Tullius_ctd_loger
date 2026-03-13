@@ -98,19 +98,19 @@ public sealed partial class MainWindow : Window
         AnalyzeSectionTitleText.Text = T("Direct dump path", "직접 덤프 경로");
         RecentDumpsTitleText.Text = T("Recent discovered dumps", "최근 발견된 덤프");
         RecentDumpsHintText.Text = T(
-            "We scan known dump locations and show the newest dumps first.",
-            "알려진 덤프 위치를 스캔하고 가장 최근 덤프를 먼저 보여줍니다.");
+            "We scan Tullius output locations and show the newest dumps first.",
+            "툴리우스 출력 위치를 스캔하고 가장 최근 덤프를 먼저 보여줍니다.");
         RecentDumpsEmptyTitleText.Text = T("No dumps were found.", "덤프를 찾지 못했습니다.");
         RecentDumpsEmptyHintText.Text = T(
-            "Add your MO2 overwrite folder or another custom dump location.",
-            "MO2 overwrite 또는 사용자 지정 폴더를 추가하세요.");
-        DumpSearchLocationsTitleText.Text = T("Dump search locations", "덤프 검색 위치");
+            "Add your MO2 overwrite folder or the folder referenced by OutputDir.",
+            "MO2 overwrite 또는 OutputDir 폴더를 추가하세요.");
+        DumpSearchLocationsTitleText.Text = T("Dump output locations", "덤프 출력 위치");
         DumpSearchLocationsHintText.Text = T(
-            "You can register a broad folder such as MO2 overwrite. Subfolders are searched automatically.",
-            "MO2 overwrite 같은 상위 폴더도 선택할 수 있으며, 하위 폴더까지 자동 검색합니다.");
+            "Register your MO2 overwrite folder or OutputDir folder. Subfolders are searched automatically.",
+            "MO2 overwrite 또는 OutputDir 폴더를 등록하면 하위 폴더까지 자동 검색합니다.");
         DumpSearchLocationsEmptyText.Text = T(
-            "No dump search locations are saved yet.",
-            "저장된 덤프 검색 위치가 아직 없습니다.");
+            "No dump output locations are saved yet.",
+            "저장된 덤프 출력 위치가 아직 없습니다.");
 
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
@@ -263,14 +263,19 @@ public sealed partial class MainWindow : Window
     {
         if (_vm.IsKorean)
         {
-            return $"검색 위치 {searchLocationCount}곳, 최근 덤프 {dumpCount}개";
+            return $"출력 위치 {searchLocationCount}곳, 최근 덤프 {dumpCount}개";
         }
 
-        return $"{searchLocationCount} search roots, {dumpCount} recent dumps";
+        return $"{searchLocationCount} output locations, {dumpCount} recent dumps";
     }
 
     private async Task PromoteLearnedDumpLocationAsync(string dumpPath)
     {
+        if (!DumpDiscoveryService.CanPromoteLearnedRoot(_dumpDiscoveryState, dumpPath))
+        {
+            return;
+        }
+
         string? directoryPath;
         try
         {
@@ -301,7 +306,7 @@ public sealed partial class MainWindow : Window
     private async void RescanDumpsButton_Click(object sender, RoutedEventArgs e)
     {
         await RefreshDiscoveredDumpsAsync();
-        StatusText.Text = T("Rescanned known dump locations.", "알려진 덤프 위치를 다시 스캔했습니다.");
+        StatusText.Text = T("Rescanned known dump output locations.", "알려진 덤프 출력 위치를 다시 스캔했습니다.");
     }
 
     private void ManageDumpFoldersButton_Click(object sender, RoutedEventArgs e)
@@ -328,7 +333,7 @@ public sealed partial class MainWindow : Window
         await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
         DumpSearchLocationsPanel.Visibility = Visibility.Visible;
         await RefreshDiscoveredDumpsAsync();
-        StatusText.Text = T("Dump search location saved.", "덤프 검색 위치를 저장했습니다.");
+        StatusText.Text = T("Dump output location saved.", "덤프 출력 위치를 저장했습니다.");
     }
 
     private async void RemoveDumpSearchLocation_Click(object sender, RoutedEventArgs e)
@@ -341,7 +346,7 @@ public sealed partial class MainWindow : Window
         _dumpDiscoveryState = DumpDiscoveryStore.RemoveRoot(_dumpDiscoveryState, item.Path);
         await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
         await RefreshDiscoveredDumpsAsync();
-        StatusText.Text = T("Removed dump search location.", "덤프 검색 위치를 제거했습니다.");
+        StatusText.Text = T("Removed dump output location.", "덤프 출력 위치를 제거했습니다.");
     }
 
     private void DumpSearchLocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)

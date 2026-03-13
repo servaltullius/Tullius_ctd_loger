@@ -196,13 +196,13 @@
                              FontSize="13"
                              TextWrapping="WrapWholeWords"
                              Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                    Add your MO2 overwrite folder or another custom dump location.
+                    Add your MO2 overwrite folder or the folder referenced by OutputDir.
                   </TextBlock>
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button x:Name="EmptyStateManageFoldersButton"
                             Click="ManageDumpFoldersButton_Click"
                             Content="Manage folders"
-                            AutomationProperties.Name="Manage dump search locations from empty state" />
+                            AutomationProperties.Name="Manage dump output locations from empty state" />
                     <Button x:Name="EmptyStateDirectSelectButton"
                             Click="BrowseDump_Click"
                             Content="Direct select"
@@ -222,36 +222,36 @@
                                FontSize="16"
                                FontWeight="SemiBold"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                      덤프 검색 위치
+                      덤프 출력 위치
                     </TextBlock>
                     <TextBlock x:Name="DumpSearchLocationsHintText"
                                FontSize="12"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      You can register a broad folder such as MO2 overwrite. Subfolders are searched automatically.
+                      Register your MO2 overwrite folder or OutputDir folder. Subfolders are searched automatically.
                     </TextBlock>
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <Button x:Name="AddDumpSearchLocationButton"
                               Click="AddDumpSearchLocation_Click"
                               Content="Add location"
-                              AutomationProperties.Name="Add dump search location" />
+                              AutomationProperties.Name="Add dump output location" />
                       <Button x:Name="RemoveDumpSearchLocationButton"
                               Click="RemoveDumpSearchLocation_Click"
                               Content="Remove selected"
                               IsEnabled="False"
-                              AutomationProperties.Name="Remove selected dump search location" />
+                              AutomationProperties.Name="Remove selected dump output location" />
                     </StackPanel>
                     <TextBlock x:Name="DumpSearchLocationsEmptyText"
                                FontSize="12"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="WrapWholeWords">
-                      No dump search locations are saved yet.
+                      No dump output locations are saved yet.
                     </TextBlock>
                     <ListView x:Name="DumpSearchLocationsList"
                               SelectionMode="Single"
                               MaxHeight="220"
                               SelectionChanged="DumpSearchLocationsList_SelectionChanged"
-                              AutomationProperties.Name="Saved dump search locations list">
+                              AutomationProperties.Name="Saved dump output locations list">
                       <ListView.ItemTemplate>
                         <DataTemplate x:DataType="local:DumpSearchLocationItem">
                           <StackPanel Spacing="2" Margin="0,0,0,6">

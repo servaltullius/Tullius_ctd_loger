@@ -114,7 +114,7 @@ internal static class DumpDiscoveryStore
         foreach (var root in roots)
         {
             var normalized = NormalizeRoot(root);
-            if (string.IsNullOrWhiteSpace(normalized) || !seen.Add(normalized))
+            if (string.IsNullOrWhiteSpace(normalized) || IsLegacyExcludedRoot(normalized) || !seen.Add(normalized))
             {
                 continue;
             }
@@ -127,6 +127,28 @@ internal static class DumpDiscoveryStore
         }
 
         return result;
+    }
+
+    private static bool IsLegacyExcludedRoot(string normalizedRoot)
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            return false;
+        }
+
+        string crashDumpsRoot;
+        try
+        {
+            crashDumpsRoot = Path.GetFullPath(Path.Combine(localAppData, "CrashDumps"))
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return false;
+        }
+
+        return string.Equals(normalizedRoot, crashDumpsRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizeRoot(string? root)
