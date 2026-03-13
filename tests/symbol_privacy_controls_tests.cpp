@@ -42,6 +42,15 @@ int main()
   assert(std::filesystem::exists(analyzerPath) && "dump_tool/src/Analyzer.cpp not found");
   const std::string analyzer = ReadAllText(analyzerPath);
   AssertContains(analyzer, "allow_online_symbols", "Analyzer must expose online symbol policy handling");
+  AssertContains(analyzer, "[Symbols]", "Analyzer diagnostics must distinguish symbol runtime degradation.");
+
+  const std::filesystem::path stackwalkSymbolsPath = repoRoot / "dump_tool" / "src" / "AnalyzerInternalsStackwalkSymbols.cpp";
+  assert(std::filesystem::exists(stackwalkSymbolsPath) && "dump_tool/src/AnalyzerInternalsStackwalkSymbols.cpp not found");
+  const std::string stackwalkSymbols = ReadAllText(stackwalkSymbolsPath);
+  AssertContains(stackwalkSymbols, "dbghelp.dll", "Stackwalk symbol session must inspect dbghelp runtime.");
+  AssertContains(stackwalkSymbols, "msdia140.dll", "Stackwalk symbol session must inspect msdia140 runtime.");
+  AssertContains(stackwalkSymbols, "runtimeDegraded", "Stackwalk symbol session must track degraded symbol runtime state.");
+  AssertContains(stackwalkSymbols, "runtimeDiagnostics", "Stackwalk symbol session must surface symbol runtime diagnostics.");
 
   const std::filesystem::path outputWriterPath = repoRoot / "dump_tool" / "src" / "OutputWriter.cpp";
   assert(std::filesystem::exists(outputWriterPath) && "dump_tool/src/OutputWriter.cpp not found");
@@ -49,5 +58,7 @@ int main()
   AssertContains(outputWriter, "path_redaction_applied", "Summary output must declare whether path redaction was applied");
   AssertContains(outputWriter, "online_symbol_source_allowed", "Summary output must declare whether online symbols were allowed");
   AssertContains(outputWriter, "MaybeRedactPath(rr.path", "Resource paths must respect path redaction in summary/report outputs");
+  AssertContains(outputWriter, "dbghelp_path", "Summary output must report dbghelp runtime path.");
+  AssertContains(outputWriter, "msdia_available", "Summary output must report DIA runtime availability.");
   return 0;
 }

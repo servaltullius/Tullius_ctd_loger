@@ -155,6 +155,16 @@ struct AnalysisResult
   std::uint32_t stackwalk_source_line_frames = 0;
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
+  std::wstring dbghelp_path;        // effective dbghelp runtime path (best-effort)
+  std::wstring dbghelp_version;     // dbghelp file version (best-effort)
+  std::wstring msdia_path;          // effective msdia140 runtime path (best-effort)
+  bool msdia_available = false;
+  bool symbol_cache_ready = false;
+  bool symbol_runtime_degraded = false;
+  bool incident_capture_profile_present = false;
+  std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
+  std::string incident_capture_profile_base_mode;  // mini / default / full
+  bool incident_capture_profile_full_memory = false;
   bool online_symbol_source_allowed = false;
   bool online_symbol_source_used = false;
   bool path_redaction_applied = true;

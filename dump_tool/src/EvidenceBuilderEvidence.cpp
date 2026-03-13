@@ -12,6 +12,55 @@ namespace skydiag::dump_tool::internal {
 
 // ── Extracted evidence helpers ──────────────────────────────────────
 
+static std::wstring DescribeCaptureProfileEvidence(const AnalysisResult& r, bool en)
+{
+  if (!r.incident_capture_profile_present) {
+    return {};
+  }
+
+  const std::wstring captureKind = ToWideAscii(r.incident_capture_kind);
+  const std::wstring baseMode = ToWideAscii(r.incident_capture_profile_base_mode);
+  if (r.incident_capture_kind == "crash_recapture") {
+    return en
+      ? (L"Dump was collected by the crash_recapture profile (base_mode=" + baseMode +
+          L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") +
+          L") after earlier analysis weakness or repeated bucket activity.")
+      : (L"이 덤프는 crash_recapture 프로필로 다시 수집되었습니다 (base_mode=" + baseMode +
+          L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") +
+          L"). 앞선 분석 약점 또는 반복 버킷 때문에 재수집된 것입니다.");
+  }
+
+  return en
+    ? (L"Dump used capture profile " + captureKind + L" (base_mode=" + baseMode +
+        L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") + L").")
+    : (L"이 덤프는 " + captureKind + L" 캡처 프로필로 수집되었습니다 (base_mode=" + baseMode +
+        L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") + L").");
+}
+
+static std::wstring DescribeSymbolRuntimeEvidence(const AnalysisResult& r, bool en)
+{
+  std::vector<std::wstring> parts;
+  if (r.dbghelp_path.empty()) {
+    parts.push_back(en ? L"dbghelp.dll runtime unresolved" : L"dbghelp.dll 런타임 경로 미확인");
+  } else if (r.dbghelp_version.empty()) {
+    parts.push_back(en ? L"dbghelp.dll version unreadable" : L"dbghelp.dll 버전 미확인");
+  } else {
+    parts.push_back(en ? (L"dbghelp " + r.dbghelp_version) : (L"dbghelp " + r.dbghelp_version));
+  }
+
+  if (!r.msdia_available) {
+    parts.push_back(en ? L"msdia140.dll missing" : L"msdia140.dll 누락");
+  }
+  if (!r.symbol_cache_ready && !r.symbol_cache_path.empty()) {
+    parts.push_back(en ? L"symbol cache unavailable" : L"심볼 캐시 준비 실패");
+  }
+  if (!r.online_symbol_source_allowed) {
+    parts.push_back(en ? L"offline symbol policy active" : L"오프라인 심볼 정책 적용");
+  }
+
+  return JoinList(parts, parts.size(), L" | ");
+}
+
 static void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
@@ -590,6 +639,28 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = en
       ? L"Header 1.71 plugin(s) found on pre-1.6.1130 runtime without bees.dll."
       : L"1.71 헤더 플러그인이 있으나 1.6.1130 미만 런타임에서 bees.dll이 로드되지 않았습니다.";
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.incident_capture_profile_present) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Capture profile metadata"
+      : L"캡처 프로필 메타데이터";
+    e.details = DescribeCaptureProfileEvidence(r, en);
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.symbol_runtime_degraded) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Symbol/runtime environment limited stackwalk quality"
+      : L"심볼/런타임 환경 때문에 스택워크 품질이 제한됨";
+    e.details = DescribeSymbolRuntimeEvidence(r, en);
     r.evidence.push_back(std::move(e));
   }
 

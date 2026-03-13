@@ -76,7 +76,30 @@ int main()
     preflightCppText,
     "KNOWN_INCOMPATIBLE_COMBO",
     "Preflight must check known incompatible mod combinations.");
+  AssertContains(
+    preflightCppText,
+    "DBGHELP_RUNTIME",
+    "Preflight must report dbghelp runtime health.");
+  AssertContains(
+    preflightCppText,
+    "dbghelp.dll",
+    "Preflight must inspect the effective dbghelp.dll runtime.");
+  AssertContains(
+    preflightCppText,
+    "MSDIA_RUNTIME",
+    "Preflight must report DIA runtime availability.");
+  AssertContains(
+    preflightCppText,
+    "msdia140.dll",
+    "Preflight must inspect msdia140.dll availability.");
+  AssertContains(
+    preflightCppText,
+    "SYMBOL_PATH_HEALTH",
+    "Preflight must report symbol search path health.");
+  AssertContains(
+    preflightCppText,
+    "SYMBOL_CACHE_HEALTH",
+    "Preflight must report symbol cache health.");
 
   return 0;
 }
-

@@ -84,8 +84,8 @@ void AddActionableCandidateRecommendations(
       : (L"[오브젝트 참조] 사고 당시 게임이 " + candidateName +
           L" 을(를) 처리 중이었지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요."));
     r.recommendations.push_back(en
-      ? L"[Object ref] If the clue stays isolated, capture another incident or recapture with DumpMode=2 for more evidence."
-      : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나 DumpMode=2로 재수집하세요.");
+      ? L"[Object ref] If the clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
+      : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
   } else if (topCandidate->status_id == "conflicting" && secondCandidate) {
     const auto secondName = DescribeCandidate(*secondCandidate);
     r.recommendations.push_back(en
@@ -94,8 +94,8 @@ void AddActionableCandidateRecommendations(
       : (L"[충돌] 신호가 " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L")와 " +
           secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. 한쪽씩 순서대로 업데이트/비활성화하며 재현을 확인하세요."));
     r.recommendations.push_back(en
-      ? L"[Conflict] If the split persists, capture another dump with DumpMode=2 (FullMemory) to break the tie."
-      : L"[충돌] 이 분리가 계속되면 DumpMode=2(FullMemory)로 다시 캡처해 근거를 더 모으세요.");
+      ? L"[Conflict] If the split persists, rerun with a richer crash recapture profile first; use FullMemory (DumpMode=2) only if the tie remains."
+      : L"[충돌] 이 분리가 계속되면 richer crash recapture profile로 먼저 다시 캡처하고, 그래도 갈리면 그때만 FullMemory(DumpMode=2)를 사용하세요.");
   }
 }
 
@@ -174,6 +174,18 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         }
       }
     }
+  }
+
+  if (r.symbol_runtime_degraded) {
+    r.recommendations.push_back(en
+      ? L"[Symbols] Fix dbghelp/msdia or symbol cache/path health first before over-trusting weak stack or source-line results."
+      : L"[심볼] 약한 스택/소스라인 결과를 과신하기 전에 dbghelp/msdia 또는 심볼 캐시/경로 상태를 먼저 바로잡으세요.");
+  }
+
+  if (r.incident_capture_profile_present && r.incident_capture_kind == "crash_recapture") {
+    r.recommendations.push_back(en
+      ? L"[Recapture] This dump already came from a richer crash recapture profile. Escalate to FullMemory only if the evidence still stays weak."
+      : L"[재수집] 이 덤프는 이미 richer crash recapture profile로 다시 수집된 결과입니다. 근거가 여전히 약할 때만 FullMemory로 올리세요.");
   }
 
   if (r.needs_bees && isCrashLike) {
@@ -340,9 +352,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[점검] SKSE 버전/게임 버전(AE/SE/VR)/Address Library 버전이 서로 맞는지 확인");
   } else {
     if (!isSnapshotLike) {
-      r.recommendations.push_back(en
-        ? L"[Check] Fault module could not be determined. Capturing again with DumpMode=2 (FullMemory) can provide more clues."
-        : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. DumpMode를 2(FullMemory)로 올려 다시 캡처하면 단서가 늘 수 있습니다.");
+    r.recommendations.push_back(en
+      ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
+      : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 다시 캡처하세요.");
     }
   }
 

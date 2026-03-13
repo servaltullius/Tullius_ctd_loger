@@ -2,8 +2,13 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cwchar>
+#include <cwctype>
 #include <filesystem>
 #include <mutex>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 namespace skydiag::dump_tool::internal::stackwalk_internal {
 namespace {
@@ -14,6 +19,83 @@ std::mutex& DbgHelpGlobalMutex()
 {
   static std::mutex m;
   return m;
+}
+
+std::string QueryFileVersionString(const std::filesystem::path& filePath)
+{
+  DWORD handle = 0;
+  const DWORD size = GetFileVersionInfoSizeW(filePath.c_str(), &handle);
+  if (size == 0) {
+    return {};
+  }
+
+  std::vector<std::uint8_t> buffer(size);
+  if (!GetFileVersionInfoW(filePath.c_str(), handle, size, buffer.data())) {
+    return {};
+  }
+
+  VS_FIXEDFILEINFO* ffi = nullptr;
+  UINT ffiSize = 0;
+  if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<LPVOID*>(&ffi), &ffiSize) ||
+      !ffi || ffiSize < sizeof(VS_FIXEDFILEINFO)) {
+    return {};
+  }
+
+  const std::uint32_t ms = ffi->dwFileVersionMS;
+  const std::uint32_t ls = ffi->dwFileVersionLS;
+  return std::to_string(HIWORD(ms)) + "."
+       + std::to_string(LOWORD(ms)) + "."
+       + std::to_string(HIWORD(ls)) + "."
+       + std::to_string(LOWORD(ls));
+}
+
+std::wstring QueryLoadedModulePath(const wchar_t* moduleName)
+{
+  if (!moduleName || !*moduleName) {
+    return {};
+  }
+  const HMODULE module = GetModuleHandleW(moduleName);
+  if (!module) {
+    return {};
+  }
+
+  std::wstring buffer(MAX_PATH, L'\0');
+  for (;;) {
+    const DWORD copied = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (copied == 0) {
+      return {};
+    }
+    if (copied < buffer.size() - 1) {
+      buffer.resize(copied);
+      return buffer;
+    }
+    buffer.resize(buffer.size() * 2);
+  }
+}
+
+std::wstring SearchDllPath(const wchar_t* moduleName)
+{
+  if (!moduleName || !*moduleName) {
+    return {};
+  }
+  const DWORD needed = SearchPathW(nullptr, moduleName, nullptr, 0, nullptr, nullptr);
+  if (needed == 0) {
+    return {};
+  }
+  std::wstring buffer(static_cast<std::size_t>(needed), L'\0');
+  if (SearchPathW(nullptr, moduleName, nullptr, needed, buffer.data(), nullptr) == 0) {
+    return {};
+  }
+  buffer.resize(std::wcslen(buffer.c_str()));
+  return buffer;
+}
+
+std::wstring ResolveRuntimeDllPath(const wchar_t* moduleName)
+{
+  if (const std::wstring loaded = QueryLoadedModulePath(moduleName); !loaded.empty()) {
+    return loaded;
+  }
+  return SearchDllPath(moduleName);
 }
 
 std::wstring ReadEnvVar(const wchar_t* name)
@@ -32,12 +114,37 @@ std::wstring ReadEnvVar(const wchar_t* name)
   return out;
 }
 
-std::wstring ResolveDefaultSymbolCacheDir()
+bool WideContainsAsciiInsensitive(std::wstring_view haystack, std::string_view needleAscii)
 {
+  if (haystack.empty() || needleAscii.empty()) {
+    return false;
+  }
+
+  std::wstring needle;
+  needle.reserve(needleAscii.size());
+  for (char ch : needleAscii) {
+    needle.push_back(static_cast<wchar_t>(std::towlower(static_cast<wchar_t>(static_cast<unsigned char>(ch)))));
+  }
+
+  std::wstring lowered(haystack);
+  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](wchar_t ch) {
+    return static_cast<wchar_t>(std::towlower(ch));
+  });
+  return lowered.find(needle) != std::wstring::npos;
+}
+
+std::wstring ResolveDefaultSymbolCacheDir(bool* outReady)
+{
+  if (outReady) {
+    *outReady = false;
+  }
   std::wstring fromEnv = ReadEnvVar(L"SKYRIMDIAG_SYMBOL_CACHE_DIR");
   if (!fromEnv.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(fromEnv, ec);
+    if (outReady) {
+      *outReady = !ec && std::filesystem::exists(fromEnv);
+    }
     return fromEnv;
   }
 
@@ -55,25 +162,44 @@ std::wstring ResolveDefaultSymbolCacheDir()
   if (!cacheDir.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(cacheDir, ec);
+    if (outReady) {
+      *outReady = !ec && std::filesystem::exists(cacheDir);
+    }
   }
   return cacheDir.wstring();
 }
 
-std::wstring ResolveSymbolSearchPath(std::wstring* outCachePath, bool allowOnlineSymbols)
+std::wstring ResolveSymbolSearchPath(
+  std::wstring* outCachePath,
+  bool allowOnlineSymbols,
+  bool* outCacheReady,
+  bool* outFromEnv)
 {
   if (outCachePath) {
     outCachePath->clear();
   }
+  if (outCacheReady) {
+    *outCacheReady = false;
+  }
+  if (outFromEnv) {
+    *outFromEnv = false;
+  }
 
   if (const std::wstring explicitPath = ReadEnvVar(L"SKYRIMDIAG_SYMBOL_PATH"); !explicitPath.empty()) {
+    if (outFromEnv) {
+      *outFromEnv = true;
+    }
     return explicitPath;
   }
 
   if (const std::wstring ntSymbolPath = ReadEnvVar(L"_NT_SYMBOL_PATH"); !ntSymbolPath.empty()) {
+    if (outFromEnv) {
+      *outFromEnv = true;
+    }
     return ntSymbolPath;
   }
 
-  const std::wstring cachePath = ResolveDefaultSymbolCacheDir();
+  const std::wstring cachePath = ResolveDefaultSymbolCacheDir(outCacheReady);
   if (outCachePath) {
     *outCachePath = cachePath;
   }
@@ -93,6 +219,26 @@ SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineS
   dbghelp_lock = std::unique_lock<std::mutex>(DbgHelpGlobalMutex());
   process = GetCurrentProcess();
 
+  dbghelpPath = ResolveRuntimeDllPath(L"dbghelp.dll");
+  if (!dbghelpPath.empty()) {
+    const auto version = QueryFileVersionString(std::filesystem::path(dbghelpPath));
+    dbghelpVersion.assign(version.begin(), version.end());
+  }
+  if (dbghelpPath.empty()) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] dbghelp.dll runtime not resolved; stackwalk quality may be degraded");
+  } else if (dbghelpVersion.empty()) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] dbghelp.dll version unreadable; runtime health is uncertain");
+  }
+
+  msdiaPath = ResolveRuntimeDllPath(L"msdia140.dll");
+  msdiaAvailable = !msdiaPath.empty();
+  if (!msdiaAvailable) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] msdia140.dll not found; source line resolution may be limited");
+  }
+
   DWORD opts = SymGetOptions();
   opts |= SYMOPT_UNDNAME;
   opts |= SYMOPT_DEFERRED_LOADS;
@@ -100,9 +246,26 @@ SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineS
   opts |= SYMOPT_NO_PROMPTS;
   SymSetOptions(opts);
 
-  searchPath = ResolveSymbolSearchPath(&cachePath, allowOnlineSymbols);
+  bool searchPathFromEnv = false;
+  searchPath = ResolveSymbolSearchPath(&cachePath, allowOnlineSymbols, &symbolCacheReady, &searchPathFromEnv);
+  if (searchPath.empty()) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] symbol search path is empty; symbolization will be limited");
+  }
+  if (!cachePath.empty() && !symbolCacheReady) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] symbol cache directory unavailable; local-cache symbolization may be limited");
+  }
+  if (!allowOnlineSymbols &&
+      searchPathFromEnv &&
+      (WideContainsAsciiInsensitive(searchPath, "https://") || WideContainsAsciiInsensitive(searchPath, "http://"))) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] explicit symbol path includes online source while policy disables it");
+  }
   ok = SymInitializeW(process, searchPath.empty() ? nullptr : searchPath.c_str(), FALSE) ? true : false;
   if (!ok) {
+    runtimeDegraded = true;
+    runtimeDiagnostics.push_back(L"[Symbols] SymInitializeW failed; stackwalk symbolization unavailable");
     return;
   }
 

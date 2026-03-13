@@ -171,8 +171,9 @@ void FinalizePendingCrashAnalysisIfReady(
   }
 
   std::uint32_t unknownStreak = 0;
+  std::uint32_t bucketSeenCount = 0;
   std::wstring statsErr;
-  if (!UpdateCrashBucketStats(outBase, summaryInfo, &unknownStreak, &statsErr)) {
+  if (!UpdateCrashBucketStats(outBase, summaryInfo, &unknownStreak, &bucketSeenCount, &statsErr)) {
     AppendLogLine(outBase, L"Crash bucket stats update failed: " + statsErr);
     ClearPendingCrashAnalysis(task);
     return;
@@ -184,6 +185,10 @@ void FinalizePendingCrashAnalysisIfReady(
     L"Crash bucket stats updated: bucket=" + bucketW +
       L", schemaVersion=" + std::to_wstring(summaryInfo.schemaVersion) +
       L", unknownFaultModule=" + std::to_wstring(summaryInfo.unknownFaultModule ? 1 : 0) +
+      L", candidateConflict=" + std::to_wstring(summaryInfo.candidateConflict ? 1 : 0) +
+      L", referenceClueOnly=" + std::to_wstring(summaryInfo.referenceClueOnly ? 1 : 0) +
+      L", stackwalkDegraded=" + std::to_wstring(summaryInfo.stackwalkDegraded ? 1 : 0) +
+      L", bucketSeenCount=" + std::to_wstring(bucketSeenCount) +
       L", unknownStreak=" + std::to_wstring(unknownStreak));
 
   const auto recaptureDecision = skydiag::helper::DecideCrashFullRecapture(
@@ -191,7 +196,11 @@ void FinalizePendingCrashAnalysisIfReady(
     cfg.autoAnalyzeDump,
     summaryInfo.unknownFaultModule,
     unknownStreak,
+    bucketSeenCount,
     cfg.autoRecaptureUnknownBucketThreshold,
+    summaryInfo.candidateConflict,
+    summaryInfo.referenceClueOnly,
+    summaryInfo.stackwalkDegraded,
     cfg.dumpMode);
   bool fullDumpWritten = false;
   if (recaptureDecision.shouldRecaptureFullDump) {
@@ -199,6 +208,9 @@ void FinalizePendingCrashAnalysisIfReady(
     if (IsProcessStillAlive(proc.process, &aliveErr)) {
       const auto tsFull = Timestamp();
       const auto fullDumpPath = (outBase / (L"SkyrimDiag_Crash_" + tsFull + L"_Full.dmp")).wstring();
+      const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
+        skydiag::helper::DumpMode::kFull,
+        skydiag::helper::CaptureKind::CrashRecapture);
 
       const std::string pluginScanJson = CollectPluginScanJson(
         proc,
@@ -215,7 +227,7 @@ void FinalizePendingCrashAnalysisIfReady(
             /*wctJsonUtf8=*/{},
             pluginScanJson,
             /*isCrash=*/true,
-            skydiag::helper::DumpMode::kFull,
+            dumpProfile,
             &fullDumpErr)) {
         AppendLogLine(outBase, L"Crash full recapture failed: " + fullDumpErr);
       } else {

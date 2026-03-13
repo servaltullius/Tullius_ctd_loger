@@ -95,6 +95,14 @@ int main()
     std::cerr << "ERROR: Incident manifest schema must include privacy\n";
     return 1;
   }
+  if (!Contains(outputWriter, "capture_profile")) {
+    std::cerr << "ERROR: Incident manifest schema must include capture_profile\n";
+    return 1;
+  }
+  if (!Contains(outputWriter, "include_full_memory")) {
+    std::cerr << "ERROR: Incident manifest schema must include effective profile flags\n";
+    return 1;
+  }
 
   return 0;
 }

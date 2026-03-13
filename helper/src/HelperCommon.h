@@ -31,6 +31,9 @@ struct CrashSummaryInfo
   std::uint32_t schemaVersion = 1;
   std::string bucketKey;
   bool unknownFaultModule = true;
+  bool candidateConflict = false;
+  bool referenceClueOnly = false;
+  bool stackwalkDegraded = false;
 };
 
 std::filesystem::path SummaryPathForDump(const std::wstring& dumpPath, const std::filesystem::path& outBase);
@@ -41,6 +44,7 @@ bool UpdateCrashBucketStats(
   const std::filesystem::path& outBase,
   const CrashSummaryInfo& info,
   std::uint32_t* outUnknownStreak,
+  std::uint32_t* outBucketSeenCount,
   std::wstring* err);
 
 }  // namespace skydiag::helper::internal

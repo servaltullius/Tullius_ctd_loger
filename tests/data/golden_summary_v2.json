@@ -96,6 +96,12 @@
   "symbolization": {
     "search_path": "C:\\Symbols",
     "cache_path": "C:\\Symbols",
+    "dbghelp_path": "C:\\Windows\\System32\\dbghelp.dll",
+    "dbghelp_version": "10.0.26100.1",
+    "msdia_path": "C:\\Program Files\\Microsoft Visual Studio\\DIA SDK\\bin\\amd64\\msdia140.dll",
+    "msdia_available": true,
+    "cache_ready": true,
+    "runtime_degraded": false,
     "total_frames": 42,
     "symbolized_frames": 4,
     "source_line_frames": 0,

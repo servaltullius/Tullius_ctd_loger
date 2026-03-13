@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,20 @@ std::filesystem::path ProjectRoot()
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
   assert(root && "SKYDIAG_PROJECT_ROOT must be set");
   return std::filesystem::path(root);
+}
+
+std::string ReadAllText(const std::filesystem::path& path)
+{
+  std::ifstream in(path, std::ios::in | std::ios::binary);
+  assert(in && "Failed to open file");
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+void AssertContains(const std::string& haystack, const char* needle, const char* message)
+{
+  assert(haystack.find(needle) != std::string::npos && message);
 }
 
 const ModuleStats* FindModule(const std::vector<ModuleStats>& stats, const std::string& name)
@@ -340,6 +355,24 @@ void TestCrashHistoryBucketCandidateStats()
   assert(noStats.empty());
 }
 
+void TestCaptureQualitySourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
+  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto evidenceCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(analyzerHeader, "symbol_runtime_degraded", "AnalysisResult must track degraded symbol/runtime state.");
+  AssertContains(analyzerHeader, "incident_capture_kind", "AnalysisResult must expose effective capture kind.");
+  AssertContains(analyzerHeader, "incident_capture_profile_base_mode", "AnalysisResult must expose capture profile base mode.");
+  AssertContains(analyzerCpp, "capture_profile", "Analyzer must consume incident capture profile metadata.");
+  AssertContains(evidenceCpp, "Capture profile metadata", "Evidence must explain which capture profile produced the dump.");
+  AssertContains(evidenceCpp, "Symbol/runtime environment limited stackwalk quality", "Evidence must describe symbol/runtime degradation.");
+  AssertContains(recommendationCpp, "richer crash recapture profile", "Recommendations must prefer richer recapture profiles before generic full-memory advice.");
+  AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
+}
+
 }  // namespace
 
 int main()
@@ -352,5 +385,6 @@ int main()
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();
   TestCrashHistoryBucketCandidateStats();
+  TestCaptureQualitySourceContracts();
   return 0;
 }

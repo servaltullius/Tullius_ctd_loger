@@ -28,6 +28,23 @@ std::filesystem::path CrashBucketStatsPath(const std::filesystem::path& outBase)
   return outBase / L"SkyrimDiag_CrashBucketStats.json";
 }
 
+bool JsonArrayContainsString(const nlohmann::json& array, std::string_view needle)
+{
+  if (!array.is_array() || needle.empty()) {
+    return false;
+  }
+  for (const auto& item : array) {
+    if (!item.is_string()) {
+      continue;
+    }
+    const auto value = item.get<std::string>();
+    if (value.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 std::wstring Timestamp()
@@ -202,6 +219,22 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
   }
   info.unknownFaultModule = unknownFromField.value_or(true);
 
+  if (root.contains("actionable_candidates") && root["actionable_candidates"].is_array() &&
+      !root["actionable_candidates"].empty()) {
+    const auto& first = root["actionable_candidates"].front();
+    if (first.is_object()) {
+      const auto statusId = TrimAscii(first.value("status_id", std::string{}));
+      info.candidateConflict = (statusId == "conflicting");
+      info.referenceClueOnly = (statusId == "reference_clue");
+    }
+  }
+
+  if (root.contains("diagnostics")) {
+    info.stackwalkDegraded = JsonArrayContainsString(
+      root["diagnostics"],
+      "[Stackwalk] DbgHelp stackwalk failed");
+  }
+
   if (out) {
     *out = std::move(info);
   }
@@ -215,10 +248,14 @@ bool UpdateCrashBucketStats(
   const std::filesystem::path& outBase,
   const CrashSummaryInfo& info,
   std::uint32_t* outUnknownStreak,
+  std::uint32_t* outBucketSeenCount,
   std::wstring* err)
 {
   if (outUnknownStreak) {
     *outUnknownStreak = 0;
+  }
+  if (outBucketSeenCount) {
+    *outBucketSeenCount = 0;
   }
   if (info.bucketKey.empty()) {
     if (err) {
@@ -271,6 +308,9 @@ bool UpdateCrashBucketStats(
 
   if (outUnknownStreak) {
     *outUnknownStreak = unknownStreak;
+  }
+  if (outBucketSeenCount) {
+    *outBucketSeenCount = seenTotal;
   }
 
   WriteTextFileUtf8(path, root.dump(2));

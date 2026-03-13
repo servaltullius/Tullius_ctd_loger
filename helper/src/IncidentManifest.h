@@ -12,6 +12,7 @@
 
 namespace skydiag::helper {
 struct HelperConfig;
+struct DumpProfile;
 }
 
 namespace skydiag::helper::internal {
@@ -26,6 +27,7 @@ nlohmann::json MakeIncidentManifestV1(
   std::string_view etwStatus,
   std::uint32_t stateFlags,
   const nlohmann::json& context,
+  const skydiag::helper::DumpProfile* dumpProfile,
   const skydiag::helper::HelperConfig& cfg,
   bool includeConfigSnapshot);
 
@@ -36,4 +38,3 @@ bool TryUpdateIncidentManifestEtw(
   std::wstring* err);
 
 }  // namespace skydiag::helper::internal
-

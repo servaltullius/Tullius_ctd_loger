@@ -219,6 +219,9 @@ void ProcessValidCrashDump(
   if (cfg.enableIncidentManifest) {
     nlohmann::json ctx = nlohmann::json::object();
     ctx["reason"] = "crash_event";
+    const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
+      cfg.dumpMode,
+      skydiag::helper::CaptureKind::Crash);
     const auto manifest = MakeIncidentManifestV1(
       "crash",
       ts,
@@ -229,6 +232,7 @@ void ProcessValidCrashDump(
       etwStatus,
       info.stateFlags,
       ctx,
+      &dumpProfile,
       cfg,
       cfg.incidentManifestIncludeConfigSnapshot);
     WriteTextFileUtf8(manifestPath, manifest.dump(2));
@@ -392,6 +396,9 @@ bool HandleCrashEventTick(
 
   const auto ts = Timestamp();
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
+  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
+    cfg.dumpMode,
+    skydiag::helper::CaptureKind::Crash);
   if (pendingHangViewerDumpPath) {
     pendingHangViewerDumpPath->clear();
   }
@@ -406,7 +413,7 @@ bool HandleCrashEventTick(
     {},
     {},
     true,
-    cfg.dumpMode,
+    dumpProfile,
     &dumpErr);
 
   if (!dumpOk) {

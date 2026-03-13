@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cwchar>
 #include <cwctype>
 #include <filesystem>
 #include <string>
@@ -31,6 +32,22 @@ struct PreflightCheck
   std::string messageKo;
   std::string messageEn;
 };
+
+struct SymbolRuntimeHealth
+{
+  std::filesystem::path dbghelpPath;
+  std::string dbghelpVersion;
+  std::filesystem::path msdiaPath;
+  bool msdiaAvailable = false;
+  std::wstring symbolSearchPath;
+  std::filesystem::path symbolCachePath;
+  bool symbolCacheReady = false;
+  bool symbolPathHealthy = false;
+  bool searchPathUsesRemote = false;
+  bool policyMismatch = false;
+};
+
+std::string QueryFileVersionString(const std::filesystem::path& filePath);
 
 std::string AsciiLower(std::string_view s)
 {
@@ -66,6 +83,169 @@ std::wstring Utf8ToWide(std::string_view s)
     out.data(),
     needed);
   return out;
+}
+
+std::wstring ReadEnvVar(const wchar_t* name)
+{
+  if (!name || !*name) {
+    return {};
+  }
+  const DWORD need = GetEnvironmentVariableW(name, nullptr, 0);
+  if (need == 0) {
+    return {};
+  }
+  std::wstring out(static_cast<std::size_t>(need - 1), L'\0');
+  if (!out.empty()) {
+    GetEnvironmentVariableW(name, out.data(), need);
+  }
+  return out;
+}
+
+bool WideContainsAsciiInsensitive(std::wstring_view haystack, std::string_view needleAscii)
+{
+  if (haystack.empty() || needleAscii.empty()) {
+    return false;
+  }
+  std::wstring needle;
+  needle.reserve(needleAscii.size());
+  for (char ch : needleAscii) {
+    needle.push_back(static_cast<wchar_t>(std::towlower(static_cast<wchar_t>(static_cast<unsigned char>(ch)))));
+  }
+  const std::wstring lowered = WideLower(std::wstring(haystack));
+  return lowered.find(needle) != std::wstring::npos;
+}
+
+std::filesystem::path QueryLoadedModulePath(const wchar_t* moduleName)
+{
+  if (!moduleName || !*moduleName) {
+    return {};
+  }
+  HMODULE module = GetModuleHandleW(moduleName);
+  if (!module) {
+    return {};
+  }
+  std::wstring buffer(MAX_PATH, L'\0');
+  for (;;) {
+    const DWORD copied = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (copied == 0) {
+      return {};
+    }
+    if (copied < buffer.size() - 1) {
+      buffer.resize(copied);
+      return std::filesystem::path(buffer);
+    }
+    buffer.resize(buffer.size() * 2);
+  }
+}
+
+std::filesystem::path SearchDllPath(const wchar_t* moduleName)
+{
+  if (!moduleName || !*moduleName) {
+    return {};
+  }
+  const DWORD needed = SearchPathW(nullptr, moduleName, nullptr, 0, nullptr, nullptr);
+  if (needed == 0) {
+    return {};
+  }
+  std::wstring buffer(static_cast<std::size_t>(needed), L'\0');
+  if (SearchPathW(nullptr, moduleName, nullptr, needed, buffer.data(), nullptr) == 0) {
+    return {};
+  }
+  buffer.resize(std::wcslen(buffer.c_str()));
+  return std::filesystem::path(buffer);
+}
+
+std::filesystem::path ResolveRuntimeDllPath(const wchar_t* moduleName)
+{
+  if (const auto loaded = QueryLoadedModulePath(moduleName); !loaded.empty()) {
+    return loaded;
+  }
+  return SearchDllPath(moduleName);
+}
+
+std::wstring ResolveDefaultSymbolCacheDir(bool* outReady)
+{
+  if (outReady) {
+    *outReady = false;
+  }
+
+  std::filesystem::path cacheDir;
+  if (const std::wstring fromEnv = ReadEnvVar(L"SKYRIMDIAG_SYMBOL_CACHE_DIR"); !fromEnv.empty()) {
+    cacheDir = fromEnv;
+  } else if (const std::wstring localAppData = ReadEnvVar(L"LOCALAPPDATA"); !localAppData.empty()) {
+    cacheDir = std::filesystem::path(localAppData) / L"SkyrimDiag" / L"SymbolCache";
+  } else {
+    wchar_t tmp[MAX_PATH]{};
+    const DWORD n = GetTempPathW(MAX_PATH, tmp);
+    if (n > 0 && n < MAX_PATH) {
+      cacheDir = std::filesystem::path(tmp) / L"SkyrimDiagSymbolCache";
+    }
+  }
+
+  if (cacheDir.empty()) {
+    return {};
+  }
+
+  std::error_code ec;
+  std::filesystem::create_directories(cacheDir, ec);
+  const bool ready = !ec && std::filesystem::exists(cacheDir);
+  if (outReady) {
+    *outReady = ready;
+  }
+  return cacheDir.wstring();
+}
+
+std::wstring ResolveSymbolSearchPath(bool allowOnlineSymbols, std::wstring* outCachePath, bool* outCacheReady)
+{
+  if (outCachePath) {
+    outCachePath->clear();
+  }
+  if (outCacheReady) {
+    *outCacheReady = false;
+  }
+
+  if (const std::wstring explicitPath = ReadEnvVar(L"SKYRIMDIAG_SYMBOL_PATH"); !explicitPath.empty()) {
+    return explicitPath;
+  }
+
+  if (const std::wstring ntSymbolPath = ReadEnvVar(L"_NT_SYMBOL_PATH"); !ntSymbolPath.empty()) {
+    return ntSymbolPath;
+  }
+
+  const std::wstring cachePath = ResolveDefaultSymbolCacheDir(outCacheReady);
+  if (outCachePath) {
+    *outCachePath = cachePath;
+  }
+  if (cachePath.empty()) {
+    return {};
+  }
+  if (!allowOnlineSymbols) {
+    return cachePath;
+  }
+  return L"srv*" + cachePath + L"*https://msdl.microsoft.com/download/symbols";
+}
+
+SymbolRuntimeHealth CollectSymbolRuntimeHealth(const skydiag::helper::HelperConfig& cfg)
+{
+  SymbolRuntimeHealth health;
+  health.dbghelpPath = ResolveRuntimeDllPath(L"dbghelp.dll");
+  if (!health.dbghelpPath.empty()) {
+    health.dbghelpVersion = QueryFileVersionString(health.dbghelpPath);
+  }
+
+  health.msdiaPath = ResolveRuntimeDllPath(L"msdia140.dll");
+  health.msdiaAvailable = !health.msdiaPath.empty();
+
+  std::wstring cachePath;
+  health.symbolSearchPath = ResolveSymbolSearchPath(cfg.allowOnlineSymbols, &cachePath, &health.symbolCacheReady);
+  if (!cachePath.empty()) {
+    health.symbolCachePath = cachePath;
+  }
+  health.symbolPathHealthy = !health.symbolSearchPath.empty();
+  health.searchPathUsesRemote = WideContainsAsciiInsensitive(health.symbolSearchPath, "https://") ||
+                                WideContainsAsciiInsensitive(health.symbolSearchPath, "http://");
+  health.policyMismatch = !cfg.allowOnlineSymbols && health.searchPathUsesRemote;
+  return health;
 }
 
 bool VersionLessThan(std::string_view lhs, std::string_view rhs)
@@ -233,9 +413,10 @@ void RunCompatibilityPreflight(
   const bool needsBees = AnyPluginHeaderVersionGte(pluginScan, 1.71);
   const bool runtimeNeedsBees =
     !pluginScan.game_exe_version.empty() && VersionLessThan(pluginScan.game_exe_version, "1.6.1130");
+  const SymbolRuntimeHealth symbolHealth = CollectSymbolRuntimeHealth(cfg);
 
   std::vector<PreflightCheck> checks;
-  checks.reserve(6);
+  checks.reserve(10);
 
   checks.push_back(PreflightCheck{
     "PLUGIN_SCAN_SOURCE",
@@ -283,6 +464,58 @@ void RunCompatibilityPreflight(
     cfg.allowOnlineSymbols
       ? "Online symbol source is enabled; review privacy/reproducibility policy."
       : "Offline symbol policy (recommended) is active.",
+  });
+
+  checks.push_back(PreflightCheck{
+    "DBGHELP_RUNTIME",
+    (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty()) ? "ok" : "warn",
+    (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty()) ? "low" : "high",
+    (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty())
+      ? ("dbghelp.dll 런타임 확인: " + WideToUtf8(symbolHealth.dbghelpPath.wstring()))
+      : "dbghelp.dll 런타임을 확인하지 못했습니다. 스택워크 품질이 저하될 수 있습니다.",
+    (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty())
+      ? ("dbghelp.dll runtime detected: " + WideToUtf8(symbolHealth.dbghelpPath.wstring()))
+      : "Failed to resolve dbghelp.dll runtime; stackwalk quality may be degraded.",
+  });
+
+  checks.push_back(PreflightCheck{
+    "MSDIA_RUNTIME",
+    symbolHealth.msdiaAvailable ? "ok" : "warn",
+    symbolHealth.msdiaAvailable ? "low" : "medium",
+    symbolHealth.msdiaAvailable
+      ? ("msdia140.dll 사용 가능: " + WideToUtf8(symbolHealth.msdiaPath.wstring()))
+      : "msdia140.dll을 찾지 못했습니다. 소스 라인 해석이 제한될 수 있습니다.",
+    symbolHealth.msdiaAvailable
+      ? ("msdia140.dll available: " + WideToUtf8(symbolHealth.msdiaPath.wstring()))
+      : "msdia140.dll not found; source line resolution may be limited.",
+  });
+
+  checks.push_back(PreflightCheck{
+    "SYMBOL_PATH_HEALTH",
+    (symbolHealth.symbolPathHealthy && !symbolHealth.policyMismatch) ? "ok" : "warn",
+    (symbolHealth.symbolPathHealthy && !symbolHealth.policyMismatch) ? "low" : "medium",
+    (symbolHealth.symbolPathHealthy && !symbolHealth.policyMismatch)
+      ? "심볼 검색 경로가 설정되어 있습니다."
+      : (symbolHealth.policyMismatch
+          ? "온라인 심볼 비허용 정책인데 검색 경로에 원격 심볼 서버가 포함되어 있습니다."
+          : "심볼 검색 경로가 비어 있어 분석 품질이 저하될 수 있습니다."),
+    (symbolHealth.symbolPathHealthy && !symbolHealth.policyMismatch)
+      ? "Symbol search path is configured."
+      : (symbolHealth.policyMismatch
+          ? "Symbol path includes a remote source while online symbol policy is disabled."
+          : "Symbol search path is empty; analysis quality may be limited."),
+  });
+
+  checks.push_back(PreflightCheck{
+    "SYMBOL_CACHE_HEALTH",
+    (symbolHealth.symbolCachePath.empty() || symbolHealth.symbolCacheReady) ? "ok" : "warn",
+    (symbolHealth.symbolCachePath.empty() || symbolHealth.symbolCacheReady) ? "low" : "medium",
+    (symbolHealth.symbolCachePath.empty() || symbolHealth.symbolCacheReady)
+      ? "심볼 캐시 경로가 준비되어 있습니다."
+      : "심볼 캐시 경로를 만들지 못했습니다. 로컬 캐시 기반 심볼화가 제한될 수 있습니다.",
+    (symbolHealth.symbolCachePath.empty() || symbolHealth.symbolCacheReady)
+      ? "Symbol cache path is ready."
+      : "Failed to prepare symbol cache directory; local-cache symbolization may be limited.",
   });
 
   // Non-ESL (full) plugin slot limit check.
@@ -348,6 +581,18 @@ void RunCompatibilityPreflight(
   out["plugins_source"] = pluginScan.plugins_source;
   out["mo2_detected"] = pluginScan.mo2_detected;
   out["loaded_module_count"] = moduleNames.size();
+  out["symbol_runtime"] = {
+    { "dbghelp_path", WideToUtf8(symbolHealth.dbghelpPath.wstring()) },
+    { "dbghelp_version", symbolHealth.dbghelpVersion },
+    { "msdia_path", WideToUtf8(symbolHealth.msdiaPath.wstring()) },
+    { "msdia_available", symbolHealth.msdiaAvailable },
+    { "search_path", WideToUtf8(symbolHealth.symbolSearchPath) },
+    { "cache_path", WideToUtf8(symbolHealth.symbolCachePath.wstring()) },
+    { "cache_ready", symbolHealth.symbolCacheReady },
+    { "online_symbol_source_allowed", cfg.allowOnlineSymbols },
+    { "search_path_uses_remote", symbolHealth.searchPathUsesRemote },
+    { "policy_mismatch", symbolHealth.policyMismatch },
+  };
   out["checks"] = nlohmann::json::array();
   for (const auto& c : checks) {
     out["checks"].push_back(ToJson(c));

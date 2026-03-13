@@ -325,6 +325,9 @@ HangTickResult HandleHangTick(
   WriteTextFileUtf8(wctPath, wctUtf8);
 
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
+  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
+    cfg.dumpMode,
+    skydiag::helper::CaptureKind::Hang);
 
   bool dumpWritten = false;
   std::wstring dumpErr;
@@ -337,7 +340,7 @@ HangTickResult HandleHangTick(
         wctUtf8,
         pluginScanJson,
         /*isCrash=*/false,
-        cfg.dumpMode,
+        dumpProfile,
         &dumpErr)) {
     std::wcerr << L"[SkyrimDiagHelper] Hang dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Hang dump failed: " + dumpErr);
@@ -369,6 +372,7 @@ HangTickResult HandleHangTick(
         etwStatus,
         stateFlags2,
         ctx,
+        &dumpProfile,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);
       WriteTextFileUtf8(manifestPath, manifest.dump(2));

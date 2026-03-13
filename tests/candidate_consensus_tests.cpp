@@ -130,6 +130,19 @@ void TestObjectRefAndHistoryRepeatBecomeRelated()
   assert(candidates[0].family_count == 2);
 }
 
+void TestWeakStackAgreementStaysRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"lowquality", L"LowQuality.esp", 6, L"LowQuality.esp"),
+    MakeSignal("actionable_stack", L"lowquality", L"Low Quality", 3, L"", L"Low Quality", L"lowquality.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+}
+
 }  // namespace
 
 int main()
@@ -141,5 +154,6 @@ int main()
   TestObjectRefAndResourceNeedMediumOnly();
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();
+  TestWeakStackAgreementStaysRelated();
   return 0;
 }

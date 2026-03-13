@@ -32,7 +32,14 @@ struct SymSession
   bool ok = false;
   std::wstring searchPath;
   std::wstring cachePath;
+  std::wstring dbghelpPath;
+  std::wstring dbghelpVersion;
+  std::wstring msdiaPath;
+  bool msdiaAvailable = false;
+  bool symbolCacheReady = false;
+  bool runtimeDegraded = false;
   bool usedOnlineSymbolSource = false;
+  std::vector<std::wstring> runtimeDiagnostics;
   std::unique_lock<std::mutex> dbghelp_lock;
 
   explicit SymSession(const std::vector<minidump::ModuleInfo>& modules, bool allowOnlineSymbols);

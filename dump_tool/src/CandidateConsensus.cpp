@@ -12,6 +12,7 @@ constexpr const char* kFamilyCrashLogger = "crash_logger_object_ref";
 constexpr const char* kFamilyStack = "actionable_stack";
 constexpr const char* kFamilyResource = "resource_provider";
 constexpr const char* kFamilyHistory = "history_repeat";
+constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
 
 struct CandidateRow
 {
@@ -98,7 +99,12 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasStack = HasFamily(candidate, kFamilyStack);
   const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool conflict = candidate.has_conflict;
-  const bool crossValidated = !conflict && hasCrashLogger && hasStack && candidate.family_count >= 2;
+  const bool crossValidated =
+    !conflict &&
+    hasCrashLogger &&
+    hasStack &&
+    candidate.family_count >= 2 &&
+    candidate.score >= kCrossValidatedScoreThreshold;
 
   if (conflict) {
     candidate.status_id = "conflicting";

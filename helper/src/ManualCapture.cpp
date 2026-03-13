@@ -87,6 +87,9 @@ void DoManualCapture(
   WriteTextFileUtf8(wctPath, wctUtf8);
 
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
+  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
+    cfg.dumpMode,
+    skydiag::helper::CaptureKind::Manual);
 
   std::wstring dumpErr;
   if (!skydiag::helper::WriteDumpWithStreams(
@@ -98,7 +101,7 @@ void DoManualCapture(
         wctUtf8,
         pluginScanJson,
         /*isCrash=*/false,
-        cfg.dumpMode,
+        dumpProfile,
         &dumpErr)) {
     std::wcerr << L"[SkyrimDiagHelper] Manual dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Manual dump failed: " + dumpErr);
@@ -127,6 +130,7 @@ void DoManualCapture(
         /*etwStatus=*/"disabled",
         stateFlags,
         ctx,
+        &dumpProfile,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);
       WriteTextFileUtf8(manifestPath, manifest.dump(2));

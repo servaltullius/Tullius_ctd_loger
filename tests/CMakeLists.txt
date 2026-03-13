@@ -64,6 +64,18 @@ add_executable(skydiag_helper_crash_autopen_config_tests
 
 add_test(NAME skydiag_helper_crash_autopen_config_tests COMMAND skydiag_helper_crash_autopen_config_tests)
 
+add_executable(skydiag_dump_profile_tests
+  dump_profile_tests.cpp
+)
+
+add_test(NAME skydiag_dump_profile_tests COMMAND skydiag_dump_profile_tests)
+
+add_executable(skydiag_dump_writer_guard_tests
+  dump_writer_guard_tests.cpp
+)
+
+add_test(NAME skydiag_dump_writer_guard_tests COMMAND skydiag_dump_writer_guard_tests)
+
 add_executable(skydiag_crash_capture_false_positive_guard_tests
   crash_capture_false_positive_guard_tests.cpp
 )

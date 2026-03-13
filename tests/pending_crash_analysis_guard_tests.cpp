@@ -56,5 +56,20 @@ int main()
     "ClearPendingCrashAnalysis(task);",
     "Starting a new pending crash analysis must clear any previous active task state first.");
 
+  AssertContains(
+    pending,
+    "summaryInfo.candidateConflict",
+    "Pending crash analysis must consider candidate conflict when deciding recapture.");
+
+  AssertContains(
+    pending,
+    "summaryInfo.referenceClueOnly",
+    "Pending crash analysis must consider isolated reference clues when deciding recapture.");
+
+  AssertContains(
+    pending,
+    "summaryInfo.stackwalkDegraded",
+    "Pending crash analysis must consider stackwalk degradation when deciding recapture.");
+
   return 0;
 }

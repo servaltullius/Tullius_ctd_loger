@@ -82,6 +82,9 @@ std::string NowIso8601Utc()
 
 
 using internal::output_writer::ReadTextFileUtf8;
+using internal::output_writer::DefaultOutDirForDump;
+using internal::output_writer::FindIncidentManifestForDump;
+using internal::output_writer::TryLoadIncidentManifestJson;
 
 // Bonus scores for Crash Logger top-module ranking.
 // Crash Logger already identifies likely suspects; higher rank → higher bonus.
@@ -691,6 +694,37 @@ static std::filesystem::path ResolveCrashHistoryPath(
   return historyDir / "crash_history.json";
 }
 
+static void LoadIncidentCaptureProfile(
+    const std::wstring& dumpPath,
+    const std::wstring& outDir,
+    AnalysisResult& out)
+{
+  const auto dumpFs = std::filesystem::path(dumpPath);
+  const auto outBase = !outDir.empty()
+    ? std::filesystem::path(outDir)
+    : DefaultOutDirForDump(dumpFs);
+  const auto manifestPath = FindIncidentManifestForDump(outBase, dumpFs.stem().wstring());
+  if (manifestPath.empty()) {
+    return;
+  }
+
+  nlohmann::json incidentManifest;
+  if (!TryLoadIncidentManifestJson(manifestPath, &incidentManifest) || !incidentManifest.is_object()) {
+    return;
+  }
+
+  out.incident_capture_kind = incidentManifest.value("capture_kind", "");
+  if (incidentManifest.contains("capture_profile") && incidentManifest["capture_profile"].is_object()) {
+    const auto& capture_profile = incidentManifest["capture_profile"];
+    out.incident_capture_profile_present = true;
+    if (out.incident_capture_kind.empty()) {
+      out.incident_capture_kind = capture_profile.value("capture_kind", "");
+    }
+    out.incident_capture_profile_base_mode = capture_profile.value("base_mode", "");
+    out.incident_capture_profile_full_memory = capture_profile.value("include_full_memory", false);
+  }
+}
+
 static void AppendHistoryCandidateKey(
     std::wstring_view rawValue,
     std::unordered_set<std::string>* seen,
@@ -915,6 +949,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // Suspects (prefer callstack/stackwalk; fallback to stack scan)
   ComputeSuspects(dumpBase, dumpSize, allModules, excCtx, hangLike, opt, out);
+  if (out.symbol_runtime_degraded) {
+    out.diagnostics.push_back(L"[Symbols] degraded runtime environment detected; stackwalk/source lookup may be limited");
+  }
 
   ApplyCrashLoggerCorroborationToSuspects(&out);
 
@@ -972,6 +1009,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
+  LoadIncidentCaptureProfile(dumpPath, outDir, out);
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
   LoadCrashHistoryContext(historyPath, analysisTimestamp, out);

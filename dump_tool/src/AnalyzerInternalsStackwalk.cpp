@@ -80,7 +80,16 @@ bool TryComputeStackwalkSuspects(
   SymSession sym(modules, out.online_symbol_source_allowed);
   out.symbol_search_path = sym.searchPath;
   out.symbol_cache_path = sym.cachePath;
+  out.dbghelp_path = sym.dbghelpPath;
+  out.dbghelp_version = sym.dbghelpVersion;
+  out.msdia_path = sym.msdiaPath;
+  out.msdia_available = sym.msdiaAvailable;
+  out.symbol_cache_ready = sym.symbolCacheReady;
+  out.symbol_runtime_degraded = sym.runtimeDegraded;
   out.online_symbol_source_used = sym.usedOnlineSymbolSource;
+  for (const auto& diagnostic : sym.runtimeDiagnostics) {
+    out.diagnostics.push_back(diagnostic);
+  }
   if (!sym.ok) {
     return false;
   }

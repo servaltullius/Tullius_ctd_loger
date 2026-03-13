@@ -76,11 +76,25 @@ static nlohmann::json BuildSummaryJson(
     if (incidentManifest.contains("privacy") && incidentManifest["privacy"].is_object()) {
       privacy = incidentManifest["privacy"];
     }
+    nlohmann::json captureProfile = nlohmann::json::object();
+    if (incidentManifest.contains("capture_profile") && incidentManifest["capture_profile"].is_object()) {
+      captureProfile = incidentManifest["capture_profile"];
+    }
+    if (!captureProfile.contains("capture_kind")) {
+      captureProfile["capture_kind"] = "";
+    }
+    if (!captureProfile.contains("base_mode")) {
+      captureProfile["base_mode"] = "";
+    }
+    if (!captureProfile.contains("include_full_memory")) {
+      captureProfile["include_full_memory"] = false;
+    }
 
     summary["incident"] = {
       { "incident_id", incidentManifest.value("incident_id", "") },
       { "capture_kind", incidentManifest.value("capture_kind", "") },
       { "artifacts", std::move(artifacts) },
+      { "capture_profile", std::move(captureProfile) },
       { "manifest_path", WideToUtf8(MaybeRedactPath(incidentManifestPath.wstring(), redactPaths)) },
       { "privacy", std::move(privacy) },
     };
@@ -239,9 +253,17 @@ static nlohmann::json BuildSummaryJson(
     std::wstring(r.symbol_search_path),
     std::wstring_view(r.symbol_cache_path),
     std::wstring_view(redactedSymbolCachePath));
+  const std::wstring redactedDbghelpPath = MaybeRedactPath(r.dbghelp_path, redactPaths);
+  const std::wstring redactedMsdiaPath = MaybeRedactPath(r.msdia_path, redactPaths);
   summary["symbolization"] = {
     { "search_path", WideToUtf8(redactedSymbolSearchPath) },
     { "cache_path", WideToUtf8(redactedSymbolCachePath) },
+    { "dbghelp_path", WideToUtf8(redactedDbghelpPath) },
+    { "dbghelp_version", WideToUtf8(r.dbghelp_version) },
+    { "msdia_path", WideToUtf8(redactedMsdiaPath) },
+    { "msdia_available", r.msdia_available },
+    { "cache_ready", r.symbol_cache_ready },
+    { "runtime_degraded", r.symbol_runtime_degraded },
     { "total_frames", r.stackwalk_total_frames },
     { "symbolized_frames", r.stackwalk_symbolized_frames },
     { "source_line_frames", r.stackwalk_source_line_frames },
@@ -363,6 +385,12 @@ static std::string BuildReportText(
   rpt << (en ? "PathRedactionApplied: " : "경로 마스킹 적용: ") << (redactPaths ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceAllowed: " : "온라인 심볼 소스 허용: ") << (r.online_symbol_source_allowed ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceUsed: " : "온라인 심볼 소스 사용: ") << (r.online_symbol_source_used ? "1" : "0") << "\n";
+  rpt << (en ? "DbgHelpPath: " : "DbgHelp 경로: ") << WideToUtf8(MaybeRedactPath(r.dbghelp_path, redactPaths)) << "\n";
+  rpt << (en ? "DbgHelpVersion: " : "DbgHelp 버전: ") << WideToUtf8(r.dbghelp_version) << "\n";
+  rpt << (en ? "DIAAvailable: " : "DIA 사용 가능: ") << (r.msdia_available ? "1" : "0") << "\n";
+  rpt << (en ? "DIAPath: " : "DIA 경로: ") << WideToUtf8(MaybeRedactPath(r.msdia_path, redactPaths)) << "\n";
+  rpt << (en ? "SymbolCacheReady: " : "심볼 캐시 준비: ") << (r.symbol_cache_ready ? "1" : "0") << "\n";
+  rpt << (en ? "SymbolRuntimeDegraded: " : "심볼 런타임 저하: ") << (r.symbol_runtime_degraded ? "1" : "0") << "\n";
   if (summary.contains("incident") && summary["incident"].is_object()) {
     const auto& inc = summary["incident"];
     if (inc.contains("incident_id") && inc["incident_id"].is_string()) {
@@ -370,6 +398,17 @@ static std::string BuildReportText(
     }
     if (inc.contains("capture_kind") && inc["capture_kind"].is_string()) {
       rpt << (en ? "CaptureKind: " : "CaptureKind: ") << inc["capture_kind"].get<std::string>() << "\n";
+    }
+    if (inc.contains("capture_profile") && inc["capture_profile"].is_object()) {
+      const auto& captureProfile = inc["capture_profile"];
+      if (captureProfile.contains("base_mode") && captureProfile["base_mode"].is_string()) {
+        rpt << (en ? "CaptureProfileBaseMode: " : "CaptureProfileBaseMode: ")
+            << captureProfile["base_mode"].get<std::string>() << "\n";
+      }
+      if (captureProfile.contains("include_full_memory") && captureProfile["include_full_memory"].is_boolean()) {
+        rpt << (en ? "CaptureProfileFullMemory: " : "CaptureProfileFullMemory: ")
+            << (captureProfile["include_full_memory"].get<bool>() ? "1" : "0") << "\n";
+      }
     }
     if (inc.contains("manifest_path") && inc["manifest_path"].is_string()) {
       rpt << (en ? "IncidentManifest: " : "Incident manifest: ") << inc["manifest_path"].get<std::string>() << "\n";

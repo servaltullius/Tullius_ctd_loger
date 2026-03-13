@@ -6,6 +6,7 @@
 #include <string>
 
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper {
@@ -19,7 +20,7 @@ bool WriteDumpWithStreams(
   const std::string& wctJsonUtf8,
   const std::string& pluginScanJson,
   bool isCrash,
-  DumpMode dumpMode,
+  const DumpProfile& dumpProfile,
   std::wstring* err);
 
 }  // namespace skydiag::helper

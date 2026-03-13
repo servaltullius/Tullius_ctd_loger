@@ -195,6 +195,10 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   const auto& sym = j["symbolization"];
   AssertIsType(sym, "search_path", "string", "symbolization");
   AssertIsType(sym, "cache_path", "string", "symbolization");
+  AssertIsType(sym, "dbghelp_path", "string", "symbolization");
+  AssertIsType(sym, "dbghelp_version", "string", "symbolization");
+  AssertIsType(sym, "msdia_available", "boolean", "symbolization");
+  AssertIsType(sym, "runtime_degraded", "boolean", "symbolization");
   AssertIsType(sym, "total_frames", "number", "symbolization");
   AssertIsType(sym, "symbolized_frames", "number", "symbolization");
   AssertIsType(sym, "source_line_frames", "number", "symbolization");
@@ -327,6 +331,10 @@ void TestOutputWriterEmitsAllFields()
     "\"total_frames\"",
     "\"symbolized_frames\"",
     "\"source_line_frames\"",
+    "\"dbghelp_path\"",
+    "\"dbghelp_version\"",
+    "\"msdia_available\"",
+    "\"runtime_degraded\"",
   };
 
   for (const auto& key : nestedKeys) {
@@ -352,6 +360,8 @@ void TestOutputWriterReportTextSections()
     "ExceptionAddress:",
     "ThreadId:",
     "Module+Offset:",
+    "CaptureProfileBaseMode:",
+    "CaptureProfileFullMemory:",
     "Evidence:",
     "Recommendations",
     "Callstack",

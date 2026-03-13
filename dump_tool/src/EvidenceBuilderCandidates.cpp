@@ -84,7 +84,7 @@ void AddStackSignals(const AnalysisResult& r, bool en, std::vector<CandidateSign
       ? (L"Actionable stack candidate: " + signal.display_name)
       : (L"실행 가능한 스택 후보: " + signal.display_name);
     signal.weight = r.suspects_from_stackwalk
-      ? (added == 0 ? 5u : 4u)
+      ? (r.symbol_runtime_degraded ? (added == 0 ? 3u : 2u) : (added == 0 ? 5u : 4u))
       : 2u;
     if (!signal.candidate_key.empty()) {
       out->push_back(std::move(signal));

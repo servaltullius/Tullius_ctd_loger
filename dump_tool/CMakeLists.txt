@@ -61,6 +61,7 @@ target_link_libraries(SkyrimDiagDumpToolCore
     skydiag_shared
     nlohmann_json::nlohmann_json
     Dbghelp
+    Version
 )
 
 target_compile_definitions(SkyrimDiagDumpToolCore

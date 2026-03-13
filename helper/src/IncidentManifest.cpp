@@ -11,6 +11,7 @@
 
 #include "HelperCommon.h"
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/DumpProfile.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -91,6 +92,21 @@ std::string MakeIncidentId(std::string_view captureKind, std::wstring_view ts, D
   return std::string(captureKind) + "_" + WideToUtf8(ts) + "_pid" + std::to_string(static_cast<std::uint32_t>(pid));
 }
 
+nlohmann::json MakeCaptureProfileJson(const skydiag::helper::DumpProfile& dumpProfile)
+{
+  return nlohmann::json{
+    { "capture_kind", skydiag::helper::CaptureKindToString(dumpProfile.captureKind) },
+    { "base_mode", DumpModeToString(dumpProfile.baseMode) },
+    { "include_thread_info", dumpProfile.includeThreadInfo },
+    { "include_handle_data", dumpProfile.includeHandleData },
+    { "include_unloaded_modules", dumpProfile.includeUnloadedModules },
+    { "include_full_memory", dumpProfile.includeFullMemory },
+    { "prefer_main_thread", dumpProfile.preferMainThread },
+    { "prefer_wct_threads", dumpProfile.preferWctThreads },
+    { "prefer_crash_context", dumpProfile.preferCrashContext },
+  };
+}
+
 }  // namespace
 
 nlohmann::json MakeIncidentManifestV1(
@@ -103,6 +119,7 @@ nlohmann::json MakeIncidentManifestV1(
   std::string_view etwStatus,
   std::uint32_t stateFlags,
   const nlohmann::json& context,
+  const skydiag::helper::DumpProfile* dumpProfile,
   const skydiag::helper::HelperConfig& cfg,
   bool includeConfigSnapshot)
 {
@@ -129,6 +146,9 @@ nlohmann::json MakeIncidentManifestV1(
   };
   if (context.is_object() && !context.empty()) {
     j["context"] = context;
+  }
+  if (dumpProfile) {
+    j["capture_profile"] = MakeCaptureProfileJson(*dumpProfile);
   }
   if (includeConfigSnapshot) {
     j["config_snapshot"] = MakeIncidentConfigSnapshotSafe(cfg);
