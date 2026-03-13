@@ -43,6 +43,7 @@ def main() -> int:
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
     linux_workflow = (REPO_ROOT / ".github" / "workflows" / "linux-tests.yml").read_text(encoding="utf-8")
+    ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     vibe_py = (REPO_ROOT / "scripts" / "vibe.py").read_text(encoding="utf-8")
     build_win_from_wsl = (REPO_ROOT / "scripts" / "build-win-from-wsl.sh").read_text(
         encoding="utf-8"
@@ -71,6 +72,15 @@ def main() -> int:
     )
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
+    )
+    assert "Start-Process -FilePath $exe" in ci_workflow and "-PassThru" in ci_workflow, (
+        "WinUI smoke must launch the GUI shell with Start-Process -PassThru so PowerShell can inspect the process object"
+    )
+    assert "WaitForExit(30000)" in ci_workflow and "timed out after 30 seconds" in ci_workflow, (
+        "WinUI smoke must enforce a bounded wait and fail clearly if the GUI shell hangs in headless mode"
+    )
+    assert "$proc.ExitCode" in ci_workflow, (
+        "WinUI smoke must read the process exit code from Start-Process instead of relying on LASTEXITCODE"
     )
     assert "_configure_fallback" in vibe_py, (
         "vibe.py must provide a configure fallback when repo-local brain scripts are absent"
