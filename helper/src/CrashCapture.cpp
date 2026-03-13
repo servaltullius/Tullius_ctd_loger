@@ -233,6 +233,7 @@ void ProcessValidCrashDump(
       info.stateFlags,
       ctx,
       &dumpProfile,
+      /*recaptureDecision=*/nullptr,
       cfg,
       cfg.incidentManifestIncludeConfigSnapshot);
     WriteTextFileUtf8(manifestPath, manifest.dump(2));

@@ -34,6 +34,8 @@ struct CrashSummaryInfo
   bool candidateConflict = false;
   bool referenceClueOnly = false;
   bool stackwalkDegraded = false;
+  bool symbolRuntimeDegraded = false;
+  bool firstChanceCandidateWeak = false;
 };
 
 std::filesystem::path SummaryPathForDump(const std::wstring& dumpPath, const std::filesystem::path& outBase);

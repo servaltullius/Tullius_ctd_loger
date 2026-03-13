@@ -90,11 +90,29 @@ static nlohmann::json BuildSummaryJson(
       captureProfile["include_full_memory"] = false;
     }
 
+    nlohmann::json recaptureEvaluation = nlohmann::json::object();
+    if (incidentManifest.contains("recapture_evaluation") && incidentManifest["recapture_evaluation"].is_object()) {
+      recaptureEvaluation = incidentManifest["recapture_evaluation"];
+    }
+    if (!recaptureEvaluation.contains("triggered")) {
+      recaptureEvaluation["triggered"] = false;
+    }
+    if (!recaptureEvaluation.contains("target_profile")) {
+      recaptureEvaluation["target_profile"] = "none";
+    }
+    if (!recaptureEvaluation.contains("reasons")) {
+      recaptureEvaluation["reasons"] = nlohmann::json::array();
+    }
+    if (!recaptureEvaluation.contains("escalation_level")) {
+      recaptureEvaluation["escalation_level"] = 0;
+    }
+
     summary["incident"] = {
       { "incident_id", incidentManifest.value("incident_id", "") },
       { "capture_kind", incidentManifest.value("capture_kind", "") },
       { "artifacts", std::move(artifacts) },
       { "capture_profile", std::move(captureProfile) },
+      { "recapture_evaluation", std::move(recaptureEvaluation) },
       { "manifest_path", WideToUtf8(MaybeRedactPath(incidentManifestPath.wstring(), redactPaths)) },
       { "privacy", std::move(privacy) },
     };
@@ -354,6 +372,18 @@ static nlohmann::json BuildSummaryJson(
     summary["freeze_analysis"]["first_chance_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
   }
 
+  summary["first_chance_context"] = {
+    { "has_context", r.first_chance_summary.has_context },
+    { "recent_count", r.first_chance_summary.recent_count },
+    { "unique_signature_count", r.first_chance_summary.unique_signature_count },
+    { "loading_window_count", r.first_chance_summary.loading_window_count },
+    { "repeated_signature_count", r.first_chance_summary.repeated_signature_count },
+    { "recent_non_system_modules", nlohmann::json::array() },
+  };
+  for (const auto& moduleName : r.first_chance_summary.recent_non_system_modules) {
+    summary["first_chance_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
+  }
+
   summary["evidence"] = nlohmann::json::array();
   for (const auto& e : r.evidence) {
     summary["evidence"].push_back({
@@ -448,6 +478,17 @@ static std::string BuildReportText(
       if (captureProfile.contains("include_full_memory") && captureProfile["include_full_memory"].is_boolean()) {
         rpt << (en ? "CaptureProfileFullMemory: " : "CaptureProfileFullMemory: ")
             << (captureProfile["include_full_memory"].get<bool>() ? "1" : "0") << "\n";
+      }
+    }
+    if (inc.contains("recapture_evaluation") && inc["recapture_evaluation"].is_object()) {
+      const auto& recapture = inc["recapture_evaluation"];
+      if (recapture.contains("triggered") && recapture["triggered"].is_boolean()) {
+        rpt << (en ? "RecaptureTriggered: " : "RecaptureTriggered: ")
+            << (recapture["triggered"].get<bool>() ? "1" : "0") << "\n";
+      }
+      if (recapture.contains("target_profile") && recapture["target_profile"].is_string()) {
+        rpt << (en ? "RecaptureTargetProfile: " : "RecaptureTargetProfile: ")
+            << recapture["target_profile"].get<std::string>() << "\n";
       }
     }
     if (inc.contains("manifest_path") && inc["manifest_path"].is_string()) {

@@ -6,124 +6,42 @@
 
 using skydiag::helper::DumpMode;
 
-static void TestPolicyDisabledSkips()
+namespace {
+
+bool HasReason(
+  const skydiag::helper::RecaptureDecision& decision,
+  skydiag::helper::RecaptureReason reason)
 {
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
+  for (const auto& entry : decision.reasons) {
+    if (entry == reason) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void TestCrashPolicyDisabledSkips()
+{
+  const auto d = skydiag::helper::DecideCrashRecapture(
     /*enablePolicy=*/false,
     /*autoAnalyzeDump=*/true,
     /*unknownFaultModule=*/true,
     /*unknownStreak=*/5,
     /*bucketSeenCount=*/5,
     /*threshold=*/2,
-    /*candidateConflict=*/false,
-    /*isolatedReferenceClue=*/false,
-    /*degradedStackwalk=*/false,
-    DumpMode::kDefault);
-  assert(!d.shouldRecaptureFullDump);
-}
-
-static void TestUnknownStreakBelowThresholdSkips()
-{
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
-    /*enablePolicy=*/true,
-    /*autoAnalyzeDump=*/true,
-    /*unknownFaultModule=*/true,
-    /*unknownStreak=*/1,
-    /*bucketSeenCount=*/1,
-    /*threshold=*/2,
-    /*candidateConflict=*/false,
-    /*isolatedReferenceClue=*/false,
-    /*degradedStackwalk=*/false,
-    DumpMode::kDefault);
-  assert(!d.shouldRecaptureFullDump);
-}
-
-static void TestUnknownStreakAtThresholdTriggers()
-{
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
-    /*enablePolicy=*/true,
-    /*autoAnalyzeDump=*/true,
-    /*unknownFaultModule=*/true,
-    /*unknownStreak=*/2,
-    /*bucketSeenCount=*/2,
-    /*threshold=*/2,
-    /*candidateConflict=*/false,
-    /*isolatedReferenceClue=*/false,
-    /*degradedStackwalk=*/false,
-    DumpMode::kDefault);
-  assert(d.shouldRecaptureFullDump);
-  assert(d.triggeredByUnknownFaultModule);
-}
-
-static void TestKnownFaultModuleSkips()
-{
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
-    /*enablePolicy=*/true,
-    /*autoAnalyzeDump=*/true,
-    /*unknownFaultModule=*/false,
-    /*unknownStreak=*/4,
-    /*bucketSeenCount=*/4,
-    /*threshold=*/2,
-    /*candidateConflict=*/false,
-    /*isolatedReferenceClue=*/false,
-    /*degradedStackwalk=*/false,
-    DumpMode::kDefault);
-  assert(!d.shouldRecaptureFullDump);
-}
-
-static void TestFullDumpModeSkips()
-{
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
-    /*enablePolicy=*/true,
-    /*autoAnalyzeDump=*/true,
-    /*unknownFaultModule=*/true,
-    /*unknownStreak=*/3,
-    /*bucketSeenCount=*/3,
-    /*threshold=*/2,
-    /*candidateConflict=*/false,
-    /*isolatedReferenceClue=*/false,
-    /*degradedStackwalk=*/false,
-    DumpMode::kFull);
-  assert(!d.shouldRecaptureFullDump);
-}
-
-static void TestCandidateConflictAtThresholdTriggers()
-{
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
-    /*enablePolicy=*/true,
-    /*autoAnalyzeDump=*/true,
-    /*unknownFaultModule=*/false,
-    /*unknownStreak=*/0,
-    /*bucketSeenCount=*/2,
-    /*threshold=*/2,
     /*candidateConflict=*/true,
     /*isolatedReferenceClue=*/false,
-    /*degradedStackwalk=*/false,
-    DumpMode::kDefault);
-  assert(d.shouldRecaptureFullDump);
-  assert(d.triggeredByCandidateConflict);
+    /*degradedStackwalk=*/true,
+    /*symbolRuntimeDegraded=*/true,
+    /*firstChanceCandidateWeak=*/true,
+    DumpMode::kMini);
+  assert(!d.shouldRecapture);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kNone);
 }
 
-static void TestIsolatedReferenceClueAtThresholdTriggers()
+void TestCrashRicherEscalationIncludesNewWeakSignals()
 {
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
-    /*enablePolicy=*/true,
-    /*autoAnalyzeDump=*/true,
-    /*unknownFaultModule=*/false,
-    /*unknownStreak=*/0,
-    /*bucketSeenCount=*/2,
-    /*threshold=*/2,
-    /*candidateConflict=*/false,
-    /*isolatedReferenceClue=*/true,
-    /*degradedStackwalk=*/false,
-    DumpMode::kDefault);
-  assert(d.shouldRecaptureFullDump);
-  assert(d.triggeredByReferenceClueOnly);
-}
-
-static void TestDegradedStackwalkAtThresholdTriggers()
-{
-  const auto d = skydiag::helper::DecideCrashFullRecapture(
+  const auto d = skydiag::helper::DecideCrashRecapture(
     /*enablePolicy=*/true,
     /*autoAnalyzeDump=*/true,
     /*unknownFaultModule=*/false,
@@ -133,20 +51,124 @@ static void TestDegradedStackwalkAtThresholdTriggers()
     /*candidateConflict=*/false,
     /*isolatedReferenceClue=*/false,
     /*degradedStackwalk=*/true,
-    DumpMode::kDefault);
-  assert(d.shouldRecaptureFullDump);
-  assert(d.triggeredByStackwalkDegraded);
+    /*symbolRuntimeDegraded=*/true,
+    /*firstChanceCandidateWeak=*/true,
+    DumpMode::kMini);
+  assert(d.shouldRecapture);
+  assert(d.kind == skydiag::helper::RecaptureKind::kCrash);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kCrashRicher);
+  assert(d.escalationLevel == 1u);
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kStackwalkDegraded));
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kSymbolRuntimeDegraded));
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kFirstChanceCandidateWeak));
 }
+
+void TestCrashRicherEscalationForRepeatedUnknownModule()
+{
+  const auto d = skydiag::helper::DecideCrashRecapture(
+    /*enablePolicy=*/true,
+    /*autoAnalyzeDump=*/true,
+    /*unknownFaultModule=*/true,
+    /*unknownStreak=*/3,
+    /*bucketSeenCount=*/3,
+    /*threshold=*/2,
+    /*candidateConflict=*/false,
+    /*isolatedReferenceClue=*/false,
+    /*degradedStackwalk=*/false,
+    /*symbolRuntimeDegraded=*/false,
+    /*firstChanceCandidateWeak=*/false,
+    DumpMode::kDefault);
+  assert(d.shouldRecapture);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kCrashRicher);
+  assert(d.escalationLevel == 1u);
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kUnknownFaultModule));
+}
+
+void TestCrashFullEscalationNeedsAdditionalWeakSignals()
+{
+  const auto d = skydiag::helper::DecideCrashRecapture(
+    /*enablePolicy=*/true,
+    /*autoAnalyzeDump=*/true,
+    /*unknownFaultModule=*/true,
+    /*unknownStreak=*/3,
+    /*bucketSeenCount=*/3,
+    /*threshold=*/2,
+    /*candidateConflict=*/true,
+    /*isolatedReferenceClue=*/false,
+    /*degradedStackwalk=*/false,
+    /*symbolRuntimeDegraded=*/true,
+    /*firstChanceCandidateWeak=*/false,
+    DumpMode::kDefault);
+  assert(d.shouldRecapture);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kCrashFull);
+  assert(d.escalationLevel == 2u);
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kUnknownFaultModule));
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kCandidateConflict));
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kSymbolRuntimeDegraded));
+}
+
+void TestFreezeAmbiguousSelectsSnapshotProfile()
+{
+  const auto d = skydiag::helper::DecideFreezeRecapture(
+    /*enablePolicy=*/true,
+    /*autoAnalyzeDump=*/true,
+    /*freezeAmbiguous=*/true,
+    /*freezeSnapshotFallback=*/false,
+    /*freezeCandidateWeak=*/false,
+    /*strongDeadlock=*/false,
+    /*snapshotBackedLoaderStall=*/false,
+    /*bucketSeenCount=*/2,
+    /*threshold=*/2);
+  assert(d.shouldRecapture);
+  assert(d.kind == skydiag::helper::RecaptureKind::kFreeze);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kFreezeSnapshotRicher);
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kFreezeAmbiguous));
+}
+
+void TestFreezeSnapshotFallbackSelectsSnapshotProfile()
+{
+  const auto d = skydiag::helper::DecideFreezeRecapture(
+    /*enablePolicy=*/true,
+    /*autoAnalyzeDump=*/true,
+    /*freezeAmbiguous=*/false,
+    /*freezeSnapshotFallback=*/true,
+    /*freezeCandidateWeak=*/true,
+    /*strongDeadlock=*/false,
+    /*snapshotBackedLoaderStall=*/false,
+    /*bucketSeenCount=*/2,
+    /*threshold=*/2);
+  assert(d.shouldRecapture);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kFreezeSnapshotRicher);
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kFreezeSnapshotFallback));
+  assert(HasReason(d, skydiag::helper::RecaptureReason::kFreezeCandidateWeak));
+}
+
+void TestStrongFreezeStateSkipsRecapture()
+{
+  const auto d = skydiag::helper::DecideFreezeRecapture(
+    /*enablePolicy=*/true,
+    /*autoAnalyzeDump=*/true,
+    /*freezeAmbiguous=*/true,
+    /*freezeSnapshotFallback=*/true,
+    /*freezeCandidateWeak=*/true,
+    /*strongDeadlock=*/true,
+    /*snapshotBackedLoaderStall=*/false,
+    /*bucketSeenCount=*/4,
+    /*threshold=*/2);
+  assert(!d.shouldRecapture);
+  assert(d.targetProfile == skydiag::helper::RecaptureTargetProfile::kNone);
+}
+
+}  // namespace
 
 int main()
 {
-  TestPolicyDisabledSkips();
-  TestUnknownStreakBelowThresholdSkips();
-  TestUnknownStreakAtThresholdTriggers();
-  TestKnownFaultModuleSkips();
-  TestFullDumpModeSkips();
-  TestCandidateConflictAtThresholdTriggers();
-  TestIsolatedReferenceClueAtThresholdTriggers();
-  TestDegradedStackwalkAtThresholdTriggers();
+  TestCrashPolicyDisabledSkips();
+  TestCrashRicherEscalationIncludesNewWeakSignals();
+  TestCrashRicherEscalationForRepeatedUnknownModule();
+  TestCrashFullEscalationNeedsAdditionalWeakSignals();
+  TestFreezeAmbiguousSelectsSnapshotProfile();
+  TestFreezeSnapshotFallbackSelectsSnapshotProfile();
+  TestStrongFreezeStateSkipsRecapture();
   return 0;
 }

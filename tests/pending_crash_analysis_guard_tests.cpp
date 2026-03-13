@@ -71,5 +71,30 @@ int main()
     "summaryInfo.stackwalkDegraded",
     "Pending crash analysis must consider stackwalk degradation when deciding recapture.");
 
+  AssertContains(
+    pending,
+    "summaryInfo.symbolRuntimeDegraded",
+    "Pending crash analysis must consider symbol runtime degradation when deciding recapture.");
+
+  AssertContains(
+    pending,
+    "summaryInfo.firstChanceCandidateWeak",
+    "Pending crash analysis must consider weak first-chance-backed candidates when deciding recapture.");
+
+  AssertContains(
+    pending,
+    "recaptureDecision.targetProfile",
+    "Pending crash analysis must select a target profile instead of hard-wiring full recapture.");
+
+  AssertContains(
+    pending,
+    "RecaptureTargetProfile::kCrashRicher",
+    "Pending crash analysis must support crash_richer recapture profile selection.");
+
+  AssertContains(
+    pending,
+    "RecaptureTargetProfile::kCrashFull",
+    "Pending crash analysis must support crash_full recapture profile selection.");
+
   return 0;
 }

@@ -127,6 +127,19 @@ bool SuppressHangAndLogIfNeeded(
   return true;
 }
 
+bool WctJsonHasCycle(const nlohmann::json& wctJson)
+{
+  if (!wctJson.is_object() || !wctJson.contains("threads") || !wctJson["threads"].is_array()) {
+    return false;
+  }
+  for (const auto& thread : wctJson["threads"]) {
+    if (thread.is_object() && thread.value("isCycle", false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 HangTickResult HandleHangTick(
@@ -349,6 +362,22 @@ HangTickResult HandleHangTick(
   wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
   wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
+  const bool strongDeadlock = WctJsonHasCycle(wctJson);
+  const bool snapshotBackedLoaderStall = decision2.isLoading && pssSnapshot.used;
+  const bool freezeAmbiguous = !strongDeadlock && !snapshotBackedLoaderStall;
+  const bool freezeSnapshotFallback = pssSnapshot.requested && !pssSnapshot.used;
+  const bool freezeCandidateWeak = decision2.isLoading && !pssSnapshot.used;
+  const auto freezeRecaptureDecision = skydiag::helper::DecideFreezeRecapture(
+    cfg.enableAutoRecaptureOnUnknownCrash,
+    cfg.autoAnalyzeDump,
+    freezeAmbiguous,
+    freezeSnapshotFallback,
+    freezeCandidateWeak,
+    strongDeadlock,
+    snapshotBackedLoaderStall,
+    /*bucketSeenCount=*/1u,
+    cfg.autoRecaptureUnknownBucketThreshold);
+
   const std::string wctUtf8 = wctJson.dump(2);
   WriteTextFileUtf8(wctPath, wctUtf8);
 
@@ -405,6 +434,7 @@ HangTickResult HandleHangTick(
         stateFlags2,
         ctx,
         &dumpProfile,
+        &freezeRecaptureDecision,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);
       WriteTextFileUtf8(manifestPath, manifest.dump(2));

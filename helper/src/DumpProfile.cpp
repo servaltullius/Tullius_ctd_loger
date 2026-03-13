@@ -57,7 +57,7 @@ DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind)
       profile.includeThreadInfo = true;
       profile.includeHandleData = true;
       profile.includeUnloadedModules = true;
-      profile.includeFullMemory = true;
+      profile.includeFullMemory = (baseMode == DumpMode::kFull);
       break;
   }
 

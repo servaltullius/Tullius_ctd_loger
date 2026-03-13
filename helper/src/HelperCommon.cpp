@@ -229,10 +229,42 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
     }
   }
 
+  if (root.contains("symbolization") && root["symbolization"].is_object()) {
+    const auto& symbolization = root["symbolization"];
+    if (symbolization.contains("runtime_degraded") && symbolization["runtime_degraded"].is_boolean()) {
+      info.symbolRuntimeDegraded = symbolization["runtime_degraded"].get<bool>();
+    }
+  }
+
   if (root.contains("diagnostics")) {
     info.stackwalkDegraded = JsonArrayContainsString(
       root["diagnostics"],
       "[Stackwalk] DbgHelp stackwalk failed");
+  }
+
+  const auto parseFirstChanceContext = [&root, &info](const nlohmann::json& firstChance) {
+    const auto repeatedSignatureCount = firstChance.value("repeated_signature_count", 0u);
+    const auto loadingWindowCount = firstChance.value("loading_window_count", 0u);
+    const bool hasStrongFirstChance = repeatedSignatureCount > 0u || loadingWindowCount > 0u;
+    bool candidateWeak = true;
+    if (root.contains("actionable_candidates") && root["actionable_candidates"].is_array() &&
+        !root["actionable_candidates"].empty()) {
+      const auto& first = root["actionable_candidates"].front();
+      if (first.is_object()) {
+        const auto statusId = TrimAscii(first.value("status_id", std::string{}));
+        candidateWeak = (statusId == "related" || statusId == "reference_clue");
+      }
+    }
+    info.firstChanceCandidateWeak = hasStrongFirstChance && candidateWeak;
+  };
+
+  if (root.contains("first_chance_context") && root["first_chance_context"].is_object()) {
+    parseFirstChanceContext(root["first_chance_context"]);
+  } else if (root.contains("freeze_analysis") && root["freeze_analysis"].is_object()) {
+    const auto& freeze = root["freeze_analysis"];
+    if (freeze.contains("first_chance_context") && freeze["first_chance_context"].is_object()) {
+      parseFirstChanceContext(freeze["first_chance_context"]);
+    }
   }
 
   if (out) {

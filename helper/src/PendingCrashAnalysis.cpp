@@ -10,6 +10,7 @@
 #include "DumpToolLaunch.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
+#include "IncidentManifest.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/CrashRecapturePolicy.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
@@ -56,6 +57,53 @@ bool IsProcessStillAlive(HANDLE process, std::wstring* err)
     *err = L"WaitForSingleObject failed: " + std::to_wstring(le);
   }
   return false;
+}
+
+std::filesystem::path CrashManifestPathForDump(const std::wstring& dumpPath, const std::filesystem::path& outBase)
+{
+  const auto dumpFs = std::filesystem::path(dumpPath);
+  const auto stem = dumpFs.stem().wstring();
+  constexpr wchar_t kPrefix[] = L"SkyrimDiag_Crash_";
+  if (stem.rfind(kPrefix, 0) != 0) {
+    return {};
+  }
+  const std::wstring suffix = stem.substr((sizeof(kPrefix) / sizeof(kPrefix[0])) - 1u);
+  return outBase / (L"SkyrimDiag_Incident_Crash_" + suffix + L".json");
+}
+
+DumpMode DumpModeForRecaptureTarget(skydiag::helper::RecaptureTargetProfile targetProfile, DumpMode fallbackMode)
+{
+  switch (targetProfile) {
+    case skydiag::helper::RecaptureTargetProfile::kCrashRicher:
+      return DumpMode::kDefault;
+    case skydiag::helper::RecaptureTargetProfile::kCrashFull:
+      return DumpMode::kFull;
+    case skydiag::helper::RecaptureTargetProfile::kNone:
+    case skydiag::helper::RecaptureTargetProfile::kFreezeSnapshotRicher:
+      return fallbackMode;
+  }
+  return fallbackMode;
+}
+
+std::wstring RecaptureSuffixForTarget(skydiag::helper::RecaptureTargetProfile targetProfile)
+{
+  switch (targetProfile) {
+    case skydiag::helper::RecaptureTargetProfile::kCrashRicher:
+      return L"_Richer";
+    case skydiag::helper::RecaptureTargetProfile::kCrashFull:
+      return L"_Full";
+    case skydiag::helper::RecaptureTargetProfile::kNone:
+    case skydiag::helper::RecaptureTargetProfile::kFreezeSnapshotRicher:
+      return L"_Recapture";
+  }
+  return L"_Recapture";
+}
+
+std::filesystem::path CrashRecaptureManifestPathForTimestamp(
+  std::wstring_view timestamp,
+  const std::filesystem::path& outBase)
+{
+  return outBase / (L"SkyrimDiag_Incident_CrashRecapture_" + std::wstring(timestamp) + L".json");
 }
 
 }  // namespace
@@ -188,10 +236,12 @@ void FinalizePendingCrashAnalysisIfReady(
       L", candidateConflict=" + std::to_wstring(summaryInfo.candidateConflict ? 1 : 0) +
       L", referenceClueOnly=" + std::to_wstring(summaryInfo.referenceClueOnly ? 1 : 0) +
       L", stackwalkDegraded=" + std::to_wstring(summaryInfo.stackwalkDegraded ? 1 : 0) +
+      L", symbolRuntimeDegraded=" + std::to_wstring(summaryInfo.symbolRuntimeDegraded ? 1 : 0) +
+      L", firstChanceCandidateWeak=" + std::to_wstring(summaryInfo.firstChanceCandidateWeak ? 1 : 0) +
       L", bucketSeenCount=" + std::to_wstring(bucketSeenCount) +
       L", unknownStreak=" + std::to_wstring(unknownStreak));
 
-  const auto recaptureDecision = skydiag::helper::DecideCrashFullRecapture(
+  const auto recaptureDecision = skydiag::helper::DecideCrashRecapture(
     cfg.enableAutoRecaptureOnUnknownCrash,
     cfg.autoAnalyzeDump,
     summaryInfo.unknownFaultModule,
@@ -201,15 +251,29 @@ void FinalizePendingCrashAnalysisIfReady(
     summaryInfo.candidateConflict,
     summaryInfo.referenceClueOnly,
     summaryInfo.stackwalkDegraded,
+    summaryInfo.symbolRuntimeDegraded,
+    summaryInfo.firstChanceCandidateWeak,
     cfg.dumpMode);
-  bool fullDumpWritten = false;
-  if (recaptureDecision.shouldRecaptureFullDump) {
+
+  const auto manifestPath = CrashManifestPathForDump(task->dumpPath, outBase);
+  if (!manifestPath.empty() && std::filesystem::exists(manifestPath)) {
+    std::wstring manifestErr;
+    if (!TryUpdateIncidentManifestRecaptureEvaluation(manifestPath, recaptureDecision, &manifestErr)) {
+      AppendLogLine(outBase, L"Incident manifest recapture evaluation update failed: " + manifestErr);
+    }
+  }
+
+  bool recaptureDumpWritten = false;
+  if (recaptureDecision.shouldRecapture) {
     std::wstring aliveErr;
     if (IsProcessStillAlive(proc.process, &aliveErr)) {
       const auto tsFull = Timestamp();
-      const auto fullDumpPath = (outBase / (L"SkyrimDiag_Crash_" + tsFull + L"_Full.dmp")).wstring();
+      const auto recaptureDumpFs =
+        outBase / (L"SkyrimDiag_Crash_" + tsFull + RecaptureSuffixForTarget(recaptureDecision.targetProfile) + L".dmp");
+      const auto recaptureDumpPath = recaptureDumpFs.wstring();
+      const auto recaptureDumpMode = DumpModeForRecaptureTarget(recaptureDecision.targetProfile, cfg.dumpMode);
       const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
-        skydiag::helper::DumpMode::kFull,
+        recaptureDumpMode,
         skydiag::helper::CaptureKind::CrashRecapture);
 
       const std::string pluginScanJson = CollectPluginScanJson(
@@ -221,7 +285,7 @@ void FinalizePendingCrashAnalysisIfReady(
       if (!skydiag::helper::WriteDumpWithStreams(
             proc.process,
             proc.pid,
-            fullDumpPath,
+            recaptureDumpPath,
             proc.shm,
             proc.shmSize,
             /*wctJsonUtf8=*/{},
@@ -230,18 +294,48 @@ void FinalizePendingCrashAnalysisIfReady(
             dumpProfile,
             /*isProcessSnapshot=*/false,
             &fullDumpErr)) {
-        AppendLogLine(outBase, L"Crash full recapture failed: " + fullDumpErr);
+        AppendLogLine(outBase, L"Crash recapture failed: " + fullDumpErr);
       } else {
-        fullDumpWritten = true;
-        AppendLogLine(outBase, L"Crash full recapture written: " + fullDumpPath);
-        StartDumpToolHeadlessIfConfigured(cfg, fullDumpPath, outBase);
+        recaptureDumpWritten = true;
+        const std::string targetProfileAscii =
+          skydiag::helper::RecaptureTargetProfileToString(recaptureDecision.targetProfile);
+        const std::wstring targetProfileW(targetProfileAscii.begin(), targetProfileAscii.end());
+        AppendLogLine(
+          outBase,
+          L"Crash recapture written: " + recaptureDumpPath +
+            L" (targetProfile=" + targetProfileW + L")");
+        if (cfg.enableIncidentManifest) {
+          nlohmann::json ctx = nlohmann::json::object();
+          ctx["reason"] = "auto_recapture";
+          ctx["source_dump"] = WideToUtf8(std::filesystem::path(task->dumpPath).filename().wstring());
+          ctx["source_bucket_key"] = summaryInfo.bucketKey;
+          ctx["source_summary_schema"] = summaryInfo.schemaVersion;
+          const auto recaptureManifestPath = CrashRecaptureManifestPathForTimestamp(tsFull, outBase);
+          const auto manifest = MakeIncidentManifestV1(
+            "crash_recapture",
+            tsFull,
+            proc.pid,
+            recaptureDumpFs,
+            std::nullopt,
+            std::nullopt,
+            /*etwStatus=*/"disabled",
+            /*stateFlags=*/0u,
+            ctx,
+            &dumpProfile,
+            &recaptureDecision,
+            cfg,
+            cfg.incidentManifestIncludeConfigSnapshot);
+          WriteTextFileUtf8(recaptureManifestPath, manifest.dump(2));
+          AppendLogLine(outBase, L"Crash recapture incident manifest written: " + recaptureManifestPath.wstring());
+        }
+        StartDumpToolHeadlessIfConfigured(cfg, recaptureDumpPath, outBase);
       }
     } else {
-      AppendLogLine(outBase, L"Crash full recapture skipped: " + aliveErr);
+      AppendLogLine(outBase, L"Crash recapture skipped: " + aliveErr);
     }
   }
 
-  if (fullDumpWritten) {
+  if (recaptureDumpWritten) {
     ApplyRetentionFromConfig(cfg, outBase);
   }
 

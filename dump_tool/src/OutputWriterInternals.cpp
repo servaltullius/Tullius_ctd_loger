@@ -233,6 +233,7 @@ std::filesystem::path FindIncidentManifestForDump(const std::filesystem::path& o
 
   const std::wstring candidates[] = {
     L"SkyrimDiag_Incident_Crash_" + ts + L".json",
+    L"SkyrimDiag_Incident_CrashRecapture_" + ts + L".json",
     L"SkyrimDiag_Incident_Hang_" + ts + L".json",
     L"SkyrimDiag_Incident_Manual_" + ts + L".json",
   };

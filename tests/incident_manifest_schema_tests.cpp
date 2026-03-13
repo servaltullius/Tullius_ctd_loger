@@ -66,13 +66,23 @@ int main()
   }
 
   const std::filesystem::path outputWriterPath = repoRoot / "dump_tool" / "src" / "OutputWriter.cpp";
+  const std::filesystem::path incidentManifestPath = repoRoot / "helper" / "src" / "IncidentManifest.cpp";
   if (!std::filesystem::exists(outputWriterPath)) {
     std::cerr << "ERROR: dump_tool/src/OutputWriter.cpp not found at: " << outputWriterPath << "\n";
+    return 1;
+  }
+  if (!std::filesystem::exists(incidentManifestPath)) {
+    std::cerr << "ERROR: helper/src/IncidentManifest.cpp not found at: " << incidentManifestPath << "\n";
     return 1;
   }
   std::string outputWriter;
   if (!ReadAllText(outputWriterPath, &outputWriter)) {
     std::cerr << "ERROR: failed to read: " << outputWriterPath << "\n";
+    return 1;
+  }
+  std::string incidentManifest;
+  if (!ReadAllText(incidentManifestPath, &incidentManifest)) {
+    std::cerr << "ERROR: failed to read: " << incidentManifestPath << "\n";
     return 1;
   }
   if (!Contains(outputWriter, "incident_id")) {
@@ -101,6 +111,26 @@ int main()
   }
   if (!Contains(outputWriter, "include_full_memory")) {
     std::cerr << "ERROR: Incident manifest schema must include effective profile flags\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "recapture_evaluation")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "target_profile")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.target_profile\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "reasons")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.reasons\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "triggered")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.triggered\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "escalation_level")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.escalation_level\n";
     return 1;
   }
 
