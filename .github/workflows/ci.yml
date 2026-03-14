@@ -114,9 +114,14 @@ jobs:
             $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
             $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
             $startupLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_startup_error.log"
+            $bootstrapLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_headless_bootstrap.log"
             if (Test-Path $startupLog) {
               Write-Host "=== WinUI startup log ==="
               Get-Content $startupLog
+            }
+            if (Test-Path $bootstrapLog) {
+              Write-Host "=== WinUI headless bootstrap log ==="
+              Get-Content $bootstrapLog
             }
             throw "WinUI headless smoke timed out after 30 seconds. stdout=[$stdout] stderr=[$stderr]"
           }
@@ -124,6 +129,16 @@ jobs:
           $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
           $code = $proc.ExitCode
           if ($code -ne 2) {
+            $startupLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_startup_error.log"
+            $bootstrapLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_headless_bootstrap.log"
+            if (Test-Path $startupLog) {
+              Write-Host "=== WinUI startup log ==="
+              Get-Content $startupLog
+            }
+            if (Test-Path $bootstrapLog) {
+              Write-Host "=== WinUI headless bootstrap log ==="
+              Get-Content $bootstrapLog
+            }
             throw "Headless smoke expected exit code 2 for missing dump, got $code. stdout=[$stdout] stderr=[$stderr]"
           }
 

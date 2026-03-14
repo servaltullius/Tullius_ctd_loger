@@ -79,6 +79,9 @@ def main() -> int:
     assert "RedirectStandardOutput = $true" in ci_workflow and "RedirectStandardError = $true" in ci_workflow, (
         "WinUI smoke must capture stdout/stderr so CI failures include headless diagnostics"
     )
+    assert "SkyrimDiagDumpToolWinUI_headless_bootstrap.log" in ci_workflow, (
+        "WinUI smoke must print the headless bootstrap log when startup hangs"
+    )
     assert "WaitForExit(30000)" in ci_workflow and "timed out after 30 seconds" in ci_workflow, (
         "WinUI smoke must enforce a bounded wait and fail clearly if the GUI shell hangs in headless mode"
     )

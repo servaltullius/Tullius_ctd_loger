@@ -45,5 +45,9 @@ int main()
   RequireContains(headless, "GetAwaiter().GetResult()", "Shared headless runner must synchronously return the native analysis exit code.");
   RequireContains(headless, "return exitCode;", "Shared headless runner must return the native analysis exit code.");
 
+  const auto bootstrapLog = ReadAllText(repoRoot / "dump_tool_winui" / "HeadlessBootstrapLog.cs");
+  RequireContains(bootstrapLog, "SkyrimDiagDumpToolWinUI_headless_bootstrap.log", "Headless bootstrap logging must write to a deterministic file for CI diagnostics.");
+  RequireContains(bootstrapLog, "File.AppendAllText", "Headless bootstrap logging must append stage markers to disk.");
+
   return 0;
 }
