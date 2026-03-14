@@ -76,6 +76,9 @@ def main() -> int:
     assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in ci_workflow, (
         "WinUI smoke must target the published WinUI DLL so CI bypasses the flaky Windows apphost layer"
     )
+    assert "timeout-minutes: 2" in ci_workflow, (
+        "WinUI smoke step must enforce a hard GitHub Actions timeout so stale runner hangs are cut off"
+    )
     assert "& dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump" in ci_workflow, (
         "WinUI smoke must execute the published DLL directly via dotnet in CI"
     )

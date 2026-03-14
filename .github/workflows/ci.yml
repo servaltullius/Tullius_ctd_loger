@@ -75,6 +75,7 @@ jobs:
         run: bash scripts/verify_release_gate.sh "$PWD" "$PWD"
 
       - name: WinUI headless interop smoke
+        timeout-minutes: 2
         shell: pwsh
         run: |
           $dll = Join-Path $env:GITHUB_WORKSPACE "build-winui\SkyrimDiagDumpToolWinUI.dll"
