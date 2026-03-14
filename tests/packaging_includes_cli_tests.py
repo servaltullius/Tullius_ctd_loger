@@ -74,7 +74,16 @@ def main() -> int:
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )
     assert "ProcessStartInfo" in ci_workflow and "UseShellExecute = $false" in ci_workflow, (
-        "WinUI smoke must use ProcessStartInfo with UseShellExecute=false for deterministic GUI-process exit handling"
+        "WinUI smoke must use ProcessStartInfo with UseShellExecute=false for deterministic process exit handling"
+    )
+    assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in ci_workflow, (
+        "WinUI smoke must target the published WinUI DLL so CI bypasses the flaky Windows apphost layer"
+    )
+    assert "$psi.FileName = \"dotnet\"" in ci_workflow, (
+        "WinUI smoke must execute the published DLL via dotnet in CI"
+    )
+    assert "$null = $psi.ArgumentList.Add($dll)" in ci_workflow, (
+        "WinUI smoke must pass the WinUI DLL as the first dotnet argument"
     )
     assert "RedirectStandardOutput = $true" in ci_workflow and "RedirectStandardError = $true" in ci_workflow, (
         "WinUI smoke must capture stdout/stderr so CI failures include headless diagnostics"
