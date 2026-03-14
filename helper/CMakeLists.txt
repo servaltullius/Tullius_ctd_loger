@@ -21,6 +21,8 @@ add_executable(${PROJECT_NAME}
   src/LoadStats.cpp
   src/ManualCapture.cpp
   src/PendingCrashAnalysis.cpp
+  src/PendingCrashAnalysis.Decision.cpp
+  src/PendingCrashAnalysis.Execute.cpp
   src/PssSnapshot.cpp
   src/PluginScanner.cpp
   src/ProcessAttach.cpp
@@ -38,6 +40,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
   src/PssSnapshot.h
+  src/PendingCrashAnalysisInternal.h
   src/RetentionWorker.h
   include/SkyrimDiagHelper/WctCapture.h)
 

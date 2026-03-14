@@ -22,9 +22,15 @@ int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const std::filesystem::path pendingPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.cpp";
+  const std::filesystem::path decisionPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Decision.cpp";
+  const std::filesystem::path executePath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Execute.cpp";
   assert(std::filesystem::exists(pendingPath) && "helper/src/PendingCrashAnalysis.cpp not found");
+  assert(std::filesystem::exists(decisionPath) && "helper/src/PendingCrashAnalysis.Decision.cpp not found");
+  assert(std::filesystem::exists(executePath) && "helper/src/PendingCrashAnalysis.Execute.cpp not found");
 
   const std::string pending = ReadAllText(pendingPath);
+  const std::string decision = ReadAllText(decisionPath);
+  const std::string execute = ReadAllText(executePath);
 
   AssertContains(
     pending,
@@ -57,42 +63,42 @@ int main()
     "Starting a new pending crash analysis must clear any previous active task state first.");
 
   AssertContains(
-    pending,
+    decision,
     "summaryInfo.candidateConflict",
     "Pending crash analysis must consider candidate conflict when deciding recapture.");
 
   AssertContains(
-    pending,
+    decision,
     "summaryInfo.referenceClueOnly",
     "Pending crash analysis must consider isolated reference clues when deciding recapture.");
 
   AssertContains(
-    pending,
+    decision,
     "summaryInfo.stackwalkDegraded",
     "Pending crash analysis must consider stackwalk degradation when deciding recapture.");
 
   AssertContains(
-    pending,
+    decision,
     "summaryInfo.symbolRuntimeDegraded",
     "Pending crash analysis must consider symbol runtime degradation when deciding recapture.");
 
   AssertContains(
-    pending,
+    decision,
     "summaryInfo.firstChanceCandidateWeak",
     "Pending crash analysis must consider weak first-chance-backed candidates when deciding recapture.");
 
   AssertContains(
-    pending,
+    execute,
     "recaptureDecision.targetProfile",
     "Pending crash analysis must select a target profile instead of hard-wiring full recapture.");
 
   AssertContains(
-    pending,
+    execute,
     "RecaptureTargetProfile::kCrashRicher",
     "Pending crash analysis must support crash_richer recapture profile selection.");
 
   AssertContains(
-    pending,
+    execute,
     "RecaptureTargetProfile::kCrashFull",
     "Pending crash analysis must support crash_full recapture profile selection.");
 

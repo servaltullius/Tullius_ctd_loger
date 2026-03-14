@@ -15,6 +15,8 @@ int main()
   const auto hangCapturePath = repoRoot / "helper" / "src" / "HangCapture.cpp";
   const auto manualCapturePath = repoRoot / "helper" / "src" / "ManualCapture.cpp";
   const auto pendingAnalysisPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.cpp";
+  const auto pendingAnalysisDecisionPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Decision.cpp";
+  const auto pendingAnalysisExecutePath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Execute.cpp";
 
   assert(std::filesystem::exists(headerPath) && "helper/include/SkyrimDiagHelper/DumpWriter.h not found");
   assert(std::filesystem::exists(implPath) && "helper/src/DumpWriter.cpp not found");
@@ -24,7 +26,10 @@ int main()
   const auto crashCapture = ReadAllText(crashCapturePath);
   const auto hangCapture = ReadAllText(hangCapturePath);
   const auto manualCapture = ReadAllText(manualCapturePath);
-  const auto pendingAnalysis = ReadAllText(pendingAnalysisPath);
+  const auto pendingAnalysis =
+    ReadAllText(pendingAnalysisPath) +
+    ReadAllText(pendingAnalysisDecisionPath) +
+    ReadAllText(pendingAnalysisExecutePath);
 
   AssertContains(header, "DumpProfile", "DumpWriter must accept an effective DumpProfile.");
   AssertContains(header, "const DumpProfile& dumpProfile", "DumpWriter signature must take DumpProfile by const reference.");
