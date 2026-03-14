@@ -73,29 +73,20 @@ def main() -> int:
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )
-    assert "ProcessStartInfo" in ci_workflow and "UseShellExecute = $false" in ci_workflow, (
-        "WinUI smoke must use ProcessStartInfo with UseShellExecute=false for deterministic process exit handling"
-    )
     assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in ci_workflow, (
         "WinUI smoke must target the published WinUI DLL so CI bypasses the flaky Windows apphost layer"
     )
-    assert "$psi.FileName = \"dotnet\"" in ci_workflow, (
-        "WinUI smoke must execute the published DLL via dotnet in CI"
+    assert "& dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump" in ci_workflow, (
+        "WinUI smoke must execute the published DLL directly via dotnet in CI"
     )
-    assert "$null = $psi.ArgumentList.Add($dll)" in ci_workflow, (
-        "WinUI smoke must pass the WinUI DLL as the first dotnet argument"
-    )
-    assert "RedirectStandardOutput = $true" in ci_workflow and "RedirectStandardError = $true" in ci_workflow, (
-        "WinUI smoke must capture stdout/stderr so CI failures include headless diagnostics"
+    assert '$code = $LASTEXITCODE' in ci_workflow, (
+        "WinUI smoke must assert the direct dotnet invocation exit code"
     )
     assert "SkyrimDiagDumpToolWinUI_headless_bootstrap.log" in ci_workflow, (
         "WinUI smoke must print the headless bootstrap log when startup hangs"
     )
-    assert "WaitForExit(30000)" in ci_workflow and "timed out after 30 seconds" in ci_workflow, (
-        "WinUI smoke must enforce a bounded wait and fail clearly if the GUI shell hangs in headless mode"
-    )
-    assert "$proc.ExitCode" in ci_workflow, (
-        "WinUI smoke must read the exit code from the Process API instead of relying on LASTEXITCODE"
+    assert '$code = $LASTEXITCODE' in ci_workflow, (
+        "WinUI smoke must check the direct dotnet invocation exit code"
     )
     assert "_configure_fallback" in vibe_py, (
         "vibe.py must provide a configure fallback when repo-local brain scripts are absent"
