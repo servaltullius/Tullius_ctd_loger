@@ -30,3 +30,6 @@ python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
 ```bash
 bash scripts/verify_release_gate.sh
 ```
+
+Release decisions use the local verification commands in this file as the source of truth.
+GitHub Actions is optional/reference only. Run `.github/workflows/winui-headless-smoke.yml` manually if you need the separate WinUI headless smoke workflow.

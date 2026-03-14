@@ -138,11 +138,26 @@ def main() -> int:
     assert "bash scripts/build-winui-from-wsl.sh" in agents_md, (
         "AGENTS build guide must document the WSL WinUI build wrapper entry point"
     )
+    assert "Release decisions use the local verification commands in this file as the source of truth." in agents_md, (
+        "AGENTS build guide must state that local verification is the release source of truth"
+    )
+    assert ".github/workflows/winui-headless-smoke.yml" in agents_md, (
+        "AGENTS build guide must point to the manual WinUI headless smoke workflow"
+    )
     assert "bash scripts/build-win-from-wsl.sh" in development_md, (
         "DEVELOPMENT.md must document the WSL build wrapper entry point"
     )
     assert "bash scripts/build-winui-from-wsl.sh" in development_md, (
         "DEVELOPMENT.md must document the WSL WinUI build wrapper entry point"
+    )
+    assert "Local verification is the release source of truth for this repository." in development_md, (
+        "DEVELOPMENT.md must state that release decisions are based on local verification"
+    )
+    assert "GitHub Actions is optional/reference only" in development_md, (
+        "DEVELOPMENT.md must mark GitHub Actions as optional/reference"
+    )
+    assert ".github/workflows/winui-headless-smoke.yml" in development_md, (
+        "DEVELOPMENT.md must document the manual WinUI smoke workflow path"
     )
     assert "cmd.exe /c scripts\\\\build-win.cmd" in development_md, (
         "DEVELOPMENT.md must explain that relative cmd.exe launches from WSL are not supported"
@@ -168,11 +183,17 @@ def main() -> int:
         assert heading in prerelease_template, (
             f"prerelease template must include required section heading: {heading}"
         )
+    assert "로컬 검증 결과를 우선 적습니다" in prerelease_template, (
+        "prerelease template must prefer local verification results over CI status summaries"
+    )
     assert "PRERELEASE_NOTES_TEMPLATE.md" in development_md, (
         "DEVELOPMENT.md must point to the prerelease release-notes template"
     )
     assert "--notes-file" in development_md, (
         "DEVELOPMENT.md must document the gh release --notes-file flow"
+    )
+    assert "Do not block prerelease solely on GitHub Actions." in development_md, (
+        "DEVELOPMENT.md release checklist must keep prerelease decisions tied to local verification"
     )
 
     with tempfile.TemporaryDirectory(prefix="skydiag_pkg_test_") as td:
