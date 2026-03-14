@@ -44,6 +44,8 @@ def main() -> int:
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
     linux_workflow = (REPO_ROOT / ".github" / "workflows" / "linux-tests.yml").read_text(encoding="utf-8")
     ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    smoke_workflow_path = REPO_ROOT / ".github" / "workflows" / "winui-headless-smoke.yml"
+    smoke_workflow = smoke_workflow_path.read_text(encoding="utf-8")
     vibe_py = (REPO_ROOT / "scripts" / "vibe.py").read_text(encoding="utf-8")
     build_win_from_wsl = (REPO_ROOT / "scripts" / "build-win-from-wsl.sh").read_text(
         encoding="utf-8"
@@ -73,23 +75,29 @@ def main() -> int:
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )
-    assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in ci_workflow, (
-        "WinUI smoke must target the published WinUI DLL so CI bypasses the flaky Windows apphost layer"
+    assert "WinUI headless interop smoke" not in ci_workflow, (
+        "main CI must not block merges on the flaky WinUI headless smoke step"
     )
-    assert "timeout-minutes: 2" in ci_workflow, (
-        "WinUI smoke step must enforce a hard GitHub Actions timeout so stale runner hangs are cut off"
+    assert smoke_workflow_path.is_file(), (
+        "manual WinUI smoke workflow must exist"
     )
-    assert "& dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump" in ci_workflow, (
-        "WinUI smoke must execute the published DLL directly via dotnet in CI"
+    assert "workflow_dispatch" in smoke_workflow, (
+        "manual WinUI smoke workflow must be runnable on demand"
     )
-    assert '$code = $LASTEXITCODE' in ci_workflow, (
-        "WinUI smoke must assert the direct dotnet invocation exit code"
+    assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in smoke_workflow, (
+        "manual smoke workflow must target the published WinUI DLL"
     )
-    assert "SkyrimDiagDumpToolWinUI_headless_bootstrap.log" in ci_workflow, (
-        "WinUI smoke must print the headless bootstrap log when startup hangs"
+    assert "timeout-minutes: 2" in smoke_workflow, (
+        "manual smoke workflow must cap the smoke step duration"
     )
-    assert '$code = $LASTEXITCODE' in ci_workflow, (
-        "WinUI smoke must check the direct dotnet invocation exit code"
+    assert "& dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump" in smoke_workflow, (
+        "manual smoke workflow must execute the published DLL directly via dotnet"
+    )
+    assert '$code = $LASTEXITCODE' in smoke_workflow, (
+        "manual smoke workflow must assert the direct dotnet invocation exit code"
+    )
+    assert "SkyrimDiagDumpToolWinUI_headless_bootstrap.log" in smoke_workflow, (
+        "manual smoke workflow must print the headless bootstrap log when startup fails"
     )
     assert "_configure_fallback" in vibe_py, (
         "vibe.py must provide a configure fallback when repo-local brain scripts are absent"

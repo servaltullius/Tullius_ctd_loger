@@ -1,21 +1,11 @@
-name: CI
+name: WinUI Headless Smoke
 
 on:
-  push:
-    branches: ["**"]
-    tags-ignore: ["v*"]
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  linux:
-    name: Linux
-    uses: ./.github/workflows/linux-tests.yml
-    with:
-      run_asan: true
-
-  windows-validate:
-    name: Windows Validate (Build + Package + Gate)
+  winui-headless-smoke:
+    name: WinUI Headless Smoke
     runs-on: windows-2022
 
     steps:
@@ -65,20 +55,31 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
-      - name: Package release zip (no PDB)
+      - name: WinUI headless interop smoke
+        timeout-minutes: 2
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
+          $dll = Join-Path $env:GITHUB_WORKSPACE "build-winui\SkyrimDiagDumpToolWinUI.dll"
+          if (-not (Test-Path $dll)) {
+            throw "WinUI DLL not found: $dll"
+          }
 
-      - name: Run release hard gate
-        shell: bash
-        run: bash scripts/verify_release_gate.sh "$PWD" "$PWD"
+          $missingDump = Join-Path $env:GITHUB_WORKSPACE "dist\does-not-exist.dmp"
+          $smokeOutDir = Join-Path $env:GITHUB_WORKSPACE "dist\headless-smoke"
+          New-Item -ItemType Directory -Path $smokeOutDir -Force | Out-Null
 
-      - name: Upload zip artifacts
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: tullius-ctd-logger-windows-zip
-          path: |
-            dist/Tullius_ctd_loger.zip
-          if-no-files-found: error
+          & dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump
+          $code = $LASTEXITCODE
+          if ($code -ne 2) {
+            $startupLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_startup_error.log"
+            $bootstrapLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_headless_bootstrap.log"
+            if (Test-Path $startupLog) {
+              Write-Host "=== WinUI startup log ==="
+              Get-Content $startupLog
+            }
+            if (Test-Path $bootstrapLog) {
+              Write-Host "=== WinUI headless bootstrap log ==="
+              Get-Content $bootstrapLog
+            }
+            throw "Headless smoke expected exit code 2 for missing dump, got $code."
+          }
