@@ -15,6 +15,17 @@ static std::string ReadAllText(const std::filesystem::path& path)
   return ss.str();
 }
 
+static std::string ReadMainWindowViewModelText(const std::filesystem::path& repoRoot)
+{
+  std::ostringstream ss;
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.DumpDiscovery.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.Recommendations.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.Candidates.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.ShareText.cs");
+  return ss.str();
+}
+
 static void RequireContains(const std::string& haystack, const char* needle, const char* message)
 {
   if (haystack.find(needle) == std::string::npos) {
@@ -103,7 +114,7 @@ static void TestMainWindowHasCrashLoggerFirstReadingPath()
   RequireContains(xaml, "Do This Now", "Grouped recommendation UI must expose an immediate-action heading.");
   RequireContains(xaml, "Recapture or Compare", "Grouped recommendation UI must expose a recapture/compare heading.");
 
-  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireContains(vm, "CrashLoggerContextSummary", "View model must expose a CrashLogger-first context summary.");
   RequireContains(vm, "CrashContextSummary", "View model must expose a lower-priority crash context summary.");
   RequireContains(vm, "RecommendationGroups", "View model must expose grouped recommendations.");
@@ -124,7 +135,7 @@ static void TestAnalyzePanelHasDumpDiscoveryFlow()
   RequireContains(xaml, "MO2 overwrite", "Empty state guidance must directly mention MO2 overwrite.");
   RequireContains(xaml, "덤프 출력 위치", "Folder-management UX must use dump-output-location wording.");
 
-  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireContains(vm, "RecentDumps", "View model must expose recent dump items.");
   RequireContains(vm, "DumpSearchLocations", "View model must expose registered dump search locations.");
   RequireContains(vm, "DumpDiscoveryItem", "View model must define a recent-dump item model.");
@@ -174,7 +185,7 @@ static void TestWinUiConsumesRecaptureContext()
   RequireContains(summary, "RecaptureTargetProfile", "AnalysisSummary must expose recapture target profile.");
   RequireContains(summary, "incident.recapture_evaluation", "AnalysisSummary must parse incident.recapture_evaluation.");
 
-  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireContains(vm, "ShowRecaptureContext", "View model must expose recapture-context visibility.");
   RequireContains(vm, "RecaptureContextTitle", "View model must expose recapture-context title.");
   RequireContains(vm, "RecaptureContextDetails", "View model must expose recapture-context details.");
@@ -201,7 +212,7 @@ static void TestWinUiUsesRepresentativeCandidateIdentifiers()
   RequireContains(summary, "string PrimaryIdentifier", "ActionableCandidateItem must expose primary_identifier.");
   RequireContains(summary, "string SecondaryLabel", "ActionableCandidateItem must expose secondary_label.");
 
-  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireContains(vm, "candidate.PrimaryIdentifier", "WinUI titles must prefer the representative primary identifier.");
   RequireContains(vm, "candidate.SecondaryLabel", "WinUI subordinate text must retain the secondary label.");
 }
@@ -222,7 +233,7 @@ int main()
   assert(xaml.find("CopyShareButton") != std::string::npos && "Community share copy button missing in XAML");
   assert(xaml.find("CopyShareButton_Click") != std::string::npos && "Community share click handler not wired in XAML");
 
-  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
   assert(vm.find("Skyrim Snapshot Report") != std::string::npos && "Snapshot community share headline missing");
   assert(vm.find("Skyrim Freeze/ILS Report") != std::string::npos && "Hang community share headline missing");
   assert(vm.find("Cross-validated candidate") != std::string::npos && "Community share text must expose cross-validated wording");
