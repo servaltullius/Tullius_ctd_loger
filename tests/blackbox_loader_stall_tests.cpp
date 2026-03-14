@@ -7,6 +7,16 @@ using skydiag::tests::source_guard::ReadAllText;
 
 namespace {
 
+std::string ReadJoined(const std::filesystem::path& path)
+{
+  std::string text = ReadAllText(path);
+  if (path.filename() == "OutputWriter.cpp") {
+    text += "\n" + ReadAllText(path.parent_path() / "OutputWriter.Summary.cpp");
+    text += "\n" + ReadAllText(path.parent_path() / "OutputWriter.Report.cpp");
+  }
+  return text;
+}
+
 void TestBlackboxLoaderStallSourceContracts()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -33,7 +43,7 @@ void TestBlackboxLoaderStallSourceContracts()
   const auto analyzerHeaderText = ReadAllText(analyzerHeader);
   const auto analyzerInternalsText = ReadAllText(analyzerInternals);
   const auto analyzerFirstChanceText = ReadAllText(analyzerFirstChance);
-  const auto outputWriterText = ReadAllText(outputWriter);
+  const auto outputWriterText = ReadJoined(outputWriter);
 
   AssertContains(sharedHeaderText, "kModuleLoad", "EventType must include module load events.");
   AssertContains(sharedHeaderText, "kModuleUnload", "EventType must include module unload events.");

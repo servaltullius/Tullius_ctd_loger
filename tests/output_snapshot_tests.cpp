@@ -20,10 +20,17 @@ namespace {
 
 std::string ReadFile(const std::filesystem::path& path)
 {
-  std::ifstream in(path, std::ios::binary);
-  assert(in.is_open());
   std::ostringstream ss;
-  ss << in.rdbuf();
+  const auto append = [&](const std::filesystem::path& inputPath) {
+    std::ifstream in(inputPath, std::ios::binary);
+    assert(in.is_open());
+    ss << in.rdbuf();
+  };
+  append(path);
+  if (path.filename() == "OutputWriter.cpp") {
+    append(path.parent_path() / "OutputWriter.Summary.cpp");
+    append(path.parent_path() / "OutputWriter.Report.cpp");
+  }
   return ss.str();
 }
 

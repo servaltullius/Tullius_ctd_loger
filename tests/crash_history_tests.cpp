@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
 
 static std::string ReadFile(const char* relPath)
@@ -11,9 +12,18 @@ static std::string ReadFile(const char* relPath)
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
   assert(root && "SKYDIAG_PROJECT_ROOT must be set");
   const std::filesystem::path p = std::filesystem::path(root) / relPath;
-  std::ifstream in(p, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  std::ostringstream ss;
+  const auto append = [&](const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::in | std::ios::binary);
+    assert(in && "Failed to open file");
+    ss << in.rdbuf();
+  };
+  append(p);
+  if (p.filename() == "OutputWriter.cpp") {
+    append(p.parent_path() / "OutputWriter.Summary.cpp");
+    append(p.parent_path() / "OutputWriter.Report.cpp");
+  }
+  return ss.str();
 }
 
 static void RequireContains(const std::string& haystack, const char* needle, const char* message)

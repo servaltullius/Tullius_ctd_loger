@@ -6,10 +6,17 @@
 
 static std::string ReadAllText(const std::filesystem::path& path)
 {
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
   std::ostringstream ss;
-  ss << in.rdbuf();
+  const auto append = [&](const std::filesystem::path& inputPath) {
+    std::ifstream in(inputPath, std::ios::in | std::ios::binary);
+    assert(in && "Failed to open file");
+    ss << in.rdbuf();
+  };
+  append(path);
+  if (path.filename() == "OutputWriter.cpp") {
+    append(path.parent_path() / "OutputWriter.Summary.cpp");
+    append(path.parent_path() / "OutputWriter.Report.cpp");
+  }
   return ss.str();
 }
 

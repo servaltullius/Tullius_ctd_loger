@@ -9,12 +9,26 @@ static bool ReadAllText(const std::filesystem::path& path, std::string* out)
   if (out) {
     out->clear();
   }
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  if (!in) {
+  std::ostringstream ss;
+  const auto append = [&](const std::filesystem::path& inputPath) {
+    std::ifstream in(inputPath, std::ios::in | std::ios::binary);
+    if (!in) {
+      return false;
+    }
+    ss << in.rdbuf();
+    return true;
+  };
+  if (!append(path)) {
     return false;
   }
-  std::ostringstream ss;
-  ss << in.rdbuf();
+  if (path.filename() == "OutputWriter.cpp") {
+    if (!append(path.parent_path() / "OutputWriter.Summary.cpp")) {
+      return false;
+    }
+    if (!append(path.parent_path() / "OutputWriter.Report.cpp")) {
+      return false;
+    }
+  }
   if (out) {
     *out = ss.str();
   }

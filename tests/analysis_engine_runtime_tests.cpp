@@ -37,6 +37,15 @@ std::string ReadAllText(const std::filesystem::path& path)
   return ss.str();
 }
 
+std::string ReadJoinedText(std::initializer_list<std::filesystem::path> paths)
+{
+  std::ostringstream ss;
+  for (const auto& path : paths) {
+    ss << ReadAllText(path) << "\n";
+  }
+  return ss.str();
+}
+
 void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
   assert(haystack.find(needle) != std::string::npos && message);
@@ -364,7 +373,10 @@ void TestCaptureQualitySourceContracts()
 {
   const auto root = ProjectRoot();
   const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
-  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto analyzerCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "Analyzer.cpp",
+    root / "dump_tool" / "src" / "Analyzer.History.cpp",
+  });
   const auto evidenceCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
   const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
 
@@ -382,7 +394,10 @@ void TestFreezeAnalysisSourceContracts()
 {
   const auto root = ProjectRoot();
   const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
-  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto analyzerCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "Analyzer.cpp",
+    root / "dump_tool" / "src" / "Analyzer.CaptureInputs.cpp",
+  });
   const auto analyzerInternalsHeader = ReadAllText(root / "dump_tool" / "src" / "AnalyzerInternals.h");
 
   AssertContains(analyzerHeader, "FreezeAnalysisResult", "AnalysisResult must define a freeze analysis model.");
@@ -429,8 +444,15 @@ void TestRecaptureEvaluationConsumptionSourceContracts()
 {
   const auto root = ProjectRoot();
   const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
-  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
-  const auto outputWriter = ReadAllText(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const auto analyzerCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "Analyzer.cpp",
+    root / "dump_tool" / "src" / "Analyzer.History.cpp",
+  });
+  const auto outputWriter = ReadJoinedText({
+    root / "dump_tool" / "src" / "OutputWriter.cpp",
+    root / "dump_tool" / "src" / "OutputWriter.Summary.cpp",
+    root / "dump_tool" / "src" / "OutputWriter.Report.cpp",
+  });
   const auto evidenceCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
   const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
 

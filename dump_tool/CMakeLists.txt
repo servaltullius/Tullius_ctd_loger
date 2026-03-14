@@ -6,7 +6,10 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(SkyrimDiagDumpToolCore STATIC
   src/Analyzer.cpp
+  src/Analyzer.CaptureInputs.cpp
+  src/Analyzer.History.cpp
   src/Analyzer.h
+  src/AnalyzerPipeline.h
   src/AnalyzerInternals.cpp
   src/AnalyzerInternals.h
   src/AnalyzerInternalsBlackbox.cpp
@@ -56,6 +59,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/Utf.cpp
   src/Utf.h
   src/OutputWriter.cpp
+  src/OutputWriter.Summary.cpp
+  src/OutputWriter.Report.cpp
   src/OutputWriter.h
   src/OutputWriterInternals.cpp
   src/OutputWriterInternals.h)
