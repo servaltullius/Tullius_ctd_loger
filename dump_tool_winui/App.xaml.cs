@@ -16,7 +16,7 @@ public partial class App : Application
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
     }
 
-    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         try
         {
@@ -24,12 +24,7 @@ public partial class App : Application
 
             if (options.Headless)
             {
-                var (exitCode, error) = await NativeAnalyzerBridge.RunAnalyzeAsync(options, CancellationToken.None);
-                if (exitCode != 0 && !string.IsNullOrWhiteSpace(error))
-                {
-                    Console.Error.WriteLine(error);
-                }
-                Environment.Exit(exitCode);
+                Environment.Exit(HeadlessEntryPoint.Run(options));
                 return;
             }
 

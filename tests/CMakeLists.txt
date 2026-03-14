@@ -53,6 +53,12 @@ add_executable(skydiag_winui_xaml_tests
 
 add_test(NAME skydiag_winui_xaml_tests COMMAND skydiag_winui_xaml_tests)
 
+add_executable(skydiag_winui_headless_entrypoint_tests
+  winui_headless_entrypoint_tests.cpp
+)
+
+add_test(NAME skydiag_winui_headless_entrypoint_tests COMMAND skydiag_winui_headless_entrypoint_tests)
+
 add_executable(skydiag_analysis_summary_helpers_tests
   analysis_summary_helpers_tests.cpp
 )
