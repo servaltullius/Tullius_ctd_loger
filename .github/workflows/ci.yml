@@ -86,23 +86,45 @@ jobs:
           $smokeOutDir = Join-Path $env:GITHUB_WORKSPACE "dist\headless-smoke"
           New-Item -ItemType Directory -Path $smokeOutDir -Force | Out-Null
 
-          $proc = Start-Process -FilePath $exe -ArgumentList @(
-            "--headless",
-            "--no-online-symbols",
-            "--out-dir",
-            $smokeOutDir,
-            $missingDump
-          ) -PassThru
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = $exe
+          $psi.WorkingDirectory = $env:GITHUB_WORKSPACE
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $null = $psi.ArgumentList.Add("--headless")
+          $null = $psi.ArgumentList.Add("--no-online-symbols")
+          $null = $psi.ArgumentList.Add("--out-dir")
+          $null = $psi.ArgumentList.Add($smokeOutDir)
+          $null = $psi.ArgumentList.Add($missingDump)
+
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          if ($null -eq $proc) {
+            throw "Failed to start WinUI headless smoke process"
+          }
+
+          $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+          $stderrTask = $proc.StandardError.ReadToEndAsync()
           if (-not $proc.WaitForExit(30000)) {
             try {
               $proc.Kill($true)
             } catch {
             }
-            throw "WinUI headless smoke timed out after 30 seconds"
+            $proc.WaitForExit()
+            $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
+            $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
+            $startupLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_startup_error.log"
+            if (Test-Path $startupLog) {
+              Write-Host "=== WinUI startup log ==="
+              Get-Content $startupLog
+            }
+            throw "WinUI headless smoke timed out after 30 seconds. stdout=[$stdout] stderr=[$stderr]"
           }
+          $stdout = $stdoutTask.GetAwaiter().GetResult().Trim()
+          $stderr = $stderrTask.GetAwaiter().GetResult().Trim()
           $code = $proc.ExitCode
           if ($code -ne 2) {
-            throw "Headless smoke expected exit code 2 for missing dump, got $code"
+            throw "Headless smoke expected exit code 2 for missing dump, got $code. stdout=[$stdout] stderr=[$stderr]"
           }
 
       - name: Upload zip artifacts

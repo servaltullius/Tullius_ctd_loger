@@ -73,14 +73,17 @@ def main() -> int:
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )
-    assert "Start-Process -FilePath $exe" in ci_workflow and "-PassThru" in ci_workflow, (
-        "WinUI smoke must launch the GUI shell with Start-Process -PassThru so PowerShell can inspect the process object"
+    assert "ProcessStartInfo" in ci_workflow and "UseShellExecute = $false" in ci_workflow, (
+        "WinUI smoke must use ProcessStartInfo with UseShellExecute=false for deterministic GUI-process exit handling"
+    )
+    assert "RedirectStandardOutput = $true" in ci_workflow and "RedirectStandardError = $true" in ci_workflow, (
+        "WinUI smoke must capture stdout/stderr so CI failures include headless diagnostics"
     )
     assert "WaitForExit(30000)" in ci_workflow and "timed out after 30 seconds" in ci_workflow, (
         "WinUI smoke must enforce a bounded wait and fail clearly if the GUI shell hangs in headless mode"
     )
     assert "$proc.ExitCode" in ci_workflow, (
-        "WinUI smoke must read the process exit code from Start-Process instead of relying on LASTEXITCODE"
+        "WinUI smoke must read the exit code from the Process API instead of relying on LASTEXITCODE"
     )
     assert "_configure_fallback" in vibe_py, (
         "vibe.py must provide a configure fallback when repo-local brain scripts are absent"
