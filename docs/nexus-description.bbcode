@@ -1,34 +1,33 @@
 [b][size=5]Tullius CTD Logger (SkyrimDiag)[/size][/b]
 
-Skyrim SE/AE용 진단 도구입니다.
-게임이 [b]CTD[/b], [b]프리징[/b], [b]무한 로딩(ILS)[/b] 상태가 되었을 때 dump와 주변 단서를 모으고,
-WinDbg 없이도 읽을 수 있는 [b]요약 + 근거 + 체크리스트[/b] 리포트를 만들어 줍니다.
+Diagnostic tool for Skyrim SE/AE.
+When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b] state, it captures dumps and surrounding clues, then generates a [b]readable report[/b] with summary, evidence, and a checklist.
 
 [b]Quick Links[/b]
 [url=https://github.com/servaltullius/Tullius_ctd_loger]GitHub (source)[/url] · [url=https://github.com/servaltullius/Tullius_ctd_loger/releases/latest]Latest release[/url] · [url=https://github.com/servaltullius/Tullius_ctd_loger/issues]Issue reporting[/url]
 
 [b][size=4]What It Does[/size][/b]
 [list]
-[*][b]CTD / 프리징 / ILS[/b]에서 dump(.dmp)를 생성합니다.
-[*]사고 직전의 [b]blackbox 이벤트[/b], [b]WCT[/b], 부가 로그를 함께 남깁니다.
-[*]결과를 [b]사람이 읽기 쉬운 보고서[/b]로 정리합니다.
-[*]CrashLoggerSSE가 있으면 관련 로그를 자동으로 읽어 [b]분석 근거[/b]에 포함합니다.
-[*]최근 버전에서는 [b]EXE 크래시[/b]나 [b]로딩 멈춤[/b] 같이 애매한 상황도 예전보다 더 실용적으로 보여주도록 개선되었습니다.
+[*]Captures [b]dumps (.dmp)[/b] for CTD, freeze, and ILS scenarios
+[*]Records [b]blackbox events[/b], [b]WCT[/b], and supporting incident artifacts around the failure
+[*]Generates a [b]human-readable report[/b] so you do not need WinDbg for the first pass
+[*]Automatically reads CrashLogger logs when CrashLoggerSSE is installed
+[*]Recent versions improved handling for ambiguous cases such as [b]EXE crashes[/b] and [b]loading stalls[/b]
 [/list]
 
 [b][size=4]What It Does NOT Do[/size][/b]
 [list]
-[*]이 모드는 [b]크래시를 막는 모드[/b]가 아닙니다.
-[*]예외를 삼키거나 "그냥 계속 플레이"하게 만드는 모드가 아닙니다.
-[*]원인 후보와 단서를 모아 [b]문제 찾기[/b]를 쉽게 해주는 도구입니다.
-[*]텔레메트리 / 자동 업로드는 없습니다. 결과는 [b]전부 로컬[/b]에 저장됩니다.
+[*]This is [b]not[/b] a crash prevention mod
+[*]It does [b]not[/b] swallow exceptions or try to keep the game running after a fault
+[*]It is a [b]diagnostics tool[/b] that helps you find likely causes and supporting clues
+[*]There is no telemetry or auto-upload. Outputs stay [b]local only[/b]
 [/list]
 
 [b][size=4]Recommended Companion Mod[/size][/b]
 [url=https://www.nexusmods.com/skyrimspecialedition/mods/59818]Crash Logger SSE AE VR — PDB support[/url]
 
-설치하면 Tullius가 CrashLogger 로그를 자동으로 감지해서 보고서에 포함합니다.
-필수는 아니지만, [b]더 풍부한 분석[/b]을 원하면 권장합니다.
+If installed, Tullius auto-detects CrashLogger logs and includes them in the report.
+It is not required, but it is strongly recommended for [b]richer diagnostics[/b].
 
 [b][size=4]Included Files[/size][/b]
 [code]
@@ -53,63 +52,63 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 [b][size=4]Installation (MO2)[/size][/b]
 [list=1]
-[*]위 필수 구성 요소를 먼저 설치합니다.
-[*]zip을 MO2에 모드로 설치하고 활성화합니다.
-[*]SKSE로 게임을 실행합니다.
-[*]Helper는 자동으로 붙고, 별도 수동 실행은 필요하지 않습니다.
+[*]Install the requirements first
+[*]Install the zip as a mod in MO2 and enable it
+[*]Launch Skyrim through SKSE
+[*]The Helper attaches automatically. No separate manual launch is required
 [/list]
 
 [b][size=4]How To Use[/size][/b]
 
-[b]1. 자동 캡처[/b]
+[b]Automatic capture[/b]
 [list]
-[*][b]CTD:[/b] 게임이 실제로 종료되면 crash dump와 보고서가 생성됩니다.
-[*][b]프리징 / ILS:[/b] 설정한 임계 시간이 지나면 hang dump를 생성합니다.
+[*][b]CTD:[/b] When the game actually exits, Tullius generates a crash dump and report
+[*][b]Freeze / ILS:[/b] When the configured threshold is exceeded, Tullius generates a hang dump
 [/list]
 
-[b]2. 수동 스냅샷[/b]
-[font=Courier New]Ctrl+Shift+F12[/font]로 수동 스냅샷을 찍을 수 있습니다.
+[b]Manual snapshot[/b]
+You can capture a manual snapshot with [font=Courier New]Ctrl+Shift+F12[/font].
 
-[i]주의:[/i] 정상 플레이 중 수동 스냅샷은 "low confidence"로 보일 수 있습니다.
-이 기능은 [b]이미 멈췄거나 이상한 상태일 때[/b] 확인용으로 쓰는 편이 좋습니다.
+[i]Note:[/i] A snapshot taken during normal gameplay may show [b]low confidence[/b].
+It is most useful when the game is already stuck or behaving abnormally.
 
-[b]3. 결과 보기 (WinUI Viewer)[/b]
+[b]Viewing results (WinUI Viewer)[/b]
 [list]
-[*]설정에 따라 CTD 후 뷰어가 자동으로 열릴 수 있습니다.
-[*]직접 열려면 [font=Courier New]SkyrimDiagDumpToolWinUI.exe[/font]를 실행하고 dump를 선택한 뒤 [b]Analyze[/b]를 누르면 됩니다.
-[*]또는 커맨드라인에서 실행할 수 있습니다:
+[*]Depending on your settings, the viewer may auto-open after a CTD
+[*]To open manually, run [font=Courier New]SkyrimDiagDumpToolWinUI.exe[/font], select a dump, and click [b]Analyze[/b]
+[*]You can also launch it from the command line:
 [/list]
 [code]
 SkyrimDiagDumpToolWinUI.exe "path\to\dump.dmp"
 [/code]
 
-뷰어에는 보통 이런 정보가 보입니다.
+The viewer typically shows:
 [list]
-[*]요약 (무엇부터 보면 되는지)
-[*]행동 우선 후보
-[*]근거 목록
-[*]이벤트 타임라인
-[*]리소스 로그
+[*]Summary
+[*]Actionable candidates
+[*]Evidence list
+[*]Event timeline
+[*]Resource log
 [*]Wait Chain (WCT)
 [/list]
 
 [b][size=4]What Changed In Recent Versions[/size][/b]
 [list]
-[*]시작 화면에서 [b]최근 dump[/b]와 [b]출력 위치[/b]를 더 쉽게 찾을 수 있게 바뀌었습니다.
-[*]후보 이름도 예쁜 별칭보다 [b]ESP/ESM 파일명[/b], [b]DLL 파일명[/b]을 우선 보여주도록 바뀌었습니다.
-[*]EXE 크래시처럼 애매한 경우에도, CrashLogger / stack / history / first-chance 문맥을 함께 보고 더 실용적인 후보를 보여주도록 개선됐습니다.
-[*]프리징은 [b]데드락인지[/b], [b]로딩 멈춤인지[/b], [b]아직 애매한지[/b]를 나눠서 보여주도록 강화됐습니다.
+[*]The start screen now makes it easier to find [b]recent dumps[/b] and the current [b]output location[/b]
+[*]Candidate names now prefer [b]ESP/ESM filenames[/b] and [b]DLL filenames[/b] over vague friendly labels
+[*]Ambiguous EXE crashes now use CrashLogger, stack, history, and first-chance context together to surface more practical suspects
+[*]Freeze analysis now tries to distinguish between [b]deadlock-like[/b], [b]loading-stall-like[/b], and [b]still ambiguous[/b] situations
 [/list]
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
-MO2에서 모드를 우클릭 → [b]Open in Explorer[/b]
+In MO2, right-click the mod and choose [b]Open in Explorer[/b].
 
-그 다음:
+Then go to:
 [code]
 SKSE\Plugins\SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe
 [/code]
 
-[i]팁:[/i] 바탕화면 바로가기를 하나 만들어 두면 편합니다.
+[i]Tip:[/i] A desktop shortcut is convenient if you open reports often.
 
 [b][size=4]Capture Types[/size][/b]
 [code]
@@ -123,11 +122,10 @@ Manual snapshot        *_Manual_*.dmp         Ctrl+Shift+F12
 [b][size=4]Output Location[/size][/b]
 [list]
 [*][b]Default:[/b] MO2 [font=Courier New]overwrite\SKSE\Plugins\[/font]
-[*][b]Custom:[/b] [font=Courier New]SkyrimDiagHelper.ini[/font]에서 [font=Courier New]OutputDir=[/font] 설정
+[*][b]Custom:[/b] Set [font=Courier New]OutputDir=[/font] in [font=Courier New]SkyrimDiagHelper.ini[/font]
 [/list]
 
-[i]중요:[/i] 최신 버전은 일반 Windows [font=Courier New]CrashDumps[/font]보다
-[b]툴리우스 출력 위치[/b] 기준으로 동작하도록 정리되었습니다.
+[i]Important:[/i] Recent versions use the [b]Tullius output location[/b] as the primary discovery path instead of generic Windows [font=Courier New]CrashDumps[/font].
 
 [b][size=4]Important Settings (SkyrimDiagHelper.ini)[/size][/b]
 [code]
@@ -147,18 +145,17 @@ MaxManualDumps=5
 [/code]
 
 [b][size=4]Performance[/size][/b]
-기본적으로는 [b]상시 무거운 감시[/b]가 아니라,
-[b]이벤트 기록 + 필요할 때만 dump 생성[/b] 방식입니다.
+This is designed as [b]event recording + on-demand dump capture[/b], not heavy continuous monitoring.
 
 [list]
-[*][font=Courier New]EnableResourceLog=1[/font] — loose file open (.nif/.hkx/.tri)까지 기록합니다. 오버헤드가 의심되면 먼저 [font=Courier New]=0[/font]으로 테스트해 보세요.
-[*][font=Courier New]EnablePerfHitchLog=1[/font] — 메인 스레드 stall 기록. 비교적 가볍습니다.
-[*][font=Courier New]CrashHookMode=1[/font] — 1 유지 권장. 2는 권장하지 않습니다.
+[*][font=Courier New]EnableResourceLog=1[/font] — records loose-file opens (.nif/.hkx/.tri). If you suspect overhead, test with [font=Courier New]=0[/font] first
+[*][font=Courier New]EnablePerfHitchLog=1[/font] — logs main-thread stalls. This is relatively lightweight
+[*][font=Courier New]CrashHookMode=1[/font] — keep this at 1. Mode 2 is not recommended
 [/list]
 
 [b][size=4]Language[/size][/b]
-기본 UI는 Windows 언어를 따라갑니다.
-필요하면 실행 옵션으로 강제할 수 있습니다.
+The UI follows your Windows language by default.
+You can override it with launch options:
 [code]
 SkyrimDiagDumpToolWinUI.exe --lang en
 SkyrimDiagDumpToolWinUI.exe --lang ko
@@ -166,37 +163,37 @@ SkyrimDiagDumpToolWinUI.exe --lang ko
 
 [b][size=4]FAQ[/size][/b]
 
-[b]Q: 저장/로드 중 뷰어가 떴는데 게임은 계속 돌아가요.[/b]
-A: 저장/코세이브 과정의 예외가 내부에서 처리되면 게임이 계속될 수 있습니다.
-이 경우 표시된 후보는 [b]확정 원인[/b]이 아니라 [b]위험 신호[/b]로 보는 게 맞습니다.
-팝업을 줄이고 싶다면 [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] 또는 [font=Courier New]AutoOpenViewerOnCrash=0[/font]을 사용하세요.
+[b]Q: The viewer popped up during save/load, but the game kept running.[/b]
+A: An exception during save/cosave may be internally handled, so the game can continue.
+In that case, the shown suspect is [b]a warning signal[/b], not a confirmed root cause.
+To reduce popups, use [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] or [font=Courier New]AutoOpenViewerOnCrash=0[/font].
 
-[b]Q: dump 파일이 어디 있나요?[/b]
-A: 기본적으로 MO2 [font=Courier New]overwrite\SKSE\Plugins\[/font] 아래에 생성됩니다.
-[font=Courier New]OutputDir=[/font]를 설정하면 원하는 폴더로 모을 수 있습니다.
+[b]Q: Where are the dump files?[/b]
+A: By default, they are written under MO2 [font=Courier New]overwrite\SKSE\Plugins\[/font].
+You can collect them in another folder by setting [font=Courier New]OutputDir=[/font].
 
-[b]Q: CrashLoggerSSE가 꼭 필요한가요?[/b]
-A: 필수는 아닙니다. 다만 설치하면 더 풍부한 진단이 가능합니다.
+[b]Q: Do I need CrashLoggerSSE?[/b]
+A: No, but it is recommended. If present, Tullius can produce richer reports.
 
-[b]Q: 프리징 분석도 자동으로 되나요?[/b]
-A: 됩니다. 최근 버전에서는 WCT, blackbox, loading 문맥을 함께 사용해서 예전보다 더 구분해서 보여줍니다.
+[b]Q: Does freeze analysis work automatically?[/b]
+A: Yes. Recent versions use WCT, blackbox, and loading context together to provide a more useful freeze summary.
 
 [b][size=4]Privacy[/size][/b]
 [list]
-[*]dump와 로그에는 [b]로컬 경로[/b], [b]사용자 이름[/b] 등이 포함될 수 있습니다.
-[*]공개 업로드 전 점검/마스킹을 권장합니다.
-[*]분석 결과는 best-effort 추정입니다. 확정 판결이 아닙니다.
+[*]Dumps and logs may contain [b]local file paths[/b] and [b]usernames[/b]
+[*]Review and redact before sharing publicly
+[*]Analysis results are best-effort estimates, not a guaranteed verdict
 [/list]
 
 [b][size=4]Support / Bug Reports[/size][/b]
-문제 제보 시 가능하면 아래를 함께 첨부해 주세요.
+When reporting an issue, include as many of these as possible:
 [list]
-[*][font=Courier New].dmp[/font] 파일
+[*][font=Courier New].dmp[/font] file
 [*][font=Courier New]*_SkyrimDiagReport.txt[/font]
 [*][font=Courier New]*_SkyrimDiagSummary.json[/font]
-[*][font=Courier New]SkyrimDiag_Incident_*.json[/font] (있다면)
-[*][font=Courier New]*_SkyrimDiagBlackbox.jsonl[/font] (있다면)
-[*]CrashLogger 로그 (있다면)
+[*][font=Courier New]SkyrimDiag_Incident_*.json[/font] if present
+[*][font=Courier New]*_SkyrimDiagBlackbox.jsonl[/font] if present
+[*]CrashLogger logs if present
 [/list]
 
 [line]
@@ -263,19 +260,19 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 [b][size=4]사용 방법[/size][/b]
 
-[b]1. 자동 캡처[/b]
+[b]자동 캡처[/b]
 [list]
 [*][b]CTD:[/b] 게임이 실제로 종료되면 crash dump와 보고서가 자동으로 생성됩니다.
 [*][b]프리징 / 무한 로딩:[/b] 설정한 임계 시간이 지나면 hang dump를 자동으로 생성합니다.
 [/list]
 
-[b]2. 수동 스냅샷[/b]
+[b]수동 스냅샷[/b]
 [font=Courier New]Ctrl+Shift+F12[/font]로 즉시 수동 스냅샷을 찍을 수 있습니다.
 
 [i]주의:[/i] 정상 플레이 중 수동 스냅샷은 [b]신뢰도 낮음[/b]으로 나올 수 있습니다.
 이미 멈췄거나 이상한 상태일 때 확인용으로 쓰는 편이 좋습니다.
 
-[b]3. 결과 보기 (WinUI 뷰어)[/b]
+[b]결과 보기 (WinUI 뷰어)[/b]
 [list]
 [*]설정에 따라 CTD 후 뷰어가 자동으로 열릴 수 있습니다.
 [*]직접 열려면 [font=Courier New]SkyrimDiagDumpToolWinUI.exe[/font]를 실행하고 dump를 고른 뒤 [b]분석[/b]을 누르면 됩니다.
@@ -368,7 +365,7 @@ SkyrimDiagDumpToolWinUI.exe --lang ko
 
 [b][size=4]자주 묻는 질문[/size][/b]
 
-[b]Q: 저장/로드 중 뷰어가 떴는데 게임은 계속 돌아가요.[/b]
+[b]Q: 저장/로드 중 뷰어가 떴는데 게임은 계속 돌아가요?[/b]
 A: 저장/코세이브 과정의 예외가 내부에서 처리되면 게임이 계속될 수 있습니다.
 이 경우 표시된 후보는 [b]확정 원인[/b]이 아니라 [b]위험 신호[/b]로 보는 게 맞습니다.
 팝업을 줄이고 싶다면 [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] 또는 [font=Courier New]AutoOpenViewerOnCrash=0[/font]을 사용하세요.
