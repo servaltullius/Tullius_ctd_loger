@@ -3,6 +3,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <string>
 
@@ -14,6 +15,15 @@ inline std::string ReadAllText(const std::filesystem::path& path)
   assert(in && "Failed to open file");
   std::ostringstream ss;
   ss << in.rdbuf();
+  return ss.str();
+}
+
+inline std::string ReadConcatenatedText(std::initializer_list<std::filesystem::path> paths)
+{
+  std::ostringstream ss;
+  for (const auto& path : paths) {
+    ss << ReadAllText(path);
+  }
   return ss.str();
 }
 

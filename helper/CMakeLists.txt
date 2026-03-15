@@ -18,6 +18,9 @@ add_executable(${PROJECT_NAME}
   src/HangCapture.Execute.cpp
   src/HelperCommon.cpp
   src/HelperLog.cpp
+  src/HelperMain.Startup.cpp
+  src/HelperMain.Process.cpp
+  src/HelperMain.Loop.cpp
   src/HangDetect.cpp
   src/IncidentManifest.cpp
   src/LoadStats.cpp

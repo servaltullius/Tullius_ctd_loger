@@ -13,6 +13,16 @@ static std::string ReadAllText(const std::filesystem::path& path)
   return ss.str();
 }
 
+static std::string ReadHelperMainText(const std::filesystem::path& repoRoot)
+{
+  std::ostringstream ss;
+  ss << ReadAllText(repoRoot / "helper" / "src" / "main.cpp");
+  ss << ReadAllText(repoRoot / "helper" / "src" / "HelperMain.Startup.cpp");
+  ss << ReadAllText(repoRoot / "helper" / "src" / "HelperMain.Process.cpp");
+  ss << ReadAllText(repoRoot / "helper" / "src" / "HelperMain.Loop.cpp");
+  return ss.str();
+}
+
 static void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
   assert(haystack.find(needle) != std::string::npos && message);
@@ -25,6 +35,9 @@ int main()
   const auto preflightCpp = repoRoot / "helper" / "src" / "CompatibilityPreflight.cpp";
   const auto preflightHeader = repoRoot / "helper" / "src" / "CompatibilityPreflight.h";
   const auto helperMain = repoRoot / "helper" / "src" / "main.cpp";
+  const auto helperMainStartup = repoRoot / "helper" / "src" / "HelperMain.Startup.cpp";
+  const auto helperMainProcess = repoRoot / "helper" / "src" / "HelperMain.Process.cpp";
+  const auto helperMainLoop = repoRoot / "helper" / "src" / "HelperMain.Loop.cpp";
   const auto helperIni = repoRoot / "dist" / "SkyrimDiagHelper.ini";
   const auto wctCapture = repoRoot / "helper" / "src" / "WctCapture.cpp";
   const auto hangCapture = repoRoot / "helper" / "src" / "HangCapture.cpp";
@@ -37,6 +50,9 @@ int main()
   assert(std::filesystem::exists(preflightCpp) && "helper/src/CompatibilityPreflight.cpp not found");
   assert(std::filesystem::exists(preflightHeader) && "helper/src/CompatibilityPreflight.h not found");
   assert(std::filesystem::exists(helperMain) && "helper/src/main.cpp not found");
+  assert(std::filesystem::exists(helperMainStartup) && "helper/src/HelperMain.Startup.cpp not found");
+  assert(std::filesystem::exists(helperMainProcess) && "helper/src/HelperMain.Process.cpp not found");
+  assert(std::filesystem::exists(helperMainLoop) && "helper/src/HelperMain.Loop.cpp not found");
   assert(std::filesystem::exists(helperIni) && "dist/SkyrimDiagHelper.ini not found");
   assert(std::filesystem::exists(wctCapture) && "helper/src/WctCapture.cpp not found");
   assert(std::filesystem::exists(hangCapture) && "helper/src/HangCapture.cpp not found");
@@ -47,7 +63,7 @@ int main()
   assert(std::filesystem::exists(pssSpikeDoc) && "docs/spikes/pss-snapshot-evaluation.md not found");
 
   const auto preflightCppText = ReadAllText(preflightCpp);
-  const auto helperMainText = ReadAllText(helperMain);
+  const auto helperMainText = ReadHelperMainText(repoRoot);
   const auto helperIniText = ReadAllText(helperIni);
   const auto wctCaptureText = ReadAllText(wctCapture);
   const auto hangCaptureText =
