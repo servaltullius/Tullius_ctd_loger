@@ -26,6 +26,18 @@ static std::string ReadMainWindowViewModelText(const std::filesystem::path& repo
   return ss.str();
 }
 
+static std::string ReadMainWindowCodeBehindText(const std::filesystem::path& repoRoot)
+{
+  std::ostringstream ss;
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Localization.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.DumpDiscovery.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Analysis.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Triage.cs");
+  ss << ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Layout.cs");
+  return ss.str();
+}
+
 static void RequireContains(const std::string& haystack, const char* needle, const char* message)
 {
   if (haystack.find(needle) == std::string::npos) {
@@ -49,7 +61,7 @@ static void TestMainWindowHasCorrelationBadge()
   const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
   assert(xaml.find("CorrelationBadge") != std::string::npos);
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   assert(cs.find("CorrelationBadge") != std::string::npos);
 
   const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
@@ -66,7 +78,7 @@ static void TestMainWindowHasTroubleshootingSection()
   const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
   assert(xaml.find("TroubleshootingExpander") != std::string::npos);
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   assert(cs.find("TroubleshootingSteps") != std::string::npos || cs.find("troubleshooting_steps") != std::string::npos);
 
   const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
@@ -87,7 +99,7 @@ static void TestMainWindowHasTriageReviewEditor()
   assert(xaml.find("GroundTruthModBox") != std::string::npos && "Ground truth mod field missing in XAML");
   assert(xaml.find("ReviewNotesBox") != std::string::npos && "Review notes field missing in XAML");
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   assert(cs.find("SaveTriageButton_Click") != std::string::npos && "Save triage click handler missing");
   assert(cs.find("PopulateTriageEditor") != std::string::npos && "Triage editor population logic missing");
   assert(cs.find("DescribeReviewStatus") != std::string::npos && "Review status formatter missing");
@@ -141,7 +153,7 @@ static void TestAnalyzePanelHasDumpDiscoveryFlow()
   RequireContains(vm, "DumpDiscoveryItem", "View model must define a recent-dump item model.");
   RequireContains(vm, "DumpSearchLocationItem", "View model must define a dump-search-location item model.");
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "RefreshDiscoveredDumpsAsync", "Main window must refresh discovered dumps on startup and after folder changes.");
   RequireContains(cs, "AnalyzeRecentDump_Click", "Analyze/start screen must let users analyze a discovered dump directly.");
   RequireContains(cs, "ManageDumpFoldersButton_Click", "Folder-management entry point handler missing.");
@@ -163,7 +175,7 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
   RequireContains(service, "overwrite", "Discovery service must infer MO2 overwrite when OutputDir is blank.");
   RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "덤프 출력 위치", "User-facing copy must talk about dump output locations.");
   RequireContains(cs, "OutputDir", "Empty-state/help copy must mention OutputDir for custom output roots.");
 
@@ -196,7 +208,7 @@ static void TestWinUiConsumesRecaptureContext()
   RequireContains(xaml, "RecaptureContextTitleText", "Recapture context card must expose a title text element.");
   RequireContains(xaml, "RecaptureContextDetailsText", "Recapture context card must expose a detail text element.");
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "RecaptureContextCard.Visibility", "Main window must toggle recapture context visibility when rendering.");
   RequireContains(cs, "RecaptureContextTitleText.Text", "Main window must render the recapture-context title.");
   RequireContains(cs, "RecaptureContextDetailsText.Text", "Main window must render the recapture-context details.");
@@ -244,7 +256,7 @@ int main()
   RequireContains(vm, "CrashLoggerContextSummary", "Top reading path must expose CrashLogger-first context.");
   RequireContains(vm, "RecommendationGroups", "View model must expose grouped recommendation collections.");
 
-  const auto cs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   assert(cs.find("CrashLogger context") != std::string::npos && "Quick primary label must use CrashLogger-first wording");
   assert(cs.find("Evidence agreement") != std::string::npos && "Quick agreement label must use evidence-agreement wording");
   RequireContains(cs, "Next action", "Quick actions label must focus on the next action, not only a count.");
