@@ -24,6 +24,14 @@ std::optional<std::uint32_t> InferMainThreadIdFromEvents(const std::vector<Event
 
 std::optional<double> InferHeartbeatAgeFromEventsSec(const std::vector<EventRow>& events);
 
+BlackboxFreezeSummary BuildBlackboxFreezeSummary(
+  const std::vector<EventRow>& events,
+  bool loadingContext);
+
+FirstChanceSummary BuildFirstChanceSummary(
+  const std::vector<EventRow>& events,
+  bool loadingContext);
+
 std::wstring ResourceKindFromPath(std::wstring_view path);
 
 std::vector<SuspectItem> ComputeStackScanSuspects(
@@ -49,4 +57,3 @@ bool TryComputeStackwalkSuspects(
 void ComputeCrashBucket(AnalysisResult& out);
 
 }  // namespace skydiag::dump_tool::internal
-

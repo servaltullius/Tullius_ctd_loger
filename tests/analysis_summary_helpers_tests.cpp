@@ -25,6 +25,10 @@ int main()
   // Verify LoadFromSummaryFile calls both helpers
   assert(src.find("ParseStringArray(root,") != std::string::npos && "ParseStringArray not called from LoadFromSummaryFile");
   assert(src.find("ParseObjectArray(root,") != std::string::npos && "ParseObjectArray not called from LoadFromSummaryFile");
+  assert(src.find("\"actionable_candidates\"") != std::string::npos && "Actionable candidate parsing missing");
+  assert(src.find("ActionableCandidates") != std::string::npos && "ActionableCandidates model missing");
+  assert(src.find("supporting_families") != std::string::npos && "Actionable candidate supporting families missing");
+  assert(src.find("conflicting_families") != std::string::npos && "Actionable candidate conflicting families missing");
 
   // Verify existing helpers are still present
   assert(src.find("ReadString(") != std::string::npos && "ReadString helper missing");

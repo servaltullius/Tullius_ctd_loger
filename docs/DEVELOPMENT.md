@@ -64,16 +64,29 @@ For in-game validation without waiting:
 
 ## CI (GitHub Actions)
 
-- Workflow: `.github/workflows/ci.yml`
-- Scope: Linux smoke/unit tests for parser + hang suppression + i18n core + bucket + retention/config checks + XAML sanity
-- Trigger: `push`, `pull_request`
-- Manual Windows packaging job: `workflow_dispatch` (build + package zip artifact upload on `windows-2022`)
+- Local verification is the release source of truth for this repository.
+- GitHub Actions is optional/reference only and should not be the sole release gate.
+- Main workflow: `.github/workflows/ci.yml`
+- Main workflow scope: Linux tests, Windows build/package/gate, and repo guard checks
+- Manual WinUI headless smoke workflow: `.github/workflows/winui-headless-smoke.yml`
+- Manual smoke trigger: `workflow_dispatch`
 
 Equivalent local commands:
 ```bash
 cmake -S . -B build-linux -G Ninja
 cmake --build build-linux
 ctest --test-dir build-linux --output-on-failure
+```
+
+Recommended release-time local verification bundle:
+```bash
+cmake -S . -B build-linux-test -G Ninja
+cmake --build build-linux-test
+ctest --test-dir build-linux-test --output-on-failure
+bash scripts/build-win-from-wsl.sh
+bash scripts/build-winui-from-wsl.sh
+python3 scripts/package.py --build-dir build-win --winui-dir build-winui --out dist/Tullius_ctd_loger.zip --no-pdb
+bash scripts/verify_release_gate.sh
 ```
 
 ## Issue Reporting / Troubleshooting
@@ -96,13 +109,34 @@ It also packages `dump_tool/data` recursively (for both plugin path and WinUI pa
 Policy:
 - GitHub Release patch notes are written in **Korean (required)**.
 - English is optional, but put Korean first.
+- Use the canonical prerelease notes template:
+  - `docs/release/PRERELEASE_NOTES_TEMPLATE.md`
 
 Suggested checklist:
 1) Update version + changelog
-2) Run tests (Linux + Windows)
+2) Run the local verification bundle (Linux tests + Windows build/package/gate). Do not block prerelease solely on GitHub Actions.
 3) Confirm compatibility preflight is required by default (`dist/SkyrimDiagHelper.ini` has `EnableCompatibilityPreflight=1`)
 4) Build + package zip on Windows (`--no-pdb`)
-5) Tag + push, then create GitHub Release and upload `dist/Tullius_ctd_loger.zip`
+5) Copy the template to a versioned draft and fill it in
+6) Tag + push, then create or edit GitHub Release with `--notes-file`
+7) Upload `dist/Tullius_ctd_loger.zip`
+
+Suggested release-notes flow:
+```bash
+mkdir -p docs/release/drafts
+cp docs/release/PRERELEASE_NOTES_TEMPLATE.md docs/release/drafts/v0.2.42-rcN.md
+# edit docs/release/drafts/v0.2.42-rcN.md
+
+gh release create v0.2.42-rcN dist/Tullius_ctd_loger_v0.2.42-rcN.zip \
+  --prerelease \
+  --title "v0.2.42-rcN — <요약 제목>" \
+  --notes-file docs/release/drafts/v0.2.42-rcN.md
+
+# or update an existing prerelease body
+gh release edit v0.2.42-rcN \
+  --title "v0.2.42-rcN — <요약 제목>" \
+  --notes-file docs/release/drafts/v0.2.42-rcN.md
+```
 
 Release hard-gate quick checks:
 ```bash
@@ -173,6 +207,16 @@ Build modern WinUI viewer output (framework-dependent / lightweight):
 ```powershell
 scripts\\build-winui.cmd
 ```
+
+WSL entry points:
+```bash
+bash scripts/build-win-from-wsl.sh
+bash scripts/build-winui-from-wsl.sh
+```
+
+Notes:
+- The WSL wrappers convert the sibling batch path with `wslpath -w` and invoke Windows PowerShell with an absolute Windows path.
+- Relative launches such as `cmd.exe /c scripts\\build-win.cmd` are not supported from WSL because `cmd.exe` falls back from the UNC current directory before it can resolve the relative script path.
 
 Notes:
 - This project uses the CommonLibSSE-NG vcpkg port. See `vcpkg-configuration.json`.

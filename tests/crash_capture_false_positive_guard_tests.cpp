@@ -8,6 +8,7 @@ using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::AssertOrdered;
 using skydiag::tests::source_guard::ExtractFunctionBody;
 using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadSplitAwareText;
 
 int main()
 {
@@ -27,7 +28,7 @@ int main()
 
   const std::string processAttach = ReadAllText(processAttachPath);
   const std::string crashCapture = ReadAllText(crashCapturePath);
-  const std::string helperMain = ReadAllText(helperMainPath);
+  const std::string helperMain = ReadSplitAwareText(helperMainPath);
   const std::string dumpToolLaunch = ReadAllText(dumpToolLaunchPath);
   const std::string crashHeuristics = ReadAllText(crashHeuristicsPath);
 
@@ -217,7 +218,7 @@ int main()
   const std::string helperEntryBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
   AssertOrdered(
     helperEntryBody,
-    "HANDLE helperSingletonMutex = AcquireHelperSingletonMutex(proc.pid, &err);",
+    "HANDLE helperSingletonMutex = skydiag::helper::internal::AcquireHelperSingletonMutex(proc.pid, &err);",
     "skydiag::helper::internal::ClearLog(outBase);",
     "Helper entry must acquire singleton mutex before clearing the helper log so duplicate helpers do not erase active diagnostics.");
 

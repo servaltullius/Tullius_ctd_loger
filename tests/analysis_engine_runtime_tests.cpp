@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,44 @@ std::filesystem::path ProjectRoot()
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
   assert(root && "SKYDIAG_PROJECT_ROOT must be set");
   return std::filesystem::path(root);
+}
+
+std::string ReadAllText(const std::filesystem::path& path)
+{
+  std::ifstream in(path, std::ios::in | std::ios::binary);
+  assert(in && "Failed to open file");
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  return ss.str();
+}
+
+std::string ReadJoinedText(std::initializer_list<std::filesystem::path> paths)
+{
+  std::ostringstream ss;
+  for (const auto& path : paths) {
+    ss << ReadAllText(path) << "\n";
+  }
+  return ss.str();
+}
+
+std::string ReadEvidenceBuilderEvidenceText(const std::filesystem::path& root)
+{
+  return ReadJoinedText({
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Context.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Crash.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Freeze.cpp",
+  });
+}
+
+void AssertContains(const std::string& haystack, const char* needle, const char* message)
+{
+  assert(haystack.find(needle) != std::string::npos && message);
+}
+
+void AssertNotContains(const std::string& haystack, const char* needle, const char* message)
+{
+  assert(haystack.find(needle) == std::string::npos && message);
 }
 
 const ModuleStats* FindModule(const std::vector<ModuleStats>& stats, const std::string& name)
@@ -297,6 +336,148 @@ void TestCrashHistoryBucketCorrelation()
   assert(corrEmpty.count == 0);
 }
 
+void TestCrashHistoryBucketCandidateStats()
+{
+  CrashHistory history;
+
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T00:00:00Z";
+    e.dump_file = "dump_0.dmp";
+    e.bucket_key = "bucket-a";
+    e.top_suspect = "modA.dll";
+    e.candidate_keys = { "repeatmod", "sharedcandidate" };
+    history.AddEntry(std::move(e));
+  }
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T01:00:00Z";
+    e.dump_file = "dump_1.dmp";
+    e.bucket_key = "bucket-a";
+    e.top_suspect = "modB.dll";
+    e.candidate_keys = { "repeatmod", "sharedcandidate", "repeatmod" };
+    history.AddEntry(std::move(e));
+  }
+  {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-02-23T02:00:00Z";
+    e.dump_file = "dump_2.dmp";
+    e.bucket_key = "bucket-b";
+    e.top_suspect = "modC.dll";
+    e.candidate_keys = { "othercandidate" };
+    history.AddEntry(std::move(e));
+  }
+
+  const auto stats = history.GetBucketCandidateStats("bucket-a");
+  assert(!stats.empty());
+  assert(stats[0].candidate_key == "repeatmod");
+  assert(stats[0].count == 2u);
+  assert(stats[1].candidate_key == "sharedcandidate");
+  assert(stats[1].count == 2u);
+
+  const auto noStats = history.GetBucketCandidateStats("bucket-c");
+  assert(noStats.empty());
+}
+
+void TestCaptureQualitySourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
+  const auto analyzerCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "Analyzer.cpp",
+    root / "dump_tool" / "src" / "Analyzer.History.cpp",
+  });
+  const auto evidenceCpp = ReadEvidenceBuilderEvidenceText(root);
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(analyzerHeader, "symbol_runtime_degraded", "AnalysisResult must track degraded symbol/runtime state.");
+  AssertContains(analyzerHeader, "incident_capture_kind", "AnalysisResult must expose effective capture kind.");
+  AssertContains(analyzerHeader, "incident_capture_profile_base_mode", "AnalysisResult must expose capture profile base mode.");
+  AssertContains(analyzerCpp, "capture_profile", "Analyzer must consume incident capture profile metadata.");
+  AssertContains(evidenceCpp, "Capture profile metadata", "Evidence must explain which capture profile produced the dump.");
+  AssertContains(evidenceCpp, "Symbol/runtime environment limited stackwalk quality", "Evidence must describe symbol/runtime degradation.");
+  AssertContains(recommendationCpp, "richer crash recapture profile", "Recommendations must prefer richer recapture profiles before generic full-memory advice.");
+  AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
+}
+
+void TestFreezeAnalysisSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
+  const auto analyzerCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "Analyzer.cpp",
+    root / "dump_tool" / "src" / "Analyzer.CaptureInputs.cpp",
+  });
+  const auto analyzerInternalsHeader = ReadAllText(root / "dump_tool" / "src" / "AnalyzerInternals.h");
+
+  AssertContains(analyzerHeader, "FreezeAnalysisResult", "AnalysisResult must define a freeze analysis model.");
+  AssertContains(analyzerHeader, "freeze_analysis", "AnalysisResult must store freeze analysis.");
+  AssertContains(analyzerHeader, "BlackboxFreezeSummary", "AnalysisResult contracts must define a blackbox freeze aggregate.");
+  AssertContains(analyzerHeader, "deadlock_likely", "Freeze analysis state ids must include deadlock_likely.");
+  AssertContains(analyzerHeader, "loader_stall_likely", "Freeze analysis state ids must include loader_stall_likely.");
+  AssertContains(analyzerHeader, "freeze_candidate", "Freeze analysis state ids must include freeze_candidate.");
+  AssertContains(analyzerHeader, "freeze_ambiguous", "Freeze analysis state ids must include freeze_ambiguous.");
+  AssertContains(analyzerCpp, "BuildFreezeCandidateConsensus", "Analyzer must call freeze candidate consensus.");
+  AssertContains(analyzerCpp, "BlackboxFreezeSummary", "Analyzer must build a blackbox freeze summary for loader-stall analysis.");
+  AssertContains(analyzerHeader, "FirstChanceSummary", "AnalysisResult contracts must define a first-chance aggregate.");
+  AssertContains(analyzerCpp, "first_chance_context", "Analyzer must attach first-chance context to analysis results.");
+  AssertContains(analyzerInternalsHeader, "BuildFirstChanceSummary", "Analyzer internals must expose a first-chance aggregate builder.");
+  AssertContains(analyzerCpp, "BuildFirstChanceSummary", "Analyzer must build a first-chance aggregate from blackbox events.");
+}
+
+void TestFirstChanceCtdCandidateSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto candidateBuilder = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(candidateBuilder, "first_chance_context",
+                 "CTD candidate aggregation must add a first_chance_context family.");
+  AssertContains(candidateBuilder, "repeated_signature_count > 0u",
+                 "CTD first-chance candidate boosts must require repeated suspicious signatures.");
+  AssertContains(candidateBuilder, "loading_window_count",
+                 "CTD first-chance candidate boosts must consider dense loading-window activity.");
+  AssertContains(candidateBuilder, "recent_non_system_modules",
+                 "CTD first-chance candidate boosts must link via repeated non-system modules.");
+  AssertContains(candidateBuilder, "ctx.isGameExe || ctx.isSystem",
+                 "CTD first-chance candidate boosts must be limited to EXE/system victims.");
+  AssertNotContains(candidateBuilder, "existing object-ref/stack/resource candidate already present",
+                    "CTD first-chance linkage must come from DLL/mod/plugin matches, not generic candidate presence.");
+  AssertContains(summaryCpp, "first_chance_context",
+                 "Summary family labels must include first_chance_context when it supports a CTD candidate.");
+  AssertContains(recommendationCpp, "first-chance",
+                 "Recommendations must explain repeated first-chance context for boosted CTD candidates.");
+}
+
+void TestRecaptureEvaluationConsumptionSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerHeader = ReadAllText(root / "dump_tool" / "src" / "Analyzer.h");
+  const auto analyzerCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "Analyzer.cpp",
+    root / "dump_tool" / "src" / "Analyzer.History.cpp",
+  });
+  const auto outputWriter = ReadJoinedText({
+    root / "dump_tool" / "src" / "OutputWriter.cpp",
+    root / "dump_tool" / "src" / "OutputWriter.Summary.cpp",
+    root / "dump_tool" / "src" / "OutputWriter.Report.cpp",
+  });
+  const auto evidenceCpp = ReadEvidenceBuilderEvidenceText(root);
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(analyzerHeader, "incident_recapture_target_profile", "AnalysisResult must expose recapture target profile metadata.");
+  AssertContains(analyzerHeader, "incident_recapture_reasons", "AnalysisResult must expose recapture reason metadata.");
+  AssertContains(analyzerCpp, "recapture_evaluation", "Analyzer must load incident recapture metadata from the manifest.");
+  AssertContains(outputWriter, "recapture_evaluation", "OutputWriter must consume incident recapture metadata.");
+  AssertContains(outputWriter, "RecaptureReasons:", "Report text must print recapture reasons.");
+  AssertContains(outputWriter, "RecaptureEscalationLevel:", "Report text must print recapture escalation level.");
+  AssertContains(evidenceCpp, "Capture recapture context", "Evidence must explain why a recapture profile was chosen.");
+  AssertContains(evidenceCpp, "incident_recapture_target_profile", "Evidence recapture explanations must read the chosen target profile.");
+  AssertContains(recommendationCpp, "freeze_snapshot_richer", "Recommendations must explain freeze snapshot richer recapture intent.");
+  AssertContains(recommendationCpp, "crash_full", "Recommendations must explain crash_full recapture intent.");
+}
+
 }  // namespace
 
 int main()
@@ -308,5 +489,10 @@ int main()
   TestAddressResolverToleratesMalformedEntries();
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();
+  TestCrashHistoryBucketCandidateStats();
+  TestCaptureQualitySourceContracts();
+  TestFreezeAnalysisSourceContracts();
+  TestFirstChanceCtdCandidateSourceContracts();
+  TestRecaptureEvaluationConsumptionSourceContracts();
   return 0;
 }

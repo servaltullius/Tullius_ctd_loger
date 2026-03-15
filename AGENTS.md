@@ -9,10 +9,16 @@ cmake --build build-linux-test
 ctest --test-dir build-linux-test --output-on-failure
 ```
 
-## Windows builds
+## Windows builds (native Windows)
 ```bash
 scripts\\build-win.cmd
 scripts\\build-winui.cmd
+```
+
+## Windows builds from WSL
+```bash
+bash scripts/build-win-from-wsl.sh
+bash scripts/build-winui-from-wsl.sh
 ```
 
 ## Packaging
@@ -24,3 +30,6 @@ python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip
 ```bash
 bash scripts/verify_release_gate.sh
 ```
+
+Release decisions use the local verification commands in this file as the source of truth.
+GitHub Actions is optional/reference only. Run `.github/workflows/winui-headless-smoke.yml` manually if you need the separate WinUI headless smoke workflow.

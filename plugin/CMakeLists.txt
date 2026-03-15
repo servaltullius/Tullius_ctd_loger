@@ -36,7 +36,8 @@ target_include_directories(${TARGET_NAME}
 target_link_libraries(${TARGET_NAME}
   PRIVATE
     skydiag_shared
-    CommonLibSSE::CommonLibSSE)
+    CommonLibSSE::CommonLibSSE
+    Psapi)
 
 target_compile_definitions(${TARGET_NAME}
   PRIVATE

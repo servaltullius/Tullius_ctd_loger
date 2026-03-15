@@ -13,19 +13,49 @@
 namespace skydiag::helper {
 namespace {
 
-MINIDUMP_TYPE MakeDumpType(DumpMode mode)
+struct DumpCallbackContext
+{
+  DumpProfile profile{};
+  DWORD preferredThreadId = 0;
+  bool isProcessSnapshot = false;
+};
+
+MINIDUMP_TYPE ApplyProfileToDumpType(const DumpProfile& dumpProfile)
 {
   MINIDUMP_TYPE t = MiniDumpNormal;
-  if (mode == DumpMode::kMini) {
-    return t;
+  if (dumpProfile.includeThreadInfo) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithThreadInfo);
   }
-
-  t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithThreadInfo | MiniDumpWithHandleData | MiniDumpWithUnloadedModules);
-  if (mode == DumpMode::kFull) {
+  if (dumpProfile.includeHandleData) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithHandleData);
+  }
+  if (dumpProfile.includeUnloadedModules) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithUnloadedModules);
+  }
+  if (dumpProfile.includeFullMemory) {
     t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithFullMemory);
   }
-
   return t;
+}
+
+BOOL CALLBACK MiniDumpCallback(
+  PVOID callbackParam,
+  const PMINIDUMP_CALLBACK_INPUT callbackInput,
+  PMINIDUMP_CALLBACK_OUTPUT callbackOutput)
+{
+  const auto* ctx = static_cast<const DumpCallbackContext*>(callbackParam);
+  (void)callbackOutput;
+  if (!ctx || !callbackInput) {
+    return TRUE;
+  }
+
+  const auto callbackType = callbackInput->CallbackType;
+  if (callbackType == IsProcessSnapshotCallback && callbackOutput) {
+    callbackOutput->Status = ctx->isProcessSnapshot ? S_FALSE : S_OK;
+    return TRUE;
+  }
+  (void)callbackType;
+  return TRUE;
 }
 
 }  // namespace
@@ -39,7 +69,8 @@ bool WriteDumpWithStreams(
   const std::string& wctJsonUtf8,
   const std::string& pluginScanJson,
   bool isCrash,
-  DumpMode dumpMode,
+  const DumpProfile& dumpProfile,
+  bool isProcessSnapshot,
   std::wstring* err)
 {
   if (!process) {
@@ -117,7 +148,15 @@ bool WriteDumpWithStreams(
     meiPtr = &mei;
   }
 
-  const MINIDUMP_TYPE dumpType = MakeDumpType(dumpMode);
+  const DumpProfile effectiveProfile = ResolveDumpProfile(dumpProfile.baseMode, dumpProfile.captureKind);
+  const MINIDUMP_TYPE dumpType = ApplyProfileToDumpType(effectiveProfile);
+  DumpCallbackContext callbackContext{};
+  callbackContext.profile = effectiveProfile;
+  callbackContext.preferredThreadId = mei.ThreadId;
+  callbackContext.isProcessSnapshot = isProcessSnapshot;
+  MINIDUMP_CALLBACK_INFORMATION callbackInfo{};
+  callbackInfo.CallbackRoutine = MiniDumpCallback;
+  callbackInfo.CallbackParam = &callbackContext;
 
   const BOOL ok = MiniDumpWriteDump(
     process,
@@ -126,7 +165,7 @@ bool WriteDumpWithStreams(
     dumpType,
     meiPtr,
     &usi,
-    nullptr);
+    &callbackInfo);
 
   const DWORD lastErr = GetLastError();
   CloseHandle(file);

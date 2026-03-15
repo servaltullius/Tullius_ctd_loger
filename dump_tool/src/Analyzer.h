@@ -33,6 +33,70 @@ struct SuspectItem
   std::wstring reason;
 };
 
+struct ActionableCandidate
+{
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
+  std::wstring confidence;
+  std::string status_id;  // cross_validated / related / reference_clue / conflicting
+  std::wstring display_name;
+  std::wstring primary_identifier;
+  std::wstring secondary_label;
+  std::wstring plugin_name;
+  std::wstring mod_name;
+  std::wstring module_filename;
+  std::wstring explanation;
+  std::vector<std::string> supporting_families;
+  std::vector<std::string> conflicting_families;
+  std::uint32_t score = 0;
+  std::uint32_t family_count = 0;
+  bool cross_validated = false;
+  bool has_conflict = false;
+};
+
+struct FreezeRelatedCandidate
+{
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
+  std::wstring confidence;
+  std::wstring display_name;
+};
+
+struct BlackboxFreezeSummary
+{
+  bool has_context = false;
+  bool loading_window = false;
+  std::uint32_t recent_module_loads = 0;
+  std::uint32_t recent_module_unloads = 0;
+  std::uint32_t recent_thread_creates = 0;
+  std::uint32_t recent_thread_exits = 0;
+  std::uint32_t module_churn_score = 0;
+  std::uint32_t thread_churn_score = 0;
+  std::vector<std::wstring> recent_non_system_modules;
+};
+
+struct FirstChanceSummary
+{
+  bool has_context = false;
+  std::uint32_t recent_count = 0;
+  std::uint32_t unique_signature_count = 0;
+  std::uint32_t loading_window_count = 0;
+  std::uint32_t repeated_signature_count = 0;
+  std::vector<std::wstring> recent_non_system_modules;
+};
+
+struct FreezeAnalysisResult
+{
+  // state ids: deadlock_likely / loader_stall_likely / freeze_candidate / freeze_ambiguous
+  bool has_analysis = false;
+  i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
+  std::wstring confidence;
+  std::string state_id;
+  std::string support_quality;
+  std::vector<std::wstring> primary_reasons;
+  std::vector<FreezeRelatedCandidate> related_candidates;
+  BlackboxFreezeSummary blackbox_context;
+  FirstChanceSummary first_chance_context;
+};
+
 struct EventRow
 {
   std::uint32_t i = 0;
@@ -62,6 +126,12 @@ struct BucketCorrelation
   std::size_t count = 0;
   std::string first_seen;
   std::string last_seen;
+};
+
+struct BucketCandidateRepeat
+{
+  std::string candidate_key;
+  std::size_t prior_count = 0;
 };
 
 struct AnalysisResult
@@ -114,6 +184,7 @@ struct AnalysisResult
   std::unordered_map<std::uint64_t, std::string> resolved_functions;
   std::vector<ModuleStats> history_stats;
   BucketCorrelation history_correlation;
+  std::vector<BucketCandidateRepeat> bucket_candidate_repeats;
   GraphicsEnvironment graphics_env;
   std::optional<GraphicsDiagResult> graphics_diag;
   bool has_plugin_scan = false;
@@ -130,6 +201,22 @@ struct AnalysisResult
   std::uint32_t stackwalk_source_line_frames = 0;
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
+  std::wstring dbghelp_path;        // effective dbghelp runtime path (best-effort)
+  std::wstring dbghelp_version;     // dbghelp file version (best-effort)
+  std::wstring msdia_path;          // effective msdia140 runtime path (best-effort)
+  bool msdia_available = false;
+  bool symbol_cache_ready = false;
+  bool symbol_runtime_degraded = false;
+  bool incident_capture_profile_present = false;
+  std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
+  std::string incident_capture_profile_base_mode;  // mini / default / full
+  bool incident_capture_profile_full_memory = false;
+  bool incident_recapture_evaluation_present = false;
+  bool incident_recapture_triggered = false;
+  std::string incident_recapture_kind;            // crash / freeze
+  std::string incident_recapture_target_profile;  // none / crash_richer / crash_full / freeze_snapshot_richer
+  std::uint32_t incident_recapture_escalation_level = 0;
+  std::vector<std::string> incident_recapture_reasons;
   bool online_symbol_source_allowed = false;
   bool online_symbol_source_used = false;
   bool path_redaction_applied = true;
@@ -139,6 +226,12 @@ struct AnalysisResult
 
   // Optional: recent resource loads (best-effort; nif/hkx/tri)
   std::vector<ResourceRow> resources;
+
+  // Cross-signal actionable candidates (best-effort; mainly for EXE/system victim-like crashes)
+  std::vector<ActionableCandidate> actionable_candidates;
+  BlackboxFreezeSummary blackbox_freeze_summary;
+  FirstChanceSummary first_chance_summary;
+  FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;
   std::string wct_json_utf8;

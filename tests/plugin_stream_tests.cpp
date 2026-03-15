@@ -10,15 +10,14 @@ namespace {
 
 using skydiag::tests::source_guard::AssertOrdered;
 using skydiag::tests::source_guard::ExtractFunctionBody;
+using skydiag::tests::source_guard::ReadSplitAwareText;
 
 std::string ReadFile(const char* relPath)
 {
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
   assert(root);
   std::filesystem::path p = std::filesystem::path(root) / relPath;
-  std::ifstream f(p);
-  assert(f.is_open());
-  return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  return ReadSplitAwareText(p);
 }
 
 void TestDumpWriterIncludesPluginStream()

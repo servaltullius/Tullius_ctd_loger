@@ -5,6 +5,46 @@
 #include "MinidumpUtil.h"
 
 namespace skydiag::dump_tool::internal {
+namespace {
+
+std::wstring DescribeCandidate(const ActionableCandidate& candidate)
+{
+  if (!candidate.display_name.empty()) {
+    return candidate.display_name;
+  }
+  if (!candidate.plugin_name.empty()) {
+    return candidate.plugin_name;
+  }
+  if (!candidate.mod_name.empty()) {
+    return candidate.mod_name;
+  }
+  if (!candidate.module_filename.empty()) {
+    return candidate.module_filename;
+  }
+  return L"(unknown)";
+}
+
+std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en)
+{
+  std::vector<std::wstring> labels;
+  labels.reserve(candidate.supporting_families.size());
+  for (const auto& family : candidate.supporting_families) {
+    if (family == "crash_logger_object_ref") {
+      labels.push_back(en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조");
+    } else if (family == "actionable_stack") {
+      labels.push_back(en ? L"actionable stack" : L"실행 가능한 스택");
+    } else if (family == "resource_provider") {
+      labels.push_back(en ? L"near resource provider" : L"인접 리소스 provider");
+    } else if (family == "history_repeat") {
+      labels.push_back(en ? L"history repeat" : L"반복 기록");
+    } else if (family == "first_chance_context") {
+      labels.push_back(en ? L"repeated first-chance context" : L"반복 first-chance 문맥");
+    }
+  }
+  return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
+}  // namespace
 
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
@@ -62,6 +102,11 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const bool topSuspectIsHookFramework = (topSuspect != nullptr) && minidump::IsKnownHookFramework(topSuspect->module_filename);
   const bool topSuspectIsSystem = (topSuspect != nullptr) &&
     (minidump::IsSystemishModule(topSuspect->module_filename) || minidump::IsLikelyWindowsSystemModulePath(topSuspect->module_path));
+  const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
+  const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
+  const std::wstring topCandidateConf = topCandidate && !topCandidate->confidence.empty()
+    ? topCandidate->confidence
+    : ConfidenceText(lang, topCandidate ? topCandidate->confidence_level : i18n::ConfidenceLevel::kUnknown);
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -124,8 +169,43 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     const bool hasObjectRefs = !r.crash_logger_object_refs.empty();
     const bool suspectsAreStackwalk = r.suspects_from_stackwalk;
 
+    if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
+      const auto firstName = DescribeCandidate(*topCandidate);
+      const auto secondName = DescribeCandidate(*secondCandidate);
+      const auto firstFamilies = JoinCandidateFamilies(*topCandidate, en);
+      const auto secondFamilies = JoinCandidateFamilies(*secondCandidate, en);
+      summary = en
+        ? (L"Crash is reported in the game executable. Signals disagree between " + firstName + L" (" + firstFamilies + L") and " + secondName +
+            L" (" + secondFamilies + L")" +
+            L", so treat them as conflicting candidates rather than a single root cause. (Confidence: " + topCandidateConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)이며, " + firstName + L" (" + firstFamilies + L") 과(와) " + secondName +
+            L" (" + secondFamilies + L")" +
+            L" 사이에 강한 신호 충돌이 있습니다. 단일 원인으로 확정하지 말고 복수 후보로 보세요. (신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidate->status_id == "cross_validated") {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto families = JoinCandidateFamilies(*topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in the game executable. Cross-validated actionable candidate: " + candidateName +
+            L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)이며, 교차검증된 실행 우선 후보는 " + candidateName +
+            L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidate->status_id == "related") {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto families = JoinCandidateFamilies(*topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in the game executable. Actionable candidate: " + candidateName +
+            L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)이며, 실행 우선 후보는 " + candidateName +
+            L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidate->status_id == "reference_clue") {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      summary = en
+        ? (L"Crash is reported in the game executable, and CrashLogger shows the game was processing " + candidateName +
+            L". No second independent signal agrees yet. (Confidence: " + topCandidateConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)이며, CrashLogger 기준으로 " + candidateName +
+            L" 처리 중이었습니다. 아직 두 번째 독립 신호 합의는 없습니다. (신뢰도: " + topCandidateConf + L")");
     // Priority 1: stackwalk-based non-hook suspect (high reliability)
-    if (hasNonHookSuspect && suspectsAreStackwalk && !nonHookSuspectWho.empty()) {
+    } else if (hasNonHookSuspect && suspectsAreStackwalk && !nonHookSuspectWho.empty()) {
       if (hasObjectRefs) {
         const auto& topRef = r.crash_logger_object_refs[0];
         summary = en

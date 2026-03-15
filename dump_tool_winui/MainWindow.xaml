@@ -91,6 +91,186 @@
               </Grid>
             </Border>
 
+            <!-- Dump discovery -->
+            <Border x:Name="RecentDumpsCard"
+                    Background="{ThemeResource CardAcrylicBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="22">
+              <StackPanel Spacing="12">
+                <TextBlock x:Name="RecentDumpsTitleText"
+                           FontSize="24" FontWeight="SemiBold"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                  Recent discovered dumps
+                </TextBlock>
+                <TextBlock x:Name="RecentDumpsHintText"
+                           FontSize="13"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextWrapping="WrapWholeWords">
+                  We scan known dump locations and show the newest dumps first.
+                </TextBlock>
+                <TextBlock x:Name="RecentDumpsStatusText"
+                           FontSize="12"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextWrapping="WrapWholeWords" />
+
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button x:Name="RescanDumpsButton"
+                          Click="RescanDumpsButton_Click"
+                          Content="Rescan"
+                          AutomationProperties.Name="Rescan known dump locations" />
+                  <Button x:Name="ManageDumpFoldersButton"
+                          Click="ManageDumpFoldersButton_Click"
+                          Content="Manage folders"
+                          AutomationProperties.Name="Manage dump search locations" />
+                  <Button x:Name="DirectSelectDumpButton"
+                          Click="BrowseDump_Click"
+                          Content="Direct select"
+                          AutomationProperties.Name="Directly select a dump file"
+                          ToolTipService.ToolTip="Browse dump file (Ctrl+O)">
+                    <Button.KeyboardAccelerators>
+                      <KeyboardAccelerator Modifiers="Control" Key="O" />
+                    </Button.KeyboardAccelerators>
+                  </Button>
+                </StackPanel>
+
+                <ListView x:Name="RecentDumpList"
+                          Visibility="Collapsed"
+                          SelectionMode="None"
+                          MaxHeight="320"
+                          AutomationProperties.Name="Recent discovered dumps list">
+                  <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:DumpDiscoveryItem">
+                      <Border Margin="0,0,0,8"
+                              Padding="12"
+                              CornerRadius="8"
+                              Background="{ThemeResource ElevatedAcrylicBrush}"
+                              BorderBrush="{ThemeResource CardBorderBrush}"
+                              BorderThickness="1">
+                        <Grid ColumnSpacing="12">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="{x:Bind FileName}"
+                                       FontSize="15"
+                                       FontWeight="SemiBold"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{x:Bind UpdatedText}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind SizeText}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{x:Bind SourceLabel}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource AccentBrush}" />
+                            <TextBlock Text="{x:Bind SourcePath}"
+                                       FontSize="12"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                          </StackPanel>
+                          <Button Grid.Column="1"
+                                  VerticalAlignment="Top"
+                                  Content="{x:Bind AnalyzeLabel}"
+                                  Tag="{x:Bind FullPath}"
+                                  Click="AnalyzeRecentDump_Click"
+                                  AutomationProperties.Name="Analyze discovered dump" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListView.ItemTemplate>
+                </ListView>
+
+                <StackPanel x:Name="RecentDumpsEmptyState"
+                            Visibility="Collapsed"
+                            Spacing="8">
+                  <TextBlock x:Name="RecentDumpsEmptyTitleText"
+                             FontSize="16"
+                             FontWeight="SemiBold"
+                             Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                    No dumps were found.
+                  </TextBlock>
+                  <TextBlock x:Name="RecentDumpsEmptyHintText"
+                             FontSize="13"
+                             TextWrapping="WrapWholeWords"
+                             Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                    Add your MO2 overwrite folder or the folder referenced by OutputDir.
+                  </TextBlock>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="EmptyStateManageFoldersButton"
+                            Click="ManageDumpFoldersButton_Click"
+                            Content="Manage folders"
+                            AutomationProperties.Name="Manage dump output locations from empty state" />
+                    <Button x:Name="EmptyStateDirectSelectButton"
+                            Click="BrowseDump_Click"
+                            Content="Direct select"
+                            AutomationProperties.Name="Directly select a dump file from empty state" />
+                  </StackPanel>
+                </StackPanel>
+
+                <Border x:Name="DumpSearchLocationsPanel"
+                        Visibility="Collapsed"
+                        Padding="14"
+                        CornerRadius="8"
+                        Background="{ThemeResource ElevatedAcrylicBrush}"
+                        BorderBrush="{ThemeResource CardBorderBrush}"
+                        BorderThickness="1">
+                  <StackPanel Spacing="10">
+                    <TextBlock x:Name="DumpSearchLocationsTitleText"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                      덤프 출력 위치
+                    </TextBlock>
+                    <TextBlock x:Name="DumpSearchLocationsHintText"
+                               FontSize="12"
+                               TextWrapping="WrapWholeWords"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                      Register your MO2 overwrite folder or OutputDir folder. Subfolders are searched automatically.
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button x:Name="AddDumpSearchLocationButton"
+                              Click="AddDumpSearchLocation_Click"
+                              Content="Add location"
+                              AutomationProperties.Name="Add dump output location" />
+                      <Button x:Name="RemoveDumpSearchLocationButton"
+                              Click="RemoveDumpSearchLocation_Click"
+                              Content="Remove selected"
+                              IsEnabled="False"
+                              AutomationProperties.Name="Remove selected dump output location" />
+                    </StackPanel>
+                    <TextBlock x:Name="DumpSearchLocationsEmptyText"
+                               FontSize="12"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextWrapping="WrapWholeWords">
+                      No dump output locations are saved yet.
+                    </TextBlock>
+                    <ListView x:Name="DumpSearchLocationsList"
+                              SelectionMode="Single"
+                              MaxHeight="220"
+                              SelectionChanged="DumpSearchLocationsList_SelectionChanged"
+                              AutomationProperties.Name="Saved dump output locations list">
+                      <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:DumpSearchLocationItem">
+                          <StackPanel Spacing="2" Margin="0,0,0,6">
+                            <TextBlock Text="{x:Bind SourceLabel}"
+                                       FontSize="12"
+                                       Foreground="{ThemeResource AccentBrush}" />
+                            <TextBlock Text="{x:Bind Path}"
+                                       FontSize="12"
+                                       TextWrapping="WrapWholeWords"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListView.ItemTemplate>
+                    </ListView>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Border>
+
             <!-- Analysis controls -->
             <Border Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
@@ -113,10 +293,7 @@
                   <Button x:Name="BrowseDumpButton" Grid.Column="1"
                           Click="BrowseDump_Click" Content="Browse dump"
                           AutomationProperties.Name="Browse dump file"
-                          ToolTipService.ToolTip="Browse dump file (Ctrl+O)">
-                    <Button.KeyboardAccelerators>
-                      <KeyboardAccelerator Modifiers="Control" Key="O" />
-                    </Button.KeyboardAccelerators>
+                          ToolTipService.ToolTip="Browse dump file">
                   </Button>
                 </Grid>
 
@@ -221,15 +398,15 @@
               </StackPanel>
             </Border>
 
-            <!-- KPI 4-card row -->
+            <!-- CrashLogger-first reading path -->
             <Grid ColumnSpacing="12">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
-              <Border Grid.Column="0"
+              <Border x:Name="CrashLoggerContextCard"
+                      Grid.Column="0"
                       Background="{ThemeResource ElevatedAcrylicBrush}"
                       BorderBrush="{ThemeResource GlowBorderBrush}"
                       BorderThickness="1" CornerRadius="8" Padding="0">
@@ -239,7 +416,7 @@
                   <StackPanel Spacing="4" Padding="14">
                     <TextBlock x:Name="QuickPrimaryLabelText"
                                FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Primary suspect
+                      CrashLogger context
                     </TextBlock>
                     <TextBlock x:Name="QuickPrimaryValueText"
                                FontSize="18" FontWeight="SemiBold"
@@ -260,7 +437,7 @@
                   <StackPanel Spacing="4" Padding="14">
                     <TextBlock x:Name="QuickConfidenceLabelText"
                                FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Confidence
+                      Evidence agreement
                     </TextBlock>
                     <TextBlock x:Name="QuickConfidenceValueText"
                                FontSize="18" FontWeight="SemiBold"
@@ -280,30 +457,10 @@
                   <StackPanel Spacing="4" Padding="14">
                     <TextBlock x:Name="QuickActionsLabelText"
                                FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Next actions
+                      Next action
                     </TextBlock>
                     <TextBlock x:Name="QuickActionsValueText"
-                               FontSize="18" FontWeight="SemiBold"
-                               Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                      -
-                    </TextBlock>
-                  </StackPanel>
-                </StackPanel>
-              </Border>
-              <Border Grid.Column="3"
-                      Background="{ThemeResource ElevatedAcrylicBrush}"
-                      BorderBrush="{ThemeResource GlowBorderBrush}"
-                      BorderThickness="1" CornerRadius="8" Padding="0">
-                <StackPanel>
-                  <Border Height="2" CornerRadius="8,8,0,0"
-                          Background="{ThemeResource AccentGradientHorizontalBrush}" />
-                  <StackPanel Spacing="4" Padding="14">
-                    <TextBlock x:Name="QuickEventsLabelText"
-                               FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
-                      Blackbox events
-                    </TextBlock>
-                    <TextBlock x:Name="QuickEventsValueText"
-                               FontSize="18" FontWeight="SemiBold"
+                               FontSize="18" FontWeight="SemiBold" TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
                       -
                     </TextBlock>
@@ -311,6 +468,47 @@
                 </StackPanel>
               </Border>
             </Grid>
+
+            <Border x:Name="ConflictCandidatesPanel"
+                    Background="{ThemeResource ElevatedAcrylicBrush}"
+                    BorderBrush="{ThemeResource GlowBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="16"
+                    Visibility="Collapsed">
+              <StackPanel Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <FontIcon Glyph="&#xE945;" FontSize="16"
+                            Foreground="{ThemeResource PurpleAccentBrush}" />
+                  <TextBlock x:Name="ConflictCandidatesTitleText"
+                             Text="Signal Comparison"
+                             FontSize="15" FontWeight="SemiBold"
+                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                </StackPanel>
+                <ItemsControl x:Name="ConflictCandidatesList">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="local:ConflictComparisonRow">
+                      <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <StackPanel Spacing="4">
+                          <TextBlock FontWeight="SemiBold"
+                                     Text="{x:Bind Candidate}"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                          <TextBlock FontSize="12"
+                                     Text="{x:Bind Signals}"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource AccentBrush}" />
+                          <TextBlock FontSize="13"
+                                     Text="{x:Bind Detail}"
+                                     TextWrapping="WrapWholeWords"
+                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
 
             <!-- 2-column Master-Detail layout -->
             <Grid x:Name="TriageTwoColumnGrid" ColumnSpacing="16">
@@ -342,7 +540,7 @@
                         <TextBlock x:Name="SuspectsSectionTitleText"
                                    FontSize="22" FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}">
-                          Top Cause Candidates
+                          Actionable Candidates
                         </TextBlock>
                       </StackPanel>
                       <ListView x:Name="SuspectsList" SelectionMode="None" MaxHeight="320"
@@ -542,118 +740,129 @@
                 <!-- Reviewer feedback loop -->
                 <Border Background="{ThemeResource ElevatedAcrylicBrush}"
                         BorderBrush="{ThemeResource GlowBorderBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="16">
-                  <StackPanel Spacing="10">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <FontIcon Glyph="&#xE70F;" FontSize="16"
-                                Foreground="{ThemeResource PurpleAccentBrush}" />
-                      <TextBlock x:Name="TriageEditorTitleText"
-                                 Text="Review Feedback"
-                                 FontSize="15" FontWeight="SemiBold"
-                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                    </StackPanel>
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander x:Name="ReviewFeedbackExpander"
+                            IsExpanded="False"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE70F;" FontSize="16"
+                                  Foreground="{ThemeResource PurpleAccentBrush}" />
+                        <TextBlock x:Name="TriageEditorTitleText"
+                                   Text="Review Feedback"
+                                   FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Padding="8,12,8,4">
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="ReviewStatusLabelText"
+                                   Text="Review status"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <ComboBox x:Name="ReviewStatusComboBox"
+                                  SelectedIndex="0"
+                                  AutomationProperties.Name="Review status selector">
+                          <ComboBoxItem x:Name="ReviewStatusUnreviewedItem"
+                                        Tag="unreviewed"
+                                        Content="Unreviewed" />
+                          <ComboBoxItem x:Name="ReviewStatusReviewedItem"
+                                        Tag="reviewed"
+                                        Content="Reviewed" />
+                          <ComboBoxItem x:Name="ReviewStatusConfirmedItem"
+                                        Tag="confirmed"
+                                        Content="Confirmed" />
+                          <ComboBoxItem x:Name="ReviewStatusTriagedItem"
+                                        Tag="triaged"
+                                        Content="Triaged" />
+                          <ComboBoxItem x:Name="ReviewStatusDoneItem"
+                                        Tag="done"
+                                        Content="Done" />
+                        </ComboBox>
+                      </StackPanel>
 
-                    <StackPanel Spacing="4">
-                      <TextBlock x:Name="ReviewStatusLabelText"
-                                 Text="Review status"
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="VerdictLabelText"
+                                   Text="Verdict"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="VerdictBox"
+                                 PlaceholderText="Top conclusion or short verdict"
+                                 AutomationProperties.Name="Triage verdict" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="ActualCauseLabelText"
+                                   Text="Actual cause"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="ActualCauseBox"
+                                 PlaceholderText="What actually caused the CTD"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="72"
+                                 AutomationProperties.Name="Actual CTD cause" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="GroundTruthModLabelText"
+                                   Text="Ground truth mod"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="GroundTruthModBox"
+                                 PlaceholderText="Confirmed mod/plugin if known"
+                                 AutomationProperties.Name="Ground truth mod name" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="ReviewNotesLabelText"
+                                   Text="Review notes"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="ReviewNotesBox"
+                                 PlaceholderText="Why the top candidate was right or wrong"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="96"
+                                 AutomationProperties.Name="Review notes" />
+                      </StackPanel>
+
+                      <TextBlock x:Name="TriageMetaText"
                                  FontSize="12"
+                                 TextWrapping="Wrap"
                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                      <ComboBox x:Name="ReviewStatusComboBox"
-                                SelectedIndex="0"
-                                AutomationProperties.Name="Review status selector">
-                        <ComboBoxItem x:Name="ReviewStatusUnreviewedItem"
-                                      Tag="unreviewed"
-                                      Content="Unreviewed" />
-                        <ComboBoxItem x:Name="ReviewStatusReviewedItem"
-                                      Tag="reviewed"
-                                      Content="Reviewed" />
-                        <ComboBoxItem x:Name="ReviewStatusConfirmedItem"
-                                      Tag="confirmed"
-                                      Content="Confirmed" />
-                        <ComboBoxItem x:Name="ReviewStatusTriagedItem"
-                                      Tag="triaged"
-                                      Content="Triaged" />
-                        <ComboBoxItem x:Name="ReviewStatusDoneItem"
-                                      Tag="done"
-                                      Content="Done" />
-                      </ComboBox>
+
+                      <Button x:Name="SaveTriageButton"
+                              Click="SaveTriageButton_Click"
+                              Content="Save review"
+                              Style="{StaticResource PrimaryActionButtonStyle}"
+                              AutomationProperties.Name="Save triage review"
+                              ToolTipService.ToolTip="Save review fields to the summary JSON (Ctrl+S)">
+                        <Button.KeyboardAccelerators>
+                          <KeyboardAccelerator Modifiers="Control" Key="S" />
+                        </Button.KeyboardAccelerators>
+                      </Button>
                     </StackPanel>
-
-                    <StackPanel Spacing="4">
-                      <TextBlock x:Name="VerdictLabelText"
-                                 Text="Verdict"
-                                 FontSize="12"
-                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                      <TextBox x:Name="VerdictBox"
-                               PlaceholderText="Top conclusion or short verdict"
-                               AutomationProperties.Name="Triage verdict" />
-                    </StackPanel>
-
-                    <StackPanel Spacing="4">
-                      <TextBlock x:Name="ActualCauseLabelText"
-                                 Text="Actual cause"
-                                 FontSize="12"
-                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                      <TextBox x:Name="ActualCauseBox"
-                               PlaceholderText="What actually caused the CTD"
-                               AcceptsReturn="True"
-                               TextWrapping="Wrap"
-                               MinHeight="72"
-                               AutomationProperties.Name="Actual CTD cause" />
-                    </StackPanel>
-
-                    <StackPanel Spacing="4">
-                      <TextBlock x:Name="GroundTruthModLabelText"
-                                 Text="Ground truth mod"
-                                 FontSize="12"
-                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                      <TextBox x:Name="GroundTruthModBox"
-                               PlaceholderText="Confirmed mod/plugin if known"
-                               AutomationProperties.Name="Ground truth mod name" />
-                    </StackPanel>
-
-                    <StackPanel Spacing="4">
-                      <TextBlock x:Name="ReviewNotesLabelText"
-                                 Text="Review notes"
-                                 FontSize="12"
-                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                      <TextBox x:Name="ReviewNotesBox"
-                               PlaceholderText="Why the top candidate was right or wrong"
-                               AcceptsReturn="True"
-                               TextWrapping="Wrap"
-                               MinHeight="96"
-                               AutomationProperties.Name="Review notes" />
-                    </StackPanel>
-
-                    <TextBlock x:Name="TriageMetaText"
-                               FontSize="12"
-                               TextWrapping="Wrap"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
-                    <Button x:Name="SaveTriageButton"
-                            Click="SaveTriageButton_Click"
-                            Content="Save review"
-                            Style="{StaticResource PrimaryActionButtonStyle}"
-                            AutomationProperties.Name="Save triage review"
-                            ToolTipService.ToolTip="Save review fields to the summary JSON (Ctrl+S)">
-                      <Button.KeyboardAccelerators>
-                        <KeyboardAccelerator Modifiers="Control" Key="S" />
-                      </Button.KeyboardAccelerators>
-                    </Button>
-                  </StackPanel>
+                  </Expander>
                 </Border>
 
-                <!-- Crash info card (always visible) -->
-                <Border Background="{ThemeResource ElevatedAcrylicBrush}"
+                <!-- Crash context card (always visible) -->
+                <Border x:Name="CrashContextCard"
+                        Background="{ThemeResource ElevatedAcrylicBrush}"
                         BorderBrush="{ThemeResource GlowBorderBrush}"
                         BorderThickness="1" CornerRadius="8" Padding="16">
-                  <StackPanel Spacing="6">
+                  <StackPanel Spacing="8">
                     <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
                       <FontIcon Glyph="&#xE946;" FontSize="16"
                                 Foreground="{ThemeResource PurpleAccentBrush}" />
-                      <TextBlock Text="Crash Info" FontSize="15" FontWeight="SemiBold"
+                      <TextBlock x:Name="CrashContextTitleText"
+                                 Text="Crash context" FontSize="15" FontWeight="SemiBold"
                                  Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                     </StackPanel>
+                    <TextBlock x:Name="CrashContextSummaryText" FontSize="12"
+                               TextWrapping="WrapWholeWords"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock x:Name="BucketText" FontSize="13"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
@@ -663,6 +872,18 @@
                     <TextBlock x:Name="ModNameText" FontSize="13"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock x:Name="QuickEventsLabelText"
+                                 FontSize="12"
+                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                        Blackbox events
+                      </TextBlock>
+                      <TextBlock x:Name="QuickEventsValueText"
+                                 FontSize="13" FontWeight="SemiBold"
+                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+                        -
+                      </TextBlock>
+                    </StackPanel>
                   </StackPanel>
                 </Border>
 
@@ -682,21 +903,90 @@
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                       </StackPanel>
                     </Expander.Header>
-                    <ListView x:Name="RecommendationsList" SelectionMode="None" MaxHeight="320"
-                              Background="Transparent" BorderThickness="0"
-                              AutomationProperties.Name="Recommended actions list">
-                      <ListView.ItemTemplate>
-                        <DataTemplate>
-                          <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
-                                  BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
-                                  Background="{ThemeResource ItemBackgroundBrush}">
-                            <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
-                                       FontSize="13"
-                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                          </Border>
-                        </DataTemplate>
-                      </ListView.ItemTemplate>
-                    </ListView>
+                    <StackPanel x:Name="RecommendationGroupsPanel" Spacing="12" Margin="0,8,0,0">
+                      <Border x:Name="RecaptureContextCard"
+                              Visibility="Collapsed"
+                              Padding="12"
+                              CornerRadius="6"
+                              BorderBrush="{ThemeResource ItemBorderBrush}"
+                              BorderThickness="1"
+                              Background="{ThemeResource ItemBackgroundBrush}">
+                        <StackPanel Spacing="4">
+                          <TextBlock x:Name="RecaptureContextTitleText"
+                                     Text="Recapture context"
+                                     FontSize="13"
+                                     FontWeight="SemiBold"
+                                     Foreground="{ThemeResource AccentBrush}" />
+                          <TextBlock x:Name="RecaptureContextDetailsText"
+                                     TextWrapping="WrapWholeWords"
+                                     FontSize="13"
+                                     Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                      </Border>
+
+                      <StackPanel x:Name="ImmediateRecommendationsSection" Spacing="6">
+                        <TextBlock x:Name="ImmediateRecommendationsTitleText"
+                                   Text="Do This Now"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AccentBrush}" />
+                        <ItemsControl x:Name="ImmediateRecommendationsList"
+                                      AutomationProperties.Name="Immediate recommended actions list">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                      BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                      Background="{ThemeResource ItemBackgroundBrush}">
+                                <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                           FontSize="13"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+
+                      <StackPanel x:Name="VerificationRecommendationsSection" Spacing="6">
+                        <TextBlock x:Name="VerificationRecommendationsTitleText"
+                                   Text="Verify Next"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AccentBrush}" />
+                        <ItemsControl x:Name="VerificationRecommendationsList"
+                                      AutomationProperties.Name="Follow-up verification actions list">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                      BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                      Background="{ThemeResource ItemBackgroundBrush}">
+                                <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                           FontSize="13"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+
+                      <StackPanel x:Name="RecaptureRecommendationsSection" Spacing="6">
+                        <TextBlock x:Name="RecaptureRecommendationsTitleText"
+                                   Text="Recapture or Compare"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource AccentBrush}" />
+                        <ItemsControl x:Name="RecaptureRecommendationsList"
+                                      AutomationProperties.Name="Recapture or compare actions list">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border Margin="0,0,0,6" Padding="12" CornerRadius="6"
+                                      BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
+                                      Background="{ThemeResource ItemBackgroundBrush}">
+                                <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                           FontSize="13"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </StackPanel>
                   </Expander>
                 </Border>
 

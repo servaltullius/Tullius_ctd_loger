@@ -1,24 +1,16 @@
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <string>
 
-namespace {
+#include "SourceGuardTestUtils.h"
 
-std::string ReadFile(const char* relPath)
-{
-  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
-  assert(root);
-  std::filesystem::path p = std::filesystem::path(root) / relPath;
-  std::ifstream f(p);
-  assert(f.is_open());
-  return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-}
+namespace {
+using skydiag::tests::source_guard::ReadProjectText;
 
 void TestAnalysisResultHasGraphicsFields()
 {
-  const auto header = ReadFile("dump_tool/src/Analyzer.h");
+  const auto header = ReadProjectText("dump_tool/src/Analyzer.h");
   assert(header.find("GraphicsEnvironment") != std::string::npos);
   assert(header.find("GraphicsDiagResult") != std::string::npos);
   assert(header.find("graphics_env") != std::string::npos);
@@ -27,7 +19,7 @@ void TestAnalysisResultHasGraphicsFields()
 
 void TestAnalyzerCallsGraphicsDiag()
 {
-  const auto impl = ReadFile("dump_tool/src/Analyzer.cpp");
+  const auto impl = ReadProjectText("dump_tool/src/Analyzer.cpp");
   assert(impl.find("GraphicsInjectionDiag") != std::string::npos);
   assert(impl.find("DetectEnvironment") != std::string::npos);
   assert(impl.find("graphics_injection_rules.json") != std::string::npos);
@@ -35,19 +27,19 @@ void TestAnalyzerCallsGraphicsDiag()
 
 void TestEvidenceUsesGraphicsDiag()
 {
-  const auto impl = ReadFile("dump_tool/src/EvidenceBuilderEvidence.cpp");
+  const auto impl = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.cpp");
   assert(impl.find("graphics_diag") != std::string::npos);
 }
 
 void TestRecommendationsUseGraphicsDiag()
 {
-  const auto impl = ReadFile("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+  const auto impl = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
   assert(impl.find("graphics_diag") != std::string::npos);
 }
 
 void TestOutputWriterHasGraphicsFields()
 {
-  const auto impl = ReadFile("dump_tool/src/OutputWriter.cpp");
+  const auto impl = ReadProjectText("dump_tool/src/OutputWriter.cpp");
   assert(impl.find("\"graphics_environment\"") != std::string::npos);
   assert(impl.find("\"graphics_diagnosis\"") != std::string::npos);
 }

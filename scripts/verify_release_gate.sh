@@ -19,6 +19,27 @@ for item in REQUIRED_WINUI_BUILD_OUTPUTS:
     print(item)
 PY
 )
+for i in "${!REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
+  REQUIRED_WINUI_BUILD_OUTPUTS[$i]="${REQUIRED_WINUI_BUILD_OUTPUTS[$i]%$'\r'}"
+done
+
+WINUI_BUILD_ROOT="$({
+  PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - "${WIN_ROOT}/build-winui" <<'PY'
+from pathlib import Path
+import sys
+
+from release_contract import find_winui_build_root
+
+root = find_winui_build_root(Path(sys.argv[1]))
+if root is not None:
+    print(root)
+PY
+})"
+WINUI_BUILD_ROOT="${WINUI_BUILD_ROOT%$'\r'}"
+
+if [[ -n "${WINUI_BUILD_ROOT}" ]] && command -v cygpath >/dev/null 2>&1; then
+  WINUI_BUILD_ROOT="$(cygpath -u "${WINUI_BUILD_ROOT}")"
+fi
 
 readarray -t REQUIRED_ZIP_ENTRIES < <(
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
@@ -28,6 +49,9 @@ for item in REQUIRED_ZIP_ENTRIES:
     print(item)
 PY
 )
+for i in "${!REQUIRED_ZIP_ENTRIES[@]}"; do
+  REQUIRED_ZIP_ENTRIES[$i]="${REQUIRED_ZIP_ENTRIES[$i]%$'\r'}"
+done
 
 NESTED_WINUI_REGEX="$({
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
@@ -36,6 +60,7 @@ from release_contract import nested_winui_path_regex
 print(nested_winui_path_regex())
 PY
 })"
+NESTED_WINUI_REGEX="${NESTED_WINUI_REGEX%$'\r'}"
 
 hash_of() {
   sha256sum "$1" | cut -d' ' -f1
@@ -81,8 +106,12 @@ else
 fi
 
 echo "[gate] 2/5 required WinUI files"
+if [[ -z "${WINUI_BUILD_ROOT}" ]]; then
+  echo "missing WinUI publish root under: ${WIN_ROOT}/build-winui"
+  exit 1
+fi
 for asset in "${REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
-  f="${WIN_ROOT}/build-winui/${asset}"
+  f="${WINUI_BUILD_ROOT}/${asset}"
   [[ -f "${f}" ]] || { echo "missing: ${f}"; exit 1; }
 done
 

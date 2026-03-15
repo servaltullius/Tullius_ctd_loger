@@ -28,6 +28,11 @@ std::wstring EventTypeName(std::uint16_t t)
     case EventType::kCellChange: return L"CellChange";
     case EventType::kNote: return L"Note";
     case EventType::kPerfHitch: return L"PerfHitch";
+    case EventType::kModuleLoad: return L"ModuleLoad";
+    case EventType::kModuleUnload: return L"ModuleUnload";
+    case EventType::kThreadCreate: return L"ThreadCreate";
+    case EventType::kThreadExit: return L"ThreadExit";
+    case EventType::kFirstChanceException: return L"FirstChanceException";
     case EventType::kCrash: return L"Crash";
     case EventType::kHangMark: return L"HangMark";
     default: return L"Unknown";
@@ -120,6 +125,30 @@ std::wstring DecodeStateFlags(std::uint64_t flags)
   return result.empty() ? (L"0x" + std::to_wstring(flags)) : result;
 }
 
+std::wstring DecodePackedShortText(std::uint64_t b, std::uint64_t c, std::uint64_t d)
+{
+  char buf[24]{};
+  std::memcpy(buf, &b, sizeof(b));
+  std::memcpy(buf + sizeof(b), &c, sizeof(c));
+  std::memcpy(buf + sizeof(b) + sizeof(c), &d, sizeof(d));
+  buf[23] = '\0';
+
+  std::size_t len = 0;
+  while (len < sizeof(buf) && buf[len] != '\0') {
+    ++len;
+  }
+  if (len == 0) {
+    return {};
+  }
+
+  std::wstring out;
+  out.reserve(len);
+  for (std::size_t i = 0; i < len; ++i) {
+    out.push_back(static_cast<wchar_t>(static_cast<unsigned char>(buf[i])));
+  }
+  return out;
+}
+
 }  // anonymous namespace
 
 std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d)
@@ -179,6 +208,41 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
         return buf;
       }
       return {};
+    }
+
+    case EventType::kModuleLoad:
+    case EventType::kModuleUnload: {
+      const auto label = DecodePackedShortText(b, c, d);
+      if (!label.empty()) {
+        return label;
+      }
+      wchar_t buf[32];
+      std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"hash=0x%016llX", static_cast<unsigned long long>(a));
+      return buf;
+    }
+
+    case EventType::kThreadCreate:
+    case EventType::kThreadExit: {
+      std::wstring s = L"tid=" + std::to_wstring(static_cast<std::uint32_t>(a & 0xFFFFFFFFu));
+      if (b != 0u) {
+        s += L" active=" + std::to_wstring(static_cast<std::uint32_t>(b & 0xFFFFFFFFu));
+      }
+      if (c != 0u) {
+        s += L" flags=" + DecodeStateFlags(c);
+      }
+      return s;
+    }
+
+    case EventType::kFirstChanceException: {
+      std::wstring s = L"code=0x";
+      wchar_t codeBuf[16];
+      std::swprintf(codeBuf, sizeof(codeBuf) / sizeof(codeBuf[0]), L"%08X", static_cast<unsigned>(a & 0xFFFFFFFFu));
+      s += codeBuf;
+      const auto label = DecodePackedShortText(b, c, d);
+      if (!label.empty()) {
+        s += L" module=" + label;
+      }
+      return s;
     }
 
     default:

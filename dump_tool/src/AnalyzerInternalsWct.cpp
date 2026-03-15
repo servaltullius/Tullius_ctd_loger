@@ -6,6 +6,80 @@
 
 namespace skydiag::dump_tool::internal {
 
+std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJsonUtf8)
+{
+  if (wctJsonUtf8.empty()) {
+    return std::nullopt;
+  }
+
+  try {
+    const auto j = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
+    if (!j.is_object()) {
+      return std::nullopt;
+    }
+
+    WctFreezeSummary summary{};
+    summary.has = true;
+
+    const auto threadsIt = j.find("threads");
+    if (threadsIt != j.end() && threadsIt->is_array()) {
+      summary.threads = static_cast<int>(threadsIt->size());
+      for (const auto& t : *threadsIt) {
+        if (!t.is_object()) {
+          continue;
+        }
+        const auto tid = t.value("tid", 0u);
+        if (t.value("isCycle", false)) {
+          summary.cycles++;
+          if (tid != 0u) {
+            summary.cycle_thread_ids.push_back(tid);
+          }
+        }
+
+        std::uint64_t waitTime = 0;
+        const auto nodesIt = t.find("nodes");
+        if (nodesIt != t.end() && nodesIt->is_array()) {
+          for (const auto& node : *nodesIt) {
+            if (!node.is_object()) {
+              continue;
+            }
+            const auto thIt = node.find("thread");
+            if (thIt == node.end() || !thIt->is_object()) {
+              continue;
+            }
+            waitTime = std::max<std::uint64_t>(waitTime, thIt->value("waitTime", 0ull));
+          }
+        }
+        if (waitTime > summary.longest_wait_ms) {
+          summary.longest_wait_ms = waitTime;
+          summary.longest_wait_tid = tid;
+        }
+      }
+    }
+
+    const auto capIt = j.find("capture");
+    if (capIt != j.end() && capIt->is_object()) {
+      summary.has_capture = true;
+      summary.capture_kind = capIt->value("kind", std::string{});
+      summary.secondsSinceHeartbeat = capIt->value("secondsSinceHeartbeat", 0.0);
+      summary.thresholdSec = capIt->value("thresholdSec", 0u);
+      summary.isLoading = capIt->value("isLoading", false);
+      summary.pss_snapshot_requested = capIt->value("pss_snapshot_requested", false);
+      summary.pss_snapshot_used = capIt->value("pss_snapshot_used", false);
+      summary.pss_snapshot_capture_ms = capIt->value("pss_snapshot_capture_ms", 0u);
+      summary.pss_snapshot_status = capIt->value("pss_snapshot_status", std::string{});
+      summary.dump_transport = capIt->value("dump_transport", std::string{});
+      summary.suggestsHang =
+        (summary.capture_kind == "hang") ||
+        (summary.thresholdSec > 0u && summary.secondsSinceHeartbeat >= static_cast<double>(summary.thresholdSec));
+    }
+
+    return summary;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN)
 {
   std::vector<std::uint32_t> tids;
@@ -14,10 +88,15 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
   }
 
   try {
-    const auto j = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
-    if (!j.is_object()) {
+    const auto freeze = TryParseWctFreezeSummary(wctJsonUtf8);
+    if (!freeze || !freeze->has) {
       return tids;
     }
+    if (!freeze->cycle_thread_ids.empty()) {
+      return freeze->cycle_thread_ids;
+    }
+
+    const auto j = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
     const auto it = j.find("threads");
     if (it == j.end() || !it->is_array()) {
       return tids;
@@ -37,11 +116,6 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
       if (tid == 0u) {
         continue;
       }
-      const bool isCycle = t.value("isCycle", false);
-      if (isCycle) {
-        tids.push_back(tid);
-        continue;
-      }
 
       std::uint64_t waitTime = 0;
       const auto nodesIt = t.find("nodes");
@@ -58,11 +132,6 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
         }
       }
       nonCycle.push_back(Row{ tid, waitTime });
-    }
-
-    // If cycles exist, prioritize them (deadlock likely).
-    if (!tids.empty()) {
-      return tids;
     }
 
     // Otherwise pick the longest-waiting threads (best-effort).
@@ -92,30 +161,18 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
 
 std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wctJsonUtf8)
 {
-  if (wctJsonUtf8.empty()) {
+  const auto freeze = TryParseWctFreezeSummary(wctJsonUtf8);
+  if (!freeze || !freeze->has_capture) {
     return std::nullopt;
   }
-  try {
-    const auto j = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
-    if (!j.is_object()) {
-      return std::nullopt;
-    }
-    const auto it = j.find("capture");
-    if (it == j.end() || !it->is_object()) {
-      return std::nullopt;
-    }
 
-    WctCaptureDecision d{};
-    d.has = true;
-    d.kind = it->value("kind", std::string{});
-    d.secondsSinceHeartbeat = it->value("secondsSinceHeartbeat", 0.0);
-    d.thresholdSec = it->value("thresholdSec", 0u);
-    d.isLoading = it->value("isLoading", false);
-    return d;
-  } catch (...) {
-    return std::nullopt;
-  }
+  WctCaptureDecision d{};
+  d.has = true;
+  d.kind = freeze->capture_kind;
+  d.secondsSinceHeartbeat = freeze->secondsSinceHeartbeat;
+  d.thresholdSec = freeze->thresholdSec;
+  d.isLoading = freeze->isLoading;
+  return d;
 }
 
 }  // namespace skydiag::dump_tool::internal
-

@@ -1,11 +1,196 @@
 #include "EvidenceBuilderPrivate.h"
 
+#include <algorithm>
 #include <cwchar>
 
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
+namespace {
+
+std::wstring DescribeCandidate(const ActionableCandidate& candidate)
+{
+  if (!candidate.display_name.empty()) {
+    return candidate.display_name;
+  }
+  if (!candidate.plugin_name.empty()) {
+    return candidate.plugin_name;
+  }
+  if (!candidate.mod_name.empty()) {
+    return candidate.mod_name;
+  }
+  return candidate.module_filename;
+}
+
+std::wstring DescribeFamily(std::string_view familyId, bool en)
+{
+  if (familyId == "crash_logger_object_ref") {
+    return en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조";
+  }
+  if (familyId == "actionable_stack") {
+    return en ? L"actionable stack" : L"실행 가능한 스택";
+  }
+  if (familyId == "resource_provider") {
+    return en ? L"near resource provider" : L"인접 리소스 provider";
+  }
+  if (familyId == "history_repeat") {
+    return en ? L"history repeat" : L"버킷 반복";
+  }
+  if (familyId == "first_chance_context") {
+    return en ? L"repeated first-chance context" : L"반복 first-chance 문맥";
+  }
+  return en ? L"other signal" : L"기타 신호";
+}
+
+std::wstring JoinFamilies(const ActionableCandidate& candidate, bool en)
+{
+  std::vector<std::wstring> labels;
+  labels.reserve(candidate.supporting_families.size());
+  for (const auto& family : candidate.supporting_families) {
+    labels.push_back(DescribeFamily(family, en));
+  }
+  return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
+bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
+{
+  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
+         candidate.supporting_families.end();
+}
+
+bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
+{
+  return summary.recent_count >= 3u &&
+         summary.loading_window_count >= 2u &&
+         summary.loading_window_count * 2u >= summary.recent_count;
+}
+
+bool HasScorableFirstChanceContext(const FirstChanceSummary& summary)
+{
+  return summary.has_context &&
+         !summary.recent_non_system_modules.empty() &&
+         (summary.repeated_signature_count > 0u || HasDenseFirstChanceLoadingWindow(summary));
+}
+
+std::wstring DescribeFirstChanceContext(const FirstChanceSummary& summary, bool en)
+{
+  if (!HasScorableFirstChanceContext(summary)) {
+    return {};
+  }
+
+  std::wstring detail = en
+    ? L"Repeated suspicious first-chance context was observed"
+    : L"반복 suspicious first-chance 문맥이 관측되었습니다";
+  detail += en
+    ? (L" (repeated=" + std::to_wstring(summary.repeated_signature_count) +
+        L", loading-window=" + std::to_wstring(summary.loading_window_count) + L")")
+    : (L" (반복=" + std::to_wstring(summary.repeated_signature_count) +
+        L", 로딩창=" + std::to_wstring(summary.loading_window_count) + L")");
+  if (!summary.recent_non_system_modules.empty()) {
+    detail += L": " + JoinList(summary.recent_non_system_modules, 3, L", ");
+  }
+  return detail;
+}
+
+std::wstring DescribeRecaptureReasons(const AnalysisResult& r, bool en)
+{
+  std::vector<std::wstring> labels;
+  labels.reserve(r.incident_recapture_reasons.size());
+  for (const auto& reason : r.incident_recapture_reasons) {
+    if (reason == "unknown_fault_module") {
+      labels.push_back(en ? L"unknown fault module" : L"fault module 미확정");
+    } else if (reason == "candidate_conflict") {
+      labels.push_back(en ? L"candidate conflict" : L"후보 충돌");
+    } else if (reason == "reference_clue_only") {
+      labels.push_back(en ? L"reference clue only" : L"참조 단서 단독");
+    } else if (reason == "stackwalk_degraded") {
+      labels.push_back(en ? L"stackwalk degraded" : L"stackwalk 저하");
+    } else if (reason == "symbol_runtime_degraded") {
+      labels.push_back(en ? L"symbol runtime degraded" : L"심볼 런타임 저하");
+    } else if (reason == "first_chance_candidate_weak") {
+      labels.push_back(en ? L"first-chance candidate weak" : L"first-chance 후보 약함");
+    } else if (reason == "freeze_ambiguous") {
+      labels.push_back(en ? L"freeze ambiguous" : L"프리징 해석 애매");
+    } else if (reason == "freeze_snapshot_fallback") {
+      labels.push_back(en ? L"freeze snapshot fallback" : L"프리징 snapshot fallback");
+    } else if (reason == "freeze_candidate_weak") {
+      labels.push_back(en ? L"freeze candidate weak" : L"프리징 후보 약함");
+    } else {
+      labels.push_back(ToWideAscii(reason));
+    }
+  }
+  return labels.empty() ? (en ? L"weak analysis context" : L"약한 분석 문맥")
+                        : JoinList(labels, labels.size(), L", ");
+}
+
+void AddActionableCandidateRecommendations(
+    AnalysisResult& r,
+    bool en,
+    const ActionableCandidate* topCandidate,
+    const ActionableCandidate* secondCandidate)
+{
+  if (!topCandidate) {
+    return;
+  }
+
+  const auto candidateName = DescribeCandidate(*topCandidate);
+  if (topCandidate->status_id == "cross_validated") {
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] Cross-validated signals point to " + candidateName +
+          L". Update/reinstall or isolate it before broader DLL triage.")
+      : (L"[행동 우선 후보] 교차검증 신호가 " + candidateName +
+          L" 쪽으로 모입니다. 광범위한 DLL 점검 전에 이 후보를 먼저 업데이트/격리하세요."));
+    if (CandidateHasFamily(*topCandidate, "first_chance_context")) {
+      const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
+      if (!firstChanceDetail.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[First-chance] Inspect the repeated first-chance module path first: " + firstChanceDetail)
+          : (L"[First-chance] 반복 first-chance 모듈 경로를 먼저 확인하세요: " + firstChanceDetail));
+      }
+    }
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] If the crash repeats, disable " + candidateName +
+          L" (or the providing mod/DLL) and retest.")
+      : (L"[행동 우선 후보] 동일 문제가 반복되면 " + candidateName +
+          L" 또는 해당 모드/DLL을 비활성화하고 다시 테스트하세요."));
+  } else if (topCandidate->status_id == "related") {
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
+          L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+      : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
+          L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."));
+    if (CandidateHasFamily(*topCandidate, "first_chance_context")) {
+      const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
+      if (!firstChanceDetail.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[First-chance] Repeated first-chance exceptions matched this candidate. Check that module path before broad EXE/system crash triage: " + firstChanceDetail)
+          : (L"[First-chance] 반복 first-chance 예외가 이 후보와 맞습니다. 광범위한 EXE/system 크래시 점검 전에 해당 모듈 경로부터 확인하세요: " + firstChanceDetail));
+      }
+    }
+  } else if (topCandidate->status_id == "reference_clue") {
+    r.recommendations.push_back(en
+      ? (L"[Object ref] The game was processing " + candidateName +
+          L" at crash time, but no second independent signal agrees yet. Treat it as a clue first.")
+      : (L"[오브젝트 참조] 사고 당시 게임이 " + candidateName +
+          L" 을(를) 처리 중이었지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요."));
+    r.recommendations.push_back(en
+      ? L"[Object ref] If the clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
+      : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
+  } else if (topCandidate->status_id == "conflicting" && secondCandidate) {
+    const auto secondName = DescribeCandidate(*secondCandidate);
+    r.recommendations.push_back(en
+      ? (L"[Conflict] Signals split between " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L") and " +
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L"). Disable/update one side at a time and retest.")
+      : (L"[충돌] 신호가 " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L")와 " +
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. 한쪽씩 순서대로 업데이트/비활성화하며 재현을 확인하세요."));
+    r.recommendations.push_back(en
+      ? L"[Conflict] If the split persists, rerun with a richer crash recapture profile first; use FullMemory (DumpMode=2) only if the tie remains."
+      : L"[충돌] 이 분리가 계속되면 richer crash recapture profile로 먼저 다시 캡처하고, 그래도 갈리면 그때만 FullMemory(DumpMode=2)를 사용하세요.");
+  }
+}
+
+}  // namespace
 
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
@@ -46,6 +231,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     hasNonHookStackCandidate;
   const bool allowFaultModuleTopSuspectRecommendations =
     !ctx.isHookFramework || hasNonHookStackCandidate;
+  const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
+  const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
+  const bool hasActionableCandidates = (topCandidate != nullptr);
 
   if (r.signature_match.has_value()) {
     for (const auto& rec : r.signature_match->recommendations) {
@@ -76,6 +264,40 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
           r.recommendations.push_back(rec);
         }
       }
+    }
+  }
+
+  if (r.symbol_runtime_degraded) {
+    r.recommendations.push_back(en
+      ? L"[Symbols] Fix dbghelp/msdia or symbol cache/path health first before over-trusting weak stack or source-line results."
+      : L"[심볼] 약한 스택/소스라인 결과를 과신하기 전에 dbghelp/msdia 또는 심볼 캐시/경로 상태를 먼저 바로잡으세요.");
+  }
+
+  if (r.incident_capture_profile_present && r.incident_capture_kind == "crash_recapture") {
+    r.recommendations.push_back(en
+      ? L"[Recapture] This dump already came from a richer crash recapture profile. Escalate to FullMemory only if the evidence still stays weak."
+      : L"[재수집] 이 덤프는 이미 richer crash recapture profile로 다시 수집된 결과입니다. 근거가 여전히 약할 때만 FullMemory로 올리세요.");
+  }
+  if (r.incident_recapture_evaluation_present && r.incident_recapture_triggered) {
+    const auto reasons = DescribeRecaptureReasons(r, en);
+    if (r.incident_recapture_target_profile == "crash_richer") {
+      r.recommendations.push_back(en
+        ? (L"[Recapture] Helper selected crash_richer because prior analysis stayed weak (" + reasons +
+            L"). Use crash_full only if the richer recapture is still ambiguous.")
+        : (L"[재수집] 이전 분석이 약해서 helper가 crash_richer를 선택했습니다 (" + reasons +
+            L"). richer recapture 이후에도 애매할 때만 crash_full로 올리세요."));
+    } else if (r.incident_recapture_target_profile == "crash_full") {
+      r.recommendations.push_back(en
+        ? (L"[Recapture] Helper escalated to crash_full after repeated weak analysis (" + reasons +
+            L"). Focus on why the richer stage was insufficient before asking for another full dump.")
+        : (L"[재수집] 약한 분석이 반복되어 helper가 crash_full까지 올렸습니다 (" + reasons +
+            L"). 추가 full dump를 요구하기 전에 왜 richer 단계가 부족했는지 먼저 확인하세요."));
+    } else if (r.incident_recapture_target_profile == "freeze_snapshot_richer") {
+      r.recommendations.push_back(en
+        ? (L"[Recapture] Helper selected freeze_snapshot_richer because freeze quality stayed weak (" + reasons +
+            L"). Reproduce the stall with snapshot-backed capture before broad deadlock triage.")
+        : (L"[재수집] 프리징 품질이 약해서 helper가 freeze_snapshot_richer를 선택했습니다 (" + reasons +
+            L"). 광범위한 데드락 점검 전에 snapshot 기반으로 다시 재현해 보세요."));
     }
   }
 
@@ -131,8 +353,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
+  AddActionableCandidateRecommendations(r, en, topCandidate, secondCandidate);
+
   const bool allowTopSuspectActionRecommendations = !isSnapshotLike;
-  if (allowTopSuspectActionRecommendations && !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
+  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? (L"[Top suspect] Reproduce after updating/reinstalling '" + r.inferred_mod_name + L"'.")
       : (L"[유력 후보] '" + r.inferred_mod_name + L"' 모드를 업데이트/재설치 후 재현 여부 확인"));
@@ -141,7 +365,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : (L"[유력 후보] 동일 크래시가 반복되면 '" + r.inferred_mod_name + L"' 모드(또는 해당 모드의 SKSE 플러그인 DLL)를 비활성화 후 재현 여부 확인"));
   }
 
-  if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
+  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
     const auto& s0 = *firstNonHookStackCandidate;
     if (!s0.inferred_mod_name.empty()) {
       r.recommendations.push_back(en
@@ -155,17 +379,17 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? (L"[Top suspect] actionable " + suspectBasis + L" candidate DLL: " + s0.module_filename + L" — check the providing mod first.")
         : (L"[유력 후보] 실행 우선 " + suspectBasis + L" 기반 후보 DLL: " + s0.module_filename + L" — 포함된 모드를 우선 점검"));
     }
-  } else if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
+  } else if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsHookFramework) {
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a known hook framework DLL. Treat it as a victim location first and prioritize non-hook candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 알려진 훅 프레임워크 DLL입니다. 우선은 피해 위치로 보고, 비-훅 후보/리소스/충돌 단서를 먼저 점검하세요.");
-  } else if (allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
+  } else if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && topStackCandidateIsSystem) {
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a Windows system DLL. For hang captures this is often a waiting/victim location, so prioritize non-system candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 Windows 시스템 DLL입니다. 행 캡처에서는 대기/피해 위치인 경우가 많으므로 비-시스템 후보/리소스/충돌 단서를 우선 점검하세요.");
   }
 
-  if (!r.crash_logger_object_refs.empty()) {
+  if (!hasActionableCandidates && !r.crash_logger_object_refs.empty()) {
     const auto& topRef = r.crash_logger_object_refs[0];
     std::wstring espDesc = topRef.esp_name;
     if (!topRef.form_id.empty()) {
@@ -241,9 +465,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[점검] SKSE 버전/게임 버전(AE/SE/VR)/Address Library 버전이 서로 맞는지 확인");
   } else {
     if (!isSnapshotLike) {
-      r.recommendations.push_back(en
-        ? L"[Check] Fault module could not be determined. Capturing again with DumpMode=2 (FullMemory) can provide more clues."
-        : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. DumpMode를 2(FullMemory)로 올려 다시 캡처하면 단서가 늘 수 있습니다.");
+    r.recommendations.push_back(en
+      ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
+      : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 다시 캡처하세요.");
     }
   }
 
@@ -254,6 +478,55 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Loading] Check mods affecting that stage first (animations/skeleton/body/physics/precaching)."
       : L"[로딩 중] 해당 시점에 개입하는 모드(애니메이션/스켈레톤/바디/물리/프리캐시)를 우선 점검");
+  }
+
+  if (r.freeze_analysis.has_analysis) {
+    if (r.freeze_analysis.state_id == "deadlock_likely") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] WCT cycle evidence makes deadlock the primary interpretation. Check synchronization-heavy mods and thread ownership first."
+        : L"[프리징] WCT cycle 근거가 있어 데드락 해석이 우선입니다. 동기화/후킹 성격이 강한 모드와 스레드 소유 관계를 먼저 확인하세요.");
+    } else if (r.freeze_analysis.state_id == "loader_stall_likely") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] Loading-context evidence points to a loader stall. Prioritize mesh/animation/physics/precache changes before generic DLL triage."
+        : L"[프리징] 로딩 문맥 근거가 있어 loader stall 가능성이 큽니다. 일반 DLL 점검보다 메쉬/애니메이션/물리/프리캐시 변경을 먼저 보세요.");
+      if (!r.freeze_analysis.blackbox_context.recent_non_system_modules.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[Freeze] blackbox module churn highlighted recent non-system modules: " +
+              JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", ") +
+              L". Check them before widening DLL/plugin triage.")
+          : (L"[프리징] blackbox module churn에서 최근 비시스템 모듈이 강조되었습니다: " +
+              JoinList(r.freeze_analysis.blackbox_context.recent_non_system_modules, 4, L", ") +
+              L". 광범위한 DLL/플러그인 점검 전에 이 후보들을 먼저 확인하세요."));
+      }
+      if (r.freeze_analysis.first_chance_context.repeated_signature_count > 0u) {
+        r.recommendations.push_back(en
+          ? L"[Freeze] repeated suspicious first-chance exceptions strengthen the loader-stall interpretation. Recheck the highlighted initialization path before broad deadlock triage."
+          : L"[프리징] 반복 suspicious first-chance 예외가 loader stall 해석을 강화합니다. 광범위한 데드락 점검 전에 강조된 초기화 경로를 다시 확인하세요.");
+      }
+      if (!r.freeze_analysis.first_chance_context.recent_non_system_modules.empty()) {
+        r.recommendations.push_back(en
+          ? (L"[Freeze] first-chance context highlighted recent non-system modules: " +
+              JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 4, L", ") +
+              L". Compare them against the current loading pipeline first.")
+          : (L"[프리징] first-chance 문맥에서 최근 비시스템 모듈이 강조되었습니다: " +
+              JoinList(r.freeze_analysis.first_chance_context.recent_non_system_modules, 4, L", ") +
+              L". 현재 로딩 파이프라인과 먼저 대조하세요."));
+      }
+    } else if (r.freeze_analysis.state_id == "freeze_candidate") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] Signals indicate a real freeze, but not a clean deadlock/stall classification yet. Compare related candidates and repeat capture during the issue."
+        : L"[프리징] 실제 프리징 신호는 있으나 데드락/로더 stall로 깔끔하게 분류되지는 않았습니다. 관련 후보를 비교하고 문제 상황에서 다시 캡처하세요.");
+    } else if (r.freeze_analysis.state_id == "freeze_ambiguous") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] Current freeze evidence is ambiguous. Prefer another capture during the issue and compare WCT/events before escalating."
+        : L"[프리징] 현재 프리징 근거가 애매합니다. 확대 해석 전에 문제 상황에서 다시 캡처해 WCT/이벤트와 비교하세요.");
+    }
+
+    if (r.freeze_analysis.support_quality == "snapshot_fallback") {
+      r.recommendations.push_back(en
+        ? L"[Freeze] PSS snapshot was requested but capture fell back to live-process transport. Treat weak freeze conclusions more conservatively."
+        : L"[프리징] PSS snapshot을 요청했지만 live-process로 fallback되었습니다. 약한 프리징 결론은 더 보수적으로 해석하세요.");
+    }
   }
 
   if (r.has_wct) {

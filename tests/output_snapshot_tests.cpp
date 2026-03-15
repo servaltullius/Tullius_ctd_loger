@@ -16,34 +16,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SourceGuardTestUtils.h"
+
 namespace {
-
-std::string ReadFile(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::binary);
-  assert(in.is_open());
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
-
-std::filesystem::path ProjectRoot()
-{
-  const char* env = std::getenv("SKYDIAG_PROJECT_ROOT");
-  if (env && *env) {
-    return std::filesystem::path(env);
-  }
-  // Fallback: walk up from binary location
-  auto p = std::filesystem::current_path();
-  for (int i = 0; i < 5; ++i) {
-    if (std::filesystem::exists(p / "vcpkg.json")) {
-      return p;
-    }
-    p = p.parent_path();
-  }
-  assert(false && "Cannot find project root. Set SKYDIAG_PROJECT_ROOT.");
-  return {};
-}
+using skydiag::tests::source_guard::ProjectRoot;
+using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadProjectText;
 
 // ── Schema validation ──────────────────────────────────────────────────
 
@@ -77,7 +55,7 @@ nlohmann::json LoadGoldenJson()
 {
   const auto root = ProjectRoot();
   const auto goldenPath = root / "tests" / "data" / "golden_summary_v2.json";
-  const std::string text = ReadFile(goldenPath);
+  const std::string text = ReadAllText(goldenPath);
   return nlohmann::json::parse(text);
 }
 
@@ -104,8 +82,11 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(j, "callstack", "object", "root");
   AssertIsType(j, "symbolization", "object", "root");
   AssertIsType(j, "resources", "array", "root");
+  AssertIsType(j, "actionable_candidates", "array", "root");
+  AssertIsType(j, "freeze_analysis", "object", "root");
   AssertIsType(j, "evidence", "array", "root");
   AssertIsType(j, "recommendations", "array", "root");
+  AssertIsType(j, "first_chance_context", "object", "root");
 
   // ── schema block ──
   const auto& schema = j["schema"];
@@ -194,6 +175,10 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   const auto& sym = j["symbolization"];
   AssertIsType(sym, "search_path", "string", "symbolization");
   AssertIsType(sym, "cache_path", "string", "symbolization");
+  AssertIsType(sym, "dbghelp_path", "string", "symbolization");
+  AssertIsType(sym, "dbghelp_version", "string", "symbolization");
+  AssertIsType(sym, "msdia_available", "boolean", "symbolization");
+  AssertIsType(sym, "runtime_degraded", "boolean", "symbolization");
   AssertIsType(sym, "total_frames", "number", "symbolization");
   AssertIsType(sym, "symbolized_frames", "number", "symbolization");
   AssertIsType(sym, "source_line_frames", "number", "symbolization");
@@ -204,6 +189,48 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
     AssertIsType(e, "title", "string", "evidence[]");
     AssertIsType(e, "details", "string", "evidence[]");
   }
+
+  // ── actionable candidates ──
+  for (const auto& c : j["actionable_candidates"]) {
+    AssertIsType(c, "status_id", "string", "actionable_candidates[]");
+    AssertIsType(c, "confidence", "string", "actionable_candidates[]");
+    AssertIsType(c, "display_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "primary_identifier", "string", "actionable_candidates[]");
+    AssertIsType(c, "secondary_label", "string", "actionable_candidates[]");
+    AssertIsType(c, "plugin_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "mod_name", "string", "actionable_candidates[]");
+    AssertIsType(c, "module_filename", "string", "actionable_candidates[]");
+    AssertIsType(c, "family_count", "number", "actionable_candidates[]");
+    AssertIsType(c, "score", "number", "actionable_candidates[]");
+    AssertIsType(c, "supporting_families", "array", "actionable_candidates[]");
+    AssertIsType(c, "conflicting_families", "array", "actionable_candidates[]");
+  }
+
+  // ── freeze_analysis ──
+  const auto& freeze = j["freeze_analysis"];
+  AssertIsType(freeze, "state_id", "string", "freeze_analysis");
+  AssertIsType(freeze, "confidence", "string", "freeze_analysis");
+  AssertIsType(freeze, "support_quality", "string", "freeze_analysis");
+  AssertIsType(freeze, "primary_reasons", "array", "freeze_analysis");
+  AssertIsType(freeze, "related_candidates", "array", "freeze_analysis");
+  AssertIsType(freeze, "blackbox_context", "object", "freeze_analysis");
+  AssertIsType(freeze, "first_chance_context", "object", "freeze_analysis");
+  const auto& blackbox = freeze["blackbox_context"];
+  AssertIsType(blackbox, "loading_window", "boolean", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_module_loads", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_module_unloads", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_thread_creates", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_thread_exits", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "module_churn_score", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "thread_churn_score", "number", "freeze_analysis.blackbox_context");
+  AssertIsType(blackbox, "recent_non_system_modules", "array", "freeze_analysis.blackbox_context");
+  const auto& firstChance = freeze["first_chance_context"];
+  AssertIsType(firstChance, "has_context", "boolean", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "recent_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "unique_signature_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "loading_window_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "repeated_signature_count", "number", "freeze_analysis.first_chance_context");
+  AssertIsType(firstChance, "recent_non_system_modules", "array", "freeze_analysis.first_chance_context");
 
   // ── recommendations ──
   for (const auto& r : j["recommendations"]) {
@@ -226,6 +253,8 @@ void TestGoldenJsonValues(const nlohmann::json& j)
   assert(j["callstack"]["frames"].size() == 4);
   assert(j["evidence"].size() == 1);
   assert(j["recommendations"].size() == 2);
+  assert(j["freeze_analysis"]["state_id"].is_string());
+  assert(j["freeze_analysis"]["first_chance_context"].is_object());
 
   // CrashLogger object_refs with FormID
   assert(j["crash_logger"]["object_refs"].size() == 1);
@@ -241,8 +270,7 @@ void TestGoldenJsonValues(const nlohmann::json& j)
 
 void TestOutputWriterEmitsAllFields()
 {
-  const auto root = ProjectRoot();
-  const std::string src = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
 
   // All top-level JSON keys that BuildSummaryJson must produce
   const std::vector<std::string> requiredKeys = {
@@ -264,6 +292,9 @@ void TestOutputWriterEmitsAllFields()
     "\"callstack\"",
     "\"symbolization\"",
     "\"resources\"",
+    "\"actionable_candidates\"",
+    "\"freeze_analysis\"",
+    "\"first_chance_context\"",
     "\"evidence\"",
     "\"recommendations\"",
   };
@@ -296,6 +327,35 @@ void TestOutputWriterEmitsAllFields()
     "\"object_refs\"",
     "\"esp_name\"",
     "\"form_id\"",
+    "\"status_id\"",
+    "\"display_name\"",
+    "\"primary_identifier\"",
+    "\"secondary_label\"",
+    "\"plugin_name\"",
+    "\"mod_name\"",
+    "\"module_filename\"",
+    "\"family_count\"",
+    "\"supporting_families\"",
+    "\"conflicting_families\"",
+    "\"state_id\"",
+    "\"support_quality\"",
+    "\"primary_reasons\"",
+    "\"related_candidates\"",
+    "\"blackbox_context\"",
+    "\"first_chance_context\"",
+    "\"loading_window\"",
+    "\"recent_module_loads\"",
+    "\"recent_module_unloads\"",
+    "\"recent_thread_creates\"",
+    "\"recent_thread_exits\"",
+    "\"module_churn_score\"",
+    "\"thread_churn_score\"",
+    "\"recent_non_system_modules\"",
+    "\"has_context\"",
+    "\"recent_count\"",
+    "\"unique_signature_count\"",
+    "\"loading_window_count\"",
+    "\"repeated_signature_count\"",
     "\"enb_detected\"",
     "\"reshade_detected\"",
     "\"dxvk_detected\"",
@@ -303,6 +363,15 @@ void TestOutputWriterEmitsAllFields()
     "\"total_frames\"",
     "\"symbolized_frames\"",
     "\"source_line_frames\"",
+    "\"dbghelp_path\"",
+    "\"dbghelp_version\"",
+    "\"msdia_available\"",
+    "\"runtime_degraded\"",
+    "\"recapture_evaluation\"",
+    "\"triggered\"",
+    "\"target_profile\"",
+    "\"reasons\"",
+    "\"escalation_level\"",
   };
 
   for (const auto& key : nestedKeys) {
@@ -319,8 +388,7 @@ void TestOutputWriterEmitsAllFields()
 
 void TestOutputWriterReportTextSections()
 {
-  const auto root = ProjectRoot();
-  const std::string src = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
 
   const std::vector<std::string> requiredSections = {
     "SkyrimDiag Report",
@@ -328,12 +396,23 @@ void TestOutputWriterReportTextSections()
     "ExceptionAddress:",
     "ThreadId:",
     "Module+Offset:",
+    "CaptureProfileBaseMode:",
+    "CaptureProfileFullMemory:",
+    "RecaptureTriggered:",
+    "RecaptureTargetProfile:",
+    "RecaptureReasons:",
+    "RecaptureEscalationLevel:",
     "Evidence:",
     "Recommendations",
     "Callstack",
     "Suspects",
+    "FreezeAnalysis:",
     "HasBlackbox:",
     "HasWCT:",
+    "blackbox",
+    "module churn",
+    "first_chance_context",
+    "repeated suspicious first-chance",
   };
 
   for (const auto& section : requiredSections) {
@@ -346,12 +425,42 @@ void TestOutputWriterReportTextSections()
   std::cout << "  [PASS] OutputWriter report text has all required sections\n";
 }
 
+void TestFirstChanceCandidateExplanationSourceGuards()
+{
+  const std::string evidenceSrc = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.cpp");
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+  const std::string summarySrc = ReadProjectText("dump_tool/src/EvidenceBuilderSummary.cpp");
+
+  assert(evidenceSrc.find("first_chance_context") != std::string::npos);
+  assert(evidenceSrc.find("repeated suspicious first-chance") != std::string::npos);
+  assert(recommendationSrc.find("first-chance") != std::string::npos);
+  assert(summarySrc.find("first_chance_context") != std::string::npos);
+
+  std::cout << "  [PASS] CTD first-chance candidate explanation guards\n";
+}
+
+void TestRecaptureEvaluationConsumptionSourceGuards()
+{
+  const std::string outputSrc = ReadProjectText("dump_tool/src/OutputWriter.cpp");
+  const std::string evidenceSrc = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.cpp");
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+
+  assert(outputSrc.find("RecaptureReasons:") != std::string::npos);
+  assert(outputSrc.find("RecaptureEscalationLevel:") != std::string::npos);
+  assert(outputSrc.find("\"recapture_evaluation\"") != std::string::npos);
+  assert(evidenceSrc.find("Capture recapture context") != std::string::npos);
+  assert(evidenceSrc.find("incident_recapture_target_profile") != std::string::npos);
+  assert(recommendationSrc.find("[Recapture]") != std::string::npos);
+  assert(recommendationSrc.find("freeze_snapshot_richer") != std::string::npos);
+
+  std::cout << "  [PASS] Recapture evaluation consumption guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
 {
-  const auto root = ProjectRoot();
-  const std::string src = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
 
   assert(src.find("_SkyrimDiagSummary.json") != std::string::npos);
   assert(src.find("_SkyrimDiagReport.txt") != std::string::npos);
@@ -371,6 +480,8 @@ int main()
   TestGoldenJsonValues(golden);
   TestOutputWriterEmitsAllFields();
   TestOutputWriterReportTextSections();
+  TestFirstChanceCandidateExplanationSourceGuards();
+  TestRecaptureEvaluationConsumptionSourceGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;

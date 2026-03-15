@@ -6,9 +6,14 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 add_library(SkyrimDiagDumpToolCore STATIC
   src/Analyzer.cpp
+  src/Analyzer.CaptureInputs.cpp
+  src/Analyzer.History.cpp
   src/Analyzer.h
+  src/AnalyzerPipeline.h
   src/AnalyzerInternals.cpp
   src/AnalyzerInternals.h
+  src/AnalyzerInternalsBlackbox.cpp
+  src/AnalyzerInternalsFirstChance.cpp
   src/AnalyzerInternalsCrashBucket.cpp
   src/AnalyzerInternalsStackScan.cpp
   src/AnalyzerInternalsWct.cpp
@@ -20,11 +25,20 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsStackwalkSymbols.cpp
   src/EvidenceBuilder.cpp
   src/EvidenceBuilder.h
+  src/EvidenceBuilderCandidates.cpp
   src/EvidenceBuilderEvidence.cpp
+  src/EvidenceBuilderEvidencePipeline.h
+  src/EvidenceBuilderEvidence.Context.cpp
+  src/EvidenceBuilderEvidence.Crash.cpp
+  src/EvidenceBuilderEvidence.Freeze.cpp
   src/EvidenceBuilderPrivate.h
   src/EvidenceBuilderRecommendations.cpp
   src/EvidenceBuilderSummary.cpp
   src/EvidenceBuilderUtil.cpp
+  src/CandidateConsensus.cpp
+  src/CandidateConsensus.h
+  src/FreezeCandidateConsensus.cpp
+  src/FreezeCandidateConsensus.h
   src/GraphicsInjectionDiag.cpp
   src/GraphicsInjectionDiag.h
   src/CrashLogger.cpp
@@ -49,6 +63,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/Utf.cpp
   src/Utf.h
   src/OutputWriter.cpp
+  src/OutputWriter.Summary.cpp
+  src/OutputWriter.Report.cpp
   src/OutputWriter.h
   src/OutputWriterInternals.cpp
   src/OutputWriterInternals.h)
@@ -58,6 +74,7 @@ target_link_libraries(SkyrimDiagDumpToolCore
     skydiag_shared
     nlohmann_json::nlohmann_json
     Dbghelp
+    Version
 )
 
 target_compile_definitions(SkyrimDiagDumpToolCore

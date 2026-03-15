@@ -1,21 +1,20 @@
 #include <cassert>
+#include <cstdlib>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
+#include <iostream>
 #include <string>
 
-static std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadSplitAwareText;
 
 static void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
-  assert(haystack.find(needle) != std::string::npos && message);
+  if (haystack.find(needle) == std::string::npos) {
+    std::cerr << message << '\n';
+    std::exit(1);
+  }
 }
 
 int main()
@@ -28,15 +27,13 @@ int main()
   const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
   const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
   const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
-  const auto evidencePath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp";
-
   const std::string stackwalkScoring = ReadAllText(stackwalkScoringPath);
   const std::string stackwalk = ReadAllText(stackwalkPath);
   const std::string stackScan = ReadAllText(stackScanPath);
   const std::string minidumpUtil = ReadAllText(minidumpUtilPath);
   const std::string summary = ReadAllText(summaryPath);
   const std::string rec = ReadAllText(recPath);
-  const std::string evidence = ReadAllText(evidencePath);
+  const std::string evidence = ReadSplitAwareText(repoRoot / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
 
   AssertContains(
     stackwalkScoring,
@@ -122,6 +119,10 @@ int main()
     "actionable candidate",
     "Summary builder must expose an actionable non-victim candidate when hook/system top suspect is likely a victim location.");
   AssertContains(
+    summary,
+    "topCandidateConf",
+    "Summary builder must use actionable-candidate confidence instead of hardcoded confidence for EXE candidate wording.");
+  AssertContains(
     rec,
     "preferStackCandidateOverFault",
     "Recommendations must prefer stack candidates over hook-framework fault modules.");
@@ -137,6 +138,18 @@ int main()
     rec,
     "allowTopSuspectActionRecommendations",
     "Top-suspect action recommendations must be gated off for snapshot-like incidents.");
+  AssertContains(
+    rec,
+    "status_id == \"cross_validated\"",
+    "Recommendations must branch on cross-validated actionable candidates.");
+  AssertContains(
+    rec,
+    "status_id == \"conflicting\"",
+    "Recommendations must branch on conflicting actionable candidates.");
+  AssertContains(
+    rec,
+    "DumpMode=2",
+    "Conflict or weak-candidate recommendations must guide users toward a richer recapture when agreement is insufficient.");
   AssertContains(
     rec,
     "!isCrashLike &&",

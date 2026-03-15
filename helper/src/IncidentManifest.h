@@ -10,8 +10,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagHelper/CrashRecapturePolicy.h"
+
 namespace skydiag::helper {
 struct HelperConfig;
+struct DumpProfile;
 }
 
 namespace skydiag::helper::internal {
@@ -26,6 +29,8 @@ nlohmann::json MakeIncidentManifestV1(
   std::string_view etwStatus,
   std::uint32_t stateFlags,
   const nlohmann::json& context,
+  const skydiag::helper::DumpProfile* dumpProfile,
+  const skydiag::helper::RecaptureDecision* recaptureDecision,
   const skydiag::helper::HelperConfig& cfg,
   bool includeConfigSnapshot);
 
@@ -35,5 +40,9 @@ bool TryUpdateIncidentManifestEtw(
   std::string_view etwStatus,
   std::wstring* err);
 
-}  // namespace skydiag::helper::internal
+bool TryUpdateIncidentManifestRecaptureEvaluation(
+  const std::filesystem::path& manifestPath,
+  const skydiag::helper::RecaptureDecision& recaptureDecision,
+  std::wstring* err);
 
+}  // namespace skydiag::helper::internal

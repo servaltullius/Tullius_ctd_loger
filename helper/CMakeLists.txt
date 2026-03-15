@@ -9,17 +9,26 @@ add_executable(${PROJECT_NAME}
   src/Config.cpp
   src/CrashEtwCapture.cpp
   src/CrashCapture.cpp
+  src/DumpProfile.cpp
   src/DumpToolLaunch.cpp
   src/DumpWriter.cpp
   src/EtwCapture.cpp
   src/HangCapture.cpp
+  src/HangCapture.Guards.cpp
+  src/HangCapture.Execute.cpp
   src/HelperCommon.cpp
   src/HelperLog.cpp
+  src/HelperMain.Startup.cpp
+  src/HelperMain.Process.cpp
+  src/HelperMain.Loop.cpp
   src/HangDetect.cpp
   src/IncidentManifest.cpp
   src/LoadStats.cpp
   src/ManualCapture.cpp
   src/PendingCrashAnalysis.cpp
+  src/PendingCrashAnalysis.Decision.cpp
+  src/PendingCrashAnalysis.Execute.cpp
+  src/PssSnapshot.cpp
   src/PluginScanner.cpp
   src/ProcessAttach.cpp
   src/ProcessUtil.cpp
@@ -29,11 +38,15 @@ add_executable(${PROJECT_NAME}
   src/main.cpp
   src/CompatibilityPreflight.h
   include/SkyrimDiagHelper/Config.h
+  include/SkyrimDiagHelper/DumpProfile.h
   include/SkyrimDiagHelper/DumpWriter.h
   include/SkyrimDiagHelper/HangDetect.h
   include/SkyrimDiagHelper/LoadStats.h
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
+  src/HangCaptureInternal.h
+  src/PssSnapshot.h
+  src/PendingCrashAnalysisInternal.h
   src/RetentionWorker.h
   include/SkyrimDiagHelper/WctCapture.h)
 

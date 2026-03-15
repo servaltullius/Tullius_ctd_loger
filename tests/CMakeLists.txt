@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(skydiag_hang_suppression_tests
   hang_suppression_tests.cpp
@@ -52,6 +53,12 @@ add_executable(skydiag_winui_xaml_tests
 
 add_test(NAME skydiag_winui_xaml_tests COMMAND skydiag_winui_xaml_tests)
 
+add_executable(skydiag_winui_headless_entrypoint_tests
+  winui_headless_entrypoint_tests.cpp
+)
+
+add_test(NAME skydiag_winui_headless_entrypoint_tests COMMAND skydiag_winui_headless_entrypoint_tests)
+
 add_executable(skydiag_analysis_summary_helpers_tests
   analysis_summary_helpers_tests.cpp
 )
@@ -63,6 +70,18 @@ add_executable(skydiag_helper_crash_autopen_config_tests
 )
 
 add_test(NAME skydiag_helper_crash_autopen_config_tests COMMAND skydiag_helper_crash_autopen_config_tests)
+
+add_executable(skydiag_dump_profile_tests
+  dump_profile_tests.cpp
+)
+
+add_test(NAME skydiag_dump_profile_tests COMMAND skydiag_dump_profile_tests)
+
+add_executable(skydiag_dump_writer_guard_tests
+  dump_writer_guard_tests.cpp
+)
+
+add_test(NAME skydiag_dump_writer_guard_tests COMMAND skydiag_dump_writer_guard_tests)
 
 add_executable(skydiag_crash_capture_false_positive_guard_tests
   crash_capture_false_positive_guard_tests.cpp
@@ -159,6 +178,39 @@ add_test(NAME skydiag_scoring_logic_tests COMMAND skydiag_scoring_logic_tests)
 set_tests_properties(skydiag_scoring_logic_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
+
+add_executable(skydiag_candidate_consensus_tests
+  candidate_consensus_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CandidateConsensus.cpp"
+)
+
+target_include_directories(skydiag_candidate_consensus_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+add_test(NAME skydiag_candidate_consensus_tests COMMAND skydiag_candidate_consensus_tests)
+
+add_executable(skydiag_freeze_candidate_consensus_tests
+  freeze_candidate_consensus_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/FreezeCandidateConsensus.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
+)
+
+target_include_directories(skydiag_freeze_candidate_consensus_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+target_link_libraries(skydiag_freeze_candidate_consensus_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
+
+add_test(NAME skydiag_freeze_candidate_consensus_tests COMMAND skydiag_freeze_candidate_consensus_tests)
+
+add_executable(skydiag_blackbox_loader_stall_tests
+  blackbox_loader_stall_tests.cpp
+)
+
+add_test(NAME skydiag_blackbox_loader_stall_tests COMMAND skydiag_blackbox_loader_stall_tests)
 
 add_executable(skydiag_stack_scan_weight_tests
   stack_scan_weight_tests.cpp
@@ -300,6 +352,11 @@ add_test(
 add_test(
   NAME skydiag_packaging_includes_cli_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
+)
+
+add_test(
+  NAME skydiag_vibekit_smoke_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/vibekit_smoke_tests.py"
 )
 
 add_executable(skydiag_graphics_injection_rules_tests

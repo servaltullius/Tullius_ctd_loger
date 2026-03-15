@@ -10,7 +10,7 @@ namespace SkyrimDiagDumpToolWinUI;
 /// Holds analysis state + ObservableCollections + text building methods.
 /// No WinUI/XAML dependency — testable in isolation.
 /// </summary>
-internal sealed class MainWindowViewModel
+internal sealed partial class MainWindowViewModel
 {
     private readonly bool _isKorean;
 
@@ -28,16 +28,25 @@ internal sealed class MainWindowViewModel
     // ── Observable collections (bound to UI) ──────────────────
     public ObservableCollection<SuspectItem> Suspects { get; } = new();
     public ObservableCollection<string> Recommendations { get; } = new();
+    public ObservableCollection<RecommendationGroupItem> RecommendationGroups { get; } = new();
+    public ObservableCollection<string> ImmediateRecommendations { get; } = new();
+    public ObservableCollection<string> VerificationRecommendations { get; } = new();
+    public ObservableCollection<string> RecaptureRecommendations { get; } = new();
+    public ObservableCollection<ConflictComparisonRow> ConflictComparisonRows { get; } = new();
     public ObservableCollection<string> CallstackFrames { get; } = new();
     public ObservableCollection<EvidenceViewItem> EvidenceItems { get; } = new();
     public ObservableCollection<ResourceViewItem> ResourceItems { get; } = new();
     public ObservableCollection<string> EventItems { get; } = new();
+    public ObservableCollection<DumpDiscoveryItem> RecentDumps { get; } = new();
+    public ObservableCollection<DumpSearchLocationItem> DumpSearchLocations { get; } = new();
 
     // ── Summary fields for UI ─────────────────────────────────
     public string SummarySentence { get; private set; } = string.Empty;
     public string BucketText { get; private set; } = string.Empty;
     public string ModuleText { get; private set; } = string.Empty;
     public string ModNameText { get; private set; } = string.Empty;
+    public string CrashLoggerContextSummary { get; private set; } = string.Empty;
+    public string CrashContextSummary { get; private set; } = string.Empty;
     public bool ShowCorrelationBadge { get; private set; }
     public string CorrelationBadgeText { get; private set; } = string.Empty;
     public string QuickPrimaryLabel { get; private set; } = string.Empty;
@@ -45,6 +54,10 @@ internal sealed class MainWindowViewModel
     public string QuickConfidenceValue { get; private set; } = string.Empty;
     public string QuickActionsValue { get; private set; } = string.Empty;
     public string QuickEventsValue { get; private set; } = string.Empty;
+    public string RecentDumpStatusText { get; private set; } = string.Empty;
+    public bool ShowRecaptureContext { get; private set; }
+    public string RecaptureContextTitle { get; private set; } = string.Empty;
+    public string RecaptureContextDetails { get; private set; } = string.Empty;
     public string TroubleshootingTitle { get; private set; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; private set; } = Array.Empty<string>();
     public bool ShowTroubleshooting { get; private set; }
@@ -56,6 +69,8 @@ internal sealed class MainWindowViewModel
         PopulateHeaderFields(summary);
         PopulateSuspects(summary);
         PopulateRecommendations(summary);
+        PopulateRecaptureContext(summary);
+        PopulateConflictComparison(summary);
         PopulateTroubleshooting(summary);
         PopulateCallstack(summary);
         PopulateEvidence(summary);
@@ -87,29 +102,70 @@ internal sealed class MainWindowViewModel
         ModuleText = string.IsNullOrWhiteSpace(summary.ModulePlusOffset)
             ? T("Fault module: unavailable", "오류 모듈: 없음")
             : T("Fault module: ", "오류 모듈: ") + summary.ModulePlusOffset;
+        CrashLoggerContextSummary = BuildCrashLoggerContextSummary(summary);
+        CrashContextSummary = BuildCrashContextSummary(summary);
 
-        if (summary.CrashLoggerRefs.Count > 0 && !string.IsNullOrWhiteSpace(summary.InferredModName))
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            ModNameText = DescribeActionableCandidateLabel(summary.ActionableCandidates[0]) + ": " + BuildPrimaryCandidateValue(summary);
+        }
+        else if (summary.CrashLoggerRefs.Count > 0 && !string.IsNullOrWhiteSpace(summary.InferredModName))
+        {
             ModNameText = T("Referenced mod: ", "참조 모드: ") + summary.InferredModName;
+        }
         else
+        {
             ModNameText = string.IsNullOrWhiteSpace(summary.InferredModName)
                 ? T("Inferred mod: unavailable", "추정 모드: 없음")
                 : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
+        }
+
+        QuickPrimaryLabel = BuildCrashLoggerContextLabel(summary);
+        QuickPrimaryValue = CrashLoggerContextSummary;
+        if (summary.ActionableCandidates.Count > 0)
+        {
+            QuickConfidenceValue = BuildAgreementSummary(summary);
+        }
+        else if (summary.CrashLoggerRefs.Count > 0)
+        {
+            QuickConfidenceValue = MapRelevanceToConfidence(summary.CrashLoggerRefs[0].RelevanceScore);
+        }
+        else
+        {
+            var primarySuspect = summary.Suspects.FirstOrDefault();
+            QuickConfidenceValue = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
+                ? T("Unrated", "미평가")
+                : primarySuspect.Confidence;
+        }
     }
 
     private void PopulateSuspects(AnalysisSummary summary)
     {
         Suspects.Clear();
-        foreach (var espRef in summary.CrashLoggerRefs.Take(3))
+        if (summary.ActionableCandidates.Count > 0)
         {
-            Suspects.Add(new SuspectItem(
-                MapRelevanceToConfidence(espRef.RelevanceScore),
-                espRef.EspName,
-                BuildEspRefReason(espRef)));
+            foreach (var candidate in summary.ActionableCandidates.Take(5))
+            {
+                Suspects.Add(new SuspectItem(
+                    DescribeEvidenceAgreement(candidate),
+                    BuildCandidateDisplayName(candidate),
+                    BuildCandidateReason(candidate)));
+            }
         }
-        var dllSlots = Math.Max(0, 7 - Suspects.Count);
-        foreach (var suspect in summary.Suspects.Take(dllSlots))
+        else
         {
-            Suspects.Add(suspect);
+            foreach (var espRef in summary.CrashLoggerRefs.Take(3))
+            {
+                Suspects.Add(new SuspectItem(
+                    MapRelevanceToConfidence(espRef.RelevanceScore),
+                    espRef.EspName,
+                    BuildEspRefReason(espRef)));
+            }
+            var dllSlots = Math.Max(0, 7 - Suspects.Count);
+            foreach (var suspect in summary.Suspects.Take(dllSlots))
+            {
+                Suspects.Add(suspect);
+            }
         }
         if (Suspects.Count == 0)
         {
@@ -118,35 +174,6 @@ internal sealed class MainWindowViewModel
                 T("No strong suspect was extracted.", "강한 원인 후보를 추출하지 못했습니다."),
                 T("Try sharing the dump + report for deeper analysis.", "덤프 + 리포트를 공유해 추가 분석을 진행하세요.")));
         }
-
-        var primarySuspect = Suspects.FirstOrDefault();
-        QuickPrimaryValue = primarySuspect is null
-            ? T("Unknown", "알 수 없음")
-            : primarySuspect.Module;
-        QuickConfidenceValue = primarySuspect is null || string.IsNullOrWhiteSpace(primarySuspect.Confidence)
-            ? T("Unrated", "미평가")
-            : primarySuspect.Confidence;
-
-        QuickPrimaryLabel = summary.CrashLoggerRefs.Count > 0
-            ? T("Referenced mod (ESP)", "참조 모드 (ESP)")
-            : T("Primary suspect", "주요 원인");
-    }
-
-    private void PopulateRecommendations(AnalysisSummary summary)
-    {
-        Recommendations.Clear();
-        foreach (var recommendation in summary.Recommendations.Take(12))
-        {
-            Recommendations.Add(recommendation);
-        }
-        var recommendationCount = Recommendations.Count;
-        if (Recommendations.Count == 0)
-        {
-            Recommendations.Add(T("No recommendation text was generated.", "권장 조치 문구가 생성되지 않았습니다."));
-        }
-        QuickActionsValue = recommendationCount == 0
-            ? T("None", "없음")
-            : $"{recommendationCount} {T("items", "개 항목")}";
     }
 
     private void PopulateTroubleshooting(AnalysisSummary summary)
@@ -229,203 +256,6 @@ internal sealed class MainWindowViewModel
             : $"{artifacts.EventCount} {T("events", "개")}";
     }
 
-    // ── Text builders ─────────────────────────────────────────
-
-    public string? BuildSummaryClipboardText()
-    {
-        var summary = CurrentSummary;
-        if (summary is null)
-        {
-            return null;
-        }
-
-        var lines = new List<string>
-        {
-            _isKorean ? "SkyrimDiag 리포트" : "SkyrimDiag report",
-        };
-
-        if (!string.IsNullOrWhiteSpace(CurrentDumpPath))
-        {
-            lines.Add((_isKorean ? "덤프: " : "Dump: ") + CurrentDumpPath);
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.SummarySentence))
-        {
-            lines.Add((_isKorean ? "결론: " : "Conclusion: ") + summary.SummarySentence);
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
-        {
-            lines.Add((_isKorean ? "크래시 버킷 키: " : "Crash bucket key: ") + summary.CrashBucketKey);
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.ModulePlusOffset))
-        {
-            lines.Add((_isKorean ? "Module+Offset: " : "Module+Offset: ") + summary.ModulePlusOffset);
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.InferredModName))
-        {
-            lines.Add((_isKorean ? "추정 모드: " : "Inferred mod: ") + summary.InferredModName);
-        }
-
-        if (summary.CrashLoggerRefs.Count > 0)
-        {
-            var espDescs = string.Join(", ", summary.CrashLoggerRefs.Select(r =>
-                !string.IsNullOrWhiteSpace(r.FormId) ? $"{r.EspName} [{r.FormId}]" : r.EspName));
-            lines.Add((_isKorean ? "CrashLogger 참조 모드: " : "CrashLogger referenced mods: ") + espDescs);
-        }
-
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    public string? BuildCommunityShareText()
-    {
-        var summary = CurrentSummary;
-        if (summary is null)
-        {
-            return null;
-        }
-
-        var lines = new List<string>();
-
-        static bool HasAnyPrefix(IEnumerable<string> values, params string[] prefixes)
-        {
-            foreach (var v in values)
-            {
-                if (string.IsNullOrWhiteSpace(v))
-                {
-                    continue;
-                }
-
-                foreach (var p in prefixes)
-                {
-                    if (v.StartsWith(p, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        var recs = summary.Recommendations;
-        var looksSnapshotByText = summary.SummarySentence.Contains("snapshot", StringComparison.OrdinalIgnoreCase) ||
-                                  summary.SummarySentence.Contains("스냅샷", StringComparison.Ordinal);
-        var looksHangByText = summary.SummarySentence.Contains("freeze", StringComparison.OrdinalIgnoreCase) ||
-                              summary.SummarySentence.Contains("infinite loading", StringComparison.OrdinalIgnoreCase) ||
-                              summary.SummarySentence.Contains("프리징", StringComparison.Ordinal) ||
-                              summary.SummarySentence.Contains("무한로딩", StringComparison.Ordinal);
-
-        var isSnapshotLike = summary.IsSnapshotLike ||
-                             looksSnapshotByText ||
-                             HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]");
-        var isHangLike = !isSnapshotLike &&
-                         (summary.IsHangLike || looksHangByText || HasAnyPrefix(recs, "[Hang]", "[프리징]"));
-        lines.Add(isSnapshotLike
-            ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
-            : isHangLike
-                ? (_isKorean ? "🟠 Skyrim 프리징/무한로딩 리포트 — SkyrimDiag" : "🟠 Skyrim Freeze/ILS Report — SkyrimDiag")
-                : (_isKorean ? "🔴 Skyrim CTD 리포트 — SkyrimDiag" : "🔴 Skyrim CTD Report — SkyrimDiag"));
-
-        if (summary.CrashLoggerRefs.Count > 0)
-        {
-            var topEspRef = summary.CrashLoggerRefs[0];
-            var espLabel = !string.IsNullOrWhiteSpace(topEspRef.FormId)
-                ? $"{topEspRef.EspName} [{topEspRef.FormId}]"
-                : topEspRef.EspName;
-            lines.Add($"📌 {(_isKorean ? "참조 모드 (ESP)" : "Referenced mod (ESP)")}: {espLabel}");
-            if (summary.Suspects.Count > 0)
-            {
-                var topSuspect = summary.Suspects[0];
-                var conf = !string.IsNullOrWhiteSpace(topSuspect.Confidence) ? topSuspect.Confidence : "?";
-                lines.Add($"🔧 {(_isKorean ? "DLL 후보" : "DLL suspect")}: {topSuspect.Module} ({conf})");
-            }
-        }
-        else if (summary.Suspects.Count > 0)
-        {
-            var top = summary.Suspects[0];
-            var conf = !string.IsNullOrWhiteSpace(top.Confidence) ? top.Confidence : "?";
-            lines.Add($"📌 {(_isKorean ? (isSnapshotLike ? "참고 후보" : "유력 원인") : (isSnapshotLike ? "Reference candidate" : "Primary suspect"))}: {top.Module} ({conf})");
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
-        {
-            var typeLabel = isSnapshotLike
-                ? (_isKorean ? "분류" : "Category")
-                : (_isKorean ? "유형" : "Type");
-            var typeValue = isSnapshotLike
-                ? "SNAPSHOT"
-                : isHangLike
-                    ? "HANG"
-                    : summary.CrashBucketKey;
-            lines.Add($"🔍 {typeLabel}: {typeValue}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.ModulePlusOffset))
-        {
-            lines.Add($"📍 Module+Offset: {summary.ModulePlusOffset}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(summary.SummarySentence))
-        {
-            lines.Add($"💡 {(_isKorean ? "결론" : "Conclusion")}: {summary.SummarySentence}");
-        }
-
-        if (summary.Recommendations.Count > 0)
-        {
-            string firstAction;
-            if (isSnapshotLike)
-            {
-                firstAction = summary.Recommendations.FirstOrDefault(r =>
-                    r.StartsWith("[Snapshot]", StringComparison.OrdinalIgnoreCase) ||
-                    r.StartsWith("[정상/스냅샷]", StringComparison.Ordinal) ||
-                    r.StartsWith("[Manual]", StringComparison.OrdinalIgnoreCase) ||
-                    r.StartsWith("[수동]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
-            }
-            else if (isHangLike)
-            {
-                firstAction = summary.Recommendations.FirstOrDefault(r =>
-                    r.StartsWith("[Hang]", StringComparison.OrdinalIgnoreCase) ||
-                    r.StartsWith("[프리징]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
-            }
-            else
-            {
-                firstAction = summary.Recommendations[0];
-            }
-            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {firstAction}");
-        }
-
-        lines.Add("— Tullius CTD Logger");
-
-        return string.Join(Environment.NewLine, lines);
-    }
-
-    public string BuildEspRefReason(CrashLoggerRefItem espRef)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(espRef.ObjectType))
-            parts.Add(espRef.ObjectType);
-        if (!string.IsNullOrWhiteSpace(espRef.FormId))
-            parts.Add($"[{espRef.FormId}]");
-        if (!string.IsNullOrWhiteSpace(espRef.ObjectName))
-            parts.Add($"\"{espRef.ObjectName}\"");
-        if (!string.IsNullOrWhiteSpace(espRef.Location))
-            parts.Add(_isKorean ? $"{espRef.Location}에서 발견" : $"found in {espRef.Location}");
-        if (espRef.RefCount > 1)
-            parts.Add(_isKorean ? $"참조 {espRef.RefCount}건" : $"{espRef.RefCount} refs");
-        return parts.Count == 0
-            ? T("ESP/ESM object reference", "ESP/ESM 오브젝트 참조")
-            : string.Join(" — ", parts);
-    }
-
-    public string MapRelevanceToConfidence(int score)
-    {
-        if (score >= 16) return T("ESP ref (high)", "ESP 참조 (높음)");
-        if (score >= 10) return T("ESP ref", "ESP 참조");
-        return T("ESP ref (low)", "ESP 참조 (낮음)");
-    }
-
     public DumpToolInvocationOptions BuildInvocationOptions(
         string dumpPath, string? outDirText, string? startupLanguage, bool headless,
         DumpToolInvocationOptions startupOptions)
@@ -448,6 +278,18 @@ internal sealed class MainWindowViewModel
     }
 
     public string T(string en, string ko) => _isKorean ? ko : en;
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+        return string.Empty;
+    }
 
     // ── Advanced artifacts loading (static, no UI dependency) ─
 
@@ -548,3 +390,14 @@ internal sealed class MainWindowViewModel
         return data;
     }
 }
+
+public sealed record DumpDiscoveryItem(
+    string FileName,
+    string FullPath,
+    string SourceLabel,
+    string SourcePath,
+    string UpdatedText,
+    string SizeText,
+    string AnalyzeLabel);
+
+public sealed record DumpSearchLocationItem(string Path, string SourceLabel, bool IsRemovable);

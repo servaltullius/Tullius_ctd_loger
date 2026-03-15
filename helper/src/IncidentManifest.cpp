@@ -11,6 +11,7 @@
 
 #include "HelperCommon.h"
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/DumpProfile.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -58,6 +59,7 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
   j["auto_open_hang_after_process_exit"] = cfg.autoOpenHangAfterProcessExit;
   j["auto_open_hang_delay_ms"] = cfg.autoOpenHangDelayMs;
   j["auto_open_viewer_beginner_mode"] = cfg.autoOpenViewerBeginnerMode;
+  j["enable_pss_snapshot_for_freeze"] = cfg.enablePssSnapshotForFreeze;
 
   j["enable_adaptive_loading_threshold"] = cfg.enableAdaptiveLoadingThreshold;
   j["adaptive_loading_min_sec"] = cfg.adaptiveLoadingMinSec;
@@ -91,6 +93,36 @@ std::string MakeIncidentId(std::string_view captureKind, std::wstring_view ts, D
   return std::string(captureKind) + "_" + WideToUtf8(ts) + "_pid" + std::to_string(static_cast<std::uint32_t>(pid));
 }
 
+nlohmann::json MakeCaptureProfileJson(const skydiag::helper::DumpProfile& dumpProfile)
+{
+  return nlohmann::json{
+    { "capture_kind", skydiag::helper::CaptureKindToString(dumpProfile.captureKind) },
+    { "base_mode", DumpModeToString(dumpProfile.baseMode) },
+    { "include_thread_info", dumpProfile.includeThreadInfo },
+    { "include_handle_data", dumpProfile.includeHandleData },
+    { "include_unloaded_modules", dumpProfile.includeUnloadedModules },
+    { "include_full_memory", dumpProfile.includeFullMemory },
+    { "prefer_main_thread", dumpProfile.preferMainThread },
+    { "prefer_wct_threads", dumpProfile.preferWctThreads },
+    { "prefer_crash_context", dumpProfile.preferCrashContext },
+  };
+}
+
+nlohmann::json MakeRecaptureEvaluationJson(const skydiag::helper::RecaptureDecision& decision)
+{
+  nlohmann::json reasons = nlohmann::json::array();
+  for (const auto reason : decision.reasons) {
+    reasons.push_back(skydiag::helper::RecaptureReasonToString(reason));
+  }
+  return nlohmann::json{
+    { "kind", skydiag::helper::RecaptureKindToString(decision.kind) },
+    { "triggered", decision.shouldRecapture },
+    { "reasons", reasons },
+    { "target_profile", skydiag::helper::RecaptureTargetProfileToString(decision.targetProfile) },
+    { "escalation_level", decision.escalationLevel },
+  };
+}
+
 }  // namespace
 
 nlohmann::json MakeIncidentManifestV1(
@@ -103,6 +135,8 @@ nlohmann::json MakeIncidentManifestV1(
   std::string_view etwStatus,
   std::uint32_t stateFlags,
   const nlohmann::json& context,
+  const skydiag::helper::DumpProfile* dumpProfile,
+  const skydiag::helper::RecaptureDecision* recaptureDecision,
   const skydiag::helper::HelperConfig& cfg,
   bool includeConfigSnapshot)
 {
@@ -129,6 +163,12 @@ nlohmann::json MakeIncidentManifestV1(
   };
   if (context.is_object() && !context.empty()) {
     j["context"] = context;
+  }
+  if (dumpProfile) {
+    j["capture_profile"] = MakeCaptureProfileJson(*dumpProfile);
+  }
+  if (recaptureDecision) {
+    j["recapture_evaluation"] = MakeRecaptureEvaluationJson(*recaptureDecision);
   }
   if (includeConfigSnapshot) {
     j["config_snapshot"] = MakeIncidentConfigSnapshotSafe(cfg);
@@ -161,6 +201,33 @@ bool TryUpdateIncidentManifestEtw(
   }
   j["artifacts"]["etw"] = WideToUtf8(etwPath.filename().wstring());
   j["artifacts"]["etw_status"] = std::string(etwStatus);
+  WriteTextFileUtf8(manifestPath, j.dump(2));
+  if (err) {
+    err->clear();
+  }
+  return true;
+}
+
+bool TryUpdateIncidentManifestRecaptureEvaluation(
+  const std::filesystem::path& manifestPath,
+  const skydiag::helper::RecaptureDecision& recaptureDecision,
+  std::wstring* err)
+{
+  std::string txt;
+  if (!ReadTextFileUtf8(manifestPath, &txt)) {
+    if (err) {
+      *err = L"manifest read failed";
+    }
+    return false;
+  }
+  auto j = nlohmann::json::parse(txt, nullptr, false);
+  if (j.is_discarded() || !j.is_object()) {
+    if (err) {
+      *err = L"manifest parse failed";
+    }
+    return false;
+  }
+  j["recapture_evaluation"] = MakeRecaptureEvaluationJson(recaptureDecision);
   WriteTextFileUtf8(manifestPath, j.dump(2));
   if (err) {
     err->clear();

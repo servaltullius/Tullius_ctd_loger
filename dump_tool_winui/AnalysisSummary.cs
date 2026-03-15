@@ -18,8 +18,15 @@ internal sealed class AnalysisSummary
     public required IReadOnlyList<string> CallstackFrames { get; init; }
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
+    public required IReadOnlyList<ActionableCandidateItem> ActionableCandidates { get; init; }
     public required TriageReview Triage { get; init; }
     public int HistoryCorrelationCount { get; init; }
+    public bool HasRecaptureEvaluation { get; init; }
+    public bool RecaptureTriggered { get; init; }
+    public string RecaptureKind { get; init; } = string.Empty;
+    public string RecaptureTargetProfile { get; init; } = string.Empty;
+    public int RecaptureEscalationLevel { get; init; }
+    public IReadOnlyList<string> RecaptureReasons { get; init; } = Array.Empty<string>();
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
@@ -60,6 +67,23 @@ internal sealed class AnalysisSummary
             ReadString(item, "title"),
             ReadString(item, "details")));
 
+        var actionableCandidates = ParseObjectArray(root, "actionable_candidates", item => new ActionableCandidateItem(
+            ReadString(item, "status_id"),
+            ReadString(item, "confidence"),
+            ReadString(item, "display_name"),
+            ReadString(item, "primary_identifier"),
+            ReadString(item, "secondary_label"),
+            ReadString(item, "plugin_name"),
+            ReadString(item, "mod_name"),
+            ReadString(item, "module_filename"),
+            ReadString(item, "explanation"),
+            ReadInt32(item, "family_count"),
+            ReadInt32(item, "score"),
+            ReadBool(item, "cross_validated"),
+            ReadBool(item, "has_conflict"),
+            ParseStringArray(item, "supporting_families"),
+            ParseStringArray(item, "conflicting_families")));
+
         var resourceItems = ParseObjectArray(root, "resources", item =>
         {
             var providers = ParseStringArray(item, "providers");
@@ -75,6 +99,11 @@ internal sealed class AnalysisSummary
             && tsTemp.ValueKind == JsonValueKind.Object ? tsTemp : default;
         var triageElement = root.TryGetProperty("triage", out var triageTemp)
             && triageTemp.ValueKind == JsonValueKind.Object ? triageTemp : default;
+        var incidentElement = root.TryGetProperty("incident", out var incidentTemp)
+            && incidentTemp.ValueKind == JsonValueKind.Object ? incidentTemp : default;
+        var recaptureElement = incidentElement.ValueKind == JsonValueKind.Object
+            && incidentElement.TryGetProperty("recapture_evaluation", out var recaptureTemp)
+            && recaptureTemp.ValueKind == JsonValueKind.Object ? recaptureTemp : default;
 
         return new AnalysisSummary
         {
@@ -93,6 +122,7 @@ internal sealed class AnalysisSummary
             Recommendations = recommendations,
             CallstackFrames = callstackFrames,
             EvidenceItems = evidenceItems,
+            ActionableCandidates = actionableCandidates,
             CrashLoggerRefs = crashLoggerRefs,
             ResourceItems = resourceItems,
             Triage = ParseTriage(triageElement),
@@ -105,6 +135,12 @@ internal sealed class AnalysisSummary
             TroubleshootingSteps = tsElement.ValueKind != JsonValueKind.Undefined
                 ? ParseStringArray(tsElement, "steps")
                 : new List<string>(),
+            HasRecaptureEvaluation = recaptureElement.ValueKind != JsonValueKind.Undefined,
+            RecaptureTriggered = ReadBool(recaptureElement, "triggered"),
+            RecaptureKind = ReadString(recaptureElement, "kind"),
+            RecaptureTargetProfile = ReadString(recaptureElement, "target_profile"),
+            RecaptureEscalationLevel = ReadInt32(recaptureElement, "escalation_level"),
+            RecaptureReasons = ParseStringArray(root, "incident.recapture_evaluation.reasons"),
             Diagnostics = ParseStringArray(root, "diagnostics"),
         };
     }
@@ -225,6 +261,24 @@ internal sealed class AnalysisSummary
 public sealed record SuspectItem(string Confidence, string Module, string Reason);
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
+public sealed record RecommendationGroupItem(string Title, IReadOnlyList<string> Items);
+public sealed record ConflictComparisonRow(string Candidate, string Signals, string Detail);
+public sealed record ActionableCandidateItem(
+    string StatusId,
+    string Confidence,
+    string DisplayName,
+    string PrimaryIdentifier,
+    string SecondaryLabel,
+    string PluginName,
+    string ModName,
+    string ModuleFilename,
+    string Explanation,
+    int FamilyCount,
+    int Score,
+    bool CrossValidated,
+    bool HasConflict,
+    IReadOnlyList<string> SupportingFamilies,
+    IReadOnlyList<string> ConflictingFamilies);
 public sealed record TriageReview
 {
     public const string UnreviewedStatus = "unreviewed";

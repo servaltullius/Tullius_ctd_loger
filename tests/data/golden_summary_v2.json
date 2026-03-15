@@ -96,6 +96,12 @@
   "symbolization": {
     "search_path": "C:\\Symbols",
     "cache_path": "C:\\Symbols",
+    "dbghelp_path": "C:\\Windows\\System32\\dbghelp.dll",
+    "dbghelp_version": "10.0.26100.1",
+    "msdia_path": "C:\\Program Files\\Microsoft Visual Studio\\DIA SDK\\bin\\amd64\\msdia140.dll",
+    "msdia_available": true,
+    "cache_ready": true,
+    "runtime_degraded": false,
     "total_frames": 42,
     "symbolized_frames": 4,
     "source_line_frames": 0,
@@ -103,6 +109,42 @@
     "online_symbol_source_used": false
   },
   "resources": [],
+  "actionable_candidates": [],
+  "freeze_analysis": {
+    "state_id": "freeze_ambiguous",
+    "confidence": "Low",
+    "support_quality": "unknown",
+    "primary_reasons": [
+      "Freeze evidence was too weak or conflicting"
+    ],
+    "related_candidates": [],
+    "blackbox_context": {
+      "loading_window": false,
+      "recent_module_loads": 0,
+      "recent_module_unloads": 0,
+      "recent_thread_creates": 0,
+      "recent_thread_exits": 0,
+      "module_churn_score": 0,
+      "thread_churn_score": 0,
+      "recent_non_system_modules": []
+    },
+    "first_chance_context": {
+      "has_context": false,
+      "recent_count": 0,
+      "unique_signature_count": 0,
+      "loading_window_count": 0,
+      "repeated_signature_count": 0,
+      "recent_non_system_modules": []
+    }
+  },
+  "first_chance_context": {
+    "has_context": false,
+    "recent_count": 0,
+    "unique_signature_count": 0,
+    "loading_window_count": 0,
+    "repeated_signature_count": 0,
+    "recent_non_system_modules": []
+  },
   "evidence": [
     {
       "confidence": "High",

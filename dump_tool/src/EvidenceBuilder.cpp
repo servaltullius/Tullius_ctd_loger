@@ -88,6 +88,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.wct = wct;
   ctx.suspectBasis = suspectBasis;
 
+  internal::BuildActionableCandidates(r, lang, ctx);
   internal::BuildEvidenceItems(r, lang, ctx);
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);

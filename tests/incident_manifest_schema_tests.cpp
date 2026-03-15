@@ -1,25 +1,8 @@
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 
-static bool ReadAllText(const std::filesystem::path& path, std::string* out)
-{
-  if (out) {
-    out->clear();
-  }
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  if (!in) {
-    return false;
-  }
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  if (out) {
-    *out = ss.str();
-  }
-  return true;
-}
+#include "SourceGuardTestUtils.h"
 
 static bool Contains(const std::string& haystack, const char* needle)
 {
@@ -31,7 +14,7 @@ static bool Contains(const std::string& haystack, const char* needle)
 
 int main()
 {
-  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto repoRoot = skydiag::tests::source_guard::ProjectRoot();
 
   const std::filesystem::path helperSrcDir = repoRoot / "helper" / "src";
   if (!std::filesystem::exists(helperSrcDir) || !std::filesystem::is_directory(helperSrcDir)) {
@@ -50,7 +33,7 @@ int main()
       continue;
     }
     std::string txt;
-    if (!ReadAllText(path, &txt)) {
+    if (!skydiag::tests::source_guard::TryReadSplitAwareText(path, &txt)) {
       std::cerr << "ERROR: failed to read: " << path << "\n";
       return 1;
     }
@@ -66,13 +49,23 @@ int main()
   }
 
   const std::filesystem::path outputWriterPath = repoRoot / "dump_tool" / "src" / "OutputWriter.cpp";
+  const std::filesystem::path incidentManifestPath = repoRoot / "helper" / "src" / "IncidentManifest.cpp";
   if (!std::filesystem::exists(outputWriterPath)) {
     std::cerr << "ERROR: dump_tool/src/OutputWriter.cpp not found at: " << outputWriterPath << "\n";
     return 1;
   }
+  if (!std::filesystem::exists(incidentManifestPath)) {
+    std::cerr << "ERROR: helper/src/IncidentManifest.cpp not found at: " << incidentManifestPath << "\n";
+    return 1;
+  }
   std::string outputWriter;
-  if (!ReadAllText(outputWriterPath, &outputWriter)) {
+  if (!skydiag::tests::source_guard::TryReadSplitAwareText(outputWriterPath, &outputWriter)) {
     std::cerr << "ERROR: failed to read: " << outputWriterPath << "\n";
+    return 1;
+  }
+  std::string incidentManifest;
+  if (!skydiag::tests::source_guard::TryReadSplitAwareText(incidentManifestPath, &incidentManifest)) {
+    std::cerr << "ERROR: failed to read: " << incidentManifestPath << "\n";
     return 1;
   }
   if (!Contains(outputWriter, "incident_id")) {
@@ -93,6 +86,34 @@ int main()
   }
   if (!Contains(outputWriter, "privacy")) {
     std::cerr << "ERROR: Incident manifest schema must include privacy\n";
+    return 1;
+  }
+  if (!Contains(outputWriter, "capture_profile")) {
+    std::cerr << "ERROR: Incident manifest schema must include capture_profile\n";
+    return 1;
+  }
+  if (!Contains(outputWriter, "include_full_memory")) {
+    std::cerr << "ERROR: Incident manifest schema must include effective profile flags\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "recapture_evaluation")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "target_profile")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.target_profile\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "reasons")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.reasons\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "triggered")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.triggered\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "escalation_level")) {
+    std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.escalation_level\n";
     return 1;
   }
 

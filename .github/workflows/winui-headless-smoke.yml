@@ -1,0 +1,85 @@
+name: WinUI Headless Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  winui-headless-smoke:
+    name: WinUI Headless Smoke
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE\vcpkg"
+          & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
+
+      - name: Setup vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-archives-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-archives-
+
+      - name: Configure (Visual Studio + vcpkg)
+        shell: pwsh
+        run: >
+          cmake -S . -B build-win
+          -G "Visual Studio 17 2022"
+          -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
+
+      - name: Build (RelWithDebInfo)
+        shell: pwsh
+        run: cmake --build build-win --config RelWithDebInfo
+
+      - name: Build WinUI shell
+        shell: cmd
+        run: scripts\build-winui.cmd
+
+      - name: WinUI headless interop smoke
+        timeout-minutes: 2
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:GITHUB_WORKSPACE "build-winui\SkyrimDiagDumpToolWinUI.dll"
+          if (-not (Test-Path $dll)) {
+            throw "WinUI DLL not found: $dll"
+          }
+
+          $missingDump = Join-Path $env:GITHUB_WORKSPACE "dist\does-not-exist.dmp"
+          $smokeOutDir = Join-Path $env:GITHUB_WORKSPACE "dist\headless-smoke"
+          New-Item -ItemType Directory -Path $smokeOutDir -Force | Out-Null
+
+          & dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump
+          $code = $LASTEXITCODE
+          if ($code -ne 2) {
+            $startupLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_startup_error.log"
+            $bootstrapLog = Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI_headless_bootstrap.log"
+            if (Test-Path $startupLog) {
+              Write-Host "=== WinUI startup log ==="
+              Get-Content $startupLog
+            }
+            if (Test-Path $bootstrapLog) {
+              Write-Host "=== WinUI headless bootstrap log ==="
+              Get-Content $bootstrapLog
+            }
+            throw "Headless smoke expected exit code 2 for missing dump, got $code."
+          }

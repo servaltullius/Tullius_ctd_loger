@@ -2,63 +2,16 @@
 
 #include <Windows.h>
 
-#include <cstdint>
 #include <filesystem>
 #include <string>
 
-#include "CaptureCommon.h"
 #include "DumpToolLaunch.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
+#include "PendingCrashAnalysisInternal.h"
 #include "SkyrimDiagHelper/Config.h"
-#include "SkyrimDiagHelper/CrashRecapturePolicy.h"
-#include "SkyrimDiagHelper/DumpWriter.h"
-#include "SkyrimDiagHelper/ProcessAttach.h"
 
 namespace skydiag::helper::internal {
-namespace {
-
-DWORD CrashAnalysisTimeoutMs(const skydiag::helper::HelperConfig& cfg)
-{
-  std::uint32_t sec = cfg.autoRecaptureAnalysisTimeoutSec;
-  if (sec < 5u) {
-    sec = 5u;
-  }
-  if (sec > 180u) {
-    sec = 180u;
-  }
-  return static_cast<DWORD>(sec * 1000u);
-}
-
-bool IsProcessStillAlive(HANDLE process, std::wstring* err)
-{
-  if (!process) {
-    if (err) {
-      *err = L"missing process handle";
-    }
-    return false;
-  }
-  const DWORD w = WaitForSingleObject(process, 0);
-  if (w == WAIT_TIMEOUT) {
-    if (err) {
-      err->clear();
-    }
-    return true;
-  }
-  if (w == WAIT_OBJECT_0) {
-    if (err) {
-      *err = L"process already exited";
-    }
-    return false;
-  }
-  const DWORD le = GetLastError();
-  if (err) {
-    *err = L"WaitForSingleObject failed: " + std::to_wstring(le);
-  }
-  return false;
-}
-
-}  // namespace
 
 void ClearPendingCrashAnalysis(PendingCrashAnalysis* task)
 {
@@ -156,81 +109,29 @@ void FinalizePendingCrashAnalysisIfReady(
     return;
   }
 
-  const auto summaryPath = SummaryPathForDump(task->dumpPath, outBase);
-  CrashSummaryInfo summaryInfo{};
+  PendingCrashRecaptureContext recaptureContext{};
   std::wstring summaryErr;
-  if (!TryLoadCrashSummaryInfo(summaryPath, &summaryInfo, &summaryErr)) {
+  if (!TryEvaluateCrashRecapture(cfg, *task, outBase, &recaptureContext, &summaryErr)) {
     AppendLogLine(outBase, L"Crash summary parse failed for recapture policy: " + summaryErr);
     ClearPendingCrashAnalysis(task);
     return;
   }
-  if (summaryInfo.bucketKey.empty()) {
-    AppendLogLine(outBase, L"Crash summary has empty crash_bucket_key; recapture policy skipped.");
-    ClearPendingCrashAnalysis(task);
-    return;
-  }
-
-  std::uint32_t unknownStreak = 0;
-  std::wstring statsErr;
-  if (!UpdateCrashBucketStats(outBase, summaryInfo, &unknownStreak, &statsErr)) {
-    AppendLogLine(outBase, L"Crash bucket stats update failed: " + statsErr);
-    ClearPendingCrashAnalysis(task);
-    return;
-  }
-
-  const std::wstring bucketW(summaryInfo.bucketKey.begin(), summaryInfo.bucketKey.end());
+  const auto& summaryInfo = recaptureContext.summaryInfo;
+  const std::wstring bucketW(recaptureContext.summaryInfo.bucketKey.begin(), recaptureContext.summaryInfo.bucketKey.end());
   AppendLogLine(
     outBase,
     L"Crash bucket stats updated: bucket=" + bucketW +
       L", schemaVersion=" + std::to_wstring(summaryInfo.schemaVersion) +
       L", unknownFaultModule=" + std::to_wstring(summaryInfo.unknownFaultModule ? 1 : 0) +
-      L", unknownStreak=" + std::to_wstring(unknownStreak));
+      L", candidateConflict=" + std::to_wstring(summaryInfo.candidateConflict ? 1 : 0) +
+      L", referenceClueOnly=" + std::to_wstring(summaryInfo.referenceClueOnly ? 1 : 0) +
+      L", stackwalkDegraded=" + std::to_wstring(summaryInfo.stackwalkDegraded ? 1 : 0) +
+      L", symbolRuntimeDegraded=" + std::to_wstring(summaryInfo.symbolRuntimeDegraded ? 1 : 0) +
+      L", firstChanceCandidateWeak=" + std::to_wstring(summaryInfo.firstChanceCandidateWeak ? 1 : 0) +
+      L", bucketSeenCount=" + std::to_wstring(recaptureContext.bucketSeenCount) +
+      L", unknownStreak=" + std::to_wstring(recaptureContext.unknownStreak));
 
-  const auto recaptureDecision = skydiag::helper::DecideCrashFullRecapture(
-    cfg.enableAutoRecaptureOnUnknownCrash,
-    cfg.autoAnalyzeDump,
-    summaryInfo.unknownFaultModule,
-    unknownStreak,
-    cfg.autoRecaptureUnknownBucketThreshold,
-    cfg.dumpMode);
-  bool fullDumpWritten = false;
-  if (recaptureDecision.shouldRecaptureFullDump) {
-    std::wstring aliveErr;
-    if (IsProcessStillAlive(proc.process, &aliveErr)) {
-      const auto tsFull = Timestamp();
-      const auto fullDumpPath = (outBase / (L"SkyrimDiag_Crash_" + tsFull + L"_Full.dmp")).wstring();
-
-      const std::string pluginScanJson = CollectPluginScanJson(
-        proc,
-        outBase,
-        L"PluginScanner skipped for full recapture: failed to resolve game exe directory.");
-
-      std::wstring fullDumpErr;
-      if (!skydiag::helper::WriteDumpWithStreams(
-            proc.process,
-            proc.pid,
-            fullDumpPath,
-            proc.shm,
-            proc.shmSize,
-            /*wctJsonUtf8=*/{},
-            pluginScanJson,
-            /*isCrash=*/true,
-            skydiag::helper::DumpMode::kFull,
-            &fullDumpErr)) {
-        AppendLogLine(outBase, L"Crash full recapture failed: " + fullDumpErr);
-      } else {
-        fullDumpWritten = true;
-        AppendLogLine(outBase, L"Crash full recapture written: " + fullDumpPath);
-        StartDumpToolHeadlessIfConfigured(cfg, fullDumpPath, outBase);
-      }
-    } else {
-      AppendLogLine(outBase, L"Crash full recapture skipped: " + aliveErr);
-    }
-  }
-
-  if (fullDumpWritten) {
-    ApplyRetentionFromConfig(cfg, outBase);
-  }
+  ApplyCrashRecaptureDecision(cfg, proc, outBase, *task, recaptureContext);
 
   ClearPendingCrashAnalysis(task);
 }
