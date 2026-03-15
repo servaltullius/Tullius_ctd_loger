@@ -18,7 +18,13 @@ std::string ReadFile(const char* relPath)
   std::filesystem::path p = std::filesystem::path(root) / relPath;
   std::ifstream f(p);
   assert(f.is_open());
-  return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  if (p.filename() == "Analyzer.cpp") {
+    std::ifstream captureInputs(p.parent_path() / "Analyzer.CaptureInputs.cpp");
+    assert(captureInputs.is_open());
+    text.append((std::istreambuf_iterator<char>(captureInputs)), std::istreambuf_iterator<char>());
+  }
+  return text;
 }
 
 void TestDumpWriterIncludesPluginStream()

@@ -13,6 +13,8 @@ int main()
   const auto implPath = repoRoot / "helper" / "src" / "DumpWriter.cpp";
   const auto crashCapturePath = repoRoot / "helper" / "src" / "CrashCapture.cpp";
   const auto hangCapturePath = repoRoot / "helper" / "src" / "HangCapture.cpp";
+  const auto hangCaptureGuardsPath = repoRoot / "helper" / "src" / "HangCapture.Guards.cpp";
+  const auto hangCaptureExecutePath = repoRoot / "helper" / "src" / "HangCapture.Execute.cpp";
   const auto manualCapturePath = repoRoot / "helper" / "src" / "ManualCapture.cpp";
   const auto pendingAnalysisPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.cpp";
   const auto pendingAnalysisDecisionPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Decision.cpp";
@@ -24,7 +26,10 @@ int main()
   const auto header = ReadAllText(headerPath);
   const auto impl = ReadAllText(implPath);
   const auto crashCapture = ReadAllText(crashCapturePath);
-  const auto hangCapture = ReadAllText(hangCapturePath);
+  const auto hangCapture =
+    ReadAllText(hangCapturePath) +
+    ReadAllText(hangCaptureGuardsPath) +
+    ReadAllText(hangCaptureExecutePath);
   const auto manualCapture = ReadAllText(manualCapturePath);
   const auto pendingAnalysis =
     ReadAllText(pendingAnalysisPath) +

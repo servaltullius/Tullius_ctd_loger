@@ -28,6 +28,8 @@ int main()
   const auto helperIni = repoRoot / "dist" / "SkyrimDiagHelper.ini";
   const auto wctCapture = repoRoot / "helper" / "src" / "WctCapture.cpp";
   const auto hangCapture = repoRoot / "helper" / "src" / "HangCapture.cpp";
+  const auto hangCaptureGuards = repoRoot / "helper" / "src" / "HangCapture.Guards.cpp";
+  const auto hangCaptureExecute = repoRoot / "helper" / "src" / "HangCapture.Execute.cpp";
   const auto manualCapture = repoRoot / "helper" / "src" / "ManualCapture.cpp";
   const auto pssSnapshotCpp = repoRoot / "helper" / "src" / "PssSnapshot.cpp";
   const auto pssSpikeDoc = repoRoot / "docs" / "spikes" / "pss-snapshot-evaluation.md";
@@ -38,6 +40,8 @@ int main()
   assert(std::filesystem::exists(helperIni) && "dist/SkyrimDiagHelper.ini not found");
   assert(std::filesystem::exists(wctCapture) && "helper/src/WctCapture.cpp not found");
   assert(std::filesystem::exists(hangCapture) && "helper/src/HangCapture.cpp not found");
+  assert(std::filesystem::exists(hangCaptureGuards) && "helper/src/HangCapture.Guards.cpp not found");
+  assert(std::filesystem::exists(hangCaptureExecute) && "helper/src/HangCapture.Execute.cpp not found");
   assert(std::filesystem::exists(manualCapture) && "helper/src/ManualCapture.cpp not found");
   assert(std::filesystem::exists(pssSnapshotCpp) && "helper/src/PssSnapshot.cpp not found");
   assert(std::filesystem::exists(pssSpikeDoc) && "docs/spikes/pss-snapshot-evaluation.md not found");
@@ -46,7 +50,10 @@ int main()
   const auto helperMainText = ReadAllText(helperMain);
   const auto helperIniText = ReadAllText(helperIni);
   const auto wctCaptureText = ReadAllText(wctCapture);
-  const auto hangCaptureText = ReadAllText(hangCapture);
+  const auto hangCaptureText =
+    ReadAllText(hangCapture) +
+    ReadAllText(hangCaptureGuards) +
+    ReadAllText(hangCaptureExecute);
   const auto manualCaptureText = ReadAllText(manualCapture);
   const auto pssSnapshotCppText = ReadAllText(pssSnapshotCpp);
 

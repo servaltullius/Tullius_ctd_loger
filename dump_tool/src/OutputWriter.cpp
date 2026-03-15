@@ -11,6 +11,9 @@
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+
+#include <nlohmann/json.hpp>
 namespace skydiag::dump_tool {
 
 using skydiag::dump_tool::internal::output_writer::DefaultOutDirForDump;

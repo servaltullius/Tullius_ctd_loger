@@ -14,6 +14,8 @@ add_executable(${PROJECT_NAME}
   src/DumpWriter.cpp
   src/EtwCapture.cpp
   src/HangCapture.cpp
+  src/HangCapture.Guards.cpp
+  src/HangCapture.Execute.cpp
   src/HelperCommon.cpp
   src/HelperLog.cpp
   src/HangDetect.cpp
@@ -39,6 +41,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/LoadStats.h
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
+  src/HangCaptureInternal.h
   src/PssSnapshot.h
   src/PendingCrashAnalysisInternal.h
   src/RetentionWorker.h

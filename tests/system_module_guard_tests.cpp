@@ -10,6 +10,11 @@ static std::string ReadAllText(const std::filesystem::path& path)
   assert(in && "Failed to open file");
   std::ostringstream ss;
   ss << in.rdbuf();
+  if (path.filename() == "Analyzer.cpp") {
+    std::ifstream captureInputs(path.parent_path() / "Analyzer.CaptureInputs.cpp", std::ios::in | std::ios::binary);
+    assert(captureInputs && "Failed to open Analyzer.CaptureInputs.cpp");
+    ss << captureInputs.rdbuf();
+  }
   return ss.str();
 }
 
