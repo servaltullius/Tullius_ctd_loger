@@ -4,18 +4,9 @@
 
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadSplitAwareText;
 
 namespace {
-
-std::string ReadJoined(const std::filesystem::path& path)
-{
-  std::string text = ReadAllText(path);
-  if (path.filename() == "OutputWriter.cpp") {
-    text += "\n" + ReadAllText(path.parent_path() / "OutputWriter.Summary.cpp");
-    text += "\n" + ReadAllText(path.parent_path() / "OutputWriter.Report.cpp");
-  }
-  return text;
-}
 
 void TestBlackboxLoaderStallSourceContracts()
 {
@@ -43,7 +34,7 @@ void TestBlackboxLoaderStallSourceContracts()
   const auto analyzerHeaderText = ReadAllText(analyzerHeader);
   const auto analyzerInternalsText = ReadAllText(analyzerInternals);
   const auto analyzerFirstChanceText = ReadAllText(analyzerFirstChance);
-  const auto outputWriterText = ReadJoined(outputWriter);
+  const auto outputWriterText = ReadSplitAwareText(outputWriter);
 
   AssertContains(sharedHeaderText, "kModuleLoad", "EventType must include module load events.");
   AssertContains(sharedHeaderText, "kModuleUnload", "EventType must include module unload events.");

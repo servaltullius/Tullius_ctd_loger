@@ -16,41 +16,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SourceGuardTestUtils.h"
+
 namespace {
-
-std::string ReadFile(const std::filesystem::path& path)
-{
-  std::ostringstream ss;
-  const auto append = [&](const std::filesystem::path& inputPath) {
-    std::ifstream in(inputPath, std::ios::binary);
-    assert(in.is_open());
-    ss << in.rdbuf();
-  };
-  append(path);
-  if (path.filename() == "OutputWriter.cpp") {
-    append(path.parent_path() / "OutputWriter.Summary.cpp");
-    append(path.parent_path() / "OutputWriter.Report.cpp");
-  }
-  return ss.str();
-}
-
-std::filesystem::path ProjectRoot()
-{
-  const char* env = std::getenv("SKYDIAG_PROJECT_ROOT");
-  if (env && *env) {
-    return std::filesystem::path(env);
-  }
-  // Fallback: walk up from binary location
-  auto p = std::filesystem::current_path();
-  for (int i = 0; i < 5; ++i) {
-    if (std::filesystem::exists(p / "vcpkg.json")) {
-      return p;
-    }
-    p = p.parent_path();
-  }
-  assert(false && "Cannot find project root. Set SKYDIAG_PROJECT_ROOT.");
-  return {};
-}
+using skydiag::tests::source_guard::ProjectRoot;
+using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadProjectText;
 
 // ── Schema validation ──────────────────────────────────────────────────
 
@@ -84,7 +55,7 @@ nlohmann::json LoadGoldenJson()
 {
   const auto root = ProjectRoot();
   const auto goldenPath = root / "tests" / "data" / "golden_summary_v2.json";
-  const std::string text = ReadFile(goldenPath);
+  const std::string text = ReadAllText(goldenPath);
   return nlohmann::json::parse(text);
 }
 
@@ -299,8 +270,7 @@ void TestGoldenJsonValues(const nlohmann::json& j)
 
 void TestOutputWriterEmitsAllFields()
 {
-  const auto root = ProjectRoot();
-  const std::string src = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
 
   // All top-level JSON keys that BuildSummaryJson must produce
   const std::vector<std::string> requiredKeys = {
@@ -418,8 +388,7 @@ void TestOutputWriterEmitsAllFields()
 
 void TestOutputWriterReportTextSections()
 {
-  const auto root = ProjectRoot();
-  const std::string src = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
 
   const std::vector<std::string> requiredSections = {
     "SkyrimDiag Report",
@@ -458,10 +427,9 @@ void TestOutputWriterReportTextSections()
 
 void TestFirstChanceCandidateExplanationSourceGuards()
 {
-  const auto root = ProjectRoot();
-  const std::string evidenceSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
-  const std::string recommendationSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
-  const std::string summarySrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const std::string evidenceSrc = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.cpp");
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+  const std::string summarySrc = ReadProjectText("dump_tool/src/EvidenceBuilderSummary.cpp");
 
   assert(evidenceSrc.find("first_chance_context") != std::string::npos);
   assert(evidenceSrc.find("repeated suspicious first-chance") != std::string::npos);
@@ -473,10 +441,9 @@ void TestFirstChanceCandidateExplanationSourceGuards()
 
 void TestRecaptureEvaluationConsumptionSourceGuards()
 {
-  const auto root = ProjectRoot();
-  const std::string outputSrc = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
-  const std::string evidenceSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
-  const std::string recommendationSrc = ReadFile(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+  const std::string outputSrc = ReadProjectText("dump_tool/src/OutputWriter.cpp");
+  const std::string evidenceSrc = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.cpp");
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
 
   assert(outputSrc.find("RecaptureReasons:") != std::string::npos);
   assert(outputSrc.find("RecaptureEscalationLevel:") != std::string::npos);
@@ -493,8 +460,7 @@ void TestRecaptureEvaluationConsumptionSourceGuards()
 
 void TestOutputWriterWritesBothFiles()
 {
-  const auto root = ProjectRoot();
-  const std::string src = ReadFile(root / "dump_tool" / "src" / "OutputWriter.cpp");
+  const std::string src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
 
   assert(src.find("_SkyrimDiagSummary.json") != std::string::npos);
   assert(src.find("_SkyrimDiagReport.txt") != std::string::npos);

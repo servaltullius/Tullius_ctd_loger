@@ -1,39 +1,8 @@
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 
-static bool ReadAllText(const std::filesystem::path& path, std::string* out)
-{
-  if (out) {
-    out->clear();
-  }
-  std::ostringstream ss;
-  const auto append = [&](const std::filesystem::path& inputPath) {
-    std::ifstream in(inputPath, std::ios::in | std::ios::binary);
-    if (!in) {
-      return false;
-    }
-    ss << in.rdbuf();
-    return true;
-  };
-  if (!append(path)) {
-    return false;
-  }
-  if (path.filename() == "OutputWriter.cpp") {
-    if (!append(path.parent_path() / "OutputWriter.Summary.cpp")) {
-      return false;
-    }
-    if (!append(path.parent_path() / "OutputWriter.Report.cpp")) {
-      return false;
-    }
-  }
-  if (out) {
-    *out = ss.str();
-  }
-  return true;
-}
+#include "SourceGuardTestUtils.h"
 
 static bool Contains(const std::string& haystack, const char* needle)
 {
@@ -45,7 +14,7 @@ static bool Contains(const std::string& haystack, const char* needle)
 
 int main()
 {
-  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto repoRoot = skydiag::tests::source_guard::ProjectRoot();
 
   const std::filesystem::path helperSrcDir = repoRoot / "helper" / "src";
   if (!std::filesystem::exists(helperSrcDir) || !std::filesystem::is_directory(helperSrcDir)) {
@@ -64,7 +33,7 @@ int main()
       continue;
     }
     std::string txt;
-    if (!ReadAllText(path, &txt)) {
+    if (!skydiag::tests::source_guard::TryReadSplitAwareText(path, &txt)) {
       std::cerr << "ERROR: failed to read: " << path << "\n";
       return 1;
     }
@@ -90,12 +59,12 @@ int main()
     return 1;
   }
   std::string outputWriter;
-  if (!ReadAllText(outputWriterPath, &outputWriter)) {
+  if (!skydiag::tests::source_guard::TryReadSplitAwareText(outputWriterPath, &outputWriter)) {
     std::cerr << "ERROR: failed to read: " << outputWriterPath << "\n";
     return 1;
   }
   std::string incidentManifest;
-  if (!ReadAllText(incidentManifestPath, &incidentManifest)) {
+  if (!skydiag::tests::source_guard::TryReadSplitAwareText(incidentManifestPath, &incidentManifest)) {
     std::cerr << "ERROR: failed to read: " << incidentManifestPath << "\n";
     return 1;
   }

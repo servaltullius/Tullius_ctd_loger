@@ -1,45 +1,19 @@
 #include <cassert>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
-static std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  if (path.filename() == "Analyzer.cpp") {
-    std::ifstream captureInputs(path.parent_path() / "Analyzer.CaptureInputs.cpp", std::ios::in | std::ios::binary);
-    assert(captureInputs && "Failed to open Analyzer.CaptureInputs.cpp");
-    ss << captureInputs.rdbuf();
-  }
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
 
-static void AssertContains(const std::string& haystack, const char* needle, const char* message)
-{
-  assert(haystack.find(needle) != std::string::npos && message);
-}
+using skydiag::tests::source_guard::AssertContains;
+using skydiag::tests::source_guard::ReadProjectText;
 
 int main()
 {
-  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
-
-  const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
-  const auto analyzerPath = repoRoot / "dump_tool" / "src" / "Analyzer.cpp";
-  const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
-  const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
-  const auto crashLoggerPath = repoRoot / "dump_tool" / "src" / "CrashLogger.cpp";
-  const auto crashLoggerParseCoreImplPath = repoRoot / "dump_tool" / "src" / "CrashLoggerParseCore.cpp";
-
-  const std::string minidumpUtil = ReadAllText(minidumpUtilPath);
-  const std::string analyzer = ReadAllText(analyzerPath);
-  const std::string summary = ReadAllText(summaryPath);
-  const std::string rec = ReadAllText(recPath);
-  const std::string crashLogger = ReadAllText(crashLoggerPath);
-  const std::string crashLoggerParseCore = ReadAllText(crashLoggerParseCoreImplPath);
+  const std::string minidumpUtil = ReadProjectText("dump_tool/src/MinidumpUtil.cpp");
+  const std::string analyzer = ReadProjectText("dump_tool/src/Analyzer.cpp");
+  const std::string summary = ReadProjectText("dump_tool/src/EvidenceBuilderSummary.cpp");
+  const std::string rec = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+  const std::string crashLogger = ReadProjectText("dump_tool/src/CrashLogger.cpp");
+  const std::string crashLoggerParseCore = ReadProjectText("dump_tool/src/CrashLoggerParseCore.cpp");
 
   AssertContains(
     minidumpUtil,

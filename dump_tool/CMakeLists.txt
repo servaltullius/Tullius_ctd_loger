@@ -27,6 +27,10 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/EvidenceBuilder.h
   src/EvidenceBuilderCandidates.cpp
   src/EvidenceBuilderEvidence.cpp
+  src/EvidenceBuilderEvidencePipeline.h
+  src/EvidenceBuilderEvidence.Context.cpp
+  src/EvidenceBuilderEvidence.Crash.cpp
+  src/EvidenceBuilderEvidence.Freeze.cpp
   src/EvidenceBuilderPrivate.h
   src/EvidenceBuilderRecommendations.cpp
   src/EvidenceBuilderSummary.cpp

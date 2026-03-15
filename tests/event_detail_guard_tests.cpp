@@ -1,81 +1,58 @@
 #include <cassert>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <iterator>
-#include <sstream>
 #include <string>
 
-static std::string ReadFile(const char* relPath)
-{
-  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
-  assert(root && "SKYDIAG_PROJECT_ROOT must be set");
-  const std::filesystem::path p = std::filesystem::path(root) / relPath;
-  std::ostringstream ss;
-  const auto append = [&](const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::in | std::ios::binary);
-    assert(in && "Failed to open file");
-    ss << in.rdbuf();
-  };
-  append(p);
-  if (p.filename() == "Analyzer.cpp") {
-    append(p.parent_path() / "Analyzer.CaptureInputs.cpp");
-    append(p.parent_path() / "Analyzer.History.cpp");
-  }
-  if (p.filename() == "OutputWriter.cpp") {
-    append(p.parent_path() / "OutputWriter.Summary.cpp");
-    append(p.parent_path() / "OutputWriter.Report.cpp");
-  }
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadProjectText;
 
 static void TestEventRowHasDetailField()
 {
-  const auto src = ReadFile("dump_tool/src/Analyzer.h");
+  const auto src = ReadProjectText("dump_tool/src/Analyzer.h");
   assert(src.find("std::wstring detail") != std::string::npos);
 }
 
 static void TestFormatEventDetailDeclared()
 {
-  const auto src = ReadFile("dump_tool/src/AnalyzerInternals.h");
+  const auto src = ReadProjectText("dump_tool/src/AnalyzerInternals.h");
   assert(src.find("FormatEventDetail") != std::string::npos);
 }
 
 static void TestMenuHashLookupExists()
 {
-  const auto src = ReadFile("dump_tool/src/AnalyzerInternals.cpp");
+  const auto src = ReadProjectText("dump_tool/src/AnalyzerInternals.cpp");
   assert(src.find("kKnownMenuHashes") != std::string::npos);
 }
 
 static void TestPerfHitchFormatInDetail()
 {
-  const auto src = ReadFile("dump_tool/src/AnalyzerInternals.cpp");
+  const auto src = ReadProjectText("dump_tool/src/AnalyzerInternals.cpp");
   assert(src.find("hitch=") != std::string::npos);
 }
 
 static void TestStateFlagsDecoding()
 {
-  const auto src = ReadFile("dump_tool/src/AnalyzerInternals.cpp");
+  const auto src = ReadProjectText("dump_tool/src/AnalyzerInternals.cpp");
   assert(src.find("Loading") != std::string::npos);
   assert(src.find("InMenu") != std::string::npos);
 }
 
 static void TestOutputWriterEmitsDetail()
 {
-  const auto src = ReadFile("dump_tool/src/OutputWriter.cpp");
+  const auto src = ReadProjectText("dump_tool/src/OutputWriter.cpp");
   assert(src.find("\"detail\"") != std::string::npos);
   assert(src.find("ev.detail") != std::string::npos);
 }
 
 static void TestAnalyzerPopulatesDetail()
 {
-  const auto src = ReadFile("dump_tool/src/Analyzer.cpp");
+  const auto src = ReadProjectText("dump_tool/src/Analyzer.cpp");
   assert(src.find("FormatEventDetail") != std::string::npos);
 }
 
 static void TestPreFreezeContextEvidence()
 {
-  const auto src = ReadFile("dump_tool/src/EvidenceBuilderEvidence.cpp");
+  const auto src = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.cpp");
   assert(src.find("pre-freeze") != std::string::npos
       || src.find("PreFreezeContext") != std::string::npos
       || src.find("context before") != std::string::npos
@@ -84,13 +61,13 @@ static void TestPreFreezeContextEvidence()
 
 static void TestPluginStoresMenuNameInPayload()
 {
-  const auto src = ReadFile("plugin/src/EventSinks.cpp");
+  const auto src = ReadProjectText("plugin/src/EventSinks.cpp");
   assert(src.find("memcpy") != std::string::npos);
 }
 
 static void TestAnalyzerExtractsMenuNameFromPayload()
 {
-  const auto src = ReadFile("dump_tool/src/AnalyzerInternals.cpp");
+  const auto src = ReadProjectText("dump_tool/src/AnalyzerInternals.cpp");
   assert(src.find("menuBuf") != std::string::npos);
 }
 

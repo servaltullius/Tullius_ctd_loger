@@ -1,19 +1,13 @@
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 
-static std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadSplitAwareText;
 
 static void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
@@ -33,15 +27,13 @@ int main()
   const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
   const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
   const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
-  const auto evidencePath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp";
-
   const std::string stackwalkScoring = ReadAllText(stackwalkScoringPath);
   const std::string stackwalk = ReadAllText(stackwalkPath);
   const std::string stackScan = ReadAllText(stackScanPath);
   const std::string minidumpUtil = ReadAllText(minidumpUtilPath);
   const std::string summary = ReadAllText(summaryPath);
   const std::string rec = ReadAllText(recPath);
-  const std::string evidence = ReadAllText(evidencePath);
+  const std::string evidence = ReadSplitAwareText(repoRoot / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
 
   AssertContains(
     stackwalkScoring,

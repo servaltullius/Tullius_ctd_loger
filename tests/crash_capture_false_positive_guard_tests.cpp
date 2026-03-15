@@ -8,7 +8,7 @@ using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::AssertOrdered;
 using skydiag::tests::source_guard::ExtractFunctionBody;
 using skydiag::tests::source_guard::ReadAllText;
-using skydiag::tests::source_guard::ReadConcatenatedText;
+using skydiag::tests::source_guard::ReadSplitAwareText;
 
 int main()
 {
@@ -17,29 +17,18 @@ int main()
   const std::filesystem::path processAttachPath = repoRoot / "helper" / "src" / "ProcessAttach.cpp";
   const std::filesystem::path crashCapturePath = repoRoot / "helper" / "src" / "CrashCapture.cpp";
   const std::filesystem::path helperMainPath = repoRoot / "helper" / "src" / "main.cpp";
-  const std::filesystem::path helperMainStartupPath = repoRoot / "helper" / "src" / "HelperMain.Startup.cpp";
-  const std::filesystem::path helperMainProcessPath = repoRoot / "helper" / "src" / "HelperMain.Process.cpp";
-  const std::filesystem::path helperMainLoopPath = repoRoot / "helper" / "src" / "HelperMain.Loop.cpp";
   const std::filesystem::path dumpToolLaunchPath = repoRoot / "helper" / "src" / "DumpToolLaunch.cpp";
   const std::filesystem::path crashHeuristicsPath = repoRoot / "helper" / "include" / "SkyrimDiagHelper" / "CrashHeuristics.h";
 
   assert(std::filesystem::exists(processAttachPath) && "helper/src/ProcessAttach.cpp not found");
   assert(std::filesystem::exists(crashCapturePath) && "helper/src/CrashCapture.cpp not found");
   assert(std::filesystem::exists(helperMainPath) && "helper/src/main.cpp not found");
-  assert(std::filesystem::exists(helperMainStartupPath) && "helper/src/HelperMain.Startup.cpp not found");
-  assert(std::filesystem::exists(helperMainProcessPath) && "helper/src/HelperMain.Process.cpp not found");
-  assert(std::filesystem::exists(helperMainLoopPath) && "helper/src/HelperMain.Loop.cpp not found");
   assert(std::filesystem::exists(dumpToolLaunchPath) && "helper/src/DumpToolLaunch.cpp not found");
   assert(std::filesystem::exists(crashHeuristicsPath) && "helper/include/SkyrimDiagHelper/CrashHeuristics.h not found");
 
   const std::string processAttach = ReadAllText(processAttachPath);
   const std::string crashCapture = ReadAllText(crashCapturePath);
-  const std::string helperMain = ReadConcatenatedText({
-    helperMainPath,
-    helperMainStartupPath,
-    helperMainProcessPath,
-    helperMainLoopPath,
-  });
+  const std::string helperMain = ReadSplitAwareText(helperMainPath);
   const std::string dumpToolLaunch = ReadAllText(dumpToolLaunchPath);
   const std::string crashHeuristics = ReadAllText(crashHeuristicsPath);
 

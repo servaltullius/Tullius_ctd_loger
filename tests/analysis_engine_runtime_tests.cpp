@@ -46,6 +46,16 @@ std::string ReadJoinedText(std::initializer_list<std::filesystem::path> paths)
   return ss.str();
 }
 
+std::string ReadEvidenceBuilderEvidenceText(const std::filesystem::path& root)
+{
+  return ReadJoinedText({
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Context.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Crash.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Freeze.cpp",
+  });
+}
+
 void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
   assert(haystack.find(needle) != std::string::npos && message);
@@ -377,7 +387,7 @@ void TestCaptureQualitySourceContracts()
     root / "dump_tool" / "src" / "Analyzer.cpp",
     root / "dump_tool" / "src" / "Analyzer.History.cpp",
   });
-  const auto evidenceCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const auto evidenceCpp = ReadEvidenceBuilderEvidenceText(root);
   const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
 
   AssertContains(analyzerHeader, "symbol_runtime_degraded", "AnalysisResult must track degraded symbol/runtime state.");
@@ -453,7 +463,7 @@ void TestRecaptureEvaluationConsumptionSourceContracts()
     root / "dump_tool" / "src" / "OutputWriter.Summary.cpp",
     root / "dump_tool" / "src" / "OutputWriter.Report.cpp",
   });
-  const auto evidenceCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const auto evidenceCpp = ReadEvidenceBuilderEvidenceText(root);
   const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
 
   AssertContains(analyzerHeader, "incident_recapture_target_profile", "AnalysisResult must expose recapture target profile metadata.");

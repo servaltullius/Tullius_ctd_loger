@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -8,6 +9,15 @@
 #include <string>
 
 namespace skydiag::tests::source_guard {
+
+inline std::filesystem::path ProjectRoot()
+{
+  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
+  if (root && *root) {
+    return std::filesystem::path(root);
+  }
+  return std::filesystem::path(__FILE__).parent_path().parent_path();
+}
 
 inline std::string ReadAllText(const std::filesystem::path& path)
 {
@@ -23,6 +33,128 @@ inline std::string ReadConcatenatedText(std::initializer_list<std::filesystem::p
   std::ostringstream ss;
   for (const auto& path : paths) {
     ss << ReadAllText(path);
+  }
+  return ss.str();
+}
+
+inline bool TryReadAllText(const std::filesystem::path& path, std::string* out)
+{
+  if (out) {
+    out->clear();
+  }
+
+  std::ifstream in(path, std::ios::in | std::ios::binary);
+  if (!in) {
+    return false;
+  }
+
+  std::ostringstream ss;
+  ss << in.rdbuf();
+  if (out) {
+    *out = ss.str();
+  }
+  return true;
+}
+
+inline std::string ReadSplitAwareText(const std::filesystem::path& path)
+{
+  std::ostringstream ss;
+  ss << ReadAllText(path);
+
+  const auto name = path.filename().wstring();
+  const auto dir = path.parent_path();
+  if (name == L"Analyzer.cpp") {
+    ss << ReadAllText(dir / "Analyzer.CaptureInputs.cpp");
+    ss << ReadAllText(dir / "Analyzer.History.cpp");
+  } else if (name == L"OutputWriter.cpp") {
+    ss << ReadAllText(dir / "OutputWriter.Summary.cpp");
+    ss << ReadAllText(dir / "OutputWriter.Report.cpp");
+  } else if (name == L"EvidenceBuilderEvidence.cpp") {
+    ss << ReadAllText(dir / "EvidenceBuilderEvidence.Context.cpp");
+    ss << ReadAllText(dir / "EvidenceBuilderEvidence.Crash.cpp");
+    ss << ReadAllText(dir / "EvidenceBuilderEvidence.Freeze.cpp");
+  } else if (name == L"main.cpp") {
+    ss << ReadAllText(dir / "HelperMain.Startup.cpp");
+    ss << ReadAllText(dir / "HelperMain.Process.cpp");
+    ss << ReadAllText(dir / "HelperMain.Loop.cpp");
+  }
+
+  return ss.str();
+}
+
+inline bool TryReadSplitAwareText(const std::filesystem::path& path, std::string* out)
+{
+  std::ostringstream ss;
+  std::string chunk;
+  if (!TryReadAllText(path, &chunk)) {
+    return false;
+  }
+  ss << chunk;
+
+  const auto name = path.filename().wstring();
+  const auto dir = path.parent_path();
+  if (name == L"Analyzer.cpp") {
+    if (!TryReadAllText(dir / "Analyzer.CaptureInputs.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+    if (!TryReadAllText(dir / "Analyzer.History.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+  } else if (name == L"OutputWriter.cpp") {
+    if (!TryReadAllText(dir / "OutputWriter.Summary.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+    if (!TryReadAllText(dir / "OutputWriter.Report.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+  } else if (name == L"EvidenceBuilderEvidence.cpp") {
+    if (!TryReadAllText(dir / "EvidenceBuilderEvidence.Context.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+    if (!TryReadAllText(dir / "EvidenceBuilderEvidence.Crash.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+    if (!TryReadAllText(dir / "EvidenceBuilderEvidence.Freeze.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+  } else if (name == L"main.cpp") {
+    if (!TryReadAllText(dir / "HelperMain.Startup.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+    if (!TryReadAllText(dir / "HelperMain.Process.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+    if (!TryReadAllText(dir / "HelperMain.Loop.cpp", &chunk)) {
+      return false;
+    }
+    ss << chunk;
+  }
+
+  if (out) {
+    *out = ss.str();
+  }
+  return true;
+}
+
+inline std::string ReadProjectText(const std::filesystem::path& relativePath)
+{
+  return ReadSplitAwareText(ProjectRoot() / relativePath);
+}
+
+inline std::string ReadProjectConcatenatedText(std::initializer_list<std::filesystem::path> relativePaths)
+{
+  std::ostringstream ss;
+  for (const auto& relativePath : relativePaths) {
+    ss << ReadProjectText(relativePath);
   }
   return ss.str();
 }

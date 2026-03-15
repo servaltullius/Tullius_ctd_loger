@@ -1,38 +1,22 @@
 #include <cassert>
-#include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <iterator>
-#include <sstream>
 #include <string>
 
-static std::string ReadFile(const char* relPath)
-{
-  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
-  assert(root && "SKYDIAG_PROJECT_ROOT must be set");
-  const std::filesystem::path p = std::filesystem::path(root) / relPath;
-  std::ostringstream ss;
-  const auto append = [&](const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::in | std::ios::binary);
-    assert(in && "Failed to open file");
-    ss << in.rdbuf();
-  };
-  append(p);
-  if (p.filename() == "OutputWriter.cpp") {
-    append(p.parent_path() / "OutputWriter.Summary.cpp");
-    append(p.parent_path() / "OutputWriter.Report.cpp");
-  }
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ProjectRoot;
+using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadProjectText;
 
 static void TestOutputWriterHasTriageFields()
 {
-  const auto outputWriter = ReadFile("dump_tool/src/OutputWriter.cpp");
+  const auto outputWriter = ReadProjectText("dump_tool/src/OutputWriter.cpp");
   assert(outputWriter.find("\"triage\"") != std::string::npos);
   assert(outputWriter.find("LoadExistingSummaryTriage") != std::string::npos);
   assert(outputWriter.find("\"signature_matched\"") != std::string::npos);
 
-  const auto internals = ReadFile("dump_tool/src/OutputWriterInternals.cpp");
+  const auto internals = ReadProjectText("dump_tool/src/OutputWriterInternals.cpp");
   assert(internals.find("\"review_status\"") != std::string::npos);
   assert(internals.find("\"verdict\"") != std::string::npos);
   assert(internals.find("\"actual_cause\"") != std::string::npos);
@@ -41,9 +25,7 @@ static void TestOutputWriterHasTriageFields()
 
 static void TestBucketQualityScriptExists()
 {
-  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
-  assert(root);
-  const std::filesystem::path p = std::filesystem::path(root) / "scripts" / "analyze_bucket_quality.py";
+  const std::filesystem::path p = ProjectRoot() / "scripts" / "analyze_bucket_quality.py";
   assert(std::filesystem::exists(p));
 }
 
