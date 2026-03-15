@@ -195,6 +195,23 @@ def main() -> int:
     assert "Do not block prerelease solely on GitHub Actions." in development_md, (
         "DEVELOPMENT.md release checklist must keep prerelease decisions tied to local verification"
     )
+    assert "Windows-only synthetic helper runtime trigger checks:" in development_md, (
+        "DEVELOPMENT.md must document the game-off helper runtime trigger checks"
+    )
+    assert "This is not an analysis-quality regression suite." in development_md, (
+        "DEVELOPMENT.md must distinguish runtime trigger checks from analysis-quality regression"
+    )
+    for runtime_test in (
+        "skydiag_helper_runtime_smoke_tests.exe",
+        "skydiag_helper_false_positive_runtime_tests.exe",
+        "skydiag_helper_hang_runtime_tests.exe",
+    ):
+        assert runtime_test in development_md, (
+            f"DEVELOPMENT.md must document the Windows helper runtime test executable: {runtime_test}"
+        )
+    assert "run them one at a time" in development_md, (
+        "DEVELOPMENT.md must require sequential execution for the helper runtime tests"
+    )
 
     with tempfile.TemporaryDirectory(prefix="skydiag_pkg_test_") as td:
         td_path = Path(td)

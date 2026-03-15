@@ -422,6 +422,80 @@ set_tests_properties(skydiag_event_detail_guard_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
 
+if(WIN32)
+  add_library(skydiag_helper_runtime_test_support STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpProfile.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpToolLaunch.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpWriter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/EtwCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.Guards.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.Execute.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangDetect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperCommon.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperLog.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Process.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Startup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/IncidentManifest.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/LoadStats.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.Decision.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.Execute.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PluginScanner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessUtil.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PssSnapshot.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/RetentionWorker.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WctCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WindowHeuristics.cpp"
+  )
+
+  target_include_directories(skydiag_helper_runtime_test_support
+    PUBLIC
+      "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+      "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+
+  target_link_libraries(skydiag_helper_runtime_test_support
+    PUBLIC
+      skydiag_shared
+      nlohmann_json::nlohmann_json
+      Advapi32
+      User32
+      Dbghelp
+      Version
+      Shell32
+      Ole32
+  )
+
+  target_compile_definitions(skydiag_helper_runtime_test_support
+    PUBLIC
+      _UNICODE
+      UNICODE
+  )
+
+  add_executable(skydiag_helper_runtime_smoke_tests
+    helper_runtime_smoke_tests.cpp
+  )
+  target_link_libraries(skydiag_helper_runtime_smoke_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_helper_runtime_smoke_tests COMMAND skydiag_helper_runtime_smoke_tests)
+
+  add_executable(skydiag_helper_false_positive_runtime_tests
+    helper_false_positive_runtime_tests.cpp
+  )
+  target_link_libraries(skydiag_helper_false_positive_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_helper_false_positive_runtime_tests COMMAND skydiag_helper_false_positive_runtime_tests)
+
+  add_executable(skydiag_helper_hang_runtime_tests
+    helper_hang_runtime_tests.cpp
+  )
+  target_link_libraries(skydiag_helper_hang_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_helper_hang_runtime_tests COMMAND skydiag_helper_hang_runtime_tests)
+endif()
+
 if(NOT WIN32)
   if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
     add_executable(skydiag_plugin_rules_logic_tests

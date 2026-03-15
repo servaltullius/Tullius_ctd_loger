@@ -89,6 +89,27 @@ python3 scripts/package.py --build-dir build-win --winui-dir build-winui --out d
 bash scripts/verify_release_gate.sh
 ```
 
+Windows-only synthetic helper runtime trigger checks:
+- Purpose: verify that CTD and freeze paths trigger the helper, and that normal exit / weak crash paths do not misfire.
+- Scope: game-off helper/runtime behavior only. This is not an analysis-quality regression suite.
+- Run the three Windows tests sequentially after `build-win` succeeds:
+
+```powershell
+build-win\bin\skydiag_helper_runtime_smoke_tests.exe
+build-win\bin\skydiag_helper_false_positive_runtime_tests.exe
+build-win\bin\skydiag_helper_hang_runtime_tests.exe
+```
+
+If launching from WSL, prefer Windows PowerShell `Start-Process -Wait -PassThru` and run them one at a time:
+
+```bash
+/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$tests = @(
+  "Z:\home\kdw73\Tullius_ctd_loger\build-win\bin\skydiag_helper_runtime_smoke_tests.exe",
+  "Z:\home\kdw73\Tullius_ctd_loger\build-win\bin\skydiag_helper_false_positive_runtime_tests.exe",
+  "Z:\home\kdw73\Tullius_ctd_loger\build-win\bin\skydiag_helper_hang_runtime_tests.exe"
+); foreach ($test in $tests) { $p = Start-Process -FilePath $test -Wait -PassThru -NoNewWindow; if ($p.ExitCode -ne 0) { exit $p.ExitCode } }'
+```
+
 ## Issue Reporting / Troubleshooting
 
 - Issue reporting guide: `docs/BETA_TESTING.md`
