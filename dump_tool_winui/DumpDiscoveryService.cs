@@ -2,6 +2,8 @@ namespace SkyrimDiagDumpToolWinUI;
 
 internal static class DumpDiscoveryService
 {
+    private const string DefaultOutputSubfolderName = "Tullius Ctd Logs";
+
     private enum DumpSearchRootKind
     {
         Learned,
@@ -193,15 +195,7 @@ internal static class DumpDiscoveryService
             };
         }
 
-        if (TryResolveDefaultOutputRoot(layout, isKorean, out var defaultOutputRoot, out var sourceLabel))
-        {
-            return new[]
-            {
-                new DumpSearchRoot(defaultOutputRoot, DumpSearchRootKind.Automatic, sourceLabel, false),
-            };
-        }
-
-        return Array.Empty<DumpSearchRoot>();
+        return BuildDefaultOutputRoots(layout, isKorean);
     }
 
     private static bool TryResolveHelperLayout(out HelperLayout layout)
@@ -270,14 +264,48 @@ internal static class DumpDiscoveryService
 
         if (TryInferMo2BaseDirectory(layout.HelperDirectoryPath, out var mo2BaseDirectory))
         {
-            outputRoot = Path.Combine(mo2BaseDirectory, "overwrite", "SKSE", "Plugins");
+            outputRoot = Path.Combine(mo2BaseDirectory, "overwrite", "SKSE", "Plugins", DefaultOutputSubfolderName);
             sourceLabel = "MO2 overwrite";
             return true;
         }
 
-        outputRoot = layout.HelperDirectoryPath;
+        outputRoot = Path.Combine(layout.HelperDirectoryPath, DefaultOutputSubfolderName);
         sourceLabel = isKorean ? "기본 출력 위치" : "Default output folder";
         return true;
+    }
+
+    private static IReadOnlyList<DumpSearchRoot> BuildDefaultOutputRoots(HelperLayout layout, bool isKorean)
+    {
+        if (TryInferMo2BaseDirectory(layout.HelperDirectoryPath, out var mo2BaseDirectory))
+        {
+            return new[]
+            {
+                new DumpSearchRoot(
+                    Path.Combine(mo2BaseDirectory, "overwrite", "SKSE", "Plugins", "Tullius Ctd Logs"),
+                    DumpSearchRootKind.Automatic,
+                    "MO2 overwrite",
+                    false),
+                new DumpSearchRoot(
+                    Path.Combine(mo2BaseDirectory, "overwrite", "SKSE", "Plugins"),
+                    DumpSearchRootKind.Automatic,
+                    isKorean ? "기존 기본 출력 위치" : "Legacy default output folder",
+                    false),
+            };
+        }
+
+        return new[]
+        {
+            new DumpSearchRoot(
+                Path.Combine(layout.HelperDirectoryPath, DefaultOutputSubfolderName),
+                DumpSearchRootKind.Automatic,
+                isKorean ? "기본 출력 위치" : "Default output folder",
+                false),
+            new DumpSearchRoot(
+                layout.HelperDirectoryPath,
+                DumpSearchRootKind.Automatic,
+                isKorean ? "기존 기본 출력 위치" : "Legacy default output folder",
+                false),
+        };
     }
 
     private static bool TryInferMo2BaseDirectory(string helperDirectoryPath, out string mo2BaseDirectory)
