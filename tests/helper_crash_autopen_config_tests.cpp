@@ -64,11 +64,18 @@ int main()
     configCpp,
     "cfg.dumpToolExe = ReadIniString(",
     "Helper config loader must read long string values through the dynamic INI helper.");
+  AssertContains(
+    configCpp,
+    "Tullius Ctd Logs",
+    "Blank OutputDir default must resolve to the dedicated default output subfolder.");
   assert(
     configCpp.find("wchar_t outDir[MAX_PATH]{};") == std::string::npos &&
     "Helper config loader must not truncate OutputDir via MAX_PATH fixed buffers.");
   assert(
     configCpp.find("wchar_t dumpToolExe[MAX_PATH]{};") == std::string::npos &&
     "Helper config loader must not truncate DumpToolExe via MAX_PATH fixed buffers.");
+  assert(
+    configCpp.find("cfg.outputDir = ExeDir();") == std::string::npos &&
+    "Blank OutputDir must not fall back to the bare helper exe directory anymore.");
   return 0;
 }

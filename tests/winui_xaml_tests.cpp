@@ -173,6 +173,12 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
   RequireContains(service, "SkyrimDiagHelper.ini", "Discovery service must inspect SkyrimDiagHelper.ini to infer the real output root.");
   RequireContains(service, "OutputDir", "Discovery service must honor SkyrimDiagHelper.ini OutputDir.");
   RequireContains(service, "overwrite", "Discovery service must infer MO2 overwrite when OutputDir is blank.");
+  RequireContains(service, "Tullius Ctd Logs", "Discovery service must know the default output subfolder name.");
+  RequireContains(service, "BuildDefaultOutputRoots", "Discovery service must build new and legacy blank-default roots explicitly.");
+  RequireContains(
+    service,
+    "Path.Combine(mo2BaseDirectory, \"overwrite\", \"SKSE\", \"Plugins\", \"Tullius Ctd Logs\")",
+    "MO2 blank default should target the dedicated output subfolder.");
   RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");
 
   const auto cs = ReadMainWindowCodeBehindText(repoRoot);
