@@ -2,6 +2,20 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.43 (2026-03-23)
+
+### 수정
+- **Helper: blank `OutputDir` 기본 출력 하위 폴더 적용** — `OutputDir=`를 비워 두면 기본 출력 위치 바로 아래가 아니라 `Tullius Ctd Logs` 하위 폴더를 사용하도록 변경. MO2 `overwrite`가 빠르게 지저분해지는 문제를 완화.
+- **WinUI: 새 기본 출력 폴더 자동 발견** — blank `OutputDir` 환경에서 `Tullius Ctd Logs` 하위 폴더를 우선 스캔하고, 기존 legacy 기본 위치도 함께 찾아서 업데이트 직후에도 기존 dump를 계속 발견할 수 있도록 조정.
+- **문서/배포 INI: `OutputDir` 사용법 명확화** — 따옴표 불필요, 상대경로 허용, blank 값의 의미를 README/한글 문서/Nexus 설명/배포용 ini에 맞춰 정리.
+
+### 리팩터링
+- Helper: 기본 출력 경로 계산 헬퍼를 정리하고, 더 이상 쓰지 않는 중복 기본 경로 처리 코드를 제거.
+
+### 테스트
+- helper 설정 가드 테스트에 기본 `Tullius Ctd Logs` 계약 검증 추가.
+- WinUI 자동 dump 발견 가드 테스트에 새 기본 출력 하위 폴더 및 legacy fallback 검증 추가.
+
 ## v0.2.42 (2026-03-05)
 
 ### 추가
