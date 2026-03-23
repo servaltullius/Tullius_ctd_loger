@@ -253,27 +253,6 @@ internal static class DumpDiscoveryService
         }
     }
 
-    private static bool TryResolveDefaultOutputRoot(
-        HelperLayout layout,
-        bool isKorean,
-        out string outputRoot,
-        out string sourceLabel)
-    {
-        outputRoot = string.Empty;
-        sourceLabel = string.Empty;
-
-        if (TryInferMo2BaseDirectory(layout.HelperDirectoryPath, out var mo2BaseDirectory))
-        {
-            outputRoot = Path.Combine(mo2BaseDirectory, "overwrite", "SKSE", "Plugins", DefaultOutputSubfolderName);
-            sourceLabel = "MO2 overwrite";
-            return true;
-        }
-
-        outputRoot = Path.Combine(layout.HelperDirectoryPath, DefaultOutputSubfolderName);
-        sourceLabel = isKorean ? "기본 출력 위치" : "Default output folder";
-        return true;
-    }
-
     private static IReadOnlyList<DumpSearchRoot> BuildDefaultOutputRoots(HelperLayout layout, bool isKorean)
     {
         if (TryInferMo2BaseDirectory(layout.HelperDirectoryPath, out var mo2BaseDirectory))
