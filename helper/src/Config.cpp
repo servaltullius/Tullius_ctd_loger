@@ -11,6 +11,8 @@
 namespace skydiag::helper {
 namespace {
 
+constexpr wchar_t kDefaultOutputSubdir[] = L"Tullius Ctd Logs";
+
 std::wstring ExeDir()
 {
   std::vector<wchar_t> buf(32768, L'\0');
@@ -76,6 +78,14 @@ std::uint32_t ReadIniUint32Clamped(
   return static_cast<std::uint32_t>(clamped);
 }
 
+std::wstring ResolveEffectiveOutputDir(std::wstring rawOutputDir)
+{
+  if (!rawOutputDir.empty()) {
+    return rawOutputDir;
+  }
+  return (std::filesystem::path(ExeDir()) / kDefaultOutputSubdir).wstring();
+}
+
 }  // namespace
 
 HelperConfig LoadConfig(std::wstring* err)
@@ -101,7 +111,7 @@ HelperConfig LoadConfig(std::wstring* err)
     cfg.dumpMode = DumpMode::kDefault;
   }
 
-  cfg.outputDir = ReadIniString(path, L"SkyrimDiagHelper", L"OutputDir", L"");
+  cfg.outputDir = ResolveEffectiveOutputDir(ReadIniString(path, L"SkyrimDiagHelper", L"OutputDir", L""));
 
   cfg.enableManualCaptureHotkey =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableManualCaptureHotkey", 1, path.c_str()) != 0;
@@ -207,10 +217,6 @@ HelperConfig LoadConfig(std::wstring* err)
     path, L"SkyrimDiagHelper", L"MaxHelperLogBytes", 8 * 1024 * 1024, 0, 100 * 1024 * 1024);
   cfg.maxHelperLogFiles = ReadIniUint32Clamped(
     path, L"SkyrimDiagHelper", L"MaxHelperLogFiles", 3, 0, 20);
-
-  if (cfg.outputDir.empty()) {
-    cfg.outputDir = ExeDir();
-  }
 
   if (err) {
     err->clear();
