@@ -70,10 +70,16 @@ jobs:
         run: |
           python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
 
-      - name: Extract release notes from CHANGELOG.md
+      - name: Resolve release notes
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
+          $draftPath = Join-Path "docs/release/drafts" "$tag.md"
+          if (Test-Path $draftPath) {
+            Copy-Item $draftPath release_notes.md
+            exit 0
+          }
+
           $lines = Get-Content CHANGELOG.md
           $capture = $false
           $notes = @()
