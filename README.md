@@ -45,8 +45,9 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 ## Output Location
 
-- By default: MO2 `overwrite\SKSE\Plugins\`
+- By default (`OutputDir=` left blank): MO2 `overwrite\SKSE\Plugins\Tullius Ctd Logs\`
 - To redirect: set `OutputDir=` in `SkyrimDiagHelper.ini`
+  Leaving it blank uses the default `Tullius Ctd Logs` subfolder. Explicit values should be plain paths without quotes. Absolute paths work; relative paths are resolved from the helper folder.
 - Startup compatibility snapshot: `SkyrimDiag_Preflight.json` (`EnableCompatibilityPreflight=1`)
 - Dump failure fallback hint: `SkyrimDiag_WER_LocalDumps_Hint.txt` (`EnableWerDumpFallbackHint=1`)
 

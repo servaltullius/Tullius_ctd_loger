@@ -25,8 +25,9 @@
 ## 2) 기본 동작
 
 - SKSE로 게임을 실행하면(기본 설정 기준) Helper가 자동으로 붙어서 모니터링합니다.
-- 덤프/분석 결과는 보통 MO2 `overwrite\SKSE\Plugins\`에 생성됩니다.
+- `OutputDir=`를 비워 두면 덤프/분석 결과는 보통 MO2 `overwrite\SKSE\Plugins\Tullius Ctd Logs\`에 생성됩니다.
   - 다른 폴더로 모으고 싶으면 `SkyrimDiagHelper.ini`의 `OutputDir=`를 설정하세요.
+  - 직접 지정할 때는 따옴표 없이 경로 문자열만 적으면 됩니다. 절대경로도 되고, 상대경로는 헬퍼 폴더 기준입니다.
 
 ## 2-1) 추천 설정(베타용)
 
