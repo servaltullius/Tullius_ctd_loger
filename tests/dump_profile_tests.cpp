@@ -31,6 +31,7 @@ int main()
   AssertContains(header, "bool includeThreadInfo", "DumpProfile must model thread-info inclusion.");
   AssertContains(header, "bool includeHandleData", "DumpProfile must model handle-data inclusion.");
   AssertContains(header, "bool includeUnloadedModules", "DumpProfile must model unloaded-module inclusion.");
+  AssertContains(header, "bool includeCodeSegments", "DumpProfile must model code-segment inclusion for machine-code-aware analysis.");
   AssertContains(header, "bool includeFullMemory", "DumpProfile must model full-memory inclusion separately.");
   AssertContains(header, "CaptureKindToString", "DumpProfile must expose a capture-kind string helper.");
   AssertContains(header, "ResolveDumpProfile", "DumpProfile must expose profile resolution.");
@@ -40,6 +41,7 @@ int main()
   AssertContains(impl, "CaptureKind::Hang", "Hang capture must map to a specific profile.");
   AssertContains(impl, "CaptureKind::Manual", "Manual capture must map to a specific profile.");
   AssertContains(impl, "CaptureKind::CrashRecapture", "Crash recapture must map to a specific profile.");
+  AssertContains(impl, "profile.includeCodeSegments = true", "At least one capture profile must request code segments for richer crash analysis.");
   AssertContains(impl, "profile.includeFullMemory = true", "At least one capture profile must be able to request full memory.");
   AssertContains(impl, "profile.preferMainThread = true", "Profiles must express thread-priority intent.");
   AssertContains(impl, "profile.preferWctThreads = true", "Hang/manual profiles must express WCT-thread preference.");

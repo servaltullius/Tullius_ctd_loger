@@ -2,6 +2,18 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.44 (2026-03-24)
+
+### 수정
+- **Helper: machine-code-aware dump capture 보강** — 기본 crash profile과 crash recapture profile에서 `MiniDumpWithCodeSegs`를 함께 요청하도록 변경. 외부 reverse-engineering/disassembly 도구가 dump 안에서 기계어 바이트를 찾지 못해 `not found machine code`로 실패하던 사례를 완화.
+- **Dump metadata: code segment 포함 여부 노출** — incident manifest, summary JSON, report text에 `include_code_segments` / `CaptureProfileCodeSegments`를 기록해 실제 캡처 프로필을 사후 확인할 수 있도록 정리.
+- **문서/배포 INI: DumpMode=1 설명 보정** — 배포용 `SkyrimDiagHelper.ini` 주석을 현재 기본 프로필(`WithThreadInfo+HandleData+UnloadedModules+CodeSegs`)에 맞게 갱신.
+
+### 테스트
+- dump profile/source guard 테스트에 code-segment 캡처 계약 검증 추가.
+- incident manifest / output snapshot 테스트에 code-segment 메타데이터 출력 검증 추가.
+- Linux: `ctest --test-dir build-linux-red --output-on-failure` 통과(`55/55`).
+
 ## v0.2.43 (2026-03-23)
 
 ### 수정

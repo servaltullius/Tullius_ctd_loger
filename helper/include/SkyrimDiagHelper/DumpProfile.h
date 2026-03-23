@@ -18,6 +18,7 @@ struct DumpProfile
   bool includeThreadInfo = false;
   bool includeHandleData = false;
   bool includeUnloadedModules = false;
+  bool includeCodeSegments = false;
   bool includeFullMemory = false;
   bool preferMainThread = false;
   bool preferWctThreads = false;

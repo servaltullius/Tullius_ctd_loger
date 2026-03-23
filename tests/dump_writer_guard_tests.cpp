@@ -45,6 +45,7 @@ int main()
   AssertContains(impl, "MiniDumpWriteDump(", "DumpWriter must still use MiniDumpWriteDump.");
   AssertContains(impl, "&callbackInfo", "MiniDumpWriteDump must receive callback information.");
   AssertContains(impl, "ApplyProfileToDumpType", "DumpWriter must derive dump flags from profile state.");
+  AssertContains(impl, "MiniDumpWithCodeSegs", "DumpWriter must request code segments when the dump profile enables machine-code capture.");
   AssertContains(impl, "MiniDumpCallback", "DumpWriter must define a callback routine.");
   AssertContains(impl, "IsProcessSnapshotCallback", "DumpWriter callback must handle process snapshot exports.");
 

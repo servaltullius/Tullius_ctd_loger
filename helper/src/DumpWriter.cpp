@@ -32,6 +32,9 @@ MINIDUMP_TYPE ApplyProfileToDumpType(const DumpProfile& dumpProfile)
   if (dumpProfile.includeUnloadedModules) {
     t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithUnloadedModules);
   }
+  if (dumpProfile.includeCodeSegments) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithCodeSegs);
+  }
   if (dumpProfile.includeFullMemory) {
     t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithFullMemory);
   }

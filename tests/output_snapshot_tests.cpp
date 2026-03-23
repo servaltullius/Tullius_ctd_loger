@@ -372,6 +372,7 @@ void TestOutputWriterEmitsAllFields()
     "\"target_profile\"",
     "\"reasons\"",
     "\"escalation_level\"",
+    "\"include_code_segments\"",
   };
 
   for (const auto& key : nestedKeys) {
@@ -397,6 +398,7 @@ void TestOutputWriterReportTextSections()
     "ThreadId:",
     "Module+Offset:",
     "CaptureProfileBaseMode:",
+    "CaptureProfileCodeSegments:",
     "CaptureProfileFullMemory:",
     "RecaptureTriggered:",
     "RecaptureTargetProfile:",

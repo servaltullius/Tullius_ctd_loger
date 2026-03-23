@@ -101,6 +101,7 @@ nlohmann::json MakeCaptureProfileJson(const skydiag::helper::DumpProfile& dumpPr
     { "include_thread_info", dumpProfile.includeThreadInfo },
     { "include_handle_data", dumpProfile.includeHandleData },
     { "include_unloaded_modules", dumpProfile.includeUnloadedModules },
+    { "include_code_segments", dumpProfile.includeCodeSegments },
     { "include_full_memory", dumpProfile.includeFullMemory },
     { "prefer_main_thread", dumpProfile.preferMainThread },
     { "prefer_wct_threads", dumpProfile.preferWctThreads },

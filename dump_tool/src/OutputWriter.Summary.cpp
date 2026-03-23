@@ -79,6 +79,9 @@ nlohmann::json BuildSummaryJson(
     if (!captureProfile.contains("base_mode")) {
       captureProfile["base_mode"] = "";
     }
+    if (!captureProfile.contains("include_code_segments")) {
+      captureProfile["include_code_segments"] = false;
+    }
     if (!captureProfile.contains("include_full_memory")) {
       captureProfile["include_full_memory"] = false;
     }

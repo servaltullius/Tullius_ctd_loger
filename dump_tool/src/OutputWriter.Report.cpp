@@ -50,6 +50,10 @@ std::string BuildReportText(
         rpt << (en ? "CaptureProfileBaseMode: " : "CaptureProfileBaseMode: ")
             << captureProfile["base_mode"].get<std::string>() << "\n";
       }
+      if (captureProfile.contains("include_code_segments") && captureProfile["include_code_segments"].is_boolean()) {
+        rpt << (en ? "CaptureProfileCodeSegments: " : "CaptureProfileCodeSegments: ")
+            << (captureProfile["include_code_segments"].get<bool>() ? "1" : "0") << "\n";
+      }
       if (captureProfile.contains("include_full_memory") && captureProfile["include_full_memory"].is_boolean()) {
         rpt << (en ? "CaptureProfileFullMemory: " : "CaptureProfileFullMemory: ")
             << (captureProfile["include_full_memory"].get<bool>() ? "1" : "0") << "\n";

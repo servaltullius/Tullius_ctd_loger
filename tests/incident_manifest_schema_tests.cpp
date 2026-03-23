@@ -96,6 +96,10 @@ int main()
     std::cerr << "ERROR: Incident manifest schema must include effective profile flags\n";
     return 1;
   }
+  if (!Contains(outputWriter, "include_code_segments")) {
+    std::cerr << "ERROR: Incident manifest schema must include code-segment capture flags\n";
+    return 1;
+  }
   if (!Contains(incidentManifest, "recapture_evaluation")) {
     std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation\n";
     return 1;
