@@ -134,6 +134,21 @@ static void TestMainWindowHasCrashLoggerFirstReadingPath()
   RequireContains(vm, "BuildConflictComparisonRows", "View model must build conflict comparison rows.");
 }
 
+static void TestMainWindowCrashLoggerFrameFirstWordingAlignment()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  RequireContains(xaml, "CrashLogger-first reading path", "UI must keep the CrashLogger-first reading-path section aligned.");
+
+  const auto localization = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Localization.cs");
+  RequireContains(localization, "CrashLogger context", "CrashLogger-first quick label must remain visible.");
+
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireContains(vm, "Crash Logger frame", "CrashLogger-first wording must align with the stronger frame-first CTD output.");
+  RequireContains(vm, "DLL guidance", "Frame-backed DLL guidance should be reflected in the WinUI reading path copy.");
+}
+
 static void TestAnalyzePanelHasDumpDiscoveryFlow()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -271,6 +286,7 @@ int main()
   TestMainWindowHasTroubleshootingSection();
   TestMainWindowHasTriageReviewEditor();
   TestMainWindowHasCrashLoggerFirstReadingPath();
+  TestMainWindowCrashLoggerFrameFirstWordingAlignment();
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
   TestWinUiConsumesRecaptureContext();

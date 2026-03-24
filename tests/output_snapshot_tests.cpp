@@ -477,6 +477,30 @@ void TestCrashLoggerFrameCandidateFamilySourceGuards()
   std::cout << "  [PASS] Crash Logger frame candidate family guards\n";
 }
 
+void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
+{
+  const std::string summarySrc = ReadProjectConcatenatedText({
+    "dump_tool/src/EvidenceBuilderSummary.cpp",
+    "dump_tool/src/EvidenceBuilderRecommendations.cpp",
+    "dump_tool/src/OutputWriter.Summary.cpp",
+  });
+
+  AssertContains(
+    summarySrc,
+    "crash_logger_frame",
+    "EXE/system victim summary must prefer Crash Logger frame-backed DLL guidance over isolated object refs.");
+  AssertContains(
+    summarySrc,
+    "Crash Logger frame first",
+    "Summary and recommendation wording must stay aligned with the frame-first CTD engine path.");
+  AssertContains(
+    summarySrc,
+    "direct DLL fault",
+    "Direct DLL fault cases should surface DLL guidance before broader EXE/system triage.");
+
+  std::cout << "  [PASS] Crash Logger frame-first summary priority guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -504,6 +528,7 @@ int main()
   TestFirstChanceCandidateExplanationSourceGuards();
   TestRecaptureEvaluationConsumptionSourceGuards();
   TestCrashLoggerFrameCandidateFamilySourceGuards();
+  TestCrashLoggerFrameFirstSummaryPrioritySourceGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;
