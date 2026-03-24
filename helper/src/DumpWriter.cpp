@@ -20,6 +20,11 @@ struct DumpCallbackContext
   bool isProcessSnapshot = false;
 };
 
+bool ShouldShapePreferredThread(const DumpCallbackContext& ctx)
+{
+  return ctx.preferredThreadId != 0 && (ctx.profile.preferCrashContext || ctx.profile.preferMainThread);
+}
+
 MINIDUMP_TYPE ApplyProfileToDumpType(const DumpProfile& dumpProfile)
 {
   MINIDUMP_TYPE t = MiniDumpNormal;
@@ -70,6 +75,15 @@ BOOL CALLBACK MiniDumpCallback(
   const auto callbackType = callbackInput->CallbackType;
   if (callbackType == IsProcessSnapshotCallback && callbackOutput) {
     callbackOutput->Status = ctx->isProcessSnapshot ? S_FALSE : S_OK;
+    return TRUE;
+  }
+  if (callbackType == IncludeThreadCallback && callbackOutput && ShouldShapePreferredThread(*ctx)) {
+    const DWORD threadId = callbackInput->IncludeThread.ThreadId;
+    if (threadId == ctx->preferredThreadId) {
+      callbackOutput->ThreadWriteFlags |= ThreadWriteInstructionWindow;
+    } else if (ctx->profile.preferCrashContext) {
+      callbackOutput->ThreadWriteFlags &= ~ThreadWriteInstructionWindow;
+    }
     return TRUE;
   }
   (void)callbackType;

@@ -53,6 +53,9 @@ int main()
   AssertContains(impl, "MiniDumpIgnoreInaccessibleMemory", "DumpWriter must tolerate inaccessible memory when requested.");
   AssertContains(impl, "MiniDumpCallback", "DumpWriter must define a callback routine.");
   AssertContains(impl, "IsProcessSnapshotCallback", "DumpWriter callback must handle process snapshot exports.");
+  AssertContains(impl, "IncludeThreadCallback", "DumpWriter callback must start shaping preferred threads.");
+  AssertContains(impl, "ThreadWriteFlags", "DumpWriter callback must control thread write flags for preferred CTD threads.");
+  AssertContains(impl, "preferredThreadId", "DumpWriter callback must keep honoring the preferred crash thread.");
 
   AssertContains(crashCapture, "CaptureKind::Crash", "Crash capture must request the crash dump profile.");
   AssertContains(hangCapture, "CaptureKind::Hang", "Hang capture must request the hang dump profile.");
