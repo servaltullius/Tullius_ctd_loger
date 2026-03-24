@@ -1,0 +1,15 @@
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.GeneratedMSBuildEditorConfig.editorconfig
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.AssemblyInfoInputs.cache
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.AssemblyInfo.cs
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.csproj.CoreCompileInputs.cache
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.sourcelink.json
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\bin\Debug\net8.0\ShareTextFixtureHarness.exe
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\bin\Debug\net8.0\ShareTextFixtureHarness.deps.json
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\bin\Debug\net8.0\ShareTextFixtureHarness.runtimeconfig.json
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\bin\Debug\net8.0\ShareTextFixtureHarness.dll
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\bin\Debug\net8.0\ShareTextFixtureHarness.pdb
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.dll
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\refint\ShareTextFixtureHarness.dll
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.pdb
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ShareTextFixtureHarness.genruntimeconfig.cache
+\\wsl.localhost\Ubuntu\home\kdw73\Tullius_ctd_loger\tests\share_text_fixture_harness\obj\Debug\net8.0\ref\ShareTextFixtureHarness.dll

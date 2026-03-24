@@ -355,6 +355,11 @@ add_test(
 )
 
 add_test(
+  NAME skydiag_share_text_fixture_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/share_text_fixture_tests.py"
+)
+
+add_test(
   NAME skydiag_vibekit_smoke_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/vibekit_smoke_tests.py"
 )

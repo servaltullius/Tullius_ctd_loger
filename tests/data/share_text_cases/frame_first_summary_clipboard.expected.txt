@@ -1,0 +1,10 @@
+SkyrimDiag report
+Dump: /tmp/frame_first_summary.dmp
+Conclusion: Top suspect: Precision.dll — Crash Logger frame first and direct DLL fault both point inside this DLL. (Confidence: High)
+Crash bucket key: CTD-precision-direct-fault
+Module+Offset: SkyrimSE.exe+0x00ABCDEF
+Inferred mod: Precision - Accurate Melee Collisions
+Actionable candidate: Precision.dll
+Evidence agreement: 2 signal families agree
+CrashLogger context: Precision.dll — Crash Logger frame first (direct DLL fault) — DLL guidance
+Next action: DLL guidance: check Precision.dll first

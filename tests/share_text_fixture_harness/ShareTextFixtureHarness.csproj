@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\dump_tool_winui\AnalysisSummary.cs" Link="AnalysisSummary.cs" />
+    <Compile Include="..\..\dump_tool_winui\SummaryTriageStore.cs" Link="SummaryTriageStore.cs" />
+    <Compile Include="..\..\dump_tool_winui\DumpToolInvocationOptions.cs" Link="DumpToolInvocationOptions.cs" />
+    <Compile Include="..\..\dump_tool_winui\NativeAnalyzerBridge.cs" Link="NativeAnalyzerBridge.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.cs" Link="MainWindowViewModel.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.Candidates.cs" Link="MainWindowViewModel.Candidates.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.Recommendations.cs" Link="MainWindowViewModel.Recommendations.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.ShareText.cs" Link="MainWindowViewModel.ShareText.cs" />
+  </ItemGroup>
+</Project>

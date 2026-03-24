@@ -124,12 +124,6 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildNextActionSummary(AnalysisSummary summary)
     {
-        var taggedAction = summary.Recommendations.FirstOrDefault(IsPriorityActionRecommendation);
-        if (!string.IsNullOrWhiteSpace(taggedAction))
-        {
-            return StripRecommendationTag(taggedAction);
-        }
-
         if (summary.ActionableCandidates.Count > 0)
         {
             var primaryCandidate = summary.ActionableCandidates[0];
@@ -155,6 +149,12 @@ internal sealed partial class MainWindowViewModel
                 "conflicting" => T($"Compare {candidateName} one side at a time", $"{candidateName} 후보를 한쪽씩 나눠 비교"),
                 _ => T("Review the first recommendation", "첫 번째 권장 조치를 확인"),
             };
+        }
+
+        var taggedAction = summary.Recommendations.FirstOrDefault(IsPriorityActionRecommendation);
+        if (!string.IsNullOrWhiteSpace(taggedAction))
+        {
+            return StripRecommendationTag(taggedAction);
         }
 
         var firstRecommendation = summary.Recommendations.FirstOrDefault();

@@ -1,0 +1,9 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+📌 Cross-validated candidate: Precision.dll
+🧭 Evidence agreement: 2 signal families agree
+🧩 CrashLogger context: Precision.dll — Crash Logger frame first (direct DLL fault) — DLL guidance
+🔍 Type: CTD-precision-direct-fault
+📍 Module+Offset: SkyrimSE.exe+0x00ABCDEF
+💡 Conclusion: Top suspect: Precision.dll — Crash Logger frame first and direct DLL fault both point inside this DLL. (Confidence: High)
+🛠️ Next action: DLL guidance: check Precision.dll first
+— Tullius CTD Logger

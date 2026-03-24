@@ -1,0 +1,74 @@
+{
+  "summary_sentence": "Top suspect: Precision.dll — Crash Logger frame first and direct DLL fault both point inside this DLL. (Confidence: High)",
+  "crash_bucket_key": "CTD-precision-direct-fault",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "SkyrimSE.exe+0x00ABCDEF",
+    "inferred_mod_name": "Precision - Accurate Melee Collisions"
+  },
+  "crash_logger": {
+    "direct_fault_module": "Precision.dll",
+    "first_actionable_probable_module": "",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 2,
+    "object_refs": []
+  },
+  "suspects": [
+    {
+      "confidence": "High",
+      "module_filename": "Precision.dll",
+      "module_path": "",
+      "inferred_mod_name": "Precision - Accurate Melee Collisions",
+      "reason": "Crash Logger direct-fault frame and actionable stack both point inside this DLL.",
+      "score": 21
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Crash Logger frame] Crash Logger frame first (direct DLL fault) and another signal both point to DLL candidate Precision.dll (Crash Logger frame + actionable stack). Use DLL guidance first: update/reinstall or isolate it before broader EXE/system triage."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "cross_validated",
+      "confidence": "High",
+      "display_name": "Precision.dll",
+      "primary_identifier": "Precision.dll",
+      "secondary_label": "Precision - Accurate Melee Collisions",
+      "plugin_name": "",
+      "mod_name": "Precision - Accurate Melee Collisions",
+      "module_filename": "Precision.dll",
+      "explanation": "Crash Logger frame + actionable stack agree on Precision.dll.",
+      "family_count": 2,
+      "score": 21,
+      "cross_validated": true,
+      "has_conflict": false,
+      "supporting_families": [
+        "crash_logger_frame",
+        "actionable_stack"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}
