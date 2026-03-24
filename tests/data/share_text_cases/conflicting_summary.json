@@ -1,0 +1,110 @@
+{
+  "summary_sentence": "Crash Logger frame points to Precision.dll, but object ref and history still keep OtherRef.esp in the comparison set. (Confidence: Medium)",
+  "crash_bucket_key": "CTD-conflicting-frame-vs-ref",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "KERNELBASE.dll+0x00012345",
+    "inferred_mod_name": "Precision - Accurate Melee Collisions"
+  },
+  "crash_logger": {
+    "direct_fault_module": "",
+    "first_actionable_probable_module": "Precision.dll",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 1,
+    "object_refs": [
+      {
+        "esp_name": "OtherRef.esp",
+        "best_object_type": "NPC",
+        "best_location": "WhiterunWorld",
+        "object_name": "Test NPC",
+        "form_id": "0xFE000800",
+        "ref_count": 3,
+        "relevance_score": 14
+      }
+    ]
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "Precision.dll",
+      "module_path": "",
+      "inferred_mod_name": "Precision - Accurate Melee Collisions",
+      "reason": "Crash Logger first actionable probable frame points to this DLL.",
+      "score": 14
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Conflict] Precision.dll (Crash Logger frame + actionable stack) competes with OtherRef.esp (CrashLogger object ref + history repeat). Check whether Crash Logger frame first DLL guidance and object ref/stack evidence disagree before retesting."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "conflicting",
+      "confidence": "Medium",
+      "display_name": "Precision.dll",
+      "primary_identifier": "Precision.dll",
+      "secondary_label": "Precision - Accurate Melee Collisions",
+      "plugin_name": "",
+      "mod_name": "Precision - Accurate Melee Collisions",
+      "module_filename": "Precision.dll",
+      "explanation": "Crash Logger frame and actionable stack agree on Precision.dll, but another clue still conflicts.",
+      "family_count": 2,
+      "score": 14,
+      "cross_validated": false,
+      "has_conflict": true,
+      "supporting_families": [
+        "crash_logger_frame",
+        "actionable_stack"
+      ],
+      "conflicting_families": [
+        "crash_logger_object_ref",
+        "history_repeat"
+      ]
+    },
+    {
+      "status_id": "related",
+      "confidence": "Medium",
+      "display_name": "OtherRef.esp",
+      "primary_identifier": "OtherRef.esp",
+      "secondary_label": "object ref candidate",
+      "plugin_name": "OtherRef.esp",
+      "mod_name": "Other Ref Mod",
+      "module_filename": "OtherRef.esp",
+      "explanation": "CrashLogger object ref and history still keep this ESP in scope.",
+      "family_count": 2,
+      "score": 11,
+      "cross_validated": false,
+      "has_conflict": true,
+      "supporting_families": [
+        "crash_logger_object_ref",
+        "history_repeat"
+      ],
+      "conflicting_families": [
+        "crash_logger_frame",
+        "actionable_stack"
+      ]
+    }
+  ]
+}

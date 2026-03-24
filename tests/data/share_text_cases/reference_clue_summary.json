@@ -1,0 +1,73 @@
+{
+  "summary_sentence": "Crash Logger frame points at ParagonPerks.dll, but no second independent signal agrees yet. (Confidence: Low)",
+  "crash_bucket_key": "CTD-reference-clue-frame-only",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "ntdll.dll+0x00099887",
+    "inferred_mod_name": "Paragon Perks"
+  },
+  "crash_logger": {
+    "direct_fault_module": "",
+    "first_actionable_probable_module": "ParagonPerks.dll",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 1,
+    "object_refs": []
+  },
+  "suspects": [
+    {
+      "confidence": "Low",
+      "module_filename": "ParagonPerks.dll",
+      "module_path": "",
+      "inferred_mod_name": "Paragon Perks",
+      "reason": "Crash Logger first actionable probable frame points to this DLL.",
+      "score": 8
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Crash Logger frame] Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate ParagonPerks.dll, but no second independent signal agrees yet. Use DLL guidance first and confirm with another capture if needed."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "reference_clue",
+      "confidence": "Low",
+      "display_name": "ParagonPerks.dll",
+      "primary_identifier": "ParagonPerks.dll",
+      "secondary_label": "Paragon Perks",
+      "plugin_name": "",
+      "mod_name": "Paragon Perks",
+      "module_filename": "ParagonPerks.dll",
+      "explanation": "Crash Logger frame is the only strong clue so far.",
+      "family_count": 1,
+      "score": 8,
+      "cross_validated": false,
+      "has_conflict": false,
+      "supporting_families": [
+        "crash_logger_frame"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

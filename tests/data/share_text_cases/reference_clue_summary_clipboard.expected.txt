@@ -1,0 +1,10 @@
+SkyrimDiag report
+Dump: /tmp/reference_clue_summary.dmp
+Conclusion: Crash Logger frame points at ParagonPerks.dll, but no second independent signal agrees yet. (Confidence: Low)
+Crash bucket key: CTD-reference-clue-frame-only
+Module+Offset: ntdll.dll+0x00099887
+Inferred mod: Paragon Perks
+Actionable candidate: ParagonPerks.dll
+Evidence agreement: Crash Logger frame first
+CrashLogger context: ParagonPerks.dll — Crash Logger frame first probable DLL frame — DLL guidance
+Next action: DLL guidance: use Crash Logger frame clues for ParagonPerks.dll first

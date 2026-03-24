@@ -1,0 +1,11 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+📌 Conflicting candidates: Precision.dll / OtherRef.esp
+🧭 Evidence agreement: Crash Logger frame + actionable stack vs CrashLogger object ref + history repeat
+🧩 CrashLogger context: Precision.dll — Crash Logger frame first probable DLL frame — DLL guidance
+⚖️ Precision.dll <- Crash Logger frame + actionable stack
+⚖️ OtherRef.esp <- CrashLogger object ref + history repeat
+🔍 Type: CTD-conflicting-frame-vs-ref
+📍 Module+Offset: KERNELBASE.dll+0x00012345
+💡 Conclusion: Crash Logger frame points to Precision.dll, but object ref and history still keep OtherRef.esp in the comparison set. (Confidence: Medium)
+🛠️ Next action: DLL guidance conflict: compare Precision.dll / OtherRef.esp one side at a time
+— Tullius CTD Logger
