@@ -56,6 +56,11 @@ std::string ReadEvidenceBuilderEvidenceText(const std::filesystem::path& root)
   });
 }
 
+std::string ReadCrashLoggerFrameFixture(const char* filename)
+{
+  return ReadAllText(ProjectRoot() / "tests" / "data" / "crashlogger_frame_cases" / filename);
+}
+
 void AssertContains(const std::string& haystack, const char* needle, const char* message)
 {
   assert(haystack.find(needle) != std::string::npos && message);
@@ -494,6 +499,66 @@ void TestRecaptureEvaluationConsumptionSourceContracts()
   AssertContains(recommendationCpp, "crash_full", "Recommendations must explain crash_full recapture intent.");
 }
 
+void TestCrashLoggerFrameFixture_DirectFaultDllRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto log = ReadCrashLoggerFrameFixture("direct_fault_dll.log.txt");
+  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto candidateCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
+
+  AssertContains(log, "Precision.dll+0x000FDDC7",
+                 "direct_fault_dll.log.txt: fixture must keep the direct DLL fault token.");
+  AssertContains(log, "Precision.dll+00000003",
+                 "direct_fault_dll.log.txt: fixture must keep the first actionable probable Precision frame.");
+  AssertContains(analyzerCpp, "CanPromoteCrashLoggerFrameModule",
+                 "direct_fault_dll.log.txt: direct-fault promotion must keep an explicit eligibility gate.");
+  AssertContains(analyzerCpp, "crash_logger_direct_fault_module",
+                 "direct_fault_dll.log.txt: analyzer must keep storing Crash Logger direct-fault modules.");
+  AssertContains(candidateCpp, "CrashLogger direct-fault frame",
+                 "direct_fault_dll.log.txt: candidate builder must keep surfacing direct-fault frame clues.");
+}
+
+void TestCrashLoggerFrameFixture_ExeVictimFirstProbableDllRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto log = ReadCrashLoggerFrameFixture("exe_victim_first_probable_dll.log.txt");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(log, "SkyrimSE.exe+0x00ABCDEF",
+                 "exe_victim_first_probable_dll.log.txt: fixture must keep the EXE victim direct-fault token.");
+  AssertContains(log, "ExampleMod.dll+00000003",
+                 "exe_victim_first_probable_dll.log.txt: fixture must keep the first actionable probable DLL frame.");
+  AssertContains(summaryCpp, "Crash Logger frame first",
+                 "exe_victim_first_probable_dll.log.txt: EXE victim summaries must keep frame-first wording.");
+  AssertContains(summaryCpp, "stronger than an isolated object ref",
+                 "exe_victim_first_probable_dll.log.txt: frame-backed DLL guidance must outrank isolated object refs.");
+  AssertContains(recommendationCpp, "DLL guidance",
+                 "exe_victim_first_probable_dll.log.txt: recommendations must preserve DLL guidance wording.");
+}
+
+void TestCrashLoggerFrameFixture_FrameObjectRefConflictRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto log = ReadCrashLoggerFrameFixture("frame_object_ref_conflict.log.txt");
+  const auto consensusCpp = ReadJoinedText({
+    root / "dump_tool" / "src" / "CandidateConsensus.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp",
+  });
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(log, "FrameBacked.dll+00000003",
+                 "frame_object_ref_conflict.log.txt: fixture must keep the frame-backed DLL clue.");
+  AssertContains(log, "\"OtherRef.esp\"",
+                 "frame_object_ref_conflict.log.txt: fixture must keep the object-ref clue.");
+  AssertContains(consensusCpp, "crash_logger_object_ref",
+                 "frame_object_ref_conflict.log.txt: consensus must keep object-ref family support alongside frame clues.");
+  AssertContains(consensusCpp, "conflicting",
+                 "frame_object_ref_conflict.log.txt: consensus must keep conflicting candidate handling.");
+  AssertContains(recommendationCpp, "object ref/stack evidence disagree",
+                 "frame_object_ref_conflict.log.txt: recommendations must explain frame vs object-ref disagreement.");
+}
+
 }  // namespace
 
 int main()
@@ -511,5 +576,8 @@ int main()
   TestFreezeAnalysisSourceContracts();
   TestFirstChanceCtdCandidateSourceContracts();
   TestRecaptureEvaluationConsumptionSourceContracts();
+  TestCrashLoggerFrameFixture_DirectFaultDllRuntimeContracts();
+  TestCrashLoggerFrameFixture_ExeVictimFirstProbableDllRuntimeContracts();
+  TestCrashLoggerFrameFixture_FrameObjectRefConflictRuntimeContracts();
   return 0;
 }

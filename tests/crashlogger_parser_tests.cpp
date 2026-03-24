@@ -2,6 +2,7 @@
 #include "SourceGuardTestUtils.h"
 
 #include <cassert>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -20,7 +21,14 @@ using skydiag::dump_tool::crashlogger_core::TryExtractDashedTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::ParsedTimestamp;
 using skydiag::dump_tool::crashlogger_core::CrashLoggerFrameSignals;
 using skydiag::tests::source_guard::AssertContains;
+using skydiag::tests::source_guard::ProjectRoot;
+using skydiag::tests::source_guard::ReadAllText;
 using skydiag::tests::source_guard::ReadProjectText;
+
+static std::string ReadCrashLoggerFrameFixture(const char* filename)
+{
+  return ReadAllText(ProjectRoot() / "tests" / "data" / "crashlogger_frame_cases" / filename);
+}
 
 static void Test_LooksLikeCrashLogger_CrashLog()
 {
@@ -1314,6 +1322,40 @@ static void Test_ParseCrashLoggerFrameSignals_IgnoresLateDiagnosticFaultModuleLi
   assert(signals.probable_streak_length == 2u);
 }
 
+static void Test_ParseCrashLoggerFrameSignals_Fixture_DirectFaultDll()
+{
+  const CrashLoggerFrameSignals signals =
+    ParseCrashLoggerFrameSignalsAscii(ReadCrashLoggerFrameFixture("direct_fault_dll.log.txt"));
+  assert(signals.direct_fault_module == "Precision.dll");
+  assert(signals.first_actionable_probable_module == "Precision.dll");
+  assert(signals.probable_streak_module == "Precision.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
+static void Test_ParseCrashLoggerFrameSignals_Fixture_ExeVictimFirstProbableDll()
+{
+  const CrashLoggerFrameSignals signals =
+    ParseCrashLoggerFrameSignalsAscii(ReadCrashLoggerFrameFixture("exe_victim_first_probable_dll.log.txt"));
+  assert(signals.direct_fault_module == "SkyrimSE.exe");
+  assert(signals.first_actionable_probable_module == "ExampleMod.dll");
+  assert(signals.probable_streak_module == "ExampleMod.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
+static void Test_ParseCrashLoggerFrameSignals_Fixture_FrameObjectRefConflict()
+{
+  const auto log = ReadCrashLoggerFrameFixture("frame_object_ref_conflict.log.txt");
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  const auto refs = skydiag::dump_tool::crashlogger_core::ParseCrashLoggerObjectRefsAscii(log);
+
+  assert(signals.direct_fault_module == "SkyrimSE.exe");
+  assert(signals.first_actionable_probable_module == "FrameBacked.dll");
+  assert(signals.probable_streak_module == "FrameBacked.dll");
+  assert(signals.probable_streak_length == 2u);
+  assert(!refs.empty());
+  assert(refs[0].esp_name == "OtherRef.esp");
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -1428,6 +1470,9 @@ int main()
   Test_ParseTopModules_CrashLog_IgnoresThreadDumpBannerLikeNote();
   Test_ParseCrashLoggerFrameSignals_RowDetailWithStackLabelDoesNotTerminate();
   Test_ParseCrashLoggerFrameSignals_IgnoresLateDiagnosticFaultModuleLine();
+  Test_ParseCrashLoggerFrameSignals_Fixture_DirectFaultDll();
+  Test_ParseCrashLoggerFrameSignals_Fixture_ExeVictimFirstProbableDll();
+  Test_ParseCrashLoggerFrameSignals_Fixture_FrameObjectRefConflict();
 
   return 0;
 }
