@@ -1,4 +1,3 @@
-#include <cassert>
 #include <string>
 
 #include "SourceGuardTestUtils.h"
@@ -14,6 +13,7 @@ int main()
   const std::string rec = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
   const std::string crashLogger = ReadProjectText("dump_tool/src/CrashLogger.cpp");
   const std::string crashLoggerParseCore = ReadProjectText("dump_tool/src/CrashLoggerParseCore.cpp");
+  const std::string crashLoggerParseCoreHeader = ReadProjectText("dump_tool/src/CrashLoggerParseCore.h");
 
   AssertContains(
     minidumpUtil,
@@ -67,6 +67,15 @@ int main()
     crashLoggerParseCore,
     "win32u.dll",
     "CrashLogger parse core filter must include win32u.dll as system module.");
+
+  AssertContains(
+    crashLoggerParseCoreHeader,
+    "IsSystemishModuleAsciiLower",
+    "CrashLogger parse core header must keep system-module helper available while frame signals are added.");
+  AssertContains(
+    crashLoggerParseCoreHeader,
+    "IsGameExeModuleAsciiLower",
+    "CrashLogger parse core header must keep game-exe helper available while frame signals are added.");
 
   return 0;
 }

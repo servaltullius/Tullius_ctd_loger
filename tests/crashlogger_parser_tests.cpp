@@ -1,4 +1,5 @@
 #include "CrashLoggerParseCore.h"
+#include "SourceGuardTestUtils.h"
 
 #include <cassert>
 #include <string>
@@ -15,6 +16,8 @@ using skydiag::dump_tool::crashlogger_core::IsGameExeModuleAsciiLower;
 using skydiag::dump_tool::crashlogger_core::TryExtractCompactTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::TryExtractDashedTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::ParsedTimestamp;
+using skydiag::tests::source_guard::AssertContains;
+using skydiag::tests::source_guard::ReadProjectText;
 
 static void Test_LooksLikeCrashLogger_CrashLog()
 {
@@ -994,6 +997,35 @@ static void Test_ParseObjectRefs_RegisterFormId()
   assert(found);
 }
 
+static void Test_CrashLoggerFrameSignals_PublicContract()
+{
+  const auto header = ReadProjectText("dump_tool/src/CrashLoggerParseCore.h");
+  AssertContains(
+    header,
+    "struct CrashLoggerFrameSignals",
+    "Crash Logger parser must declare frame-signal result storage.");
+  AssertContains(
+    header,
+    "ParseCrashLoggerFrameSignalsAscii",
+    "Crash Logger parser must expose a frame-signal parsing entry point.");
+  AssertContains(
+    header,
+    "direct_fault_module",
+    "Crash Logger parser must expose direct DLL fault module extraction.");
+  AssertContains(
+    header,
+    "first_actionable_probable_module",
+    "Crash Logger parser must capture the first actionable probable frame.");
+  AssertContains(
+    header,
+    "probable_streak_module",
+    "Crash Logger parser must capture same-DLL probable streak winners.");
+  AssertContains(
+    header,
+    "probable_streak_length",
+    "Crash Logger parser must track same-DLL probable streak length.");
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -1093,6 +1125,7 @@ int main()
   Test_ParseObjectRefs_FormIdPropagated();
   Test_AggregateObjectRefs_FormIdKept();
   Test_ParseObjectRefs_RegisterFormId();
+  Test_CrashLoggerFrameSignals_PublicContract();
 
   return 0;
 }
