@@ -73,6 +73,11 @@ add_test(NAME skydiag_helper_crash_autopen_config_tests COMMAND skydiag_helper_c
 
 add_executable(skydiag_dump_profile_tests
   dump_profile_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpProfile.cpp"
+)
+
+target_include_directories(skydiag_dump_profile_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
 )
 
 add_test(NAME skydiag_dump_profile_tests COMMAND skydiag_dump_profile_tests)

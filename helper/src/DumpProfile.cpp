@@ -37,6 +37,11 @@ DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind)
     case CaptureKind::Crash:
       profile.preferCrashContext = true;
       profile.preferMainThread = true;
+      if (baseMode == DumpMode::kDefault) {
+        profile.includeProcessThreadData = true;
+        profile.includeFullMemoryInfo = true;
+        profile.includeModuleHeaders = true;
+      }
       break;
     case CaptureKind::Hang:
       profile.preferMainThread = true;
@@ -59,6 +64,13 @@ DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind)
       profile.includeHandleData = true;
       profile.includeUnloadedModules = true;
       profile.includeCodeSegments = true;
+      if (baseMode == DumpMode::kDefault) {
+        profile.includeProcessThreadData = true;
+        profile.includeFullMemoryInfo = true;
+        profile.includeModuleHeaders = true;
+        profile.includeIndirectMemory = true;
+        profile.ignoreInaccessibleMemory = true;
+      }
       profile.includeFullMemory = (baseMode == DumpMode::kFull);
       break;
   }
