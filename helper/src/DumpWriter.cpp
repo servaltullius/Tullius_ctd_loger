@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string_view>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "SkyrimDiagProtocol.h"
 
@@ -17,12 +20,55 @@ struct DumpCallbackContext
 {
   DumpProfile profile{};
   DWORD preferredThreadId = 0;
+  std::vector<DWORD> preferredThreadIds;
   bool isProcessSnapshot = false;
 };
 
+void AppendPreferredThreadId(std::vector<DWORD>& preferredThreadIds, DWORD tid)
+{
+  if (tid == 0) {
+    return;
+  }
+  if (std::find(preferredThreadIds.begin(), preferredThreadIds.end(), tid) == preferredThreadIds.end()) {
+    preferredThreadIds.push_back(tid);
+  }
+}
+
+std::vector<DWORD> ExtractPreferredWctThreadIds(std::string_view wctJsonUtf8)
+{
+  std::vector<DWORD> tids;
+  if (wctJsonUtf8.empty()) {
+    return tids;
+  }
+
+  const auto json = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/false);
+  if (!json.is_object() || !json.contains("threads") || !json["threads"].is_array()) {
+    return tids;
+  }
+
+  for (const auto& thread : json["threads"]) {
+    if (!thread.is_object() || !thread.value("isCycle", false)) {
+      continue;
+    }
+    const auto tid = thread.value("tid", 0u);
+    if (tid != 0u) {
+      AppendPreferredThreadId(tids, tid);
+    }
+  }
+
+  return tids;
+}
+
 bool ShouldShapePreferredThread(const DumpCallbackContext& ctx)
 {
-  return ctx.preferredThreadId != 0 && (ctx.profile.preferCrashContext || ctx.profile.preferMainThread);
+  return !ctx.preferredThreadIds.empty() && (ctx.profile.preferCrashContext || ctx.profile.preferMainThread ||
+                                             ctx.profile.preferWctThreads);
+}
+
+bool IsPreferredThread(const DumpCallbackContext& ctx, DWORD threadId)
+{
+  return std::find(ctx.preferredThreadIds.begin(), ctx.preferredThreadIds.end(), threadId) !=
+         ctx.preferredThreadIds.end();
 }
 
 MINIDUMP_TYPE ApplyProfileToDumpType(const DumpProfile& dumpProfile)
@@ -79,9 +125,9 @@ BOOL CALLBACK MiniDumpCallback(
   }
   if (callbackType == IncludeThreadCallback && callbackOutput && ShouldShapePreferredThread(*ctx)) {
     const DWORD threadId = callbackInput->IncludeThread.ThreadId;
-    if (threadId == ctx->preferredThreadId) {
+    if (IsPreferredThread(*ctx, threadId)) {
       callbackOutput->ThreadWriteFlags |= ThreadWriteInstructionWindow;
-    } else if (ctx->profile.preferCrashContext) {
+    } else if (ctx->profile.preferCrashContext || ctx->profile.preferWctThreads) {
       callbackOutput->ThreadWriteFlags &= ~ThreadWriteInstructionWindow;
     }
     return TRUE;
@@ -185,6 +231,12 @@ bool WriteDumpWithStreams(
   DumpCallbackContext callbackContext{};
   callbackContext.profile = effectiveProfile;
   callbackContext.preferredThreadId = mei.ThreadId;
+  AppendPreferredThreadId(callbackContext.preferredThreadIds, callbackContext.preferredThreadId);
+  if (effectiveProfile.preferWctThreads) {
+    for (const DWORD tid : ExtractPreferredWctThreadIds(wctJsonUtf8)) {
+      AppendPreferredThreadId(callbackContext.preferredThreadIds, tid);
+    }
+  }
   callbackContext.isProcessSnapshot = isProcessSnapshot;
   MINIDUMP_CALLBACK_INFORMATION callbackInfo{};
   callbackInfo.CallbackRoutine = MiniDumpCallback;

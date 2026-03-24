@@ -56,6 +56,10 @@ int main()
   AssertContains(impl, "IncludeThreadCallback", "DumpWriter callback must start shaping preferred threads.");
   AssertContains(impl, "ThreadWriteFlags", "DumpWriter callback must control thread write flags for preferred CTD threads.");
   AssertContains(impl, "preferredThreadId", "DumpWriter callback must keep honoring the preferred crash thread.");
+  AssertContains(impl, "ExtractPreferredWctThreadIds", "DumpWriter must derive preferred WCT threads from capture metadata.");
+  AssertContains(impl, "\"isCycle\"", "DumpWriter must look for WCT cycle-thread markers when shaping hang/manual dumps.");
+  AssertContains(impl, "preferredThreadIds", "DumpWriter callback context must track multiple preferred threads.");
+  AssertContains(impl, "preferWctThreads", "DumpWriter shaping must honor WCT-thread preference from the dump profile.");
 
   AssertContains(crashCapture, "CaptureKind::Crash", "Crash capture must request the crash dump profile.");
   AssertContains(hangCapture, "CaptureKind::Hang", "Hang capture must request the hang dump profile.");
