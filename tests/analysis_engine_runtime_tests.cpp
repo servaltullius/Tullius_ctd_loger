@@ -400,6 +400,22 @@ void TestCaptureQualitySourceContracts()
   AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
 }
 
+void TestCrashLoggerFrameConsensusContracts()
+{
+  const auto root = ProjectRoot();
+  const auto consensusSrc = ReadJoinedText({
+    root / "dump_tool" / "src" / "CandidateConsensus.cpp",
+    root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp",
+  });
+
+  AssertContains(consensusSrc, "crash_logger_frame", "Candidate consensus must recognize the crash_logger_frame family.");
+  AssertContains(consensusSrc, "actionable_stack", "Candidate consensus must still admit actionable_stack agreement.");
+  AssertContains(consensusSrc, "crash_logger_object_ref", "Candidate consensus must still admit crash_logger_object_ref agreement.");
+  AssertContains(consensusSrc, "cross_validated", "Candidate consensus must support cross_validated outcomes.");
+  AssertContains(consensusSrc, "related", "Candidate consensus must support related outcomes.");
+  AssertContains(consensusSrc, "conflicting", "Candidate consensus must support conflicting outcomes.");
+}
+
 void TestFreezeAnalysisSourceContracts()
 {
   const auto root = ProjectRoot();
@@ -491,6 +507,7 @@ int main()
   TestCrashHistoryBucketCorrelation();
   TestCrashHistoryBucketCandidateStats();
   TestCaptureQualitySourceContracts();
+  TestCrashLoggerFrameConsensusContracts();
   TestFreezeAnalysisSourceContracts();
   TestFirstChanceCtdCandidateSourceContracts();
   TestRecaptureEvaluationConsumptionSourceContracts();

@@ -21,7 +21,9 @@
 namespace {
 using skydiag::tests::source_guard::ProjectRoot;
 using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ReadProjectConcatenatedText;
 using skydiag::tests::source_guard::ReadProjectText;
+using skydiag::tests::source_guard::AssertContains;
 
 // ── Schema validation ──────────────────────────────────────────────────
 
@@ -458,6 +460,23 @@ void TestRecaptureEvaluationConsumptionSourceGuards()
   std::cout << "  [PASS] Recapture evaluation consumption guards\n";
 }
 
+void TestCrashLoggerFrameCandidateFamilySourceGuards()
+{
+  const std::string candidateSrc = ReadProjectConcatenatedText({
+    "dump_tool/src/CandidateConsensus.cpp",
+    "dump_tool/src/EvidenceBuilderCandidates.cpp",
+  });
+  const std::string summarySrc = ReadProjectText("dump_tool/src/OutputWriter.Summary.cpp");
+
+  AssertContains(candidateSrc, "crash_logger_frame", "Candidate consensus must recognize the crash_logger_frame family.");
+  AssertContains(candidateSrc, "cross_validated", "Candidate consensus must still emit cross_validated actionable candidates.");
+  AssertContains(candidateSrc, "related", "Candidate consensus must still emit related actionable candidates.");
+  AssertContains(candidateSrc, "conflicting", "Candidate consensus must still emit conflicting actionable candidates.");
+  AssertContains(summarySrc, "supporting_families", "Output summary must serialize supporting families for actionable candidates.");
+
+  std::cout << "  [PASS] Crash Logger frame candidate family guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -484,6 +503,7 @@ int main()
   TestOutputWriterReportTextSections();
   TestFirstChanceCandidateExplanationSourceGuards();
   TestRecaptureEvaluationConsumptionSourceGuards();
+  TestCrashLoggerFrameCandidateFamilySourceGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;
