@@ -27,6 +27,107 @@ std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& r
   return 3u;
 }
 
+std::wstring WideLowerLocal(std::wstring_view value)
+{
+  std::wstring out;
+  out.reserve(value.size());
+  for (const wchar_t ch : value) {
+    out.push_back(static_cast<wchar_t>(towlower(ch)));
+  }
+  return out;
+}
+
+void PopulateFrameSignalCandidate(const AnalysisResult& r, std::wstring_view module, CandidateSignal* signal)
+{
+  if (!signal) {
+    return;
+  }
+
+  const std::wstring moduleLower = WideLowerLocal(module);
+  for (const auto& suspect : r.suspects) {
+    if (!IsActionableSuspect(suspect)) {
+      continue;
+    }
+    if (WideLowerLocal(suspect.module_filename) != moduleLower) {
+      continue;
+    }
+
+    signal->candidate_key = CanonicalCandidateKey(
+      !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename);
+    signal->display_name = !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename;
+    signal->mod_name = suspect.inferred_mod_name;
+    signal->module_filename = suspect.module_filename;
+    return;
+  }
+
+  signal->candidate_key = CanonicalCandidateKey(module);
+  signal->display_name = std::wstring(module);
+  signal->module_filename = std::wstring(module);
+}
+
+void AddCrashLoggerFrameSignal(
+  const AnalysisResult& r,
+  std::wstring_view module,
+  std::uint32_t weight,
+  std::wstring&& detail,
+  std::vector<CandidateSignal>* out)
+{
+  if (!out || module.empty() || weight == 0u) {
+    return;
+  }
+
+  CandidateSignal signal{};
+  signal.family_id = "crash_logger_frame";
+  PopulateFrameSignalCandidate(r, module, &signal);
+  signal.detail = std::move(detail);
+  signal.weight = weight;
+  if (!signal.candidate_key.empty()) {
+    out->push_back(std::move(signal));
+  }
+}
+
+void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  if (!out) {
+    return;
+  }
+
+  if (!r.crash_logger_direct_fault_module.empty()) {
+    AddCrashLoggerFrameSignal(
+      r,
+      r.crash_logger_direct_fault_module,
+      8u,
+      en
+        ? (L"CrashLogger direct-fault frame: " + r.crash_logger_direct_fault_module)
+        : (L"CrashLogger direct-fault 프레임: " + r.crash_logger_direct_fault_module),
+      out);
+  }
+
+  if (!r.crash_logger_first_actionable_probable_module.empty()) {
+    AddCrashLoggerFrameSignal(
+      r,
+      r.crash_logger_first_actionable_probable_module,
+      6u,
+      en
+        ? (L"CrashLogger first actionable probable frame: " + r.crash_logger_first_actionable_probable_module)
+        : (L"CrashLogger 첫 actionable probable 프레임: " + r.crash_logger_first_actionable_probable_module),
+      out);
+  }
+
+  if (r.crash_logger_probable_streak_length >= 2u && !r.crash_logger_probable_streak_module.empty()) {
+    AddCrashLoggerFrameSignal(
+      r,
+      r.crash_logger_probable_streak_module,
+      (r.crash_logger_probable_streak_length >= 3u) ? 6u : 5u,
+      en
+        ? (L"CrashLogger probable frame streak (" + std::to_wstring(r.crash_logger_probable_streak_length) +
+           L"x): " + r.crash_logger_probable_streak_module)
+        : (L"CrashLogger probable 프레임 streak (" + std::to_wstring(r.crash_logger_probable_streak_length) +
+           L"회): " + r.crash_logger_probable_streak_module),
+      out);
+  }
+}
+
 std::uint32_t HistoryWeight(std::size_t priorCount)
 {
   if (priorCount >= 3u) {
@@ -368,7 +469,8 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
 
   const bool en = (lang == i18n::Language::kEnglish);
   std::vector<CandidateSignal> signals;
-  signals.reserve(12);
+  signals.reserve(16);
+  AddCrashLoggerFrameSignals(r, en, &signals);
   AddCrashLoggerSignals(r, en, &signals);
   AddStackSignals(r, en, &signals);
   AddResourceSignals(r, en, &signals);

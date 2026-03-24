@@ -8,12 +8,16 @@
 namespace skydiag::dump_tool {
 namespace {
 
-constexpr const char* kFamilyCrashLogger = "crash_logger_object_ref";
+constexpr const char* kFamilyCrashLoggerFrame = "crash_logger_frame";
+constexpr const char* kFamilyCrashLoggerObjectRef = "crash_logger_object_ref";
 constexpr const char* kFamilyStack = "actionable_stack";
 constexpr const char* kFamilyResource = "resource_provider";
 constexpr const char* kFamilyHistory = "history_repeat";
 constexpr const char* kFamilyFirstChance = "first_chance_context";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
+constexpr std::uint32_t kFrameConflictWeightThreshold = 6u;
+constexpr std::uint32_t kStackConflictWeightThreshold = 4u;
+constexpr std::uint32_t kObjectRefConflictWeightThreshold = 5u;
 
 struct CandidateRow
 {
@@ -31,6 +35,17 @@ bool IsBoostOnlyFamily(std::string_view familyId)
   return familyId == kFamilyHistory;
 }
 
+std::size_t CountNonBoostFamilies(const CandidateRow& row)
+{
+  std::size_t count = 0;
+  for (const auto& [familyId, _] : row.family_weight) {
+    if (!IsBoostOnlyFamily(familyId)) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 bool HasFamily(const ActionableCandidate& candidate, std::string_view familyId)
 {
   return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
@@ -39,12 +54,15 @@ bool HasFamily(const ActionableCandidate& candidate, std::string_view familyId)
 
 bool HasStrongFamily(const ActionableCandidate& candidate)
 {
-  return HasFamily(candidate, kFamilyCrashLogger) || HasFamily(candidate, kFamilyStack);
+  return HasFamily(candidate, kFamilyCrashLoggerFrame) ||
+         HasFamily(candidate, kFamilyCrashLoggerObjectRef) ||
+         HasFamily(candidate, kFamilyStack);
 }
 
 bool HasActionableCrossValidation(const CandidateRow& row)
 {
-  return RowHasFamily(row, kFamilyCrashLogger) && RowHasFamily(row, kFamilyStack);
+  return (RowHasFamily(row, kFamilyCrashLoggerFrame) || RowHasFamily(row, kFamilyCrashLoggerObjectRef)) &&
+         RowHasFamily(row, kFamilyStack);
 }
 
 int StatusRank(const ActionableCandidate& candidate)
@@ -116,16 +134,26 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   candidate.secondary_label = PickSecondaryLabel(candidate, candidate.primary_identifier, fallbackLabel);
   candidate.display_name = candidate.primary_identifier;
 
-  const bool hasCrashLogger = HasFamily(candidate, kFamilyCrashLogger);
+  const bool hasCrashLoggerFrame = HasFamily(candidate, kFamilyCrashLoggerFrame);
+  const bool hasCrashLoggerObjectRef = HasFamily(candidate, kFamilyCrashLoggerObjectRef);
   const bool hasStack = HasFamily(candidate, kFamilyStack);
   const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool conflict = candidate.has_conflict;
+  const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
   const bool crossValidated =
     !conflict &&
-    hasCrashLogger &&
+    (hasCrashLoggerFrame || hasCrashLoggerObjectRef) &&
     hasStack &&
-    candidate.family_count >= 2 &&
+    nonBoostFamilyCount >= 2 &&
     candidate.score >= kCrossValidatedScoreThreshold;
+  const bool frameAndObjectRef = hasCrashLoggerFrame && hasCrashLoggerObjectRef;
+  const bool frameOnly = hasCrashLoggerFrame && !hasStack && !hasCrashLoggerObjectRef && !hasResource;
+  const bool objectRefWithHistory =
+    hasCrashLoggerObjectRef &&
+    HasFamily(candidate, kFamilyHistory) &&
+    !hasCrashLoggerFrame &&
+    !hasStack &&
+    !hasResource;
 
   if (conflict) {
     candidate.status_id = "conflicting";
@@ -135,11 +163,23 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.status_id = "cross_validated";
     candidate.confidence_level = i18n::ConfidenceLevel::kHigh;
     candidate.cross_validated = true;
-  } else if (candidate.family_count >= 2 && candidate.score >= 7 && HasStrongFamily(candidate)) {
+  } else if (frameAndObjectRef) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
-  } else if (hasCrashLogger) {
+  } else if (objectRefWithHistory) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kLow;
+    candidate.cross_validated = false;
+  } else if (nonBoostFamilyCount >= 2 && candidate.score >= 7 && HasStrongFamily(candidate)) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
+    candidate.cross_validated = false;
+  } else if (frameOnly) {
+    candidate.status_id = "reference_clue";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
+    candidate.cross_validated = false;
+  } else if (hasCrashLoggerObjectRef) {
     candidate.status_id = "reference_clue";
     candidate.confidence_level = i18n::ConfidenceLevel::kLow;
     candidate.cross_validated = false;
@@ -221,22 +261,30 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
     familyWeight = std::max(familyWeight, signal.weight);
   }
 
-  std::wstring topCrashLoggerKey;
-  std::uint32_t topCrashLoggerWeight = 0;
+  std::wstring topFrameKey;
+  std::uint32_t topFrameWeight = 0;
+  std::wstring topObjectRefKey;
+  std::uint32_t topObjectRefWeight = 0;
   std::wstring topStackKey;
   std::uint32_t topStackWeight = 0;
   for (const auto& signal : signals) {
-    if (signal.family_id == kFamilyCrashLogger && signal.weight > topCrashLoggerWeight) {
-      topCrashLoggerKey = signal.candidate_key;
-      topCrashLoggerWeight = signal.weight;
+    if (signal.family_id == kFamilyCrashLoggerFrame && signal.weight > topFrameWeight) {
+      topFrameKey = signal.candidate_key;
+      topFrameWeight = signal.weight;
+    } else if (signal.family_id == kFamilyCrashLoggerObjectRef && signal.weight > topObjectRefWeight) {
+      topObjectRefKey = signal.candidate_key;
+      topObjectRefWeight = signal.weight;
     } else if (signal.family_id == kFamilyStack && signal.weight > topStackWeight) {
       topStackKey = signal.candidate_key;
       topStackWeight = signal.weight;
     }
   }
 
-  if (!topCrashLoggerKey.empty() && !topStackKey.empty() && topCrashLoggerKey != topStackKey) {
-    if (auto it = rowsByKey.find(topCrashLoggerKey); it != rowsByKey.end() &&
+  if (!topFrameKey.empty() && !topStackKey.empty() &&
+      topFrameKey != topStackKey &&
+      topFrameWeight >= kFrameConflictWeightThreshold &&
+      topStackWeight >= kStackConflictWeightThreshold) {
+    if (auto it = rowsByKey.find(topFrameKey); it != rowsByKey.end() &&
         !HasActionableCrossValidation(it->second)) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families = { kFamilyStack };
@@ -244,7 +292,39 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
     if (auto it = rowsByKey.find(topStackKey); it != rowsByKey.end() &&
         !HasActionableCrossValidation(it->second)) {
       it->second.candidate.has_conflict = true;
-      it->second.candidate.conflicting_families = { kFamilyCrashLogger };
+      it->second.candidate.conflicting_families = { kFamilyCrashLoggerFrame };
+    }
+  }
+
+  if (!topObjectRefKey.empty() && !topStackKey.empty() &&
+      topObjectRefKey != topStackKey &&
+      topObjectRefWeight >= kObjectRefConflictWeightThreshold &&
+      topStackWeight >= kStackConflictWeightThreshold) {
+    if (auto it = rowsByKey.find(topObjectRefKey); it != rowsByKey.end() &&
+        !HasActionableCrossValidation(it->second)) {
+      it->second.candidate.has_conflict = true;
+      it->second.candidate.conflicting_families.push_back(kFamilyStack);
+    }
+    if (auto it = rowsByKey.find(topStackKey); it != rowsByKey.end() &&
+        !HasActionableCrossValidation(it->second)) {
+      it->second.candidate.has_conflict = true;
+      it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerObjectRef);
+    }
+  }
+
+  if (!topFrameKey.empty() && !topObjectRefKey.empty() &&
+      topFrameKey != topObjectRefKey &&
+      topFrameWeight >= kFrameConflictWeightThreshold &&
+      topObjectRefWeight >= kObjectRefConflictWeightThreshold) {
+    if (auto it = rowsByKey.find(topFrameKey); it != rowsByKey.end() &&
+        !HasActionableCrossValidation(it->second)) {
+      it->second.candidate.has_conflict = true;
+      it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerObjectRef);
+    }
+    if (auto it = rowsByKey.find(topObjectRefKey); it != rowsByKey.end() &&
+        !HasActionableCrossValidation(it->second)) {
+      it->second.candidate.has_conflict = true;
+      it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerFrame);
     }
   }
 
