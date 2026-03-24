@@ -52,6 +52,11 @@ internal sealed partial class MainWindowViewModel
             return T("Signals disagree", "신호 충돌");
         }
 
+        if (IsStrongStandaloneCallstackCandidate(candidate))
+        {
+            return T("Tullius callstack first", "Tullius callstack first");
+        }
+
         if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "first_chance_context"))
         {
             return T("Crash Logger frame + first-chance", "Crash Logger frame + first-chance");
@@ -115,6 +120,12 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildCrashLoggerContextLabel(AnalysisSummary summary)
     {
+        if (summary.ActionableCandidates.Count > 0 &&
+            IsStrongStandaloneCallstackCandidate(summary.ActionableCandidates[0]))
+        {
+            return T("Tullius callstack", "Tullius callstack");
+        }
+
         if (HasCrashLoggerFrameSignal(summary))
         {
             return T("Crash Logger frame", "Crash Logger 프레임");
@@ -137,6 +148,12 @@ internal sealed partial class MainWindowViewModel
     private string BuildCrashLoggerContextSummary(AnalysisSummary summary)
     {
         const string dllGuidance = "DLL guidance";
+
+        if (summary.ActionableCandidates.Count > 0 &&
+            IsStrongStandaloneCallstackCandidate(summary.ActionableCandidates[0]))
+        {
+            return $"{BuildPrimaryCandidateValue(summary)} — Tullius callstack first — {dllGuidance}";
+        }
 
         if (!string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule))
         {
@@ -216,6 +233,15 @@ internal sealed partial class MainWindowViewModel
         return T(
             "This capture has limited crash-context details.",
             "이번 캡처에는 크래시 컨텍스트 정보가 제한적입니다.");
+    }
+
+    private static bool IsStrongStandaloneCallstackCandidate(ActionableCandidateItem candidate)
+    {
+        return HasFamily(candidate, "actionable_stack") &&
+               !HasFamily(candidate, "crash_logger_frame") &&
+               !HasFamily(candidate, "crash_logger_object_ref") &&
+               !HasFamily(candidate, "resource_provider") &&
+               candidate.Score >= 5;
     }
 
     private string BuildFamilySummary(ActionableCandidateItem candidate)

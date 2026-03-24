@@ -196,6 +196,14 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     vm,
     "Crash Logger frame + resource",
     "Expanded WinUI wording must expose frame plus resource agreement when nearby resource providers support the DLL candidate.");
+  RequireContains(
+    vm,
+    "Tullius callstack first",
+    "Expanded WinUI wording must expose standalone Tullius callstack-first guidance for strong stackwalk-backed candidates.");
+  RequireContains(
+    vm,
+    "Tullius callstack: check",
+    "Expanded WinUI wording must surface a standalone Tullius callstack next action for strong stackwalk-backed candidates.");
 }
 
 static void TestMainWindowShareTextUsesCrashLoggerReadingPath()

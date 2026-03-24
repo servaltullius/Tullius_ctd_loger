@@ -156,6 +156,19 @@ void TestRepresentativeNamePrefersDllFilenameOverModFolderName()
   assert(candidates[0].secondary_label == L"Faction Ranks");
 }
 
+void TestStrongStackOnlyBecomesMediumRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("actionable_stack", L"standalonestack", L"Standalone Stack", 5, L"", L"Standalone Stack", L"StandaloneStack.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence == L"Medium");
+}
+
 void TestObjectRefAndResourceNeedMediumOnly()
 {
   const std::vector<CandidateSignal> signals = {
@@ -375,6 +388,7 @@ int main()
   TestSecondaryObjectRefCanStillCrossValidate();
   TestRepresentativeNamePrefersPluginFilenameOverFriendlyLabel();
   TestRepresentativeNamePrefersDllFilenameOverModFolderName();
+  TestStrongStackOnlyBecomesMediumRelated();
   TestObjectRefAndResourceNeedMediumOnly();
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();

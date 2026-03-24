@@ -26,7 +26,7 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
   return L"(unknown)";
 }
 
-bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
+bool LocalCandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
 {
   return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
          candidate.supporting_families.end();
@@ -42,24 +42,33 @@ bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_v
 
 bool CandidateHasFrameSupport(const ActionableCandidate& candidate)
 {
-  return CandidateHasFamily(candidate, "crash_logger_frame");
+  return LocalCandidateHasFamily(candidate, "crash_logger_frame");
 }
 
 bool CandidateHasScorableFirstChanceSupport(const AnalysisResult& r, const ActionableCandidate& candidate)
 {
-  return CandidateHasFamily(candidate, "first_chance_context") &&
+  return LocalCandidateHasFamily(candidate, "first_chance_context") &&
          HasScorableFirstChanceContext(r.first_chance_summary);
 }
 
 bool CandidateHasScorableHistorySupport(const AnalysisResult& r, const ActionableCandidate& candidate)
 {
-  return CandidateHasFamily(candidate, "history_repeat") &&
+  return LocalCandidateHasFamily(candidate, "history_repeat") &&
          (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
 }
 
 bool CandidateHasResourceSupport(const ActionableCandidate& candidate)
 {
-  return CandidateHasFamily(candidate, "resource_provider");
+  return LocalCandidateHasFamily(candidate, "resource_provider");
+}
+
+bool CandidateHasStandaloneCallstackSupport(const ActionableCandidate& candidate)
+{
+  return LocalCandidateHasFamily(candidate, "actionable_stack") &&
+         !LocalCandidateHasFamily(candidate, "crash_logger_frame") &&
+         !LocalCandidateHasFamily(candidate, "crash_logger_object_ref") &&
+         !LocalCandidateHasFamily(candidate, "resource_provider") &&
+         candidate.score >= 5u;
 }
 
 std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
@@ -242,6 +251,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
             (hasResourceSupport ? L" 인접 리소스 provider 활동도 이 후보와 맞습니다." : L"") +
             L" (신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(*topCandidate)) {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      summary = en
+        ? (L"Crash is reported in a Windows system DLL, but Tullius callstack first points to DLL candidate " + candidateName +
+            L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, Tullius callstack first 가 DLL 후보 " + candidateName +
+            L" (actionable stack)를 가리킵니다. 이는 stack scan only 보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
     } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
         ? (L"Crash is reported in a Windows system DLL, but " + suspectBasis + L" points to " + nonHookSuspectWho +
@@ -310,11 +326,19 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
-      summary = en
-        ? (L"Crash is reported in the game executable. Actionable candidate: " + candidateName +
-            L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
-        : (L"크래시 위치가 게임 본체(EXE)이며, 실행 우선 후보는 " + candidateName +
-            L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
+      if (CandidateHasStandaloneCallstackSupport(*topCandidate)) {
+        summary = en
+          ? (L"Crash is reported in the game executable. Tullius callstack first points to DLL candidate " + candidateName +
+              L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")
+          : (L"크래시 위치가 게임 본체(EXE)이며, Tullius callstack first 가 DLL 후보 " + candidateName +
+              L" (actionable stack)를 가리킵니다. 이는 stack scan only 보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
+      } else {
+        summary = en
+          ? (L"Crash is reported in the game executable. Actionable candidate: " + candidateName +
+              L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
+          : (L"크래시 위치가 게임 본체(EXE)이며, 실행 우선 후보는 " + candidateName +
+              L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
+      }
     } else if (topCandidate && topCandidate->status_id == "reference_clue" && topCandidateHasFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);

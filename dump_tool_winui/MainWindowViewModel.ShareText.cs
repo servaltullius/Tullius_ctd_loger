@@ -45,9 +45,12 @@ internal sealed partial class MainWindowViewModel
         if (summary.ActionableCandidates.Count > 0)
         {
             var primaryCandidate = summary.ActionableCandidates[0];
+            var readingPathLabel = IsStrongStandaloneCallstackCandidate(primaryCandidate)
+                ? (_isKorean ? "Tullius callstack" : "Tullius callstack")
+                : (_isKorean ? "CrashLogger 기준" : "CrashLogger context");
             lines.Add((_isKorean ? "행동 우선 후보: " : "Actionable candidate: ") + BuildPrimaryCandidateValue(summary));
             lines.Add((_isKorean ? "근거 합의: " : "Evidence agreement: ") + BuildAgreementSummary(summary));
-            lines.Add((_isKorean ? "CrashLogger 기준: " : "CrashLogger context: ") + BuildCrashLoggerContextSummary(summary));
+            lines.Add(readingPathLabel + ": " + BuildCrashLoggerContextSummary(summary));
             lines.Add((_isKorean ? "다음 조치: " : "Next action: ") + BuildNextActionSummary(summary));
             if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
                 summary.ActionableCandidates.Count > 1)
@@ -124,9 +127,12 @@ internal sealed partial class MainWindowViewModel
         if (summary.ActionableCandidates.Count > 0)
         {
             var primaryCandidate = summary.ActionableCandidates[0];
+            var readingPathLabel = IsStrongStandaloneCallstackCandidate(primaryCandidate)
+                ? (_isKorean ? "Tullius callstack" : "Tullius callstack")
+                : (_isKorean ? "CrashLogger 기준" : "CrashLogger context");
             lines.Add($"📌 {DescribeActionableCandidateLabel(primaryCandidate)}: {BuildPrimaryCandidateValue(summary)}");
             lines.Add($"🧭 {(_isKorean ? "근거 합의" : "Evidence agreement")}: {BuildAgreementSummary(summary)}");
-            lines.Add($"🧩 {(_isKorean ? "CrashLogger 기준" : "CrashLogger context")}: {BuildCrashLoggerContextSummary(summary)}");
+            lines.Add($"🧩 {readingPathLabel}: {BuildCrashLoggerContextSummary(summary)}");
             if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
                 summary.ActionableCandidates.Count > 1)
             {

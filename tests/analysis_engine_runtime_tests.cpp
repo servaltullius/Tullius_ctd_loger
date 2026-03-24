@@ -629,6 +629,29 @@ void TestCrashLoggerFrameFixture_SystemDllPathqualifiedFirstProbableDllRuntimeCo
                  "system_dll_pathqualified_first_probable_dll.log.txt: recommendations must keep DLL guidance wording for system victims.");
 }
 
+void TestStandaloneStackwalkRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto consensusCpp = ReadAllText(root / "dump_tool" / "src" / "CandidateConsensus.cpp");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+  const auto winUiCandidates = ReadAllText(root / "dump_tool_winui" / "MainWindowViewModel.Candidates.cs");
+  const auto winUiRecommendations = ReadAllText(root / "dump_tool_winui" / "MainWindowViewModel.Recommendations.cs");
+
+  AssertContains(consensusCpp, "strongStackOnly",
+                 "Standalone stackwalk CTD handling must distinguish strong stackwalk-only candidates from weak stack-scan-only clues.");
+  AssertContains(summaryCpp, "Tullius callstack first points to DLL candidate",
+                 "Standalone stackwalk-backed summaries must expose Tullius callstack-first wording.");
+  AssertContains(summaryCpp, "stronger than stack scan only",
+                 "Standalone stackwalk-backed summaries must explain why callstack-backed clues outrank stack scan only.");
+  AssertContains(recommendationCpp, "Tullius callstack first points to DLL candidate",
+                 "Standalone stackwalk-backed recommendations must expose Tullius callstack-first wording.");
+  AssertContains(winUiCandidates, "Tullius callstack first",
+                 "WinUI evidence agreement must expose standalone Tullius callstack-first wording.");
+  AssertContains(winUiRecommendations, "Tullius callstack: check",
+                 "WinUI next-action summary must expose standalone Tullius callstack guidance.");
+}
+
 }  // namespace
 
 int main()
@@ -652,5 +675,6 @@ int main()
   TestCrashLoggerFrameFixture_HookFrameworkVictimFirstProbableDllRuntimeContracts();
   TestCrashLoggerFrameFixture_CppExceptionModuleSupportRuntimeContracts();
   TestCrashLoggerFrameFixture_SystemDllPathqualifiedFirstProbableDllRuntimeContracts();
+  TestStandaloneStackwalkRuntimeContracts();
   return 0;
 }

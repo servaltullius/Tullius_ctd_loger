@@ -182,6 +182,8 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool frameAndObjectRef = hasCrashLoggerFrame && hasCrashLoggerObjectRef;
   const bool frameOnly = hasCrashLoggerFrame && !hasStack && !hasCrashLoggerObjectRef && !hasResource;
   const bool strongFrameOnly = frameOnly && FamilyWeight(*row, kFamilyCrashLoggerFrame) >= 6u;
+  const bool stackOnly = hasStack && !hasCrashLoggerFrame && !hasCrashLoggerObjectRef && !hasResource;
+  const bool strongStackOnly = stackOnly && FamilyWeight(*row, kFamilyStack) >= 5u;
   const bool objectRefWithHistory =
     hasCrashLoggerObjectRef &&
     HasFamily(candidate, kFamilyHistory) &&
@@ -206,6 +208,10 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.confidence_level = i18n::ConfidenceLevel::kLow;
     candidate.cross_validated = false;
   } else if (strongFrameOnly) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
+    candidate.cross_validated = false;
+  } else if (strongStackOnly) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;

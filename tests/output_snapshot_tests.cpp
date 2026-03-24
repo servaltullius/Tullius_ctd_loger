@@ -454,6 +454,31 @@ void TestFirstChanceCandidateExplanationSourceGuards()
   std::cout << "  [PASS] CTD first-chance candidate explanation guards\n";
 }
 
+void TestStandaloneCallstackExplanationSourceGuards()
+{
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+  const std::string summarySrc = ReadProjectText("dump_tool/src/EvidenceBuilderSummary.cpp");
+
+  AssertContains(
+    summarySrc,
+    "Tullius callstack first points to DLL candidate",
+    "Standalone stackwalk-backed CTD summaries must expose Tullius callstack-first wording.");
+  AssertContains(
+    summarySrc,
+    "This is stronger than stack scan only.",
+    "Standalone stackwalk-backed CTD summaries must explain why callstack-backed clues outrank stack scan only.");
+  AssertContains(
+    recommendationSrc,
+    "Tullius callstack first points to DLL candidate",
+    "Standalone stackwalk-backed recommendations must expose Tullius callstack-first wording.");
+  AssertContains(
+    recommendationSrc,
+    "Check it before broad EXE/system triage.",
+    "Standalone stackwalk-backed recommendations must direct users before generic EXE/system triage.");
+
+  std::cout << "  [PASS] Standalone callstack explanation guards\n";
+}
+
 void TestRecaptureEvaluationConsumptionSourceGuards()
 {
   const std::string outputSrc = ReadProjectText("dump_tool/src/OutputWriter.cpp");
@@ -656,6 +681,7 @@ int main()
   TestOutputWriterEmitsAllFields();
   TestOutputWriterReportTextSections();
   TestFirstChanceCandidateExplanationSourceGuards();
+  TestStandaloneCallstackExplanationSourceGuards();
   TestRecaptureEvaluationConsumptionSourceGuards();
   TestCrashLoggerFrameCandidateFamilySourceGuards();
   TestCrashLoggerFrameFirstSummaryPrioritySourceGuards();

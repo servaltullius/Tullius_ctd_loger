@@ -1,0 +1,9 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+📌 Actionable candidate: StandaloneStack.dll
+🧭 Evidence agreement: Tullius callstack first
+🧩 Tullius callstack: StandaloneStack.dll — Tullius callstack first — DLL guidance
+🔍 Type: CTD-standalone-stackwalk-related
+📍 Module+Offset: SkyrimSE.exe+0x00123456
+💡 Conclusion: Crash is reported in the game executable. Tullius callstack first points to DLL candidate StandaloneStack.dll (actionable stack). This is stronger than stack scan only. (Confidence: Medium)
+🛠️ Next action: Tullius callstack: check StandaloneStack.dll before generic EXE/system triage
+— Tullius CTD Logger

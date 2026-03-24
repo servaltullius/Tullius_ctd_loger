@@ -1,0 +1,76 @@
+{
+  "summary_sentence": "Crash is reported in the game executable. Tullius callstack first points to DLL candidate StandaloneStack.dll (actionable stack). This is stronger than stack scan only. (Confidence: Medium)",
+  "crash_bucket_key": "CTD-standalone-stackwalk-related",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "SkyrimSE.exe+0x00123456",
+    "inferred_mod_name": "Standalone Stack"
+  },
+  "crash_logger": {
+    "direct_fault_module": "",
+    "first_actionable_probable_module": "",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 0,
+    "object_refs": []
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "StandaloneStack.dll",
+      "module_path": "",
+      "inferred_mod_name": "Standalone Stack",
+      "reason": "Callstack-backed suspect from Tullius stackwalk.",
+      "score": 24
+    }
+  ],
+  "callstack": {
+    "frames": [
+      "StandaloneStack.dll+00001000",
+      "SkyrimSE.exe+00123456"
+    ]
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Actionable candidate] Tullius callstack first points to DLL candidate StandaloneStack.dll (actionable stack). Check it before broad EXE/system triage."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "related",
+      "confidence": "Medium",
+      "display_name": "StandaloneStack.dll",
+      "primary_identifier": "StandaloneStack.dll",
+      "secondary_label": "Standalone Stack",
+      "plugin_name": "",
+      "mod_name": "Standalone Stack",
+      "module_filename": "StandaloneStack.dll",
+      "explanation": "Tullius callstack is the strongest standalone clue so far.",
+      "family_count": 1,
+      "score": 5,
+      "cross_validated": false,
+      "has_conflict": false,
+      "supporting_families": [
+        "actionable_stack"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

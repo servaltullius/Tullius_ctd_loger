@@ -167,6 +167,12 @@ void AddActionableCandidateRecommendations(
   const bool hasFirstChanceFamily = CandidateHasFamily(*topCandidate, "first_chance_context");
   const bool hasHistoryFamily = CandidateHasFamily(*topCandidate, "history_repeat");
   const bool hasResourceFamily = CandidateHasFamily(*topCandidate, "resource_provider");
+  const bool hasStandaloneCallstackFamily =
+    CandidateHasFamily(*topCandidate, "actionable_stack") &&
+    !hasFrameFamily &&
+    !CandidateHasFamily(*topCandidate, "crash_logger_object_ref") &&
+    !hasResourceFamily &&
+    topCandidate->score >= 5u;
   const bool hasScorableFirstChance = hasFirstChanceFamily && HasScorableFirstChanceContext(r.first_chance_summary);
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
@@ -196,7 +202,13 @@ void AddActionableCandidateRecommendations(
       : (L"[행동 우선 후보] 동일 문제가 반복되면 " + candidateName +
           L" 또는 해당 모드/DLL을 비활성화하고 다시 테스트하세요."));
   } else if (topCandidate->status_id == "related") {
-    r.recommendations.push_back(hasFrameFamily
+    r.recommendations.push_back(hasStandaloneCallstackFamily
+      ? (en
+          ? (L"[Actionable candidate] Tullius callstack first points to DLL candidate " + candidateName +
+              L" (actionable stack). Check it before broad EXE/system triage.")
+          : (L"[행동 우선 후보] Tullius callstack first 가 DLL 후보 " + candidateName +
+              L" (actionable stack)를 가리킵니다. 광범위한 EXE/system 점검 전에 먼저 확인하세요."))
+      : hasFrameFamily
       ? (hasScorableFirstChance
           ? (en
               ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
