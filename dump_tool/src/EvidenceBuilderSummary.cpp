@@ -1,5 +1,6 @@
 #include "EvidenceBuilderPrivate.h"
 
+#include <algorithm>
 #include <cwchar>
 
 #include "MinidumpUtil.h"
@@ -24,12 +25,50 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
   return L"(unknown)";
 }
 
+bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
+{
+  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
+         candidate.supporting_families.end();
+}
+
+bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
+{
+  if (candidate.module_filename.empty() || module.empty()) {
+    return false;
+  }
+  return minidump::WideLower(candidate.module_filename) == minidump::WideLower(module);
+}
+
+bool CandidateHasFrameSupport(const ActionableCandidate& candidate)
+{
+  return CandidateHasFamily(candidate, "crash_logger_frame");
+}
+
+std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
+{
+  if (CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
+    return en ? L"Crash Logger frame first (direct DLL fault)"
+              : L"Crash Logger frame first (direct DLL fault)";
+  }
+  if (CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
+    return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
+              : L"Crash Logger frame first (첫 actionable probable DLL frame)";
+  }
+  if (CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
+    return en ? L"Crash Logger frame first (probable frame streak)"
+              : L"Crash Logger frame first (probable frame streak)";
+  }
+  return en ? L"Crash Logger frame first" : L"Crash Logger frame first";
+}
+
 std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en)
 {
   std::vector<std::wstring> labels;
   labels.reserve(candidate.supporting_families.size());
   for (const auto& family : candidate.supporting_families) {
-    if (family == "crash_logger_object_ref") {
+    if (family == "crash_logger_frame") {
+      labels.push_back(en ? L"Crash Logger frame" : L"Crash Logger 프레임");
+    } else if (family == "crash_logger_object_ref") {
       labels.push_back(en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조");
     } else if (family == "actionable_stack") {
       labels.push_back(en ? L"actionable stack" : L"실행 가능한 스택");
@@ -107,6 +146,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const std::wstring topCandidateConf = topCandidate && !topCandidate->confidence.empty()
     ? topCandidate->confidence
     : ConfidenceText(lang, topCandidate ? topCandidate->confidence_level : i18n::ConfidenceLevel::kUnknown);
+  const bool topCandidateHasFrame = topCandidate && CandidateHasFrameSupport(*topCandidate);
+  const bool topCandidateHasObjectRef = topCandidate && CandidateHasFamily(*topCandidate, "crash_logger_object_ref");
+  const bool topCandidateBackedByFrame =
+    topCandidate &&
+    (CandidateMatchesModule(*topCandidate, r.crash_logger_direct_fault_module) ||
+     CandidateMatchesModule(*topCandidate, r.crash_logger_first_actionable_probable_module) ||
+     CandidateMatchesModule(*topCandidate, r.crash_logger_probable_streak_module));
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -140,11 +186,34 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : (L"크래시 위치가 " + who + L"(알려진 훅 프레임워크)로 보고되었습니다. 이 경우 피해 위치로 잡히는 일이 많아 단독 원인으로 단정하기 어렵습니다. (신뢰도: 낮음)");
     }
   } else if (hasModule && !isSystem && !isGameExe) {
-    summary = en
-      ? (L"Top suspect: " + who + L" — the crash appears to occur inside this DLL. (Confidence: High)")
-      : (L"유력 후보: " + who + L" — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 높음)");
+    if (!r.crash_logger_direct_fault_module.empty() &&
+        minidump::WideLower(r.crash_logger_direct_fault_module) == minidump::WideLower(r.fault_module_filename)) {
+      summary = en
+        ? (L"Top suspect: " + who + L" — Crash Logger frame first and direct DLL fault both point inside this DLL. (Confidence: High)")
+        : (L"유력 후보: " + who + L" — Crash Logger frame first 와 direct DLL fault 가 모두 이 DLL 내부를 가리킵니다. (신뢰도: 높음)");
+    } else {
+      summary = en
+        ? (L"Top suspect: " + who + L" — the crash appears to occur inside this DLL. (Confidence: High)")
+        : (L"유력 후보: " + who + L" — 해당 DLL 내부에서 크래시가 발생한 것으로 보입니다. (신뢰도: 높음)");
+    }
   } else if (hasModule && isSystem) {
-    if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
+    if (topCandidate && topCandidate->status_id == "cross_validated") {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto families = JoinCandidateFamilies(*topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in a Windows system DLL, but the strongest actionable candidate is " + candidateName +
+            L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, 가장 강한 실행 우선 후보는 " + candidateName +
+            L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidateHasFrame && topCandidateBackedByFrame) {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in a Windows system DLL, but " + frameSupport + L" points to DLL candidate " + candidateName +
+            L". This is stronger than an isolated object ref. (Confidence: " + topCandidateConf + L")")
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + frameSupport + L" 가 DLL 후보 " + candidateName +
+            L" 를 가리킵니다. 이는 단독 object ref 보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
+    } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
         ? (L"Crash is reported in a Windows system DLL, but " + suspectBasis + L" points to " + nonHookSuspectWho +
             L". (Confidence: " + nonHookSuspectConf + L")")
@@ -189,6 +258,15 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
         : (L"크래시 위치가 게임 본체(EXE)이며, 교차검증된 실행 우선 후보는 " + candidateName +
             L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidateHasFrame && topCandidateBackedByFrame) {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto families = JoinCandidateFamilies(*topCandidate, en);
+      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in the game executable. " + frameSupport + L" points to DLL candidate " + candidateName +
+            L" (" + families + L"). This is stronger than an isolated object ref. (Confidence: " + topCandidateConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L" 가 DLL 후보 " + candidateName +
+            L" 를 가리킵니다. (" + families + L", 단독 object ref 보다 강한 신호, 신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
@@ -197,7 +275,15 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
         : (L"크래시 위치가 게임 본체(EXE)이며, 실행 우선 후보는 " + candidateName +
             L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
-    } else if (topCandidate && topCandidate->status_id == "reference_clue") {
+    } else if (topCandidate && topCandidate->status_id == "reference_clue" && topCandidateHasFrame) {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in the game executable, and " + frameSupport + L" points to DLL candidate " + candidateName +
+            L". No second independent signal agrees yet. (Confidence: " + topCandidateConf + L")")
+        : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L" 가 DLL 후보 " + candidateName +
+            L" 를 가리킵니다. 아직 두 번째 독립 신호 합의는 없습니다. (신뢰도: " + topCandidateConf + L")");
+    } else if (topCandidate && topCandidate->status_id == "reference_clue" && topCandidateHasObjectRef) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
         ? (L"Crash is reported in the game executable, and CrashLogger shows the game was processing " + candidateName +

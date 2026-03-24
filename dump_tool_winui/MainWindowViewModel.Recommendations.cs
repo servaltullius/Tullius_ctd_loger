@@ -134,11 +134,24 @@ internal sealed partial class MainWindowViewModel
         {
             var primaryCandidate = summary.ActionableCandidates[0];
             var candidateName = BuildPrimaryCandidateValue(summary);
+            var hasFrameFamily = HasFamily(primaryCandidate, "crash_logger_frame");
             return primaryCandidate.StatusId switch
             {
+                "cross_validated" when hasFrameFamily => T(
+                    $"DLL guidance: check {candidateName} first",
+                    $"DLL guidance: {candidateName}부터 확인"),
                 "cross_validated" => T($"Update or isolate {candidateName} first", $"{candidateName} 업데이트/격리부터 확인"),
+                "related" when hasFrameFamily => T(
+                    $"DLL guidance: check {candidateName} before generic EXE/system triage",
+                    $"DLL guidance: 일반 EXE/system 점검보다 먼저 {candidateName} 확인"),
                 "related" => T($"Check {candidateName} before generic DLL triage", $"{candidateName} 쪽을 일반 DLL 점검보다 먼저 확인"),
+                "reference_clue" when hasFrameFamily => T(
+                    $"DLL guidance: use Crash Logger frame clues for {candidateName} first",
+                    $"DLL guidance: {candidateName}의 Crash Logger frame 단서를 먼저 확인"),
                 "reference_clue" => T("Capture another dump or compare a second signal", "다른 덤프를 한 번 더 모으거나 두 번째 신호를 비교"),
+                "conflicting" when hasFrameFamily => T(
+                    $"DLL guidance conflict: compare {candidateName} one side at a time",
+                    $"DLL guidance 충돌: {candidateName} 후보를 한쪽씩 나눠 비교"),
                 "conflicting" => T($"Compare {candidateName} one side at a time", $"{candidateName} 후보를 한쪽씩 나눠 비교"),
                 _ => T("Review the first recommendation", "첫 번째 권장 조치를 확인"),
             };
@@ -154,6 +167,8 @@ internal sealed partial class MainWindowViewModel
     {
         return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Crash Logger 프레임]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Object ref]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[오브젝트 참조]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Conflict]", StringComparison.OrdinalIgnoreCase) ||
@@ -183,6 +198,8 @@ internal sealed partial class MainWindowViewModel
     {
         return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Crash Logger 프레임]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Top suspect]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[유력 후보]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[ESP/ESM]", StringComparison.OrdinalIgnoreCase) ||
@@ -216,4 +233,5 @@ internal sealed partial class MainWindowViewModel
                recommendation.StartsWith("[Manual]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[수동]", StringComparison.Ordinal);
     }
+
 }

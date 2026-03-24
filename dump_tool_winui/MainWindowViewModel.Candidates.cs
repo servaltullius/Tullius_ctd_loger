@@ -54,6 +54,10 @@ internal sealed partial class MainWindowViewModel
 
         if (candidate.StatusId == "reference_clue")
         {
+            if (HasFamily(candidate, "crash_logger_frame"))
+            {
+                return T("Crash Logger frame first", "Crash Logger frame 우선");
+            }
             return T("Object ref only", "오브젝트 참조 단독");
         }
 
@@ -95,6 +99,11 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildCrashLoggerContextLabel(AnalysisSummary summary)
     {
+        if (HasCrashLoggerFrameSignal(summary))
+        {
+            return T("Crash Logger frame", "Crash Logger 프레임");
+        }
+
         if (summary.CrashLoggerRefs.Count > 0)
         {
             if (summary.ActionableCandidates.Count > 0 &&
@@ -111,6 +120,30 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildCrashLoggerContextSummary(AnalysisSummary summary)
     {
+        const string dllGuidance = "DLL guidance";
+
+        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule))
+        {
+            return _isKorean
+                ? $"{summary.CrashLoggerDirectFaultModule} — Crash Logger frame first (direct DLL fault) — {dllGuidance}"
+                : $"{summary.CrashLoggerDirectFaultModule} — Crash Logger frame first (direct DLL fault) — {dllGuidance}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerFirstActionableProbableModule))
+        {
+            return _isKorean
+                ? $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger frame first probable DLL frame — {dllGuidance}"
+                : $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger frame first probable DLL frame — {dllGuidance}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerProbableStreakModule) &&
+            summary.CrashLoggerProbableStreakLength > 0)
+        {
+            return _isKorean
+                ? $"{summary.CrashLoggerProbableStreakModule} — Crash Logger frame first probable frame streak x{summary.CrashLoggerProbableStreakLength} — {dllGuidance}"
+                : $"{summary.CrashLoggerProbableStreakModule} — Crash Logger frame first probable frame streak x{summary.CrashLoggerProbableStreakLength} — {dllGuidance}";
+        }
+
         if (summary.CrashLoggerRefs.Count > 0)
         {
             var topRef = summary.CrashLoggerRefs[0];
@@ -253,6 +286,7 @@ internal sealed partial class MainWindowViewModel
 
     private string DescribeFamily(string familyId) => familyId switch
     {
+        "crash_logger_frame" => T("Crash Logger frame", "Crash Logger 프레임"),
         "crash_logger_object_ref" => T("CrashLogger object ref", "CrashLogger 오브젝트 참조"),
         "actionable_stack" => T("actionable stack", "실행 가능한 스택"),
         "resource_provider" => T("near resource provider", "인접 리소스 provider"),
@@ -283,5 +317,33 @@ internal sealed partial class MainWindowViewModel
         if (score >= 16) return T("ESP ref (high)", "ESP 참조 (높음)");
         if (score >= 10) return T("ESP ref", "ESP 참조");
         return T("ESP ref (low)", "ESP 참조 (낮음)");
+    }
+
+    private static bool HasFamily(ActionableCandidateItem candidate, string familyId)
+    {
+        return candidate.SupportingFamilies.Contains(familyId, StringComparer.Ordinal);
+    }
+
+    private bool HasCrashLoggerFrameSignal(AnalysisSummary summary)
+    {
+        if (summary.CrashLoggerFrameSignalStrength > 0)
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule) ||
+            !string.IsNullOrWhiteSpace(summary.CrashLoggerFirstActionableProbableModule) ||
+            !string.IsNullOrWhiteSpace(summary.CrashLoggerProbableStreakModule))
+        {
+            return true;
+        }
+
+        if (summary.ActionableCandidates.Count == 0)
+        {
+            return false;
+        }
+
+        var topCandidate = summary.ActionableCandidates[0];
+        return HasFamily(topCandidate, "crash_logger_frame");
     }
 }

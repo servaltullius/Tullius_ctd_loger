@@ -134,6 +134,23 @@ std::string BuildReportText(
     rpt << (en ? "CrashLoggerTopModules: " : "Crash Logger 상위 모듈: ")
         << WideToUtf8(JoinList(r.crash_logger_top_modules, 6, L", ")) << "\n";
   }
+  if (!r.crash_logger_direct_fault_module.empty()) {
+    rpt << (en ? "CrashLoggerDirectFaultModule: " : "Crash Logger direct fault 모듈: ")
+        << WideToUtf8(r.crash_logger_direct_fault_module) << "\n";
+  }
+  if (!r.crash_logger_first_actionable_probable_module.empty()) {
+    rpt << (en ? "CrashLoggerFirstActionableProbableModule: " : "Crash Logger 첫 actionable probable 모듈: ")
+        << WideToUtf8(r.crash_logger_first_actionable_probable_module) << "\n";
+  }
+  if (!r.crash_logger_probable_streak_module.empty()) {
+    rpt << (en ? "CrashLoggerProbableStreakModule: " : "Crash Logger probable streak 모듈: ")
+        << WideToUtf8(r.crash_logger_probable_streak_module)
+        << " x" << r.crash_logger_probable_streak_length << "\n";
+  }
+  if (r.crash_logger_frame_signal_strength > 0u) {
+    rpt << (en ? "CrashLoggerFrameSignalStrength: " : "Crash Logger frame 신호 강도: ")
+        << r.crash_logger_frame_signal_strength << "\n";
+  }
   if (!r.crash_logger_cpp_exception_type.empty() ||
       !r.crash_logger_cpp_exception_info.empty() ||
       !r.crash_logger_cpp_exception_throw_location.empty() ||

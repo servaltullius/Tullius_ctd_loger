@@ -25,6 +25,9 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
 
 std::wstring DescribeFamily(std::string_view familyId, bool en)
 {
+  if (familyId == "crash_logger_frame") {
+    return en ? L"Crash Logger frame" : L"Crash Logger 프레임";
+  }
   if (familyId == "crash_logger_object_ref") {
     return en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조";
   }
@@ -57,6 +60,31 @@ bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view f
 {
   return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
          candidate.supporting_families.end();
+}
+
+bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
+{
+  if (candidate.module_filename.empty() || module.empty()) {
+    return false;
+  }
+  return minidump::WideLower(candidate.module_filename) == minidump::WideLower(module);
+}
+
+std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
+{
+  if (CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
+    return en ? L"Crash Logger frame first (direct DLL fault)"
+              : L"Crash Logger frame first (direct DLL fault)";
+  }
+  if (CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
+    return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
+              : L"Crash Logger frame first (첫 actionable probable DLL frame)";
+  }
+  if (CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
+    return en ? L"Crash Logger frame first (probable frame streak)"
+              : L"Crash Logger frame first (probable frame streak)";
+  }
+  return en ? L"Crash Logger frame first" : L"Crash Logger frame first";
 }
 
 bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
@@ -135,12 +163,20 @@ void AddActionableCandidateRecommendations(
   }
 
   const auto candidateName = DescribeCandidate(*topCandidate);
+  const bool hasFrameFamily = CandidateHasFamily(*topCandidate, "crash_logger_frame");
+  const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
   if (topCandidate->status_id == "cross_validated") {
-    r.recommendations.push_back(en
-      ? (L"[Actionable candidate] Cross-validated signals point to " + candidateName +
-          L". Update/reinstall or isolate it before broader DLL triage.")
-      : (L"[행동 우선 후보] 교차검증 신호가 " + candidateName +
-          L" 쪽으로 모입니다. 광범위한 DLL 점검 전에 이 후보를 먼저 업데이트/격리하세요."));
+    r.recommendations.push_back(hasFrameFamily
+      ? (en
+          ? (L"[Actionable candidate] " + frameSupport + L" and another signal agree on " + candidateName +
+              L". Use DLL guidance first: update/reinstall or isolate it before broader EXE/system triage.")
+          : (L"[행동 우선 후보] " + frameSupport + L" 와 다른 신호가 " + candidateName +
+              L" 쪽으로 합의합니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance로 업데이트/재설치/격리를 진행하세요."))
+      : (en
+          ? (L"[Actionable candidate] Cross-validated signals point to " + candidateName +
+              L". Update/reinstall or isolate it before broader DLL triage.")
+          : (L"[행동 우선 후보] 교차검증 신호가 " + candidateName +
+              L" 쪽으로 모입니다. 광범위한 DLL 점검 전에 이 후보를 먼저 업데이트/격리하세요.")));
     if (CandidateHasFamily(*topCandidate, "first_chance_context")) {
       const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
       if (!firstChanceDetail.empty()) {
@@ -155,11 +191,17 @@ void AddActionableCandidateRecommendations(
       : (L"[행동 우선 후보] 동일 문제가 반복되면 " + candidateName +
           L" 또는 해당 모드/DLL을 비활성화하고 다시 테스트하세요."));
   } else if (topCandidate->status_id == "related") {
-    r.recommendations.push_back(en
-      ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
-          L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
-      : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
-          L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."));
+    r.recommendations.push_back(hasFrameFamily
+      ? (en
+          ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")
+          : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance를 따르세요."))
+      : (en
+          ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+          : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 일반적인 SKSE/DLL 점검보다 먼저 확인하세요.")));
     if (CandidateHasFamily(*topCandidate, "first_chance_context")) {
       const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
       if (!firstChanceDetail.empty()) {
@@ -169,21 +211,32 @@ void AddActionableCandidateRecommendations(
       }
     }
   } else if (topCandidate->status_id == "reference_clue") {
-    r.recommendations.push_back(en
-      ? (L"[Object ref] The game was processing " + candidateName +
-          L" at crash time, but no second independent signal agrees yet. Treat it as a clue first.")
-      : (L"[오브젝트 참조] 사고 당시 게임이 " + candidateName +
-          L" 을(를) 처리 중이었지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요."));
-    r.recommendations.push_back(en
-      ? L"[Object ref] If the clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
-      : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
+    if (hasFrameFamily) {
+      r.recommendations.push_back(en
+        ? (L"[Crash Logger frame] " + frameSupport + L" points to DLL candidate " + candidateName +
+            L", but no second independent signal agrees yet. Use DLL guidance first and confirm with another capture if needed.")
+        : (L"[Crash Logger 프레임] " + frameSupport + L" 가 DLL 후보 " + candidateName +
+            L" 를 가리키지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 DLL guidance를 따르고 필요하면 추가 캡처로 확인하세요."));
+      r.recommendations.push_back(en
+        ? L"[Crash Logger frame] If the frame clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
+        : L"[Crash Logger 프레임] 이 frame 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
+    } else {
+      r.recommendations.push_back(en
+        ? (L"[Object ref] The game was processing " + candidateName +
+            L" at crash time, but no second independent signal agrees yet. Treat it as a clue first.")
+        : (L"[오브젝트 참조] 사고 당시 게임이 " + candidateName +
+            L" 을(를) 처리 중이었지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요."));
+      r.recommendations.push_back(en
+        ? L"[Object ref] If the clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
+        : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
+    }
   } else if (topCandidate->status_id == "conflicting" && secondCandidate) {
     const auto secondName = DescribeCandidate(*secondCandidate);
     r.recommendations.push_back(en
       ? (L"[Conflict] Signals split between " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L") and " +
-          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L"). Disable/update one side at a time and retest.")
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L"). Check whether Crash Logger frame first DLL guidance and object ref/stack evidence disagree before retesting.")
       : (L"[충돌] 신호가 " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L")와 " +
-          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. 한쪽씩 순서대로 업데이트/비활성화하며 재현을 확인하세요."));
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. Crash Logger frame first DLL guidance 와 object ref/stack 근거가 어디서 갈리는지 먼저 확인한 뒤 재현을 확인하세요."));
     r.recommendations.push_back(en
       ? L"[Conflict] If the split persists, rerun with a richer crash recapture profile first; use FullMemory (DumpMode=2) only if the tie remains."
       : L"[충돌] 이 분리가 계속되면 richer crash recapture profile로 먼저 다시 캡처하고, 그래도 갈리면 그때만 FullMemory(DumpMode=2)를 사용하세요.");

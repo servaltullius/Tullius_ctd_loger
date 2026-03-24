@@ -146,6 +146,11 @@ nlohmann::json BuildSummaryJson(
   for (const auto& m : r.crash_logger_top_modules) {
     summary["crash_logger"]["top_modules"].push_back(WideToUtf8(m));
   }
+  summary["crash_logger"]["direct_fault_module"] = WideToUtf8(r.crash_logger_direct_fault_module);
+  summary["crash_logger"]["first_actionable_probable_module"] = WideToUtf8(r.crash_logger_first_actionable_probable_module);
+  summary["crash_logger"]["probable_streak_module"] = WideToUtf8(r.crash_logger_probable_streak_module);
+  summary["crash_logger"]["probable_streak_length"] = r.crash_logger_probable_streak_length;
+  summary["crash_logger"]["frame_signal_strength"] = r.crash_logger_frame_signal_strength;
   if (!r.crash_logger_cpp_exception_type.empty() ||
       !r.crash_logger_cpp_exception_info.empty() ||
       !r.crash_logger_cpp_exception_throw_location.empty() ||

@@ -30,6 +30,11 @@ internal sealed class AnalysisSummary
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
+    public string CrashLoggerDirectFaultModule { get; init; } = string.Empty;
+    public string CrashLoggerFirstActionableProbableModule { get; init; } = string.Empty;
+    public string CrashLoggerProbableStreakModule { get; init; } = string.Empty;
+    public int CrashLoggerProbableStreakLength { get; init; }
+    public int CrashLoggerFrameSignalStrength { get; init; }
     public IReadOnlyList<string> Diagnostics { get; init; } = Array.Empty<string>();
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
@@ -124,6 +129,11 @@ internal sealed class AnalysisSummary
             EvidenceItems = evidenceItems,
             ActionableCandidates = actionableCandidates,
             CrashLoggerRefs = crashLoggerRefs,
+            CrashLoggerDirectFaultModule = ReadString(crashLoggerNode, "direct_fault_module"),
+            CrashLoggerFirstActionableProbableModule = ReadString(crashLoggerNode, "first_actionable_probable_module"),
+            CrashLoggerProbableStreakModule = ReadString(crashLoggerNode, "probable_streak_module"),
+            CrashLoggerProbableStreakLength = ReadInt32(crashLoggerNode, "probable_streak_length"),
+            CrashLoggerFrameSignalStrength = ReadInt32(crashLoggerNode, "frame_signal_strength"),
             ResourceItems = resourceItems,
             Triage = ParseTriage(triageElement),
             HistoryCorrelationCount = root.TryGetProperty("history_correlation", out var histCorr)
