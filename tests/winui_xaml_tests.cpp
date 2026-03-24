@@ -188,6 +188,10 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     vm,
     "Crash Logger frame + first-chance",
     "Expanded WinUI wording must expose frame plus first-chance agreement when both support the DLL candidate.");
+  RequireContains(
+    vm,
+    "Crash Logger frame + history",
+    "Expanded WinUI wording must expose frame plus history agreement when repeated bucket evidence supports the DLL candidate.");
 }
 
 static void TestMainWindowShareTextUsesCrashLoggerReadingPath()

@@ -1,0 +1,9 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+📌 Actionable candidate: RepeatDll.dll
+🧭 Evidence agreement: Crash Logger frame + history
+🧩 CrashLogger context: RepeatDll.dll — Crash Logger frame first probable DLL frame — DLL guidance
+🔍 Type: CTD-frame-history-related
+📍 Module+Offset: SkyrimSE.exe+0x00ABCDEF
+💡 Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate RepeatDll.dll (Crash Logger frame + history repeat). Repeated crash bucket history also matched this candidate. (Confidence: Medium)
+🛠️ Next action: DLL guidance: check RepeatDll.dll and repeated bucket history first
+— Tullius CTD Logger

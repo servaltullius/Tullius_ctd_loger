@@ -57,6 +57,11 @@ internal sealed partial class MainWindowViewModel
             return T("Crash Logger frame + first-chance", "Crash Logger frame + first-chance");
         }
 
+        if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "history_repeat"))
+        {
+            return T("Crash Logger frame + history", "Crash Logger frame + history");
+        }
+
         if (HasFamily(candidate, "crash_logger_frame") && candidate.FamilyCount <= 1)
         {
             return T("Crash Logger frame first", "Crash Logger frame 우선");

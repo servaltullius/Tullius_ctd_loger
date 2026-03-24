@@ -51,6 +51,12 @@ bool CandidateHasScorableFirstChanceSupport(const AnalysisResult& r, const Actio
          HasScorableFirstChanceContext(r.first_chance_summary);
 }
 
+bool CandidateHasScorableHistorySupport(const AnalysisResult& r, const ActionableCandidate& candidate)
+{
+  return CandidateHasFamily(candidate, "history_repeat") &&
+         (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
+}
+
 std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
 {
   if (CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
@@ -216,14 +222,17 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
       const bool hasFirstChanceSupport = CandidateHasScorableFirstChanceSupport(r, *topCandidate);
+      const bool hasHistorySupport = CandidateHasScorableHistorySupport(r, *topCandidate);
       summary = en
         ? (L"Crash is reported in a Windows system DLL, but " + frameSupport + L" points to DLL candidate " + candidateName +
             L". This is stronger than an isolated object ref." +
             (hasFirstChanceSupport ? L" Repeated suspicious first-chance context also matched this candidate." : L"") +
+            (hasHistorySupport ? L" Repeated crash bucket history also matched this candidate." : L"") +
             L" (Confidence: " + topCandidateConf + L")")
         : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + frameSupport + L" 가 DLL 후보 " + candidateName +
             L" 를 가리킵니다. 이는 단독 object ref 보다 강한 신호입니다." +
             (hasFirstChanceSupport ? L" 반복 suspicious first-chance 문맥도 이 후보와 맞습니다." : L"") +
+            (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
             L" (신뢰도: " + topCandidateConf + L")");
     } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
@@ -275,14 +284,17 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       const auto families = JoinCandidateFamilies(*topCandidate, en);
       const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
       const bool hasFirstChanceSupport = CandidateHasScorableFirstChanceSupport(r, *topCandidate);
+      const bool hasHistorySupport = CandidateHasScorableHistorySupport(r, *topCandidate);
       summary = en
         ? (L"Crash is reported in the game executable. " + frameSupport + L" points to DLL candidate " + candidateName +
             L" (" + families + L"). This is stronger than an isolated object ref." +
             (hasFirstChanceSupport ? L" Repeated suspicious first-chance context also matched this candidate." : L"") +
+            (hasHistorySupport ? L" Repeated crash bucket history also matched this candidate." : L"") +
             L" (Confidence: " + topCandidateConf + L")")
         : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L" 가 DLL 후보 " + candidateName +
             L" 를 가리킵니다. (" + families + L", 단독 object ref 보다 강한 신호" +
             (hasFirstChanceSupport ? L", 반복 suspicious first-chance 문맥도 이 후보와 맞음" : L"") +
+            (hasHistorySupport ? L", 반복 크래시 버킷 이력도 이 후보와 맞음" : L"") +
             L", 신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);

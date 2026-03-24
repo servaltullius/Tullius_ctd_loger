@@ -473,6 +473,10 @@ void TestFirstChanceCtdCandidateSourceContracts()
                  "EXE/system victim frame-backed summaries must mention repeated first-chance context when it reinforces the DLL candidate.");
   AssertContains(recommendationCpp, "check the repeated first-chance path before broad EXE/system triage",
                  "Related frame-backed CTD recommendations must prioritize the repeated first-chance path before broad EXE/system triage.");
+  AssertContains(summaryCpp, "Repeated crash bucket history also matched this candidate.",
+                 "EXE/system victim frame-backed summaries must mention repeated crash bucket history when it reinforces the DLL candidate.");
+  AssertContains(recommendationCpp, "compare repeated same-bucket crashes before broad EXE/system triage",
+                 "Related frame-backed CTD recommendations must prioritize repeated same-bucket crash history before broad EXE/system triage.");
 }
 
 void TestRecaptureEvaluationConsumptionSourceContracts()

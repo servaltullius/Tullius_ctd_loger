@@ -1,0 +1,80 @@
+{
+  "summary_sentence": "Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate RepeatDll.dll (Crash Logger frame + history repeat). Repeated crash bucket history also matched this candidate. (Confidence: Medium)",
+  "crash_bucket_key": "CTD-frame-history-related",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "SkyrimSE.exe+0x00ABCDEF",
+    "inferred_mod_name": "Repeat DLL Mod"
+  },
+  "crash_logger": {
+    "direct_fault_module": "",
+    "first_actionable_probable_module": "RepeatDll.dll",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 1,
+    "object_refs": []
+  },
+  "history_correlation": {
+    "bucket_key": "CTD-frame-history-related",
+    "count": 4,
+    "first_seen": "2026-03-20T11:15:38Z",
+    "last_seen": "2026-03-24T09:30:00Z"
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "RepeatDll.dll",
+      "module_path": "",
+      "inferred_mod_name": "Repeat DLL Mod",
+      "reason": "Crash Logger first actionable probable frame points to this DLL.",
+      "score": 10
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Actionable candidate] Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate RepeatDll.dll (Crash Logger frame + history repeat). Use DLL guidance first and compare repeated same-bucket crashes before broad EXE/system triage."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "related",
+      "confidence": "Medium",
+      "display_name": "RepeatDll.dll",
+      "primary_identifier": "RepeatDll.dll",
+      "secondary_label": "Repeat DLL Mod",
+      "plugin_name": "",
+      "mod_name": "Repeat DLL Mod",
+      "module_filename": "RepeatDll.dll",
+      "explanation": "Crash Logger frame and repeated crash bucket history both point to this DLL.",
+      "family_count": 2,
+      "score": 8,
+      "cross_validated": false,
+      "has_conflict": false,
+      "supporting_families": [
+        "crash_logger_frame",
+        "history_repeat"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

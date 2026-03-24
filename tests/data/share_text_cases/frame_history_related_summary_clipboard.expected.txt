@@ -1,0 +1,10 @@
+SkyrimDiag report
+Dump: /tmp/frame_history_related_summary.dmp
+Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate RepeatDll.dll (Crash Logger frame + history repeat). Repeated crash bucket history also matched this candidate. (Confidence: Medium)
+Crash bucket key: CTD-frame-history-related
+Module+Offset: SkyrimSE.exe+0x00ABCDEF
+Inferred mod: Repeat DLL Mod
+Actionable candidate: RepeatDll.dll
+Evidence agreement: Crash Logger frame + history
+CrashLogger context: RepeatDll.dll — Crash Logger frame first probable DLL frame — DLL guidance
+Next action: DLL guidance: check RepeatDll.dll and repeated bucket history first
