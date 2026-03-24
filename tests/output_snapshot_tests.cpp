@@ -61,6 +61,11 @@ nlohmann::json LoadGoldenJson()
   return nlohmann::json::parse(text);
 }
 
+std::string ReadCrashLoggerFrameFixture(const char* filename)
+{
+  return ReadAllText(ProjectRoot() / "tests" / "data" / "crashlogger_frame_cases" / filename);
+}
+
 void TestGoldenJsonSchemaV2(const nlohmann::json& j)
 {
 
@@ -501,6 +506,38 @@ void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
   std::cout << "  [PASS] Crash Logger frame-first summary priority guards\n";
 }
 
+void TestCrashLoggerFrameFixtureSummaryPriorityGuards()
+{
+  const std::string directFaultFixture = ReadCrashLoggerFrameFixture("direct_fault_dll.log.txt");
+  const std::string exeVictimFixture = ReadCrashLoggerFrameFixture("exe_victim_first_probable_dll.log.txt");
+  const std::string conflictFixture = ReadCrashLoggerFrameFixture("frame_object_ref_conflict.log.txt");
+  const std::string summarySrc = ReadProjectText("dump_tool/src/EvidenceBuilderSummary.cpp");
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(
+    directFaultFixture,
+    "Precision.dll+0x000FDDC7",
+    "direct_fault_dll.log.txt must preserve the direct DLL fault token used by frame-first CTD summaries.");
+  AssertContains(
+    exeVictimFixture,
+    "ExampleMod.dll+00000003",
+    "exe_victim_first_probable_dll.log.txt must preserve the first actionable probable DLL frame.");
+  AssertContains(
+    conflictFixture,
+    "\"OtherRef.esp\"",
+    "frame_object_ref_conflict.log.txt must preserve the conflicting object-ref clue.");
+  AssertContains(
+    summarySrc,
+    "stronger than an isolated object ref",
+    "Fixture-backed EXE/system victim summaries must keep preferring frame-backed DLL guidance over isolated object refs.");
+  AssertContains(
+    recommendationSrc,
+    "object ref/stack evidence disagree",
+    "Fixture-backed conflict guidance must keep explaining frame vs object-ref disagreement.");
+
+  std::cout << "  [PASS] Crash Logger frame fixture summary priority guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -529,6 +566,7 @@ int main()
   TestRecaptureEvaluationConsumptionSourceGuards();
   TestCrashLoggerFrameCandidateFamilySourceGuards();
   TestCrashLoggerFrameFirstSummaryPrioritySourceGuards();
+  TestCrashLoggerFrameFixtureSummaryPriorityGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;
