@@ -243,6 +243,49 @@ void TestCrossValidatedCandidateRetainsFirstChanceFamily()
   assert(candidates[0].supporting_families.size() == 3);
 }
 
+void TestFrameAndStackOutrankObjectRefHistoryWithoutConflict()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"precisiondll", L"Precision.dll", 6, L"", L"Precision - Accurate Melee Collisions", L"Precision.dll"),
+    MakeSignal("actionable_stack", L"precisiondll", L"Precision - Accurate Melee Collisions", 5, L"", L"Precision - Accurate Melee Collisions", L"Precision.dll"),
+    MakeSignal("crash_logger_object_ref", L"otherref", L"OtherRef.esp", 6, L"OtherRef.esp"),
+    MakeSignal("history_repeat", L"otherref", L"OtherRef.esp", 3, L"OtherRef.esp"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 2);
+  assert(candidates[0].display_name == L"Precision.dll");
+  AssertStatus(candidates[0], "cross_validated");
+  assert(candidates[0].cross_validated);
+  assert(!candidates[0].has_conflict);
+
+  assert(candidates[1].display_name == L"OtherRef.esp");
+  AssertStatus(candidates[1], "related");
+  assert(!candidates[1].cross_validated);
+  assert(!candidates[1].has_conflict);
+}
+
+void TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"precisiondll", L"Precision.dll", 6, L"", L"Precision - Accurate Melee Collisions", L"Precision.dll"),
+    MakeSignal("actionable_stack", L"precisiondll", L"Precision - Accurate Melee Collisions", 5, L"", L"Precision - Accurate Melee Collisions", L"Precision.dll"),
+    MakeSignal("crash_logger_object_ref", L"otherref", L"OtherRef.esp", 6, L"OtherRef.esp"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 2);
+  assert(candidates[0].display_name == L"Precision.dll");
+  AssertStatus(candidates[0], "cross_validated");
+  assert(candidates[0].cross_validated);
+  assert(!candidates[0].has_conflict);
+
+  assert(candidates[1].display_name == L"OtherRef.esp");
+  AssertStatus(candidates[1], "reference_clue");
+  assert(!candidates[1].cross_validated);
+  assert(!candidates[1].has_conflict);
+}
+
 void TestFirstChanceFamilySourceContract()
 {
   const auto root = ProjectRoot();
@@ -267,6 +310,8 @@ int main()
   TestFirstChanceOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndFirstChanceBecomeRelated();
   TestCrossValidatedCandidateRetainsFirstChanceFamily();
+  TestFrameAndStackOutrankObjectRefHistoryWithoutConflict();
+  TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict();
   TestFirstChanceFamilySourceContract();
   return 0;
 }

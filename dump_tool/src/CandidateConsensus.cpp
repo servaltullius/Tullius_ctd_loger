@@ -35,6 +35,15 @@ bool IsBoostOnlyFamily(std::string_view familyId)
   return familyId == kFamilyHistory;
 }
 
+std::uint32_t RowScore(const CandidateRow& row)
+{
+  std::uint32_t score = 0;
+  for (const auto& [_, weight] : row.family_weight) {
+    score += weight;
+  }
+  return score;
+}
+
 std::size_t CountNonBoostFamilies(const CandidateRow& row)
 {
   std::size_t count = 0;
@@ -63,6 +72,22 @@ bool HasActionableCrossValidation(const CandidateRow& row)
 {
   return (RowHasFamily(row, kFamilyCrashLoggerFrame) || RowHasFamily(row, kFamilyCrashLoggerObjectRef)) &&
          RowHasFamily(row, kFamilyStack);
+}
+
+bool HasFrameAndStackConsensus(const CandidateRow& row)
+{
+  return RowHasFamily(row, kFamilyCrashLoggerFrame) &&
+         RowHasFamily(row, kFamilyStack) &&
+         CountNonBoostFamilies(row) >= 2 &&
+         RowScore(row) >= kCrossValidatedScoreThreshold;
+}
+
+bool IsObjectRefOnlyClue(const CandidateRow& row)
+{
+  return RowHasFamily(row, kFamilyCrashLoggerObjectRef) &&
+         !RowHasFamily(row, kFamilyCrashLoggerFrame) &&
+         !RowHasFamily(row, kFamilyStack) &&
+         !RowHasFamily(row, kFamilyResource);
 }
 
 int StatusRank(const ActionableCandidate& candidate)
@@ -300,8 +325,13 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
       topObjectRefKey != topStackKey &&
       topObjectRefWeight >= kObjectRefConflictWeightThreshold &&
       topStackWeight >= kStackConflictWeightThreshold) {
+    const auto topStackIt = rowsByKey.find(topStackKey);
+    const bool preserveObjectRefAsSecondaryClue =
+      topStackIt != rowsByKey.end() &&
+      HasFrameAndStackConsensus(topStackIt->second);
     if (auto it = rowsByKey.find(topObjectRefKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second)) {
+        !HasActionableCrossValidation(it->second) &&
+        !(preserveObjectRefAsSecondaryClue && IsObjectRefOnlyClue(it->second))) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyStack);
     }
@@ -316,13 +346,18 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
       topFrameKey != topObjectRefKey &&
       topFrameWeight >= kFrameConflictWeightThreshold &&
       topObjectRefWeight >= kObjectRefConflictWeightThreshold) {
+    const auto topFrameIt = rowsByKey.find(topFrameKey);
+    const bool preserveObjectRefAsSecondaryClue =
+      topFrameIt != rowsByKey.end() &&
+      HasFrameAndStackConsensus(topFrameIt->second);
     if (auto it = rowsByKey.find(topFrameKey); it != rowsByKey.end() &&
         !HasActionableCrossValidation(it->second)) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerObjectRef);
     }
     if (auto it = rowsByKey.find(topObjectRefKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second)) {
+        !HasActionableCrossValidation(it->second) &&
+        !(preserveObjectRefAsSecondaryClue && IsObjectRefOnlyClue(it->second))) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerFrame);
     }
