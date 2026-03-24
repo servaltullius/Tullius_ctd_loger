@@ -652,6 +652,20 @@ void TestStandaloneStackwalkRuntimeContracts()
                  "WinUI next-action summary must expose standalone Tullius callstack guidance.");
 }
 
+void TestResourceProviderScoreOnlyRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto candidateCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
+  const auto consensusCpp = ReadAllText(root / "dump_tool" / "src" / "CandidateConsensus.cpp");
+
+  AssertContains(candidateCpp, "signal.weight = (row.hitCount >= 2u && row.bestDistanceMs <= 150.0) ? 5u",
+                 "resource-provider tuning must use hitCount plus distance for the top score-only bump.");
+  AssertContains(candidateCpp, "((row.bestDistanceMs <= 300.0) || row.hitCount >= 2u) ? 4u : 3u",
+                 "resource-provider tuning must keep lower-tier boosts score-only without changing status rules.");
+  AssertContains(consensusCpp, "strongFrameOnly",
+                 "resource-provider score-only tuning must not require new status-promotion rules.");
+}
+
 }  // namespace
 
 int main()
@@ -676,5 +690,6 @@ int main()
   TestCrashLoggerFrameFixture_CppExceptionModuleSupportRuntimeContracts();
   TestCrashLoggerFrameFixture_SystemDllPathqualifiedFirstProbableDllRuntimeContracts();
   TestStandaloneStackwalkRuntimeContracts();
+  TestResourceProviderScoreOnlyRuntimeContracts();
   return 0;
 }

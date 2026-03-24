@@ -63,6 +63,13 @@ static void TestStackScanHookPromotionThreshold()
   assert(src.find("score + 8u") != std::string::npos);
 }
 
+static void TestResourceProviderScoreOnlyTuningPresent()
+{
+  const auto src = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
+  assert(src.find("signal.weight = (row.hitCount >= 2u && row.bestDistanceMs <= 150.0) ? 5u") != std::string::npos);
+  assert(src.find("((row.bestDistanceMs <= 300.0) || row.hitCount >= 2u) ? 4u : 3u") != std::string::npos);
+}
+
 static void TestConfidenceDowngradePresent()
 {
   const auto stackwalk = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
@@ -121,6 +128,7 @@ int main()
   TestStackwalkHookPromotionThreshold();
   TestStackScanConfidenceThresholds();
   TestStackScanHookPromotionThreshold();
+  TestResourceProviderScoreOnlyTuningPresent();
   TestConfidenceDowngradePresent();
   TestCrashLoggerCorroborationRankingPresent();
   TestCrashLoggerPromotionUsesFrameSignals();

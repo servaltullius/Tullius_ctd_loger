@@ -287,7 +287,8 @@ void AddResourceSignals(const AnalysisResult& r, bool en, std::vector<CandidateS
     signal.detail = en
       ? (L"Near-timestamp resources from " + row.provider)
       : (row.provider + L" 제공 리소스가 사고 직전 감지됨");
-    signal.weight = (row.bestDistanceMs <= 300.0) ? 4u : 3u;
+    signal.weight = (row.hitCount >= 2u && row.bestDistanceMs <= 150.0) ? 5u
+                  : (((row.bestDistanceMs <= 300.0) || row.hitCount >= 2u) ? 4u : 3u);
     if (!signal.candidate_key.empty()) {
       out->push_back(std::move(signal));
     }
