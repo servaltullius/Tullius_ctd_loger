@@ -35,6 +35,21 @@ MINIDUMP_TYPE ApplyProfileToDumpType(const DumpProfile& dumpProfile)
   if (dumpProfile.includeCodeSegments) {
     t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithCodeSegs);
   }
+  if (dumpProfile.includeProcessThreadData) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithProcessThreadData);
+  }
+  if (dumpProfile.includeFullMemoryInfo) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithFullMemoryInfo);
+  }
+  if (dumpProfile.includeModuleHeaders) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithModuleHeaders);
+  }
+  if (dumpProfile.includeIndirectMemory) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithIndirectlyReferencedMemory);
+  }
+  if (dumpProfile.ignoreInaccessibleMemory) {
+    t = static_cast<MINIDUMP_TYPE>(t | MiniDumpIgnoreInaccessibleMemory);
+  }
   if (dumpProfile.includeFullMemory) {
     t = static_cast<MINIDUMP_TYPE>(t | MiniDumpWithFullMemory);
   }

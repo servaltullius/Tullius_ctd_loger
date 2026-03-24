@@ -120,6 +120,26 @@ int main()
     std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation.escalation_level\n";
     return 1;
   }
+  if (!Contains(incidentManifest, "include_process_thread_data")) {
+    std::cerr << "ERROR: Incident manifest schema must include process/thread-data capture flags\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "include_full_memory_info")) {
+    std::cerr << "ERROR: Incident manifest schema must include full-memory-info capture flags\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "include_module_headers")) {
+    std::cerr << "ERROR: Incident manifest schema must include module-header capture flags\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "include_indirect_memory")) {
+    std::cerr << "ERROR: Incident manifest schema must include indirect-memory capture flags\n";
+    return 1;
+  }
+  if (!Contains(incidentManifest, "ignore_inaccessible_memory")) {
+    std::cerr << "ERROR: Incident manifest schema must include inaccessible-memory tolerance flags\n";
+    return 1;
+  }
 
   return 0;
 }
