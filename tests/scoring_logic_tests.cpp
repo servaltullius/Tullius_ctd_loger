@@ -81,8 +81,37 @@ static void TestCrashLoggerCorroborationRankingPresent()
   const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
   assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects") != std::string::npos);
   assert(analyzer.find("CrashLoggerRankBonus") != std::string::npos);
-  assert(analyzer.find("Crash Logger corroboration bonus=+") != std::string::npos);
+  assert(analyzer.find("Crash Logger frame promotion=+") != std::string::npos);
   assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out)") != std::string::npos);
+}
+
+static void TestCrashLoggerPromotionUsesFrameSignals()
+{
+  const auto header = ReadFile("dump_tool/src/Analyzer.h");
+  const auto impl = ReadFile("dump_tool/src/Analyzer.cpp");
+
+  assert(header.find("crash_logger_direct_fault_module") != std::string::npos);
+  assert(header.find("crash_logger_first_actionable_probable_module") != std::string::npos);
+  assert(header.find("crash_logger_probable_streak_module") != std::string::npos);
+  assert(header.find("crash_logger_probable_streak_length") != std::string::npos);
+  assert(header.find("crash_logger_frame_signal_strength") != std::string::npos);
+
+  assert(impl.find("bool CanPromoteCrashLoggerFrameModule(std::wstring_view module)") != std::string::npos);
+  assert(impl.find("struct CrashLoggerFramePromotion") != std::string::npos);
+  assert(impl.find("promotion.directFaultPromotion = directFaultMatches ? kCrashLoggerDirectFaultPromotion : 0u;") != std::string::npos);
+  assert(impl.find("promotion.firstActionablePromotion = firstActionableMatches ? kCrashLoggerFirstActionablePromotion : 0u;") != std::string::npos);
+  assert(impl.find("promotion.probableStreakPromotion = probableStreakMatches ? kCrashLoggerProbableStreakPromotion : 0u;") != std::string::npos);
+  assert(impl.find("promotion.cppExceptionSupport = cppModuleMatches ? kCrashLoggerCppExceptionSupport : 0u;") != std::string::npos);
+}
+
+static void TestCrashLoggerPromotionNoLongerRankOnly()
+{
+  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  assert(analyzer.find("promotion.topModuleRankBonus = matchedRank ? CrashLoggerRankBonus(*matchedRank) : 0u;") != std::string::npos);
+  assert(analyzer.find("promotion.frameSignalStrength = promotion.directFaultPromotion +") != std::string::npos);
+  assert(analyzer.find("promotion.totalPromotion = promotion.frameSignalStrength + promotion.cppExceptionSupport + promotion.topModuleRankBonus;") != std::string::npos);
+  assert(analyzer.find("row.score + row.promotion.totalPromotion") != std::string::npos);
+  assert(analyzer.find("out->crash_logger_frame_signal_strength") != std::string::npos);
 }
 
 int main()
@@ -94,5 +123,7 @@ int main()
   TestStackScanHookPromotionThreshold();
   TestConfidenceDowngradePresent();
   TestCrashLoggerCorroborationRankingPresent();
+  TestCrashLoggerPromotionUsesFrameSignals();
+  TestCrashLoggerPromotionNoLongerRankOnly();
   return 0;
 }

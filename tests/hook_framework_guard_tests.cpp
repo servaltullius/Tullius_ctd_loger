@@ -27,6 +27,7 @@ int main()
   const auto minidumpUtilPath = repoRoot / "dump_tool" / "src" / "MinidumpUtil.cpp";
   const auto summaryPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp";
   const auto recPath = repoRoot / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp";
+  const auto analyzerPath = repoRoot / "dump_tool" / "src" / "Analyzer.cpp";
   const std::string stackwalkScoring = ReadAllText(stackwalkScoringPath);
   const std::string stackwalk = ReadAllText(stackwalkPath);
   const std::string stackScan = ReadAllText(stackScanPath);
@@ -34,6 +35,7 @@ int main()
   const std::string summary = ReadAllText(summaryPath);
   const std::string rec = ReadAllText(recPath);
   const std::string evidence = ReadSplitAwareText(repoRoot / "dump_tool" / "src" / "EvidenceBuilderEvidence.cpp");
+  const std::string analyzer = ReadAllText(analyzerPath);
 
   AssertContains(
     stackwalkScoring,
@@ -166,6 +168,47 @@ int main()
     evidence,
     "r.needs_bees && ctx.isCrashLike",
     "Evidence builder must gate BEES evidence cards to crash-like incidents.");
+
+  AssertContains(
+    analyzer,
+    "ApplyCrashLoggerCorroborationToSuspects",
+    "Crash Logger corroboration must remain part of the analyzer promotion path.");
+  AssertContains(
+    analyzer,
+    "CanPromoteCrashLoggerFrameModule",
+    "Crash Logger frame-module promotion helper must exist so direct-fault guards are centralized.");
+  AssertContains(
+    analyzer,
+    "directFaultEligible",
+    "Crash Logger direct-fault path must gate promotion through an explicit eligibility check.");
+  AssertContains(
+    analyzer,
+    "CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module)",
+    "Direct-fault promotion must be tied to the stored Crash Logger direct-fault module field.");
+  AssertContains(
+    analyzer,
+    "!IsKnownHookFramework(module)",
+    "Frame-module promotion helper must keep hook-framework rows from getting unconditional promotion.");
+  AssertContains(
+    analyzer,
+    "!IsSystemishModule(module)",
+    "Frame-module promotion helper must keep system DLL rows from getting unconditional promotion.");
+  AssertContains(
+    analyzer,
+    "!IsGameExeModule(module)",
+    "Frame-module promotion helper must keep game executable rows from getting unconditional promotion.");
+  AssertContains(
+    analyzer,
+    "cppExceptionSupport",
+    "Crash Logger C++ exception support must remain additive instead of replacing frame promotion.");
+  AssertContains(
+    analyzer,
+    "topModuleRankBonus",
+    "Crash Logger rank corroboration must remain a bounded bonus rather than the only promotion path.");
+  AssertContains(
+    analyzer,
+    "crash_logger_cpp_exception_module",
+    "Crash Logger C++ exception support must still be considered in promotion logic.");
 
   return 0;
 }
