@@ -160,6 +160,11 @@ struct AnalysisResult
   std::wstring crash_logger_log_path;
   std::wstring crash_logger_version;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
+  std::wstring crash_logger_direct_fault_module;
+  std::wstring crash_logger_first_actionable_probable_module;
+  std::wstring crash_logger_probable_streak_module;
+  std::uint32_t crash_logger_probable_streak_length = 0;
+  std::uint32_t crash_logger_frame_signal_strength = 0;
   std::wstring crash_logger_cpp_exception_type;
   std::wstring crash_logger_cpp_exception_info;
   std::wstring crash_logger_cpp_exception_throw_location;

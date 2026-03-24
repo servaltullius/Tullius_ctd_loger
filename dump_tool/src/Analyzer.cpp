@@ -86,13 +86,16 @@ using internal::output_writer::DefaultOutDirForDump;
 using internal::output_writer::FindIncidentManifestForDump;
 using internal::output_writer::TryLoadIncidentManifestJson;
 
-// Bonus scores for Crash Logger top-module ranking.
-// Crash Logger already identifies likely suspects; higher rank → higher bonus.
+// Bounded corroboration bonuses from Crash Logger top-module ranking.
 constexpr std::uint32_t kCrashLoggerBonusRank0 = 18u;  // top suspect
 constexpr std::uint32_t kCrashLoggerBonusRank1 = 14u;
 constexpr std::uint32_t kCrashLoggerBonusRank2 = 10u;
 constexpr std::uint32_t kCrashLoggerBonusRank3to4 = 8u;
 constexpr std::uint32_t kCrashLoggerBonusDeep   = 6u;  // rank > 4
+constexpr std::uint32_t kCrashLoggerDirectFaultPromotion = 32u;
+constexpr std::uint32_t kCrashLoggerFirstActionablePromotion = 20u;
+constexpr std::uint32_t kCrashLoggerProbableStreakPromotion = 14u;
+constexpr std::uint32_t kCrashLoggerCppExceptionSupport = 10u;
 
 std::uint32_t CrashLoggerRankBonus(std::size_t rank)
 {
@@ -103,9 +106,119 @@ std::uint32_t CrashLoggerRankBonus(std::size_t rank)
   return kCrashLoggerBonusDeep;
 }
 
+std::wstring NormalizeCrashLoggerModuleFilename(std::wstring_view module)
+{
+  if (module.empty()) {
+    return {};
+  }
+
+  const std::size_t pathPos = module.find_last_of(L"\\/");
+  if (pathPos == std::wstring_view::npos) {
+    return std::wstring(module);
+  }
+
+  return std::wstring(module.substr(pathPos + 1));
+}
+
+std::wstring CanonicalizeCrashLoggerFrameModule(
+  std::string_view moduleUtf8,
+  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
+{
+  const std::wstring module = NormalizeCrashLoggerModuleFilename(Utf8ToWide(std::string(moduleUtf8)));
+  const std::wstring key = WideLower(module);
+  if (const auto it = canonicalByFilenameLower.find(key); it != canonicalByFilenameLower.end()) {
+    return it->second;
+  }
+  return module;
+}
+
+bool CanPromoteCrashLoggerFrameModule(std::wstring_view module)
+{
+  if (module.empty()) {
+    return false;
+  }
+  return !IsKnownHookFramework(module) &&
+         !IsSystemishModule(module) &&
+         !IsGameExeModule(module);
+}
+
+void IntegrateCrashLoggerFrameSignals(
+  const std::vector<ModuleInfo>& allModules,
+  AnalysisResult* out)
+{
+  if (!out || out->crash_logger_log_path.empty()) {
+    return;
+  }
+
+  std::wstring readErr;
+  const auto logUtf8 = ReadWholeFileUtf8(std::filesystem::path(out->crash_logger_log_path), &readErr);
+  if (!logUtf8) {
+    if (!readErr.empty()) {
+      out->diagnostics.push_back(L"[CrashLogger] failed to re-read log for frame signals: " + readErr);
+    }
+    return;
+  }
+
+  std::unordered_map<std::wstring, std::wstring> canonicalByFilenameLower;
+  canonicalByFilenameLower.reserve(allModules.size());
+  for (const auto& module : allModules) {
+    if (!module.filename.empty()) {
+      canonicalByFilenameLower.emplace(WideLower(module.filename), module.filename);
+    }
+  }
+
+  const auto rawSignals = crashlogger_core::ParseCrashLoggerFrameSignalsAscii(*logUtf8);
+  if (!rawSignals.direct_fault_module.empty()) {
+    out->crash_logger_direct_fault_module =
+      CanonicalizeCrashLoggerFrameModule(rawSignals.direct_fault_module, canonicalByFilenameLower);
+  }
+  if (!rawSignals.first_actionable_probable_module.empty()) {
+    out->crash_logger_first_actionable_probable_module =
+      CanonicalizeCrashLoggerFrameModule(rawSignals.first_actionable_probable_module, canonicalByFilenameLower);
+  }
+  if (!rawSignals.probable_streak_module.empty()) {
+    out->crash_logger_probable_streak_module =
+      CanonicalizeCrashLoggerFrameModule(rawSignals.probable_streak_module, canonicalByFilenameLower);
+  }
+  out->crash_logger_probable_streak_length = rawSignals.probable_streak_length;
+
+  const bool directFaultEligible =
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module);
+  const bool firstActionableEligible =
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module);
+  const bool probableStreakEligible =
+    (out->crash_logger_probable_streak_length >= 2u) &&
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module);
+
+  out->crash_logger_frame_signal_strength = 0;
+  if (directFaultEligible) {
+    out->crash_logger_frame_signal_strength += kCrashLoggerDirectFaultPromotion;
+  }
+  if (firstActionableEligible) {
+    out->crash_logger_frame_signal_strength += kCrashLoggerFirstActionablePromotion;
+  }
+  if (probableStreakEligible) {
+    out->crash_logger_frame_signal_strength += kCrashLoggerProbableStreakPromotion;
+  }
+}
+
+struct CrashLoggerFramePromotion
+{
+  std::uint32_t directFaultPromotion = 0;
+  std::uint32_t firstActionablePromotion = 0;
+  std::uint32_t probableStreakPromotion = 0;
+  std::uint32_t cppExceptionSupport = 0;
+  std::uint32_t topModuleRankBonus = 0;
+  std::uint32_t frameSignalStrength = 0;
+  std::uint32_t totalPromotion = 0;
+};
+
 void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
 {
-  if (!out || out->suspects.empty() || out->crash_logger_top_modules.empty()) {
+  if (!out || out->suspects.empty() ||
+      (out->crash_logger_top_modules.empty() &&
+       out->crash_logger_frame_signal_strength == 0 &&
+       out->crash_logger_cpp_exception_module.empty())) {
     return;
   }
 
@@ -120,45 +233,75 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
       rankByModule.emplace(key, i);
     }
   }
-  if (rankByModule.empty()) {
-    return;
-  }
-
+  const bool directFaultEligible =
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module);
+  const bool firstActionableEligible =
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module);
+  const bool probableStreakEligible =
+    (out->crash_logger_probable_streak_length >= 2u) &&
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module);
+  const std::wstring directFaultLower =
+    directFaultEligible ? WideLower(out->crash_logger_direct_fault_module) : std::wstring{};
+  const std::wstring firstActionableLower =
+    firstActionableEligible ? WideLower(out->crash_logger_first_actionable_probable_module) : std::wstring{};
+  const std::wstring probableStreakLower =
+    probableStreakEligible ? WideLower(out->crash_logger_probable_streak_module) : std::wstring{};
   const std::wstring cppModuleLower = WideLower(out->crash_logger_cpp_exception_module);
+
   struct Ranked
   {
     std::size_t index = 0;
     std::uint32_t score = 0;
-    std::uint32_t bonus = 0;
+    CrashLoggerFramePromotion promotion;
     std::uint32_t effective = 0;
     bool matchedCppModule = false;
-    std::size_t crashLoggerRank = 0;
+    std::optional<std::size_t> matchedRank;
   };
 
   std::vector<Ranked> rows;
   rows.reserve(out->suspects.size());
   for (std::size_t i = 0; i < out->suspects.size(); ++i) {
     const auto key = WideLower(out->suspects[i].module_filename);
-    const auto it = rankByModule.find(key);
-    if (it == rankByModule.end()) {
-      rows.push_back(Ranked{ i, out->suspects[i].score, 0u, out->suspects[i].score, false, 0u });
-      continue;
+    std::optional<std::size_t> matchedRank;
+    if (const auto it = rankByModule.find(key); it != rankByModule.end()) {
+      matchedRank = it->second;
     }
 
-    const bool matchedCpp = !cppModuleLower.empty() && (cppModuleLower == key);
-    std::uint32_t bonus = CrashLoggerRankBonus(it->second);
-    if (matchedCpp) {
-      bonus += 10u;
-    }
-    rows.push_back(Ranked{ i, out->suspects[i].score, bonus, out->suspects[i].score + bonus, matchedCpp, it->second });
+    const bool directFaultMatches = directFaultEligible && (directFaultLower == key);
+    const bool firstActionableMatches = firstActionableEligible && (firstActionableLower == key);
+    const bool probableStreakMatches = probableStreakEligible && (probableStreakLower == key);
+    const bool cppModuleMatches = !cppModuleLower.empty() && (cppModuleLower == key);
+
+    CrashLoggerFramePromotion promotion{};
+    promotion.directFaultPromotion = directFaultMatches ? kCrashLoggerDirectFaultPromotion : 0u;
+    promotion.firstActionablePromotion = firstActionableMatches ? kCrashLoggerFirstActionablePromotion : 0u;
+    promotion.probableStreakPromotion = probableStreakMatches ? kCrashLoggerProbableStreakPromotion : 0u;
+    promotion.cppExceptionSupport = cppModuleMatches ? kCrashLoggerCppExceptionSupport : 0u;
+    promotion.topModuleRankBonus = matchedRank ? CrashLoggerRankBonus(*matchedRank) : 0u;
+    promotion.frameSignalStrength = promotion.directFaultPromotion +
+                                    promotion.firstActionablePromotion +
+                                    promotion.probableStreakPromotion;
+    promotion.totalPromotion = promotion.frameSignalStrength + promotion.cppExceptionSupport + promotion.topModuleRankBonus;
+
+    Ranked row{};
+    row.index = i;
+    row.score = out->suspects[i].score;
+    row.promotion = promotion;
+    row.effective = row.score + row.promotion.totalPromotion;
+    row.matchedCppModule = cppModuleMatches;
+    row.matchedRank = matchedRank;
+    rows.push_back(std::move(row));
   }
 
   std::stable_sort(rows.begin(), rows.end(), [&](const Ranked& a, const Ranked& b) {
     if (a.effective != b.effective) {
       return a.effective > b.effective;
     }
-    if (a.bonus != b.bonus) {
-      return a.bonus > b.bonus;
+    if (a.promotion.frameSignalStrength != b.promotion.frameSignalStrength) {
+      return a.promotion.frameSignalStrength > b.promotion.frameSignalStrength;
+    }
+    if (a.promotion.totalPromotion != b.promotion.totalPromotion) {
+      return a.promotion.totalPromotion > b.promotion.totalPromotion;
     }
     if (a.score != b.score) {
       return a.score > b.score;
@@ -171,16 +314,27 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
   const bool en = (out->language == i18n::Language::kEnglish);
   for (const auto& r : rows) {
     auto item = out->suspects[r.index];
-    if (r.bonus > 0) {
+    if (r.promotion.totalPromotion > 0) {
       item.reason += en
-        ? (L" (Crash Logger corroboration bonus=+" + std::to_wstring(r.bonus)
-          + L", rank=" + std::to_wstring(r.crashLoggerRank + 1u) + L")")
-        : (L" (Crash Logger 교차검증 보정=+" + std::to_wstring(r.bonus)
-          + L", 순위=" + std::to_wstring(r.crashLoggerRank + 1u) + L")");
+        ? (L" (Crash Logger frame promotion=+" + std::to_wstring(r.promotion.totalPromotion) + L")")
+        : (L" (Crash Logger frame 승격=+" + std::to_wstring(r.promotion.totalPromotion) + L")");
+      if (r.promotion.directFaultPromotion > 0) {
+        item.reason += en ? L" (direct fault match)" : L" (direct fault 일치)";
+      }
+      if (r.promotion.firstActionablePromotion > 0) {
+        item.reason += en ? L" (first actionable probable frame match)" : L" (첫 actionable probable frame 일치)";
+      }
+      if (r.promotion.probableStreakPromotion > 0) {
+        item.reason += en ? L" (probable frame streak match)" : L" (probable frame streak 일치)";
+      }
       if (r.matchedCppModule) {
+        item.reason += en ? L" (Crash Logger C++ exception module support)"
+                          : L" (Crash Logger C++ 예외 모듈 보강)";
+      }
+      if (r.promotion.topModuleRankBonus > 0 && r.matchedRank) {
         item.reason += en
-          ? L" (Crash Logger C++ exception module match)"
-          : L" (Crash Logger C++ 예외 모듈 일치)";
+          ? (L" (Crash Logger top-module rank=" + std::to_wstring(*r.matchedRank + 1u) + L")")
+          : (L" (Crash Logger 상위 모듈 순위=" + std::to_wstring(*r.matchedRank + 1u) + L")");
       }
     }
     reordered.push_back(std::move(item));
@@ -188,15 +342,17 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
 
   out->suspects = std::move(reordered);
 
-  if (!out->suspects.empty() &&
-      !IsKnownHookFramework(out->suspects[0].module_filename) &&
-      rankByModule.find(WideLower(out->suspects[0].module_filename)) != rankByModule.end()) {
-    const auto topKey = WideLower(out->suspects[0].module_filename);
-    const auto rank = rankByModule[topKey];
-    if (rank <= 1 || (!cppModuleLower.empty() && topKey == cppModuleLower)) {
+  if (!out->suspects.empty() && !rows.empty()) {
+    const auto& topRow = rows.front();
+    if (topRow.promotion.directFaultPromotion > 0) {
       out->suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
-    } else if (out->suspects[0].confidence_level == i18n::ConfidenceLevel::kLow) {
-      out->suspects[0].confidence_level = i18n::ConfidenceLevel::kMedium;
+    } else if (topRow.promotion.frameSignalStrength > 0 ||
+               topRow.promotion.cppExceptionSupport > 0 ||
+               (!topRow.matchedRank || *topRow.matchedRank <= 1u)) {
+      if (out->suspects[0].confidence_level == i18n::ConfidenceLevel::kLow ||
+          out->suspects[0].confidence_level == i18n::ConfidenceLevel::kUnknown) {
+        out->suspects[0].confidence_level = i18n::ConfidenceLevel::kMedium;
+      }
     }
     out->suspects[0].confidence = i18n::ConfidenceText(out->language, out->suspects[0].confidence_level);
   }
@@ -299,6 +455,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     const bool shouldSearchCrashLogger = (out.exc_code != 0) || nameCrash || hangLike;
     if (shouldSearchCrashLogger) {
       IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
+      IntegrateCrashLoggerFrameSignals(allModules, &out);
     }
   }
 
