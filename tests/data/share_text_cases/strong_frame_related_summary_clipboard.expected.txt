@@ -1,0 +1,10 @@
+SkyrimDiag report
+Dump: /tmp/strong_frame_related_summary.dmp
+Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate ParagonPerks.dll (Crash Logger frame). This is stronger than an isolated object ref. (Confidence: Medium)
+Crash bucket key: CTD-strong-frame-related
+Module+Offset: ntdll.dll+0x00099887
+Inferred mod: Paragon Perks
+Actionable candidate: ParagonPerks.dll
+Evidence agreement: Crash Logger frame first
+CrashLogger context: ParagonPerks.dll — Crash Logger frame first probable DLL frame — DLL guidance
+Next action: DLL guidance: check ParagonPerks.dll before generic EXE/system triage

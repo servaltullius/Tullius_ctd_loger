@@ -1,0 +1,73 @@
+{
+  "summary_sentence": "Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate ParagonPerks.dll (Crash Logger frame). This is stronger than an isolated object ref. (Confidence: Medium)",
+  "crash_bucket_key": "CTD-strong-frame-related",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "ntdll.dll+0x00099887",
+    "inferred_mod_name": "Paragon Perks"
+  },
+  "crash_logger": {
+    "direct_fault_module": "",
+    "first_actionable_probable_module": "ParagonPerks.dll",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 1,
+    "object_refs": []
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "ParagonPerks.dll",
+      "module_path": "",
+      "inferred_mod_name": "Paragon Perks",
+      "reason": "Crash Logger first actionable probable frame points to this DLL.",
+      "score": 10
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Actionable candidate] Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate ParagonPerks.dll (Crash Logger frame). Use DLL guidance first before broad EXE/system triage."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "related",
+      "confidence": "Medium",
+      "display_name": "ParagonPerks.dll",
+      "primary_identifier": "ParagonPerks.dll",
+      "secondary_label": "Paragon Perks",
+      "plugin_name": "",
+      "mod_name": "Paragon Perks",
+      "module_filename": "ParagonPerks.dll",
+      "explanation": "Crash Logger frame is the strongest actionable clue so far.",
+      "family_count": 1,
+      "score": 6,
+      "cross_validated": false,
+      "has_conflict": false,
+      "supporting_families": [
+        "crash_logger_frame"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

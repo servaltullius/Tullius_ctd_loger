@@ -30,6 +30,14 @@ bool RowHasFamily(const CandidateRow& row, std::string_view familyId)
   return row.family_weight.find(std::string(familyId)) != row.family_weight.end();
 }
 
+std::uint32_t FamilyWeight(const CandidateRow& row, std::string_view familyId)
+{
+  if (const auto it = row.family_weight.find(std::string(familyId)); it != row.family_weight.end()) {
+    return it->second;
+  }
+  return 0u;
+}
+
 bool IsBoostOnlyFamily(std::string_view familyId)
 {
   return familyId == kFamilyHistory;
@@ -173,6 +181,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.score >= kCrossValidatedScoreThreshold;
   const bool frameAndObjectRef = hasCrashLoggerFrame && hasCrashLoggerObjectRef;
   const bool frameOnly = hasCrashLoggerFrame && !hasStack && !hasCrashLoggerObjectRef && !hasResource;
+  const bool strongFrameOnly = frameOnly && FamilyWeight(*row, kFamilyCrashLoggerFrame) >= 6u;
   const bool objectRefWithHistory =
     hasCrashLoggerObjectRef &&
     HasFamily(candidate, kFamilyHistory) &&
@@ -195,6 +204,10 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   } else if (objectRefWithHistory) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kLow;
+    candidate.cross_validated = false;
+  } else if (strongFrameOnly) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
   } else if (nonBoostFamilyCount >= 2 && candidate.score >= 7 && HasStrongFamily(candidate)) {
     candidate.status_id = "related";

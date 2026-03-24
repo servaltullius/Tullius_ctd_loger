@@ -1,0 +1,9 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+📌 Actionable candidate: ParagonPerks.dll
+🧭 Evidence agreement: Crash Logger frame first
+🧩 CrashLogger context: ParagonPerks.dll — Crash Logger frame first probable DLL frame — DLL guidance
+🔍 Type: CTD-strong-frame-related
+📍 Module+Offset: ntdll.dll+0x00099887
+💡 Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate ParagonPerks.dll (Crash Logger frame). This is stronger than an isolated object ref. (Confidence: Medium)
+🛠️ Next action: DLL guidance: check ParagonPerks.dll before generic EXE/system triage
+— Tullius CTD Logger

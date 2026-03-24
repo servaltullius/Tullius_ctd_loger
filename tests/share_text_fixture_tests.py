@@ -89,6 +89,18 @@ def test_reference_clue_summary_clipboard_fixture() -> None:
     assert actual == expected
 
 
+def test_strong_frame_related_community_share_fixture() -> None:
+    actual = _run_harness("strong_frame_related_summary.json", "community")
+    expected = _read_expected("strong_frame_related_community_share.expected.txt")
+    assert actual == expected
+
+
+def test_strong_frame_related_summary_clipboard_fixture() -> None:
+    actual = _run_harness("strong_frame_related_summary.json", "clipboard")
+    expected = _read_expected("strong_frame_related_summary_clipboard.expected.txt")
+    assert actual == expected
+
+
 if __name__ == "__main__":
     test_frame_first_community_share_fixture()
     test_frame_first_summary_clipboard_fixture()
@@ -96,4 +108,6 @@ if __name__ == "__main__":
     test_conflicting_summary_clipboard_fixture()
     test_reference_clue_community_share_fixture()
     test_reference_clue_summary_clipboard_fixture()
+    test_strong_frame_related_community_share_fixture()
+    test_strong_frame_related_summary_clipboard_fixture()
     print("share_text_fixture_tests: OK")

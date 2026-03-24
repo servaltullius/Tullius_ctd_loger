@@ -286,6 +286,33 @@ void TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict()
   assert(!candidates[1].has_conflict);
 }
 
+void TestStrongFrameOnlyBecomesRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"paragonperks", L"ParagonPerks.dll", 6, L"", L"Paragon Perks", L"ParagonPerks.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(!candidates[0].has_conflict);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+}
+
+void TestWeakFrameOnlyStaysReferenceClue()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"paragonperks", L"ParagonPerks.dll", 5, L"", L"Paragon Perks", L"ParagonPerks.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "reference_clue");
+  assert(!candidates[0].cross_validated);
+  assert(!candidates[0].has_conflict);
+}
+
 void TestFirstChanceFamilySourceContract()
 {
   const auto root = ProjectRoot();
@@ -312,6 +339,8 @@ int main()
   TestCrossValidatedCandidateRetainsFirstChanceFamily();
   TestFrameAndStackOutrankObjectRefHistoryWithoutConflict();
   TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict();
+  TestStrongFrameOnlyBecomesRelated();
+  TestWeakFrameOnlyStaysReferenceClue();
   TestFirstChanceFamilySourceContract();
   return 0;
 }
