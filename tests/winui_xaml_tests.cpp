@@ -186,6 +186,29 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     "Expanded WinUI wording must keep DLL guidance conflict copy for disagreement cases.");
 }
 
+static void TestMainWindowShareTextUsesCrashLoggerReadingPath()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto shareText = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.ShareText.cs");
+
+  RequireContains(
+    shareText,
+    "BuildCrashLoggerContextSummary(summary)",
+    "Share text must reuse the CrashLogger-first reading path summary.");
+  RequireContains(
+    shareText,
+    "BuildNextActionSummary(summary)",
+    "Share text must reuse the next-action summary instead of picking a raw recommendation line.");
+  RequireContains(
+    shareText,
+    "CrashLogger context: ",
+    "Share text must label the CrashLogger-first reading path explicitly.");
+  RequireContains(
+    shareText,
+    "Next action: ",
+    "Share text must label the next action explicitly.");
+}
+
 static void TestAnalyzePanelHasDumpDiscoveryFlow()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -325,6 +348,7 @@ int main()
   TestMainWindowHasCrashLoggerFirstReadingPath();
   TestMainWindowCrashLoggerFrameFirstWordingAlignment();
   TestMainWindowCrashLoggerExpandedFixtureWordingAlignment();
+  TestMainWindowShareTextUsesCrashLoggerReadingPath();
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
   TestWinUiConsumesRecaptureContext();

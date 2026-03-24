@@ -47,12 +47,19 @@ internal sealed partial class MainWindowViewModel
             var primaryCandidate = summary.ActionableCandidates[0];
             lines.Add((_isKorean ? "행동 우선 후보: " : "Actionable candidate: ") + BuildPrimaryCandidateValue(summary));
             lines.Add((_isKorean ? "근거 합의: " : "Evidence agreement: ") + BuildAgreementSummary(summary));
+            lines.Add((_isKorean ? "CrashLogger 기준: " : "CrashLogger context: ") + BuildCrashLoggerContextSummary(summary));
+            lines.Add((_isKorean ? "다음 조치: " : "Next action: ") + BuildNextActionSummary(summary));
             if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
                 summary.ActionableCandidates.Count > 1)
             {
                 lines.Add((_isKorean ? "충돌 세부: " : "Conflict detail: ") + BuildConflictCandidateLine(primaryCandidate));
                 lines.Add((_isKorean ? "충돌 세부: " : "Conflict detail: ") + BuildConflictCandidateLine(summary.ActionableCandidates[1]));
             }
+        }
+        else if (HasCrashLoggerFrameSignal(summary) || summary.CrashLoggerRefs.Count > 0)
+        {
+            lines.Add((_isKorean ? "CrashLogger 기준: " : "CrashLogger context: ") + BuildCrashLoggerContextSummary(summary));
+            lines.Add((_isKorean ? "다음 조치: " : "Next action: ") + BuildNextActionSummary(summary));
         }
 
         if (summary.CrashLoggerRefs.Count > 0)
@@ -119,6 +126,7 @@ internal sealed partial class MainWindowViewModel
             var primaryCandidate = summary.ActionableCandidates[0];
             lines.Add($"📌 {DescribeActionableCandidateLabel(primaryCandidate)}: {BuildPrimaryCandidateValue(summary)}");
             lines.Add($"🧭 {(_isKorean ? "근거 합의" : "Evidence agreement")}: {BuildAgreementSummary(summary)}");
+            lines.Add($"🧩 {(_isKorean ? "CrashLogger 기준" : "CrashLogger context")}: {BuildCrashLoggerContextSummary(summary)}");
             if ((primaryCandidate.StatusId == "conflicting" || primaryCandidate.HasConflict) &&
                 summary.ActionableCandidates.Count > 1)
             {
@@ -139,6 +147,7 @@ internal sealed partial class MainWindowViewModel
                 var conf = !string.IsNullOrWhiteSpace(topSuspect.Confidence) ? topSuspect.Confidence : "?";
                 lines.Add($"🔧 {(_isKorean ? "DLL 후보" : "DLL suspect")}: {topSuspect.Module} ({conf})");
             }
+            lines.Add($"🧩 {(_isKorean ? "CrashLogger 기준" : "CrashLogger context")}: {BuildCrashLoggerContextSummary(summary)}");
         }
         else if (summary.Suspects.Count > 0)
         {
@@ -189,9 +198,9 @@ internal sealed partial class MainWindowViewModel
             }
             else
             {
-                firstAction = summary.Recommendations[0];
+                firstAction = BuildNextActionSummary(summary);
             }
-            lines.Add($"🛠️ {(_isKorean ? "권장" : "Action")}: {StripRecommendationTag(firstAction)}");
+            lines.Add($"🛠️ {(_isKorean ? "다음 조치" : "Next action")}: {StripRecommendationTag(firstAction)}");
         }
 
         lines.Add("— Tullius CTD Logger");

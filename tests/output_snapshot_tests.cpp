@@ -613,6 +613,14 @@ void TestCrashLoggerExpandedFixtureReportTextGuards()
     reportSrc,
     "CrashLoggerCppExceptionModule:",
     "Report text must keep printing Crash Logger C++ exception module details.");
+  AssertContains(
+    reportSrc,
+    "CrashLoggerReadingPath:",
+    "Report text must expose a CrashLogger-first reading path line.");
+  AssertContains(
+    reportSrc,
+    "NextAction:",
+    "Report text must expose a next-action line for checklist consumers.");
 
   std::cout << "  [PASS] Expanded Crash Logger fixture report text guards\n";
 }

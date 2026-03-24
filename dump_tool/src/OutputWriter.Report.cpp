@@ -22,6 +22,50 @@ std::string BuildReportText(
   bool redactPaths)
 {
   const bool en = (r.language == i18n::Language::kEnglish);
+  const auto stripRecommendationTag = [](const std::wstring& recommendation) -> std::wstring {
+    if (recommendation.empty() || recommendation.front() != L'[') {
+      return recommendation;
+    }
+
+    const auto end = recommendation.find(L']');
+    if (end == std::wstring::npos || end + 1 >= recommendation.size()) {
+      return recommendation;
+    }
+
+    std::size_t start = end + 1;
+    while (start < recommendation.size() && iswspace(recommendation[start])) {
+      ++start;
+    }
+    return recommendation.substr(start);
+  };
+  const auto buildCrashLoggerReadingPath = [&]() -> std::wstring {
+    if (!r.crash_logger_direct_fault_module.empty()) {
+      return en
+        ? (L"Crash Logger frame first (direct DLL fault): " + r.crash_logger_direct_fault_module)
+        : (L"Crash Logger frame 우선 (direct DLL fault): " + r.crash_logger_direct_fault_module);
+    }
+    if (!r.crash_logger_first_actionable_probable_module.empty()) {
+      return en
+        ? (L"Crash Logger frame first (first actionable probable DLL frame): " + r.crash_logger_first_actionable_probable_module)
+        : (L"Crash Logger frame 우선 (첫 actionable probable DLL frame): " + r.crash_logger_first_actionable_probable_module);
+    }
+    if (!r.crash_logger_probable_streak_module.empty() && r.crash_logger_probable_streak_length > 0u) {
+      return en
+        ? (L"Crash Logger frame first (probable frame streak x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
+           r.crash_logger_probable_streak_module)
+        : (L"Crash Logger frame 우선 (probable frame streak x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
+           r.crash_logger_probable_streak_module);
+    }
+    if (!r.crash_logger_object_refs.empty()) {
+      const auto& topRef = r.crash_logger_object_refs.front();
+      if (!topRef.esp_name.empty()) {
+        return en
+          ? (L"Crash Logger object ref: " + topRef.esp_name)
+          : (L"Crash Logger 오브젝트 참조: " + topRef.esp_name);
+      }
+    }
+    return {};
+  };
 
   std::ostringstream rpt;
   rpt << (en ? "SkyrimDiag Report\n" : "SkyrimDiag 리포트\n");
@@ -175,6 +219,15 @@ std::string BuildReportText(
       first = false;
     }
     rpt << "\n";
+  }
+  const auto crashLoggerReadingPath = buildCrashLoggerReadingPath();
+  if (!crashLoggerReadingPath.empty()) {
+    rpt << (en ? "CrashLoggerReadingPath: " : "CrashLoggerReadingPath: ")
+        << WideToUtf8(crashLoggerReadingPath) << "\n";
+  }
+  if (!r.recommendations.empty()) {
+    rpt << (en ? "NextAction: " : "NextAction: ")
+        << WideToUtf8(stripRecommendationTag(r.recommendations.front())) << "\n";
   }
   rpt << (en ? "StateFlags: " : "StateFlags: ") << r.state_flags << "\n";
   rpt << (en ? "HasBlackbox: " : "HasBlackbox: ") << (r.has_blackbox ? "1" : "0") << "\n";
