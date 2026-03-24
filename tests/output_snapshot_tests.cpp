@@ -538,6 +538,57 @@ void TestCrashLoggerFrameFixtureSummaryPriorityGuards()
   std::cout << "  [PASS] Crash Logger frame fixture summary priority guards\n";
 }
 
+void TestCrashLoggerExpandedFixtureSummaryPriorityGuards()
+{
+  const std::string hookVictimFixture = ReadCrashLoggerFrameFixture("hook_framework_victim_first_probable_dll.log.txt");
+  const std::string cppFixture = ReadCrashLoggerFrameFixture("cpp_exception_module_support.log.txt");
+  const std::string systemVictimFixture = ReadCrashLoggerFrameFixture("system_dll_pathqualified_first_probable_dll.log.txt");
+  const std::string summarySrc = ReadProjectText("dump_tool/src/EvidenceBuilderSummary.cpp");
+  const std::string recommendationSrc = ReadProjectText("dump_tool/src/EvidenceBuilderRecommendations.cpp");
+  const std::string summaryJsonSrc = ReadProjectText("dump_tool/src/OutputWriter.Summary.cpp");
+  const std::string reportSrc = ReadProjectText("dump_tool/src/OutputWriter.Report.cpp");
+  const std::string evidenceCrashSrc = ReadProjectText("dump_tool/src/EvidenceBuilderEvidence.Crash.cpp");
+
+  AssertContains(
+    hookVictimFixture,
+    "CrashLoggerSSE.dll+0x00001234",
+    "hook_framework_victim_first_probable_dll.log.txt must preserve the hook-framework fault token.");
+  AssertContains(
+    cppFixture,
+    "C++ EXCEPTION:",
+    "cpp_exception_module_support.log.txt must preserve the C++ exception block.");
+  AssertContains(
+    systemVictimFixture,
+    "Faulting module path: C:\\Windows\\System32\\KERNELBASE.dll",
+    "system_dll_pathqualified_first_probable_dll.log.txt must preserve the path-qualified system victim token.");
+  AssertContains(
+    summarySrc,
+    "known hook framework",
+    "Expanded fixtures must keep hook-framework victim wording in CTD summaries.");
+  AssertContains(
+    summarySrc,
+    "Windows system DLL",
+    "Expanded fixtures must keep Windows system DLL victim wording in CTD summaries.");
+  AssertContains(
+    recommendationSrc,
+    "known hook framework DLL",
+    "Expanded fixtures must keep hook-framework victim recommendations.");
+  AssertContains(
+    summaryJsonSrc,
+    "\"cpp_exception\"",
+    "Expanded fixtures must keep serializing Crash Logger C++ exception details into summary JSON.");
+  AssertContains(
+    reportSrc,
+    "CrashLoggerCppExceptionModule:",
+    "Expanded fixtures must keep printing Crash Logger C++ exception module details in report text.");
+  AssertContains(
+    evidenceCrashSrc,
+    "Crash Logger: C++ exception details",
+    "Expanded fixtures must keep exposing Crash Logger C++ exception evidence details.");
+
+  std::cout << "  [PASS] Expanded Crash Logger fixture summary priority guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -567,6 +618,7 @@ int main()
   TestCrashLoggerFrameCandidateFamilySourceGuards();
   TestCrashLoggerFrameFirstSummaryPrioritySourceGuards();
   TestCrashLoggerFrameFixtureSummaryPriorityGuards();
+  TestCrashLoggerExpandedFixtureSummaryPriorityGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;

@@ -1,0 +1,7 @@
+CrashLoggerSSE v1.20.1
+Faulting module path: C:\Windows\System32\KERNELBASE.dll
+PROBABLE CALL STACK:
+	[ 0] 0x00007FF612340001 C:\Windows\System32\KERNELBASE.dll+00000001
+	[ 1] 0x00007FF612340002 D:\Mods\SystemVictim.dll+00000003
+	[ 2] 0x00007FF612340003 D:\Mods\SystemVictim.dll+00000004
+REGISTERS:

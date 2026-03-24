@@ -1356,6 +1356,42 @@ static void Test_ParseCrashLoggerFrameSignals_Fixture_FrameObjectRefConflict()
   assert(refs[0].esp_name == "OtherRef.esp");
 }
 
+static void Test_ParseCrashLoggerFrameSignals_Fixture_HookFrameworkVictimFirstProbableDll()
+{
+  const CrashLoggerFrameSignals signals =
+    ParseCrashLoggerFrameSignalsAscii(ReadCrashLoggerFrameFixture("hook_framework_victim_first_probable_dll.log.txt"));
+  assert(signals.direct_fault_module == "CrashLoggerSSE.dll");
+  assert(signals.first_actionable_probable_module == "RealCause.dll");
+  assert(signals.probable_streak_module == "RealCause.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
+static void Test_ParseCrashLoggerFrameSignals_Fixture_CppExceptionModuleSupport()
+{
+  const auto log = ReadCrashLoggerFrameFixture("cpp_exception_module_support.log.txt");
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  const auto ex = ParseCrashLoggerCppExceptionDetailsAscii(log);
+
+  assert(signals.direct_fault_module == "SkyrimSE.exe");
+  assert(signals.first_actionable_probable_module == "CppOwner.dll");
+  assert(signals.probable_streak_module == "CppOwner.dll");
+  assert(signals.probable_streak_length == 2u);
+  assert(ex);
+  assert(ex->type == "std::runtime_error");
+  assert(ex->throw_location == "CppOwner.dll+0x1234");
+  assert(ex->module == "CppOwner.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_Fixture_SystemDllPathqualifiedFirstProbableDll()
+{
+  const CrashLoggerFrameSignals signals =
+    ParseCrashLoggerFrameSignalsAscii(ReadCrashLoggerFrameFixture("system_dll_pathqualified_first_probable_dll.log.txt"));
+  assert(signals.direct_fault_module == "KERNELBASE.dll");
+  assert(signals.first_actionable_probable_module == "SystemVictim.dll");
+  assert(signals.probable_streak_module == "SystemVictim.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -1473,6 +1509,9 @@ int main()
   Test_ParseCrashLoggerFrameSignals_Fixture_DirectFaultDll();
   Test_ParseCrashLoggerFrameSignals_Fixture_ExeVictimFirstProbableDll();
   Test_ParseCrashLoggerFrameSignals_Fixture_FrameObjectRefConflict();
+  Test_ParseCrashLoggerFrameSignals_Fixture_HookFrameworkVictimFirstProbableDll();
+  Test_ParseCrashLoggerFrameSignals_Fixture_CppExceptionModuleSupport();
+  Test_ParseCrashLoggerFrameSignals_Fixture_SystemDllPathqualifiedFirstProbableDll();
 
   return 0;
 }

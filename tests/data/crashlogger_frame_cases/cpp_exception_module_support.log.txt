@@ -1,0 +1,15 @@
+CrashLoggerSSE v1.20.1
+Unhandled exception "0xE06D7363" at 0x00007FF612340001 SkyrimSE.exe+0x00BEEF01
+PROBABLE CALL STACK:
+	[ 0] 0x00007FF612340001 SkyrimSE.exe+00000001
+	[ 1] 0x00007FF612340002 KERNELBASE.dll+00000002
+	[ 2] 0x00007FF612340003 CppOwner.dll+00000003
+	[ 3] 0x00007FF612340004 CppOwner.dll+00000004
+
+C++ EXCEPTION:
+	Type: std::runtime_error
+	Info: test runtime failure
+	Throw Location: CppOwner.dll+0x1234
+	Module: CppOwner.dll
+
+REGISTERS:

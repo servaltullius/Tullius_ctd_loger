@@ -559,6 +559,64 @@ void TestCrashLoggerFrameFixture_FrameObjectRefConflictRuntimeContracts()
                  "frame_object_ref_conflict.log.txt: recommendations must explain frame vs object-ref disagreement.");
 }
 
+void TestCrashLoggerFrameFixture_HookFrameworkVictimFirstProbableDllRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto log = ReadCrashLoggerFrameFixture("hook_framework_victim_first_probable_dll.log.txt");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(log, "CrashLoggerSSE.dll+0x00001234",
+                 "hook_framework_victim_first_probable_dll.log.txt: fixture must keep the hook-framework fault token.");
+  AssertContains(log, "RealCause.dll+00000003",
+                 "hook_framework_victim_first_probable_dll.log.txt: fixture must keep the promoted non-hook DLL frame.");
+  AssertContains(summaryCpp, "known hook framework",
+                 "hook_framework_victim_first_probable_dll.log.txt: summary must keep hook-framework victim wording.");
+  AssertContains(summaryCpp, "victim location",
+                 "hook_framework_victim_first_probable_dll.log.txt: summary must keep victim-location guidance.");
+  AssertContains(recommendationCpp, "known hook framework DLL",
+                 "hook_framework_victim_first_probable_dll.log.txt: recommendations must keep hook-framework fallback guidance.");
+}
+
+void TestCrashLoggerFrameFixture_CppExceptionModuleSupportRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto log = ReadCrashLoggerFrameFixture("cpp_exception_module_support.log.txt");
+  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto captureCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.CaptureInputs.cpp");
+  const auto evidenceCrashCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderEvidence.Crash.cpp");
+
+  AssertContains(log, "C++ EXCEPTION:",
+                 "cpp_exception_module_support.log.txt: fixture must keep the C++ exception block.");
+  AssertContains(log, "Module: CppOwner.dll",
+                 "cpp_exception_module_support.log.txt: fixture must keep the exception module line.");
+  AssertContains(captureCpp, "crash_logger_cpp_exception_module",
+                 "cpp_exception_module_support.log.txt: analyzer capture must keep storing the C++ exception module.");
+  AssertContains(analyzerCpp, "Crash Logger C++ exception module support",
+                 "cpp_exception_module_support.log.txt: analyzer promotion must keep additive C++ exception support.");
+  AssertContains(evidenceCrashCpp, "Crash Logger: C++ exception details",
+                 "cpp_exception_module_support.log.txt: evidence output must keep exposing C++ exception details.");
+}
+
+void TestCrashLoggerFrameFixture_SystemDllPathqualifiedFirstProbableDllRuntimeContracts()
+{
+  const auto root = ProjectRoot();
+  const auto log = ReadCrashLoggerFrameFixture("system_dll_pathqualified_first_probable_dll.log.txt");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+
+  AssertContains(log, "Faulting module path: C:\\Windows\\System32\\KERNELBASE.dll",
+                 "system_dll_pathqualified_first_probable_dll.log.txt: fixture must keep the path-qualified system victim token.");
+  AssertContains(log, "D:\\Mods\\SystemVictim.dll+00000003",
+                 "system_dll_pathqualified_first_probable_dll.log.txt: fixture must keep the promoted non-system DLL frame.");
+  AssertContains(summaryCpp, "Windows system DLL",
+                 "system_dll_pathqualified_first_probable_dll.log.txt: summary must keep system-DLL victim wording.");
+  AssertContains(summaryCpp, "stronger than an isolated object ref",
+                 "system_dll_pathqualified_first_probable_dll.log.txt: system-DLL victim summaries must prefer frame-backed DLL guidance.");
+  AssertContains(recommendationCpp, "DLL guidance",
+                 "system_dll_pathqualified_first_probable_dll.log.txt: recommendations must keep DLL guidance wording for system victims.");
+}
+
 }  // namespace
 
 int main()
@@ -579,5 +637,8 @@ int main()
   TestCrashLoggerFrameFixture_DirectFaultDllRuntimeContracts();
   TestCrashLoggerFrameFixture_ExeVictimFirstProbableDllRuntimeContracts();
   TestCrashLoggerFrameFixture_FrameObjectRefConflictRuntimeContracts();
+  TestCrashLoggerFrameFixture_HookFrameworkVictimFirstProbableDllRuntimeContracts();
+  TestCrashLoggerFrameFixture_CppExceptionModuleSupportRuntimeContracts();
+  TestCrashLoggerFrameFixture_SystemDllPathqualifiedFirstProbableDllRuntimeContracts();
   return 0;
 }
