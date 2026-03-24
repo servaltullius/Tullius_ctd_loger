@@ -271,6 +271,136 @@ std::optional<std::string_view> TryExtractModulePlusOffsetTokenAscii(std::string
   return line.substr(start, end - start);
 }
 
+namespace {
+
+bool IsModuleTokenCharAscii(char c)
+{
+  const unsigned char uc = static_cast<unsigned char>(c);
+  return std::isalnum(uc) || c == '.' || c == '_' || c == '-';
+}
+
+bool EndsWithCaseInsensitiveAscii(std::string_view s, std::string_view suffix)
+{
+  if (s.size() < suffix.size()) {
+    return false;
+  }
+  return EqualsCaseInsensitiveAscii(s.substr(s.size() - suffix.size()), suffix);
+}
+
+std::string_view ExtractModuleFilenameAscii(std::string_view module)
+{
+  const auto pos = module.find_last_of("\\/:");
+  if (pos == std::string_view::npos || pos + 1 >= module.size()) {
+    return module;
+  }
+  return module.substr(pos + 1);
+}
+
+std::optional<std::string_view> TryExtractBareModuleTokenAscii(std::string_view line)
+{
+  for (std::size_t i = 0; i < line.size();) {
+    if (!IsModuleTokenCharAscii(line[i])) {
+      i++;
+      continue;
+    }
+
+    std::size_t end = i + 1;
+    while (end < line.size() && IsModuleTokenCharAscii(line[end])) {
+      end++;
+    }
+
+    const std::string_view token = line.substr(i, end - i);
+    if (EndsWithCaseInsensitiveAscii(token, ".dll") || EndsWithCaseInsensitiveAscii(token, ".exe")) {
+      return token;
+    }
+    i = end;
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::string> TryExtractModuleNameFromLineAscii(std::string_view line)
+{
+  if (auto tokOpt = TryExtractModulePlusOffsetTokenAscii(line)) {
+    const auto plus = tokOpt->find('+');
+    if (plus != std::string_view::npos && plus > 0) {
+      const std::string_view module = ExtractModuleFilenameAscii(tokOpt->substr(0, plus));
+      return std::string(module);
+    }
+  }
+
+  if (auto tokOpt = TryExtractBareModuleTokenAscii(line)) {
+    const std::string_view module = ExtractModuleFilenameAscii(*tokOpt);
+    return std::string(module);
+  }
+
+  return std::nullopt;
+}
+
+bool IsCrashLoggerProbableSectionTerminator(std::string_view line)
+{
+  const std::string_view trimmed = TrimAscii(line);
+  if (trimmed.empty()) {
+    return true;
+  }
+
+  return EqualsCaseInsensitiveAscii(trimmed, "REGISTERS:") ||
+         EqualsCaseInsensitiveAscii(trimmed, "MODULES:") ||
+         EqualsCaseInsensitiveAscii(trimmed, "POSSIBLE RELEVANT OBJECTS:") ||
+         EqualsCaseInsensitiveAscii(trimmed, "C++ EXCEPTION:");
+}
+
+bool IsCrashLoggerDirectFaultLineAscii(std::string_view line)
+{
+  const std::string_view trimmed = TrimAscii(line);
+  if (trimmed.empty()) {
+    return false;
+  }
+
+  if (ContainsCaseInsensitiveAscii(trimmed, "unhandled exception")) {
+    return true;
+  }
+
+  return StartsWithCaseInsensitiveAscii(trimmed, "fault module:") ||
+         StartsWithCaseInsensitiveAscii(trimmed, "fault module name:") ||
+         StartsWithCaseInsensitiveAscii(trimmed, "fault module path:") ||
+         StartsWithCaseInsensitiveAscii(trimmed, "faulting module:") ||
+         StartsWithCaseInsensitiveAscii(trimmed, "faulting module name:") ||
+         StartsWithCaseInsensitiveAscii(trimmed, "faulting module path:");
+}
+
+bool IsCrashLoggerThreadDumpHeaderLineAscii(std::string_view line)
+{
+  const std::string_view trimmed = TrimAscii(line);
+  if (EqualsCaseInsensitiveAscii(trimmed, "THREAD DUMP")) {
+    return true;
+  }
+
+  if (!StartsWithCaseInsensitiveAscii(trimmed, "THREAD DUMP (")) {
+    return false;
+  }
+
+  return trimmed.size() > std::string_view("THREAD DUMP ()").size() &&
+         trimmed.back() == ')';
+}
+
+bool HasCrashLoggerThreadDumpHeaderAscii(std::string_view logUtf8)
+{
+  std::istringstream iss{ std::string(logUtf8) };
+  std::string line;
+  while (std::getline(iss, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (IsCrashLoggerThreadDumpHeaderLineAscii(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8)
 {
   std::istringstream iss{ std::string(logUtf8) };
@@ -333,15 +463,131 @@ std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetail
   return out;
 }
 
-std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view logUtf8)
+CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8)
 {
-  std::unordered_map<std::string, std::uint32_t> freq;
-  const bool isThreadDump = ContainsCaseInsensitiveAscii(logUtf8, "thread dump");
+  CrashLoggerFrameSignals out{};
+  if (logUtf8.empty()) {
+    return out;
+  }
 
   std::istringstream iss{ std::string(logUtf8) };
   std::string line;
+  bool inProbableCallStack = false;
+  bool allowDirectFaultScan = true;
 
-  bool inStack = false;
+  while (std::getline(iss, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+
+    if (allowDirectFaultScan &&
+        out.direct_fault_module.empty() &&
+        IsCrashLoggerDirectFaultLineAscii(line)) {
+      if (auto module = TryExtractModuleNameFromLineAscii(line)) {
+        out.direct_fault_module = *module;
+      }
+    }
+
+    if (!inProbableCallStack) {
+      if (ContainsCaseInsensitiveAscii(line, "probable call stack")) {
+        inProbableCallStack = true;
+        allowDirectFaultScan = false;
+      }
+      continue;
+    }
+
+    if (IsCrashLoggerProbableSectionTerminator(line)) {
+      break;
+    }
+
+    if (auto module = TryExtractModuleNameFromLineAscii(line)) {
+      out.probable_modules_in_order.push_back(*module);
+    }
+  }
+
+  for (const auto& module : out.probable_modules_in_order) {
+    const std::string moduleLower = AsciiLower(module);
+    if (!IsSystemishModuleAsciiLower(moduleLower) && !IsGameExeModuleAsciiLower(moduleLower)) {
+      out.first_actionable_probable_module = module;
+      break;
+    }
+  }
+
+  std::string currentLower;
+  std::string currentModule;
+  std::uint32_t currentLength = 0;
+  for (const auto& module : out.probable_modules_in_order) {
+    const std::string moduleLower = AsciiLower(module);
+    if (moduleLower == currentLower) {
+      currentLength++;
+    } else {
+      currentLower = moduleLower;
+      currentModule = module;
+      currentLength = 1;
+    }
+
+    if (currentLength > out.probable_streak_length) {
+      out.probable_streak_length = currentLength;
+      out.probable_streak_module = currentModule;
+    }
+  }
+
+  return out;
+}
+
+std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_view logUtf8)
+{
+  std::unordered_map<std::string, std::uint32_t> freq;
+  const auto signals = ParseCrashLoggerFrameSignalsAscii(logUtf8);
+  for (const auto& module : signals.probable_modules_in_order) {
+    const std::string moduleLower = AsciiLower(module);
+    if (IsSystemishModuleAsciiLower(moduleLower) || IsGameExeModuleAsciiLower(moduleLower)) {
+      continue;
+    }
+    freq[moduleLower] += 1;
+  }
+
+  struct Row
+  {
+    std::string moduleLower;
+    std::uint32_t count = 0;
+  };
+
+  std::vector<Row> rows;
+  rows.reserve(freq.size());
+  for (const auto& [k, v] : freq) {
+    rows.push_back(Row{ k, v });
+  }
+  std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+    if (a.count != b.count) {
+      return a.count > b.count;
+    }
+    return a.moduleLower < b.moduleLower;
+  });
+
+  std::vector<std::string> out;
+  out.reserve(std::min<std::size_t>(rows.size(), 8));
+  for (const auto& row : rows) {
+    out.push_back(row.moduleLower);
+    if (out.size() >= 8) {
+      break;
+    }
+  }
+
+  return out;
+}
+
+std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view logUtf8)
+{
+  const bool isThreadDump = HasCrashLoggerThreadDumpHeaderAscii(logUtf8);
+  if (!isThreadDump) {
+    return ParseCrashLoggerFrameTopModulesAsciiLower(logUtf8);
+  }
+
+  std::unordered_map<std::string, std::uint32_t> freq;
+  std::istringstream iss{ std::string(logUtf8) };
+  std::string line;
+
   bool inThreadCallstack = false;
 
   while (std::getline(iss, line)) {
@@ -349,60 +595,31 @@ std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view l
       line.pop_back();
     }
 
-    if (isThreadDump) {
-      if (!inThreadCallstack) {
-        if (ContainsCaseInsensitiveAscii(line, "callstack:")) {
-          inThreadCallstack = true;
-        }
-        continue;
-      }
-
-      if (line.empty()) {
-        inThreadCallstack = false;
-        continue;
-      }
-      if (!line.empty() && line[0] == '=') {
-        inThreadCallstack = false;
-        continue;
-      }
-
-      auto tokOpt = TryExtractModulePlusOffsetTokenAscii(line);
-      if (!tokOpt) {
-        continue;
-      }
-      const std::string tokLower = AsciiLower(*tokOpt);
-      const auto plus = tokLower.find('+');
-      if (plus == std::string::npos || plus == 0) {
-        continue;
-      }
-      const std::string module = tokLower.substr(0, plus);
-      freq[module] += 1;
-      continue;
-    }
-
-    if (!inStack) {
-      if (ContainsCaseInsensitiveAscii(line, "probable call stack")) {
-        inStack = true;
+    if (!inThreadCallstack) {
+      if (EqualsCaseInsensitiveAscii(TrimAscii(line), "CALLSTACK:")) {
+        inThreadCallstack = true;
       }
       continue;
     }
 
-    if (line.empty() || ContainsCaseInsensitiveAscii(line, "registers:") || ContainsCaseInsensitiveAscii(line, "modules:")) {
-      break;
-    }
-
-    auto tokOpt = TryExtractModulePlusOffsetTokenAscii(line);
-    if (!tokOpt) {
+    if (line.empty()) {
+      inThreadCallstack = false;
       continue;
     }
-    const std::string tokLower = AsciiLower(*tokOpt);
-    const auto plus = tokLower.find('+');
-    if (plus == std::string::npos || plus == 0) {
+    if (!line.empty() && line[0] == '=') {
+      inThreadCallstack = false;
       continue;
     }
 
-    const std::string module = tokLower.substr(0, plus);
-    freq[module] += 1;
+    auto moduleOpt = TryExtractModuleNameFromLineAscii(line);
+    if (!moduleOpt) {
+      continue;
+    }
+    const std::string moduleLower = AsciiLower(*moduleOpt);
+    if (IsSystemishModuleAsciiLower(moduleLower) || IsGameExeModuleAsciiLower(moduleLower)) {
+      continue;
+    }
+    freq[moduleLower] += 1;
   }
 
   struct Row
@@ -426,9 +643,6 @@ std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view l
   std::vector<std::string> out;
   out.reserve(std::min<std::size_t>(rows.size(), 8));
   for (const auto& r : rows) {
-    if (IsSystemishModuleAsciiLower(r.moduleLower) || IsGameExeModuleAsciiLower(r.moduleLower)) {
-      continue;
-    }
     out.push_back(r.moduleLower);
     if (out.size() >= 8) {
       break;

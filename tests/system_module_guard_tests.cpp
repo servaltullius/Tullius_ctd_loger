@@ -64,9 +64,29 @@ int main()
     "IsSystemishModule",
     "CrashLogger module filter must delegate to IsSystemishModule for system module detection.");
   AssertContains(
+    crashLogger,
+    "BuildNormalizedCrashLoggerFrameSignals",
+    "CrashLogger normalization must compute analyzer-facing frame signals separately from raw parsing.");
+  AssertContains(
+    crashLogger,
+    "NormalizeCrashLoggerModuleFilename",
+    "CrashLogger wrapper normalization must strip directory prefixes before canonical lookup and filtering.");
+  AssertContains(
+    crashLogger,
+    "first_actionable_probable_module",
+    "CrashLogger normalization must preserve a first actionable probable module field.");
+  AssertContains(
+    crashLogger,
+    "probable_streak_length",
+    "CrashLogger normalization must preserve same-DLL streak length for analyzer use.");
+  AssertContains(
     crashLoggerParseCore,
     "win32u.dll",
     "CrashLogger parse core filter must include win32u.dll as system module.");
+  AssertContains(
+    crashLoggerParseCore,
+    "probable_modules_in_order",
+    "CrashLogger raw frame parsing must preserve probable rows before analyzer filtering.");
 
   AssertContains(
     crashLoggerParseCoreHeader,

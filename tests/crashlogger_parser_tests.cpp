@@ -9,6 +9,8 @@ using skydiag::dump_tool::LooksLikeCrashLoggerLogTextCore;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerIniCrashlogDirectoryAscii;
 using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerVersionAscii;
+using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerFrameSignalsAscii;
+using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerFrameTopModulesAsciiLower;
 using skydiag::dump_tool::ParseCrashLoggerTopModulesAsciiLower;
 using skydiag::dump_tool::crashlogger_core::TryExtractModulePlusOffsetTokenAscii;
 using skydiag::dump_tool::crashlogger_core::IsSystemishModuleAsciiLower;
@@ -16,6 +18,7 @@ using skydiag::dump_tool::crashlogger_core::IsGameExeModuleAsciiLower;
 using skydiag::dump_tool::crashlogger_core::TryExtractCompactTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::TryExtractDashedTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::ParsedTimestamp;
+using skydiag::dump_tool::crashlogger_core::CrashLoggerFrameSignals;
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::ReadProjectText;
 
@@ -1026,6 +1029,291 @@ static void Test_CrashLoggerFrameSignals_PublicContract()
     "Crash Logger parser must track same-DLL probable streak length.");
 }
 
+static void Test_ParseCrashLoggerFrameSignals_LegacyProbableRows()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.18.0\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF612345678 Precision.dll+0x00ABCDEF\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\tSkyrimSE.exe+0x00000001\n"
+    "\tkernelbase.dll+0x00000002\n"
+    "\tPrecision.dll+0x00001000\n"
+    "\tPrecision.dll+0x00002000\n"
+    "\tPrecision.dll+0x00003000\n"
+    "\td3d11.dll+0x00004000\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module == "Precision.dll");
+  assert(signals.first_actionable_probable_module == "Precision.dll");
+  assert(signals.probable_streak_module == "Precision.dll");
+  assert(signals.probable_streak_length == 3u);
+  assert(signals.probable_modules_in_order.size() == 6u);
+  assert(signals.probable_modules_in_order[0] == "SkyrimSE.exe");
+  assert(signals.probable_modules_in_order[1] == "kernelbase.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_IndexedProbableRows()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF612345678 ExampleMod.dll+00001234\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 SkyrimSE.exe+00000001\n"
+    "\t[ 1] 0x00007FF612340002 KERNELBASE.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 ExampleMod.dll+00000003\tmov eax, eax | ExampleA\n"
+    "\t[ 3] 0x00007FF612340004 ExampleMod.dll+00000004\tmov ecx, ecx | ExampleB\n"
+    "\t[ 4] 0x00007FF612340005 HookBridge.dll+00000005\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module == "ExampleMod.dll");
+  assert(signals.first_actionable_probable_module == "ExampleMod.dll");
+  assert(signals.probable_streak_module == "ExampleMod.dll");
+  assert(signals.probable_streak_length == 2u);
+  assert(signals.probable_modules_in_order.size() == 5u);
+  assert(signals.probable_modules_in_order[0] == "SkyrimSE.exe");
+  assert(signals.probable_modules_in_order[1] == "KERNELBASE.dll");
+  assert(signals.probable_modules_in_order[4] == "HookBridge.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_IgnoresFaultingApplicationName()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "Faulting application name: SkyrimSE.exe, version 1.6.1170.0\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 SkyrimSE.exe+00000001\n"
+    "\t[ 1] 0x00007FF612340002 Precision.dll+00000003\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module.empty());
+  assert(signals.first_actionable_probable_module == "Precision.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_ExtractsFaultingModulePath()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "Faulting module path: C:\\Windows\\System32\\KERNELBASE.dll\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 Precision.dll+00000001\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module == "KERNELBASE.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_ExtractsFaultModulePath()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "Fault module path: D:\\Mods\\Precision.dll\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 Precision.dll+00000001\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module == "Precision.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_PathQualifiedModulesNormalizeToFilename()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF612345678 D:\\Mods\\FancyMod.dll+00001234\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 C:\\Windows\\System32\\KERNELBASE.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 D:\\Mods\\FancyMod.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 D:\\Mods\\FancyMod.dll+00000003\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module == "FancyMod.dll");
+  assert(signals.first_actionable_probable_module == "FancyMod.dll");
+  assert(signals.probable_streak_module == "FancyMod.dll");
+  assert(signals.probable_streak_length == 2u);
+  assert(signals.probable_modules_in_order.size() == 3u);
+  assert(signals.probable_modules_in_order[0] == "KERNELBASE.dll");
+  assert(signals.probable_modules_in_order[1] == "FancyMod.dll");
+}
+
+static void Test_ParseCrashLoggerFrameTopModules_PathQualifiedSystemRowsFiltered()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 C:\\Windows\\System32\\KERNELBASE.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 D:\\Mods\\FancyMod.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 D:\\Mods\\FancyMod.dll+00000003\n"
+    "\t[ 3] 0x00007FF612340004 E:\\Other\\OtherMod.dll+00000004\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto mods = ParseCrashLoggerFrameTopModulesAsciiLower(log);
+  assert(mods.size() == 2u);
+  assert(mods[0] == "fancymod.dll");
+  assert(mods[1] == "othermod.dll");
+}
+
+static void Test_ParseTopModules_CrashLog_PathQualifiedRowsUseNormalizedFrameSignals()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 C:\\Windows\\System32\\KERNELBASE.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 D:\\Mods\\hdtSMP64.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 D:\\Mods\\hdtSMP64.dll+00000003\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto frameMods = ParseCrashLoggerFrameTopModulesAsciiLower(log);
+  assert(frameMods.size() == 1u);
+  assert(frameMods[0] == "hdtsmp64.dll");
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(log);
+  assert(mods.size() == 1u);
+  assert(mods[0] == "hdtsmp64.dll");
+}
+
+static void Test_ParseTopModules_ThreadDump_PathQualifiedRowsNormalizeBeforeFiltering()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "========================================\n"
+    "THREAD DUMP (Manual Trigger)\n"
+    "========================================\n"
+    "TIME: 2026-03-24 12:34:56\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x00007FF612340001 C:\\Windows\\System32\\KERNELBASE.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 D:\\Mods\\FancyThread.dll+00000002\n"
+    "\n"
+    "===== THREAD 2 (ID: 456) =====\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x00007FF612340003 E:\\Mods\\FancyThread.dll+00000003\n"
+    "\t[ 1] 0x00007FF612340004 E:\\Mods\\OtherThread.dll+00000004\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(log);
+  assert(mods.size() == 2u);
+  assert(mods[0] == "fancythread.dll");
+  assert(mods[1] == "otherthread.dll");
+}
+
+static void Test_ParseTopModules_ThreadDump_AcceptsNonManualHeaderVariant()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "========================================\n"
+    "THREAD DUMP (Background Capture)\n"
+    "========================================\n"
+    "TIME: 2026-03-24 12:34:56\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x00007FF612340001 VariantThread.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 ntdll.dll+00000002\n"
+    "\n"
+    "===== THREAD 2 (ID: 456) =====\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x00007FF612340003 OtherVariant.dll+00000003\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(log);
+  assert(mods.size() == 2u);
+  assert(mods[0] == "othervariant.dll");
+  assert(mods[1] == "variantthread.dll");
+}
+
+static void Test_ParseTopModules_CrashLog_IgnoresThreadDumpSubstringNoise()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "Exception detail: previous thread dump note retained for diagnostics only.\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 NoisyCrash.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 NoisyCrash.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 OtherCrash.dll+00000003\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(log);
+  assert(mods.size() == 2u);
+  assert(mods[0] == "noisycrash.dll");
+  assert(mods[1] == "othercrash.dll");
+}
+
+static void Test_ParseTopModules_CrashLog_IgnoresThreadDumpBannerLikeNote()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "THREAD DUMP NOTE: previous manual capture attached below for comparison only.\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 BannerCrash.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 BannerCrash.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 OtherCrash.dll+00000003\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto mods = ParseCrashLoggerTopModulesAsciiLower(log);
+  assert(mods.size() == 2u);
+  assert(mods[0] == "bannercrash.dll");
+  assert(mods[1] == "othercrash.dll");
+}
+
+static void Test_ParseCrashLoggerFrameSignals_RowDetailWithStackLabelDoesNotTerminate()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF612345678 DetailKeep.dll+00001234\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 DetailKeep.dll+00000001\tcopied from stack: prior frame note\n"
+    "\t[ 1] 0x00007FF612340002 DetailKeep.dll+00000002\n"
+    "\t[ 2] 0x00007FF612340003 TrailingRow.dll+00000003\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.probable_modules_in_order.size() == 3u);
+  assert(signals.probable_modules_in_order[0] == "DetailKeep.dll");
+  assert(signals.probable_modules_in_order[2] == "TrailingRow.dll");
+  assert(signals.probable_streak_module == "DetailKeep.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
+static void Test_ParseCrashLoggerFrameSignals_IgnoresLateDiagnosticFaultModuleLine()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 EarlyWinner.dll+00000001\n"
+    "\t[ 1] 0x00007FF612340002 EarlyWinner.dll+00000002\n"
+    "\n"
+    "REGISTERS:\n"
+    "fault module path: D:\\Diagnostics\\LateNoise.dll\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module.empty());
+  assert(signals.first_actionable_probable_module == "EarlyWinner.dll");
+  assert(signals.probable_streak_module == "EarlyWinner.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
@@ -1126,6 +1414,20 @@ int main()
   Test_AggregateObjectRefs_FormIdKept();
   Test_ParseObjectRefs_RegisterFormId();
   Test_CrashLoggerFrameSignals_PublicContract();
+  Test_ParseCrashLoggerFrameSignals_LegacyProbableRows();
+  Test_ParseCrashLoggerFrameSignals_IndexedProbableRows();
+  Test_ParseCrashLoggerFrameSignals_IgnoresFaultingApplicationName();
+  Test_ParseCrashLoggerFrameSignals_ExtractsFaultingModulePath();
+  Test_ParseCrashLoggerFrameSignals_ExtractsFaultModulePath();
+  Test_ParseCrashLoggerFrameSignals_PathQualifiedModulesNormalizeToFilename();
+  Test_ParseCrashLoggerFrameTopModules_PathQualifiedSystemRowsFiltered();
+  Test_ParseTopModules_CrashLog_PathQualifiedRowsUseNormalizedFrameSignals();
+  Test_ParseTopModules_ThreadDump_PathQualifiedRowsNormalizeBeforeFiltering();
+  Test_ParseTopModules_ThreadDump_AcceptsNonManualHeaderVariant();
+  Test_ParseTopModules_CrashLog_IgnoresThreadDumpSubstringNoise();
+  Test_ParseTopModules_CrashLog_IgnoresThreadDumpBannerLikeNote();
+  Test_ParseCrashLoggerFrameSignals_RowDetailWithStackLabelDoesNotTerminate();
+  Test_ParseCrashLoggerFrameSignals_IgnoresLateDiagnosticFaultModuleLine();
 
   return 0;
 }

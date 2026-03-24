@@ -28,6 +28,89 @@ using minidump::WideLower;
 using minidump::IsSystemishModule;
 using minidump::IsGameExeModule;
 
+struct NormalizedCrashLoggerFrameSignals
+{
+  std::wstring direct_fault_module;
+  std::wstring first_actionable_probable_module;
+  std::wstring probable_streak_module;
+  std::uint32_t probable_streak_length = 0;
+  std::vector<std::wstring> probable_modules_in_order;
+};
+
+std::wstring NormalizeCrashLoggerModuleFilename(std::wstring_view module)
+{
+  if (module.empty()) {
+    return {};
+  }
+
+  const std::size_t pathPos = module.find_last_of(L"\\/");
+  if (pathPos == std::wstring_view::npos) {
+    return std::wstring(module);
+  }
+
+  return std::wstring(module.substr(pathPos + 1));
+}
+
+std::wstring CanonicalizeCrashLoggerModule(
+  std::string_view moduleUtf8,
+  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
+{
+  const std::wstring module = NormalizeCrashLoggerModuleFilename(Utf8ToWide(std::string(moduleUtf8)));
+  const std::wstring key = WideLower(module);
+  if (const auto it = canonicalByFilenameLower.find(key); it != canonicalByFilenameLower.end()) {
+    return it->second;
+  }
+  return module;
+}
+
+NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
+  const crashlogger_core::CrashLoggerFrameSignals& raw,
+  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
+{
+  NormalizedCrashLoggerFrameSignals normalized{};
+  if (!raw.direct_fault_module.empty()) {
+    normalized.direct_fault_module = CanonicalizeCrashLoggerModule(raw.direct_fault_module, canonicalByFilenameLower);
+  }
+
+  normalized.probable_modules_in_order.reserve(raw.probable_modules_in_order.size());
+  std::wstring currentLower;
+  std::wstring currentModule;
+  std::uint32_t currentLength = 0;
+  for (const auto& moduleUtf8 : raw.probable_modules_in_order) {
+    std::wstring module = CanonicalizeCrashLoggerModule(moduleUtf8, canonicalByFilenameLower);
+    normalized.probable_modules_in_order.push_back(module);
+
+    if (normalized.first_actionable_probable_module.empty() &&
+        !IsSystemishModule(module) &&
+        !IsGameExeModule(module)) {
+      normalized.first_actionable_probable_module = module;
+    }
+
+    if (IsSystemishModule(module) || IsGameExeModule(module)) {
+      currentLower.clear();
+      currentModule.clear();
+      currentLength = 0;
+      continue;
+    }
+
+    const std::wstring moduleLower = WideLower(module);
+    if (moduleLower == currentLower) {
+      currentLength++;
+    } else {
+      currentLower = moduleLower;
+      currentModule = module;
+      currentLength = 1;
+    }
+
+    if (currentLength > normalized.probable_streak_length) {
+      normalized.probable_streak_length = currentLength;
+      normalized.probable_streak_module = currentModule;
+    }
+  }
+
+  return normalized;
+}
+
 std::optional<std::wstring> TryGetDocumentsKnownFolder()
 {
   PWSTR path = nullptr;
@@ -551,22 +634,62 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::string_view logUtf8,
   const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
 {
-  const auto modulesLower = crashlogger_core::ParseCrashLoggerTopModulesAsciiLower(logUtf8);
+  const auto normalizedSignals =
+    BuildNormalizedCrashLoggerFrameSignals(
+      crashlogger_core::ParseCrashLoggerFrameSignalsAscii(logUtf8),
+      canonicalByFilenameLower);
 
-  std::vector<std::wstring> out;
-  out.reserve(std::min<std::size_t>(modulesLower.size(), 8));
-  for (const auto& moduleLower : modulesLower) {
-    const std::wstring wLower = Utf8ToWide(moduleLower);
-    const std::wstring key = WideLower(wLower);
+  struct ModuleCount
+  {
+    std::wstring display_name;
+    std::uint32_t count = 0;
+  };
 
-    const auto it = canonicalByFilenameLower.find(key);
-    std::wstring disp = (it != canonicalByFilenameLower.end()) ? it->second : wLower;
-
-    if (IsSystemishModule(disp) || IsGameExeModule(disp)) {
+  std::unordered_map<std::wstring, ModuleCount> freqByLower;
+  for (const auto& module : normalizedSignals.probable_modules_in_order) {
+    if (IsSystemishModule(module) || IsGameExeModule(module)) {
       continue;
     }
 
-    out.push_back(disp);
+    const std::wstring lower = WideLower(module);
+    auto& entry = freqByLower[lower];
+    if (entry.display_name.empty()) {
+      entry.display_name = module;
+    }
+    entry.count += 1;
+  }
+
+  if (freqByLower.empty()) {
+    const auto modulesLower = crashlogger_core::ParseCrashLoggerTopModulesAsciiLower(logUtf8);
+    for (const auto& moduleLower : modulesLower) {
+      std::wstring disp = CanonicalizeCrashLoggerModule(moduleLower, canonicalByFilenameLower);
+      if (IsSystemishModule(disp) || IsGameExeModule(disp)) {
+        continue;
+      }
+      auto& entry = freqByLower[WideLower(disp)];
+      if (entry.display_name.empty()) {
+        entry.display_name = disp;
+      }
+      entry.count += 1;
+    }
+  }
+
+  std::vector<ModuleCount> ranked;
+  ranked.reserve(freqByLower.size());
+  for (const auto& [_, entry] : freqByLower) {
+    ranked.push_back(entry);
+  }
+  std::sort(ranked.begin(), ranked.end(), [](const ModuleCount& a, const ModuleCount& b) {
+    if (a.count != b.count) {
+      return a.count > b.count;
+    }
+    return WideLower(a.display_name) < WideLower(b.display_name);
+  });
+
+  std::vector<std::wstring> out;
+  out.reserve(std::min<std::size_t>(ranked.size(), 8));
+  for (const auto& row : ranked) {
+    out.push_back(row.display_name);
     if (out.size() >= 8) {
       break;
     }

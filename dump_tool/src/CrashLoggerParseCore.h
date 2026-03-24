@@ -16,6 +16,14 @@ struct CrashLoggerCppExceptionDetails {
   std::string module;
 };
 
+struct CrashLoggerFrameSignals {
+  std::string direct_fault_module;
+  std::string first_actionable_probable_module;
+  std::string probable_streak_module;
+  std::uint32_t probable_streak_length = 0;
+  std::vector<std::string> probable_modules_in_order;
+};
+
 // Parsed date/time components from a filename pattern.
 struct ParsedTimestamp
 {
@@ -61,6 +69,8 @@ std::optional<std::string> ParseCrashLoggerIniCrashlogDirectoryAscii(std::string
 bool LooksLikeCrashLoggerLogTextCore(std::string_view utf8Prefix);
 std::optional<std::string_view> TryExtractModulePlusOffsetTokenAscii(std::string_view line);
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8);
+CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8);
+std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_view logUtf8);
 std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view logUtf8);
 
 // ── Module classification ──
