@@ -380,6 +380,11 @@ void TestOutputWriterEmitsAllFields()
     "\"reasons\"",
     "\"escalation_level\"",
     "\"include_code_segments\"",
+    "\"include_process_thread_data\"",
+    "\"include_full_memory_info\"",
+    "\"include_module_headers\"",
+    "\"include_indirect_memory\"",
+    "\"ignore_inaccessible_memory\"",
   };
 
   for (const auto& key : nestedKeys) {
@@ -407,6 +412,11 @@ void TestOutputWriterReportTextSections()
     "CaptureProfileBaseMode:",
     "CaptureProfileCodeSegments:",
     "CaptureProfileFullMemory:",
+    "CaptureProfileProcessThreadData:",
+    "CaptureProfileFullMemoryInfo:",
+    "CaptureProfileModuleHeaders:",
+    "CaptureProfileIndirectMemory:",
+    "CaptureProfileIgnoreInaccessibleMemory:",
     "RecaptureTriggered:",
     "RecaptureTargetProfile:",
     "RecaptureReasons:",

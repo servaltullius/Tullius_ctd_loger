@@ -6,6 +6,37 @@
 
 namespace skydiag::dump_tool::internal {
 
+namespace {
+
+std::vector<std::wstring> CollectCaptureProfileCapabilities(const AnalysisResult& r, bool en)
+{
+  std::vector<std::wstring> parts;
+  if (r.incident_capture_profile_code_segments) {
+    parts.push_back(en ? L"code_segments=1" : L"code_segments=1");
+  }
+  if (r.incident_capture_profile_process_thread_data) {
+    parts.push_back(en ? L"process_thread_data=1" : L"process_thread_data=1");
+  }
+  if (r.incident_capture_profile_full_memory_info) {
+    parts.push_back(en ? L"full_memory_info=1" : L"full_memory_info=1");
+  }
+  if (r.incident_capture_profile_module_headers) {
+    parts.push_back(en ? L"module_headers=1" : L"module_headers=1");
+  }
+  if (r.incident_capture_profile_indirect_memory) {
+    parts.push_back(en ? L"indirect_memory=1" : L"indirect_memory=1");
+  }
+  if (r.incident_capture_profile_ignore_inaccessible_memory) {
+    parts.push_back(en ? L"ignore_inaccessible_memory=1" : L"ignore_inaccessible_memory=1");
+  }
+  parts.push_back(en
+    ? (L"full_memory=" + std::wstring(r.incident_capture_profile_full_memory ? L"1" : L"0"))
+    : (L"full_memory=" + std::wstring(r.incident_capture_profile_full_memory ? L"1" : L"0")));
+  return parts;
+}
+
+}  // namespace
+
 std::wstring DescribeCaptureProfileEvidence(const AnalysisResult& r, bool en)
 {
   if (!r.incident_capture_profile_present) {
@@ -14,21 +45,23 @@ std::wstring DescribeCaptureProfileEvidence(const AnalysisResult& r, bool en)
 
   const std::wstring captureKind = ToWideAscii(r.incident_capture_kind);
   const std::wstring baseMode = ToWideAscii(r.incident_capture_profile_base_mode);
+  const auto capabilityParts = CollectCaptureProfileCapabilities(r, en);
+  const std::wstring capabilitySummary = JoinList(capabilityParts, capabilityParts.size(), L", ");
   if (r.incident_capture_kind == "crash_recapture") {
     return en
       ? (L"Dump was collected by the crash_recapture profile (base_mode=" + baseMode +
-          L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") +
+          L", " + capabilitySummary +
           L") after earlier analysis weakness or repeated bucket activity.")
       : (L"이 덤프는 crash_recapture 프로필로 다시 수집되었습니다 (base_mode=" + baseMode +
-          L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") +
+          L", " + capabilitySummary +
           L"). 앞선 분석 약점 또는 반복 버킷 때문에 재수집된 것입니다.");
   }
 
   return en
     ? (L"Dump used capture profile " + captureKind + L" (base_mode=" + baseMode +
-        L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") + L").")
+        L", " + capabilitySummary + L").")
     : (L"이 덤프는 " + captureKind + L" 캡처 프로필로 수집되었습니다 (base_mode=" + baseMode +
-        L", full_memory=" + (r.incident_capture_profile_full_memory ? L"1" : L"0") + L").");
+        L", " + capabilitySummary + L").");
 }
 
 static std::wstring DescribeRecaptureReason(std::string_view reasonId, bool en)

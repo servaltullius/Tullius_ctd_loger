@@ -98,6 +98,29 @@ std::string BuildReportText(
         rpt << (en ? "CaptureProfileCodeSegments: " : "CaptureProfileCodeSegments: ")
             << (captureProfile["include_code_segments"].get<bool>() ? "1" : "0") << "\n";
       }
+      if (captureProfile.contains("include_process_thread_data") &&
+          captureProfile["include_process_thread_data"].is_boolean()) {
+        rpt << (en ? "CaptureProfileProcessThreadData: " : "CaptureProfileProcessThreadData: ")
+            << (captureProfile["include_process_thread_data"].get<bool>() ? "1" : "0") << "\n";
+      }
+      if (captureProfile.contains("include_full_memory_info") &&
+          captureProfile["include_full_memory_info"].is_boolean()) {
+        rpt << (en ? "CaptureProfileFullMemoryInfo: " : "CaptureProfileFullMemoryInfo: ")
+            << (captureProfile["include_full_memory_info"].get<bool>() ? "1" : "0") << "\n";
+      }
+      if (captureProfile.contains("include_module_headers") && captureProfile["include_module_headers"].is_boolean()) {
+        rpt << (en ? "CaptureProfileModuleHeaders: " : "CaptureProfileModuleHeaders: ")
+            << (captureProfile["include_module_headers"].get<bool>() ? "1" : "0") << "\n";
+      }
+      if (captureProfile.contains("include_indirect_memory") && captureProfile["include_indirect_memory"].is_boolean()) {
+        rpt << (en ? "CaptureProfileIndirectMemory: " : "CaptureProfileIndirectMemory: ")
+            << (captureProfile["include_indirect_memory"].get<bool>() ? "1" : "0") << "\n";
+      }
+      if (captureProfile.contains("ignore_inaccessible_memory") &&
+          captureProfile["ignore_inaccessible_memory"].is_boolean()) {
+        rpt << (en ? "CaptureProfileIgnoreInaccessibleMemory: " : "CaptureProfileIgnoreInaccessibleMemory: ")
+            << (captureProfile["ignore_inaccessible_memory"].get<bool>() ? "1" : "0") << "\n";
+      }
       if (captureProfile.contains("include_full_memory") && captureProfile["include_full_memory"].is_boolean()) {
         rpt << (en ? "CaptureProfileFullMemory: " : "CaptureProfileFullMemory: ")
             << (captureProfile["include_full_memory"].get<bool>() ? "1" : "0") << "\n";

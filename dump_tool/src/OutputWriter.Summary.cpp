@@ -82,6 +82,21 @@ nlohmann::json BuildSummaryJson(
     if (!captureProfile.contains("include_code_segments")) {
       captureProfile["include_code_segments"] = false;
     }
+    if (!captureProfile.contains("include_process_thread_data")) {
+      captureProfile["include_process_thread_data"] = false;
+    }
+    if (!captureProfile.contains("include_full_memory_info")) {
+      captureProfile["include_full_memory_info"] = false;
+    }
+    if (!captureProfile.contains("include_module_headers")) {
+      captureProfile["include_module_headers"] = false;
+    }
+    if (!captureProfile.contains("include_indirect_memory")) {
+      captureProfile["include_indirect_memory"] = false;
+    }
+    if (!captureProfile.contains("ignore_inaccessible_memory")) {
+      captureProfile["ignore_inaccessible_memory"] = false;
+    }
     if (!captureProfile.contains("include_full_memory")) {
       captureProfile["include_full_memory"] = false;
     }

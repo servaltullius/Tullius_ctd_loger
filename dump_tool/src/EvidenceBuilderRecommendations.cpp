@@ -94,6 +94,27 @@ bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
          summary.loading_window_count * 2u >= summary.recent_count;
 }
 
+std::wstring DescribeCaptureProfileStrength(const AnalysisResult& r, bool en)
+{
+  std::vector<std::wstring> parts;
+  if (r.incident_capture_profile_process_thread_data) {
+    parts.push_back(en ? L"process/thread data" : L"process/thread data");
+  }
+  if (r.incident_capture_profile_full_memory_info) {
+    parts.push_back(en ? L"full memory info" : L"full memory info");
+  }
+  if (r.incident_capture_profile_module_headers) {
+    parts.push_back(en ? L"module headers" : L"module headers");
+  }
+  if (r.incident_capture_profile_indirect_memory) {
+    parts.push_back(en ? L"indirect memory" : L"indirect memory");
+  }
+  if (r.incident_capture_profile_ignore_inaccessible_memory) {
+    parts.push_back(en ? L"inaccessible-memory tolerance" : L"inaccessible-memory tolerance");
+  }
+  return JoinList(parts, parts.size(), L", ");
+}
+
 bool HasScorableFirstChanceContext(const FirstChanceSummary& summary)
 {
   return summary.has_context &&
@@ -362,9 +383,14 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   }
 
   if (r.incident_capture_profile_present && r.incident_capture_kind == "crash_recapture") {
+    const auto quality = DescribeCaptureProfileStrength(r, en);
     r.recommendations.push_back(en
-      ? L"[Recapture] This dump already came from a richer crash recapture profile. Escalate to FullMemory only if the evidence still stays weak."
-      : L"[재수집] 이 덤프는 이미 richer crash recapture profile로 다시 수집된 결과입니다. 근거가 여전히 약할 때만 FullMemory로 올리세요.");
+      ? (L"[Recapture] This dump already came from a richer crash recapture profile" +
+          (quality.empty() ? L"" : L" (" + quality + L")") +
+          L". Escalate to FullMemory only if the evidence still stays weak.")
+      : (L"[재수집] 이 덤프는 이미 richer crash recapture profile로 다시 수집된 결과입니다" +
+          (quality.empty() ? L"" : L" (" + quality + L")") +
+          L". 근거가 여전히 약할 때만 FullMemory로 올리세요."));
   }
   if (r.incident_recapture_evaluation_present && r.incident_recapture_triggered) {
     const auto reasons = DescribeRecaptureReasons(r, en);
@@ -554,8 +580,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   } else {
     if (!isSnapshotLike) {
     r.recommendations.push_back(en
-      ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
-      : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 다시 캡처하세요.");
+      ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile (full memory info / module headers / indirect memory) before escalating to FullMemory (DumpMode=2)."
+      : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile(full memory info / module headers / indirect memory)로 먼저 다시 캡처하세요.");
     }
   }
 

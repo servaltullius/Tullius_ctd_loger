@@ -215,6 +215,12 @@ struct AnalysisResult
   bool incident_capture_profile_present = false;
   std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
   std::string incident_capture_profile_base_mode;  // mini / default / full
+  bool incident_capture_profile_code_segments = false;
+  bool incident_capture_profile_process_thread_data = false;
+  bool incident_capture_profile_full_memory_info = false;
+  bool incident_capture_profile_module_headers = false;
+  bool incident_capture_profile_indirect_memory = false;
+  bool incident_capture_profile_ignore_inaccessible_memory = false;
   bool incident_capture_profile_full_memory = false;
   bool incident_recapture_evaluation_present = false;
   bool incident_recapture_triggered = false;

@@ -398,10 +398,23 @@ void TestCaptureQualitySourceContracts()
   AssertContains(analyzerHeader, "symbol_runtime_degraded", "AnalysisResult must track degraded symbol/runtime state.");
   AssertContains(analyzerHeader, "incident_capture_kind", "AnalysisResult must expose effective capture kind.");
   AssertContains(analyzerHeader, "incident_capture_profile_base_mode", "AnalysisResult must expose capture profile base mode.");
+  AssertContains(analyzerHeader, "incident_capture_profile_process_thread_data", "AnalysisResult must expose process/thread-data capture quality.");
+  AssertContains(analyzerHeader, "incident_capture_profile_full_memory_info", "AnalysisResult must expose full-memory-info capture quality.");
+  AssertContains(analyzerHeader, "incident_capture_profile_module_headers", "AnalysisResult must expose module-header capture quality.");
+  AssertContains(analyzerHeader, "incident_capture_profile_indirect_memory", "AnalysisResult must expose indirect-memory capture quality.");
+  AssertContains(analyzerHeader, "incident_capture_profile_ignore_inaccessible_memory", "AnalysisResult must expose inaccessible-memory tolerance.");
   AssertContains(analyzerCpp, "capture_profile", "Analyzer must consume incident capture profile metadata.");
+  AssertContains(analyzerCpp, "include_process_thread_data", "Analyzer must consume process/thread-data capture metadata.");
+  AssertContains(analyzerCpp, "include_full_memory_info", "Analyzer must consume full-memory-info capture metadata.");
+  AssertContains(analyzerCpp, "include_module_headers", "Analyzer must consume module-header capture metadata.");
+  AssertContains(analyzerCpp, "include_indirect_memory", "Analyzer must consume indirect-memory capture metadata.");
+  AssertContains(analyzerCpp, "ignore_inaccessible_memory", "Analyzer must consume inaccessible-memory tolerance metadata.");
   AssertContains(evidenceCpp, "Capture profile metadata", "Evidence must explain which capture profile produced the dump.");
+  AssertContains(evidenceCpp, "process_thread_data=", "Capture evidence must expose richer capture capabilities.");
+  AssertContains(evidenceCpp, "indirect_memory=", "Capture evidence must expose indirect-memory support.");
   AssertContains(evidenceCpp, "Symbol/runtime environment limited stackwalk quality", "Evidence must describe symbol/runtime degradation.");
   AssertContains(recommendationCpp, "richer crash recapture profile", "Recommendations must prefer richer recapture profiles before generic full-memory advice.");
+  AssertContains(recommendationCpp, "indirect memory", "Recommendations must acknowledge richer indirect-memory capture when present.");
   AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
 }
 

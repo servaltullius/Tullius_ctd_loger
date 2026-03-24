@@ -68,6 +68,13 @@ void LoadIncidentCaptureProfile(
       out.incident_capture_kind = capture_profile.value("capture_kind", "");
     }
     out.incident_capture_profile_base_mode = capture_profile.value("base_mode", "");
+    out.incident_capture_profile_code_segments = capture_profile.value("include_code_segments", false);
+    out.incident_capture_profile_process_thread_data = capture_profile.value("include_process_thread_data", false);
+    out.incident_capture_profile_full_memory_info = capture_profile.value("include_full_memory_info", false);
+    out.incident_capture_profile_module_headers = capture_profile.value("include_module_headers", false);
+    out.incident_capture_profile_indirect_memory = capture_profile.value("include_indirect_memory", false);
+    out.incident_capture_profile_ignore_inaccessible_memory =
+      capture_profile.value("ignore_inaccessible_memory", false);
     out.incident_capture_profile_full_memory = capture_profile.value("include_full_memory", false);
   }
   if (incidentManifest.contains("recapture_evaluation") && incidentManifest["recapture_evaluation"].is_object()) {
