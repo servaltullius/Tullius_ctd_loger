@@ -129,16 +129,23 @@ internal sealed partial class MainWindowViewModel
             var primaryCandidate = summary.ActionableCandidates[0];
             var candidateName = BuildPrimaryCandidateValue(summary);
             var hasFrameFamily = HasFamily(primaryCandidate, "crash_logger_frame");
+            var hasFirstChanceFamily = HasFamily(primaryCandidate, "first_chance_context");
             return primaryCandidate.StatusId switch
             {
                 "cross_validated" when hasFrameFamily => T(
                     $"DLL guidance: check {candidateName} first",
                     $"DLL guidance: {candidateName}부터 확인"),
                 "cross_validated" => T($"Update or isolate {candidateName} first", $"{candidateName} 업데이트/격리부터 확인"),
+                "related" when hasFrameFamily && hasFirstChanceFamily => T(
+                    $"DLL guidance: check {candidateName} and repeated first-chance path first",
+                    $"DLL guidance: {candidateName}와 반복 first-chance 경로를 먼저 확인"),
                 "related" when hasFrameFamily => T(
                     $"DLL guidance: check {candidateName} before generic EXE/system triage",
                     $"DLL guidance: 일반 EXE/system 점검보다 먼저 {candidateName} 확인"),
                 "related" => T($"Check {candidateName} before generic DLL triage", $"{candidateName} 쪽을 일반 DLL 점검보다 먼저 확인"),
+                "reference_clue" when hasFrameFamily && hasFirstChanceFamily => T(
+                    $"DLL guidance: check {candidateName} and repeated first-chance path before another capture",
+                    $"DLL guidance: 추가 캡처 전에 {candidateName}와 반복 first-chance 경로를 먼저 확인"),
                 "reference_clue" when hasFrameFamily => T(
                     $"DLL guidance: use Crash Logger frame clues for {candidateName} first",
                     $"DLL guidance: {candidateName}의 Crash Logger frame 단서를 먼저 확인"),

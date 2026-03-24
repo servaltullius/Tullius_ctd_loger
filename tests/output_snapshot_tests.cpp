@@ -444,6 +444,8 @@ void TestFirstChanceCandidateExplanationSourceGuards()
   assert(evidenceSrc.find("repeated suspicious first-chance") != std::string::npos);
   assert(recommendationSrc.find("first-chance") != std::string::npos);
   assert(summarySrc.find("first_chance_context") != std::string::npos);
+  assert(summarySrc.find("Repeated suspicious first-chance context also matched this candidate.") != std::string::npos);
+  assert(recommendationSrc.find("check the repeated first-chance path before broad EXE/system triage") != std::string::npos);
 
   std::cout << "  [PASS] CTD first-chance candidate explanation guards\n";
 }

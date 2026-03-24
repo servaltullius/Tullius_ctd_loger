@@ -469,6 +469,10 @@ void TestFirstChanceCtdCandidateSourceContracts()
                  "Summary family labels must include first_chance_context when it supports a CTD candidate.");
   AssertContains(recommendationCpp, "first-chance",
                  "Recommendations must explain repeated first-chance context for boosted CTD candidates.");
+  AssertContains(summaryCpp, "Repeated suspicious first-chance context also matched this candidate.",
+                 "EXE/system victim frame-backed summaries must mention repeated first-chance context when it reinforces the DLL candidate.");
+  AssertContains(recommendationCpp, "check the repeated first-chance path before broad EXE/system triage",
+                 "Related frame-backed CTD recommendations must prioritize the repeated first-chance path before broad EXE/system triage.");
 }
 
 void TestRecaptureEvaluationConsumptionSourceContracts()

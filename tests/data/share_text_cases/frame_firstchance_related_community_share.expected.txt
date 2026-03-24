@@ -1,0 +1,9 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+📌 Actionable candidate: EarlyWinner.dll
+🧭 Evidence agreement: Crash Logger frame + first-chance
+🧩 CrashLogger context: EarlyWinner.dll — Crash Logger frame first probable DLL frame — DLL guidance
+🔍 Type: CTD-frame-firstchance-related
+📍 Module+Offset: SkyrimSE.exe+0x00ABCDEF
+💡 Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate EarlyWinner.dll (Crash Logger frame + repeated first-chance context). Repeated suspicious first-chance context also matched this candidate. (Confidence: Medium)
+🛠️ Next action: DLL guidance: check EarlyWinner.dll and repeated first-chance path first
+— Tullius CTD Logger

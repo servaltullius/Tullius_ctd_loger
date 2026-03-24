@@ -52,6 +52,11 @@ internal sealed partial class MainWindowViewModel
             return T("Signals disagree", "신호 충돌");
         }
 
+        if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "first_chance_context"))
+        {
+            return T("Crash Logger frame + first-chance", "Crash Logger frame + first-chance");
+        }
+
         if (HasFamily(candidate, "crash_logger_frame") && candidate.FamilyCount <= 1)
         {
             return T("Crash Logger frame first", "Crash Logger frame 우선");

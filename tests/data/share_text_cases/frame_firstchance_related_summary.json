@@ -1,0 +1,86 @@
+{
+  "summary_sentence": "Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate EarlyWinner.dll (Crash Logger frame + repeated first-chance context). Repeated suspicious first-chance context also matched this candidate. (Confidence: Medium)",
+  "crash_bucket_key": "CTD-frame-firstchance-related",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "SkyrimSE.exe+0x00ABCDEF",
+    "inferred_mod_name": "Early Winner"
+  },
+  "crash_logger": {
+    "direct_fault_module": "",
+    "first_actionable_probable_module": "EarlyWinner.dll",
+    "probable_streak_module": "",
+    "probable_streak_length": 0,
+    "frame_signal_strength": 1,
+    "object_refs": []
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "EarlyWinner.dll",
+      "module_path": "",
+      "inferred_mod_name": "Early Winner",
+      "reason": "Crash Logger first actionable probable frame points to this DLL.",
+      "score": 10
+    }
+  ],
+  "first_chance_context": {
+    "has_context": true,
+    "recent_count": 4,
+    "unique_signature_count": 2,
+    "loading_window_count": 3,
+    "repeated_signature_count": 2,
+    "recent_non_system_modules": [
+      "EarlyWinner.dll",
+      "SupportMod.dll"
+    ]
+  },
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Actionable candidate] Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate EarlyWinner.dll (Crash Logger frame + repeated first-chance context). Use DLL guidance first and check the repeated first-chance path before broad EXE/system triage.",
+    "[First-chance] Repeated first-chance exceptions matched this candidate. Check that module path before broad EXE/system crash triage: Repeated suspicious first-chance context was observed (repeated=2, loading-window=3): EarlyWinner.dll, SupportMod.dll"
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "related",
+      "confidence": "Medium",
+      "display_name": "EarlyWinner.dll",
+      "primary_identifier": "EarlyWinner.dll",
+      "secondary_label": "Early Winner",
+      "plugin_name": "",
+      "mod_name": "Early Winner",
+      "module_filename": "EarlyWinner.dll",
+      "explanation": "Crash Logger frame and repeated first-chance context both point to this DLL.",
+      "family_count": 2,
+      "score": 9,
+      "cross_validated": false,
+      "has_conflict": false,
+      "supporting_families": [
+        "crash_logger_frame",
+        "first_chance_context"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

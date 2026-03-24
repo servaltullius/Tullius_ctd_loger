@@ -184,6 +184,10 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     vm,
     "DLL guidance conflict",
     "Expanded WinUI wording must keep DLL guidance conflict copy for disagreement cases.");
+  RequireContains(
+    vm,
+    "Crash Logger frame + first-chance",
+    "Expanded WinUI wording must expose frame plus first-chance agreement when both support the DLL candidate.");
 }
 
 static void TestMainWindowShareTextUsesCrashLoggerReadingPath()
