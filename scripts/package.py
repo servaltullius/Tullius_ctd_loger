@@ -14,6 +14,7 @@ from release_contract import (
     EXCLUDED_WINUI_TOP_LEVEL_DIRS,
     REQUIRED_WINUI_ASSETS,
     find_winui_build_root,
+    release_zip_name,
 )
 
 
@@ -98,7 +99,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--out",
         default="",
-        help="Output zip path (default: dist/SkyrimDiag_<timestamp>.zip)",
+        help="Output zip path (default: dist/Tullius_ctd_loger_v<version>.zip)",
     )
     parser.add_argument(
         "--no-pdb",
@@ -201,7 +202,7 @@ def main(argv: list[str]) -> int:
     out_zip = (
         Path(args.out)
         if args.out
-        else root / "dist" / f"Tullius_ctd_loger_v{_read_version(root)}.zip"
+        else root / "dist" / release_zip_name(f"v{_read_version(root)}")
     )
     if not out_zip.is_absolute():
         out_zip = (root / out_zip).resolve()

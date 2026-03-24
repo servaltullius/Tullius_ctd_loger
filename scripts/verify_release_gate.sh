@@ -3,13 +3,22 @@ set -euo pipefail
 
 REPO_ROOT="${1:-/home/kdw73/Tullius_ctd_loger}"
 WIN_ROOT="${2:-/mnt/c/Users/kdw73/Tullius_ctd_loger}"
-ZIP_PATH="${WIN_ROOT}/dist/Tullius_ctd_loger.zip"
+ZIP_PATH="${3:-}"
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
 
 if [[ -z "${PYTHON_BIN}" ]]; then
   echo "python interpreter not found (python3/python required)"
   exit 1
 fi
+
+RELEASE_ZIP_GLOB="$({
+  PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
+from release_contract import release_zip_glob
+
+print(release_zip_glob())
+PY
+})"
+RELEASE_ZIP_GLOB="${RELEASE_ZIP_GLOB%$'\r'}"
 
 readarray -t REQUIRED_WINUI_BUILD_OUTPUTS < <(
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
@@ -62,6 +71,47 @@ PY
 })"
 NESTED_WINUI_REGEX="${NESTED_WINUI_REGEX%$'\r'}"
 
+resolve_zip_path() {
+  local dist_dir="$1"
+  local zip_glob="$2"
+  local latest=""
+  local candidate
+
+  shopt -s nullglob
+  for candidate in "${dist_dir}"/${zip_glob}; do
+    if [[ -z "${latest}" || "${candidate}" -nt "${latest}" ]]; then
+      latest="${candidate}"
+    fi
+  done
+  shopt -u nullglob
+
+  if [[ -n "${latest}" ]]; then
+    printf '%s\n' "${latest}"
+    return 0
+  fi
+
+  local legacy="${dist_dir}/Tullius_ctd_loger.zip"
+  if [[ -f "${legacy}" ]]; then
+    printf '%s\n' "${legacy}"
+    return 0
+  fi
+
+  return 1
+}
+
+if [[ -z "${ZIP_PATH}" ]]; then
+  ZIP_PATH="$(resolve_zip_path "${WIN_ROOT}/dist" "${RELEASE_ZIP_GLOB}" || true)"
+fi
+
+if [[ -n "${ZIP_PATH}" ]] && command -v cygpath >/dev/null 2>&1 && [[ "${ZIP_PATH}" =~ ^[A-Za-z]:\\ ]]; then
+  ZIP_PATH="$(cygpath -u "${ZIP_PATH}")"
+fi
+
+if [[ -z "${ZIP_PATH}" || ! -f "${ZIP_PATH}" ]]; then
+  echo "missing release zip under: ${WIN_ROOT}/dist (expected ${RELEASE_ZIP_GLOB} or legacy Tullius_ctd_loger.zip)"
+  exit 1
+fi
+
 hash_of() {
   sha256sum "$1" | cut -d' ' -f1
 }
@@ -88,6 +138,7 @@ assert_synced() {
 
 echo "[gate] repo=${REPO_ROOT}"
 echo "[gate] win=${WIN_ROOT}"
+echo "[gate] zip=${ZIP_PATH}"
 
 echo "[gate] 1/5 script sync hashes"
 if [[ "${REPO_ROOT}" == "${WIN_ROOT}" ]]; then

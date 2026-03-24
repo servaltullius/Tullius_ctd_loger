@@ -39,6 +39,9 @@ def main() -> int:
     development_md = (REPO_ROOT / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
     prerelease_template_path = REPO_ROOT / "docs" / "release" / "PRERELEASE_NOTES_TEMPLATE.md"
     package_py = REPO_ROOT / "scripts" / "package.py"
+    release_workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"
+    )
     gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
@@ -53,9 +56,27 @@ def main() -> int:
     build_winui_from_wsl = (
         REPO_ROOT / "scripts" / "build-winui-from-wsl.sh"
     ).read_text(encoding="utf-8")
+    release_zip_name = getattr(_RELEASE_CONTRACT, "release_zip_name", None)
+    release_zip_glob = getattr(_RELEASE_CONTRACT, "release_zip_glob", None)
+
+    assert callable(release_zip_name), (
+        "release contract must expose a helper for versioned release zip names"
+    )
+    assert callable(release_zip_glob), (
+        "release contract must expose a helper for release zip globbing"
+    )
+    assert release_zip_name("v0.2.44") == "Tullius_ctd_loger_v0.2.44.zip", (
+        "release zip helper must preserve the Git tag in the asset filename"
+    )
+    assert release_zip_glob() == "Tullius_ctd_loger_v*.zip", (
+        "release zip glob helper must match versioned release assets"
+    )
 
     assert "scripts/release_contract.py" in gate_script, (
         "release gate must sync release_contract.py to catch mirror drift"
+    )
+    assert "release_zip_glob" in gate_script, (
+        "release gate must discover versioned release zip names instead of assuming a fixed filename"
     )
     assert "scripts/verify_release_gate.sh" in gate_script, (
         "release gate must sync verify_release_gate.sh to catch mirror drift"
@@ -83,6 +104,12 @@ def main() -> int:
     )
     assert "workflow_dispatch" in smoke_workflow, (
         "manual WinUI smoke workflow must be runnable on demand"
+    )
+    assert "release_zip_name" in release_workflow, (
+        "release workflow must resolve the zip asset name from the release contract helper"
+    )
+    assert "dist/Tullius_ctd_loger.zip" not in release_workflow, (
+        "release workflow must not publish an unversioned zip asset"
     )
     assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in smoke_workflow, (
         "manual smoke workflow must target the published WinUI DLL"
@@ -155,6 +182,9 @@ def main() -> int:
     )
     assert "GitHub Actions is optional/reference only" in development_md, (
         "DEVELOPMENT.md must mark GitHub Actions as optional/reference"
+    )
+    assert "dist/Tullius_ctd_loger_v<version>.zip" in development_md, (
+        "DEVELOPMENT.md must document versioned release zip names"
     )
     assert ".github/workflows/winui-headless-smoke.yml" in development_md, (
         "DEVELOPMENT.md must document the manual WinUI smoke workflow path"

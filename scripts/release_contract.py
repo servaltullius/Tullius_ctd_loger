@@ -30,6 +30,17 @@ REQUIRED_ZIP_ENTRIES = (
 EXCLUDED_WINUI_TOP_LEVEL_DIRS = frozenset({"publish", "win-x64", "x64"})
 
 
+def release_zip_name(tag_or_version: str) -> str:
+    normalized = tag_or_version.strip()
+    if not normalized:
+        raise ValueError("tag_or_version must not be empty")
+    return f"Tullius_ctd_loger_{normalized}.zip"
+
+
+def release_zip_glob() -> str:
+    return "Tullius_ctd_loger_v*.zip"
+
+
 def nested_winui_path_regex() -> str:
     parts = "|".join(sorted(EXCLUDED_WINUI_TOP_LEVEL_DIRS))
     return rf"^SKSE/Plugins/SkyrimDiagWinUI/({parts})/"

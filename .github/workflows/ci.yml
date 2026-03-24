@@ -68,7 +68,7 @@ jobs:
       - name: Package release zip (no PDB)
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
+          python scripts/package.py --build-dir build-win --no-pdb
 
       - name: Run release hard gate
         shell: bash
@@ -80,5 +80,5 @@ jobs:
         with:
           name: tullius-ctd-logger-windows-zip
           path: |
-            dist/Tullius_ctd_loger.zip
+            dist/Tullius_ctd_loger_v*.zip
           if-no-files-found: error

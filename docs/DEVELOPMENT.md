@@ -140,7 +140,7 @@ Suggested checklist:
 4) Build + package zip on Windows (`--no-pdb`)
 5) Copy the template to a versioned draft and fill it in
 6) Tag + push, then create or edit GitHub Release with `--notes-file`
-7) Upload `dist/Tullius_ctd_loger.zip`
+7) Upload `dist/Tullius_ctd_loger_v<version>.zip`
 
 Suggested release-notes flow:
 ```bash
@@ -183,7 +183,7 @@ import sys
 sys.path.insert(0, "scripts")
 from release_contract import REQUIRED_ZIP_ENTRIES
 
-zip_path = "dist/Tullius_ctd_loger.zip"
+zip_path = "dist/Tullius_ctd_loger_v<version>.zip"
 entries = set(subprocess.check_output(["unzip", "-Z1", zip_path], text=True).splitlines())
 missing = [entry for entry in REQUIRED_ZIP_ENTRIES if entry not in entries]
 if missing:
@@ -192,7 +192,7 @@ print("zip required entries: OK")
 PY
 
 # 4) zip size guard (guide: 8MB ~ 25MB)
-ls -lh dist/Tullius_ctd_loger.zip
+ls -lh dist/Tullius_ctd_loger_v<version>.zip
 
 # 5) nested-path guard (must be empty; regex from scripts/release_contract.py)
 python3 - <<'PY'
@@ -203,7 +203,7 @@ import sys
 sys.path.insert(0, "scripts")
 from release_contract import nested_winui_path_regex
 
-zip_path = "dist/Tullius_ctd_loger.zip"
+zip_path = "dist/Tullius_ctd_loger_v<version>.zip"
 pattern = re.compile(nested_winui_path_regex())
 bad = [line for line in subprocess.check_output(["unzip", "-Z1", zip_path], text=True).splitlines() if pattern.match(line)]
 if bad:

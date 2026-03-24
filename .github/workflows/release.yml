@@ -65,10 +65,20 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
+      - name: Resolve release zip path
+        id: release_zip
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $zipName = (python -c "import sys; sys.path.insert(0, 'scripts'); from release_contract import release_zip_name; print(release_zip_name(sys.argv[1]))" $tag).Trim()
+          $zipPath = Join-Path "dist" $zipName
+          "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Package zip
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
+          python scripts/package.py --build-dir build-win --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
 
       - name: Resolve release notes
         shell: pwsh
@@ -112,5 +122,5 @@ jobs:
           if ($tag -match "-rc") {
             $args += "--prerelease"
           }
-          $args += "dist/Tullius_ctd_loger.zip"
+          $args += "${{ steps.release_zip.outputs.zip_path }}"
           gh @args
