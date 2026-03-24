@@ -589,6 +589,34 @@ void TestCrashLoggerExpandedFixtureSummaryPriorityGuards()
   std::cout << "  [PASS] Expanded Crash Logger fixture summary priority guards\n";
 }
 
+void TestCrashLoggerExpandedFixtureReportTextGuards()
+{
+  const std::string reportSrc = ReadProjectText("dump_tool/src/OutputWriter.Report.cpp");
+
+  AssertContains(
+    reportSrc,
+    "CrashLoggerDirectFaultModule:",
+    "Report text must keep printing direct DLL fault modules for frame-first CTD cases.");
+  AssertContains(
+    reportSrc,
+    "CrashLoggerFirstActionableProbableModule:",
+    "Report text must keep printing first actionable probable DLL modules for EXE/system victim cases.");
+  AssertContains(
+    reportSrc,
+    "CrashLoggerProbableStreakModule:",
+    "Report text must keep printing probable frame streak modules for repeated DLL clues.");
+  AssertContains(
+    reportSrc,
+    "CrashLoggerFrameSignalStrength:",
+    "Report text must keep printing Crash Logger frame signal strength.");
+  AssertContains(
+    reportSrc,
+    "CrashLoggerCppExceptionModule:",
+    "Report text must keep printing Crash Logger C++ exception module details.");
+
+  std::cout << "  [PASS] Expanded Crash Logger fixture report text guards\n";
+}
+
 // ── Source guard: WriteOutputs writes both JSON and text files ──
 
 void TestOutputWriterWritesBothFiles()
@@ -619,6 +647,7 @@ int main()
   TestCrashLoggerFrameFirstSummaryPrioritySourceGuards();
   TestCrashLoggerFrameFixtureSummaryPriorityGuards();
   TestCrashLoggerExpandedFixtureSummaryPriorityGuards();
+  TestCrashLoggerExpandedFixtureReportTextGuards();
   TestOutputWriterWritesBothFiles();
   std::cout << "All output snapshot tests passed.\n";
   return 0;

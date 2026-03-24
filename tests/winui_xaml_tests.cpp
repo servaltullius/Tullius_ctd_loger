@@ -149,6 +149,43 @@ static void TestMainWindowCrashLoggerFrameFirstWordingAlignment()
   RequireContains(vm, "DLL guidance", "Frame-backed DLL guidance should be reflected in the WinUI reading path copy.");
 }
 
+static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  RequireContains(
+    summary,
+    "ReadInt32(crashLoggerNode, \"frame_signal_strength\")",
+    "WinUI summary loader must keep consuming Crash Logger frame signal strength.");
+  RequireContains(
+    summary,
+    "CrashLoggerDirectFaultModule = ReadString(crashLoggerNode, \"direct_fault_module\")",
+    "WinUI summary loader must keep consuming direct DLL fault modules.");
+  RequireContains(
+    summary,
+    "CrashLoggerFirstActionableProbableModule = ReadString(crashLoggerNode, \"first_actionable_probable_module\")",
+    "WinUI summary loader must keep consuming first actionable probable DLL modules.");
+  RequireContains(
+    summary,
+    "CrashLoggerProbableStreakModule = ReadString(crashLoggerNode, \"probable_streak_module\")",
+    "WinUI summary loader must keep consuming probable streak DLL modules.");
+
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireContains(
+    vm,
+    "Crash Logger frame first probable DLL frame",
+    "Expanded WinUI wording must keep first probable DLL frame guidance.");
+  RequireContains(
+    vm,
+    "Crash Logger frame first probable frame streak x",
+    "Expanded WinUI wording must keep probable streak guidance.");
+  RequireContains(
+    vm,
+    "DLL guidance conflict",
+    "Expanded WinUI wording must keep DLL guidance conflict copy for disagreement cases.");
+}
+
 static void TestAnalyzePanelHasDumpDiscoveryFlow()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -287,6 +324,7 @@ int main()
   TestMainWindowHasTriageReviewEditor();
   TestMainWindowHasCrashLoggerFirstReadingPath();
   TestMainWindowCrashLoggerFrameFirstWordingAlignment();
+  TestMainWindowCrashLoggerExpandedFixtureWordingAlignment();
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
   TestWinUiConsumesRecaptureContext();
