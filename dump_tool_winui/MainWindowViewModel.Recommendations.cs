@@ -131,6 +131,7 @@ internal sealed partial class MainWindowViewModel
             var hasFrameFamily = HasFamily(primaryCandidate, "crash_logger_frame");
             var hasFirstChanceFamily = HasFamily(primaryCandidate, "first_chance_context");
             var hasHistoryFamily = HasFamily(primaryCandidate, "history_repeat");
+            var hasResourceFamily = HasFamily(primaryCandidate, "resource_provider");
             return primaryCandidate.StatusId switch
             {
                 "cross_validated" when hasFrameFamily => T(
@@ -143,6 +144,9 @@ internal sealed partial class MainWindowViewModel
                 "related" when hasFrameFamily && hasHistoryFamily => T(
                     $"DLL guidance: check {candidateName} and repeated bucket history first",
                     $"DLL guidance: {candidateName}와 반복 버킷 이력을 먼저 확인"),
+                "related" when hasFrameFamily && hasResourceFamily => T(
+                    $"DLL guidance: check {candidateName} and nearby resource providers first",
+                    $"DLL guidance: {candidateName}와 인접 리소스 provider를 먼저 확인"),
                 "related" when hasFrameFamily => T(
                     $"DLL guidance: check {candidateName} before generic EXE/system triage",
                     $"DLL guidance: 일반 EXE/system 점검보다 먼저 {candidateName} 확인"),

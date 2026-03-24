@@ -192,6 +192,10 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     vm,
     "Crash Logger frame + history",
     "Expanded WinUI wording must expose frame plus history agreement when repeated bucket evidence supports the DLL candidate.");
+  RequireContains(
+    vm,
+    "Crash Logger frame + resource",
+    "Expanded WinUI wording must expose frame plus resource agreement when nearby resource providers support the DLL candidate.");
 }
 
 static void TestMainWindowShareTextUsesCrashLoggerReadingPath()

@@ -343,6 +343,21 @@ void TestFrameAndHistoryBecomeRelated()
   assert(candidates[0].supporting_families.size() == 2);
 }
 
+void TestFrameAndResourceBecomeRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"resourcedll", L"ResourceDll.dll", 6, L"", L"Resource DLL Mod", L"ResourceDll.dll"),
+    MakeSignal("resource_provider", L"resourcedll", L"Resource DLL Mod", 4, L"", L"Resource DLL Mod", L"ResourceDll.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(!candidates[0].has_conflict);
+  assert(candidates[0].supporting_families.size() == 2);
+}
+
 void TestFirstChanceFamilySourceContract()
 {
   const auto root = ProjectRoot();
@@ -373,6 +388,7 @@ int main()
   TestWeakFrameOnlyStaysReferenceClue();
   TestFrameAndFirstChanceBecomeRelated();
   TestFrameAndHistoryBecomeRelated();
+  TestFrameAndResourceBecomeRelated();
   TestFirstChanceFamilySourceContract();
   return 0;
 }

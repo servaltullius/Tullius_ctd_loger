@@ -477,6 +477,10 @@ void TestFirstChanceCtdCandidateSourceContracts()
                  "EXE/system victim frame-backed summaries must mention repeated crash bucket history when it reinforces the DLL candidate.");
   AssertContains(recommendationCpp, "compare repeated same-bucket crashes before broad EXE/system triage",
                  "Related frame-backed CTD recommendations must prioritize repeated same-bucket crash history before broad EXE/system triage.");
+  AssertContains(summaryCpp, "Nearby resource provider activity also matched this candidate.",
+                 "EXE/system victim frame-backed summaries must mention nearby resource provider activity when it reinforces the DLL candidate.");
+  AssertContains(recommendationCpp, "compare nearby resource providers before broad EXE/system triage",
+                 "Related frame-backed CTD recommendations must prioritize nearby resource providers before broad EXE/system triage.");
 }
 
 void TestRecaptureEvaluationConsumptionSourceContracts()

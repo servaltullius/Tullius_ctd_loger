@@ -448,6 +448,8 @@ void TestFirstChanceCandidateExplanationSourceGuards()
   assert(recommendationSrc.find("check the repeated first-chance path before broad EXE/system triage") != std::string::npos);
   assert(summarySrc.find("Repeated crash bucket history also matched this candidate.") != std::string::npos);
   assert(recommendationSrc.find("compare repeated same-bucket crashes before broad EXE/system triage") != std::string::npos);
+  assert(summarySrc.find("Nearby resource provider activity also matched this candidate.") != std::string::npos);
+  assert(recommendationSrc.find("compare nearby resource providers before broad EXE/system triage") != std::string::npos);
 
   std::cout << "  [PASS] CTD first-chance candidate explanation guards\n";
 }

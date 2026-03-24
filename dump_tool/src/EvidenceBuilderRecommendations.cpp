@@ -166,6 +166,7 @@ void AddActionableCandidateRecommendations(
   const bool hasFrameFamily = CandidateHasFamily(*topCandidate, "crash_logger_frame");
   const bool hasFirstChanceFamily = CandidateHasFamily(*topCandidate, "first_chance_context");
   const bool hasHistoryFamily = CandidateHasFamily(*topCandidate, "history_repeat");
+  const bool hasResourceFamily = CandidateHasFamily(*topCandidate, "resource_provider");
   const bool hasScorableFirstChance = hasFirstChanceFamily && HasScorableFirstChanceContext(r.first_chance_summary);
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
@@ -208,6 +209,12 @@ void AddActionableCandidateRecommendations(
                     L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare repeated same-bucket crashes before broad EXE/system triage.")
                 : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
                     L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance 와 반복 버킷 이력을 함께 확인하세요."))
+          : hasResourceFamily
+            ? (en
+                ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
+                    L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare nearby resource providers before broad EXE/system triage.")
+                : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
+                    L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance 와 인접 리소스 provider를 함께 확인하세요."))
           : (en
               ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
                   L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")

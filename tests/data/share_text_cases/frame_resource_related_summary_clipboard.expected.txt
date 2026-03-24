@@ -1,0 +1,10 @@
+SkyrimDiag report
+Dump: /tmp/frame_resource_related_summary.dmp
+Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate ResourceDll.dll (Crash Logger frame + near resource provider). Nearby resource provider activity also matched this candidate. (Confidence: Medium)
+Crash bucket key: CTD-frame-resource-related
+Module+Offset: SkyrimSE.exe+0x00ABCDEF
+Inferred mod: Resource DLL Mod
+Actionable candidate: ResourceDll.dll
+Evidence agreement: Crash Logger frame + resource
+CrashLogger context: ResourceDll.dll — Crash Logger frame first probable DLL frame — DLL guidance
+Next action: DLL guidance: check ResourceDll.dll and nearby resource providers first
