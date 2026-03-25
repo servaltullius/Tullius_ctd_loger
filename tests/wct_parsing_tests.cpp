@@ -1,10 +1,15 @@
 #include "WctTypes.h"
 
 #include <cassert>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
 
 using skydiag::dump_tool::internal::ExtractWctCandidateThreadIds;
 using skydiag::dump_tool::internal::TryParseWctCaptureDecision;
+using skydiag::dump_tool::internal::TryParseWctFreezeSummary;
 
 // ── ExtractWctCandidateThreadIds ────────────────────────
 
@@ -131,6 +136,76 @@ static void Test_Capture_DefaultValues()
   assert(r->isLoading == false);
 }
 
+static void Test_FreezeSummary_ConsensusFields()
+{
+  const std::string json = R"({
+    "capture_passes": 2,
+    "cycle_consensus": true,
+    "repeated_cycle_tids": [200, 300],
+    "consistent_loading_signal": true,
+    "longest_wait_tid_consensus": true,
+    "threads": [
+      {"tid": 200, "isCycle": true},
+      {"tid": 300, "isCycle": true},
+      {"tid": 400, "isCycle": false, "nodes": [{"thread":{"waitTime":900}}]}
+    ],
+    "capture": {
+      "kind": "hang",
+      "secondsSinceHeartbeat": 15.5,
+      "thresholdSec": 10,
+      "isLoading": true
+    }
+  })";
+
+  const auto r = TryParseWctFreezeSummary(json);
+  assert(r.has_value());
+  assert(r->has == true);
+  assert(r->capture_passes == 2);
+  assert(r->cycle_consensus == true);
+  assert(r->repeated_cycle_tids.size() == 2);
+  assert(r->repeated_cycle_tids[0] == 200);
+  assert(r->repeated_cycle_tids[1] == 300);
+  assert(r->consistent_loading_signal == true);
+  assert(r->longest_wait_tid_consensus == true);
+}
+
+static void Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto helperSource = repoRoot / "helper" / "src" / "WctCapture.cpp";
+  std::ifstream in(helperSource);
+  assert(in.is_open());
+
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  const std::string source = buffer.str();
+
+  if (source.find("out[\"passes\"]") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("\"threads\", secondPass.threads") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("\"capture_usable\"") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("ReadLoadingSignal(captureStateFlags)") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("usablePassCount") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("primaryPassIndex") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("ContainsLoaderKeyword") != std::string::npos) {
+    std::abort();
+  }
+  if (source.find("find(\"loader\")") != std::string::npos) {
+    std::abort();
+  }
+}
+
 int main()
 {
   Test_EmptyInput_ReturnsEmpty();
@@ -145,6 +220,8 @@ int main()
   Test_Capture_NoCaptureKey();
   Test_Capture_ValidCapture();
   Test_Capture_DefaultValues();
+  Test_FreezeSummary_ConsensusFields();
+  Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic();
 
   return 0;
 }

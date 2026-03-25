@@ -20,6 +20,23 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
 
     WctFreezeSummary summary{};
     summary.has = true;
+    summary.capture_passes = j.value("capture_passes", 0u);
+    summary.cycle_consensus = j.value("cycle_consensus", false);
+    summary.consistent_loading_signal = j.value("consistent_loading_signal", false);
+    summary.longest_wait_tid_consensus = j.value("longest_wait_tid_consensus", false);
+
+    const auto repeatedCycleIt = j.find("repeated_cycle_tids");
+    if (repeatedCycleIt != j.end() && repeatedCycleIt->is_array()) {
+      for (const auto& tidValue : *repeatedCycleIt) {
+        if (!tidValue.is_number_unsigned()) {
+          continue;
+        }
+        const auto tid = tidValue.get<std::uint32_t>();
+        if (tid != 0u) {
+          summary.repeated_cycle_tids.push_back(tid);
+        }
+      }
+    }
 
     const auto threadsIt = j.find("threads");
     if (threadsIt != j.end() && threadsIt->is_array()) {

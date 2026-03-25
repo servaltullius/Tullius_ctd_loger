@@ -7,11 +7,18 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagShared.h"
+
+#include <algorithm>
+#include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace skydiag::helper {
 namespace {
+
+constexpr DWORD kConsensusCaptureDelayMs = 15;
 
 std::vector<DWORD> EnumerateThreads(DWORD pid)
 {
@@ -73,6 +80,95 @@ std::string WideToUtf8Bounded(const wchar_t (&buf)[N])
   return out;
 }
 
+struct WctPassResult
+{
+  nlohmann::json threads = nlohmann::json::array();
+  std::unordered_set<std::uint32_t> cycleTids;
+  bool hasUsableData = false;
+  bool hasLoadingSignal = false;
+  std::uint32_t longestWaitTid = 0;
+  std::uint64_t longestWaitMs = 0;
+};
+
+std::vector<std::uint32_t> SortedCycleThreadIds(const std::unordered_set<std::uint32_t>& tids)
+{
+  std::vector<std::uint32_t> out(tids.begin(), tids.end());
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+bool ReadLoadingSignal(const volatile std::uint32_t* stateFlags)
+{
+  if (!stateFlags) {
+    return false;
+  }
+  return ((*stateFlags & skydiag::kState_Loading) != 0u);
+}
+
+void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_t* captureStateFlags, WctPassResult& out)
+{
+  out = WctPassResult{};
+  out.hasLoadingSignal = ReadLoadingSignal(captureStateFlags);
+
+  const auto tids = EnumerateThreads(pid);
+  for (const auto tid : tids) {
+    DWORD nodeCount = WCT_MAX_NODE_COUNT;
+    WAITCHAIN_NODE_INFO nodes[WCT_MAX_NODE_COUNT]{};
+    BOOL isCycle = FALSE;
+
+    const DWORD flags = WCTP_GETINFO_ALL_FLAGS;
+    const BOOL ok = GetThreadWaitChain(session, /*Context=*/0, flags, tid, &nodeCount, nodes, &isCycle);
+    const DWORD lastErr = GetLastError();
+
+    nlohmann::json thread = nlohmann::json::object();
+    thread["tid"] = tid;
+    thread["isCycle"] = isCycle ? true : false;
+    thread["nodes"] = nlohmann::json::array();
+
+    if (!ok && lastErr != ERROR_MORE_DATA) {
+      thread["error"] = lastErr;
+      out.threads.push_back(std::move(thread));
+      continue;
+    }
+
+    out.hasUsableData = true;
+
+    if (isCycle) {
+      out.cycleTids.insert(tid);
+    }
+
+    std::uint64_t threadLongestWait = 0;
+    for (DWORD i = 0; i < nodeCount; ++i) {
+      const auto& n = nodes[i];
+      nlohmann::json node = nlohmann::json::object();
+      node["objectType"] = static_cast<std::uint32_t>(n.ObjectType);
+      node["objectStatus"] = static_cast<std::uint32_t>(n.ObjectStatus);
+      if (n.ObjectType == WctThreadType) {
+        const std::uint64_t waitTime = n.ThreadObject.WaitTime;
+        threadLongestWait = std::max(threadLongestWait, waitTime);
+        node["thread"] = {
+          { "processId", n.ThreadObject.ProcessId },
+          { "threadId", n.ThreadObject.ThreadId },
+          { "waitTime", waitTime },
+          { "contextSwitches", n.ThreadObject.ContextSwitches },
+        };
+      } else {
+        // For non-thread nodes, LockObject.ObjectName is valid. For thread nodes it's a union and reading it is garbage.
+        node["objectName"] = WideToUtf8Bounded(n.LockObject.ObjectName);
+      }
+
+      thread["nodes"].push_back(std::move(node));
+    }
+
+    if (threadLongestWait > out.longestWaitMs) {
+      out.longestWaitMs = threadLongestWait;
+      out.longestWaitTid = tid;
+    }
+
+    out.threads.push_back(std::move(thread));
+  }
+}
+
 }  // namespace
 
 struct DebugPrivilegeResult
@@ -107,11 +203,21 @@ DebugPrivilegeResult EnableDebugPrivilege()
   return DebugPrivilegeResult{ ok && le == ERROR_SUCCESS, le };
 }
 
-bool CaptureWct(std::uint32_t pid, nlohmann::json& out, std::wstring* err)
+bool CaptureWct(
+  std::uint32_t pid,
+  const volatile std::uint32_t* captureStateFlags,
+  nlohmann::json& out,
+  std::wstring* err)
 {
   out = nlohmann::json::object();
   out["pid"] = pid;
   out["threads"] = nlohmann::json::array();
+  out["passes"] = nlohmann::json::array();
+  out["capture_passes"] = 0;
+  out["cycle_consensus"] = false;
+  out["repeated_cycle_tids"] = nlohmann::json::array();
+  out["consistent_loading_signal"] = false;
+  out["longest_wait_tid_consensus"] = false;
 
   {
     const auto dbg = EnableDebugPrivilege();  // best-effort
@@ -142,49 +248,70 @@ bool CaptureWct(std::uint32_t pid, nlohmann::json& out, std::wstring* err)
   }
   out["comCallbackRegistered"] = comCallbackRegistered;
 
-  const auto tids = EnumerateThreads(pid);
-  for (const auto tid : tids) {
-    DWORD nodeCount = WCT_MAX_NODE_COUNT;
-    WAITCHAIN_NODE_INFO nodes[WCT_MAX_NODE_COUNT]{};
-    BOOL isCycle = FALSE;
+  std::vector<WctPassResult> passes;
+  passes.reserve(2);
 
-    const DWORD flags = WCTP_GETINFO_ALL_FLAGS;
-    const BOOL ok = GetThreadWaitChain(session, /*Context=*/0, flags, tid, &nodeCount, nodes, &isCycle);
+  WctPassResult firstPass{};
+  CaptureWctPass(session, pid, captureStateFlags, firstPass);
+  out["passes"].push_back({
+    { "pass_index", 0u },
+    { "capture_usable", firstPass.hasUsableData },
+    { "threads", firstPass.threads },
+    { "cycle_thread_ids", SortedCycleThreadIds(firstPass.cycleTids) },
+    { "has_loading_signal", firstPass.hasLoadingSignal },
+    { "longest_wait_tid", firstPass.longestWaitTid },
+    { "longest_wait_ms", firstPass.longestWaitMs },
+  });
+  passes.push_back(std::move(firstPass));
 
-    const DWORD lastErr = GetLastError();
+  Sleep(kConsensusCaptureDelayMs);
 
-    nlohmann::json thread = nlohmann::json::object();
-    thread["tid"] = tid;
-    thread["isCycle"] = isCycle ? true : false;
-    thread["nodes"] = nlohmann::json::array();
+  WctPassResult secondPass{};
+  CaptureWctPass(session, pid, captureStateFlags, secondPass);
+  out["passes"].push_back({
+    { "pass_index", 1u },
+    { "capture_usable", secondPass.hasUsableData },
+    { "threads", secondPass.threads },
+    { "cycle_thread_ids", SortedCycleThreadIds(secondPass.cycleTids) },
+    { "has_loading_signal", secondPass.hasLoadingSignal },
+    { "longest_wait_tid", secondPass.longestWaitTid },
+    { "longest_wait_ms", secondPass.longestWaitMs },
+  });
+  passes.push_back(std::move(secondPass));
 
-    if (!ok && lastErr != ERROR_MORE_DATA) {
-      thread["error"] = lastErr;
-      out["threads"].push_back(std::move(thread));
-      continue;
+  std::uint32_t usablePassCount = 0;
+  for (const auto& pass : passes) {
+    if (pass.hasUsableData) {
+      usablePassCount++;
     }
+  }
+  out["capture_passes"] = usablePassCount;
 
-    for (DWORD i = 0; i < nodeCount; ++i) {
-      const auto& n = nodes[i];
-      nlohmann::json node = nlohmann::json::object();
-      node["objectType"] = static_cast<std::uint32_t>(n.ObjectType);
-      node["objectStatus"] = static_cast<std::uint32_t>(n.ObjectStatus);
-      if (n.ObjectType == WctThreadType) {
-        node["thread"] = {
-          { "processId", n.ThreadObject.ProcessId },
-          { "threadId", n.ThreadObject.ThreadId },
-          { "waitTime", n.ThreadObject.WaitTime },
-          { "contextSwitches", n.ThreadObject.ContextSwitches },
-        };
-      } else {
-        // For non-thread nodes, LockObject.ObjectName is valid. For thread nodes it's a union and reading it is garbage.
-        node["objectName"] = WideToUtf8Bounded(n.LockObject.ObjectName);
+  std::size_t primaryPassIndex = 0;
+  if (!passes.empty() && !passes[0].hasUsableData) {
+    for (std::size_t i = 1; i < passes.size(); ++i) {
+      if (passes[i].hasUsableData) {
+        primaryPassIndex = i;
+        break;
       }
-
-      thread["nodes"].push_back(std::move(node));
     }
+  }
+  out["threads"] = passes[primaryPassIndex].threads;
 
-    out["threads"].push_back(std::move(thread));
+  if (passes.size() >= 2 && passes[0].hasUsableData && passes[1].hasUsableData) {
+    std::vector<std::uint32_t> repeatedCycleTids;
+    for (const auto tid : passes[0].cycleTids) {
+      if (passes[1].cycleTids.find(tid) != passes[1].cycleTids.end()) {
+        repeatedCycleTids.push_back(tid);
+      }
+    }
+    std::sort(repeatedCycleTids.begin(), repeatedCycleTids.end());
+    out["repeated_cycle_tids"] = repeatedCycleTids;
+    out["cycle_consensus"] = !repeatedCycleTids.empty();
+    out["consistent_loading_signal"] = passes[0].hasLoadingSignal && passes[1].hasLoadingSignal;
+    out["longest_wait_tid_consensus"] =
+      passes[0].longestWaitTid != 0 &&
+      passes[0].longestWaitTid == passes[1].longestWaitTid;
   }
 
   CloseThreadWaitChainSession(session);

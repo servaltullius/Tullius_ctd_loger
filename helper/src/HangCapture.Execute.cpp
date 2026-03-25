@@ -69,7 +69,7 @@ HangTickResult ExecuteConfirmedHangCapture(
 
   nlohmann::json wctJson;
   std::wstring wctErr;
-  if (!skydiag::helper::CaptureWct(proc.pid, wctJson, &wctErr)) {
+  if (!skydiag::helper::CaptureWct(proc.pid, &proc.shm->header.state_flags, wctJson, &wctErr)) {
     std::wcerr << L"[SkyrimDiagHelper] WCT capture failed: " << wctErr << L"\n";
     wctJson = nlohmann::json::object();
     wctJson["pid"] = proc.pid;

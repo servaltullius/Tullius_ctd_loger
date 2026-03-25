@@ -20,11 +20,16 @@ struct WctCaptureDecision
 struct WctFreezeSummary
 {
   bool has = false;
+  std::uint32_t capture_passes = 0;
   int threads = 0;
   int cycles = 0;
+  bool cycle_consensus = false;
   std::vector<std::uint32_t> cycle_thread_ids;
+  std::vector<std::uint32_t> repeated_cycle_tids;
+  bool consistent_loading_signal = false;
   std::uint32_t longest_wait_tid = 0;
   std::uint64_t longest_wait_ms = 0;
+  bool longest_wait_tid_consensus = false;
   bool has_capture = false;
   std::string capture_kind;
   double secondsSinceHeartbeat = 0.0;

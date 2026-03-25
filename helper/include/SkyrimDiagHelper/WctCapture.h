@@ -7,6 +7,10 @@
 
 namespace skydiag::helper {
 
-bool CaptureWct(std::uint32_t pid, nlohmann::json& out, std::wstring* err);
+bool CaptureWct(
+  std::uint32_t pid,
+  const volatile std::uint32_t* captureStateFlags,
+  nlohmann::json& out,
+  std::wstring* err);
 
 }  // namespace skydiag::helper
