@@ -2,6 +2,24 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.45 (2026-03-25)
+
+### 추가
+- **CTD: Crash Logger frame-first 해석 경로 강화** — direct fault DLL, 첫 actionable probable frame, same-DLL streak, C++ exception module을 CTD 후보 승격의 핵심 신호로 반영. EXE/system victim 크래시에서도 Crash Logger가 강하게 가리키는 DLL 후보를 summary/report/WinUI/share text에서 먼저 보여주도록 개선.
+- **CTD: Tullius 단독 callstack 해석 경로 보강** — Crash Logger가 없는 상태에서도 강한 stackwalk-only 후보를 별도 경로로 드러내고, 약한 stack-scan 단서와 구분해 표시하도록 정리.
+- **Capture quality: richer crash dump profile 도입** — crash / crash recapture profile에 `process_thread_data`, `full_memory_info`, `module_headers`, `indirect_memory`, `ignore_inaccessible_memory`를 배선하고, callback-shaped dump bootstrap을 추가해 더 나은 CTD 해석 입력을 확보.
+- **Freeze/PSS: snapshot + WCT 합의 품질 노출** — freeze snapshot flags를 `VA_SPACE` / `SECTION_INFORMATION`까지 확대하고, WCT 2회 캡처 기반 `cycle_consensus`, `consistent_loading_signal`, `capture_passes` 메타데이터를 summary/report에 기록.
+
+### 수정
+- **CTD: ambiguous candidate 노이즈 완화** — `frame`이 이미 합의된 후보를 `object-ref/history` 보조 신호가 불필요하게 `conflicting`으로 끌어내리던 경로를 줄이고, `frame + first-chance`, `frame + history`, `frame + near resource provider` 같은 다중 신호를 더 자연스럽게 보여주도록 조정.
+- **공유/리포트: 해석 경로를 직접 노출** — WinUI 공유 텍스트와 텍스트 리포트에 `CrashLogger reading path`, `Next action`, `capture quality`, `freeze support_quality`를 직접 표시해 사용자가 왜 그런 결론이 나왔는지 바로 볼 수 있도록 정리.
+- **Freeze: legacy WCT 샘플 보수 해석 유지** — 새 consensus 메타데이터가 없는 과거 hang dump는 `freeze_ambiguous` / `live_process` 수준으로 안전하게 내려가도록 재검증.
+
+### 테스트
+- Crash Logger 최소 excerpt fixture 6종과 share text fixture 5종을 추가해 `parser -> candidate -> summary -> WinUI/share text` 회귀를 고정.
+- capture profile / dump writer / incident manifest / freeze consensus 가드 테스트를 확장.
+- Linux 전체 테스트 `57/57` 통과, Windows native build / WinUI build / packaging / release gate 확인.
+
 ## v0.2.44 (2026-03-24)
 
 ### 수정
