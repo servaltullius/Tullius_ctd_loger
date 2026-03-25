@@ -1,8 +1,8 @@
 # Changelog
 
-> **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
+> **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다. `v0.2.45`는 태그 직후 Linux release CI 호환성 수정이 필요해 정식 GitHub Release 없이 `v0.2.46`으로 대체됩니다.
 
-## v0.2.45 (2026-03-25)
+## v0.2.46 (2026-03-25)
 
 ### 추가
 - **CTD: Crash Logger frame-first 해석 경로 강화** — direct fault DLL, 첫 actionable probable frame, same-DLL streak, C++ exception module을 CTD 후보 승격의 핵심 신호로 반영. EXE/system victim 크래시에서도 Crash Logger가 강하게 가리키는 DLL 후보를 summary/report/WinUI/share text에서 먼저 보여주도록 개선.
@@ -18,6 +18,7 @@
 ### 테스트
 - Crash Logger 최소 excerpt fixture 6종과 share text fixture 5종을 추가해 `parser -> candidate -> summary -> WinUI/share text` 회귀를 고정.
 - capture profile / dump writer / incident manifest / freeze consensus 가드 테스트를 확장.
+- Linux release CI에 `.NET 8 SDK` setup을 추가하고, share text fixture runner가 non-WSL Linux 경로를 직접 사용하도록 조정.
 - Linux 전체 테스트 `57/57` 통과, Windows native build / WinUI build / packaging / release gate 확인.
 
 ## v0.2.44 (2026-03-24)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -10,15 +11,20 @@ HARNESS_PROJECT = REPO_ROOT / "tests" / "share_text_fixture_harness" / "ShareTex
 DATA_DIR = REPO_ROOT / "tests" / "data" / "share_text_cases"
 
 
-def _windows_path(path: Path) -> str:
-    completed = subprocess.run(
-        ["wslpath", "-w", str(path)],
-        cwd=str(REPO_ROOT),
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return completed.stdout.strip()
+def _dotnet_arg_path(path: Path) -> str:
+    # Use native paths on normal Linux/macOS/Windows runners.
+    # Only convert to UNC Windows paths when running inside WSL, where
+    # `dotnet` may resolve to the Windows host SDK path handling model.
+    if os.environ.get("WSL_DISTRO_NAME"):
+        completed = subprocess.run(
+            ["wslpath", "-w", str(path)],
+            cwd=str(REPO_ROOT),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+    return str(path)
 
 
 def _run_harness(summary_name: str, mode: str) -> str:
@@ -28,11 +34,11 @@ def _run_harness(summary_name: str, mode: str) -> str:
             "dotnet",
             "run",
             "--project",
-            _windows_path(HARNESS_PROJECT),
+            _dotnet_arg_path(HARNESS_PROJECT),
             "--framework",
             "net8.0",
             "--",
-            _windows_path(summary_path),
+            _dotnet_arg_path(summary_path),
             mode,
         ],
         cwd=str(REPO_ROOT),
