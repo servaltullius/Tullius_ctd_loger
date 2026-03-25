@@ -222,6 +222,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(freeze, "related_candidates", "array", "freeze_analysis");
   AssertIsType(freeze, "blackbox_context", "object", "freeze_analysis");
   AssertIsType(freeze, "first_chance_context", "object", "freeze_analysis");
+  AssertIsType(freeze, "wct_consensus", "object", "freeze_analysis");
   const auto& blackbox = freeze["blackbox_context"];
   AssertIsType(blackbox, "loading_window", "boolean", "freeze_analysis.blackbox_context");
   AssertIsType(blackbox, "recent_module_loads", "number", "freeze_analysis.blackbox_context");
@@ -238,6 +239,12 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(firstChance, "loading_window_count", "number", "freeze_analysis.first_chance_context");
   AssertIsType(firstChance, "repeated_signature_count", "number", "freeze_analysis.first_chance_context");
   AssertIsType(firstChance, "recent_non_system_modules", "array", "freeze_analysis.first_chance_context");
+  const auto& wctConsensus = freeze["wct_consensus"];
+  AssertIsType(wctConsensus, "capture_passes", "number", "freeze_analysis.wct_consensus");
+  AssertIsType(wctConsensus, "cycle_consensus", "boolean", "freeze_analysis.wct_consensus");
+  AssertIsType(wctConsensus, "repeated_cycle_thread_count", "number", "freeze_analysis.wct_consensus");
+  AssertIsType(wctConsensus, "consistent_loading_signal", "boolean", "freeze_analysis.wct_consensus");
+  AssertIsType(wctConsensus, "longest_wait_tid_consensus", "boolean", "freeze_analysis.wct_consensus");
 
   // ── recommendations ──
   for (const auto& r : j["recommendations"]) {
@@ -350,6 +357,7 @@ void TestOutputWriterEmitsAllFields()
     "\"related_candidates\"",
     "\"blackbox_context\"",
     "\"first_chance_context\"",
+    "\"wct_consensus\"",
     "\"loading_window\"",
     "\"recent_module_loads\"",
     "\"recent_module_unloads\"",
@@ -431,6 +439,9 @@ void TestOutputWriterReportTextSections()
     "blackbox",
     "module churn",
     "first_chance_context",
+    "wct capture_passes=",
+    "cycle_consensus=",
+    "consistent_loading_signal=",
     "repeated suspicious first-chance",
   };
 

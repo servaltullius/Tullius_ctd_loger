@@ -599,10 +599,20 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(en
         ? L"[Freeze] WCT cycle evidence makes deadlock the primary interpretation. Check synchronization-heavy mods and thread ownership first."
         : L"[프리징] WCT cycle 근거가 있어 데드락 해석이 우선입니다. 동기화/후킹 성격이 강한 모드와 스레드 소유 관계를 먼저 확인하세요.");
+      if (r.freeze_analysis.support_quality == "snapshot_consensus_backed") {
+        r.recommendations.push_back(en
+          ? L"[Freeze] Repeated WCT captures preserved the same cycle picture. Prioritize the repeated ownership chain before broad busy-wait triage."
+          : L"[프리징] 반복 WCT 캡처에서 같은 cycle 구도가 유지됐습니다. 광범위한 busy-wait 점검보다 반복되는 소유 체인을 먼저 확인하세요.");
+      }
     } else if (r.freeze_analysis.state_id == "loader_stall_likely") {
       r.recommendations.push_back(en
         ? L"[Freeze] Loading-context evidence points to a loader stall. Prioritize mesh/animation/physics/precache changes before generic DLL triage."
         : L"[프리징] 로딩 문맥 근거가 있어 loader stall 가능성이 큽니다. 일반 DLL 점검보다 메쉬/애니메이션/물리/프리캐시 변경을 먼저 보세요.");
+      if (r.freeze_analysis.support_quality == "snapshot_consensus_backed") {
+        r.recommendations.push_back(en
+          ? L"[Freeze] Repeated WCT captures stayed aligned with the loading window. Recheck the same initialization path before widening freeze triage."
+          : L"[프리징] 반복 WCT 캡처가 같은 로딩 윈도우와 계속 일치했습니다. 프리징 점검 범위를 넓히기 전에 같은 초기화 경로를 먼저 다시 확인하세요.");
+      }
       if (!r.freeze_analysis.blackbox_context.recent_non_system_modules.empty()) {
         r.recommendations.push_back(en
           ? (L"[Freeze] blackbox module churn highlighted recent non-system modules: " +
@@ -682,6 +692,6 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? (L"[Troubleshooting] See the troubleshooting checklist (" + std::to_wstring(r.troubleshooting_steps.size()) + L" steps) for this crash type.")
       : (L"[트러블슈팅] 이 크래시 유형에 대한 단계별 체크리스트(" + std::to_wstring(r.troubleshooting_steps.size()) + L"단계)를 확인하세요."));
   }
-}
+  }
 
 }  // namespace skydiag::dump_tool::internal

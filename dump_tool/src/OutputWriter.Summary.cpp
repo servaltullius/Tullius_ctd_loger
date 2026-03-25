@@ -2,6 +2,7 @@
 
 #include "OutputWriterInternals.h"
 #include "Utf.h"
+#include "WctTypes.h"
 
 #include <Windows.h>
 
@@ -389,6 +390,14 @@ nlohmann::json BuildSummaryJson(
   for (const auto& moduleName : r.freeze_analysis.first_chance_context.recent_non_system_modules) {
     summary["freeze_analysis"]["first_chance_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
   }
+  const auto freezeWct = internal::TryParseWctFreezeSummary(r.wct_json_utf8);
+  summary["freeze_analysis"]["wct_consensus"] = {
+    { "capture_passes", freezeWct ? freezeWct->capture_passes : 0u },
+    { "cycle_consensus", freezeWct ? freezeWct->cycle_consensus : false },
+    { "repeated_cycle_thread_count", freezeWct ? freezeWct->repeated_cycle_tids.size() : 0u },
+    { "consistent_loading_signal", freezeWct ? freezeWct->consistent_loading_signal : false },
+    { "longest_wait_tid_consensus", freezeWct ? freezeWct->longest_wait_tid_consensus : false },
+  };
 
   summary["first_chance_context"] = {
     { "has_context", r.first_chance_summary.has_context },

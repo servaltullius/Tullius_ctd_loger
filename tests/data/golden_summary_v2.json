@@ -135,6 +135,13 @@
       "loading_window_count": 0,
       "repeated_signature_count": 0,
       "recent_non_system_modules": []
+    },
+    "wct_consensus": {
+      "capture_passes": 0,
+      "cycle_consensus": false,
+      "repeated_cycle_thread_count": 0,
+      "consistent_loading_signal": false,
+      "longest_wait_tid_consensus": false
     }
   },
   "first_chance_context": {

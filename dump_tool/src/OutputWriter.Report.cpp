@@ -2,6 +2,7 @@
 
 #include "OutputWriterInternals.h"
 #include "Utf.h"
+#include "WctTypes.h"
 
 #include <filesystem>
 #include <optional>
@@ -258,10 +259,17 @@ std::string BuildReportText(
   rpt << (en ? "Suspects: " : "후보 개수: ") << r.suspects.size() << "\n";
   rpt << (en ? "SuspectsFromStackwalk: " : "콜스택 기반 후보: ") << (r.suspects_from_stackwalk ? "1" : "0") << "\n";
   if (r.freeze_analysis.has_analysis) {
+    const auto freezeWct = internal::TryParseWctFreezeSummary(r.wct_json_utf8);
     rpt << (en ? "FreezeAnalysis: " : "FreezeAnalysis: ")
         << r.freeze_analysis.state_id
         << " confidence=" << WideToUtf8(r.freeze_analysis.confidence)
         << " support_quality=" << r.freeze_analysis.support_quality
+        << "\n";
+    rpt << "  wct capture_passes=" << (freezeWct ? freezeWct->capture_passes : 0u)
+        << " cycle_consensus=" << ((freezeWct && freezeWct->cycle_consensus) ? "1" : "0")
+        << " repeated_cycle_thread_count=" << (freezeWct ? freezeWct->repeated_cycle_tids.size() : 0u)
+        << " consistent_loading_signal=" << ((freezeWct && freezeWct->consistent_loading_signal) ? "1" : "0")
+        << " longest_wait_tid_consensus=" << ((freezeWct && freezeWct->longest_wait_tid_consensus) ? "1" : "0")
         << "\n";
     rpt << "  blackbox loading_window="
         << (r.freeze_analysis.blackbox_context.loading_window ? "1" : "0")

@@ -139,6 +139,11 @@ std::wstring DescribeSymbolRuntimeEvidence(const AnalysisResult& r, bool en)
 
 std::wstring DescribeFreezeSupportQuality(std::string_view supportQuality, bool en)
 {
+  if (supportQuality == "snapshot_consensus_backed") {
+    return en
+      ? L"PSS snapshot-backed freeze capture with repeated WCT consensus"
+      : L"반복 WCT 합의가 붙은 PSS 스냅샷 기반 프리징 캡처";
+  }
   if (supportQuality == "snapshot_backed") {
     return en ? L"PSS snapshot-backed freeze capture" : L"PSS 스냅샷 기반 프리징 캡처";
   }
