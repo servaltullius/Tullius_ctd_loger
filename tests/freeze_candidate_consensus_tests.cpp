@@ -56,6 +56,9 @@ void TestSourceContracts()
   AssertContains(freezeConsensusCppText, "loader_stall_likely", "Freeze candidate consensus must classify loader_stall_likely.");
   AssertContains(freezeConsensusCppText, "freeze_candidate", "Freeze candidate consensus must classify freeze_candidate.");
   AssertContains(freezeConsensusCppText, "freeze_ambiguous", "Freeze candidate consensus must classify freeze_ambiguous.");
+  AssertContains(freezeConsensusCppText, "snapshot_consensus_backed", "Freeze candidate consensus must expose richer snapshot_consensus_backed quality.");
+  AssertContains(freezeConsensusCppText, "cycle_consensus", "Freeze candidate consensus must consume WCT cycle consensus.");
+  AssertContains(freezeConsensusCppText, "consistent_loading_signal", "Freeze candidate consensus must consume consistent loading signal conservatively.");
   AssertContains(freezeConsensusCppText, "repeated suspicious first-chance", "Freeze candidate consensus must explain repeated suspicious first-chance context.");
   AssertContains(analyzerCppText, "BuildFreezeCandidateConsensus", "Analyzer must invoke freeze candidate consensus for freeze-like dumps.");
 }
@@ -98,7 +101,45 @@ void TestConsensusDeadlockLikely()
   assert(result.has_analysis);
   assert(result.state_id == "deadlock_likely");
   assert(result.support_quality == "snapshot_backed");
+  assert(result.confidence_level == ConfidenceLevel::kMedium);
+}
+
+void TestConsensusDeadlockSinglePassLiveStaysConservative()
+{
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->cycles = 1;
+  input.wct->cycle_thread_ids = { 1111u };
+
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.has_analysis);
+  assert(result.state_id == "deadlock_likely");
+  assert(result.support_quality == "live_process");
+  assert(result.confidence_level == ConfidenceLevel::kMedium);
+}
+
+void TestConsensusDeadlockSnapshotConsensusBacked()
+{
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->cycles = 2;
+  input.wct->cycle_consensus = true;
+  input.wct->repeated_cycle_tids = { 1234u, 5678u };
+  input.wct->longest_wait_tid_consensus = true;
+  input.wct->pss_snapshot_used = true;
+
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.has_analysis);
+  assert(result.state_id == "deadlock_likely");
+  assert(result.support_quality == "snapshot_consensus_backed");
   assert(result.confidence_level == ConfidenceLevel::kHigh);
+  assert(result.primary_reasons.size() >= 2u);
 }
 
 void TestConsensusLoaderStallLikely()
@@ -169,6 +210,77 @@ void TestConsensusLoaderStallWithFirstChanceContext()
   assert(!result.primary_reasons.empty());
 }
 
+void TestConsensusLoaderStallNeedsContextForConsistentLoadingSignal()
+{
+  FreezeSignalInput weakInput{};
+  weakInput.is_hang_like = true;
+  weakInput.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  weakInput.wct->has = true;
+  weakInput.wct->has_capture = true;
+  weakInput.wct->isLoading = true;
+  weakInput.wct->consistent_loading_signal = true;
+  weakInput.wct->pss_snapshot_used = true;
+
+  const auto weakResult = BuildFreezeCandidateConsensus(weakInput, Language::kEnglish);
+  assert(weakResult.has_analysis);
+  assert(weakResult.state_id == "loader_stall_likely");
+  assert(weakResult.support_quality == "snapshot_backed");
+  assert(weakResult.confidence_level == ConfidenceLevel::kMedium);
+
+  FreezeSignalInput loadingOnlyInput = weakInput;
+  loadingOnlyInput.loading_context = true;
+
+  const auto loadingOnlyResult = BuildFreezeCandidateConsensus(loadingOnlyInput, Language::kEnglish);
+  assert(loadingOnlyResult.has_analysis);
+  assert(loadingOnlyResult.state_id == "loader_stall_likely");
+  assert(loadingOnlyResult.support_quality == "snapshot_backed");
+  assert(loadingOnlyResult.confidence_level == ConfidenceLevel::kMedium);
+
+  FreezeSignalInput strongInput = loadingOnlyInput;
+  skydiag::dump_tool::FirstChanceSummary firstChance{};
+  firstChance.has_context = true;
+  firstChance.loading_window_count = 3;
+  firstChance.repeated_signature_count = 1;
+  strongInput.first_chance = firstChance;
+
+  const auto strongResult = BuildFreezeCandidateConsensus(strongInput, Language::kEnglish);
+  assert(strongResult.has_analysis);
+  assert(strongResult.state_id == "loader_stall_likely");
+  assert(strongResult.support_quality == "snapshot_consensus_backed");
+  assert(strongResult.confidence_level == ConfidenceLevel::kHigh);
+}
+
+void TestConsensusSnapshotFallbackAndSnapshotBackedStayStateConservative()
+{
+  FreezeSignalInput fallbackInput{};
+  fallbackInput.is_manual_capture = true;
+  fallbackInput.actionable_candidates.push_back(MakeCandidate(L"FallbackFreezeMod"));
+  fallbackInput.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  fallbackInput.wct->has = true;
+  fallbackInput.wct->has_capture = true;
+  fallbackInput.wct->pss_snapshot_requested = true;
+  fallbackInput.wct->pss_snapshot_used = false;
+
+  const auto fallbackResult = BuildFreezeCandidateConsensus(fallbackInput, Language::kEnglish);
+  assert(fallbackResult.has_analysis);
+  assert(fallbackResult.state_id == "freeze_candidate");
+  assert(fallbackResult.support_quality == "snapshot_fallback");
+  assert(fallbackResult.confidence_level == ConfidenceLevel::kLow);
+
+  FreezeSignalInput backedInput{};
+  backedInput.is_manual_capture = true;
+  backedInput.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  backedInput.wct->has = true;
+  backedInput.wct->has_capture = true;
+  backedInput.wct->pss_snapshot_used = true;
+
+  const auto backedResult = BuildFreezeCandidateConsensus(backedInput, Language::kEnglish);
+  assert(backedResult.has_analysis);
+  assert(backedResult.state_id == "freeze_ambiguous");
+  assert(backedResult.support_quality == "snapshot_backed");
+  assert(backedResult.confidence_level == ConfidenceLevel::kLow);
+}
+
 void TestConsensusFreezeCandidateAndAmbiguous()
 {
   FreezeSignalInput candidateInput{};
@@ -197,9 +309,13 @@ int main()
   TestSourceContracts();
   TestWctFreezeSummaryParsing();
   TestConsensusDeadlockLikely();
+  TestConsensusDeadlockSinglePassLiveStaysConservative();
+  TestConsensusDeadlockSnapshotConsensusBacked();
   TestConsensusLoaderStallLikely();
   TestConsensusLoaderStallWithBlackboxChurn();
   TestConsensusLoaderStallWithFirstChanceContext();
+  TestConsensusLoaderStallNeedsContextForConsistentLoadingSignal();
+  TestConsensusSnapshotFallbackAndSnapshotBackedStayStateConservative();
   TestConsensusFreezeCandidateAndAmbiguous();
   return 0;
 }

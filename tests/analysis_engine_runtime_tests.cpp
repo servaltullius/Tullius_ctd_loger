@@ -457,6 +457,15 @@ void TestFreezeAnalysisSourceContracts()
   AssertContains(analyzerCpp, "first_chance_context", "Analyzer must attach first-chance context to analysis results.");
   AssertContains(analyzerInternalsHeader, "BuildFirstChanceSummary", "Analyzer internals must expose a first-chance aggregate builder.");
   AssertContains(analyzerCpp, "BuildFirstChanceSummary", "Analyzer must build a first-chance aggregate from blackbox events.");
+  AssertContains(analyzerHeader, "support_quality", "Freeze analysis output must carry support_quality.");
+  const auto freezeConsensusCpp = ReadAllText(root / "dump_tool" / "src" / "FreezeCandidateConsensus.cpp");
+  AssertContains(freezeConsensusCpp, "snapshot_consensus_backed", "Freeze consensus must distinguish snapshot_consensus_backed support quality.");
+  AssertContains(freezeConsensusCpp, "snapshot_backed", "Freeze consensus must distinguish snapshot_backed support quality.");
+  AssertContains(freezeConsensusCpp, "snapshot_fallback", "Freeze consensus must distinguish snapshot_fallback support quality.");
+  AssertContains(freezeConsensusCpp, "live_process", "Freeze consensus must distinguish live_process support quality.");
+  AssertContains(freezeConsensusCpp, "cycle_consensus", "Freeze consensus must consume cycle_consensus metadata.");
+  AssertContains(freezeConsensusCpp, "repeated_cycle_tids", "Freeze consensus must consume repeated cycle tids metadata.");
+  AssertContains(freezeConsensusCpp, "consistent_loading_signal", "Freeze consensus must consume consistent loading signal metadata.");
 }
 
 void TestFirstChanceCtdCandidateSourceContracts()
