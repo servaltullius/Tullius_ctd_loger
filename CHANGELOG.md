@@ -4,6 +4,13 @@
 
 ## v0.2.45 (2026-03-25)
 
+### 한눈에 보기
+- 이번 버전은 **CTD 원인 후보를 더 쉽게 읽고 더 덜 헷갈리게 보여주는 업데이트**입니다.
+- Crash Logger가 같이 있는 경우, Tullius가 **Crash Logger가 가리키는 DLL 후보를 전보다 더 앞에, 더 직접적으로 보여줍니다.**
+- Crash Logger가 없어도, Tullius 단독 callstack 분석 결과를 **약한 추정과 구분해서** 읽기 쉽게 정리했습니다.
+- freeze / hang 진단은 **근거가 부족하면 무리하게 단정하지 않고**, 합의된 신호가 있을 때만 더 강하게 보여주도록 조정했습니다.
+- 공유 텍스트와 텍스트 리포트도 정리해서, **왜 이 후보를 의심하는지**를 예전보다 바로 이해하기 쉬워졌습니다.
+
 ### 추가
 - **CTD: Crash Logger frame-first 해석 경로 강화** — direct fault DLL, 첫 actionable probable frame, same-DLL streak, C++ exception module을 CTD 후보 승격의 핵심 신호로 반영. EXE/system victim 크래시에서도 Crash Logger가 강하게 가리키는 DLL 후보를 summary/report/WinUI/share text에서 먼저 보여주도록 개선.
 - **CTD: Tullius 단독 callstack 해석 경로 보강** — Crash Logger가 없는 상태에서도 강한 stackwalk-only 후보를 별도 경로로 드러내고, 약한 stack-scan 단서와 구분해 표시하도록 정리.
