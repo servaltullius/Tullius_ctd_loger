@@ -11,6 +11,7 @@ namespace {
 constexpr const char* kFamilyCrashLoggerFrame = "crash_logger_frame";
 constexpr const char* kFamilyCrashLoggerObjectRef = "crash_logger_object_ref";
 constexpr const char* kFamilyStack = "actionable_stack";
+constexpr const char* kFamilyCaptureQualityStack = "capture_quality_stack";
 constexpr const char* kFamilyResource = "resource_provider";
 constexpr const char* kFamilyHistory = "history_repeat";
 constexpr const char* kFamilyFirstChance = "first_chance_context";
@@ -40,7 +41,7 @@ std::uint32_t FamilyWeight(const CandidateRow& row, std::string_view familyId)
 
 bool IsBoostOnlyFamily(std::string_view familyId)
 {
-  return familyId == kFamilyHistory;
+  return familyId == kFamilyHistory || familyId == kFamilyCaptureQualityStack;
 }
 
 std::uint32_t RowScore(const CandidateRow& row)
@@ -170,6 +171,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasCrashLoggerFrame = HasFamily(candidate, kFamilyCrashLoggerFrame);
   const bool hasCrashLoggerObjectRef = HasFamily(candidate, kFamilyCrashLoggerObjectRef);
   const bool hasStack = HasFamily(candidate, kFamilyStack);
+  const bool hasCaptureQualityStack = HasFamily(candidate, kFamilyCaptureQualityStack);
   const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool conflict = candidate.has_conflict;
   const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
@@ -184,6 +186,8 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool strongFrameOnly = frameOnly && FamilyWeight(*row, kFamilyCrashLoggerFrame) >= 6u;
   const bool stackOnly = hasStack && !hasCrashLoggerFrame && !hasCrashLoggerObjectRef && !hasResource;
   const bool strongStackOnly = stackOnly && FamilyWeight(*row, kFamilyStack) >= 5u;
+  const bool captureBackedStrongStackOnly =
+    stackOnly && hasCaptureQualityStack && FamilyWeight(*row, kFamilyStack) >= 4u;
   const bool objectRefWithHistory =
     hasCrashLoggerObjectRef &&
     HasFamily(candidate, kFamilyHistory) &&
@@ -212,6 +216,10 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
   } else if (strongStackOnly) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
+    candidate.cross_validated = false;
+  } else if (captureBackedStrongStackOnly) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;

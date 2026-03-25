@@ -13,6 +13,29 @@ constexpr std::size_t kMaxActionableStackSignals = 3;
 constexpr std::size_t kMaxHistorySignals = 5;
 constexpr std::size_t kMaxFirstChanceSignals = 4;
 
+bool HasRicherStackCapture(const AnalysisResult& r)
+{
+  return r.incident_capture_profile_process_thread_data ||
+         r.incident_capture_profile_full_memory_info ||
+         r.incident_capture_profile_module_headers;
+}
+
+std::uint32_t CaptureQualityStackWeight(const AnalysisResult& r, std::size_t stackRank)
+{
+  if (!r.suspects_from_stackwalk) {
+    return 0u;
+  }
+
+  std::uint32_t weight = 0u;
+  if (HasRicherStackCapture(r)) {
+    weight += 1u;
+  }
+  if (stackRank == 0u && r.symbol_runtime_degraded && r.incident_capture_profile_indirect_memory) {
+    weight += 1u;
+  }
+  return weight;
+}
+
 std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& ref)
 {
   if (ref.relevance_score >= 16u) {
@@ -215,6 +238,20 @@ void AddStackSignals(const AnalysisResult& r, bool en, std::vector<CandidateSign
       : 2u;
     if (!signal.candidate_key.empty()) {
       out->push_back(std::move(signal));
+      const auto captureQualityWeight = CaptureQualityStackWeight(r, added);
+      if (captureQualityWeight > 0u) {
+        CandidateSignal captureSignal{};
+        captureSignal.family_id = "capture_quality_stack";
+        captureSignal.candidate_key = CanonicalCandidateKey(!suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename);
+        captureSignal.display_name = !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename;
+        captureSignal.mod_name = suspect.inferred_mod_name;
+        captureSignal.module_filename = suspect.module_filename;
+        captureSignal.detail = en
+          ? (L"Richer capture profile preserved extra stackwalk context: " + captureSignal.display_name)
+          : (L"강화된 캡처 프로필이 추가 stackwalk 문맥을 보존함: " + captureSignal.display_name);
+        captureSignal.weight = captureQualityWeight;
+        out->push_back(std::move(captureSignal));
+      }
       ++added;
     }
   }

@@ -166,7 +166,7 @@ void TestStrongStackOnlyBecomesMediumRelated()
   assert(candidates.size() == 1);
   AssertStatus(candidates[0], "related");
   assert(!candidates[0].cross_validated);
-  assert(candidates[0].confidence == L"Medium");
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
 }
 
 void TestObjectRefAndResourceNeedMediumOnly()
@@ -371,6 +371,34 @@ void TestFrameAndResourceBecomeRelated()
   assert(candidates[0].supporting_families.size() == 2);
 }
 
+void TestCaptureQualityBoostedWeakStackAgreementCrossValidates()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"captureboost", L"CaptureBoost.esp", 6, L"CaptureBoost.esp"),
+    MakeSignal("actionable_stack", L"captureboost", L"Capture Boost", 3, L"", L"Capture Boost", L"captureboost.dll"),
+    MakeSignal("capture_quality_stack", L"captureboost", L"Capture Boost", 1, L"", L"Capture Boost", L"captureboost.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "cross_validated");
+  assert(candidates[0].cross_validated);
+}
+
+void TestCaptureQualityBackedStandaloneStackBecomesMediumRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("actionable_stack", L"capturestack", L"Capture Stack", 4, L"", L"Capture Stack", L"capturestack.dll"),
+    MakeSignal("capture_quality_stack", L"capturestack", L"Capture Stack", 1, L"", L"Capture Stack", L"capturestack.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+}
+
 void TestFirstChanceFamilySourceContract()
 {
   const auto root = ProjectRoot();
@@ -403,6 +431,8 @@ int main()
   TestFrameAndFirstChanceBecomeRelated();
   TestFrameAndHistoryBecomeRelated();
   TestFrameAndResourceBecomeRelated();
+  TestCaptureQualityBoostedWeakStackAgreementCrossValidates();
+  TestCaptureQualityBackedStandaloneStackBecomesMediumRelated();
   TestFirstChanceFamilySourceContract();
   return 0;
 }

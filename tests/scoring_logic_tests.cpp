@@ -121,6 +121,19 @@ static void TestCrashLoggerPromotionNoLongerRankOnly()
   assert(analyzer.find("out->crash_logger_frame_signal_strength") != std::string::npos);
 }
 
+static void TestCaptureQualityStackSupportPresent()
+{
+  const auto candidates = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
+  const auto consensus = ReadFile("dump_tool/src/CandidateConsensus.cpp");
+
+  assert(candidates.find("capture_quality_stack") != std::string::npos);
+  assert(candidates.find("incident_capture_profile_process_thread_data") != std::string::npos);
+  assert(candidates.find("incident_capture_profile_full_memory_info") != std::string::npos);
+  assert(candidates.find("incident_capture_profile_module_headers") != std::string::npos);
+  assert(candidates.find("incident_capture_profile_indirect_memory") != std::string::npos);
+  assert(consensus.find("capture_quality_stack") != std::string::npos);
+}
+
 int main()
 {
   TestCallstackFrameWeightConstants();
@@ -133,5 +146,6 @@ int main()
   TestCrashLoggerCorroborationRankingPresent();
   TestCrashLoggerPromotionUsesFrameSignals();
   TestCrashLoggerPromotionNoLongerRankOnly();
+  TestCaptureQualityStackSupportPresent();
   return 0;
 }
