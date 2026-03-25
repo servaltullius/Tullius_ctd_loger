@@ -88,6 +88,12 @@ add_executable(skydiag_dump_writer_guard_tests
 
 add_test(NAME skydiag_dump_writer_guard_tests COMMAND skydiag_dump_writer_guard_tests)
 
+add_executable(skydiag_pss_snapshot_guard_tests
+  pss_snapshot_guard_tests.cpp
+)
+
+add_test(NAME skydiag_pss_snapshot_guard_tests COMMAND skydiag_pss_snapshot_guard_tests)
+
 add_executable(skydiag_crash_capture_false_positive_guard_tests
   crash_capture_false_positive_guard_tests.cpp
 )

@@ -51,6 +51,8 @@ bool TryLoadPssApi(PssApi* api, std::wstring* status)
 
 constexpr PSS_CAPTURE_FLAGS kFreezeSnapshotFlags = static_cast<PSS_CAPTURE_FLAGS>(
   PSS_CAPTURE_VA_CLONE |
+  PSS_CAPTURE_VA_SPACE |
+  PSS_CAPTURE_VA_SPACE_SECTION_INFORMATION |
   PSS_CAPTURE_THREADS |
   PSS_CAPTURE_THREAD_CONTEXT);
 
@@ -106,7 +108,7 @@ void ReleasePssSnapshotForFreeze(HANDLE process, HANDLE snapshotHandle)
   PssApi api{};
   std::wstring status;
   if (TryLoadPssApi(&api, &status) && api.freeSnapshot) {
-    (void)api.freeSnapshot(process, reinterpret_cast<HPSS>(snapshotHandle));
+    (void)api.freeSnapshot(GetCurrentProcess(), reinterpret_cast<HPSS>(snapshotHandle));
     return;
   }
 
