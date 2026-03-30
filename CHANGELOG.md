@@ -2,6 +2,25 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.46 (2026-03-30)
+
+### 한눈에 보기
+- 이번 버전은 **WinUI에서 바로 보이는 작은 불편과 지원 혼선을 줄이는 유지보수 업데이트**입니다.
+- `Raw Data` 탭의 긴 텍스트를 더 직접적으로 스크롤해서 볼 수 있게 했습니다.
+- `Triage` 탭에서 `Evidence` 패널을 접고 펼칠 때 페이지 폭이 흔들리는 현상을 줄였습니다.
+- `address_db` 로딩 실패 메시지를 더 구체적으로 나눠, 파일 누락인지 게임 버전 미지원인지 바로 구분할 수 있게 했습니다.
+
+### 수정
+- **WinUI: Raw Data 텍스트 박스 스크롤바 명시** — `WCT JSON`은 가로/세로 스크롤을 모두 직접 사용할 수 있게 하고, `Report`는 세로 스크롤을 안정적으로 노출해 긴 출력 확인이 쉬워지도록 조정.
+- **WinUI: Triage 레이아웃 폭 흔들림 완화** — 루트 스크롤 영역이 세로 스크롤바 폭을 항상 예약하도록 바꿔 `Evidence` expander 확장/축소 시 본문 폭이 변하는 현상을 줄임.
+- **Engine: address_db 진단 세분화** — `address_db/skyrimse_functions.json` 실패를 단일 문구로 뭉뚱그리지 않고, `파일 없음`과 `현재 game_version 항목 없음`을 구분해서 보고하도록 개선.
+
+### 테스트
+- WinUI XAML 가드 테스트에 `Raw Data` 스크롤바 계약과 루트 스크롤바 폭 고정 계약을 추가.
+- AddressResolver 런타임 테스트에 load status 분기와 `missing file / missing game version` 구분 케이스를 추가.
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build / WinUI build / Packaging(`--no-pdb`) / release gate 확인.
+
 ## v0.2.45 (2026-03-25)
 
 ### 한눈에 보기

@@ -330,6 +330,32 @@ static void TestWinUiUsesRepresentativeCandidateIdentifiers()
   RequireContains(vm, "candidate.SecondaryLabel", "WinUI subordinate text must retain the secondary label.");
 }
 
+static void TestWinUiRawDataTextBoxesExposeScrollbars()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+
+  RequireContains(
+    xaml,
+    "x:Name=\"WctTextBox\"\n                         IsReadOnly=\"True\" AcceptsReturn=\"True\" TextWrapping=\"NoWrap\"\n                         ScrollViewer.HorizontalScrollBarVisibility=\"Auto\"\n                         ScrollViewer.VerticalScrollBarVisibility=\"Auto\"",
+    "Raw Data WCT textbox must expose both horizontal and vertical scrollbars.");
+  RequireContains(
+    xaml,
+    "x:Name=\"ReportTextBox\"\n                         IsReadOnly=\"True\" AcceptsReturn=\"True\" TextWrapping=\"Wrap\"\n                         ScrollViewer.HorizontalScrollBarVisibility=\"Disabled\"\n                         ScrollViewer.VerticalScrollBarVisibility=\"Auto\"",
+    "Raw Data report textbox must expose a stable vertical scrollbar.");
+}
+
+static void TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+
+  RequireContains(
+    xaml,
+    "VerticalScrollBarVisibility=\"Visible\"",
+    "Root scroll viewer must reserve vertical scrollbar width to prevent Triage layout shifts.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -373,6 +399,8 @@ int main()
   TestDumpDiscoveryUsesOutputLocationsOnly();
   TestWinUiConsumesRecaptureContext();
   TestWinUiUsesRepresentativeCandidateIdentifiers();
+  TestWinUiRawDataTextBoxesExposeScrollbars();
+  TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

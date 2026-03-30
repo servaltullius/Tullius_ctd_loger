@@ -510,8 +510,23 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!opt.data_dir.empty() && !out.game_version.empty()) {
     AddressResolver resolver;
     const auto addrDb = std::filesystem::path(opt.data_dir) / L"address_db" / L"skyrimse_functions.json";
-    if (!resolver.LoadFromJson(addrDb, out.game_version)) {
-      out.diagnostics.push_back(L"[Data] failed to load address_db/skyrimse_functions.json");
+    AddressResolver::LoadStatus loadStatus = AddressResolver::LoadStatus::kOk;
+    if (!resolver.LoadFromJson(addrDb, out.game_version, &loadStatus)) {
+      switch (loadStatus) {
+      case AddressResolver::LoadStatus::kFileOpenFailed:
+        out.diagnostics.push_back(L"[Data] address_db/skyrimse_functions.json not found");
+        break;
+      case AddressResolver::LoadStatus::kMissingGameVersion:
+        out.diagnostics.push_back(
+          L"[Data] address_db/skyrimse_functions.json has no entry for game_version " +
+          Utf8ToWide(out.game_version));
+        break;
+      case AddressResolver::LoadStatus::kInvalidJson:
+      case AddressResolver::LoadStatus::kEmptyEntries:
+      default:
+        out.diagnostics.push_back(L"[Data] failed to load address_db/skyrimse_functions.json");
+        break;
+      }
     } else {
       if (!out.fault_module_filename.empty() && IsGameExeModule(out.fault_module_filename)) {
         if (auto fn = resolver.Resolve(out.fault_module_offset)) {

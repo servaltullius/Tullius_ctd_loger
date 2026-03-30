@@ -50,7 +50,7 @@
       <ScrollViewer
           x:Name="RootScrollViewer"
           HorizontalContentAlignment="Center"
-          VerticalScrollBarVisibility="Auto"
+          VerticalScrollBarVisibility="Visible"
           HorizontalScrollBarVisibility="Disabled">
         <Grid x:Name="RootContentGrid"
               MaxWidth="1240"
@@ -1043,6 +1043,8 @@
                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 <TextBox x:Name="WctTextBox"
                          IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
                          FontFamily="Cascadia Code" FontSize="12"
                          MinHeight="200" MaxHeight="400"
                          AutomationProperties.Name="WCT JSON content" />
@@ -1059,6 +1061,8 @@
                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 <TextBox x:Name="ReportTextBox"
                          IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto"
                          FontSize="13"
                          MinHeight="200" MaxHeight="500"
                          AutomationProperties.Name="Analysis report text" />

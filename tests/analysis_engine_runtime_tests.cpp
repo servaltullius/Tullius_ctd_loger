@@ -259,6 +259,39 @@ void TestAddressResolverToleratesMalformedEntries()
   std::filesystem::remove(tempPath, ec);
 }
 
+void TestAddressResolverLoadStatusRuntime()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_address_resolver_status_runtime_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"game_versions\": {\n"
+      "    \"1.5.97.0\": {\n"
+      "      \"functions\": {\n"
+      "        \"D6DDDA\": \"BSBatchRenderer::Draw\"\n"
+      "      }\n"
+      "    }\n"
+      "  }\n"
+      "}\n";
+  }
+
+  AddressResolver resolver;
+  AddressResolver::LoadStatus status = AddressResolver::LoadStatus::kOk;
+
+  assert(!resolver.LoadFromJson(tempPath.parent_path() / "missing.json", "1.5.97.0", &status));
+  assert(status == AddressResolver::LoadStatus::kFileOpenFailed);
+
+  assert(!resolver.LoadFromJson(tempPath, "1.6.1170.0", &status));
+  assert(status == AddressResolver::LoadStatus::kMissingGameVersion);
+
+  assert(resolver.LoadFromJson(tempPath, "1.5.97.0", &status));
+  assert(status == AddressResolver::LoadStatus::kOk);
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
+}
+
 void TestCrashHistoryRuntime()
 {
   CrashHistory history;
@@ -416,6 +449,19 @@ void TestCaptureQualitySourceContracts()
   AssertContains(recommendationCpp, "richer crash recapture profile", "Recommendations must prefer richer recapture profiles before generic full-memory advice.");
   AssertContains(recommendationCpp, "indirect memory", "Recommendations must acknowledge richer indirect-memory capture when present.");
   AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
+}
+
+void TestAddressDbDiagnosticSourceContracts()
+{
+  const auto root = ProjectRoot();
+  const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  const auto resolverHeader = ReadAllText(root / "dump_tool" / "src" / "AddressResolver.h");
+  const auto resolverCpp = ReadAllText(root / "dump_tool" / "src" / "AddressResolver.cpp");
+
+  AssertContains(resolverHeader, "enum class LoadStatus", "AddressResolver must expose a load-status enum for diagnostics.");
+  AssertContains(resolverCpp, "LoadStatus::kMissingGameVersion", "AddressResolver must distinguish missing game-version entries.");
+  AssertContains(analyzerCpp, "address_db/skyrimse_functions.json not found", "Analyzer must tell users when the address DB file is missing.");
+  AssertContains(analyzerCpp, "has no entry for game_version", "Analyzer must tell users when the address DB lacks the current game version.");
 }
 
 void TestCrashLoggerFrameConsensusContracts()
@@ -697,10 +743,12 @@ int main()
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
   TestAddressResolverToleratesMalformedEntries();
+  TestAddressResolverLoadStatusRuntime();
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();
   TestCrashHistoryBucketCandidateStats();
   TestCaptureQualitySourceContracts();
+  TestAddressDbDiagnosticSourceContracts();
   TestCrashLoggerFrameConsensusContracts();
   TestFreezeAnalysisSourceContracts();
   TestFirstChanceCtdCandidateSourceContracts();

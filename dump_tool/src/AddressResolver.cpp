@@ -7,19 +7,36 @@
 
 namespace skydiag::dump_tool {
 
-bool AddressResolver::LoadFromJson(const std::filesystem::path& jsonPath, const std::string& gameVersion)
+bool AddressResolver::LoadFromJson(
+  const std::filesystem::path& jsonPath,
+  const std::string& gameVersion,
+  LoadStatus* outStatus)
 {
+  if (outStatus) {
+    *outStatus = LoadStatus::kInvalidJson;
+  }
+  m_functions.clear();
+
   try {
     std::ifstream f(jsonPath);
     if (!f.is_open()) {
+      if (outStatus) {
+        *outStatus = LoadStatus::kFileOpenFailed;
+      }
       return false;
     }
     const auto j = nlohmann::json::parse(f, nullptr, true);
     if (!j.is_object() || !j.contains("game_versions") || !j["game_versions"].is_object()) {
+      if (outStatus) {
+        *outStatus = LoadStatus::kInvalidJson;
+      }
       return false;
     }
     const auto& versions = j["game_versions"];
     if (!versions.contains(gameVersion) || !versions[gameVersion].is_object()) {
+      if (outStatus) {
+        *outStatus = LoadStatus::kMissingGameVersion;
+      }
       return false;
     }
 
@@ -42,11 +59,20 @@ bool AddressResolver::LoadFromJson(const std::filesystem::path& jsonPath, const 
       }
     }
     if (loaded.empty()) {
+      if (outStatus) {
+        *outStatus = LoadStatus::kEmptyEntries;
+      }
       return false;
     }
     m_functions = std::move(loaded);
+    if (outStatus) {
+      *outStatus = LoadStatus::kOk;
+    }
     return true;
   } catch (...) {
+    if (outStatus) {
+      *outStatus = LoadStatus::kInvalidJson;
+    }
     return false;
   }
 }

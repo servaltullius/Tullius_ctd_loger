@@ -11,7 +11,19 @@ namespace skydiag::dump_tool {
 class AddressResolver
 {
 public:
-  bool LoadFromJson(const std::filesystem::path& jsonPath, const std::string& gameVersion);
+  enum class LoadStatus
+  {
+    kOk,
+    kFileOpenFailed,
+    kInvalidJson,
+    kMissingGameVersion,
+    kEmptyEntries,
+  };
+
+  bool LoadFromJson(
+    const std::filesystem::path& jsonPath,
+    const std::string& gameVersion,
+    LoadStatus* outStatus = nullptr);
   std::optional<std::string> Resolve(std::uint64_t offset) const;
   const std::unordered_map<std::uint64_t, std::string>& Functions() const { return m_functions; }
   std::size_t Size() const { return m_functions.size(); }
