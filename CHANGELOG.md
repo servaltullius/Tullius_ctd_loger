@@ -2,6 +2,25 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.49-rc1 (2026-03-31)
+
+### 한눈에 보기
+- 이번 프리릴리즈는 **non-system DLL CTD에서 단일 DLL 과단정을 더 줄이는 정확도 보정**입니다.
+- 이제 non-system DLL CTD도 `actionable_candidates` 합의 경로에 들어가고, raw fault DLL 하나만으로 후보가 고정되지 않도록 조정했습니다.
+- `Crash Logger frame + 같은 덤프 stack`만 있는 경우는 더 이상 독립 교차검증처럼 취급하지 않고, `fault-location cluster`로 낮춰 보여줍니다.
+
+### 수정
+- **Engine: non-system DLL candidate consensus 확장** — EXE/system/hook/hang 케이스에만 국한되던 `actionable_candidates` 합의 경로를 non-system DLL CTD에도 열어, `Crash Logger frame`, `stack`, `history`, `resource` 같은 신호를 함께 비교하도록 확장.
+- **Engine: weak fault-location cluster 강등** — `Crash Logger frame + 같은 덤프 stack` 정도만 있는 후보는 `cross_validated`처럼 승격하지 않고, low/cautious path로 내려 summary/evidence/recommendation이 피해 위치 가능성을 더 정직하게 노출하도록 조정.
+- **Output: phrasing 정렬** — non-system DLL CTD에서 `유력 후보`처럼 읽히던 wording을 `fault-location 단서`, `주변 probable DLL 비교` 쪽으로 옮겨, raw crash site와 최종 해석을 더 분리해서 읽을 수 있게 함.
+
+### 테스트
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build: 성공.
+- Windows WinUI build: 성공.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.49-rc1.zip`, `--no-pdb`): 성공.
+- Release gate: `OK`.
+
 ## v0.2.48 (2026-03-31)
 
 ### 한눈에 보기
