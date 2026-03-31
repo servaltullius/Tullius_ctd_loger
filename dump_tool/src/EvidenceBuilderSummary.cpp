@@ -221,6 +221,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     const bool topCandidateMatchesFaultModule =
       topCandidate &&
       CandidateMatchesModule(*topCandidate, r.fault_module_filename);
+    const bool weakFaultLocationTopCandidate =
+      topCandidate &&
+      IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx);
     const bool topCandidateHasStandaloneCallstack =
       topCandidate &&
       CandidateHasStandaloneCallstackSupport(*topCandidate);
@@ -237,7 +240,24 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       topCandidate &&
       CandidateHasObjectRefSupport(*topCandidate);
 
-    if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
+    if (topCandidateMatchesFaultModule && weakFaultLocationTopCandidate) {
+      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      if (topCandidateHasStandaloneCallstack) {
+        summary = en
+          ? (L"Crash is reported in " + who + L", and " + frameSupport +
+              L" plus the same-dump stack both land in this DLL, but that still reflects the current fault-location cluster rather than an independent confirmation. Compare nearby probable DLLs too. (Confidence: " +
+              topCandidateConf + L")")
+          : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport +
+              L" 와 같은 덤프의 스택이 모두 이 DLL에 걸리지만 이는 독립 검증이라기보다 현재 fault-location cluster 에 가깝습니다. 주변 probable DLL도 함께 비교하세요. (신뢰도: " +
+              topCandidateConf + L")");
+      } else {
+        summary = en
+          ? (L"Crash is reported in " + who + L", but current actionable support still stays on the fault-location DLL. Compare nearby probable DLLs before treating it as the root cause. (Confidence: " +
+              topCandidateConf + L")")
+          : (L"크래시 위치가 " + who + L"로 보고되었지만, 현재 실행 우선 근거는 여전히 fault-location DLL에 머뭅니다. 근본 원인으로 단정하기 전에 주변 probable DLL도 함께 비교하세요. (신뢰도: " +
+              topCandidateConf + L")");
+      }
+    } else if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
       const auto firstName = DescribeCandidate(*topCandidate);
       const auto secondName = DescribeCandidate(*secondCandidate);
       const auto firstFamilies = JoinCandidateFamilies(*topCandidate, en);

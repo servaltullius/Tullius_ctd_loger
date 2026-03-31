@@ -177,7 +177,8 @@ void AddActionableCandidateRecommendations(
     AnalysisResult& r,
     bool en,
     const ActionableCandidate* topCandidate,
-    const ActionableCandidate* secondCandidate)
+    const ActionableCandidate* secondCandidate,
+    bool weakFaultLocationTopCandidate)
 {
   if (!topCandidate) {
     return;
@@ -197,6 +198,17 @@ void AddActionableCandidateRecommendations(
   const bool hasScorableFirstChance = hasFirstChanceFamily && HasScorableFirstChanceContext(r.first_chance_summary);
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
+  if (weakFaultLocationTopCandidate && hasFrameFamily) {
+    r.recommendations.push_back(en
+      ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
+          L", but this is still only the current fault-location cluster. Compare nearby Crash Logger probable DLLs before isolating this mod.")
+      : (L"[행동 우선 후보] " + frameSupport + L" 와 같은 덤프의 스택이 모두 " + candidateName +
+          L" 에 걸리지만, 이는 여전히 현재 fault-location cluster 단서입니다. 이 모드를 바로 격리하기 전에 주변 Crash Logger probable DLL도 함께 비교하세요."));
+    r.recommendations.push_back(en
+      ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
+      : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 richer recapture profile을 우선 사용하세요.");
+    return;
+  }
   if (topCandidate->status_id == "cross_validated") {
     r.recommendations.push_back(hasFrameFamily
       ? (en
@@ -343,6 +355,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
   const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
   const bool hasActionableCandidates = (topCandidate != nullptr);
+  const bool weakFaultLocationOnly =
+    IsWeakFaultLocationOnlySuspect(r, ctx) ||
+    (topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
   const bool topCandidateMatchesFaultModule =
     topCandidate &&
     CandidateMatchesModule(*topCandidate, r.fault_module_filename);
@@ -473,10 +488,16 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
-  AddActionableCandidateRecommendations(r, en, topCandidate, secondCandidate);
+  AddActionableCandidateRecommendations(
+    r,
+    en,
+    topCandidate,
+    secondCandidate,
+    topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
 
   const bool allowTopSuspectActionRecommendations = !isSnapshotLike;
-  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
+  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
+      !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
       ? (L"[Top suspect] Reproduce after updating/reinstalling '" + r.inferred_mod_name + L"'.")
       : (L"[유력 후보] '" + r.inferred_mod_name + L"' 모드를 업데이트/재설치 후 재현 여부 확인"));
@@ -485,7 +506,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : (L"[유력 후보] 동일 크래시가 반복되면 '" + r.inferred_mod_name + L"' 모드(또는 해당 모드의 SKSE 플러그인 DLL)를 비활성화 후 재현 여부 확인"));
   }
 
-  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
+  if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
+      (r.inferred_mod_name.empty() || preferStackCandidateOverFault) && hasNonHookStackCandidate) {
     const auto& s0 = *firstNonHookStackCandidate;
     if (!s0.inferred_mod_name.empty()) {
       r.recommendations.push_back(en
@@ -507,6 +529,27 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Top suspect] The current top stack candidate is a Windows system DLL. For hang captures this is often a waiting/victim location, so prioritize non-system candidates/resources/conflicts."
       : L"[유력 후보] 현재 스택 1순위 후보가 Windows 시스템 DLL입니다. 행 캡처에서는 대기/피해 위치인 경우가 많으므로 비-시스템 후보/리소스/충돌 단서를 우선 점검하세요.");
+  }
+
+  if (weakFaultLocationOnly) {
+    std::vector<std::wstring> nearbyProbableDlls;
+    const std::wstring faultLower = minidump::WideLower(r.fault_module_filename);
+    for (const auto& module : r.crash_logger_top_modules) {
+      if (minidump::WideLower(module) == faultLower) {
+        continue;
+      }
+      nearbyProbableDlls.push_back(module);
+      if (nearbyProbableDlls.size() >= 4u) {
+        break;
+      }
+    }
+    if (!nearbyProbableDlls.empty()) {
+      r.recommendations.push_back(en
+        ? (L"[DLL guidance] This DLL is only the current fault-location clue. Compare nearby Crash Logger probable DLLs too: " +
+            JoinList(nearbyProbableDlls, 4, L", ") + L".")
+        : (L"[DLL guidance] 이 DLL은 현재 fault-location 단서만 있습니다. 주변 Crash Logger probable DLL도 함께 비교하세요: " +
+            JoinList(nearbyProbableDlls, 4, L", ") + L"."));
+    }
   }
 
   if (!hasActionableCandidates && !r.crash_logger_object_refs.empty()) {

@@ -89,6 +89,14 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.suspectBasis = suspectBasis;
 
   internal::BuildActionableCandidates(r, lang, ctx);
+  if (internal::IsWeakFaultLocationOnlySuspect(r, ctx) && !r.suspects.empty()) {
+    auto& topSuspect = r.suspects[0];
+    topSuspect.confidence_level = i18n::ConfidenceLevel::kLow;
+    topSuspect.confidence = i18n::ConfidenceText(lang, topSuspect.confidence_level);
+    topSuspect.reason += en
+      ? L" (fault-location clue only; may be victim location)"
+      : L" (fault-location 단서만 있음; 피해 위치일 수 있음)";
+  }
   internal::BuildEvidenceItems(r, lang, ctx);
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);

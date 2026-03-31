@@ -501,7 +501,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
 {
   r.actionable_candidates.clear();
 
-  if (!(ctx.isGameExe || ctx.isSystem || ctx.isHookFramework || ctx.isHangLike)) {
+  if (ctx.isSnapshotLike) {
     return;
   }
 
@@ -516,6 +516,26 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   AddFirstChanceSignals(r, en, ctx, &signals);
 
   r.actionable_candidates = BuildCandidateConsensus(signals, lang);
+  for (auto& candidate : r.actionable_candidates) {
+    if (!IsWeakFaultLocationActionableCandidate(r, candidate, ctx)) {
+      continue;
+    }
+
+    const bool hasStackSupport =
+      std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), "actionable_stack") !=
+      candidate.supporting_families.end();
+    candidate.status_id = hasStackSupport ? "related" : "reference_clue";
+    candidate.confidence_level = i18n::ConfidenceLevel::kLow;
+    candidate.confidence = i18n::ConfidenceText(lang, candidate.confidence_level);
+    candidate.cross_validated = false;
+    candidate.explanation = en
+      ? (hasStackSupport
+          ? L"Crash Logger frame and the same-dump stack both land in this DLL, but this is still only the current fault location."
+          : L"Crash Logger frame support for this DLL is still limited to the current fault location.")
+      : (hasStackSupport
+          ? L"Crash Logger 프레임과 같은 덤프의 스택이 모두 이 DLL에 걸리지만, 여전히 현재 fault location 단서에 머뭅니다."
+          : L"이 DLL에 대한 Crash Logger 프레임 근거는 여전히 현재 fault location 단서에 머뭅니다.");
+  }
 }
 
 }  // namespace skydiag::dump_tool::internal

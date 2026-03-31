@@ -101,6 +101,10 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
 void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
+  const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
+  const bool weakFaultLocationOnly =
+    IsWeakFaultLocationOnlySuspect(r, ctx) ||
+    (topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
 
   if (!r.stackwalk_primary_frames.empty()) {
     EvidenceItem e{};
@@ -128,9 +132,15 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     EvidenceItem e{};
     e.confidence_level = selectedTop->confidence_level;
     e.confidence = selectedTop->confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : selectedTop->confidence;
-    e.title = en
-      ? (r.suspects_from_stackwalk ? L"Top suspect (callstack-based)" : L"Top suspect (stack-scan-based)")
-      : (r.suspects_from_stackwalk ? L"콜스택 기반 유력 후보" : L"스택 스캔 기반 유력 후보");
+    if (weakFaultLocationOnly) {
+      e.title = en
+        ? L"Top stack DLL clue (fault-location)"
+        : L"콜스택 상위 DLL 단서 (fault-location)";
+    } else {
+      e.title = en
+        ? (r.suspects_from_stackwalk ? L"Top suspect (callstack-based)" : L"Top suspect (stack-scan-based)")
+        : (r.suspects_from_stackwalk ? L"콜스택 기반 유력 후보" : L"스택 스캔 기반 유력 후보");
+    }
 
     std::vector<std::wstring> display;
     auto appendDisplay = [&](const SuspectItem& s) {
@@ -154,6 +164,11 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
       }
     }
     e.details = JoinList(display, 3, L", ");
+    if (weakFaultLocationOnly) {
+      e.details += en
+        ? L" — current signal is still fault-location only."
+        : L" — 현재는 fault-location 단서만 있습니다.";
+    }
     r.evidence.push_back(std::move(e));
   }
 }

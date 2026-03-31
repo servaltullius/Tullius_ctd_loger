@@ -457,4 +457,44 @@ bool IsActionableSuspect(const SuspectItem& s)
          !minidump::IsGameExeModule(s.module_filename);
 }
 
+bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx)
+{
+  if (!ctx.isCrashLike || ctx.isHangLike || ctx.isSnapshotLike || !ctx.hasModule || ctx.isSystem || ctx.isGameExe ||
+      ctx.isHookFramework) {
+    return false;
+  }
+  if (r.suspects.empty() || !r.actionable_candidates.empty()) {
+    return false;
+  }
+
+  return WideLower(r.suspects[0].module_filename) == WideLower(r.fault_module_filename);
+}
+
+bool IsWeakFaultLocationActionableCandidate(
+  const AnalysisResult& r,
+  const ActionableCandidate& candidate,
+  const EvidenceBuildContext& ctx)
+{
+  if (!ctx.isCrashLike || ctx.isHangLike || ctx.isSnapshotLike || !ctx.hasModule || ctx.isSystem || ctx.isGameExe ||
+      ctx.isHookFramework) {
+    return false;
+  }
+  if (candidate.module_filename.empty() || WideLower(candidate.module_filename) != WideLower(r.fault_module_filename)) {
+    return false;
+  }
+
+  bool hasCrashLoggerFrame = false;
+  for (const auto& family : candidate.supporting_families) {
+    if (family == "crash_logger_frame") {
+      hasCrashLoggerFrame = true;
+      continue;
+    }
+    if (family == "actionable_stack" || family == "capture_quality_stack" || family == "history_repeat") {
+      continue;
+    }
+    return false;
+  }
+  return hasCrashLoggerFrame;
+}
+
 }  // namespace skydiag::dump_tool::internal

@@ -88,6 +88,11 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
 
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
+bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx);
+bool IsWeakFaultLocationActionableCandidate(
+  const AnalysisResult& r,
+  const ActionableCandidate& candidate,
+  const EvidenceBuildContext& ctx);
 
 // Split parts of BuildEvidenceAndSummaryImpl.
 void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

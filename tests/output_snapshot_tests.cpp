@@ -537,6 +537,7 @@ void TestCrashLoggerFrameCandidateFamilySourceGuards()
 void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
 {
   const std::string summarySrc = ReadProjectConcatenatedText({
+    "dump_tool/src/EvidenceBuilder.cpp",
     "dump_tool/src/EvidenceBuilderSummary.cpp",
     "dump_tool/src/EvidenceBuilderRecommendations.cpp",
     "dump_tool/src/OutputWriter.Summary.cpp",
@@ -566,6 +567,10 @@ void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
     summarySrc,
     "fault-location evidence only",
     "Fallback non-system DLL summaries must avoid overclaiming when only the fault location is known.");
+  AssertContains(
+    summarySrc,
+    "fault-location clue only; may be victim location",
+    "Weak non-system DLL suspects must be downgraded before report serialization.");
 
   std::cout << "  [PASS] Crash Logger frame-first summary priority guards\n";
 }
@@ -643,6 +648,10 @@ void TestCrashLoggerExpandedFixtureSummaryPriorityGuards()
     "Weak non-system DLL recommendations must stay cautious before blaming the DLL.");
   AssertContains(
     recommendationSrc,
+    "Compare nearby Crash Logger probable DLLs too",
+    "Weak non-system DLL guidance should point users at neighboring probable DLLs, not just the fault-location DLL.");
+  AssertContains(
+    recommendationSrc,
     "when reporting to the mod author",
     "Cross-validated DLL candidates may still escalate to mod-author reporting.");
   AssertContains(
@@ -657,6 +666,10 @@ void TestCrashLoggerExpandedFixtureSummaryPriorityGuards()
     evidenceCrashSrc,
     "Crash Logger: C++ exception details",
     "Expanded fixtures must keep exposing Crash Logger C++ exception evidence details.");
+  AssertContains(
+    evidenceCrashSrc,
+    "Top stack DLL clue (fault-location)",
+    "Weak non-system DLL evidence should be labeled as a clue rather than a top suspect.");
 
   std::cout << "  [PASS] Expanded Crash Logger fixture summary priority guards\n";
 }
