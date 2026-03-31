@@ -2,6 +2,26 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.47 (2026-03-31)
+
+### 한눈에 보기
+- 이번 버전은 **실사용 피드백으로 확인된 환경 탐지 오경고를 줄이는 후속 패치**입니다.
+- `msdia140.dll`이 게임의 `SKSE\Plugins`에만 있어도 분석기가 실제로 찾고 사용할 수 있게 했습니다.
+- MO2 환경에서 `plugins.txt`를 놓쳐 `Could not find plugins.txt`가 뜨던 케이스를 더 잘 따라가도록 보강했습니다.
+- 플러그인 헤더를 읽지 못한 경우에는 `ESP_FULL_SLOT_NEAR_LIMIT`를 고신뢰 경고처럼 띄우지 않도록 조정했습니다.
+
+### 수정
+- **Engine: bundled `msdia140.dll` 탐지 보강** — 분석기 프로세스 DLL 검색 경로에 없더라도, 게임 설치의 `Data\SKSE\Plugins\msdia140.dll`을 직접 찾아 로드할 수 있게 조정.
+- **Helper: MO2 profile 탐지 보강** — `usvfs_x64.dll`/`uvsfs64.dll` 모듈 실제 경로를 이용해 `ModOrganizer.ini`와 활성 profile의 `plugins.txt`를 찾는 fallback을 추가.
+- **Preflight: non-ESL 슬롯 경고 false positive 완화** — 플러그인 헤더를 읽지 못한 항목은 `slot_type_known`으로 분리하고, 슬롯 분류가 불완전할 때는 `254 슬롯 근접` 경고를 대략적 검사로 낮춰 표시.
+
+### 테스트
+- plugin scanner 가드 테스트에 `slot_type_known`, MO2 module-path fallback, plugin stream 계약 검증을 추가.
+- preflight 가드 테스트에 `slot-limit check is approximate` 계약을 추가.
+- analysis engine runtime 테스트에 bundled `msdia140.dll` 탐지 소스 계약을 추가.
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build / WinUI build / Packaging(`--no-pdb`) / release gate 확인.
+
 ## v0.2.46 (2026-03-30)
 
 ### 한눈에 보기

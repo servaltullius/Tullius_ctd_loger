@@ -86,6 +86,10 @@ int main()
     "Preflight must warn when non-ESL plugin count approaches 254 limit.");
   AssertContains(
     preflightCppText,
+    "slot-limit check is approximate",
+    "Preflight must downgrade full-slot warnings when plugin slot classification is incomplete.");
+  AssertContains(
+    preflightCppText,
     "KNOWN_INCOMPATIBLE_COMBO",
     "Preflight must check known incompatible mod combinations.");
   AssertContains(

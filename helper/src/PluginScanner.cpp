@@ -81,6 +81,14 @@ bool HasModule(const std::vector<std::wstring>& modules, const wchar_t* moduleNa
   return false;
 }
 
+bool EndsWithAsciiInsensitive(std::string_view value, std::string_view suffix)
+{
+  if (value.size() < suffix.size()) {
+    return false;
+  }
+  return AsciiLower(value.substr(value.size() - suffix.size())) == AsciiLower(suffix);
+}
+
 std::string ParseSelectedProfileValue(std::string raw)
 {
   StripUtf8BomInPlace(raw);
@@ -147,6 +155,55 @@ std::string QueryFileVersionString(const std::filesystem::path& filePath)
        + std::to_string(LOWORD(ms)) + "."
        + std::to_string(HIWORD(ls)) + "."
        + std::to_string(LOWORD(ls));
+}
+
+std::filesystem::path ResolveMo2IniFromModulePath(const std::filesystem::path& modulePath)
+{
+  if (modulePath.empty()) {
+    return {};
+  }
+
+  const std::wstring moduleLower = WideLower(modulePath.filename().wstring());
+  if (moduleLower != L"usvfs_x64.dll" && moduleLower != L"uvsfs64.dll") {
+    return {};
+  }
+
+  std::vector<std::filesystem::path> candidates;
+  if (modulePath.has_parent_path()) {
+    candidates.push_back(modulePath.parent_path() / "ModOrganizer.ini");
+    if (modulePath.parent_path().has_parent_path()) {
+      candidates.push_back(modulePath.parent_path().parent_path() / "ModOrganizer.ini");
+    }
+  }
+
+  for (const auto& candidate : candidates) {
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return {};
+}
+
+std::filesystem::path FindMo2IniFromModulePaths(const std::vector<std::wstring>* modulePaths)
+{
+  if (!modulePaths) {
+    return {};
+  }
+
+  std::unordered_set<std::wstring> seen;
+  for (const auto& rawPath : *modulePaths) {
+    if (rawPath.empty()) {
+      continue;
+    }
+    const std::wstring lowered = WideLower(rawPath);
+    if (!seen.insert(lowered).second) {
+      continue;
+    }
+    if (const auto iniPath = ResolveMo2IniFromModulePath(std::filesystem::path(rawPath)); !iniPath.empty()) {
+      return iniPath;
+    }
+  }
+  return {};
 }
 
 }  // namespace
@@ -289,9 +346,40 @@ std::vector<std::wstring> CollectModuleFilenamesBestEffort(std::uint32_t pid)
   return modules;
 }
 
+std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid)
+{
+  std::vector<std::wstring> paths;
+  if (pid == 0) {
+    return paths;
+  }
+
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+  if (snap == INVALID_HANDLE_VALUE) {
+    return paths;
+  }
+
+  MODULEENTRY32W me{};
+  me.dwSize = sizeof(me);
+  std::unordered_set<std::wstring> seen;
+  for (BOOL ok = Module32FirstW(snap, &me); ok; ok = Module32NextW(snap, &me)) {
+    std::wstring path = me.szExePath;
+    if (path.empty()) {
+      continue;
+    }
+    const std::wstring lower = WideLower(path);
+    if (seen.insert(lower).second) {
+      paths.push_back(std::move(path));
+    }
+  }
+
+  CloseHandle(snap);
+  return paths;
+}
+
 PluginScanResult ScanPlugins(
   const std::filesystem::path& gameExeDir,
-  const std::vector<std::wstring>& moduleFilenames)
+  const std::vector<std::wstring>& moduleFilenames,
+  const std::vector<std::wstring>* modulePaths)
 {
   PluginScanResult result{};
   result.game_exe_version = QueryFileVersionString(ResolveGameExePathFromDir(gameExeDir));
@@ -303,6 +391,9 @@ PluginScanResult ScanPlugins(
     auto moIni = gameExeDir / "ModOrganizer.ini";
     if (!std::filesystem::exists(moIni)) {
       moIni = gameExeDir.parent_path() / "ModOrganizer.ini";
+    }
+    if (!std::filesystem::exists(moIni)) {
+      moIni = FindMo2IniFromModulePaths(modulePaths);
     }
     if (std::filesystem::exists(moIni)) {
       std::ifstream ini(moIni);
@@ -382,8 +473,12 @@ PluginScanResult ScanPlugins(
         std::vector<std::uint8_t> buf(4096);
         pf.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
         const std::size_t bytesRead = static_cast<std::size_t>(pf.gcount());
-        (void)ParseTes4Header(buf.data(), bytesRead, meta);
+        meta.slot_type_known = ParseTes4Header(buf.data(), bytesRead, meta);
       }
+    }
+    if (!meta.slot_type_known && EndsWithAsciiInsensitive(pluginName, ".esl")) {
+      meta.is_esl = true;
+      meta.slot_type_known = true;
     }
     result.plugins.push_back(std::move(meta));
   }
@@ -406,6 +501,7 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
     p["header_version"] = plugin.header_version;
     p["is_esl"] = plugin.is_esl;
     p["is_active"] = plugin.is_active;
+    p["slot_type_known"] = plugin.slot_type_known;
     p["masters"] = plugin.masters;
     j["plugins"].push_back(std::move(p));
   }

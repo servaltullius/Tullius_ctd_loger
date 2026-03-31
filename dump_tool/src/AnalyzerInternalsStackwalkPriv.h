@@ -29,6 +29,7 @@ struct MinidumpMemoryView
 struct SymSession
 {
   HANDLE process = nullptr;
+  HMODULE ownedMsdiaModule = nullptr;
   bool ok = false;
   std::wstring searchPath;
   std::wstring cachePath;

@@ -389,7 +389,8 @@ void RunCompatibilityPreflight(
   }
 
   const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
-  auto pluginScan = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+  const auto modulePaths = skydiag::helper::CollectModulePathsBestEffort(proc.pid);
+  auto pluginScan = skydiag::helper::ScanPlugins(gameExeDir, moduleNames, &modulePaths);
 
   std::filesystem::path gameExePath;
   for (const wchar_t* name : { L"SkyrimSE.exe", L"SkyrimVR.exe", L"Skyrim.exe" }) {
@@ -521,22 +522,39 @@ void RunCompatibilityPreflight(
   // Non-ESL (full) plugin slot limit check.
   {
     std::size_t fullPluginCount = 0;
+    std::size_t unknownSlotCount = 0;
     for (const auto& p : pluginScan.plugins) {
-      if (p.is_active && !p.is_esl) {
+      if (!p.is_active) {
+        continue;
+      }
+      if (!p.slot_type_known) {
+        ++unknownSlotCount;
+        continue;
+      }
+      if (!p.is_esl) {
         ++fullPluginCount;
       }
     }
-    const bool nearLimit = (fullPluginCount >= 240);
+    const bool countReliable = (unknownSlotCount == 0);
+    const bool nearLimit = countReliable && (fullPluginCount >= 240);
     checks.push_back(PreflightCheck{
       "FULL_PLUGIN_SLOT_LIMIT",
-      nearLimit ? "warn" : "ok",
-      nearLimit ? "high" : "low",
+      nearLimit ? "warn" : (countReliable ? "ok" : "warn"),
+      nearLimit ? "high" : (countReliable ? "low" : "medium"),
       nearLimit
         ? ("비-ESL 플러그인 " + std::to_string(fullPluginCount) + "개 — 254 슬롯 한계에 근접합니다.")
-        : ("비-ESL 플러그인 " + std::to_string(fullPluginCount) + "개 — 슬롯 여유 있음."),
+        : (countReliable
+            ? ("비-ESL 플러그인 " + std::to_string(fullPluginCount) + "개 — 슬롯 여유 있음.")
+            : ("비-ESL 슬롯 분류 미완전: " + std::to_string(fullPluginCount) +
+                "개만 확인됐고 " + std::to_string(unknownSlotCount) +
+                "개는 헤더를 읽지 못해 슬롯 한계 점검이 대략적입니다.")),
       nearLimit
         ? ("Non-ESL plugin count " + std::to_string(fullPluginCount) + " — approaching 254 slot limit.")
-        : ("Non-ESL plugin count " + std::to_string(fullPluginCount) + " — within safe range."),
+        : (countReliable
+            ? ("Non-ESL plugin count " + std::to_string(fullPluginCount) + " — within safe range.")
+            : ("Non-ESL slot classification incomplete: " + std::to_string(fullPluginCount) +
+                " confirmed, " + std::to_string(unknownSlotCount) +
+                " plugin headers unavailable, so the slot-limit check is approximate.")),
     });
   }
 

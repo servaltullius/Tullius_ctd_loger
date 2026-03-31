@@ -40,7 +40,8 @@ inline std::string CollectPluginScanJson(
   }
 
   const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
-  auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames);
+  const auto modulePaths = skydiag::helper::CollectModulePathsBestEffort(proc.pid);
+  auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames, &modulePaths);
   return skydiag::helper::SerializePluginScanResult(scanResult);
 }
 

@@ -259,6 +259,20 @@ void TestAddressResolverToleratesMalformedEntries()
   std::filesystem::remove(tempPath, ec);
 }
 
+void TestStackwalkRuntimeCanUseBundledGameMsdia()
+{
+  const auto symbolsCpp = ProjectRoot() / "dump_tool" / "src" / "AnalyzerInternalsStackwalkSymbols.cpp";
+  const auto text = ReadAllText(symbolsCpp);
+  AssertContains(
+    text,
+    "Data\" / L\"SKSE\" / L\"Plugins\" / moduleName",
+    "Stackwalk runtime must check the game's SKSE Plugins folder for bundled msdia140.dll.");
+  AssertContains(
+    text,
+    "LoadLibraryW",
+    "Stackwalk runtime must load a bundled msdia140.dll when only the game install provides it.");
+}
+
 void TestAddressResolverLoadStatusRuntime()
 {
   const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_address_resolver_status_runtime_test.json";
@@ -743,6 +757,7 @@ int main()
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
   TestAddressResolverToleratesMalformedEntries();
+  TestStackwalkRuntimeCanUseBundledGameMsdia();
   TestAddressResolverLoadStatusRuntime();
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();

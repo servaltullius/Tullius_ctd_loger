@@ -24,6 +24,8 @@ void TestPluginScannerHeaderExists()
   assert(header.find("ScanPlugins") != std::string::npos);
   assert(header.find("ParseTes4Header") != std::string::npos);
   assert(header.find("ParsePluginsTxt") != std::string::npos);
+  assert(header.find("slot_type_known") != std::string::npos);
+  assert(header.find("CollectModulePathsBestEffort") != std::string::npos);
 }
 
 void TestPluginScannerImplExists()
@@ -40,6 +42,8 @@ void TestMo2SelectedProfileByteArraySupportExists()
   const auto impl = ReadFile("helper/src/PluginScanner.cpp");
   assert(impl.find("@ByteArray(") != std::string::npos);
   assert(impl.find("ParseSelectedProfileValue") != std::string::npos);
+  assert(impl.find("ResolveMo2IniFromModulePath") != std::string::npos);
+  assert(impl.find("usvfs_x64.dll") != std::string::npos);
 }
 
 void TestPluginsTxtBomHandlingExists()
@@ -47,6 +51,7 @@ void TestPluginsTxtBomHandlingExists()
   const auto impl = ReadFile("helper/src/PluginScanner.cpp");
   assert(impl.find("StripUtf8BomInPlace") != std::string::npos);
   assert(impl.find("ParsePluginsTxt") != std::string::npos);
+  assert(impl.find("\"slot_type_known\"") != std::string::npos);
 }
 
 void TestTestDataExists()

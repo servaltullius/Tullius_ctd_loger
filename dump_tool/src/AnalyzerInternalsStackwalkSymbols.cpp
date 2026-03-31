@@ -98,6 +98,35 @@ std::wstring ResolveRuntimeDllPath(const wchar_t* moduleName)
   return SearchDllPath(moduleName);
 }
 
+std::filesystem::path InferGameExeDirFromModules(const std::vector<ModuleInfo>& modules)
+{
+  for (const auto& module : modules) {
+    if (module.path.empty() || module.filename.empty() || !minidump::IsGameExeModule(module.filename)) {
+      continue;
+    }
+    const std::filesystem::path exePath(module.path);
+    if (exePath.has_parent_path()) {
+      return exePath.parent_path();
+    }
+  }
+  return {};
+}
+
+std::wstring FindBundledGameRuntimeDllPath(const std::vector<ModuleInfo>& modules, const wchar_t* moduleName)
+{
+  if (!moduleName || !*moduleName) {
+    return {};
+  }
+
+  const std::filesystem::path gameExeDir = InferGameExeDirFromModules(modules);
+  if (gameExeDir.empty()) {
+    return {};
+  }
+
+  const auto candidate = gameExeDir / L"Data" / L"SKSE" / L"Plugins" / moduleName;
+  return std::filesystem::exists(candidate) ? candidate.wstring() : std::wstring{};
+}
+
 std::wstring ReadEnvVar(const wchar_t* name)
 {
   if (!name || !*name) {
@@ -233,6 +262,18 @@ SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineS
   }
 
   msdiaPath = ResolveRuntimeDllPath(L"msdia140.dll");
+  if (msdiaPath.empty()) {
+    if (const std::wstring bundledMsdiaPath = FindBundledGameRuntimeDllPath(modules, L"msdia140.dll");
+        !bundledMsdiaPath.empty()) {
+      ownedMsdiaModule = LoadLibraryW(bundledMsdiaPath.c_str());
+      if (ownedMsdiaModule) {
+        msdiaPath = QueryLoadedModulePath(L"msdia140.dll");
+        if (msdiaPath.empty()) {
+          msdiaPath = bundledMsdiaPath;
+        }
+      }
+    }
+  }
   msdiaAvailable = !msdiaPath.empty();
   if (!msdiaAvailable) {
     runtimeDegraded = true;
@@ -290,6 +331,9 @@ SymSession::~SymSession()
 {
   if (ok && process) {
     SymCleanup(process);
+  }
+  if (ownedMsdiaModule) {
+    FreeLibrary(ownedMsdiaModule);
   }
 }
 

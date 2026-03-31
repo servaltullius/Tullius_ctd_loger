@@ -16,6 +16,7 @@ struct PluginMeta
   float header_version = 0.0f;
   bool is_esl = false;
   bool is_active = false;
+  bool slot_type_known = false;
   std::vector<std::string> masters;
 };
 
@@ -33,10 +34,12 @@ std::vector<std::string> ParsePluginsTxt(const std::string& content);
 
 bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir);
 std::vector<std::wstring> CollectModuleFilenamesBestEffort(std::uint32_t pid);
+std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid);
 
 PluginScanResult ScanPlugins(
   const std::filesystem::path& gameExeDir,
-  const std::vector<std::wstring>& moduleFilenames);
+  const std::vector<std::wstring>& moduleFilenames,
+  const std::vector<std::wstring>* modulePaths = nullptr);
 
 std::string SerializePluginScanResult(const PluginScanResult& result);
 
