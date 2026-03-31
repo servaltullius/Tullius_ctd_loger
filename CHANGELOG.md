@@ -2,6 +2,25 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.48 (2026-03-31)
+
+### 한눈에 보기
+- 이번 버전은 **Crash Logger 단서를 Tullius 결론과 더 정확히 맞추는 후속 패치**입니다.
+- Crash Logger의 `CALL STACK ([P]robable / [S]tack scan)` 형식을 제대로 읽어, `[P]` 체인을 실제 후보 근거로 반영합니다.
+- non-system DLL에서 direct fault가 잡혀도, 독립 근거가 부족하면 바로 `유력 후보 / 높음`으로 단정하지 않도록 완화했습니다.
+- mod author에게 바로 보고하라는 안내도 `cross_validated`처럼 교차검증된 경우에만 유지합니다.
+
+### 수정
+- **Crash Logger parser: mixed call stack 형식 지원** — `PROBABLE CALL STACK:`뿐 아니라 `CALL STACK ([P]robable / [S]tack scan):` 헤더도 인식하고, 혼합 형식에서는 `[P]` 행만 probable call stack으로 수집하도록 수정.
+- **Summary: non-system DLL 과단정 완화** — direct fault DLL이 있어도 `frame only`, `reference clue`, `related`, `conflicting`, `cross_validated` 상태를 구분해 요약 문장을 다르게 쓰고, 피해 위치(victim location) 가능성을 더 정직하게 노출.
+- **Recommendations: DLL guidance 조정** — 독립 신호 합의가 없는 경우에는 DLL을 바로 근본 원인으로 단정하지 말라는 안내를 우선하고, mod author 보고 권고는 fault-module candidate가 교차검증된 경우에만 노출.
+
+### 테스트
+- Crash Logger parser 테스트에 mixed `[P]/[S]` call stack fixture를 추가.
+- output snapshot / analysis engine runtime 테스트에 `no second independent signal`, `victim location`, `fault-location evidence only` 같은 비과장 계약을 추가.
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build / WinUI build / Packaging(`--no-pdb`) / release gate 확인.
+
 ## v0.2.47 (2026-03-31)
 
 ### 한눈에 보기
