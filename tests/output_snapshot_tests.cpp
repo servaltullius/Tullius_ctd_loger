@@ -552,8 +552,20 @@ void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
     "Summary and recommendation wording must stay aligned with the frame-first CTD engine path.");
   AssertContains(
     summarySrc,
+    "no second independent signal agrees yet",
+    "Non-system DLL summaries must distinguish isolated frame clues from corroborated DLL blame.");
+  AssertContains(
+    summarySrc,
+    "victim location",
+    "Weak non-system DLL summaries must preserve victim-location caution.");
+  AssertContains(
+    summarySrc,
     "direct DLL fault",
     "Direct DLL fault cases should surface DLL guidance before broader EXE/system triage.");
+  AssertContains(
+    summarySrc,
+    "fault-location evidence only",
+    "Fallback non-system DLL summaries must avoid overclaiming when only the fault location is known.");
 
   std::cout << "  [PASS] Crash Logger frame-first summary priority guards\n";
 }
@@ -625,6 +637,14 @@ void TestCrashLoggerExpandedFixtureSummaryPriorityGuards()
     recommendationSrc,
     "known hook framework DLL",
     "Expanded fixtures must keep hook-framework victim recommendations.");
+  AssertContains(
+    recommendationSrc,
+    "before treating it as the root cause",
+    "Weak non-system DLL recommendations must stay cautious before blaming the DLL.");
+  AssertContains(
+    recommendationSrc,
+    "when reporting to the mod author",
+    "Cross-validated DLL candidates may still escalate to mod-author reporting.");
   AssertContains(
     summaryJsonSrc,
     "\"cpp_exception\"",

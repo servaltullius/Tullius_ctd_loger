@@ -1089,6 +1089,39 @@ static void Test_ParseCrashLoggerFrameSignals_IndexedProbableRows()
   assert(signals.probable_modules_in_order[4] == "HookBridge.dll");
 }
 
+static void Test_ParseCrashLoggerFrameSignals_MixedProbableAndStackScanRows()
+{
+  const std::string log =
+    "CrashLoggerSSE v1-20-1-0 Feb 11 2026 05:26:32\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF87A9D6F4F MaxsuDetectionMeter.dll+0056F4F\n"
+    "CRASH TIME: 2026-03-31 17:15:55\n"
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FF87A9D6F4F MaxsuDetectionMeter.dll+0056F4F\n"
+    "\t[ 1][P] 0x7FF87A9D6D49 MaxsuDetectionMeter.dll+0056D49\n"
+    "\t[ 2][P] 0x7FF878746EAA OpenAnimationReplacer.dll+0146EAA\n"
+    "\t[ 3][P] 0x7FF875B3FE30 po3_PhotoMode.dll+002FE30\n"
+    "\t[18][S] 0x7FF874E52A46 PrismaUI.dll+0002A46\n"
+    "\t[21][S] 0x7FF88583B5EC SKSEMenuFramework.dll+029B5EC\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.direct_fault_module == "MaxsuDetectionMeter.dll");
+  assert(signals.first_actionable_probable_module == "MaxsuDetectionMeter.dll");
+  assert(signals.probable_streak_module == "MaxsuDetectionMeter.dll");
+  assert(signals.probable_streak_length == 2u);
+  assert(signals.probable_modules_in_order.size() == 4u);
+  assert(signals.probable_modules_in_order[0] == "MaxsuDetectionMeter.dll");
+  assert(signals.probable_modules_in_order[2] == "OpenAnimationReplacer.dll");
+  assert(signals.probable_modules_in_order[3] == "po3_PhotoMode.dll");
+
+  const auto topMods = ParseCrashLoggerFrameTopModulesAsciiLower(log);
+  assert(topMods.size() == 3u);
+  assert(topMods[0] == "maxsudetectionmeter.dll");
+  assert(topMods[1] == "openanimationreplacer.dll");
+  assert(topMods[2] == "po3_photomode.dll");
+}
+
 static void Test_ParseCrashLoggerFrameSignals_IgnoresFaultingApplicationName()
 {
   const std::string log =
@@ -1494,6 +1527,7 @@ int main()
   Test_CrashLoggerFrameSignals_PublicContract();
   Test_ParseCrashLoggerFrameSignals_LegacyProbableRows();
   Test_ParseCrashLoggerFrameSignals_IndexedProbableRows();
+  Test_ParseCrashLoggerFrameSignals_MixedProbableAndStackScanRows();
   Test_ParseCrashLoggerFrameSignals_IgnoresFaultingApplicationName();
   Test_ParseCrashLoggerFrameSignals_ExtractsFaultingModulePath();
   Test_ParseCrashLoggerFrameSignals_ExtractsFaultModulePath();

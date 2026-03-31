@@ -599,6 +599,8 @@ void TestCrashLoggerFrameFixture_DirectFaultDllRuntimeContracts()
   const auto log = ReadCrashLoggerFrameFixture("direct_fault_dll.log.txt");
   const auto analyzerCpp = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
   const auto candidateCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
+  const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
+  const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
 
   AssertContains(log, "Precision.dll+0x000FDDC7",
                  "direct_fault_dll.log.txt: fixture must keep the direct DLL fault token.");
@@ -610,6 +612,14 @@ void TestCrashLoggerFrameFixture_DirectFaultDllRuntimeContracts()
                  "direct_fault_dll.log.txt: analyzer must keep storing Crash Logger direct-fault modules.");
   AssertContains(candidateCpp, "CrashLogger direct-fault frame",
                  "direct_fault_dll.log.txt: candidate builder must keep surfacing direct-fault frame clues.");
+  AssertContains(summaryCpp, "no second independent signal agrees yet",
+                 "direct_fault_dll.log.txt: weak non-system DLL summaries must preserve isolated-frame caution.");
+  AssertContains(summaryCpp, "fault-location evidence only",
+                 "direct_fault_dll.log.txt: fallback non-system DLL summaries must avoid overclaiming from fault location alone.");
+  AssertContains(recommendationCpp, "before treating it as the root cause",
+                 "direct_fault_dll.log.txt: weak non-system DLL guidance must stay cautious before blaming the DLL.");
+  AssertContains(recommendationCpp, "when reporting to the mod author",
+                 "direct_fault_dll.log.txt: corroborated DLL suspects may still escalate to mod-author reporting.");
 }
 
 void TestCrashLoggerFrameFixture_ExeVictimFirstProbableDllRuntimeContracts()

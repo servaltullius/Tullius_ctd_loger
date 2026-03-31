@@ -343,6 +343,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
   const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
   const bool hasActionableCandidates = (topCandidate != nullptr);
+  const bool topCandidateMatchesFaultModule =
+    topCandidate &&
+    CandidateMatchesModule(*topCandidate, r.fault_module_filename);
+  const bool topCandidateCrossValidatedFaultModule =
+    topCandidateMatchesFaultModule &&
+    topCandidate->status_id == "cross_validated";
 
   if (r.signature_match.has_value()) {
     for (const auto& rec : r.signature_match->recommendations) {
@@ -546,11 +552,17 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 
   if (allowTopSuspectActionRecommendations && hasModule && !isSystem && !isGameExe && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
-      ? L"[Top suspect] Verify prerequisites/versions for the mod containing this DLL (SKSE / Address Library / game runtime)."
-      : L"[유력 후보] 해당 DLL이 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전) 충족 여부 확인");
-    r.recommendations.push_back(en
-      ? L"[Top suspect] Attach this report (*_SkyrimDiagReport.txt) and dump (*.dmp) when reporting to the mod author."
-      : L"[유력 후보] 이 리포트 파일(*_SkyrimDiagReport.txt)과 덤프(*.dmp)를 모드 제작자에게 첨부");
+      ? (topCandidateCrossValidatedFaultModule
+          ? L"[Top suspect] Verify prerequisites/versions for the mod containing this DLL (SKSE / Address Library / game runtime)."
+          : L"[DLL guidance] Verify prerequisites/versions for the mod containing this DLL before treating it as the root cause.")
+      : (topCandidateCrossValidatedFaultModule
+          ? L"[유력 후보] 해당 DLL이 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전) 충족 여부 확인"
+          : L"[DLL guidance] 이 DLL을 바로 근본 원인으로 단정하기 전에, 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전)부터 확인하세요."));
+    if (topCandidateCrossValidatedFaultModule) {
+      r.recommendations.push_back(en
+        ? L"[Top suspect] Attach this report (*_SkyrimDiagReport.txt) and dump (*.dmp) when reporting to the mod author."
+        : L"[유력 후보] 이 리포트 파일(*_SkyrimDiagReport.txt)과 덤프(*.dmp)를 모드 제작자에게 첨부");
+    }
   } else if (allowTopSuspectActionRecommendations && hasModule && isGameExe) {
     if (!r.crash_logger_object_refs.empty()) {
       // ESP/ESM reference is the primary clue for EXE crashes — already emitted above as [ESP/ESM]

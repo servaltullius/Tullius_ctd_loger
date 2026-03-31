@@ -231,6 +231,9 @@ bool LooksLikeCrashLoggerLogTextCore(std::string_view utf8Prefix)
   return ContainsCaseInsensitiveAscii(utf8Prefix, "crash time:") ||
          ContainsCaseInsensitiveAscii(utf8Prefix, "thread dump") ||
          ContainsCaseInsensitiveAscii(utf8Prefix, "probable call stack") ||
+         (ContainsCaseInsensitiveAscii(utf8Prefix, "call stack") &&
+          ContainsCaseInsensitiveAscii(utf8Prefix, "[p]robable") &&
+          ContainsCaseInsensitiveAscii(utf8Prefix, "[s]tack scan")) ||
          ContainsCaseInsensitiveAscii(utf8Prefix, "process info:");
 }
 
@@ -348,6 +351,25 @@ bool IsCrashLoggerProbableSectionTerminator(std::string_view line)
          EqualsCaseInsensitiveAscii(trimmed, "MODULES:") ||
          EqualsCaseInsensitiveAscii(trimmed, "POSSIBLE RELEVANT OBJECTS:") ||
          EqualsCaseInsensitiveAscii(trimmed, "C++ EXCEPTION:");
+}
+
+bool IsCrashLoggerMixedCallstackHeaderAscii(std::string_view line)
+{
+  const std::string_view trimmed = TrimAscii(line);
+  return ContainsCaseInsensitiveAscii(trimmed, "call stack") &&
+         ContainsCaseInsensitiveAscii(trimmed, "[p]robable") &&
+         ContainsCaseInsensitiveAscii(trimmed, "[s]tack scan");
+}
+
+bool IsCrashLoggerProbableCallstackHeaderAscii(std::string_view line)
+{
+  return ContainsCaseInsensitiveAscii(line, "probable call stack") ||
+         IsCrashLoggerMixedCallstackHeaderAscii(line);
+}
+
+bool IsCrashLoggerMixedProbableRowAscii(std::string_view line)
+{
+  return ContainsCaseInsensitiveAscii(TrimAscii(line), "[p]");
 }
 
 bool IsCrashLoggerDirectFaultLineAscii(std::string_view line)
@@ -473,6 +495,7 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
   std::istringstream iss{ std::string(logUtf8) };
   std::string line;
   bool inProbableCallStack = false;
+  bool mixedProbableRows = false;
   bool allowDirectFaultScan = true;
 
   while (std::getline(iss, line)) {
@@ -489,8 +512,9 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
     }
 
     if (!inProbableCallStack) {
-      if (ContainsCaseInsensitiveAscii(line, "probable call stack")) {
+      if (IsCrashLoggerProbableCallstackHeaderAscii(line)) {
         inProbableCallStack = true;
+        mixedProbableRows = IsCrashLoggerMixedCallstackHeaderAscii(line);
         allowDirectFaultScan = false;
       }
       continue;
@@ -498,6 +522,10 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
 
     if (IsCrashLoggerProbableSectionTerminator(line)) {
       break;
+    }
+
+    if (mixedProbableRows && !IsCrashLoggerMixedProbableRowAscii(line)) {
+      continue;
     }
 
     if (auto module = TryExtractModuleNameFromLineAscii(line)) {
