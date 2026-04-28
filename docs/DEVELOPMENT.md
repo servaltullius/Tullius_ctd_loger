@@ -103,10 +103,10 @@ build-win\bin\skydiag_helper_hang_runtime_tests.exe
 If launching from WSL, prefer Windows PowerShell `Start-Process -Wait -PassThru` and run them one at a time:
 
 ```bash
-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$tests = @(
-  "Z:\home\kdw73\Tullius_ctd_loger\build-win\bin\skydiag_helper_runtime_smoke_tests.exe",
-  "Z:\home\kdw73\Tullius_ctd_loger\build-win\bin\skydiag_helper_false_positive_runtime_tests.exe",
-  "Z:\home\kdw73\Tullius_ctd_loger\build-win\bin\skydiag_helper_hang_runtime_tests.exe"
+SKYDIAG_REPO="$(wslpath -w "$PWD")" /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -Command '$tests = @(
+  (Join-Path $env:SKYDIAG_REPO "build-win\bin\skydiag_helper_runtime_smoke_tests.exe"),
+  (Join-Path $env:SKYDIAG_REPO "build-win\bin\skydiag_helper_false_positive_runtime_tests.exe"),
+  (Join-Path $env:SKYDIAG_REPO "build-win\bin\skydiag_helper_hang_runtime_tests.exe")
 ); foreach ($test in $tests) { $p = Start-Process -FilePath $test -Wait -PassThru -NoNewWindow; if ($p.ExitCode -ne 0) { exit $p.ExitCode } }'
 ```
 

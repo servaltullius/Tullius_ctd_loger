@@ -107,6 +107,7 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
         info.header_version = p.value("header_version", 0.0f);
         info.is_esl = p.value("is_esl", false);
         info.is_active = p.value("is_active", false);
+        info.slot_type_known = p.value("slot_type_known", true);
         if (auto itMasters = p.find("masters"); itMasters != p.end() && itMasters->is_array()) {
           for (const auto& m : *itMasters) {
             if (m.is_string()) {
@@ -179,7 +180,18 @@ std::size_t CountEslPlugins(const ParsedPluginScan& scan)
 {
   std::size_t count = 0;
   for (const auto& plugin : scan.plugins) {
-    if (plugin.is_esl) {
+    if (plugin.is_active && plugin.is_esl) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+std::size_t CountFullPlugins(const ParsedPluginScan& scan)
+{
+  std::size_t count = 0;
+  for (const auto& plugin : scan.plugins) {
+    if (plugin.is_active && plugin.slot_type_known && !plugin.is_esl) {
       ++count;
     }
   }
@@ -258,6 +270,14 @@ bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)
           rule.esl_count_gte = static_cast<std::size_t>(v);
         }
       }
+      if (auto it = cond.find("full_plugin_count_gte"); it != cond.end() && it->is_number_unsigned()) {
+        rule.full_plugin_count_gte = static_cast<std::size_t>(it->get<std::uint64_t>());
+      } else if (auto it2 = cond.find("full_plugin_count_gte"); it2 != cond.end() && it2->is_number_integer()) {
+        const auto v = it2->get<std::int64_t>();
+        if (v >= 0) {
+          rule.full_plugin_count_gte = static_cast<std::size_t>(v);
+        }
+      }
 
       const auto& diag = *itDiagnosis;
       rule.cause_ko = Utf8ToWide(diag.value("cause_ko", ""));
@@ -305,6 +325,7 @@ std::vector<PluginRuleDiagnosis> PluginRules::Evaluate(const PluginRulesContext&
     ? ComputeMissingMasters(scan)
     : ctx.missing_masters;
   const std::size_t eslCount = CountEslPlugins(scan);
+  const std::size_t fullPluginCount = CountFullPlugins(scan);
 
   std::unordered_set<std::wstring> loadedModulesLower;
   loadedModulesLower.reserve(ctx.loaded_module_filenames.size());
@@ -338,6 +359,10 @@ std::vector<PluginRuleDiagnosis> PluginRules::Evaluate(const PluginRulesContext&
     }
 
     if (rule.esl_count_gte.has_value() && eslCount < *rule.esl_count_gte) {
+      continue;
+    }
+
+    if (rule.full_plugin_count_gte.has_value() && fullPluginCount < *rule.full_plugin_count_gte) {
       continue;
     }
 

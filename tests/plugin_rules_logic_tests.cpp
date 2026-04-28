@@ -226,6 +226,134 @@ void TestRulesEvaluateFromJson()
   std::filesystem::remove(tmp, ec);
 }
 
+void TestFullPluginSlotRuleRequiresActiveFullThreshold()
+{
+  const auto tmp = std::filesystem::temp_directory_path() / "skydiag_plugin_rules_full_slot_test.json";
+  const std::string rulesJson = R"JSON(
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "ESP_FULL_SLOT_NEAR_LIMIT",
+      "condition": {
+        "full_plugin_count_gte": 3
+      },
+      "diagnosis": {
+        "cause_ko": "ko",
+        "cause_en": "near full slot",
+        "confidence": "high",
+        "recommendations_ko": ["ko"],
+        "recommendations_en": ["en"]
+      }
+    }
+  ]
+}
+)JSON";
+
+  {
+    std::ofstream f(tmp);
+    assert(f.is_open());
+    f << rulesJson;
+  }
+
+  const char* belowThresholdJson = R"JSON(
+{
+  "plugins": [
+    { "filename": "A.esm", "is_esl": false, "is_active": true, "masters": [] },
+    { "filename": "B.esp", "is_esl": false, "is_active": true, "masters": [] },
+    { "filename": "Light.esl", "is_esl": true, "is_active": true, "masters": [] },
+    { "filename": "Disabled.esp", "is_esl": false, "is_active": false, "masters": [] }
+  ]
+}
+)JSON";
+
+  ParsedPluginScan below{};
+  assert(ParsePluginScanJson(belowThresholdJson, &below));
+
+  PluginRules rules;
+  assert(rules.LoadFromJson(tmp));
+
+  PluginRulesContext ctx{};
+  ctx.scan = &below;
+  const auto belowDiags = rules.Evaluate(ctx);
+  assert(belowDiags.empty());
+
+  const char* atThresholdJson = R"JSON(
+{
+  "plugins": [
+    { "filename": "A.esm", "is_esl": false, "is_active": true, "masters": [] },
+    { "filename": "B.esp", "is_esl": false, "is_active": true, "masters": [] },
+    { "filename": "C.esp", "is_esl": false, "is_active": true, "masters": [] },
+    { "filename": "Light.esl", "is_esl": true, "is_active": true, "masters": [] }
+  ]
+}
+)JSON";
+
+  ParsedPluginScan at{};
+  assert(ParsePluginScanJson(atThresholdJson, &at));
+  ctx.scan = &at;
+  const auto atDiags = rules.Evaluate(ctx);
+  assert(atDiags.size() == 1);
+  assert(atDiags[0].rule_id == "ESP_FULL_SLOT_NEAR_LIMIT");
+
+  std::error_code ec;
+  std::filesystem::remove(tmp, ec);
+}
+
+void TestEslSlotRuleCountsOnlyActivePlugins()
+{
+  const auto tmp = std::filesystem::temp_directory_path() / "skydiag_plugin_rules_esl_slot_test.json";
+  const std::string rulesJson = R"JSON(
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "ESL_SLOT_NEAR_LIMIT",
+      "condition": {
+        "esl_count_gte": 2
+      },
+      "diagnosis": {
+        "cause_ko": "ko",
+        "cause_en": "near esl slot",
+        "confidence": "low",
+        "recommendations_ko": ["ko"],
+        "recommendations_en": ["en"]
+      }
+    }
+  ]
+}
+)JSON";
+
+  {
+    std::ofstream f(tmp);
+    assert(f.is_open());
+    f << rulesJson;
+  }
+
+  const char* scanJson = R"JSON(
+{
+  "plugins": [
+    { "filename": "Active.esl", "is_esl": true, "is_active": true, "masters": [] },
+    { "filename": "Inactive.esl", "is_esl": true, "is_active": false, "masters": [] }
+  ]
+}
+)JSON";
+
+  ParsedPluginScan scan{};
+  assert(ParsePluginScanJson(scanJson, &scan));
+
+  PluginRules rules;
+  assert(rules.LoadFromJson(tmp));
+
+  PluginRulesContext ctx{};
+  ctx.scan = &scan;
+  const auto diags = rules.Evaluate(ctx);
+  assert(diags.empty());
+
+  std::error_code ec;
+  std::filesystem::remove(tmp, ec);
+}
+
 }  // namespace
 
 int main()
@@ -235,5 +363,7 @@ int main()
   TestMissingMastersIgnoreInactivePlugins();
   TestMissingMastersIgnoreImplicitRuntimeMasters();
   TestRulesEvaluateFromJson();
+  TestFullPluginSlotRuleRequiresActiveFullThreshold();
+  TestEslSlotRuleCountsOnlyActivePlugins();
   return 0;
 }

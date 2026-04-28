@@ -93,6 +93,18 @@ def main() -> int:
     assert "%$'\\r'}" in gate_script, (
         "release gate must trim Windows CRLF output from Python helper snippets before path checks"
     )
+    assert "DEFAULT_REPO_ROOT" in gate_script, (
+        "release gate must derive its default repo root from its own script location"
+    )
+    assert 'WIN_ROOT="${2:-${REPO_ROOT}}"' in gate_script, (
+        "release gate must default to the current repo root after the Windows drive relocation"
+    )
+    assert "/home/kdw73/Tullius_ctd_loger" not in gate_script, (
+        "release gate must not default to the old WSL checkout path"
+    )
+    assert "/mnt/c/Users/kdw73/Tullius_ctd_loger" not in gate_script, (
+        "release gate must not default to the old Windows mirror path"
+    )
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )

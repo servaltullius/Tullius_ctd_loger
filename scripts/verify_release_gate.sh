@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="${1:-/home/kdw73/Tullius_ctd_loger}"
-WIN_ROOT="${2:-/mnt/c/Users/kdw73/Tullius_ctd_loger}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+
+REPO_ROOT="${1:-${DEFAULT_REPO_ROOT}}"
+WIN_ROOT="${2:-${REPO_ROOT}}"
 ZIP_PATH="${3:-}"
 PYTHON_BIN="$(command -v python3 || command -v python || true)"
 

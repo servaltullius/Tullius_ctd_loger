@@ -17,6 +17,7 @@ struct PluginEntryInfo
   float header_version = 0.0f;
   bool is_esl = false;
   bool is_active = false;
+  bool slot_type_known = true;
   std::vector<std::string> masters;
 };
 
@@ -69,6 +70,7 @@ private:
     std::optional<std::wstring> module_not_loaded_lower;
     std::optional<bool> has_missing_master;
     std::optional<std::size_t> esl_count_gte;
+    std::optional<std::size_t> full_plugin_count_gte;
 
     std::wstring cause_ko;
     std::wstring cause_en;

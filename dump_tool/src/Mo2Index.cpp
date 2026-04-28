@@ -289,7 +289,9 @@ std::optional<Mo2Index> TryBuildMo2IndexFromModulePaths(const std::vector<std::w
   std::unordered_set<std::wstring> usedLower;
   usedLower.reserve(dirByLower.size());
 
+  bool activeProfileModlistLoaded = false;
   if (!idx.modlistPath.empty() && std::filesystem::exists(idx.modlistPath, ec)) {
+    activeProfileModlistLoaded = true;
     const auto enabledWinnerFirst = ReadMo2EnabledModsWinnerFirst(idx.modlistPath);
     idx.modDirs.reserve(enabledWinnerFirst.size());
     idx.modNames.reserve(enabledWinnerFirst.size());
@@ -307,8 +309,9 @@ std::optional<Mo2Index> TryBuildMo2IndexFromModulePaths(const std::vector<std::w
     }
   }
 
-  // Append any remaining mod directories not present in the active profile list (deterministic by name).
-  if (idx.modDirs.size() < dirByLower.size()) {
+  // Without an active profile, fall back to installed dirs. When a profile was read,
+  // keep provider hints scoped to enabled mods so disabled profile entries do not look active.
+  if (!activeProfileModlistLoaded && idx.modDirs.size() < dirByLower.size()) {
     std::vector<std::wstring> remaining;
     remaining.reserve(dirByLower.size() - idx.modDirs.size());
     for (const auto& [lower, _] : dirByLower) {

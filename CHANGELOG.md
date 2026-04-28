@@ -2,6 +2,27 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.50 (2026-04-28)
+
+### 한눈에 보기
+- 이번 릴리즈는 **MO2 활성 프로필 기준의 provider/slot 진단 정확도 보정**입니다.
+- 활성 profile의 `modlist.txt`를 읽은 경우, 비활성화된 모드가 loose-file provider 후보처럼 보이지 않도록 했습니다.
+- ESL / full plugin 슬롯 경고는 활성 플러그인만 세고, full plugin 판정이 불확실한 항목은 고신뢰 슬롯 한계 경고에서 제외하도록 조정했습니다.
+- 프로젝트를 `G:\skyrim project\Tullius_ctd_loger`로 옮긴 뒤에도 릴리즈 게이트와 외부 build tree 테스트가 현재 repo root를 올바르게 잡도록 보강했습니다.
+
+### 수정
+- **MO2 provider hint: 비활성 모드 제외** — 활성 profile modlist를 정상적으로 읽은 경우 provider 검색을 활성 모드 범위로 제한해, 꺼져 있는 모드가 리소스 제공 후보처럼 표시되는 오탐을 줄였습니다.
+- **Plugin rules: 활성 슬롯 기준 보정** — `esl_count_gte`는 활성 ESL만 세도록 바꾸고, 새 `full_plugin_count_gte` 조건은 활성 full plugin 중 슬롯 타입을 알고 있는 항목만 세도록 추가했습니다.
+- **Release gate: 이동 후 경로 안정화** — `verify_release_gate.sh`가 예전 WSL checkout / Windows mirror 경로 대신 스크립트 위치에서 기본 repo root를 계산하도록 변경했습니다.
+- **Tests: 외부 build tree 안정화** — `skydiag_candidate_consensus_tests`가 repo 밖 build tree에서도 source root를 찾도록 CTest 환경을 보강했습니다.
+
+### 테스트
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build: 성공.
+- Windows WinUI build: 성공.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.50.zip`, `--no-pdb`): 성공.
+- Release gate: `OK`.
+
 ## v0.2.49 (2026-04-02)
 
 ### 한눈에 보기

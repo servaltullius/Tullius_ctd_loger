@@ -1,11 +1,32 @@
 #include "Mo2Index.h"
 
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
+using skydiag::dump_tool::FindMo2ProvidersForDataPath;
 using skydiag::dump_tool::InferMo2ModNameFromPath;
+using skydiag::dump_tool::TryBuildMo2IndexFromModulePaths;
 using skydiag::dump_tool::TryInferMo2BaseDirFromModulePaths;
+
+namespace {
+
+void WriteTextFile(const std::filesystem::path& path, const std::string& text)
+{
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream out(path, std::ios::binary);
+  assert(out.is_open());
+  out << text;
+}
+
+void TouchFile(const std::filesystem::path& path)
+{
+  WriteTextFile(path, "x");
+}
+
+}  // namespace
 
 // ── InferMo2ModNameFromPath ────────────────────────
 
@@ -85,6 +106,39 @@ static void Test_InferBaseDir_EmptyStringsIgnored()
   assert(!result.has_value());
 }
 
+static void Test_ActiveProfileProviderScan_DoesNotIncludeDisabledMods()
+{
+  const auto base = std::filesystem::temp_directory_path() / "skydiag_mo2_index_active_profile_test";
+  std::error_code ec;
+  std::filesystem::remove_all(base, ec);
+
+  WriteTextFile(base / "ModOrganizer.ini", "selected_profile=@ByteArray(Default)\n");
+  WriteTextFile(
+    base / "profiles" / "Default" / "modlist.txt",
+    "+Active Low\n"
+    "-Disabled Source\n"
+    "+Active Winner\n");
+
+  const auto rel = std::filesystem::path("meshes") / "footprints" / "test.nif";
+  TouchFile(base / "mods" / "Active Low" / rel);
+  TouchFile(base / "mods" / "Active Winner" / rel);
+  TouchFile(base / "mods" / "Disabled Source" / rel);
+
+  const std::wstring modulePath = base.wstring() + L"\\mods\\Active Winner\\SKSE\\Plugins\\winner.dll";
+  const auto idx = TryBuildMo2IndexFromModulePaths({modulePath});
+  assert(idx.has_value());
+
+  const auto providers = FindMo2ProvidersForDataPath(*idx, L"meshes/footprints/test.nif", 8);
+  assert(providers.size() == 2);
+  assert(providers[0] == L"Active Winner");
+  assert(providers[1] == L"Active Low");
+  for (const auto& provider : providers) {
+    assert(provider != L"Disabled Source");
+  }
+
+  std::filesystem::remove_all(base, ec);
+}
+
 int main()
 {
   Test_InferModName_StandardPath();
@@ -98,6 +152,7 @@ int main()
   Test_InferBaseDir_NoMatch();
   Test_InferBaseDir_EmptyPaths();
   Test_InferBaseDir_EmptyStringsIgnored();
+  Test_ActiveProfileProviderScan_DoesNotIncludeDisabledMods();
 
   return 0;
 }

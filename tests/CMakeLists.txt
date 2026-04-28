@@ -200,6 +200,9 @@ target_include_directories(skydiag_candidate_consensus_tests PRIVATE
 )
 
 add_test(NAME skydiag_candidate_consensus_tests COMMAND skydiag_candidate_consensus_tests)
+set_tests_properties(skydiag_candidate_consensus_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
 
 add_executable(skydiag_freeze_candidate_consensus_tests
   freeze_candidate_consensus_tests.cpp
