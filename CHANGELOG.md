@@ -2,6 +2,24 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.51 (2026-05-04)
+
+### 한눈에 보기
+- 이번 릴리즈는 **CrashLoggerSSE v1.21/v1.22 객체 introspection 호환성 보강**입니다.
+- Crash Logger가 새로 출력하는 `SpellItem`, `EffectSetting`, `BGSLocation`, `NavMesh` 요약 라인에서도 원인 후보 ESP/FormID와 객체 타입/이름을 유지하도록 파서를 보강했습니다.
+- 기존 `RDI: (Character*) ...` 형식은 그대로 유지하고, `RDX: RE::SpellItem "..." [0x...] (Mod.esp)` 같은 새 요약 포맷만 fallback으로 처리합니다.
+
+### 수정
+- **CrashLogger parser: simplified introspection 지원** — `POSSIBLE RELEVANT OBJECTS` 안의 `RE::SpellItem`, `RE::EffectSetting`, `RE::BGSLocation`, `RE::NavMesh` 라인에서 타입, 표시 이름, FormID, plugin 파일명을 함께 추출합니다.
+- **Regression tests: v1.21/v1.22 객체 라인 가드 추가** — 최신 CrashLoggerSSE의 spell/effect/location/navmesh 예시 라인을 파서 테스트에 추가해 이후 포맷 회귀를 잡도록 했습니다.
+
+### 테스트
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build: 성공.
+- Windows WinUI build: 성공.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.51.zip`, `--no-pdb`): 성공.
+- Release gate: `OK`.
+
 ## v0.2.50 (2026-04-28)
 
 ### 한눈에 보기

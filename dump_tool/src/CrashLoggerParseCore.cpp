@@ -915,6 +915,15 @@ std::vector<std::string> ExtractEspNamesFromLine(std::string_view line)
   return results;
 }
 
+std::string_view ObjectPayloadAfterLocation(std::string_view line)
+{
+  const auto colon = line.find(':');
+  if (colon != std::string_view::npos) {
+    line = line.substr(colon + 1);
+  }
+  return TrimLeftAscii(line);
+}
+
 std::string ExtractObjectType(std::string_view line)
 {
   auto open = line.find('(');
@@ -929,13 +938,57 @@ std::string ExtractObjectType(std::string_view line)
     }
     open = line.find('(', close + 1);
   }
-  return {};
+
+  std::string_view payload = ObjectPayloadAfterLocation(line);
+  if (payload.empty() || payload.front() == '(' || payload.front() == '[' || payload.front() == '"') {
+    return {};
+  }
+
+  const auto typeEnd = payload.find_first_of(" \t\"[({");
+  std::string_view typeName = typeEnd == std::string_view::npos ? payload : payload.substr(0, typeEnd);
+  typeName = TrimAscii(typeName);
+  if (typeName.empty() || LooksLikePluginExtension(typeName)) {
+    return {};
+  }
+  return std::string(typeName);
+}
+
+std::string ExtractSimplifiedObjectName(std::string_view line)
+{
+  std::string_view payload = ObjectPayloadAfterLocation(line);
+  if (payload.empty() || payload.front() == '(' || payload.front() == '[') {
+    return {};
+  }
+
+  const auto quote = payload.find('"');
+  if (quote == std::string_view::npos) {
+    return {};
+  }
+
+  const auto bracket = payload.find('[');
+  if (bracket != std::string_view::npos && bracket < quote) {
+    return {};
+  }
+
+  const auto paren = payload.find('(');
+  if (paren != std::string_view::npos && paren < quote) {
+    return {};
+  }
+
+  const auto endq = payload.find('"', quote + 1);
+  if (endq == std::string_view::npos) {
+    return {};
+  }
+
+  return std::string(payload.substr(quote + 1, endq - quote - 1));
 }
 
 std::string ExtractObjectName(std::string_view line)
 {
   auto typeEnd = line.find("*) ");
-  if (typeEnd == std::string_view::npos) return {};
+  if (typeEnd == std::string_view::npos) {
+    return ExtractSimplifiedObjectName(line);
+  }
   auto afterType = line.substr(typeEnd + 3);
   if (afterType.empty() || afterType[0] != '"') return {};
   auto endq = afterType.find('"', 1);

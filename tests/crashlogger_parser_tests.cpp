@@ -884,6 +884,61 @@ static void Test_ParseObjectRefs_CCContentFiltered()
   assert(refs[0].esp_name == "RealMod.esp");
 }
 
+static const CrashLoggerObjectRef* FindObjectRefByEsp(
+    const std::vector<CrashLoggerObjectRef>& refs,
+    const std::string& espName)
+{
+  for (const auto& ref : refs) {
+    if (ref.esp_name == espName) {
+      return &ref;
+    }
+  }
+  return nullptr;
+}
+
+static void Test_ParseObjectRefs_CrashLoggerV121V122SimplifiedIntrospection()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.22.0 May  2 2026 02:29:15\n"
+    "CRASH TIME: 2026-05-04 19:22:00\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDX: RE::SpellItem \"Chain Heal\" [0xFE123456] (MagicOverhaul.esp) {Spell, Concentration, Aimed}\n"
+    "\tR8: RE::EffectSetting \"Bleeding Wound\" [0xFE234567] (CombatMagic.esl) {ValueModifier}\n"
+    "\tR9: RE::BGSLocation \"Forgotten Crypt\" [0xFE345678] (LocationPatch.esp)\n"
+    "\tR10: RE::NavMesh [0xFE456789] (NavmeshPatch.esm)\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  assert(refs.size() == 4);
+
+  const auto* spell = FindObjectRefByEsp(refs, "MagicOverhaul.esp");
+  assert(spell);
+  assert(spell->location == "RDX");
+  assert(spell->object_type == "RE::SpellItem");
+  assert(spell->object_name == "Chain Heal");
+  assert(spell->form_id == "0xFE123456");
+
+  const auto* effect = FindObjectRefByEsp(refs, "CombatMagic.esl");
+  assert(effect);
+  assert(effect->location == "R8");
+  assert(effect->object_type == "RE::EffectSetting");
+  assert(effect->object_name == "Bleeding Wound");
+  assert(effect->form_id == "0xFE234567");
+
+  const auto* location = FindObjectRefByEsp(refs, "LocationPatch.esp");
+  assert(location);
+  assert(location->object_type == "RE::BGSLocation");
+  assert(location->object_name == "Forgotten Crypt");
+  assert(location->form_id == "0xFE345678");
+
+  const auto* navmesh = FindObjectRefByEsp(refs, "NavmeshPatch.esm");
+  assert(navmesh);
+  assert(navmesh->object_type == "RE::NavMesh");
+  assert(navmesh->object_name.empty());
+  assert(navmesh->form_id == "0xFE456789");
+}
+
 // ── Group 10: FormID extraction tests ──
 
 static void Test_ExtractFormIdBefore_Basic()
@@ -1512,6 +1567,7 @@ int main()
   Test_ParseObjectRefs_MalformedQuotedParen_NoInfiniteLoop();
   Test_ExtractEspNames_NoParens();
   Test_ParseObjectRefs_CCContentFiltered();
+  Test_ParseObjectRefs_CrashLoggerV121V122SimplifiedIntrospection();
 
   // Group 10: FormID extraction tests
   Test_ExtractFormIdBefore_Basic();
