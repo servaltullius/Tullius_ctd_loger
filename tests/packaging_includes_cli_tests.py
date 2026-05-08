@@ -278,6 +278,7 @@ def main() -> int:
         _touch(build_dir / "bin" / "SkyrimDiagHelper.exe")
         _touch(build_dir / "bin" / "SkyrimDiagDumpToolNative.dll")
         _touch(build_dir / "bin" / "SkyrimDiagDumpToolCli.exe")
+        _touch(build_dir / "bin" / "SkyrimDiagDumpToolWinUI.exe")
 
         # Minimal fake WinUI publish folder.
         _touch(winui_dir / "SkyrimDiagDumpToolWinUI.exe")
@@ -336,6 +337,19 @@ def main() -> int:
         for entry in REQUIRED_ZIP_ENTRIES:
             assert entry in names, f"Missing required zip entry in zip: {entry}"
 
+        assert "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe" in names, (
+            "Expected top-level WinUI launcher exe to remain easy to find"
+        )
+        assert "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.exe" in names, (
+            "Expected self-contained WinUI app exe to live under the app subfolder"
+        )
+        assert "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolNative.dll" in names, (
+            "Expected native analyzer DLL beside the real WinUI app executable"
+        )
+        assert "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll" not in names, (
+            "Top-level WinUI folder should expose the launcher, not mixed runtime/native sidecars"
+        )
+
         assert "SKSE/Plugins/SkyrimDiag.ini" in names, (
             "Expected SkyrimDiag.ini to be packaged"
         )
@@ -358,7 +372,7 @@ def main() -> int:
         assert expected_data, "Expected at least one dump_tool/data file in repository"
         for rel in expected_data:
             plugin_data_path = f"SKSE/Plugins/data/{rel}"
-            winui_data_path = f"SKSE/Plugins/SkyrimDiagWinUI/data/{rel}"
+            winui_data_path = f"SKSE/Plugins/SkyrimDiagWinUI/app/data/{rel}"
             assert plugin_data_path in names, (
                 f"Missing plugin data file in zip: {plugin_data_path}"
             )

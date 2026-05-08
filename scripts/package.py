@@ -121,6 +121,7 @@ def main(argv: list[str]) -> int:
     helper_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagHelper.exe")
     native_dll = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolNative.dll")
     cli_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.exe")
+    winui_launcher_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolWinUI.exe")
 
     if not plugin_dll:
         print(
@@ -143,6 +144,12 @@ def main(argv: list[str]) -> int:
     if not cli_exe:
         print(
             "ERROR: could not find SkyrimDiagDumpToolCli.exe. Build the project first.",
+            file=sys.stderr,
+        )
+        return 3
+    if not winui_launcher_exe:
+        print(
+            "ERROR: could not find SkyrimDiagDumpToolWinUI.exe launcher. Build the project first.",
             file=sys.stderr,
         )
         return 3
@@ -232,7 +239,10 @@ def main(argv: list[str]) -> int:
 
         copied_winui = 0
         winui_plugins_dir = plugins_dir / "SkyrimDiagWinUI"
+        winui_app_dir = winui_plugins_dir / "app"
         winui_plugins_dir.mkdir(parents=True, exist_ok=True)
+        winui_app_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(winui_launcher_exe, winui_plugins_dir / "SkyrimDiagDumpToolWinUI.exe")
         for item in winui_publish_dir.rglob("*"):
             if not item.is_file():
                 continue
@@ -242,7 +252,7 @@ def main(argv: list[str]) -> int:
             if rel.parts and rel.parts[0].lower() in EXCLUDED_WINUI_TOP_LEVEL_DIRS:
                 # Avoid packaging nested build/publish outputs that duplicate WinUI runtime files.
                 continue
-            dst = winui_plugins_dir / rel
+            dst = winui_app_dir / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, dst)
             copied_winui += 1
@@ -253,14 +263,14 @@ def main(argv: list[str]) -> int:
             )
             return 5
 
-        shutil.copy2(native_dll, winui_plugins_dir / "SkyrimDiagDumpToolNative.dll")
+        shutil.copy2(native_dll, winui_app_dir / "SkyrimDiagDumpToolNative.dll")
         for rel in dump_tool_data_files:
             src = data_root / rel
-            dst = winui_plugins_dir / "data" / rel
+            dst = winui_app_dir / "data" / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
         if native_pdb and native_pdb.is_file():
-            shutil.copy2(native_pdb, winui_plugins_dir / "SkyrimDiagDumpToolNative.pdb")
+            shutil.copy2(native_pdb, winui_app_dir / "SkyrimDiagDumpToolNative.pdb")
 
         _zip_dir(pkg_root, out_zip)
 
@@ -268,7 +278,8 @@ def main(argv: list[str]) -> int:
     print(f"- Plugin: {plugin_dll}")
     print(f"- Helper: {helper_exe}")
     print(f"- DumpToolCli: {cli_exe}")
-    print(f"- DumpToolWinUI: {winui_exe}")
+    print(f"- DumpToolWinUI launcher: {winui_launcher_exe}")
+    print(f"- DumpToolWinUI app: {winui_exe}")
     print(f"- DumpToolNative: {native_dll}")
     return 0
 

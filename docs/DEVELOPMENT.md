@@ -17,8 +17,8 @@ This repository contains an MVP implementation of the design in:
 - Helper (EXE): attach/monitor, hang detection, WCT capture, MiniDumpWriteDump with user streams (blackbox + WCT JSON)
 - DumpTool (CLI + WinUI + native analyzer DLL):
   - Headless CLI: `SkyrimDiagDumpToolCli.exe`
-  - WinUI shell: `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-  - Native analyzer: `SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
+  - WinUI launcher: `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
+  - Self-contained WinUI app/runtime/native analyzer: `SkyrimDiagWinUI/app/`
 
 ## Install (MO2) (Local Testing)
 
@@ -29,12 +29,13 @@ Install as a mod with:
 - `SKSE/Plugins/SkyrimDiagHelper.ini`
 - `SKSE/Plugins/SkyrimDiagDumpToolCli.exe`
 - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-- `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
+- `SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.exe`
+- `SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolNative.dll`
 
 Default behavior: launching SKSE will auto-start the helper (`AutoStartHelper=1` in `SkyrimDiag.ini`).
 
 Runtime prerequisites for release distribution:
-- WinUI release builds are self-contained (`v0.2.52+`) and bundle .NET + Windows App SDK files next to `SkyrimDiagDumpToolWinUI.exe`.
+- WinUI release builds are self-contained (`v0.2.52+`). In `v0.2.53+`, the easy-to-find top-level `SkyrimDiagDumpToolWinUI.exe` is a native launcher and the .NET + Windows App SDK files live under `SkyrimDiagWinUI/app/`.
 - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
 
 ## Use (For Testing)
@@ -121,8 +122,8 @@ After building on Windows, create an MO2-friendly zip:
 python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
 ```
 
-The packager requires self-contained WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes both `SkyrimDiagDumpToolWinUI.exe` and `SkyrimDiagDumpToolNative.dll`.
-Because the WinUI viewer is self-contained, the zip intentionally includes many .NET and Windows App SDK sidecar files under `SKSE/Plugins/SkyrimDiagWinUI/`.
+The packager requires self-contained WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes a top-level WinUI launcher plus the real WinUI app/runtime under `SKSE/Plugins/SkyrimDiagWinUI/app/`.
+Because the WinUI viewer is self-contained, the zip intentionally includes many .NET and Windows App SDK sidecar files under the `app` subfolder.
 It also packages `dump_tool/data` recursively (for both plugin path and WinUI path), so newly added data files do not require manual script edits.
 
 ## Release (GitHub)

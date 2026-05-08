@@ -247,8 +247,9 @@ DumpToolViewerLaunchResult StartDumpToolViewer(
           + std::filesystem::path(dumpPath).filename().wstring()
           + L", exe="
           + exe.wstring()
-          + L"). Possible missing runtime (.NET Desktop Runtime 8 x64 / Windows App Runtime 1.8 x64) or startup crash "
-            L"(check SkyrimDiagDumpToolWinUI_startup_error.log next to the viewer).");
+          + L"). Possible missing packaged WinUI runtime files or startup crash "
+            L"(check SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI_launcher_error.log and "
+            L"SkyrimDiagWinUI\\app\\SkyrimDiagDumpToolWinUI_startup_error.log).");
       result = DumpToolViewerLaunchResult::kExitedImmediately;
     }
     CloseHandle(process);

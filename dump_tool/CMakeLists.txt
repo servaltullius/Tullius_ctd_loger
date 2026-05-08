@@ -116,6 +116,27 @@ target_compile_definitions(SkyrimDiagDumpToolCli
 
 set_property(TARGET SkyrimDiagDumpToolCli PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
+add_executable(SkyrimDiagDumpToolWinUILauncher WIN32
+  src/WinuiLauncher.cpp
+)
+
+target_link_libraries(SkyrimDiagDumpToolWinUILauncher
+  PRIVATE
+    Shell32
+)
+
+target_compile_definitions(SkyrimDiagDumpToolWinUILauncher
+  PRIVATE
+    _UNICODE
+    UNICODE
+)
+
+set_target_properties(SkyrimDiagDumpToolWinUILauncher PROPERTIES
+  OUTPUT_NAME "SkyrimDiagDumpToolWinUI"
+)
+
+set_property(TARGET SkyrimDiagDumpToolWinUILauncher PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
 set(SKYDIAG_DUMP_TOOL_DATA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/data")
 set(SKYDIAG_DUMP_TOOL_DATA_FILES
   "hook_frameworks.json"

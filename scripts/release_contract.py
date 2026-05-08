@@ -19,12 +19,13 @@ REQUIRED_WINUI_BUILD_OUTPUTS = (
 REQUIRED_ZIP_ENTRIES = (
     "SKSE/Plugins/SkyrimDiagDumpToolCli.exe",
     "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe",
-    "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll",
-    "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.pri",
-    "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.runtimeconfig.json",
-    "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.deps.json",
-    "SKSE/Plugins/SkyrimDiagWinUI/App.xbf",
-    "SKSE/Plugins/SkyrimDiagWinUI/MainWindow.xbf",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.exe",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolNative.dll",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.pri",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.runtimeconfig.json",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.deps.json",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/App.xbf",
+    "SKSE/Plugins/SkyrimDiagWinUI/app/MainWindow.xbf",
 )
 
 EXCLUDED_WINUI_TOP_LEVEL_DIRS = frozenset({"publish", "win-x64", "x64"})
@@ -43,7 +44,7 @@ def release_zip_glob() -> str:
 
 def nested_winui_path_regex() -> str:
     parts = "|".join(sorted(EXCLUDED_WINUI_TOP_LEVEL_DIRS))
-    return rf"^SKSE/Plugins/SkyrimDiagWinUI/({parts})/"
+    return rf"^SKSE/Plugins/SkyrimDiagWinUI/(app/)?({parts})/"
 
 
 def find_winui_build_root(root: str | Path) -> Path | None:

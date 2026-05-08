@@ -272,6 +272,14 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
   RequireContains(service, "BuildDefaultOutputRoots", "Discovery service must build new and legacy blank-default roots explicitly.");
   RequireContains(
     service,
+    "ResolveHelperDirectoryFromBaseDirectory",
+    "Dump discovery must support the launcher layout where the real WinUI app lives under an app subfolder.");
+  RequireContains(
+    service,
+    "string.Equals(baseInfo.Name, \"app\", StringComparison.OrdinalIgnoreCase)",
+    "Dump discovery must step out of the app subfolder before looking for SkyrimDiagHelper.ini.");
+  RequireContains(
+    service,
     "Path.Combine(mo2BaseDirectory, \"overwrite\", \"SKSE\", \"Plugins\", \"Tullius Ctd Logs\")",
     "MO2 blank default should target the dedicated output subfolder.");
   RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");

@@ -17,8 +17,8 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 | SKSE Plugin | `SkyrimDiag.dll` | Black-box event/state recording, heartbeat, optional resource (.nif/.hkx/.tri) logging |
 | Helper | `SkyrimDiagHelper.exe` | Out-of-proc — attaches to game, detects freeze/ILS, captures dump + WCT |
 | CLI Analyzer | `SkyrimDiagDumpToolCli.exe` | Headless analysis (no window) — used by Helper for auto-analysis |
-| WinUI Viewer | `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe` | Interactive viewer: summary / evidence / events / resources / WCT |
-| Native Engine | `SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll` | Native analyzer backing the WinUI viewer |
+| WinUI Viewer | `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe` | Easy-to-find launcher for the interactive viewer |
+| WinUI App Runtime | `SkyrimDiagWinUI/app/` | Self-contained viewer app, runtime files, native analyzer, and data |
 
 ## Requirements
 
@@ -38,6 +38,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 4. When a crash/freeze/ILS happens, a dump (`.dmp`) + report are generated
 5. Open `SkyrimDiagDumpToolWinUI.exe`, click `Select dump`, and analyze the `.dmp`
    - Or launch it from a command line: `SkyrimDiagDumpToolWinUI.exe "path\\to\\dump.dmp"`
+   - In `v0.2.53+`, use the top-level launcher in `SkyrimDiagWinUI`; the many self-contained runtime files are kept under `SkyrimDiagWinUI\\app`.
 
 **Manual snapshot hotkey:** `Ctrl+Shift+F12`
 > Snapshots taken during normal gameplay may have low confidence. Best used when the game is already stuck (freeze / ILS) or right before a CTD.

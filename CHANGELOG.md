@@ -2,6 +2,30 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.53 (2026-05-08)
+
+### 한눈에 보기
+- 이번 릴리즈는 **WinUI self-contained 폴더 정리 hotfix**입니다.
+- `v0.2.52`에서 런타임 오류를 막기 위해 self-contained 파일을 모두 포함하면서 `SkyrimDiagWinUI` 폴더가 너무 복잡해진 문제를 정리했습니다.
+- 이제 사용자는 `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`만 찾으면 되고, 많은 .NET/Windows App SDK 런타임 파일은 `SKSE/Plugins/SkyrimDiagWinUI/app/` 아래로 모입니다.
+
+### 수정
+- **WinUI launcher 추가** — Helper가 기존처럼 `SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`를 실행하면, 작은 네이티브 런처가 `app\SkyrimDiagDumpToolWinUI.exe`를 실행하고 종료까지 기다립니다.
+- **Package layout 정리** — 실제 WinUI self-contained 앱, `SkyrimDiagDumpToolNative.dll`, analyzer data 파일을 `SkyrimDiagWinUI/app/` 아래에 배치합니다.
+- **Dump discovery 보정** — 실제 WinUI 앱이 `app/` 하위에서 실행되어도 `SkyrimDiagHelper.ini`와 MO2 overwrite 출력 위치를 올바르게 찾도록 경로 추론을 보강했습니다.
+- **Helper diagnostics 보정** — WinUI가 즉시 종료될 때 안내하는 로그 경로를 새 launcher/app 레이아웃에 맞췄습니다.
+
+### 테스트
+- Packaging/WinUI dump discovery target tests: 실패 확인 후 통과.
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build: 성공.
+- Windows WinUI self-contained publish: 성공.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.53.zip`, `--no-pdb`): 성공 (`87,689,734` bytes).
+- Package layout check: `SkyrimDiagWinUI` 최상위 1개 파일, `app/` 아래 511개 파일.
+- Release gate: `OK`.
+- WinUI launcher startup smoke: zip 추출본에서 launcher가 5초 이상 정상 실행 상태 유지.
+- Windows helper runtime smoke 3종: 통과.
+
 ## v0.2.52 (2026-05-08)
 
 ### 한눈에 보기

@@ -212,7 +212,7 @@ internal static class DumpDiscoveryService
             return false;
         }
 
-        var helperDirectory = Path.GetFullPath(Path.Combine(baseDirectory, ".."));
+        var helperDirectory = ResolveHelperDirectoryFromBaseDirectory(baseDirectory);
         var helperIniPath = Path.Combine(helperDirectory, "SkyrimDiagHelper.ini");
         if (!File.Exists(helperIniPath))
         {
@@ -221,6 +221,22 @@ internal static class DumpDiscoveryService
 
         layout = new HelperLayout(helperDirectory, helperIniPath);
         return true;
+    }
+
+    private static string ResolveHelperDirectoryFromBaseDirectory(string baseDirectory)
+    {
+        var baseInfo = new DirectoryInfo(baseDirectory.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+        if (string.Equals(baseInfo.Name, "app", StringComparison.OrdinalIgnoreCase) &&
+            baseInfo.Parent is not null &&
+            string.Equals(baseInfo.Parent.Name, "SkyrimDiagWinUI", StringComparison.OrdinalIgnoreCase) &&
+            baseInfo.Parent.Parent is not null)
+        {
+            return baseInfo.Parent.Parent.FullName;
+        }
+
+        return Path.GetFullPath(Path.Combine(baseDirectory, ".."));
     }
 
     private static bool TryResolveConfiguredOutputRoot(HelperLayout layout, out string outputRoot)
