@@ -33,9 +33,8 @@ Install as a mod with:
 
 Default behavior: launching SKSE will auto-start the helper (`AutoStartHelper=1` in `SkyrimDiag.ini`).
 
-Runtime prerequisites for lightweight WinUI distribution:
-- .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
-- Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
+Runtime prerequisites for release distribution:
+- WinUI release builds are self-contained (`v0.2.52+`) and bundle .NET + Windows App SDK files next to `SkyrimDiagDumpToolWinUI.exe`.
 - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
 
 ## Use (For Testing)
@@ -122,7 +121,8 @@ After building on Windows, create an MO2-friendly zip:
 python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
 ```
 
-The packager requires WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes both `SkyrimDiagDumpToolWinUI.exe` and `SkyrimDiagDumpToolNative.dll`.
+The packager requires self-contained WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes both `SkyrimDiagDumpToolWinUI.exe` and `SkyrimDiagDumpToolNative.dll`.
+Because the WinUI viewer is self-contained, the zip intentionally includes many .NET and Windows App SDK sidecar files under `SKSE/Plugins/SkyrimDiagWinUI/`.
 It also packages `dump_tool/data` recursively (for both plugin path and WinUI path), so newly added data files do not require manual script edits.
 
 ## Release (GitHub)
@@ -191,7 +191,7 @@ if missing:
 print("zip required entries: OK")
 PY
 
-# 4) zip size guard (guide: 8MB ~ 25MB)
+# 4) zip size guard (guide: self-contained WinUI release zips are normally tens of MB; hard gate is 100MB)
 ls -lh dist/Tullius_ctd_loger_v<version>.zip
 
 # 5) nested-path guard (must be empty; regex from scripts/release_contract.py)
@@ -224,7 +224,7 @@ cmake -S . -B build --preset default
 cmake --build build --preset default
 ```
 
-Build modern WinUI viewer output (framework-dependent / lightweight):
+Build modern WinUI viewer output (self-contained release publish):
 ```powershell
 scripts\\build-winui.cmd
 ```

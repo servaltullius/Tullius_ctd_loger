@@ -210,6 +210,18 @@ def main() -> int:
     assert "SkyrimDiagDumpToolWinUI.deps.json" in build_winui_script, (
         "build-winui.cmd must require WinUI deps sidecar when selecting output"
     )
+    assert "dotnet publish" in build_winui_script, (
+        "build-winui.cmd must publish the WinUI viewer instead of using a framework-dependent build"
+    )
+    assert "--self-contained true" in build_winui_script, (
+        "build-winui.cmd must produce a self-contained .NET WinUI publish"
+    )
+    assert "WindowsAppSDKSelfContained=true" in build_winui_script, (
+        "build-winui.cmd must self-contain Windows App SDK runtime files"
+    )
+    assert "\\publish" in build_winui_script, (
+        "build-winui.cmd must prefer the publish output directory"
+    )
     assert prerelease_template_path.is_file(), (
         "prerelease release-notes template must exist at docs/release/PRERELEASE_NOTES_TEMPLATE.md"
     )

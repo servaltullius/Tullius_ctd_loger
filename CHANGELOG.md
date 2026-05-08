@@ -2,6 +2,26 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.52 (2026-05-08)
+
+### 한눈에 보기
+- 이번 릴리즈는 **WinUI 뷰어 런타임 설치 오류 hotfix**입니다.
+- `SkyrimDiagDumpToolWinUI.exe`가 Windows App Runtime 1.8/MSIX 설치 상태에 민감하게 실패하던 배포 방식을 self-contained publish로 바꿨습니다.
+- 릴리즈 zip 크기는 커지지만, 사용자는 WinUI 뷰어 실행을 위해 .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 별도로 설치할 필요가 없습니다.
+
+### 수정
+- **WinUI 배포: self-contained 전환** — `dotnet publish --self-contained true`와 `WindowsAppSDKSelfContained=true`를 사용해 WinUI 실행 파일 옆에 .NET/Windows App SDK 런타임 파일을 함께 배포합니다.
+- **Release gate: zip 크기 기준 갱신** — self-contained WinUI 포함으로 정상 zip 크기가 수십 MB까지 커질 수 있어 hard gate를 100MB로 조정했습니다.
+- **문서: 런타임 안내 보정** — v0.2.52+ 릴리즈에서는 별도 Windows App Runtime 1.8 설치가 필요 없다는 점과, v0.2.49~v0.2.51의 기존 framework-dependent 동작을 명확히 적었습니다.
+
+### 테스트
+- Linux 전체 테스트 `57/57` 통과.
+- Windows native build: 성공.
+- Windows WinUI self-contained publish: 성공 (`build-winui`, 330개 파일 / 약 213MB uncompressed).
+- Packaging(`dist/Tullius_ctd_loger_v0.2.52.zip`, `--no-pdb`): 성공 (`87,572,243` bytes).
+- Release gate: `OK`.
+- WinUI startup smoke: `SkyrimDiagDumpToolWinUI.exe`가 5초 이상 정상 실행 상태 유지.
+
 ## v0.2.51 (2026-05-04)
 
 ### 한눈에 보기

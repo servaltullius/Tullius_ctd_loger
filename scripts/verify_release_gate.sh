@@ -178,8 +178,8 @@ done
 echo "[gate] 4/5 size guard"
 ls -lh "${ZIP_PATH}"
 size_bytes="$(stat -c%s "${ZIP_PATH}")"
-if (( size_bytes > 25 * 1024 * 1024 )); then
-  echo "zip too large: ${size_bytes} bytes (>25MB)"
+if (( size_bytes > 100 * 1024 * 1024 )); then
+  echo "zip too large: ${size_bytes} bytes (>100MB)"
   exit 1
 fi
 

@@ -32,6 +32,10 @@ int main()
     csproj,
     "DISABLE_XAML_GENERATED_MAIN",
     "WinUI project must disable the generated XAML Main so headless mode can short-circuit startup.");
+  RequireContains(
+    csproj,
+    "<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>",
+    "WinUI project must self-contain Windows App SDK runtime files for zip deployment.");
 
   const auto program = ReadAllText(repoRoot / "dump_tool_winui" / "Program.cs");
   RequireContains(program, "static int Main(string[] args)", "Program.cs must define a custom WinUI entry point.");
