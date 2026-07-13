@@ -34,6 +34,13 @@ void TestDumpWriterPopulatesExpectedStreams()
   assert(writeDumpBody.find("kMinidumpUserStream_WctJson") != std::string::npos);
   assert(writeDumpBody.find("kMinidumpUserStream_PluginInfo") != std::string::npos);
   assert(writeDumpBody.find("if (!pluginScanJson.empty())") != std::string::npos);
+  assert(writeDumpBody.find("skydiag::SharedHeader committedHeader{}") != std::string::npos);
+  assert(writeDumpBody.find("std::memcpy(&committedHeader, blackboxBytes.data()") != std::string::npos);
+  assert(writeDumpBody.find("committedHeader.crash.exception_record") != std::string::npos);
+  assert(writeDumpBody.find("reinterpret_cast<const skydiag::SharedLayout*>(blackboxBytes.data())") == std::string::npos);
+  assert(
+    writeDumpBody.find("shmSnapshot->header.crash.exception_record") == std::string::npos &&
+    "Exception stream must be built from the same immutable copy as the blackbox user stream");
 }
 
 void TestDumpWriterHeaderHasPluginParam()
@@ -65,6 +72,18 @@ void TestCrashPathWritesPluginScanSidecar()
     "Crash path must write plugin scan sidecar when collected.");
 }
 
+void TestCrashSeqlockProtocolVersionAndDumpCompatibility()
+{
+  const auto shared = ReadFile("shared/SkyrimDiagShared.h");
+  const auto analyzerCapture = ReadFile("dump_tool/src/Analyzer.CaptureInputs.cpp");
+  assert(
+    shared.find("kVersion = 3") != std::string::npos &&
+    "Crash seqlock semantics require a new live helper/plugin protocol version");
+  assert(
+    analyzerCapture.find("ver != 2u") != std::string::npos &&
+    "Offline analyzer must continue accepting v2 blackbox streams from existing dumps");
+}
+
 void TestAnalyzerHasPluginSidecarFallback()
 {
   const auto impl = ReadFile("dump_tool/src/Analyzer.cpp");
@@ -81,6 +100,7 @@ int main()
   TestDumpWriterHeaderHasPluginParam();
   TestCrashPathIsDumpFirst();
   TestCrashPathWritesPluginScanSidecar();
+  TestCrashSeqlockProtocolVersionAndDumpCompatibility();
   TestAnalyzerHasPluginSidecarFallback();
   return 0;
 }

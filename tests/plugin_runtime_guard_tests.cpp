@@ -134,17 +134,40 @@ int main()
 
   AssertContains(
     vectoredHandlerBody,
-    "InterlockedIncrement(",
-    "Crash handler must bump crash_seq for each captured crash signal so recovery does not permanently disable capture.");
+    "TryPublishCrashRecord(shm, ep, code)",
+    "Crash handler must publish a stable fixed-size crash record before signaling the helper.");
 
   AssertContains(
     vectoredHandlerBody,
     "SetEvent(ev)",
     "Crash handler must signal crash event after recording crash snapshot.");
 
+  AssertOrdered(
+    vectoredHandlerBody,
+    "TryPublishCrashRecord(shm, ep, code)",
+    "SetEvent(ev)",
+    "Crash record publication must precede helper signaling.");
+
+  AssertOrdered(
+    vectoredHandlerBody,
+    "SetEvent(ev)",
+    "ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)",
+    "Fatal capture must return after signaling before dynamic first-chance telemetry can execute.");
+
+  const std::string publishCrashBody = ExtractFunctionBody(crashHandler, "bool TryPublishCrashRecord(");
+  AssertContains(
+    publishCrashBody,
+    "InterlockedCompareExchange(sequence, writing, observed)",
+    "Crash record writer must acquire the odd seqlock state atomically.");
+  AssertContains(
+    publishCrashBody,
+    "InterlockedExchange(sequence, committed)",
+    "Crash record writer must publish an even committed sequence.");
   assert(
-    vectoredHandlerBody.find("InterlockedCompareExchange(") == std::string::npos &&
-    "Crash handler must not use one-shot crash_seq latch because it blocks future captures after recovery.");
+    publishCrashBody.find("std::string") == std::string::npos &&
+    publishCrashBody.find("std::filesystem") == std::string::npos &&
+    publishCrashBody.find("ResolveExceptionModuleBasenameUtf8") == std::string::npos &&
+    "Fatal crash record publication must not allocate or resolve filesystem paths.");
 
   AssertContains(
     pluginMain,

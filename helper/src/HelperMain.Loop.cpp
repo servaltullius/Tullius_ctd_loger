@@ -113,6 +113,24 @@ void RunHelperLoop(
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &state->pendingCrashAnalysis);
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &state->pendingCrashEtw);
 
+    // Drain a published crash record before polling process exit. The process
+    // handle and crash event commonly become signaled in the same scheduler
+    // slice; giving the event first chance preserves the live address space
+    // for MiniDumpWriteDump whenever Windows has not torn it down yet.
+    if (HandleCrashEventTick(
+          cfg,
+          proc,
+          outBase,
+          /*waitMs=*/0,
+          &state->crashCaptured,
+          &state->pendingCrashEtw,
+          &state->pendingCrashAnalysis,
+          &state->capturedCrashDumpPath,
+          &state->pendingHangViewerDumpPath,
+          &state->pendingCrashViewerDumpPath)) {
+      continue;
+    }
+
     if (HandleProcessExitTick(cfg, proc, outBase, state)) {
       break;
     }

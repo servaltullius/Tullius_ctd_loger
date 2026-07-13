@@ -161,6 +161,7 @@ inline skydiag::helper::AttachedProcess MakeSelfAttachedProcess(skydiag::SharedL
   proc.pid = GetCurrentProcessId();
   proc.process = OpenSelfProcessHandle();
   proc.shm = shared;
+  proc.shmWritable = shared;
   proc.shmSize = sizeof(skydiag::SharedLayout);
   return proc;
 }
@@ -252,6 +253,7 @@ inline skydiag::helper::AttachedProcess MakeAttachedProcessForChild(
   proc.pid = child.pi.dwProcessId;
   proc.process = child.pi.hProcess;
   proc.shm = shared;
+  proc.shmWritable = shared;
   proc.shmSize = sizeof(skydiag::SharedLayout);
   return proc;
 }

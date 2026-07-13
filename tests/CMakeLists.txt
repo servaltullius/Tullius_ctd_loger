@@ -3,8 +3,22 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# The release verification build uses RelWithDebInfo, which normally defines
+# NDEBUG and compiles every standard assert() out of these test executables.
+# Keep assertions active so a passing CTest result represents executed checks.
+if(MSVC)
+  add_compile_options(/UNDEBUG)
+else()
+  add_compile_options(-UNDEBUG)
+endif()
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+
+add_executable(skydiag_assertions_enabled_tests
+  assertions_enabled_tests.cpp
+)
+add_test(NAME skydiag_assertions_enabled_tests COMMAND skydiag_assertions_enabled_tests)
 
 add_executable(skydiag_hang_suppression_tests
   hang_suppression_tests.cpp
@@ -26,6 +40,27 @@ target_include_directories(skydiag_crashlogger_parser_tests PRIVATE
 )
 
 add_test(NAME skydiag_crashlogger_parser_tests COMMAND skydiag_crashlogger_parser_tests)
+
+if(WIN32)
+  add_executable(skydiag_crashlogger_search_integration_tests
+    crashlogger_search_integration_tests.cpp
+  )
+
+  target_include_directories(skydiag_crashlogger_search_integration_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+
+  # SkyrimDiagDumpToolCore is declared later by the Windows-only dump_tool
+  # subdirectory; CMake resolves this target when generating the full graph.
+  target_link_libraries(skydiag_crashlogger_search_integration_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+
+  add_test(
+    NAME skydiag_crashlogger_search_integration_tests
+    COMMAND skydiag_crashlogger_search_integration_tests
+  )
+endif()
 
 add_executable(skydiag_i18n_core_tests
   i18n_core_tests.cpp
@@ -271,28 +306,25 @@ set_tests_properties(skydiag_triage_fields_tests PROPERTIES
   ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
 )
 
-include(CheckIncludeFileCXX)
-check_include_file_cxx("nlohmann/json.hpp" SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
-if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
-  add_executable(skydiag_analysis_engine_runtime_tests
-    analysis_engine_runtime_tests.cpp
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/SignatureDatabase.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressResolver.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashHistory.cpp"
-  )
+add_executable(skydiag_analysis_engine_runtime_tests
+  analysis_engine_runtime_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/SignatureDatabase.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressResolver.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashHistory.cpp"
+)
 
-  target_include_directories(skydiag_analysis_engine_runtime_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
-  )
+target_include_directories(skydiag_analysis_engine_runtime_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+target_link_libraries(skydiag_analysis_engine_runtime_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
 
-    add_test(NAME skydiag_analysis_engine_runtime_tests COMMAND skydiag_analysis_engine_runtime_tests)
-  set_tests_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
-    ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
-  )
-else()
-  message(STATUS "skydiag_analysis_engine_runtime_tests skipped: nlohmann/json.hpp not found")
-endif()
+add_test(NAME skydiag_analysis_engine_runtime_tests COMMAND skydiag_analysis_engine_runtime_tests)
+set_tests_properties(skydiag_analysis_engine_runtime_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
 
 add_executable(skydiag_crash_recapture_policy_tests
   crash_recapture_policy_tests.cpp
@@ -373,10 +405,6 @@ add_test(
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/share_text_fixture_tests.py"
 )
 
-add_test(
-  NAME skydiag_vibekit_smoke_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/vibekit_smoke_tests.py"
-)
 
 add_executable(skydiag_graphics_injection_rules_tests
   graphics_injection_rules_tests.cpp
@@ -515,23 +543,20 @@ if(WIN32)
   add_test(NAME skydiag_helper_hang_runtime_tests COMMAND skydiag_helper_hang_runtime_tests)
 endif()
 
-if(NOT WIN32)
-  if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
-    add_executable(skydiag_plugin_rules_logic_tests
-      plugin_rules_logic_tests.cpp
-      ../dump_tool/src/PluginRules.cpp
-    )
+add_executable(skydiag_plugin_rules_logic_tests
+  plugin_rules_logic_tests.cpp
+  ../dump_tool/src/PluginRules.cpp
+)
 
-    target_include_directories(skydiag_plugin_rules_logic_tests PRIVATE
-      "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
-    )
+target_include_directories(skydiag_plugin_rules_logic_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+target_link_libraries(skydiag_plugin_rules_logic_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
 
-        add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
-  else()
-    message(STATUS "skydiag_plugin_rules_logic_tests skipped: nlohmann/json.hpp not found")
-  endif()
-endif()
+add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
 
 add_executable(skydiag_diagnostic_logging_guard_tests
   diagnostic_logging_guard_tests.cpp
@@ -553,37 +578,35 @@ target_include_directories(skydiag_mo2_index_tests PRIVATE
 
 add_test(NAME skydiag_mo2_index_tests COMMAND skydiag_mo2_index_tests)
 
-# WCT JSON parsing tests (requires nlohmann/json)
-if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
-  add_executable(skydiag_wct_parsing_tests
-    wct_parsing_tests.cpp
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
-  )
+# WCT JSON parsing tests (nlohmann_json is a required project dependency).
+add_executable(skydiag_wct_parsing_tests
+  wct_parsing_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
+)
 
-  target_include_directories(skydiag_wct_parsing_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
-  )
+target_include_directories(skydiag_wct_parsing_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+target_link_libraries(skydiag_wct_parsing_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
 
-    add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
-else()
-  message(STATUS "skydiag_wct_parsing_tests skipped: nlohmann/json.hpp not found")
-endif()
+add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
 
-# E2E output snapshot / schema contract tests (requires nlohmann/json)
-if(SKYDIAG_HAS_NLOHMANN_JSON_HEADER)
-  add_executable(skydiag_output_snapshot_tests
-    output_snapshot_tests.cpp
-  )
+# E2E output snapshot / schema contract tests (nlohmann_json is required above).
+add_executable(skydiag_output_snapshot_tests
+  output_snapshot_tests.cpp
+)
 
-  target_include_directories(skydiag_output_snapshot_tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
-  )
+target_include_directories(skydiag_output_snapshot_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+target_link_libraries(skydiag_output_snapshot_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
 
-    add_test(NAME skydiag_output_snapshot_tests COMMAND skydiag_output_snapshot_tests)
-  set_tests_properties(skydiag_output_snapshot_tests PROPERTIES
-    ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
-  )
-else()
-  message(STATUS "skydiag_output_snapshot_tests skipped: nlohmann/json.hpp not found")
-endif()
+add_test(NAME skydiag_output_snapshot_tests COMMAND skydiag_output_snapshot_tests)
+set_tests_properties(skydiag_output_snapshot_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)

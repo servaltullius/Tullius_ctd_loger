@@ -35,6 +35,32 @@ struct ParsedTimestamp
   int second = 0;
 };
 
+enum class CrashLoggerArtifactKind {
+  kUnknown,
+  kCrash,
+  kThreadDump,
+};
+
+inline constexpr std::uint64_t kCrashLoggerFileTimeTicksPerSecond = 10'000'000ull;
+inline constexpr std::uint64_t kCrashLoggerPairingMaxDiff =
+  120ull * kCrashLoggerFileTimeTicksPerSecond;
+
+constexpr bool IsCrashLoggerPairingDiffAllowed(std::uint64_t diff) noexcept
+{
+  return diff <= kCrashLoggerPairingMaxDiff;
+}
+
+bool IsBetterCrashLoggerPairCandidate(
+  bool hasBest,
+  std::uint64_t candidateDiff,
+  CrashLoggerArtifactKind candidateKind,
+  bool candidateSameDirectory,
+  std::wstring_view candidateStablePath,
+  std::uint64_t bestDiff,
+  CrashLoggerArtifactKind bestKind,
+  bool bestSameDirectory,
+  std::wstring_view bestStablePath);
+
 // ── ESP/ESM object reference parsing ──
 
 struct CrashLoggerObjectRef {
@@ -55,6 +81,7 @@ struct EspRefEntry {
 // ── String utilities ──
 
 std::string AsciiLower(std::string_view s);
+CrashLoggerArtifactKind ClassifyCrashLoggerArtifactNameAscii(std::string_view filename);
 std::string_view TrimLeftAscii(std::string_view s);
 std::string_view TrimRightAscii(std::string_view s);
 std::string_view TrimAscii(std::string_view s);

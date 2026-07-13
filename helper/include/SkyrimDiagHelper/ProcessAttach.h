@@ -16,6 +16,7 @@ struct AttachedProcess {
 
   HANDLE shmMapping = nullptr;
   const skydiag::SharedLayout* shm = nullptr;
+  skydiag::SharedLayout* shmWritable = nullptr;
   std::size_t shmSize = 0;  // mapped bytes (best-effort)
 
   HANDLE crashEvent = nullptr;

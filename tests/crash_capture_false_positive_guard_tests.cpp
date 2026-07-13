@@ -46,6 +46,11 @@ int main()
     "EVENT_MODIFY_STATE | SYNCHRONIZE",
     "Crash event handle must include EVENT_MODIFY_STATE to allow ResetEvent.");
 
+  AssertContains(
+    processAttach,
+    "FILE_MAP_READ | FILE_MAP_WRITE",
+    "Helper shared-memory mapping must be writable so a recovered exception can thaw telemetry safely.");
+
   const std::string crashTickBody = ExtractFunctionBody(crashCapture, "bool HandleCrashEventTick(");
   AssertContains(
     crashTickBody,
@@ -82,6 +87,22 @@ int main()
     "ProcessValidCrashDump(",
     "Crash capture flow must route valid dump post-processing through extracted helper.");
 
+  AssertContains(
+    crashTickBody,
+    "FilterVerdict::kRetryNewerCrash",
+    "A newer crash arriving during recovery filtering must supersede the first-chance dump without latching it.");
+
+  AssertContains(
+    crashTickBody,
+    "if (!IsCommittedCrashSequence(info.crashSeq))",
+    "Crash event must fail closed when its snapshot has a zero or odd crash sequence.");
+
+  AssertOrdered(
+    crashTickBody,
+    "if (!IsCommittedCrashSequence(info.crashSeq))",
+    "WriteDumpWithStreams(",
+    "Crash sequence validation must run before any dump file is written.");
+
   AssertOrdered(
     crashTickBody,
     "WriteDumpWithStreams(",
@@ -93,6 +114,16 @@ int main()
     "FilterShutdownException(",
     "ProcessValidCrashDump(",
     "Crash capture must run post-processing only after filtering keeps the dump.");
+
+  const std::string firstChanceFilterBody = ExtractFunctionBody(crashCapture, "FilterVerdict FilterFirstChanceException(");
+  AssertContains(
+    firstChanceFilterBody,
+    "WaitForCrashOrProcess(crashEvent, process, kHeartbeatCheckIntervalMs)",
+    "First-chance filter must wake for a newer crash instead of sleeping through the real CTD.");
+  AssertContains(
+    firstChanceFilterBody,
+    "HasNewerCrashRecord(shm, info.crashSeq)",
+    "First-chance filter must compare committed crash sequences before declaring recovery.");
 
   const std::string processValidBody = ExtractFunctionBody(crashCapture, "void ProcessValidCrashDump(");
   AssertContains(
@@ -195,11 +226,23 @@ int main()
     "HandleProcessWaitFailed(",
     "Process exit tick must handle WAIT_FAILED via dedicated helper.");
 
+  AssertContains(
+    processExitTickBody,
+    "WriteWerFallbackHint(outBase)",
+    "Abnormal exit without an internal dump must emit WER LocalDumps fallback guidance.");
+
   AssertOrdered(
     processExitTickBody,
     "MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);",
     "LaunchDeferredViewersAfterExit(",
     "Process exit tick must finalize crash ETW before deferred viewer launch.");
+
+  const std::string helperLoopBody = ExtractFunctionBody(helperMain, "void RunHelperLoop(");
+  AssertOrdered(
+    helperLoopBody,
+    "/*waitMs=*/0",
+    "HandleProcessExitTick(cfg, proc, outBase, state)",
+    "Helper loop must drain the crash event before polling process exit.");
 
   const std::string manualCaptureBody = ExtractFunctionBody(helperMain, "void PumpManualCaptureInputs(");
   AssertContains(

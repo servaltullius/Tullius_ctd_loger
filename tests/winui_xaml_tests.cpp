@@ -170,8 +170,32 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     summary,
     "CrashLoggerProbableStreakModule = ReadString(crashLoggerNode, \"probable_streak_module\")",
     "WinUI summary loader must keep consuming probable streak DLL modules.");
+  RequireContains(
+    summary,
+    "CrashLoggerDirectFaultEligible = ReadBool(crashLoggerNode, \"direct_fault_eligible\")",
+    "WinUI must parse actionable eligibility separately from raw Crash Logger observations.");
+  RequireContains(
+    summary,
+    "HasCrashLoggerFrameEligibilityMetadata = hasCrashLoggerFrameEligibilityMetadata",
+    "WinUI must distinguish legacy summaries from eligibility-aware summaries.");
 
   const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireContains(
+    vm,
+    "IsCrashLoggerDirectFaultActionable(summary)",
+    "Frame-first wording must be gated by actionable eligibility.");
+  RequireContains(
+    vm,
+    "not promoted as a causal candidate",
+    "Ineligible raw frames must be labeled as observations rather than causes.");
+  RequireContains(
+    vm,
+    "LegacyCrashLoggerFrameCandidateMatches",
+    "Legacy frame summaries must require candidate-level module evidence instead of reusing aggregate strength.");
+  RequireNotContains(
+    vm,
+    "!summary.HasCrashLoggerFrameEligibilityMetadata && summary.CrashLoggerFrameSignalStrength > 0",
+    "Legacy aggregate strength must not make every raw frame actionable.");
   RequireContains(
     vm,
     "Crash Logger frame first probable DLL frame",
@@ -227,6 +251,14 @@ static void TestMainWindowShareTextUsesCrashLoggerReadingPath()
     shareText,
     "Next action: ",
     "Share text must label the next action explicitly.");
+  RequireContains(
+    shareText,
+    "유력 후보",
+    "Korean fallback share text must describe an uncorroborated suspect as a candidate.");
+  RequireNotContains(
+    shareText,
+    "\"유력 원인\"",
+    "Korean fallback share text must not present a heuristic suspect as a confirmed cause.");
 }
 
 static void TestAnalyzePanelHasDumpDiscoveryFlow()

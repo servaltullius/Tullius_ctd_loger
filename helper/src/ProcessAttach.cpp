@@ -79,20 +79,21 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
     return false;
   }
 
-  out.shmMapping = OpenFileMappingW(FILE_MAP_READ, FALSE, shmName.c_str());
+  out.shmMapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, shmName.c_str());
   if (!out.shmMapping) {
     if (err) *err = L"OpenFileMappingW failed: " + std::to_wstring(GetLastError());
     Detach(out);
     return false;
   }
 
-  void* view = MapViewOfFile(out.shmMapping, FILE_MAP_READ, 0, 0, 0);
+  void* view = MapViewOfFile(out.shmMapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
   if (!view) {
     if (err) *err = L"MapViewOfFile failed: " + std::to_wstring(GetLastError());
     Detach(out);
     return false;
   }
-  out.shm = static_cast<const skydiag::SharedLayout*>(view);
+  out.shmWritable = static_cast<skydiag::SharedLayout*>(view);
+  out.shm = out.shmWritable;
   out.shmSize = sizeof(skydiag::SharedLayout);
   {
     MEMORY_BASIC_INFORMATION mbi{};
@@ -167,6 +168,7 @@ void Detach(AttachedProcess& p)
   if (p.shm) {
     UnmapViewOfFile(p.shm);
     p.shm = nullptr;
+    p.shmWritable = nullptr;
   }
   if (p.shmMapping) {
     CloseHandle(p.shmMapping);

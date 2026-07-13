@@ -7,7 +7,9 @@ using skydiag::helper::internal::BuildCrashEventInfo;
 using skydiag::helper::internal::ClassifyExitCodeVerdict;
 using skydiag::helper::internal::CrashEventInfo;
 using skydiag::helper::internal::FilterVerdict;
+using skydiag::helper::internal::IsCommittedCrashSequence;
 using skydiag::helper::internal::QueueDeferredCrashViewer;
+using skydiag::helper::internal::ShouldLatchCrashCapture;
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {
@@ -131,6 +133,23 @@ static void TestQueueDeferredCrashViewer_NullPendingPath()
   assert(!queued);
 }
 
+static void TestFilteredVerdictsNeverLatchCrashCapture()
+{
+  assert(ShouldLatchCrashCapture(FilterVerdict::kKeepDump));
+  assert(!ShouldLatchCrashCapture(FilterVerdict::kDeleteBenign));
+  assert(!ShouldLatchCrashCapture(FilterVerdict::kDeleteRecovered));
+  assert(!ShouldLatchCrashCapture(FilterVerdict::kRetryNewerCrash));
+}
+
+static void TestCommittedCrashSequenceValidation()
+{
+  assert(!IsCommittedCrashSequence(0u));
+  assert(!IsCommittedCrashSequence(1u));
+  assert(IsCommittedCrashSequence(2u));
+  assert(!IsCommittedCrashSequence(3u));
+  assert(IsCommittedCrashSequence(4u));
+}
+
 int main()
 {
   TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit();
@@ -153,5 +172,7 @@ int main()
   TestQueueDeferredCrashViewer_IdempotentForSamePath();
   TestQueueDeferredCrashViewer_RejectsDifferentExistingPath();
   TestQueueDeferredCrashViewer_NullPendingPath();
+  TestFilteredVerdictsNeverLatchCrashCapture();
+  TestCommittedCrashSequenceValidation();
   return 0;
 }

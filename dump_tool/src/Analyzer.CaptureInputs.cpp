@@ -125,7 +125,8 @@ void ParseBlackboxStream(
   }
   const auto* snap = static_cast<const skydiag::SharedLayout*>(bbPtr);
   const auto ver = snap->header.version;
-  if (snap->header.magic != skydiag::kMagic || (ver != 1u && ver != skydiag::kVersion)) {
+  if (snap->header.magic != skydiag::kMagic ||
+      (ver != 1u && ver != 2u && ver != skydiag::kVersion)) {
     return;
   }
 
@@ -495,7 +496,13 @@ void ComputeSuspects(
   if (!internal::TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, opt.language, out)) {
     out.suspects_from_stackwalk = false;
     out.diagnostics.push_back(L"[Stackwalk] DbgHelp stackwalk failed, falling back to stack scan");
-    out.suspects = internal::ComputeStackScanSuspects(dumpBase, dumpSize, allModules, tids, opt.language);
+    out.suspects = internal::ComputeStackScanSuspects(
+      dumpBase,
+      dumpSize,
+      allModules,
+      tids,
+      out.exc_tid,
+      opt.language);
   }
 }
 

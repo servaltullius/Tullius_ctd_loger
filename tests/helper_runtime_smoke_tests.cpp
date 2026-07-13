@@ -16,10 +16,14 @@
 using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
 using skydiag::helper::internal::CleanupCrashArtifactsAfterZeroExit;
+using skydiag::helper::internal::CaptureStableSharedSnapshot;
+using skydiag::helper::internal::ExtractCrashInfo;
 using skydiag::helper::internal::HandleCrashEventTick;
 using skydiag::helper::internal::PendingCrashAnalysis;
 using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
+using skydiag::helper::internal::StableSharedSnapshot;
+using skydiag::helper::internal::TryClearRecoveredCrashFreeze;
 using skydiag::tests::runtime::AssertContains;
 using skydiag::tests::runtime::FileExists;
 using skydiag::tests::runtime::FindSingleFileByPrefix;
@@ -41,7 +45,7 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   ClearLog(outBase);
 
   auto shared = MakeSharedLayout();
-  shared->header.crash_seq = 1;
+  shared->header.crash_seq = 2;
   shared->header.crash.exception_code = 0xC0000005u;
   auto child = LaunchSleepingChildProcess();
   shared->header.crash.faulting_tid = child.pi.dwThreadId;
@@ -98,6 +102,128 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   std::filesystem::remove_all(outBase);
 }
 
+void TestRecoveredCrashThaw_AllowsStableFollowupSnapshot()
+{
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = 0x1111u;
+  shared->header.crash.faulting_tid = 101u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  StableSharedSnapshot first{};
+  Require(
+    CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &first),
+    "Committed crash record must produce a stable helper snapshot");
+  Require(
+    (reinterpret_cast<std::uintptr_t>(first.layout()) % alignof(skydiag::SharedLayout)) == 0u,
+    "Stable helper snapshot storage must satisfy SharedLayout alignment");
+  const auto firstInfo = ExtractCrashInfo(&first.layout()->header);
+  Require(firstInfo.crashSeq == 2u, "Stable snapshot must retain its committed crash sequence");
+  Require(firstInfo.exceptionAddr == 0x1111u, "Stable snapshot must retain the first crash record");
+
+  Require(
+    TryClearRecoveredCrashFreeze(shared.get(), firstInfo.crashSeq),
+    "Recovered first-chance exception must thaw the matching frozen record");
+  Require(
+    (shared->header.state_flags & skydiag::kState_Frozen) == 0u,
+    "Recovered exception must resume blackbox/resource telemetry");
+
+  // Model the next committed crash. The old immutable snapshot must stay
+  // unchanged while a new stable snapshot observes only the follow-up record.
+  shared->header.crash_seq = 3u;
+  shared->header.crash.exception_code = 0xC000001Du;
+  shared->header.crash.exception_addr = 0x2222u;
+  shared->header.crash.faulting_tid = 202u;
+  shared->header.state_flags |= skydiag::kState_Frozen;
+  MemoryBarrier();
+  shared->header.crash_seq = 4u;
+
+  Require(
+    ExtractCrashInfo(&first.layout()->header).exceptionAddr == 0x1111u,
+    "Previously captured snapshot must remain immutable after a follow-up crash");
+
+  StableSharedSnapshot second{};
+  Require(
+    CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &second),
+    "Follow-up crash must produce a new stable snapshot after recovery");
+  const auto secondInfo = ExtractCrashInfo(&second.layout()->header);
+  Require(secondInfo.crashSeq == 4u, "Follow-up snapshot must expose the new committed sequence");
+  Require(secondInfo.exceptionAddr == 0x2222u, "Follow-up snapshot must not mix the prior crash record");
+  Require(secondInfo.faultingTid == 202u, "Follow-up snapshot must retain one coherent crash record");
+}
+
+void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_runtime_zero_seq");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 0u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = 0x1234u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  HelperConfig cfg = MakeTestConfig();
+  bool crashCaptured = false;
+  PendingCrashEtwCapture pendingCrashEtw{};
+  PendingCrashAnalysis pendingCrashAnalysis{};
+  std::wstring lastCrashDumpPath;
+  std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
+
+  const bool handled = HandleCrashEventTick(
+    cfg,
+    proc,
+    outBase,
+    /*waitMs=*/0,
+    &crashCaptured,
+    &pendingCrashEtw,
+    &pendingCrashAnalysis,
+    &lastCrashDumpPath,
+    &pendingHangViewerDumpPath,
+    &pendingCrashViewerDumpPath);
+
+  Require(!handled, "Zero crash sequence must be rejected before dump capture");
+  Require(!crashCaptured, "Rejected crash sequence must not set capture latch");
+  Require(lastCrashDumpPath.empty(), "Rejected crash sequence must not expose a dump path");
+
+  shared->header.crash_seq = 1u;
+  Require(SetEvent(proc.crashEvent) != FALSE, "SetEvent failed for odd-sequence check");
+  const bool oddHandled = HandleCrashEventTick(
+    cfg,
+    proc,
+    outBase,
+    /*waitMs=*/0,
+    &crashCaptured,
+    &pendingCrashEtw,
+    &pendingCrashAnalysis,
+    &lastCrashDumpPath,
+    &pendingHangViewerDumpPath,
+    &pendingCrashViewerDumpPath);
+  Require(!oddHandled, "Odd crash sequence must be rejected before dump capture");
+  Require(!crashCaptured, "Odd crash sequence must not set capture latch");
+  Require(lastCrashDumpPath.empty(), "Odd crash sequence must not expose a dump path");
+
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(outBase, ec)) {
+    Require(!ec, "Failed to enumerate zero-sequence output directory");
+    Require(entry.path().extension() != L".dmp", "Zero crash sequence must not write a dump file");
+  }
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "crash_seq is not a non-zero committed sequence", "Rejected sequence must be logged");
+
+  CloseHandle(proc.crashEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 void TestCleanupCrashArtifactsAfterZeroExit_PreservesStrongCrashArtifacts()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_runtime_preserve");
@@ -137,6 +263,8 @@ int main()
 {
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
+    TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
+    TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
     TestCleanupCrashArtifactsAfterZeroExit_PreservesStrongCrashArtifacts();
     return 0;
   } catch (const std::exception& ex) {

@@ -19,6 +19,9 @@ static void TestStackScanUsesProximityWeight()
 {
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackScan.cpp");
   assert(src.find("StackScanSlotWeight") != std::string::npos);
+  assert(src.find("exceptionScoreByModule") != std::string::npos);
+  assert(src.find("usedExceptionThreadScores = !rows.empty()") != std::string::npos);
+  assert(src.find("rows = buildActionableRows(scoreByModule)") != std::string::npos);
 }
 
 int main()

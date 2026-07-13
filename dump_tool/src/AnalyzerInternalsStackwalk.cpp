@@ -1,5 +1,6 @@
 #include "AnalyzerInternals.h"
 
+#include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
 
 #include <algorithm>
@@ -129,7 +130,14 @@ bool TryComputeStackwalkSuspects(
       continue;
     }
 
-    if (bestAny.pcs.size() < pcs.size()) {
+    if (policy::ShouldSelectStackwalkCandidate(
+          !bestAny.pcs.empty(),
+          bestAny.tid,
+          static_cast<std::uint32_t>(bestAny.pcs.size()),
+          !pcs.empty(),
+          tid,
+          static_cast<std::uint32_t>(pcs.size()),
+          excTid)) {
       bestAny.tid = tid;
       bestAny.pcs = pcs;
     }
@@ -140,8 +148,14 @@ bool TryComputeStackwalkSuspects(
     }
 
     const std::uint32_t topScore = suspects[0].score;
-    const bool prefer = (best.tid != excTid && tid == excTid);
-    if (best.suspects.empty() || prefer || topScore > best.topScore) {
+    if (policy::ShouldSelectStackwalkCandidate(
+          !best.suspects.empty(),
+          best.tid,
+          best.topScore,
+          !suspects.empty(),
+          tid,
+          topScore,
+          excTid)) {
       best.tid = tid;
       best.pcs = std::move(pcs);
       best.suspects = std::move(suspects);

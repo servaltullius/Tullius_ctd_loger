@@ -155,21 +155,24 @@ internal sealed partial class MainWindowViewModel
             return $"{BuildPrimaryCandidateValue(summary)} — Tullius callstack first — {dllGuidance}";
         }
 
-        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule))
+        if (IsCrashLoggerDirectFaultActionable(summary) &&
+            !string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule))
         {
             return _isKorean
                 ? $"{summary.CrashLoggerDirectFaultModule} — Crash Logger frame first (direct DLL fault) — {dllGuidance}"
                 : $"{summary.CrashLoggerDirectFaultModule} — Crash Logger frame first (direct DLL fault) — {dllGuidance}";
         }
 
-        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerFirstActionableProbableModule))
+        if (IsCrashLoggerFirstActionableProbableActionable(summary) &&
+            !string.IsNullOrWhiteSpace(summary.CrashLoggerFirstActionableProbableModule))
         {
             return _isKorean
                 ? $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger frame first probable DLL frame — {dllGuidance}"
                 : $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger frame first probable DLL frame — {dllGuidance}";
         }
 
-        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerProbableStreakModule) &&
+        if (IsCrashLoggerProbableStreakActionable(summary) &&
+            !string.IsNullOrWhiteSpace(summary.CrashLoggerProbableStreakModule) &&
             summary.CrashLoggerProbableStreakLength > 0)
         {
             return _isKorean
@@ -211,6 +214,17 @@ internal sealed partial class MainWindowViewModel
         if (summary.ActionableCandidates.Count > 0)
         {
             return BuildPrimaryCandidateValue(summary);
+        }
+
+        var observedFrame = FirstNonEmpty(
+            summary.CrashLoggerDirectFaultModule,
+            summary.CrashLoggerFirstActionableProbableModule,
+            summary.CrashLoggerProbableStreakModule);
+        if (!string.IsNullOrWhiteSpace(observedFrame))
+        {
+            return T(
+                $"{observedFrame} — observed Crash Logger frame (not promoted as a causal candidate)",
+                $"{observedFrame} — Crash Logger 관측 프레임 (원인 후보로 승격하지 않음)");
         }
 
         if (!string.IsNullOrWhiteSpace(summary.InferredModName))
@@ -368,24 +382,53 @@ internal sealed partial class MainWindowViewModel
 
     private bool HasCrashLoggerFrameSignal(AnalysisSummary summary)
     {
-        if (summary.CrashLoggerFrameSignalStrength > 0)
+        if (summary.ActionableCandidates.Any(candidate => HasFamily(candidate, "crash_logger_frame")))
         {
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule) ||
-            !string.IsNullOrWhiteSpace(summary.CrashLoggerFirstActionableProbableModule) ||
-            !string.IsNullOrWhiteSpace(summary.CrashLoggerProbableStreakModule))
+        if (summary.HasCrashLoggerFrameEligibilityMetadata)
         {
-            return true;
+            return summary.CrashLoggerDirectFaultEligible ||
+                   summary.CrashLoggerFirstActionableProbableEligible ||
+                   summary.CrashLoggerProbableStreakEligible;
         }
 
-        if (summary.ActionableCandidates.Count == 0)
+        // A legacy aggregate strength cannot identify which raw frame was
+        // actionable. Require candidate-level frame evidence instead.
+        return false;
+    }
+
+    private static bool IsCrashLoggerDirectFaultActionable(AnalysisSummary summary)
+    {
+        return summary.HasCrashLoggerFrameEligibilityMetadata
+            ? summary.CrashLoggerDirectFaultEligible
+            : LegacyCrashLoggerFrameCandidateMatches(summary, summary.CrashLoggerDirectFaultModule);
+    }
+
+    private static bool IsCrashLoggerFirstActionableProbableActionable(AnalysisSummary summary)
+    {
+        return summary.HasCrashLoggerFrameEligibilityMetadata
+            ? summary.CrashLoggerFirstActionableProbableEligible
+            : LegacyCrashLoggerFrameCandidateMatches(summary, summary.CrashLoggerFirstActionableProbableModule);
+    }
+
+    private static bool IsCrashLoggerProbableStreakActionable(AnalysisSummary summary)
+    {
+        return summary.HasCrashLoggerFrameEligibilityMetadata
+            ? summary.CrashLoggerProbableStreakEligible
+            : LegacyCrashLoggerFrameCandidateMatches(summary, summary.CrashLoggerProbableStreakModule);
+    }
+
+    private static bool LegacyCrashLoggerFrameCandidateMatches(AnalysisSummary summary, string rawModule)
+    {
+        if (string.IsNullOrWhiteSpace(rawModule))
         {
             return false;
         }
 
-        var topCandidate = summary.ActionableCandidates[0];
-        return HasFamily(topCandidate, "crash_logger_frame");
+        return summary.ActionableCandidates.Any(candidate =>
+            HasFamily(candidate, "crash_logger_frame") &&
+            string.Equals(candidate.ModuleFilename, rawModule, StringComparison.OrdinalIgnoreCase));
     }
 }

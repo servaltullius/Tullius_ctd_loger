@@ -142,6 +142,9 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(cl, "log_path", "string", "crash_logger");
   AssertIsType(cl, "version", "string", "crash_logger");
   AssertIsType(cl, "top_modules", "array", "crash_logger");
+  AssertIsType(cl, "direct_fault_eligible", "boolean", "crash_logger");
+  AssertIsType(cl, "first_actionable_probable_eligible", "boolean", "crash_logger");
+  AssertIsType(cl, "probable_streak_eligible", "boolean", "crash_logger");
   if (cl.contains("object_refs")) {
     assert(cl["object_refs"].is_array());
     for (const auto& ref : cl["object_refs"]) {
@@ -153,6 +156,14 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
       AssertIsType(ref, "ref_count", "number", "crash_logger.object_refs[]");
       AssertIsType(ref, "relevance_score", "number", "crash_logger.object_refs[]");
     }
+  }
+
+  if (j["signature_match"].is_object()) {
+    const auto& signature = j["signature_match"];
+    AssertIsType(signature, "id", "string", "signature_match");
+    AssertIsType(signature, "scope", "string", "signature_match");
+    AssertIsType(signature, "mechanism", "string", "signature_match");
+    AssertIsType(signature, "match_confidence", "string", "signature_match");
   }
 
   // ── graphics_environment ──

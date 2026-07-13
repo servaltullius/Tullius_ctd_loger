@@ -1,4 +1,5 @@
 #include "AnalyzerInternals.h"
+#include "AnalyzerScoringPolicy.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -18,6 +19,11 @@ using skydiag::dump_tool::minidump::ThreadRecord;
 using skydiag::dump_tool::minidump::WideLower;
 using skydiag::dump_tool::i18n::ConfidenceText;
 
+constexpr std::uint32_t kHookFrameworkNearTieThreshold = 8u;
+constexpr std::uint32_t kPassiveHookFallbackMinScore = 8u;
+constexpr std::uint32_t kOtherHookFallbackMinScore = 16u;
+constexpr std::uint32_t kSecondaryMediumMinScore = 40u;
+
 i18n::ConfidenceLevel ConfidenceForTopSuspectLevel(std::uint32_t topScore, std::uint32_t secondScore)
 {
   if (topScore >= 256u || (topScore >= 96u && topScore >= (secondScore * 2u))) {
@@ -27,6 +33,13 @@ i18n::ConfidenceLevel ConfidenceForTopSuspectLevel(std::uint32_t topScore, std::
     return i18n::ConfidenceLevel::kMedium;
   }
   return i18n::ConfidenceLevel::kLow;
+}
+
+i18n::ConfidenceLevel ConfidenceForSecondarySuspectLevel(std::uint32_t score)
+{
+  return policy::SecondaryStackScanCanBeMedium(score, kSecondaryMediumMinScore)
+    ? i18n::ConfidenceLevel::kMedium
+    : i18n::ConfidenceLevel::kLow;
 }
 
 std::uint32_t StackScanSlotWeight(std::size_t slotIndex)
@@ -50,6 +63,7 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   std::uint64_t dumpSize,
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint32_t>& targetTids,
+  std::uint32_t exceptionTid,
   i18n::Language lang)
 {
   std::vector<SuspectItem> out;
@@ -63,6 +77,7 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   }
 
   std::unordered_map<std::size_t, std::uint32_t> scoreByModule;
+  std::unordered_map<std::size_t, std::uint32_t> exceptionScoreByModule;
 
   constexpr std::size_t kMaxScanBytes = 96 * 1024;
   for (const auto tid : targetTids) {
@@ -98,7 +113,11 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
         continue;
       }
       const std::size_t slotIndex = (off - startOff) / sizeof(std::uint64_t);
-      scoreByModule[*mi] += StackScanSlotWeight(slotIndex);
+      const auto weight = StackScanSlotWeight(slotIndex);
+      scoreByModule[*mi] += weight;
+      if (exceptionTid != 0u && tid == exceptionTid) {
+        exceptionScoreByModule[*mi] += weight;
+      }
     }
   }
 
@@ -107,14 +126,26 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     std::size_t modIndex = 0;
     std::uint32_t score = 0;
   };
-  std::vector<Row> rows;
-  rows.reserve(scoreByModule.size());
-  for (const auto& [idx, score] : scoreByModule) {
-    const auto& m = modules[idx];
-    if (m.is_systemish || m.is_game_exe) {
-      continue;
+  const auto buildActionableRows = [&](const auto& scores) {
+    std::vector<Row> result;
+    result.reserve(scores.size());
+    for (const auto& [idx, score] : scores) {
+      const auto& m = modules[idx];
+      if (m.is_systemish || m.is_game_exe) {
+        continue;
+      }
+      result.push_back(Row{ idx, score });
     }
-    rows.push_back(Row{ idx, score });
+    return result;
+  };
+
+  // As with the real stackwalk path, a usable exception-thread result is the
+  // authoritative CTD stack. Auxiliary/main-thread pointer density must not
+  // replace it merely because symbols were unavailable.
+  std::vector<Row> rows = buildActionableRows(exceptionScoreByModule);
+  const bool usedExceptionThreadScores = !rows.empty();
+  if (rows.empty()) {
+    rows = buildActionableRows(scoreByModule);
   }
 
   std::sort(rows.begin(), rows.end(), [&](const Row& a, const Row& b) {
@@ -142,8 +173,16 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
       const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
       const bool topIsSkseRuntime = IsSkseModule(topLower);
       const bool topIsMo2Vfs = (topLower == L"usvfs_x64.dll" || topLower == L"uvsfs64.dll");
-      const bool nearTie = (fallbackIt->score + 8u) >= rows[0].score;
-      if (topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs || nearTie) {
+      const bool topIsPassiveHook = topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs;
+      const std::uint32_t minimumFallbackScore = topIsPassiveHook
+        ? kPassiveHookFallbackMinScore
+        : kOtherHookFallbackMinScore;
+      const bool promotionEligible = policy::ShouldPromoteHookFallback(
+        rows[0].score,
+        fallbackIt->score,
+        minimumFallbackScore,
+        kHookFrameworkNearTieThreshold);
+      if (promotionEligible) {
         std::iter_swap(rows.begin(), fallbackIt);
         promotedHookTop = true;
       }
@@ -169,15 +208,18 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     const auto& m = modules[row.modIndex];
 
     SuspectItem si{};
-    si.confidence_level = (i == 0) ? confTop : i18n::ConfidenceLevel::kMedium;
+    si.confidence_level = (i == 0) ? confTop : ConfidenceForSecondarySuspectLevel(row.score);
     si.confidence = ConfidenceText(lang, si.confidence_level);
     si.module_filename = m.filename;
     si.module_path = m.path;
     si.inferred_mod_name = m.inferred_mod_name;
     si.score = row.score;
     si.reason = en
-      ? (L"Observed " + std::to_wstring(row.score) + L" hit(s) in stack scan")
-      : (L"스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측");
+      ? (L"Observed " + std::to_wstring(row.score) +
+         (usedExceptionThreadScores ? L" hit(s) in exception-thread stack scan" : L" hit(s) in stack scan"))
+      : (usedExceptionThreadScores
+          ? L"예외 스레드 스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측"
+          : L"스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측");
     if (i == 0 && promotedHookTop) {
       si.reason += en
         ? L" (primary candidate promoted over hook framework hit owner)"

@@ -40,17 +40,20 @@ std::string BuildReportText(
     return recommendation.substr(start);
   };
   const auto buildCrashLoggerReadingPath = [&]() -> std::wstring {
-    if (!r.crash_logger_direct_fault_module.empty()) {
+    if (r.crash_logger_direct_fault_eligible && !r.crash_logger_direct_fault_module.empty()) {
       return en
         ? (L"Crash Logger frame first (direct DLL fault): " + r.crash_logger_direct_fault_module)
         : (L"Crash Logger frame 우선 (direct DLL fault): " + r.crash_logger_direct_fault_module);
     }
-    if (!r.crash_logger_first_actionable_probable_module.empty()) {
+    if (r.crash_logger_first_actionable_probable_eligible &&
+        !r.crash_logger_first_actionable_probable_module.empty()) {
       return en
         ? (L"Crash Logger frame first (first actionable probable DLL frame): " + r.crash_logger_first_actionable_probable_module)
         : (L"Crash Logger frame 우선 (첫 actionable probable DLL frame): " + r.crash_logger_first_actionable_probable_module);
     }
-    if (!r.crash_logger_probable_streak_module.empty() && r.crash_logger_probable_streak_length > 0u) {
+    if (r.crash_logger_probable_streak_eligible &&
+        !r.crash_logger_probable_streak_module.empty() &&
+        r.crash_logger_probable_streak_length > 0u) {
       return en
         ? (L"Crash Logger frame first (probable frame streak x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
            r.crash_logger_probable_streak_module)

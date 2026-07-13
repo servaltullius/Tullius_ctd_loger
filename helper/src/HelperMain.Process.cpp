@@ -49,7 +49,16 @@ void DrainCrashEventBeforeExit(
 
 bool HasSharedMemoryStrongCrashEvidence(const AttachedProcess& proc)
 {
-  return proc.shm && skydiag::helper::IsStrongCrashException(proc.shm->header.crash.exception_code);
+  StableSharedSnapshot snapshot{};
+  if (!CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &snapshot)) {
+    return false;
+  }
+  const auto* layout = snapshot.layout();
+  const auto info = ExtractCrashInfo(layout ? &layout->header : nullptr);
+  return info.crashSeq != 0u &&
+         (info.crashSeq & 1u) == 0u &&
+         (info.stateFlags & skydiag::kState_Frozen) != 0u &&
+         skydiag::helper::IsStrongCrashException(info.exceptionCode);
 }
 
 void CleanupCrashArtifactsAfterZeroExit(
@@ -75,7 +84,13 @@ void CleanupCrashArtifactsAfterZeroExit(
     return;
   }
   if (cfg.preserveFilteredCrashDumps) {
-    AppendLogLine(outBase, L"exit_code=0 after crash capture; dump preserved (PreserveFilteredCrashDumps=1).");
+    state->capturedCrashDumpPath.clear();
+    state->pendingCrashViewerDumpPath.clear();
+    state->crashCaptured = false;
+    AppendLogLine(
+      outBase,
+      L"exit_code=0 after filtered crash; dump file preserved without keeping the crashCaptured latch "
+      L"(PreserveFilteredCrashDumps=1).");
     return;
   }
 
@@ -224,6 +239,15 @@ bool HandleProcessExitTick(
     const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);
     if (exitCode != 0 || sharedMemoryStrongCrash) {
       DrainCrashEventBeforeExit(cfg, proc, outBase, state);
+    }
+    if ((exitCode != 0 || sharedMemoryStrongCrash) &&
+        !state->crashCaptured &&
+        cfg.enableWerDumpFallbackHint) {
+      WriteWerFallbackHint(outBase);
+      AppendLogLine(
+        outBase,
+        L"Abnormal process exit had no internal crash dump; wrote WER LocalDumps fallback guidance: "
+          + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
     }
     const bool exitCode0StrongCrash =
       (exitCode == 0) &&

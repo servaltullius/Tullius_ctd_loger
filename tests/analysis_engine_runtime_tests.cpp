@@ -1,3 +1,6 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
@@ -85,20 +88,117 @@ void TestSignatureDatabaseRuntime()
 {
   SignatureDatabase db;
   const auto jsonPath = ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json";
-  assert(db.LoadFromJson(jsonPath));
+  const bool loaded = db.LoadFromJson(jsonPath);
+  assert(loaded);
   assert(db.Size() > 0);
 
   SignatureMatchInput input{};
   input.exc_code = 0xC0000005u;
+  input.game_version = "1.5.97.0";
   input.fault_module = L"SkyrimSE.exe";
   input.fault_offset = 0xD6DDDAull;
-  input.exc_address = 0x140000000ull + input.fault_offset;
   input.fault_module_is_system = false;
   input.callstack_modules = { L"SkyrimSE.exe!BSBatchRenderer::Draw+0x2F" };
 
   const auto matched = db.Match(input, /*useKorean=*/false);
   assert(matched.has_value());
-  assert(matched->id == "D6DDDA_VRAM");
+  assert(matched->id == "D6DDDA_1597_AV");
+  assert(matched->scope == "mechanism");
+
+  input.game_version = "1.6.640.0";
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+
+  input.game_version = "1.5.97.0";
+  input.fault_offset = 0xD6DDD9ull;
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+  input.fault_offset = 0xD6DDDBull;
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+
+  input.game_version.clear();
+  input.fault_offset = 0xD6DDDAull;
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+}
+
+void TestNullAccessViolationSignatureRuntime()
+{
+  SignatureDatabase db;
+  const auto jsonPath = ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json";
+  const bool loaded = db.LoadFromJson(jsonPath);
+  assert(loaded);
+
+  SignatureMatchInput input{};
+  input.exc_code = 0xC0000005u;
+  input.fault_module = L"ExampleMod.dll";
+  input.fault_offset = 0x1234ull;
+
+  assert(!input.access_violation_address.has_value());
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+
+  input.access_violation_address = 0x20ull;
+  const auto nearNull = db.Match(input, /*useKorean=*/false);
+  assert(nearNull.has_value());
+  assert(nearNull->id == "ACCESS_VIOLATION_NULL");
+
+  input.access_violation_address = 0x140001234ull;
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+}
+
+void TestLegacyNullAddressFieldFailsClosedRuntime()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_legacy_null_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"signatures\": [{\n"
+      "    \"id\": \"LEGACY_NULL\",\n"
+      "    \"match\": {\"exc_code\": \"0xC0000005\", \"exc_address_near_zero\": true},\n"
+      "    \"diagnosis\": {\"cause_ko\": \"test\", \"cause_en\": \"test\", "
+      "\"confidence\": \"low\", \"recommendations_ko\": [], \"recommendations_en\": []}\n"
+      "  }]\n"
+      "}\n";
+  }
+
+  SignatureDatabase db;
+  const bool loaded = db.LoadFromJson(tempPath);
+  assert(loaded);
+
+  SignatureMatchInput input{};
+  input.exc_code = 0xC0000005u;
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+  input.access_violation_address = 0x10ull;
+  const auto matched = db.Match(input, /*useKorean=*/false);
+  assert(matched.has_value());
+  assert(matched->id == "LEGACY_NULL");
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
+}
+
+void TestSignatureDatabaseRejectsUnknownFutureSchemaRuntime()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_future_schema_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"version\": 999,\n"
+      "  \"signatures\": [{\n"
+      "    \"id\": \"FUTURE_NARROW_RULE\",\n"
+      "    \"match\": {\"future_constraint\": \"must-not-be-ignored\"},\n"
+      "    \"diagnosis\": {\"cause_ko\": \"test\", \"cause_en\": \"test\", "
+      "\"confidence\": \"high\", \"recommendations_ko\": [], \"recommendations_en\": []}\n"
+      "  }]\n"
+      "}\n";
+  }
+
+  SignatureDatabase db;
+  const bool loaded = db.LoadFromJson(tempPath);
+  assert(!loaded);
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
 }
 
 void TestSignatureCallstackContainsRuntime()
@@ -128,7 +228,8 @@ void TestSignatureCallstackContainsRuntime()
   }
 
   SignatureDatabase db;
-  assert(db.LoadFromJson(tempPath));
+  const bool loaded = db.LoadFromJson(tempPath);
+  assert(loaded);
   SignatureMatchInput input{};
   input.callstack_modules = { L"SkyrimSE.exe!SomePath\\.STRINGS::Read" };
 
@@ -177,6 +278,39 @@ void TestSignatureDatabaseToleratesMalformedEntries()
       "      }\n"
       "    },\n"
       "    {\n"
+      "      \"id\": \"OVERFLOW_HEX\",\n"
+      "      \"match\": {\"exc_code\": \"0x100000000\"},\n"
+      "      \"diagnosis\": {\n"
+      "        \"cause_ko\": \"bad\",\n"
+      "        \"cause_en\": \"bad\",\n"
+      "        \"confidence\": \"high\",\n"
+      "        \"recommendations_ko\": [],\n"
+      "        \"recommendations_en\": []\n"
+      "      }\n"
+      "    },\n"
+      "    {\n"
+      "      \"id\": \"UNKNOWN_CONSTRAINT\",\n"
+      "      \"match\": {\"future_constraint\": \"must-not-be-ignored\"},\n"
+      "      \"diagnosis\": {\n"
+      "        \"cause_ko\": \"bad\",\n"
+      "        \"cause_en\": \"bad\",\n"
+      "        \"confidence\": \"high\",\n"
+      "        \"recommendations_ko\": [],\n"
+      "        \"recommendations_en\": []\n"
+      "      }\n"
+      "    },\n"
+      "    {\n"
+      "      \"id\": \"EMPTY_MATCH\",\n"
+      "      \"match\": {},\n"
+      "      \"diagnosis\": {\n"
+      "        \"cause_ko\": \"bad\",\n"
+      "        \"cause_en\": \"bad\",\n"
+      "        \"confidence\": \"high\",\n"
+      "        \"recommendations_ko\": [],\n"
+      "        \"recommendations_en\": []\n"
+      "      }\n"
+      "    },\n"
+      "    {\n"
       "      \"id\": \"GOOD\",\n"
       "      \"match\": {\n"
       "        \"exc_code\": \"0xC0000005\",\n"
@@ -195,7 +329,8 @@ void TestSignatureDatabaseToleratesMalformedEntries()
   }
 
   SignatureDatabase db;
-  assert(db.LoadFromJson(tempPath));
+  const bool loaded = db.LoadFromJson(tempPath);
+  assert(loaded);
   assert(db.Size() == 1);
 
   SignatureMatchInput input{};
@@ -213,7 +348,8 @@ void TestAddressResolverRuntime()
 {
   AddressResolver resolver;
   const auto jsonPath = ProjectRoot() / "dump_tool" / "data" / "address_db" / "skyrimse_functions.json";
-  assert(resolver.LoadFromJson(jsonPath, "1.5.97.0"));
+  const bool loaded = resolver.LoadFromJson(jsonPath, "1.5.97.0");
+  assert(loaded);
   assert(resolver.Size() > 0);
 
   const auto exact = resolver.Resolve(0xD6DDDAull);
@@ -248,7 +384,8 @@ void TestAddressResolverToleratesMalformedEntries()
   }
 
   AddressResolver resolver;
-  assert(resolver.LoadFromJson(tempPath, "1.5.97.0"));
+  const bool loaded = resolver.LoadFromJson(tempPath, "1.5.97.0");
+  assert(loaded);
   assert(resolver.Size() == 1);
 
   const auto resolved = resolver.Resolve(0xD6DDDAull);
@@ -293,13 +430,17 @@ void TestAddressResolverLoadStatusRuntime()
   AddressResolver resolver;
   AddressResolver::LoadStatus status = AddressResolver::LoadStatus::kOk;
 
-  assert(!resolver.LoadFromJson(tempPath.parent_path() / "missing.json", "1.5.97.0", &status));
+  const bool missingFileLoaded =
+    resolver.LoadFromJson(tempPath.parent_path() / "missing.json", "1.5.97.0", &status);
+  assert(!missingFileLoaded);
   assert(status == AddressResolver::LoadStatus::kFileOpenFailed);
 
-  assert(!resolver.LoadFromJson(tempPath, "1.6.1170.0", &status));
+  const bool unsupportedVersionLoaded = resolver.LoadFromJson(tempPath, "1.6.1170.0", &status);
+  assert(!unsupportedVersionLoaded);
   assert(status == AddressResolver::LoadStatus::kMissingGameVersion);
 
-  assert(resolver.LoadFromJson(tempPath, "1.5.97.0", &status));
+  const bool supportedVersionLoaded = resolver.LoadFromJson(tempPath, "1.5.97.0", &status);
+  assert(supportedVersionLoaded);
   assert(status == AddressResolver::LoadStatus::kOk);
 
   std::error_code ec;
@@ -329,10 +470,12 @@ void TestCrashHistoryRuntime()
   assert(shared->total_crashes == 20u);
 
   const auto historyPath = std::filesystem::temp_directory_path() / "skydiag_crash_history_runtime_test.json";
-  assert(history.SaveToFile(historyPath));
+  const bool saved = history.SaveToFile(historyPath);
+  assert(saved);
 
   CrashHistory loaded;
-  assert(loaded.LoadFromFile(historyPath));
+  const bool historyLoaded = loaded.LoadFromFile(historyPath);
+  assert(historyLoaded);
   assert(loaded.Size() == CrashHistory::kMaxEntries);
   const auto statsLoaded = loaded.GetModuleStats(20);
   const ModuleStats* sharedLoaded = FindModule(statsLoaded, "shared.dll");
@@ -431,6 +574,62 @@ void TestCrashHistoryBucketCandidateStats()
   assert(noStats.empty());
 }
 
+void TestCrashHistoryCandidateKeyVersionMigration()
+{
+  const auto historyPath =
+    std::filesystem::temp_directory_path() / "skydiag_crash_history_candidate_key_v1.json";
+  {
+    std::ofstream out(historyPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"version\": 1,\n"
+      "  \"entries\": [{\n"
+      "    \"timestamp_utc\": \"2026-01-01T00:00:00Z\",\n"
+      "    \"dump_file\": \"legacy.dmp\",\n"
+      "    \"bucket_key\": \"bucket-key-version\",\n"
+      "    \"top_suspect\": \"A-B.dll\",\n"
+      "    \"candidate_keys\": [\"ab\"]\n"
+      "  }]\n"
+      "}\n";
+  }
+
+  CrashHistory history;
+  const bool historyLoaded = history.LoadFromFile(historyPath);
+  assert(historyLoaded);
+  assert(
+    history.GetBucketCandidateStats("bucket-key-version").empty() &&
+    "Ambiguous v1 keys must not boost v2 candidates");
+
+  CrashHistoryEntry dashed{};
+  dashed.timestamp_utc = "2026-01-02T00:00:00Z";
+  dashed.bucket_key = "bucket-key-version";
+  dashed.candidate_keys = { "a-b" };
+  history.AddEntry(std::move(dashed));
+
+  CrashHistoryEntry compact{};
+  compact.timestamp_utc = "2026-01-03T00:00:00Z";
+  compact.bucket_key = "bucket-key-version";
+  compact.candidate_keys = { "ab" };
+  history.AddEntry(std::move(compact));
+
+  const auto stats = history.GetBucketCandidateStats("bucket-key-version");
+  assert(stats.size() == 2);
+  assert(stats[0].count == 1u);
+  assert(stats[1].count == 1u);
+  assert(stats[0].candidate_key != stats[1].candidate_key);
+
+  const bool saved = history.SaveToFile(historyPath);
+  assert(saved);
+  CrashHistory reloaded;
+  const bool reloadedFromFile = reloaded.LoadFromFile(historyPath);
+  assert(reloadedFromFile);
+  const auto reloadedStats = reloaded.GetBucketCandidateStats("bucket-key-version");
+  assert(reloadedStats.size() == 2);
+
+  std::error_code ec;
+  std::filesystem::remove(historyPath, ec);
+}
+
 void TestCaptureQualitySourceContracts()
 {
   const auto root = ProjectRoot();
@@ -463,6 +662,39 @@ void TestCaptureQualitySourceContracts()
   AssertContains(recommendationCpp, "richer crash recapture profile", "Recommendations must prefer richer recapture profiles before generic full-memory advice.");
   AssertContains(recommendationCpp, "indirect memory", "Recommendations must acknowledge richer indirect-memory capture when present.");
   AssertContains(recommendationCpp, "Fix dbghelp/msdia or symbol cache/path health first", "Recommendations must call out symbol/runtime remediation.");
+}
+
+void TestCrashLoggerSystemPathPromotionGuardSourceContracts()
+{
+  const auto analyzerCpp = ReadAllText(ProjectRoot() / "dump_tool" / "src" / "Analyzer.cpp");
+  AssertContains(
+    analyzerCpp,
+    "IsCrashLoggerFrameModuleLoadedFromSystemPath",
+    "Crash Logger promotion must check the loaded module path, not only its filename.");
+  AssertContains(
+    analyzerCpp,
+    "IsLikelyWindowsSystemModulePath(loaded.path)",
+    "Crash Logger promotion must reject modules loaded from a Windows system path.");
+  AssertContains(
+    analyzerCpp,
+    "ApplyCrashLoggerCorroborationToSuspects(&out, allModules)",
+    "Crash Logger suspect corroboration must receive loaded module paths.");
+  AssertContains(
+    analyzerCpp,
+    "out->crash_logger_direct_fault_eligible =",
+    "Direct-fault observations must keep a separate actionable eligibility flag.");
+  AssertContains(
+    analyzerCpp,
+    "out->crash_logger_first_actionable_probable_eligible =",
+    "Probable-frame observations must keep a separate actionable eligibility flag.");
+  AssertContains(
+    analyzerCpp,
+    "out->crash_logger_probable_streak_eligible =",
+    "Probable-streak observations must keep a separate actionable eligibility flag.");
+  AssertNotContains(
+    analyzerCpp,
+    "out->crash_logger_direct_fault_module.clear()",
+    "Ineligible Crash Logger observations must remain available as raw evidence.");
 }
 
 void TestAddressDbDiagnosticSourceContracts()
@@ -768,6 +1000,9 @@ void TestResourceProviderScoreOnlyRuntimeContracts()
 int main()
 {
   TestSignatureDatabaseRuntime();
+  TestNullAccessViolationSignatureRuntime();
+  TestLegacyNullAddressFieldFailsClosedRuntime();
+  TestSignatureDatabaseRejectsUnknownFutureSchemaRuntime();
   TestSignatureCallstackContainsRuntime();
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
@@ -777,7 +1012,9 @@ int main()
   TestCrashHistoryRuntime();
   TestCrashHistoryBucketCorrelation();
   TestCrashHistoryBucketCandidateStats();
+  TestCrashHistoryCandidateKeyVersionMigration();
   TestCaptureQualitySourceContracts();
+  TestCrashLoggerSystemPathPromotionGuardSourceContracts();
   TestAddressDbDiagnosticSourceContracts();
   TestCrashLoggerFrameConsensusContracts();
   TestFreezeAnalysisSourceContracts();

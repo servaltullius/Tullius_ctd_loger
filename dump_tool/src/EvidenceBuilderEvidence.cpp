@@ -13,8 +13,8 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.confidence_level = sig.confidence_level;
     e.confidence = sig.confidence.empty() ? ConfidenceText(lang, sig.confidence_level) : sig.confidence;
     e.title = ctx.en
-      ? (L"Known crash pattern: " + ToWideAscii(sig.id))
-      : (L"알려진 크래시 패턴: " + ToWideAscii(sig.id));
+      ? ((sig.scope == "root_cause" ? L"Known root-cause pattern: " : L"Known crash mechanism: ") + ToWideAscii(sig.id))
+      : ((sig.scope == "root_cause" ? L"알려진 근본 원인 패턴: " : L"알려진 크래시 메커니즘: ") + ToWideAscii(sig.id));
     e.details = sig.cause;
     r.evidence.push_back(std::move(e));
   }

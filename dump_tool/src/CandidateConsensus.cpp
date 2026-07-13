@@ -1,7 +1,15 @@
 #include "CandidateConsensus.h"
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <Windows.h>
+#endif
+
 #include <algorithm>
 #include <cwctype>
+#include <limits>
 #include <unordered_map>
 #include <utility>
 
@@ -41,7 +49,7 @@ std::uint32_t FamilyWeight(const CandidateRow& row, std::string_view familyId)
 
 bool IsBoostOnlyFamily(std::string_view familyId)
 {
-  return familyId == kFamilyHistory || familyId == kFamilyCaptureQualityStack;
+  return familyId == kFamilyHistory;
 }
 
 std::uint32_t RowScore(const CandidateRow& row)
@@ -104,10 +112,10 @@ int StatusRank(const ActionableCandidate& candidate)
   if (candidate.status_id == "cross_validated") {
     return 4;
   }
-  if (candidate.status_id == "related") {
+  if (candidate.status_id == "conflicting") {
     return 3;
   }
-  if (candidate.status_id == "conflicting") {
+  if (candidate.status_id == "related") {
     return 2;
   }
   if (candidate.status_id == "reference_clue") {
@@ -171,7 +179,6 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasCrashLoggerFrame = HasFamily(candidate, kFamilyCrashLoggerFrame);
   const bool hasCrashLoggerObjectRef = HasFamily(candidate, kFamilyCrashLoggerObjectRef);
   const bool hasStack = HasFamily(candidate, kFamilyStack);
-  const bool hasCaptureQualityStack = HasFamily(candidate, kFamilyCaptureQualityStack);
   const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool conflict = candidate.has_conflict;
   const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
@@ -186,8 +193,6 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool strongFrameOnly = frameOnly && FamilyWeight(*row, kFamilyCrashLoggerFrame) >= 6u;
   const bool stackOnly = hasStack && !hasCrashLoggerFrame && !hasCrashLoggerObjectRef && !hasResource;
   const bool strongStackOnly = stackOnly && FamilyWeight(*row, kFamilyStack) >= 5u;
-  const bool captureBackedStrongStackOnly =
-    stackOnly && hasCaptureQualityStack && FamilyWeight(*row, kFamilyStack) >= 4u;
   const bool objectRefWithHistory =
     hasCrashLoggerObjectRef &&
     HasFamily(candidate, kFamilyHistory) &&
@@ -216,10 +221,6 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
   } else if (strongStackOnly) {
-    candidate.status_id = "related";
-    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
-    candidate.cross_validated = false;
-  } else if (captureBackedStrongStackOnly) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
@@ -259,24 +260,140 @@ bool IsStandaloneCandidateAllowed(const ActionableCandidate& candidate)
   return !candidate.status_id.empty();
 }
 
+constexpr wchar_t PortableInvariantLower(wchar_t ch) noexcept
+{
+  if (ch >= L'A' && ch <= L'Z') {
+    return static_cast<wchar_t>(ch + (L'a' - L'A'));
+  }
+  if ((ch >= 0x00C0 && ch <= 0x00D6) || (ch >= 0x00D8 && ch <= 0x00DE)) {
+    return static_cast<wchar_t>(ch + 0x20);
+  }
+  if ((ch >= 0x0391 && ch <= 0x03A1) || (ch >= 0x03A3 && ch <= 0x03AB)) {
+    return static_cast<wchar_t>(ch + 0x20);
+  }
+  if (ch >= 0x0410 && ch <= 0x042F) {
+    return static_cast<wchar_t>(ch + 0x20);
+  }
+  if (ch == 0x0401) {
+    return static_cast<wchar_t>(0x0451);
+  }
+  if (ch >= 0xFF21 && ch <= 0xFF3A) {
+    return static_cast<wchar_t>(ch + 0x20);
+  }
+  return ch;
+}
+
+std::wstring InvariantLower(std::wstring_view value)
+{
+#ifdef _WIN32
+  if (!value.empty() && value.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    const int length = static_cast<int>(value.size());
+    const int required = LCMapStringEx(
+      LOCALE_NAME_INVARIANT,
+      LCMAP_LOWERCASE,
+      value.data(),
+      length,
+      nullptr,
+      0,
+      nullptr,
+      nullptr,
+      0);
+    if (required > 0) {
+      std::wstring lowered(static_cast<std::size_t>(required), L'\0');
+      if (LCMapStringEx(
+            LOCALE_NAME_INVARIANT,
+            LCMAP_LOWERCASE,
+            value.data(),
+            length,
+            lowered.data(),
+            required,
+            nullptr,
+            nullptr,
+            0) == required) {
+        return lowered;
+      }
+    }
+  }
+#endif
+
+  std::wstring lowered;
+  lowered.reserve(value.size());
+  for (const wchar_t ch : value) {
+    lowered.push_back(PortableInvariantLower(ch));
+  }
+  return lowered;
+}
+
+bool IsUnicodeSeparatorOrPunctuation(wchar_t ch) noexcept
+{
+  const auto cp = static_cast<std::uint32_t>(ch);
+  if (cp < 0x80u) {
+    return !((ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') ||
+             (ch >= L'0' && ch <= L'9'));
+  }
+#ifdef _WIN32
+  WORD type = 0;
+  if (GetStringTypeW(CT_CTYPE1, &ch, 1, &type) != 0 &&
+      (type & (C1_SPACE | C1_PUNCT | C1_CNTRL | C1_BLANK)) != 0) {
+    return true;
+  }
+#endif
+  const bool unicodeSpace =
+    cp == 0x00A0u || cp == 0x1680u || (cp >= 0x2000u && cp <= 0x200Au) ||
+    cp == 0x2028u || cp == 0x2029u || cp == 0x202Fu || cp == 0x205Fu || cp == 0x3000u;
+  const bool unicodePunctuation =
+    (cp >= 0x2000u && cp <= 0x206Fu) ||
+    (cp >= 0x3000u && cp <= 0x303Fu) ||
+    (cp >= 0xFF01u && cp <= 0xFF0Fu) ||
+    (cp >= 0xFF1Au && cp <= 0xFF20u) ||
+    (cp >= 0xFF3Bu && cp <= 0xFF40u) ||
+    (cp >= 0xFF5Bu && cp <= 0xFF65u);
+  return unicodeSpace || unicodePunctuation || iswspace(ch) || iswpunct(ch) || iswcntrl(ch);
+}
+
 }  // namespace
 
 std::wstring CanonicalCandidateKey(std::wstring_view value)
 {
-  std::wstring key;
-  key.reserve(value.size());
-  for (wchar_t ch : value) {
-    const wchar_t lower = static_cast<wchar_t>(towlower(ch));
-    if ((lower >= L'a' && lower <= L'z') || (lower >= L'0' && lower <= L'9')) {
-      key.push_back(lower);
+  std::wstring stem(value);
+  while (!stem.empty() && iswspace(stem.back())) {
+    stem.pop_back();
+  }
+
+  // Remove a real file extension before normalizing punctuation. Removing it
+  // afterwards made an all-Unicode name such as "한글모드.esp" collapse to
+  // the shared key "esp".
+  const auto extensionPos = stem.find_last_of(L'.');
+  const auto pathSeparatorPos = stem.find_last_of(L"/\\");
+  if (extensionPos != std::wstring::npos &&
+      (pathSeparatorPos == std::wstring::npos || extensionPos > pathSeparatorPos)) {
+    const std::wstring extension = InvariantLower(
+      std::wstring_view(stem).substr(extensionPos + 1u));
+    if (extension == L"esp" || extension == L"esm" || extension == L"esl" ||
+        extension == L"dll" || extension == L"exe") {
+      stem.erase(extensionPos);
     }
   }
 
-  const std::wstring candidates[] = { L"esp", L"esm", L"esl", L"dll", L"exe" };
-  for (const auto& suffix : candidates) {
-    if (key.size() > suffix.size() && key.ends_with(suffix)) {
-      key.erase(key.size() - suffix.size());
-      break;
+  std::wstring key;
+  key.reserve(stem.size());
+  bool separatorPending = false;
+  for (const wchar_t lower : InvariantLower(stem)) {
+    if ((lower >= L'a' && lower <= L'z') || (lower >= L'0' && lower <= L'9')) {
+      if (separatorPending && !key.empty()) {
+        key.push_back(L'-');
+      }
+      key.push_back(lower);
+      separatorPending = false;
+    } else if (static_cast<unsigned int>(lower) >= 0x80u &&
+               !IsUnicodeSeparatorOrPunctuation(lower)) {
+      if (separatorPending && !key.empty()) {
+        key.push_back(L'-');
+      }
+      key.push_back(lower);
+      separatorPending = false;
+    } else if (!key.empty()) {
+      separatorPending = true;
     }
   }
   return key;
@@ -288,11 +405,17 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
   rowsByKey.reserve(signals.size());
 
   for (const auto& signal : signals) {
-    if (signal.candidate_key.empty() || signal.family_id.empty() || signal.weight == 0) {
+    // Capture richness describes evidence quality, not a second causal signal.
+    // Keep it out of score, supporting_families, family_count and confidence.
+    if (signal.family_id == kFamilyCaptureQualityStack) {
+      continue;
+    }
+    const auto candidateKey = CanonicalCandidateKey(signal.candidate_key);
+    if (candidateKey.empty() || signal.family_id.empty() || signal.weight == 0) {
       continue;
     }
 
-    auto& row = rowsByKey[signal.candidate_key];
+    auto& row = rowsByKey[candidateKey];
     if (row.candidate.display_name.empty()) {
       row.candidate.display_name = signal.display_name;
     }
@@ -320,14 +443,18 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
   std::wstring topStackKey;
   std::uint32_t topStackWeight = 0;
   for (const auto& signal : signals) {
+    const auto candidateKey = CanonicalCandidateKey(signal.candidate_key);
+    if (candidateKey.empty()) {
+      continue;
+    }
     if (signal.family_id == kFamilyCrashLoggerFrame && signal.weight > topFrameWeight) {
-      topFrameKey = signal.candidate_key;
+      topFrameKey = candidateKey;
       topFrameWeight = signal.weight;
     } else if (signal.family_id == kFamilyCrashLoggerObjectRef && signal.weight > topObjectRefWeight) {
-      topObjectRefKey = signal.candidate_key;
+      topObjectRefKey = candidateKey;
       topObjectRefWeight = signal.weight;
     } else if (signal.family_id == kFamilyStack && signal.weight > topStackWeight) {
-      topStackKey = signal.candidate_key;
+      topStackKey = candidateKey;
       topStackWeight = signal.weight;
     }
   }

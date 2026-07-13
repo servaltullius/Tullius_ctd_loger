@@ -12,19 +12,22 @@ namespace skydiag::dump_tool {
 
 struct SignatureMatch
 {
-  std::string id;  // e.g. D6DDDA_VRAM
-  std::wstring cause;
+  std::string id;  // e.g. D6DDDA_1597_AV
+  std::string scope = "mechanism";  // mechanism / root_cause
+  std::wstring cause;  // localized mechanism or root-cause description
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
-  std::wstring confidence;  // localized confidence label
+  std::wstring confidence;  // localized match-confidence label
   std::vector<std::wstring> recommendations;
 };
 
 struct SignatureMatchInput
 {
   std::uint32_t exc_code = 0;
+  std::string game_version;  // exact executable file version; empty = unavailable
   std::wstring fault_module;
   std::uint64_t fault_offset = 0;
-  std::uint64_t exc_address = 0;
+  // MINIDUMP_EXCEPTION.ExceptionInformation[1]; nullopt when the dump did not provide it.
+  std::optional<std::uint64_t> access_violation_address;
   bool fault_module_is_system = false;
   std::vector<std::wstring> callstack_modules;
 };

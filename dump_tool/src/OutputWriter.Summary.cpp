@@ -166,6 +166,9 @@ nlohmann::json BuildSummaryJson(
   summary["crash_logger"]["first_actionable_probable_module"] = WideToUtf8(r.crash_logger_first_actionable_probable_module);
   summary["crash_logger"]["probable_streak_module"] = WideToUtf8(r.crash_logger_probable_streak_module);
   summary["crash_logger"]["probable_streak_length"] = r.crash_logger_probable_streak_length;
+  summary["crash_logger"]["direct_fault_eligible"] = r.crash_logger_direct_fault_eligible;
+  summary["crash_logger"]["first_actionable_probable_eligible"] = r.crash_logger_first_actionable_probable_eligible;
+  summary["crash_logger"]["probable_streak_eligible"] = r.crash_logger_probable_streak_eligible;
   summary["crash_logger"]["frame_signal_strength"] = r.crash_logger_frame_signal_strength;
   if (!r.crash_logger_cpp_exception_type.empty() ||
       !r.crash_logger_cpp_exception_info.empty() ||
@@ -196,7 +199,10 @@ nlohmann::json BuildSummaryJson(
   if (r.signature_match.has_value()) {
     summary["signature_match"] = {
       { "id", r.signature_match->id },
+      { "scope", r.signature_match->scope },
+      { "mechanism", r.signature_match->scope == "mechanism" ? WideToUtf8(r.signature_match->cause) : "" },
       { "cause", WideToUtf8(r.signature_match->cause) },
+      { "match_confidence", WideToUtf8(r.signature_match->confidence) },
       { "confidence", WideToUtf8(r.signature_match->confidence) },
     };
   } else {

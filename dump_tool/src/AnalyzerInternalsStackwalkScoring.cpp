@@ -1,4 +1,5 @@
 #include "AnalyzerInternals.h"
+#include "AnalyzerScoringPolicy.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -35,6 +36,8 @@ constexpr std::uint32_t kMedConfMinMargin     = 6;
 
 // Score proximity threshold for hook-framework demotion heuristic.
 constexpr std::uint32_t kHookFrameworkNearTieThreshold = 4;
+constexpr std::uint32_t kPassiveHookFallbackMinScore = 4;
+constexpr std::uint32_t kOtherHookFallbackMinScore = 8;
 
 std::uint32_t CallstackFrameWeight(std::size_t depth)
 {
@@ -55,6 +58,13 @@ i18n::ConfidenceLevel ConfidenceForTopSuspectCallstackLevel(std::uint32_t topSco
     return i18n::ConfidenceLevel::kMedium;
   }
   return i18n::ConfidenceLevel::kLow;
+}
+
+i18n::ConfidenceLevel ConfidenceForSecondaryCallstackLevel(std::uint32_t score, std::size_t firstDepth)
+{
+  return policy::SecondaryCallstackCanBeMedium(score, firstDepth, kMedConfMinScore, kMedConfMaxDepth)
+    ? i18n::ConfidenceLevel::kMedium
+    : i18n::ConfidenceLevel::kLow;
 }
 
 }  // namespace
@@ -134,8 +144,16 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
       const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
       const bool topIsSkseRuntime = IsSkseModule(topLower);
       const bool topIsMo2Vfs = (topLower == L"usvfs_x64.dll" || topLower == L"uvsfs64.dll");
-      const bool nearTie = (fallbackIt->score + kHookFrameworkNearTieThreshold) >= rows[0].score;
-      if (topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs || nearTie) {
+      const bool topIsPassiveHook = topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs;
+      const std::uint32_t minimumFallbackScore = topIsPassiveHook
+        ? kPassiveHookFallbackMinScore
+        : kOtherHookFallbackMinScore;
+      const bool promotionEligible = policy::ShouldPromoteHookFallback(
+        rows[0].score,
+        fallbackIt->score,
+        minimumFallbackScore,
+        kHookFrameworkNearTieThreshold);
+      if (promotionEligible) {
         std::iter_swap(rows.begin(), fallbackIt);
         promotedHookTop = true;
       }
@@ -165,7 +183,9 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     const auto& m = modules[row.modIndex];
 
     SuspectItem si{};
-    si.confidence_level = (i == 0) ? confTop : i18n::ConfidenceLevel::kMedium;
+    si.confidence_level = (i == 0)
+      ? confTop
+      : ConfidenceForSecondaryCallstackLevel(row.score, row.firstDepth);
     si.confidence = ConfidenceText(lang, si.confidence_level);
     si.module_filename = m.filename;
     si.module_path = m.path;

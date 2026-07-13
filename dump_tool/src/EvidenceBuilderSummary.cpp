@@ -78,15 +78,18 @@ bool CandidateHasStandaloneCallstackSupport(const ActionableCandidate& candidate
 
 std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
 {
-  if (CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
+  if (r.crash_logger_direct_fault_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
     return en ? L"Crash Logger frame first (direct DLL fault)"
               : L"Crash Logger frame first (direct DLL fault)";
   }
-  if (CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
+  if (r.crash_logger_first_actionable_probable_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
     return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
               : L"Crash Logger frame first (첫 actionable probable DLL frame)";
   }
-  if (CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
+  if (r.crash_logger_probable_streak_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
     return en ? L"Crash Logger frame first (probable frame streak)"
               : L"Crash Logger frame first (probable frame streak)";
   }
@@ -120,13 +123,6 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
-  if (r.signature_match.has_value()) {
-    const auto& sig = *r.signature_match;
-    return en
-      ? (L"Known pattern [" + ToWideAscii(sig.id) + L"]: " + sig.cause + L" (Confidence: " + sig.confidence + L")")
-      : (L"알려진 패턴 [" + ToWideAscii(sig.id) + L"]: " + sig.cause + L" (신뢰도: " + sig.confidence + L")");
-  }
-
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
   const bool isManualCapture = ctx.isManualCapture;
@@ -182,9 +178,12 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const bool topCandidateHasObjectRef = topCandidate && CandidateHasFamily(*topCandidate, "crash_logger_object_ref");
   const bool topCandidateBackedByFrame =
     topCandidate &&
-    (CandidateMatchesModule(*topCandidate, r.crash_logger_direct_fault_module) ||
-     CandidateMatchesModule(*topCandidate, r.crash_logger_first_actionable_probable_module) ||
-     CandidateMatchesModule(*topCandidate, r.crash_logger_probable_streak_module));
+    ((r.crash_logger_direct_fault_eligible &&
+      CandidateMatchesModule(*topCandidate, r.crash_logger_direct_fault_module)) ||
+     (r.crash_logger_first_actionable_probable_eligible &&
+      CandidateMatchesModule(*topCandidate, r.crash_logger_first_actionable_probable_module)) ||
+     (r.crash_logger_probable_streak_eligible &&
+      CandidateMatchesModule(*topCandidate, r.crash_logger_probable_streak_module)));
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -610,6 +609,22 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           : L"덤프만으로 유력 후보를 특정하기 어렵습니다. (신뢰도: 낮음)";
       }
     }
+  }
+
+  if (r.signature_match.has_value()) {
+    const auto& sig = *r.signature_match;
+    if (sig.scope == "root_cause") {
+      return en
+        ? (L"Known root-cause pattern [" + ToWideAscii(sig.id) + L"]: " + sig.cause +
+           L" (Root-cause confidence: " + sig.confidence + L"). " + summary)
+        : (L"알려진 근본 원인 패턴 [" + ToWideAscii(sig.id) + L"]: " + sig.cause +
+           L" (근본 원인 신뢰도: " + sig.confidence + L"). " + summary);
+    }
+    return en
+      ? (L"Known crash mechanism [" + ToWideAscii(sig.id) + L"]: " + sig.cause +
+         L" (Pattern-match confidence: " + sig.confidence + L"). Root-cause assessment: " + summary)
+      : (L"알려진 크래시 메커니즘 [" + ToWideAscii(sig.id) + L"]: " + sig.cause +
+         L" (패턴 일치 신뢰도: " + sig.confidence + L"). 근본 원인 후보 판단: " + summary);
   }
 
   return summary;

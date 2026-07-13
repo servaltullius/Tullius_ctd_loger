@@ -159,7 +159,7 @@ internal sealed partial class MainWindowViewModel
         {
             var top = summary.Suspects[0];
             var conf = !string.IsNullOrWhiteSpace(top.Confidence) ? top.Confidence : "?";
-            lines.Add($"📌 {(_isKorean ? (isSnapshotLike ? "참고 후보" : "유력 원인") : (isSnapshotLike ? "Reference candidate" : "Primary suspect"))}: {top.Module} ({conf})");
+            lines.Add($"📌 {(_isKorean ? (isSnapshotLike ? "참고 후보" : "유력 후보") : (isSnapshotLike ? "Reference candidate" : "Primary suspect"))}: {top.Module} ({conf})");
         }
 
         if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))

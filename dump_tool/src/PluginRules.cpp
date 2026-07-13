@@ -169,7 +169,7 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan)
 bool AnyPluginHeaderVersionGte(const ParsedPluginScan& scan, double threshold)
 {
   for (const auto& plugin : scan.plugins) {
-    if (static_cast<double>(plugin.header_version) + 1e-6 >= threshold) {
+    if (plugin.is_active && static_cast<double>(plugin.header_version) + 1e-6 >= threshold) {
       return true;
     }
   }

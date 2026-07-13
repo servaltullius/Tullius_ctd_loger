@@ -72,15 +72,18 @@ bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_v
 
 std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
 {
-  if (CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
+  if (r.crash_logger_direct_fault_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
     return en ? L"Crash Logger frame first (direct DLL fault)"
               : L"Crash Logger frame first (direct DLL fault)";
   }
-  if (CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
+  if (r.crash_logger_first_actionable_probable_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
     return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
               : L"Crash Logger frame first (첫 actionable probable DLL frame)";
   }
-  if (CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
+  if (r.crash_logger_probable_streak_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
     return en ? L"Crash Logger frame first (probable frame streak)"
               : L"Crash Logger frame first (probable frame streak)";
   }

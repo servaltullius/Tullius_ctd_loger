@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cwctype>
 #include <fstream>
+#include <limits>
 #include <locale>
 #include <regex>
 #include <stdexcept>
@@ -49,7 +50,20 @@ std::uint32_t ParseHexU32(const std::string& s)
   if (parsed != s.size()) {
     throw std::invalid_argument("trailing characters in hex value");
   }
+  if (value > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::out_of_range("hex value exceeds uint32");
+  }
   return static_cast<std::uint32_t>(value);
+}
+
+std::uint64_t ParseHexU64(const std::string& s)
+{
+  std::size_t parsed = 0;
+  const auto value = std::stoull(s, &parsed, 0);
+  if (parsed != s.size()) {
+    throw std::invalid_argument("trailing characters in hex value");
+  }
+  return static_cast<std::uint64_t>(value);
 }
 
 std::wstring Utf8ToWidePortable(const std::string& s)
@@ -80,20 +94,25 @@ struct SignatureDatabase::Signature
   std::uint32_t exc_code = 0;
   bool has_exc_code = false;
 
+  std::string game_version;  // empty = any
+
   std::wstring fault_module;      // lowercase, empty = any
+  std::uint64_t fault_offset = 0;
+  bool has_fault_offset = false;
   std::string fault_offset_regex;  // empty = any
   std::optional<std::regex> fault_offset_re;
 
   bool fault_module_is_system = false;
   bool has_fault_module_is_system = false;
 
-  bool exc_address_near_zero = false;
-  bool has_exc_address_near_zero = false;
+  bool access_violation_address_near_zero = false;
+  bool has_access_violation_address_near_zero = false;
 
   std::vector<std::wstring> callstack_contains;
 
   std::wstring cause_ko;
   std::wstring cause_en;
+  std::string scope = "mechanism";
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::vector<std::wstring> recommendations_ko;
   std::vector<std::wstring> recommendations_en;
@@ -123,6 +142,12 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
     if (!j.contains("version") || !j["version"].is_number_unsigned()) {
       return false;
     }
+    const auto schemaVersion = j["version"].get<std::uint32_t>();
+    if (schemaVersion != 1u && schemaVersion != 2u) {
+      // Unknown match fields must never be silently ignored: that can turn a
+      // future narrow signature into a broad false-positive rule.
+      return false;
+    }
 
     std::vector<Signature> loaded;
     loaded.reserve(j["signatures"].size());
@@ -146,45 +171,151 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
       }
       const auto& m = *itMatch;
       bool valid = true;
+      bool hasMatchConstraint = false;
 
-      if (m.contains("exc_code") && m["exc_code"].is_string()) {
-        try {
-          sig.exc_code = ParseHexU32(m["exc_code"].get<std::string>());
-          sig.has_exc_code = true;
-        } catch (...) {
+      for (auto it = m.begin(); it != m.end(); ++it) {
+        const std::string& key = it.key();
+        if (key != "exc_code" &&
+            key != "game_version" &&
+            key != "fault_module" &&
+            key != "fault_offset" &&
+            key != "fault_offset_regex" &&
+            key != "fault_module_is_system" &&
+            key != "access_violation_address_near_zero" &&
+            key != "exc_address_near_zero" &&
+            key != "callstack_contains") {
+          // A typo or newer constraint must invalidate this entry rather than
+          // being ignored and broadening its match.
           valid = false;
         }
       }
-      if (m.contains("fault_module") && m["fault_module"].is_string()) {
-        sig.fault_module = WideLower(Utf8ToWidePortable(m["fault_module"].get<std::string>()));
-      }
-      if (m.contains("fault_offset_regex") && m["fault_offset_regex"].is_string()) {
-        sig.fault_offset_regex = m["fault_offset_regex"].get<std::string>();
-        if (!sig.fault_offset_regex.empty()) {
+
+      if (m.contains("exc_code")) {
+        if (m["exc_code"].is_string()) {
           try {
-            sig.fault_offset_re.emplace(sig.fault_offset_regex, std::regex::icase);
+            sig.exc_code = ParseHexU32(m["exc_code"].get<std::string>());
+            sig.has_exc_code = true;
+            hasMatchConstraint = true;
           } catch (...) {
             valid = false;
           }
+        } else {
+          valid = false;
         }
       }
-      if (m.contains("fault_module_is_system") && m["fault_module_is_system"].is_boolean()) {
-        sig.fault_module_is_system = m["fault_module_is_system"].get<bool>();
-        sig.has_fault_module_is_system = true;
+      if (m.contains("game_version")) {
+        if (m["game_version"].is_string() && !m["game_version"].get_ref<const std::string&>().empty()) {
+          sig.game_version = m["game_version"].get<std::string>();
+          hasMatchConstraint = true;
+        } else {
+          valid = false;
+        }
       }
-      if (m.contains("exc_address_near_zero") && m["exc_address_near_zero"].is_boolean()) {
-        sig.exc_address_near_zero = m["exc_address_near_zero"].get<bool>();
-        sig.has_exc_address_near_zero = true;
+      if (m.contains("fault_module")) {
+        if (m["fault_module"].is_string() && !m["fault_module"].get_ref<const std::string&>().empty()) {
+          sig.fault_module = WideLower(Utf8ToWidePortable(m["fault_module"].get<std::string>()));
+          if (sig.fault_module.empty()) {
+            valid = false;
+          } else {
+            hasMatchConstraint = true;
+          }
+        } else {
+          valid = false;
+        }
       }
-      if (m.contains("callstack_contains") && m["callstack_contains"].is_array()) {
-        for (const auto& v : m["callstack_contains"]) {
-          if (v.is_string()) {
+      if (m.contains("fault_offset")) {
+        if (m["fault_offset"].is_string()) {
+          try {
+            sig.fault_offset = ParseHexU64(m["fault_offset"].get<std::string>());
+            sig.has_fault_offset = true;
+            hasMatchConstraint = true;
+          } catch (...) {
+            valid = false;
+          }
+        } else {
+          valid = false;
+        }
+      }
+      if (m.contains("fault_offset_regex")) {
+        if (m["fault_offset_regex"].is_string() && !m["fault_offset_regex"].get_ref<const std::string&>().empty()) {
+          sig.fault_offset_regex = m["fault_offset_regex"].get<std::string>();
+          try {
+            sig.fault_offset_re.emplace(sig.fault_offset_regex, std::regex::icase);
+            hasMatchConstraint = true;
+          } catch (...) {
+            valid = false;
+          }
+        } else {
+          valid = false;
+        }
+      }
+      if (m.contains("fault_module_is_system")) {
+        if (m["fault_module_is_system"].is_boolean()) {
+          sig.fault_module_is_system = m["fault_module_is_system"].get<bool>();
+          sig.has_fault_module_is_system = true;
+          hasMatchConstraint = true;
+        } else {
+          valid = false;
+        }
+      }
+      const bool hasAccessViolationNearZero = m.contains("access_violation_address_near_zero");
+      const bool hasLegacyExceptionNearZero = m.contains("exc_address_near_zero");
+      if (hasAccessViolationNearZero || hasLegacyExceptionNearZero) {
+        if ((hasAccessViolationNearZero && !m["access_violation_address_near_zero"].is_boolean()) ||
+            (hasLegacyExceptionNearZero && !m["exc_address_near_zero"].is_boolean())) {
+          valid = false;
+        } else {
+          const bool nearZero = hasAccessViolationNearZero
+            ? m["access_violation_address_near_zero"].get<bool>()
+            : m["exc_address_near_zero"].get<bool>();
+          if (hasAccessViolationNearZero && hasLegacyExceptionNearZero &&
+              nearZero != m["exc_address_near_zero"].get<bool>()) {
+            valid = false;
+          } else {
+            // Schema v1 called this the exception address. Treat it as the AV
+            // target address so stale data cannot broaden into every AV.
+            sig.access_violation_address_near_zero = nearZero;
+            sig.has_access_violation_address_near_zero = true;
+            hasMatchConstraint = true;
+          }
+        }
+      }
+      if (m.contains("callstack_contains")) {
+        if (m["callstack_contains"].is_array()) {
+          for (const auto& v : m["callstack_contains"]) {
+            if (!v.is_string()) {
+              valid = false;
+              continue;
+            }
             const std::wstring token = WideLower(Utf8ToWidePortable(v.get<std::string>()));
             if (!token.empty()) {
               sig.callstack_contains.push_back(token);
+            } else {
+              valid = false;
             }
           }
+          if (!sig.callstack_contains.empty()) {
+            hasMatchConstraint = true;
+          } else {
+            valid = false;
+          }
+        } else {
+          valid = false;
         }
+      }
+
+      if (!hasMatchConstraint) {
+        valid = false;
+      }
+
+      if (sig.id == "D6DDDA_1597_AV" &&
+          (!sig.has_exc_code || sig.exc_code != 0xC0000005u ||
+           sig.game_version != "1.5.97.0" ||
+           sig.fault_module != L"skyrimse.exe" ||
+           !sig.has_fault_offset || sig.fault_offset != 0xD6DDDAull)) {
+        // This high-confidence location match is version/address specific. Reject older
+        // broad variants instead of silently applying them to other runtimes.
+        valid = false;
       }
 
       if (!valid) {
@@ -192,6 +323,15 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
       }
 
       const auto& d = *itDiagnosis;
+      if (d.contains("scope")) {
+        if (!d["scope"].is_string()) {
+          continue;
+        }
+        sig.scope = d["scope"].get<std::string>();
+      }
+      if (sig.scope != "mechanism" && sig.scope != "root_cause") {
+        continue;
+      }
       sig.cause_ko = Utf8ToWidePortable(d.value("cause_ko", ""));
       sig.cause_en = Utf8ToWidePortable(d.value("cause_en", ""));
       sig.confidence_level = ParseConfidence(d.value("confidence", ""));
@@ -228,7 +368,15 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
       continue;
     }
 
+    if (!sig.game_version.empty() && sig.game_version != input.game_version) {
+      continue;
+    }
+
     if (!sig.fault_module.empty() && WideLower(input.fault_module) != sig.fault_module) {
+      continue;
+    }
+
+    if (sig.has_fault_offset && sig.fault_offset != input.fault_offset) {
       continue;
     }
 
@@ -244,9 +392,12 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
       continue;
     }
 
-    if (sig.has_exc_address_near_zero) {
-      const bool nearZero = (input.exc_address <= 0x10000ull);
-      if (nearZero != sig.exc_address_near_zero) {
+    if (sig.has_access_violation_address_near_zero) {
+      if (!input.access_violation_address.has_value()) {
+        continue;
+      }
+      const bool nearZero = (*input.access_violation_address <= 0x10000ull);
+      if (nearZero != sig.access_violation_address_near_zero) {
         continue;
       }
     }
@@ -273,6 +424,7 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
 
     SignatureMatch result{};
     result.id = sig.id;
+    result.scope = sig.scope;
     result.cause = useKorean ? sig.cause_ko : sig.cause_en;
     result.confidence_level = sig.confidence_level;
     result.confidence = std::wstring(i18n::ConfidenceLabel(

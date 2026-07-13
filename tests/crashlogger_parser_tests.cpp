@@ -20,6 +20,11 @@ using skydiag::dump_tool::crashlogger_core::TryExtractCompactTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::TryExtractDashedTimestampFromStem;
 using skydiag::dump_tool::crashlogger_core::ParsedTimestamp;
 using skydiag::dump_tool::crashlogger_core::CrashLoggerFrameSignals;
+using skydiag::dump_tool::crashlogger_core::CrashLoggerArtifactKind;
+using skydiag::dump_tool::crashlogger_core::ClassifyCrashLoggerArtifactNameAscii;
+using skydiag::dump_tool::crashlogger_core::IsBetterCrashLoggerPairCandidate;
+using skydiag::dump_tool::crashlogger_core::IsCrashLoggerPairingDiffAllowed;
+using skydiag::dump_tool::crashlogger_core::kCrashLoggerFileTimeTicksPerSecond;
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::ProjectRoot;
 using skydiag::tests::source_guard::ReadAllText;
@@ -51,6 +56,63 @@ static void Test_LooksLikeCrashLogger_ThreadDump()
     "\tCALLSTACK:\n"
     "\t\tPrismaUI.dll+0x1234\n";
   assert(LooksLikeCrashLoggerLogTextCore(s));
+}
+
+static void Test_ClassifyCrashLoggerArtifactName()
+{
+  assert(ClassifyCrashLoggerArtifactNameAscii("crash-2026-07-13-12-34-56.log") ==
+         CrashLoggerArtifactKind::kCrash);
+  assert(ClassifyCrashLoggerArtifactNameAscii("C:/logs/CRASH_20260713_123456.txt") ==
+         CrashLoggerArtifactKind::kCrash);
+  assert(ClassifyCrashLoggerArtifactNameAscii("threaddump-2026-07-13-12-34-56.log") ==
+         CrashLoggerArtifactKind::kThreadDump);
+  assert(ClassifyCrashLoggerArtifactNameAscii("THREAD_DUMP_20260713_123456.txt") ==
+         CrashLoggerArtifactKind::kThreadDump);
+  assert(ClassifyCrashLoggerArtifactNameAscii("renamed-diagnostic.log") ==
+         CrashLoggerArtifactKind::kUnknown);
+}
+
+static void Test_CrashLoggerPairRankingPrioritizesTimeThenProvenance()
+{
+  const auto second = kCrashLoggerFileTimeTicksPerSecond;
+  assert(IsCrashLoggerPairingDiffAllowed(120u * second));
+  assert(!IsCrashLoggerPairingDiffAllowed(120u * second + 1u));
+
+  // A renamed but exactly contemporaneous valid log is better than a
+  // conventionally named log from nearly two minutes earlier.
+  assert(IsBetterCrashLoggerPairCandidate(
+    true,
+    0u,
+    CrashLoggerArtifactKind::kUnknown,
+    false,
+    L"z-renamed.log",
+    119u * second,
+    CrashLoggerArtifactKind::kCrash,
+    false,
+    L"a-crash.log"));
+
+  // With equal timestamps, known incident kind and co-location are useful,
+  // deterministic provenance tie-breakers.
+  assert(IsBetterCrashLoggerPairCandidate(
+    true,
+    second,
+    CrashLoggerArtifactKind::kCrash,
+    false,
+    L"z-crash.log",
+    second,
+    CrashLoggerArtifactKind::kUnknown,
+    true,
+    L"a-renamed.log"));
+  assert(IsBetterCrashLoggerPairCandidate(
+    true,
+    second,
+    CrashLoggerArtifactKind::kCrash,
+    true,
+    L"z-crash.log",
+    second,
+    CrashLoggerArtifactKind::kCrash,
+    false,
+    L"a-crash.log"));
 }
 
 static void Test_ParseTopModules_CrashLog()
@@ -717,6 +779,27 @@ static void Test_ParseObjectRefs_RegisterFileField()
   }
   assert(foundSome);
   assert(foundDetailed);
+}
+
+static void Test_ParseObjectRefs_QuotedPluginNamesWithSpaces()
+{
+  const std::string log =
+    "CrashLoggerSSE v1.20.0\n"
+    "POSSIBLE RELEVANT OBJECTS:\n"
+    "\tRDI: (TESObjectREFR*) [0x12345678] (\"JK's Skyrim.esp\")\n"
+    "\tFile: \"My Compatibility Patch.esm\"\n"
+    "\n"
+    "REGISTERS:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  bool foundJks = false;
+  bool foundPatch = false;
+  for (const auto& ref : refs) {
+    if (ref.esp_name == "JK's Skyrim.esp") foundJks = true;
+    if (ref.esp_name == "My Compatibility Patch.esm") foundPatch = true;
+  }
+  assert(foundJks);
+  assert(foundPatch);
 }
 
 static void Test_ParseObjectRefs_RegisterRanksHigher()
@@ -1484,6 +1567,8 @@ int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
   Test_LooksLikeCrashLogger_ThreadDump();
+  Test_ClassifyCrashLoggerArtifactName();
+  Test_CrashLoggerPairRankingPrioritizesTimeThenProvenance();
   Test_ParseTopModules_CrashLog();
   Test_ParseTopModules_CrashLog_NewCallstackFormat();
   Test_ParseTopModules_ThreadDump();
@@ -1557,6 +1642,7 @@ int main()
   Test_ParseObjectRefs_FiltersVanillaEsp();
   Test_ParseObjectRefs_ModifiedBySkipped();
   Test_ParseObjectRefs_RegisterFileField();
+  Test_ParseObjectRefs_QuotedPluginNamesWithSpaces();
   Test_ParseObjectRefs_RegisterRanksHigher();
   Test_ParseObjectRefs_ActorRanksHigher();
   Test_AggregateObjectRefs_Dedup();

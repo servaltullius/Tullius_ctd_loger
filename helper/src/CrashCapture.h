@@ -8,12 +8,15 @@ using DWORD = std::uint32_t;
 #endif
 
 #include <cstdint>
+#include <cstddef>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 
 namespace skydiag {
 struct SharedHeader;
+struct SharedLayout;
 }
 
 namespace skydiag::helper {
@@ -31,14 +34,31 @@ struct CrashEventInfo {
   std::uint64_t exceptionAddr = 0;
   std::uint32_t faultingTid = 0;
   std::uint32_t stateFlags = 0;
+  std::uint32_t crashSeq = 0;
   bool isStrong = false;
   bool inMenu = false;
+};
+
+struct StableSharedSnapshot {
+  struct AlignedByteDeleter {
+    std::size_t alignment = alignof(std::max_align_t);
+    void operator()(std::byte* ptr) const noexcept;
+  };
+
+  using Storage = std::unique_ptr<std::byte, AlignedByteDeleter>;
+
+  Storage storage{nullptr, AlignedByteDeleter{}};
+  std::size_t byteSize = 0;
+
+  const skydiag::SharedLayout* layout() const noexcept;
+  std::size_t size() const noexcept;
 };
 
 enum class FilterVerdict {
   kKeepDump,
   kDeleteBenign,
   kDeleteRecovered,
+  kRetryNewerCrash,
 };
 
 inline constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
@@ -107,7 +127,25 @@ inline bool QueueDeferredCrashViewer(
   return false;
 }
 
+inline bool ShouldLatchCrashCapture(FilterVerdict verdict) noexcept
+{
+  return verdict == FilterVerdict::kKeepDump;
+}
+
+inline bool IsCommittedCrashSequence(std::uint32_t crashSeq) noexcept
+{
+  return crashSeq != 0u && (crashSeq & 1u) == 0u;
+}
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
+bool CaptureStableSharedSnapshot(
+  const skydiag::SharedLayout* shm,
+  std::size_t shmBytes,
+  StableSharedSnapshot* out) noexcept;
+bool TryClearRecoveredCrashFreeze(
+  skydiag::SharedLayout* shm,
+  std::uint32_t expectedCrashSeq) noexcept;
+void WriteWerFallbackHint(const std::filesystem::path& outBase);
 
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,

@@ -110,6 +110,24 @@ SKYDIAG_REPO="$(wslpath -w "$PWD")" /mnt/c/Windows/System32/WindowsPowerShell/v1
 ); foreach ($test in $tests) { $p = Start-Process -FilePath $test -Wait -PassThru -NoNewWindow; if ($p.ExitCode -ne 0) { exit $p.ExitCode } }'
 ```
 
+## Analysis Quality Corpus Gate
+
+Synthetic fixtures verify deterministic behavior, but they do not establish real-world CTD-cause accuracy. Use reviewed, real incident summaries with `triage.ground_truth_mod` populated to measure the same `actionable_candidates` ordering that users see:
+
+```powershell
+python scripts/analyze_bucket_quality.py `
+  --root <reviewed-summary-directory> `
+  --out-json build/analysis-quality.json `
+  --min-ground-truth <required-sample-count> `
+  --min-high-confidence-predictions <required-high-sample-count> `
+  --min-top1-accuracy <0-to-1> `
+  --min-top3-recall <0-to-1> `
+  --min-high-confidence-precision <0-to-1> `
+  --max-abstention-rate <0-to-1>
+```
+
+The command exits with code `2` when a configured threshold is missed or when a requested metric has no eligible samples. Do not publish an accuracy percentage from synthetic fixtures or from an unreviewed corpus; choose release thresholds only after the corpus size and labeling policy have been recorded.
+
 ## Issue Reporting / Troubleshooting
 
 - Issue reporting guide: `docs/BETA_TESTING.md`

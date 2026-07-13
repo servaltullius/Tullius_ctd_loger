@@ -34,6 +34,10 @@ internal sealed class AnalysisSummary
     public string CrashLoggerFirstActionableProbableModule { get; init; } = string.Empty;
     public string CrashLoggerProbableStreakModule { get; init; } = string.Empty;
     public int CrashLoggerProbableStreakLength { get; init; }
+    public bool HasCrashLoggerFrameEligibilityMetadata { get; init; }
+    public bool CrashLoggerDirectFaultEligible { get; init; }
+    public bool CrashLoggerFirstActionableProbableEligible { get; init; }
+    public bool CrashLoggerProbableStreakEligible { get; init; }
     public int CrashLoggerFrameSignalStrength { get; init; }
     public IReadOnlyList<string> Diagnostics { get; init; } = Array.Empty<string>();
 
@@ -55,6 +59,11 @@ internal sealed class AnalysisSummary
             ReadString(item, "reason")));
 
         var crashLoggerNode = root.TryGetProperty("crash_logger", out var clNode) ? clNode : default;
+        var hasCrashLoggerFrameEligibilityMetadata =
+            crashLoggerNode.ValueKind == JsonValueKind.Object &&
+            (crashLoggerNode.TryGetProperty("direct_fault_eligible", out _) ||
+             crashLoggerNode.TryGetProperty("first_actionable_probable_eligible", out _) ||
+             crashLoggerNode.TryGetProperty("probable_streak_eligible", out _));
         var crashLoggerRefs = ParseObjectArray(crashLoggerNode, "object_refs", item => new CrashLoggerRefItem(
             ReadString(item, "esp_name"),
             ReadString(item, "best_object_type"),
@@ -133,6 +142,10 @@ internal sealed class AnalysisSummary
             CrashLoggerFirstActionableProbableModule = ReadString(crashLoggerNode, "first_actionable_probable_module"),
             CrashLoggerProbableStreakModule = ReadString(crashLoggerNode, "probable_streak_module"),
             CrashLoggerProbableStreakLength = ReadInt32(crashLoggerNode, "probable_streak_length"),
+            HasCrashLoggerFrameEligibilityMetadata = hasCrashLoggerFrameEligibilityMetadata,
+            CrashLoggerDirectFaultEligible = ReadBool(crashLoggerNode, "direct_fault_eligible"),
+            CrashLoggerFirstActionableProbableEligible = ReadBool(crashLoggerNode, "first_actionable_probable_eligible"),
+            CrashLoggerProbableStreakEligible = ReadBool(crashLoggerNode, "probable_streak_eligible"),
             CrashLoggerFrameSignalStrength = ReadInt32(crashLoggerNode, "frame_signal_strength"),
             ResourceItems = resourceItems,
             Triage = ParseTriage(triageElement),

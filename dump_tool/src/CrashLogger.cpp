@@ -37,6 +37,40 @@ struct NormalizedCrashLoggerFrameSignals
   std::vector<std::wstring> probable_modules_in_order;
 };
 
+enum class DumpIncidentKind {
+  kUnknown,
+  kCrash,
+  kThreadDump,
+};
+
+DumpIncidentKind ClassifyDumpIncidentKind(const std::filesystem::path& dumpPath)
+{
+  const std::wstring lower = WideLower(dumpPath.stem().wstring());
+  if (lower.find(L"_crash_") != std::wstring::npos || lower.starts_with(L"crash-") ||
+      lower.starts_with(L"crash_")) {
+    return DumpIncidentKind::kCrash;
+  }
+  if (lower.find(L"_hang_") != std::wstring::npos || lower.find(L"_manual_") != std::wstring::npos ||
+      lower.find(L"thread") != std::wstring::npos || lower.starts_with(L"hang-") ||
+      lower.starts_with(L"hang_")) {
+    return DumpIncidentKind::kThreadDump;
+  }
+  return DumpIncidentKind::kUnknown;
+}
+
+bool IsKnownArtifactKindMismatch(
+  DumpIncidentKind dumpKind,
+  crashlogger_core::CrashLoggerArtifactKind artifactKind)
+{
+  if (dumpKind == DumpIncidentKind::kCrash) {
+    return artifactKind == crashlogger_core::CrashLoggerArtifactKind::kThreadDump;
+  }
+  if (dumpKind == DumpIncidentKind::kThreadDump) {
+    return artifactKind == crashlogger_core::CrashLoggerArtifactKind::kCrash;
+  }
+  return false;
+}
+
 std::wstring NormalizeCrashLoggerModuleFilename(std::wstring_view module)
 {
   if (module.empty()) {
@@ -500,6 +534,17 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   const std::uint64_t targetTime = BestEffortDumpTimestampFileTimeUtc(dumpPath);
   auto dirs = BuildCrashLoggerCandidateDirs(mo2BaseDir);
 
+  // Search an explicitly co-located log and use that provenance as a
+  // deterministic tie-breaker after timestamp distance and filename-derived
+  // incident kind.
+  {
+    std::error_code parentEc;
+    const auto parent = dumpPath.parent_path();
+    if (!parent.empty() && std::filesystem::is_directory(parent, parentEc)) {
+      dirs.insert(dirs.begin(), parent);
+    }
+  }
+
   // If the user configured CrashLogger.ini Crashlog Directory, also search there.
   if (auto customDir = TryReadCrashLoggerCrashlogDirFromIni(mo2Index, gameRootDir)) {
     std::error_code ec;
@@ -520,15 +565,30 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
 
   // Crash Logger logs should be created around the crash moment. If nothing is close in time, don't attach an older
   // unrelated log (confusing).
-  constexpr std::uint64_t kFileTimeTicksPerSec = 10'000'000ull;
-  constexpr std::uint64_t kMaxDiffSec = 5ull * 60ull;  // 5 minutes (narrower window to avoid matching unrelated logs)
-  constexpr std::uint64_t kMaxDiff = kMaxDiffSec * kFileTimeTicksPerSec;
-
   std::optional<std::filesystem::path> best;
   std::uint64_t bestDiff = std::numeric_limits<std::uint64_t>::max();
+  crashlogger_core::CrashLoggerArtifactKind bestArtifactKind =
+    crashlogger_core::CrashLoggerArtifactKind::kUnknown;
+  bool bestSameDirectory = false;
+  std::wstring bestStablePath;
+  const DumpIncidentKind dumpKind = ClassifyDumpIncidentKind(dumpPath);
+  const std::wstring dumpParentLower = WideLower(dumpPath.parent_path().wstring());
+
+  // Preserve search priority while preventing the same physical directory
+  // from affecting tie behavior more than once.
+  std::vector<std::filesystem::path> uniqueDirs;
+  std::vector<std::wstring> uniqueDirKeys;
+  for (const auto& dir : dirs) {
+    const std::wstring key = WideLower(dir.lexically_normal().wstring());
+    if (std::find(uniqueDirKeys.begin(), uniqueDirKeys.end(), key) == uniqueDirKeys.end()) {
+      uniqueDirKeys.push_back(key);
+      uniqueDirs.push_back(dir);
+    }
+  }
 
   std::error_code ec;
-  for (const auto& dir : dirs) {
+  for (const auto& dir : uniqueDirs) {
+    ec.clear();
     for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
       if (ec) {
         break;
@@ -540,6 +600,12 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       const auto p = ent.path();
       const std::wstring ext = WideLower(p.extension().wstring());
       if (ext != L".log" && ext != L".txt") {
+        continue;
+      }
+
+      const auto artifactKind = crashlogger_core::ClassifyCrashLoggerArtifactNameAscii(
+        WideToUtf8(p.filename().wstring()));
+      if (IsKnownArtifactKindMismatch(dumpKind, artifactKind)) {
         continue;
       }
 
@@ -563,18 +629,32 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       }
 
       const std::uint64_t diff = AbsDiffU64(ft, targetTime);
-      if (diff < bestDiff) {
+      if (!crashlogger_core::IsCrashLoggerPairingDiffAllowed(diff)) {
+        continue;
+      }
+      const bool sameDirectory = WideLower(p.parent_path().wstring()) == dumpParentLower;
+      const std::wstring stablePath = WideLower(p.lexically_normal().wstring());
+      const bool better = crashlogger_core::IsBetterCrashLoggerPairCandidate(
+        best.has_value(),
+        diff,
+        artifactKind,
+        sameDirectory,
+        stablePath,
+        bestDiff,
+        bestArtifactKind,
+        bestSameDirectory,
+        bestStablePath);
+      if (better) {
         best = p;
         bestDiff = diff;
+        bestArtifactKind = artifactKind;
+        bestSameDirectory = sameDirectory;
+        bestStablePath = stablePath;
       }
     }
   }
 
   if (!best) {
-    if (err) err->clear();
-    return std::nullopt;
-  }
-  if (bestDiff > kMaxDiff) {
     if (err) err->clear();
     return std::nullopt;
   }
@@ -661,17 +741,28 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
 
   if (freqByLower.empty()) {
     const auto modulesLower = crashlogger_core::ParseCrashLoggerTopModulesAsciiLower(logUtf8);
+    std::vector<std::wstring> orderedFallback;
+    orderedFallback.reserve(std::min<std::size_t>(modulesLower.size(), 8));
+    std::vector<std::wstring> seenLower;
     for (const auto& moduleLower : modulesLower) {
       std::wstring disp = CanonicalizeCrashLoggerModule(moduleLower, canonicalByFilenameLower);
       if (IsSystemishModule(disp) || IsGameExeModule(disp)) {
         continue;
       }
-      auto& entry = freqByLower[WideLower(disp)];
-      if (entry.display_name.empty()) {
-        entry.display_name = disp;
+      const std::wstring key = WideLower(disp);
+      if (std::find(seenLower.begin(), seenLower.end(), key) != seenLower.end()) {
+        continue;
       }
-      entry.count += 1;
+      seenLower.push_back(key);
+      orderedFallback.push_back(std::move(disp));
+      if (orderedFallback.size() >= 8) {
+        break;
+      }
     }
+    // The core parser already ranked thread-dump modules by occurrence count.
+    // Preserve that order instead of converting every unique result back to
+    // count=1 and accidentally re-sorting it alphabetically.
+    return orderedFallback;
   }
 
   std::vector<ModuleCount> ranked;

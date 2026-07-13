@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -9,6 +10,7 @@ namespace skydiag::dump_tool {
 
 struct CrashHistoryEntry
 {
+  std::uint32_t candidate_key_version = 2;
   std::string timestamp_utc;
   std::string dump_file;
   std::string bucket_key;

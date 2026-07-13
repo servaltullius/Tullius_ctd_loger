@@ -2,23 +2,23 @@
   "version": 1,
   "guides": [
     {
-      "id": "D6DDDA_VRAM",
-      "match": { "exc_code": "0xC0000005", "signature_id": "D6DDDA_VRAM" },
-      "title_en": "VRAM Exhaustion (D6DDDA)",
-      "title_ko": "VRAM 부족 (D6DDDA)",
+      "id": "D6DDDA_1597_AV",
+      "match": { "exc_code": "0xC0000005", "signature_id": "D6DDDA_1597_AV" },
+      "title_en": "D6DDDA Access-Violation Investigation (Skyrim 1.5.97)",
+      "title_ko": "D6DDDA 접근 위반 점검 (Skyrim 1.5.97)",
       "steps_en": [
-        "Check your GPU VRAM usage — this crash typically means VRAM is exhausted",
-        "Lower texture quality in ENB/SkyrimPrefs.ini",
-        "Reduce 4K texture mods or switch to 2K alternatives",
-        "Close background apps using GPU (browsers, Discord overlay)",
-        "If using ENB, try disabling post-processing effects one by one"
+        "Treat D6DDDA as an exact crash-location match, not proof of VRAM exhaustion",
+        "Check the actionable candidates and nearby callstack modules before selecting a mod",
+        "If resource pressure is suspected, monitor VRAM and lower texture load as a controlled A/B test",
+        "If the crash is location- or object-specific, scan recently changed NIF/DDS assets and their providers",
+        "Compare repeated dumps and disable recent visual or asset mods in small groups to confirm the cause"
       ],
       "steps_ko": [
-        "GPU VRAM 사용량을 확인하세요 — 이 크래시는 보통 VRAM 부족을 의미합니다",
-        "ENB/SkyrimPrefs.ini에서 텍스처 품질을 낮추세요",
-        "4K 텍스처 모드를 줄이거나 2K 대안으로 교체하세요",
-        "GPU를 사용하는 백그라운드 앱(브라우저, Discord 오버레이)을 닫으세요",
-        "ENB 사용 시 후처리 효과를 하나씩 꺼보세요"
+        "D6DDDA는 정확한 크래시 위치 일치로 보되 VRAM 부족의 증명으로 간주하지 마세요",
+        "특정 모드를 고르기 전에 실행 우선 후보와 인접 콜스택 모듈을 확인하세요",
+        "리소스 압박이 의심되면 VRAM을 관찰하고 텍스처 부하를 낮춘 대조 테스트를 하세요",
+        "특정 장소나 오브젝트에서만 재현되면 최근 변경된 NIF/DDS와 제공 모드를 점검하세요",
+        "반복 덤프를 비교하고 최근 시각·에셋 모드를 작은 묶음으로 비활성화해 원인을 확인하세요"
       ]
     },
     {

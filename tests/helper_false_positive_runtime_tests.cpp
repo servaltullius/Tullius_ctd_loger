@@ -104,6 +104,41 @@ void TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit()
   std::filesystem::remove_all(outBase);
 }
 
+void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_false_positive_preserve_no_latch");
+  ClearLog(outBase);
+
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20260315_140000_001.dmp";
+  WriteAllTextUtf8(dumpPath, "filtered dump");
+
+  HelperConfig cfg = MakeTestConfig();
+  cfg.preserveFilteredCrashDumps = true;
+  skydiag::helper::AttachedProcess proc{};
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured = true;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  state.pendingCrashViewerDumpPath = dumpPath.wstring();
+
+  CleanupCrashArtifactsAfterZeroExit(
+    cfg,
+    proc,
+    outBase,
+    /*exitCode0StrongCrash=*/false,
+    /*exceptionCode=*/0xE06D7363u,
+    &state);
+
+  Require(FileExists(dumpPath), "PreserveFilteredCrashDumps must keep the filtered dump file");
+  Require(!state.crashCaptured, "Preserved filtered dump must not block a later real CTD capture");
+  Require(state.capturedCrashDumpPath.empty(), "Preserved filtered dump must detach from active crash state");
+  Require(state.pendingCrashViewerDumpPath.empty(), "Preserved filtered dump must not auto-open as a real CTD");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "without keeping the crashCaptured latch", "Preserve behavior must be explicit in helper log");
+
+  std::filesystem::remove_all(outBase);
+}
+
 }  // namespace
 
 int main()
@@ -111,6 +146,7 @@ int main()
   try {
     TestCleanupCrashArtifactsAfterZeroExit_RemovesArtifactsOnWeakExit();
     TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit();
+    TestPreservedFilteredDump_DoesNotKeepCaptureLatch();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

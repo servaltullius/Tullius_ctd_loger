@@ -39,6 +39,7 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   std::uint64_t dumpSize,
   const std::vector<minidump::ModuleInfo>& modules,
   const std::vector<std::uint32_t>& targetTids,
+  std::uint32_t exceptionTid,
   i18n::Language lang);
 
 bool TryReadContextFromLocation(void* dumpBase, std::uint64_t dumpSize, const MINIDUMP_LOCATION_DESCRIPTOR& loc, CONTEXT& out);

@@ -201,6 +201,46 @@ bool ShouldRecordException(DWORD code) noexcept
   }
 }
 
+bool TryPublishCrashRecord(
+  skydiag::SharedLayout* shm,
+  const EXCEPTION_POINTERS* ep,
+  DWORD code) noexcept
+{
+  if (!shm || !ep || !ep->ExceptionRecord || !ep->ContextRecord) {
+    return false;
+  }
+
+  auto* const sequence = reinterpret_cast<volatile LONG*>(&shm->header.crash_seq);
+  const LONG observed = InterlockedCompareExchange(sequence, 0, 0);
+  if ((observed & 1L) != 0L) {
+    // Another fatal exception is already publishing a complete fixed-size
+    // record. That writer owns the crash event signal.
+    return false;
+  }
+
+  const LONG writing = static_cast<LONG>(static_cast<std::uint32_t>(observed) + 1u);
+  if (InterlockedCompareExchange(sequence, writing, observed) != observed) {
+    return false;
+  }
+
+  auto& crash = shm->header.crash;
+  crash.exception_code = code;
+  crash.exception_addr = reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress);
+  crash.faulting_tid = GetCurrentThreadId();
+  std::memcpy(&crash.exception_record, ep->ExceptionRecord, sizeof(EXCEPTION_RECORD));
+  std::memcpy(&crash.context, ep->ContextRecord, sizeof(CONTEXT));
+
+  // Publish the complete record before the even sequence and event become
+  // observable in the helper process.
+  MemoryBarrier();
+  LONG committed = static_cast<LONG>(static_cast<std::uint32_t>(observed) + 2u);
+  if (committed == 0L) {
+    committed = 2L;
+  }
+  InterlockedExchange(sequence, committed);
+  return true;
+}
+
 LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 {
   auto* shm = GetShared();
@@ -209,6 +249,29 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
   }
 
   const DWORD code = ep->ExceptionRecord->ExceptionCode;
+  if (ShouldRecordException(code)) {
+    // The fatal path deliberately performs only fixed-size shared-memory
+    // writes and kernel signaling. Module/path resolution and std::string /
+    // std::filesystem telemetry are unsafe with a corrupt heap or low stack.
+    if (!TryPublishCrashRecord(shm, ep, code)) {
+      return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    InterlockedOr(
+      reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
+      static_cast<LONG>(skydiag::kState_Frozen));
+
+    skydiag::EventPayload p{};
+    p.a = code;
+    p.b = reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress);
+    PushEventAlways(skydiag::EventType::kCrash, p, sizeof(p));
+
+    if (HANDLE ev = GetCrashEvent()) {
+      SetEvent(ev);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+
   if (ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)) {
     const auto qpcNow = QpcNow();
     const auto addressBucket = BucketExceptionAddress(ep->ExceptionRecord->ExceptionAddress);
@@ -217,30 +280,6 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     if (ConsumeFirstChanceTelemetryBudget(signature, qpcNow)) {
       PushFirstChanceExceptionEvent(code, addressBucket, moduleBasenameUtf8);
     }
-  }
-  if (!ShouldRecordException(code)) {
-    return EXCEPTION_CONTINUE_SEARCH;
-  }
-
-  shm->header.crash.exception_code = code;
-  shm->header.crash.exception_addr = reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress);
-  shm->header.crash.faulting_tid = GetCurrentThreadId();
-
-  std::memcpy(&shm->header.crash.exception_record, ep->ExceptionRecord, sizeof(EXCEPTION_RECORD));
-  std::memcpy(&shm->header.crash.context, ep->ContextRecord, sizeof(CONTEXT));
-  (void)InterlockedIncrement(reinterpret_cast<volatile LONG*>(&shm->header.crash_seq));
-
-  skydiag::EventPayload p{};
-  p.a = shm->header.crash.exception_code;
-  p.b = shm->header.crash.exception_addr;
-  PushEventAlways(skydiag::EventType::kCrash, p, sizeof(p));
-
-  InterlockedOr(
-    reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
-    static_cast<LONG>(skydiag::kState_Frozen));
-
-  if (HANDLE ev = GetCrashEvent()) {
-    SetEvent(ev);
   }
 
   return EXCEPTION_CONTINUE_SEARCH;

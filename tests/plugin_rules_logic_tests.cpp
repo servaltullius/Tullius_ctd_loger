@@ -36,6 +36,7 @@ std::string WideToUtf8(std::wstring_view w)
 namespace {
 
 using skydiag::dump_tool::ComputeMissingMasters;
+using skydiag::dump_tool::AnyPluginHeaderVersionGte;
 using skydiag::dump_tool::IsGameVersionLessThan;
 using skydiag::dump_tool::ParsePluginScanJson;
 using skydiag::dump_tool::ParsedPluginScan;
@@ -84,7 +85,8 @@ void TestVersionCompare()
 void TestParseAndMissingMasters()
 {
   ParsedPluginScan scan{};
-  assert(ParsePluginScanJson(kScanJson, &scan));
+  const bool parsed = ParsePluginScanJson(kScanJson, &scan);
+  assert(parsed);
   assert(scan.plugins.size() == 3);
   assert(scan.plugins[1].header_version >= 1.70f);
   assert(scan.plugins[1].is_esl);
@@ -109,9 +111,38 @@ void TestMissingMastersIgnoreInactivePlugins()
 }
 )JSON";
   ParsedPluginScan scan{};
-  assert(ParsePluginScanJson(inactiveOnlyJson, &scan));
+  const bool parsed = ParsePluginScanJson(inactiveOnlyJson, &scan);
+  assert(parsed);
   const auto missing = ComputeMissingMasters(scan);
   assert(missing.empty());
+}
+
+void TestHeaderVersionRuleIgnoresInactivePlugins()
+{
+  const char* inactiveHeaderJson = R"JSON(
+{
+  "plugins": [
+    {
+      "filename": "Disabled171.esp",
+      "header_version": 1.71,
+      "is_esl": true,
+      "is_active": false,
+      "masters": []
+    },
+    {
+      "filename": "ActiveLegacy.esp",
+      "header_version": 1.0,
+      "is_esl": false,
+      "is_active": true,
+      "masters": []
+    }
+  ]
+}
+)JSON";
+  ParsedPluginScan scan{};
+  const bool parsed = ParsePluginScanJson(inactiveHeaderJson, &scan);
+  assert(parsed);
+  assert(!AnyPluginHeaderVersionGte(scan, 1.71));
 }
 
 void TestMissingMastersIgnoreImplicitRuntimeMasters()
@@ -143,7 +174,8 @@ void TestMissingMastersIgnoreImplicitRuntimeMasters()
 }
 )JSON";
   ParsedPluginScan scan{};
-  assert(ParsePluginScanJson(implicitMastersJson, &scan));
+  const bool parsed = ParsePluginScanJson(implicitMastersJson, &scan);
+  assert(parsed);
   const auto missing = ComputeMissingMasters(scan);
   assert(missing.size() == 1);
   assert(missing[0] == L"ActuallyMissing.esm");
@@ -195,10 +227,12 @@ void TestRulesEvaluateFromJson()
   }
 
   ParsedPluginScan scan{};
-  assert(ParsePluginScanJson(kScanJson, &scan));
+  const bool parsed = ParsePluginScanJson(kScanJson, &scan);
+  assert(parsed);
 
   PluginRules rules;
-  assert(rules.LoadFromJson(tmp));
+  const bool loaded = rules.LoadFromJson(tmp);
+  assert(loaded);
 
   PluginRulesContext ctx{};
   ctx.scan = &scan;
@@ -268,10 +302,12 @@ void TestFullPluginSlotRuleRequiresActiveFullThreshold()
 )JSON";
 
   ParsedPluginScan below{};
-  assert(ParsePluginScanJson(belowThresholdJson, &below));
+  const bool belowParsed = ParsePluginScanJson(belowThresholdJson, &below);
+  assert(belowParsed);
 
   PluginRules rules;
-  assert(rules.LoadFromJson(tmp));
+  const bool loaded = rules.LoadFromJson(tmp);
+  assert(loaded);
 
   PluginRulesContext ctx{};
   ctx.scan = &below;
@@ -290,7 +326,8 @@ void TestFullPluginSlotRuleRequiresActiveFullThreshold()
 )JSON";
 
   ParsedPluginScan at{};
-  assert(ParsePluginScanJson(atThresholdJson, &at));
+  const bool atParsed = ParsePluginScanJson(atThresholdJson, &at);
+  assert(atParsed);
   ctx.scan = &at;
   const auto atDiags = rules.Evaluate(ctx);
   assert(atDiags.size() == 1);
@@ -340,10 +377,12 @@ void TestEslSlotRuleCountsOnlyActivePlugins()
 )JSON";
 
   ParsedPluginScan scan{};
-  assert(ParsePluginScanJson(scanJson, &scan));
+  const bool parsed = ParsePluginScanJson(scanJson, &scan);
+  assert(parsed);
 
   PluginRules rules;
-  assert(rules.LoadFromJson(tmp));
+  const bool loaded = rules.LoadFromJson(tmp);
+  assert(loaded);
 
   PluginRulesContext ctx{};
   ctx.scan = &scan;
@@ -361,6 +400,7 @@ int main()
   TestVersionCompare();
   TestParseAndMissingMasters();
   TestMissingMastersIgnoreInactivePlugins();
+  TestHeaderVersionRuleIgnoresInactivePlugins();
   TestMissingMastersIgnoreImplicitRuntimeMasters();
   TestRulesEvaluateFromJson();
   TestFullPluginSlotRuleRequiresActiveFullThreshold();

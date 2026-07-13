@@ -8,7 +8,7 @@
 namespace skydiag {
 
 inline constexpr std::uint32_t kMagic = 0x53444941u;  // 'SDIA'
-inline constexpr std::uint32_t kVersion = 2;
+inline constexpr std::uint32_t kVersion = 3;
 inline constexpr std::uint32_t kEventCapacity = 1u << 16;  // 65536
 inline constexpr std::uint32_t kResourceCapacity = 256;
 inline constexpr std::uint32_t kResourcePathMaxBytes = 260;  // UTF-8, null-terminated (best-effort)
@@ -107,7 +107,9 @@ struct SharedHeader {
   volatile std::uint32_t state_flags = 0;
 
   volatile std::uint32_t write_index = 0;  // monotonically increases
-  volatile std::uint32_t crash_seq = 0;    // increments on crash
+  // CrashInfo seqlock: odd=writer active, even=committed. Zero means no crash
+  // has been published yet; each committed crash advances by two.
+  volatile std::uint32_t crash_seq = 0;
   volatile std::uint32_t hang_seq = 0;     // helper can bump when it takes hang dump
 
   CrashInfo crash{};

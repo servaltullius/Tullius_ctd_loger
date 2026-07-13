@@ -5,6 +5,8 @@
 #include <iterator>
 #include <string>
 
+#include "../dump_tool/src/AnalyzerScoringPolicy.h"
+
 static std::string ReadFile(const char* relPath)
 {
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
@@ -47,6 +49,8 @@ static void TestStackwalkHookPromotionThreshold()
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
   assert(src.find("kHookFrameworkNearTieThreshold") != std::string::npos);
   assert(src.find("= 4") != std::string::npos);
+  assert(src.find("kPassiveHookFallbackMinScore") != std::string::npos);
+  assert(src.find("ShouldPromoteHookFallback") != std::string::npos);
 }
 
 static void TestStackScanConfidenceThresholds()
@@ -60,7 +64,9 @@ static void TestStackScanConfidenceThresholds()
 static void TestStackScanHookPromotionThreshold()
 {
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackScan.cpp");
-  assert(src.find("score + 8u") != std::string::npos);
+  assert(src.find("kHookFrameworkNearTieThreshold = 8u") != std::string::npos);
+  assert(src.find("kPassiveHookFallbackMinScore") != std::string::npos);
+  assert(src.find("ShouldPromoteHookFallback") != std::string::npos);
 }
 
 static void TestResourceProviderScoreOnlyTuningPresent()
@@ -89,7 +95,7 @@ static void TestCrashLoggerCorroborationRankingPresent()
   assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects") != std::string::npos);
   assert(analyzer.find("CrashLoggerRankBonus") != std::string::npos);
   assert(analyzer.find("Crash Logger frame promotion=+") != std::string::npos);
-  assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out)") != std::string::npos);
+  assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out, allModules)") != std::string::npos);
 }
 
 static void TestCrashLoggerPromotionUsesFrameSignals()
@@ -121,17 +127,35 @@ static void TestCrashLoggerPromotionNoLongerRankOnly()
   assert(analyzer.find("out->crash_logger_frame_signal_strength") != std::string::npos);
 }
 
-static void TestCaptureQualityStackSupportPresent()
+static void TestCaptureQualityDoesNotBecomeCausalSupport()
 {
   const auto candidates = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
   const auto consensus = ReadFile("dump_tool/src/CandidateConsensus.cpp");
 
-  assert(candidates.find("capture_quality_stack") != std::string::npos);
-  assert(candidates.find("incident_capture_profile_process_thread_data") != std::string::npos);
-  assert(candidates.find("incident_capture_profile_full_memory_info") != std::string::npos);
-  assert(candidates.find("incident_capture_profile_module_headers") != std::string::npos);
-  assert(candidates.find("incident_capture_profile_indirect_memory") != std::string::npos);
+  assert(candidates.find("capture_quality_stack") == std::string::npos);
   assert(consensus.find("capture_quality_stack") != std::string::npos);
+  assert(consensus.find("signal.family_id == kFamilyCaptureQualityStack") != std::string::npos);
+}
+
+static void TestSecondaryConfidenceIsEvidenceGated()
+{
+  const auto stackwalk = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
+  const auto stackscan = ReadFile("dump_tool/src/AnalyzerInternalsStackScan.cpp");
+  assert(stackwalk.find("ConfidenceForSecondaryCallstackLevel") != std::string::npos);
+  assert(stackwalk.find("SecondaryCallstackCanBeMedium") != std::string::npos);
+  assert(stackscan.find("ConfidenceForSecondarySuspectLevel") != std::string::npos);
+  assert(stackscan.find("SecondaryStackScanCanBeMedium") != std::string::npos);
+}
+
+static void TestLowStackwalkCannotBeReupgradedByConsensusWeight()
+{
+  using skydiag::dump_tool::internal::policy::ActionableStackSignalWeight;
+  assert(ActionableStackSignalWeight(true, false, false, true) == 3u);
+  assert(ActionableStackSignalWeight(true, false, false, true) < 5u);
+  assert(ActionableStackSignalWeight(true, false, true, true) == 5u);
+  assert(ActionableStackSignalWeight(true, true, true, true) == 3u);
+  assert(ActionableStackSignalWeight(true, false, true, false) == 4u);
+  assert(ActionableStackSignalWeight(false, false, true, true) == 2u);
 }
 
 int main()
@@ -146,6 +170,8 @@ int main()
   TestCrashLoggerCorroborationRankingPresent();
   TestCrashLoggerPromotionUsesFrameSignals();
   TestCrashLoggerPromotionNoLongerRankOnly();
-  TestCaptureQualityStackSupportPresent();
+  TestCaptureQualityDoesNotBecomeCausalSupport();
+  TestSecondaryConfidenceIsEvidenceGated();
+  TestLowStackwalkCannotBeReupgradedByConsensusWeight();
   return 0;
 }

@@ -18,6 +18,51 @@ std::string AsciiLower(std::string_view s)
   return out;
 }
 
+CrashLoggerArtifactKind ClassifyCrashLoggerArtifactNameAscii(std::string_view filename)
+{
+  const auto slash = filename.find_last_of("/\\");
+  if (slash != std::string_view::npos) {
+    filename.remove_prefix(slash + 1);
+  }
+  const std::string lower = AsciiLower(filename);
+  if (lower.starts_with("threaddump-") || lower.starts_with("threaddump_") ||
+      lower.starts_with("thread-dump-") || lower.starts_with("thread_dump_")) {
+    return CrashLoggerArtifactKind::kThreadDump;
+  }
+  if (lower.starts_with("crash-") || lower.starts_with("crash_")) {
+    return CrashLoggerArtifactKind::kCrash;
+  }
+  return CrashLoggerArtifactKind::kUnknown;
+}
+
+bool IsBetterCrashLoggerPairCandidate(
+  bool hasBest,
+  std::uint64_t candidateDiff,
+  CrashLoggerArtifactKind candidateKind,
+  bool candidateSameDirectory,
+  std::wstring_view candidateStablePath,
+  std::uint64_t bestDiff,
+  CrashLoggerArtifactKind bestKind,
+  bool bestSameDirectory,
+  std::wstring_view bestStablePath)
+{
+  if (!hasBest) {
+    return true;
+  }
+  if (candidateDiff != bestDiff) {
+    return candidateDiff < bestDiff;
+  }
+  const bool candidateKindKnown = candidateKind != CrashLoggerArtifactKind::kUnknown;
+  const bool bestKindKnown = bestKind != CrashLoggerArtifactKind::kUnknown;
+  if (candidateKindKnown != bestKindKnown) {
+    return candidateKindKnown;
+  }
+  if (candidateSameDirectory != bestSameDirectory) {
+    return candidateSameDirectory;
+  }
+  return candidateStablePath < bestStablePath;
+}
+
 std::optional<std::string> ParseCrashLoggerVersionAscii(std::string_view logUtf8)
 {
   std::istringstream iss{ std::string(logUtf8) };
@@ -857,7 +902,9 @@ std::vector<EspRefEntry> ExtractEspRefsFromLine(std::string_view line)
       auto fqe = line.find('"', fq + 1);
       if (fqe == std::string_view::npos) { pos = fq + 1; continue; }
       std::string_view name = line.substr(fq + 1, fqe - (fq + 1));
-      if (LooksLikePluginExtension(name) && name.find(' ') == std::string_view::npos) {
+      // Quoting already gives us an exact filename boundary. Spaces are valid
+      // in Skyrim plugin filenames (for example "JK's Skyrim.esp").
+      if (LooksLikePluginExtension(name)) {
         EspRefEntry entry;
         entry.esp_name = std::string(name);
         entry.form_id = ExtractFormIdBefore(line, nextFile);
@@ -875,7 +922,7 @@ std::vector<EspRefEntry> ExtractEspRefsFromLine(std::string_view line)
       auto endq = line.find("\")", nextParen + 2);
       if (endq != std::string_view::npos) {
         std::string_view name = line.substr(nextParen + 2, endq - (nextParen + 2));
-        if (LooksLikePluginExtension(name) && name.find(' ') == std::string_view::npos) {
+        if (LooksLikePluginExtension(name)) {
           EspRefEntry entry;
           entry.esp_name = std::string(name);
           entry.form_id = ExtractFormIdBefore(line, nextParen);

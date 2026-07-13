@@ -142,6 +142,24 @@ bool CanPromoteCrashLoggerFrameModule(std::wstring_view module)
          !IsGameExeModule(module);
 }
 
+bool IsCrashLoggerFrameModuleLoadedFromSystemPath(
+  std::wstring_view module,
+  const std::vector<ModuleInfo>& allModules)
+{
+  const std::wstring key = WideLower(NormalizeCrashLoggerModuleFilename(module));
+  if (key.empty()) {
+    return false;
+  }
+
+  for (const auto& loaded : allModules) {
+    if (WideLower(loaded.filename) == key &&
+        IsLikelyWindowsSystemModulePath(loaded.path)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void IntegrateCrashLoggerFrameSignals(
   const std::vector<ModuleInfo>& allModules,
   AnalysisResult* out)
@@ -182,22 +200,29 @@ void IntegrateCrashLoggerFrameSignals(
   }
   out->crash_logger_probable_streak_length = rawSignals.probable_streak_length;
 
-  const bool directFaultEligible =
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module);
-  const bool firstActionableEligible =
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module);
-  const bool probableStreakEligible =
+  out->crash_logger_direct_fault_eligible =
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module) &&
+    !IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_direct_fault_module, allModules);
+  out->crash_logger_first_actionable_probable_eligible =
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module) &&
+    !IsCrashLoggerFrameModuleLoadedFromSystemPath(
+      out->crash_logger_first_actionable_probable_module,
+      allModules);
+  out->crash_logger_probable_streak_eligible =
     (out->crash_logger_probable_streak_length >= 2u) &&
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module);
+    CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module) &&
+    !IsCrashLoggerFrameModuleLoadedFromSystemPath(
+      out->crash_logger_probable_streak_module,
+      allModules);
 
   out->crash_logger_frame_signal_strength = 0;
-  if (directFaultEligible) {
+  if (out->crash_logger_direct_fault_eligible) {
     out->crash_logger_frame_signal_strength += kCrashLoggerDirectFaultPromotion;
   }
-  if (firstActionableEligible) {
+  if (out->crash_logger_first_actionable_probable_eligible) {
     out->crash_logger_frame_signal_strength += kCrashLoggerFirstActionablePromotion;
   }
-  if (probableStreakEligible) {
+  if (out->crash_logger_probable_streak_eligible) {
     out->crash_logger_frame_signal_strength += kCrashLoggerProbableStreakPromotion;
   }
 }
@@ -213,7 +238,9 @@ struct CrashLoggerFramePromotion
   std::uint32_t totalPromotion = 0;
 };
 
-void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
+void ApplyCrashLoggerCorroborationToSuspects(
+  AnalysisResult* out,
+  const std::vector<ModuleInfo>& allModules)
 {
   if (!out || out->suspects.empty() ||
       (out->crash_logger_top_modules.empty() &&
@@ -233,13 +260,9 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
       rankByModule.emplace(key, i);
     }
   }
-  const bool directFaultEligible =
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module);
-  const bool firstActionableEligible =
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module);
-  const bool probableStreakEligible =
-    (out->crash_logger_probable_streak_length >= 2u) &&
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module);
+  const bool directFaultEligible = out->crash_logger_direct_fault_eligible;
+  const bool firstActionableEligible = out->crash_logger_first_actionable_probable_eligible;
+  const bool probableStreakEligible = out->crash_logger_probable_streak_eligible;
   const std::wstring directFaultLower =
     directFaultEligible ? WideLower(out->crash_logger_direct_fault_module) : std::wstring{};
   const std::wstring firstActionableLower =
@@ -348,7 +371,7 @@ void ApplyCrashLoggerCorroborationToSuspects(AnalysisResult* out)
       out->suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
     } else if (topRow.promotion.frameSignalStrength > 0 ||
                topRow.promotion.cppExceptionSupport > 0 ||
-               (!topRow.matchedRank || *topRow.matchedRank <= 1u)) {
+               (topRow.matchedRank && *topRow.matchedRank <= 1u)) {
       if (out->suspects[0].confidence_level == i18n::ConfidenceLevel::kLow ||
           out->suspects[0].confidence_level == i18n::ConfidenceLevel::kUnknown) {
         out->suspects[0].confidence_level = i18n::ConfidenceLevel::kMedium;
@@ -465,7 +488,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.diagnostics.push_back(L"[Symbols] degraded runtime environment detected; stackwalk/source lookup may be limited");
   }
 
-  ApplyCrashLoggerCorroborationToSuspects(&out);
+  ApplyCrashLoggerCorroborationToSuspects(&out, allModules);
 
   internal::ComputeCrashBucket(out);
 
@@ -478,9 +501,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     } else {
       SignatureMatchInput input{};
       input.exc_code = out.exc_code;
+      input.game_version = out.game_version;
       input.fault_module = out.fault_module_filename;
       input.fault_offset = out.fault_module_offset;
-      input.exc_address = out.exc_addr;
+      if (out.exc_code == 0xC0000005u && out.exc_info.size() >= 2u) {
+        input.access_violation_address = out.exc_info[1];
+      }
       input.fault_module_is_system =
         IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
       input.callstack_modules.reserve(

@@ -177,6 +177,14 @@ bool WriteDumpWithStreams(
     blackboxBytes.resize(got);
     std::memcpy(blackboxBytes.data(), shmSnapshot, got);
   }
+  // vector<uint8_t> is not formally aligned for SharedLayout. Copy only the
+  // header into an aligned local object instead of type-punning the byte
+  // buffer; both streams still derive from the same immutable byte copy.
+  skydiag::SharedHeader committedHeader{};
+  const bool hasCommittedHeader = blackboxBytes.size() >= sizeof(committedHeader);
+  if (hasCommittedHeader) {
+    std::memcpy(&committedHeader, blackboxBytes.data(), sizeof(committedHeader));
+  }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
   streams.reserve(3);
@@ -214,13 +222,18 @@ bool WriteDumpWithStreams(
   CONTEXT ctx{};
 
   MINIDUMP_EXCEPTION_INFORMATION* meiPtr = nullptr;
-  if (isCrash && shmSnapshot && shmSnapshot->header.crash_seq != 0) {
-    er = shmSnapshot->header.crash.exception_record;
-    ctx = shmSnapshot->header.crash.context;
+  if (isCrash && hasCommittedHeader &&
+      committedHeader.crash_seq != 0u &&
+      (committedHeader.crash_seq & 1u) == 0u) {
+    // The exception stream and the blackbox user stream must originate from
+    // this same immutable byte copy. Reading the live mapping again here can
+    // combine a later exception with an earlier event/resource history.
+    er = committedHeader.crash.exception_record;
+    ctx = committedHeader.crash.context;
     ep.ExceptionRecord = &er;
     ep.ContextRecord = &ctx;
 
-    mei.ThreadId = shmSnapshot->header.crash.faulting_tid;
+    mei.ThreadId = committedHeader.crash.faulting_tid;
     mei.ExceptionPointers = &ep;
     mei.ClientPointers = FALSE;  // pointers are in this process address space
     meiPtr = &mei;

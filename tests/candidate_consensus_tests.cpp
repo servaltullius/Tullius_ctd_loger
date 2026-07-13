@@ -6,12 +6,15 @@
 #include <string>
 #include <vector>
 
+#include "AnalyzerScoringPolicy.h"
 #include "CandidateConsensus.h"
 
 using skydiag::dump_tool::ActionableCandidate;
 using skydiag::dump_tool::BuildCandidateConsensus;
 using skydiag::dump_tool::CandidateSignal;
+using skydiag::dump_tool::CanonicalCandidateKey;
 using skydiag::dump_tool::i18n::Language;
+namespace scoring_policy = skydiag::dump_tool::internal::policy;
 
 namespace {
 
@@ -371,7 +374,7 @@ void TestFrameAndResourceBecomeRelated()
   assert(candidates[0].supporting_families.size() == 2);
 }
 
-void TestCaptureQualityBoostedWeakStackAgreementCrossValidates()
+void TestCaptureQualityDoesNotCrossValidateWeakStackAgreement()
 {
   const std::vector<CandidateSignal> signals = {
     MakeSignal("crash_logger_object_ref", L"captureboost", L"CaptureBoost.esp", 6, L"CaptureBoost.esp"),
@@ -381,11 +384,14 @@ void TestCaptureQualityBoostedWeakStackAgreementCrossValidates()
 
   const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
   assert(candidates.size() == 1);
-  AssertStatus(candidates[0], "cross_validated");
-  assert(candidates[0].cross_validated);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].score == 9u);
+  assert(candidates[0].family_count == 2u);
+  assert(candidates[0].supporting_families.size() == 2u);
 }
 
-void TestCaptureQualityBackedStandaloneStackBecomesMediumRelated()
+void TestCaptureQualityDoesNotUpgradeStandaloneStack()
 {
   const std::vector<CandidateSignal> signals = {
     MakeSignal("actionable_stack", L"capturestack", L"Capture Stack", 4, L"", L"Capture Stack", L"capturestack.dll"),
@@ -396,7 +402,76 @@ void TestCaptureQualityBackedStandaloneStackBecomesMediumRelated()
   assert(candidates.size() == 1);
   AssertStatus(candidates[0], "related");
   assert(!candidates[0].cross_validated);
-  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kLow);
+  assert(candidates[0].score == 4u);
+  assert(candidates[0].family_count == 1u);
+  assert(candidates[0].supporting_families.size() == 1u);
+  assert(candidates[0].supporting_families[0] == "actionable_stack");
+}
+
+void TestCanonicalCandidateKeyPreservesUnicodeAndSeparators()
+{
+  assert(CanonicalCandidateKey(L"A-B.esp") == L"a-b");
+  assert(CanonicalCandidateKey(L"AB.dll") == L"ab");
+  assert(CanonicalCandidateKey(L"A-B.esp") != CanonicalCandidateKey(L"AB.dll"));
+  assert(CanonicalCandidateKey(L"한글모드.esp") == L"한글모드");
+  assert(CanonicalCandidateKey(L"다른모드.esp") == L"다른모드");
+  assert(CanonicalCandidateKey(L"한글모드.esp") != CanonicalCandidateKey(L"다른모드.esp"));
+  assert(CanonicalCandidateKey(L"My__Mod.esm") == L"my-mod");
+  assert(CanonicalCandidateKey(L"MÓD.esp") == CanonicalCandidateKey(L"mód.ESP"));
+  assert(CanonicalCandidateKey(L"МОД.esp") == CanonicalCandidateKey(L"мод.ESP"));
+  assert(CanonicalCandidateKey(L"A！B.esl") == L"a-b");
+}
+
+void TestConsensusCanonicalizationDoesNotMergeSeparatedNames()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("resource_provider", L"A-B.esp", L"A-B.esp", 3, L"A-B.esp"),
+    MakeSignal("resource_provider", L"AB.esp", L"AB.esp", 3, L"AB.esp"),
+    MakeSignal("resource_provider", L"한글모드.esp", L"한글모드.esp", 3, L"한글모드.esp"),
+    MakeSignal("resource_provider", L"다른모드.esp", L"다른모드.esp", 3, L"다른모드.esp"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 4u);
+}
+
+void TestConflictingEvidenceOutranksResourceOnlyRelatedCandidate()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"frame-owner", L"FrameOwner.dll", 6, L"", L"Frame Owner", L"FrameOwner.dll"),
+    MakeSignal("actionable_stack", L"stack-owner", L"StackOwner.dll", 5, L"", L"Stack Owner", L"StackOwner.dll"),
+    MakeSignal("resource_provider", L"recent-resource", L"Recent Resource", 5, L"", L"Recent Resource"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 3u);
+  AssertStatus(candidates[0], "conflicting");
+  AssertStatus(candidates[1], "conflicting");
+  AssertStatus(candidates[2], "related");
+}
+
+void TestExceptionThreadSelectionPolicyIsOrderIndependent()
+{
+  assert(scoring_policy::ShouldSelectStackwalkCandidate(false, 0u, 0u, true, 40u, 4u, 40u));
+  assert(!scoring_policy::ShouldSelectStackwalkCandidate(true, 40u, 4u, true, 90u, 50u, 40u));
+  assert(scoring_policy::ShouldSelectStackwalkCandidate(true, 90u, 50u, true, 40u, 4u, 40u));
+  assert(scoring_policy::ShouldSelectStackwalkCandidate(true, 10u, 4u, true, 20u, 5u, 0u));
+}
+
+void TestHookFallbackPromotionRequiresNearTieAndMinimumEvidence()
+{
+  assert(!scoring_policy::ShouldPromoteHookFallback(28u, 1u, 4u, 4u));
+  assert(!scoring_policy::ShouldPromoteHookFallback(28u, 3u, 4u, 30u));
+  assert(scoring_policy::ShouldPromoteHookFallback(28u, 24u, 4u, 4u));
+}
+
+void TestSecondaryConfidencePolicyRejectsOnePointCandidates()
+{
+  assert(!scoring_policy::SecondaryCallstackCanBeMedium(1u, 11u, 12u, 6u));
+  assert(scoring_policy::SecondaryCallstackCanBeMedium(12u, 6u, 12u, 6u));
+  assert(!scoring_policy::SecondaryStackScanCanBeMedium(1u, 40u));
+  assert(scoring_policy::SecondaryStackScanCanBeMedium(40u, 40u));
 }
 
 void TestFirstChanceFamilySourceContract()
@@ -431,8 +506,14 @@ int main()
   TestFrameAndFirstChanceBecomeRelated();
   TestFrameAndHistoryBecomeRelated();
   TestFrameAndResourceBecomeRelated();
-  TestCaptureQualityBoostedWeakStackAgreementCrossValidates();
-  TestCaptureQualityBackedStandaloneStackBecomesMediumRelated();
+  TestCaptureQualityDoesNotCrossValidateWeakStackAgreement();
+  TestCaptureQualityDoesNotUpgradeStandaloneStack();
+  TestCanonicalCandidateKeyPreservesUnicodeAndSeparators();
+  TestConsensusCanonicalizationDoesNotMergeSeparatedNames();
+  TestConflictingEvidenceOutranksResourceOnlyRelatedCandidate();
+  TestExceptionThreadSelectionPolicyIsOrderIndependent();
+  TestHookFallbackPromotionRequiresNearTieAndMinimumEvidence();
+  TestSecondaryConfidencePolicyRejectsOnePointCandidates();
   TestFirstChanceFamilySourceContract();
   return 0;
 }

@@ -1,16 +1,19 @@
 {
-  "version": 1,
+  "version": 2,
   "signatures": [
     {
-      "id": "D6DDDA_VRAM",
+      "id": "D6DDDA_1597_AV",
       "match": {
         "exc_code": "0xC0000005",
+        "game_version": "1.5.97.0",
         "fault_module": "SkyrimSE.exe",
-        "fault_offset_regex": "^[Dd]6[Dd][Dd]..$"
+        "fault_offset": "0xD6DDDA",
+        "fault_offset_regex": "^[Dd]6[Dd][Dd][Dd][Aa]$"
       },
       "diagnosis": {
-        "cause_ko": "RAM/VRAM 초과 또는 손상된 메시/텍스처",
-        "cause_en": "RAM/VRAM exhaustion or corrupted mesh/texture",
+        "scope": "mechanism",
+        "cause_ko": "SkyrimSE.exe 1.5.97.0의 정확한 0xD6DDDA 오프셋에서 발생한 접근 위반입니다. 리소스 압박이나 손상된 에셋은 점검 가설이며 이 패턴만으로 확정되지 않습니다.",
+        "cause_en": "Access violation at the exact SkyrimSE.exe 1.5.97.0 offset 0xD6DDDA. Resource pressure or a damaged asset is an investigation hypothesis, not proven by this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
           "[리소스] BethINI으로 텍스처 품질을 낮추거나 SSE Display Tweaks의 VRAM 제한을 확인하세요.",
@@ -31,6 +34,7 @@
         "fault_module_is_system": true
       },
       "diagnosis": {
+        "scope": "mechanism",
         "cause_ko": "C++ 예외(throw/catch)로 보이며, 실제 CTD가 아니라면 오탐일 수 있습니다",
         "cause_en": "C++ exception (throw/catch); may be a false positive if no real CTD happened",
         "confidence": "low",
@@ -48,11 +52,13 @@
       "id": "ACCESS_VIOLATION_NULL",
       "match": {
         "exc_code": "0xC0000005",
+        "access_violation_address_near_zero": true,
         "exc_address_near_zero": true
       },
       "diagnosis": {
-        "cause_ko": "NULL 포인터 역참조 — 초기화되지 않거나 해제된 객체 접근",
-        "cause_en": "NULL pointer dereference — accessing an uninitialized or freed object",
+        "scope": "mechanism",
+        "cause_ko": "접근 위반의 대상 주소가 NULL 근처입니다. 초기화 누락, 해제 후 접근 등 구체적인 근본 원인은 추가 후보 근거가 필요합니다.",
+        "cause_en": "The access-violation target address is near NULL. A specific root cause such as uninitialized or use-after-free access requires additional candidate evidence.",
         "confidence": "medium",
         "recommendations_ko": [
           "[모드 점검] 유력 후보 모드를 업데이트/재설치하고 재현 여부를 확인하세요.",
@@ -70,8 +76,9 @@
         "exc_code": "0xC0000006"
       },
       "diagnosis": {
-        "cause_ko": "디스크 I/O 오류 (In-Page Error) — 파일 읽기 실패",
-        "cause_en": "Disk I/O error (In-Page Error) — failed to read required file from disk",
+        "scope": "mechanism",
+        "cause_ko": "Windows In-Page Error 예외입니다. 필요한 페이지를 읽지 못했으며 디스크·파일·보안 소프트웨어 등 구체 원인은 추가 점검이 필요합니다.",
+        "cause_en": "Windows reported an In-Page Error while obtaining a required page. Disk, file, or security-software causes require additional checks.",
         "confidence": "high",
         "recommendations_ko": [
           "[디스크] SSD/HDD 상태를 점검하세요.",
@@ -91,8 +98,9 @@
         "exc_code": "0xC00000FD"
       },
       "diagnosis": {
-        "cause_ko": "스택 오버플로우 — 무한 재귀 또는 과도한 스크립트 중첩",
-        "cause_en": "Stack overflow — infinite recursion or excessive script nesting",
+        "scope": "mechanism",
+        "cause_ko": "스택 오버플로우 예외입니다. 무한 재귀나 과도한 중첩은 점검 가설이며 원인 모듈은 별도 후보 근거가 필요합니다.",
+        "cause_en": "Stack-overflow exception. Infinite recursion or excessive nesting is an investigation hypothesis; the responsible module requires separate candidate evidence.",
         "confidence": "high",
         "recommendations_ko": [
           "[스크립트] 최근 추가한 스크립트 모드/Papyrus 루프를 우선 점검하세요.",
@@ -110,8 +118,9 @@
         "exc_code": "0xC0000374"
       },
       "diagnosis": {
-        "cause_ko": "힙 손상 — 메모리 관리 충돌 가능성",
-        "cause_en": "Heap corruption — probable memory management conflict",
+        "scope": "mechanism",
+        "cause_ko": "Windows가 힙 손상을 보고했습니다. 실제로 메모리를 손상시킨 모듈은 이 예외 코드만으로 특정할 수 없습니다.",
+        "cause_en": "Windows reported heap corruption. The module that actually corrupted memory cannot be identified from this exception code alone.",
         "confidence": "medium",
         "recommendations_ko": [
           "[모드 충돌] 최근 변경 모드를 이진 탐색으로 좁혀보세요.",

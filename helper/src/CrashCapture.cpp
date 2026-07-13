@@ -3,10 +3,14 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cwchar>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
+#include <new>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -30,13 +34,6 @@
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
-namespace {
-
-constexpr DWORD kShutdownWaitMs = 3000;
-constexpr int kMaxHeartbeatChecks = 4;
-constexpr DWORD kHeartbeatCheckIntervalMs = 2000;
-constexpr int kRequiredHeartbeatAdvances = 2;
-
 void WriteWerFallbackHint(const std::filesystem::path& outBase)
 {
   const std::string hint =
@@ -49,6 +46,24 @@ void WriteWerFallbackHint(const std::filesystem::path& outBase)
     "  DumpFolder (EXPAND_SZ) = <your output folder>\n"
     "Reference: https://learn.microsoft.com/windows/win32/wer/collecting-user-mode-dumps\n";
   WriteTextFileUtf8(outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt", hint);
+}
+
+namespace {
+
+constexpr DWORD kShutdownWaitMs = 3000;
+constexpr int kMaxHeartbeatChecks = 4;
+constexpr DWORD kHeartbeatCheckIntervalMs = 2000;
+constexpr int kRequiredHeartbeatAdvances = 2;
+constexpr int kStableSnapshotAttempts = 64;
+
+std::uint32_t ReadCrashSequence(const skydiag::SharedHeader* header) noexcept
+{
+  if (!header) {
+    return 0u;
+  }
+  auto* const sequence = reinterpret_cast<volatile LONG*>(
+    const_cast<volatile std::uint32_t*>(&header->crash_seq));
+  return static_cast<std::uint32_t>(InterlockedCompareExchange(sequence, 0, 0));
 }
 
 using skydiag::helper::internal::Hex32;
@@ -102,13 +117,48 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
   return verdict;
 }
 
+bool HasNewerCrashRecord(
+  const skydiag::SharedHeader* shm,
+  std::uint32_t expectedCrashSeq) noexcept
+{
+  const auto current = ReadCrashSequence(shm);
+  return current != 0u && current != expectedCrashSeq;
+}
+
+DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noexcept
+{
+  if (crashEvent && process) {
+    // Crash event first: if both handles become signaled together, Windows
+    // returns the lowest index and we get a chance to snapshot the newer crash
+    // before the process address space disappears.
+    const HANDLE handles[] = { crashEvent, process };
+    return WaitForMultipleObjects(static_cast<DWORD>(std::size(handles)), handles, FALSE, waitMs);
+  }
+  if (process) {
+    const DWORD result = WaitForSingleObject(process, waitMs);
+    if (result == WAIT_OBJECT_0) {
+      return WAIT_OBJECT_0 + 1u;
+    }
+    return result;
+  }
+  return WAIT_FAILED;
+}
+
 FilterVerdict FilterShutdownException(
   HANDLE process,
+  HANDLE crashEvent,
+  const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase)
 {
-  const DWORD pw = WaitForSingleObject(process, kShutdownWaitMs);
-  if (pw == WAIT_OBJECT_0) {
+  const DWORD pw = WaitForCrashOrProcess(crashEvent, process, kShutdownWaitMs);
+  if (pw == WAIT_OBJECT_0 && crashEvent) {
+    if (HasNewerCrashRecord(shm, info.crashSeq)) {
+      AppendLogLine(outBase, L"A newer crash record arrived during shutdown filtering; prioritizing the newer CTD.");
+      return FilterVerdict::kRetryNewerCrash;
+    }
+  }
+  if (pw == WAIT_OBJECT_0 + 1u) {
     DWORD exitCode = STILL_ACTIVE;
     GetExitCodeProcess(process, &exitCode);
     return ClassifyExitCodeVerdictWithContext(exitCode, info, outBase, L"shutdown", -1);
@@ -121,6 +171,7 @@ FilterVerdict FilterShutdownException(
 
 FilterVerdict FilterFirstChanceException(
   HANDLE process,
+  HANDLE crashEvent,
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase)
@@ -131,14 +182,22 @@ FilterVerdict FilterFirstChanceException(
 
   int heartbeatAdvanceCount = 0;
   for (int attempt = 0; attempt < kMaxHeartbeatChecks; ++attempt) {
-    if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0) {
+    const auto hb0 = shm->last_heartbeat_qpc;
+    const DWORD waitResult = WaitForCrashOrProcess(crashEvent, process, kHeartbeatCheckIntervalMs);
+    if (waitResult == WAIT_OBJECT_0 && crashEvent) {
+      if (HasNewerCrashRecord(shm, info.crashSeq)) {
+        AppendLogLine(
+          outBase,
+          L"A newer crash record arrived during first-chance recovery filtering; prioritizing the newer CTD.");
+        return FilterVerdict::kRetryNewerCrash;
+      }
+    }
+    if (waitResult == WAIT_OBJECT_0 + 1u) {
       DWORD exitCode = STILL_ACTIVE;
       GetExitCodeProcess(process, &exitCode);
       return ClassifyExitCodeVerdictWithContext(exitCode, info, outBase, L"heartbeat_check", attempt);
     }
 
-    const auto hb0 = shm->last_heartbeat_qpc;
-    Sleep(kHeartbeatCheckIntervalMs);
     const auto hb1 = shm->last_heartbeat_qpc;
     if (hb1 > hb0) {
       ++heartbeatAdvanceCount;
@@ -337,16 +396,111 @@ void ProcessValidCrashDump(
 
 }
 
+const skydiag::SharedLayout* StableSharedSnapshot::layout() const noexcept
+{
+  if (byteSize < sizeof(skydiag::SharedLayout) || !storage) {
+    return nullptr;
+  }
+  return std::launder(reinterpret_cast<const skydiag::SharedLayout*>(storage.get()));
+}
+
+std::size_t StableSharedSnapshot::size() const noexcept
+{
+  return byteSize;
+}
+
+void StableSharedSnapshot::AlignedByteDeleter::operator()(std::byte* ptr) const noexcept
+{
+  if (ptr) {
+    ::operator delete(ptr, std::align_val_t{alignment});
+  }
+}
+
+bool CaptureStableSharedSnapshot(
+  const skydiag::SharedLayout* shm,
+  std::size_t shmBytes,
+  StableSharedSnapshot* out) noexcept
+{
+  if (!shm || !out || shmBytes < sizeof(skydiag::SharedLayout)) {
+    return false;
+  }
+
+  out->storage.reset();
+  out->byteSize = 0;
+  constexpr std::size_t kSnapshotAlignment = alignof(skydiag::SharedLayout);
+  auto* rawStorage = static_cast<std::byte*>(::operator new(
+    sizeof(skydiag::SharedLayout),
+    std::align_val_t{kSnapshotAlignment},
+    std::nothrow));
+  if (!rawStorage) {
+    return false;
+  }
+  out->storage = StableSharedSnapshot::Storage(
+    rawStorage,
+    StableSharedSnapshot::AlignedByteDeleter{kSnapshotAlignment});
+  out->byteSize = sizeof(skydiag::SharedLayout);
+
+  for (int attempt = 0; attempt < kStableSnapshotAttempts; ++attempt) {
+    const std::uint32_t before = ReadCrashSequence(&shm->header);
+    if ((before & 1u) != 0u) {
+      SwitchToThread();
+      continue;
+    }
+
+    std::memcpy(out->storage.get(), shm, sizeof(skydiag::SharedLayout));
+    MemoryBarrier();
+    const std::uint32_t after = ReadCrashSequence(&shm->header);
+    if (before == after && (after & 1u) == 0u) {
+      return true;
+    }
+    SwitchToThread();
+  }
+
+  out->storage.reset();
+  out->byteSize = 0;
+  return false;
+}
+
+bool TryClearRecoveredCrashFreeze(
+  skydiag::SharedLayout* shm,
+  std::uint32_t expectedCrashSeq) noexcept
+{
+  if (!shm || expectedCrashSeq == 0u || (expectedCrashSeq & 1u) != 0u) {
+    return false;
+  }
+
+  if (ReadCrashSequence(&shm->header) != expectedCrashSeq) {
+    return false;
+  }
+
+  InterlockedAnd(
+    reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
+    ~static_cast<LONG>(skydiag::kState_Frozen));
+  MemoryBarrier();
+
+  if (ReadCrashSequence(&shm->header) != expectedCrashSeq) {
+    // A newer crash began or committed while the recovered record was being
+    // thawed. Restore the freeze so its evidence cannot be overwritten.
+    InterlockedOr(
+      reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
+      static_cast<LONG>(skydiag::kState_Frozen));
+    return false;
+  }
+  return true;
+}
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept
 {
   if (!shm) {
     return {};
   }
-  return BuildCrashEventInfo(
+  auto info = BuildCrashEventInfo(
     shm->crash.exception_code,
     shm->crash.exception_addr,
     shm->crash.faulting_tid,
     shm->state_flags);
+  info.crashSeq = ReadCrashSequence(shm);
+  return info;
 }
 
 bool HandleCrashEventTick(
@@ -387,12 +541,41 @@ bool HandleCrashEventTick(
     return true;
   }
 
-  const auto info = ExtractCrashInfo(proc.shm ? &proc.shm->header : nullptr);
+  StableSharedSnapshot stableSnapshot{};
+  const skydiag::SharedLayout* dumpSnapshot = nullptr;
+  std::size_t dumpSnapshotBytes = 0;
+  if (proc.shm) {
+    if (!CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &stableSnapshot)) {
+      const bool processStillActive =
+        proc.process && WaitForSingleObject(proc.process, 0) == WAIT_TIMEOUT;
+      AppendLogLine(
+        outBase,
+        processStillActive
+          ? L"Crash event snapshot was not stable; scheduling a retry before dump capture."
+          : L"Crash event snapshot was not stable after process exit; allowing exit fallback handling.");
+      if (processStillActive) {
+        SetEvent(proc.crashEvent);
+      }
+      return false;
+    }
+    dumpSnapshot = stableSnapshot.layout();
+    dumpSnapshotBytes = stableSnapshot.size();
+  }
+
+  const auto info = ExtractCrashInfo(dumpSnapshot ? &dumpSnapshot->header : nullptr);
+  if (!IsCommittedCrashSequence(info.crashSeq)) {
+    AppendLogLine(
+      outBase,
+      L"Crash event rejected before dump capture because crash_seq is not a non-zero committed sequence "
+        L"(crash_seq=" + std::to_wstring(info.crashSeq) + L").");
+    return false;
+  }
   AppendLogLine(
     outBase,
     L"Crash event signaled (exception_code=" + Hex32(info.exceptionCode)
       + L", exception_addr=" + Hex64(info.exceptionAddr)
       + L", tid=" + std::to_wstring(info.faultingTid)
+      + L", crash_seq=" + std::to_wstring(info.crashSeq)
       + L").");
 
   const auto ts = Timestamp();
@@ -409,8 +592,8 @@ bool HandleCrashEventTick(
     proc.process,
     proc.pid,
     dumpPath,
-    proc.shm,
-    proc.shmSize,
+    dumpSnapshot,
+    dumpSnapshotBytes,
     {},
     {},
     true,
@@ -440,24 +623,47 @@ bool HandleCrashEventTick(
     *lastCrashDumpPath = dumpPath;
   }
 
+  auto verdict = FilterVerdict::kKeepDump;
   if (proc.process) {
-    auto verdict = FilterShutdownException(proc.process, info, outBase);
+    verdict = FilterShutdownException(
+      proc.process,
+      proc.crashEvent,
+      proc.shm ? &proc.shm->header : nullptr,
+      info,
+      outBase);
     if (verdict == FilterVerdict::kKeepDump && proc.shm) {
-      verdict = FilterFirstChanceException(proc.process, &proc.shm->header, info, outBase);
+      verdict = FilterFirstChanceException(proc.process, proc.crashEvent, &proc.shm->header, info, outBase);
     }
     if (verdict != FilterVerdict::kKeepDump) {
+      if (verdict == FilterVerdict::kDeleteRecovered) {
+        const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+        AppendLogLine(
+          outBase,
+          thawed
+            ? L"Recovered first-chance exception thawed blackbox/resource capture for a later real CTD."
+            : L"Recovered first-chance exception was not thawed because a newer crash record is already present.");
+      } else if (verdict == FilterVerdict::kRetryNewerCrash) {
+        AppendLogLine(
+          outBase,
+          L"Discarding the superseded first-chance dump state and immediately retrying the newer crash event.");
+      }
+
       if (cfg.preserveFilteredCrashDumps) {
         AppendLogLine(
           outBase,
-          L"Crash dump would have been deleted by false-positive filter but preserved (PreserveFilteredCrashDumps=1).");
+          L"Filtered dump file preserved without crash post-processing or capture latch (PreserveFilteredCrashDumps=1).");
       } else {
         std::error_code ec;
         std::filesystem::remove(dumpPath, ec);
-        if (lastCrashDumpPath) {
-          lastCrashDumpPath->clear();
-        }
-        return false;
       }
+      if (lastCrashDumpPath) {
+        lastCrashDumpPath->clear();
+      }
+      if (crashCaptured) {
+        *crashCaptured = false;
+      }
+      AppendLogLine(outBase, L"Filtered crash event consumed; capture remains ready for a later CTD.");
+      return true;
     }
   }
 
@@ -473,7 +679,7 @@ bool HandleCrashEventTick(
     pendingCrashViewerDumpPath);
 
   if (crashCaptured) {
-    *crashCaptured = true;
+    *crashCaptured = ShouldLatchCrashCapture(verdict);
   }
   AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
   return true;

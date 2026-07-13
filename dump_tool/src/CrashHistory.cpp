@@ -11,22 +11,18 @@
 namespace skydiag::dump_tool {
 namespace {
 
-std::string CanonicalHistoryKey(std::string_view value)
+std::string NormalizeStoredCandidateKey(std::string_view value)
 {
-  std::string key;
-  key.reserve(value.size());
-  for (unsigned char ch : value) {
-    const char lower = static_cast<char>(std::tolower(ch));
-    if ((lower >= 'a' && lower <= 'z') || (lower >= '0' && lower <= '9')) {
-      key.push_back(lower);
-    }
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
+    value.remove_prefix(1);
   }
-
-  const std::string suffixes[] = { "esp", "esm", "esl", "dll", "exe" };
-  for (const auto& suffix : suffixes) {
-    if (key.size() > suffix.size() && key.ends_with(suffix)) {
-      key.erase(key.size() - suffix.size());
-      break;
+  while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+    value.remove_suffix(1);
+  }
+  std::string key(value);
+  for (char& ch : key) {
+    if (ch >= 'A' && ch <= 'Z') {
+      ch = static_cast<char>(ch - 'A' + 'a');
     }
   }
   return key;
@@ -45,6 +41,10 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
     if (!j.is_object() || !j.contains("entries") || !j["entries"].is_array()) {
       return false;
     }
+    const auto historyVersion = j.value("version", 1u);
+    if (historyVersion != 1u && historyVersion != 2u) {
+      return false;
+    }
 
     std::vector<CrashHistoryEntry> loaded;
     loaded.reserve(j["entries"].size());
@@ -54,6 +54,10 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
         continue;
       }
       CrashHistoryEntry row{};
+      row.candidate_key_version = e.value("candidate_key_version", historyVersion >= 2u ? 2u : 1u);
+      if (row.candidate_key_version != 1u && row.candidate_key_version != 2u) {
+        row.candidate_key_version = 1u;
+      }
       row.timestamp_utc = e.value("timestamp_utc", "");
       row.dump_file = e.value("dump_file", "");
       row.bucket_key = e.value("bucket_key", "");
@@ -88,10 +92,11 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
 {
   try {
     nlohmann::json j = nlohmann::json::object();
-    j["version"] = 1;
+    j["version"] = 2;
     j["entries"] = nlohmann::json::array();
     for (const auto& e : m_entries) {
       j["entries"].push_back({
+        { "candidate_key_version", e.candidate_key_version },
         { "timestamp_utc", e.timestamp_utc },
         { "dump_file", e.dump_file },
         { "bucket_key", e.bucket_key },
@@ -226,9 +231,9 @@ std::vector<BucketCandidateStats> CrashHistory::GetBucketCandidateStats(const st
     }
 
     std::unordered_set<std::string> seenInEntry;
-    if (!e.candidate_keys.empty()) {
+    if (e.candidate_key_version >= 2u && !e.candidate_keys.empty()) {
       for (const auto& rawKey : e.candidate_keys) {
-        const auto key = CanonicalHistoryKey(rawKey);
+        const auto key = NormalizeStoredCandidateKey(rawKey);
         if (!key.empty() && seenInEntry.insert(key).second) {
           auto& row = byKey[key];
           row.candidate_key = key;
@@ -237,13 +242,9 @@ std::vector<BucketCandidateStats> CrashHistory::GetBucketCandidateStats(const st
       }
       continue;
     }
-
-    const auto fallbackKey = CanonicalHistoryKey(e.top_suspect);
-    if (!fallbackKey.empty()) {
-      auto& row = byKey[fallbackKey];
-      row.candidate_key = fallbackKey;
-      row.count += 1;
-    }
+    // v1 keys removed all separators/non-ASCII and can alias distinct v2
+    // candidates (for example A-B vs AB). Do not let ambiguous legacy keys
+    // boost a modern actionable candidate; bucket-level history still works.
   }
 
   result.reserve(byKey.size());

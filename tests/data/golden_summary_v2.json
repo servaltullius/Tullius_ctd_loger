@@ -45,6 +45,9 @@
   "crash_logger": {
     "log_path": "C:\\Crashes\\crash_20260115_143022.log",
     "version": "4.26.1",
+    "direct_fault_eligible": false,
+    "first_actionable_probable_eligible": false,
+    "probable_streak_eligible": false,
     "top_modules": ["hdtSMP64.dll", "SkyrimSE.exe"],
     "object_refs": [
       {
