@@ -2,6 +2,42 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.54 (2026-07-13)
+
+### 한눈에 보기
+- 이번 릴리즈는 **CTD 원인 과단정 방지와 크래시 캡처 정합성 보강** 릴리즈입니다.
+- 플러그인과 Helper 사이의 크래시 컨텍스트를 원자적으로 커밋해, 기록 도중의 예외 정보가 덤프에 섞이는 가능성을 줄였습니다.
+- 알려진 크래시 서명은 기본적으로 "발생 메커니즘"을 설명하고, 별도의 후보 합의 결과가 실제 근본 원인 후보를 판단하도록 역할을 분리했습니다.
+- Crash Logger의 원시 프레임은 보존하되 시스템 DLL, 게임 실행 파일, 훅 프레임워크 같은 비행동 신호가 유력 원인으로 승격되지 않도록 했습니다.
+
+### 수정
+- **Crash capture: 커밋 시퀀스 도입** — `crash_seq` seqlock 프로토콜로 플러그인 기록과 Helper 읽기를 동기화하고, 동일한 안정 스냅샷으로 blackbox/exception stream을 생성합니다.
+- **Crash capture: 복구·종료 경합 보정** — 복구된 first-chance 예외는 자신이 기록한 시퀀스만 해제할 수 있으며, Helper는 프로세스 종료 전에 대기 중인 crash event를 먼저 처리합니다.
+- **Signature: 메커니즘/근본 원인 분리** — 서명 schema를 엄격히 검증하고 `scope`, `mechanism`, `match_confidence`를 출력합니다. `D6DDDA_VRAM`은 SkyrimSE 1.5.97.0의 정확한 접근 위반 패턴인 `D6DDDA_1597_AV`로 좁혔습니다.
+- **Candidate consensus: 예외 스레드 우선** — 정상 stackwalk와 fallback scan 모두 예외 스레드를 우선하고, 낮은 품질의 stack 및 capture-quality 신호가 후보 신뢰도를 과도하게 올리지 못하도록 했습니다.
+- **Candidate identity/history: 키 충돌 방지** — 후보 키가 구분자와 Unicode를 보존하며, 모호한 v1 history key가 다른 후보를 잘못 boost하지 않도록 history schema v2를 사용합니다.
+- **Crash Logger: 로그 페어링 강화** — dump/log artifact 종류를 구분하고 최대 시간 창을 120초로 제한하며, 이름 규칙보다 실제 시간 차이를 먼저 비교합니다.
+- **Crash Logger/WinUI: 원시 관측과 행동 후보 분리** — 세 frame field별 eligibility를 summary에 기록하고, WinUI와 권장 조치가 같은 행동 가능성 판정을 사용합니다.
+- **품질 게이트: 실사용 표시 순서 측정** — 중복 incident와 충돌 라벨을 fail-closed하고 top-1 accuracy, top-3 recall, High-confidence precision, abstention rate를 분리해 측정합니다.
+- **테스트: release build 검증 실효성 강화** — RelWithDebInfo에서도 assertion을 활성화하고, Crash Logger 실제 파일/타임스탬프 통합 테스트와 새 summary schema 회귀 검사를 추가했습니다.
+- **개발 도구 정리** — 더 이상 사용하지 않는 Vibekit 스크립트, 에이전트 안내, 전용 CI/테스트를 제거하고 현재 빌드·패키징 계약에 맞췄습니다.
+
+### 주의사항
+- 공유 메모리 프로토콜이 v3으로 올라갔으므로 `SkyrimDiag.dll`과 `SkyrimDiagHelper.exe`를 서로 다른 릴리즈에서 섞지 말고 zip 전체를 함께 업데이트해야 합니다.
+- 서명의 High confidence는 해당 패턴의 일치 신뢰도이며, 특정 모드·에셋이 근본 원인이라는 자동 확정을 의미하지 않습니다.
+- 실제 CTD 원인 적중률은 검토자가 `triage.ground_truth_mod`를 채운 실사고 코퍼스로 별도 측정해야 하며, 합성 테스트 결과를 정확도 백분율로 사용하지 않습니다.
+
+### 테스트
+- Windows native build: 성공.
+- Windows 전체 테스트 `61/61` 통과.
+- Windows WinUI self-contained publish: 성공.
+- Ubuntu Linux build: 성공.
+- Linux 전체 테스트 `57/57` 통과.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.54.zip`, `--no-pdb`): 성공 (`87,612,303` bytes, 523 entries, PDB 0개).
+- Package content check: protocol v3 Plugin/Helper와 `D6DDDA_1597_AV` 서명 포함 확인.
+- Release gate: `OK`.
+- SHA-256: `50090AC11C6E2B99C46ACEBFDD0AA34AA48A22F60F3DB8604F781C9CEF76AEC4`.
+
 ## v0.2.53 (2026-05-08)
 
 ### 한눈에 보기
