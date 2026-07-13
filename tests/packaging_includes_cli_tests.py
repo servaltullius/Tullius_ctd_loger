@@ -49,7 +49,6 @@ def main() -> int:
     ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     smoke_workflow_path = REPO_ROOT / ".github" / "workflows" / "winui-headless-smoke.yml"
     smoke_workflow = smoke_workflow_path.read_text(encoding="utf-8")
-    vibe_py = (REPO_ROOT / "scripts" / "vibe.py").read_text(encoding="utf-8")
     build_win_from_wsl = (REPO_ROOT / "scripts" / "build-win-from-wsl.sh").read_text(
         encoding="utf-8"
     )
@@ -137,15 +136,6 @@ def main() -> int:
     )
     assert "SkyrimDiagDumpToolWinUI_headless_bootstrap.log" in smoke_workflow, (
         "manual smoke workflow must print the headless bootstrap log when startup fails"
-    )
-    assert "_configure_fallback" in vibe_py, (
-        "vibe.py must provide a configure fallback when repo-local brain scripts are absent"
-    )
-    assert "_doctor_fallback" in vibe_py, (
-        "vibe.py must provide a doctor fallback when repo-local brain scripts are absent"
-    )
-    assert "_agents_doctor_fallback" in vibe_py, (
-        "vibe.py must provide an agents-doctor fallback when repo-local brain scripts are absent"
     )
     assert 'pushd "%~dp0.."' in build_win_script, (
         "build-win.cmd must self-map the repo root so WSL/UNC launches do not break cmd/lib.exe"

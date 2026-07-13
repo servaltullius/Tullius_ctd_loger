@@ -29,12 +29,6 @@ worktrees/
 __pycache__/
 *.pyc
 
-# vibe-kit
-.vibe/db/
-.vibe/reports/
-.vibe/locks/
-.vibe/context/LATEST_CONTEXT.md
-.vibe/context/PACK_*.md
 
 # WinUI build outputs
 dump_tool_winui/bin/
