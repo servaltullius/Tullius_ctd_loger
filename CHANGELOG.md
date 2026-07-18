@@ -2,6 +2,34 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.55 (2026-07-18)
+
+### 한눈에 보기
+- 이번 릴리즈는 **정상 게임 종료를 CTD로 오인하던 문제를 수정한 hotfix**입니다.
+- SKSE DLL의 first-chance 접근 위반이 기록되더라도 게임 프로세스의 최종 `exit_code=0`이면 처리된 예외로 판정합니다.
+- 정상 종료가 확정되면 CTD 분석, 지연 뷰어, 덤프와 파생 리포트가 사용자에게 실제 CTD처럼 노출되지 않습니다.
+
+### 수정
+- **종료 코드 우선 판정** — 예외 코드의 강도와 관계없이 최종 프로세스 종료 코드가 0이면 정상 종료로 확정하고, 비정상 종료(`exit_code!=0`)의 기존 CTD 처리는 유지합니다.
+- **strong-exception 우회 제거** — 공유 메모리에 접근 위반이 남아 있어도 정상 종료를 CTD로 되돌리거나 지연 뷰어를 실행하지 않습니다.
+- **오탐 산출물 정리** — 진행 중인 headless 분석과 ETW를 중단하고 dump, report, summary, blackbox, WCT, PluginScan, incident manifest를 정리합니다.
+- **보존 옵션 정합성** — `PreserveFilteredCrashDumps=1`에서는 원본 dump만 남기고 파생 CTD 산출물과 capture/viewer latch는 제거합니다.
+- **회귀 테스트** — `0xC0000005 + InMenu + exit_code=0` 사례와 strong shared-memory crash evidence가 있는 실제 프로세스 종료 경로를 추가했습니다.
+
+### 주의사항
+- 외부 크래시 핸들러가 실제 치명적 CTD의 프로세스 종료 코드를 강제로 0으로 바꾸는 매우 드문 환경에서는 해당 사고가 정상 종료로 필터링될 수 있습니다.
+- 필터링된 원본 dump를 조사 목적으로 남기려면 `SkyrimDiagHelper.ini`에서 `PreserveFilteredCrashDumps=1`을 사용해야 합니다.
+
+### 테스트
+- Windows native build: 성공.
+- Windows 전체 테스트 `61/61` 통과.
+- Windows WinUI self-contained publish: 성공.
+- Ubuntu Linux build: 성공.
+- Linux 전체 테스트 `57/57` 통과.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.55.zip`, `--no-pdb`): 성공 (`87,614,201` bytes, 523 entries, PDB 0개).
+- Release gate: `OK`.
+- SHA-256: `C58113A22589947F08504F28B2199031945E746C26251B1D20FC615CE0BB010C`.
+
 ## v0.2.54 (2026-07-13)
 
 ### 한눈에 보기
