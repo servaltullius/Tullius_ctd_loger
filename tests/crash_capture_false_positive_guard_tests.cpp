@@ -144,7 +144,11 @@ int main()
   AssertContains(
     processValidBody,
     "Process exited with exit_code=0 during wait window",
-    "Post-processing helper must handle exit_code=0 during wait window with deferred viewer logic.");
+    "Post-processing helper must handle exit_code=0 during the viewer wait window.");
+  AssertContains(
+    processValidBody,
+    "suppressing deferred crash viewer",
+    "Post-processing helper must suppress crash viewer launch once the process reports a zero exit code.");
 
   AssertOrdered(
     processValidBody,
@@ -153,6 +157,9 @@ int main()
     "Post-processing helper must start ETW capture before writing incident manifest.");
 
   const std::string zeroExitCleanupBody = ExtractFunctionBody(helperMain, "void CleanupCrashArtifactsAfterZeroExit(");
+  assert(
+    zeroExitCleanupBody.find("exitCode0StrongCrash") == std::string::npos &&
+    "Zero-exit cleanup must not preserve artifacts based on strong first-chance exception evidence.");
   AssertContains(
     zeroExitCleanupBody,
     "if (!state->crashCaptured)",
@@ -165,13 +172,13 @@ int main()
 
   AssertContains(
     zeroExitCleanupBody,
-    "RemoveCrashArtifactsForDump(outBase, state->capturedCrashDumpPath, crashEtwPath)",
+    "RemoveCrashArtifactsForDump(\n      outBase,\n      state->capturedCrashDumpPath,\n      crashEtwPath,\n      cfg.preserveFilteredCrashDumps)",
     "Zero-exit cleanup must remove crash artifact set tied to captured dump.");
 
   AssertOrdered(
     zeroExitCleanupBody,
     "MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);",
-    "RemoveCrashArtifactsForDump(outBase, state->capturedCrashDumpPath, crashEtwPath)",
+    "RemoveCrashArtifactsForDump(",
     "Zero-exit cleanup must stop ETW before deleting crash artifacts.");
 
   const std::string processExitTickBody = ExtractFunctionBody(helperMain, "bool HandleProcessExitTick(");
@@ -182,24 +189,12 @@ int main()
 
   AssertContains(
     processExitTickBody,
-    "DrainCrashEventBeforeExit(",
-    "Process exit tick must drain pending crash signal before exit handling.");
-
-  AssertContains(
-    processExitTickBody,
-    "const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);",
-    "Process exit tick must preserve zero-exit crashes when shared memory still reports a strong exception.");
-
-  AssertContains(
-    processExitTickBody,
-    "(state->crashCaptured || sharedMemoryStrongCrash)",
-    "Process exit tick must keep zero-exit crash handling active even when the crash event was not consumed before exit.");
-
-  AssertOrdered(
-    processExitTickBody,
-    "const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);",
-    "DrainCrashEventBeforeExit(",
-    "Process exit tick must evaluate strong shared-memory crash evidence before deciding whether to drain the crash event.");
+    "if (exitCode != 0) {\n      DrainCrashEventBeforeExit(",
+    "Process exit tick must drain pending crash signals only for non-zero exits.");
+  assert(
+    processExitTickBody.find("sharedMemoryStrongCrash") == std::string::npos &&
+    processExitTickBody.find("exitCode0StrongCrash") == std::string::npos &&
+    "Process exit tick must treat exit_code=0 as authoritative normal termination.");
 
   AssertContains(
     processExitTickBody,
@@ -214,8 +209,11 @@ int main()
   const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
   AssertContains(
     deferredViewerBody,
-    "exitCode != 0 || exitCode0StrongCrash",
-    "Deferred crash viewer launch must trigger on non-zero exit or exit_code=0 with strong-crash evidence.");
+    "cfg.autoOpenViewerOnCrash &&\n      exitCode != 0",
+    "Deferred crash viewer launch must require a non-zero process exit code.");
+  assert(
+    deferredViewerBody.find("exitCode0StrongCrash") == std::string::npos &&
+    "Deferred crash viewer launch must not override a zero exit code with exception strength.");
   AssertContains(
     deferredViewerBody,
     "Suppressed deferred crash viewer launch on normal process exit",

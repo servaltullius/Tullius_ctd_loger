@@ -224,7 +224,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
   std::filesystem::remove_all(outBase);
 }
 
-void TestCleanupCrashArtifactsAfterZeroExit_PreservesStrongCrashArtifacts()
+void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_runtime_preserve");
   ClearLog(outBase);
@@ -239,20 +239,14 @@ void TestCleanupCrashArtifactsAfterZeroExit_PreservesStrongCrashArtifacts()
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
 
-  CleanupCrashArtifactsAfterZeroExit(
-    cfg,
-    proc,
-    outBase,
-    /*exitCode0StrongCrash=*/true,
-    /*exceptionCode=*/0xC0000005u,
-    &state);
+  CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &state);
 
-  Require(FileExists(dumpPath), "Strong zero-exit crash must preserve artifacts");
-  Require(state.crashCaptured, "Strong zero-exit crash must preserve capture state");
-  Require(!state.pendingCrashViewerDumpPath.empty(), "Strong zero-exit crash must preserve deferred viewer path");
+  Require(!FileExists(dumpPath), "Handled strong exception with exit_code=0 must remove artifacts");
+  Require(!state.crashCaptured, "Handled strong exception with exit_code=0 must clear capture state");
+  Require(state.pendingCrashViewerDumpPath.empty(), "Handled strong exception with exit_code=0 must suppress viewer");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
-  AssertContains(log, "preserving crash artifacts", "Strong zero-exit crash must be logged as preserved");
+  AssertContains(log, "removed", "Handled strong zero-exit exception must be logged as filtered");
 
   std::filesystem::remove_all(outBase);
 }
@@ -265,7 +259,7 @@ int main()
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
-    TestCleanupCrashArtifactsAfterZeroExit_PreservesStrongCrashArtifacts();
+    TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

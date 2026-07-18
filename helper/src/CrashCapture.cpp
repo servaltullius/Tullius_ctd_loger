@@ -87,21 +87,12 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
       L"Crash event received but process exited normally (context=" + std::wstring(context)
         + L", exit_code=0"
         + checkSuffix
-        + L"); deleting dump (likely shutdown exception)."
+        + L"); deleting dump (handled first-chance or shutdown exception)."
     );
     return verdict;
   }
 
-  if (exitCode == 0 && info.isStrong) {
-    AppendLogLine(
-      outBase,
-      L"Crash event received with exit_code=0 but strong exception_code="
-        + Hex32(info.exceptionCode)
-        + L" (context="
-        + std::wstring(context)
-        + checkSuffix
-        + L"); keeping dump and preserving crash auto-actions.");
-  } else if (info.inMenu && exitCode != 0) {
+  if (info.inMenu && exitCode != 0) {
     AppendLogLine(
       outBase,
       L"Crash event reached menu/shutdown boundary with non-zero exit (context="
@@ -324,13 +315,10 @@ void ProcessValidCrashDump(
           processExitCode = 0xFFFFFFFFu;
         }
         if (processExitCode == 0) {
-          const bool deferred = QueueDeferredCrashViewer(dumpPath, pendingCrashViewerDumpPath);
           AppendLogLine(
             outBase,
             L"Process exited with exit_code=0 during wait window; "
-              + std::wstring(deferred ? L"deferring viewer to post-exit strong-crash check"
-                                      : L"deferred viewer queue unchanged")
-              + L" (wait_ms="
+              L"suppressing deferred crash viewer; normal-exit cleanup will remove filtered crash artifacts (wait_ms="
               + std::to_wstring(waitExitMs)
               + L", dump="
               + dumpFs.filename().wstring()

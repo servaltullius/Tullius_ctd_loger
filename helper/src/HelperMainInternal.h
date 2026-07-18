@@ -38,7 +38,8 @@ std::wstring BuildCrashEventUnavailableMessage(const AttachedProcess& proc, std:
 std::uint32_t RemoveCrashArtifactsForDump(
   const std::filesystem::path& outBase,
   std::wstring_view dumpPath,
-  const std::filesystem::path& extraArtifactPath = {});
+  const std::filesystem::path& extraArtifactPath = {},
+  bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
 void RegisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg, const std::filesystem::path& outBase);
 void UnregisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg);
@@ -53,23 +54,16 @@ void DrainCrashEventBeforeExit(
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
   HelperLoopState* state);
-bool HasSharedMemoryStrongCrashEvidence(const AttachedProcess& proc);
 void CleanupCrashArtifactsAfterZeroExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
-  bool exitCode0StrongCrash,
-  std::uint32_t exceptionCode,
   HelperLoopState* state);
-void AppendExitClassificationLog(
-  const std::filesystem::path& outBase,
-  bool exitCode0StrongCrash,
-  std::uint32_t exceptionCode);
+void AppendExitClassificationLog(const std::filesystem::path& outBase);
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
   DWORD exitCode,
-  bool exitCode0StrongCrash,
   HelperLoopState* state);
 void HandleProcessWaitFailed(
   const HelperConfig& cfg,

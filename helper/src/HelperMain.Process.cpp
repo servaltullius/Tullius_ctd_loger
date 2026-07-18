@@ -5,19 +5,15 @@
 #include <iostream>
 #include <string>
 
-#include "SkyrimDiagHelper/CrashHeuristics.h"
-
 #include "CrashCapture.h"
 #include "DumpToolLaunch.h"
 #include "HelperLog.h"
-#include "HexFormat.h"
 
 namespace {
 
 using skydiag::helper::internal::AppendLogLine;
 using skydiag::helper::internal::ClearPendingCrashAnalysis;
 using skydiag::helper::internal::HandleCrashEventTick;
-using skydiag::helper::internal::Hex32;
 using skydiag::helper::internal::MaybeStopPendingCrashEtwCapture;
 using skydiag::helper::internal::StartDumpToolViewer;
 
@@ -47,61 +43,29 @@ void DrainCrashEventBeforeExit(
     &state->pendingCrashViewerDumpPath);
 }
 
-bool HasSharedMemoryStrongCrashEvidence(const AttachedProcess& proc)
-{
-  StableSharedSnapshot snapshot{};
-  if (!CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &snapshot)) {
-    return false;
-  }
-  const auto* layout = snapshot.layout();
-  const auto info = ExtractCrashInfo(layout ? &layout->header : nullptr);
-  return info.crashSeq != 0u &&
-         (info.crashSeq & 1u) == 0u &&
-         (info.stateFlags & skydiag::kState_Frozen) != 0u &&
-         skydiag::helper::IsStrongCrashException(info.exceptionCode);
-}
-
 void CleanupCrashArtifactsAfterZeroExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
-  bool exitCode0StrongCrash,
-  std::uint32_t exceptionCode,
   HelperLoopState* state)
 {
   if (!state) {
     return;
   }
-  if (exitCode0StrongCrash) {
-    AppendLogLine(
-      outBase,
-      L"exit_code=0 after crash capture but exception_code="
-        + Hex32(exceptionCode)
-        + L" is strong; preserving crash artifacts and crash auto-actions.");
-    return;
-  }
   if (!state->crashCaptured) {
     return;
   }
-  if (cfg.preserveFilteredCrashDumps) {
-    state->capturedCrashDumpPath.clear();
-    state->pendingCrashViewerDumpPath.clear();
-    state->crashCaptured = false;
-    AppendLogLine(
-      outBase,
-      L"exit_code=0 after filtered crash; dump file preserved without keeping the crashCaptured latch "
-      L"(PreserveFilteredCrashDumps=1).");
-    return;
-  }
 
-  if (state->pendingCrashAnalysis.active && state->pendingCrashAnalysis.process) {
-    if (!TerminateProcess(state->pendingCrashAnalysis.process, 1)) {
-      AppendLogLine(
-        outBase,
-        L"exit_code=0 after crash capture; failed to terminate pending crash analysis process: "
-          + std::to_wstring(GetLastError()));
-    } else {
-      AppendLogLine(outBase, L"exit_code=0 after crash capture; terminated pending crash analysis process.");
+  if (state->pendingCrashAnalysis.active) {
+    if (state->pendingCrashAnalysis.process) {
+      if (!TerminateProcess(state->pendingCrashAnalysis.process, 1)) {
+        AppendLogLine(
+          outBase,
+          L"exit_code=0 after crash capture; failed to terminate pending crash analysis process: "
+            + std::to_wstring(GetLastError()));
+      } else {
+        AppendLogLine(outBase, L"exit_code=0 after crash capture; terminated pending crash analysis process.");
+      }
     }
     ClearPendingCrashAnalysis(&state->pendingCrashAnalysis);
   }
@@ -113,40 +77,45 @@ void CleanupCrashArtifactsAfterZeroExit(
     state->capturedCrashDumpPath = state->pendingCrashViewerDumpPath;
   }
   if (!state->capturedCrashDumpPath.empty()) {
-    const std::uint32_t removed = RemoveCrashArtifactsForDump(outBase, state->capturedCrashDumpPath, crashEtwPath);
-    AppendLogLine(
+    const std::uint32_t removed = RemoveCrashArtifactsForDump(
       outBase,
-      L"exit_code=0 after crash capture; removed "
-        + std::to_wstring(removed)
-        + L" crash artifact(s): "
-        + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
+      state->capturedCrashDumpPath,
+      crashEtwPath,
+      cfg.preserveFilteredCrashDumps);
+    if (cfg.preserveFilteredCrashDumps) {
+      AppendLogLine(
+        outBase,
+        L"exit_code=0 after filtered crash; dump file preserved, removed "
+          + std::to_wstring(removed)
+          + L" derived crash artifact(s), without keeping the crashCaptured latch "
+          L"(PreserveFilteredCrashDumps=1): "
+          + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
+    } else {
+      AppendLogLine(
+        outBase,
+        L"exit_code=0 after crash capture; removed "
+          + std::to_wstring(removed)
+          + L" crash artifact(s): "
+          + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
+    }
   }
   state->capturedCrashDumpPath.clear();
   state->pendingCrashViewerDumpPath.clear();
   state->crashCaptured = false;
 }
 
-void AppendExitClassificationLog(
-  const std::filesystem::path& outBase,
-  bool exitCode0StrongCrash,
-  std::uint32_t exceptionCode)
+void AppendExitClassificationLog(const std::filesystem::path& outBase)
 {
-  if (exitCode0StrongCrash) {
-    AppendLogLine(
-      outBase,
-      L"Process exited with exit_code=0 but crash exception_code="
-        + Hex32(exceptionCode)
-        + L" is strong; treating as crash for viewer/deferred behavior.");
-  } else {
-    AppendLogLine(outBase, L"Process exited normally (exit_code=0); skipping crash event drain.");
-  }
+  AppendLogLine(
+    outBase,
+    L"Process exited normally (exit_code=0); treating captured first-chance exceptions as handled "
+    L"and suppressing crash viewer/deferred behavior.");
 }
 
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
   DWORD exitCode,
-  bool exitCode0StrongCrash,
   HelperLoopState* state)
 {
   if (!state) {
@@ -155,13 +124,13 @@ void LaunchDeferredViewersAfterExit(
 
   if (!state->pendingCrashViewerDumpPath.empty() &&
       cfg.autoOpenViewerOnCrash &&
-      (exitCode != 0 || exitCode0StrongCrash)) {
+      exitCode != 0) {
     const std::wstring deferredDumpPath = state->pendingCrashViewerDumpPath;
     const auto launch = StartDumpToolViewer(
       cfg,
       deferredDumpPath,
       outBase,
-      exitCode0StrongCrash ? L"crash_deferred_exit_code0_strong" : L"crash_deferred_exit");
+      L"crash_deferred_exit");
     if (launch == DumpToolViewerLaunchResult::kLaunched) {
       AppendLogLine(
         outBase,
@@ -235,12 +204,10 @@ bool HandleProcessExitTick(
   if (w == WAIT_OBJECT_0) {
     DWORD exitCode = STILL_ACTIVE;
     GetExitCodeProcess(proc.process, &exitCode);
-    const std::uint32_t exceptionCode = proc.shm ? proc.shm->header.crash.exception_code : 0u;
-    const bool sharedMemoryStrongCrash = (exitCode == 0) && HasSharedMemoryStrongCrashEvidence(proc);
-    if (exitCode != 0 || sharedMemoryStrongCrash) {
+    if (exitCode != 0) {
       DrainCrashEventBeforeExit(cfg, proc, outBase, state);
     }
-    if ((exitCode != 0 || sharedMemoryStrongCrash) &&
+    if (exitCode != 0 &&
         !state->crashCaptured &&
         cfg.enableWerDumpFallbackHint) {
       WriteWerFallbackHint(outBase);
@@ -249,18 +216,14 @@ bool HandleProcessExitTick(
         L"Abnormal process exit had no internal crash dump; wrote WER LocalDumps fallback guidance: "
           + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
     }
-    const bool exitCode0StrongCrash =
-      (exitCode == 0) &&
-      (state->crashCaptured || sharedMemoryStrongCrash) &&
-      skydiag::helper::IsStrongCrashException(exceptionCode);
     if (exitCode == 0) {
-      CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, exitCode0StrongCrash, exceptionCode, state);
-      AppendExitClassificationLog(outBase, exitCode0StrongCrash, exceptionCode);
+      CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, state);
+      AppendExitClassificationLog(outBase);
     }
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
     std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
     AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
-    LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, exitCode0StrongCrash, state);
+    LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, state);
     return true;
   }
   if (w == WAIT_FAILED) {

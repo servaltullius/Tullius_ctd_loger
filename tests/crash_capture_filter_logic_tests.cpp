@@ -17,10 +17,16 @@ static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
   assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
 }
 
-static void TestClassifyExitCodeVerdict_KeepDumpOnStrongZeroExit()
+static void TestClassifyExitCodeVerdict_DeleteBenignOnStrongZeroExit()
 {
-  const auto info = BuildCrashEventInfo(0xC0000005u, 0u, 0u, 0u);
-  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kKeepDump);
+  const auto info = BuildCrashEventInfo(
+    0xC0000005u,
+    0x439Eu,
+    17120u,
+    skydiag::helper::internal::kStateInMenu);
+  assert(info.isStrong);
+  assert(info.inMenu);
+  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
 }
 
 static void TestClassifyExitCodeVerdict_KeepDumpInMenuNonZeroExit()
@@ -65,10 +71,10 @@ static void TestClassifyExitCodeVerdict_DeleteBenignForControlCExitWeak()
   assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
 }
 
-static void TestClassifyExitCodeVerdict_KeepDumpForAccessViolationStrong()
+static void TestClassifyExitCodeVerdict_KeepDumpForAccessViolationNonZeroExit()
 {
   const auto info = BuildCrashEventInfo(0xC0000005u, 0u, 0u, 0u);
-  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kKeepDump);
+  assert(ClassifyExitCodeVerdict(0xC0000005u, info, {}) == FilterVerdict::kKeepDump);
 }
 
 static void TestExtractLikeInfo_DefaultValues()
@@ -153,7 +159,7 @@ static void TestCommittedCrashSequenceValidation()
 int main()
 {
   TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit();
-  TestClassifyExitCodeVerdict_KeepDumpOnStrongZeroExit();
+  TestClassifyExitCodeVerdict_DeleteBenignOnStrongZeroExit();
   TestClassifyExitCodeVerdict_KeepDumpInMenuNonZeroExit();
   TestClassifyExitCodeVerdict_KeepDumpOutsideMenuNonZeroExit();
   TestClassifyExitCodeVerdict_DeleteBenignForInvalidHandleWeak();
@@ -161,7 +167,7 @@ int main()
   TestClassifyExitCodeVerdict_DeleteBenignForClrExceptionWeak();
   TestClassifyExitCodeVerdict_DeleteBenignForBreakpointWeak();
   TestClassifyExitCodeVerdict_DeleteBenignForControlCExitWeak();
-  TestClassifyExitCodeVerdict_KeepDumpForAccessViolationStrong();
+  TestClassifyExitCodeVerdict_KeepDumpForAccessViolationNonZeroExit();
 
   TestExtractLikeInfo_DefaultValues();
   TestExtractLikeInfo_FieldMapping();

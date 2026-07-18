@@ -58,7 +58,8 @@ std::wstring BuildCrashEventUnavailableMessage(const AttachedProcess& proc, std:
 std::uint32_t RemoveCrashArtifactsForDump(
   const std::filesystem::path& outBase,
   std::wstring_view dumpPath,
-  const std::filesystem::path& extraArtifactPath)
+  const std::filesystem::path& extraArtifactPath,
+  bool preserveDumpFile)
 {
   if (dumpPath.empty()) {
     return 0;
@@ -71,12 +72,15 @@ std::uint32_t RemoveCrashArtifactsForDump(
   }
 
   std::vector<std::filesystem::path> artifacts;
-  artifacts.reserve(7);
-  artifacts.push_back(dumpFs);
+  artifacts.reserve(8);
+  if (!preserveDumpFile) {
+    artifacts.push_back(dumpFs);
+  }
   artifacts.push_back(outBase / (stem + L"_SkyrimDiagBlackbox.jsonl"));
   artifacts.push_back(outBase / (stem + L"_SkyrimDiagReport.txt"));
   artifacts.push_back(outBase / (stem + L"_SkyrimDiagSummary.json"));
   artifacts.push_back(outBase / (stem + L"_SkyrimDiagWct.json"));
+  artifacts.push_back(dumpFs.parent_path() / (stem + L"_PluginScan.json"));
   artifacts.push_back(outBase / (stem + L".etl"));
 
   const std::wstring kCrashStemPrefix = L"SkyrimDiag_Crash_";

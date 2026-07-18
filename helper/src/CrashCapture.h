@@ -101,10 +101,10 @@ inline CrashEventInfo BuildCrashEventInfo(
 
 inline FilterVerdict ClassifyExitCodeVerdict(
   std::uint32_t exitCode,
-  const CrashEventInfo& info,
+  const CrashEventInfo&,
   const std::filesystem::path&) noexcept
 {
-  if (exitCode == 0 && !info.isStrong) {
+  if (exitCode == 0) {
     return FilterVerdict::kDeleteBenign;
   }
   return FilterVerdict::kKeepDump;
