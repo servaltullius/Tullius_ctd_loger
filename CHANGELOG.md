@@ -2,6 +2,39 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.56 (2026-07-20)
+
+### 한눈에 보기
+- 이번 릴리즈는 **정상 종료 오탐 경합, CTD 근거 신뢰도, 런타임 비용과 배포 검증을 함께 보강**합니다.
+- 크래시 버킷을 심볼 문자열 대신 모듈명과 RVA로 계산하는 `CTD2` 형식으로 전환하고, 같은 덤프 재분석이 history 통계를 부풀리지 않도록 했습니다.
+- Crash Logger 로그가 여러 개 가까운 시각에 존재하면 모호한 페어링으로 표시하고 해당 단서의 신뢰도와 후보 가중치를 낮춥니다.
+
+### 수정
+- **정상 종료 분석 경합 제거** — headless 분석기 프로세스를 Helper가 추적하고, 최종 `exit_code=0`이면 프로세스를 종료한 뒤 CTD 파생 산출물을 정리해 늦은 summary 재생성을 막습니다.
+- **Crash history 멱등성** — dump 파일명을 대소문자 비구분 키로 사용해 동일 덤프 재분석 결과를 갱신하고, 현재 덤프는 반복 근거 계산에서 제외합니다.
+- **Canonical crash bucket v2** — 예외 코드, fault module+RVA, 선택된 callstack의 module+RVA를 해시해 심볼 서버 상태나 함수명 표현 차이에 덜 민감한 `CTD2-*` 키를 생성합니다.
+- **Crash Logger 페어링 품질** — 선택 로그의 시간차, 차순위 시간차, 유효 후보 수와 근접 경쟁 로그 수를 summary/report에 기록합니다. 2초 이내 경쟁 로그가 있으면 독립 stack suspect 재정렬과 High 승격을 막습니다.
+- **플러그인 핫패스 경량화** — first-chance 예외 rate limit을 모듈 경로 확인보다 먼저 수행하고 고정 버퍼를 사용합니다. heartbeat와 별개인 모듈/스레드 lifecycle 열거 주기를 1초로 낮춥니다.
+- **릴리스 hard gate 강화** — 버전명, PDB 부재, 핵심 PE x64, 현재 빌드와 ZIP 내부 파일의 SHA-256 일치, self-contained Windows App SDK 런타임 파일 포함을 검증합니다.
+- **실사고 품질 게이트 연결** — 검토 완료 코퍼스와 모든 임계값이 설정된 경우에만 정확도 기준을 강제하며, 코퍼스가 없으면 통과로 오인하지 않도록 `SKIPPED (not measured)`로 표시합니다.
+- **WinUI 안내 정리** — v0.2.52+ self-contained 배포와 v0.2.53+ launcher/app 폴더 구조를 README, Beta, Nexus 안내에 맞게 통일했습니다.
+
+### 주의사항
+- 새 버킷 키는 `CTD2-` 접두사를 사용하므로 기존 `CTD-` history 그룹과 자동으로 합쳐지지 않습니다.
+- 실제 CTD 원인 적중률은 `triage.ground_truth_mod`가 채워진 검토 완료 실사고 코퍼스가 필요합니다. 이번 릴리즈는 합성 테스트만으로 정확도 백분율을 주장하지 않습니다.
+- v0.2.52+에서는 .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 별도로 설치할 필요가 없습니다. 런타임 설치 창이 뜨면 기존 `SkyrimDiagWinUI` 폴더를 제거하고 zip 전체를 다시 설치해 주세요.
+
+### 테스트
+- Windows native build: 성공.
+- Windows 전체 테스트 `62/62` 통과.
+- Windows WinUI self-contained publish: 성공.
+- Ubuntu Linux build: 성공.
+- Linux 전체 테스트 `58/58` 통과.
+- Packaging(`dist/Tullius_ctd_loger_v0.2.56.zip`, `--no-pdb`): 성공 (`87,647,479` bytes, 523 entries, PDB 0개).
+- Release gate: `OK` (핵심 PE/Windows App SDK x64, 현재 빌드 해시 일치).
+- 실사고 품질 코퍼스: `SKIPPED (not measured)` — 코퍼스 미제공.
+- SHA-256: `E10D82377C43CD9ED3E0CE36730B73983804C3C4B8A0AA779DF74531CB59C072`.
+
 ## v0.2.55 (2026-07-18)
 
 ### 한눈에 보기
