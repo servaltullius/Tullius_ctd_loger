@@ -4,6 +4,8 @@
 #include <exception>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "HelperLog.h"
 #include "HelperMainInternal.h"
@@ -27,6 +29,44 @@ using skydiag::tests::runtime::TerminateChildProcess;
 using skydiag::tests::runtime::WriteAllTextUtf8;
 
 namespace {
+
+std::wstring QuoteArg(std::wstring_view value)
+{
+  std::wstring quoted = L"\"";
+  quoted.append(value);
+  quoted += L"\"";
+  return quoted;
+}
+
+HANDLE LaunchDelayedArtifactWriter(const std::filesystem::path& artifactPath)
+{
+  std::vector<wchar_t> exePath(32768, L'\0');
+  const DWORD length = GetModuleFileNameW(nullptr, exePath.data(), static_cast<DWORD>(exePath.size()));
+  Require(length > 0 && length < exePath.size(), "GetModuleFileNameW failed");
+
+  std::wstring command = QuoteArg(std::wstring(exePath.data(), length));
+  command += L" --delayed-artifact-writer ";
+  command += QuoteArg(artifactPath.wstring());
+
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION process{};
+  Require(
+    CreateProcessW(
+      exePath.data(),
+      command.data(),
+      nullptr,
+      nullptr,
+      FALSE,
+      CREATE_NO_WINDOW,
+      nullptr,
+      nullptr,
+      &startup,
+      &process) != FALSE,
+    "CreateProcessW for delayed artifact writer failed");
+  CloseHandle(process.hThread);
+  return process.hProcess;
+}
 
 void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts()
 {
@@ -75,6 +115,34 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifac
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "removed", "Handled AV zero-exit cleanup must log artifact removal");
+
+  std::filesystem::remove_all(outBase);
+}
+
+void TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_false_positive_delayed_writer");
+  ClearLog(outBase);
+
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20260315_131500_001.dmp";
+  const auto summaryPath = outBase / "SkyrimDiag_Crash_20260315_131500_001_SkyrimDiagSummary.json";
+  WriteAllTextUtf8(dumpPath, "dump");
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::AttachedProcess proc{};
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured = true;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  state.pendingCrashAnalysis.active = true;
+  state.pendingCrashAnalysis.dumpPath = dumpPath.wstring();
+  state.pendingCrashAnalysis.process = LaunchDelayedArtifactWriter(summaryPath);
+
+  CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &state);
+  Sleep(750);
+
+  Require(!FileExists(dumpPath), "Zero-exit cleanup must remove the captured dump");
+  Require(!FileExists(summaryPath), "Stopped analyzer must not recreate summary after zero-exit cleanup");
+  Require(!state.pendingCrashAnalysis.active, "Zero-exit cleanup must clear tracked analyzer state");
 
   std::filesystem::remove_all(outBase);
 }
@@ -198,10 +266,17 @@ void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()
 
 }  // namespace
 
-int main()
+int wmain(int argc, wchar_t** argv)
 {
   try {
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--delayed-artifact-writer") {
+      Sleep(500);
+      WriteAllTextUtf8(std::filesystem::path(argv[2]), "late summary");
+      return 0;
+    }
+
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts();
+    TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter();
     TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit();
     TestHandleProcessExitTick_TreatsStrongSharedMemoryExceptionAsHandledOnZeroExit();
     TestPreservedFilteredDump_DoesNotKeepCaptureLatch();

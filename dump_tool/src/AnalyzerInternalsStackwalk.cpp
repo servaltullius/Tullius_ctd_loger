@@ -29,6 +29,11 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   const std::vector<std::uint64_t>& pcs,
   i18n::Language lang);
 
+std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames);
+
 std::vector<std::wstring> FormatCallstackForDisplay(
   HANDLE process,
   const std::vector<ModuleInfo>& modules,
@@ -166,6 +171,10 @@ bool TryComputeStackwalkSuspects(
   if (best.suspects.empty()) {
     if (!bestAny.pcs.empty()) {
       out.stackwalk_primary_tid = bestAny.tid;
+      out.stackwalk_primary_bucket_frames = stackwalk::BuildCanonicalCallstackFrames(
+        modules,
+        bestAny.pcs,
+        /*maxFrames=*/12);
       out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
         sym.process,
         modules,
@@ -182,7 +191,8 @@ bool TryComputeStackwalkSuspects(
 
   // Boost confidence when Crash Logger agrees with our top module (best-effort).
   // Skip this boost for hook frameworks to avoid over-crediting frame owners like CrashLogger itself.
-  if (!out.crash_logger_top_modules.empty() && !best.suspects.empty() && !topIsHookFramework) {
+  if (!out.crash_logger_pairing_ambiguous &&
+      !out.crash_logger_top_modules.empty() && !best.suspects.empty() && !topIsHookFramework) {
     const auto topLower = WideLower(best.suspects[0].module_filename);
     for (const auto& m : out.crash_logger_top_modules) {
       if (WideLower(m) == topLower) {
@@ -196,7 +206,8 @@ bool TryComputeStackwalkSuspects(
 
   // Also boost when Crash Logger provides an explicit C++ exception module that matches our top suspect.
   // Skip this boost for hook frameworks to keep confidence conservative.
-  if (!out.crash_logger_cpp_exception_module.empty() && !best.suspects.empty() && !topIsHookFramework) {
+  if (!out.crash_logger_pairing_ambiguous &&
+      !out.crash_logger_cpp_exception_module.empty() && !best.suspects.empty() && !topIsHookFramework) {
     const auto topLower = WideLower(best.suspects[0].module_filename);
     if (WideLower(out.crash_logger_cpp_exception_module) == topLower) {
       best.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
@@ -208,6 +219,10 @@ bool TryComputeStackwalkSuspects(
   out.suspects_from_stackwalk = true;
   out.suspects = std::move(best.suspects);
   out.stackwalk_primary_tid = best.tid;
+  out.stackwalk_primary_bucket_frames = stackwalk::BuildCanonicalCallstackFrames(
+    modules,
+    best.pcs,
+    /*maxFrames=*/12);
   out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
     sym.process,
     modules,

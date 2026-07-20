@@ -13,6 +13,7 @@
 namespace {
 
 using skydiag::dump_tool::TryFindCrashLoggerLogForDump;
+using skydiag::dump_tool::CrashLoggerPairingMetadata;
 
 constexpr const char* kCrashLogText =
   "CrashLoggerSSE v1.20.0\n"
@@ -117,7 +118,9 @@ void SetLastWriteTimeLocal(
   Require(updated != FALSE, "failed to update integration-test file timestamp");
 }
 
-std::optional<std::filesystem::path> Search(const std::filesystem::path& dumpPath)
+std::optional<std::filesystem::path> Search(
+  const std::filesystem::path& dumpPath,
+  CrashLoggerPairingMetadata* metadata = nullptr)
 {
   std::wstring error = L"not cleared";
   const auto found = TryFindCrashLoggerLogForDump(
@@ -125,7 +128,8 @@ std::optional<std::filesystem::path> Search(const std::filesystem::path& dumpPat
     std::nullopt,
     nullptr,
     std::nullopt,
-    &error);
+    &error,
+    metadata);
   Require(error.empty(), "CrashLogger search unexpectedly returned an error");
   return found;
 }
@@ -216,6 +220,26 @@ void TestEqualTimestampTieBreakIsDeterministic()
     "equal-time pairing must prefer a known kind, then the stable path order");
 }
 
+void TestNearbyCompetingLogMarksPairingAmbiguous()
+{
+  TempDirectory temp("ambiguous-nearby-log");
+  const auto dump = WriteFile(temp.path(), L"Tullius_crash_20970717_150000.dmp", "dump");
+  WriteFile(temp.path(), L"crash-2097-07-17-15-00-00-a.log", kCrashLogText);
+  WriteFile(temp.path(), L"crash-2097-07-17-15-00-01-b.log", kCrashLogText);
+
+  CrashLoggerPairingMetadata metadata{};
+  RequireFoundFilename(
+    Search(dump, &metadata),
+    L"crash-2097-07-17-15-00-00-a.log",
+    "the exact-time log must remain the deterministic selection");
+  Require(metadata.ambiguous, "a second valid log within two seconds must mark pairing ambiguous");
+  Require(metadata.eligible_candidate_count == 2u, "pairing metadata must count eligible logs");
+  Require(metadata.nearby_competitor_count == 1u, "pairing metadata must count nearby competitors");
+  Require(metadata.time_delta_ms == 0u, "selected exact-time log must report zero delta");
+  Require(metadata.runner_up_time_delta_ms == 1000u, "runner-up delta must be reported");
+  Require(metadata.selected_kind == "crash", "selected artifact kind must be recorded");
+}
+
 }  // namespace
 
 int main()
@@ -225,6 +249,7 @@ int main()
     TestPairingWindowIncludesExactly120SecondsAndRejects121();
     TestKnownCrashAndThreadDumpKindsCannotCrossPair();
     TestEqualTimestampTieBreakIsDeterministic();
+    TestNearbyCompetingLogMarksPairingAmbiguous();
     std::cout << "crashlogger search integration tests passed\n";
     return 0;
   } catch (const std::exception& ex) {

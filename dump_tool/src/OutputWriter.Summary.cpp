@@ -44,6 +44,7 @@ nlohmann::json BuildSummaryJson(
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
+  summary["crash_bucket_version"] = r.crash_bucket_version;
   summary["analysis"] = {
     { "is_crash_like", r.is_crash_like },
     { "is_hang_like", r.is_hang_like },
@@ -158,6 +159,16 @@ nlohmann::json BuildSummaryJson(
   summary["crash_logger"] = nlohmann::json::object();
   summary["crash_logger"]["log_path"] = WideToUtf8(MaybeRedactPath(r.crash_logger_log_path, redactPaths));
   summary["crash_logger"]["version"] = WideToUtf8(r.crash_logger_version);
+  summary["crash_logger"]["pairing"] = {
+    { "time_delta_ms", r.crash_logger_pairing_time_delta_ms },
+    { "runner_up_time_delta_ms", r.crash_logger_pairing_runner_up_time_delta_ms },
+    { "eligible_candidate_count", r.crash_logger_pairing_eligible_candidate_count },
+    { "nearby_competitor_count", r.crash_logger_pairing_nearby_competitor_count },
+    { "selected_kind", r.crash_logger_pairing_selected_kind },
+    { "same_directory", r.crash_logger_pairing_same_directory },
+    { "ambiguous", r.crash_logger_pairing_ambiguous },
+    { "confidence", r.crash_logger_pairing_confidence },
+  };
   summary["crash_logger"]["top_modules"] = nlohmann::json::array();
   for (const auto& m : r.crash_logger_top_modules) {
     summary["crash_logger"]["top_modules"].push_back(WideToUtf8(m));

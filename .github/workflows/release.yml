@@ -71,7 +71,7 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $zipName = (python -c "import sys; sys.path.insert(0, 'scripts'); from release_contract import release_zip_name; print(release_zip_name(sys.argv[1]))" $tag).Trim()
-          $zipPath = Join-Path "dist" $zipName
+          $zipPath = "dist/$zipName"
           "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
@@ -79,6 +79,10 @@ jobs:
         shell: pwsh
         run: |
           python scripts/package.py --build-dir build-win --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
+
+      - name: Run release hard gate
+        shell: bash
+        run: bash scripts/verify_release_gate.sh "$PWD" "$PWD" "$PWD/${{ steps.release_zip.outputs.zip_path }}"
 
       - name: Resolve release notes
         shell: pwsh

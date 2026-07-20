@@ -43,6 +43,9 @@ def main() -> int:
         encoding="utf-8"
     )
     gate_script = (REPO_ROOT / "scripts" / "verify_release_gate.sh").read_text(encoding="utf-8")
+    zip_verifier = (REPO_ROOT / "scripts" / "verify_release_zip.py").read_text(
+        encoding="utf-8"
+    )
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
     linux_workflow = (REPO_ROOT / ".github" / "workflows" / "linux-tests.yml").read_text(encoding="utf-8")
@@ -74,6 +77,12 @@ def main() -> int:
     assert "scripts/release_contract.py" in gate_script, (
         "release gate must sync release_contract.py to catch mirror drift"
     )
+    assert "scripts/verify_release_zip.py" in gate_script, (
+        "release gate must sync and run the reusable release zip verifier"
+    )
+    assert "scripts/analyze_bucket_quality.py" in gate_script, (
+        "release gate must sync the optional reviewed-corpus quality checker"
+    )
     assert "release_zip_glob" in gate_script, (
         "release gate must discover versioned release zip names instead of assuming a fixed filename"
     )
@@ -104,6 +113,21 @@ def main() -> int:
     assert "/mnt/c/Users/kdw73/Tullius_ctd_loger" not in gate_script, (
         "release gate must not default to the old Windows mirror path"
     )
+    assert "SKYDIAG_QUALITY_CORPUS" in gate_script, (
+        "release gate must support a reviewed real-incident corpus"
+    )
+    assert "SKIPPED (not measured" in gate_script, (
+        "missing real-incident corpus must be reported as unmeasured, not passed"
+    )
+    for verifier_contract in (
+        "REQUIRED_X64_PE_ZIP_ENTRIES",
+        "PDB must not be shipped",
+        "packaged file differs from current build",
+        "release zip filename mismatch",
+    ):
+        assert verifier_contract in zip_verifier, (
+            f"release zip verifier missing hard contract: {verifier_contract}"
+        )
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )
@@ -118,6 +142,12 @@ def main() -> int:
     )
     assert "release_zip_name" in release_workflow, (
         "release workflow must resolve the zip asset name from the release contract helper"
+    )
+    assert "verify_release_gate.sh" in release_workflow, (
+        "tag releases must pass the hard gate before GitHub Release creation"
+    )
+    assert '${{ steps.release_zip.outputs.zip_path }}' in ci_workflow, (
+        "CI must pass the exact newly packaged zip path to the hard gate"
     )
     assert "dist/Tullius_ctd_loger.zip" not in release_workflow, (
         "release workflow must not publish an unversioned zip asset"
@@ -167,6 +197,9 @@ def main() -> int:
     assert "bash scripts/build-winui-from-wsl.sh" in agents_md, (
         "AGENTS build guide must document the WSL WinUI build wrapper entry point"
     )
+    assert "--out dist/Tullius_ctd_loger.zip" not in agents_md, (
+        "AGENTS packaging entry point must not create an unversioned release zip"
+    )
     assert "Release decisions use the local verification commands in this file as the source of truth." in agents_md, (
         "AGENTS build guide must state that local verification is the release source of truth"
     )
@@ -188,6 +221,9 @@ def main() -> int:
     assert "dist/Tullius_ctd_loger_v<version>.zip" in development_md, (
         "DEVELOPMENT.md must document versioned release zip names"
     )
+    assert "--out dist/Tullius_ctd_loger.zip" not in development_md, (
+        "DEVELOPMENT.md must not recommend an unversioned release zip"
+    )
     assert ".github/workflows/winui-headless-smoke.yml" in development_md, (
         "DEVELOPMENT.md must document the manual WinUI smoke workflow path"
     )
@@ -200,6 +236,20 @@ def main() -> int:
     assert "SkyrimDiagDumpToolWinUI.deps.json" in build_winui_script, (
         "build-winui.cmd must require WinUI deps sidecar when selecting output"
     )
+    for runtime_asset in (
+        "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+        "Microsoft.WindowsAppRuntime.dll",
+        "Microsoft.WindowsAppRuntime.pri",
+        "Microsoft.ui.xaml.dll",
+        "Microsoft.UI.pri",
+        "CoreMessagingXP.dll",
+    ):
+        assert runtime_asset in REQUIRED_WINUI_BUILD_OUTPUTS, (
+            f"release contract must require self-contained WinUI runtime asset: {runtime_asset}"
+        )
+        assert runtime_asset in build_winui_script, (
+            f"build-winui.cmd must reject incomplete self-contained output: {runtime_asset}"
+        )
     assert "dotnet publish" in build_winui_script, (
         "build-winui.cmd must publish the WinUI viewer instead of using a framework-dependent build"
     )
@@ -277,17 +327,15 @@ def main() -> int:
         _touch(winui_dir / "SkyrimDiagDumpToolWinUI.deps.json")
         _touch(winui_dir / "App.xbf")
         _touch(winui_dir / "MainWindow.xbf")
+        for output in REQUIRED_WINUI_BUILD_OUTPUTS:
+            _touch(winui_dir / output)
         # Nested build/publish output should be ignored by the packager.
         _touch(winui_dir / "publish" / "SkyrimDiagDumpToolWinUI.exe")
         _touch(winui_dir / "win-x64" / "SkyrimDiagDumpToolWinUI.exe")
 
         nested_only_dir = td_path / "nested-winui"
-        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.exe")
-        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.pri")
-        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.runtimeconfig.json")
-        _touch(nested_only_dir / "publish" / "SkyrimDiagDumpToolWinUI.deps.json")
-        _touch(nested_only_dir / "publish" / "App.xbf")
-        _touch(nested_only_dir / "publish" / "MainWindow.xbf")
+        for output in REQUIRED_WINUI_BUILD_OUTPUTS:
+            _touch(nested_only_dir / "publish" / output)
         assert find_winui_build_root(nested_only_dir) == nested_only_dir / "publish", (
             "release contract helper must locate nested WinUI publish roots for CI and release-gate parity"
         )

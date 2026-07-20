@@ -248,6 +248,11 @@ void ApplyCrashLoggerCorroborationToSuspects(
        out->crash_logger_cpp_exception_module.empty())) {
     return;
   }
+  if (out->crash_logger_pairing_ambiguous) {
+    // Keep the parsed log visible as a low-confidence clue, but do not let an
+    // ambiguous time pairing reorder independently derived stack suspects.
+    return;
+  }
 
   std::unordered_map<std::wstring, std::size_t> rankByModule;
   rankByModule.reserve(out->crash_logger_top_modules.size());
@@ -565,7 +570,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   LoadIncidentCaptureProfile(dumpPath, outDir, out);
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
-  LoadCrashHistoryContext(historyPath, analysisTimestamp, out);
+  LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
 
   // Best-effort troubleshooting guide matching.
   if (!opt.data_dir.empty()) {

@@ -38,8 +38,11 @@ std::atomic_bool g_schedulerStarted{ false };
 std::jthread g_scheduler;
 bool g_lifecycleBaselineReady = false;
 std::uint64_t g_lifecycleActiveUntilQpc = 0;
+std::uint64_t g_nextLifecyclePollQpc = 0;
 std::unordered_map<std::uint64_t, std::string> g_lastModuleNames;
 std::unordered_set<std::uint32_t> g_lastThreadIds;
+
+constexpr std::uint64_t kLifecyclePollIntervalMs = 1000;
 
 inline void HeartbeatTaskOnMainThread() noexcept
 {
@@ -280,12 +283,13 @@ void EmitLifecycleDiffs(
   }
 }
 
-void PollLifecycleSignals() noexcept
+void PollLifecycleSignals()
 {
   auto* shm = GetShared();
   if (!shm) {
     g_lifecycleBaselineReady = false;
     g_lifecycleActiveUntilQpc = 0;
+    g_nextLifecyclePollQpc = 0;
     g_lastModuleNames.clear();
     g_lastThreadIds.clear();
     return;
@@ -297,10 +301,18 @@ void PollLifecycleSignals() noexcept
   }
   if (g_lifecycleActiveUntilQpc == 0u || nowQpc > g_lifecycleActiveUntilQpc) {
     g_lifecycleBaselineReady = false;
+    g_nextLifecyclePollQpc = 0;
     g_lastModuleNames.clear();
     g_lastThreadIds.clear();
     return;
   }
+
+  if (g_nextLifecyclePollQpc != 0u && nowQpc < g_nextLifecyclePollQpc) {
+    return;
+  }
+  const std::uint64_t intervalQpc =
+    std::max<std::uint64_t>(1ull, (shm->header.qpc_freq * kLifecyclePollIntervalMs) / 1000ull);
+  g_nextLifecyclePollQpc = nowQpc + intervalQpc;
 
   std::unordered_map<std::uint64_t, std::string> currentModules;
   std::unordered_set<std::uint32_t> currentThreadIds;
@@ -358,7 +370,16 @@ void SchedulerLoop(std::stop_token st)
     }
 
     QueueHeartbeatTask();
-    PollLifecycleSignals();
+    try {
+      PollLifecycleSignals();
+    } catch (...) {
+      // Lifecycle telemetry is optional; keep heartbeat scheduling alive if a
+      // temporary allocation or enumeration failure escapes the poller.
+      g_lifecycleBaselineReady = false;
+      g_nextLifecyclePollQpc = 0;
+      g_lastModuleNames.clear();
+      g_lastThreadIds.clear();
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
   }
 }

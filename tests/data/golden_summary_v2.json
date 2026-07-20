@@ -7,7 +7,8 @@
   "pid": 12345,
   "state_flags": 0,
   "summary_sentence": "Crash in hdtSMP64.dll (Access Violation 0xC0000005)",
-  "crash_bucket_key": "hdtSMP64.dll+0x1A2B3",
+  "crash_bucket_key": "CTD2-0123456789abcdef",
+  "crash_bucket_version": 2,
   "analysis": {
     "is_crash_like": true,
     "is_hang_like": false,
@@ -45,6 +46,16 @@
   "crash_logger": {
     "log_path": "C:\\Crashes\\crash_20260115_143022.log",
     "version": "4.26.1",
+    "pairing": {
+      "time_delta_ms": 0,
+      "runner_up_time_delta_ms": 0,
+      "eligible_candidate_count": 1,
+      "nearby_competitor_count": 0,
+      "selected_kind": "crash",
+      "same_directory": true,
+      "ambiguous": false,
+      "confidence": "high"
+    },
     "direct_fault_eligible": false,
     "first_actionable_probable_eligible": false,
     "probable_streak_eligible": false,

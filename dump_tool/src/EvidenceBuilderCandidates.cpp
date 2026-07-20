@@ -29,6 +29,11 @@ std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& r
   return 3u;
 }
 
+std::uint32_t PairingAdjustedCrashLoggerWeight(const AnalysisResult& r, std::uint32_t weight)
+{
+  return r.crash_logger_pairing_ambiguous ? std::min<std::uint32_t>(weight, 3u) : weight;
+}
+
 std::wstring WideLowerLocal(std::wstring_view value)
 {
   std::wstring out;
@@ -98,7 +103,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
     AddCrashLoggerFrameSignal(
       r,
       r.crash_logger_direct_fault_module,
-      8u,
+      PairingAdjustedCrashLoggerWeight(r, 8u),
       en
         ? (L"CrashLogger direct-fault frame: " + r.crash_logger_direct_fault_module)
         : (L"CrashLogger direct-fault 프레임: " + r.crash_logger_direct_fault_module),
@@ -110,7 +115,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
     AddCrashLoggerFrameSignal(
       r,
       r.crash_logger_first_actionable_probable_module,
-      6u,
+      PairingAdjustedCrashLoggerWeight(r, 6u),
       en
         ? (L"CrashLogger first actionable probable frame: " + r.crash_logger_first_actionable_probable_module)
         : (L"CrashLogger 첫 actionable probable 프레임: " + r.crash_logger_first_actionable_probable_module),
@@ -123,7 +128,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
     AddCrashLoggerFrameSignal(
       r,
       r.crash_logger_probable_streak_module,
-      (r.crash_logger_probable_streak_length >= 3u) ? 6u : 5u,
+      PairingAdjustedCrashLoggerWeight(r, (r.crash_logger_probable_streak_length >= 3u) ? 6u : 5u),
       en
         ? (L"CrashLogger probable frame streak (" + std::to_wstring(r.crash_logger_probable_streak_length) +
            L"x): " + r.crash_logger_probable_streak_module)
@@ -186,7 +191,7 @@ void AddCrashLoggerSignals(const AnalysisResult& r, bool en, std::vector<Candida
     signal.detail = en
       ? (L"CrashLogger object ref: " + ref.esp_name)
       : (L"CrashLogger 오브젝트 참조: " + ref.esp_name);
-    signal.weight = CrashLoggerWeight(ref);
+    signal.weight = PairingAdjustedCrashLoggerWeight(r, CrashLoggerWeight(ref));
     if (!signal.candidate_key.empty()) {
       out->push_back(std::move(signal));
     }

@@ -5,19 +5,19 @@
 This checklist verifies that the full-replacement WinUI DumpTool flow works for real MO2 users (no legacy viewer dependency).
 
 Target build:
-- `dist/Tullius_ctd_loger.zip`
+- `dist/Tullius_ctd_loger_v<version>.zip`
 
 Target audience:
 - Beginner Skyrim users who can install mods in MO2
 
 ## 1) Install + Basic Layout
 
-1. Install `Tullius_ctd_loger.zip` as a mod in MO2.
+1. Install `Tullius_ctd_loger_v<version>.zip` as a mod in MO2.
 2. Confirm these files exist under the mod:
    - `SKSE/Plugins/SkyrimDiag.dll`
    - `SKSE/Plugins/SkyrimDiagHelper.exe`
    - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
+   - `SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolNative.dll`
 3. Confirm `SkyrimDiagHelper.ini` contains:
    - `DumpToolExe=SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe`
 

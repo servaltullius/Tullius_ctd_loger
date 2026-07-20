@@ -57,6 +57,16 @@ int main()
     "ti->AddUITask",
     "Heartbeat scheduler must check/set pending state before queueing UI task.");
 
+  AssertContains(
+    heartbeat,
+    "kLifecyclePollIntervalMs = 1000",
+    "Lifecycle module/thread enumeration must use a slower cadence than the heartbeat.");
+  const std::string schedulerLoopBody = ExtractFunctionBody(heartbeat, "void SchedulerLoop(");
+  AssertContains(
+    schedulerLoopBody,
+    "catch (...)",
+    "Optional lifecycle polling failures must not terminate the heartbeat scheduler.");
+
   const std::string looseFileOpenHookBody = ExtractFunctionBody(resourceHooks, "ErrorCode LooseFileDoOpen_Hook(");
   AssertContains(
     looseFileOpenHookBody,
@@ -153,6 +163,12 @@ int main()
     "SetEvent(ev)",
     "ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)",
     "Fatal capture must return after signaling before dynamic first-chance telemetry can execute.");
+
+  AssertOrdered(
+    vectoredHandlerBody,
+    "ConsumeFirstChanceTelemetryBudget(signature, qpcNow)",
+    "ResolveExceptionModuleBasenameUtf8(",
+    "First-chance rate limiting must run before module/path resolution.");
 
   const std::string publishCrashBody = ExtractFunctionBody(crashHandler, "bool TryPublishCrashRecord(");
   AssertContains(

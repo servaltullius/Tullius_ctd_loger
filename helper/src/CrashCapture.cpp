@@ -373,7 +373,13 @@ void ProcessValidCrashDump(
 
   if (!crashAnalysisQueued) {
     if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, false)) {
-      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+      std::wstring analyzeQueueErr;
+      if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, pendingCrashAnalysis, &analyzeQueueErr)) {
+        crashAnalysisQueued = true;
+        AppendLogLine(outBase, L"Crash headless analysis queued with tracked process lifetime.");
+      } else {
+        AppendLogLine(outBase, L"Crash headless analysis queue failed: " + analyzeQueueErr);
+      }
     } else if (viewerNow && cfg.autoAnalyzeDump) {
       AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
     }

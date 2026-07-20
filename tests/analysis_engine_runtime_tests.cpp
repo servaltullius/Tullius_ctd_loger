@@ -630,6 +630,45 @@ void TestCrashHistoryCandidateKeyVersionMigration()
   std::filesystem::remove(historyPath, ec);
 }
 
+void TestCrashHistorySameDumpIsIdempotent()
+{
+  CrashHistory history;
+
+  CrashHistoryEntry first{};
+  first.timestamp_utc = "2026-07-20T01:00:00Z";
+  first.dump_file = "SkyrimDiag_Crash_20260720_100000_001.dmp";
+  first.bucket_key = "bucket-old";
+  first.top_suspect = "Old.dll";
+  first.candidate_keys = { "old" };
+  history.AddEntry(std::move(first));
+
+  CrashHistoryEntry reanalyzed{};
+  reanalyzed.timestamp_utc = "2026-07-20T02:00:00Z";
+  reanalyzed.dump_file = "skyrimdiag_crash_20260720_100000_001.DMP";
+  reanalyzed.bucket_key = "bucket-new";
+  reanalyzed.top_suspect = "New.dll";
+  reanalyzed.candidate_keys = { "new" };
+  history.AddEntry(std::move(reanalyzed));
+
+  assert(history.Size() == 1u);
+  assert(history.GetBucketStats("bucket-old").count == 0u);
+  const auto replacement = history.GetBucketStats("bucket-new");
+  assert(replacement.count == 1u);
+  assert(replacement.first_seen == "2026-07-20T01:00:00Z");
+  const auto candidates = history.GetBucketCandidateStats("bucket-new");
+  assert(candidates.size() == 1u);
+  assert(candidates[0].candidate_key == "new");
+
+  assert(history.RemoveEntriesForDumpFile("SKYRIMDIAG_CRASH_20260720_100000_001.DMP") == 1u);
+  assert(history.Size() == 0u);
+
+  const auto analyzerHistory = ReadAllText(ProjectRoot() / "dump_tool" / "src" / "Analyzer.History.cpp");
+  AssertContains(
+    analyzerHistory,
+    "history.RemoveEntriesForDumpFile",
+    "Current dump must be excluded before history_repeat evidence is calculated.");
+}
+
 void TestCaptureQualitySourceContracts()
 {
   const auto root = ProjectRoot();
@@ -724,6 +763,16 @@ void TestCrashLoggerFrameConsensusContracts()
   AssertContains(consensusSrc, "cross_validated", "Candidate consensus must support cross_validated outcomes.");
   AssertContains(consensusSrc, "related", "Candidate consensus must support related outcomes.");
   AssertContains(consensusSrc, "conflicting", "Candidate consensus must support conflicting outcomes.");
+  AssertContains(
+    consensusSrc,
+    "PairingAdjustedCrashLoggerWeight",
+    "Ambiguous CrashLogger pairing must downgrade candidate signal weights.");
+
+  const auto analyzerSrc = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
+  AssertContains(
+    analyzerSrc,
+    "if (out->crash_logger_pairing_ambiguous)",
+    "Ambiguous CrashLogger pairing must not reorder independent stack suspects.");
 }
 
 void TestFreezeAnalysisSourceContracts()
@@ -1013,6 +1062,7 @@ int main()
   TestCrashHistoryBucketCorrelation();
   TestCrashHistoryBucketCandidateStats();
   TestCrashHistoryCandidateKeyVersionMigration();
+  TestCrashHistorySameDumpIsIdempotent();
   TestCaptureQualitySourceContracts();
   TestCrashLoggerSystemPathPromotionGuardSourceContracts();
   TestAddressDbDiagnosticSourceContracts();

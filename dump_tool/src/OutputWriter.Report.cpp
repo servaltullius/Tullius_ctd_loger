@@ -167,6 +167,7 @@ std::string BuildReportText(
   }
   if (!r.crash_bucket_key.empty()) {
     rpt << (en ? "CrashBucketKey: " : "크래시 버킷 키: ") << WideToUtf8(r.crash_bucket_key) << "\n";
+    rpt << (en ? "CrashBucketVersion: " : "크래시 버킷 버전: ") << r.crash_bucket_version << "\n";
   }
   if (r.has_plugin_scan) {
     rpt << (en ? "PluginScan: 1" : "플러그인 스캔: 1") << "\n";
@@ -197,6 +198,13 @@ std::string BuildReportText(
   }
   if (!r.crash_logger_log_path.empty()) {
     rpt << (en ? "CrashLoggerLog: " : "Crash Logger 로그: ") << WideToUtf8(MaybeRedactPath(r.crash_logger_log_path, redactPaths)) << "\n";
+    rpt << (en ? "CrashLoggerPairing: " : "Crash Logger 쌍짓기: ")
+        << "delta_ms=" << r.crash_logger_pairing_time_delta_ms
+        << ", kind=" << r.crash_logger_pairing_selected_kind
+        << ", candidates=" << r.crash_logger_pairing_eligible_candidate_count
+        << ", nearby_competitors=" << r.crash_logger_pairing_nearby_competitor_count
+        << ", ambiguous=" << (r.crash_logger_pairing_ambiguous ? 1 : 0)
+        << ", confidence=" << r.crash_logger_pairing_confidence << "\n";
   }
   if (!r.crash_logger_version.empty()) {
     rpt << (en ? "CrashLoggerVersion: " : "Crash Logger 버전: ") << WideToUtf8(r.crash_logger_version) << "\n";

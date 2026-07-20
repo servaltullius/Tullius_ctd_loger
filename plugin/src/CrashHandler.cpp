@@ -6,12 +6,10 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
-#include <string>
+#include <iterator>
 #include <string_view>
 
 #include "SkyrimDiag/Blackbox.h"
-#include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagShared.h"
 
@@ -50,43 +48,12 @@ bool IsBenignFirstChanceException(DWORD code) noexcept
   }
 }
 
-std::string WideToUtf8(std::wstring_view text) noexcept
+std::string_view ResolveExceptionModuleBasenameUtf8(
+  void* address,
+  char* out,
+  std::size_t outCapacity) noexcept
 {
-  if (text.empty()) {
-    return {};
-  }
-  const int needed = WideCharToMultiByte(
-    CP_UTF8,
-    0,
-    text.data(),
-    static_cast<int>(text.size()),
-    nullptr,
-    0,
-    nullptr,
-    nullptr);
-  if (needed <= 0) {
-    return {};
-  }
-  std::string out(static_cast<std::size_t>(needed), '\0');
-  const int written = WideCharToMultiByte(
-    CP_UTF8,
-    0,
-    text.data(),
-    static_cast<int>(text.size()),
-    out.data(),
-    needed,
-    nullptr,
-    nullptr);
-  if (written <= 0) {
-    return {};
-  }
-  out.resize(static_cast<std::size_t>(written));
-  return out;
-}
-
-std::string ResolveExceptionModuleBasenameUtf8(void* address) noexcept
-{
-  if (!address) {
+  if (!address || !out || outCapacity == 0) {
     return {};
   }
 
@@ -105,8 +72,30 @@ std::string ResolveExceptionModuleBasenameUtf8(void* address) noexcept
     return {};
   }
 
-  const std::filesystem::path path(std::wstring_view(pathBuf, len));
-  return WideToUtf8(path.filename().wstring());
+  std::size_t basenameOffset = 0;
+  for (std::size_t i = 0; i < len; ++i) {
+    if (pathBuf[i] == L'\\' || pathBuf[i] == L'/') {
+      basenameOffset = i + 1;
+    }
+  }
+  const std::size_t basenameLength = static_cast<std::size_t>(len) - basenameOffset;
+  if (basenameLength == 0) {
+    return {};
+  }
+
+  const int written = WideCharToMultiByte(
+    CP_UTF8,
+    0,
+    pathBuf + basenameOffset,
+    static_cast<int>(basenameLength),
+    out,
+    static_cast<int>(outCapacity),
+    nullptr,
+    nullptr);
+  if (written <= 0) {
+    return {};
+  }
+  return std::string_view(out, static_cast<std::size_t>(written));
 }
 
 std::uint32_t BucketExceptionAddress(void* address) noexcept
@@ -117,12 +106,10 @@ std::uint32_t BucketExceptionAddress(void* address) noexcept
 
 std::uint64_t HashFirstChanceSignature(
   DWORD code,
-  std::uint32_t addressBucket,
-  std::string_view moduleBasenameUtf8) noexcept
+  std::uint32_t addressBucket) noexcept
 {
   std::uint64_t signature = static_cast<std::uint64_t>(code);
   signature ^= (static_cast<std::uint64_t>(addressBucket) << 32);
-  signature ^= skydiag::hash::Fnv1a64(moduleBasenameUtf8);
   return signature;
 }
 
@@ -275,9 +262,13 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
   if (ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)) {
     const auto qpcNow = QpcNow();
     const auto addressBucket = BucketExceptionAddress(ep->ExceptionRecord->ExceptionAddress);
-    const auto moduleBasenameUtf8 = ResolveExceptionModuleBasenameUtf8(ep->ExceptionRecord->ExceptionAddress);
-    const auto signature = HashFirstChanceSignature(code, addressBucket, moduleBasenameUtf8);
+    const auto signature = HashFirstChanceSignature(code, addressBucket);
     if (ConsumeFirstChanceTelemetryBudget(signature, qpcNow)) {
+      char moduleBasenameBuffer[MAX_PATH]{};
+      const auto moduleBasenameUtf8 = ResolveExceptionModuleBasenameUtf8(
+        ep->ExceptionRecord->ExceptionAddress,
+        moduleBasenameBuffer,
+        std::size(moduleBasenameBuffer));
       PushFirstChanceExceptionEvent(code, addressBucket, moduleBasenameUtf8);
     }
   }

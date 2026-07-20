@@ -23,7 +23,7 @@ bash scripts/build-winui-from-wsl.sh
 
 ## Packaging
 ```bash
-python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
+python scripts/package.py --build-dir build-win --no-pdb
 ```
 
 ## Release gate

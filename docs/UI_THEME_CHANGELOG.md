@@ -123,7 +123,7 @@ Mica 백드롭, NavigationView, Expander 등 Fluent Design 핵심 요소를 적�
 ```powershell
 # Run from the repository root.
 scripts\build-win.cmd
-python scripts\package.py --build-dir build-win --out dist\Tullius_ctd_loger.zip
+python scripts\package.py --build-dir build-win --no-pdb
 ```
 
 ## 참고사항

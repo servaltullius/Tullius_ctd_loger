@@ -93,12 +93,6 @@ resolve_zip_path() {
     return 0
   fi
 
-  local legacy="${dist_dir}/Tullius_ctd_loger.zip"
-  if [[ -f "${legacy}" ]]; then
-    printf '%s\n' "${legacy}"
-    return 0
-  fi
-
   return 1
 }
 
@@ -111,7 +105,7 @@ if [[ -n "${ZIP_PATH}" ]] && command -v cygpath >/dev/null 2>&1 && [[ "${ZIP_PAT
 fi
 
 if [[ -z "${ZIP_PATH}" || ! -f "${ZIP_PATH}" ]]; then
-  echo "missing release zip under: ${WIN_ROOT}/dist (expected ${RELEASE_ZIP_GLOB} or legacy Tullius_ctd_loger.zip)"
+  echo "missing versioned release zip under: ${WIN_ROOT}/dist (expected ${RELEASE_ZIP_GLOB})"
   exit 1
 fi
 
@@ -143,7 +137,7 @@ echo "[gate] repo=${REPO_ROOT}"
 echo "[gate] win=${WIN_ROOT}"
 echo "[gate] zip=${ZIP_PATH}"
 
-echo "[gate] 1/5 script sync hashes"
+echo "[gate] 1/7 script sync hashes"
 if [[ "${REPO_ROOT}" == "${WIN_ROOT}" ]]; then
   echo "  - same root path; sync hash comparison skipped"
 else
@@ -152,6 +146,8 @@ else
     "scripts/build-winui.cmd"
     "scripts/package.py"
     "scripts/release_contract.py"
+    "scripts/verify_release_zip.py"
+    "scripts/analyze_bucket_quality.py"
     "scripts/verify_release_gate.sh"
   )
   for rel in "${sync_files[@]}"; do
@@ -159,7 +155,7 @@ else
   done
 fi
 
-echo "[gate] 2/5 required WinUI files"
+echo "[gate] 2/7 required WinUI files"
 if [[ -z "${WINUI_BUILD_ROOT}" ]]; then
   echo "missing WinUI publish root under: ${WIN_ROOT}/build-winui"
   exit 1
@@ -169,13 +165,13 @@ for asset in "${REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
   [[ -f "${f}" ]] || { echo "missing: ${f}"; exit 1; }
 done
 
-echo "[gate] 3/5 required zip entries"
+echo "[gate] 3/7 required zip entries"
 entries="$(unzip -Z1 "${ZIP_PATH}")"
 for p in "${REQUIRED_ZIP_ENTRIES[@]}"; do
   printf '%s\n' "${entries}" | grep -Fxq "${p}" || { echo "missing zip entry: ${p}"; exit 1; }
 done
 
-echo "[gate] 4/5 size guard"
+echo "[gate] 4/7 size guard"
 ls -lh "${ZIP_PATH}"
 size_bytes="$(stat -c%s "${ZIP_PATH}")"
 if (( size_bytes > 100 * 1024 * 1024 )); then
@@ -183,10 +179,49 @@ if (( size_bytes > 100 * 1024 * 1024 )); then
   exit 1
 fi
 
-echo "[gate] 5/5 nested path guard"
+echo "[gate] 5/7 nested path guard"
 if unzip -Z1 "${ZIP_PATH}" | grep -Eq "${NESTED_WINUI_REGEX}"; then
   echo "nested winui output detected in zip"
   exit 1
+fi
+
+echo "[gate] 6/7 version, x64, no-PDB, and current-build match"
+"${PYTHON_BIN}" "${REPO_ROOT}/scripts/verify_release_zip.py" \
+  --repo-root "${REPO_ROOT}" \
+  --zip "${ZIP_PATH}" \
+  --build-dir "${WIN_ROOT}/build-win" \
+  --winui-dir "${WINUI_BUILD_ROOT}"
+
+echo "[gate] 7/7 reviewed-corpus analysis quality"
+if [[ -z "${SKYDIAG_QUALITY_CORPUS:-}" ]]; then
+  echo "  - SKIPPED (not measured; SKYDIAG_QUALITY_CORPUS is not set)"
+else
+  quality_vars=(
+    SKYDIAG_QUALITY_MIN_GROUND_TRUTH
+    SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PREDICTIONS
+    SKYDIAG_QUALITY_MIN_TOP1_ACCURACY
+    SKYDIAG_QUALITY_MIN_TOP3_RECALL
+    SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PRECISION
+    SKYDIAG_QUALITY_MAX_ABSTENTION_RATE
+  )
+  for name in "${quality_vars[@]}"; do
+    if [[ -z "$(printenv "${name}" || true)" ]]; then
+      echo "quality corpus is configured but required threshold is missing: ${name}"
+      exit 1
+    fi
+  done
+
+  QUALITY_REPORT="${SKYDIAG_QUALITY_REPORT:-${WIN_ROOT}/build/analysis-quality.json}"
+  mkdir -p "$(dirname "${QUALITY_REPORT}")"
+  "${PYTHON_BIN}" "${REPO_ROOT}/scripts/analyze_bucket_quality.py" \
+    --root "${SKYDIAG_QUALITY_CORPUS}" \
+    --out-json "${QUALITY_REPORT}" \
+    --min-ground-truth "${SKYDIAG_QUALITY_MIN_GROUND_TRUTH}" \
+    --min-high-confidence-predictions "${SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PREDICTIONS}" \
+    --min-top1-accuracy "${SKYDIAG_QUALITY_MIN_TOP1_ACCURACY}" \
+    --min-top3-recall "${SKYDIAG_QUALITY_MIN_TOP3_RECALL}" \
+    --min-high-confidence-precision "${SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PRECISION}" \
+    --max-abstention-rate "${SKYDIAG_QUALITY_MAX_ABSTENTION_RATE}"
 fi
 
 echo "[gate] OK"

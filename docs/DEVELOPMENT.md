@@ -85,9 +85,11 @@ cmake --build build-linux-test
 ctest --test-dir build-linux-test --output-on-failure
 bash scripts/build-win-from-wsl.sh
 bash scripts/build-winui-from-wsl.sh
-python3 scripts/package.py --build-dir build-win --winui-dir build-winui --out dist/Tullius_ctd_loger.zip --no-pdb
+python3 scripts/package.py --build-dir build-win --winui-dir build-winui --no-pdb
 bash scripts/verify_release_gate.sh
 ```
+
+The hard gate requires the versioned `Tullius_ctd_loger_v<version>.zip` name, rejects PDBs and non-x64 key executables, requires the self-contained Windows App SDK runtime files, and verifies that packaged native/WinUI binaries are byte-for-byte identical to the current build outputs.
 
 Windows-only synthetic helper runtime trigger checks:
 - Purpose: verify that CTD and freeze paths trigger the helper, and that normal exit / weak crash paths do not misfire.
@@ -128,6 +130,21 @@ python scripts/analyze_bucket_quality.py `
 
 The command exits with code `2` when a configured threshold is missed or when a requested metric has no eligible samples. Do not publish an accuracy percentage from synthetic fixtures or from an unreviewed corpus; choose release thresholds only after the corpus size and labeling policy have been recorded.
 
+To attach a reviewed corpus to the release hard gate, configure the corpus and every threshold before running it:
+
+```bash
+export SKYDIAG_QUALITY_CORPUS=<reviewed-summary-directory>
+export SKYDIAG_QUALITY_MIN_GROUND_TRUTH=<required-sample-count>
+export SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PREDICTIONS=<required-high-sample-count>
+export SKYDIAG_QUALITY_MIN_TOP1_ACCURACY=<0-to-1>
+export SKYDIAG_QUALITY_MIN_TOP3_RECALL=<0-to-1>
+export SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PRECISION=<0-to-1>
+export SKYDIAG_QUALITY_MAX_ABSTENTION_RATE=<0-to-1>
+bash scripts/verify_release_gate.sh
+```
+
+When `SKYDIAG_QUALITY_CORPUS` is not set, the gate reports this step as `SKIPPED (not measured)` rather than claiming that real-world accuracy passed. When a corpus is set, omitting any threshold is a hard failure.
+
 ## Issue Reporting / Troubleshooting
 
 - Issue reporting guide: `docs/BETA_TESTING.md`
@@ -137,7 +154,7 @@ The command exits with code `2` when a configured threshold is missed or when a 
 
 After building on Windows, create an MO2-friendly zip:
 ```powershell
-python scripts/package.py --build-dir build-win --out dist/Tullius_ctd_loger.zip --no-pdb
+python scripts/package.py --build-dir build-win --no-pdb
 ```
 
 The packager requires self-contained WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes a top-level WinUI launcher plus the real WinUI app/runtime under `SKSE/Plugins/SkyrimDiagWinUI/app/`.

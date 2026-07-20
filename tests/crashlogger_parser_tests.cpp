@@ -24,6 +24,7 @@ using skydiag::dump_tool::crashlogger_core::CrashLoggerArtifactKind;
 using skydiag::dump_tool::crashlogger_core::ClassifyCrashLoggerArtifactNameAscii;
 using skydiag::dump_tool::crashlogger_core::IsBetterCrashLoggerPairCandidate;
 using skydiag::dump_tool::crashlogger_core::IsCrashLoggerPairingDiffAllowed;
+using skydiag::dump_tool::crashlogger_core::IsCrashLoggerPairingAmbiguous;
 using skydiag::dump_tool::crashlogger_core::kCrashLoggerFileTimeTicksPerSecond;
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::ProjectRoot;
@@ -77,6 +78,8 @@ static void Test_CrashLoggerPairRankingPrioritizesTimeThenProvenance()
   const auto second = kCrashLoggerFileTimeTicksPerSecond;
   assert(IsCrashLoggerPairingDiffAllowed(120u * second));
   assert(!IsCrashLoggerPairingDiffAllowed(120u * second + 1u));
+  assert(IsCrashLoggerPairingAmbiguous(0u, 2u * second));
+  assert(!IsCrashLoggerPairingAmbiguous(0u, 2u * second + 1u));
 
   // A renamed but exactly contemporaneous valid log is better than a
   // conventionally named log from nearly two minutes earlier.

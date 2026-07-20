@@ -65,14 +65,22 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
+      - name: Resolve release zip path
+        id: release_zip
+        shell: pwsh
+        run: |
+          $zipName = (python -c "import sys; from pathlib import Path; sys.path.insert(0, 'scripts'); from release_contract import project_version, release_zip_name; print(release_zip_name('v' + project_version(Path('.'))))").Trim()
+          $zipPath = "dist/$zipName"
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Package release zip (no PDB)
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --no-pdb
+          python scripts/package.py --build-dir build-win --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
 
       - name: Run release hard gate
         shell: bash
-        run: bash scripts/verify_release_gate.sh "$PWD" "$PWD"
+        run: bash scripts/verify_release_gate.sh "$PWD" "$PWD" "$PWD/${{ steps.release_zip.outputs.zip_path }}"
 
       - name: Upload zip artifacts
         if: github.event_name == 'workflow_dispatch'

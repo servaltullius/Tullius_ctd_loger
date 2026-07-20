@@ -28,6 +28,32 @@ std::string NormalizeStoredCandidateKey(std::string_view value)
   return key;
 }
 
+void UpsertHistoryEntry(std::vector<CrashHistoryEntry>* entries, CrashHistoryEntry entry)
+{
+  if (!entries || entry.dump_file.empty()) {
+    if (entries) {
+      entries->push_back(std::move(entry));
+    }
+    return;
+  }
+
+  const auto dumpKey = NormalizeStoredCandidateKey(entry.dump_file);
+  const auto existing = std::find_if(entries->begin(), entries->end(), [&](const CrashHistoryEntry& row) {
+    return NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
+  });
+  if (existing == entries->end()) {
+    entries->push_back(std::move(entry));
+    return;
+  }
+
+  // Reanalysis refreshes the diagnosis for the same incident without turning it
+  // into a second crash. Keep the original observation time and list position.
+  if (!existing->timestamp_utc.empty()) {
+    entry.timestamp_utc = existing->timestamp_utc;
+  }
+  *existing = std::move(entry);
+}
+
 }  // namespace
 
 bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
@@ -78,7 +104,11 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
           }
         }
       }
-      loaded.push_back(std::move(row));
+      UpsertHistoryEntry(&loaded, std::move(row));
+    }
+
+    while (loaded.size() > kMaxEntries) {
+      loaded.erase(loaded.begin());
     }
 
     m_entries = std::move(loaded);
@@ -141,10 +171,25 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
 
 void CrashHistory::AddEntry(CrashHistoryEntry entry)
 {
-  m_entries.push_back(std::move(entry));
+  UpsertHistoryEntry(&m_entries, std::move(entry));
   while (m_entries.size() > kMaxEntries) {
     m_entries.erase(m_entries.begin());
   }
+}
+
+std::size_t CrashHistory::RemoveEntriesForDumpFile(std::string_view dumpFile)
+{
+  const auto dumpKey = NormalizeStoredCandidateKey(dumpFile);
+  if (dumpKey.empty()) {
+    return 0;
+  }
+  const auto oldSize = m_entries.size();
+  m_entries.erase(
+    std::remove_if(m_entries.begin(), m_entries.end(), [&](const CrashHistoryEntry& row) {
+      return NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
+    }),
+    m_entries.end());
+  return oldSize - m_entries.size();
 }
 
 std::vector<ModuleStats> CrashHistory::GetModuleStats(std::size_t lastN) const

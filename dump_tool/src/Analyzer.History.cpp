@@ -144,6 +144,7 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
 
 void LoadCrashHistoryContext(
   const std::filesystem::path& historyPath,
+  const std::wstring& dumpPath,
   const std::string& analysisTimestamp,
   AnalysisResult& out)
 {
@@ -159,6 +160,7 @@ void LoadCrashHistoryContext(
 
   CrashHistory history;
   history.LoadFromFile(historyPath);
+  history.RemoveEntriesForDumpFile(WideToUtf8(std::filesystem::path(dumpPath).filename().wstring()));
 
   out.history_stats = history.GetModuleStats(20);
 

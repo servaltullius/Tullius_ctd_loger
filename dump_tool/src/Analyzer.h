@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Bucket.h"
 #include "CrashHistory.h"
 #include "GraphicsInjectionDiag.h"
 #include "PluginRules.h"
@@ -149,6 +150,7 @@ struct AnalysisResult
   std::uint64_t fault_module_offset = 0;  // offset in fault module (if resolved)
   std::vector<std::uint64_t> exc_info;  // MINIDUMP_EXCEPTION.ExceptionInformation (best-effort)
   std::wstring crash_bucket_key;  // stable key for repeated CTD grouping (best-effort)
+  std::uint32_t crash_bucket_version = 2;
   std::string game_version;  // best-effort game executable version (e.g. "1.5.97.0")
 
   std::wstring fault_module_path;      // full path if available
@@ -159,6 +161,14 @@ struct AnalysisResult
   // Optional: Crash Logger SSE/AE integration (best-effort)
   std::wstring crash_logger_log_path;
   std::wstring crash_logger_version;
+  std::uint64_t crash_logger_pairing_time_delta_ms = 0;
+  std::uint64_t crash_logger_pairing_runner_up_time_delta_ms = 0;
+  std::uint32_t crash_logger_pairing_eligible_candidate_count = 0;
+  std::uint32_t crash_logger_pairing_nearby_competitor_count = 0;
+  std::string crash_logger_pairing_selected_kind;
+  std::string crash_logger_pairing_confidence;
+  bool crash_logger_pairing_same_directory = false;
+  bool crash_logger_pairing_ambiguous = false;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
   std::wstring crash_logger_direct_fault_module;
   std::wstring crash_logger_first_actionable_probable_module;
@@ -204,6 +214,7 @@ struct AnalysisResult
   // Best-effort callstack (primary thread: crash thread, WCT cycle thread, or inferred main thread)
   std::uint32_t stackwalk_primary_tid = 0;
   std::vector<std::wstring> stackwalk_primary_frames;
+  std::vector<CrashBucketFrame> stackwalk_primary_bucket_frames;
   std::uint32_t stackwalk_total_frames = 0;
   std::uint32_t stackwalk_symbolized_frames = 0;
   std::uint32_t stackwalk_source_line_frames = 0;

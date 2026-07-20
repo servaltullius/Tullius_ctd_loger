@@ -44,10 +44,20 @@ enum class CrashLoggerArtifactKind {
 inline constexpr std::uint64_t kCrashLoggerFileTimeTicksPerSecond = 10'000'000ull;
 inline constexpr std::uint64_t kCrashLoggerPairingMaxDiff =
   120ull * kCrashLoggerFileTimeTicksPerSecond;
+inline constexpr std::uint64_t kCrashLoggerPairingAmbiguityWindow =
+  2ull * kCrashLoggerFileTimeTicksPerSecond;
 
 constexpr bool IsCrashLoggerPairingDiffAllowed(std::uint64_t diff) noexcept
 {
   return diff <= kCrashLoggerPairingMaxDiff;
+}
+
+constexpr bool IsCrashLoggerPairingAmbiguous(
+  std::uint64_t bestDiff,
+  std::uint64_t competitorDiff) noexcept
+{
+  return competitorDiff >= bestDiff &&
+    (competitorDiff - bestDiff) <= kCrashLoggerPairingAmbiguityWindow;
 }
 
 bool IsBetterCrashLoggerPairCandidate(

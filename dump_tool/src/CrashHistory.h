@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace skydiag::dump_tool {
@@ -51,6 +52,7 @@ public:
   bool SaveToFile(const std::filesystem::path& path) const;
 
   void AddEntry(CrashHistoryEntry entry);
+  std::size_t RemoveEntriesForDumpFile(std::string_view dumpFile);
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
   BucketStats GetBucketStats(const std::string& bucketKey) const;
   std::vector<BucketCandidateStats> GetBucketCandidateStats(const std::string& bucketKey) const;

@@ -15,7 +15,9 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
 
   if (!r.crash_logger_log_path.empty()) {
     EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence_level = r.crash_logger_pairing_ambiguous
+      ? i18n::ConfidenceLevel::kLow
+      : i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en
       ? L"Crash Logger SSE/AE log auto-detected"
@@ -24,12 +26,24 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
     if (!r.crash_logger_version.empty()) {
       e.details += L" (" + r.crash_logger_version + L")";
     }
+    e.details += en
+      ? (L" | pairing delta=" + std::to_wstring(r.crash_logger_pairing_time_delta_ms) +
+         L"ms, eligible=" + std::to_wstring(r.crash_logger_pairing_eligible_candidate_count))
+      : (L" | 쌍짓기 시간차=" + std::to_wstring(r.crash_logger_pairing_time_delta_ms) +
+         L"ms, 유효 후보=" + std::to_wstring(r.crash_logger_pairing_eligible_candidate_count));
+    if (r.crash_logger_pairing_ambiguous) {
+      e.details += en
+        ? L" | ambiguous: nearby competing log exists; CrashLogger clues are downgraded."
+        : L" | 모호함: 가까운 경쟁 로그가 있어 CrashLogger 단서를 낮게 평가합니다.";
+    }
     r.evidence.push_back(std::move(e));
   }
 
   if (!r.crash_logger_top_modules.empty()) {
     EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence_level = r.crash_logger_pairing_ambiguous
+      ? i18n::ConfidenceLevel::kLow
+      : i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en
       ? L"Crash Logger: top callstack modules"
@@ -40,7 +54,7 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
 
   if (!r.crash_logger_object_refs.empty()) {
     EvidenceItem e{};
-    e.confidence_level = (r.crash_logger_object_refs[0].relevance_score >= 14)
+    e.confidence_level = (!r.crash_logger_pairing_ambiguous && r.crash_logger_object_refs[0].relevance_score >= 14)
       ? i18n::ConfidenceLevel::kMedium
       : i18n::ConfidenceLevel::kLow;
     e.confidence = ConfidenceText(lang, e.confidence_level);
@@ -88,7 +102,9 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
     }
 
     EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence_level = r.crash_logger_pairing_ambiguous
+      ? i18n::ConfidenceLevel::kLow
+      : i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en
       ? L"Crash Logger: C++ exception details"

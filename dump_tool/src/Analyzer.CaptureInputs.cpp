@@ -394,7 +394,14 @@ void IntegrateCrashLoggerLog(
   }
 
   const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
-  auto logPath = TryFindCrashLoggerLogForDump(dumpFs, mo2Base, mo2Index ? &*mo2Index : nullptr, gameRootDir, &clErr);
+  CrashLoggerPairingMetadata pairing{};
+  auto logPath = TryFindCrashLoggerLogForDump(
+    dumpFs,
+    mo2Base,
+    mo2Index ? &*mo2Index : nullptr,
+    gameRootDir,
+    &clErr,
+    &pairing);
   if (!logPath) {
     if (!clErr.empty()) {
       out.diagnostics.push_back(L"[CrashLogger] log not found: " + clErr);
@@ -403,6 +410,21 @@ void IntegrateCrashLoggerLog(
   }
 
   out.crash_logger_log_path = logPath->wstring();
+  out.crash_logger_pairing_time_delta_ms = pairing.time_delta_ms;
+  out.crash_logger_pairing_runner_up_time_delta_ms = pairing.runner_up_time_delta_ms;
+  out.crash_logger_pairing_eligible_candidate_count = pairing.eligible_candidate_count;
+  out.crash_logger_pairing_nearby_competitor_count = pairing.nearby_competitor_count;
+  out.crash_logger_pairing_selected_kind = pairing.selected_kind;
+  out.crash_logger_pairing_same_directory = pairing.selected_same_directory;
+  out.crash_logger_pairing_ambiguous = pairing.ambiguous;
+  out.crash_logger_pairing_confidence = pairing.ambiguous
+    ? "low"
+    : (pairing.time_delta_ms <= 10'000ull ? "high" : "medium");
+  if (pairing.ambiguous) {
+    out.diagnostics.push_back(
+      L"[CrashLogger] ambiguous log pairing; nearby competing logs=" +
+      std::to_wstring(pairing.nearby_competitor_count));
+  }
 
   std::wstring readErr;
   auto logUtf8 = ReadWholeFileUtf8(*logPath, &readErr);

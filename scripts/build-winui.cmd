@@ -73,6 +73,12 @@ if not exist "%CAND%\SkyrimDiagDumpToolWinUI.runtimeconfig.json" goto :eof
 if not exist "%CAND%\SkyrimDiagDumpToolWinUI.deps.json" goto :eof
 if not exist "%CAND%\App.xbf" goto :eof
 if not exist "%CAND%\MainWindow.xbf" goto :eof
+if not exist "%CAND%\Microsoft.WindowsAppRuntime.Bootstrap.dll" goto :eof
+if not exist "%CAND%\Microsoft.WindowsAppRuntime.dll" goto :eof
+if not exist "%CAND%\Microsoft.WindowsAppRuntime.pri" goto :eof
+if not exist "%CAND%\Microsoft.ui.xaml.dll" goto :eof
+if not exist "%CAND%\Microsoft.UI.pri" goto :eof
+if not exist "%CAND%\CoreMessagingXP.dll" goto :eof
 set "FINAL_OUT=%CAND%"
 goto :eof
 

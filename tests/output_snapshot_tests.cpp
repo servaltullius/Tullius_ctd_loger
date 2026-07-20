@@ -76,6 +76,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(j, "state_flags", "number", "root");
   AssertIsType(j, "summary_sentence", "string", "root");
   AssertIsType(j, "crash_bucket_key", "string", "root");
+  AssertIsType(j, "crash_bucket_version", "number", "root");
   AssertIsType(j, "analysis", "object", "root");
   AssertIsType(j, "privacy", "object", "root");
   AssertIsType(j, "triage", "object", "root");
@@ -141,6 +142,12 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   const auto& cl = j["crash_logger"];
   AssertIsType(cl, "log_path", "string", "crash_logger");
   AssertIsType(cl, "version", "string", "crash_logger");
+  AssertIsType(cl, "pairing", "object", "crash_logger");
+  AssertIsType(cl["pairing"], "time_delta_ms", "number", "crash_logger.pairing");
+  AssertIsType(cl["pairing"], "eligible_candidate_count", "number", "crash_logger.pairing");
+  AssertIsType(cl["pairing"], "nearby_competitor_count", "number", "crash_logger.pairing");
+  AssertIsType(cl["pairing"], "ambiguous", "boolean", "crash_logger.pairing");
+  AssertIsType(cl["pairing"], "confidence", "string", "crash_logger.pairing");
   AssertIsType(cl, "top_modules", "array", "crash_logger");
   AssertIsType(cl, "direct_fault_eligible", "boolean", "crash_logger");
   AssertIsType(cl, "first_actionable_probable_eligible", "boolean", "crash_logger");
@@ -305,6 +312,7 @@ void TestOutputWriterEmitsAllFields()
     "\"state_flags\"",
     "\"summary_sentence\"",
     "\"crash_bucket_key\"",
+    "\"crash_bucket_version\"",
     "\"analysis\"",
     "\"privacy\"",
     "\"triage\"",

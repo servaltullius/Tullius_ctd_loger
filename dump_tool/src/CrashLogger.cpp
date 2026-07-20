@@ -529,8 +529,12 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   const std::optional<std::filesystem::path>& mo2BaseDir,
   const Mo2Index* mo2Index,
   const std::optional<std::filesystem::path>& gameRootDir,
-  std::wstring* err)
+  std::wstring* err,
+  CrashLoggerPairingMetadata* pairingMetadata)
 {
+  if (pairingMetadata) {
+    *pairingMetadata = {};
+  }
   const std::uint64_t targetTime = BestEffortDumpTimestampFileTimeUtc(dumpPath);
   auto dirs = BuildCrashLoggerCandidateDirs(mo2BaseDir);
 
@@ -565,12 +569,16 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
 
   // Crash Logger logs should be created around the crash moment. If nothing is close in time, don't attach an older
   // unrelated log (confusing).
-  std::optional<std::filesystem::path> best;
-  std::uint64_t bestDiff = std::numeric_limits<std::uint64_t>::max();
-  crashlogger_core::CrashLoggerArtifactKind bestArtifactKind =
-    crashlogger_core::CrashLoggerArtifactKind::kUnknown;
-  bool bestSameDirectory = false;
-  std::wstring bestStablePath;
+  struct PairCandidate
+  {
+    std::filesystem::path path;
+    std::uint64_t diff = 0;
+    crashlogger_core::CrashLoggerArtifactKind artifactKind =
+      crashlogger_core::CrashLoggerArtifactKind::kUnknown;
+    bool sameDirectory = false;
+    std::wstring stablePath;
+  };
+  std::vector<PairCandidate> candidates;
   const DumpIncidentKind dumpKind = ClassifyDumpIncidentKind(dumpPath);
   const std::wstring dumpParentLower = WideLower(dumpPath.parent_path().wstring());
 
@@ -634,32 +642,58 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       }
       const bool sameDirectory = WideLower(p.parent_path().wstring()) == dumpParentLower;
       const std::wstring stablePath = WideLower(p.lexically_normal().wstring());
-      const bool better = crashlogger_core::IsBetterCrashLoggerPairCandidate(
-        best.has_value(),
-        diff,
-        artifactKind,
-        sameDirectory,
-        stablePath,
-        bestDiff,
-        bestArtifactKind,
-        bestSameDirectory,
-        bestStablePath);
-      if (better) {
-        best = p;
-        bestDiff = diff;
-        bestArtifactKind = artifactKind;
-        bestSameDirectory = sameDirectory;
-        bestStablePath = stablePath;
-      }
+      candidates.push_back({ p, diff, artifactKind, sameDirectory, stablePath });
     }
   }
 
-  if (!best) {
+  if (candidates.empty()) {
     if (err) err->clear();
     return std::nullopt;
   }
+
+  std::sort(candidates.begin(), candidates.end(), [](const PairCandidate& a, const PairCandidate& b) {
+    return crashlogger_core::IsBetterCrashLoggerPairCandidate(
+      true,
+      a.diff,
+      a.artifactKind,
+      a.sameDirectory,
+      a.stablePath,
+      b.diff,
+      b.artifactKind,
+      b.sameDirectory,
+      b.stablePath);
+  });
+
+  const auto& best = candidates.front();
+  if (pairingMetadata) {
+    pairingMetadata->time_delta_ms = best.diff / 10'000ull;
+    pairingMetadata->eligible_candidate_count = static_cast<std::uint32_t>(
+      std::min<std::size_t>(candidates.size(), std::numeric_limits<std::uint32_t>::max()));
+    pairingMetadata->selected_same_directory = best.sameDirectory;
+    switch (best.artifactKind) {
+      case crashlogger_core::CrashLoggerArtifactKind::kCrash:
+        pairingMetadata->selected_kind = "crash";
+        break;
+      case crashlogger_core::CrashLoggerArtifactKind::kThreadDump:
+        pairingMetadata->selected_kind = "thread_dump";
+        break;
+      case crashlogger_core::CrashLoggerArtifactKind::kUnknown:
+        pairingMetadata->selected_kind = "unknown";
+        break;
+    }
+
+    if (candidates.size() > 1u) {
+      pairingMetadata->runner_up_time_delta_ms = candidates[1].diff / 10'000ull;
+    }
+    for (std::size_t i = 1; i < candidates.size(); ++i) {
+      if (crashlogger_core::IsCrashLoggerPairingAmbiguous(best.diff, candidates[i].diff)) {
+        pairingMetadata->nearby_competitor_count += 1u;
+      }
+    }
+    pairingMetadata->ambiguous = pairingMetadata->nearby_competitor_count > 0u;
+  }
   if (err) err->clear();
-  return best;
+  return best.path;
 }
 
 std::optional<std::string> ReadWholeFileUtf8(const std::filesystem::path& path, std::wstring* err)

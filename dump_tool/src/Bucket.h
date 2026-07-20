@@ -10,6 +10,13 @@
 #include <vector>
 
 namespace skydiag::dump_tool {
+
+struct CrashBucketFrame
+{
+  std::wstring module_filename;
+  std::uint64_t module_offset = 0;
+};
+
 namespace bucket {
 
 inline std::wstring LowerTrimmed(std::wstring_view s)
@@ -69,24 +76,26 @@ inline std::uint64_t Fnv1a64(std::string_view s)
 inline std::wstring ComputeCrashBucketKey(
   std::uint32_t exceptionCode,
   std::wstring_view faultModule,
-  const std::vector<std::wstring>& frames,
+  std::uint64_t faultModuleOffset,
+  const std::vector<CrashBucketFrame>& frames,
   std::size_t maxFrames = 6)
 {
   std::ostringstream canonical;
-  canonical << "exc=0x" << std::hex << std::nouppercase << exceptionCode << "|mod=";
+  canonical << "v=2|exc=0x" << std::hex << std::nouppercase << exceptionCode << "|mod=";
   canonical << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(faultModule));
+  canonical << "|off=0x" << std::hex << std::nouppercase << faultModuleOffset;
 
   const std::size_t n = std::min<std::size_t>(frames.size(), maxFrames);
   for (std::size_t i = 0; i < n; i++) {
     canonical << "|f" << i << "=";
-    canonical << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(frames[i]));
+    canonical << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(frames[i].module_filename));
+    canonical << "+0x" << std::hex << std::nouppercase << frames[i].module_offset;
   }
 
   const std::uint64_t hash = bucket::Fnv1a64(canonical.str());
   std::wstringstream wss;
-  wss << L"CTD-" << std::hex << std::nouppercase << std::setw(16) << std::setfill(L'0') << hash;
+  wss << L"CTD2-" << std::hex << std::nouppercase << std::setw(16) << std::setfill(L'0') << hash;
   return wss.str();
 }
 
 }  // namespace skydiag::dump_tool
-

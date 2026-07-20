@@ -12,15 +12,15 @@
   - `SKSE/Plugins/SkyrimDiagHelper.exe`
   - `SKSE/Plugins/SkyrimDiagHelper.ini`
   - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`
-  - `SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolNative.dll`
+  - `SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.exe`
+  - `SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolNative.dll`
 
-### 필수 런타임 (경량 WinUI 배포)
+### WinUI 런타임 (`v0.2.52+`)
 
-- 이 배포본은 WinUI를 framework-dependent 방식으로 배포합니다.
-- 아래 런타임이 설치되어 있어야 실행됩니다:
-  - .NET Desktop Runtime 8 (x64): https://dotnet.microsoft.com/en-us/download/dotnet/8.0
-  - Windows App Runtime (1.8, x64): https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads
-  - Microsoft Visual C++ Redistributable 2015-2022 (x64): https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
+- 릴리즈 zip은 .NET 8과 Windows App SDK를 포함하는 self-contained WinUI 뷰어를 배포합니다. .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 따로 설치할 필요가 없습니다.
+- `v0.2.53+`에서는 `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`가 런처이고, 실제 앱과 런타임은 `SkyrimDiagWinUI/app/` 아래에 있습니다.
+- Windows App Runtime 1.8 설치 창이 표시되면 구버전(`v0.2.49`~`v0.2.51`) 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 `SkyrimDiagWinUI` 폴더를 완전히 제거한 뒤 최신 zip 전체를 다시 설치하고 MO2 파일 제공자를 확인하세요.
+- Microsoft Visual C++ Redistributable 2015-2022 (x64)는 필요합니다: https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist
 
 ## 2) 기본 동작
 

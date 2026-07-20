@@ -101,9 +101,9 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 
 - MO2 `overwrite\\SKSE\\Plugins\\SkyrimDiagHelper.log`
   - `DumpTool viewer launch failed ... win32_error=...` : 실행 실패(경로/파일 누락/권한)
-  - `DumpTool viewer launch succeeded ...` 뒤에 `DumpTool viewer exited immediately ...` : 런타임 미설치 또는 뷰어 시작 크래시 가능성
+  - `DumpTool viewer launch succeeded ...` 뒤에 `DumpTool viewer exited immediately ...` : `v0.2.52+` 파일 누락/구버전 혼합 또는 뷰어 시작 크래시 가능성
 - 뷰어 폴더(`SKSE\\Plugins\\SkyrimDiagWinUI\\`)의 `SkyrimDiagDumpToolWinUI_startup_error.log` (있으면 내용 첨부)
-- `v0.2.52+` 릴리즈의 WinUI 뷰어는 self-contained로 배포됩니다. 뷰어 시작 실패가 계속되면 새 릴리즈 zip으로 전체 교체했는지, `SKSE\\Plugins\\SkyrimDiagWinUI\\app\\` 폴더 안의 파일이 일부만 남지 않았는지 먼저 확인하세요.
+- `v0.2.52+` 릴리즈의 WinUI 뷰어는 self-contained로 배포됩니다. 뷰어 시작 실패가 계속되면 기존 `SKSE\\Plugins\\SkyrimDiagWinUI\\` 폴더를 완전히 제거한 뒤 새 릴리즈 zip 전체를 다시 설치하고, MO2에서 파일 제공 모드를 확인하세요.
 - `v0.2.53+`에서는 `SKSE\\Plugins\\SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe`가 런처이고, 실제 앱/런타임 파일은 `SKSE\\Plugins\\SkyrimDiagWinUI\\app\\` 아래에 있습니다.
 - `v0.2.49`~`v0.2.51`의 WinUI 뷰어는 Windows App Runtime 1.8을 별도로 요구했으며, Windows App Runtime 2.x 설치만으로는 이 요구사항이 해결되지 않을 수 있습니다.
 

@@ -73,6 +73,7 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out);
 
 void LoadCrashHistoryContext(
   const std::filesystem::path& historyPath,
+  const std::wstring& dumpPath,
   const std::string& analysisTimestamp,
   AnalysisResult& out);
 

@@ -109,6 +109,12 @@ void FinalizePendingCrashAnalysisIfReady(
     return;
   }
 
+  if (!cfg.enableAutoRecaptureOnUnknownCrash) {
+    AppendLogLine(outBase, L"Crash headless analysis finished; tracked process handle released.");
+    ClearPendingCrashAnalysis(task);
+    return;
+  }
+
   PendingCrashRecaptureContext recaptureContext{};
   std::wstring summaryErr;
   if (!TryEvaluateCrashRecapture(cfg, *task, outBase, &recaptureContext, &summaryErr)) {

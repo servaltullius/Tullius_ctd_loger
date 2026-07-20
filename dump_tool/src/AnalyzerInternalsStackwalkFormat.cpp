@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <utility>
 #include <vector>
 
 namespace skydiag::dump_tool::internal::stackwalk {
@@ -87,7 +88,52 @@ std::wstring FormatSymbolizedFrame(
   return frame;
 }
 
+std::pair<std::size_t, std::size_t> SelectCallstackFrameRange(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames)
+{
+  std::size_t firstNonSystem = pcs.size();
+  for (std::size_t i = 0; i < pcs.size(); i++) {
+    const auto mi = FindModuleIndexForAddress(modules, pcs[i]);
+    if (!mi) {
+      continue;
+    }
+    const auto& m = modules[*mi];
+    if (!m.is_systemish && !m.is_game_exe) {
+      firstNonSystem = i;
+      break;
+    }
+  }
+
+  const std::size_t start = (firstNonSystem != pcs.size() && firstNonSystem > 2) ? (firstNonSystem - 2) : 0;
+  return { start, std::min<std::size_t>(pcs.size(), start + maxFrames) };
+}
+
 }  // namespace
+
+std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames)
+{
+  std::vector<CrashBucketFrame> out;
+  if (pcs.empty() || maxFrames == 0) {
+    return out;
+  }
+
+  const auto [start, end] = SelectCallstackFrameRange(modules, pcs, maxFrames);
+  out.reserve(end - start);
+  for (std::size_t i = start; i < end; i++) {
+    const auto moduleIndex = FindModuleIndexForAddress(modules, pcs[i]);
+    if (!moduleIndex) {
+      continue;
+    }
+    const auto& module = modules[*moduleIndex];
+    out.push_back({ module.filename, pcs[i] - module.base });
+  }
+  return out;
+}
 
 std::vector<std::wstring> FormatCallstackForDisplay(
   HANDLE process,
@@ -113,21 +159,7 @@ std::vector<std::wstring> FormatCallstackForDisplay(
     return out;
   }
 
-  std::size_t firstNonSystem = pcs.size();
-  for (std::size_t i = 0; i < pcs.size(); i++) {
-    auto mi = FindModuleIndexForAddress(modules, pcs[i]);
-    if (!mi) {
-      continue;
-    }
-    const auto& m = modules[*mi];
-    if (!m.is_systemish && !m.is_game_exe) {
-      firstNonSystem = i;
-      break;
-    }
-  }
-
-  const std::size_t start = (firstNonSystem != pcs.size() && firstNonSystem > 2) ? (firstNonSystem - 2) : 0;
-  const std::size_t end = std::min<std::size_t>(pcs.size(), start + maxFrames);
+  const auto [start, end] = SelectCallstackFrameRange(modules, pcs, maxFrames);
   out.reserve(end - start);
   for (std::size_t i = start; i < end; i++) {
     bool hasSymbol = false;
@@ -147,4 +179,3 @@ std::vector<std::wstring> FormatCallstackForDisplay(
 }
 
 }  // namespace skydiag::dump_tool::internal::stackwalk
-

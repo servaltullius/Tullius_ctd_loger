@@ -37,22 +37,27 @@ SKSE/Plugins/SkyrimDiagHelper.exe      — Out-of-process monitor (CTD / freeze 
 SKSE/Plugins/SkyrimDiagHelper.ini      — Helper settings (thresholds, output, cleanup)
 SKSE/Plugins/SkyrimDiagDumpToolCli.exe — Headless analyzer
 SKSE/Plugins/SkyrimDiagWinUI/
-  SkyrimDiagDumpToolWinUI.exe          — Interactive viewer
-  SkyrimDiagDumpToolNative.dll         — Native analyzer engine
+  SkyrimDiagDumpToolWinUI.exe          — Native viewer launcher
+  app/
+    SkyrimDiagDumpToolWinUI.exe        — Self-contained viewer app
+    SkyrimDiagDumpToolNative.dll       — Native analyzer engine
+    ...                                — Bundled .NET / Windows App SDK runtime files
 [/code]
 
 [b][size=4]Requirements[/size][/b]
 [list]
 [*][url=https://skse.silverlock.org/]SKSE64[/url]
 [*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
-[*][url=https://dotnet.microsoft.com/en-us/download/dotnet/8.0].NET Desktop Runtime 8 (x64)[/url]
-[*][url=https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads]Windows App Runtime 1.8 (x64)[/url]
 [*][url=https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist]Visual C++ Redistributable 2015-2022 (x64)[/url]
 [/list]
 
+[i]WinUI runtime note:[/i] The [b]v0.2.52+[/b] release zip includes self-contained .NET 8 and Windows App SDK runtime files. You do not need to install .NET Desktop Runtime 8 or Windows App Runtime 1.8 separately.
+
+If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
+
 [b][size=4]Installation (MO2)[/size][/b]
 [list=1]
-[*]Install the requirements first
+[*]Install SKSE64, Address Library, and the Visual C++ Redistributable
 [*]Install the zip as a mod in MO2 and enable it
 [*]Launch Skyrim through SKSE
 [*]The Helper attaches automatically. No separate manual launch is required
@@ -239,22 +244,27 @@ SKSE/Plugins/SkyrimDiagHelper.exe      — 외부 프로세스 모니터 (CTD / 
 SKSE/Plugins/SkyrimDiagHelper.ini      — Helper 설정 (임계값, 출력, 정리)
 SKSE/Plugins/SkyrimDiagDumpToolCli.exe — CLI 분석기
 SKSE/Plugins/SkyrimDiagWinUI/
-  SkyrimDiagDumpToolWinUI.exe          — WinUI 뷰어
-  SkyrimDiagDumpToolNative.dll         — 네이티브 분석 엔진
+  SkyrimDiagDumpToolWinUI.exe          — 네이티브 뷰어 런처
+  app/
+    SkyrimDiagDumpToolWinUI.exe        — self-contained 뷰어 앱
+    SkyrimDiagDumpToolNative.dll       — 네이티브 분석 엔진
+    ...                                — 포함된 .NET / Windows App SDK 런타임 파일
 [/code]
 
 [b][size=4]필수 요구사항[/size][/b]
 [list]
 [*][url=https://skse.silverlock.org/]SKSE64[/url]
 [*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
-[*][url=https://dotnet.microsoft.com/en-us/download/dotnet/8.0].NET Desktop Runtime 8 (x64)[/url]
-[*][url=https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads]Windows App Runtime 1.8 (x64)[/url]
 [*][url=https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist]VC++ 재배포 2015-2022 (x64)[/url]
 [/list]
 
+[i]WinUI 런타임 안내:[/i] [b]v0.2.52+[/b] 릴리즈 zip에는 self-contained .NET 8과 Windows App SDK 런타임이 포함됩니다. .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 따로 설치할 필요가 없습니다.
+
+v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
+
 [b][size=4]설치 (MO2)[/size][/b]
 [list=1]
-[*]위 필수 구성 요소를 먼저 설치합니다.
+[*]SKSE64, Address Library, VC++ 재배포 패키지를 설치합니다.
 [*]zip을 MO2에 모드로 설치하고 활성화합니다.
 [*]SKSE로 게임을 실행합니다.
 [*]Helper는 자동으로 게임에 붙습니다.

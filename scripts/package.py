@@ -6,62 +6,17 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 import zipfile
 from pathlib import Path
 
 from release_contract import (
     EXCLUDED_WINUI_TOP_LEVEL_DIRS,
     REQUIRED_WINUI_ASSETS,
+    find_build_artifact,
     find_winui_build_root,
+    project_version,
     release_zip_name,
 )
-
-
-def _timestamp() -> str:
-    return time.strftime("%Y%m%d_%H%M%S", time.localtime())
-
-
-def _read_version(root: Path) -> str:
-    """Read project version from CMakeLists.txt."""
-    import re
-
-    cml = root / "CMakeLists.txt"
-    if cml.is_file():
-        m = re.search(r"VERSION\s+(\d+\.\d+\.\d+)", cml.read_text())
-        if m:
-            return m.group(1)
-    return _timestamp()  # fallback
-
-
-def _find_artifact(build_dir: Path, bin_dir: Path | None, filename: str) -> Path | None:
-    candidates: list[Path] = []
-
-    if bin_dir:
-        p = bin_dir / filename
-        if p.is_file():
-            return p
-
-    for p in [
-        build_dir / "bin" / filename,
-        build_dir / filename,
-        build_dir / "bin" / "Release" / filename,
-        build_dir / "bin" / "RelWithDebInfo" / filename,
-        build_dir / "bin" / "Debug" / filename,
-    ]:
-        if p.is_file():
-            return p
-
-    # Fallback: find latest match (can be expensive on huge build dirs).
-    for p in build_dir.rglob(filename):
-        if p.is_file():
-            candidates.append(p)
-
-    if not candidates:
-        return None
-
-    return max(candidates, key=lambda x: x.stat().st_mtime)
-
 
 def _zip_dir(src_dir: Path, out_zip: Path) -> None:
     out_zip.parent.mkdir(parents=True, exist_ok=True)
@@ -117,11 +72,15 @@ def main(argv: list[str]) -> int:
         print(f"ERROR: build dir not found: {build_dir}", file=sys.stderr)
         return 2
 
-    plugin_dll = _find_artifact(build_dir, bin_dir, "SkyrimDiag.dll")
-    helper_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagHelper.exe")
-    native_dll = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolNative.dll")
-    cli_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.exe")
-    winui_launcher_exe = _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolWinUI.exe")
+    plugin_dll = find_build_artifact(build_dir, bin_dir, "SkyrimDiag.dll")
+    helper_exe = find_build_artifact(build_dir, bin_dir, "SkyrimDiagHelper.exe")
+    native_dll = find_build_artifact(
+        build_dir, bin_dir, "SkyrimDiagDumpToolNative.dll"
+    )
+    cli_exe = find_build_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.exe")
+    winui_launcher_exe = find_build_artifact(
+        build_dir, bin_dir, "SkyrimDiagDumpToolWinUI.exe"
+    )
 
     if not plugin_dll:
         print(
@@ -155,22 +114,26 @@ def main(argv: list[str]) -> int:
         return 3
 
     plugin_pdb = (
-        None if args.no_pdb else _find_artifact(build_dir, bin_dir, "SkyrimDiag.pdb")
+        None
+        if args.no_pdb
+        else find_build_artifact(build_dir, bin_dir, "SkyrimDiag.pdb")
     )
     helper_pdb = (
         None
         if args.no_pdb
-        else _find_artifact(build_dir, bin_dir, "SkyrimDiagHelper.pdb")
+        else find_build_artifact(build_dir, bin_dir, "SkyrimDiagHelper.pdb")
     )
     native_pdb = (
         None
         if args.no_pdb
-        else _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolNative.pdb")
+        else find_build_artifact(
+            build_dir, bin_dir, "SkyrimDiagDumpToolNative.pdb"
+        )
     )
     cli_pdb = (
         None
         if args.no_pdb
-        else _find_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.pdb")
+        else find_build_artifact(build_dir, bin_dir, "SkyrimDiagDumpToolCli.pdb")
     )
 
     winui_publish_dir = find_winui_build_root(winui_dir)
@@ -209,7 +172,7 @@ def main(argv: list[str]) -> int:
     out_zip = (
         Path(args.out)
         if args.out
-        else root / "dist" / release_zip_name(f"v{_read_version(root)}")
+        else root / "dist" / release_zip_name(f"v{project_version(root)}")
     )
     if not out_zip.is_absolute():
         out_zip = (root / out_zip).resolve()

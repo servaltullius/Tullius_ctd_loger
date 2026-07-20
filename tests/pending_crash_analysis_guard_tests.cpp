@@ -24,13 +24,16 @@ int main()
   const std::filesystem::path pendingPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.cpp";
   const std::filesystem::path decisionPath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Decision.cpp";
   const std::filesystem::path executePath = repoRoot / "helper" / "src" / "PendingCrashAnalysis.Execute.cpp";
+  const std::filesystem::path crashCapturePath = repoRoot / "helper" / "src" / "CrashCapture.cpp";
   assert(std::filesystem::exists(pendingPath) && "helper/src/PendingCrashAnalysis.cpp not found");
   assert(std::filesystem::exists(decisionPath) && "helper/src/PendingCrashAnalysis.Decision.cpp not found");
   assert(std::filesystem::exists(executePath) && "helper/src/PendingCrashAnalysis.Execute.cpp not found");
+  assert(std::filesystem::exists(crashCapturePath) && "helper/src/CrashCapture.cpp not found");
 
   const std::string pending = ReadAllText(pendingPath);
   const std::string decision = ReadAllText(decisionPath);
   const std::string execute = ReadAllText(executePath);
+  const std::string crashCapture = ReadAllText(crashCapturePath);
 
   AssertContains(
     pending,
@@ -61,6 +64,16 @@ int main()
     pending,
     "ClearPendingCrashAnalysis(task);",
     "Starting a new pending crash analysis must clear any previous active task state first.");
+
+  AssertContains(
+    pending,
+    "if (!cfg.enableAutoRecaptureOnUnknownCrash)",
+    "Tracked crash analysis must not enter recapture evaluation when the policy is disabled.");
+
+  AssertContains(
+    crashCapture,
+    "Crash headless analysis queued with tracked process lifetime.",
+    "Default crash headless analysis must retain a process handle for zero-exit cleanup.");
 
   AssertContains(
     decision,
