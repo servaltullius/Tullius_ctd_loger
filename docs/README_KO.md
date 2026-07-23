@@ -9,7 +9,7 @@ WinDbg 없이 **요약 / 근거 / 체크리스트** 형태로 보여주는 진�
 
 - **크래시를 막아주는 모드가 아닙니다.** 예외를 삼키거나 실행을 계속하지 않습니다.
 - **업로드/텔레메트리 없음.** 결과물은 로컬에 저장되며, 온라인 심볼 다운로드는 기본 OFF (`AllowOnlineSymbols=0`).
-- **CrashLoggerSSE 연동** — `crash-*.log` / `threaddump-*.log`를 자동으로 찾아서 함께 표시합니다.
+- **CrashLoggerSSE 연동** — 현재 v1.24 형식을 포함한 시각별 `crash-*.log` / `threaddump-*.log`를 자동으로 찾아서 함께 표시합니다. `Callstack:` 섹션이 없는 일반 런타임 `CrashLogger.log`는 크래시 근거로 사용하지 않습니다.
 
 ---
 
@@ -20,6 +20,7 @@ WinDbg 없이 **요약 / 근거 / 체크리스트** 형태로 보여주는 진�
 - [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
 - WinUI 뷰어 런타임:
   - 릴리즈 zip의 WinUI 뷰어는 `v0.2.52`부터 self-contained로 포함됩니다. 사용자가 .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 따로 설치할 필요가 없습니다.
+  - `SkyrimDiagWinUI\\app` 아래의 많은 파일은 함께 동봉된 .NET / Windows App SDK 런타임입니다. 파일을 개별 삭제하거나 뷰어 EXE만 복사하지 마세요. 업데이트할 때는 기존 `SkyrimDiagWinUI` 폴더를 제거한 뒤 새 릴리즈 zip 전체를 설치하세요.
   - [Visual C++ Redistributable 2015-2022 (x64)](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
 - (선택/권장) [Crash Logger SSE AE VR — PDB support](https://www.nexusmods.com/skyrimspecialedition/mods/59818)
 
@@ -58,6 +59,15 @@ WinDbg 없이 **요약 / 근거 / 체크리스트** 형태로 보여주는 진�
 
 **수동 스냅샷:** `Ctrl+Shift+F12`
 > 정상 플레이 중 찍은 스냅샷은 신뢰도가 낮을 수 있습니다. 프리징/무한로딩/CTD 직전에 찍는 것이 가장 유효합니다.
+
+## 결과를 안전하게 해석하는 법
+
+Tullius는 CrashLogger를 대체하는 도구가 아니라 서로 다른 근거를 보완하는 도구입니다. 검토 완료 실사고 코퍼스가 충분하지 않으므로 다른 크래시 로거보다 근본 원인 적중률이 높다고 수치로 주장하지 않습니다.
+
+- **비교적 강한 근거:** 덤프의 fault module과 유효한 CrashLogger 프레임이 같은 비시스템 DLL을 가리키는 경우입니다. 소스 점검이나 격리 우선순위가 높다는 뜻이며, 근본 원인 자동 확정은 아닙니다.
+- **피해 위치 가능성:** `CrashLogger.dll`, 훅 프레임워크, 게임 EXE 또는 시스템 DLL은 손상된 상태가 마지막으로 관측된 위치일 수 있습니다. `v0.2.57+`는 이미 캡처한 원래 예외가 후속 CrashLogger 내부 예외로 교체되지 않도록 보호하고, 페어링된 로그가 뒷받침하면 유효한 비훅 DLL 프레임 후보를 조심스럽게 우선 안내합니다.
+- **문맥 단서:** 참조된 ESP/ESM 레코드, 최근 로드 리소스와 제공 모드는 사고 주변의 상관관계입니다. 독립 스택, 재현 또는 소스 수준 일치가 없으면 원인 모드로 단정하면 안 됩니다.
+- **로그 페어링 품질:** CrashLogger 로그 후보가 여러 개이거나 시각 차이가 크면 신뢰도를 낮춰 기록하며, 해당 단서만으로 후보를 높은 신뢰도로 승격하지 않습니다.
 
 ## 출력 위치
 
@@ -144,6 +154,8 @@ Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 - `SkyrimDiag_Incident_*.json`
 - (있다면) `*_SkyrimDiagNativeException.log`, `*_SkyrimDiagBlackbox.jsonl`, `SkyrimDiag_WCT_*.json`, ETL 트레이스
 - (있다면) CrashLogger `crash-*.log` / `threaddump-*.log`
+
+출력 폴더의 모든 파일을 첨부할 필요는 없습니다. 먼저 같은 사고 시각의 파일들을 고르고, Blackbox·WCT·ETL·외부 CrashLogger 로그는 실제로 존재하고 해당 사고와 관련 있을 때만 추가하세요.
 
 > **개인정보 주의:** 덤프와 외부 로그에는 PC 경로(유저명 등)가 포함될 수 있습니다. 공개 업로드 전 확인/마스킹을 권장합니다.
 
