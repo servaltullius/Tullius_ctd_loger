@@ -2,6 +2,7 @@
 #include <filesystem>
 #include <string>
 
+#include "SkyrimDiag/CrashHandler.h"
 #include "SourceGuardTestUtils.h"
 
 using skydiag::tests::source_guard::AssertContains;
@@ -11,6 +12,22 @@ using skydiag::tests::source_guard::ReadAllText;
 
 int main()
 {
+  using skydiag::plugin::CrashHandlerModuleRange;
+  using skydiag::plugin::ShouldSuppressNestedCrashLoggerException;
+
+  constexpr CrashHandlerModuleRange crashLoggerRange{0x1000u, 0x2000u};
+  constexpr CrashHandlerModuleRange crashLoggerSseRange{0x3000u, 0x4000u};
+  static_assert(!ShouldSuppressNestedCrashLoggerException(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(ShouldSuppressNestedCrashLoggerException(
+    true, 0x1800u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(ShouldSuppressNestedCrashLoggerException(
+    true, 0x3800u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!ShouldSuppressNestedCrashLoggerException(
+    true, 0x2000u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!ShouldSuppressNestedCrashLoggerException(
+    true, 0x5000u, crashLoggerRange, crashLoggerSseRange));
+
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const auto heartbeatPath = repoRoot / "plugin" / "src" / "Heartbeat.cpp";
   const auto resourceHooksPath = repoRoot / "plugin" / "src" / "ResourceHooks.cpp";
@@ -144,6 +161,11 @@ int main()
 
   AssertContains(
     vectoredHandlerBody,
+    "ShouldSuppressNestedCrashLoggerException(",
+    "CrashLogger introspection exceptions must not replace an already frozen CTD.");
+
+  AssertContains(
+    vectoredHandlerBody,
     "TryPublishCrashRecord(shm, ep, code)",
     "Crash handler must publish a stable fixed-size crash record before signaling the helper.");
 
@@ -151,6 +173,12 @@ int main()
     vectoredHandlerBody,
     "SetEvent(ev)",
     "Crash handler must signal crash event after recording crash snapshot.");
+
+  AssertOrdered(
+    vectoredHandlerBody,
+    "ShouldSuppressNestedCrashLoggerException(",
+    "TryPublishCrashRecord(shm, ep, code)",
+    "Nested CrashLogger suppression must run before publishing a replacement crash record.");
 
   AssertOrdered(
     vectoredHandlerBody,
@@ -163,6 +191,23 @@ int main()
     "SetEvent(ev)",
     "ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)",
     "Fatal capture must return after signaling before dynamic first-chance telemetry can execute.");
+
+  const std::string installCrashHandlerBody = ExtractFunctionBody(
+    crashHandler,
+    "bool InstallCrashHandler(");
+  AssertContains(
+    installCrashHandlerBody,
+    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
+    "Crash handler install must cache the current CrashLogger module image range.");
+  AssertContains(
+    installCrashHandlerBody,
+    "QueryLoadedModuleRange(L\"CrashLoggerSSE.dll\")",
+    "Crash handler install must also cache the legacy CrashLoggerSSE module image range.");
+  AssertOrdered(
+    installCrashHandlerBody,
+    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
+    "AddVectoredExceptionHandler(",
+    "CrashLogger module ranges must be cached before the vectored handler can run.");
 
   AssertOrdered(
     vectoredHandlerBody,

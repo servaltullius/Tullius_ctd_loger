@@ -6,6 +6,9 @@ namespace SkyrimDiagDumpToolWinUI;
 
 public partial class App : Application
 {
+    internal const string MissingNativeAnalyzerWarning =
+        "SkyrimDiagDumpToolNative.dll was not found next to SkyrimDiagDumpToolWinUI.exe.";
+
     private Window? _window;
 
     public App()
@@ -32,7 +35,7 @@ public partial class App : Application
 
             if (NativeAnalyzerBridge.ResolveNativeAnalyzerPath() is null)
             {
-                startupWarning = "SkyrimDiagDumpToolNative.dll was not found next to SkyrimDiagDumpToolWinUI.exe.";
+                startupWarning = MissingNativeAnalyzerWarning;
             }
 
             _window = new MainWindow(options, startupWarning);

@@ -54,22 +54,22 @@ internal sealed partial class MainWindowViewModel
 
         if (IsStrongStandaloneCallstackCandidate(candidate))
         {
-            return T("Tullius callstack first", "Tullius callstack first");
+            return T("Tullius callstack first", "Tullius 콜스택 우선");
         }
 
         if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "first_chance_context"))
         {
-            return T("Crash Logger frame + first-chance", "Crash Logger frame + first-chance");
+            return T("Crash Logger frame + first-chance", "Crash Logger 프레임 + 선행 예외");
         }
 
         if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "history_repeat"))
         {
-            return T("Crash Logger frame + history", "Crash Logger frame + history");
+            return T("Crash Logger frame + history", "Crash Logger 프레임 + 반복 이력");
         }
 
         if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "resource_provider"))
         {
-            return T("Crash Logger frame + resource", "Crash Logger frame + resource");
+            return T("Crash Logger frame + resource", "Crash Logger 프레임 + 인접 리소스");
         }
 
         if (HasFamily(candidate, "crash_logger_frame") && candidate.FamilyCount <= 1)
@@ -109,7 +109,7 @@ internal sealed partial class MainWindowViewModel
     private string BuildConflictAgreementSummary(ActionableCandidateItem first, ActionableCandidateItem second)
     {
         return _isKorean
-            ? $"{BuildFamilySummary(first)} vs {BuildFamilySummary(second)}"
+            ? $"{BuildFamilySummary(first)} 대 {BuildFamilySummary(second)}"
             : $"{BuildFamilySummary(first)} vs {BuildFamilySummary(second)}";
     }
 
@@ -123,7 +123,7 @@ internal sealed partial class MainWindowViewModel
         if (summary.ActionableCandidates.Count > 0 &&
             IsStrongStandaloneCallstackCandidate(summary.ActionableCandidates[0]))
         {
-            return T("Tullius callstack", "Tullius callstack");
+            return T("Tullius callstack", "Tullius 콜스택");
         }
 
         if (HasCrashLoggerFrameSignal(summary))
@@ -147,19 +147,21 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildCrashLoggerContextSummary(AnalysisSummary summary)
     {
-        const string dllGuidance = "DLL guidance";
+        var dllGuidance = T("DLL guidance", "DLL 점검 안내");
 
         if (summary.ActionableCandidates.Count > 0 &&
             IsStrongStandaloneCallstackCandidate(summary.ActionableCandidates[0]))
         {
-            return $"{BuildPrimaryCandidateValue(summary)} — Tullius callstack first — {dllGuidance}";
+            return _isKorean
+                ? $"{BuildPrimaryCandidateValue(summary)} — Tullius 콜스택 첫 후보 — {dllGuidance}"
+                : $"{BuildPrimaryCandidateValue(summary)} — Tullius callstack first — {dllGuidance}";
         }
 
         if (IsCrashLoggerDirectFaultActionable(summary) &&
             !string.IsNullOrWhiteSpace(summary.CrashLoggerDirectFaultModule))
         {
             return _isKorean
-                ? $"{summary.CrashLoggerDirectFaultModule} — Crash Logger frame first (direct DLL fault) — {dllGuidance}"
+                ? $"{summary.CrashLoggerDirectFaultModule} — Crash Logger 직접 오류 프레임 — {dllGuidance}"
                 : $"{summary.CrashLoggerDirectFaultModule} — Crash Logger frame first (direct DLL fault) — {dllGuidance}";
         }
 
@@ -167,7 +169,7 @@ internal sealed partial class MainWindowViewModel
             !string.IsNullOrWhiteSpace(summary.CrashLoggerFirstActionableProbableModule))
         {
             return _isKorean
-                ? $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger frame first probable DLL frame — {dllGuidance}"
+                ? $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger 첫 유효 추정 DLL 프레임 — {dllGuidance}"
                 : $"{summary.CrashLoggerFirstActionableProbableModule} — Crash Logger frame first probable DLL frame — {dllGuidance}";
         }
 
@@ -176,7 +178,7 @@ internal sealed partial class MainWindowViewModel
             summary.CrashLoggerProbableStreakLength > 0)
         {
             return _isKorean
-                ? $"{summary.CrashLoggerProbableStreakModule} — Crash Logger frame first probable frame streak x{summary.CrashLoggerProbableStreakLength} — {dllGuidance}"
+                ? $"{summary.CrashLoggerProbableStreakModule} — Crash Logger 추정 프레임 연속 {summary.CrashLoggerProbableStreakLength}회 — {dllGuidance}"
                 : $"{summary.CrashLoggerProbableStreakModule} — Crash Logger frame first probable frame streak x{summary.CrashLoggerProbableStreakLength} — {dllGuidance}";
         }
 
@@ -344,9 +346,9 @@ internal sealed partial class MainWindowViewModel
     {
         "crash_logger_frame" => T("Crash Logger frame", "Crash Logger 프레임"),
         "crash_logger_object_ref" => T("CrashLogger object ref", "CrashLogger 오브젝트 참조"),
-        "actionable_stack" => T("actionable stack", "실행 가능한 스택"),
-        "resource_provider" => T("near resource provider", "인접 리소스 provider"),
-        "history_repeat" => T("history repeat", "반복 기록"),
+        "actionable_stack" => T("actionable stack", "Tullius 콜스택"),
+        "resource_provider" => T("near resource provider", "인접 리소스 제공자"),
+        "history_repeat" => T("history repeat", "반복 이력"),
         _ => familyId,
     };
 

@@ -385,6 +385,84 @@ static void TestWinUiRawDataTextBoxesExposeScrollbars()
     "Raw Data report textbox must expose a stable vertical scrollbar.");
 }
 
+static void TestWinUiUsesAvailableWidthAndStacksQuickCards()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+
+  RequireContains(
+    xaml,
+    "x:Name=\"RootScrollViewer\"\n          HorizontalContentAlignment=\"Stretch\"",
+    "Root scroll content must stretch into the available window width.");
+  RequireContains(
+    xaml,
+    "x:Name=\"RootContentGrid\"\n              MaxWidth=\"1240\"\n              MinWidth=\"640\"",
+    "Root content must retain the bounded wide layout while using available width.");
+  RequireContains(xaml, "x:Name=\"QuickSummaryGrid\"", "Quick-summary grid must remain addressable by adaptive layout code.");
+  RequireContains(xaml, "x:Name=\"EvidenceAgreementCard\"", "Evidence agreement card must be named for narrow stacking.");
+  RequireContains(xaml, "x:Name=\"NextActionCard\"", "Next-action card must be named for narrow stacking.");
+
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
+  RequireContains(cs, "tier == LayoutTier.Narrow ? 0", "Narrow layout must not force a desktop minimum width.");
+  RequireContains(cs, "RootScrollViewer.ViewportWidth", "Adaptive layout must size content from the real scroll viewport.");
+  RequireContains(cs, "RootContentGrid.Width = Math.Clamp", "Adaptive layout must explicitly fill the available viewport up to its maximum width.");
+  RequireContains(cs, "Grid.SetRow(EvidenceAgreementCard, 1)", "Narrow layout must stack evidence agreement below CrashLogger context.");
+  RequireContains(cs, "Grid.SetRow(NextActionCard, 2)", "Narrow layout must stack next action below evidence agreement.");
+}
+
+static void TestWinUiUsesFocusedEmptyStates()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+
+  RequireContains(xaml, "x:Name=\"TriageEmptyStateCard\"", "Triage must show a focused pre-analysis empty state.");
+  RequireContains(xaml, "x:Name=\"RawDataEmptyStateCard\"", "Raw Data must show a focused empty state before artifacts exist.");
+  RequireContains(xaml, "x:Name=\"WctCard\"\n                    Visibility=\"Collapsed\"", "WCT card must start collapsed instead of showing an empty shell.");
+  RequireContains(xaml, "x:Name=\"ReportCard\"\n                    Visibility=\"Collapsed\"", "Report card must start collapsed instead of showing an empty shell.");
+
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
+  RequireContains(cs, "SetAnalysisContentVisibility(false)", "Main window must start with analysis-result cards hidden.");
+  RequireContains(cs, "SetRawDataContentVisibility(hasReport: false, hasWct: false)", "Main window must start with raw-data artifact cards hidden.");
+  RequireContains(cs, "SetAnalysisContentVisibility(true)", "Successful analysis must reveal analysis-result cards.");
+  RequireContains(cs, "SetRawDataContentVisibility(artifacts.HasReport, artifacts.HasWct)", "Raw Data visibility must follow real artifact availability.");
+
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireContains(vm, "public bool HasReport", "Advanced artifacts must record report availability.");
+  RequireContains(vm, "public bool HasWct", "Advanced artifacts must record WCT availability.");
+}
+
+static void TestWinUiKoreanStaticCopyIsLocalized()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto localization = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Localization.cs");
+  RequireContains(localization, "준비됨.", "Korean UI must localize the idle status.");
+  RequireContains(localization, "문제 해결 절차", "Korean UI must localize the troubleshooting title.");
+  RequireContains(localization, "리포트 및 원시 데이터", "Korean UI must localize the Raw Data section title.");
+
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
+  RequireContains(cs, "SkyrimDiagDumpToolNative.dll을 SkyrimDiagDumpToolWinUI.exe 옆에서 찾지 못했습니다.", "Korean UI must localize the missing-native startup warning.");
+
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireContains(vm, "Tullius 콜스택 첫 후보", "Korean candidate copy must localize the Tullius callstack-first label.");
+  RequireContains(vm, "DLL 점검 안내", "Korean recommendation copy must localize DLL guidance.");
+  RequireContains(vm, "Crash Logger 직접 오류 프레임", "Korean candidate copy must localize the direct-fault frame label.");
+}
+
+static void TestReviewFeedbackFollowsPrimaryGuidance()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+
+  const auto crashContext = xaml.find("x:Name=\"CrashContextCard\"");
+  const auto recommendations = xaml.find("x:Name=\"NextStepsSectionTitleText\"");
+  const auto reviewFeedback = xaml.find("x:Name=\"ReviewFeedbackCard\"");
+  if (crashContext == std::string::npos || recommendations == std::string::npos ||
+      reviewFeedback == std::string::npos || !(crashContext < recommendations && recommendations < reviewFeedback)) {
+    std::cerr << "Review feedback must follow crash context and recommended actions in the reading order.\n";
+    std::exit(1);
+  }
+}
+
 static void TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -440,6 +518,10 @@ int main()
   TestWinUiConsumesRecaptureContext();
   TestWinUiUsesRepresentativeCandidateIdentifiers();
   TestWinUiRawDataTextBoxesExposeScrollbars();
+  TestWinUiUsesAvailableWidthAndStacksQuickCards();
+  TestWinUiUsesFocusedEmptyStates();
+  TestWinUiKoreanStaticCopyIsLocalized();
+  TestReviewFeedbackFollowsPrimaryGuidance();
   TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
 
   // Accessibility: interactive elements must have AutomationProperties.Name

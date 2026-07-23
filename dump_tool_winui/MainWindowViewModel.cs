@@ -297,6 +297,8 @@ internal sealed partial class MainWindowViewModel
     {
         public List<string> EventLines { get; } = new();
         public int EventCount { get; set; }
+        public bool HasReport { get; set; }
+        public bool HasWct { get; set; }
         public string ReportText { get; set; } = string.Empty;
         public string WctText { get; set; } = string.Empty;
     }
@@ -361,12 +363,14 @@ internal sealed partial class MainWindowViewModel
         }
 
         var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
-        data.ReportText = File.Exists(reportPath)
+        data.HasReport = File.Exists(reportPath);
+        data.ReportText = data.HasReport
             ? File.ReadAllText(reportPath)
             : missingReportText;
 
         var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
-        if (File.Exists(wctPath))
+        data.HasWct = File.Exists(wctPath);
+        if (data.HasWct)
         {
             var raw = File.ReadAllText(wctPath);
             try

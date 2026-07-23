@@ -184,6 +184,12 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       CandidateMatchesModule(*topCandidate, r.crash_logger_first_actionable_probable_module)) ||
      (r.crash_logger_probable_streak_eligible &&
       CandidateMatchesModule(*topCandidate, r.crash_logger_probable_streak_module)));
+  const bool topCandidateIsActionableNonHookDll =
+    topCandidate &&
+    !topCandidate->module_filename.empty() &&
+    !minidump::IsKnownHookFramework(topCandidate->module_filename) &&
+    !minidump::IsSystemishModule(topCandidate->module_filename) &&
+    !minidump::IsGameExeModule(topCandidate->module_filename);
 
   std::wstring who;
   if (!r.inferred_mod_name.empty()) {
@@ -205,7 +211,19 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           ? L"Looks like a snapshot dump (not a crash/hang). Useful for state inspection, not root cause. (Confidence: High)"
           : L"스냅샷 덤프(크래시/행 아님)로 보입니다. 원인 판정용이 아니라 '상태 확인'에 유용합니다. (신뢰도: 높음)");
   } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
-    if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
+    if (topCandidateIsActionableNonHookDll && topCandidateBackedByFrame) {
+      const auto candidateName = DescribeCandidate(*topCandidate);
+      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      summary = en
+        ? (L"Crash is reported in " + who + L" (known hook framework), but the paired CrashLogger log's " +
+            frameSupport + L" points to DLL candidate " + candidateName +
+            L". Check this candidate first, but do not treat it as a confirmed root cause. (Confidence: " +
+            topCandidateConf + L")")
+        : (L"크래시 덤프 위치는 " + who + L"(알려진 훅 프레임워크)이지만, 짝지어진 CrashLogger 로그의 " +
+            frameSupport + L" 가 DLL 후보 " + candidateName +
+            L" 를 가리킵니다. 이 후보를 먼저 점검하되 확정 원인으로 단정하지 마세요. (신뢰도: " +
+            topCandidateConf + L")");
+    } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
         ? (L"Crash is reported in " + who + L" (known hook framework), but " + suspectBasis + L" points to " + nonHookSuspectWho +
             L". (Confidence: " + nonHookSuspectConf + L")")

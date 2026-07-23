@@ -161,6 +161,10 @@ add_executable(skydiag_plugin_runtime_guard_tests
   plugin_runtime_guard_tests.cpp
 )
 
+target_include_directories(skydiag_plugin_runtime_guard_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+)
+
 add_test(NAME skydiag_plugin_runtime_guard_tests COMMAND skydiag_plugin_runtime_guard_tests)
 
 add_executable(skydiag_helper_preflight_guard_tests

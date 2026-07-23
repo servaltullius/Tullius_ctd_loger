@@ -28,6 +28,12 @@ constexpr const char* kThreadDumpText =
   "CALLSTACK:\n"
   "  ExampleMod.dll+0x123\n";
 
+constexpr const char* kCrashLoggerRuntimeLogText =
+  "[12:07:32.476] [41376] [I] CrashLogger v1-24-0-0\n"
+  "[12:07:32.476] [41376] [I] installed crash handlers\n"
+  "[12:07:32.476] [41376] [I] Thread dump hotkey monitoring started (Ctrl+Shift+F12)\n"
+  "[12:07:32.476] [41376] [I] CrashLogger has finished loading.\n";
+
 void Require(bool condition, const char* message)
 {
   if (!condition) {
@@ -240,6 +246,25 @@ void TestNearbyCompetingLogMarksPairingAmbiguous()
   Require(metadata.selected_kind == "crash", "selected artifact kind must be recorded");
 }
 
+void TestRuntimeLogHotkeyLineCannotBeatRealCrashLog()
+{
+  TempDirectory temp("runtime-log-hotkey");
+  const auto dump = WriteFile(temp.path(), L"Tullius_crash_20970718_120006.dmp", "dump");
+  const auto runtimeLog = WriteFile(temp.path(), L"CrashLogger.log", kCrashLoggerRuntimeLogText);
+  SetLastWriteTimeLocal(runtimeLog, 2097, 7, 18, 12, 0, 4);
+  WriteFile(temp.path(), L"crash-2097-07-18-12-00-00.log", kCrashLogText);
+
+  CrashLoggerPairingMetadata metadata{};
+  RequireFoundFilename(
+    Search(dump, &metadata),
+    L"crash-2097-07-18-12-00-00.log",
+    "CrashLogger runtime log hotkey text must not outrank the real crash artifact");
+  Require(metadata.eligible_candidate_count == 1u,
+          "CrashLogger runtime log must not remain an eligible crash artifact");
+  Require(metadata.selected_kind == "crash",
+          "the selected artifact must retain crash provenance");
+}
+
 }  // namespace
 
 int main()
@@ -250,6 +275,7 @@ int main()
     TestKnownCrashAndThreadDumpKindsCannotCrossPair();
     TestEqualTimestampTieBreakIsDeterministic();
     TestNearbyCompetingLogMarksPairingAmbiguous();
+    TestRuntimeLogHotkeyLineCannotBeatRealCrashLog();
     std::cout << "crashlogger search integration tests passed\n";
     return 0;
   } catch (const std::exception& ex) {

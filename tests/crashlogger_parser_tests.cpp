@@ -59,6 +59,17 @@ static void Test_LooksLikeCrashLogger_ThreadDump()
   assert(LooksLikeCrashLoggerLogTextCore(s));
 }
 
+static void Test_LooksLikeCrashLogger_RuntimeLogHotkeyLineIsNotThreadDump()
+{
+  const std::string s =
+    "[12:07:32.476] [41376] [I] CrashLogger v1-24-0-0\n"
+    "[12:07:32.476] [41376] [I] installed crash handlers\n"
+    "[12:07:32.476] [41376] [I] Thread dump hotkey monitoring started (Ctrl+Shift+F12)\n"
+    "[12:07:32.476] [41376] [I] CrashLogger has finished loading.\n";
+
+  assert(!LooksLikeCrashLoggerLogTextCore(s));
+}
+
 static void Test_ClassifyCrashLoggerArtifactName()
 {
   assert(ClassifyCrashLoggerArtifactNameAscii("crash-2026-07-13-12-34-56.log") ==
@@ -1566,10 +1577,26 @@ static void Test_ParseCrashLoggerFrameSignals_Fixture_SystemDllPathqualifiedFirs
   assert(signals.probable_streak_length == 2u);
 }
 
+static void Test_ParseCrashLoggerFrameSignals_Fixture_V124RealFormat()
+{
+  const auto log = ReadCrashLoggerFrameFixture("v124_real_format_direct_fault.log.txt");
+  const auto version = ParseCrashLoggerVersionAscii(log);
+  const CrashLoggerFrameSignals signals = ParseCrashLoggerFrameSignalsAscii(log);
+
+  assert(LooksLikeCrashLoggerLogTextCore(log));
+  assert(version);
+  assert(*version == "v1-24-0-0");
+  assert(signals.direct_fault_module == "CalamityAffixes.dll");
+  assert(signals.first_actionable_probable_module == "CalamityAffixes.dll");
+  assert(signals.probable_streak_module == "CalamityAffixes.dll");
+  assert(signals.probable_streak_length == 2u);
+}
+
 int main()
 {
   Test_LooksLikeCrashLogger_CrashLog();
   Test_LooksLikeCrashLogger_ThreadDump();
+  Test_LooksLikeCrashLogger_RuntimeLogHotkeyLineIsNotThreadDump();
   Test_ClassifyCrashLoggerArtifactName();
   Test_CrashLoggerPairRankingPrioritizesTimeThenProvenance();
   Test_ParseTopModules_CrashLog();
@@ -1691,6 +1718,7 @@ int main()
   Test_ParseCrashLoggerFrameSignals_Fixture_HookFrameworkVictimFirstProbableDll();
   Test_ParseCrashLoggerFrameSignals_Fixture_CppExceptionModuleSupport();
   Test_ParseCrashLoggerFrameSignals_Fixture_SystemDllPathqualifiedFirstProbableDll();
+  Test_ParseCrashLoggerFrameSignals_Fixture_V124RealFormat();
 
   return 0;
 }

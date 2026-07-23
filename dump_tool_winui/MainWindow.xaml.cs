@@ -46,6 +46,8 @@ public sealed partial class MainWindow : Window
         CopySummaryButton.IsEnabled = false;
         CopyShareButton.IsEnabled = false;
         SetTriageEditorEnabled(false);
+        SetAnalysisContentVisibility(false);
+        SetRawDataContentVisibility(hasReport: false, hasWct: false);
         RecentDumpsEmptyState.Visibility = Visibility.Collapsed;
         RecentDumpList.Visibility = Visibility.Collapsed;
         DumpSearchLocationsPanel.Visibility = Visibility.Collapsed;
@@ -60,7 +62,11 @@ public sealed partial class MainWindow : Window
         }
         if (!string.IsNullOrWhiteSpace(startupWarning))
         {
-            StatusText.Text = startupWarning;
+            StatusText.Text = string.Equals(startupWarning, App.MissingNativeAnalyzerWarning, StringComparison.Ordinal)
+                ? T(
+                    "SkyrimDiagDumpToolNative.dll was not found next to SkyrimDiagDumpToolWinUI.exe.",
+                    "SkyrimDiagDumpToolNative.dll을 SkyrimDiagDumpToolWinUI.exe 옆에서 찾지 못했습니다.")
+                : startupWarning;
         }
 
         DispatcherQueue.TryEnqueue(async () =>

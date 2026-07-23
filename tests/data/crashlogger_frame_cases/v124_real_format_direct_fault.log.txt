@@ -1,0 +1,23 @@
+CRASH TIME: 2026-07-23 12:38:47
+Skyrim SSE v1.5.97
+CrashLoggerSSE v1-24-0-0 Jun 28 2026 00:14:22
+
+Unhandled exception "EXCEPTION_ACCESS_VIOLATION" at 0x7FFD5ACD8978 CalamityAffixes.dll+00E8978	cmp byte ptr [rax+0x22], 0x01
+Exception Flags: 0x00000000 (Continuable)
+Number of Parameters: 2
+Exception Thread ID: 18588
+Access Violation: Tried to read memory at 0xFFFFFFFFFFFFFFFF
+
+POSSIBLE RELEVANT OBJECTS:
+	RSI: (Character*) "Example NPC" [0xFE34182D] ("ExampleTweak.esp")
+	R14: (CalamityAffixes::EventBridge*)
+
+CALL STACK ([P]robable / [S]tack scan):
+	[ 0][P] 0x7FFD5ACD8978 CalamityAffixes.dll+00E8978
+	[ 1][P] 0x7FFD5ACD7B8E CalamityAffixes.dll+00E7B8E
+	[ 2][P] 0x7FF718ADBA25 SkyrimSE.exe+061BA25
+	[ 3][P] 0x7FFE62AEE957 KERNEL32.DLL+002E957
+	[ 4][S] 0x7FFD5AD46D89 CalamityAffixes.dll+0156D89
+
+REGISTERS:
+	RAX 0x0101010101010101

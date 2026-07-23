@@ -80,6 +80,34 @@ public sealed partial class MainWindow
         }
     }
 
+    private void TriageEmptyDashboardButton_Click(object sender, RoutedEventArgs e)
+    {
+        NavView.SelectedItem = NavAnalyze;
+    }
+
+    private void SetAnalysisContentVisibility(bool hasAnalysis)
+    {
+        var contentVisibility = hasAnalysis ? Visibility.Visible : Visibility.Collapsed;
+        TriageEmptyStateCard.Visibility = hasAnalysis ? Visibility.Collapsed : Visibility.Visible;
+        SummarySentenceCard.Visibility = contentVisibility;
+        QuickSummaryGrid.Visibility = contentVisibility;
+        TriageTwoColumnGrid.Visibility = contentVisibility;
+
+        if (!hasAnalysis)
+        {
+            ConflictCandidatesPanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void SetRawDataContentVisibility(bool hasReport, bool hasWct)
+    {
+        ReportCard.Visibility = hasReport ? Visibility.Visible : Visibility.Collapsed;
+        WctCard.Visibility = hasWct ? Visibility.Visible : Visibility.Collapsed;
+        RawDataEmptyStateCard.Visibility = hasReport || hasWct
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
     private void RootGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         ApplyAdaptiveLayout();
@@ -98,6 +126,19 @@ public sealed partial class MainWindow
         else
             tier = LayoutTier.Wide;
 
+        var maxContentWidth = tier == LayoutTier.Narrow ? 960 : (tier == LayoutTier.Compact ? 1140 : 1240);
+        var minContentWidth = tier == LayoutTier.Narrow ? 0 : (tier == LayoutTier.Compact ? 640 : 1060);
+        RootContentGrid.MaxWidth = maxContentWidth;
+        RootContentGrid.MinWidth = minContentWidth;
+
+        var availableContentWidth = RootScrollViewer.ViewportWidth > 0
+            ? RootScrollViewer.ViewportWidth
+            : RootScrollViewer.ActualWidth;
+        if (availableContentWidth > 0)
+        {
+            RootContentGrid.Width = Math.Clamp(availableContentWidth, minContentWidth, maxContentWidth);
+        }
+
         if (tier == _currentLayoutTier)
         {
             return;
@@ -111,8 +152,6 @@ public sealed partial class MainWindow
         NavView.IsPaneOpen = !narrow;
         NavView.IsPaneToggleButtonVisible = narrow;
 
-        RootContentGrid.MaxWidth = narrow ? 960 : (compact ? 1140 : 1240);
-        RootContentGrid.MinWidth = narrow ? 480 : (compact ? 640 : 1060);
         RootContentGrid.Padding = narrow
             ? new Thickness(10, 8, 10, 8)
             : compact ? new Thickness(14, 12, 14, 12) : new Thickness(22, 18, 22, 18);
@@ -127,6 +166,20 @@ public sealed partial class MainWindow
 
         if (narrow)
         {
+            QuickSummaryGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+            QuickSummaryGrid.ColumnDefinitions[1].Width = new GridLength(0);
+            QuickSummaryGrid.ColumnDefinitions[2].Width = new GridLength(0);
+            QuickSummaryGrid.RowDefinitions.Clear();
+            QuickSummaryGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            QuickSummaryGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            QuickSummaryGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Grid.SetRow(CrashLoggerContextCard, 0);
+            Grid.SetColumn(CrashLoggerContextCard, 0);
+            Grid.SetRow(EvidenceAgreementCard, 1);
+            Grid.SetColumn(EvidenceAgreementCard, 0);
+            Grid.SetRow(NextActionCard, 2);
+            Grid.SetColumn(NextActionCard, 0);
+
             TriageTwoColumnGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
             TriageTwoColumnGrid.ColumnDefinitions[1].Width = new GridLength(0);
 
@@ -142,6 +195,17 @@ public sealed partial class MainWindow
         }
         else
         {
+            QuickSummaryGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+            QuickSummaryGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
+            QuickSummaryGrid.ColumnDefinitions[2].Width = new GridLength(1, GridUnitType.Star);
+            QuickSummaryGrid.RowDefinitions.Clear();
+            Grid.SetRow(CrashLoggerContextCard, 0);
+            Grid.SetColumn(CrashLoggerContextCard, 0);
+            Grid.SetRow(EvidenceAgreementCard, 0);
+            Grid.SetColumn(EvidenceAgreementCard, 1);
+            Grid.SetRow(NextActionCard, 0);
+            Grid.SetColumn(NextActionCard, 2);
+
             TriageTwoColumnGrid.RowDefinitions.Clear();
             Grid.SetRow(TriageSidebar, 0);
             Grid.SetColumn(TriageSidebar, 1);

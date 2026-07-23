@@ -136,34 +136,34 @@ internal sealed partial class MainWindowViewModel
             {
                 "cross_validated" when hasFrameFamily => T(
                     $"DLL guidance: check {candidateName} first",
-                    $"DLL guidance: {candidateName}부터 확인"),
+                    $"DLL 점검 안내: {candidateName}부터 확인"),
                 "cross_validated" => T($"Update or isolate {candidateName} first", $"{candidateName} 업데이트/격리부터 확인"),
                 "related" when hasFrameFamily && hasFirstChanceFamily => T(
                     $"DLL guidance: check {candidateName} and repeated first-chance path first",
-                    $"DLL guidance: {candidateName}와 반복 first-chance 경로를 먼저 확인"),
+                    $"DLL 점검 안내: {candidateName}와 반복 선행 예외 경로를 먼저 확인"),
                 "related" when hasFrameFamily && hasHistoryFamily => T(
                     $"DLL guidance: check {candidateName} and repeated bucket history first",
-                    $"DLL guidance: {candidateName}와 반복 버킷 이력을 먼저 확인"),
+                    $"DLL 점검 안내: {candidateName}와 반복 버킷 이력을 먼저 확인"),
                 "related" when hasFrameFamily && hasResourceFamily => T(
                     $"DLL guidance: check {candidateName} and nearby resource providers first",
-                    $"DLL guidance: {candidateName}와 인접 리소스 provider를 먼저 확인"),
+                    $"DLL 점검 안내: {candidateName}와 인접 리소스 제공자를 먼저 확인"),
                 "related" when IsStrongStandaloneCallstackCandidate(primaryCandidate) => T(
                     $"Tullius callstack: check {candidateName} before generic EXE/system triage",
-                    $"Tullius callstack: 일반 EXE/system 점검보다 먼저 {candidateName} 확인"),
+                    $"Tullius 콜스택: 일반 EXE/시스템 점검보다 먼저 {candidateName} 확인"),
                 "related" when hasFrameFamily => T(
                     $"DLL guidance: check {candidateName} before generic EXE/system triage",
-                    $"DLL guidance: 일반 EXE/system 점검보다 먼저 {candidateName} 확인"),
+                    $"DLL 점검 안내: 일반 EXE/시스템 점검보다 먼저 {candidateName} 확인"),
                 "related" => T($"Check {candidateName} before generic DLL triage", $"{candidateName} 쪽을 일반 DLL 점검보다 먼저 확인"),
                 "reference_clue" when hasFrameFamily && hasFirstChanceFamily => T(
                     $"DLL guidance: check {candidateName} and repeated first-chance path before another capture",
-                    $"DLL guidance: 추가 캡처 전에 {candidateName}와 반복 first-chance 경로를 먼저 확인"),
+                    $"DLL 점검 안내: 추가 캡처 전에 {candidateName}와 반복 선행 예외 경로를 먼저 확인"),
                 "reference_clue" when hasFrameFamily => T(
                     $"DLL guidance: use Crash Logger frame clues for {candidateName} first",
-                    $"DLL guidance: {candidateName}의 Crash Logger frame 단서를 먼저 확인"),
+                    $"DLL 점검 안내: {candidateName}의 Crash Logger 프레임 단서를 먼저 확인"),
                 "reference_clue" => T("Capture another dump or compare a second signal", "다른 덤프를 한 번 더 모으거나 두 번째 신호를 비교"),
                 "conflicting" when hasFrameFamily => T(
                     $"DLL guidance conflict: compare {candidateName} one side at a time",
-                    $"DLL guidance 충돌: {candidateName} 후보를 한쪽씩 나눠 비교"),
+                    $"DLL 근거 충돌: {candidateName} 후보를 한쪽씩 나눠 비교"),
                 "conflicting" => T($"Compare {candidateName} one side at a time", $"{candidateName} 후보를 한쪽씩 나눠 비교"),
                 _ => T("Review the first recommendation", "첫 번째 권장 조치를 확인"),
             };

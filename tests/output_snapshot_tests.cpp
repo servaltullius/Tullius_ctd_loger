@@ -584,6 +584,10 @@ void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
     "Direct DLL fault cases should surface DLL guidance before broader EXE/system triage.");
   AssertContains(
     summarySrc,
+    "paired CrashLogger log's",
+    "Hook-framework victim summaries must prefer the paired CrashLogger frame-backed DLL candidate.");
+  AssertContains(
+    summarySrc,
     "fault-location evidence only",
     "Fallback non-system DLL summaries must avoid overclaiming when only the fault location is known.");
   AssertContains(

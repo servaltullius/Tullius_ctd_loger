@@ -14,6 +14,7 @@ public sealed partial class MainWindow
             "Skyrim SE detected. Ready for dump triage.",
             "Skyrim SE가 감지되었습니다. 덤프 원인 분석을 시작할 수 있습니다.");
         HeaderBadgeText.Text = T("STATUS READY", "상태 준비됨");
+        StatusText.Text = T("Ready.", "준비됨.");
 
         AnalyzeSectionTitleText.Text = T("Direct dump path", "직접 덤프 경로");
         RecentDumpsTitleText.Text = T("Recent discovered dumps", "최근 발견된 덤프");
@@ -33,6 +34,11 @@ public sealed partial class MainWindow
             "저장된 덤프 출력 위치가 아직 없습니다.");
 
         SnapshotSectionTitleText.Text = T("Crash Summary", "크래시 요약");
+        TriageEmptyTitleText.Text = T("No analysis yet", "아직 분석 결과가 없습니다");
+        TriageEmptyHintText.Text = T(
+            "Choose a dump on the dashboard and run analysis to see candidates and next steps.",
+            "대시보드에서 덤프를 선택해 분석하면 원인 후보와 다음 조치를 확인할 수 있습니다.");
+        TriageEmptyDashboardButton.Content = T("Go to dashboard", "대시보드로 이동");
         NextStepsSectionTitleText.Text = T("Recommended Next Steps", "권장 다음 단계");
         SuspectsSectionTitleText.Text = T("Actionable Candidates", "행동 우선 후보");
         QuickPrimaryLabelText.Text = T("CrashLogger context", "CrashLogger 기준");
@@ -56,6 +62,12 @@ public sealed partial class MainWindow
         EvidenceLabelText.Text = T("Evidence", "근거");
         ResourcesLabelText.Text = T("Recent Resources", "최근 리소스");
         EventsLabelText.Text = T("Events (Blackbox)", "이벤트 (블랙박스)");
+        TroubleshootingTitleText.Text = T("Troubleshooting", "문제 해결 절차");
+        RawDataSectionTitleText.Text = T("Reports & Raw Data", "리포트 및 원시 데이터");
+        RawDataEmptyTitleText.Text = T("No raw data loaded", "불러온 원시 데이터가 없습니다");
+        RawDataEmptyHintText.Text = T(
+            "Run analysis first. WCT is shown only when the selected capture includes it.",
+            "먼저 분석을 실행하세요. WCT는 선택한 캡처에 포함된 경우에만 표시됩니다.");
         WctLabelText.Text = T("WCT JSON", "WCT JSON");
         ReportLabelText.Text = T("Report", "리포트");
 

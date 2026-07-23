@@ -161,6 +161,7 @@ public sealed partial class MainWindow
     private void RenderSummary(AnalysisSummary summary)
     {
         _vm.PopulateSummary(summary);
+        SetAnalysisContentVisibility(true);
 
         SummarySentenceText.Text = _vm.SummarySentence;
         BucketText.Text = _vm.BucketText;
@@ -282,6 +283,7 @@ public sealed partial class MainWindow
         QuickEventsValueText.Text = _vm.QuickEventsValue;
         ReportTextBox.Text = artifacts.ReportText;
         WctTextBox.Text = artifacts.WctText;
+        SetRawDataContentVisibility(artifacts.HasReport, artifacts.HasWct);
     }
 
     private void OpenOutputButton_Click(object sender, RoutedEventArgs e)

@@ -274,7 +274,8 @@ bool LooksLikeCrashLoggerLogTextCore(std::string_view utf8Prefix)
     return false;
   }
   return ContainsCaseInsensitiveAscii(utf8Prefix, "crash time:") ||
-         ContainsCaseInsensitiveAscii(utf8Prefix, "thread dump") ||
+         (ContainsCaseInsensitiveAscii(utf8Prefix, "thread dump") &&
+          ContainsCaseInsensitiveAscii(utf8Prefix, "callstack:")) ||
          ContainsCaseInsensitiveAscii(utf8Prefix, "probable call stack") ||
          (ContainsCaseInsensitiveAscii(utf8Prefix, "call stack") &&
           ContainsCaseInsensitiveAscii(utf8Prefix, "[p]robable") &&

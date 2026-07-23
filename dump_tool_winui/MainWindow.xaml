@@ -49,14 +49,14 @@
       <!-- Scrollable content area -->
       <ScrollViewer
           x:Name="RootScrollViewer"
-          HorizontalContentAlignment="Center"
+          HorizontalContentAlignment="Stretch"
           VerticalScrollBarVisibility="Visible"
           HorizontalScrollBarVisibility="Disabled">
         <Grid x:Name="RootContentGrid"
               MaxWidth="1240"
               MinWidth="640"
               Padding="22,18,22,18"
-              HorizontalAlignment="Center"
+              HorizontalAlignment="Stretch"
               VerticalAlignment="Top">
 
           <!-- ════════════════════════════════════════════
@@ -385,8 +385,31 @@
                       AutomationProperties.Name="Copy share text to clipboard" />
             </Grid>
 
+            <Border x:Name="TriageEmptyStateCard"
+                    Background="{ThemeResource CardAcrylicBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="24">
+              <StackPanel Spacing="10" HorizontalAlignment="Center">
+                <FontIcon Glyph="&#xE946;" FontSize="28"
+                          Foreground="{ThemeResource AccentBrush}" />
+                <TextBlock x:Name="TriageEmptyTitleText"
+                           FontSize="18" FontWeight="SemiBold"
+                           TextAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="TriageEmptyHintText"
+                           MaxWidth="520" FontSize="13"
+                           TextAlignment="Center" TextWrapping="WrapWholeWords"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button x:Name="TriageEmptyDashboardButton"
+                        Click="TriageEmptyDashboardButton_Click"
+                        Style="{StaticResource PrimaryActionButtonStyle}"
+                        AutomationProperties.Name="Go to dump dashboard" />
+              </StackPanel>
+            </Border>
+
             <!-- Summary sentence (full-width) -->
-            <Border Background="{ThemeResource CardAcrylicBrush}"
+            <Border x:Name="SummarySentenceCard"
+                    Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource GlowBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="4">
@@ -399,7 +422,7 @@
             </Border>
 
             <!-- CrashLogger-first reading path -->
-            <Grid ColumnSpacing="12">
+            <Grid x:Name="QuickSummaryGrid" ColumnSpacing="12" RowSpacing="12">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
@@ -427,7 +450,8 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
-              <Border Grid.Column="1"
+              <Border x:Name="EvidenceAgreementCard"
+                      Grid.Column="1"
                       Background="{ThemeResource ElevatedAcrylicBrush}"
                       BorderBrush="{ThemeResource GlowBorderBrush}"
                       BorderThickness="1" CornerRadius="8" Padding="0">
@@ -447,7 +471,8 @@
                   </StackPanel>
                 </StackPanel>
               </Border>
-              <Border Grid.Column="2"
+              <Border x:Name="NextActionCard"
+                      Grid.Column="2"
                       Background="{ThemeResource ElevatedAcrylicBrush}"
                       BorderBrush="{ThemeResource GlowBorderBrush}"
                       BorderThickness="1" CornerRadius="8" Padding="0">
@@ -737,116 +762,6 @@
               <!-- ── Sidebar column ── -->
               <StackPanel x:Name="TriageSidebar" Grid.Column="1" Spacing="12">
 
-                <!-- Reviewer feedback loop -->
-                <Border Background="{ThemeResource ElevatedAcrylicBrush}"
-                        BorderBrush="{ThemeResource GlowBorderBrush}"
-                        BorderThickness="1" CornerRadius="8" Padding="8">
-                  <Expander x:Name="ReviewFeedbackExpander"
-                            IsExpanded="False"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch">
-                    <Expander.Header>
-                      <StackPanel Orientation="Horizontal" Spacing="8">
-                        <FontIcon Glyph="&#xE70F;" FontSize="16"
-                                  Foreground="{ThemeResource PurpleAccentBrush}" />
-                        <TextBlock x:Name="TriageEditorTitleText"
-                                   Text="Review Feedback"
-                                   FontSize="15" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                      </StackPanel>
-                    </Expander.Header>
-                    <StackPanel Spacing="10" Padding="8,12,8,4">
-                      <StackPanel Spacing="4">
-                        <TextBlock x:Name="ReviewStatusLabelText"
-                                   Text="Review status"
-                                   FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <ComboBox x:Name="ReviewStatusComboBox"
-                                  SelectedIndex="0"
-                                  AutomationProperties.Name="Review status selector">
-                          <ComboBoxItem x:Name="ReviewStatusUnreviewedItem"
-                                        Tag="unreviewed"
-                                        Content="Unreviewed" />
-                          <ComboBoxItem x:Name="ReviewStatusReviewedItem"
-                                        Tag="reviewed"
-                                        Content="Reviewed" />
-                          <ComboBoxItem x:Name="ReviewStatusConfirmedItem"
-                                        Tag="confirmed"
-                                        Content="Confirmed" />
-                          <ComboBoxItem x:Name="ReviewStatusTriagedItem"
-                                        Tag="triaged"
-                                        Content="Triaged" />
-                          <ComboBoxItem x:Name="ReviewStatusDoneItem"
-                                        Tag="done"
-                                        Content="Done" />
-                        </ComboBox>
-                      </StackPanel>
-
-                      <StackPanel Spacing="4">
-                        <TextBlock x:Name="VerdictLabelText"
-                                   Text="Verdict"
-                                   FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBox x:Name="VerdictBox"
-                                 PlaceholderText="Top conclusion or short verdict"
-                                 AutomationProperties.Name="Triage verdict" />
-                      </StackPanel>
-
-                      <StackPanel Spacing="4">
-                        <TextBlock x:Name="ActualCauseLabelText"
-                                   Text="Actual cause"
-                                   FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBox x:Name="ActualCauseBox"
-                                 PlaceholderText="What actually caused the CTD"
-                                 AcceptsReturn="True"
-                                 TextWrapping="Wrap"
-                                 MinHeight="72"
-                                 AutomationProperties.Name="Actual CTD cause" />
-                      </StackPanel>
-
-                      <StackPanel Spacing="4">
-                        <TextBlock x:Name="GroundTruthModLabelText"
-                                   Text="Ground truth mod"
-                                   FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBox x:Name="GroundTruthModBox"
-                                 PlaceholderText="Confirmed mod/plugin if known"
-                                 AutomationProperties.Name="Ground truth mod name" />
-                      </StackPanel>
-
-                      <StackPanel Spacing="4">
-                        <TextBlock x:Name="ReviewNotesLabelText"
-                                   Text="Review notes"
-                                   FontSize="12"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBox x:Name="ReviewNotesBox"
-                                 PlaceholderText="Why the top candidate was right or wrong"
-                                 AcceptsReturn="True"
-                                 TextWrapping="Wrap"
-                                 MinHeight="96"
-                                 AutomationProperties.Name="Review notes" />
-                      </StackPanel>
-
-                      <TextBlock x:Name="TriageMetaText"
-                                 FontSize="12"
-                                 TextWrapping="Wrap"
-                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
-                      <Button x:Name="SaveTriageButton"
-                              Click="SaveTriageButton_Click"
-                              Content="Save review"
-                              Style="{StaticResource PrimaryActionButtonStyle}"
-                              AutomationProperties.Name="Save triage review"
-                              ToolTipService.ToolTip="Save review fields to the summary JSON (Ctrl+S)">
-                        <Button.KeyboardAccelerators>
-                          <KeyboardAccelerator Modifiers="Control" Key="S" />
-                        </Button.KeyboardAccelerators>
-                      </Button>
-                    </StackPanel>
-                  </Expander>
-                </Border>
-
                 <!-- Crash context card (always visible) -->
                 <Border x:Name="CrashContextCard"
                         Background="{ThemeResource ElevatedAcrylicBrush}"
@@ -1003,7 +918,8 @@
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE90F;" FontSize="18"
                                   Foreground="{ThemeResource PurpleAccentBrush}" />
-                        <TextBlock Text="Troubleshooting"
+                        <TextBlock x:Name="TroubleshootingTitleText"
+                                   Text="Troubleshooting"
                                    FontWeight="SemiBold" FontSize="17"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                       </StackPanel>
@@ -1018,6 +934,117 @@
                   </Expander>
                 </Border>
 
+                <!-- Reviewer feedback loop: secondary to the immediate diagnosis and actions. -->
+                <Border x:Name="ReviewFeedbackCard"
+                        Background="{ThemeResource ElevatedAcrylicBrush}"
+                        BorderBrush="{ThemeResource GlowBorderBrush}"
+                        BorderThickness="1" CornerRadius="8" Padding="8">
+                  <Expander x:Name="ReviewFeedbackExpander"
+                            IsExpanded="False"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch">
+                    <Expander.Header>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE70F;" FontSize="16"
+                                  Foreground="{ThemeResource PurpleAccentBrush}" />
+                        <TextBlock x:Name="TriageEditorTitleText"
+                                   Text="Review Feedback"
+                                   FontSize="15" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="10" Padding="8,12,8,4">
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="ReviewStatusLabelText"
+                                   Text="Review status"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <ComboBox x:Name="ReviewStatusComboBox"
+                                  SelectedIndex="0"
+                                  AutomationProperties.Name="Review status selector">
+                          <ComboBoxItem x:Name="ReviewStatusUnreviewedItem"
+                                        Tag="unreviewed"
+                                        Content="Unreviewed" />
+                          <ComboBoxItem x:Name="ReviewStatusReviewedItem"
+                                        Tag="reviewed"
+                                        Content="Reviewed" />
+                          <ComboBoxItem x:Name="ReviewStatusConfirmedItem"
+                                        Tag="confirmed"
+                                        Content="Confirmed" />
+                          <ComboBoxItem x:Name="ReviewStatusTriagedItem"
+                                        Tag="triaged"
+                                        Content="Triaged" />
+                          <ComboBoxItem x:Name="ReviewStatusDoneItem"
+                                        Tag="done"
+                                        Content="Done" />
+                        </ComboBox>
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="VerdictLabelText"
+                                   Text="Verdict"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="VerdictBox"
+                                 PlaceholderText="Top conclusion or short verdict"
+                                 AutomationProperties.Name="Triage verdict" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="ActualCauseLabelText"
+                                   Text="Actual cause"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="ActualCauseBox"
+                                 PlaceholderText="What actually caused the CTD"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="72"
+                                 AutomationProperties.Name="Actual CTD cause" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="GroundTruthModLabelText"
+                                   Text="Ground truth mod"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="GroundTruthModBox"
+                                 PlaceholderText="Confirmed mod/plugin if known"
+                                 AutomationProperties.Name="Ground truth mod name" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock x:Name="ReviewNotesLabelText"
+                                   Text="Review notes"
+                                   FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBox x:Name="ReviewNotesBox"
+                                 PlaceholderText="Why the top candidate was right or wrong"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 MinHeight="96"
+                                 AutomationProperties.Name="Review notes" />
+                      </StackPanel>
+
+                      <TextBlock x:Name="TriageMetaText"
+                                 FontSize="12"
+                                 TextWrapping="Wrap"
+                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                      <Button x:Name="SaveTriageButton"
+                              Click="SaveTriageButton_Click"
+                              Content="Save review"
+                              Style="{StaticResource PrimaryActionButtonStyle}"
+                              AutomationProperties.Name="Save triage review"
+                              ToolTipService.ToolTip="Save review fields to the summary JSON (Ctrl+S)">
+                        <Button.KeyboardAccelerators>
+                          <KeyboardAccelerator Modifiers="Control" Key="S" />
+                        </Button.KeyboardAccelerators>
+                      </Button>
+                    </StackPanel>
+                  </Expander>
+                </Border>
+
               </StackPanel>
             </Grid>
 
@@ -1028,13 +1055,32 @@
                ════════════════════════════════════════════ -->
           <StackPanel x:Name="RawDataPanel" Spacing="16" Visibility="Collapsed" HorizontalAlignment="Stretch">
 
-            <TextBlock FontSize="30" FontWeight="SemiBold"
+            <TextBlock x:Name="RawDataSectionTitleText"
+                       FontSize="30" FontWeight="SemiBold"
                        Foreground="{ThemeResource TextFillColorPrimaryBrush}">
               Reports &amp; Raw Data
             </TextBlock>
 
+            <Border x:Name="RawDataEmptyStateCard"
+                    Background="{ThemeResource CardAcrylicBrush}"
+                    BorderBrush="{ThemeResource CardBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="24">
+              <StackPanel Spacing="8" HorizontalAlignment="Center">
+                <TextBlock x:Name="RawDataEmptyTitleText"
+                           FontSize="18" FontWeight="SemiBold"
+                           TextAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="RawDataEmptyHintText"
+                           MaxWidth="520" FontSize="13"
+                           TextAlignment="Center" TextWrapping="WrapWholeWords"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+              </StackPanel>
+            </Border>
+
             <!-- WCT JSON -->
-            <Border Background="{ThemeResource CardAcrylicBrush}"
+            <Border x:Name="WctCard"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="10">
@@ -1052,7 +1098,9 @@
             </Border>
 
             <!-- Full report -->
-            <Border Background="{ThemeResource CardAcrylicBrush}"
+            <Border x:Name="ReportCard"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource CardAcrylicBrush}"
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="10">

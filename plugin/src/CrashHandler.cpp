@@ -1,12 +1,14 @@
 #include "SkyrimDiag/CrashHandler.h"
 
 #include <Windows.h>
+#include <Psapi.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <string_view>
 
 #include "SkyrimDiag/Blackbox.h"
@@ -21,8 +23,47 @@ std::atomic<std::uint64_t> g_lastFirstChanceSignature{0};
 std::atomic<std::uint64_t> g_lastFirstChanceQpc{0};
 std::atomic<std::uint64_t> g_firstChanceWindowStartQpc{0};
 std::atomic<std::uint32_t> g_firstChanceWindowCount{0};
+CrashHandlerModuleRange g_crashLoggerRange{};
+CrashHandlerModuleRange g_crashLoggerSseRange{};
 
 constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
+
+CrashHandlerModuleRange QueryLoadedModuleRange(const wchar_t* moduleName) noexcept
+{
+  const HMODULE module = GetModuleHandleW(moduleName);
+  if (!module) {
+    return {};
+  }
+
+  MODULEINFO info{};
+  if (!GetModuleInformation(
+        GetCurrentProcess(),
+        module,
+        &info,
+        static_cast<DWORD>(sizeof(info))) ||
+      !info.lpBaseOfDll || info.SizeOfImage == 0u) {
+    return {};
+  }
+
+  const auto begin = reinterpret_cast<std::uintptr_t>(info.lpBaseOfDll);
+  const auto size = static_cast<std::uintptr_t>(info.SizeOfImage);
+  const auto maxAddress = std::numeric_limits<std::uintptr_t>::max();
+  if (size > maxAddress - begin) {
+    return { begin, maxAddress };
+  }
+  return { begin, begin + size };
+}
+
+bool IsCrashCaptureFrozen(const skydiag::SharedLayout* shm) noexcept
+{
+  if (!shm) {
+    return false;
+  }
+  auto* const flags = reinterpret_cast<volatile LONG*>(
+    const_cast<volatile std::uint32_t*>(&shm->header.state_flags));
+  const auto value = static_cast<std::uint32_t>(InterlockedCompareExchange(flags, 0, 0));
+  return (value & skydiag::kState_Frozen) != 0u;
+}
 
 std::uint64_t QpcNow() noexcept
 {
@@ -237,6 +278,19 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 
   const DWORD code = ep->ExceptionRecord->ExceptionCode;
   if (ShouldRecordException(code)) {
+    const auto exceptionAddress =
+      reinterpret_cast<std::uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
+    if (ShouldSuppressNestedCrashLoggerException(
+          IsCrashCaptureFrozen(shm),
+          exceptionAddress,
+          g_crashLoggerRange,
+          g_crashLoggerSseRange)) {
+      // CrashLogger probes objects with handled exceptions while producing its
+      // report. Once a crash candidate is already frozen, those probes must not
+      // replace the original crash context.
+      return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     // The fatal path deliberately performs only fixed-size shared-memory
     // writes and kernel signaling. Module/path resolution and std::string /
     // std::filesystem telemetry are unsafe with a corrupt heap or low stack.
@@ -281,6 +335,8 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 bool InstallCrashHandler(std::uint32_t crashHookMode)
 {
   g_crashHookMode = crashHookMode;
+  g_crashLoggerRange = QueryLoadedModuleRange(L"CrashLogger.dll");
+  g_crashLoggerSseRange = QueryLoadedModuleRange(L"CrashLoggerSSE.dll");
 
   // First=1 to run early, but we never consume the exception.
   PVOID h = AddVectoredExceptionHandler(/*First=*/1, VectoredHandler);
