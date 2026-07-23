@@ -8,7 +8,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 - **Not a crash-prevention mod.** It records signals and captures evidence; it does not swallow exceptions or attempt to keep playing.
 - **No uploads / telemetry.** All output is local. Online symbol downloads are OFF by default (`AllowOnlineSymbols=0`).
-- **CrashLoggerSSE integration** — auto-detects `crash-*.log` / `threaddump-*.log` and surfaces top callstack modules, C++ exception blocks, and CrashLogger version.
+- **CrashLoggerSSE integration** — auto-detects timestamped `crash-*.log` / `threaddump-*.log` artifacts, including the current v1.24 format, and surfaces top callstack modules, C++ exception blocks, and CrashLogger version. A normal runtime `CrashLogger.log` without a `Callstack:` section is not treated as crash evidence.
 
 ## Components
 
@@ -27,6 +27,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 - [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
 - WinUI viewer runtime:
   - The release zip includes a self-contained WinUI viewer (`v0.2.52+`), so users do **not** need to install .NET Desktop Runtime 8 or Windows App Runtime 1.8 separately.
+  - The many files under `SkyrimDiagWinUI\\app` are the bundled .NET / Windows App SDK runtime. Do **not** delete individual files or copy only the viewer EXE. When updating, remove the old `SkyrimDiagWinUI` folder and install the complete release zip.
   - [Visual C++ Redistributable 2015-2022 (x64)](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
 - Optional (recommended): [Crash Logger SSE AE VR — PDB support](https://www.nexusmods.com/skyrimspecialedition/mods/59818)
 
@@ -42,6 +43,15 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 **Manual snapshot hotkey:** `Ctrl+Shift+F12`
 > Snapshots taken during normal gameplay may have low confidence. Best used when the game is already stuck (freeze / ILS) or right before a CTD.
+
+## Reading Results Safely
+
+Tullius complements CrashLogger rather than replacing it. There is no reviewed real-incident corpus large enough to claim higher measured root-cause accuracy than another crash logger.
+
+- **Stronger evidence:** the dump fault module and an eligible CrashLogger frame point to the same non-system DLL. This is a priority for source review or isolation, not automatic proof of root cause.
+- **Possible victim location:** `CrashLogger.dll`, a hook framework, the game EXE, or a system DLL can be where corrupted state is finally observed. `v0.2.57+` preserves an already captured original exception from later CrashLogger-internal faults and cautiously prefers an eligible non-hook frame candidate when the paired log supports it.
+- **Context only:** referenced ESP/ESM records, recently loaded resources, and resource providers show correlation around the incident. They must not be treated as the culprit without an independent stack, reproduction, or source-level match.
+- **Pairing quality matters:** ambiguous or distant CrashLogger log matches are recorded with reduced confidence and cannot independently promote a candidate to High confidence.
 
 ## Output Location
 
@@ -110,6 +120,8 @@ See [`docs/BETA_TESTING.md`](docs/BETA_TESTING.md) for the full guide.
 - `SkyrimDiag_Incident_*.json`
 - (if available) `*_SkyrimDiagNativeException.log`, `*_SkyrimDiagBlackbox.jsonl`, `SkyrimDiag_WCT_*.json`, ETL traces
 - (if available) CrashLogger `crash-*.log` / `threaddump-*.log`
+
+You do not need to attach every file in the output directory. Start with the files from the same incident timestamp; add Blackbox, WCT, ETL, and external CrashLogger logs only when they exist and are relevant.
 
 > **Privacy:** Dumps and external logs may contain PC paths (drive letters, usernames). Review/mask before public upload.
 
