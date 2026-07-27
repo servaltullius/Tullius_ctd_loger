@@ -124,6 +124,8 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableWerDumpFallbackHint", 1, path.c_str()) != 0;
   cfg.preserveFilteredCrashDumps =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"PreserveFilteredCrashDumps", 0, path.c_str()) != 0;
+  cfg.enableCleanExitEvidenceQuarantine =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableCleanExitEvidenceQuarantine", 1, path.c_str()) != 0;
   cfg.dumpToolExe = ReadIniString(
     path,
     L"SkyrimDiagHelper",

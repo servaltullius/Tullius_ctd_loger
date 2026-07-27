@@ -1,0 +1,44 @@
+{
+  "_fixture_intent": "The fault surfaced inside CrashLogger.dll while it was producing its own report. A passive hook framework is the observation point, not the cause, so it must be demoted below the real culprit. Ranking the hook framework first is the regression this fixture exists to catch.",
+  "schema_version": 2,
+  "crash_bucket_key": "av-write::CrashLogger.dll",
+  "dump_path": "SkyrimDiag_Crash_20260302_193000.dmp",
+  "incident": {
+    "incident_id": "corpus-hook-framework-victim"
+  },
+  "triage": {
+    "review_status": "reviewed",
+    "ground_truth_mod": "Weather Redux",
+    "reviewed_at_utc": "2026-03-02T19:45:00Z",
+    "verdict": "confirmed",
+    "notes": "Author confirmed an out-of-bounds write in the weather transition code; CrashLogger merely observed the corrupted state."
+  },
+  "exception": {
+    "code": "0xC0000005",
+    "module_plus_offset": "CrashLogger.dll+0x8F0"
+  },
+  "actionable_candidates": [
+    {
+      "confidence": "Medium",
+      "mod_name": "Weather Redux",
+      "module_filename": "WeatherRedux.dll",
+      "evidence": "actionable_stack (hook framework demoted)"
+    },
+    {
+      "confidence": "Low",
+      "mod_name": "Crash Logger",
+      "module_filename": "CrashLogger.dll",
+      "evidence": "fault_location_only (passive hook framework)"
+    }
+  ],
+  "suspects": [
+    {
+      "module_filename": "CrashLogger.dll",
+      "inferred_mod_name": "Crash Logger"
+    },
+    {
+      "module_filename": "WeatherRedux.dll",
+      "inferred_mod_name": "Weather Redux"
+    }
+  ]
+}

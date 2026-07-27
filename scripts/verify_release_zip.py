@@ -14,10 +14,10 @@ from release_contract import (
     REQUIRED_X64_PE_ZIP_ENTRIES,
     REQUIRED_ZIP_ENTRIES,
     WINUI_BUILD_ZIP_MAPPINGS,
+    assert_version_sources_agree,
     find_build_artifact,
     find_winui_build_root,
     nested_winui_path_regex,
-    project_version,
     release_zip_name,
 )
 
@@ -81,7 +81,10 @@ def verify_release_zip(
     build_dir: Path,
     winui_dir: Path,
 ) -> None:
-    version = project_version(repo_root)
+    # Fails the release rather than shipping a build whose declared versions
+    # disagree with each other.
+    version = assert_version_sources_agree(repo_root)
+    print(f"  - version sources agree: {version}")
     stable_name = release_zip_name(f"v{version}")
     versioned_stem = stable_name.removesuffix(".zip")
     filename_pattern = re.compile(

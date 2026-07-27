@@ -13,6 +13,8 @@ jobs:
     uses: ./.github/workflows/linux-tests.yml
     with:
       run_asan: true
+      run_fuzz: true
+      run_clang_tidy: true
 
   windows-validate:
     name: Windows Validate (Build + Package + Gate)
@@ -64,6 +66,12 @@ jobs:
       - name: Build WinUI shell
         shell: cmd
         run: scripts\build-winui.cmd
+
+      # The Linux job cannot cover targets guarded by if(WIN32), so without this
+      # step those tests never ran anywhere.
+      - name: Run tests (Windows)
+        shell: pwsh
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
 
       - name: Resolve release zip path
         id: release_zip

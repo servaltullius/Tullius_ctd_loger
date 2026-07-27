@@ -175,6 +175,16 @@ void OnSkseMessage(SKSE::MessagingInterface::Message* message)
   if (!message) {
     return;
   }
+  // CrashLogger is itself an SKSE plugin and may load after us, in which case
+  // InstallCrashHandler saw no module image to cache. Re-check at each
+  // lifecycle stage so nested-fault suppression covers late loads too; the
+  // ranges publish at most once, so repeating this is cheap and idempotent.
+  if (message->type == SKSE::MessagingInterface::kPostLoad ||
+      message->type == SKSE::MessagingInterface::kPostPostLoad ||
+      message->type == SKSE::MessagingInterface::kInputLoaded ||
+      message->type == SKSE::MessagingInterface::kDataLoaded) {
+    skydiag::plugin::RefreshCrashLoggerModuleRanges();
+  }
   if (message->type == SKSE::MessagingInterface::kInputLoaded) {
     skydiag::plugin::HeartbeatOnInputLoaded();
   }

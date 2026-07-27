@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import struct
 import subprocess
 import sys
@@ -166,6 +167,45 @@ def test_zip_must_match_current_build() -> None:
         assert "packaged file differs from current build" in result.stderr
 
 
+def _write_vcpkg_manifest(root: Path, version: str | None) -> None:
+    manifest: dict[str, object] = {"name": "skyrimdiag", "dependencies": []}
+    if version is not None:
+        manifest["version-string"] = version
+    (root / "vcpkg.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def test_matching_vcpkg_version_passes() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        zip_path, build_dir, winui_dir = _make_fixture(root)
+        _write_vcpkg_manifest(root, "1.2.3")
+        result = _run(root, zip_path, build_dir, winui_dir)
+        assert result.returncode == 0, result.stderr
+
+
+def test_mismatched_vcpkg_version_fails() -> None:
+    # vcpkg.json sat 14 releases behind CMakeLists.txt because nothing compared
+    # them; the release path only ever read the CMake version.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        zip_path, build_dir, winui_dir = _make_fixture(root)
+        _write_vcpkg_manifest(root, "0.9.9")
+        result = _run(root, zip_path, build_dir, winui_dir)
+        assert result.returncode == 1
+        assert "version mismatch" in result.stderr
+
+
+def test_absent_vcpkg_version_is_allowed() -> None:
+    # Omitting the field is a valid way to keep CMakeLists.txt authoritative,
+    # so it must not be treated as a mismatch.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        zip_path, build_dir, winui_dir = _make_fixture(root)
+        _write_vcpkg_manifest(root, None)
+        result = _run(root, zip_path, build_dir, winui_dir)
+        assert result.returncode == 0, result.stderr
+
+
 def main() -> int:
     test_valid_release_zip_passes()
     test_pdb_entry_fails()
@@ -173,6 +213,9 @@ def main() -> int:
     test_non_x64_entry_fails()
     test_versioned_filename_mismatch_fails()
     test_zip_must_match_current_build()
+    test_matching_vcpkg_version_passes()
+    test_mismatched_vcpkg_version_fails()
+    test_absent_vcpkg_version_is_allowed()
     return 0
 
 

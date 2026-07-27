@@ -78,6 +78,25 @@ cmake --build build-linux
 ctest --test-dir build-linux --output-on-failure
 ```
 
+The CI-only checks below are not part of the default build, so run them locally
+before pushing changes to the analyzer sources:
+```bash
+# Static analysis. .clang-tidy runs with WarningsAsErrors, and the covered file
+# list comes from the compile database, so new analyzer sources are included
+# automatically. Windows-only sources are outside this gate.
+bash scripts/run_clang_tidy.sh
+
+# Parser fuzz smoke. The crash-log parsers read files written by other mods, so
+# they take the least trusted input in the project.
+cmake -S . -B build-fuzz -G Ninja -DSKYDIAG_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++
+cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser
+# The scratch directory goes first: libFuzzer writes new units into the first
+# corpus argument, so this keeps the checked-in seeds curated.
+mkdir -p /tmp/fuzz-crashlogger /tmp/fuzz-wct
+./build-fuzz/bin/fuzz_crashlogger_parser /tmp/fuzz-crashlogger fuzz/corpus/crashlogger -max_total_time=90
+./build-fuzz/bin/fuzz_wct_parser /tmp/fuzz-wct fuzz/corpus/wct -max_total_time=90
+```
+
 Recommended release-time local verification bundle:
 ```bash
 cmake -S . -B build-linux-test -G Ninja

@@ -65,6 +65,12 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
+      # Windows-only test targets are invisible to the Linux job, so a release
+      # must not be cut without running them.
+      - name: Run tests (Windows)
+        shell: pwsh
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
+
       - name: Resolve release zip path
         id: release_zip
         shell: pwsh

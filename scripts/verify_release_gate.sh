@@ -193,9 +193,17 @@ echo "[gate] 6/7 version, x64, no-PDB, and current-build match"
   --winui-dir "${WINUI_BUILD_ROOT}"
 
 echo "[gate] 7/7 reviewed-corpus analysis quality"
-if [[ -z "${SKYDIAG_QUALITY_CORPUS:-}" ]]; then
-  echo "  - SKIPPED (not measured; SKYDIAG_QUALITY_CORPUS is not set)"
-else
+
+# This step measures accuracy against reviewed real incidents. Hand-authored
+# fixtures cannot substitute for that, so without a real corpus the honest report
+# is "not measured" -- never a pass. Behavior regressions are covered separately
+# by skydiag_quality_corpus_gate_tests in ctest, which is a different claim:
+# "the analyzer still decides what it was designed to decide", not "the analyzer
+# is accurate on real crashes".
+QUALITY_CORPUS="${SKYDIAG_QUALITY_CORPUS:-}"
+if [[ -n "${QUALITY_CORPUS}" ]]; then
+  # An external corpus has unknown characteristics, so every threshold must be
+  # stated explicitly.
   quality_vars=(
     SKYDIAG_QUALITY_MIN_GROUND_TRUTH
     SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PREDICTIONS
@@ -210,11 +218,11 @@ else
       exit 1
     fi
   done
-
+  echo "  - corpus=${QUALITY_CORPUS} (external, thresholds from environment)"
   QUALITY_REPORT="${SKYDIAG_QUALITY_REPORT:-${WIN_ROOT}/build/analysis-quality.json}"
   mkdir -p "$(dirname "${QUALITY_REPORT}")"
   "${PYTHON_BIN}" "${REPO_ROOT}/scripts/analyze_bucket_quality.py" \
-    --root "${SKYDIAG_QUALITY_CORPUS}" \
+    --root "${QUALITY_CORPUS}" \
     --out-json "${QUALITY_REPORT}" \
     --min-ground-truth "${SKYDIAG_QUALITY_MIN_GROUND_TRUTH}" \
     --min-high-confidence-predictions "${SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PREDICTIONS}" \
@@ -222,6 +230,11 @@ else
     --min-top3-recall "${SKYDIAG_QUALITY_MIN_TOP3_RECALL}" \
     --min-high-confidence-precision "${SKYDIAG_QUALITY_MIN_HIGH_CONFIDENCE_PRECISION}" \
     --max-abstention-rate "${SKYDIAG_QUALITY_MAX_ABSTENTION_RATE}"
+else
+  echo "  - SKIPPED (not measured; SKYDIAG_QUALITY_CORPUS is not set)"
+  echo "    Attribution accuracy on real incidents is unverified for this release."
+  echo "    See tests/data/quality_corpus/README.md to configure a reviewed corpus."
+  echo "    (Behavior regressions are covered separately by skydiag_quality_corpus_gate_tests.)"
 fi
 
 echo "[gate] OK"

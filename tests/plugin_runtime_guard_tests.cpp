@@ -192,22 +192,50 @@ int main()
     "ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)",
     "Fatal capture must return after signaling before dynamic first-chance telemetry can execute.");
 
+  const std::string refreshCrashLoggerRangesBody = ExtractFunctionBody(
+    crashHandler,
+    "void RefreshCrashLoggerModuleRanges() noexcept");
+  AssertContains(
+    refreshCrashLoggerRangesBody,
+    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
+    "Crash handler must cache the current CrashLogger module image range.");
+  AssertContains(
+    refreshCrashLoggerRangesBody,
+    "QueryLoadedModuleRange(L\"CrashLoggerSSE.dll\")",
+    "Crash handler must also cache the legacy CrashLoggerSSE module image range.");
+  AssertContains(
+    refreshCrashLoggerRangesBody,
+    "PublishOnce(",
+    "CrashLogger ranges must publish through the write-once helper so the crash handler "
+    "never observes a torn range.");
+
   const std::string installCrashHandlerBody = ExtractFunctionBody(
     crashHandler,
     "bool InstallCrashHandler(");
   AssertContains(
     installCrashHandlerBody,
-    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
-    "Crash handler install must cache the current CrashLogger module image range.");
-  AssertContains(
-    installCrashHandlerBody,
-    "QueryLoadedModuleRange(L\"CrashLoggerSSE.dll\")",
-    "Crash handler install must also cache the legacy CrashLoggerSSE module image range.");
+    "RefreshCrashLoggerModuleRanges()",
+    "Crash handler install must cache the CrashLogger module image ranges.");
   AssertOrdered(
     installCrashHandlerBody,
-    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
+    "RefreshCrashLoggerModuleRanges()",
     "AddVectoredExceptionHandler(",
     "CrashLogger module ranges must be cached before the vectored handler can run.");
+
+  // CrashLogger is an SKSE plugin and can load after us, leaving the install-time
+  // lookup empty. Without a lifecycle refresh, nested-fault suppression would be
+  // permanently disabled for those load orders.
+  const std::string onSkseMessageBody = ExtractFunctionBody(
+    pluginMain,
+    "void OnSkseMessage(SKSE::MessagingInterface::Message* message)");
+  AssertContains(
+    onSkseMessageBody,
+    "RefreshCrashLoggerModuleRanges()",
+    "SKSE lifecycle must refresh CrashLogger module ranges so late-loaded builds are covered.");
+  AssertContains(
+    onSkseMessageBody,
+    "kPostLoad",
+    "CrashLogger range refresh must start at the earliest post-load lifecycle stage.");
 
   AssertOrdered(
     vectoredHandlerBody,
@@ -215,7 +243,8 @@ int main()
     "ResolveExceptionModuleBasenameUtf8(",
     "First-chance rate limiting must run before module/path resolution.");
 
-  const std::string publishCrashBody = ExtractFunctionBody(crashHandler, "bool TryPublishCrashRecord(");
+  const std::string publishCrashBody =
+    ExtractFunctionBody(crashHandler, "bool TryPublishCrashRecord(");
   AssertContains(
     publishCrashBody,
     "InterlockedCompareExchange(sequence, writing, observed)",
@@ -224,6 +253,7 @@ int main()
     publishCrashBody,
     "InterlockedExchange(sequence, committed)",
     "Crash record writer must publish an even committed sequence.");
+
   assert(
     publishCrashBody.find("std::string") == std::string::npos &&
     publishCrashBody.find("std::filesystem") == std::string::npos &&

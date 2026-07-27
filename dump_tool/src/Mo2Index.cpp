@@ -128,7 +128,7 @@ std::optional<std::filesystem::path> TryPickMo2ProfileDir(const std::filesystem:
     if (!ent.is_directory(ec)) {
       continue;
     }
-    const auto p = ent.path();
+    const auto& p = ent.path();
     const auto modlist = p / L"modlist.txt";
     if (!std::filesystem::exists(modlist, ec)) {
       continue;
@@ -273,7 +273,7 @@ std::optional<Mo2Index> TryBuildMo2IndexFromModulePaths(const std::vector<std::w
     if (!ent.is_directory(ec)) {
       continue;
     }
-    const auto p = ent.path();
+    const auto& p = ent.path();
     const auto name = p.filename().wstring();
     const auto lower = WideLower(name);
     dirByLower[lower] = p;

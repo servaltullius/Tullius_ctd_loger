@@ -14,6 +14,8 @@ using DWORD = std::uint32_t;
 #include <string>
 #include <string_view>
 
+#include "SkyrimDiagCrashCodes.h"
+
 namespace skydiag {
 struct SharedHeader;
 struct SharedLayout;
@@ -61,26 +63,39 @@ enum class FilterVerdict {
   kRetryNewerCrash,
 };
 
-inline constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
-inline constexpr std::uint32_t kStatusCppException = 0xE06D7363u;
-inline constexpr std::uint32_t kStatusClrException = 0xE0434F4Du;
-inline constexpr std::uint32_t kStatusBreakpoint = 0x80000003u;
-inline constexpr std::uint32_t kStatusControlCExit = 0xC000013Au;
+// Bounded retry budget for crash dump writes.
+inline constexpr int kDumpWriteAttempts = 3;
+
+// Decides whether dump attempt `attemptIndex` (0-based) should run.
+//
+// The first attempt always runs. Retries only make sense while the game process
+// is alive: MiniDumpWriteDump reads the target address space, so once the
+// process exits there is nothing left to capture and further attempts would
+// only delay the exit-path handling.
+inline bool ShouldAttemptDumpWrite(int attemptIndex, bool processStillActive) noexcept
+{
+  if (attemptIndex <= 0) {
+    return true;
+  }
+  if (attemptIndex >= kDumpWriteAttempts) {
+    return false;
+  }
+  return processStillActive;
+}
+
+// Re-exported from the shared definition so the plugin and the helper classify
+// fault severity identically; the plugin uses it to decide whether an already
+// published fault outranks a later one.
+inline constexpr std::uint32_t kStatusInvalidHandle = skydiag::kStatusInvalidHandle;
+inline constexpr std::uint32_t kStatusCppException = skydiag::kStatusCppException;
+inline constexpr std::uint32_t kStatusClrException = skydiag::kStatusClrException;
+inline constexpr std::uint32_t kStatusBreakpoint = skydiag::kStatusBreakpoint;
+inline constexpr std::uint32_t kStatusControlCExit = skydiag::kStatusControlCExit;
 inline constexpr std::uint32_t kStateInMenu = 1u << 2;
 
 inline bool IsStrongCrashExceptionCode(std::uint32_t code) noexcept
 {
-  if (code == 0) {
-    return false;
-  }
-  if (code == kStatusInvalidHandle ||
-      code == kStatusCppException ||
-      code == kStatusClrException ||
-      code == kStatusBreakpoint ||
-      code == kStatusControlCExit) {
-    return false;
-  }
-  return true;
+  return skydiag::IsStrongCrashExceptionCode(code);
 }
 
 inline CrashEventInfo BuildCrashEventInfo(
@@ -135,6 +150,25 @@ inline bool ShouldLatchCrashCapture(FilterVerdict verdict) noexcept
 inline bool IsCommittedCrashSequence(std::uint32_t crashSeq) noexcept
 {
   return crashSeq != 0u && (crashSeq & 1u) == 0u;
+}
+
+// Exit code 0 is treated as authoritative proof that an exception was handled,
+// which is what keeps handled first-chance exceptions from producing dumps.
+// That rule is deliberately absolute, so it also discards the rare genuine CTD
+// that exits 0 — a foreign handler calling ExitProcess(0), a launcher
+// normalizing the child exit code, or teardown that reaches a normal exit path
+// after a fatal fault.
+//
+// This predicate does not change the delete decision. It only marks the subset
+// where the deleted incident carried real fault evidence, so a compact metadata
+// record can be preserved for investigation. `kDeleteRecovered` covers the
+// heartbeat-recovery case separately, so reaching a benign zero-exit verdict
+// with a committed strong fault means recovery was never actually observed.
+inline bool ShouldQuarantineCleanExitEvidence(
+  std::uint32_t exitCode,
+  const CrashEventInfo& info) noexcept
+{
+  return exitCode == 0u && info.isStrong && IsCommittedCrashSequence(info.crashSeq);
 }
 
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -81,6 +82,41 @@ def project_version(root: str | Path) -> str:
     if version_match is None:
         raise ValueError(f"project VERSION not found in {cmake_lists}")
     return version_match.group(1)
+
+
+def vcpkg_version(root: str | Path) -> str | None:
+    """Version declared in vcpkg.json, or None when the manifest omits one.
+
+    vcpkg accepts several version fields; a top-level manifest is also allowed to
+    declare none at all, which is a valid way to keep CMakeLists.txt the single
+    source of truth.
+    """
+    manifest = Path(root) / "vcpkg.json"
+    if not manifest.is_file():
+        return None
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    for field in ("version", "version-string", "version-semver", "version-date"):
+        value = data.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def assert_version_sources_agree(root: str | Path) -> str:
+    """Ensure every declared project version matches CMakeLists.txt.
+
+    vcpkg.json drifted 14 releases behind CMakeLists.txt before this check
+    existed, because the release path only ever reads project_version() and
+    nothing compared the two.
+    """
+    version = project_version(root)
+    declared = vcpkg_version(root)
+    if declared is not None and declared != version:
+        raise ValueError(
+            f"version mismatch: CMakeLists.txt has {version} but vcpkg.json has {declared}. "
+            "Update vcpkg.json, or drop its version field to keep CMakeLists.txt authoritative."
+        )
+    return version
 
 
 def release_zip_name(tag_or_version: str) -> str:

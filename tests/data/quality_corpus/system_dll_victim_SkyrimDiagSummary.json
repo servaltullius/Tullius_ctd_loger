@@ -1,0 +1,34 @@
+{
+  "_fixture_intent": "The fault address lands in a Windows system DLL reached through a mod's callback. System modules are never actionable suspects, so the mod that drove the call must rank first.",
+  "schema_version": 2,
+  "crash_bucket_key": "av-read::d3d11.dll",
+  "dump_path": "SkyrimDiag_Crash_20260304_074500.dmp",
+  "incident": {
+    "incident_id": "corpus-system-dll-victim"
+  },
+  "triage": {
+    "review_status": "reviewed",
+    "ground_truth_mod": "ENB Helper Suite",
+    "reviewed_at_utc": "2026-03-04T08:10:00Z",
+    "verdict": "confirmed",
+    "notes": "Passed a released texture handle to d3d11; fixed in the mod's own update."
+  },
+  "exception": {
+    "code": "0xC0000005",
+    "module_plus_offset": "d3d11.dll+0x4C1B0"
+  },
+  "actionable_candidates": [
+    {
+      "confidence": "Medium",
+      "mod_name": "ENB Helper Suite",
+      "module_filename": "ENBHelperSuite.dll",
+      "evidence": "actionable_stack (system module excluded)"
+    }
+  ],
+  "suspects": [
+    {
+      "module_filename": "ENBHelperSuite.dll",
+      "inferred_mod_name": "ENB Helper Suite"
+    }
+  ]
+}

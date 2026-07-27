@@ -213,6 +213,10 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
       }
     }
     if (strongFirstChanceLoaderSignal) {
+      // HasStrongFirstChanceLoaderSignal() already requires first_chance to hold
+      // a value, but clang-tidy's optional dataflow does not cross that call, so
+      // it reports the dereferences below as unchecked.
+      // NOLINTBEGIN(bugprone-unchecked-optional-access)
       result.primary_reasons.push_back(
         language == i18n::Language::kEnglish
           ? (L"repeated suspicious first-chance exceptions appeared during loading (count=" +
@@ -227,6 +231,7 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
             : (L"first-chance 문맥에서 비시스템 모듈이 강조됨: " +
                 JoinModules(input.first_chance->recent_non_system_modules, 3)));
       }
+      // NOLINTEND(bugprone-unchecked-optional-access)
     }
   } else if (!input.actionable_candidates.empty()) {
     result.state_id = "freeze_candidate";

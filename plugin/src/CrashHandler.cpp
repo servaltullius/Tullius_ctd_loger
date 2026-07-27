@@ -23,8 +23,47 @@ std::atomic<std::uint64_t> g_lastFirstChanceSignature{0};
 std::atomic<std::uint64_t> g_lastFirstChanceQpc{0};
 std::atomic<std::uint64_t> g_firstChanceWindowStartQpc{0};
 std::atomic<std::uint32_t> g_firstChanceWindowCount{0};
-CrashHandlerModuleRange g_crashLoggerRange{};
-CrashHandlerModuleRange g_crashLoggerSseRange{};
+// A module range that transitions from empty to published exactly once.
+//
+// The crash handler reads these ranges from an arbitrary faulting thread while
+// the SKSE lifecycle may still be publishing them. Storing `end` before
+// releasing `begin` means a reader either sees begin == 0 (treated as "no
+// range", the pre-publication behavior) or sees both halves of a complete
+// range. A published range is never rewritten, so no torn update is possible.
+struct PublishOnceModuleRange
+{
+  std::atomic<std::uintptr_t> begin{0};
+  std::atomic<std::uintptr_t> end{0};
+
+  CrashHandlerModuleRange Load() const noexcept
+  {
+    const auto loadedBegin = begin.load(std::memory_order_acquire);
+    if (loadedBegin == 0u) {
+      return {};
+    }
+    return { loadedBegin, end.load(std::memory_order_relaxed) };
+  }
+
+  bool IsPublished() const noexcept
+  {
+    return begin.load(std::memory_order_acquire) != 0u;
+  }
+
+  void PublishOnce(CrashHandlerModuleRange range) noexcept
+  {
+    if (range.begin == 0u || range.end <= range.begin) {
+      return;
+    }
+    if (IsPublished()) {
+      return;
+    }
+    end.store(range.end, std::memory_order_relaxed);
+    begin.store(range.begin, std::memory_order_release);
+  }
+};
+
+PublishOnceModuleRange g_crashLoggerRange{};
+PublishOnceModuleRange g_crashLoggerSseRange{};
 
 constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
 
@@ -283,8 +322,8 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     if (ShouldSuppressNestedCrashLoggerException(
           IsCrashCaptureFrozen(shm),
           exceptionAddress,
-          g_crashLoggerRange,
-          g_crashLoggerSseRange)) {
+          g_crashLoggerRange.Load(),
+          g_crashLoggerSseRange.Load())) {
       // CrashLogger probes objects with handled exceptions while producing its
       // report. Once a crash candidate is already frozen, those probes must not
       // replace the original crash context.
@@ -332,11 +371,20 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 
 }  // namespace
 
+void RefreshCrashLoggerModuleRanges() noexcept
+{
+  // Safe context only. GetModuleHandleW takes the loader lock, so this must
+  // never run from VectoredHandler.
+  g_crashLoggerRange.PublishOnce(QueryLoadedModuleRange(L"CrashLogger.dll"));
+  g_crashLoggerSseRange.PublishOnce(QueryLoadedModuleRange(L"CrashLoggerSSE.dll"));
+}
+
 bool InstallCrashHandler(std::uint32_t crashHookMode)
 {
   g_crashHookMode = crashHookMode;
-  g_crashLoggerRange = QueryLoadedModuleRange(L"CrashLogger.dll");
-  g_crashLoggerSseRange = QueryLoadedModuleRange(L"CrashLoggerSSE.dll");
+  // CrashLogger may not be resident yet; the SKSE lifecycle refreshes these
+  // ranges again once the remaining plugins have loaded.
+  RefreshCrashLoggerModuleRanges();
 
   // First=1 to run early, but we never consume the exception.
   PVOID h = AddVectoredExceptionHandler(/*First=*/1, VectoredHandler);

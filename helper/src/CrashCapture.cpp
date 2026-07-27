@@ -56,6 +56,18 @@ constexpr DWORD kHeartbeatCheckIntervalMs = 2000;
 constexpr int kRequiredHeartbeatAdvances = 2;
 constexpr int kStableSnapshotAttempts = 64;
 
+// The retry window is deliberately short: the faulting game process is usually
+// seconds from exiting, and once it does the dump can no longer be produced.
+constexpr DWORD kDumpRetryBackoffMs = 250;
+
+bool IsProcessStillActive(HANDLE process) noexcept
+{
+  if (!process) {
+    return false;
+  }
+  return WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+}
+
 std::uint32_t ReadCrashSequence(const skydiag::SharedHeader* header) noexcept
 {
   if (!header) {
@@ -69,7 +81,42 @@ std::uint32_t ReadCrashSequence(const skydiag::SharedHeader* header) noexcept
 using skydiag::helper::internal::Hex32;
 using skydiag::helper::internal::Hex64;
 
+// Records the evidence of a strong fault that a zero exit code caused us to
+// discard. This is metadata only — no dump, no derived artifacts — so the clean
+// output directory the zero-exit filter exists to protect stays clean, while a
+// genuinely missed CTD still leaves something to investigate.
+void WriteCleanExitEvidenceRecord(
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  std::wstring_view context)
+{
+  const auto ts = Timestamp();
+  nlohmann::json j = nlohmann::json::object();
+  j["schema"] = "skydiag.clean_exit_evidence.v1";
+  j["reason"] = "strong_fault_published_but_process_exited_zero";
+  j["captured_at"] = WideToUtf8(ts);
+  j["filter_context"] = WideToUtf8(context);
+  j["exception_code"] = info.exceptionCode;
+  j["exception_addr"] = info.exceptionAddr;
+  j["faulting_tid"] = info.faultingTid;
+  j["state_flags"] = info.stateFlags;
+  j["crash_seq"] = info.crashSeq;
+  j["in_menu"] = info.inMenu;
+  j["note"] =
+    "The game published a strong fault record and no heartbeat recovery was observed, "
+    "but the process exited with code 0, so the dump was discarded as a handled exception. "
+    "Set PreserveFilteredCrashDumps=1 to keep the dump itself if this repeats.";
+
+  const auto recordPath = outBase / (L"SkyrimDiag_CleanExitEvidence_" + ts + L".json");
+  WriteTextFileUtf8(recordPath, j.dump(2));
+  AppendLogLine(
+    outBase,
+    L"Zero-exit filter discarded a strong fault record; wrote evidence metadata: "
+      + recordPath.wstring());
+}
+
 FilterVerdict ClassifyExitCodeVerdictWithContext(
+  const skydiag::helper::HelperConfig& cfg,
   std::uint32_t exitCode,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase,
@@ -89,6 +136,10 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
         + checkSuffix
         + L"); deleting dump (handled first-chance or shutdown exception)."
     );
+    if (cfg.enableCleanExitEvidenceQuarantine &&
+        ShouldQuarantineCleanExitEvidence(exitCode, info)) {
+      WriteCleanExitEvidenceRecord(outBase, info, context);
+    }
     return verdict;
   }
 
@@ -135,7 +186,30 @@ DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noe
   return WAIT_FAILED;
 }
 
+// Reads the exit code, reporting whether it is trustworthy. A failed query used
+// to leave the STILL_ACTIVE initializer in place, which reads as a non-zero
+// (crash-like) exit; callers must not treat that as an observed exit code.
+bool TryReadExitCode(
+  HANDLE process,
+  const std::filesystem::path& outBase,
+  DWORD* outExitCode) noexcept
+{
+  DWORD exitCode = STILL_ACTIVE;
+  if (!GetExitCodeProcess(process, &exitCode)) {
+    AppendLogLine(
+      outBase,
+      L"GetExitCodeProcess failed (error=" + std::to_wstring(GetLastError())
+        + L"); treating the exit code as unknown and keeping the dump.");
+    return false;
+  }
+  if (outExitCode) {
+    *outExitCode = exitCode;
+  }
+  return true;
+}
+
 FilterVerdict FilterShutdownException(
+  const skydiag::helper::HelperConfig& cfg,
   HANDLE process,
   HANDLE crashEvent,
   const skydiag::SharedHeader* shm,
@@ -151,8 +225,10 @@ FilterVerdict FilterShutdownException(
   }
   if (pw == WAIT_OBJECT_0 + 1u) {
     DWORD exitCode = STILL_ACTIVE;
-    GetExitCodeProcess(process, &exitCode);
-    return ClassifyExitCodeVerdictWithContext(exitCode, info, outBase, L"shutdown", -1);
+    if (!TryReadExitCode(process, outBase, &exitCode)) {
+      return FilterVerdict::kKeepDump;
+    }
+    return ClassifyExitCodeVerdictWithContext(cfg, exitCode, info, outBase, L"shutdown", -1);
   }
   if (pw == WAIT_TIMEOUT) {
     return FilterVerdict::kKeepDump;
@@ -161,6 +237,7 @@ FilterVerdict FilterShutdownException(
 }
 
 FilterVerdict FilterFirstChanceException(
+  const skydiag::helper::HelperConfig& cfg,
   HANDLE process,
   HANDLE crashEvent,
   const skydiag::SharedHeader* shm,
@@ -185,8 +262,11 @@ FilterVerdict FilterFirstChanceException(
     }
     if (waitResult == WAIT_OBJECT_0 + 1u) {
       DWORD exitCode = STILL_ACTIVE;
-      GetExitCodeProcess(process, &exitCode);
-      return ClassifyExitCodeVerdictWithContext(exitCode, info, outBase, L"heartbeat_check", attempt);
+      if (!TryReadExitCode(process, outBase, &exitCode)) {
+        return FilterVerdict::kKeepDump;
+      }
+      return ClassifyExitCodeVerdictWithContext(
+        cfg, exitCode, info, outBase, L"heartbeat_check", attempt);
     }
 
     const auto hb1 = shm->last_heartbeat_qpc;
@@ -581,19 +661,56 @@ bool HandleCrashEventTick(
     pendingHangViewerDumpPath->clear();
   }
 
+  // The crash event was already consumed and reset, and the game has committed
+  // its record and will not signal again for this fault. Nothing would drive a
+  // later attempt, so a transient failure (sharing violation, momentary disk
+  // pressure) has to be retried here or the incident is lost outright.
   std::wstring dumpErr;
-  const bool dumpOk = skydiag::helper::WriteDumpWithStreams(
-    proc.process,
-    proc.pid,
-    dumpPath,
-    dumpSnapshot,
-    dumpSnapshotBytes,
-    {},
-    {},
-    true,
-    dumpProfile,
-    /*isProcessSnapshot=*/false,
-    &dumpErr);
+  bool dumpOk = false;
+  for (int attempt = 0; attempt < kDumpWriteAttempts; ++attempt) {
+    if (attempt > 0) {
+      if (!ShouldAttemptDumpWrite(attempt, IsProcessStillActive(proc.process))) {
+        AppendLogLine(
+          outBase,
+          L"Skipping remaining crash dump retries because the game process already exited; "
+            L"its address space is gone and no dump can be produced.");
+        break;
+      }
+      Sleep(kDumpRetryBackoffMs);
+      std::error_code retryEc;
+      std::filesystem::remove(dumpPath, retryEc);
+      AppendLogLine(
+        outBase,
+        L"Retrying crash dump write (attempt " + std::to_wstring(attempt + 1)
+          + L" of " + std::to_wstring(kDumpWriteAttempts) + L").");
+    }
+
+    dumpErr.clear();
+    dumpOk = skydiag::helper::WriteDumpWithStreams(
+      proc.process,
+      proc.pid,
+      dumpPath,
+      dumpSnapshot,
+      dumpSnapshotBytes,
+      {},
+      {},
+      true,
+      dumpProfile,
+      /*isProcessSnapshot=*/false,
+      &dumpErr);
+    if (dumpOk) {
+      if (attempt > 0) {
+        AppendLogLine(
+          outBase,
+          L"Crash dump succeeded on attempt " + std::to_wstring(attempt + 1) + L".");
+      }
+      break;
+    }
+
+    AppendLogLine(
+      outBase,
+      L"Crash dump attempt " + std::to_wstring(attempt + 1) + L" failed: " + dumpErr);
+  }
 
   if (!dumpOk) {
     AppendLogLine(outBase, L"Crash dump failed: " + dumpErr);
@@ -609,7 +726,20 @@ bool HandleCrashEventTick(
     if (lastCrashDumpPath) {
       lastCrashDumpPath->clear();
     }
-    AppendLogLine(outBase, L"Crash dump write failed; crash capture state remains re-tryable.");
+
+    // Terminal state for this incident: no dump exists, so there is no evidence
+    // left to protect. Leaving the game frozen would keep blackbox recording
+    // stopped and, with strong-fault preservation active, would block every
+    // later CTD from being published. Thawing restores normal capture.
+    if (proc.shmWritable) {
+      const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+      AppendLogLine(
+        outBase,
+        thawed
+          ? L"Crash dump write failed after all retries; thawed capture so a later CTD can still be recorded."
+          : L"Crash dump write failed after all retries; capture was not thawed because a newer crash record "
+            L"is already present.");
+    }
     return true;
   }
 
@@ -620,13 +750,15 @@ bool HandleCrashEventTick(
   auto verdict = FilterVerdict::kKeepDump;
   if (proc.process) {
     verdict = FilterShutdownException(
+      cfg,
       proc.process,
       proc.crashEvent,
       proc.shm ? &proc.shm->header : nullptr,
       info,
       outBase);
     if (verdict == FilterVerdict::kKeepDump && proc.shm) {
-      verdict = FilterFirstChanceException(proc.process, proc.crashEvent, &proc.shm->header, info, outBase);
+      verdict = FilterFirstChanceException(
+        cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase);
     }
     if (verdict != FilterVerdict::kKeepDump) {
       if (verdict == FilterVerdict::kDeleteRecovered) {

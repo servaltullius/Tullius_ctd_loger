@@ -141,6 +141,7 @@ add_executable(skydiag_crash_capture_filter_logic_tests
 
 target_include_directories(skydiag_crash_capture_filter_logic_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_crash_capture_filter_logic_tests COMMAND skydiag_crash_capture_filter_logic_tests)
@@ -163,6 +164,7 @@ add_executable(skydiag_plugin_runtime_guard_tests
 
 target_include_directories(skydiag_plugin_runtime_guard_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_plugin_runtime_guard_tests COMMAND skydiag_plugin_runtime_guard_tests)
@@ -397,6 +399,21 @@ add_test(NAME skydiag_headless_analysis_policy_tests COMMAND skydiag_headless_an
 add_test(
   NAME skydiag_bucket_quality_script_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
+)
+
+# Attribution behavior gate. Release gate step 7 reuses this so the thresholds
+# are defined once, and running it here means regressions surface on every push
+# instead of only at release time.
+add_test(
+  NAME skydiag_quality_corpus_gate_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/quality_corpus_gate_tests.py"
+)
+
+# Asserts the workflows still invoke clang-tidy, the fuzzers, and the Windows
+# ctest run. Each of those was committed as configuration that nothing called.
+add_test(
+  NAME skydiag_ci_wiring_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ci_wiring_tests.py"
 )
 
 add_test(

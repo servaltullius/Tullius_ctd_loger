@@ -1,8 +1,13 @@
+# Enforced by scripts/run_clang_tidy.sh, which the Linux CI job runs over the
+# non-test sources reachable on Linux. WarningsAsErrors is on, so a new finding
+# fails CI rather than scrolling past; suppress verified false positives at the
+# call site with NOLINT and a reason.
 Checks: >
   -*,
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
   cppcoreguidelines-init-variables,
   cppcoreguidelines-slicing,
   misc-redundant-expression,
@@ -18,7 +23,16 @@ Checks: >
   readability-redundant-string-cstr,
   readability-simplify-boolean-expr,
 
-WarningsAsErrors: ''
+# bugprone-branch-clone is disabled above: the attribution code is written as
+# decision tables where distinct predicates deliberately share a body, and
+# collapsing them would hide which evidence path produced a verdict.
+CheckOptions:
+  # Keep the useful half of the check (if (x) return true; else return false;)
+  # but not the DeMorgan rewrites: "not one of {digit, dot, dash, alpha}" reads
+  # better as a negated set than as a chain of ANDed inequalities.
+  readability-simplify-boolean-expr.SimplifyDeMorgan: false
+
+WarningsAsErrors: '*'
 
 HeaderFilterRegex: '(dump_tool|helper|plugin|shared)/.*\.h$'
 
