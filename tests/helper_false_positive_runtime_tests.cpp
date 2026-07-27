@@ -14,10 +14,13 @@
 using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
 using skydiag::helper::internal::CleanupCrashArtifactsAfterZeroExit;
+using skydiag::helper::internal::CrashCaptureState;
 using skydiag::helper::internal::HandleProcessExitTick;
 using skydiag::helper::internal::LaunchDeferredViewersAfterExit;
+using skydiag::helper::internal::TryWriteCleanExitEvidenceRecord;
 using skydiag::tests::runtime::AssertContains;
 using skydiag::tests::runtime::FileExists;
+using skydiag::tests::runtime::FindSingleFileByPrefix;
 using skydiag::tests::runtime::LaunchSleepingChildProcess;
 using skydiag::tests::runtime::MakeAttachedProcessForChild;
 using skydiag::tests::runtime::MakeSharedLayout;
@@ -68,6 +71,38 @@ HANDLE LaunchDelayedArtifactWriter(const std::filesystem::path& artifactPath)
   return process.hProcess;
 }
 
+void TestCleanExitEvidenceWriteFailureDoesNotClaimSuccess()
+{
+  const auto tempRoot = MakeTempDir(L"skydiag_clean_exit_write_failure");
+  const auto blockedOutputBase = tempRoot / L"not_a_directory";
+  WriteAllTextUtf8(blockedOutputBase, "blocks child file creation");
+
+  HelperConfig cfg = MakeTestConfig();
+  cfg.enableCleanExitEvidenceQuarantine = true;
+
+  CrashCaptureState crashState{};
+  crashState.capturedInfo = skydiag::helper::internal::BuildCrashEventInfo(
+    0xC0000005u,
+    0x12345678u,
+    42u,
+    skydiag::kState_Frozen);
+  crashState.capturedInfo.crashSeq = 2u;
+
+  Require(
+    !TryWriteCleanExitEvidenceRecord(
+      cfg,
+      blockedOutputBase,
+      &crashState,
+      L"write_failure_test",
+      /*dumpPreserved=*/false),
+    "A failed metadata write must be reported to the caller");
+  Require(
+    !crashState.cleanExitEvidenceWritten,
+    "A failed metadata write must not mark clean-exit evidence as available");
+
+  std::filesystem::remove_all(tempRoot);
+}
+
 void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_false_positive_cleanup");
@@ -93,7 +128,7 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifac
   HelperConfig cfg = MakeTestConfig();
   skydiag::helper::AttachedProcess proc{};
   skydiag::helper::internal::HelperLoopState state{};
-  state.crashCaptured = true;
+  state.crashCaptured.latched = true;
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
   state.pendingCrashEtw.etwPath = etwPath;
@@ -108,7 +143,7 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifac
   Require(!FileExists(blackboxPath), "Handled AV with exit_code=0 must delete blackbox");
   Require(!FileExists(pluginScanPath), "Handled AV with exit_code=0 must delete plugin scan");
   Require(!FileExists(manifestPath), "Handled AV with exit_code=0 must delete incident manifest");
-  Require(!state.crashCaptured, "Handled AV with exit_code=0 must clear crashCaptured state");
+  Require(!state.crashCaptured.latched, "Handled AV with exit_code=0 must clear crashCaptured state");
   Require(!state.pendingCrashAnalysis.active, "Handled AV with exit_code=0 must cancel pending analysis");
   Require(state.capturedCrashDumpPath.empty(), "Handled AV with exit_code=0 must clear captured dump path");
   Require(state.pendingCrashViewerDumpPath.empty(), "Handled AV with exit_code=0 must clear deferred viewer path");
@@ -131,7 +166,7 @@ void TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter()
   HelperConfig cfg = MakeTestConfig();
   skydiag::helper::AttachedProcess proc{};
   skydiag::helper::internal::HelperLoopState state{};
-  state.crashCaptured = true;
+  state.crashCaptured.latched = true;
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashAnalysis.active = true;
   state.pendingCrashAnalysis.dumpPath = dumpPath.wstring();
@@ -198,7 +233,14 @@ void TestHandleProcessExitTick_TreatsStrongSharedMemoryExceptionAsHandledOnZeroE
   cfg.enableWerDumpFallbackHint = true;
 
   skydiag::helper::internal::HelperLoopState state{};
-  state.crashCaptured = true;
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo =
+    skydiag::helper::internal::BuildCrashEventInfo(
+      0xC0000005u,
+      0x12345678u,
+      child.pi.dwThreadId,
+      skydiag::kState_Frozen | skydiag::kState_InMenu);
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
 
@@ -210,11 +252,24 @@ void TestHandleProcessExitTick_TreatsStrongSharedMemoryExceptionAsHandledOnZeroE
     "Process exit tick must handle a signaled zero-exit process");
   Require(!FileExists(dumpPath), "Strong shared-memory exception with exit_code=0 must delete dump");
   Require(!FileExists(reportPath), "Strong shared-memory exception with exit_code=0 must delete report");
-  Require(!state.crashCaptured, "Strong shared-memory exception with exit_code=0 must clear capture state");
+  Require(!state.crashCaptured.latched, "Strong shared-memory exception with exit_code=0 must clear capture state");
   Require(state.pendingCrashViewerDumpPath.empty(), "Strong shared-memory exception with exit_code=0 must suppress viewer");
   Require(
     !FileExists(outBase / "SkyrimDiag_WER_LocalDumps_Hint.txt"),
     "Zero exit must not emit abnormal-exit WER guidance");
+
+  const auto evidencePath = FindSingleFileByPrefix(
+    outBase,
+    L"SkyrimDiag_CleanExitEvidence_",
+    L".json");
+  const auto evidence = ReadAllTextUtf8(evidencePath);
+  AssertContains(
+    evidence,
+    "strong_fault_published_but_process_exited_zero_dump_discarded",
+    "Late zero-exit cleanup must preserve metadata for the captured strong fault");
+  AssertContains(evidence, "\"dump_preserved\": false", "Discarded dump state must be explicit");
+  AssertContains(evidence, "\"filter_context\": \"process_exit\"", "Late exit context must be explicit");
+  AssertContains(evidence, "\"exception_addr\": 305419896", "Evidence must use the capture-time snapshot");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(
@@ -245,7 +300,14 @@ void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()
   cfg.preserveFilteredCrashDumps = true;
   skydiag::helper::AttachedProcess proc{};
   skydiag::helper::internal::HelperLoopState state{};
-  state.crashCaptured = true;
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo =
+    skydiag::helper::internal::BuildCrashEventInfo(
+      0xC0000005u,
+      0x87654321u,
+      77u,
+      skydiag::kState_Frozen);
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
 
@@ -254,12 +316,33 @@ void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()
   Require(FileExists(dumpPath), "PreserveFilteredCrashDumps must keep the filtered dump file");
   Require(!FileExists(reportPath), "PreserveFilteredCrashDumps must remove derived reports");
   Require(!FileExists(pluginScanPath), "PreserveFilteredCrashDumps must remove plugin-scan sidecars");
-  Require(!state.crashCaptured, "Preserved filtered dump must not block a later real CTD capture");
+  Require(!state.crashCaptured.latched, "Preserved filtered dump must not block a later real CTD capture");
   Require(state.capturedCrashDumpPath.empty(), "Preserved filtered dump must detach from active crash state");
   Require(state.pendingCrashViewerDumpPath.empty(), "Preserved filtered dump must not auto-open as a real CTD");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "without keeping the crashCaptured latch", "Preserve behavior must be explicit in helper log");
+
+  const auto evidencePath = FindSingleFileByPrefix(
+    outBase,
+    L"SkyrimDiag_CleanExitEvidence_",
+    L".json");
+  const auto evidence = ReadAllTextUtf8(evidencePath);
+  AssertContains(
+    evidence,
+    "strong_fault_published_but_process_exited_zero_dump_preserved",
+    "Preserved filtered dump must have a preservation-specific reason");
+  AssertContains(evidence, "\"dump_preserved\": true", "Preserved dump state must be explicit");
+  Require(
+    evidence.find("Set PreserveFilteredCrashDumps=1") == std::string::npos,
+    "Evidence must not tell the user to enable an option that is already active");
+
+  // Cleanup is idempotent after the latch clears and must not create another
+  // metadata record for the same captured generation.
+  CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &state);
+  Require(
+    FindSingleFileByPrefix(outBase, L"SkyrimDiag_CleanExitEvidence_", L".json") == evidencePath,
+    "Repeated cleanup must not duplicate clean-exit evidence");
 
   std::filesystem::remove_all(outBase);
 }
@@ -275,6 +358,7 @@ int wmain(int argc, wchar_t** argv)
       return 0;
     }
 
+    TestCleanExitEvidenceWriteFailureDoesNotClaimSuccess();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts();
     TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter();
     TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit();

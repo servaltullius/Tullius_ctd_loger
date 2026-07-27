@@ -2,8 +2,6 @@
 
 #include <cstdint>
 
-#include "SkyrimDiagCrashCodes.h"
-
 namespace skydiag::plugin {
 
 struct CrashHandlerModuleRange

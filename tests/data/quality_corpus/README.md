@@ -1,19 +1,27 @@
 # Analysis quality regression corpus
 
-Fixtures scored by `scripts/analyze_bucket_quality.py`, run as
-`skydiag_quality_corpus_gate_tests` in ctest.
+Raw signal fixtures are executed by `skydiag_quality_corpus_runner`, which calls
+the production `BuildCandidateConsensus()` implementation and writes temporary
+`*_SkyrimDiagSummary.json` files. `skydiag_quality_corpus_gate_tests` then scores
+only those generated summaries with `scripts/analyze_bucket_quality.py`.
 
 ## What this corpus is — and is not
 
-These are **hand-authored summary fixtures**, not real incidents. Each one pins a
-decision the analyzer is supposed to make: prefer the real culprit over a hook
-framework, do not blame a system DLL for being the observation point, abstain
-rather than guess when the evidence is thin.
+These are **hand-authored signal scenarios**, not real incidents. Each one pins a
+decision candidate consensus is supposed to make: combine independent evidence,
+keep stack-only candidates cautious, retain a useful top-three candidate, or
+abstain rather than manufacture a result from boost-only history.
 
-That makes them a **behavior regression gate**, not a measurement of real-world
-accuracy. Passing says the analyzer still decides what it was designed to decide.
-It says nothing about how often it identifies a real root cause — see the
-accuracy caveats in the top-level `README.md`.
+Unlike precomputed Summary fixtures, candidate order, status, confidence, score,
+and abstention are produced during the test by the same `CandidateConsensus.cpp`
+used by the analyzer. Each scenario checks its exact candidate contract before
+the generated summaries are aggregated. A broken consensus implementation must
+therefore fail before the metric report can pass.
+
+This remains a **behavior regression gate**, not a measurement of real-world
+accuracy. Passing says the implementation still makes these five designed
+decisions. It says nothing about how often it identifies a real root cause — see
+the accuracy caveats in the top-level `README.md`.
 
 The two claims are kept deliberately separate. Release gate step 7 measures
 accuracy against reviewed real incidents, and it reports `SKIPPED (not measured)`
@@ -36,8 +44,10 @@ export SKYDIAG_QUALITY_MAX_ABSTENTION_RATE=0.35
 bash scripts/verify_release_gate.sh
 ```
 
-Setting `SKYDIAG_QUALITY_CORPUS` replaces this corpus rather than adding to it,
-so a real corpus should be a superset of the behaviors pinned here.
+`SKYDIAG_QUALITY_CORPUS` accepts reviewed analyzer Summary files and is separate
+from these raw signal scenarios. A real corpus should cover at least the same
+important evidence shapes, but these synthetic fixtures must never be mixed into
+its accuracy denominator.
 
 Real dumps carry usernames and drive letters, so keep that corpus out of the
 repository.
@@ -47,19 +57,23 @@ tool — a source-level fix, a reproduction that disappears when one mod is
 removed, or an author confirming the bug. A cause that came from reading this
 tool's own report must not become its own ground truth.
 
-## Fixture format
+## Fixture and execution contract
 
-`*_SkyrimDiagSummary.json`, the analyzer's own output schema. The gate reads:
+Source files are named `*_signals.json` and contain:
 
 | Field | Role |
 |---|---|
-| `triage.ground_truth_mod` | Confirmed culprit; the answer being graded |
-| `triage.review_status` | Marks the incident reviewed |
-| `actionable_candidates[]` | Ranked predictions (`confidence`, `mod_name`, `module_filename`) |
-| `suspects[]` | Raw stack suspects, used when no actionable candidate exists |
-| `crash_bucket_key` | Groups incidents for per-bucket reporting |
-| `incident.incident_id` | Deduplicates the same incident appearing twice |
+| `_fixture_kind` | Versioned raw-signal schema identifier |
+| `scenario_id` | Stable synthetic incident and output filename key |
+| `ground_truth_mod` | Expected answer for this designed scenario, not real-incident ground truth |
+| `signals[]` | Inputs mapped directly to production `CandidateSignal` fields |
+| `expected_candidates[]` | Exact ordered subset of generated candidate fields to pin |
 
-A candidate matches when any of `mod_name`, `inferred_mod_name`,
-`module_filename`, `plugin_name`, `primary_identifier` or `display_name` equals
-`ground_truth_mod`, compared case-insensitively with collapsed whitespace.
+The runner intentionally accepts ASCII fixture identifiers only. Production
+Unicode canonicalization remains covered by `skydiag_candidate_consensus_tests`;
+keeping this corpus ASCII makes the generated cross-platform Summary JSON
+deterministic.
+
+The source directory must not contain `*_SkyrimDiagSummary.json`. Summaries are
+always created in a temporary directory during the test, which prevents a stale
+checked-in prediction from bypassing the production consensus code.

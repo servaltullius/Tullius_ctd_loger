@@ -68,6 +68,7 @@ For in-game validation without waiting:
 - GitHub Actions is optional/reference only and should not be the sole release gate.
 - Main workflow: `.github/workflows/ci.yml`
 - Main workflow scope: Linux tests, Windows build/package/gate, and repo guard checks
+- Tag-triggered releases rerun Linux unit, ASan+UBSan, clang-tidy, and parser fuzz gates before the Windows build/package/release job.
 - Manual WinUI headless smoke workflow: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`
 
@@ -133,7 +134,9 @@ SKYDIAG_REPO="$(wslpath -w "$PWD")" /mnt/c/Windows/System32/WindowsPowerShell/v1
 
 ## Analysis Quality Corpus Gate
 
-Synthetic fixtures verify deterministic behavior, but they do not establish real-world CTD-cause accuracy. Use reviewed, real incident summaries with `triage.ground_truth_mod` populated to measure the same `actionable_candidates` ordering that users see:
+CTest builds `skydiag_quality_corpus_runner`, feeds its raw signal fixtures through the production `BuildCandidateConsensus()` implementation, and scores only the generated temporary summaries. This pins deterministic candidate-consensus behavior without allowing stale precomputed predictions to pass.
+
+Synthetic fixtures do not establish real-world CTD-cause accuracy. Use reviewed, real incident summaries with `triage.ground_truth_mod` populated to measure the same `actionable_candidates` ordering that users see:
 
 ```powershell
 python scripts/analyze_bucket_quality.py `

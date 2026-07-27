@@ -1,0 +1,19 @@
+{
+  "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
+  "_fixture_intent": "History alone is boost-only evidence and must not manufacture an actionable candidate.",
+  "scenario_id": "justified_abstention",
+  "ground_truth_mod": "Script Extender Patch",
+  "fault_module_plus_offset": "SkyrimSE.exe+0x12AB00",
+  "signals": [
+    {
+      "family_id": "history_repeat",
+      "candidate_key": "Script Extender Patch",
+      "display_name": "ScriptExtenderPatch.dll",
+      "mod_name": "Script Extender Patch",
+      "module_filename": "ScriptExtenderPatch.dll",
+      "detail": "Repeated in the same crash bucket",
+      "weight": 3
+    }
+  ],
+  "expected_candidates": []
+}

@@ -74,10 +74,15 @@ std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
   return out;
 }
 
-void WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
+bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
 {
-  std::ofstream f(path, std::ios::binary);
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (!f) {
+    return false;
+  }
   f.write(s.data(), static_cast<std::streamsize>(s.size()));
+  f.flush();
+  return static_cast<bool>(f);
 }
 
 bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)

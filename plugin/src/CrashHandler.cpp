@@ -13,6 +13,7 @@
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/SharedMemory.h"
+#include "SkyrimDiagCrashCodes.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::plugin {
@@ -116,12 +117,12 @@ bool IsBenignFirstChanceException(DWORD code) noexcept
   // Benign exceptions: first-chance C++ SEH, OutputDebugString, thread naming,
   // breakpoints in debuggers, etc.
   switch (code) {
-    case 0xE06D7363:                     // MSVC C++ exception (SEH __CxxThrowException)
-    case 0x406D1388:                     // SetThreadName via RaiseException (legacy)
-    case EXCEPTION_BREAKPOINT:           // 0x80000003 — debugger breakpoint
-    case EXCEPTION_SINGLE_STEP:          // 0x80000004 — single step (debugger)
-    case 0x40010006:                     // OutputDebugStringA
-    case 0x4001000A:                     // OutputDebugStringW
+    case skydiag::kStatusCppException:         // MSVC C++ exception (SEH __CxxThrowException)
+    case skydiag::kStatusThreadNameLegacy:     // SetThreadName via RaiseException (legacy)
+    case skydiag::kStatusBreakpoint:           // debugger breakpoint
+    case skydiag::kStatusSingleStep:           // single step (debugger)
+    case skydiag::kStatusOutputDebugStringA:   // OutputDebugStringA
+    case skydiag::kStatusOutputDebugStringW:   // OutputDebugStringW
       return true;
     default:
       return false;

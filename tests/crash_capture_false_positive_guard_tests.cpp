@@ -162,8 +162,27 @@ int main()
     "Zero-exit cleanup must not preserve artifacts based on strong first-chance exception evidence.");
   AssertContains(
     zeroExitCleanupBody,
-    "if (!state->crashCaptured)",
+    "if (!state->crashCaptured.latched)",
     "Zero-exit cleanup must short-circuit when crash capture state is not active.");
+  AssertOrdered(
+    zeroExitCleanupBody,
+    "TryWriteCleanExitEvidenceRecord(",
+    "RemoveCrashArtifactsForDump(",
+    "Late zero-exit evidence must be written before filtered artifacts are removed.");
+  AssertContains(
+    zeroExitCleanupBody,
+    "ShouldPreserveFilteredDump(",
+    "Late zero-exit cleanup must preserve the dump when required metadata cannot be written.");
+
+  AssertOrdered(
+    crashTickBody,
+    "TryWriteCleanExitEvidenceRecord(",
+    "if (preserveFilteredDump)",
+    "Fast zero-exit evidence must be written before the dump is preserved or removed.");
+  AssertContains(
+    crashTickBody,
+    "ShouldPreserveFilteredDump(",
+    "Fast zero-exit filtering must preserve the dump when required metadata cannot be written.");
 
   AssertContains(
     zeroExitCleanupBody,
@@ -172,7 +191,7 @@ int main()
 
   AssertContains(
     zeroExitCleanupBody,
-    "RemoveCrashArtifactsForDump(\n      outBase,\n      state->capturedCrashDumpPath,\n      crashEtwPath,\n      cfg.preserveFilteredCrashDumps)",
+    "RemoveCrashArtifactsForDump(\n      outBase,\n      state->capturedCrashDumpPath,\n      crashEtwPath,\n      preserveDump)",
     "Zero-exit cleanup must remove crash artifact set tied to captured dump.");
 
   AssertOrdered(

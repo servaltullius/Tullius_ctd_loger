@@ -15,7 +15,7 @@ namespace skydiag::helper::internal {
 std::wstring Timestamp();
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg);
 
-void WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s);
+bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s);
 bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out);
 
 std::string TrimAscii(std::string_view s);

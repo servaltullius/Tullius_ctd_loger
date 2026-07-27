@@ -6,6 +6,10 @@ executed it, the fuzz harnesses built only on a developer's machine, and the
 Windows-only ctest targets were invisible to the Linux job. Configuration that
 no workflow calls looks like coverage in review and provides none, so these
 tests assert the call sites rather than the config files.
+
+Both the normal CI caller and the tag-triggered release caller must enable the
+full Linux gate set. Version tags are excluded from ci.yml, so relying on a
+previous branch run would let a directly tagged commit bypass those checks.
 """
 
 import sys
@@ -47,9 +51,10 @@ def check_clang_tidy_is_wired(failures: list[str]) -> None:
     if "scripts/run_clang_tidy.sh" not in linux:
         failures.append("linux-tests.yml never calls scripts/run_clang_tidy.sh")
 
-    ci = _read(WORKFLOWS / "ci.yml")
-    if "run_clang_tidy: true" not in ci:
-        failures.append("ci.yml does not enable the clang-tidy job")
+    for name in ("ci.yml", "release.yml"):
+        caller = _read(WORKFLOWS / name)
+        if "run_clang_tidy: true" not in caller:
+            failures.append(f"{name} does not enable the clang-tidy job")
 
 
 def check_fuzzers_are_wired(failures: list[str]) -> None:
@@ -64,9 +69,17 @@ def check_fuzzers_are_wired(failures: list[str]) -> None:
             "hangs the workflow instead of reporting a regression"
         )
 
-    ci = _read(WORKFLOWS / "ci.yml")
-    if "run_fuzz: true" not in ci:
-        failures.append("ci.yml does not enable the fuzz job")
+    for name in ("ci.yml", "release.yml"):
+        caller = _read(WORKFLOWS / name)
+        if "run_fuzz: true" not in caller:
+            failures.append(f"{name} does not enable the fuzz job")
+
+
+def check_sanitizers_are_wired(failures: list[str]) -> None:
+    for name in ("ci.yml", "release.yml"):
+        caller = _read(WORKFLOWS / name)
+        if "run_asan: true" not in caller:
+            failures.append(f"{name} does not enable the ASan + UBSan job")
 
 
 def check_windows_tests_are_wired(failures: list[str]) -> None:
@@ -82,6 +95,7 @@ def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
     check_fuzzers_are_wired(failures)
+    check_sanitizers_are_wired(failures)
     check_windows_tests_are_wired(failures)
 
     if failures:

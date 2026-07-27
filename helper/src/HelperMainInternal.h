@@ -12,6 +12,7 @@
 #include "SkyrimDiagHelper/ProcessAttach.h"
 
 #include "CrashEtwCapture.h"
+#include "CrashCapture.h"
 #include "HangCapture.h"
 #include "PendingCrashAnalysis.h"
 
@@ -22,7 +23,7 @@ inline constexpr ULONGLONG kManualCaptureDebounceMs = 250;
 
 struct HelperLoopState
 {
-  bool crashCaptured = false;
+  CrashCaptureState crashCaptured{};
   HangCaptureState hangState{};
   std::wstring pendingHangViewerDumpPath;
   std::wstring pendingCrashViewerDumpPath;

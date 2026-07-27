@@ -2,7 +2,7 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
-## v0.2.58 (2026-07-27)
+## v0.2.58 (2026-07-28)
 
 ### 한눈에 보기
 - 이번 릴리즈는 **CTD 증거가 조용히 사라지는 경로를 막고, 릴리즈·CI 검증 체계를 실제로 동작하게 연결**합니다.
@@ -12,9 +12,9 @@
 
 ### 수정
 - **덤프 쓰기 재시도** — 크래시 이벤트는 덤프 기록 전에 소비되고 같은 결함으로 다시 신호되지 않으므로, 일시적 쓰기 실패는 곧 사고 유실이었습니다. 대상 프로세스가 살아 있는 동안 제한된 횟수만큼 그 자리에서 재시도합니다.
-- **정상 종료 증거 격리(신규, 기본 켜짐)** — exit 0은 예외가 처리되었다는 신호로 보고 덤프를 삭제하지만, 외부 크래시 핸들러의 `ExitProcess(0)`이나 종료 코드를 정규화하는 런처 때문에 실제 CTD가 0으로 끝나는 경우가 있습니다. 강한 결함이 이미 게시되었고 하트비트 복구가 관측되지 않았다면 `SkyrimDiag_CleanExitEvidence_*.json` 메타데이터를 남깁니다. **덤프와 파생 리포트는 그대로 삭제되며, 결함 메타데이터만 보존됩니다.** `SkyrimDiagHelper.ini`의 `EnableCleanExitEvidenceQuarantine`으로 끌 수 있습니다.
+- **정상 종료 증거 격리(신규, 기본 켜짐)** — exit 0은 예외가 처리되었다는 신호로 보고 덤프를 삭제하지만, 외부 크래시 핸들러의 `ExitProcess(0)`이나 종료 코드를 정규화하는 런처 때문에 실제 CTD가 0으로 끝나는 경우가 있습니다. 강한 결함이 이미 게시되었고 하트비트 복구가 관측되지 않았다면 초기 필터와 지연된 프로세스 종료 경로 모두에서 `SkyrimDiag_CleanExitEvidence_*.json`을 산출물 삭제 전에 기록합니다. JSON은 캡처 당시 결함 정보와 `dump_preserved` 상태를 보존합니다. 기본 설정에서는 덤프와 파생 리포트를 삭제하고, `PreserveFilteredCrashDumps=1`이면 덤프는 남기되 파생 리포트와 자동 동작만 억제합니다. JSON 쓰기가 실패하면 증거를 모두 잃지 않도록 덤프를 자동 보존합니다. `SkyrimDiagHelper.ini`의 `EnableCleanExitEvidenceQuarantine`으로 JSON 기록을 끌 수 있습니다.
 - **늦게 로드되는 CrashLogger 대응** — CrashLogger도 SKSE 플러그인이라 우리 뒤에 로드될 수 있고, 그러면 설치 시점 조회 결과가 비어 중첩 결함 억제가 영구히 꺼졌습니다. SKSE `kPostLoad` 시점부터 모듈 범위를 다시 조회하고, 크래시 핸들러가 찢어진 범위를 절대 관측하지 않도록 write-once 게시 규약으로 공개합니다.
-- **양성 예외 코드 분류 보정** — 싱글 스텝, 스레드 이름 설정, `OutputDebugString` 예외를 강한 결함 분류에서 제외해 정상 동작이 CTD로 보고되지 않게 했습니다.
+- **양성 예외 코드 분류 보정** — 싱글 스텝, 스레드 이름 설정, `OutputDebugString` 예외를 강한 결함 분류에서 제외해 unsafe `CrashHookMode=2`에서 이런 정상 알림이 clean-exit 증거 JSON의 대상이 되지 않게 했습니다. 기본 `CrashHookMode=1`의 치명적 예외 선택은 기존과 같습니다.
 - **분석기 이식성/불필요 복사 수정** — `Mo2Index`의 경로 사본 2곳을 참조로 바꾸고, 상위 코드 유닛이 부호 확장되던 `wchar_t` 폭 확장 경로를 부호 없는 등가 타입 경유로 고쳤습니다.
 
 ### 빌드·검증
@@ -22,13 +22,15 @@
 - **clang-tidy를 CI에 연결** — 설정 파일만 있고 아무도 실행하지 않던 상태였습니다. Linux CI에서 `WarningsAsErrors`로 돌고, 검사 대상 파일 목록은 컴파일 데이터베이스에서 도출하므로 새 분석기 소스가 자동 포함됩니다. Windows 전용 소스는 이 게이트 밖이며, 커버 목록을 CI 로그에 출력해 그 공백이 보이게 했습니다.
 - **퍼저를 CI에서 실제 실행** — 크래시 로그 파서는 다른 모드가 쓴 파일을 읽는, 이 프로젝트에서 가장 신뢰할 수 없는 입력을 다룹니다. `crashlogger`/`wct` 파서 퍼저를 CI에서 실행하고, libFuzzer가 새 입력을 첫 번째 코퍼스 인자에 쓰므로 스크래치 디렉터리를 앞에 두어 검수된 시드 코퍼스가 오염되지 않게 했습니다.
 - **Windows 테스트를 CI에서 실행** — 헬퍼·플러그인 런타임 테스트는 Windows에서만 빌드되므로, 그동안 로컬 실행에만 의존하고 있었습니다.
-- **분석기 동작 회귀 게이트 신설** — `skydiag_quality_corpus_gate_tests`가 저장소 내 픽스처 코퍼스로 후보 순위 변화가 조용히 발생하는지 매 푸시마다 검사합니다. 이는 **실사고 정확도 측정이 아니라 동작 회귀 감지**이며, 정확도 주장은 릴리즈 게이트 7단계가 계속 담당합니다.
+- **분석기 동작 회귀 게이트 신설** — `skydiag_quality_corpus_runner`가 raw `CandidateSignal` 픽스처를 production `BuildCandidateConsensus()`에 통과시켜 후보 순위·상태·신뢰도·점수·기권을 생성하고, `skydiag_quality_corpus_gate_tests`가 그 임시 Summary만 품질 채점기에 전달합니다. 미리 계산된 Summary는 소스 코퍼스에 둘 수 없습니다. 이는 **실사고 정확도 측정이 아니라 candidate-consensus 동작 회귀 감지**이며, 정확도 주장은 릴리즈 게이트 7단계가 계속 담당합니다.
 - **미측정 상태를 명확히 보고** — 검수된 실사고 코퍼스가 없으면 릴리즈 게이트가 "이번 릴리즈의 실사고 귀속 정확도는 미검증"이라고 명시적으로 출력합니다. 통과로 위장하지 않습니다.
 - **CI 배선 자체를 지키는 테스트** — `skydiag_ci_wiring_tests`가 clang-tidy·퍼저·Windows ctest 호출이 워크플로에서 사라지면 실패합니다.
+- **태그 릴리즈도 전체 Linux 게이트 실행** — 일반 CI가 버전 태그를 제외하므로, 릴리즈 워크플로가 unit·ASan+UBSan·clang-tidy·parser fuzz를 직접 다시 실행한 뒤 Windows 빌드/패키징으로 넘어갑니다.
+- **Windows 테스트 이식성 보정** — source/XAML guard는 CRLF를 LF로 정규화하고, .NET share-text fixture의 stdout은 UTF-8로 명시해 Windows runner의 기본 CP1252 때문에 검증이 실패하지 않게 했습니다.
 
 ### 주의사항
 - **2차 결함 보존 기능은 이번 릴리즈에서 제외했습니다.** 최초의 강한 결함을 이후 결함으로부터 지키는 기능을 구현했다가 릴리즈 전에 되돌렸습니다. 보존은 설계상 `crash_seq`를 움직이지 않는데 `crash_seq`가 이 프로토콜의 유일한 세대 카운터라, 헬퍼 입장에서 억제 사실이 보이지 않습니다. 버전이 없는 별도 상태 플래그를 더해도 두 프로세스가 하나의 사고를 원자적으로 볼 수는 없어, 검사를 추가할 때마다 다른 인터리빙이 남았습니다. 안전한 구현에는 단일 원자적 선형화 지점을 갖는 프로토콜, 즉 `SharedLayout` 버전 상향과 ADR-0004 호환성 검토가 필요하며 다음 릴리즈 과제입니다. **v0.2.57 대비 동시성 위험은 추가되지 않았습니다.**
-- 정상 종료 증거 격리는 JSON 메타데이터만 남깁니다. 덤프가 필요하면 `PreserveFilteredCrashDumps=1`을 별도로 켜야 합니다.
+- 정상 종료 증거 격리는 기본적으로 JSON 메타데이터만 남깁니다. 덤프가 필요하면 `PreserveFilteredCrashDumps=1`을 켜야 하며, 이 경우 JSON도 덤프가 보존됐다고 명시합니다.
 - 검수된 실사고 코퍼스가 여전히 없으므로, 다른 크래시 로거 대비 적중률을 수치로 주장하지 않습니다.
 - 플러그인, Helper, 분석기와 WinUI가 함께 바뀌므로 이전 릴리즈 파일과 섞지 말고 zip 전체를 업데이트해 주세요.
 
@@ -39,10 +41,10 @@
 - Linux 전체 테스트 `60/60` 통과.
 - clang-tidy(`WarningsAsErrors`): clean.
 - Windows WinUI self-contained publish: 성공.
-- Packaging(`dist/Tullius_ctd_loger_v0.2.58.zip`, `--no-pdb`): 성공 (`87,782,747` bytes, 523 entries, PDB 0개).
+- Packaging(`dist/Tullius_ctd_loger_v0.2.58.zip`, `--no-pdb`): 성공 (`87,783,466` bytes, 523 entries, PDB 0개).
 - Release gate: `OK` (핵심 PE/Windows App SDK x64, 현재 빌드 해시 일치, 버전 소스 일치).
 - 실사고 품질 코퍼스: `SKIPPED (not measured)` — 코퍼스 미제공.
-- SHA-256: `20FAE82BBE5BA513C9CCB49D1916D4D3635AB30872DFEF0CD99034843F0D6DEA`.
+- SHA-256: `ED3C69AA09B2CD05707511B3C2194D80A69E41ACB65ABEC12656C9A5F4F6A501`.
 
 ## v0.2.57 (2026-07-23)
 

@@ -82,37 +82,52 @@ using skydiag::helper::internal::Hex32;
 using skydiag::helper::internal::Hex64;
 
 // Records the evidence of a strong fault that a zero exit code caused us to
-// discard. This is metadata only — no dump, no derived artifacts — so the clean
-// output directory the zero-exit filter exists to protect stays clean, while a
-// genuinely missed CTD still leaves something to investigate.
-void WriteCleanExitEvidenceRecord(
+// filter. The metadata states whether PreserveFilteredCrashDumps kept the dump;
+// derived artifacts and automatic crash actions remain filtered either way.
+bool WriteCleanExitEvidenceRecord(
   const std::filesystem::path& outBase,
   const CrashEventInfo& info,
-  std::wstring_view context)
+  std::wstring_view context,
+  bool dumpPreserved)
 {
   const auto ts = Timestamp();
   nlohmann::json j = nlohmann::json::object();
   j["schema"] = "skydiag.clean_exit_evidence.v1";
-  j["reason"] = "strong_fault_published_but_process_exited_zero";
+  j["reason"] = dumpPreserved
+    ? "strong_fault_published_but_process_exited_zero_dump_preserved"
+    : "strong_fault_published_but_process_exited_zero_dump_discarded";
   j["captured_at"] = WideToUtf8(ts);
   j["filter_context"] = WideToUtf8(context);
+  j["dump_preserved"] = dumpPreserved;
   j["exception_code"] = info.exceptionCode;
   j["exception_addr"] = info.exceptionAddr;
   j["faulting_tid"] = info.faultingTid;
   j["state_flags"] = info.stateFlags;
   j["crash_seq"] = info.crashSeq;
   j["in_menu"] = info.inMenu;
-  j["note"] =
-    "The game published a strong fault record and no heartbeat recovery was observed, "
-    "but the process exited with code 0, so the dump was discarded as a handled exception. "
-    "Set PreserveFilteredCrashDumps=1 to keep the dump itself if this repeats.";
+  j["note"] = dumpPreserved
+    ? "The game published a strong fault record and no heartbeat recovery was observed, "
+      "but the process exited with code 0. The filtered dump remains available; derived "
+      "crash artifacts and automatic crash actions were suppressed."
+    : "The game published a strong fault record and no heartbeat recovery was observed, "
+      "but the process exited with code 0, so the dump was discarded as a handled exception. "
+      "Set PreserveFilteredCrashDumps=1 to keep the dump itself if this repeats.";
 
   const auto recordPath = outBase / (L"SkyrimDiag_CleanExitEvidence_" + ts + L".json");
-  WriteTextFileUtf8(recordPath, j.dump(2));
+  if (!WriteTextFileUtf8(recordPath, j.dump(2))) {
+    AppendLogLine(
+      outBase,
+      L"Failed to write clean-exit evidence metadata; the filtered dump must be preserved: "
+        + recordPath.wstring());
+    return false;
+  }
   AppendLogLine(
     outBase,
-    L"Zero-exit filter discarded a strong fault record; wrote evidence metadata: "
+    (dumpPreserved
+       ? L"Zero-exit filter preserved the dump for a strong fault record; wrote evidence metadata: "
+       : L"Zero-exit filter discarded the dump for a strong fault record; wrote evidence metadata: ")
       + recordPath.wstring());
+  return true;
 }
 
 FilterVerdict ClassifyExitCodeVerdictWithContext(
@@ -121,7 +136,8 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
   const CrashEventInfo& info,
   const std::filesystem::path& outBase,
   std::wstring_view context,
-  int checkIndex)
+  int checkIndex,
+  CrashCaptureState* crashState)
 {
   const auto verdict = ClassifyExitCodeVerdict(exitCode, info, outBase);
   const std::wstring checkSuffix = (checkIndex >= 0)
@@ -136,9 +152,9 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
         + checkSuffix
         + L"); deleting dump (handled first-chance or shutdown exception)."
     );
-    if (cfg.enableCleanExitEvidenceQuarantine &&
+    if (crashState && cfg.enableCleanExitEvidenceQuarantine &&
         ShouldQuarantineCleanExitEvidence(exitCode, info)) {
-      WriteCleanExitEvidenceRecord(outBase, info, context);
+      crashState->cleanExitFilterContext.assign(context);
     }
     return verdict;
   }
@@ -214,7 +230,8 @@ FilterVerdict FilterShutdownException(
   HANDLE crashEvent,
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
-  const std::filesystem::path& outBase)
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState)
 {
   const DWORD pw = WaitForCrashOrProcess(crashEvent, process, kShutdownWaitMs);
   if (pw == WAIT_OBJECT_0 && crashEvent) {
@@ -228,7 +245,8 @@ FilterVerdict FilterShutdownException(
     if (!TryReadExitCode(process, outBase, &exitCode)) {
       return FilterVerdict::kKeepDump;
     }
-    return ClassifyExitCodeVerdictWithContext(cfg, exitCode, info, outBase, L"shutdown", -1);
+    return ClassifyExitCodeVerdictWithContext(
+      cfg, exitCode, info, outBase, L"shutdown", -1, crashState);
   }
   if (pw == WAIT_TIMEOUT) {
     return FilterVerdict::kKeepDump;
@@ -242,7 +260,8 @@ FilterVerdict FilterFirstChanceException(
   HANDLE crashEvent,
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
-  const std::filesystem::path& outBase)
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState)
 {
   if (!shm) {
     return FilterVerdict::kKeepDump;
@@ -266,7 +285,7 @@ FilterVerdict FilterFirstChanceException(
         return FilterVerdict::kKeepDump;
       }
       return ClassifyExitCodeVerdictWithContext(
-        cfg, exitCode, info, outBase, L"heartbeat_check", attempt);
+        cfg, exitCode, info, outBase, L"heartbeat_check", attempt, crashState);
     }
 
     const auto hb1 = shm->last_heartbeat_qpc;
@@ -470,6 +489,40 @@ void ProcessValidCrashDump(
 
 }
 
+bool IsCleanExitEvidenceRequired(
+  const skydiag::helper::HelperConfig& cfg,
+  const CrashCaptureState* crashState) noexcept
+{
+  return crashState &&
+         cfg.enableCleanExitEvidenceQuarantine &&
+         ShouldQuarantineCleanExitEvidence(0u, crashState->capturedInfo);
+}
+
+bool TryWriteCleanExitEvidenceRecord(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState,
+  std::wstring_view context,
+  bool dumpPreserved)
+{
+  if (!IsCleanExitEvidenceRequired(cfg, crashState)) {
+    return false;
+  }
+  if (crashState->cleanExitEvidenceWritten) {
+    return true;
+  }
+
+  if (!WriteCleanExitEvidenceRecord(
+        outBase,
+        crashState->capturedInfo,
+        context,
+        dumpPreserved)) {
+    return false;
+  }
+  crashState->cleanExitEvidenceWritten = true;
+  return true;
+}
+
 const skydiag::SharedLayout* StableSharedSnapshot::layout() const noexcept
 {
   if (byteSize < sizeof(skydiag::SharedLayout) || !storage) {
@@ -582,7 +635,7 @@ bool HandleCrashEventTick(
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
   DWORD waitMs,
-  bool* crashCaptured,
+  CrashCaptureState* crashState,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
   std::wstring* lastCrashDumpPath,
@@ -610,7 +663,7 @@ bool HandleCrashEventTick(
     AppendLogLine(outBase, L"Failed to reset crash event: " + std::to_wstring(GetLastError()));
   }
 
-  if (crashCaptured && *crashCaptured) {
+  if (crashState && crashState->latched) {
     AppendLogLine(outBase, L"Crash event signaled again; ignoring (already captured).");
     return true;
   }
@@ -643,6 +696,11 @@ bool HandleCrashEventTick(
       L"Crash event rejected before dump capture because crash_seq is not a non-zero committed sequence "
         L"(crash_seq=" + std::to_wstring(info.crashSeq) + L").");
     return false;
+  }
+  if (crashState) {
+    crashState->capturedInfo = info;
+    crashState->cleanExitEvidenceWritten = false;
+    crashState->cleanExitFilterContext.clear();
   }
   AppendLogLine(
     outBase,
@@ -740,6 +798,9 @@ bool HandleCrashEventTick(
           : L"Crash dump write failed after all retries; capture was not thawed because a newer crash record "
             L"is already present.");
     }
+    if (crashState) {
+      crashState->latched = false;
+    }
     return true;
   }
 
@@ -755,10 +816,11 @@ bool HandleCrashEventTick(
       proc.crashEvent,
       proc.shm ? &proc.shm->header : nullptr,
       info,
-      outBase);
+      outBase,
+      crashState);
     if (verdict == FilterVerdict::kKeepDump && proc.shm) {
       verdict = FilterFirstChanceException(
-        cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase);
+        cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
     }
     if (verdict != FilterVerdict::kKeepDump) {
       if (verdict == FilterVerdict::kDeleteRecovered) {
@@ -774,10 +836,32 @@ bool HandleCrashEventTick(
           L"Discarding the superseded first-chance dump state and immediately retrying the newer crash event.");
       }
 
-      if (cfg.preserveFilteredCrashDumps) {
+      bool preserveFilteredDump = cfg.preserveFilteredCrashDumps;
+      if (verdict == FilterVerdict::kDeleteBenign) {
+        const std::wstring_view context =
+          (crashState && !crashState->cleanExitFilterContext.empty())
+            ? std::wstring_view(crashState->cleanExitFilterContext)
+            : std::wstring_view(L"filtered_exit");
+        const bool evidenceRequired = IsCleanExitEvidenceRequired(cfg, crashState);
+        const bool evidenceWritten = TryWriteCleanExitEvidenceRecord(
+          cfg,
+          outBase,
+          crashState,
+          context,
+          cfg.preserveFilteredCrashDumps);
+        preserveFilteredDump = ShouldPreserveFilteredDump(
+          cfg.preserveFilteredCrashDumps,
+          evidenceRequired,
+          evidenceWritten);
+      }
+      if (preserveFilteredDump) {
         AppendLogLine(
           outBase,
-          L"Filtered dump file preserved without crash post-processing or capture latch (PreserveFilteredCrashDumps=1).");
+          cfg.preserveFilteredCrashDumps
+            ? L"Filtered dump file preserved without crash post-processing or capture latch "
+              L"(PreserveFilteredCrashDumps=1)."
+            : L"Clean-exit evidence metadata write failed; preserved the filtered dump as a fail-safe "
+              L"without crash post-processing or capture latch.");
       } else {
         std::error_code ec;
         std::filesystem::remove(dumpPath, ec);
@@ -785,8 +869,8 @@ bool HandleCrashEventTick(
       if (lastCrashDumpPath) {
         lastCrashDumpPath->clear();
       }
-      if (crashCaptured) {
-        *crashCaptured = false;
+      if (crashState) {
+        crashState->latched = false;
       }
       AppendLogLine(outBase, L"Filtered crash event consumed; capture remains ready for a later CTD.");
       return true;
@@ -804,8 +888,8 @@ bool HandleCrashEventTick(
     pendingCrashAnalysis,
     pendingCrashViewerDumpPath);
 
-  if (crashCaptured) {
-    *crashCaptured = ShouldLatchCrashCapture(verdict);
+  if (crashState) {
+    crashState->latched = ShouldLatchCrashCapture(verdict);
   }
   AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
   return true;

@@ -401,12 +401,26 @@ add_test(
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
 )
 
-# Attribution behavior gate. Release gate step 7 reuses this so the thresholds
-# are defined once, and running it here means regressions surface on every push
-# instead of only at release time.
+# Build synthetic summaries from raw signal fixtures through the production
+# CandidateConsensus implementation. The Python gate then scores those generated
+# summaries with the same quality script used for reviewed incident corpora.
+add_executable(skydiag_quality_corpus_runner
+  quality_corpus_runner.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CandidateConsensus.cpp"
+)
+
+target_include_directories(skydiag_quality_corpus_runner PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+target_link_libraries(skydiag_quality_corpus_runner PRIVATE
+  nlohmann_json::nlohmann_json
+)
+
 add_test(
   NAME skydiag_quality_corpus_gate_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/quality_corpus_gate_tests.py"
+    --runner "$<TARGET_FILE:skydiag_quality_corpus_runner>"
 )
 
 # Asserts the workflows still invoke clang-tidy, the fuzzers, and the Windows

@@ -11,6 +11,7 @@ using skydiag::helper::internal::IsCommittedCrashSequence;
 using skydiag::helper::internal::QueueDeferredCrashViewer;
 using skydiag::helper::internal::ShouldLatchCrashCapture;
 using skydiag::helper::internal::ShouldAttemptDumpWrite;
+using skydiag::helper::internal::ShouldPreserveFilteredDump;
 using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
 using skydiag::helper::internal::kDumpWriteAttempts;
 
@@ -185,8 +186,9 @@ static void TestDumpWriteRetry_BudgetIsBounded()
   assert(!ShouldAttemptDumpWrite(kDumpWriteAttempts + 1, /*processStillActive=*/true));
 }
 
-// Quarantine marks the zero-exit deletions that discarded real fault evidence.
-// It never changes the verdict itself; the dump is still deleted.
+// Quarantine marks zero-exit filters that carried real fault evidence. The
+// verdict stays filtered, while dump preservation is decided separately from
+// the metadata-write result.
 static void TestQuarantineCleanExit_StrongCommittedZeroExit()
 {
   auto info = BuildCrashEventInfo(0xC0000005u, 0x439Eu, 17120u, 0u);
@@ -227,6 +229,26 @@ static void TestQuarantineCleanExit_RequiresCommittedSequence()
   assert(!ShouldQuarantineCleanExitEvidence(0u, info));
 }
 
+static void TestQuarantineWriteFailurePreservesDumpAsFailSafe()
+{
+  assert(ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/false,
+    /*evidenceRequired=*/true,
+    /*evidenceWritten=*/false));
+  assert(!ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/false,
+    /*evidenceRequired=*/true,
+    /*evidenceWritten=*/true));
+  assert(!ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/false,
+    /*evidenceRequired=*/false,
+    /*evidenceWritten=*/false));
+  assert(ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/true,
+    /*evidenceRequired=*/false,
+    /*evidenceWritten=*/false));
+}
+
 int main()
 {
   TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit();
@@ -260,5 +282,6 @@ int main()
   TestQuarantineCleanExit_RequiresZeroExit();
   TestQuarantineCleanExit_RequiresStrongException();
   TestQuarantineCleanExit_RequiresCommittedSequence();
+  TestQuarantineWriteFailurePreservesDumpAsFailSafe();
   return 0;
 }

@@ -43,6 +43,7 @@ def _run_harness(summary_name: str, mode: str) -> str:
         ],
         cwd=str(REPO_ROOT),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
     )

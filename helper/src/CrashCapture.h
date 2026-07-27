@@ -41,6 +41,16 @@ struct CrashEventInfo {
   bool inMenu = false;
 };
 
+// Helper-owned state for one captured crash generation. Keeping the immutable
+// CrashEventInfo snapshot beside the latch lets the later process-exit path
+// describe the same incident even after shared memory changes or disappears.
+struct CrashCaptureState {
+  bool latched = false;
+  CrashEventInfo capturedInfo{};
+  bool cleanExitEvidenceWritten = false;
+  std::wstring cleanExitFilterContext;
+};
+
 struct StableSharedSnapshot {
   struct AlignedByteDeleter {
     std::size_t alignment = alignof(std::max_align_t);
@@ -83,9 +93,9 @@ inline bool ShouldAttemptDumpWrite(int attemptIndex, bool processStillActive) no
   return processStillActive;
 }
 
-// Re-exported from the shared definition so the plugin and the helper classify
-// fault severity identically; the plugin uses it to decide whether an already
-// published fault outranks a later one.
+// Re-exported from the shared definition so helper quarantine uses the same
+// known-benign constants as the plugin's exception filtering. The plugin does
+// not currently preserve or rank an earlier fault over a later one.
 inline constexpr std::uint32_t kStatusInvalidHandle = skydiag::kStatusInvalidHandle;
 inline constexpr std::uint32_t kStatusCppException = skydiag::kStatusCppException;
 inline constexpr std::uint32_t kStatusClrException = skydiag::kStatusClrException;
@@ -159,8 +169,8 @@ inline bool IsCommittedCrashSequence(std::uint32_t crashSeq) noexcept
 // normalizing the child exit code, or teardown that reaches a normal exit path
 // after a fatal fault.
 //
-// This predicate does not change the delete decision. It only marks the subset
-// where the deleted incident carried real fault evidence, so a compact metadata
+// This predicate does not change the filter decision. It only marks the subset
+// where the filtered incident carried real fault evidence, so a compact metadata
 // record can be preserved for investigation. `kDeleteRecovered` covers the
 // heartbeat-recovery case separately, so reaching a benign zero-exit verdict
 // with a committed strong fault means recovery was never actually observed.
@@ -180,13 +190,30 @@ bool TryClearRecoveredCrashFreeze(
   skydiag::SharedLayout* shm,
   std::uint32_t expectedCrashSeq) noexcept;
 void WriteWerFallbackHint(const std::filesystem::path& outBase);
+bool IsCleanExitEvidenceRequired(
+  const skydiag::helper::HelperConfig& cfg,
+  const CrashCaptureState* crashState) noexcept;
+bool TryWriteCleanExitEvidenceRecord(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState,
+  std::wstring_view context,
+  bool dumpPreserved);
+
+inline bool ShouldPreserveFilteredDump(
+  bool preserveConfigured,
+  bool evidenceRequired,
+  bool evidenceWritten) noexcept
+{
+  return preserveConfigured || (evidenceRequired && !evidenceWritten);
+}
 
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
   DWORD waitMs,
-  bool* crashCaptured,
+  CrashCaptureState* crashState,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
   std::wstring* lastCrashDumpPath,

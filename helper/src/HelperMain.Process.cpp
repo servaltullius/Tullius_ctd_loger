@@ -52,9 +52,24 @@ void CleanupCrashArtifactsAfterZeroExit(
   if (!state) {
     return;
   }
-  if (!state->crashCaptured) {
+  if (!state->crashCaptured.latched) {
     return;
   }
+
+  // Preserve the capture-time fault metadata before terminating analysis or
+  // deleting any filtered artifacts. If metadata cannot be written, retain the
+  // dump as a fail-safe even when the INI normally allows deletion.
+  const bool evidenceRequired = IsCleanExitEvidenceRequired(cfg, &state->crashCaptured);
+  const bool evidenceWritten = TryWriteCleanExitEvidenceRecord(
+    cfg,
+    outBase,
+    &state->crashCaptured,
+    L"process_exit",
+    cfg.preserveFilteredCrashDumps);
+  const bool preserveDump = ShouldPreserveFilteredDump(
+    cfg.preserveFilteredCrashDumps,
+    evidenceRequired,
+    evidenceWritten);
 
   if (state->pendingCrashAnalysis.active) {
     if (state->pendingCrashAnalysis.process) {
@@ -81,14 +96,16 @@ void CleanupCrashArtifactsAfterZeroExit(
       outBase,
       state->capturedCrashDumpPath,
       crashEtwPath,
-      cfg.preserveFilteredCrashDumps);
-    if (cfg.preserveFilteredCrashDumps) {
+      preserveDump);
+    if (preserveDump) {
       AppendLogLine(
         outBase,
-        L"exit_code=0 after filtered crash; dump file preserved, removed "
+        (cfg.preserveFilteredCrashDumps
+           ? L"exit_code=0 after filtered crash; dump file preserved, removed "
+           : L"exit_code=0 clean-exit evidence write failed; dump preserved as a fail-safe, removed ")
           + std::to_wstring(removed)
           + L" derived crash artifact(s), without keeping the crashCaptured latch "
-          L"(PreserveFilteredCrashDumps=1): "
+          + (cfg.preserveFilteredCrashDumps ? L"(PreserveFilteredCrashDumps=1): " : L": ")
           + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
     } else {
       AppendLogLine(
@@ -101,7 +118,7 @@ void CleanupCrashArtifactsAfterZeroExit(
   }
   state->capturedCrashDumpPath.clear();
   state->pendingCrashViewerDumpPath.clear();
-  state->crashCaptured = false;
+  state->crashCaptured.latched = false;
 }
 
 void AppendExitClassificationLog(const std::filesystem::path& outBase)
@@ -208,7 +225,7 @@ bool HandleProcessExitTick(
       DrainCrashEventBeforeExit(cfg, proc, outBase, state);
     }
     if (exitCode != 0 &&
-        !state->crashCaptured &&
+        !state->crashCaptured.latched &&
         cfg.enableWerDumpFallbackHint) {
       WriteWerFallbackHint(outBase);
       AppendLogLine(

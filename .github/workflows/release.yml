@@ -12,6 +12,12 @@ jobs:
   linux:
     name: Linux
     uses: ./.github/workflows/linux-tests.yml
+    # ci.yml ignores version tags, so the release caller must enable the full
+    # Linux gate set itself instead of relying on an earlier branch run.
+    with:
+      run_asan: true
+      run_fuzz: true
+      run_clang_tidy: true
 
   release:
     name: Build + Release

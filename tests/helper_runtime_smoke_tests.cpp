@@ -17,6 +17,7 @@ using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
 using skydiag::helper::internal::CleanupCrashArtifactsAfterZeroExit;
 using skydiag::helper::internal::CaptureStableSharedSnapshot;
+using skydiag::helper::internal::CrashCaptureState;
 using skydiag::helper::internal::ExtractCrashInfo;
 using skydiag::helper::internal::HandleCrashEventTick;
 using skydiag::helper::internal::PendingCrashAnalysis;
@@ -63,7 +64,7 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   cfg.autoAnalyzeDump = false;
   cfg.enableIncidentManifest = true;
 
-  bool crashCaptured = false;
+  CrashCaptureState crashState{};
   PendingCrashEtwCapture pendingCrashEtw{};
   PendingCrashAnalysis pendingCrashAnalysis{};
   std::wstring lastCrashDumpPath;
@@ -75,7 +76,7 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
     proc,
     outBase,
     /*waitMs=*/0,
-    &crashCaptured,
+    &crashState,
     &pendingCrashEtw,
     &pendingCrashAnalysis,
     &lastCrashDumpPath,
@@ -83,7 +84,11 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
     &pendingCrashViewerDumpPath);
 
   Require(handled, "Crash event should be consumed");
-  Require(crashCaptured, "Crash capture state should flip true");
+  Require(crashState.latched, "Crash capture state should flip true");
+  Require(
+    crashState.capturedInfo.crashSeq == 2u &&
+      crashState.capturedInfo.exceptionCode == 0xC0000005u,
+    "Crash capture state must retain the immutable crash metadata for exit-time classification");
   Require(!lastCrashDumpPath.empty(), "Crash dump path should be recorded");
   Require(FileExists(lastCrashDumpPath), "Crash dump file must exist");
   Require(
@@ -170,7 +175,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
   Require(proc.crashEvent != nullptr, "CreateEventW failed");
 
   HelperConfig cfg = MakeTestConfig();
-  bool crashCaptured = false;
+  CrashCaptureState crashState{};
   PendingCrashEtwCapture pendingCrashEtw{};
   PendingCrashAnalysis pendingCrashAnalysis{};
   std::wstring lastCrashDumpPath;
@@ -182,7 +187,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
     proc,
     outBase,
     /*waitMs=*/0,
-    &crashCaptured,
+    &crashState,
     &pendingCrashEtw,
     &pendingCrashAnalysis,
     &lastCrashDumpPath,
@@ -190,7 +195,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
     &pendingCrashViewerDumpPath);
 
   Require(!handled, "Zero crash sequence must be rejected before dump capture");
-  Require(!crashCaptured, "Rejected crash sequence must not set capture latch");
+  Require(!crashState.latched, "Rejected crash sequence must not set capture latch");
   Require(lastCrashDumpPath.empty(), "Rejected crash sequence must not expose a dump path");
 
   shared->header.crash_seq = 1u;
@@ -200,14 +205,14 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
     proc,
     outBase,
     /*waitMs=*/0,
-    &crashCaptured,
+    &crashState,
     &pendingCrashEtw,
     &pendingCrashAnalysis,
     &lastCrashDumpPath,
     &pendingHangViewerDumpPath,
     &pendingCrashViewerDumpPath);
   Require(!oddHandled, "Odd crash sequence must be rejected before dump capture");
-  Require(!crashCaptured, "Odd crash sequence must not set capture latch");
+  Require(!crashState.latched, "Odd crash sequence must not set capture latch");
   Require(lastCrashDumpPath.empty(), "Odd crash sequence must not expose a dump path");
 
   std::error_code ec;
@@ -235,14 +240,14 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts()
   HelperConfig cfg = MakeTestConfig();
   skydiag::helper::AttachedProcess proc{};
   skydiag::helper::internal::HelperLoopState state{};
-  state.crashCaptured = true;
+  state.crashCaptured.latched = true;
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
 
   CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &state);
 
   Require(!FileExists(dumpPath), "Handled strong exception with exit_code=0 must remove artifacts");
-  Require(!state.crashCaptured, "Handled strong exception with exit_code=0 must clear capture state");
+  Require(!state.crashCaptured.latched, "Handled strong exception with exit_code=0 must clear capture state");
   Require(state.pendingCrashViewerDumpPath.empty(), "Handled strong exception with exit_code=0 must suppress viewer");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
