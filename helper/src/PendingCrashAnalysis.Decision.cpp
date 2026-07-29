@@ -33,7 +33,7 @@ DWORD CrashAnalysisTimeoutMs(const skydiag::helper::HelperConfig& cfg)
   if (sec > 180u) {
     sec = 180u;
   }
-  return static_cast<DWORD>(sec * 1000u);
+  return sec * 1000u;
 }
 
 bool TryEvaluateCrashRecapture(

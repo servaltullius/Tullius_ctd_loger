@@ -14,7 +14,6 @@
 
 namespace {
 
-using skydiag::helper::internal::AppendLogLine;
 using skydiag::protocol::MakeKernelName;
 
 }  // namespace
@@ -55,20 +54,21 @@ std::wstring BuildCrashEventUnavailableMessage(const AttachedProcess& proc, std:
   return message;
 }
 
-std::uint32_t RemoveCrashArtifactsForDump(
+CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& outBase,
   std::wstring_view dumpPath,
   const std::filesystem::path& extraArtifactPath,
   bool preserveDumpFile)
 {
+  CrashArtifactRemovalResult result{};
   if (dumpPath.empty()) {
-    return 0;
+    return result;
   }
 
   const std::filesystem::path dumpFs(dumpPath);
   const std::wstring stem = dumpFs.stem().wstring();
   if (stem.empty()) {
-    return 0;
+    return result;
   }
 
   std::vector<std::filesystem::path> artifacts;
@@ -98,14 +98,28 @@ std::uint32_t RemoveCrashArtifactsForDump(
     artifacts.push_back(extraArtifactPath);
   }
 
-  std::uint32_t removedCount = 0;
   for (const auto& path : artifacts) {
     if (path.empty()) {
       continue;
     }
     std::error_code ec;
+    const bool isDump = path == dumpFs;
+    if (isDump) {
+      result.dumpExistedBefore = std::filesystem::exists(path, ec);
+      if (ec) {
+        result.dumpError = ec;
+        AppendLogLine(
+          outBase,
+          L"Failed to inspect crash dump before removal: " + path.wstring()
+            + L" (err=" + std::to_wstring(ec.value()) + L")");
+        ec.clear();
+      }
+    }
     const bool removed = std::filesystem::remove(path, ec);
     if (ec) {
+      if (isDump) {
+        result.dumpError = ec;
+      }
       AppendLogLine(
         outBase,
         L"Failed to remove crash artifact: " + path.wstring()
@@ -113,10 +127,22 @@ std::uint32_t RemoveCrashArtifactsForDump(
       continue;
     }
     if (!ec && removed) {
-      ++removedCount;
+      ++result.removedCount;
     }
   }
-  return removedCount;
+
+  std::error_code existsEc;
+  result.dumpExistsAfter = std::filesystem::exists(dumpFs, existsEc);
+  if (existsEc) {
+    result.dumpError = existsEc;
+    // Fail closed: an unobservable final state must not be reported as deleted.
+    result.dumpExistsAfter = true;
+    AppendLogLine(
+      outBase,
+      L"Failed to inspect crash dump after artifact removal: " + dumpFs.wstring()
+        + L" (err=" + std::to_wstring(existsEc.value()) + L")");
+  }
+  return result;
 }
 
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)

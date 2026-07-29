@@ -381,6 +381,7 @@ void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath)
     }
   } catch (...) {
     // Keep defaults on parse/IO errors.
+    return;
   }
 }
 

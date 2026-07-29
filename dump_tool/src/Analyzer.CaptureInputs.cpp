@@ -25,7 +25,6 @@ namespace skydiag::dump_tool {
 
 using skydiag::dump_tool::internal::output_writer::ReadTextFileUtf8;
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
-using skydiag::dump_tool::minidump::GetThreadStackBytes;
 using skydiag::dump_tool::minidump::IsGameExeModule;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
 using skydiag::dump_tool::minidump::IsSystemishModule;
@@ -126,13 +125,17 @@ void ParseBlackboxStream(
   const auto* snap = static_cast<const skydiag::SharedLayout*>(bbPtr);
   const auto ver = snap->header.version;
   if (snap->header.magic != skydiag::kMagic ||
-      (ver != 1u && ver != 2u && ver != skydiag::kVersion)) {
+      (ver != 1u && ver != 2u && ver != 3u && ver != skydiag::kVersion)) {
     return;
   }
 
   out.has_blackbox = true;
   out.pid = snap->header.pid;
   out.state_flags = snap->header.state_flags;
+  out.blackbox_crash_seq = snap->header.crash_seq;
+  out.blackbox_exception_code = snap->header.crash.exception_code;
+  out.blackbox_faulting_tid = snap->header.crash.faulting_tid;
+  out.blackbox_exception_addr = snap->header.crash.exception_addr;
 
   std::uint32_t cap = snap->header.capacity;
   if (cap == 0 || cap > skydiag::kEventCapacity) {

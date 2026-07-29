@@ -10,6 +10,8 @@
 #include "TroubleshootingGuide.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
+#include "CleanExitEvidence.h"
+#include "DumpIdentity.h"
 #include "AnalyzerInternals.h"
 #include "MinidumpUtil.h"
 #include "Mo2Index.h"
@@ -46,21 +48,15 @@
 
 namespace skydiag::dump_tool {
 
-using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
-using skydiag::dump_tool::minidump::GetThreadStackBytes;
 using skydiag::dump_tool::minidump::IsGameExeModule;
 using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
 using skydiag::dump_tool::minidump::IsSystemishModule;
 using skydiag::dump_tool::minidump::LoadHookFrameworksFromJson;
 using skydiag::dump_tool::minidump::LoadAllModules;
-using skydiag::dump_tool::minidump::LoadThreads;
 using skydiag::dump_tool::minidump::MappedFile;
-using skydiag::dump_tool::minidump::ModuleForAddress;
 using skydiag::dump_tool::minidump::ModuleInfo;
 using skydiag::dump_tool::minidump::ReadStreamSized;
-using skydiag::dump_tool::minidump::ReadThreadContextWin64;
-using skydiag::dump_tool::minidump::ThreadRecord;
 using skydiag::dump_tool::minidump::WideLower;
 
 std::string NowIso8601Utc()
@@ -80,11 +76,6 @@ std::string NowIso8601Utc()
   return buf;
 }
 
-
-using internal::output_writer::ReadTextFileUtf8;
-using internal::output_writer::DefaultOutDirForDump;
-using internal::output_writer::FindIncidentManifestForDump;
-using internal::output_writer::TryLoadIncidentManifestJson;
 
 // Bounded corroboration bonuses from Crash Logger top-module ranking.
 constexpr std::uint32_t kCrashLoggerBonusRank0 = 18u;  // top suspect
@@ -408,6 +399,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
   const std::uint64_t dumpSize = mf.size;
   void* dumpBase = mf.view;
+  if (!ComputeDumpIdentity(mf.file.get(), dumpBase, dumpSize, &out.dump_identity, err)) {
+    return false;
+  }
 
   // Optional: allow external hook-framework list override.
   if (!opt.data_dir.empty()) {
@@ -463,6 +457,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // SkyrimDiag blackbox (optional)
   ParseBlackboxStream(dumpBase, dumpSize, mo2Index, modulePaths, out);
+  TryConsumeCleanExitEvidence(dumpPath, out);
 
   // WCT stream (optional)
   void* wctPtr = nullptr;
@@ -480,7 +475,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // Crash Logger integration (best-effort)
   {
-    const bool shouldSearchCrashLogger = (out.exc_code != 0) || nameCrash || hangLike;
+    const bool shouldSearchCrashLogger =
+      !out.is_filtered_clean_exit &&
+      ((out.exc_code != 0) || nameCrash || hangLike);
     if (shouldSearchCrashLogger) {
       IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
       IntegrateCrashLoggerFrameSignals(allModules, &out);
@@ -495,10 +492,22 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   ApplyCrashLoggerCorroborationToSuspects(&out, allModules);
 
+  if (out.is_filtered_clean_exit) {
+    out.suspects.clear();
+    out.actionable_candidates.clear();
+    out.crash_logger_object_refs.clear();
+    out.crash_logger_top_modules.clear();
+    out.inferred_mod_name.clear();
+    out.graphics_diag.reset();
+    out.plugin_diagnostics.clear();
+    out.missing_masters.clear();
+    out.needs_bees = false;
+  }
+
   internal::ComputeCrashBucket(out);
 
   // Signature matching from external pattern DB.
-  if (!opt.data_dir.empty()) {
+  if (!out.is_filtered_clean_exit && !opt.data_dir.empty()) {
     SignatureDatabase sigDb;
     const auto sigPath = std::filesystem::path(opt.data_dir) / L"crash_signatures.json";
     if (!sigDb.LoadFromJson(sigPath)) {
@@ -570,10 +579,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   LoadIncidentCaptureProfile(dumpPath, outDir, out);
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
-  LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
+  if (!out.is_filtered_clean_exit) {
+    LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
+  }
 
   // Best-effort troubleshooting guide matching.
-  if (!opt.data_dir.empty()) {
+  if (!out.is_filtered_clean_exit && !opt.data_dir.empty()) {
     TroubleshootingGuideDatabase tsDb;
     const auto guidesPath = std::filesystem::path(opt.data_dir) / L"troubleshooting_guides.json";
     if (!tsDb.LoadFromJson(guidesPath)) {
@@ -620,7 +631,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.freeze_analysis.has_analysis) {
     BuildEvidenceAndSummary(out, opt.language);
   }
-  AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out);
+  if (!out.is_filtered_clean_exit) {
+    AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out);
+  }
   if (err) err->clear();
   return true;
 }

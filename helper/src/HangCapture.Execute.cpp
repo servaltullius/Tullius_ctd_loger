@@ -215,23 +215,34 @@ HangTickResult ExecuteConfirmedHangCapture(
 
   if (etwStarted) {
     std::wstring etwErr;
-    if (StopEtwCaptureToPath(cfg, outBase, etwPath, &etwErr)) {
-      AppendLogLine(outBase, L"ETW hang capture written: " + etwPath.wstring());
-      etwStatus = "written";
-      if (manifestWritten) {
-        std::wstring updErr;
-        if (!TryUpdateIncidentManifestEtw(manifestPath, etwPath, "written", &updErr)) {
-          AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
-        }
-      }
-    } else {
-      AppendLogLine(outBase, L"ETW hang capture stop failed: " + etwErr);
-      etwStatus = "stop_failed";
-      if (manifestWritten) {
-        std::wstring updErr;
-        if (!TryUpdateIncidentManifestEtw(manifestPath, etwPath, "stop_failed", &updErr)) {
-          AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
-        }
+    const auto finalizeStatus = FinalizeEtwCaptureWithCleanup(
+      cfg,
+      outBase,
+      etwPath,
+      /*maxStopAttempts=*/3u,
+      &etwErr);
+    switch (finalizeStatus) {
+      case EtwFinalizeStatus::kWritten:
+        AppendLogLine(outBase, L"ETW hang capture written: " + etwPath.wstring());
+        etwStatus = "written";
+        break;
+      case EtwFinalizeStatus::kCancelledAfterStopFailure:
+        AppendLogLine(
+          outBase,
+          L"ETW hang capture stop failed repeatedly; WPR cancellation was confirmed: " + etwErr);
+        etwStatus = "cancelled_after_stop_failure";
+        break;
+      case EtwFinalizeStatus::kCleanupUnconfirmed:
+        AppendLogLine(
+          outBase,
+          L"ETW hang capture cleanup remains unconfirmed after stop retries and wpr -cancel: " + etwErr);
+        etwStatus = "cleanup_unconfirmed";
+        break;
+    }
+    if (manifestWritten) {
+      std::wstring updErr;
+      if (!TryUpdateIncidentManifestEtw(manifestPath, etwPath, etwStatus, &updErr)) {
+        AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
       }
     }
   }

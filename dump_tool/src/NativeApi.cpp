@@ -5,6 +5,7 @@
 #include "OutputWriter.h"
 #include "Utf.h"
 
+#include <algorithm>
 #include <cwchar>
 #include <exception>
 #include <string>
@@ -22,7 +23,10 @@ void SetError(std::wstring_view msg, wchar_t* buf, int cap)
   if (msg.empty()) {
     return;
   }
-  _snwprintf_s(buf, static_cast<size_t>(cap), _TRUNCATE, L"%ls", msg.data());
+  const auto capacity = static_cast<std::size_t>(cap);
+  const auto copyLength = std::min(msg.size(), capacity - 1u);
+  std::copy_n(msg.begin(), copyLength, buf);
+  buf[copyLength] = L'\0';
 }
 
 std::wstring DescribeStdException(const std::exception& ex)

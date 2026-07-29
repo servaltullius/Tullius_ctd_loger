@@ -67,9 +67,9 @@ For in-game validation without waiting:
 - Local verification is the release source of truth for this repository.
 - GitHub Actions is optional/reference only and should not be the sole release gate.
 - Main workflow: `.github/workflows/ci.yml`
-- Main workflow scope: Linux tests, Windows build/package/gate, and repo guard checks
-- Tag-triggered releases rerun Linux unit, ASan+UBSan, clang-tidy, and parser fuzz gates before the Windows build/package/release job.
-- Manual WinUI headless smoke workflow: `.github/workflows/winui-headless-smoke.yml`
+- Main workflow scope: Linux tests, Windows build/package/gate, complete Windows production clang-tidy coverage, extracted-package launcher smoke, and repo guard checks
+- Tag-triggered releases rerun Linux unit, ASan+UBSan, the Linux clang-tidy subset, parser fuzz, complete Windows production clang-tidy, and the packaged launcher smoke before publication.
+- Manual rerun of the same packaged WinUI smoke: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`
 
 Equivalent local commands:
@@ -82,9 +82,9 @@ ctest --test-dir build-linux --output-on-failure
 The CI-only checks below are not part of the default build, so run them locally
 before pushing changes to the analyzer sources:
 ```bash
-# Static analysis. .clang-tidy runs with WarningsAsErrors, and the covered file
-# list comes from the compile database, so new analyzer sources are included
-# automatically. Windows-only sources are outside this gate.
+# Fast Linux static-analysis subset. The printed list contains only production
+# sources reachable in the Linux compile database; it is intentionally not the
+# complete Windows product claim.
 bash scripts/run_clang_tidy.sh
 
 # Parser fuzz smoke. The crash-log parsers read files written by other mods, so
@@ -98,6 +98,17 @@ mkdir -p /tmp/fuzz-crashlogger /tmp/fuzz-wct
 ./build-fuzz/bin/fuzz_wct_parser /tmp/fuzz-wct fuzz/corpus/wct -max_total_time=90
 ```
 
+After `scripts\build-win.cmd` on Windows, require that the Ninja compile database
+contains every production `.cpp` under `dump_tool/src`, `helper/src`, and
+`plugin/src` (plus the generated SKSE metadata source), then lint that full set:
+
+```powershell
+python scripts/run_clang_tidy.py `
+  --build-dir build-win `
+  --clang-tidy "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\bin\clang-tidy.exe" `
+  --jobs 4
+```
+
 Recommended release-time local verification bundle:
 ```bash
 cmake -S . -B build-linux-test -G Ninja
@@ -105,11 +116,31 @@ cmake --build build-linux-test
 ctest --test-dir build-linux-test --output-on-failure
 bash scripts/build-win-from-wsl.sh
 bash scripts/build-winui-from-wsl.sh
-python3 scripts/package.py --build-dir build-win --winui-dir build-winui --no-pdb
+python3 scripts/package.py --build-dir build-win --config RelWithDebInfo --winui-dir build-winui --no-pdb
 bash scripts/verify_release_gate.sh
 ```
 
-The hard gate requires the versioned `Tullius_ctd_loger_v<version>.zip` name, rejects PDBs and non-x64 key executables, requires the self-contained Windows App SDK runtime files, and verifies that packaged native/WinUI binaries are byte-for-byte identical to the current build outputs.
+With no third argument, the gate resolves exactly
+`dist/Tullius_ctd_loger_v<project-version>.zip`; it never chooses the newest
+matching file by mtime. For an RC name, pass the exact ZIP path as argument 3.
+
+The hard gate rejects PDBs and non-x64 key executables, requires the self-contained
+Windows App SDK runtime files, reads the actual PE `FileVersion`/`ProductVersion`
+and SKSE `PluginDeclaration` from the ZIP, and verifies byte-for-byte identity
+against one exact native configuration and the flat `build-winui` output.
+It also validates commit-bound native, WinUI, and package provenance before
+extracting the ZIP to a fresh directory and analyzing a valid Windows minidump
+through the packaged top-level WinUI launcher. Exit 0 plus an identity-matched
+report/Summary pair is required.
+
+Dirty source trees remain packageable for local diagnosis, but public artifacts
+must pass with clean provenance:
+
+```bash
+SKYDIAG_REQUIRE_CLEAN_PROVENANCE=1 \
+SKYDIAG_RELEASE_CONFIG=RelWithDebInfo \
+bash scripts/verify_release_gate.sh "$PWD" "$PWD" "$PWD/dist/Tullius_ctd_loger_v<version-or-rc>.zip"
+```
 
 Windows-only synthetic helper runtime trigger checks:
 - Purpose: verify that CTD and freeze paths trigger the helper, and that normal exit / weak crash paths do not misfire.
@@ -182,6 +213,13 @@ python scripts/package.py --build-dir build-win --no-pdb
 The packager requires self-contained WinUI publish output from `build-winui` (override path with `--winui-dir`) and includes a top-level WinUI launcher plus the real WinUI app/runtime under `SKSE/Plugins/SkyrimDiagWinUI/app/`.
 Because the WinUI viewer is self-contained, the zip intentionally includes many .NET and Windows App SDK sidecar files under the `app` subfolder.
 It also packages `dump_tool/data` recursively (for both plugin path and WinUI path), so newly added data files do not require manual script edits.
+`scripts\build-win.cmd` and `scripts\build-winui.cmd` write build provenance
+manifests containing HEAD, dirty state, a source-tree fingerprint, exact
+configuration, and artifact hashes. `package.py` refuses stale/mismatched
+manifests and records a package manifest covering every ZIP payload file.
+`build-winui.cmd` publishes into one freshly cleared staging directory, validates
+that directory only, writes provenance there, and replaces `build-winui`; it
+does not search older `bin/.../publish` candidates.
 
 ## Release (GitHub)
 
@@ -197,8 +235,9 @@ Suggested checklist:
 3) Confirm compatibility preflight is required by default (`dist/SkyrimDiagHelper.ini` has `EnableCompatibilityPreflight=1`)
 4) Build + package zip on Windows (`--no-pdb`)
 5) Copy the template to a versioned draft and fill it in
-6) Tag + push, then create or edit GitHub Release with `--notes-file`
-7) Upload `dist/Tullius_ctd_loger_v<version>.zip`
+6) Confirm the exact ZIP passes the hard gate with `SKYDIAG_REQUIRE_CLEAN_PROVENANCE=1`
+7) Tag + push, then create or edit GitHub Release with `--notes-file`
+8) Upload `dist/Tullius_ctd_loger_v<version>.zip`
 
 Suggested release-notes flow:
 ```bash

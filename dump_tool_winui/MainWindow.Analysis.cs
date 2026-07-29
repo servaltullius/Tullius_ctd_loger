@@ -11,7 +11,10 @@ public sealed partial class MainWindow
 {
     private async void AnalyzeButton_Click(object sender, RoutedEventArgs e)
     {
-        await AnalyzeAsync(preferExistingArtifacts: false);
+        await RunUiEventAsync(
+            () => AnalyzeAsync(preferExistingArtifacts: false),
+            "Analysis failed: ",
+            "분석 실패: ");
     }
 
     private void CancelAnalyzeButton_Click(object sender, RoutedEventArgs e)
@@ -21,15 +24,19 @@ public sealed partial class MainWindow
 
     private async Task<bool> TryLoadExistingAnalysisAsync(string dumpPath, string outDir, CancellationToken cancellationToken)
     {
-        var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
+        var selectedIdentity = await DumpIdentityContract.ComputeAsync(dumpPath, cancellationToken);
+        var identitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(outDir, selectedIdentity);
+        var compatibilitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
 
-        for (var i = 0; i < 15 && !File.Exists(summaryPath); i++)
+        for (var i = 0;
+             i < 15 && !File.Exists(identitySummaryPath) && !File.Exists(compatibilitySummaryPath);
+             i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(100, cancellationToken);
         }
 
-        if (!File.Exists(summaryPath))
+        if (!File.Exists(identitySummaryPath) && !File.Exists(compatibilitySummaryPath))
         {
             return false;
         }
@@ -39,9 +46,21 @@ public sealed partial class MainWindow
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                var summaryPath = File.Exists(identitySummaryPath)
+                    ? identitySummaryPath
+                    : compatibilitySummaryPath;
                 var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
+                if (summary.DumpIdentity != selectedIdentity)
+                {
+                    return false;
+                }
+                _currentSummaryPath = summaryPath;
                 RenderSummary(summary);
-                await RenderAdvancedArtifactsAsync(dumpPath, outDir, cancellationToken);
+                await RenderAdvancedArtifactsAsync(
+                    dumpPath,
+                    outDir,
+                    summary.DumpIdentity,
+                    cancellationToken);
                 SetBusy(false, T(
                     "Loaded existing analysis artifacts. Click Analyze to refresh.",
                     "기존 분석 결과를 불러왔습니다. 다시 분석하려면 \"지금 분석\"을 누르세요."));
@@ -64,37 +83,39 @@ public sealed partial class MainWindow
 
     private async Task AnalyzeAsync(bool preferExistingArtifacts)
     {
-        var dumpPath = DumpPathBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(dumpPath))
-        {
-            StatusText.Text = T("Select a .dmp file first.", "먼저 .dmp 파일을 선택하세요.");
-            return;
-        }
-
-        dumpPath = Path.GetFullPath(dumpPath);
-        if (!File.Exists(dumpPath))
-        {
-            StatusText.Text = T("Dump file not found: ", "덤프 파일을 찾을 수 없습니다: ") + dumpPath;
-            return;
-        }
-
-        await PromoteLearnedDumpLocationAsync(dumpPath);
-        await RefreshDiscoveredDumpsAsync();
-
-        _analysisCts?.Cancel();
-        _analysisCts?.Dispose();
-        using var analysisCts = new CancellationTokenSource();
-        _analysisCts = analysisCts;
-        var cancellationToken = analysisCts.Token;
-
-        var options = _vm.BuildInvocationOptions(
-            dumpPath, OutputDirBox.Text.Trim(), _startupOptions.Language, false, _startupOptions);
-        var outDir = NativeAnalyzerBridge.ResolveOutputDirectory(dumpPath, options.OutDir);
-        _vm.CurrentDumpPath = dumpPath;
-        _vm.CurrentOutDir = outDir;
-
+        CancellationTokenSource? analysisCts = null;
         try
         {
+            var dumpPath = DumpPathBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(dumpPath))
+            {
+                StatusText.Text = T("Select a .dmp file first.", "먼저 .dmp 파일을 선택하세요.");
+                return;
+            }
+
+            dumpPath = Path.GetFullPath(dumpPath);
+            if (!File.Exists(dumpPath))
+            {
+                StatusText.Text = T("Dump file not found: ", "덤프 파일을 찾을 수 없습니다: ") + dumpPath;
+                return;
+            }
+
+            await PromoteLearnedDumpLocationAsync(dumpPath);
+            await RefreshDiscoveredDumpsAsync();
+
+            _analysisCts?.Cancel();
+            _analysisCts?.Dispose();
+            analysisCts = new CancellationTokenSource();
+            _analysisCts = analysisCts;
+            var cancellationToken = analysisCts.Token;
+
+            var options = _vm.BuildInvocationOptions(
+                dumpPath, OutputDirBox.Text.Trim(), _startupOptions.Language, false, _startupOptions);
+            var outDir = NativeAnalyzerBridge.ResolveOutputDirectory(dumpPath, options.OutDir);
+            _vm.CurrentDumpPath = dumpPath;
+            _vm.CurrentOutDir = outDir;
+            _currentSummaryPath = null;
+
             if (preferExistingArtifacts)
             {
                 SetBusy(true, T(
@@ -128,7 +149,12 @@ public sealed partial class MainWindow
                 return;
             }
 
-            var summaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
+            var selectedIdentity = await DumpIdentityContract.ComputeAsync(dumpPath, cancellationToken);
+            var identitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(outDir, selectedIdentity);
+            var compatibilitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
+            var summaryPath = File.Exists(identitySummaryPath)
+                ? identitySummaryPath
+                : compatibilitySummaryPath;
             if (!File.Exists(summaryPath))
             {
                 SetBusy(false, T("Analysis finished but summary file is missing: ", "분석은 끝났지만 요약 파일이 없습니다: ") + summaryPath);
@@ -136,8 +162,20 @@ public sealed partial class MainWindow
             }
 
             var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
+            if (summary.DumpIdentity != selectedIdentity)
+            {
+                SetBusy(false, T(
+                    "Analysis output does not match the selected dump. Run analysis again.",
+                    "분석 결과가 선택한 덤프와 일치하지 않습니다. 다시 분석해 주세요."));
+                return;
+            }
+            _currentSummaryPath = summaryPath;
             RenderSummary(summary);
-            await RenderAdvancedArtifactsAsync(dumpPath, outDir, cancellationToken);
+            await RenderAdvancedArtifactsAsync(
+                dumpPath,
+                outDir,
+                summary.DumpIdentity,
+                cancellationToken);
             SetBusy(false, T("Analysis complete. Review the candidates and checklist.", "분석 완료. 원인 후보와 체크리스트를 확인하세요."));
             NavView.SelectedItem = NavTriage;
         }
@@ -147,14 +185,15 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            SetBusy(false, T("Failed to read summary JSON: ", "요약 JSON을 읽지 못했습니다: ") + ex.Message);
+            SetBusy(false, T("Analysis failed: ", "분석 실패: ") + ex.Message);
         }
         finally
         {
-            if (ReferenceEquals(_analysisCts, analysisCts))
+            if (analysisCts is not null && ReferenceEquals(_analysisCts, analysisCts))
             {
                 _analysisCts = null;
             }
+            analysisCts?.Dispose();
         }
     }
 
@@ -267,12 +306,17 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task RenderAdvancedArtifactsAsync(string dumpPath, string outDir, CancellationToken cancellationToken)
+    private async Task RenderAdvancedArtifactsAsync(
+        string dumpPath,
+        string outDir,
+        DumpIdentityContract dumpIdentity,
+        CancellationToken cancellationToken)
     {
         var artifacts = await Task.Run(
             () => MainWindowViewModel.LoadAdvancedArtifacts(
                 dumpPath,
                 outDir,
+                dumpIdentity,
                 T("Report file not found.", "리포트 파일이 없습니다."),
                 T("WCT file not found for this dump.", "이 덤프에 대한 WCT 파일이 없습니다."),
                 cancellationToken),

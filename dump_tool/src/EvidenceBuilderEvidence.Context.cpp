@@ -8,30 +8,28 @@ namespace skydiag::dump_tool::internal {
 
 namespace {
 
-std::vector<std::wstring> CollectCaptureProfileCapabilities(const AnalysisResult& r, bool en)
+std::vector<std::wstring> CollectCaptureProfileCapabilities(const AnalysisResult& r)
 {
   std::vector<std::wstring> parts;
   if (r.incident_capture_profile_code_segments) {
-    parts.push_back(en ? L"code_segments=1" : L"code_segments=1");
+    parts.push_back(L"code_segments=1");
   }
   if (r.incident_capture_profile_process_thread_data) {
-    parts.push_back(en ? L"process_thread_data=1" : L"process_thread_data=1");
+    parts.push_back(L"process_thread_data=1");
   }
   if (r.incident_capture_profile_full_memory_info) {
-    parts.push_back(en ? L"full_memory_info=1" : L"full_memory_info=1");
+    parts.push_back(L"full_memory_info=1");
   }
   if (r.incident_capture_profile_module_headers) {
-    parts.push_back(en ? L"module_headers=1" : L"module_headers=1");
+    parts.push_back(L"module_headers=1");
   }
   if (r.incident_capture_profile_indirect_memory) {
-    parts.push_back(en ? L"indirect_memory=1" : L"indirect_memory=1");
+    parts.push_back(L"indirect_memory=1");
   }
   if (r.incident_capture_profile_ignore_inaccessible_memory) {
-    parts.push_back(en ? L"ignore_inaccessible_memory=1" : L"ignore_inaccessible_memory=1");
+    parts.push_back(L"ignore_inaccessible_memory=1");
   }
-  parts.push_back(en
-    ? (L"full_memory=" + std::wstring(r.incident_capture_profile_full_memory ? L"1" : L"0"))
-    : (L"full_memory=" + std::wstring(r.incident_capture_profile_full_memory ? L"1" : L"0")));
+  parts.push_back(L"full_memory=" + std::wstring(r.incident_capture_profile_full_memory ? L"1" : L"0"));
   return parts;
 }
 
@@ -45,7 +43,7 @@ std::wstring DescribeCaptureProfileEvidence(const AnalysisResult& r, bool en)
 
   const std::wstring captureKind = ToWideAscii(r.incident_capture_kind);
   const std::wstring baseMode = ToWideAscii(r.incident_capture_profile_base_mode);
-  const auto capabilityParts = CollectCaptureProfileCapabilities(r, en);
+  const auto capabilityParts = CollectCaptureProfileCapabilities(r);
   const std::wstring capabilitySummary = JoinList(capabilityParts, capabilityParts.size(), L", ");
   if (r.incident_capture_kind == "crash_recapture") {
     return en
@@ -99,8 +97,8 @@ static std::wstring DescribeRecaptureReason(std::string_view reasonId, bool en)
 std::wstring DescribeRecaptureEvaluationEvidence(const AnalysisResult& r, bool en)
 {
   std::vector<std::wstring> parts;
-  parts.push_back((en ? L"target_profile=" : L"target_profile=") + ToWideAscii(r.incident_recapture_target_profile));
-  parts.push_back((en ? L"escalation_level=" : L"escalation_level=") +
+  parts.push_back(L"target_profile=" + ToWideAscii(r.incident_recapture_target_profile));
+  parts.push_back(L"escalation_level=" +
                   std::to_wstring(r.incident_recapture_escalation_level));
   if (!r.incident_recapture_reasons.empty()) {
     std::vector<std::wstring> reasonLabels;
@@ -108,7 +106,7 @@ std::wstring DescribeRecaptureEvaluationEvidence(const AnalysisResult& r, bool e
     for (const auto& reason : r.incident_recapture_reasons) {
       reasonLabels.push_back(DescribeRecaptureReason(reason, en));
     }
-    parts.push_back((en ? L"reasons=" : L"reasons=") + JoinList(reasonLabels, reasonLabels.size(), L", "));
+    parts.push_back(L"reasons=" + JoinList(reasonLabels, reasonLabels.size(), L", "));
   }
   return JoinList(parts, parts.size(), L" | ");
 }
@@ -121,7 +119,7 @@ std::wstring DescribeSymbolRuntimeEvidence(const AnalysisResult& r, bool en)
   } else if (r.dbghelp_version.empty()) {
     parts.push_back(en ? L"dbghelp.dll version unreadable" : L"dbghelp.dll 버전 미확인");
   } else {
-    parts.push_back(en ? (L"dbghelp " + r.dbghelp_version) : (L"dbghelp " + r.dbghelp_version));
+    parts.push_back(L"dbghelp " + r.dbghelp_version);
   }
 
   if (!r.msdia_available) {

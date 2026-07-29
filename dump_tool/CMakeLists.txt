@@ -59,6 +59,10 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AddressResolver.h
   src/CrashHistory.cpp
   src/CrashHistory.h
+  src/CleanExitEvidence.cpp
+  src/CleanExitEvidence.h
+  src/DumpIdentity.cpp
+  src/DumpIdentity.h
   src/NativeApi.h
   src/Utf.cpp
   src/Utf.h
@@ -73,6 +77,7 @@ target_link_libraries(SkyrimDiagDumpToolCore
   PUBLIC
     skydiag_shared
     nlohmann_json::nlohmann_json
+    Bcrypt
     Dbghelp
     Version
 )
@@ -88,6 +93,13 @@ add_library(SkyrimDiagDumpToolNative SHARED
   src/NativeApi.cpp
   src/NativeApi.h)
 
+skydiag_add_version_resource(
+  SkyrimDiagDumpToolNative
+  "SkyrimDiagDumpToolNative.dll"
+  "SkyrimDiag native dump analyzer"
+  "VFT_DLL"
+)
+
 target_link_libraries(SkyrimDiagDumpToolNative
   PRIVATE
     SkyrimDiagDumpToolCore)
@@ -101,6 +113,13 @@ set_property(TARGET SkyrimDiagDumpToolNative PROPERTY MSVC_RUNTIME_LIBRARY "Mult
 
 add_executable(SkyrimDiagDumpToolCli
   src/DumpToolCliMain.cpp
+)
+
+skydiag_add_version_resource(
+  SkyrimDiagDumpToolCli
+  "SkyrimDiagDumpToolCli.exe"
+  "SkyrimDiag command-line dump analyzer"
+  "VFT_APP"
 )
 
 target_link_libraries(SkyrimDiagDumpToolCli
@@ -118,6 +137,13 @@ set_property(TARGET SkyrimDiagDumpToolCli PROPERTY MSVC_RUNTIME_LIBRARY "MultiTh
 
 add_executable(SkyrimDiagDumpToolWinUILauncher WIN32
   src/WinuiLauncher.cpp
+)
+
+skydiag_add_version_resource(
+  SkyrimDiagDumpToolWinUILauncher
+  "SkyrimDiagDumpToolWinUI.exe"
+  "SkyrimDiag WinUI launcher"
+  "VFT_APP"
 )
 
 target_link_libraries(SkyrimDiagDumpToolWinUILauncher

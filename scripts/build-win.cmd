@@ -47,7 +47,8 @@ if not exist "%NINJA%" set "NINJA=ninja"
 "%CMAKE%" -S "%SRC%" -B "%BUILD%" -G Ninja ^
   -DCMAKE_MAKE_PROGRAM="%NINJA%" ^
   -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if errorlevel 1 (
   set "EXITCODE=1"
   goto :cleanup

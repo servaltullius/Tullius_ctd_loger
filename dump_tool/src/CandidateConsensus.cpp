@@ -288,11 +288,12 @@ std::wstring InvariantLower(std::wstring_view value)
 {
 #ifdef _WIN32
   if (!value.empty() && value.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    const std::wstring nullTerminatedValue(value);
     const int length = static_cast<int>(value.size());
     const int required = LCMapStringEx(
       LOCALE_NAME_INVARIANT,
       LCMAP_LOWERCASE,
-      value.data(),
+      nullTerminatedValue.c_str(),
       length,
       nullptr,
       0,
@@ -304,7 +305,7 @@ std::wstring InvariantLower(std::wstring_view value)
       if (LCMapStringEx(
             LOCALE_NAME_INVARIANT,
             LCMAP_LOWERCASE,
-            value.data(),
+            nullTerminatedValue.c_str(),
             length,
             lowered.data(),
             required,

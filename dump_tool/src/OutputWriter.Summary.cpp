@@ -19,7 +19,7 @@
 
 namespace skydiag::dump_tool {
 
-using skydiag::dump_tool::internal::output_writer::DefaultOutDirForDump;
+using skydiag::dump_tool::internal::output_writer::DumpIdentityJson;
 using skydiag::dump_tool::internal::output_writer::FindIncidentManifestForDump;
 using skydiag::dump_tool::internal::output_writer::IsUnknownModuleField;
 using skydiag::dump_tool::internal::output_writer::LoadExistingSummaryTriage;
@@ -40,6 +40,7 @@ nlohmann::json BuildSummaryJson(
     { "version", kSummarySchemaVersion },
   };
   summary["dump_path"] = WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths));
+  summary["dump_identity"] = DumpIdentityJson(r.dump_identity);
   summary["pid"] = r.pid;
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
@@ -50,7 +51,15 @@ nlohmann::json BuildSummaryJson(
     { "is_hang_like", r.is_hang_like },
     { "is_snapshot_like", r.is_snapshot_like },
     { "is_manual_capture", r.is_manual_capture },
+    { "is_filtered_clean_exit", r.is_filtered_clean_exit },
   };
+  if (r.is_filtered_clean_exit) {
+    summary["clean_exit_evidence"] = {
+      { "validated", true },
+      { "dump_state", r.clean_exit_dump_state },
+      { "sidecar_filename", WideToUtf8(r.clean_exit_evidence_filename) },
+    };
+  }
   summary["privacy"] = {
     { "path_redaction_applied", redactPaths },
     { "online_symbol_source_allowed", r.online_symbol_source_allowed },
@@ -132,7 +141,7 @@ nlohmann::json BuildSummaryJson(
   }
   const auto summaryPath = outBase / (stem + L"_SkyrimDiagSummary.json");
   nlohmann::json triage;
-  LoadExistingSummaryTriage(summaryPath, &triage);
+  LoadExistingSummaryTriage(summaryPath, outBase, r.dump_identity, &triage);
   summary["triage"] = std::move(triage);
   summary["triage"]["signature_matched"] = r.signature_match.has_value();
   if (!summary["triage"].contains("reviewed")) {

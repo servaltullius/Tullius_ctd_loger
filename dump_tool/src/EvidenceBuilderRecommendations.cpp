@@ -74,8 +74,7 @@ std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const Acti
 {
   if (r.crash_logger_direct_fault_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
-    return en ? L"Crash Logger frame first (direct DLL fault)"
-              : L"Crash Logger frame first (direct DLL fault)";
+    return L"Crash Logger frame first (direct DLL fault)";
   }
   if (r.crash_logger_first_actionable_probable_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
@@ -84,10 +83,9 @@ std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const Acti
   }
   if (r.crash_logger_probable_streak_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
-    return en ? L"Crash Logger frame first (probable frame streak)"
-              : L"Crash Logger frame first (probable frame streak)";
+    return L"Crash Logger frame first (probable frame streak)";
   }
-  return en ? L"Crash Logger frame first" : L"Crash Logger frame first";
+  return L"Crash Logger frame first";
 }
 
 bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
@@ -99,21 +97,22 @@ bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
 
 std::wstring DescribeCaptureProfileStrength(const AnalysisResult& r, bool en)
 {
+  (void)en;  // Capture-profile field names are stable technical terms in both locales.
   std::vector<std::wstring> parts;
   if (r.incident_capture_profile_process_thread_data) {
-    parts.push_back(en ? L"process/thread data" : L"process/thread data");
+    parts.emplace_back(L"process/thread data");
   }
   if (r.incident_capture_profile_full_memory_info) {
-    parts.push_back(en ? L"full memory info" : L"full memory info");
+    parts.emplace_back(L"full memory info");
   }
   if (r.incident_capture_profile_module_headers) {
-    parts.push_back(en ? L"module headers" : L"module headers");
+    parts.emplace_back(L"module headers");
   }
   if (r.incident_capture_profile_indirect_memory) {
-    parts.push_back(en ? L"indirect memory" : L"indirect memory");
+    parts.emplace_back(L"indirect memory");
   }
   if (r.incident_capture_profile_ignore_inaccessible_memory) {
-    parts.push_back(en ? L"inaccessible-memory tolerance" : L"inaccessible-memory tolerance");
+    parts.emplace_back(L"inaccessible-memory tolerance");
   }
   return JoinList(parts, parts.size(), L", ");
 }
@@ -319,6 +318,15 @@ void AddActionableCandidateRecommendations(
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
+  if (ctx.isFilteredCleanExit) {
+    r.recommendations.push_back(en
+      ? L"[Clean exit] The validated helper record says the process exited with code 0. Do not blame a mod from this preserved diagnostic dump."
+      : L"[정상 종료] 검증된 헬퍼 레코드에 따르면 프로세스가 종료 코드 0으로 끝났습니다. 보존된 진단 덤프만으로 모드를 원인으로 지목하지 마세요.");
+    r.recommendations.push_back(en
+      ? L"[Clean exit] Keep the dump, clean-exit evidence sidecar, and helper log together when reporting filter behavior."
+      : L"[정상 종료] 필터 동작을 제보할 때 덤프, 정상 종료 증거 사이드카, 헬퍼 로그를 함께 보관하세요.");
+    return;
+  }
   const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;

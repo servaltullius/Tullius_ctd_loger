@@ -21,6 +21,9 @@ struct PendingCrashEtwCapture
   ULONGLONG startedAtTick64 = 0;
   std::uint32_t captureSeconds = 0;
   std::wstring profileUsed;
+  bool cleanupPending = false;
+  std::uint32_t stopAttempts = 0;
+  ULONGLONG nextCleanupAttemptTick64 = 0;
 };
 
 void MaybeStopPendingCrashEtwCapture(
@@ -31,4 +34,3 @@ void MaybeStopPendingCrashEtwCapture(
   PendingCrashEtwCapture* pending);
 
 }  // namespace skydiag::helper::internal
-

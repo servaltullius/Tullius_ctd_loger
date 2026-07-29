@@ -29,24 +29,15 @@ constexpr bool ShouldSuppressNestedCrashLoggerException(
           CrashHandlerModuleRangeContains(crashLoggerSseRange, exceptionAddress));
 }
 
-// NOTE: first-fault preservation is deliberately absent.
+// Protocol v4 preserves the first selected exception for one incident.
 //
-// Once a record is committed, a later fatal exception can still overwrite it,
-// and on a heavily modded setup a single corruption often cascades into further
-// faults on other threads — so the record that survives is not always the one
-// nearest the root cause.
-//
-// An attempt to preserve the first strong fault was reverted before release. It
-// required the plugin to suppress a later fault without moving crash_seq, which
-// left the suppression invisible to the helper: crash_seq is this protocol's
-// only generation counter, and a separate unversioned state flag could not give
-// the two processes an atomic view of one incident. Every added check narrowed
-// the race and left another interleaving that could discard evidence.
-//
-// Implementing it safely needs a protocol with a single atomic linearization
-// point — a versioned incident state, or a combined generation/state word
-// updated with CAS — which means a SharedLayout version bump and an ADR-0004
-// compatibility review, not more observations around two independent values.
+// kState_Frozen is the cross-process incident ownership/ACK bit. A fatal writer
+// must CAS-claim it before changing crash_seq or CrashInfo. Later writers lose
+// that same atomic claim and cannot overwrite the first committed record. If
+// the helper proves the record was recovered or cannot retain its dump, its
+// atomic clear of kState_Frozen acknowledges the old generation and rearms the
+// slot for the next incident. crash_seq remains the CrashInfo seqlock and
+// generation used for stable helper snapshots.
 
 // CrashHookMode:
 //   0 = Off

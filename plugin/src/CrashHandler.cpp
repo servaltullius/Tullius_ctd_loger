@@ -5,11 +5,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <cstring>
-#include <iterator>
 #include <limits>
-#include <string_view>
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/SharedMemory.h"
@@ -129,56 +128,6 @@ bool IsBenignFirstChanceException(DWORD code) noexcept
   }
 }
 
-std::string_view ResolveExceptionModuleBasenameUtf8(
-  void* address,
-  char* out,
-  std::size_t outCapacity) noexcept
-{
-  if (!address || !out || outCapacity == 0) {
-    return {};
-  }
-
-  HMODULE module{};
-  if (!GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        static_cast<LPCWSTR>(address),
-        &module) ||
-      !module) {
-    return {};
-  }
-
-  wchar_t pathBuf[MAX_PATH]{};
-  const DWORD len = GetModuleFileNameW(module, pathBuf, static_cast<DWORD>(std::size(pathBuf)));
-  if (len == 0 || len >= std::size(pathBuf)) {
-    return {};
-  }
-
-  std::size_t basenameOffset = 0;
-  for (std::size_t i = 0; i < len; ++i) {
-    if (pathBuf[i] == L'\\' || pathBuf[i] == L'/') {
-      basenameOffset = i + 1;
-    }
-  }
-  const std::size_t basenameLength = static_cast<std::size_t>(len) - basenameOffset;
-  if (basenameLength == 0) {
-    return {};
-  }
-
-  const int written = WideCharToMultiByte(
-    CP_UTF8,
-    0,
-    pathBuf + basenameOffset,
-    static_cast<int>(basenameLength),
-    out,
-    static_cast<int>(outCapacity),
-    nullptr,
-    nullptr);
-  if (written <= 0) {
-    return {};
-  }
-  return std::string_view(out, static_cast<std::size_t>(written));
-}
-
 std::uint32_t BucketExceptionAddress(void* address) noexcept
 {
   const auto raw = reinterpret_cast<std::uintptr_t>(address);
@@ -278,15 +227,24 @@ bool TryPublishCrashRecord(
     return false;
   }
 
-  auto* const sequence = reinterpret_cast<volatile LONG*>(&shm->header.crash_seq);
-  const LONG observed = InterlockedCompareExchange(sequence, 0, 0);
-  if ((observed & 1L) != 0L) {
-    // Another fatal exception is already publishing a complete fixed-size
-    // record. That writer owns the crash event signal.
+  // This CAS is the protocol-v4 incident linearization point. Once claimed,
+  // every later exception observes Frozen and leaves this record untouched
+  // until the helper explicitly ACKs/rearms by clearing Frozen.
+  if (!skydiag::TryClaimCrashIncidentOwnership(&shm->header.state_flags)) {
     return false;
   }
 
-  const LONG writing = static_cast<LONG>(static_cast<std::uint32_t>(observed) + 1u);
+  auto* const sequence = reinterpret_cast<volatile LONG*>(&shm->header.crash_seq);
+  const LONG observed = InterlockedCompareExchange(sequence, 0, 0);
+  if ((observed & 1L) != 0L) {
+    // Frozen ownership says no other writer can legitimately be active. Keep
+    // the incident fail-closed rather than clearing ownership and allowing an
+    // inconsistent CrashInfo record to be replaced.
+    return false;
+  }
+
+  const auto writingBits = static_cast<std::uint32_t>(observed) + 1u;
+  const LONG writing = std::bit_cast<LONG>(writingBits);
   if (InterlockedCompareExchange(sequence, writing, observed) != observed) {
     return false;
   }
@@ -301,7 +259,8 @@ bool TryPublishCrashRecord(
   // Publish the complete record before the even sequence and event become
   // observable in the helper process.
   MemoryBarrier();
-  LONG committed = static_cast<LONG>(static_cast<std::uint32_t>(observed) + 2u);
+  const auto committedBits = static_cast<std::uint32_t>(observed) + 2u;
+  LONG committed = std::bit_cast<LONG>(committedBits);
   if (committed == 0L) {
     committed = 2L;
   }
@@ -338,10 +297,6 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
       return EXCEPTION_CONTINUE_SEARCH;
     }
 
-    InterlockedOr(
-      reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
-      static_cast<LONG>(skydiag::kState_Frozen));
-
     skydiag::EventPayload p{};
     p.a = code;
     p.b = reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress);
@@ -358,12 +313,10 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     const auto addressBucket = BucketExceptionAddress(ep->ExceptionRecord->ExceptionAddress);
     const auto signature = HashFirstChanceSignature(code, addressBucket);
     if (ConsumeFirstChanceTelemetryBudget(signature, qpcNow)) {
-      char moduleBasenameBuffer[MAX_PATH]{};
-      const auto moduleBasenameUtf8 = ResolveExceptionModuleBasenameUtf8(
-        ep->ExceptionRecord->ExceptionAddress,
-        moduleBasenameBuffer,
-        std::size(moduleBasenameBuffer));
-      PushFirstChanceExceptionEvent(code, addressBucket, moduleBasenameUtf8);
+      // VEH records only numeric telemetry. Loader/module/path lookup is
+      // intentionally deferred to helper/analyzer processing outside the
+      // faulting process.
+      PushFirstChanceExceptionEvent(code, addressBucket, {});
     }
   }
 

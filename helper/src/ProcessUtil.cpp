@@ -25,7 +25,7 @@ bool RunHiddenProcessAndWait(std::wstring cmdLine, const std::filesystem::path& 
 }
 
 bool RunHiddenProcessAndWait(
-  std::wstring applicationPath,
+  const std::wstring& applicationPath,
   std::wstring cmdLine,
   const std::filesystem::path& cwd,
   DWORD timeoutMs,

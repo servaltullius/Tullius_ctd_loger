@@ -1,9 +1,11 @@
 #include <Windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <exception>
 #include <string>
+#include <thread>
 
 #include "CrashCapture.h"
 #include "CrashEtwCapture.h"
@@ -158,6 +160,84 @@ void TestRecoveredCrashThaw_AllowsStableFollowupSnapshot()
   Require(secondInfo.faultingTid == 202u, "Follow-up snapshot must retain one coherent crash record");
 }
 
+void TestStableSnapshot_PerEntrySeqlocksRejectTornRingData()
+{
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->events[0].seq = 3u;
+  shared->events[0].payload.a = 0xAAAAAAAAAAAAAAAAull;
+  shared->resources.entries[0].seq = 5u;
+  shared->resources.entries[0].path_hash = 0xBBBBBBBBBBBBBBBBull;
+
+  StableSharedSnapshot unstableSnapshot{};
+  Require(
+    CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &unstableSnapshot),
+    "An unstable ring entry must not invalidate the coherent crash snapshot");
+  Require(
+    (unstableSnapshot.layout()->events[0].seq & 1u) != 0u,
+    "Overlapping blackbox entry must be marked invalid instead of copied torn");
+  Require(
+    (unstableSnapshot.layout()->resources.entries[0].seq & 1u) != 0u,
+    "Overlapping resource entry must be marked invalid instead of copied torn");
+
+  std::atomic<bool> stop{false};
+  std::thread writer([&]() {
+    std::uint32_t generation = 1u;
+    while (!stop.load(std::memory_order_relaxed)) {
+      auto& event = shared->events[1];
+      const std::uint32_t eventCommitted = generation * 2u;
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&event.seq),
+        static_cast<LONG>(eventCommitted | 1u));
+      event.payload.a = generation;
+      event.payload.b = ~static_cast<std::uint64_t>(generation);
+      event.qpc = static_cast<std::uint64_t>(generation) * 3u;
+      MemoryBarrier();
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&event.seq),
+        static_cast<LONG>(eventCommitted));
+
+      auto& resource = shared->resources.entries[1];
+      const std::uint32_t resourceCommitted = generation * 2u;
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&resource.seq),
+        static_cast<LONG>(resourceCommitted | 1u));
+      resource.path_hash = generation;
+      resource.qpc = static_cast<std::uint64_t>(generation) * 7u;
+      MemoryBarrier();
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&resource.seq),
+        static_cast<LONG>(resourceCommitted));
+      ++generation;
+    }
+  });
+
+  for (int i = 0; i < 64; ++i) {
+    StableSharedSnapshot snapshot{};
+    Require(
+      CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &snapshot),
+      "Concurrent ring writer must not destabilize the committed crash record");
+
+    const auto& event = snapshot.layout()->events[1];
+    if ((event.seq & 1u) == 0u && event.seq != 0u) {
+      Require(
+        event.payload.b == ~event.payload.a &&
+          event.qpc == event.payload.a * 3u,
+        "Committed blackbox snapshot entry must come from one writer generation");
+    }
+    const auto& resource = snapshot.layout()->resources.entries[1];
+    if ((resource.seq & 1u) == 0u && resource.seq != 0u) {
+      Require(
+        resource.qpc == resource.path_hash * 7u,
+        "Committed resource snapshot entry must come from one writer generation");
+    }
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  writer.join();
+}
+
 void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_runtime_zero_seq");
@@ -263,6 +343,7 @@ int main()
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
+    TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts();
     return 0;

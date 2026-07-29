@@ -1,11 +1,13 @@
 #include "SkyrimDiagHelper/LoadStats.h"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
 
 #include "SkyrimDiagHelper/Config.h"
+#include "HelperCommon.h"
 
 namespace skydiag::helper {
 namespace {
@@ -26,7 +28,7 @@ std::uint32_t Percentile(const std::vector<std::uint32_t>& v, double p)
   std::sort(sorted.begin(), sorted.end());
 
   const double idx = (static_cast<double>(sorted.size() - 1) * p);
-  const auto i = static_cast<std::size_t>(idx + 0.5);  // nearest-rank-ish for small N
+  const auto i = static_cast<std::size_t>(std::lround(idx));  // nearest-rank-ish for small N
   return sorted[std::min(i, sorted.size() - 1)];
 }
 
@@ -81,12 +83,10 @@ bool LoadStats::SaveToFile(const std::filesystem::path& path) const
   j["version"] = 1;
   j["loadingSeconds"] = loadingSeconds_;
 
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  if (!f.is_open()) {
-    return false;
-  }
-  f << j.dump(2);
-  return true;
+  // This state survives across helper runs. Reuse the helper's checked
+  // write/flush/replace path so a disk or sharing failure cannot truncate the
+  // last known-good adaptive-loading history.
+  return internal::WriteTextFileUtf8(path, j.dump(2));
 }
 
 void LoadStats::AddLoadingSampleSeconds(std::uint32_t seconds)

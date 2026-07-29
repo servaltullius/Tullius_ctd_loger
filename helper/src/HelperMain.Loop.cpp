@@ -9,13 +9,6 @@
 
 namespace {
 
-using skydiag::helper::internal::AppendLogLine;
-using skydiag::helper::internal::ClearPendingCrashAnalysis;
-using skydiag::helper::internal::DoManualCapture;
-using skydiag::helper::internal::FinalizePendingCrashAnalysisIfReady;
-using skydiag::helper::internal::HandleCrashEventTick;
-using skydiag::helper::internal::MaybeStopPendingCrashEtwCapture;
-
 constexpr std::uint64_t kCrashEventRetryIntervalMs = 2000;
 constexpr std::uint64_t kCrashEventWarnIntervalMs = 30000;
 

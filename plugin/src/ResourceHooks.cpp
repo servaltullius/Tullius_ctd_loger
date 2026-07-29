@@ -139,9 +139,16 @@ bool InstallResourceHooks() noexcept
     return true;
   }
 
-  REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSResource____LooseFileStream[0] };
-  g_origLooseFileDoOpen = reinterpret_cast<DoOpen_t*>(vtbl.write_vfunc(0x01, LooseFileDoOpen_Hook));
-  installed = (g_origLooseFileDoOpen != nullptr);
+  try {
+    REL::Relocation<std::uintptr_t> vtbl{ RE::VTABLE_BSResource____LooseFileStream[0] };
+    g_origLooseFileDoOpen = reinterpret_cast<DoOpen_t*>(vtbl.write_vfunc(0x01, LooseFileDoOpen_Hook));
+    installed = (g_origLooseFileDoOpen != nullptr);
+  } catch (...) {
+    // Hook installation is optional. Keep this noexcept boundary reliable when
+    // relocation lookup or trampoline patching rejects the current runtime.
+    g_origLooseFileDoOpen = nullptr;
+    installed = false;
+  }
   return installed;
 }
 

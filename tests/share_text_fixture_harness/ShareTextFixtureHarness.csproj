@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <Compile Include="..\..\dump_tool_winui\AnalysisSummary.cs" Link="AnalysisSummary.cs" />
+    <Compile Include="..\..\dump_tool_winui\DumpIdentityContract.cs" Link="DumpIdentityContract.cs" />
+    <Compile Include="..\..\dump_tool_winui\AtomicFile.cs" Link="AtomicFile.cs" />
     <Compile Include="..\..\dump_tool_winui\SummaryTriageStore.cs" Link="SummaryTriageStore.cs" />
     <Compile Include="..\..\dump_tool_winui\DumpToolInvocationOptions.cs" Link="DumpToolInvocationOptions.cs" />
     <Compile Include="..\..\dump_tool_winui\NativeAnalyzerBridge.cs" Link="NativeAnalyzerBridge.cs" />

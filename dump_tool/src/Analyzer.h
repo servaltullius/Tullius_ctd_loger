@@ -2,6 +2,7 @@
 
 #include "Bucket.h"
 #include "CrashHistory.h"
+#include "DumpIdentity.h"
 #include "GraphicsInjectionDiag.h"
 #include "PluginRules.h"
 #include <cstdint>
@@ -140,9 +141,17 @@ struct AnalysisResult
   i18n::Language language = i18n::DefaultLanguage();
   std::wstring dump_path;
   std::wstring out_dir;
+  DumpIdentity dump_identity;
 
   std::uint32_t pid = 0;
   std::uint32_t state_flags = 0;
+  std::uint32_t blackbox_crash_seq = 0;
+  std::uint32_t blackbox_exception_code = 0;
+  std::uint32_t blackbox_faulting_tid = 0;
+  std::uint64_t blackbox_exception_addr = 0;
+  bool is_filtered_clean_exit = false;
+  std::string clean_exit_dump_state;
+  std::wstring clean_exit_evidence_filename;
 
   std::uint32_t exc_code = 0;
   std::uint32_t exc_tid = 0;

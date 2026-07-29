@@ -9,38 +9,92 @@
 #include "DumpToolLaunch.h"
 #include "HelperLog.h"
 
-namespace {
-
-using skydiag::helper::internal::AppendLogLine;
-using skydiag::helper::internal::ClearPendingCrashAnalysis;
-using skydiag::helper::internal::HandleCrashEventTick;
-using skydiag::helper::internal::MaybeStopPendingCrashEtwCapture;
-using skydiag::helper::internal::StartDumpToolViewer;
-
-}  // namespace
-
 namespace skydiag::helper::internal {
 
 void DrainCrashEventBeforeExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
+  DWORD exitCode,
   HelperLoopState* state)
 {
   if (!state) {
     return;
   }
-  HandleCrashEventTick(
-    cfg,
-    proc,
-    outBase,
-    /*waitMs=*/0,
-    &state->crashCaptured,
-    &state->pendingCrashEtw,
-    &state->pendingCrashAnalysis,
-    &state->capturedCrashDumpPath,
-    &state->pendingHangViewerDumpPath,
-    &state->pendingCrashViewerDumpPath);
+
+  const bool processExited =
+    proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+  if (!processExited) {
+    HandleCrashEventTick(
+      cfg,
+      proc,
+      outBase,
+      /*waitMs=*/0,
+      &state->crashCaptured,
+      &state->pendingCrashEtw,
+      &state->pendingCrashAnalysis,
+      &state->capturedCrashDumpPath,
+      &state->pendingHangViewerDumpPath,
+      &state->pendingCrashViewerDumpPath);
+    return;
+  }
+
+  if (proc.crashEvent && WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0) {
+    if (!ResetEvent(proc.crashEvent)) {
+      AppendLogLine(
+        outBase,
+        L"Failed to reset post-exit crash event: " + std::to_wstring(GetLastError()));
+    }
+  }
+  if (state->crashCaptured.latched) {
+    return;
+  }
+
+  CrashEventInfo info{};
+  if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &info)) {
+    return;
+  }
+
+  const bool sameCapturedSequence =
+    state->crashCaptured.capturedInfo.crashSeq == info.crashSeq;
+  if (exitCode == 0u) {
+    if (!info.isStrong) {
+      return;
+    }
+    const bool priorEvidenceAttempt =
+      state->crashCaptured.cleanExitEvidenceWritten ||
+      state->crashCaptured.cleanExitEvidenceFinalized ||
+      !state->crashCaptured.cleanExitEvidencePath.empty();
+    if (sameCapturedSequence && priorEvidenceAttempt) {
+      AppendLogLine(
+        outBase,
+        L"Preserving the existing clean-exit evidence attempt for crash_seq="
+          + std::to_wstring(info.crashSeq)
+          + L"; post-exit drain will not relabel it as not_captured.");
+      return;
+    }
+
+    state->crashCaptured.latched = true;
+    state->crashCaptured.capturedInfo = info;
+    state->crashCaptured.cleanExitEvidenceWritten = false;
+    state->crashCaptured.cleanExitEvidenceFinalized = false;
+    state->crashCaptured.cleanExitEvidencePath.clear();
+    state->crashCaptured.cleanExitDumpIdentity = CleanExitDumpIdentity{};
+    state->crashCaptured.cleanExitFilterContext = L"process_exit_metadata_drain";
+    AppendLogLine(
+      outBase,
+      L"Drained committed strong-fault metadata after process exit (exit_code=0, crash_seq="
+        + std::to_wstring(info.crashSeq)
+        + L"); the process address space is already gone, so dump capture was not attempted.");
+    return;
+  }
+
+  if (state->postExitEvidenceSeq == info.crashSeq) {
+    return;
+  }
+  if (TryWritePostExitCrashEvidenceRecord(outBase, info, exitCode)) {
+    state->postExitEvidenceSeq = info.crashSeq;
+  }
 }
 
 void CleanupCrashArtifactsAfterZeroExit(
@@ -56,20 +110,46 @@ void CleanupCrashArtifactsAfterZeroExit(
     return;
   }
 
+  if (state->capturedCrashDumpPath.empty() && !state->pendingCrashViewerDumpPath.empty()) {
+    state->capturedCrashDumpPath = state->pendingCrashViewerDumpPath;
+  }
+  const std::filesystem::path capturedDumpPath(state->capturedCrashDumpPath);
+
   // Preserve the capture-time fault metadata before terminating analysis or
-  // deleting any filtered artifacts. If metadata cannot be written, retain the
-  // dump as a fail-safe even when the INI normally allows deletion.
+  // deleting any filtered artifacts. When deletion is intended, commit a
+  // pending record first and finalize it only after observing the filesystem.
   const bool evidenceRequired = IsCleanExitEvidenceRequired(cfg, &state->crashCaptured);
-  const bool evidenceWritten = TryWriteCleanExitEvidenceRecord(
-    cfg,
-    outBase,
-    &state->crashCaptured,
-    L"process_exit",
-    cfg.preserveFilteredCrashDumps);
-  const bool preserveDump = ShouldPreserveFilteredDump(
-    cfg.preserveFilteredCrashDumps,
-    evidenceRequired,
-    evidenceWritten);
+  bool preserveDump = cfg.preserveFilteredCrashDumps;
+  bool pendingDeleteRecorded = false;
+  bool dumpDeletionFailed = false;
+  if (evidenceRequired && capturedDumpPath.empty()) {
+    (void)TryWriteCleanExitEvidenceRecord(
+      cfg,
+      outBase,
+      &state->crashCaptured,
+      L"process_exit_metadata_drain",
+      {},
+      CleanExitDumpState::kNotCaptured);
+  } else if (evidenceRequired && cfg.preserveFilteredCrashDumps) {
+    (void)TryWriteCleanExitEvidenceRecord(
+      cfg,
+      outBase,
+      &state->crashCaptured,
+      L"process_exit",
+      capturedDumpPath,
+      CleanExitDumpState::kPreserved);
+  } else if (evidenceRequired) {
+    pendingDeleteRecorded = TryWriteCleanExitEvidenceRecord(
+      cfg,
+      outBase,
+      &state->crashCaptured,
+      L"process_exit",
+      capturedDumpPath,
+      CleanExitDumpState::kPendingDelete);
+    if (!pendingDeleteRecorded) {
+      preserveDump = true;
+    }
+  }
 
   if (state->pendingCrashAnalysis.active) {
     if (state->pendingCrashAnalysis.process) {
@@ -87,23 +167,52 @@ void CleanupCrashArtifactsAfterZeroExit(
 
   const std::filesystem::path crashEtwPath = state->pendingCrashEtw.etwPath;
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
-
-  if (state->capturedCrashDumpPath.empty() && !state->pendingCrashViewerDumpPath.empty()) {
-    state->capturedCrashDumpPath = state->pendingCrashViewerDumpPath;
+  const std::filesystem::path removableCrashEtwPath =
+    state->pendingCrashEtw.active ? std::filesystem::path{} : crashEtwPath;
+  if (state->pendingCrashEtw.active && !crashEtwPath.empty()) {
+    AppendLogLine(
+      outBase,
+      L"Keeping ETW path out of artifact deletion because WPR cleanup is still unconfirmed: "
+        + crashEtwPath.filename().wstring());
   }
+
   if (!state->capturedCrashDumpPath.empty()) {
-    const std::uint32_t removed = RemoveCrashArtifactsForDump(
+    const auto removal = RemoveCrashArtifactsForDump(
       outBase,
       state->capturedCrashDumpPath,
-      crashEtwPath,
+      removableCrashEtwPath,
       preserveDump);
+    if (!preserveDump && removal.dumpExistsAfter) {
+      dumpDeletionFailed = true;
+      preserveDump = true;
+    }
+    if (evidenceRequired && pendingDeleteRecorded) {
+      const auto finalState = removal.dumpExistsAfter
+        ? CleanExitDumpState::kDeleteFailed
+        : CleanExitDumpState::kDiscarded;
+      if (!TryWriteCleanExitEvidenceRecord(
+            cfg,
+            outBase,
+            &state->crashCaptured,
+            L"process_exit",
+            capturedDumpPath,
+            finalState)) {
+        AppendLogLine(
+          outBase,
+          L"Clean-exit evidence finalization failed; the durable pending_delete record "
+          L"does not claim an unobserved dump state.");
+      }
+      preserveDump = removal.dumpExistsAfter;
+    }
     if (preserveDump) {
       AppendLogLine(
         outBase,
         (cfg.preserveFilteredCrashDumps
            ? L"exit_code=0 after filtered crash; dump file preserved, removed "
-           : L"exit_code=0 clean-exit evidence write failed; dump preserved as a fail-safe, removed ")
-          + std::to_wstring(removed)
+           : (dumpDeletionFailed
+                ? L"exit_code=0 after filtered crash; dump deletion failed or was not verifiable, removed "
+                : L"exit_code=0 clean-exit evidence write failed; dump preserved as a fail-safe, removed "))
+          + std::to_wstring(removal.removedCount)
           + L" derived crash artifact(s), without keeping the crashCaptured latch "
           + (cfg.preserveFilteredCrashDumps ? L"(PreserveFilteredCrashDumps=1): " : L": ")
           + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
@@ -111,7 +220,7 @@ void CleanupCrashArtifactsAfterZeroExit(
       AppendLogLine(
         outBase,
         L"exit_code=0 after crash capture; removed "
-          + std::to_wstring(removed)
+          + std::to_wstring(removal.removedCount)
           + L" crash artifact(s): "
           + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
     }
@@ -199,7 +308,7 @@ void HandleProcessWaitFailed(
   if (!state) {
     return;
   }
-  DrainCrashEventBeforeExit(cfg, proc, outBase, state);
+  DrainCrashEventBeforeExit(cfg, proc, outBase, STILL_ACTIVE, state);
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
   std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << waitError << L").\n";
   AppendLogLine(outBase, L"Target process wait failed: " + std::to_wstring(waitError));
@@ -220,10 +329,17 @@ bool HandleProcessExitTick(
   const DWORD w = WaitForSingleObject(proc.process, 0);
   if (w == WAIT_OBJECT_0) {
     DWORD exitCode = STILL_ACTIVE;
-    GetExitCodeProcess(proc.process, &exitCode);
-    if (exitCode != 0) {
-      DrainCrashEventBeforeExit(cfg, proc, outBase, state);
+    if (!GetExitCodeProcess(proc.process, &exitCode)) {
+      AppendLogLine(
+        outBase,
+        L"GetExitCodeProcess failed after process signal (error="
+          + std::to_wstring(GetLastError())
+          + L"); treating exit code as unavailable/non-zero.");
+      exitCode = STILL_ACTIVE;
     }
+    // Always drain the committed crash generation after observing process exit.
+    // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
+    DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
     if (exitCode != 0 &&
         !state->crashCaptured.latched &&
         cfg.enableWerDumpFallbackHint) {

@@ -2,8 +2,11 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 #include "CaptureCommon.h"
 #include "EtwCapture.h"
@@ -13,6 +16,31 @@
 #include "SkyrimDiagHelper/ProcessAttach.h"
 
 namespace skydiag::helper::internal {
+namespace {
+
+constexpr std::uint32_t kMaxCrashEtwStopAttempts = 3u;
+constexpr ULONGLONG kCrashEtwRetryDelayMs = 1000u;
+
+void UpdateManifestStatus(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  const PendingCrashEtwCapture& pending,
+  std::string_view status)
+{
+  if (!cfg.enableIncidentManifest || pending.manifestPath.empty()) {
+    return;
+  }
+  std::wstring updErr;
+  if (!TryUpdateIncidentManifestEtw(
+        pending.manifestPath,
+        pending.etwPath,
+        status,
+        &updErr)) {
+    AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
+  }
+}
+
+}  // namespace
 
 void MaybeStopPendingCrashEtwCapture(
   const skydiag::helper::HelperConfig& cfg,
@@ -32,6 +60,11 @@ void MaybeStopPendingCrashEtwCapture(
   }
 
   const ULONGLONG nowTick = GetTickCount64();
+  if (pending->cleanupPending &&
+      !force &&
+      nowTick < pending->nextCleanupAttemptTick64) {
+    return;
+  }
   bool timeUp = false;
   if (pending->captureSeconds > 0 && nowTick >= pending->startedAtTick64) {
     const ULONGLONG elapsedMs = nowTick - pending->startedAtTick64;
@@ -42,28 +75,69 @@ void MaybeStopPendingCrashEtwCapture(
     return;
   }
 
-  std::wstring etwErr;
-  if (StopEtwCaptureToPath(cfg, outBase, pending->etwPath, &etwErr)) {
-    AppendLogLine(outBase, L"ETW crash capture written: " + pending->etwPath.wstring());
-    if (cfg.enableIncidentManifest && !pending->manifestPath.empty()) {
-      std::wstring updErr;
-      if (!TryUpdateIncidentManifestEtw(pending->manifestPath, pending->etwPath, "written", &updErr)) {
-        AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
-      }
+  const std::uint32_t attemptsThisCall = force
+    ? std::max<std::uint32_t>(
+        1u,
+        kMaxCrashEtwStopAttempts - std::min(
+          pending->stopAttempts,
+          kMaxCrashEtwStopAttempts))
+    : 1u;
+  std::wstring lastStopErr;
+  for (std::uint32_t attempt = 0;
+       attempt < attemptsThisCall &&
+       pending->stopAttempts < kMaxCrashEtwStopAttempts;
+       ++attempt) {
+    if (StopEtwCaptureToPath(cfg, outBase, pending->etwPath, &lastStopErr)) {
+      AppendLogLine(outBase, L"ETW crash capture written: " + pending->etwPath.wstring());
+      UpdateManifestStatus(cfg, outBase, *pending, "written");
+      pending->active = false;
+      pending->cleanupPending = false;
+      pending->nextCleanupAttemptTick64 = 0;
+      ApplyRetentionFromConfig(cfg, outBase);
+      return;
     }
-  } else {
-    AppendLogLine(outBase, L"ETW crash capture stop failed: " + etwErr);
-    if (cfg.enableIncidentManifest && !pending->manifestPath.empty()) {
-      std::wstring updErr;
-      if (!TryUpdateIncidentManifestEtw(pending->manifestPath, pending->etwPath, "stop_failed", &updErr)) {
-        AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
-      }
+    ++pending->stopAttempts;
+    pending->cleanupPending = true;
+    pending->nextCleanupAttemptTick64 = GetTickCount64() + kCrashEtwRetryDelayMs;
+    AppendLogLine(
+      outBase,
+      L"ETW crash capture stop failed (attempt "
+        + std::to_wstring(pending->stopAttempts)
+        + L" of "
+        + std::to_wstring(kMaxCrashEtwStopAttempts)
+        + L"): "
+        + lastStopErr);
+    if (!force) {
+      break;
     }
   }
 
-  pending->active = false;
+  if (pending->stopAttempts < kMaxCrashEtwStopAttempts) {
+    UpdateManifestStatus(cfg, outBase, *pending, "stop_retry_pending");
+    return;
+  }
 
-  ApplyRetentionFromConfig(cfg, outBase);
+  std::wstring cancelErr;
+  if (CancelEtwCapture(cfg, outBase, &cancelErr)) {
+    AppendLogLine(
+      outBase,
+      L"ETW crash capture stop failed repeatedly; WPR cancellation was confirmed.");
+    UpdateManifestStatus(cfg, outBase, *pending, "cancelled_after_stop_failure");
+    pending->active = false;
+    pending->cleanupPending = false;
+    pending->nextCleanupAttemptTick64 = 0;
+    ApplyRetentionFromConfig(cfg, outBase);
+    return;
+  }
+
+  pending->active = true;
+  pending->cleanupPending = true;
+  pending->nextCleanupAttemptTick64 = GetTickCount64() + kCrashEtwRetryDelayMs;
+  AppendLogLine(
+    outBase,
+    L"ETW crash capture cleanup remains unconfirmed after bounded stop retries and wpr -cancel: "
+      + cancelErr);
+  UpdateManifestStatus(cfg, outBase, *pending, "cleanup_unconfirmed");
 }
 
 }  // namespace skydiag::helper::internal

@@ -1,11 +1,30 @@
 #include "EvidenceBuilderEvidencePipeline.h"
 #include "SkyrimDiagShared.h"
+#include "Utf.h"
 
 namespace skydiag::dump_tool::internal {
 
 void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
+
+  if (ctx.isFilteredCleanExit) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Validated clean-exit quarantine"
+      : L"검증된 정상 종료 격리";
+    e.details = en
+      ? (L"The helper's finalized evidence record matches this dump and its exception/blackbox identity "
+         L"(state=" + Utf8ToWide(r.clean_exit_dump_state) + L", sidecar=" +
+         r.clean_exit_evidence_filename + L").")
+      : (L"헬퍼의 최종 증거 레코드가 이 덤프 및 예외/블랙박스 식별값과 정확히 일치합니다"
+         L"(상태=" + Utf8ToWide(r.clean_exit_dump_state) + L", 사이드카=" +
+         r.clean_exit_evidence_filename + L").");
+    r.evidence.push_back(std::move(e));
+    return;
+  }
 
   if (r.signature_match.has_value()) {
     const auto& sig = *r.signature_match;

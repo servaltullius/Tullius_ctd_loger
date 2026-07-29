@@ -6,6 +6,13 @@ find_package(CommonLibSSE CONFIG REQUIRED)
 
 set(TARGET_NAME SkyrimDiag)
 
+set(_plugin_info_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/SkyrimDiagPluginInfo.cpp")
+configure_file(
+  "${CMAKE_SOURCE_DIR}/cmake/SkyrimDiagPluginInfo.cpp.in"
+  "${_plugin_info_generated}"
+  @ONLY
+)
+
 set(headers
   include/SkyrimDiag/Blackbox.h
   include/SkyrimDiag/CrashHandler.h
@@ -21,13 +28,19 @@ set(sources
   src/EventSinks.cpp
   src/Heartbeat.cpp
   src/MsvcRegexStub.cpp
-  src/PluginInfo.cpp
+  "${_plugin_info_generated}"
   src/PluginMain.cpp
   src/ResourceHooks.cpp
   src/ResourceLog.cpp
   src/SharedMemory.cpp)
 
 add_library(${TARGET_NAME} SHARED ${headers} ${sources})
+skydiag_add_version_resource(
+  ${TARGET_NAME}
+  "SkyrimDiag.dll"
+  "SkyrimDiag SKSE plugin"
+  "VFT_DLL"
+)
 
 target_include_directories(${TARGET_NAME}
   PRIVATE

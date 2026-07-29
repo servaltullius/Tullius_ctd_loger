@@ -11,7 +11,7 @@ namespace skydiag::helper::internal {
 std::wstring QuoteArg(std::wstring_view s);
 
 bool RunHiddenProcessAndWait(
-  std::wstring applicationPath,
+  const std::wstring& applicationPath,
   std::wstring cmdLine,
   const std::filesystem::path& cwd,
   DWORD timeoutMs,

@@ -50,6 +50,13 @@ add_executable(${PROJECT_NAME}
   src/RetentionWorker.h
   include/SkyrimDiagHelper/WctCapture.h)
 
+skydiag_add_version_resource(
+  ${PROJECT_NAME}
+  "SkyrimDiagHelper.exe"
+  "SkyrimDiag crash and hang capture helper"
+  "VFT_APP"
+)
+
 target_include_directories(${PROJECT_NAME}
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/include")

@@ -14,6 +14,7 @@ public sealed partial class MainWindow : Window
     private enum LayoutTier { Wide, Compact, Narrow }
     private LayoutTier _currentLayoutTier = (LayoutTier)(-1);
     private CancellationTokenSource? _analysisCts;
+    private string? _currentSummaryPath;
 
     internal MainWindow(DumpToolInvocationOptions startupOptions, string? startupWarning)
     {
@@ -69,16 +70,50 @@ public sealed partial class MainWindow : Window
                 : startupWarning;
         }
 
-        DispatcherQueue.TryEnqueue(async () =>
+        DispatcherQueue.TryEnqueue(() =>
         {
-            await RefreshDiscoveredDumpsAsync();
-            if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
-            {
-                await AnalyzeAsync(preferExistingArtifacts: true);
-            }
+            _ = RunUiEventAsync(
+                async () =>
+                {
+                    await RefreshDiscoveredDumpsAsync();
+                    if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
+                    {
+                        await AnalyzeAsync(preferExistingArtifacts: true);
+                    }
+                },
+                "Initial dump loading failed: ",
+                "초기 덤프 불러오기 실패: ");
         });
 
         ApplyAdaptiveLayout();
+    }
+
+    private async Task RunUiEventAsync(
+        Func<Task> action,
+        string englishFailurePrefix,
+        string koreanFailurePrefix)
+    {
+        try
+        {
+            await action();
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = T("Operation canceled.", "작업이 취소되었습니다.");
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                StatusText.Text = T(englishFailurePrefix, koreanFailurePrefix) + ex.Message;
+            }
+            catch (Exception statusEx)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"UI event error reporting failed: {statusEx.GetType().Name}: {statusEx.Message}; " +
+                    $"original={ex.GetType().Name}: {ex.Message}");
+            }
+        }
     }
 
     private void SetBusy(bool isBusy, string message)

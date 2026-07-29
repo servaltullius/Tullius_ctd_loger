@@ -386,7 +386,7 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
 
   // MO2 base (optional): <base>\overwrite\... and <base>\profiles\<name>\...
   if (mo2BaseDir) {
-    const std::filesystem::path base = *mo2BaseDir;
+    const std::filesystem::path& base = *mo2BaseDir;
     const std::filesystem::path overwrite = base / L"overwrite";
     const std::filesystem::path profiles = base / L"profiles";
 
@@ -410,7 +410,7 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
         if (!ent.is_directory(ec)) {
           continue;
         }
-        const auto p = ent.path();
+        const auto& p = ent.path();
         const std::filesystem::path pv[] = {
           p / L"SKSE",
           p / L"SKSE" / L"CrashLogger",
@@ -605,7 +605,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
         continue;
       }
 
-      const auto p = ent.path();
+      const auto& p = ent.path();
       const std::wstring ext = WideLower(p.extension().wstring());
       if (ext != L".log" && ext != L".txt") {
         continue;
@@ -628,7 +628,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       }
 
       std::wstring prefixErr;
-      auto prefix = ReadFilePrefixUtf8(p, 256 * 1024, &prefixErr);
+      auto prefix = ReadFilePrefixUtf8(p, std::size_t{256} * 1024u, &prefixErr);
       if (!prefix) {
         continue;
       }

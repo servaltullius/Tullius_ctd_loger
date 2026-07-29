@@ -41,6 +41,21 @@ struct CrashEventInfo {
   bool inMenu = false;
 };
 
+enum class CleanExitDumpState {
+  kPendingDelete,
+  kDiscarded,
+  kPreserved,
+  kDeleteFailed,
+  kNotCaptured,
+};
+
+struct CleanExitDumpIdentity {
+  bool valid = false;
+  std::wstring filename;
+  std::uint64_t sizeBytes = 0;
+  std::uint64_t lastWriteTimeUtc100ns = 0;
+};
+
 // Helper-owned state for one captured crash generation. Keeping the immutable
 // CrashEventInfo snapshot beside the latch lets the later process-exit path
 // describe the same incident even after shared memory changes or disappears.
@@ -48,6 +63,9 @@ struct CrashCaptureState {
   bool latched = false;
   CrashEventInfo capturedInfo{};
   bool cleanExitEvidenceWritten = false;
+  bool cleanExitEvidenceFinalized = false;
+  std::filesystem::path cleanExitEvidencePath;
+  CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
 };
 
@@ -182,6 +200,13 @@ inline bool ShouldQuarantineCleanExitEvidence(
 }
 
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
+bool TryCaptureCommittedCrashInfo(
+  const skydiag::SharedHeader* shm,
+  CrashEventInfo* out) noexcept;
+bool TryWritePostExitCrashEvidenceRecord(
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  DWORD exitCode);
 bool CaptureStableSharedSnapshot(
   const skydiag::SharedLayout* shm,
   std::size_t shmBytes,
@@ -198,7 +223,8 @@ bool TryWriteCleanExitEvidenceRecord(
   const std::filesystem::path& outBase,
   CrashCaptureState* crashState,
   std::wstring_view context,
-  bool dumpPreserved);
+  const std::filesystem::path& dumpPath,
+  CleanExitDumpState dumpState);
 
 inline bool ShouldPreserveFilteredDump(
   bool preserveConfigured,

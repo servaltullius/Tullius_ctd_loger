@@ -11,6 +11,7 @@
 
 #include <cstddef>
 
+// NOLINTNEXTLINE(bugprone-reserved-identifier) -- exact MSVC STL ABI symbol required.
 extern "C" std::size_t __stdcall __std_regex_transform_primary_char(
     char* /*first1*/, char* /*last1*/,
     const char* /*first2*/, const char* /*last2*/,

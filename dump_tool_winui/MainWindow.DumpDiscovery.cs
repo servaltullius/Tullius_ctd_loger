@@ -9,22 +9,30 @@ namespace SkyrimDiagDumpToolWinUI;
 
 public sealed partial class MainWindow
 {
-    private async Task RefreshDiscoveredDumpsAsync()
+    private Task<bool> RefreshDiscoveredDumpsAsync()
     {
-        var hintDumpPath = !string.IsNullOrWhiteSpace(DumpPathBox.Text)
-            ? DumpPathBox.Text.Trim()
-            : _startupOptions.DumpPath;
+        try
+        {
+            var hintDumpPath = !string.IsNullOrWhiteSpace(DumpPathBox.Text)
+                ? DumpPathBox.Text.Trim()
+                : _startupOptions.DumpPath;
 
-        var recentDumps = DumpDiscoveryService.DiscoverRecentDumps(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
-        var searchLocations = DumpDiscoveryService.BuildSearchLocationItems(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
-        _vm.PopulateDumpDiscovery(recentDumps, searchLocations, BuildDumpDiscoveryStatusText(recentDumps.Count, searchLocations.Count));
+            var recentDumps = DumpDiscoveryService.DiscoverRecentDumps(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
+            var searchLocations = DumpDiscoveryService.BuildSearchLocationItems(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
+            _vm.PopulateDumpDiscovery(recentDumps, searchLocations, BuildDumpDiscoveryStatusText(recentDumps.Count, searchLocations.Count));
 
-        RecentDumpsStatusText.Text = _vm.RecentDumpStatusText;
-        RecentDumpList.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        RecentDumpsEmptyState.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
-        DumpSearchLocationsEmptyText.Visibility = _vm.DumpSearchLocations.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
-        UpdateDumpSearchLocationSelectionState();
-        await Task.CompletedTask;
+            RecentDumpsStatusText.Text = _vm.RecentDumpStatusText;
+            RecentDumpList.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            RecentDumpsEmptyState.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+            DumpSearchLocationsEmptyText.Visibility = _vm.DumpSearchLocations.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+            UpdateDumpSearchLocationSelectionState();
+            return Task.FromResult(true);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T("Dump discovery failed: ", "덤프 검색 실패: ") + ex.Message;
+            return Task.FromResult(false);
+        }
     }
 
     private string BuildDumpDiscoveryStatusText(int dumpCount, int searchLocationCount)
@@ -59,8 +67,18 @@ public sealed partial class MainWindow
             return;
         }
 
-        _dumpDiscoveryState = DumpDiscoveryStore.PromoteLearnedRoot(_dumpDiscoveryState, directoryPath);
-        await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
+        try
+        {
+            var nextState = DumpDiscoveryStore.PromoteLearnedRoot(_dumpDiscoveryState, directoryPath);
+            await DumpDiscoveryStore.SaveAsync(nextState, CancellationToken.None);
+            _dumpDiscoveryState = nextState;
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T(
+                "Could not save the learned dump location: ",
+                "학습한 덤프 위치를 저장하지 못했습니다: ") + ex.Message;
+        }
     }
 
     private void UpdateDumpSearchLocationSelectionState()
@@ -73,8 +91,18 @@ public sealed partial class MainWindow
 
     private async void RescanDumpsButton_Click(object sender, RoutedEventArgs e)
     {
-        await RefreshDiscoveredDumpsAsync();
-        StatusText.Text = T("Rescanned known dump output locations.", "알려진 덤프 출력 위치를 다시 스캔했습니다.");
+        await RunUiEventAsync(
+            async () =>
+            {
+                if (await RefreshDiscoveredDumpsAsync())
+                {
+                    StatusText.Text = T(
+                        "Rescanned known dump output locations.",
+                        "알려진 덤프 출력 위치를 다시 스캔했습니다.");
+                }
+            },
+            "Dump rescan failed: ",
+            "덤프 재검색 실패: ");
     }
 
     private void ManageDumpFoldersButton_Click(object sender, RoutedEventArgs e)
@@ -86,35 +114,53 @@ public sealed partial class MainWindow
 
     private async void AddDumpSearchLocation_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker();
-        picker.FileTypeFilter.Add("*");
-        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        await RunUiEventAsync(
+            async () =>
+            {
+                var picker = new FolderPicker();
+                picker.FileTypeFilter.Add("*");
+                picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
 
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is null)
-        {
-            return;
-        }
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder is null)
+                {
+                    return;
+                }
 
-        _dumpDiscoveryState = DumpDiscoveryStore.AddRegisteredRoot(_dumpDiscoveryState, folder.Path);
-        await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
-        DumpSearchLocationsPanel.Visibility = Visibility.Visible;
-        await RefreshDiscoveredDumpsAsync();
-        StatusText.Text = T("Dump output location saved.", "덤프 출력 위치를 저장했습니다.");
+                var nextState = DumpDiscoveryStore.AddRegisteredRoot(_dumpDiscoveryState, folder.Path);
+                await DumpDiscoveryStore.SaveAsync(nextState, CancellationToken.None);
+                _dumpDiscoveryState = nextState;
+                DumpSearchLocationsPanel.Visibility = Visibility.Visible;
+                if (await RefreshDiscoveredDumpsAsync())
+                {
+                    StatusText.Text = T("Dump output location saved.", "덤프 출력 위치를 저장했습니다.");
+                }
+            },
+            "Could not save the dump output location: ",
+            "덤프 출력 위치를 저장하지 못했습니다: ");
     }
 
     private async void RemoveDumpSearchLocation_Click(object sender, RoutedEventArgs e)
     {
-        if (DumpSearchLocationsList.SelectedItem is not DumpSearchLocationItem item || !item.IsRemovable)
-        {
-            return;
-        }
+        await RunUiEventAsync(
+            async () =>
+            {
+                if (DumpSearchLocationsList.SelectedItem is not DumpSearchLocationItem item || !item.IsRemovable)
+                {
+                    return;
+                }
 
-        _dumpDiscoveryState = DumpDiscoveryStore.RemoveRoot(_dumpDiscoveryState, item.Path);
-        await DumpDiscoveryStore.SaveAsync(_dumpDiscoveryState, CancellationToken.None);
-        await RefreshDiscoveredDumpsAsync();
-        StatusText.Text = T("Removed dump output location.", "덤프 출력 위치를 제거했습니다.");
+                var nextState = DumpDiscoveryStore.RemoveRoot(_dumpDiscoveryState, item.Path);
+                await DumpDiscoveryStore.SaveAsync(nextState, CancellationToken.None);
+                _dumpDiscoveryState = nextState;
+                if (await RefreshDiscoveredDumpsAsync())
+                {
+                    StatusText.Text = T("Removed dump output location.", "덤프 출력 위치를 제거했습니다.");
+                }
+            },
+            "Could not remove the dump output location: ",
+            "덤프 출력 위치를 제거하지 못했습니다: ");
     }
 
     private void DumpSearchLocationsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -124,46 +170,66 @@ public sealed partial class MainWindow
 
     private async void AnalyzeRecentDump_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button button || button.Tag is not string dumpPath || string.IsNullOrWhiteSpace(dumpPath))
-        {
-            return;
-        }
+        await RunUiEventAsync(
+            async () =>
+            {
+                if (sender is not Button button ||
+                    button.Tag is not string dumpPath ||
+                    string.IsNullOrWhiteSpace(dumpPath))
+                {
+                    return;
+                }
 
-        DumpPathBox.Text = dumpPath;
-        await PromoteLearnedDumpLocationAsync(dumpPath);
-        await RefreshDiscoveredDumpsAsync();
-        await AnalyzeAsync(preferExistingArtifacts: true);
+                DumpPathBox.Text = dumpPath;
+                await AnalyzeAsync(preferExistingArtifacts: true);
+            },
+            "Could not analyze the selected dump: ",
+            "선택한 덤프를 분석하지 못했습니다: ");
     }
 
     private async void BrowseDump_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".dmp");
-        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        await RunUiEventAsync(
+            async () =>
+            {
+                var picker = new FileOpenPicker();
+                picker.FileTypeFilter.Add(".dmp");
+                picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
 
-        var file = await picker.PickSingleFileAsync();
-        if (file is not null)
-        {
-            DumpPathBox.Text = file.Path;
-            await PromoteLearnedDumpLocationAsync(file.Path);
-            await RefreshDiscoveredDumpsAsync();
-            StatusText.Text = T("Dump selected.", "덤프 파일을 선택했습니다.");
-        }
+                var file = await picker.PickSingleFileAsync();
+                if (file is not null)
+                {
+                    DumpPathBox.Text = file.Path;
+                    await PromoteLearnedDumpLocationAsync(file.Path);
+                    if (await RefreshDiscoveredDumpsAsync())
+                    {
+                        StatusText.Text = T("Dump selected.", "덤프 파일을 선택했습니다.");
+                    }
+                }
+            },
+            "Could not select the dump: ",
+            "덤프 파일을 선택하지 못했습니다: ");
     }
 
     private async void BrowseOutputFolder_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker();
-        picker.FileTypeFilter.Add("*");
-        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        await RunUiEventAsync(
+            async () =>
+            {
+                var picker = new FolderPicker();
+                picker.FileTypeFilter.Add("*");
+                picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
 
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is not null)
-        {
-            OutputDirBox.Text = folder.Path;
-            StatusText.Text = T("Output folder selected.", "출력 폴더를 선택했습니다.");
-        }
+                var folder = await picker.PickSingleFolderAsync();
+                if (folder is not null)
+                {
+                    OutputDirBox.Text = folder.Path;
+                    StatusText.Text = T("Output folder selected.", "출력 폴더를 선택했습니다.");
+                }
+            },
+            "Could not select the output folder: ",
+            "출력 폴더를 선택하지 못했습니다: ");
     }
 }

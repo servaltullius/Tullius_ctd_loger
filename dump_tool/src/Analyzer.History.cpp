@@ -97,6 +97,14 @@ void LoadIncidentCaptureProfile(
 
 namespace {
 
+std::string CrashHistoryIdentityKey(const AnalysisResult& out)
+{
+  if (!out.dump_identity.IsValid()) {
+    return {};
+  }
+  return out.dump_identity.sha256 + "." + out.dump_identity.StorageMetadataKey();
+}
+
 void AppendHistoryCandidateKey(
   std::wstring_view rawValue,
   std::unordered_set<std::string>* seen,
@@ -160,7 +168,9 @@ void LoadCrashHistoryContext(
 
   CrashHistory history;
   history.LoadFromFile(historyPath);
-  history.RemoveEntriesForDumpFile(WideToUtf8(std::filesystem::path(dumpPath).filename().wstring()));
+  history.RemoveEntriesForDumpFile(
+    WideToUtf8(std::filesystem::path(dumpPath).filename().wstring()),
+    CrashHistoryIdentityKey(out));
 
   out.history_stats = history.GetModuleStats(20);
 
@@ -202,6 +212,7 @@ void AppendCrashHistoryEntry(
   CrashHistoryEntry entry{};
   entry.timestamp_utc = analysisTimestamp;
   entry.dump_file = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
+  entry.dump_identity_key = CrashHistoryIdentityKey(out);
   entry.bucket_key = WideToUtf8(out.crash_bucket_key);
   if (!out.suspects.empty()) {
     entry.top_suspect = WideToUtf8(out.suspects[0].module_filename);

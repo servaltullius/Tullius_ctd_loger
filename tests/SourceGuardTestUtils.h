@@ -267,7 +267,10 @@ inline std::string ExtractFunctionBody(const std::string& source, const char* si
 inline void AssertOrdered(const std::string& haystack, const char* first, const char* second, const char* message)
 {
   const auto firstPos = haystack.find(first);
-  const auto secondPos = haystack.find(second);
+  const auto secondPos =
+    firstPos == std::string::npos
+    ? std::string::npos
+    : haystack.find(second, firstPos + std::char_traits<char>::length(first));
   assert(firstPos != std::string::npos && secondPos != std::string::npos && message);
   assert(firstPos < secondPos && message);
 }

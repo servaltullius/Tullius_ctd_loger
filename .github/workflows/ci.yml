@@ -40,8 +40,8 @@ jobs:
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE\vcpkg"
-          & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
+          git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP\vcpkg"
+          & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
 
       - name: Setup vcpkg binary cache
         uses: actions/cache@v4
@@ -51,17 +51,35 @@ jobs:
           restore-keys: |
             vcpkg-archives-
 
-      - name: Configure (Visual Studio + vcpkg)
+      - name: Configure (Ninja + vcpkg)
         shell: pwsh
         run: >
           cmake -S . -B build-win
-          -G "Visual Studio 17 2022"
-          -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DCMAKE_TOOLCHAIN_FILE="$env:RUNNER_TEMP\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
       - name: Build (RelWithDebInfo)
         shell: pwsh
-        run: cmake --build build-win --config RelWithDebInfo
+        run: cmake --build build-win
+
+      - name: Run clang-tidy over complete Windows production sources
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "$env:ProgramFiles\LLVM\bin\clang-tidy.exe",
+            "$env:ProgramFiles\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin\clang-tidy.exe"
+          )
+          $tidy = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $tidy) {
+            $tidy = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\2022" -Recurse -Filter clang-tidy.exe |
+              Where-Object { $_.FullName -match '\\x64\\bin\\clang-tidy\.exe$' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $tidy) { throw "clang-tidy.exe not found" }
+          python scripts/run_clang_tidy.py --build-dir build-win --clang-tidy "$tidy" --jobs 4
 
       - name: Build WinUI shell
         shell: cmd
@@ -84,9 +102,12 @@ jobs:
       - name: Package release zip (no PDB)
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
+          python scripts/package.py --build-dir build-win --config RelWithDebInfo --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
 
       - name: Run release hard gate
+        env:
+          SKYDIAG_REQUIRE_CLEAN_PROVENANCE: "1"
+          SKYDIAG_RELEASE_CONFIG: "RelWithDebInfo"
         shell: bash
         run: bash scripts/verify_release_gate.sh "$PWD" "$PWD" "$PWD/${{ steps.release_zip.outputs.zip_path }}"
 

@@ -7,44 +7,54 @@
 ### 한눈에 보기
 - 이번 릴리즈는 **CTD 증거가 조용히 사라지는 경로를 막고, 릴리즈·CI 검증 체계를 실제로 동작하게 연결**합니다.
 - 덤프 쓰기가 일시적으로 실패해도 사고를 잃지 않으며, 정상 종료(exit 0)로 삭제되는 실제 결함은 메타데이터만이라도 남깁니다.
+- 프로세스 종료 직전 경합, 산출물 삭제 결과, 손상된 상태 JSON, ETW 종료 실패까지 사고 종료 경로의 최종 상태를 사실대로 남깁니다.
 - CrashLogger가 우리보다 늦게 로드되는 로드오더에서도 중첩 예외 억제가 동작합니다.
 - 새 기능보다 **기존 기능이 실제로 검증되는지**에 무게를 둔 릴리즈입니다.
 
 ### 수정
 - **덤프 쓰기 재시도** — 크래시 이벤트는 덤프 기록 전에 소비되고 같은 결함으로 다시 신호되지 않으므로, 일시적 쓰기 실패는 곧 사고 유실이었습니다. 대상 프로세스가 살아 있는 동안 제한된 횟수만큼 그 자리에서 재시도합니다.
-- **정상 종료 증거 격리(신규, 기본 켜짐)** — exit 0은 예외가 처리되었다는 신호로 보고 덤프를 삭제하지만, 외부 크래시 핸들러의 `ExitProcess(0)`이나 종료 코드를 정규화하는 런처 때문에 실제 CTD가 0으로 끝나는 경우가 있습니다. 강한 결함이 이미 게시되었고 하트비트 복구가 관측되지 않았다면 초기 필터와 지연된 프로세스 종료 경로 모두에서 `SkyrimDiag_CleanExitEvidence_*.json`을 산출물 삭제 전에 기록합니다. JSON은 캡처 당시 결함 정보와 `dump_preserved` 상태를 보존합니다. 기본 설정에서는 덤프와 파생 리포트를 삭제하고, `PreserveFilteredCrashDumps=1`이면 덤프는 남기되 파생 리포트와 자동 동작만 억제합니다. JSON 쓰기가 실패하면 증거를 모두 잃지 않도록 덤프를 자동 보존합니다. `SkyrimDiagHelper.ini`의 `EnableCleanExitEvidenceQuarantine`으로 JSON 기록을 끌 수 있습니다.
+- **정상 종료 증거 격리(신규, 기본 켜짐)** — exit 0은 예외가 처리되었다는 신호로 보고 덤프를 삭제하지만, 외부 크래시 핸들러의 `ExitProcess(0)`이나 종료 코드를 정규화하는 런처 때문에 실제 CTD가 0으로 끝나는 경우가 있습니다. 강한 결함이 이미 게시되었고 하트비트 복구가 관측되지 않았다면 초기 필터와 지연된 프로세스 종료 경로 모두에서 `SkyrimDiag_CleanExitEvidence_*.json`을 남깁니다. 2단계 disposition으로 먼저 덤프 identity와 보존 정책을 고정하고, 삭제를 시도한 뒤 `dump_preserved`, `delete_failed`, 실제 파일 상태를 원자적으로 확정해 기록합니다. 기본 설정에서는 덤프와 파생 리포트를 삭제하고, `PreserveFilteredCrashDumps=1`이면 덤프는 남기되 파생 리포트와 자동 동작만 억제합니다. JSON 쓰기가 실패하면 증거를 모두 잃지 않도록 덤프를 자동 보존합니다. `SkyrimDiagHelper.ini`의 `EnableCleanExitEvidenceQuarantine`으로 JSON 기록을 끌 수 있습니다.
+- **exit-0 최종 폴 경합 제거** — 프로세스 종료를 관측한 직후 마지막 crash-event poll에서 새 결함 메타데이터가 발견돼도 이미 죽은 프로세스에 `MiniDumpWriteDump`를 시도하지 않습니다. 종료 후 drain은 metadata-only로 수행하고 동일 사고의 증거 판정에만 합칩니다.
+- **헬퍼 JSON 원자 기록과 손상 통계 격리** — incident/clean-exit/adaptive-load/crash-bucket JSON은 임시 파일을 완성한 뒤 교체해 중간 내용이 정상 상태처럼 노출되지 않게 했습니다. crash-bucket stats가 손상됐으면 기본값으로 조용히 덮지 않고 별도 corrupt 파일로 격리한 뒤 새 상태를 시작합니다.
+- **링 엔트리별 seqlock 스냅샷** — 전체 crash record가 안정적이어도 동시에 쓰는 blackbox/resource 엔트리가 찢어질 수 있었습니다. Helper가 각 엔트리의 전후 sequence를 검증해, 겹친 엔트리만 명시적으로 무효화하고 나머지 사고 스냅샷은 보존합니다.
+- **ETW 종료의 제한 재시도와 정리 상태** — `wpr -stop` 실패를 한 번의 성공/실패로 축약하지 않고 제한된 횟수로 재시도합니다. 끝내 확인되지 않으면 `wpr -cancel` 결과까지 확인하고, 정리가 확정되지 않은 경우 manifest에 `cleanup_unconfirmed`를 남겨 완료된 ETL처럼 취급하지 않습니다.
+- **덤프 identity 기반 산출물 충돌 방지** — 같은 stem을 가진 다른 덤프의 authoritative 산출물을 덤프 identity가 붙은 report/summary 쌍으로 분리하며, WinUI triage 저장도 동일 identity 계약을 사용합니다. 기존 이름의 파일은 호환용 최신 별칭일 뿐 사건 identity의 저장소로 사용하지 않습니다.
+- **동시 분석 출력 직렬화** — CLI와 WinUI가 같은 stem을 동시에 분석해도 per-stem 파일 잠금 안에서 report/blackbox/WCT/Summary 세대를 게시합니다. WinUI triage 저장도 같은 잠금을 사용하며 summary mirror 실패 시 authoritative triage state를 보상 복구합니다.
+- **열린 덤프 handle에 identity 결합** — 해시는 mmap한 파일인데 크기·FILETIME은 교체된 경로에서 읽는 경합을 없앴습니다. SHA-256, 크기, FILETIME, volume/file ID를 동일한 열린 handle에서 해시 전후 확인합니다.
+- **손상된 정상 종료 sidecar 격리** — 문법은 맞지만 필드 타입이 잘못된 clean-exit JSON도 optional evidence로 안전하게 거부하며 CLI 분석 밖으로 예외를 전파하지 않습니다.
+- **플러그인 worker 종료 안전성** — DLL detach의 loader lock 안에서 `jthread` 소멸자가 join하지 않도록 worker 시작 전에 모듈을 pin하고, 일반 스레드에서 호출할 명시적 shutdown 경계를 제공합니다.
 - **늦게 로드되는 CrashLogger 대응** — CrashLogger도 SKSE 플러그인이라 우리 뒤에 로드될 수 있고, 그러면 설치 시점 조회 결과가 비어 중첩 결함 억제가 영구히 꺼졌습니다. SKSE `kPostLoad` 시점부터 모듈 범위를 다시 조회하고, 크래시 핸들러가 찢어진 범위를 절대 관측하지 않도록 write-once 게시 규약으로 공개합니다.
 - **양성 예외 코드 분류 보정** — 싱글 스텝, 스레드 이름 설정, `OutputDebugString` 예외를 강한 결함 분류에서 제외해 unsafe `CrashHookMode=2`에서 이런 정상 알림이 clean-exit 증거 JSON의 대상이 되지 않게 했습니다. 기본 `CrashHookMode=1`의 치명적 예외 선택은 기존과 같습니다.
 - **분석기 이식성/불필요 복사 수정** — `Mo2Index`의 경로 사본 2곳을 참조로 바꾸고, 상위 코드 유닛이 부호 확장되던 `wchar_t` 폭 확장 경로를 부호 없는 등가 타입 경유로 고쳤습니다.
 
 ### 빌드·검증
-- **버전 소스 불일치 게이트** — `vcpkg.json`이 `CMakeLists.txt`보다 14개 릴리즈 뒤처진 `0.2.43`에 머물러 있었습니다. 릴리즈 경로가 한쪽만 읽고 둘을 비교하지 않았기 때문입니다. 두 값을 맞추고, 앞으로 불일치하면 릴리즈가 실패합니다.
-- **clang-tidy를 CI에 연결** — 설정 파일만 있고 아무도 실행하지 않던 상태였습니다. Linux CI에서 `WarningsAsErrors`로 돌고, 검사 대상 파일 목록은 컴파일 데이터베이스에서 도출하므로 새 분석기 소스가 자동 포함됩니다. Windows 전용 소스는 이 게이트 밖이며, 커버 목록을 CI 로그에 출력해 그 공백이 보이게 했습니다.
+- **하나의 버전 원천과 실제 바이너리 검증** — `CMakeLists.txt`의 `0.2.58`에서 SKSE `PluginDeclaration`, plugin/helper/CLI/native/launcher의 `VERSIONINFO`, WinUI assembly/file/product version과 application manifest를 생성합니다. `vcpkg.json`에 별도 버전이 있으면 반드시 일치해야 하며, 릴리즈 게이트는 ZIP 안 실제 PE fixed metadata와 SKSE export를 읽어 확인합니다.
+- **commit-bound 빌드·패키지 provenance** — native/WinUI 빌드는 HEAD, dirty 여부, 소스 트리 fingerprint와 정확한 산출물 해시를 manifest에 기록합니다. 패키지는 두 build manifest와 ZIP의 모든 파일 해시를 결합하며, recursive/mtime 후보 검색 없이 지정 configuration의 단일 경로만 허용합니다. 로컬 dirty 패키지는 진단용으로 허용하지만 CI와 공개 릴리즈는 `git_dirty=false`를 강제합니다.
+- **실제 ZIP 진입점 스모크** — 릴리즈 ZIP을 새 임시 폴더에 풀고 packaged top-level WinUI launcher에 Windows가 생성한 유효 minidump를 전달합니다. exit 0과 identity-aware report/summary JSON 쌍 생성을 모두 확인하며, DLL 직접 실행이나 missing-dump 오류 경로를 성공으로 대신하지 않습니다.
+- **전체 PE 아키텍처와 prerelease 상태 검증** — 고정된 핵심 파일뿐 아니라 ZIP의 모든 EXE/DLL을 검사해 native x64, x64 managed, AnyCPU IL-only, 실제 hybrid metadata가 있는 ARM64X만 허용합니다. suffix가 붙은 허용 태그는 모두 GitHub prerelease로 만들고 공개 readback 상태도 양방향 비교합니다.
+- **clang-tidy 전체 production 커버리지** — Linux의 빠른 부분 집합에 더해 Windows Ninja compile database가 `dump_tool/src`, `helper/src`, `plugin/src`의 실제 production `.cpp`와 생성된 plugin metadata 소스를 모두 포함하는지 검증하고, 전체 집합을 `WarningsAsErrors`로 실행합니다. 커버 파일 목록을 CI 로그에 출력합니다.
 - **퍼저를 CI에서 실제 실행** — 크래시 로그 파서는 다른 모드가 쓴 파일을 읽는, 이 프로젝트에서 가장 신뢰할 수 없는 입력을 다룹니다. `crashlogger`/`wct` 파서 퍼저를 CI에서 실행하고, libFuzzer가 새 입력을 첫 번째 코퍼스 인자에 쓰므로 스크래치 디렉터리를 앞에 두어 검수된 시드 코퍼스가 오염되지 않게 했습니다.
 - **Windows 테스트를 CI에서 실행** — 헬퍼·플러그인 런타임 테스트는 Windows에서만 빌드되므로, 그동안 로컬 실행에만 의존하고 있었습니다.
-- **분석기 동작 회귀 게이트 신설** — `skydiag_quality_corpus_runner`가 raw `CandidateSignal` 픽스처를 production `BuildCandidateConsensus()`에 통과시켜 후보 순위·상태·신뢰도·점수·기권을 생성하고, `skydiag_quality_corpus_gate_tests`가 그 임시 Summary만 품질 채점기에 전달합니다. 미리 계산된 Summary는 소스 코퍼스에 둘 수 없습니다. 이는 **실사고 정확도 측정이 아니라 candidate-consensus 동작 회귀 감지**이며, 정확도 주장은 릴리즈 게이트 7단계가 계속 담당합니다.
+- **분석기 동작 회귀 게이트 신설** — `skydiag_quality_corpus_runner`가 raw `CandidateSignal` 픽스처를 production `BuildCandidateConsensus()`에 통과시켜 후보 순위·상태·신뢰도·점수·기권을 생성하고, `skydiag_quality_corpus_gate_tests`가 그 임시 Summary만 품질 채점기에 전달합니다. 미리 계산된 Summary는 소스 코퍼스에 둘 수 없습니다. 이는 **실사고 정확도 측정이 아니라 candidate-consensus 동작 회귀 감지**이며, 정확도 주장은 릴리즈 게이트의 별도 reviewed-corpus 단계가 계속 담당합니다.
 - **미측정 상태를 명확히 보고** — 검수된 실사고 코퍼스가 없으면 릴리즈 게이트가 "이번 릴리즈의 실사고 귀속 정확도는 미검증"이라고 명시적으로 출력합니다. 통과로 위장하지 않습니다.
 - **CI 배선 자체를 지키는 테스트** — `skydiag_ci_wiring_tests`가 clang-tidy·퍼저·Windows ctest 호출이 워크플로에서 사라지면 실패합니다.
 - **태그 릴리즈도 전체 Linux 게이트 실행** — 일반 CI가 버전 태그를 제외하므로, 릴리즈 워크플로가 unit·ASan+UBSan·clang-tidy·parser fuzz를 직접 다시 실행한 뒤 Windows 빌드/패키징으로 넘어갑니다.
 - **Windows 테스트 이식성 보정** — source/XAML guard는 CRLF를 LF로 정규화하고, .NET share-text fixture의 stdout은 UTF-8로 명시해 Windows runner의 기본 CP1252 때문에 검증이 실패하지 않게 했습니다.
 
 ### 주의사항
-- **2차 결함 보존 기능은 이번 릴리즈에서 제외했습니다.** 최초의 강한 결함을 이후 결함으로부터 지키는 기능을 구현했다가 릴리즈 전에 되돌렸습니다. 보존은 설계상 `crash_seq`를 움직이지 않는데 `crash_seq`가 이 프로토콜의 유일한 세대 카운터라, 헬퍼 입장에서 억제 사실이 보이지 않습니다. 버전이 없는 별도 상태 플래그를 더해도 두 프로세스가 하나의 사고를 원자적으로 볼 수는 없어, 검사를 추가할 때마다 다른 인터리빙이 남았습니다. 안전한 구현에는 단일 원자적 선형화 지점을 갖는 프로토콜, 즉 `SharedLayout` 버전 상향과 ADR-0004 호환성 검토가 필요하며 다음 릴리즈 과제입니다. **v0.2.57 대비 동시성 위험은 추가되지 않았습니다.**
+- **SharedLayout protocol v4는 Plugin과 Helper를 함께 교체해야 합니다.** Plugin은 `kState_Frozen`의 clear→set CAS를 단일 사고 ownership 지점으로 사용해 최초 강한 결함을 고정하고, Helper만 명시적으로 reject/abandon한 세대를 ACK/reset해 다음 사고가 슬롯을 claim하도록 합니다. 동시성·호환성 회귀는 자동 테스트로 검증했지만, 실제 Skyrim 런타임의 연속 first-chance/CTD와 구버전 save·모드 조합은 아직 사람 플레이로 확인하지 않았습니다.
 - 정상 종료 증거 격리는 기본적으로 JSON 메타데이터만 남깁니다. 덤프가 필요하면 `PreserveFilteredCrashDumps=1`을 켜야 하며, 이 경우 JSON도 덤프가 보존됐다고 명시합니다.
 - 검수된 실사고 코퍼스가 여전히 없으므로, 다른 크래시 로거 대비 적중률을 수치로 주장하지 않습니다.
 - 플러그인, Helper, 분석기와 WinUI가 함께 바뀌므로 이전 릴리즈 파일과 섞지 말고 zip 전체를 업데이트해 주세요.
 
 ### 테스트
-- Windows native build: 성공.
-- Windows 전체 테스트 `64/64` 통과.
-- Ubuntu Linux build: 성공.
-- Linux 전체 테스트 `60/60` 통과.
-- clang-tidy(`WarningsAsErrors`): clean.
-- Windows WinUI self-contained publish: 성공.
-- Packaging(`dist/Tullius_ctd_loger_v0.2.58.zip`, `--no-pdb`): 성공 (`87,783,466` bytes, 523 entries, PDB 0개).
-- Release gate: `OK` (핵심 PE/Windows App SDK x64, 현재 빌드 해시 일치, 버전 소스 일치).
-- 실사고 품질 코퍼스: `SKIPPED (not measured)` — 코퍼스 미제공.
-- SHA-256: `ED3C69AA09B2CD05707511B3C2194D80A69E41ACB65ABEC12656C9A5F4F6A501`.
+- 릴리즈 ZIP 검증기·패키징 계약·CI 배선 회귀 테스트: 통과.
+- Windows native build와 이전 산출물을 재사용하지 않는 WinUI fresh staging publish: 성공.
+- Windows 전체 테스트: `67/67` 통과.
+- Linux 새 구성·빌드와 전체 테스트: `61/61` 통과.
+- Windows production compile database 전체 `86`개 번역 단위 clang-tidy(`WarningsAsErrors`): clean.
+- 현재 통합 소스의 로컬 diagnostic ZIP·release gate·packaged-launcher smoke는 버전 선택 직전 최종 재실행하며, 공개 프리릴리스와 그 SHA-256은 아직 생성·검증됐다고 주장하지 않습니다.
+- 실사고 품질 코퍼스와 실제 Skyrim 플레이 런타임은 미검증입니다.
 
 ## v0.2.57 (2026-07-23)
 

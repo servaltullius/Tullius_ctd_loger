@@ -34,7 +34,7 @@ std::wstring QuoteArg(std::wstring_view arg)
   std::wstring quoted;
   quoted.push_back(L'"');
 
-  int backslashes = 0;
+  std::size_t backslashes = 0;
   for (const wchar_t ch : arg) {
     if (ch == L'\\') {
       ++backslashes;
@@ -42,18 +42,18 @@ std::wstring QuoteArg(std::wstring_view arg)
     }
 
     if (ch == L'"') {
-      quoted.append(static_cast<std::size_t>(backslashes * 2 + 1), L'\\');
+      quoted.append(backslashes * 2u + 1u, L'\\');
       quoted.push_back(ch);
       backslashes = 0;
       continue;
     }
 
-    quoted.append(static_cast<std::size_t>(backslashes), L'\\');
+    quoted.append(backslashes, L'\\');
     backslashes = 0;
     quoted.push_back(ch);
   }
 
-  quoted.append(static_cast<std::size_t>(backslashes * 2), L'\\');
+  quoted.append(backslashes * 2u, L'\\');
   quoted.push_back(L'"');
   return quoted;
 }
@@ -88,7 +88,7 @@ void WriteLauncherError(const std::filesystem::path& launcherDir, std::wstring_v
       << message << L"\n";
 }
 
-int Fail(const std::filesystem::path& launcherDir, std::wstring message, bool headless)
+int Fail(const std::filesystem::path& launcherDir, const std::wstring& message, bool headless)
 {
   WriteLauncherError(launcherDir, message);
   if (!headless) {
@@ -108,7 +108,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
   const auto launcherDir = GetCurrentExeDir();
   if (launcherDir.empty()) {
     if (argv) {
-      LocalFree(argv);
+      LocalFree(reinterpret_cast<HLOCAL>(argv));
     }
     return 2;
   }
@@ -116,7 +116,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
   const auto appExe = launcherDir / L"app" / L"SkyrimDiagDumpToolWinUI.exe";
   if (!std::filesystem::is_regular_file(appExe)) {
     if (argv) {
-      LocalFree(argv);
+      LocalFree(reinterpret_cast<HLOCAL>(argv));
     }
     return Fail(launcherDir, L"Missing WinUI app executable: " + appExe.wstring(), headless);
   }
@@ -130,7 +130,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
   }
 
   if (argv) {
-    LocalFree(argv);
+    LocalFree(reinterpret_cast<HLOCAL>(argv));
   }
 
   STARTUPINFOW startupInfo{};
