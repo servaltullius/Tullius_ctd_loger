@@ -15,7 +15,10 @@ set "STAGING_OUT=%SRC%\build-winui.next"
 set "PREVIOUS_OUT=%SRC%\build-winui.previous"
 set "RID=win-x64"
 set "TFM=net8.0-windows10.0.19041.0"
-set "XAML_BUILD_OUT=%SRC%\dump_tool_winui\bin\Release\%TFM%\%RID%"
+set "WINUI_PLATFORM=x64"
+set "XAML_BUILD_ROOT=%SRC%\dump_tool_winui\bin\%WINUI_PLATFORM%\Release"
+set "XAML_INTERMEDIATE_ROOT=%SRC%\dump_tool_winui\obj\%WINUI_PLATFORM%\Release"
+set "XAML_BUILD_OUT=%XAML_BUILD_ROOT%\%TFM%\%RID%"
 set "WINUI_MANIFEST=%SRC%\dump_tool_winui\obj\SkyrimDiagVersion\app.manifest"
 set "PROJECT_VERSION="
 set "INFORMATIONAL_VERSION="
@@ -61,20 +64,21 @@ if exist "%STAGING_OUT%" (
   set "EXITCODE=1"
   goto :cleanup
 )
-if exist "%SRC%\dump_tool_winui\bin\Release" rmdir /s /q "%SRC%\dump_tool_winui\bin\Release"
-if exist "%SRC%\dump_tool_winui\obj\Release" rmdir /s /q "%SRC%\dump_tool_winui\obj\Release"
-if exist "%SRC%\dump_tool_winui\bin\Release" (
+if exist "%XAML_BUILD_ROOT%" rmdir /s /q "%XAML_BUILD_ROOT%"
+if exist "%XAML_INTERMEDIATE_ROOT%" rmdir /s /q "%XAML_INTERMEDIATE_ROOT%"
+if exist "%XAML_BUILD_ROOT%" (
   echo ERROR: failed to clear WinUI Release build output
   set "EXITCODE=1"
   goto :cleanup
 )
-if exist "%SRC%\dump_tool_winui\obj\Release" (
+if exist "%XAML_INTERMEDIATE_ROOT%" (
   echo ERROR: failed to clear WinUI Release intermediate output
   set "EXITCODE=1"
   goto :cleanup
 )
 
 dotnet publish "%PROJECT%" -c Release -r %RID% --self-contained true --output "%STAGING_OUT%" ^
+  -p:Platform=%WINUI_PLATFORM% ^
   -p:WindowsAppSDKSelfContained=true ^
   -p:PublishSingleFile=false ^
   -p:PublishTrimmed=false ^

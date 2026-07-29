@@ -398,6 +398,34 @@ def main() -> int:
     assert '--output "%STAGING_OUT%"' in build_winui_script, (
         "build-winui.cmd must force dotnet publish into one exact staging directory"
     )
+    assert 'set "WINUI_PLATFORM=x64"' in build_winui_script, (
+        "build-winui.cmd must make the MSBuild platform independent of the caller environment"
+    )
+    assert "-p:Platform=%WINUI_PLATFORM%" in build_winui_script, (
+        "build-winui.cmd must pass the canonical x64 platform explicitly to dotnet publish"
+    )
+    assert r"bin\%WINUI_PLATFORM%\Release" in build_winui_script, (
+        "build-winui.cmd must read XAML assets from the explicit x64 output tree"
+    )
+    assert r"obj\%WINUI_PLATFORM%\Release" in build_winui_script, (
+        "build-winui.cmd must isolate the explicit x64 intermediate tree"
+    )
+    assert 'if exist "%XAML_BUILD_ROOT%" rmdir /s /q "%XAML_BUILD_ROOT%"' in build_winui_script, (
+        "build-winui.cmd must clear the exact XAML output tree before publish"
+    )
+    assert build_winui_script.count('if exist "%XAML_BUILD_ROOT%"') >= 2, (
+        "build-winui.cmd must verify that the exact XAML output tree was deleted"
+    )
+    assert (
+        'if exist "%XAML_INTERMEDIATE_ROOT%" rmdir /s /q "%XAML_INTERMEDIATE_ROOT%"'
+        in build_winui_script
+    ), "build-winui.cmd must clear the exact XAML intermediate tree before publish"
+    assert build_winui_script.count('if exist "%XAML_INTERMEDIATE_ROOT%"') >= 2, (
+        "build-winui.cmd must verify that the exact XAML intermediate tree was deleted"
+    )
+    assert r"dump_tool_winui\bin\Release" not in build_winui_script, (
+        "build-winui.cmd must not depend on the environment-sensitive platformless output path"
+    )
     assert 'if exist "%STAGING_OUT%" rmdir /s /q "%STAGING_OUT%"' in build_winui_script, (
         "build-winui.cmd must clear staging before publish so stale output cannot pass"
     )

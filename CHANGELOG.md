@@ -30,6 +30,7 @@
 ### 빌드·검증
 - **하나의 버전 원천과 실제 바이너리 검증** — `CMakeLists.txt`의 `0.2.58`에서 SKSE `PluginDeclaration`, plugin/helper/CLI/native/launcher의 `VERSIONINFO`, WinUI assembly/file/product version과 application manifest를 생성합니다. `vcpkg.json`에 별도 버전이 있으면 반드시 일치해야 하며, 릴리즈 게이트는 ZIP 안 실제 PE fixed metadata와 SKSE export를 읽어 확인합니다.
 - **commit-bound 빌드·패키지 provenance** — native/WinUI 빌드는 HEAD, dirty 여부, 소스 트리 fingerprint와 정확한 산출물 해시를 manifest에 기록합니다. 패키지는 두 build manifest와 ZIP의 모든 파일 해시를 결합하며, recursive/mtime 후보 검색 없이 지정 configuration의 단일 경로만 허용합니다. 로컬 dirty 패키지는 진단용으로 허용하지만 CI와 공개 릴리즈는 `git_dirty=false`를 강제합니다.
+- **WinUI 출력 경로 환경 독립화** — GitHub MSVC 환경이 `Platform=x64`를 주입해도 로컬과 같은 산출물 계약을 사용하도록 `dotnet publish`에 x64 platform을 명시합니다. 해당 단일 `bin\x64\Release`·`obj\x64\Release` 트리를 publish 전에 지우고 그 실행에서 생성된 XAML만 staging에 합칩니다.
 - **실제 ZIP 진입점 스모크** — 릴리즈 ZIP을 새 임시 폴더에 풀고 packaged top-level WinUI launcher에 Windows가 생성한 유효 minidump를 전달합니다. exit 0과 identity-aware report/summary JSON 쌍 생성을 모두 확인하며, DLL 직접 실행이나 missing-dump 오류 경로를 성공으로 대신하지 않습니다.
 - **전체 PE 아키텍처와 prerelease 상태 검증** — 고정된 핵심 파일뿐 아니라 ZIP의 모든 EXE/DLL을 검사해 native x64, x64 managed, AnyCPU IL-only, 실제 hybrid metadata가 있는 ARM64X만 허용합니다. suffix가 붙은 허용 태그는 모두 GitHub prerelease로 만들고 공개 readback 상태도 양방향 비교합니다.
 - **clang-tidy 전체 production 커버리지** — Linux의 빠른 부분 집합에 더해 Windows Ninja compile database가 `dump_tool/src`, `helper/src`, `plugin/src`의 실제 production `.cpp`와 생성된 plugin metadata 소스를 모두 포함하는지 검증하고, 전체 집합을 `WarningsAsErrors`로 실행합니다. 커버 파일 목록을 CI 로그에 출력합니다.
@@ -53,7 +54,7 @@
 - Windows 전체 테스트: `67/67` 통과.
 - Linux 새 구성·빌드와 전체 테스트: `61/61` 통과.
 - Windows production compile database 전체 `86`개 번역 단위 clang-tidy(`WarningsAsErrors`): clean.
-- 현재 통합 소스의 로컬 diagnostic ZIP·release gate·packaged-launcher smoke는 버전 선택 직전 최종 재실행하며, 공개 프리릴리스와 그 SHA-256은 아직 생성·검증됐다고 주장하지 않습니다.
+- 현재 통합 소스의 로컬 diagnostic ZIP·release gate·packaged-launcher smoke는 clean provenance를 강제해 최종 재실행하며, 태그 워크플로는 공개 asset 재다운로드와 SHA-256 일치까지 확인해야 완료됩니다.
 - 실사고 품질 코퍼스와 실제 Skyrim 플레이 런타임은 미검증입니다.
 
 ## v0.2.57 (2026-07-23)
