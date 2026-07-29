@@ -68,6 +68,8 @@ def _pick_product_entry(
 def prepare_full_production_database(
     repo_root: Path, build_dir: Path
 ) -> tuple[Path, list[Path], list[str]]:
+    repo_root = repo_root.resolve()
+    build_dir = build_dir.resolve()
     database_path = build_dir / "compile_commands.json"
     if not database_path.is_file():
         raise FileNotFoundError(f"compile database not found: {database_path}")

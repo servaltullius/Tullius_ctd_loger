@@ -99,6 +99,9 @@ def check_clang_tidy_rejects_test_only_entries(failures: list[str]) -> None:
     runner = _load_script("run_clang_tidy.py")
     with tempfile.TemporaryDirectory(prefix="skydiag_tidy_product_entry_") as temp:
         root = Path(temp)
+        alias_anchor = root / "path_alias"
+        alias_anchor.mkdir()
+        repo_alias = alias_anchor / ".."
         source = root / "dump_tool" / "src" / "OnlyInTest.cpp"
         source.parent.mkdir(parents=True)
         source.write_text("int only_in_test = 0;\n", encoding="utf-8")
@@ -131,7 +134,7 @@ def check_clang_tidy_rejects_test_only_entries(failures: list[str]) -> None:
             json.dumps(database), encoding="utf-8"
         )
         try:
-            runner.prepare_full_production_database(root, build)
+            runner.prepare_full_production_database(repo_alias, build)
         except ValueError as exc:
             if "no product target compile entry" not in str(exc):
                 failures.append(
@@ -151,7 +154,7 @@ def check_clang_tidy_rejects_test_only_entries(failures: list[str]) -> None:
             json.dumps(database), encoding="utf-8"
         )
         try:
-            runner.prepare_full_production_database(root, build)
+            runner.prepare_full_production_database(repo_alias, build)
         except (OSError, ValueError) as exc:
             failures.append(
                 "run_clang_tidy.py rejected the production dump-tool core target: "

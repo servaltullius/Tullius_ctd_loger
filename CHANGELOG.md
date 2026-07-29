@@ -40,7 +40,7 @@
 - **미측정 상태를 명확히 보고** — 검수된 실사고 코퍼스가 없으면 릴리즈 게이트가 "이번 릴리즈의 실사고 귀속 정확도는 미검증"이라고 명시적으로 출력합니다. 통과로 위장하지 않습니다.
 - **CI 배선 자체를 지키는 테스트** — `skydiag_ci_wiring_tests`가 clang-tidy·퍼저·Windows ctest 호출이 워크플로에서 사라지면 실패합니다.
 - **태그 릴리즈도 전체 Linux 게이트 실행** — 일반 CI가 버전 태그를 제외하므로, 릴리즈 워크플로가 unit·ASan+UBSan·clang-tidy·parser fuzz를 직접 다시 실행한 뒤 Windows 빌드/패키징으로 넘어갑니다.
-- **Windows 테스트 이식성 보정** — source/XAML guard는 CRLF를 LF로 정규화하고, .NET share-text fixture의 stdout은 UTF-8로 명시해 Windows runner의 기본 CP1252 때문에 검증이 실패하지 않게 했습니다.
+- **Windows 테스트 이식성 보정** — source/XAML guard는 CRLF를 LF로 정규화하고, .NET share-text fixture의 stdout은 UTF-8로 명시합니다. clang-tidy compile-database 검사는 8.3 short path나 `alias\..`가 같은 저장소를 가리킬 때 먼저 canonicalize해 runner 경로 표기 차이를 소스 누락으로 오인하지 않습니다.
 
 ### 주의사항
 - **SharedLayout protocol v4는 Plugin과 Helper를 함께 교체해야 합니다.** Plugin은 `kState_Frozen`의 clear→set CAS를 단일 사고 ownership 지점으로 사용해 최초 강한 결함을 고정하고, Helper만 명시적으로 reject/abandon한 세대를 ACK/reset해 다음 사고가 슬롯을 claim하도록 합니다. 동시성·호환성 회귀는 자동 테스트로 검증했지만, 실제 Skyrim 런타임의 연속 first-chance/CTD와 구버전 save·모드 조합은 아직 사람 플레이로 확인하지 않았습니다.
