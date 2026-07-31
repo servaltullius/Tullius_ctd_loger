@@ -4,6 +4,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -46,11 +47,22 @@ HangTickResult HandleHangTick(
     } else if (state->wasLoading && !isLoading && state->loadStartQpc != 0 && proc.shm->header.qpc_freq != 0) {
       const auto deltaQpc = static_cast<std::uint64_t>(now.QuadPart) - state->loadStartQpc;
       const double seconds = static_cast<double>(deltaQpc) / static_cast<double>(proc.shm->header.qpc_freq);
-      const auto secRounded = static_cast<std::uint32_t>(seconds + 0.5);
+      const auto secRounded = static_cast<std::uint32_t>(std::lround(seconds));
       if (secRounded > 0) {
         loadStats->AddLoadingSampleSeconds(secRounded);
-        loadStats->SaveToFile(loadStatsPath);
+        const bool statsPersisted = loadStats->SaveToFile(loadStatsPath);
         *adaptiveLoadingThresholdSec = loadStats->SuggestedLoadingThresholdSec(cfg);
+        if (!statsPersisted) {
+          // The observation is still valid for this live helper session. Keep
+          // it in memory, but surface that the next run will resume from the
+          // last atomically preserved on-disk state.
+          const std::wstring warning =
+            L"Warning: failed to persist adaptive loading statistics; "
+            L"using the new sample in memory for this helper session while preserving the prior file: "
+            + loadStatsPath.wstring();
+          AppendLogLine(outBase, warning);
+          std::wcerr << L"[SkyrimDiagHelper] " << warning << L"\n";
+        }
         std::wcout << L"[SkyrimDiagHelper] Observed loading duration=" << secRounded
                    << L"s -> new adaptive threshold=" << *adaptiveLoadingThresholdSec << L"s\n";
       }

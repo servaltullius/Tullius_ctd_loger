@@ -79,7 +79,7 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   std::unordered_map<std::size_t, std::uint32_t> scoreByModule;
   std::unordered_map<std::size_t, std::uint32_t> exceptionScoreByModule;
 
-  constexpr std::size_t kMaxScanBytes = 96 * 1024;
+  constexpr std::size_t kMaxScanBytes = std::size_t{96} * 1024u;
   for (const auto tid : targetTids) {
     const auto it = std::find_if(threads.begin(), threads.end(), [&](const ThreadRecord& tr) { return tr.tid == tid; });
     if (it == threads.end()) {

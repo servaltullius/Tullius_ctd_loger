@@ -55,11 +55,17 @@ internal static class NativeAnalyzerBridge
         return Path.Combine(outDir, stem + "_SkyrimDiagSummary.json");
     }
 
+    public static string ResolveSummaryPath(string outDir, DumpIdentityContract identity) =>
+        Path.Combine(identity.ResolveArtifactDirectory(outDir), "Summary.json");
+
     public static string ResolveReportPath(string dumpPath, string outDir)
     {
         var stem = Path.GetFileNameWithoutExtension(dumpPath);
         return Path.Combine(outDir, stem + "_SkyrimDiagReport.txt");
     }
+
+    public static string ResolveReportPath(string outDir, DumpIdentityContract identity) =>
+        Path.Combine(identity.ResolveArtifactDirectory(outDir), "Report.txt");
 
     public static string ResolveBlackboxPath(string dumpPath, string outDir)
     {
@@ -67,11 +73,17 @@ internal static class NativeAnalyzerBridge
         return Path.Combine(outDir, stem + "_SkyrimDiagBlackbox.jsonl");
     }
 
+    public static string ResolveBlackboxPath(string outDir, DumpIdentityContract identity) =>
+        Path.Combine(identity.ResolveArtifactDirectory(outDir), "Blackbox.jsonl");
+
     public static string ResolveWctPath(string dumpPath, string outDir)
     {
         var stem = Path.GetFileNameWithoutExtension(dumpPath);
         return Path.Combine(outDir, stem + "_SkyrimDiagWct.json");
     }
+
+    public static string ResolveWctPath(string outDir, DumpIdentityContract identity) =>
+        Path.Combine(identity.ResolveArtifactDirectory(outDir), "Wct.json");
 
     public static async Task<(int exitCode, string error)> RunAnalyzeAsync(
         DumpToolInvocationOptions options,

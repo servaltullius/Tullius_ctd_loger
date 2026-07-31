@@ -16,6 +16,7 @@ struct HeartbeatConfig
 };
 
 bool StartHeartbeatScheduler(const HeartbeatConfig& cfg);
+void StopHeartbeatScheduler() noexcept;
 void HeartbeatOnInputLoaded() noexcept;
 
 }  // namespace skydiag::plugin

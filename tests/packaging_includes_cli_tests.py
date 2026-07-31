@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -7,6 +8,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 
 def _load_release_contract():
@@ -29,9 +32,83 @@ REQUIRED_WINUI_BUILD_OUTPUTS = tuple(_RELEASE_CONTRACT.REQUIRED_WINUI_BUILD_OUTP
 find_winui_build_root = _RELEASE_CONTRACT.find_winui_build_root
 
 
+def _load_smoke_script():
+    path = SCRIPTS_DIR / "smoke_release_zip.py"
+    spec = importlib.util.spec_from_file_location("smoke_release_zip_for_tests", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Failed to load packaged smoke module: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_SMOKE_SCRIPT = _load_smoke_script()
+
+
 def _touch(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x")
+
+
+def _check_smoke_identity_family_contract() -> None:
+    with tempfile.TemporaryDirectory(prefix="skydiag_smoke_identity_") as td:
+        root = Path(td)
+        output = root / "out"
+        output.mkdir()
+        dump = root / "release-smoke.dmp"
+        dump.write_bytes(b"valid synthetic dump bytes")
+        stat = dump.stat()
+        identity = {
+            "schema": "skydiag.dump_identity.v1",
+            "sha256": _SMOKE_SCRIPT._sha256_path(dump),
+            "size_bytes": stat.st_size,
+            "last_write_time_utc_100ns": (
+                stat.st_mtime_ns // 100
+                + _SMOKE_SCRIPT.WINDOWS_EPOCH_FILETIME_100NS
+            ),
+        }
+        summary_data = {
+            "schema": {"name": "SkyrimDiagSummary", "version": 2},
+            "dump_identity": identity,
+            "summary_sentence": "identity-family smoke fixture",
+        }
+        summary_text = json.dumps(summary_data, sort_keys=True) + "\n"
+        legacy_summary = output / "release-smoke_SkyrimDiagSummary.json"
+        legacy_report = output / "release-smoke_SkyrimDiagReport.txt"
+        legacy_summary.write_text(summary_text, encoding="utf-8")
+        legacy_report.write_text("same report\n", encoding="utf-8")
+
+        family_dir = (
+            output
+            / ".skydiag-analysis"
+            / identity["sha256"]
+            / (
+                f"{identity['size_bytes']:016x}."
+                f"{identity['last_write_time_utc_100ns']:016x}"
+            )
+        )
+        family_dir.mkdir(parents=True)
+        family_summary = family_dir / "Summary.json"
+        family_report = family_dir / "Report.txt"
+        family_summary.write_text(summary_text, encoding="utf-8")
+        family_report.write_text("same report\n", encoding="utf-8")
+
+        _SMOKE_SCRIPT._validate_analysis_artifacts(output, dump)
+
+        mismatched = dict(summary_data)
+        mismatched["dump_identity"] = dict(identity)
+        mismatched["dump_identity"]["size_bytes"] += 1
+        family_summary.write_text(
+            json.dumps(mismatched, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        try:
+            _SMOKE_SCRIPT._validate_analysis_artifacts(output, dump)
+        except RuntimeError as exc:
+            assert "different dump_identity" in str(exc), str(exc)
+        else:
+            raise AssertionError(
+                "packaged smoke accepted a mismatched dump identity family"
+            )
 
 
 def main() -> int:
@@ -46,8 +123,21 @@ def main() -> int:
     zip_verifier = (REPO_ROOT / "scripts" / "verify_release_zip.py").read_text(
         encoding="utf-8"
     )
+    smoke_script = (REPO_ROOT / "scripts" / "smoke_release_zip.py").read_text(
+        encoding="utf-8"
+    )
     build_win_script = (REPO_ROOT / "scripts" / "build-win.cmd").read_text(encoding="utf-8")
     build_winui_script = (REPO_ROOT / "scripts" / "build-winui.cmd").read_text(encoding="utf-8")
+    plugin_cmake = (REPO_ROOT / "plugin" / "CMakeLists.txt").read_text(encoding="utf-8")
+    plugin_info_template = (
+        REPO_ROOT / "cmake" / "SkyrimDiagPluginInfo.cpp.in"
+    ).read_text(encoding="utf-8")
+    winui_project = (
+        REPO_ROOT / "dump_tool_winui" / "SkyrimDiagDumpToolWinUI.csproj"
+    ).read_text(encoding="utf-8")
+    winui_manifest_template = (
+        REPO_ROOT / "dump_tool_winui" / "app.manifest.in"
+    ).read_text(encoding="utf-8")
     linux_workflow = (REPO_ROOT / ".github" / "workflows" / "linux-tests.yml").read_text(encoding="utf-8")
     ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     smoke_workflow_path = REPO_ROOT / ".github" / "workflows" / "winui-headless-smoke.yml"
@@ -83,8 +173,8 @@ def main() -> int:
     assert "scripts/analyze_bucket_quality.py" in gate_script, (
         "release gate must sync the optional reviewed-corpus quality checker"
     )
-    assert "release_zip_glob" in gate_script, (
-        "release gate must discover versioned release zip names instead of assuming a fixed filename"
+    assert "release_zip_name" in gate_script and "project_version" in gate_script, (
+        "release gate must resolve one exact versioned zip name when no path is supplied"
     )
     assert "scripts/verify_release_gate.sh" in gate_script, (
         "release gate must sync verify_release_gate.sh to catch mirror drift"
@@ -92,8 +182,8 @@ def main() -> int:
     assert "scripts/build-win.cmd" in gate_script, (
         "release gate must sync build-win.cmd alongside packaging scripts"
     )
-    assert "find_winui_build_root" in gate_script, (
-        "release gate must resolve the real WinUI publish root instead of assuming a flat top-level layout"
+    assert 'WINUI_BUILD_ROOT="${WIN_ROOT}/build-winui"' in gate_script, (
+        "release gate must use the exact WinUI publish path instead of recursively selecting a candidate"
     )
     assert "cygpath -u" in gate_script, (
         "release gate must normalize Windows publish paths before bash file existence checks"
@@ -120,10 +210,14 @@ def main() -> int:
         "missing real-incident corpus must be reported as unmeasured, not passed"
     )
     for verifier_contract in (
-        "REQUIRED_X64_PE_ZIP_ENTRIES",
+        "architecture-neutral managed PE",
+        "release payload contains no PE .exe/.dll entries",
         "PDB must not be shipped",
         "packaged file differs from current build",
         "release zip filename mismatch",
+        "binary version mismatch",
+        "SKSE plugin metadata version mismatch",
+        "package provenance build manifest mismatch",
     ):
         assert verifier_contract in zip_verifier, (
             f"release zip verifier missing hard contract: {verifier_contract}"
@@ -131,8 +225,11 @@ def main() -> int:
     assert "nlohmann-json3-dev" in linux_workflow, (
         "Linux workflow must install nlohmann-json3-dev before configuring CMake tests"
     )
-    assert "WinUI headless interop smoke" not in ci_workflow, (
-        "main CI must not block merges on the flaky WinUI headless smoke step"
+    assert "scripts/smoke_release_zip.py" in gate_script, (
+        "the hard release gate must execute the packaged launcher smoke"
+    )
+    assert "verify_release_gate.sh" in ci_workflow, (
+        "main CI must execute the hard gate that includes packaged launcher smoke"
     )
     assert smoke_workflow_path.is_file(), (
         "manual WinUI smoke workflow must exist"
@@ -146,27 +243,37 @@ def main() -> int:
     assert "verify_release_gate.sh" in release_workflow, (
         "tag releases must pass the hard gate before GitHub Release creation"
     )
+    assert "Verify public release readback" in release_workflow, (
+        "tag releases must download and verify the authoritative public asset"
+    )
+    assert "--require-clean" in release_workflow and "Get-FileHash" in release_workflow, (
+        "public release readback must enforce clean provenance and byte identity"
+    )
     assert '${{ steps.release_zip.outputs.zip_path }}' in ci_workflow, (
         "CI must pass the exact newly packaged zip path to the hard gate"
     )
     assert "dist/Tullius_ctd_loger.zip" not in release_workflow, (
         "release workflow must not publish an unversioned zip asset"
     )
-    assert 'Join-Path $env:GITHUB_WORKSPACE "build-winui\\SkyrimDiagDumpToolWinUI.dll"' in smoke_workflow, (
-        "manual smoke workflow must target the published WinUI DLL"
-    )
     assert "timeout-minutes: 2" in smoke_workflow, (
         "manual smoke workflow must cap the smoke step duration"
     )
-    assert "& dotnet $dll --headless --no-online-symbols --out-dir $smokeOutDir $missingDump" in smoke_workflow, (
-        "manual smoke workflow must execute the published DLL directly via dotnet"
+    assert "scripts/smoke_release_zip.py" in smoke_workflow, (
+        "manual smoke workflow must use the same extracted-package smoke as the release gate"
     )
-    assert '$code = $LASTEXITCODE' in smoke_workflow, (
-        "manual smoke workflow must assert the direct dotnet invocation exit code"
+    assert "SkyrimDiagDumpToolWinUI.exe" in smoke_script, (
+        "packaged smoke must execute the top-level WinUI launcher"
     )
-    assert "SkyrimDiagDumpToolWinUI_headless_bootstrap.log" in smoke_workflow, (
-        "manual smoke workflow must print the headless bootstrap log when startup fails"
+    assert "skydiag_minidump_fixture_writer.exe" in smoke_script, (
+        "packaged smoke must generate a valid minidump through the native fixture writer"
     )
+    assert "_SkyrimDiagReport.txt" in smoke_script and "_SkyrimDiagSummary.json" in smoke_script, (
+        "packaged smoke must require the real report artifacts"
+    )
+    assert ".skydiag-analysis" in smoke_script and "dump_identity" in smoke_script, (
+        "packaged smoke must validate the authoritative dump identity family"
+    )
+    _check_smoke_identity_family_contract()
     assert 'pushd "%~dp0.."' in build_win_script, (
         "build-win.cmd must self-map the repo root so WSL/UNC launches do not break cmd/lib.exe"
     )
@@ -236,6 +343,35 @@ def main() -> int:
     assert "SkyrimDiagDumpToolWinUI.deps.json" in build_winui_script, (
         "build-winui.cmd must require WinUI deps sidecar when selecting output"
     )
+    assert not (REPO_ROOT / "plugin" / "src" / "PluginInfo.cpp").exists(), (
+        "stale hand-written SKSE version metadata must not coexist with the generated source"
+    )
+    assert "SkyrimDiagPluginInfo.cpp.in" in plugin_cmake, (
+        "plugin metadata must be generated from the root CMake version"
+    )
+    for component in (
+        "@CMAKE_PROJECT_VERSION_MAJOR@",
+        "@CMAKE_PROJECT_VERSION_MINOR@",
+        "@CMAKE_PROJECT_VERSION_PATCH@",
+    ):
+        assert component in plugin_info_template, (
+            f"generated SKSE metadata missing project-version component: {component}"
+        )
+    assert "SkyrimDiagVersion" in winui_project and "FileVersion" in winui_project, (
+        "WinUI assembly/file metadata must receive the canonical project version"
+    )
+    assert "SkyrimDiagApplicationManifest" in winui_project, (
+        "WinUI build must require the generated versioned application manifest"
+    )
+    assert '@SKYDIAG_VERSION@.0' in winui_manifest_template, (
+        "WinUI application manifest must be generated from the project version"
+    )
+    assert "generate_winui_manifest.py" in build_winui_script, (
+        "build-winui.cmd must generate the application manifest before publish"
+    )
+    assert "write_build_provenance.py" in build_winui_script, (
+        "build-winui.cmd must bind the exact publish output to source provenance"
+    )
     for runtime_asset in (
         "Microsoft.WindowsAppRuntime.Bootstrap.dll",
         "Microsoft.WindowsAppRuntime.dll",
@@ -259,8 +395,45 @@ def main() -> int:
     assert "WindowsAppSDKSelfContained=true" in build_winui_script, (
         "build-winui.cmd must self-contain Windows App SDK runtime files"
     )
-    assert "\\publish" in build_winui_script, (
-        "build-winui.cmd must prefer the publish output directory"
+    assert '--output "%STAGING_OUT%"' in build_winui_script, (
+        "build-winui.cmd must force dotnet publish into one exact staging directory"
+    )
+    assert 'set "WINUI_PLATFORM=x64"' in build_winui_script, (
+        "build-winui.cmd must make the MSBuild platform independent of the caller environment"
+    )
+    assert "-p:Platform=%WINUI_PLATFORM%" in build_winui_script, (
+        "build-winui.cmd must pass the canonical x64 platform explicitly to dotnet publish"
+    )
+    assert r"bin\%WINUI_PLATFORM%\Release" in build_winui_script, (
+        "build-winui.cmd must read XAML assets from the explicit x64 output tree"
+    )
+    assert r"obj\%WINUI_PLATFORM%\Release" in build_winui_script, (
+        "build-winui.cmd must isolate the explicit x64 intermediate tree"
+    )
+    assert 'if exist "%XAML_BUILD_ROOT%" rmdir /s /q "%XAML_BUILD_ROOT%"' in build_winui_script, (
+        "build-winui.cmd must clear the exact XAML output tree before publish"
+    )
+    assert build_winui_script.count('if exist "%XAML_BUILD_ROOT%"') >= 2, (
+        "build-winui.cmd must verify that the exact XAML output tree was deleted"
+    )
+    assert (
+        'if exist "%XAML_INTERMEDIATE_ROOT%" rmdir /s /q "%XAML_INTERMEDIATE_ROOT%"'
+        in build_winui_script
+    ), "build-winui.cmd must clear the exact XAML intermediate tree before publish"
+    assert build_winui_script.count('if exist "%XAML_INTERMEDIATE_ROOT%"') >= 2, (
+        "build-winui.cmd must verify that the exact XAML intermediate tree was deleted"
+    )
+    assert r"dump_tool_winui\bin\Release" not in build_winui_script, (
+        "build-winui.cmd must not depend on the environment-sensitive platformless output path"
+    )
+    assert 'if exist "%STAGING_OUT%" rmdir /s /q "%STAGING_OUT%"' in build_winui_script, (
+        "build-winui.cmd must clear staging before publish so stale output cannot pass"
+    )
+    assert "BUILD_OUT_RID" not in build_winui_script and "BUILD_OUT_X64" not in build_winui_script, (
+        "build-winui.cmd must not select among stale candidate publish directories"
+    )
+    assert 'move "%STAGING_OUT%" "%OUT%"' in build_winui_script, (
+        "build-winui.cmd must install only the freshly validated staging output"
     )
     assert prerelease_template_path.is_file(), (
         "prerelease release-notes template must exist at docs/release/PRERELEASE_NOTES_TEMPLATE.md"
@@ -314,6 +487,10 @@ def main() -> int:
         out_zip = td_path / "out.zip"
 
         # Minimal fake build artifacts expected by scripts/package.py
+        (build_dir / "CMakeCache.txt").parent.mkdir(parents=True, exist_ok=True)
+        (build_dir / "CMakeCache.txt").write_text(
+            "CMAKE_BUILD_TYPE:STRING=RelWithDebInfo\n", encoding="utf-8"
+        )
         _touch(build_dir / "bin" / "SkyrimDiag.dll")
         _touch(build_dir / "bin" / "SkyrimDiagHelper.exe")
         _touch(build_dir / "bin" / "SkyrimDiagDumpToolNative.dll")
@@ -336,8 +513,46 @@ def main() -> int:
         nested_only_dir = td_path / "nested-winui"
         for output in REQUIRED_WINUI_BUILD_OUTPUTS:
             _touch(nested_only_dir / "publish" / output)
-        assert find_winui_build_root(nested_only_dir) == nested_only_dir / "publish", (
-            "release contract helper must locate nested WinUI publish roots for CI and release-gate parity"
+        assert find_winui_build_root(nested_only_dir) is None, (
+            "release contract must reject nested WinUI candidates instead of selecting by search order"
+        )
+
+        provenance_writer = SCRIPTS_DIR / "write_build_provenance.py"
+        native_manifest = build_dir / "bin" / _RELEASE_CONTRACT.BUILD_PROVENANCE_FILENAME
+        native_command = [
+            sys.executable,
+            str(provenance_writer),
+            "--repo-root",
+            str(REPO_ROOT),
+            "--output",
+            str(native_manifest),
+            "--kind",
+            "native",
+            "--configuration",
+            "RelWithDebInfo",
+        ]
+        for filename, _ in _RELEASE_CONTRACT.NATIVE_BUILD_ZIP_MAPPINGS:
+            native_command.extend(
+                ["--artifact", f"{filename}={build_dir / 'bin' / filename}"]
+            )
+        subprocess.run(native_command, check=True, cwd=REPO_ROOT)
+        subprocess.run(
+            [
+                sys.executable,
+                str(provenance_writer),
+                "--repo-root",
+                str(REPO_ROOT),
+                "--output",
+                str(winui_dir / _RELEASE_CONTRACT.BUILD_PROVENANCE_FILENAME),
+                "--kind",
+                "winui",
+                "--configuration",
+                "Release",
+                "--artifact-root",
+                str(winui_dir),
+            ],
+            check=True,
+            cwd=REPO_ROOT,
         )
 
         proc = subprocess.run(
@@ -348,6 +563,8 @@ def main() -> int:
                 str(build_dir),
                 "--winui-dir",
                 str(winui_dir),
+                "--config",
+                "RelWithDebInfo",
                 "--out",
                 str(out_zip),
                 "--no-pdb",

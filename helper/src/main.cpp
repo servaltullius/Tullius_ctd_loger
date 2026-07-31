@@ -77,8 +77,13 @@ int wmain(int argc, wchar_t** argv)
     skydiag::helper::Detach(proc);
     return 0;
   }
-  if (!helperSingletonMutex && !err.empty()) {
-    AppendLogLine(outBase, L"Warning: helper singleton mutex unavailable: " + err);
+  if (!helperSingletonMutex) {
+    const std::wstring singletonError =
+      err.empty() ? L"CreateMutexW returned a null handle." : err;
+    std::wcerr << L"[SkyrimDiagHelper] Singleton mutex failed: " << singletonError << L"\n";
+    AppendLogLine(outBase, L"Fatal: helper singleton mutex unavailable: " + singletonError);
+    skydiag::helper::Detach(proc);
+    return 4;
   }
 
   skydiag::helper::internal::ClearLog(outBase);

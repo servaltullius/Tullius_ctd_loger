@@ -12,7 +12,16 @@ static std::string ReadAllText(const std::filesystem::path& path)
   assert(in && "Failed to open file");
   std::ostringstream ss;
   ss << in.rdbuf();
-  return ss.str();
+  const auto raw = ss.str();
+  std::string normalized;
+  normalized.reserve(raw.size());
+  for (std::size_t i = 0; i < raw.size(); ++i) {
+    if (raw[i] == '\r' && i + 1 < raw.size() && raw[i + 1] == '\n') {
+      continue;
+    }
+    normalized.push_back(raw[i]);
+  }
+  return normalized;
 }
 
 static std::string ReadMainWindowViewModelText(const std::filesystem::path& repoRoot)

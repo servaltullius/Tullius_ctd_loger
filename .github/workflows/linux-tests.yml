@@ -8,6 +8,16 @@ on:
         required: false
         type: boolean
         default: false
+      run_fuzz:
+        description: "Also run the libFuzzer smoke job"
+        required: false
+        type: boolean
+        default: false
+      run_clang_tidy:
+        description: "Also run the clang-tidy gate"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   unit-tests:
@@ -68,3 +78,84 @@ jobs:
 
       - name: Run tests under sanitizers
         run: ctest --test-dir build-asan --output-on-failure
+
+  clang-tidy:
+    name: Linux clang-tidy
+    if: ${{ inputs.run_clang_tidy }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned: .clang-tidy runs with WarningsAsErrors, so an unpinned toolchain
+      # could fail the build on checks a new release enables rather than on a
+      # change to this repository.
+      - name: Install lint dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy-18 nlohmann-json3-dev
+
+      - name: Configure (compile database)
+        run: >
+          cmake -S . -B build-tidy -G Ninja
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: bash scripts/run_clang_tidy.sh build-tidy clang-tidy-18
+
+  fuzz:
+    name: Linux Fuzz Smoke
+    if: ${{ inputs.run_fuzz }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install fuzz dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang nlohmann-json3-dev
+
+      # The parsers consume crash logs written by other mods, so they are the
+      # least trusted input this project handles. The ASan job only covers the
+      # inputs unit tests happen to use.
+      - name: Configure (libFuzzer)
+        run: >
+          cmake -S . -B build-fuzz -G Ninja
+          -DSKYDIAG_FUZZ=ON
+          -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Build fuzz targets
+        run: cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser
+
+      # Bounded smoke run, not a fuzzing campaign: it re-runs the seed corpus and
+      # explores briefly, so a parser that regressed into a crash on known-good
+      # input fails the build.
+      # libFuzzer writes newly discovered units into the first corpus directory
+      # given, so a scratch directory goes first: the checked-in seeds stay the
+      # curated set instead of accumulating unminimized run-to-run mutations.
+      - name: Fuzz CrashLogger parser
+        run: |
+          mkdir -p artifacts/fuzz /tmp/fuzz-crashlogger
+          ./build-fuzz/bin/fuzz_crashlogger_parser /tmp/fuzz-crashlogger fuzz/corpus/crashlogger \
+            -max_total_time=90 -print_final_stats=1 \
+            -artifact_prefix=artifacts/fuzz/crashlogger-
+
+      - name: Fuzz WCT parser
+        run: |
+          mkdir -p artifacts/fuzz /tmp/fuzz-wct
+          ./build-fuzz/bin/fuzz_wct_parser /tmp/fuzz-wct fuzz/corpus/wct \
+            -max_total_time=90 -print_final_stats=1 \
+            -artifact_prefix=artifacts/fuzz/wct-
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-artifacts
+          path: artifacts/fuzz/
+          if-no-files-found: ignore

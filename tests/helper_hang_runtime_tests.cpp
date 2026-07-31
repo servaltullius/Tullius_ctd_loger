@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "HangCapture.h"
@@ -32,6 +33,132 @@ using skydiag::tests::runtime::ReadAllTextUtf8;
 using skydiag::tests::runtime::Require;
 
 namespace {
+
+void TestLoadStatsAtomicSaveFailurePreservesExistingState()
+{
+  const auto outBase = MakeTempDir(L"skydiag_load_stats_atomic_failure");
+  const auto statsPath = outBase / L"SkyrimDiag_LoadStats.json";
+  constexpr const char* kPriorState =
+    "{\n  \"version\": 1,\n  \"loadingSeconds\": [17]\n}\n";
+  {
+    std::ofstream prior(statsPath, std::ios::binary | std::ios::trunc);
+    Require(prior.is_open(), "Failed to create prior load-stats state");
+    prior << kPriorState;
+    prior.flush();
+    Require(prior.good(), "Failed to flush prior load-stats state");
+  }
+
+  HANDLE locked = CreateFileW(
+    statsPath.c_str(),
+    GENERIC_READ,
+    FILE_SHARE_READ,
+    nullptr,
+    OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    nullptr);
+  Require(locked != INVALID_HANDLE_VALUE, "Failed to lock load-stats state against replacement");
+
+  LoadStats replacement;
+  replacement.AddLoadingSampleSeconds(99u);
+  const bool saved = replacement.SaveToFile(statsPath);
+  CloseHandle(locked);
+
+  Require(!saved, "LoadStats::SaveToFile must propagate atomic replacement failure");
+  Require(
+    ReadAllTextUtf8(statsPath) == kPriorState,
+    "Failed load-stats replacement must preserve the complete prior JSON");
+
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(outBase, ec)) {
+    Require(!ec, "Failed to enumerate load-stats output directory");
+    Require(
+      entry.path().filename().wstring().find(L".tmp.") == std::wstring::npos,
+      "Failed load-stats replacement must clean its temporary file");
+  }
+
+  std::filesystem::remove_all(outBase);
+}
+
+void TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample()
+{
+  const auto outBase = MakeTempDir(L"skydiag_load_stats_tick_failure");
+  ClearLog(outBase);
+  const auto statsPath = outBase / L"SkyrimDiag_LoadStats.json";
+  constexpr const char* kPriorState =
+    "{\n  \"version\": 1,\n  \"loadingSeconds\": [17]\n}\n";
+  {
+    std::ofstream prior(statsPath, std::ios::binary | std::ios::trunc);
+    Require(prior.is_open(), "Failed to create prior tick load-stats state");
+    prior << kPriorState;
+    prior.flush();
+    Require(prior.good(), "Failed to flush prior tick load-stats state");
+  }
+
+  HANDLE locked = CreateFileW(
+    statsPath.c_str(),
+    GENERIC_READ,
+    FILE_SHARE_READ,
+    nullptr,
+    OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    nullptr);
+  Require(locked != INVALID_HANDLE_VALUE, "Failed to lock tick load-stats state");
+
+  auto shared = MakeSharedLayout();
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  shared->header.qpc_freq = 10'000'000ull;
+  shared->header.last_heartbeat_qpc = static_cast<std::uint64_t>(now.QuadPart);
+  shared->header.state_flags = skydiag::kState_None;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  auto cfg = MakeTestConfig();
+  cfg.adaptiveLoadingMinSec = 1u;
+  cfg.adaptiveLoadingMinExtraSec = 5u;
+  cfg.adaptiveLoadingMaxSec = 1000u;
+
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  std::wstring pendingHangViewerDumpPath;
+  HangCaptureState state{};
+  state.wasLoading = true;
+  state.loadStartQpc =
+    static_cast<std::uint64_t>(now.QuadPart) - (20ull * shared->header.qpc_freq);
+
+  const auto result = HandleHangTick(
+    cfg,
+    proc,
+    outBase,
+    &loadStats,
+    statsPath,
+    &adaptiveLoadingThresholdSec,
+    static_cast<std::uint64_t>(now.QuadPart),
+    &pendingHangViewerDumpPath,
+    &state);
+  CloseHandle(locked);
+
+  Require(result == HangTickResult::kContinue, "Stats persistence failure must not stop hang monitoring");
+  Require(loadStats.HasSamples(), "Valid loading observation must remain usable in memory");
+  Require(
+    adaptiveLoadingThresholdSec == 30u,
+    "Current helper session must derive its threshold from the valid in-memory sample");
+  Require(
+    ReadAllTextUtf8(statsPath) == kPriorState,
+    "Tick persistence failure must preserve the prior on-disk statistics");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(
+    log,
+    "failed to persist adaptive loading statistics",
+    "Tick persistence failure must be visible in the helper log");
+  AssertContains(
+    log,
+    "using the new sample in memory",
+    "Helper log must state the intentional current-session memory behavior");
+
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
 
 void TestHandleHangTick_SkipsWhenHeartbeatNotInitialized()
 {
@@ -133,6 +260,8 @@ void TestExecuteConfirmedHangCapture_WritesArtifacts()
 int main()
 {
   try {
+    TestLoadStatsAtomicSaveFailurePreservesExistingState();
+    TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample();
     TestHandleHangTick_SkipsWhenHeartbeatNotInitialized();
     TestExecuteConfirmedHangCapture_WritesArtifacts();
     return 0;

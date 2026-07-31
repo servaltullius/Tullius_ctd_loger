@@ -34,18 +34,21 @@ int main()
   const auto pluginMainPath = repoRoot / "plugin" / "src" / "PluginMain.cpp";
   const auto sharedMemoryPath = repoRoot / "plugin" / "src" / "SharedMemory.cpp";
   const auto crashHandlerPath = repoRoot / "plugin" / "src" / "CrashHandler.cpp";
+  const auto sharedProtocolPath = repoRoot / "shared" / "SkyrimDiagShared.h";
 
   assert(std::filesystem::exists(heartbeatPath) && "plugin/src/Heartbeat.cpp not found");
   assert(std::filesystem::exists(resourceHooksPath) && "plugin/src/ResourceHooks.cpp not found");
   assert(std::filesystem::exists(pluginMainPath) && "plugin/src/PluginMain.cpp not found");
   assert(std::filesystem::exists(sharedMemoryPath) && "plugin/src/SharedMemory.cpp not found");
   assert(std::filesystem::exists(crashHandlerPath) && "plugin/src/CrashHandler.cpp not found");
+  assert(std::filesystem::exists(sharedProtocolPath) && "shared/SkyrimDiagShared.h not found");
 
   const std::string heartbeat = ReadAllText(heartbeatPath);
   const std::string resourceHooks = ReadAllText(resourceHooksPath);
   const std::string pluginMain = ReadAllText(pluginMainPath);
   const std::string sharedMemory = ReadAllText(sharedMemoryPath);
   const std::string crashHandler = ReadAllText(crashHandlerPath);
+  const std::string sharedProtocol = ReadAllText(sharedProtocolPath);
 
   const std::string queueHeartbeatTaskBody = ExtractFunctionBody(heartbeat, "void QueueHeartbeatTask() noexcept");
   AssertContains(
@@ -112,10 +115,38 @@ int main()
     "StartHeartbeatScheduler(",
     "Plugin data-loaded path must start heartbeat scheduler.");
 
+  assert(
+    pluginMain.find("static std::jthread g_testHotkeysThread;") == std::string::npos &&
+    pluginMain.find("static std::jthread g_watchdogThread;") == std::string::npos &&
+    heartbeat.find("std::jthread g_scheduler;") == std::string::npos &&
+    "Joining jthread value destructors must never run during DLL detach under loader lock.");
+
   AssertContains(
     pluginMain,
-    "static std::jthread g_testHotkeysThread;",
-    "Test hotkey worker must keep a managed jthread so DLL unload can request shutdown.");
+    "GET_MODULE_HANDLE_EX_FLAG_PIN",
+    "Plugin module must be pinned before background workers can outlive a FreeLibrary request.");
+  const std::string shutdownWorkersBody = ExtractFunctionBody(
+    pluginMain,
+    "SkyrimDiagShutdownWorkers() noexcept");
+  AssertContains(
+    shutdownWorkersBody,
+    "StopPluginBackgroundWorkers()",
+    "Explicit shutdown must join plugin-owned workers outside DllMain.");
+  AssertContains(
+    shutdownWorkersBody,
+    "StopHeartbeatScheduler()",
+    "Explicit shutdown must join the heartbeat worker outside DllMain.");
+  const std::string stopHeartbeatBody = ExtractFunctionBody(
+    heartbeat,
+    "void StopHeartbeatScheduler() noexcept");
+  AssertContains(
+    stopHeartbeatBody,
+    "request_stop()",
+    "Heartbeat shutdown must request cooperative worker termination.");
+  AssertContains(
+    stopHeartbeatBody,
+    "join()",
+    "Heartbeat shutdown must join before deleting its heap-owned jthread.");
 
   AssertContains(
     pluginMain,
@@ -192,30 +223,80 @@ int main()
     "ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)",
     "Fatal capture must return after signaling before dynamic first-chance telemetry can execute.");
 
+  const std::string refreshCrashLoggerRangesBody = ExtractFunctionBody(
+    crashHandler,
+    "void RefreshCrashLoggerModuleRanges() noexcept");
+  AssertContains(
+    refreshCrashLoggerRangesBody,
+    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
+    "Crash handler must cache the current CrashLogger module image range.");
+  AssertContains(
+    refreshCrashLoggerRangesBody,
+    "QueryLoadedModuleRange(L\"CrashLoggerSSE.dll\")",
+    "Crash handler must also cache the legacy CrashLoggerSSE module image range.");
+  AssertContains(
+    refreshCrashLoggerRangesBody,
+    "PublishOnce(",
+    "CrashLogger ranges must publish through the write-once helper so the crash handler "
+    "never observes a torn range.");
+
   const std::string installCrashHandlerBody = ExtractFunctionBody(
     crashHandler,
     "bool InstallCrashHandler(");
   AssertContains(
     installCrashHandlerBody,
-    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
-    "Crash handler install must cache the current CrashLogger module image range.");
-  AssertContains(
-    installCrashHandlerBody,
-    "QueryLoadedModuleRange(L\"CrashLoggerSSE.dll\")",
-    "Crash handler install must also cache the legacy CrashLoggerSSE module image range.");
+    "RefreshCrashLoggerModuleRanges()",
+    "Crash handler install must cache the CrashLogger module image ranges.");
   AssertOrdered(
     installCrashHandlerBody,
-    "QueryLoadedModuleRange(L\"CrashLogger.dll\")",
+    "RefreshCrashLoggerModuleRanges()",
     "AddVectoredExceptionHandler(",
     "CrashLogger module ranges must be cached before the vectored handler can run.");
 
-  AssertOrdered(
-    vectoredHandlerBody,
-    "ConsumeFirstChanceTelemetryBudget(signature, qpcNow)",
-    "ResolveExceptionModuleBasenameUtf8(",
-    "First-chance rate limiting must run before module/path resolution.");
+  // CrashLogger is an SKSE plugin and can load after us, leaving the install-time
+  // lookup empty. Without a lifecycle refresh, nested-fault suppression would be
+  // permanently disabled for those load orders.
+  const std::string onSkseMessageBody = ExtractFunctionBody(
+    pluginMain,
+    "void OnSkseMessage(SKSE::MessagingInterface::Message* message)");
+  AssertContains(
+    onSkseMessageBody,
+    "RefreshCrashLoggerModuleRanges()",
+    "SKSE lifecycle must refresh CrashLogger module ranges so late-loaded builds are covered.");
+  AssertContains(
+    onSkseMessageBody,
+    "kPostLoad",
+    "CrashLogger range refresh must start at the earliest post-load lifecycle stage.");
 
-  const std::string publishCrashBody = ExtractFunctionBody(crashHandler, "bool TryPublishCrashRecord(");
+  AssertContains(
+    vectoredHandlerBody,
+    "PushFirstChanceExceptionEvent(code, addressBucket, {});",
+    "VEH first-chance telemetry must record only the numeric address bucket.");
+  assert(
+    crashHandler.find("ResolveExceptionModuleBasenameUtf8") == std::string::npos &&
+    vectoredHandlerBody.find("GetModuleHandleExW") == std::string::npos &&
+    vectoredHandlerBody.find("GetModuleFileNameW") == std::string::npos &&
+    vectoredHandlerBody.find("WideCharToMultiByte") == std::string::npos &&
+    "VEH must not perform loader, module, path, or text conversion lookups.");
+
+  const std::string publishCrashBody =
+    ExtractFunctionBody(crashHandler, "bool TryPublishCrashRecord(");
+  const std::string claimCrashBody = ExtractFunctionBody(
+    sharedProtocol,
+    "inline bool TryClaimCrashIncidentOwnership(");
+  AssertContains(
+    claimCrashBody,
+    "InterlockedCompareExchange(flags, desired, observed)",
+    "Incident ownership must be claimed with compare-exchange on the shared state word.");
+  AssertContains(
+    claimCrashBody,
+    "kState_Frozen",
+    "Incident claim must reject an already-owned Frozen slot.");
+  AssertOrdered(
+    publishCrashBody,
+    "TryClaimCrashIncidentOwnership(&shm->header.state_flags)",
+    "InterlockedCompareExchange(sequence, 0, 0)",
+    "Incident ownership must be claimed before CrashInfo seqlock publication begins.");
   AssertContains(
     publishCrashBody,
     "InterlockedCompareExchange(sequence, writing, observed)",
@@ -224,11 +305,77 @@ int main()
     publishCrashBody,
     "InterlockedExchange(sequence, committed)",
     "Crash record writer must publish an even committed sequence.");
+
   assert(
     publishCrashBody.find("std::string") == std::string::npos &&
     publishCrashBody.find("std::filesystem") == std::string::npos &&
     publishCrashBody.find("ResolveExceptionModuleBasenameUtf8") == std::string::npos &&
     "Fatal crash record publication must not allocate or resolve filesystem paths.");
+  assert(
+    vectoredHandlerBody.find("InterlockedOr(") == std::string::npos &&
+    "Fatal handler must not set ownership after publication; the CAS claim is the only ownership point.");
+
+  const std::string setupLogBody = ExtractFunctionBody(pluginMain, "bool SetupLog() noexcept");
+  AssertContains(
+    setupLogBody,
+    "catch (...)",
+    "File logger setup must catch every exception before it can escape plugin load.");
+  AssertContains(
+    setupLogBody,
+    "InstallFallbackLogger()",
+    "Logger setup failure must install a safe fallback logger.");
+  AssertContains(
+    pluginMain,
+    "spdlog::sinks::null_sink_mt",
+    "Fallback logging must use a no-op sink that is safe for later log calls.");
+
+  const std::string pluginLoadBody = ExtractFunctionBody(
+    pluginMain,
+    "SKSEPluginLoad(");
+  AssertContains(
+    pluginLoadBody,
+    "if (!SetupLog())",
+    "Plugin load must explicitly tolerate file logger setup failure.");
+  AssertContains(
+    pluginLoadBody,
+    "catch (...)",
+    "Plugin initialization must never unwind through the SKSE C ABI.");
+  AssertContains(
+    pluginLoadBody,
+    "return skseInitialized;",
+    "A partial plugin initialization must keep the DLL resident after the SKSE boundary is established.");
+  AssertOrdered(
+    pluginLoadBody,
+    "PinThisModuleForWorkerLifetime()",
+    "StartHeartbeatScheduler(",
+    "Plugin must pin its module before starting a worker that executes DLL code.");
+
+  const std::string watchdogBody = ExtractFunctionBody(
+    pluginMain,
+    "void StartHelperWatchdogIfConfigured(");
+  AssertContains(
+    watchdogBody,
+    "unconfirmed; retry in {} ms",
+    "An unconfirmed helper launch must be logged as a retryable failure.");
+  AssertOrdered(
+    watchdogBody,
+    "if (confirmed)",
+    "retryBackoffMs = kRetryMinMs;",
+    "A confirmed helper launch must be the branch that resets watchdog backoff.");
+  AssertOrdered(
+    watchdogBody,
+    "if (confirmed)",
+    "nextAttemptTick = 0;",
+    "A confirmed helper launch must clear its pending retry deadline.");
+  AssertOrdered(
+    watchdogBody,
+    "unconfirmed; retry in {} ms",
+    "retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);",
+    "An unconfirmed launch must increase watchdog backoff after scheduling its retry.");
+  AssertContains(
+    watchdogBody,
+    "nextAttemptTick = GetTickCount64() + retryBackoffMs;",
+    "Unconfirmed and failed launches must schedule a bounded retry delay.");
 
   AssertContains(
     pluginMain,

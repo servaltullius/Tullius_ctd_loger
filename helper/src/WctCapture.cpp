@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 namespace skydiag::helper {
@@ -82,15 +81,15 @@ std::string WideToUtf8Bounded(const wchar_t (&buf)[N])
 
 struct WctPassResult
 {
-  nlohmann::json threads = nlohmann::json::array();
-  std::unordered_set<std::uint32_t> cycleTids;
+  nlohmann::json threads;
+  std::vector<std::uint32_t> cycleTids;
   bool hasUsableData = false;
   bool hasLoadingSignal = false;
   std::uint32_t longestWaitTid = 0;
   std::uint64_t longestWaitMs = 0;
 };
 
-std::vector<std::uint32_t> SortedCycleThreadIds(const std::unordered_set<std::uint32_t>& tids)
+std::vector<std::uint32_t> SortedCycleThreadIds(const std::vector<std::uint32_t>& tids)
 {
   std::vector<std::uint32_t> out(tids.begin(), tids.end());
   std::sort(out.begin(), out.end());
@@ -108,6 +107,7 @@ bool ReadLoadingSignal(const volatile std::uint32_t* stateFlags)
 void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_t* captureStateFlags, WctPassResult& out)
 {
   out = WctPassResult{};
+  out.threads = nlohmann::json::array();
   out.hasLoadingSignal = ReadLoadingSignal(captureStateFlags);
 
   const auto tids = EnumerateThreads(pid);
@@ -122,7 +122,7 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
 
     nlohmann::json thread = nlohmann::json::object();
     thread["tid"] = tid;
-    thread["isCycle"] = isCycle ? true : false;
+    thread["isCycle"] = isCycle != FALSE;
     thread["nodes"] = nlohmann::json::array();
 
     if (!ok && lastErr != ERROR_MORE_DATA) {
@@ -134,7 +134,7 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
     out.hasUsableData = true;
 
     if (isCycle) {
-      out.cycleTids.insert(tid);
+      out.cycleTids.push_back(tid);
     }
 
     std::uint64_t threadLongestWait = 0;
@@ -301,7 +301,8 @@ bool CaptureWct(
   if (passes.size() >= 2 && passes[0].hasUsableData && passes[1].hasUsableData) {
     std::vector<std::uint32_t> repeatedCycleTids;
     for (const auto tid : passes[0].cycleTids) {
-      if (passes[1].cycleTids.find(tid) != passes[1].cycleTids.end()) {
+      if (std::find(passes[1].cycleTids.begin(), passes[1].cycleTids.end(), tid) !=
+          passes[1].cycleTids.end()) {
         repeatedCycleTids.push_back(tid);
       }
     }

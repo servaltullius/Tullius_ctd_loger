@@ -303,7 +303,7 @@ SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineS
     runtimeDegraded = true;
     runtimeDiagnostics.push_back(L"[Symbols] explicit symbol path includes online source while policy disables it");
   }
-  ok = SymInitializeW(process, searchPath.empty() ? nullptr : searchPath.c_str(), FALSE) ? true : false;
+  ok = SymInitializeW(process, searchPath.empty() ? nullptr : searchPath.c_str(), FALSE) != FALSE;
   if (!ok) {
     runtimeDegraded = true;
     runtimeDiagnostics.push_back(L"[Symbols] SymInitializeW failed; stackwalk symbolization unavailable");

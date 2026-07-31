@@ -87,57 +87,57 @@ std::string BuildReportText(
   if (summary.contains("incident") && summary["incident"].is_object()) {
     const auto& inc = summary["incident"];
     if (inc.contains("incident_id") && inc["incident_id"].is_string()) {
-      rpt << (en ? "IncidentId: " : "IncidentId: ") << inc["incident_id"].get<std::string>() << "\n";
+      rpt << "IncidentId: " << inc["incident_id"].get<std::string>() << "\n";
     }
     if (inc.contains("capture_kind") && inc["capture_kind"].is_string()) {
-      rpt << (en ? "CaptureKind: " : "CaptureKind: ") << inc["capture_kind"].get<std::string>() << "\n";
+      rpt << "CaptureKind: " << inc["capture_kind"].get<std::string>() << "\n";
     }
     if (inc.contains("capture_profile") && inc["capture_profile"].is_object()) {
       const auto& captureProfile = inc["capture_profile"];
       if (captureProfile.contains("base_mode") && captureProfile["base_mode"].is_string()) {
-        rpt << (en ? "CaptureProfileBaseMode: " : "CaptureProfileBaseMode: ")
+        rpt << "CaptureProfileBaseMode: "
             << captureProfile["base_mode"].get<std::string>() << "\n";
       }
       if (captureProfile.contains("include_code_segments") && captureProfile["include_code_segments"].is_boolean()) {
-        rpt << (en ? "CaptureProfileCodeSegments: " : "CaptureProfileCodeSegments: ")
+        rpt << "CaptureProfileCodeSegments: "
             << (captureProfile["include_code_segments"].get<bool>() ? "1" : "0") << "\n";
       }
       if (captureProfile.contains("include_process_thread_data") &&
           captureProfile["include_process_thread_data"].is_boolean()) {
-        rpt << (en ? "CaptureProfileProcessThreadData: " : "CaptureProfileProcessThreadData: ")
+        rpt << "CaptureProfileProcessThreadData: "
             << (captureProfile["include_process_thread_data"].get<bool>() ? "1" : "0") << "\n";
       }
       if (captureProfile.contains("include_full_memory_info") &&
           captureProfile["include_full_memory_info"].is_boolean()) {
-        rpt << (en ? "CaptureProfileFullMemoryInfo: " : "CaptureProfileFullMemoryInfo: ")
+        rpt << "CaptureProfileFullMemoryInfo: "
             << (captureProfile["include_full_memory_info"].get<bool>() ? "1" : "0") << "\n";
       }
       if (captureProfile.contains("include_module_headers") && captureProfile["include_module_headers"].is_boolean()) {
-        rpt << (en ? "CaptureProfileModuleHeaders: " : "CaptureProfileModuleHeaders: ")
+        rpt << "CaptureProfileModuleHeaders: "
             << (captureProfile["include_module_headers"].get<bool>() ? "1" : "0") << "\n";
       }
       if (captureProfile.contains("include_indirect_memory") && captureProfile["include_indirect_memory"].is_boolean()) {
-        rpt << (en ? "CaptureProfileIndirectMemory: " : "CaptureProfileIndirectMemory: ")
+        rpt << "CaptureProfileIndirectMemory: "
             << (captureProfile["include_indirect_memory"].get<bool>() ? "1" : "0") << "\n";
       }
       if (captureProfile.contains("ignore_inaccessible_memory") &&
           captureProfile["ignore_inaccessible_memory"].is_boolean()) {
-        rpt << (en ? "CaptureProfileIgnoreInaccessibleMemory: " : "CaptureProfileIgnoreInaccessibleMemory: ")
+        rpt << "CaptureProfileIgnoreInaccessibleMemory: "
             << (captureProfile["ignore_inaccessible_memory"].get<bool>() ? "1" : "0") << "\n";
       }
       if (captureProfile.contains("include_full_memory") && captureProfile["include_full_memory"].is_boolean()) {
-        rpt << (en ? "CaptureProfileFullMemory: " : "CaptureProfileFullMemory: ")
+        rpt << "CaptureProfileFullMemory: "
             << (captureProfile["include_full_memory"].get<bool>() ? "1" : "0") << "\n";
       }
     }
     if (inc.contains("recapture_evaluation") && inc["recapture_evaluation"].is_object()) {
       const auto& recapture = inc["recapture_evaluation"];
       if (recapture.contains("triggered") && recapture["triggered"].is_boolean()) {
-        rpt << (en ? "RecaptureTriggered: " : "RecaptureTriggered: ")
+        rpt << "RecaptureTriggered: "
             << (recapture["triggered"].get<bool>() ? "1" : "0") << "\n";
       }
       if (recapture.contains("target_profile") && recapture["target_profile"].is_string()) {
-        rpt << (en ? "RecaptureTargetProfile: " : "RecaptureTargetProfile: ")
+        rpt << "RecaptureTargetProfile: "
             << recapture["target_profile"].get<std::string>() << "\n";
       }
       if (recapture.contains("reasons") && recapture["reasons"].is_array()) {
@@ -147,11 +147,11 @@ std::string BuildReportText(
             reasons.push_back(Utf8ToWide(reason.get<std::string>()));
           }
         }
-        rpt << (en ? "RecaptureReasons: " : "RecaptureReasons: ")
+        rpt << "RecaptureReasons: "
             << WideToUtf8(JoinList(reasons, reasons.size(), L", ")) << "\n";
       }
       if (recapture.contains("escalation_level") && recapture["escalation_level"].is_number_unsigned()) {
-        rpt << (en ? "RecaptureEscalationLevel: " : "RecaptureEscalationLevel: ")
+        rpt << "RecaptureEscalationLevel: "
             << recapture["escalation_level"].get<std::uint32_t>() << "\n";
       }
     }
@@ -161,7 +161,7 @@ std::string BuildReportText(
     if (inc.contains("artifacts") && inc["artifacts"].is_object()) {
       const auto& art = inc["artifacts"];
       if (art.contains("etw") && art["etw"].is_string() && !art["etw"].get<std::string>().empty()) {
-        rpt << (en ? "ETW: " : "ETW: ") << art["etw"].get<std::string>() << "\n";
+        rpt << "ETW: " << art["etw"].get<std::string>() << "\n";
       }
     }
   }
@@ -189,10 +189,10 @@ std::string BuildReportText(
         << WideToUtf8(JoinList(diagIds, 8, L", ")) << "\n";
   }
   rpt << "\n";
-  rpt << (en ? "ExceptionCode: 0x" : "ExceptionCode: 0x") << std::hex << r.exc_code << std::dec << "\n";
-  rpt << (en ? "ExceptionAddress: 0x" : "ExceptionAddress: 0x") << std::hex << r.exc_addr << std::dec << "\n";
-  rpt << (en ? "ThreadId: " : "ThreadId: ") << r.exc_tid << "\n";
-  rpt << (en ? "Module+Offset: " : "Module+Offset: ") << WideToUtf8(r.fault_module_plus_offset) << "\n";
+  rpt << "ExceptionCode: 0x" << std::hex << r.exc_code << std::dec << "\n";
+  rpt << "ExceptionAddress: 0x" << std::hex << r.exc_addr << std::dec << "\n";
+  rpt << "ThreadId: " << r.exc_tid << "\n";
+  rpt << "Module+Offset: " << WideToUtf8(r.fault_module_plus_offset) << "\n";
   if (!r.inferred_mod_name.empty()) {
     rpt << (en ? "InferredMod: " : "추정 모드: ") << WideToUtf8(r.inferred_mod_name) << "\n";
   }
@@ -257,21 +257,21 @@ std::string BuildReportText(
   }
   const auto crashLoggerReadingPath = buildCrashLoggerReadingPath();
   if (!crashLoggerReadingPath.empty()) {
-    rpt << (en ? "CrashLoggerReadingPath: " : "CrashLoggerReadingPath: ")
+    rpt << "CrashLoggerReadingPath: "
         << WideToUtf8(crashLoggerReadingPath) << "\n";
   }
   if (!r.recommendations.empty()) {
-    rpt << (en ? "NextAction: " : "NextAction: ")
+    rpt << "NextAction: "
         << WideToUtf8(stripRecommendationTag(r.recommendations.front())) << "\n";
   }
-  rpt << (en ? "StateFlags: " : "StateFlags: ") << r.state_flags << "\n";
-  rpt << (en ? "HasBlackbox: " : "HasBlackbox: ") << (r.has_blackbox ? "1" : "0") << "\n";
-  rpt << (en ? "HasWCT: " : "HasWCT: ") << (r.has_wct ? "1" : "0") << "\n";
+  rpt << "StateFlags: " << r.state_flags << "\n";
+  rpt << "HasBlackbox: " << (r.has_blackbox ? "1" : "0") << "\n";
+  rpt << "HasWCT: " << (r.has_wct ? "1" : "0") << "\n";
   rpt << (en ? "Suspects: " : "후보 개수: ") << r.suspects.size() << "\n";
   rpt << (en ? "SuspectsFromStackwalk: " : "콜스택 기반 후보: ") << (r.suspects_from_stackwalk ? "1" : "0") << "\n";
   if (r.freeze_analysis.has_analysis) {
     const auto freezeWct = internal::TryParseWctFreezeSummary(r.wct_json_utf8);
-    rpt << (en ? "FreezeAnalysis: " : "FreezeAnalysis: ")
+    rpt << "FreezeAnalysis: "
         << r.freeze_analysis.state_id
         << " confidence=" << WideToUtf8(r.freeze_analysis.confidence)
         << " support_quality=" << r.freeze_analysis.support_quality

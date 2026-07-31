@@ -14,6 +14,7 @@ struct CrashHistoryEntry
   std::uint32_t candidate_key_version = 2;
   std::string timestamp_utc;
   std::string dump_file;
+  std::string dump_identity_key;
   std::string bucket_key;
   std::string top_suspect;
   std::string confidence;
@@ -52,7 +53,9 @@ public:
   bool SaveToFile(const std::filesystem::path& path) const;
 
   void AddEntry(CrashHistoryEntry entry);
-  std::size_t RemoveEntriesForDumpFile(std::string_view dumpFile);
+  std::size_t RemoveEntriesForDumpFile(
+    std::string_view dumpFile,
+    std::string_view dumpIdentityKey = {});
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
   BucketStats GetBucketStats(const std::string& bucketKey) const;
   std::vector<BucketCandidateStats> GetBucketCandidateStats(const std::string& bucketKey) const;

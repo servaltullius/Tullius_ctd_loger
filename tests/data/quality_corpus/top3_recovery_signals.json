@@ -1,0 +1,45 @@
+{
+  "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
+  "_fixture_intent": "Two stack-only candidates remain cautious; the expected mod is visible at rank two without a false High claim.",
+  "scenario_id": "top3_recovery",
+  "ground_truth_mod": "Follower Framework",
+  "fault_module_plus_offset": "SkyrimSE.exe+0xB120",
+  "signals": [
+    {
+      "family_id": "actionable_stack",
+      "candidate_key": "Animation Overhaul",
+      "display_name": "Animation Overhaul",
+      "mod_name": "Animation Overhaul",
+      "module_filename": "AnimationOverhaul.dll",
+      "detail": "Highest stack-only candidate",
+      "weight": 5
+    },
+    {
+      "family_id": "actionable_stack",
+      "candidate_key": "Follower Framework",
+      "display_name": "Follower Framework",
+      "mod_name": "Follower Framework",
+      "module_filename": "FollowerFramework.dll",
+      "detail": "Second stack-only candidate",
+      "weight": 4
+    }
+  ],
+  "expected_candidates": [
+    {
+      "mod_name": "Animation Overhaul",
+      "module_filename": "AnimationOverhaul.dll",
+      "status_id": "related",
+      "confidence": "Medium",
+      "score": 5,
+      "cross_validated": false
+    },
+    {
+      "mod_name": "Follower Framework",
+      "module_filename": "FollowerFramework.dll",
+      "status_id": "related",
+      "confidence": "Low",
+      "score": 4,
+      "cross_validated": false
+    }
+  ]
+}

@@ -14,6 +14,8 @@ using DWORD = std::uint32_t;
 #include <string>
 #include <string_view>
 
+#include "SkyrimDiagCrashCodes.h"
+
 namespace skydiag {
 struct SharedHeader;
 struct SharedLayout;
@@ -39,6 +41,34 @@ struct CrashEventInfo {
   bool inMenu = false;
 };
 
+enum class CleanExitDumpState {
+  kPendingDelete,
+  kDiscarded,
+  kPreserved,
+  kDeleteFailed,
+  kNotCaptured,
+};
+
+struct CleanExitDumpIdentity {
+  bool valid = false;
+  std::wstring filename;
+  std::uint64_t sizeBytes = 0;
+  std::uint64_t lastWriteTimeUtc100ns = 0;
+};
+
+// Helper-owned state for one captured crash generation. Keeping the immutable
+// CrashEventInfo snapshot beside the latch lets the later process-exit path
+// describe the same incident even after shared memory changes or disappears.
+struct CrashCaptureState {
+  bool latched = false;
+  CrashEventInfo capturedInfo{};
+  bool cleanExitEvidenceWritten = false;
+  bool cleanExitEvidenceFinalized = false;
+  std::filesystem::path cleanExitEvidencePath;
+  CleanExitDumpIdentity cleanExitDumpIdentity{};
+  std::wstring cleanExitFilterContext;
+};
+
 struct StableSharedSnapshot {
   struct AlignedByteDeleter {
     std::size_t alignment = alignof(std::max_align_t);
@@ -61,26 +91,39 @@ enum class FilterVerdict {
   kRetryNewerCrash,
 };
 
-inline constexpr std::uint32_t kStatusInvalidHandle = 0xC0000008u;
-inline constexpr std::uint32_t kStatusCppException = 0xE06D7363u;
-inline constexpr std::uint32_t kStatusClrException = 0xE0434F4Du;
-inline constexpr std::uint32_t kStatusBreakpoint = 0x80000003u;
-inline constexpr std::uint32_t kStatusControlCExit = 0xC000013Au;
+// Bounded retry budget for crash dump writes.
+inline constexpr int kDumpWriteAttempts = 3;
+
+// Decides whether dump attempt `attemptIndex` (0-based) should run.
+//
+// The first attempt always runs. Retries only make sense while the game process
+// is alive: MiniDumpWriteDump reads the target address space, so once the
+// process exits there is nothing left to capture and further attempts would
+// only delay the exit-path handling.
+inline bool ShouldAttemptDumpWrite(int attemptIndex, bool processStillActive) noexcept
+{
+  if (attemptIndex <= 0) {
+    return true;
+  }
+  if (attemptIndex >= kDumpWriteAttempts) {
+    return false;
+  }
+  return processStillActive;
+}
+
+// Re-exported from the shared definition so helper quarantine uses the same
+// known-benign constants as the plugin's exception filtering. The plugin does
+// not currently preserve or rank an earlier fault over a later one.
+inline constexpr std::uint32_t kStatusInvalidHandle = skydiag::kStatusInvalidHandle;
+inline constexpr std::uint32_t kStatusCppException = skydiag::kStatusCppException;
+inline constexpr std::uint32_t kStatusClrException = skydiag::kStatusClrException;
+inline constexpr std::uint32_t kStatusBreakpoint = skydiag::kStatusBreakpoint;
+inline constexpr std::uint32_t kStatusControlCExit = skydiag::kStatusControlCExit;
 inline constexpr std::uint32_t kStateInMenu = 1u << 2;
 
 inline bool IsStrongCrashExceptionCode(std::uint32_t code) noexcept
 {
-  if (code == 0) {
-    return false;
-  }
-  if (code == kStatusInvalidHandle ||
-      code == kStatusCppException ||
-      code == kStatusClrException ||
-      code == kStatusBreakpoint ||
-      code == kStatusControlCExit) {
-    return false;
-  }
-  return true;
+  return skydiag::IsStrongCrashExceptionCode(code);
 }
 
 inline CrashEventInfo BuildCrashEventInfo(
@@ -137,7 +180,33 @@ inline bool IsCommittedCrashSequence(std::uint32_t crashSeq) noexcept
   return crashSeq != 0u && (crashSeq & 1u) == 0u;
 }
 
+// Exit code 0 is treated as authoritative proof that an exception was handled,
+// which is what keeps handled first-chance exceptions from producing dumps.
+// That rule is deliberately absolute, so it also discards the rare genuine CTD
+// that exits 0 — a foreign handler calling ExitProcess(0), a launcher
+// normalizing the child exit code, or teardown that reaches a normal exit path
+// after a fatal fault.
+//
+// This predicate does not change the filter decision. It only marks the subset
+// where the filtered incident carried real fault evidence, so a compact metadata
+// record can be preserved for investigation. `kDeleteRecovered` covers the
+// heartbeat-recovery case separately, so reaching a benign zero-exit verdict
+// with a committed strong fault means recovery was never actually observed.
+inline bool ShouldQuarantineCleanExitEvidence(
+  std::uint32_t exitCode,
+  const CrashEventInfo& info) noexcept
+{
+  return exitCode == 0u && info.isStrong && IsCommittedCrashSequence(info.crashSeq);
+}
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
+bool TryCaptureCommittedCrashInfo(
+  const skydiag::SharedHeader* shm,
+  CrashEventInfo* out) noexcept;
+bool TryWritePostExitCrashEvidenceRecord(
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  DWORD exitCode);
 bool CaptureStableSharedSnapshot(
   const skydiag::SharedLayout* shm,
   std::size_t shmBytes,
@@ -146,13 +215,31 @@ bool TryClearRecoveredCrashFreeze(
   skydiag::SharedLayout* shm,
   std::uint32_t expectedCrashSeq) noexcept;
 void WriteWerFallbackHint(const std::filesystem::path& outBase);
+bool IsCleanExitEvidenceRequired(
+  const skydiag::helper::HelperConfig& cfg,
+  const CrashCaptureState* crashState) noexcept;
+bool TryWriteCleanExitEvidenceRecord(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState,
+  std::wstring_view context,
+  const std::filesystem::path& dumpPath,
+  CleanExitDumpState dumpState);
+
+inline bool ShouldPreserveFilteredDump(
+  bool preserveConfigured,
+  bool evidenceRequired,
+  bool evidenceWritten) noexcept
+{
+  return preserveConfigured || (evidenceRequired && !evidenceWritten);
+}
 
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
   DWORD waitMs,
-  bool* crashCaptured,
+  CrashCaptureState* crashState,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
   std::wstring* lastCrashDumpPath,

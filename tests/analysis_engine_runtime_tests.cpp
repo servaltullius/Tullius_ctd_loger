@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
 #include "AddressResolver.h"
 #include "CrashHistory.h"
 #include "SignatureDatabase.h"
@@ -669,6 +673,86 @@ void TestCrashHistorySameDumpIsIdempotent()
     "Current dump must be excluded before history_repeat evidence is calculated.");
 }
 
+void TestCrashHistorySameStemIdentityIsolation()
+{
+  CrashHistory history;
+
+  CrashHistoryEntry first{};
+  first.timestamp_utc = "2026-07-20T01:00:00Z";
+  first.dump_file = "SameStem.dmp";
+  first.dump_identity_key = "sha-a.0000000000001000.0000000000002000";
+  first.bucket_key = "bucket-a";
+  history.AddEntry(first);
+
+  CrashHistoryEntry second{};
+  second.timestamp_utc = "2026-07-20T02:00:00Z";
+  second.dump_file = "samestem.DMP";
+  second.dump_identity_key = "sha-b.0000000000001000.0000000000003000";
+  second.bucket_key = "bucket-b";
+  history.AddEntry(second);
+
+  assert(history.Size() == 2u);
+  assert(history.GetBucketStats("bucket-a").count == 1u);
+  assert(history.GetBucketStats("bucket-b").count == 1u);
+
+  CrashHistoryEntry reanalyzed = second;
+  reanalyzed.timestamp_utc = "2026-07-20T03:00:00Z";
+  reanalyzed.bucket_key = "bucket-b-new";
+  history.AddEntry(std::move(reanalyzed));
+  assert(history.Size() == 2u);
+  assert(history.GetBucketStats("bucket-b").count == 0u);
+  assert(history.GetBucketStats("bucket-b-new").count == 1u);
+
+  assert(history.RemoveEntriesForDumpFile("SameStem.dmp", second.dump_identity_key) == 1u);
+  assert(history.Size() == 1u);
+  assert(history.GetBucketStats("bucket-a").count == 1u);
+  assert(history.RemoveEntriesForDumpFile("SameStem.dmp", first.dump_identity_key) == 1u);
+  assert(history.Size() == 0u);
+}
+
+#ifdef _WIN32
+void TestCrashHistoryFailedReplacementPreservesExistingFile()
+{
+  const auto root = std::filesystem::temp_directory_path() /
+    ("skydiag_history_atomic_" + std::to_string(GetCurrentProcessId()));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::create_directories(root, ec);
+  assert(!ec);
+
+  const auto path = root / "crash_history.json";
+  {
+    std::ofstream out(path, std::ios::binary);
+    out << "authoritative-old-history";
+  }
+
+  const HANDLE locked = CreateFileW(
+    path.c_str(),
+    GENERIC_READ,
+    FILE_SHARE_READ | FILE_SHARE_WRITE,
+    nullptr,
+    OPEN_EXISTING,
+    FILE_ATTRIBUTE_NORMAL,
+    nullptr);
+  assert(locked != INVALID_HANDLE_VALUE);
+
+  CrashHistory replacement;
+  CrashHistoryEntry entry{};
+  entry.timestamp_utc = "2026-07-20T04:00:00Z";
+  entry.dump_file = "new.dmp";
+  entry.dump_identity_key = "new-identity";
+  replacement.AddEntry(std::move(entry));
+  assert(!replacement.SaveToFile(path));
+  CloseHandle(locked);
+
+  assert(ReadAllText(path) == "authoritative-old-history");
+  for (const auto& child : std::filesystem::directory_iterator(root)) {
+    assert(child.path() == path && "Failed atomic replacement left a temporary file behind");
+  }
+  std::filesystem::remove_all(root, ec);
+}
+#endif
+
 void TestCaptureQualitySourceContracts()
 {
   const auto root = ProjectRoot();
@@ -1063,6 +1147,10 @@ int main()
   TestCrashHistoryBucketCandidateStats();
   TestCrashHistoryCandidateKeyVersionMigration();
   TestCrashHistorySameDumpIsIdempotent();
+  TestCrashHistorySameStemIdentityIsolation();
+#ifdef _WIN32
+  TestCrashHistoryFailedReplacementPreservesExistingFile();
+#endif
   TestCaptureQualitySourceContracts();
   TestCrashLoggerSystemPathPromotionGuardSourceContracts();
   TestAddressDbDiagnosticSourceContracts();

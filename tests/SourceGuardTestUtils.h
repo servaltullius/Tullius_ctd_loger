@@ -10,6 +10,19 @@
 
 namespace skydiag::tests::source_guard {
 
+inline std::string NormalizeNewlines(std::string text)
+{
+  std::string normalized;
+  normalized.reserve(text.size());
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    if (text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n') {
+      continue;
+    }
+    normalized.push_back(text[i]);
+  }
+  return normalized;
+}
+
 inline std::filesystem::path ProjectRoot()
 {
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
@@ -25,7 +38,7 @@ inline std::string ReadAllText(const std::filesystem::path& path)
   assert(in && "Failed to open file");
   std::ostringstream ss;
   ss << in.rdbuf();
-  return ss.str();
+  return NormalizeNewlines(ss.str());
 }
 
 inline std::string ReadConcatenatedText(std::initializer_list<std::filesystem::path> paths)
@@ -51,7 +64,7 @@ inline bool TryReadAllText(const std::filesystem::path& path, std::string* out)
   std::ostringstream ss;
   ss << in.rdbuf();
   if (out) {
-    *out = ss.str();
+    *out = NormalizeNewlines(ss.str());
   }
   return true;
 }
@@ -254,7 +267,10 @@ inline std::string ExtractFunctionBody(const std::string& source, const char* si
 inline void AssertOrdered(const std::string& haystack, const char* first, const char* second, const char* message)
 {
   const auto firstPos = haystack.find(first);
-  const auto secondPos = haystack.find(second);
+  const auto secondPos =
+    firstPos == std::string::npos
+    ? std::string::npos
+    : haystack.find(second, firstPos + std::char_traits<char>::length(first));
   assert(firstPos != std::string::npos && secondPos != std::string::npos && message);
   assert(firstPos < secondPos && message);
 }

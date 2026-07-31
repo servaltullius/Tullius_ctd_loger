@@ -19,7 +19,10 @@ internal sealed partial class MainWindowViewModel
 
         if (!string.IsNullOrWhiteSpace(CurrentDumpPath))
         {
-            lines.Add((_isKorean ? "덤프: " : "Dump: ") + CurrentDumpPath);
+            var privacySafePath = CurrentDumpPath.Replace('\\', '/');
+            var slash = privacySafePath.LastIndexOf('/');
+            var filename = slash >= 0 ? privacySafePath[(slash + 1)..] : privacySafePath;
+            lines.Add((_isKorean ? "덤프: " : "Dump: ") + filename);
         }
 
         if (!string.IsNullOrWhiteSpace(summary.SummarySentence))
@@ -113,12 +116,16 @@ internal sealed partial class MainWindowViewModel
                               summary.SummarySentence.Contains("프리징", StringComparison.Ordinal) ||
                               summary.SummarySentence.Contains("무한로딩", StringComparison.Ordinal);
 
-        var isSnapshotLike = summary.IsSnapshotLike ||
+        var isFilteredCleanExit = summary.IsFilteredCleanExit;
+        var isSnapshotLike = !isFilteredCleanExit &&
+                             (summary.IsSnapshotLike ||
                              looksSnapshotByText ||
-                             HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]");
-        var isHangLike = !isSnapshotLike &&
+                             HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]"));
+        var isHangLike = !isFilteredCleanExit && !isSnapshotLike &&
                          (summary.IsHangLike || looksHangByText || HasAnyPrefix(recs, "[Hang]", "[프리징]"));
-        lines.Add(isSnapshotLike
+        lines.Add(isFilteredCleanExit
+            ? (_isKorean ? "🟢 Skyrim 정상 종료 진단 리포트 — SkyrimDiag" : "🟢 Skyrim Clean-Exit Diagnostic Report — SkyrimDiag")
+            : isSnapshotLike
             ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
             : isHangLike
                 ? (_isKorean ? "🟠 Skyrim 프리징/무한로딩 리포트 — SkyrimDiag" : "🟠 Skyrim Freeze/ILS Report — SkyrimDiag")
@@ -164,10 +171,12 @@ internal sealed partial class MainWindowViewModel
 
         if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
         {
-            var typeLabel = isSnapshotLike
+            var typeLabel = isFilteredCleanExit || isSnapshotLike
                 ? (_isKorean ? "분류" : "Category")
                 : (_isKorean ? "유형" : "Type");
-            var typeValue = isSnapshotLike
+            var typeValue = isFilteredCleanExit
+                ? "CLEAN_EXIT"
+                : isSnapshotLike
                 ? "SNAPSHOT"
                 : isHangLike
                     ? "HANG"
@@ -188,7 +197,13 @@ internal sealed partial class MainWindowViewModel
         if (summary.Recommendations.Count > 0)
         {
             string firstAction;
-            if (isSnapshotLike)
+            if (isFilteredCleanExit)
+            {
+                firstAction = summary.Recommendations.FirstOrDefault(r =>
+                    r.StartsWith("[Clean exit]", StringComparison.OrdinalIgnoreCase) ||
+                    r.StartsWith("[정상 종료]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
+            }
+            else if (isSnapshotLike)
             {
                 firstAction = summary.Recommendations.FirstOrDefault(r =>
                     r.StartsWith("[Snapshot]", StringComparison.OrdinalIgnoreCase) ||

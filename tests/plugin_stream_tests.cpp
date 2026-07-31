@@ -75,13 +75,27 @@ void TestCrashPathWritesPluginScanSidecar()
 void TestCrashSeqlockProtocolVersionAndDumpCompatibility()
 {
   const auto shared = ReadFile("shared/SkyrimDiagShared.h");
+  const auto pluginSharedMemory = ReadFile("plugin/src/SharedMemory.cpp");
+  const auto helperMain = ReadFile("helper/src/main.cpp");
+  const auto processAttach = ReadFile("helper/src/ProcessAttach.cpp");
   const auto analyzerCapture = ReadFile("dump_tool/src/Analyzer.CaptureInputs.cpp");
   assert(
-    shared.find("kVersion = 3") != std::string::npos &&
-    "Crash seqlock semantics require a new live helper/plugin protocol version");
+    shared.find("kVersion = 4") != std::string::npos &&
+    "Incident ownership/ACK semantics require a new live helper/plugin protocol version");
+  assert(
+    pluginSharedMemory.find("g_shared->header.version = skydiag::kVersion") != std::string::npos &&
+    "The live plugin mapping must advertise the current protocol version");
+  assert(
+    helperMain.find("proc.shm->header.version != skydiag::kVersion") != std::string::npos &&
+    "The live helper must reject every non-current mapping before processing it");
+  assert(
+    processAttach.find("FILE_MAP_READ | FILE_MAP_WRITE") != std::string::npos &&
+    "Protocol v4 helper attach must be writable so recovered incidents can be ACKed/rearmed");
   assert(
     analyzerCapture.find("ver != 2u") != std::string::npos &&
-    "Offline analyzer must continue accepting v2 blackbox streams from existing dumps");
+    analyzerCapture.find("ver != 3u") != std::string::npos &&
+    analyzerCapture.find("ver != skydiag::kVersion") != std::string::npos &&
+    "Offline analyzer must continue accepting v2 and v3 blackbox streams from existing dumps");
 }
 
 void TestAnalyzerHasPluginSidecarFallback()

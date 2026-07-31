@@ -1,7 +1,13 @@
 #include "CrashHistory.h"
 
+#ifdef _WIN32
+#include <Windows.h>
+#endif
+
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <fstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -10,6 +16,8 @@
 
 namespace skydiag::dump_tool {
 namespace {
+
+std::atomic<std::uint64_t> g_historyTempCounter{ 0u };
 
 std::string NormalizeStoredCandidateKey(std::string_view value)
 {
@@ -39,7 +47,12 @@ void UpsertHistoryEntry(std::vector<CrashHistoryEntry>* entries, CrashHistoryEnt
 
   const auto dumpKey = NormalizeStoredCandidateKey(entry.dump_file);
   const auto existing = std::find_if(entries->begin(), entries->end(), [&](const CrashHistoryEntry& row) {
-    return NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
+    if (!entry.dump_identity_key.empty()) {
+      return !row.dump_identity_key.empty() &&
+        row.dump_identity_key == entry.dump_identity_key;
+    }
+    return row.dump_identity_key.empty() &&
+      NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
   });
   if (existing == entries->end()) {
     entries->push_back(std::move(entry));
@@ -68,7 +81,7 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
       return false;
     }
     const auto historyVersion = j.value("version", 1u);
-    if (historyVersion != 1u && historyVersion != 2u) {
+    if (historyVersion != 1u && historyVersion != 2u && historyVersion != 3u) {
       return false;
     }
 
@@ -86,6 +99,7 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
       }
       row.timestamp_utc = e.value("timestamp_utc", "");
       row.dump_file = e.value("dump_file", "");
+      row.dump_identity_key = e.value("dump_identity_key", "");
       row.bucket_key = e.value("bucket_key", "");
       row.top_suspect = e.value("top_suspect", "");
       row.confidence = e.value("confidence", "");
@@ -122,13 +136,14 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
 {
   try {
     nlohmann::json j = nlohmann::json::object();
-    j["version"] = 2;
+    j["version"] = 3;
     j["entries"] = nlohmann::json::array();
     for (const auto& e : m_entries) {
       j["entries"].push_back({
         { "candidate_key_version", e.candidate_key_version },
         { "timestamp_utc", e.timestamp_utc },
         { "dump_file", e.dump_file },
+        { "dump_identity_key", e.dump_identity_key },
         { "bucket_key", e.bucket_key },
         { "top_suspect", e.top_suspect },
         { "confidence", e.confidence },
@@ -139,30 +154,50 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
     }
 
     std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
+    const auto parent = path.parent_path();
+    if (!parent.empty()) {
+      std::filesystem::create_directories(parent, ec);
+      if (ec) {
+        return false;
+      }
+    }
     auto tempPath = path;
-    tempPath += L".tmp";
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    tempPath += ".tmp." + std::to_string(now) + "." +
+      std::to_string(g_historyTempCounter.fetch_add(1u, std::memory_order_relaxed));
 
+    bool wrote = false;
     {
       std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
-      if (!out) {
-        return false;
-      }
-      out << j.dump(2);
-      if (!out) {
-        return false;
+      if (out) {
+        out << j.dump(2);
+        out.flush();
+        out.close();
+        wrote = static_cast<bool>(out);
       }
     }
-
-    // Best-effort atomic replacement under caller-side lock.
-    std::filesystem::remove(path, ec);
-    ec.clear();
-    std::filesystem::rename(tempPath, path, ec);
-    if (ec) {
-      std::error_code cleanupEc;
-      std::filesystem::remove(tempPath, cleanupEc);
+    if (!wrote) {
+      std::filesystem::remove(tempPath, ec);
       return false;
     }
+
+    // Replace in one filesystem operation. Never unlink the authoritative
+    // history first: if replacement fails, callers keep the previous file.
+#ifdef _WIN32
+    if (!MoveFileExW(
+          tempPath.c_str(),
+          path.c_str(),
+          MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+      std::filesystem::remove(tempPath, ec);
+      return false;
+    }
+#else
+    std::filesystem::rename(tempPath, path, ec);
+    if (ec) {
+      std::filesystem::remove(tempPath, ec);
+      return false;
+    }
+#endif
     return true;
   } catch (...) {
     return false;
@@ -177,16 +212,26 @@ void CrashHistory::AddEntry(CrashHistoryEntry entry)
   }
 }
 
-std::size_t CrashHistory::RemoveEntriesForDumpFile(std::string_view dumpFile)
+std::size_t CrashHistory::RemoveEntriesForDumpFile(
+  std::string_view dumpFile,
+  std::string_view dumpIdentityKey)
 {
   const auto dumpKey = NormalizeStoredCandidateKey(dumpFile);
-  if (dumpKey.empty()) {
+  if (dumpKey.empty() && dumpIdentityKey.empty()) {
     return 0;
   }
   const auto oldSize = m_entries.size();
   m_entries.erase(
     std::remove_if(m_entries.begin(), m_entries.end(), [&](const CrashHistoryEntry& row) {
-      return NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
+      if (!dumpIdentityKey.empty() && !row.dump_identity_key.empty()) {
+        return row.dump_identity_key == dumpIdentityKey;
+      }
+      // Legacy rows have no identity. Exclude same-basename legacy evidence
+      // conservatively for current-incident correlation, but never merge it
+      // into a new identity-bound row during persistence.
+      return row.dump_identity_key.empty() &&
+        !dumpKey.empty() &&
+        NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
     }),
     m_entries.end());
   return oldSize - m_entries.size();

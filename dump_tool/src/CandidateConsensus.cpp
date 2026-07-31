@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <limits>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -287,11 +288,12 @@ std::wstring InvariantLower(std::wstring_view value)
 {
 #ifdef _WIN32
   if (!value.empty() && value.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+    const std::wstring nullTerminatedValue(value);
     const int length = static_cast<int>(value.size());
     const int required = LCMapStringEx(
       LOCALE_NAME_INVARIANT,
       LCMAP_LOWERCASE,
-      value.data(),
+      nullTerminatedValue.c_str(),
       length,
       nullptr,
       0,
@@ -303,7 +305,7 @@ std::wstring InvariantLower(std::wstring_view value)
       if (LCMapStringEx(
             LOCALE_NAME_INVARIANT,
             LCMAP_LOWERCASE,
-            value.data(),
+            nullTerminatedValue.c_str(),
             length,
             lowered.data(),
             required,
@@ -326,7 +328,10 @@ std::wstring InvariantLower(std::wstring_view value)
 
 bool IsUnicodeSeparatorOrPunctuation(wchar_t ch) noexcept
 {
-  const auto cp = static_cast<std::uint32_t>(ch);
+  // wchar_t is unsigned 16-bit on Windows but signed 32-bit where the Linux test
+  // build runs, so widen through the unsigned equivalent instead of letting a
+  // high code unit sign-extend.
+  const auto cp = static_cast<std::uint32_t>(static_cast<std::make_unsigned_t<wchar_t>>(ch));
   if (cp < 0x80u) {
     return !((ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') ||
              (ch >= L'0' && ch <= L'9'));

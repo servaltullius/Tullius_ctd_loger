@@ -83,7 +83,9 @@ internal sealed partial class MainWindowViewModel
             ? T("No summary sentence produced.", "요약 문장이 생성되지 않았습니다.")
             : summary.SummarySentence;
 
-        BucketText = string.IsNullOrWhiteSpace(summary.CrashBucketKey)
+        BucketText = summary.IsFilteredCleanExit
+            ? T("Classification: CLEAN_EXIT (not CTD)", "분류: 정상 종료 (CTD 아님)")
+            : string.IsNullOrWhiteSpace(summary.CrashBucketKey)
             ? T("Crash bucket: unavailable", "크래시 버킷: 없음")
             : T("Crash bucket: ", "크래시 버킷: ") + summary.CrashBucketKey;
 
@@ -99,13 +101,21 @@ internal sealed partial class MainWindowViewModel
             ShowCorrelationBadge = false;
         }
 
-        ModuleText = string.IsNullOrWhiteSpace(summary.ModulePlusOffset)
+        ModuleText = summary.IsFilteredCleanExit
+            ? T("Fault data retained for diagnostics only", "오류 데이터는 진단 목적으로만 보존됨")
+            : string.IsNullOrWhiteSpace(summary.ModulePlusOffset)
             ? T("Fault module: unavailable", "오류 모듈: 없음")
             : T("Fault module: ", "오류 모듈: ") + summary.ModulePlusOffset;
         CrashLoggerContextSummary = BuildCrashLoggerContextSummary(summary);
         CrashContextSummary = BuildCrashContextSummary(summary);
 
-        if (summary.ActionableCandidates.Count > 0)
+        if (summary.IsFilteredCleanExit)
+        {
+            ModNameText = T(
+                "No mod attribution from a clean-exit dump",
+                "정상 종료 덤프에서 모드 원인을 판정하지 않음");
+        }
+        else if (summary.ActionableCandidates.Count > 0)
         {
             ModNameText = DescribeActionableCandidateLabel(summary.ActionableCandidates[0]) + ": " + BuildPrimaryCandidateValue(summary);
         }
@@ -120,9 +130,17 @@ internal sealed partial class MainWindowViewModel
                 : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
         }
 
-        QuickPrimaryLabel = BuildCrashLoggerContextLabel(summary);
-        QuickPrimaryValue = CrashLoggerContextSummary;
-        if (summary.ActionableCandidates.Count > 0)
+        QuickPrimaryLabel = summary.IsFilteredCleanExit
+            ? T("Classification", "분류")
+            : BuildCrashLoggerContextLabel(summary);
+        QuickPrimaryValue = summary.IsFilteredCleanExit
+            ? T("Clean exit — not a CTD", "정상 종료 — CTD 아님")
+            : CrashLoggerContextSummary;
+        if (summary.IsFilteredCleanExit)
+        {
+            QuickConfidenceValue = T("Validated helper evidence", "검증된 헬퍼 증거");
+        }
+        else if (summary.ActionableCandidates.Count > 0)
         {
             QuickConfidenceValue = BuildAgreementSummary(summary);
         }
@@ -142,7 +160,16 @@ internal sealed partial class MainWindowViewModel
     private void PopulateSuspects(AnalysisSummary summary)
     {
         Suspects.Clear();
-        if (summary.ActionableCandidates.Count > 0)
+        if (summary.IsFilteredCleanExit)
+        {
+            Suspects.Add(new SuspectItem(
+                T("High", "높음"),
+                T("Not classified as a CTD", "CTD로 분류되지 않음"),
+                T(
+                    "The finalized clean-exit evidence matches this exact dump. No mod is blamed.",
+                    "최종 정상 종료 증거가 이 덤프와 정확히 일치하므로 모드 원인을 지목하지 않습니다.")));
+        }
+        else if (summary.ActionableCandidates.Count > 0)
         {
             foreach (var candidate in summary.ActionableCandidates.Take(5))
             {
@@ -306,13 +333,16 @@ internal sealed partial class MainWindowViewModel
     public static AdvancedArtifactsData LoadAdvancedArtifacts(
         string dumpPath,
         string outDir,
+        DumpIdentityContract dumpIdentity,
         string missingReportText,
         string missingWctText,
         CancellationToken cancellationToken)
     {
         var data = new AdvancedArtifactsData();
 
-        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
+        var blackboxPath = dumpIdentity.IsValid
+            ? NativeAnalyzerBridge.ResolveBlackboxPath(outDir, dumpIdentity)
+            : NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
         if (File.Exists(blackboxPath))
         {
             var tail = new Queue<string>(capacity: 200);
@@ -362,13 +392,17 @@ internal sealed partial class MainWindowViewModel
             data.EventCount = data.EventLines.Count;
         }
 
-        var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
+        var reportPath = dumpIdentity.IsValid
+            ? NativeAnalyzerBridge.ResolveReportPath(outDir, dumpIdentity)
+            : NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
         data.HasReport = File.Exists(reportPath);
         data.ReportText = data.HasReport
             ? File.ReadAllText(reportPath)
             : missingReportText;
 
-        var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
+        var wctPath = dumpIdentity.IsValid
+            ? NativeAnalyzerBridge.ResolveWctPath(outDir, dumpIdentity)
+            : NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
         data.HasWct = File.Exists(wctPath);
         if (data.HasWct)
         {

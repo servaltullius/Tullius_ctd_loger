@@ -8,7 +8,7 @@
 namespace skydiag {
 
 inline constexpr std::uint32_t kMagic = 0x53444941u;  // 'SDIA'
-inline constexpr std::uint32_t kVersion = 3;
+inline constexpr std::uint32_t kVersion = 4;
 inline constexpr std::uint32_t kEventCapacity = 1u << 16;  // 65536
 inline constexpr std::uint32_t kResourceCapacity = 256;
 inline constexpr std::uint32_t kResourcePathMaxBytes = 260;  // UTF-8, null-terminated (best-effort)
@@ -40,10 +40,42 @@ enum class EventType : std::uint16_t {
 
 enum StateFlags : std::uint32_t {
   kState_None = 0,
-  kState_Frozen = 1u << 0,   // stop writing blackbox after crash mark
+  // Protocol v4 incident ownership/acknowledgement bit.
+  //
+  // The plugin claims an incident with a compare-exchange from clear to set
+  // before touching CrashInfo. While set, later exceptions must not replace
+  // the owned record. The helper clears this bit only after it deliberately
+  // rejects or abandons that committed incident; that clear is the ACK/reset
+  // which permits a later incident to claim the slot.
+  kState_Frozen = 1u << 0,
   kState_Loading = 1u << 1,  // loading screen/menu detected
   kState_InMenu = 1u << 2,   // any menu open detected
 };
+
+inline bool TryClaimCrashIncidentOwnership(
+  volatile std::uint32_t* stateFlags) noexcept
+{
+  if (!stateFlags) {
+    return false;
+  }
+
+  static_assert(sizeof(LONG) == sizeof(std::uint32_t));
+  auto* const flags = reinterpret_cast<volatile LONG*>(stateFlags);
+  LONG observed = InterlockedCompareExchange(flags, 0, 0);
+  for (;;) {
+    if ((static_cast<std::uint32_t>(observed) & kState_Frozen) != 0u) {
+      return false;
+    }
+
+    const LONG desired = static_cast<LONG>(
+      static_cast<std::uint32_t>(observed) | kState_Frozen);
+    const LONG exchanged = InterlockedCompareExchange(flags, desired, observed);
+    if (exchanged == observed) {
+      return true;
+    }
+    observed = exchanged;
+  }
+}
 
 struct EventPayload {
   std::uint64_t a = 0;
@@ -107,8 +139,15 @@ struct SharedHeader {
   volatile std::uint32_t state_flags = 0;
 
   volatile std::uint32_t write_index = 0;  // monotonically increases
-  // CrashInfo seqlock: odd=writer active, even=committed. Zero means no crash
-  // has been published yet; each committed crash advances by two.
+  // Protocol v4 crash publication:
+  //   1. CAS-claim kState_Frozen (the single incident-ownership point).
+  //   2. Publish CrashInfo under this seqlock.
+  //   3. Signal the helper after the even committed sequence is visible.
+  //
+  // odd=writer active, even=committed. Zero means no crash has been published
+  // yet; each ACKed-and-rearmed incident advances the committed sequence by
+  // two. The helper ACK/reset clears kState_Frozen but leaves this generation
+  // intact so stable-snapshot validation remains possible.
   volatile std::uint32_t crash_seq = 0;
   volatile std::uint32_t hang_seq = 0;     // helper can bump when it takes hang dump
 

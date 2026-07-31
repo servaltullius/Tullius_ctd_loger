@@ -13,6 +13,10 @@ internal sealed class AnalysisSummary
     public required bool IsHangLike { get; init; }
     public required bool IsSnapshotLike { get; init; }
     public required bool IsManualCapture { get; init; }
+    public DumpIdentityContract DumpIdentity { get; init; } = DumpIdentityContract.Invalid;
+    public bool IsFilteredCleanExit { get; init; }
+    public string CleanExitDumpState { get; init; } = string.Empty;
+    public string CleanExitEvidenceFilename { get; init; } = string.Empty;
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
     public required IReadOnlyList<string> CallstackFrames { get; init; }
@@ -49,6 +53,9 @@ internal sealed class AnalysisSummary
 
         var exception = root.TryGetProperty("exception", out var exNode) ? exNode : default;
         var analysis = root.TryGetProperty("analysis", out var analysisNode) ? analysisNode : default;
+        var cleanExitEvidence = root.TryGetProperty("clean_exit_evidence", out var cleanExitNode)
+            ? cleanExitNode
+            : default;
 
         var suspects = ParseObjectArray(root, "suspects", item => new SuspectItem(
             ReadString(item, "confidence"),
@@ -132,6 +139,11 @@ internal sealed class AnalysisSummary
             IsHangLike = ReadBool(analysis, "is_hang_like"),
             IsSnapshotLike = ReadBool(analysis, "is_snapshot_like"),
             IsManualCapture = ReadBool(analysis, "is_manual_capture"),
+            DumpIdentity = DumpIdentityContract.FromJson(root),
+            IsFilteredCleanExit = ReadBool(analysis, "is_filtered_clean_exit") &&
+                                  ReadBool(cleanExitEvidence, "validated"),
+            CleanExitDumpState = ReadString(cleanExitEvidence, "dump_state"),
+            CleanExitEvidenceFilename = ReadString(cleanExitEvidence, "sidecar_filename"),
             Suspects = suspects,
             Recommendations = recommendations,
             CallstackFrames = callstackFrames,

@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <ctime>
 #include <cwctype>
@@ -74,10 +75,71 @@ std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
   return out;
 }
 
-void WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
+bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
 {
-  std::ofstream f(path, std::ios::binary);
-  f.write(s.data(), static_cast<std::streamsize>(s.size()));
+  if (path.empty() || path.filename().empty()) {
+    return false;
+  }
+
+  // Stateful helper JSON must never expose a truncated destination file. Write
+  // and flush a sibling temporary file first, then atomically replace the
+  // destination on the same volume.
+  static std::atomic<std::uint64_t> tempSequence{0};
+  std::filesystem::path tempPath;
+  HANDLE file = INVALID_HANDLE_VALUE;
+  for (int attempt = 0; attempt < 8 && file == INVALID_HANDLE_VALUE; ++attempt) {
+    tempPath = path;
+    tempPath +=
+      L".tmp."
+      + std::to_wstring(GetCurrentProcessId())
+      + L"."
+      + std::to_wstring(GetTickCount64())
+      + L"."
+      + std::to_wstring(tempSequence.fetch_add(1, std::memory_order_relaxed));
+    file = CreateFileW(
+      tempPath.c_str(),
+      GENERIC_WRITE,
+      0,
+      nullptr,
+      CREATE_NEW,
+      FILE_ATTRIBUTE_TEMPORARY,
+      nullptr);
+  }
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+
+  bool ok = true;
+  std::size_t offset = 0;
+  while (offset < s.size()) {
+    const auto remaining = s.size() - offset;
+    const DWORD chunk = static_cast<DWORD>(
+      std::min<std::size_t>(remaining, static_cast<std::size_t>(MAXDWORD)));
+    DWORD written = 0;
+    if (!WriteFile(file, s.data() + offset, chunk, &written, nullptr) ||
+        written != chunk) {
+      ok = false;
+      break;
+    }
+    offset += written;
+  }
+  if (ok && !FlushFileBuffers(file)) {
+    ok = false;
+  }
+  if (!CloseHandle(file)) {
+    ok = false;
+  }
+
+  if (ok) {
+    ok = MoveFileExW(
+      tempPath.c_str(),
+      path.c_str(),
+      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+  }
+  if (!ok) {
+    DeleteFileW(tempPath.c_str());
+  }
+  return ok;
 }
 
 bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
@@ -299,12 +361,37 @@ bool UpdateCrashBucketStats(
   const auto path = CrashBucketStatsPath(outBase);
 
   nlohmann::json root = nlohmann::json::object();
-  if (std::filesystem::exists(path)) {
+  std::error_code existsEc;
+  const bool statsExist = std::filesystem::exists(path, existsEc);
+  if (existsEc) {
+    if (err) {
+      *err = L"crash bucket stats existence check failed: "
+        + std::to_wstring(existsEc.value());
+    }
+    return false;
+  }
+  if (statsExist) {
     std::string txt;
-    if (ReadTextFileUtf8(path, &txt)) {
-      const auto parsed = nlohmann::json::parse(txt, nullptr, false);
-      if (!parsed.is_discarded() && parsed.is_object()) {
-        root = parsed;
+    if (!ReadTextFileUtf8(path, &txt)) {
+      if (err) {
+        *err = L"crash bucket stats read failed";
+      }
+      return false;
+    }
+    const auto parsed = nlohmann::json::parse(txt, nullptr, false);
+    if (!parsed.is_discarded() && parsed.is_object()) {
+      root = parsed;
+    } else {
+      auto quarantinePath = path;
+      quarantinePath += L".corrupt." + Timestamp();
+      std::error_code quarantineEc;
+      std::filesystem::rename(path, quarantinePath, quarantineEc);
+      if (quarantineEc) {
+        if (err) {
+          *err = L"crash bucket stats parse failed and corrupt file quarantine failed: "
+            + std::to_wstring(quarantineEc.value());
+        }
+        return false;
       }
     }
   }
@@ -338,14 +425,18 @@ bool UpdateCrashBucketStats(
   bucket["last_unknown_fault_module"] = info.unknownFaultModule;
   bucket["updated_at_epoch"] = static_cast<std::int64_t>(std::time(nullptr));
 
+  if (!WriteTextFileUtf8(path, root.dump(2))) {
+    if (err) {
+      *err = L"crash bucket stats atomic write failed";
+    }
+    return false;
+  }
   if (outUnknownStreak) {
     *outUnknownStreak = unknownStreak;
   }
   if (outBucketSeenCount) {
     *outBucketSeenCount = seenTotal;
   }
-
-  WriteTextFileUtf8(path, root.dump(2));
   if (err) {
     err->clear();
   }

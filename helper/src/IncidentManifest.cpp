@@ -207,7 +207,12 @@ bool TryUpdateIncidentManifestEtw(
   }
   j["artifacts"]["etw"] = WideToUtf8(etwPath.filename().wstring());
   j["artifacts"]["etw_status"] = std::string(etwStatus);
-  WriteTextFileUtf8(manifestPath, j.dump(2));
+  if (!WriteTextFileUtf8(manifestPath, j.dump(2))) {
+    if (err) {
+      *err = L"manifest atomic write failed";
+    }
+    return false;
+  }
   if (err) {
     err->clear();
   }
@@ -234,7 +239,12 @@ bool TryUpdateIncidentManifestRecaptureEvaluation(
     return false;
   }
   j["recapture_evaluation"] = MakeRecaptureEvaluationJson(recaptureDecision);
-  WriteTextFileUtf8(manifestPath, j.dump(2));
+  if (!WriteTextFileUtf8(manifestPath, j.dump(2))) {
+    if (err) {
+      *err = L"manifest atomic write failed";
+    }
+    return false;
+  }
   if (err) {
     err->clear();
   }

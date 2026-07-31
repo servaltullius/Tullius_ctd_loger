@@ -80,8 +80,7 @@ std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandi
 {
   if (r.crash_logger_direct_fault_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
-    return en ? L"Crash Logger frame first (direct DLL fault)"
-              : L"Crash Logger frame first (direct DLL fault)";
+    return L"Crash Logger frame first (direct DLL fault)";
   }
   if (r.crash_logger_first_actionable_probable_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
@@ -90,10 +89,9 @@ std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandi
   }
   if (r.crash_logger_probable_streak_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
-    return en ? L"Crash Logger frame first (probable frame streak)"
-              : L"Crash Logger frame first (probable frame streak)";
+    return L"Crash Logger frame first (probable frame streak)";
   }
-  return en ? L"Crash Logger frame first" : L"Crash Logger frame first";
+  return L"Crash Logger frame first";
 }
 
 std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en)
@@ -202,7 +200,11 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
 
   std::wstring summary;
 
-  if (isSnapshotLike) {
+  if (ctx.isFilteredCleanExit) {
+    summary = en
+      ? L"Validated clean-exit quarantine metadata matches this preserved dump. The process exited with code 0, so this is not classified as a CTD. (Confidence: High)"
+      : L"검증된 정상 종료 격리 메타데이터가 이 보존 덤프와 일치합니다. 프로세스가 종료 코드 0으로 끝났으므로 CTD로 분류하지 않습니다. (신뢰도: 높음)";
+  } else if (isSnapshotLike) {
     summary = isManualCapture
       ? (en
           ? L"Looks like a manual snapshot. This alone does not prove a problem. (Confidence: High)"

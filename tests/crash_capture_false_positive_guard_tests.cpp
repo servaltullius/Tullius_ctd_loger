@@ -162,8 +162,36 @@ int main()
     "Zero-exit cleanup must not preserve artifacts based on strong first-chance exception evidence.");
   AssertContains(
     zeroExitCleanupBody,
-    "if (!state->crashCaptured)",
+    "if (!state->crashCaptured.latched)",
     "Zero-exit cleanup must short-circuit when crash capture state is not active.");
+  AssertOrdered(
+    zeroExitCleanupBody,
+    "TryWriteCleanExitEvidenceRecord(",
+    "RemoveCrashArtifactsForDump(",
+    "Late zero-exit evidence must be written before filtered artifacts are removed.");
+  AssertContains(
+    zeroExitCleanupBody,
+    "CleanExitDumpState::kPendingDelete",
+    "Late zero-exit cleanup must commit a pending deletion record before touching the dump.");
+  AssertOrdered(
+    zeroExitCleanupBody,
+    "RemoveCrashArtifactsForDump(",
+    "CleanExitDumpState::kDeleteFailed",
+    "Late zero-exit cleanup must derive the final evidence state from observed removal.");
+
+  AssertOrdered(
+    crashTickBody,
+    "TryWriteCleanExitEvidenceRecord(",
+    "if (preserveFilteredDump)",
+    "Fast zero-exit evidence must be written before the dump is preserved or removed.");
+  AssertContains(
+    crashTickBody,
+    "CleanExitDumpState::kPendingDelete",
+    "Fast zero-exit filtering must commit a pending deletion record before touching the dump.");
+  AssertContains(
+    crashTickBody,
+    "RemoveFileAndObserve(dumpPath)",
+    "Fast zero-exit filtering must observe the final dump state after deletion.");
 
   AssertContains(
     zeroExitCleanupBody,
@@ -172,8 +200,8 @@ int main()
 
   AssertContains(
     zeroExitCleanupBody,
-    "RemoveCrashArtifactsForDump(\n      outBase,\n      state->capturedCrashDumpPath,\n      crashEtwPath,\n      cfg.preserveFilteredCrashDumps)",
-    "Zero-exit cleanup must remove crash artifact set tied to captured dump.");
+    "RemoveCrashArtifactsForDump(\n      outBase,\n      state->capturedCrashDumpPath,\n      removableCrashEtwPath,\n      preserveDump)",
+    "Zero-exit cleanup must remove the captured artifact set without deleting an ETW path whose cleanup is unconfirmed.");
 
   AssertOrdered(
     zeroExitCleanupBody,
@@ -189,8 +217,8 @@ int main()
 
   AssertContains(
     processExitTickBody,
-    "if (exitCode != 0) {\n      DrainCrashEventBeforeExit(",
-    "Process exit tick must drain pending crash signals only for non-zero exits.");
+    "DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);",
+    "Process exit tick must drain pending crash metadata for every observed exit code.");
   assert(
     processExitTickBody.find("sharedMemoryStrongCrash") == std::string::npos &&
     processExitTickBody.find("exitCode0StrongCrash") == std::string::npos &&
@@ -257,11 +285,43 @@ int main()
     "Manual capture debounce must use wall-clock gating to avoid duplicate capture bursts.");
 
   const std::string helperEntryBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
+  AssertContains(
+    helperEntryBody,
+    "if (!helperSingletonMutex)",
+    "Helper entry must fail closed when its singleton mutex cannot be created.");
+  AssertContains(
+    helperEntryBody,
+    "return 4;",
+    "A singleton mutex creation failure must return a non-zero process exit code.");
   AssertOrdered(
     helperEntryBody,
     "HANDLE helperSingletonMutex = skydiag::helper::internal::AcquireHelperSingletonMutex(proc.pid, &err);",
     "skydiag::helper::internal::ClearLog(outBase);",
     "Helper entry must acquire singleton mutex before clearing the helper log so duplicate helpers do not erase active diagnostics.");
+
+  const std::string thawBody = ExtractFunctionBody(
+    crashCapture,
+    "bool TryClearRecoveredCrashFreeze(");
+  AssertOrdered(
+    thawBody,
+    "ReadCrashSequence(&shm->header) != expectedCrashSeq",
+    "InterlockedAnd(",
+    "Helper ACK/reset must verify the committed incident generation before clearing ownership.");
+  AssertContains(
+    thawBody,
+    "~static_cast<LONG>(skydiag::kState_Frozen)",
+    "Helper ACK/reset must atomically clear the protocol-v4 incident ownership bit.");
+  AssertContains(
+    thawBody,
+    "~static_cast<LONG>(skydiag::kState_Frozen));\n"
+    "  MemoryBarrier();\n"
+    "\n"
+    "  if (ReadCrashSequence(&shm->header) != expectedCrashSeq)",
+    "Helper ACK/reset must recheck the generation after releasing ownership.");
+  AssertContains(
+    thawBody,
+    "InterlockedOr(",
+    "Helper ACK/reset must restore ownership if a newer generation raced with its clear.");
 
   const std::string viewerLaunchBody = ExtractFunctionBody(dumpToolLaunch, "DumpToolViewerLaunchResult StartDumpToolViewer(");
   AssertContains(

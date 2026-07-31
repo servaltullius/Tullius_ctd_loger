@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <stop_token>
 #include <thread>
@@ -35,7 +37,12 @@ std::atomic_bool g_taskPending{ false };
 std::atomic_uint64_t g_taskEnqueueQpc{ 0 };
 
 std::atomic_bool g_schedulerStarted{ false };
-std::jthread g_scheduler;
+// Intentionally heap-owned. SKSE plugins have no loader-lock-safe unload
+// callback where a joining jthread destructor could run. The module is pinned
+// before this worker starts; explicit shutdown joins and deletes it outside
+// DllMain, while process termination lets Windows reclaim it after other
+// threads have already stopped.
+std::jthread* g_scheduler = nullptr;
 bool g_lifecycleBaselineReady = false;
 std::uint64_t g_lifecycleActiveUntilQpc = 0;
 std::uint64_t g_nextLifecyclePollQpc = 0;
@@ -77,7 +84,10 @@ inline void HeartbeatTaskOnMainThread() noexcept
       if (cooldownOk) {
         lastLoggedQpc = now;
         skydiag::EventPayload p{};
-        p.a = static_cast<std::uint64_t>(deltaMs + 0.5);  // ms (rounded)
+        const double roundedDeltaMs = std::round(deltaMs);
+        p.a = roundedDeltaMs >= static_cast<double>(std::numeric_limits<std::uint64_t>::max())
+                ? std::numeric_limits<std::uint64_t>::max()
+                : static_cast<std::uint64_t>(roundedDeltaMs);
         p.b = shm->header.state_flags;
         p.c = static_cast<std::uint64_t>(g_intervalMs.load());
         PushEvent(skydiag::EventType::kPerfHitch, p, sizeof(p));
@@ -360,7 +370,7 @@ void QueueHeartbeatTask() noexcept
   }
 }
 
-void SchedulerLoop(std::stop_token st)
+void SchedulerLoop(const std::stop_token& st)
 {
   while (!st.stop_requested()) {
     const std::uint32_t intervalMs = g_intervalMs.load();
@@ -400,10 +410,43 @@ bool StartHeartbeatScheduler(const HeartbeatConfig& cfg)
   g_running.store(true);
   bool expected = false;
   if (g_schedulerStarted.compare_exchange_strong(expected, true)) {
-    g_scheduler = std::jthread(SchedulerLoop);
+    try {
+      g_scheduler = new std::jthread(SchedulerLoop);
+    } catch (...) {
+      g_running.store(false);
+      g_schedulerStarted.store(false);
+      throw;
+    }
   }
   QueueHeartbeatTask();  // kick once immediately
   return true;
+}
+
+void StopHeartbeatScheduler() noexcept
+{
+  g_running.store(false);
+  auto* scheduler = g_scheduler;
+  g_scheduler = nullptr;
+  if (scheduler) {
+    try {
+      scheduler->request_stop();
+      if (scheduler->joinable()) {
+        if (scheduler->get_id() == std::this_thread::get_id()) {
+          scheduler->detach();
+        } else {
+          scheduler->join();
+        }
+      }
+    } catch (...) {
+      OutputDebugStringW(
+        L"SkyrimDiag: heartbeat worker shutdown failed; pinned module will retain it.\n");
+    }
+    if (!scheduler->joinable()) {
+      delete scheduler;
+    }
+  }
+  g_schedulerStarted.store(false);
+  g_taskPending.store(false);
 }
 
 void HeartbeatOnInputLoaded() noexcept

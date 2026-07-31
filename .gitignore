@@ -33,4 +33,5 @@ __pycache__/
 # WinUI build outputs
 dump_tool_winui/bin/
 dump_tool_winui/obj/
-
+tests/winui_state_fixture_harness/bin/
+tests/winui_state_fixture_harness/obj/

@@ -1,5 +1,5 @@
 SkyrimDiag report
-Dump: /tmp/frame_firstchance_related_summary.dmp
+Dump: frame_firstchance_related_summary.dmp
 Conclusion: Crash is reported in the game executable. Crash Logger frame first (first actionable probable DLL frame) points to DLL candidate EarlyWinner.dll (Crash Logger frame + repeated first-chance context). Repeated suspicious first-chance context also matched this candidate. (Confidence: Medium)
 Crash bucket key: CTD-frame-firstchance-related
 Module+Offset: SkyrimSE.exe+0x00ABCDEF

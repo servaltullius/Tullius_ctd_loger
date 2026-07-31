@@ -38,10 +38,16 @@ internal static class DumpDiscoveryStore
 
     public static async Task SaveAsync(DumpDiscoveryState state, CancellationToken cancellationToken)
     {
-        var path = GetStatePath();
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await SaveToPathAsync(state, GetStatePath(), cancellationToken);
+    }
+
+    internal static async Task SaveToPathAsync(
+        DumpDiscoveryState state,
+        string path,
+        CancellationToken cancellationToken)
+    {
         var json = JsonSerializer.Serialize(Sanitize(state), s_writeOptions) + Environment.NewLine;
-        await File.WriteAllTextAsync(path, json, cancellationToken);
+        await AtomicFile.WriteAllTextAsync(path, json, cancellationToken);
     }
 
     public static DumpDiscoveryState AddRegisteredRoot(DumpDiscoveryState state, string root)

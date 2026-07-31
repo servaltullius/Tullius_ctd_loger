@@ -2,8 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 
 project(
   SkyrimDiag
-  VERSION 0.2.57
+  VERSION 0.2.58
   LANGUAGES CXX)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SkyrimDiagVersion.cmake")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +13,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
   add_compile_options(/utf-8)
+endif()
+if(WIN32)
+  enable_language(RC)
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -37,4 +42,26 @@ else()
   add_subdirectory(plugin)
   add_subdirectory(helper)
   add_subdirectory(dump_tool)
+
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_custom_target(skydiag_native_provenance ALL
+    COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/write_build_provenance.py"
+      --repo-root "${CMAKE_CURRENT_SOURCE_DIR}"
+      --output "$<TARGET_FILE_DIR:SkyrimDiag>/SkyrimDiagBuildProvenance.json"
+      --kind native
+      --configuration "$<CONFIG>"
+      --artifact "SkyrimDiag.dll=$<TARGET_FILE:SkyrimDiag>"
+      --artifact "SkyrimDiagHelper.exe=$<TARGET_FILE:SkyrimDiagHelper>"
+      --artifact "SkyrimDiagDumpToolNative.dll=$<TARGET_FILE:SkyrimDiagDumpToolNative>"
+      --artifact "SkyrimDiagDumpToolCli.exe=$<TARGET_FILE:SkyrimDiagDumpToolCli>"
+      --artifact "SkyrimDiagDumpToolWinUI.exe=$<TARGET_FILE:SkyrimDiagDumpToolWinUILauncher>"
+    DEPENDS
+      SkyrimDiag
+      SkyrimDiagHelper
+      SkyrimDiagDumpToolNative
+      SkyrimDiagDumpToolCli
+      SkyrimDiagDumpToolWinUILauncher
+    VERBATIM
+  )
 endif()

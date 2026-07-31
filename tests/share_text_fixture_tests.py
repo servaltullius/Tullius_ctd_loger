@@ -43,6 +43,7 @@ def _run_harness(summary_name: str, mode: str) -> str:
         ],
         cwd=str(REPO_ROOT),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
     )
@@ -69,6 +70,7 @@ def test_frame_first_summary_clipboard_fixture() -> None:
     actual = _run_harness("frame_first_summary.json", "clipboard")
     expected = _read_expected("frame_first_summary_clipboard.expected.txt")
     assert actual == expected
+    assert "/tmp/" not in actual
 
 
 def test_conflicting_community_share_fixture() -> None:

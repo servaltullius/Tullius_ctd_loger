@@ -1,0 +1,37 @@
+{
+  "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
+  "_fixture_intent": "A system fault location stays an observation point while two independent candidate families agree on a mod DLL.",
+  "scenario_id": "system_dll_victim",
+  "ground_truth_mod": "ENB Helper Suite",
+  "fault_module_plus_offset": "KERNELBASE.dll+0x3A00",
+  "signals": [
+    {
+      "family_id": "crash_logger_frame",
+      "candidate_key": "ENB Helper Suite",
+      "display_name": "ENBHelperSuite.dll",
+      "mod_name": "ENB Helper Suite",
+      "module_filename": "ENBHelperSuite.dll",
+      "detail": "First actionable probable frame",
+      "weight": 6
+    },
+    {
+      "family_id": "actionable_stack",
+      "candidate_key": "ENB Helper Suite",
+      "display_name": "ENB Helper Suite",
+      "mod_name": "ENB Helper Suite",
+      "module_filename": "ENBHelperSuite.dll",
+      "detail": "Independent actionable stack",
+      "weight": 5
+    }
+  ],
+  "expected_candidates": [
+    {
+      "mod_name": "ENB Helper Suite",
+      "module_filename": "ENBHelperSuite.dll",
+      "status_id": "cross_validated",
+      "confidence": "High",
+      "score": 11,
+      "cross_validated": true
+    }
+  ]
+}

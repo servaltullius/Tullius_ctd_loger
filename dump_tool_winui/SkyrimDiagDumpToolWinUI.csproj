@@ -5,7 +5,6 @@
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <RootNamespace>SkyrimDiagDumpToolWinUI</RootNamespace>
     <AssemblyName>SkyrimDiagDumpToolWinUI</AssemblyName>
     <Nullable>enable</Nullable>
@@ -14,6 +13,20 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(SkyrimDiagVersion)' != ''">
+    <Version>$(SkyrimDiagVersion)</Version>
+    <AssemblyVersion>$(SkyrimDiagVersion).0</AssemblyVersion>
+    <FileVersion>$(SkyrimDiagVersion).0</FileVersion>
+    <InformationalVersion>$(SkyrimDiagInformationalVersion)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <ApplicationManifest>$(SkyrimDiagApplicationManifest)</ApplicationManifest>
+  </PropertyGroup>
+
+  <Target Name="RequireSkyrimDiagVersion" BeforeTargets="PrepareForBuild"
+          Condition="'$(SkyrimDiagVersion)' == '' or '$(SkyrimDiagInformationalVersion)' == '' or '$(SkyrimDiagApplicationManifest)' == ''">
+    <Error Text="SkyrimDiagVersion, SkyrimDiagInformationalVersion, and SkyrimDiagApplicationManifest are required. Use scripts\build-winui.cmd." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260101001" />

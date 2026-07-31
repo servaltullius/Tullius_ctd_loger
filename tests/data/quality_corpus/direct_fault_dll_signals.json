@@ -1,0 +1,38 @@
+{
+  "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
+  "_fixture_intent": "A direct CrashLogger frame and an independent actionable stack agree on one non-system DLL.",
+  "scenario_id": "direct_fault_dll",
+  "ground_truth_mod": "Physics Extender",
+  "fault_module_plus_offset": "PhysicsExtender.dll+0x1A20",
+  "signals": [
+    {
+      "family_id": "crash_logger_frame",
+      "candidate_key": "Physics Extender",
+      "display_name": "PhysicsExtender.dll",
+      "mod_name": "Physics Extender",
+      "module_filename": "PhysicsExtender.dll",
+      "detail": "CrashLogger direct-fault frame",
+      "weight": 8
+    },
+    {
+      "family_id": "actionable_stack",
+      "candidate_key": "Physics Extender",
+      "display_name": "Physics Extender",
+      "mod_name": "Physics Extender",
+      "module_filename": "PhysicsExtender.dll",
+      "detail": "Independent actionable stack",
+      "weight": 5
+    }
+  ],
+  "expected_candidates": [
+    {
+      "mod_name": "Physics Extender",
+      "module_filename": "PhysicsExtender.dll",
+      "status_id": "cross_validated",
+      "confidence": "High",
+      "score": 13,
+      "family_count": 2,
+      "cross_validated": true
+    }
+  ]
+}

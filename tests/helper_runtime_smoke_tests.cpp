@@ -1,9 +1,11 @@
 #include <Windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <exception>
 #include <string>
+#include <thread>
 
 #include "CrashCapture.h"
 #include "CrashEtwCapture.h"
@@ -17,6 +19,7 @@ using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
 using skydiag::helper::internal::CleanupCrashArtifactsAfterZeroExit;
 using skydiag::helper::internal::CaptureStableSharedSnapshot;
+using skydiag::helper::internal::CrashCaptureState;
 using skydiag::helper::internal::ExtractCrashInfo;
 using skydiag::helper::internal::HandleCrashEventTick;
 using skydiag::helper::internal::PendingCrashAnalysis;
@@ -63,7 +66,7 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   cfg.autoAnalyzeDump = false;
   cfg.enableIncidentManifest = true;
 
-  bool crashCaptured = false;
+  CrashCaptureState crashState{};
   PendingCrashEtwCapture pendingCrashEtw{};
   PendingCrashAnalysis pendingCrashAnalysis{};
   std::wstring lastCrashDumpPath;
@@ -75,7 +78,7 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
     proc,
     outBase,
     /*waitMs=*/0,
-    &crashCaptured,
+    &crashState,
     &pendingCrashEtw,
     &pendingCrashAnalysis,
     &lastCrashDumpPath,
@@ -83,7 +86,11 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
     &pendingCrashViewerDumpPath);
 
   Require(handled, "Crash event should be consumed");
-  Require(crashCaptured, "Crash capture state should flip true");
+  Require(crashState.latched, "Crash capture state should flip true");
+  Require(
+    crashState.capturedInfo.crashSeq == 2u &&
+      crashState.capturedInfo.exceptionCode == 0xC0000005u,
+    "Crash capture state must retain the immutable crash metadata for exit-time classification");
   Require(!lastCrashDumpPath.empty(), "Crash dump path should be recorded");
   Require(FileExists(lastCrashDumpPath), "Crash dump file must exist");
   Require(
@@ -153,6 +160,84 @@ void TestRecoveredCrashThaw_AllowsStableFollowupSnapshot()
   Require(secondInfo.faultingTid == 202u, "Follow-up snapshot must retain one coherent crash record");
 }
 
+void TestStableSnapshot_PerEntrySeqlocksRejectTornRingData()
+{
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->events[0].seq = 3u;
+  shared->events[0].payload.a = 0xAAAAAAAAAAAAAAAAull;
+  shared->resources.entries[0].seq = 5u;
+  shared->resources.entries[0].path_hash = 0xBBBBBBBBBBBBBBBBull;
+
+  StableSharedSnapshot unstableSnapshot{};
+  Require(
+    CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &unstableSnapshot),
+    "An unstable ring entry must not invalidate the coherent crash snapshot");
+  Require(
+    (unstableSnapshot.layout()->events[0].seq & 1u) != 0u,
+    "Overlapping blackbox entry must be marked invalid instead of copied torn");
+  Require(
+    (unstableSnapshot.layout()->resources.entries[0].seq & 1u) != 0u,
+    "Overlapping resource entry must be marked invalid instead of copied torn");
+
+  std::atomic<bool> stop{false};
+  std::thread writer([&]() {
+    std::uint32_t generation = 1u;
+    while (!stop.load(std::memory_order_relaxed)) {
+      auto& event = shared->events[1];
+      const std::uint32_t eventCommitted = generation * 2u;
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&event.seq),
+        static_cast<LONG>(eventCommitted | 1u));
+      event.payload.a = generation;
+      event.payload.b = ~static_cast<std::uint64_t>(generation);
+      event.qpc = static_cast<std::uint64_t>(generation) * 3u;
+      MemoryBarrier();
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&event.seq),
+        static_cast<LONG>(eventCommitted));
+
+      auto& resource = shared->resources.entries[1];
+      const std::uint32_t resourceCommitted = generation * 2u;
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&resource.seq),
+        static_cast<LONG>(resourceCommitted | 1u));
+      resource.path_hash = generation;
+      resource.qpc = static_cast<std::uint64_t>(generation) * 7u;
+      MemoryBarrier();
+      InterlockedExchange(
+        reinterpret_cast<volatile LONG*>(&resource.seq),
+        static_cast<LONG>(resourceCommitted));
+      ++generation;
+    }
+  });
+
+  for (int i = 0; i < 64; ++i) {
+    StableSharedSnapshot snapshot{};
+    Require(
+      CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &snapshot),
+      "Concurrent ring writer must not destabilize the committed crash record");
+
+    const auto& event = snapshot.layout()->events[1];
+    if ((event.seq & 1u) == 0u && event.seq != 0u) {
+      Require(
+        event.payload.b == ~event.payload.a &&
+          event.qpc == event.payload.a * 3u,
+        "Committed blackbox snapshot entry must come from one writer generation");
+    }
+    const auto& resource = snapshot.layout()->resources.entries[1];
+    if ((resource.seq & 1u) == 0u && resource.seq != 0u) {
+      Require(
+        resource.qpc == resource.path_hash * 7u,
+        "Committed resource snapshot entry must come from one writer generation");
+    }
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  writer.join();
+}
+
 void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_runtime_zero_seq");
@@ -170,7 +255,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
   Require(proc.crashEvent != nullptr, "CreateEventW failed");
 
   HelperConfig cfg = MakeTestConfig();
-  bool crashCaptured = false;
+  CrashCaptureState crashState{};
   PendingCrashEtwCapture pendingCrashEtw{};
   PendingCrashAnalysis pendingCrashAnalysis{};
   std::wstring lastCrashDumpPath;
@@ -182,7 +267,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
     proc,
     outBase,
     /*waitMs=*/0,
-    &crashCaptured,
+    &crashState,
     &pendingCrashEtw,
     &pendingCrashAnalysis,
     &lastCrashDumpPath,
@@ -190,7 +275,7 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
     &pendingCrashViewerDumpPath);
 
   Require(!handled, "Zero crash sequence must be rejected before dump capture");
-  Require(!crashCaptured, "Rejected crash sequence must not set capture latch");
+  Require(!crashState.latched, "Rejected crash sequence must not set capture latch");
   Require(lastCrashDumpPath.empty(), "Rejected crash sequence must not expose a dump path");
 
   shared->header.crash_seq = 1u;
@@ -200,14 +285,14 @@ void TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump()
     proc,
     outBase,
     /*waitMs=*/0,
-    &crashCaptured,
+    &crashState,
     &pendingCrashEtw,
     &pendingCrashAnalysis,
     &lastCrashDumpPath,
     &pendingHangViewerDumpPath,
     &pendingCrashViewerDumpPath);
   Require(!oddHandled, "Odd crash sequence must be rejected before dump capture");
-  Require(!crashCaptured, "Odd crash sequence must not set capture latch");
+  Require(!crashState.latched, "Odd crash sequence must not set capture latch");
   Require(lastCrashDumpPath.empty(), "Odd crash sequence must not expose a dump path");
 
   std::error_code ec;
@@ -235,14 +320,14 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts()
   HelperConfig cfg = MakeTestConfig();
   skydiag::helper::AttachedProcess proc{};
   skydiag::helper::internal::HelperLoopState state{};
-  state.crashCaptured = true;
+  state.crashCaptured.latched = true;
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
 
   CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &state);
 
   Require(!FileExists(dumpPath), "Handled strong exception with exit_code=0 must remove artifacts");
-  Require(!state.crashCaptured, "Handled strong exception with exit_code=0 must clear capture state");
+  Require(!state.crashCaptured.latched, "Handled strong exception with exit_code=0 must clear capture state");
   Require(state.pendingCrashViewerDumpPath.empty(), "Handled strong exception with exit_code=0 must suppress viewer");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
@@ -258,6 +343,7 @@ int main()
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
+    TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts();
     return 0;

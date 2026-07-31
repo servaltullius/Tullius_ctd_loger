@@ -5,14 +5,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <cstring>
-#include <iterator>
 #include <limits>
-#include <string_view>
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/SharedMemory.h"
+#include "SkyrimDiagCrashCodes.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::plugin {
@@ -23,8 +23,47 @@ std::atomic<std::uint64_t> g_lastFirstChanceSignature{0};
 std::atomic<std::uint64_t> g_lastFirstChanceQpc{0};
 std::atomic<std::uint64_t> g_firstChanceWindowStartQpc{0};
 std::atomic<std::uint32_t> g_firstChanceWindowCount{0};
-CrashHandlerModuleRange g_crashLoggerRange{};
-CrashHandlerModuleRange g_crashLoggerSseRange{};
+// A module range that transitions from empty to published exactly once.
+//
+// The crash handler reads these ranges from an arbitrary faulting thread while
+// the SKSE lifecycle may still be publishing them. Storing `end` before
+// releasing `begin` means a reader either sees begin == 0 (treated as "no
+// range", the pre-publication behavior) or sees both halves of a complete
+// range. A published range is never rewritten, so no torn update is possible.
+struct PublishOnceModuleRange
+{
+  std::atomic<std::uintptr_t> begin{0};
+  std::atomic<std::uintptr_t> end{0};
+
+  CrashHandlerModuleRange Load() const noexcept
+  {
+    const auto loadedBegin = begin.load(std::memory_order_acquire);
+    if (loadedBegin == 0u) {
+      return {};
+    }
+    return { loadedBegin, end.load(std::memory_order_relaxed) };
+  }
+
+  bool IsPublished() const noexcept
+  {
+    return begin.load(std::memory_order_acquire) != 0u;
+  }
+
+  void PublishOnce(CrashHandlerModuleRange range) noexcept
+  {
+    if (range.begin == 0u || range.end <= range.begin) {
+      return;
+    }
+    if (IsPublished()) {
+      return;
+    }
+    end.store(range.end, std::memory_order_relaxed);
+    begin.store(range.begin, std::memory_order_release);
+  }
+};
+
+PublishOnceModuleRange g_crashLoggerRange{};
+PublishOnceModuleRange g_crashLoggerSseRange{};
 
 constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
 
@@ -77,66 +116,16 @@ bool IsBenignFirstChanceException(DWORD code) noexcept
   // Benign exceptions: first-chance C++ SEH, OutputDebugString, thread naming,
   // breakpoints in debuggers, etc.
   switch (code) {
-    case 0xE06D7363:                     // MSVC C++ exception (SEH __CxxThrowException)
-    case 0x406D1388:                     // SetThreadName via RaiseException (legacy)
-    case EXCEPTION_BREAKPOINT:           // 0x80000003 — debugger breakpoint
-    case EXCEPTION_SINGLE_STEP:          // 0x80000004 — single step (debugger)
-    case 0x40010006:                     // OutputDebugStringA
-    case 0x4001000A:                     // OutputDebugStringW
+    case skydiag::kStatusCppException:         // MSVC C++ exception (SEH __CxxThrowException)
+    case skydiag::kStatusThreadNameLegacy:     // SetThreadName via RaiseException (legacy)
+    case skydiag::kStatusBreakpoint:           // debugger breakpoint
+    case skydiag::kStatusSingleStep:           // single step (debugger)
+    case skydiag::kStatusOutputDebugStringA:   // OutputDebugStringA
+    case skydiag::kStatusOutputDebugStringW:   // OutputDebugStringW
       return true;
     default:
       return false;
   }
-}
-
-std::string_view ResolveExceptionModuleBasenameUtf8(
-  void* address,
-  char* out,
-  std::size_t outCapacity) noexcept
-{
-  if (!address || !out || outCapacity == 0) {
-    return {};
-  }
-
-  HMODULE module{};
-  if (!GetModuleHandleExW(
-        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        static_cast<LPCWSTR>(address),
-        &module) ||
-      !module) {
-    return {};
-  }
-
-  wchar_t pathBuf[MAX_PATH]{};
-  const DWORD len = GetModuleFileNameW(module, pathBuf, static_cast<DWORD>(std::size(pathBuf)));
-  if (len == 0 || len >= std::size(pathBuf)) {
-    return {};
-  }
-
-  std::size_t basenameOffset = 0;
-  for (std::size_t i = 0; i < len; ++i) {
-    if (pathBuf[i] == L'\\' || pathBuf[i] == L'/') {
-      basenameOffset = i + 1;
-    }
-  }
-  const std::size_t basenameLength = static_cast<std::size_t>(len) - basenameOffset;
-  if (basenameLength == 0) {
-    return {};
-  }
-
-  const int written = WideCharToMultiByte(
-    CP_UTF8,
-    0,
-    pathBuf + basenameOffset,
-    static_cast<int>(basenameLength),
-    out,
-    static_cast<int>(outCapacity),
-    nullptr,
-    nullptr);
-  if (written <= 0) {
-    return {};
-  }
-  return std::string_view(out, static_cast<std::size_t>(written));
 }
 
 std::uint32_t BucketExceptionAddress(void* address) noexcept
@@ -238,15 +227,24 @@ bool TryPublishCrashRecord(
     return false;
   }
 
-  auto* const sequence = reinterpret_cast<volatile LONG*>(&shm->header.crash_seq);
-  const LONG observed = InterlockedCompareExchange(sequence, 0, 0);
-  if ((observed & 1L) != 0L) {
-    // Another fatal exception is already publishing a complete fixed-size
-    // record. That writer owns the crash event signal.
+  // This CAS is the protocol-v4 incident linearization point. Once claimed,
+  // every later exception observes Frozen and leaves this record untouched
+  // until the helper explicitly ACKs/rearms by clearing Frozen.
+  if (!skydiag::TryClaimCrashIncidentOwnership(&shm->header.state_flags)) {
     return false;
   }
 
-  const LONG writing = static_cast<LONG>(static_cast<std::uint32_t>(observed) + 1u);
+  auto* const sequence = reinterpret_cast<volatile LONG*>(&shm->header.crash_seq);
+  const LONG observed = InterlockedCompareExchange(sequence, 0, 0);
+  if ((observed & 1L) != 0L) {
+    // Frozen ownership says no other writer can legitimately be active. Keep
+    // the incident fail-closed rather than clearing ownership and allowing an
+    // inconsistent CrashInfo record to be replaced.
+    return false;
+  }
+
+  const auto writingBits = static_cast<std::uint32_t>(observed) + 1u;
+  const LONG writing = std::bit_cast<LONG>(writingBits);
   if (InterlockedCompareExchange(sequence, writing, observed) != observed) {
     return false;
   }
@@ -261,7 +259,8 @@ bool TryPublishCrashRecord(
   // Publish the complete record before the even sequence and event become
   // observable in the helper process.
   MemoryBarrier();
-  LONG committed = static_cast<LONG>(static_cast<std::uint32_t>(observed) + 2u);
+  const auto committedBits = static_cast<std::uint32_t>(observed) + 2u;
+  LONG committed = std::bit_cast<LONG>(committedBits);
   if (committed == 0L) {
     committed = 2L;
   }
@@ -283,8 +282,8 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     if (ShouldSuppressNestedCrashLoggerException(
           IsCrashCaptureFrozen(shm),
           exceptionAddress,
-          g_crashLoggerRange,
-          g_crashLoggerSseRange)) {
+          g_crashLoggerRange.Load(),
+          g_crashLoggerSseRange.Load())) {
       // CrashLogger probes objects with handled exceptions while producing its
       // report. Once a crash candidate is already frozen, those probes must not
       // replace the original crash context.
@@ -297,10 +296,6 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     if (!TryPublishCrashRecord(shm, ep, code)) {
       return EXCEPTION_CONTINUE_SEARCH;
     }
-
-    InterlockedOr(
-      reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
-      static_cast<LONG>(skydiag::kState_Frozen));
 
     skydiag::EventPayload p{};
     p.a = code;
@@ -318,12 +313,10 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     const auto addressBucket = BucketExceptionAddress(ep->ExceptionRecord->ExceptionAddress);
     const auto signature = HashFirstChanceSignature(code, addressBucket);
     if (ConsumeFirstChanceTelemetryBudget(signature, qpcNow)) {
-      char moduleBasenameBuffer[MAX_PATH]{};
-      const auto moduleBasenameUtf8 = ResolveExceptionModuleBasenameUtf8(
-        ep->ExceptionRecord->ExceptionAddress,
-        moduleBasenameBuffer,
-        std::size(moduleBasenameBuffer));
-      PushFirstChanceExceptionEvent(code, addressBucket, moduleBasenameUtf8);
+      // VEH records only numeric telemetry. Loader/module/path lookup is
+      // intentionally deferred to helper/analyzer processing outside the
+      // faulting process.
+      PushFirstChanceExceptionEvent(code, addressBucket, {});
     }
   }
 
@@ -332,11 +325,20 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 
 }  // namespace
 
+void RefreshCrashLoggerModuleRanges() noexcept
+{
+  // Safe context only. GetModuleHandleW takes the loader lock, so this must
+  // never run from VectoredHandler.
+  g_crashLoggerRange.PublishOnce(QueryLoadedModuleRange(L"CrashLogger.dll"));
+  g_crashLoggerSseRange.PublishOnce(QueryLoadedModuleRange(L"CrashLoggerSSE.dll"));
+}
+
 bool InstallCrashHandler(std::uint32_t crashHookMode)
 {
   g_crashHookMode = crashHookMode;
-  g_crashLoggerRange = QueryLoadedModuleRange(L"CrashLogger.dll");
-  g_crashLoggerSseRange = QueryLoadedModuleRange(L"CrashLoggerSSE.dll");
+  // CrashLogger may not be resident yet; the SKSE lifecycle refreshes these
+  // ranges again once the remaining plugins have loaded.
+  RefreshCrashLoggerModuleRanges();
 
   // First=1 to run early, but we never consume the exception.
   PVOID h = AddVectoredExceptionHandler(/*First=*/1, VectoredHandler);

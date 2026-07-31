@@ -10,6 +10,10 @@ using skydiag::helper::internal::FilterVerdict;
 using skydiag::helper::internal::IsCommittedCrashSequence;
 using skydiag::helper::internal::QueueDeferredCrashViewer;
 using skydiag::helper::internal::ShouldLatchCrashCapture;
+using skydiag::helper::internal::ShouldAttemptDumpWrite;
+using skydiag::helper::internal::ShouldPreserveFilteredDump;
+using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
+using skydiag::helper::internal::kDumpWriteAttempts;
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {
@@ -156,6 +160,95 @@ static void TestCommittedCrashSequenceValidation()
   assert(IsCommittedCrashSequence(4u));
 }
 
+// The crash event is consumed before the dump is written and the game never
+// re-signals for the same fault, so a transient write failure must be retried
+// in place or the incident is lost.
+static void TestDumpWriteRetry_FirstAttemptAlwaysRuns()
+{
+  // Even if the process is already gone, the first attempt must run: the
+  // snapshot may still be writable and this is the only chance to find out.
+  assert(ShouldAttemptDumpWrite(0, /*processStillActive=*/false));
+  assert(ShouldAttemptDumpWrite(0, /*processStillActive=*/true));
+}
+
+static void TestDumpWriteRetry_RetriesOnlyWhileProcessAlive()
+{
+  // MiniDumpWriteDump reads the target address space; once the process exits
+  // there is nothing left to capture.
+  assert(ShouldAttemptDumpWrite(1, /*processStillActive=*/true));
+  assert(!ShouldAttemptDumpWrite(1, /*processStillActive=*/false));
+}
+
+static void TestDumpWriteRetry_BudgetIsBounded()
+{
+  assert(kDumpWriteAttempts > 1 && "A single attempt would leave no retry at all");
+  assert(!ShouldAttemptDumpWrite(kDumpWriteAttempts, /*processStillActive=*/true));
+  assert(!ShouldAttemptDumpWrite(kDumpWriteAttempts + 1, /*processStillActive=*/true));
+}
+
+// Quarantine marks zero-exit filters that carried real fault evidence. The
+// verdict stays filtered, while dump preservation is decided separately from
+// the metadata-write result.
+static void TestQuarantineCleanExit_StrongCommittedZeroExit()
+{
+  auto info = BuildCrashEventInfo(0xC0000005u, 0x439Eu, 17120u, 0u);
+  info.crashSeq = 2u;
+  assert(info.isStrong);
+  assert(ShouldQuarantineCleanExitEvidence(0u, info));
+  // The delete decision must be unchanged by quarantine eligibility.
+  assert(ClassifyExitCodeVerdict(0u, info, {}) == FilterVerdict::kDeleteBenign);
+}
+
+static void TestQuarantineCleanExit_RequiresZeroExit()
+{
+  auto info = BuildCrashEventInfo(0xC0000005u, 0x439Eu, 17120u, 0u);
+  info.crashSeq = 2u;
+  // A non-zero exit keeps the dump, so there is nothing to preserve separately.
+  assert(!ShouldQuarantineCleanExitEvidence(1u, info));
+}
+
+static void TestQuarantineCleanExit_RequiresStrongException()
+{
+  auto info = BuildCrashEventInfo(skydiag::helper::internal::kStatusCppException, 0u, 0u, 0u);
+  info.crashSeq = 2u;
+  assert(!info.isStrong);
+  assert(!ShouldQuarantineCleanExitEvidence(0u, info));
+}
+
+static void TestQuarantineCleanExit_RequiresCommittedSequence()
+{
+  auto info = BuildCrashEventInfo(0xC0000005u, 0x439Eu, 17120u, 0u);
+  assert(info.isStrong);
+
+  // Never published.
+  info.crashSeq = 0u;
+  assert(!ShouldQuarantineCleanExitEvidence(0u, info));
+
+  // Publication still in flight; the record may be half-written.
+  info.crashSeq = 3u;
+  assert(!ShouldQuarantineCleanExitEvidence(0u, info));
+}
+
+static void TestQuarantineWriteFailurePreservesDumpAsFailSafe()
+{
+  assert(ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/false,
+    /*evidenceRequired=*/true,
+    /*evidenceWritten=*/false));
+  assert(!ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/false,
+    /*evidenceRequired=*/true,
+    /*evidenceWritten=*/true));
+  assert(!ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/false,
+    /*evidenceRequired=*/false,
+    /*evidenceWritten=*/false));
+  assert(ShouldPreserveFilteredDump(
+    /*preserveConfigured=*/true,
+    /*evidenceRequired=*/false,
+    /*evidenceWritten=*/false));
+}
+
 int main()
 {
   TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit();
@@ -180,5 +273,15 @@ int main()
   TestQueueDeferredCrashViewer_NullPendingPath();
   TestFilteredVerdictsNeverLatchCrashCapture();
   TestCommittedCrashSequenceValidation();
+
+  TestDumpWriteRetry_FirstAttemptAlwaysRuns();
+  TestDumpWriteRetry_RetriesOnlyWhileProcessAlive();
+  TestDumpWriteRetry_BudgetIsBounded();
+
+  TestQuarantineCleanExit_StrongCommittedZeroExit();
+  TestQuarantineCleanExit_RequiresZeroExit();
+  TestQuarantineCleanExit_RequiresStrongException();
+  TestQuarantineCleanExit_RequiresCommittedSequence();
+  TestQuarantineWriteFailurePreservesDumpAsFailSafe();
   return 0;
 }

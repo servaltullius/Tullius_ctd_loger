@@ -60,6 +60,20 @@ if(WIN32)
     NAME skydiag_crashlogger_search_integration_tests
     COMMAND skydiag_crashlogger_search_integration_tests
   )
+
+  add_executable(skydiag_analyzer_state_runtime_tests
+    analyzer_state_runtime_tests.cpp
+  )
+  target_include_directories(skydiag_analyzer_state_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_analyzer_state_runtime_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_analyzer_state_runtime_tests
+    COMMAND skydiag_analyzer_state_runtime_tests
+  )
 endif()
 
 add_executable(skydiag_i18n_core_tests
@@ -141,6 +155,7 @@ add_executable(skydiag_crash_capture_filter_logic_tests
 
 target_include_directories(skydiag_crash_capture_filter_logic_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_crash_capture_filter_logic_tests COMMAND skydiag_crash_capture_filter_logic_tests)
@@ -163,9 +178,27 @@ add_executable(skydiag_plugin_runtime_guard_tests
 
 target_include_directories(skydiag_plugin_runtime_guard_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_plugin_runtime_guard_tests COMMAND skydiag_plugin_runtime_guard_tests)
+
+if(WIN32)
+  add_executable(skydiag_crash_incident_protocol_tests
+    crash_incident_protocol_tests.cpp
+  )
+  target_link_libraries(skydiag_crash_incident_protocol_tests PRIVATE
+    skydiag_shared
+    SkyrimDiagDumpToolCore
+  )
+  target_include_directories(skydiag_crash_incident_protocol_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  add_test(
+    NAME skydiag_crash_incident_protocol_tests
+    COMMAND skydiag_crash_incident_protocol_tests
+  )
+endif()
 
 add_executable(skydiag_helper_preflight_guard_tests
   helper_preflight_guard_tests.cpp
@@ -399,6 +432,35 @@ add_test(
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
 )
 
+# Build synthetic summaries from raw signal fixtures through the production
+# CandidateConsensus implementation. The Python gate then scores those generated
+# summaries with the same quality script used for reviewed incident corpora.
+add_executable(skydiag_quality_corpus_runner
+  quality_corpus_runner.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CandidateConsensus.cpp"
+)
+
+target_include_directories(skydiag_quality_corpus_runner PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+target_link_libraries(skydiag_quality_corpus_runner PRIVATE
+  nlohmann_json::nlohmann_json
+)
+
+add_test(
+  NAME skydiag_quality_corpus_gate_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/quality_corpus_gate_tests.py"
+    --runner "$<TARGET_FILE:skydiag_quality_corpus_runner>"
+)
+
+# Asserts the workflows still invoke clang-tidy, the fuzzers, and the Windows
+# ctest run. Each of those was committed as configuration that nothing called.
+add_test(
+  NAME skydiag_ci_wiring_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ci_wiring_tests.py"
+)
+
 add_test(
   NAME skydiag_packaging_includes_cli_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
@@ -412,6 +474,11 @@ add_test(
 add_test(
   NAME skydiag_share_text_fixture_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/share_text_fixture_tests.py"
+)
+
+add_test(
+  NAME skydiag_winui_state_fixture_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/winui_state_fixture_tests.py"
 )
 
 
@@ -479,6 +546,11 @@ set_tests_properties(skydiag_event_detail_guard_tests PROPERTIES
 )
 
 if(WIN32)
+  add_executable(skydiag_minidump_fixture_writer
+    minidump_fixture_writer.cpp
+  )
+  target_link_libraries(skydiag_minidump_fixture_writer PRIVATE Dbghelp)
+
   add_library(skydiag_helper_runtime_test_support STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"

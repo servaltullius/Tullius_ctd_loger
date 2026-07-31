@@ -12,6 +12,12 @@ jobs:
   linux:
     name: Linux
     uses: ./.github/workflows/linux-tests.yml
+    # ci.yml ignores version tags, so the release caller must enable the full
+    # Linux gate set itself instead of relying on an earlier branch run.
+    with:
+      run_asan: true
+      run_fuzz: true
+      run_clang_tidy: true
 
   release:
     name: Build + Release
@@ -38,8 +44,8 @@ jobs:
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
-          git clone https://github.com/microsoft/vcpkg "$env:GITHUB_WORKSPACE\vcpkg"
-          & "$env:GITHUB_WORKSPACE\vcpkg\bootstrap-vcpkg.bat"
+          git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP\vcpkg"
+          & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
 
       - name: Setup vcpkg binary cache
         uses: actions/cache@v4
@@ -49,21 +55,45 @@ jobs:
           restore-keys: |
             vcpkg-archives-
 
-      - name: Configure (Visual Studio + vcpkg)
+      - name: Configure (Ninja + vcpkg)
         shell: pwsh
         run: >
           cmake -S . -B build-win
-          -G "Visual Studio 17 2022"
-          -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DCMAKE_TOOLCHAIN_FILE="$env:RUNNER_TEMP\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
       - name: Build (RelWithDebInfo)
         shell: pwsh
-        run: cmake --build build-win --config RelWithDebInfo
+        run: cmake --build build-win
+
+      - name: Run clang-tidy over complete Windows production sources
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "$env:ProgramFiles\LLVM\bin\clang-tidy.exe",
+            "$env:ProgramFiles\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin\clang-tidy.exe"
+          )
+          $tidy = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $tidy) {
+            $tidy = Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\2022" -Recurse -Filter clang-tidy.exe |
+              Where-Object { $_.FullName -match '\\x64\\bin\\clang-tidy\.exe$' } |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $tidy) { throw "clang-tidy.exe not found" }
+          python scripts/run_clang_tidy.py --build-dir build-win --clang-tidy "$tidy" --jobs 4
 
       - name: Build WinUI shell
         shell: cmd
         run: scripts\build-winui.cmd
+
+      # Windows-only test targets are invisible to the Linux job, so a release
+      # must not be cut without running them.
+      - name: Run tests (Windows)
+        shell: pwsh
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
 
       - name: Resolve release zip path
         id: release_zip
@@ -71,50 +101,35 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $zipName = (python -c "import sys; sys.path.insert(0, 'scripts'); from release_contract import release_zip_name; print(release_zip_name(sys.argv[1]))" $tag).Trim()
+          $isPrerelease = (python -c "import sys; sys.path.insert(0, 'scripts'); from release_contract import release_tag_is_prerelease; print(str(release_tag_is_prerelease(sys.argv[1])).lower())" $tag).Trim()
           $zipPath = "dist/$zipName"
           "zip_name=$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "is_prerelease=$isPrerelease" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Package zip
         shell: pwsh
         run: |
-          python scripts/package.py --build-dir build-win --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
+          python scripts/package.py --build-dir build-win --config RelWithDebInfo --out "${{ steps.release_zip.outputs.zip_path }}" --no-pdb
 
       - name: Run release hard gate
+        env:
+          SKYDIAG_REQUIRE_CLEAN_PROVENANCE: "1"
+          SKYDIAG_RELEASE_CONFIG: "RelWithDebInfo"
         shell: bash
         run: bash scripts/verify_release_gate.sh "$PWD" "$PWD" "$PWD/${{ steps.release_zip.outputs.zip_path }}"
 
       - name: Resolve release notes
+        id: release_notes
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          $draftPath = Join-Path "docs/release/drafts" "$tag.md"
-          if (Test-Path $draftPath) {
-            Copy-Item $draftPath release_notes.md
-            exit 0
-          }
-
-          $lines = Get-Content CHANGELOG.md
-          $capture = $false
-          $notes = @()
-          foreach ($line in $lines) {
-            if ($line -match "^## $([regex]::Escape($tag))\b") {
-              $capture = $true
-              $notes += $line
-              continue
-            }
-            if ($capture -and $line -match "^## v") {
-              break
-            }
-            if ($capture) {
-              $notes += $line
-            }
-          }
-          if ($notes.Count -eq 0) {
-            "Release $tag" | Out-File -FilePath release_notes.md -Encoding utf8
-          } else {
-            ($notes -join "`n").TrimEnd() | Out-File -FilePath release_notes.md -Encoding utf8
-          }
+          $notesPath = Join-Path $env:RUNNER_TEMP "skydiag-release-notes.md"
+          "notes_path=$notesPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          python scripts/resolve_release_notes.py `
+            --repo-root . `
+            --tag $tag `
+            --output $notesPath
 
       - name: Create GitHub Release
         env:
@@ -122,9 +137,48 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          $args = @("release", "create", $tag, "--title", $tag, "--notes-file", "release_notes.md")
-          if ($tag -match "-rc") {
+          $expectedPrerelease = "${{ steps.release_zip.outputs.is_prerelease }}" -eq "true"
+          $args = @("release", "create", $tag, "--title", $tag, "--notes-file", "${{ steps.release_notes.outputs.notes_path }}")
+          if ($expectedPrerelease) {
             $args += "--prerelease"
           }
           $args += "${{ steps.release_zip.outputs.zip_path }}"
           gh @args
+
+      - name: Verify public release readback
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $expectedPrerelease = "${{ steps.release_zip.outputs.is_prerelease }}" -eq "true"
+          $zipName = "${{ steps.release_zip.outputs.zip_name }}"
+          $downloadDir = Join-Path $env:RUNNER_TEMP "skydiag-public-release"
+          New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+          gh release download $tag --pattern $zipName --dir $downloadDir --clobber
+
+          $localZip = Resolve-Path "${{ steps.release_zip.outputs.zip_path }}"
+          $publicZip = Join-Path $downloadDir $zipName
+          if (-not (Test-Path $publicZip)) {
+            throw "Public release asset was not readable after upload: $publicZip"
+          }
+          $localHash = (Get-FileHash $localZip -Algorithm SHA256).Hash
+          $publicHash = (Get-FileHash $publicZip -Algorithm SHA256).Hash
+          if ($localHash -ne $publicHash) {
+            throw "Public release asset hash mismatch: local=$localHash public=$publicHash"
+          }
+
+          python scripts/verify_release_zip.py `
+            --repo-root . `
+            --zip $publicZip `
+            --build-dir build-win `
+            --winui-dir build-winui `
+            --config RelWithDebInfo `
+            --require-clean
+
+          $release = gh release view $tag --json isPrerelease | ConvertFrom-Json
+          $actualPrerelease = [bool]$release.isPrerelease
+          if ($actualPrerelease -ne $expectedPrerelease) {
+            throw "GitHub prerelease state mismatch: tag=$tag expected=$expectedPrerelease actual=$actualPrerelease"
+          }
+          Write-Host "Public release readback SHA256=$publicHash"

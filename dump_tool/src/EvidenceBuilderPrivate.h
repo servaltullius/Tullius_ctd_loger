@@ -37,6 +37,7 @@ struct EvidenceBuildContext
   bool en = false;
 
   bool hasException = false;
+  bool isFilteredCleanExit = false;
   bool isCrashLike = false;
   bool isHangLike = false;
   bool isSnapshotLike = false;

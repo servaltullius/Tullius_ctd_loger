@@ -24,6 +24,10 @@ struct HelperConfig {
   bool allowOnlineSymbols = false;
   bool enableWerDumpFallbackHint = true;
   bool preserveFilteredCrashDumps = false;  // If true, never delete crash dumps even if false-positive filter triggers
+  // A clean (exit code 0) shutdown normally means a handled exception, so the dump is
+  // discarded. When a strong fault was already published and no heartbeat recovery was
+  // observed, keep a small metadata record so a genuinely missed CTD stays investigable.
+  bool enableCleanExitEvidenceQuarantine = true;
   bool autoOpenViewerOnCrash = true;
   bool autoOpenCrashOnlyIfProcessExited = true;
   std::uint32_t autoOpenCrashWaitForExitMs = 2000;

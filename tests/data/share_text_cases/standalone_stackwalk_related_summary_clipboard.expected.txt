@@ -1,5 +1,5 @@
 SkyrimDiag report
-Dump: /tmp/standalone_stackwalk_related_summary.dmp
+Dump: standalone_stackwalk_related_summary.dmp
 Conclusion: Crash is reported in the game executable. Tullius callstack first points to DLL candidate StandaloneStack.dll (actionable stack). This is stronger than stack scan only. (Confidence: Medium)
 Crash bucket key: CTD-standalone-stackwalk-related
 Module+Offset: SkyrimSE.exe+0x00123456

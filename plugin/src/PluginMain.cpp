@@ -13,6 +13,7 @@
 #include <SKSE/Version.h>
 
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/null_sink.h>
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/CrashHandler.h"
@@ -129,19 +130,41 @@ PluginConfig LoadConfig()
   return cfg;
 }
 
-void SetupLog()
+void InstallFallbackLogger() noexcept
 {
-  auto path = SKSE::log::log_directory();
-  if (!path) {
-    return;
+  try {
+    auto sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+    auto logger = std::make_shared<spdlog::logger>("SkyrimDiag fallback", std::move(sink));
+    spdlog::set_default_logger(std::move(logger));
+    spdlog::set_level(spdlog::level::info);
+  } catch (...) {
+    // Plugin loading must not fail merely because even the no-op logger could
+    // not be allocated. OutputDebugStringW is the last allocation-free notice.
+    OutputDebugStringW(L"SkyrimDiag: failed to install fallback logger.\n");
   }
+}
 
-  *path /= "SkyrimDiag.log";
-  auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
-  auto logger = std::make_shared<spdlog::logger>("global log", std::move(sink));
-  spdlog::set_default_logger(std::move(logger));
-  spdlog::set_level(spdlog::level::info);
-  spdlog::flush_on(spdlog::level::info);
+bool SetupLog() noexcept
+{
+  try {
+    auto path = SKSE::log::log_directory();
+    if (!path) {
+      InstallFallbackLogger();
+      return false;
+    }
+
+    *path /= "SkyrimDiag.log";
+    auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
+    auto logger = std::make_shared<spdlog::logger>("global log", std::move(sink));
+    spdlog::set_default_logger(std::move(logger));
+    spdlog::set_level(spdlog::level::info);
+    spdlog::flush_on(spdlog::level::info);
+    return true;
+  } catch (...) {
+    InstallFallbackLogger();
+    OutputDebugStringW(L"SkyrimDiag: file logger setup failed; using no-op fallback.\n");
+    return false;
+  }
 }
 
 void OnDataLoaded(const PluginConfig& cfg)
@@ -175,6 +198,16 @@ void OnSkseMessage(SKSE::MessagingInterface::Message* message)
   if (!message) {
     return;
   }
+  // CrashLogger is itself an SKSE plugin and may load after us, in which case
+  // InstallCrashHandler saw no module image to cache. Re-check at each
+  // lifecycle stage so nested-fault suppression covers late loads too; the
+  // ranges publish at most once, so repeating this is cheap and idempotent.
+  if (message->type == SKSE::MessagingInterface::kPostLoad ||
+      message->type == SKSE::MessagingInterface::kPostPostLoad ||
+      message->type == SKSE::MessagingInterface::kInputLoaded ||
+      message->type == SKSE::MessagingInterface::kDataLoaded) {
+    skydiag::plugin::RefreshCrashLoggerModuleRanges();
+  }
   if (message->type == SKSE::MessagingInterface::kInputLoaded) {
     skydiag::plugin::HeartbeatOnInputLoaded();
   }
@@ -191,6 +224,16 @@ HMODULE GetThisModule() noexcept
     reinterpret_cast<LPCWSTR>(&GetThisModule),
     &mod);
   return mod;
+}
+
+bool PinThisModuleForWorkerLifetime() noexcept
+{
+  HMODULE pinnedModule{};
+  return GetModuleHandleExW(
+           GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+             GET_MODULE_HANDLE_EX_FLAG_PIN,
+           reinterpret_cast<LPCWSTR>(&PinThisModuleForWorkerLifetime),
+           &pinnedModule) != FALSE;
 }
 
 std::filesystem::path GetThisModulePath()
@@ -217,11 +260,11 @@ bool IsHelperSingletonPresent(std::uint32_t pid)
   return true;
 }
 
-std::filesystem::path ResolveHelperPath(const PluginConfig& cfg)
+std::filesystem::path ResolveHelperPath(const std::wstring& helperExe)
 {
   const auto dllPath = GetThisModulePath();
   const auto dllDir = dllPath.parent_path();
-  std::filesystem::path helperPath(cfg.helperExe);
+  std::filesystem::path helperPath(helperExe);
   if (helperPath.is_relative()) {
     helperPath = dllDir / helperPath;
   }
@@ -291,7 +334,7 @@ bool StartHelperIfConfigured(const PluginConfig& cfg)
   }
 
   DWORD helperPid = 0;
-  const auto helperPath = ResolveHelperPath(cfg);
+  const auto helperPath = ResolveHelperPath(cfg.helperExe);
   if (!StartHelperProcess(helperPath, pid, &helperPid)) {
     return false;
   }
@@ -300,9 +343,14 @@ bool StartHelperIfConfigured(const PluginConfig& cfg)
   return true;
 }
 
-// Store the watchdog jthread so its destructor can request a clean stop on DLL unload.
-static std::jthread g_watchdogThread;
-static std::jthread g_testHotkeysThread;
+// These workers are heap-owned so CRT detach never joins them while holding the
+// loader lock. The module is pinned before any worker starts. The exported
+// shutdown entry point joins and deletes them only when called from a normal
+// thread outside DllMain.
+static std::jthread* g_watchdogThread = nullptr;
+static std::jthread* g_testHotkeysThread = nullptr;
+static std::atomic_bool g_watchdogStarted{ false };
+static std::atomic_bool g_testHotkeysStarted{ false };
 
 void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
 {
@@ -310,65 +358,96 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
     return;
   }
 
-  static std::atomic<bool> started{ false };
-  if (started.exchange(true)) {
+  if (g_watchdogStarted.exchange(true)) {
     return;
   }
 
-  g_watchdogThread = std::jthread([cfg](std::stop_token stopToken) {
-    constexpr std::uint32_t kRetryMinMs = 1000;
-    constexpr std::uint32_t kRetryMaxMs = 30000;
-    constexpr std::uint32_t kLoopSleepMs = 1000;
-    constexpr std::uint32_t kInitialGraceMs = 3000;
-    constexpr int kHelperConfirmPollCount = 15;
-    constexpr std::uint32_t kHelperConfirmPollSleepMs = 100;
+  try {
+    g_watchdogThread = new std::jthread(
+      [helperExe = cfg.helperExe](const std::stop_token &stopToken) noexcept {
+        try {
+          constexpr std::uint32_t kRetryMinMs = 1000;
+          constexpr std::uint32_t kRetryMaxMs = 30000;
+          constexpr std::uint32_t kLoopSleepMs = 1000;
+          constexpr std::uint32_t kInitialGraceMs = 3000;
+          constexpr int kHelperConfirmPollCount = 15;
+          constexpr std::uint32_t kHelperConfirmPollSleepMs = 100;
 
-    const auto pid = GetCurrentProcessId();
-    std::uint32_t retryBackoffMs = kRetryMinMs;
-    ULONGLONG nextAttemptTick = GetTickCount64() + kInitialGraceMs;
+          const auto pid = GetCurrentProcessId();
+          std::uint32_t retryBackoffMs = kRetryMinMs;
+          ULONGLONG nextAttemptTick = GetTickCount64() + kInitialGraceMs;
 
-    while (!stopToken.stop_requested()) {
-      if (IsHelperSingletonPresent(pid)) {
-        retryBackoffMs = kRetryMinMs;
-        nextAttemptTick = 0;
-        Sleep(kLoopSleepMs);
-        continue;
-      }
+          while (!stopToken.stop_requested()) {
+            try {
+              if (IsHelperSingletonPresent(pid)) {
+                retryBackoffMs = kRetryMinMs;
+                nextAttemptTick = 0;
+                Sleep(kLoopSleepMs);
+                continue;
+              }
 
-      const ULONGLONG now = GetTickCount64();
-      if (nextAttemptTick != 0 && now < nextAttemptTick) {
-        Sleep(kLoopSleepMs);
-        continue;
-      }
+              const ULONGLONG now = GetTickCount64();
+              if (nextAttemptTick != 0 && now < nextAttemptTick) {
+                Sleep(kLoopSleepMs);
+                continue;
+              }
 
-      DWORD helperPid = 0;
-      const auto helperPath = ResolveHelperPath(cfg);
-      if (StartHelperProcess(helperPath, pid, &helperPid)) {
-        bool confirmed = false;
-        for (int i = 0; i < kHelperConfirmPollCount; ++i) {
-          if (stopToken.stop_requested()) break;
-          if (IsHelperSingletonPresent(pid)) {
-            confirmed = true;
-            break;
+              DWORD helperPid = 0;
+              const auto helperPath = ResolveHelperPath(helperExe);
+              if (StartHelperProcess(helperPath, pid, &helperPid)) {
+                bool confirmed = false;
+                for (int i = 0; i < kHelperConfirmPollCount; ++i) {
+                  if (stopToken.stop_requested())
+                    break;
+                  if (IsHelperSingletonPresent(pid)) {
+                    confirmed = true;
+                    break;
+                  }
+                  Sleep(kHelperConfirmPollSleepMs);
+                }
+                if (confirmed) {
+                  spdlog::info("SkyrimDiag: helper watchdog confirmed helper "
+                               "running (helperPid={})",
+                               helperPid);
+                  retryBackoffMs = kRetryMinMs;
+                  nextAttemptTick = 0;
+                } else if (!stopToken.stop_requested()) {
+                  nextAttemptTick = GetTickCount64() + retryBackoffMs;
+                  spdlog::warn("SkyrimDiag: helper watchdog launch "
+                               "unconfirmed; retry in {} ms",
+                               retryBackoffMs);
+                  retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
+                }
+              } else {
+                nextAttemptTick = GetTickCount64() + retryBackoffMs;
+                spdlog::warn("SkyrimDiag: helper watchdog retry in {} ms",
+                             retryBackoffMs);
+                retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
+              }
+
+              Sleep(kLoopSleepMs);
+            } catch (...) {
+              // A watchdog failure must not unwind across the thread entry
+              // point or permanently disable helper recovery after one
+              // transient exception.
+              nextAttemptTick = GetTickCount64() + retryBackoffMs;
+              retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
+              OutputDebugStringW(L"SkyrimDiag: helper watchdog iteration "
+                                 L"failed; retry scheduled.\n");
+              Sleep(kLoopSleepMs);
+            }
           }
-          Sleep(kHelperConfirmPollSleepMs);
+        } catch (...) {
+          // Preserve the noexcept thread boundary even if an unexpected failure
+          // occurs outside the per-iteration recovery scope.
+          OutputDebugStringW(L"SkyrimDiag: helper watchdog stopped after an "
+                             L"unexpected failure.\n");
         }
-        if (confirmed) {
-          spdlog::info("SkyrimDiag: helper watchdog confirmed helper running (helperPid={})", helperPid);
-        } else if (!stopToken.stop_requested()) {
-          spdlog::warn("SkyrimDiag: helper watchdog launched helper but singleton mutex not observed yet");
-        }
-        retryBackoffMs = kRetryMinMs;
-        nextAttemptTick = 0;
-      } else {
-        nextAttemptTick = GetTickCount64() + retryBackoffMs;
-        spdlog::warn("SkyrimDiag: helper watchdog retry in {} ms", retryBackoffMs);
-        retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
-      }
-
-      Sleep(kLoopSleepMs);
-    }
-  });
+      });
+  } catch (...) {
+    g_watchdogStarted.store(false);
+    throw;
+  }
 }
 
 void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
@@ -377,109 +456,174 @@ void StartTestHotkeysIfEnabled(const PluginConfig& cfg)
     return;
   }
 
-  static std::atomic<bool> started{ false };
-  if (started.exchange(true)) {
+  if (g_testHotkeysStarted.exchange(true)) {
     return;
   }
 
-  g_testHotkeysThread = std::jthread([](std::stop_token stopToken) {
-    bool crashTriggered = false;
-    bool hangTriggered = false;
+  try {
+    g_testHotkeysThread = new std::jthread([](const std::stop_token& stopToken) {
+      bool crashTriggered = false;
+      bool hangTriggered = false;
 
-    while (!stopToken.stop_requested()) {
-      const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-      const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+      while (!stopToken.stop_requested()) {
+        const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-      if (ctrl && shift && ((GetAsyncKeyState(VK_F10) & 1) != 0) && !crashTriggered) {
-        crashTriggered = true;
-        spdlog::warn("SkyrimDiag: test hotkey -> intentional crash");
-        skydiag::plugin::Note(/*tag=*/0x544553545F435241ull);  // "TEST_CRA"
-        if (auto* ti = SKSE::GetTaskInterface()) {
-          try {
-            ti->AddUITask([]() {
-              *reinterpret_cast<volatile int*>(0) = 0;
-            });
-          } catch (...) {
-            spdlog::warn("SkyrimDiag: failed to enqueue crash hotkey UI task");
+        if (ctrl && shift && ((GetAsyncKeyState(VK_F10) & 1) != 0) && !crashTriggered) {
+          crashTriggered = true;
+          spdlog::warn("SkyrimDiag: test hotkey -> intentional crash");
+          skydiag::plugin::Note(/*tag=*/0x544553545F435241ull);  // "TEST_CRA"
+          if (auto* ti = SKSE::GetTaskInterface()) {
+            try {
+              ti->AddUITask([]() {
+                *reinterpret_cast<volatile int*>(0) = 0;
+              });
+            } catch (...) {
+              spdlog::warn("SkyrimDiag: failed to enqueue crash hotkey UI task");
+            }
           }
         }
-      }
 
-      if (ctrl && shift && ((GetAsyncKeyState(VK_F11) & 1) != 0) && !hangTriggered) {
-        hangTriggered = true;
-        spdlog::warn("SkyrimDiag: test hotkey -> intentional hang (main thread)");
-        skydiag::plugin::Note(/*tag=*/0x544553545F48414Eull);  // "TEST_HAN"
-        if (auto* ti = SKSE::GetTaskInterface()) {
-          try {
-            ti->AddUITask([]() {
-              for (;;) {
-                Sleep(1000);
-              }
-            });
-          } catch (...) {
-            spdlog::warn("SkyrimDiag: failed to enqueue hang hotkey UI task");
+        if (ctrl && shift && ((GetAsyncKeyState(VK_F11) & 1) != 0) && !hangTriggered) {
+          hangTriggered = true;
+          spdlog::warn("SkyrimDiag: test hotkey -> intentional hang (main thread)");
+          skydiag::plugin::Note(/*tag=*/0x544553545F48414Eull);  // "TEST_HAN"
+          if (auto* ti = SKSE::GetTaskInterface()) {
+            try {
+              ti->AddUITask([]() {
+                for (;;) {
+                  Sleep(1000);
+                }
+              });
+            } catch (...) {
+              spdlog::warn("SkyrimDiag: failed to enqueue hang hotkey UI task");
+            }
           }
         }
-      }
 
-      Sleep(50);
-    }
-  });
+        Sleep(50);
+      }
+    });
+  } catch (...) {
+    g_testHotkeysStarted.store(false);
+    throw;
+  }
 }
 
-}  // namespace
-
-SKSEPluginLoad(const SKSE::LoadInterface* skse)
+void StopOwnedWorker(std::jthread*& worker) noexcept
 {
-  SKSE::Init(skse);
-  SetupLog();
+  auto* owned = worker;
+  worker = nullptr;
+  if (!owned) {
+    return;
+  }
+  try {
+    owned->request_stop();
+    if (owned->joinable()) {
+      if (owned->get_id() == std::this_thread::get_id()) {
+        owned->detach();
+      } else {
+        owned->join();
+      }
+    }
+  } catch (...) {
+    OutputDebugStringW(
+      L"SkyrimDiag: background worker shutdown failed; pinned module will retain it.\n");
+  }
+  if (!owned->joinable()) {
+    delete owned;
+  }
+}
 
-  g_cfg = LoadConfig();
+void StopPluginBackgroundWorkers() noexcept
+{
+  StopOwnedWorker(g_testHotkeysThread);
+  StopOwnedWorker(g_watchdogThread);
+  g_testHotkeysStarted.store(false);
+  g_watchdogStarted.store(false);
+}
 
-  if (!skydiag::plugin::InitSharedMemory()) {
-    spdlog::warn("SkyrimDiag: shared memory init failed; plugin stays loaded but diagnostics disabled");
+} // namespace
+
+extern "C" __declspec(dllexport) void SkyrimDiagShutdownWorkers() noexcept
+{
+  StopPluginBackgroundWorkers();
+  skydiag::plugin::StopHeartbeatScheduler();
+}
+
+SKSEPluginLoad(const SKSE::LoadInterface *skse) {
+  bool skseInitialized = false;
+  try {
+    SKSE::Init(skse);
+    skseInitialized = true;
+    if (!SetupLog()) {
+      OutputDebugStringW(
+          L"SkyrimDiag: continuing plugin load without a file logger.\n");
+    }
+
+    g_cfg = LoadConfig();
+
+    if (!skydiag::plugin::InitSharedMemory()) {
+      spdlog::warn("SkyrimDiag: shared memory init failed; plugin stays loaded "
+                   "but diagnostics disabled");
+      return true;
+    }
+
+    if (!PinThisModuleForWorkerLifetime()) {
+      spdlog::error("SkyrimDiag: failed to pin plugin module before starting "
+                    "background workers");
+      return false;
+    }
+
+    skydiag::plugin::Note(
+        /*tag=*/0x53455353494F4E31ull); // "SESSION1" (tag only)
+
+    // Start as early as possible: the helper relies on main-thread heartbeat
+    // updates.
+    skydiag::plugin::StartHeartbeatScheduler(skydiag::plugin::HeartbeatConfig{
+        g_cfg.heartbeatIntervalMs,
+        g_cfg.enablePerfHitchLog,
+        g_cfg.perfHitchThresholdMs,
+        g_cfg.perfHitchCooldownMs,
+    });
+
+    StartHelperIfConfigured(g_cfg);
+    StartHelperWatchdogIfConfigured(g_cfg);
+    StartTestHotkeysIfEnabled(g_cfg);
+    if (g_cfg.enableResourceLog) {
+      skydiag::plugin::ConfigureResourceLogThrottle(
+          g_cfg.enableAdaptiveResourceLogThrottle,
+          g_cfg.resourceLogThrottleHighWatermarkPerSec,
+          g_cfg.resourceLogThrottleMaxSampleDivisor);
+      if (!skydiag::plugin::InstallResourceHooks()) {
+        spdlog::warn("SkyrimDiag: resource hook install failed (resource "
+                     "logging disabled)");
+      } else {
+        spdlog::info("SkyrimDiag: resource log throttle adaptive={} "
+                     "highWatermarkPerSec={} maxDivisor={}",
+                     g_cfg.enableAdaptiveResourceLogThrottle ? 1 : 0,
+                     g_cfg.resourceLogThrottleHighWatermarkPerSec,
+                     g_cfg.resourceLogThrottleMaxSampleDivisor);
+      }
+    }
+
+    if (g_cfg.crashHookMode != 0) {
+      if (!skydiag::plugin::InstallCrashHandler(g_cfg.crashHookMode)) {
+        spdlog::warn("SkyrimDiag: crash handler install failed");
+      }
+    }
+
+    if (auto *msg = SKSE::GetMessagingInterface()) {
+      msg->RegisterListener(OnSkseMessage);
+    }
+
+    spdlog::info("SkyrimDiag: loaded");
     return true;
+  } catch (...) {
+    // Never unwind through the SKSE C ABI. Once SKSE initialization completed,
+    // keep the DLL resident because hooks or worker threads may already exist.
+    OutputDebugStringW(L"SkyrimDiag: unexpected plugin initialization failure; "
+                       L"keeping any initialized components resident.\n");
+    return skseInitialized;
   }
-
-  skydiag::plugin::Note(/*tag=*/0x53455353494F4E31ull);  // "SESSION1" (tag only)
-
-  // Start as early as possible: the helper relies on main-thread heartbeat updates.
-  skydiag::plugin::StartHeartbeatScheduler(skydiag::plugin::HeartbeatConfig{
-    g_cfg.heartbeatIntervalMs,
-    g_cfg.enablePerfHitchLog,
-    g_cfg.perfHitchThresholdMs,
-    g_cfg.perfHitchCooldownMs,
-  });
-
-  StartHelperIfConfigured(g_cfg);
-  StartHelperWatchdogIfConfigured(g_cfg);
-  StartTestHotkeysIfEnabled(g_cfg);
-  if (g_cfg.enableResourceLog) {
-    skydiag::plugin::ConfigureResourceLogThrottle(
-      g_cfg.enableAdaptiveResourceLogThrottle,
-      g_cfg.resourceLogThrottleHighWatermarkPerSec,
-      g_cfg.resourceLogThrottleMaxSampleDivisor);
-    if (!skydiag::plugin::InstallResourceHooks()) {
-      spdlog::warn("SkyrimDiag: resource hook install failed (resource logging disabled)");
-    } else {
-      spdlog::info(
-        "SkyrimDiag: resource log throttle adaptive={} highWatermarkPerSec={} maxDivisor={}",
-        g_cfg.enableAdaptiveResourceLogThrottle ? 1 : 0,
-        g_cfg.resourceLogThrottleHighWatermarkPerSec,
-        g_cfg.resourceLogThrottleMaxSampleDivisor);
-    }
-  }
-
-  if (g_cfg.crashHookMode != 0) {
-    if (!skydiag::plugin::InstallCrashHandler(g_cfg.crashHookMode)) {
-      spdlog::warn("SkyrimDiag: crash handler install failed");
-    }
-  }
-
-  if (auto* msg = SKSE::GetMessagingInterface()) {
-    msg->RegisterListener(OnSkseMessage);
-  }
-
-  spdlog::info("SkyrimDiag: loaded");
-  return true;
 }

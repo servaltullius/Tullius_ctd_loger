@@ -10,6 +10,14 @@ public sealed partial class MainWindow
 {
     private async void SaveTriageButton_Click(object sender, RoutedEventArgs e)
     {
+        await RunUiEventAsync(
+            SaveTriageAsync,
+            "Failed to save review: ",
+            "검토 저장 실패: ");
+    }
+
+    private async Task SaveTriageAsync()
+    {
         var summaryPath = ResolveCurrentSummaryPath();
         if (string.IsNullOrWhiteSpace(summaryPath) || !File.Exists(summaryPath))
         {
@@ -24,7 +32,20 @@ public sealed partial class MainWindow
             SaveTriageButton.IsEnabled = false;
             StatusText.Text = T("Saving review feedback...", "검토 피드백을 저장하는 중입니다...");
 
-            await SummaryTriageStore.SaveAsync(summaryPath, BuildTriageReviewFromEditor(), CancellationToken.None);
+            if (string.IsNullOrWhiteSpace(_vm.CurrentDumpPath))
+            {
+                throw new InvalidOperationException("The current dump path is unavailable.");
+            }
+            if (string.IsNullOrWhiteSpace(_vm.CurrentOutDir))
+            {
+                throw new InvalidOperationException("The current output directory is unavailable.");
+            }
+            await SummaryTriageStore.SaveAsync(
+                summaryPath,
+                _vm.CurrentDumpPath,
+                _vm.CurrentOutDir,
+                BuildTriageReviewFromEditor(),
+                CancellationToken.None);
 
             var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
             RenderSummary(summary);
@@ -112,7 +133,7 @@ public sealed partial class MainWindow
             return null;
         }
 
-        return NativeAnalyzerBridge.ResolveSummaryPath(_vm.CurrentDumpPath, _vm.CurrentOutDir);
+        return _currentSummaryPath;
     }
 
     private string FormatTriageMetadata(TriageReview triage)
