@@ -43,7 +43,7 @@
 - **Windows 테스트 이식성 보정** — source/XAML guard는 CRLF를 LF로 정규화하고, .NET share-text fixture의 stdout은 UTF-8로 명시합니다. clang-tidy compile-database 검사는 8.3 short path나 `alias\..`가 같은 저장소를 가리킬 때 먼저 canonicalize해 runner 경로 표기 차이를 소스 누락으로 오인하지 않습니다.
 
 ### 주의사항
-- **SharedLayout protocol v4는 Plugin과 Helper를 함께 교체해야 합니다.** Plugin은 `kState_Frozen`의 clear→set CAS를 단일 사고 ownership 지점으로 사용해 최초 강한 결함을 고정하고, Helper만 명시적으로 reject/abandon한 세대를 ACK/reset해 다음 사고가 슬롯을 claim하도록 합니다. 동시성·호환성 회귀는 자동 테스트로 검증했지만, 실제 Skyrim 런타임의 연속 first-chance/CTD와 구버전 save·모드 조합은 아직 사람 플레이로 확인하지 않았습니다.
+- **SharedLayout protocol v4는 Plugin과 Helper를 함께 교체해야 합니다.** Plugin은 `kState_Frozen`의 clear→set CAS를 단일 사고 ownership 지점으로 사용해 최초 강한 결함을 고정하고, Helper만 명시적으로 reject/abandon한 세대를 ACK/reset해 다음 사고가 슬롯을 claim하도록 합니다. 동시성·호환성 회귀는 자동 테스트로 검증했고, 사용자의 RC3 기본 실사용 스모크에서는 이상이 보고되지 않았습니다. 다만 실제 Skyrim 런타임의 연속 first-chance/CTD와 구버전 save·모드 조합은 체계적으로 확인하지 않았습니다.
 - 정상 종료 증거 격리는 기본적으로 JSON 메타데이터만 남깁니다. 덤프가 필요하면 `PreserveFilteredCrashDumps=1`을 켜야 하며, 이 경우 JSON도 덤프가 보존됐다고 명시합니다.
 - 검수된 실사고 코퍼스가 여전히 없으므로, 다른 크래시 로거 대비 적중률을 수치로 주장하지 않습니다.
 - 플러그인, Helper, 분석기와 WinUI가 함께 바뀌므로 이전 릴리즈 파일과 섞지 말고 zip 전체를 업데이트해 주세요.
@@ -55,7 +55,8 @@
 - Linux 새 구성·빌드와 전체 테스트: `61/61` 통과.
 - Windows production compile database 전체 `86`개 번역 단위 clang-tidy(`WarningsAsErrors`): clean.
 - 현재 통합 소스의 로컬 diagnostic ZIP·release gate·packaged-launcher smoke는 clean provenance를 강제해 최종 재실행하며, 태그 워크플로는 공개 asset 재다운로드와 SHA-256 일치까지 확인해야 완료됩니다.
-- 실사고 품질 코퍼스와 실제 Skyrim 플레이 런타임은 미검증입니다.
+- 사용자 RC3 기본 실사용 스모크에서는 이상이 보고되지 않았습니다.
+- 실사고 품질 코퍼스, 연속 first-chance/CTD, 구버전 save·모드 조합은 미검증입니다.
 
 ## v0.2.57 (2026-07-23)
 
