@@ -231,4 +231,60 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   return out;
 }
 
+std::vector<std::uint32_t> FindThreadsWithNearStackModule(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& modules,
+  std::wstring_view moduleFilename,
+  std::size_t maxSlots)
+{
+  std::vector<std::uint32_t> matchingTids;
+  if (!dumpBase || moduleFilename.empty() || maxSlots == 0u) {
+    return matchingTids;
+  }
+
+  const auto moduleIt = std::find_if(modules.begin(), modules.end(), [&](const ModuleInfo& module) {
+    return WideLower(module.filename) == WideLower(moduleFilename);
+  });
+  if (moduleIt == modules.end()) {
+    return matchingTids;
+  }
+
+  const auto threads = LoadThreads(dumpBase, dumpSize);
+  for (const auto& thread : threads) {
+    CONTEXT context{};
+    if (!ReadThreadContextWin64(dumpBase, dumpSize, thread, context)) {
+      continue;
+    }
+
+    const std::uint8_t* stackBytes = nullptr;
+    std::size_t stackSize = 0;
+    std::uint64_t stackBase = 0;
+    if (!GetThreadStackBytes(dumpBase, dumpSize, thread, stackBytes, stackSize, stackBase)) {
+      continue;
+    }
+
+    std::size_t startOffset = 0;
+    if (context.Rsp >= stackBase && context.Rsp < stackBase + static_cast<std::uint64_t>(stackSize)) {
+      startOffset = static_cast<std::size_t>(context.Rsp - stackBase);
+    }
+    const std::size_t scanBytes = std::min<std::size_t>(
+      stackSize - startOffset,
+      maxSlots * sizeof(std::uint64_t));
+    bool matched = false;
+    for (std::size_t offset = 0; offset + sizeof(std::uint64_t) <= scanBytes; offset += sizeof(std::uint64_t)) {
+      std::uint64_t value = 0;
+      std::memcpy(&value, stackBytes + startOffset + offset, sizeof(value));
+      if (value >= moduleIt->base && value < moduleIt->end) {
+        matched = true;
+        break;
+      }
+    }
+    if (matched) {
+      matchingTids.push_back(thread.tid);
+    }
+  }
+  return matchingTids;
+}
+
 }  // namespace skydiag::dump_tool::internal

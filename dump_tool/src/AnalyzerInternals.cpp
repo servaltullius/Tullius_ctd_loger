@@ -252,9 +252,21 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
 
 std::optional<std::uint32_t> InferMainThreadIdFromEvents(const std::vector<EventRow>& events)
 {
+  // Heartbeats are emitted from the game main thread and are the freshest
+  // authority when present.
   for (auto it = events.rbegin(); it != events.rend(); ++it) {
     if (it->type == static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat) && it->tid != 0) {
       return it->tid;
+    }
+  }
+
+  // Some real hangs stop before a heartbeat event reaches the retained event
+  // window. SharedMemory initialization emits SessionStart synchronously on
+  // the same main thread, so keep it as the compatibility fallback for v1-v4
+  // captures that do not store a dedicated main-thread id in SharedHeader.
+  for (const auto& event : events) {
+    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kSessionStart) && event.tid != 0) {
+      return event.tid;
     }
   }
   return std::nullopt;

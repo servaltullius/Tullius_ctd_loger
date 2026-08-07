@@ -85,9 +85,20 @@ struct FirstChanceSummary
   std::vector<std::wstring> recent_non_system_modules;
 };
 
+struct HangThreadModuleConsensus
+{
+  bool has_consensus = false;
+  std::uint32_t main_thread_id = 0;
+  std::wstring module_filename;
+  std::uint32_t matching_thread_count = 0;
+  std::uint32_t stable_thread_count = 0;
+  bool os_lock_cycle_proven = false;
+};
+
 struct FreezeAnalysisResult
 {
-  // state ids: deadlock_likely / loader_stall_likely / freeze_candidate / freeze_ambiguous
+  // state ids: deadlock_likely / synchronization_stall_likely /
+  // loader_stall_likely / freeze_candidate / freeze_ambiguous
   bool has_analysis = false;
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;
@@ -97,6 +108,7 @@ struct FreezeAnalysisResult
   std::vector<FreezeRelatedCandidate> related_candidates;
   BlackboxFreezeSummary blackbox_context;
   FirstChanceSummary first_chance_context;
+  HangThreadModuleConsensus thread_module_consensus;
 };
 
 struct EventRow
@@ -265,6 +277,7 @@ struct AnalysisResult
   std::vector<ActionableCandidate> actionable_candidates;
   BlackboxFreezeSummary blackbox_freeze_summary;
   FirstChanceSummary first_chance_summary;
+  HangThreadModuleConsensus hang_thread_module_consensus;
   FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;

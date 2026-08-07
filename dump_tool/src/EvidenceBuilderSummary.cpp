@@ -70,6 +70,7 @@ bool CandidateHasResourceSupport(const ActionableCandidate& candidate)
 bool CandidateHasStandaloneCallstackSupport(const ActionableCandidate& candidate)
 {
   return LocalCandidateHasFamily(candidate, "actionable_stack") &&
+         !LocalCandidateHasFamily(candidate, "hang_thread_group") &&
          !LocalCandidateHasFamily(candidate, "crash_logger_frame") &&
          !LocalCandidateHasFamily(candidate, "crash_logger_object_ref") &&
          !LocalCandidateHasFamily(candidate, "resource_provider") &&
@@ -111,6 +112,8 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
       labels.push_back(en ? L"history repeat" : L"반복 기록");
     } else if (family == "first_chance_context") {
       labels.push_back(en ? L"repeated first-chance context" : L"반복 first-chance 문맥");
+    } else if (family == "hang_thread_group") {
+      labels.push_back(en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹");
     }
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
@@ -595,8 +598,24 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         hangPrefix = hb;
       }
 
-      if (hasSuspect && !suspectWho.empty()) {
-        if ((topSuspectIsHookFramework || topSuspectIsSystem) && hasNonHookSuspect && !nonHookSuspectWho.empty()) {
+      if (r.hang_thread_module_consensus.has_consensus) {
+        const auto& consensus = r.hang_thread_module_consensus;
+        summary = en
+          ? (hangPrefix + L" " + consensus.module_filename + L" appears on the game main thread and " +
+              std::to_wstring(consensus.matching_thread_count - 1u) +
+              L" other non-progressing threads, supporting a module-level synchronization stall. WCT did not prove an OS lock cycle. (Confidence: Medium)")
+          : (hangPrefix + L" 게임 메인 스레드와 진행이 멈춘 다른 " +
+              std::to_wstring(consensus.matching_thread_count - 1u) + L"개 스레드에서 " +
+              consensus.module_filename +
+              L"이(가) 반복되어 모듈 내부 동기화 정지 가능성이 높습니다. WCT가 OS 잠금 사이클을 입증한 것은 아닙니다. (신뢰도: 중간)");
+      } else if (hasSuspect && !suspectWho.empty()) {
+        if (!r.suspects_from_stackwalk) {
+          summary = en
+            ? (hangPrefix + L" Main-thread pointer scan found " + suspectWho +
+                L" nearby, but formal stack walking failed. Treat this as a weak investigation clue, not a confirmed cause. (Confidence: Low)")
+            : (hangPrefix + L" 메인 스레드 포인터 스캔에서 " + suspectWho +
+                L"이(가) 감지됐지만 정식 스택 분석은 실패했습니다. 확정 원인이 아닌 약한 조사 단서입니다. (신뢰도: 낮음)");
+        } else if ((topSuspectIsHookFramework || topSuspectIsSystem) && hasNonHookSuspect && !nonHookSuspectWho.empty()) {
           summary = en
             ? (hangPrefix + L" Top stack candidate is likely a victim location; actionable candidate: " + nonHookSuspectWho
                 + L" — based on " + suspectBasis + L" heuristic. (Confidence: " + nonHookSuspectConf + L")")

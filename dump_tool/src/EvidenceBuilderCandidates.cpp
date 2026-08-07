@@ -5,6 +5,7 @@
 
 #include "AnalyzerScoringPolicy.h"
 #include "CandidateConsensus.h"
+#include "MinidumpUtil.h"
 #include "Utf.h"
 
 namespace skydiag::dump_tool::internal {
@@ -204,10 +205,22 @@ void AddStackSignals(const AnalysisResult& r, bool en, std::vector<CandidateSign
     return;
   }
 
+  const bool weakHangPointerScan = r.is_hang_like && !r.suspects_from_stackwalk;
+  const std::size_t signalLimit = weakHangPointerScan ? 1u : kMaxActionableStackSignals;
   std::size_t added = 0;
-  for (std::size_t i = 0; i < r.suspects.size() && added < kMaxActionableStackSignals; ++i) {
+  for (std::size_t i = 0; i < r.suspects.size() && added < signalLimit; ++i) {
     const auto& suspect = r.suspects[i];
-    if (!IsActionableSuspect(suspect)) {
+    // Hook frameworks are normally excluded because a CTD can merely surface
+    // through their hooks. For a hang, however, the top module on the
+    // authoritative main-thread scan is the owner of the observed wait path.
+    // Keep that one weak clue, while still excluding system/game modules and
+    // all secondary pointer-density noise.
+    const bool topHangMainThreadOwner =
+      weakHangPointerScan && i == 0u &&
+      !minidump::IsSystemishModule(suspect.module_filename) &&
+      !minidump::IsLikelyWindowsSystemModulePath(suspect.module_path) &&
+      !minidump::IsGameExeModule(suspect.module_filename);
+    if (!IsActionableSuspect(suspect) && !topHangMainThreadOwner) {
       continue;
     }
 
@@ -307,6 +320,38 @@ void AddResourceSignals(const AnalysisResult& r, bool en, std::vector<CandidateS
     if (!signal.candidate_key.empty()) {
       out->push_back(std::move(signal));
     }
+  }
+}
+
+void AddHangThreadGroupSignal(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  const auto& consensus = r.hang_thread_module_consensus;
+  if (!out || !consensus.has_consensus || consensus.module_filename.empty()) {
+    return;
+  }
+
+  CandidateSignal signal{};
+  signal.family_id = "hang_thread_group";
+  signal.candidate_key = CanonicalCandidateKey(consensus.module_filename);
+  signal.display_name = consensus.module_filename;
+  signal.module_filename = consensus.module_filename;
+  for (const auto& suspect : r.suspects) {
+    if (WideLowerLocal(suspect.module_filename) == WideLowerLocal(consensus.module_filename)) {
+      signal.candidate_key = CanonicalCandidateKey(
+        !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename);
+      signal.display_name = !suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename;
+      signal.mod_name = suspect.inferred_mod_name;
+      break;
+    }
+  }
+  signal.detail = en
+    ? (L"Main thread and " + std::to_wstring(consensus.matching_thread_count - 1u) +
+        L" other stable threads retained the same module near their active stacks")
+    : (L"메인 스레드와 다른 " + std::to_wstring(consensus.matching_thread_count - 1u) +
+        L"개 정지 스레드의 현재 스택 상단에 동일 모듈이 반복됨");
+  signal.weight = 5u;
+  if (!signal.candidate_key.empty()) {
+    out->push_back(std::move(signal));
   }
 }
 
@@ -489,6 +534,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   AddCrashLoggerFrameSignals(r, en, &signals);
   AddCrashLoggerSignals(r, en, &signals);
   AddStackSignals(r, en, &signals);
+  AddHangThreadGroupSignal(r, en, &signals);
   AddResourceSignals(r, en, &signals);
   AddHistorySignals(r, en, &signals);
   AddFirstChanceSignals(r, en, ctx, &signals);

@@ -60,6 +60,9 @@ int main()
   AssertContains(impl, "\"isCycle\"", "DumpWriter must look for WCT cycle-thread markers when shaping hang/manual dumps.");
   AssertContains(impl, "preferredThreadIds", "DumpWriter callback context must track multiple preferred threads.");
   AssertContains(impl, "preferWctThreads", "DumpWriter shaping must honor WCT-thread preference from the dump profile.");
+  AssertContains(impl, "InferMainThreadIdFromSnapshot", "Dump writer must recover the main thread from the blackbox snapshot.");
+  AssertContains(impl, "effectiveProfile.preferMainThread", "preferMainThread must affect the callback preferred thread set.");
+  AssertContains(impl, "EventType::kSessionStart", "SessionStart must be the compatibility fallback when heartbeats are absent.");
 
   AssertContains(crashCapture, "CaptureKind::Crash", "Crash capture must request the crash dump profile.");
   AssertContains(hangCapture, "CaptureKind::Hang", "Hang capture must request the hang dump profile.");

@@ -5,9 +5,10 @@
 
 namespace skydiag::dump_tool::internal::policy {
 
-// For CTD analysis the exception thread is the authoritative primary stack
-// whenever it produced a usable candidate. Numeric TID ordering and a higher
-// score on an auxiliary/main thread must not replace it.
+// The capture's authoritative thread (the exception thread for CTDs or the
+// inferred game main thread for hangs) is the primary stack whenever it
+// produced a usable candidate. Numeric TID ordering and a higher score on an
+// auxiliary thread must not replace it.
 constexpr bool ShouldSelectStackwalkCandidate(
   bool currentHasCandidate,
   std::uint32_t currentTid,
@@ -15,7 +16,7 @@ constexpr bool ShouldSelectStackwalkCandidate(
   bool candidateHasCandidate,
   std::uint32_t candidateTid,
   std::uint32_t candidateScore,
-  std::uint32_t exceptionTid) noexcept
+  std::uint32_t preferredTid) noexcept
 {
   if (!candidateHasCandidate) {
     return false;
@@ -24,11 +25,11 @@ constexpr bool ShouldSelectStackwalkCandidate(
     return true;
   }
 
-  if (exceptionTid != 0u) {
-    const bool currentIsException = currentTid == exceptionTid;
-    const bool candidateIsException = candidateTid == exceptionTid;
-    if (currentIsException != candidateIsException) {
-      return candidateIsException;
+  if (preferredTid != 0u) {
+    const bool currentIsPreferred = currentTid == preferredTid;
+    const bool candidateIsPreferred = candidateTid == preferredTid;
+    if (currentIsPreferred != candidateIsPreferred) {
+      return candidateIsPreferred;
     }
   }
 

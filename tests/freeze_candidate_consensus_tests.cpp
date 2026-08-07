@@ -46,6 +46,7 @@ void TestSourceContracts()
   AssertContains(analyzerHeaderText, "struct FreezeAnalysisResult", "AnalysisResult must expose a structured freeze analysis model.");
   AssertContains(analyzerHeaderText, "freeze_analysis", "AnalysisResult must store freeze analysis output.");
   AssertContains(analyzerHeaderText, "deadlock_likely", "Freeze analysis state ids must include deadlock_likely.");
+  AssertContains(analyzerHeaderText, "synchronization_stall_likely", "Freeze analysis state ids must include synchronization_stall_likely.");
   AssertContains(analyzerHeaderText, "loader_stall_likely", "Freeze analysis state ids must include loader_stall_likely.");
   AssertContains(analyzerHeaderText, "freeze_candidate", "Freeze analysis state ids must include freeze_candidate.");
   AssertContains(analyzerHeaderText, "freeze_ambiguous", "Freeze analysis state ids must include freeze_ambiguous.");
@@ -53,6 +54,7 @@ void TestSourceContracts()
   AssertContains(freezeConsensusHeaderText, "BuildFreezeCandidateConsensus", "Freeze candidate consensus entry point must exist.");
   AssertContains(freezeConsensusHeaderText, "first_chance", "Freeze candidate consensus input must accept first-chance context.");
   AssertContains(freezeConsensusCppText, "deadlock_likely", "Freeze candidate consensus must classify deadlock_likely.");
+  AssertContains(freezeConsensusCppText, "synchronization_stall_likely", "Freeze candidate consensus must classify synchronization_stall_likely.");
   AssertContains(freezeConsensusCppText, "loader_stall_likely", "Freeze candidate consensus must classify loader_stall_likely.");
   AssertContains(freezeConsensusCppText, "freeze_candidate", "Freeze candidate consensus must classify freeze_candidate.");
   AssertContains(freezeConsensusCppText, "freeze_ambiguous", "Freeze candidate consensus must classify freeze_ambiguous.");
@@ -140,6 +142,27 @@ void TestConsensusDeadlockSnapshotConsensusBacked()
   assert(result.support_quality == "snapshot_consensus_backed");
   assert(result.confidence_level == ConfidenceLevel::kHigh);
   assert(result.primary_reasons.size() >= 2u);
+}
+
+void TestConsensusModuleThreadGroupSupportsLogicalSynchronizationStall()
+{
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.thread_module_consensus = skydiag::dump_tool::HangThreadModuleConsensus{};
+  input.thread_module_consensus->has_consensus = true;
+  input.thread_module_consensus->main_thread_id = 45112u;
+  input.thread_module_consensus->module_filename = L"hdtsmp64.dll";
+  input.thread_module_consensus->matching_thread_count = 16u;
+  input.thread_module_consensus->stable_thread_count = 16u;
+  input.thread_module_consensus->os_lock_cycle_proven = false;
+
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.has_analysis);
+  assert(result.state_id == "synchronization_stall_likely");
+  assert(result.support_quality == "multi_thread_consensus");
+  assert(result.confidence_level == ConfidenceLevel::kMedium);
+  assert(result.thread_module_consensus.module_filename == L"hdtsmp64.dll");
+  assert(result.primary_reasons.size() == 3u);
 }
 
 void TestConsensusLoaderStallLikely()
@@ -311,6 +334,7 @@ int main()
   TestConsensusDeadlockLikely();
   TestConsensusDeadlockSinglePassLiveStaysConservative();
   TestConsensusDeadlockSnapshotConsensusBacked();
+  TestConsensusModuleThreadGroupSupportsLogicalSynchronizationStall();
   TestConsensusLoaderStallLikely();
   TestConsensusLoaderStallWithBlackboxChurn();
   TestConsensusLoaderStallWithFirstChanceContext();

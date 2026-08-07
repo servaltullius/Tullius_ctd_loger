@@ -501,33 +501,95 @@ void ComputeSuspects(
   }
 
   std::vector<std::uint32_t> tids;
+  std::optional<std::uint32_t> mainTid;
+  if (hangLike && out.has_blackbox) {
+    mainTid = internal::InferMainThreadIdFromEvents(out.events);
+    if (mainTid) {
+      tids.push_back(*mainTid);
+    }
+  }
   if (out.exc_tid != 0) {
     tids.push_back(out.exc_tid);
   } else if (out.has_wct) {
-    tids = internal::ExtractWctCandidateThreadIds(out.wct_json_utf8, /*maxN=*/8);
-  }
-  if (out.has_blackbox) {
-    if (auto mainTid = internal::InferMainThreadIdFromEvents(out.events)) {
-      tids.push_back(*mainTid);
+    for (const auto tid : internal::ExtractWctCandidateThreadIds(out.wct_json_utf8, /*maxN=*/8)) {
+      tids.push_back(tid);
     }
   }
   if (tids.empty()) {
     return;
   }
 
-  std::sort(tids.begin(), tids.end());
-  tids.erase(std::unique(tids.begin(), tids.end()), tids.end());
+  std::vector<std::uint32_t> uniqueTids;
+  uniqueTids.reserve(tids.size());
+  for (const auto tid : tids) {
+    if (tid != 0u && std::find(uniqueTids.begin(), uniqueTids.end(), tid) == uniqueTids.end()) {
+      uniqueTids.push_back(tid);
+    }
+  }
+  tids = std::move(uniqueTids);
   const auto threads = LoadThreads(dumpBase, dumpSize);
-  if (!internal::TryComputeStackwalkSuspects(dumpBase, dumpSize, allModules, tids, out.exc_tid, excCtx, threads, opt.language, out)) {
+  const std::uint32_t preferredTid = out.exc_tid != 0u ? out.exc_tid : mainTid.value_or(0u);
+  if (!internal::TryComputeStackwalkSuspects(
+        dumpBase,
+        dumpSize,
+        allModules,
+        tids,
+        preferredTid,
+        out.exc_tid,
+        excCtx,
+        threads,
+        opt.language,
+        out)) {
     out.suspects_from_stackwalk = false;
     out.diagnostics.push_back(L"[Stackwalk] DbgHelp stackwalk failed, falling back to stack scan");
+    const std::vector<std::uint32_t> scanTids =
+      (hangLike && mainTid.has_value()) ? std::vector<std::uint32_t>{ *mainTid } : tids;
     out.suspects = internal::ComputeStackScanSuspects(
       dumpBase,
       dumpSize,
       allModules,
-      tids,
+      scanTids,
       out.exc_tid,
       opt.language);
+    if (hangLike) {
+      for (auto& suspect : out.suspects) {
+        suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+        suspect.confidence = i18n::ConfidenceText(opt.language, suspect.confidence_level);
+        suspect.reason += opt.language == i18n::Language::kEnglish
+          ? L" (main-thread pointer scan only; weak freeze clue)"
+          : L" (메인 스레드 포인터 스캔만 사용한 약한 프리징 단서)";
+      }
+    }
+  }
+
+  if (hangLike && mainTid.has_value() && !out.suspects.empty()) {
+    constexpr std::size_t kNearStackSlots = 32u;
+    constexpr std::size_t kMinimumThreadGroup = 4u;
+    const auto matchingTids = internal::FindThreadsWithNearStackModule(
+      dumpBase,
+      dumpSize,
+      allModules,
+      out.suspects[0].module_filename,
+      kNearStackSlots);
+    const std::uint32_t stableCount = internal::CountWctThreadsWithStableContextSwitches(
+      out.wct_json_utf8,
+      matchingTids);
+    const bool includesMainThread =
+      std::find(matchingTids.begin(), matchingTids.end(), *mainTid) != matchingTids.end();
+    if (includesMainThread && matchingTids.size() >= kMinimumThreadGroup &&
+        static_cast<std::size_t>(stableCount) == matchingTids.size()) {
+      out.hang_thread_module_consensus.has_consensus = true;
+      out.hang_thread_module_consensus.main_thread_id = *mainTid;
+      out.hang_thread_module_consensus.module_filename = out.suspects[0].module_filename;
+      out.hang_thread_module_consensus.matching_thread_count = static_cast<std::uint32_t>(matchingTids.size());
+      out.hang_thread_module_consensus.stable_thread_count = stableCount;
+      out.hang_thread_module_consensus.os_lock_cycle_proven = false;
+      out.suspects[0].reason += opt.language == i18n::Language::kEnglish
+        ? (L" (same module appeared near the active stack of " + std::to_wstring(matchingTids.size()) +
+            L" threads; all had zero context-switch delta across WCT passes)")
+        : (L" (동일 모듈이 " + std::to_wstring(matchingTids.size()) +
+            L"개 스레드의 현재 스택 상단에 반복되고 모두 WCT 간 context-switch 변화가 없음)");
+    }
   }
 }
 

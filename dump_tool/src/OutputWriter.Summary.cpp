@@ -381,6 +381,14 @@ nlohmann::json BuildSummaryJson(
   summary["freeze_analysis"]["state_id"] = r.freeze_analysis.state_id;
   summary["freeze_analysis"]["confidence"] = WideToUtf8(r.freeze_analysis.confidence);
   summary["freeze_analysis"]["support_quality"] = r.freeze_analysis.support_quality;
+  summary["freeze_analysis"]["thread_module_consensus"] = {
+    { "has_consensus", r.freeze_analysis.thread_module_consensus.has_consensus },
+    { "main_thread_id", r.freeze_analysis.thread_module_consensus.main_thread_id },
+    { "module_filename", WideToUtf8(r.freeze_analysis.thread_module_consensus.module_filename) },
+    { "matching_thread_count", r.freeze_analysis.thread_module_consensus.matching_thread_count },
+    { "stable_thread_count", r.freeze_analysis.thread_module_consensus.stable_thread_count },
+    { "os_lock_cycle_proven", r.freeze_analysis.thread_module_consensus.os_lock_cycle_proven },
+  };
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
   for (const auto& reason : r.freeze_analysis.primary_reasons) {
     summary["freeze_analysis"]["primary_reasons"].push_back(WideToUtf8(reason));

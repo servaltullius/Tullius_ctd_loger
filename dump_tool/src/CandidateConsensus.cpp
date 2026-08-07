@@ -24,6 +24,7 @@ constexpr const char* kFamilyCaptureQualityStack = "capture_quality_stack";
 constexpr const char* kFamilyResource = "resource_provider";
 constexpr const char* kFamilyHistory = "history_repeat";
 constexpr const char* kFamilyFirstChance = "first_chance_context";
+constexpr const char* kFamilyHangThreadGroup = "hang_thread_group";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
 constexpr std::uint32_t kFrameConflictWeightThreshold = 6u;
 constexpr std::uint32_t kStackConflictWeightThreshold = 4u;
@@ -50,7 +51,10 @@ std::uint32_t FamilyWeight(const CandidateRow& row, std::string_view familyId)
 
 bool IsBoostOnlyFamily(std::string_view familyId)
 {
-  return familyId == kFamilyHistory;
+  // Resource ownership is timeline context, not execution evidence. It may
+  // reinforce a frame/stack/object-ref candidate but must never create a
+  // standalone candidate or freeze next action by itself.
+  return familyId == kFamilyHistory || familyId == kFamilyResource;
 }
 
 std::uint32_t RowScore(const CandidateRow& row)
@@ -83,7 +87,8 @@ bool HasStrongFamily(const ActionableCandidate& candidate)
 {
   return HasFamily(candidate, kFamilyCrashLoggerFrame) ||
          HasFamily(candidate, kFamilyCrashLoggerObjectRef) ||
-         HasFamily(candidate, kFamilyStack);
+         HasFamily(candidate, kFamilyStack) ||
+         HasFamily(candidate, kFamilyHangThreadGroup);
 }
 
 bool HasActionableCrossValidation(const CandidateRow& row)

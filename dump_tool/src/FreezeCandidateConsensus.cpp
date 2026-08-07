@@ -135,6 +135,9 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   if (input.first_chance.has_value()) {
     result.first_chance_context = *input.first_chance;
   }
+  if (input.thread_module_consensus.has_value()) {
+    result.thread_module_consensus = *input.thread_module_consensus;
+  }
 
   const bool loadingSignal = input.loading_context || (input.wct && input.wct->isLoading);
   const bool hasBlackboxChurn = input.blackbox.has_value() &&
@@ -146,6 +149,9 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     (loadingSignal && input.blackbox.has_value() && input.blackbox->module_churn_score >= 3u) ||
     strongFirstChanceLoaderSignal;
   result.support_quality = DetermineSupportQuality(input, consensusBackedDeadlock, consensusBackedLoaderSignal);
+  if (result.thread_module_consensus.has_consensus) {
+    result.support_quality = "multi_thread_consensus";
+  }
 
   if (input.wct && input.wct->cycles > 0) {
     result.state_id = "deadlock_likely";
@@ -178,6 +184,29 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
             : L"반복 WCT 캡처에서도 longest-wait thread가 유지됨");
       }
     }
+  } else if (result.thread_module_consensus.has_consensus) {
+    result.state_id = "synchronization_stall_likely";
+    result.confidence_level = i18n::ConfidenceLevel::kMedium;
+    result.primary_reasons.push_back(
+      language == i18n::Language::kEnglish
+        ? (L"The game main thread and " +
+            std::to_wstring(result.thread_module_consensus.matching_thread_count - 1u) +
+            L" other threads retained " + result.thread_module_consensus.module_filename +
+            L" near their active stacks")
+        : (L"게임 메인 스레드와 다른 " +
+            std::to_wstring(result.thread_module_consensus.matching_thread_count - 1u) +
+            L"개 스레드의 현재 스택 상단에 " + result.thread_module_consensus.module_filename +
+            L"이(가) 반복됨"));
+    result.primary_reasons.push_back(
+      language == i18n::Language::kEnglish
+        ? (L"All " + std::to_wstring(result.thread_module_consensus.stable_thread_count) +
+            L" matching threads had zero context-switch delta across repeated WCT captures")
+        : (L"일치한 " + std::to_wstring(result.thread_module_consensus.stable_thread_count) +
+            L"개 스레드 모두 반복 WCT 캡처 사이 context-switch 변화가 없음"));
+    result.primary_reasons.push_back(
+      language == i18n::Language::kEnglish
+        ? L"This supports a logical synchronization stall, but WCT did not prove an OS lock cycle"
+        : L"논리적 동기화 정지를 뒷받침하지만 WCT가 OS 잠금 사이클을 입증한 것은 아님");
   } else if (loadingSignal && freezeLike) {
     result.state_id = "loader_stall_likely";
     result.confidence_level = (strongLoaderContext || consensusBackedLoaderSignal)

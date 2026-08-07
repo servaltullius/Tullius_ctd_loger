@@ -22,6 +22,14 @@ static void TestStackScanUsesProximityWeight()
   assert(src.find("exceptionScoreByModule") != std::string::npos);
   assert(src.find("usedExceptionThreadScores = !rows.empty()") != std::string::npos);
   assert(src.find("rows = buildActionableRows(scoreByModule)") != std::string::npos);
+
+  const auto capture = ReadFile("dump_tool/src/Analyzer.CaptureInputs.cpp");
+  assert(capture.find("std::vector<std::uint32_t>{ *mainTid }") != std::string::npos);
+  assert(capture.find("main-thread pointer scan only; weak freeze clue") != std::string::npos);
+
+  const auto candidates = ReadFile("dump_tool/src/EvidenceBuilderCandidates.cpp");
+  assert(candidates.find("weakHangPointerScan ? 1u : kMaxActionableStackSignals") != std::string::npos);
+  assert(candidates.find("topHangMainThreadOwner") != std::string::npos);
 }
 
 int main()

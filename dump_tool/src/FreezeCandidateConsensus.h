@@ -16,6 +16,7 @@ struct FreezeSignalInput
   std::optional<internal::WctFreezeSummary> wct;
   std::optional<BlackboxFreezeSummary> blackbox;
   std::optional<FirstChanceSummary> first_chance;
+  std::optional<HangThreadModuleConsensus> thread_module_consensus;
   std::vector<ActionableCandidate> actionable_candidates;
 };
 

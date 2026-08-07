@@ -68,6 +68,7 @@ bool TryComputeStackwalkSuspects(
   std::uint64_t dumpSize,
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint32_t>& targetTids,
+  std::uint32_t preferredTid,
   std::uint32_t excTid,
   const std::optional<CONTEXT>& excCtx,
   const std::vector<ThreadRecord>& threads,
@@ -142,7 +143,7 @@ bool TryComputeStackwalkSuspects(
           !pcs.empty(),
           tid,
           static_cast<std::uint32_t>(pcs.size()),
-          excTid)) {
+          preferredTid)) {
       bestAny.tid = tid;
       bestAny.pcs = pcs;
     }
@@ -160,7 +161,7 @@ bool TryComputeStackwalkSuspects(
           !suspects.empty(),
           tid,
           topScore,
-          excTid)) {
+          preferredTid)) {
       best.tid = tid;
       best.pcs = std::move(pcs);
       best.suspects = std::move(suspects);

@@ -45,6 +45,10 @@ struct WctFreezeSummary
 
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN);
 
+std::uint32_t CountWctThreadsWithStableContextSwitches(
+  std::string_view wctJsonUtf8,
+  const std::vector<std::uint32_t>& targetTids);
+
 std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wctJsonUtf8);
 std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJsonUtf8);
 

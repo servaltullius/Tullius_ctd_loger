@@ -625,6 +625,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     freezeSignals.blackbox = out.blackbox_freeze_summary;
   }
   freezeSignals.first_chance = out.first_chance_summary;
+  if (out.hang_thread_module_consensus.has_consensus) {
+    freezeSignals.thread_module_consensus = out.hang_thread_module_consensus;
+  }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   out.freeze_analysis.first_chance_context = out.first_chance_summary;

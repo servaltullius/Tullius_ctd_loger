@@ -8,6 +8,7 @@
 #include <string>
 
 using skydiag::dump_tool::internal::ExtractWctCandidateThreadIds;
+using skydiag::dump_tool::internal::CountWctThreadsWithStableContextSwitches;
 using skydiag::dump_tool::internal::TryParseWctCaptureDecision;
 using skydiag::dump_tool::internal::TryParseWctFreezeSummary;
 
@@ -89,6 +90,29 @@ static void Test_ZeroTid_Skipped()
   const auto tids = ExtractWctCandidateThreadIds(json, 8);
   assert(tids.size() == 1);
   assert(tids[0] == 42);
+}
+
+static void Test_StableContextSwitchesAcrossPasses()
+{
+  const std::string json = R"({
+    "passes": [
+      {"capture_usable":true,"threads":[
+        {"tid":10,"nodes":[{"thread":{"threadId":10,"contextSwitches":100}}]},
+        {"tid":20,"nodes":[{"thread":{"threadId":20,"contextSwitches":200}}]},
+        {"tid":30,"nodes":[{"thread":{"threadId":30,"contextSwitches":300}}]}
+      ]},
+      {"capture_usable":true,"threads":[
+        {"tid":10,"nodes":[{"thread":{"threadId":10,"contextSwitches":100}}]},
+        {"tid":20,"nodes":[{"thread":{"threadId":20,"contextSwitches":201}}]},
+        {"tid":30,"nodes":[{"thread":{"threadId":30,"contextSwitches":300}}]}
+      ]}
+    ]
+  })";
+  assert(CountWctThreadsWithStableContextSwitches(json, { 10u, 20u, 30u, 40u }) == 2u);
+  assert(CountWctThreadsWithStableContextSwitches(R"({"passes":[]})", { 10u }) == 0u);
+  assert(CountWctThreadsWithStableContextSwitches(
+    R"({"passes":[{"capture_usable":false,"threads":[]},{"capture_usable":true,"threads":[]}]})",
+    { 10u }) == 0u);
 }
 
 // ── TryParseWctCaptureDecision ─────────────────────────
@@ -215,6 +239,7 @@ int main()
   Test_NoCycle_SortedByWaitTime();
   Test_MaxN_Limit();
   Test_ZeroTid_Skipped();
+  Test_StableContextSwitchesAcrossPasses();
 
   Test_Capture_EmptyInput();
   Test_Capture_NoCaptureKey();

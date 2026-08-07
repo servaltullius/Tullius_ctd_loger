@@ -282,6 +282,16 @@ std::string BuildReportText(
         << " consistent_loading_signal=" << ((freezeWct && freezeWct->consistent_loading_signal) ? "1" : "0")
         << " longest_wait_tid_consensus=" << ((freezeWct && freezeWct->longest_wait_tid_consensus) ? "1" : "0")
         << "\n";
+    if (r.freeze_analysis.thread_module_consensus.has_consensus) {
+      rpt << "  thread_module_consensus module="
+          << WideToUtf8(r.freeze_analysis.thread_module_consensus.module_filename)
+          << " main_tid=" << r.freeze_analysis.thread_module_consensus.main_thread_id
+          << " matching_threads=" << r.freeze_analysis.thread_module_consensus.matching_thread_count
+          << " stable_threads=" << r.freeze_analysis.thread_module_consensus.stable_thread_count
+          << " os_lock_cycle_proven="
+          << (r.freeze_analysis.thread_module_consensus.os_lock_cycle_proven ? "1" : "0")
+          << "\n";
+    }
     rpt << "  blackbox loading_window="
         << (r.freeze_analysis.blackbox_context.loading_window ? "1" : "0")
         << " module churn=" << r.freeze_analysis.blackbox_context.module_churn_score

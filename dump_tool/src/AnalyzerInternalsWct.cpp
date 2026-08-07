@@ -1,6 +1,8 @@
 #include "WctTypes.h"
 
 #include <algorithm>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <nlohmann/json.hpp>
 
@@ -174,6 +176,81 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
     return tids;
   }
   return tids;
+}
+
+std::uint32_t CountWctThreadsWithStableContextSwitches(
+  std::string_view wctJsonUtf8,
+  const std::vector<std::uint32_t>& targetTids)
+{
+  if (wctJsonUtf8.empty() || targetTids.empty()) {
+    return 0u;
+  }
+
+  try {
+    const auto json = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
+    const auto passesIt = json.find("passes");
+    if (passesIt == json.end() || !passesIt->is_array() || passesIt->size() < 2u) {
+      return 0u;
+    }
+
+    const std::unordered_set<std::uint32_t> targets(targetTids.begin(), targetTids.end());
+    const auto readPass = [&](const nlohmann::json& pass) {
+      std::unordered_map<std::uint32_t, std::uint64_t> switchesByTid;
+      if (!pass.is_object() || !pass.value("capture_usable", false)) {
+        return switchesByTid;
+      }
+      const auto threadsIt = pass.find("threads");
+      if (threadsIt == pass.end() || !threadsIt->is_array()) {
+        return switchesByTid;
+      }
+      for (const auto& thread : *threadsIt) {
+        if (!thread.is_object()) {
+          continue;
+        }
+        const std::uint32_t tid = thread.value("tid", 0u);
+        if (tid == 0u || !targets.contains(tid)) {
+          continue;
+        }
+        const auto nodesIt = thread.find("nodes");
+        if (nodesIt == thread.end() || !nodesIt->is_array()) {
+          continue;
+        }
+        for (const auto& node : *nodesIt) {
+          if (!node.is_object()) {
+            continue;
+          }
+          const auto threadIt = node.find("thread");
+          if (threadIt == node.end() || !threadIt->is_object()) {
+            continue;
+          }
+          const auto threadIdIt = threadIt->find("threadId");
+          const auto switchesIt = threadIt->find("contextSwitches");
+          if (threadIdIt == threadIt->end() || !threadIdIt->is_number_unsigned() ||
+              switchesIt == threadIt->end() || !switchesIt->is_number_unsigned() ||
+              threadIdIt->get<std::uint32_t>() != tid) {
+            continue;
+          }
+          switchesByTid[tid] = switchesIt->get<std::uint64_t>();
+          break;
+        }
+      }
+      return switchesByTid;
+    };
+
+    const auto first = readPass(passesIt->front());
+    const auto last = readPass(passesIt->back());
+    std::uint32_t stable = 0u;
+    for (const auto tid : targets) {
+      const auto firstIt = first.find(tid);
+      const auto lastIt = last.find(tid);
+      if (firstIt != first.end() && lastIt != last.end() && firstIt->second == lastIt->second) {
+        ++stable;
+      }
+    }
+    return stable;
+  } catch (...) {
+    return 0u;
+  }
 }
 
 std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wctJsonUtf8)

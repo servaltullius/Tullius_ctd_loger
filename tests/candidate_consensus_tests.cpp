@@ -172,7 +172,21 @@ void TestStrongStackOnlyBecomesMediumRelated()
   assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
 }
 
-void TestObjectRefAndResourceNeedMediumOnly()
+void TestHangThreadGroupCorroboratesWeakMainStack()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("actionable_stack", L"faster-hdt-smp", L"Faster HDT-SMP", 2, L"", L"Faster HDT-SMP", L"hdtsmp64.dll"),
+    MakeSignal("hang_thread_group", L"faster-hdt-smp", L"Faster HDT-SMP", 5, L"", L"Faster HDT-SMP", L"hdtsmp64.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "related");
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].supporting_families.size() == 2u);
+}
+
+void TestObjectRefAndResourceStayReferenceOnly()
 {
   const std::vector<CandidateSignal> signals = {
     MakeSignal("crash_logger_object_ref", L"resourcex", L"ResourceX.esp", 6, L"ResourceX.esp"),
@@ -181,8 +195,9 @@ void TestObjectRefAndResourceNeedMediumOnly()
 
   const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
   assert(candidates.size() == 1);
-  AssertStatus(candidates[0], "related");
+  AssertStatus(candidates[0], "reference_clue");
   assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kLow);
 }
 
 void TestHistoryOnlyDoesNotCreateStandaloneCandidate()
@@ -374,6 +389,16 @@ void TestFrameAndResourceBecomeRelated()
   assert(candidates[0].supporting_families.size() == 2);
 }
 
+void TestResourceOnlyDoesNotCreateStandaloneCandidate()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("resource_provider", L"sparkpatch", L"Spark Patch", 5, L"", L"Spark Patch"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.empty());
+}
+
 void TestCaptureQualityDoesNotCrossValidateWeakStackAgreement()
 {
   const std::vector<CandidateSignal> signals = {
@@ -426,10 +451,10 @@ void TestCanonicalCandidateKeyPreservesUnicodeAndSeparators()
 void TestConsensusCanonicalizationDoesNotMergeSeparatedNames()
 {
   const std::vector<CandidateSignal> signals = {
-    MakeSignal("resource_provider", L"A-B.esp", L"A-B.esp", 3, L"A-B.esp"),
-    MakeSignal("resource_provider", L"AB.esp", L"AB.esp", 3, L"AB.esp"),
-    MakeSignal("resource_provider", L"한글모드.esp", L"한글모드.esp", 3, L"한글모드.esp"),
-    MakeSignal("resource_provider", L"다른모드.esp", L"다른모드.esp", 3, L"다른모드.esp"),
+    MakeSignal("crash_logger_object_ref", L"A-B.esp", L"A-B.esp", 3, L"A-B.esp"),
+    MakeSignal("crash_logger_object_ref", L"AB.esp", L"AB.esp", 3, L"AB.esp"),
+    MakeSignal("crash_logger_object_ref", L"한글모드.esp", L"한글모드.esp", 3, L"한글모드.esp"),
+    MakeSignal("crash_logger_object_ref", L"다른모드.esp", L"다른모드.esp", 3, L"다른모드.esp"),
   };
 
   const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
@@ -445,10 +470,9 @@ void TestConflictingEvidenceOutranksResourceOnlyRelatedCandidate()
   };
 
   const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
-  assert(candidates.size() == 3u);
+  assert(candidates.size() == 2u);
   AssertStatus(candidates[0], "conflicting");
   AssertStatus(candidates[1], "conflicting");
-  AssertStatus(candidates[2], "related");
 }
 
 void TestExceptionThreadSelectionPolicyIsOrderIndependent()
@@ -492,7 +516,8 @@ int main()
   TestRepresentativeNamePrefersPluginFilenameOverFriendlyLabel();
   TestRepresentativeNamePrefersDllFilenameOverModFolderName();
   TestStrongStackOnlyBecomesMediumRelated();
-  TestObjectRefAndResourceNeedMediumOnly();
+  TestHangThreadGroupCorroboratesWeakMainStack();
+  TestObjectRefAndResourceStayReferenceOnly();
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();
   TestWeakStackAgreementStaysRelated();
@@ -506,6 +531,7 @@ int main()
   TestFrameAndFirstChanceBecomeRelated();
   TestFrameAndHistoryBecomeRelated();
   TestFrameAndResourceBecomeRelated();
+  TestResourceOnlyDoesNotCreateStandaloneCandidate();
   TestCaptureQualityDoesNotCrossValidateWeakStackAgreement();
   TestCaptureQualityDoesNotUpgradeStandaloneStack();
   TestCanonicalCandidateKeyPreservesUnicodeAndSeparators();

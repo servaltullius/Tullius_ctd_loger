@@ -132,6 +132,7 @@ internal sealed partial class MainWindowViewModel
             var hasFirstChanceFamily = HasFamily(primaryCandidate, "first_chance_context");
             var hasHistoryFamily = HasFamily(primaryCandidate, "history_repeat");
             var hasResourceFamily = HasFamily(primaryCandidate, "resource_provider");
+            var hasHangThreadGroupFamily = HasFamily(primaryCandidate, "hang_thread_group");
             return primaryCandidate.StatusId switch
             {
                 "cross_validated" when hasFrameFamily => T(
@@ -147,6 +148,9 @@ internal sealed partial class MainWindowViewModel
                 "related" when hasFrameFamily && hasResourceFamily => T(
                     $"DLL guidance: check {candidateName} and nearby resource providers first",
                     $"DLL 점검 안내: {candidateName}와 인접 리소스 제공자를 먼저 확인"),
+                "related" when hasHangThreadGroupFamily => T(
+                    $"Synchronization stall: update or isolate {candidateName} first",
+                    $"동기화 정지: {candidateName} 업데이트/격리를 먼저 확인"),
                 "related" when IsStrongStandaloneCallstackCandidate(primaryCandidate) => T(
                     $"Tullius callstack: check {candidateName} before generic EXE/system triage",
                     $"Tullius 콜스택: 일반 EXE/시스템 점검보다 먼저 {candidateName} 확인"),

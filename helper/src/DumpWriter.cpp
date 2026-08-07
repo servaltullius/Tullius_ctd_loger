@@ -5,7 +5,9 @@
 #include <DbgHelp.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -57,6 +59,55 @@ std::vector<DWORD> ExtractPreferredWctThreadIds(std::string_view wctJsonUtf8)
   }
 
   return tids;
+}
+
+std::optional<DWORD> InferMainThreadIdFromSnapshot(
+  const skydiag::SharedLayout* snapshot,
+  std::size_t snapshotBytes)
+{
+  if (!snapshot || snapshotBytes < offsetof(skydiag::SharedLayout, events)) {
+    return std::nullopt;
+  }
+  if (snapshot->header.magic != skydiag::kMagic) {
+    return std::nullopt;
+  }
+
+  const std::size_t availableEventBytes = snapshotBytes - offsetof(skydiag::SharedLayout, events);
+  const std::size_t availableEvents = std::min<std::size_t>(
+    skydiag::kEventCapacity,
+    availableEventBytes / sizeof(skydiag::BlackboxEvent));
+  std::uint32_t capacity = snapshot->header.capacity;
+  if (capacity == 0u || capacity > availableEvents) {
+    capacity = static_cast<std::uint32_t>(availableEvents);
+  }
+  if (capacity == 0u) {
+    return std::nullopt;
+  }
+
+  const std::uint32_t writeIndex = snapshot->header.write_index;
+  const std::uint32_t begin = (writeIndex > capacity) ? (writeIndex - capacity) : 0u;
+  std::optional<DWORD> sessionStartTid;
+  std::optional<DWORD> latestHeartbeatTid;
+  for (std::uint32_t i = begin; i < writeIndex; ++i) {
+    const auto& source = snapshot->events[i % capacity];
+    const std::uint32_t seq1 = source.seq;
+    if ((seq1 & 1u) != 0u) {
+      continue;
+    }
+    skydiag::BlackboxEvent event{};
+    std::memcpy(&event, &source, sizeof(event));
+    const std::uint32_t seq2 = source.seq;
+    if (seq1 != seq2 || (seq2 & 1u) != 0u || event.tid == 0u) {
+      continue;
+    }
+    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat)) {
+      latestHeartbeatTid = event.tid;
+    } else if (!sessionStartTid &&
+               event.type == static_cast<std::uint16_t>(skydiag::EventType::kSessionStart)) {
+      sessionStartTid = event.tid;
+    }
+  }
+  return latestHeartbeatTid ? latestHeartbeatTid : sessionStartTid;
 }
 
 bool ShouldShapePreferredThread(const DumpCallbackContext& ctx)
@@ -245,6 +296,11 @@ bool WriteDumpWithStreams(
   callbackContext.profile = effectiveProfile;
   callbackContext.preferredThreadId = mei.ThreadId;
   AppendPreferredThreadId(callbackContext.preferredThreadIds, callbackContext.preferredThreadId);
+  if (effectiveProfile.preferMainThread) {
+    if (const auto mainTid = InferMainThreadIdFromSnapshot(shmSnapshot, shmSnapshotBytes)) {
+      AppendPreferredThreadId(callbackContext.preferredThreadIds, *mainTid);
+    }
+  }
   if (effectiveProfile.preferWctThreads) {
     for (const DWORD tid : ExtractPreferredWctThreadIds(wctJsonUtf8)) {
       AppendPreferredThreadId(callbackContext.preferredThreadIds, tid);

@@ -43,6 +43,9 @@ std::wstring DescribeFamily(std::string_view familyId, bool en)
   if (familyId == "first_chance_context") {
     return en ? L"repeated first-chance context" : L"반복 first-chance 문맥";
   }
+  if (familyId == "hang_thread_group") {
+    return en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹";
+  }
   return en ? L"other signal" : L"기타 신호";
 }
 
@@ -191,7 +194,9 @@ void AddActionableCandidateRecommendations(
   const bool hasFirstChanceFamily = CandidateHasFamily(*topCandidate, "first_chance_context");
   const bool hasHistoryFamily = CandidateHasFamily(*topCandidate, "history_repeat");
   const bool hasResourceFamily = CandidateHasFamily(*topCandidate, "resource_provider");
+  const bool hasHangThreadGroupFamily = CandidateHasFamily(*topCandidate, "hang_thread_group");
   const bool hasStandaloneCallstackFamily =
+    r.suspects_from_stackwalk &&
     CandidateHasFamily(*topCandidate, "actionable_stack") &&
     !hasFrameFamily &&
     !CandidateHasFamily(*topCandidate, "crash_logger_object_ref") &&
@@ -237,7 +242,13 @@ void AddActionableCandidateRecommendations(
       : (L"[행동 우선 후보] 동일 문제가 반복되면 " + candidateName +
           L" 또는 해당 모드/DLL을 비활성화하고 다시 테스트하세요."));
   } else if (topCandidate->status_id == "related") {
-    r.recommendations.push_back(hasStandaloneCallstackFamily
+    r.recommendations.push_back(hasHangThreadGroupFamily
+      ? (en
+          ? (L"[Synchronization stall] The game main thread and a stable worker group repeatedly retain " + candidateName +
+              L" near their active stacks. Update or isolate this DLL first; no OS lock cycle was proven.")
+          : (L"[동기화 정지] 게임 메인 스레드와 정지된 워커 그룹의 현재 스택 상단에 " + candidateName +
+              L"이(가) 반복됩니다. 이 DLL의 업데이트/격리를 먼저 확인하되 OS 잠금 사이클이 입증된 것은 아닙니다."))
+      : hasStandaloneCallstackFamily
       ? (en
           ? (L"[Actionable candidate] Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). Check it before broad EXE/system triage.")

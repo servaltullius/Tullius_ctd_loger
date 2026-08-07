@@ -7,3 +7,4 @@ ADR index:
 - `0002-perfhitch-signal-via-heartbeat-lateness.md`
 - `0003-dump-tool-core-ui-split.md`
 - `0004-sharedlayout-versioning-and-compatibility-policy.md`
+- `0005-hang-main-thread-and-thread-group-consensus.md`

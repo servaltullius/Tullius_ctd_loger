@@ -42,6 +42,13 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   std::uint32_t exceptionTid,
   i18n::Language lang);
 
+std::vector<std::uint32_t> FindThreadsWithNearStackModule(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  std::wstring_view moduleFilename,
+  std::size_t maxSlots);
+
 bool TryReadContextFromLocation(void* dumpBase, std::uint64_t dumpSize, const MINIDUMP_LOCATION_DESCRIPTOR& loc, CONTEXT& out);
 
 bool TryComputeStackwalkSuspects(
@@ -49,6 +56,7 @@ bool TryComputeStackwalkSuspects(
   std::uint64_t dumpSize,
   const std::vector<minidump::ModuleInfo>& modules,
   const std::vector<std::uint32_t>& targetTids,
+  std::uint32_t preferredTid,
   std::uint32_t excTid,
   const std::optional<CONTEXT>& excCtx,
   const std::vector<minidump::ThreadRecord>& threads,
