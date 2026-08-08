@@ -53,12 +53,12 @@ static void TestStackwalkHookPromotionThreshold()
   assert(src.find("ShouldPromoteHookFallback") != std::string::npos);
 }
 
-static void TestStackScanConfidenceThresholds()
+static void TestStackScanConfidenceIsAlwaysLow()
 {
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackScan.cpp");
-  assert(src.find("256u") != std::string::npos);
-  assert(src.find("96u") != std::string::npos);
-  assert(src.find("40u") != std::string::npos);
+  assert(src.find("si.confidence_level = i18n::ConfidenceLevel::kLow") != std::string::npos);
+  assert(src.find("ConfidenceForTopSuspectLevel") == std::string::npos);
+  assert(src.find("ConfidenceForSecondarySuspectLevel") == std::string::npos);
 }
 
 static void TestStackScanHookPromotionThreshold()
@@ -84,9 +84,8 @@ static void TestConfidenceDowngradePresent()
   assert(stackwalk.find("is_known_hook_framework") != std::string::npos);
 
   const auto stackscan = ReadFile("dump_tool/src/AnalyzerInternalsStackScan.cpp");
-  assert(stackscan.find("kHigh") != std::string::npos);
-  assert(stackscan.find("kMedium") != std::string::npos);
-  assert(stackscan.find("is_known_hook_framework") != std::string::npos);
+  assert(stackscan.find("si.confidence_level = i18n::ConfidenceLevel::kLow") != std::string::npos);
+  assert(stackscan.find("ConfidenceForTopSuspectLevel") == std::string::npos);
 }
 
 static void TestCrashLoggerCorroborationRankingPresent()
@@ -96,6 +95,49 @@ static void TestCrashLoggerCorroborationRankingPresent()
   assert(analyzer.find("CrashLoggerRankBonus") != std::string::npos);
   assert(analyzer.find("Crash Logger frame promotion=+") != std::string::npos);
   assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out, allModules)") != std::string::npos);
+  assert(analyzer.find("out->suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh") == std::string::npos);
+  assert(analyzer.find("ConfidenceAfterCrashLoggerCorroboration") != std::string::npos);
+}
+
+static void TestCrashLoggerConfidencePolicyFlow()
+{
+  using skydiag::dump_tool::i18n::ConfidenceLevel;
+  using skydiag::dump_tool::internal::policy::ConfidenceAfterCrashLoggerCorroboration;
+
+  constexpr bool directFaultSupport = true;
+  assert(ConfidenceAfterCrashLoggerCorroboration(
+           ConfidenceLevel::kLow,
+           directFaultSupport,
+           /*suspectsFromStackwalk=*/false) == ConfidenceLevel::kLow);
+  assert(ConfidenceAfterCrashLoggerCorroboration(
+           ConfidenceLevel::kHigh,
+           directFaultSupport,
+           /*suspectsFromStackwalk=*/true) == ConfidenceLevel::kHigh);
+  assert(ConfidenceAfterCrashLoggerCorroboration(
+           ConfidenceLevel::kLow,
+           directFaultSupport,
+           /*suspectsFromStackwalk=*/true) == ConfidenceLevel::kMedium);
+  assert(ConfidenceAfterCrashLoggerCorroboration(
+           ConfidenceLevel::kUnknown,
+           directFaultSupport,
+           /*suspectsFromStackwalk=*/true) == ConfidenceLevel::kMedium);
+  assert(ConfidenceAfterCrashLoggerCorroboration(
+           ConfidenceLevel::kLow,
+           /*hasCrashLoggerSupport=*/false,
+           /*suspectsFromStackwalk=*/true) == ConfidenceLevel::kLow);
+}
+
+static void TestPointerScanConfidenceClampRunsAfterCorroboration()
+{
+  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  const auto applyPos = analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out, allModules);");
+  assert(applyPos != std::string::npos);
+  const auto clampPos = analyzer.find("if (!out.suspects_from_stackwalk)", applyPos);
+  assert(clampPos != std::string::npos);
+  const auto lowPos = analyzer.find(
+    "suspect.confidence_level = i18n::ConfidenceLevel::kLow",
+    clampPos);
+  assert(lowPos != std::string::npos);
 }
 
 static void TestCrashLoggerPromotionUsesFrameSignals()
@@ -143,8 +185,8 @@ static void TestSecondaryConfidenceIsEvidenceGated()
   const auto stackscan = ReadFile("dump_tool/src/AnalyzerInternalsStackScan.cpp");
   assert(stackwalk.find("ConfidenceForSecondaryCallstackLevel") != std::string::npos);
   assert(stackwalk.find("SecondaryCallstackCanBeMedium") != std::string::npos);
-  assert(stackscan.find("ConfidenceForSecondarySuspectLevel") != std::string::npos);
-  assert(stackscan.find("SecondaryStackScanCanBeMedium") != std::string::npos);
+  assert(stackscan.find("ConfidenceForSecondarySuspectLevel") == std::string::npos);
+  assert(stackscan.find("si.confidence_level = i18n::ConfidenceLevel::kLow") != std::string::npos);
 }
 
 static void TestLowStackwalkCannotBeReupgradedByConsensusWeight()
@@ -163,11 +205,13 @@ int main()
   TestCallstackFrameWeightConstants();
   TestStackwalkConfidenceThresholds();
   TestStackwalkHookPromotionThreshold();
-  TestStackScanConfidenceThresholds();
+  TestStackScanConfidenceIsAlwaysLow();
   TestStackScanHookPromotionThreshold();
   TestResourceProviderScoreOnlyTuningPresent();
   TestConfidenceDowngradePresent();
   TestCrashLoggerCorroborationRankingPresent();
+  TestCrashLoggerConfidencePolicyFlow();
+  TestPointerScanConfidenceClampRunsAfterCorroboration();
   TestCrashLoggerPromotionUsesFrameSignals();
   TestCrashLoggerPromotionNoLongerRankOnly();
   TestCaptureQualityDoesNotBecomeCausalSupport();

@@ -1,0 +1,38 @@
+{
+  "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
+  "_fixture_intent": "A strong CrashLogger object reference supplies semantic non-stack support while a formal actionable stack points to the same mod, with their weights summing to at least 10 for the High gate.",
+  "scenario_id": "object_ref_stack_high_confidence",
+  "ground_truth_mod": "Quest Runtime Fix",
+  "fault_module_plus_offset": "SkyrimSE.exe+0x45A120",
+  "signals": [
+    {
+      "family_id": "crash_logger_object_ref",
+      "candidate_key": "quest-runtime-fix",
+      "display_name": "Quest Runtime Fix.esp",
+      "plugin_name": "Quest Runtime Fix.esp",
+      "detail": "High-relevance CrashLogger object reference",
+      "weight": 6
+    },
+    {
+      "family_id": "actionable_stack",
+      "candidate_key": "quest-runtime-fix",
+      "display_name": "Quest Runtime Fix",
+      "mod_name": "Quest Runtime Fix",
+      "module_filename": "QuestRuntimeFix.dll",
+      "detail": "Formal actionable stack candidate",
+      "weight": 5
+    }
+  ],
+  "expected_candidates": [
+    {
+      "plugin_name": "Quest Runtime Fix.esp",
+      "mod_name": "Quest Runtime Fix",
+      "module_filename": "QuestRuntimeFix.dll",
+      "status_id": "cross_validated",
+      "confidence": "High",
+      "score": 11,
+      "family_count": 2,
+      "cross_validated": true
+    }
+  ]
+}

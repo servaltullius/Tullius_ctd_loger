@@ -28,7 +28,7 @@ CORPUS_DIR = REPO_ROOT / "tests" / "data" / "quality_corpus"
 QUALITY_SCRIPT = REPO_ROOT / "scripts" / "analyze_bucket_quality.py"
 
 THRESHOLDS = {
-    "--min-ground-truth": "5",
+    "--min-ground-truth": "6",
     "--min-high-confidence-predictions": "1",
     "--min-top1-accuracy": "0.60",
     "--min-top3-recall": "0.80",
@@ -40,12 +40,12 @@ THRESHOLDS = {
 }
 
 EXPECTED_COUNTS = {
-    "files_parsed": 5,
-    "gt_with_mod_total": 5,
-    "gt_top1_match_total": 3,
-    "gt_top3_match_total": 4,
-    "high_confidence_predictions_total": 3,
-    "high_confidence_matches_total": 3,
+    "files_parsed": 6,
+    "gt_with_mod_total": 6,
+    "gt_top1_match_total": 4,
+    "gt_top3_match_total": 5,
+    "high_confidence_predictions_total": 1,
+    "high_confidence_matches_total": 1,
     "abstained_with_ground_truth_total": 1,
 }
 

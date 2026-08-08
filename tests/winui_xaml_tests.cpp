@@ -219,6 +219,14 @@ static void TestMainWindowCrashLoggerExpandedFixtureWordingAlignment()
     "Expanded WinUI wording must keep DLL guidance conflict copy for disagreement cases.");
   RequireContains(
     vm,
+    "Corroborated fault location",
+    "Related Crash Logger frame plus same-event stack must be labeled as fault-location corroboration, not independent agreement.");
+  RequireContains(
+    vm,
+    "상호 확인된 오류 위치",
+    "Korean WinUI wording must distinguish fault-location corroboration from independent validation.");
+  RequireContains(
+    vm,
     "Crash Logger frame + first-chance",
     "Expanded WinUI wording must expose frame plus first-chance agreement when both support the DLL candidate.");
   RequireContains(

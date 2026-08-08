@@ -64,6 +64,9 @@ def test_frame_first_community_share_fixture() -> None:
     actual = _run_harness("frame_first_summary.json", "community")
     expected = _read_expected("frame_first_community_share.expected.txt")
     assert actual == expected
+    assert "Corroborated fault location" in actual
+    assert "Cross-validated candidate" not in actual
+    assert "Confidence: High" not in actual
 
 
 def test_frame_first_summary_clipboard_fixture() -> None:
@@ -71,6 +74,8 @@ def test_frame_first_summary_clipboard_fixture() -> None:
     expected = _read_expected("frame_first_summary_clipboard.expected.txt")
     assert actual == expected
     assert "/tmp/" not in actual
+    assert "Corroborated fault location" in actual
+    assert "Confidence: High" not in actual
 
 
 def test_conflicting_community_share_fixture() -> None:

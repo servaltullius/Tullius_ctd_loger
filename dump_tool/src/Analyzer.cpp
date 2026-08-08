@@ -1,5 +1,6 @@
 #include "Analyzer.h"
 #include "AnalyzerPipeline.h"
+#include "AnalyzerScoringPolicy.h"
 #include "AddressResolver.h"
 #include "Bucket.h"
 #include "CandidateConsensus.h"
@@ -363,16 +364,14 @@ void ApplyCrashLoggerCorroborationToSuspects(
 
   if (!out->suspects.empty() && !rows.empty()) {
     const auto& topRow = rows.front();
-    if (topRow.promotion.directFaultPromotion > 0) {
-      out->suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
-    } else if (topRow.promotion.frameSignalStrength > 0 ||
-               topRow.promotion.cppExceptionSupport > 0 ||
-               (topRow.matchedRank && *topRow.matchedRank <= 1u)) {
-      if (out->suspects[0].confidence_level == i18n::ConfidenceLevel::kLow ||
-          out->suspects[0].confidence_level == i18n::ConfidenceLevel::kUnknown) {
-        out->suspects[0].confidence_level = i18n::ConfidenceLevel::kMedium;
-      }
-    }
+    const bool hasCrashLoggerSupport =
+      topRow.promotion.frameSignalStrength > 0 ||
+      topRow.promotion.cppExceptionSupport > 0 ||
+      (topRow.matchedRank && *topRow.matchedRank <= 1u);
+    out->suspects[0].confidence_level = internal::policy::ConfidenceAfterCrashLoggerCorroboration(
+      out->suspects[0].confidence_level,
+      hasCrashLoggerSupport,
+      out->suspects_from_stackwalk);
     out->suspects[0].confidence = i18n::ConfidenceText(out->language, out->suspects[0].confidence_level);
   }
 }
@@ -491,6 +490,15 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
 
   ApplyCrashLoggerCorroborationToSuspects(&out, allModules);
+  if (!out.suspects_from_stackwalk) {
+    // Pointer-density scans do not prove that a raw stack slot is a return
+    // address. Keep their user-visible confidence Low even when Crash Logger
+    // corroboration reorders the same module to the top.
+    for (auto& suspect : out.suspects) {
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(out.language, suspect.confidence_level);
+    }
+  }
 
   if (out.is_filtered_clean_exit) {
     out.suspects.clear();

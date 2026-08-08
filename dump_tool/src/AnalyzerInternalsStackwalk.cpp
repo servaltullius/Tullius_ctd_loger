@@ -14,11 +14,8 @@ using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext
 using skydiag::dump_tool::internal::stackwalk_internal::SymSession;
 
 using skydiag::dump_tool::minidump::ModuleInfo;
-using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
 using skydiag::dump_tool::minidump::ThreadRecord;
-using skydiag::dump_tool::minidump::WideLower;
-using skydiag::dump_tool::i18n::ConfidenceText;
 
 }  // namespace
 
@@ -111,7 +108,6 @@ bool TryComputeStackwalkSuspects(
 
   Candidate best{};
   Candidate bestAny{};
-  const bool en = (lang == i18n::Language::kEnglish);
   for (const auto tid : targetTids) {
     CONTEXT ctx{};
     bool haveCtx = false;
@@ -186,35 +182,6 @@ bool TryComputeStackwalkSuspects(
         &out.stackwalk_source_line_frames);
     }
     return false;
-  }
-
-  const bool topIsHookFramework = !best.suspects.empty() && IsKnownHookFramework(best.suspects[0].module_filename);
-
-  // Boost confidence when Crash Logger agrees with our top module (best-effort).
-  // Skip this boost for hook frameworks to avoid over-crediting frame owners like CrashLogger itself.
-  if (!out.crash_logger_pairing_ambiguous &&
-      !out.crash_logger_top_modules.empty() && !best.suspects.empty() && !topIsHookFramework) {
-    const auto topLower = WideLower(best.suspects[0].module_filename);
-    for (const auto& m : out.crash_logger_top_modules) {
-      if (WideLower(m) == topLower) {
-        best.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
-        best.suspects[0].confidence = ConfidenceText(lang, best.suspects[0].confidence_level);
-        best.suspects[0].reason += en ? L" (also in Crash Logger callstack)" : L" (Crash Logger 콜스택에도 등장)";
-        break;
-      }
-    }
-  }
-
-  // Also boost when Crash Logger provides an explicit C++ exception module that matches our top suspect.
-  // Skip this boost for hook frameworks to keep confidence conservative.
-  if (!out.crash_logger_pairing_ambiguous &&
-      !out.crash_logger_cpp_exception_module.empty() && !best.suspects.empty() && !topIsHookFramework) {
-    const auto topLower = WideLower(best.suspects[0].module_filename);
-    if (WideLower(out.crash_logger_cpp_exception_module) == topLower) {
-      best.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
-      best.suspects[0].confidence = ConfidenceText(lang, best.suspects[0].confidence_level);
-      best.suspects[0].reason += en ? L" (Crash Logger C++ exception module)" : L" (Crash Logger C++ 예외 모듈)";
-    }
   }
 
   out.suspects_from_stackwalk = true;

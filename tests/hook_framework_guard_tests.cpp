@@ -17,6 +17,14 @@ static void AssertContains(const std::string& haystack, const char* needle, cons
   }
 }
 
+static void AssertNotContains(const std::string& haystack, const char* needle, const char* message)
+{
+  if (haystack.find(needle) != std::string::npos) {
+    std::cerr << message << '\n';
+    std::exit(1);
+  }
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -62,14 +70,14 @@ int main()
     "promotedHookTop",
     "Stackwalk scoring must keep non-hook promotion marker logic.");
 
-  AssertContains(
+  AssertNotContains(
     stackwalk,
-    "topIsHookFramework",
-    "Stackwalk confidence boost must detect hook-framework top suspects.");
-  AssertContains(
+    "confidence_level = i18n::ConfidenceLevel::kHigh",
+    "Stackwalk collection must not independently promote Crash Logger matches to High.");
+  AssertNotContains(
     stackwalk,
-    "&& !topIsHookFramework",
-    "Stackwalk confidence boost must be gated off for hook-framework top suspects.");
+    "also in Crash Logger callstack",
+    "Crash Logger corroboration must stay centralized outside the stackwalk collector.");
 
   AssertContains(
     stackScan,
@@ -105,8 +113,8 @@ int main()
     "Minidump util fallback hook-framework list must include MO2 usvfs alias.");
   AssertContains(
     stackScan,
-    "is_known_hook_framework",
-    "Stack-scan scoring must keep hook-framework confidence downgrade logic.");
+    "si.confidence_level = i18n::ConfidenceLevel::kLow",
+    "Every raw stack-scan suspect must remain Low confidence.");
 
   AssertContains(
     summary,
@@ -209,6 +217,14 @@ int main()
     analyzer,
     "crash_logger_cpp_exception_module",
     "Crash Logger C++ exception support must still be considered in promotion logic.");
+  AssertNotContains(
+    analyzer,
+    "out->suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh",
+    "Crash Logger corroboration must not overwrite a raw suspect with High confidence.");
+  AssertContains(
+    analyzer,
+    "if (!out.suspects_from_stackwalk)",
+    "Analyzer must apply the final Low-confidence clamp after pointer-scan fallback.");
 
   return 0;
 }

@@ -1,6 +1,6 @@
 {
   "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
-  "_fixture_intent": "A direct CrashLogger frame and an independent actionable stack agree on one non-system DLL.",
+  "_fixture_intent": "A direct CrashLogger frame and the Tullius same-event stack corroborate one non-system DLL, but do not independently validate its root-cause attribution.",
   "scenario_id": "direct_fault_dll",
   "ground_truth_mod": "Physics Extender",
   "fault_module_plus_offset": "PhysicsExtender.dll+0x1A20",
@@ -20,7 +20,7 @@
       "display_name": "Physics Extender",
       "mod_name": "Physics Extender",
       "module_filename": "PhysicsExtender.dll",
-      "detail": "Independent actionable stack",
+      "detail": "Same-event actionable stack corroboration",
       "weight": 5
     }
   ],
@@ -28,11 +28,11 @@
     {
       "mod_name": "Physics Extender",
       "module_filename": "PhysicsExtender.dll",
-      "status_id": "cross_validated",
-      "confidence": "High",
+      "status_id": "related",
+      "confidence": "Medium",
       "score": 13,
       "family_count": 2,
-      "cross_validated": true
+      "cross_validated": false
     }
   ]
 }

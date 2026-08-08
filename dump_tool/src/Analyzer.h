@@ -31,7 +31,7 @@ struct SuspectItem
   std::wstring module_filename;
   std::wstring module_path;
   std::wstring inferred_mod_name;  // best-effort (MO2 mods\<modname>\...)
-  std::uint32_t score = 0;  // stack-hit count (heuristic)
+  std::uint32_t score = 0;  // weighted callstack/pointer score (heuristic; not a hit count)
   std::wstring reason;
 };
 
