@@ -28,6 +28,19 @@ BOOL CALLBACK ReadProcessMemoryFromMinidump64(HANDLE, DWORD64 baseAddr, PVOID bu
   return ok ? TRUE : FALSE;
 }
 
+// DbgHelp's own SymFunctionTableAccess64 reads .pdata through the process
+// handle, which does not exist for a dump, so it returns nothing and the walk
+// degrades to treating every stack slot as a return address.
+PVOID CALLBACK FunctionTableAccessFromImages(HANDLE process, DWORD64 addrBase)
+{
+  if (g_stackwalkMemView && g_stackwalkMemView->image_fallback) {
+    if (const auto* entry = g_stackwalkMemView->image_fallback->FindFunctionEntry(static_cast<std::uint64_t>(addrBase))) {
+      return const_cast<RUNTIME_FUNCTION*>(entry);
+    }
+  }
+  return SymFunctionTableAccess64(process, addrBase);
+}
+
 }  // namespace
 
 LocalImageMemory::LocalImageMemory(const std::vector<minidump::ModuleInfo>& modules)
@@ -113,6 +126,34 @@ bool LocalImageMemory::Read(std::uint64_t addr, void* dst, std::size_t n, std::s
   std::memcpy(dst, image->view + static_cast<std::size_t>(addr - image->module->base), copyN);
   outRead = copyN;
   return copyN > 0;
+}
+
+const RUNTIME_FUNCTION* LocalImageMemory::FindFunctionEntry(std::uint64_t addr) const
+{
+  const Image* image = Resolve(addr);
+  if (!image) {
+    return nullptr;
+  }
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image->view);
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image->view + dos->e_lfanew);
+  const auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+  const std::uint64_t imageSize = image->module->end - image->module->base;
+  if (dir.VirtualAddress == 0 || dir.Size < sizeof(RUNTIME_FUNCTION) ||
+      static_cast<std::uint64_t>(dir.VirtualAddress) + dir.Size > imageSize) {
+    return nullptr;
+  }
+  const auto* first = reinterpret_cast<const RUNTIME_FUNCTION*>(image->view + dir.VirtualAddress);
+  const auto* last = first + (dir.Size / sizeof(RUNTIME_FUNCTION));
+  const auto rva = static_cast<DWORD>(addr - image->module->base);
+  // Entries are sorted by BeginAddress.
+  const auto* it = std::upper_bound(first, last, rva, [](DWORD value, const RUNTIME_FUNCTION& entry) {
+    return value < entry.BeginAddress;
+  });
+  if (it == first) {
+    return nullptr;
+  }
+  --it;
+  return (rva >= it->BeginAddress && rva < it->EndAddress) ? it : nullptr;
 }
 
 bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads)
@@ -271,60 +312,8 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   g_stackwalkMemView = &mem;
   const HANDLE thread = GetCurrentThread();
 
-  constexpr std::size_t kMaxHard = 128;
-  const std::size_t limit = std::min(maxFrames, kMaxHard);
-  for (std::size_t i = 0; i < limit; i++) {
-    const DWORD64 pc = frame.AddrPC.Offset;
-    if (pc == 0) {
-      break;
-    }
-    pcs.push_back(static_cast<std::uint64_t>(pc));
-
-    const BOOL ok = StackWalk64(
-      IMAGE_FILE_MACHINE_AMD64,
-      process,
-      thread,
-      &frame,
-      &ctx,
-      ReadProcessMemoryFromMinidump64,
-      SymFunctionTableAccess64,
-      SymGetModuleBase64,
-      nullptr);
-    if (!ok) {
-      break;
-    }
-    if (frame.AddrPC.Offset == pc) {
-      break;
-    }
-  }
-
-  g_stackwalkMemView = nullptr;
-  return pcs;
-}
-
-std::vector<std::uint64_t> StackWalkAllFramesForContext(
-  HANDLE process,
-  const MinidumpMemoryView& mem,
-  const CONTEXT& inCtx,
-  std::size_t maxFrames)
-{
-  std::vector<std::uint64_t> pcs;
-  if (!process || maxFrames == 0) {
-    return pcs;
-  }
-
-  CONTEXT ctx = inCtx;
-  STACKFRAME64 frame{};
-  frame.AddrPC.Offset = ctx.Rip;
-  frame.AddrPC.Mode = AddrModeFlat;
-  frame.AddrFrame.Offset = ctx.Rbp;
-  frame.AddrFrame.Mode = AddrModeFlat;
-  frame.AddrStack.Offset = ctx.Rsp;
-  frame.AddrStack.Mode = AddrModeFlat;
-
-  g_stackwalkMemView = &mem;
-  const HANDLE thread = GetCurrentThread();
-
+  // The first StackWalk64 call reports the context's own frame; each later
+  // call unwinds one caller. Stop when unwinding fails or makes no progress.
   constexpr std::size_t kMaxHard = 128;
   const std::size_t limit = std::min(maxFrames, kMaxHard);
   DWORD64 lastPc = 0;
@@ -337,7 +326,7 @@ std::vector<std::uint64_t> StackWalkAllFramesForContext(
       &frame,
       &ctx,
       ReadProcessMemoryFromMinidump64,
-      SymFunctionTableAccess64,
+      FunctionTableAccessFromImages,
       SymGetModuleBase64,
       nullptr);
     if (!ok) {
@@ -348,9 +337,20 @@ std::vector<std::uint64_t> StackWalkAllFramesForContext(
     if (pc == 0 || (!pcs.empty() && pc == lastPc && sp == lastSp)) {
       break;
     }
+    // A caller frame must belong to a known module.
+    if (!pcs.empty() && SymGetModuleBase64(process, pc) == 0) {
+      break;
+    }
     pcs.push_back(static_cast<std::uint64_t>(pc));
     lastPc = pc;
     lastSp = sp;
+    // Only the innermost frame may legitimately be a leaf function. A caller
+    // frame without an unwind entry would be unwound by guessing the next
+    // stack slot, which yields heap and data addresses rather than callers.
+    // (STACKFRAME64::FuncTableEntry is not filled on x64, so look it up.)
+    if (pcs.size() > 1u && FunctionTableAccessFromImages(process, pc) == nullptr) {
+      break;
+    }
   }
 
   g_stackwalkMemView = nullptr;

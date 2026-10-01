@@ -654,6 +654,20 @@ if(WIN32)
     SkyrimDiagDumpToolCore
   )
   add_test(NAME skydiag_modal_dialog_hang_e2e_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
+
+  # Real helper hang capture of a thread parked three calls deep: the formal
+  # stackwalk must unwind every caller instead of stopping or guessing.
+  add_executable(skydiag_stackwalk_e2e_tests
+    stackwalk_e2e_tests.cpp
+  )
+  target_include_directories(skydiag_stackwalk_e2e_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_stackwalk_e2e_tests PRIVATE
+    skydiag_helper_runtime_test_support
+    SkyrimDiagDumpToolCore
+  )
+  add_test(NAME skydiag_stackwalk_e2e_tests COMMAND skydiag_stackwalk_e2e_tests)
 endif()
 
 add_executable(skydiag_plugin_rules_logic_tests

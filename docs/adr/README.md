@@ -9,3 +9,4 @@ ADR index:
 - `0004-sharedlayout-versioning-and-compatibility-policy.md`
 - `0005-hang-main-thread-and-thread-group-consensus.md`
 - `0006-modal-dialog-hang-classification.md`
+- `0007-formal-stackwalk-unwinding.md`

@@ -31,9 +31,8 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
    - 스택 근거: 메인 스레드 상위 24프레임 안에 `user32` MessageBox/DialogBox 계열
      또는 `comctl32` TaskDialog 진입점(변위 `0x800` 이하)이 있고, 그 위 프레임이
      모두 시스템 모듈이다.
-3. 스택 근거 판정 전용 walk는 모든 프레임을 unwind하고, 덤프에 없는 모듈 메모리는
-   로컬 이미지 파일에서 읽는다. 로컬 파일의 `TimeDateStamp`와 `SizeOfImage`가 덤프
-   모듈과 같을 때만 읽는다. 후보 점수용 공용 stackwalk 동작은 이 결정에서 바꾸지 않는다.
+3. 스택 근거는 공용 정식 stackwalk의 메인 스레드 프레임을 사용한다. unwind 방식은
+   ADR-0007을 따른다.
 4. 대화상자를 연 모듈은 modal API 아래 첫 비시스템 프레임이다. 게임 EXE, SKSE
    런타임, hook framework에서 멈추며 그보다 아래 모듈로 승격하지 않는다.
 5. 둘 중 하나라도 성립하면 프리징 상태는 `modal_dialog_wait`이며 다른 상태보다 먼저
@@ -67,7 +66,7 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
 - 다른 PC에서 분석하면 로컬 이미지가 맞지 않아 스택 근거가 빠지고 창 근거만 남을 수 있다.
 - modal 루프가 디스패치한 플러그인 콜백이 메인 스레드에서 실행 중이면 스택 근거는
   성립하지 않는다.
-- 공용 stackwalk의 1프레임 제한은 별도 작업으로 다룬다.
+- 공용 stackwalk의 1프레임 제한은 ADR-0007에서 해결했다.
 
 ## Verification
 
