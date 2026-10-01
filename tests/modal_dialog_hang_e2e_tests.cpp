@@ -82,8 +82,9 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
     ExecuteConfirmedHangCapture(MakeTestConfig(), proc, outBase, decision, 0u, &pendingViewer, &state);
   }
 
-  if (HWND hwnd = FindWindowW(L"#32770", kDialogTitle); hwnd != nullptr) {
-    PostMessageW(hwnd, WM_COMMAND, IDOK, 0);
+  if (!skydiag::tests::runtime::CloseDialogAndWait(kDialogTitle)) {
+    dialogThread.detach();
+    Require(false, "Test MessageBox did not close");
   }
   dialogThread.join();
   ShutdownRetentionWorker();

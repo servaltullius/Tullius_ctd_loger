@@ -274,6 +274,23 @@ inline skydiag::helper::HelperConfig MakeTestConfig()
   return cfg;
 }
 
+// Closes a MessageBox shown by another thread of this process and waits until
+// it is gone. A single-button MessageBox gives its OK button the IDCANCEL id,
+// so WM_COMMAND/IDOK is ignored; WM_CLOSE works for every MessageBox type.
+inline bool CloseDialogAndWait(const wchar_t* title, DWORD timeoutMs = 10000)
+{
+  const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+  while (GetTickCount64() < deadline) {
+    const HWND hwnd = FindWindowW(L"#32770", title);
+    if (!hwnd) {
+      return true;
+    }
+    PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    Sleep(50);
+  }
+  return FindWindowW(L"#32770", title) == nullptr;
+}
+
 inline void AssertContains(std::string_view haystack, std::string_view needle, const char* message)
 {
   Require(haystack.find(needle) != std::string_view::npos, message);

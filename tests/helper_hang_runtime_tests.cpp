@@ -284,8 +284,9 @@ void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
     }
   }
 
-  if (HWND hwnd = FindWindowW(L"#32770", kTitle); hwnd != nullptr) {
-    PostMessageW(hwnd, WM_COMMAND, IDOK, 0);
+  if (!skydiag::tests::runtime::CloseDialogAndWait(kTitle)) {
+    dialogThread.detach();
+    Require(false, "Test MessageBox did not close");
   }
   dialogThread.join();
 
