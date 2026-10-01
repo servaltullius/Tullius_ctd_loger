@@ -2,6 +2,8 @@
 
 #include <Windows.h>
 
+#include <TlHelp32.h>
+
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
@@ -208,6 +210,22 @@ inline std::wstring GetCmdExePath()
   return std::filesystem::path(systemDir).append(L"cmd.exe").wstring();
 }
 
+inline bool HasChildProcess(DWORD parentPid)
+{
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snap == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  PROCESSENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  bool found = false;
+  for (BOOL ok = Process32FirstW(snap, &entry); ok && !found; ok = Process32NextW(snap, &entry)) {
+    found = entry.th32ParentProcessID == parentPid;
+  }
+  CloseHandle(snap);
+  return found;
+}
+
 inline ChildProcess LaunchSleepingChildProcess()
 {
   ChildProcess child{};
@@ -230,6 +248,12 @@ inline ChildProcess LaunchSleepingChildProcess()
   if (child.pi.hThread) {
     CloseHandle(child.pi.hThread);
     child.pi.hThread = nullptr;
+  }
+  // A process dumped while the loader is still mapping modules makes
+  // MiniDumpWriteDump fail with ERROR_PARTIAL_COPY. cmd.exe starts ping.exe
+  // only after it has initialized, so wait for that child before returning.
+  for (int attempt = 0; attempt < 100 && !HasChildProcess(child.pi.dwProcessId); ++attempt) {
+    Sleep(50);
   }
   return child;
 }
