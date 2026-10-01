@@ -25,6 +25,7 @@ constexpr const char* kFamilyResource = "resource_provider";
 constexpr const char* kFamilyHistory = "history_repeat";
 constexpr const char* kFamilyFirstChance = "first_chance_context";
 constexpr const char* kFamilyHangThreadGroup = "hang_thread_group";
+constexpr const char* kFamilyModalDialogOwner = "modal_dialog_owner";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
 constexpr std::uint32_t kQualifiedStackWeightThreshold = 4u;
 constexpr std::uint32_t kFrameConflictWeightThreshold = 6u;
@@ -91,7 +92,8 @@ bool HasStrongFamily(const ActionableCandidate& candidate)
   return HasFamily(candidate, kFamilyCrashLoggerFrame) ||
          HasFamily(candidate, kFamilyCrashLoggerObjectRef) ||
          HasFamily(candidate, kFamilyStack) ||
-         HasFamily(candidate, kFamilyHangThreadGroup);
+         HasFamily(candidate, kFamilyHangThreadGroup) ||
+         HasFamily(candidate, kFamilyModalDialogOwner);
 }
 
 bool HasQualifiedCrossValidation(const CandidateRow& row)
@@ -201,6 +203,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasCrashLoggerObjectRef = HasFamily(candidate, kFamilyCrashLoggerObjectRef);
   const bool hasStack = HasFamily(candidate, kFamilyStack);
   const bool hasResource = HasFamily(candidate, kFamilyResource);
+  const bool hasModalDialogOwner = HasFamily(candidate, kFamilyModalDialogOwner);
   const bool conflict = candidate.has_conflict;
   const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
   const std::uint32_t coreScore = CoreRowScore(*row);
@@ -244,6 +247,13 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
   } else if (strongStackOnly) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
+    candidate.cross_validated = false;
+  } else if (hasModalDialogOwner) {
+    // The direct caller of a modal dialog API owns the observed wait. That is
+    // the module to inspect, but the dialog text, not the stack, names the
+    // underlying problem, so it never reaches High on its own.
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;

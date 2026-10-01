@@ -8,3 +8,4 @@ ADR index:
 - `0003-dump-tool-core-ui-split.md`
 - `0004-sharedlayout-versioning-and-compatibility-policy.md`
 - `0005-hang-main-thread-and-thread-group-consensus.md`
+- `0006-modal-dialog-hang-classification.md`

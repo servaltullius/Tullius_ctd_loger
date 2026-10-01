@@ -489,7 +489,11 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.diagnostics.push_back(L"[Symbols] degraded runtime environment detected; stackwalk/source lookup may be limited");
   }
 
-  ApplyCrashLoggerCorroborationToSuspects(&out, allModules);
+  if (!out.modal_dialog_wait.detected) {
+    // A modal wait already explains the hang; corroborating bystander stack
+    // modules with Crash Logger frames would only re-promote them.
+    ApplyCrashLoggerCorroborationToSuspects(&out, allModules);
+  }
   if (!out.suspects_from_stackwalk) {
     // Pointer-density scans do not prove that a raw stack slot is a return
     // address. Keep their user-visible confidence Low even when Crash Logger
@@ -635,6 +639,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   freezeSignals.first_chance = out.first_chance_summary;
   if (out.hang_thread_module_consensus.has_consensus) {
     freezeSignals.thread_module_consensus = out.hang_thread_module_consensus;
+  }
+  if (out.modal_dialog_wait.detected) {
+    freezeSignals.modal_dialog_wait = out.modal_dialog_wait;
   }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);

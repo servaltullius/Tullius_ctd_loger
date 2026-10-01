@@ -25,6 +25,7 @@ add_executable(${PROJECT_NAME}
   src/IncidentManifest.cpp
   src/LoadStats.cpp
   src/ManualCapture.cpp
+  src/ModalDialogProbe.cpp
   src/PendingCrashAnalysis.cpp
   src/PendingCrashAnalysis.Decision.cpp
   src/PendingCrashAnalysis.Execute.cpp
@@ -42,6 +43,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/DumpWriter.h
   include/SkyrimDiagHelper/HangDetect.h
   include/SkyrimDiagHelper/LoadStats.h
+  include/SkyrimDiagHelper/ModalDialogProbe.h
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
   src/HangCaptureInternal.h

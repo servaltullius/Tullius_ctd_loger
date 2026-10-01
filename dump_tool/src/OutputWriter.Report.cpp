@@ -292,6 +292,22 @@ std::string BuildReportText(
           << (r.freeze_analysis.thread_module_consensus.os_lock_cycle_proven ? "1" : "0")
           << "\n";
     }
+    if (r.modal_dialog_wait.detected) {
+      const auto& modal = r.modal_dialog_wait;
+      rpt << "  modal_dialog_wait main_tid=" << modal.main_thread_id
+          << " window_evidence=" << (modal.window_evidence ? "1" : "0")
+          << " stack_evidence=" << (modal.stack_evidence ? "1" : "0")
+          << " wait_api=" << WideToUtf8(modal.wait_api)
+          << " caller=" << WideToUtf8(modal.caller_module_filename)
+          << " caller_kind=" << modal.caller_kind
+          << "\n";
+      if (!modal.dialog_title.empty()) {
+        rpt << "  modal_dialog_title=" << WideToUtf8(modal.dialog_title) << "\n";
+      }
+      if (!modal.dialog_text.empty()) {
+        rpt << "  modal_dialog_text=" << WideToUtf8(modal.dialog_text) << "\n";
+      }
+    }
     rpt << "  blackbox loading_window="
         << (r.freeze_analysis.blackbox_context.loading_window ? "1" : "0")
         << " module churn=" << r.freeze_analysis.blackbox_context.module_churn_score

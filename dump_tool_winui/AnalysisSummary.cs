@@ -44,6 +44,9 @@ internal sealed class AnalysisSummary
     public bool CrashLoggerProbableStreakEligible { get; init; }
     public int CrashLoggerFrameSignalStrength { get; init; }
     public IReadOnlyList<string> Diagnostics { get; init; } = Array.Empty<string>();
+    public string FreezeStateId { get; init; } = string.Empty;
+    public bool ModalDialogWaitDetected { get; init; }
+    public string ModalDialogTitle { get; init; } = string.Empty;
 
     public static AnalysisSummary LoadFromSummaryFile(string summaryPath)
     {
@@ -55,6 +58,15 @@ internal sealed class AnalysisSummary
         var analysis = root.TryGetProperty("analysis", out var analysisNode) ? analysisNode : default;
         var cleanExitEvidence = root.TryGetProperty("clean_exit_evidence", out var cleanExitNode)
             ? cleanExitNode
+            : default;
+        var freezeAnalysis = root.TryGetProperty("freeze_analysis", out var freezeNode) &&
+                             freezeNode.ValueKind == JsonValueKind.Object
+            ? freezeNode
+            : default;
+        var modalDialogWait = freezeAnalysis.ValueKind == JsonValueKind.Object &&
+                              freezeAnalysis.TryGetProperty("modal_dialog_wait", out var modalNode) &&
+                              modalNode.ValueKind == JsonValueKind.Object
+            ? modalNode
             : default;
 
         var suspects = ParseObjectArray(root, "suspects", item => new SuspectItem(
@@ -177,6 +189,9 @@ internal sealed class AnalysisSummary
             RecaptureEscalationLevel = ReadInt32(recaptureElement, "escalation_level"),
             RecaptureReasons = ParseStringArray(root, "incident.recapture_evaluation.reasons"),
             Diagnostics = ParseStringArray(root, "diagnostics"),
+            FreezeStateId = ReadString(freezeAnalysis, "state_id"),
+            ModalDialogWaitDetected = ReadBool(modalDialogWait, "detected"),
+            ModalDialogTitle = ReadString(modalDialogWait, "dialog_title"),
         };
     }
 

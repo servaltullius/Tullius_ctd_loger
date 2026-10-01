@@ -116,6 +116,54 @@ std::string DetermineSupportQuality(
   return "unknown";
 }
 
+std::wstring DescribeModalDialogCaller(const ModalDialogWaitInfo& modal)
+{
+  if (!modal.caller_inferred_mod_name.empty()) {
+    return modal.caller_inferred_mod_name + L" (" + modal.caller_module_filename + L")";
+  }
+  return modal.caller_module_filename;
+}
+
+void AddModalDialogReasons(const ModalDialogWaitInfo& modal, i18n::Language language, FreezeAnalysisResult* result)
+{
+  const bool en = language == i18n::Language::kEnglish;
+  if (modal.window_evidence) {
+    std::wstring line = en
+      ? L"The game main thread owned a visible dialog window at capture time"
+      : L"캡처 시점에 게임 메인 스레드가 보이는 대화상자 창을 소유하고 있었음";
+    if (!modal.dialog_title.empty()) {
+      line += L": \"" + modal.dialog_title + L"\"";
+    }
+    result->primary_reasons.push_back(std::move(line));
+  }
+  if (modal.stack_evidence) {
+    result->primary_reasons.push_back(en
+      ? (L"The main-thread stack is waiting inside " + modal.wait_api + L" with no plugin code above it")
+      : (L"메인 스레드 스택이 " + modal.wait_api + L" 안에서 대기 중이며 그 위에 플러그인 코드가 없음"));
+  }
+  const auto caller = DescribeModalDialogCaller(modal);
+  if (modal.caller_kind == "plugin" && !caller.empty()) {
+    result->primary_reasons.push_back(en
+      ? (L"The dialog was opened by " + caller)
+      : (L"대화상자를 연 모듈: " + caller));
+  } else if (modal.caller_kind == "skse_runtime") {
+    result->primary_reasons.push_back(en
+      ? L"The dialog was opened by the SKSE runtime itself (typically a plugin load or version error)"
+      : L"대화상자를 연 주체는 SKSE 런타임 자체임 (보통 플러그인 로드/버전 오류)");
+  } else if (modal.caller_kind == "hook_framework" && !caller.empty()) {
+    result->primary_reasons.push_back(en
+      ? (L"The dialog was opened by hook framework " + caller)
+      : (L"대화상자를 연 모듈은 훅 프레임워크 " + caller + L"임"));
+  } else if (modal.caller_kind == "game_exe") {
+    result->primary_reasons.push_back(en
+      ? L"The dialog was opened by the game executable"
+      : L"대화상자를 연 주체는 게임 실행 파일임");
+  }
+  result->primary_reasons.push_back(en
+    ? L"Modules on the waiting stack are bystanders of the dialog, not the hang cause"
+    : L"대기 중인 스택의 모듈은 대화상자 대기의 구경꾼일 뿐 프리징 원인이 아님");
+}
+
 }  // namespace
 
 FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& input, i18n::Language language)
@@ -153,7 +201,17 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     result.support_quality = "multi_thread_consensus";
   }
 
-  if (input.wct && input.wct->cycles > 0) {
+  const bool modalWait = input.modal_dialog_wait.has_value() && input.modal_dialog_wait->detected;
+  if (modalWait) {
+    // Checked first: the main thread is the heartbeat source, so a dialog it
+    // is pumping fully explains the stall regardless of other wait chains.
+    const auto& modal = *input.modal_dialog_wait;
+    result.state_id = "modal_dialog_wait";
+    result.confidence_level = (modal.window_evidence && modal.stack_evidence)
+      ? i18n::ConfidenceLevel::kHigh
+      : i18n::ConfidenceLevel::kMedium;
+    AddModalDialogReasons(modal, language, &result);
+  } else if (input.wct && input.wct->cycles > 0) {
     result.state_id = "deadlock_likely";
     const bool repeatedCycleSupport =
       consensusBackedDeadlock || (input.wct->cycle_consensus && input.wct->longest_wait_tid_consensus);
@@ -297,6 +355,10 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     auto related = ToRelatedCandidate(input.actionable_candidates[i], language);
     seenNames.insert(related.display_name);
     result.related_candidates.push_back(std::move(related));
+  }
+  if (modalWait) {
+    // Recent module loads are timeline noise next to a dialog the user can see.
+    return result;
   }
   if (input.blackbox.has_value()) {
     for (const auto& moduleName : input.blackbox->recent_non_system_modules) {

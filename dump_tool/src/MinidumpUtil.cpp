@@ -434,6 +434,7 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     ModuleInfo mi{};
     mi.base = mod.BaseOfImage;
     mi.end = mi.base + mod.SizeOfImage;
+    mi.time_date_stamp = mod.TimeDateStamp;
     mi.version = ModuleVersionString(mod.VersionInfo);
     mi.path = Utf8ToWide(utf8);
     mi.filename = std::filesystem::path(mi.path).filename().wstring();
