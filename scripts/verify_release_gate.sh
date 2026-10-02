@@ -7,7 +7,17 @@ DEFAULT_REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="${1:-${DEFAULT_REPO_ROOT}}"
 WIN_ROOT="${2:-${REPO_ROOT}}"
 ZIP_PATH="${3:-}"
-PYTHON_BIN="$(command -v python3 || command -v python || true)"
+# Pick the first interpreter that actually runs. On Windows Git Bash,
+# `python3` often resolves to the Microsoft Store app-execution alias, which
+# only prints "Python" and exits 49 instead of running the script.
+PYTHON_BIN=""
+for _python_candidate in python3 python; do
+  if command -v "${_python_candidate}" >/dev/null 2>&1 &&
+     "${_python_candidate}" -c 'import sys' >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v "${_python_candidate}")"
+    break
+  fi
+done
 NATIVE_CONFIGURATION="${SKYDIAG_RELEASE_CONFIG:-RelWithDebInfo}"
 
 if [[ -z "${PYTHON_BIN}" ]]; then
