@@ -34,7 +34,9 @@ void ComputeCrashBucket(AnalysisResult& out)
   if (faultModule.empty()) {
     faultModule = out.fault_module_plus_offset;
   }
-  out.crash_bucket_version = 2;
+  // v3: the formal stackwalk unwinds real caller frames instead of stopping at
+  // the faulting frame, so v2 keys would not group the same incidents.
+  out.crash_bucket_version = 3;
   out.crash_bucket_key = ComputeCrashBucketKey(
     out.exc_code,
     faultModule,

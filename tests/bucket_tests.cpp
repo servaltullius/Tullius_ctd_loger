@@ -26,7 +26,7 @@ static void Test_SameInput_ProducesStableKey()
     frames);
 
   assert(!a.empty());
-  assert(a.starts_with(L"CTD2-"));
+  assert(a.starts_with(L"CTD3-"));
   assert(a == b);
 }
 

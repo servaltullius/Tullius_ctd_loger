@@ -191,7 +191,7 @@ struct AnalysisResult
   std::uint64_t fault_module_offset = 0;  // offset in fault module (if resolved)
   std::vector<std::uint64_t> exc_info;  // MINIDUMP_EXCEPTION.ExceptionInformation (best-effort)
   std::wstring crash_bucket_key;  // stable key for repeated CTD grouping (best-effort)
-  std::uint32_t crash_bucket_version = 2;
+  std::uint32_t crash_bucket_version = 3;
   std::string game_version;  // best-effort game executable version (e.g. "1.5.97.0")
 
   std::wstring fault_module_path;      // full path if available

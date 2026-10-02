@@ -30,6 +30,11 @@ public:
 
   bool Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
 
+  // x64 unwind entry (.pdata) covering addr, or nullptr when the module has no
+  // verified local image or the address is in a leaf function. The pointer
+  // stays valid for the lifetime of this object.
+  const RUNTIME_FUNCTION* FindFunctionEntry(std::uint64_t addr) const;
+
 private:
   struct Image
   {
@@ -75,15 +80,6 @@ struct SymSession
 };
 
 std::vector<std::uint64_t> StackWalkAddrsForContext(
-  HANDLE process,
-  const MinidumpMemoryView& mem,
-  const CONTEXT& inCtx,
-  std::size_t maxFrames);
-
-// Unwinds every frame: the first StackWalk64 call reports the context's own
-// frame and each later call one caller. Used for the modal-dialog probe, which
-// needs the frames between the wait syscall and the dialog's caller.
-std::vector<std::uint64_t> StackWalkAllFramesForContext(
   HANDLE process,
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,

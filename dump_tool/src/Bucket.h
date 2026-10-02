@@ -81,7 +81,7 @@ inline std::wstring ComputeCrashBucketKey(
   std::size_t maxFrames = 6)
 {
   std::ostringstream canonical;
-  canonical << "v=2|exc=0x" << std::hex << std::nouppercase << exceptionCode << "|mod=";
+  canonical << "v=3|exc=0x" << std::hex << std::nouppercase << exceptionCode << "|mod=";
   canonical << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(faultModule));
   canonical << "|off=0x" << std::hex << std::nouppercase << faultModuleOffset;
 
@@ -94,7 +94,7 @@ inline std::wstring ComputeCrashBucketKey(
 
   const std::uint64_t hash = bucket::Fnv1a64(canonical.str());
   std::wstringstream wss;
-  wss << L"CTD2-" << std::hex << std::nouppercase << std::setw(16) << std::setfill(L'0') << hash;
+  wss << L"CTD3-" << std::hex << std::nouppercase << std::setw(16) << std::setfill(L'0') << hash;
   return wss.str();
 }
 

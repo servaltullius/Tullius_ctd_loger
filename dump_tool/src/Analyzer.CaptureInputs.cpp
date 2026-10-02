@@ -511,6 +511,15 @@ void ComputeSuspects(
   }
   if (out.exc_tid != 0) {
     tids.push_back(out.exc_tid);
+  } else if (mainTid.has_value()) {
+    // ADR-0005: a freeze is judged from the game main thread. Other threads
+    // join only when WCT proves they are in a wait cycle; long-waiting worker
+    // threads (a plugin's own idle loop) are not evidence of the stall.
+    if (const auto wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8)) {
+      for (const auto tid : wct->cycle_thread_ids) {
+        tids.push_back(tid);
+      }
+    }
   } else if (out.has_wct) {
     for (const auto tid : internal::ExtractWctCandidateThreadIds(out.wct_json_utf8, /*maxN=*/8)) {
       tids.push_back(tid);
@@ -546,7 +555,11 @@ void ComputeSuspects(
         modalProbeTid,
         &mainThreadFrames)) {
     out.suspects_from_stackwalk = false;
-    out.diagnostics.push_back(L"[Stackwalk] DbgHelp stackwalk failed, falling back to stack scan");
+    // The helper treats the "failed" diagnostic as degraded capture quality,
+    // so keep it for walks that produced no caller frames at all.
+    out.diagnostics.push_back(out.stackwalk_total_frames >= 2u
+      ? L"[Stackwalk] formal stackwalk found no actionable module, falling back to stack scan"
+      : L"[Stackwalk] DbgHelp stackwalk failed, falling back to stack scan");
     const std::vector<std::uint32_t> scanTids =
       (hangLike && mainTid.has_value()) ? std::vector<std::uint32_t>{ *mainTid } : tids;
     out.suspects = internal::ComputeStackScanSuspects(

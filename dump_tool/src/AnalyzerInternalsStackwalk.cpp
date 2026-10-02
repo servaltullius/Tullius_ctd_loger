@@ -12,7 +12,6 @@ namespace {
 using skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory;
 using skydiag::dump_tool::internal::stackwalk_internal::MinidumpMemoryView;
 using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext;
-using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAllFramesForContext;
 using skydiag::dump_tool::internal::stackwalk_internal::SymSession;
 
 using skydiag::dump_tool::minidump::ModuleInfo;
@@ -90,6 +89,10 @@ bool TryComputeStackwalkSuspects(
   if (!mem.Init(dumpBase, dumpSize, &threads)) {
     return false;
   }
+  // Dumps usually omit module images, so unwind data for frames in system
+  // DLLs and plugins has to come from matching local files.
+  const LocalImageMemory localImages(modules);
+  mem.image_fallback = &localImages;
 
   SymSession sym(modules, out.online_symbol_source_allowed);
   out.symbol_search_path = sym.searchPath;
@@ -137,23 +140,16 @@ bool TryComputeStackwalkSuspects(
       continue;
     }
 
-    if (outModalProbeFrames && modalProbeTid != 0u && tid == modalProbeTid) {
-      // Hang dumps usually omit system DLL images, so their unwind data has
-      // to come from matching local files to get past the wait syscall.
-      const LocalImageMemory localImages(modules);
-      MinidumpMemoryView probeMem = mem;
-      probeMem.image_fallback = &localImages;
-      const auto probePcs = StackWalkAllFramesForContext(sym.process, probeMem, ctx, kModalApiMaxDepth + 16u);
-      *outModalProbeFrames = stackwalk::BuildModalProbeFrames(
-        sym.process,
-        modules,
-        probePcs,
-        kModalApiMaxDepth + 16u);
-    }
-
     auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64);
     if (pcs.empty()) {
       continue;
+    }
+    if (outModalProbeFrames && modalProbeTid != 0u && tid == modalProbeTid) {
+      *outModalProbeFrames = stackwalk::BuildModalProbeFrames(
+        sym.process,
+        modules,
+        pcs,
+        kModalApiMaxDepth + 16u);
     }
 
     if (policy::ShouldSelectStackwalkCandidate(

@@ -651,9 +651,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         if (!r.suspects_from_stackwalk) {
           summary = en
             ? (hangPrefix + L" Main-thread pointer scan found " + suspectWho +
-                L" nearby, but formal stack walking failed. Treat this as a weak investigation clue, not a confirmed cause. (Confidence: Low)")
+                L" nearby, but the formal stack walk did not identify an actionable module. Treat this as a weak investigation clue, not a confirmed cause. (Confidence: Low)")
             : (hangPrefix + L" 메인 스레드 포인터 스캔에서 " + suspectWho +
-                L"이(가) 감지됐지만 정식 스택 분석은 실패했습니다. 확정 원인이 아닌 약한 조사 단서입니다. (신뢰도: 낮음)");
+                L"이(가) 감지됐지만 정식 스택 분석으로는 실행 가능한 모듈을 특정하지 못했습니다. 확정 원인이 아닌 약한 조사 단서입니다. (신뢰도: 낮음)");
         } else if ((topSuspectIsHookFramework || topSuspectIsSystem) && hasNonHookSuspect && !nonHookSuspectWho.empty()) {
           summary = en
             ? (hangPrefix + L" Top stack candidate is likely a victim location; actionable candidate: " + nonHookSuspectWho
