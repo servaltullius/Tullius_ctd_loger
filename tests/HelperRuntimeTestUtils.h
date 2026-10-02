@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
@@ -157,6 +158,63 @@ inline HANDLE OpenSelfProcessHandle()
   return process;
 }
 
+// A worker thread of this process parked in a wait. Synthetic crash records
+// name it as the faulting thread so crash-capture tests dump this process.
+// Dumping a freshly launched external process (cmd.exe) intermittently failed
+// on GitHub Windows runners with ERROR_PARTIAL_COPY even after it settled,
+// while self-process dumps (the hang tests) have been stable there.
+class ParkedThread
+{
+public:
+  ParkedThread()
+    : release_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      parked_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
+  {
+    Require(release_ != nullptr && parked_ != nullptr, "CreateEventW failed");
+    thread_ = std::thread([this]() {
+      tid_ = GetCurrentThreadId();
+      SetEvent(parked_);
+      WaitForSingleObject(release_, INFINITE);
+    });
+    Require(WaitForSingleObject(parked_, 5000) == WAIT_OBJECT_0, "Parked thread did not start");
+  }
+
+  ParkedThread(const ParkedThread&) = delete;
+  ParkedThread& operator=(const ParkedThread&) = delete;
+
+  ~ParkedThread()
+  {
+    SetEvent(release_);
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+    CloseHandle(release_);
+    CloseHandle(parked_);
+  }
+
+  DWORD tid() const { return tid_; }
+
+  CONTEXT Context() const
+  {
+    CONTEXT ctx{};
+    ctx.ContextFlags = CONTEXT_FULL;
+    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, tid_);
+    Require(thread != nullptr, "OpenThread failed");
+    Require(SuspendThread(thread) != static_cast<DWORD>(-1), "SuspendThread failed");
+    const BOOL ok = GetThreadContext(thread, &ctx);
+    ResumeThread(thread);
+    CloseHandle(thread);
+    Require(ok != FALSE, "GetThreadContext failed");
+    return ctx;
+  }
+
+private:
+  HANDLE release_ = nullptr;
+  HANDLE parked_ = nullptr;
+  DWORD tid_ = 0;
+  std::thread thread_;
+};
+
 inline skydiag::helper::AttachedProcess MakeSelfAttachedProcess(skydiag::SharedLayout* shared)
 {
   skydiag::helper::AttachedProcess proc{};
@@ -210,7 +268,7 @@ inline std::wstring GetCmdExePath()
   return std::filesystem::path(systemDir).append(L"cmd.exe").wstring();
 }
 
-inline bool HasChildProcess(DWORD parentPid)
+inline bool HasChildProcessNamed(DWORD parentPid, const wchar_t* exeName)
 {
   HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if (snap == INVALID_HANDLE_VALUE) {
@@ -220,7 +278,7 @@ inline bool HasChildProcess(DWORD parentPid)
   entry.dwSize = sizeof(entry);
   bool found = false;
   for (BOOL ok = Process32FirstW(snap, &entry); ok && !found; ok = Process32NextW(snap, &entry)) {
-    found = entry.th32ParentProcessID == parentPid;
+    found = entry.th32ParentProcessID == parentPid && _wcsicmp(entry.szExeFile, exeName) == 0;
   }
   CloseHandle(snap);
   return found;
@@ -252,9 +310,16 @@ inline ChildProcess LaunchSleepingChildProcess()
   // A process dumped while the loader is still mapping modules makes
   // MiniDumpWriteDump fail with ERROR_PARTIAL_COPY. cmd.exe starts ping.exe
   // only after it has initialized, so wait for that child before returning.
-  for (int attempt = 0; attempt < 100 && !HasChildProcess(child.pi.dwProcessId); ++attempt) {
-    Sleep(50);
+  // Waiting for any child is not enough: conhost.exe is also a child of a
+  // console process and appears early in its startup.
+  bool settled = false;
+  for (int attempt = 0; attempt < 200 && !settled; ++attempt) {
+    settled = HasChildProcessNamed(child.pi.dwProcessId, L"PING.EXE");
+    if (!settled) {
+      Sleep(25);
+    }
   }
+  Require(settled, "cmd.exe did not start ping.exe within 5 seconds");
   return child;
 }
 
