@@ -148,7 +148,11 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     EvidenceItem e{};
     e.confidence_level = selectedTop->confidence_level;
     e.confidence = selectedTop->confidence.empty() ? ConfidenceText(lang, i18n::ConfidenceLevel::kMedium) : selectedTop->confidence;
-    if (weakFaultLocationOnly) {
+    if (r.modal_dialog_wait.detected) {
+      e.title = en
+        ? L"Stack modules on the waiting main thread (not the hang cause)"
+        : L"대기 중인 메인 스레드의 스택 모듈 (프리징 원인 아님)";
+    } else if (weakFaultLocationOnly) {
       e.title = en
         ? L"Top stack DLL clue (fault-location)"
         : L"콜스택 상위 DLL 단서 (fault-location)";

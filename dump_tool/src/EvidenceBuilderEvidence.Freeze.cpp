@@ -87,6 +87,35 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
   const bool wctSuggestsHang = ctx.wctSuggestsHang;
   const auto& wct = ctx.wct;
 
+  if (r.modal_dialog_wait.detected) {
+    const auto& modal = r.modal_dialog_wait;
+    EvidenceItem e{};
+    e.confidence_level = (modal.window_evidence && modal.stack_evidence)
+      ? i18n::ConfidenceLevel::kHigh
+      : i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Main thread waiting in a modal dialog"
+      : L"메인 스레드가 modal 대화상자에서 대기 중";
+    std::vector<std::wstring> parts;
+    parts.push_back(L"main_tid=" + std::to_wstring(modal.main_thread_id));
+    if (modal.window_evidence) {
+      parts.push_back((en ? L"dialog window: \"" : L"대화상자 창: \"") + modal.dialog_title + L"\"");
+    }
+    if (modal.stack_evidence) {
+      parts.push_back((en ? L"wait API: " : L"대기 API: ") + modal.wait_api);
+    }
+    if (!modal.caller_module_filename.empty()) {
+      parts.push_back((en ? L"opened by: " : L"호출 모듈: ") + modal.caller_module_filename +
+        L" [" + ToWideAscii(modal.caller_kind) + L"]");
+    }
+    if (!modal.dialog_text.empty()) {
+      parts.push_back((en ? L"text: " : L"내용: ") + modal.dialog_text);
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (r.has_wct) {
     EvidenceItem e{};
     if (isSnapshotLike && isManualCapture && !wctSuggestsHang) {

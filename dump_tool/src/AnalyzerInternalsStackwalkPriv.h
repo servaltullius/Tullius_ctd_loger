@@ -17,9 +17,36 @@ struct MinidumpMemoryRange
   const std::uint8_t* bytes = nullptr;  // points into mapped dump file
 };
 
+// Read-only image-layout views of local module files. Used only for memory the
+// dump does not contain (typically unwind data of system DLLs), and only when
+// the local file has the dump module's TimeDateStamp and SizeOfImage.
+class LocalImageMemory
+{
+public:
+  explicit LocalImageMemory(const std::vector<minidump::ModuleInfo>& modules);
+  ~LocalImageMemory();
+  LocalImageMemory(const LocalImageMemory&) = delete;
+  LocalImageMemory& operator=(const LocalImageMemory&) = delete;
+
+  bool Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
+
+private:
+  struct Image
+  {
+    const minidump::ModuleInfo* module = nullptr;
+    bool attempted = false;
+    HMODULE handle = nullptr;
+    const std::uint8_t* view = nullptr;
+  };
+  const Image* Resolve(std::uint64_t addr) const;
+
+  mutable std::vector<Image> images_;
+};
+
 struct MinidumpMemoryView
 {
   std::vector<MinidumpMemoryRange> ranges;
+  const LocalImageMemory* image_fallback = nullptr;
 
   bool Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads);
 
@@ -48,6 +75,15 @@ struct SymSession
 };
 
 std::vector<std::uint64_t> StackWalkAddrsForContext(
+  HANDLE process,
+  const MinidumpMemoryView& mem,
+  const CONTEXT& inCtx,
+  std::size_t maxFrames);
+
+// Unwinds every frame: the first StackWalk64 call reports the context's own
+// frame and each later call one caller. Used for the modal-dialog probe, which
+// needs the frames between the wait syscall and the dialog's caller.
+std::vector<std::uint64_t> StackWalkAllFramesForContext(
   HANDLE process,
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,

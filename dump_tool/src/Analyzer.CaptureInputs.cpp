@@ -3,6 +3,7 @@
 #include "AnalyzerInternals.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
+#include "ModalDialogWait.h"
 #include "Mo2Index.h"
 #include "OutputWriterInternals.h"
 #include "PluginRules.h"
@@ -529,6 +530,8 @@ void ComputeSuspects(
   tids = std::move(uniqueTids);
   const auto threads = LoadThreads(dumpBase, dumpSize);
   const std::uint32_t preferredTid = out.exc_tid != 0u ? out.exc_tid : mainTid.value_or(0u);
+  const std::uint32_t modalProbeTid = (hangLike && mainTid.has_value()) ? *mainTid : 0u;
+  std::vector<ModalStackFrame> mainThreadFrames;
   if (!internal::TryComputeStackwalkSuspects(
         dumpBase,
         dumpSize,
@@ -539,7 +542,9 @@ void ComputeSuspects(
         excCtx,
         threads,
         opt.language,
-        out)) {
+        out,
+        modalProbeTid,
+        &mainThreadFrames)) {
     out.suspects_from_stackwalk = false;
     out.diagnostics.push_back(L"[Stackwalk] DbgHelp stackwalk failed, falling back to stack scan");
     const std::vector<std::uint32_t> scanTids =
@@ -560,6 +565,28 @@ void ComputeSuspects(
           : L" (메인 스레드 포인터 스캔만 사용한 약한 프리징 단서)";
       }
     }
+  }
+
+  if (modalProbeTid != 0u) {
+    const auto wctSummary = internal::TryParseWctFreezeSummary(out.wct_json_utf8);
+    ModalDialogWaitInput modalInput{};
+    modalInput.main_thread_id = modalProbeTid;
+    modalInput.wct = wctSummary ? &*wctSummary : nullptr;
+    modalInput.main_thread_frames = &mainThreadFrames;
+    out.modal_dialog_wait = ResolveModalDialogWait(modalInput);
+  }
+
+  if (out.modal_dialog_wait.detected) {
+    // The heartbeat stopped because the main thread is pumping a dialog.
+    // Modules on that stack (or left over in its memory) are bystanders.
+    for (auto& suspect : out.suspects) {
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(opt.language, suspect.confidence_level);
+      suspect.reason += opt.language == i18n::Language::kEnglish
+        ? L" (main thread is waiting in a modal dialog; stack modules are not the hang cause)"
+        : L" (메인 스레드가 modal 대화상자에서 대기 중이므로 스택 모듈은 프리징 원인이 아님)";
+    }
+    return;
   }
 
   if (hangLike && mainTid.has_value() && !out.suspects.empty()) {

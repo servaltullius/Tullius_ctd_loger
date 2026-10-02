@@ -46,6 +46,9 @@ std::wstring DescribeFamily(std::string_view familyId, bool en)
   if (familyId == "hang_thread_group") {
     return en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹";
   }
+  if (familyId == "modal_dialog_owner") {
+    return en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈";
+  }
   return en ? L"other signal" : L"기타 신호";
 }
 
@@ -324,6 +327,35 @@ void AddActionableCandidateRecommendations(
   }
 }
 
+void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
+{
+  const auto& modal = r.modal_dialog_wait;
+  const std::wstring caller = !modal.caller_inferred_mod_name.empty()
+    ? (modal.caller_inferred_mod_name + L" (" + modal.caller_module_filename + L")")
+    : modal.caller_module_filename;
+
+  r.recommendations.push_back(en
+    ? L"[Modal dialog] The game is waiting for a dialog to be closed. Alt-Tab or check the taskbar for an error window hidden behind the game, then read its message."
+    : L"[Modal 대화상자] 게임이 대화상자가 닫히기를 기다리고 있습니다. Alt-Tab 또는 작업 표시줄에서 게임 창 뒤에 숨은 오류 창을 찾아 메시지를 확인하세요.");
+  if (!modal.dialog_text.empty()) {
+    r.recommendations.push_back(en
+      ? (L"[Modal dialog] Captured dialog text: " + modal.dialog_text)
+      : (L"[Modal 대화상자] 캡처된 대화상자 내용: " + modal.dialog_text));
+  }
+  if (modal.caller_kind == "plugin" && !caller.empty()) {
+    r.recommendations.push_back(en
+      ? (L"[Modal dialog] " + caller + L" opened the dialog. Follow its message (missing requirement, version mismatch, config error) or check that mod's documentation.")
+      : (L"[Modal 대화상자] " + caller + L"이(가) 대화상자를 열었습니다. 메시지(누락된 선행 모드, 버전 불일치, 설정 오류)를 따르거나 해당 모드 설명을 확인하세요."));
+  } else if (modal.caller_kind == "skse_runtime") {
+    r.recommendations.push_back(en
+      ? L"[Modal dialog] SKSE itself opened the dialog. This usually names a plugin that failed to load or does not match the game version; update or remove that plugin."
+      : L"[Modal 대화상자] SKSE 자체가 대화상자를 열었습니다. 보통 로드에 실패했거나 게임 버전과 맞지 않는 플러그인을 알리는 창이므로 해당 플러그인을 업데이트하거나 제거하세요.");
+  }
+  r.recommendations.push_back(en
+    ? L"[Modal dialog] Do not isolate mods based on the stack modules of this dump; they only happened to be on the waiting main thread."
+    : L"[Modal 대화상자] 이 덤프의 스택 모듈을 근거로 모드를 격리하지 마세요. 대기 중인 메인 스레드에 우연히 남아 있었을 뿐입니다.");
+}
+
 }  // namespace
 
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -468,6 +500,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Masters] Install missing masters or disable dependent plugins."
       : L"[마스터] 누락된 마스터를 설치하거나 의존 플러그인을 비활성화하세요.");
+  }
+
+  if (isHangLike && r.modal_dialog_wait.detected) {
+    AddModalDialogWaitRecommendations(r, en);
+    return;
   }
 
   // Recommendations (checklist)

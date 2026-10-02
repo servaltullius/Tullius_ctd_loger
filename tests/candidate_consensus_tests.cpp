@@ -191,6 +191,28 @@ void TestHangThreadGroupCorroboratesWeakMainStack()
   assert(candidates[0].supporting_families.size() == 2u);
 }
 
+void TestModalDialogOwnerAloneStaysMediumRelated()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("modal_dialog_owner", L"brokenplugin.dll", L"BrokenPlugin.dll", 6, L"", L"", L"BrokenPlugin.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+
+  // History repeat is boost-only and must not lift a dialog owner to High.
+  const std::vector<CandidateSignal> withHistory = {
+    MakeSignal("modal_dialog_owner", L"brokenplugin.dll", L"BrokenPlugin.dll", 6, L"", L"", L"BrokenPlugin.dll"),
+    MakeSignal("history_repeat", L"brokenplugin.dll", L"BrokenPlugin.dll", 6),
+  };
+  const auto boosted = BuildCandidateConsensus(withHistory, Language::kEnglish);
+  assert(boosted.size() == 1u);
+  assert(boosted[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+}
+
 void TestObjectRefAndResourceStayReferenceOnly()
 {
   const std::vector<CandidateSignal> signals = {
@@ -791,6 +813,7 @@ int main()
   TestRepresentativeNamePrefersDllFilenameOverModFolderName();
   TestStrongStackOnlyBecomesMediumRelated();
   TestHangThreadGroupCorroboratesWeakMainStack();
+  TestModalDialogOwnerAloneStaysMediumRelated();
   TestObjectRefAndResourceStayReferenceOnly();
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();

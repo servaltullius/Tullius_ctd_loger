@@ -5,6 +5,9 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
+
+#include <nlohmann/json.hpp>
 
 #include "HangCapture.h"
 #include "HangCaptureInternal.h"
@@ -12,6 +15,7 @@
 #include "HelperRuntimeTestUtils.h"
 #include "RetentionWorker.h"
 #include "SkyrimDiagHelper/LoadStats.h"
+#include "SkyrimDiagHelper/ModalDialogProbe.h"
 
 using skydiag::helper::HangDecision;
 using skydiag::helper::LoadStats;
@@ -246,6 +250,9 @@ void TestExecuteConfirmedHangCapture_WritesArtifacts()
     std::filesystem::exists(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Hang_", L".json")),
     "Hang capture must write incident manifest");
 
+  const auto wctJson = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_WCT_", L".json"));
+  AssertContains(wctJson, "\"modal_dialogs\"", "Hang WCT json must always record the visible-dialog probe result");
+
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "Hang dump written", "Confirmed hang capture must log dump creation");
   AssertContains(log, "Incident manifest written", "Confirmed hang capture must log manifest creation");
@@ -253,6 +260,44 @@ void TestExecuteConfirmedHangCapture_WritesArtifacts()
   ShutdownRetentionWorker();
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
+}
+
+void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
+{
+  constexpr wchar_t kTitle[] = L"SkyrimDiag modal probe test";
+  DWORD dialogTid = 0;
+  std::thread dialogThread([&]() {
+    dialogTid = GetCurrentThreadId();
+    MessageBoxW(nullptr, L"Plugin failed to load.\nSee C:\\Users\\Tester\\log.txt", kTitle, MB_OK | MB_SETFOREGROUND);
+  });
+
+  std::vector<skydiag::helper::ModalDialogWindow> dialogs;
+  const skydiag::helper::ModalDialogWindow* found = nullptr;
+  for (int attempt = 0; attempt < 100 && !found; ++attempt) {
+    Sleep(50);
+    dialogs = skydiag::helper::CaptureModalDialogs(GetCurrentProcessId());
+    for (const auto& dialog : dialogs) {
+      if (dialog.title == "SkyrimDiag modal probe test") {
+        found = &dialog;
+        break;
+      }
+    }
+  }
+
+  if (!skydiag::tests::runtime::CloseDialogAndWait(kTitle)) {
+    dialogThread.detach();
+    Require(false, "Test MessageBox did not close");
+  }
+  dialogThread.join();
+
+  Require(found != nullptr, "Visible MessageBox owned by this process must be captured");
+  Require(found->tid == dialogTid, "Captured dialog must report the thread that pumps it");
+  Require(
+    found->text.find("Plugin failed to load.") != std::string::npos,
+    "Captured dialog must include the MessageBox body text");
+  const auto json = skydiag::helper::ModalDialogsToJson(dialogs).dump();
+  AssertContains(json, "\"tid\"", "Dialog json must include the owner thread id");
+  AssertContains(json, "\"owner_disabled\"", "Dialog json must record whether the owner window is disabled");
 }
 
 }  // namespace
@@ -264,6 +309,7 @@ int main()
     TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample();
     TestHandleHangTick_SkipsWhenHeartbeatNotInitialized();
     TestExecuteConfirmedHangCapture_WritesArtifacts();
+    TestCaptureModalDialogsFindsMessageBoxOwnerThread();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

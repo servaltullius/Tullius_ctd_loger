@@ -9,8 +9,10 @@
 namespace skydiag::dump_tool::internal {
 namespace {
 
+using skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory;
 using skydiag::dump_tool::internal::stackwalk_internal::MinidumpMemoryView;
 using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext;
+using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAllFramesForContext;
 using skydiag::dump_tool::internal::stackwalk_internal::SymSession;
 
 using skydiag::dump_tool::minidump::ModuleInfo;
@@ -27,6 +29,12 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   i18n::Language lang);
 
 std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames);
+
+std::vector<ModalStackFrame> BuildModalProbeFrames(
+  HANDLE process,
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
   std::size_t maxFrames);
@@ -70,7 +78,9 @@ bool TryComputeStackwalkSuspects(
   const std::optional<CONTEXT>& excCtx,
   const std::vector<ThreadRecord>& threads,
   i18n::Language lang,
-  AnalysisResult& out)
+  AnalysisResult& out,
+  std::uint32_t modalProbeTid,
+  std::vector<ModalStackFrame>* outModalProbeFrames)
 {
   if (!dumpBase || modules.empty() || targetTids.empty() || threads.empty()) {
     return false;
@@ -125,6 +135,20 @@ bool TryComputeStackwalkSuspects(
     }
     if (ctx.Rip == 0 || ctx.Rsp == 0) {
       continue;
+    }
+
+    if (outModalProbeFrames && modalProbeTid != 0u && tid == modalProbeTid) {
+      // Hang dumps usually omit system DLL images, so their unwind data has
+      // to come from matching local files to get past the wait syscall.
+      const LocalImageMemory localImages(modules);
+      MinidumpMemoryView probeMem = mem;
+      probeMem.image_fallback = &localImages;
+      const auto probePcs = StackWalkAllFramesForContext(sym.process, probeMem, ctx, kModalApiMaxDepth + 16u);
+      *outModalProbeFrames = stackwalk::BuildModalProbeFrames(
+        sym.process,
+        modules,
+        probePcs,
+        kModalApiMaxDepth + 16u);
     }
 
     auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64);

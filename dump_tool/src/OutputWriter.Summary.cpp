@@ -389,6 +389,19 @@ nlohmann::json BuildSummaryJson(
     { "stable_thread_count", r.freeze_analysis.thread_module_consensus.stable_thread_count },
     { "os_lock_cycle_proven", r.freeze_analysis.thread_module_consensus.os_lock_cycle_proven },
   };
+  summary["freeze_analysis"]["modal_dialog_wait"] = {
+    { "detected", r.modal_dialog_wait.detected },
+    { "window_evidence", r.modal_dialog_wait.window_evidence },
+    { "stack_evidence", r.modal_dialog_wait.stack_evidence },
+    { "main_thread_id", r.modal_dialog_wait.main_thread_id },
+    { "wait_api", WideToUtf8(r.modal_dialog_wait.wait_api) },
+    { "dialog_title", WideToUtf8(r.modal_dialog_wait.dialog_title) },
+    { "dialog_text", WideToUtf8(r.modal_dialog_wait.dialog_text) },
+    { "caller_module_filename", WideToUtf8(r.modal_dialog_wait.caller_module_filename) },
+    { "caller_inferred_mod_name", WideToUtf8(r.modal_dialog_wait.caller_inferred_mod_name) },
+    { "caller_kind", r.modal_dialog_wait.caller_kind },
+    { "other_thread_dialog_count", r.modal_dialog_wait.other_thread_dialog_count },
+  };
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
   for (const auto& reason : r.freeze_analysis.primary_reasons) {
     summary["freeze_analysis"]["primary_reasons"].push_back(WideToUtf8(reason));

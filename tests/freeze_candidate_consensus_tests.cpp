@@ -45,6 +45,7 @@ void TestSourceContracts()
 
   AssertContains(analyzerHeaderText, "struct FreezeAnalysisResult", "AnalysisResult must expose a structured freeze analysis model.");
   AssertContains(analyzerHeaderText, "freeze_analysis", "AnalysisResult must store freeze analysis output.");
+  AssertContains(analyzerHeaderText, "modal_dialog_wait", "Freeze analysis state ids must include modal_dialog_wait.");
   AssertContains(analyzerHeaderText, "deadlock_likely", "Freeze analysis state ids must include deadlock_likely.");
   AssertContains(analyzerHeaderText, "synchronization_stall_likely", "Freeze analysis state ids must include synchronization_stall_likely.");
   AssertContains(analyzerHeaderText, "loader_stall_likely", "Freeze analysis state ids must include loader_stall_likely.");
@@ -304,6 +305,60 @@ void TestConsensusSnapshotFallbackAndSnapshotBackedStayStateConservative()
   assert(backedResult.confidence_level == ConfidenceLevel::kLow);
 }
 
+void TestConsensusModalDialogWaitOutranksOtherStates()
+{
+  skydiag::dump_tool::ModalDialogWaitInfo modal{};
+  modal.detected = true;
+  modal.window_evidence = true;
+  modal.stack_evidence = true;
+  modal.main_thread_id = 100;
+  modal.wait_api = L"user32.dll!MessageBoxW";
+  modal.dialog_title = L"Fatal Error";
+  modal.caller_module_filename = L"BrokenPlugin.dll";
+  modal.caller_kind = "plugin";
+
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.loading_context = true;
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->cycles = 2;
+  skydiag::dump_tool::BlackboxFreezeSummary blackbox{};
+  blackbox.has_context = true;
+  blackbox.loading_window = true;
+  blackbox.module_churn_score = 5;
+  blackbox.recent_non_system_modules.push_back(L"ColdBreathNG.dll");
+  input.blackbox = blackbox;
+  input.modal_dialog_wait = modal;
+  input.actionable_candidates.push_back(MakeCandidate(L"BrokenPlugin.dll"));
+
+  const auto both = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(both.has_analysis);
+  assert(both.state_id == "modal_dialog_wait");
+  assert(both.confidence_level == ConfidenceLevel::kHigh);
+  assert(both.related_candidates.size() == 1u);
+  assert(both.related_candidates[0].display_name == L"BrokenPlugin.dll");
+  bool mentionsBystanders = false;
+  for (const auto& reason : both.primary_reasons) {
+    if (reason.find(L"bystanders") != std::wstring::npos) {
+      mentionsBystanders = true;
+    }
+  }
+  assert(mentionsBystanders);
+
+  modal.stack_evidence = false;
+  input.modal_dialog_wait = modal;
+  const auto windowOnly = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(windowOnly.state_id == "modal_dialog_wait");
+  assert(windowOnly.confidence_level == ConfidenceLevel::kMedium);
+
+  modal.detected = false;
+  input.modal_dialog_wait = modal;
+  const auto notModal = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(notModal.state_id == "deadlock_likely");
+}
+
 void TestConsensusFreezeCandidateAndAmbiguous()
 {
   FreezeSignalInput candidateInput{};
@@ -341,5 +396,6 @@ int main()
   TestConsensusLoaderStallNeedsContextForConsistentLoadingSignal();
   TestConsensusSnapshotFallbackAndSnapshotBackedStayStateConservative();
   TestConsensusFreezeCandidateAndAmbiguous();
+  TestConsensusModalDialogWaitOutranksOtherStates();
   return 0;
 }

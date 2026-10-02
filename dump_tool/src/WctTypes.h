@@ -17,6 +17,15 @@ struct WctCaptureDecision
   bool isLoading = false;
 };
 
+struct WctModalDialog
+{
+  std::uint32_t tid = 0;
+  std::string title;  // UTF-8
+  std::string text;   // UTF-8
+  bool has_owner = false;
+  bool owner_disabled = false;
+};
+
 struct WctFreezeSummary
 {
   bool has = false;
@@ -41,6 +50,9 @@ struct WctFreezeSummary
   std::uint32_t pss_snapshot_capture_ms = 0;
   std::string pss_snapshot_status;
   std::string dump_transport;
+  // Visible #32770 dialogs captured by the helper (absent in older captures).
+  bool modal_dialogs_captured = false;
+  std::vector<WctModalDialog> modal_dialogs;
 };
 
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN);
