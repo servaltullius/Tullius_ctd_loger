@@ -79,7 +79,7 @@ This is a workaround reported by users, not a behavior the helper detects yet. I
 Capture and the text report work under Wine/Proton; the WinUI viewer does not ([#5](https://github.com/servaltullius/Tullius_ctd_loger/issues/5)). The viewer needs the Windows App Runtime, which Wine does not provide and winetricks cannot install.
 
 - The SKSE plugin and `SkyrimDiagHelper.exe` capture crash, freeze, and manual dumps as usual. Each capture also gets `*_SkyrimDiagReport.txt` and `*_SkyrimDiagSummary.json` in the output folder; read the `.txt` report.
-- Starting with the next release, the helper detects Wine and turns viewer auto-open off, so every capture gets a report. Opening `SkyrimDiagDumpToolWinUI.exe` under Wine shows this note; when given a dump, it writes that dump's report and offers to open it.
+- Starting with v0.2.59-rc2, the helper detects Wine and turns viewer auto-open off, so every capture gets a report. Opening `SkyrimDiagDumpToolWinUI.exe` under Wine shows this note; when given a dump, it writes that dump's report and offers to open it.
 - On earlier versions, set `AutoOpenViewerOnCrash=0` and `AutoOpenViewerOnHang=0` in `SkyrimDiagHelper.ini`. Otherwise a crash that ends the game quickly can leave only the dump, because the helper waits for a viewer that never starts.
 - To analyze a dump by hand: `wine SkyrimDiagDumpToolCli.exe "path\to\dump.dmp"`.
 - Under Wine, WCT wait chains are unavailable (Wine does not implement them) and symbol/source-line detail may be reduced.
