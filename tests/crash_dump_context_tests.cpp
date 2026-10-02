@@ -13,27 +13,13 @@ using skydiag::helper::CaptureKind;
 using skydiag::helper::DumpMode;
 using skydiag::helper::ResolveDumpProfile;
 using skydiag::helper::WriteDumpWithStreams;
-using skydiag::tests::runtime::LaunchSleepingChildProcess;
 using skydiag::tests::runtime::MakeSharedLayout;
 using skydiag::tests::runtime::MakeTempDir;
+using skydiag::tests::runtime::OpenSelfProcessHandle;
+using skydiag::tests::runtime::ParkedThread;
 using skydiag::tests::runtime::Require;
-using skydiag::tests::runtime::TerminateChildProcess;
 
 namespace {
-
-CONTEXT CaptureChildThreadContext(DWORD tid)
-{
-  CONTEXT ctx{};
-  ctx.ContextFlags = CONTEXT_FULL;
-  HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, tid);
-  Require(thread != nullptr, "OpenThread failed");
-  Require(SuspendThread(thread) != static_cast<DWORD>(-1), "SuspendThread failed");
-  const BOOL ok = GetThreadContext(thread, &ctx);
-  ResumeThread(thread);
-  CloseHandle(thread);
-  Require(ok != FALSE, "GetThreadContext failed");
-  return ctx;
-}
 
 bool WriteCrashDump(
   HANDLE process,
@@ -66,10 +52,13 @@ bool WriteCrashDump(
 void TestCrashDumpSurvivesUnmappedRegisterTargets()
 {
   const auto outBase = MakeTempDir(L"skydiag_crash_dump_context");
-  auto child = LaunchSleepingChildProcess();
-  const DWORD pid = child.pi.dwProcessId;
-  const DWORD tid = child.pi.dwThreadId;
-  const CONTEXT real = CaptureChildThreadContext(tid);
+  // Dump this process with a parked worker as the faulting thread (see
+  // ParkedThread for why not an external process).
+  ParkedThread faulting;
+  const HANDLE process = OpenSelfProcessHandle();
+  const DWORD pid = GetCurrentProcessId();
+  const DWORD tid = faulting.tid();
+  const CONTEXT real = faulting.Context();
 
   CONTEXT ripNullPage = real;
   ripNullPage.Rip = 0x10;
@@ -84,7 +73,7 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
     const CONTEXT* ctx;
   };
   const Case cases[] = {
-    { "child thread context", &real },
+    { "faulting thread context", &real },
     { "RIP in the null page", &ripNullPage },
     { "RIP in unmapped memory", &ripUnmapped },
     { "RSP in the null page", &rspNullPage },
@@ -95,7 +84,7 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
     for (const auto& c : cases) {
       std::wstring err;
       const auto path = outBase / (L"case" + std::to_wstring(index++) + L".dmp");
-      const bool ok = WriteCrashDump(child.pi.hProcess, pid, tid, *c.ctx, mode, path, &err);
+      const bool ok = WriteCrashDump(process, pid, tid, *c.ctx, mode, path, &err);
       if (!ok) {
         std::fprintf(
           stderr,
@@ -109,7 +98,7 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
     }
   }
 
-  TerminateChildProcess(&child);
+  CloseHandle(process);
   std::filesystem::remove_all(outBase);
 }
 

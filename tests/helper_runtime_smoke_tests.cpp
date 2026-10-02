@@ -28,13 +28,16 @@ using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::helper::internal::StableSharedSnapshot;
 using skydiag::helper::internal::TryClearRecoveredCrashFreeze;
 using skydiag::tests::runtime::AssertContains;
+using skydiag::tests::runtime::CloseAttachedProcess;
 using skydiag::tests::runtime::FileExists;
 using skydiag::tests::runtime::FindSingleFileByPrefix;
 using skydiag::tests::runtime::LaunchSleepingChildProcess;
 using skydiag::tests::runtime::MakeAttachedProcessForChild;
+using skydiag::tests::runtime::MakeSelfAttachedProcess;
 using skydiag::tests::runtime::MakeSharedLayout;
 using skydiag::tests::runtime::MakeTempDir;
 using skydiag::tests::runtime::MakeTestConfig;
+using skydiag::tests::runtime::ParkedThread;
 using skydiag::tests::runtime::ReadAllTextUtf8;
 using skydiag::tests::runtime::Require;
 using skydiag::tests::runtime::TerminateChildProcess;
@@ -50,14 +53,17 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   auto shared = MakeSharedLayout();
   shared->header.crash_seq = 2;
   shared->header.crash.exception_code = 0xC0000005u;
-  auto child = LaunchSleepingChildProcess();
-  shared->header.crash.faulting_tid = child.pi.dwThreadId;
-  shared->header.crash.exception_addr = reinterpret_cast<std::uint64_t>(shared.get());
+  // The faulting thread is a parked worker of this process, and the dump
+  // target is this process (see ParkedThread for why not an external child).
+  ParkedThread faulting;
+  const CONTEXT faultingContext = faulting.Context();
+  shared->header.crash.faulting_tid = faulting.tid();
+  shared->header.crash.exception_addr = faultingContext.Rip;
   shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
-  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(shared.get());
-  RtlCaptureContext(&shared->header.crash.context);
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(faultingContext.Rip);
+  shared->header.crash.context = faultingContext;
 
-  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  auto proc = MakeSelfAttachedProcess(shared.get());
   proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
   Require(proc.crashEvent != nullptr, "CreateEventW failed");
 
@@ -86,6 +92,10 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
     &pendingCrashViewerDumpPath);
 
   Require(handled, "Crash event should be consumed");
+  if (!crashState.latched) {
+    // Surface the per-attempt dump errors from the helper log.
+    std::fprintf(stderr, "%s\n", ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log").c_str());
+  }
   Require(crashState.latched, "Crash capture state should flip true");
   Require(
     crashState.capturedInfo.crashSeq == 2u &&
@@ -105,7 +115,7 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   ShutdownRetentionWorker();
   CloseHandle(proc.crashEvent);
   proc.crashEvent = nullptr;
-  TerminateChildProcess(&child);
+  CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
 }
 

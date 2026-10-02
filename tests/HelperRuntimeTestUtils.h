@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
@@ -156,6 +157,63 @@ inline HANDLE OpenSelfProcessHandle()
   Require(process != nullptr, "OpenProcess(self) failed");
   return process;
 }
+
+// A worker thread of this process parked in a wait. Synthetic crash records
+// name it as the faulting thread so crash-capture tests dump this process.
+// Dumping a freshly launched external process (cmd.exe) intermittently failed
+// on GitHub Windows runners with ERROR_PARTIAL_COPY even after it settled,
+// while self-process dumps (the hang tests) have been stable there.
+class ParkedThread
+{
+public:
+  ParkedThread()
+    : release_(CreateEventW(nullptr, TRUE, FALSE, nullptr)),
+      parked_(CreateEventW(nullptr, TRUE, FALSE, nullptr))
+  {
+    Require(release_ != nullptr && parked_ != nullptr, "CreateEventW failed");
+    thread_ = std::thread([this]() {
+      tid_ = GetCurrentThreadId();
+      SetEvent(parked_);
+      WaitForSingleObject(release_, INFINITE);
+    });
+    Require(WaitForSingleObject(parked_, 5000) == WAIT_OBJECT_0, "Parked thread did not start");
+  }
+
+  ParkedThread(const ParkedThread&) = delete;
+  ParkedThread& operator=(const ParkedThread&) = delete;
+
+  ~ParkedThread()
+  {
+    SetEvent(release_);
+    if (thread_.joinable()) {
+      thread_.join();
+    }
+    CloseHandle(release_);
+    CloseHandle(parked_);
+  }
+
+  DWORD tid() const { return tid_; }
+
+  CONTEXT Context() const
+  {
+    CONTEXT ctx{};
+    ctx.ContextFlags = CONTEXT_FULL;
+    HANDLE thread = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, tid_);
+    Require(thread != nullptr, "OpenThread failed");
+    Require(SuspendThread(thread) != static_cast<DWORD>(-1), "SuspendThread failed");
+    const BOOL ok = GetThreadContext(thread, &ctx);
+    ResumeThread(thread);
+    CloseHandle(thread);
+    Require(ok != FALSE, "GetThreadContext failed");
+    return ctx;
+  }
+
+private:
+  HANDLE release_ = nullptr;
+  HANDLE parked_ = nullptr;
+  DWORD tid_ = 0;
+  std::thread thread_;
+};
 
 inline skydiag::helper::AttachedProcess MakeSelfAttachedProcess(skydiag::SharedLayout* shared)
 {
