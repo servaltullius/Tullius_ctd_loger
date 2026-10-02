@@ -26,6 +26,9 @@ bool IsUnknownModuleField(std::string_view modulePlusOffset);
 
 std::string WideToUtf8(std::wstring_view s);
 
+// True when the helper runs under Wine/Proton (ntdll exports wine_get_version).
+bool IsRunningUnderWine();
+
 struct CrashSummaryInfo
 {
   std::uint32_t schemaVersion = 1;

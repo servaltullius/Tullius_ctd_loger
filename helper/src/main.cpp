@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagShared.h"
@@ -33,7 +34,9 @@ int wmain(int argc, wchar_t** argv)
   SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
 
   std::wstring err;
-  const auto cfg = skydiag::helper::LoadConfig(&err);
+  auto cfg = skydiag::helper::LoadConfig(&err);
+  const bool runningUnderWine = skydiag::helper::internal::IsRunningUnderWine();
+  const bool wineViewerPolicyApplied = skydiag::helper::ApplyWineViewerPolicy(&cfg, runningUnderWine);
   SetHelperLogRotation(cfg.maxHelperLogBytes, cfg.maxHelperLogFiles);
   if (!err.empty()) {
     std::wcerr << L"[SkyrimDiagHelper] Config warning: " << err << L"\n";
@@ -91,6 +94,14 @@ int wmain(int argc, wchar_t** argv)
   AppendLogLine(outBase, L"Attached to pid=" + std::to_wstring(proc.pid) + L", output=" + outBase.wstring());
   if (!configWarning.empty()) {
     AppendLogLine(outBase, L"Config warning: " + configWarning);
+  }
+  if (runningUnderWine) {
+    AppendLogLine(
+      outBase,
+      wineViewerPolicyApplied
+        ? L"Wine/Proton detected: the WinUI viewer cannot start under Wine, so viewer auto-open is disabled and "
+          L"captures get a headless *_SkyrimDiagReport.txt (set AutoOpenViewerUnderWine=1 to override)."
+        : L"Wine/Proton detected.");
   }
   if (!proc.crashEvent) {
     AppendLogLine(

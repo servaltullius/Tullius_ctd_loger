@@ -63,6 +63,9 @@ If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or inco
 [*]The Helper attaches automatically. No separate manual launch is required
 [/list]
 
+[b]Linux (Wine / Proton)[/b]
+Capture and the text report work under Wine/Proton, but the WinUI viewer does not: it needs the Windows App Runtime, which Wine does not provide. Read [font=Courier New]*_SkyrimDiagReport.txt[/font] in the output folder instead. Starting with the next release the Helper detects Wine and writes a report for every capture; on earlier versions set [font=Courier New]AutoOpenViewerOnCrash=0[/font] and [font=Courier New]AutoOpenViewerOnHang=0[/font] in [font=Courier New]SkyrimDiagHelper.ini[/font].
+
 [b][size=4]How To Use[/size][/b]
 
 [b]Automatic capture[/b]
@@ -269,6 +272,9 @@ v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 
 [*]SKSE로 게임을 실행합니다.
 [*]Helper는 자동으로 게임에 붙습니다.
 [/list]
+
+[b]Linux (Wine / Proton)[/b]
+Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰어는 Wine이 제공하지 않는 Windows App Runtime이 필요해 실행되지 않습니다. 출력 폴더의 [font=Courier New]*_SkyrimDiagReport.txt[/font]를 확인하세요. 다음 릴리즈부터 Helper가 Wine을 감지해 모든 캡처에 리포트를 만듭니다. 이전 버전에서는 [font=Courier New]SkyrimDiagHelper.ini[/font]에서 [font=Courier New]AutoOpenViewerOnCrash=0[/font], [font=Courier New]AutoOpenViewerOnHang=0[/font]으로 설정하세요.
 
 [b][size=4]사용 방법[/size][/b]
 

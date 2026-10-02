@@ -67,6 +67,12 @@ std::wstring Timestamp()
   return buf;
 }
 
+bool IsRunningUnderWine()
+{
+  const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
 {
   std::filesystem::path out(cfg.outputDir);

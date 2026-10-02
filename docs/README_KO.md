@@ -77,6 +77,16 @@ Tullius는 CrashLogger를 대체하는 도구가 아니라 서로 다른 근거�
 - 시작 시 호환성 점검 결과: `SkyrimDiag_Preflight.json` (설정 `EnableCompatibilityPreflight=1`)
 - 덤프 실패 fallback 힌트: `SkyrimDiag_WER_LocalDumps_Hint.txt` (설정 `EnableWerDumpFallbackHint=1`)
 
+## Linux (Wine / Proton)
+
+Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰어는 실행되지 않습니다([#5](https://github.com/servaltullius/Tullius_ctd_loger/issues/5)). 뷰어에 필요한 Windows App Runtime을 Wine이 제공하지 않고, winetricks로도 설치할 수 없습니다.
+
+- SKSE 플러그인과 `SkyrimDiagHelper.exe`는 평소처럼 CTD·프리징·수동 덤프를 캡처합니다. 캡처마다 출력 폴더에 `*_SkyrimDiagReport.txt`와 `*_SkyrimDiagSummary.json`도 생성되니 `.txt` 리포트를 확인하세요.
+- 다음 릴리즈부터 Helper가 Wine을 감지해 뷰어 자동 열기를 끄므로, 모든 캡처에 리포트가 생성됩니다. Wine에서 `SkyrimDiagDumpToolWinUI.exe`를 실행하면 이 안내가 표시되고, 덤프를 넘기면 해당 덤프의 리포트를 만든 뒤 열지 물어봅니다.
+- 이전 버전에서는 `SkyrimDiagHelper.ini`에서 `AutoOpenViewerOnCrash=0`, `AutoOpenViewerOnHang=0`으로 설정하세요. 그렇지 않으면 게임이 곧바로 종료되는 CTD에서 Helper가 뜨지 않는 뷰어를 기다리느라 덤프만 남을 수 있습니다.
+- 덤프를 직접 분석하려면: `wine SkyrimDiagDumpToolCli.exe "경로\dump.dmp"`
+- Wine에서는 WCT 대기 체인을 쓸 수 없고(Wine 미구현), 심볼·소스 줄 정보가 줄어들 수 있습니다.
+
 ## 캡처 방식
 
 | 상황 | 덤프 파일 패턴 | 트리거 |

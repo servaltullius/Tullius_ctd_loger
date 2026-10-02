@@ -36,6 +36,9 @@ struct HelperConfig {
   std::uint32_t autoRecaptureAnalysisTimeoutSec = 20;
   bool autoOpenViewerOnHang = true;
   bool autoOpenViewerOnManualCapture = false;
+  // The WinUI viewer cannot start under Wine/Proton; auto-open stays off there
+  // unless this is set.
+  bool autoOpenViewerUnderWine = false;
   bool autoOpenHangAfterProcessExit = true;
   std::uint32_t autoOpenHangDelayMs = 2000;
   bool autoOpenViewerBeginnerMode = true;
