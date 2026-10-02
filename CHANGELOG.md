@@ -2,6 +2,48 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.59-rc2 (미배포)
+
+### 한눈에 보기
+- 플러그인이 띄운 오류 대화상자 때문에 게임이 멈춘 경우를 **`modal_dialog_wait`** 상태로 분류하고, 스택에 우연히 남은 무관한 플러그인을 원인으로 지목하지 않습니다(#3).
+- 정식 stackwalk가 처음부터 **항상 1프레임에서 멈추던 버그**를 고쳐, CTD와 프리징 리포트에 실제 호출 체인이 나타납니다.
+- Linux(Wine/Proton)에서는 동작하지 않는 WinUI 뷰어를 기다리지 않고, 모든 캡처에 텍스트 리포트를 남깁니다(#5).
+- MO2에서 사고 후 결과가 생기지 않을 때의 확인 방법과 실제 폴더 배치 우회법을 문서에 추가했습니다(#4).
+
+### 수정
+- **modal 대화상자 프리징 분류** — Helper가 hang 캡처 시 대상 프로세스의 보이는 대화상자(`#32770`: MessageBox, DialogBox, TaskDialog)의 소유 스레드, 제목, 본문을 WCT JSON의 `modal_dialogs`에 기록합니다. 대상에 메시지를 보내지 않으므로 멈춘 게임이 Helper를 막지 못합니다. 분석기는 메인 스레드가 그 대화상자를 소유하는지(창 근거)와, 메인 스레드 스택이 `user32` MessageBox/DialogBox 또는 `comctl32` TaskDialog 진입점에서 대기 중이고 그 위에 플러그인 코드가 없는지(스택 근거)를 각각 판정합니다. 둘 다 성립하면 `High`, 하나면 `Medium`이며, 다른 프리징 상태보다 먼저 판정합니다.
+- **modal 대기의 후보 귀속** — 대화상자 API를 직접 호출한 일반 플러그인만 `modal_dialog_owner` 후보(`related / Medium`)가 됩니다. SKSE 런타임, 훅 프레임워크, 게임 EXE가 띄운 대화상자는 그렇게 설명만 하고 스택 아래쪽 모듈로 넘기지 않습니다. Crash Logger frame, 스택 밀도, 스레드 그룹, 인접 리소스 후보는 만들지 않고, 스택 suspect는 `Low`로 낮춰 원인이 아님을 표시합니다. 요약 문장, 근거 항목, 텍스트 리포트, `freeze_analysis.modal_dialog_wait` JSON, 권장 조치("게임 창 뒤 오류 창 확인"과 캡처된 대화상자 본문), WinUI 다음 행동 안내에 반영했습니다. 본문의 사용자 프로필 경로 이름은 `<user>`로 가립니다.
+- **정식 stackwalk가 실제 호출자를 복원** — 기존 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임)을 진전 없음으로 보고 멈춰, CTD는 fault 프레임 하나만 점수에 쓰였고 프리징은 사실상 항상 메인 스레드 포인터 스캔으로 넘어갔습니다. 이제 모든 프레임을 unwind하며, 덤프에 없는 모듈 메모리와 `.pdata`는 로컬 이미지 파일의 `TimeDateStamp`와 `SizeOfImage`가 덤프 모듈과 같을 때만 읽습니다. 0번 프레임 외에는 unwind 항목이 없으면 멈추고 모듈 밖 주소를 기록하지 않아, 스택 슬롯 추측으로 힙·전역·vtable 주소가 프레임에 섞이지 않습니다.
+- **프리징 stackwalk 대상 제한** — 메인 스레드를 아는 프리징은 메인 스레드와 WCT cycle 스레드만 stackwalk합니다(ADR-0005). 자기 루프에서 쉬고 있는 워커 스레드는 정지의 근거로 쓰지 않습니다.
+- **stackwalk 진단 구분** — Helper의 재수집 상향 판단에 쓰이는 `[Stackwalk] DbgHelp stackwalk failed`는 실제로 호출자 프레임을 얻지 못한 경우에만 남깁니다. 프레임은 얻었지만 실행 가능한 모듈이 없으면 `formal stackwalk found no actionable module`로 구분하고, 프리징 요약도 "실패" 대신 "실행 가능한 모듈을 특정하지 못함"으로 표시합니다.
+- **Wine/Proton에서 헤드리스 리포트 보장** — WinUI 뷰어는 Wine이 제공하지 않는 Windows App Runtime 구성 요소가 필요해 시작 단계에서 실패하지만, 그 프로세스가 Helper의 실행 확인 시간보다 오래 살아 있어 헤드리스 분석이 건너뛰어졌습니다. Helper가 Wine을 감지하면 뷰어 자동 열기를 끄고 모든 캡처에 `*_SkyrimDiagReport.txt`를 생성하며, `SkyrimDiagHelper.ini`의 `AutoOpenViewerUnderWine=1`로 이 동작을 끌 수 있습니다. 뷰어 런처는 Wine에서 WinUI 앱을 띄우지 않고 이유를 안내하며, 덤프가 주어지면 함께 배포된 CLI로 리포트를 만든 뒤 열지 묻습니다.
+
+### 빌드·검증
+- **crash bucket v3(`CTD3-`)** — 버킷 키를 이루는 stackwalk 프레임이 달라지므로 버킷 버전을 올렸습니다.
+- **분석기 데이터 복사 경쟁 제거** — `SkyrimDiagDumpToolNative.dll`과 `SkyrimDiagDumpToolCli.exe`가 각각 POST_BUILD 단계에서 같은 `data` 폴더로 복사하다 동시에 끝나면 빌드가 실패하던 문제를, 단일 `SkyrimDiagDumpToolData` 타깃으로 고쳤습니다.
+- **CI 중복 실행 제거** — PR 브랜치는 `pull_request`로 한 번만 검증하고, 같은 PR에 새로 푸시하면 진행 중인 이전 실행을 취소합니다. `main` 푸시는 취소하지 않습니다.
+- **테스트 안정화** — 버튼 하나짜리 MessageBox의 OK 버튼 ID가 `IDCANCEL`이라 `IDOK`로 닫히지 않던 테스트를 `WM_CLOSE`와 제한 시간으로 고쳤고, 덤프 대상 자식 프로세스가 초기화를 마칠 때까지 기다려 `ERROR_PARTIAL_COPY` 간헐 실패를 막았습니다.
+- 설계 기록으로 ADR-0006(modal 대화상자 분류)과 ADR-0007(정식 stackwalk unwind)을 추가했습니다.
+
+### 문서
+- **MO2 실제 폴더 배치 안내** — 모드로만 설치했을 때 사고 후 덤프·리포트가 생기지 않거나 뷰어가 열리지 않으면 `SkyrimDiagHelper.log`를 먼저 확인하고, `SKSE\Plugins\` 전체를 실제 `Data` 폴더에 복사하는 사용자 제보 우회법을 README·한국어 README·Nexus 설명에 추가했습니다. 한국어 README의 Helper 로그 경로도 실제 위치(`Tullius Ctd Logs\SkyrimDiagHelper.log`)로 바로잡았습니다.
+- **Linux(Wine/Proton) 지원 범위** — 캡처와 텍스트 리포트는 동작하고 WinUI 뷰어는 동작하지 않는다는 점, 이전 버전용 설정(`AutoOpenViewerOnCrash=0`, `AutoOpenViewerOnHang=0`)을 문서에 추가했습니다.
+
+### 주의사항
+- 새 `CTD3-` 버킷은 기존 `CTD2-` history 그룹과 자동으로 합쳐지지 않습니다.
+- stackwalk는 덤프의 모듈과 같은 버전의 파일이 분석하는 PC에 있어야 그 모듈을 지나 내려갈 수 있습니다. 삭제·업데이트된 모드나 다른 PC에서 분석한 덤프는 해당 모듈에서 멈추고, modal 판정도 창 근거만 남을 수 있습니다.
+- 실제 호출 체인이 나타나면서 후킹 체인(D3D 초기화 훅 등)에 놓인 다른 DLL도 호출자로 보일 수 있습니다. 점수 가중치와 후보 정책은 바꾸지 않았으므로 이런 DLL은 `Low` 보조 후보로만 남습니다.
+- 이번 동작 변경은 한 사용자 PC의 실사고 덤프 7개(crash 2, hang 5)로 회귀만 확인했으며, 정확도 측정이 아닙니다. 검수된 실사고 코퍼스가 없으므로 다른 로거 대비 적중률을 수치로 주장하지 않습니다.
+- Wine에서는 WCT 대기 체인과 modal 대화상자 스택 근거를 쓸 수 없고 심볼·소스 줄 정보가 줄어듭니다. Helper의 Wine 감지는 실제 Proton 게임 세션에서 확인하지 못했습니다.
+- 플러그인과 공유 메모리 프로토콜(SharedLayout v4)은 바뀌지 않았지만, Helper·분석기·WinUI 런처가 함께 바뀌므로 zip 전체를 교체해 주세요.
+
+### 테스트
+- Windows 전체 테스트: `70/70` 통과. modal 대화상자 판정·WCT 파싱 단위 테스트, 실제 MessageBox를 Helper로 캡처하는 테스트, Helper hang 캡처부터 분석기까지 이어지는 modal E2E 테스트, 세 단계 호출 체인을 복원하는 stackwalk E2E 테스트를 추가했습니다.
+- Linux 전체 테스트: `62/62` 통과.
+- Windows production clang-tidy 전체: clean(각 PR 기준).
+- Wine 9.0 실측: CLI 분석, Helper CTD·hang 캡처, 런처의 Wine 안내와 리포트 생성을 확인했습니다.
+- 실사고 덤프 7개 전후 비교: crash 2건은 최상위 후보 유지, hang 4건은 "stackwalk 실패"에서 실제 메인 스레드 호출 체인 복원, 나머지 1건은 GPU 드라이버 안 대기까지 복원했습니다.
+
 ## v0.2.59-rc1 (2026-08-08)
 
 ### 수정
