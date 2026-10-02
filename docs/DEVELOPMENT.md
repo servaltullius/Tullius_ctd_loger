@@ -68,7 +68,7 @@ For in-game validation without waiting:
 - GitHub Actions is optional/reference only and should not be the sole release gate.
 - Main workflow: `.github/workflows/ci.yml`
 - Main workflow scope: Linux tests, Windows build/package/gate, complete Windows production clang-tidy coverage, extracted-package launcher smoke, and repo guard checks
-- Main workflow triggers: pull requests, pushes to `main`, and `workflow_dispatch` for any other branch. A newer push to the same pull request cancels its in-flight run.
+- Main workflow triggers: pull requests, pushes to `main`, and `workflow_dispatch` for any other branch. A newer push to the same pull request cancels its in-flight run; every commit pushed to `main` keeps its own run.
 - Tag-triggered releases rerun Linux unit, ASan+UBSan, the Linux clang-tidy subset, parser fuzz, complete Windows production clang-tidy, and the packaged launcher smoke before publication.
 - Manual rerun of the same packaged WinUI smoke: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`

@@ -9,10 +9,11 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same PR supersedes its in-flight run. Pushes to main are
-# never cancelled so every merged commit keeps its own result.
+# A newer push to the same PR supersedes its in-flight run. Other runs get a
+# group per commit: a shared per-ref group still let GitHub replace a pending
+# main run when merges landed back to back, leaving that commit unverified.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
