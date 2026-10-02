@@ -26,6 +26,7 @@ constexpr const char* kFamilyHistory = "history_repeat";
 constexpr const char* kFamilyFirstChance = "first_chance_context";
 constexpr const char* kFamilyHangThreadGroup = "hang_thread_group";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
+constexpr std::uint32_t kQualifiedStackWeightThreshold = 4u;
 constexpr std::uint32_t kFrameConflictWeightThreshold = 6u;
 constexpr std::uint32_t kStackConflictWeightThreshold = 4u;
 constexpr std::uint32_t kObjectRefConflictWeightThreshold = 5u;
@@ -57,11 +58,13 @@ bool IsBoostOnlyFamily(std::string_view familyId)
   return familyId == kFamilyHistory || familyId == kFamilyResource;
 }
 
-std::uint32_t RowScore(const CandidateRow& row)
+std::uint32_t CoreRowScore(const CandidateRow& row)
 {
   std::uint32_t score = 0;
-  for (const auto& [_, weight] : row.family_weight) {
-    score += weight;
+  for (const auto& [familyId, weight] : row.family_weight) {
+    if (!IsBoostOnlyFamily(familyId)) {
+      score += weight;
+    }
   }
   return score;
 }
@@ -91,7 +94,20 @@ bool HasStrongFamily(const ActionableCandidate& candidate)
          HasFamily(candidate, kFamilyHangThreadGroup);
 }
 
-bool HasActionableCrossValidation(const CandidateRow& row)
+bool HasQualifiedCrossValidation(const CandidateRow& row)
+{
+  // A Crash Logger frame and the same incident's stack corroborate a fault
+  // location, but are not independent enough for High confidence. Reserve
+  // cross-validation for a semantic object reference plus a formal stack
+  // signal; pointer-scan signals have weight 2 and cannot qualify.
+  const std::uint32_t objectRefWeight = FamilyWeight(row, kFamilyCrashLoggerObjectRef);
+  const std::uint32_t stackWeight = FamilyWeight(row, kFamilyStack);
+  return objectRefWeight > 0u &&
+         stackWeight >= kQualifiedStackWeightThreshold &&
+         static_cast<std::uint64_t>(objectRefWeight) + stackWeight >= kCrossValidatedScoreThreshold;
+}
+
+bool HasCorroboratedStackSupport(const CandidateRow& row)
 {
   return (RowHasFamily(row, kFamilyCrashLoggerFrame) || RowHasFamily(row, kFamilyCrashLoggerObjectRef)) &&
          RowHasFamily(row, kFamilyStack);
@@ -102,15 +118,14 @@ bool HasFrameAndStackConsensus(const CandidateRow& row)
   return RowHasFamily(row, kFamilyCrashLoggerFrame) &&
          RowHasFamily(row, kFamilyStack) &&
          CountNonBoostFamilies(row) >= 2 &&
-         RowScore(row) >= kCrossValidatedScoreThreshold;
+         CoreRowScore(row) >= kCrossValidatedScoreThreshold;
 }
 
 bool IsObjectRefOnlyClue(const CandidateRow& row)
 {
   return RowHasFamily(row, kFamilyCrashLoggerObjectRef) &&
          !RowHasFamily(row, kFamilyCrashLoggerFrame) &&
-         !RowHasFamily(row, kFamilyStack) &&
-         !RowHasFamily(row, kFamilyResource);
+         !RowHasFamily(row, kFamilyStack);
 }
 
 int StatusRank(const ActionableCandidate& candidate)
@@ -188,23 +203,21 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool conflict = candidate.has_conflict;
   const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
+  const std::uint32_t coreScore = CoreRowScore(*row);
   const bool crossValidated =
     !conflict &&
-    (hasCrashLoggerFrame || hasCrashLoggerObjectRef) &&
-    hasStack &&
-    nonBoostFamilyCount >= 2 &&
-    candidate.score >= kCrossValidatedScoreThreshold;
+    HasQualifiedCrossValidation(*row);
+  const bool frameAndStack = hasCrashLoggerFrame && hasStack;
   const bool frameAndObjectRef = hasCrashLoggerFrame && hasCrashLoggerObjectRef;
-  const bool frameOnly = hasCrashLoggerFrame && !hasStack && !hasCrashLoggerObjectRef && !hasResource;
+  const bool frameOnly = hasCrashLoggerFrame && !hasStack && !hasCrashLoggerObjectRef;
   const bool strongFrameOnly = frameOnly && FamilyWeight(*row, kFamilyCrashLoggerFrame) >= 6u;
-  const bool stackOnly = hasStack && !hasCrashLoggerFrame && !hasCrashLoggerObjectRef && !hasResource;
+  const bool stackOnly = hasStack && !hasCrashLoggerFrame && !hasCrashLoggerObjectRef;
   const bool strongStackOnly = stackOnly && FamilyWeight(*row, kFamilyStack) >= 5u;
   const bool objectRefWithHistory =
     hasCrashLoggerObjectRef &&
     HasFamily(candidate, kFamilyHistory) &&
     !hasCrashLoggerFrame &&
-    !hasStack &&
-    !hasResource;
+    !hasStack;
 
   if (conflict) {
     candidate.status_id = "conflicting";
@@ -214,6 +227,10 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.status_id = "cross_validated";
     candidate.confidence_level = i18n::ConfidenceLevel::kHigh;
     candidate.cross_validated = true;
+  } else if (frameAndStack) {
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
+    candidate.cross_validated = false;
   } else if (frameAndObjectRef) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
@@ -230,7 +247,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
-  } else if (nonBoostFamilyCount >= 2 && candidate.score >= 7 && HasStrongFamily(candidate)) {
+  } else if (nonBoostFamilyCount >= 2 && coreScore >= 7 && HasStrongFamily(candidate)) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;
     candidate.cross_validated = false;
@@ -409,6 +426,24 @@ std::wstring CanonicalCandidateKey(std::wstring_view value)
   return key;
 }
 
+void SortActionableCandidates(std::vector<ActionableCandidate>& candidates)
+{
+  std::sort(candidates.begin(), candidates.end(), [](const ActionableCandidate& a, const ActionableCandidate& b) {
+    const int rankA = StatusRank(a);
+    const int rankB = StatusRank(b);
+    if (rankA != rankB) {
+      return rankA > rankB;
+    }
+    if (a.score != b.score) {
+      return a.score > b.score;
+    }
+    if (a.family_count != b.family_count) {
+      return a.family_count > b.family_count;
+    }
+    return a.display_name < b.display_name;
+  });
+}
+
 std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<CandidateSignal>& signals, i18n::Language language)
 {
   std::unordered_map<std::wstring, CandidateRow> rowsByKey;
@@ -474,12 +509,12 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
       topFrameWeight >= kFrameConflictWeightThreshold &&
       topStackWeight >= kStackConflictWeightThreshold) {
     if (auto it = rowsByKey.find(topFrameKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second)) {
+        !HasCorroboratedStackSupport(it->second)) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families = { kFamilyStack };
     }
     if (auto it = rowsByKey.find(topStackKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second)) {
+        !HasCorroboratedStackSupport(it->second)) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families = { kFamilyCrashLoggerFrame };
     }
@@ -494,13 +529,13 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
       topStackIt != rowsByKey.end() &&
       HasFrameAndStackConsensus(topStackIt->second);
     if (auto it = rowsByKey.find(topObjectRefKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second) &&
+        !HasCorroboratedStackSupport(it->second) &&
         !(preserveObjectRefAsSecondaryClue && IsObjectRefOnlyClue(it->second))) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyStack);
     }
     if (auto it = rowsByKey.find(topStackKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second)) {
+        !HasCorroboratedStackSupport(it->second)) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerObjectRef);
     }
@@ -515,12 +550,12 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
       topFrameIt != rowsByKey.end() &&
       HasFrameAndStackConsensus(topFrameIt->second);
     if (auto it = rowsByKey.find(topFrameKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second)) {
+        !HasCorroboratedStackSupport(it->second)) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerObjectRef);
     }
     if (auto it = rowsByKey.find(topObjectRefKey); it != rowsByKey.end() &&
-        !HasActionableCrossValidation(it->second) &&
+        !HasCorroboratedStackSupport(it->second) &&
         !(preserveObjectRefAsSecondaryClue && IsObjectRefOnlyClue(it->second))) {
       it->second.candidate.has_conflict = true;
       it->second.candidate.conflicting_families.push_back(kFamilyCrashLoggerFrame);
@@ -537,20 +572,7 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
     }
   }
 
-  std::sort(candidates.begin(), candidates.end(), [](const ActionableCandidate& a, const ActionableCandidate& b) {
-    const int rankA = StatusRank(a);
-    const int rankB = StatusRank(b);
-    if (rankA != rankB) {
-      return rankA > rankB;
-    }
-    if (a.score != b.score) {
-      return a.score > b.score;
-    }
-    if (a.family_count != b.family_count) {
-      return a.family_count > b.family_count;
-    }
-    return a.display_name < b.display_name;
-  });
+  SortActionableCandidates(candidates);
 
   return candidates;
 }

@@ -560,6 +560,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
           ? L"Crash Logger 프레임과 같은 덤프의 스택이 모두 이 DLL에 걸리지만, 여전히 현재 fault location 단서에 머뭅니다."
           : L"이 DLL에 대한 Crash Logger 프레임 근거는 여전히 현재 fault location 단서에 머뭅니다.");
   }
+  SortActionableCandidates(r.actionable_candidates);
 }
 
 }  // namespace skydiag::dump_tool::internal

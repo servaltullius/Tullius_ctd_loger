@@ -62,6 +62,14 @@ internal sealed partial class MainWindowViewModel
             return T("Tullius callstack first", "Tullius 콜스택 우선");
         }
 
+        if (candidate.StatusId == "related" &&
+            !candidate.CrossValidated &&
+            HasFamily(candidate, "crash_logger_frame") &&
+            HasFamily(candidate, "actionable_stack"))
+        {
+            return T("Corroborated fault location", "상호 확인된 오류 위치");
+        }
+
         if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "first_chance_context"))
         {
             return T("Crash Logger frame + first-chance", "Crash Logger 프레임 + 선행 예외");

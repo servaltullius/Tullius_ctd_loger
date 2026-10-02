@@ -1,5 +1,5 @@
 {
-  "summary_sentence": "Top suspect: Precision.dll — Crash Logger frame first and direct DLL fault both point inside this DLL. (Confidence: High)",
+  "summary_sentence": "Crash Logger's direct-fault frame and the Tullius same-event stack both land in Precision.dll, but this corroborates the current fault location rather than independently validating a root cause. (Confidence: Medium)",
   "crash_bucket_key": "CTD-precision-direct-fault",
   "analysis": {
     "is_crash_like": true,
@@ -33,11 +33,11 @@
   },
   "suspects": [
     {
-      "confidence": "High",
+      "confidence": "Medium",
       "module_filename": "Precision.dll",
       "module_path": "",
       "inferred_mod_name": "Precision - Accurate Melee Collisions",
-      "reason": "Crash Logger direct-fault frame and actionable stack both point inside this DLL.",
+      "reason": "Crash Logger direct-fault frame and the Tullius same-event stack corroborate this fault location.",
       "score": 21
     }
   ],
@@ -47,22 +47,22 @@
   "evidence": [],
   "resources": [],
   "recommendations": [
-    "[Crash Logger frame] Crash Logger frame first (direct DLL fault) and another signal both point to DLL candidate Precision.dll (Crash Logger frame + actionable stack). Use DLL guidance first: update/reinstall or isolate it before broader EXE/system triage."
+    "[Actionable candidate] Crash Logger frame first (direct DLL fault) and the same-event stack both point to DLL candidate Precision.dll (Crash Logger frame + actionable stack). Treat this as a corroborated fault location and compare another independent signal before root-cause attribution."
   ],
   "actionable_candidates": [
     {
-      "status_id": "cross_validated",
-      "confidence": "High",
+      "status_id": "related",
+      "confidence": "Medium",
       "display_name": "Precision.dll",
       "primary_identifier": "Precision.dll",
       "secondary_label": "Precision - Accurate Melee Collisions",
       "plugin_name": "",
       "mod_name": "Precision - Accurate Melee Collisions",
       "module_filename": "Precision.dll",
-      "explanation": "Crash Logger frame + actionable stack agree on Precision.dll.",
+      "explanation": "Crash Logger frame and the Tullius same-event stack corroborate Precision.dll as the current fault location; they are not independent causal evidence.",
       "family_count": 2,
-      "score": 21,
-      "cross_validated": true,
+      "score": 13,
+      "cross_validated": false,
       "has_conflict": false,
       "supporting_families": [
         "crash_logger_frame",

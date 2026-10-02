@@ -13,6 +13,7 @@ using skydiag::dump_tool::ActionableCandidate;
 using skydiag::dump_tool::BuildCandidateConsensus;
 using skydiag::dump_tool::CandidateSignal;
 using skydiag::dump_tool::CanonicalCandidateKey;
+using skydiag::dump_tool::SortActionableCandidates;
 using skydiag::dump_tool::i18n::Language;
 namespace scoring_policy = skydiag::dump_tool::internal::policy;
 
@@ -115,6 +116,10 @@ void TestObjectRefAndStackConflictStayConflicting()
   AssertStatus(candidates[1], "conflicting");
   assert(candidates[0].has_conflict);
   assert(candidates[1].has_conflict);
+  assert(!candidates[0].cross_validated);
+  assert(!candidates[1].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[1].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
 }
 
 void TestSecondaryObjectRefCanStillCrossValidate()
@@ -236,6 +241,55 @@ void TestWeakStackAgreementStaysRelated()
   assert(!candidates[0].cross_validated);
 }
 
+void TestObjectRefAndPointerScanCannotCrossValidateWithBoostOnlyScores()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"pointerscan", L"PointerScan.esp", 6, L"PointerScan.esp"),
+    MakeSignal("actionable_stack", L"pointerscan", L"Pointer Scan", 2, L"", L"Pointer Scan", L"PointerScan.dll"),
+    MakeSignal("history_repeat", L"pointerscan", L"Pointer Scan", 3, L"", L"Pointer Scan", L"PointerScan.dll"),
+    MakeSignal("resource_provider", L"pointerscan", L"Pointer Scan", 5, L"", L"Pointer Scan", L"PointerScan.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].score == 16u);
+}
+
+void TestAuxiliaryCoreFamiliesCannotFillIndependentHighThreshold()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"auxiliary", L"Auxiliary.esp", 5, L"Auxiliary.esp"),
+    MakeSignal("actionable_stack", L"auxiliary", L"Auxiliary", 4, L"", L"Auxiliary", L"Auxiliary.dll"),
+    MakeSignal("first_chance_context", L"auxiliary", L"Auxiliary", 3, L"", L"Auxiliary", L"Auxiliary.dll"),
+    MakeSignal("hang_thread_group", L"auxiliary", L"Auxiliary", 5, L"", L"Auxiliary", L"Auxiliary.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].score == 17u);
+}
+
+void TestObjectRefAndFormalStackCrossValidateAtIndependentThreshold()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_object_ref", L"threshold", L"Threshold.esp", 6, L"Threshold.esp"),
+    MakeSignal("actionable_stack", L"threshold", L"Threshold", 4, L"", L"Threshold", L"Threshold.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "cross_validated");
+  assert(candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kHigh);
+  assert(candidates[0].score == 10u);
+}
+
 void TestFirstChanceOnlyDoesNotCreateStandaloneCandidate()
 {
   const std::vector<CandidateSignal> signals = {
@@ -274,7 +328,7 @@ void TestCrossValidatedCandidateRetainsFirstChanceFamily()
   assert(candidates[0].supporting_families.size() == 3);
 }
 
-void TestFrameAndStackOutrankObjectRefHistoryWithoutConflict()
+void TestFrameAndStackStayRelatedWhileOutrankingObjectRefHistory()
 {
   const std::vector<CandidateSignal> signals = {
     MakeSignal("crash_logger_frame", L"precisiondll", L"Precision.dll", 6, L"", L"Precision - Accurate Melee Collisions", L"Precision.dll"),
@@ -286,8 +340,9 @@ void TestFrameAndStackOutrankObjectRefHistoryWithoutConflict()
   const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
   assert(candidates.size() == 2);
   assert(candidates[0].display_name == L"Precision.dll");
-  AssertStatus(candidates[0], "cross_validated");
-  assert(candidates[0].cross_validated);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
   assert(!candidates[0].has_conflict);
 
   assert(candidates[1].display_name == L"OtherRef.esp");
@@ -296,7 +351,7 @@ void TestFrameAndStackOutrankObjectRefHistoryWithoutConflict()
   assert(!candidates[1].has_conflict);
 }
 
-void TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict()
+void TestFrameAndStackStayRelatedWhileOutrankingIsolatedObjectRef()
 {
   const std::vector<CandidateSignal> signals = {
     MakeSignal("crash_logger_frame", L"precisiondll", L"Precision.dll", 6, L"", L"Precision - Accurate Melee Collisions", L"Precision.dll"),
@@ -307,8 +362,9 @@ void TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict()
   const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
   assert(candidates.size() == 2);
   assert(candidates[0].display_name == L"Precision.dll");
-  AssertStatus(candidates[0], "cross_validated");
-  assert(candidates[0].cross_validated);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
   assert(!candidates[0].has_conflict);
 
   assert(candidates[1].display_name == L"OtherRef.esp");
@@ -386,7 +442,186 @@ void TestFrameAndResourceBecomeRelated()
   AssertStatus(candidates[0], "related");
   assert(!candidates[0].cross_validated);
   assert(!candidates[0].has_conflict);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
   assert(candidates[0].supporting_families.size() == 2);
+}
+
+void TestBoostOnlyFamiliesDoNotDemoteBaseClassification()
+{
+  const auto strongFrame = BuildCandidateConsensus({
+    MakeSignal("crash_logger_frame", L"strong-frame", L"StrongFrame.dll", 6, L"", L"Strong Frame", L"StrongFrame.dll"),
+  }, Language::kEnglish);
+  const auto boostedStrongFrame = BuildCandidateConsensus({
+    MakeSignal("crash_logger_frame", L"strong-frame", L"StrongFrame.dll", 6, L"", L"Strong Frame", L"StrongFrame.dll"),
+    MakeSignal("history_repeat", L"strong-frame", L"Strong Frame", 3, L"", L"Strong Frame", L"StrongFrame.dll"),
+    MakeSignal("resource_provider", L"strong-frame", L"Strong Frame", 4, L"", L"Strong Frame", L"StrongFrame.dll"),
+  }, Language::kEnglish);
+  assert(strongFrame.size() == 1u);
+  assert(boostedStrongFrame.size() == 1u);
+  assert(boostedStrongFrame[0].status_id == strongFrame[0].status_id);
+  assert(boostedStrongFrame[0].confidence_level == strongFrame[0].confidence_level);
+  assert(strongFrame[0].status_id == "related");
+  assert(strongFrame[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(strongFrame[0].score == 6u);
+  assert(boostedStrongFrame[0].score == 13u);
+
+  const auto strongStack = BuildCandidateConsensus({
+    MakeSignal("actionable_stack", L"strong-stack", L"Strong Stack", 5, L"", L"Strong Stack", L"StrongStack.dll"),
+  }, Language::kEnglish);
+  const auto boostedStrongStack = BuildCandidateConsensus({
+    MakeSignal("actionable_stack", L"strong-stack", L"Strong Stack", 5, L"", L"Strong Stack", L"StrongStack.dll"),
+    MakeSignal("history_repeat", L"strong-stack", L"Strong Stack", 3, L"", L"Strong Stack", L"StrongStack.dll"),
+    MakeSignal("resource_provider", L"strong-stack", L"Strong Stack", 4, L"", L"Strong Stack", L"StrongStack.dll"),
+  }, Language::kEnglish);
+  assert(strongStack.size() == 1u);
+  assert(boostedStrongStack.size() == 1u);
+  assert(boostedStrongStack[0].status_id == strongStack[0].status_id);
+  assert(boostedStrongStack[0].confidence_level == strongStack[0].confidence_level);
+  assert(strongStack[0].status_id == "related");
+  assert(strongStack[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(strongStack[0].score == 5u);
+  assert(boostedStrongStack[0].score == 12u);
+
+  const auto objectRefWithHistory = BuildCandidateConsensus({
+    MakeSignal("crash_logger_object_ref", L"object-history", L"ObjectHistory.esp", 6, L"ObjectHistory.esp"),
+    MakeSignal("history_repeat", L"object-history", L"ObjectHistory.esp", 2, L"ObjectHistory.esp"),
+  }, Language::kEnglish);
+  const auto boostedObjectRefWithHistory = BuildCandidateConsensus({
+    MakeSignal("crash_logger_object_ref", L"object-history", L"ObjectHistory.esp", 6, L"ObjectHistory.esp"),
+    MakeSignal("history_repeat", L"object-history", L"ObjectHistory.esp", 2, L"ObjectHistory.esp"),
+    MakeSignal("resource_provider", L"object-history", L"Object History", 4, L"ObjectHistory.esp"),
+  }, Language::kEnglish);
+  assert(objectRefWithHistory.size() == 1u);
+  assert(boostedObjectRefWithHistory.size() == 1u);
+  assert(boostedObjectRefWithHistory[0].status_id == objectRefWithHistory[0].status_id);
+  assert(boostedObjectRefWithHistory[0].confidence_level == objectRefWithHistory[0].confidence_level);
+  assert(objectRefWithHistory[0].status_id == "related");
+  assert(objectRefWithHistory[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kLow);
+  assert(objectRefWithHistory[0].score == 8u);
+  assert(boostedObjectRefWithHistory[0].score == 12u);
+}
+
+void TestResourceBoostDoesNotCreateConflictForSecondaryObjectRefClue()
+{
+  const auto base = BuildCandidateConsensus({
+    MakeSignal("crash_logger_frame", L"fault-owner", L"FaultOwner.dll", 6, L"", L"Fault Owner", L"FaultOwner.dll"),
+    MakeSignal("actionable_stack", L"fault-owner", L"Fault Owner", 5, L"", L"Fault Owner", L"FaultOwner.dll"),
+    MakeSignal("crash_logger_object_ref", L"object-owner", L"ObjectOwner.esp", 6, L"ObjectOwner.esp"),
+  }, Language::kEnglish);
+  const auto boosted = BuildCandidateConsensus({
+    MakeSignal("crash_logger_frame", L"fault-owner", L"FaultOwner.dll", 6, L"", L"Fault Owner", L"FaultOwner.dll"),
+    MakeSignal("actionable_stack", L"fault-owner", L"Fault Owner", 5, L"", L"Fault Owner", L"FaultOwner.dll"),
+    MakeSignal("crash_logger_object_ref", L"object-owner", L"ObjectOwner.esp", 6, L"ObjectOwner.esp"),
+    MakeSignal("resource_provider", L"object-owner", L"Object Owner", 5, L"ObjectOwner.esp"),
+  }, Language::kEnglish);
+
+  assert(base.size() == 2u);
+  assert(boosted.size() == 2u);
+  assert(base[0].module_filename == L"FaultOwner.dll");
+  assert(boosted[0].module_filename == L"FaultOwner.dll");
+  AssertStatus(base[0], "related");
+  AssertStatus(boosted[0], "related");
+  assert(!base[0].has_conflict);
+  assert(!boosted[0].has_conflict);
+
+  assert(base[1].plugin_name == L"ObjectOwner.esp");
+  assert(boosted[1].plugin_name == L"ObjectOwner.esp");
+  AssertStatus(base[1], "reference_clue");
+  AssertStatus(boosted[1], "reference_clue");
+  assert(!base[1].has_conflict);
+  assert(!boosted[1].has_conflict);
+  assert(base[1].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kLow);
+  assert(boosted[1].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kLow);
+  assert(base[1].score == 6u);
+  assert(boosted[1].score == 11u);
+}
+
+void TestFrameAndStackRemainMediumWithAuxiliaryFamilies()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"frame-stack", L"FrameStack.dll", 8, L"", L"Frame Stack", L"FrameStack.dll"),
+    MakeSignal("actionable_stack", L"frame-stack", L"Frame Stack", 5, L"", L"Frame Stack", L"FrameStack.dll"),
+    MakeSignal("first_chance_context", L"frame-stack", L"Frame Stack", 3, L"", L"Frame Stack", L"FrameStack.dll"),
+    MakeSignal("hang_thread_group", L"frame-stack", L"Frame Stack", 5, L"", L"Frame Stack", L"FrameStack.dll"),
+    MakeSignal("history_repeat", L"frame-stack", L"Frame Stack", 3, L"", L"Frame Stack", L"FrameStack.dll"),
+    MakeSignal("resource_provider", L"frame-stack", L"Frame Stack", 5, L"", L"Frame Stack", L"FrameStack.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "related");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].score == 29u);
+}
+
+void TestBoostOnlyScoresDoNotFillGeneralRelatedThreshold()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"weak-core", L"WeakCore.dll", 3, L"", L"Weak Core", L"WeakCore.dll"),
+    MakeSignal("first_chance_context", L"weak-core", L"Weak Core", 3, L"", L"Weak Core", L"WeakCore.dll"),
+    MakeSignal("history_repeat", L"weak-core", L"Weak Core", 3, L"", L"Weak Core", L"WeakCore.dll"),
+    MakeSignal("resource_provider", L"weak-core", L"Weak Core", 5, L"", L"Weak Core", L"WeakCore.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "reference_clue");
+  assert(!candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].score == 14u);
+}
+
+void TestSortActionableCandidatesRestoresStatusPriorityAndKeepsScoreRanking()
+{
+  ActionableCandidate downgradedDirectFault{};
+  downgradedDirectFault.display_name = L"DowngradedDirectFault.dll";
+  downgradedDirectFault.status_id = "reference_clue";
+  downgradedDirectFault.confidence_level = skydiag::dump_tool::i18n::ConfidenceLevel::kLow;
+  downgradedDirectFault.score = 40u;
+  downgradedDirectFault.family_count = 3u;
+
+  ActionableCandidate relatedCandidate{};
+  relatedCandidate.display_name = L"RelatedCandidate.dll";
+  relatedCandidate.status_id = "related";
+  relatedCandidate.confidence_level = skydiag::dump_tool::i18n::ConfidenceLevel::kMedium;
+  relatedCandidate.score = 7u;
+  relatedCandidate.family_count = 2u;
+
+  std::vector<ActionableCandidate> postprocessed = { downgradedDirectFault, relatedCandidate };
+  SortActionableCandidates(postprocessed);
+  assert(postprocessed[0].display_name == L"RelatedCandidate.dll");
+  assert(postprocessed[1].display_name == L"DowngradedDirectFault.dll");
+
+  ActionableCandidate higherScore = relatedCandidate;
+  higherScore.display_name = L"HigherScore.dll";
+  higherScore.score = 15u;
+  std::vector<ActionableCandidate> sameStatus = { relatedCandidate, higherScore };
+  SortActionableCandidates(sameStatus);
+  assert(sameStatus[0].display_name == L"HigherScore.dll");
+  assert(sameStatus[0].score == 15u);
+  assert(sameStatus[1].score == 7u);
+}
+
+void TestTotalScoreStillRanksCandidatesWithinSameStatus()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("crash_logger_frame", L"plain-core", L"PlainCore.dll", 4, L"", L"Plain Core", L"PlainCore.dll"),
+    MakeSignal("first_chance_context", L"plain-core", L"Plain Core", 3, L"", L"Plain Core", L"PlainCore.dll"),
+    MakeSignal("crash_logger_frame", L"boosted-core", L"BoostedCore.dll", 4, L"", L"Boosted Core", L"BoostedCore.dll"),
+    MakeSignal("first_chance_context", L"boosted-core", L"Boosted Core", 3, L"", L"Boosted Core", L"BoostedCore.dll"),
+    MakeSignal("history_repeat", L"boosted-core", L"Boosted Core", 3, L"", L"Boosted Core", L"BoostedCore.dll"),
+    MakeSignal("resource_provider", L"boosted-core", L"Boosted Core", 5, L"", L"Boosted Core", L"BoostedCore.dll"),
+  };
+
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 2u);
+  AssertStatus(candidates[0], "related");
+  AssertStatus(candidates[1], "related");
+  assert(candidates[0].module_filename == L"BoostedCore.dll");
+  assert(candidates[0].score == 15u);
+  assert(candidates[1].module_filename == L"PlainCore.dll");
+  assert(candidates[1].score == 7u);
 }
 
 void TestResourceOnlyDoesNotCreateStandaloneCandidate()
@@ -448,6 +683,23 @@ void TestCanonicalCandidateKeyPreservesUnicodeAndSeparators()
   assert(CanonicalCandidateKey(L"A！B.esl") == L"a-b");
 }
 
+void TestProductionNamesCanonicalizeIntoQualifiedCrossValidation()
+{
+  const auto objectRefKey = CanonicalCandidateKey(L"Quest Runtime Fix.esp");
+  const auto stackKey = CanonicalCandidateKey(L"Quest Runtime Fix");
+  assert(objectRefKey == stackKey);
+
+  const auto candidates = BuildCandidateConsensus({
+    MakeSignal("crash_logger_object_ref", objectRefKey, L"Quest Runtime Fix.esp", 6, L"Quest Runtime Fix.esp"),
+    MakeSignal("actionable_stack", stackKey, L"Quest Runtime Fix", 5, L"", L"Quest Runtime Fix", L"QuestRuntimeFix.dll"),
+  }, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "cross_validated");
+  assert(candidates[0].cross_validated);
+  assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kHigh);
+  assert(candidates[0].score == 11u);
+}
+
 void TestConsensusCanonicalizationDoesNotMergeSeparatedNames()
 {
   const std::vector<CandidateSignal> signals = {
@@ -490,12 +742,10 @@ void TestHookFallbackPromotionRequiresNearTieAndMinimumEvidence()
   assert(scoring_policy::ShouldPromoteHookFallback(28u, 24u, 4u, 4u));
 }
 
-void TestSecondaryConfidencePolicyRejectsOnePointCandidates()
+void TestSecondaryCallstackConfidencePolicyRejectsOnePointCandidates()
 {
   assert(!scoring_policy::SecondaryCallstackCanBeMedium(1u, 11u, 12u, 6u));
   assert(scoring_policy::SecondaryCallstackCanBeMedium(12u, 6u, 12u, 6u));
-  assert(!scoring_policy::SecondaryStackScanCanBeMedium(1u, 40u));
-  assert(scoring_policy::SecondaryStackScanCanBeMedium(40u, 40u));
 }
 
 void TestFirstChanceFamilySourceContract()
@@ -503,6 +753,30 @@ void TestFirstChanceFamilySourceContract()
   const auto root = ProjectRoot();
   const auto source = ReadAllText(root / "dump_tool" / "src" / "CandidateConsensus.cpp");
   AssertContains(source, "first_chance_context", "Candidate consensus must recognize first_chance_context as a supporting family.");
+}
+
+void TestWeakFaultLocationRequiresQualifiedIndependentSupport()
+{
+  const auto root = ProjectRoot();
+  const auto source = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderUtil.cpp");
+  AssertContains(source, "candidate.has_conflict || candidate.status_id == \"conflicting\"",
+                 "Fault-location post-processing must preserve explicit conflicts.");
+  AssertContains(source, "candidate.cross_validated && hasCrashLoggerObjectRef && hasActionableStack",
+                  "A direct-fault frame must remain weak without qualified object-ref and formal-stack support.");
+}
+
+void TestWeakFaultLocationPostprocessingResortsCandidates()
+{
+  const auto root = ProjectRoot();
+  const auto source = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
+  const auto consensusPos = source.find("r.actionable_candidates = BuildCandidateConsensus(signals, lang);");
+  const auto loopPos = source.find("for (auto& candidate : r.actionable_candidates)", consensusPos);
+  const auto downgradePos = source.find("candidate.status_id = hasStackSupport ? \"related\" : \"reference_clue\";", loopPos);
+  const auto resortPos = source.find("SortActionableCandidates(r.actionable_candidates);", downgradePos);
+  assert(consensusPos != std::string::npos);
+  assert(loopPos != std::string::npos && loopPos > consensusPos);
+  assert(downgradePos != std::string::npos && downgradePos > loopPos);
+  assert(resortPos != std::string::npos && resortPos > downgradePos);
 }
 
 }  // namespace
@@ -521,25 +795,37 @@ int main()
   TestHistoryOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndHistoryRepeatBecomeRelated();
   TestWeakStackAgreementStaysRelated();
+  TestObjectRefAndPointerScanCannotCrossValidateWithBoostOnlyScores();
+  TestAuxiliaryCoreFamiliesCannotFillIndependentHighThreshold();
+  TestObjectRefAndFormalStackCrossValidateAtIndependentThreshold();
   TestFirstChanceOnlyDoesNotCreateStandaloneCandidate();
   TestObjectRefAndFirstChanceBecomeRelated();
   TestCrossValidatedCandidateRetainsFirstChanceFamily();
-  TestFrameAndStackOutrankObjectRefHistoryWithoutConflict();
-  TestFrameAndStackOutrankIsolatedObjectRefWithoutConflict();
+  TestFrameAndStackStayRelatedWhileOutrankingObjectRefHistory();
+  TestFrameAndStackStayRelatedWhileOutrankingIsolatedObjectRef();
   TestStrongFrameOnlyBecomesRelated();
   TestWeakFrameOnlyStaysReferenceClue();
   TestFrameAndFirstChanceBecomeRelated();
   TestFrameAndHistoryBecomeRelated();
   TestFrameAndResourceBecomeRelated();
+  TestBoostOnlyFamiliesDoNotDemoteBaseClassification();
+  TestResourceBoostDoesNotCreateConflictForSecondaryObjectRefClue();
+  TestFrameAndStackRemainMediumWithAuxiliaryFamilies();
+  TestBoostOnlyScoresDoNotFillGeneralRelatedThreshold();
+  TestSortActionableCandidatesRestoresStatusPriorityAndKeepsScoreRanking();
+  TestTotalScoreStillRanksCandidatesWithinSameStatus();
   TestResourceOnlyDoesNotCreateStandaloneCandidate();
   TestCaptureQualityDoesNotCrossValidateWeakStackAgreement();
   TestCaptureQualityDoesNotUpgradeStandaloneStack();
   TestCanonicalCandidateKeyPreservesUnicodeAndSeparators();
+  TestProductionNamesCanonicalizeIntoQualifiedCrossValidation();
   TestConsensusCanonicalizationDoesNotMergeSeparatedNames();
   TestConflictingEvidenceOutranksResourceOnlyRelatedCandidate();
   TestExceptionThreadSelectionPolicyIsOrderIndependent();
   TestHookFallbackPromotionRequiresNearTieAndMinimumEvidence();
-  TestSecondaryConfidencePolicyRejectsOnePointCandidates();
+  TestSecondaryCallstackConfidencePolicyRejectsOnePointCandidates();
   TestFirstChanceFamilySourceContract();
+  TestWeakFaultLocationRequiresQualifiedIndependentSupport();
+  TestWeakFaultLocationPostprocessingResortsCandidates();
   return 0;
 }
