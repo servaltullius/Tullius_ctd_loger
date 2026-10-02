@@ -97,6 +97,104 @@ int Fail(const std::filesystem::path& launcherDir, const std::wstring& message, 
   return 2;
 }
 
+bool IsRunningUnderWine()
+{
+  const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
+struct DumpArgs
+{
+  std::filesystem::path dump;
+  std::filesystem::path outDir;
+};
+
+DumpArgs ParseDumpArgs(int argc, wchar_t** argv)
+{
+  DumpArgs args{};
+  for (int i = 1; argv && i < argc; ++i) {
+    if (!argv[i]) {
+      continue;
+    }
+    const std::wstring_view arg(argv[i]);
+    if (_wcsicmp(argv[i], L"--out-dir") == 0 && i + 1 < argc && argv[i + 1]) {
+      args.outDir = argv[++i];
+      continue;
+    }
+    if (args.dump.empty() && !arg.starts_with(L"--")) {
+      const std::filesystem::path candidate(arg);
+      if (_wcsicmp(candidate.extension().c_str(), L".dmp") == 0) {
+        args.dump = candidate;
+      }
+    }
+  }
+  if (args.outDir.empty() && !args.dump.empty()) {
+    args.outDir = args.dump.parent_path();
+  }
+  return args;
+}
+
+std::filesystem::path ReportPathFor(const DumpArgs& args)
+{
+  return args.outDir / (args.dump.stem().wstring() + L"_SkyrimDiagReport.txt");
+}
+
+// Produces the text report with the headless CLI that ships next to the
+// SkyrimDiagWinUI folder; the CLI does not depend on the Windows App Runtime.
+void RunCliAnalysis(const std::filesystem::path& launcherDir, const DumpArgs& args)
+{
+  const auto cliExe = launcherDir.parent_path() / L"SkyrimDiagDumpToolCli.exe";
+  if (!std::filesystem::is_regular_file(cliExe)) {
+    return;
+  }
+  std::wstring commandLine = QuoteArg(cliExe.wstring()) + L" " + QuoteArg(args.dump.wstring()) +
+    L" --out-dir " + QuoteArg(args.outDir.wstring());
+  STARTUPINFOW startupInfo{};
+  startupInfo.cb = sizeof(startupInfo);
+  PROCESS_INFORMATION processInfo{};
+  if (CreateProcessW(
+        cliExe.c_str(), commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr,
+        &startupInfo, &processInfo)) {
+    CloseHandle(processInfo.hThread);
+    WaitForSingleObject(processInfo.hProcess, 5u * 60u * 1000u);
+    CloseHandle(processInfo.hProcess);
+  }
+}
+
+// The WinUI app needs the Windows App Runtime, whose WinRT dependencies Wine
+// does not provide, so under Wine/Proton it dies during startup. Explain that
+// and point at the text report instead of launching it.
+int HandleWine(const std::filesystem::path& launcherDir, int argc, wchar_t** argv, bool headless)
+{
+  const DumpArgs args = ParseDumpArgs(argc, argv);
+  std::wstring message =
+    L"The SkyrimDiag WinUI viewer cannot run under Wine/Proton: it needs the Windows App Runtime, "
+    L"which Wine does not provide.\n\n"
+    L"Use the text report instead: *_SkyrimDiagReport.txt next to each dump. SkyrimDiagHelper writes it "
+    L"automatically under Wine, or run SkyrimDiagDumpToolCli.exe \"<dump.dmp>\".";
+  WriteLauncherError(launcherDir, L"Wine/Proton detected; WinUI viewer not started.");
+  if (headless) {
+    return 3;
+  }
+
+  if (!args.dump.empty()) {
+    const auto report = ReportPathFor(args);
+    if (!std::filesystem::is_regular_file(report)) {
+      RunCliAnalysis(launcherDir, args);
+    }
+    if (std::filesystem::is_regular_file(report)) {
+      message += L"\n\nOpen the report for this dump now?\n" + report.wstring();
+      if (MessageBoxW(nullptr, message.c_str(), L"SkyrimDiag viewer", MB_ICONINFORMATION | MB_YESNO) == IDYES) {
+        ShellExecuteW(nullptr, L"open", report.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      }
+      return 3;
+    }
+  }
+
+  MessageBoxW(nullptr, message.c_str(), L"SkyrimDiag viewer", MB_ICONINFORMATION | MB_OK);
+  return 3;
+}
+
 }  // namespace
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
@@ -111,6 +209,14 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
       LocalFree(reinterpret_cast<HLOCAL>(argv));
     }
     return 2;
+  }
+
+  if (IsRunningUnderWine()) {
+    const int code = HandleWine(launcherDir, argc, argv, headless);
+    if (argv) {
+      LocalFree(reinterpret_cast<HLOCAL>(argv));
+    }
+    return code;
   }
 
   const auto appExe = launcherDir / L"app" / L"SkyrimDiagDumpToolWinUI.exe";

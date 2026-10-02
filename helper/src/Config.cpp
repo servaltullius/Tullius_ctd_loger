@@ -149,6 +149,8 @@ HelperConfig LoadConfig(std::wstring* err)
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenHangAfterProcessExit", 1, path.c_str()) != 0;
   cfg.autoOpenHangDelayMs = ReadIniUint32Clamped(
     path, L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, 0, 60000);
+  cfg.autoOpenViewerUnderWine =
+    GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerUnderWine", 0, path.c_str()) != 0;
   cfg.autoOpenViewerBeginnerMode =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"AutoOpenViewerBeginnerMode", 1, path.c_str()) != 0;
   cfg.enablePssSnapshotForFreeze =
