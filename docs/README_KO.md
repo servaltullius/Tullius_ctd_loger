@@ -119,13 +119,26 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 
 아래 파일부터 확인하면 원인 분류가 빠릅니다:
 
-- MO2 `overwrite\\SKSE\\Plugins\\SkyrimDiagHelper.log`
+- 출력 폴더의 `SkyrimDiagHelper.log` (기본: MO2 `overwrite\\SKSE\\Plugins\\Tullius Ctd Logs\\SkyrimDiagHelper.log`)
   - `DumpTool viewer launch failed ... win32_error=...` : 실행 실패(경로/파일 누락/권한)
   - `DumpTool viewer launch succeeded ...` 뒤에 `DumpTool viewer exited immediately ...` : `v0.2.52+` 파일 누락/구버전 혼합 또는 뷰어 시작 크래시 가능성
 - 뷰어 폴더(`SKSE\\Plugins\\SkyrimDiagWinUI\\`)의 `SkyrimDiagDumpToolWinUI_startup_error.log` (있으면 내용 첨부)
 - `v0.2.52+` 릴리즈의 WinUI 뷰어는 self-contained로 배포됩니다. 뷰어 시작 실패가 계속되면 기존 `SKSE\\Plugins\\SkyrimDiagWinUI\\` 폴더를 완전히 제거한 뒤 새 릴리즈 zip 전체를 다시 설치하고, MO2에서 파일 제공 모드를 확인하세요.
 - `v0.2.53+`에서는 `SKSE\\Plugins\\SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe`가 런처이고, 실제 앱/런타임 파일은 `SKSE\\Plugins\\SkyrimDiagWinUI\\app\\` 아래에 있습니다.
 - `v0.2.49`~`v0.2.51`의 WinUI 뷰어는 Windows App Runtime 1.8을 별도로 요구했으며, Windows App Runtime 2.x 설치만으로는 이 요구사항이 해결되지 않을 수 있습니다.
+
+## "MO2에서 CTD 후 덤프/리포트가 안 생기거나 뷰어가 안 뜸"
+
+MO2는 USVFS 가상 파일 시스템 안에서 스카이림을 실행합니다. 플러그인은 게임 프로세스에서 `SkyrimDiagHelper.exe`를 시작하므로, Helper도 보통 모드 파일의 가상 사본에서 실행됩니다. MO2 사용자 제보에 따르면, 모드로만 설치한 경우 게임 종료 뒤 Helper가 해야 할 작업이 조용히 실패할 수 있습니다. 새 덤프나 리포트가 없거나 뷰어가 열리지 않습니다([#4](https://github.com/servaltullius/Tullius_ctd_loger/issues/4)).
+
+이 경우 먼저 출력 폴더(기본: `overwrite\SKSE\Plugins\Tullius Ctd Logs\`)의 `SkyrimDiagHelper.log`에 사고 이후 기록이 있는지 확인하세요. 로그가 사고 시점에서 끊겨 있다면, 파일을 실제 폴더에 배치해 사고 후 동작이 복구됐다는 제보가 있습니다.
+
+1. 릴리즈 zip의 `SKSE\Plugins\` 내용 전체를 실제 게임 `Data\SKSE\Plugins\` 폴더에 복사합니다. `SkyrimDiag.dll`, `SkyrimDiag.ini`, `SkyrimDiagHelper.exe`, `SkyrimDiagHelper.ini`, `SkyrimDiagDumpToolCli.exe`, `data\` 폴더, `app\`을 포함한 `SkyrimDiagWinUI\` 폴더 전체입니다.
+2. MO2에서 Tullius 모드를 비활성화합니다. MO2가 실제 파일 위에 모드 사본을 겹쳐 올리지 않고, 한 버전만 설치된 상태가 됩니다.
+3. 실제 폴더의 `SkyrimDiagHelper.ini`에서 `OutputDir=`를 게임·MO2 폴더 밖의 절대경로(예: `C:\SkyrimDiag`)로 지정해 결과가 한곳에 쌓이게 합니다.
+4. 업데이트할 때는 실제 사본 전체를 교체합니다. 기존 `SkyrimDiagWinUI` 폴더를 먼저 지우고, 다른 릴리즈의 파일을 섞지 마세요.
+
+이는 사용자 제보로 확인된 우회 방법이며, Helper가 아직 이 상황을 자동으로 감지하지는 않습니다. 문제를 제보할 때는 `SkyrimDiagHelper.log`를 함께 첨부해 주세요.
 
 ## 성능 영향
 
