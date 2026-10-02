@@ -57,6 +57,7 @@ struct ModuleInfo
 {
   std::uint64_t base = 0;
   std::uint64_t end = 0;
+  std::uint32_t time_date_stamp = 0;
   std::string version;
   std::wstring path;
   std::wstring filename;

@@ -11,6 +11,7 @@ namespace skydiag::dump_tool::internal::stackwalk {
 namespace {
 
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
+using skydiag::dump_tool::minidump::IsSkseModule;
 using skydiag::dump_tool::minidump::ModuleInfo;
 
 std::wstring FormatModulePlusOffset(const std::vector<ModuleInfo>& modules, std::uint64_t addr)
@@ -131,6 +132,45 @@ std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
     }
     const auto& module = modules[*moduleIndex];
     out.push_back({ module.filename, pcs[i] - module.base });
+  }
+  return out;
+}
+
+std::vector<ModalStackFrame> BuildModalProbeFrames(
+  HANDLE process,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames)
+{
+  std::vector<ModalStackFrame> out;
+  const std::size_t n = std::min(pcs.size(), maxFrames);
+  out.reserve(n);
+  for (std::size_t i = 0; i < n; i++) {
+    ModalStackFrame frame{};
+    if (const auto idx = FindModuleIndexForAddress(modules, pcs[i])) {
+      const auto& m = modules[*idx];
+      frame.has_module = true;
+      frame.module_filename = m.filename;
+      frame.module_path = m.path;
+      frame.inferred_mod_name = m.inferred_mod_name;
+      frame.is_system = m.is_systemish;
+      frame.is_game_exe = m.is_game_exe;
+      frame.is_skse_runtime = IsSkseModule(m.filename);
+      frame.is_hook_framework = m.is_known_hook_framework;
+      // Modal entry points live in system DLLs; only those need names.
+      if (m.is_systemish && process) {
+        alignas(SYMBOL_INFOW) unsigned char symBuf[sizeof(SYMBOL_INFOW) + (MAX_SYM_NAME * sizeof(wchar_t))]{};
+        auto* sym = reinterpret_cast<PSYMBOL_INFOW>(symBuf);
+        sym->SizeOfStruct = sizeof(SYMBOL_INFOW);
+        sym->MaxNameLen = MAX_SYM_NAME;
+        DWORD64 displacement = 0;
+        if (SymFromAddrW(process, static_cast<DWORD64>(pcs[i]), &displacement, sym) && sym->NameLen > 0) {
+          frame.symbol.assign(sym->Name, sym->NameLen);
+          frame.displacement = static_cast<std::uint64_t>(displacement);
+        }
+      }
+    }
+    out.push_back(std::move(frame));
   }
   return out;
 }

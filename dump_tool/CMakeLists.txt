@@ -39,6 +39,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/CandidateConsensus.h
   src/FreezeCandidateConsensus.cpp
   src/FreezeCandidateConsensus.h
+  src/ModalDialogWait.cpp
+  src/ModalDialogWait.h
   src/GraphicsInjectionDiag.cpp
   src/GraphicsInjectionDiag.h
   src/CrashLogger.cpp
@@ -173,23 +175,29 @@ set(SKYDIAG_DUMP_TOOL_DATA_FILES
   "address_db/skyrimse_functions.json"
 )
 
-foreach(_target IN ITEMS SkyrimDiagDumpToolNative SkyrimDiagDumpToolCli)
-  foreach(_rel IN LISTS SKYDIAG_DUMP_TOOL_DATA_FILES)
-    if(EXISTS "${SKYDIAG_DUMP_TOOL_DATA_ROOT}/${_rel}")
-      get_filename_component(_rel_dir "${_rel}" DIRECTORY)
-      get_filename_component(_rel_name "${_rel}" NAME)
-      if(_rel_dir)
-        set(_dst_dir "$<TARGET_FILE_DIR:${_target}>/data/${_rel_dir}")
-      else()
-        set(_dst_dir "$<TARGET_FILE_DIR:${_target}>/data")
-      endif()
-      add_custom_command(TARGET ${_target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${_dst_dir}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${SKYDIAG_DUMP_TOOL_DATA_ROOT}/${_rel}"
-          "${_dst_dir}/${_rel_name}"
-        VERBATIM
-      )
+# The native DLL and the CLI share one output directory. Copying the analyzer
+# data from both targets' POST_BUILD steps raced when they finished linking at
+# the same time, so a single target copies it once and both depend on it.
+set(_data_copy_commands)
+foreach(_rel IN LISTS SKYDIAG_DUMP_TOOL_DATA_FILES)
+  if(EXISTS "${SKYDIAG_DUMP_TOOL_DATA_ROOT}/${_rel}")
+    get_filename_component(_rel_dir "${_rel}" DIRECTORY)
+    get_filename_component(_rel_name "${_rel}" NAME)
+    if(_rel_dir)
+      set(_dst_dir "$<TARGET_FILE_DIR:SkyrimDiagDumpToolCli>/data/${_rel_dir}")
+    else()
+      set(_dst_dir "$<TARGET_FILE_DIR:SkyrimDiagDumpToolCli>/data")
     endif()
-  endforeach()
+    list(APPEND _data_copy_commands
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_dst_dir}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${SKYDIAG_DUMP_TOOL_DATA_ROOT}/${_rel}"
+        "${_dst_dir}/${_rel_name}")
+  endif()
 endforeach()
+add_custom_target(SkyrimDiagDumpToolData ALL
+  ${_data_copy_commands}
+  VERBATIM
+)
+add_dependencies(SkyrimDiagDumpToolNative SkyrimDiagDumpToolData)
+add_dependencies(SkyrimDiagDumpToolCli SkyrimDiagDumpToolData)

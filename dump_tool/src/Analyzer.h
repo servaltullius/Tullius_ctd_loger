@@ -31,7 +31,7 @@ struct SuspectItem
   std::wstring module_filename;
   std::wstring module_path;
   std::wstring inferred_mod_name;  // best-effort (MO2 mods\<modname>\...)
-  std::uint32_t score = 0;  // stack-hit count (heuristic)
+  std::uint32_t score = 0;  // weighted callstack/pointer score (heuristic; not a hit count)
   std::wstring reason;
 };
 
@@ -95,9 +95,29 @@ struct HangThreadModuleConsensus
   bool os_lock_cycle_proven = false;
 };
 
+// The game main thread parked in a Win32 modal loop (MessageBox / DialogBox /
+// TaskDialog). Its stack then only shows bystander modules, so plugin
+// attribution must come from the dialog itself, never from stack density.
+struct ModalDialogWaitInfo
+{
+  bool detected = false;
+  bool window_evidence = false;  // helper saw a visible dialog owned by the main thread
+  bool stack_evidence = false;   // main-thread stack is a pure modal-wait chain
+  std::uint32_t main_thread_id = 0;
+  std::wstring wait_api;         // e.g. "user32.dll!MessageBoxW"
+  std::wstring dialog_title;
+  std::wstring dialog_text;
+  std::wstring caller_module_filename;
+  std::wstring caller_module_path;
+  std::wstring caller_inferred_mod_name;
+  // plugin / skse_runtime / hook_framework / game_exe / none
+  std::string caller_kind = "none";
+  std::uint32_t other_thread_dialog_count = 0;
+};
+
 struct FreezeAnalysisResult
 {
-  // state ids: deadlock_likely / synchronization_stall_likely /
+  // state ids: modal_dialog_wait / deadlock_likely / synchronization_stall_likely /
   // loader_stall_likely / freeze_candidate / freeze_ambiguous
   bool has_analysis = false;
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
@@ -278,6 +298,7 @@ struct AnalysisResult
   BlackboxFreezeSummary blackbox_freeze_summary;
   FirstChanceSummary first_chance_summary;
   HangThreadModuleConsensus hang_thread_module_consensus;
+  ModalDialogWaitInfo modal_dialog_wait;
   FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;

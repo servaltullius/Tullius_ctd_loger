@@ -17,6 +17,7 @@ struct FreezeSignalInput
   std::optional<BlackboxFreezeSummary> blackbox;
   std::optional<FirstChanceSummary> first_chance;
   std::optional<HangThreadModuleConsensus> thread_module_consensus;
+  std::optional<ModalDialogWaitInfo> modal_dialog_wait;
   std::vector<ActionableCandidate> actionable_candidates;
 };
 

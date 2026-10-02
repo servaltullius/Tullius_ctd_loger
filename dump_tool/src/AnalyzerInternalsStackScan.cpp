@@ -22,25 +22,6 @@ using skydiag::dump_tool::i18n::ConfidenceText;
 constexpr std::uint32_t kHookFrameworkNearTieThreshold = 8u;
 constexpr std::uint32_t kPassiveHookFallbackMinScore = 8u;
 constexpr std::uint32_t kOtherHookFallbackMinScore = 16u;
-constexpr std::uint32_t kSecondaryMediumMinScore = 40u;
-
-i18n::ConfidenceLevel ConfidenceForTopSuspectLevel(std::uint32_t topScore, std::uint32_t secondScore)
-{
-  if (topScore >= 256u || (topScore >= 96u && topScore >= (secondScore * 2u))) {
-    return i18n::ConfidenceLevel::kHigh;
-  }
-  if (topScore >= 40u) {
-    return i18n::ConfidenceLevel::kMedium;
-  }
-  return i18n::ConfidenceLevel::kLow;
-}
-
-i18n::ConfidenceLevel ConfidenceForSecondarySuspectLevel(std::uint32_t score)
-{
-  return policy::SecondaryStackScanCanBeMedium(score, kSecondaryMediumMinScore)
-    ? i18n::ConfidenceLevel::kMedium
-    : i18n::ConfidenceLevel::kLow;
-}
 
 std::uint32_t StackScanSlotWeight(std::size_t slotIndex)
 {
@@ -189,16 +170,6 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     }
   }
 
-  const std::uint32_t topScore = rows[0].score;
-  const std::uint32_t secondScore = (rows.size() > 1) ? rows[1].score : 0;
-  auto confTop = ConfidenceForTopSuspectLevel(topScore, secondScore);
-  if (modules[rows[0].modIndex].is_known_hook_framework) {
-    if (confTop == i18n::ConfidenceLevel::kHigh) {
-      confTop = i18n::ConfidenceLevel::kMedium;
-    } else if (confTop == i18n::ConfidenceLevel::kMedium) {
-      confTop = i18n::ConfidenceLevel::kLow;
-    }
-  }
   const bool en = (lang == i18n::Language::kEnglish);
 
   const std::size_t n = std::min<std::size_t>(rows.size(), 5);
@@ -208,22 +179,25 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     const auto& m = modules[row.modIndex];
 
     SuspectItem si{};
-    si.confidence_level = (i == 0) ? confTop : ConfidenceForSecondarySuspectLevel(row.score);
+    si.confidence_level = i18n::ConfidenceLevel::kLow;
     si.confidence = ConfidenceText(lang, si.confidence_level);
     si.module_filename = m.filename;
     si.module_path = m.path;
     si.inferred_mod_name = m.inferred_mod_name;
     si.score = row.score;
     si.reason = en
-      ? (L"Observed " + std::to_wstring(row.score) +
-         (usedExceptionThreadScores ? L" hit(s) in exception-thread stack scan" : L" hit(s) in stack scan"))
-      : (usedExceptionThreadScores
-          ? L"예외 스레드 스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측"
-          : L"스택 스캔에서 " + std::to_wstring(row.score) + L"회 관측");
+      ? (std::wstring(usedExceptionThreadScores
+           ? L"Exception-thread raw stack scan weighted pointer score="
+           : L"Raw stack scan weighted pointer score=") +
+         std::to_wstring(row.score) +
+         L"; raw stack slots may contain stale or non-return-address pointers such as vtable/callback addresses")
+      : (std::wstring(usedExceptionThreadScores ? L"예외 스레드 원시 스택 스캔" : L"원시 스택 스캔") +
+         L"의 가중 포인터 점수=" + std::to_wstring(row.score) +
+         L"; 원시 스택 슬롯에는 오래되었거나 반환 주소가 아닌 포인터(vtable/callback 주소 등)가 포함될 수 있음");
     if (i == 0 && promotedHookTop) {
       si.reason += en
-        ? L" (primary candidate promoted over hook framework hit owner)"
-        : L" (훅 프레임워크 히트 소유자보다 우선 후보로 승격)";
+        ? L" (primary candidate promoted over hook framework pointer-score owner)"
+        : L" (훅 프레임워크 포인터 점수 소유자보다 우선 후보로 승격)";
     }
     out.push_back(std::move(si));
   }

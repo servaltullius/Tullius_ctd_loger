@@ -8,9 +8,10 @@ only those generated summaries with `scripts/analyze_bucket_quality.py`.
 ## What this corpus is — and is not
 
 These are **hand-authored signal scenarios**, not real incidents. Each one pins a
-decision candidate consensus is supposed to make: combine independent evidence,
-keep stack-only candidates cautious, retain a useful top-three candidate, or
-abstain rather than manufacture a result from boost-only history.
+decision candidate consensus is supposed to make: distinguish same-event stack
+corroboration from independent semantic support, keep stack-only candidates
+cautious, retain a useful top-three candidate, or abstain rather than manufacture
+a result from boost-only history.
 
 Unlike precomputed Summary fixtures, candidate order, status, confidence, score,
 and abstention are produced during the test by the same `CandidateConsensus.cpp`
@@ -19,9 +20,17 @@ the generated summaries are aggregated. A broken consensus implementation must
 therefore fail before the metric report can pass.
 
 This remains a **behavior regression gate**, not a measurement of real-world
-accuracy. Passing says the implementation still makes these five designed
+accuracy. Passing says the implementation still makes these six designed
 decisions. It says nothing about how often it identifies a real root cause — see
 the accuracy caveats in the top-level `README.md`.
+
+Three scenarios deliberately pair a CrashLogger frame with Tullius's stack from
+the same incident. They must remain `related / Medium`: parsing the same execution
+location twice corroborates a fault location, but is not independent causal
+validation. The single synthetic High positive control instead combines a strong
+CrashLogger object reference with a formal actionable stack whose two weights
+sum to at least 10. Keeping that positive control prevents an implementation
+from satisfying this gate merely by suppressing every High-confidence outcome.
 
 The two claims are kept deliberately separate. Release gate step 7 measures
 accuracy against reviewed real incidents, and it reports `SKIPPED (not measured)`

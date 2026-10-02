@@ -482,19 +482,30 @@ bool IsWeakFaultLocationActionableCandidate(
   if (candidate.module_filename.empty() || WideLower(candidate.module_filename) != WideLower(r.fault_module_filename)) {
     return false;
   }
+  if (candidate.has_conflict || candidate.status_id == "conflicting") {
+    return false;
+  }
 
   bool hasCrashLoggerFrame = false;
+  bool hasCrashLoggerObjectRef = false;
+  bool hasActionableStack = false;
   for (const auto& family : candidate.supporting_families) {
     if (family == "crash_logger_frame") {
       hasCrashLoggerFrame = true;
-      continue;
+    } else if (family == "crash_logger_object_ref") {
+      hasCrashLoggerObjectRef = true;
+    } else if (family == "actionable_stack") {
+      hasActionableStack = true;
     }
-    if (family == "actionable_stack" || family == "capture_quality_stack" || family == "history_repeat") {
-      continue;
-    }
+  }
+
+  if (!hasCrashLoggerFrame) {
     return false;
   }
-  return hasCrashLoggerFrame;
+
+  const bool hasQualifiedIndependentSupport =
+    candidate.cross_validated && hasCrashLoggerObjectRef && hasActionableStack;
+  return !hasQualifiedIndependentSupport;
 }
 
 }  // namespace skydiag::dump_tool::internal

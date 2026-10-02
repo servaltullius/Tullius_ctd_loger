@@ -18,6 +18,7 @@
 #include "PssSnapshot.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
+#include "SkyrimDiagHelper/ModalDialogProbe.h"
 #include "SkyrimDiagHelper/WctCapture.h"
 
 namespace skydiag::helper::internal {
@@ -78,6 +79,17 @@ HangTickResult ExecuteConfirmedHangCapture(
   if (wctJson.contains("debugPrivilegeEnabled") && wctJson["debugPrivilegeEnabled"].is_boolean() &&
       !wctJson["debugPrivilegeEnabled"].get<bool>()) {
     AppendLogLine(outBase, L"Warning: EnableDebugPrivilege failed; WCT capture may be incomplete.");
+  }
+
+  // A main thread parked in a modal loop (e.g. a plugin's error MessageBox)
+  // stops the heartbeat while its stack only shows bystander modules. The
+  // visible dialog itself is the symbol-independent evidence for that state.
+  const auto modalDialogs = skydiag::helper::CaptureModalDialogs(proc.pid);
+  wctJson["modal_dialogs"] = skydiag::helper::ModalDialogsToJson(modalDialogs);
+  if (!modalDialogs.empty()) {
+    AppendLogLine(
+      outBase,
+      L"Visible dialog windows at hang capture: " + std::to_wstring(modalDialogs.size()));
   }
 
   wctJson["capture"] = nlohmann::json::object();

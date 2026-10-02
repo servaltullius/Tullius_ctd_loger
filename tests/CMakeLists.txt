@@ -292,6 +292,23 @@ target_link_libraries(skydiag_freeze_candidate_consensus_tests PRIVATE
 
 add_test(NAME skydiag_freeze_candidate_consensus_tests COMMAND skydiag_freeze_candidate_consensus_tests)
 
+add_executable(skydiag_modal_dialog_wait_tests
+  modal_dialog_wait_tests.cpp
+  test_utf_stub.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/ModalDialogWait.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
+)
+
+target_include_directories(skydiag_modal_dialog_wait_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+target_link_libraries(skydiag_modal_dialog_wait_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
+
+add_test(NAME skydiag_modal_dialog_wait_tests COMMAND skydiag_modal_dialog_wait_tests)
+
 add_executable(skydiag_blackbox_loader_stall_tests
   blackbox_loader_stall_tests.cpp
 )
@@ -568,6 +585,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Startup.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/IncidentManifest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/LoadStats.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ModalDialogProbe.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.Decision.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.Execute.cpp"
@@ -622,6 +640,20 @@ if(WIN32)
   )
   target_link_libraries(skydiag_helper_hang_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_hang_runtime_tests COMMAND skydiag_helper_hang_runtime_tests)
+
+  # Real helper hang capture of a thread parked in MessageBoxW, analyzed by the
+  # production analyzer: the modal-dialog path end to end.
+  add_executable(skydiag_modal_dialog_hang_e2e_tests
+    modal_dialog_hang_e2e_tests.cpp
+  )
+  target_include_directories(skydiag_modal_dialog_hang_e2e_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_modal_dialog_hang_e2e_tests PRIVATE
+    skydiag_helper_runtime_test_support
+    SkyrimDiagDumpToolCore
+  )
+  add_test(NAME skydiag_modal_dialog_hang_e2e_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
 endif()
 
 add_executable(skydiag_plugin_rules_logic_tests

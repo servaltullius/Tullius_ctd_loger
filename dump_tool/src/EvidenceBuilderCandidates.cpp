@@ -355,6 +355,31 @@ void AddHangThreadGroupSignal(const AnalysisResult& r, bool en, std::vector<Cand
   }
 }
 
+void AddModalDialogOwnerSignal(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  const auto& modal = r.modal_dialog_wait;
+  // SKSE runtime, hook framework, and game EXE owners are explained in the
+  // summary instead; promoting a module further down the stack would repeat
+  // the bystander attribution this signal exists to prevent.
+  if (!out || !modal.detected || modal.caller_kind != "plugin" || modal.caller_module_filename.empty()) {
+    return;
+  }
+
+  CandidateSignal signal{};
+  signal.family_id = "modal_dialog_owner";
+  signal.display_name = !modal.caller_inferred_mod_name.empty() ? modal.caller_inferred_mod_name : modal.caller_module_filename;
+  signal.candidate_key = CanonicalCandidateKey(signal.display_name);
+  signal.mod_name = modal.caller_inferred_mod_name;
+  signal.module_filename = modal.caller_module_filename;
+  signal.detail = en
+    ? (L"Directly called " + modal.wait_api + L" on the game main thread")
+    : (L"게임 메인 스레드에서 " + modal.wait_api + L"을(를) 직접 호출함");
+  signal.weight = 6u;
+  if (!signal.candidate_key.empty()) {
+    out->push_back(std::move(signal));
+  }
+}
+
 void AddHistorySignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
 {
   if (!out) {
@@ -531,6 +556,15 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   const bool en = (lang == i18n::Language::kEnglish);
   std::vector<CandidateSignal> signals;
   signals.reserve(16);
+  if (r.modal_dialog_wait.detected) {
+    // Execution-location families (frames, stack density, thread groups,
+    // nearby resources) all describe bystanders of the dialog wait.
+    AddModalDialogOwnerSignal(r, en, &signals);
+    AddHistorySignals(r, en, &signals);
+    r.actionable_candidates = BuildCandidateConsensus(signals, lang);
+    SortActionableCandidates(r.actionable_candidates);
+    return;
+  }
   AddCrashLoggerFrameSignals(r, en, &signals);
   AddCrashLoggerSignals(r, en, &signals);
   AddStackSignals(r, en, &signals);
@@ -560,6 +594,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
           ? L"Crash Logger 프레임과 같은 덤프의 스택이 모두 이 DLL에 걸리지만, 여전히 현재 fault location 단서에 머뭅니다."
           : L"이 DLL에 대한 Crash Logger 프레임 근거는 여전히 현재 fault location 단서에 머뭅니다.");
   }
+  SortActionableCandidates(r.actionable_candidates);
 }
 
 }  // namespace skydiag::dump_tool::internal

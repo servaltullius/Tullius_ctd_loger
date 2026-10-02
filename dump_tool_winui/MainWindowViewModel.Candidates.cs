@@ -52,6 +52,11 @@ internal sealed partial class MainWindowViewModel
             return T("Signals disagree", "신호 충돌");
         }
 
+        if (HasFamily(candidate, "modal_dialog_owner"))
+        {
+            return T("Opened the blocking dialog", "멈춘 대화상자를 연 모듈");
+        }
+
         if (HasFamily(candidate, "hang_thread_group"))
         {
             return T("Main-thread + stable worker group", "메인 스레드 + 정지 워커 그룹");
@@ -60,6 +65,14 @@ internal sealed partial class MainWindowViewModel
         if (IsStrongStandaloneCallstackCandidate(candidate))
         {
             return T("Tullius callstack first", "Tullius 콜스택 우선");
+        }
+
+        if (candidate.StatusId == "related" &&
+            !candidate.CrossValidated &&
+            HasFamily(candidate, "crash_logger_frame") &&
+            HasFamily(candidate, "actionable_stack"))
+        {
+            return T("Corroborated fault location", "상호 확인된 오류 위치");
         }
 
         if (HasFamily(candidate, "crash_logger_frame") && HasFamily(candidate, "first_chance_context"))
@@ -354,6 +367,7 @@ internal sealed partial class MainWindowViewModel
         "crash_logger_object_ref" => T("CrashLogger object ref", "CrashLogger 오브젝트 참조"),
         "actionable_stack" => T("actionable stack", "Tullius 콜스택"),
         "hang_thread_group" => T("stable same-module thread group", "동일 모듈 정지 스레드 그룹"),
+        "modal_dialog_owner" => T("modal dialog owner", "modal 대화상자 호출 모듈"),
         "resource_provider" => T("near resource provider", "인접 리소스 제공자"),
         "history_repeat" => T("history repeat", "반복 이력"),
         _ => familyId,
