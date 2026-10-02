@@ -114,9 +114,46 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
       labels.push_back(en ? L"repeated first-chance context" : L"반복 first-chance 문맥");
     } else if (family == "hang_thread_group") {
       labels.push_back(en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹");
+    } else if (family == "modal_dialog_owner") {
+      labels.push_back(en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈");
     }
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
+std::wstring DescribeModalDialogWait(const ModalDialogWaitInfo& modal, i18n::Language lang, bool en)
+{
+  const auto level = (modal.window_evidence && modal.stack_evidence)
+    ? i18n::ConfidenceLevel::kHigh
+    : i18n::ConfidenceLevel::kMedium;
+  const std::wstring conf = ConfidenceText(lang, level);
+  const std::wstring title = modal.dialog_title.empty() ? std::wstring{} : (L" \"" + modal.dialog_title + L"\"");
+  const std::wstring caller = !modal.caller_inferred_mod_name.empty()
+    ? (modal.caller_inferred_mod_name + L" (" + modal.caller_module_filename + L")")
+    : modal.caller_module_filename;
+
+  std::wstring owner;
+  if (modal.caller_kind == "plugin" && !caller.empty()) {
+    owner = en ? (L" It was opened by " + caller + L".") : (L" 대화상자를 연 모듈: " + caller + L".");
+  } else if (modal.caller_kind == "skse_runtime") {
+    owner = en
+      ? L" It was opened by the SKSE runtime itself, which usually reports a plugin load or version error."
+      : L" 대화상자를 연 주체는 SKSE 런타임 자체이며, 보통 플러그인 로드/버전 오류를 알리는 창입니다.";
+  } else if (modal.caller_kind == "hook_framework" && !caller.empty()) {
+    owner = en ? (L" It was opened by hook framework " + caller + L".") : (L" 대화상자를 연 모듈: 훅 프레임워크 " + caller + L".");
+  } else if (modal.caller_kind == "game_exe") {
+    owner = en ? L" It was opened by the game executable." : L" 대화상자를 연 주체는 게임 실행 파일입니다.";
+  }
+
+  return en
+    ? (L"The game main thread is waiting in a modal dialog" + title +
+        L", so the game stays stopped until that dialog is closed." + owner +
+        L" Look for an error window behind the game window; modules on the waiting stack are not the cause. (Confidence: " +
+        conf + L")")
+    : (L"게임 메인 스레드가 modal 대화상자" + title +
+        L"에서 대기 중이어서, 이 창을 닫기 전까지 게임이 멈춰 있습니다." + owner +
+        L" 게임 창 뒤에 오류 창이 있는지 확인하세요. 대기 중인 스택에 보이는 모듈은 원인이 아닙니다. (신뢰도: " +
+        conf + L")");
 }
 
 }  // namespace
@@ -598,7 +635,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         hangPrefix = hb;
       }
 
-      if (r.hang_thread_module_consensus.has_consensus) {
+      if (r.modal_dialog_wait.detected) {
+        summary = hangPrefix + L" " + DescribeModalDialogWait(r.modal_dialog_wait, lang, en);
+      } else if (r.hang_thread_module_consensus.has_consensus) {
         const auto& consensus = r.hang_thread_module_consensus;
         summary = en
           ? (hangPrefix + L" " + consensus.module_filename + L" appears on the game main thread and " +

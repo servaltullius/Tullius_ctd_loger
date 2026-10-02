@@ -1,6 +1,6 @@
 {
   "_fixture_kind": "skydiag.candidate_consensus_signals.v1",
-  "_fixture_intent": "A system fault location stays an observation point while two independent candidate families agree on a mod DLL.",
+  "_fixture_intent": "A CrashLogger frame and the Tullius same-event stack corroborate a mod DLL behind a system fault location without claiming independent causal validation.",
   "scenario_id": "system_dll_victim",
   "ground_truth_mod": "ENB Helper Suite",
   "fault_module_plus_offset": "KERNELBASE.dll+0x3A00",
@@ -20,7 +20,7 @@
       "display_name": "ENB Helper Suite",
       "mod_name": "ENB Helper Suite",
       "module_filename": "ENBHelperSuite.dll",
-      "detail": "Independent actionable stack",
+      "detail": "Same-event actionable stack corroboration",
       "weight": 5
     }
   ],
@@ -28,10 +28,10 @@
     {
       "mod_name": "ENB Helper Suite",
       "module_filename": "ENBHelperSuite.dll",
-      "status_id": "cross_validated",
-      "confidence": "High",
+      "status_id": "related",
+      "confidence": "Medium",
       "score": 11,
-      "cross_validated": true
+      "cross_validated": false
     }
   ]
 }

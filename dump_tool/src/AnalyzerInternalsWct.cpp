@@ -76,6 +76,38 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
       }
     }
 
+    const auto dialogsIt = j.find("modal_dialogs");
+    if (dialogsIt != j.end() && dialogsIt->is_array()) {
+      summary.modal_dialogs_captured = true;
+      for (const auto& d : *dialogsIt) {
+        if (!d.is_object()) {
+          continue;
+        }
+        const auto tidIt = d.find("tid");
+        if (tidIt == d.end() || !tidIt->is_number_unsigned()) {
+          continue;
+        }
+        WctModalDialog dialog{};
+        dialog.tid = tidIt->get<std::uint32_t>();
+        if (dialog.tid == 0u) {
+          continue;
+        }
+        if (const auto it = d.find("title"); it != d.end() && it->is_string()) {
+          dialog.title = it->get<std::string>();
+        }
+        if (const auto it = d.find("text"); it != d.end() && it->is_string()) {
+          dialog.text = it->get<std::string>();
+        }
+        if (const auto it = d.find("has_owner"); it != d.end() && it->is_boolean()) {
+          dialog.has_owner = it->get<bool>();
+        }
+        if (const auto it = d.find("owner_disabled"); it != d.end() && it->is_boolean()) {
+          dialog.owner_disabled = it->get<bool>();
+        }
+        summary.modal_dialogs.push_back(std::move(dialog));
+      }
+    }
+
     const auto capIt = j.find("capture");
     if (capIt != j.end() && capIt->is_object()) {
       summary.has_capture = true;

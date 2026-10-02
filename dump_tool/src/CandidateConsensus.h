@@ -22,6 +22,7 @@ struct CandidateSignal
 };
 
 std::wstring CanonicalCandidateKey(std::wstring_view value);
+void SortActionableCandidates(std::vector<ActionableCandidate>& candidates);
 std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<CandidateSignal>& signals, i18n::Language language);
 
 }  // namespace skydiag::dump_tool

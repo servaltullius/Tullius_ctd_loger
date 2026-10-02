@@ -2,6 +2,16 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.59-rc1 (2026-08-08)
+
+### 수정
+- **CTD 후보 신뢰도 보수화** — Crash Logger frame과 Tullius stack이 같은 사고의 실행 위치를 함께 가리키더라도 이를 독립 교차검증으로 계산하지 않고, `related / Medium`의 fault-location 보강으로 해석합니다. `High`는 boost-only인 history/resource가 아니라 strong object ref 같은 비스택 의미 근거와 정식 actionable stack의 두 weight 합이 10 이상일 때만 허용합니다.
+- **보강 신호의 승격 차단** — 반복 이력, 인접 리소스 제공자, first-chance 문맥은 후보 설명과 순위 보강에는 남기되 `High` 임계값의 부족분을 채우지 못하게 했습니다. hang thread-group 합의는 ADR-0005의 `synchronization_stall_likely / Medium` 계약을 유지합니다.
+- **사용자 문구 정렬** — 동일 사고의 frame+stack 조합을 `교차검증된 원인`으로 부르던 품질 코퍼스와 공유 텍스트를 `현재 fault location을 상호 확인한 단서`로 낮춰, 원인 확정과 실행 위치 보강을 구분합니다.
+
+### 테스트
+- 합성 품질 코퍼스의 direct DLL/system victim/hook-framework victim 사례를 `related / Medium`으로 고정하고, strong CrashLogger object ref와 정식 actionable stack의 두 weight 합이 10 이상인 별도 High 양성 대조군을 추가했습니다.
+
 ## v0.2.58 (2026-07-28)
 
 ### 한눈에 보기

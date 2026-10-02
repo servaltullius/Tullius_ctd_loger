@@ -124,6 +124,16 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildNextActionSummary(AnalysisSummary summary)
     {
+        if (summary.ModalDialogWaitDetected)
+        {
+            // The game is waiting for a dialog; reading it beats any module triage.
+            return string.IsNullOrWhiteSpace(summary.ModalDialogTitle)
+                ? T("Find and read the error dialog behind the game window", "게임 창 뒤의 오류 대화상자를 찾아 내용을 확인")
+                : T(
+                    $"Find and read the \"{summary.ModalDialogTitle}\" dialog behind the game window",
+                    $"게임 창 뒤의 \"{summary.ModalDialogTitle}\" 대화상자를 찾아 내용을 확인");
+        }
+
         if (summary.ActionableCandidates.Count > 0)
         {
             var primaryCandidate = summary.ActionableCandidates[0];
@@ -187,7 +197,9 @@ internal sealed partial class MainWindowViewModel
 
     private static bool IsPriorityActionRecommendation(string recommendation)
     {
-        return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
+        return recommendation.StartsWith("[Modal dialog]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Modal 대화상자]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[Crash Logger 프레임]", StringComparison.Ordinal) ||
