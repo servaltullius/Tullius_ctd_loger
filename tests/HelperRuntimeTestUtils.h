@@ -210,7 +210,7 @@ inline std::wstring GetCmdExePath()
   return std::filesystem::path(systemDir).append(L"cmd.exe").wstring();
 }
 
-inline bool HasChildProcess(DWORD parentPid)
+inline bool HasChildProcessNamed(DWORD parentPid, const wchar_t* exeName)
 {
   HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if (snap == INVALID_HANDLE_VALUE) {
@@ -220,7 +220,7 @@ inline bool HasChildProcess(DWORD parentPid)
   entry.dwSize = sizeof(entry);
   bool found = false;
   for (BOOL ok = Process32FirstW(snap, &entry); ok && !found; ok = Process32NextW(snap, &entry)) {
-    found = entry.th32ParentProcessID == parentPid;
+    found = entry.th32ParentProcessID == parentPid && _wcsicmp(entry.szExeFile, exeName) == 0;
   }
   CloseHandle(snap);
   return found;
@@ -252,9 +252,16 @@ inline ChildProcess LaunchSleepingChildProcess()
   // A process dumped while the loader is still mapping modules makes
   // MiniDumpWriteDump fail with ERROR_PARTIAL_COPY. cmd.exe starts ping.exe
   // only after it has initialized, so wait for that child before returning.
-  for (int attempt = 0; attempt < 100 && !HasChildProcess(child.pi.dwProcessId); ++attempt) {
-    Sleep(50);
+  // Waiting for any child is not enough: conhost.exe is also a child of a
+  // console process and appears early in its startup.
+  bool settled = false;
+  for (int attempt = 0; attempt < 200 && !settled; ++attempt) {
+    settled = HasChildProcessNamed(child.pi.dwProcessId, L"PING.EXE");
+    if (!settled) {
+      Sleep(25);
+    }
   }
+  Require(settled, "cmd.exe did not start ping.exe within 5 seconds");
   return child;
 }
 

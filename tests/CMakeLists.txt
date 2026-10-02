@@ -641,6 +641,14 @@ if(WIN32)
   target_link_libraries(skydiag_helper_hang_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_hang_runtime_tests COMMAND skydiag_helper_hang_runtime_tests)
 
+  # Real MiniDumpWriteDump of a child process with crash contexts whose
+  # registers point at unmapped memory (bad function-pointer calls).
+  add_executable(skydiag_crash_dump_context_tests
+    crash_dump_context_tests.cpp
+  )
+  target_link_libraries(skydiag_crash_dump_context_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_crash_dump_context_tests COMMAND skydiag_crash_dump_context_tests)
+
   # Real helper hang capture of a thread parked in MessageBoxW, analyzed by the
   # production analyzer: the modal-dialog path end to end.
   add_executable(skydiag_modal_dialog_hang_e2e_tests
