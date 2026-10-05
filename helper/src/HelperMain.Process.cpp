@@ -343,10 +343,10 @@ bool HandleProcessExitTick(
     if (exitCode != 0 &&
         !state->crashCaptured.latched &&
         cfg.enableWerDumpFallbackHint) {
-      WriteWerFallbackHint(outBase);
+      WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
       AppendLogLine(
         outBase,
-        L"Abnormal process exit had no internal crash dump; wrote WER LocalDumps fallback guidance: "
+        L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
           + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
     }
     if (exitCode == 0) {

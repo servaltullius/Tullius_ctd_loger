@@ -254,7 +254,7 @@ int main()
 
   AssertContains(
     processExitTickBody,
-    "WriteWerFallbackHint(outBase)",
+    "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
     "Abnormal exit without an internal dump must emit WER LocalDumps fallback guidance.");
 
   AssertOrdered(

@@ -249,8 +249,29 @@ static void TestQuarantineWriteFailurePreservesDumpAsFailSafe()
     /*evidenceWritten=*/false));
 }
 
+// Field case (v0.2.59-rc4): a plugin's error dialog ended the game with exit
+// code 3, and the hint claimed "dump capture failed" although no crash was
+// recorded and no dump was attempted.
+static void TestWerFallbackHintTellsTheTwoCasesApart()
+{
+  using skydiag::helper::internal::BuildWerFallbackHintText;
+  using skydiag::helper::internal::WerFallbackReason;
+
+  const auto abnormal = BuildWerFallbackHintText(WerFallbackReason::kAbnormalExitWithoutCrash, 3u);
+  assert(abnormal.find("dump capture failed") == std::string::npos);
+  assert(abnormal.find("exit code 3 / 0x00000003") != std::string::npos);
+  assert(abnormal.find("This is not a failed capture.") != std::string::npos);
+  assert(abnormal.find("error dialog") != std::string::npos);
+  assert(abnormal.find("LocalDumps\\SkyrimSE.exe") != std::string::npos);
+
+  const auto failed = BuildWerFallbackHintText(WerFallbackReason::kDumpWriteFailed, 0u);
+  assert(failed.find("could not write its dump") != std::string::npos);
+  assert(failed.find("LocalDumps\\SkyrimSE.exe") != std::string::npos);
+}
+
 int main()
 {
+  TestWerFallbackHintTellsTheTwoCasesApart();
   TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit();
   TestClassifyExitCodeVerdict_DeleteBenignOnStrongZeroExit();
   TestClassifyExitCodeVerdict_KeepDumpInMenuNonZeroExit();
