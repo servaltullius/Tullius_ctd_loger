@@ -435,6 +435,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
+  // A low-confidence plugin rule (e.g. ESL slots near the limit) is general
+  // upkeep, not an explanation of this incident, so it goes to the end of the
+  // checklist instead of becoming the first action.
+  std::vector<std::wstring> lowConfidencePluginRecommendations;
   if (!r.plugin_diagnostics.empty()) {
     for (const auto& pd : r.plugin_diagnostics) {
       for (const auto& rec : pd.recommendations) {
@@ -445,11 +449,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
                rec.find(L"1.6.1130") != std::wstring::npos)) {
             continue;
           }
+          if (pd.confidence_level == i18n::ConfidenceLevel::kLow) {
+            lowConfidencePluginRecommendations.push_back(rec);
+            continue;
+          }
           r.recommendations.push_back(rec);
         }
       }
     }
   }
+  auto appendLowConfidencePluginRecommendations = [&]() {
+    r.recommendations.insert(
+      r.recommendations.end(),
+      lowConfidencePluginRecommendations.begin(),
+      lowConfidencePluginRecommendations.end());
+  };
 
   if (r.symbol_runtime_degraded) {
     r.recommendations.push_back(en
@@ -504,6 +518,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 
   if (isHangLike && r.modal_dialog_wait.detected) {
     AddModalDialogWaitRecommendations(r, en);
+    appendLowConfidencePluginRecommendations();
     return;
   }
 
@@ -814,6 +829,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : L"[수동] 수동 캡처에는 WCT가 포함됩니다. 실제 프리징/무한로딩 중 캡처한 덤프에서 WCT 탭을 참고하세요.");
     }
   }
+
+  appendLowConfidencePluginRecommendations();
 
   if (!r.troubleshooting_steps.empty()) {
     r.recommendations.push_back(en

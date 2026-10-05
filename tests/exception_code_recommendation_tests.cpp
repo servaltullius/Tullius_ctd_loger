@@ -77,6 +77,31 @@ void TestFaultInsideCrashLoggerIsExplainedAsSecondary()
     "only a fault inside CrashLogger is a CrashLogger secondary fault");
 }
 
+// Field case (v0.2.59-rc3): a low-confidence "ESL slots near the limit" rule
+// became the report's NextAction ahead of the crashing DLL.
+void TestLowConfidencePluginRuleDoesNotLeadTheChecklist()
+{
+  auto r = MakeCrash(0xC0000005u, L"SmoothCam.dll");
+  skydiag::dump_tool::PluginRuleDiagnosis low{};
+  low.rule_id = "ESL_SLOT_NEAR_LIMIT";
+  low.confidence_level = i18n::ConfidenceLevel::kLow;
+  low.recommendations.push_back(L"[최적화] 불필요한 ESL 플러그인 정리 또는 병합을 고려하세요");
+  r.plugin_diagnostics.push_back(low);
+  skydiag::dump_tool::PluginRuleDiagnosis high{};
+  high.rule_id = "TEST_HIGH";
+  high.confidence_level = i18n::ConfidenceLevel::kHigh;
+  high.recommendations.push_back(L"[필수] 높은 신뢰도 규칙");
+  r.plugin_diagnostics.push_back(high);
+
+  BuildEvidenceAndSummary(r, i18n::Language::kKorean);
+  Require(!r.recommendations.empty(), "recommendations must be built");
+  Require(r.recommendations.front().rfind(L"[필수]", 0) == 0, "a high-confidence plugin rule keeps its place");
+  Require(AnyRecommendationStartsWith(r, L"[최적화]", L"ESL"), "the low-confidence rule must still be listed");
+  Require(
+    r.recommendations[1].rfind(L"[최적화]", 0) != 0,
+    "a low-confidence plugin rule must not come before the crash guidance");
+}
+
 }  // namespace
 
 int main()
@@ -84,6 +109,7 @@ int main()
   try {
     TestBreakpointGetsItsOwnExplanation();
     TestFaultInsideCrashLoggerIsExplainedAsSecondary();
+    TestLowConfidencePluginRuleDoesNotLeadTheChecklist();
     std::puts("exception code recommendation tests passed");
     return 0;
   } catch (const std::exception& ex) {
