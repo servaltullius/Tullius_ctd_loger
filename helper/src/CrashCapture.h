@@ -9,6 +9,7 @@ using DWORD = std::uint32_t;
 
 #include <cstdint>
 #include <cstddef>
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -214,7 +215,47 @@ bool CaptureStableSharedSnapshot(
 bool TryClearRecoveredCrashFreeze(
   skydiag::SharedLayout* shm,
   std::uint32_t expectedCrashSeq) noexcept;
-void WriteWerFallbackHint(const std::filesystem::path& outBase);
+// Why the WER LocalDumps hint is being written. The two cases need different
+// first steps, so the hint must not claim a failed capture when none was tried.
+enum class WerFallbackReason
+{
+  // A crash was recorded but every dump write failed.
+  kDumpWriteFailed,
+  // The game exited with a non-zero code and no recorded exception, e.g. a
+  // plugin ended it after an error dialog, or abort()/TerminateProcess.
+  kAbnormalExitWithoutCrash,
+};
+
+inline std::string BuildWerFallbackHintText(WerFallbackReason reason, DWORD exitCode)
+{
+  std::string text;
+  if (reason == WerFallbackReason::kDumpWriteFailed) {
+    text =
+      "SkyrimDiag recorded a crash but could not write its dump. As a fallback, you can enable "
+      "Windows Error Reporting LocalDumps.\n";
+  } else {
+    char code[16]{};
+    std::snprintf(code, sizeof(code), "0x%08X", static_cast<unsigned int>(exitCode));
+    text =
+      "The game exited abnormally (exit code " + std::to_string(exitCode) + " / " + code +
+      ") without an exception that SkyrimDiag records, so no dump was taken. This is not a failed capture.\n"
+      "This usually means the game was ended on purpose: a plugin showed an error dialog (for example an "
+      "incompatible Address Library or game version) and closed the game, or code called abort() or "
+      "TerminateProcess. Look for such a dialog and the plugin's own log first.\n"
+      "If the game was crashing instead, Windows Error Reporting LocalDumps can capture it:\n";
+  }
+  text +=
+    "Registry path:\n"
+    "  HKLM\\SOFTWARE\\Microsoft\\Windows\\Windows Error Reporting\\LocalDumps\\SkyrimSE.exe\n"
+    "Recommended values:\n"
+    "  DumpType (DWORD) = 2   ; full dump\n"
+    "  DumpCount (DWORD) = 10\n"
+    "  DumpFolder (EXPAND_SZ) = <your output folder>\n"
+    "Reference: https://learn.microsoft.com/windows/win32/wer/collecting-user-mode-dumps\n";
+  return text;
+}
+
+void WriteWerFallbackHint(const std::filesystem::path& outBase, WerFallbackReason reason, DWORD exitCode);
 bool IsCleanExitEvidenceRequired(
   const skydiag::helper::HelperConfig& cfg,
   const CrashCaptureState* crashState) noexcept;
