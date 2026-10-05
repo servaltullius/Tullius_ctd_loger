@@ -28,6 +28,52 @@ int main()
   static_assert(!ShouldSuppressNestedCrashLoggerException(
     true, 0x5000u, crashLoggerRange, crashLoggerSseRange));
 
+  // An unhandled assert breakpoint or C++ throw is reported by CrashLogger,
+  // whose own probe faults must not become the recorded crash.
+  using skydiag::plugin::kCrashHandlerBreakpointCode;
+  using skydiag::plugin::kCrashHandlerCppExceptionCode;
+  using skydiag::plugin::ShouldKeepUnrecordedException;
+  using skydiag::plugin::ShouldRecordKeptExceptionInstead;
+  using skydiag::plugin::ShouldReplaceKeptException;
+  static_assert(ShouldKeepUnrecordedException(
+    kCrashHandlerBreakpointCode, 1u, 0u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(ShouldKeepUnrecordedException(
+    kCrashHandlerCppExceptionCode, 4u, 0x9000u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!ShouldKeepUnrecordedException(
+    kCrashHandlerCppExceptionCode, 4u, 0x1000u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!ShouldKeepUnrecordedException(
+    0x406D1388u, 0u, 0u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!ShouldKeepUnrecordedException(
+    0xC0000005u, 2u, 0u, crashLoggerRange, crashLoggerSseRange));
+
+  static_assert(ShouldReplaceKeptException(
+    false, false, false, 0u, kCrashHandlerCppExceptionCode));
+  static_assert(!ShouldReplaceKeptException(
+    true, true, true, kCrashHandlerBreakpointCode, kCrashHandlerCppExceptionCode));
+  static_assert(ShouldReplaceKeptException(
+    true, true, true, kCrashHandlerBreakpointCode, kCrashHandlerBreakpointCode));
+  static_assert(ShouldReplaceKeptException(
+    true, true, true, kCrashHandlerCppExceptionCode, kCrashHandlerBreakpointCode));
+  static_assert(ShouldReplaceKeptException(
+    true, false, true, kCrashHandlerBreakpointCode, kCrashHandlerCppExceptionCode));
+  static_assert(ShouldReplaceKeptException(
+    true, true, false, kCrashHandlerBreakpointCode, kCrashHandlerCppExceptionCode));
+
+  static_assert(ShouldRecordKeptExceptionInstead(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true));
+  static_assert(ShouldRecordKeptExceptionInstead(
+    false, 0x3800u, crashLoggerRange, crashLoggerSseRange, true, true, true));
+  static_assert(!ShouldRecordKeptExceptionInstead(
+    true, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true));
+  static_assert(!ShouldRecordKeptExceptionInstead(
+    false, 0x5000u, crashLoggerRange, crashLoggerSseRange, true, true, true));
+  static_assert(!ShouldRecordKeptExceptionInstead(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, false, true, true));
+  static_assert(!ShouldRecordKeptExceptionInstead(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, false, true));
+  static_assert(!ShouldRecordKeptExceptionInstead(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, false));
+
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const auto heartbeatPath = repoRoot / "plugin" / "src" / "Heartbeat.cpp";
   const auto resourceHooksPath = repoRoot / "plugin" / "src" / "ResourceHooks.cpp";
@@ -216,6 +262,18 @@ int main()
     "TryPublishCrashRecord(shm, ep, code)",
     "SetEvent(ev)",
     "Crash record publication must precede helper signaling.");
+
+  AssertOrdered(
+    vectoredHandlerBody,
+    "TryPublishKeptExceptionForCrashLoggerFault(",
+    "TryPublishCrashRecord(shm, ep, code)",
+    "A CrashLogger fault must first record the exception CrashLogger is reporting.");
+
+  AssertOrdered(
+    vectoredHandlerBody,
+    "SetEvent(ev)",
+    "KeepUnrecordedException(shm, ep)",
+    "Only exceptions the fatal filter let through may be kept for a later CrashLogger fault.");
 
   AssertOrdered(
     vectoredHandlerBody,

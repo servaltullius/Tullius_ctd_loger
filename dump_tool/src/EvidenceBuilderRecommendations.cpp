@@ -522,6 +522,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(en
         ? L"[Basics] ExceptionCode=0xC0000005 (Access Violation). Often caused by DLL hooks / invalid memory access."
         : L"[기본] ExceptionCode=0xC0000005(접근 위반)입니다. 보통 DLL 후킹/메모리 접근 문제로 발생합니다.");
+    } else if (r.exc_code == 0x80000003u) {
+      r.recommendations.push_back(en
+        ? L"[Basics] ExceptionCode=0x80000003 (breakpoint). A mod usually raises this when it stops itself on a failed internal check (assert/abort). Check the first non-system module in the call stack, the code that called the stopping function."
+        : L"[기본] ExceptionCode=0x80000003(브레이크포인트)입니다. 모드가 내부 검사(assert/abort)에 실패해 스스로 실행을 멈출 때 주로 생깁니다. 콜스택에서 시스템 DLL이 아닌 첫 모듈, 즉 멈춤을 호출한 코드를 먼저 확인하세요.");
     } else {
       wchar_t buf[128]{};
       swprintf_s(buf, en ? L"[Basics] ExceptionCode=0x%08X." : L"[기본] ExceptionCode=0x%08X 입니다.", r.exc_code);
@@ -541,7 +545,17 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if (ctx.isHookFramework) {
+  const std::wstring faultModuleLower = minidump::WideLower(r.fault_module_filename);
+  const bool faultIsCrashLogger =
+    faultModuleLower == L"crashlogger.dll" || faultModuleLower == L"crashloggersse.dll";
+  if (r.exc_code != 0 && faultIsCrashLogger) {
+    // CrashLogger catches access violations from its own memory probes while
+    // writing a report, so a fault inside it usually belongs to a crash it was
+    // already reporting rather than to CrashLogger.
+    r.recommendations.push_back(en
+      ? L"[Interpretation] The exception is inside CrashLogger. It is most likely a secondary fault from CrashLogger probing memory while it reported another crash. Judge the crash by the original exception and call stack in the paired CrashLogger log, not by CrashLogger."
+      : L"[해석] 예외 위치가 CrashLogger 내부입니다. CrashLogger가 다른 크래시를 기록하면서 메모리를 조사하다 낸 2차 예외일 가능성이 큽니다. CrashLogger가 아니라 짝지어진 CrashLogger 로그의 원래 예외와 콜스택을 기준으로 판단하세요.");
+  } else if (ctx.isHookFramework) {
     r.recommendations.push_back(en
       ? L"[Hook framework] This mod extensively hooks the game engine. It may be a victim of memory corruption caused by another mod, not the root cause itself. Check other suspect candidates first."
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
