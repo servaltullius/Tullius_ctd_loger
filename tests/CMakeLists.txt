@@ -74,6 +74,20 @@ if(WIN32)
     NAME skydiag_analyzer_state_runtime_tests
     COMMAND skydiag_analyzer_state_runtime_tests
   )
+
+  add_executable(skydiag_exception_code_recommendation_tests
+    exception_code_recommendation_tests.cpp
+  )
+  target_include_directories(skydiag_exception_code_recommendation_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_exception_code_recommendation_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_exception_code_recommendation_tests
+    COMMAND skydiag_exception_code_recommendation_tests
+  )
 endif()
 
 add_executable(skydiag_i18n_core_tests
@@ -662,6 +676,35 @@ if(WIN32)
     SkyrimDiagDumpToolCore
   )
   add_test(NAME skydiag_modal_dialog_hang_e2e_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
+
+  # The plugin's real vectored handler against a stand-in CrashLogger.dll: an
+  # assert breakpoint that CrashLogger reports must be recorded, not
+  # CrashLogger's own probe fault. The stand-in lives in its own directory so
+  # nothing named CrashLogger.dll sits next to the shipped binaries.
+  add_library(skydiag_fake_crashlogger SHARED
+    fake_crashlogger_dll.cpp
+  )
+  set_target_properties(skydiag_fake_crashlogger PROPERTIES
+    OUTPUT_NAME CrashLogger
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fakes/crashlogger"
+  )
+
+  add_executable(skydiag_plugin_crash_handler_runtime_tests
+    plugin_crash_handler_runtime_tests.cpp
+    ../plugin/src/Blackbox.cpp
+    ../plugin/src/CrashHandler.cpp
+    ../plugin/src/SharedMemory.cpp
+  )
+  target_include_directories(skydiag_plugin_crash_handler_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+  )
+  target_compile_definitions(skydiag_plugin_crash_handler_runtime_tests PRIVATE _UNICODE UNICODE)
+  target_link_libraries(skydiag_plugin_crash_handler_runtime_tests PRIVATE skydiag_shared Psapi)
+  add_dependencies(skydiag_plugin_crash_handler_runtime_tests skydiag_fake_crashlogger)
+  add_test(
+    NAME skydiag_plugin_crash_handler_runtime_tests
+    COMMAND skydiag_plugin_crash_handler_runtime_tests $<TARGET_FILE:skydiag_fake_crashlogger>
+  )
 
   # Real helper hang capture of a thread parked three calls deep: the formal
   # stackwalk must unwind every caller instead of stopping or guessing.

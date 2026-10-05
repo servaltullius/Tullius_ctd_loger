@@ -500,6 +500,7 @@ void ProcessValidCrashDump(
   const std::wstring& dumpPath,
   const std::wstring& ts,
   const CrashEventInfo& info,
+  const PluginScanInputs& pluginScanInputs,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
   std::wstring* pendingCrashViewerDumpPath)
@@ -511,7 +512,7 @@ void ProcessValidCrashDump(
   std::wcout << L"[SkyrimDiagHelper] Crash dump written: " << dumpPath << L"\n";
 
   {
-    const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
+    const std::string pluginScanJson = CollectPluginScanJson(pluginScanInputs, outBase);
     if (!pluginScanJson.empty()) {
       const auto pluginScanPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
       WriteTextFileUtf8(pluginScanPath, pluginScanJson);
@@ -1115,6 +1116,10 @@ bool HandleCrashEventTick(
     *lastCrashDumpPath = dumpPath;
   }
 
+  // Read these while the game is still alive: the filters below wait for it to
+  // exit, after which its exe path and module list can no longer be queried.
+  const PluginScanInputs pluginScanInputs = CollectPluginScanInputs(proc);
+
   auto verdict = FilterVerdict::kKeepDump;
   if (proc.process) {
     verdict = FilterShutdownException(
@@ -1239,6 +1244,7 @@ bool HandleCrashEventTick(
     dumpPath,
     ts,
     info,
+    pluginScanInputs,
     pendingCrashEtw,
     pendingCrashAnalysis,
     pendingCrashViewerDumpPath);

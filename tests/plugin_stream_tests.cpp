@@ -72,6 +72,29 @@ void TestCrashPathWritesPluginScanSidecar()
     "Crash path must write plugin scan sidecar when collected.");
 }
 
+// The exit-code filters wait for the game to exit, and an exited process can no
+// longer report its exe path or modules. Reading them after the filters made
+// every real CTD skip the plugin scan.
+void TestCrashPathCollectsPluginScanInputsWhileProcessIsAlive()
+{
+  const auto impl = ReadFile("helper/src/CrashCapture.cpp");
+  const auto crashTickBody = ExtractFunctionBody(impl, "bool HandleCrashEventTick(");
+  AssertOrdered(
+    crashTickBody,
+    "WriteDumpWithStreams(",
+    "CollectPluginScanInputs(proc)",
+    "Crash capture must collect plugin scan inputs after the dump write.");
+  AssertOrdered(
+    crashTickBody,
+    "CollectPluginScanInputs(proc)",
+    "FilterShutdownException(",
+    "Crash capture must collect plugin scan inputs before waiting for the game to exit.");
+
+  const auto processValidBody = ExtractFunctionBody(impl, "void ProcessValidCrashDump(");
+  assert(processValidBody.find("CollectPluginScanJson(pluginScanInputs, outBase)") != std::string::npos);
+  assert(processValidBody.find("CollectPluginScanJson(proc") == std::string::npos);
+}
+
 void TestCrashSeqlockProtocolVersionAndDumpCompatibility()
 {
   const auto shared = ReadFile("shared/SkyrimDiagShared.h");
@@ -114,6 +137,7 @@ int main()
   TestDumpWriterHeaderHasPluginParam();
   TestCrashPathIsDumpFirst();
   TestCrashPathWritesPluginScanSidecar();
+  TestCrashPathCollectsPluginScanInputsWhileProcessIsAlive();
   TestCrashSeqlockProtocolVersionAndDumpCompatibility();
   TestAnalyzerHasPluginSidecarFallback();
   return 0;

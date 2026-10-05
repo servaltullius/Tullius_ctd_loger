@@ -18,6 +18,15 @@ constexpr bool CrashHandlerModuleRangeContains(
          address >= range.begin && address < range.end;
 }
 
+constexpr bool IsInCrashLoggerModule(
+  std::uintptr_t address,
+  CrashHandlerModuleRange crashLoggerRange,
+  CrashHandlerModuleRange crashLoggerSseRange) noexcept
+{
+  return CrashHandlerModuleRangeContains(crashLoggerRange, address) ||
+         CrashHandlerModuleRangeContains(crashLoggerSseRange, address);
+}
+
 constexpr bool ShouldSuppressNestedCrashLoggerException(
   bool crashAlreadyFrozen,
   std::uintptr_t exceptionAddress,
@@ -25,8 +34,67 @@ constexpr bool ShouldSuppressNestedCrashLoggerException(
   CrashHandlerModuleRange crashLoggerSseRange) noexcept
 {
   return crashAlreadyFrozen &&
-         (CrashHandlerModuleRangeContains(crashLoggerRange, exceptionAddress) ||
-          CrashHandlerModuleRangeContains(crashLoggerSseRange, exceptionAddress));
+         IsInCrashLoggerModule(exceptionAddress, crashLoggerRange, crashLoggerSseRange);
+}
+
+// In fatal-only mode an assert/abort breakpoint and a C++ throw are not
+// recorded, because they are usually handled. When one is not handled,
+// CrashLogger reports it, and while doing so it raises access violations of its
+// own that it catches internally. Those probes are fatal codes, so without this
+// the first thing recorded for the crash would be CrashLogger's probe.
+//
+// The handler therefore keeps the latest such exception, tagged with its
+// thread, and records it instead when CrashLogger faults on that thread before
+// anything else has been recorded.
+inline constexpr std::uint32_t kCrashHandlerBreakpointCode = 0x80000003u;
+inline constexpr std::uint32_t kCrashHandlerCppExceptionCode = 0xE06D7363u;
+
+// throwImageBase is ExceptionInformation[3] of a C++ exception: the image that
+// threw it. CrashLogger's own throws while writing its report are not the crash.
+constexpr bool ShouldKeepUnrecordedException(
+  std::uint32_t code,
+  std::uint32_t numberParameters,
+  std::uintptr_t throwImageBase,
+  CrashHandlerModuleRange crashLoggerRange,
+  CrashHandlerModuleRange crashLoggerSseRange) noexcept
+{
+  if (code == kCrashHandlerBreakpointCode) {
+    return true;
+  }
+  if (code == kCrashHandlerCppExceptionCode) {
+    return !(numberParameters >= 4u &&
+             IsInCrashLoggerModule(throwImageBase, crashLoggerRange, crashLoggerSseRange));
+  }
+  return false;
+}
+
+// A breakpoint is the more specific signal (assert/abort), so a later C++
+// throw on the same thread does not displace a recent one.
+constexpr bool ShouldReplaceKeptException(
+  bool haveKept,
+  bool keptOnSameThread,
+  bool keptIsRecent,
+  std::uint32_t keptCode,
+  std::uint32_t newCode) noexcept
+{
+  if (!haveKept || !keptOnSameThread || !keptIsRecent) {
+    return true;
+  }
+  return !(keptCode == kCrashHandlerBreakpointCode && newCode != kCrashHandlerBreakpointCode);
+}
+
+constexpr bool ShouldRecordKeptExceptionInstead(
+  bool crashAlreadyFrozen,
+  std::uintptr_t exceptionAddress,
+  CrashHandlerModuleRange crashLoggerRange,
+  CrashHandlerModuleRange crashLoggerSseRange,
+  bool haveKept,
+  bool keptOnSameThread,
+  bool keptIsRecent) noexcept
+{
+  return !crashAlreadyFrozen &&
+         IsInCrashLoggerModule(exceptionAddress, crashLoggerRange, crashLoggerSseRange) &&
+         haveKept && keptOnSameThread && keptIsRecent;
 }
 
 // Protocol v4 preserves the first selected exception for one incident.

@@ -67,6 +67,24 @@ PublishOnceModuleRange g_crashLoggerSseRange{};
 
 constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
 
+// The latest unrecorded breakpoint or C++ throw (see ShouldKeepUnrecordedException).
+// Static storage, so the handler never puts a CONTEXT on a possibly exhausted
+// stack. `busy` is a try-lock: a thread that finds it taken just skips.
+struct KeptException
+{
+  std::atomic<LONG> busy{0};
+  DWORD tid = 0;
+  std::uint64_t qpc = 0;
+  EXCEPTION_RECORD record{};
+  CONTEXT context{};
+};
+
+KeptException g_keptException{};
+
+// CrashLogger writes its report within seconds; this only bounds how stale a
+// kept exception may be when it is matched to a CrashLogger fault.
+constexpr std::uint64_t kKeptExceptionMaxAgeSeconds = 60;
+
 CrashHandlerModuleRange QueryLoadedModuleRange(const wchar_t* moduleName) noexcept
 {
   const HMODULE module = GetModuleHandleW(moduleName);
@@ -268,6 +286,85 @@ bool TryPublishCrashRecord(
   return true;
 }
 
+bool IsKeptExceptionRecent(const skydiag::SharedLayout* shm, std::uint64_t keptQpc, std::uint64_t nowQpc) noexcept
+{
+  const std::uint64_t qpcFreq = (shm && shm->header.qpc_freq != 0u) ? shm->header.qpc_freq : 10000000ull;
+  return keptQpc != 0u && nowQpc >= keptQpc && (nowQpc - keptQpc) <= kKeptExceptionMaxAgeSeconds * qpcFreq;
+}
+
+void KeepUnrecordedException(const skydiag::SharedLayout* shm, const EXCEPTION_POINTERS* ep) noexcept
+{
+  const auto& record = *ep->ExceptionRecord;
+  const auto throwImageBase = record.NumberParameters >= 4u
+    ? static_cast<std::uintptr_t>(record.ExceptionInformation[3])
+    : std::uintptr_t{0};
+  if (!ShouldKeepUnrecordedException(
+        record.ExceptionCode,
+        record.NumberParameters,
+        throwImageBase,
+        g_crashLoggerRange.Load(),
+        g_crashLoggerSseRange.Load())) {
+    return;
+  }
+
+  auto& kept = g_keptException;
+  if (kept.busy.exchange(1, std::memory_order_acquire) != 0) {
+    return;
+  }
+  const DWORD tid = GetCurrentThreadId();
+  const auto nowQpc = QpcNow();
+  if (ShouldReplaceKeptException(
+        kept.tid != 0u,
+        kept.tid == tid,
+        IsKeptExceptionRecent(shm, kept.qpc, nowQpc),
+        kept.record.ExceptionCode,
+        record.ExceptionCode)) {
+    kept.tid = tid;
+    kept.qpc = nowQpc;
+    std::memcpy(&kept.record, ep->ExceptionRecord, sizeof(EXCEPTION_RECORD));
+    std::memcpy(&kept.context, ep->ContextRecord, sizeof(CONTEXT));
+  }
+  kept.busy.store(0, std::memory_order_release);
+}
+
+// Records the kept exception when CrashLogger faults while reporting it. On
+// success the incident is frozen, so CrashLogger's remaining probes are
+// suppressed like any nested CrashLogger exception.
+bool TryPublishKeptExceptionForCrashLoggerFault(
+  skydiag::SharedLayout* shm,
+  std::uintptr_t exceptionAddress,
+  DWORD* outCode,
+  std::uint64_t* outAddress) noexcept
+{
+  if (!IsInCrashLoggerModule(exceptionAddress, g_crashLoggerRange.Load(), g_crashLoggerSseRange.Load())) {
+    return false;
+  }
+  auto& kept = g_keptException;
+  if (kept.busy.exchange(1, std::memory_order_acquire) != 0) {
+    return false;
+  }
+  bool published = false;
+  if (ShouldRecordKeptExceptionInstead(
+        IsCrashCaptureFrozen(shm),
+        exceptionAddress,
+        g_crashLoggerRange.Load(),
+        g_crashLoggerSseRange.Load(),
+        kept.tid != 0u,
+        kept.tid == GetCurrentThreadId(),
+        IsKeptExceptionRecent(shm, kept.qpc, QpcNow()))) {
+    EXCEPTION_POINTERS keptPointers{ &kept.record, &kept.context };
+    published = TryPublishCrashRecord(shm, &keptPointers, kept.record.ExceptionCode);
+    if (published) {
+      *outCode = kept.record.ExceptionCode;
+      *outAddress = reinterpret_cast<std::uint64_t>(kept.record.ExceptionAddress);
+      kept.tid = 0;
+      kept.qpc = 0;
+    }
+  }
+  kept.busy.store(0, std::memory_order_release);
+  return published;
+}
+
 LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 {
   auto* shm = GetShared();
@@ -293,19 +390,30 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     // The fatal path deliberately performs only fixed-size shared-memory
     // writes and kernel signaling. Module/path resolution and std::string /
     // std::filesystem telemetry are unsafe with a corrupt heap or low stack.
-    if (!TryPublishCrashRecord(shm, ep, code)) {
+    //
+    // CrashLogger faulting before anything was recorded means it is reporting
+    // an exception the fatal filter let through. Record that exception, not
+    // CrashLogger's own probe.
+    DWORD recordedCode = code;
+    auto recordedAddress = static_cast<std::uint64_t>(exceptionAddress);
+    if (!TryPublishKeptExceptionForCrashLoggerFault(shm, exceptionAddress, &recordedCode, &recordedAddress) &&
+        !TryPublishCrashRecord(shm, ep, code)) {
       return EXCEPTION_CONTINUE_SEARCH;
     }
 
     skydiag::EventPayload p{};
-    p.a = code;
-    p.b = reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress);
+    p.a = recordedCode;
+    p.b = recordedAddress;
     PushEventAlways(skydiag::EventType::kCrash, p, sizeof(p));
 
     if (HANDLE ev = GetCrashEvent()) {
       SetEvent(ev);
     }
     return EXCEPTION_CONTINUE_SEARCH;
+  }
+
+  if (g_crashHookMode == 1) {
+    KeepUnrecordedException(shm, ep);
   }
 
   if (ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)) {
