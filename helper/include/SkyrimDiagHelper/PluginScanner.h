@@ -25,12 +25,17 @@ struct PluginScanResult
   std::string game_exe_version;
   std::string plugins_source;  // "standard", "mo2_profile", "fallback", "error"
   bool mo2_detected = false;
+  // True when `plugins` also lists the base masters and Skyrim.ccc plugins the
+  // game loads without a plugins.txt entry. Older scans listed only plugins.txt.
+  bool implicit_plugins_included = false;
   std::vector<PluginMeta> plugins;
   std::string error;
 };
 
 bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out);
 std::vector<std::string> ParsePluginsTxt(const std::string& content);
+// Plugin names from Skyrim.ccc, the Creation Club files the game loads on its own.
+std::vector<std::string> ParseCreationClubContentList(const std::string& content);
 
 bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir);
 std::vector<std::wstring> CollectModuleFilenamesBestEffort(std::uint32_t pid);

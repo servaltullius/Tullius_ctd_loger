@@ -35,6 +35,15 @@ bool IsImplicitRuntimeMaster(std::string_view masterLower)
          masterLower == "resourcepack.esl";
 }
 
+// Creation Club plugin names (ccXXXsse###-name.esm/.esl). The game loads the
+// ones listed in Skyrim.ccc without a plugins.txt entry.
+bool IsCreationClubPluginName(std::string_view nameLower)
+{
+  const bool masterOrLight = nameLower.size() > 4u &&
+    (nameLower.substr(nameLower.size() - 4u) == ".esm" || nameLower.substr(nameLower.size() - 4u) == ".esl");
+  return masterOrLight && nameLower.rfind("cc", 0) == 0;
+}
+
 i18n::ConfidenceLevel ParseConfidenceLevel(std::string_view s)
 {
   const std::string lower = AsciiLower(s);
@@ -95,6 +104,7 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
     parsed.game_exe_version = j.value("game_exe_version", "");
     parsed.plugins_source = j.value("plugins_source", "");
     parsed.mo2_detected = j.value("mo2_detected", false);
+    parsed.implicit_plugins_included = j.value("implicit_plugins_included", false);
 
     if (auto it = j.find("plugins"); it != j.end() && it->is_array()) {
       parsed.plugins.reserve(it->size());
@@ -155,6 +165,12 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan)
       // they are not listed in plugins.txt (depends on manager/runtime), so do not
       // flag them as missing based on active-list comparison alone.
       if (IsImplicitRuntimeMaster(masterLower)) {
+        continue;
+      }
+      // A scan that predates implicit plugins cannot see which Creation Club
+      // files Skyrim.ccc loaded, so a CC master absent from plugins.txt is not
+      // evidence that it is missing.
+      if (!scan.implicit_plugins_included && IsCreationClubPluginName(masterLower)) {
         continue;
       }
       if (added.insert(masterLower).second) {
