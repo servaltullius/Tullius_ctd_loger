@@ -26,6 +26,9 @@ struct ParsedPluginScan
   std::string game_exe_version;
   std::string plugins_source;
   bool mo2_detected = false;
+  // Set by scans that list the base masters and Skyrim.ccc plugins the game
+  // loads on its own; older scans listed only plugins.txt.
+  bool implicit_plugins_included = false;
   std::vector<PluginEntryInfo> plugins;
 };
 

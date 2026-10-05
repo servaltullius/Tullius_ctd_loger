@@ -677,6 +677,14 @@ if(WIN32)
   )
   add_test(NAME skydiag_modal_dialog_hang_e2e_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
 
+  # ScanPlugins against a throwaway MO2-style game folder: the base masters and
+  # Skyrim.ccc plugins the game loads on its own must count as active.
+  add_executable(skydiag_plugin_scanner_runtime_tests
+    plugin_scanner_runtime_tests.cpp
+  )
+  target_link_libraries(skydiag_plugin_scanner_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_plugin_scanner_runtime_tests COMMAND skydiag_plugin_scanner_runtime_tests)
+
   # The plugin's real vectored handler against a stand-in CrashLogger.dll: an
   # assert breakpoint that CrashLogger reports must be recorded, not
   # CrashLogger's own probe fault. The stand-in lives in its own directory so

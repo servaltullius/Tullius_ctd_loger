@@ -294,6 +294,26 @@ std::vector<std::string> ParsePluginsTxt(const std::string& content)
   return hasStarredLines ? active : legacyActive;
 }
 
+std::vector<std::string> ParseCreationClubContentList(const std::string& content)
+{
+  std::vector<std::string> plugins;
+  bool firstLine = true;
+  std::istringstream stream(content);
+  std::string line;
+  while (std::getline(stream, line)) {
+    if (firstLine) {
+      StripUtf8BomInPlace(line);
+      firstLine = false;
+    }
+    TrimAsciiInPlace(line);
+    if (line.empty() || line[0] == '#' || line[0] == ';') {
+      continue;
+    }
+    plugins.push_back(std::move(line));
+  }
+  return plugins;
+}
+
 bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir)
 {
   if (!processHandle) {
@@ -458,9 +478,42 @@ PluginScanResult ScanPlugins(
     return result;
   }
   const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  const auto activePlugins = ParsePluginsTxt(content);
+  const auto listedPlugins = ParsePluginsTxt(content);
 
+  // The game loads the base masters and the Creation Club files named in
+  // Skyrim.ccc without a plugins.txt entry, whenever they are in Data. Mod
+  // managers usually leave them out of plugins.txt, so without them every
+  // plugin that depends on an Anniversary Edition CC file looked like it had
+  // a missing master.
   const auto dataDir = gameExeDir / "Data";
+  std::vector<std::string> activePlugins;
+  std::unordered_set<std::string> seen;
+  auto addImplicitIfPresent = [&](const std::string& name) {
+    if (seen.count(AsciiLower(name)) != 0u) {
+      return;
+    }
+    std::error_code ec;
+    if (std::filesystem::exists(dataDir / std::filesystem::u8path(name), ec)) {
+      seen.insert(AsciiLower(name));
+      activePlugins.push_back(name);
+    }
+  };
+  for (const char* baseMaster : { "Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm" }) {
+    addImplicitIfPresent(baseMaster);
+  }
+  if (std::ifstream ccc(gameExeDir / "Skyrim.ccc"); ccc.is_open()) {
+    const std::string cccContent((std::istreambuf_iterator<char>(ccc)), std::istreambuf_iterator<char>());
+    for (const auto& name : ParseCreationClubContentList(cccContent)) {
+      addImplicitIfPresent(name);
+    }
+  }
+  for (const auto& name : listedPlugins) {
+    if (seen.insert(AsciiLower(name)).second) {
+      activePlugins.push_back(name);
+    }
+  }
+  result.implicit_plugins_included = true;
+
   for (const auto& pluginName : activePlugins) {
     PluginMeta meta{};
     meta.filename = pluginName;
@@ -492,6 +545,7 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
   j["game_exe_version"] = result.game_exe_version;
   j["plugins_source"] = result.plugins_source;
   j["mo2_detected"] = result.mo2_detected;
+  j["implicit_plugins_included"] = result.implicit_plugins_included;
   j["error"] = result.error;
   j["plugins"] = nlohmann::json::array();
 

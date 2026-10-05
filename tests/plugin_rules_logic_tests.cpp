@@ -181,6 +181,49 @@ void TestMissingMastersIgnoreImplicitRuntimeMasters()
   assert(missing[0] == L"ActuallyMissing.esm");
 }
 
+// Field case (v0.2.59-rc3): an MO2 profile without the Anniversary Edition
+// CC files in plugins.txt made every CC master look missing.
+void TestMissingMastersTrustCreationClubMastersOnlyFromImplicitAwareScans()
+{
+  const char* legacyJson = R"JSON(
+{
+  "plugins": [
+    {
+      "filename": "MyPatch.esp",
+      "is_active": true,
+      "masters": ["ccasvsse001-almsivi.esm", "ccBGSSSE002-ExoticArrows.esl", "ActuallyMissing.esm"]
+    }
+  ]
+}
+)JSON";
+  ParsedPluginScan legacy{};
+  assert(ParsePluginScanJson(legacyJson, &legacy));
+  assert(!legacy.implicit_plugins_included);
+  const auto legacyMissing = ComputeMissingMasters(legacy);
+  assert(legacyMissing.size() == 1);
+  assert(legacyMissing[0] == L"ActuallyMissing.esm");
+
+  const char* implicitAwareJson = R"JSON(
+{
+  "implicit_plugins_included": true,
+  "plugins": [
+    { "filename": "ccasvsse001-almsivi.esm", "is_active": true, "masters": ["Skyrim.esm"] },
+    {
+      "filename": "MyPatch.esp",
+      "is_active": true,
+      "masters": ["ccasvsse001-almsivi.esm", "ccBGSSSE002-ExoticArrows.esl"]
+    }
+  ]
+}
+)JSON";
+  ParsedPluginScan aware{};
+  assert(ParsePluginScanJson(implicitAwareJson, &aware));
+  assert(aware.implicit_plugins_included);
+  const auto awareMissing = ComputeMissingMasters(aware);
+  assert(awareMissing.size() == 1);
+  assert(awareMissing[0] == L"ccBGSSSE002-ExoticArrows.esl");
+}
+
 void TestRulesEvaluateFromJson()
 {
   const auto tmp = std::filesystem::temp_directory_path() / "skydiag_plugin_rules_logic_test.json";
@@ -402,6 +445,7 @@ int main()
   TestMissingMastersIgnoreInactivePlugins();
   TestHeaderVersionRuleIgnoresInactivePlugins();
   TestMissingMastersIgnoreImplicitRuntimeMasters();
+  TestMissingMastersTrustCreationClubMastersOnlyFromImplicitAwareScans();
   TestRulesEvaluateFromJson();
   TestFullPluginSlotRuleRequiresActiveFullThreshold();
   TestEslSlotRuleCountsOnlyActivePlugins();
