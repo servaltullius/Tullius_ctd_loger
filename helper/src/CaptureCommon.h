@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
@@ -28,21 +29,52 @@ inline void ApplyRetentionFromConfig(const skydiag::helper::HelperConfig& cfg, c
   QueueRetentionSweep(outBase, BuildRetentionLimits(cfg));
 }
 
-inline std::string CollectPluginScanJson(
-  const skydiag::helper::AttachedProcess& proc,
-  const std::filesystem::path& outBase,
-  std::wstring_view resolveFailureMessage = L"PluginScanner skipped: failed to resolve game exe directory.")
+// What the plugin scan needs from the live game process. The exe path and the
+// module list can only be read while the process exists, so a crash capture
+// collects them right after the dump write: by the time the crash is confirmed
+// the game has usually exited.
+struct PluginScanInputs
 {
+  bool gameExeDirResolved = false;
   std::filesystem::path gameExeDir;
-  if (!skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+  std::vector<std::wstring> moduleNames;
+  std::vector<std::wstring> modulePaths;
+};
+
+inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedProcess& proc)
+{
+  PluginScanInputs inputs{};
+  inputs.gameExeDirResolved = skydiag::helper::TryResolveGameExeDir(proc.process, inputs.gameExeDir);
+  if (inputs.gameExeDirResolved) {
+    inputs.moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
+    inputs.modulePaths = skydiag::helper::CollectModulePathsBestEffort(proc.pid);
+  }
+  return inputs;
+}
+
+inline constexpr std::wstring_view kPluginScanResolveFailureMessage =
+  L"PluginScanner skipped: failed to resolve game exe directory.";
+
+inline std::string CollectPluginScanJson(
+  const PluginScanInputs& inputs,
+  const std::filesystem::path& outBase,
+  std::wstring_view resolveFailureMessage = kPluginScanResolveFailureMessage)
+{
+  if (!inputs.gameExeDirResolved) {
     AppendLogLine(outBase, resolveFailureMessage);
     return {};
   }
 
-  const auto moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
-  const auto modulePaths = skydiag::helper::CollectModulePathsBestEffort(proc.pid);
-  auto scanResult = skydiag::helper::ScanPlugins(gameExeDir, moduleNames, &modulePaths);
+  auto scanResult = skydiag::helper::ScanPlugins(inputs.gameExeDir, inputs.moduleNames, &inputs.modulePaths);
   return skydiag::helper::SerializePluginScanResult(scanResult);
+}
+
+inline std::string CollectPluginScanJson(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  std::wstring_view resolveFailureMessage = kPluginScanResolveFailureMessage)
+{
+  return CollectPluginScanJson(CollectPluginScanInputs(proc), outBase, resolveFailureMessage);
 }
 
 }  // namespace skydiag::helper::internal
