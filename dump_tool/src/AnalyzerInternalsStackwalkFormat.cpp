@@ -56,6 +56,19 @@ std::wstring FormatSymbolizedFrame(
   if (!SymFromAddrW(process, static_cast<DWORD64>(addr), &displacement, sym) || sym->NameLen == 0) {
     return fallback;
   }
+  // Without a PDB, DbgHelp names an address after the nearest exported
+  // function below it, however far away. A mod DLL usually exports only
+  // SKSEPlugin_Load and friends, so most of its code would be shown as
+  // SKSEPlugin_Load+0x7bd57. Keep an export name only when the address is
+  // close enough to plausibly be inside that function.
+  constexpr DWORD64 kMaxExportSymbolDisplacement = 0x1000;
+  IMAGEHLP_MODULEW64 moduleInfo{};
+  moduleInfo.SizeOfStruct = sizeof(moduleInfo);
+  if (displacement > kMaxExportSymbolDisplacement &&
+      SymGetModuleInfoW64(process, static_cast<DWORD64>(addr), &moduleInfo) &&
+      moduleInfo.SymType == SymExport) {
+    return fallback;
+  }
   if (outHasSymbol) {
     *outHasSymbol = true;
   }
