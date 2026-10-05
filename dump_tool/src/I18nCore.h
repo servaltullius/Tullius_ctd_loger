@@ -18,6 +18,15 @@ inline Language DefaultLanguage()
   return Language::kEnglish;
 }
 
+// Language for a Windows UI LANGID when no language was requested. Matches the
+// WinUI viewer, which follows CurrentUICulture: Korean for a Korean display
+// language, English otherwise. The primary language id is the low 10 bits.
+inline Language LanguageFromWindowsUiLangId(std::uint16_t langId)
+{
+  constexpr std::uint16_t kPrimaryLanguageKorean = 0x12;  // LANG_KOREAN
+  return (langId & 0x3FFu) == kPrimaryLanguageKorean ? Language::kKorean : Language::kEnglish;
+}
+
 inline std::string AsciiLower(std::string_view s)
 {
   std::string out;

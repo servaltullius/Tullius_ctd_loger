@@ -92,6 +92,11 @@ int wmain(int argc, wchar_t** argv)
   }
   if (!a.lang_token.empty()) {
     opt.language = i18n::ParseLanguageTokenAscii(ToAscii(a.lang_token));
+  } else {
+    // The helper runs headless analysis without --lang. Follow the Windows
+    // display language like the viewer does, so hang reports (written here)
+    // and crash reports (written by the viewer) use the same language.
+    opt.language = i18n::LanguageFromWindowsUiLangId(GetUserDefaultUILanguage());
   }
   const std::wstring exeDir = GetCurrentExeDir();
   if (!exeDir.empty()) {
