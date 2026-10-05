@@ -29,7 +29,7 @@ inline std::wstring DumpToolCliUsage()
     L"  --out-dir <dir>            Output directory (optional)\n"
     L"  --allow-online-symbols     Allow symbol server usage (opt-in)\n"
     L"  --no-online-symbols        Disallow symbol server usage\n"
-    L"  --lang <token>             Language token (e.g. en, ko)\n"
+    L"  --lang <token>             Language token (e.g. en, ko); default: Windows display language\n"
     L"  --debug                    Disable path redaction\n"
     L"  --headless                 Accepted for compatibility (ignored)\n"
     L"  --help                     Show this help\n";

@@ -21,6 +21,18 @@ static void Test_ParseLanguageToken()
   assert(ParseLanguageTokenAscii("korean") == Language::kKorean);
 }
 
+// Headless CLI runs (hang reports) have no --lang; they must follow the
+// Windows display language like the viewer instead of always using English.
+static void Test_LanguageFromWindowsUiLangId()
+{
+  using skydiag::dump_tool::i18n::LanguageFromWindowsUiLangId;
+  assert(LanguageFromWindowsUiLangId(0x0412) == Language::kKorean);   // ko-KR
+  assert(LanguageFromWindowsUiLangId(0x0012) == Language::kKorean);   // ko (neutral)
+  assert(LanguageFromWindowsUiLangId(0x0409) == Language::kEnglish);  // en-US
+  assert(LanguageFromWindowsUiLangId(0x0411) == Language::kEnglish);  // ja-JP
+  assert(LanguageFromWindowsUiLangId(0x0000) == Language::kEnglish);
+}
+
 static void Test_ConfidenceLabels()
 {
   assert(ConfidenceLabel(Language::kEnglish, ConfidenceLevel::kHigh) == L"High");
@@ -34,6 +46,7 @@ static void Test_ConfidenceLabels()
 
 int main()
 {
+  Test_LanguageFromWindowsUiLangId();
   Test_DefaultLanguage_IsEnglish();
   Test_ParseLanguageToken();
   Test_ConfidenceLabels();
