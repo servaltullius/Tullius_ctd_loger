@@ -35,6 +35,11 @@ public:
   // stays valid for the lifetime of this object.
   const RUNTIME_FUNCTION* FindFunctionEntry(std::uint64_t addr) const;
 
+  // True only when the module has a verified local image and addr is not in
+  // one of its executable sections (for example a vtable in .rdata). False
+  // when that cannot be checked.
+  bool IsKnownNonCodeAddress(std::uint64_t addr) const;
+
 private:
   struct Image
   {

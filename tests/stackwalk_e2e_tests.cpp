@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <Psapi.h>
 
 #include <atomic>
 #include <cstdio>
@@ -8,6 +9,7 @@
 #include <thread>
 
 #include "Analyzer.h"
+#include "AnalyzerInternalsStackwalkPriv.h"
 #include "HangCaptureInternal.h"
 #include "HelperLog.h"
 #include "HelperRuntimeTestUtils.h"
@@ -139,9 +141,43 @@ void TestFormalStackwalkUnwindsRealCallerChain()
 
 }  // namespace
 
+// A recovered return address has to point into code. The local-image check
+// must reject a data address (a constant in .rdata) and accept a function.
+void TestLocalImageRejectsNonCodeReturnAddresses()
+{
+  static const char kReadOnlyData[] = "skydiag stackwalk rdata probe";
+
+  const HMODULE self = GetModuleHandleW(nullptr);
+  MODULEINFO info{};
+  Require(GetModuleInformation(GetCurrentProcess(), self, &info, sizeof(info)) != 0, "GetModuleInformation failed");
+  wchar_t path[MAX_PATH]{};
+  Require(GetModuleFileNameW(self, path, MAX_PATH) != 0, "GetModuleFileNameW failed");
+  const auto* view = reinterpret_cast<const std::uint8_t*>(self);
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(view);
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(view + dos->e_lfanew);
+
+  std::vector<skydiag::dump_tool::minidump::ModuleInfo> modules(1);
+  modules[0].base = reinterpret_cast<std::uint64_t>(info.lpBaseOfDll);
+  modules[0].end = modules[0].base + info.SizeOfImage;
+  modules[0].time_date_stamp = nt->FileHeader.TimeDateStamp;
+  modules[0].path = path;
+
+  const skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory images(modules);
+  Require(
+    images.IsKnownNonCodeAddress(reinterpret_cast<std::uint64_t>(&kReadOnlyData[0])),
+    "a read-only data address must be rejected as a return address");
+  Require(
+    !images.IsKnownNonCodeAddress(reinterpret_cast<std::uint64_t>(&DeepFrameB)),
+    "a function address must be accepted");
+  Require(
+    !images.IsKnownNonCodeAddress(modules[0].end + 0x1000u),
+    "an address outside every module cannot be judged");
+}
+
 int main()
 {
   try {
+    TestLocalImageRejectsNonCodeReturnAddresses();
     TestFormalStackwalkUnwindsRealCallerChain();
     return 0;
   } catch (const std::exception& ex) {

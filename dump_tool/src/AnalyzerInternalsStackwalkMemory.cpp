@@ -156,6 +156,27 @@ const RUNTIME_FUNCTION* LocalImageMemory::FindFunctionEntry(std::uint64_t addr) 
   return (rva >= it->BeginAddress && rva < it->EndAddress) ? it : nullptr;
 }
 
+bool LocalImageMemory::IsKnownNonCodeAddress(std::uint64_t addr) const
+{
+  const Image* image = Resolve(addr);
+  if (!image) {
+    return false;
+  }
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image->view);
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(image->view + dos->e_lfanew);
+  const auto* section = IMAGE_FIRST_SECTION(nt);
+  const auto rva = static_cast<std::uint64_t>(addr - image->module->base);
+  for (WORD i = 0; i < nt->FileHeader.NumberOfSections; i++, section++) {
+    const std::uint64_t begin = section->VirtualAddress;
+    const std::uint64_t size = section->Misc.VirtualSize != 0 ? section->Misc.VirtualSize : section->SizeOfRawData;
+    if (rva >= begin && rva < begin + size) {
+      return (section->Characteristics & IMAGE_SCN_MEM_EXECUTE) == 0;
+    }
+  }
+  // Headers or a gap between sections: nothing executes there either.
+  return true;
+}
+
 bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads)
 {
   ranges.clear();
@@ -339,6 +360,12 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
     }
     // A caller frame must belong to a known module.
     if (!pcs.empty() && SymGetModuleBase64(process, pc) == 0) {
+      break;
+    }
+    // ...and point into its code. A data address here (such as a vtable in
+    // .rdata) means the unwind read a stack slot that no longer holds the
+    // return address, e.g. because the thread kept running after the fault.
+    if (!pcs.empty() && mem.image_fallback && mem.image_fallback->IsKnownNonCodeAddress(pc)) {
       break;
     }
     pcs.push_back(static_cast<std::uint64_t>(pc));
