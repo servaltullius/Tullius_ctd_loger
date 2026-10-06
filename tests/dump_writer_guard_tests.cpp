@@ -45,6 +45,14 @@ int main()
   AssertContains(impl, "MiniDumpWriteDump(", "DumpWriter must still use MiniDumpWriteDump.");
   AssertContains(impl, "&callbackInfo", "MiniDumpWriteDump must receive callback information.");
   AssertContains(impl, "ApplyProfileToDumpType", "DumpWriter must derive dump flags from profile state.");
+  AssertContains(
+    impl,
+    "ShouldRetryDumpIgnoringInaccessibleMemory(",
+    "DumpWriter must retry an ERROR_PARTIAL_COPY failure with unreadable memory skipped.");
+  AssertContains(
+    impl,
+    "dumpType | MiniDumpIgnoreInaccessibleMemory",
+    "The partial-copy retry must add MiniDumpIgnoreInaccessibleMemory.");
   AssertContains(impl, "MiniDumpWithCodeSegs", "DumpWriter must request code segments when the dump profile enables machine-code capture.");
   AssertContains(impl, "MiniDumpWithProcessThreadData", "DumpWriter must request process/thread data when profile enables it.");
   AssertContains(impl, "MiniDumpWithFullMemoryInfo", "DumpWriter must request full memory info when profile enables it.");

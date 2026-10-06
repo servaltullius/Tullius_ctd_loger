@@ -207,19 +207,6 @@ bool WriteDumpWithStreams(
     return false;
   }
 
-  HANDLE file = CreateFileW(
-    dumpPath.c_str(),
-    GENERIC_WRITE,
-    0,
-    nullptr,
-    CREATE_ALWAYS,
-    FILE_ATTRIBUTE_NORMAL,
-    nullptr);
-  if (file == INVALID_HANDLE_VALUE) {
-    if (err) *err = L"CreateFileW failed: " + std::to_wstring(GetLastError());
-    return false;
-  }
-
   // ---- build user streams ----
   std::vector<std::uint8_t> blackboxBytes;
   if (shmSnapshot) {
@@ -291,7 +278,7 @@ bool WriteDumpWithStreams(
   }
 
   const DumpProfile effectiveProfile = ResolveDumpProfile(dumpProfile.baseMode, dumpProfile.captureKind);
-  const MINIDUMP_TYPE dumpType = ApplyProfileToDumpType(effectiveProfile);
+  MINIDUMP_TYPE dumpType = ApplyProfileToDumpType(effectiveProfile);
   DumpCallbackContext callbackContext{};
   callbackContext.profile = effectiveProfile;
   callbackContext.preferredThreadId = mei.ThreadId;
@@ -311,27 +298,51 @@ bool WriteDumpWithStreams(
   callbackInfo.CallbackRoutine = MiniDumpCallback;
   callbackInfo.CallbackParam = &callbackContext;
 
-  const BOOL ok = MiniDumpWriteDump(
-    process,
-    pid,
-    file,
-    dumpType,
-    meiPtr,
-    &usi,
-    &callbackInfo);
+  static_assert(kMiniDumpIgnoreInaccessibleMemoryFlag == static_cast<std::uint32_t>(MiniDumpIgnoreInaccessibleMemory));
 
-  const DWORD lastErr = GetLastError();
-  CloseHandle(file);
+  // See ShouldRetryDumpIgnoringInaccessibleMemory: an ERROR_PARTIAL_COPY
+  // failure is retried once at once with unreadable regions skipped.
+  DWORD lastErr = ERROR_SUCCESS;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    HANDLE file = CreateFileW(
+      dumpPath.c_str(),
+      GENERIC_WRITE,
+      0,
+      nullptr,
+      CREATE_ALWAYS,
+      FILE_ATTRIBUTE_NORMAL,
+      nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+      if (err) *err = L"CreateFileW failed: " + std::to_wstring(GetLastError());
+      return false;
+    }
 
-  if (!ok) {
-    if (err) *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr);
-    return false;
+    const BOOL ok = MiniDumpWriteDump(
+      process,
+      pid,
+      file,
+      dumpType,
+      meiPtr,
+      &usi,
+      &callbackInfo);
+
+    lastErr = GetLastError();
+    CloseHandle(file);
+
+    if (ok) {
+      if (err) {
+        err->clear();
+      }
+      return true;
+    }
+    if (!ShouldRetryDumpIgnoringInaccessibleMemory(static_cast<std::uint32_t>(dumpType), lastErr)) {
+      break;
+    }
+    dumpType = static_cast<MINIDUMP_TYPE>(dumpType | MiniDumpIgnoreInaccessibleMemory);
   }
 
-  if (err) {
-    err->clear();
-  }
-  return true;
+  if (err) *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr);
+  return false;
 }
 
 }  // namespace skydiag::helper
