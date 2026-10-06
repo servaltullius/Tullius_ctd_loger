@@ -27,16 +27,6 @@ constexpr bool IsInCrashLoggerModule(
          CrashHandlerModuleRangeContains(crashLoggerSseRange, address);
 }
 
-constexpr bool ShouldSuppressNestedCrashLoggerException(
-  bool crashAlreadyFrozen,
-  std::uintptr_t exceptionAddress,
-  CrashHandlerModuleRange crashLoggerRange,
-  CrashHandlerModuleRange crashLoggerSseRange) noexcept
-{
-  return crashAlreadyFrozen &&
-         IsInCrashLoggerModule(exceptionAddress, crashLoggerRange, crashLoggerSseRange);
-}
-
 // In fatal-only mode an assert/abort breakpoint and a C++ throw are not
 // recorded, because they are usually handled. When one is not handled,
 // CrashLogger reports it, and while doing so it raises access violations of its
@@ -83,7 +73,23 @@ constexpr bool ShouldReplaceKeptException(
   return !(keptCode == kCrashHandlerBreakpointCode && newCode != kCrashHandlerBreakpointCode);
 }
 
-constexpr bool ShouldRecordKeptExceptionInstead(
+// What to do with a fatal-code exception raised inside CrashLogger.
+//
+// CrashLogger catches the access violations its memory probes raise, both
+// while it reports a crash and while it writes a thread dump on its hotkey
+// (Ctrl+Shift+F12 in CrashLogger 1.25, the same keys as SkyrimDiag's manual
+// capture). Its own exception is therefore never the crash to record. Record
+// the exception it is reporting when one was kept on that thread; otherwise
+// ignore it. Recording the probes made every thread-dump hotkey press write
+// and then discard full crash dumps while the game stalled.
+enum class CrashLoggerFaultAction
+{
+  kNotInCrashLogger,
+  kRecordKeptException,
+  kIgnore,
+};
+
+constexpr CrashLoggerFaultAction ClassifyCrashLoggerFault(
   bool crashAlreadyFrozen,
   std::uintptr_t exceptionAddress,
   CrashHandlerModuleRange crashLoggerRange,
@@ -92,9 +98,13 @@ constexpr bool ShouldRecordKeptExceptionInstead(
   bool keptOnSameThread,
   bool keptIsRecent) noexcept
 {
-  return !crashAlreadyFrozen &&
-         IsInCrashLoggerModule(exceptionAddress, crashLoggerRange, crashLoggerSseRange) &&
-         haveKept && keptOnSameThread && keptIsRecent;
+  if (!IsInCrashLoggerModule(exceptionAddress, crashLoggerRange, crashLoggerSseRange)) {
+    return CrashLoggerFaultAction::kNotInCrashLogger;
+  }
+  if (!crashAlreadyFrozen && haveKept && keptOnSameThread && keptIsRecent) {
+    return CrashLoggerFaultAction::kRecordKeptException;
+  }
+  return CrashLoggerFaultAction::kIgnore;
 }
 
 // Protocol v4 preserves the first selected exception for one incident.
