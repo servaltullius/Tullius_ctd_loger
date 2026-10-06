@@ -43,6 +43,8 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 **Manual snapshot hotkey:** `Ctrl+Shift+F12`
 > Snapshots taken during normal gameplay may have low confidence. Best used when the game is already stuck (freeze / ILS) or right before a CTD.
+>
+> Crash Logger 1.25 uses the same keys for its thread dump, so with both installed one press also writes a Crash Logger `threaddump-*.log`.
 
 ## Reading Results Safely
 
