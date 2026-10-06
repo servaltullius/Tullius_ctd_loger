@@ -22,7 +22,6 @@
 namespace {
 
 constexpr std::uint32_t kBreakpoint = 0x80000003u;
-constexpr std::uint32_t kAccessViolation = 0xC0000005u;
 
 using ProbeFn = int (*)();
 ProbeFn g_probe = nullptr;
@@ -103,22 +102,32 @@ void TestBreakpointReportedByCrashLoggerIsRecordedInsteadOfTheProbe(
   Require(CrashSeq(shm) == seq, "later CrashLogger probes must not replace the recorded crash");
 }
 
-void TestCrashLoggerFaultWithoutAKeptExceptionOnItsThreadIsRecorded(
-  skydiag::SharedLayout* shm,
-  const ModuleRange& crashLogger)
+// Field case (v0.2.59-rc4): CrashLogger 1.25 writes a thread dump on
+// Ctrl+Shift+F12, the same keys as the manual capture, and its probes there
+// were recorded as crashes; each press wrote and discarded full crash dumps.
+void TestCrashLoggerProbeWithNothingToReportIsIgnored(skydiag::SharedLayout* shm)
 {
   RearmIncident(shm);
 
-  // A breakpoint handled on another thread says nothing about this fault.
+  // A breakpoint handled on another thread says nothing about this probe.
   std::thread other(HandledBreakpoint);
   other.join();
 
   const auto seq = CrashSeq(shm);
   g_probe();
-  const auto& crash = shm->header.crash;
-  Require(CrashSeq(shm) != seq, "a CrashLogger fault with nothing to report must still be recorded");
-  Require(crash.exception_code == kAccessViolation, "the CrashLogger fault itself must be recorded");
-  Require(crashLogger.Contains(crash.exception_addr), "the recorded address must be inside CrashLogger");
+  Require(CrashSeq(shm) == seq, "a CrashLogger probe with no kept exception on its thread must not be recorded");
+  Require(
+    (shm->header.state_flags & skydiag::kState_Frozen) == 0u,
+    "an ignored CrashLogger probe must leave capture armed for a real crash");
+}
+
+void TestRealCrashAfterIgnoredProbeIsStillRecorded(skydiag::SharedLayout* shm, const ModuleRange& testExe)
+{
+  const auto seq = CrashSeq(shm);
+  BreakpointReportedByCrashLogger();
+  Require(CrashSeq(shm) != seq, "a crash after ignored probes must still be recorded");
+  Require(shm->header.crash.exception_code == kBreakpoint, "the reported breakpoint must be recorded");
+  Require(testExe.Contains(shm->header.crash.exception_addr), "the recorded address must be the breakpoint");
 }
 
 }  // namespace
@@ -138,7 +147,8 @@ int main(int argc, char** argv)
 
     auto* shm = skydiag::plugin::GetShared();
     TestBreakpointReportedByCrashLoggerIsRecordedInsteadOfTheProbe(shm, RangeOf(GetModuleHandleW(nullptr)));
-    TestCrashLoggerFaultWithoutAKeptExceptionOnItsThreadIsRecorded(shm, RangeOf(crashLogger));
+    TestCrashLoggerProbeWithNothingToReportIsIgnored(shm);
+    TestRealCrashAfterIgnoredProbeIsStillRecorded(shm, RangeOf(GetModuleHandleW(nullptr)));
     std::puts("plugin crash handler runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {

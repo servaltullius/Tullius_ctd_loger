@@ -13,27 +13,22 @@ using skydiag::tests::source_guard::ReadAllText;
 int main()
 {
   using skydiag::plugin::CrashHandlerModuleRange;
-  using skydiag::plugin::ShouldSuppressNestedCrashLoggerException;
+  using skydiag::plugin::IsInCrashLoggerModule;
 
   constexpr CrashHandlerModuleRange crashLoggerRange{0x1000u, 0x2000u};
   constexpr CrashHandlerModuleRange crashLoggerSseRange{0x3000u, 0x4000u};
-  static_assert(!ShouldSuppressNestedCrashLoggerException(
-    false, 0x1800u, crashLoggerRange, crashLoggerSseRange));
-  static_assert(ShouldSuppressNestedCrashLoggerException(
-    true, 0x1800u, crashLoggerRange, crashLoggerSseRange));
-  static_assert(ShouldSuppressNestedCrashLoggerException(
-    true, 0x3800u, crashLoggerRange, crashLoggerSseRange));
-  static_assert(!ShouldSuppressNestedCrashLoggerException(
-    true, 0x2000u, crashLoggerRange, crashLoggerSseRange));
-  static_assert(!ShouldSuppressNestedCrashLoggerException(
-    true, 0x5000u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(IsInCrashLoggerModule(0x1800u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(IsInCrashLoggerModule(0x3800u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!IsInCrashLoggerModule(0x2000u, crashLoggerRange, crashLoggerSseRange));
+  static_assert(!IsInCrashLoggerModule(0x5000u, crashLoggerRange, crashLoggerSseRange));
 
   // An unhandled assert breakpoint or C++ throw is reported by CrashLogger,
   // whose own probe faults must not become the recorded crash.
   using skydiag::plugin::kCrashHandlerBreakpointCode;
   using skydiag::plugin::kCrashHandlerCppExceptionCode;
   using skydiag::plugin::ShouldKeepUnrecordedException;
-  using skydiag::plugin::ShouldRecordKeptExceptionInstead;
+  using skydiag::plugin::ClassifyCrashLoggerFault;
+  using skydiag::plugin::CrashLoggerFaultAction;
   using skydiag::plugin::ShouldReplaceKeptException;
   static_assert(ShouldKeepUnrecordedException(
     kCrashHandlerBreakpointCode, 1u, 0u, crashLoggerRange, crashLoggerSseRange));
@@ -59,20 +54,30 @@ int main()
   static_assert(ShouldReplaceKeptException(
     true, true, false, kCrashHandlerBreakpointCode, kCrashHandlerCppExceptionCode));
 
-  static_assert(ShouldRecordKeptExceptionInstead(
-    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true));
-  static_assert(ShouldRecordKeptExceptionInstead(
-    false, 0x3800u, crashLoggerRange, crashLoggerSseRange, true, true, true));
-  static_assert(!ShouldRecordKeptExceptionInstead(
-    true, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true));
-  static_assert(!ShouldRecordKeptExceptionInstead(
-    false, 0x5000u, crashLoggerRange, crashLoggerSseRange, true, true, true));
-  static_assert(!ShouldRecordKeptExceptionInstead(
-    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, false, true, true));
-  static_assert(!ShouldRecordKeptExceptionInstead(
-    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, false, true));
-  static_assert(!ShouldRecordKeptExceptionInstead(
-    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, false));
+  static_assert(ClassifyCrashLoggerFault(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true) ==
+    CrashLoggerFaultAction::kRecordKeptException);
+  static_assert(ClassifyCrashLoggerFault(
+    false, 0x3800u, crashLoggerRange, crashLoggerSseRange, true, true, true) ==
+    CrashLoggerFaultAction::kRecordKeptException);
+  static_assert(ClassifyCrashLoggerFault(
+    false, 0x5000u, crashLoggerRange, crashLoggerSseRange, true, true, true) ==
+    CrashLoggerFaultAction::kNotInCrashLogger);
+  // Already frozen, nothing kept, kept on another thread, or kept too long
+  // ago: CrashLogger's own probe is ignored. The "nothing kept" case is the
+  // CrashLogger 1.25 thread-dump hotkey seen in the field (v0.2.59-rc4).
+  static_assert(ClassifyCrashLoggerFault(
+    true, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true) ==
+    CrashLoggerFaultAction::kIgnore);
+  static_assert(ClassifyCrashLoggerFault(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, false, true, true) ==
+    CrashLoggerFaultAction::kIgnore);
+  static_assert(ClassifyCrashLoggerFault(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, false, true) ==
+    CrashLoggerFaultAction::kIgnore);
+  static_assert(ClassifyCrashLoggerFault(
+    false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, false) ==
+    CrashLoggerFaultAction::kIgnore);
 
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const auto heartbeatPath = repoRoot / "plugin" / "src" / "Heartbeat.cpp";
@@ -238,8 +243,8 @@ int main()
 
   AssertContains(
     vectoredHandlerBody,
-    "ShouldSuppressNestedCrashLoggerException(",
-    "CrashLogger introspection exceptions must not replace an already frozen CTD.");
+    "IsInCrashLoggerModule(exceptionAddress",
+    "CrashLogger's own probe exceptions must be handled before the normal crash record.");
 
   AssertContains(
     vectoredHandlerBody,
@@ -253,9 +258,9 @@ int main()
 
   AssertOrdered(
     vectoredHandlerBody,
-    "ShouldSuppressNestedCrashLoggerException(",
+    "IsInCrashLoggerModule(exceptionAddress",
     "TryPublishCrashRecord(shm, ep, code)",
-    "Nested CrashLogger suppression must run before publishing a replacement crash record.");
+    "CrashLogger probe handling must run before publishing a crash record.");
 
   AssertOrdered(
     vectoredHandlerBody,

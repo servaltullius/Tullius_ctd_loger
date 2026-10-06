@@ -327,31 +327,28 @@ void KeepUnrecordedException(const skydiag::SharedLayout* shm, const EXCEPTION_P
   kept.busy.store(0, std::memory_order_release);
 }
 
-// Records the kept exception when CrashLogger faults while reporting it. On
-// success the incident is frozen, so CrashLogger's remaining probes are
-// suppressed like any nested CrashLogger exception.
+// Handles a fatal-code exception inside CrashLogger (see ClassifyCrashLoggerFault):
+// records the kept exception CrashLogger is reporting, if any. Returns false
+// when the exception should be ignored. On success the incident is frozen.
 bool TryPublishKeptExceptionForCrashLoggerFault(
   skydiag::SharedLayout* shm,
   std::uintptr_t exceptionAddress,
   DWORD* outCode,
   std::uint64_t* outAddress) noexcept
 {
-  if (!IsInCrashLoggerModule(exceptionAddress, g_crashLoggerRange.Load(), g_crashLoggerSseRange.Load())) {
-    return false;
-  }
   auto& kept = g_keptException;
   if (kept.busy.exchange(1, std::memory_order_acquire) != 0) {
     return false;
   }
   bool published = false;
-  if (ShouldRecordKeptExceptionInstead(
+  if (ClassifyCrashLoggerFault(
         IsCrashCaptureFrozen(shm),
         exceptionAddress,
         g_crashLoggerRange.Load(),
         g_crashLoggerSseRange.Load(),
         kept.tid != 0u,
         kept.tid == GetCurrentThreadId(),
-        IsKeptExceptionRecent(shm, kept.qpc, QpcNow()))) {
+        IsKeptExceptionRecent(shm, kept.qpc, QpcNow())) == CrashLoggerFaultAction::kRecordKeptException) {
     EXCEPTION_POINTERS keptPointers{ &kept.record, &kept.context };
     published = TryPublishCrashRecord(shm, &keptPointers, kept.record.ExceptionCode);
     if (published) {
@@ -376,28 +373,20 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
   if (ShouldRecordException(code)) {
     const auto exceptionAddress =
       reinterpret_cast<std::uintptr_t>(ep->ExceptionRecord->ExceptionAddress);
-    if (ShouldSuppressNestedCrashLoggerException(
-          IsCrashCaptureFrozen(shm),
-          exceptionAddress,
-          g_crashLoggerRange.Load(),
-          g_crashLoggerSseRange.Load())) {
-      // CrashLogger probes objects with handled exceptions while producing its
-      // report. Once a crash candidate is already frozen, those probes must not
-      // replace the original crash context.
-      return EXCEPTION_CONTINUE_SEARCH;
-    }
 
     // The fatal path deliberately performs only fixed-size shared-memory
     // writes and kernel signaling. Module/path resolution and std::string /
     // std::filesystem telemetry are unsafe with a corrupt heap or low stack.
-    //
-    // CrashLogger faulting before anything was recorded means it is reporting
-    // an exception the fatal filter let through. Record that exception, not
-    // CrashLogger's own probe.
     DWORD recordedCode = code;
     auto recordedAddress = static_cast<std::uint64_t>(exceptionAddress);
-    if (!TryPublishKeptExceptionForCrashLoggerFault(shm, exceptionAddress, &recordedCode, &recordedAddress) &&
-        !TryPublishCrashRecord(shm, ep, code)) {
+    if (IsInCrashLoggerModule(exceptionAddress, g_crashLoggerRange.Load(), g_crashLoggerSseRange.Load())) {
+      // CrashLogger's own probe faults are never the crash (see
+      // ClassifyCrashLoggerFault): record the exception it is reporting if
+      // one was kept, and otherwise leave the probe to CrashLogger's handler.
+      if (!TryPublishKeptExceptionForCrashLoggerFault(shm, exceptionAddress, &recordedCode, &recordedAddress)) {
+        return EXCEPTION_CONTINUE_SEARCH;
+      }
+    } else if (!TryPublishCrashRecord(shm, ep, code)) {
       return EXCEPTION_CONTINUE_SEARCH;
     }
 
