@@ -10,6 +10,8 @@ using skydiag::helper::CaptureKindToString;
 using skydiag::helper::DumpMode;
 using skydiag::helper::DumpProfile;
 using skydiag::helper::ResolveDumpProfile;
+using skydiag::helper::ShouldRetryDumpIgnoringInaccessibleMemory;
+using skydiag::helper::kMiniDumpIgnoreInaccessibleMemoryFlag;
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::ReadAllText;
 
@@ -40,6 +42,14 @@ void AssertDefaultCrashBase(const DumpProfile& profile)
   assert(profile.preferCrashContext);
   assert(!profile.preferWctThreads);
 }
+
+// CI and field dumps have failed with ERROR_PARTIAL_COPY (seen as the HRESULT
+// 0x8007012B); the writer retries once skipping unreadable memory.
+static_assert(ShouldRetryDumpIgnoringInaccessibleMemory(0x00000000u, 299u));
+static_assert(ShouldRetryDumpIgnoringInaccessibleMemory(0x00001105u, 0x8007012Bu));
+static_assert(!ShouldRetryDumpIgnoringInaccessibleMemory(kMiniDumpIgnoreInaccessibleMemoryFlag, 0x8007012Bu));
+static_assert(!ShouldRetryDumpIgnoringInaccessibleMemory(0x00000000u, 5u));
+static_assert(!ShouldRetryDumpIgnoringInaccessibleMemory(0x00000000u, 0u));
 
 }  // namespace
 
