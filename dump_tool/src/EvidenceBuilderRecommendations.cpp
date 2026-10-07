@@ -704,9 +704,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
           : (L"[스택 스캔] 스택 스캔에서 " + r.suspects[0].module_filename + L"도 감지되었으나 신뢰도가 낮습니다. 위의 ESP/ESM 단서를 우선 점검하세요."));
       }
     }
+    // A fault in the game executable says where it failed, not why. Engine
+    // code that trips over bad plugin data (the v0.2.59 field case: a trap
+    // hitting a modded creature, every frame vanilla) is at least as common
+    // as a version mismatch or a hook, so do not single those out.
     r.recommendations.push_back(en
-      ? L"[Check] Crash location is the game executable. Version mismatch (Address Library/SKSE) or hook conflicts are likely."
-      : L"[점검] 크래시 위치가 게임 본체(EXE)로 나옵니다. Address Library/ SKSE 버전 불일치 또는 후킹 충돌 가능성이 큽니다.");
+      ? L"[Check] The crash is in the game executable. That alone does not tell the cause: the engine may have tripped over plugin data (ESP/ESM, meshes) it was processing, or an Address Library/SKSE version mismatch or a DLL hook may be involved."
+      : L"[점검] 크래시 위치가 게임 본체(EXE)입니다. 이것만으로는 원인을 가릴 수 없습니다. 엔진이 처리하던 플러그인 데이터(ESP/ESM·메시) 문제일 수도, Address Library/SKSE 버전 불일치나 DLL 훅 문제일 수도 있습니다.");
     r.recommendations.push_back(en
       ? L"[Check] Disable recently added/updated SKSE plugin DLLs one by one and retest."
       : L"[점검] 최근 추가/업데이트한 SKSE 플러그인(DLL)부터 하나씩 제외하며 재현 여부 확인");
