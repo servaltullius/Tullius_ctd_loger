@@ -1,4 +1,6 @@
 #include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 
@@ -279,6 +281,14 @@ int main()
     manualCaptureBody,
     "TryTriggerManualCapture(",
     "Manual capture input pump must route both hotkey paths through a shared debounce helper.");
+  AssertContains(
+    manualCaptureBody,
+    "ManualCaptureKeys().ConsumePress()",
+    "Manual capture must also take presses from the key-state watcher, which WM_HOTKEY can miss in gameplay.");
+  if (manualCaptureBody.find("GetAsyncKeyState(VK_F12) & 1") != std::string::npos) {
+    std::fprintf(stderr, "Manual capture must not read GetAsyncKeyState's shared pressed-since-last-call bit.\n");
+    std::abort();
+  }
   AssertContains(
     helperMain,
     "GetTickCount64()",

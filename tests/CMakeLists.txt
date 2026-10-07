@@ -145,6 +145,14 @@ target_include_directories(skydiag_dump_profile_tests PRIVATE
 
 add_test(NAME skydiag_dump_profile_tests COMMAND skydiag_dump_profile_tests)
 
+add_executable(skydiag_manual_capture_chord_edge_tests
+  manual_capture_chord_edge_tests.cpp
+)
+target_include_directories(skydiag_manual_capture_chord_edge_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+)
+add_test(NAME skydiag_manual_capture_chord_edge_tests COMMAND skydiag_manual_capture_chord_edge_tests)
+
 add_executable(skydiag_dump_writer_guard_tests
   dump_writer_guard_tests.cpp
 )
@@ -597,6 +605,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperLog.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Process.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Startup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ManualCaptureKeyWatcher.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/IncidentManifest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/LoadStats.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ModalDialogProbe.cpp"

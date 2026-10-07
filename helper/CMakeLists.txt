@@ -25,6 +25,7 @@ add_executable(${PROJECT_NAME}
   src/IncidentManifest.cpp
   src/LoadStats.cpp
   src/ManualCapture.cpp
+  src/ManualCaptureKeyWatcher.cpp
   src/ModalDialogProbe.cpp
   src/PendingCrashAnalysis.cpp
   src/PendingCrashAnalysis.Decision.cpp
