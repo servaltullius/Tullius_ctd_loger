@@ -18,13 +18,69 @@
 namespace skydiag::helper {
 namespace {
 
+// Where MiniDumpWriteDump was when it failed. ERROR_PARTIAL_COPY failures
+// have never reproduced outside CI and are not prevented by
+// MiniDumpIgnoreInaccessibleMemory, so the failure message carries the last
+// callback the writer made and any memory reads it reported as failed.
+struct DumpProgress
+{
+  ULONG lastCallbackType = 0;
+  ULONG64 lastCallbackSubject = 0;  // thread id or module base, when the callback has one
+  ULONG readFailureCount = 0;
+  ULONG64 firstFailedReadOffset = 0;
+  ULONG firstFailedReadBytes = 0;
+  HRESULT firstFailedReadStatus = S_OK;
+
+  void Reset() noexcept { *this = DumpProgress{}; }
+};
+
 struct DumpCallbackContext
 {
   DumpProfile profile{};
   DWORD preferredThreadId = 0;
   std::vector<DWORD> preferredThreadIds;
   bool isProcessSnapshot = false;
+  DumpProgress progress{};
 };
+
+ULONG64 CallbackSubject(const MINIDUMP_CALLBACK_INPUT& input) noexcept
+{
+  switch (input.CallbackType) {
+    case ThreadCallback:
+    case ThreadExCallback:
+      return input.Thread.ThreadId;
+    case IncludeThreadCallback:
+      return input.IncludeThread.ThreadId;
+    case ModuleCallback:
+      return input.Module.BaseOfImage;
+    case IncludeModuleCallback:
+      return input.IncludeModule.BaseOfImage;
+    default:
+      return 0;
+  }
+}
+
+std::wstring Hex(ULONG64 value)
+{
+  wchar_t buf[32]{};
+  swprintf_s(buf, L"0x%llX", static_cast<unsigned long long>(value));
+  return buf;
+}
+
+std::wstring DescribeDumpProgress(const DumpProgress& progress)
+{
+  std::wstring text = L"last callback type=" + std::to_wstring(progress.lastCallbackType);
+  if (progress.lastCallbackSubject != 0) {
+    text += L" subject=" + Hex(progress.lastCallbackSubject);
+  }
+  text += L", memory read failures=" + std::to_wstring(progress.readFailureCount);
+  if (progress.readFailureCount != 0) {
+    text += L" (first at " + Hex(progress.firstFailedReadOffset) + L" size=" +
+      std::to_wstring(progress.firstFailedReadBytes) + L" status=" +
+      Hex(static_cast<ULONG>(progress.firstFailedReadStatus)) + L")";
+  }
+  return text;
+}
 
 void AppendPreferredThreadId(std::vector<DWORD>& preferredThreadIds, DWORD tid)
 {
@@ -163,13 +219,30 @@ BOOL CALLBACK MiniDumpCallback(
   const PMINIDUMP_CALLBACK_INPUT callbackInput,
   PMINIDUMP_CALLBACK_OUTPUT callbackOutput)
 {
-  const auto* ctx = static_cast<const DumpCallbackContext*>(callbackParam);
+  auto* ctx = static_cast<DumpCallbackContext*>(callbackParam);
   (void)callbackOutput;
   if (!ctx || !callbackInput) {
     return TRUE;
   }
 
   const auto callbackType = callbackInput->CallbackType;
+  if (callbackType == ReadMemoryFailureCallback) {
+    // Record the read and let the writer continue without that memory. The
+    // record shows up in the failure message if the dump still fails.
+    auto& progress = ctx->progress;
+    if (progress.readFailureCount == 0) {
+      progress.firstFailedReadOffset = callbackInput->ReadMemoryFailure.Offset;
+      progress.firstFailedReadBytes = callbackInput->ReadMemoryFailure.Bytes;
+      progress.firstFailedReadStatus = callbackInput->ReadMemoryFailure.FailureStatus;
+    }
+    ++progress.readFailureCount;
+    if (callbackOutput) {
+      callbackOutput->Status = S_OK;
+    }
+    return TRUE;
+  }
+  ctx->progress.lastCallbackType = static_cast<ULONG>(callbackType);
+  ctx->progress.lastCallbackSubject = CallbackSubject(*callbackInput);
   if (callbackType == IsProcessSnapshotCallback && callbackOutput) {
     callbackOutput->Status = ctx->isProcessSnapshot ? S_FALSE : S_OK;
     return TRUE;
@@ -317,6 +390,7 @@ bool WriteDumpWithStreams(
       return false;
     }
 
+    callbackContext.progress.Reset();
     const BOOL ok = MiniDumpWriteDump(
       process,
       pid,
@@ -341,7 +415,10 @@ bool WriteDumpWithStreams(
     dumpType = static_cast<MINIDUMP_TYPE>(dumpType | MiniDumpIgnoreInaccessibleMemory);
   }
 
-  if (err) *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr);
+  if (err) {
+    *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr) + L" (" +
+      DescribeDumpProgress(callbackContext.progress) + L")";
+  }
   return false;
 }
 

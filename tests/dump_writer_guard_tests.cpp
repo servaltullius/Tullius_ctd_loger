@@ -53,6 +53,14 @@ int main()
     impl,
     "dumpType | MiniDumpIgnoreInaccessibleMemory",
     "The partial-copy retry must add MiniDumpIgnoreInaccessibleMemory.");
+  AssertContains(
+    impl,
+    "callbackType == ReadMemoryFailureCallback",
+    "The dump callback must record memory read failures and let the writer continue.");
+  AssertContains(
+    impl,
+    "DescribeDumpProgress(callbackContext.progress)",
+    "A failed dump must report where the writer was, so CI-only failures can be located.");
   AssertContains(impl, "MiniDumpWithCodeSegs", "DumpWriter must request code segments when the dump profile enables machine-code capture.");
   AssertContains(impl, "MiniDumpWithProcessThreadData", "DumpWriter must request process/thread data when profile enables it.");
   AssertContains(impl, "MiniDumpWithFullMemoryInfo", "DumpWriter must request full memory info when profile enables it.");
