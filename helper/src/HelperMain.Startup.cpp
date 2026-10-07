@@ -11,6 +11,7 @@
 
 #include "CrashCapture.h"
 #include "HelperLog.h"
+#include "ManualCaptureKeyWatcher.h"
 
 namespace {
 
@@ -162,14 +163,17 @@ void RegisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg, const std::fi
     return;
   }
 
+  // Key-state polling also catches presses WM_HOTKEY never delivers (see
+  // ManualCaptureKeyWatcher), so a failed registration only loses one path.
+  ManualCaptureKeys().Start();
   if (!RegisterHotKey(nullptr, kHotkeyId, MOD_CONTROL | MOD_SHIFT, VK_F12)) {
     const DWORD le = GetLastError();
     std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " << le << L"\n";
     AppendLogLine(outBase, L"Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " + std::to_wstring(le) +
-      L" (falling back to GetAsyncKeyState polling)");
+      L" (key-state polling still watches Ctrl+Shift+F12)");
   } else {
     std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: Ctrl+Shift+F12\n";
-    AppendLogLine(outBase, L"Manual capture hotkey registered: Ctrl+Shift+F12");
+    AppendLogLine(outBase, L"Manual capture hotkey registered: Ctrl+Shift+F12 (also watched by key-state polling)");
   }
 }
 
@@ -179,6 +183,7 @@ void UnregisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg)
     return;
   }
   UnregisterHotKey(nullptr, kHotkeyId);
+  ManualCaptureKeys().Stop();
 }
 
 bool DetectGrassCacheMode(

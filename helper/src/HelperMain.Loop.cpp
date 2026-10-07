@@ -6,6 +6,7 @@
 #include "CrashCapture.h"
 #include "HelperLog.h"
 #include "ManualCapture.h"
+#include "ManualCaptureKeyWatcher.h"
 
 namespace {
 
@@ -33,8 +34,15 @@ bool TryTriggerManualCapture(
   }
 
   DoManualCapture(cfg, proc, outBase, loadStats, adaptiveLoadingThresholdSec, source);
+  // A capture takes seconds. Presses seen meanwhile, including the other
+  // path's copy of the press that started this capture, must not start a
+  // second one, so drop them and debounce from the end of the capture.
+  ManualCaptureKeys().ConsumePress();
+  MSG pendingHotkey{};
+  while (PeekMessageW(&pendingHotkey, nullptr, WM_HOTKEY, WM_HOTKEY, PM_REMOVE)) {
+  }
   if (lastManualCaptureTick) {
-    *lastManualCaptureTick = now;
+    *lastManualCaptureTick = GetTickCount64();
   }
   return true;
 }
@@ -70,19 +78,18 @@ void PumpManualCaptureInputs(
     DispatchMessageW(&msg);
   }
 
-  if (cfg.enableManualCaptureHotkey && !triggeredFromHotkeyMessage) {
-    const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-    const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-    if (ctrl && shift && ((GetAsyncKeyState(VK_F12) & 1) != 0)) {
-      TryTriggerManualCapture(
-        cfg,
-        proc,
-        outBase,
-        *loadStats,
-        adaptiveLoadingThresholdSec,
-        L"GetAsyncKeyState",
-        &s_lastManualCaptureTick);
-    }
+  // Always consume the polled press so a press WM_HOTKEY already handled is
+  // not replayed on a later pump.
+  const bool polledPress = cfg.enableManualCaptureHotkey && ManualCaptureKeys().ConsumePress();
+  if (polledPress && !triggeredFromHotkeyMessage) {
+    TryTriggerManualCapture(
+      cfg,
+      proc,
+      outBase,
+      *loadStats,
+      adaptiveLoadingThresholdSec,
+      L"key-state poll",
+      &s_lastManualCaptureTick);
   }
 }
 
