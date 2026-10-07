@@ -1,0 +1,77 @@
+name: Dump Stress
+
+# Runs selected Windows tests many times in a row on a CI runner.
+#
+# The helper's dump tests intermittently fail on CI with ERROR_PARTIAL_COPY
+# (MiniDumpWriteDump failed: 2147944184) but never locally, so waiting for a
+# random failure on a merge is the only other way to see one. This repeats
+# them until the first failure; the failing test prints the helper log, whose
+# "Crash dump attempt ... failed" lines carry the dump writer's diagnostics.
+# Manual only: it never runs on pushes or pull requests.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: "Runs per test (stops at the first failure)"
+        required: true
+        default: "100"
+      tests:
+        description: "ctest -R regex of the tests to repeat"
+        required: true
+        default: "skydiag_helper_runtime_smoke_tests|skydiag_crash_dump_context_tests"
+
+jobs:
+  dump-stress:
+    name: Dump Stress (repeat until fail)
+    runs-on: windows-2022
+    timeout-minutes: 150
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP\vcpkg"
+          & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
+
+      - name: Setup vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-archives-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          restore-keys: |
+            vcpkg-archives-
+
+      - name: Configure (Ninja + vcpkg)
+        shell: pwsh
+        run: >
+          cmake -S . -B build-win
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_TOOLCHAIN_FILE="$env:RUNNER_TEMP\vcpkg\scripts\buildsystems\vcpkg.cmake"
+
+      - name: Build (RelWithDebInfo)
+        shell: pwsh
+        run: cmake --build build-win
+
+      - name: Repeat selected tests until the first failure
+        shell: pwsh
+        env:
+          STRESS_REPEAT: ${{ inputs.repeat }}
+          STRESS_TESTS: ${{ inputs.tests }}
+        run: >
+          ctest --test-dir build-win -C RelWithDebInfo
+          -R "$env:STRESS_TESTS"
+          --repeat "until-fail:$env:STRESS_REPEAT"
+          --output-on-failure

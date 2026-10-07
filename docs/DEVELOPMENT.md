@@ -72,6 +72,7 @@ For in-game validation without waiting:
 - Tag-triggered releases rerun Linux unit, ASan+UBSan, the Linux clang-tidy subset, parser fuzz, complete Windows production clang-tidy, and the packaged launcher smoke before publication.
 - Manual rerun of the same packaged WinUI smoke: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`
+- Manual dump stress: `.github/workflows/dump-stress.yml` repeats selected Windows tests (default: the helper smoke and crash dump context tests, 100 runs each) until the first failure. Use it to catch the CI-only `ERROR_PARTIAL_COPY` dump failure; the failing test prints the helper log with the dump writer diagnostics. Run: `gh workflow run dump-stress.yml --ref main`.
 
 Equivalent local commands:
 ```bash
