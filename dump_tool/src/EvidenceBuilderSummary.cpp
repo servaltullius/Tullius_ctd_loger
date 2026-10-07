@@ -617,8 +617,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L"이(가) 감지되었으나 신뢰도가 낮습니다. (신뢰도: 낮음)");
     } else {
       summary = en
-        ? L"Crash is reported in the game executable. Version mismatch/hook conflict is possible. (Confidence: Medium)"
-        : L"크래시 위치가 게임 본체(EXE)로 보고되었습니다. 버전 불일치/후킹 충돌 가능성이 있습니다. (신뢰도: 중간)";
+        ? L"Crash is reported in the game executable. This dump alone cannot tell plugin data, a version mismatch, or a hook apart. (Confidence: Low)"
+        : L"크래시 위치가 게임 본체(EXE)로 보고되었습니다. 플러그인 데이터 문제, 버전 불일치, 후킹 충돌 중 무엇인지 이 덤프만으로는 가릴 수 없습니다. (신뢰도: 낮음)";
     }
   } else {
     if (isHangLike) {

@@ -102,6 +102,27 @@ void TestLowConfidencePluginRuleDoesNotLeadTheChecklist()
     "a low-confidence plugin rule must not come before the crash guidance");
 }
 
+// Field case (v0.2.59-rc5): a trap hitting a modded creature crashed inside
+// vanilla engine code with no DLL on the stack, and the checklist said a
+// version mismatch or hook conflict was "likely".
+void TestGameExeFaultDoesNotSingleOutVersionOrHooks()
+{
+  for (const auto lang : { i18n::Language::kKorean, i18n::Language::kEnglish }) {
+    auto r = MakeCrash(0xC0000005u, L"SkyrimSE.exe");
+    BuildEvidenceAndSummary(r, lang);
+    const bool en = lang == i18n::Language::kEnglish;
+    Require(
+      AnyRecommendationStartsWith(r, en ? L"[Check]" : L"[점검]", en ? L"plugin data" : L"플러그인 데이터"),
+      "a game-executable fault must name plugin data as a possible cause");
+    Require(
+      !AnyRecommendationStartsWith(r, en ? L"[Check]" : L"[점검]", en ? L"are likely" : L"가능성이 큽니다"),
+      "a game-executable fault alone must not call a version mismatch or hook likely");
+    Require(
+      r.summary_sentence.find(en ? L"(Confidence: Low)" : L"(신뢰도: 낮음)") != std::wstring::npos,
+      "a game-executable fault with nothing else to go on is low confidence");
+  }
+}
+
 }  // namespace
 
 int main()
@@ -110,6 +131,7 @@ int main()
     TestBreakpointGetsItsOwnExplanation();
     TestFaultInsideCrashLoggerIsExplainedAsSecondary();
     TestLowConfidencePluginRuleDoesNotLeadTheChecklist();
+    TestGameExeFaultDoesNotSingleOutVersionOrHooks();
     std::puts("exception code recommendation tests passed");
     return 0;
   } catch (const std::exception& ex) {
