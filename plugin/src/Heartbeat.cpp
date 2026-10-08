@@ -20,6 +20,7 @@
 #include <SKSE/SKSE.h>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/EventSinks.h"
 #include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
 
@@ -58,6 +59,8 @@ inline void HeartbeatTaskOnMainThread() noexcept
     g_taskPending.store(false);
     return;
   }
+
+  RefreshInMenuFlag();
 
   LARGE_INTEGER li{};
   QueryPerformanceCounter(&li);
