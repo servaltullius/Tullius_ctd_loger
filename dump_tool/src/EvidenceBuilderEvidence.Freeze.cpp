@@ -109,6 +109,9 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
       parts.push_back((en ? L"opened by: " : L"호출 모듈: ") + modal.caller_module_filename +
         L" [" + ToWideAscii(modal.caller_kind) + L"]");
     }
+    if (!modal.address_library_issue.empty()) {
+      parts.push_back(L"Address Library: " + ToWideAscii(modal.address_library_issue));
+    }
     if (!modal.dialog_text.empty()) {
       parts.push_back((en ? L"text: " : L"내용: ") + modal.dialog_text);
     }

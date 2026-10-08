@@ -299,8 +299,11 @@ std::string BuildReportText(
           << " stack_evidence=" << (modal.stack_evidence ? "1" : "0")
           << " wait_api=" << WideToUtf8(modal.wait_api)
           << " caller=" << WideToUtf8(modal.caller_module_filename)
-          << " caller_kind=" << modal.caller_kind
-          << "\n";
+          << " caller_kind=" << modal.caller_kind;
+      if (!modal.address_library_issue.empty()) {
+        rpt << " address_library_issue=" << modal.address_library_issue;
+      }
+      rpt << "\n";
       if (!modal.dialog_title.empty()) {
         rpt << "  modal_dialog_title=" << WideToUtf8(modal.dialog_title) << "\n";
       }

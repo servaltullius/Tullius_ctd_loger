@@ -42,6 +42,15 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
    `related / Medium`으로 만든다. 스택 suspect는 `Low`로 낮추고 원인이 아님을 표시한다.
 7. 대화상자 본문의 사용자 프로필 경로 이름은 `<user>`로 가리고 줄바꿈은 ` / `로
    합친다.
+8. 본문이 CommonLibSSE(-NG)의 Address Library 오류 문구이면 종류를 붙인다.
+   - `plugin_incompatible`: "Unsupported address library format",
+     "Failed to find the id within the address library". 플러그인 빌드가 현재 게임
+     버전을 지원하지 않으므로 맞는 파일로 바꾸라고 안내한다.
+   - `address_library_missing`: "Failed to locate an appropriate address library",
+     "failed to open address library file". 이 게임 버전용 Address Library를
+     설치하라고 안내하고, 이미 있다면 다른 판(SE/AE)용 빌드일 수 있다고 덧붙인다.
+   - 판정은 본문만 보며 신뢰도와 후보는 바꾸지 않는다. 호출 모듈을 못 찾으면
+     CommonLib이 제목에 넣는 플러그인 파일 이름으로 대상을 부른다.
 
 ## Output Contract
 
@@ -51,6 +60,7 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
 - `wait_api`, `dialog_title`, `dialog_text`
 - `caller_module_filename`, `caller_inferred_mod_name`
 - `caller_kind` (`plugin` / `skse_runtime` / `hook_framework` / `game_exe` / `none`)
+- `address_library_issue` (`plugin_incompatible` / `address_library_missing` / 빈 문자열)
 - `other_thread_dialog_count`
 
 ## Consequences
@@ -70,7 +80,9 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
 
 ## Verification
 
-- `skydiag_modal_dialog_wait_tests`: 스택 매칭, 호출자 분류, WCT 파싱, 근거 결합, 경로 가림.
+- `skydiag_modal_dialog_wait_tests`: 스택 매칭, 호출자 분류, WCT 파싱, 근거 결합, 경로 가림,
+  Address Library 오류 문구 분류.
+- `skydiag_modal_dialog_recommendation_tests`: Address Library 오류별 요약 문장과 안내.
 - `skydiag_freeze_candidate_consensus_tests`, `skydiag_candidate_consensus_tests`: 상태 우선순위와 후보 신뢰도.
 - `skydiag_helper_hang_runtime_tests`: 실제 MessageBox의 소유 스레드와 본문 캡처.
 - `skydiag_modal_dialog_hang_e2e_tests`: 실제 헬퍼 hang 캡처를 분석기로 분석해 상태,

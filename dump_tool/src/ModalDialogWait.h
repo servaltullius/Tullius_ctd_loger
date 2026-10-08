@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "Analyzer.h"
@@ -48,6 +49,11 @@ ModalStackMatch MatchModalDialogWaitStack(const std::vector<ModalStackFrame>& fr
 
 // plugin / skse_runtime / hook_framework / game_exe
 std::string ClassifyModalDialogCaller(const ModalStackFrame& frame);
+
+// Recognizes the Address Library failures that CommonLibSSE(-NG) plugins report
+// through a message box: plugin_incompatible (unsupported format, missing id),
+// address_library_missing (no database file for this game version), or empty.
+std::string ClassifyAddressLibraryDialogText(std::wstring_view text);
 
 struct ModalDialogWaitInput
 {
