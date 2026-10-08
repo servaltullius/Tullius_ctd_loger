@@ -2,6 +2,39 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.60-rc1 (미배포)
+
+### 한눈에 보기
+- 플러그인이 띄운 Address Library 오류 창 때문에 게임이 멈추면, 리포트가 어떤 플러그인을 어떻게 바꿔야 하는지 안내합니다. v0.2.59 실게임 확인 때 SmoothCam.dll이 "Unsupported address library format: 2" 창으로 게임을 멈췄는데, 그때 리포트는 창 내용을 보여주고 "메시지를 따르세요"라고만 했습니다.
+- 그 실행에서 SKSE가 로드하지 않은 DLL과 사유를 리포트에 참고로 보여줍니다. 원인 후보로는 쓰지 않습니다.
+
+### 추가
+- **Address Library 오류 창 안내** — 프리징이 modal 대화상자 때문이고 본문이 CommonLibSSE(-NG)의 Address Library 오류 문구이면 종류를 붙입니다(ADR-0006).
+  - `plugin_incompatible`("Unsupported address library format", "Failed to find the id within the address library"): 플러그인 빌드가 현재 게임 버전을 지원하지 않으므로, 이 게임 버전용 파일로 바꾸거나 모드를 비활성화하라고 안내합니다. 보통 Address Library를 다시 설치해서는 해결되지 않습니다.
+  - `address_library_missing`("Failed to locate an appropriate address library", "failed to open address library file"): 이 게임 버전용 Address Library를 설치하라고 안내하고, 이미 있다면 플러그인이 다른 판(SE/AE)용일 수 있다고 덧붙입니다.
+  - 요약 문장에 한 줄을 덧붙이고 일반 안내("메시지를 따르세요")를 플러그인 이름과 게임 버전을 짚는 안내로 바꿉니다. 호출 모듈을 못 찾으면 CommonLib이 창 제목에 넣는 플러그인 파일 이름을 씁니다. 신뢰도와 후보는 바뀌지 않습니다.
+  - 리포트의 `modal_dialog_wait` 줄, 근거 항목, 요약 JSON의 `freeze_analysis.modal_dialog_wait.address_library_issue`에 기록합니다.
+- **SKSE가 로드하지 않은 DLL** — SKSE는 게임 버전과 맞지 않는 플러그인을 시작할 때 거부하고 사유를 skse64.log에 남깁니다. 거부된 DLL은 실행되지 않으므로 사고 원인이 될 수 없어, 참고 정보로만 보여줍니다(ADR-0008).
+  - Helper가 캡처할 때 게임 EXE의 기준 주소를 함께 읽고, `Documents\My Games\Skyrim Special Edition*\SKSE\skse64.log` 중 첫머리 `imagebase`가 같은 로그만 이번 실행의 로그로 씁니다. skse64.log에는 시각 정보가 없어 이전 실행의 로그를 이렇게 걸러냅니다. 여러 개가 맞으면 가장 최근 로그를 씁니다.
+  - 결과는 플러그인 스캔의 `skse_log`에 실리고, Helper 로그에 `SKSE log: matched (checked=..., loaded=..., not_loaded=...)` 한 줄이 남습니다.
+  - 리포트에는 `Low` 근거 항목, 체크리스트 맨 끝의 `[SKSE]` 안내, `SkseLog:` 줄로 나옵니다. 안내에는 이번 사고의 원인 근거가 아니라고 적습니다.
+  - SKSE는 DLL 이름을 시스템 ANSI 코드 페이지로 기록하므로, UTF-8로 바꿔서 스캔 JSON에 넣습니다.
+
+### CI
+- Windows 빌드가 새로 만든 테스트 exe를 링크하다 "Access is denied" / "used by another process"로 실패하면 한 번 다시 빌드합니다(`ci.yml`, `release.yml`).
+- skse64.log 파서용 퍼저 `fuzz_skse_log_parser`를 Linux fuzz 스모크에 추가했습니다.
+
+### 주의사항
+- 분석기와 Helper가 바뀌었습니다. 플러그인 코드와 공유 메모리 프로토콜(SharedLayout v4)은 v0.2.59와 같지만 버전 정보가 바뀌므로 zip 전체를 교체해 주세요.
+- `msdia140.dll`처럼 SKSE 플러그인이 아닌 보조 DLL도 SKSE가 "no version data"로 기록하므로 목록에 나옵니다. 구형 플러그인과 구분할 수 없어 안내에 두 가능성을 함께 적었습니다.
+- 이 버전 이전의 캡처에는 SKSE 로그 정보가 없습니다.
+
+### 테스트
+- Windows 전체 테스트: `78/78` 통과.
+- 문구 분류(실제 SmoothCam 본문 포함), 오류 종류별 한/영 요약과 안내, skse64.log 파서(실제 2.2.6 로그 형식, 공백과 괄호가 든 이름, 로드 후 충돌, 오류 코드, 깨진 줄), 스캔 JSON 파싱, 기준 주소 매칭과 다른 실행의 로그 거부, ANSI 이름의 UTF-8 직렬화, `[SKSE]` 안내의 조건과 위치를 테스트로 고정했습니다.
+- 보관 중인 SmoothCam 실사고 프리징 덤프를 다시 분석해 `address_library_issue=plugin_incompatible`과 새 안내를 확인했습니다.
+- 사용자 환경의 실제 skse64.log(1.6.1170, SKSE 2.2.6)를 파싱한 결과(검사 322, 로드 320, 거부 2)가 로그를 직접 센 값과 같습니다. 실게임 캡처에서 Helper가 로그를 매칭하는지는 rc1 실게임 테스트로 확인해야 합니다.
+
 ## v0.2.59 (2026-10-09)
 
 v0.2.59-rc1부터 rc7까지의 변경을 묶은 정식 릴리즈입니다. 항목별 자세한 내용은 아래 각 RC 항목에 있습니다.
