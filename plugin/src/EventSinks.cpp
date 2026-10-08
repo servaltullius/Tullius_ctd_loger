@@ -15,6 +15,29 @@
 namespace skydiag::plugin {
 namespace {
 
+// The helper picks its longer menu hang threshold from kState_InMenu, so the
+// flag means "a menu has taken over the game", not "some menu is open":
+// HUD-style menus (HUD Menu, Cursor Menu, TrueHUD, widget menus) stay open
+// throughout gameplay. UI::IsShowingMenus() only reports HUD visibility.
+bool MenuTakesOverGame(const RE::IMenu& menu) noexcept
+{
+  return menu.PausesGame() || menu.Modal() || menu.ApplicationMenu() || menu.InventoryItemMenu();
+}
+
+void StoreInMenuFlag(skydiag::SharedLayout& shm, RE::UI& ui, bool openingMenuTakesOverGame) noexcept
+{
+  const bool inMenu = openingMenuTakesOverGame || ui.GameIsPaused() || ui.IsModalMenuOpen() ||
+                      ui.IsApplicationMenuOpen() || ui.IsItemMenuOpen();
+  auto* flags = reinterpret_cast<volatile LONG*>(&shm.header.state_flags);
+  if (inMenu) {
+    InterlockedOr(flags, static_cast<LONG>(skydiag::kState_InMenu));
+  } else if (!ui.closingAllMenus) {
+    // While the game closes every menu at once (save load, quit) the counters
+    // are in flux; keep the flag until the next refresh.
+    InterlockedAnd(flags, ~static_cast<LONG>(skydiag::kState_InMenu));
+  }
+}
+
 class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 {
 public:
@@ -48,11 +71,18 @@ public:
       dst[copyLen] = '\0';
     }
 
+    auto* ui = RE::UI::GetSingleton();
     if (e->opening) {
       PushEvent(skydiag::EventType::kMenuOpen, p, sizeof(p));
-      InterlockedOr(
-        reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
-        static_cast<LONG>(skydiag::kState_InMenu));
+      if (ui) {
+        // The UI counters may not include the menu being opened yet.
+        const auto menu = ui->GetMenu(menuName);
+        StoreInMenuFlag(*shm, *ui, menu && MenuTakesOverGame(*menu));
+      } else {
+        InterlockedOr(
+          reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
+          static_cast<LONG>(skydiag::kState_InMenu));
+      }
 
       if (menuName == RE::LoadingMenu::MENU_NAME) {
         PushEvent(skydiag::EventType::kLoadStart, p, sizeof(p));
@@ -63,12 +93,10 @@ public:
     } else {
       PushEvent(skydiag::EventType::kMenuClose, p, sizeof(p));
 
-      // Best-effort flag clearing (UI state can be slightly out-of-date during teardown).
-      auto* ui = RE::UI::GetSingleton();
-      if (ui && !ui->IsShowingMenus()) {
-        InterlockedAnd(
-          reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
-          ~static_cast<LONG>(skydiag::kState_InMenu));
+      // Best-effort: the counters may still include the closing menu; the
+      // heartbeat refresh settles the flag within one interval.
+      if (ui) {
+        StoreInMenuFlag(*shm, *ui, false);
       }
 
       if (menuName == RE::LoadingMenu::MENU_NAME) {
@@ -86,6 +114,15 @@ public:
 MenuSink g_menuSink;
 
 }  // namespace
+
+void RefreshInMenuFlag() noexcept
+{
+  auto* shm = GetShared();
+  auto* ui = RE::UI::GetSingleton();
+  if (shm && ui) {
+    StoreInMenuFlag(*shm, *ui, false);
+  }
+}
 
 bool RegisterEventSinks(bool logMenus)
 {

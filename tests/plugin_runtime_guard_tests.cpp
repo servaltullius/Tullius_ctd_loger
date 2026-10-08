@@ -86,6 +86,7 @@ int main()
   const auto sharedMemoryPath = repoRoot / "plugin" / "src" / "SharedMemory.cpp";
   const auto crashHandlerPath = repoRoot / "plugin" / "src" / "CrashHandler.cpp";
   const auto sharedProtocolPath = repoRoot / "shared" / "SkyrimDiagShared.h";
+  const auto eventSinksPath = repoRoot / "plugin" / "src" / "EventSinks.cpp";
 
   assert(std::filesystem::exists(heartbeatPath) && "plugin/src/Heartbeat.cpp not found");
   assert(std::filesystem::exists(resourceHooksPath) && "plugin/src/ResourceHooks.cpp not found");
@@ -93,6 +94,7 @@ int main()
   assert(std::filesystem::exists(sharedMemoryPath) && "plugin/src/SharedMemory.cpp not found");
   assert(std::filesystem::exists(crashHandlerPath) && "plugin/src/CrashHandler.cpp not found");
   assert(std::filesystem::exists(sharedProtocolPath) && "shared/SkyrimDiagShared.h not found");
+  assert(std::filesystem::exists(eventSinksPath) && "plugin/src/EventSinks.cpp not found");
 
   const std::string heartbeat = ReadAllText(heartbeatPath);
   const std::string resourceHooks = ReadAllText(resourceHooksPath);
@@ -100,6 +102,7 @@ int main()
   const std::string sharedMemory = ReadAllText(sharedMemoryPath);
   const std::string crashHandler = ReadAllText(crashHandlerPath);
   const std::string sharedProtocol = ReadAllText(sharedProtocolPath);
+  const std::string eventSinks = ReadAllText(eventSinksPath);
 
   const std::string queueHeartbeatTaskBody = ExtractFunctionBody(heartbeat, "void QueueHeartbeatTask() noexcept");
   AssertContains(
@@ -165,6 +168,37 @@ int main()
     onDataLoadedBody,
     "StartHeartbeatScheduler(",
     "Plugin data-loaded path must start heartbeat scheduler.");
+
+  // kState_InMenu selects the helper's longer menu hang threshold. It must
+  // follow menus that take over the game, not HUD visibility: the old
+  // IsShowingMenus() check never cleared it during gameplay.
+  assert(
+    eventSinks.find("->IsShowingMenus(") == std::string::npos &&
+    eventSinks.find(".IsShowingMenus(") == std::string::npos &&
+    "In-menu flag must not be cleared by HUD visibility (UI::IsShowingMenus).");
+  const std::string storeInMenuFlagBody = ExtractFunctionBody(eventSinks, "void StoreInMenuFlag(");
+  for (const char* counter : {"GameIsPaused()", "IsModalMenuOpen()", "IsApplicationMenuOpen()", "IsItemMenuOpen()"}) {
+    AssertContains(
+      storeInMenuFlagBody,
+      counter,
+      "In-menu flag must be derived from the UI counters of menus that take over the game.");
+  }
+  AssertOrdered(
+    storeInMenuFlagBody,
+    "!ui.closingAllMenus",
+    "InterlockedAnd(",
+    "In-menu flag must not be cleared while the game closes every menu at once.");
+  const std::string menuTakesOverGameBody = ExtractFunctionBody(eventSinks, "bool MenuTakesOverGame(");
+  AssertContains(
+    menuTakesOverGameBody,
+    "PausesGame()",
+    "An opening menu must count by its own flags before the UI counters include it.");
+  const std::string heartbeatTaskBody = ExtractFunctionBody(heartbeat, "void HeartbeatTaskOnMainThread()");
+  AssertOrdered(
+    heartbeatTaskBody,
+    "RefreshInMenuFlag();",
+    "shm->header.last_heartbeat_qpc = now;",
+    "Each heartbeat must refresh the in-menu flag before publishing the heartbeat.");
 
   assert(
     pluginMain.find("static std::jthread g_testHotkeysThread;") == std::string::npos &&
