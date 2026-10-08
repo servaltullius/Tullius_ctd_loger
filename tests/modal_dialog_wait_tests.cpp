@@ -271,6 +271,60 @@ void TestDialogTextRedactsUserProfileAndFlattensLines()
   assert(info.detected);
   assert(info.dialog_text ==
     L"Failed to read C:\\Users\\<user>\\Documents\\My Games\\x.ini / See /users/<user>/log.txt");
+  assert(info.address_library_issue.empty());
+}
+
+// The SmoothCam dialog from the v0.2.59 field test, as the helper captured it.
+constexpr char kSmoothCamDialogText[] =
+  "C:/Users/someone/git/SkyrimSE-SmoothCam/buck-out/v2/gen/root/549d9706738bb58d/__CommonLibAE__/buck-headers/REL/ID.h(223): "
+  "Unsupported address library format: 2\r\n"
+  "This means this script extender plugin is incompatible with the address library available for this version of the game, "
+  "and thus does not support it.";
+
+void TestClassifyAddressLibraryDialogText()
+{
+  using skydiag::dump_tool::ClassifyAddressLibraryDialogText;
+  assert(ClassifyAddressLibraryDialogText(
+           L"REL/ID.h(223): Unsupported address library format: 2 / This means this script extender plugin is incompatible") ==
+         "plugin_incompatible");
+  assert(ClassifyAddressLibraryDialogText(
+           L"Failed to find the id within the address library: 51830 / This means this script extender plugin is incompatible "
+           L"with the address library for this version of the game, and thus does not support it.") ==
+         "plugin_incompatible");
+  assert(ClassifyAddressLibraryDialogText(
+           L"Failed to locate an appropriate address library with the path: Data/SKSE/Plugins/version-1-6-1170-0.bin / "
+           L"This means you are missing the address library for this specific version of the game.") ==
+         "address_library_missing");
+  assert(ClassifyAddressLibraryDialogText(L"failed to open address library file") == "address_library_missing");
+  assert(ClassifyAddressLibraryDialogText(L"UNSUPPORTED ADDRESS LIBRARY FORMAT: 1") == "plugin_incompatible");
+
+  // Other plugin errors, including CommonLib's generic ones, are left alone.
+  assert(ClassifyAddressLibraryDialogText(L"Plugin failed to load").empty());
+  assert(ClassifyAddressLibraryDialogText(L"version mismatch").empty());
+  assert(ClassifyAddressLibraryDialogText(L"Please install Address Library for SKSE Plugins.").empty());
+  assert(ClassifyAddressLibraryDialogText(L"").empty());
+}
+
+void TestResolveTagsAddressLibraryDialog()
+{
+  const auto wct = WctWithDialog(100, "SmoothCam.dll", kSmoothCamDialogText);
+  auto frames = MessageBoxChain();
+  frames.push_back(Plugin(L"SmoothCam.dll", L"SmoothCam"));
+  ModalDialogWaitInput input{};
+  input.main_thread_id = 100;
+  input.wct = &wct;
+  input.main_thread_frames = &frames;
+  const auto info = ResolveModalDialogWait(input);
+  assert(info.detected);
+  assert(info.caller_kind == "plugin");
+  assert(info.address_library_issue == "plugin_incompatible");
+  assert(info.dialog_text.find(L"C:/Users/<user>/git/") == 0);
+
+  // The tag comes from the dialog text, so a stack-only match has none.
+  ModalDialogWaitInput stackOnly{};
+  stackOnly.main_thread_id = 100;
+  stackOnly.main_thread_frames = &frames;
+  assert(ResolveModalDialogWait(stackOnly).address_library_issue.empty());
 }
 
 }  // namespace
@@ -288,5 +342,7 @@ int main()
   TestResolveWindowOnlyAndOtherThreadDialogs();
   TestResolveStackOnlyWithoutHelperDialogCapture();
   TestDialogTextRedactsUserProfileAndFlattensLines();
+  TestClassifyAddressLibraryDialogText();
+  TestResolveTagsAddressLibraryDialog();
   return 0;
 }

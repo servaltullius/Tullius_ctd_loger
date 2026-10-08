@@ -112,6 +112,8 @@ struct ModalDialogWaitInfo
   std::wstring caller_inferred_mod_name;
   // plugin / skse_runtime / hook_framework / game_exe / none
   std::string caller_kind = "none";
+  // plugin_incompatible / address_library_missing / empty (from the dialog text)
+  std::string address_library_issue;
   std::uint32_t other_thread_dialog_count = 0;
 };
 

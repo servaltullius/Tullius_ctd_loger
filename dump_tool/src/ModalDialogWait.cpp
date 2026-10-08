@@ -183,6 +183,32 @@ std::string ClassifyModalDialogCaller(const ModalStackFrame& frame)
   return "plugin";
 }
 
+std::string ClassifyAddressLibraryDialogText(std::wstring_view text)
+{
+  // REL::IDDatabase texts from CommonLibSSE and CommonLibSSE-NG. They are
+  // English in every game language because the plugin formats them itself.
+  constexpr std::wstring_view kPluginIncompatible[] = {
+    L"unsupported address library format",
+    L"failed to find the id within the address library",
+  };
+  constexpr std::wstring_view kAddressLibraryMissing[] = {
+    L"failed to locate an appropriate address library",
+    L"failed to open address library file",
+  };
+  const auto lower = LowerAscii(text);
+  for (const auto needle : kPluginIncompatible) {
+    if (lower.find(needle) != std::wstring::npos) {
+      return "plugin_incompatible";
+    }
+  }
+  for (const auto needle : kAddressLibraryMissing) {
+    if (lower.find(needle) != std::wstring::npos) {
+      return "address_library_missing";
+    }
+  }
+  return {};
+}
+
 ModalDialogWaitInfo ResolveModalDialogWait(const ModalDialogWaitInput& input)
 {
   ModalDialogWaitInfo info{};
@@ -207,6 +233,7 @@ ModalDialogWaitInfo ResolveModalDialogWait(const ModalDialogWaitInput& input)
       info.window_evidence = true;
       info.dialog_title = FlattenLines(RedactUserProfileSegments(Utf8ToWide(selected->title)));
       info.dialog_text = FlattenLines(RedactUserProfileSegments(Utf8ToWide(selected->text)));
+      info.address_library_issue = ClassifyAddressLibraryDialogText(info.dialog_text);
     }
   }
 

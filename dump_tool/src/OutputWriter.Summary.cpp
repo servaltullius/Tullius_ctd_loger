@@ -400,6 +400,7 @@ nlohmann::json BuildSummaryJson(
     { "caller_module_filename", WideToUtf8(r.modal_dialog_wait.caller_module_filename) },
     { "caller_inferred_mod_name", WideToUtf8(r.modal_dialog_wait.caller_inferred_mod_name) },
     { "caller_kind", r.modal_dialog_wait.caller_kind },
+    { "address_library_issue", r.modal_dialog_wait.address_library_issue },
     { "other_thread_dialog_count", r.modal_dialog_wait.other_thread_dialog_count },
   };
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
