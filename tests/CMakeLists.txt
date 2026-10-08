@@ -89,6 +89,20 @@ if(WIN32)
     COMMAND skydiag_exception_code_recommendation_tests
   )
 
+  add_executable(skydiag_modal_dialog_recommendation_tests
+    modal_dialog_recommendation_tests.cpp
+  )
+  target_include_directories(skydiag_modal_dialog_recommendation_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_modal_dialog_recommendation_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_modal_dialog_recommendation_tests
+    COMMAND skydiag_modal_dialog_recommendation_tests
+  )
+
   add_executable(skydiag_skse_log_report_tests
     skse_log_report_tests.cpp
   )

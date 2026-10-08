@@ -342,7 +342,26 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
       ? (L"[Modal dialog] Captured dialog text: " + modal.dialog_text)
       : (L"[Modal 대화상자] 캡처된 대화상자 내용: " + modal.dialog_text));
   }
-  if (modal.caller_kind == "plugin" && !caller.empty()) {
+  // CommonLib puts the plugin's file name in the dialog title, so it names the
+  // plugin even when the stack walk could not resolve the caller.
+  std::wstring plugin = (modal.caller_kind == "plugin" && !caller.empty()) ? caller : modal.dialog_title;
+  if (plugin.empty()) {
+    plugin = en ? L"The plugin" : L"해당 플러그인";
+  }
+  const std::wstring gameVersion = r.game_version.empty() ? std::wstring{} : (L" (" + ToWideAscii(r.game_version) + L")");
+  if (modal.address_library_issue == "plugin_incompatible") {
+    r.recommendations.push_back(en
+      ? (L"[Modal dialog] " + plugin + L" was built for a different game version and does not support the Address Library of this game" +
+          gameVersion + L". Install the file of that mod made for this game version, or disable it. Reinstalling Address Library usually does not fix this.")
+      : (L"[Modal 대화상자] " + plugin + L"은(는) 다른 게임 버전용으로 빌드되어 현재 게임" + gameVersion +
+          L"의 Address Library를 지원하지 않습니다. 이 게임 버전용 파일로 바꾸거나 해당 모드를 비활성화하세요. 보통 Address Library를 다시 설치해서는 해결되지 않습니다."));
+  } else if (modal.address_library_issue == "address_library_missing") {
+    r.recommendations.push_back(en
+      ? (L"[Modal dialog] " + plugin + L" could not find the Address Library file for this game version" + gameVersion +
+          L". Install or update Address Library for SKSE Plugins for this game version. If it is already installed, the plugin was likely built for the other edition (SE 1.5.97 or AE 1.6+); install the matching file.")
+      : (L"[Modal 대화상자] " + plugin + L"이(가) 현재 게임 버전" + gameVersion +
+          L"용 Address Library 파일을 찾지 못했습니다. 이 게임 버전용 Address Library for SKSE Plugins를 설치하거나 업데이트하세요. 이미 설치되어 있다면 플러그인이 다른 판(SE 1.5.97 / AE 1.6 이상)용으로 빌드되었을 가능성이 높으니 맞는 파일로 바꾸세요."));
+  } else if (modal.caller_kind == "plugin" && !caller.empty()) {
     r.recommendations.push_back(en
       ? (L"[Modal dialog] " + caller + L" opened the dialog. Follow its message (missing requirement, version mismatch, config error) or check that mod's documentation.")
       : (L"[Modal 대화상자] " + caller + L"이(가) 대화상자를 열었습니다. 메시지(누락된 선행 모드, 버전 불일치, 설정 오류)를 따르거나 해당 모드 설명을 확인하세요."));

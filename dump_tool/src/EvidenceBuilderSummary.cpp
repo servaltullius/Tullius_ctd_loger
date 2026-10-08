@@ -144,6 +144,15 @@ std::wstring DescribeModalDialogWait(const ModalDialogWaitInfo& modal, i18n::Lan
   } else if (modal.caller_kind == "game_exe") {
     owner = en ? L" It was opened by the game executable." : L" 대화상자를 연 주체는 게임 실행 파일입니다.";
   }
+  if (modal.address_library_issue == "plugin_incompatible") {
+    owner += en
+      ? L" The dialog says this plugin build does not support the Address Library of this game version."
+      : L" 대화상자 내용으로 보아 이 플러그인 빌드는 현재 게임 버전의 Address Library를 지원하지 않습니다.";
+  } else if (modal.address_library_issue == "address_library_missing") {
+    owner += en
+      ? L" The dialog says the plugin could not find the Address Library file for this game version."
+      : L" 대화상자 내용으로 보아 플러그인이 현재 게임 버전용 Address Library 파일을 찾지 못했습니다.";
+  }
 
   return en
     ? (L"The game main thread is waiting in a modal dialog" + title +
