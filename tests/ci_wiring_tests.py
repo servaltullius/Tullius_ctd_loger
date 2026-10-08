@@ -231,7 +231,7 @@ def check_release_prerelease_classification(failures: list[str]) -> None:
 
 def check_fuzzers_are_wired(failures: list[str]) -> None:
     linux = _read(WORKFLOWS / "linux-tests.yml")
-    for target in ("fuzz_crashlogger_parser", "fuzz_wct_parser"):
+    for target in ("fuzz_crashlogger_parser", "fuzz_wct_parser", "fuzz_skse_log_parser"):
         if target not in linux:
             failures.append(f"linux-tests.yml never runs {target}")
 

@@ -93,6 +93,71 @@ void TestParseAndMissingMasters()
   const auto missing = ComputeMissingMasters(scan);
   assert(missing.size() == 1);
   assert(missing[0] == L"MissingMaster.esm");
+  // Scans made before the helper read skse64.log have no section.
+  assert(scan.skse_log.status.empty());
+  assert(scan.skse_log.issues.empty());
+}
+
+void TestParseSkseLogSection()
+{
+  const char* scanJson = R"JSON(
+{
+  "game_exe_version": "1.6.1170.0",
+  "plugins": [],
+  "skse_log": {
+    "status": "matched",
+    "skse_version": "2.2.6",
+    "checked_count": 322,
+    "loaded_count": 320,
+    "issue_count": 1,
+    "issues": [
+      { "dll": "NpcGhostFix.dll", "name": "", "status": "no version data", "code": 0 },
+      { "dll": "Missing Dep.dll", "name": "Missing Dep", "status": "couldn't load plugin", "code": 126 },
+      { "dll": "", "status": "no version data" },
+      "not an object"
+    ]
+  }
+}
+)JSON";
+  ParsedPluginScan scan{};
+  assert(ParsePluginScanJson(scanJson, &scan));
+  const auto& log = scan.skse_log;
+  assert(log.status == "matched");
+  assert(log.skse_version == "2.2.6");
+  assert(log.checked_count == 322u);
+  assert(log.loaded_count == 320u);
+  assert(log.issues.size() == 2u);
+  // A count below the listed issues is raised to match them.
+  assert(log.issue_count == 2u);
+  assert(log.issues[1].plugin_name == "Missing Dep");
+  assert(log.issues[1].error_code == 126);
+
+  ParsedPluginScan unmatched{};
+  assert(ParsePluginScanJson(R"JSON({ "plugins": [], "skse_log": { "status": "no_matching_log" } })JSON", &unmatched));
+  assert(unmatched.skse_log.status == "no_matching_log");
+  assert(unmatched.skse_log.issues.empty());
+}
+
+void TestDescribeSkseLoadStatus()
+{
+  using skydiag::dump_tool::DescribeSkseLoadStatus;
+  using skydiag::dump_tool::SummarizeSkseLogIssues;
+  assert(DescribeSkseLoadStatus("disabled, incompatible with current version of the game", 0, true) ==
+         L"made for a different game version");
+  assert(DescribeSkseLoadStatus("disabled, incompatible with current version of the game", 0, false) == L"다른 게임 버전용");
+  assert(DescribeSkseLoadStatus("couldn't load plugin", 126, true).find(L"a DLL it needs is missing") != std::wstring::npos);
+  assert(DescribeSkseLoadStatus("couldn't load plugin", 5, true) == L"could not be loaded (error 5)");
+  assert(DescribeSkseLoadStatus("no version data", 0, false).find(L"버전 정보 없음") == 0);
+  // Unknown texts (newer SKSE builds) are shown as SKSE wrote them.
+  assert(DescribeSkseLoadStatus("disabled, something new", 0, true) == L"disabled, something new");
+
+  skydiag::dump_tool::SkseLogScanInfo log{};
+  log.issue_count = 3;
+  log.issues.push_back({ "A.dll", "", "no version data", 0 });
+  log.issues.push_back({ "B.dll", "B", "disabled, requires newer script extender", 0 });
+  assert(SummarizeSkseLogIssues(log, true, 1, L", ") ==
+         L"A.dll: no version data (a helper DLL that is not an SKSE plugin, or an old plugin without AE version data) (+2 more)");
+  assert(SummarizeSkseLogIssues(log, false, 6, L" | ").find(L" | B.dll: 더 새로운 SKSE 필요 (외 1개)") != std::wstring::npos);
 }
 
 void TestMissingMastersIgnoreInactivePlugins()
@@ -442,6 +507,8 @@ int main()
 {
   TestVersionCompare();
   TestParseAndMissingMasters();
+  TestParseSkseLogSection();
+  TestDescribeSkseLoadStatus();
   TestMissingMastersIgnoreInactivePlugins();
   TestHeaderVersionRuleIgnoresInactivePlugins();
   TestMissingMastersIgnoreImplicitRuntimeMasters();

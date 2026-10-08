@@ -88,6 +88,20 @@ if(WIN32)
     NAME skydiag_exception_code_recommendation_tests
     COMMAND skydiag_exception_code_recommendation_tests
   )
+
+  add_executable(skydiag_skse_log_report_tests
+    skse_log_report_tests.cpp
+  )
+  target_include_directories(skydiag_skse_log_report_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_skse_log_report_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_skse_log_report_tests
+    COMMAND skydiag_skse_log_report_tests
+  )
 endif()
 
 add_executable(skydiag_i18n_core_tests
@@ -616,6 +630,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessUtil.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PssSnapshot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/RetentionWorker.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WctCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WindowHeuristics.cpp"
   )
@@ -752,6 +767,15 @@ target_link_libraries(skydiag_plugin_rules_logic_tests PRIVATE
 )
 
 add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
+
+add_executable(skydiag_skse_log_parser_tests
+  skse_log_parser_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
+)
+target_include_directories(skydiag_skse_log_parser_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+add_test(NAME skydiag_skse_log_parser_tests COMMAND skydiag_skse_log_parser_tests)
 
 add_executable(skydiag_diagnostic_logging_guard_tests
   diagnostic_logging_guard_tests.cpp

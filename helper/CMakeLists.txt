@@ -35,6 +35,7 @@ add_executable(${PROJECT_NAME}
   src/ProcessAttach.cpp
   src/ProcessUtil.cpp
   src/RetentionWorker.cpp
+  src/SkseLogParser.cpp
   src/WctCapture.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
@@ -47,6 +48,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/ModalDialogProbe.h
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
+  include/SkyrimDiagHelper/SkseLogParser.h
   src/HangCaptureInternal.h
   src/PssSnapshot.h
   src/PendingCrashAnalysisInternal.h

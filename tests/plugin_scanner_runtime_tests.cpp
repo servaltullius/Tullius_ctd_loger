@@ -8,6 +8,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -16,13 +17,17 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "SkyrimDiagHelper/PluginScanner.h"
 
 namespace {
 
+using skydiag::helper::MatchSkseLogFiles;
 using skydiag::helper::ParseCreationClubContentList;
 using skydiag::helper::PluginScanResult;
 using skydiag::helper::ScanPlugins;
+using skydiag::helper::SerializePluginScanResult;
 
 void Require(bool condition, const char* message)
 {
@@ -96,6 +101,81 @@ void TestImplicitPluginsAreActiveUnderMo2()
     "a plugin both in Skyrim.ccc and plugins.txt must be listed once");
 }
 
+// skse64.log keeps no timestamps; only the log whose imagebase is the running
+// game's executable base belongs to the captured session.
+void TestSkseLogIsMatchedByImageBase()
+{
+  const auto root = std::filesystem::temp_directory_path() /
+    (L"skydiag_skse_log_" + std::to_wstring(GetCurrentProcessId()));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  const auto oldLog = root / L"Skyrim Special Edition GOG" / L"SKSE" / L"skse64.log";
+  WriteText(oldLog,
+    "SKSE64 runtime: initialize (version = 2.2.6 01064920 01DD574A9E6B4D48, os = 6.2 (9200))\r\n"
+    "imagebase = 00007FF711110000\r\n"
+    "plugin Stale.dll (00000000  00000000) no version data 0 (handle 0)\r\n");
+  // "Caf\xE9" is "Café" in the ANSI code pages of the CI runner and most
+  // Western systems; SKSE writes DLL names in the ANSI code page.
+  const auto currentLog = root / L"Skyrim Special Edition" / L"SKSE" / L"skse64.log";
+  WriteText(currentLog,
+    "SKSE64 runtime: initialize (version = 2.2.6 01064920 01DD574A9E6B4D48, os = 6.2 (9200))\r\n"
+    "imagebase = 00007FF7B4BD0000\r\n"
+    "checking plugin Caf\xE9.dll\r\n"
+    "plugin Caf\xE9.dll (00000000  00000000) no version data 0 (handle 0)\r\n"
+    "checking plugin Good.dll\r\n"
+    "plugin Good.dll (00000001 Good 00000001) loaded correctly (handle 1)\r\n");
+
+  // A third folder whose log has the same base but is older than the current one.
+  const auto olderSameBase = root / L"Skyrim Special Edition EPIC" / L"SKSE" / L"skse64.log";
+  WriteText(olderSameBase,
+    "SKSE64 runtime: initialize (version = 2.2.6 01064920 01DD574A9E6B4D48, os = 6.2 (9200))\r\n"
+    "imagebase = 00007FF7B4BD0000\r\n"
+    "plugin Older.dll (00000000  00000000) no version data 0 (handle 0)\r\n"
+    "plugin Older2.dll (00000000  00000000) no version data 0 (handle 0)\r\n");
+  std::filesystem::last_write_time(
+    olderSameBase, std::filesystem::last_write_time(currentLog) - std::chrono::hours(1));
+
+  const auto none = MatchSkseLogFiles({}, 0x00007FF7B4BD0000ull);
+  const auto newestFirst = MatchSkseLogFiles({ currentLog, olderSameBase }, 0x00007FF7B4BD0000ull);
+  const auto newestLast = MatchSkseLogFiles({ olderSameBase, currentLog }, 0x00007FF7B4BD0000ull);
+  const auto noBase = MatchSkseLogFiles({ currentLog }, 0);
+  const auto stale = MatchSkseLogFiles({ oldLog }, 0x00007FF7B4BD0000ull);
+  const auto matched = MatchSkseLogFiles({ oldLog, currentLog }, 0x00007FF7B4BD0000ull);
+  std::filesystem::remove_all(root, ec);
+
+  Require(none.status == "not_found", "no log file is reported as not_found");
+  Require(noBase.status == "no_image_base", "without the game's image base no log is trusted");
+  Require(stale.status == "no_matching_log", "a log from another session must not be used");
+  Require(stale.summary.issues.empty(), "a stale log must not leak its plugin results");
+  Require(matched.status == "matched", "the log of the running session must be found");
+  Require(matched.summary.checked_count == 2u && matched.summary.loaded_count == 1u, "plugin counts come from the matched log");
+  Require(matched.summary.issues.size() == 1u, "only the DLL SKSE did not load is listed");
+  for (const auto* scan : { &newestFirst, &newestLast }) {
+    Require(
+      scan->status == "matched" && scan->summary.issues.size() == 1u && scan->summary.checked_count == 2u,
+      "among logs with the same image base the most recently written one wins");
+  }
+
+  PluginScanResult scan{};
+  scan.skse_log = matched;
+  // nlohmann throws on invalid UTF-8, so a successful dump and parse proves the
+  // ANSI name was converted.
+  const auto json = nlohmann::json::parse(SerializePluginScanResult(scan));
+  const auto& log = json.at("skse_log");
+  Require(log.at("status") == "matched", "the scan JSON carries the match status");
+  Require(log.at("checked_count") == 2 && log.at("loaded_count") == 1 && log.at("issue_count") == 1, "counts are serialized");
+  const auto& issue = log.at("issues").at(0);
+  Require(issue.at("status") == "no version data" && issue.at("code") == 0, "the SKSE status is serialized as written");
+  Require(issue.at("dll").get<std::string>().size() > std::string("Caf.dll").size(), "the ANSI DLL name survives as UTF-8");
+
+  PluginScanResult staleScan{};
+  staleScan.skse_log = stale;
+  const auto staleJson = nlohmann::json::parse(SerializePluginScanResult(staleScan));
+  Require(staleJson.at("skse_log").at("status") == "no_matching_log", "an unmatched status is still recorded");
+  Require(!staleJson.at("skse_log").contains("issues"), "an unmatched log contributes no plugin results");
+}
+
 }  // namespace
 
 int main()
@@ -103,6 +183,7 @@ int main()
   try {
     TestCreationClubListParsing();
     TestImplicitPluginsAreActiveUnderMo2();
+    TestSkseLogIsMatchedByImageBase();
     std::puts("plugin scanner runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {

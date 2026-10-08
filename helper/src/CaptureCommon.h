@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -39,6 +40,8 @@ struct PluginScanInputs
   std::filesystem::path gameExeDir;
   std::vector<std::wstring> moduleNames;
   std::vector<std::wstring> modulePaths;
+  // Identifies the session in skse64.log, which keeps no timestamps.
+  std::uint64_t gameImageBase = 0;
 };
 
 inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedProcess& proc)
@@ -48,6 +51,7 @@ inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedP
   if (inputs.gameExeDirResolved) {
     inputs.moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
     inputs.modulePaths = skydiag::helper::CollectModulePathsBestEffort(proc.pid);
+    inputs.gameImageBase = skydiag::helper::QueryMainModuleBaseBestEffort(proc.pid);
   }
   return inputs;
 }
@@ -66,6 +70,15 @@ inline std::string CollectPluginScanJson(
   }
 
   auto scanResult = skydiag::helper::ScanPlugins(inputs.gameExeDir, inputs.moduleNames, &inputs.modulePaths);
+  scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);
+  const auto& skseLog = scanResult.skse_log;
+  std::wstring skseLine = L"SKSE log: " + std::wstring(skseLog.status.begin(), skseLog.status.end());
+  if (skseLog.status == "matched") {
+    skseLine += L" (checked=" + std::to_wstring(skseLog.summary.checked_count) +
+      L", loaded=" + std::to_wstring(skseLog.summary.loaded_count) +
+      L", not_loaded=" + std::to_wstring(skseLog.summary.issues.size()) + L")";
+  }
+  AppendLogLine(outBase, skseLine);
   return skydiag::helper::SerializePluginScanResult(scanResult);
 }
 

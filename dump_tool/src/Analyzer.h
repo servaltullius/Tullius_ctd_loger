@@ -251,6 +251,8 @@ struct AnalysisResult
   std::vector<std::wstring> missing_masters;
   bool needs_bees = false;
   std::vector<PluginRuleDiagnosis> plugin_diagnostics;
+  // skse64.log of the captured session (environment context, never a cause candidate)
+  SkseLogScanInfo skse_log;
 
   // Best-effort callstack (primary thread: crash thread, WCT cycle thread, or inferred main thread)
   std::uint32_t stackwalk_primary_tid = 0;

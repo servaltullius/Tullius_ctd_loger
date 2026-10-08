@@ -74,6 +74,19 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     r.evidence.push_back(std::move(e));
   }
 
+  // Context only: SKSE refused these DLLs at startup, so they were not running
+  // when the incident happened and never become cause candidates.
+  if (r.skse_log.status == "matched" && r.skse_log.issue_count > 0) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? (L"SKSE did not load " + std::to_wstring(r.skse_log.issue_count) + L" DLL(s) in this session")
+      : (L"이번 실행에서 SKSE가 로드하지 않은 DLL " + std::to_wstring(r.skse_log.issue_count) + L"개");
+    e.details = SummarizeSkseLogIssues(r.skse_log, en, 6, L" | ");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (r.needs_bees && ctx.isCrashLike) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kHigh;

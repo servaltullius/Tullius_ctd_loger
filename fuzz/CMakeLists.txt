@@ -2,7 +2,7 @@
 #
 # Usage:
 #   cmake -S . -B build-fuzz -DSKYDIAG_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++
-#   cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser
+#   cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser fuzz_skse_log_parser
 #   ./build-fuzz/bin/fuzz_crashlogger_parser fuzz/corpus/crashlogger -max_total_time=60
 #
 # Sanitizer flags are attached per target rather than through CMAKE_CXX_FLAGS:
@@ -32,6 +32,18 @@ target_include_directories(fuzz_crashlogger_parser PRIVATE
 )
 
 skydiag_configure_fuzz_target(fuzz_crashlogger_parser)
+
+# skse64.log is read from the user's Documents folder at capture time.
+add_executable(fuzz_skse_log_parser
+  fuzz_skse_log_parser.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
+)
+
+target_include_directories(fuzz_skse_log_parser PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+
+skydiag_configure_fuzz_target(fuzz_skse_log_parser)
 
 if(SKYDIAG_HAS_NLOHMANN_JSON_FOR_FUZZ)
   add_executable(fuzz_wct_parser

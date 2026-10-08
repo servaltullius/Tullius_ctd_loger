@@ -10,3 +10,4 @@ ADR index:
 - `0005-hang-main-thread-and-thread-group-consensus.md`
 - `0006-modal-dialog-hang-classification.md`
 - `0007-formal-stackwalk-unwinding.md`
+- `0008-skse-log-refused-plugins.md`

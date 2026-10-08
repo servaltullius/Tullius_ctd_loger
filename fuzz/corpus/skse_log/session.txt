@@ -1,0 +1,13 @@
+SKSE64 runtime: initialize (version = 2.2.6 01064920 01DD574A9E6B4D48, os = 6.2 (9200))
+imagebase = 00007FF7B4BD0000
+reloc mgr imagebase = 00007FF7B4BD0000
+plugin directory = C:\Game\Data\SKSE\Plugins\
+checking plugin msdia140.dll
+plugin msdia140.dll (00000000  00000000) no version data 0 (handle 0)
+checking plugin Old.dll
+plugin Old.dll (00000001 Old Plugin (SE) 00010000) disabled, incompatible with current version of the game 0 (handle 0)
+loading plugin "Good"
+plugin Good.dll (00000001 Good 02020010) loaded correctly (handle 65)
+plugin Missing Dep.dll (00000001 Missing Dep 00010000) couldn't load plugin 126 (handle 12)
+plugin Crashy.dll (00000001 Crashy 00010000) loaded correctly (handle 13)
+plugin Crashy.dll (00000001 Crashy 00010000) crashed during postload 0 (handle 13)

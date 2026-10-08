@@ -292,6 +292,7 @@ void IntegratePluginScan(
     parsedPluginScanOk = ParsePluginScanJson(out.plugin_scan_json_utf8, &parsedPluginScan);
     if (parsedPluginScanOk) {
       out.missing_masters = ComputeMissingMasters(parsedPluginScan);
+      out.skse_log = parsedPluginScan.skse_log;
 
       const bool hasHeader171 = AnyPluginHeaderVersionGte(parsedPluginScan, 1.71);
       bool hasBees = false;
