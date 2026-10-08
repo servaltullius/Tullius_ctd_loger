@@ -263,6 +263,15 @@ def check_windows_tests_are_wired(failures: list[str]) -> None:
             failures.append(f"{name} builds Windows targets but never runs ctest on them")
 
 
+def check_windows_build_retries_once(failures: list[str]) -> None:
+    # The runner sometimes fails to link a freshly built test ("Access is
+    # denied" / "used by another process"); without a retry the whole job fails.
+    for name in ("ci.yml", "release.yml"):
+        text = _read(WORKFLOWS / name)
+        if "Build failed once; retrying the remaining steps." not in text:
+            failures.append(f"{name} does not retry the Windows build after a transient link failure")
+
+
 def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
@@ -272,6 +281,7 @@ def main() -> int:
     check_fuzzers_are_wired(failures)
     check_sanitizers_are_wired(failures)
     check_windows_tests_are_wired(failures)
+    check_windows_build_retries_once(failures)
 
     if failures:
         for failure in failures:
