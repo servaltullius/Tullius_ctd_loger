@@ -29,7 +29,7 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 If installed, Tullius auto-detects CrashLogger logs and includes them in the report.
 It is not required, but it is strongly recommended for [b]richer diagnostics[/b].
 
-[b][size=4]Included Files[/size][/b]
+[b][size=4]Key Included Files[/size][/b]
 [code]
 SKSE/Plugins/SkyrimDiag.dll            — SKSE plugin (in-game event recorder)
 SKSE/Plugins/SkyrimDiag.ini            — Plugin settings
@@ -46,6 +46,7 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 [b][size=4]Requirements[/size][/b]
 [list]
+[*]Windows 10 build 19041 or later
 [*][url=https://skse.silverlock.org/]SKSE64[/url]
 [*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
 [*][url=https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist]Visual C++ Redistributable 2015-2022 (x64)[/url]
@@ -54,6 +55,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 [i]WinUI runtime note:[/i] The [b]v0.2.52+[/b] release zip includes self-contained .NET 8 and Windows App SDK runtime files. You do not need to install .NET Desktop Runtime 8 or Windows App Runtime 1.8 separately.
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
+
+[b]Important v0.2.59 Update Notice[/b]
+Replace the previous installation with the complete v0.2.59 zip. Do not copy only individual EXEs or DLLs. The plugin, Helper, analyzer, and viewer all changed in v0.2.59, so update them together (the SharedLayout protocol is still v4, as in v0.2.58). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
 
 [b][size=4]Installation (MO2)[/size][/b]
 [list=1]
@@ -79,7 +83,7 @@ Capture and the text report work under Wine/Proton, but the WinUI viewer does no
 
 [b]Automatic capture[/b]
 [list]
-[*][b]CTD:[/b] When the game actually exits, Tullius generates a crash dump and report
+[*][b]CTD:[/b] For captured fatal crashes, Tullius normally writes a crash dump and report. Strong faults followed by process exit code 0 are filtered by default and leave clean-exit evidence metadata instead
 [*][b]Freeze / ILS:[/b] When the configured threshold is exceeded, Tullius generates a hang dump
 [/list]
 
@@ -109,13 +113,18 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What Changed In Recent Versions[/size][/b]
+[b][size=4]What Changed In v0.2.59[/size][/b]
 [list]
-[*]The start screen now makes it easier to find [b]recent dumps[/b] and the current [b]output location[/b]
-[*]Candidate names now prefer [b]ESP/ESM filenames[/b] and [b]DLL filenames[/b] over vague friendly labels
-[*]Ambiguous EXE crashes now use CrashLogger, stack, history, and first-chance context together to surface more practical suspects
-[*]Freeze analysis now tries to distinguish between [b]deadlock-like[/b], [b]loading-stall-like[/b], and [b]still ambiguous[/b] situations
+[*][b]More conservative suspects:[/b] two signals that point at the same crash location no longer count as independent confirmation, and supporting hints alone never make a suspect [b]High[/b] confidence
+[*][b]Error-dialog freezes:[/b] when the game waits on a message box a plugin opened (for example an Address Library or version error), the report says so and shows the dialog title and text
+[*][b]Real call stacks:[/b] the stack walk no longer stops at the first frame
+[*][b]With Crash Logger:[/b] a mod assert or unhandled C++ exception reported by Crash Logger is recorded as the original exception, and Crash Logger's own thread dump ([font=Courier New]Ctrl+Shift+F12[/font]) no longer creates crash captures
+[*][b]Plugin scan:[/b] runs after a crash again, and Creation Club files from [font=Courier New]Skyrim.ccc[/font] are no longer reported as missing masters (MO2 + Anniversary Edition)
+[*][b]Gameplay freezes:[/b] freeze detection during gameplay now uses [font=Courier New]HangThresholdInGameSec[/font] (10 s by default). Before v0.2.59 a bug kept the 30 s menu threshold active for the whole session
+[*]The manual snapshot hotkey also works during gameplay, and freeze reports follow the Windows display language like crash reports
 [/list]
+
+[i]Validation scope:[/i] Release candidates rc2–rc7 were played on one MO2 setup (game 1.6.1170, about 4,250 plugins). Error-dialog freezes, the post-crash plugin scan, Crash Logger thread dumps, the gameplay snapshot hotkey, and the gameplay/menu freeze thresholds were confirmed in game. Recording a Crash Logger-reported assert is covered by automated runtime tests only, and there is still no reviewed real-incident accuracy corpus.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -147,8 +156,9 @@ Manual snapshot        *_Manual_*.dmp         Ctrl+Shift+F12
 [b][size=4]Important Settings (SkyrimDiagHelper.ini)[/size][/b]
 [code]
 ; Freeze / ILS thresholds (seconds)
-HangThresholdInGameSec=15
-HangThresholdLoadingSec=120
+HangThresholdInGameSec=10
+HangThresholdInMenuSec=30
+HangThresholdLoadingSec=600
 EnableAdaptiveLoadingThreshold=1
 
 ; Viewer auto-open
@@ -248,7 +258,7 @@ dump와 주변 단서를 모아서 [b]사람이 읽기 쉬운 보고서[/b]를 �
 설치하면 CrashLogger 로그를 자동으로 읽어서 보고서에 포함합니다.
 필수는 아니지만, 더 풍부한 진단을 원하면 권장합니다.
 
-[b][size=4]포함 파일[/size][/b]
+[b][size=4]주요 포함 파일[/size][/b]
 [code]
 SKSE/Plugins/SkyrimDiag.dll            — SKSE 플러그인 (인게임 이벤트 기록)
 SKSE/Plugins/SkyrimDiag.ini            — 플러그인 설정
@@ -265,6 +275,7 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 [b][size=4]필수 요구사항[/size][/b]
 [list]
+[*]Windows 10 build 19041 이상
 [*][url=https://skse.silverlock.org/]SKSE64[/url]
 [*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
 [*][url=https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist]VC++ 재배포 2015-2022 (x64)[/url]
@@ -273,6 +284,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 [i]WinUI 런타임 안내:[/i] [b]v0.2.52+[/b] 릴리즈 zip에는 self-contained .NET 8과 Windows App SDK 런타임이 포함됩니다. .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 따로 설치할 필요가 없습니다.
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
+
+[b]v0.2.59 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.59 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.59에서는 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었으므로 함께 업데이트해야 합니다(SharedLayout protocol은 v0.2.58과 같은 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
 
 [b][size=4]설치 (MO2)[/size][/b]
 [list=1]
@@ -298,7 +312,7 @@ Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰
 
 [b]자동 캡처[/b]
 [list]
-[*][b]CTD:[/b] 게임이 실제로 종료되면 crash dump와 보고서가 자동으로 생성됩니다.
+[*][b]CTD:[/b] 포착된 치명적 크래시는 보통 crash dump와 보고서를 생성합니다. 강한 결함 뒤 프로세스 종료 코드가 0이면 기본적으로 정상 종료로 필터링하고 clean-exit 증거 메타데이터를 대신 남깁니다.
 [*][b]프리징 / 무한 로딩:[/b] 설정한 임계 시간이 지나면 hang dump를 자동으로 생성합니다.
 [/list]
 
@@ -328,13 +342,18 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]최근 버전에서 좋아진 점[/size][/b]
+[b][size=4]v0.2.59에서 바뀐 점[/size][/b]
 [list]
-[*]첫 화면에서 [b]최근 dump[/b]와 [b]출력 위치[/b]를 더 쉽게 확인할 수 있게 바뀌었습니다.
-[*]후보 이름도 예쁜 별칭보다 [b]ESP/ESM 파일명[/b], [b]DLL 파일명[/b]을 우선 보여주도록 바뀌었습니다.
-[*]EXE 크래시처럼 애매한 경우에도 CrashLogger, stack, history, first-chance 문맥을 함께 보고 더 실용적인 후보를 보여주도록 개선됐습니다.
-[*]프리징도 [b]데드락인지[/b], [b]로딩 멈춤인지[/b], [b]아직 애매한지[/b]를 나눠서 보여주도록 강화됐습니다.
+[*][b]더 보수적인 원인 후보:[/b] 같은 크래시 위치를 가리키는 두 신호를 독립적인 교차 확인으로 세지 않고, 보강 단서만으로는 [b]높음[/b] 신뢰도가 되지 않습니다.
+[*][b]오류 창 때문에 멈춘 경우:[/b] 플러그인이 띄운 메시지 창(예: Address Library·버전 오류)에서 게임이 기다리고 있으면 그렇게 알려 주고, 창 제목과 내용을 보여 줍니다.
+[*][b]실제 호출 스택:[/b] 스택 추적이 첫 프레임에서 멈추지 않습니다.
+[*][b]Crash Logger와 함께 쓸 때:[/b] Crash Logger가 보고하는 모드 assert나 처리되지 않은 C++ 예외를 원래 예외로 기록하고, Crash Logger의 스레드 덤프([font=Courier New]Ctrl+Shift+F12[/font]) 중에는 크래시 캡처를 만들지 않습니다.
+[*][b]플러그인 스캔:[/b] 크래시 후 스캔이 다시 동작하고, [font=Courier New]Skyrim.ccc[/font]의 Creation Club 파일을 누락 마스터로 잘못 표시하지 않습니다(MO2 + Anniversary Edition).
+[*][b]게임 플레이 중 프리징:[/b] 이제 [font=Courier New]HangThresholdInGameSec[/font](기본 10초) 기준으로 감지합니다. v0.2.59 이전에는 버그 때문에 메뉴 기준 30초가 계속 적용됐습니다.
+[*]수동 스냅샷 단축키가 게임 플레이 중에도 동작하고, 프리징 리포트도 CTD 리포트처럼 Windows 표시 언어를 따릅니다.
 [/list]
+
+[i]검증 범위:[/i] rc2~rc7을 한 MO2 환경(게임 1.6.1170, 플러그인 약 4,250개)에서 실제로 플레이하며 확인했습니다. 오류 창 프리징, 크래시 후 플러그인 스캔, Crash Logger 스레드 덤프, 게임 플레이 중 스냅샷 단축키, 게임 플레이/메뉴 프리징 기준은 실게임에서 확인했습니다. Crash Logger가 보고한 assert 기록은 자동 런타임 테스트로만 확인했고, 검수된 실사고 정확도 corpus는 아직 없습니다.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
@@ -367,8 +386,9 @@ CTD                    *_Crash_*.dmp          자동
 [b][size=4]주요 설정 (SkyrimDiagHelper.ini)[/size][/b]
 [code]
 ; 프리징 / 무한 로딩 감지 임계값 (초)
-HangThresholdInGameSec=15
-HangThresholdLoadingSec=120
+HangThresholdInGameSec=10
+HangThresholdInMenuSec=30
+HangThresholdLoadingSec=600
 EnableAdaptiveLoadingThreshold=1
 
 ; 뷰어 자동 열기
