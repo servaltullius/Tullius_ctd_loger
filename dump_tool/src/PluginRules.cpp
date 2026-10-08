@@ -129,6 +129,33 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
       }
     }
 
+    if (auto it = j.find("skse_log"); it != j.end() && it->is_object()) {
+      auto& log = parsed.skse_log;
+      log.status = it->value("status", "");
+      log.skse_version = it->value("skse_version", "");
+      log.checked_count = it->value("checked_count", 0u);
+      log.loaded_count = it->value("loaded_count", 0u);
+      log.issue_count = it->value("issue_count", 0u);
+      if (auto itIssues = it->find("issues"); itIssues != it->end() && itIssues->is_array()) {
+        for (const auto& issue : *itIssues) {
+          if (!issue.is_object()) {
+            continue;
+          }
+          SkseLogIssueInfo info{};
+          info.dll_name = issue.value("dll", "");
+          info.plugin_name = issue.value("name", "");
+          info.status = issue.value("status", "");
+          info.error_code = issue.value("code", static_cast<std::int64_t>(0));
+          if (!info.dll_name.empty()) {
+            log.issues.push_back(std::move(info));
+          }
+        }
+      }
+      if (log.issue_count < log.issues.size()) {
+        log.issue_count = static_cast<std::uint32_t>(log.issues.size());
+      }
+    }
+
     *out = std::move(parsed);
     return true;
   } catch (...) {
@@ -230,6 +257,85 @@ bool IsGameVersionLessThan(std::string_view lhs, std::string_view rhs)
     }
   }
   return false;
+}
+
+std::wstring DescribeSkseLoadStatus(std::string_view status, std::int64_t errorCode, bool en)
+{
+  // Texts from SKSE64's PluginManager.cpp (2.2.x / 2.3.x).
+  if (status == "no version data") {
+    return en ? L"no version data (a helper DLL that is not an SKSE plugin, or an old plugin without AE version data)"
+              : L"버전 정보 없음(SKSE 플러그인이 아닌 보조 DLL이거나 AE용 버전 정보가 없는 구형 플러그인)";
+  }
+  if (status == "disabled, incompatible with current version of the game") {
+    return en ? L"made for a different game version" : L"다른 게임 버전용";
+  }
+  if (status == "disabled, address library needs to be updated") {
+    return en ? L"Address Library for this game version is missing" : L"이 게임 버전용 Address Library 없음";
+  }
+  if (status == "must be recompiled for new address library") {
+    return en ? L"must be rebuilt for the new Address Library format" : L"새 Address Library 형식용으로 다시 빌드해야 함";
+  }
+  if (status == "disabled, only compatible with versions earlier than 1.6.629") {
+    return en ? L"only works on game versions before 1.6.629" : L"1.6.629 이전 게임 전용";
+  }
+  if (status == "disabled, requires newer script extender") {
+    return en ? L"needs a newer SKSE" : L"더 새로운 SKSE 필요";
+  }
+  if (status == "disabled, bad version data" || status == "disabled, no name specified" ||
+      status == "disabled, unsupported version independence method") {
+    return en ? L"invalid version data" : L"잘못된 버전 정보";
+  }
+  if (status == "couldn't load plugin") {
+    if (errorCode == 126) {
+      return en ? L"could not be loaded: a DLL it needs is missing (error 126)"
+                : L"불러오지 못함: 필요한 다른 DLL이 없음(오류 126)";
+    }
+    return en ? (L"could not be loaded (error " + std::to_wstring(errorCode) + L")")
+              : (L"불러오지 못함(오류 " + std::to_wstring(errorCode) + L")");
+  }
+  if (status == "does not appear to be an SKSE plugin") {
+    return en ? L"not an SKSE plugin" : L"SKSE 플러그인이 아님";
+  }
+  if (status == "LE plugin cannot be used with SE") {
+    return en ? L"32-bit (LE) plugin" : L"32비트(LE)용 플러그인";
+  }
+  if (status == "reported as incompatible during load") {
+    return en ? L"the plugin reported itself incompatible while loading" : L"로드 중 플러그인 스스로 비호환을 알림";
+  }
+  if (status == "crashed during postload") {
+    return en ? L"crashed during post-load setup" : L"로드 후 초기화 중 충돌";
+  }
+  if (status == "disabled, fatal error occurred while loading plugin" ||
+      status == "disabled, fatal error occurred while checking plugin compatibility") {
+    return en ? L"an error occurred while SKSE loaded or checked it" : L"SKSE가 로드하거나 검사하는 중 오류 발생";
+  }
+  return Utf8ToWide(status);
+}
+
+std::wstring SummarizeSkseLogIssues(
+  const SkseLogScanInfo& log,
+  bool en,
+  std::size_t maxItems,
+  std::wstring_view separator)
+{
+  std::wstring out;
+  std::size_t shown = 0;
+  for (const auto& issue : log.issues) {
+    if (shown == maxItems) {
+      break;
+    }
+    if (shown > 0) {
+      out += separator;
+    }
+    out += Utf8ToWide(issue.dll_name) + L": " + DescribeSkseLoadStatus(issue.status, issue.error_code, en);
+    ++shown;
+  }
+  const std::size_t total = std::max<std::size_t>(log.issue_count, log.issues.size());
+  if (total > shown) {
+    out += en ? (L" (+" + std::to_wstring(total - shown) + L" more)")
+              : (L" (외 " + std::to_wstring(total - shown) + L"개)");
+  }
+  return out;
 }
 
 bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)

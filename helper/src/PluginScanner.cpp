@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <climits>
 #include <cstring>
 #include <cwctype>
 #include <fstream>
@@ -396,6 +397,136 @@ std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid)
   return paths;
 }
 
+namespace {
+
+// SKSE writes DLL names in the system ANSI code page. JSON needs UTF-8, so a
+// log that is not already valid UTF-8 is converted from CP_ACP.
+std::string AnsiLogToUtf8(const std::string& text)
+{
+  if (text.empty() || text.size() > static_cast<std::size_t>(INT_MAX)) {
+    return text;
+  }
+  const int len = static_cast<int>(text.size());
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), len, nullptr, 0) > 0) {
+    return text;
+  }
+  const int wideLen = MultiByteToWideChar(CP_ACP, 0, text.data(), len, nullptr, 0);
+  if (wideLen <= 0) {
+    return {};
+  }
+  std::wstring wide(static_cast<std::size_t>(wideLen), L'\0');
+  MultiByteToWideChar(CP_ACP, 0, text.data(), len, wide.data(), wideLen);
+  const int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen, nullptr, 0, nullptr, nullptr);
+  if (utf8Len <= 0) {
+    return {};
+  }
+  std::string utf8(static_cast<std::size_t>(utf8Len), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen, utf8.data(), utf8Len, nullptr, nullptr);
+  return utf8;
+}
+
+}  // namespace
+
+std::uint64_t QueryMainModuleBaseBestEffort(std::uint32_t pid)
+{
+  if (pid == 0) {
+    return 0;
+  }
+  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+  if (snap == INVALID_HANDLE_VALUE) {
+    return 0;
+  }
+  // The first module of a snapshot is the process executable.
+  MODULEENTRY32W me{};
+  me.dwSize = sizeof(me);
+  std::uint64_t base = 0;
+  if (Module32FirstW(snap, &me)) {
+    base = reinterpret_cast<std::uint64_t>(me.modBaseAddr);
+  }
+  CloseHandle(snap);
+  return base;
+}
+
+SkseLogScan CollectSkseLogBestEffort(std::uint64_t gameImageBase)
+{
+  // SKSE writes to Documents\My Games\<game folder>\SKSE\skse64.log. The game
+  // folder name differs by store ("Skyrim Special Edition", "... GOG", ...).
+  std::vector<std::filesystem::path> logPaths;
+  std::filesystem::path myGames;
+  if (gameImageBase != 0) {
+    wchar_t* documents = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents)) && documents) {
+      myGames = std::filesystem::path(documents) / L"My Games";
+    }
+    CoTaskMemFree(documents);  // required even when the call fails
+  }
+  if (!myGames.empty()) {
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(myGames, ec)) {
+      if (ec) {
+        break;
+      }
+      if (!entry.is_directory(ec)) {
+        continue;
+      }
+      if (WideLower(entry.path().filename().wstring()).rfind(L"skyrim special edition", 0) != 0) {
+        continue;
+      }
+      auto logPath = entry.path() / L"SKSE" / L"skse64.log";
+      if (std::filesystem::is_regular_file(logPath, ec)) {
+        logPaths.push_back(std::move(logPath));
+      }
+    }
+  }
+  return MatchSkseLogFiles(logPaths, gameImageBase);
+}
+
+SkseLogScan MatchSkseLogFiles(const std::vector<std::filesystem::path>& logPaths, std::uint64_t gameImageBase)
+{
+  SkseLogScan scan{};
+  if (gameImageBase == 0) {
+    scan.status = "no_image_base";
+    return scan;
+  }
+  if (logPaths.empty()) {
+    scan.status = "not_found";
+    return scan;
+  }
+
+  constexpr std::uintmax_t kMaxLogBytes = 32ull * 1024ull * 1024ull;
+  // An executable can map at the same address again within one boot, so when
+  // logs of several store folders match, the most recently written one wins.
+  std::filesystem::file_time_type newestMatch{};
+  for (const auto& logPath : logPaths) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(logPath, ec);
+    if (ec || size == 0 || size > kMaxLogBytes) {
+      continue;
+    }
+    const auto writeTime = std::filesystem::last_write_time(logPath, ec);
+    if (ec || (scan.status == "matched" && writeTime <= newestMatch)) {
+      continue;
+    }
+    std::ifstream in(logPath, std::ios::binary);
+    if (!in.is_open()) {
+      continue;
+    }
+    std::string text(static_cast<std::size_t>(size), '\0');
+    in.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<std::size_t>(in.gcount()));
+    auto summary = ParseSkseLog(AnsiLogToUtf8(text));
+    if (summary.recognized && summary.image_base == gameImageBase) {
+      scan.status = "matched";
+      scan.summary = std::move(summary);
+      newestMatch = writeTime;
+    }
+  }
+  if (scan.status.empty()) {
+    scan.status = "no_matching_log";
+  }
+  return scan;
+}
+
 PluginScanResult ScanPlugins(
   const std::filesystem::path& gameExeDir,
   const std::vector<std::wstring>& moduleFilenames,
@@ -558,6 +689,31 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
     p["slot_type_known"] = plugin.slot_type_known;
     p["masters"] = plugin.masters;
     j["plugins"].push_back(std::move(p));
+  }
+
+  if (!result.skse_log.status.empty()) {
+    const auto& log = result.skse_log.summary;
+    nlohmann::json s = nlohmann::json::object();
+    s["status"] = result.skse_log.status;
+    if (result.skse_log.status == "matched") {
+      s["skse_version"] = log.skse_version;
+      s["checked_count"] = log.checked_count;
+      s["loaded_count"] = log.loaded_count;
+      s["issue_count"] = log.issues.size();
+      // The scan is embedded in the dump; a broken mod folder must not bloat it.
+      constexpr std::size_t kMaxIssues = 64;
+      s["issues"] = nlohmann::json::array();
+      for (std::size_t i = 0; i < log.issues.size() && i < kMaxIssues; ++i) {
+        const auto& issue = log.issues[i];
+        s["issues"].push_back({
+          { "dll", issue.dll_name },
+          { "name", issue.plugin_name },
+          { "status", issue.status },
+          { "code", issue.error_code },
+        });
+      }
+    }
+    j["skse_log"] = std::move(s);
   }
 
   return j.dump();

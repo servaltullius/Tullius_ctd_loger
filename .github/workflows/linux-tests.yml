@@ -130,7 +130,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=clang++
 
       - name: Build fuzz targets
-        run: cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser
+        run: cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser fuzz_skse_log_parser
 
       # Bounded smoke run, not a fuzzing campaign: it re-runs the seed corpus and
       # explores briefly, so a parser that regressed into a crash on known-good
@@ -151,6 +151,13 @@ jobs:
           ./build-fuzz/bin/fuzz_wct_parser /tmp/fuzz-wct fuzz/corpus/wct \
             -max_total_time=90 -print_final_stats=1 \
             -artifact_prefix=artifacts/fuzz/wct-
+
+      - name: Fuzz skse64.log parser
+        run: |
+          mkdir -p artifacts/fuzz /tmp/fuzz-skse-log
+          ./build-fuzz/bin/fuzz_skse_log_parser /tmp/fuzz-skse-log fuzz/corpus/skse_log \
+            -max_total_time=60 -print_final_stats=1 \
+            -artifact_prefix=artifacts/fuzz/skse-log-
 
       - name: Upload crash artifacts
         if: failure()

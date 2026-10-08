@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -21,6 +22,27 @@ struct PluginEntryInfo
   std::vector<std::string> masters;
 };
 
+// A DLL that SKSE did not load in the captured session, as skse64.log said.
+struct SkseLogIssueInfo
+{
+  std::string dll_name;
+  std::string plugin_name;
+  std::string status;  // SKSE's own text
+  std::int64_t error_code = 0;
+};
+
+struct SkseLogScanInfo
+{
+  // matched / no_matching_log / not_found / no_image_base; empty for scans
+  // made before the helper read skse64.log
+  std::string status;
+  std::string skse_version;
+  std::uint32_t checked_count = 0;
+  std::uint32_t loaded_count = 0;
+  std::uint32_t issue_count = 0;  // may exceed issues.size() when the helper capped the list
+  std::vector<SkseLogIssueInfo> issues;
+};
+
 struct ParsedPluginScan
 {
   std::string game_exe_version;
@@ -30,6 +52,7 @@ struct ParsedPluginScan
   // loads on its own; older scans listed only plugins.txt.
   bool implicit_plugins_included = false;
   std::vector<PluginEntryInfo> plugins;
+  SkseLogScanInfo skse_log;
 };
 
 struct PluginRuleDiagnosis
@@ -55,6 +78,14 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan);
 bool AnyPluginHeaderVersionGte(const ParsedPluginScan& scan, double threshold);
 std::size_t CountEslPlugins(const ParsedPluginScan& scan);
 bool IsGameVersionLessThan(std::string_view lhs, std::string_view rhs);
+// Short reader-facing meaning of an SKSE load status from skse64.log.
+std::wstring DescribeSkseLoadStatus(std::string_view status, std::int64_t errorCode, bool en);
+// "<dll>: <meaning>" for the first maxItems DLLs SKSE did not load, then "+N more".
+std::wstring SummarizeSkseLogIssues(
+  const SkseLogScanInfo& log,
+  bool en,
+  std::size_t maxItems,
+  std::wstring_view separator);
 
 class PluginRules
 {

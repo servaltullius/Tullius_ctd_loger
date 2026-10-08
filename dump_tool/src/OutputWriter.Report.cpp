@@ -172,6 +172,23 @@ std::string BuildReportText(
   if (r.has_plugin_scan) {
     rpt << (en ? "PluginScan: 1" : "플러그인 스캔: 1") << "\n";
   }
+  if (!r.skse_log.status.empty()) {
+    rpt << (en ? "SkseLog: " : "SKSE 로그: ") << "status=" << r.skse_log.status;
+    if (r.skse_log.status == "matched") {
+      rpt << " skse=" << r.skse_log.skse_version
+          << " checked=" << r.skse_log.checked_count
+          << " loaded=" << r.skse_log.loaded_count
+          << " not_loaded=" << r.skse_log.issue_count;
+    }
+    rpt << "\n";
+    for (const auto& issue : r.skse_log.issues) {
+      rpt << "  - " << issue.dll_name;
+      if (!issue.plugin_name.empty()) {
+        rpt << " (" << issue.plugin_name << ")";
+      }
+      rpt << ": " << issue.status << " [" << issue.error_code << "]\n";
+    }
+  }
   if (!r.missing_masters.empty()) {
     rpt << (en ? "MissingMasters: " : "누락 마스터: ")
         << WideToUtf8(JoinList(r.missing_masters, 8, L", ")) << "\n";
