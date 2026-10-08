@@ -109,7 +109,18 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What Changed In Recent Versions[/size][/b]
+[b][size=4]What Changed In v0.2.59[/size][/b]
+[list]
+[*][b]More conservative suspects:[/b] two signals that point at the same crash location no longer count as independent confirmation, and supporting hints alone never make a suspect [b]High[/b] confidence
+[*][b]Error-dialog freezes:[/b] when the game waits on a message box a plugin opened (for example an Address Library or version error), the report says so and shows the dialog title and text
+[*][b]Real call stacks:[/b] the stack walk no longer stops at the first frame
+[*][b]With Crash Logger:[/b] a mod assert or unhandled C++ exception reported by Crash Logger is recorded as the original exception, and Crash Logger's own thread dump ([font=Courier New]Ctrl+Shift+F12[/font]) no longer creates crash captures
+[*][b]Plugin scan:[/b] runs after a crash again, and Creation Club files from [font=Courier New]Skyrim.ccc[/font] are no longer reported as missing masters (MO2 + Anniversary Edition)
+[*][b]Gameplay freezes:[/b] freeze detection during gameplay now uses [font=Courier New]HangThresholdInGameSec[/font] (10 s by default). Before v0.2.59 a bug kept the 30 s menu threshold active for the whole session
+[*]The manual snapshot hotkey also works during gameplay, and freeze reports follow the Windows display language like crash reports
+[/list]
+
+[b]Earlier versions[/b]
 [list]
 [*]The start screen now makes it easier to find [b]recent dumps[/b] and the current [b]output location[/b]
 [*]Candidate names now prefer [b]ESP/ESM filenames[/b] and [b]DLL filenames[/b] over vague friendly labels
@@ -147,8 +158,9 @@ Manual snapshot        *_Manual_*.dmp         Ctrl+Shift+F12
 [b][size=4]Important Settings (SkyrimDiagHelper.ini)[/size][/b]
 [code]
 ; Freeze / ILS thresholds (seconds)
-HangThresholdInGameSec=15
-HangThresholdLoadingSec=120
+HangThresholdInGameSec=10
+HangThresholdInMenuSec=30
+HangThresholdLoadingSec=600
 EnableAdaptiveLoadingThreshold=1
 
 ; Viewer auto-open
@@ -328,7 +340,18 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]최근 버전에서 좋아진 점[/size][/b]
+[b][size=4]v0.2.59에서 바뀐 점[/size][/b]
+[list]
+[*][b]더 보수적인 원인 후보:[/b] 같은 크래시 위치를 가리키는 두 신호를 독립적인 교차 확인으로 세지 않고, 보강 단서만으로는 [b]높음[/b] 신뢰도가 되지 않습니다.
+[*][b]오류 창 때문에 멈춘 경우:[/b] 플러그인이 띄운 메시지 창(예: Address Library·버전 오류)에서 게임이 기다리고 있으면 그렇게 알려 주고, 창 제목과 내용을 보여 줍니다.
+[*][b]실제 호출 스택:[/b] 스택 추적이 첫 프레임에서 멈추지 않습니다.
+[*][b]Crash Logger와 함께 쓸 때:[/b] Crash Logger가 보고하는 모드 assert나 처리되지 않은 C++ 예외를 원래 예외로 기록하고, Crash Logger의 스레드 덤프([font=Courier New]Ctrl+Shift+F12[/font]) 중에는 크래시 캡처를 만들지 않습니다.
+[*][b]플러그인 스캔:[/b] 크래시 후 스캔이 다시 동작하고, [font=Courier New]Skyrim.ccc[/font]의 Creation Club 파일을 누락 마스터로 잘못 표시하지 않습니다(MO2 + Anniversary Edition).
+[*][b]게임 플레이 중 프리징:[/b] 이제 [font=Courier New]HangThresholdInGameSec[/font](기본 10초) 기준으로 감지합니다. v0.2.59 이전에는 버그 때문에 메뉴 기준 30초가 계속 적용됐습니다.
+[*]수동 스냅샷 단축키가 게임 플레이 중에도 동작하고, 프리징 리포트도 CTD 리포트처럼 Windows 표시 언어를 따릅니다.
+[/list]
+
+[b]이전 버전[/b]
 [list]
 [*]첫 화면에서 [b]최근 dump[/b]와 [b]출력 위치[/b]를 더 쉽게 확인할 수 있게 바뀌었습니다.
 [*]후보 이름도 예쁜 별칭보다 [b]ESP/ESM 파일명[/b], [b]DLL 파일명[/b]을 우선 보여주도록 바뀌었습니다.
@@ -367,8 +390,9 @@ CTD                    *_Crash_*.dmp          자동
 [b][size=4]주요 설정 (SkyrimDiagHelper.ini)[/size][/b]
 [code]
 ; 프리징 / 무한 로딩 감지 임계값 (초)
-HangThresholdInGameSec=15
-HangThresholdLoadingSec=120
+HangThresholdInGameSec=10
+HangThresholdInMenuSec=30
+HangThresholdLoadingSec=600
 EnableAdaptiveLoadingThreshold=1
 
 ; 뷰어 자동 열기
