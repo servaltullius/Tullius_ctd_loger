@@ -101,6 +101,44 @@ void TestImplicitPluginsAreActiveUnderMo2()
     "a plugin both in Skyrim.ccc and plugins.txt must be listed once");
 }
 
+// plugins.txt and Skyrim.ccc are written in the ANSI code page, not UTF-8. A
+// name like "Caf\xE9.esp" threw out of the scan (u8path, json dump) and, with
+// no catch above it, took the helper and the hang dump down with it.
+void TestAnsiPluginNamesDoNotThrow()
+{
+  const auto root = std::filesystem::temp_directory_path() /
+    (L"skydiag_plugin_scanner_ansi_" + std::to_wstring(GetCurrentProcessId()));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "*Caf\xE9.esp\n*Mod.esp\n");
+  WriteText(root / L"Skyrim.ccc", "cc\xE9.esl\n");
+  WriteText(root / L"Data" / L"Mod.esp", "");
+  // The file the game would open for that line: the same bytes through the ANSI code page.
+  wchar_t wideName[64]{};
+  MultiByteToWideChar(CP_ACP, 0, "Caf\xE9.esp", -1, wideName, 64);
+  WriteText(root / L"Data" / wideName, "");
+
+  PluginScanResult result{};
+  std::string json;
+  try {
+    result = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+    json = SerializePluginScanResult(result);
+  } catch (...) {
+    std::filesystem::remove_all(root, ec);
+    Require(false, "an ANSI plugin name must not throw out of the scan");
+  }
+  std::filesystem::remove_all(root, ec);
+
+  const auto parsed = nlohmann::json::parse(json, nullptr, false);
+  Require(!parsed.is_discarded(), "the scan JSON must stay valid UTF-8 JSON");
+  Require(Contains(ActiveNames(result), "Mod.esp"), "the other plugins must still be scanned");
+  char utf8Name[64]{};
+  WideCharToMultiByte(CP_UTF8, 0, wideName, -1, utf8Name, 64, nullptr, nullptr);
+  Require(Contains(ActiveNames(result), utf8Name), "the ANSI name must be listed, converted to UTF-8");
+}
+
 // skse64.log keeps no timestamps; only the log whose imagebase is the running
 // game's executable base belongs to the captured session.
 void TestSkseLogIsMatchedByImageBase()
@@ -184,6 +222,7 @@ int main()
     TestCreationClubListParsing();
     TestImplicitPluginsAreActiveUnderMo2();
     TestSkseLogIsMatchedByImageBase();
+    TestAnsiPluginNamesDoNotThrow();
     std::puts("plugin scanner runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {

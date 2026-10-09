@@ -200,6 +200,37 @@ static void Test_RotatesHelperLog()
   assert(Exists(dir / "SkyrimDiagHelper.log.1"));
 }
 
+// Names the ANSI code page cannot represent (here a snowman): retention now
+// compares UTF-8 names, which never throw, instead of path::string(), which
+// substitutes '?' on most systems but can throw when the code page is UTF-8.
+// Pruning must go on around such a file.
+static void Test_PrunesAroundNamesOutsideTheAnsiCodePage()
+{
+  const auto dir = MakeTempDir();
+  const auto odd = dir / std::filesystem::u8path("SkyrimDiag_Crash_20260101_000009_\xE2\x98\x83.txt");
+  const auto oddDump = dir / std::filesystem::u8path("notes \xE2\x98\x83.dmp");
+  WriteFile(odd);
+  WriteFile(oddDump);
+
+  const auto stem0 = std::string("SkyrimDiag_Crash_20260101_000000");
+  const auto stem1 = std::string("SkyrimDiag_Crash_20260101_000001");
+  WriteFile(dir / (stem0 + ".dmp"));
+  WriteFile(dir / (stem0 + "_SkyrimDiagReport.txt"));
+  WriteFile(dir / (stem1 + ".dmp"));
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(dir / (stem0 + ".dmp")));
+  assert(!Exists(dir / (stem0 + "_SkyrimDiagReport.txt")));
+  assert(Exists(dir / (stem1 + ".dmp")));
+  assert(Exists(oddDump));
+}
+
 int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
@@ -208,5 +239,6 @@ int main()
   Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();
   Test_PrunesCrashManifestWithPrecisionTimestamp();
   Test_RotatesHelperLog();
+  Test_PrunesAroundNamesOutsideTheAnsiCodePage();
   return 0;
 }

@@ -207,6 +207,34 @@ std::filesystem::path FindMo2IniFromModulePaths(const std::vector<std::wstring>*
   return {};
 }
 
+// The game and SKSE read and write plugin and DLL names through the ANSI
+// code page (plugins.txt, Skyrim.ccc, TES4 MAST records, skse64.log), so names
+// with accented letters are not UTF-8. JSON and u8path need UTF-8: text that is
+// not already valid UTF-8 is converted from CP_ACP.
+std::string AnsiToUtf8IfNeeded(const std::string& text)
+{
+  if (text.empty() || text.size() > static_cast<std::size_t>(INT_MAX)) {
+    return text;
+  }
+  const int len = static_cast<int>(text.size());
+  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), len, nullptr, 0) > 0) {
+    return text;
+  }
+  const int wideLen = MultiByteToWideChar(CP_ACP, 0, text.data(), len, nullptr, 0);
+  if (wideLen <= 0) {
+    return {};
+  }
+  std::wstring wide(static_cast<std::size_t>(wideLen), L'\0');
+  MultiByteToWideChar(CP_ACP, 0, text.data(), len, wide.data(), wideLen);
+  const int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen, nullptr, 0, nullptr, nullptr);
+  if (utf8Len <= 0) {
+    return {};
+  }
+  std::string utf8(static_cast<std::size_t>(utf8Len), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen, utf8.data(), utf8Len, nullptr, nullptr);
+  return utf8;
+}
+
 }  // namespace
 
 bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out)
@@ -397,35 +425,6 @@ std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid)
   return paths;
 }
 
-namespace {
-
-// SKSE writes DLL names in the system ANSI code page. JSON needs UTF-8, so a
-// log that is not already valid UTF-8 is converted from CP_ACP.
-std::string AnsiLogToUtf8(const std::string& text)
-{
-  if (text.empty() || text.size() > static_cast<std::size_t>(INT_MAX)) {
-    return text;
-  }
-  const int len = static_cast<int>(text.size());
-  if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), len, nullptr, 0) > 0) {
-    return text;
-  }
-  const int wideLen = MultiByteToWideChar(CP_ACP, 0, text.data(), len, nullptr, 0);
-  if (wideLen <= 0) {
-    return {};
-  }
-  std::wstring wide(static_cast<std::size_t>(wideLen), L'\0');
-  MultiByteToWideChar(CP_ACP, 0, text.data(), len, wide.data(), wideLen);
-  const int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen, nullptr, 0, nullptr, nullptr);
-  if (utf8Len <= 0) {
-    return {};
-  }
-  std::string utf8(static_cast<std::size_t>(utf8Len), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, wide.data(), wideLen, utf8.data(), utf8Len, nullptr, nullptr);
-  return utf8;
-}
-
-}  // namespace
 
 std::uint64_t QueryMainModuleBaseBestEffort(std::uint32_t pid)
 {
@@ -514,7 +513,7 @@ SkseLogScan MatchSkseLogFiles(const std::vector<std::filesystem::path>& logPaths
     std::string text(static_cast<std::size_t>(size), '\0');
     in.read(text.data(), static_cast<std::streamsize>(text.size()));
     text.resize(static_cast<std::size_t>(in.gcount()));
-    auto summary = ParseSkseLog(AnsiLogToUtf8(text));
+    auto summary = ParseSkseLog(AnsiToUtf8IfNeeded(text));
     if (summary.recognized && summary.image_base == gameImageBase) {
       scan.status = "matched";
       scan.summary = std::move(summary);
@@ -608,7 +607,8 @@ PluginScanResult ScanPlugins(
     result.error = "Could not open plugins.txt";
     return result;
   }
-  const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  const std::string content = AnsiToUtf8IfNeeded(
+    std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()));
   const auto listedPlugins = ParsePluginsTxt(content);
 
   // The game loads the base masters and the Creation Club files named in
@@ -633,7 +633,8 @@ PluginScanResult ScanPlugins(
     addImplicitIfPresent(baseMaster);
   }
   if (std::ifstream ccc(gameExeDir / "Skyrim.ccc"); ccc.is_open()) {
-    const std::string cccContent((std::istreambuf_iterator<char>(ccc)), std::istreambuf_iterator<char>());
+    const std::string cccContent = AnsiToUtf8IfNeeded(
+      std::string((std::istreambuf_iterator<char>(ccc)), std::istreambuf_iterator<char>()));
     for (const auto& name : ParseCreationClubContentList(cccContent)) {
       addImplicitIfPresent(name);
     }
@@ -651,13 +652,17 @@ PluginScanResult ScanPlugins(
     meta.is_active = true;
 
     const auto pluginPath = dataDir / std::filesystem::u8path(pluginName);
-    if (std::filesystem::exists(pluginPath)) {
+    std::error_code existsEc;
+    if (std::filesystem::exists(pluginPath, existsEc)) {
       std::ifstream pf(pluginPath, std::ios::binary);
       if (pf.is_open()) {
         std::vector<std::uint8_t> buf(4096);
         pf.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
         const std::size_t bytesRead = static_cast<std::size_t>(pf.gcount());
         meta.slot_type_known = ParseTes4Header(buf.data(), bytesRead, meta);
+        for (auto& master : meta.masters) {
+          master = AnsiToUtf8IfNeeded(master);
+        }
       }
     }
     if (!meta.slot_type_known && EndsWithAsciiInsensitive(pluginName, ".esl")) {
@@ -716,7 +721,9 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
     j["skse_log"] = std::move(s);
   }
 
-  return j.dump();
+  // The names above are converted to UTF-8; replace anything that still is
+  // not, rather than throwing and losing the capture this scan belongs to.
+  return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 }  // namespace skydiag::helper

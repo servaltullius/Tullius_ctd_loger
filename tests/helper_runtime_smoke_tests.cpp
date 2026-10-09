@@ -348,6 +348,24 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts()
 
 }  // namespace
 
+// The helper log used to be truncated on every attach, so relaunching the game
+// after a crash erased the log users are told to read.
+void TestHelperLogSessionKeepsThePreviousLog()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_log_session");
+  skydiag::helper::internal::AppendLogLine(outBase, L"crash session line");
+  skydiag::helper::internal::StartHelperLogSession(outBase);
+  skydiag::helper::internal::AppendLogLine(outBase, L"next session line");
+
+  const auto previous = ReadAllTextUtf8(outBase / L"SkyrimDiagHelper.previous.log");
+  const auto current = ReadAllTextUtf8(outBase / L"SkyrimDiagHelper.log");
+  std::error_code ec;
+  std::filesystem::remove_all(outBase, ec);
+  Require(previous.find("crash session line") != std::string::npos, "the previous session's log must be kept");
+  Require(current.find("crash session line") == std::string::npos, "the new session starts a fresh log");
+  Require(current.find("next session line") != std::string::npos, "the new session writes to the current log");
+}
+
 int main()
 {
   try {
@@ -356,6 +374,7 @@ int main()
     TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts();
+    TestHelperLogSessionKeepsThePreviousLog();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

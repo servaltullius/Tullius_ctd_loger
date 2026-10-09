@@ -76,9 +76,17 @@ HangTickResult ExecuteConfirmedHangCapture(
     wctJson["pid"] = proc.pid;
     wctJson["error"] = "capture_failed";
   }
+  // A normal (non-admin) user never holds SeDebugPrivilege, so the request
+  // ends in ERROR_NOT_ALL_ASSIGNED on every capture. The helper runs as the
+  // same user as the game, so the game's own wait chains are still read; only
+  // other errors are worth a warning.
   if (wctJson.contains("debugPrivilegeEnabled") && wctJson["debugPrivilegeEnabled"].is_boolean() &&
-      !wctJson["debugPrivilegeEnabled"].get<bool>()) {
-    AppendLogLine(outBase, L"Warning: EnableDebugPrivilege failed; WCT capture may be incomplete.");
+      !wctJson["debugPrivilegeEnabled"].get<bool>() &&
+      wctJson.value("debugPrivilegeError", 0u) != ERROR_NOT_ALL_ASSIGNED) {
+    AppendLogLine(
+      outBase,
+      L"Warning: EnableDebugPrivilege failed (error " + std::to_wstring(wctJson.value("debugPrivilegeError", 0u)) +
+        L"); WCT capture may be incomplete.");
   }
 
   // A main thread parked in a modal loop (e.g. a plugin's error MessageBox)

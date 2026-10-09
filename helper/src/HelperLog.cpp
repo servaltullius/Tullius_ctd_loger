@@ -31,6 +31,21 @@ void ClearLog(const std::filesystem::path& outBase)
   }
 }
 
+void StartHelperLogSession(const std::filesystem::path& outBase)
+{
+  std::error_code ec;
+  const auto path = outBase / L"SkyrimDiagHelper.log";
+  if (!std::filesystem::exists(path, ec) || std::filesystem::file_size(path, ec) == 0) {
+    return;
+  }
+  const auto previous = outBase / L"SkyrimDiagHelper.previous.log";
+  std::filesystem::remove(previous, ec);
+  std::filesystem::rename(path, previous, ec);
+  if (ec) {
+    ClearLog(outBase);  // a locked log is still restarted, as before
+  }
+}
+
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
 {
   std::error_code ec;

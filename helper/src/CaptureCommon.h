@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -69,17 +70,27 @@ inline std::string CollectPluginScanJson(
     return {};
   }
 
-  auto scanResult = skydiag::helper::ScanPlugins(inputs.gameExeDir, inputs.moduleNames, &inputs.modulePaths);
-  scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);
-  const auto& skseLog = scanResult.skse_log;
-  std::wstring skseLine = L"SKSE log: " + std::wstring(skseLog.status.begin(), skseLog.status.end());
-  if (skseLog.status == "matched") {
-    skseLine += L" (checked=" + std::to_wstring(skseLog.summary.checked_count) +
-      L", loaded=" + std::to_wstring(skseLog.summary.loaded_count) +
-      L", not_loaded=" + std::to_wstring(skseLog.summary.issues.size()) + L")";
+  // The scan is context for the dump, never a reason to lose it: a hang dump
+  // is written after this, so an exception here must not escape.
+  try {
+    auto scanResult = skydiag::helper::ScanPlugins(inputs.gameExeDir, inputs.moduleNames, &inputs.modulePaths);
+    scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);
+    const auto& skseLog = scanResult.skse_log;
+    std::wstring skseLine = L"SKSE log: " + std::wstring(skseLog.status.begin(), skseLog.status.end());
+    if (skseLog.status == "matched") {
+      skseLine += L" (checked=" + std::to_wstring(skseLog.summary.checked_count) +
+        L", loaded=" + std::to_wstring(skseLog.summary.loaded_count) +
+        L", not_loaded=" + std::to_wstring(skseLog.summary.issues.size()) + L")";
+    }
+    AppendLogLine(outBase, skseLine);
+    return skydiag::helper::SerializePluginScanResult(scanResult);
+  } catch (const std::exception& ex) {
+    const std::string what = ex.what();
+    AppendLogLine(outBase, L"PluginScanner failed; capture continues without it: " + std::wstring(what.begin(), what.end()));
+  } catch (...) {
+    AppendLogLine(outBase, L"PluginScanner failed; capture continues without it.");
   }
-  AppendLogLine(outBase, skseLine);
-  return skydiag::helper::SerializePluginScanResult(scanResult);
+  return {};
 }
 
 inline std::string CollectPluginScanJson(
