@@ -310,6 +310,29 @@ std::string BuildReportText(
           << (r.freeze_analysis.thread_module_consensus.os_lock_cycle_proven ? "1" : "0")
           << "\n";
     }
+    if (!r.main_thread_wait.kind.empty()) {
+      const auto& wait = r.main_thread_wait;
+      rpt << "  main_thread_wait kind=" << wait.kind;
+      if (!wait.wait_api.empty()) {
+        rpt << " api=" << WideToUtf8(wait.wait_api);
+      }
+      if (!wait.waiting_module.empty()) {
+        rpt << " module=" << WideToUtf8(wait.waiting_module);
+      }
+      if (!wait.path_modules.empty()) {
+        rpt << " path=" << WideToUtf8(JoinList(wait.path_modules, wait.path_modules.size(), L","));
+      }
+      rpt << "\n";
+    }
+    {
+      const auto& state = r.blackbox_freeze_summary;
+      if (!state.open_menus.empty() || state.seconds_since_load_end >= 0.0 || state.pause_gap_seconds > 0.0) {
+        rpt << "  game_state open_menus=" << WideToUtf8(JoinList(state.open_menus, state.open_menus.size(), L","))
+            << " since_load_end_s=" << static_cast<long long>(state.seconds_since_load_end)
+            << " pause_gap_s=" << static_cast<long long>(state.pause_gap_seconds)
+            << " pause_gap_ended_s_before=" << static_cast<long long>(state.pause_gap_ended_seconds_before) << "\n";
+      }
+    }
     if (r.modal_dialog_wait.detected) {
       const auto& modal = r.modal_dialog_wait;
       rpt << "  modal_dialog_wait main_tid=" << modal.main_thread_id

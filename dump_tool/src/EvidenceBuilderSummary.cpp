@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "MainThreadWait.h"
 #include "MinidumpUtil.h"
 
 namespace skydiag::dump_tool::internal {
@@ -119,6 +120,48 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
     }
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
+std::wstring JoinWaitPath(const std::vector<std::wstring>& names)
+{
+  std::wstring out;
+  for (const auto& name : names) {
+    if (!out.empty()) {
+      out += L", ";
+    }
+    out += name;
+  }
+  return out;
+}
+
+// ADR-0009: the main thread sat in a wait the plugins on its stack did not
+// perform, so the sentence says where it waited instead of naming a module.
+std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang, bool en)
+{
+  const auto& wait = r.main_thread_wait;
+  const std::wstring conf = ConfidenceText(lang, i18n::ConfidenceLevel::kLow);
+  const std::wstring api = wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api);
+  if (wait.kind == "graphics_driver_wait") {
+    return en
+      ? (L"The game main thread was waiting inside the graphics driver (" + wait.waiting_module + api +
+          L"). That points to the GPU side - the driver itself, graphics mods (ENB, ReShade, upscalers, shader mods) or "
+          L"video memory - rather than to modules found on the stack. (Confidence: " + conf + L")")
+      : (L"게임 메인 스레드가 그래픽 드라이버(" + wait.waiting_module + api +
+          L") 안에서 대기 중이었습니다. 스택에서 보이는 모듈보다는 GPU 쪽(드라이버 자체, ENB·ReShade·업스케일러·셰이더 모드 같은 "
+          L"그래픽 모드, 비디오 메모리)을 가리킵니다. (신뢰도: " + conf + L")");
+  }
+  const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
+  return en
+    ? (L"The game main thread was not running mod code: it was waiting inside the game engine (" + wait.waiting_module +
+        api + L")." +
+        (path.empty() ? std::wstring{}
+                      : (L" Plugins further down its stack (" + path + L") are on the call path, not shown to be the cause.")) +
+        L" This dump alone cannot tell what the engine was waiting for. (Confidence: " + conf + L")")
+    : (L"게임 메인 스레드는 모드 코드를 실행하던 것이 아니라 게임 엔진(" + wait.waiting_module + api +
+        L") 안에서 대기 중이었습니다." +
+        (path.empty() ? std::wstring{}
+                      : (L" 스택 아래쪽 플러그인(" + path + L")은 호출 경로일 뿐 원인으로 확인된 것이 아닙니다.")) +
+        L" 엔진이 무엇을 기다렸는지는 이 덤프만으로 알 수 없습니다. (신뢰도: " + conf + L")");
 }
 
 std::wstring DescribeModalDialogWait(const ModalDialogWaitInfo& modal, i18n::Language lang, bool en)
@@ -643,6 +686,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           wct->thresholdSec);
         hangPrefix = hb;
       }
+      if (!r.modal_dialog_wait.detected) {
+        // ADR-0009: what the player had open (the Console in most of the
+        // field freezes) and a recent long pause frame the stall.
+        if (const auto gameState = DescribeGameStateAtCapture(r.blackbox_freeze_summary, en); !gameState.empty()) {
+          hangPrefix += L" " + gameState;
+        }
+      }
 
       if (r.modal_dialog_wait.detected) {
         summary = hangPrefix + L" " + DescribeModalDialogWait(r.modal_dialog_wait, lang, en);
@@ -656,6 +706,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
               std::to_wstring(consensus.matching_thread_count - 1u) + L"개 스레드에서 " +
               consensus.module_filename +
               L"이(가) 반복되어 모듈 내부 동기화 정지 가능성이 높습니다. WCT가 OS 잠금 사이클을 입증한 것은 아닙니다. (신뢰도: 중간)");
+      } else if (IsBystanderWait(r.main_thread_wait)) {
+        summary = hangPrefix + L" " + DescribeBystanderWait(r, lang, en);
       } else if (hasSuspect && !suspectWho.empty()) {
         if (!r.suspects_from_stackwalk) {
           summary = en

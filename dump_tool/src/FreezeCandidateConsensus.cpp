@@ -1,7 +1,11 @@
 #include "FreezeCandidateConsensus.h"
 
 #include <algorithm>
+#include <string>
 #include <unordered_set>
+#include <vector>
+
+#include "MainThreadWait.h"
 
 namespace skydiag::dump_tool {
 namespace {
@@ -114,6 +118,54 @@ std::string DetermineSupportQuality(
     return "live_process";
   }
   return "unknown";
+}
+
+std::wstring JoinNames(const std::vector<std::wstring>& names)
+{
+  std::wstring out;
+  for (const auto& name : names) {
+    if (!out.empty()) {
+      out += L", ";
+    }
+    out += name;
+  }
+  return out;
+}
+
+// What the main thread was doing, as the first reason: it decides how much the
+// modules on its stack mean (ADR-0009).
+void AddMainThreadWaitReason(const MainThreadWaitInfo& wait, i18n::Language language, FreezeAnalysisResult* result)
+{
+  const bool en = language == i18n::Language::kEnglish;
+  const std::wstring api = wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api);
+  std::wstring line;
+  if (wait.kind == "engine_wait") {
+    line = en
+      ? (L"The main thread was waiting inside the game engine (" + wait.waiting_module + api +
+          L"), not running plugin code")
+      : (L"메인 스레드는 플러그인 코드를 실행하던 것이 아니라 게임 엔진(" + wait.waiting_module + api +
+          L") 안에서 대기 중이었음");
+  } else if (wait.kind == "graphics_driver_wait") {
+    line = en
+      ? (L"The main thread was waiting inside the graphics driver (" + wait.waiting_module + api + L")")
+      : (L"메인 스레드가 그래픽 드라이버(" + wait.waiting_module + api + L") 안에서 대기 중이었음");
+  } else if (wait.kind == "plugin_wait") {
+    line = en
+      ? (L"The main thread was waiting in " + wait.wait_api + L", called by " + wait.waiting_module)
+      : (L"메인 스레드가 " + wait.waiting_module + L"이(가) 호출한 " + wait.wait_api + L"에서 대기 중이었음");
+  } else if (wait.kind == "running") {
+    line = en
+      ? (L"The main thread was running code in " + wait.waiting_module + L" (no wait on top of its stack)")
+      : (L"메인 스레드가 " + wait.waiting_module + L"에서 코드를 실행 중이었음(스택 맨 위에 대기 API 없음)");
+  } else {
+    return;
+  }
+  if (IsBystanderWait(wait) && !wait.path_modules.empty()) {
+    line += en
+      ? (L"; plugins further down its stack (call path only): " + JoinNames(wait.path_modules))
+      : (L"; 스택 아래쪽 플러그인(호출 경로일 뿐): " + JoinNames(wait.path_modules));
+  }
+  result->primary_reasons.insert(result->primary_reasons.begin(), std::move(line));
 }
 
 std::wstring DescribeModalDialogCaller(const ModalDialogWaitInfo& modal)
@@ -348,6 +400,9 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     }
   }
 
+  if (!modalWait && input.main_thread_wait.has_value()) {
+    AddMainThreadWaitReason(*input.main_thread_wait, language, &result);
+  }
   result.confidence = i18n::ConfidenceText(language, result.confidence_level);
   std::unordered_set<std::wstring> seenNames;
   const std::size_t maxCandidates = std::min<std::size_t>(input.actionable_candidates.size(), 2u);

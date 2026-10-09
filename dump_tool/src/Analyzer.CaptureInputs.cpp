@@ -3,6 +3,7 @@
 #include "AnalyzerInternals.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
+#include "MainThreadWait.h"
 #include "ModalDialogWait.h"
 #include "Mo2Index.h"
 #include "OutputWriterInternals.h"
@@ -601,6 +602,24 @@ void ComputeSuspects(
         : L" (메인 스레드가 modal 대화상자에서 대기 중이므로 스택 모듈은 프리징 원인이 아님)";
     }
     return;
+  }
+
+  if (modalProbeTid != 0u) {
+    out.main_thread_wait = ClassifyMainThreadWait(mainThreadFrames);
+  }
+  if (IsBystanderWait(out.main_thread_wait)) {
+    // The main thread was sitting in a wait it did not get from these
+    // modules: the engine's own sleep/wait or the graphics driver. Plugins on
+    // its stack were only on the call path (ADR-0009).
+    for (auto& suspect : out.suspects) {
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(opt.language, suspect.confidence_level);
+      suspect.reason += opt.language == i18n::Language::kEnglish
+        ? L" (main thread was waiting in " + out.main_thread_wait.waiting_module +
+            L"; modules on its stack are on the call path, not shown to be the freeze cause)"
+        : L" (메인 스레드가 " + out.main_thread_wait.waiting_module +
+            L" 안에서 대기 중이었으므로 스택의 모듈은 호출 경로일 뿐 프리징 원인으로 확인된 것이 아님)";
+    }
   }
 
   if (hangLike && mainTid.has_value() && !out.suspects.empty()) {

@@ -45,7 +45,8 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   std::size_t maxFrames,
   std::uint32_t* outTotalFrames,
   std::uint32_t* outSymbolizedFrames,
-  std::uint32_t* outSourceLineFrames);
+  std::uint32_t* outSourceLineFrames,
+  bool fromTop);
 
 }  // namespace stackwalk
 
@@ -192,14 +193,16 @@ bool TryComputeStackwalkSuspects(
         modules,
         bestAny.pcs,
         /*maxFrames=*/12);
+      const bool fromTop = modalProbeTid != 0u && bestAny.tid == modalProbeTid;
       out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
         sym.process,
         modules,
         bestAny.pcs,
-        /*maxFrames=*/12,
+        /*maxFrames=*/fromTop ? 16u : 12u,
         &out.stackwalk_total_frames,
         &out.stackwalk_symbolized_frames,
-        &out.stackwalk_source_line_frames);
+        &out.stackwalk_source_line_frames,
+        fromTop);
     }
     return false;
   }
@@ -211,14 +214,16 @@ bool TryComputeStackwalkSuspects(
     modules,
     best.pcs,
     /*maxFrames=*/12);
+  const bool fromTop = modalProbeTid != 0u && best.tid == modalProbeTid;
   out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
     sym.process,
     modules,
     best.pcs,
-    /*maxFrames=*/12,
+    /*maxFrames=*/fromTop ? 16u : 12u,
     &out.stackwalk_total_frames,
     &out.stackwalk_symbolized_frames,
-    &out.stackwalk_source_line_frames);
+    &out.stackwalk_source_line_frames,
+    fromTop);
   return true;
 }
 

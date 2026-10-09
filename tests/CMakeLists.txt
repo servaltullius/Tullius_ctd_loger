@@ -103,6 +103,20 @@ if(WIN32)
     COMMAND skydiag_modal_dialog_recommendation_tests
   )
 
+  add_executable(skydiag_freeze_context_report_tests
+    freeze_context_report_tests.cpp
+  )
+  target_include_directories(skydiag_freeze_context_report_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_freeze_context_report_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_freeze_context_report_tests
+    COMMAND skydiag_freeze_context_report_tests
+  )
+
   add_executable(skydiag_skse_log_report_tests
     skse_log_report_tests.cpp
   )
@@ -329,6 +343,7 @@ set_tests_properties(skydiag_candidate_consensus_tests PROPERTIES
 add_executable(skydiag_freeze_candidate_consensus_tests
   freeze_candidate_consensus_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/FreezeCandidateConsensus.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/MainThreadWait.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
 )
 
@@ -341,6 +356,15 @@ target_link_libraries(skydiag_freeze_candidate_consensus_tests PRIVATE
 )
 
 add_test(NAME skydiag_freeze_candidate_consensus_tests COMMAND skydiag_freeze_candidate_consensus_tests)
+
+add_executable(skydiag_main_thread_wait_tests
+  main_thread_wait_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/MainThreadWait.cpp"
+)
+target_include_directories(skydiag_main_thread_wait_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_main_thread_wait_tests COMMAND skydiag_main_thread_wait_tests)
 
 add_executable(skydiag_modal_dialog_wait_tests
   modal_dialog_wait_tests.cpp

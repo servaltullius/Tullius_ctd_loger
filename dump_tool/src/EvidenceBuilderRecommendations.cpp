@@ -771,6 +771,57 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   }
 
   if (r.freeze_analysis.has_analysis) {
+    // ADR-0009: say what the main thread was doing before any module triage.
+    const auto& wait = r.main_thread_wait;
+    if (isHangLike && wait.kind == "engine_wait") {
+      const std::wstring path = wait.path_modules.empty()
+        ? std::wstring{}
+        : (L" (" + JoinList(wait.path_modules, wait.path_modules.size(), L", ") + L")");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting inside the game engine, not running mod code. Do not remove the plugins on its stack" +
+            path + L" on this evidence alone; if the freeze repeats, capture it again while frozen (Ctrl+Shift+F12) and compare what stays the same.")
+        : (L"[메인 스레드] 메인 스레드는 모드 코드를 실행하던 것이 아니라 게임 엔진 안에서 대기 중이었습니다. 이 근거만으로 스택의 플러그인" +
+            path + L"을 빼지 마세요. 프리징이 반복되면 멈춘 상태에서 다시 캡처(Ctrl+Shift+F12)해 공통점을 비교하세요."));
+    } else if (isHangLike && wait.kind == "graphics_driver_wait") {
+      std::vector<std::wstring> injectors;
+      if (r.graphics_env.enb_detected) {
+        injectors.push_back(L"ENB");
+      }
+      if (r.graphics_env.reshade_detected) {
+        injectors.push_back(L"ReShade");
+      }
+      if (r.graphics_env.dxvk_detected) {
+        injectors.push_back(L"DXVK");
+      }
+      const std::wstring detected = injectors.empty()
+        ? std::wstring{}
+        : (en ? (L" (detected: " + JoinList(injectors, injectors.size(), L", ") + L")")
+              : (L" (감지됨: " + JoinList(injectors, injectors.size(), L", ") + L")"));
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting in the graphics driver (" + wait.waiting_module +
+            L"). Update or clean-install the GPU driver, then test without graphics injectors and upscalers" + detected +
+            L" and with lighter texture/video-memory load.")
+        : (L"[메인 스레드] 메인 스레드가 그래픽 드라이버(" + wait.waiting_module +
+            L") 안에서 대기 중이었습니다. GPU 드라이버를 업데이트하거나 클린 설치한 뒤, 그래픽 인젝터·업스케일러" + detected +
+            L" 없이, 그리고 텍스처/비디오 메모리 부담을 줄여서 시험해 보세요."));
+    }
+    if (isHangLike) {
+      const auto& state = r.blackbox_freeze_summary;
+      if (std::find(state.open_menus.begin(), state.open_menus.end(), L"Console") != state.open_menus.end()) {
+        r.recommendations.push_back(en
+          ? L"[Context] The Console was open when the game froze. If a console command was run just before, check whether that command alone stalls the game."
+          : L"[상황] 프리징 당시 콘솔이 열려 있었습니다. 직전에 콘솔 명령을 실행했다면 그 명령만으로 게임이 멈추는지 확인해 보세요.");
+      }
+      if (state.pause_gap_seconds > 0.0) {
+        r.recommendations.push_back(en
+          ? (L"[Context] A pause of " + DescribeDuration(state.pause_gap_seconds, en) + L" (PC asleep or the game minimized) ended " +
+              DescribeDuration(state.pause_gap_ended_seconds_before, en) +
+              L" before this freeze. If freezes mostly come after a resume, close the game before the PC sleeps and see whether they stop.")
+          : (L"[상황] " + DescribeDuration(state.pause_gap_seconds, en) + L" 동안의 정지(PC 절전이나 게임 최소화)가 이 프리징 " +
+              DescribeDuration(state.pause_gap_ended_seconds_before, en) +
+              L" 전에 끝났습니다. 프리징이 주로 절전 해제 뒤에 난다면, PC를 절전시키기 전에 게임을 끄고 계속 나는지 보세요."));
+      }
+    }
     if (r.freeze_analysis.state_id == "deadlock_likely") {
       r.recommendations.push_back(en
         ? L"[Freeze] WCT cycle evidence makes deadlock the primary interpretation. Check synchronization-heavy mods and thread ownership first."

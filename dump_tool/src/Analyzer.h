@@ -73,6 +73,13 @@ struct BlackboxFreezeSummary
   std::uint32_t module_churn_score = 0;
   std::uint32_t thread_churn_score = 0;
   std::vector<std::wstring> recent_non_system_modules;
+
+  // Game state at the capture (ADR-0009). Independent of has_context, which
+  // only covers module/thread churn.
+  std::vector<std::wstring> open_menus;     // game menus open at the last event, oldest first
+  double seconds_since_load_end = -1.0;     // -1 when no load finished in the recorded window
+  double pause_gap_seconds = 0.0;           // longest main-thread gap of 5+ minutes (PC asleep / minimized)
+  double pause_gap_ended_seconds_before = 0.0;
 };
 
 struct FirstChanceSummary
@@ -115,6 +122,23 @@ struct ModalDialogWaitInfo
   // plugin_incompatible / address_library_missing / empty (from the dialog text)
   std::string address_library_issue;
   std::uint32_t other_thread_dialog_count = 0;
+};
+
+// What the game main thread was doing when a freeze was captured, read from the
+// top of its stack (ADR-0009).
+struct MainThreadWaitInfo
+{
+  // engine_wait: a sleep/wait called by the game executable
+  // plugin_wait: a sleep/wait called by a plugin DLL
+  // graphics_driver_wait: a wait inside the graphics driver or D3D/DXGI
+  // running: code was executing (no wait API on top)
+  // unknown: the top frames could not be told apart; empty: not analyzed
+  std::string kind;
+  std::string wait_class;           // sleep / sync / empty
+  std::wstring wait_api;            // e.g. "KERNELBASE.dll!SleepEx"
+  std::wstring waiting_module;      // module that called the wait, or that was running
+  std::wstring waiting_mod_name;
+  std::vector<std::wstring> path_modules;  // plugin DLLs further down the stack, outermost last
 };
 
 struct FreezeAnalysisResult
@@ -303,6 +327,7 @@ struct AnalysisResult
   FirstChanceSummary first_chance_summary;
   HangThreadModuleConsensus hang_thread_module_consensus;
   ModalDialogWaitInfo modal_dialog_wait;
+  MainThreadWaitInfo main_thread_wait;
   FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;

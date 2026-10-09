@@ -5,6 +5,7 @@
 
 #include "AnalyzerScoringPolicy.h"
 #include "CandidateConsensus.h"
+#include "MainThreadWait.h"
 #include "MinidumpUtil.h"
 #include "Utf.h"
 
@@ -567,7 +568,11 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   }
   AddCrashLoggerFrameSignals(r, en, &signals);
   AddCrashLoggerSignals(r, en, &signals);
-  AddStackSignals(r, en, &signals);
+  // A main thread waiting in the engine or the graphics driver says nothing
+  // about the plugins further down its stack (ADR-0009).
+  if (!IsBystanderWait(r.main_thread_wait)) {
+    AddStackSignals(r, en, &signals);
+  }
   AddHangThreadGroupSignal(r, en, &signals);
   AddResourceSignals(r, en, &signals);
   AddHistorySignals(r, en, &signals);

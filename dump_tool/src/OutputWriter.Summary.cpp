@@ -404,6 +404,20 @@ nlohmann::json BuildSummaryJson(
     { "address_library_issue", r.modal_dialog_wait.address_library_issue },
     { "other_thread_dialog_count", r.modal_dialog_wait.other_thread_dialog_count },
   };
+  {
+    auto path = nlohmann::json::array();
+    for (const auto& module : r.main_thread_wait.path_modules) {
+      path.push_back(WideToUtf8(module));
+    }
+    summary["freeze_analysis"]["main_thread_wait"] = {
+      { "kind", r.main_thread_wait.kind },
+      { "wait_class", r.main_thread_wait.wait_class },
+      { "wait_api", WideToUtf8(r.main_thread_wait.wait_api) },
+      { "waiting_module", WideToUtf8(r.main_thread_wait.waiting_module) },
+      { "waiting_mod_name", WideToUtf8(r.main_thread_wait.waiting_mod_name) },
+      { "path_modules", std::move(path) },
+    };
+  }
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
   for (const auto& reason : r.freeze_analysis.primary_reasons) {
     summary["freeze_analysis"]["primary_reasons"].push_back(WideToUtf8(reason));
@@ -427,6 +441,20 @@ nlohmann::json BuildSummaryJson(
   };
   for (const auto& moduleName : r.freeze_analysis.blackbox_context.recent_non_system_modules) {
     summary["freeze_analysis"]["blackbox_context"]["recent_non_system_modules"].push_back(WideToUtf8(moduleName));
+  }
+  {
+    // Game state at the capture (ADR-0009), from the full blackbox summary.
+    const auto& state = r.blackbox_freeze_summary;
+    auto menus = nlohmann::json::array();
+    for (const auto& menu : state.open_menus) {
+      menus.push_back(WideToUtf8(menu));
+    }
+    summary["freeze_analysis"]["game_state"] = {
+      { "open_menus", std::move(menus) },
+      { "seconds_since_load_end", state.seconds_since_load_end },
+      { "pause_gap_seconds", state.pause_gap_seconds },
+      { "pause_gap_ended_seconds_before", state.pause_gap_ended_seconds_before },
+    };
   }
   summary["freeze_analysis"]["first_chance_context"] = {
     { "has_context", r.freeze_analysis.first_chance_context.has_context },

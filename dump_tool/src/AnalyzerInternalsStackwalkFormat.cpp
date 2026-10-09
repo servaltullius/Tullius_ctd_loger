@@ -195,7 +195,8 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   std::size_t maxFrames,
   std::uint32_t* outTotalFrames,
   std::uint32_t* outSymbolizedFrames,
-  std::uint32_t* outSourceLineFrames)
+  std::uint32_t* outSourceLineFrames,
+  bool fromTop)
 {
   if (outTotalFrames) {
     *outTotalFrames = 0;
@@ -212,7 +213,11 @@ std::vector<std::wstring> FormatCallstackForDisplay(
     return out;
   }
 
-  const auto [start, end] = SelectCallstackFrameRange(modules, pcs, maxFrames);
+  // A frozen main thread's top frames show what it waits in (ADR-0009), so
+  // freeze stacks start at frame 0; crash stacks skip to the first plugin.
+  const auto [start, end] = fromTop
+    ? std::pair<std::size_t, std::size_t>{ 0u, std::min<std::size_t>(pcs.size(), maxFrames) }
+    : SelectCallstackFrameRange(modules, pcs, maxFrames);
   out.reserve(end - start);
   for (std::size_t i = start; i < end; i++) {
     bool hasSymbol = false;

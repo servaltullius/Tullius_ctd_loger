@@ -49,6 +49,39 @@ std::wstring ToWideAscii(std::string_view s)
   return out;
 }
 
+std::wstring DescribeDuration(double seconds, bool en)
+{
+  wchar_t buf[64]{};
+  if (seconds >= 120.0) {
+    swprintf_s(buf, en ? L"%.0f minutes" : L"%.0f분", seconds / 60.0);
+  } else {
+    swprintf_s(buf, en ? L"%.0f seconds" : L"%.0f초", seconds);
+  }
+  return buf;
+}
+
+std::wstring DescribeGameStateAtCapture(const BlackboxFreezeSummary& blackbox, bool en)
+{
+  std::wstring out;
+  if (!blackbox.open_menus.empty()) {
+    const auto menus = JoinList(blackbox.open_menus, blackbox.open_menus.size(), L", ");
+    out += en ? (L"Open at the time: " + menus + L".") : (L"당시 열려 있던 메뉴: " + menus + L".");
+  }
+  if (blackbox.pause_gap_seconds > 0.0) {
+    if (!out.empty()) {
+      out += L" ";
+    }
+    out += en
+      ? (L"A pause of " + DescribeDuration(blackbox.pause_gap_seconds, en) +
+          L" (PC asleep or the game minimized, most likely) ended " +
+          DescribeDuration(blackbox.pause_gap_ended_seconds_before, en) + L" before this.")
+      : (DescribeDuration(blackbox.pause_gap_seconds, en) +
+          L" 동안의 정지(PC 절전이나 게임 최소화로 추정)가 이보다 " +
+          DescribeDuration(blackbox.pause_gap_ended_seconds_before, en) + L" 전에 끝났습니다.");
+  }
+  return out;
+}
+
 std::wstring Hex64(std::uint64_t v)
 {
   wchar_t buf[32]{};
