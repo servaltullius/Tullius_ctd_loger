@@ -139,7 +139,13 @@ void AddMainThreadWaitReason(const MainThreadWaitInfo& wait, i18n::Language lang
   const bool en = language == i18n::Language::kEnglish;
   const std::wstring api = wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api);
   std::wstring line;
-  if (wait.kind == "engine_wait") {
+  if (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll") {
+    line = en
+      ? (L"The main thread was waiting for the GPU: the engine was polling a Direct3D query "
+          L"(ID3D11DeviceContext::GetData) in a Sleep loop (" + wait.waiting_module + api + L")")
+      : (L"메인 스레드가 GPU를 기다리고 있었음: 엔진이 Sleep 루프에서 Direct3D 쿼리"
+          L"(ID3D11DeviceContext::GetData) 결과를 기다림(" + wait.waiting_module + api + L")");
+  } else if (wait.kind == "engine_wait") {
     line = en
       ? (L"The main thread was waiting inside the game engine (" + wait.waiting_module + api +
           L"), not running plugin code")

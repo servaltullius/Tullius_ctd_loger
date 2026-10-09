@@ -154,6 +154,37 @@ void TestGraphicsDriverWaitAfterPause()
   Require(AnyStartsWith(r.recommendations, L"[Context]", L"pause of 84 minutes"), "the pause gets its own advice");
 }
 
+// The four field freezes on 1.6.1170: the engine polled a Direct3D query in
+// a Sleep loop, so the report points at the GPU, not at the stack plugins.
+void TestEngineGpuQueryPoll()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = MakeHang();
+    r.main_thread_wait.kind = "engine_wait";
+    r.main_thread_wait.engine_wait_detail = "gpu_query_poll";
+    r.main_thread_wait.wait_class = "sleep";
+    r.main_thread_wait.wait_api = L"KERNELBASE.dll!SleepEx";
+    r.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+    r.main_thread_wait.path_modules = { L"EngineFixes.dll", L"CommunityShaders.dll" };
+    r.graphics_env.reshade_detected = true;
+    BuildEvidenceAndSummary(r, lang);
+
+    Require(Contains(r.summary_sentence, en ? L"waiting for the GPU" : L"GPU를 기다리고"), "the summary says it waited for the GPU");
+    Require(Contains(r.summary_sentence, L"ID3D11DeviceContext::GetData"), "the summary names the query poll");
+    Require(!Contains(r.summary_sentence, en ? L"cannot tell what the engine was waiting for" : L"무엇을 기다렸는지는"),
+      "a known poll does not say the wait is unknown");
+    const auto next = SelectNextActionIndex(r.recommendations);
+    Require(next != std::wstring::npos && r.recommendations[next].rfind(en ? L"[Main thread]" : L"[메인 스레드]", 0) == 0 &&
+              Contains(r.recommendations[next], en ? L"GPU driver" : L"GPU 드라이버") &&
+              Contains(r.recommendations[next], L"ReShade"),
+      "NextAction gives the GPU-side advice");
+    for (const auto& candidate : r.actionable_candidates) {
+      Require(candidate.module_filename != L"CommunityShaders.dll", "the stack plugins make no candidate");
+    }
+  }
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -174,6 +205,7 @@ int main()
     TestBlackboxGameState();
     TestEngineWaitWithConsoleOpen();
     TestGraphicsDriverWaitAfterPause();
+    TestEngineGpuQueryPoll();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;

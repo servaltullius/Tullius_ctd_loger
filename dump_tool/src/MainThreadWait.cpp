@@ -59,6 +59,31 @@ constexpr std::size_t kMaxPathModules = 6;
 
 }  // namespace
 
+bool LooksLikeGpuQueryPoll(const std::vector<std::uint8_t>& codeBefore)
+{
+  const std::size_t n = codeBefore.size();
+  // The instruction ending at the return address is the Sleep call:
+  // call [rip+disp32] (FF 15 xx xx xx xx) or call rel32 (E8 xx xx xx xx).
+  std::size_t callStart = 0;
+  if (n >= 6 && codeBefore[n - 6] == 0xFF && codeBefore[n - 5] == 0x15) {
+    callStart = n - 6;
+  } else if (n >= 5 && codeBefore[n - 5] == 0xE8) {
+    callStart = n - 5;
+  } else {
+    return false;
+  }
+  // call qword ptr [reg+0E8h]: FF /2 with mod=10 and a 32-bit displacement
+  // (0xE8 does not fit a signed 8-bit one). rsp (rm=100) would need a SIB byte.
+  for (std::size_t i = 0; i + 6 <= callStart; ++i) {
+    const std::uint8_t modrm = codeBefore[i + 1];
+    if (codeBefore[i] == 0xFF && (modrm & 0xF8) == 0x90 && modrm != 0x94 && codeBefore[i + 2] == 0xE8 &&
+        codeBefore[i + 3] == 0x00 && codeBefore[i + 4] == 0x00 && codeBefore[i + 5] == 0x00) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool IsGraphicsDriverModule(std::wstring_view moduleFilename)
 {
   return Contains(kGraphicsDrivers, LowerAscii(moduleFilename));
@@ -142,6 +167,9 @@ MainThreadWaitInfo ClassifyMainThreadWait(const std::vector<ModalStackFrame>& fr
     info.kind = callerFrame.is_game_exe ? "engine_wait" : "plugin_wait";
     info.waiting_module = callerFrame.module_filename;
     info.waiting_mod_name = callerFrame.inferred_mod_name;
+    if (callerFrame.is_game_exe && info.wait_class == "sleep" && LooksLikeGpuQueryPoll(callerFrame.code_before)) {
+      info.engine_wait_detail = "gpu_query_poll";
+    }
   } else if (!waitFrame && !unnamedSystemFrame && callerKnown) {
     info.kind = "running";
     info.waiting_module = frames[caller].module_filename;
@@ -176,6 +204,12 @@ MainThreadWaitInfo ClassifyMainThreadWait(const std::vector<ModalStackFrame>& fr
 bool IsBystanderWait(const MainThreadWaitInfo& wait)
 {
   return wait.kind == "engine_wait" || wait.kind == "graphics_driver_wait";
+}
+
+bool IsGpuWait(const MainThreadWaitInfo& wait)
+{
+  return wait.kind == "graphics_driver_wait" ||
+         (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll");
 }
 
 }  // namespace skydiag::dump_tool

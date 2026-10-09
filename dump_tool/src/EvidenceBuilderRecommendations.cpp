@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "MainThreadWait.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
@@ -773,16 +774,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   if (r.freeze_analysis.has_analysis) {
     // ADR-0009: say what the main thread was doing before any module triage.
     const auto& wait = r.main_thread_wait;
-    if (isHangLike && wait.kind == "engine_wait") {
-      const std::wstring path = wait.path_modules.empty()
-        ? std::wstring{}
-        : (L" (" + JoinList(wait.path_modules, wait.path_modules.size(), L", ") + L")");
-      r.recommendations.push_back(en
-        ? (L"[Main thread] The main thread was waiting inside the game engine, not running mod code. Do not remove the plugins on its stack" +
-            path + L" on this evidence alone; if the freeze repeats, capture it again while frozen (Ctrl+Shift+F12) and compare what stays the same.")
-        : (L"[메인 스레드] 메인 스레드는 모드 코드를 실행하던 것이 아니라 게임 엔진 안에서 대기 중이었습니다. 이 근거만으로 스택의 플러그인" +
-            path + L"을 빼지 마세요. 프리징이 반복되면 멈춘 상태에서 다시 캡처(Ctrl+Shift+F12)해 공통점을 비교하세요."));
-    } else if (isHangLike && wait.kind == "graphics_driver_wait") {
+    if (isHangLike && IsGpuWait(wait)) {
       std::vector<std::wstring> injectors;
       if (r.graphics_env.enb_detected) {
         injectors.push_back(L"ENB");
@@ -797,13 +789,28 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? std::wstring{}
         : (en ? (L" (detected: " + JoinList(injectors, injectors.size(), L", ") + L")")
               : (L" (감지됨: " + JoinList(injectors, injectors.size(), L", ") + L")"));
+      const bool inDriver = wait.kind == "graphics_driver_wait";
+      const std::wstring where = en
+        ? (inDriver ? (L"was waiting in the graphics driver (" + wait.waiting_module + L")")
+                    : std::wstring(L"was waiting for the GPU (the engine was polling a Direct3D query)"))
+        : (inDriver ? (L"그래픽 드라이버(" + wait.waiting_module + L") 안에서 대기 중이었습니다")
+                    : std::wstring(L"GPU를 기다리고 있었습니다(엔진이 Direct3D 쿼리 결과를 기다림)"));
       r.recommendations.push_back(en
-        ? (L"[Main thread] The main thread was waiting in the graphics driver (" + wait.waiting_module +
-            L"). Update or clean-install the GPU driver, then test without graphics injectors and upscalers" + detected +
+        ? (L"[Main thread] The main thread " + where +
+            L". Update or clean-install the GPU driver, then test without graphics injectors and upscalers" + detected +
             L" and with lighter texture/video-memory load.")
-        : (L"[메인 스레드] 메인 스레드가 그래픽 드라이버(" + wait.waiting_module +
-            L") 안에서 대기 중이었습니다. GPU 드라이버를 업데이트하거나 클린 설치한 뒤, 그래픽 인젝터·업스케일러" + detected +
+        : (L"[메인 스레드] 메인 스레드가 " + where +
+            L". GPU 드라이버를 업데이트하거나 클린 설치한 뒤, 그래픽 인젝터·업스케일러" + detected +
             L" 없이, 그리고 텍스처/비디오 메모리 부담을 줄여서 시험해 보세요."));
+    } else if (isHangLike && wait.kind == "engine_wait") {
+      const std::wstring path = wait.path_modules.empty()
+        ? std::wstring{}
+        : (L" (" + JoinList(wait.path_modules, wait.path_modules.size(), L", ") + L")");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting inside the game engine, not running mod code. Do not remove the plugins on its stack" +
+            path + L" on this evidence alone; if the freeze repeats, capture it again while frozen (Ctrl+Shift+F12) and compare what stays the same.")
+        : (L"[메인 스레드] 메인 스레드는 모드 코드를 실행하던 것이 아니라 게임 엔진 안에서 대기 중이었습니다. 이 근거만으로 스택의 플러그인" +
+            path + L"을 빼지 마세요. 프리징이 반복되면 멈춘 상태에서 다시 캡처(Ctrl+Shift+F12)해 공통점을 비교하세요."));
     }
     if (isHangLike) {
       const auto& state = r.blackbox_freeze_summary;

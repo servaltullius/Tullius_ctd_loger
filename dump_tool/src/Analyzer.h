@@ -135,6 +135,10 @@ struct MainThreadWaitInfo
   // unknown: the top frames could not be told apart; empty: not analyzed
   std::string kind;
   std::string wait_class;           // sleep / sync / empty
+  // engine_wait only: gpu_query_poll when the engine was polling a Direct3D
+  // query (ID3D11DeviceContext::GetData) in its Sleep loop, i.e. waiting for
+  // the GPU; empty when the code is not known.
+  std::string engine_wait_detail;
   std::wstring wait_api;            // e.g. "KERNELBASE.dll!SleepEx"
   std::wstring waiting_module;      // module that called the wait, or that was running
   std::wstring waiting_mod_name;

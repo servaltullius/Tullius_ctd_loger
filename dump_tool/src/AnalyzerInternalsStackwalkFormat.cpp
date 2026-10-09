@@ -160,6 +160,7 @@ std::vector<ModalStackFrame> BuildModalProbeFrames(
   out.reserve(n);
   for (std::size_t i = 0; i < n; i++) {
     ModalStackFrame frame{};
+    frame.pc = pcs[i];
     if (const auto idx = FindModuleIndexForAddress(modules, pcs[i])) {
       const auto& m = modules[*idx];
       frame.has_module = true;

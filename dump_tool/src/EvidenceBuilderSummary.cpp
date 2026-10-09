@@ -151,6 +151,19 @@ std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang,
           L"그래픽 모드, 비디오 메모리)을 가리킵니다. (신뢰도: " + conf + L")");
   }
   const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
+  if (wait.engine_wait_detail == "gpu_query_poll") {
+    return en
+      ? (L"The game main thread was waiting for the GPU: the engine was polling a Direct3D query "
+          L"(ID3D11DeviceContext::GetData) in a Sleep loop (" + wait.waiting_module + api +
+          L") until the GPU finished its work. That points to the GPU side - the driver, graphics mods (ENB, ReShade, "
+          L"upscalers, shader mods) or video memory - rather than to the plugins on the stack" +
+          (path.empty() ? std::wstring{} : (L" (" + path + L")")) + L". (Confidence: " + conf + L")")
+      : (L"게임 메인 스레드는 GPU를 기다리고 있었습니다. 엔진이 GPU 작업이 끝나기를 Sleep 루프에서 Direct3D 쿼리"
+          L"(ID3D11DeviceContext::GetData)로 확인하던 중이었습니다(" + wait.waiting_module + api +
+          L"). 스택의 플러그인" + (path.empty() ? std::wstring{} : (L"(" + path + L")")) +
+          L"보다는 GPU 쪽(드라이버, ENB·ReShade·업스케일러·셰이더 모드 같은 그래픽 모드, 비디오 메모리)을 가리킵니다. (신뢰도: " +
+          conf + L")");
+  }
   return en
     ? (L"The game main thread was not running mod code: it was waiting inside the game engine (" + wait.waiting_module +
         api + L")." +

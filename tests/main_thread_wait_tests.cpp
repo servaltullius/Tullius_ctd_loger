@@ -3,6 +3,7 @@
 // engine's render pass and one wait inside the NVIDIA driver.
 
 #include <cassert>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -137,6 +138,70 @@ void TestUnknownWhenTheTopCannotBeRead()
   assert(ClassifyMainThreadWait({}).kind.empty());
 }
 
+// The 0x60 code bytes ending at SkyrimSE.exe+0xe46e21 in the user's freeze
+// dumps (game 1.6.1170): End(query) via vtable +0xE0, then a loop of
+// GetData via vtable +0xE8, test, and Sleep(1) through the import table.
+const std::vector<std::uint8_t> kFieldQueryPoll = {
+  0x83, 0xfb, 0x03, 0x41, 0x0f, 0x43, 0xdc, 0x46, 0x38, 0xa4, 0x2b, 0x78, 0x6a, 0x28, 0x03, 0x75,
+  0x69, 0x4c, 0x89, 0x74, 0x24, 0x70, 0x4d, 0x8b, 0xb4, 0xdd, 0x60, 0x6a, 0x28, 0x03, 0x44, 0x89,
+  0x64, 0x24, 0x78, 0xc7, 0x44, 0x24, 0x20, 0x01, 0x00, 0x00, 0x00, 0x48, 0x8b, 0x0d, 0xbd, 0x19,
+  0x44, 0x02, 0x4c, 0x8d, 0x44, 0x24, 0x78, 0x41, 0xb9, 0x04, 0x00, 0x00, 0x00, 0x49, 0x8b, 0xd6,
+  0x48, 0x8b, 0x01, 0xff, 0x90, 0xe8, 0x00, 0x00, 0x00, 0x85, 0xc0, 0x78, 0x08, 0x8b, 0x44, 0x24,
+  0x78, 0x85, 0xc0, 0x75, 0x12, 0xb9, 0x01, 0x00, 0x00, 0x00, 0xff, 0x15, 0x9f, 0x86, 0x90, 0x00,
+};
+
+void TestGpuQueryPollPattern()
+{
+  using skydiag::dump_tool::LooksLikeGpuQueryPoll;
+  assert(LooksLikeGpuQueryPoll(kFieldQueryPoll));
+
+  auto otherSlot = kFieldQueryPoll;  // vtable +0xE0 (End) is not GetData
+  otherSlot[69] = 0xe0;
+  assert(!LooksLikeGpuQueryPoll(otherSlot));
+
+  auto notACall = kFieldQueryPoll;  // the return address does not follow a call
+  notACall[90] = 0x90;
+  assert(!LooksLikeGpuQueryPoll(notACall));
+
+  // call rel32 instead of the import-table call also counts.
+  auto rel32 = kFieldQueryPoll;
+  rel32[90] = 0x90;
+  rel32[91] = 0xe8;
+  assert(LooksLikeGpuQueryPoll(rel32));
+
+  assert(!LooksLikeGpuQueryPoll({}));
+  assert(!LooksLikeGpuQueryPoll({ 0xff, 0x15, 0x00, 0x00, 0x00, 0x00 }));
+}
+
+void TestEngineWaitNamesTheGpuQueryPoll()
+{
+  auto caller = GameExe();
+  caller.code_before = kFieldQueryPoll;
+  const std::vector<ModalStackFrame> frames = {
+    System(L"ntdll.dll", L"NtDelayExecution"),
+    System(L"KERNELBASE.dll", L"SleepEx", 0x91),
+    caller,
+    Plugin(L"EngineFixes.dll"),
+  };
+  const auto wait = ClassifyMainThreadWait(frames);
+  assert(wait.kind == "engine_wait");
+  assert(wait.engine_wait_detail == "gpu_query_poll");
+  assert(skydiag::dump_tool::IsGpuWait(wait));
+
+  // Without the code bytes (dump lacks them) it stays a plain engine wait.
+  auto plain = frames;
+  plain[2].code_before.clear();
+  const auto unknownCode = ClassifyMainThreadWait(plain);
+  assert(unknownCode.kind == "engine_wait" && unknownCode.engine_wait_detail.empty());
+  assert(!skydiag::dump_tool::IsGpuWait(unknownCode));
+
+  // A sync wait from the same code is not the Sleep poll.
+  auto sync = frames;
+  sync[0] = System(L"ntdll.dll", L"NtWaitForSingleObject");
+  sync[1] = System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf);
+  assert(ClassifyMainThreadWait(sync).engine_wait_detail.empty());
+}
+
 }  // namespace
 
 int main()
@@ -145,5 +210,7 @@ int main()
   TestGraphicsDriverWaitWithShortStack();
   TestPluginWaitAndRunning();
   TestUnknownWhenTheTopCannotBeRead();
+  TestGpuQueryPollPattern();
+  TestEngineWaitNamesTheGpuQueryPoll();
   return 0;
 }

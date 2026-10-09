@@ -118,7 +118,10 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
-    if (wait.kind == "engine_wait") {
+    if (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll") {
+      e.title = en ? L"Main thread was waiting for the GPU (engine polling a Direct3D query)"
+                   : L"메인 스레드가 GPU를 기다리는 중(엔진의 Direct3D 쿼리 대기)";
+    } else if (wait.kind == "engine_wait") {
       e.title = en ? L"Main thread was waiting inside the game engine" : L"메인 스레드가 게임 엔진 안에서 대기 중";
     } else if (wait.kind == "graphics_driver_wait") {
       e.title = en ? L"Main thread was waiting inside the graphics driver" : L"메인 스레드가 그래픽 드라이버 안에서 대기 중";

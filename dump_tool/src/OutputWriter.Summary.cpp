@@ -412,6 +412,7 @@ nlohmann::json BuildSummaryJson(
     summary["freeze_analysis"]["main_thread_wait"] = {
       { "kind", r.main_thread_wait.kind },
       { "wait_class", r.main_thread_wait.wait_class },
+      { "engine_wait_detail", r.main_thread_wait.engine_wait_detail },
       { "wait_api", WideToUtf8(r.main_thread_wait.wait_api) },
       { "waiting_module", WideToUtf8(r.main_thread_wait.waiting_module) },
       { "waiting_mod_name", WideToUtf8(r.main_thread_wait.waiting_mod_name) },

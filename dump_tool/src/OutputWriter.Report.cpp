@@ -313,6 +313,9 @@ std::string BuildReportText(
     if (!r.main_thread_wait.kind.empty()) {
       const auto& wait = r.main_thread_wait;
       rpt << "  main_thread_wait kind=" << wait.kind;
+      if (!wait.engine_wait_detail.empty()) {
+        rpt << " detail=" << wait.engine_wait_detail;
+      }
       if (!wait.wait_api.empty()) {
         rpt << " api=" << WideToUtf8(wait.wait_api);
       }
