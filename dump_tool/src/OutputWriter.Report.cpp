@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "Utf.h"
 #include "WctTypes.h"
@@ -277,9 +278,9 @@ std::string BuildReportText(
     rpt << "CrashLoggerReadingPath: "
         << WideToUtf8(crashLoggerReadingPath) << "\n";
   }
-  if (!r.recommendations.empty()) {
+  if (const auto next = SelectNextActionIndex(r.recommendations); next != std::wstring::npos) {
     rpt << "NextAction: "
-        << WideToUtf8(stripRecommendationTag(r.recommendations.front())) << "\n";
+        << WideToUtf8(stripRecommendationTag(r.recommendations[next])) << "\n";
   }
   rpt << "StateFlags: " << r.state_flags << "\n";
   rpt << "HasBlackbox: " << (r.has_blackbox ? "1" : "0") << "\n";

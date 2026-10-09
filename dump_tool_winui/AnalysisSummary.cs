@@ -19,6 +19,8 @@ internal sealed class AnalysisSummary
     public string CleanExitEvidenceFilename { get; init; } = string.Empty;
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
+    // Index of the report's NextAction in Recommendations (0 for older summaries).
+    public int NextActionIndex { get; init; }
     public required IReadOnlyList<string> CallstackFrames { get; init; }
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
@@ -158,6 +160,7 @@ internal sealed class AnalysisSummary
             CleanExitEvidenceFilename = ReadString(cleanExitEvidence, "sidecar_filename"),
             Suspects = suspects,
             Recommendations = recommendations,
+            NextActionIndex = ReadInt32(root, "next_action_index"),
             CallstackFrames = callstackFrames,
             EvidenceItems = evidenceItems,
             ActionableCandidates = actionableCandidates,

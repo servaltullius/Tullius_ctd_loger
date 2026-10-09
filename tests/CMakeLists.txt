@@ -782,6 +782,15 @@ target_link_libraries(skydiag_plugin_rules_logic_tests PRIVATE
 
 add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logic_tests)
 
+add_executable(skydiag_next_action_tests
+  next_action_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/NextAction.cpp"
+)
+target_include_directories(skydiag_next_action_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_next_action_tests COMMAND skydiag_next_action_tests)
+
 add_executable(skydiag_skse_log_parser_tests
   skse_log_parser_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
