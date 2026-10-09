@@ -98,6 +98,11 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
+      # Host details for the intermittent self-dump failure (see dump-stress.yml).
+      - name: Runner info
+        shell: pwsh
+        run: ./scripts/print_runner_info.ps1
+
       # Windows-only test targets are invisible to the Linux job, so a release
       # must not be cut without running them.
       - name: Run tests (Windows)

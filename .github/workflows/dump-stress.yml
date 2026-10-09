@@ -1,19 +1,19 @@
 name: Dump Stress
 
-# Runs selected Windows tests many times in a row on a CI runner.
+# Runs selected Windows tests many times in a row on several CI runners.
 #
-# The helper's dump tests intermittently fail on CI with ERROR_PARTIAL_COPY
-# (MiniDumpWriteDump failed: 2147944184) but never locally, so waiting for a
-# random failure on a merge is the only other way to see one. This repeats
-# them until the first failure; the failing test prints the helper log, whose
-# "Crash dump attempt ... failed" lines carry the dump writer's diagnostics.
+# The helper's crash-path self-dump tests intermittently fail on CI with
+# "MiniDumpWriteDump failed: 2147944184" (0x800706F8, ERROR_INVALID_USER_BUFFER;
+# earlier notes misread it as ERROR_PARTIAL_COPY) but never locally. Within one
+# CI run every retry fails, and one shard repeating the tests 400 times never
+# failed, so the cause looks tied to the runner host. Each shard is a separate
+# job, so a run samples several hosts; every shard prints its host details and
+# runs the tests with SKYDIAG_DUMP_IO_TRACE=1, so a failing dump reports which
+# file write failed and whether 1 MiB writes would have worked.
 # Manual only: it never runs on pushes or pull requests.
 #
-# Runner-only failures seen so far (this ERROR_PARTIAL_COPY and "Access is
-# denied" when linking a freshly built test) point at real-time antivirus
-# scanning on the runner. defender_exclusion=true excludes the workspace and
-# the test executables from Microsoft Defender; running once with it off and
-# once with it on shows whether Defender is behind the dump failure.
+# defender_exclusion=true excludes the workspace and the test executables from
+# Microsoft Defender (an earlier experiment; Defender did not explain it).
 
 on:
   workflow_dispatch:
@@ -31,12 +31,27 @@ on:
         type: boolean
         required: true
         default: false
+      io_trace:
+        description: "Run with SKYDIAG_DUMP_IO_TRACE=1 (a failing dump reports the failed file write)"
+        type: boolean
+        required: true
+        default: true
+      full_suite_first:
+        description: "Run the whole Windows suite once before the repeats (the CI failures happened there)"
+        type: boolean
+        required: true
+        default: true
 
 jobs:
   dump-stress:
-    name: Dump Stress (repeat until fail)
+    name: Dump Stress (shard ${{ matrix.shard }})
     runs-on: windows-2022
     timeout-minutes: 150
+    # Each shard is its own job and usually its own runner host.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 
     steps:
       - name: Checkout
@@ -99,11 +114,24 @@ jobs:
           }
           exit $LASTEXITCODE
 
+      - name: Runner info
+        shell: pwsh
+        run: ./scripts/print_runner_info.ps1
+
+      - name: Run the whole Windows suite once
+        if: ${{ inputs.full_suite_first }}
+        shell: pwsh
+        env:
+          SKYDIAG_DUMP_IO_TRACE: ${{ inputs.io_trace && '1' || '0' }}
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
+
       - name: Repeat selected tests until the first failure
+        if: ${{ !cancelled() }}
         shell: pwsh
         env:
           STRESS_REPEAT: ${{ inputs.repeat }}
           STRESS_TESTS: ${{ inputs.tests }}
+          SKYDIAG_DUMP_IO_TRACE: ${{ inputs.io_trace && '1' || '0' }}
         run: >
           ctest --test-dir build-win -C RelWithDebInfo
           -R "$env:STRESS_TESTS"

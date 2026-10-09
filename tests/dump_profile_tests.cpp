@@ -43,8 +43,10 @@ void AssertDefaultCrashBase(const DumpProfile& profile)
   assert(!profile.preferWctThreads);
 }
 
-// CI and field dumps have failed with ERROR_PARTIAL_COPY (seen as the HRESULT
-// 0x8007012B); the writer retries once skipping unreadable memory.
+// An ERROR_PARTIAL_COPY failure (Win32 299 or HRESULT 0x8007012B) is retried
+// once skipping unreadable memory. The intermittent CI failure this was added
+// for turned out to be 0x800706F8 (ERROR_INVALID_USER_BUFFER), which is not
+// retried here.
 static_assert(ShouldRetryDumpIgnoringInaccessibleMemory(0x00000000u, 299u));
 static_assert(ShouldRetryDumpIgnoringInaccessibleMemory(0x00001105u, 0x8007012Bu));
 static_assert(!ShouldRetryDumpIgnoringInaccessibleMemory(kMiniDumpIgnoreInaccessibleMemoryFlag, 0x8007012Bu));

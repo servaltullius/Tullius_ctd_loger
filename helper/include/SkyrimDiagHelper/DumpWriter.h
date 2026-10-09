@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
 #include "SkyrimDiagHelper/Config.h"
@@ -23,5 +24,9 @@ bool WriteDumpWithStreams(
   const DumpProfile& dumpProfile,
   bool isProcessSnapshot,
   std::wstring* err);
+
+// File writes performed by the dump callback under SKYDIAG_DUMP_IO_TRACE=1
+// since the process started; lets tests prove the traced path ran.
+std::uint64_t TracedDumpWriteCount() noexcept;
 
 }  // namespace skydiag::helper
