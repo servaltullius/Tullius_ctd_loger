@@ -12,6 +12,16 @@
 
 namespace skydiag::helper {
 
+// path::string() converts through the ANSI code page: it substitutes '?' for
+// characters it cannot represent and can throw when that code page is UTF-8.
+// The output folder can hold any file a user drops there, so compare UTF-8
+// names, which never throw; the names retention manages are all ASCII.
+inline std::string PathPartUtf8(const std::filesystem::path& part)
+{
+  const auto u8 = part.u8string();
+  return std::string(u8.begin(), u8.end());
+}
+
 struct RetentionLimits {
   // 0 = unlimited (no cleanup).
   std::uint32_t maxCrashDumps = 20;
@@ -93,7 +103,7 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::filesystem::path& dir, 
     if (!ent.is_regular_file(ec)) {
       continue;
     }
-    const auto name = ent.path().filename().string();
+    const auto name = PathPartUtf8(ent.path().filename());
     if (StartsWith(name, stem + "_")) {
       std::filesystem::remove(ent.path(), ec);
     }
@@ -142,12 +152,12 @@ inline std::vector<DatedFile> CollectFilesByPrefixAndExt(
 {
   std::vector<DatedFile> out;
   for (const auto& p : files) {
-    const auto name = p.filename().string();
+    const auto name = PathPartUtf8(p.filename());
     if (!StartsWith(name, prefix) || !EndsWith(name, ext)) {
       continue;
     }
 
-    const std::string stem = p.stem().string();
+    const std::string stem = PathPartUtf8(p.stem());
     auto tsOpt = TryExtractTimestampToken(stem);
     if (!tsOpt) {
       continue;
@@ -159,7 +169,7 @@ inline std::vector<DatedFile> CollectFilesByPrefixAndExt(
     if (a.ts != b.ts) {
       return a.ts > b.ts;
     }
-    return a.path.filename().string() < b.path.filename().string();
+    return PathPartUtf8(a.path.filename()) < PathPartUtf8(b.path.filename());
   });
   return out;
 }
@@ -201,7 +211,7 @@ inline void PruneDumpFilesFromCollected(
   auto tsRefs = BuildTimestampRefCounts(dumps);
   for (std::size_t i = maxCount; i < dumps.size(); i++) {
     const auto p = dumps[i].path;
-    const auto stem = p.stem().string();
+    const auto stem = PathPartUtf8(p.stem());
 
     std::filesystem::remove(p, ec);
     DeleteAssociatedDumpToolArtifacts(dir, stem);
@@ -264,7 +274,7 @@ inline void PruneEtwTracesFromCollected(std::vector<DatedFile> etls, std::uint32
     if (a.ts != b.ts) {
       return a.ts > b.ts;
     }
-    return a.path.filename().string() < b.path.filename().string();
+    return PathPartUtf8(a.path.filename()) < PathPartUtf8(b.path.filename());
   });
 
   std::error_code ec;

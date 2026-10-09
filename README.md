@@ -67,7 +67,7 @@ Tullius complements CrashLogger rather than replacing it. There is no reviewed r
 
 MO2 runs Skyrim inside its USVFS virtual file system. The plugin starts `SkyrimDiagHelper.exe` from the game process, so the helper normally runs from the virtual copy of the mod files. MO2 users have reported that, with a mod-only install, the steps the helper performs after the game exits can fail silently: no new dump or report, or the viewer never opens ([#4](https://github.com/servaltullius/Tullius_ctd_loger/issues/4)).
 
-If that happens, first open `SkyrimDiagHelper.log` in the output folder (`overwrite\SKSE\Plugins\Tullius Ctd Logs\` by default) and check whether anything was logged after the crash. If the log stops at the crash, users report that deploying the files physically restores the post-crash steps:
+If that happens, first open `SkyrimDiagHelper.log` in the output folder (`overwrite\SKSE\Plugins\Tullius Ctd Logs\` by default) and check whether anything was logged after the crash (if the game was started again since, the crashed session's log is `SkyrimDiagHelper.previous.log`). If the log stops at the crash, users report that deploying the files physically restores the post-crash steps:
 
 1. Copy the whole `SKSE\Plugins\` contents of the release zip into the real game `Data\SKSE\Plugins\` folder: `SkyrimDiag.dll`, `SkyrimDiag.ini`, `SkyrimDiagHelper.exe`, `SkyrimDiagHelper.ini`, `SkyrimDiagDumpToolCli.exe`, the `data\` folder, and the complete `SkyrimDiagWinUI\` folder including `app\`.
 2. Disable the Tullius mod in MO2, so MO2 does not overlay its copy on top of the real files and only one version is installed.

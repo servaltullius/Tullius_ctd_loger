@@ -1,10 +1,13 @@
 #include "RetentionWorker.h"
 
 #include <condition_variable>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
+
+#include "HelperLog.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -59,7 +62,16 @@ void RetentionWorkerMain()
     }
 
     for (const auto& [_, task] : batch) {
-      skydiag::helper::ApplyRetentionToOutputDir(task.outBase, task.limits);
+      // An exception escaping this thread would terminate the helper; a
+      // failed sweep only means old captures stay until the next one.
+      try {
+        skydiag::helper::ApplyRetentionToOutputDir(task.outBase, task.limits);
+      } catch (const std::exception& ex) {
+        const std::string what = ex.what();
+        AppendLogLine(task.outBase, L"Retention sweep failed: " + std::wstring(what.begin(), what.end()));
+      } catch (...) {
+        AppendLogLine(task.outBase, L"Retention sweep failed.");
+      }
     }
   }
 }

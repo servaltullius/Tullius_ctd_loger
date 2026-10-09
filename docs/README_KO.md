@@ -133,7 +133,7 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 
 MO2는 USVFS 가상 파일 시스템 안에서 스카이림을 실행합니다. 플러그인은 게임 프로세스에서 `SkyrimDiagHelper.exe`를 시작하므로, Helper도 보통 모드 파일의 가상 사본에서 실행됩니다. MO2 사용자 제보에 따르면, 모드로만 설치한 경우 게임 종료 뒤 Helper가 해야 할 작업이 조용히 실패할 수 있습니다. 새 덤프나 리포트가 없거나 뷰어가 열리지 않습니다([#4](https://github.com/servaltullius/Tullius_ctd_loger/issues/4)).
 
-이 경우 먼저 출력 폴더(기본: `overwrite\SKSE\Plugins\Tullius Ctd Logs\`)의 `SkyrimDiagHelper.log`에 사고 이후 기록이 있는지 확인하세요. 로그가 사고 시점에서 끊겨 있다면, 파일을 실제 폴더에 배치해 사고 후 동작이 복구됐다는 제보가 있습니다.
+이 경우 먼저 출력 폴더(기본: `overwrite\SKSE\Plugins\Tullius Ctd Logs\`)의 `SkyrimDiagHelper.log`에 사고 이후 기록이 있는지 확인하세요(그 뒤에 게임을 다시 켰다면 사고 난 세션의 로그는 `SkyrimDiagHelper.previous.log`입니다). 로그가 사고 시점에서 끊겨 있다면, 파일을 실제 폴더에 배치해 사고 후 동작이 복구됐다는 제보가 있습니다.
 
 1. 릴리즈 zip의 `SKSE\Plugins\` 내용 전체를 실제 게임 `Data\SKSE\Plugins\` 폴더에 복사합니다. `SkyrimDiag.dll`, `SkyrimDiag.ini`, `SkyrimDiagHelper.exe`, `SkyrimDiagHelper.ini`, `SkyrimDiagDumpToolCli.exe`, `data\` 폴더, `app\`을 포함한 `SkyrimDiagWinUI\` 폴더 전체입니다.
 2. MO2에서 Tullius 모드를 비활성화합니다. MO2가 실제 파일 위에 모드 사본을 겹쳐 올리지 않고, 한 버전만 설치된 상태가 됩니다.

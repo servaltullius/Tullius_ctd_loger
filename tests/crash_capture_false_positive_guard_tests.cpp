@@ -306,8 +306,8 @@ int main()
   AssertOrdered(
     helperEntryBody,
     "HANDLE helperSingletonMutex = skydiag::helper::internal::AcquireHelperSingletonMutex(proc.pid, &err);",
-    "skydiag::helper::internal::ClearLog(outBase);",
-    "Helper entry must acquire singleton mutex before clearing the helper log so duplicate helpers do not erase active diagnostics.");
+    "skydiag::helper::internal::StartHelperLogSession(outBase);",
+    "Helper entry must acquire singleton mutex before restarting the helper log so duplicate helpers do not erase active diagnostics.");
 
   const std::string thawBody = ExtractFunctionBody(
     crashCapture,
