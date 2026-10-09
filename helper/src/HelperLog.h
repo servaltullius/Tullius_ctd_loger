@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <exception>
 #include <filesystem>
+#include <string>
 #include <string_view>
 
 namespace skydiag::helper::internal {
@@ -13,6 +15,9 @@ void ClearLog(const std::filesystem::path& outBase);
 // after a crash, often after relaunching the game.
 void StartHelperLogSession(const std::filesystem::path& outBase);
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line);
+// what() of a standard-library exception is in the ANSI code page (e.g. a
+// localized system message or a path); widen it for the log.
+std::wstring AnsiExceptionText(const std::exception& ex);
 
 }  // namespace skydiag::helper::internal
 

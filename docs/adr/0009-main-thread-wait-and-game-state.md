@@ -31,8 +31,9 @@ Accepted
    (`ClassifyMainThreadWait`).
    - `engine_wait`: 맨 위 시스템 프레임에 Sleep 계열이나 동기화 대기 API가 있고, 그것을 부른
      첫 비시스템 프레임이 게임 EXE. Sleep 대기이고, 게임 EXE 프레임의 호출 직전 코드(덤프 메모리에서만
-     읽은 0x60바이트)가 "vtable +0xE8 간접 호출(`call [reg+0E8h]`, `GetData`) 뒤 Sleep 호출로 끝남"
-     모양이면 `engine_wait_detail = gpu_query_poll`(GPU 쿼리 결과 대기)로 구체화한다. 주소가 아니라
+     읽은 0x60바이트)가 "vtable +0xE8 간접 호출(`call [reg+0E8h]`, `GetData`)과 바로 뒤의 결과 검사
+     (`test eax,eax` 또는 `cmp eax,1`), 그리고 Sleep 호출로 끝남" 모양이면
+     `engine_wait_detail = gpu_query_poll`(GPU 쿼리 결과 대기)로 구체화한다. 주소가 아니라
      코드 모양으로 판별하므로 게임 버전에 묶이지 않고, 덤프에 코드가 없으면 그냥 `engine_wait`로 남는다.
    - `plugin_wait`: 같은 대기를 플러그인 DLL이 불렀다.
    - `graphics_driver_wait`: 대기 위쪽에 그래픽 드라이버 UMD(NVIDIA/AMD/Intel)나 D3D/DXGI가 있다.
@@ -41,16 +42,20 @@ Accepted
    - `unknown`: 맨 위 시스템 프레임에 가까운 이름이 없거나 호출자에 닿지 못했다.
 2. `engine_wait`와 `graphics_driver_wait`는 스택 아래쪽 플러그인이 일으킨 대기가 아니므로
    ("방관자 대기"), modal 대화상자와 같은 원칙으로 다룬다.
-   - 스택 기반 후보 신호를 만들지 않고, 스택 suspect는 `Low`로 낮추며 호출 경로라고 표시한다.
+   - suspect가 메인 스레드 스택에서 나왔을 때만(스택 분석이 WCT cycle 스레드를 고를 수 있다)
+     스택 기반 후보 신호를 만들지 않고, 스택 suspect는 `Low`로 낮추며 호출 경로라고 표시한다.
    - 스레드 그룹 합의, 반복 이력, first-chance 신호는 그대로 쓴다.
    - 요약 문장은 어디서 기다렸는지와 스택 아래쪽 플러그인(호출 경로)을 말하고, 신뢰도는 `Low`.
-   - `[Main thread]` / `[메인 스레드]` 안내를 프리징 체크리스트 맨 앞에 두고, `NextAction`은
-     modal 대화상자와 같은 우선순위로 이 안내를 고른다.
+   - `[Main thread]` / `[메인 스레드]` 안내를 프리징 체크리스트에 넣고, `NextAction`은 modal
+     대화상자와 같은 우선순위로 이 안내를 고른다. 데드락, 동기화 정지, 로더 stall로 판정됐거나
+     스레드 그룹 합의가 있으면 이 안내를 넣지 않는다(그 판정이 먼저이고, 대기는 근거 항목으로
+     남는다).
    - 드라이버 대기와 GPU 쿼리 대기(`IsGpuWait`)는 같은 GPU 쪽 안내(드라이버, 그래픽 인젝터·업스케일러,
      비디오 메모리)를 쓰고, 감지된 그래픽 인젝터(ENB, ReShade, DXVK)를 적는다.
-3. 프리징 상태 id(`freeze_candidate`, `freeze_ambiguous` 등)는 바꾸지 않는다. 대기 분류는 첫
-   번째 `primary_reasons`로 들어간다. 데드락, 동기화 정지, 로더 stall 판정과 modal 대화상자가 여전히
-   먼저다.
+3. 대기 분류가 프리징 상태 id를 직접 바꾸지는 않는다. 다만 스택 후보가 빠지므로 같은 덤프가
+   `freeze_candidate` 대신 `freeze_ambiguous`가 될 수 있다. 대기 분류는 첫 번째
+   `primary_reasons`로 들어가고, 데드락, 동기화 정지, 로더 stall에서는 그 판정의 이유 뒤에
+   붙는다. modal 대화상자는 대기 분류를 쓰지 않는다.
 4. 프리징 캡처의 메인 스레드 스택은 0번 프레임부터 16개를 보여 준다. 크래시 스택과 crash bucket
    키는 그대로다.
 5. 블랙박스에서 캡처 시점의 게임 상태를 만든다.
@@ -58,6 +63,9 @@ Accepted
      TweenMenu, InventoryMenu 등)만 남긴다. HUD 위젯과 커서 같은 오버레이는 제외한다.
    - 마지막 로딩이 끝난 뒤 지난 시간.
    - 5분 이상의 PerfHitch 공백은 PC 절전이나 최소화로 보고, 언제 끝났는지와 함께 기록한다.
+   - 시간은 메인 스레드의 마지막 하트비트(프리징이 시작된 때)까지 잰다. 조용히 플레이하면
+     블랙박스 이벤트가 쌓이지 않아, 마지막 이벤트를 기준으로 하면 시간이 0에 가깝게 나온다.
+     하트비트가 없으면 마지막 이벤트를 쓴다.
    - 프리징 요약 문장(modal 제외), "캡처 당시 게임 상태" 근거 항목, 콘솔과 긴 공백에 대한
      `[Context]` / `[상황]` 안내에 쓴다. 히치 통계는 그대로 두되 최댓값에 긴 공백이 포함됐다고 적는다.
 
@@ -85,15 +93,23 @@ Accepted
 - 블랙박스 링 버퍼보다 먼저 열린 메뉴는 보이지 않는다.
 - 시스템 DLL 심볼은 로컬 이미지의 export 이름에 기대므로, 다른 PC에서 분석하면 `unknown`이 늘
   수 있다.
+- 게임 EXE가 플러그인이 쥔 SRW 잠금이나 critical section에서 기다려도 `engine_wait`로 분류된다.
+  WCT는 SRW 잠금을 보지 못하므로, 스레드 그룹 합의가 없으면 그 플러그인의 스택 후보가 빠진다.
+- ENB의 `d3d11.dll`, ReShade의 `dxgi.dll` 같은 프록시 DLL은 이름으로 그래픽 런타임으로 본다.
+  프록시 자체 코드에서 기다려도 "그래픽 드라이버 안에서 대기"로 나온다(안내에는 감지된 인젝터를
+  적는다).
 
 ## Verification
 
 - `skydiag_main_thread_wait_tests`(Linux): 실사고 덤프의 실제 코드 바이트로 GPU 쿼리 대기 판별과 그 변형, 실사고 모양의 엔진 대기, 짧은 드라이버 스택,
   플러그인 대기, 실행 중, 판별 불가.
 - `skydiag_freeze_candidate_consensus_tests`(Linux): 대기 분류가 첫 이유가 되고 상태 id는
-  그대로이며 modal이 우선한다.
-- `skydiag_freeze_context_report_tests`: 블랙박스 메뉴 재생, 로딩 후 시간, 긴 공백, 요약·근거·
-  안내·`NextAction`, 스택 후보 없음, 크래시 리포트 무변화.
+  그대로이며 modal이 우선하고, 데드락에서는 대기 이유가 뒤에 붙는다.
+- `skydiag_freeze_context_report_tests`: 블랙박스 메뉴 재생, 로딩 후 시간(하트비트 기준),
+  긴 공백, 요약·근거·안내·`NextAction`, 스택 후보 없음, 다른 스레드의 suspect는 후보 유지,
+  동기화 정지·데드락에서 `[Main thread]` 안내 없음, 크래시 리포트 무변화.
+- `skydiag_share_text_fixture_tests`: WinUI 뷰어와 공유 텍스트가 리포트의 `NextAction`
+  (`next_action_index`)을 따른다.
 - 보관 중인 실사고 프리징 5건과 modal 1건 재분석.
 
 ## References

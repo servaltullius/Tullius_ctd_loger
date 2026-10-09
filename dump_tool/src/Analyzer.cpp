@@ -619,7 +619,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.has_blackbox) {
     blackboxFreezeSummary = internal::BuildBlackboxFreezeSummary(
       out.events,
-      (out.state_flags & skydiag::kState_Loading) != 0u);
+      (out.state_flags & skydiag::kState_Loading) != 0u,
+      out.blackbox_last_heartbeat_ms);
   }
   out.blackbox_freeze_summary = std::move(blackboxFreezeSummary);
   out.first_chance_summary = internal::BuildFirstChanceSummary(

@@ -42,7 +42,10 @@ jobs:
         run: |
           code=true
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            if files=$(git diff --name-only "$BASE_SHA...$HEAD_SHA") && [ -n "$files" ]; then
+            # --no-renames lists both sides of a rename, so moving a script
+            # into docs/ still counts as a code change; core.quotePath=false
+            # keeps non-ASCII paths (doc/*.md) unquoted for the match.
+            if files=$(git -c core.quotePath=false diff --no-renames --name-only "$BASE_SHA...$HEAD_SHA") && [ -n "$files" ]; then
               echo "$files"
               if ! echo "$files" | grep -qvE '(\.md$|^docs/|^doc/)'; then
                 code=false

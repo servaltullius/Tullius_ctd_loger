@@ -569,8 +569,9 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   AddCrashLoggerFrameSignals(r, en, &signals);
   AddCrashLoggerSignals(r, en, &signals);
   // A main thread waiting in the engine or the graphics driver says nothing
-  // about the plugins further down its stack (ADR-0009).
-  if (!IsBystanderWait(r.main_thread_wait)) {
+  // about the plugins further down its stack (ADR-0009). Suspects from another
+  // thread (a WCT cycle member) still count.
+  if (!IsBystanderWait(r.main_thread_wait) || !r.suspects_from_main_thread) {
     AddStackSignals(r, en, &signals);
   }
   AddHangThreadGroupSignal(r, en, &signals);

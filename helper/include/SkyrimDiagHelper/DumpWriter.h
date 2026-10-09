@@ -29,4 +29,8 @@ bool WriteDumpWithStreams(
 // since the process started; lets tests prove the traced path ran.
 std::uint64_t TracedDumpWriteCount() noexcept;
 
+// Crash dumps whose exception context went through the XSTATE-sized copy
+// (not the bare-CONTEXT fallback) since the process started.
+std::uint64_t XStateSizedContextCount() noexcept;
+
 }  // namespace skydiag::helper

@@ -19,8 +19,10 @@ internal sealed class AnalysisSummary
     public string CleanExitEvidenceFilename { get; init; } = string.Empty;
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
-    // Index of the report's NextAction in Recommendations (0 for older summaries).
+    // Index of the report's NextAction in Recommendations (-1 = none).
     public int NextActionIndex { get; init; }
+    // Older summaries have no next_action_index; the viewer then picks by tag.
+    public bool HasNextActionIndex { get; init; }
     public required IReadOnlyList<string> CallstackFrames { get; init; }
     public required IReadOnlyList<EvidenceViewItem> EvidenceItems { get; init; }
     public required IReadOnlyList<ResourceViewItem> ResourceItems { get; init; }
@@ -161,6 +163,8 @@ internal sealed class AnalysisSummary
             Suspects = suspects,
             Recommendations = recommendations,
             NextActionIndex = ReadInt32(root, "next_action_index"),
+            HasNextActionIndex = root.TryGetProperty("next_action_index", out var nextActionIndexElement) &&
+                                 nextActionIndexElement.ValueKind == JsonValueKind.Number,
             CallstackFrames = callstackFrames,
             EvidenceItems = evidenceItems,
             ActionableCandidates = actionableCandidates,

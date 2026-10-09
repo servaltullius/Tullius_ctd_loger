@@ -162,6 +162,18 @@ def test_standalone_stackwalk_related_summary_clipboard_fixture() -> None:
     assert actual == expected
 
 
+def test_gpu_wait_hang_follows_report_next_action() -> None:
+    # The report's NextAction (next_action_index) is the [Main thread] line;
+    # neither the candidate, the [Hang] line nor the generic [Conflict] line
+    # may replace it in the viewer or the share text.
+    for mode in ("community", "clipboard"):
+        actual = _run_harness("gpu_wait_hang_summary.json", mode)
+        next_lines = [line for line in actual.split("\n") if "Next action:" in line]
+        assert len(next_lines) == 1, actual
+        assert "The main thread was waiting for the GPU" in next_lines[0], actual
+        assert "(detected: ENB)" in next_lines[0], actual
+
+
 if __name__ == "__main__":
     test_frame_first_community_share_fixture()
     test_frame_first_summary_clipboard_fixture()
@@ -179,4 +191,5 @@ if __name__ == "__main__":
     test_frame_resource_related_summary_clipboard_fixture()
     test_standalone_stackwalk_related_community_share_fixture()
     test_standalone_stackwalk_related_summary_clipboard_fixture()
+    test_gpu_wait_hang_follows_report_next_action()
     print("share_text_fixture_tests: OK")

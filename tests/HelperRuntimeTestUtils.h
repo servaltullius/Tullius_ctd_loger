@@ -161,8 +161,10 @@ inline HANDLE OpenSelfProcessHandle()
 // A worker thread of this process parked in a wait. Synthetic crash records
 // name it as the faulting thread so crash-capture tests dump this process.
 // Dumping a freshly launched external process (cmd.exe) intermittently failed
-// on GitHub Windows runners with ERROR_PARTIAL_COPY even after it settled,
-// while self-process dumps (the hang tests) have been stable there.
+// on GitHub Windows runners even after it settled, while self-process dumps
+// (the hang tests) have been stable there. (The error was reported then as
+// ERROR_PARTIAL_COPY; v0.2.60-rc3 found the self-dump failures were
+// 0x800706F8 from an XSTATE over-read on AMX hosts.)
 class ParkedThread
 {
 public:

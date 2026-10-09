@@ -14,6 +14,9 @@ previous branch run would let a directly tagged commit bypass those checks.
 
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -287,6 +290,79 @@ def check_docs_only_skip_is_pr_only(failures: list[str]) -> None:
         failures.append("release.yml must never skip the Windows job")
 
 
+def check_dump_stress_repeats_only_after_a_build(failures: list[str]) -> None:
+    # A failed build would otherwise show up as a second, misleading ctest
+    # failure in every shard.
+    text = _read(WORKFLOWS / "dump-stress.yml")
+    if "steps.build.outcome == 'success'" not in text:
+        failures.append("dump-stress.yml repeats tests even after a failed build")
+
+
+def _docs_only_detector_script() -> str:
+    lines = _read(WORKFLOWS / "ci.yml").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "id: diff")
+    run = next(i for i in range(start, len(lines)) if lines[i].strip() == "run: |")
+    indent = len(lines[run]) - len(lines[run].lstrip()) + 2
+    body: list[str] = []
+    for line in lines[run + 1:]:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        body.append(line[indent:])
+    return "\n".join(body) + "\n"
+
+
+def check_docs_only_detector_behaviour(failures: list[str]) -> None:
+    # Run the detector itself on a scratch repository.
+    bash = shutil.which("bash")
+    git = shutil.which("git")
+    if not bash or not git:
+        print("ci_wiring_tests: bash/git not found; docs-only detector behaviour not checked")
+        return
+    script = _docs_only_detector_script()
+    cases = [
+        ("docs only", {"README.md": "b", "docs/a.md": "b"}, [], "false"),
+        ("non-ASCII doc path", {"doc/안내.md": "b"}, [], "false"),
+        ("code change", {"src/a.cpp": "b"}, [], "true"),
+        ("script moved into docs", {}, [("scripts/tool.py", "docs/tool.py")], "true"),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, writes, moves, expected in cases:
+            repo = Path(tmp) / name.replace(" ", "_")
+            repo.mkdir()
+
+            def run(*args: str) -> str:
+                return subprocess.run(
+                    [git, "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                    cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8",
+                ).stdout.strip()
+
+            run("init", "-q")
+            for path, text in {"README.md": "a", "src/a.cpp": "a", "scripts/tool.py": "x = 1\n" * 20,
+                               "doc/안내.md": "a"}.items():
+                (repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (repo / path).write_text(text, encoding="utf-8")
+            run("add", "-A")
+            run("commit", "-q", "-m", "base")
+            base = run("rev-parse", "HEAD")
+            for path, text in writes.items():
+                (repo / path).parent.mkdir(parents=True, exist_ok=True)
+                (repo / path).write_text(text, encoding="utf-8")
+            for src, dst in moves:
+                (repo / dst).parent.mkdir(parents=True, exist_ok=True)
+                run("mv", src, dst)
+            run("add", "-A")
+            run("commit", "-q", "-m", "change")
+            head = run("rev-parse", "HEAD")
+
+            output = repo / "github_output.txt"
+            env = dict(os.environ, EVENT_NAME="pull_request", BASE_SHA=base, HEAD_SHA=head,
+                       GITHUB_OUTPUT=str(output))
+            subprocess.run([bash, "-c", script], cwd=repo, env=env, check=True, capture_output=True)
+            got = output.read_text(encoding="utf-8").strip()
+            if got != f"code={expected}":
+                failures.append(f"docs-only detector, {name}: expected code={expected}, got {got!r}")
+
+
 def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
@@ -298,6 +374,8 @@ def main() -> int:
     check_windows_tests_are_wired(failures)
     check_windows_build_retries_once(failures)
     check_docs_only_skip_is_pr_only(failures)
+    check_docs_only_detector_behaviour(failures)
+    check_dump_stress_repeats_only_after_a_build(failures)
 
     if failures:
         for failure in failures:

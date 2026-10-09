@@ -58,6 +58,7 @@ struct DumpCallbackContext
 };
 
 std::atomic<std::uint64_t> g_tracedDumpWrites{ 0 };
+std::atomic<std::uint64_t> g_xstateSizedContexts{ 0 };
 
 bool DumpIoTraceRequested()
 {
@@ -122,7 +123,8 @@ PCONTEXT CopyIntoXStateSizedContext(const CONTEXT& source, std::vector<BYTE>& st
   // CONTEXT_XSTATE is CONTEXT_AMD64 plus this bit; CONTEXT_ALL already has CONTEXT_AMD64.
   constexpr DWORD kXStateBit = 0x00000040;
   // NOLINTNEXTLINE(misc-redundant-expression) -- the SDK's CONTEXT_ALL repeats CONTEXT_AMD64 in its own expansion.
-  constexpr DWORD kFlags = CONTEXT_ALL | kXStateBit;
+  constexpr DWORD kRegisterSets = CONTEXT_ALL;
+  constexpr DWORD kFlags = kRegisterSets | kXStateBit;
   DWORD length = 0;
   InitializeContext(nullptr, kFlags, nullptr, &length);
   if (length == 0) {
@@ -137,11 +139,14 @@ PCONTEXT CopyIntoXStateSizedContext(const CONTEXT& source, std::vector<BYTE>& st
     return nullptr;
   }
   // The shared-memory copy is a bare CONTEXT: never ask CopyContext for its
-  // (absent) extended state.
+  // (absent) extended state, and pass only register-set bits (the exception
+  // context also carries CONTEXT_EXCEPTION_* and similar status bits).
   CONTEXT sourceCopy = source;
-  if (!CopyContext(out, source.ContextFlags & ~kXStateBit, &sourceCopy)) {
+  sourceCopy.ContextFlags &= ~kXStateBit;
+  if (!CopyContext(out, sourceCopy.ContextFlags & kRegisterSets, &sourceCopy)) {
     return nullptr;
   }
+  g_xstateSizedContexts.fetch_add(1, std::memory_order_relaxed);
   return out;
 }
 
@@ -497,8 +502,12 @@ bool WriteDumpWithStreams(
     er = committedHeader.crash.exception_record;
     ctx = committedHeader.crash.context;
     ep.ExceptionRecord = &er;
-    // See CopyIntoXStateSizedContext; the bare copy is only a fallback.
+    // See CopyIntoXStateSizedContext; the bare copy is only a fallback, and
+    // it must not claim extended state it does not have.
     PCONTEXT sized = CopyIntoXStateSizedContext(ctx, xstateContextStorage);
+    if (!sized) {
+      ctx.ContextFlags &= ~static_cast<DWORD>(0x00000040);  // CONTEXT_XSTATE's own bit
+    }
     ep.ContextRecord = sized ? sized : &ctx;
 
     mei.ThreadId = committedHeader.crash.faulting_tid;
@@ -578,6 +587,11 @@ bool WriteDumpWithStreams(
       DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";
   }
   return false;
+}
+
+std::uint64_t XStateSizedContextCount() noexcept
+{
+  return g_xstateSizedContexts.load(std::memory_order_relaxed);
 }
 
 std::uint64_t TracedDumpWriteCount() noexcept

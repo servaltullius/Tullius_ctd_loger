@@ -169,6 +169,18 @@ void TestGpuQueryPollPattern()
   rel32[91] = 0xe8;
   assert(LooksLikeGpuQueryPoll(rel32));
 
+  // A vtable +0xE8 call whose result is not checked is some other object.
+  auto unchecked = kFieldQueryPoll;
+  unchecked[73] = 0x90;  // test eax,eax -> nop nop
+  unchecked[74] = 0x90;
+  assert(!LooksLikeGpuQueryPoll(unchecked));
+
+  // cmp eax,1 (S_FALSE) also checks it.
+  std::vector<std::uint8_t> cmpS_False(kFieldQueryPoll.begin(), kFieldQueryPoll.begin() + 73);
+  cmpS_False.insert(cmpS_False.end(), { 0x83, 0xf8, 0x01, 0x74, 0x02 });
+  cmpS_False.insert(cmpS_False.end(), { 0xb9, 0x01, 0x00, 0x00, 0x00, 0xff, 0x15, 0x9f, 0x86, 0x90, 0x00 });
+  assert(LooksLikeGpuQueryPoll(cmpS_False));
+
   assert(!LooksLikeGpuQueryPoll({}));
   assert(!LooksLikeGpuQueryPoll({ 0xff, 0x15, 0x00, 0x00, 0x00, 0x00 }));
 }

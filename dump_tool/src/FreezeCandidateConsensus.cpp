@@ -171,7 +171,14 @@ void AddMainThreadWaitReason(const MainThreadWaitInfo& wait, i18n::Language lang
       ? (L"; plugins further down its stack (call path only): " + JoinNames(wait.path_modules))
       : (L"; 스택 아래쪽 플러그인(호출 경로일 뿐): " + JoinNames(wait.path_modules));
   }
-  result->primary_reasons.insert(result->primary_reasons.begin(), std::move(line));
+  // A deadlock, module-level stall or loader stall keeps its own reasons first.
+  const bool stallExplained = result->state_id == "deadlock_likely" ||
+    result->state_id == "synchronization_stall_likely" || result->state_id == "loader_stall_likely";
+  if (stallExplained) {
+    result->primary_reasons.push_back(std::move(line));
+  } else {
+    result->primary_reasons.insert(result->primary_reasons.begin(), std::move(line));
+  }
 }
 
 std::wstring DescribeModalDialogCaller(const ModalDialogWaitInfo& modal)

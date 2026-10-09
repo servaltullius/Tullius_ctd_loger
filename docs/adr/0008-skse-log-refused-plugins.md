@@ -14,7 +14,10 @@ houseCARL처럼 각 DLL의 `SKSEPlugin_Version` export를 직접 읽어 판정�
   구조체 규칙, 필요 SKSE 버전 등)를 이미 하고, 맞지 않는 DLL은 로드하지 않습니다.
   거부 사유는 정해진 문구로 skse64.log에 남습니다.
 - 거부된 DLL은 게임 안에서 실행되지 않으므로 그 실행의 CTD나 프리징 원인이 될 수
-  없습니다.
+  없습니다. 다만 "crashed during postload", "reported as incompatible during load",
+  "fatal error occurred while loading plugin"은 DLL 코드가 이미 실행된 경우라서
+  "로드하지 않음"이 아니라 "정상적으로 로드되지 못함"입니다. 이 경우도 그 실행 시작 때의
+  일이므로 원인 근거로 쓰지 않는 원칙은 같습니다.
 - v0.2.59 실게임의 SmoothCam 대화상자는 SKSE 검사를 통과해 "loaded correctly"였던
   플러그인이 실행 중 CommonLib Address Library 오류를 띄운 경우였습니다. 선언 검사로는
   잡히지 않으며 ADR-0006의 대화상자 문구 분류로 다룹니다.
@@ -45,11 +48,12 @@ houseCARL처럼 각 DLL의 `SKSEPlugin_Version` export를 직접 읽어 판정�
 ## Output Contract
 
 - 플러그인 스캔 JSON(요약 JSON에서는 `plugin_scan.skse_log`):
-  `status` (`matched` / `no_matching_log` / `not_found` / `no_image_base`),
+  `status` (`matched` / `no_matching_log` / `not_found` / `no_image_base` / `error`),
   `matched`일 때 `skse_version`, `checked_count`, `loaded_count`, `issue_count`,
-  `issues[] {dll, name, status, code}`
-- 보고서: `SkseLog: status=... skse=... checked=... loaded=... not_loaded=...`와
-  거부된 DLL별 줄
+  `issues[] {dll, name, status, code}`. `error`는 로그를 읽다 예외가 난 경우이며 플러그인
+  스캔 결과는 그대로 남는다.
+- 보고서: `SkseLog: status=... skse=... checked=... loaded=... not_loaded=...`(한국어
+  보고서는 `SKSE 로그:`)와 정상적으로 로드되지 못한 DLL별 줄
 - 헬퍼 로그: `SKSE log: <status> (checked=..., loaded=..., not_loaded=...)`
 
 ## Consequences
@@ -68,6 +72,10 @@ houseCARL처럼 각 DLL의 `SKSEPlugin_Version` export를 직접 읽어 판정�
 - SKSE 플러그인이 아닌 보조 DLL(예: `msdia140.dll`)도 "no version data"로 나온다.
   구형 플러그인과 구분할 수 없어 안내 문구에 두 가능성을 함께 적는다.
 - 이 기능 이전의 캡처에는 `skse_log`가 없다.
+- 실제 로그로 확인한 형식은 1.6.1170의 SKSE 2.2.6뿐이다. 1.5.97용 SKSE 2.0.x가 다른
+  줄 형식을 쓰면 그 줄은 건너뛰어 목록에 나오지 않는다. 샘플 로그를 얻으면 확인한다.
+- 플러그인이 자기 로드 도중 게임을 멈추거나 죽이면 결과 줄이 남지 않아 목록에 나오지
+  않는다.
 
 ## Verification
 

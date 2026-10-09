@@ -25,9 +25,12 @@ std::optional<std::uint32_t> InferMainThreadIdFromEvents(const std::vector<Event
 
 std::optional<double> InferHeartbeatAgeFromEventsSec(const std::vector<EventRow>& events);
 
+// lastHeartbeatMs: the last main-thread heartbeat (-1 = unknown). Game-state
+// times are measured to it when it is later than the newest event.
 BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   const std::vector<EventRow>& events,
-  bool loadingContext);
+  bool loadingContext,
+  double lastHeartbeatMs = -1.0);
 
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,

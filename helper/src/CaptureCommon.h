@@ -74,7 +74,14 @@ inline std::string CollectPluginScanJson(
   // is written after this, so an exception here must not escape.
   try {
     auto scanResult = skydiag::helper::ScanPlugins(inputs.gameExeDir, inputs.moduleNames, &inputs.modulePaths);
-    scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);
+    // A failure while reading skse64.log keeps the finished plugin scan.
+    try {
+      scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);
+    } catch (const std::exception& ex) {
+      scanResult.skse_log = {};
+      scanResult.skse_log.status = "error";
+      AppendLogLine(outBase, L"SKSE log scan failed: " + AnsiExceptionText(ex));
+    }
     const auto& skseLog = scanResult.skse_log;
     std::wstring skseLine = L"SKSE log: " + std::wstring(skseLog.status.begin(), skseLog.status.end());
     if (skseLog.status == "matched") {
@@ -85,8 +92,7 @@ inline std::string CollectPluginScanJson(
     AppendLogLine(outBase, skseLine);
     return skydiag::helper::SerializePluginScanResult(scanResult);
   } catch (const std::exception& ex) {
-    const std::string what = ex.what();
-    AppendLogLine(outBase, L"PluginScanner failed; capture continues without it: " + std::wstring(what.begin(), what.end()));
+    AppendLogLine(outBase, L"PluginScanner failed; capture continues without it: " + AnsiExceptionText(ex));
   } catch (...) {
     AppendLogLine(outBase, L"PluginScanner failed; capture continues without it.");
   }
