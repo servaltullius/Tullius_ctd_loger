@@ -643,6 +643,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.modal_dialog_wait.detected) {
     freezeSignals.modal_dialog_wait = out.modal_dialog_wait;
   }
+  if (!out.main_thread_wait.kind.empty()) {
+    freezeSignals.main_thread_wait = out.main_thread_wait;
+  }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   out.freeze_analysis.first_chance_context = out.first_chance_summary;

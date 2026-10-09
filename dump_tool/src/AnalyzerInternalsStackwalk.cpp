@@ -45,7 +45,8 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   std::size_t maxFrames,
   std::uint32_t* outTotalFrames,
   std::uint32_t* outSymbolizedFrames,
-  std::uint32_t* outSourceLineFrames);
+  std::uint32_t* outSourceLineFrames,
+  bool fromTop);
 
 }  // namespace stackwalk
 
@@ -150,6 +151,23 @@ bool TryComputeStackwalkSuspects(
         modules,
         pcs,
         kModalApiMaxDepth + 16u);
+      // The calls the top frames made, for ClassifyMainThreadWait. Only the
+      // dump's own memory: a local SkyrimSE.exe has its code encrypted on disk.
+      MinidumpMemoryView dumpOnly = mem;
+      dumpOnly.image_fallback = nullptr;
+      constexpr std::size_t kCodeBeforeBytes = 0x60;
+      constexpr std::size_t kCodeFrames = 12;
+      for (std::size_t i = 0; i < outModalProbeFrames->size() && i < kCodeFrames; ++i) {
+        auto& frame = (*outModalProbeFrames)[i];
+        if (!frame.has_module || frame.is_system || frame.pc < kCodeBeforeBytes) {
+          continue;
+        }
+        std::vector<std::uint8_t> bytes(kCodeBeforeBytes);
+        std::size_t got = 0;
+        if (dumpOnly.Read(frame.pc - kCodeBeforeBytes, bytes.data(), bytes.size(), got) && got == bytes.size()) {
+          frame.code_before = std::move(bytes);
+        }
+      }
     }
 
     if (policy::ShouldSelectStackwalkCandidate(
@@ -192,14 +210,16 @@ bool TryComputeStackwalkSuspects(
         modules,
         bestAny.pcs,
         /*maxFrames=*/12);
+      const bool fromTop = modalProbeTid != 0u && bestAny.tid == modalProbeTid;
       out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
         sym.process,
         modules,
         bestAny.pcs,
-        /*maxFrames=*/12,
+        /*maxFrames=*/fromTop ? 16u : 12u,
         &out.stackwalk_total_frames,
         &out.stackwalk_symbolized_frames,
-        &out.stackwalk_source_line_frames);
+        &out.stackwalk_source_line_frames,
+        fromTop);
     }
     return false;
   }
@@ -211,14 +231,16 @@ bool TryComputeStackwalkSuspects(
     modules,
     best.pcs,
     /*maxFrames=*/12);
+  const bool fromTop = modalProbeTid != 0u && best.tid == modalProbeTid;
   out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
     sym.process,
     modules,
     best.pcs,
-    /*maxFrames=*/12,
+    /*maxFrames=*/fromTop ? 16u : 12u,
     &out.stackwalk_total_frames,
     &out.stackwalk_symbolized_frames,
-    &out.stackwalk_source_line_frames);
+    &out.stackwalk_source_line_frames,
+    fromTop);
   return true;
 }
 

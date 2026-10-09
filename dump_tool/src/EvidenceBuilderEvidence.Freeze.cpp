@@ -22,6 +22,14 @@ void BuildHitchAndFreezeEvidence(AnalysisResult& r, i18n::Language lang, const E
       : L"끊김/프레임 드랍(히치) 감지";
     e.details = L"count=" + std::to_wstring(hitch.count) +
       L", max=" + std::to_wstring(hitch.maxMs) + L"ms, p95=" + std::to_wstring(hitch.p95Ms) + L"ms";
+    if (r.blackbox_freeze_summary.pause_gap_seconds > 0.0) {
+      // A gap of minutes is the PC sleeping or the game minimized, not a stutter.
+      e.details += en
+        ? (L" (max includes a " + DescribeDuration(r.blackbox_freeze_summary.pause_gap_seconds, en) +
+            L" pause: PC asleep or the game minimized, most likely)")
+        : (L" (max에 " + DescribeDuration(r.blackbox_freeze_summary.pause_gap_seconds, en) +
+            L" 정지가 포함됨: PC 절전이나 게임 최소화로 추정)");
+    }
     r.evidence.push_back(std::move(e));
 
     if (!r.resources.empty()) {
@@ -77,6 +85,23 @@ void BuildHitchAndFreezeEvidence(AnalysisResult& r, i18n::Language lang, const E
       r.evidence.push_back(std::move(e));
     }
   }
+
+  if (isHangLike || ctx.isManualCapture) {
+    if (const auto gameState = DescribeGameStateAtCapture(r.blackbox_freeze_summary, en); !gameState.empty() ||
+        r.blackbox_freeze_summary.seconds_since_load_end >= 0.0) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kMedium;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = en ? L"Game state at the capture" : L"캡처 당시 게임 상태";
+      e.details = gameState;
+      if (r.blackbox_freeze_summary.seconds_since_load_end >= 0.0) {
+        e.details += (e.details.empty() ? L"" : L" ") +
+          (en ? (L"The last load finished " + DescribeDuration(r.blackbox_freeze_summary.seconds_since_load_end, en) + L" earlier.")
+              : (L"마지막 로딩은 " + DescribeDuration(r.blackbox_freeze_summary.seconds_since_load_end, en) + L" 전에 끝났습니다."));
+      }
+      r.evidence.push_back(std::move(e));
+    }
+  }
 }
 
 void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -86,6 +111,39 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
   const bool isManualCapture = ctx.isManualCapture;
   const bool wctSuggestsHang = ctx.wctSuggestsHang;
   const auto& wct = ctx.wct;
+
+  if (!r.modal_dialog_wait.detected && !r.main_thread_wait.kind.empty() && r.main_thread_wait.kind != "unknown") {
+    // ADR-0009: what the frozen main thread was doing, from its top frames.
+    const auto& wait = r.main_thread_wait;
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    if (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll") {
+      e.title = en ? L"Main thread was waiting for the GPU (engine polling a Direct3D query)"
+                   : L"메인 스레드가 GPU를 기다리는 중(엔진의 Direct3D 쿼리 대기)";
+    } else if (wait.kind == "engine_wait") {
+      e.title = en ? L"Main thread was waiting inside the game engine" : L"메인 스레드가 게임 엔진 안에서 대기 중";
+    } else if (wait.kind == "graphics_driver_wait") {
+      e.title = en ? L"Main thread was waiting inside the graphics driver" : L"메인 스레드가 그래픽 드라이버 안에서 대기 중";
+    } else if (wait.kind == "plugin_wait") {
+      e.title = en ? L"Main thread was waiting in a plugin's call" : L"메인 스레드가 플러그인이 호출한 대기에 머묾";
+    } else {
+      e.title = en ? L"Main thread was running code" : L"메인 스레드가 코드를 실행 중";
+    }
+    std::vector<std::wstring> parts;
+    if (!wait.wait_api.empty()) {
+      parts.push_back((en ? L"wait API: " : L"대기 API: ") + wait.wait_api);
+    }
+    if (!wait.waiting_module.empty()) {
+      parts.push_back((en ? L"module: " : L"모듈: ") + wait.waiting_module);
+    }
+    if (!wait.path_modules.empty()) {
+      parts.push_back((en ? L"plugins further down (call path): " : L"스택 아래쪽 플러그인(호출 경로): ") +
+        JoinList(wait.path_modules, wait.path_modules.size(), L", "));
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
+    r.evidence.push_back(std::move(e));
+  }
 
   if (r.modal_dialog_wait.detected) {
     const auto& modal = r.modal_dialog_wait;

@@ -61,6 +61,11 @@ struct EvidenceBuildContext
 
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep);
 std::wstring ToWideAscii(std::string_view s);
+// "12 seconds" / "84 minutes" (Korean: "12초" / "84분").
+std::wstring DescribeDuration(double seconds, bool en);
+// The game state the blackbox recorded at the capture (open menus, a long
+// pause before it), as sentences; empty when there is nothing to say.
+std::wstring DescribeGameStateAtCapture(const BlackboxFreezeSummary& blackbox, bool en);
 std::wstring Hex64(std::uint64_t v);
 
 std::optional<std::wstring> TryExplainExceptionInfo(const AnalysisResult& r, bool en);

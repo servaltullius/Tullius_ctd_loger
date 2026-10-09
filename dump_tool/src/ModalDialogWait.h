@@ -24,6 +24,10 @@ struct ModalStackFrame
   bool is_game_exe = false;
   bool is_skse_runtime = false;
   bool is_hook_framework = false;
+  std::uint64_t pc = 0;
+  // Code bytes just before pc (the call this frame made), read from the dump's
+  // own memory only; empty when the dump does not hold them.
+  std::vector<std::uint8_t> code_before;
 };
 
 struct ModalStackMatch

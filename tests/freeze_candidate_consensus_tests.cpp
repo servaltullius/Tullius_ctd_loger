@@ -382,6 +382,49 @@ void TestConsensusFreezeCandidateAndAmbiguous()
 
 }  // namespace
 
+// ADR-0009: the main thread's wait is the first reason, without changing the
+// state, and a modal dialog keeps its own reasons.
+void TestConsensusMainThreadWaitLeadsTheReasons()
+{
+  skydiag::dump_tool::MainThreadWaitInfo engineWait{};
+  engineWait.kind = "engine_wait";
+  engineWait.wait_api = L"KERNELBASE.dll!SleepEx";
+  engineWait.waiting_module = L"SkyrimSE.exe";
+  engineWait.path_modules = { L"EngineFixes.dll", L"CommunityShaders.dll" };
+
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.main_thread_wait = engineWait;
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.state_id == "freeze_ambiguous");
+  assert(!result.primary_reasons.empty());
+  assert(result.primary_reasons.front().find(L"waiting inside the game engine (SkyrimSE.exe, KERNELBASE.dll!SleepEx)") !=
+         std::wstring::npos);
+  assert(result.primary_reasons.front().find(L"call path only): EngineFixes.dll, CommunityShaders.dll") !=
+         std::wstring::npos);
+
+  skydiag::dump_tool::MainThreadWaitInfo driverWait{};
+  driverWait.kind = "graphics_driver_wait";
+  driverWait.waiting_module = L"nvwgf2umx.dll";
+  FreezeSignalInput driver{};
+  driver.is_hang_like = true;
+  driver.main_thread_wait = driverWait;
+  const auto driverResult = BuildFreezeCandidateConsensus(driver, Language::kKorean);
+  assert(driverResult.primary_reasons.front().find(L"그래픽 드라이버(nvwgf2umx.dll)") != std::wstring::npos);
+
+  FreezeSignalInput modal{};
+  modal.is_hang_like = true;
+  modal.main_thread_wait = engineWait;
+  modal.modal_dialog_wait = skydiag::dump_tool::ModalDialogWaitInfo{};
+  modal.modal_dialog_wait->detected = true;
+  modal.modal_dialog_wait->window_evidence = true;
+  const auto modalResult = BuildFreezeCandidateConsensus(modal, Language::kEnglish);
+  assert(modalResult.state_id == "modal_dialog_wait");
+  for (const auto& reason : modalResult.primary_reasons) {
+    assert(reason.find(L"game engine") == std::wstring::npos);
+  }
+}
+
 int main()
 {
   TestSourceContracts();
@@ -397,5 +440,6 @@ int main()
   TestConsensusSnapshotFallbackAndSnapshotBackedStayStateConservative();
   TestConsensusFreezeCandidateAndAmbiguous();
   TestConsensusModalDialogWaitOutranksOtherStates();
+  TestConsensusMainThreadWaitLeadsTheReasons();
   return 0;
 }

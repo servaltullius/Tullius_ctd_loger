@@ -29,7 +29,11 @@ std::size_t FindFirstTagged(const std::vector<std::wstring>& recommendations, co
 
 // Same priority tags the WinUI viewer uses for its next action, plus the other
 // candidate-level tags the checklist emits.
-constexpr std::wstring_view kModalDialog[] = { L"[Modal dialog]", L"[Modal 대화상자]" };
+// What the main thread was doing (modal dialog, engine or driver wait) comes
+// before any module triage.
+constexpr std::wstring_view kModalDialog[] = {
+  L"[Modal dialog]", L"[Modal 대화상자]", L"[Main thread]", L"[메인 스레드]",
+};
 constexpr std::wstring_view kCandidate[] = {
   L"[Actionable candidate]", L"[행동 우선 후보]", L"[Top suspect]", L"[유력 후보]",
   L"[Synchronization stall]", L"[동기화 정지]",
