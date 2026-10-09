@@ -105,6 +105,7 @@ jobs:
       # Linking a freshly built test has failed on the runner with "Access is
       # denied"; a second pass only relinks what is missing.
       - name: Build (RelWithDebInfo)
+        id: build
         shell: pwsh
         run: |
           cmake --build build-win
@@ -125,8 +126,10 @@ jobs:
           SKYDIAG_DUMP_IO_TRACE: ${{ inputs.io_trace && '1' || '0' }}
         run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
 
+      # Runs even when the full suite failed (to keep hunting the flake), but
+      # not after a failed build, which would only repeat the build error.
       - name: Repeat selected tests until the first failure
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         shell: pwsh
         env:
           STRESS_REPEAT: ${{ inputs.repeat }}

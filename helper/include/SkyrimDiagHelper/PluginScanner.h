@@ -24,7 +24,7 @@ struct PluginMeta
 
 struct SkseLogScan
 {
-  // matched / no_matching_log / not_found / no_image_base; empty when not collected
+  // matched / no_matching_log / not_found / no_image_base / error; empty when not collected
   std::string status;
   SkseLogSummary summary;  // filled when status == "matched"
 };

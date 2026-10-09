@@ -460,11 +460,12 @@ SkseLogScan CollectSkseLogBestEffort(std::uint64_t gameImageBase)
     CoTaskMemFree(documents);  // required even when the call fails
   }
   if (!myGames.empty()) {
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(myGames, ec)) {
-      if (ec) {
-        break;
-      }
+    // increment(ec), not a range-for: its operator++ throws on an iteration
+    // error, which would throw away the finished plugin scan with it.
+    std::error_code iterEc;
+    for (std::filesystem::directory_iterator it(myGames, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+      const auto& entry = *it;
+      std::error_code ec;
       if (!entry.is_directory(ec)) {
         continue;
       }

@@ -111,7 +111,8 @@ void AddGameStateContext(const std::vector<EventRow>& events, double lastMs, Bla
 
 BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   const std::vector<EventRow>& events,
-  bool loadingContext)
+  bool loadingContext,
+  double lastHeartbeatMs)
 {
   BlackboxFreezeSummary summary{};
   summary.loading_window = loadingContext;
@@ -180,7 +181,9 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
     }
   }
 
-  AddGameStateContext(events, maxMs, summary);
+  // Quiet play writes no events, so the newest one can be long before the
+  // freeze. The main thread's last heartbeat is when it stopped.
+  AddGameStateContext(events, std::max(maxMs, lastHeartbeatMs), summary);
 
   summary.has_context =
     summary.recent_module_loads > 0u ||

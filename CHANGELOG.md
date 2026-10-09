@@ -52,7 +52,7 @@
 
 ### 테스트
 - Windows 전체 테스트: `78/78` 통과.
-- 수정 전 dump-stress(16개 job)에서 AMX 호스트 2대(Xeon 6973P-C, Xeon Platinum 8573C)만 실패하고, AVX-512만 있는 Intel·AMD 호스트 14대는 통과했습니다. 수정 후 32개 job 중 AMX 호스트 4대를 포함해 모두 통과했습니다.
+- 수정 전 dump-stress(16개 job)에서 AMX 호스트 2대(Xeon 6973P-C, Xeon Platinum 8573C)만 실패하고, AVX-512만 있는 Intel·AMD 호스트 14대는 통과했습니다. 수정 후 3회 실행(48개 job)이 AMX 호스트 4대를 포함해 모두 통과했습니다.
 - 덤프 쓰기 추적 경로와, 덤프 안 예외 컨텍스트의 RIP·RSP가 원래 값과 같은지를 테스트로 확인합니다.
 
 ## v0.2.60-rc2 (2026-10-09)

@@ -69,10 +69,11 @@ For in-game validation without waiting:
 - Main workflow: `.github/workflows/ci.yml`
 - Main workflow scope: Linux tests, Windows build/package/gate, complete Windows production clang-tidy coverage, extracted-package launcher smoke, and repo guard checks
 - Main workflow triggers: pull requests, pushes to `main`, and `workflow_dispatch` for any other branch. A newer push to the same pull request cancels its in-flight run; every commit pushed to `main` keeps its own run.
+- A pull request that only changes documentation (`*.md`, `docs/`, `doc/`) skips the Windows job (the `Detect docs-only PR` job decides; a rename counts both paths). Pushes to `main` and releases always run it.
 - Tag-triggered releases rerun Linux unit, ASan+UBSan, the Linux clang-tidy subset, parser fuzz, complete Windows production clang-tidy, and the packaged launcher smoke before publication.
 - Manual rerun of the same packaged WinUI smoke: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`
-- Manual dump stress: `.github/workflows/dump-stress.yml` repeats selected Windows tests (default: the helper smoke and crash dump context tests, 100 runs each) until the first failure. Use it to catch the CI-only `ERROR_PARTIAL_COPY` dump failure; the failing test prints the helper log with the dump writer diagnostics. Run: `gh workflow run dump-stress.yml --ref main`. `-f defender_exclusion=true` excludes the workspace and test executables from Microsoft Defender, to compare a run with and without it.
+- Manual dump stress: `.github/workflows/dump-stress.yml` runs 16 shards (usually 16 runner hosts). Each prints its host details, optionally runs the whole Windows suite once (`full_suite_first`), then repeats selected tests (default: the helper smoke and crash dump context tests) until the first failure. It found the CI-only crash-dump failure (`0x800706F8`, earlier misread as `ERROR_PARTIAL_COPY`) on AMX hosts with Server 2022 dbghelp, fixed in v0.2.60-rc3. `io_trace` (default on) makes a failing dump report the failed file write. Run: `gh workflow run dump-stress.yml --ref main`. `-f defender_exclusion=true` excludes the workspace and test executables from Microsoft Defender.
 
 Equivalent local commands:
 ```bash

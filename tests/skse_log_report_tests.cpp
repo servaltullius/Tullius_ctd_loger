@@ -61,7 +61,8 @@ void TestRefusedDllsAreListedAsContext()
     auto r = MakeCrashWithSkseLog("matched", 2);
     BuildEvidenceAndSummary(r, lang);
 
-    const auto* evidence = FindEvidence(r, en ? L"SKSE did not load 2 DLL(s)" : L"SKSE가 로드하지 않은 DLL 2개");
+    const auto* evidence =
+      FindEvidence(r, en ? L"SKSE did not load 2 DLL(s) correctly" : L"SKSE가 정상적으로 로드하지 못한 DLL 2개");
     Require(evidence != nullptr, "refused DLLs must be listed as evidence");
     Require(evidence->confidence_level == i18n::ConfidenceLevel::kLow, "refused DLLs are context, not a cause");
     Require(evidence->details.find(L"NpcGhostFix.dll") != std::wstring::npos, "the evidence names each DLL");
@@ -77,6 +78,10 @@ void TestRefusedDllsAreListedAsContext()
     Require(
       r.recommendations.back().find(en ? L"not evidence for the cause" : L"원인 근거는 아닙니다") != std::wstring::npos,
       "the recommendation must say this is not the incident's cause");
+    Require(
+      r.recommendations.back().find(en ? L"or the DLL it needs" : L"필요한 DLL 설치") != std::wstring::npos &&
+        r.recommendations.back().find(en ? L"without version data can stay" : L"그대로 둬도") != std::wstring::npos,
+      "the advice fits a missing dependency and a helper DLL, not only a wrong game version");
   }
 }
 

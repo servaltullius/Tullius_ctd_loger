@@ -211,8 +211,9 @@ internal sealed partial class MainWindowViewModel
                     r.StartsWith("[Manual]", StringComparison.OrdinalIgnoreCase) ||
                     r.StartsWith("[수동]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
             }
-            else if (isHangLike)
+            else if (isHangLike && !summary.HasNextActionIndex)
             {
+                // Older summaries without next_action_index.
                 firstAction = summary.Recommendations.FirstOrDefault(r =>
                     r.StartsWith("[Hang]", StringComparison.OrdinalIgnoreCase) ||
                     r.StartsWith("[프리징]", StringComparison.Ordinal)) ?? summary.Recommendations[0];

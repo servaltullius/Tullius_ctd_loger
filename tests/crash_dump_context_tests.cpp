@@ -15,6 +15,7 @@ using skydiag::helper::CaptureKind;
 using skydiag::helper::DumpMode;
 using skydiag::helper::ResolveDumpProfile;
 using skydiag::helper::TracedDumpWriteCount;
+using skydiag::helper::XStateSizedContextCount;
 using skydiag::helper::WriteDumpWithStreams;
 using skydiag::tests::runtime::MakeSharedLayout;
 using skydiag::tests::runtime::MakeTempDir;
@@ -69,6 +70,10 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
   ripUnmapped.Rip = 0x00007000'00000000ull;
   CONTEXT rspNullPage = real;
   rspNullPage.Rsp = 0x10;
+  // A real exception ContextRecord claims extended state and carries
+  // exception status bits; the copy must still go through the sized buffer.
+  CONTEXT exceptionFlags = real;
+  exceptionFlags.ContextFlags |= 0x00000040u | 0x08000000u;  // XSTATE bit, CONTEXT_EXCEPTION_ACTIVE
 
   struct Case
   {
@@ -80,6 +85,7 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
     { "RIP in the null page", &ripNullPage },
     { "RIP in unmapped memory", &ripUnmapped },
     { "RSP in the null page", &rspNullPage },
+    { "exception context flags", &exceptionFlags },
   };
 
   int index = 0;
@@ -87,6 +93,7 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
     for (const auto& c : cases) {
       std::wstring err;
       const auto path = outBase / (L"case" + std::to_wstring(index++) + L".dmp");
+      const auto sizedBefore = XStateSizedContextCount();
       const bool ok = WriteCrashDump(process, pid, tid, *c.ctx, mode, path, &err);
       if (!ok) {
         std::fprintf(
@@ -98,6 +105,7 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
       }
       Require(ok, "Crash dump must be written even when the context points at unmapped memory");
       Require(std::filesystem::file_size(path) > 0, "Crash dump file must not be empty");
+      Require(XStateSizedContextCount() > sizedBefore, "The exception context must go through the XSTATE-sized copy");
     }
   }
 

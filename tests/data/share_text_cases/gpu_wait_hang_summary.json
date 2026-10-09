@@ -1,0 +1,68 @@
+{
+  "summary_sentence": "Freeze detected (capture=hang, heartbeatAge=31.5s >= 30s). The game main thread was waiting for the GPU: the engine was polling a Direct3D query (ID3D11DeviceContext::GetData) in a Sleep loop (SkyrimSE.exe, KERNELBASE.dll!SleepEx). (Confidence: Low)",
+  "crash_bucket_key": "HANG-gpu-query-poll",
+  "next_action_index": 1,
+  "analysis": {
+    "is_crash_like": false,
+    "is_hang_like": true,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "triage": {
+    "review_status": "unreviewed",
+    "reviewed": false,
+    "verdict": "",
+    "actual_cause": "",
+    "ground_truth_cause": "",
+    "ground_truth_mod": "",
+    "signature_matched": false,
+    "reviewer": "",
+    "reviewed_at_utc": "",
+    "notes": ""
+  },
+  "exception": {
+    "module_plus_offset": "",
+    "inferred_mod_name": ""
+  },
+  "suspects": [
+    {
+      "confidence": "Low",
+      "module_filename": "CommunityShaders.dll",
+      "module_path": "",
+      "inferred_mod_name": "Community Shaders",
+      "reason": "Stack frame (main thread was waiting in SkyrimSE.exe; modules on its stack are on the call path, not shown to be the freeze cause)",
+      "score": 1
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Hang] No WCT cycle: possible infinite loop / busy wait.",
+    "[Main thread] The main thread was waiting for the GPU (the engine was polling a Direct3D query). Update or clean-install the GPU driver, then test without graphics injectors and upscalers (detected: ENB) and with lighter texture/video-memory load.",
+    "[Conflict] If multiple mods provide the same file, check the load order and overwrites."
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "reference_clue",
+      "confidence": "Low",
+      "display_name": "hdtsmp64.dll",
+      "primary_identifier": "hdtsmp64.dll",
+      "secondary_label": "FSMP",
+      "plugin_name": "",
+      "mod_name": "FSMP",
+      "module_filename": "hdtsmp64.dll",
+      "explanation": "Repeated in earlier freezes.",
+      "family_count": 1,
+      "score": 4,
+      "cross_validated": false,
+      "has_conflict": false,
+      "supporting_families": [
+        "history_repeat"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

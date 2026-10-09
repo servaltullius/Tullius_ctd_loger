@@ -81,8 +81,8 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.confidence_level = i18n::ConfidenceLevel::kLow;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en
-      ? (L"SKSE did not load " + std::to_wstring(r.skse_log.issue_count) + L" DLL(s) in this session")
-      : (L"이번 실행에서 SKSE가 로드하지 않은 DLL " + std::to_wstring(r.skse_log.issue_count) + L"개");
+      ? (L"SKSE did not load " + std::to_wstring(r.skse_log.issue_count) + L" DLL(s) correctly in this session")
+      : (L"이번 실행에서 SKSE가 정상적으로 로드하지 못한 DLL " + std::to_wstring(r.skse_log.issue_count) + L"개");
     e.details = SummarizeSkseLogIssues(r.skse_log, en, 6, L" | ");
     r.evidence.push_back(std::move(e));
   }

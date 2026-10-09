@@ -423,6 +423,19 @@ void TestConsensusMainThreadWaitLeadsTheReasons()
   for (const auto& reason : modalResult.primary_reasons) {
     assert(reason.find(L"game engine") == std::wstring::npos);
   }
+
+  // A WCT-proven deadlock keeps its own reasons first; the wait follows.
+  FreezeSignalInput deadlock{};
+  deadlock.is_hang_like = true;
+  deadlock.main_thread_wait = engineWait;
+  deadlock.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  deadlock.wct->has = true;
+  deadlock.wct->cycles = 2;
+  const auto deadlockResult = BuildFreezeCandidateConsensus(deadlock, Language::kEnglish);
+  assert(deadlockResult.state_id == "deadlock_likely");
+  assert(deadlockResult.primary_reasons.size() >= 2u);
+  assert(deadlockResult.primary_reasons.front().find(L"game engine") == std::wstring::npos);
+  assert(deadlockResult.primary_reasons.back().find(L"waiting inside the game engine") != std::wstring::npos);
 }
 
 int main()

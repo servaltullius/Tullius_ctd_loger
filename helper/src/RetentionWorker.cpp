@@ -67,8 +67,7 @@ void RetentionWorkerMain()
       try {
         skydiag::helper::ApplyRetentionToOutputDir(task.outBase, task.limits);
       } catch (const std::exception& ex) {
-        const std::string what = ex.what();
-        AppendLogLine(task.outBase, L"Retention sweep failed: " + std::wstring(what.begin(), what.end()));
+        AppendLogLine(task.outBase, L"Retention sweep failed: " + AnsiExceptionText(ex));
       } catch (...) {
         AppendLogLine(task.outBase, L"Retention sweep failed.");
       }

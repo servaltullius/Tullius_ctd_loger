@@ -321,6 +321,9 @@ struct AnalysisResult
 
   bool has_blackbox = false;
   std::vector<EventRow> events;
+  // Last main-thread heartbeat on the event clock (-1 = unknown). In a freeze
+  // this is when the main thread stopped.
+  double blackbox_last_heartbeat_ms = -1.0;
 
   // Optional: recent resource loads (best-effort; nif/hkx/tri)
   std::vector<ResourceRow> resources;
@@ -332,6 +335,10 @@ struct AnalysisResult
   HangThreadModuleConsensus hang_thread_module_consensus;
   ModalDialogWaitInfo modal_dialog_wait;
   MainThreadWaitInfo main_thread_wait;
+  // The suspects came from the game main thread's stack (a freeze's stack walk
+  // can pick a WCT cycle thread instead). A bystander wait only speaks for
+  // the main thread's own stack.
+  bool suspects_from_main_thread = false;
   FreezeAnalysisResult freeze_analysis;
 
   bool has_wct = false;

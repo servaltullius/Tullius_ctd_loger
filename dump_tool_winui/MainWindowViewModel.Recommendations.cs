@@ -134,6 +134,21 @@ internal sealed partial class MainWindowViewModel
                     $"게임 창 뒤의 \"{summary.ModalDialogTitle}\" 대화상자를 찾아 내용을 확인");
         }
 
+        // The analyzer picks the same entry as the text report's NextAction.
+        // Only a module-triage line keeps the shorter candidate wording below,
+        // which names the same module.
+        if (summary.HasNextActionIndex &&
+            summary.NextActionIndex >= 0 &&
+            summary.NextActionIndex < summary.Recommendations.Count)
+        {
+            var chosen = summary.Recommendations[summary.NextActionIndex];
+            if (!(summary.ActionableCandidates.Count > 0 && IsCandidateLevelRecommendation(chosen)) &&
+                !string.IsNullOrWhiteSpace(chosen))
+            {
+                return StripRecommendationTag(chosen);
+            }
+        }
+
         if (summary.ActionableCandidates.Count > 0)
         {
             var primaryCandidate = summary.ActionableCandidates[0];
@@ -183,20 +198,34 @@ internal sealed partial class MainWindowViewModel
             };
         }
 
-        var taggedAction = summary.Recommendations.FirstOrDefault(IsPriorityActionRecommendation);
-        if (!string.IsNullOrWhiteSpace(taggedAction))
+        if (summary.HasNextActionIndex)
         {
-            return StripRecommendationTag(taggedAction);
+            return summary.NextActionIndex >= 0 && summary.NextActionIndex < summary.Recommendations.Count
+                ? StripRecommendationTag(summary.Recommendations[summary.NextActionIndex])
+                : T("None", "없음");
         }
 
-        // The analyzer picks the same entry as the text report's NextAction.
-        var index = summary.NextActionIndex;
-        var nextRecommendation = index >= 0 && index < summary.Recommendations.Count
-            ? summary.Recommendations[index]
+        // Older summaries without next_action_index.
+        var taggedAction = summary.Recommendations.FirstOrDefault(IsPriorityActionRecommendation);
+        var nextRecommendation = !string.IsNullOrWhiteSpace(taggedAction)
+            ? taggedAction
             : summary.Recommendations.FirstOrDefault();
         return string.IsNullOrWhiteSpace(nextRecommendation)
             ? T("None", "없음")
             : StripRecommendationTag(nextRecommendation);
+    }
+
+    // Module-triage lines about the same candidate the viewer names above.
+    private static bool IsCandidateLevelRecommendation(string recommendation)
+    {
+        return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Top suspect]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[유력 후보]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Synchronization stall]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[동기화 정지]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Crash Logger 프레임]", StringComparison.Ordinal);
     }
 
     private static bool IsPriorityActionRecommendation(string recommendation)

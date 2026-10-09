@@ -14,12 +14,51 @@ namespace skydiag::helper {
 
 // path::string() converts through the ANSI code page: it substitutes '?' for
 // characters it cannot represent and can throw when that code page is UTF-8.
-// The output folder can hold any file a user drops there, so compare UTF-8
-// names, which never throw; the names retention manages are all ASCII.
+// path::u8string() throws on an unpaired UTF-16 surrogate, which an NTFS name
+// can hold. The output folder can hold any file a user drops there, so encode
+// UTF-8 by hand with U+FFFD for a broken surrogate; this never throws. The
+// names retention manages are all ASCII.
 inline std::string PathPartUtf8(const std::filesystem::path& part)
 {
-  const auto u8 = part.u8string();
-  return std::string(u8.begin(), u8.end());
+  const auto& native = part.native();
+  std::string out;
+  out.reserve(native.size());
+  if constexpr (sizeof(std::filesystem::path::value_type) == 1) {
+    for (const auto c : native) {
+      out.push_back(static_cast<char>(c));
+    }
+  } else {
+    for (std::size_t i = 0; i < native.size(); ++i) {
+      std::uint32_t cp = static_cast<std::uint16_t>(native[i]);
+      if (cp >= 0xD800u && cp <= 0xDBFFu && i + 1u < native.size()) {
+        const std::uint32_t low = static_cast<std::uint16_t>(native[i + 1u]);
+        if (low >= 0xDC00u && low <= 0xDFFFu) {
+          cp = 0x10000u + ((cp - 0xD800u) << 10u) + (low - 0xDC00u);
+          ++i;
+        } else {
+          cp = 0xFFFDu;
+        }
+      } else if (cp >= 0xD800u && cp <= 0xDFFFu) {
+        cp = 0xFFFDu;
+      }
+      if (cp < 0x80u) {
+        out.push_back(static_cast<char>(cp));
+      } else if (cp < 0x800u) {
+        out.push_back(static_cast<char>(0xC0u | (cp >> 6u)));
+        out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+      } else if (cp < 0x10000u) {
+        out.push_back(static_cast<char>(0xE0u | (cp >> 12u)));
+        out.push_back(static_cast<char>(0x80u | ((cp >> 6u) & 0x3Fu)));
+        out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+      } else {
+        out.push_back(static_cast<char>(0xF0u | (cp >> 18u)));
+        out.push_back(static_cast<char>(0x80u | ((cp >> 12u) & 0x3Fu)));
+        out.push_back(static_cast<char>(0x80u | ((cp >> 6u) & 0x3Fu)));
+        out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+      }
+    }
+  }
+  return out;
 }
 
 struct RetentionLimits {

@@ -85,6 +85,17 @@ void TestBlackboxGameState()
     { Event(EventType::kPerfHitch, 10000.0, {}, 6488) }, false);
   Require(quiet.pause_gap_seconds == 0.0 && quiet.open_menus.empty() && quiet.seconds_since_load_end < 0.0,
     "a stutter is not a pause and no load means no load time");
+
+  // Quiet play writes no events: 15 minutes after the load the newest event is
+  // still the LoadEnd, so times are measured to the last heartbeat.
+  const auto quietPlay = skydiag::dump_tool::internal::BuildBlackboxFreezeSummary(
+    { Event(EventType::kLoadEnd, 1000.0) }, false, 901000.0);
+  Require(quietPlay.seconds_since_load_end > 899.0 && quietPlay.seconds_since_load_end < 901.0,
+    "time since the load is measured to the last heartbeat, not the newest event");
+  const auto noHeartbeat = skydiag::dump_tool::internal::BuildBlackboxFreezeSummary(
+    { Event(EventType::kLoadEnd, 1000.0), Event(EventType::kMenuOpen, 4000.0, "Console") }, false, 2000.0);
+  Require(noHeartbeat.seconds_since_load_end > 2.9 && noHeartbeat.seconds_since_load_end < 3.1,
+    "an older heartbeat does not pull the reference back");
 }
 
 AnalysisResult MakeHang()
@@ -99,6 +110,7 @@ AnalysisResult MakeHang()
   suspect.confidence_level = i18n::ConfidenceLevel::kLow;
   r.suspects.push_back(suspect);
   r.suspects_from_stackwalk = true;
+  r.suspects_from_main_thread = true;
   return r;
 }
 
@@ -185,6 +197,56 @@ void TestEngineGpuQueryPoll()
   }
 }
 
+// The stack walk picked a WCT cycle thread, not the main thread: the main
+// thread's wait says nothing about that thread's modules.
+void TestOtherThreadSuspectsKeepTheirSignal()
+{
+  auto withMain = MakeHang();
+  withMain.suspects[0].score = 12;
+  withMain.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+  withMain.main_thread_wait.kind = "engine_wait";
+  withMain.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+  auto withCycleThread = withMain;
+  withCycleThread.suspects_from_main_thread = false;
+  BuildEvidenceAndSummary(withMain, i18n::Language::kEnglish);
+  BuildEvidenceAndSummary(withCycleThread, i18n::Language::kEnglish);
+
+  const auto hasStackSignal = [](const AnalysisResult& r) {
+    for (const auto& candidate : r.actionable_candidates) {
+      if (candidate.module_filename == L"CommunityShaders.dll") {
+        return true;
+      }
+    }
+    return false;
+  };
+  Require(!hasStackSignal(withMain), "the main thread's own stack makes no candidate");
+  Require(hasStackSignal(withCycleThread), "a cycle thread's stack still makes a candidate");
+}
+
+// A module-level stall (the same module on the main thread and other stuck
+// threads) or a deadlock explains the freeze; the wait advice must not
+// contradict it as the first action.
+void TestStallOutranksTheWaitAdvice()
+{
+  for (const auto& stateId : { std::string("synchronization_stall_likely"), std::string("deadlock_likely") }) {
+    auto r = MakeHang();
+    r.freeze_analysis.state_id = stateId;
+    r.main_thread_wait.kind = "engine_wait";
+    r.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+    r.main_thread_wait.path_modules = { L"CommunityShaders.dll" };
+    if (stateId == "synchronization_stall_likely") {
+      r.hang_thread_module_consensus.has_consensus = true;
+      r.hang_thread_module_consensus.module_filename = L"CommunityShaders.dll";
+      r.hang_thread_module_consensus.matching_thread_count = 4u;
+    }
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    Require(!AnyStartsWith(r.recommendations, L"[Main thread]"), "no wait advice when a stall explains the freeze");
+    const auto next = SelectNextActionIndex(r.recommendations);
+    Require(next == std::wstring::npos || r.recommendations[next].rfind(L"[Main thread]", 0) != 0,
+      "NextAction is not the wait advice");
+  }
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -206,6 +268,8 @@ int main()
     TestEngineWaitWithConsoleOpen();
     TestGraphicsDriverWaitAfterPause();
     TestEngineGpuQueryPoll();
+    TestOtherThreadSuspectsKeepTheirSignal();
+    TestStallOutranksTheWaitAdvice();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;

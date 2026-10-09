@@ -1,5 +1,7 @@
 #include "HelperLog.h"
 
+#include <Windows.h>
+
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -64,6 +66,22 @@ void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
   if (!utf8.empty()) {
     f.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
   }
+}
+
+std::wstring AnsiExceptionText(const std::exception& ex)
+{
+  const std::string what = ex.what();
+  if (what.empty() || what.size() > 0x7FFFFFFFu) {
+    return {};
+  }
+  const int len = static_cast<int>(what.size());
+  const int wideLen = MultiByteToWideChar(CP_ACP, 0, what.data(), len, nullptr, 0);
+  if (wideLen <= 0) {
+    return std::wstring(what.begin(), what.end());
+  }
+  std::wstring wide(static_cast<std::size_t>(wideLen), wchar_t{});
+  MultiByteToWideChar(CP_ACP, 0, what.data(), len, wide.data(), wideLen);
+  return wide;
 }
 
 }  // namespace skydiag::helper::internal

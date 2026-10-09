@@ -145,6 +145,9 @@ void ParseBlackboxStream(
   }
   const std::uint64_t freq = snap->header.qpc_freq ? snap->header.qpc_freq : 1;
   const std::uint64_t start = snap->header.start_qpc;
+  out.blackbox_last_heartbeat_ms = (snap->header.last_heartbeat_qpc > start)
+    ? (1000.0 * (static_cast<double>(snap->header.last_heartbeat_qpc - start) / static_cast<double>(freq)))
+    : -1.0;
   const std::uint32_t writeIndex = snap->header.write_index;
   const std::uint32_t begin = (writeIndex > cap) ? (writeIndex - cap) : 0;
 
@@ -606,8 +609,11 @@ void ComputeSuspects(
 
   if (modalProbeTid != 0u) {
     out.main_thread_wait = ClassifyMainThreadWait(mainThreadFrames);
+    // The pointer-scan fallback reads only the main thread for freezes.
+    out.suspects_from_main_thread =
+      !out.suspects_from_stackwalk || out.stackwalk_primary_tid == modalProbeTid;
   }
-  if (IsBystanderWait(out.main_thread_wait)) {
+  if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread) {
     // The main thread was sitting in a wait it did not get from these
     // modules: the engine's own sleep/wait or the graphics driver. Plugins on
     // its stack were only on the call path (ADR-0009).

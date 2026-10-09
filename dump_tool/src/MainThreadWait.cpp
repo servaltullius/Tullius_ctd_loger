@@ -74,10 +74,22 @@ bool LooksLikeGpuQueryPoll(const std::vector<std::uint8_t>& codeBefore)
   }
   // call qword ptr [reg+0E8h]: FF /2 with mod=10 and a 32-bit displacement
   // (0xE8 does not fit a signed 8-bit one). rsp (rm=100) would need a SIB byte.
+  // The call must be followed by a check of its HRESULT (GetData returns
+  // S_FALSE until the GPU is done): test eax,eax / cmp eax,1. Any other
+  // object's vtable slot 29 is unlikely to be checked the same way.
+  const auto checksResult = [&](std::size_t at) {
+    if (at + 2 <= callStart && codeBefore[at] == 0x85 && codeBefore[at + 1] == 0xC0) {
+      return true;  // test eax, eax
+    }
+    if (at + 3 <= callStart && codeBefore[at] == 0x83 && codeBefore[at + 1] == 0xF8 && codeBefore[at + 2] == 0x01) {
+      return true;  // cmp eax, 1
+    }
+    return false;
+  };
   for (std::size_t i = 0; i + 6 <= callStart; ++i) {
     const std::uint8_t modrm = codeBefore[i + 1];
     if (codeBefore[i] == 0xFF && (modrm & 0xF8) == 0x90 && modrm != 0x94 && codeBefore[i + 2] == 0xE8 &&
-        codeBefore[i + 3] == 0x00 && codeBefore[i + 4] == 0x00 && codeBefore[i + 5] == 0x00) {
+        codeBefore[i + 3] == 0x00 && codeBefore[i + 4] == 0x00 && codeBefore[i + 5] == 0x00 && checksResult(i + 6)) {
       return true;
     }
   }

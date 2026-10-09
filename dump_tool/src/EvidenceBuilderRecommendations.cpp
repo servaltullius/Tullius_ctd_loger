@@ -483,10 +483,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   if (r.skse_log.status == "matched" && r.skse_log.issue_count > 0) {
     const auto issues = SummarizeSkseLogIssues(r.skse_log, en, 6, L"; ");
     lowConfidencePluginRecommendations.push_back(en
-      ? (L"[SKSE] SKSE did not load these DLLs in this session: " + issues +
-          L". This is not evidence for the cause of this incident. If you meant to use one of them, install its file made for this game version.")
-      : (L"[SKSE] 이번 실행에서 SKSE가 로드하지 않은 DLL: " + issues +
-          L". 이번 사고의 원인 근거는 아닙니다. 쓰려던 플러그인이 있다면 현재 게임 버전용 파일로 바꾸세요."));
+      ? (L"[SKSE] SKSE did not load these DLLs correctly in this session: " + issues +
+          L". This is not evidence for the cause of this incident. A helper DLL without version data can stay; "
+          L"for a plugin you meant to use, do what its note says (a file for this game version, or the DLL it needs).")
+      : (L"[SKSE] 이번 실행에서 SKSE가 정상적으로 로드하지 못한 DLL: " + issues +
+          L". 이번 사고의 원인 근거는 아닙니다. 버전 정보가 없는 보조 DLL은 그대로 둬도 되고, "
+          L"쓰려던 플러그인이라면 사유에 맞게 고치세요(현재 게임 버전용 파일로 교체, 또는 필요한 DLL 설치)."));
   }
   auto appendLowConfidencePluginRecommendations = [&]() {
     r.recommendations.insert(
@@ -772,9 +774,16 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   }
 
   if (r.freeze_analysis.has_analysis) {
-    // ADR-0009: say what the main thread was doing before any module triage.
+    // ADR-0009: say what the main thread was doing before any module triage,
+    // unless a deadlock, a module-level stall or a loader stall already
+    // explains the freeze (those come first, and the wait is still evidence).
     const auto& wait = r.main_thread_wait;
-    if (isHangLike && IsGpuWait(wait)) {
+    const auto& stateId = r.freeze_analysis.state_id;
+    const bool stallExplained = stateId == "deadlock_likely" || stateId == "synchronization_stall_likely" ||
+      stateId == "loader_stall_likely" || r.hang_thread_module_consensus.has_consensus;
+    if (stallExplained) {
+      // No [Main thread] advice.
+    } else if (isHangLike && IsGpuWait(wait)) {
       std::vector<std::wstring> injectors;
       if (r.graphics_env.enb_detected) {
         injectors.push_back(L"ENB");
@@ -805,7 +814,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     } else if (isHangLike && wait.kind == "engine_wait") {
       const std::wstring path = wait.path_modules.empty()
         ? std::wstring{}
-        : (L" (" + JoinList(wait.path_modules, wait.path_modules.size(), L", ") + L")");
+        : ((en ? L" (" : L"(") + JoinList(wait.path_modules, wait.path_modules.size(), L", ") + L")");
       r.recommendations.push_back(en
         ? (L"[Main thread] The main thread was waiting inside the game engine, not running mod code. Do not remove the plugins on its stack" +
             path + L" on this evidence alone; if the freeze repeats, capture it again while frozen (Ctrl+Shift+F12) and compare what stays the same.")

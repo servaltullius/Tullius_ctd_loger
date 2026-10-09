@@ -231,6 +231,35 @@ static void Test_PrunesAroundNamesOutsideTheAnsiCodePage()
   assert(Exists(oddDump));
 }
 
+#ifdef _WIN32
+// An NTFS name can hold an unpaired UTF-16 surrogate, on which
+// path::u8string() throws. One such file must not stop every sweep.
+static void Test_PrunesAroundUnpairedSurrogateNames()
+{
+  const auto dir = MakeTempDir();
+  const auto odd = dir / std::wstring(L"notes \xD800.dmp");
+  WriteFile(odd);
+  assert(skydiag::helper::PathPartUtf8(odd.filename()) == "notes \xEF\xBF\xBD.dmp");
+  assert(skydiag::helper::PathPartUtf8(std::filesystem::path(L"\xD83D\xDE00")) == "\xF0\x9F\x98\x80");
+
+  const auto stem0 = std::string("SkyrimDiag_Crash_20260101_000000");
+  const auto stem1 = std::string("SkyrimDiag_Crash_20260101_000001");
+  WriteFile(dir / (stem0 + ".dmp"));
+  WriteFile(dir / (stem1 + ".dmp"));
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(dir / (stem0 + ".dmp")));
+  assert(Exists(dir / (stem1 + ".dmp")));
+  assert(Exists(odd));
+}
+#endif
+
 int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
@@ -240,5 +269,8 @@ int main()
   Test_PrunesCrashManifestWithPrecisionTimestamp();
   Test_RotatesHelperLog();
   Test_PrunesAroundNamesOutsideTheAnsiCodePage();
+#ifdef _WIN32
+  Test_PrunesAroundUnpairedSurrogateNames();
+#endif
   return 0;
 }
