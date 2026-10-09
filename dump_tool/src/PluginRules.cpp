@@ -318,17 +318,36 @@ std::wstring SummarizeSkseLogIssues(
   std::size_t maxItems,
   std::wstring_view separator)
 {
-  std::wstring out;
+  // DLLs with the same meaning share one explanation, in first-seen order:
+  // "a.dll, b.dll: <meaning>" instead of repeating a long text per DLL.
+  struct Group
+  {
+    std::wstring meaning;
+    std::wstring dlls;
+  };
+  std::vector<Group> groups;
   std::size_t shown = 0;
   for (const auto& issue : log.issues) {
     if (shown == maxItems) {
       break;
     }
-    if (shown > 0) {
+    auto meaning = DescribeSkseLoadStatus(issue.status, issue.error_code, en);
+    auto it = std::find_if(groups.begin(), groups.end(), [&](const Group& g) { return g.meaning == meaning; });
+    if (it == groups.end()) {
+      groups.push_back(Group{ std::move(meaning), {} });
+      it = std::prev(groups.end());
+    } else {
+      it->dlls += L", ";
+    }
+    it->dlls += Utf8ToWide(issue.dll_name);
+    ++shown;
+  }
+  std::wstring out;
+  for (const auto& group : groups) {
+    if (!out.empty()) {
       out += separator;
     }
-    out += Utf8ToWide(issue.dll_name) + L": " + DescribeSkseLoadStatus(issue.status, issue.error_code, en);
-    ++shown;
+    out += group.dlls + L": " + group.meaning;
   }
   const std::size_t total = std::max<std::size_t>(log.issue_count, log.issues.size());
   if (total > shown) {

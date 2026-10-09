@@ -80,7 +80,8 @@ std::size_t CountEslPlugins(const ParsedPluginScan& scan);
 bool IsGameVersionLessThan(std::string_view lhs, std::string_view rhs);
 // Short reader-facing meaning of an SKSE load status from skse64.log.
 std::wstring DescribeSkseLoadStatus(std::string_view status, std::int64_t errorCode, bool en);
-// "<dll>: <meaning>" for the first maxItems DLLs SKSE did not load, then "+N more".
+// "<dll>, <dll>: <meaning>" grouped by meaning for the first maxItems DLLs SKSE
+// did not load, groups joined by separator, then "+N more".
 std::wstring SummarizeSkseLogIssues(
   const SkseLogScanInfo& log,
   bool en,

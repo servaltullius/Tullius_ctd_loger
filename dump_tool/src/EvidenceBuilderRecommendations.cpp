@@ -480,7 +480,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // Plugins SKSE refused at startup are upkeep for the next launch, not an
   // explanation of this incident, so they join the end of the checklist too.
   if (r.skse_log.status == "matched" && r.skse_log.issue_count > 0) {
-    const auto issues = SummarizeSkseLogIssues(r.skse_log, en, 6, L", ");
+    const auto issues = SummarizeSkseLogIssues(r.skse_log, en, 6, L"; ");
     lowConfidencePluginRecommendations.push_back(en
       ? (L"[SKSE] SKSE did not load these DLLs in this session: " + issues +
           L". This is not evidence for the cause of this incident. If you meant to use one of them, install its file made for this game version.")
