@@ -110,6 +110,41 @@ HRESULT TracedWriteAll(const MINIDUMP_IO_CALLBACK& io, DumpProgress& progress)
   return hr;
 }
 
+// The exception context handed to MiniDumpWriteDump. The dbghelp shipped with
+// Windows Server 2022 (10.0.20348) writes it with the CPU's full extended-state
+// size, about 11.5 KB on AMX hosts (Xeon Sapphire/Emerald/Granite Rapids),
+// instead of sizeof(CONTEXT). From a bare CONTEXT that read can run past the
+// end of the stack, and the dump fails with ERROR_INVALID_USER_BUFFER. A
+// CONTEXT_EX-backed buffer of that size keeps the read inside valid memory;
+// the stored context has no extended state, so that area stays zero.
+PCONTEXT CopyIntoXStateSizedContext(const CONTEXT& source, std::vector<BYTE>& storage)
+{
+  // CONTEXT_XSTATE is CONTEXT_AMD64 plus this bit; CONTEXT_ALL already has CONTEXT_AMD64.
+  constexpr DWORD kXStateBit = 0x00000040;
+  // NOLINTNEXTLINE(misc-redundant-expression) -- the SDK's CONTEXT_ALL repeats CONTEXT_AMD64 in its own expansion.
+  constexpr DWORD kFlags = CONTEXT_ALL | kXStateBit;
+  DWORD length = 0;
+  InitializeContext(nullptr, kFlags, nullptr, &length);
+  if (length == 0) {
+    return nullptr;
+  }
+  // Slack in case that dbghelp sizes the read from more features than this
+  // process sees enabled (AMX tile data alone is 8 KB).
+  length += 16u * 1024u;
+  storage.assign(length, 0);
+  PCONTEXT out = nullptr;
+  if (!InitializeContext(storage.data(), kFlags, &out, &length) || !out) {
+    return nullptr;
+  }
+  // The shared-memory copy is a bare CONTEXT: never ask CopyContext for its
+  // (absent) extended state.
+  CONTEXT sourceCopy = source;
+  if (!CopyContext(out, source.ContextFlags & ~kXStateBit, &sourceCopy)) {
+    return nullptr;
+  }
+  return out;
+}
+
 // File version of the dbghelp.dll this process loaded, e.g. "10.0.20348.1 C:\...\dbghelp.dll".
 std::wstring DescribeLoadedDbgHelp()
 {
@@ -450,6 +485,7 @@ bool WriteDumpWithStreams(
   EXCEPTION_POINTERS ep{};
   EXCEPTION_RECORD er{};
   CONTEXT ctx{};
+  std::vector<BYTE> xstateContextStorage;
 
   MINIDUMP_EXCEPTION_INFORMATION* meiPtr = nullptr;
   if (isCrash && hasCommittedHeader &&
@@ -461,7 +497,9 @@ bool WriteDumpWithStreams(
     er = committedHeader.crash.exception_record;
     ctx = committedHeader.crash.context;
     ep.ExceptionRecord = &er;
-    ep.ContextRecord = &ctx;
+    // See CopyIntoXStateSizedContext; the bare copy is only a fallback.
+    PCONTEXT sized = CopyIntoXStateSizedContext(ctx, xstateContextStorage);
+    ep.ContextRecord = sized ? sized : &ctx;
 
     mei.ThreadId = committedHeader.crash.faulting_tid;
     mei.ExceptionPointers = &ep;

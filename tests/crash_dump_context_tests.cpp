@@ -136,13 +136,20 @@ void TestTracedDumpWritesAreComplete()
     PMINIDUMP_DIRECTORY dir = nullptr;
     void* stream = nullptr;
     ULONG streamSize = 0;
+    const auto* exception = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(stream);
     const bool hasException =
       view && MiniDumpReadDumpStream(view, ExceptionStream, &dir, &stream, &streamSize) && stream &&
-      static_cast<const MINIDUMP_EXCEPTION_STREAM*>(stream)->ThreadId == faulting.tid();
+      (exception = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(stream))->ThreadId == faulting.tid();
+    // The exception context is written from an XSTATE-sized copy; the
+    // registers must still be the faulting thread's.
+    const bool contextMatches = hasException && exception->ThreadContext.DataSize >= sizeof(CONTEXT) &&
+      reinterpret_cast<const CONTEXT*>(static_cast<const BYTE*>(view) + exception->ThreadContext.Rva)->Rip == real.Rip &&
+      reinterpret_cast<const CONTEXT*>(static_cast<const BYTE*>(view) + exception->ThreadContext.Rva)->Rsp == real.Rsp;
     if (view) UnmapViewOfFile(view);
     if (mapping) CloseHandle(mapping);
     CloseHandle(file);
     Require(hasException, "A traced dump must be a readable minidump with the faulting thread's exception");
+    Require(contextMatches, "The dumped exception context must carry the faulting thread's registers");
   }
   SetEnvironmentVariableW(L"SKYDIAG_DUMP_IO_TRACE", hadPrevious ? previous : nullptr);
 
