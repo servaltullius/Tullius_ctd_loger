@@ -17,6 +17,41 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A PR that only touches documentation (*.md, docs/, doc/) skips the ~19 min
+  # Windows job: nothing it builds, tests or packages can change. The Linux
+  # job still runs, and every push to main runs the full set, so each merged
+  # commit is fully validated either way.
+  changes:
+    name: Detect docs-only PR
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare with the base branch
+        id: diff
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          code=true
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if files=$(git diff --name-only "$BASE_SHA...$HEAD_SHA") && [ -n "$files" ]; then
+              echo "$files"
+              if ! echo "$files" | grep -qvE '(\.md$|^docs/|^doc/)'; then
+                code=false
+              fi
+            fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Run the Windows job: $code"
+
   linux:
     name: Linux
     uses: ./.github/workflows/linux-tests.yml
@@ -27,6 +62,8 @@ jobs:
 
   windows-validate:
     name: Windows Validate (Build + Package + Gate)
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: windows-2022
 
     steps:

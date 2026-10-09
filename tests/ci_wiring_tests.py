@@ -272,6 +272,21 @@ def check_windows_build_retries_once(failures: list[str]) -> None:
             failures.append(f"{name} does not retry the Windows build after a transient link failure")
 
 
+def check_docs_only_skip_is_pr_only(failures: list[str]) -> None:
+    # Docs-only PRs may skip the Windows job, but a push to main and the
+    # release workflow must always build, test and package.
+    ci = _read(WORKFLOWS / "ci.yml")
+    if "needs.changes.outputs.code == 'true'" not in ci:
+        failures.append("ci.yml Windows job is not gated by the docs-only check")
+    if 'if [ "$EVENT_NAME" = "pull_request" ]; then' not in ci:
+        failures.append("ci.yml docs-only check must apply to pull requests only")
+    if "          code=true" not in ci:
+        failures.append("ci.yml docs-only check must default to running the Windows job")
+    release = _read(WORKFLOWS / "release.yml")
+    if "needs.changes" in release:
+        failures.append("release.yml must never skip the Windows job")
+
+
 def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
@@ -282,6 +297,7 @@ def main() -> int:
     check_sanitizers_are_wired(failures)
     check_windows_tests_are_wired(failures)
     check_windows_build_retries_once(failures)
+    check_docs_only_skip_is_pr_only(failures)
 
     if failures:
         for failure in failures:
