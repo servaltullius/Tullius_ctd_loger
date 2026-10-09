@@ -2,6 +2,33 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.60-rc3 (미배포)
+
+### 한눈에 보기
+- rc2의 SKSE 미로드 DLL 목록 묶기를 실게임에서 확인했습니다. `[SKSE]` 줄과 근거 항목에 `msdia140.dll, NpcGhostFix.dll: 버전 정보 없음(…)`이 한 번만 나왔습니다.
+- CI에서만 간헐적으로 실패하던 덤프 테스트의 원인을 찾아 고쳤습니다. AMX를 지원하는 Intel 서버 CPU와 Windows Server 2022의 dbghelp 조합에서 CTD 덤프 쓰기가 실패하던 문제로, 같은 환경의 사용자 PC에서도 CTD 덤프를 놓칠 수 있었습니다.
+
+### 수정
+- **AMX CPU에서 CTD 덤프 쓰기 실패** — dbghelp 10.0.20348(Windows Server 2022)은 예외 컨텍스트를 CPU 확장 상태 전체 크기만큼 읽어 덤프에 씁니다. AMX가 있는 CPU(Intel Xeon Sapphire/Emerald/Granite Rapids 등)에서는 이 크기가 약 11.5KB인데, Helper가 넘기던 것은 1,232바이트짜리 `CONTEXT`였습니다. 그 뒤가 읽을 수 없는 메모리면 덤프 파일 쓰기가 `0x800706F8`(ERROR_INVALID_USER_BUFFER)로 실패하고, 재시도해도 같았습니다.
+  - 이제 예외 컨텍스트를 `InitializeContext(CONTEXT_ALL | CONTEXT_XSTATE)`로 만든 확장 상태 크기 버퍼에 담아 넘깁니다. 레지스터 값은 그대로이고, 분석기는 컨텍스트의 앞부분만 읽으므로 리포트에는 변화가 없습니다.
+  - 덤프가 실패하면 Helper 로그에 오류를 16진수로도 적고, 실제로 로드된 dbghelp.dll의 버전과 경로를 함께 남깁니다.
+  - 일반 게이밍 PC(AMD, Intel 데스크톱 CPU)는 AMX가 없어 이전에도 해당하지 않았을 가능성이 큽니다.
+
+### 정정
+- v0.2.59와 그 rc5·rc6 노트는 이 간헐적 실패를 `ERROR_PARTIAL_COPY`로 설명했지만 잘못 읽은 것이었습니다. 로그의 `2147944184`는 `0x800706F8`(ERROR_INVALID_USER_BUFFER)이고, 기록된 실패 5건이 모두 이 코드였습니다. 그래서 rc5에 넣은 "읽을 수 없는 메모리를 건너뛰는 재시도"는 이 실패에서 한 번도 동작하지 않았습니다(ERROR_PARTIAL_COPY 대비로는 남겨 둡니다).
+
+### CI
+- Windows 테스트 전에 러너의 CPU, OS 빌드, AVX-512 지원, dbghelp 버전을 기록합니다.
+- dump-stress 워크플로를 16개 job으로 나눠 여러 호스트에서 돌리고, `SKYDIAG_DUMP_IO_TRACE=1`로 덤프 파일 쓰기를 추적합니다. 이 변수는 테스트에서만 쓰며 게임 환경의 동작은 바꾸지 않습니다.
+
+### 주의사항
+- Helper가 바뀌었습니다. zip 전체를 교체해 주세요.
+
+### 테스트
+- Windows 전체 테스트: `78/78` 통과.
+- 수정 전 dump-stress(16개 job)에서 AMX 호스트 2대(Xeon 6973P-C, Xeon Platinum 8573C)만 실패하고, AVX-512만 있는 Intel·AMD 호스트 14대는 통과했습니다. 수정 후 32개 job 중 AMX 호스트 4대를 포함해 모두 통과했습니다.
+- 덤프 쓰기 추적 경로와, 덤프 안 예외 컨텍스트의 RIP·RSP가 원래 값과 같은지를 테스트로 확인합니다.
+
 ## v0.2.60-rc2 (2026-10-09)
 
 ### 한눈에 보기
