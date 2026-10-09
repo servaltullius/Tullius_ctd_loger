@@ -103,6 +103,11 @@ jobs:
         shell: cmd
         run: scripts\build-winui.cmd
 
+      # Host details for the intermittent self-dump failure (see dump-stress.yml).
+      - name: Runner info
+        shell: pwsh
+        run: ./scripts/print_runner_info.ps1
+
       # The Linux job cannot cover targets guarded by if(WIN32), so without this
       # step those tests never ran anywhere.
       - name: Run tests (Windows)

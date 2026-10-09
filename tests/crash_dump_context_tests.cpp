@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include <DbgHelp.h>
+
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -12,6 +14,7 @@
 using skydiag::helper::CaptureKind;
 using skydiag::helper::DumpMode;
 using skydiag::helper::ResolveDumpProfile;
+using skydiag::helper::TracedDumpWriteCount;
 using skydiag::helper::WriteDumpWithStreams;
 using skydiag::tests::runtime::MakeSharedLayout;
 using skydiag::tests::runtime::MakeTempDir;
@@ -102,12 +105,65 @@ void TestCrashDumpSurvivesUnmappedRegisterTargets()
   std::filesystem::remove_all(outBase);
 }
 
+// With SKYDIAG_DUMP_IO_TRACE=1 the callback performs the file writes. The
+// dump must come out the same as dbghelp's own writes: readable and with the
+// exception stream that names the faulting thread.
+void TestTracedDumpWritesAreComplete()
+{
+  const auto outBase = MakeTempDir(L"skydiag_crash_dump_io_trace");
+  ParkedThread faulting;
+  const HANDLE process = OpenSelfProcessHandle();
+  const CONTEXT real = faulting.Context();
+
+  wchar_t previous[8]{};
+  const bool hadPrevious = GetEnvironmentVariableW(L"SKYDIAG_DUMP_IO_TRACE", previous, 8) > 0;
+  SetEnvironmentVariableW(L"SKYDIAG_DUMP_IO_TRACE", L"1");
+  for (const auto mode : { DumpMode::kMini, DumpMode::kDefault }) {
+    const auto writesBefore = TracedDumpWriteCount();
+    std::wstring err;
+    const auto path = outBase / (mode == DumpMode::kMini ? L"traced_mini.dmp" : L"traced_default.dmp");
+    const bool ok = WriteCrashDump(process, GetCurrentProcessId(), faulting.tid(), real, mode, path, &err);
+    if (!ok) {
+      std::fprintf(stderr, "traced crash dump failed: err=%ls\n", err.c_str());
+    }
+    Require(ok, "A traced crash dump must be written");
+    Require(TracedDumpWriteCount() > writesBefore, "dbghelp must hand the dump's file writes to the callback");
+
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+    Require(file != INVALID_HANDLE_VALUE, "Traced dump must open");
+    HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    void* view = mapping ? MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0) : nullptr;
+    PMINIDUMP_DIRECTORY dir = nullptr;
+    void* stream = nullptr;
+    ULONG streamSize = 0;
+    const auto* exception = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(stream);
+    const bool hasException =
+      view && MiniDumpReadDumpStream(view, ExceptionStream, &dir, &stream, &streamSize) && stream &&
+      (exception = static_cast<const MINIDUMP_EXCEPTION_STREAM*>(stream))->ThreadId == faulting.tid();
+    // The exception context is written from an XSTATE-sized copy; the
+    // registers must still be the faulting thread's.
+    const bool contextMatches = hasException && exception->ThreadContext.DataSize >= sizeof(CONTEXT) &&
+      reinterpret_cast<const CONTEXT*>(static_cast<const BYTE*>(view) + exception->ThreadContext.Rva)->Rip == real.Rip &&
+      reinterpret_cast<const CONTEXT*>(static_cast<const BYTE*>(view) + exception->ThreadContext.Rva)->Rsp == real.Rsp;
+    if (view) UnmapViewOfFile(view);
+    if (mapping) CloseHandle(mapping);
+    CloseHandle(file);
+    Require(hasException, "A traced dump must be a readable minidump with the faulting thread's exception");
+    Require(contextMatches, "The dumped exception context must carry the faulting thread's registers");
+  }
+  SetEnvironmentVariableW(L"SKYDIAG_DUMP_IO_TRACE", hadPrevious ? previous : nullptr);
+
+  CloseHandle(process);
+  std::filesystem::remove_all(outBase);
+}
+
 }  // namespace
 
 int main()
 {
   try {
     TestCrashDumpSurvivesUnmappedRegisterTargets();
+    TestTracedDumpWritesAreComplete();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

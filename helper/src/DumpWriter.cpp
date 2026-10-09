@@ -5,8 +5,10 @@
 #include <DbgHelp.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -18,10 +20,11 @@
 namespace skydiag::helper {
 namespace {
 
-// Where MiniDumpWriteDump was when it failed. ERROR_PARTIAL_COPY failures
-// have never reproduced outside CI and are not prevented by
-// MiniDumpIgnoreInaccessibleMemory, so the failure message carries the last
-// callback the writer made and any memory reads it reported as failed.
+// Where MiniDumpWriteDump was when it failed. CI runs intermittently fail with
+// 0x800706F8 (ERROR_INVALID_USER_BUFFER) on self-dump tests and never
+// locally, so the failure message carries the last callback the writer made,
+// any memory reads it reported as failed and, when I/O tracing is on, the
+// file write that failed.
 struct DumpProgress
 {
   ULONG lastCallbackType = 0;
@@ -30,6 +33,14 @@ struct DumpProgress
   ULONG64 firstFailedReadOffset = 0;
   ULONG firstFailedReadBytes = 0;
   HRESULT firstFailedReadStatus = S_OK;
+
+  bool ioTraced = false;
+  ULONG ioWriteCount = 0;
+  ULONG64 ioBytesWritten = 0;
+  ULONG64 failedWriteOffset = 0;
+  ULONG failedWriteBytes = 0;
+  HRESULT failedWriteStatus = S_OK;     // the single WriteFile dbghelp would have made
+  HRESULT chunkedRetryStatus = S_OK;    // the same bytes written again in 1 MiB pieces
 
   void Reset() noexcept { *this = DumpProgress{}; }
 };
@@ -40,8 +51,126 @@ struct DumpCallbackContext
   DWORD preferredThreadId = 0;
   std::vector<DWORD> preferredThreadIds;
   bool isProcessSnapshot = false;
+  // SKYDIAG_DUMP_IO_TRACE=1 (set by CI, never by the game setup): the callback
+  // performs the dump's file writes itself so a failing write is recorded.
+  bool traceIo = false;
   DumpProgress progress{};
 };
+
+std::atomic<std::uint64_t> g_tracedDumpWrites{ 0 };
+
+bool DumpIoTraceRequested()
+{
+  wchar_t value[8]{};
+  const DWORD n = GetEnvironmentVariableW(L"SKYDIAG_DUMP_IO_TRACE", value, static_cast<DWORD>(std::size(value)));
+  return n == 1 && value[0] == L'1';
+}
+
+HRESULT WriteAllAt(HANDLE file, ULONG64 offset, const BYTE* bytes, ULONG size, ULONG maxChunk)
+{
+  LARGE_INTEGER pos{};
+  pos.QuadPart = static_cast<LONGLONG>(offset);
+  if (!SetFilePointerEx(file, pos, nullptr, FILE_BEGIN)) {
+    return HRESULT_FROM_WIN32(GetLastError());
+  }
+  while (size > 0) {
+    const DWORD chunk = std::min<ULONG>(size, maxChunk);
+    DWORD written = 0;
+    if (!WriteFile(file, bytes, chunk, &written, nullptr)) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+    if (written == 0) {
+      return HRESULT_FROM_WIN32(ERROR_WRITE_FAULT);
+    }
+    bytes += written;
+    size -= written;
+  }
+  return S_OK;
+}
+
+// IoWriteAllCallback: write the block the way dbghelp would (one WriteFile).
+// A failure is recorded together with whether the same bytes could be written
+// in 1 MiB pieces, which tells a large-buffer failure apart from one tied to
+// the bytes or the file. The write still fails as dbghelp's would, so tracing
+// diagnoses the failure without hiding it.
+HRESULT TracedWriteAll(const MINIDUMP_IO_CALLBACK& io, DumpProgress& progress)
+{
+  const auto* bytes = static_cast<const BYTE*>(io.Buffer);
+  const HRESULT hr = WriteAllAt(io.Handle, io.Offset, bytes, io.BufferBytes, io.BufferBytes == 0 ? 1u : io.BufferBytes);
+  ++progress.ioWriteCount;
+  g_tracedDumpWrites.fetch_add(1, std::memory_order_relaxed);
+  if (SUCCEEDED(hr)) {
+    progress.ioBytesWritten += io.BufferBytes;
+  } else if (progress.failedWriteStatus == S_OK) {
+    progress.failedWriteOffset = io.Offset;
+    progress.failedWriteBytes = io.BufferBytes;
+    progress.failedWriteStatus = hr;
+    progress.chunkedRetryStatus = WriteAllAt(io.Handle, io.Offset, bytes, io.BufferBytes, 1u << 20);
+  }
+  return hr;
+}
+
+// The exception context handed to MiniDumpWriteDump. The dbghelp shipped with
+// Windows Server 2022 (10.0.20348) writes it with the CPU's full extended-state
+// size, about 11.5 KB on AMX hosts (Xeon Sapphire/Emerald/Granite Rapids),
+// instead of sizeof(CONTEXT). From a bare CONTEXT that read can run past the
+// end of the stack, and the dump fails with ERROR_INVALID_USER_BUFFER. A
+// CONTEXT_EX-backed buffer of that size keeps the read inside valid memory;
+// the stored context has no extended state, so that area stays zero.
+PCONTEXT CopyIntoXStateSizedContext(const CONTEXT& source, std::vector<BYTE>& storage)
+{
+  // CONTEXT_XSTATE is CONTEXT_AMD64 plus this bit; CONTEXT_ALL already has CONTEXT_AMD64.
+  constexpr DWORD kXStateBit = 0x00000040;
+  // NOLINTNEXTLINE(misc-redundant-expression) -- the SDK's CONTEXT_ALL repeats CONTEXT_AMD64 in its own expansion.
+  constexpr DWORD kFlags = CONTEXT_ALL | kXStateBit;
+  DWORD length = 0;
+  InitializeContext(nullptr, kFlags, nullptr, &length);
+  if (length == 0) {
+    return nullptr;
+  }
+  // Slack in case that dbghelp sizes the read from more features than this
+  // process sees enabled (AMX tile data alone is 8 KB).
+  length += 16u * 1024u;
+  storage.assign(length, 0);
+  PCONTEXT out = nullptr;
+  if (!InitializeContext(storage.data(), kFlags, &out, &length) || !out) {
+    return nullptr;
+  }
+  // The shared-memory copy is a bare CONTEXT: never ask CopyContext for its
+  // (absent) extended state.
+  CONTEXT sourceCopy = source;
+  if (!CopyContext(out, source.ContextFlags & ~kXStateBit, &sourceCopy)) {
+    return nullptr;
+  }
+  return out;
+}
+
+// File version of the dbghelp.dll this process loaded, e.g. "10.0.20348.1 C:\...\dbghelp.dll".
+std::wstring DescribeLoadedDbgHelp()
+{
+  HMODULE module = GetModuleHandleW(L"dbghelp.dll");
+  if (!module) {
+    return L"not loaded";
+  }
+  wchar_t path[MAX_PATH]{};
+  if (GetModuleFileNameW(module, path, MAX_PATH) == 0) {
+    return L"unknown";
+  }
+  std::wstring version = L"?";
+  DWORD handle = 0;
+  const DWORD size = GetFileVersionInfoSizeW(path, &handle);
+  if (size > 0) {
+    std::vector<BYTE> data(size);
+    VS_FIXEDFILEINFO* ffi = nullptr;
+    UINT ffiSize = 0;
+    if (GetFileVersionInfoW(path, 0, size, data.data()) &&
+        VerQueryValueW(data.data(), L"\\", reinterpret_cast<LPVOID*>(&ffi), &ffiSize) && ffi) {
+      version = std::to_wstring(HIWORD(ffi->dwFileVersionMS)) + L"." + std::to_wstring(LOWORD(ffi->dwFileVersionMS)) +
+        L"." + std::to_wstring(HIWORD(ffi->dwFileVersionLS)) + L"." + std::to_wstring(LOWORD(ffi->dwFileVersionLS));
+    }
+  }
+  return version + L" " + path;
+}
 
 ULONG64 CallbackSubject(const MINIDUMP_CALLBACK_INPUT& input) noexcept
 {
@@ -78,6 +207,15 @@ std::wstring DescribeDumpProgress(const DumpProgress& progress)
     text += L" (first at " + Hex(progress.firstFailedReadOffset) + L" size=" +
       std::to_wstring(progress.firstFailedReadBytes) + L" status=" +
       Hex(static_cast<ULONG>(progress.firstFailedReadStatus)) + L")";
+  }
+  if (progress.ioTraced) {
+    text += L", io writes=" + std::to_wstring(progress.ioWriteCount) + L" bytes=" + std::to_wstring(progress.ioBytesWritten);
+    if (progress.failedWriteStatus != S_OK) {
+      text += L" (write at " + Hex(progress.failedWriteOffset) + L" size=" + std::to_wstring(progress.failedWriteBytes) +
+        L" failed " + Hex(static_cast<ULONG>(progress.failedWriteStatus)) + L", 1 MiB retry " +
+        (SUCCEEDED(progress.chunkedRetryStatus) ? std::wstring(L"ok") : Hex(static_cast<ULONG>(progress.chunkedRetryStatus))) +
+        L")";
+    }
   }
   return text;
 }
@@ -226,6 +364,22 @@ BOOL CALLBACK MiniDumpCallback(
   }
 
   const auto callbackType = callbackInput->CallbackType;
+  if (ctx->traceIo && callbackOutput) {
+    // Kept out of lastCallbackType so that field still names the dump phase.
+    if (callbackType == IoStartCallback) {
+      ctx->progress.ioTraced = true;
+      callbackOutput->Status = S_FALSE;  // the callback performs every write
+      return TRUE;
+    }
+    if (callbackType == IoWriteAllCallback) {
+      callbackOutput->Status = TracedWriteAll(callbackInput->Io, ctx->progress);
+      return TRUE;
+    }
+    if (callbackType == IoFinishCallback) {
+      callbackOutput->Status = S_OK;
+      return TRUE;
+    }
+  }
   if (callbackType == ReadMemoryFailureCallback) {
     // Record the read and let the writer continue without that memory. The
     // record shows up in the failure message if the dump still fails.
@@ -331,6 +485,7 @@ bool WriteDumpWithStreams(
   EXCEPTION_POINTERS ep{};
   EXCEPTION_RECORD er{};
   CONTEXT ctx{};
+  std::vector<BYTE> xstateContextStorage;
 
   MINIDUMP_EXCEPTION_INFORMATION* meiPtr = nullptr;
   if (isCrash && hasCommittedHeader &&
@@ -342,7 +497,9 @@ bool WriteDumpWithStreams(
     er = committedHeader.crash.exception_record;
     ctx = committedHeader.crash.context;
     ep.ExceptionRecord = &er;
-    ep.ContextRecord = &ctx;
+    // See CopyIntoXStateSizedContext; the bare copy is only a fallback.
+    PCONTEXT sized = CopyIntoXStateSizedContext(ctx, xstateContextStorage);
+    ep.ContextRecord = sized ? sized : &ctx;
 
     mei.ThreadId = committedHeader.crash.faulting_tid;
     mei.ExceptionPointers = &ep;
@@ -367,6 +524,7 @@ bool WriteDumpWithStreams(
     }
   }
   callbackContext.isProcessSnapshot = isProcessSnapshot;
+  callbackContext.traceIo = DumpIoTraceRequested();
   MINIDUMP_CALLBACK_INFORMATION callbackInfo{};
   callbackInfo.CallbackRoutine = MiniDumpCallback;
   callbackInfo.CallbackParam = &callbackContext;
@@ -416,10 +574,15 @@ bool WriteDumpWithStreams(
   }
 
   if (err) {
-    *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr) + L" (" +
-      DescribeDumpProgress(callbackContext.progress) + L")";
+    *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr) + L" (" + Hex(lastErr) + L", " +
+      DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";
   }
   return false;
+}
+
+std::uint64_t TracedDumpWriteCount() noexcept
+{
+  return g_tracedDumpWrites.load(std::memory_order_relaxed);
 }
 
 }  // namespace skydiag::helper
