@@ -158,6 +158,23 @@ void TestDescribeSkseLoadStatus()
   assert(SummarizeSkseLogIssues(log, true, 1, L", ") ==
          L"A.dll: no version data (a helper DLL that is not an SKSE plugin, or an old plugin without AE version data) (+2 more)");
   assert(SummarizeSkseLogIssues(log, false, 6, L" | ").find(L" | B.dll: 더 새로운 SKSE 필요 (외 1개)") != std::wstring::npos);
+
+  // rc1 field report: two "no version data" DLLs repeated the long text twice.
+  skydiag::dump_tool::SkseLogScanInfo grouped{};
+  grouped.issues.push_back({ "msdia140.dll", "", "no version data", 0 });
+  grouped.issues.push_back({ "Old.dll", "Old", "disabled, requires newer script extender", 0 });
+  grouped.issues.push_back({ "NpcGhostFix.dll", "", "no version data", 0 });
+  grouped.issues.push_back({ "A.dll", "A", "couldn't load plugin", 126 });
+  grouped.issues.push_back({ "B.dll", "B", "couldn't load plugin", 5 });
+  grouped.issue_count = 5;
+  assert(SummarizeSkseLogIssues(grouped, true, 6, L"; ") ==
+         L"msdia140.dll, NpcGhostFix.dll: no version data (a helper DLL that is not an SKSE plugin, or an old plugin "
+         L"without AE version data); Old.dll: needs a newer SKSE; A.dll: could not be loaded: a DLL it needs is missing "
+         L"(error 126); B.dll: could not be loaded (error 5)");
+  // The cap counts DLLs, not groups.
+  assert(SummarizeSkseLogIssues(grouped, true, 3, L"; ") ==
+         L"msdia140.dll, NpcGhostFix.dll: no version data (a helper DLL that is not an SKSE plugin, or an old plugin "
+         L"without AE version data); Old.dll: needs a newer SKSE (+2 more)");
 }
 
 void TestMissingMastersIgnoreInactivePlugins()
