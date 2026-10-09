@@ -189,10 +189,14 @@ internal sealed partial class MainWindowViewModel
             return StripRecommendationTag(taggedAction);
         }
 
-        var firstRecommendation = summary.Recommendations.FirstOrDefault();
-        return string.IsNullOrWhiteSpace(firstRecommendation)
+        // The analyzer picks the same entry as the text report's NextAction.
+        var index = summary.NextActionIndex;
+        var nextRecommendation = index >= 0 && index < summary.Recommendations.Count
+            ? summary.Recommendations[index]
+            : summary.Recommendations.FirstOrDefault();
+        return string.IsNullOrWhiteSpace(nextRecommendation)
             ? T("None", "없음")
-            : StripRecommendationTag(firstRecommendation);
+            : StripRecommendationTag(nextRecommendation);
     }
 
     private static bool IsPriorityActionRecommendation(string recommendation)

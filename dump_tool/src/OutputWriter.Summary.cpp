@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "Utf.h"
 #include "WctTypes.h"
@@ -471,6 +472,9 @@ nlohmann::json BuildSummaryJson(
   for (const auto& s : r.recommendations) {
     summary["recommendations"].push_back(WideToUtf8(s));
   }
+  // Index into "recommendations" of the report's NextAction; -1 when there is none.
+  const auto nextAction = SelectNextActionIndex(r.recommendations);
+  summary["next_action_index"] = nextAction == std::wstring::npos ? -1 : static_cast<int>(nextAction);
 
   if (!r.history_stats.empty()) {
     auto stats = nlohmann::json::array();
