@@ -82,18 +82,19 @@ std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandi
 {
   if (r.crash_logger_direct_fault_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
-    return L"Crash Logger frame first (direct DLL fault)";
+    return en ? L"Crash Logger frame first (direct DLL fault)" : L"Crash Logger 프레임(DLL 안에서 바로 난 예외)";
   }
   if (r.crash_logger_first_actionable_probable_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
     return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
-              : L"Crash Logger frame first (첫 actionable probable DLL frame)";
+              : L"Crash Logger 프레임(첫 번째 유력 DLL 프레임)";
   }
   if (r.crash_logger_probable_streak_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
-    return L"Crash Logger frame first (probable frame streak)";
+    return en ? L"Crash Logger frame first (probable frame streak)" : L"Crash Logger 프레임(유력 DLL 프레임 연속)";
   }
-  return L"Crash Logger frame first";
+  // Korean particles after this label assume it ends in "프레임" (이/과).
+  return en ? L"Crash Logger frame first" : L"Crash Logger 프레임";
 }
 
 std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en)
@@ -108,11 +109,11 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
     } else if (family == "actionable_stack") {
       labels.push_back(en ? L"actionable stack" : L"실행 가능한 스택");
     } else if (family == "resource_provider") {
-      labels.push_back(en ? L"near resource provider" : L"인접 리소스 provider");
+      labels.push_back(en ? L"near resource provider" : L"근처 리소스 제공 모드");
     } else if (family == "history_repeat") {
       labels.push_back(en ? L"history repeat" : L"반복 기록");
     } else if (family == "first_chance_context") {
-      labels.push_back(en ? L"repeated first-chance context" : L"반복 first-chance 문맥");
+      labels.push_back(en ? L"repeated first-chance context" : L"반복 선행 예외(first-chance)");
     } else if (family == "hang_thread_group") {
       labels.push_back(en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹");
     } else if (family == "modal_dialog_owner") {
@@ -327,8 +328,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L". Check this candidate first, but do not treat it as a confirmed root cause. (Confidence: " +
             topCandidateConf + L")")
         : (L"크래시 덤프 위치는 " + who + L"(알려진 훅 프레임워크)이지만, 짝지어진 CrashLogger 로그의 " +
-            frameSupport + L" 가 DLL 후보 " + candidateName +
-            L" 를 가리킵니다. 이 후보를 먼저 점검하되 확정 원인으로 단정하지 마세요. (신뢰도: " +
+            frameSupport + L"이 DLL 후보 " + candidateName +
+            L"을(를) 가리킵니다. 이 후보를 먼저 점검하되 확정 원인으로 단정하지 마세요. (신뢰도: " +
             topCandidateConf + L")");
     } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
@@ -372,13 +373,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
               L" plus the same-dump stack both land in this DLL, but that still reflects the current fault-location cluster rather than an independent confirmation. Compare nearby probable DLLs too. (Confidence: " +
               topCandidateConf + L")")
           : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport +
-              L" 와 같은 덤프의 스택이 모두 이 DLL에 걸리지만 이는 독립 검증이라기보다 현재 fault-location cluster 에 가깝습니다. 주변 probable DLL도 함께 비교하세요. (신뢰도: " +
+              L"과 같은 덤프의 스택이 모두 이 DLL을 가리키지만, 둘 다 예외가 난 위치를 보는 것이라 독립 검증은 아닙니다. Crash Logger가 함께 지목한 근처 DLL도 비교하세요. (신뢰도: " +
               topCandidateConf + L")");
       } else {
         summary = en
           ? (L"Crash is reported in " + who + L", but current actionable support still stays on the fault-location DLL. Compare nearby probable DLLs before treating it as the root cause. (Confidence: " +
               topCandidateConf + L")")
-          : (L"크래시 위치가 " + who + L"로 보고되었지만, 현재 실행 우선 근거는 여전히 fault-location DLL에 머뭅니다. 근본 원인으로 단정하기 전에 주변 probable DLL도 함께 비교하세요. (신뢰도: " +
+          : (L"크래시 위치가 " + who + L"로 보고되었지만, 지금 근거는 예외가 난 DLL이라는 것뿐입니다. 근본 원인으로 단정하기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요. (신뢰도: " +
               topCandidateConf + L")");
       }
     } else if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
@@ -400,7 +401,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = en
           ? (L"Top suspect: " + who + L" — " + frameSupport + L" and another signal agree on this DLL (" + families +
               L"). (Confidence: " + topCandidateConf + L")")
-          : (L"유력 후보: " + who + L" — " + frameSupport + L" 와 다른 신호가 이 DLL에서 합의합니다. (" + families +
+          : (L"유력 후보: " + who + L" — " + frameSupport + L"과 다른 신호가 이 DLL을 함께 가리킵니다. (" + families +
               L", 신뢰도: " + topCandidateConf + L")");
       } else {
         summary = en
@@ -414,8 +415,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = en
           ? (L"Crash is reported in " + who + L", and Tullius callstack first also points to this DLL (actionable stack). "
               L"This is stronger than a standalone frame clue, but it can still be a victim location. (Confidence: " + topCandidateConf + L")")
-          : (L"크래시 위치가 " + who + L"로 보고되었고, Tullius callstack first 도 이 DLL (actionable stack)를 가리킵니다. "
-              L"이는 단독 frame 단서보다 강하지만, 여전히 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
+          : (L"크래시 위치가 " + who + L"로 보고되었고, Tullius 콜스택도 이 DLL을 가리킵니다. "
+              L"이는 프레임 단서 하나보다 강하지만, 여전히 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
       } else if (topCandidateBackedByFrame) {
         const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
         const auto families = JoinCandidateFamilies(*topCandidate, en);
@@ -423,14 +424,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           summary = en
             ? (L"Crash is reported in " + who + L", and " + frameSupport + L" points inside this DLL. Another supporting signal agrees (" +
                 families + L"), but this can still be a victim location. (Confidence: " + topCandidateConf + L")")
-            : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport + L" 가 이 DLL 내부를 가리킵니다. 다른 보조 신호도 맞지만 (" +
+            : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport + L"이 이 DLL 내부를 가리킵니다. 다른 보조 신호도 맞지만 (" +
                 families + L"), 여전히 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
         } else {
           summary = en
             ? (L"Crash is reported in " + who + L", and " + frameSupport +
                 L" points inside this DLL, but no second independent signal agrees yet. This can still be a victim location. (Confidence: " + topCandidateConf + L")")
             : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport +
-                L" 가 이 DLL 내부를 가리키지만 아직 두 번째 독립 신호 합의는 없습니다. 여전히 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
+                L"이 이 DLL 내부를 가리키지만 이를 뒷받침하는 다른 독립 신호는 아직 없습니다. 여전히 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
         }
       } else {
         const auto candidateName = DescribeCandidate(*topCandidate);
@@ -439,7 +440,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           ? (L"Crash is reported in " + who + L", and partial actionable support still points to this DLL candidate " + candidateName +
               L" (" + families + L"). Treat it as a candidate first, not a confirmed root cause. (Confidence: " + topCandidateConf + L")")
           : (L"크래시 위치가 " + who + L"로 보고되었고, 부분적인 실행 우선 신호도 이 DLL 후보 " + candidateName +
-              L" 를 가리킵니다. (" + families + L", 우선 후보로 보되 확정 원인으로 단정하지 마세요. 신뢰도: " + topCandidateConf + L")");
+              L"을(를) 가리킵니다. (" + families + L", 우선 후보로 보되 확정 원인으로 단정하지 마세요. 신뢰도: " + topCandidateConf + L")");
       }
     } else if (topCandidateMatchesFaultModule && topCandidate->status_id == "reference_clue") {
       const auto candidateName = DescribeCandidate(*topCandidate);
@@ -449,7 +450,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           ? (L"Crash is reported in " + who + L", and " + frameSupport +
               L" points inside this DLL, but no second independent signal agrees yet. Treat it as a clue first. (Confidence: " + topCandidateConf + L")")
           : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport +
-              L" 가 이 DLL 내부를 가리키지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요. (신뢰도: " + topCandidateConf + L")");
+              L"이 이 DLL 내부를 가리키지만 이를 뒷받침하는 다른 독립 신호는 아직 없습니다. 우선 단서로 보세요. (신뢰도: " + topCandidateConf + L")");
       } else {
         summary = en
           ? (L"Crash is reported in " + who + L", but the current actionable clue for this DLL candidate is still limited to " +
@@ -464,7 +465,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         ? (L"Crash is reported in " + who + L", but the strongest actionable candidate is " + candidateName +
             L" (" + families + L"). The faulting DLL can still be a victim location. (Confidence: " + topCandidateConf + L")")
         : (L"크래시 위치가 " + who + L"로 보고되었지만, 가장 강한 실행 우선 후보는 " + candidateName +
-            L" 입니다. (" + families + L", faulting DLL은 피해 위치일 수 있습니다. 신뢰도: " + topCandidateConf + L")");
+            L" 입니다. (" + families + L", 예외가 난 DLL은 피해 위치일 수 있습니다. 신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
@@ -472,28 +473,28 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = en
           ? (L"Crash is reported in " + who + L", but Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). The faulting DLL can still be a victim location. (Confidence: " + topCandidateConf + L")")
-          : (L"크래시 위치가 " + who + L"로 보고되었지만, Tullius callstack first 는 DLL 후보 " + candidateName +
-              L" (actionable stack)를 가리킵니다. faulting DLL은 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
+          : (L"크래시 위치가 " + who + L"로 보고되었지만, Tullius 콜스택은 DLL 후보 " + candidateName +
+              L"을(를) 가리킵니다. 예외가 난 DLL은 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
       } else if (topCandidateBackedByFrame) {
         const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
         summary = en
           ? (L"Crash is reported in " + who + L", but " + frameSupport + L" points to DLL candidate " + candidateName +
               L" (" + families + L"). The faulting DLL can still be a victim location. (Confidence: " + topCandidateConf + L")")
-          : (L"크래시 위치가 " + who + L"로 보고되었지만, " + frameSupport + L" 가 DLL 후보 " + candidateName +
-              L" 를 가리킵니다. (" + families + L", faulting DLL은 피해 위치일 수 있습니다. 신뢰도: " + topCandidateConf + L")");
+          : (L"크래시 위치가 " + who + L"로 보고되었지만, " + frameSupport + L"이 DLL 후보 " + candidateName +
+              L"을(를) 가리킵니다. (" + families + L", 예외가 난 DLL은 피해 위치일 수 있습니다. 신뢰도: " + topCandidateConf + L")");
       } else {
         summary = en
           ? (L"Crash is reported in " + who + L", but partial actionable support points to DLL candidate " + candidateName +
               L" (" + families + L"). The faulting DLL can still be a victim location. (Confidence: " + topCandidateConf + L")")
           : (L"크래시 위치가 " + who + L"로 보고되었지만, 부분적인 실행 우선 신호가 DLL 후보 " + candidateName +
-              L" 를 가리킵니다. (" + families + L", faulting DLL은 피해 위치일 수 있습니다. 신뢰도: " + topCandidateConf + L")");
+              L"을(를) 가리킵니다. (" + families + L", 예외가 난 DLL은 피해 위치일 수 있습니다. 신뢰도: " + topCandidateConf + L")");
       }
     } else {
       summary = en
         ? (L"Crash is reported in " + who +
             L", but this currently rests on fault-location evidence only. This can still be a victim location. (Confidence: Low)")
         : (L"크래시 위치가 " + who +
-            L"로 보고되었지만, 현재는 fault-location 단서만 있습니다. 여전히 피해 위치일 수 있습니다. (신뢰도: 낮음)");
+            L"로 보고되었지만, 지금은 예외가 난 위치라는 단서만 있습니다. 여전히 피해 위치일 수 있습니다. (신뢰도: 낮음)");
     }
   } else if (hasModule && isSystem) {
     if (topCandidate && topCandidate->status_id == "cross_validated") {
@@ -517,19 +518,19 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             (hasHistorySupport ? L" Repeated crash bucket history also matched this candidate." : L"") +
             (hasResourceSupport ? L" Nearby resource provider activity also matched this candidate." : L"") +
             L" (Confidence: " + topCandidateConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + frameSupport + L" 가 DLL 후보 " + candidateName +
-            L" 를 가리킵니다. 이는 단독 object ref 보다 강한 신호입니다." +
-            (hasFirstChanceSupport ? L" 반복 suspicious first-chance 문맥도 이 후보와 맞습니다." : L"") +
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + frameSupport + L"이 DLL 후보 " + candidateName +
+            L"을(를) 가리킵니다. 이는 오브젝트 참조 하나보다 강한 신호입니다." +
+            (hasFirstChanceSupport ? L" 반복된 의심스러운 선행 예외(first-chance)도 이 후보와 맞습니다." : L"") +
             (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
-            (hasResourceSupport ? L" 인접 리소스 provider 활동도 이 후보와 맞습니다." : L"") +
+            (hasResourceSupport ? L" 근처 리소스를 제공한 모드도 이 후보와 맞습니다." : L"") +
             L" (신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(*topCandidate)) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
         ? (L"Crash is reported in a Windows system DLL, but Tullius callstack first points to DLL candidate " + candidateName +
             L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, Tullius callstack first 가 DLL 후보 " + candidateName +
-            L" (actionable stack)를 가리킵니다. 이는 stack scan only 보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
+        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, Tullius 콜스택이 DLL 후보 " + candidateName +
+            L"을(를) 가리킵니다. 이는 스택 스캔만으로 얻은 단서보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
     } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
         ? (L"Crash is reported in a Windows system DLL, but " + suspectBasis + L" points to " + nonHookSuspectWho +
@@ -589,11 +590,11 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             (hasHistorySupport ? L" Repeated crash bucket history also matched this candidate." : L"") +
             (hasResourceSupport ? L" Nearby resource provider activity also matched this candidate." : L"") +
             L" (Confidence: " + topCandidateConf + L")")
-        : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L" 가 DLL 후보 " + candidateName +
-            L" 를 가리킵니다. (" + families + L", 단독 object ref 보다 강한 신호" +
-            (hasFirstChanceSupport ? L", 반복 suspicious first-chance 문맥도 이 후보와 맞음" : L"") +
+        : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L"이 DLL 후보 " + candidateName +
+            L"을(를) 가리킵니다. (" + families + L", 오브젝트 참조 하나보다 강한 신호" +
+            (hasFirstChanceSupport ? L", 반복된 의심스러운 선행 예외도 이 후보와 맞음" : L"") +
             (hasHistorySupport ? L", 반복 크래시 버킷 이력도 이 후보와 맞음" : L"") +
-            (hasResourceSupport ? L", 인접 리소스 provider 활동도 이 후보와 맞음" : L"") +
+            (hasResourceSupport ? L", 근처 리소스를 제공한 모드도 이 후보와 맞음" : L"") +
             L", 신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
@@ -602,8 +603,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = en
           ? (L"Crash is reported in the game executable. Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")
-          : (L"크래시 위치가 게임 본체(EXE)이며, Tullius callstack first 가 DLL 후보 " + candidateName +
-              L" (actionable stack)를 가리킵니다. 이는 stack scan only 보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
+          : (L"크래시 위치가 게임 본체(EXE)이며, Tullius 콜스택이 DLL 후보 " + candidateName +
+              L"을(를) 가리킵니다. 이는 스택 스캔만으로 얻은 단서보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
       } else {
         summary = en
           ? (L"Crash is reported in the game executable. Actionable candidate: " + candidateName +
@@ -617,15 +618,15 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       summary = en
         ? (L"Crash is reported in the game executable, and " + frameSupport + L" points to DLL candidate " + candidateName +
             L". No second independent signal agrees yet. (Confidence: " + topCandidateConf + L")")
-        : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L" 가 DLL 후보 " + candidateName +
-            L" 를 가리킵니다. 아직 두 번째 독립 신호 합의는 없습니다. (신뢰도: " + topCandidateConf + L")");
+        : (L"크래시 위치가 게임 본체(EXE)이며, " + frameSupport + L"이 DLL 후보 " + candidateName +
+            L"을(를) 가리킵니다. 이를 뒷받침하는 다른 독립 신호는 아직 없습니다. (신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidate->status_id == "reference_clue" && topCandidateHasObjectRef) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
         ? (L"Crash is reported in the game executable, and CrashLogger shows the game was processing " + candidateName +
             L". No second independent signal agrees yet. (Confidence: " + topCandidateConf + L")")
         : (L"크래시 위치가 게임 본체(EXE)이며, CrashLogger 기준으로 " + candidateName +
-            L" 처리 중이었습니다. 아직 두 번째 독립 신호 합의는 없습니다. (신뢰도: " + topCandidateConf + L")");
+            L" 처리 중이었습니다. 이를 뒷받침하는 다른 독립 신호는 아직 없습니다. (신뢰도: " + topCandidateConf + L")");
     // Priority 1: stackwalk-based non-hook suspect (high reliability)
     } else if (hasNonHookSuspect && suspectsAreStackwalk && !nonHookSuspectWho.empty()) {
       if (hasObjectRefs) {

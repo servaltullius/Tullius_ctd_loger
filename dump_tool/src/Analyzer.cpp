@@ -337,15 +337,15 @@ void ApplyCrashLoggerCorroborationToSuspects(
     if (r.promotion.totalPromotion > 0) {
       item.reason += en
         ? (L" (Crash Logger frame promotion=+" + std::to_wstring(r.promotion.totalPromotion) + L")")
-        : (L" (Crash Logger frame 승격=+" + std::to_wstring(r.promotion.totalPromotion) + L")");
+        : (L" (Crash Logger 프레임 가산=+" + std::to_wstring(r.promotion.totalPromotion) + L")");
       if (r.promotion.directFaultPromotion > 0) {
-        item.reason += en ? L" (direct fault match)" : L" (direct fault 일치)";
+        item.reason += en ? L" (direct fault match)" : L" (DLL 안에서 바로 난 예외와 일치)";
       }
       if (r.promotion.firstActionablePromotion > 0) {
-        item.reason += en ? L" (first actionable probable frame match)" : L" (첫 actionable probable frame 일치)";
+        item.reason += en ? L" (first actionable probable frame match)" : L" (첫 번째 유력 DLL 프레임과 일치)";
       }
       if (r.promotion.probableStreakPromotion > 0) {
-        item.reason += en ? L" (probable frame streak match)" : L" (probable frame streak 일치)";
+        item.reason += en ? L" (probable frame streak match)" : L" (유력 DLL 프레임 연속과 일치)";
       }
       if (r.matchedCppModule) {
         item.reason += en ? L" (Crash Logger C++ exception module support)"
