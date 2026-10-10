@@ -5,6 +5,7 @@
 #include "Utf.h"
 #include "WctTypes.h"
 
+#include <cmath>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -330,10 +331,11 @@ std::string BuildReportText(
     {
       const auto& state = r.blackbox_freeze_summary;
       if (!state.open_menus.empty() || state.seconds_since_load_end >= 0.0 || state.pause_gap_seconds > 0.0) {
+        // Rounded like the evidence text (DescribeDuration), so both show the same number.
         rpt << "  game_state open_menus=" << WideToUtf8(JoinList(state.open_menus, state.open_menus.size(), L","))
-            << " since_load_end_s=" << static_cast<long long>(state.seconds_since_load_end)
-            << " pause_gap_s=" << static_cast<long long>(state.pause_gap_seconds)
-            << " pause_gap_ended_s_before=" << static_cast<long long>(state.pause_gap_ended_seconds_before) << "\n";
+            << " since_load_end_s=" << std::llround(state.seconds_since_load_end)
+            << " pause_gap_s=" << std::llround(state.pause_gap_seconds)
+            << " pause_gap_ended_s_before=" << std::llround(state.pause_gap_ended_seconds_before) << "\n";
       }
     }
     if (r.modal_dialog_wait.detected) {
