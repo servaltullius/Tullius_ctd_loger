@@ -7,15 +7,19 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "Analyzer.h"
 #include "AnalyzerInternals.h"
 #include "EvidenceBuilder.h"
 #include "NextAction.h"
+#include "OutputWriterPipeline.h"
 #include "SkyrimDiagShared.h"
 
 namespace {
@@ -247,6 +251,31 @@ void TestStallOutranksTheWaitAdvice()
   }
 }
 
+// The report keeps an overview and the most recent events; the full ring
+// buffer is in the blackbox companion file.
+void TestReportKeepsRecentEvents()
+{
+  AnalysisResult r = MakeHang();
+  r.has_blackbox = true;
+  for (std::uint32_t i = 0; i < 200; ++i) {
+    auto row = Event(i % 2 == 0 ? skydiag::EventType::kMenuOpen : skydiag::EventType::kMenuClose, 5061700.0 + i);
+    row.i = i;
+    row.type_name = i % 2 == 0 ? L"MenuOpen" : L"MenuClose";
+    r.events.push_back(row);
+  }
+  BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+  const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+  const auto report = skydiag::dump_tool::BuildReportText(r, summary, false);
+  Require(report.find("Events: 200 over 0.2 s (MenuOpen 100, MenuClose 100)") != std::string::npos, "event overview");
+  Require(report.find("(last 60 of 200; all of them are in *_SkyrimDiagBlackbox.jsonl)") != std::string::npos,
+    "the report says where the rest is");
+  Require(report.find("[139] ") == std::string::npos && report.find("[140] ") != std::string::npos &&
+            report.find("[199] ") != std::string::npos,
+    "only the last 60 events are listed");
+  Require(report.find("t_ms=5061899.0 ") != std::string::npos && report.find("e+06") == std::string::npos,
+    "times are never in scientific notation");
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -270,6 +299,7 @@ int main()
     TestEngineGpuQueryPoll();
     TestOtherThreadSuspectsKeepTheirSignal();
     TestStallOutranksTheWaitAdvice();
+    TestReportKeepsRecentEvents();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;

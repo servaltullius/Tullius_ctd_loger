@@ -6,7 +6,9 @@
 #include "Utf.h"
 #include "WctTypes.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <optional>
 #include <sstream>
@@ -448,13 +450,53 @@ std::string BuildReportText(
   for (const auto& s : r.recommendations) {
     rpt << "- " << WideToUtf8(s) << "\n";
   }
-  rpt << (en ? "\nLast events (most recent last):\n" : "\n최근 이벤트(최신이 마지막):\n");
-  for (const auto& ev : r.events) {
-    rpt << "[" << ev.i << "] t_ms=" << ev.t_ms << " tid=" << ev.tid << " " << WideToUtf8(ev.type_name);
-    if (!ev.detail.empty()) {
-      rpt << " | " << WideToUtf8(ev.detail);
+  if (!r.events.empty()) {
+    // The full ring buffer (often over a thousand module loads) is in the
+    // *_SkyrimDiagBlackbox.jsonl companion; the report keeps an overview and
+    // the most recent events.
+    std::vector<std::pair<std::wstring, std::size_t>> countsByType;
+    for (const auto& ev : r.events) {
+      const auto it = std::find_if(countsByType.begin(), countsByType.end(), [&](const auto& entry) {
+        return entry.first == ev.type_name;
+      });
+      if (it == countsByType.end()) {
+        countsByType.emplace_back(ev.type_name, 1u);
+      } else {
+        ++it->second;
+      }
     }
-    rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
+    std::stable_sort(countsByType.begin(), countsByType.end(), [](const auto& a, const auto& b) {
+      return a.second > b.second;
+    });
+    const auto [firstMs, lastMs] = std::minmax_element(r.events.begin(), r.events.end(), [](const auto& a, const auto& b) {
+      return a.t_ms < b.t_ms;
+    });
+    char span[32]{};
+    std::snprintf(span, sizeof(span), "%.1f", (lastMs->t_ms - firstMs->t_ms) / 1000.0);
+    rpt << (en ? "\nEvents: " : "\n이벤트: ") << r.events.size() << (en ? " over " : "개, ") << span
+        << (en ? " s (" : "초 (");
+    for (std::size_t i = 0; i < countsByType.size(); ++i) {
+      rpt << (i == 0 ? "" : ", ") << WideToUtf8(countsByType[i].first) << " " << countsByType[i].second;
+    }
+    rpt << ")\n";
+
+    constexpr std::size_t kReportEvents = 60;
+    const std::size_t shown = std::min(r.events.size(), kReportEvents);
+    rpt << (en ? "\nLast events (most recent last):\n" : "\n최근 이벤트(최신이 마지막):\n");
+    if (shown < r.events.size()) {
+      rpt << (en ? "  (last " : "  (마지막 ") << shown << (en ? " of " : "개 / 전체 ") << r.events.size()
+          << (en ? "; all of them are in *_SkyrimDiagBlackbox.jsonl)\n" : "개. 전체 목록은 *_SkyrimDiagBlackbox.jsonl에 있습니다)\n");
+    }
+    for (std::size_t i = r.events.size() - shown; i < r.events.size(); ++i) {
+      const auto& ev = r.events[i];
+      char time[32]{};
+      std::snprintf(time, sizeof(time), "%.1f", ev.t_ms);  // never scientific notation
+      rpt << "[" << ev.i << "] t_ms=" << time << " tid=" << ev.tid << " " << WideToUtf8(ev.type_name);
+      if (!ev.detail.empty()) {
+        rpt << " | " << WideToUtf8(ev.detail);
+      }
+      rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
+    }
   }
 
   if (!r.diagnostics.empty()) {
