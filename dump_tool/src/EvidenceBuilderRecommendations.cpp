@@ -36,13 +36,13 @@ std::wstring DescribeFamily(std::string_view familyId, bool en)
     return en ? L"actionable stack" : L"실행 가능한 스택";
   }
   if (familyId == "resource_provider") {
-    return en ? L"near resource provider" : L"인접 리소스 provider";
+    return en ? L"near resource provider" : L"근처 리소스 제공 모드";
   }
   if (familyId == "history_repeat") {
     return en ? L"history repeat" : L"버킷 반복";
   }
   if (familyId == "first_chance_context") {
-    return en ? L"repeated first-chance context" : L"반복 first-chance 문맥";
+    return en ? L"repeated first-chance context" : L"반복 선행 예외(first-chance)";
   }
   if (familyId == "hang_thread_group") {
     return en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹";
@@ -81,18 +81,19 @@ std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const Acti
 {
   if (r.crash_logger_direct_fault_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
-    return L"Crash Logger frame first (direct DLL fault)";
+    return en ? L"Crash Logger frame first (direct DLL fault)" : L"Crash Logger 프레임(DLL 안에서 바로 난 예외)";
   }
   if (r.crash_logger_first_actionable_probable_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
     return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
-              : L"Crash Logger frame first (첫 actionable probable DLL frame)";
+              : L"Crash Logger 프레임(첫 번째 유력 DLL 프레임)";
   }
   if (r.crash_logger_probable_streak_eligible &&
       CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
-    return L"Crash Logger frame first (probable frame streak)";
+    return en ? L"Crash Logger frame first (probable frame streak)" : L"Crash Logger 프레임(유력 DLL 프레임 연속)";
   }
-  return L"Crash Logger frame first";
+  // Korean particles after this label assume it ends in "프레임" (이/과).
+  return en ? L"Crash Logger frame first" : L"Crash Logger 프레임";
 }
 
 bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
@@ -213,11 +214,11 @@ void AddActionableCandidateRecommendations(
     r.recommendations.push_back(en
       ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
           L", but this is still only the current fault-location cluster. Compare nearby Crash Logger probable DLLs before isolating this mod.")
-      : (L"[행동 우선 후보] " + frameSupport + L" 와 같은 덤프의 스택이 모두 " + candidateName +
-          L" 에 걸리지만, 이는 여전히 현재 fault-location cluster 단서입니다. 이 모드를 바로 격리하기 전에 주변 Crash Logger probable DLL도 함께 비교하세요."));
+      : (L"[행동 우선 후보] " + frameSupport + L"과 같은 덤프의 스택이 모두 " + candidateName +
+          L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. 이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요."));
     r.recommendations.push_back(en
       ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
-      : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 richer recapture profile을 우선 사용하세요.");
+      : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 더 많은 정보를 담는 재수집 설정을 먼저 쓰세요.");
     return;
   }
   if (topCandidate->status_id == "cross_validated") {
@@ -225,8 +226,8 @@ void AddActionableCandidateRecommendations(
       ? (en
           ? (L"[Actionable candidate] " + frameSupport + L" and another signal agree on " + candidateName +
               L". Use DLL guidance first: update/reinstall or isolate it before broader EXE/system triage.")
-          : (L"[행동 우선 후보] " + frameSupport + L" 와 다른 신호가 " + candidateName +
-              L" 쪽으로 합의합니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance로 업데이트/재설치/격리를 진행하세요."))
+          : (L"[행동 우선 후보] " + frameSupport + L"과 다른 신호가 " + candidateName +
+              L" 쪽으로 합의합니다. 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL을 먼저 업데이트/재설치하거나 빼고 시험하세요."))
       : (en
           ? (L"[Actionable candidate] Cross-validated signals point to " + candidateName +
               L". Update/reinstall or isolate it before broader DLL triage.")
@@ -237,7 +238,7 @@ void AddActionableCandidateRecommendations(
       if (!firstChanceDetail.empty()) {
         r.recommendations.push_back(en
           ? (L"[First-chance] Inspect the repeated first-chance module path first: " + firstChanceDetail)
-          : (L"[First-chance] 반복 first-chance 모듈 경로를 먼저 확인하세요: " + firstChanceDetail));
+          : (L"[First-chance] 반복된 선행 예외(first-chance)가 난 모듈 경로를 먼저 확인하세요: " + firstChanceDetail));
       }
     }
     r.recommendations.push_back(en
@@ -256,43 +257,43 @@ void AddActionableCandidateRecommendations(
       ? (en
           ? (L"[Actionable candidate] Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). Check it before broad EXE/system triage.")
-          : (L"[행동 우선 후보] Tullius callstack first 가 DLL 후보 " + candidateName +
-              L" (actionable stack)를 가리킵니다. 광범위한 EXE/system 점검 전에 먼저 확인하세요."))
+          : (L"[행동 우선 후보] Tullius 콜스택이 DLL 후보 " + candidateName +
+              L"을(를) 가리킵니다. 게임 본체·시스템 DLL을 넓게 점검하기 전에 먼저 확인하세요."))
       : hasFrameFamily
       ? (hasScorableFirstChance
           ? (en
               ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
                   L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and check the repeated first-chance path before broad EXE/system triage.")
-              : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
-                  L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance 와 반복 first-chance 경로를 함께 확인하세요."))
+              : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
+                  L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 반복 선행 예외 경로를 먼저 확인하세요."))
           : hasScorableHistory
             ? (en
                 ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
                     L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare repeated same-bucket crashes before broad EXE/system triage.")
-                : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
-                    L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance 와 반복 버킷 이력을 함께 확인하세요."))
+                : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
+                    L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 같은 유형으로 반복된 크래시 이력을 먼저 확인하세요."))
           : hasResourceFamily
             ? (en
                 ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
                     L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare nearby resource providers before broad EXE/system triage.")
-                : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
-                    L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance 와 인접 리소스 provider를 함께 확인하세요."))
+                : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
+                    L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 근처 리소스를 제공한 모드를 먼저 확인하세요."))
           : (en
               ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
                   L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")
-              : (L"[행동 우선 후보] " + frameSupport + L" 가 DLL 후보 " + candidateName +
-                  L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 광범위한 EXE/system 점검보다 먼저 DLL guidance를 따르세요.")))
+              : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
+                  L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL부터 확인하세요.")))
       : (en
           ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
               L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
           : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
-              L" (" + JoinFamilies(*topCandidate, en) + L")를 가리킵니다. 일반적인 SKSE/DLL 점검보다 먼저 확인하세요.")));
+              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요.")));
     if (hasFirstChanceFamily) {
       const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
       if (!firstChanceDetail.empty()) {
         r.recommendations.push_back(en
           ? (L"[First-chance] Repeated first-chance exceptions matched this candidate. Check that module path before broad EXE/system crash triage: " + firstChanceDetail)
-          : (L"[First-chance] 반복 first-chance 예외가 이 후보와 맞습니다. 광범위한 EXE/system 크래시 점검 전에 해당 모듈 경로부터 확인하세요: " + firstChanceDetail));
+          : (L"[First-chance] 반복된 선행 예외(first-chance)가 이 후보와 맞습니다. 게임 본체·시스템 DLL을 넓게 점검하기 전에 그 모듈 경로부터 확인하세요: " + firstChanceDetail));
       }
     }
   } else if (topCandidate->status_id == "reference_clue") {
@@ -300,20 +301,20 @@ void AddActionableCandidateRecommendations(
       r.recommendations.push_back(en
         ? (L"[Crash Logger frame] " + frameSupport + L" points to DLL candidate " + candidateName +
             L", but no second independent signal agrees yet. Use DLL guidance first and confirm with another capture if needed.")
-        : (L"[Crash Logger 프레임] " + frameSupport + L" 가 DLL 후보 " + candidateName +
-            L" 를 가리키지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 DLL guidance를 따르고 필요하면 추가 캡처로 확인하세요."));
+        : (L"[Crash Logger 프레임] " + frameSupport + L"이 DLL 후보 " + candidateName +
+            L"을(를) 가리키지만 이를 뒷받침하는 다른 독립 신호는 아직 없습니다. 이 DLL부터 확인하고, 필요하면 다음 크래시를 추가로 캡처해 비교하세요."));
       r.recommendations.push_back(en
         ? L"[Crash Logger frame] If the frame clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
-        : L"[Crash Logger 프레임] 이 frame 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
+        : L"[Crash Logger 프레임] 이 프레임 단서만 계속 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 더 많은 정보를 담는 재수집 설정으로 먼저 다시 캡처하세요.");
     } else {
       r.recommendations.push_back(en
         ? (L"[Object ref] The game was processing " + candidateName +
             L" at crash time, but no second independent signal agrees yet. Treat it as a clue first.")
         : (L"[오브젝트 참조] 사고 당시 게임이 " + candidateName +
-            L" 을(를) 처리 중이었지만 아직 두 번째 독립 신호 합의는 없습니다. 우선 단서로 보세요."));
+            L"을(를) 처리 중이었지만 이를 뒷받침하는 다른 독립 신호는 아직 없습니다. 우선 단서로 보세요."));
       r.recommendations.push_back(en
         ? L"[Object ref] If the clue stays isolated, capture another incident or rerun with a richer crash recapture profile before escalating to FullMemory (DumpMode=2)."
-        : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile로 먼저 재수집하세요.");
+        : L"[오브젝트 참조] 이 단서가 계속 단독으로 남으면 다른 사고를 한 번 더 캡처하거나, 바로 FullMemory(DumpMode=2)로 가지 말고 더 많은 정보를 담는 재수집 설정으로 먼저 다시 캡처하세요.");
     }
   } else if (topCandidate->status_id == "conflicting" && secondCandidate) {
     const auto secondName = DescribeCandidate(*secondCandidate);
@@ -321,10 +322,10 @@ void AddActionableCandidateRecommendations(
       ? (L"[Conflict] Signals split between " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L") and " +
           secondName + L" (" + JoinFamilies(*secondCandidate, en) + L"). Check whether Crash Logger frame first DLL guidance and object ref/stack evidence disagree before retesting.")
       : (L"[충돌] 신호가 " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L")와 " +
-          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. Crash Logger frame first DLL guidance 와 object ref/stack 근거가 어디서 갈리는지 먼저 확인한 뒤 재현을 확인하세요."));
+          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. Crash Logger 프레임 쪽 근거와 오브젝트 참조·스택 근거가 어디서 갈리는지 먼저 확인한 뒤 다시 재현해 보세요."));
     r.recommendations.push_back(en
       ? L"[Conflict] If the split persists, rerun with a richer crash recapture profile first; use FullMemory (DumpMode=2) only if the tie remains."
-      : L"[충돌] 이 분리가 계속되면 richer crash recapture profile로 먼저 다시 캡처하고, 그래도 갈리면 그때만 FullMemory(DumpMode=2)를 사용하세요.");
+      : L"[충돌] 이렇게 계속 갈리면 더 많은 정보를 담는 재수집 설정으로 먼저 다시 캡처하고, 그래도 갈리면 그때만 FullMemory(DumpMode=2)를 사용하세요.");
   }
 }
 
@@ -667,7 +668,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(en
         ? (L"[DLL guidance] This DLL is only the current fault-location clue. Compare nearby Crash Logger probable DLLs too: " +
             JoinList(nearbyProbableDlls, 4, L", ") + L".")
-        : (L"[DLL guidance] 이 DLL은 현재 fault-location 단서만 있습니다. 주변 Crash Logger probable DLL도 함께 비교하세요: " +
+        : (L"[DLL 점검] 이 DLL은 예외가 난 위치라는 단서만 있습니다. Crash Logger가 함께 지목한 근처 DLL도 비교하세요: " +
             JoinList(nearbyProbableDlls, 4, L", ") + L"."));
     }
   }
@@ -720,7 +721,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
           : L"[DLL guidance] Verify prerequisites/versions for the mod containing this DLL before treating it as the root cause.")
       : (topCandidateCrossValidatedFaultModule
           ? L"[유력 후보] 해당 DLL이 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전) 충족 여부 확인"
-          : L"[DLL guidance] 이 DLL을 바로 근본 원인으로 단정하기 전에, 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전)부터 확인하세요."));
+          : L"[DLL 점검] 이 DLL을 바로 근본 원인으로 단정하기 전에, 포함된 모드의 선행 모드/요구 버전(SKSE/Address Library/엔진 버전)부터 확인하세요."));
     if (topCandidateCrossValidatedFaultModule) {
       r.recommendations.push_back(en
         ? L"[Top suspect] Attach this report (*_SkyrimDiagReport.txt) and dump (*.dmp) when reporting to the mod author."
@@ -760,7 +761,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     if (!isSnapshotLike) {
     r.recommendations.push_back(en
       ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile (full memory info / module headers / indirect memory) before escalating to FullMemory (DumpMode=2)."
-      : L"[점검] 덤프에서 fault module을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 richer crash recapture profile(full memory info / module headers / indirect memory)로 먼저 다시 캡처하세요.");
+      : L"[점검] 덤프에서 예외가 난 모듈을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 더 많은 정보를 담는 재수집 설정(full memory info / module headers / indirect memory)으로 먼저 다시 캡처하세요.");
     }
   }
 

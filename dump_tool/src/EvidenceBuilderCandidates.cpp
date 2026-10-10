@@ -120,7 +120,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
       PairingAdjustedCrashLoggerWeight(r, 6u),
       en
         ? (L"CrashLogger first actionable probable frame: " + r.crash_logger_first_actionable_probable_module)
-        : (L"CrashLogger 첫 actionable probable 프레임: " + r.crash_logger_first_actionable_probable_module),
+        : (L"Crash Logger 첫 번째 유력 DLL 프레임: " + r.crash_logger_first_actionable_probable_module),
       out);
   }
 

@@ -52,7 +52,7 @@ std::string BuildReportText(
         !r.crash_logger_first_actionable_probable_module.empty()) {
       return en
         ? (L"Crash Logger frame first (first actionable probable DLL frame): " + r.crash_logger_first_actionable_probable_module)
-        : (L"Crash Logger frame 우선 (첫 actionable probable DLL frame): " + r.crash_logger_first_actionable_probable_module);
+        : (L"Crash Logger 프레임 우선(첫 번째 유력 DLL 프레임): " + r.crash_logger_first_actionable_probable_module);
     }
     if (r.crash_logger_probable_streak_eligible &&
         !r.crash_logger_probable_streak_module.empty() &&
@@ -60,7 +60,7 @@ std::string BuildReportText(
       return en
         ? (L"Crash Logger frame first (probable frame streak x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
            r.crash_logger_probable_streak_module)
-        : (L"Crash Logger frame 우선 (probable frame streak x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
+        : (L"Crash Logger 프레임 우선(유력 DLL 프레임 연속 x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
            r.crash_logger_probable_streak_module);
     }
     if (!r.crash_logger_object_refs.empty()) {

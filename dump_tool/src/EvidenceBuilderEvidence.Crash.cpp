@@ -176,7 +176,7 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     } else if (weakFaultLocationOnly) {
       e.title = en
         ? L"Top stack DLL clue (fault-location)"
-        : L"콜스택 상위 DLL 단서 (fault-location)";
+        : L"콜스택 상위 DLL 단서(예외가 난 위치)";
     } else {
       e.title = en
         ? (r.suspects_from_stackwalk ? L"Top suspect (callstack-based)" : L"Top suspect (stack-scan-based)")
@@ -208,7 +208,7 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     if (weakFaultLocationOnly) {
       e.details += en
         ? L" — current signal is still fault-location only."
-        : L" — 현재는 fault-location 단서만 있습니다.";
+        : L" — 지금은 예외가 난 위치라는 단서만 있습니다.";
     }
     r.evidence.push_back(std::move(e));
   }
