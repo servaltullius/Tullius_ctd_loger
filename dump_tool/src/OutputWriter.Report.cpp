@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "DumpObjects.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "Utf.h"
@@ -273,6 +274,13 @@ std::string BuildReportText(
       first = false;
     }
     rpt << "\n";
+  }
+  if (!r.dump_objects.empty()) {
+    // ADR-0010: objects read from the dump itself.
+    rpt << (en ? "DumpObjects:\n" : "덤프 오브젝트:\n");
+    for (const auto& object : r.dump_objects) {
+      rpt << "  " << WideToUtf8(DescribeDumpObject(object)) << "\n";
+    }
   }
   const auto crashLoggerReadingPath = buildCrashLoggerReadingPath();
   if (!crashLoggerReadingPath.empty()) {

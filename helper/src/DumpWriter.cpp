@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "CrashObjectMemory.h"
 #include "SkyrimDiagProtocol.h"
 
 namespace skydiag::helper {
@@ -54,11 +55,25 @@ struct DumpCallbackContext
   // SKYDIAG_DUMP_IO_TRACE=1 (set by CI, never by the game setup): the callback
   // performs the dump's file writes itself so a failing write is recorded.
   bool traceIo = false;
+  // Crash dumps: objects the crash registers and stack point at (ADR-0010),
+  // handed to the writer one range per MemoryCallback.
+  std::vector<internal::ExtraDumpMemory> extraMemory;
+  std::size_t nextExtraMemory = 0;
   DumpProgress progress{};
 };
 
 std::atomic<std::uint64_t> g_tracedDumpWrites{ 0 };
 std::atomic<std::uint64_t> g_xstateSizedContexts{ 0 };
+std::atomic<std::uint64_t> g_crashObjectMemoryBytes{ 0 };
+
+std::uint64_t TotalBytes(const std::vector<internal::ExtraDumpMemory>& ranges)
+{
+  std::uint64_t total = 0;
+  for (const auto& range : ranges) {
+    total += range.size;
+  }
+  return total;
+}
 
 bool DumpIoTraceRequested()
 {
@@ -402,6 +417,16 @@ BOOL CALLBACK MiniDumpCallback(
   }
   ctx->progress.lastCallbackType = static_cast<ULONG>(callbackType);
   ctx->progress.lastCallbackSubject = CallbackSubject(*callbackInput);
+  if (callbackType == MemoryCallback && callbackOutput && !ctx->extraMemory.empty()) {
+    // Called until it returns FALSE; each TRUE adds one range.
+    if (ctx->nextExtraMemory >= ctx->extraMemory.size()) {
+      return FALSE;
+    }
+    const auto& range = ctx->extraMemory[ctx->nextExtraMemory++];
+    callbackOutput->MemoryBase = range.base;
+    callbackOutput->MemorySize = range.size;
+    return TRUE;
+  }
   if (callbackType == IsProcessSnapshotCallback && callbackOutput) {
     callbackOutput->Status = ctx->isProcessSnapshot ? S_FALSE : S_OK;
     return TRUE;
@@ -493,6 +518,7 @@ bool WriteDumpWithStreams(
   std::vector<BYTE> xstateContextStorage;
 
   MINIDUMP_EXCEPTION_INFORMATION* meiPtr = nullptr;
+  std::vector<internal::ExtraDumpMemory> crashObjectMemory;
   if (isCrash && hasCommittedHeader &&
       committedHeader.crash_seq != 0u &&
       (committedHeader.crash_seq & 1u) == 0u) {
@@ -509,6 +535,11 @@ bool WriteDumpWithStreams(
       ctx.ContextFlags &= ~static_cast<DWORD>(0x00000040);  // CONTEXT_XSTATE's own bit
     }
     ep.ContextRecord = sized ? sized : &ctx;
+    if (!isProcessSnapshot) {
+      // The game is stopped in its crash handler, so the objects are intact.
+      crashObjectMemory = internal::CollectCrashObjectMemory(process, ctx);
+      g_crashObjectMemoryBytes.fetch_add(TotalBytes(crashObjectMemory), std::memory_order_relaxed);
+    }
 
     mei.ThreadId = committedHeader.crash.faulting_tid;
     mei.ExceptionPointers = &ep;
@@ -520,6 +551,7 @@ bool WriteDumpWithStreams(
   MINIDUMP_TYPE dumpType = ApplyProfileToDumpType(effectiveProfile);
   DumpCallbackContext callbackContext{};
   callbackContext.profile = effectiveProfile;
+  callbackContext.extraMemory = std::move(crashObjectMemory);
   callbackContext.preferredThreadId = mei.ThreadId;
   AppendPreferredThreadId(callbackContext.preferredThreadIds, callbackContext.preferredThreadId);
   if (effectiveProfile.preferMainThread) {
@@ -587,6 +619,11 @@ bool WriteDumpWithStreams(
       DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";
   }
   return false;
+}
+
+std::uint64_t CrashObjectMemoryBytes() noexcept
+{
+  return g_crashObjectMemoryBytes.load(std::memory_order_relaxed);
 }
 
 std::uint64_t XStateSizedContextCount() noexcept

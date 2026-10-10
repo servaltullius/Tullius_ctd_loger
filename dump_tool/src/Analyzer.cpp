@@ -508,6 +508,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.suspects.clear();
     out.actionable_candidates.clear();
     out.crash_logger_object_refs.clear();
+    out.dump_objects.clear();
     out.crash_logger_top_modules.clear();
     out.inferred_mod_name.clear();
     out.graphics_diag.reset();

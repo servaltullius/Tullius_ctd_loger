@@ -24,6 +24,21 @@ struct EvidenceItem
   std::wstring details;
 };
 
+// ADR-0010: an object that a crash register or the top of the crash stack
+// points at, read from the memory the helper added to the dump.
+struct DumpObject
+{
+  std::wstring location;   // "RBX", "RSP+68"
+  std::uint64_t address = 0;
+  std::wstring type_name;  // "Character", "RE::Foo"
+  std::wstring module;     // module holding the RTTI (SkyrimSE.exe or a plugin DLL)
+  bool is_form = false;
+  std::uint32_t form_id = 0;
+  std::uint8_t form_type = 0;
+  std::vector<std::wstring> source_files;  // plugin files, in load order
+  std::uint32_t relevance = 0;  // Crash Logger's location + type weights
+};
+
 struct SuspectItem
 {
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
@@ -265,6 +280,8 @@ struct AnalysisResult
     std::uint32_t relevance_score = 0;
   };
   std::vector<CrashLoggerModReference> crash_logger_object_refs;
+  // ADR-0010: objects read from the crash dump itself (crashes only).
+  std::vector<DumpObject> dump_objects;
 
   // Heuristic: suspects inferred from stack/module scanning
   std::vector<SuspectItem> suspects;

@@ -33,4 +33,8 @@ std::uint64_t TracedDumpWriteCount() noexcept;
 // (not the bare-CONTEXT fallback) since the process started.
 std::uint64_t XStateSizedContextCount() noexcept;
 
+// Bytes of crash-object memory (ADR-0010) added to crash dumps since the
+// process started.
+std::uint64_t CrashObjectMemoryBytes() noexcept;
+
 }  // namespace skydiag::helper

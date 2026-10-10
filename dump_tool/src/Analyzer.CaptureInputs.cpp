@@ -3,6 +3,7 @@
 #include "AnalyzerInternals.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
+#include "DumpObjects.h"
 #include "MainThreadWait.h"
 #include "ModalDialogWait.h"
 #include "Mo2Index.h"
@@ -543,6 +544,9 @@ void ComputeSuspects(
   }
   tids = std::move(uniqueTids);
   const auto threads = LoadThreads(dumpBase, dumpSize);
+  if (out.exc_tid != 0u && excCtx) {
+    out.dump_objects = ReadDumpObjects(dumpBase, dumpSize, threads, allModules, *excCtx);
+  }
   const std::uint32_t preferredTid = out.exc_tid != 0u ? out.exc_tid : mainTid.value_or(0u);
   const std::uint32_t modalProbeTid = (hangLike && mainTid.has_value()) ? *mainTid : 0u;
   std::vector<ModalStackFrame> mainThreadFrames;
