@@ -12,6 +12,26 @@ using skydiag::dump_tool::minidump::ReadStreamSized;
 
 static thread_local const MinidumpMemoryView* g_stackwalkMemView = nullptr;
 
+// A dump can hold overlapping ranges: the helper adds crash-object memory
+// (ADR-0010) that may lie inside memory the writer already included. Keep each
+// address once, so the range found for an address is the one that holds it.
+void FlattenOverlappingRanges(std::vector<MinidumpMemoryRange>& ranges)
+{
+  std::vector<MinidumpMemoryRange> flat;
+  flat.reserve(ranges.size());
+  for (auto range : ranges) {
+    if (!flat.empty() && range.start < flat.back().end) {
+      if (range.end <= flat.back().end) {
+        continue;
+      }
+      range.bytes += static_cast<std::size_t>(flat.back().end - range.start);
+      range.start = flat.back().end;
+    }
+    flat.push_back(range);
+  }
+  ranges.swap(flat);
+}
+
 BOOL CALLBACK ReadProcessMemoryFromMinidump64(HANDLE, DWORD64 baseAddr, PVOID buffer, DWORD size, LPDWORD bytesRead)
 {
   if (bytesRead) {
@@ -216,6 +236,7 @@ bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std:
         }
         if (!ranges.empty()) {
           std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
+          FlattenOverlappingRanges(ranges);
           return true;
         }
       }
@@ -249,6 +270,7 @@ bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std:
       }
       if (!ranges.empty()) {
         std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
+        FlattenOverlappingRanges(ranges);
       }
       return !ranges.empty();
     }
@@ -281,6 +303,7 @@ bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std:
 
     if (!ranges.empty()) {
       std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) { return a.start < b.start; });
+      FlattenOverlappingRanges(ranges);
     }
     return !ranges.empty();
   }
@@ -299,15 +322,25 @@ bool MinidumpMemoryView::Read(std::uint64_t addr, void* dst, std::size_t n, std:
   if (it == ranges.begin()) {
     return image_fallback && image_fallback->Read(addr, dst, n, outRead);
   }
-  const auto& r = *(it - 1);
-  if (addr < r.start || addr >= r.end || !r.bytes) {
+  auto current = it - 1;
+  if (addr < current->start || addr >= current->end || !current->bytes) {
     return image_fallback && image_fallback->Read(addr, dst, n, outRead);
   }
-  const std::uint64_t avail = r.end - addr;
-  const std::size_t copyN = static_cast<std::size_t>(std::min<std::uint64_t>(avail, static_cast<std::uint64_t>(n)));
-  std::memcpy(dst, r.bytes + static_cast<std::size_t>(addr - r.start), copyN);
-  outRead = copyN;
-  return copyN > 0;
+  // Continue into ranges that start exactly where the previous one ends.
+  auto* out = static_cast<std::uint8_t*>(dst);
+  std::uint64_t cursor = addr;
+  while (outRead < n) {
+    const std::uint64_t avail = current->end - cursor;
+    const std::size_t copyN = static_cast<std::size_t>(std::min<std::uint64_t>(avail, static_cast<std::uint64_t>(n - outRead)));
+    std::memcpy(out + outRead, current->bytes + static_cast<std::size_t>(cursor - current->start), copyN);
+    outRead += copyN;
+    cursor += copyN;
+    ++current;
+    if (outRead == n || current == ranges.end() || current->start != cursor || !current->bytes) {
+      break;
+    }
+  }
+  return outRead > 0;
 }
 
 std::vector<std::uint64_t> StackWalkAddrsForContext(

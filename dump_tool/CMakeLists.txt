@@ -7,6 +7,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 add_library(SkyrimDiagDumpToolCore STATIC
   src/Analyzer.cpp
   src/Analyzer.CaptureInputs.cpp
+  src/DumpObjects.cpp
   src/Analyzer.History.cpp
   src/Analyzer.h
   src/AnalyzerPipeline.h

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <vector>
 
+#include "DumpObjects.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
@@ -80,6 +81,26 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
       shown++;
     }
     e.details = detail;
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (!r.dump_objects.empty()) {
+    // ADR-0010: read from the dump itself, so it works without a Crash Logger
+    // log. Context for the reader, not a cause on its own.
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? L"Objects the crash registers and stack pointed at (read from the dump)"
+      : L"크래시 당시 레지스터·스택이 가리킨 오브젝트(덤프에서 읽음)";
+    std::vector<std::wstring> parts;
+    for (const auto& object : r.dump_objects) {
+      if (parts.size() >= 5u) {
+        break;
+      }
+      parts.push_back(DescribeDumpObject(object));
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
     r.evidence.push_back(std::move(e));
   }
 

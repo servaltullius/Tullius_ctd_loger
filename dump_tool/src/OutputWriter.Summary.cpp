@@ -217,6 +217,30 @@ nlohmann::json BuildSummaryJson(
     }
   }
 
+  if (!r.dump_objects.empty()) {
+    // ADR-0010: objects read from the dump itself.
+    summary["dump_objects"] = nlohmann::json::array();
+    for (const auto& object : r.dump_objects) {
+      nlohmann::json files = nlohmann::json::array();
+      for (const auto& file : object.source_files) {
+        files.push_back(WideToUtf8(file));
+      }
+      char address[32]{};
+      std::snprintf(address, sizeof(address), "0x%llX", static_cast<unsigned long long>(object.address));
+      summary["dump_objects"].push_back({
+        { "location", WideToUtf8(object.location) },
+        { "address", address },
+        { "type", WideToUtf8(object.type_name) },
+        { "module", WideToUtf8(object.module) },
+        { "is_form", object.is_form },
+        { "form_id", object.form_id },
+        { "form_type", object.form_type },
+        { "source_files", std::move(files) },
+        { "relevance", object.relevance },
+      });
+    }
+  }
+
   if (r.signature_match.has_value()) {
     summary["signature_match"] = {
       { "id", r.signature_match->id },

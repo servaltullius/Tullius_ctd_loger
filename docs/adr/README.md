@@ -12,3 +12,4 @@ ADR index:
 - `0007-formal-stackwalk-unwinding.md`
 - `0008-skse-log-refused-plugins.md`
 - `0009-main-thread-wait-and-game-state.md`
+- `0010-crash-object-introspection.md`

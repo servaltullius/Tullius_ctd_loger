@@ -9,6 +9,7 @@ add_executable(${PROJECT_NAME}
   src/Config.cpp
   src/CrashEtwCapture.cpp
   src/CrashCapture.cpp
+  src/CrashObjectMemory.cpp
   src/DumpProfile.cpp
   src/DumpToolLaunch.cpp
   src/DumpWriter.cpp
@@ -40,6 +41,7 @@ add_executable(${PROJECT_NAME}
   src/WindowHeuristics.cpp
   src/main.cpp
   src/CompatibilityPreflight.h
+  src/CrashObjectMemory.h
   include/SkyrimDiagHelper/Config.h
   include/SkyrimDiagHelper/DumpProfile.h
   include/SkyrimDiagHelper/DumpWriter.h

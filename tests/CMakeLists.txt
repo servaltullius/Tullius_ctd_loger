@@ -366,6 +366,14 @@ target_include_directories(skydiag_main_thread_wait_tests PRIVATE
 )
 add_test(NAME skydiag_main_thread_wait_tests COMMAND skydiag_main_thread_wait_tests)
 
+add_executable(skydiag_rtti_decoder_tests
+  rtti_decoder_tests.cpp
+)
+target_include_directories(skydiag_rtti_decoder_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+add_test(NAME skydiag_rtti_decoder_tests COMMAND skydiag_rtti_decoder_tests)
+
 add_executable(skydiag_modal_dialog_wait_tests
   modal_dialog_wait_tests.cpp
   test_utf_stub.cpp
@@ -645,6 +653,7 @@ if(WIN32)
   add_library(skydiag_helper_runtime_test_support STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashObjectMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpProfile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpToolLaunch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpWriter.cpp"
@@ -738,6 +747,20 @@ if(WIN32)
     SkyrimDiagDumpToolCore
   )
   add_test(NAME skydiag_modal_dialog_hang_e2e_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
+
+  # ADR-0010: the crash dump writer adds the objects the crash registers point
+  # at, and the production analyzer reads their type, FormID and plugins back.
+  add_executable(skydiag_crash_object_e2e_tests
+    crash_object_e2e_tests.cpp
+  )
+  target_include_directories(skydiag_crash_object_e2e_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_crash_object_e2e_tests PRIVATE
+    skydiag_helper_runtime_test_support
+    SkyrimDiagDumpToolCore
+  )
+  add_test(NAME skydiag_crash_object_e2e_tests COMMAND skydiag_crash_object_e2e_tests)
 
   # ScanPlugins against a throwaway MO2-style game folder: the base masters and
   # Skyrim.ccc plugins the game loads on its own must count as active.
