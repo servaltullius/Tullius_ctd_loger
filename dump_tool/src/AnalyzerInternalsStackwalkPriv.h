@@ -2,10 +2,12 @@
 
 #include "AnalyzerInternals.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace skydiag::dump_tool::internal::stackwalk_internal {
@@ -53,14 +55,72 @@ private:
   mutable std::vector<Image> images_;
 };
 
+class DumpImageData;
+
+// True when SKYDIAG_STACKWALK_IGNORE_LOCAL_IMAGES=1: local module files are
+// treated as not matching, as after a Windows update. Tests use it to prove a
+// dump carries what its stack walk needs (ADR-0011).
+bool IgnoreLocalImagesForTesting();
+
+// True when the local file at module.path is the same build as the dump's
+// module (TimeDateStamp and SizeOfImage), or the dump does not say.
+bool LocalFileMatchesModule(const minidump::ModuleInfo& module);
+
 struct MinidumpMemoryView
 {
   std::vector<MinidumpMemoryRange> ranges;
   const LocalImageMemory* image_fallback = nullptr;
+  // Unwind entries from the dump's own .pdata, for modules whose local file
+  // does not match (ADR-0011).
+  const DumpImageData* dump_images = nullptr;
 
   bool Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads);
 
   bool Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
+};
+
+// ADR-0011: PE data that the dump itself carries for a module (headers,
+// exception directory, export directory). The helper adds it for Windows
+// modules; crash dumps also carry it for modules with code segments.
+class DumpImageData
+{
+public:
+  struct Export
+  {
+    std::uint32_t rva = 0;
+    std::uint32_t size = 0;  // up to the next export, capped
+    std::string name;
+  };
+
+  DumpImageData(const MinidumpMemoryView& memory, const std::vector<minidump::ModuleInfo>& modules);
+
+  // x64 unwind entry covering addr from the dump's .pdata, or nullptr. The
+  // pointer stays valid for the next 15 calls.
+  const RUNTIME_FUNCTION* FindFunctionEntry(std::uint64_t addr) const;
+
+  // Named exports from the dump's export directory, sorted by RVA; forwarders
+  // are left out.
+  std::vector<Export> ReadExports(const minidump::ModuleInfo& module) const;
+
+private:
+  struct Directories
+  {
+    bool ok = false;
+    std::uint32_t exception_rva = 0;
+    std::uint32_t exception_size = 0;
+    std::uint32_t export_rva = 0;
+    std::uint32_t export_size = 0;
+  };
+
+  bool Read(std::uint64_t addr, void* dst, std::size_t n) const;
+  const minidump::ModuleInfo* ModuleFor(std::uint64_t addr) const;
+  const Directories& DirectoriesFor(const minidump::ModuleInfo& module) const;
+
+  MinidumpMemoryView memory_;  // dump ranges only
+  const std::vector<minidump::ModuleInfo>* modules_ = nullptr;
+  mutable std::unordered_map<std::uint64_t, Directories> directories_;
+  mutable std::array<RUNTIME_FUNCTION, 16> entries_{};
+  mutable std::size_t next_entry_ = 0;
 };
 
 struct SymSession
@@ -78,11 +138,17 @@ struct SymSession
   bool runtimeDegraded = false;
   bool usedOnlineSymbolSource = false;
   std::vector<std::wstring> runtimeDiagnostics;
+  // Modules loaded without their local file (it was missing or a different
+  // build); AddDumpExportSymbols names them from the dump (ADR-0011).
+  std::vector<const minidump::ModuleInfo*> virtualModules;
   std::unique_lock<std::mutex> dbghelp_lock;
 
   explicit SymSession(const std::vector<minidump::ModuleInfo>& modules, bool allowOnlineSymbols);
   ~SymSession();
 };
+
+// Adds the dump's export names for the session's virtual modules.
+void AddDumpExportSymbols(const SymSession& session, const DumpImageData& images);
 
 std::vector<std::uint64_t> StackWalkAddrsForContext(
   HANDLE process,

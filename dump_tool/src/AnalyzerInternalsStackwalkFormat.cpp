@@ -66,7 +66,7 @@ std::wstring FormatSymbolizedFrame(
   moduleInfo.SizeOfStruct = sizeof(moduleInfo);
   if (displacement > kMaxExportSymbolDisplacement &&
       SymGetModuleInfoW64(process, static_cast<DWORD64>(addr), &moduleInfo) &&
-      moduleInfo.SymType == SymExport) {
+      (moduleInfo.SymType == SymExport || moduleInfo.SymType == SymVirtual)) {
     return fallback;
   }
   if (outHasSymbol) {

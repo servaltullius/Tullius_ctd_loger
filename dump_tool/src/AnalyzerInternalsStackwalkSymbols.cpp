@@ -323,7 +323,17 @@ SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineS
     }
     const DWORD64 base = static_cast<DWORD64>(m.base);
     const DWORD size = static_cast<DWORD>(std::min<std::uint64_t>(m.end - m.base, 0xFFFFFFFFull));
-    SymLoadModuleExW(process, nullptr, m.path.c_str(), m.filename.empty() ? nullptr : m.filename.c_str(), base, size, nullptr, 0);
+    if (LocalFileMatchesModule(m)) {
+      SymLoadModuleExW(process, nullptr, m.path.c_str(), m.filename.empty() ? nullptr : m.filename.c_str(), base, size, nullptr, 0);
+      continue;
+    }
+    // The local file is missing or a different build (a Windows or driver
+    // update since the capture): its exports and PDB would name the wrong
+    // functions. Load an empty module and name it from the dump (ADR-0011).
+    const std::wstring& name = m.filename.empty() ? m.path : m.filename;
+    if (SymLoadModuleExW(process, nullptr, name.c_str(), name.c_str(), base, size, nullptr, SLMFLAG_VIRTUAL) != 0) {
+      virtualModules.push_back(&m);
+    }
   }
 }
 

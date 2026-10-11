@@ -19,6 +19,7 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsStackScan.cpp
   src/AnalyzerInternalsWct.cpp
   src/AnalyzerInternalsStackwalk.cpp
+  src/AnalyzerInternalsStackwalkDumpImage.cpp
   src/AnalyzerInternalsStackwalkFormat.cpp
   src/AnalyzerInternalsStackwalkScoring.cpp
   src/AnalyzerInternalsStackwalkMemory.cpp

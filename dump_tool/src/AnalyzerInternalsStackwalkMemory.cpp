@@ -58,6 +58,13 @@ PVOID CALLBACK FunctionTableAccessFromImages(HANDLE process, DWORD64 addrBase)
       return const_cast<RUNTIME_FUNCTION*>(entry);
     }
   }
+  // No matching local file (for example after a Windows update): the dump's
+  // own .pdata, when it carries it (ADR-0011).
+  if (g_stackwalkMemView && g_stackwalkMemView->dump_images) {
+    if (const auto* entry = g_stackwalkMemView->dump_images->FindFunctionEntry(static_cast<std::uint64_t>(addrBase))) {
+      return const_cast<RUNTIME_FUNCTION*>(entry);
+    }
+  }
   return SymFunctionTableAccess64(process, addrBase);
 }
 
@@ -101,6 +108,9 @@ const LocalImageMemory::Image* LocalImageMemory::Resolve(std::uint64_t addr) con
   }
   if (!image.attempted) {
     image.attempted = true;
+    if (IgnoreLocalImagesForTesting()) {
+      return nullptr;
+    }
     // Image-resource mapping lays sections out at their RVAs without running
     // or relocating anything; unwind data is RVA-based, so it reads correctly.
     const HMODULE handle = LoadLibraryExW(

@@ -5,9 +5,12 @@
 #include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <cstring>
 #include <string>
+#include <vector>
 
 #include "HelperRuntimeTestUtils.h"
+#include "ModuleUnwindMemory.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 
@@ -167,9 +170,44 @@ void TestTracedDumpWritesAreComplete()
 
 }  // namespace
 
+// ADR-0011: the UNWIND_INFO sizes the helper adds to dumps, including the
+// handler RVA and a chained entry's own unwind info.
+void TestUnwindInfoRanges()
+{
+  constexpr std::uint64_t kBase = 0x7FF000000000ull;
+  constexpr std::uint32_t kSpanRva = 0x100;
+  std::vector<std::uint8_t> span(0x400, 0);
+  const auto put = [&](std::uint32_t rva, std::uint8_t flags, std::uint8_t codes) {
+    span[rva - kSpanRva] = static_cast<std::uint8_t>(1u | (flags << 3));  // version 1
+    span[rva - kSpanRva + 2] = codes;
+  };
+  put(0x100, 0, 3);     // 4 + 2*4 (codes padded to even) = 12
+  put(0x200, 0x1, 0);   // EHANDLER: 4 + handler 4 = 8
+  put(0x300, 0x4, 1);   // CHAININFO: 4 + 2*2 + 12 = 20, chained to 0x380
+  RUNTIME_FUNCTION chained{};
+  chained.BeginAddress = 0x1000;
+  chained.EndAddress = 0x1100;
+  chained.UnwindData = 0x380;
+  std::memcpy(span.data() + (0x300 - kSpanRva) + 8, &chained, sizeof(chained));
+  put(0x380, 0, 0);     // 4
+
+  std::vector<RUNTIME_FUNCTION> functions(4);
+  functions[0].UnwindData = 0x100;
+  functions[1].UnwindData = 0x200;
+  functions[2].UnwindData = 0x300;
+  functions[3].UnwindData = 0x41;  // points at another .pdata entry: skipped
+  const auto ranges = skydiag::helper::internal::UnwindInfoRanges(kBase, functions, kSpanRva, span);
+  Require(ranges.size() == 4u, "four unwind infos");
+  Require(ranges[0].base == kBase + 0x100 && ranges[0].size == 12u, "unwind codes are padded to an even count");
+  Require(ranges[1].base == kBase + 0x200 && ranges[1].size == 8u, "a handler adds its RVA");
+  Require(ranges[2].base == kBase + 0x300 && ranges[2].size == 20u, "a chain adds the chained entry");
+  Require(ranges[3].base == kBase + 0x380 && ranges[3].size == 4u, "the chained unwind info is included too");
+}
+
 int main()
 {
   try {
+    TestUnwindInfoRanges();
     TestCrashDumpSurvivesUnmappedRegisterTargets();
     TestTracedDumpWritesAreComplete();
     return 0;
