@@ -77,6 +77,16 @@ static void Test_CaseDifferences_DoNotChangeCanonicalKey()
   assert(a == b);
 }
 
+static void Test_HangKey_IsStableAndSeparateFromCrashKeys()
+{
+  const auto a = skydiag::dump_tool::ComputeHangBucketKey("v=1|kind=engine_wait|detail=gpu_query_poll");
+  const auto b = skydiag::dump_tool::ComputeHangBucketKey("v=1|kind=engine_wait|detail=gpu_query_poll");
+  const auto c = skydiag::dump_tool::ComputeHangBucketKey("v=1|kind=graphics_driver_wait|detail=");
+  assert(a == b);
+  assert(a != c);
+  assert(a.starts_with(L"HANG1-") && a.size() == 6 + 16);
+}
+
 int main()
 {
   Test_SameInput_ProducesStableKey();
@@ -84,5 +94,6 @@ int main()
   Test_DifferentExceptionCode_ChangesKey();
   Test_DifferentModuleOffset_ChangesKey();
   Test_CaseDifferences_DoNotChangeCanonicalKey();
+  Test_HangKey_IsStableAndSeparateFromCrashKeys();
   return 0;
 }

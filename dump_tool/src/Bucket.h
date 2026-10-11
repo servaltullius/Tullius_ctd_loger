@@ -98,4 +98,14 @@ inline std::wstring ComputeCrashBucketKey(
   return wss.str();
 }
 
+// Freezes grouped by the main thread's wait (ADR-0009): "HANG1-<hash>". The
+// prefix keeps them apart from stack-keyed history written before.
+inline std::wstring ComputeHangBucketKey(std::string_view waitCanonical)
+{
+  const std::uint64_t hash = bucket::Fnv1a64(waitCanonical);
+  std::wstringstream wss;
+  wss << L"HANG1-" << std::hex << std::nouppercase << std::setw(16) << std::setfill(L'0') << hash;
+  return wss.str();
+}
+
 }  // namespace skydiag::dump_tool

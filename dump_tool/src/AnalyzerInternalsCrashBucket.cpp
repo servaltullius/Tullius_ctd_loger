@@ -3,11 +3,49 @@
 #include "Bucket.h"
 
 #include <algorithm>
+#include <optional>
+#include <sstream>
+#include <string>
 
 namespace skydiag::dump_tool::internal {
+namespace {
+
+// ADR-0009: a freeze is grouped by what the main thread was waiting in. The
+// stack below that wait differs between captures of the same freeze (which
+// plugins happened to be on the call path, how deep the walk got), so stack
+// keys put every capture of one GPU stall in its own bucket. Only freezes have
+// a main-thread wait or a modal dialog, so crashes keep the stack key.
+std::optional<std::string> HangWaitCanonical(const AnalysisResult& out)
+{
+  const auto lower = [](std::wstring_view text) {
+    return bucket::NarrowAsciiFallback(bucket::LowerTrimmed(text));
+  };
+  std::ostringstream canonical;
+  canonical << "v=1|";
+  if (out.modal_dialog_wait.detected) {
+    canonical << "kind=modal_dialog|caller=" << lower(out.modal_dialog_wait.caller_module_filename)
+              << "|addrlib=" << out.modal_dialog_wait.address_library_issue;
+    return canonical.str();
+  }
+  const auto& wait = out.main_thread_wait;
+  if (wait.kind == "engine_wait" || wait.kind == "graphics_driver_wait" || wait.kind == "plugin_wait") {
+    canonical << "kind=" << wait.kind << "|detail=" << wait.engine_wait_detail << "|module=" << lower(wait.waiting_module)
+              << "|api=" << lower(wait.wait_api);
+    return canonical.str();
+  }
+  return std::nullopt;  // running or unknown: the stack is all there is
+}
+
+}  // namespace
 
 void ComputeCrashBucket(AnalysisResult& out)
 {
+  if (const auto canonical = HangWaitCanonical(out)) {
+    out.crash_bucket_version = 3;
+    out.crash_bucket_key = ComputeHangBucketKey(*canonical);
+    return;
+  }
+
   // Avoid generating a misleading "always the same" bucket key for snapshot/manual dumps that
   // contain no exception/module/callstack information.
   if (out.exc_code == 0u &&
