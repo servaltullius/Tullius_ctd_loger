@@ -13,3 +13,4 @@ ADR index:
 - `0008-skse-log-refused-plugins.md`
 - `0009-main-thread-wait-and-game-state.md`
 - `0010-crash-object-introspection.md`
+- `0011-dump-carries-system-module-unwind-data.md`

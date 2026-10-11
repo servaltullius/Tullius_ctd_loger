@@ -37,4 +37,8 @@ std::uint64_t XStateSizedContextCount() noexcept;
 // process started.
 std::uint64_t CrashObjectMemoryBytes() noexcept;
 
+// Bytes of Windows-module headers, exports and unwind data (ADR-0011) added
+// to dumps since the process started.
+std::uint64_t ModuleUnwindMemoryBytes() noexcept;
+
 }  // namespace skydiag::helper

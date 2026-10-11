@@ -654,6 +654,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashObjectMemory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ModuleUnwindMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpProfile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpToolLaunch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpWriter.cpp"
@@ -747,6 +748,12 @@ if(WIN32)
     SkyrimDiagDumpToolCore
   )
   add_test(NAME skydiag_modal_dialog_hang_e2e_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
+  # ADR-0011: the same capture analyzed as after a Windows update (no local
+  # module file matches); the dump alone must carry the unwind data and names.
+  add_test(NAME skydiag_modal_dialog_hang_e2e_dump_only_tests COMMAND skydiag_modal_dialog_hang_e2e_tests)
+  set_tests_properties(skydiag_modal_dialog_hang_e2e_dump_only_tests PROPERTIES
+    ENVIRONMENT "SKYDIAG_STACKWALK_IGNORE_LOCAL_IMAGES=1"
+  )
 
   # ADR-0010: the crash dump writer adds the objects the crash registers point
   # at, and the production analyzer reads their type, FormID and plugins back.

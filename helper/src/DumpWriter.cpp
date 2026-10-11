@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CrashObjectMemory.h"
+#include "ModuleUnwindMemory.h"
 #include "SkyrimDiagProtocol.h"
 
 namespace skydiag::helper {
@@ -65,6 +66,7 @@ struct DumpCallbackContext
 std::atomic<std::uint64_t> g_tracedDumpWrites{ 0 };
 std::atomic<std::uint64_t> g_xstateSizedContexts{ 0 };
 std::atomic<std::uint64_t> g_crashObjectMemoryBytes{ 0 };
+std::atomic<std::uint64_t> g_moduleUnwindMemoryBytes{ 0 };
 
 std::uint64_t TotalBytes(const std::vector<internal::ExtraDumpMemory>& ranges)
 {
@@ -551,7 +553,16 @@ bool WriteDumpWithStreams(
   MINIDUMP_TYPE dumpType = ApplyProfileToDumpType(effectiveProfile);
   DumpCallbackContext callbackContext{};
   callbackContext.profile = effectiveProfile;
-  callbackContext.extraMemory = std::move(crashObjectMemory);
+  // ADR-0011: Windows modules' headers, exports and unwind data, so the dump
+  // still walks and names system frames after a Windows or driver update.
+  // A PSS snapshot handle is not a process handle; those dumps go without.
+  std::vector<internal::ExtraDumpMemory> moduleUnwindMemory;
+  if (!isProcessSnapshot) {
+    moduleUnwindMemory = internal::CollectModuleUnwindMemory(process);
+    g_moduleUnwindMemoryBytes.fetch_add(TotalBytes(moduleUnwindMemory), std::memory_order_relaxed);
+  }
+  crashObjectMemory.insert(crashObjectMemory.end(), moduleUnwindMemory.begin(), moduleUnwindMemory.end());
+  callbackContext.extraMemory = internal::MergeExtraDumpMemory(std::move(crashObjectMemory));
   callbackContext.preferredThreadId = mei.ThreadId;
   AppendPreferredThreadId(callbackContext.preferredThreadIds, callbackContext.preferredThreadId);
   if (effectiveProfile.preferMainThread) {
@@ -619,6 +630,11 @@ bool WriteDumpWithStreams(
       DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";
   }
   return false;
+}
+
+std::uint64_t ModuleUnwindMemoryBytes() noexcept
+{
+  return g_moduleUnwindMemoryBytes.load(std::memory_order_relaxed);
 }
 
 std::uint64_t CrashObjectMemoryBytes() noexcept

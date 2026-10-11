@@ -9,6 +9,8 @@
 namespace skydiag::dump_tool::internal {
 namespace {
 
+using skydiag::dump_tool::internal::stackwalk_internal::AddDumpExportSymbols;
+using skydiag::dump_tool::internal::stackwalk_internal::DumpImageData;
 using skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory;
 using skydiag::dump_tool::internal::stackwalk_internal::MinidumpMemoryView;
 using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext;
@@ -111,6 +113,11 @@ bool TryComputeStackwalkSuspects(
   if (!sym.ok) {
     return false;
   }
+  // ADR-0011: unwind entries and export names from the dump itself, for
+  // modules whose local file does not match.
+  const DumpImageData dumpImages(mem, modules);
+  mem.dump_images = &dumpImages;
+  AddDumpExportSymbols(sym, dumpImages);
 
   struct Candidate
   {
