@@ -72,6 +72,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the pull request diff below needs the base commit
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -122,9 +124,15 @@ jobs:
           }
           exit $LASTEXITCODE
 
+      # Pull requests lint only the production sources they change (all of them
+      # when a header or build setting changes); pushes to main and the release
+      # workflow always lint the full set.
       - name: Run clang-tidy over complete Windows production sources
         timeout-minutes: 20
         shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           $candidates = @(
             "$env:ProgramFiles\LLVM\bin\clang-tidy.exe",
@@ -137,7 +145,9 @@ jobs:
               Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $tidy) { throw "clang-tidy.exe not found" }
-          python scripts/run_clang_tidy.py --build-dir build-win --clang-tidy "$tidy" --jobs 4
+          $scope = @()
+          if ($env:EVENT_NAME -eq "pull_request" -and $env:BASE_SHA) { $scope = @("--changed-since", $env:BASE_SHA) }
+          python scripts/run_clang_tidy.py --build-dir build-win --clang-tidy "$tidy" --jobs 4 @scope
 
       - name: Build WinUI shell
         shell: cmd

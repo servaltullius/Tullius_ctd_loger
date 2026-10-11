@@ -70,6 +70,7 @@ For in-game validation without waiting:
 - Main workflow scope: Linux tests, Windows build/package/gate, complete Windows production clang-tidy coverage, extracted-package launcher smoke, and repo guard checks
 - Main workflow triggers: pull requests, pushes to `main`, and `workflow_dispatch` for any other branch. A newer push to the same pull request cancels its in-flight run; every commit pushed to `main` keeps its own run.
 - A pull request that only changes documentation (`*.md`, `docs/`, `doc/`) skips the Windows job (the `Detect docs-only PR` job decides; a rename counts both paths). Pushes to `main` and releases always run it.
+- On a pull request the Windows clang-tidy step lints only the production `.cpp` files the PR changes, and the full set when a header, `CMakeLists.txt`, `.clang-tidy`, `vcpkg.json` or the runner itself changes (`scripts/run_clang_tidy.py --changed-since <base>`). Pushes to `main` and releases always lint the full set.
 - Tag-triggered releases rerun Linux unit, ASan+UBSan, the Linux clang-tidy subset, parser fuzz, complete Windows production clang-tidy, and the packaged launcher smoke before publication.
 - Manual rerun of the same packaged WinUI smoke: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`

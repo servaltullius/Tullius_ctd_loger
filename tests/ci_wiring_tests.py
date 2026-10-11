@@ -290,6 +290,32 @@ def check_docs_only_skip_is_pr_only(failures: list[str]) -> None:
         failures.append("release.yml must never skip the Windows job")
 
 
+def check_pull_request_tidy_scope(failures: list[str]) -> None:
+    # Pull requests lint only the production sources they change, or everything
+    # when a header or build setting changes; main pushes and releases lint all.
+    runner = _load_script("run_clang_tidy.py")
+    labels = ["dump_tool/src/A.cpp", "helper/src/B.cpp", "plugin/src/C.cpp"]
+    cases = [
+        (["dump_tool/src/A.cpp", "docs/x.md"], [0]),
+        (["README.md"], []),
+        (["dump_tool/src/A.cpp", "dump_tool/src/A.h"], None),
+        (["shared/SkyrimDiagRtti.h"], None),
+        ([".clang-tidy"], None),
+        (["helper/CMakeLists.txt"], None),
+        (["scripts/run_clang_tidy.py"], None),
+        (["plugin/src/PluginInfo.cpp.in"], None),
+    ]
+    for changed, expected in cases:
+        got = runner.select_changed_sources(changed, labels)
+        if got != expected:
+            failures.append(f"run_clang_tidy.py scope for {changed}: expected {expected}, got {got}")
+    ci = _read(WORKFLOWS / "ci.yml")
+    if '$env:EVENT_NAME -eq "pull_request"' not in ci or "--changed-since" not in ci:
+        failures.append("ci.yml must narrow clang-tidy for pull requests only")
+    if "--changed-since" in _read(WORKFLOWS / "release.yml"):
+        failures.append("release.yml must always lint the full production set")
+
+
 def check_dump_stress_repeats_only_after_a_build(failures: list[str]) -> None:
     # A failed build would otherwise show up as a second, misleading ctest
     # failure in every shard.
@@ -376,6 +402,7 @@ def main() -> int:
     check_docs_only_skip_is_pr_only(failures)
     check_docs_only_detector_behaviour(failures)
     check_dump_stress_repeats_only_after_a_build(failures)
+    check_pull_request_tidy_scope(failures)
 
     if failures:
         for failure in failures:
