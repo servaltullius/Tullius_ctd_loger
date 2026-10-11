@@ -12,6 +12,10 @@ from pathlib import Path
 PRODUCTION_DIRS = ("dump_tool/src", "helper/src", "plugin/src")
 REPLACED_SOURCE = "plugin/src/PluginInfo.cpp"
 GENERATED_PLUGIN_SOURCE = "SkyrimDiagPluginInfo.cpp"
+# On a pull request (--changed-since), a change to any of these can affect
+# every translation unit, so the full set is linted.
+FULL_RUN_SUFFIXES = (".h", ".hpp", ".hh", ".inl", ".ipp", ".in", ".cmake")
+FULL_RUN_FILES = (".clang-tidy", "CMakeLists.txt", "vcpkg.json", "scripts/run_clang_tidy.py")
 PRODUCT_TARGET_MARKERS = (
     "CMakeFiles/SkyrimDiag.dir",
     "CMakeFiles/SkyrimDiagHelper.dir",
@@ -129,6 +133,39 @@ def prepare_full_production_database(
     return filtered_dir, selected_paths, labels
 
 
+def select_changed_sources(
+    changed_paths: list[str], labels: list[str]
+) -> list[int] | None:
+    """Indexes of the production sources a pull request needs linted, or
+    None when a header or build setting changed and every source must be.
+
+    Pushes to main and releases never call this: they always lint the full
+    set, so whatever a pull request skips is still checked before release.
+    """
+    for path in changed_paths:
+        name = path.rsplit("/", 1)[-1]
+        if path in FULL_RUN_FILES or name in FULL_RUN_FILES or path.endswith(FULL_RUN_SUFFIXES):
+            return None
+    changed = set(changed_paths)
+    return [index for index, label in enumerate(labels) if label in changed]
+
+
+def _changed_paths(repo_root: Path, base: str) -> list[str] | None:
+    result = subprocess.run(
+        ["git", "-c", "core.quotePath=false", "diff", "--no-renames", "--name-only", f"{base}...HEAD"],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
 def _lint_one(
     tidy_binary: str,
     database_dir: Path,
@@ -162,6 +199,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clang-tidy", default="clang-tidy")
     parser.add_argument("--jobs", type=int, default=max(1, min(4, os.cpu_count() or 1)))
     parser.add_argument("--coverage-only", action="store_true")
+    parser.add_argument(
+        "--changed-since",
+        default="",
+        help="pull requests: lint only production sources changed since this base commit",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root).resolve()
@@ -184,6 +226,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.jobs < 1:
         print("ERROR: --jobs must be at least 1", file=sys.stderr)
         return 2
+
+    if args.changed_since:
+        changed = _changed_paths(root, args.changed_since)
+        selected = None if changed is None else select_changed_sources(changed, labels)
+        if selected is None:
+            print("==> pull request touches headers or build settings (or the diff failed): full run")
+        else:
+            sources = [sources[index] for index in selected]
+            labels = [labels[index] for index in selected]
+            print(f"==> pull request: {len(sources)} changed production source(s)")
+            if not sources:
+                return 0
 
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:
         results = list(
