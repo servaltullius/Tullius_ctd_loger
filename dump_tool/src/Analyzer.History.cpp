@@ -2,6 +2,7 @@
 
 #include "CandidateConsensus.h"
 #include "CrashHistory.h"
+#include "MainThreadWait.h"
 #include "OutputWriterInternals.h"
 #include "ScopedHistoryFileLock.h"
 #include "Utf.h"
@@ -138,11 +139,19 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
     }
   }
 
+  // A freeze whose main thread waited in a dialog, the engine or the driver
+  // has bystanders on its stack (ADR-0006, ADR-0009). Recording them would
+  // make every repeat of the same freeze vote for them through the bucket.
+  const bool stackIsBystander = out.modal_dialog_wait.detected ||
+    (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread);
   if (keys.empty()) {
     for (const auto& ref : out.crash_logger_object_refs) {
       AppendHistoryCandidateKey(ref.esp_name, &seen, &keys);
     }
     for (const auto& suspect : out.suspects) {
+      if (stackIsBystander) {
+        break;
+      }
       AppendHistoryCandidateKey(!suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename, &seen, &keys);
     }
   }

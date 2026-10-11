@@ -17,6 +17,7 @@
 
 #include "Analyzer.h"
 #include "AnalyzerInternals.h"
+#include "AnalyzerPipeline.h"
 #include "EvidenceBuilder.h"
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
@@ -276,6 +277,63 @@ void TestReportKeepsRecentEvents()
     "times are never in scientific notation");
 }
 
+// Captures of the same freeze land in one bucket even when the stack below
+// the wait differs, and a different wait is a different bucket.
+void TestFreezesGroupByTheMainThreadWait()
+{
+  const auto gpuPoll = [](std::uint64_t deepFrameOffset) {
+    auto r = MakeHang();
+    r.main_thread_wait.kind = "engine_wait";
+    r.main_thread_wait.engine_wait_detail = "gpu_query_poll";
+    r.main_thread_wait.wait_api = L"KERNELBASE.dll!SleepEx";
+    r.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+    r.stackwalk_primary_frames = { L"frame" };
+    r.stackwalk_primary_bucket_frames = { { L"SkyrimSE.exe", 0xE46E21 }, { L"CommunityShaders.dll", deepFrameOffset } };
+    skydiag::dump_tool::internal::ComputeCrashBucket(r);
+    return r.crash_bucket_key;
+  };
+  const auto first = gpuPoll(0x1000);
+  Require(first.rfind(L"HANG1-", 0) == 0, "a freeze with a classified wait gets a wait bucket");
+  Require(gpuPoll(0x2000) == first, "the stack below the wait does not split the bucket");
+
+  auto driver = MakeHang();
+  driver.main_thread_wait.kind = "graphics_driver_wait";
+  driver.main_thread_wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+  driver.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  skydiag::dump_tool::internal::ComputeCrashBucket(driver);
+  Require(driver.crash_bucket_key.rfind(L"HANG1-", 0) == 0 && driver.crash_bucket_key != first,
+    "a different wait is a different bucket");
+
+  auto running = MakeHang();
+  running.main_thread_wait.kind = "running";
+  running.stackwalk_primary_frames = { L"frame" };
+  running.stackwalk_primary_bucket_frames = { { L"SomePlugin.dll", 0x10 } };
+  skydiag::dump_tool::internal::ComputeCrashBucket(running);
+  Require(running.crash_bucket_key.rfind(L"CTD3-", 0) == 0, "a running main thread keeps the stack bucket");
+
+  AnalysisResult crash{};
+  crash.exc_code = 0xC0000005u;
+  crash.fault_module_filename = L"SmoothCam.dll";
+  crash.fault_module_offset = 0x15FCC;
+  skydiag::dump_tool::internal::ComputeCrashBucket(crash);
+  Require(crash.crash_bucket_key.rfind(L"CTD3-", 0) == 0, "crashes keep the stack bucket");
+}
+
+// Plugins on a waiting main thread's stack are bystanders; recording them as
+// the bucket's candidates would let every repeat of the freeze vote for them.
+void TestBystanderStackIsNotRecordedInHistory()
+{
+  auto wait = MakeHang();
+  wait.main_thread_wait.kind = "engine_wait";
+  wait.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+  Require(skydiag::dump_tool::CollectHistoryCandidateKeys(wait).empty(), "bystander suspects are not history candidates");
+
+  auto running = MakeHang();
+  running.main_thread_wait.kind = "running";
+  const auto keys = skydiag::dump_tool::CollectHistoryCandidateKeys(running);
+  Require(!keys.empty(), "a running main thread still records its stack suspects");
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -300,6 +358,8 @@ int main()
     TestOtherThreadSuspectsKeepTheirSignal();
     TestStallOutranksTheWaitAdvice();
     TestReportKeepsRecentEvents();
+    TestFreezesGroupByTheMainThreadWait();
+    TestBystanderStackIsNotRecordedInHistory();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;

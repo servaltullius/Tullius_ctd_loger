@@ -69,6 +69,14 @@ Accepted
    - 프리징 요약 문장(modal 제외), "캡처 당시 게임 상태" 근거 항목, 콘솔과 긴 공백에 대한
      `[Context]` / `[상황]` 안내에 쓴다. 히치 통계는 그대로 두되 최댓값에 긴 공백이 포함됐다고 적는다.
 
+6. 프리징의 버킷 키는 메인 스레드 대기로 정한다(`HANG1-<hash>`). modal 대화상자는 호출 모듈과
+   Address Library 오류 종류, `engine_wait`·`graphics_driver_wait`·`plugin_wait`는 대기 종류,
+   `engine_wait_detail`, 대기 모듈, 대기 API로 해시한다. 같은 프리징이라도 대기 아래 스택(그때
+   호출 경로에 있던 플러그인, 스택 분석이 내려간 깊이)은 캡처마다 달라, 스택 키로는 실사고 GPU 대기
+   4건이 모두 다른 버킷이었다. `running`, `unknown`과 크래시는 기존 스택 키(`CTD3-`)를 쓴다.
+   대기가 방관자 대기이거나 modal 대화상자이면, 스택 suspect를 이력의 후보 키로 기록하지 않는다.
+   기록하면 같은 프리징이 반복될 때마다 버킷 반복 신호가 그 플러그인을 다시 후보로 올린다.
+
 ## Output Contract
 
 - 요약 JSON `freeze_analysis.main_thread_wait`: `kind`, `wait_class`(`sleep`/`sync`),
@@ -77,6 +85,7 @@ Accepted
 - 요약 JSON `freeze_analysis.game_state`: `open_menus`, `seconds_since_load_end`(-1 = 기록 없음),
   `pause_gap_seconds`, `pause_gap_ended_seconds_before`
 - 리포트 `FreezeAnalysis` 아래 `main_thread_wait ...`, `game_state ...` 줄
+- `crash_bucket_key`: 대기로 분류된 프리징은 `HANG1-` 접두사. 이전 이력의 `CTD3-` 키와는 합쳐지지 않는다.
 
 ## Consequences
 
@@ -91,8 +100,9 @@ Accepted
   덤프로 알 수 없다.
 - 쿼리 대기가 아닌 엔진 대기(다른 Sleep 루프, 동기화 대기)는 여전히 "무엇을 기다렸는지 모름"이다.
 - 블랙박스 링 버퍼보다 먼저 열린 메뉴는 보이지 않는다.
-- 시스템 DLL 심볼은 로컬 이미지의 export 이름에 기대므로, 다른 PC에서 분석하면 `unknown`이 늘
-  수 있다.
+- 시스템 DLL 심볼과 unwind 정보는 같은 버전의 로컬 이미지에 기대므로, 다른 PC나 Windows 업데이트
+  뒤에 이전 덤프를 분석하면 스택이 ntdll에서 끊겨 `unknown`이 된다(2026-10-11 업데이트 뒤 실사고
+  프리징 5건 모두 그랬다). 캡처 직후의 분석은 같은 DLL이라 영향이 없다.
 - 게임 EXE가 플러그인이 쥔 SRW 잠금이나 critical section에서 기다려도 `engine_wait`로 분류된다.
   WCT는 SRW 잠금을 보지 못하므로, 스레드 그룹 합의가 없으면 그 플러그인의 스택 후보가 빠진다.
 - ENB의 `d3d11.dll`, ReShade의 `dxgi.dll` 같은 프록시 DLL은 이름으로 그래픽 런타임으로 본다.
