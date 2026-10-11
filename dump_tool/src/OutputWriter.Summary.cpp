@@ -277,8 +277,26 @@ nlohmann::json BuildSummaryJson(
     auto parsedPluginScan = nlohmann::json::parse(r.plugin_scan_json_utf8, nullptr, false);
     if (parsedPluginScan.is_discarded()) {
       summary["plugin_scan"] = nullptr;
-      summary["plugin_scan_raw"] = r.plugin_scan_json_utf8;
+      // Enough to see what went wrong; the full scan stays in the dump.
+      constexpr std::size_t kRawPreviewBytes = 4096;
+      summary["plugin_scan_raw"] = r.plugin_scan_json_utf8.substr(0, kRawPreviewBytes);
     } else {
+      // The per-plugin list (about 1 MB for a 4,000-plugin load order) is
+      // input to the analysis, which reads it from the dump's own stream; the
+      // summary keeps counts. Missing masters and plugin rules are reported
+      // separately below.
+      if (parsedPluginScan.is_object() && parsedPluginScan.contains("plugins") && parsedPluginScan["plugins"].is_array()) {
+        std::size_t active = 0;
+        std::size_t light = 0;
+        for (const auto& plugin : parsedPluginScan["plugins"]) {
+          active += plugin.value("is_active", false) ? 1u : 0u;
+          light += plugin.value("is_esl", false) ? 1u : 0u;
+        }
+        parsedPluginScan["plugin_count"] = parsedPluginScan["plugins"].size();
+        parsedPluginScan["active_plugin_count"] = active;
+        parsedPluginScan["light_plugin_count"] = light;
+        parsedPluginScan.erase("plugins");
+      }
       summary["plugin_scan"] = std::move(parsedPluginScan);
     }
 

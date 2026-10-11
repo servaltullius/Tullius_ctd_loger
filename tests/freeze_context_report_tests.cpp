@@ -334,6 +334,29 @@ void TestBystanderStackIsNotRecordedInHistory()
   Require(!keys.empty(), "a running main thread still records its stack suspects");
 }
 
+// The summary keeps plugin counts, not the ~1 MB per-plugin list that the
+// analysis reads from the dump itself.
+void TestSummaryKeepsPluginCountsOnly()
+{
+  AnalysisResult r = MakeHang();
+  r.has_plugin_scan = true;
+  r.plugin_scan_json_utf8 = R"({"game_exe_version":"1.6.1170.0","plugins_source":"mo2_profile","plugins":[
+    {"filename":"Skyrim.esm","is_active":true,"is_esl":false,"masters":[]},
+    {"filename":"A.esl","is_active":true,"is_esl":true,"masters":["Skyrim.esm"]},
+    {"filename":"B.esp","is_active":false,"is_esl":false,"masters":["Skyrim.esm"]}],
+    "skse_log":{"status":"matched"}})";
+  const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+  const auto& scan = summary["plugin_scan"];
+  Require(!scan.contains("plugins"), "the per-plugin list is left out");
+  Require(scan["plugin_count"] == 3 && scan["active_plugin_count"] == 2 && scan["light_plugin_count"] == 1, "counts");
+  Require(scan["game_exe_version"] == "1.6.1170.0" && scan["skse_log"]["status"] == "matched", "other fields stay");
+
+  r.plugin_scan_json_utf8 = std::string(10000, '{');
+  const auto broken = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+  Require(broken["plugin_scan"].is_null() && broken["plugin_scan_raw"].get<std::string>().size() == 4096u,
+    "an unparsable scan keeps only a preview");
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -360,6 +383,7 @@ int main()
     TestReportKeepsRecentEvents();
     TestFreezesGroupByTheMainThreadWait();
     TestBystanderStackIsNotRecordedInHistory();
+    TestSummaryKeepsPluginCountsOnly();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;

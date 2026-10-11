@@ -47,7 +47,8 @@ houseCARL처럼 각 DLL의 `SKSEPlugin_Version` export를 직접 읽어 판정�
 
 ## Output Contract
 
-- 플러그인 스캔 JSON(요약 JSON에서는 `plugin_scan.skse_log`):
+- 플러그인 스캔 JSON(요약 JSON에서는 `plugin_scan.skse_log`. 요약 JSON의 `plugin_scan`은 플러그인별 목록 대신
+  `plugin_count`, `active_plugin_count`, `light_plugin_count`만 담고, 전체 목록은 덤프의 스트림에 있다):
   `status` (`matched` / `no_matching_log` / `not_found` / `no_image_base` / `error`),
   `matched`일 때 `skse_version`, `checked_count`, `loaded_count`, `issue_count`,
   `issues[] {dll, name, status, code}`. `error`는 로그를 읽다 예외가 난 경우이며 플러그인
