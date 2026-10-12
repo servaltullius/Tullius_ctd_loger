@@ -609,6 +609,17 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Interpretation] The exception is inside CrashLogger. It is most likely a secondary fault from CrashLogger probing memory while it reported another crash. Judge the crash by the original exception and call stack in the paired CrashLogger log, not by CrashLogger."
       : L"[해석] 예외 위치가 CrashLogger 내부입니다. CrashLogger가 다른 크래시를 기록하면서 메모리를 조사하다 낸 2차 예외일 가능성이 큽니다. CrashLogger가 아니라 짝지어진 CrashLogger 로그의 원래 예외와 콜스택을 기준으로 판단하세요.");
+    if (!r.crash_logger_exception_type.empty()) {
+      const std::wstring where = r.crash_logger_exception_location.empty()
+        ? std::wstring{}
+        : (en ? (L" at " + r.crash_logger_exception_location) : (L"(" + r.crash_logger_exception_location + L")"));
+      const bool breakpoint = r.crash_logger_exception_type == L"EXCEPTION_BREAKPOINT";
+      r.recommendations.push_back(en
+        ? (L"[Interpretation] The paired CrashLogger log records the original exception: " + r.crash_logger_exception_type + where +
+            (breakpoint ? L". A breakpoint like this is usually a mod stopping itself on a failed internal check (assert/abort); look at the mods on that log's call stack." : L"."))
+        : (L"[해석] 짝지어진 CrashLogger 로그의 원래 예외는 " + r.crash_logger_exception_type + where + L"입니다." +
+            (breakpoint ? L" 이런 브레이크포인트는 보통 모드가 내부 검사(assert/abort)에 실패해 스스로 멈춘 것이니, 그 로그의 콜스택에 있는 모드를 보세요." : L"")));
+    }
   } else if (ctx.isHookFramework) {
     r.recommendations.push_back(en
       ? L"[Hook framework] This mod extensively hooks the game engine. It may be a victim of memory corruption caused by another mod, not the root cause itself. Check other suspect candidates first."

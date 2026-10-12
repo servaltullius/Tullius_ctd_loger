@@ -2,6 +2,7 @@
 
 #include "CandidateConsensus.h"
 #include "CrashHistory.h"
+#include "CrashLoggerParseCore.h"
 #include "MainThreadWait.h"
 #include "OutputWriterInternals.h"
 #include "ScopedHistoryFileLock.h"
@@ -146,6 +147,9 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
     (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread);
   if (keys.empty()) {
     for (const auto& ref : out.crash_logger_object_refs) {
+      if (crashlogger_core::IsLocationObjectTypeAscii(WideToUtf8(ref.best_object_type))) {
+        continue;  // where the player was, not a candidate
+      }
       AppendHistoryCandidateKey(ref.esp_name, &seen, &keys);
     }
     for (const auto& suspect : out.suspects) {

@@ -473,6 +473,22 @@ void IntegrateCrashLoggerLog(
     }
   }
 
+  if (auto exceptionLine = crashlogger_core::ParseCrashLoggerExceptionLineAscii(*logUtf8)) {
+    out.crash_logger_exception_type = Utf8ToWide(exceptionLine->type);
+    out.crash_logger_exception_location = Utf8ToWide(exceptionLine->location);
+    out.crash_logger_exception_instruction = Utf8ToWide(exceptionLine->instruction);
+  }
+  for (const auto& object : crashlogger_core::ParseCrashLoggerUnattributedObjectsAscii(*logUtf8)) {
+    AnalysisResult::CrashLoggerModReference ref;
+    ref.best_object_type = Utf8ToWide(object.object_type);
+    ref.best_location = Utf8ToWide(object.location);
+    ref.object_name = Utf8ToWide(object.object_name);
+    ref.form_id = Utf8ToWide(object.form_id);
+    ref.ref_count = 1;
+    ref.relevance_score = object.relevance_score;
+    out.crash_logger_unattributed_objects.push_back(std::move(ref));
+  }
+
   auto rawRefs = crashlogger_core::ParseCrashLoggerObjectRefsAscii(*logUtf8);
   auto aggRefs = crashlogger_core::AggregateCrashLoggerObjectRefs(rawRefs);
   std::unordered_map<std::string, std::uint32_t> espCount;

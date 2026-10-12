@@ -1425,8 +1425,9 @@ static void Test_ParseTopModules_ThreadDump_AcceptsNonManualHeaderVariant()
 
   const auto mods = ParseCrashLoggerTopModulesAsciiLower(log);
   assert(mods.size() == 2u);
-  assert(mods[0] == "othervariant.dll");
-  assert(mods[1] == "variantthread.dll");
+  // Equal counts keep the order they first appear in, not alphabetical order.
+  assert(mods[0] == "variantthread.dll");
+  assert(mods[1] == "othervariant.dll");
 }
 
 static void Test_ParseTopModules_CrashLog_IgnoresThreadDumpSubstringNoise()
@@ -1592,8 +1593,75 @@ static void Test_ParseCrashLoggerFrameSignals_Fixture_V124RealFormat()
   assert(signals.probable_streak_length == 2u);
 }
 
+// The original exception Crash Logger reports (here an assert's int3), and
+// the relevant objects that have no plugin, from a real 1.25 log.
+static void Test_ParseExceptionLineAndObjectsWithoutPlugin()
+{
+  using skydiag::dump_tool::crashlogger_core::IsLocationObjectTypeAscii;
+  using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerExceptionLineAscii;
+  using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerUnattributedObjectsAscii;
+  const std::string log =
+    "CRASH TIME: 2026-10-05 12:28:58\r\n"
+    "CrashLoggerSSE v1-25-0-0 Aug 21 2026 09:19:20\r\n"
+    "\r\n"
+    "Unhandled exception \"EXCEPTION_BREAKPOINT\" at 0x7FFE68312B24 ucrtbase.dll+00C2B24\tint3\r\n"
+    "Exception Flags: 0x00000000 (Continuable)\r\n"
+    "\r\n"
+    "POSSIBLE RELEVANT OBJECTS:\r\n"
+    "\tRSP+4C8: (Character*) \"Blood Dragon\" [0xFF0036F8]\r\n"
+    "\tRSP+500: (TESObjectCELL*) [0xFF00114E]\r\n"
+    "\tRSP+730: (bhkCharProxyController*)\r\n"
+    "\tRSP+8E8: (TESPackage*) [0x00050AF2] (\"Skyrim.esm\")\r\n"
+    "\tRSP+AD0: (Character*) \"Snow Hare\" [0x001071A8] (\"Skyrim.esm\")\r\n"
+    "\r\n"
+    "PROCESS INFO:\r\n"
+    "\tProcess ID: 10360\r\n";
+
+  const auto exception = ParseCrashLoggerExceptionLineAscii(log);
+  assert(exception.has_value());
+  assert(exception->type == "EXCEPTION_BREAKPOINT");
+  assert(exception->location == "ucrtbase.dll+00C2B24");
+  assert(exception->instruction == "int3");
+  assert(!ParseCrashLoggerExceptionLineAscii("no exception line here").has_value());
+
+  const auto objects = ParseCrashLoggerUnattributedObjectsAscii(log);
+  assert(objects.size() == 1u);  // the cell, the bare pointer and plugin-backed forms are left out
+  assert(objects[0].location == "RSP+4C8");
+  assert(objects[0].object_name == "Blood Dragon");
+  assert(objects[0].form_id == "0xFF0036F8");
+  assert(objects[0].esp_name.empty());
+
+  assert(IsLocationObjectTypeAscii("TESObjectCELL*"));
+  assert(IsLocationObjectTypeAscii("TESWorldSpace*"));
+  assert(!IsLocationObjectTypeAscii("Character*"));
+}
+
+// Modules that appear equally often keep call-stack order (the 2026-09-18
+// log listed them alphabetically and lost the first two frames' modules).
+static void Test_ParseFrameTopModules_TiesKeepStackOrder()
+{
+  const std::string log =
+    "CrashLoggerSSE v1-25-0-0 Aug 21 2026 09:19:20\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FFA3CB46144 SkyrimUpscaler.dll+0156144\n"
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FFA3CB46144             SkyrimUpscaler.dll+0156144\n"
+    "\t[ 1][P] 0x7FF9C67C8BF4           SSEDisplayTweaks.dll+0028BF4\n"
+    "\t[ 2][P] 0x7FFA371F4D1E                      dmenu.dll+0034D1E\n"
+    "\t[ 3][P] 0x7FF9ED4A19FA                      Modex.dll+00919FA\n"
+    "\t[ 4][P] 0x7FF9EBA6303A      OpenAnimationReplacer.dll+014303A\n"
+    "\n";
+  const auto mods = ParseCrashLoggerFrameTopModulesAsciiLower(log);
+  assert(mods.size() >= 4u);
+  assert(mods[0] == "skyrimupscaler.dll");
+  assert(mods[1] == "ssedisplaytweaks.dll");
+  assert(mods[2] == "dmenu.dll");
+  assert(mods[3] == "modex.dll");
+}
+
 int main()
 {
+  Test_ParseExceptionLineAndObjectsWithoutPlugin();
+  Test_ParseFrameTopModules_TiesKeepStackOrder();
   Test_LooksLikeCrashLogger_CrashLog();
   Test_LooksLikeCrashLogger_ThreadDump();
   Test_LooksLikeCrashLogger_RuntimeLogHotkeyLineIsNotThreadDump();

@@ -277,6 +277,28 @@ std::string BuildReportText(
     }
     rpt << "\n";
   }
+  if (!r.crash_logger_exception_type.empty()) {
+    rpt << (en ? "CrashLoggerException: " : "Crash Logger 예외: ") << WideToUtf8(r.crash_logger_exception_type);
+    if (!r.crash_logger_exception_location.empty()) {
+      rpt << " at " << WideToUtf8(r.crash_logger_exception_location);
+    }
+    rpt << "\n";
+  }
+  if (!r.crash_logger_unattributed_objects.empty()) {
+    rpt << (en ? "CrashLoggerObjectsWithoutPlugin: " : "Crash Logger 플러그인 없는 오브젝트: ");
+    bool first = true;
+    for (const auto& object : r.crash_logger_unattributed_objects) {
+      rpt << (first ? "" : ", ") << WideToUtf8(object.best_object_type);
+      if (!object.object_name.empty()) {
+        rpt << " \"" << WideToUtf8(object.object_name) << "\"";
+      }
+      if (!object.form_id.empty()) {
+        rpt << " [" << WideToUtf8(object.form_id) << "]";
+      }
+      first = false;
+    }
+    rpt << "\n";
+  }
   if (!r.dump_objects.empty()) {
     // ADR-0010: objects read from the dump itself.
     rpt << (en ? "DumpObjects:\n" : "덤프 오브젝트:\n");

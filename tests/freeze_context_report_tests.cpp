@@ -405,6 +405,39 @@ void TestAdviceFitsTheCapture()
   Require(!AnyStartsWith(modal.recommendations, L"[Optimization]"), "no load-order upkeep next to the dialog");
 }
 
+// The cell the player stood in (defined by a large location overhaul) is not
+// a candidate; the character being processed is (2026-10-07 real crash).
+void TestCellIsNotACandidate()
+{
+  AnalysisResult r{};
+  r.dump_path = L"C:\\Logs\\SkyrimDiag_Crash_20261007_123742_440.dmp";
+  r.exc_code = 0xC0000005u;
+  r.fault_module_filename = L"SkyrimSE.exe";
+  AnalysisResult::CrashLoggerModReference character{};
+  character.esp_name = L"AE_StellarBlade_Doro.esp";
+  character.best_object_type = L"Character*";
+  character.best_location = L"RCX";
+  character.relevance_score = 20;
+  AnalysisResult::CrashLoggerModReference cell{};
+  cell.esp_name = L"Lux.esp";
+  cell.best_object_type = L"TESObjectCELL*";
+  cell.best_location = L"RSP+328";
+  cell.relevance_score = 7;
+  r.crash_logger_object_refs = { character, cell };
+  BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+  bool hasCharacterPlugin = false;
+  for (const auto& candidate : r.actionable_candidates) {
+    Require(candidate.display_name != L"Lux.esp" && candidate.plugin_name != L"Lux.esp", "a cell is not a candidate");
+    hasCharacterPlugin = hasCharacterPlugin || candidate.plugin_name == L"AE_StellarBlade_Doro.esp";
+  }
+  Require(hasCharacterPlugin, "the character's plugin still is");
+
+  r.actionable_candidates.clear();
+  for (const auto& key : skydiag::dump_tool::CollectHistoryCandidateKeys(r)) {
+    Require(key.find("lux") == std::string::npos, "a cell is not a history candidate either");
+  }
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -433,6 +466,7 @@ int main()
     TestBystanderStackIsNotRecordedInHistory();
     TestSummaryKeepsPluginCountsOnly();
     TestAdviceFitsTheCapture();
+    TestCellIsNotACandidate();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;

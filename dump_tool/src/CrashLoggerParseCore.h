@@ -106,6 +106,15 @@ std::optional<std::string> ParseCrashLoggerIniCrashlogDirectoryAscii(std::string
 bool LooksLikeCrashLoggerLogTextCore(std::string_view utf8Prefix);
 std::optional<std::string_view> TryExtractModulePlusOffsetTokenAscii(std::string_view line);
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8);
+
+// The exception Crash Logger reports, e.g.
+// Unhandled exception "EXCEPTION_BREAKPOINT" at 0x7FFE68312B24 ucrtbase.dll+00C2B24<TAB>int3
+struct CrashLoggerExceptionLine {
+  std::string type;         // "EXCEPTION_BREAKPOINT"
+  std::string location;     // "ucrtbase.dll+00C2B24"
+  std::string instruction;  // "int3"
+};
+std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::string_view logUtf8);
 CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8);
 std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_view logUtf8);
 std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view logUtf8);
@@ -134,6 +143,12 @@ std::string ExtractObjectName(std::string_view line);
 std::string ExtractLocation(std::string_view trimmed);
 std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_view logUtf8);
 std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(const std::vector<CrashLoggerObjectRef>& refs);
+// POSSIBLE RELEVANT OBJECTS entries with a name or FormID but no plugin (forms
+// created at runtime, such as spawned actors), most relevant first, at most 6.
+// esp_name is empty.
+std::vector<CrashLoggerObjectRef> ParseCrashLoggerUnattributedObjectsAscii(std::string_view logUtf8);
+// Cells and worldspaces tell where the player was, not what was being processed.
+bool IsLocationObjectTypeAscii(std::string_view objType);
 
 }  // namespace crashlogger_core
 
