@@ -16,6 +16,10 @@
 #include <string_view>
 #include <vector>
 
+namespace skydiag::dump_tool {
+class AddressResolver;
+}  // namespace skydiag::dump_tool
+
 namespace skydiag::dump_tool::internal {
 
 std::wstring EventTypeName(std::uint16_t t);
@@ -70,7 +74,8 @@ bool TryComputeStackwalkSuspects(
   std::uint32_t modalProbeTid = 0,
   std::vector<ModalStackFrame>* outModalProbeFrames = nullptr,
   const std::vector<std::uint32_t>* sideTids = nullptr,
-  std::vector<ThreadTopFrames>* outSideFrames = nullptr);
+  std::vector<ThreadTopFrames>* outSideFrames = nullptr,
+  const AddressResolver* gameFunctions = nullptr);
 
 void ComputeCrashBucket(AnalysisResult& out);
 

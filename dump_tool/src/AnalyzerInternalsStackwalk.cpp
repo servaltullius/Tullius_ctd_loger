@@ -1,5 +1,6 @@
 #include "AnalyzerInternals.h"
 
+#include "AddressResolver.h"
 #include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
 
@@ -11,14 +12,68 @@ namespace {
 
 using skydiag::dump_tool::internal::stackwalk_internal::AddDumpExportSymbols;
 using skydiag::dump_tool::internal::stackwalk_internal::DumpImageData;
+using skydiag::dump_tool::internal::stackwalk_internal::FindFunctionStart;
 using skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory;
 using skydiag::dump_tool::internal::stackwalk_internal::MinidumpMemoryView;
 using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext;
 using skydiag::dump_tool::internal::stackwalk_internal::SymSession;
 
+using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::ModuleInfo;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
 using skydiag::dump_tool::minidump::ThreadRecord;
+
+// Name of the SkyrimSE.exe function containing pc, with the offset into it
+// ("BSReadWriteLock::LockForRead+0xf"), or empty. Only an exact match of
+// the .pdata function start counts. Also records the name in
+// out.resolved_functions under the frame's module offset.
+std::wstring LabelGameFrame(
+  const MinidumpMemoryView& mem,
+  const std::vector<ModuleInfo>& modules,
+  std::uint64_t pc,
+  bool returnAddress,
+  const AddressResolver& gameFunctions,
+  AnalysisResult& out)
+{
+  const auto idx = FindModuleIndexForAddress(modules, pc);
+  if (!idx || !modules[*idx].is_game_exe) {
+    return {};
+  }
+  const auto& module = modules[*idx];
+  // A return address can be the first byte after its function when the call
+  // was the function's last instruction.
+  const std::uint64_t probe = (returnAddress && pc > module.base) ? pc - 1u : pc;
+  const auto start = FindFunctionStart(mem, module.base, probe);
+  if (!start) {
+    return {};
+  }
+  const auto name = gameFunctions.Resolve(*start - module.base);
+  if (!name) {
+    return {};
+  }
+  out.resolved_functions[pc - module.base] = *name;
+  wchar_t disp[32]{};
+  swprintf_s(disp, L"+0x%llx", static_cast<unsigned long long>(pc - *start));
+  return std::wstring(name->begin(), name->end()) + disp;
+}
+
+std::vector<std::wstring> LabelGameFrames(
+  const MinidumpMemoryView& mem,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  const AddressResolver* gameFunctions,
+  AnalysisResult& out)
+{
+  std::vector<std::wstring> labels;
+  if (!gameFunctions) {
+    return labels;
+  }
+  labels.reserve(pcs.size());
+  for (std::size_t i = 0; i < pcs.size(); ++i) {
+    labels.push_back(LabelGameFrame(mem, modules, pcs[i], /*returnAddress=*/i > 0u, *gameFunctions, out));
+  }
+  return labels;
+}
 
 }  // namespace
 
@@ -48,7 +103,8 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   std::uint32_t* outTotalFrames,
   std::uint32_t* outSymbolizedFrames,
   std::uint32_t* outSourceLineFrames,
-  bool fromTop);
+  bool fromTop,
+  const std::vector<std::wstring>* frameLabels);
 
 }  // namespace stackwalk
 
@@ -84,7 +140,8 @@ bool TryComputeStackwalkSuspects(
   std::uint32_t modalProbeTid,
   std::vector<ModalStackFrame>* outModalProbeFrames,
   const std::vector<std::uint32_t>* sideTids,
-  std::vector<ThreadTopFrames>* outSideFrames)
+  std::vector<ThreadTopFrames>* outSideFrames,
+  const AddressResolver* gameFunctions)
 {
   if (!dumpBase || modules.empty() || targetTids.empty() || threads.empty()) {
     return false;
@@ -120,6 +177,12 @@ bool TryComputeStackwalkSuspects(
   const DumpImageData dumpImages(mem, modules);
   mem.dump_images = &dumpImages;
   AddDumpExportSymbols(sym, dumpImages);
+
+  // The faulting game function, for the evidence line, whichever thread's
+  // stack is shown.
+  if (gameFunctions && excCtx) {
+    (void)LabelGameFrame(mem, modules, excCtx->Rip, /*returnAddress=*/false, *gameFunctions, out);
+  }
 
   struct Candidate
   {
@@ -238,6 +301,7 @@ bool TryComputeStackwalkSuspects(
         bestAny.pcs,
         /*maxFrames=*/12);
       const bool fromTop = modalProbeTid != 0u && bestAny.tid == modalProbeTid;
+      const auto labels = LabelGameFrames(mem, modules, bestAny.pcs, gameFunctions, out);
       out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
         sym.process,
         modules,
@@ -246,7 +310,8 @@ bool TryComputeStackwalkSuspects(
         &out.stackwalk_total_frames,
         &out.stackwalk_symbolized_frames,
         &out.stackwalk_source_line_frames,
-        fromTop);
+        fromTop,
+        &labels);
     }
     return false;
   }
@@ -259,6 +324,7 @@ bool TryComputeStackwalkSuspects(
     best.pcs,
     /*maxFrames=*/12);
   const bool fromTop = modalProbeTid != 0u && best.tid == modalProbeTid;
+  const auto labels = LabelGameFrames(mem, modules, best.pcs, gameFunctions, out);
   out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
     sym.process,
     modules,
@@ -267,7 +333,8 @@ bool TryComputeStackwalkSuspects(
     &out.stackwalk_total_frames,
     &out.stackwalk_symbolized_frames,
     &out.stackwalk_source_line_frames,
-    fromTop);
+    fromTop,
+    &labels);
   return true;
 }
 

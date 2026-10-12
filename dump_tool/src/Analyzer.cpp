@@ -495,8 +495,36 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
+  // Names of SkyrimSE.exe functions, for game frames of the stack walk
+  // (best-effort).
+  AddressResolver gameFunctions;
+  bool gameFunctionsLoaded = false;
+  if (!opt.data_dir.empty() && !out.game_version.empty()) {
+    const auto addrDb = std::filesystem::path(opt.data_dir) / L"address_db" / L"skyrimse_functions.json";
+    AddressResolver::LoadStatus loadStatus = AddressResolver::LoadStatus::kOk;
+    if (!gameFunctions.LoadFromJson(addrDb, out.game_version, &loadStatus)) {
+      switch (loadStatus) {
+      case AddressResolver::LoadStatus::kFileOpenFailed:
+        out.diagnostics.push_back(L"[Data] address_db/skyrimse_functions.json not found");
+        break;
+      case AddressResolver::LoadStatus::kMissingGameVersion:
+        out.diagnostics.push_back(
+          L"[Data] address_db/skyrimse_functions.json has no entry for game_version " +
+          Utf8ToWide(out.game_version));
+        break;
+      case AddressResolver::LoadStatus::kInvalidJson:
+      case AddressResolver::LoadStatus::kEmptyEntries:
+      default:
+        out.diagnostics.push_back(L"[Data] failed to load address_db/skyrimse_functions.json");
+        break;
+      }
+    } else {
+      gameFunctionsLoaded = true;
+    }
+  }
+
   // Suspects (prefer callstack/stackwalk; fallback to stack scan)
-  ComputeSuspects(dumpBase, dumpSize, allModules, excCtx, hangLike, opt, out);
+  ComputeSuspects(dumpBase, dumpSize, allModules, excCtx, hangLike, opt, out, gameFunctionsLoaded ? &gameFunctions : nullptr);
   if (out.symbol_runtime_degraded) {
     out.diagnostics.push_back(L"[Symbols] degraded runtime environment detected; stackwalk/source lookup may be limited");
   }
@@ -574,36 +602,6 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       if (out.signature_match && out.signature_match->id == "CPP_EXCEPTION_HANDLED" &&
           IsCrashLoggerConfirmedCppException(out)) {
         out.signature_match.reset();
-      }
-    }
-  }
-
-  // Resolve game EXE offsets to known function names (best-effort).
-  if (!opt.data_dir.empty() && !out.game_version.empty()) {
-    AddressResolver resolver;
-    const auto addrDb = std::filesystem::path(opt.data_dir) / L"address_db" / L"skyrimse_functions.json";
-    AddressResolver::LoadStatus loadStatus = AddressResolver::LoadStatus::kOk;
-    if (!resolver.LoadFromJson(addrDb, out.game_version, &loadStatus)) {
-      switch (loadStatus) {
-      case AddressResolver::LoadStatus::kFileOpenFailed:
-        out.diagnostics.push_back(L"[Data] address_db/skyrimse_functions.json not found");
-        break;
-      case AddressResolver::LoadStatus::kMissingGameVersion:
-        out.diagnostics.push_back(
-          L"[Data] address_db/skyrimse_functions.json has no entry for game_version " +
-          Utf8ToWide(out.game_version));
-        break;
-      case AddressResolver::LoadStatus::kInvalidJson:
-      case AddressResolver::LoadStatus::kEmptyEntries:
-      default:
-        out.diagnostics.push_back(L"[Data] failed to load address_db/skyrimse_functions.json");
-        break;
-      }
-    } else {
-      if (!out.fault_module_filename.empty() && IsGameExeModule(out.fault_module_filename)) {
-        if (auto fn = resolver.Resolve(out.fault_module_offset)) {
-          out.resolved_functions[out.fault_module_offset] = *fn;
-        }
       }
     }
   }

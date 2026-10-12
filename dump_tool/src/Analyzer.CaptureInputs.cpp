@@ -516,7 +516,8 @@ void ComputeSuspects(
   const std::optional<CONTEXT>& excCtx,
   bool hangLike,
   const AnalyzeOptions& opt,
-  AnalysisResult& out)
+  AnalysisResult& out,
+  const AddressResolver* gameFunctions)
 {
   const bool shouldAnalyzeStacks = (out.exc_tid != 0) || hangLike;
   if (!shouldAnalyzeStacks) {
@@ -594,7 +595,8 @@ void ComputeSuspects(
         modalProbeTid,
         &mainThreadFrames,
         gameThreadTids.empty() ? nullptr : &gameThreadTids,
-        &gameThreadFrames)) {
+        &gameThreadFrames,
+        gameFunctions)) {
     out.suspects_from_stackwalk = false;
     // The helper treats the "failed" diagnostic as degraded capture quality,
     // so keep it for walks that produced no caller frames at all.

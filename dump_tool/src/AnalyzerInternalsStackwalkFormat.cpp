@@ -197,7 +197,8 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   std::uint32_t* outTotalFrames,
   std::uint32_t* outSymbolizedFrames,
   std::uint32_t* outSourceLineFrames,
-  bool fromTop)
+  bool fromTop,
+  const std::vector<std::wstring>* frameLabels)
 {
   if (outTotalFrames) {
     *outTotalFrames = 0;
@@ -223,7 +224,13 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   for (std::size_t i = start; i < end; i++) {
     bool hasSymbol = false;
     bool hasSourceLine = false;
-    out.push_back(FormatSymbolizedFrame(process, modules, pcs[i], &hasSymbol, &hasSourceLine));
+    auto frame = FormatSymbolizedFrame(process, modules, pcs[i], &hasSymbol, &hasSourceLine);
+    // A SkyrimSE.exe function name from the address DB (no PDB exists for
+    // the game): "SkyrimSE.exe+0xcc90cf (BSReadWriteLock::LockForRead+0xf)".
+    if (!hasSymbol && frameLabels && i < frameLabels->size() && !(*frameLabels)[i].empty()) {
+      frame += L" (" + (*frameLabels)[i] + L")";
+    }
+    out.push_back(std::move(frame));
     if (outTotalFrames) {
       *outTotalFrames += 1;
     }

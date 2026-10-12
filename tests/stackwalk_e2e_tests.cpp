@@ -3,10 +3,12 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "Analyzer.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
@@ -174,9 +176,62 @@ void TestLocalImageRejectsNonCodeReturnAddresses()
     "an address outside every module cannot be judged");
 }
 
+// FindFunctionStart names a frame only by the exact start of its function.
+// A chained .pdata entry is a fragment of another function (for example a
+// cold block moved away from it) and must lead back to that function.
+void TestFindFunctionStartFollowsChainedEntries()
+{
+  constexpr std::uint64_t kBase = 0x140000000ull;
+  constexpr std::size_t kSize = 0x4000;
+  std::vector<std::uint8_t> image(kSize);
+  auto put = [&](std::size_t at, const void* src, std::size_t n) { std::memcpy(image.data() + at, src, n); };
+
+  IMAGE_DOS_HEADER dos{};
+  dos.e_magic = IMAGE_DOS_SIGNATURE;
+  dos.e_lfanew = 0x80;
+  put(0, &dos, sizeof(dos));
+  IMAGE_NT_HEADERS64 nt{};
+  nt.Signature = IMAGE_NT_SIGNATURE;
+  nt.OptionalHeader.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+  nt.OptionalHeader.SizeOfImage = static_cast<DWORD>(kSize);
+  nt.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION] = { 0x1000, 3 * sizeof(RUNTIME_FUNCTION) };
+  put(0x80, &nt, sizeof(nt));
+
+  // .pdata: a function, a chained fragment of it, and an indirect entry.
+  const RUNTIME_FUNCTION entries[3] = {
+    { 0x2000, 0x2100, 0x3000 },
+    { 0x2200, 0x2280, 0x3010 },
+    { 0x2400, 0x2480, 0x1000 | 1u },
+  };
+  put(0x1000, entries, sizeof(entries));
+  const std::uint8_t primary[4] = { 0x01, 0, 0, 0 };                          // version 1, no flags
+  const std::uint8_t chained[4] = { 0x01 | (UNW_FLAG_CHAININFO << 3), 0, 0, 0 };  // no unwind codes
+  put(0x3000, primary, sizeof(primary));
+  put(0x3010, chained, sizeof(chained));
+  put(0x3014, &entries[0], sizeof(RUNTIME_FUNCTION));
+
+  std::vector<skydiag::dump_tool::minidump::ModuleInfo> modules(1);
+  modules[0].base = kBase;
+  modules[0].end = kBase + kSize;
+  modules[0].filename = L"SkyrimSE.exe";
+  modules[0].is_game_exe = true;
+
+  namespace sw = skydiag::dump_tool::internal::stackwalk_internal;
+  sw::MinidumpMemoryView mem;
+  mem.ranges.push_back({ kBase, kBase + kSize, image.data() });
+  const sw::DumpImageData images(mem, modules);
+  mem.dump_images = &images;
+
+  Require(sw::FindFunctionStart(mem, kBase, kBase + 0x2050) == kBase + 0x2000, "a primary entry starts its function");
+  Require(sw::FindFunctionStart(mem, kBase, kBase + 0x2250) == kBase + 0x2000, "a chained fragment leads to its function");
+  Require(sw::FindFunctionStart(mem, kBase, kBase + 0x2410) == kBase + 0x2000, "an indirect entry leads to its target");
+  Require(!sw::FindFunctionStart(mem, kBase, kBase + 0x2150).has_value(), "a leaf function has no start");
+}
+
 int main()
 {
   try {
+    TestFindFunctionStartFollowsChainedEntries();
     TestLocalImageRejectsNonCodeReturnAddresses();
     TestFormalStackwalkUnwindsRealCallerChain();
     return 0;

@@ -348,6 +348,22 @@ Notes:
   - `SKYRIM_FOLDER` copies `SkyrimDiag.dll` + `SkyrimDiag.ini` into `Data/SKSE/Plugins`
   - `SKYRIM_MODS_FOLDER` copies into `<mods>/<ProjectName>/SKSE/Plugins`
 
+## Game Function Names (address DB)
+
+`dump_tool/data/address_db/skyrimse_functions.json` names SkyrimSE.exe frames (ADR-0014). It is generated; do not edit it by hand. Regenerate it after adding a game version or moving to another MIT CommonLibSSE-NG revision (the alandtse fork is GPL from 2026-08-20; stay on a revision whose LICENSE is MIT):
+
+```bash
+python scripts/generate_game_function_names.py \
+  --commonlib <CommonLibSSE-NG source at the MIT revision> \
+  --commonlib-ref alandtse/CommonLibSSE-NG@e34246283a75fdd7009108476f0c646038f71f3c \
+  --bin 1.5.97.0=<Address Library>/version-1-5-97-0.bin \
+  --bin 1.6.640.0=<Address Library>/versionlib-1-6-640-0.bin \
+  --bin 1.6.1170.0=<Address Library>/versionlib-1-6-1170-0.bin \
+  --exe 1.6.1170.0=<game folder>/SkyrimSE.exe
+```
+
+`--exe` keeps only IDs that start a function in that build's `.pdata`; without it data addresses stay in the table (harmless, since the analyzer matches exact function starts, but noisy). Do not commit Address Library files.
+
 ## Dependency Refresh (Recommended)
 
 For stability on new Skyrim runtimes, run a periodic dependency refresh cycle (for example, monthly):
