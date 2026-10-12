@@ -43,6 +43,11 @@ else()
   add_subdirectory(helper)
   add_subdirectory(dump_tool)
 
+  option(SKYDIAG_CRASH_TESTER "Build the development-only crash tester SKSE plugins (never packaged)" OFF)
+  if(SKYDIAG_CRASH_TESTER)
+    add_subdirectory(tools/crash_tester)
+  endif()
+
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_custom_target(skydiag_native_provenance ALL
     COMMAND "${Python3_EXECUTABLE}"
