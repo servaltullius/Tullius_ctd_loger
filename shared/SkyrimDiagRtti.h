@@ -79,18 +79,24 @@ bool ReadValue(const Reader& read, std::uint64_t address, T& out)
 }
 
 // Reads a NUL-terminated string in 16-byte pieces, falling back to single
-// bytes when a piece crosses into memory that cannot be read.
+// bytes when a piece crosses into memory that cannot be read. `out` is empty
+// unless the whole string was read: a pointer into freed or reused memory
+// must not leave the bytes before the first bad one behind as a name.
 template <class Reader>
 bool ReadCString(const Reader& read, std::uint64_t address, std::size_t maxBytes, bool asciiOnly, std::string& out)
 {
   out.clear();
+  const auto fail = [&out] {
+    out.clear();
+    return false;
+  };
   constexpr std::size_t kPiece = 16;
   char piece[kPiece]{};
   for (std::size_t offset = 0; offset < maxBytes;) {
     std::size_t got = kPiece;
     if (!read(address + offset, piece, kPiece)) {
       if (!read(address + offset, piece, 1)) {
-        return false;
+        return fail();
       }
       got = 1;
     }
@@ -100,13 +106,13 @@ bool ReadCString(const Reader& read, std::uint64_t address, std::size_t maxBytes
         return !out.empty();
       }
       if (c < 0x20 || c == 0x7F || (asciiOnly && c > 0x7E)) {
-        return false;
+        return fail();
       }
       out.push_back(static_cast<char>(c));
     }
     offset += got;
   }
-  return false;  // no terminator within maxBytes
+  return fail();  // no terminator within maxBytes
 }
 
 #pragma pack(push, 4)

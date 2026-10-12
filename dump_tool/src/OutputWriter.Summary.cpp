@@ -283,6 +283,7 @@ nlohmann::json BuildSummaryJson(
         { "commit_used_bytes", r.memory.commit_used_bytes },
         { "commit_limit_bytes", r.memory.commit_limit_bytes },
         { "commit_percent", pressure.commit_percent },
+        { "commit_includes_snapshot_clone", r.memory.commit_includes_snapshot_clone },
       };
     }
     if (r.memory.has_process) {

@@ -80,6 +80,27 @@ unsigned Percent(std::uint64_t part, std::uint64_t whole)
   return static_cast<unsigned>(std::llround(static_cast<double>(part) * 100.0 / static_cast<double>(whole)));
 }
 
+// The raw ratio, so that 89.5% is not rounded up into pressure.
+bool ReachesPercent(std::uint64_t part, std::uint64_t whole, unsigned percent)
+{
+  return whole > 0 &&
+    static_cast<long double>(part) * 100.0L >= static_cast<long double>(whole) * static_cast<long double>(percent);
+}
+
+// A field of the wrong type reads as absent instead of throwing: the stream
+// comes from another program and must not fail the whole analysis.
+std::uint64_t JsonBytes(const nlohmann::json& object, const char* key)
+{
+  const auto it = object.find(key);
+  return (it != object.end() && it->is_number_unsigned()) ? it->get<std::uint64_t>() : 0;
+}
+
+std::string JsonText(const nlohmann::json& object, const char* key)
+{
+  const auto it = object.find(key);
+  return (it != object.end() && it->is_string()) ? it->get<std::string>() : std::string{};
+}
+
 }  // namespace
 
 std::wstring FormatGb(std::uint64_t bytes, int decimals)
@@ -101,7 +122,7 @@ bool ApplyGpuMemoryJson(std::string_view json, MemorySnapshot& out)
     if (!adapter.is_object()) {
       continue;
     }
-    const std::uint64_t usage = adapter.value("local_usage", std::uint64_t{ 0 });
+    const std::uint64_t usage = JsonBytes(adapter, "local_usage");
     if (!best || usage > bestUsage) {
       best = &adapter;
       bestUsage = usage;
@@ -111,11 +132,11 @@ bool ApplyGpuMemoryJson(std::string_view json, MemorySnapshot& out)
     return false;
   }
   out.has_gpu = true;
-  out.gpu_name = Utf8ToWide(best->value("name", std::string{}));
+  out.gpu_name = Utf8ToWide(JsonText(*best, "name"));
   out.vram_usage_bytes = bestUsage;
-  out.vram_budget_bytes = best->value("local_budget", std::uint64_t{ 0 });
-  out.vram_dedicated_bytes = best->value("dedicated_bytes", std::uint64_t{ 0 });
-  out.gpu_shared_usage_bytes = best->value("nonlocal_usage", std::uint64_t{ 0 });
+  out.vram_budget_bytes = JsonBytes(*best, "local_budget");
+  out.vram_dedicated_bytes = JsonBytes(*best, "dedicated_bytes");
+  out.gpu_shared_usage_bytes = JsonBytes(*best, "nonlocal_usage");
   return true;
 }
 
@@ -136,11 +157,14 @@ MemoryPressure AssessMemoryPressure(const MemorySnapshot& memory)
   MemoryPressure pressure{};
   if (memory.has_system) {
     pressure.commit_percent = Percent(memory.commit_used_bytes, memory.commit_limit_bytes);
-    pressure.commit_high = memory.commit_limit_bytes > 0 && pressure.commit_percent >= kCommitPressurePercent;
+    // A PSS snapshot's clone is charged to system commit while the dump is
+    // written, so that number is not what the game ran with.
+    pressure.commit_high = !memory.commit_includes_snapshot_clone &&
+      ReachesPercent(memory.commit_used_bytes, memory.commit_limit_bytes, kCommitPressurePercent);
   }
   if (memory.has_gpu) {
     pressure.vram_percent = Percent(memory.vram_usage_bytes, memory.vram_budget_bytes);
-    pressure.vram_high = memory.vram_budget_bytes > 0 && pressure.vram_percent >= kVramPressurePercent;
+    pressure.vram_high = ReachesPercent(memory.vram_usage_bytes, memory.vram_budget_bytes, kVramPressurePercent);
   }
   return pressure;
 }
@@ -153,10 +177,12 @@ std::wstring DescribeSystemMemory(const MemorySnapshot& memory, bool en)
     text = en
       ? (L"RAM " + FormatGb(memory.ram_available_bytes, 1) + L"/" + FormatGb(memory.ram_total_bytes, 1) +
           L" GB available, commit " + FormatGb(memory.commit_used_bytes, 1) + L"/" + FormatGb(memory.commit_limit_bytes, 1) +
-          L" GB (" + std::to_wstring(commitPercent) + L"%)")
+          L" GB (" + std::to_wstring(commitPercent) + L"%" +
+          (memory.commit_includes_snapshot_clone ? L", includes the PSS snapshot's copy of the game" : L"") + L")")
       : (L"사용 가능 RAM " + FormatGb(memory.ram_available_bytes, 1) + L"/" + FormatGb(memory.ram_total_bytes, 1) +
           L" GB, 커밋 " + FormatGb(memory.commit_used_bytes, 1) + L"/" + FormatGb(memory.commit_limit_bytes, 1) +
-          L" GB (" + std::to_wstring(commitPercent) + L"%)");
+          L" GB (" + std::to_wstring(commitPercent) + L"%" +
+          (memory.commit_includes_snapshot_clone ? L", PSS 스냅샷이 복제한 게임 메모리 포함" : L"") + L")");
   }
   if (memory.has_process) {
     if (!text.empty()) {
@@ -176,11 +202,16 @@ std::wstring DescribeGpuMemory(const MemorySnapshot& memory, bool en)
   if (!memory.has_gpu) {
     return {};
   }
+  if (memory.vram_budget_bytes == 0 && memory.gpu_shared_usage_bytes == 0) {
+    return {};
+  }
   std::wstring text = memory.gpu_name.empty() ? std::wstring(L"GPU") : memory.gpu_name;
-  text += L", VRAM " + FormatGb(memory.vram_usage_bytes, 2) + L"/" + FormatGb(memory.vram_budget_bytes, 2);
-  text += en ? L" GB of budget" : L" GB 예산";
+  // Without a budget there is no VRAM figure worth showing.
   if (memory.vram_budget_bytes > 0) {
-    text += L" (" + std::to_wstring(Percent(memory.vram_usage_bytes, memory.vram_budget_bytes)) + L"%)";
+    const auto amount = FormatGb(memory.vram_usage_bytes, 2) + L"/" + FormatGb(memory.vram_budget_bytes, 2);
+    const auto percent = std::to_wstring(Percent(memory.vram_usage_bytes, memory.vram_budget_bytes));
+    text += en ? (L", VRAM " + amount + L" GB of budget (" + percent + L"%)")
+               : (L", VRAM " + amount + L" GB(예산 대비 " + percent + L"%)");
   }
   if (memory.gpu_shared_usage_bytes > 0) {
     text += (en ? L", shared " : L", 공유 메모리 ") + FormatGb(memory.gpu_shared_usage_bytes, 2) + L" GB";

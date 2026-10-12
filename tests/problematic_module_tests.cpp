@@ -15,6 +15,7 @@
 #include "Analyzer.h"
 #include "EvidenceBuilder.h"
 #include "MinidumpUtil.h"
+#include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "ProblematicModules.h"
 
@@ -101,8 +102,21 @@ void TestEveryCaptureNamesIt()
     Require(hasEvidence, "evidence item with the reason and the mod page");
     Require(AnyStartsWith(r.recommendations, en ? L"[Problem module]" : L"[문제 모듈]",
               en ? L"SkyrimCrashGuard.dll (SkyrimCrashGuard, mod: Skyrim Crash Guard) is loaded"
-                 : L"로드된 문제 모듈: SkyrimCrashGuard.dll (SkyrimCrashGuard, 모드: Skyrim Crash Guard). 이 모듈은 크래시를"),
+                 : L"SkyrimCrashGuard.dll (SkyrimCrashGuard, 모드: Skyrim Crash Guard)이(가) 로드되어 있습니다. 이 모듈은 크래시를"),
       "recommendation naming the DLL and its mod");
+  }
+
+  // Without a candidate it is the next action, ahead of recapture advice: a
+  // recapture with the module still loaded tells no more.
+  {
+    auto recaptured = MakeCrash();
+    recaptured.incident_capture_profile_present = true;
+    recaptured.incident_capture_kind = "crash_recapture";
+    BuildEvidenceAndSummary(recaptured, i18n::Language::kEnglish);
+    Require(AnyStartsWith(recaptured.recommendations, L"[Recapture]"), "the recapture line is there");
+    const auto next = skydiag::dump_tool::SelectNextActionIndex(recaptured.recommendations);
+    Require(next != std::wstring::npos && recaptured.recommendations[next].rfind(L"[Problem module]", 0) == 0,
+      "the problem module is the next action");
   }
 
   // A freeze explained by a modal dialog still names it.

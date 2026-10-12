@@ -13,8 +13,11 @@
 #include <memory>
 #include <string>
 
+#include <nlohmann/json.hpp>
+
 #include "Analyzer.h"
 #include "HelperRuntimeTestUtils.h"
+#include "OutputWriterPipeline.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 
@@ -220,6 +223,17 @@ void TestCrashObjectsAreReadBackFromTheDump()
     }
   }
   Require(hasEvidence, "The objects are listed as evidence");
+
+  const auto summary = skydiag::dump_tool::BuildSummaryJson(result, outBase, L"stem", false);
+  bool hasJson = false;
+  for (const auto& object : summary["dump_objects"]) {
+    if (object.value("location", std::string{}) == "RCX") {
+      hasJson = object["name"] == "Blood Dragon" && object["base_object"]["type"] == "TESNPC" &&
+        object["base_object"]["form_id"] == 0x0001D8F6u && object["base_object"]["source_files"].size() == 1u &&
+        object["base_object"]["source_files"][0] == "Skyrim.esm";
+    }
+  }
+  Require(hasJson, "The summary JSON carries the name and the base object");
 
   std::filesystem::remove_all(outBase);
 }

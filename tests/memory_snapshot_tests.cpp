@@ -7,6 +7,7 @@
 
 #include <DbgHelp.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -193,6 +194,44 @@ void TestPressureThresholds()
 
   m.vram_budget_bytes = 0;
   Require(!skydiag::dump_tool::AssessMemoryPressure(m).vram_high, "no budget, no VRAM verdict");
+
+  // The raw ratio decides: 89.6% shows as 90% but is not pressure.
+  m.commit_limit_bytes = 1000 * kGiB;
+  m.commit_used_bytes = 896 * kGiB;
+  p = skydiag::dump_tool::AssessMemoryPressure(m);
+  Require(p.commit_percent == 90u && !p.commit_high, "89.6% is not rounded up into pressure");
+
+  // A PSS snapshot's clone counts toward commit while the dump is written.
+  m.commit_used_bytes = 990 * kGiB;
+  m.commit_includes_snapshot_clone = true;
+  Require(!skydiag::dump_tool::AssessMemoryPressure(m).commit_high, "no commit verdict for a PSS dump");
+  Require(Contains(skydiag::dump_tool::DescribeSystemMemory(m, false), L"PSS 스냅샷이 복제한 게임 메모리 포함"),
+    "the PSS commit is labelled");
+}
+
+void TestGpuDescription()
+{
+  MemorySnapshot m{};
+  m.has_gpu = true;
+  m.gpu_name = L"NVIDIA GeForce RTX 4090";
+  m.vram_usage_bytes = 4946ull * kMiB;
+  m.vram_budget_bytes = 23368ull * kMiB;
+  Require(skydiag::dump_tool::DescribeGpuMemory(m, false) == L"NVIDIA GeForce RTX 4090, VRAM 4.83/22.82 GB(예산 대비 21%)",
+    "Korean VRAM wording");
+  m.vram_budget_bytes = 0;
+  m.gpu_shared_usage_bytes = 100ull * kMiB;
+  Require(skydiag::dump_tool::DescribeGpuMemory(m, true) == L"NVIDIA GeForce RTX 4090, shared 0.10 GB",
+    "no VRAM figure without a budget");
+  m.gpu_shared_usage_bytes = 0;
+  Require(skydiag::dump_tool::DescribeGpuMemory(m, true).empty(), "nothing to show");
+
+  // Fields of the wrong type read as absent; the analysis goes on.
+  MemorySnapshot odd{};
+  Require(skydiag::dump_tool::ApplyGpuMemoryJson(
+            R"({"adapters":[{"name":7,"local_usage":"12","local_budget":null,"nonlocal_usage":[1]}]})", odd),
+    "the adapter is still taken");
+  Require(odd.has_gpu && odd.gpu_name.empty() && odd.vram_usage_bytes == 0 && odd.vram_budget_bytes == 0,
+    "wrong types read as absent");
 }
 
 AnalysisResult MakeCrash(const MemorySnapshot& memory)
@@ -268,8 +307,15 @@ void TestPressureIsReported()
   r.fault_module_path = L"G:\\TAKEALOOK\\mods\\SmoothCam\\SKSE\\Plugins\\SmoothCam.dll";
   BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
   const auto next = skydiag::dump_tool::SelectNextActionIndex(r.recommendations);
-  Require(next != std::wstring::npos && r.recommendations[next].rfind(L"[Memory]", 0) != 0,
-    "memory pressure does not outrank a candidate");
+  std::size_t firstMemory = r.recommendations.size();
+  for (std::size_t i = 0; i < r.recommendations.size(); ++i) {
+    if (r.recommendations[i].rfind(L"[Memory]", 0) == 0) {
+      firstMemory = std::min(firstMemory, i);
+    }
+  }
+  Require(firstMemory < r.recommendations.size(), "the memory advice is there");
+  Require(next != std::wstring::npos && next < firstMemory && r.recommendations[next].rfind(L"[Memory]", 0) != 0,
+    "memory pressure does not outrank the DLL line");
 }
 
 }  // namespace
@@ -279,6 +325,7 @@ int main()
   try {
     TestDumpStreamsAreRead();
     TestPressureThresholds();
+    TestGpuDescription();
     TestNormalMemoryIsContextOnly();
     TestPressureIsReported();
     std::puts("memory snapshot tests passed");

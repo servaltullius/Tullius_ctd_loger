@@ -41,6 +41,7 @@ std::wstring FormatGb(std::uint64_t bytes, int decimals);
 // "RAM 27.0/61.6 GB available, commit 54.3/101.6 GB (53%), game commit 23.39 GB, working set 11.65 GB"
 std::wstring DescribeSystemMemory(const MemorySnapshot& memory, bool en);
 // "NVIDIA GeForce RTX 4090, VRAM 4.83/22.82 GB of budget (21%), shared 0.10 GB"
+// (Korean: "VRAM 4.83/22.82 GB(예산 대비 21%)"); empty without a budget or shared use.
 std::wstring DescribeGpuMemory(const MemorySnapshot& memory, bool en);
 
 }  // namespace skydiag::dump_tool
