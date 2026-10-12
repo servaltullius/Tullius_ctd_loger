@@ -139,8 +139,35 @@ static void Test_ActiveProfileProviderScan_DoesNotIncludeDisabledMods()
   std::filesystem::remove_all(base, ec);
 }
 
+// Folder names from a real MO2 setup that installed Nexus archives without
+// metadata, and names that must stay as they are.
+static void Test_CleanMo2ModFolderName()
+{
+  using skydiag::dump_tool::CleanMo2ModFolderName;
+  assert(CleanMo2ModFolderName(L"SmoothCam 41252 1.8.1 2026") == L"SmoothCam");
+  assert(CleanMo2ModFolderName(L"CrashLogger 59818 1.25.0 2026-08-21T09-21Z yIjvuh041") == L"CrashLogger");
+  assert(CleanMo2ModFolderName(L"Texture Downscaler 187049 2.6.0 2026-09-28T13-25Z 6XybdasXK") == L"Texture Downscaler");
+  assert(CleanMo2ModFolderName(L"Address Library All in One (1.7.104.0) v13 32444 13 2026-08-27T15-29Z Ae46W7Fw2") ==
+         L"Address Library All in One (1.7.104.0) v13");
+  assert(CleanMo2ModFolderName(L"LoadAccel 0.3.1 - SE 1.5.97 and AE 1.6.1170 193880 0.3.1 2026") ==
+         L"LoadAccel 0.3.1 - SE 1.5.97 and AE 1.6.1170");
+  assert(CleanMo2ModFolderName(L"Skyrim Performance Solution (SPS) - BETA 194164 1.0.54 2026") ==
+         L"Skyrim Performance Solution (SPS) - BETA");
+
+  assert(CleanMo2ModFolderName(L"Tullius Hair 3 XML Pack 1004 fix") == L"Tullius Hair 3 XML Pack 1004 fix");
+  assert(CleanMo2ModFolderName(L"Heels Sound - 2025 Edition") == L"Heels Sound - 2025 Edition");
+  assert(CleanMo2ModFolderName(L"Engine Fixes - Main File") == L"Engine Fixes - Main File");
+  assert(CleanMo2ModFolderName(L"SkyrimUpscalerAIOBuild16-Hotfix1") == L"SkyrimUpscalerAIOBuild16-Hotfix1");
+  assert(CleanMo2ModFolderName(L"Mod 2026") == L"Mod 2026");
+  assert(CleanMo2ModFolderName(L"") == L"");
+
+  assert(InferMo2ModNameFromPath(L"G:\\TAKEALOOK\\mods\\SmoothCam 41252 1.8.1 2026\\SKSE\\Plugins\\SmoothCam.dll") ==
+         L"SmoothCam");
+}
+
 int main()
 {
+  Test_CleanMo2ModFolderName();
   Test_InferModName_StandardPath();
   Test_InferModName_CaseInsensitive();
   Test_InferModName_NoModsDir();
