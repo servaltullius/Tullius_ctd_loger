@@ -134,6 +134,7 @@ Helper diagnostics options (`SkyrimDiagHelper.ini`):
 Helper auto-cleans old dumps and artifacts via `SkyrimDiagHelper.ini`:
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = unlimited)
 - `MaxHelperLogBytes`, `MaxHelperLogFiles` (log rotation)
+- Analysis copies under `.skydiag-analysis/` and lock files under `.skydiag-locks/` whose dump is gone are removed after a day. Review state under `.skydiag-triage/` is kept.
 
 ## Issue Reporting
 

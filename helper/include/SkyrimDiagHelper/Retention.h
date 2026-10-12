@@ -2,12 +2,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace skydiag::helper {
@@ -330,6 +333,80 @@ inline void PruneEtwTraces(const std::filesystem::path& dir, std::uint32_t maxCo
   PruneEtwTracesFromCollected(std::move(etls), maxCount);
 }
 
+// The dump tool keeps an identity-bound copy of every analysis under
+// .skydiag-analysis/<sha256>/<size>.<mtime>/ and a lock file per dump under
+// .skydiag-locks/<stem>.lock (dump_tool OutputWriter.cpp). Neither went away
+// with its dump, so they piled up. A copy is orphaned when no dump left in
+// the folder has its size, the first half of the key (size alone can only
+// keep too much, never delete a live copy), and a lock when no dump has its
+// stem. Anything changed within minAge is kept, so an analysis still being
+// written, or one of a dump stored elsewhere, is left alone. Review state in
+// .skydiag-triage is user data and is not touched.
+inline void PruneOrphanedAnalysisCaches(
+  const std::filesystem::path& outBase,
+  std::chrono::seconds minAge = std::chrono::hours(24))
+{
+  std::unordered_set<std::uint64_t> dumpSizes;
+  std::unordered_set<std::string> dumpStems;
+  for (const auto& file : CollectRegularFiles(outBase)) {
+    if (!EndsWith(PathPartUtf8(file.filename()), ".dmp")) {
+      continue;
+    }
+    std::error_code sizeEc;
+    const auto size = std::filesystem::file_size(file, sizeEc);
+    if (!sizeEc) {
+      dumpSizes.insert(static_cast<std::uint64_t>(size));
+    }
+    dumpStems.insert(PathPartUtf8(file.stem()));
+  }
+
+  const auto now = std::filesystem::file_time_type::clock::now();
+  const auto oldEnough = [&](const std::filesystem::path& path) {
+    std::error_code timeEc;
+    const auto written = std::filesystem::last_write_time(path, timeEc);
+    return !timeEc && now - written >= minAge;
+  };
+  const auto listDir = [](const std::filesystem::path& dir) {
+    std::vector<std::filesystem::directory_entry> entries;
+    std::error_code iterEc;
+    for (std::filesystem::directory_iterator it(dir, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+      entries.push_back(*it);
+    }
+    return entries;
+  };
+
+  std::error_code ec;
+  for (const auto& identity : listDir(outBase / ".skydiag-analysis")) {
+    if (!identity.is_directory(ec)) {
+      continue;
+    }
+    for (const auto& generation : listDir(identity.path())) {
+      // "<16 hex size>.<16 hex mtime>"; anything else is not ours.
+      const auto key = PathPartUtf8(generation.path().filename());
+      std::uint64_t size = 0;
+      const auto parsed = std::from_chars(key.data(), key.data() + key.size(), size, 16);
+      const bool isKey = key.size() == 33 && parsed.ec == std::errc() && parsed.ptr == key.data() + 16 && key[16] == '.';
+      if (!isKey || !generation.is_directory(ec) || dumpSizes.count(size) != 0 || !oldEnough(generation.path())) {
+        continue;
+      }
+      std::filesystem::remove_all(generation.path(), ec);
+    }
+    if (std::filesystem::is_empty(identity.path(), ec) && !ec) {
+      std::filesystem::remove(identity.path(), ec);
+    }
+  }
+
+  for (const auto& lock : listDir(outBase / ".skydiag-locks")) {
+    const auto name = PathPartUtf8(lock.path().filename());
+    if (!EndsWith(name, ".lock") || dumpStems.count(name.substr(0, name.size() - 5)) != 0 ||
+        !lock.is_regular_file(ec) || !oldEnough(lock.path())) {
+      continue;
+    }
+    // Fails harmlessly while an analysis holds the lock open.
+    std::filesystem::remove(lock.path(), ec);
+  }
+}
+
 inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, const RetentionLimits& limits)
 {
   if (outBase.empty()) {
@@ -376,6 +453,8 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
   auto crashEtls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".etl");
   etls.insert(etls.end(), crashEtls.begin(), crashEtls.end());
   PruneEtwTracesFromCollected(std::move(etls), limits.maxEtwTraces);
+
+  PruneOrphanedAnalysisCaches(outBase);
 }
 
 inline void RotateLogFileIfNeeded(const std::filesystem::path& path, std::uint64_t maxBytes, std::uint32_t maxFiles)

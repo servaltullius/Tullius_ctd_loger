@@ -337,6 +337,46 @@ def check_compiler_cache_is_ci_only(failures: list[str]) -> None:
         failures.append("release.yml must not use the compiler cache")
 
 
+def _job_blocks(text: str) -> dict[str, str]:
+    """Top-level jobs of a workflow, keyed by id, as their raw text."""
+    lines = text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.rstrip() == "jobs:"), None)
+    if start is None:
+        return {}
+    jobs: dict[str, list[str]] = {}
+    current = None
+    for line in lines[start + 1:]:
+        match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if match:
+            current = match.group(1)
+            jobs[current] = []
+        elif line and not line.startswith(" ") and not line.startswith("#"):
+            break
+        elif current is not None:
+            jobs[current].append(line)
+    return {name: "\n".join(body) for name, body in jobs.items()}
+
+
+def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
+    # A third-party action moved by its owner, or vcpkg master moving on,
+    # changes the build without a commit here; a hung step otherwise holds a
+    # runner for the 6-hour default.
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = _read(path)
+        for match in re.finditer(r"uses:\s*([^\s#]+)@([^\s#]+)", text):
+            action, ref = match.groups()
+            if action.startswith(("actions/", "./")):
+                continue
+            if re.fullmatch(r"[0-9a-f]{40}", ref) is None:
+                failures.append(f"{path.name}: {action} must be pinned to a commit SHA, not {ref}")
+        for job, body in _job_blocks(text).items():
+            if re.search(r"^    runs-on:", body, re.M) and not re.search(r"^    timeout-minutes:\s*\d+", body, re.M):
+                failures.append(f"{path.name}: job {job} needs a job-level timeout-minutes")
+        if "git clone https://github.com/microsoft/vcpkg" in text:
+            if "'default-registry'.baseline" not in text or "checkout --quiet --detach $baseline" not in text:
+                failures.append(f"{path.name}: the vcpkg clone must be checked out at the manifest baseline")
+
+
 def check_dump_stress_repeats_only_after_a_build(failures: list[str]) -> None:
     # A failed build would otherwise show up as a second, misleading ctest
     # failure in every shard.
@@ -425,6 +465,7 @@ def main() -> int:
     check_dump_stress_repeats_only_after_a_build(failures)
     check_pull_request_tidy_scope(failures)
     check_compiler_cache_is_ci_only(failures)
+    check_workflows_are_pinned_and_bounded(failures)
 
     if failures:
         for failure in failures:

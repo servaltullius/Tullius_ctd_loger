@@ -23,6 +23,7 @@ jobs:
   unit-tests:
     name: Linux Unit Tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -51,6 +52,7 @@ jobs:
     name: Linux ASan + UBSan
     if: ${{ inputs.run_asan }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
