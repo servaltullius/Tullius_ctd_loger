@@ -551,7 +551,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 
   if (isHangLike && r.modal_dialog_wait.detected) {
     AddModalDialogWaitRecommendations(r, en);
-    appendLowConfidencePluginRecommendations();
+    // The dialog explains the freeze; general load-order upkeep (ESL slots and
+    // the like) would only bury it. SKSE's refused DLLs can still bear on it.
+    for (const auto& rec : lowConfidencePluginRecommendations) {
+      if (rec.rfind(L"[SKSE]", 0) == 0) {
+        r.recommendations.push_back(rec);
+      }
+    }
     return;
   }
 
@@ -703,7 +709,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if (hitch.count > 0) {
+  // Stutter advice is for freezes and manual captures; a crash report gains
+  // nothing from it.
+  if (hitch.count > 0 && !isCrashLike) {
     r.recommendations.push_back(en
       ? L"[Performance] PerfHitch events were recorded. Check Events tab (t_ms and hitch(ms)) to see when the stutter happens."
       : L"[성능] PerfHitch 이벤트가 기록되었습니다. 이벤트 탭에서 t_ms와 hitch(ms)를 확인해 '언제 끊기는지' 먼저 파악하세요.");
@@ -758,7 +766,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? L"[Check] Verify SKSE version, game runtime (AE/SE/VR), and Address Library all match."
       : L"[점검] SKSE 버전/게임 버전(AE/SE/VR)/Address Library 버전이 서로 맞는지 확인");
   } else {
-    if (!isSnapshotLike) {
+    // Only a crash has a faulting module to look for; a freeze has none.
+    if (isCrashLike) {
     r.recommendations.push_back(en
       ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile (full memory info / module headers / indirect memory) before escalating to FullMemory (DumpMode=2)."
       : L"[점검] 덤프에서 예외가 난 모듈을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 더 많은 정보를 담는 재수집 설정(full memory info / module headers / indirect memory)으로 먼저 다시 캡처하세요.");
@@ -839,7 +848,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
               L" 전에 끝났습니다. 프리징이 주로 절전 해제 뒤에 난다면, PC를 절전시키기 전에 게임을 끄고 계속 나는지 보세요."));
       }
     }
-    if (r.freeze_analysis.state_id == "deadlock_likely") {
+    // A manual capture of a running game is not a freeze ("[Manual]" says so);
+    // freeze-state advice would contradict it.
+    if (!isHangLike) {
+      // No freeze-state advice.
+    } else if (r.freeze_analysis.state_id == "deadlock_likely") {
       r.recommendations.push_back(en
         ? L"[Freeze] WCT cycle evidence makes deadlock the primary interpretation. Check synchronization-heavy mods and thread ownership first."
         : L"[프리징] WCT cycle 근거가 있어 데드락 해석이 우선입니다. 동기화/후킹 성격이 강한 모드와 스레드 소유 관계를 먼저 확인하세요.");
@@ -934,9 +947,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   appendLowConfidencePluginRecommendations();
 
   if (!r.troubleshooting_steps.empty()) {
+    const std::wstring steps = std::to_wstring(r.troubleshooting_steps.size());
+    const wchar_t* kindEn = isCrashLike ? L"crash type" : (isHangLike ? L"freeze type" : L"capture");
+    const wchar_t* kindKo = isCrashLike ? L"이 크래시 유형" : (isHangLike ? L"이 프리징 유형" : L"이 상황");
     r.recommendations.push_back(en
-      ? (L"[Troubleshooting] See the troubleshooting checklist (" + std::to_wstring(r.troubleshooting_steps.size()) + L" steps) for this crash type.")
-      : (L"[트러블슈팅] 이 크래시 유형에 대한 단계별 체크리스트(" + std::to_wstring(r.troubleshooting_steps.size()) + L"단계)를 확인하세요."));
+      ? (L"[Troubleshooting] See the troubleshooting checklist (" + steps + L" steps) for this " + kindEn + L".")
+      : (L"[트러블슈팅] " + std::wstring(kindKo) + L"에 대한 단계별 체크리스트(" + steps + L"단계)를 확인하세요."));
   }
   }
 

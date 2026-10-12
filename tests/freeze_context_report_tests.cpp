@@ -357,6 +357,54 @@ void TestSummaryKeepsPluginCountsOnly()
     "an unparsable scan keeps only a preview");
 }
 
+// Advice that does not fit the capture is left out: stutter advice in a crash
+// report, "fault module not found" for a freeze, freeze-state advice for a
+// manual capture of a running game, and load-order upkeep next to a dialog
+// that already explains the freeze.
+void TestAdviceFitsTheCapture()
+{
+  const auto hitch = [] {
+    auto row = Event(skydiag::EventType::kPerfHitch, 1000.0, {}, 600);
+    row.type_name = L"PerfHitch";
+    return row;
+  };
+
+  AnalysisResult crash{};
+  crash.dump_path = L"C:\\Logs\\SkyrimDiag_Crash_20261007_123742_440.dmp";
+  crash.exc_code = 0xC0000005u;
+  crash.has_blackbox = true;
+  crash.events = { hitch() };
+  BuildEvidenceAndSummary(crash, i18n::Language::kEnglish);
+  Require(!AnyStartsWith(crash.recommendations, L"[Performance]"), "no stutter advice in a crash report");
+
+  auto hang = MakeHang();
+  hang.has_blackbox = true;
+  hang.events = { hitch() };
+  BuildEvidenceAndSummary(hang, i18n::Language::kEnglish);
+  Require(!AnyStartsWith(hang.recommendations, L"[Check]", L"Fault module could not be determined"),
+    "a freeze has no faulting module to look for");
+  Require(AnyStartsWith(hang.recommendations, L"[Performance]"), "a freeze keeps the stutter advice");
+
+  AnalysisResult manual{};
+  manual.dump_path = L"C:\\Logs\\SkyrimDiag_Manual_20261012_102746_296.dmp";
+  manual.freeze_analysis.has_analysis = true;
+  manual.freeze_analysis.state_id = "freeze_ambiguous";
+  BuildEvidenceAndSummary(manual, i18n::Language::kEnglish);
+  Require(!AnyStartsWith(manual.recommendations, L"[Freeze]"), "no freeze-state advice for a running game");
+
+  auto modal = MakeHang();
+  modal.modal_dialog_wait.detected = true;
+  modal.modal_dialog_wait.window_evidence = true;
+  modal.modal_dialog_wait.dialog_title = L"SmoothCam.dll";
+  skydiag::dump_tool::PluginRuleDiagnosis upkeep{};
+  upkeep.rule_id = "ESL_SLOT_NEAR_LIMIT";
+  upkeep.confidence_level = i18n::ConfidenceLevel::kLow;
+  upkeep.recommendations = { L"[Optimization] Consider removing or merging unnecessary ESL plugins" };
+  modal.plugin_diagnostics.push_back(upkeep);
+  BuildEvidenceAndSummary(modal, i18n::Language::kEnglish);
+  Require(!AnyStartsWith(modal.recommendations, L"[Optimization]"), "no load-order upkeep next to the dialog");
+}
+
 void TestCrashesAreUntouched()
 {
   AnalysisResult r{};
@@ -384,6 +432,7 @@ int main()
     TestFreezesGroupByTheMainThreadWait();
     TestBystanderStackIsNotRecordedInHistory();
     TestSummaryKeepsPluginCountsOnly();
+    TestAdviceFitsTheCapture();
     TestCrashesAreUntouched();
     std::puts("freeze context report tests passed");
     return 0;
