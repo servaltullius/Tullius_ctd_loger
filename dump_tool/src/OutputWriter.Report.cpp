@@ -2,6 +2,7 @@
 
 #include "DumpObjects.h"
 #include "MemorySnapshot.h"
+#include "ProblematicModules.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "Utf.h"
@@ -324,6 +325,13 @@ std::string BuildReportText(
   }
   if (const auto gpu = DescribeGpuMemory(r.memory, en); !gpu.empty()) {
     rpt << "GPU: " << WideToUtf8(gpu) << "\n";
+  }
+  if (!r.problematic_modules.empty()) {
+    rpt << (en ? "ProblematicModules: " : "문제 모듈: ");
+    for (std::size_t i = 0; i < r.problematic_modules.size(); ++i) {
+      rpt << (i ? ", " : "") << WideToUtf8(DescribeProblematicModule(r.problematic_modules[i], en));
+    }
+    rpt << "\n";
   }
   rpt << (en ? "Suspects: " : "후보 개수: ") << r.suspects.size() << "\n";
   rpt << (en ? "SuspectsFromStackwalk: " : "콜스택 기반 후보: ") << (r.suspects_from_stackwalk ? "1" : "0") << "\n";

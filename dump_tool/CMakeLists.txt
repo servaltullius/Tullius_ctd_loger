@@ -44,6 +44,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/MainThreadWait.cpp
   src/MemorySnapshot.cpp
   src/MemorySnapshot.h
+  src/ProblematicModules.cpp
+  src/ProblematicModules.h
   src/ModalDialogWait.cpp
   src/ModalDialogWait.h
   src/GraphicsInjectionDiag.cpp

@@ -5,6 +5,7 @@
 
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
+#include "ProblematicModules.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
@@ -548,6 +549,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Masters] Install missing masters or disable dependent plugins."
       : L"[마스터] 누락된 마스터를 설치하거나 의존 플러그인을 비활성화하세요.");
+  }
+
+  // A module that swallows crashes changes how every capture reads, whatever
+  // its kind, so it is named before the rest of the checklist.
+  for (const auto& module : r.problematic_modules) {
+    const auto* rule = FindProblematicModuleRule(module.filename);
+    if (!rule) {
+      continue;
+    }
+    const std::wstring who = DescribeProblematicModule(module, en);
+    r.recommendations.push_back(en
+      ? (L"[Problem module] " + who + L" is loaded: " + std::wstring(rule->reason_en) +
+          L". Disable it while you look for the cause, then reproduce the problem.")
+      : (L"[문제 모듈] 로드된 문제 모듈: " + who + L". 이 모듈은 " + std::wstring(rule->reason_ko) +
+          L". 원인을 찾는 동안에는 비활성화하고 다시 재현해 보세요."));
   }
 
   if (isHangLike && r.modal_dialog_wait.detected) {

@@ -294,6 +294,17 @@ nlohmann::json BuildSummaryJson(
     summary["memory"] = std::move(memory);
   }
 
+  if (!r.problematic_modules.empty()) {
+    summary["problematic_modules"] = nlohmann::json::array();
+    for (const auto& module : r.problematic_modules) {
+      summary["problematic_modules"].push_back({
+        { "module", WideToUtf8(module.filename) },
+        { "name", WideToUtf8(module.name) },
+        { "mod_name", WideToUtf8(module.mod_name) },
+      });
+    }
+  }
+
   if (r.signature_match.has_value()) {
     summary["signature_match"] = {
       { "id", r.signature_match->id },

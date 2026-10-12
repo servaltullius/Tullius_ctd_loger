@@ -16,6 +16,7 @@
 #include "AnalyzerInternals.h"
 #include "MinidumpUtil.h"
 #include "MemorySnapshot.h"
+#include "ProblematicModules.h"
 #include "Mo2Index.h"
 #include "Utf.h"
 
@@ -428,6 +429,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
   const auto mo2Index = TryBuildMo2IndexFromModulePaths(modulePaths);
+  out.problematic_modules = FindProblematicModules(allModules);
 
   // Exception info + fault module
   const auto excCtx = ParseExceptionInfo(dumpBase, dumpSize, out);

@@ -213,6 +213,14 @@ struct BucketCandidateRepeat
   std::size_t prior_count = 0;
 };
 
+// A loaded DLL that makes crash evidence unreliable (ProblematicModules.h).
+struct ProblematicModule
+{
+  std::wstring filename;
+  std::wstring name;
+  std::wstring mod_name;  // MO2 mod folder, when the path shows one
+};
+
 // Memory at capture time. RAM and commit come from the dump's own
 // SystemMemoryInfo and ProcessVmCounters streams (Windows writes them); VRAM
 // comes from the helper's GPU memory stream.
@@ -318,6 +326,7 @@ struct AnalysisResult
   // ADR-0010: objects read from the crash dump itself (crashes only).
   std::vector<DumpObject> dump_objects;
   MemorySnapshot memory;
+  std::vector<ProblematicModule> problematic_modules;
 
   // Heuristic: suspects inferred from stack/module scanning
   std::vector<SuspectItem> suspects;
