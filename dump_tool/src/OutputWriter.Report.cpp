@@ -1,6 +1,7 @@
 #include "OutputWriterPipeline.h"
 
 #include "DumpObjects.h"
+#include "MemorySnapshot.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "Utf.h"
@@ -318,6 +319,12 @@ std::string BuildReportText(
   rpt << "StateFlags: " << r.state_flags << "\n";
   rpt << "HasBlackbox: " << (r.has_blackbox ? "1" : "0") << "\n";
   rpt << "HasWCT: " << (r.has_wct ? "1" : "0") << "\n";
+  if (const auto memory = DescribeSystemMemory(r.memory, en); !memory.empty()) {
+    rpt << (en ? "Memory: " : "메모리: ") << WideToUtf8(memory) << "\n";
+  }
+  if (const auto gpu = DescribeGpuMemory(r.memory, en); !gpu.empty()) {
+    rpt << "GPU: " << WideToUtf8(gpu) << "\n";
+  }
   rpt << (en ? "Suspects: " : "후보 개수: ") << r.suspects.size() << "\n";
   rpt << (en ? "SuspectsFromStackwalk: " : "콜스택 기반 후보: ") << (r.suspects_from_stackwalk ? "1" : "0") << "\n";
   if (r.freeze_analysis.has_analysis) {

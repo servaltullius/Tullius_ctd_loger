@@ -14,3 +14,4 @@ ADR index:
 - `0009-main-thread-wait-and-game-state.md`
 - `0010-crash-object-introspection.md`
 - `0011-dump-carries-system-module-unwind-data.md`
+- `0012-memory-snapshot.md`

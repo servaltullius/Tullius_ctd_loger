@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CrashObjectMemory.h"
+#include "GpuMemory.h"
 #include "ModuleUnwindMemory.h"
 #include "SkyrimDiagProtocol.h"
 
@@ -484,7 +485,7 @@ bool WriteDumpWithStreams(
   }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
-  streams.reserve(3);
+  streams.reserve(4);
 
   MINIDUMP_USER_STREAM s1{};
   s1.Type = skydiag::protocol::kMinidumpUserStream_Blackbox;
@@ -506,6 +507,17 @@ bool WriteDumpWithStreams(
     s3.BufferSize = static_cast<ULONG>(pluginScanJson.size());
     s3.Buffer = const_cast<char*>(pluginScanJson.data());
     streams.push_back(s3);
+  }
+
+  // RAM and commit come with the dump itself (SystemMemoryInfo and
+  // ProcessVmCounters streams); the game's VRAM use does not.
+  const std::string gpuMemoryJson = internal::GpuMemoryJson(internal::QueryProcessGpuMemory(pid));
+  MINIDUMP_USER_STREAM s4{};
+  if (!gpuMemoryJson.empty()) {
+    s4.Type = skydiag::protocol::kMinidumpUserStream_GpuMemory;
+    s4.BufferSize = static_cast<ULONG>(gpuMemoryJson.size());
+    s4.Buffer = const_cast<char*>(gpuMemoryJson.data());
+    streams.push_back(s4);
   }
 
   MINIDUMP_USER_STREAM_INFORMATION usi{};

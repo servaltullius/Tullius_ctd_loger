@@ -213,6 +213,33 @@ struct BucketCandidateRepeat
   std::size_t prior_count = 0;
 };
 
+// Memory at capture time. RAM and commit come from the dump's own
+// SystemMemoryInfo and ProcessVmCounters streams (Windows writes them); VRAM
+// comes from the helper's GPU memory stream.
+struct MemorySnapshot
+{
+  bool has_system = false;
+  std::uint64_t ram_total_bytes = 0;
+  std::uint64_t ram_available_bytes = 0;
+  std::uint64_t commit_used_bytes = 0;
+  std::uint64_t commit_limit_bytes = 0;
+
+  bool has_process = false;
+  std::uint64_t process_private_bytes = 0;  // the game's commit charge
+  std::uint64_t process_working_set_bytes = 0;
+  std::uint64_t process_peak_working_set_bytes = 0;
+
+  // The adapter the game used most. Usage and budget are DXGI's
+  // QueryVideoMemoryInfo numbers for the adapter's own memory, the same ones
+  // Crash Logger prints as "GPU MEMORY".
+  bool has_gpu = false;
+  std::wstring gpu_name;
+  std::uint64_t vram_usage_bytes = 0;
+  std::uint64_t vram_budget_bytes = 0;
+  std::uint64_t vram_dedicated_bytes = 0;
+  std::uint64_t gpu_shared_usage_bytes = 0;
+};
+
 struct AnalysisResult
 {
   i18n::Language language = i18n::DefaultLanguage();
@@ -290,6 +317,7 @@ struct AnalysisResult
   std::vector<CrashLoggerModReference> crash_logger_unattributed_objects;
   // ADR-0010: objects read from the crash dump itself (crashes only).
   std::vector<DumpObject> dump_objects;
+  MemorySnapshot memory;
 
   // Heuristic: suspects inferred from stack/module scanning
   std::vector<SuspectItem> suspects;

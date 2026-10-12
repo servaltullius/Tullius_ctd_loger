@@ -15,6 +15,7 @@ std::wstring DescribeFirstChanceSupport(const FirstChanceSummary& summary, bool 
 void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
+void BuildMemoryEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildHitchAndFreezeEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

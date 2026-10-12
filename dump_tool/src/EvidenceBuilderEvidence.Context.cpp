@@ -1,5 +1,7 @@
 #include "EvidenceBuilderEvidencePipeline.h"
 
+#include "MemorySnapshot.h"
+
 #include <algorithm>
 #include <cwchar>
 #include <vector>
@@ -238,6 +240,43 @@ void BuildHistoryEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     e.details = buf;
     r.evidence.push_back(std::move(e));
   }
+}
+
+void BuildMemoryEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const auto& memory = r.memory;
+  if (!memory.has_system && !memory.has_process && !memory.has_gpu) {
+    return;
+  }
+  const bool en = ctx.en;
+  const MemoryPressure pressure = AssessMemoryPressure(memory);
+
+  std::vector<std::wstring> parts;
+  if (pressure.commit_high) {
+    parts.push_back(en
+      ? (L"system commit at " + std::to_wstring(pressure.commit_percent) + L"% of the commit limit")
+      : (L"시스템 커밋이 한도의 " + std::to_wstring(pressure.commit_percent) + L"%"));
+  }
+  if (pressure.vram_high) {
+    parts.push_back(en
+      ? (L"VRAM at " + std::to_wstring(pressure.vram_percent) + L"% of the game's budget")
+      : (L"VRAM이 게임 예산의 " + std::to_wstring(pressure.vram_percent) + L"%"));
+  }
+  if (const auto system = DescribeSystemMemory(memory, en); !system.empty()) {
+    parts.push_back(system);
+  }
+  if (const auto gpu = DescribeGpuMemory(memory, en); !gpu.empty()) {
+    parts.push_back(gpu);
+  }
+
+  EvidenceItem e{};
+  e.confidence_level = pressure.Any() ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+  e.confidence = ConfidenceText(lang, e.confidence_level);
+  e.title = pressure.Any()
+    ? (en ? L"Memory was close to its limit at capture time" : L"캡처 당시 메모리가 한도에 가까웠음")
+    : (en ? L"Memory at capture time" : L"캡처 당시 메모리");
+  e.details = JoinList(parts, parts.size(), L" | ");
+  r.evidence.push_back(std::move(e));
 }
 
 }  // namespace skydiag::dump_tool::internal

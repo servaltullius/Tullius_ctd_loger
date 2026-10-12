@@ -14,7 +14,7 @@ This repository contains an MVP implementation of the design in:
 - SKSE plugin (DLL): shared-memory blackbox ringbuffer, main-thread heartbeat, passive crash mark (VEH)
   - Optional: recent resource load log (e.g. `.nif/.hkx/.tri`)
   - Optional: best-effort hitch/stutter signal (PerfHitch)
-- Helper (EXE): attach/monitor, hang detection, WCT capture, MiniDumpWriteDump with user streams (blackbox + WCT JSON)
+- Helper (EXE): attach/monitor, hang detection, WCT capture, MiniDumpWriteDump with user streams (blackbox, WCT JSON, plugin scan, GPU memory)
 - DumpTool (CLI + WinUI + native analyzer DLL):
   - Headless CLI: `SkyrimDiagDumpToolCli.exe`
   - WinUI launcher: `SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe`

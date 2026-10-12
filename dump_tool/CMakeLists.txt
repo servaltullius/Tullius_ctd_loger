@@ -42,6 +42,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/FreezeCandidateConsensus.cpp
   src/FreezeCandidateConsensus.h
   src/MainThreadWait.cpp
+  src/MemorySnapshot.cpp
+  src/MemorySnapshot.h
   src/ModalDialogWait.cpp
   src/ModalDialogWait.h
   src/GraphicsInjectionDiag.cpp

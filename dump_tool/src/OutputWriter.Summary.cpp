@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "MemorySnapshot.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "Utf.h"
@@ -257,6 +258,40 @@ nlohmann::json BuildSummaryJson(
         { "relevance", object.relevance },
       });
     }
+  }
+
+  if (r.memory.has_system || r.memory.has_process || r.memory.has_gpu) {
+    const MemoryPressure pressure = AssessMemoryPressure(r.memory);
+    nlohmann::json memory = nlohmann::json::object();
+    if (r.memory.has_system) {
+      memory["system"] = {
+        { "ram_total_bytes", r.memory.ram_total_bytes },
+        { "ram_available_bytes", r.memory.ram_available_bytes },
+        { "commit_used_bytes", r.memory.commit_used_bytes },
+        { "commit_limit_bytes", r.memory.commit_limit_bytes },
+        { "commit_percent", pressure.commit_percent },
+      };
+    }
+    if (r.memory.has_process) {
+      memory["process"] = {
+        { "private_bytes", r.memory.process_private_bytes },
+        { "working_set_bytes", r.memory.process_working_set_bytes },
+        { "peak_working_set_bytes", r.memory.process_peak_working_set_bytes },
+      };
+    }
+    if (r.memory.has_gpu) {
+      memory["gpu"] = {
+        { "name", WideToUtf8(r.memory.gpu_name) },
+        { "vram_usage_bytes", r.memory.vram_usage_bytes },
+        { "vram_budget_bytes", r.memory.vram_budget_bytes },
+        { "vram_dedicated_bytes", r.memory.vram_dedicated_bytes },
+        { "shared_usage_bytes", r.memory.gpu_shared_usage_bytes },
+        { "vram_percent", pressure.vram_percent },
+      };
+    }
+    memory["commit_high"] = pressure.commit_high;
+    memory["vram_high"] = pressure.vram_high;
+    summary["memory"] = std::move(memory);
   }
 
   if (r.signature_match.has_value()) {

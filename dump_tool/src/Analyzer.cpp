@@ -15,6 +15,7 @@
 #include "DumpIdentity.h"
 #include "AnalyzerInternals.h"
 #include "MinidumpUtil.h"
+#include "MemorySnapshot.h"
 #include "Mo2Index.h"
 #include "Utf.h"
 
@@ -465,6 +466,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.has_wct = true;
     out.wct_json_utf8.assign(static_cast<const char*>(wctPtr), static_cast<std::size_t>(wctSize));
   }
+
+  // RAM, commit and VRAM at capture time
+  ReadMemorySnapshot(dumpBase, dumpSize, out.memory);
 
   // Plugin scan + rules
   IntegratePluginScan(dumpPath, allModules, dumpBase, dumpSize, opt, out);
