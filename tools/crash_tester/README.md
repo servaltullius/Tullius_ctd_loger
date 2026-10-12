@@ -14,14 +14,16 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 - `CrashTester.dll`: 단축키로 크래시·프리징을 일으킵니다.
 - `SkyrimCrashGuard.dll`: 로드만 되고 아무것도 하지 않습니다. 문제 모듈 경고(ADR-0013)가 파일 이름으로 뜨는지 확인할 때만 켭니다.
 
-## 단축키 (게임 메인 스레드에서 실행)
+## 단축키 (SKSE task로 실행)
+
+작업은 SKSE `AddTask`로 실행되므로, 1.6.1170에서는 창·렌더를 맡는 첫 스레드가 아니라 게임의 작업 스레드(`BSJobs::JobThread`)에서 돌고, 첫 스레드는 매 프레임 그 작업을 기다립니다.
 
 | 키 | 일어나는 일 | 기대하는 분석 |
 |---|---|---|
 | Ctrl+Shift+F1 | 조준한 레퍼런스(없으면 플레이어)를 RCX에 둔 채 CrashTester.dll 안에서 접근 위반 | 예외 모듈과 후보가 CrashTester.dll, 덤프 오브젝트 RCX에 그 레퍼런스의 이름과 기반 오브젝트 |
 | Ctrl+Shift+F2 | CrashTester.dll 안에서 `int 3` | `0x80000003`, 모드가 스스로 멈춘 것이라는 해석, 후보 CrashTester.dll |
 | Ctrl+Shift+F3 | CrashTester.dll에서 처리되지 않는 C++ 예외 | C++ 예외(`0xE06D7363`), Crash Logger의 C++ 예외 정보와 대조 |
-| Ctrl+Shift+F4 | 메인 스레드를 CrashTester.dll 안의 `Sleep`으로 45초 붙잡음(다시 누를 수 있음) | 자동 프리징 캡처, 플러그인 안의 대기, 두 번째는 같은 `HANG1-` 버킷 |
+| Ctrl+Shift+F4 | 작업 스레드를 CrashTester.dll 안의 `Sleep`으로 45초 붙잡음(다시 누를 수 있음) | 자동 프리징 캡처, 막힌 작업 스레드의 CrashTester.dll을 후보로, 두 번째는 같은 `HANG1-` 버킷 |
 | Ctrl+Shift+F6 | CrashTester.dll이 읽을 수 없는 메모리를 레퍼런스로 엔진의 `TESObjectREFR::GetDisplayFullName`에 넘김 | 예외 모듈 SkyrimSE.exe, 콜스택으로 CrashTester.dll을 후보로 |
 
 크래시 단축키는 게임 한 번에 하나만 동작합니다. 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
