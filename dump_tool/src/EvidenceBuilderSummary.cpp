@@ -135,6 +135,23 @@ std::wstring JoinWaitPath(const std::vector<std::wstring>& names)
   return out;
 }
 
+std::wstring DescribeBlockedPlugin(const MainThreadWaitInfo& wait)
+{
+  return wait.blocked_mod_name.empty() ? wait.blocked_module : (wait.blocked_mod_name + L" (" + wait.blocked_module + L")");
+}
+
+// "was waiting inside" / "코드 안에서 대기 중이었습니다" and so on.
+std::wstring DescribeBlockedState(const MainThreadWaitInfo& wait, bool en)
+{
+  if (wait.blocked_state == "waiting_in_plugin") {
+    return en ? L"was waiting inside" : L" 코드 안에서 대기 중이었습니다";
+  }
+  if (wait.blocked_state == "engine_call_from_plugin") {
+    return en ? L"was running game engine code called by" : L"이(가) 부른 게임 엔진 코드를 실행하고 있었습니다";
+  }
+  return en ? L"was running the code of" : L" 코드를 실행하고 있었습니다";
+}
+
 // ADR-0009: the main thread sat in a wait the plugins on its stack did not
 // perform, so the sentence says where it waited instead of naming a module.
 std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang, bool en)
@@ -152,6 +169,19 @@ std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang,
           L"그래픽 모드, 비디오 메모리)을 가리킵니다. (신뢰도: " + conf + L")");
   }
   const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
+  if (HasBlockedGameThread(wait)) {
+    const std::wstring medium = ConfidenceText(lang, i18n::ConfidenceLevel::kMedium);
+    const std::wstring who = DescribeBlockedPlugin(wait);
+    const std::wstring tid = std::to_wstring(wait.blocked_thread_tid);
+    return en
+      ? (L"The game main thread was waiting inside the game engine (" + wait.waiting_module + api +
+          L") for another game thread to finish, and that thread (tid " + tid + L") " + DescribeBlockedState(wait, en) +
+          L" " + who + L" (top: " + wait.blocked_top + L"). That plugin is the main lead for this freeze. (Confidence: " +
+          medium + L")")
+      : (L"게임 메인 스레드는 게임 엔진(" + wait.waiting_module + api + L") 안에서 다른 게임 스레드의 작업이 끝나기를 기다리고 "
+          L"있었고, 그 스레드(tid " + tid + L")는 " + who + DescribeBlockedState(wait, en) + L"(맨 위: " + wait.blocked_top +
+          L"). 이 플러그인이 이번 프리징의 가장 유력한 단서입니다. (신뢰도: " + medium + L")");
+  }
   if (wait.engine_wait_detail == "gpu_query_poll") {
     return en
       ? (L"The game main thread was waiting for the GPU: the engine was polling a Direct3D query "
@@ -367,20 +397,29 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
 
     if (topCandidateMatchesFaultModule && weakFaultLocationTopCandidate) {
       const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      const bool nearby = HasNearbyProbableDll(r);
+      const std::wstring compareEn = nearby
+        ? std::wstring(L" Compare nearby probable DLLs too.")
+        : std::wstring(L" Crash Logger names no other DLL nearby.");
+      const std::wstring compareKo = nearby
+        ? std::wstring(L" Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
+        : std::wstring(L" Crash Logger가 함께 지목한 다른 DLL은 없습니다.");
       if (topCandidateHasStandaloneCallstack) {
         summary = en
           ? (L"Crash is reported in " + who + L", and " + frameSupport +
-              L" plus the same-dump stack both land in this DLL, but that still reflects the current fault-location cluster rather than an independent confirmation. Compare nearby probable DLLs too. (Confidence: " +
-              topCandidateConf + L")")
+              L" plus the same-dump stack both land in this DLL, but that still reflects the current fault-location cluster rather than an independent confirmation." +
+              compareEn + L" (Confidence: " + topCandidateConf + L")")
           : (L"크래시 위치가 " + who + L"로 보고되었고, " + frameSupport +
-              L"과 같은 덤프의 스택이 모두 이 DLL을 가리키지만, 둘 다 예외가 난 위치를 보는 것이라 독립 검증은 아닙니다. Crash Logger가 함께 지목한 근처 DLL도 비교하세요. (신뢰도: " +
-              topCandidateConf + L")");
+              L"과 같은 덤프의 스택이 모두 이 DLL을 가리키지만, 둘 다 예외가 난 위치를 보는 것이라 독립 검증은 아닙니다." +
+              compareKo + L" (신뢰도: " + topCandidateConf + L")");
       } else {
         summary = en
-          ? (L"Crash is reported in " + who + L", but current actionable support still stays on the fault-location DLL. Compare nearby probable DLLs before treating it as the root cause. (Confidence: " +
-              topCandidateConf + L")")
-          : (L"크래시 위치가 " + who + L"로 보고되었지만, 지금 근거는 예외가 난 DLL이라는 것뿐입니다. 근본 원인으로 단정하기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요. (신뢰도: " +
-              topCandidateConf + L")");
+          ? (L"Crash is reported in " + who + L", but current actionable support still stays on the fault-location DLL." +
+              (nearby ? std::wstring(L" Compare nearby probable DLLs before treating it as the root cause.") : compareEn) +
+              L" (Confidence: " + topCandidateConf + L")")
+          : (L"크래시 위치가 " + who + L"로 보고되었지만, 지금 근거는 예외가 난 DLL이라는 것뿐입니다." +
+              (nearby ? std::wstring(L" 근본 원인으로 단정하기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요.") : compareKo) +
+              L" (신뢰도: " + topCandidateConf + L")");
       }
     } else if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
       const auto firstName = DescribeCandidate(*topCandidate);

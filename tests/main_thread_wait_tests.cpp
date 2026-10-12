@@ -214,6 +214,128 @@ void TestEngineWaitNamesTheGpuQueryPoll()
   assert(ClassifyMainThreadWait(sync).engine_wait_detail.empty());
 }
 
+// The main thread waiting for game threads, as in the 2026-10-12 crash test
+// (tools/crash_tester): the window/render thread sits in the engine's
+// WaitForSingleObjectEx while a BSJobs job thread runs SKSE tasks.
+skydiag::dump_tool::MainThreadWaitInfo EngineSyncWait()
+{
+  const std::vector<ModalStackFrame> frames = {
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf),
+    GameExe(),
+    GameExe(),
+    Plugin(L"hdtsmp64.dll", L"FSMP"),
+    GameExe(),
+  };
+  return ClassifyMainThreadWait(frames);
+}
+
+skydiag::dump_tool::ThreadTopFrames Thread(std::uint32_t tid, std::vector<ModalStackFrame> frames)
+{
+  return skydiag::dump_tool::ThreadTopFrames{ tid, std::move(frames) };
+}
+
+// Hitch Hunter's hooked game thread waiting for work: thread start, the
+// game's thread function, the plugin, a sync wait. Present in every capture.
+skydiag::dump_tool::ThreadTopFrames IdleHookedThread(std::uint32_t tid)
+{
+  return Thread(tid, {
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf),
+    Plugin(L"HitchHunter.dll", L"Hitch Hunter And Fixes"),
+    GameExe(),
+    GameExe(),
+    System(L"kernel32.dll", L"BaseThreadInitThunk", 0x17),
+    System(L"ntdll.dll", L"RtlUserThreadStart", 0x2c),
+  });
+}
+
+void TestBlockedGameThreadIsFound()
+{
+  using skydiag::dump_tool::FindBlockedGameThread;
+  using skydiag::dump_tool::HasBlockedGameThread;
+
+  auto wait = EngineSyncWait();
+  assert(wait.kind == "engine_wait" && wait.wait_class == "sync");
+  // Freeze 1: a job thread sleeping inside CrashTester.dll's SKSE task.
+  FindBlockedGameThread(wait, {
+    IdleHookedThread(9644),
+    Thread(40400, {
+      System(L"ntdll.dll", L"ZwDelayExecution"),
+      System(L"ntdll.dll", L"RtlDelayExecution", 0x34),
+      System(L"KERNELBASE.dll", L"SleepEx", 0x91),
+      Plugin(L"CrashTester.dll", L"CrashTester (dev test)"),
+      Plugin(L"CrashTester.dll", L"CrashTester (dev test)"),
+      Skse(),
+    }),
+  });
+  assert(HasBlockedGameThread(wait));
+  assert(wait.blocked_thread_tid == 40400u && wait.blocked_module == L"CrashTester.dll");
+  assert(wait.blocked_mod_name == L"CrashTester (dev test)" && wait.blocked_state == "waiting_in_plugin");
+  assert(wait.blocked_top == L"KERNELBASE.dll!SleepEx" && wait.blocked_thread_count == 1u);
+
+  // Freeze 2: engine code the plugin called, spinning on a lock.
+  auto spin = EngineSyncWait();
+  FindBlockedGameThread(spin, {
+    IdleHookedThread(37948),
+    Thread(9532, { GameExe(), GameExe(), GameExe(), GameExe(), Plugin(L"CrashTester.dll"), Skse() }),
+  });
+  assert(spin.blocked_thread_tid == 9532u && spin.blocked_state == "engine_call_from_plugin");
+  assert(spin.blocked_top == L"SkyrimSE.exe");
+
+  // Waiting inside a plugin outranks a plugin merely running; a shallower
+  // plugin frame wins a tie.
+  auto ranked = EngineSyncWait();
+  FindBlockedGameThread(ranked, {
+    Thread(1, { Plugin(L"Busy.dll"), GameExe() }),
+    Thread(2, { System(L"KERNELBASE.dll", L"SleepEx"), GameExe(), Plugin(L"Deep.dll") }),
+    Thread(3, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"Shallow.dll") }),
+  });
+  assert(ranked.blocked_module == L"Shallow.dll" && ranked.blocked_thread_count == 3u);
+}
+
+void TestBlockedGameThreadIsNotInvented()
+{
+  using skydiag::dump_tool::FindBlockedGameThread;
+  using skydiag::dump_tool::HasBlockedGameThread;
+
+  // A plugin-owned idle loop alone is not a lead.
+  auto idle = EngineSyncWait();
+  FindBlockedGameThread(idle, { IdleHookedThread(9644) });
+  assert(!HasBlockedGameThread(idle));
+
+  // The SKSE runtime, hook frameworks, the graphics stack and SkyrimDiag
+  // itself are not plugin code here.
+  auto framework = EngineSyncWait();
+  auto hook = Plugin(L"EngineFixes.dll");
+  hook.is_hook_framework = true;
+  FindBlockedGameThread(framework, {
+    Thread(1, { System(L"KERNELBASE.dll", L"SleepEx"), Skse(), GameExe() }),
+    Thread(2, { System(L"KERNELBASE.dll", L"SleepEx"), hook, GameExe() }),
+    Thread(3, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"nvwgf2umx.dll"), GameExe() }),
+    Thread(4, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"SkyrimDiag.dll"), GameExe() }),
+  });
+  assert(!HasBlockedGameThread(framework));
+
+  // Only when the main thread waits on a sync object in the engine: not for
+  // the GPU poll (a Sleep) or a plugin's own wait.
+  const ModalStackFrame sleepFrames[] = {
+    System(L"ntdll.dll", L"NtDelayExecution"), System(L"KERNELBASE.dll", L"SleepEx"), GameExe(),
+  };
+  auto sleeping = ClassifyMainThreadWait({ std::begin(sleepFrames), std::end(sleepFrames) });
+  const std::vector<skydiag::dump_tool::ThreadTopFrames> crashTester = {
+    Thread(40400, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"CrashTester.dll") }),
+  };
+  FindBlockedGameThread(sleeping, crashTester);
+  assert(!HasBlockedGameThread(sleeping));
+  auto pluginWait = ClassifyMainThreadWait({
+    System(L"ntdll.dll", L"NtWaitForSingleObject"), System(L"KERNELBASE.dll", L"WaitForSingleObjectEx"),
+    Plugin(L"Other.dll"), GameExe() });
+  assert(pluginWait.kind == "plugin_wait");
+  FindBlockedGameThread(pluginWait, crashTester);
+  assert(!HasBlockedGameThread(pluginWait));
+}
+
 }  // namespace
 
 int main()
@@ -224,5 +346,7 @@ int main()
   TestUnknownWhenTheTopCannotBeRead();
   TestGpuQueryPollPattern();
   TestEngineWaitNamesTheGpuQueryPoll();
+  TestBlockedGameThreadIsFound();
+  TestBlockedGameThreadIsNotInvented();
   return 0;
 }

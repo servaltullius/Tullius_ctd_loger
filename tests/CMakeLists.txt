@@ -131,6 +131,20 @@ if(WIN32)
     COMMAND skydiag_memory_snapshot_tests
   )
 
+  add_executable(skydiag_crash_test_findings_tests
+    crash_test_findings_tests.cpp
+  )
+  target_include_directories(skydiag_crash_test_findings_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_crash_test_findings_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_crash_test_findings_tests
+    COMMAND skydiag_crash_test_findings_tests
+  )
+
   add_executable(skydiag_problematic_module_tests
     problematic_module_tests.cpp
   )

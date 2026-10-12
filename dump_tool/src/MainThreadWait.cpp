@@ -224,4 +224,113 @@ bool IsGpuWait(const MainThreadWaitInfo& wait)
          (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll");
 }
 
+namespace {
+
+bool IsPluginFrame(const ModalStackFrame& frame)
+{
+  if (!frame.has_module || frame.is_system || frame.is_game_exe || frame.is_skse_runtime || frame.is_hook_framework ||
+      IsGraphicsStackModule(frame.module_filename)) {
+    return false;
+  }
+  return LowerAscii(frame.module_filename) != L"skyrimdiag.dll";
+}
+
+std::wstring FrameName(const ModalStackFrame& frame)
+{
+  if (!frame.has_module) {
+    return {};
+  }
+  return frame.symbol.empty() ? frame.module_filename : (frame.module_filename + L"!" + frame.symbol);
+}
+
+// A plugin that runs a game thread's own loop and waits there for work: the
+// thread starts, enters the game's thread function (at most a few frames),
+// the plugin's hook, and a wait on a sync object. That is the thread idling
+// (Hitch Hunter's hooked game thread looked like this in every freeze of the
+// 2026-10-12 crash test), not work the main thread is waiting for.
+bool IsPluginOwnedIdleLoop(const std::vector<ModalStackFrame>& frames, std::size_t pluginIndex)
+{
+  bool syncWaitOnTop = false;
+  for (std::size_t i = 0; i < pluginIndex; ++i) {
+    if (!frames[i].is_system) {
+      return false;
+    }
+    syncWaitOnTop = syncWaitOnTop || Contains(kSyncApis, frames[i].symbol);
+  }
+  if (!syncWaitOnTop) {
+    return false;
+  }
+  constexpr std::size_t kMaxGameFramesToThreadStart = 3;
+  std::size_t gameFrames = 0;
+  for (std::size_t i = pluginIndex + 1; i < frames.size(); ++i) {
+    const auto& frame = frames[i];
+    if (frame.is_system && (frame.symbol == L"BaseThreadInitThunk" || frame.symbol == L"RtlUserThreadStart")) {
+      return true;
+    }
+    if (!frame.is_game_exe || ++gameFrames > kMaxGameFramesToThreadStart) {
+      return false;
+    }
+  }
+  return false;  // the walk did not reach the thread start
+}
+
+struct BlockedCandidate
+{
+  const ThreadTopFrames* thread = nullptr;
+  std::size_t pluginIndex = 0;
+  int rank = 0;  // 0 waiting in the plugin, 1 engine called by it, 2 plugin running
+};
+
+}  // namespace
+
+void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTopFrames>& gameThreads)
+{
+  if (wait.kind != "engine_wait" || wait.wait_class != "sync") {
+    return;
+  }
+  std::vector<BlockedCandidate> candidates;
+  for (const auto& thread : gameThreads) {
+    const std::size_t limit = std::min(thread.frames.size(), kBlockedThreadTopFrames);
+    for (std::size_t i = 0; i < limit; ++i) {
+      if (!IsPluginFrame(thread.frames[i])) {
+        continue;
+      }
+      if (IsPluginOwnedIdleLoop(thread.frames, i)) {
+        break;
+      }
+      bool engineAbove = false;
+      for (std::size_t j = 0; j < i; ++j) {
+        engineAbove = engineAbove || thread.frames[j].is_game_exe;
+      }
+      BlockedCandidate candidate{ &thread, i, i == 0 ? 2 : (engineAbove ? 1 : 0) };
+      candidates.push_back(candidate);
+      break;
+    }
+  }
+  if (candidates.empty()) {
+    return;
+  }
+  std::stable_sort(candidates.begin(), candidates.end(), [](const BlockedCandidate& a, const BlockedCandidate& b) {
+    return a.rank != b.rank ? a.rank < b.rank : a.pluginIndex < b.pluginIndex;
+  });
+  const auto& best = candidates.front();
+  const auto& plugin = best.thread->frames[best.pluginIndex];
+  wait.blocked_thread_tid = best.thread->tid;
+  wait.blocked_module = plugin.module_filename;
+  wait.blocked_module_path = plugin.module_path;
+  wait.blocked_mod_name = plugin.inferred_mod_name;
+  wait.blocked_state = best.rank == 0 ? "waiting_in_plugin" : (best.rank == 1 ? "engine_call_from_plugin" : "running_in_plugin");
+  // The call the plugin made (KERNELBASE.dll!SleepEx) reads better than the
+  // syscall stub on top.
+  const auto& topFrame = (best.rank == 0 && best.pluginIndex > 0) ? best.thread->frames[best.pluginIndex - 1]
+                                                                   : best.thread->frames.front();
+  wait.blocked_top = FrameName(topFrame);
+  wait.blocked_thread_count = static_cast<std::uint32_t>(candidates.size());
+}
+
+bool HasBlockedGameThread(const MainThreadWaitInfo& wait)
+{
+  return wait.blocked_thread_tid != 0u && !wait.blocked_module.empty();
+}
+
 }  // namespace skydiag::dump_tool

@@ -164,6 +164,22 @@ struct MainThreadWaitInfo
   std::wstring waiting_module;      // module that called the wait, or that was running
   std::wstring waiting_mod_name;
   std::vector<std::wstring> path_modules;  // plugin DLLs further down the stack, outermost last
+
+  // engine_wait on a sync object only: a thread the game itself started (its
+  // start address is in the game executable, e.g. a BSJobs job thread that
+  // runs SKSE tasks) that was inside plugin code while the main thread waited.
+  // The main thread waits for such threads every frame, so a plugin stuck on
+  // one of them stops the game (seen with the crash tester, 2026-10-12).
+  std::uint32_t blocked_thread_tid = 0;
+  std::wstring blocked_module;
+  std::wstring blocked_module_path;
+  std::wstring blocked_mod_name;
+  // waiting_in_plugin: the plugin called a sleep/wait
+  // engine_call_from_plugin: engine code the plugin called was on top
+  // running_in_plugin: plugin code was on top
+  std::string blocked_state;
+  std::wstring blocked_top;  // top frame, e.g. "KERNELBASE.dll!SleepEx"
+  std::uint32_t blocked_thread_count = 0;  // game threads found in plugin code
 };
 
 struct FreezeAnalysisResult
@@ -429,6 +445,21 @@ struct AnalysisResult
   // Diagnostic messages from best-effort subsystems (data loading, CrashLogger integration, etc.)
   std::vector<std::wstring> diagnostics;
 };
+
+// The dump holds a C++ exception (0xE06D7363) that Crash Logger also logged as
+// its unhandled exception: a real crash, not a caught throw. With the default
+// CrashHookMode=1 the plugin records a C++ exception only in that case.
+inline bool IsCrashLoggerConfirmedCppException(const AnalysisResult& r)
+{
+  if (r.exc_code != 0xE06D7363u) {
+    return false;
+  }
+  std::wstring type = r.crash_logger_exception_type;
+  for (auto& ch : type) {
+    ch = static_cast<wchar_t>(ch >= L'A' && ch <= L'Z' ? ch + (L'a' - L'A') : ch);
+  }
+  return type.find(L"c++ exception") != std::wstring::npos;
+}
 
 struct AnalyzeOptions
 {

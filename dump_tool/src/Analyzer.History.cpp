@@ -154,6 +154,10 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
     }
     for (const auto& suspect : out.suspects) {
       if (stackIsBystander) {
+        // Except the plugin the main thread was waiting on (it leads).
+        if (HasBlockedGameThread(out.main_thread_wait)) {
+          AppendHistoryCandidateKey(!suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename, &seen, &keys);
+        }
         break;
       }
       AppendHistoryCandidateKey(!suspect.inferred_mod_name.empty() ? suspect.inferred_mod_name : suspect.module_filename, &seen, &keys);

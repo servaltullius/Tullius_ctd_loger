@@ -2,6 +2,7 @@
 
 #include "Analyzer.h"
 #include "MinidumpUtil.h"
+#include "MainThreadWait.h"
 #include "ModalDialogWait.h"
 #include "WctTypes.h"
 
@@ -67,7 +68,9 @@ bool TryComputeStackwalkSuspects(
   i18n::Language lang,
   AnalysisResult& out,
   std::uint32_t modalProbeTid = 0,
-  std::vector<ModalStackFrame>* outModalProbeFrames = nullptr);
+  std::vector<ModalStackFrame>* outModalProbeFrames = nullptr,
+  const std::vector<std::uint32_t>* sideTids = nullptr,
+  std::vector<ThreadTopFrames>* outSideFrames = nullptr);
 
 void ComputeCrashBucket(AnalysisResult& out);
 

@@ -470,6 +470,36 @@ std::optional<std::size_t> FindModuleIndexForAddress(const std::vector<ModuleInf
   return std::nullopt;
 }
 
+std::vector<std::pair<std::uint32_t, std::uint64_t>> LoadThreadStartAddresses(void* dumpBase, std::uint64_t dumpSize)
+{
+  std::vector<std::pair<std::uint32_t, std::uint64_t>> out;
+  void* ptr = nullptr;
+  ULONG size = 0;
+  if (!ReadStreamSized(dumpBase, dumpSize, ThreadInfoListStream, &ptr, &size) || !ptr ||
+      size < sizeof(MINIDUMP_THREAD_INFO_LIST)) {
+    return out;
+  }
+  MINIDUMP_THREAD_INFO_LIST list{};
+  std::memcpy(&list, ptr, sizeof(list));
+  if (list.SizeOfHeader < sizeof(MINIDUMP_THREAD_INFO_LIST) || list.SizeOfEntry < sizeof(MINIDUMP_THREAD_INFO) ||
+      list.SizeOfHeader > size) {
+    return out;
+  }
+  const std::uint64_t need =
+    static_cast<std::uint64_t>(list.SizeOfHeader) + static_cast<std::uint64_t>(list.NumberOfEntries) * list.SizeOfEntry;
+  if (need > size) {
+    return out;
+  }
+  const auto* bytes = static_cast<const std::uint8_t*>(ptr);
+  out.reserve(list.NumberOfEntries);
+  for (ULONG32 i = 0; i < list.NumberOfEntries; ++i) {
+    MINIDUMP_THREAD_INFO info{};
+    std::memcpy(&info, bytes + list.SizeOfHeader + static_cast<std::size_t>(i) * list.SizeOfEntry, sizeof(info));
+    out.emplace_back(info.ThreadId, info.StartAddress);
+  }
+  return out;
+}
+
 std::vector<ThreadRecord> LoadThreads(void* dumpBase, std::uint64_t dumpSize)
 {
   std::vector<ThreadRecord> out;
