@@ -55,15 +55,16 @@ Crash Logger는 게임 프로세스 안에서 돌아 이 메모리를 바로 읽
 
 - 이름: 클래스 계층에서 `TESFullName` 기반 클래스(가상 상속이 아닌 것)의 오프셋(mdisp)을 찾아, 그 위치 +0x08의 BSFixedString(문자 포인터)이 가리키는 문자열을 읽는다. 클래스마다 다른 오프셋을 계층이 알려 주므로 따로 표를 두지 않는다.
 - 레퍼런스: `TESObjectREFR` 기반이 있는 폼은 그 위치 +0x40(`OBJ_REFR::objectReference`, CommonLibSSE-NG 기준)의 포인터를 한 단계만 따라간다. 그 대상이 `TESBoundObject` 기반을 가진 폼일 때만 베이스 오브젝트로 인정해, 타입·FormID·플러그인을 기록하고 이름이 없으면 그 이름을 쓴다. 오프셋이 틀리면 엉뚱한 이름 대신 아무것도 나오지 않는다.
-- 문자열은 유효한 UTF-8이면 UTF-8로, 아니면 ANSI 코드 페이지로 읽는다.
-- 출력: `RCX: Character "Blood Dragon" [0xFF0036F8] (base TESNPC [0x0001D8F6] Skyrim.esm)`. 요약 JSON의 `dump_objects`에 `name`과 `base_object`(`type`, `form_id`, `source_files`)가 더해진다. 실행 중에 생긴 액터는 자기 플러그인이 없어도 베이스 NPC의 플러그인이 나온다.
+- 문자열은 끝(NUL)까지 다 읽혔을 때만 쓴다. 해제·재사용된 메모리에서 도중에 끊긴 바이트는 이름으로 남기지 않는다.
+- 문자열은 유효한 UTF-8이면 UTF-8로, 아니면 분석하는 PC의 ANSI 코드 페이지로 읽는다. 짧은 CP949 한글 이름이 우연히 유효한 UTF-8이면 깨져 보일 수 있다(플러그인 파일 이름과 같은 한계).
+- 출력: `RCX: Character "Blood Dragon" [0xFF0036F8] (base TESNPC [0x0001D8F6] Skyrim.esm)`. 요약 JSON의 `dump_objects`에 `name`과 `base_object`(`type`, `form_id`, `source_files`)가 더해진다. 배치된 액터는 베이스 NPC를 정의한 플러그인이 나온다. 레벨드 리스트에서 생긴 액터(대부분의 적)는 베이스가 실행 중에 만든 임시 NPC(0xFF…)라 이름만 나오고 플러그인은 나오지 않는다. 원래 NPC를 가리키는 `ExtraLeveledCreature`는 아직 읽지 않는다.
 - 후보에는 여전히 쓰지 않는다.
 
 ## Verification
 
 - `skydiag_rtti_decoder_tests`(Linux): 손으로 만든 주소 공간에서 Character 폼 판별, 숫자·잘못된 locator·이름이 아닌 값 거부, 계층·파일 일부가 없는 경우, 읽을 수 없는 메모리 바로 앞에서 끝나는 타입 이름, TESForm이 아닌 클래스, 이름 해독.
 - `skydiag_crash_object_e2e_tests`: 레지스터가 Skyrim과 같은 레이아웃의 실제 C++ 오브젝트(MSVC RTTI)를 가리키는 크래시를 실제 헬퍼 덤프 경로로 쓰고, 실제 분석기로 타입, FormID, 플러그인 파일 두 개, RTTI 모듈, 근거 항목을 확인한다. 헬퍼가 메모리를 담지 않으면 실패한다.
-- 이름과 베이스 오브젝트: `skydiag_rtti_decoder_tests`가 UTF-8 이름, 레퍼런스→베이스, `TESBoundObject`가 아닌 대상 거부, 읽을 수 없는 이름을 확인하고, `skydiag_crash_object_e2e_tests`가 다중 상속으로 TESFullName이 0이 아닌 위치에 있는 실제 MSVC 클래스로 이름, 베이스 타입·FormID·플러그인과 근거 문장을 덤프에서 다시 읽는다.
+- 이름과 베이스 오브젝트: `skydiag_rtti_decoder_tests`가 UTF-8 이름, 레퍼런스→베이스, `TESBoundObject`가 아닌 대상 거부, 읽을 수 없는 이름, 도중에 끊기거나 제어 문자가 섞인 이름, TESFullName 부분을 가리키는 포인터(완전 오브젝트를 먼저 찾음)를 확인하고, `skydiag_crash_object_e2e_tests`가 다중 상속으로 TESFullName이 0이 아닌 위치에 있는 실제 MSVC 클래스로 이름, 베이스 타입·FormID·플러그인, 근거 문장, 요약 JSON의 `name`·`base_object`를 덤프에서 다시 읽는다.
 - 보관 중인 실사고 덤프 15건 재분석: 오브젝트 0개(메모리 없음), 다른 결과는 변화 없음.
 
 ## References

@@ -324,7 +324,9 @@ def check_compiler_cache_is_ci_only(failures: list[str]) -> None:
     if re.search(r"uses: mozilla-actions/sccache-action@[0-9a-f]{40}\b", ci) is None:
         failures.append("ci.yml must pin sccache-action to a commit SHA")
     for needed in (
+        "-DCMAKE_C_COMPILER_LAUNCHER=sccache",
         "-DCMAKE_CXX_COMPILER_LAUNCHER=sccache",
+        'SCCACHE_GHA_ENABLED: "true"',
         "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded",
         "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW",
         'SCCACHE_IGNORE_SERVER_IO_ERROR: "1"',

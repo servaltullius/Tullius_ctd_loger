@@ -200,6 +200,8 @@ constexpr std::uint32_t kNpcVtable = 0x6000;
 constexpr std::uint32_t kNpcLocator = 0x6100;
 constexpr std::uint32_t kNpcHierarchy = 0x6200;
 constexpr std::uint32_t kNpcBaseArray = 0x6300;
+constexpr std::uint32_t kNpcSubVtable = 0x6400;
+constexpr std::uint32_t kNpcSubLocator = 0x6500;
 
 void PutNpc(FakeMemory& m, const std::string& boundObjectName = ".?AVTESBoundObject@@")
 {
@@ -224,7 +226,12 @@ void PutNpc(FakeMemory& m, const std::string& boundObjectName = ".?AVTESBoundObj
   m.PutValue<std::uint64_t>(kNpc + 0x08, kFileArray);  // same plugins as the character
   m.PutValue<std::uint32_t>(kNpc + 0x14, 0x0001D8F6u);
   m.PutValue<std::uint8_t>(kNpc + 0x1A, 0x2B);
-  m.PutValue<std::uint64_t>(kNpc + 0x30, kModule + 0x5000);  // TESFullName's vtable
+  // TESFullName's own vtable, whose locator says the sub-object sits 0x30 into
+  // the complete TESNPC.
+  skydiag::rtti::detail::CompleteObjectLocator subLocator{ 1, 0x30, 0, 0x7000, kNpcHierarchy, kNpcSubLocator };
+  m.PutValue(kModule + kNpcSubLocator, subLocator);
+  m.PutValue<std::uint64_t>(kModule + kNpcSubVtable - 8, kModule + kNpcSubLocator);
+  m.PutValue<std::uint64_t>(kNpc + 0x30, kModule + kNpcSubVtable);
   m.PutValue<std::uint64_t>(kNpc + 0x38, kNpcName);           // BSFixedString
   m.PutString(kNpcName, "\xEB\xB8\x94\xEB\x9F\xAC\xEB\x93\x9C \xEB\x93\x9C\xEB\x9E\x98\xEA\xB3\xA4");
 }
@@ -263,6 +270,27 @@ void TestNames()
   badName.Erase(kNpcName, 4);
   const auto nameless = ReadObject(badName, kNpc);
   assert(nameless && nameless->is_form && nameless->full_name.empty());
+
+  // A name that breaks off part-way (freed or reused memory, or only part of
+  // it in the dump) leaves nothing behind, not its first bytes.
+  auto cutName = MakeCharacter();
+  PutNpc(cutName);
+  cutName.Erase(kNpcName + 4, 4);
+  const auto cut = ReadObject(cutName, kNpc);
+  assert(cut && cut->is_form && cut->full_name.empty());
+  auto junkName = MakeCharacter();
+  PutNpc(junkName);
+  junkName.PutValue<std::uint8_t>(kNpcName + 5, 0x07);
+  const auto junk = ReadObject(junkName, kNpc);
+  assert(junk && junk->full_name.empty());
+
+  // Pointed at through its TESFullName part (this in TESFullName::GetFullName):
+  // the complete object is found first, and the name is still read.
+  auto sub = MakeCharacter();
+  PutNpc(sub);
+  const auto viaSub = ReadObject(sub, kNpc + 0x30);
+  assert(viaSub && viaSub->complete_object == kNpc && viaSub->type_name == ".?AVTESNPC@@");
+  assert(viaSub->form_id == 0x0001D8F6u && viaSub->full_name == npc->full_name);
 }
 
 void TestUndecorate()

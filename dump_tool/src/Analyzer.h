@@ -237,6 +237,9 @@ struct MemorySnapshot
   std::uint64_t ram_available_bytes = 0;
   std::uint64_t commit_used_bytes = 0;
   std::uint64_t commit_limit_bytes = 0;
+  // Taken from a PSS snapshot, whose clone counts toward system commit while
+  // the dump is written; no commit verdict then.
+  bool commit_includes_snapshot_clone = false;
 
   bool has_process = false;
   std::uint64_t process_private_bytes = 0;  // the game's commit charge

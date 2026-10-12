@@ -68,6 +68,11 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     runs-on: windows-2022
+    # Job-wide, so every sccache process in the job (the build's server and
+    # the action's post-run report) uses the GitHub Actions cache.
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_IGNORE_SERVER_IO_ERROR: "1"  # a cache outage compiles without it
 
     steps:
       - name: Checkout
@@ -112,9 +117,6 @@ jobs:
 
       - name: Configure (Ninja + vcpkg)
         shell: pwsh
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"  # a cache outage compiles without it
         run: >
           cmake -S . -B build-win
           -G Ninja
@@ -131,9 +133,6 @@ jobs:
       # is missing.
       - name: Build (RelWithDebInfo)
         shell: pwsh
-        env:
-          SCCACHE_GHA_ENABLED: "true"
-          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
         run: |
           cmake --build build-win
           if ($LASTEXITCODE -ne 0) {

@@ -471,6 +471,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // RAM, commit and VRAM at capture time
   ReadMemorySnapshot(dumpBase, dumpSize, out.memory);
+  if (out.has_wct) {
+    // Freeze dumps taken from a PSS snapshot: the clone is charged to system
+    // commit while the dump is written (ADR-0012).
+    const auto wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8);
+    out.memory.commit_includes_snapshot_clone = wct && wct->pss_snapshot_used;
+  }
 
   // Plugin scan + rules
   IntegratePluginScan(dumpPath, allModules, dumpBase, dumpSize, opt, out);

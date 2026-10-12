@@ -274,6 +274,8 @@ internal sealed partial class MainWindowViewModel
                recommendation.StartsWith("[오브젝트 참조]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Conflict]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[충돌]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Problem module]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[문제 모듈]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Masters]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[마스터]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[BEES]", StringComparison.OrdinalIgnoreCase) ||

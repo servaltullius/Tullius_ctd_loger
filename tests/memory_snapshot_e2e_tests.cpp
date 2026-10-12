@@ -16,9 +16,11 @@
 #include <exception>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include "Analyzer.h"
 #include "GpuMemory.h"
+#include "MemorySnapshot.h"
 #include "HelperRuntimeTestUtils.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
@@ -159,6 +161,16 @@ void TestMemoryIsReadBackFromTheDump()
   Require(m.has_system && m.has_process, "Windows puts RAM, commit and process counters into every dump");
   Require(m.ram_total_bytes > 0 && m.ram_available_bytes <= m.ram_total_bytes, "RAM numbers");
   Require(m.commit_used_bytes > 0 && m.commit_used_bytes <= m.commit_limit_bytes, "commit numbers");
+  // Same totals as the live API: catches a missing or doubled page size.
+  MEMORYSTATUSEX status{};
+  status.dwLength = sizeof(status);
+  Require(GlobalMemoryStatusEx(&status) != FALSE, "GlobalMemoryStatusEx");
+  const auto closeTo = [](std::uint64_t a, std::uint64_t b) {
+    const std::uint64_t diff = a > b ? a - b : b - a;
+    return diff <= b / 50u;  // within 2%
+  };
+  Require(closeTo(m.ram_total_bytes, status.ullTotalPhys), "RAM total matches the system");
+  Require(closeTo(m.commit_limit_bytes, status.ullTotalPageFile), "commit limit matches the system");
   // The dump writer itself allocates, so allow for growth, not for a mix-up.
   Require(
     m.process_private_bytes >= counters.PrivateUsage / 2 && m.process_private_bytes <= counters.PrivateUsage * 4 + 256 * kMiB,
@@ -189,9 +201,35 @@ void TestMemoryIsReadBackFromTheDump()
 
 }  // namespace
 
+// The helper's JSON writer against the analyzer's reader, without a GPU, so
+// CI checks the stream contract too.
+void TestGpuStreamRoundTrip()
+{
+  std::vector<skydiag::helper::internal::GpuAdapterMemory> adapters(2);
+  adapters[0].name = L"AMD Radeon(TM) Graphics";
+  adapters[0].local_usage = 12 * kMiB;
+  adapters[0].local_budget = 46ull * 1024 * kMiB;
+  adapters[1].name = L"NVIDIA GeForce RTX 4090";
+  adapters[1].local_usage = 4946 * kMiB;
+  adapters[1].local_budget = 23368 * kMiB;
+  adapters[1].nonlocal_usage = 100 * kMiB;
+  adapters[1].nonlocal_budget = 44ull * 1024 * kMiB;
+  adapters[1].dedicated_bytes = 24ull * 1024 * kMiB;
+  const auto json = skydiag::helper::internal::GpuMemoryJson(adapters);
+  Require(!json.empty() && skydiag::helper::internal::GpuMemoryJson({}).empty(), "JSON only for adapters in use");
+
+  skydiag::dump_tool::MemorySnapshot m{};
+  Require(skydiag::dump_tool::ApplyGpuMemoryJson(json, m), "the analyzer reads what the helper writes");
+  Require(m.has_gpu && m.gpu_name == L"NVIDIA GeForce RTX 4090", "the most-used adapter");
+  Require(m.vram_usage_bytes == adapters[1].local_usage && m.vram_budget_bytes == adapters[1].local_budget &&
+            m.gpu_shared_usage_bytes == adapters[1].nonlocal_usage && m.vram_dedicated_bytes == adapters[1].dedicated_bytes,
+    "every field survives the round trip");
+}
+
 int main()
 {
   try {
+    TestGpuStreamRoundTrip();
     TestMemoryIsReadBackFromTheDump();
     std::puts("memory snapshot e2e tests passed");
     return 0;

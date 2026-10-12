@@ -7,7 +7,6 @@
 #include <d3dkmthk.h>
 
 #include <algorithm>
-#include <array>
 
 #include <nlohmann/json.hpp>
 
@@ -124,6 +123,44 @@ bool QueryGroup(
   return true;
 }
 
+// The adapters D3DKMTEnumAdapters2 opened, closed again on every path.
+class OpenAdapters
+{
+public:
+  explicit OpenAdapters(const KmtApi& api) : api_(api)
+  {
+    D3DKMT_ENUMADAPTERS2 enumeration{};  // a null array asks for the count
+    if (!Succeeded(api_.enumAdapters2(&enumeration)) || enumeration.NumAdapters == 0) {
+      return;
+    }
+    // Room for an adapter that appears between the two calls.
+    adapters_.resize(static_cast<std::size_t>(enumeration.NumAdapters) + 4u);
+    enumeration.NumAdapters = static_cast<ULONG>(adapters_.size());
+    enumeration.pAdapters = adapters_.data();
+    if (!Succeeded(api_.enumAdapters2(&enumeration))) {
+      adapters_.clear();
+      return;
+    }
+    adapters_.resize(std::min<std::size_t>(enumeration.NumAdapters, adapters_.size()));
+  }
+  ~OpenAdapters()
+  {
+    for (const auto& adapter : adapters_) {
+      D3DKMT_CLOSEADAPTER close{};
+      close.hAdapter = adapter.hAdapter;
+      api_.closeAdapter(&close);
+    }
+  }
+  OpenAdapters(const OpenAdapters&) = delete;
+  OpenAdapters& operator=(const OpenAdapters&) = delete;
+
+  const std::vector<D3DKMT_ADAPTERINFO>& Get() const noexcept { return adapters_; }
+
+private:
+  const KmtApi& api_;
+  std::vector<D3DKMT_ADAPTERINFO> adapters_;
+};
+
 }  // namespace
 
 std::vector<GpuAdapterMemory> QueryProcessGpuMemory(std::uint32_t pid)
@@ -140,16 +177,8 @@ std::vector<GpuAdapterMemory> QueryProcessGpuMemory(std::uint32_t pid)
     return out;
   }
 
-  std::array<D3DKMT_ADAPTERINFO, 16> adapters{};
-  D3DKMT_ENUMADAPTERS2 enumeration{};
-  enumeration.NumAdapters = static_cast<ULONG>(adapters.size());
-  enumeration.pAdapters = adapters.data();
-  if (!Succeeded(api.enumAdapters2(&enumeration))) {
-    return out;
-  }
-  const ULONG count = std::min<ULONG>(enumeration.NumAdapters, static_cast<ULONG>(adapters.size()));
-  for (ULONG i = 0; i < count; ++i) {
-    const auto& adapter = adapters[i];
+  const OpenAdapters adapters(api);
+  for (const auto& adapter : adapters.Get()) {
     GpuAdapterMemory memory{};
     const bool local = QueryGroup(
       api, adapter.AdapterLuid, process.get(), D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
@@ -162,9 +191,6 @@ std::vector<GpuAdapterMemory> QueryProcessGpuMemory(std::uint32_t pid)
       memory.dedicated_bytes = DedicatedBytes(api, adapter.AdapterLuid);
       out.push_back(std::move(memory));
     }
-    D3DKMT_CLOSEADAPTER close{};
-    close.hAdapter = adapter.hAdapter;
-    api.closeAdapter(&close);
   }
   std::stable_sort(out.begin(), out.end(), [](const GpuAdapterMemory& a, const GpuAdapterMemory& b) {
     return a.local_usage > b.local_usage;
