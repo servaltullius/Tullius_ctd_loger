@@ -246,7 +246,7 @@ nlohmann::json BuildSummaryJson(
       }
       char address[32]{};
       std::snprintf(address, sizeof(address), "0x%llX", static_cast<unsigned long long>(object.address));
-      summary["dump_objects"].push_back({
+      nlohmann::json entry = {
         { "location", WideToUtf8(object.location) },
         { "address", address },
         { "type", WideToUtf8(object.type_name) },
@@ -255,8 +255,21 @@ nlohmann::json BuildSummaryJson(
         { "form_id", object.form_id },
         { "form_type", object.form_type },
         { "source_files", std::move(files) },
+        { "name", WideToUtf8(object.name) },
         { "relevance", object.relevance },
-      });
+      };
+      if (object.has_base_object) {
+        nlohmann::json baseFiles = nlohmann::json::array();
+        for (const auto& file : object.base_source_files) {
+          baseFiles.push_back(WideToUtf8(file));
+        }
+        entry["base_object"] = {
+          { "type", WideToUtf8(object.base_type_name) },
+          { "form_id", object.base_form_id },
+          { "source_files", std::move(baseFiles) },
+        };
+      }
+      summary["dump_objects"].push_back(std::move(entry));
     }
   }
 

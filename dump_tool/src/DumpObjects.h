@@ -25,7 +25,8 @@ std::vector<DumpObject> ReadDumpObjects(
 
 inline constexpr std::size_t kMaxDumpObjects = 24;
 
-// "RBX: Character [0xFEAD081B] Skyrim.esm -> MyMod.esp", or for other objects
+// RBX: Character "Lydia" [0xFEAD081B] Skyrim.esm -> MyMod.esp (base TESNPC
+// [0x000A2C94] Skyrim.esm), or for other objects
 // "RCX: BSFadeNode (SkyrimSE.exe)". Language-neutral.
 std::wstring DescribeDumpObject(const DumpObject& object);
 
