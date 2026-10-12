@@ -24,7 +24,9 @@ public:
     const std::filesystem::path& jsonPath,
     const std::string& gameVersion,
     LoadStatus* outStatus = nullptr);
-  std::optional<std::string> Resolve(std::uint64_t offset) const;
+  // Name of the SkyrimSE.exe function that starts at this offset (RVA), if
+  // known. Exact match only.
+  std::optional<std::string> Resolve(std::uint64_t functionStart) const;
   const std::unordered_map<std::uint64_t, std::string>& Functions() const { return m_functions; }
   std::size_t Size() const { return m_functions.size(); }
 

@@ -16,3 +16,4 @@ ADR index:
 - `0011-dump-carries-system-module-unwind-data.md`
 - `0012-memory-snapshot.md`
 - `0013-problematic-modules.md`
+- `0014-game-function-names.md`

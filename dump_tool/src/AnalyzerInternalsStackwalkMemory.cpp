@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 namespace skydiag::dump_tool::internal::stackwalk_internal {
 namespace {
@@ -351,6 +352,49 @@ bool MinidumpMemoryView::Read(std::uint64_t addr, void* dst, std::size_t n, std:
     }
   }
   return outRead > 0;
+}
+
+std::optional<std::uint64_t> FindFunctionStart(const MinidumpMemoryView& mem, std::uint64_t moduleBase, std::uint64_t pc)
+{
+  const RUNTIME_FUNCTION* found = mem.image_fallback ? mem.image_fallback->FindFunctionEntry(pc) : nullptr;
+  if (!found && mem.dump_images) {
+    found = mem.dump_images->FindFunctionEntry(pc);
+  }
+  if (!found) {
+    return std::nullopt;
+  }
+  RUNTIME_FUNCTION entry = *found;
+  // Bounded: a corrupt chain must not loop.
+  for (int depth = 0; depth < 8; ++depth) {
+    std::size_t got = 0;
+    // UnwindData with the low bit set points at another RUNTIME_FUNCTION.
+    if ((entry.UnwindData & 1u) != 0u) {
+      RUNTIME_FUNCTION next{};
+      if (!mem.Read(moduleBase + (entry.UnwindData & ~1u), &next, sizeof(next), got) || got != sizeof(next)) {
+        return std::nullopt;
+      }
+      entry = next;
+      continue;
+    }
+    // UNWIND_INFO: version:3 flags:5, prolog size, code count, frame register.
+    std::uint8_t header[4]{};
+    if (!mem.Read(moduleBase + entry.UnwindData, header, sizeof(header), got) || got != sizeof(header)) {
+      return std::nullopt;
+    }
+    if (((header[0] >> 3) & UNW_FLAG_CHAININFO) == 0) {
+      return moduleBase + entry.BeginAddress;
+    }
+    // A chained entry is a fragment; the RUNTIME_FUNCTION of the function it
+    // belongs to follows the (even-padded) unwind codes.
+    const std::uint64_t codesBytes = static_cast<std::uint64_t>((header[2] + 1u) & ~1u) * 2u;
+    RUNTIME_FUNCTION parent{};
+    if (!mem.Read(moduleBase + entry.UnwindData + sizeof(header) + codesBytes, &parent, sizeof(parent), got) ||
+        got != sizeof(parent)) {
+      return std::nullopt;
+    }
+    entry = parent;
+  }
+  return std::nullopt;
 }
 
 std::vector<std::uint64_t> StackWalkAddrsForContext(

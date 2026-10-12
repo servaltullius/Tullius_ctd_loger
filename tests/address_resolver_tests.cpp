@@ -34,7 +34,11 @@ static void TestAddressResolverApiExists()
 static void TestKnownFunctionsPresent()
 {
   const auto content = ReadFile("dump_tool/data/address_db/skyrimse_functions.json");
-  assert(content.find("BSBatchRenderer::Draw") != std::string::npos);
+  assert(content.find("\"1.6.1170.0\"") != std::string::npos);
+  assert(content.find("\"0xCC90C0\": \"BSReadWriteLock::LockForRead\"") != std::string::npos);
+  // Generated from an MIT CommonLibSSE-NG revision, never edited by hand.
+  assert(content.find("generate_game_function_names.py") != std::string::npos);
+  assert(content.find("e34246283a75fdd7009108476f0c646038f71f3c") != std::string::npos);
 }
 
 int main()

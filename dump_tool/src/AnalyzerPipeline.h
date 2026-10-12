@@ -13,6 +13,8 @@
 
 namespace skydiag::dump_tool {
 
+class AddressResolver;
+
 std::optional<CONTEXT> ParseExceptionInfo(
   void* dumpBase,
   std::uint64_t dumpSize,
@@ -57,7 +59,8 @@ void ComputeSuspects(
   const std::optional<CONTEXT>& excCtx,
   bool hangLike,
   const AnalyzeOptions& opt,
-  AnalysisResult& out);
+  AnalysisResult& out,
+  const AddressResolver* gameFunctions = nullptr);
 
 std::filesystem::path ResolveCrashHistoryPath(
   const std::wstring& dumpPath,

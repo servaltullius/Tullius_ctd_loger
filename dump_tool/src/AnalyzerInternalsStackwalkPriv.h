@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -146,6 +147,12 @@ struct SymSession
   explicit SymSession(const std::vector<minidump::ModuleInfo>& modules, bool allowOnlineSymbols);
   ~SymSession();
 };
+
+// Start of the function containing pc, following chained unwind entries to
+// the primary one (a function split into fragments). Uses the same .pdata as
+// the stack walk: a matching local image, else the dump's own. nullopt for a
+// leaf function or when the unwind data is not available.
+std::optional<std::uint64_t> FindFunctionStart(const MinidumpMemoryView& mem, std::uint64_t moduleBase, std::uint64_t pc);
 
 // Adds the dump's export names for the session's virtual modules.
 void AddDumpExportSymbols(const SymSession& session, const DumpImageData& images);

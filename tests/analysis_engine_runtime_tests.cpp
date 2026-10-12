@@ -352,20 +352,26 @@ void TestAddressResolverRuntime()
 {
   AddressResolver resolver;
   const auto jsonPath = ProjectRoot() / "dump_tool" / "data" / "address_db" / "skyrimse_functions.json";
-  const bool loaded = resolver.LoadFromJson(jsonPath, "1.5.97.0");
+  // The crash test's engine fault (2026-10-12) was at SkyrimSE.exe+0xCC90CF,
+  // 0xF into BSReadWriteLock::LockForRead (AE ID 68233).
+  const bool loaded = resolver.LoadFromJson(jsonPath, "1.6.1170.0");
   assert(loaded);
-  assert(resolver.Size() > 0);
+  assert(resolver.Size() > 500u);
 
-  const auto exact = resolver.Resolve(0xD6DDDAull);
+  const auto exact = resolver.Resolve(0xCC90C0ull);
   assert(exact.has_value());
-  assert(exact.value() == "BSBatchRenderer::Draw");
+  assert(exact.value() == "BSReadWriteLock::LockForRead");
 
-  const auto fuzzy = resolver.Resolve(0xD6DDDAull + 0x20ull);
-  assert(fuzzy.has_value());
-  assert(fuzzy.value() == "BSBatchRenderer::Draw");
+  // Only a function's exact start names it: an address inside the function
+  // is resolved by the caller through .pdata, never by nearness here.
+  assert(!resolver.Resolve(0xCC90CFull).has_value());
+  assert(!resolver.Resolve(0x1ull).has_value());
 
-  const auto miss = resolver.Resolve(0x1ull);
-  assert(!miss.has_value());
+  for (const char* version : { "1.5.97.0", "1.6.640.0" }) {
+    AddressResolver other;
+    assert(other.LoadFromJson(jsonPath, version));
+    assert(other.Size() > 500u);
+  }
 }
 
 void TestAddressResolverToleratesMalformedEntries()

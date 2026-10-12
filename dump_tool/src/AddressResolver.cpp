@@ -77,29 +77,15 @@ bool AddressResolver::LoadFromJson(
   }
 }
 
-std::optional<std::string> AddressResolver::Resolve(std::uint64_t offset) const
+std::optional<std::string> AddressResolver::Resolve(std::uint64_t functionStart) const
 {
-  const auto it = m_functions.find(offset);
+  // Exact match only: the caller passes the start of the .pdata function
+  // that contains a frame. Naming an address after the nearest known
+  // function below it would name the wrong function whenever the table
+  // lacks the real one.
+  const auto it = m_functions.find(functionStart);
   if (it != m_functions.end()) {
     return it->second;
-  }
-
-  constexpr std::uint64_t kTolerance = 0x100;
-  std::optional<std::pair<std::uint64_t, std::string>> nearest;
-  for (const auto& [fnOffset, fnName] : m_functions) {
-    if (offset < fnOffset) {
-      continue;
-    }
-    const std::uint64_t diff = offset - fnOffset;
-    if (diff >= kTolerance) {
-      continue;
-    }
-    if (!nearest || diff < nearest->first) {
-      nearest = std::make_pair(diff, fnName);
-    }
-  }
-  if (nearest) {
-    return nearest->second;
   }
   return std::nullopt;
 }

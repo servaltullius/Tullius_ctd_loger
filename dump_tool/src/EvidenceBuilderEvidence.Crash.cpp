@@ -437,8 +437,10 @@ void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, c
       e.title = ctx.en ? L"Game function identified" : L"게임 함수 식별";
       const std::wstring fn = ToWideAscii(it->second);
       e.details = ctx.en
-        ? (L"Crash occurred in or near: " + fn)
-        : (L"크래시 발생 위치(또는 근처): " + fn);
+        ? (L"The crash happened in " + fn + L" (" + r.fault_module_plus_offset + L"). "
+           L"A game function only shows where it crashed; the cause is usually a mod that called it with bad data.")
+        : (L"크래시가 난 게임 함수: " + fn + L" (" + r.fault_module_plus_offset + L"). "
+           L"게임 함수는 터진 위치일 뿐이고, 원인은 대개 잘못된 데이터로 이 함수를 부른 모드입니다.");
       r.evidence.push_back(std::move(e));
     }
   }
