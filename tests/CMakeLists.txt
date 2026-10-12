@@ -754,6 +754,11 @@ if(WIN32)
   set_tests_properties(skydiag_modal_dialog_hang_e2e_dump_only_tests PROPERTIES
     ENVIRONMENT "SKYDIAG_STACKWALK_IGNORE_LOCAL_IMAGES=1"
   )
+  # Both runs open a MessageBox with the same title and close it by title; in
+  # parallel (ctest -j) one would close the other's dialog.
+  set_tests_properties(skydiag_modal_dialog_hang_e2e_tests skydiag_modal_dialog_hang_e2e_dump_only_tests PROPERTIES
+    RESOURCE_LOCK skydiag_modal_dialog_window
+  )
 
   # ADR-0010: the crash dump writer adds the objects the crash registers point
   # at, and the production analyzer reads their type, FormID and plugins back.

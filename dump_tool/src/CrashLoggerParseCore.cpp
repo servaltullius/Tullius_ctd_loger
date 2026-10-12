@@ -612,12 +612,14 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
 std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_view logUtf8)
 {
   std::unordered_map<std::string, std::uint32_t> freq;
+  std::unordered_map<std::string, std::size_t> firstSeen;  // ties keep stack order
   const auto signals = ParseCrashLoggerFrameSignalsAscii(logUtf8);
   for (const auto& module : signals.probable_modules_in_order) {
     const std::string moduleLower = AsciiLower(module);
     if (IsSystemishModuleAsciiLower(moduleLower) || IsGameExeModuleAsciiLower(moduleLower)) {
       continue;
     }
+    firstSeen.emplace(moduleLower, firstSeen.size());
     freq[moduleLower] += 1;
   }
 
@@ -625,18 +627,19 @@ std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_v
   {
     std::string moduleLower;
     std::uint32_t count = 0;
+    std::size_t first = 0;
   };
 
   std::vector<Row> rows;
   rows.reserve(freq.size());
   for (const auto& [k, v] : freq) {
-    rows.push_back(Row{ k, v });
+    rows.push_back(Row{ k, v, firstSeen[k] });
   }
   std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
     if (a.count != b.count) {
       return a.count > b.count;
     }
-    return a.moduleLower < b.moduleLower;
+    return a.first < b.first;
   });
 
   std::vector<std::string> out;
@@ -659,6 +662,7 @@ std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view l
   }
 
   std::unordered_map<std::string, std::uint32_t> freq;
+  std::unordered_map<std::string, std::size_t> firstSeen;  // ties keep stack order
   std::istringstream iss{ std::string(logUtf8) };
   std::string line;
 
@@ -693,6 +697,7 @@ std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view l
     if (IsSystemishModuleAsciiLower(moduleLower) || IsGameExeModuleAsciiLower(moduleLower)) {
       continue;
     }
+    firstSeen.emplace(moduleLower, firstSeen.size());
     freq[moduleLower] += 1;
   }
 
@@ -700,18 +705,19 @@ std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view l
   {
     std::string moduleLower;
     std::uint32_t count = 0;
+    std::size_t first = 0;
   };
 
   std::vector<Row> rows;
   rows.reserve(freq.size());
   for (const auto& [k, v] : freq) {
-    rows.push_back(Row{ k, v });
+    rows.push_back(Row{ k, v, firstSeen[k] });
   }
   std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
     if (a.count != b.count) {
       return a.count > b.count;
     }
-    return a.moduleLower < b.moduleLower;
+    return a.first < b.first;
   });
 
   std::vector<std::string> out;
@@ -1253,6 +1259,102 @@ std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
     result.push_back(std::move(r));
   }
   return result;
+}
+
+std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::string_view logUtf8)
+{
+  constexpr std::string_view kPrefix = "Unhandled exception \"";
+  const std::size_t start = logUtf8.find(kPrefix);
+  if (start == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const std::size_t lineEnd = logUtf8.find('\n', start);
+  std::string_view line = logUtf8.substr(start, lineEnd == std::string_view::npos ? std::string_view::npos : lineEnd - start);
+  if (!line.empty() && line.back() == '\r') {
+    line.remove_suffix(1);
+  }
+  line.remove_prefix(kPrefix.size());
+  const std::size_t quote = line.find('"');
+  if (quote == std::string_view::npos || quote == 0) {
+    return std::nullopt;
+  }
+  CrashLoggerExceptionLine out;
+  out.type = std::string(line.substr(0, quote));
+  std::string_view rest = line.substr(quote + 1);
+  // " at 0x<address> <module>+<offset>\t<instruction>"
+  const std::size_t at = rest.find(" at ");
+  if (at != std::string_view::npos) {
+    rest = TrimLeftAscii(rest.substr(at + 4));
+    const std::size_t afterAddress = rest.find_first_of(" \t");
+    if (afterAddress != std::string_view::npos) {
+      rest = TrimLeftAscii(rest.substr(afterAddress));
+      const std::size_t tab = rest.find('\t');
+      out.location = std::string(TrimAscii(rest.substr(0, tab)));
+      if (tab != std::string_view::npos) {
+        out.instruction = std::string(TrimAscii(rest.substr(tab + 1)));
+      }
+    }
+  }
+  return out;
+}
+
+bool IsLocationObjectTypeAscii(std::string_view objType)
+{
+  const std::string lower = AsciiLower(objType);
+  return lower.find("tesobjectcell") != std::string::npos || lower.find("tesworldspace") != std::string::npos;
+}
+
+std::vector<CrashLoggerObjectRef> ParseCrashLoggerUnattributedObjectsAscii(std::string_view logUtf8)
+{
+  std::vector<CrashLoggerObjectRef> out;
+  const std::size_t sectionStart = logUtf8.find("POSSIBLE RELEVANT OBJECTS:");
+  if (sectionStart == std::string_view::npos) {
+    return out;
+  }
+  std::size_t pos = logUtf8.find('\n', sectionStart);
+  while (pos != std::string_view::npos && pos + 1 < logUtf8.size()) {
+    const std::size_t begin = pos + 1;
+    const std::size_t end = logUtf8.find('\n', begin);
+    std::string_view line = logUtf8.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin);
+    pos = end;
+    if (!line.empty() && line.back() == '\r') {
+      line.remove_suffix(1);
+    }
+    if (line.empty() || (line[0] != '\t' && line[0] != ' ')) {
+      break;  // end of the section
+    }
+    const std::string_view trimmed = TrimLeftAscii(line);
+    if (trimmed.empty() || StartsWithCaseInsensitiveAscii(trimmed, "Modified by:") || !ExtractEspRefsFromLine(trimmed).empty()) {
+      continue;
+    }
+    const std::string location = ExtractLocation(trimmed);
+    if (location.empty()) {
+      continue;
+    }
+    CrashLoggerObjectRef ref;
+    ref.location = location;
+    ref.object_type = ExtractObjectType(trimmed);
+    ref.object_name = ExtractObjectName(trimmed);
+    const std::size_t formStart = trimmed.find("[0x");
+    if (formStart != std::string_view::npos) {
+      const std::size_t formEnd = trimmed.find(']', formStart);
+      if (formEnd != std::string_view::npos) {
+        ref.form_id = std::string(trimmed.substr(formStart + 1, formEnd - formStart - 1));
+      }
+    }
+    if ((ref.object_name.empty() && ref.form_id.empty()) || IsLocationObjectTypeAscii(ref.object_type)) {
+      continue;  // a bare pointer type, or only where the player was
+    }
+    ref.relevance_score = LocationWeight(location) + TypeWeight(ref.object_type);
+    out.push_back(std::move(ref));
+  }
+  std::stable_sort(out.begin(), out.end(), [](const CrashLoggerObjectRef& a, const CrashLoggerObjectRef& b) {
+    return a.relevance_score > b.relevance_score;
+  });
+  if (out.size() > 6) {
+    out.resize(6);
+  }
+  return out;
 }
 
 }  // namespace crashlogger_core

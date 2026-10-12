@@ -5,6 +5,7 @@
 
 #include "AnalyzerScoringPolicy.h"
 #include "CandidateConsensus.h"
+#include "CrashLoggerParseCore.h"
 #include "MainThreadWait.h"
 #include "MinidumpUtil.h"
 #include "Utf.h"
@@ -185,6 +186,11 @@ void AddCrashLoggerSignals(const AnalysisResult& r, bool en, std::vector<Candida
   const std::size_t limit = std::min<std::size_t>(r.crash_logger_object_refs.size(), kMaxObjectRefs);
   for (std::size_t i = 0; i < limit; ++i) {
     const auto& ref = r.crash_logger_object_refs[i];
+    // A cell or worldspace is where the player was; the plugin that defines
+    // it (often a large location overhaul) is not a candidate on that alone.
+    if (crashlogger_core::IsLocationObjectTypeAscii(WideToUtf8(ref.best_object_type))) {
+      continue;
+    }
     CandidateSignal signal{};
     signal.family_id = "crash_logger_object_ref";
     signal.candidate_key = CanonicalCandidateKey(ref.esp_name);

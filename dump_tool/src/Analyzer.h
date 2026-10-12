@@ -280,6 +280,14 @@ struct AnalysisResult
     std::uint32_t relevance_score = 0;
   };
   std::vector<CrashLoggerModReference> crash_logger_object_refs;
+  // Crash Logger's own exception line: the original exception when the dump
+  // holds a secondary one (for example from Crash Logger's memory probes).
+  std::wstring crash_logger_exception_type;      // "EXCEPTION_BREAKPOINT"
+  std::wstring crash_logger_exception_location;  // "ucrtbase.dll+00C2B24"
+  std::wstring crash_logger_exception_instruction;
+  // Relevant objects with a name or FormID but no plugin (spawned at runtime);
+  // esp_name is empty.
+  std::vector<CrashLoggerModReference> crash_logger_unattributed_objects;
   // ADR-0010: objects read from the crash dump itself (crashes only).
   std::vector<DumpObject> dump_objects;
 

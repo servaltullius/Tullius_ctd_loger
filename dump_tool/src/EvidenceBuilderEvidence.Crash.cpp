@@ -40,6 +40,23 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
     r.evidence.push_back(std::move(e));
   }
 
+  if (!r.crash_logger_exception_type.empty()) {
+    // The exception Crash Logger reported; when the dump's own exception is a
+    // secondary fault (inside CrashLogger), this is the original one.
+    EvidenceItem e{};
+    e.confidence_level = r.crash_logger_pairing_ambiguous ? i18n::ConfidenceLevel::kLow : i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Crash Logger: reported exception" : L"Crash Logger가 기록한 예외";
+    e.details = r.crash_logger_exception_type;
+    if (!r.crash_logger_exception_location.empty()) {
+      e.details += L" at " + r.crash_logger_exception_location;
+    }
+    if (!r.crash_logger_exception_instruction.empty()) {
+      e.details += L" (" + r.crash_logger_exception_instruction + L")";
+    }
+    r.evidence.push_back(std::move(e));
+  }
+
   if (!r.crash_logger_top_modules.empty()) {
     EvidenceItem e{};
     e.confidence_level = r.crash_logger_pairing_ambiguous
@@ -81,6 +98,32 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
       shown++;
     }
     e.details = detail;
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (!r.crash_logger_unattributed_objects.empty()) {
+    // Spawned actors and other forms created at runtime have no plugin to
+    // blame, but they say what the game was handling.
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Crash Logger: relevant objects without a plugin (created at runtime)"
+                 : L"Crash Logger: 플러그인이 표시되지 않은 관련 오브젝트(실행 중 생성)";
+    std::vector<std::wstring> parts;
+    for (const auto& object : r.crash_logger_unattributed_objects) {
+      if (parts.size() >= 4u) {
+        break;
+      }
+      std::wstring part = object.best_location + L": " + object.best_object_type;
+      if (!object.object_name.empty()) {
+        part += L" \"" + object.object_name + L"\"";
+      }
+      if (!object.form_id.empty()) {
+        part += L" [" + object.form_id + L"]";
+      }
+      parts.push_back(std::move(part));
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
     r.evidence.push_back(std::move(e));
   }
 

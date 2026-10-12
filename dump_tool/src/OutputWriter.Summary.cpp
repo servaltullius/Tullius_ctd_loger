@@ -216,6 +216,24 @@ nlohmann::json BuildSummaryJson(
       });
     }
   }
+  if (!r.crash_logger_exception_type.empty()) {
+    summary["crash_logger"]["exception"] = {
+      { "type", WideToUtf8(r.crash_logger_exception_type) },
+      { "location", WideToUtf8(r.crash_logger_exception_location) },
+      { "instruction", WideToUtf8(r.crash_logger_exception_instruction) },
+    };
+  }
+  if (!r.crash_logger_unattributed_objects.empty()) {
+    summary["crash_logger"]["objects_without_plugin"] = nlohmann::json::array();
+    for (const auto& object : r.crash_logger_unattributed_objects) {
+      summary["crash_logger"]["objects_without_plugin"].push_back({
+        { "location", WideToUtf8(object.best_location) },
+        { "object_type", WideToUtf8(object.best_object_type) },
+        { "object_name", WideToUtf8(object.object_name) },
+        { "form_id", WideToUtf8(object.form_id) },
+      });
+    }
+  }
 
   if (!r.dump_objects.empty()) {
     // ADR-0010: objects read from the dump itself.

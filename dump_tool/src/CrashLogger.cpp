@@ -757,6 +757,7 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   {
     std::wstring display_name;
     std::uint32_t count = 0;
+    std::size_t first = 0;  // position in the call stack; ties keep stack order
   };
 
   std::unordered_map<std::wstring, ModuleCount> freqByLower;
@@ -769,6 +770,7 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
     auto& entry = freqByLower[lower];
     if (entry.display_name.empty()) {
       entry.display_name = module;
+      entry.first = freqByLower.size();
     }
     entry.count += 1;
   }
@@ -808,7 +810,7 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
     if (a.count != b.count) {
       return a.count > b.count;
     }
-    return WideLower(a.display_name) < WideLower(b.display_name);
+    return a.first < b.first;
   });
 
   std::vector<std::wstring> out;
