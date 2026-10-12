@@ -566,6 +566,20 @@ void ComputeSuspects(
   const std::uint32_t preferredTid = out.exc_tid != 0u ? out.exc_tid : mainTid.value_or(0u);
   const std::uint32_t modalProbeTid = (hangLike && mainTid.has_value()) ? *mainTid : 0u;
   std::vector<ModalStackFrame> mainThreadFrames;
+  // Threads the game itself started (BSJobs job threads and the like): the
+  // main thread may be waiting for one of them (FindBlockedGameThread).
+  std::vector<std::uint32_t> gameThreadTids;
+  std::vector<ThreadTopFrames> gameThreadFrames;
+  if (modalProbeTid != 0u) {
+    const auto gameExe = std::find_if(allModules.begin(), allModules.end(), [](const ModuleInfo& m) { return m.is_game_exe; });
+    if (gameExe != allModules.end()) {
+      for (const auto& [tid, start] : minidump::LoadThreadStartAddresses(dumpBase, dumpSize)) {
+        if (tid != modalProbeTid && start >= gameExe->base && start < gameExe->end) {
+          gameThreadTids.push_back(tid);
+        }
+      }
+    }
+  }
   if (!internal::TryComputeStackwalkSuspects(
         dumpBase,
         dumpSize,
@@ -578,7 +592,9 @@ void ComputeSuspects(
         opt.language,
         out,
         modalProbeTid,
-        &mainThreadFrames)) {
+        &mainThreadFrames,
+        gameThreadTids.empty() ? nullptr : &gameThreadTids,
+        &gameThreadFrames)) {
     out.suspects_from_stackwalk = false;
     // The helper treats the "failed" diagnostic as degraded capture quality,
     // so keep it for walks that produced no caller frames at all.
@@ -629,6 +645,7 @@ void ComputeSuspects(
 
   if (modalProbeTid != 0u) {
     out.main_thread_wait = ClassifyMainThreadWait(mainThreadFrames);
+    FindBlockedGameThread(out.main_thread_wait, gameThreadFrames);
     // The pointer-scan fallback reads only the main thread for freezes.
     out.suspects_from_main_thread =
       !out.suspects_from_stackwalk || out.stackwalk_primary_tid == modalProbeTid;
@@ -646,6 +663,29 @@ void ComputeSuspects(
         : L" (메인 스레드가 " + out.main_thread_wait.waiting_module +
             L" 안에서 대기 중이었으므로 스택의 모듈은 호출 경로일 뿐 프리징 원인으로 확인된 것이 아님)";
     }
+  }
+
+  if (HasBlockedGameThread(out.main_thread_wait)) {
+    // The main thread waited for a game thread that was inside this plugin's
+    // code; that plugin, not the main thread's call path, is the lead.
+    const auto& wait = out.main_thread_wait;
+    const bool en = opt.language == i18n::Language::kEnglish;
+    SuspectItem lead{};
+    lead.confidence_level = i18n::ConfidenceLevel::kMedium;
+    lead.confidence = i18n::ConfidenceText(opt.language, lead.confidence_level);
+    lead.module_filename = wait.blocked_module;
+    lead.module_path = wait.blocked_module_path;
+    lead.inferred_mod_name = wait.blocked_mod_name;
+    lead.score = out.suspects.empty() ? 1u : out.suspects.front().score + 1u;
+    lead.reason = en
+      ? (L"The main thread was waiting for game thread " + std::to_wstring(wait.blocked_thread_tid) +
+          L", which was inside this plugin's code (top: " + wait.blocked_top + L")")
+      : (L"메인 스레드가 기다린 게임 스레드(tid " + std::to_wstring(wait.blocked_thread_tid) +
+          L")가 이 플러그인 코드 안에 있었음(맨 위: " + wait.blocked_top + L")");
+    std::erase_if(out.suspects, [&](const SuspectItem& s) {
+      return _wcsicmp(s.module_filename.c_str(), wait.blocked_module.c_str()) == 0;
+    });
+    out.suspects.insert(out.suspects.begin(), std::move(lead));
   }
 
   if (hangLike && mainTid.has_value() && !out.suspects.empty()) {

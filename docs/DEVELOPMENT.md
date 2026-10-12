@@ -75,6 +75,7 @@ For in-game validation without waiting:
 - Tag-triggered releases rerun Linux unit, ASan+UBSan, the Linux clang-tidy subset, parser fuzz, complete Windows production clang-tidy, and the packaged launcher smoke before publication.
 - Manual rerun of the same packaged WinUI smoke: `.github/workflows/winui-headless-smoke.yml`
 - Manual smoke trigger: `workflow_dispatch`
+- In-game checks of known causes: `tools/crash_tester` (built only with `-DSKYDIAG_CRASH_TESTER=ON`, never packaged) is an SKSE plugin that causes crashes and freezes of known cause, by hotkey or unattended through `CrashTester.ini`; see its README.
 - Manual dump stress: `.github/workflows/dump-stress.yml` runs 16 shards (usually 16 runner hosts). Each prints its host details, optionally runs the whole Windows suite once (`full_suite_first`), then repeats selected tests (default: the helper smoke and crash dump context tests) until the first failure. It found the CI-only crash-dump failure (`0x800706F8`, earlier misread as `ERROR_PARTIAL_COPY`) on AMX hosts with Server 2022 dbghelp, fixed in v0.2.60-rc3. `io_trace` (default on) makes a failing dump report the failed file write. Run: `gh workflow run dump-stress.yml --ref main`. `-f defender_exclusion=true` excludes the workspace and test executables from Microsoft Defender.
 
 Equivalent local commands:

@@ -34,4 +34,25 @@ bool IsBystanderWait(const MainThreadWaitInfo& wait);
 // the engine's Direct3D query poll.
 bool IsGpuWait(const MainThreadWaitInfo& wait);
 
+// The top of a game-started thread's stack (innermost first).
+struct ThreadTopFrames
+{
+  std::uint32_t tid = 0;
+  std::vector<ModalStackFrame> frames;
+};
+
+// Frames searched for plugin code on a game thread.
+inline constexpr std::size_t kBlockedThreadTopFrames = 12;
+
+// Only for an engine_wait on a sync object (the main thread waiting for other
+// game threads): fills wait.blocked_* with the game thread that was inside
+// plugin code. Threads waiting inside the plugin come first, then engine code
+// the plugin called, then plugin code running; the shallower plugin frame
+// wins a tie. The Windows system, the game, the SKSE runtime, the graphics
+// stack, known hook frameworks and SkyrimDiag itself are not plugin code.
+void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTopFrames>& gameThreads);
+
+// The main thread waited for another game thread that was inside plugin code.
+bool HasBlockedGameThread(const MainThreadWaitInfo& wait);
+
 }  // namespace skydiag::dump_tool

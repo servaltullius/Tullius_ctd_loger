@@ -373,6 +373,11 @@ std::string BuildReportText(
       if (!wait.path_modules.empty()) {
         rpt << " path=" << WideToUtf8(JoinList(wait.path_modules, wait.path_modules.size(), L","));
       }
+      if (wait.blocked_thread_tid != 0u) {
+        rpt << " blocked_tid=" << wait.blocked_thread_tid << " blocked_module=" << WideToUtf8(wait.blocked_module)
+            << " blocked_state=" << wait.blocked_state << " blocked_top=" << WideToUtf8(wait.blocked_top)
+            << " blocked_threads=" << wait.blocked_thread_count;
+      }
       rpt << "\n";
     }
     {

@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "SkyrimDiagHandle.h"
@@ -78,6 +79,8 @@ struct ThreadRecord
 };
 
 std::vector<ThreadRecord> LoadThreads(void* dumpBase, std::uint64_t dumpSize);
+// Thread id -> start address, from the ThreadInfoList stream (empty without it).
+std::vector<std::pair<std::uint32_t, std::uint64_t>> LoadThreadStartAddresses(void* dumpBase, std::uint64_t dumpSize);
 bool ReadThreadContextWin64(void* dumpBase, std::uint64_t dumpSize, const ThreadRecord& tr, CONTEXT& out);
 bool GetThreadStackBytes(
   void* dumpBase,

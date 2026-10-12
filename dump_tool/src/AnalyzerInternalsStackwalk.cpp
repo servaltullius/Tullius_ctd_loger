@@ -82,7 +82,9 @@ bool TryComputeStackwalkSuspects(
   i18n::Language lang,
   AnalysisResult& out,
   std::uint32_t modalProbeTid,
-  std::vector<ModalStackFrame>* outModalProbeFrames)
+  std::vector<ModalStackFrame>* outModalProbeFrames,
+  const std::vector<std::uint32_t>* sideTids,
+  std::vector<ThreadTopFrames>* outSideFrames)
 {
   if (!dumpBase || modules.empty() || targetTids.empty() || threads.empty()) {
     return false;
@@ -126,6 +128,24 @@ bool TryComputeStackwalkSuspects(
     std::vector<SuspectItem> suspects;
     std::uint32_t topScore = 0;
   };
+
+  // Other threads' top frames, walked in the same symbol session; they do
+  // not compete for the suspects (FindBlockedGameThread reads them).
+  if (sideTids && outSideFrames) {
+    for (const auto tid : *sideTids) {
+      const auto it = std::find_if(threads.begin(), threads.end(), [&](const ThreadRecord& tr) { return tr.tid == tid; });
+      CONTEXT ctx{};
+      if (it == threads.end() || !ReadThreadContextWin64(dumpBase, dumpSize, *it, ctx) || ctx.Rip == 0 || ctx.Rsp == 0) {
+        continue;
+      }
+      const auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/kBlockedThreadTopFrames + 4u);
+      if (pcs.empty()) {
+        continue;
+      }
+      outSideFrames->push_back(ThreadTopFrames{
+        tid, stackwalk::BuildModalProbeFrames(sym.process, modules, pcs, kBlockedThreadTopFrames) });
+    }
+  }
 
   Candidate best{};
   Candidate bestAny{};

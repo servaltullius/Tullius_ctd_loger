@@ -96,6 +96,11 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     if (m.is_systemish || m.is_game_exe) {
       continue;
     }
+    // The SKSE runtime hands plugins their tasks and events, so below a
+    // plugin's frames it is only the call path; it counts when it faulted.
+    if (i > 0 && IsSkseModule(m.filename)) {
+      continue;
+    }
     const std::uint32_t w = CallstackFrameWeight(i);
     auto it = byModule.find(*mi);
     if (it == byModule.end()) {

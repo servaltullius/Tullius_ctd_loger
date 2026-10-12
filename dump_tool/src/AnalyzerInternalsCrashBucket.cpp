@@ -31,6 +31,11 @@ std::optional<std::string> HangWaitCanonical(const AnalysisResult& out)
   if (wait.kind == "engine_wait" || wait.kind == "graphics_driver_wait" || wait.kind == "plugin_wait") {
     canonical << "kind=" << wait.kind << "|detail=" << wait.engine_wait_detail << "|module=" << lower(wait.waiting_module)
               << "|api=" << lower(wait.wait_api);
+    // The main thread waits the same way for every game thread; which plugin
+    // held the thread it waited for tells these freezes apart.
+    if (wait.blocked_thread_tid != 0u) {
+      canonical << "|blocked=" << lower(wait.blocked_module) << "|state=" << wait.blocked_state;
+    }
     return canonical.str();
   }
   return std::nullopt;  // running or unknown: the stack is all there is

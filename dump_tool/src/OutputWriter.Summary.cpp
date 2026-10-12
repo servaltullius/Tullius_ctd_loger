@@ -538,6 +538,16 @@ nlohmann::json BuildSummaryJson(
       { "waiting_mod_name", WideToUtf8(r.main_thread_wait.waiting_mod_name) },
       { "path_modules", std::move(path) },
     };
+    if (r.main_thread_wait.blocked_thread_tid != 0u) {
+      summary["freeze_analysis"]["main_thread_wait"]["blocked_thread"] = {
+        { "tid", r.main_thread_wait.blocked_thread_tid },
+        { "module", WideToUtf8(r.main_thread_wait.blocked_module) },
+        { "mod_name", WideToUtf8(r.main_thread_wait.blocked_mod_name) },
+        { "state", r.main_thread_wait.blocked_state },
+        { "top", WideToUtf8(r.main_thread_wait.blocked_top) },
+        { "thread_count", r.main_thread_wait.blocked_thread_count },
+      };
+    }
   }
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
   for (const auto& reason : r.freeze_analysis.primary_reasons) {

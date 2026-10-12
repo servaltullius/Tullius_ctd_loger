@@ -49,6 +49,17 @@ std::wstring ToWideAscii(std::string_view s)
   return out;
 }
 
+bool HasNearbyProbableDll(const AnalysisResult& r)
+{
+  const std::wstring faultLower = minidump::WideLower(r.fault_module_filename);
+  for (const auto& module : r.crash_logger_top_modules) {
+    if (minidump::WideLower(module) != faultLower && !minidump::IsSkseModule(module)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::wstring DescribeDuration(double seconds, bool en)
 {
   wchar_t buf[64]{};

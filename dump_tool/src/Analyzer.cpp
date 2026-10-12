@@ -569,6 +569,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         }
       }
       out.signature_match = sigDb.Match(input, opt.language == i18n::Language::kKorean);
+      // "may be a caught throw" does not fit a throw Crash Logger saw crash
+      // the game (crash test, 2026-10-12).
+      if (out.signature_match && out.signature_match->id == "CPP_EXCEPTION_HANDLED" &&
+          IsCrashLoggerConfirmedCppException(out)) {
+        out.signature_match.reset();
+      }
     }
   }
 

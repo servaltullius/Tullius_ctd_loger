@@ -213,11 +213,16 @@ void AddActionableCandidateRecommendations(
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
   if (weakFaultLocationTopCandidate && hasFrameFamily) {
+    const bool nearby = HasNearbyProbableDll(r);
     r.recommendations.push_back(en
       ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
-          L", but this is still only the current fault-location cluster. Compare nearby Crash Logger probable DLLs before isolating this mod.")
+          L", but this is still only the current fault-location cluster. " +
+          (nearby ? std::wstring(L"Compare nearby Crash Logger probable DLLs before isolating this mod.")
+                  : std::wstring(L"Crash Logger names no other DLL nearby, so disable or update this mod and see whether the crash still happens.")))
       : (L"[행동 우선 후보] " + frameSupport + L"과 같은 덤프의 스택이 모두 " + candidateName +
-          L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. 이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요."));
+          L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. " +
+          (nearby ? std::wstring(L"이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
+                  : std::wstring(L"Crash Logger가 함께 지목한 다른 DLL은 없으니, 이 모드를 끄거나 업데이트해 재현 여부를 확인하세요."))));
     r.recommendations.push_back(en
       ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
       : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 더 많은 정보를 담는 재수집 설정을 먼저 쓰세요.");
@@ -604,7 +609,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(buf);
     }
 
-    if (r.exc_code == 0xE06D7363u) {
+    if (IsCrashLoggerConfirmedCppException(r)) {
+      r.recommendations.push_back(en
+        ? L"[Interpretation] Crash Logger logged this C++ exception as the unhandled exception that crashed the game, so this is a real CTD, not a caught throw. Start with the module that threw it (first non-system module in the call stack)."
+        : L"[해석] Crash Logger도 이 C++ 예외를 게임을 끝낸 처리되지 않은 예외로 기록했습니다. 잡힌 예외(오탐)가 아니라 실제 CTD입니다. 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
+    } else if (r.exc_code == 0xE06D7363u) {
       r.recommendations.push_back(en
         ? L"[Interpretation] 0xE06D7363 is a common C++ exception (throw) code. It can occur during normal throw/catch."
         : L"[해석] 0xE06D7363은 흔한 C++ 예외(throw) 코드입니다. 정상 동작 중에도 throw/catch로 발생할 수 있습니다.");
@@ -691,7 +700,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     std::vector<std::wstring> nearbyProbableDlls;
     const std::wstring faultLower = minidump::WideLower(r.fault_module_filename);
     for (const auto& module : r.crash_logger_top_modules) {
-      if (minidump::WideLower(module) == faultLower) {
+      // The SKSE runtime is the path plugin tasks take, not a suspect.
+      if (minidump::WideLower(module) == faultLower || minidump::IsSkseModule(module)) {
         continue;
       }
       nearbyProbableDlls.push_back(module);
@@ -850,6 +860,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : (L"[메인 스레드] 메인 스레드가 " + where +
             L". GPU 드라이버를 업데이트하거나 클린 설치한 뒤, 그래픽 인젝터·업스케일러" + detected +
             L" 없이, 그리고 텍스처/비디오 메모리 부담을 줄여서 시험해 보세요."));
+    } else if (isHangLike && HasBlockedGameThread(wait)) {
+      const std::wstring who = wait.blocked_mod_name.empty()
+        ? wait.blocked_module
+        : (wait.blocked_mod_name + L" (" + wait.blocked_module + L")");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting inside the game engine for another game thread, and that thread was inside " +
+            who + L" (top: " + wait.blocked_top + L"). Disable or update " + who + L" and reproduce the same situation.")
+        : (L"[메인 스레드] 메인 스레드는 게임 엔진 안에서 다른 게임 스레드를 기다리고 있었고, 그 스레드는 " + who +
+            L" 코드 안에 있었습니다(맨 위: " + wait.blocked_top + L"). " + who + L"을(를) 끄거나 업데이트한 뒤 같은 상황을 재현해 보세요."));
     } else if (isHangLike && wait.kind == "engine_wait") {
       const std::wstring path = wait.path_modules.empty()
         ? std::wstring{}

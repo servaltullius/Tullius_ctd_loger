@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "MainThreadWait.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -143,6 +144,32 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     }
     e.details = JoinList(parts, parts.size(), L" | ");
     r.evidence.push_back(std::move(e));
+
+    if (HasBlockedGameThread(wait)) {
+      EvidenceItem blocked{};
+      blocked.confidence_level = i18n::ConfidenceLevel::kMedium;
+      blocked.confidence = ConfidenceText(lang, blocked.confidence_level);
+      blocked.title = en ? L"The game thread the main thread waited for was inside plugin code"
+                         : L"메인 스레드가 기다린 게임 스레드가 플러그인 코드 안에 있었음";
+      const std::wstring state = wait.blocked_state == "waiting_in_plugin"
+        ? (en ? L"waiting inside the plugin" : L"플러그인 안에서 대기")
+        : (wait.blocked_state == "engine_call_from_plugin"
+            ? (en ? L"running engine code the plugin called" : L"플러그인이 부른 엔진 코드 실행 중")
+            : (en ? L"running plugin code" : L"플러그인 코드 실행 중"));
+      std::vector<std::wstring> details = {
+        L"tid " + std::to_wstring(wait.blocked_thread_tid),
+        (en ? L"module: " : L"모듈: ") + wait.blocked_module +
+          (wait.blocked_mod_name.empty() ? std::wstring{} : (L" (" + wait.blocked_mod_name + L")")),
+        (en ? L"state: " : L"상태: ") + state,
+        (en ? L"top: " : L"맨 위: ") + wait.blocked_top,
+      };
+      if (wait.blocked_thread_count > 1u) {
+        details.push_back((en ? L"game threads in plugin code: " : L"플러그인 코드 안에 있던 게임 스레드: ") +
+          std::to_wstring(wait.blocked_thread_count));
+      }
+      blocked.details = JoinList(details, details.size(), L" | ");
+      r.evidence.push_back(std::move(blocked));
+    }
   }
 
   if (r.modal_dialog_wait.detected) {

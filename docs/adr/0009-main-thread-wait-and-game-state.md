@@ -109,6 +109,22 @@ Accepted
   프록시 자체 코드에서 기다려도 "그래픽 드라이버 안에서 대기"로 나온다(안내에는 감지된 인젝터를
   적는다).
 
+## Addendum (2026-10-12): the game thread the main thread waits for
+
+원인을 미리 아는 프리징을 실게임에서 일으킨 시험(`tools/crash_tester`)에서 빈틈이 드러났습니다. 1.6.1170에서 하트비트를 기록하는 스레드(창·렌더를 맡는 첫 스레드)는 SKSE `AddTask` 작업을 직접 돌리지 않습니다. 그 작업은 게임의 작업 스레드(`BSJobs::JobThread`)에서 돌고, 첫 스레드는 매 프레임 엔진 안의 `WaitForSingleObjectEx`로 그 작업이 끝나기를 기다립니다. 그래서 플러그인 task가 멈추면 메인 스레드는 "엔진 안에서 대기"로만 보였습니다. 리포트는 메인 스레드 경로의 hdtsmp64.dll(FSMP)만 언급했고, 원인이 다른 두 프리징이 같은 `HANG1-` 버킷으로 묶였습니다.
+
+1. 메인 스레드가 엔진 안에서 동기화 객체를 기다릴 때(`engine_wait`, `wait_class=sync`), 덤프의 ThreadInfoList에서 시작 주소가 게임 EXE 안에 있는 스레드(게임이 만든 스레드)의 스택 위쪽 12프레임을 같은 심볼 세션에서 푼다.
+2. 그중 플러그인 코드가 있는 스레드를 찾는다. Windows, 게임, SKSE 런타임, 그래픽 스택, 알려진 훅 프레임워크, SkyrimDiag 자신은 플러그인 코드로 치지 않는다.
+   - 순서: 플러그인이 직접 대기·Sleep을 부른 스레드(`waiting_in_plugin`), 플러그인이 부른 엔진 코드가 맨 위인 스레드(`engine_call_from_plugin`), 플러그인 코드가 맨 위인 스레드(`running_in_plugin`). 같으면 플러그인 프레임이 얕은 쪽.
+   - 제외: 스레드 시작 → 게임 스레드 함수(3프레임 이하) → 플러그인 → 동기화 대기 모양. 플러그인이 게임 스레드의 루프를 차지하고 일거리를 기다리는 평소 상태다(Hitch Hunter가 시험의 모든 캡처에서 이 모양이었다).
+3. 찾으면 `main_thread_wait.blocked_*`에 기록하고:
+   - 그 플러그인을 후보 맨 앞에 둔다(신뢰도 중간). 메인 스레드 경로의 모듈은 그대로 낮춘다.
+   - 결론 문장, `[메인 스레드]` 다음 조치, 근거 항목, 리포트 `main_thread_wait` 줄, 요약 JSON `blocked_thread`에 적는다.
+   - 버킷 키에 플러그인과 상태를 넣어(`|blocked=…|state=…`) 원인이 다른 프리징을 나눈다.
+   - 이력 후보로 그 플러그인만 기록한다.
+
+한계: 메인 스레드가 정확히 어느 스레드를 기다렸는지(대기 객체의 주인)는 덤프로 알 수 없어, "그 시각 플러그인 코드 안에 있던 게임 스레드"로 추정한다. 보관 중인 실사고 프리징은 GPU 대기이거나 Windows 업데이트 뒤 스택을 풀 수 없어 이 판정이 걸리지 않았으므로, 실사고에서의 오탐 여부는 아직 검증되지 않았다.
+
 ## Verification
 
 - `skydiag_main_thread_wait_tests`(Linux): 실사고 덤프의 실제 코드 바이트로 GPU 쿼리 대기 판별과 그 변형, 실사고 모양의 엔진 대기, 짧은 드라이버 스택,
@@ -121,6 +137,7 @@ Accepted
 - `skydiag_share_text_fixture_tests`: WinUI 뷰어와 공유 텍스트가 리포트의 `NextAction`
   (`next_action_index`)을 따른다.
 - 보관 중인 실사고 프리징 5건과 modal 1건 재분석.
+- 막힌 게임 스레드: `skydiag_main_thread_wait_tests`가 시험 덤프의 스택 모양(플러그인 Sleep, 엔진 스핀, Hitch Hunter 유휴 루프)과 제외 규칙을, `skydiag_crash_test_findings_tests`가 결론·다음 조치·근거·JSON·리포트·버킷·이력을 확인한다. 시험 프리징 3건(`SkyrimDiag_Hang_20261012_191024_970`, `_191131_297`, `_192730_714`)을 다시 분석하면 모두 CrashTester.dll을 가리키고, 앞의 두 건은 같은 버킷, 세 번째는 다른 버킷이 된다.
 
 ## References
 
