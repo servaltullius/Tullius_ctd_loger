@@ -24,6 +24,13 @@ struct Mo2Index
 // Best-effort: detect "...\\mods\\<ModName>\\..." (MO2)
 std::wstring InferMo2ModNameFromPath(std::wstring_view fullPath);
 
+// A mod installed from a Nexus archive without MO2 metadata keeps the
+// archive's name: "SmoothCam 41252 1.8.1 2026",
+// "CrashLogger 59818 1.25.0 2026-08-21T09-21Z yIjvuh041". This drops the
+// trailing Nexus mod ID, version, upload date and download hash, giving
+// "SmoothCam" and "CrashLogger". Any other folder name comes back unchanged.
+std::wstring CleanMo2ModFolderName(std::wstring_view folderName);
+
 // Best-effort: infer MO2 base folder from any module path containing "\\mods\\".
 // Example:
 //   "G:\\Modding\\MO2\\mods\\SomeMod\\SKSE\\Plugins\\X.dll" -> "G:\\Modding\\MO2"

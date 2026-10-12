@@ -222,7 +222,67 @@ std::wstring InferMo2ModNameFromPath(std::wstring_view fullPath)
     return {};
   }
 
-  return s.substr(start, end - start);
+  return CleanMo2ModFolderName(s.substr(start, end - start));
+}
+
+std::wstring CleanMo2ModFolderName(std::wstring_view folderName)
+{
+  std::vector<std::wstring_view> tokens;
+  std::vector<std::size_t> starts;
+  for (std::size_t pos = 0; pos < folderName.size();) {
+    const std::size_t space = folderName.find(L' ', pos);
+    const std::size_t end = space == std::wstring_view::npos ? folderName.size() : space;
+    if (end > pos) {
+      tokens.push_back(folderName.substr(pos, end - pos));
+      starts.push_back(pos);
+    }
+    pos = end + 1;
+  }
+  const auto isDigit = [](wchar_t c) { return c >= L'0' && c <= L'9'; };
+  const auto isAlnum = [&](wchar_t c) { return isDigit(c) || (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z'); };
+  const auto allOf = [](std::wstring_view token, auto predicate) {
+    return !token.empty() && std::all_of(token.begin(), token.end(), predicate);
+  };
+  // "2026" or "2026-08-21T09-21Z"
+  const auto isUploadDate = [&](std::wstring_view token, bool* withTime) {
+    *withTime = false;
+    if (token.size() == 4) {
+      return allOf(token, isDigit) && token[0] == L'2' && token[1] == L'0';
+    }
+    if (token.size() != 17 || token[4] != L'-' || token[7] != L'-' || token[10] != L'T' || token[13] != L'-' ||
+        token[16] != L'Z' || token[0] != L'2' || token[1] != L'0') {
+      return false;
+    }
+    for (const std::size_t i : { 0u, 1u, 2u, 3u, 5u, 6u, 8u, 9u, 11u, 12u, 14u, 15u }) {
+      if (!isDigit(token[i])) {
+        return false;
+      }
+    }
+    *withTime = true;
+    return true;
+  };
+  const auto isVersion = [&](std::wstring_view token) {
+    return allOf(token, [&](wchar_t c) { return isAlnum(c) || c == L'.' || c == L'-' || c == L'_'; }) &&
+      std::any_of(token.begin(), token.end(), isDigit);
+  };
+
+  std::size_t last = tokens.size();
+  bool withTime = false;
+  // A download hash follows a full timestamp ("yIjvuh041").
+  if (last >= 5 && tokens[last - 1].size() >= 6 && tokens[last - 1].size() <= 12 && allOf(tokens[last - 1], isAlnum) &&
+      isUploadDate(tokens[last - 2], &withTime) && withTime) {
+    --last;
+  }
+  // Name, Nexus mod ID, version, upload date.
+  if (last < 4 || !isUploadDate(tokens[last - 1], &withTime) || !isVersion(tokens[last - 2]) ||
+      tokens[last - 3].size() < 2 || tokens[last - 3].size() > 7 || !allOf(tokens[last - 3], isDigit)) {
+    return std::wstring(folderName);
+  }
+  std::wstring_view name = folderName.substr(0, starts[last - 3]);
+  while (!name.empty() && (name.back() == L' ' || name.back() == L'-')) {
+    name.remove_suffix(1);
+  }
+  return name.empty() ? std::wstring(folderName) : std::wstring(name);
 }
 
 std::optional<std::filesystem::path> TryInferMo2BaseDirFromModulePaths(const std::vector<std::wstring>& modulePaths)
@@ -365,7 +425,7 @@ std::vector<std::wstring> FindMo2ProvidersForDataPath(const Mo2Index& idx, std::
 
   for (std::size_t i = 0; i < idx.modDirs.size(); i++) {
     if (std::filesystem::exists(idx.modDirs[i] / rel, ec)) {
-      out.push_back(idx.modNames[i]);
+      out.push_back(CleanMo2ModFolderName(idx.modNames[i]));
       if (out.size() >= maxProviders) {
         break;
       }
