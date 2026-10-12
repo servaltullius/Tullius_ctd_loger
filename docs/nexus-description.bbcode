@@ -12,7 +12,9 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 [*]Records [b]blackbox events[/b], [b]WCT[/b], and supporting incident artifacts around the failure
 [*]Generates a [b]human-readable report[/b] so you do not need WinDbg for the first pass
 [*]Automatically reads CrashLogger logs when CrashLoggerSSE is installed
-[*]Recent versions improved handling for ambiguous cases such as [b]EXE crashes[/b] and [b]loading stalls[/b]
+[*]Reads the game objects a crash was handling straight from the dump: type, FormID, name, the plugins that define and change it, and a reference's base object
+[*]Explains freezes by what the game's main thread was waiting for: the GPU, the graphics driver, an error dialog a plugin opened, or a game thread stuck in a plugin's code
+[*]Records RAM, commit and VRAM at capture time, and warns about modules that hide crashes (such as SkyrimCrashGuard)
 [/list]
 
 [b][size=4]What It Does NOT Do[/size][/b]
@@ -56,8 +58,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.59 Update Notice[/b]
-Replace the previous installation with the complete v0.2.59 zip. Do not copy only individual EXEs or DLLs. The plugin, Helper, analyzer, and viewer all changed in v0.2.59, so update them together (the SharedLayout protocol is still v4, as in v0.2.58). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.61 Update Notice[/b]
+Replace the previous installation with the complete v0.2.61 zip. Do not copy only individual EXEs or DLLs. The plugin code is the same as in v0.2.59, but the Helper, analyzer, viewer and version info changed, so update them together (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder. Dumps are about 17 MB larger than before because they now carry Windows modules' unwind data.
 
 [b][size=4]Installation (MO2)[/size][/b]
 [list=1]
@@ -113,18 +115,23 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What Changed In v0.2.59[/size][/b]
+[b][size=4]What Changed Since v0.2.59 (v0.2.60 and v0.2.61)[/size][/b]
 [list]
-[*][b]More conservative suspects:[/b] two signals that point at the same crash location no longer count as independent confirmation, and supporting hints alone never make a suspect [b]High[/b] confidence
-[*][b]Error-dialog freezes:[/b] when the game waits on a message box a plugin opened (for example an Address Library or version error), the report says so and shows the dialog title and text
-[*][b]Real call stacks:[/b] the stack walk no longer stops at the first frame
-[*][b]With Crash Logger:[/b] a mod assert or unhandled C++ exception reported by Crash Logger is recorded as the original exception, and Crash Logger's own thread dump ([font=Courier New]Ctrl+Shift+F12[/font]) no longer creates crash captures
-[*][b]Plugin scan:[/b] runs after a crash again, and Creation Club files from [font=Courier New]Skyrim.ccc[/font] are no longer reported as missing masters (MO2 + Anniversary Edition)
-[*][b]Gameplay freezes:[/b] freeze detection during gameplay now uses [font=Courier New]HangThresholdInGameSec[/font] (10 s by default). Before v0.2.59 a bug kept the 30 s menu threshold active for the whole session
-[*]The manual snapshot hotkey also works during gameplay, and freeze reports follow the Windows display language like crash reports
+[*][b]Crash objects from the dump:[/b] the objects the crash registers and stack pointed at are read from the dump itself, with type, FormID, name, the plugins that define and change them, and a reference's base object, e.g. [font=Courier New]RCX: Character "Lydia" 0x000A2C94 Update.esm -> SkyrimHouseRemodel.esp (base TESNPC 0x000A2C8E Skyrim.esm)[/font]. No Crash Logger log needed
+[*][b]Freezes explained by the main thread's wait:[/b] the report says whether the main thread was waiting for the GPU, inside the graphics driver, inside the engine, or in a plugin's call. When it waited for another game thread (where SKSE tasks run), the plugin that thread was stuck in becomes the lead. Stack plugins that were only on the call path are no longer blamed
+[*][b]Game state at the freeze:[/b] open menus (e.g. the Console), time since the last load, and a long pause just before (PC asleep or the game minimized)
+[*][b]Error dialogs:[/b] for an Address Library error dialog a plugin opened, the report says whether that plugin does not support your game version or Address Library is missing
+[*][b]SKSE log:[/b] DLLs SKSE did not load correctly in that session are listed from skse64.log, as information only
+[*][b]Works after Windows updates:[/b] dumps carry the stack-unwind data and export names of system DLLs and the graphics driver, so older dumps still analyze after a Windows or driver update
+[*][b]Memory at capture:[/b] RAM, system commit, the game's commit and its VRAM use and budget (the same numbers Crash Logger prints as GPU MEMORY); a memory warning when commit or VRAM is at 90% or more of its limit
+[*][b]Crash Logger integration:[/b] its original exception, objects without a plugin, and C++ exception details; the cell you stood in is no longer a suspect; a C++ exception Crash Logger logged as unhandled is described as a real CTD
+[*][b]Problem modules:[/b] a loaded SkyrimCrashGuard (which swallows crashes) is called out in every report
+[*][b]Repeat freezes grouped:[/b] the same freeze cause lands in the same bucket, so repeats are counted together
+[*][b]Smaller reports:[/b] about 11–17 KB instead of 150–190 KB, with an event overview and the last 60 events; checklist lines that do not fit the capture are gone, the SKSE runtime is no longer a suspect, and MO2 mod names drop Nexus archive suffixes ([font=Courier New]SmoothCam 41252 1.8.1 2026[/font] → [font=Courier New]SmoothCam[/font])
+[*][b]Helper fixes:[/b] plugin names with characters like [font=Courier New]é[/font] no longer stop the Helper; the previous session's log is kept as [font=Courier New]SkyrimDiagHelper.previous.log[/font]; crash dumps no longer fail on some Intel server CPUs with AMX
 [/list]
 
-[i]Validation scope:[/i] Release candidates rc2–rc7 were played on one MO2 setup (game 1.6.1170, about 4,250 plugins). Error-dialog freezes, the post-crash plugin scan, Crash Logger thread dumps, the gameplay snapshot hotkey, and the gameplay/menu freeze thresholds were confirmed in game. Recording a Crash Logger-reported assert is covered by automated runtime tests only, and there is still no reviewed real-incident accuracy corpus.
+[i]Validation scope:[/i] All release candidates were played on one MO2 setup (game 1.6.1170, SKSE 2.2.6, about 4,250 plugins, Crash Logger 1.25). For v0.2.61 a development-only test plugin caused 7 incidents of known cause in that game (access violation, breakpoint, C++ exception, a crash inside the game EXE, and freezes); after the fixes in v0.2.61 every report pointed at the right DLL. Not yet seen in real use: the "stuck game thread" freeze rule on a real freeze, analysis after the next Windows update, and a real SkyrimCrashGuard install. There is still no reviewed real-incident accuracy corpus.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -205,7 +212,7 @@ Write the path as plain text without quotes. Absolute paths work; relative paths
 A: No, but it is recommended. If present, Tullius can produce richer reports.
 
 [b]Q: Does freeze analysis work automatically?[/b]
-A: Yes. Recent versions use WCT, blackbox, and loading context together to provide a more useful freeze summary.
+A: Yes. The report says what the game's main thread was waiting for (the GPU, the driver, an error dialog, the engine or a game thread stuck in a plugin) and uses WCT, the blackbox and the loading context alongside it.
 
 [b][size=4]Privacy[/size][/b]
 [list]
@@ -241,7 +248,9 @@ dump와 주변 단서를 모아서 [b]사람이 읽기 쉬운 보고서[/b]를 �
 [*]사고 직전의 [b]blackbox 이벤트[/b], [b]WCT[/b], 보조 로그를 함께 남깁니다.
 [*]결과를 [b]요약 + 근거 + 체크리스트[/b] 형태로 정리합니다.
 [*]CrashLoggerSSE가 있으면 관련 로그를 자동으로 찾아서 분석에 포함합니다.
-[*]최근 버전에서는 [b]EXE 크래시[/b]와 [b]로딩 멈춤[/b] 같은 애매한 경우도 더 실용적으로 해석하도록 개선됐습니다.
+[*]크래시가 다루던 게임 오브젝트를 덤프에서 직접 읽습니다: 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트.
+[*]프리징을 게임 메인 스레드가 무엇을 기다렸는지로 설명합니다: GPU, 그래픽 드라이버, 플러그인이 띄운 오류 창, 플러그인 코드에 갇힌 게임 스레드.
+[*]캡처 당시 RAM·커밋·VRAM을 기록하고, 크래시를 숨기는 모듈(SkyrimCrashGuard 등)을 경고합니다.
 [/list]
 
 [b][size=4]이 모드가 아닌 것[/size][/b]
@@ -285,8 +294,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.59 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.59 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.59에서는 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었으므로 함께 업데이트해야 합니다(SharedLayout protocol은 v0.2.58과 같은 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.61 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.61 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. 플러그인 코드는 v0.2.59와 같지만 Helper, 분석기, 뷰어, 버전 정보가 바뀌었으므로 함께 업데이트해야 합니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요. 덤프에 Windows 모듈의 스택 해제 정보를 담기 때문에 덤프가 이전보다 약 17MB 커집니다.
 
 [b][size=4]설치 (MO2)[/size][/b]
 [list=1]
@@ -342,18 +351,23 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.59에서 바뀐 점[/size][/b]
+[b][size=4]v0.2.59 이후 바뀐 점 (v0.2.60, v0.2.61)[/size][/b]
 [list]
-[*][b]더 보수적인 원인 후보:[/b] 같은 크래시 위치를 가리키는 두 신호를 독립적인 교차 확인으로 세지 않고, 보강 단서만으로는 [b]높음[/b] 신뢰도가 되지 않습니다.
-[*][b]오류 창 때문에 멈춘 경우:[/b] 플러그인이 띄운 메시지 창(예: Address Library·버전 오류)에서 게임이 기다리고 있으면 그렇게 알려 주고, 창 제목과 내용을 보여 줍니다.
-[*][b]실제 호출 스택:[/b] 스택 추적이 첫 프레임에서 멈추지 않습니다.
-[*][b]Crash Logger와 함께 쓸 때:[/b] Crash Logger가 보고하는 모드 assert나 처리되지 않은 C++ 예외를 원래 예외로 기록하고, Crash Logger의 스레드 덤프([font=Courier New]Ctrl+Shift+F12[/font]) 중에는 크래시 캡처를 만들지 않습니다.
-[*][b]플러그인 스캔:[/b] 크래시 후 스캔이 다시 동작하고, [font=Courier New]Skyrim.ccc[/font]의 Creation Club 파일을 누락 마스터로 잘못 표시하지 않습니다(MO2 + Anniversary Edition).
-[*][b]게임 플레이 중 프리징:[/b] 이제 [font=Courier New]HangThresholdInGameSec[/font](기본 10초) 기준으로 감지합니다. v0.2.59 이전에는 버그 때문에 메뉴 기준 30초가 계속 적용됐습니다.
-[*]수동 스냅샷 단축키가 게임 플레이 중에도 동작하고, 프리징 리포트도 CTD 리포트처럼 Windows 표시 언어를 따릅니다.
+[*][b]덤프에서 크래시 오브젝트 읽기:[/b] 크래시 레지스터와 스택이 가리킨 오브젝트를 덤프 자체에서 읽어 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트를 보여 줍니다. 예: [font=Courier New]RCX: Character "리디아" 0x000A2C94 Update.esm -> SkyrimHouseRemodel.esp (base TESNPC 0x000A2C8E Skyrim.esm)[/font]. Crash Logger 로그가 없어도 됩니다.
+[*][b]메인 스레드의 대기로 프리징 설명:[/b] 메인 스레드가 GPU, 그래픽 드라이버, 엔진, 플러그인 호출 중 어디서 기다렸는지 알려 줍니다. 다른 게임 스레드(SKSE 작업이 도는 곳)를 기다리고 있었다면 그 스레드를 붙잡은 플러그인을 가장 유력한 단서로 올립니다. 호출 경로에 있었을 뿐인 스택의 플러그인은 더 이상 지목하지 않습니다.
+[*][b]프리징 당시 게임 상태:[/b] 열려 있던 메뉴(예: 콘솔), 마지막 로딩 뒤 지난 시간, 직전의 긴 정지(PC 절전이나 최소화).
+[*][b]오류 창:[/b] 플러그인이 띄운 Address Library 오류 창이면 그 플러그인이 현재 게임 버전을 지원하지 않는지, Address Library가 없는지 구분해 알려 줍니다.
+[*][b]SKSE 로그:[/b] 그 실행에서 SKSE가 정상적으로 로드하지 못한 DLL을 skse64.log에서 읽어 참고 정보로 보여 줍니다.
+[*][b]Windows 업데이트 뒤에도 분석:[/b] 덤프에 시스템 DLL과 그래픽 드라이버의 스택 해제 정보와 이름표를 담아, Windows나 드라이버를 업데이트한 뒤에도 예전 덤프를 분석할 수 있습니다.
+[*][b]캡처 당시 메모리:[/b] RAM, 시스템 커밋, 게임의 커밋과 VRAM 사용량·예산(Crash Logger의 GPU MEMORY와 같은 값). 커밋이나 VRAM이 한도의 90% 이상이면 메모리 경고를 붙입니다.
+[*][b]Crash Logger 연동:[/b] 원래 예외, 플러그인이 없는 관련 오브젝트, C++ 예외 정보를 읽고, 플레이어가 서 있던 셀을 후보로 올리지 않습니다. Crash Logger가 처리되지 않은 예외로 기록한 C++ 예외는 실제 CTD로 설명합니다.
+[*][b]문제 모듈:[/b] 크래시를 가로채는 SkyrimCrashGuard가 로드되어 있으면 모든 리포트에서 알려 줍니다.
+[*][b]반복 프리징 묶기:[/b] 같은 원인의 프리징은 같은 묶음(버킷)으로 세어 반복 횟수가 이어집니다.
+[*][b]가벼워진 리포트:[/b] 150~190KB에서 약 11~17KB로 줄었고(이벤트는 개요와 최근 60개), 상황에 맞지 않는 안내를 빼고, SKSE 런타임을 후보로 올리지 않으며, MO2 모드 이름에서 Nexus 압축 파일 이름의 꼬리를 뗍니다([font=Courier New]SmoothCam 41252 1.8.1 2026[/font] → [font=Courier New]SmoothCam[/font]).
+[*][b]Helper 수정:[/b] [font=Courier New]é[/font] 같은 문자가 든 플러그인 이름 때문에 Helper가 멈추지 않고, 직전 세션 로그를 [font=Courier New]SkyrimDiagHelper.previous.log[/font]로 남기며, AMX가 있는 일부 Intel 서버 CPU에서 크래시 덤프가 실패하던 문제를 고쳤습니다.
 [/list]
 
-[i]검증 범위:[/i] rc2~rc7을 한 MO2 환경(게임 1.6.1170, 플러그인 약 4,250개)에서 실제로 플레이하며 확인했습니다. 오류 창 프리징, 크래시 후 플러그인 스캔, Crash Logger 스레드 덤프, 게임 플레이 중 스냅샷 단축키, 게임 플레이/메뉴 프리징 기준은 실게임에서 확인했습니다. Crash Logger가 보고한 assert 기록은 자동 런타임 테스트로만 확인했고, 검수된 실사고 정확도 corpus는 아직 없습니다.
+[i]검증 범위:[/i] 모든 RC를 한 MO2 환경(게임 1.6.1170, SKSE 2.2.6, 플러그인 약 4,250개, Crash Logger 1.25)에서 실제로 플레이하며 확인했습니다. v0.2.61에서는 개발용 테스트 플러그인으로 원인을 아는 사고 7건(접근 위반, 브레이크포인트, C++ 예외, 게임 EXE 안의 크래시, 프리징)을 그 게임에서 일으켰고, v0.2.61의 수정 뒤 모든 리포트가 올바른 DLL을 지목했습니다. 아직 실사용에서 보지 못한 것: 실제 프리징에서의 "갇힌 게임 스레드" 판정, 다음 Windows 업데이트 뒤 분석, 실제 SkyrimCrashGuard 설치 환경. 검수된 실사고 정확도 corpus는 아직 없습니다.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
@@ -436,7 +450,7 @@ A: [font=Courier New]OutputDir=[/font]를 비워 두면 새 dump는 MO2 [font=Co
 A: 필수는 아닙니다. 다만 설치하면 더 풍부한 진단이 가능합니다.
 
 [b]Q: 프리징 분석도 자동으로 되나요?[/b]
-A: 됩니다. 최근 버전에서는 WCT, blackbox, loading 문맥을 함께 사용해서 예전보다 더 구분해서 보여줍니다.
+A: 됩니다. 게임 메인 스레드가 무엇을 기다렸는지(GPU, 드라이버, 오류 창, 엔진, 플러그인에 갇힌 게임 스레드)를 알려 주고, WCT, blackbox, 로딩 문맥도 함께 씁니다.
 
 [b][size=4]개인정보 안내[/size][/b]
 [list]
