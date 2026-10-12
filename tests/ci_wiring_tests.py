@@ -15,6 +15,7 @@ previous branch run would let a directly tagged commit bypass those checks.
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -316,6 +317,24 @@ def check_pull_request_tidy_scope(failures: list[str]) -> None:
         failures.append("release.yml must always lint the full production set")
 
 
+def check_compiler_cache_is_ci_only(failures: list[str]) -> None:
+    # CI caches compiles with sccache, which needs /Z7 instead of /Zi; the
+    # release workflow must keep building every object from scratch.
+    ci = _read(WORKFLOWS / "ci.yml")
+    if re.search(r"uses: mozilla-actions/sccache-action@[0-9a-f]{40}\b", ci) is None:
+        failures.append("ci.yml must pin sccache-action to a commit SHA")
+    for needed in (
+        "-DCMAKE_CXX_COMPILER_LAUNCHER=sccache",
+        "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded",
+        "-DCMAKE_POLICY_DEFAULT_CMP0141=NEW",
+        'SCCACHE_IGNORE_SERVER_IO_ERROR: "1"',
+    ):
+        if needed not in ci:
+            failures.append(f"ci.yml compiler cache is missing {needed}")
+    if "sccache" in _read(WORKFLOWS / "release.yml"):
+        failures.append("release.yml must not use the compiler cache")
+
+
 def check_dump_stress_repeats_only_after_a_build(failures: list[str]) -> None:
     # A failed build would otherwise show up as a second, misleading ctest
     # failure in every shard.
@@ -403,6 +422,7 @@ def main() -> int:
     check_docs_only_detector_behaviour(failures)
     check_dump_stress_repeats_only_after_a_build(failures)
     check_pull_request_tidy_scope(failures)
+    check_compiler_cache_is_ci_only(failures)
 
     if failures:
         for failure in failures:

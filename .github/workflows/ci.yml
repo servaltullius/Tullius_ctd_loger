@@ -102,27 +102,47 @@ jobs:
           restore-keys: |
             vcpkg-archives-
 
+      # Compiler cache for CI only; the release workflow always builds clean.
+      # sccache cannot cache /Zi (a PDB shared between compiles), so CI
+      # compiles with /Z7; the linker still writes the same PDB files.
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba  # v0.0.11
+        with:
+          version: "v0.18.0"
+
       - name: Configure (Ninja + vcpkg)
         shell: pwsh
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"  # a cache outage compiles without it
         run: >
           cmake -S . -B build-win
           -G Ninja
           -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DCMAKE_TOOLCHAIN_FILE="$env:RUNNER_TEMP\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+          -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       # Linking a freshly built test has failed on the runner with "Access is
       # denied" or "used by another process"; a second pass only relinks what
       # is missing.
       - name: Build (RelWithDebInfo)
         shell: pwsh
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
         run: |
           cmake --build build-win
           if ($LASTEXITCODE -ne 0) {
             Write-Host "Build failed once; retrying the remaining steps."
             cmake --build build-win
           }
-          exit $LASTEXITCODE
+          $buildExit = $LASTEXITCODE
+          sccache --show-stats
+          exit $buildExit
 
       # Pull requests lint only the production sources they change (all of them
       # when a header or build setting changes); pushes to main and the release
