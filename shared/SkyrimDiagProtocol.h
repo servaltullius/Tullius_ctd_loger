@@ -15,6 +15,8 @@ inline constexpr wchar_t kKernelObjectSuffix_HelperMutex[] = L"_HELPER_MUTEX";
 inline constexpr std::uint32_t kMinidumpUserStream_Blackbox = 0x10000u + 0x5344u;  // arbitrary
 inline constexpr std::uint32_t kMinidumpUserStream_WctJson = 0x10000u + 0x5743u;   // arbitrary
 inline constexpr std::uint32_t kMinidumpUserStream_PluginInfo = 0x10000u + 0x504Cu;  // arbitrary "PL"
+// JSON: the game process's GPU memory per adapter at capture time ("GM").
+inline constexpr std::uint32_t kMinidumpUserStream_GpuMemory = 0x10000u + 0x474Du;
 
 // Build a kernel object name from PID and suffix.
 inline std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)

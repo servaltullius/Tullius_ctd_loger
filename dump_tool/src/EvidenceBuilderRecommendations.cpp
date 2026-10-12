@@ -4,6 +4,7 @@
 #include <cwchar>
 
 #include "MainThreadWait.h"
+#include "MemorySnapshot.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 
@@ -952,6 +953,32 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(en
         ? L"[Manual] Manual captures include WCT. For real freezes/infinite loading, check the WCT tab from a capture taken during the issue."
         : L"[수동] 수동 캡처에는 WCT가 포함됩니다. 실제 프리징/무한로딩 중 캡처한 덤프에서 WCT 탭을 참고하세요.");
+    }
+  }
+
+  // Memory near a limit makes allocations fail (a crash) or makes Windows
+  // move the game's textures out of VRAM (stutter, freezes). It names no mod,
+  // so it never outranks a candidate.
+  if (const MemoryPressure pressure = AssessMemoryPressure(r.memory); pressure.Any()) {
+    if (pressure.vram_high) {
+      const std::wstring amount = FormatGb(r.memory.vram_usage_bytes, 2) + L"/" + FormatGb(r.memory.vram_budget_bytes, 2) + L" GB";
+      r.recommendations.push_back(en
+        ? (L"[Memory] At capture time the game was using " + std::to_wstring(pressure.vram_percent) +
+            L"% of its VRAM budget (" + amount + L"). Running out of VRAM can crash or freeze the game. "
+            L"Lower texture resolution (texture packs, ENB/Community Shaders settings, upscaler) and retest.")
+        : (L"[메모리] 캡처 당시 게임이 VRAM 예산의 " + std::to_wstring(pressure.vram_percent) +
+            L"%(" + amount + L")를 쓰고 있었습니다. VRAM이 모자라면 크래시나 프리징이 날 수 있습니다. "
+            L"텍스처 해상도(텍스처 모드, ENB/Community Shaders 설정, 업스케일러)를 낮춰 재현 여부를 확인하세요."));
+    }
+    if (pressure.commit_high) {
+      const std::wstring amount = FormatGb(r.memory.commit_used_bytes, 1) + L"/" + FormatGb(r.memory.commit_limit_bytes, 1) + L" GB";
+      r.recommendations.push_back(en
+        ? (L"[Memory] At capture time system commit was at " + std::to_wstring(pressure.commit_percent) +
+            L"% of its limit (" + amount + L"). When it runs out, allocations fail and the game crashes. "
+            L"Close other programs or enlarge the page file (or let Windows manage its size), then retest.")
+        : (L"[메모리] 캡처 당시 시스템 커밋이 한도의 " + std::to_wstring(pressure.commit_percent) +
+            L"%(" + amount + L")였습니다. 한도에 닿으면 메모리 할당이 실패해 게임이 튕깁니다. "
+            L"다른 프로그램을 닫거나 페이지 파일을 늘린(또는 시스템이 관리하도록 둔) 뒤 재현 여부를 확인하세요."));
     }
   }
 

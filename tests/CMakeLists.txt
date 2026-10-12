@@ -117,6 +117,20 @@ if(WIN32)
     COMMAND skydiag_freeze_context_report_tests
   )
 
+  add_executable(skydiag_memory_snapshot_tests
+    memory_snapshot_tests.cpp
+  )
+  target_include_directories(skydiag_memory_snapshot_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_memory_snapshot_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_memory_snapshot_tests
+    COMMAND skydiag_memory_snapshot_tests
+  )
+
   add_executable(skydiag_skse_log_report_tests
     skse_log_report_tests.cpp
   )
@@ -654,6 +668,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashObjectMemory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/GpuMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ModuleUnwindMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpProfile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpToolLaunch.cpp"
@@ -773,6 +788,23 @@ if(WIN32)
     SkyrimDiagDumpToolCore
   )
   add_test(NAME skydiag_crash_object_e2e_tests COMMAND skydiag_crash_object_e2e_tests)
+
+  # RAM/commit from the dump's own streams and VRAM from the helper's stream,
+  # read back by the production analyzer.
+  add_executable(skydiag_memory_snapshot_e2e_tests
+    memory_snapshot_e2e_tests.cpp
+  )
+  target_include_directories(skydiag_memory_snapshot_e2e_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_memory_snapshot_e2e_tests PRIVATE
+    skydiag_helper_runtime_test_support
+    SkyrimDiagDumpToolCore
+    d3d11
+    dxgi
+    Psapi
+  )
+  add_test(NAME skydiag_memory_snapshot_e2e_tests COMMAND skydiag_memory_snapshot_e2e_tests)
 
   # ScanPlugins against a throwaway MO2-style game folder: the base masters and
   # Skyrim.ccc plugins the game loads on its own must count as active.
