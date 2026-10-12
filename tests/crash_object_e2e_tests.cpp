@@ -54,10 +54,32 @@ public:
   std::uint8_t formType = 0;            // 0x1A
 };
 
+class TESBoundObject : public TESForm
+{
+public:
+  ~TESBoundObject() override = default;
+};
+
+class TESFullName
+{
+public:
+  virtual ~TESFullName() = default;
+  const char* fullName = nullptr;  // 0x08, a BSFixedString in the game
+};
+
+// TESFullName lands after the TESForm part, as in the game.
+class TESNPC : public TESBoundObject, public TESFullName
+{
+public:
+  ~TESNPC() override = default;
+};
+
 class TESObjectREFR : public TESForm
 {
 public:
   ~TESObjectREFR() override = default;
+  char unk20[0x20]{};
+  TESBoundObject* baseObject = nullptr;  // 0x40, OBJ_REFR::objectReference
 };
 
 class Actor : public TESObjectREFR
@@ -88,6 +110,7 @@ void TestCrashObjectsAreReadBackFromTheDump()
   const auto* base = reinterpret_cast<const char*>(character.get());
   Require(reinterpret_cast<const char*>(&character->formID) - base == 0x14, "TESForm::formID at 0x14");
   Require(reinterpret_cast<const char*>(&character->formType) - base == 0x1A, "TESForm::formType at 0x1A");
+  Require(reinterpret_cast<const char*>(&character->baseObject) - base == 0x40, "OBJ_REFR at 0x40");
 
   auto master = std::make_unique<TESFile>();
   auto plugin = std::make_unique<TESFile>();
@@ -98,6 +121,18 @@ void TestCrashObjectsAreReadBackFromTheDump()
   character->sourceFiles = &fileArray;
   character->formID = 0xFEAD081Bu;
   character->formType = 0x3E;
+  // The spawned actor's base NPC, defined by the master only.
+  TESFile* masterOnly[] = { master.get() };
+  TESFileArray npcFiles{ masterOnly, 1 };
+  auto npc = std::make_unique<TESNPC>();
+  npc->sourceFiles = &npcFiles;
+  npc->formID = 0x0001D8F6u;
+  npc->formType = 0x2B;
+  static const char kNpcName[] = "Blood Dragon";
+  npc->fullName = kNpcName;
+  Require(reinterpret_cast<const char*>(static_cast<TESFullName*>(npc.get())) != reinterpret_cast<const char*>(npc.get()),
+    "TESFullName is not at the start of TESNPC");
+  character->baseObject = npc.get();
   auto node = std::make_unique<BSFadeNode>();
   auto notAnObject = std::make_unique<std::uint64_t>(42);
 
@@ -161,6 +196,11 @@ void TestCrashObjectsAreReadBackFromTheDump()
   Require(form != nullptr, "The object in RCX must be read back from the dump");
   Require(form->type_name == L"Character", "The RTTI type name survives the dump");
   Require(form->is_form && form->form_id == 0xFEAD081Bu && form->form_type == 0x3E, "The TESForm fields survive the dump");
+  Require(form->name == L"Blood Dragon", "The base NPC's name survives the dump");
+  Require(
+    form->has_base_object && form->base_type_name == L"TESNPC" && form->base_form_id == 0x0001D8F6u &&
+      form->base_source_files.size() == 1u && form->base_source_files[0] == L"Skyrim.esm",
+    "The base object survives the dump");
   Require(
     form->source_files.size() == 2u && form->source_files[0] == L"Skyrim.esm" &&
       form->source_files[1] == L"AE_StellarBlade_Doro.esp",
@@ -173,7 +213,9 @@ void TestCrashObjectsAreReadBackFromTheDump()
   bool hasEvidence = false;
   for (const auto& e : result.evidence) {
     if (e.title.find(L"read from the dump") != std::wstring::npos &&
-        e.details.find(L"RCX: Character [0xFEAD081B] Skyrim.esm -> AE_StellarBlade_Doro.esp") != std::wstring::npos) {
+        e.details.find(
+          L"RCX: Character \"Blood Dragon\" [0xFEAD081B] Skyrim.esm -> AE_StellarBlade_Doro.esp "
+          L"(base TESNPC [0x0001D8F6] Skyrim.esm)") != std::wstring::npos) {
       hasEvidence = true;
     }
   }

@@ -26,7 +26,8 @@ bool IsValidUtf8(std::string_view s)
   return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0) > 0;
 }
 
-// TESFile names are in the game's ANSI code page.
+// TESFile and form names: UTF-8 when they are valid UTF-8 (localized string
+// files), otherwise the game's ANSI code page.
 std::wstring FileNameToWide(const std::string& name)
 {
   if (name.empty() || name.size() > 0x1000) {
@@ -53,6 +54,37 @@ std::wstring ModuleNameFor(const std::vector<minidump::ModuleInfo>& modules, std
     }
   }
   return {};
+}
+
+std::vector<std::wstring> FileNamesToWide(const std::vector<std::string>& names)
+{
+  std::vector<std::wstring> out;
+  for (const auto& name : names) {
+    if (auto wide = FileNameToWide(name); !wide.empty()) {
+      out.push_back(std::move(wide));
+    }
+  }
+  return out;
+}
+
+std::wstring FormIdText(std::uint32_t formId)
+{
+  wchar_t text[16]{};
+  std::swprintf(text, std::size(text), L"0x%08X", formId);
+  return text;
+}
+
+// Defining plugin, then the last one that changes it.
+std::wstring FilesText(const std::vector<std::wstring>& files)
+{
+  if (files.empty()) {
+    return {};
+  }
+  std::wstring text = files.front();
+  if (files.size() > 1u) {
+    text += L" -> " + files.back();
+  }
+  return text;
 }
 
 struct Root
@@ -87,16 +119,20 @@ std::vector<Root> CollectRoots(const internal::stackwalk_internal::MinidumpMemor
 std::wstring DescribeDumpObject(const DumpObject& object)
 {
   std::wstring text = object.location + L": " + object.type_name;
+  if (!object.name.empty()) {
+    text += L" \"" + object.name + L"\"";
+  }
   if (object.is_form) {
-    wchar_t formId[16]{};
-    std::swprintf(formId, std::size(formId), L"0x%08X", object.form_id);
-    text += L" [" + std::wstring(formId) + L"]";
-    // Defining plugin, then the last one that changes it.
-    if (!object.source_files.empty()) {
-      text += L" " + object.source_files.front();
-      if (object.source_files.size() > 1u) {
-        text += L" -> " + object.source_files.back();
+    text += L" [" + FormIdText(object.form_id) + L"]";
+    if (const auto files = FilesText(object.source_files); !files.empty()) {
+      text += L" " + files;
+    }
+    if (object.has_base_object) {
+      text += L" (base " + object.base_type_name + L" [" + FormIdText(object.base_form_id) + L"]";
+      if (const auto files = FilesText(object.base_source_files); !files.empty()) {
+        text += L" " + files;
       }
+      text += L")";
     }
   } else if (!object.module.empty()) {
     text += L" (" + object.module + L")";
@@ -149,10 +185,13 @@ std::vector<DumpObject> ReadDumpObjects(
     object.is_form = info->is_form;
     object.form_id = info->form_id;
     object.form_type = info->form_type;
-    for (const auto& file : info->source_files) {
-      if (auto wide = FileNameToWide(file); !wide.empty()) {
-        object.source_files.push_back(std::move(wide));
-      }
+    object.source_files = FileNamesToWide(info->source_files);
+    object.name = FileNameToWide(info->full_name);
+    if (info->has_base_object) {
+      object.has_base_object = true;
+      object.base_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(info->base_type_name));
+      object.base_form_id = info->base_form_id;
+      object.base_source_files = FileNamesToWide(info->base_source_files);
     }
     object.relevance = relevance;
     objects.push_back(std::move(object));

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -191,6 +192,79 @@ void TestNonFormClass()
   assert(object && !object->is_form && object->source_files.empty());
 }
 
+// A second class in the same fake module: TESNPC with TESBoundObject and
+// TESForm at 0 and TESFullName at 0x30, like the game's multiple inheritance.
+constexpr std::uint64_t kNpc = 0x2A000006000ull;
+constexpr std::uint64_t kNpcName = 0x2A000007000ull;
+constexpr std::uint32_t kNpcVtable = 0x6000;
+constexpr std::uint32_t kNpcLocator = 0x6100;
+constexpr std::uint32_t kNpcHierarchy = 0x6200;
+constexpr std::uint32_t kNpcBaseArray = 0x6300;
+
+void PutNpc(FakeMemory& m, const std::string& boundObjectName = ".?AVTESBoundObject@@")
+{
+  const std::vector<std::pair<std::string, std::int32_t>> bases = {
+    { ".?AVTESNPC@@", 0 }, { boundObjectName, 0 }, { ".?AVTESForm@@", 0 }, { ".?AVTESFullName@@", 0x30 },
+  };
+  for (std::size_t i = 0; i < bases.size(); ++i) {
+    const auto td = static_cast<std::uint32_t>(0x7000 + i * 0x100);
+    PutTypeDescriptor(m, td, bases[i].first);
+    const auto bcd = static_cast<std::uint32_t>(0x8000 + i * 0x40);
+    skydiag::rtti::detail::BaseClassDescriptor base{ td, 0, bases[i].second, -1, 0, 0, kNpcHierarchy };
+    m.PutValue(kModule + bcd, base);
+    m.PutValue<std::uint32_t>(kModule + kNpcBaseArray + 4 * i, bcd);
+  }
+  skydiag::rtti::detail::ClassHierarchyDescriptor hierarchy{ 0, 0, static_cast<std::uint32_t>(bases.size()), kNpcBaseArray };
+  m.PutValue(kModule + kNpcHierarchy, hierarchy);
+  skydiag::rtti::detail::CompleteObjectLocator locator{ 1, 0, 0, 0x7000, kNpcHierarchy, kNpcLocator };
+  m.PutValue(kModule + kNpcLocator, locator);
+  m.PutValue<std::uint64_t>(kModule + kNpcVtable - 8, kModule + kNpcLocator);
+
+  m.PutValue<std::uint64_t>(kNpc, kModule + kNpcVtable);
+  m.PutValue<std::uint64_t>(kNpc + 0x08, kFileArray);  // same plugins as the character
+  m.PutValue<std::uint32_t>(kNpc + 0x14, 0x0001D8F6u);
+  m.PutValue<std::uint8_t>(kNpc + 0x1A, 0x2B);
+  m.PutValue<std::uint64_t>(kNpc + 0x30, kModule + 0x5000);  // TESFullName's vtable
+  m.PutValue<std::uint64_t>(kNpc + 0x38, kNpcName);           // BSFixedString
+  m.PutString(kNpcName, "\xEB\xB8\x94\xEB\x9F\xAC\xEB\x93\x9C \xEB\x93\x9C\xEB\x9E\x98\xEA\xB3\xA4");
+}
+
+void TestNames()
+{
+  // A form with a name of its own.
+  auto m = MakeCharacter();
+  PutNpc(m);
+  const auto npc = ReadObject(m, kNpc);
+  assert(npc && npc->type_name == ".?AVTESNPC@@" && npc->form_id == 0x0001D8F6u);
+  assert(npc->full_name == "\xEB\xB8\x94\xEB\x9F\xAC\xEB\x93\x9C \xEB\x93\x9C\xEB\x9E\x98\xEA\xB3\xA4");
+  assert(!npc->has_base_object);
+
+  // A reference takes its base object's name; OBJ_REFR starts at 0x40.
+  m.PutValue<std::uint64_t>(kObject + 0x40, kNpc);
+  const auto character = ReadObject(m, kObject);
+  assert(character && character->has_base_object);
+  assert(character->full_name == npc->full_name);
+  assert(character->base_type_name == ".?AVTESNPC@@" && character->base_form_id == 0x0001D8F6u);
+  assert((character->base_source_files == std::vector<std::string>{ "Skyrim.esm", "AE_StellarBlade_Doro.esp" }));
+
+  // Something that is not a bound object is not taken as the base.
+  auto notBound = MakeCharacter();
+  PutNpc(notBound, ".?AVTESObject@@");
+  notBound.PutValue<std::uint64_t>(kObject + 0x40, kNpc);
+  const auto unbased = ReadObject(notBound, kObject);
+  assert(unbased && !unbased->has_base_object && unbased->full_name.empty());
+
+  // No pointer, or an unreadable name: still the object, without a name.
+  auto noBase = MakeCharacter();
+  const auto plain = ReadObject(noBase, kObject);
+  assert(plain && !plain->has_base_object && plain->full_name.empty());
+  auto badName = MakeCharacter();
+  PutNpc(badName);
+  badName.Erase(kNpcName, 4);
+  const auto nameless = ReadObject(badName, kNpc);
+  assert(nameless && nameless->is_form && nameless->full_name.empty());
+}
+
 void TestUndecorate()
 {
   assert(UndecorateTypeName(".?AVCharacter@@") == "Character");
@@ -208,6 +282,7 @@ int main()
   TestNotAnObject();
   TestPartialMemory();
   TestNonFormClass();
+  TestNames();
   TestUndecorate();
   std::puts("rtti decoder tests passed");
   return 0;

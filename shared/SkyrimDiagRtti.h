@@ -17,6 +17,10 @@
 // - Skyrim SE/AE TESForm: sourceFiles (TESFileContainer, a pointer to
 //   BSStaticArray<TESFile*>) at 0x08, formID at 0x14, formType at 0x1A;
 //   TESFile::fileName at 0x58.
+// - Names: a TESFullName base (wherever the class hierarchy puts it) holds a
+//   BSFixedString, a pointer to the characters, at +0x08. A reference
+//   (TESObjectREFR) has no name of its own; OBJ_REFR at 0x40 starts with the
+//   base object (TESBoundObject*), whose name and plugins are used instead.
 
 #include <algorithm>
 #include <cstddef>
@@ -40,6 +44,12 @@ struct ObjectInfo
   std::uint32_t form_id = 0;
   std::uint8_t form_type = 0;
   std::vector<std::string> source_files;  // TESFile::fileName, in load order
+  std::string full_name;  // TESFullName, bytes as the game holds them
+  // For a reference: the base object it places (an NPC for a Character).
+  bool has_base_object = false;
+  std::string base_type_name;  // decorated
+  std::uint32_t base_form_id = 0;
+  std::vector<std::string> base_source_files;
 };
 
 inline constexpr std::size_t kMaxTypeNameBytes = 256;
@@ -49,6 +59,11 @@ inline constexpr std::size_t kMaxFileNameBytes = 0x104;
 inline constexpr std::uint64_t kMinUserAddress = 0x10000;
 inline constexpr std::uint64_t kMaxUserAddress = 0x7FFFFFFF0000ull;
 inline constexpr std::string_view kTesFormTypeName = ".?AVTESForm@@";
+inline constexpr std::string_view kTesFullNameTypeName = ".?AVTESFullName@@";
+inline constexpr std::string_view kTesObjectRefrTypeName = ".?AVTESObjectREFR@@";
+inline constexpr std::string_view kTesBoundObjectTypeName = ".?AVTESBoundObject@@";
+inline constexpr std::size_t kMaxFullNameBytes = 256;
+inline constexpr std::uint64_t kRefrBaseObjectOffset = 0x40;
 
 namespace detail {
 
@@ -161,12 +176,11 @@ void ReadFormFields(const Reader& read, std::uint64_t form, ObjectInfo& info)
 
 }  // namespace detail
 
-// Returns nullopt unless `address` points at an object with a vtable whose
-// RTTI is readable and well formed.
+namespace detail {
+
 template <class Reader>
-std::optional<ObjectInfo> ReadObject(const Reader& read, std::uint64_t address)
+std::optional<ObjectInfo> ReadObjectAt(const Reader& read, std::uint64_t address, bool followReference)
 {
-  using namespace detail;
   if (!PlausiblePointer(address) || (address & 7u) != 0) {
     return std::nullopt;
   }
@@ -200,6 +214,8 @@ std::optional<ObjectInfo> ReadObject(const Reader& read, std::uint64_t address)
   }
 
   std::optional<std::uint64_t> formBase;
+  std::optional<std::uint64_t> fullNameBase;
+  std::optional<std::uint64_t> referenceBase;
   ClassHierarchyDescriptor hierarchy{};
   if (ReadValue(read, moduleBase + locator.class_descriptor, hierarchy) &&
       hierarchy.num_base_classes <= kMaxBaseClasses) {
@@ -213,8 +229,15 @@ std::optional<ObjectInfo> ReadObject(const Reader& read, std::uint64_t address)
         break;
       }
       // pdisp == -1: a non-virtual base at a fixed offset (mdisp).
-      if (!formBase && name == kTesFormTypeName && base.pdisp == -1 && base.mdisp >= 0) {
-        formBase = info.complete_object + static_cast<std::uint64_t>(base.mdisp);
+      if (base.pdisp == -1 && base.mdisp >= 0) {
+        const std::uint64_t at = info.complete_object + static_cast<std::uint64_t>(base.mdisp);
+        if (!formBase && name == kTesFormTypeName) {
+          formBase = at;
+        } else if (!fullNameBase && name == kTesFullNameTypeName) {
+          fullNameBase = at;
+        } else if (!referenceBase && name == kTesObjectRefrTypeName) {
+          referenceBase = at;
+        }
       }
       info.base_names.push_back(std::move(name));
     }
@@ -222,7 +245,41 @@ std::optional<ObjectInfo> ReadObject(const Reader& read, std::uint64_t address)
   if (formBase) {
     ReadFormFields(read, *formBase, info);
   }
+  if (fullNameBase) {
+    std::uint64_t characters = 0;
+    if (ReadValue(read, *fullNameBase + 8, characters) && PlausiblePointer(characters)) {
+      ReadCString(read, characters, kMaxFullNameBytes, /*asciiOnly=*/false, info.full_name);
+    }
+  }
+  if (followReference && referenceBase && info.is_form) {
+    // Only a form that is a bound object counts as the base: a wrong offset
+    // yields nothing rather than another object's name.
+    std::uint64_t baseObject = 0;
+    if (ReadValue(read, *referenceBase + kRefrBaseObjectOffset, baseObject)) {
+      const auto base = ReadObjectAt(read, baseObject, /*followReference=*/false);
+      if (base && base->is_form &&
+          std::find(base->base_names.begin(), base->base_names.end(), kTesBoundObjectTypeName) != base->base_names.end()) {
+        info.has_base_object = true;
+        info.base_type_name = base->type_name;
+        info.base_form_id = base->form_id;
+        info.base_source_files = base->source_files;
+        if (info.full_name.empty()) {
+          info.full_name = base->full_name;
+        }
+      }
+    }
+  }
   return info;
+}
+
+}  // namespace detail
+
+// Returns nullopt unless `address` points at an object with a vtable whose
+// RTTI is readable and well formed.
+template <class Reader>
+std::optional<ObjectInfo> ReadObject(const Reader& read, std::uint64_t address)
+{
+  return detail::ReadObjectAt(read, address, /*followReference=*/true);
 }
 
 // ".?AVCharacter@@" -> "Character", ".?AVPlayer@RE@@" -> "RE::Player".

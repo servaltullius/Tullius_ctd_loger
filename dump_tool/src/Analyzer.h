@@ -36,6 +36,12 @@ struct DumpObject
   std::uint32_t form_id = 0;
   std::uint8_t form_type = 0;
   std::vector<std::wstring> source_files;  // plugin files, in load order
+  std::wstring name;  // TESFullName; a reference takes its base object's
+  // For a reference: the base object it places (an NPC for a Character).
+  bool has_base_object = false;
+  std::wstring base_type_name;  // "TESNPC"
+  std::uint32_t base_form_id = 0;
+  std::vector<std::wstring> base_source_files;
   std::uint32_t relevance = 0;  // Crash Logger's location + type weights
 };
 
