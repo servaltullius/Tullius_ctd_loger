@@ -1,6 +1,7 @@
 #include "EvidenceBuilderEvidencePipeline.h"
 
 #include "MemorySnapshot.h"
+#include "ProblematicModules.h"
 
 #include <algorithm>
 #include <cwchar>
@@ -238,6 +239,25 @@ void BuildHistoryEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
       r.history_correlation.count,
       ToWideAscii(r.history_correlation.first_seen).c_str());
     e.details = buf;
+    r.evidence.push_back(std::move(e));
+  }
+}
+
+void BuildProblematicModuleEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  for (const auto& module : r.problematic_modules) {
+    const auto* rule = FindProblematicModuleRule(module.filename);
+    if (!rule) {
+      continue;
+    }
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = ctx.en
+      ? (L"A module that makes crash evidence unreliable is loaded: " + std::wstring(rule->name))
+      : (L"크래시 근거를 믿기 어렵게 만드는 모듈이 로드됨: " + std::wstring(rule->name));
+    e.details = DescribeProblematicModule(module, ctx.en) + L": " +
+      std::wstring(ctx.en ? rule->reason_en : rule->reason_ko) + L". " + std::wstring(rule->link);
     r.evidence.push_back(std::move(e));
   }
 }

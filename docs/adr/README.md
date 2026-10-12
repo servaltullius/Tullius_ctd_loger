@@ -15,3 +15,4 @@ ADR index:
 - `0010-crash-object-introspection.md`
 - `0011-dump-carries-system-module-unwind-data.md`
 - `0012-memory-snapshot.md`
+- `0013-problematic-modules.md`
