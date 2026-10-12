@@ -801,6 +801,7 @@ if(WIN32)
     skydiag_helper_runtime_test_support
     SkyrimDiagDumpToolCore
     d3d11
+    dxgi
     Psapi
   )
   add_test(NAME skydiag_memory_snapshot_e2e_tests COMMAND skydiag_memory_snapshot_e2e_tests)

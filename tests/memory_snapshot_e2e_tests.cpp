@@ -1,11 +1,14 @@
 // End to end: the helper's real dump writer and the production analyzer must
 // agree on this process's memory. RAM and commit come from the dump's own
-// streams on every machine; the GPU part is checked when a hardware Direct3D
-// device can be created (CI runners have none, so it is skipped there).
+// streams on every machine; the GPU part is checked when a Direct3D device
+// lands on a real GPU. CI runners only have the Microsoft Basic Render Driver,
+// which the kernel keeps no per-process VRAM statistics for, so it is skipped
+// there.
 
 #include <Windows.h>
 
 #include <d3d11.h>
+#include <dxgi.h>
 #include <psapi.h>
 
 #include <cstdint>
@@ -42,7 +45,7 @@ void SafeRelease(T*& p)
   }
 }
 
-// A hardware device with two 64 MiB textures in VRAM, or nothing.
+// Two 64 MiB textures in the VRAM of a real GPU, or nothing.
 struct GpuLoad
 {
   ID3D11Device* device = nullptr;
@@ -53,6 +56,10 @@ struct GpuLoad
   {
     if (FAILED(D3D11CreateDevice(
           nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, &context))) {
+      return;
+    }
+    if (!OnRealGpu()) {
+      Release();
       return;
     }
     D3D11_TEXTURE2D_DESC desc{};
@@ -91,6 +98,22 @@ struct GpuLoad
   }
 
   bool Ready() const { return textures[1] != nullptr; }
+
+  // Not the Microsoft Basic Render Driver (vendor 0x1414) and with memory of
+  // its own.
+  bool OnRealGpu() const
+  {
+    IDXGIDevice* dxgiDevice = nullptr;
+    if (FAILED(device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void**>(&dxgiDevice)))) {
+      return false;
+    }
+    IDXGIAdapter* adapter = nullptr;
+    DXGI_ADAPTER_DESC desc{};
+    const bool described = SUCCEEDED(dxgiDevice->GetAdapter(&adapter)) && SUCCEEDED(adapter->GetDesc(&desc));
+    SafeRelease(adapter);
+    SafeRelease(dxgiDevice);
+    return described && desc.VendorId != 0x1414u && desc.DedicatedVideoMemory > 0;
+  }
 };
 
 void TestMemoryIsReadBackFromTheDump()
@@ -148,8 +171,8 @@ void TestMemoryIsReadBackFromTheDump()
   Require(hasEvidence, "The memory is listed as evidence");
 
   if (!gpu.Ready()) {
-    std::puts("no hardware Direct3D device; GPU part skipped");
-    Require(!m.has_gpu || m.vram_usage_bytes > 0, "a GPU part is only written for memory in use");
+    std::puts("no real GPU; GPU part skipped");
+    Require(!m.has_gpu || m.vram_usage_bytes + m.gpu_shared_usage_bytes > 0, "a GPU part is only written for memory in use");
   } else {
     Require(m.has_gpu, "The helper's GPU memory stream must be read back");
     Require(m.vram_usage_bytes >= 128 * kMiB, "The two 64 MiB textures count as VRAM in use");
