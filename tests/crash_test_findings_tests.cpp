@@ -29,7 +29,8 @@ namespace skydiag::dump_tool::internal::stackwalk {
 std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   const std::vector<minidump::ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
-  i18n::Language lang);
+  i18n::Language lang,
+  bool walkReachedThreadStart = true);
 }
 
 namespace {
@@ -218,6 +219,22 @@ void TestSkseRuntimeIsThePathNotASuspect()
     hasSkse = hasSkse || s.module_filename == L"skse64_1_6_1170.dll";
   }
   Require(hasSkse, "SKSE that faulted is still a suspect");
+
+  // A thread-entry hook shape (game x3, plugin, game, system) is left out only
+  // when the walk reached the thread start; a walk cut on a system frame
+  // without unwind data hides what lies below it.
+  std::vector<ModuleInfo> hookModules = {
+    module(L"SkyrimSE.exe", 0x30000), module(L"Hook.dll", 0x40000), module(L"KERNELBASE.dll", 0x50000),
+  };
+  hookModules[0].is_game_exe = true;
+  hookModules[2].is_systemish = true;
+  const std::vector<std::uint64_t> hookStack = { 0x30100, 0x30200, 0x30300, 0x40100, 0x30400, 0x50100 };
+  Require(skydiag::dump_tool::internal::stackwalk::ComputeCallstackSuspectsFromAddrs(
+            hookModules, hookStack, i18n::Language::kEnglish, /*walkReachedThreadStart=*/true).empty(),
+          "a thread-entry hook of a complete walk is no suspect");
+  const auto cut = skydiag::dump_tool::internal::stackwalk::ComputeCallstackSuspectsFromAddrs(
+    hookModules, hookStack, i18n::Language::kEnglish, /*walkReachedThreadStart=*/false);
+  Require(cut.size() == 1u && cut[0].module_filename == L"Hook.dll", "a cut walk keeps the plugin a suspect");
 
   AnalysisResult r{};
   r.fault_module_filename = L"CrashTester.dll";

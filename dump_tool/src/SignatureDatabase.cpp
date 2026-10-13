@@ -108,6 +108,11 @@ struct SignatureDatabase::Signature
   bool access_violation_address_near_zero = false;
   bool has_access_violation_address_near_zero = false;
 
+  // The exact address the access violation read or wrote (a known null
+  // dereference reads one fixed offset from the null pointer).
+  std::uint64_t access_violation_address = 0;
+  bool has_access_violation_address = false;
+
   std::vector<std::wstring> callstack_contains;
 
   std::wstring cpp_exception_info_contains;  // lowercase, empty = any
@@ -185,6 +190,7 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
             key != "fault_offset_regex" &&
             key != "fault_module_is_system" &&
             key != "access_violation_address_near_zero" &&
+            key != "access_violation_address" &&
             key != "exc_address_near_zero" &&
             key != "callstack_contains" &&
             key != "cpp_exception_info_contains" &&
@@ -223,6 +229,19 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
             valid = false;
           } else {
             hasMatchConstraint = true;
+          }
+        } else {
+          valid = false;
+        }
+      }
+      if (m.contains("access_violation_address")) {
+        if (m["access_violation_address"].is_string()) {
+          try {
+            sig.access_violation_address = ParseHexU64(m["access_violation_address"].get<std::string>());
+            sig.has_access_violation_address = true;
+            hasMatchConstraint = true;
+          } catch (...) {
+            valid = false;
           }
         } else {
           valid = false;
@@ -435,6 +454,11 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
       if (nearZero != sig.access_violation_address_near_zero) {
         continue;
       }
+    }
+
+    if (sig.has_access_violation_address &&
+        (!input.access_violation_address || *input.access_violation_address != sig.access_violation_address)) {
+      continue;
     }
 
     if (!sig.callstack_contains.empty()) {

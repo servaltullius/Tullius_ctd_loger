@@ -72,8 +72,14 @@ i18n::ConfidenceLevel ConfidenceForSecondaryCallstackLevel(std::uint32_t score, 
 
 std::vector<bool> MarkThreadEntryHookPcs(
   const std::vector<ModuleInfo>& modules,
-  const std::vector<std::uint64_t>& pcs)
+  const std::vector<std::uint64_t>& pcs,
+  bool walkReachedThreadStart)
 {
+  // A walk cut short can end on a system frame (one without unwind data) far
+  // above the thread start; the frames below the cut are unknown.
+  if (!walkReachedThreadStart) {
+    return std::vector<bool>(pcs.size(), false);
+  }
   std::vector<StackFrameKind> kinds;
   kinds.reserve(pcs.size());
   for (const auto pc : pcs) {
@@ -90,7 +96,8 @@ std::vector<bool> MarkThreadEntryHookPcs(
 std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
-  i18n::Language lang)
+  i18n::Language lang,
+  bool walkReachedThreadStart)
 {
   std::vector<SuspectItem> out;
   if (modules.empty() || pcs.empty()) {
@@ -104,7 +111,7 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     std::size_t firstDepth = 0;
   };
   std::unordered_map<std::size_t, Row> byModule;
-  const auto threadEntryHook = MarkThreadEntryHookPcs(modules, pcs);
+  const auto threadEntryHook = MarkThreadEntryHookPcs(modules, pcs, walkReachedThreadStart);
 
   for (std::size_t i = 0; i < pcs.size(); i++) {
     auto mi = FindModuleIndexForAddress(modules, pcs[i]);

@@ -56,7 +56,7 @@
         "game_version": "1.5.97.0",
         "fault_module": "SkyrimSE.exe",
         "fault_offset": "0x3D692C",
-        "access_violation_address_near_zero": true
+        "access_violation_address": "0x24"
       },
       "diagnosis": {
         "scope": "mechanism",
@@ -78,7 +78,7 @@
         "game_version": "1.6.640.0",
         "fault_module": "SkyrimSE.exe",
         "fault_offset": "0x3F08EC",
-        "access_violation_address_near_zero": true
+        "access_violation_address": "0x24"
       },
       "diagnosis": {
         "scope": "mechanism",
@@ -100,7 +100,7 @@
         "game_version": "1.6.1170.0",
         "fault_module": "SkyrimSE.exe",
         "fault_offset": "0x4301DC",
-        "access_violation_address_near_zero": true
+        "access_violation_address": "0x24"
       },
       "diagnosis": {
         "scope": "mechanism",
@@ -122,7 +122,7 @@
         "game_version": "1.5.97.0",
         "fault_module": "SkyrimSE.exe",
         "fault_offset": "0x12BACB6",
-        "access_violation_address_near_zero": true
+        "access_violation_address": "0x18"
       },
       "diagnosis": {
         "scope": "mechanism",
@@ -144,7 +144,7 @@
         "game_version": "1.6.640.0",
         "fault_module": "SkyrimSE.exe",
         "fault_offset": "0x13DC426",
-        "access_violation_address_near_zero": true
+        "access_violation_address": "0x18"
       },
       "diagnosis": {
         "scope": "mechanism",
@@ -166,7 +166,7 @@
         "game_version": "1.6.1170.0",
         "fault_module": "SkyrimSE.exe",
         "fault_offset": "0x14A2546",
-        "access_violation_address_near_zero": true
+        "access_violation_address": "0x18"
       },
       "diagnosis": {
         "scope": "mechanism",

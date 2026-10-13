@@ -90,6 +90,8 @@ with_cl = "--no-crash-logger" not in sys.argv
 summary = {"actionable_candidates": [{"module_filename": "Real.dll"}] if with_cl else [],
            "suspects": [{"module_filename": "Victim.dll"}],
            "signature_match": None}
+if with_cl:  # the analyzer finds the log next to the dump on its own
+    summary["crash_logger"] = {"log_path": "<redacted>\\\\crash.log"}
 (out / (dump.stem + "_SkyrimDiagSummary.json")).write_text(json.dumps(summary), encoding="utf-8")
 """
 
@@ -122,6 +124,15 @@ def test_add_case_and_score_end_to_end():
                                  "--expect-none", "--cli", sys.executable, str(fake_cli)],
                                 capture_output=True, text=True)
         assert result.returncode != 0 and "exists" in (result.stderr + result.stdout)
+        # The crash_logger view must read the log the analyzer paired.
+        other = root / "other.log"
+        other.write_text(CONTENT_CATALOG_LOG, encoding="utf-8")
+        for log_args in (["--crash-logger-log", str(other)], []):
+            result = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "accuracy_benchmark.py"), "add-case",
+                                     "--corpus", str(corpus), "--id", "case-2", "--kind", "ctd", "--dump", str(dump),
+                                     *log_args, "--expect-none", "--cli", sys.executable, str(fake_cli)],
+                                    capture_output=True, text=True)
+            assert result.returncode != 0 and "crash.log" in (result.stderr + result.stdout), result
 
 
 def main() -> int:

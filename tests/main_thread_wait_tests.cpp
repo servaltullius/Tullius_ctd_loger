@@ -311,6 +311,21 @@ void TestBlockedGameThreadIsFound()
     Thread(7, { System(L"ntdll.dll", L""), Plugin(L"CrashTester.dll") }),
   });
   assert(unnamed.blocked_state == "waiting_in_plugin");
+  // Neither is a system call outside the wait lists: blocking I/O waits.
+  auto blockingRead = EngineSyncWait();
+  FindBlockedGameThread(blockingRead, {
+    Thread(8, { System(L"ntdll.dll", L"NtReadFile"), System(L"KERNELBASE.dll", L"ReadFile"), Plugin(L"Pipe.dll") }),
+  });
+  assert(blockingRead.blocked_module == L"Pipe.dll" && blockingRead.blocked_state == "waiting_in_plugin");
+  // SendMessage blocks until the main thread handles it: that thread waits in
+  // its plugin and ranks above a plugin that only called into the engine.
+  auto sendMessage = EngineSyncWait();
+  FindBlockedGameThread(sendMessage, {
+    Thread(9, { GameExe(), Plugin(L"Busy.dll") }),
+    Thread(10, { System(L"win32u.dll", L"NtUserMessageCall"), System(L"user32.dll", L"SendMessageW"),
+                 Plugin(L"Sender.dll"), Skse() }),
+  });
+  assert(sendMessage.blocked_module == L"Sender.dll" && sendMessage.blocked_state == "waiting_in_plugin");
 }
 
 void TestBlockedGameThreadIsNotInvented()

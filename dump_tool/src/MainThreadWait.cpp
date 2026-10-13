@@ -57,6 +57,16 @@ constexpr std::wstring_view kGraphicsRuntimes[] = {
 
 constexpr std::size_t kMaxPathModules = 6;
 
+// A system call stub (ntdll.dll!NtReadFile, win32u.dll!NtUserGetMessage): the
+// thread is in the kernel, which for a thread found there is usually a wait.
+bool IsSystemCallStub(const ModalStackFrame& frame)
+{
+  const auto module = LowerAscii(frame.module_filename);
+  const std::wstring_view symbol = frame.symbol;
+  return (module == L"ntdll.dll" || module == L"win32u.dll") && frame.displacement <= kMaxWaitApiDisplacement &&
+         (symbol.starts_with(L"Nt") || symbol.starts_with(L"Zw"));
+}
+
 }  // namespace
 
 bool LooksLikeGpuQueryPoll(const std::vector<std::uint8_t>& codeBefore)
@@ -304,9 +314,12 @@ void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTop
         const auto& above = thread.frames[j];
         engineAbove = engineAbove || above.is_game_exe;
         // A named non-wait call (the clock a spin loop reads, crash test
-        // 2026-10-13) is the plugin running; an unnamed one may be a wait.
+        // 2026-10-13) is the plugin running; an unnamed one may be a wait,
+        // and so may any system call (blocking I/O such as NtReadFile or
+        // NtDeviceIoControlFile, a message wait), which the lists leave out.
         mayWaitAbove = mayWaitAbove || above.symbol.empty() || above.displacement > kMaxWaitApiDisplacement ||
-                       Contains(kSleepApis, above.symbol) || Contains(kSyncApis, above.symbol);
+                       Contains(kSleepApis, above.symbol) || Contains(kSyncApis, above.symbol) ||
+                       IsSystemCallStub(above);
       }
       BlockedCandidate candidate{ &thread, i, i == 0 ? 2 : (engineAbove ? 1 : (mayWaitAbove ? 0 : 2)) };
       candidates.push_back(candidate);
