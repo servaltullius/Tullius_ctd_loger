@@ -22,9 +22,9 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 ## Requirements
 
-- **Skyrim SE / AE** (Windows)
-- [SKSE64](https://skse.silverlock.org/)
-- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
+- **Skyrim SE / AE** (Windows): 1.5.97, 1.6.x and 1.7.104 (`v0.2.62+`; VR is not supported)
+- [SKSE64](https://skse.silverlock.org/) matching the game (1.7.104 needs SKSE 2.3.1)
+- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) (1.7.104 needs the v13 All in One)
 - WinUI viewer runtime:
   - The release zip includes a self-contained WinUI viewer (`v0.2.52+`), so users do **not** need to install .NET Desktop Runtime 8 or Windows App Runtime 1.8 separately.
   - The many files under `SkyrimDiagWinUI\\app` are the bundled .NET / Windows App SDK runtime. Do **not** delete individual files or copy only the viewer EXE. When updating, remove the old `SkyrimDiagWinUI` folder and install the complete release zip.
