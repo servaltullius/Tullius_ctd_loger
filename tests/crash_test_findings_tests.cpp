@@ -301,6 +301,84 @@ void TestTruncatedCallStackIsExplained()
   Require(unloaded && Contains(unloaded->details, L"FailedPlugin.dll"), "a fault in an unloaded DLL names it");
 }
 
+// 2026-10-13 17:28:38: an int3 outside every module where the dump holds a
+// finished jump to zzzz_TypeMode.dll (ADR-0016). The stack scan and Crash
+// Logger pointed at SkyrimUpscaler.dll and a music record instead.
+AnalysisResult MakeHookStubRace(std::wstring module, std::uint64_t stub)
+{
+  AnalysisResult r{};
+  r.dump_path = L"C:\\Logs\\SkyrimDiag_Crash_20261013_172838_711.dmp";
+  r.exc_code = 0x80000003u;
+  r.exc_addr = stub;
+  r.hook_stub_race.detected = true;
+  r.hook_stub_race.stub_address = stub;
+  r.hook_stub_race.target_module = std::move(module);
+  r.hook_stub_race.target_mod_name = L"Typing Mode";
+  r.hook_stub_race.target_offset = 0x1BFC0u;
+  r.hook_stub_race.target = 0x7FFA4C4EBFC0ull;
+  r.hook_stub_race.call_site = L"SkyrimSE.exe+0xcd8fbb";
+  SuspectItem typeMode{};
+  typeMode.module_filename = r.hook_stub_race.target_module;
+  typeMode.inferred_mod_name = L"Typing Mode";
+  typeMode.confidence_level = i18n::ConfidenceLevel::kHigh;
+  typeMode.score = 9;
+  SuspectItem upscaler{};
+  upscaler.module_filename = L"SkyrimUpscaler.dll";
+  upscaler.confidence_level = i18n::ConfidenceLevel::kMedium;
+  upscaler.score = 8;
+  r.suspects = { typeMode, upscaler };
+  r.crash_logger_top_modules = { L"SkyrimUpscaler.dll" };
+  r.stackwalk_primary_frames = { L"SkyrimSE.exe+0xcd8fc0", L"SkyrimUpscaler.dll+0x285a7c" };
+  return r;
+}
+
+void TestHookStubRaceNamesTheHookOwner()
+{
+  for (const bool en : { true, false }) {
+    auto r = MakeHookStubRace(L"zzzz_TypeMode.dll", 0x7FF6AA84583Dull);
+    BuildEvidenceAndSummary(r, en ? i18n::Language::kEnglish : i18n::Language::kKorean);
+    Require(Contains(r.summary_sentence, L"Typing Mode (zzzz_TypeMode.dll)") &&
+              Contains(r.summary_sentence, en ? L"(Confidence: High)" : L"(신뢰도: 높음)"),
+      "the conclusion names the hook owner");
+    Require(!Contains(r.summary_sentence, L"SkyrimUpscaler"), "the stack scan is not the conclusion");
+    Require(!r.actionable_candidates.empty() &&
+              r.actionable_candidates[0].display_name == L"zzzz_TypeMode.dll" &&
+              r.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kHigh,
+      "the hook owner is the high-confidence candidate");
+    for (const auto& candidate : r.actionable_candidates) {
+      Require(candidate.display_name != L"SkyrimUpscaler.dll", "no candidate from the stack scan");
+    }
+    const auto next = SelectNextActionIndex(r.recommendations);
+    Require(next != std::wstring::npos &&
+              r.recommendations[next].rfind(en ? L"[Known cause]" : L"[알려진 원인]", 0) == 0 &&
+              Contains(r.recommendations[next], L"zzzz_TypeMode.dll"),
+      "the next action is the hook owner");
+    const auto* evidence = FindEvidence(r, en ? L"Crash in a hook being installed" : L"설치 중인 후킹에서 크래시");
+    Require(evidence && Contains(evidence->details, L"0x7ff6aa84583d") &&
+              Contains(evidence->details, L"zzzz_TypeMode.dll+0x1bfc0") &&
+              Contains(evidence->details, L"SkyrimSE.exe+0xcd8fbb"),
+      "the evidence shows the stub, its target and the patched call");
+  }
+
+  auto r = MakeHookStubRace(L"zzzz_TypeMode.dll", 0x7FF6AA84583Dull);
+  BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+  const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+  const auto& race = summary["hook_stub_race"];
+  Require(race["stub_address"] == "0x7FF6AA84583D" && race["target_module"] == "zzzz_TypeMode.dll" &&
+            race["target_offset"] == "0x1BFC0" && race["call_site"] == "SkyrimSE.exe+0xcd8fbb",
+    "summary JSON hook_stub_race");
+
+  const auto key = [](std::wstring module, std::uint64_t stub) {
+    auto bucket = MakeHookStubRace(std::move(module), stub);
+    skydiag::dump_tool::internal::ComputeCrashBucket(bucket);
+    return bucket.crash_bucket_key;
+  };
+  const auto first = key(L"zzzz_TypeMode.dll", 0x7FF6AA84583Dull);
+  Require(first.rfind(L"CTD3-", 0) == 0, "a crash bucket");
+  Require(first == key(L"zzzz_TypeMode.dll", 0x7FF6BB000010ull), "the stub address changes per run, the bucket not");
+  Require(first != key(L"Other.dll", 0x7FF6AA84583Dull), "another hook owner splits it");
+}
+
 }  // namespace
 
 int main()
@@ -311,6 +389,7 @@ int main()
     TestBlockedPluginSplitsTheHangBucket();
     TestConfirmedCppExceptionIsARealCrash();
     TestSkseRuntimeIsThePathNotASuspect();
+    TestHookStubRaceNamesTheHookOwner();
     std::puts("crash test findings tests passed");
     return 0;
   } catch (const std::exception& ex) {

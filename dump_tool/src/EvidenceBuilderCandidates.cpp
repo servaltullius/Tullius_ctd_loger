@@ -387,6 +387,28 @@ void AddModalDialogOwnerSignal(const AnalysisResult& r, bool en, std::vector<Can
   }
 }
 
+void AddHookStubOwnerSignal(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  const auto& race = r.hook_stub_race;
+  if (!out || !race.detected || race.target_module.empty()) {
+    return;
+  }
+
+  CandidateSignal signal{};
+  signal.family_id = "hook_stub_owner";
+  signal.display_name = !race.target_mod_name.empty() ? race.target_mod_name : race.target_module;
+  signal.candidate_key = CanonicalCandidateKey(signal.display_name);
+  signal.mod_name = race.target_mod_name;
+  signal.module_filename = race.target_module;
+  signal.detail = en
+    ? L"The crash ran this plugin's hook stub before it was completely written"
+    : L"크래시가 다 써지기 전의 이 플러그인 후킹 점프 코드를 실행함";
+  signal.weight = 8u;
+  if (!signal.candidate_key.empty()) {
+    out->push_back(std::move(signal));
+  }
+}
+
 void AddHistorySignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
 {
   if (!out) {
@@ -567,6 +589,17 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
     // Execution-location families (frames, stack density, thread groups,
     // nearby resources) all describe bystanders of the dialog wait.
     AddModalDialogOwnerSignal(r, en, &signals);
+    AddHistorySignals(r, en, &signals);
+    r.actionable_candidates = BuildCandidateConsensus(signals, lang);
+    SortActionableCandidates(r.actionable_candidates);
+    return;
+  }
+  if (r.hook_stub_race.detected) {
+    // ADR-0016: the crash address is a hook stub outside every module, so
+    // Crash Logger frames, object refs and the stack scan describe whatever
+    // else was on that thread's stack (2026-10-13: SkyrimUpscaler.dll and a
+    // music record, while the stub belonged to zzzz_TypeMode.dll).
+    AddHookStubOwnerSignal(r, en, &signals);
     AddHistorySignals(r, en, &signals);
     r.actionable_candidates = BuildCandidateConsensus(signals, lang);
     SortActionableCandidates(r.actionable_candidates);

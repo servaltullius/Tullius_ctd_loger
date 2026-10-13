@@ -11,11 +11,13 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/Analyzer.History.cpp
   src/Analyzer.h
   src/AnalyzerPipeline.h
+  src/HookStubRace.h
   src/AnalyzerInternals.cpp
   src/AnalyzerInternals.h
   src/AnalyzerInternalsBlackbox.cpp
   src/AnalyzerInternalsFirstChance.cpp
   src/AnalyzerInternalsCrashBucket.cpp
+  src/AnalyzerInternalsHookStubRace.cpp
   src/AnalyzerInternalsStackScan.cpp
   src/AnalyzerInternalsWct.cpp
   src/AnalyzerInternalsStackwalk.cpp

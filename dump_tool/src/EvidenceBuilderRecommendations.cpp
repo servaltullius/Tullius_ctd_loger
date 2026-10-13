@@ -52,6 +52,9 @@ std::wstring DescribeFamily(std::string_view familyId, bool en)
   if (familyId == "modal_dialog_owner") {
     return en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈";
   }
+  if (familyId == "hook_stub_owner") {
+    return en ? L"hook stub owner" : L"후킹 점프 코드 주인";
+  }
   return en ? L"other signal" : L"기타 신호";
 }
 
@@ -446,6 +449,22 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool topCandidateCrossValidatedFaultModule =
     topCandidateMatchesFaultModule &&
     topCandidate->status_id == "cross_validated";
+
+  if (r.hook_stub_race.detected) {
+    // ADR-0016: a timing race in that plugin's hook install; it may not recur
+    // on the next run, so a clean retry proves nothing.
+    const auto& race = r.hook_stub_race;
+    const std::wstring owner = race.target_mod_name.empty()
+      ? race.target_module
+      : (race.target_mod_name + L" (" + race.target_module + L")");
+    r.recommendations.push_back(en
+      ? (L"[Known cause] " + owner + L" installs a hook while other game threads run, and one of them ran the "
+         L"half-written hook. Update it, or disable it if the crash repeats, and report the timing race to its "
+         L"author with this report. The crash depends on timing, so a run without it does not mean it is fixed.")
+      : (L"[알려진 원인] " + owner + L"이(가) 다른 게임 스레드가 도는 중에 후킹을 설치하다가, 그중 한 스레드가 반쯤 써진 "
+         L"후킹을 실행했습니다. 이 모드를 업데이트하고, 크래시가 반복되면 끄세요. 작성자에게 이 리포트와 함께 설치 시점 경쟁 "
+         L"문제를 알려 주세요. 타이밍에 따라 나는 크래시라, 한 번 안 난다고 해결된 것은 아닙니다."));
+  }
 
   if (r.signature_match.has_value()) {
     for (const auto& rec : r.signature_match->recommendations) {

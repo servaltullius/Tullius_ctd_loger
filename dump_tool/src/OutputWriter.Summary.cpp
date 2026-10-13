@@ -416,6 +416,20 @@ nlohmann::json BuildSummaryJson(
   if (!r.fault_unloaded_module.empty()) {
     summary["fault_unloaded_module"] = WideToUtf8(r.fault_unloaded_module);
   }
+  if (r.hook_stub_race.detected) {
+    const auto& race = r.hook_stub_race;
+    char stub[32]{};
+    char target[32]{};
+    std::snprintf(stub, sizeof(stub), "0x%llX", static_cast<unsigned long long>(race.stub_address));
+    std::snprintf(target, sizeof(target), "0x%llX", static_cast<unsigned long long>(race.target_offset));
+    summary["hook_stub_race"] = {
+      { "stub_address", stub },
+      { "target_module", WideToUtf8(race.target_module) },
+      { "target_offset", target },
+      { "target_mod_name", WideToUtf8(race.target_mod_name) },
+      { "call_site", WideToUtf8(race.call_site) },
+    };
+  }
 
   if (!r.thread_entry_hook_modules.empty()) {
     nlohmann::json hooks = nlohmann::json::array();

@@ -26,6 +26,7 @@ constexpr const char* kFamilyHistory = "history_repeat";
 constexpr const char* kFamilyFirstChance = "first_chance_context";
 constexpr const char* kFamilyHangThreadGroup = "hang_thread_group";
 constexpr const char* kFamilyModalDialogOwner = "modal_dialog_owner";
+constexpr const char* kFamilyHookStubOwner = "hook_stub_owner";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
 constexpr std::uint32_t kQualifiedStackWeightThreshold = 4u;
 constexpr std::uint32_t kFrameConflictWeightThreshold = 6u;
@@ -93,7 +94,8 @@ bool HasStrongFamily(const ActionableCandidate& candidate)
          HasFamily(candidate, kFamilyCrashLoggerObjectRef) ||
          HasFamily(candidate, kFamilyStack) ||
          HasFamily(candidate, kFamilyHangThreadGroup) ||
-         HasFamily(candidate, kFamilyModalDialogOwner);
+         HasFamily(candidate, kFamilyModalDialogOwner) ||
+         HasFamily(candidate, kFamilyHookStubOwner);
 }
 
 bool HasQualifiedCrossValidation(const CandidateRow& row)
@@ -204,6 +206,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasStack = HasFamily(candidate, kFamilyStack);
   const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool hasModalDialogOwner = HasFamily(candidate, kFamilyModalDialogOwner);
+  const bool hasHookStubOwner = HasFamily(candidate, kFamilyHookStubOwner);
   const bool conflict = candidate.has_conflict;
   const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
   const std::uint32_t coreScore = CoreRowScore(*row);
@@ -230,6 +233,12 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.status_id = "cross_validated";
     candidate.confidence_level = i18n::ConfidenceLevel::kHigh;
     candidate.cross_validated = true;
+  } else if (hasHookStubOwner) {
+    // ADR-0016: the dump itself shows the crash ran this plugin's hook stub
+    // before it was complete. One signal, but not a guess from the stack.
+    candidate.status_id = "related";
+    candidate.confidence_level = i18n::ConfidenceLevel::kHigh;
+    candidate.cross_validated = false;
   } else if (frameAndStack) {
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kMedium;

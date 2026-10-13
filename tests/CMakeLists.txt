@@ -50,6 +50,12 @@ target_include_directories(skydiag_thread_entry_hook_tests PRIVATE
 )
 add_test(NAME skydiag_thread_entry_hook_tests COMMAND skydiag_thread_entry_hook_tests)
 
+add_executable(skydiag_hook_stub_race_tests hook_stub_race_tests.cpp)
+target_include_directories(skydiag_hook_stub_race_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_hook_stub_race_tests COMMAND skydiag_hook_stub_race_tests)
+
 if(WIN32)
   add_executable(skydiag_crashlogger_search_integration_tests
     crashlogger_search_integration_tests.cpp

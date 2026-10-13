@@ -123,6 +123,23 @@ struct HangThreadModuleConsensus
   bool os_lock_cycle_proven = false;
 };
 
+// ADR-0016: a crash on an int3 in a hook stub that the dump shows complete,
+// so the stub was still being written when another thread ran the hooked
+// call (HookStubRace.h).
+struct HookStubRaceInfo
+{
+  bool detected = false;
+  std::uint64_t stub_address = 0;  // the exception address
+  std::uint64_t target = 0;        // where the stub jumps now
+  std::wstring target_module;      // the plugin whose hook it is
+  std::wstring target_module_path;
+  std::wstring target_mod_name;    // MO2 mod name, when known
+  std::uint64_t target_offset = 0;
+  // The patched game call that entered the stub ("SkyrimSE.exe+0xcd8fbb"),
+  // when the return address on the stack shows it; empty otherwise.
+  std::wstring call_site;
+};
+
 // The game main thread parked in a Win32 modal loop (MessageBox / DialogBox /
 // TaskDialog). Its stack then only shows bystander modules, so plugin
 // attribution must come from the dialog itself, never from stack density.
@@ -396,6 +413,7 @@ struct AnalysisResult
   std::wstring stackwalk_truncation_module;         // no_unwind_info: the frame's module
   std::wstring stackwalk_truncation_unloaded_module;  // the cut address lies in this unloaded DLL
   std::wstring fault_unloaded_module;  // the exception address lies in this unloaded DLL
+  HookStubRaceInfo hook_stub_race;
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
   std::wstring dbghelp_path;        // effective dbghelp runtime path (best-effort)
