@@ -402,6 +402,14 @@ nlohmann::json BuildSummaryJson(
     }
   }
 
+  if (!r.thread_entry_hook_modules.empty()) {
+    nlohmann::json hooks = nlohmann::json::array();
+    for (const auto& module : r.thread_entry_hook_modules) {
+      hooks.push_back(WideToUtf8(module));
+    }
+    summary["thread_entry_hooks"] = std::move(hooks);
+  }
+
   if (!r.resolved_functions.empty()) {
     nlohmann::json funcs = nlohmann::json::object();
     for (const auto& [offset, name] : r.resolved_functions) {

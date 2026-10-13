@@ -230,7 +230,9 @@ internal sealed partial class MainWindowViewModel
 
     private static bool IsPriorityActionRecommendation(string recommendation)
     {
-        return recommendation.StartsWith("[Modal dialog]", StringComparison.OrdinalIgnoreCase) ||
+        return recommendation.StartsWith("[Known cause]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[알려진 원인]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Modal dialog]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[Modal 대화상자]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
@@ -263,7 +265,9 @@ internal sealed partial class MainWindowViewModel
 
     private static bool IsImmediateActionRecommendation(string recommendation)
     {
-        return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
+        return recommendation.StartsWith("[Known cause]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[알려진 원인]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[Crash Logger 프레임]", StringComparison.Ordinal) ||

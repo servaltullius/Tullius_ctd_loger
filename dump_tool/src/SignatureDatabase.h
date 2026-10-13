@@ -30,6 +30,11 @@ struct SignatureMatchInput
   std::optional<std::uint64_t> access_violation_address;
   bool fault_module_is_system = false;
   std::vector<std::wstring> callstack_modules;
+  // Crash Logger's C++ exception message ("invalid stoull argument").
+  std::wstring cpp_exception_info;
+  // Object types near the crash: Crash Logger's POSSIBLE RELEVANT OBJECTS and
+  // REGISTERS, and the dump objects ("InstalledContent", "Character").
+  std::vector<std::wstring> object_types;
 };
 
 class SignatureDatabase

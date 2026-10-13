@@ -110,6 +110,9 @@ struct SignatureDatabase::Signature
 
   std::vector<std::wstring> callstack_contains;
 
+  std::wstring cpp_exception_info_contains;  // lowercase, empty = any
+  std::vector<std::wstring> object_type_any;  // lowercase, empty = any
+
   std::wstring cause_ko;
   std::wstring cause_en;
   std::string scope = "mechanism";
@@ -183,7 +186,9 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
             key != "fault_module_is_system" &&
             key != "access_violation_address_near_zero" &&
             key != "exc_address_near_zero" &&
-            key != "callstack_contains") {
+            key != "callstack_contains" &&
+            key != "cpp_exception_info_contains" &&
+            key != "object_type_any") {
           // A typo or newer constraint must invalidate this entry rather than
           // being ignored and broadening its match.
           valid = false;
@@ -304,6 +309,36 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
         }
       }
 
+      if (m.contains("cpp_exception_info_contains")) {
+        const auto& v = m["cpp_exception_info_contains"];
+        sig.cpp_exception_info_contains =
+          v.is_string() ? WideLower(Utf8ToWidePortable(v.get<std::string>())) : std::wstring{};
+        if (sig.cpp_exception_info_contains.empty()) {
+          valid = false;
+        } else {
+          hasMatchConstraint = true;
+        }
+      }
+      if (m.contains("object_type_any")) {
+        const auto& v = m["object_type_any"];
+        if (v.is_array()) {
+          for (const auto& type : v) {
+            const std::wstring token =
+              type.is_string() ? WideLower(Utf8ToWidePortable(type.get<std::string>())) : std::wstring{};
+            if (token.empty()) {
+              valid = false;
+            } else {
+              sig.object_type_any.push_back(token);
+            }
+          }
+        }
+        if (sig.object_type_any.empty()) {
+          valid = false;
+        } else {
+          hasMatchConstraint = true;
+        }
+      }
+
       if (!hasMatchConstraint) {
         valid = false;
       }
@@ -418,6 +453,22 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
         }
       }
       if (!allMatched) {
+        continue;
+      }
+    }
+
+    if (!sig.cpp_exception_info_contains.empty() &&
+        !ContainsInsensitive(input.cpp_exception_info, sig.cpp_exception_info_contains)) {
+      continue;
+    }
+
+    if (!sig.object_type_any.empty()) {
+      // Exact type names: "Actor" must not match "ActorValueOwner".
+      const bool anyType = std::any_of(input.object_types.begin(), input.object_types.end(), [&](const std::wstring& t) {
+        return std::find(sig.object_type_any.begin(), sig.object_type_any.end(), WideLower(t)) !=
+               sig.object_type_any.end();
+      });
+      if (!anyType) {
         continue;
       }
     }

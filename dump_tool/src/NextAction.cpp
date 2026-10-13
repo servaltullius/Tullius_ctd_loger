@@ -31,6 +31,8 @@ std::size_t FindFirstTagged(const std::vector<std::wstring>& recommendations, co
 // candidate-level tags the checklist emits.
 // What the main thread was doing (modal dialog, engine or driver wait) comes
 // before any module triage.
+// A known root cause (crash_signatures.json) names the fix itself.
+constexpr std::wstring_view kKnownCause[] = { L"[Known cause]", L"[알려진 원인]" };
 constexpr std::wstring_view kModalDialog[] = {
   L"[Modal dialog]", L"[Modal 대화상자]", L"[Main thread]", L"[메인 스레드]",
 };
@@ -56,6 +58,7 @@ std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendatio
     return std::wstring::npos;
   }
   for (const std::size_t found : {
+         FindFirstTagged(recommendations, kKnownCause),
          FindFirstTagged(recommendations, kModalDialog),
          FindFirstTagged(recommendations, kCandidate),
          FindFirstTagged(recommendations, kCrashLoggerFrame),

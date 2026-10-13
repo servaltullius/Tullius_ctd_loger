@@ -582,6 +582,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L". This can still be a victim location rather than the root cause. (Confidence: Low)")
         : (L"크래시가 Windows 시스템 DLL에서 보고되었고, 스택 후보 1순위는 " + suspectWho +
             L" 입니다. 이 경우에도 실제 원인은 다른 DLL/모드일 수 있습니다. (신뢰도: 낮음)");
+    } else if (r.exc_code == 0xE06D7363u && IsCrashLoggerConfirmedCppException(r)) {
+      // Crash Logger saw it end the game, so it is no caught throw (crash test,
+      // 2026-10-12); with no plugin on the throwing path there is no suspect.
+      summary = en
+        ? L"A C++ exception (0xE06D7363) that Crash Logger also logged as unhandled ended the game; the call stack "
+          L"shows no plugin to suspect. (Confidence: Low)"
+        : L"Crash Logger도 처리되지 않은 예외로 기록한 C++ 예외(0xE06D7363)로 게임이 종료되었습니다. 콜스택에서 "
+          L"원인으로 볼 플러그인은 찾지 못했습니다. (신뢰도: 낮음)";
     } else if (r.exc_code == 0xE06D7363u) {
       summary = en
         ? L"Reported in a Windows system DLL with 0xE06D7363 (C++ exception). Could be normal throw/catch; confirm this was an actual CTD. (Confidence: Low)"

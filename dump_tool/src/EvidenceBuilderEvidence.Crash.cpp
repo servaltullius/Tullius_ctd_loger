@@ -444,6 +444,27 @@ void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, c
       r.evidence.push_back(std::move(e));
     }
   }
+
+  if (!r.thread_entry_hook_modules.empty()) {
+    std::wstring hooks;
+    for (const auto& module : r.thread_entry_hook_modules) {
+      hooks += (hooks.empty() ? L"" : L", ") + module;
+    }
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = ctx.en
+      ? L"Thread-entry hooks left out of the suspects"
+      : L"게임 스레드 시작 지점의 훅(후보에서 제외)";
+    e.details = ctx.en
+      ? (hooks + L" only wrap the start of the game thread that crashed: below them is just the game's thread "
+                 L"start, and the fault is deep in game code above them. Every stack of that thread goes "
+                 L"through them, so they are not suspects for this crash.")
+      : (hooks + L"은(는) 크래시가 난 게임 스레드의 시작 지점에 끼어 있을 뿐입니다. 아래에는 게임의 스레드 시작 코드만 "
+                 L"있고, 크래시는 그 위의 게임 코드 깊은 곳에서 났습니다. 이 스레드의 모든 콜스택이 이 DLL을 지나가므로 "
+                 L"이번 크래시의 후보로 보지 않습니다.");
+    r.evidence.push_back(std::move(e));
+  }
 }
 
 }  // namespace skydiag::dump_tool::internal

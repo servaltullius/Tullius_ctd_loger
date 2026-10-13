@@ -12,6 +12,18 @@ using skydiag::dump_tool::SelectNextActionIndex;
 
 int main()
 {
+  // A known root cause names the fix itself and leads even a candidate line
+  // (2026-10-13 ContentCatalog.txt CTD).
+  assert(SelectNextActionIndex({
+           L"[Basics] ExceptionCode=0xE06D7363.",
+           L"[Actionable candidate] Tullius callstack first points to DLL candidate X.dll.",
+           L"[알려진 원인] ContentCatalog.txt를 휴지통으로 옮긴 뒤 다시 실행하세요.",
+         }) == 2u);
+  assert(SelectNextActionIndex({
+           L"[Known cause] Move ContentCatalog.txt to the Recycle Bin.",
+           L"[Modal dialog] Read the dialog.",
+         }) == 0u);
+
   // SmoothCam CTD: background first, candidate second.
   assert(SelectNextActionIndex({
            L"[Basics] ExceptionCode=0xC0000005 (Access Violation).",

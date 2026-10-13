@@ -205,6 +205,72 @@ void TestSignatureDatabaseRejectsUnknownFutureSchemaRuntime()
   std::filesystem::remove(tempPath, ec);
 }
 
+// The bundled DB recognises the 2026-10-13 CTD: the game threw "invalid
+// stoull argument" reading a ContentCatalog.txt that 1.7.104 had rewritten.
+void TestContentCatalogSignatureRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+
+  SignatureMatchInput input{};
+  input.exc_code = 0xE06D7363u;
+  input.fault_module = L"KERNELBASE.dll";
+  input.fault_module_is_system = true;
+  input.cpp_exception_info = L"invalid stoull argument";
+  input.object_types = { L"TESObjectSTAT", L"PathingCell", L"InstalledContent", L"PlayerCharacter" };
+  const auto matched = db.Match(input, /*useKorean=*/true);
+  assert(matched.has_value());
+  assert(matched->id == "CONTENT_CATALOG_FORMAT_MISMATCH");
+  assert(matched->scope == "root_cause");
+  assert(!matched->recommendations.empty());
+  assert(matched->recommendations[0].rfind(L"[알려진 원인]", 0) == 0);
+  assert(matched->recommendations[0].find(L"ContentCatalog.txt") != std::wstring::npos);
+
+  // The same message from other code, without the content list near it, is
+  // not this cause; neither is a different message near it.
+  input.object_types = { L"TESObjectSTAT", L"InstalledContentList" };
+  const auto otherCode = db.Match(input, /*useKorean=*/true);
+  assert(!otherCode || otherCode->id != "CONTENT_CATALOG_FORMAT_MISMATCH");
+  input.object_types = { L"InstalledContent" };
+  input.cpp_exception_info = L"invalid stoi argument";
+  const auto otherMessage = db.Match(input, /*useKorean=*/true);
+  assert(!otherMessage || otherMessage->id != "CONTENT_CATALOG_FORMAT_MISMATCH");
+}
+
+void TestSignatureRejectsMalformedExceptionAndObjectConstraints()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_object_constraints_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"version\": 2,\n"
+      "  \"signatures\": [\n"
+      "    {\"id\": \"EMPTY_INFO\", \"match\": {\"cpp_exception_info_contains\": \"\"},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"EMPTY_TYPES\", \"match\": {\"object_type_any\": []},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"BAD_TYPE\", \"match\": {\"object_type_any\": [\"Actor\", 3]},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"GOOD\", \"match\": {\"object_type_any\": [\"Actor\"]},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}}\n"
+      "  ]\n"
+      "}\n";
+  }
+  SignatureDatabase db;
+  assert(db.LoadFromJson(tempPath));
+  assert(db.Size() == 1u);
+  SignatureMatchInput input{};
+  input.object_types = { L"ActorValueOwner" };  // exact type names only
+  assert(!db.Match(input, /*useKorean=*/false).has_value());
+  input.object_types = { L"actor" };
+  const auto matched = db.Match(input, /*useKorean=*/false);
+  assert(matched && matched->id == "GOOD");
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
+}
+
 void TestSignatureCallstackContainsRuntime()
 {
   const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_runtime_test.json";
@@ -1143,6 +1209,8 @@ int main()
   TestLegacyNullAddressFieldFailsClosedRuntime();
   TestSignatureDatabaseRejectsUnknownFutureSchemaRuntime();
   TestSignatureCallstackContainsRuntime();
+  TestContentCatalogSignatureRuntime();
+  TestSignatureRejectsMalformedExceptionAndObjectConstraints();
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();
   TestAddressResolverToleratesMalformedEntries();

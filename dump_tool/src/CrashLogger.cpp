@@ -35,6 +35,7 @@ struct NormalizedCrashLoggerFrameSignals
   std::wstring probable_streak_module;
   std::uint32_t probable_streak_length = 0;
   std::vector<std::wstring> probable_modules_in_order;
+  std::vector<bool> probable_frame_is_thread_entry_hook;  // ThreadEntryHooks.h
 };
 
 enum class DumpIncidentKind {
@@ -107,20 +108,25 @@ NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
   }
 
   normalized.probable_modules_in_order.reserve(raw.probable_modules_in_order.size());
+  normalized.probable_frame_is_thread_entry_hook = raw.probable_frame_is_thread_entry_hook;
+  normalized.probable_frame_is_thread_entry_hook.resize(raw.probable_modules_in_order.size(), false);
   std::wstring currentLower;
   std::wstring currentModule;
   std::uint32_t currentLength = 0;
-  for (const auto& moduleUtf8 : raw.probable_modules_in_order) {
-    std::wstring module = CanonicalizeCrashLoggerModule(moduleUtf8, canonicalByFilenameLower);
+  for (std::size_t i = 0; i < raw.probable_modules_in_order.size(); ++i) {
+    std::wstring module = CanonicalizeCrashLoggerModule(raw.probable_modules_in_order[i], canonicalByFilenameLower);
     normalized.probable_modules_in_order.push_back(module);
+    // A plugin that only wraps the thread's entry is neither actionable nor a streak.
+    const bool threadEntryHook = normalized.probable_frame_is_thread_entry_hook[i];
 
     if (normalized.first_actionable_probable_module.empty() &&
+        !threadEntryHook &&
         !IsSystemishModule(module) &&
         !IsGameExeModule(module)) {
       normalized.first_actionable_probable_module = module;
     }
 
-    if (IsSystemishModule(module) || IsGameExeModule(module)) {
+    if (threadEntryHook || IsSystemishModule(module) || IsGameExeModule(module)) {
       currentLower.clear();
       currentModule.clear();
       currentLength = 0;
@@ -761,8 +767,10 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   };
 
   std::unordered_map<std::wstring, ModuleCount> freqByLower;
-  for (const auto& module : normalizedSignals.probable_modules_in_order) {
-    if (IsSystemishModule(module) || IsGameExeModule(module)) {
+  for (std::size_t i = 0; i < normalizedSignals.probable_modules_in_order.size(); ++i) {
+    const auto& module = normalizedSignals.probable_modules_in_order[i];
+    if (IsSystemishModule(module) || IsGameExeModule(module) ||
+        normalizedSignals.probable_frame_is_thread_entry_hook[i]) {
       continue;
     }
 

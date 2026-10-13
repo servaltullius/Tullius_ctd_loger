@@ -1,5 +1,6 @@
 #include "AnalyzerInternals.h"
 #include "AnalyzerScoringPolicy.h"
+#include "ThreadEntryHooks.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -69,6 +70,23 @@ i18n::ConfidenceLevel ConfidenceForSecondaryCallstackLevel(std::uint32_t score, 
 
 }  // namespace
 
+std::vector<bool> MarkThreadEntryHookPcs(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs)
+{
+  std::vector<StackFrameKind> kinds;
+  kinds.reserve(pcs.size());
+  for (const auto pc : pcs) {
+    const auto mi = FindModuleIndexForAddress(modules, pc);
+    kinds.push_back(
+      !mi                          ? StackFrameKind::kUnknown
+      : modules[*mi].is_systemish  ? StackFrameKind::kSystem
+      : modules[*mi].is_game_exe   ? StackFrameKind::kGame
+                                   : StackFrameKind::kPlugin);
+  }
+  return MarkThreadEntryHookFrames(kinds);
+}
+
 std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
@@ -86,6 +104,7 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     std::size_t firstDepth = 0;
   };
   std::unordered_map<std::size_t, Row> byModule;
+  const auto threadEntryHook = MarkThreadEntryHookPcs(modules, pcs);
 
   for (std::size_t i = 0; i < pcs.size(); i++) {
     auto mi = FindModuleIndexForAddress(modules, pcs[i]);
@@ -94,6 +113,10 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
     }
     const auto& m = modules[*mi];
     if (m.is_systemish || m.is_game_exe) {
+      continue;
+    }
+    // Where a game thread started, not what crashed it (ThreadEntryHooks.h).
+    if (threadEntryHook[i]) {
       continue;
     }
     // The SKSE runtime hands plugins their tasks and events, so below a
