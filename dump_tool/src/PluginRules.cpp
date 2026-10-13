@@ -397,8 +397,16 @@ bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)
       if (auto it = cond.find("game_version_lt"); it != cond.end() && it->is_string()) {
         rule.game_version_lt = it->get<std::string>();
       }
-      if (auto it = cond.find("module_not_loaded"); it != cond.end() && it->is_string()) {
-        rule.module_not_loaded_lower = WideLower(Utf8ToWide(it->get<std::string>()));
+      if (auto it = cond.find("module_not_loaded"); it != cond.end()) {
+        if (it->is_string()) {
+          rule.modules_not_loaded_lower.push_back(WideLower(Utf8ToWide(it->get<std::string>())));
+        } else if (it->is_array()) {
+          for (const auto& name : *it) {
+            if (name.is_string()) {
+              rule.modules_not_loaded_lower.push_back(WideLower(Utf8ToWide(name.get<std::string>())));
+            }
+          }
+        }
       }
       if (auto it = cond.find("has_missing_master"); it != cond.end() && it->is_boolean()) {
         rule.has_missing_master = it->get<bool>();
@@ -487,8 +495,8 @@ std::vector<PluginRuleDiagnosis> PluginRules::Evaluate(const PluginRulesContext&
       }
     }
 
-    if (rule.module_not_loaded_lower.has_value() &&
-        loadedModulesLower.find(*rule.module_not_loaded_lower) != loadedModulesLower.end()) {
+    if (std::any_of(rule.modules_not_loaded_lower.begin(), rule.modules_not_loaded_lower.end(),
+          [&](const std::wstring& name) { return loadedModulesLower.contains(name); })) {
       continue;
     }
 

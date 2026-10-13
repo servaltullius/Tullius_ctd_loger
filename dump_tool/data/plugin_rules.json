@@ -6,7 +6,7 @@
       "condition": {
         "any_plugin_header_version_gte": 1.71,
         "game_version_lt": "1.6.1130",
-        "module_not_loaded": "bees.dll"
+        "module_not_loaded": ["BackportedESLSupport.dll", "bees.dll"]
       },
       "diagnosis": {
         "cause_ko": "헤더 버전 1.71 플러그인이 있으나 BEES가 설치되지 않음 - 구버전 런타임에서 크래시 가능",

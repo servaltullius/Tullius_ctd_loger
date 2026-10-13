@@ -95,8 +95,8 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       ? L"BEES requirement detected"
       : L"BEES 필요 조건 감지";
     e.details = en
-      ? L"Header 1.71 plugin(s) found on pre-1.6.1130 runtime without bees.dll."
-      : L"1.71 헤더 플러그인이 있으나 1.6.1130 미만 런타임에서 bees.dll이 로드되지 않았습니다.";
+      ? L"Header 1.71 plugin(s) found on pre-1.6.1130 runtime without BEES (BackportedESLSupport.dll) loaded."
+      : L"1.71 헤더 플러그인이 있으나 1.6.1130 미만 런타임에서 BEES(BackportedESLSupport.dll)가 로드되지 않았습니다.";
     r.evidence.push_back(std::move(e));
   }
 

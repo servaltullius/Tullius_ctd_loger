@@ -102,7 +102,9 @@ private:
 
     std::optional<double> any_plugin_header_version_gte;
     std::optional<std::string> game_version_lt;
-    std::optional<std::wstring> module_not_loaded_lower;
+    // The rule applies only when none of these modules is loaded (one name, or
+    // several for a mod whose DLL has had more than one name).
+    std::vector<std::wstring> modules_not_loaded_lower;
     std::optional<bool> has_missing_master;
     std::optional<std::size_t> esl_count_gte;
     std::optional<std::size_t> full_plugin_count_gte;

@@ -300,9 +300,12 @@ void IntegratePluginScan(
       out.skse_log = parsedPluginScan.skse_log;
 
       const bool hasHeader171 = AnyPluginHeaderVersionGte(parsedPluginScan, 1.71);
+      // BEES ships SKSE\Plugins\BackportedESLSupport.dll; "bees.dll" is kept
+      // for any build named after the mod (the Helper preflight checks both).
       bool hasBees = false;
       for (const auto& m : allModules) {
-        if (WideLower(m.filename) == L"bees.dll") {
+        const auto name = WideLower(m.filename);
+        if (name == L"backportedeslsupport.dll" || name == L"bees.dll") {
           hasBees = true;
           break;
         }

@@ -318,7 +318,7 @@ void TestRulesEvaluateFromJson()
       "condition": {
         "any_plugin_header_version_gte": 1.71,
         "game_version_lt": "1.6.1130",
-        "module_not_loaded": "bees.dll"
+        "module_not_loaded": ["BackportedESLSupport.dll", "bees.dll"]
       },
       "diagnosis": {
         "cause_ko": "ko",
@@ -380,6 +380,14 @@ void TestRulesEvaluateFromJson()
   const auto diagsWithBees = rules.Evaluate(ctxWithBees);
   assert(diagsWithBees.size() == 1);
   assert(diagsWithBees[0].rule_id == "MISSING_MASTER");
+
+  // BEES ships SKSE\Plugins\BackportedESLSupport.dll (Nexus bug report
+  // 2026-10-14: a 1.5.97 user with BEES installed was told it was missing).
+  PluginRulesContext ctxWithBeesDll = ctx;
+  ctxWithBeesDll.loaded_module_filenames.push_back(L"BackportedESLSupport.dll");
+  const auto diagsWithBeesDll = rules.Evaluate(ctxWithBeesDll);
+  assert(diagsWithBeesDll.size() == 1);
+  assert(diagsWithBeesDll[0].rule_id == "MISSING_MASTER");
 
   std::error_code ec;
   std::filesystem::remove(tmp, ec);
