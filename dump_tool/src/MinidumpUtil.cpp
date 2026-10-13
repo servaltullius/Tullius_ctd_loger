@@ -470,6 +470,51 @@ std::optional<std::size_t> FindModuleIndexForAddress(const std::vector<ModuleInf
   return std::nullopt;
 }
 
+std::vector<UnloadedModule> LoadUnloadedModules(void* dumpBase, std::uint64_t dumpSize)
+{
+  std::vector<UnloadedModule> out;
+  void* ptr = nullptr;
+  ULONG size = 0;
+  if (!ReadStreamSized(dumpBase, dumpSize, UnloadedModuleListStream, &ptr, &size) || !ptr ||
+      size < sizeof(MINIDUMP_UNLOADED_MODULE_LIST)) {
+    return out;
+  }
+  MINIDUMP_UNLOADED_MODULE_LIST list{};
+  std::memcpy(&list, ptr, sizeof(list));
+  if (list.SizeOfHeader < sizeof(MINIDUMP_UNLOADED_MODULE_LIST) ||
+      list.SizeOfEntry < sizeof(MINIDUMP_UNLOADED_MODULE) || list.SizeOfHeader > size) {
+    return out;
+  }
+  const std::uint64_t need =
+    static_cast<std::uint64_t>(list.SizeOfHeader) + static_cast<std::uint64_t>(list.NumberOfEntries) * list.SizeOfEntry;
+  if (need > size) {
+    return out;
+  }
+  const auto* bytes = static_cast<const std::uint8_t*>(ptr);
+  out.reserve(list.NumberOfEntries);
+  for (ULONG32 i = 0; i < list.NumberOfEntries; ++i) {
+    MINIDUMP_UNLOADED_MODULE mod{};
+    std::memcpy(&mod, bytes + list.SizeOfHeader + static_cast<std::size_t>(i) * list.SizeOfEntry, sizeof(mod));
+    std::string utf8;
+    if (mod.SizeOfImage == 0 || !ReadMinidumpStringUtf8(dumpBase, dumpSize, mod.ModuleNameRva, utf8)) {
+      continue;
+    }
+    out.push_back({ mod.BaseOfImage, mod.BaseOfImage + mod.SizeOfImage,
+                    std::filesystem::path(Utf8ToWide(utf8)).filename().wstring() });
+  }
+  return out;
+}
+
+const UnloadedModule* FindUnloadedModule(const std::vector<UnloadedModule>& mods, std::uint64_t addr)
+{
+  for (auto it = mods.rbegin(); it != mods.rend(); ++it) {
+    if (addr >= it->base && addr < it->end) {
+      return &*it;
+    }
+  }
+  return nullptr;
+}
+
 std::vector<std::pair<std::uint32_t, std::uint64_t>> LoadThreadStartAddresses(void* dumpBase, std::uint64_t dumpSize)
 {
   std::vector<std::pair<std::uint32_t, std::uint64_t>> out;

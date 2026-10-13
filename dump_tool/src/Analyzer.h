@@ -388,6 +388,14 @@ struct AnalysisResult
   std::uint32_t stackwalk_total_frames = 0;
   std::uint32_t stackwalk_symbolized_frames = 0;
   std::uint32_t stackwalk_source_line_frames = 0;
+  // The shown thread's walk stopped before the thread start ("" when it did
+  // not): "outside_modules", "non_code_address" or "no_unwind_info".
+  std::string stackwalk_truncation;
+  std::uint32_t stackwalk_truncation_depth = 0;     // frames walked before the cut
+  std::uint64_t stackwalk_truncation_address = 0;   // the rejected caller, or the last frame
+  std::wstring stackwalk_truncation_module;         // no_unwind_info: the frame's module
+  std::wstring stackwalk_truncation_unloaded_module;  // the cut address lies in this unloaded DLL
+  std::wstring fault_unloaded_module;  // the exception address lies in this unloaded DLL
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
   std::wstring dbghelp_path;        // effective dbghelp runtime path (best-effort)

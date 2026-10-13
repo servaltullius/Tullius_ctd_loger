@@ -71,6 +71,19 @@ struct ModuleInfo
 std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize);
 std::optional<std::size_t> FindModuleIndexForAddress(const std::vector<ModuleInfo>& mods, std::uint64_t addr);
 
+// DLLs the process had unloaded before the capture (UnloadedModuleListStream;
+// empty without it). Code that still calls into one crashes at an address no
+// loaded module covers.
+struct UnloadedModule
+{
+  std::uint64_t base = 0;
+  std::uint64_t end = 0;
+  std::wstring filename;
+};
+std::vector<UnloadedModule> LoadUnloadedModules(void* dumpBase, std::uint64_t dumpSize);
+// The most recently unloaded module covering addr (the list is oldest first).
+const UnloadedModule* FindUnloadedModule(const std::vector<UnloadedModule>& mods, std::uint64_t addr);
+
 struct ThreadRecord
 {
   std::uint32_t tid = 0;

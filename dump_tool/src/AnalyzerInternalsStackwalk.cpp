@@ -16,6 +16,8 @@ using skydiag::dump_tool::internal::stackwalk_internal::FindFunctionStart;
 using skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory;
 using skydiag::dump_tool::internal::stackwalk_internal::MinidumpMemoryView;
 using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext;
+using skydiag::dump_tool::internal::stackwalk_internal::StackWalkEnd;
+using skydiag::dump_tool::internal::stackwalk_internal::StackWalkStop;
 using skydiag::dump_tool::internal::stackwalk_internal::SymSession;
 
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
@@ -194,6 +196,7 @@ bool TryComputeStackwalkSuspects(
     std::vector<std::uint64_t> pcs;
     std::vector<SuspectItem> suspects;
     std::uint32_t topScore = 0;
+    StackWalkEnd end;
   };
 
   // Other threads' top frames, walked in the same symbol session; they do
@@ -235,7 +238,8 @@ bool TryComputeStackwalkSuspects(
       continue;
     }
 
-    auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64);
+    StackWalkEnd end{};
+    auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end);
     if (pcs.empty()) {
       continue;
     }
@@ -274,6 +278,7 @@ bool TryComputeStackwalkSuspects(
           preferredTid)) {
       bestAny.tid = tid;
       bestAny.pcs = pcs;
+      bestAny.end = end;
     }
 
     auto suspects = stackwalk::ComputeCallstackSuspectsFromAddrs(modules, pcs, lang);
@@ -292,8 +297,37 @@ bool TryComputeStackwalkSuspects(
           preferredTid)) {
       best.tid = tid;
       best.pcs = std::move(pcs);
+      best.end = end;
       best.suspects = std::move(suspects);
       best.topScore = topScore;
+    }
+  }
+
+  // Where the shown thread's walk was cut short, for the report: the frames
+  // below the cut (often the mod that started the call) are not visible.
+  const auto unloaded = minidump::LoadUnloadedModules(dumpBase, dumpSize);
+  const auto recordTruncation = [&](const std::vector<std::uint64_t>& pcs, const StackWalkEnd& end) {
+    const char* reason = end.stop == StackWalkStop::kOutsideModules ? "outside_modules"
+                         : end.stop == StackWalkStop::kNonCode      ? "non_code_address"
+                         : end.stop == StackWalkStop::kNoUnwind     ? "no_unwind_info"
+                                                                    : nullptr;
+    if (!reason || pcs.empty()) {
+      return;
+    }
+    out.stackwalk_truncation = reason;
+    out.stackwalk_truncation_depth = static_cast<std::uint32_t>(pcs.size());
+    out.stackwalk_truncation_address = end.address;
+    if (end.stop == StackWalkStop::kNoUnwind) {
+      if (const auto mi = minidump::FindModuleIndexForAddress(modules, end.address)) {
+        out.stackwalk_truncation_module = modules[*mi].filename;
+      }
+    } else if (const auto* gone = minidump::FindUnloadedModule(unloaded, end.address)) {
+      out.stackwalk_truncation_unloaded_module = gone->filename;
+    }
+  };
+  if (excCtx && !minidump::FindModuleIndexForAddress(modules, excCtx->Rip)) {
+    if (const auto* gone = minidump::FindUnloadedModule(unloaded, excCtx->Rip)) {
+      out.fault_unloaded_module = gone->filename;
     }
   }
 
@@ -314,6 +348,7 @@ bool TryComputeStackwalkSuspects(
   if (best.suspects.empty()) {
     if (!bestAny.pcs.empty()) {
       recordThreadEntryHooks(bestAny.pcs);
+      recordTruncation(bestAny.pcs, bestAny.end);
       out.stackwalk_primary_tid = bestAny.tid;
       out.stackwalk_primary_bucket_frames = stackwalk::BuildCanonicalCallstackFrames(
         modules,
@@ -336,6 +371,7 @@ bool TryComputeStackwalkSuspects(
   }
 
   recordThreadEntryHooks(best.pcs);
+  recordTruncation(best.pcs, best.end);
   out.suspects_from_stackwalk = true;
   out.suspects = std::move(best.suspects);
   out.stackwalk_primary_tid = best.tid;

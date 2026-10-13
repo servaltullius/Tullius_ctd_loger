@@ -227,11 +227,69 @@ void TestSkseRuntimeIsThePathNotASuspect()
   Require(skydiag::dump_tool::internal::HasNearbyProbableDll(r), "another plugin is");
 }
 
+const skydiag::dump_tool::EvidenceItem* FindEvidence(const AnalysisResult& r, std::wstring_view titlePart)
+{
+  for (const auto& e : r.evidence) {
+    if (Contains(e.title, titlePart)) {
+      return &e;
+    }
+  }
+  return nullptr;
+}
+
+// A walk cut short says where and why, so a missing suspect is explained.
+void TestTruncatedCallStackIsExplained()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    AnalysisResult r{};
+    r.exc_code = 0xC0000005u;
+    r.stackwalk_primary_tid = 7;
+    r.stackwalk_primary_frames = { L"SkyrimSE.exe+0x1234" };
+    r.stackwalk_truncation = "outside_modules";
+    r.stackwalk_truncation_depth = 3;
+    r.stackwalk_truncation_address = 0x7FF912340000ull;
+    r.stackwalk_truncation_unloaded_module = L"FailedPlugin.dll";
+    BuildEvidenceAndSummary(r, lang);
+    const auto* cut = FindEvidence(r, en ? L"Call stack cut short" : L"콜스택이 중간에 끊김");
+    Require(cut != nullptr, "the cut is reported");
+    Require(Contains(cut->details, L"FailedPlugin.dll") && Contains(cut->details, L"0x7ff912340000"),
+      "names the unloaded DLL and the address");
+    Require(Contains(cut->details, en ? L"after 3 frames" : L"3번째 프레임"), "says how far the walk got");
+  }
+
+  // A Windows DLL without unwind data: the old-dump-after-update hint.
+  AnalysisResult old{};
+  old.stackwalk_primary_frames = { L"ntdll.dll+0x1" };
+  old.stackwalk_truncation = "no_unwind_info";
+  old.stackwalk_truncation_depth = 2;
+  old.stackwalk_truncation_module = L"ntdll.dll";
+  BuildEvidenceAndSummary(old, i18n::Language::kEnglish);
+  const auto* noUnwind = FindEvidence(old, L"Call stack cut short");
+  Require(noUnwind && Contains(noUnwind->details, L"ntdll.dll has no unwind data") &&
+            Contains(noUnwind->details, L"Windows update"),
+    "a system DLL without unwind data points at the Windows update case");
+
+  // A complete walk says nothing.
+  AnalysisResult whole{};
+  whole.stackwalk_primary_frames = { L"SkyrimSE.exe+0x1234" };
+  BuildEvidenceAndSummary(whole, i18n::Language::kEnglish);
+  Require(!FindEvidence(whole, L"Call stack cut short"), "no report for a complete walk");
+
+  AnalysisResult gone{};
+  gone.exc_code = 0xC0000005u;
+  gone.fault_unloaded_module = L"FailedPlugin.dll";
+  BuildEvidenceAndSummary(gone, i18n::Language::kKorean);
+  const auto* unloaded = FindEvidence(gone, L"언로드된 DLL");
+  Require(unloaded && Contains(unloaded->details, L"FailedPlugin.dll"), "a fault in an unloaded DLL names it");
+}
+
 }  // namespace
 
 int main()
 {
   try {
+    TestTruncatedCallStackIsExplained();
     TestBlockedGameThreadLeadsTheFreezeReport();
     TestBlockedPluginSplitsTheHangBucket();
     TestConfirmedCppExceptionIsARealCrash();

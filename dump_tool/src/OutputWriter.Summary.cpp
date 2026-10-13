@@ -402,6 +402,21 @@ nlohmann::json BuildSummaryJson(
     }
   }
 
+  if (!r.stackwalk_truncation.empty()) {
+    char addr[32]{};
+    std::snprintf(addr, sizeof(addr), "0x%llX", static_cast<unsigned long long>(r.stackwalk_truncation_address));
+    summary["stackwalk_truncation"] = {
+      { "reason", r.stackwalk_truncation },
+      { "depth", r.stackwalk_truncation_depth },
+      { "address", addr },
+      { "module", WideToUtf8(r.stackwalk_truncation_module) },
+      { "unloaded_module", WideToUtf8(r.stackwalk_truncation_unloaded_module) },
+    };
+  }
+  if (!r.fault_unloaded_module.empty()) {
+    summary["fault_unloaded_module"] = WideToUtf8(r.fault_unloaded_module);
+  }
+
   if (!r.thread_entry_hook_modules.empty()) {
     nlohmann::json hooks = nlohmann::json::array();
     for (const auto& module : r.thread_entry_hook_modules) {
