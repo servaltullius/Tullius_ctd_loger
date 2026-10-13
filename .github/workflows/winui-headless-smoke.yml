@@ -7,6 +7,7 @@ jobs:
   winui-headless-smoke:
     name: WinUI Headless Smoke
     runs-on: windows-2022
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -23,12 +24,17 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
       - name: Bootstrap vcpkg
         shell: pwsh
         run: |
           git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP\vcpkg"
+          # The vcpkg tool from the manifest's baseline commit, not whatever
+          # vcpkg master is on the day of the run.
+          $baseline = (Get-Content vcpkg-configuration.json -Raw | ConvertFrom-Json).'default-registry'.baseline
+          git -C "$env:RUNNER_TEMP\vcpkg" checkout --quiet --detach $baseline
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg checkout of baseline $baseline failed" }
           & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
 
       - name: Setup vcpkg binary cache

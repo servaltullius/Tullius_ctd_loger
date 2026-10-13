@@ -1,6 +1,7 @@
 #include "SkyrimDiagHelper/Retention.h"
 
 #include <cassert>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -260,6 +261,80 @@ static void Test_PrunesAroundUnpairedSurrogateNames()
 }
 #endif
 
+static void SetAge(const std::filesystem::path& path, std::chrono::hours age)
+{
+  std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() - age);
+}
+
+// Analysis copies and locks of dumps that are gone are removed; those of
+// dumps still there, recent ones, and folders that are not ours stay.
+static void Test_PrunesAnalysisCachesWithoutTheirDump()
+{
+  const auto dir = MakeTempDir();
+  const std::string stem = "SkyrimDiag_Crash_20260101_000000_000";
+  WriteFile(dir / (stem + ".dmp"), 10);
+
+  const auto live = dir / ".skydiag-analysis" / "aaaa" / "000000000000000a.01dd000000000001";
+  const auto orphan = dir / ".skydiag-analysis" / "bbbb" / "0000000000000014.01dd000000000001";
+  const auto recent = dir / ".skydiag-analysis" / "cccc" / "000000000000001e.01dd000000000001";
+  const auto foreign = dir / ".skydiag-analysis" / "dddd" / "not-a-key";
+  for (const auto& generation : { live, orphan, recent, foreign }) {
+    WriteFile(generation / "Summary.json");
+  }
+  for (const auto& generation : { live, orphan, foreign }) {
+    SetAge(generation, std::chrono::hours(48));
+  }
+  const auto liveLock = dir / ".skydiag-locks" / (stem + ".lock");
+  const auto orphanLock = dir / ".skydiag-locks" / "SkyrimDiag_Crash_20250101_000000_000.lock";
+  const auto triage = dir / ".skydiag-triage" / "bbbb" / "0000000000000014.01dd000000000001.json";
+  WriteFile(liveLock);
+  WriteFile(orphanLock);
+  WriteFile(triage);
+  SetAge(liveLock, std::chrono::hours(48));
+  SetAge(orphanLock, std::chrono::hours(48));
+
+  ApplyRetentionToOutputDir(dir, RetentionLimits{});
+
+  assert(Exists(live / "Summary.json"));
+  assert(!Exists(orphan));
+  assert(!Exists(dir / ".skydiag-analysis" / "bbbb"));
+  assert(Exists(recent / "Summary.json"));
+  assert(Exists(foreign / "Summary.json"));
+  assert(Exists(liveLock));
+  assert(!Exists(orphanLock));
+  assert(Exists(triage));
+  assert(Exists(dir / (stem + ".dmp")));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+// A dump pruned by the count limit takes its analysis copy with it once
+// that copy is old enough.
+static void Test_PrunedDumpLeavesNoAnalysisCopy()
+{
+  const auto dir = MakeTempDir();
+  WriteFile(dir / "SkyrimDiag_Crash_20260101_000000_000.dmp", 10);
+  WriteFile(dir / "SkyrimDiag_Crash_20260102_000000_000.dmp", 11);
+  const auto oldCopy = dir / ".skydiag-analysis" / "aaaa" / "000000000000000a.01dd000000000001";
+  const auto newCopy = dir / ".skydiag-analysis" / "bbbb" / "000000000000000b.01dd000000000001";
+  WriteFile(oldCopy / "Summary.json");
+  WriteFile(newCopy / "Summary.json");
+  SetAge(oldCopy, std::chrono::hours(48));
+  SetAge(newCopy, std::chrono::hours(48));
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(dir / "SkyrimDiag_Crash_20260101_000000_000.dmp"));
+  assert(!Exists(oldCopy));
+  assert(Exists(newCopy / "Summary.json"));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
@@ -269,6 +344,8 @@ int main()
   Test_PrunesCrashManifestWithPrecisionTimestamp();
   Test_RotatesHelperLog();
   Test_PrunesAroundNamesOutsideTheAnsiCodePage();
+  Test_PrunesAnalysisCachesWithoutTheirDump();
+  Test_PrunedDumpLeavesNoAnalysisCopy();
 #ifdef _WIN32
   Test_PrunesAroundUnpairedSurrogateNames();
 #endif
