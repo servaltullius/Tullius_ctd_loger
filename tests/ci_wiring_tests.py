@@ -401,9 +401,40 @@ def _docs_only_detector_script() -> str:
     return "\n".join(body) + "\n"
 
 
+def _find_bash() -> str | None:
+    """A bash that runs the detector the way the CI runner's Git Bash does.
+
+    On Windows, PATH usually lists C:\\Windows\\System32 first, so
+    shutil.which("bash") returns the WSL launcher there. WSL reads the
+    Windows GITHUB_OUTPUT path as a relative file name, so the detector's
+    output never reached the test (2026-10-13: the test failed whenever
+    ctest ran from PowerShell or cmd and passed from Git Bash).
+    """
+    if os.name != "nt":
+        return shutil.which("bash")
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows")).resolve()
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    if git:
+        # <Git>\cmd\git.exe or <Git>\mingw64\bin\git.exe -> <Git>\bin\bash.exe
+        for parent in Path(git).resolve().parents:
+            candidates += [parent / "bin" / "bash.exe", parent / "usr" / "bin" / "bash.exe"]
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if entry:
+            candidates.append(Path(entry) / "bash.exe")
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.is_file() and system_root not in resolved.parents:
+            return str(resolved)
+    return None
+
+
 def check_docs_only_detector_behaviour(failures: list[str]) -> None:
     # Run the detector itself on a scratch repository.
-    bash = shutil.which("bash")
+    bash = _find_bash()
     git = shutil.which("git")
     if not bash or not git:
         print("ci_wiring_tests: bash/git not found; docs-only detector behaviour not checked")
@@ -448,6 +479,9 @@ def check_docs_only_detector_behaviour(failures: list[str]) -> None:
             env = dict(os.environ, EVENT_NAME="pull_request", BASE_SHA=base, HEAD_SHA=head,
                        GITHUB_OUTPUT=str(output))
             subprocess.run([bash, "-c", script], cwd=repo, env=env, check=True, capture_output=True)
+            if not output.is_file():
+                failures.append(f"docs-only detector, {name}: {bash} wrote no GITHUB_OUTPUT file")
+                continue
             got = output.read_text(encoding="utf-8").strip()
             if got != f"code={expected}":
                 failures.append(f"docs-only detector, {name}: expected code={expected}, got {got!r}")
