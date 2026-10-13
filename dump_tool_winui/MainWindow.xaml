@@ -78,7 +78,7 @@
                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                            TextWrapping="WrapWholeWords"
                            VerticalAlignment="Center">
-                  Skyrim SE detected. Ready for dump triage.
+                  Ready for dump triage.
                 </TextBlock>
                 <Border Grid.Column="1" CornerRadius="999" Padding="12,4"
                         BorderBrush="{ThemeResource BadgeBorderBrush}" BorderThickness="1"

@@ -46,6 +46,8 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
 inline std::wstring WideLower(std::wstring_view s) { return skydiag::WideLower(s); }
 
 bool IsSystemishModule(std::wstring_view filename);
+// DirectX/OpenGL runtime names that graphics injectors also use for their proxies.
+bool IsGraphicsRuntimeName(std::wstring_view filename);
 bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath);
 bool IsGameExeModule(std::wstring_view filename);
 bool IsSkseModule(std::wstring_view filename);

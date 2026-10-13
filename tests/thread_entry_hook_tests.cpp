@@ -190,6 +190,25 @@ void TestThreadEntryHookIsNoStreak()
   assert(signals.probable_streak_module == "SkyrimSE.exe" && signals.probable_streak_length == 3u);
 }
 
+void TestCrashLoggerStackMustReachThreadStart()
+{
+  // The hook shape, but the stack ends in ucrtbase.dll, not at the thread
+  // start in ntdll.dll: what lies below is unknown, so nothing is excluded.
+  const std::string log =
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FF6AB000001      SkyrimSE.exe+0000001\n"
+    "\t[ 1][P] 0x7FF6AB000002      SkyrimSE.exe+0000002\n"
+    "\t[ 2][P] 0x7FF6AB000003      SkyrimSE.exe+0000003\n"
+    "\t[ 3][P] 0x7FF9BE000001        BadHook.dll+0000001\n"
+    "\t[ 4][P] 0x7FF6AB000004      SkyrimSE.exe+0000004\n"
+    "\t[ 5][P] 0x7FFB546950D9      ucrtbase.dll+00050D9\n"
+    "\n";
+  const auto signals = core::ParseCrashLoggerFrameSignalsAscii(log);
+  assert(!signals.probable_frame_is_thread_entry_hook[3]);
+  assert(signals.thread_entry_hook_modules.empty());
+  assert(signals.first_actionable_probable_module == "BadHook.dll");
+}
+
 void TestFrameWithoutModuleKeepsItsPlace()
 {
   // Crash Logger prints a [P] row with no module for code outside every
@@ -225,6 +244,7 @@ int main()
   TestCrashLoggerObjectTypes();
   TestPluginOnTheCrashingPathIsNoHook();
   TestThreadEntryHookIsNoStreak();
+  TestCrashLoggerStackMustReachThreadStart();
   TestFrameWithoutModuleKeepsItsPlace();
   return 0;
 }

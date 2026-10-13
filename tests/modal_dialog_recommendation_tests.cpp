@@ -64,15 +64,15 @@ void TestIncompatiblePluginGetsSpecificGuidance()
     auto r = MakeModalHang("plugin_incompatible", true);
     BuildEvidenceAndSummary(r, lang);
     Require(
-      AnyRecommendationStartsWith(r, tag, en ? L"SmoothCam (SmoothCam.dll) was built for a different game version"
-                                             : L"SmoothCam (SmoothCam.dll)은(는) 다른 게임 버전용으로 빌드되어"),
-      "an Address Library format error must name the plugin as built for another game version");
+      AnyRecommendationStartsWith(r, tag, en ? L"SmoothCam (SmoothCam.dll) could not use the Address Library of this game"
+                                             : L"SmoothCam (SmoothCam.dll)이(가) 현재 게임"),
+      "an Address Library format error names the plugin and both explanations");
     Require(AnyRecommendationStartsWith(r, tag, L"(1.6.1170.0)"), "the guidance must name the game version");
     Require(
       !AnyRecommendationStartsWith(r, tag, en ? L"Follow its message" : L"메시지(누락된 선행 모드"),
       "the generic 'follow the message' advice is replaced by the specific one");
     Require(
-      r.summary_sentence.find(en ? L"does not support the Address Library" : L"Address Library를 지원하지 않습니다") !=
+      r.summary_sentence.find(en ? L"could not use the Address Library" : L"Address Library를 쓰지 못했습니다") !=
         std::wstring::npos,
       "the summary must say what the dialog means");
     Require(

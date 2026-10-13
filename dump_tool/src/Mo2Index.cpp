@@ -164,8 +164,11 @@ std::vector<std::wstring> ReadMo2EnabledModsWinnerFirst(const std::filesystem::p
 
   std::unordered_set<std::wstring> seenLower;
 
-  // MO2 rule: lower (bottom) has higher priority. Walk bottom->top to get winner-first ordering.
-  for (auto it = linesOpt->rbegin(); it != linesOpt->rend(); ++it) {
+  // MO2 writes modlist.txt highest priority first (the bottom of its left
+  // pane is the top of the file; Profile::doWriteModlist), so the file order
+  // is already winner-first. Reading it bottom-up, as before v0.2.65, took
+  // the losing mod's file (CrashLogger.ini, a mesh provider) for the winner.
+  for (auto it = linesOpt->begin(); it != linesOpt->end(); ++it) {
     std::string_view line = Trim(*it);
     if (line.empty()) {
       continue;

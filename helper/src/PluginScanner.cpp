@@ -292,8 +292,6 @@ bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out
 std::vector<std::string> ParsePluginsTxt(const std::string& content)
 {
   std::vector<std::string> active;
-  std::vector<std::string> legacyActive;
-  bool hasStarredLines = false;
   bool firstLine = true;
 
   std::istringstream stream(content);
@@ -309,18 +307,19 @@ std::vector<std::string> ParsePluginsTxt(const std::string& content)
     }
 
     if (line[0] == '*') {
-      hasStarredLines = true;
       std::string name = line.substr(1);
       TrimAsciiInPlace(name);
       if (!name.empty()) {
         active.push_back(std::move(name));
       }
-    } else {
-      legacyActive.push_back(line);
     }
   }
 
-  return hasStarredLines ? active : legacyActive;
+  // Skyrim SE/AE (and MO2, Vortex) mark active plugins with '*'; a line
+  // without it is an inactive plugin, so a list with no '*' at all has none
+  // active. The unstarred "legacy" reading made every disabled plugin active
+  // (missing-master and header-1.71 warnings for plugins that were off).
+  return active;
 }
 
 std::vector<std::string> ParseCreationClubContentList(const std::string& content)
@@ -579,7 +578,14 @@ PluginScanResult ScanPlugins(
   if (pluginsTxtPath.empty()) {
     wchar_t* localAppData = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &localAppData)) && localAppData) {
-      const auto standardPath = std::filesystem::path(localAppData) / L"Skyrim Special Edition" / L"plugins.txt";
+      // GOG and Epic keep their list under their own folder name (MO2 tells
+      // them apart by Galaxy64.dll / EOSSDK-Win64-Shipping.dll next to the
+      // exe); reading the Steam list there would describe another install.
+      const wchar_t* folder = std::filesystem::exists(gameExeDir / L"Galaxy64.dll")
+        ? L"Skyrim Special Edition GOG"
+        : std::filesystem::exists(gameExeDir / L"EOSSDK-Win64-Shipping.dll") ? L"Skyrim Special Edition EPIC"
+                                                                             : L"Skyrim Special Edition";
+      const auto standardPath = std::filesystem::path(localAppData) / folder / L"plugins.txt";
       CoTaskMemFree(localAppData);
       if (std::filesystem::exists(standardPath)) {
         pluginsTxtPath = standardPath;

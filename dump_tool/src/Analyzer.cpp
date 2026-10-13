@@ -154,6 +154,33 @@ bool IsCrashLoggerFrameModuleLoadedFromSystemPath(
   return false;
 }
 
+// The paired Crash Logger log is about this crash: not an ambiguous time
+// pairing, and where both name the exception location ("KERNELBASE.dll+00C483A"
+// and the dump's fault module and offset) they agree.
+bool CrashLoggerLogDescribesThisCrash(const AnalysisResult& out)
+{
+  if (out.crash_logger_log_path.empty() || out.crash_logger_pairing_ambiguous) {
+    return false;
+  }
+  const std::wstring& location = out.crash_logger_exception_location;
+  const auto plus = location.rfind(L'+');
+  if (plus == std::wstring::npos || plus == 0 || out.fault_module_filename.empty()) {
+    return out.crash_logger_pairing_confidence != "low";
+  }
+  std::uint64_t offset = 0;
+  try {
+    std::size_t used = 0;
+    offset = std::stoull(location.substr(plus + 1), &used, 16);
+    if (used == 0) {
+      return out.crash_logger_pairing_confidence != "low";
+    }
+  } catch (...) {
+    return out.crash_logger_pairing_confidence != "low";
+  }
+  return WideLower(location.substr(0, plus)) == WideLower(out.fault_module_filename) &&
+         offset == out.fault_module_offset;
+}
+
 void IntegrateCrashLoggerFrameSignals(
   const std::vector<ModuleInfo>& allModules,
   AnalysisResult* out)
@@ -449,17 +476,23 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     if (!graphicsDiag.LoadRules(rulesPath)) {
       out.diagnostics.push_back(L"[Data] failed to load graphics_injection_rules.json");
     } else {
+      // ENB, ReShade and DXVK are recognised by DLLs named like the Windows
+      // ones they replace (d3d11.dll, dxgi.dll, dinput8.dll, d3d9.dll). The
+      // game loads the Windows copies from System32 anyway, so only a copy
+      // from elsewhere (the game folder) is an injector; before this, every
+      // report said ENB and ReShade were detected.
       std::vector<std::wstring> moduleFilenames;
       moduleFilenames.reserve(allModules.size());
       for (const auto& m : allModules) {
-        if (!m.filename.empty()) {
+        if (!m.filename.empty() && !IsLikelyWindowsSystemModulePath(m.path)) {
           moduleFilenames.push_back(m.filename);
         }
       }
+      const bool faultInWindows = IsLikelyWindowsSystemModulePath(out.fault_module_path);
       out.graphics_env = graphicsDiag.DetectEnvironment(moduleFilenames);
       out.graphics_diag = graphicsDiag.Diagnose(
         moduleFilenames,
-        out.fault_module_filename,
+        faultInWindows ? std::wstring{} : out.fault_module_filename,
         opt.language == i18n::Language::kKorean);
     }
   }
@@ -624,13 +657,18 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
           input.callstack_modules.push_back(frame);
         }
       }
-      for (const auto& m : out.crash_logger_top_modules) {
-        if (!m.empty()) {
-          input.callstack_modules.push_back(m);
+      // A Crash Logger log is paired by time; only one that describes this
+      // crash may feed a signature (a known root cause names a fix).
+      const bool crashLoggerThisCrash = CrashLoggerLogDescribesThisCrash(out);
+      if (crashLoggerThisCrash) {
+        for (const auto& m : out.crash_logger_top_modules) {
+          if (!m.empty()) {
+            input.callstack_modules.push_back(m);
+          }
         }
+        input.cpp_exception_info = out.crash_logger_cpp_exception_info;
+        input.object_types = out.crash_logger_object_types;
       }
-      input.cpp_exception_info = out.crash_logger_cpp_exception_info;
-      input.object_types = out.crash_logger_object_types;
       for (const auto& object : out.dump_objects) {
         if (!object.type_name.empty()) {
           input.object_types.push_back(object.type_name);

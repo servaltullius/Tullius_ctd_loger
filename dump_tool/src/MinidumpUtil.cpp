@@ -302,6 +302,14 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
   return std::nullopt;
 }
 
+bool IsGraphicsRuntimeName(std::wstring_view filename)
+{
+  std::wstring lower(filename);
+  std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
+  return lower == L"d3d11.dll" || lower == L"d3d12.dll" || lower == L"dxgi.dll" || lower == L"d3d9.dll" ||
+         lower == L"opengl32.dll";
+}
+
 bool IsSystemishModule(std::wstring_view filename)
 {
   std::wstring lower(filename);
@@ -439,7 +447,12 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     mi.path = Utf8ToWide(utf8);
     mi.filename = std::filesystem::path(mi.path).filename().wstring();
     mi.inferred_mod_name = InferMo2ModNameFromPath(mi.path);
-    mi.is_systemish = IsSystemishModule(mi.filename) || IsLikelyWindowsSystemModulePathLower(WideLower(mi.path));
+    // ENB, ReShade and DXVK ship proxies named like the DirectX runtime
+    // (d3d11.dll, dxgi.dll, ...). A copy loaded from outside Windows is that
+    // injector, a mod to suspect, not the system runtime.
+    const bool inWindows = IsLikelyWindowsSystemModulePathLower(WideLower(mi.path));
+    const bool graphicsProxy = !mi.path.empty() && !inWindows && IsGraphicsRuntimeName(mi.filename);
+    mi.is_systemish = inWindows || (IsSystemishModule(mi.filename) && !graphicsProxy);
     mi.is_game_exe = IsGameExeModule(mi.filename);
     mi.is_known_hook_framework = IsKnownHookFramework(mi.filename);
     out.push_back(std::move(mi));

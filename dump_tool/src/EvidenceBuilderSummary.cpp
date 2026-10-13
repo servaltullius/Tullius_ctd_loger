@@ -235,8 +235,8 @@ std::wstring DescribeModalDialogWait(const ModalDialogWaitInfo& modal, i18n::Lan
   }
   if (modal.address_library_issue == "plugin_incompatible") {
     owner += en
-      ? L" The dialog says this plugin build does not support the Address Library of this game version."
-      : L" 대화상자 내용으로 보아 이 플러그인 빌드는 현재 게임 버전의 Address Library를 지원하지 않습니다.";
+      ? L" The dialog says this plugin could not use the Address Library of this game version (format or address missing)."
+      : L" 대화상자 내용으로 보아 이 플러그인이 현재 게임 버전의 Address Library를 쓰지 못했습니다(형식이 맞지 않거나 필요한 주소가 없음).";
   } else if (modal.address_library_issue == "address_library_missing") {
     owner += en
       ? L" The dialog says the plugin could not find the Address Library file for this game version."
@@ -357,10 +357,11 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       ? race.target_module
       : (race.target_mod_name + L" (" + race.target_module + L")");
     summary = en
-      ? (owner + L" was installing a hook while the game ran: another thread took the patched call before the "
-                 L"jump code was complete and hit its unwritten bytes (int3). (Confidence: High)")
-      : (owner + L"이(가) 게임 실행 중에 후킹을 설치하던 순간, 다른 스레드가 바뀐 호출을 지나다 아직 다 써지지 않은 "
-                 L"점프 코드(int3)를 실행했습니다. (신뢰도: 높음)");
+      ? (L"A hook into " + owner + L" was being installed while the game ran: another thread took the patched "
+         L"call before the jump code was complete and hit its unwritten bytes (int3). The mod that jump goes to "
+         L"usually installed it. (Confidence: High)")
+      : (owner + L"(으)로 가는 후킹이 게임 실행 중에 설치되던 순간, 다른 스레드가 바뀐 호출을 지나다 아직 다 써지지 않은 "
+         L"점프 코드(int3)를 실행했습니다. 그 점프가 가는 모드가 대개 후킹을 설치한 모드입니다. (신뢰도: 높음)");
   } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
     if (topCandidateIsActionableNonHookDll && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);

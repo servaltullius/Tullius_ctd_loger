@@ -161,13 +161,14 @@ void TestGraphicsDriverWaitAfterPause()
   r.main_thread_wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
   r.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
   r.graphics_env.enb_detected = true;
+  r.graphics_env.injection_modules = { L"d3d11.dll", L"d3dcompiler_46e.dll" };
   r.blackbox_freeze_summary.pause_gap_seconds = 5057.6;
   r.blackbox_freeze_summary.pause_gap_ended_seconds_before = 7.0;
   BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
 
   Require(Contains(r.summary_sentence, L"waiting inside the graphics driver (nvwgf2umx.dll"), "driver wait in the summary");
   Require(Contains(r.summary_sentence, L"A pause of 84 minutes"), "the pause before the freeze is in the summary");
-  Require(AnyStartsWith(r.recommendations, L"[Main thread]", L"(detected: ENB)"), "driver advice names the detected injector");
+  Require(AnyStartsWith(r.recommendations, L"[Main thread]", L"(detected: d3d11.dll, d3dcompiler_46e.dll)"), "driver advice names the injector DLLs found");
   Require(AnyStartsWith(r.recommendations, L"[Context]", L"pause of 84 minutes"), "the pause gets its own advice");
 }
 
@@ -185,6 +186,7 @@ void TestEngineGpuQueryPoll()
     r.main_thread_wait.waiting_module = L"SkyrimSE.exe";
     r.main_thread_wait.path_modules = { L"EngineFixes.dll", L"CommunityShaders.dll" };
     r.graphics_env.reshade_detected = true;
+    r.graphics_env.injection_modules = { L"dxgi.dll" };
     BuildEvidenceAndSummary(r, lang);
 
     Require(Contains(r.summary_sentence, en ? L"waiting for the GPU" : L"GPU를 기다리고"), "the summary says it waited for the GPU");
@@ -194,7 +196,7 @@ void TestEngineGpuQueryPoll()
     const auto next = SelectNextActionIndex(r.recommendations);
     Require(next != std::wstring::npos && r.recommendations[next].rfind(en ? L"[Main thread]" : L"[메인 스레드]", 0) == 0 &&
               Contains(r.recommendations[next], en ? L"GPU driver" : L"GPU 드라이버") &&
-              Contains(r.recommendations[next], L"ReShade"),
+              Contains(r.recommendations[next], L"dxgi.dll"),
       "NextAction gives the GPU-side advice");
     for (const auto& candidate : r.actionable_candidates) {
       Require(candidate.module_filename != L"CommunityShaders.dll", "the stack plugins make no candidate");

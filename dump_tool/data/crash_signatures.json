@@ -38,12 +38,12 @@
         "cause_en": "Access violation at the exact SkyrimSE.exe 1.5.97.0 offset 0xD6DDDA. Resource pressure or a damaged asset is an investigation hypothesis, not proven by this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[리소스] BethINI으로 텍스처 품질을 낮추거나 SSE Display Tweaks의 VRAM 제한을 확인하세요.",
+          "[리소스] BethINI 등으로 텍스처 품질을 낮춰 재현 여부를 비교하고, SSE Display Tweaks의 OSD로 VRAM 사용량을 관찰하세요.",
           "[메시 검사] NifScan으로 손상된 메시(.nif)를 점검하세요.",
           "[메모리] 모드가 많다면 4K 텍스처를 2K로 낮춰 재현 여부를 확인하세요."
         ],
         "recommendations_en": [
-          "[Resources] Lower texture quality via BethINI or check SSE Display Tweaks VRAM limit.",
+          "[Resources] Compare with lower texture quality (BethINI or similar) and watch VRAM use with the SSE Display Tweaks OSD.",
           "[Mesh check] Scan for corrupted meshes (.nif) with NifScan.",
           "[Memory] If running many mods, consider downscaling 4K textures to 2K."
         ]
@@ -64,10 +64,10 @@
         "cause_en": "The crash is at a known spot where engine code for face data (BSFaceGenMorphDataHead) reads a pointer without a null check. Which mod supplied the bad face data (an NPC appearance mod, a preset) is not known from this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정의 bFaceGenMorphDataHeadNullPtrCrash가 켜져 있는지 확인하세요(기본값은 켜짐). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
+          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정에서 이 수정이 켜져 있는지 확인하세요(기본값은 켜짐. 7.x는 bFaceGenMorphDataHeadNullPtrCrash, 그 이전 버전은 FaceGenMorphDataHeadNullptrCrash). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
         ],
         "recommendations_en": [
-          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that bFaceGenMorphDataHeadNullPtrCrash is on (it is by default). Engine Fixes guards this exact spot."
+          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bFaceGenMorphDataHeadNullPtrCrash in 7.x, FaceGenMorphDataHeadNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
         ]
       }
     },
@@ -86,10 +86,10 @@
         "cause_en": "The crash is at a known spot where engine code for face data (BSFaceGenMorphDataHead) reads a pointer without a null check. Which mod supplied the bad face data (an NPC appearance mod, a preset) is not known from this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정의 bFaceGenMorphDataHeadNullPtrCrash가 켜져 있는지 확인하세요(기본값은 켜짐). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
+          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정에서 이 수정이 켜져 있는지 확인하세요(기본값은 켜짐. 7.x는 bFaceGenMorphDataHeadNullPtrCrash, 그 이전 버전은 FaceGenMorphDataHeadNullptrCrash). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
         ],
         "recommendations_en": [
-          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that bFaceGenMorphDataHeadNullPtrCrash is on (it is by default). Engine Fixes guards this exact spot."
+          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bFaceGenMorphDataHeadNullPtrCrash in 7.x, FaceGenMorphDataHeadNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
         ]
       }
     },
@@ -108,10 +108,10 @@
         "cause_en": "The crash is at a known spot where engine code for face data (BSFaceGenMorphDataHead) reads a pointer without a null check. Which mod supplied the bad face data (an NPC appearance mod, a preset) is not known from this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정의 bFaceGenMorphDataHeadNullPtrCrash가 켜져 있는지 확인하세요(기본값은 켜짐). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
+          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정에서 이 수정이 켜져 있는지 확인하세요(기본값은 켜짐. 7.x는 bFaceGenMorphDataHeadNullPtrCrash, 그 이전 버전은 FaceGenMorphDataHeadNullptrCrash). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
         ],
         "recommendations_en": [
-          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that bFaceGenMorphDataHeadNullPtrCrash is on (it is by default). Engine Fixes guards this exact spot."
+          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bFaceGenMorphDataHeadNullPtrCrash in 7.x, FaceGenMorphDataHeadNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
         ]
       }
     },
@@ -130,10 +130,10 @@
         "cause_en": "The crash is at a known spot where engine code for the shadow scene node (ShadowSceneNode) makes a virtual call without a null check. What left the bad state before it is not known from this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정의 bShadowSceneNodeNullPtrCrash가 켜져 있는지 확인하세요(기본값은 켜짐). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
+          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정에서 이 수정이 켜져 있는지 확인하세요(기본값은 켜짐. 7.x는 bShadowSceneNodeNullPtrCrash, 그 이전 버전은 ShadowSceneNodeNullptrCrash). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
         ],
         "recommendations_en": [
-          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that bShadowSceneNodeNullPtrCrash is on (it is by default). Engine Fixes guards this exact spot."
+          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bShadowSceneNodeNullPtrCrash in 7.x, ShadowSceneNodeNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
         ]
       }
     },
@@ -152,10 +152,10 @@
         "cause_en": "The crash is at a known spot where engine code for the shadow scene node (ShadowSceneNode) makes a virtual call without a null check. What left the bad state before it is not known from this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정의 bShadowSceneNodeNullPtrCrash가 켜져 있는지 확인하세요(기본값은 켜짐). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
+          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정에서 이 수정이 켜져 있는지 확인하세요(기본값은 켜짐. 7.x는 bShadowSceneNodeNullPtrCrash, 그 이전 버전은 ShadowSceneNodeNullptrCrash). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
         ],
         "recommendations_en": [
-          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that bShadowSceneNodeNullPtrCrash is on (it is by default). Engine Fixes guards this exact spot."
+          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bShadowSceneNodeNullPtrCrash in 7.x, ShadowSceneNodeNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
         ]
       }
     },
@@ -174,10 +174,10 @@
         "cause_en": "The crash is at a known spot where engine code for the shadow scene node (ShadowSceneNode) makes a virtual call without a null check. What left the bad state before it is not known from this pattern alone.",
         "confidence": "high",
         "recommendations_ko": [
-          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정의 bShadowSceneNodeNullPtrCrash가 켜져 있는지 확인하세요(기본값은 켜짐). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
+          "[알려진 크래시 지점] 게임 버전에 맞는 SSE Engine Fixes(Part 1 SKSE 플러그인과 Part 2 프리로더)를 설치하거나 업데이트하고, 설정에서 이 수정이 켜져 있는지 확인하세요(기본값은 켜짐. 7.x는 bShadowSceneNodeNullPtrCrash, 그 이전 버전은 ShadowSceneNodeNullptrCrash). 이 위치의 크래시는 Engine Fixes가 막아 줍니다."
         ],
         "recommendations_en": [
-          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that bShadowSceneNodeNullPtrCrash is on (it is by default). Engine Fixes guards this exact spot."
+          "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bShadowSceneNodeNullPtrCrash in 7.x, ShadowSceneNodeNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
         ]
       }
     },
@@ -191,8 +191,8 @@
       },
       "diagnosis": {
         "scope": "mechanism",
-        "cause_ko": "1.6.1170 엔진의 물 반사 결함입니다. 물 반사 객체가 이미 해제된 물 재질을 가리킨 채 남아 있다가, 물을 추가할 때(TESWaterSystem::AddWater) 그 재질을 다시 쓰려다 크래시가 납니다. 셀 이동이나 물이 있는 장소에서 자주 납니다.",
-        "cause_en": "A 1.6.1170 engine water-reflections defect: a reflections object keeps pointing at a water material that was already freed, and adding water (TESWaterSystem::AddWater) uses it again. It shows up around cell changes and places with water.",
+        "cause_ko": "1.6.1170의 알려진 물 반사 크래시 지점(TESWaterSystem::AddWater)과 일치합니다. 이 지점의 알려진 결함은 물 반사 객체가 이미 해제된 물 재질을 다시 쓰는 것이며, 셀 이동이나 물이 있는 장소에서 자주 납니다. 이번 크래시가 그 결함인지는 수정 모드로 대조해야 확인됩니다.",
+        "cause_en": "Matches the known 1.6.1170 water-reflections crash spot (TESWaterSystem::AddWater). The known defect there reuses a water material that was already freed, around cell changes and places with water; whether this crash is that defect is confirmed by testing with the fix.",
         "confidence": "high",
         "recommendations_ko": [
           "[알려진 크래시 지점] 1.6.1170용 Skyrim Water Reflections Engine Fix(Nexus 185419, 현재 베타)를 설치하고, WaterReflectionsEngineFix.log에서 수정이 켜졌는지 확인한 뒤 같은 상황을 다시 시험하세요."

@@ -27,18 +27,16 @@
       "title_en": "C++ Exception (0xE06D7363)",
       "title_ko": "C++ 예외 (0xE06D7363)",
       "steps_en": [
-        "Confirm this was an actual CTD (not a handled exception false positive)",
-        "Consider setting CrashHookMode=1 in SkyrimDiag.ini to filter handled exceptions",
-        "Check the C++ Exception section for type and info details",
-        "If DXGI_ERROR_DEVICE_REMOVED: likely a GPU driver crash — update GPU drivers",
-        "If std::bad_alloc: RAM/VRAM exhaustion — reduce mod payload"
+        "Check whether the game actually closed (Crash Logger also logs an unhandled C++ exception)",
+        "Check the C++ Exception section for its type and message",
+        "If DXGI_ERROR_DEVICE_REMOVED: the GPU device was lost (driver, overclock, overheating or power); update the GPU driver and test at stock clocks",
+        "If std::bad_alloc: check the report's memory line; near the commit limit means memory ran out, otherwise a mod asked for an unreasonably large block"
       ],
       "steps_ko": [
-        "실제 CTD인지 확인하세요 (handled exception 오탐이 아닌지)",
-        "SkyrimDiag.ini에서 CrashHookMode=1로 설정하여 handled exception을 필터링해 보세요",
-        "C++ Exception 섹션에서 type과 info 세부 정보를 확인하세요",
-        "DXGI_ERROR_DEVICE_REMOVED인 경우: GPU 드라이버 크래시 — 드라이버 업데이트",
-        "std::bad_alloc인 경우: RAM/VRAM 부족 — 모드 부하를 줄이세요"
+        "게임이 실제로 꺼졌는지 확인하세요(처리되지 않은 C++ 예외는 Crash Logger에도 기록됩니다)",
+        "C++ Exception 섹션에서 예외 타입과 메시지를 확인하세요",
+        "DXGI_ERROR_DEVICE_REMOVED인 경우: GPU 장치가 끊긴 것입니다(드라이버, 오버클럭, 과열, 전원). GPU 드라이버를 업데이트하고 기본 클럭에서 시험하세요",
+        "std::bad_alloc인 경우: 리포트의 메모리 줄을 보세요. 커밋 한도에 가까우면 메모리 부족이고, 아니면 모드가 지나치게 큰 메모리를 요청한 것입니다"
       ]
     },
     {
@@ -49,14 +47,14 @@
       "steps_en": [
         "Check the WCT tab for deadlock indicators (isCycle=true)",
         "If deadlock: identify which DLLs hold the locks from the WCT thread chains",
-        "If no deadlock: likely an infinite loop or busy wait — check the callstack for looping code",
+        "No WCT cycle does not rule out a deadlock (WCT does not see every lock); check what the main thread was waiting for in the report",
         "Review the Events tab for what happened just before the freeze",
         "Disable recently added mods that affect scripting/animation/physics"
       ],
       "steps_ko": [
         "WCT 탭에서 데드락 표시(isCycle=true)를 확인하세요",
         "데드락인 경우: WCT 스레드 체인에서 어떤 DLL이 잠금을 보유하는지 확인하세요",
-        "데드락이 아닌 경우: 무한 루프 또는 바쁜 대기일 가능성 — 콜스택에서 반복 코드 확인",
+        "WCT에 순환이 없다고 데드락이 아닌 것은 아닙니다(WCT가 모든 잠금을 보지는 못함). 리포트에서 메인 스레드가 무엇을 기다렸는지 확인하세요",
         "이벤트 탭에서 프리징 직전에 무엇이 일어났는지 확인하세요",
         "스크립팅/애니메이션/물리에 영향을 주는 최근 추가 모드를 비활성화하세요"
       ]

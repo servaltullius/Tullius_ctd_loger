@@ -29,18 +29,18 @@
         ]
       },
       "diagnosis": {
-        "cause_ko": "ENB/렌더링 인젝션 DLL 내부에서 크래시 발생",
-        "cause_en": "Crash occurred inside ENB/rendering injection DLL",
+        "cause_ko": "게임 폴더의 그래픽 인젝터 DLL(d3d11.dll 또는 d3dcompiler_46e.dll: ENB, ReShade, DXVK 등) 안에서 크래시가 났습니다",
+        "cause_en": "Crash inside a graphics injector DLL from the game folder (d3d11.dll or d3dcompiler_46e.dll: ENB, ReShade, DXVK and similar)",
         "confidence": "high",
         "recommendations_ko": [
-          "[ENB] enblocal.ini 설정(VideoMemorySizeMb, EnableOcclusionCulling 등) 점검",
-          "[ENB] 최신 ENB 바이너리로 업데이트 시도",
-          "[ENB] ENB를 일시 제거하고 크래시 재현 여부 확인"
+          "[그래픽 인젝터] 게임 폴더의 d3d11.dll이 어느 프로그램(ENB, ReShade, DXVK 등)의 것인지 확인하고 최신 버전으로 업데이트하세요",
+          "[그래픽 인젝터] ENB라면 enblocal.ini 설정(VideoMemorySizeMb, EnableOcclusionCulling 등)을 점검하세요",
+          "[그래픽 인젝터] 그 DLL을 잠시 빼고 크래시가 다시 나는지 확인하세요"
         ],
         "recommendations_en": [
-          "[ENB] Check enblocal.ini settings (VideoMemorySizeMb, EnableOcclusionCulling, etc.)",
-          "[ENB] Try updating to the latest ENB binaries",
-          "[ENB] Temporarily remove ENB and check if crash reproduces"
+          "[Graphics injector] Find which program the game-folder d3d11.dll belongs to (ENB, ReShade, DXVK, ...) and update it",
+          "[Graphics injector] For ENB, check enblocal.ini (VideoMemorySizeMb, EnableOcclusionCulling, ...)",
+          "[Graphics injector] Temporarily remove that DLL and check whether the crash comes back"
         ]
       }
     },
@@ -59,16 +59,16 @@
         ]
       },
       "diagnosis": {
-        "cause_ko": "ReShade/렌더링 인젝션 DLL 내부에서 크래시 발생",
-        "cause_en": "Crash occurred inside ReShade/rendering injection DLL",
+        "cause_ko": "게임 폴더의 그래픽 인젝터 DLL(dxgi.dll 또는 ReShade DLL: ReShade, DXVK 등) 안에서 크래시가 났습니다",
+        "cause_en": "Crash inside a graphics injector DLL from the game folder (dxgi.dll or a ReShade DLL: ReShade, DXVK and similar)",
         "confidence": "high",
         "recommendations_ko": [
-          "[ReShade] ReShade 버전 업데이트 또는 프리셋 변경 시도",
-          "[ReShade] ReShade를 일시 제거하고 크래시 재현 여부 확인"
+          "[그래픽 인젝터] 게임 폴더의 dxgi.dll이 어느 프로그램(ReShade, DXVK 등)의 것인지 확인하고 업데이트하거나 프리셋을 바꿔 보세요",
+          "[그래픽 인젝터] 그 DLL을 잠시 빼고 크래시가 다시 나는지 확인하세요"
         ],
         "recommendations_en": [
-          "[ReShade] Try updating ReShade or changing presets",
-          "[ReShade] Temporarily remove ReShade and check if crash reproduces"
+          "[Graphics injector] Find which program the game-folder dxgi.dll belongs to (ReShade, DXVK, ...) and update it or change presets",
+          "[Graphics injector] Temporarily remove that DLL and check whether the crash comes back"
         ]
       }
     },
@@ -83,8 +83,8 @@
         ]
       },
       "diagnosis": {
-        "cause_ko": "입력 인젝션 DLL(dinput8.dll) 내부에서 크래시 발생",
-        "cause_en": "Crash occurred inside input injection DLL (dinput8.dll)",
+        "cause_ko": "게임 폴더의 입력 인젝션 DLL(dinput8.dll) 안에서 크래시가 났습니다",
+        "cause_en": "Crash inside an input injection DLL (dinput8.dll) from the game folder",
         "confidence": "medium",
         "recommendations_ko": [
           "[입력] dinput8.dll을 사용하는 모드(컨트롤러 모드 등) 점검",

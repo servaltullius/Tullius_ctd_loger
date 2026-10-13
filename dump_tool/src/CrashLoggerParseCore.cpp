@@ -592,8 +592,15 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
     }
   }
 
-  // Marked per call-stack row, then kept for the rows that name a module.
-  const auto rowMarked = MarkThreadEntryHookFrames(rowKinds);
+  // Marked per call-stack row, then kept for the rows that name a module. The
+  // shape only means "thread entry" when the stack reaches the thread start
+  // (RtlUserThreadStart in ntdll.dll); a stack Crash Logger cut short in some
+  // other system DLL proves nothing about what lies below it.
+  const bool reachesThreadStart = !rowKinds.empty() && !moduleRows.empty() &&
+                                  moduleRows.back() == rowKinds.size() - 1 &&
+                                  AsciiLower(out.probable_modules_in_order.back()) == "ntdll.dll";
+  const auto rowMarked = reachesThreadStart ? MarkThreadEntryHookFrames(rowKinds)
+                                            : std::vector<bool>(rowKinds.size(), false);
   std::vector<StackFrameKind> kinds;
   kinds.reserve(moduleRows.size());
   out.probable_frame_is_thread_entry_hook.reserve(moduleRows.size());

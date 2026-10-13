@@ -113,11 +113,13 @@ static void Test_ActiveProfileProviderScan_DoesNotIncludeDisabledMods()
   std::filesystem::remove_all(base, ec);
 
   WriteTextFile(base / "ModOrganizer.ini", "selected_profile=@ByteArray(Default)\n");
+  // MO2 writes modlist.txt highest priority first (Profile::doWriteModlist):
+  // the mod at the bottom of its left pane, which wins conflicts, is line 1.
   WriteTextFile(
     base / "profiles" / "Default" / "modlist.txt",
-    "+Active Low\n"
+    "+Active Winner\n"
     "-Disabled Source\n"
-    "+Active Winner\n");
+    "+Active Low\n");
 
   const auto rel = std::filesystem::path("meshes") / "footprints" / "test.nif";
   TouchFile(base / "mods" / "Active Low" / rel);

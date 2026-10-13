@@ -11,8 +11,8 @@ public sealed partial class MainWindow
         NavRawData.Content = T("Raw Data", "원시 데이터");
 
         HeaderSubtitleText.Text = T(
-            "Skyrim SE detected. Ready for dump triage.",
-            "Skyrim SE가 감지되었습니다. 덤프 원인 분석을 시작할 수 있습니다.");
+            "Ready for dump triage.",
+            "덤프 원인 분석을 시작할 수 있습니다.");
         HeaderBadgeText.Text = T("STATUS READY", "상태 준비됨");
         StatusText.Text = T("Ready.", "준비됨.");
 

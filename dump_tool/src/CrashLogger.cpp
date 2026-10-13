@@ -371,6 +371,9 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
   if (auto docs = TryGetDocumentsKnownFolder()) {
     const std::filesystem::path docRoot(*docs);
     const std::filesystem::path se = docRoot / L"My Games" / L"Skyrim Special Edition" / L"SKSE";
+    // GOG and Epic keep their documents under their own folder names.
+    const std::filesystem::path gog = docRoot / L"My Games" / L"Skyrim Special Edition GOG" / L"SKSE";
+    const std::filesystem::path epic = docRoot / L"My Games" / L"Skyrim Special Edition EPIC" / L"SKSE";
     const std::filesystem::path vr = docRoot / L"My Games" / L"Skyrim VR" / L"SKSE";
 
     const std::filesystem::path variants[] = {
@@ -378,6 +381,14 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
       se / L"CrashLogger",
       se / L"CrashLogs",
       se / L"Crashlogs",
+      gog,
+      gog / L"CrashLogger",
+      gog / L"CrashLogs",
+      gog / L"Crashlogs",
+      epic,
+      epic / L"CrashLogger",
+      epic / L"CrashLogs",
+      epic / L"Crashlogs",
       vr,
       vr / L"CrashLogger",
       vr / L"CrashLogs",
