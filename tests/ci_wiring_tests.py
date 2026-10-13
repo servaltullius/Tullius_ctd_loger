@@ -372,6 +372,9 @@ def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
         for job, body in _job_blocks(text).items():
             if re.search(r"^    runs-on:", body, re.M) and not re.search(r"^    timeout-minutes:\s*\d+", body, re.M):
                 failures.append(f"{path.name}: job {job} needs a job-level timeout-minutes")
+            # The plugin builds CommonLibSSE-NG from the extern/ submodule.
+            if "bootstrap-vcpkg" in body and not re.search(r"^\s+submodules:\s*true\b", body, re.M):
+                failures.append(f"{path.name}: job {job} builds the plugin but does not check out submodules")
         if "git clone https://github.com/microsoft/vcpkg" in text:
             if "'default-registry'.baseline" not in text or "checkout --quiet --detach $baseline" not in text:
                 failures.append(f"{path.name}: the vcpkg clone must be checked out at the manifest baseline")

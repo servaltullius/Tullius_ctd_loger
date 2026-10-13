@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.24)
 
 project(SkyrimDiagPlugin VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES CXX)
 
-find_package(CommonLibSSE CONFIG REQUIRED)
-
 set(TARGET_NAME SkyrimDiag)
 
 set(_plugin_info_generated "${CMAKE_CURRENT_BINARY_DIR}/generated/SkyrimDiagPluginInfo.cpp")

@@ -151,6 +151,10 @@ You do not need to attach every file in the output directory. Start with the fil
 
 > **Privacy:** Dumps and external logs may contain PC paths (drive letters, usernames). Review/mask before public upload.
 
+## License
+
+GPL-3.0-or-later ([`COPYING`](COPYING)). `SkyrimDiag.dll` links [CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG) (GPL-3.0-or-later with modding exceptions); third-party notices are in [`NOTICE`](NOTICE). The release zip carries both as `SKSE/Plugins/SkyrimDiag-LICENSE.txt`.
+
 ## Development
 
 See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).

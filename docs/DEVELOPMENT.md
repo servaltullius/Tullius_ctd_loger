@@ -320,6 +320,9 @@ PY
 Prereqs:
 - Visual Studio 2022 (C++ Desktop)
 - `vcpkg` and `VCPKG_ROOT` env var set
+- The CommonLibSSE-NG submodule: `git submodule update --init extern/CommonLibSSE-NG` (not `--recursive`; its openvr submodule is only for VR, which this build turns off)
+
+CommonLibSSE-NG is pinned to a release tag in `extern/` and built from source (SE + AE). Its vcpkg dependencies use the `x64-windows-static-md` triplet (set in the root `CMakeLists.txt`) so `SkyrimDiag.dll` needs no `spdlog.dll`/`fmt.dll` next to it. A build directory configured before that change keeps `x64-windows` in its cache; reconfigure it from scratch. To move to a newer CommonLibSSE-NG, check out the new tag in the submodule and raise the vcpkg baseline to at least that tag's `builtin-baseline`.
 
 Configure + build:
 ```powershell

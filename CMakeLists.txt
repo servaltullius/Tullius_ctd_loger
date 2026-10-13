@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Static vcpkg libraries with the DLL CRT: SKSE loads SkyrimDiag.dll from
+# Data/SKSE/Plugins, where nothing would provide spdlog.dll or fmt.dll (the
+# default x64-windows triplet builds them as DLLs; load error 126). The vcpkg
+# toolchain reads it when the project is declared, so it has to come first.
+if(NOT DEFINED VCPKG_TARGET_TRIPLET)
+  set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "")
+endif()
+
 project(
   SkyrimDiag
   VERSION 0.2.61
@@ -39,6 +47,16 @@ endif()
 if(NOT WIN32)
   message(STATUS "SkyrimDiag: Windows-only targets (plugin/helper) are skipped on non-Windows hosts.")
 else()
+  # CommonLibSSE-NG is a git submodule pinned to a release tag (GPL-3.0-or-later
+  # with the modding exceptions; see extern/CommonLibSSE-NG/EXCEPTIONS.md). SE
+  # and AE only; VR would need the openvr submodule. Building from source also
+  # keeps it from downloading a prebuilt library during configure.
+  set(ENABLE_SKYRIM_SE ON CACHE BOOL "" FORCE)
+  set(ENABLE_SKYRIM_AE ON CACHE BOOL "" FORCE)
+  set(ENABLE_SKYRIM_VR OFF CACHE BOOL "" FORCE)
+  set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  add_subdirectory(extern/CommonLibSSE-NG EXCLUDE_FROM_ALL)
+
   add_subdirectory(plugin)
   add_subdirectory(helper)
   add_subdirectory(dump_tool)

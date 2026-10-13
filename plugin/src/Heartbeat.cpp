@@ -1,3 +1,6 @@
+// CommonLibSSE-NG must come before any Windows API header (REX/W32/BASE.h).
+#include <SKSE/SKSE.h>
+
 #include "SkyrimDiag/Heartbeat.h"
 
 #include <Windows.h>
@@ -16,8 +19,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include <SKSE/SKSE.h>
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/EventSinks.h"

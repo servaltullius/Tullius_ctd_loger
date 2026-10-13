@@ -178,7 +178,6 @@ def _lint_one(
             str(database_dir),
             "--quiet",
             "--extra-arg=-D_CRT_USE_BUILTIN_OFFSETOF=1",
-            "--extra-arg=-fdelayed-template-parsing",
             str(source),
         ],
         stdout=subprocess.PIPE,
