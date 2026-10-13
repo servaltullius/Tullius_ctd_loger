@@ -3,6 +3,7 @@
 #include "AddressResolver.h"
 #include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
+#include "ThreadEntryHooks.h"
 
 #include <algorithm>
 #include <cstring>
@@ -24,6 +25,13 @@ using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::ModuleInfo;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
 using skydiag::dump_tool::minidump::ThreadRecord;
+
+// DbgHelp ended the walk itself (normally at the thread start), so the last
+// frames are the bottom of the stack (ThreadEntryHooks.h relies on that).
+bool WalkReachedThreadStart(const StackWalkEnd& end)
+{
+  return end.stop == StackWalkStop::kWalkEnded || end.stop == StackWalkStop::kNoProgress;
+}
 
 // Name of the SkyrimSE.exe function containing pc, with the offset into it
 // ("BSReadWriteLock::LockForRead+0xf"), or empty. Only an exact match of
@@ -84,11 +92,13 @@ namespace stackwalk {
 std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
-  i18n::Language lang);
+  i18n::Language lang,
+  bool walkReachedThreadStart = true);
 
 std::vector<bool> MarkThreadEntryHookPcs(
   const std::vector<ModuleInfo>& modules,
-  const std::vector<std::uint64_t>& pcs);
+  const std::vector<std::uint64_t>& pcs,
+  bool walkReachedThreadStart);
 
 std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
   const std::vector<ModuleInfo>& modules,
@@ -281,7 +291,7 @@ bool TryComputeStackwalkSuspects(
       bestAny.end = end;
     }
 
-    auto suspects = stackwalk::ComputeCallstackSuspectsFromAddrs(modules, pcs, lang);
+    auto suspects = stackwalk::ComputeCallstackSuspectsFromAddrs(modules, pcs, lang, WalkReachedThreadStart(end));
     if (suspects.empty()) {
       continue;
     }
@@ -325,29 +335,38 @@ bool TryComputeStackwalkSuspects(
       out.stackwalk_truncation_unloaded_module = gone->filename;
     }
   };
-  if (excCtx && !minidump::FindModuleIndexForAddress(modules, excCtx->Rip)) {
+  // Only when fetching the instruction itself faulted: code that ran there
+  // and faulted on data is something mapped since (a trampoline, JIT code).
+  const bool instructionFetchFault =
+    out.exc_code == 0xC0000005u && out.exc_info.size() >= 2u && excCtx && out.exc_info[1] == excCtx->Rip;
+  if (instructionFetchFault && !minidump::FindModuleIndexForAddress(modules, excCtx->Rip)) {
     if (const auto* gone = minidump::FindUnloadedModule(unloaded, excCtx->Rip)) {
       out.fault_unloaded_module = gone->filename;
     }
   }
 
   // Plugins that only wrap the entry of the shown thread, for the report.
-  const auto recordThreadEntryHooks = [&](const std::vector<std::uint64_t>& pcs) {
-    const auto marked = stackwalk::MarkThreadEntryHookPcs(modules, pcs);
+  const auto recordThreadEntryHooks = [&](const std::vector<std::uint64_t>& pcs, const StackWalkEnd& end) {
+    const auto marked = stackwalk::MarkThreadEntryHookPcs(modules, pcs, WalkReachedThreadStart(end));
     out.stackwalk_only_thread_entry_hook_plugins =
       std::find(marked.begin(), marked.end(), true) != marked.end();
-    for (std::size_t i = 0; i < pcs.size(); ++i) {
-      const auto mi = marked[i] ? minidump::FindModuleIndexForAddress(modules, pcs[i]) : std::nullopt;
-      if (mi && std::find(out.thread_entry_hook_modules.begin(), out.thread_entry_hook_modules.end(),
-                          modules[*mi].filename) == out.thread_entry_hook_modules.end()) {
-        out.thread_entry_hook_modules.push_back(modules[*mi].filename);
+    std::vector<std::wstring> frameModules;
+    frameModules.reserve(pcs.size());
+    for (const auto pc : pcs) {
+      const auto mi = minidump::FindModuleIndexForAddress(modules, pc);
+      frameModules.push_back(mi ? modules[*mi].filename : std::wstring{});
+    }
+    for (const auto& module : ThreadEntryHookOnlyModules(frameModules, marked)) {
+      if (std::find(out.thread_entry_hook_modules.begin(), out.thread_entry_hook_modules.end(), module) ==
+          out.thread_entry_hook_modules.end()) {
+        out.thread_entry_hook_modules.push_back(module);
       }
     }
   };
 
   if (best.suspects.empty()) {
     if (!bestAny.pcs.empty()) {
-      recordThreadEntryHooks(bestAny.pcs);
+      recordThreadEntryHooks(bestAny.pcs, bestAny.end);
       recordTruncation(bestAny.pcs, bestAny.end);
       out.stackwalk_primary_tid = bestAny.tid;
       out.stackwalk_primary_bucket_frames = stackwalk::BuildCanonicalCallstackFrames(
@@ -370,7 +389,7 @@ bool TryComputeStackwalkSuspects(
     return false;
   }
 
-  recordThreadEntryHooks(best.pcs);
+  recordThreadEntryHooks(best.pcs, best.end);
   recordTruncation(best.pcs, best.end);
   out.suspects_from_stackwalk = true;
   out.suspects = std::move(best.suspects);

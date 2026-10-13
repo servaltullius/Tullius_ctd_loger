@@ -34,7 +34,7 @@ import json
 import re
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 VIEWS = ("tullius_only", "tullius_with_crash_logger", "crash_logger")
@@ -228,6 +228,18 @@ def run_analyzer(cli: list[str], dump: Path, out_dir: Path, with_crash_logger: b
     return json.loads(summary_path.read_text(encoding="utf-8"))
 
 
+def check_paired_log(summary: dict[str, Any], expected: Path | None) -> None:
+    """The analyzer finds the Crash Logger log on its own; it must be the log
+    the crash_logger view reads, or the views describe different incidents."""
+    crash_logger = summary.get("crash_logger")
+    log_path = crash_logger.get("log_path", "") if isinstance(crash_logger, dict) else ""
+    paired = PureWindowsPath(log_path).name if isinstance(log_path, str) and log_path else ""
+    wanted = expected.name if expected else ""
+    if paired.lower() != wanted.lower():
+        raise SystemExit(f"the analyzer paired Crash Logger log {paired or '(none)'!r}, "
+                         f"but --crash-logger-log is {wanted or '(none)'!r}")
+
+
 def add_case(args: argparse.Namespace) -> int:
     corpus: Path = args.corpus
     if not args.expect_none and not args.expect_module:
@@ -237,13 +249,15 @@ def add_case(args: argparse.Namespace) -> int:
     case_dir = corpus / "cases" / args.id
     if case_dir.exists() and not args.replace:
         raise SystemExit(f"case {args.id} exists; pass --replace to rebuild it")
-    case_dir.mkdir(parents=True, exist_ok=True)
-
+    summaries: dict[str, dict[str, Any]] = {}
     with tempfile.TemporaryDirectory(prefix="skydiag_bench_") as tmp:
         for name, with_cl in (("tullius_only", False), ("tullius_with_crash_logger", True)):
-            summary = run_analyzer(args.cli, args.dump, Path(tmp) / name, with_cl)
-            (case_dir / f"{name}_summary.json").write_text(
-                json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            summaries[name] = run_analyzer(args.cli, args.dump, Path(tmp) / name, with_cl)
+    check_paired_log(summaries["tullius_with_crash_logger"], args.crash_logger_log)
+    case_dir.mkdir(parents=True, exist_ok=True)
+    for name, summary in summaries.items():
+        (case_dir / f"{name}_summary.json").write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     log_text = args.crash_logger_log.read_text(encoding="utf-8", errors="replace") if args.crash_logger_log else None
     (case_dir / "crash_logger_view.json").write_text(
         json.dumps(crash_logger_view(log_text), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

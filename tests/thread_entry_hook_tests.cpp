@@ -125,8 +125,94 @@ void TestCrashLoggerObjectTypes()
   assert(has("TESObjectSTAT"));
   assert(has("PlayerCharacter"));
   assert(has("PathingCell"));
-  // Not from the C++ EXCEPTION or CALL STACK sections.
-  assert(!has("std::invalid_argument"));
+  // The thrown type is named only under C++ EXCEPTION (CPP_BAD_ALLOC needs
+  // std::bad_alloc from there); nothing comes from the CALL STACK.
+  assert(has("std::invalid_argument"));
+  assert(!has("NPCWaterAIFix.dll") && !has("Info:") && !has("MSVCP140.dll+0044E92"));
+  const auto older = core::ParseCrashLoggerObjectTypesAscii(
+    "C++ EXCEPTION:\n\tType: class std::bad_alloc\n\tInfo: bad allocation\n"
+    "REGISTERS:\n\tRAX 0x0                (size_t) [0]\n\tRCX 0x1B5535AF2E0      (NiTriShape*)\n");
+  // REGISTERS gives pointer types only, not the register names.
+  assert((older == std::vector<std::string>{ "std::bad_alloc", "NiTriShape" }));
+}
+
+void TestPluginOnTheCrashingPathIsNoHook()
+{
+  // Hooks.dll wraps the thread entry and also sits on the crashing path: it
+  // stays the first actionable module and is not reported as a hook.
+  const std::string log =
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FF6AB000001      SkyrimSE.exe+0000001\n"
+    "\t[ 1][P] 0x7FF6AB000002      SkyrimSE.exe+0000002\n"
+    "\t[ 2][P] 0x7FF6AB000003      SkyrimSE.exe+0000003\n"
+    "\t[ 3][P] 0x7FF9BE000001         Hooks.dll+0000001\n"
+    "\t[ 4][P] 0x7FF6AB000004      SkyrimSE.exe+0000004\n"
+    "\t[ 5][P] 0x7FF6AB000005      SkyrimSE.exe+0000005\n"
+    "\t[ 6][P] 0x7FF6AB000006      SkyrimSE.exe+0000006\n"
+    "\t[ 7][P] 0x7FF9BE000002         Hooks.dll+0000002\n"
+    "\t[ 8][P] 0x7FF9BE000003         Hooks.dll+0000003\n"
+    "\t[ 9][P] 0x7FF6AB000007      SkyrimSE.exe+0000007\n"
+    "\t[10][P] 0x7FFB55EACDF7      KERNEL32.DLL+002CDF7\n"
+    "\t[11][P] 0x7FFB56F3EE4C         ntdll.dll+007EE4C\n"
+    "\n";
+  const auto signals = core::ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.probable_frame_is_thread_entry_hook[7] && signals.probable_frame_is_thread_entry_hook[8]);
+  assert(!signals.probable_frame_is_thread_entry_hook[3]);
+  assert(signals.thread_entry_hook_modules.empty());
+  assert(signals.first_actionable_probable_module == "Hooks.dll");
+
+  using skydiag::dump_tool::ThreadEntryHookOnlyModules;
+  const std::vector<std::string> modules = { "A.dll", "B.dll", "A.dll" };
+  assert((ThreadEntryHookOnlyModules(modules, { false, true, true }) == std::vector<std::string>{ "B.dll" }));
+  assert((ThreadEntryHookOnlyModules(modules, { true, true, true }) == std::vector<std::string>{ "A.dll", "B.dll" }));
+}
+
+void TestThreadEntryHookIsNoStreak()
+{
+  // Four frames of one hook directly below three game frames: the longest
+  // run in the stack, but it only wraps the thread entry.
+  const std::string log =
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FFB541B483A    KERNELBASE.dll+00C483A\n"
+    "\t[ 1][P] 0x7FF6AB000001      SkyrimSE.exe+0000001\n"
+    "\t[ 2][P] 0x7FF6AB000002      SkyrimSE.exe+0000002\n"
+    "\t[ 3][P] 0x7FF6AB000003      SkyrimSE.exe+0000003\n"
+    "\t[ 4][P] 0x7FF9BE000001         Hooks.dll+0000001\n"
+    "\t[ 5][P] 0x7FF9BE000002         Hooks.dll+0000002\n"
+    "\t[ 6][P] 0x7FF9BE000003         Hooks.dll+0000003\n"
+    "\t[ 7][P] 0x7FF9BE000004         Hooks.dll+0000004\n"
+    "\t[ 8][P] 0x7FF6AB000004      SkyrimSE.exe+0000004\n"
+    "\t[ 9][P] 0x7FFB55EACDF7      KERNEL32.DLL+002CDF7\n"
+    "\t[10][P] 0x7FFB56F3EE4C         ntdll.dll+007EE4C\n"
+    "\n";
+  const auto signals = core::ParseCrashLoggerFrameSignalsAscii(log);
+  assert((signals.thread_entry_hook_modules == std::vector<std::string>{ "Hooks.dll" }));
+  assert(signals.probable_streak_module == "SkyrimSE.exe" && signals.probable_streak_length == 3u);
+}
+
+void TestFrameWithoutModuleKeepsItsPlace()
+{
+  // Crash Logger prints a [P] row with no module for code outside every
+  // module. Dropping it would make A.dll look like it sits on the game's
+  // thread start routine.
+  const std::string log =
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FF6AB000001      SkyrimSE.exe+0000001\n"
+    "\t[ 1][P] 0x7FF6AB000002      SkyrimSE.exe+0000002\n"
+    "\t[ 2][P] 0x7FF6AB000003      SkyrimSE.exe+0000003\n"
+    "\t[ 3][P] 0x7FF9BE000001             A.dll+0000001\n"
+    "\t[ 4][P] 0x7FF6AB000004      SkyrimSE.exe+0000004\n"
+    "\t[ 5][P] 0x12345678               \n"
+    "\t[ 6][S] 0x7FF9BE000002             B.dll+0000002\n"
+    "\t[ 7][P] 0x7FFB55EACDF7      KERNEL32.DLL+002CDF7\n"
+    "\t[ 8][P] 0x7FFB56F3EE4C         ntdll.dll+007EE4C\n"
+    "\n";
+  const auto signals = core::ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.probable_modules_in_order.size() == 7u);
+  assert(signals.probable_frame_is_thread_entry_hook.size() == 7u);
+  assert(!signals.probable_frame_is_thread_entry_hook[3]);
+  assert(signals.thread_entry_hook_modules.empty());
+  assert(signals.first_actionable_probable_module == "A.dll");
 }
 
 }  // namespace
@@ -137,5 +223,8 @@ int main()
   TestPluginsThatAreNotThreadEntryHooks();
   TestCrashLoggerFrameSignalsSkipThreadEntryHooks();
   TestCrashLoggerObjectTypes();
+  TestPluginOnTheCrashingPathIsNoHook();
+  TestThreadEntryHookIsNoStreak();
+  TestFrameWithoutModuleKeepsItsPlace();
   return 0;
 }

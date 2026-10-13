@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <vector>
 
@@ -74,6 +75,28 @@ inline std::vector<bool> MarkThreadEntryHookFrames(const std::vector<StackFrameK
     a = b + 1;
   }
   return marked;
+}
+
+// The modules of the marked frames that have no unmarked frame in the same
+// stack, first occurrence order. A plugin that also sits on the crashing path
+// above the entry stays a suspect there, so it is not reported as a hook.
+template <class Module>
+std::vector<Module> ThreadEntryHookOnlyModules(const std::vector<Module>& frameModules, const std::vector<bool>& marked)
+{
+  std::vector<Module> out;
+  for (std::size_t i = 0; i < frameModules.size() && i < marked.size(); ++i) {
+    if (!marked[i] || std::find(out.begin(), out.end(), frameModules[i]) != out.end()) {
+      continue;
+    }
+    bool onlyMarked = true;
+    for (std::size_t j = 0; onlyMarked && j < frameModules.size() && j < marked.size(); ++j) {
+      onlyMarked = marked[j] || !(frameModules[j] == frameModules[i]);
+    }
+    if (onlyMarked) {
+      out.push_back(frameModules[i]);
+    }
+  }
+  return out;
 }
 
 }  // namespace skydiag::dump_tool

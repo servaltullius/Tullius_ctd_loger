@@ -147,7 +147,8 @@ std::string ExtractObjectName(std::string_view line);
 std::string ExtractLocation(std::string_view trimmed);
 std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_view logUtf8);
 // Every object type Crash Logger names under POSSIBLE RELEVANT OBJECTS and
-// REGISTERS, without the trailing '*', first occurrence order, unique. Unlike
+// REGISTERS, and the thrown type under C++ EXCEPTION (std::bad_alloc),
+// without the trailing '*', first occurrence order, unique. Unlike
 // the refs above this keeps types with no plugin or name (InstalledContent).
 std::vector<std::string> ParseCrashLoggerObjectTypesAscii(std::string_view logUtf8);
 std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(const std::vector<CrashLoggerObjectRef>& refs);

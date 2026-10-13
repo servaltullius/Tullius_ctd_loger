@@ -544,6 +544,8 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
   bool inProbableCallStack = false;
   bool mixedProbableRows = false;
   bool allowDirectFaultScan = true;
+  std::vector<StackFrameKind> rowKinds;  // every probable call-stack row
+  std::vector<std::size_t> moduleRows;   // the row of each probable_modules_in_order entry
 
   while (std::getline(iss, line)) {
     if (!line.empty() && line.back() == '\r') {
@@ -577,29 +579,30 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
 
     if (auto module = TryExtractModuleNameFromLineAscii(line)) {
       out.probable_modules_in_order.push_back(*module);
+      const std::string moduleLower = AsciiLower(*module);
+      moduleRows.push_back(rowKinds.size());
+      rowKinds.push_back(
+        IsSystemishModuleAsciiLower(moduleLower) ? StackFrameKind::kSystem
+        : IsGameExeModuleAsciiLower(moduleLower) ? StackFrameKind::kGame
+                                                 : StackFrameKind::kPlugin);
+    } else if (const auto trimmed = TrimAscii(line); !trimmed.empty() && trimmed.front() == '[') {
+      // A frame in no module (JIT code, a freed DLL) keeps its place, so the
+      // frames around it are not taken as adjacent (ThreadEntryHooks.h).
+      rowKinds.push_back(StackFrameKind::kUnknown);
     }
   }
 
+  // Marked per call-stack row, then kept for the rows that name a module.
+  const auto rowMarked = MarkThreadEntryHookFrames(rowKinds);
   std::vector<StackFrameKind> kinds;
-  kinds.reserve(out.probable_modules_in_order.size());
-  for (const auto& module : out.probable_modules_in_order) {
-    const std::string moduleLower = AsciiLower(module);
-    kinds.push_back(
-      IsSystemishModuleAsciiLower(moduleLower) ? StackFrameKind::kSystem
-      : IsGameExeModuleAsciiLower(moduleLower) ? StackFrameKind::kGame
-                                               : StackFrameKind::kPlugin);
+  kinds.reserve(moduleRows.size());
+  out.probable_frame_is_thread_entry_hook.reserve(moduleRows.size());
+  for (const auto row : moduleRows) {
+    kinds.push_back(rowKinds[row]);
+    out.probable_frame_is_thread_entry_hook.push_back(rowMarked[row]);
   }
-  out.probable_frame_is_thread_entry_hook = MarkThreadEntryHookFrames(kinds);
-  for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
-    if (!out.probable_frame_is_thread_entry_hook[i]) {
-      continue;
-    }
-    const auto& module = out.probable_modules_in_order[i];
-    if (std::find(out.thread_entry_hook_modules.begin(), out.thread_entry_hook_modules.end(), module) ==
-        out.thread_entry_hook_modules.end()) {
-      out.thread_entry_hook_modules.push_back(module);
-    }
-  }
+  out.thread_entry_hook_modules =
+    ThreadEntryHookOnlyModules(out.probable_modules_in_order, out.probable_frame_is_thread_entry_hook);
 
   for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
     if (kinds[i] == StackFrameKind::kPlugin && !out.probable_frame_is_thread_entry_hook[i]) {
@@ -611,7 +614,15 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
   std::string currentLower;
   std::string currentModule;
   std::uint32_t currentLength = 0;
-  for (const auto& module : out.probable_modules_in_order) {
+  for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
+    const auto& module = out.probable_modules_in_order[i];
+    // A thread-entry hook is no streak (the Analyzer promotes this one).
+    if (out.probable_frame_is_thread_entry_hook[i]) {
+      currentLower.clear();
+      currentModule.clear();
+      currentLength = 0;
+      continue;
+    }
     const std::string moduleLower = AsciiLower(module);
     if (moduleLower == currentLower) {
       currentLength++;
@@ -1087,21 +1098,50 @@ std::vector<std::string> ParseCrashLoggerObjectTypesAscii(std::string_view logUt
   std::vector<std::string> types;
   std::istringstream iss{ std::string(logUtf8) };
   std::string line;
-  bool inSection = false;
+  enum class Section { kOther, kObjects, kRegisters, kCppException };
+  Section section = Section::kOther;
   while (std::getline(iss, line)) {
     if (!line.empty() && line.back() == '\r') {
       line.pop_back();
     }
     const bool isHeader = !line.empty() && line.front() != '\t' && line.front() != ' ' && line.back() == ':';
     if (isHeader) {
-      inSection = ContainsCaseInsensitiveAscii(line, "POSSIBLE RELEVANT OBJECTS") ||
-                  ContainsCaseInsensitiveAscii(line, "REGISTERS");
+      section = ContainsCaseInsensitiveAscii(line, "POSSIBLE RELEVANT OBJECTS") ? Section::kObjects
+                : ContainsCaseInsensitiveAscii(line, "REGISTERS")               ? Section::kRegisters
+                : ContainsCaseInsensitiveAscii(line, "C++ EXCEPTION")           ? Section::kCppException
+                                                                                : Section::kOther;
       continue;
     }
-    if (!inSection) {
+    std::string type;
+    if (section == Section::kCppException) {
+      // The thrown object's type: "Type: (std::bad_alloc*)" (Crash Logger
+      // 1.25), "Type: std::bad_alloc" (older). It is in no other section.
+      const std::string_view trimmed = TrimAscii(line);
+      if (!StartsWithCaseInsensitiveAscii(trimmed, "Type:")) {
+        continue;
+      }
+      std::string_view value = TrimAscii(trimmed.substr(5));
+      if (!value.empty() && value.front() == '(' && value.back() == ')') {
+        value = TrimAscii(value.substr(1, value.size() - 2));
+      }
+      for (const std::string_view prefix : { std::string_view("class "), std::string_view("struct ") }) {
+        if (StartsWithCaseInsensitiveAscii(value, prefix)) {
+          value = TrimAscii(value.substr(prefix.size()));
+        }
+      }
+      type.assign(value.begin(), value.end());
+    } else if (section == Section::kObjects) {
+      type = ExtractObjectType(TrimAscii(line));
+    } else if (section == Section::kRegisters) {
+      // Only a pointer type in parentheses ("RCX 0x... (NiTriShape*)"); the
+      // fallback would take the register name of "RAX 0x0 (size_t) [0]".
+      type = ExtractObjectType(TrimAscii(line));
+      if (type.empty() || type.back() != '*') {
+        continue;
+      }
+    } else {
       continue;
     }
-    std::string type = ExtractObjectType(TrimAscii(line));
     while (!type.empty() && (type.back() == '*' || type.back() == ' ')) {
       type.pop_back();
     }

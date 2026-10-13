@@ -262,6 +262,24 @@ void TestKnownCrashSiteSignaturesRuntime()
   otherVersion.game_version = "1.7.104.0";
   const auto noSite = db.Match(otherVersion, /*useKorean=*/false);
   assert(!noSite || noSite->id.rfind("FACEGEN", 0) != 0);
+  // Engine Fixes skips only rbx == 0 ([rbx+0x24] reads 0x24); a read of 0x124
+  // (rbx == 0x100) is near zero but not the case it guards.
+  auto otherPointer = facegen;
+  otherPointer.access_violation_address = 0x124ull;
+  const auto notGuarded = db.Match(otherPointer, /*useKorean=*/false);
+  assert(notGuarded && notGuarded->id == "ACCESS_VIOLATION_NULL");
+
+  SignatureMatchInput shadow{};
+  shadow.exc_code = 0xC0000005u;
+  shadow.game_version = "1.6.1170.0";
+  shadow.fault_module = L"SkyrimSE.exe";
+  shadow.fault_offset = 0x14A2546ull;  // RELOCATION_ID(99708, 106342) + 0x16: call [rax+0x18]
+  shadow.access_violation_address = 0x18ull;
+  const auto shadowHit = db.Match(shadow, /*useKorean=*/false);
+  assert(shadowHit && shadowHit->id == "SHADOWSCENENODE_NULLPTR_1_6_1170");
+  shadow.access_violation_address = 0x20ull;
+  const auto shadowMiss = db.Match(shadow, /*useKorean=*/false);
+  assert(shadowMiss && shadowMiss->id == "ACCESS_VIOLATION_NULL");
 
   SignatureMatchInput water{};
   water.exc_code = 0xC0000005u;
@@ -297,6 +315,10 @@ void TestSignatureRejectsMalformedExceptionAndObjectConstraints()
       "    {\"id\": \"EMPTY_TYPES\", \"match\": {\"object_type_any\": []},\n"
       "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
       "    {\"id\": \"BAD_TYPE\", \"match\": {\"object_type_any\": [\"Actor\", 3]},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"NUMBER_AV_ADDRESS\", \"match\": {\"access_violation_address\": 36},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"BAD_AV_ADDRESS\", \"match\": {\"access_violation_address\": \"0x24q\"},\n"
       "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
       "    {\"id\": \"GOOD\", \"match\": {\"object_type_any\": [\"Actor\"]},\n"
       "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}}\n"

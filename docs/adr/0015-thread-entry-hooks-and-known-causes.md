@@ -26,10 +26,11 @@ Accepted
      - 스택 스캔 대체 후보
    - 정식 스택 해제가 스레드 시작까지 끝났고 플러그인 프레임이 모두 이런 훅이면, 포인터 스캔으로 넘어가지 않습니다. 넘어가면 Crash Logger나 MO2 VFS의 오래된 리턴 주소만 후보로 더해지기 때문입니다.
    - 리포트에 근거 항목 "게임 스레드 시작 지점의 훅(후보에서 제외)"을, 요약 JSON에 `thread_entry_hooks`를 넣습니다.
+   - 같은 DLL이 크래시 경로 위쪽에도 프레임을 가지면, 그 프레임은 후보 점수에 그대로 들어가고 그 DLL은 훅 목록과 스택 스캔 제외 대상이 아닙니다(v0.2.63 검수).
 2. **알려진 원인 시그니처**
    - `crash_signatures.json`에 매칭 조건 두 가지를 더했습니다.
      - `cpp_exception_info_contains`: Crash Logger C++ 예외 메시지의 부분 문자열(대소문자 무시)
-     - `object_type_any`: 크래시 근처 오브젝트 타입의 정확한 이름(대소문자 무시). Crash Logger의 POSSIBLE RELEVANT OBJECTS·REGISTERS와 덤프 오브젝트에서 가져오며, 플러그인도 이름도 없는 `InstalledContent` 같은 타입도 포함합니다.
+     - `object_type_any`: 크래시 근처 오브젝트 타입의 정확한 이름(대소문자 무시). Crash Logger의 POSSIBLE RELEVANT OBJECTS, REGISTERS의 포인터 타입, C++ EXCEPTION의 `Type:`(던진 예외 타입)과 덤프 오브젝트에서 가져오며, 플러그인도 이름도 없는 `InstalledContent` 같은 타입도 포함합니다.
    - 새 시그니처 `CONTENT_CATALOG_FORMAT_MISMATCH`(root_cause, 신뢰도 중간)
      - 조건: `0xE06D7363` + "invalid stoull argument" + `InstalledContent`
      - 권장 조치: `[알려진 원인]` ContentCatalog.txt를 휴지통으로 옮기기
@@ -61,6 +62,7 @@ Accepted
     - Engine Fixes 소스(`RELOCATION_ID(26343, 26918)+0x4C`, `RELOCATION_ID(99708, 106342)+0x16`)에서 ID, 오프셋, 명령어를 확인했습니다.
     - 버전별 주소는 Address Library로 구했습니다. 1.6.1170은 실제 exe의 `.pdata` 함수 시작과도 맞췄습니다.
     - 1.7.104는 Engine Fixes 지원을 확인하지 못해 뺐습니다.
+    - 패치는 포인터가 정확히 null일 때만 건너뜁니다(FaceGen `[rbx+0x24]`, Shadow `call [rax+0x18]`). 그래서 새 조건 `access_violation_address`로 접근 주소가 `0x24`, `0x18`일 때만 일치시킵니다. 근처의 다른 작은 주소(예: `0x124`)는 패치가 막지 못하므로 일반 `ACCESS_VIOLATION_NULL`로 남깁니다(v0.2.63 검수).
   - `WATER_REFLECTIONS_ADDWATER_1_6_1170`: 공개 조사 문서의 `AddWater+0x697`을 실제 exe 함수 시작 `0x523280`과 맞췄습니다.
   - `NITRISHAPE_MISSING_GEOMETRY_1_7_104`: 문서의 `SkyrimSE+EDBD16`을 씁니다. 두 번째 주소는 확인하지 못해 뺐습니다.
   - `ANIMATION_CLIPGENERATOR_A0D789_1_5_97`
@@ -70,7 +72,7 @@ Accepted
   - 일반 메커니즘(`ACCESS_VIOLATION_NULL` 등)보다 앞에 두어, 정확한 지점이 먼저 일치하게 했습니다.
 - **콜스택 끊김**
   - 대표 스레드의 스택 해제가 스레드 시작 전에 멈추면 근거 항목과 요약 JSON `stackwalk_truncation`에 이유를 적습니다. 이유는 `outside_modules`, `non_code_address`, `no_unwind_info` 중 하나입니다.
-  - 덤프의 언로드된 모듈 목록으로, 끊긴 주소나 예외 주소가 언로드된 DLL 자리면 그 이름을 적습니다.
+  - 덤프의 언로드된 모듈 목록으로, 끊긴 주소나 예외 주소가 언로드된 DLL 자리면 그 이름을 적습니다. 예외 주소는 그 명령어를 가져오다 난 접근 위반일 때만 봅니다. 거기서 코드가 실행되다 데이터에서 크래시가 났다면 그 자리에는 이미 다른 코드(트램펄린 등)가 올라와 있기 때문입니다.
   - Windows DLL의 해제 정보가 없으면 "v0.2.61 이전 덤프를 Windows 업데이트 뒤 열 때 흔함"을 덧붙입니다.
 - **확인**
   - 보관 덤프 24개를 v0.2.62와 나란히 비교했습니다. 바뀐 것은 이미 머지한 #96·#99로 설명되는 2건뿐이고, 새 시그니처가 잘못 일치한 덤프는 없습니다.
