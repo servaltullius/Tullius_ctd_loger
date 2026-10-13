@@ -118,6 +118,8 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
       labels.push_back(en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹");
     } else if (family == "modal_dialog_owner") {
       labels.push_back(en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈");
+    } else if (family == "hook_stub_owner") {
+      labels.push_back(en ? L"hook stub owner" : L"후킹 점프 코드 주인");
     }
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
@@ -348,6 +350,17 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       : (en
           ? L"Looks like a snapshot dump (not a crash/hang). Useful for state inspection, not root cause. (Confidence: High)"
           : L"스냅샷 덤프(크래시/행 아님)로 보입니다. 원인 판정용이 아니라 '상태 확인'에 유용합니다. (신뢰도: 높음)");
+  } else if (r.hook_stub_race.detected) {
+    // ADR-0016: the dump shows the hook stub complete where the CPU ran int3.
+    const auto& race = r.hook_stub_race;
+    const std::wstring owner = race.target_mod_name.empty()
+      ? race.target_module
+      : (race.target_mod_name + L" (" + race.target_module + L")");
+    summary = en
+      ? (owner + L" was installing a hook while the game ran: another thread took the patched call before the "
+                 L"jump code was complete and hit its unwritten bytes (int3). (Confidence: High)")
+      : (owner + L"이(가) 게임 실행 중에 후킹을 설치하던 순간, 다른 스레드가 바뀐 호출을 지나다 아직 다 써지지 않은 "
+                 L"점프 코드(int3)를 실행했습니다. (신뢰도: 높음)");
   } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
     if (topCandidateIsActionableNonHookDll && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);

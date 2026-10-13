@@ -61,6 +61,18 @@ void ComputeCrashBucket(AnalysisResult& out)
     return;
   }
 
+  // ADR-0016: the stub address and the walk from it change with every run;
+  // whose hook it was and where it jumps do not.
+  if (out.hook_stub_race.detected) {
+    out.crash_bucket_version = 3;
+    out.crash_bucket_key = ComputeCrashBucketKey(
+      out.exc_code,
+      L"hook_stub:" + out.hook_stub_race.target_module,
+      out.hook_stub_race.target_offset,
+      {});
+    return;
+  }
+
   std::vector<CrashBucketFrame> bucketFrames;
   if (!out.stackwalk_primary_bucket_frames.empty()) {
     const std::size_t n = std::min<std::size_t>(out.stackwalk_primary_bucket_frames.size(), 6);

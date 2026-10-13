@@ -551,6 +551,31 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       suspect.confidence = i18n::ConfidenceText(out.language, suspect.confidence_level);
     }
   }
+  if (out.hook_stub_race.detected) {
+    // ADR-0016: the dump names whose hook stub the crash ran into; the stack
+    // above an address outside every module is guesswork by comparison.
+    const auto& race = out.hook_stub_race;
+    const bool en = out.language == i18n::Language::kEnglish;
+    SuspectItem lead{};
+    lead.confidence_level = i18n::ConfidenceLevel::kHigh;
+    lead.confidence = i18n::ConfidenceText(out.language, lead.confidence_level);
+    lead.module_filename = race.target_module;
+    lead.module_path = race.target_module_path;
+    lead.inferred_mod_name = race.target_mod_name;
+    lead.score = out.suspects.empty() ? 1u : out.suspects.front().score + 1u;
+    lead.reason = en
+      ? L"The crash ran the unfinished hook stub that now jumps into this plugin"
+      : L"크래시가 아직 다 써지지 않은 이 플러그인의 후킹 점프 코드를 실행함";
+    std::erase_if(out.suspects, [&](const SuspectItem& s) {
+      return _wcsicmp(s.module_filename.c_str(), race.target_module.c_str()) == 0;
+    });
+    // The rest came from a stack that starts outside every module.
+    for (auto& suspect : out.suspects) {
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(out.language, suspect.confidence_level);
+    }
+    out.suspects.insert(out.suspects.begin(), std::move(lead));
+  }
 
   if (out.is_filtered_clean_exit) {
     out.suspects.clear();
@@ -562,6 +587,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.thread_entry_hook_modules.clear();
     out.stackwalk_truncation.clear();
     out.fault_unloaded_module.clear();
+    out.hook_stub_race = {};
     out.crash_logger_object_types.clear();
     out.inferred_mod_name.clear();
     out.graphics_diag.reset();

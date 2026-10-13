@@ -77,6 +77,16 @@ bool TryComputeStackwalkSuspects(
   std::vector<ThreadTopFrames>* outSideFrames = nullptr,
   const AddressResolver* gameFunctions = nullptr);
 
+// ADR-0016: the crash ran the int3 padding of a hook stub that was being
+// written; detected only for EXCEPTION_BREAKPOINT outside every module.
+HookStubRaceInfo DetectHookStubRace(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const AnalysisResult& out,
+  const std::optional<CONTEXT>& excCtx);
+
 void ComputeCrashBucket(AnalysisResult& out);
 
 }  // namespace skydiag::dump_tool::internal

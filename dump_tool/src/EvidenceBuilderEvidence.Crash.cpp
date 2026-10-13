@@ -212,6 +212,30 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     r.evidence.push_back(std::move(e));
   }
 
+  if (r.hook_stub_race.detected) {
+    const auto& race = r.hook_stub_race;
+    wchar_t stub[32]{};
+    wchar_t target[32]{};
+    swprintf_s(stub, L"0x%llx", static_cast<unsigned long long>(race.stub_address));
+    swprintf_s(target, L"0x%llx", static_cast<unsigned long long>(race.target_offset));
+    const std::wstring callSite = race.call_site.empty()
+      ? std::wstring{}
+      : (en ? (L" The game call at " + race.call_site + L" was patched to enter it.")
+            : (L" 게임의 " + race.call_site + L" 호출이 이 코드로 가도록 바뀌어 있었습니다."));
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Crash in a hook being installed" : L"설치 중인 후킹에서 크래시";
+    e.details = en
+      ? (L"The CPU ran an int3 at " + std::wstring(stub) + L", outside every module, but the dump holds a finished "
+         L"jump there to " + race.target_module + L"+" + target + L": the jump was written right after the crash."
+         + callSite)
+      : (L"CPU는 어느 모듈에도 속하지 않은 " + std::wstring(stub) + L"에서 int3를 실행했지만, 덤프의 그 자리에는 " +
+         race.target_module + L"+" + target + L"(으)로 가는 완성된 점프 코드가 있습니다. 크래시 직후에 점프 코드가 써졌다는 뜻입니다." +
+         callSite);
+    r.evidence.push_back(std::move(e));
+  }
+
   if (!r.stackwalk_truncation.empty()) {
     wchar_t addr[32]{};
     swprintf_s(addr, L"0x%llx", static_cast<unsigned long long>(r.stackwalk_truncation_address));

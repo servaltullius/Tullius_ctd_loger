@@ -18,3 +18,4 @@ ADR index:
 - `0013-problematic-modules.md`
 - `0014-game-function-names.md`
 - `0015-thread-entry-hooks-and-known-causes.md`
+- `0016-hook-install-race.md`

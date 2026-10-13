@@ -1,0 +1,38 @@
+# ADR-0016: Hook Install Race
+
+## Status
+Accepted
+
+## Context
+2026-10-13 17:28:38에 1.6.1170에서 CTD가 났습니다.
+- 리포트는 `SkyrimUpscaler.dll`을 신뢰도 중간 후보로, `NyghtfallMM_NonReplacer.esp`를 추정 모드로 올렸습니다. 둘 다 스택 흔적과 Crash Logger 오브젝트 참조에서 나왔고, 둘 다 틀렸습니다.
+- 예외는 `EXCEPTION_BREAKPOINT`(`0x80000003`)이고, 위치 `0x7FF6AA84583D`는 어느 모듈에도 속하지 않습니다. SkyrimSE.exe 바로 앞의 SKSE 트램펄린 영역입니다.
+- 그런데 덤프의 그 주소에는 int3가 아니라 완성된 점프 코드 `FF 25 00000000 <imm64>`가 있고, 그 대상은 `zzzz_TypeMode.dll+0x1BFC0`입니다.
+- 스택 맨 위의 반환 주소 `SkyrimSE.exe+0xCD8FC0` 바로 앞(`+0xCD8FBB`)은 정확히 그 주소를 부르는 `call rel32`입니다(함수 ID 68617).
+- `zzzz_TypeMode.log`에는 같은 밀리초 `17:28:38.602`에 메인 스레드(14260)가 "Instalando o hook do Bloqueador..."를 남겼습니다. 크래시 스레드는 44080입니다.
+- 즉 TypeMode가 게임 실행 중(로딩이 끝날 때)에 후킹을 설치했고, 다른 스레드가 이미 바뀐 call을 지날 때 점프 코드 칸이 아직 0xCC 패딩이었습니다. 덤프를 쓸 무렵에는 점프 코드가 완성돼 있었습니다.
+
+## Decision
+1. **감지**(`HookStubRace.h`, `AnalyzerInternalsHookStubRace.cpp`) — 아래를 모두 만족할 때만:
+   - 예외가 `EXCEPTION_BREAKPOINT`이고, 예외 주소가 어느 모듈에도 속하지 않음
+   - 덤프의 그 주소가 점프 코드: `FF 25 00000000 <imm64>`, `mov rax, imm64; jmp rax`, `mov r11, imm64; jmp r11`
+   - 점프 대상이 Windows 모듈도 게임 EXE도 아닌 모듈 안
+   - 덤프 자신의 메모리만 읽습니다. 디스크의 파일에는 이 순간의 상태가 없습니다.
+   - 스택 맨 위의 반환 주소 앞이 이 주소를 부르는 `call rel32`이면 그 위치(`call_site`)도 적습니다. 함수 시작을 덮는 `jmp` 후킹이면 없을 수 있어 조건은 아닙니다.
+2. **판정**
+   - 점프 대상 모듈(후킹 주인)을 후보 맨 앞에 신뢰도 높음으로 둡니다. 새 근거 종류 `hook_stub_owner`는 강한 근거입니다.
+   - 행동 우선 후보는 이 근거와 반복 이력만으로 만듭니다. 모달 대화상자와 같은 방식입니다. 크래시 주소가 모듈 밖이라 Crash Logger 프레임, 오브젝트 참조, 스택 스캔은 그 스레드에 우연히 남은 것을 가리키기 때문입니다.
+   - 결론 문장, 근거 항목 "설치 중인 후킹에서 크래시", 다음 조치 `[알려진 원인]`(업데이트, 반복되면 끄기, 작성자에게 제보)을 씁니다.
+   - 요약 JSON에 `hook_stub_race`(점프 코드 주소, 대상 모듈과 오프셋, MO2 모드 이름, `call_site`)를 넣습니다.
+   - 크래시 버킷 키는 `hook_stub:<모듈>`과 대상 오프셋으로 만듭니다. 트램펄린 주소는 실행마다 바뀌기 때문입니다.
+
+## Consequences
+- 2026-10-13 덤프 재분석: 결론과 다음 조치가 `Typing Mode (zzzz_TypeMode.dll)`, 신뢰도 높음으로 바뀝니다.
+- 점프 코드가 끝까지 안 써졌거나(덤프에도 int3) 다른 형태의 점프면 감지하지 않고 이전 판정을 그대로 씁니다.
+- 디버거 중단점처럼 일부러 넣은 int3가 나중에 점프로 바뀐 경우와는 구분하지 못합니다. 일반 플레이 환경에서는 드뭅니다.
+- 타이밍 경쟁이라 다음 실행에서 재현되지 않을 수 있습니다. 다음 조치에 "한 번 안 난다고 해결된 것은 아님"을 적었습니다.
+
+## Verification
+- `skydiag_hook_stub_race_tests`(Linux 포함): 세 점프 코드 형태, 패딩·변위 있는 jmp·null 대상·짧은 읽기 거부, `call rel32` 판정
+- `skydiag_crash_test_findings_tests`: 결론, 행동 우선 후보, 다음 조치, 근거 항목, 요약 JSON, 버킷 키(트램펄린 주소와 무관, 모듈별로 다름)
+- 2026-10-13 덤프 재분석과 보관 덤프 나란히 비교
