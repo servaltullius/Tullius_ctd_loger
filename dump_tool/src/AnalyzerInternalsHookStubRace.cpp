@@ -74,6 +74,12 @@ HookStubRaceInfo DetectHookStubRace(
       }
     }
   }
+  // Only a patched game call that entered exactly this stub shows the CPU
+  // took a hook while it was being written; without it (a breakpoint set and
+  // removed, code reached some other way) nothing is claimed (v0.2.65 audit).
+  if (info.call_site.empty()) {
+    return HookStubRaceInfo{};
+  }
   return info;
 }
 

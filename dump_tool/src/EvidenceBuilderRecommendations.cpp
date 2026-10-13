@@ -363,10 +363,14 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
   const std::wstring gameVersion = r.game_version.empty() ? std::wstring{} : (L" (" + ToWideAscii(r.game_version) + L")");
   if (modal.address_library_issue == "plugin_incompatible") {
     r.recommendations.push_back(en
-      ? (L"[Modal dialog] " + plugin + L" was built for a different game version and does not support the Address Library of this game" +
-          gameVersion + L". Install the file of that mod made for this game version, or disable it. Reinstalling Address Library usually does not fix this.")
-      : (L"[Modal 대화상자] " + plugin + L"은(는) 다른 게임 버전용으로 빌드되어 현재 게임" + gameVersion +
-          L"의 Address Library를 지원하지 않습니다. 이 게임 버전용 파일로 바꾸거나 해당 모드를 비활성화하세요. 보통 Address Library를 다시 설치해서는 해결되지 않습니다."));
+      ? (L"[Modal dialog] " + plugin + L" could not use the Address Library of this game" + gameVersion +
+          L": the format or an address it needs is missing. Usually the plugin was built for another game version; "
+          L"an outdated or damaged Address Library file gives the same message. Check that Address Library for this "
+          L"game version is current, then install the file of that mod made for this game version, or disable it.")
+      : (L"[Modal 대화상자] " + plugin + L"이(가) 현재 게임" + gameVersion +
+          L"의 Address Library를 쓰지 못했습니다(형식이 맞지 않거나 필요한 주소가 없음). 대개 플러그인이 다른 게임 버전용으로 "
+          L"빌드된 경우지만, Address Library 파일이 오래되었거나 손상되어도 같은 메시지가 나옵니다. 이 게임 버전용 Address "
+          L"Library가 최신인지 먼저 확인하고, 그다음 이 게임 버전용 모드 파일로 바꾸거나 해당 모드를 비활성화하세요."));
   } else if (modal.address_library_issue == "address_library_missing") {
     r.recommendations.push_back(en
       ? (L"[Modal dialog] " + plugin + L" could not find the Address Library file for this game version" + gameVersion +
@@ -458,12 +462,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? race.target_module
       : (race.target_mod_name + L" (" + race.target_module + L")");
     r.recommendations.push_back(en
-      ? (L"[Known cause] " + owner + L" installs a hook while other game threads run, and one of them ran the "
-         L"half-written hook. Update it, or disable it if the crash repeats, and report the timing race to its "
-         L"author with this report. The crash depends on timing, so a run without it does not mean it is fixed.")
-      : (L"[알려진 원인] " + owner + L"이(가) 다른 게임 스레드가 도는 중에 후킹을 설치하다가, 그중 한 스레드가 반쯤 써진 "
-         L"후킹을 실행했습니다. 이 모드를 업데이트하고, 크래시가 반복되면 끄세요. 작성자에게 이 리포트와 함께 설치 시점 경쟁 "
-         L"문제를 알려 주세요. 타이밍에 따라 나는 크래시라, 한 번 안 난다고 해결된 것은 아닙니다."));
+      ? (L"[Known cause] A hook into " + owner + L" was installed while other game threads ran, and one of them "
+         L"ran it half-written. Update that mod, or disable it if the crash repeats, and report the timing race to "
+         L"its author with this report. The crash depends on timing, so a run without it does not mean it is fixed.")
+      : (L"[알려진 원인] " + owner + L"(으)로 가는 후킹이 다른 게임 스레드가 도는 중에 설치되다가, 그중 한 스레드가 반쯤 "
+         L"써진 후킹을 실행했습니다. 이 모드를 업데이트하고, 크래시가 반복되면 끄세요. 작성자에게 이 리포트와 함께 설치 시점 "
+         L"경쟁 문제를 알려 주세요. 타이밍에 따라 나는 크래시라, 한 번 안 난다고 해결된 것은 아닙니다."));
   }
 
   if (r.signature_match.has_value()) {
@@ -581,8 +585,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 
   if (r.needs_bees && isCrashLike) {
     r.recommendations.push_back(en
-      ? L"[BEES] Install BEES or update the game runtime to 1.6.1130+."
-      : L"[BEES] BEES를 설치하거나 게임 런타임을 1.6.1130 이상으로 업데이트하세요.");
+      ? L"[BEES] Install BEES (if it is installed, check skse64.log that BackportedESLSupport.dll loaded) or update the game runtime to 1.6.1130+."
+      : L"[BEES] BEES를 설치하거나(이미 설치했다면 skse64.log에서 BackportedESLSupport.dll이 로드되었는지 확인) 게임 런타임을 1.6.1130 이상으로 업데이트하세요.");
   }
 
   if (!r.missing_masters.empty()) {
@@ -852,16 +856,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     if (stallExplained) {
       // No [Main thread] advice.
     } else if (isHangLike && IsGpuWait(wait)) {
-      std::vector<std::wstring> injectors;
-      if (r.graphics_env.enb_detected) {
-        injectors.push_back(L"ENB");
-      }
-      if (r.graphics_env.reshade_detected) {
-        injectors.push_back(L"ReShade");
-      }
-      if (r.graphics_env.dxvk_detected) {
-        injectors.push_back(L"DXVK");
-      }
+      // The injector DLLs found in the game folder, by file name: the same
+      // d3d11.dll/dxgi.dll pair can be ENB, ReShade or DXVK.
+      const auto& injectors = r.graphics_env.injection_modules;
       const std::wstring detected = injectors.empty()
         ? std::wstring{}
         : (en ? (L" (detected: " + JoinList(injectors, injectors.size(), L", ") + L")")

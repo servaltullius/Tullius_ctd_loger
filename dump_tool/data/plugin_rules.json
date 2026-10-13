@@ -9,15 +9,15 @@
         "module_not_loaded": ["BackportedESLSupport.dll", "bees.dll"]
       },
       "diagnosis": {
-        "cause_ko": "헤더 버전 1.71 플러그인이 있으나 BEES가 설치되지 않음 - 구버전 런타임에서 크래시 가능",
-        "cause_en": "Header version 1.71 plugin found but BEES not installed - may crash on older runtime",
+        "cause_ko": "헤더 버전 1.71 플러그인이 있는데 BEES(BackportedESLSupport.dll)가 로드되지 않았습니다. 설치하지 않았거나 SKSE가 로드하지 못한 경우로, 1.6.1130 미만 런타임에서 크래시가 날 수 있습니다",
+        "cause_en": "Header version 1.71 plugin found but BEES (BackportedESLSupport.dll) is not loaded: not installed, or SKSE did not load it. Runtimes before 1.6.1130 may crash",
         "confidence": "high",
         "recommendations_ko": [
-          "[BEES] BEES (Backported Extended ESL Support) 모드를 설치하세요",
+          "[BEES] BEES (Backported Extended ESL Support)를 설치하세요. 이미 설치했다면 SKSE 로그(skse64.log)에서 BackportedESLSupport.dll이 로드되었는지 확인하세요",
           "[대안] 게임을 1.6.1130 이상으로 업데이트하세요"
         ],
         "recommendations_en": [
-          "[BEES] Install BEES (Backported Extended ESL Support) mod",
+          "[BEES] Install BEES (Backported Extended ESL Support). If it is installed, check skse64.log that BackportedESLSupport.dll loaded",
           "[Alternative] Update game to 1.6.1130 or later"
         ]
       }
@@ -64,16 +64,14 @@
         "full_plugin_count_gte": 240
       },
       "diagnosis": {
-        "cause_ko": "비-ESL 플러그인 수가 슬롯 한계(254)에 근접 — 크래시 위험 높음",
-        "cause_en": "Non-ESL plugin count approaching slot limit (254) — high crash risk",
-        "confidence": "high",
+        "cause_ko": "비-ESL 플러그인 수가 한계(254개)에 가깝습니다. 한계를 넘기 전에는 그 자체로 크래시 원인이 아니지만, 넘으면 그 뒤 플러그인이 로드되지 않습니다",
+        "cause_en": "Non-ESL plugin count is close to the limit (254). It is not a crash cause by itself below the limit, but plugins past it do not load",
+        "confidence": "low",
         "recommendations_ko": [
-          "[필수] 불필요한 ESP를 ESL 플래그로 변환하거나 제거하세요",
-          "[도구] SSEEdit의 'Compact FormIDs for ESL' 기능을 활용하세요"
+          "[정리] 플러그인을 더 추가할 계획이면 ESL로 바꿀 수 있는 ESP를 정리하세요(SSEEdit의 'Compact FormIDs for ESL')"
         ],
         "recommendations_en": [
-          "[Required] Convert unnecessary ESPs to ESL-flagged or remove them",
-          "[Tool] Use SSEEdit's 'Compact FormIDs for ESL' feature"
+          "[Upkeep] If you plan to add more plugins, ESL-flag the ESPs that can be (SSEEdit's 'Compact FormIDs for ESL')"
         ]
       }
     }
