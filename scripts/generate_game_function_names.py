@@ -196,6 +196,16 @@ def read_address_library(path: Path) -> dict[int, int]:
         return value
 
     fmt_version = take("<i")
+    if fmt_version == 5:
+        # 1.7.x (Address Library v13): version[4], a 64-byte module name,
+        # pointer size, a reserved int, the ID count, then one u32 offset per
+        # ID, indexed by ID (0 = no address).
+        pos += 16 + 64 + 4 + 4
+        count = take("<i")
+        if len(data) != pos + count * 4:
+            raise ValueError(f"{path}: format 5 size does not match its {count} IDs")
+        offsets = struct.unpack_from(f"<{count}I", data, pos)
+        return {id_: off for id_, off in enumerate(offsets) if off}
     if fmt_version not in (1, 2):
         raise ValueError(f"{path}: unsupported Address Library format {fmt_version}")
     pos += 16  # version[4]

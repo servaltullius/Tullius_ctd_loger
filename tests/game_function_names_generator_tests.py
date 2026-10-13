@@ -138,6 +138,17 @@ def test_address_library_decoding():
         assert gen.read_address_library(path) == mapping
 
 
+def test_address_library_format_5_decoding():
+    # 1.7.x files: a fixed 64-byte name and one u32 offset per ID.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "versionlib-1-7-104-0.bin"
+        offsets = [0, 0x1000, 0, 0xCE3250]
+        header = struct.pack("<i4i", 5, 1, 7, 104, 0) + b"SkyrimSE.exe".ljust(64, b"\0")
+        header += struct.pack("<iii", 8, 0, len(offsets))
+        path.write_bytes(header + struct.pack(f"<{len(offsets)}I", *offsets))
+        assert gen.read_address_library(path) == {1: 0x1000, 3: 0xCE3250}
+
+
 def test_generated_table_leaves_out_ambiguous_ids():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -166,7 +177,7 @@ def test_checked_in_table_matches_its_source():
     # MIT asks for its notice wherever the names go; they ship in this file.
     assert data["name_license"][0] == "MIT License"
     assert any("Ryan-rsm-McKenzie" in line for line in data["name_license"])
-    for version in ("1.5.97.0", "1.6.640.0", "1.6.1170.0"):
+    for version in ("1.5.97.0", "1.6.640.0", "1.6.1170.0", "1.7.104.0"):
         functions = data["game_versions"][version]["functions"]
         assert len(functions) > 500, (version, len(functions))
         for key in functions:

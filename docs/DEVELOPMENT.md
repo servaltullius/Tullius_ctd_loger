@@ -362,7 +362,9 @@ python scripts/generate_game_function_names.py \
   --bin 1.5.97.0=<Address Library>/version-1-5-97-0.bin \
   --bin 1.6.640.0=<Address Library>/versionlib-1-6-640-0.bin \
   --bin 1.6.1170.0=<Address Library>/versionlib-1-6-1170-0.bin \
-  --exe 1.6.1170.0=<game folder>/SkyrimSE.exe
+  --bin 1.7.104.0=<Address Library>/versionlib-1-7-104-0.bin \
+  --exe 1.6.1170.0=<1.6.1170 game folder>/SkyrimSE.exe \
+  --exe 1.7.104.0=<1.7.104 game folder>/SkyrimSE.exe
 ```
 
 `--exe` keeps only IDs that start a function in that build's `.pdata`; without it data addresses stay in the table (harmless, since the analyzer matches exact function starts, but noisy). Do not commit Address Library files.
