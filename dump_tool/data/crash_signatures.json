@@ -2,6 +2,28 @@
   "version": 2,
   "signatures": [
     {
+      "id": "CONTENT_CATALOG_FORMAT_MISMATCH",
+      "match": {
+        "exc_code": "0xE06D7363",
+        "cpp_exception_info_contains": "invalid stoull argument",
+        "object_type_any": [
+          "InstalledContent"
+        ]
+      },
+      "diagnosis": {
+        "scope": "root_cause",
+        "cause_ko": "게임이 설치된 Creations·CC 목록(ContentCatalog.txt)을 읽다가 숫자가 아닌 값을 만나 C++ 예외로 종료했습니다. 다른 게임 버전(예: 1.7.x)을 실행하면 이 파일이 새 형식으로 다시 쓰이고, 이전 버전(1.6.x)이 그 파일을 읽지 못합니다.",
+        "cause_en": "The game stopped on a C++ exception while reading its list of installed Creations (ContentCatalog.txt): a value it expected to be a number was not. Running another game version (such as 1.7.x) rewrites this file in a newer format that an older version (1.6.x) cannot read.",
+        "confidence": "medium",
+        "recommendations_ko": [
+          "[알려진 원인] %LOCALAPPDATA%\\Skyrim Special Edition\\ContentCatalog.txt를 휴지통으로 옮기거나 이름을 바꾼 뒤 게임을 다시 실행하세요. 게임이 설치된 콘텐츠를 보고 이 파일을 다시 만듭니다. 같은 PC에서 다른 게임 버전을 실행할 때마다 다시 생길 수 있습니다."
+        ],
+        "recommendations_en": [
+          "[Known cause] Move %LOCALAPPDATA%\\Skyrim Special Edition\\ContentCatalog.txt to the Recycle Bin (or rename it) and start the game again; the game rebuilds it from the installed content. It can come back each time another game version runs on the same PC."
+        ]
+      }
+    },
+    {
       "id": "D6DDDA_1597_AV",
       "match": {
         "exc_code": "0xC0000005",

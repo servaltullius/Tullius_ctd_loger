@@ -22,6 +22,10 @@ struct CrashLoggerFrameSignals {
   std::string probable_streak_module;
   std::uint32_t probable_streak_length = 0;
   std::vector<std::string> probable_modules_in_order;
+  // Plugins whose probable frames only wrap a game thread's entry
+  // (ThreadEntryHooks.h); never the first actionable module or a top module.
+  std::vector<std::string> thread_entry_hook_modules;
+  std::vector<bool> probable_frame_is_thread_entry_hook;
 };
 
 // Parsed date/time components from a filename pattern.
@@ -142,6 +146,10 @@ std::string ExtractObjectType(std::string_view line);
 std::string ExtractObjectName(std::string_view line);
 std::string ExtractLocation(std::string_view trimmed);
 std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_view logUtf8);
+// Every object type Crash Logger names under POSSIBLE RELEVANT OBJECTS and
+// REGISTERS, without the trailing '*', first occurrence order, unique. Unlike
+// the refs above this keeps types with no plugin or name (InstalledContent).
+std::vector<std::string> ParseCrashLoggerObjectTypesAscii(std::string_view logUtf8);
 std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(const std::vector<CrashLoggerObjectRef>& refs);
 // POSSIBLE RELEVANT OBJECTS entries with a name or FormID but no plugin (forms
 // created at runtime, such as spawned actors), most relevant first, at most 6.

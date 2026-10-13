@@ -473,6 +473,10 @@ void IntegrateCrashLoggerLog(
     }
   }
 
+  for (const auto& type : crashlogger_core::ParseCrashLoggerObjectTypesAscii(*logUtf8)) {
+    out.crash_logger_object_types.push_back(Utf8ToWide(type));
+  }
+
   if (auto exceptionLine = crashlogger_core::ParseCrashLoggerExceptionLineAscii(*logUtf8)) {
     out.crash_logger_exception_type = Utf8ToWide(exceptionLine->type);
     out.crash_logger_exception_location = Utf8ToWide(exceptionLine->location);
@@ -598,6 +602,14 @@ void ComputeSuspects(
         &gameThreadFrames,
         gameFunctions)) {
     out.suspects_from_stackwalk = false;
+  }
+  if (!out.suspects_from_stackwalk && out.stackwalk_only_thread_entry_hook_plugins) {
+    // The walk reached the thread start and its only plugin frames wrap the
+    // thread's entry: no plugin is on the crashing path. A pointer scan would
+    // only add stale return addresses (Crash Logger's own, the MO2 VFS).
+    out.diagnostics.push_back(
+      L"[Stackwalk] complete walk; its only plugin frames wrap the thread entry, so no stack scan");
+  } else if (!out.suspects_from_stackwalk) {
     // The helper treats the "failed" diagnostic as degraded capture quality,
     // so keep it for walks that produced no caller frames at all.
     out.diagnostics.push_back(out.stackwalk_total_frames >= 2u
@@ -612,6 +624,12 @@ void ComputeSuspects(
       scanTids,
       out.exc_tid,
       opt.language);
+    // The walk or Crash Logger already showed these only wrap the thread's
+    // entry; a raw stack slot holding their return address says no more.
+    std::erase_if(out.suspects, [&](const SuspectItem& suspect) {
+      return std::any_of(out.thread_entry_hook_modules.begin(), out.thread_entry_hook_modules.end(),
+        [&](const std::wstring& hook) { return _wcsicmp(hook.c_str(), suspect.module_filename.c_str()) == 0; });
+    });
     if (hangLike) {
       for (auto& suspect : out.suspects) {
         suspect.confidence_level = i18n::ConfidenceLevel::kLow;

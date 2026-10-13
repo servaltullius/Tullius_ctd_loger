@@ -1,4 +1,5 @@
 #include "CrashLoggerParseCore.h"
+#include "ThreadEntryHooks.h"
 
 #include <algorithm>
 #include <cctype>
@@ -579,10 +580,30 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
     }
   }
 
+  std::vector<StackFrameKind> kinds;
+  kinds.reserve(out.probable_modules_in_order.size());
   for (const auto& module : out.probable_modules_in_order) {
     const std::string moduleLower = AsciiLower(module);
-    if (!IsSystemishModuleAsciiLower(moduleLower) && !IsGameExeModuleAsciiLower(moduleLower)) {
-      out.first_actionable_probable_module = module;
+    kinds.push_back(
+      IsSystemishModuleAsciiLower(moduleLower) ? StackFrameKind::kSystem
+      : IsGameExeModuleAsciiLower(moduleLower) ? StackFrameKind::kGame
+                                               : StackFrameKind::kPlugin);
+  }
+  out.probable_frame_is_thread_entry_hook = MarkThreadEntryHookFrames(kinds);
+  for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
+    if (!out.probable_frame_is_thread_entry_hook[i]) {
+      continue;
+    }
+    const auto& module = out.probable_modules_in_order[i];
+    if (std::find(out.thread_entry_hook_modules.begin(), out.thread_entry_hook_modules.end(), module) ==
+        out.thread_entry_hook_modules.end()) {
+      out.thread_entry_hook_modules.push_back(module);
+    }
+  }
+
+  for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
+    if (kinds[i] == StackFrameKind::kPlugin && !out.probable_frame_is_thread_entry_hook[i]) {
+      out.first_actionable_probable_module = out.probable_modules_in_order[i];
       break;
     }
   }
@@ -614,9 +635,11 @@ std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_v
   std::unordered_map<std::string, std::uint32_t> freq;
   std::unordered_map<std::string, std::size_t> firstSeen;  // ties keep stack order
   const auto signals = ParseCrashLoggerFrameSignalsAscii(logUtf8);
-  for (const auto& module : signals.probable_modules_in_order) {
+  for (std::size_t i = 0; i < signals.probable_modules_in_order.size(); ++i) {
+    const auto& module = signals.probable_modules_in_order[i];
     const std::string moduleLower = AsciiLower(module);
-    if (IsSystemishModuleAsciiLower(moduleLower) || IsGameExeModuleAsciiLower(moduleLower)) {
+    if (IsSystemishModuleAsciiLower(moduleLower) || IsGameExeModuleAsciiLower(moduleLower) ||
+        signals.probable_frame_is_thread_entry_hook[i]) {
       continue;
     }
     firstSeen.emplace(moduleLower, firstSeen.size());
@@ -1057,6 +1080,36 @@ std::string ExtractLocation(std::string_view trimmed)
   std::string_view loc = trimmed.substr(0, colon);
   while (!loc.empty() && (loc.back() == ' ' || loc.back() == '\t')) loc.remove_suffix(1);
   return std::string(loc);
+}
+
+std::vector<std::string> ParseCrashLoggerObjectTypesAscii(std::string_view logUtf8)
+{
+  std::vector<std::string> types;
+  std::istringstream iss{ std::string(logUtf8) };
+  std::string line;
+  bool inSection = false;
+  while (std::getline(iss, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    const bool isHeader = !line.empty() && line.front() != '\t' && line.front() != ' ' && line.back() == ':';
+    if (isHeader) {
+      inSection = ContainsCaseInsensitiveAscii(line, "POSSIBLE RELEVANT OBJECTS") ||
+                  ContainsCaseInsensitiveAscii(line, "REGISTERS");
+      continue;
+    }
+    if (!inSection) {
+      continue;
+    }
+    std::string type = ExtractObjectType(TrimAscii(line));
+    while (!type.empty() && (type.back() == '*' || type.back() == ' ')) {
+      type.pop_back();
+    }
+    if (!type.empty() && std::find(types.begin(), types.end(), type) == types.end()) {
+      types.push_back(std::move(type));
+    }
+  }
+  return types;
 }
 
 std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_view logUtf8)

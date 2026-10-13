@@ -324,10 +324,20 @@ struct AnalysisResult
   bool crash_logger_first_actionable_probable_eligible = false;
   bool crash_logger_probable_streak_eligible = false;
   std::uint32_t crash_logger_frame_signal_strength = 0;
+  // Plugins whose frames only wrap the entry of the game thread that crashed
+  // (ThreadEntryHooks.h), from Crash Logger's call stack and the stack walk.
+  // They are left out of the suspects and of Crash Logger's frame signals.
+  std::vector<std::wstring> thread_entry_hook_modules;
+  // The shown thread's walk reached its start and had plugin frames, all of
+  // them thread-entry hooks (no stack scan then; see Analyzer.CaptureInputs).
+  bool stackwalk_only_thread_entry_hook_plugins = false;
   std::wstring crash_logger_cpp_exception_type;
   std::wstring crash_logger_cpp_exception_info;
   std::wstring crash_logger_cpp_exception_throw_location;
   std::wstring crash_logger_cpp_exception_module;
+  // Object types Crash Logger names near the crash (crash_signatures.json
+  // object_type_any), including ones with no plugin such as InstalledContent.
+  std::vector<std::wstring> crash_logger_object_types;
 
   // CrashLogger: referenced game objects (ESP/ESM) at crash time
   struct CrashLoggerModReference {

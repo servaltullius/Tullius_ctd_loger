@@ -41,6 +41,15 @@ target_include_directories(skydiag_crashlogger_parser_tests PRIVATE
 
 add_test(NAME skydiag_crashlogger_parser_tests COMMAND skydiag_crashlogger_parser_tests)
 
+add_executable(skydiag_thread_entry_hook_tests
+  thread_entry_hook_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashLoggerParseCore.cpp"
+)
+target_include_directories(skydiag_thread_entry_hook_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_thread_entry_hook_tests COMMAND skydiag_thread_entry_hook_tests)
+
 if(WIN32)
   add_executable(skydiag_crashlogger_search_integration_tests
     crashlogger_search_integration_tests.cpp

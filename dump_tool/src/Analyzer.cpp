@@ -193,6 +193,13 @@ void IntegrateCrashLoggerFrameSignals(
       CanonicalizeCrashLoggerFrameModule(rawSignals.probable_streak_module, canonicalByFilenameLower);
   }
   out->crash_logger_probable_streak_length = rawSignals.probable_streak_length;
+  for (const auto& hook : rawSignals.thread_entry_hook_modules) {
+    const auto module = CanonicalizeCrashLoggerFrameModule(hook, canonicalByFilenameLower);
+    if (std::find(out->thread_entry_hook_modules.begin(), out->thread_entry_hook_modules.end(), module) ==
+        out->thread_entry_hook_modules.end()) {
+      out->thread_entry_hook_modules.push_back(module);
+    }
+  }
 
   out->crash_logger_direct_fault_eligible =
     CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module) &&
@@ -551,6 +558,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.crash_logger_unattributed_objects.clear();
     out.dump_objects.clear();
     out.crash_logger_top_modules.clear();
+    out.thread_entry_hook_modules.clear();
+    out.crash_logger_object_types.clear();
     out.inferred_mod_name.clear();
     out.graphics_diag.reset();
     out.plugin_diagnostics.clear();
@@ -589,6 +598,13 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       for (const auto& m : out.crash_logger_top_modules) {
         if (!m.empty()) {
           input.callstack_modules.push_back(m);
+        }
+      }
+      input.cpp_exception_info = out.crash_logger_cpp_exception_info;
+      input.object_types = out.crash_logger_object_types;
+      for (const auto& object : out.dump_objects) {
+        if (!object.type_name.empty()) {
+          input.object_types.push_back(object.type_name);
         }
       }
       for (const auto& s : out.suspects) {
