@@ -49,8 +49,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 [b][size=4]Requirements[/size][/b]
 [list]
 [*]Windows 10 build 19041 or later
-[*][url=https://skse.silverlock.org/]SKSE64[/url]
-[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
+[*]Skyrim Special Edition / Anniversary Edition: 1.5.97, 1.6.x or 1.7.104 (VR is not supported)
+[*][url=https://skse.silverlock.org/]SKSE64[/url] for your game version (1.7.104 needs SKSE 2.3.1)
+[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url] (1.7.104 needs the v13 All in One)
 [*][url=https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist]Visual C++ Redistributable 2015-2022 (x64)[/url]
 [/list]
 
@@ -58,8 +59,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.61 Update Notice[/b]
-Replace the previous installation with the complete v0.2.61 zip. Do not copy only individual EXEs or DLLs. The plugin code is the same as in v0.2.59, but the Helper, analyzer, viewer and version info changed, so update them together (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder. Dumps are about 17 MB larger than before because they now carry Windows modules' unwind data.
+[b]Important v0.2.62 Update Notice[/b]
+Replace the previous installation with the complete v0.2.62 zip. Do not copy only individual EXEs or DLLs: the plugin, Helper, analyzer and viewer all changed (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
+On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 fixes that.
 
 [b][size=4]Installation (MO2)[/size][/b]
 [list=1]
@@ -115,7 +117,15 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What Changed Since v0.2.59 (v0.2.60 and v0.2.61)[/size][/b]
+[b][size=4]What's New in v0.2.62[/size][/b]
+[list]
+[*][b]Skyrim 1.7.104 support:[/b] the plugin now carries the Address Library v5 flag SKSE 2.3.x requires and reads the 1.7.x Address Library format. Checked in game on 1.7.104 with SKSE 2.3.1
+[*][b]Game function names:[/b] game frames in call stacks are named, e.g. [font=Courier New]SkyrimSE.exe+0x2ea36b (TESObjectREFR::GetDisplayFullName+0x2b)[/font], on 1.5.97, 1.6.640, 1.6.1170 and 1.7.104. A name is shown only when the frame's function start matches exactly; deep engine frames often stay as plain addresses
+[*][b]Cache cleanup:[/b] analysis copies and lock files left behind by deleted dumps are removed after a day
+[*][b]License:[/b] the project is now GPL-3.0-or-later; the zip includes [font=Courier New]SkyrimDiag-LICENSE.txt[/font]
+[/list]
+
+[b][size=4]Earlier: v0.2.60 and v0.2.61[/size][/b]
 [list]
 [*][b]Crash objects from the dump:[/b] the objects the crash registers and stack pointed at are read from the dump itself, with type, FormID, name, the plugins that define and change them, and a reference's base object, e.g. [font=Courier New]RCX: Character "Lydia" 0x000A2C94 Update.esm -> SkyrimHouseRemodel.esp (base TESNPC 0x000A2C8E Skyrim.esm)[/font]. No Crash Logger log needed
 [*][b]Freezes explained by the main thread's wait:[/b] the report says whether the main thread was waiting for the GPU, inside the graphics driver, inside the engine, or in a plugin's call. When it waited for another game thread (where SKSE tasks run), the plugin that thread was stuck in becomes the lead. Stack plugins that were only on the call path are no longer blamed
@@ -131,7 +141,7 @@ The viewer typically shows:
 [*][b]Helper fixes:[/b] plugin names with characters like [font=Courier New]é[/font] no longer stop the Helper; the previous session's log is kept as [font=Courier New]SkyrimDiagHelper.previous.log[/font]; crash dumps no longer fail on some Intel server CPUs with AMX
 [/list]
 
-[i]Validation scope:[/i] All release candidates were played on one MO2 setup (game 1.6.1170, SKSE 2.2.6, about 4,250 plugins, Crash Logger 1.25). For v0.2.61 a development-only test plugin caused 7 incidents of known cause in that game (access violation, breakpoint, C++ exception, a crash inside the game EXE, and freezes); after the fixes in v0.2.61 every report pointed at the right DLL. Not yet seen in real use: the "stuck game thread" freeze rule on a real freeze, analysis after the next Windows update, and a real SkyrimCrashGuard install. There is still no reviewed real-incident accuracy corpus.
+[i]Validation scope:[/i] All release candidates were played on one MO2 setup (game 1.6.1170, SKSE 2.2.6, about 4,250 plugins, Crash Logger 1.25). For v0.2.61 a development-only test plugin caused 7 incidents of known cause in that game (access violation, breakpoint, C++ exception, a crash inside the game EXE, and freezes); after the fixes in v0.2.61 every report pointed at the right DLL. v0.2.62 was also loaded on 1.7.104 (Steam, no other mods, SKSE 2.3.1) with a manual capture and report. Not yet seen in real use: crashes and freezes on a modded 1.7.104 setup, the "stuck game thread" freeze rule on a real freeze, analysis after the next Windows update, and a real SkyrimCrashGuard install. There is still no reviewed real-incident accuracy corpus.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -214,6 +224,9 @@ A: No, but it is recommended. If present, Tullius can produce richer reports.
 [b]Q: Does freeze analysis work automatically?[/b]
 A: Yes. The report says what the game's main thread was waiting for (the GPU, the driver, an error dialog, the engine or a game thread stuck in a plugin) and uses WCT, the blackbox and the loading context alongside it.
 
+[b]Q: I get a SkyrimDiag.dll popup on Skyrim 1.7.104.[/b]
+A: Install v0.2.62 or later, with SKSE 2.3.1 and the Address Library v13 All in One. Older versions of this mod do not load on 1.7.104.
+
 [b][size=4]Privacy[/size][/b]
 [list]
 [*]Dumps and logs may contain [b]local file paths[/b] and [b]usernames[/b]
@@ -231,6 +244,9 @@ When reporting an issue, include as many of these as possible:
 [*][font=Courier New]*_SkyrimDiagBlackbox.jsonl[/font] if present
 [*]CrashLogger logs if present
 [/list]
+
+[b][size=4]License[/size][/b]
+GPL-3.0-or-later. Source: [url=https://github.com/servaltullius/Tullius_ctd_loger]GitHub[/url]. The plugin uses [url=https://github.com/alandtse/CommonLibSSE-NG]CommonLibSSE-NG[/url] (GPL-3.0-or-later with modding exceptions).
 
 [line]
 
@@ -285,8 +301,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 [b][size=4]필수 요구사항[/size][/b]
 [list]
 [*]Windows 10 build 19041 이상
-[*][url=https://skse.silverlock.org/]SKSE64[/url]
-[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url]
+[*]Skyrim Special Edition / Anniversary Edition: 1.5.97, 1.6.x, 1.7.104 (VR은 지원하지 않음)
+[*]게임 버전에 맞는 [url=https://skse.silverlock.org/]SKSE64[/url] (1.7.104는 SKSE 2.3.1)
+[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library for SKSE Plugins[/url] (1.7.104는 v13 All in One)
 [*][url=https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist]VC++ 재배포 2015-2022 (x64)[/url]
 [/list]
 
@@ -294,8 +311,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.61 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.61 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. 플러그인 코드는 v0.2.59와 같지만 Helper, 분석기, 뷰어, 버전 정보가 바뀌었으므로 함께 업데이트해야 합니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요. 덤프에 Windows 모듈의 스택 해제 정보를 담기 때문에 덤프가 이전보다 약 17MB 커집니다.
+[b]v0.2.62 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.62 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
+Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62에서 고쳤습니다.
 
 [b][size=4]설치 (MO2)[/size][/b]
 [list=1]
@@ -351,7 +369,15 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.59 이후 바뀐 점 (v0.2.60, v0.2.61)[/size][/b]
+[b][size=4]v0.2.62 새 기능[/size][/b]
+[list]
+[*][b]Skyrim 1.7.104 지원:[/b] SKSE 2.3.x가 요구하는 Address Library v5 호환 표시를 넣고, 1.7.x용 Address Library 형식을 읽습니다. 1.7.104 + SKSE 2.3.1 실게임에서 확인했습니다
+[*][b]게임 함수 이름:[/b] 콜스택의 게임 프레임에 함수 이름을 붙입니다. 예: [font=Courier New]SkyrimSE.exe+0x2ea36b (TESObjectREFR::GetDisplayFullName+0x2b)[/font]. 1.5.97, 1.6.640, 1.6.1170, 1.7.104를 지원하고, 프레임이 속한 함수의 시작이 정확히 맞을 때만 붙입니다. 깊은 엔진 프레임은 주소로만 나오는 경우가 많습니다
+[*][b]캐시 정리:[/b] 지운 덤프의 분석 사본과 잠금 파일이 남아 쌓이던 것을 하루 뒤 정리합니다
+[*][b]라이선스:[/b] 프로젝트가 GPL-3.0-or-later로 바뀌었고, zip에 [font=Courier New]SkyrimDiag-LICENSE.txt[/font]가 들어갑니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.60, v0.2.61[/size][/b]
 [list]
 [*][b]덤프에서 크래시 오브젝트 읽기:[/b] 크래시 레지스터와 스택이 가리킨 오브젝트를 덤프 자체에서 읽어 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트를 보여 줍니다. 예: [font=Courier New]RCX: Character "리디아" 0x000A2C94 Update.esm -> SkyrimHouseRemodel.esp (base TESNPC 0x000A2C8E Skyrim.esm)[/font]. Crash Logger 로그가 없어도 됩니다.
 [*][b]메인 스레드의 대기로 프리징 설명:[/b] 메인 스레드가 GPU, 그래픽 드라이버, 엔진, 플러그인 호출 중 어디서 기다렸는지 알려 줍니다. 다른 게임 스레드(SKSE 작업이 도는 곳)를 기다리고 있었다면 그 스레드를 붙잡은 플러그인을 가장 유력한 단서로 올립니다. 호출 경로에 있었을 뿐인 스택의 플러그인은 더 이상 지목하지 않습니다.
@@ -367,7 +393,7 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*][b]Helper 수정:[/b] [font=Courier New]é[/font] 같은 문자가 든 플러그인 이름 때문에 Helper가 멈추지 않고, 직전 세션 로그를 [font=Courier New]SkyrimDiagHelper.previous.log[/font]로 남기며, AMX가 있는 일부 Intel 서버 CPU에서 크래시 덤프가 실패하던 문제를 고쳤습니다.
 [/list]
 
-[i]검증 범위:[/i] 모든 RC를 한 MO2 환경(게임 1.6.1170, SKSE 2.2.6, 플러그인 약 4,250개, Crash Logger 1.25)에서 실제로 플레이하며 확인했습니다. v0.2.61에서는 개발용 테스트 플러그인으로 원인을 아는 사고 7건(접근 위반, 브레이크포인트, C++ 예외, 게임 EXE 안의 크래시, 프리징)을 그 게임에서 일으켰고, v0.2.61의 수정 뒤 모든 리포트가 올바른 DLL을 지목했습니다. 아직 실사용에서 보지 못한 것: 실제 프리징에서의 "갇힌 게임 스레드" 판정, 다음 Windows 업데이트 뒤 분석, 실제 SkyrimCrashGuard 설치 환경. 검수된 실사고 정확도 corpus는 아직 없습니다.
+[i]검증 범위:[/i] 모든 RC를 한 MO2 환경(게임 1.6.1170, SKSE 2.2.6, 플러그인 약 4,250개, Crash Logger 1.25)에서 실제로 플레이하며 확인했습니다. v0.2.61에서는 개발용 테스트 플러그인으로 원인을 아는 사고 7건(접근 위반, 브레이크포인트, C++ 예외, 게임 EXE 안의 크래시, 프리징)을 그 게임에서 일으켰고, v0.2.61의 수정 뒤 모든 리포트가 올바른 DLL을 지목했습니다. v0.2.62는 1.7.104(Steam, 다른 모드 없음, SKSE 2.3.1)에서도 로드와 수동 캡처·리포트를 확인했습니다. 아직 실사용에서 보지 못한 것: 모드가 많은 1.7.104 환경의 크래시·프리징, 실제 프리징에서의 "갇힌 게임 스레드" 판정, 다음 Windows 업데이트 뒤 분석, 실제 SkyrimCrashGuard 설치 환경. 검수된 실사고 정확도 corpus는 아직 없습니다.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
@@ -452,6 +478,9 @@ A: 필수는 아닙니다. 다만 설치하면 더 풍부한 진단이 가능합
 [b]Q: 프리징 분석도 자동으로 되나요?[/b]
 A: 됩니다. 게임 메인 스레드가 무엇을 기다렸는지(GPU, 드라이버, 오류 창, 엔진, 플러그인에 갇힌 게임 스레드)를 알려 주고, WCT, blackbox, 로딩 문맥도 함께 씁니다.
 
+[b]Q: Skyrim 1.7.104에서 SkyrimDiag.dll 오류 창이 떠요.[/b]
+A: v0.2.62 이상을 SKSE 2.3.1, Address Library v13(All in One)과 함께 설치하세요. 이 모드의 이전 버전은 1.7.104에서 로드되지 않습니다.
+
 [b][size=4]개인정보 안내[/size][/b]
 [list]
 [*]dump와 로그에는 [b]로컬 경로[/b], [b]사용자 이름[/b] 등이 포함될 수 있습니다.
@@ -469,3 +498,6 @@ A: 됩니다. 게임 메인 스레드가 무엇을 기다렸는지(GPU, 드라�
 [*][font=Courier New]*_SkyrimDiagBlackbox.jsonl[/font] (있다면)
 [*]CrashLogger 로그 (있다면)
 [/list]
+
+[b][size=4]라이선스[/size][/b]
+GPL-3.0-or-later. 소스: [url=https://github.com/servaltullius/Tullius_ctd_loger]GitHub[/url]. 플러그인은 [url=https://github.com/alandtse/CommonLibSSE-NG]CommonLibSSE-NG[/url](GPL-3.0-or-later, 모딩 예외 포함)를 사용합니다.
