@@ -99,6 +99,20 @@ std::size_t AppendPathPart(char* dst, std::size_t cap, std::size_t pos, const ch
   return Append(dst, cap, pos, part);
 }
 
+// The stream's prefix, directory and file name. CommonLibSSE-NG lays out
+// LooseFileStream for AE when built for SE and AE (its Stream base is 0x18
+// bytes on AE, 0x10 on SE), so self->fileName on 1.5.97 reads the wrong
+// field: v0.2.62 and v0.2.63 crashed there on the first loose file the game
+// opened. Locate the names for the running game instead.
+const RE::BSResource::LooseFileStreamBase& NamesOf(const RE::BSResource::LooseFileStream& stream) noexcept
+{
+  constexpr std::size_t kNamesOffsetAE = 0x18;  // after Stream on 1.6.x / 1.7.x
+  constexpr std::size_t kNamesOffsetSE = 0x10;  // after Stream on 1.5.97
+  const std::size_t offset = REL::Module::IsAE() ? kNamesOffsetAE : kNamesOffsetSE;
+  return *reinterpret_cast<const RE::BSResource::LooseFileStreamBase*>(
+    reinterpret_cast<const std::byte*>(&stream) + offset);
+}
+
 ErrorCode LooseFileDoOpen_Hook(RE::BSResource::LooseFileStream* self)
 {
   if (!g_origLooseFileDoOpen) {
@@ -110,15 +124,16 @@ ErrorCode LooseFileDoOpen_Hook(RE::BSResource::LooseFileStream* self)
     return rc;
   }
 
-  const char* fileName = self->fileName.c_str();
+  const auto& names = NamesOf(*self);
+  const char* fileName = names.fileName.c_str();
   if (!IsInterestingResourceName(fileName)) {
     return rc;
   }
 
   char buf[512]{};
   std::size_t n = 0;
-  n = AppendPathPart(buf, sizeof(buf), n, self->prefix.c_str());
-  n = AppendPathPart(buf, sizeof(buf), n, self->dirName.c_str());
+  n = AppendPathPart(buf, sizeof(buf), n, names.prefix.c_str());
+  n = AppendPathPart(buf, sizeof(buf), n, names.dirName.c_str());
   n = AppendPathPart(buf, sizeof(buf), n, fileName);
 
   if (n > 0 && buf[0] != '\0') {
