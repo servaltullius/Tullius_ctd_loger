@@ -158,6 +158,22 @@ int main()
     "char buf[512]{};",
     "Resource hook must filter before path assembly for hot-path performance.");
 
+  // v0.2.62/v0.2.63 crashed 1.5.97 at startup: CommonLibSSE-NG lays out
+  // LooseFileStream for AE in an SE+AE build, so self->fileName is the wrong
+  // field on SE. The names must be located for the running game.
+  AssertContains(
+    looseFileOpenHookBody,
+    "NamesOf(*self)",
+    "Resource hook must read the stream names through the runtime-aware NamesOf.");
+  AssertContains(
+    ExtractFunctionBody(resourceHooks, "const RE::BSResource::LooseFileStreamBase& NamesOf("),
+    "REL::Module::IsAE()",
+    "NamesOf must pick the SE or AE layout at run time.");
+  assert(looseFileOpenHookBody.find("self->fileName") == std::string::npos &&
+         looseFileOpenHookBody.find("self->prefix") == std::string::npos &&
+         looseFileOpenHookBody.find("self->dirName") == std::string::npos &&
+         "Resource hook must not read LooseFileStream members at their compile-time (AE) offsets.");
+
   const std::string onDataLoadedBody = ExtractFunctionBody(pluginMain, "void OnDataLoaded(");
   AssertContains(
     onDataLoadedBody,
