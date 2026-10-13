@@ -10,21 +10,29 @@
 //       may be pressed again after the game recovers
 //   F6  access violation inside SkyrimSE.exe: CrashTester.dll passes a
 //       corrupt reference to the engine's TESObjectREFR::GetDisplayFullName
+//   F7  access violation in CrashTester.dll's menu event sink, called by the
+//       game when the Journal Menu opens (a mod's callback crashing)
+//   F8  access violation on a thread CrashTester.dll started itself
+//   F9  stack overflow from recursion inside CrashTester.dll
+//   F10 game job thread spinning in CrashTester.dll for 45 s (a busy freeze)
+//   F11 menu event sink holding the game for 45 s when the Journal Menu opens
 // Built a second time as SkyrimCrashGuard.dll (CRASH_TESTER_GUARD_STUB),
 // which only loads and does nothing, to check the problem-module warning.
+
+// CommonLibSSE-NG must come before any Windows API header (REX/W32/BASE.h).
+#include <RE/Skyrim.h>
+#include <SKSE/SKSE.h>
 
 #include <Windows.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
-
-#include <RE/Skyrim.h>
-#include <SKSE/SKSE.h>
 
 #include <spdlog/sinks/basic_file_sink.h>
 
@@ -112,6 +120,84 @@ __declspec(noinline) const char* EngineFaultWithCorruptReference()
   return name;
 }
 
+// Scenario 7 (F7): the game calls a mod's event sink, which crashes. The
+// sink's frame is at the fault with the game's event dispatch below it.
+__declspec(noinline) void CrashInEventSink(const RE::MenuOpenCloseEvent* event)
+{
+  volatile std::uint32_t* nowhere = nullptr;
+  *nowhere = event->opening ? 1u : 0u;
+}
+
+// Scenario 8 (F8): a thread the mod started itself; no game frame below it.
+__declspec(noinline) void CrashOnOwnThread()
+{
+  volatile std::uint64_t* nowhere = nullptr;
+  *nowhere = 0x4F574E54ull;
+}
+
+// Scenario 9 (F9): unbounded recursion. The local buffer and the use of the
+// result after the call keep every level a real frame.
+__declspec(noinline) std::uint64_t Recurse(std::uint64_t depth)
+{
+  volatile std::uint8_t pad[256];
+  pad[depth % sizeof(pad)] = static_cast<std::uint8_t>(depth);
+  return Recurse(depth + 1) + pad[0];
+}
+
+// Scenario 10 (F10): a freeze that burns CPU in the mod instead of waiting.
+__declspec(noinline) void SpinInPlugin()
+{
+  const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(45);
+  volatile std::uint64_t spins = 0;
+  while (std::chrono::steady_clock::now() < until) {
+    spins = spins + 1;
+    YieldProcessor();
+  }
+}
+
+// Scenario 11 (F11): the game calls a mod's event sink, which blocks.
+__declspec(noinline) void HoldInEventSink()
+{
+  for (int i = 0; i < 45; ++i) {
+    Sleep(1000);
+  }
+}
+
+// What the menu sink does the next time the Journal Menu opens.
+enum class SinkAction : int
+{
+  kNone = 0,
+  kCrash = 1,
+  kHold = 2,
+};
+std::atomic<int> g_sinkAction{ static_cast<int>(SinkAction::kNone) };
+
+class JournalSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+{
+public:
+  RE::BSEventNotifyControl ProcessEvent(
+    const RE::MenuOpenCloseEvent* event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
+  {
+    if (event && event->opening && event->menuName == RE::JournalMenu::MENU_NAME) {
+      switch (static_cast<SinkAction>(g_sinkAction.exchange(static_cast<int>(SinkAction::kNone)))) {
+      case SinkAction::kCrash:
+        CrashInEventSink(event);
+        break;
+      case SinkAction::kHold:
+        HoldInEventSink();
+        spdlog::warn("CrashTester: F11 event sink released");
+        spdlog::default_logger()->flush();
+        break;
+      default:
+        break;
+      }
+    }
+    return RE::BSEventNotifyControl::kContinue;
+  }
+};
+
+JournalSink g_journalSink;
+
 template <class F>
 void RunOnMainThread(const char* what, F&& task)
 {
@@ -120,6 +206,34 @@ void RunOnMainThread(const char* what, F&& task)
   if (auto* tasks = SKSE::GetTaskInterface()) {
     tasks->AddTask(std::forward<F>(task));
   }
+}
+
+// Arms the menu sink and opens the Journal Menu so the game calls it.
+void OpenJournalWith(SinkAction action, const char* what)
+{
+  g_sinkAction.store(static_cast<int>(action));
+  RunOnMainThread(what, [] {
+    if (auto* queue = RE::UIMessageQueue::GetSingleton()) {
+      queue->AddMessage(RE::JournalMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kShow, nullptr);
+    }
+  });
+}
+
+void CrashOnNewThread()
+{
+  spdlog::warn("CrashTester: F8 access violation on a thread of its own");
+  spdlog::default_logger()->flush();
+  std::thread([] { CrashOnOwnThread(); }).detach();
+}
+
+void SpinJobThread()
+{
+  RunOnMainThread("F10 job thread spinning for 45 s", [] {
+    SpinInPlugin();
+    g_freezeRunning.store(false);
+    spdlog::warn("CrashTester: F10 spin released");
+    spdlog::default_logger()->flush();
+  });
 }
 
 void HotkeyLoop(const std::stop_token& stop)
@@ -134,7 +248,27 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool f3 = pressed(VK_F3);
     const bool f4 = pressed(VK_F4);
     const bool f6 = pressed(VK_F6);
+    const bool f7 = pressed(VK_F7);
+    const bool f8 = pressed(VK_F8);
+    const bool f9 = pressed(VK_F9);
+    const bool f10 = pressed(VK_F10);
+    const bool f11 = pressed(VK_F11);
     if (ctrl && shift) {
+      if ((f7 || f8 || f9) && !g_crashQueued.exchange(true)) {
+        if (f7) {
+          OpenJournalWith(SinkAction::kCrash, "F7 access violation in the Journal Menu event sink");
+        } else if (f8) {
+          CrashOnNewThread();
+        } else {
+          RunOnMainThread("F9 stack overflow", [] { spdlog::warn("CrashTester: depth {}", Recurse(0)); });
+        }
+      }
+      if (f10 && !g_freezeRunning.exchange(true)) {
+        SpinJobThread();
+      }
+      if (f11) {
+        OpenJournalWith(SinkAction::kHold, "F11 Journal Menu event sink held for 45 s");
+      }
       if ((f1 || f2 || f3 || f6) && !g_crashQueued.exchange(true)) {
         if (f1) {
           RunOnMainThread("F1 access violation with the crosshair reference in RCX", [] {
@@ -168,8 +302,9 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..4  (1: freeze twice, then F1 on the nearest NPC; 2: F2;
-//                     3: F3; 4: F6). 0 or missing: hotkeys only.
+// AutoScenario=1..9  (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+//                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11).
+//                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
 
@@ -286,6 +421,22 @@ void RunAutoScenario()
   case 4:
     RunOnMainThread("auto F6 corrupt reference passed to SkyrimSE.exe", [] { EngineFaultWithCorruptReference(); });
     break;
+  case 5:
+    OpenJournalWith(SinkAction::kCrash, "auto F7 access violation in the Journal Menu event sink");
+    break;
+  case 6:
+    CrashOnNewThread();
+    break;
+  case 7:
+    RunOnMainThread("auto F9 stack overflow", [] { spdlog::warn("CrashTester: depth {}", Recurse(0)); });
+    break;
+  case 8:
+    g_freezeRunning.store(true);
+    SpinJobThread();
+    break;
+  case 9:
+    OpenJournalWith(SinkAction::kHold, "auto F11 Journal Menu event sink held for 45 s");
+    break;
   default:
     break;
   }
@@ -323,6 +474,11 @@ std::atomic_bool g_scenarioStarted{ false };
 
 void OnSkseMessage(SKSE::MessagingInterface::Message* message)
 {
+  if (message && message->type == SKSE::MessagingInterface::kDataLoaded) {
+    if (auto* ui = RE::UI::GetSingleton()) {
+      ui->AddEventSink<RE::MenuOpenCloseEvent>(&g_journalSink);
+    }
+  }
   if (!message || g_auto.scenario <= 0) {
     return;
   }
@@ -345,7 +501,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     spdlog::set_default_logger(std::make_shared<spdlog::logger>("CrashTester", std::move(sink)));
   }
   g_auto = ReadAutoConfig();
-  spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault; "
+  spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
+               "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze; "
                "AutoScenario={} SaveName={}", g_auto.scenario, g_auto.saveName);
   spdlog::default_logger()->flush();
   if (auto* messaging = SKSE::GetMessagingInterface()) {

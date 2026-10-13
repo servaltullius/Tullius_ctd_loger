@@ -299,10 +299,16 @@ void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTop
         break;
       }
       bool engineAbove = false;
+      bool mayWaitAbove = false;
       for (std::size_t j = 0; j < i; ++j) {
-        engineAbove = engineAbove || thread.frames[j].is_game_exe;
+        const auto& above = thread.frames[j];
+        engineAbove = engineAbove || above.is_game_exe;
+        // A named non-wait call (the clock a spin loop reads, crash test
+        // 2026-10-13) is the plugin running; an unnamed one may be a wait.
+        mayWaitAbove = mayWaitAbove || above.symbol.empty() || above.displacement > kMaxWaitApiDisplacement ||
+                       Contains(kSleepApis, above.symbol) || Contains(kSyncApis, above.symbol);
       }
-      BlockedCandidate candidate{ &thread, i, i == 0 ? 2 : (engineAbove ? 1 : 0) };
+      BlockedCandidate candidate{ &thread, i, i == 0 ? 2 : (engineAbove ? 1 : (mayWaitAbove ? 0 : 2)) };
       candidates.push_back(candidate);
       break;
     }

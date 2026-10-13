@@ -292,6 +292,25 @@ void TestBlockedGameThreadIsFound()
     Thread(3, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"Shallow.dll") }),
   });
   assert(ranked.blocked_module == L"Shallow.dll" && ranked.blocked_thread_count == 3u);
+
+  // Crash test 2026-10-13 (F10): a plugin spinning reads the clock in a loop;
+  // a named non-wait call above it is the plugin running, not waiting.
+  auto busy = EngineSyncWait();
+  FindBlockedGameThread(busy, {
+    Thread(28596, {
+      System(L"msvcp140.dll", L"Query_perf_counter"),
+      Plugin(L"CrashTester.dll", L"CrashTester (dev test)"),
+      Skse(),
+    }),
+  });
+  assert(busy.blocked_module == L"CrashTester.dll" && busy.blocked_state == "running_in_plugin");
+  assert(busy.blocked_top == L"msvcp140.dll!Query_perf_counter");
+  // An unnamed system frame may be a wait, so it is not called running.
+  auto unnamed = EngineSyncWait();
+  FindBlockedGameThread(unnamed, {
+    Thread(7, { System(L"ntdll.dll", L""), Plugin(L"CrashTester.dll") }),
+  });
+  assert(unnamed.blocked_state == "waiting_in_plugin");
 }
 
 void TestBlockedGameThreadIsNotInvented()
