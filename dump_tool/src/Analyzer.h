@@ -479,6 +479,7 @@ struct AnalyzeOptions
   std::wstring data_dir;  // Optional analyzer data directory (e.g. "<exe>/data")
   std::string game_version;  // Optional override (e.g. "1.6.640.0")
   std::wstring output_dir;   // Optional output base directory for crash history
+  bool use_crash_logger = true;  // false: do not pair a Crash Logger log (CLI --no-crash-logger)
   i18n::Language language = i18n::DefaultLanguage();
 };
 

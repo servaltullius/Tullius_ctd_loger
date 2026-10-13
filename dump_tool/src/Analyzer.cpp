@@ -494,6 +494,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   // Crash Logger integration (best-effort)
   {
     const bool shouldSearchCrashLogger =
+      opt.use_crash_logger &&
       !out.is_filtered_clean_exit &&
       ((out.exc_code != 0) || nameCrash || hangLike);
     if (shouldSearchCrashLogger) {
