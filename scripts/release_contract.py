@@ -36,12 +36,25 @@ PACKAGE_PROVENANCE_ENTRY = "SKSE/Plugins/SkyrimDiagPackageProvenance.json"
 BUILD_PROVENANCE_SCHEMA = "skydiag.build_provenance.v1"
 PACKAGE_PROVENANCE_SCHEMA = "skydiag.package_provenance.v1"
 
+# GPL-3.0: the binaries travel with the license, the third-party notices and
+# where the source is. Built from NOTICE and COPYING so it cannot drift.
+LICENSE_ZIP_ENTRY = "SKSE/Plugins/SkyrimDiag-LICENSE.txt"
+
+
+def license_entry_bytes(root: str | Path) -> bytes:
+    root = Path(root)
+    notice = (root / "NOTICE").read_bytes().replace(b"\r\n", b"\n")
+    copying = (root / "COPYING").read_bytes().replace(b"\r\n", b"\n")
+    return (notice.rstrip(b"\n") + b"\n\n" + copying).replace(b"\n", b"\r\n")
+
+
 REQUIRED_ZIP_ENTRIES = (
     "SKSE/Plugins/SkyrimDiag.dll",
     "SKSE/Plugins/SkyrimDiagHelper.exe",
     "SKSE/Plugins/SkyrimDiagDumpToolCli.exe",
     "SKSE/Plugins/SkyrimDiag.ini",
     "SKSE/Plugins/SkyrimDiagHelper.ini",
+    LICENSE_ZIP_ENTRY,
     "SKSE/Plugins/SkyrimDiagWinUI/SkyrimDiagDumpToolWinUI.exe",
     "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolWinUI.exe",
     "SKSE/Plugins/SkyrimDiagWinUI/app/SkyrimDiagDumpToolNative.dll",

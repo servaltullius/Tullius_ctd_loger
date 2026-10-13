@@ -1,0 +1,22 @@
+Tullius CTD Logger
+Copyright (C) servaltullius
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. The full license text is in COPYING.
+
+Source code: https://github.com/servaltullius/Tullius_ctd_loger
+(the release tag of this package holds the exact source it was built from).
+
+Third-party components
+- CommonLibSSE-NG (extern/CommonLibSSE-NG, linked into SkyrimDiag.dll):
+  GPL-3.0-or-later WITH the Modding Exception and the GPL-3.0 Linking
+  Exception (with Corresponding Source), see its EXCEPTIONS.md.
+  https://github.com/alandtse/CommonLibSSE-NG
+- Game function names in data/address_db/skyrimse_functions.json come from
+  CommonLibSSE-NG at the MIT-licensed revision e342462; that MIT notice is kept
+  in the file's name_license field. The offsets are derived from Address
+  Library for SKSE Plugins by meh321 (Nexus mod 32444).

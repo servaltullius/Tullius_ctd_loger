@@ -2,8 +2,6 @@
 # freezes of known cause in the real game (tools/crash_tester/README.md).
 # Built only with -DSKYDIAG_CRASH_TESTER=ON and never packaged.
 
-find_package(CommonLibSSE CONFIG REQUIRED)
-
 foreach(_target IN ITEMS CrashTester SkyrimCrashGuardStub)
   add_library(${_target} SHARED
     CrashTester.cpp

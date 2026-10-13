@@ -1,3 +1,8 @@
+// CommonLibSSE-NG must come before any Windows API header (REX/W32/BASE.h).
+#include <RE/Skyrim.h>
+#include <SKSE/SKSE.h>
+#include <SKSE/Version.h>
+
 #include <Windows.h>
 
 #include <algorithm>
@@ -7,10 +12,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <RE/Skyrim.h>
-#include <SKSE/SKSE.h>
-#include <SKSE/Version.h>
 
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/null_sink.h>

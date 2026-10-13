@@ -12,6 +12,7 @@ from pathlib import Path
 
 from release_contract import (
     BUILD_PROVENANCE_FILENAME,
+    LICENSE_ZIP_ENTRY,
     NATIVE_BUILD_ZIP_MAPPINGS,
     PACKAGE_PROVENANCE_ENTRY,
     PACKAGE_PROVENANCE_SCHEMA,
@@ -19,6 +20,7 @@ from release_contract import (
     WINUI_BUILD_ZIP_MAPPINGS,
     assert_version_sources_agree,
     find_winui_build_root,
+    license_entry_bytes,
     native_artifact_path,
     release_zip_name,
     sha256_path,
@@ -235,6 +237,9 @@ def main(argv: list[str]) -> int:
         shutil.copy2(cli_exe, plugins_dir / "SkyrimDiagDumpToolCli.exe")
         shutil.copy2(ini_plugin, plugins_dir / "SkyrimDiag.ini")
         shutil.copy2(ini_helper, plugins_dir / "SkyrimDiagHelper.ini")
+        # GPL-3.0: the binaries travel with the license, the notices and where
+        # the source is.
+        (pkg_root / LICENSE_ZIP_ENTRY).write_bytes(license_entry_bytes(root))
         for rel in dump_tool_data_files:
             src = data_root / rel
             dst = plugins_dir / "data" / rel

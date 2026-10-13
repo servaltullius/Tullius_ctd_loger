@@ -1,11 +1,12 @@
+// CommonLibSSE-NG must come before any Windows API header (REX/W32/BASE.h).
+#include <RE/Skyrim.h>
+
 #include "SkyrimDiag/EventSinks.h"
 
 #include <Windows.h>
 
 #include <cstring>
 #include <string_view>
-
-#include <RE/Skyrim.h>
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/Hash.h"

@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 
 from release_contract import (
     BUILD_PROVENANCE_FILENAME,
+    LICENSE_ZIP_ENTRY,
     NATIVE_BUILD_ZIP_MAPPINGS,
     PACKAGE_PROVENANCE_ENTRY,
     PACKAGE_PROVENANCE_SCHEMA,
@@ -20,6 +21,7 @@ from release_contract import (
     WINUI_BUILD_ZIP_MAPPINGS,
     assert_version_sources_agree,
     find_winui_build_root,
+    license_entry_bytes,
     native_artifact_path,
     nested_winui_path_regex,
     release_zip_name,
@@ -404,6 +406,12 @@ def _verify_static_source_bindings(
             raise VerificationError(f"static package entry missing: {entry}")
         _verify_source_hash(archive, source, entry)
         expected_entries.add(entry)
+
+    if LICENSE_ZIP_ENTRY not in name_set:
+        raise VerificationError(f"static package entry missing: {LICENSE_ZIP_ENTRY}")
+    if archive.read(LICENSE_ZIP_ENTRY) != license_entry_bytes(repo_root):
+        raise VerificationError(f"static package hash mismatch: {LICENSE_ZIP_ENTRY}")
+    expected_entries.add(LICENSE_ZIP_ENTRY)
 
     data_root = repo_root / "dump_tool" / "data"
     data_files = sorted(

@@ -81,6 +81,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # the pull request diff below needs the base commit
+          submodules: true  # extern/CommonLibSSE-NG (VR is off, so not recursive)
 
       - name: Setup Python
         uses: actions/setup-python@v5

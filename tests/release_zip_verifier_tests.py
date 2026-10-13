@@ -260,6 +260,8 @@ def _make_fixture(
     )
     _write(root / "dist" / "SkyrimDiag.ini", b"[SkyrimDiag]\n")
     _write(root / "dist" / "SkyrimDiagHelper.ini", b"[Helper]\n")
+    _write(root / "NOTICE", b"Fixture notice\n")
+    _write(root / "COPYING", b"Fixture license\n")
     _write(root / "dump_tool" / "data" / "fixture.json", b'{"fixture":true}\n')
     _git(root, "init")
     _git(root, "config", "user.email", "tests@example.invalid")
@@ -325,6 +327,7 @@ def _make_fixture(
     entries["SKSE/Plugins/SkyrimDiagHelper.ini"] = (
         root / "dist" / "SkyrimDiagHelper.ini"
     ).read_bytes()
+    entries["SKSE/Plugins/SkyrimDiag-LICENSE.txt"] = b"Fixture notice\r\n\r\nFixture license\r\n"
     data = (root / "dump_tool" / "data" / "fixture.json").read_bytes()
     entries["SKSE/Plugins/data/fixture.json"] = data
     entries["SKSE/Plugins/SkyrimDiagWinUI/app/data/fixture.json"] = data
