@@ -237,6 +237,52 @@ void TestContentCatalogSignatureRuntime()
   assert(!otherMessage || otherMessage->id != "CONTENT_CATALOG_FORMAT_MISMATCH");
 }
 
+// Known crash sites from public fixes (2026-10-13 research): each matches only
+// its exact game version and instruction, ahead of the generic NULL-AV rule.
+void TestKnownCrashSiteSignaturesRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+
+  SignatureMatchInput facegen{};
+  facegen.exc_code = 0xC0000005u;
+  facegen.game_version = "1.6.1170.0";
+  facegen.fault_module = L"SkyrimSE.exe";
+  facegen.fault_offset = 0x4301DCull;  // Engine Fixes: RELOCATION_ID(26343, 26918) + 0x4C
+  facegen.access_violation_address = 0x24ull;
+  const auto matched = db.Match(facegen, /*useKorean=*/true);
+  assert(matched && matched->id == "FACEGEN_MORPHDATA_NULLPTR_1_6_1170");
+  assert(matched->recommendations[0].find(L"bFaceGenMorphDataHeadNullPtrCrash") != std::wstring::npos);
+
+  auto nextInstruction = facegen;
+  nextInstruction.fault_offset += 1u;
+  const auto generic = db.Match(nextInstruction, /*useKorean=*/false);
+  assert(generic && generic->id == "ACCESS_VIOLATION_NULL");
+  auto otherVersion = facegen;
+  otherVersion.game_version = "1.7.104.0";
+  const auto noSite = db.Match(otherVersion, /*useKorean=*/false);
+  assert(!noSite || noSite->id.rfind("FACEGEN", 0) != 0);
+
+  SignatureMatchInput water{};
+  water.exc_code = 0xC0000005u;
+  water.game_version = "1.6.1170.0";
+  water.fault_module = L"SkyrimSE.exe";
+  water.fault_offset = 0x523917ull;  // TESWaterSystem::AddWater+0x697
+  water.access_violation_address = 0x7FF612345678ull;
+  const auto waterHit = db.Match(water, /*useKorean=*/false);
+  assert(waterHit && waterHit->id == "WATER_REFLECTIONS_ADDWATER_1_6_1170");
+
+  SignatureMatchInput badAlloc{};
+  badAlloc.exc_code = 0xE06D7363u;
+  badAlloc.cpp_exception_info = L"bad allocation";
+  badAlloc.object_types = { L"std::bad_alloc" };
+  const auto allocHit = db.Match(badAlloc, /*useKorean=*/false);
+  assert(allocHit && allocHit->id == "CPP_BAD_ALLOC");
+  badAlloc.object_types.clear();  // the message alone is not enough
+  const auto allocMiss = db.Match(badAlloc, /*useKorean=*/false);
+  assert(!allocMiss || allocMiss->id != "CPP_BAD_ALLOC");
+}
+
 void TestSignatureRejectsMalformedExceptionAndObjectConstraints()
 {
   const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_object_constraints_test.json";
@@ -1210,6 +1256,7 @@ int main()
   TestSignatureDatabaseRejectsUnknownFutureSchemaRuntime();
   TestSignatureCallstackContainsRuntime();
   TestContentCatalogSignatureRuntime();
+  TestKnownCrashSiteSignaturesRuntime();
   TestSignatureRejectsMalformedExceptionAndObjectConstraints();
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();

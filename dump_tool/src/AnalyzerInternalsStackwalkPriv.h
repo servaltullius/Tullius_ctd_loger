@@ -157,10 +157,29 @@ std::optional<std::uint64_t> FindFunctionStart(const MinidumpMemoryView& mem, st
 // Adds the dump's export names for the session's virtual modules.
 void AddDumpExportSymbols(const SymSession& session, const DumpImageData& images);
 
+// Why a walk stopped. kWalkEnded and kNoProgress are DbgHelp's own end
+// (normally the thread start); the others cut the stack short.
+enum class StackWalkStop
+{
+  kWalkEnded,
+  kNoProgress,
+  kFrameLimit,
+  kOutsideModules,  // the next caller address is in no loaded module
+  kNonCode,         // the next caller address is data, not code
+  kNoUnwind,        // the last frame has no unwind entry to find its caller
+};
+
+struct StackWalkEnd
+{
+  StackWalkStop stop = StackWalkStop::kWalkEnded;
+  std::uint64_t address = 0;  // the rejected caller address, or the last frame for kNoUnwind
+};
+
 std::vector<std::uint64_t> StackWalkAddrsForContext(
   HANDLE process,
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,
-  std::size_t maxFrames);
+  std::size_t maxFrames,
+  StackWalkEnd* outEnd = nullptr);
 
 }  // namespace skydiag::dump_tool::internal::stackwalk_internal

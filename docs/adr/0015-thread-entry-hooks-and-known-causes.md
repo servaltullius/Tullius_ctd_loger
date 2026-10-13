@@ -53,3 +53,25 @@ Accepted
 - `skydiag_analysis_engine_runtime_tests`: 번들 DB의 `CONTENT_CATALOG_FORMAT_MISMATCH` 일치·불일치, 새 조건의 잘못된 항목 거부, 정확한 타입 이름 비교
 - `skydiag_next_action_tests`: `[알려진 원인]`이 후보 줄과 modal 줄보다 먼저 선택됨
 - 보관 덤프 19개(크래시 10, 프리징 9)를 v0.2.62 분석기와 나란히 재분석했습니다. 결론, 버킷, 추정 모드, 다음 조치, 후보가 바뀐 것은 2026-10-13 CTD 1건뿐입니다.
+
+## Addendum (2026-10-13): known crash sites and a cut-short call stack
+
+- **알려진 크래시 지점 시그니처**: Codex(gpt-6.1-sol) 조사 후보 29개 중 근거를 직접 확인한 것만 넣었습니다. 모두 scope는 `mechanism`이고, 권장 조치 태그는 `[알려진 크래시 지점]`입니다. 이 태그는 다음 조치 최우선은 아니지만, 뷰어에서는 "지금 바로" 묶음에 들어갑니다.
+  - `FACEGEN_MORPHDATA_NULLPTR_*`, `SHADOWSCENENODE_NULLPTR_*`: 1.5.97, 1.6.640, 1.6.1170
+    - Engine Fixes 소스(`RELOCATION_ID(26343, 26918)+0x4C`, `RELOCATION_ID(99708, 106342)+0x16`)에서 ID, 오프셋, 명령어를 확인했습니다.
+    - 버전별 주소는 Address Library로 구했습니다. 1.6.1170은 실제 exe의 `.pdata` 함수 시작과도 맞췄습니다.
+    - 1.7.104는 Engine Fixes 지원을 확인하지 못해 뺐습니다.
+  - `WATER_REFLECTIONS_ADDWATER_1_6_1170`: 공개 조사 문서의 `AddWater+0x697`을 실제 exe 함수 시작 `0x523280`과 맞췄습니다.
+  - `NITRISHAPE_MISSING_GEOMETRY_1_7_104`: 문서의 `SkyrimSE+EDBD16`을 씁니다. 두 번째 주소는 확인하지 못해 뺐습니다.
+  - `ANIMATION_CLIPGENERATOR_A0D789_1_5_97`
+  - `CPP_BAD_ALLOC`: 메시지와 `std::bad_alloc` 타입이 둘 다 있어야 합니다.
+  - 보류: Havok 3종. 근거가 공개된 지 며칠 된 모드 설명 하나뿐입니다.
+  - 보류: 새 신호가 필요한 18종(마스터 누락, Address Library 누락, ESL 한도, 레벨드 리스트 등). 조사 원문은 측정 세트 폴더의 `research/`에 있습니다.
+  - 일반 메커니즘(`ACCESS_VIOLATION_NULL` 등)보다 앞에 두어, 정확한 지점이 먼저 일치하게 했습니다.
+- **콜스택 끊김**
+  - 대표 스레드의 스택 해제가 스레드 시작 전에 멈추면 근거 항목과 요약 JSON `stackwalk_truncation`에 이유를 적습니다. 이유는 `outside_modules`, `non_code_address`, `no_unwind_info` 중 하나입니다.
+  - 덤프의 언로드된 모듈 목록으로, 끊긴 주소나 예외 주소가 언로드된 DLL 자리면 그 이름을 적습니다.
+  - Windows DLL의 해제 정보가 없으면 "v0.2.61 이전 덤프를 Windows 업데이트 뒤 열 때 흔함"을 덧붙입니다.
+- **확인**
+  - 보관 덤프 24개를 v0.2.62와 나란히 비교했습니다. 바뀐 것은 이미 머지한 #96·#99로 설명되는 2건뿐이고, 새 시그니처가 잘못 일치한 덤프는 없습니다.
+  - 끊김은 이전 실사고 프리징 6건(Windows DLL 해제 정보 없음)과 CTD 1건(데이터 주소)에서만 나왔습니다.

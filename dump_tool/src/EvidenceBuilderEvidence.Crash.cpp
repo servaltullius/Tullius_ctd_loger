@@ -197,6 +197,62 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     r.evidence.push_back(std::move(e));
   }
 
+  if (!r.fault_unloaded_module.empty()) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Crashed in an unloaded DLL" : L"이미 언로드된 DLL 자리에서 크래시";
+    e.details = en
+      ? (L"The exception address lies where " + r.fault_unloaded_module +
+         L" was loaded before it was unloaded. Code still called it afterwards, for example a hook or callback "
+         L"it left behind (an SKSE plugin that failed to load is unloaded by SKSE).")
+      : (L"예외 주소가 " + r.fault_unloaded_module +
+         L"이(가) 언로드되기 전에 있던 자리입니다. 그 DLL이 내려간 뒤에도 남은 훅이나 콜백을 누군가 불렀다는 뜻입니다"
+         L"(로드에 실패한 SKSE 플러그인은 SKSE가 언로드합니다).");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (!r.stackwalk_truncation.empty()) {
+    wchar_t addr[32]{};
+    swprintf_s(addr, L"0x%llx", static_cast<unsigned long long>(r.stackwalk_truncation_address));
+    const std::wstring depth = std::to_wstring(r.stackwalk_truncation_depth);
+    std::wstring why;
+    if (r.stackwalk_truncation == "no_unwind_info") {
+      const std::wstring module = r.stackwalk_truncation_module.empty() ? std::wstring(addr) : r.stackwalk_truncation_module;
+      why = en ? (module + L" has no unwind data for that frame, so its caller cannot be found")
+               : (module + L" 프레임에 스택 해제 정보가 없어 그 호출자를 찾을 수 없습니다");
+      // ADR-0011: a Windows DLL's unwind data comes from the dump (v0.2.61+)
+      // or from a local file of the same build, which a Windows update replaces.
+      if (minidump::IsSystemishModule(r.stackwalk_truncation_module)) {
+        why += en ? L" (typical of a dump from before v0.2.61 opened after a Windows update; newer dumps carry it)"
+                  : L"(v0.2.61 이전 덤프를 Windows 업데이트 뒤에 열 때 흔합니다. 새 덤프는 이 정보를 담습니다)";
+      }
+    } else if (r.stackwalk_truncation == "non_code_address") {
+      why = en ? (L"the next return address " + std::wstring(addr) +
+                  L" points at data, not code, so the stack was overwritten after the fault")
+               : (L"다음 리턴 주소 " + std::wstring(addr) + L"가 코드가 아닌 데이터를 가리켜, 크래시 뒤 스택이 덮어쓰인 것으로 보입니다");
+    } else if (!r.stackwalk_truncation_unloaded_module.empty()) {
+      why = en ? (L"the next return address " + std::wstring(addr) + L" lies in " +
+                  r.stackwalk_truncation_unloaded_module + L", which was unloaded before the capture")
+               : (L"다음 리턴 주소 " + std::wstring(addr) + L"가 캡처 전에 언로드된 " +
+                  r.stackwalk_truncation_unloaded_module + L" 자리입니다");
+    } else {
+      why = en ? (L"the next return address " + std::wstring(addr) + L" is in no loaded module")
+               : (L"다음 리턴 주소 " + std::wstring(addr) + L"가 로드된 어떤 모듈에도 속하지 않습니다");
+    }
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Call stack cut short" : L"콜스택이 중간에 끊김";
+    e.details = en
+      ? (L"The walk stopped after " + depth + L" frames: " + why +
+         L". The frames below, often the mod that started the call, are not visible; a missing or weak suspect "
+         L"may be why.")
+      : (L"콜스택을 " + depth + L"번째 프레임까지만 풀었습니다. " + why +
+         L". 그 아래의 프레임(호출을 시작한 모드인 경우가 많음)은 보이지 않으므로, 후보가 없거나 약하면 이 때문일 수 있습니다.");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (!r.suspects.empty()) {
     const SuspectItem* selectedTop = &r.suspects[0];
     const bool topIsVictimish = !IsActionableSuspect(r.suspects[0]);

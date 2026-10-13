@@ -267,6 +267,8 @@ internal sealed partial class MainWindowViewModel
     {
         return recommendation.StartsWith("[Known cause]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[알려진 원인]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Known crash site]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[알려진 크래시 지점]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||

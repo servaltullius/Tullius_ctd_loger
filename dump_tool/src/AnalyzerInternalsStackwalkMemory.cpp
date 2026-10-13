@@ -401,9 +401,11 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   HANDLE process,
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,
-  std::size_t maxFrames)
+  std::size_t maxFrames,
+  StackWalkEnd* outEnd)
 {
   std::vector<std::uint64_t> pcs;
+  StackWalkEnd end{};
   if (!process || maxFrames == 0) {
     return pcs;
   }
@@ -426,6 +428,7 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   const std::size_t limit = std::min(maxFrames, kMaxHard);
   DWORD64 lastPc = 0;
   DWORD64 lastSp = 0;
+  end.stop = StackWalkStop::kFrameLimit;
   for (std::size_t i = 0; i < limit; i++) {
     const BOOL ok = StackWalk64(
       IMAGE_FILE_MACHINE_AMD64,
@@ -438,21 +441,25 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
       SymGetModuleBase64,
       nullptr);
     if (!ok) {
+      end = { StackWalkStop::kWalkEnded, 0 };
       break;
     }
     const DWORD64 pc = frame.AddrPC.Offset;
     const DWORD64 sp = frame.AddrStack.Offset;
     if (pc == 0 || (!pcs.empty() && pc == lastPc && sp == lastSp)) {
+      end = { StackWalkStop::kNoProgress, 0 };
       break;
     }
     // A caller frame must belong to a known module.
     if (!pcs.empty() && SymGetModuleBase64(process, pc) == 0) {
+      end = { StackWalkStop::kOutsideModules, static_cast<std::uint64_t>(pc) };
       break;
     }
     // ...and point into its code. A data address here (such as a vtable in
     // .rdata) means the unwind read a stack slot that no longer holds the
     // return address, e.g. because the thread kept running after the fault.
     if (!pcs.empty() && mem.image_fallback && mem.image_fallback->IsKnownNonCodeAddress(pc)) {
+      end = { StackWalkStop::kNonCode, static_cast<std::uint64_t>(pc) };
       break;
     }
     pcs.push_back(static_cast<std::uint64_t>(pc));
@@ -463,11 +470,15 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
     // stack slot, which yields heap and data addresses rather than callers.
     // (STACKFRAME64::FuncTableEntry is not filled on x64, so look it up.)
     if (pcs.size() > 1u && FunctionTableAccessFromImages(process, pc) == nullptr) {
+      end = { StackWalkStop::kNoUnwind, static_cast<std::uint64_t>(pc) };
       break;
     }
   }
 
   g_stackwalkMemView = nullptr;
+  if (outEnd) {
+    *outEnd = end;
+  }
   return pcs;
 }
 

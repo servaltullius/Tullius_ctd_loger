@@ -560,6 +560,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.dump_objects.clear();
     out.crash_logger_top_modules.clear();
     out.thread_entry_hook_modules.clear();
+    out.stackwalk_truncation.clear();
+    out.fault_unloaded_module.clear();
     out.crash_logger_object_types.clear();
     out.inferred_mod_name.clear();
     out.graphics_diag.reset();
