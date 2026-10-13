@@ -158,17 +158,25 @@ int main()
     "char buf[512]{};",
     "Resource hook must filter before path assembly for hot-path performance.");
 
-  // v0.2.62/v0.2.63 crashed 1.5.97 at startup: CommonLibSSE-NG lays out
-  // LooseFileStream for AE in an SE+AE build, so self->fileName is the wrong
-  // field on SE. The names must be located for the running game.
+  // v0.2.62/v0.2.63 crashed 1.5.97 at startup reading the names at the AE
+  // offset, and on AE every release hooked VTABLE[0] slot 1, which there is
+  // the next vtable's RTTI pointer. The layout is the running game's, and the
+  // vtable is checked by RTTI before it is patched.
   AssertContains(
     looseFileOpenHookBody,
-    "NamesOf(*self)",
+    "NamesOf(self)",
     "Resource hook must read the stream names through the runtime-aware NamesOf.");
-  AssertContains(
-    ExtractFunctionBody(resourceHooks, "const RE::BSResource::LooseFileStreamBase& NamesOf("),
-    "REL::Module::IsAE()",
-    "NamesOf must pick the SE or AE layout at run time.");
+  const std::string installBody = ExtractFunctionBody(resourceHooks, "bool InstallResourceHooks(");
+  AssertContains(installBody, "REL::Module::IsAE() ? kLayoutAE : kLayoutSE",
+    "Resource hook must pick the SE or AE layout at run time.");
+  AssertContains(installBody, "VTABLE_BSResource____LooseFileStream[g_layout.vtableIndex]",
+    "Resource hook must patch the Stream subobject's vtable of the running layout.");
+  AssertOrdered(installBody, "IsLooseFileStreamVtable(", "write_vfunc(",
+    "Resource hook must verify the vtable by RTTI before patching it.");
+  AssertContains(resourceHooks, "constexpr LooseFileStreamLayout kLayoutAE{ 1, 0x30, 0x08 };",
+    "AE: Stream at 0x30 (VTABLE[1]), names at 0x08 (1.6.1170 and 1.7.104 RTTI and DoOpen).");
+  AssertContains(resourceHooks, "constexpr LooseFileStreamLayout kLayoutSE{ 0, 0x00, 0x10 };",
+    "SE: Stream at 0 (VTABLE[0]), names at 0x10.");
   assert(looseFileOpenHookBody.find("self->fileName") == std::string::npos &&
          looseFileOpenHookBody.find("self->prefix") == std::string::npos &&
          looseFileOpenHookBody.find("self->dirName") == std::string::npos &&
