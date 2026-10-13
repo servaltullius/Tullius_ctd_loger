@@ -15,6 +15,7 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 [*]Reads the game objects a crash was handling straight from the dump: type, FormID, name, the plugins that define and change it, and a reference's base object
 [*]Explains freezes by what the game's main thread was waiting for: the GPU, the graphics driver, an error dialog a plugin opened, or a game thread stuck in a plugin's code
 [*]Records RAM, commit and VRAM at capture time, and warns about modules that hide crashes (such as SkyrimCrashGuard)
+[*]Recognizes known causes and known engine crash spots that a public fix guards, and puts that fix first in the next steps
 [/list]
 
 [b][size=4]What It Does NOT Do[/size][/b]
@@ -59,9 +60,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.62 Update Notice[/b]
-Replace the previous installation with the complete v0.2.62 zip. Do not copy only individual EXEs or DLLs: the plugin, Helper, analyzer and viewer all changed (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
-On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 fixes that.
+[b]Important v0.2.63 Update Notice[/b]
+Replace the previous installation with the complete v0.2.63 zip. Do not copy only individual EXEs or DLLs. In v0.2.63 the plugin and Helper code is the same as v0.2.62, but the analyzer, its data files and the viewer changed (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
+On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
 [b][size=4]Installation (MO2)[/size][/b]
 [list=1]
@@ -117,7 +118,18 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.62[/size][/b]
+[b][size=4]What's New in v0.2.63[/size][/b]
+Two real CTDs had reports that blamed the wrong DLL; both are fixed, and crashes with a known cause are now named directly.
+[list]
+[*][b]Thread-start hooks are not suspects:[/b] a plugin that only wraps the start of a game thread shows up in every call stack of that thread, so it no longer becomes a candidate when the crash is deep in game code above it (the case: NPCWaterAIFix.dll and Trails.dll were blamed for a crash they had nothing to do with)
+[*][b]Known causes:[/b] when Skyrim 1.7.104 was run on the same PC, it rewrites the shared [font=Courier New]ContentCatalog.txt[/font] in its own format and 1.6.1170 then closes right after launch. The report now recognizes this and tells you to move that file to the Recycle Bin. A known cause is the first next step
+[*][b]A hook installed while the game runs:[/b] when a mod installs a hook while another game thread is already taking that path, the thread can run the half-written hook. The dump shows this, and the report names that mod with high confidence (the case: Typing Mode; the old report blamed SkyrimUpscaler and a music mod). The crash depends on timing, so one clean run does not mean it is fixed
+[*][b]Known crash spots:[/b] engine spots that a public fix guards: the Engine Fixes FaceGen and ShadowSceneNode null crashes (1.5.97, 1.6.640, 1.6.1170, only at the exact address the patch guards), the 1.6.1170 water reflections AddWater crash, the 1.7.104 NiTriShape without geometry, A0D789 on 1.5.97, and C++ out-of-memory (std::bad_alloc). Each was checked against its source. This says where it crashed, not which mod left the bad data
+[*][b]Call stack cut short:[/b] when the stack walk stops before the thread start, the report says why and how deep it got, so a weak or missing suspect is explained; a crash address or cut in an already unloaded DLL is named
+[*][b]Freezes:[/b] a game thread stuck in a plugin is told apart as waiting or spinning on the CPU
+[/list]
+
+[b][size=4]Earlier: v0.2.62[/size][/b]
 [list]
 [*][b]Skyrim 1.7.104 support:[/b] the plugin now carries the Address Library v5 flag SKSE 2.3.x requires and reads the 1.7.x Address Library format. Checked in game on 1.7.104 with SKSE 2.3.1
 [*][b]Game function names:[/b] game frames in call stacks are named, e.g. [font=Courier New]SkyrimSE.exe+0x2ea36b (TESObjectREFR::GetDisplayFullName+0x2b)[/font], on 1.5.97, 1.6.640, 1.6.1170 and 1.7.104. A name is shown only when the frame's function start matches exactly; deep engine frames often stay as plain addresses
@@ -142,6 +154,7 @@ The viewer typically shows:
 [/list]
 
 [i]Validation scope:[/i] All release candidates were played on one MO2 setup (game 1.6.1170, SKSE 2.2.6, about 4,250 plugins, Crash Logger 1.25). For v0.2.61 a development-only test plugin caused 7 incidents of known cause in that game (access violation, breakpoint, C++ exception, a crash inside the game EXE, and freezes); after the fixes in v0.2.61 every report pointed at the right DLL. v0.2.62 was also loaded on 1.7.104 (Steam, no other mods, SKSE 2.3.1) with a manual capture and report. Not yet seen in real use: crashes and freezes on a modded 1.7.104 setup, the "stuck game thread" freeze rule on a real freeze, analysis after the next Windows update, and a real SkyrimCrashGuard install. There is still no reviewed real-incident accuracy corpus.
+For v0.2.63, the two real CTDs above were re-analyzed with the new analyzer (moving ContentCatalog.txt away did stop the first; the second matches a hook install the mod logged in the same millisecond), five more test-plugin incidents were caused in game (a crash in an event callback, in the plugin's own thread, a stack overflow, a spinning freeze and a callback freeze), and a build of this release's code was installed and played on the same MO2 setup. Not yet seen in real use: the new known crash spots on a real crash.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -227,6 +240,9 @@ A: Yes. The report says what the game's main thread was waiting for (the GPU, th
 [b]Q: I get a SkyrimDiag.dll popup on Skyrim 1.7.104.[/b]
 A: Install v0.2.62 or later, with SKSE 2.3.1 and the Address Library v13 All in One. Older versions of this mod do not load on 1.7.104.
 
+[b]Q: My 1.6.1170 game closes right after launch since I also ran 1.7.104.[/b]
+A: Both versions share [font=Courier New]%LOCALAPPDATA%\Skyrim Special Edition\ContentCatalog.txt[/font], and 1.7.104 rewrites it in a format 1.6.1170 cannot read. Move that file to the Recycle Bin; the game makes a new one. From v0.2.63 the report says this when the crash matches.
+
 [b][size=4]Privacy[/size][/b]
 [list]
 [*]Dumps and logs may contain [b]local file paths[/b] and [b]usernames[/b]
@@ -267,6 +283,7 @@ dump와 주변 단서를 모아서 [b]사람이 읽기 쉬운 보고서[/b]를 �
 [*]크래시가 다루던 게임 오브젝트를 덤프에서 직접 읽습니다: 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트.
 [*]프리징을 게임 메인 스레드가 무엇을 기다렸는지로 설명합니다: GPU, 그래픽 드라이버, 플러그인이 띄운 오류 창, 플러그인 코드에 갇힌 게임 스레드.
 [*]캡처 당시 RAM·커밋·VRAM을 기록하고, 크래시를 숨기는 모듈(SkyrimCrashGuard 등)을 경고합니다.
+[*]원인이 알려진 크래시와 공개된 수정 모드가 막아 주는 엔진 크래시 지점을 알아보고, 그 해결책을 다음 조치 맨 앞에 둡니다.
 [/list]
 
 [b][size=4]이 모드가 아닌 것[/size][/b]
@@ -311,9 +328,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.62 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.62 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
-Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62에서 고쳤습니다.
+[b]v0.2.63 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.63 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.63에서 플러그인과 Helper의 코드는 v0.2.62와 같지만, 분석기와 그 데이터 파일, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
+Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
 [b][size=4]설치 (MO2)[/size][/b]
 [list=1]
@@ -369,7 +386,18 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.62 새 기능[/size][/b]
+[b][size=4]v0.2.63 새 기능[/size][/b]
+실사고 CTD 두 건에서 리포트가 엉뚱한 DLL을 지목한 문제를 고치고, 원인이 알려진 크래시를 바로 알려 줍니다.
+[list]
+[*][b]게임 스레드 시작 지점의 훅은 후보에서 제외:[/b] 게임 스레드의 시작 지점만 감싸는 플러그인은 그 스레드의 모든 콜스택에 나타날 뿐입니다. 크래시가 그 위의 게임 코드 깊은 곳에서 났다면 더 이상 후보로 올리지 않습니다(이번 사례: 상관없는 NPCWaterAIFix.dll과 Trails.dll이 지목됐었음)
+[*][b]알려진 원인:[/b] 같은 PC에서 Skyrim 1.7.104를 실행하면 함께 쓰는 [font=Courier New]ContentCatalog.txt[/font]를 1.7 형식으로 다시 써서, 1.6.1170이 시작 직후 꺼집니다. 리포트가 이를 알아보고 그 파일을 휴지통으로 옮기라고 안내합니다. 알려진 원인은 다음 조치의 맨 앞에 옵니다
+[*][b]게임 실행 중의 후킹 설치:[/b] 어떤 모드가 후킹을 설치하던 순간 다른 게임 스레드가 그 경로를 지나면, 반쯤 써진 후킹을 실행해 크래시가 납니다. 덤프에서 이를 알아보고 그 모드를 신뢰도 높음으로 짚습니다(이번 사례: Typing Mode. 이전 리포트는 SkyrimUpscaler와 음악 모드를 지목했음). 타이밍에 따라 나는 크래시라, 한 번 괜찮다고 해결된 것은 아닙니다
+[*][b]알려진 크래시 지점:[/b] 공개된 수정 모드가 막아 주는 엔진 위치를 알아봅니다. Engine Fixes의 FaceGen·ShadowSceneNode null 크래시(1.5.97, 1.6.640, 1.6.1170, 패치가 막는 정확한 주소일 때만), 1.6.1170 물 반사 AddWater 크래시, 1.7.104 지오메트리 없는 NiTriShape, 1.5.97 A0D789, C++ 메모리 부족(std::bad_alloc). 모두 근거 자료로 확인했습니다. 어디서 터졌는지를 알려 줄 뿐, 잘못된 데이터를 남긴 모드까지 알려 주지는 않습니다
+[*][b]콜스택이 중간에 끊긴 경우:[/b] 스택 해제가 스레드 시작 전에 멈추면 이유와 깊이를 적어, 후보가 약하거나 없는 까닭을 설명합니다. 크래시 주소나 끊긴 지점이 이미 언로드된 DLL 자리면 그 이름도 적습니다
+[*][b]프리징:[/b] 플러그인 안에 갇힌 게임 스레드가 기다리는 중인지, CPU를 쓰며 도는 중인지 구분합니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.62[/size][/b]
 [list]
 [*][b]Skyrim 1.7.104 지원:[/b] SKSE 2.3.x가 요구하는 Address Library v5 호환 표시를 넣고, 1.7.x용 Address Library 형식을 읽습니다. 1.7.104 + SKSE 2.3.1 실게임에서 확인했습니다
 [*][b]게임 함수 이름:[/b] 콜스택의 게임 프레임에 함수 이름을 붙입니다. 예: [font=Courier New]SkyrimSE.exe+0x2ea36b (TESObjectREFR::GetDisplayFullName+0x2b)[/font]. 1.5.97, 1.6.640, 1.6.1170, 1.7.104를 지원하고, 프레임이 속한 함수의 시작이 정확히 맞을 때만 붙입니다. 깊은 엔진 프레임은 주소로만 나오는 경우가 많습니다
@@ -394,6 +422,7 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [/list]
 
 [i]검증 범위:[/i] 모든 RC를 한 MO2 환경(게임 1.6.1170, SKSE 2.2.6, 플러그인 약 4,250개, Crash Logger 1.25)에서 실제로 플레이하며 확인했습니다. v0.2.61에서는 개발용 테스트 플러그인으로 원인을 아는 사고 7건(접근 위반, 브레이크포인트, C++ 예외, 게임 EXE 안의 크래시, 프리징)을 그 게임에서 일으켰고, v0.2.61의 수정 뒤 모든 리포트가 올바른 DLL을 지목했습니다. v0.2.62는 1.7.104(Steam, 다른 모드 없음, SKSE 2.3.1)에서도 로드와 수동 캡처·리포트를 확인했습니다. 아직 실사용에서 보지 못한 것: 모드가 많은 1.7.104 환경의 크래시·프리징, 실제 프리징에서의 "갇힌 게임 스레드" 판정, 다음 Windows 업데이트 뒤 분석, 실제 SkyrimCrashGuard 설치 환경. 검수된 실사고 정확도 corpus는 아직 없습니다.
+v0.2.63에서는 위의 실사고 CTD 두 건을 새 분석기로 다시 분석했습니다(첫 번째는 ContentCatalog.txt를 옮기자 실제로 해결됐고, 두 번째는 그 모드가 같은 밀리초에 남긴 후킹 설치 기록과 맞음). 개발용 테스트 플러그인으로 사고 5건(이벤트 콜백 안의 크래시, 플러그인 자신의 스레드, 스택 오버플로, CPU를 도는 프리징, 콜백 프리징)을 더 일으켜 확인했고, 이 릴리즈와 같은 코드의 빌드를 같은 MO2 환경에 설치해 플레이했습니다. 아직 실사용에서 보지 못한 것: 새 알려진 크래시 지점이 실제 크래시에서 일치하는 경우.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
@@ -480,6 +509,9 @@ A: 됩니다. 게임 메인 스레드가 무엇을 기다렸는지(GPU, 드라�
 
 [b]Q: Skyrim 1.7.104에서 SkyrimDiag.dll 오류 창이 떠요.[/b]
 A: v0.2.62 이상을 SKSE 2.3.1, Address Library v13(All in One)과 함께 설치하세요. 이 모드의 이전 버전은 1.7.104에서 로드되지 않습니다.
+
+[b]Q: 1.7.104도 실행해 본 뒤로 1.6.1170 게임이 시작 직후 꺼집니다.[/b]
+A: 두 버전은 [font=Courier New]%LOCALAPPDATA%\Skyrim Special Edition\ContentCatalog.txt[/font]를 함께 쓰는데, 1.7.104가 이 파일을 1.6.1170이 읽지 못하는 형식으로 다시 씁니다. 그 파일을 휴지통으로 옮기면 게임이 새로 만듭니다. v0.2.63부터는 크래시가 이 경우와 맞으면 리포트가 알려 줍니다.
 
 [b][size=4]개인정보 안내[/size][/b]
 [list]
