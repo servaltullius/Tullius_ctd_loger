@@ -85,6 +85,7 @@ int wmain(int argc, wchar_t** argv)
   AnalyzeOptions opt{};
   opt.debug = a.debug;
   opt.redact_paths = !a.debug;
+  opt.use_crash_logger = !a.no_crash_logger;
   if (a.allow_online_symbols.has_value()) {
     opt.allow_online_symbols = a.allow_online_symbols.value();
   } else {

@@ -16,6 +16,9 @@ struct DumpToolCliArgs
   std::optional<bool> allow_online_symbols;
 
   bool debug = false;
+  // Skip pairing a Crash Logger log, for the accuracy benchmark's
+  // analyzer-only view (scripts/accuracy_benchmark.py).
+  bool no_crash_logger = false;
   std::wstring lang_token;  // e.g. "en", "ko"
 };
 
@@ -31,6 +34,7 @@ inline std::wstring DumpToolCliUsage()
     L"  --no-online-symbols        Disallow symbol server usage\n"
     L"  --lang <token>             Language token (e.g. en, ko); default: Windows display language\n"
     L"  --debug                    Disable path redaction\n"
+    L"  --no-crash-logger          Do not look for or use a Crash Logger log\n"
     L"  --headless                 Accepted for compatibility (ignored)\n"
     L"  --help                     Show this help\n";
 }
@@ -73,6 +77,11 @@ inline bool ParseDumpToolCliArgs(const std::vector<std::wstring_view>& argv, Dum
 
     if (a == L"--debug") {
       out->debug = true;
+      continue;
+    }
+
+    if (a == L"--no-crash-logger") {
+      out->no_crash_logger = true;
       continue;
     }
 

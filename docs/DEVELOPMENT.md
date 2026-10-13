@@ -204,6 +204,26 @@ bash scripts/verify_release_gate.sh
 
 When `SKYDIAG_QUALITY_CORPUS` is not set, the gate reports this step as `SKIPPED (not measured)` rather than claiming that real-world accuracy passed. When a corpus is set, omitting any threshold is a hard failure.
 
+## Accuracy Benchmark (confirmed incidents)
+
+`scripts/accuracy_benchmark.py` measures how often the report names the right cause, against Crash Logger read on its own. Each case is an incident whose cause a person confirmed; it is scored three ways:
+
+- `tullius_only`: our analyzer with `--no-crash-logger`
+- `tullius_with_crash_logger`: our analyzer with the paired Crash Logger log
+- `crash_logger`: the first probable call-stack frame outside Windows, the C/C++ runtime and the game EXE, which is what a reader of the log alone would check
+
+Ground truth is the module(s) or mod(s) at fault, or `--expect-none` when no plugin caused it (then naming none is correct); `--expect-known-cause` also checks the signature. Metrics: top-1 accuracy, wrong-lead rate, abstain rate, top-3 recall, known-cause rate.
+
+```bash
+python scripts/accuracy_benchmark.py add-case --corpus <corpus> --id <id> --kind ctd \
+  --dump <SkyrimDiag_Crash_*.dmp> --crash-logger-log <crash-*.log> \
+  --expect-module <SomeMod.dll> --note "<how the cause was confirmed>" \
+  --cli build-win/bin/SkyrimDiagDumpToolCli.exe
+python scripts/accuracy_benchmark.py score --corpus <corpus> --out-json <corpus>/report.json
+```
+
+Keep the corpus outside the repo: the summaries carry mod lists and local paths. Add a case only when the cause is confirmed (the crash stopped after removing the mod, a crash test, a known fix); re-run `add-case --replace` for every case after an analyzer change so all views come from the same build. Crash tests are cases whose answer we chose, so report them apart from real incidents, and do not publish a percentage until real incidents dominate the corpus. Crash Logger writes no log for freezes, so its view abstains on them.
+
 ## Issue Reporting / Troubleshooting
 
 - Issue reporting guide: `docs/BETA_TESTING.md`
