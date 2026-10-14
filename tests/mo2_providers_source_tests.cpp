@@ -104,6 +104,73 @@ void TestAnalysisTimeProvidersAreLabelledAndCapped()
   }
 }
 
+bool CandidateHasResourceSupport(const AnalysisResult& r, std::wstring_view name)
+{
+  for (const auto& c : r.actionable_candidates) {
+    if (c.mod_name != name) {
+      continue;
+    }
+    for (const auto& family : c.supporting_families) {
+      if (family == "resource_provider") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool HasCandidate(const AnalysisResult& r, std::wstring_view name)
+{
+  for (const auto& c : r.actionable_candidates) {
+    if (c.mod_name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A stack candidate whose mod also provided the resource opened just before
+// the crash. Only a crash-time provider may count as support for it.
+AnalysisResult MakeStackCandidateWithNearbyResource(std::string source)
+{
+  AnalysisResult r{};
+  r.dump_path = L"C:\\Logs\\SkyrimDiag_Crash_20261014_120000_000.dmp";
+  r.exc_code = 0xC0000005u;
+  r.fault_module_filename = L"SkyrimSE.exe";
+  r.suspects_from_stackwalk = true;
+  skydiag::dump_tool::SuspectItem suspect{};
+  suspect.module_filename = L"ModA.dll";
+  suspect.module_path = L"C:\\MO2\\mods\\Mod A\\SKSE\\Plugins\\ModA.dll";
+  suspect.inferred_mod_name = L"Mod A";
+  suspect.confidence_level = i18n::ConfidenceLevel::kMedium;
+  suspect.score = 10;
+  r.suspects.push_back(suspect);
+  ResourceRow rr{};
+  rr.t_ms = 1000.0;
+  rr.kind = L"nif";
+  rr.path = L"meshes\\moda\\thing.nif";
+  rr.providers = { L"Mod A" };
+  r.resources.push_back(rr);
+  r.resources.push_back(rr);
+  r.mo2_providers_source = std::move(source);
+  return r;
+}
+
+void TestAnalysisTimeProvidersDoNotSupportCandidates()
+{
+  auto captured = MakeStackCandidateWithNearbyResource("crash_time");
+  BuildEvidenceAndSummary(captured, i18n::Language::kEnglish);
+  Require(HasCandidate(captured, L"Mod A"), "the stack suspect becomes a candidate");
+  Require(CandidateHasResourceSupport(captured, L"Mod A"),
+    "a crash-time provider of a nearby resource supports the candidate");
+
+  auto later = MakeStackCandidateWithNearbyResource("analysis_time");
+  BuildEvidenceAndSummary(later, i18n::Language::kEnglish);
+  Require(HasCandidate(later, L"Mod A"), "the stack candidate stays");
+  Require(!CandidateHasResourceSupport(later, L"Mod A"),
+    "a provider read at analysis time may belong to another profile and does not support it");
+}
+
 void TestCaptureInTheScanWinsOverTheDisk()
 {
   const auto base = std::filesystem::temp_directory_path() / "skydiag_mo2_providers_source_test";
@@ -145,6 +212,7 @@ int main()
 {
   try {
     TestAnalysisTimeProvidersAreLabelledAndCapped();
+    TestAnalysisTimeProvidersDoNotSupportCandidates();
     TestCaptureInTheScanWinsOverTheDisk();
     std::puts("mo2 providers source tests passed");
     return 0;
