@@ -60,8 +60,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.64 Update Notice[/b]
-On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); v0.2.64 fixes that. Replace the previous installation with the complete v0.2.64 zip. Do not copy only individual EXEs or DLLs: since v0.2.62 the plugin, analyzer, its data files and the viewer changed (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.65 Update Notice[/b]
+On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64. Replace the previous installation with the complete v0.2.65 zip. Do not copy only individual EXEs or DLLs: since v0.2.62 the plugin, analyzer, its data files and the viewer changed (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
 [b][size=4]Installation (MO2)[/size][/b]
@@ -118,7 +118,18 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New since v0.2.62 (v0.2.63 and v0.2.64)[/size][/b]
+[b][size=4]What's New in v0.2.65[/size][/b]
+A sweep for places where the report said something false about your setup, started by a report that BEES was "not installed" while it was.[list]
+[*][b]BEES:[/b] BEES installs BackportedESLSupport.dll, but only bees.dll was checked, so 1.71-header plugins on runtimes before 1.6.1130 always got a "BEES not installed" warning. Both names count now, and the report says "not loaded" (not installed, or SKSE did not load it)
+[*][b]ENB/ReShade false positives:[/b] the Windows copies of d3d11.dll and dxgi.dll, which the game always loads, were taken for ENB and ReShade, so nearly every report said they were detected. Only copies loaded from outside Windows (the game folder) count now, named by DLL because ENB, ReShade and DXVK share those names; such a game-folder DLL can now be a suspect
+[*][b]Resource log works on AE for the first time:[/b] on 1.6.x and 1.7.x the resource-log hook was attached to the wrong vtable slot (another class's RTTI pointer) and never recorded a file. It now uses the layout of the running game and checks the target by RTTI before patching; on 1.6.1170 a capture recorded 120 recent meshes and their MO2 mods
+[*][b]MO2 priority:[/b] modlist.txt was read in reverse, so when two mods provided the same file (CrashLogger.ini, a mesh) the losing mod was taken for the winner
+[*][b]Crash Logger pairing:[/b] a log paired only by time could attach a known cause from another crash; a log now feeds known causes only when its exception location matches the dump
+[*][b]Softer wording where evidence is weaker:[/b] Engine Fixes setting names for 7.x and earlier, the water AddWater spot as a match rather than a proven defect, both causes of an Address Library error dialog, the 240-ESP note as low-confidence upkeep, and guide lines that overstated GPU driver crashes, memory exhaustion or "no WCT cycle means no deadlock"
+[*][b]Also:[/b] GOG and Epic folders for plugins.txt and Crash Logger logs; plugins.txt lines without '*' are inactive; the viewer no longer shows "Skyrim SE detected"
+[/list]
+
+[b][size=4]Earlier: v0.2.63 and v0.2.64[/size][/b]
 Two real CTDs had reports that blamed the wrong DLL; both are fixed, and crashes with a known cause are now named directly.
 [list]
 [*][b]1.5.97 launch crash fixed (v0.2.64):[/b] on 1.5.97, v0.2.62 and v0.2.63 crashed right after launch in SkyrimDiag.dll, because the resource-log hook read a file name at the AE layout. The hook now picks the layout of the running game. 1.6.x and 1.7.104 are unchanged
@@ -156,6 +167,7 @@ Two real CTDs had reports that blamed the wrong DLL; both are fixed, and crashes
 
 [i]Validation scope:[/i] All release candidates were played on one MO2 setup (game 1.6.1170, SKSE 2.2.6, about 4,250 plugins, Crash Logger 1.25). For v0.2.61 a development-only test plugin caused 7 incidents of known cause in that game (access violation, breakpoint, C++ exception, a crash inside the game EXE, and freezes); after the fixes in v0.2.61 every report pointed at the right DLL. v0.2.62 was also loaded on 1.7.104 (Steam, no other mods, SKSE 2.3.1) with a manual capture and report. Not yet seen in real use: crashes and freezes on a modded 1.7.104 setup, the "stuck game thread" freeze rule on a real freeze, analysis after the next Windows update, and a real SkyrimCrashGuard install. There is still no reviewed real-incident accuracy corpus.
 For v0.2.63, the two real CTDs above were re-analyzed with the new analyzer (moving ContentCatalog.txt away did stop the first; the second matches a hook install the mod logged in the same millisecond), five more test-plugin incidents were caused in game (a crash in an event callback, in the plugin's own thread, a stack overflow, a spinning freeze and a callback freeze), and a build of this release's code was installed and played on the same MO2 setup. Not yet seen in real use: the new known crash spots on a real crash. The v0.2.64 fix was checked in the rebuilt plugin's machine code; it has not been run on 1.5.97 here.
+For v0.2.65, a test build ran on the same 1.6.1170 setup: the resource log started at the main menu, a manual capture held 120 recent files with their MO2 mods and no ENB/ReShade claim, and the game closed normally. 25 kept dumps re-analyzed against v0.2.64 changed only in wording. Not yet run here: 1.5.97 and 1.7.104 with the new resource hook (1.7.104 has the same layout in its RTTI).
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -332,8 +344,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.64 중요 업데이트 안내[/b]
-Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64에서 고쳤습니다. 기존 설치를 완전히 교체하고 v0.2.64 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.62 이후 플러그인, 분석기와 그 데이터 파일, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.65 중요 업데이트 안내[/b]
+Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다. 기존 설치를 완전히 교체하고 v0.2.65 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.62 이후 플러그인, 분석기와 그 데이터 파일, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
 [b][size=4]설치 (MO2)[/size][/b]
@@ -390,7 +402,18 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.62 이후 새 기능 (v0.2.63, v0.2.64)[/size][/b]
+[b][size=4]v0.2.65 새 기능[/size][/b]
+"BEES를 설치했는데 미설치라고 나온다"는 제보를 계기로, 리포트가 사용자 환경에 대해 틀린 말을 하던 곳을 전수 점검해 고쳤습니다.[list]
+[*][b]BEES:[/b] BEES가 설치하는 BackportedESLSupport.dll 대신 bees.dll만 찾아서, 1.6.1130 미만에서 1.71 헤더 플러그인을 쓰면 BEES가 있어도 항상 "미설치" 경고가 떴습니다. 이제 두 이름을 모두 보고, "로드되지 않음(설치하지 않았거나 SKSE가 로드하지 못함)"이라고 씁니다
+[*][b]ENB/ReShade 오탐:[/b] 게임이 항상 로드하는 Windows의 d3d11.dll·dxgi.dll을 ENB·ReShade로 착각해, 거의 모든 리포트가 감지됐다고 했습니다. 이제 Windows 밖(게임 폴더)에서 로드된 사본만 보고, ENB·ReShade·DXVK가 같은 이름을 쓰므로 DLL 이름으로 적습니다. 게임 폴더의 그런 DLL은 이제 후보가 될 수 있습니다
+[*][b]AE에서 리소스 기록이 처음으로 동작:[/b] 1.6.x·1.7.x에서 리소스 기록 후킹이 엉뚱한 칸(다른 클래스의 RTTI 포인터)에 걸려 있어 한 번도 기록하지 못했습니다. 이제 실행 중인 게임의 구조를 쓰고, 패치하기 전에 RTTI로 대상을 확인합니다. 1.6.1170에서 캡처에 최근 메시 120개와 그 MO2 모드가 기록됐습니다
+[*][b]MO2 우선순위:[/b] modlist.txt를 거꾸로 읽어, 두 모드가 같은 파일(CrashLogger.ini, 메시)을 제공하면 지는 모드를 이기는 모드로 봤습니다
+[*][b]Crash Logger 로그 짝짓기:[/b] 시간만 맞는 다른 사고의 로그로 알려진 원인이 붙을 수 있었습니다. 이제 예외 위치가 덤프와 같은 로그만 알려진 원인에 씁니다
+[*][b]근거가 약한 곳의 문구 조정:[/b] Engine Fixes 설정 이름(7.x와 이전 버전), 물 반사 AddWater는 "알려진 지점과 일치"로, Address Library 오류 창은 두 원인 모두, ESP 240개는 신뢰도 낮은 정리 안내로, GPU 드라이버 크래시·메모리 부족 단정과 "WCT 순환이 없으면 데드락 아님" 문구는 뺐습니다
+[*][b]그 밖에:[/b] GOG·Epic 판의 plugins.txt와 Crash Logger 로그 폴더, plugins.txt에서 '*' 없는 줄은 비활성, 뷰어의 "Skyrim SE 감지됨" 제거
+[/list]
+
+[b][size=4]이전 변경: v0.2.63, v0.2.64[/size][/b]
 실사고 CTD 두 건에서 리포트가 엉뚱한 DLL을 지목한 문제를 고치고, 원인이 알려진 크래시를 바로 알려 줍니다.
 [list]
 [*][b]1.5.97 시작 직후 크래시 수정(v0.2.64):[/b] 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll에서 CTD가 났습니다. 리소스 기록 후킹이 파일 이름을 AE 배치 위치에서 읽었기 때문입니다. 이제 실행 중인 게임에 맞는 위치를 고릅니다. 1.6.x와 1.7.104는 동작 변화가 없습니다
@@ -428,6 +451,7 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 
 [i]검증 범위:[/i] 모든 RC를 한 MO2 환경(게임 1.6.1170, SKSE 2.2.6, 플러그인 약 4,250개, Crash Logger 1.25)에서 실제로 플레이하며 확인했습니다. v0.2.61에서는 개발용 테스트 플러그인으로 원인을 아는 사고 7건(접근 위반, 브레이크포인트, C++ 예외, 게임 EXE 안의 크래시, 프리징)을 그 게임에서 일으켰고, v0.2.61의 수정 뒤 모든 리포트가 올바른 DLL을 지목했습니다. v0.2.62는 1.7.104(Steam, 다른 모드 없음, SKSE 2.3.1)에서도 로드와 수동 캡처·리포트를 확인했습니다. 아직 실사용에서 보지 못한 것: 모드가 많은 1.7.104 환경의 크래시·프리징, 실제 프리징에서의 "갇힌 게임 스레드" 판정, 다음 Windows 업데이트 뒤 분석, 실제 SkyrimCrashGuard 설치 환경. 검수된 실사고 정확도 corpus는 아직 없습니다.
 v0.2.63에서는 위의 실사고 CTD 두 건을 새 분석기로 다시 분석했습니다(첫 번째는 ContentCatalog.txt를 옮기자 실제로 해결됐고, 두 번째는 그 모드가 같은 밀리초에 남긴 후킹 설치 기록과 맞음). 개발용 테스트 플러그인으로 사고 5건(이벤트 콜백 안의 크래시, 플러그인 자신의 스레드, 스택 오버플로, CPU를 도는 프리징, 콜백 프리징)을 더 일으켜 확인했고, 이 릴리즈와 같은 코드의 빌드를 같은 MO2 환경에 설치해 플레이했습니다. 아직 실사용에서 보지 못한 것: 새 알려진 크래시 지점이 실제 크래시에서 일치하는 경우. v0.2.64 수정은 다시 빌드한 플러그인의 기계어로 확인했고, 1.5.97 실게임에서는 아직 확인하지 못했습니다.
+v0.2.65는 같은 1.6.1170 환경에서 테스트 빌드로 실행했습니다. 메인 메뉴에서 리소스 기록이 시작됐고, 수동 캡처에 최근 파일 120개와 그 MO2 모드가 기록됐으며 ENB/ReShade 오탐은 없었고, 정상 종료했습니다. 보관 덤프 25개를 v0.2.64와 비교한 결과 문구만 바뀌었습니다. 아직 확인하지 못한 것: 1.5.97과 1.7.104에서의 새 리소스 후킹(1.7.104는 RTTI로 같은 구조임을 확인).
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
