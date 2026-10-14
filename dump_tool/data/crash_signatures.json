@@ -116,6 +116,28 @@
       }
     },
     {
+      "id": "FACEGEN_MORPHDATA_NULLPTR_1_7_104",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.7.104.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset": "0x43756C",
+        "access_violation_address": "0x24"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "얼굴 데이터(BSFaceGenMorphDataHead)를 다루는 엔진 코드가 널 검사 없이 포인터를 읽는 알려진 위치에서 크래시가 났습니다. 잘못된 얼굴 데이터를 넘긴 쪽(NPC 외형 모드, 프리셋 등)은 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "The crash is at a known spot where engine code for face data (BSFaceGenMorphDataHead) reads a pointer without a null check. Which mod supplied the bad face data (an NPC appearance mod, a preset) is not known from this pattern alone.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] SSE Engine Fixes 7.0.21 이상의 1.7.x 빌드가 이 위치를 막습니다(설정 bFaceGenMorphDataHeadNullPtrCrash, 기본값 켜짐). 1.7.104에서 실제로 켜졌는지는 EngineFixes.log의 \"installed facegen morphdatahead nullptr crash fix\" 줄로 확인하세요. 그 줄이 없으면 설치한 Engine Fixes가 1.7.104용 빌드인지 확인하세요."
+        ],
+        "recommendations_en": [
+          "[Known crash site] SSE Engine Fixes 7.0.21 and later, in a 1.7.x build, guard this exact spot (setting bFaceGenMorphDataHeadNullPtrCrash, on by default). To see that it is active on 1.7.104, look for \"installed facegen morphdatahead nullptr crash fix\" in EngineFixes.log; without that line, check that the Engine Fixes you installed is a build for 1.7.104."
+        ]
+      }
+    },
+    {
       "id": "SHADOWSCENENODE_NULLPTR_1_5_97",
       "match": {
         "exc_code": "0xC0000005",
@@ -178,6 +200,28 @@
         ],
         "recommendations_en": [
           "[Known crash site] Install or update SSE Engine Fixes for your game version (Part 1, the SKSE plugin, and Part 2, the preloader) and check that this fix is on (it is by default; bShadowSceneNodeNullPtrCrash in 7.x, ShadowSceneNodeNullptrCrash in earlier versions). Engine Fixes guards this exact spot."
+        ]
+      }
+    },
+    {
+      "id": "SHADOWSCENENODE_NULLPTR_1_7_104",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.7.104.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset": "0x150E416",
+        "access_violation_address": "0x18"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "그림자 장면 노드(ShadowSceneNode)를 다루는 엔진 코드가 널 검사 없이 가상 함수를 부르는 알려진 위치에서 크래시가 났습니다. 그 앞에서 잘못된 상태를 만든 원인은 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "The crash is at a known spot where engine code for the shadow scene node (ShadowSceneNode) makes a virtual call without a null check. What left the bad state before it is not known from this pattern alone.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] SSE Engine Fixes 7.0.21 이상의 1.7.x 빌드가 이 위치를 막습니다(설정 bShadowSceneNodeNullPtrCrash, 기본값 켜짐). 1.7.104에서 실제로 켜졌는지는 EngineFixes.log의 \"installed shadow scene node nullptr crash fix\" 줄로 확인하세요. 그 줄이 없으면 설치한 Engine Fixes가 1.7.104용 빌드인지 확인하세요."
+        ],
+        "recommendations_en": [
+          "[Known crash site] SSE Engine Fixes 7.0.21 and later, in a 1.7.x build, guard this exact spot (setting bShadowSceneNodeNullPtrCrash, on by default). To see that it is active on 1.7.104, look for \"installed shadow scene node nullptr crash fix\" in EngineFixes.log; without that line, check that the Engine Fixes you installed is a build for 1.7.104."
         ]
       }
     },
