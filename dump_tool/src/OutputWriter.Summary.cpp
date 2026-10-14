@@ -178,6 +178,7 @@ nlohmann::json BuildSummaryJson(
     { "selected_kind", r.crash_logger_pairing_selected_kind },
     { "same_directory", r.crash_logger_pairing_same_directory },
     { "ambiguous", r.crash_logger_pairing_ambiguous },
+    { "location_mismatch", r.crash_logger_location_mismatch },
     { "confidence", r.crash_logger_pairing_confidence },
   };
   summary["crash_logger"]["top_modules"] = nlohmann::json::array();

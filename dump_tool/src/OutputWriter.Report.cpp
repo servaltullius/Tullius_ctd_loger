@@ -229,6 +229,7 @@ std::string BuildReportText(
         << ", candidates=" << r.crash_logger_pairing_eligible_candidate_count
         << ", nearby_competitors=" << r.crash_logger_pairing_nearby_competitor_count
         << ", ambiguous=" << (r.crash_logger_pairing_ambiguous ? 1 : 0)
+        << ", location_mismatch=" << (r.crash_logger_location_mismatch ? 1 : 0)
         << ", confidence=" << r.crash_logger_pairing_confidence << "\n";
   }
   if (!r.crash_logger_version.empty()) {

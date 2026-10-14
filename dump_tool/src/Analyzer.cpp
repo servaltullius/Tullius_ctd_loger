@@ -181,6 +181,28 @@ bool CrashLoggerLogDescribesThisCrash(const AnalysisResult& out)
          offset == out.fault_module_offset;
 }
 
+// The time pairing (up to 120 s apart) can pick another crash's log even with
+// no competing log nearby. When the log names a different exception location
+// than the dump, handle its clues like an ambiguous pairing: still shown, but
+// Low, and they neither reorder suspects nor raise candidates.
+void DowngradeCrashLoggerLogForOtherLocation(AnalysisResult* out)
+{
+  if (!out || out->crash_logger_log_path.empty() ||
+      !crashlogger_core::CrashLoggerLocationContradictsDumpFault(
+        out->crash_logger_exception_location,
+        out->fault_module_filename,
+        out->fault_module_offset)) {
+    return;
+  }
+  out->crash_logger_location_mismatch = true;
+  out->crash_logger_pairing_ambiguous = true;
+  out->crash_logger_pairing_confidence = "low";
+  out->diagnostics.push_back(
+    L"[CrashLogger] log exception location " + out->crash_logger_exception_location +
+    L" differs from the dump fault " + out->fault_module_plus_offset +
+    L"; treating the pairing as ambiguous");
+}
+
 void IntegrateCrashLoggerFrameSignals(
   const std::vector<ModuleInfo>& allModules,
   AnalysisResult* out)
@@ -533,6 +555,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       ((out.exc_code != 0) || nameCrash || hangLike);
     if (shouldSearchCrashLogger) {
       IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
+      DowngradeCrashLoggerLogForOtherLocation(&out);
       IntegrateCrashLoggerFrameSignals(allModules, &out);
     }
   }

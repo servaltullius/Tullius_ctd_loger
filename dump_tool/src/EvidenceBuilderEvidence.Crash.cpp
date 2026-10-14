@@ -32,7 +32,15 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
          L"ms, eligible=" + std::to_wstring(r.crash_logger_pairing_eligible_candidate_count))
       : (L" | 쌍짓기 시간차=" + std::to_wstring(r.crash_logger_pairing_time_delta_ms) +
          L"ms, 유효 후보=" + std::to_wstring(r.crash_logger_pairing_eligible_candidate_count));
-    if (r.crash_logger_pairing_ambiguous) {
+    if (r.crash_logger_location_mismatch) {
+      e.details += en
+        ? (L" | the log's exception location (" + r.crash_logger_exception_location +
+           L") differs from this dump's (" + r.fault_module_plus_offset +
+           L"); it may be another crash's log, so CrashLogger clues are downgraded.")
+        : (L" | 로그의 예외 위치(" + r.crash_logger_exception_location +
+           L")가 이 덤프(" + r.fault_module_plus_offset +
+           L")와 달라 다른 크래시의 로그일 수 있어 CrashLogger 단서를 낮게 평가합니다.");
+    } else if (r.crash_logger_pairing_ambiguous) {
       e.details += en
         ? L" | ambiguous: nearby competing log exists; CrashLogger clues are downgraded."
         : L" | 모호함: 가까운 경쟁 로그가 있어 CrashLogger 단서를 낮게 평가합니다.";

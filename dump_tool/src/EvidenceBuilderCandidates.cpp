@@ -260,6 +260,13 @@ void AddResourceSignals(const AnalysisResult& r, bool en, std::vector<CandidateS
   if (!out) {
     return;
   }
+  // Providers looked up in the MO2 installation at analysis time may come
+  // from another profile than the one the game ran with (audit F05). The
+  // resource evidence still lists them, labelled and Low; they must not
+  // raise a candidate's score or add "resource provider" to its support.
+  if (r.mo2_providers_source == "analysis_time") {
+    return;
+  }
 
   const auto anchorMs = InferCaptureAnchorMs(r);
   if (!anchorMs) {

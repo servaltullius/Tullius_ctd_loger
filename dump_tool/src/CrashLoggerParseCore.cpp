@@ -1398,6 +1398,77 @@ std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::
   return out;
 }
 
+namespace {
+
+std::wstring WideAsciiLower(std::wstring_view s)
+{
+  std::wstring out(s);
+  for (auto& ch : out) {
+    if (ch >= L'A' && ch <= L'Z') {
+      ch = static_cast<wchar_t>(ch + (L'a' - L'A'));
+    }
+  }
+  return out;
+}
+
+std::optional<std::uint64_t> ParseHexOffset(std::wstring_view s)
+{
+  if (s.size() >= 2 && s[0] == L'0' && (s[1] == L'x' || s[1] == L'X')) {
+    s.remove_prefix(2);
+  }
+  if (s.empty() || s.size() > 16) {
+    return std::nullopt;
+  }
+  std::uint64_t value = 0;
+  for (const wchar_t ch : s) {
+    std::uint64_t digit = 0;
+    if (ch >= L'0' && ch <= L'9') {
+      digit = static_cast<std::uint64_t>(ch - L'0');
+    } else if (ch >= L'a' && ch <= L'f') {
+      digit = static_cast<std::uint64_t>(ch - L'a') + 10u;
+    } else if (ch >= L'A' && ch <= L'F') {
+      digit = static_cast<std::uint64_t>(ch - L'A') + 10u;
+    } else {
+      return std::nullopt;
+    }
+    value = (value << 4u) | digit;
+  }
+  return value;
+}
+
+}  // namespace
+
+bool CrashLoggerLocationContradictsDumpFault(
+  std::wstring_view location,
+  std::wstring_view faultModuleFilename,
+  std::uint64_t faultModuleOffset)
+{
+  if (faultModuleFilename.empty()) {
+    return false;
+  }
+  const std::wstring faultLower = WideAsciiLower(faultModuleFilename);
+  if (faultLower == L"crashlogger.dll" || faultLower == L"crashloggersse.dll") {
+    return false;
+  }
+  const auto plus = location.rfind(L'+');
+  if (plus == std::wstring_view::npos || plus == 0) {
+    return false;
+  }
+  const auto offset = ParseHexOffset(location.substr(plus + 1));
+  if (!offset) {
+    return false;
+  }
+  std::wstring_view module = location.substr(0, plus);
+  const auto slash = module.find_last_of(L"/\\");
+  if (slash != std::wstring_view::npos) {
+    module.remove_prefix(slash + 1);
+  }
+  if (module.empty()) {
+    return false;
+  }
+  return WideAsciiLower(module) != faultLower || *offset != faultModuleOffset;
+}
+
 bool IsLocationObjectTypeAscii(std::string_view objType)
 {
   const std::string lower = AsciiLower(objType);

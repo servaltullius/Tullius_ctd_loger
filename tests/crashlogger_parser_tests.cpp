@@ -1658,8 +1658,36 @@ static void Test_ParseFrameTopModules_TiesKeepStackOrder()
   assert(mods[3] == "modex.dll");
 }
 
+// A log paired by time alone (up to 120 s) may describe another crash; its
+// exception location then disagrees with the dump's fault.
+static void Test_CrashLoggerLocationContradictsDumpFault()
+{
+  using skydiag::dump_tool::crashlogger_core::CrashLoggerLocationContradictsDumpFault;
+
+  // Same crash: module (any case, any path) and offset agree.
+  assert(!CrashLoggerLocationContradictsDumpFault(L"KERNELBASE.dll+00C483A", L"KernelBase.dll", 0xC483Au));
+  assert(!CrashLoggerLocationContradictsDumpFault(L"Precision.dll+0x000FDDC7", L"Precision.dll", 0xFDDC7u));
+  assert(!CrashLoggerLocationContradictsDumpFault(L"D:\\Mods\\FancyMod.dll+00001234", L"FancyMod.dll", 0x1234u));
+
+  // Another crash: different module, or same module at another offset.
+  assert(CrashLoggerLocationContradictsDumpFault(L"hdtSMP64.dll+0012345", L"SkyrimSE.exe", 0x12345u));
+  assert(CrashLoggerLocationContradictsDumpFault(L"SkyrimSE.exe+0043756C", L"SkyrimSE.exe", 0x150E416u));
+
+  // Nothing to compare: no fault module, or no module+offset in the log.
+  assert(!CrashLoggerLocationContradictsDumpFault(L"SkyrimSE.exe+0043756C", L"", 0u));
+  assert(!CrashLoggerLocationContradictsDumpFault(L"", L"SkyrimSE.exe", 0x43756Cu));
+  assert(!CrashLoggerLocationContradictsDumpFault(L"0x7FF612345678", L"SkyrimSE.exe", 0x43756Cu));
+  assert(!CrashLoggerLocationContradictsDumpFault(L"SkyrimSE.exe+zz", L"SkyrimSE.exe", 0x43756Cu));
+
+  // The dump faulted inside Crash Logger while it reported the original
+  // exception, which is what the log names.
+  assert(!CrashLoggerLocationContradictsDumpFault(L"SkyrimSE.exe+0043756C", L"CrashLogger.dll", 0x1000u));
+  assert(!CrashLoggerLocationContradictsDumpFault(L"SkyrimSE.exe+0043756C", L"CrashLoggerSSE.dll", 0x1000u));
+}
+
 int main()
 {
+  Test_CrashLoggerLocationContradictsDumpFault();
   Test_ParseExceptionLineAndObjectsWithoutPlugin();
   Test_ParseFrameTopModules_TiesKeepStackOrder();
   Test_LooksLikeCrashLogger_CrashLog();
