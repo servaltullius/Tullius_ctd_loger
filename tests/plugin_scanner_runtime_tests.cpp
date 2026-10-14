@@ -235,7 +235,23 @@ void TestSkseLogIsMatchedByImageBase()
   const auto noBase = MatchSkseLogFiles({ currentLog }, 0);
   const auto stale = MatchSkseLogFiles({ oldLog }, 0x00007FF7B4BD0000ull);
   const auto matched = MatchSkseLogFiles({ oldLog, currentLog }, 0x00007FF7B4BD0000ull);
+  // Audit F17: an earlier launch in the same boot can share the image base; a
+  // log last written before the game started is that launch's.
+  const auto started = std::filesystem::last_write_time(currentLog) - std::chrono::minutes(30);
+  const auto earlierLaunchOnly = MatchSkseLogFiles({ olderSameBase }, 0x00007FF7B4BD0000ull, started);
+  const auto currentAfterStart = MatchSkseLogFiles({ olderSameBase, currentLog }, 0x00007FF7B4BD0000ull, started);
+  const auto startUnknown = MatchSkseLogFiles({ olderSameBase }, 0x00007FF7B4BD0000ull);
   std::filesystem::remove_all(root, ec);
+
+  Require(earlierLaunchOnly.status == "no_matching_log", "a log written before the game started is not this session's");
+  Require(currentAfterStart.status == "matched" && currentAfterStart.time_checked &&
+      currentAfterStart.summary.checked_count == 2u,
+    "the log written after the start is matched and marked as time-checked");
+  Require(startUnknown.status == "matched" && !startUnknown.time_checked,
+    "without the start time the image base still matches, but is not marked time-checked");
+  const auto selfStart = skydiag::helper::QueryProcessStartTimeBestEffort(GetCurrentProcess());
+  Require(selfStart && *selfStart <= std::filesystem::file_time_type::clock::now(),
+    "the start time of a running process is read in file time");
 
   Require(none.status == "not_found", "no log file is reported as not_found");
   Require(noBase.status == "no_image_base", "without the game's image base no log is trusted");
@@ -257,6 +273,7 @@ void TestSkseLogIsMatchedByImageBase()
   const auto json = nlohmann::json::parse(SerializePluginScanResult(scan));
   const auto& log = json.at("skse_log");
   Require(log.at("status") == "matched", "the scan JSON carries the match status");
+  Require(log.at("time_checked") == false, "the scan JSON says whether the log time was checked");
   Require(log.at("checked_count") == 2 && log.at("loaded_count") == 1 && log.at("issue_count") == 1, "counts are serialized");
   const auto& issue = log.at("issues").at(0);
   Require(issue.at("status") == "no version data" && issue.at("code") == 0, "the SKSE status is serialized as written");

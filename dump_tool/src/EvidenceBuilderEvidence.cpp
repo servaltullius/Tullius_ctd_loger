@@ -80,9 +80,15 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kLow;
     e.confidence = ConfidenceText(lang, e.confidence_level);
+    // Only a log written after the game started is known to be this session's;
+    // otherwise it merely shares the image base, as an earlier launch can.
+    const bool thisSession = r.skse_log.time_checked;
     e.title = en
-      ? (L"SKSE did not load " + std::to_wstring(r.skse_log.issue_count) + L" DLL(s) correctly in this session")
-      : (L"이번 실행에서 SKSE가 정상적으로 로드하지 못한 DLL " + std::to_wstring(r.skse_log.issue_count) + L"개");
+      ? (L"SKSE did not load " + std::to_wstring(r.skse_log.issue_count) +
+          (thisSession ? L" DLL(s) correctly in this session"
+                       : L" DLL(s) correctly, per the skse64.log with this session's image base (not confirmed by time)"))
+      : ((thisSession ? L"이번 실행에서" : L"이미지 베이스가 같은 skse64.log 기준(이번 실행인지 시각으로 확인 못 함)") +
+          std::wstring(L" SKSE가 정상적으로 로드하지 못한 DLL ") + std::to_wstring(r.skse_log.issue_count) + L"개");
     e.details = SummarizeSkseLogIssues(r.skse_log, en, 6, L" | ");
     r.evidence.push_back(std::move(e));
   }

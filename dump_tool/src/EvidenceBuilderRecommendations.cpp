@@ -513,11 +513,18 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // explanation of this incident, so they join the end of the checklist too.
   if (r.skse_log.status == "matched" && r.skse_log.issue_count > 0) {
     const auto issues = SummarizeSkseLogIssues(r.skse_log, en, 6, L"; ");
+    const bool thisSession = r.skse_log.time_checked;
     lowConfidencePluginRecommendations.push_back(en
-      ? (L"[SKSE] SKSE did not load these DLLs correctly in this session: " + issues +
+      ? (std::wstring(thisSession
+            ? L"[SKSE] SKSE did not load these DLLs correctly in this session: "
+            : L"[SKSE] Per the skse64.log with this session's image base (not confirmed by time to be this session), "
+              L"SKSE did not load these DLLs correctly: ") + issues +
           L". This is not evidence for the cause of this incident. A helper DLL without version data can stay; "
           L"for a plugin you meant to use, do what its note says (a file for this game version, or the DLL it needs).")
-      : (L"[SKSE] 이번 실행에서 SKSE가 정상적으로 로드하지 못한 DLL: " + issues +
+      : (std::wstring(thisSession
+            ? L"[SKSE] 이번 실행에서 SKSE가 정상적으로 로드하지 못한 DLL: "
+            : L"[SKSE] 이미지 베이스가 같은 skse64.log 기준(이번 실행인지 시각으로 확인 못 함), SKSE가 정상적으로 로드하지 못한 DLL: ") +
+          issues +
           L". 이번 사고의 원인 근거는 아닙니다. 버전 정보가 없는 보조 DLL은 그대로 둬도 되고, "
           L"쓰려던 플러그인이라면 사유에 맞게 고치세요(현재 게임 버전용 파일로 교체, 또는 필요한 DLL 설치)."));
   }

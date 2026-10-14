@@ -136,6 +136,7 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
       log.checked_count = it->value("checked_count", 0u);
       log.loaded_count = it->value("loaded_count", 0u);
       log.issue_count = it->value("issue_count", 0u);
+      log.time_checked = it->value("time_checked", false);
       if (auto itIssues = it->find("issues"); itIssues != it->end() && itIssues->is_array()) {
         for (const auto& issue : *itIssues) {
           if (!issue.is_object()) {

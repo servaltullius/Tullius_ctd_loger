@@ -185,7 +185,8 @@ std::string BuildReportText(
       rpt << " skse=" << r.skse_log.skse_version
           << " checked=" << r.skse_log.checked_count
           << " loaded=" << r.skse_log.loaded_count
-          << " not_loaded=" << r.skse_log.issue_count;
+          << " not_loaded=" << r.skse_log.issue_count
+          << " time_checked=" << (r.skse_log.time_checked ? 1 : 0);
     }
     rpt << "\n";
     for (const auto& issue : r.skse_log.issues) {
