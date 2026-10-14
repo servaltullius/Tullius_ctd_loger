@@ -12,6 +12,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 namespace skydiag::dump_tool {
 namespace {
 
@@ -394,6 +396,69 @@ std::optional<Mo2Index> TryBuildMo2IndexFromModulePaths(const std::vector<std::w
     }
   }
 
+  return idx;
+}
+
+std::optional<CapturedMo2State> TryParseCapturedMo2State(std::string_view pluginScanJsonUtf8)
+{
+  if (pluginScanJsonUtf8.empty()) {
+    return std::nullopt;
+  }
+  const auto j = nlohmann::json::parse(pluginScanJsonUtf8, nullptr, /*allow_exceptions=*/false);
+  if (!j.is_object()) {
+    return std::nullopt;
+  }
+  const auto it = j.find("mo2");
+  if (it == j.end() || !it->is_object() || it->value("status", std::string{}) != "captured") {
+    return std::nullopt;
+  }
+  const auto pathOf = [&](const char* key) {
+    const auto v = it->find(key);
+    return (v != it->end() && v->is_string()) ? std::filesystem::path(Utf8ToWide(v->get<std::string>()))
+                                              : std::filesystem::path{};
+  };
+
+  CapturedMo2State state{};
+  state.base = pathOf("base_dir");
+  state.modsDir = pathOf("mods_dir");
+  state.overwriteDir = pathOf("overwrite_dir");
+  state.profilesDir = pathOf("profiles_dir");
+  if (const auto p = it->find("profile"); p != it->end() && p->is_string()) {
+    state.profileName = Utf8ToWide(p->get<std::string>());
+  }
+  if (const auto mods = it->find("enabled_mods"); mods != it->end() && mods->is_array()) {
+    state.enabledModsWinnerFirst.reserve(mods->size());
+    for (const auto& m : *mods) {
+      if (m.is_string() && !m.get_ref<const std::string&>().empty()) {
+        state.enabledModsWinnerFirst.push_back(Utf8ToWide(m.get<std::string>()));
+      }
+    }
+  }
+  if (state.modsDir.empty()) {
+    return std::nullopt;
+  }
+  return state;
+}
+
+Mo2Index BuildMo2IndexFromCapture(const CapturedMo2State& state)
+{
+  Mo2Index idx{};
+  idx.source = Mo2Index::Source::kCrashTime;
+  idx.base = state.base;
+  idx.modsDir = state.modsDir;
+  idx.overwriteDir = state.overwriteDir;
+  idx.profilesDir = state.profilesDir;
+  idx.profileName = state.profileName;
+  if (!state.profilesDir.empty() && !state.profileName.empty()) {
+    idx.profileDir = state.profilesDir / state.profileName;
+    idx.modlistPath = idx.profileDir / L"modlist.txt";
+  }
+  idx.modDirs.reserve(state.enabledModsWinnerFirst.size());
+  idx.modNames.reserve(state.enabledModsWinnerFirst.size());
+  for (const auto& name : state.enabledModsWinnerFirst) {
+    idx.modDirs.push_back(state.modsDir / name);
+    idx.modNames.push_back(name);
+  }
   return idx;
 }
 

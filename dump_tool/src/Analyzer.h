@@ -450,6 +450,11 @@ struct AnalysisResult
 
   // Optional: recent resource loads (best-effort; nif/hkx/tri)
   std::vector<ResourceRow> resources;
+  // Where the MO2 providers in `resources` come from: "crash_time" (profile
+  // and mod list captured while the game ran), "analysis_time" (read from disk
+  // at analysis, may not match the crash), or empty (no MO2 index).
+  std::string mo2_providers_source;
+  std::wstring mo2_profile_name;
 
   // Cross-signal actionable candidates (best-effort; mainly for EXE/system victim-like crashes)
   std::vector<ActionableCandidate> actionable_candidates;

@@ -490,6 +490,12 @@ nlohmann::json BuildSummaryJson(
     { "online_symbol_source_used", r.online_symbol_source_used },
   };
 
+  // crash_time: providers from the MO2 profile captured with the dump;
+  // analysis_time: from the installation found when the dump was analyzed.
+  summary["mo2"] = {
+    { "providers_source", r.mo2_providers_source },
+    { "profile", WideToUtf8(r.mo2_profile_name) },
+  };
   summary["resources"] = nlohmann::json::array();
   for (const auto& rr : r.resources) {
     nlohmann::json providers = nlohmann::json::array();

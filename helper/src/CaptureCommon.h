@@ -74,6 +74,11 @@ inline std::string CollectPluginScanJson(
   // is written after this, so an exception here must not escape.
   try {
     auto scanResult = skydiag::helper::ScanPlugins(inputs.gameExeDir, inputs.moduleNames, &inputs.modulePaths);
+    if (const auto& mo2 = scanResult.mo2; !mo2.status.empty()) {
+      AppendLogLine(outBase,
+        L"MO2 capture: " + std::wstring(mo2.status.begin(), mo2.status.end()) +
+        L" (enabled mods=" + std::to_wstring(mo2.enabled_mods.size()) + L")");
+    }
     // A failure while reading skse64.log keeps the finished plugin scan.
     try {
       scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);

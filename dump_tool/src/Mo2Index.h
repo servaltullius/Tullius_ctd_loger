@@ -10,6 +10,16 @@ namespace skydiag::dump_tool {
 
 struct Mo2Index
 {
+  // Where the profile and mod list come from. kCrashTime: the helper captured
+  // them while the game ran. kAnalysisTime: read from disk when the dump is
+  // analyzed, so another profile or changed mods may be described (audit F05).
+  enum class Source
+  {
+    kAnalysisTime,
+    kCrashTime,
+  };
+
+  Source source = Source::kAnalysisTime;
   std::filesystem::path base;
   std::filesystem::path modsDir;
   std::filesystem::path overwriteDir;
@@ -20,6 +30,23 @@ struct Mo2Index
   std::vector<std::filesystem::path> modDirs;
   std::vector<std::wstring> modNames;
 };
+
+// The MO2 instance and profile the helper recorded while the game ran (the
+// "mo2" object of its plugin scan, status "captured").
+struct CapturedMo2State
+{
+  std::filesystem::path base;
+  std::filesystem::path modsDir;
+  std::filesystem::path overwriteDir;
+  std::filesystem::path profilesDir;
+  std::wstring profileName;
+  std::vector<std::wstring> enabledModsWinnerFirst;
+};
+
+std::optional<CapturedMo2State> TryParseCapturedMo2State(std::string_view pluginScanJsonUtf8);
+
+// Mod folders removed since the crash simply provide nothing.
+Mo2Index BuildMo2IndexFromCapture(const CapturedMo2State& state);
 
 // Best-effort: detect "...\\mods\\<ModName>\\..." (MO2)
 std::wstring InferMo2ModNameFromPath(std::wstring_view fullPath);

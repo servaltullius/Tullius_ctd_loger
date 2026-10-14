@@ -26,6 +26,17 @@ void ResolveFaultModule(
   const std::vector<minidump::ModuleInfo>& allModules,
   AnalysisResult& out);
 
+// The helper's plugin scan (dump stream, or the _PluginScan.json sidecar).
+void LoadPluginScanJson(
+  const std::wstring& dumpPath,
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  AnalysisResult& out);
+
+// From the MO2 state captured with the dump when present, else from the
+// current disk (marked as analysis-time in `out`).
+std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out);
+
 void ParseBlackboxStream(
   void* dumpBase,
   std::uint64_t dumpSize,

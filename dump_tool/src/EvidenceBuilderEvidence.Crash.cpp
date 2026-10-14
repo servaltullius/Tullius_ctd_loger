@@ -346,6 +346,7 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
   const bool isHangLike = ctx.isHangLike;
 
   std::vector<std::wstring> recent;
+  bool recentNamesProviders = false;
   const std::size_t n = std::min<std::size_t>(r.resources.size(), 4);
   recent.reserve(n);
   for (std::size_t i = r.resources.size() - n; i < r.resources.size(); i++) {
@@ -356,6 +357,7 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
     }
     if (rr.is_conflict && !rr.providers.empty()) {
       line += L" (providers: " + JoinList(rr.providers, 4, L", ") + L")";
+      recentNamesProviders = true;
     }
     recent.push_back(std::move(line));
   }
@@ -368,6 +370,9 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
       ? L"Recent resource loads (mesh/anim)"
       : L"최근 로드된 리소스(메쉬/애니) 기록";
     e.details = JoinList(recent, 4, L", ");
+    if (recentNamesProviders) {
+      e.details += Mo2ProvidersCaveat(r, en);
+    }
     r.evidence.push_back(std::move(e));
   }
 
@@ -385,12 +390,12 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
 
   if (!conflicts.empty()) {
     EvidenceItem c{};
-    c.confidence_level = i18n::ConfidenceLevel::kMedium;
+    c.confidence_level = CapForMo2ProvidersSource(r, i18n::ConfidenceLevel::kMedium);
     c.confidence = ConfidenceText(lang, c.confidence_level);
     c.title = en
       ? L"Same file provided by multiple mods (possible conflict)"
       : L"동일 파일을 여러 모드가 제공(충돌 가능)";
-    c.details = JoinList(conflicts, 4, L" | ");
+    c.details = JoinList(conflicts, 4, L" | ") + Mo2ProvidersCaveat(r, en);
     r.evidence.push_back(std::move(c));
   }
 
@@ -401,12 +406,14 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
       const auto hits = FindResourcesNearAnchor(r.resources, *anchorMs, windowBeforeMs, windowAfterMs);
       if (!hits.empty()) {
         std::vector<std::wstring> lines;
+        bool linesNameProviders = false;
         lines.reserve(std::min<std::size_t>(hits.size(), 4));
         for (const auto* rr : hits) {
           if (!rr) {
             continue;
           }
           lines.push_back(FormatResourceHitLine(*rr, *anchorMs));
+          linesNameProviders = linesNameProviders || (rr->is_conflict && !rr->providers.empty());
           if (lines.size() >= 4) {
             break;
           }
@@ -424,6 +431,9 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
                 ? L"크래시 직전/직후 로드된 리소스(메쉬/애니) 추정"
                 : L"프리징/무한로딩 시점 근처 로드된 리소스(메쉬/애니) 추정");
           e.details = JoinList(lines, 4, L" | ");
+          if (linesNameProviders) {
+            e.details += Mo2ProvidersCaveat(r, en);
+          }
           r.evidence.push_back(std::move(e));
         }
 
@@ -439,12 +449,12 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
         }
         if (!nearConflicts.empty()) {
           EvidenceItem c{};
-          c.confidence_level = i18n::ConfidenceLevel::kMedium;
+          c.confidence_level = CapForMo2ProvidersSource(r, i18n::ConfidenceLevel::kMedium);
           c.confidence = ConfidenceText(lang, c.confidence_level);
           c.title = en
             ? L"Near-timestamp resources exist in multiple mods (possible conflict)"
             : L"시점 근처 리소스가 여러 모드에 존재(충돌 가능)";
-          c.details = JoinList(nearConflicts, 3, L" | ");
+          c.details = JoinList(nearConflicts, 3, L" | ") + Mo2ProvidersCaveat(r, en);
           r.evidence.push_back(std::move(c));
         }
 
@@ -456,7 +466,7 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
           s.title = en
             ? L"Mods providing near-timestamp resources (correlation)"
             : L"시점 근처 리소스를 제공한 모드(상관분석)";
-          s.details = JoinList(suspects, 5, L", ");
+          s.details = JoinList(suspects, 5, L", ") + Mo2ProvidersCaveat(r, en);
           r.evidence.push_back(std::move(s));
         }
       }
