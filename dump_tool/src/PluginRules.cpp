@@ -105,6 +105,7 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
     parsed.plugins_source = j.value("plugins_source", "");
     parsed.mo2_detected = j.value("mo2_detected", false);
     parsed.implicit_plugins_included = j.value("implicit_plugins_included", false);
+    parsed.implicit_masters_verified = j.value("implicit_masters_verified", false);
 
     if (auto it = j.find("plugins"); it != j.end() && it->is_array()) {
       parsed.plugins.reserve(it->size());
@@ -190,9 +191,9 @@ std::vector<std::wstring> ComputeMissingMasters(const ParsedPluginScan& scan)
         continue;
       }
       // Base game/DLC and mandatory free CC masters can be implicitly loaded even when
-      // they are not listed in plugins.txt (depends on manager/runtime), so do not
-      // flag them as missing based on active-list comparison alone.
-      if (IsImplicitRuntimeMaster(masterLower)) {
+      // they are not listed in plugins.txt (depends on manager/runtime). Only a scan
+      // that checked them where the game looks knows one is really absent.
+      if (!scan.implicit_masters_verified && IsImplicitRuntimeMaster(masterLower)) {
         continue;
       }
       // A scan that predates implicit plugins cannot see which Creation Club

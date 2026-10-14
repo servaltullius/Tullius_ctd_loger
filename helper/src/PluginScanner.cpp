@@ -895,6 +895,11 @@ PluginScanResult ScanPlugins(
     }
   }
   result.implicit_plugins_included = true;
+  // Started by the game, this helper inherits MO2's virtual file system and
+  // sees the Data folder the game sees; started any other way under MO2 it
+  // sees only the real folder, where mod-provided CC files are absent.
+  const bool seesGameData = !result.mo2_detected || GetModuleHandleW(L"usvfs_x64.dll") != nullptr;
+  result.implicit_masters_verified = seesGameData;
 
   for (const auto& pluginName : activePlugins) {
     PluginMeta meta{};
@@ -932,6 +937,7 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
   j["plugins_source"] = result.plugins_source;
   j["mo2_detected"] = result.mo2_detected;
   j["implicit_plugins_included"] = result.implicit_plugins_included;
+  j["implicit_masters_verified"] = result.implicit_masters_verified;
   j["error"] = result.error;
   j["plugins"] = nlohmann::json::array();
 

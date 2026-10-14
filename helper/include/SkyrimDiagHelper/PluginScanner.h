@@ -80,6 +80,12 @@ struct PluginScanResult
   // True when `plugins` also lists the base masters and Skyrim.ccc plugins the
   // game loads without a plugins.txt entry. Older scans listed only plugins.txt.
   bool implicit_plugins_included = false;
+  // The implicit masters (base game, Skyrim.ccc, which lists _ResourcePack.esl
+  // on 1.6.1130+) were checked in the Data folder the game sees: no MO2, or
+  // this helper runs inside MO2's virtual file system. Then an implicit master
+  // missing from `plugins` is really absent (audit F12); otherwise it may sit
+  // in a mod folder the helper cannot see (CC files kept as an MO2 mod).
+  bool implicit_masters_verified = false;
   std::vector<PluginMeta> plugins;
   std::string error;
   SkseLogScan skse_log;

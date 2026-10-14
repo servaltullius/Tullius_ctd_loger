@@ -306,6 +306,41 @@ void TestMissingMastersTrustCreationClubMastersOnlyFromImplicitAwareScans()
   assert(awareMissing[0] == L"ccBGSSSE002-ExoticArrows.esl");
 }
 
+// Audit F12: on 1.5.97 a patch needing ccBGSSSE001-Fish.esm or
+// _ResourcePack.esl, neither of which exists, showed no missing master. A scan
+// that checked the implicit masters where the game looks reports them.
+void TestMissingImplicitMastersAreReportedFromVerifiedScans()
+{
+  const char* verifiedJson = R"JSON(
+{
+  "implicit_plugins_included": true,
+  "implicit_masters_verified": true,
+  "plugins": [
+    { "filename": "Skyrim.esm", "is_active": true, "masters": [] },
+    { "filename": "_ResourcePack.esl", "is_active": true, "masters": ["Skyrim.esm"] },
+    {
+      "filename": "Patch.esp",
+      "is_active": true,
+      "masters": ["Skyrim.esm", "_ResourcePack.esl", "ccBGSSSE001-Fish.esm", "Dawnguard.esm"]
+    }
+  ]
+}
+)JSON";
+  ParsedPluginScan verified{};
+  assert(ParsePluginScanJson(verifiedJson, &verified));
+  assert(verified.implicit_masters_verified);
+  const auto missing = ComputeMissingMasters(verified);
+  assert(missing.size() == 2);
+  assert(missing[0] == L"ccBGSSSE001-Fish.esm");
+  assert(missing[1] == L"Dawnguard.esm");
+
+  // The same list from a scan that could not check where the game looks
+  // (older helper, or MO2 without its virtual file system) keeps the exemption.
+  ParsedPluginScan unverified = verified;
+  unverified.implicit_masters_verified = false;
+  assert(ComputeMissingMasters(unverified).empty());
+}
+
 void TestRulesEvaluateFromJson()
 {
   const auto tmp = std::filesystem::temp_directory_path() / "skydiag_plugin_rules_logic_test.json";
@@ -538,6 +573,7 @@ int main()
   TestHeaderVersionRuleIgnoresInactivePlugins();
   TestMissingMastersIgnoreImplicitRuntimeMasters();
   TestMissingMastersTrustCreationClubMastersOnlyFromImplicitAwareScans();
+  TestMissingImplicitMastersAreReportedFromVerifiedScans();
   TestRulesEvaluateFromJson();
   TestFullPluginSlotRuleRequiresActiveFullThreshold();
   TestEslSlotRuleCountsOnlyActivePlugins();

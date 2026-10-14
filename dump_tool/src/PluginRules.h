@@ -55,6 +55,10 @@ struct ParsedPluginScan
   // Set by scans that list the base masters and Skyrim.ccc plugins the game
   // loads on its own; older scans listed only plugins.txt.
   bool implicit_plugins_included = false;
+  // Set by scans that checked the implicit masters (base game and Skyrim.ccc)
+  // in the Data folder the game sees: one missing from the
+  // active list is then really absent, not loaded on its own (audit F12).
+  bool implicit_masters_verified = false;
   std::vector<PluginEntryInfo> plugins;
   SkseLogScanInfo skse_log;
 };

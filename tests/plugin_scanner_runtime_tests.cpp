@@ -87,6 +87,9 @@ void TestImplicitPluginsAreActiveUnderMo2()
 
   Require(result.plugins_source == "mo2_profile", "the MO2 profile plugins.txt must be used");
   Require(result.implicit_plugins_included, "the scan must say it lists implicit plugins");
+  // This test process is not inside MO2's virtual file system, so it may not
+  // see CC files kept in a mod folder: the implicit masters are not verified.
+  Require(!result.implicit_masters_verified, "implicit masters are unverified outside the game's Data view");
   Require(
     skydiag::helper::SerializePluginScanResult(result).find("\"implicit_plugins_included\":true") != std::string::npos,
     "the sidecar must carry the implicit-plugins flag");
