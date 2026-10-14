@@ -281,6 +281,30 @@ void TestKnownCrashSiteSignaturesRuntime()
   const auto shadowMiss = db.Match(shadow, /*useKorean=*/false);
   assert(shadowMiss && shadowMiss->id == "ACCESS_VIOLATION_NULL");
 
+  // 1.7.104: the same Engine Fixes IDs plus offsets, checked in the decrypted
+  // executable (mov eax,[rbx+0x24] at 0x43756C, call [rax+0x18] at 0x150E416).
+  auto facegen17 = facegen;
+  facegen17.game_version = "1.7.104.0";
+  facegen17.fault_offset = 0x43756Cull;
+  const auto facegen17Hit = db.Match(facegen17, /*useKorean=*/false);
+  assert(facegen17Hit && facegen17Hit->id == "FACEGEN_MORPHDATA_NULLPTR_1_7_104");
+  assert(facegen17Hit->recommendations[0].find(L"installed facegen morphdatahead nullptr crash fix") != std::wstring::npos);
+  facegen17.access_violation_address = 0x124ull;
+  const auto facegen17Miss = db.Match(facegen17, /*useKorean=*/false);
+  assert(facegen17Miss && facegen17Miss->id == "ACCESS_VIOLATION_NULL");
+
+  auto shadow17 = shadow;
+  shadow17.game_version = "1.7.104.0";
+  shadow17.fault_offset = 0x150E416ull;
+  shadow17.access_violation_address = 0x18ull;
+  const auto shadow17Hit = db.Match(shadow17, /*useKorean=*/true);
+  assert(shadow17Hit && shadow17Hit->id == "SHADOWSCENENODE_NULLPTR_1_7_104");
+  assert(shadow17Hit->recommendations[0].find(L"installed shadow scene node nullptr crash fix") != std::wstring::npos);
+  auto shadow1170OffsetOn17 = shadow17;
+  shadow1170OffsetOn17.fault_offset = 0x14A2546ull;
+  const auto wrongOffset = db.Match(shadow1170OffsetOn17, /*useKorean=*/false);
+  assert(!wrongOffset || wrongOffset->id.rfind("SHADOWSCENENODE", 0) != 0);
+
   SignatureMatchInput water{};
   water.exc_code = 0xC0000005u;
   water.game_version = "1.6.1170.0";

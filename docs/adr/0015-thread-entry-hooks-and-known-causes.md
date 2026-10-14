@@ -77,3 +77,15 @@ Accepted
 - **확인**
   - 보관 덤프 24개를 v0.2.62와 나란히 비교했습니다. 바뀐 것은 이미 머지한 #96·#99로 설명되는 2건뿐이고, 새 시그니처가 잘못 일치한 덤프는 없습니다.
   - 끊김은 이전 실사고 프리징 6건(Windows DLL 해제 정보 없음)과 CTD 1건(데이터 주소)에서만 나왔습니다.
+
+## Addendum (2026-10-14): Engine Fixes sites on 1.7.104
+
+- 2026-10-13 추가분에서 1.7.104는 Engine Fixes 지원을 확인하지 못해 뺐습니다. 이번에 확인한 것은 다음과 같습니다.
+  - Engine Fixes master는 두 수정을 런타임 구분 없이 AE ID(`26918+0x4C`, `106342+0x16`)로 설치합니다. 1.7.x 빌드는 7.0.21 베타부터입니다.
+  - Nexus의 1.7.x 파일은 "7.0.21 beta for Skyrim AE 1.7.99"(2026-08-24)입니다. 1.7.104로 호환 선언을 바꾼 커밋(`b289e3d`, 2026-08-29)은 아직 릴리즈에 들어가지 않았습니다.
+  - 그래서 권장 문구는 특정 파일 설치를 단정하지 않습니다. `EngineFixes.log`의 설치 줄("installed facegen morphdatahead nullptr crash fix", "installed shadow scene node nullptr crash fix")로 수정이 켜졌는지 확인하게 합니다.
+- **주소:** 1.7.104 Address Library(format 5)로 구했습니다.
+  - `FACEGEN_MORPHDATA_NULLPTR_1_7_104`: `0x43756C`
+  - `SHADOWSCENENODE_NULLPTR_1_7_104`: `0x150E416`
+- **명령어 확인:** 1.7.104 실행 파일을 Ghidra로 디스어셈블했습니다(1.7.104는 Steam DRM이 코드를 암호화하지 않습니다). 두 주소가 각각 `mov eax,[rbx+0x24]`, `call [rax+0x18]`이고, 1.5.97·1.6.1170과 같은 명령어입니다.
+- 같은 방법으로 기존 버전별 시그니처 9개(1.6.640 제외)도 대조했고, 모두 맞았습니다. 1.5.97·1.6.1170 Steam 실행 파일은 코드가 SteamStub으로 암호화돼 있어 Steamless로 복호화한 사본을 썼습니다.
