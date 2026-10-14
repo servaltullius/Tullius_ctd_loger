@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +44,8 @@ struct PluginScanInputs
   std::vector<std::wstring> modulePaths;
   // Identifies the session in skse64.log, which keeps no timestamps.
   std::uint64_t gameImageBase = 0;
+  // A skse64.log written before this is from an earlier launch.
+  std::optional<std::filesystem::file_time_type> gameProcessStart;
 };
 
 inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedProcess& proc)
@@ -53,6 +56,7 @@ inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedP
     inputs.moduleNames = skydiag::helper::CollectModuleFilenamesBestEffort(proc.pid);
     inputs.modulePaths = skydiag::helper::CollectModulePathsBestEffort(proc.pid);
     inputs.gameImageBase = skydiag::helper::QueryMainModuleBaseBestEffort(proc.pid);
+    inputs.gameProcessStart = skydiag::helper::QueryProcessStartTimeBestEffort(proc.process);
   }
   return inputs;
 }
@@ -81,7 +85,7 @@ inline std::string CollectPluginScanJson(
     }
     // A failure while reading skse64.log keeps the finished plugin scan.
     try {
-      scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase);
+      scanResult.skse_log = skydiag::helper::CollectSkseLogBestEffort(inputs.gameImageBase, inputs.gameProcessStart);
     } catch (const std::exception& ex) {
       scanResult.skse_log = {};
       scanResult.skse_log.status = "error";
@@ -92,7 +96,8 @@ inline std::string CollectPluginScanJson(
     if (skseLog.status == "matched") {
       skseLine += L" (checked=" + std::to_wstring(skseLog.summary.checked_count) +
         L", loaded=" + std::to_wstring(skseLog.summary.loaded_count) +
-        L", not_loaded=" + std::to_wstring(skseLog.summary.issues.size()) + L")";
+        L", not_loaded=" + std::to_wstring(skseLog.summary.issues.size()) +
+        (skseLog.time_checked ? L", written after the game started)" : L", start time unknown)");
     }
     AppendLogLine(outBase, skseLine);
     return skydiag::helper::SerializePluginScanResult(scanResult);

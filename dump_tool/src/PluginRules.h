@@ -41,6 +41,10 @@ struct SkseLogScanInfo
   std::uint32_t loaded_count = 0;
   std::uint32_t issue_count = 0;  // may exceed issues.size() when the helper capped the list
   std::vector<SkseLogIssueInfo> issues;
+  // The log was written after the game process started. False for scans
+  // that matched it only by image base, which an earlier launch in the same
+  // boot can share (audit F17), and for scans made before the check existed.
+  bool time_checked = false;
 };
 
 struct ParsedPluginScan

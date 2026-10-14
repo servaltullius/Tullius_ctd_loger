@@ -85,6 +85,37 @@ void TestRefusedDllsAreListedAsContext()
   }
 }
 
+// Audit F17: the image base alone does not prove the log is this session's;
+// the same executable can map there again within one boot. "This session" is
+// said only for a log written after the game started.
+void TestThisSessionOnlyWhenTheLogTimeWasChecked()
+{
+  for (const auto lang : { i18n::Language::kKorean, i18n::Language::kEnglish }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const std::wstring_view thisSession = en ? L"in this session" : L"이번 실행에서";
+    const std::wstring_view sameBase = en ? L"not confirmed by time" : L"시각으로 확인 못 함";
+
+    auto checked = MakeCrashWithSkseLog("matched", 2);
+    checked.skse_log.time_checked = true;
+    BuildEvidenceAndSummary(checked, lang);
+    const auto* checkedEvidence = FindEvidence(checked, en ? L"SKSE did not load 2" : L"로드하지 못한 DLL 2개");
+    Require(checkedEvidence && checkedEvidence->title.find(thisSession) != std::wstring::npos,
+      "a log written after the start is this session's");
+    Require(checked.recommendations.back().find(thisSession) != std::wstring::npos,
+      "the recommendation says this session");
+
+    auto baseOnly = MakeCrashWithSkseLog("matched", 2);
+    BuildEvidenceAndSummary(baseOnly, lang);
+    const auto* baseOnlyEvidence = FindEvidence(baseOnly, en ? L"SKSE did not load 2" : L"로드하지 못한 DLL 2개");
+    Require(baseOnlyEvidence && baseOnlyEvidence->title.find(thisSession) == std::wstring::npos &&
+        baseOnlyEvidence->title.find(sameBase) != std::wstring::npos,
+      "a log matched only by image base is not called this session's");
+    Require(baseOnly.recommendations.back().find(thisSession) == std::wstring::npos &&
+        baseOnly.recommendations.back().find(sameBase) != std::wstring::npos,
+      "nor in the recommendation");
+  }
+}
+
 void TestNothingWithoutAMatchedLogOrRefusals()
 {
   for (const auto* status : { "no_matching_log", "not_found", "" }) {
@@ -108,6 +139,7 @@ int main()
 {
   try {
     TestRefusedDllsAreListedAsContext();
+    TestThisSessionOnlyWhenTheLogTimeWasChecked();
     TestNothingWithoutAMatchedLogOrRefusals();
     std::puts("skse log report tests passed");
     return 0;

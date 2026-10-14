@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,10 @@ struct SkseLogScan
   // matched / no_matching_log / not_found / no_image_base / error; empty when not collected
   std::string status;
   SkseLogSummary summary;  // filled when status == "matched"
+  // The matched log was written after the game process started. Without the
+  // start time only the image base ties it to this session, and the same
+  // executable can map at the same base again within one boot (audit F17).
+  bool time_checked = false;
 };
 
 // The MO2 instance and profile the game ran under, read while it is still
@@ -91,12 +96,22 @@ std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid);
 // Base address of the process executable; 0 when it cannot be read.
 std::uint64_t QueryMainModuleBaseBestEffort(std::uint32_t pid);
 
+// When the process was created; empty when it cannot be read. Works on the
+// handle of a process that has already exited.
+std::optional<std::filesystem::file_time_type> QueryProcessStartTimeBestEffort(HANDLE process);
+
 // Finds the skse64.log written by the game session whose executable is mapped
-// at gameImageBase. Only a log from that session is returned, so a log left
-// over from an earlier launch is never reported as current.
-SkseLogScan CollectSkseLogBestEffort(std::uint64_t gameImageBase);
+// at gameImageBase and, when processStart is known, that was written after the
+// process started. SKSE rewrites the log from inside the game process, so an
+// older one is left over from an earlier launch, even at the same base.
+SkseLogScan CollectSkseLogBestEffort(
+  std::uint64_t gameImageBase,
+  std::optional<std::filesystem::file_time_type> processStart = std::nullopt);
 // The matching step of CollectSkseLogBestEffort over explicit log files.
-SkseLogScan MatchSkseLogFiles(const std::vector<std::filesystem::path>& logPaths, std::uint64_t gameImageBase);
+SkseLogScan MatchSkseLogFiles(
+  const std::vector<std::filesystem::path>& logPaths,
+  std::uint64_t gameImageBase,
+  std::optional<std::filesystem::file_time_type> processStart = std::nullopt);
 
 PluginScanResult ScanPlugins(
   const std::filesystem::path& gameExeDir,

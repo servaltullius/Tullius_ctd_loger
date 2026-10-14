@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <climits>
 #include <cstring>
 #include <cwctype>
@@ -632,7 +633,23 @@ std::uint64_t QueryMainModuleBaseBestEffort(std::uint32_t pid)
   return base;
 }
 
-SkseLogScan CollectSkseLogBestEffort(std::uint64_t gameImageBase)
+std::optional<std::filesystem::file_time_type> QueryProcessStartTimeBestEffort(HANDLE process)
+{
+  FILETIME created{}, exited{}, kernel{}, user{};
+  if (!process || !GetProcessTimes(process, &created, &exited, &kernel, &user)) {
+    return std::nullopt;
+  }
+  // MSVC's file_clock counts 100 ns ticks from 1601-01-01, as FILETIME does.
+  const auto ticks = (static_cast<std::int64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+  if (ticks == 0) {
+    return std::nullopt;
+  }
+  return std::filesystem::file_time_type(std::filesystem::file_time_type::duration(ticks));
+}
+
+SkseLogScan CollectSkseLogBestEffort(
+  std::uint64_t gameImageBase,
+  std::optional<std::filesystem::file_time_type> processStart)
 {
   // SKSE writes to Documents\My Games\<game folder>\SKSE\skse64.log. The game
   // folder name differs by store ("Skyrim Special Edition", "... GOG", ...).
@@ -664,10 +681,13 @@ SkseLogScan CollectSkseLogBestEffort(std::uint64_t gameImageBase)
       }
     }
   }
-  return MatchSkseLogFiles(logPaths, gameImageBase);
+  return MatchSkseLogFiles(logPaths, gameImageBase, processStart);
 }
 
-SkseLogScan MatchSkseLogFiles(const std::vector<std::filesystem::path>& logPaths, std::uint64_t gameImageBase)
+SkseLogScan MatchSkseLogFiles(
+  const std::vector<std::filesystem::path>& logPaths,
+  std::uint64_t gameImageBase,
+  std::optional<std::filesystem::file_time_type> processStart)
 {
   SkseLogScan scan{};
   if (gameImageBase == 0) {
@@ -693,6 +713,13 @@ SkseLogScan MatchSkseLogFiles(const std::vector<std::filesystem::path>& logPaths
     if (ec || (scan.status == "matched" && writeTime <= newestMatch)) {
       continue;
     }
+    // SKSE writes this log from inside the game process, so a log last written
+    // before the process started belongs to an earlier launch whatever its
+    // image base. The margin covers file time granularity.
+    constexpr auto kStartMargin = std::chrono::seconds(2);
+    if (processStart && writeTime + kStartMargin < *processStart) {
+      continue;
+    }
     std::ifstream in(logPath, std::ios::binary);
     if (!in.is_open()) {
       continue;
@@ -704,6 +731,7 @@ SkseLogScan MatchSkseLogFiles(const std::vector<std::filesystem::path>& logPaths
     if (summary.recognized && summary.image_base == gameImageBase) {
       scan.status = "matched";
       scan.summary = std::move(summary);
+      scan.time_checked = processStart.has_value();
       newestMatch = writeTime;
     }
   }
@@ -938,6 +966,7 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
     nlohmann::json s = nlohmann::json::object();
     s["status"] = result.skse_log.status;
     if (result.skse_log.status == "matched") {
+      s["time_checked"] = result.skse_log.time_checked;
       s["skse_version"] = log.skse_version;
       s["checked_count"] = log.checked_count;
       s["loaded_count"] = log.loaded_count;
