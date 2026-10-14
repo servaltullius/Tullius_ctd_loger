@@ -1038,6 +1038,11 @@ void TestCrashLoggerFrameConsensusContracts()
     "out->crash_logger_location_mismatch = true;",
     "out->crash_logger_pairing_ambiguous = true;",
     "A location mismatch must take the ambiguous-pairing path for suspects and candidates.");
+  AssertOrdered(
+    analyzerSrc,
+    "bool CrashLoggerLogDescribesThisCrash(const AnalysisResult& out)",
+    "!crashlogger_core::CrashLoggerLocationContradictsDumpFault(",
+    "The signature gate must share the location check (path-qualified modules, Crash Logger self-faults).");
 }
 
 void TestFreezeAnalysisSourceContracts()

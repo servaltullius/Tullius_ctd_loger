@@ -49,7 +49,7 @@ internal sealed partial class MainWindowViewModel
         {
             var primaryCandidate = summary.ActionableCandidates[0];
             var readingPathLabel = IsStrongStandaloneCallstackCandidate(primaryCandidate)
-                ? (_isKorean ? "Tullius callstack" : "Tullius callstack")
+                ? (_isKorean ? "Tullius 콜스택" : "Tullius callstack")
                 : (_isKorean ? "CrashLogger 기준" : "CrashLogger context");
             lines.Add((_isKorean ? "행동 우선 후보: " : "Actionable candidate: ") + BuildPrimaryCandidateValue(summary));
             lines.Add((_isKorean ? "근거 합의: " : "Evidence agreement: ") + BuildAgreementSummary(summary));
@@ -62,7 +62,7 @@ internal sealed partial class MainWindowViewModel
                 lines.Add((_isKorean ? "충돌 세부: " : "Conflict detail: ") + BuildConflictCandidateLine(summary.ActionableCandidates[1]));
             }
         }
-        else if (HasCrashLoggerFrameSignal(summary) || summary.CrashLoggerRefs.Count > 0)
+        else if (HasCrashLoggerFrameSignal(summary) || summary.CulpritRef is not null)
         {
             lines.Add((_isKorean ? "CrashLogger 기준: " : "CrashLogger context: ") + BuildCrashLoggerContextSummary(summary));
             lines.Add((_isKorean ? "다음 조치: " : "Next action: ") + BuildNextActionSummary(summary));
@@ -135,7 +135,7 @@ internal sealed partial class MainWindowViewModel
         {
             var primaryCandidate = summary.ActionableCandidates[0];
             var readingPathLabel = IsStrongStandaloneCallstackCandidate(primaryCandidate)
-                ? (_isKorean ? "Tullius callstack" : "Tullius callstack")
+                ? (_isKorean ? "Tullius 콜스택" : "Tullius callstack")
                 : (_isKorean ? "CrashLogger 기준" : "CrashLogger context");
             lines.Add($"📌 {DescribeActionableCandidateLabel(primaryCandidate)}: {BuildPrimaryCandidateValue(summary)}");
             lines.Add($"🧭 {(_isKorean ? "근거 합의" : "Evidence agreement")}: {BuildAgreementSummary(summary)}");
@@ -147,9 +147,8 @@ internal sealed partial class MainWindowViewModel
                 lines.Add($"⚖️ {BuildConflictCandidateLine(summary.ActionableCandidates[1])}");
             }
         }
-        else if (summary.CrashLoggerRefs.Count > 0)
+        else if (summary.CulpritRef is { } topEspRef)
         {
-            var topEspRef = summary.CrashLoggerRefs[0];
             var espLabel = !string.IsNullOrWhiteSpace(topEspRef.FormId)
                 ? $"{topEspRef.EspName} [{topEspRef.FormId}]"
                 : topEspRef.EspName;

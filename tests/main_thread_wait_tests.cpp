@@ -274,6 +274,27 @@ void TestBlockedGameThreadIsFound()
   assert(wait.blocked_mod_name == L"CrashTester (dev test)" && wait.blocked_state == "waiting_in_plugin");
   assert(wait.blocked_top == L"KERNELBASE.dll!SleepEx" && wait.blocked_thread_count == 1u);
 
+  // The same freeze re-analyzed after Hitch Hunter and CrashTester were
+  // rebuilt (2026-10-14): both walks stop at the plugin frame. Hitch Hunter's
+  // sync wait can no longer be shown to be its idle loop, and its shallower
+  // plugin frame used to win the tie. It must not be the lead.
+  auto rebuilt = EngineSyncWait();
+  FindBlockedGameThread(rebuilt, {
+    Thread(9644, {
+      System(L"ntdll.dll", L"NtWaitForSingleObject"),
+      System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf),
+      Plugin(L"HitchHunter.dll", L"Hitch Hunter And Fixes"),
+    }),
+    Thread(40400, {
+      System(L"ntdll.dll", L"ZwDelayExecution"),
+      System(L"ntdll.dll", L"RtlDelayExecution", 0x34),
+      System(L"KERNELBASE.dll", L"SleepEx", 0x91),
+      Plugin(L"CrashTester.dll", L"CrashTester (dev test)"),
+    }),
+  });
+  assert(rebuilt.blocked_thread_tid == 40400u && rebuilt.blocked_module == L"CrashTester.dll");
+  assert(rebuilt.blocked_thread_count == 1u);
+
   // Freeze 2: engine code the plugin called, spinning on a lock.
   auto spin = EngineSyncWait();
   FindBlockedGameThread(spin, {
@@ -337,6 +358,18 @@ void TestBlockedGameThreadIsNotInvented()
   auto idle = EngineSyncWait();
   FindBlockedGameThread(idle, { IdleHookedThread(9644) });
   assert(!HasBlockedGameThread(idle));
+  // Nor one whose walk stops at the plugin with a sync wait on top: it cannot
+  // be told apart from that idle loop.
+  auto truncated = EngineSyncWait();
+  FindBlockedGameThread(truncated, {
+    Thread(9644, {
+      System(L"ntdll.dll", L"NtWaitForSingleObject"),
+      System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf),
+      Plugin(L"HitchHunter.dll", L"Hitch Hunter And Fixes"),
+      GameExe(),
+    }),
+  });
+  assert(!HasBlockedGameThread(truncated));
 
   // The SKSE runtime, hook frameworks, the graphics stack and SkyrimDiag
   // itself are not plugin code here.

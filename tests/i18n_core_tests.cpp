@@ -42,6 +42,9 @@ static void Test_ConfidenceLabels()
   assert(ConfidenceLabel(Language::kKorean, ConfidenceLevel::kHigh) == L"높음");
   assert(ConfidenceLabel(Language::kKorean, ConfidenceLevel::kMedium) == L"중간");
   assert(ConfidenceLabel(Language::kKorean, ConfidenceLevel::kLow) == L"낮음");
+
+  assert(ConfidenceLabel(Language::kEnglish, ConfidenceLevel::kUnknown) == L"Unknown");
+  assert(ConfidenceLabel(Language::kKorean, ConfidenceLevel::kUnknown) == L"(알 수 없음)");
 }
 
 int main()

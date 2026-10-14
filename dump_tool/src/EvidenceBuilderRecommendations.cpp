@@ -748,8 +748,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if (!hasActionableCandidates && !r.crash_logger_object_refs.empty()) {
-    const auto& topRef = r.crash_logger_object_refs[0];
+  // A cell or worldspace only says where the player was; never advise
+  // disabling the location mod on that alone (see FirstCulpritObjectRef).
+  const auto* culpritRef = FirstCulpritObjectRef(r);
+  if (!hasActionableCandidates && culpritRef) {
+    const auto& topRef = *culpritRef;
     std::wstring espDesc = topRef.esp_name;
     if (!topRef.form_id.empty()) {
       espDesc += L" [" + topRef.form_id + L"]";
@@ -805,7 +808,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : L"[유력 후보] 이 리포트 파일(*_SkyrimDiagReport.txt)과 덤프(*.dmp)를 모드 제작자에게 첨부");
     }
   } else if (allowTopSuspectActionRecommendations && hasModule && isGameExe) {
-    if (!r.crash_logger_object_refs.empty()) {
+    if (FirstCulpritObjectRef(r)) {
       // ESP/ESM reference is the primary clue for EXE crashes — already emitted above as [ESP/ESM]
       if (hasStackCandidate && !r.suspects_from_stackwalk) {
         // Stack scan suspect exists but is weak — note it as supplementary

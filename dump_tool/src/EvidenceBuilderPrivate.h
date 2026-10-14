@@ -100,6 +100,11 @@ i18n::ConfidenceLevel CapForMo2ProvidersSource(const AnalysisResult& r, i18n::Co
 
 std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool en);
 
+// The most relevant Crash Logger object ref that can name a culprit plugin.
+// Cells and worldspaces only say where the player was, so they are skipped
+// here as they are for candidates and history; evidence still lists them.
+const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const AnalysisResult& r);
+
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
 bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx);

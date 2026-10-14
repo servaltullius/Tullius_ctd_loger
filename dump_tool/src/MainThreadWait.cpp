@@ -258,6 +258,10 @@ std::wstring FrameName(const ModalStackFrame& frame)
 // the plugin's hook, and a wait on a sync object. That is the thread idling
 // (Hitch Hunter's hooked game thread looked like this in every freeze of the
 // 2026-10-12 crash test), not work the main thread is waiting for.
+// A walk that stops below the plugin without leaving the game's thread
+// function (no unwind data for that plugin build, typically an old dump
+// re-analyzed after a mod update) cannot be told apart from that idle loop,
+// so it counts as one: the freeze is not pinned on a thread that may be idle.
 bool IsPluginOwnedIdleLoop(const std::vector<ModalStackFrame>& frames, std::size_t pluginIndex)
 {
   bool syncWaitOnTop = false;
@@ -281,7 +285,9 @@ bool IsPluginOwnedIdleLoop(const std::vector<ModalStackFrame>& frames, std::size
       return false;
     }
   }
-  return false;  // the walk did not reach the thread start
+  // The walk stopped before the thread start with only the idle-loop shape
+  // seen so far (see above).
+  return true;
 }
 
 struct BlockedCandidate

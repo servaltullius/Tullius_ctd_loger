@@ -363,24 +363,38 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       : (owner + L"(으)로 가는 후킹이 게임 실행 중에 설치되던 순간, 다른 스레드가 바뀐 호출을 지나다 아직 다 써지지 않은 "
          L"점프 코드(int3)를 실행했습니다. 그 점프가 가는 모드가 대개 후킹을 설치한 모드입니다. (신뢰도: 높음)");
   } else if (hasModule && !isSystem && !isGameExe && ctx.isHookFramework) {
+    // CrashLogger is on the hook-framework list, but a fault inside it is a
+    // secondary fault from its memory probes while it reported another crash
+    // (the [Interpretation] recommendation says the same).
+    const std::wstring faultLower = minidump::WideLower(r.fault_module_filename);
+    const bool faultIsCrashLogger = faultLower == L"crashlogger.dll" || faultLower == L"crashloggersse.dll";
+    const std::wstring frameworkLabel = faultIsCrashLogger
+      ? (en ? L"Crash Logger itself" : L"Crash Logger 자체")
+      : (en ? L"known hook framework" : L"알려진 훅 프레임워크");
     if (topCandidateIsActionableNonHookDll && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
       summary = en
-        ? (L"Crash is reported in " + who + L" (known hook framework), but the paired CrashLogger log's " +
+        ? (L"Crash is reported in " + who + L" (" + frameworkLabel + L"), but the paired CrashLogger log's " +
             frameSupport + L" points to DLL candidate " + candidateName +
             L". Check this candidate first, but do not treat it as a confirmed root cause. (Confidence: " +
             topCandidateConf + L")")
-        : (L"크래시 덤프 위치는 " + who + L"(알려진 훅 프레임워크)이지만, 짝지어진 CrashLogger 로그의 " +
+        : (L"크래시 덤프 위치는 " + who + L"(" + frameworkLabel + L")이지만, 짝지어진 CrashLogger 로그의 " +
             frameSupport + L"이 DLL 후보 " + candidateName +
             L"을(를) 가리킵니다. 이 후보를 먼저 점검하되 확정 원인으로 단정하지 마세요. (신뢰도: " +
             topCandidateConf + L")");
     } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in " + who + L" (known hook framework), but " + suspectBasis + L" points to " + nonHookSuspectWho +
+        ? (L"Crash is reported in " + who + L" (" + frameworkLabel + L"), but " + suspectBasis + L" points to " + nonHookSuspectWho +
             L". (Confidence: " + nonHookSuspectConf + L")")
-        : (L"크래시 위치가 " + who + L"(알려진 훅 프레임워크)로 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
+        : (L"크래시 위치가 " + who + L"(" + frameworkLabel + L")로 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
             L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
+    } else if (faultIsCrashLogger) {
+      summary = en
+        ? (L"Crash is reported in " + who + L", most likely a secondary fault from Crash Logger probing memory while it reported another crash. "
+           L"Judge the crash by the original exception and call stack in the paired Crash Logger log. (Confidence: Low)")
+        : (L"크래시 위치가 " + who + L"로 보고되었지만, Crash Logger가 다른 크래시를 기록하면서 메모리를 조사하다 낸 2차 예외일 가능성이 큽니다. "
+           L"짝지어진 Crash Logger 로그의 원래 예외와 콜스택을 기준으로 판단하세요. (신뢰도: 낮음)");
     } else {
       summary = en
         ? (L"Crash is reported in " + who + L" (known hook framework). This is often a victim location, so avoid treating it as a standalone root cause. (Confidence: Low)")
@@ -614,7 +628,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : L"크래시가 Windows 시스템 DLL에서 보고되었습니다. 실제 원인은 다른 모드/DLL일 수 있습니다. (신뢰도: 낮음)";
     }
   } else if (hasModule && isGameExe) {
-    const bool hasObjectRefs = !r.crash_logger_object_refs.empty();
+    // A cell or worldspace only says where the player was (see FirstCulpritObjectRef).
+    const auto* culpritRef = FirstCulpritObjectRef(r);
+    const bool hasObjectRefs = culpritRef != nullptr;
     const bool suspectsAreStackwalk = r.suspects_from_stackwalk;
 
     if (topCandidate && topCandidate->status_id == "conflicting" && secondCandidate) {
@@ -691,7 +707,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     // Priority 1: stackwalk-based non-hook suspect (high reliability)
     } else if (hasNonHookSuspect && suspectsAreStackwalk && !nonHookSuspectWho.empty()) {
       if (hasObjectRefs) {
-        const auto& topRef = r.crash_logger_object_refs[0];
+        const auto& topRef = *culpritRef;
         summary = en
           ? (L"Crash is reported in the game executable. Callstack points to " + nonHookSuspectWho +
               L", while processing " + topRef.esp_name + L" object. (Confidence: " + nonHookSuspectConf + L")")
@@ -706,7 +722,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       }
     // Priority 2: CrashLogger ESP/ESM object refs (more actionable than stack scan)
     } else if (hasObjectRefs) {
-      const auto& topRef = r.crash_logger_object_refs[0];
+      const auto& topRef = *culpritRef;
       if (hasSuspect && !suspectsAreStackwalk && !suspectWho.empty()) {
         // Stack scan suspect exists but is low reliability — mention as supplementary
         summary = en

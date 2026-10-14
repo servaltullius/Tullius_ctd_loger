@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
@@ -67,13 +68,17 @@ std::string BuildReportText(
         : (L"Crash Logger 프레임 우선(유력 DLL 프레임 연속 x" + std::to_wstring(r.crash_logger_probable_streak_length) + L"): " +
            r.crash_logger_probable_streak_module);
     }
-    if (!r.crash_logger_object_refs.empty()) {
-      const auto& topRef = r.crash_logger_object_refs.front();
+    // Cells and worldspaces only say where the player was.
+    for (const auto& topRef : r.crash_logger_object_refs) {
+      if (crashlogger_core::IsLocationObjectTypeAscii(WideToUtf8(topRef.best_object_type))) {
+        continue;
+      }
       if (!topRef.esp_name.empty()) {
         return en
           ? (L"Crash Logger object ref: " + topRef.esp_name)
           : (L"Crash Logger 오브젝트 참조: " + topRef.esp_name);
       }
+      break;
     }
     return {};
   };

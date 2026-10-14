@@ -255,6 +255,35 @@ void AddStackSignals(const AnalysisResult& r, bool en, std::vector<CandidateSign
   }
 }
 
+// ADR-0009 addendum: when the main thread waited in the engine for a game
+// thread that was inside a plugin's code, that plugin leads. It is the only
+// stack candidate; the main thread's own call path stays out (bystanders).
+void AddBlockedGameThreadSignal(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  if (!out || !HasBlockedGameThread(r.main_thread_wait)) {
+    return;
+  }
+  const auto& wait = r.main_thread_wait;
+  const std::wstring name = !wait.blocked_mod_name.empty() ? wait.blocked_mod_name : wait.blocked_module;
+  CandidateSignal signal{};
+  signal.family_id = "actionable_stack";
+  signal.candidate_key = CanonicalCandidateKey(name);
+  signal.display_name = name;
+  signal.mod_name = wait.blocked_mod_name;
+  signal.module_filename = wait.blocked_module;
+  signal.detail = en
+    ? (L"The game thread the main thread waited for was inside " + name)
+    : (L"메인 스레드가 기다린 게임 스레드가 " + name + L" 코드 안에 있었음");
+  signal.weight = policy::ActionableStackSignalWeight(
+    r.suspects_from_stackwalk,
+    r.symbol_runtime_degraded,
+    /*suspectAtLeastMedium=*/true,
+    /*firstVisibleSuspect=*/true);
+  if (!signal.candidate_key.empty()) {
+    out->push_back(std::move(signal));
+  }
+}
+
 void AddResourceSignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
 {
   if (!out) {
@@ -619,6 +648,8 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   // thread (a WCT cycle member) still count.
   if (!IsBystanderWait(r.main_thread_wait) || !r.suspects_from_main_thread) {
     AddStackSignals(r, en, &signals);
+  } else {
+    AddBlockedGameThreadSignal(r, en, &signals);
   }
   AddHangThreadGroupSignal(r, en, &signals);
   AddResourceSignals(r, en, &signals);
