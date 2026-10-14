@@ -132,6 +132,20 @@ if(WIN32)
     COMMAND skydiag_freeze_context_report_tests
   )
 
+  add_executable(skydiag_mo2_providers_source_tests
+    mo2_providers_source_tests.cpp
+  )
+  target_include_directories(skydiag_mo2_providers_source_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_mo2_providers_source_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_mo2_providers_source_tests
+    COMMAND skydiag_mo2_providers_source_tests
+  )
+
   add_executable(skydiag_memory_snapshot_tests
     memory_snapshot_tests.cpp
   )
@@ -961,6 +975,7 @@ target_include_directories(skydiag_mo2_index_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
   "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
+target_link_libraries(skydiag_mo2_index_tests PRIVATE nlohmann_json::nlohmann_json)
 
 add_test(NAME skydiag_mo2_index_tests COMMAND skydiag_mo2_index_tests)
 

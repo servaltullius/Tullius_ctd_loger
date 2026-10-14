@@ -266,12 +266,10 @@ void ParseBlackboxStream(
   }
 }
 
-void IntegratePluginScan(
+void LoadPluginScanJson(
   const std::wstring& dumpPath,
-  const std::vector<ModuleInfo>& allModules,
   void* dumpBase,
   std::uint64_t dumpSize,
-  const AnalyzeOptions& opt,
   AnalysisResult& out)
 {
   void* pluginPtr = nullptr;
@@ -289,6 +287,36 @@ void IntegratePluginScan(
       out.has_plugin_scan = true;
       out.plugin_scan_json_utf8 = std::move(sidecarJson);
     }
+  }
+}
+
+std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out)
+{
+  std::optional<Mo2Index> idx;
+  if (auto captured = TryParseCapturedMo2State(out.plugin_scan_json_utf8)) {
+    idx = BuildMo2IndexFromCapture(*captured);
+  } else {
+    // A dump captured before the helper recorded MO2 state, or state it could
+    // not read: what is on disk now may be another profile or changed mods.
+    idx = TryBuildMo2IndexFromModulePaths(modulePaths);
+  }
+  if (idx) {
+    out.mo2_providers_source = idx->source == Mo2Index::Source::kCrashTime ? "crash_time" : "analysis_time";
+    out.mo2_profile_name = idx->profileName;
+  }
+  return idx;
+}
+
+void IntegratePluginScan(
+  const std::wstring& dumpPath,
+  const std::vector<ModuleInfo>& allModules,
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const AnalyzeOptions& opt,
+  AnalysisResult& out)
+{
+  if (!out.has_plugin_scan) {
+    LoadPluginScanJson(dumpPath, dumpBase, dumpSize, out);
   }
 
   ParsedPluginScan parsedPluginScan{};

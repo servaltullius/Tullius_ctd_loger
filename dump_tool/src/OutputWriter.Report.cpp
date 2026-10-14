@@ -476,6 +476,15 @@ std::string BuildReportText(
   }
   if (!r.resources.empty()) {
     rpt << (en ? "\nRecent resources (.nif/.hkx/.tri):\n" : "\n최근 리소스(.nif/.hkx/.tri):\n");
+    if (r.mo2_providers_source == "crash_time") {
+      rpt << (en ? "  providers: MO2 profile at the time of the crash" : "  providers: 크래시 당시의 MO2 프로필 기준");
+      rpt << (r.mo2_profile_name.empty() ? "" : " (" + WideToUtf8(r.mo2_profile_name) + ")") << "\n";
+    } else if (r.mo2_providers_source == "analysis_time") {
+      rpt << (en
+        ? "  providers: candidates from the MO2 installation at analysis time; the crash-time profile or mods may differ"
+        : "  providers: 분석 시점의 MO2 설치 기준 후보 (크래시 당시 프로필이나 모드와 다를 수 있음)");
+      rpt << (r.mo2_profile_name.empty() ? "" : " (" + WideToUtf8(r.mo2_profile_name) + ")") << "\n";
+    }
     for (const auto& rr : r.resources) {
       rpt << "- t_ms=" << rr.t_ms << " tid=" << rr.tid << " [" << WideToUtf8(rr.kind) << "] "
           << WideToUtf8(MaybeRedactPath(rr.path, redactPaths));

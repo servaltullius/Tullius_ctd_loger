@@ -92,6 +92,11 @@ std::vector<std::wstring> InferProviderScoresFromResources(const std::vector<con
 std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(
   const std::vector<EventRow>& events,
   const std::vector<ResourceRow>& resources);
+// Appended to evidence naming MO2 providers that were read from disk at
+// analysis time instead of captured with the dump (audit F05); empty otherwise.
+std::wstring Mo2ProvidersCaveat(const AnalysisResult& r, bool en);
+// Provider-based evidence is not trusted beyond kLow without the crash-time profile.
+i18n::ConfidenceLevel CapForMo2ProvidersSource(const AnalysisResult& r, i18n::ConfidenceLevel level);
 
 std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool en);
 

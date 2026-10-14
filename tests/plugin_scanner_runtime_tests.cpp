@@ -101,6 +101,61 @@ void TestImplicitPluginsAreActiveUnderMo2()
     "a plugin both in Skyrim.ccc and plugins.txt must be listed once");
 }
 
+// Audit F05: the analyzer used whatever profile MO2 had on disk when a dump
+// was analyzed. The helper now records the instance, the profile and its
+// enabled mods while the game runs, honouring MO2's [Settings] directories.
+void TestMo2StateIsCapturedWithConfiguredDirectories()
+{
+  const auto ini = skydiag::helper::ParseMo2Ini(
+    "\xEF\xBB\xBF[General]\nselected_profile=@ByteArray(Caf\\xe9)\n"
+    "[Settings]\nbase_directory=\"D:\\\\Mod \\\"Lists\\\"\"\nmod_directory=%BASE_DIR%/caf\\x00e9\n"
+    "[Other]\nprofiles_directory=ignored\n");
+  Require(ini.selected_profile == "Caf\xE9", "an @ByteArray \\xNN escape is one byte");
+  Require(ini.base_directory == "D:\\Mod \"Lists\"", "quoted values and \\\\ \\\" escapes decode");
+  Require(ini.mod_directory == "%BASE_DIR%/caf\xC3\xA9", "a \\xNNNN escape is a character, written as UTF-8");
+  Require(ini.profiles_directory.empty(), "only keys of the [Settings] section count");
+
+  const auto root = std::filesystem::temp_directory_path() /
+    (L"skydiag_plugin_scanner_mo2_" + std::to_wstring(GetCurrentProcessId()));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  const auto instance = root / L"instance";
+  std::string iniText = "[General]\nselected_profile=@ByteArray(Crash Profile)\n[Settings]\nbase_directory=";
+  iniText += instance.generic_string();
+  iniText += "\nprofiles_directory=%BASE_DIR%/my profiles\nmod_directory=%BASE_DIR%\\\\my mods\n";
+  WriteText(root / L"ModOrganizer.ini", iniText);
+  // The default profiles folder exists too; the configured one must be used.
+  WriteText(root / L"profiles" / L"Crash Profile" / L"plugins.txt", "*Wrong.esp\n");
+  const auto profile = instance / L"my profiles" / L"Crash Profile";
+  WriteText(profile / L"plugins.txt", "*Mod.esp\n");
+  WriteText(profile / L"modlist.txt", "+Winner\n-Disabled\n*DLC: Dawnguard\n+Low\n+winner\n");
+  WriteText(root / L"Data" / L"Mod.esp", "");
+
+  const auto result = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+  const auto json = nlohmann::json::parse(SerializePluginScanResult(result));
+
+  // A selected profile that no longer exists is reported, not guessed.
+  WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Gone)\n");
+  const auto gone = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+  std::filesystem::remove_all(root, ec);
+
+  Require(result.mo2.status == "captured", "the MO2 state must be captured");
+  Require(result.mo2.profile == "Crash Profile", "the selected profile is recorded");
+  Require(
+    result.mo2.enabled_mods == std::vector<std::string>({ "Winner", "Low" }),
+    "only enabled mods are kept, winner first and without duplicates");
+  Require(
+    std::filesystem::u8path(result.mo2.mods_dir) == (instance / L"my mods").lexically_normal(),
+    "%BASE_DIR% and Qt escapes resolve in mod_directory");
+  Require(result.plugins_source == "mo2_profile", "plugins.txt comes from the configured profiles directory");
+  Require(Contains(ActiveNames(result), "Mod.esp") && !Contains(ActiveNames(result), "Wrong.esp"),
+    "the default profiles folder must not be read when another is configured");
+  Require(json.at("mo2").at("status") == "captured" && json.at("mo2").at("enabled_mods").size() == 2u,
+    "the capture is serialized into the scan");
+  Require(gone.mo2.status == "no_profile" && gone.mo2.enabled_mods.empty(), "a missing profile is not guessed");
+}
+
 // plugins.txt and Skyrim.ccc are written in the ANSI code page, not UTF-8. A
 // name like "Caf\xE9.esp" threw out of the scan (u8path, json dump) and, with
 // no catch above it, took the helper and the hang dump down with it.
@@ -223,6 +278,7 @@ int main()
     TestImplicitPluginsAreActiveUnderMo2();
     TestSkseLogIsMatchedByImageBase();
     TestAnsiPluginNamesDoNotThrow();
+    TestMo2StateIsCapturedWithConfiguredDirectories();
     std::puts("plugin scanner runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {

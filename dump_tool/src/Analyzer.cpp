@@ -462,7 +462,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       modulePaths.push_back(m.path);
     }
   }
-  const auto mo2Index = TryBuildMo2IndexFromModulePaths(modulePaths);
+  LoadPluginScanJson(dumpPath, dumpBase, dumpSize, out);
+  const auto mo2Index = BuildMo2IndexForDump(modulePaths, out);
   out.problematic_modules = FindProblematicModules(allModules);
 
   // Exception info + fault module

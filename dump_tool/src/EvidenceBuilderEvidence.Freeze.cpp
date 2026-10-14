@@ -42,7 +42,7 @@ void BuildHitchAndFreezeEvidence(AnalysisResult& r, i18n::Language lang, const E
         s.title = en
           ? L"Mods providing resources near hitch events (correlation)"
           : L"히치 시점 근처 리소스를 제공한 모드(상관분석)";
-        s.details = JoinList(suspects, 5, L", ");
+        s.details = JoinList(suspects, 5, L", ") + Mo2ProvidersCaveat(r, en);
         r.evidence.push_back(std::move(s));
       }
     }

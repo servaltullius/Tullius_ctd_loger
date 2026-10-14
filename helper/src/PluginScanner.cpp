@@ -90,17 +90,37 @@ bool EndsWithAsciiInsensitive(std::string_view value, std::string_view suffix)
   return AsciiLower(value.substr(value.size() - suffix.size())) == AsciiLower(suffix);
 }
 
+void AppendUtf8(std::string& out, std::uint32_t cp)
+{
+  if (cp < 0x80u) {
+    out.push_back(static_cast<char>(cp));
+  } else if (cp < 0x800u) {
+    out.push_back(static_cast<char>(0xC0u | (cp >> 6)));
+    out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+  } else {
+    out.push_back(static_cast<char>(0xE0u | (cp >> 12)));
+    out.push_back(static_cast<char>(0x80u | ((cp >> 6) & 0x3Fu)));
+    out.push_back(static_cast<char>(0x80u | (cp & 0x3Fu)));
+  }
+}
+
+// A value as QSettings writes it to an INI file: QByteArray values are wrapped
+// in @ByteArray(...), values with special characters are quoted, and
+// backslashes, quotes and characters it does not write as-is are escaped
+// (\\, \", \xNNNN; inside @ByteArray \xNN is one byte).
 std::string ParseSelectedProfileValue(std::string raw)
 {
   StripUtf8BomInPlace(raw);
   TrimAsciiInPlace(raw);
 
+  bool byteArray = false;
   constexpr std::string_view kByteArrayPrefix = "@ByteArray(";
   if (raw.size() >= kByteArrayPrefix.size() + 1 &&
       raw.rfind(kByteArrayPrefix, 0) == 0 &&
       raw.back() == ')') {
     raw = raw.substr(kByteArrayPrefix.size(), raw.size() - kByteArrayPrefix.size() - 1);
     TrimAsciiInPlace(raw);
+    byteArray = true;
   }
 
   if (raw.size() >= 2) {
@@ -112,7 +132,43 @@ std::string ParseSelectedProfileValue(std::string raw)
     }
   }
 
-  return raw;
+  std::string out;
+  out.reserve(raw.size());
+  for (std::size_t i = 0; i < raw.size(); ++i) {
+    if (raw[i] != '\\' || i + 1 >= raw.size()) {
+      out.push_back(raw[i]);
+      continue;
+    }
+    const char next = raw[++i];
+    if (next == 'x' || next == 'X') {
+      std::uint32_t value = 0;
+      std::size_t digits = 0;
+      while (digits < (byteArray ? 2u : 4u) && i + 1 < raw.size() && std::isxdigit(static_cast<unsigned char>(raw[i + 1]))) {
+        value = value * 16u + static_cast<std::uint32_t>(std::stoi(std::string(1, raw[++i]), nullptr, 16));
+        ++digits;
+      }
+      if (digits == 0) {
+        out += "\\x";
+      } else if (byteArray) {
+        out.push_back(static_cast<char>(value & 0xFFu));
+      } else {
+        AppendUtf8(out, value);
+      }
+      continue;
+    }
+    switch (next) {
+      case '\\': out.push_back('\\'); break;
+      case '"': out.push_back('"'); break;
+      case 'n': out.push_back('\n'); break;
+      case 'r': out.push_back('\r'); break;
+      case 't': out.push_back('\t'); break;
+      default:
+        out.push_back('\\');
+        out.push_back(next);
+        break;
+    }
+  }
+  return out;
 }
 
 std::filesystem::path ResolveGameExePathFromDir(const std::filesystem::path& gameExeDir)
@@ -235,7 +291,138 @@ std::string AnsiToUtf8IfNeeded(const std::string& text)
   return utf8;
 }
 
+std::string PathToUtf8(const std::filesystem::path& path)
+{
+  const auto u8 = path.u8string();
+  return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+}
+
+bool ReadWholeFile(const std::filesystem::path& path, std::string* out)
+{
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    return false;
+  }
+  *out = std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return true;
+}
+
+// A global (non-portable) MO2 instance keeps its ModOrganizer.ini under
+// %LOCALAPPDATA%\ModOrganizer\<instance>, not next to ModOrganizer.exe; MO2
+// records the instance it runs as CurrentInstance (empty for portable).
+std::filesystem::path FindGlobalMo2InstanceIni()
+{
+  wchar_t name[512]{};
+  DWORD bytes = sizeof(name);
+  if (RegGetValueW(
+        HKEY_CURRENT_USER, L"Software\\Mod Organizer Team\\Mod Organizer", L"CurrentInstance", RRF_RT_REG_SZ, nullptr,
+        name, &bytes) != ERROR_SUCCESS ||
+      name[0] == L'\0') {
+    return {};
+  }
+  wchar_t* localAppData = nullptr;
+  std::filesystem::path ini;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &localAppData)) && localAppData) {
+    ini = std::filesystem::path(localAppData) / L"ModOrganizer" / name / L"ModOrganizer.ini";
+  }
+  CoTaskMemFree(localAppData);
+  std::error_code ec;
+  return (!ini.empty() && std::filesystem::is_regular_file(ini, ec)) ? ini : std::filesystem::path{};
+}
+
 }  // namespace
+
+Mo2IniSettings ParseMo2Ini(const std::string& content)
+{
+  Mo2IniSettings settings{};
+  std::istringstream in(content);
+  std::string line;
+  std::string section;
+  bool firstLine = true;
+  while (std::getline(in, line)) {
+    if (firstLine) {
+      StripUtf8BomInPlace(line);
+      firstLine = false;
+    }
+    TrimAsciiInPlace(line);
+    if (line.empty() || line[0] == '#' || line[0] == ';') {
+      continue;
+    }
+    if (line.front() == '[' && line.back() == ']') {
+      section = AsciiLower(line.substr(1, line.size() - 2));
+      continue;
+    }
+    const auto eq = line.find('=');
+    if (eq == std::string::npos) {
+      continue;
+    }
+    std::string key = line.substr(0, eq);
+    TrimAsciiInPlace(key);
+    key = AsciiLower(key);
+    const std::string value = ParseSelectedProfileValue(line.substr(eq + 1));
+    if (section == "general" && key == "selected_profile") {
+      settings.selected_profile = value;
+    } else if (section == "settings") {
+      if (key == "base_directory") {
+        settings.base_directory = value;
+      } else if (key == "mod_directory") {
+        settings.mod_directory = value;
+      } else if (key == "profiles_directory") {
+        settings.profiles_directory = value;
+      } else if (key == "overwrite_directory") {
+        settings.overwrite_directory = value;
+      }
+    }
+  }
+  return settings;
+}
+
+std::filesystem::path ResolveMo2Directory(
+  const std::string& configured,
+  const std::filesystem::path& baseDir,
+  const wchar_t* defaultLeaf)
+{
+  if (configured.empty()) {
+    return (baseDir / defaultLeaf).lexically_normal();
+  }
+  std::string value = configured;
+  constexpr std::string_view kBaseDir = "%base_dir%";
+  if (const auto pos = AsciiLower(value).find(kBaseDir); pos != std::string::npos) {
+    value = value.substr(0, pos) + PathToUtf8(baseDir) + value.substr(pos + kBaseDir.size());
+  }
+  std::filesystem::path path = std::filesystem::u8path(value);
+  if (path.is_relative()) {
+    path = baseDir / path;
+  }
+  return path.lexically_normal();
+}
+
+std::vector<std::string> ParseMo2EnabledModsWinnerFirst(const std::string& modlistContent)
+{
+  // MO2 writes modlist.txt highest priority first (Profile::doWriteModlist):
+  // "+Name" enabled, "-Name" disabled, "*Name" unmanaged (DLC, Creation Club).
+  std::vector<std::string> mods;
+  std::unordered_set<std::string> seen;
+  std::istringstream in(modlistContent);
+  std::string line;
+  bool firstLine = true;
+  while (std::getline(in, line)) {
+    if (firstLine) {
+      StripUtf8BomInPlace(line);
+      firstLine = false;
+    }
+    TrimAsciiInPlace(line);
+    if (line.size() < 2 || line[0] != '+') {
+      continue;
+    }
+    std::string name = line.substr(1);
+    TrimAsciiInPlace(name);
+    if (!name.empty() && seen.insert(AsciiLower(name)).second) {
+      mods.push_back(std::move(name));
+    }
+  }
+  return mods;
+}
 
 bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out)
 {
@@ -545,32 +732,60 @@ PluginScanResult ScanPlugins(
     if (!std::filesystem::exists(moIni)) {
       moIni = FindMo2IniFromModulePaths(modulePaths);
     }
-    if (std::filesystem::exists(moIni)) {
-      std::ifstream ini(moIni);
-      std::string line;
-      std::string selectedProfile;
-      bool firstLine = true;
-      constexpr std::string_view kSelectedProfileKey = "selected_profile=";
-      while (std::getline(ini, line)) {
-        if (firstLine) {
-          StripUtf8BomInPlace(line);
-          firstLine = false;
+    if (!std::filesystem::exists(moIni)) {
+      moIni = FindGlobalMo2InstanceIni();
+    }
+    std::string iniText;
+    if (moIni.empty() || !ReadWholeFile(moIni, &iniText)) {
+      result.mo2.status = "no_ini";
+    } else {
+      try {
+        // MO2 cannot switch profiles while the game runs, so what the INI and the
+        // profile say now is what the game was started with.
+        auto settings = ParseMo2Ini(AnsiToUtf8IfNeeded(iniText));
+        // An @ByteArray \xNN escape can leave bytes that are not UTF-8.
+        settings.selected_profile = AnsiToUtf8IfNeeded(settings.selected_profile);
+        const auto iniDir = moIni.parent_path().lexically_normal();
+        const auto baseDir = settings.base_directory.empty()
+          ? iniDir
+          : ResolveMo2Directory(settings.base_directory, iniDir, L"");
+        const auto profilesDir = ResolveMo2Directory(settings.profiles_directory, baseDir, L"profiles");
+        result.mo2.ini_path = PathToUtf8(moIni.lexically_normal());
+        result.mo2.base_dir = PathToUtf8(baseDir);
+        result.mo2.mods_dir = PathToUtf8(ResolveMo2Directory(settings.mod_directory, baseDir, L"mods"));
+        result.mo2.profiles_dir = PathToUtf8(profilesDir);
+        result.mo2.overwrite_dir = PathToUtf8(ResolveMo2Directory(settings.overwrite_directory, baseDir, L"overwrite"));
+        result.mo2.profile = settings.selected_profile;
+
+        const auto profileDir = profilesDir / std::filesystem::u8path(settings.selected_profile);
+        std::error_code ec;
+        if (settings.selected_profile.empty() || !std::filesystem::is_directory(profileDir, ec)) {
+          result.mo2.status = "no_profile";
+        } else {
+          const auto profilePluginsTxt = profileDir / "plugins.txt";
+          if (std::filesystem::exists(profilePluginsTxt, ec)) {
+            pluginsTxtPath = profilePluginsTxt;
+            result.plugins_source = "mo2_profile";
+          }
+          std::string modlist;
+          if (!ReadWholeFile(profileDir / "modlist.txt", &modlist)) {
+            result.mo2.status = "no_modlist";
+          } else {
+            auto mods = ParseMo2EnabledModsWinnerFirst(AnsiToUtf8IfNeeded(modlist));
+            // The scan is embedded in the dump; large lists run to a few thousand.
+            constexpr std::size_t kMaxCapturedMods = 20000;
+            if (mods.size() > kMaxCapturedMods) {
+              mods.resize(kMaxCapturedMods);
+              result.mo2.enabled_mods_truncated = true;
+            }
+            result.mo2.enabled_mods = std::move(mods);
+            result.mo2.status = "captured";
+          }
         }
-        TrimAsciiInPlace(line);
-        if (line.empty() || line[0] == '#' || line[0] == ';') {
-          continue;
-        }
-        if (line.rfind(kSelectedProfileKey, 0) == 0) {
-          selectedProfile = ParseSelectedProfileValue(line.substr(kSelectedProfileKey.size()));
-          break;
-        }
-      }
-      if (!selectedProfile.empty()) {
-        const auto profilePath = moIni.parent_path() / "profiles" / selectedProfile / "plugins.txt";
-        if (std::filesystem::exists(profilePath)) {
-          pluginsTxtPath = profilePath;
-          result.plugins_source = "mo2_profile";
-        }
+      } catch (const std::exception&) {
+        // A path that does not convert must not cost the plugin scan below.
+        result.mo2 = {};
+        result.mo2.status = "error";
       }
     }
   }
@@ -701,6 +916,21 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
     p["slot_type_known"] = plugin.slot_type_known;
     p["masters"] = plugin.masters;
     j["plugins"].push_back(std::move(p));
+  }
+
+  if (!result.mo2.status.empty()) {
+    const auto& mo2 = result.mo2;
+    j["mo2"] = {
+      { "status", mo2.status },
+      { "ini_path", mo2.ini_path },
+      { "base_dir", mo2.base_dir },
+      { "mods_dir", mo2.mods_dir },
+      { "profiles_dir", mo2.profiles_dir },
+      { "overwrite_dir", mo2.overwrite_dir },
+      { "profile", mo2.profile },
+      { "enabled_mods", mo2.enabled_mods },
+      { "enabled_mods_truncated", mo2.enabled_mods_truncated },
+    };
   }
 
   if (!result.skse_log.status.empty()) {

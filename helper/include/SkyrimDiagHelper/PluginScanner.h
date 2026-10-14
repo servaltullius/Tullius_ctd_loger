@@ -29,11 +29,49 @@ struct SkseLogScan
   SkseLogSummary summary;  // filled when status == "matched"
 };
 
+// The MO2 instance and profile the game ran under, read while it is still
+// running. Analyzing a kept dump later must not use whatever profile and mod
+// folders MO2 has on disk by then (audit F05). Strings are UTF-8.
+struct Mo2Capture
+{
+  // captured / no_ini / no_profile / no_modlist; empty when MO2 was not detected
+  std::string status;
+  std::string ini_path;
+  std::string base_dir;
+  std::string mods_dir;
+  std::string profiles_dir;
+  std::string overwrite_dir;
+  std::string profile;
+  // The profile's enabled mods (modlist.txt "+" entries), highest priority first.
+  std::vector<std::string> enabled_mods;
+  bool enabled_mods_truncated = false;
+};
+
+// ModOrganizer.ini values the capture needs, decoded from Qt's INI format.
+struct Mo2IniSettings
+{
+  std::string selected_profile;
+  std::string base_directory;
+  std::string mod_directory;
+  std::string profiles_directory;
+  std::string overwrite_directory;
+};
+
+Mo2IniSettings ParseMo2Ini(const std::string& content);
+// MO2 path settings default to "%BASE_DIR%/<leaf>"; the base directory itself
+// defaults to the folder holding ModOrganizer.ini.
+std::filesystem::path ResolveMo2Directory(
+  const std::string& configured,
+  const std::filesystem::path& baseDir,
+  const wchar_t* defaultLeaf);
+std::vector<std::string> ParseMo2EnabledModsWinnerFirst(const std::string& modlistContent);
+
 struct PluginScanResult
 {
   std::string game_exe_version;
   std::string plugins_source;  // "standard", "mo2_profile", "fallback", "error"
   bool mo2_detected = false;
+  Mo2Capture mo2;
   // True when `plugins` also lists the base masters and Skyrim.ccc plugins the
   // game loads without a plugins.txt entry. Older scans listed only plugins.txt.
   bool implicit_plugins_included = false;

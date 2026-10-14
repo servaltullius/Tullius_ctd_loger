@@ -440,6 +440,30 @@ std::vector<std::wstring> InferProviderScoresFromResources(const std::vector<con
   return out;
 }
 
+std::wstring Mo2ProvidersCaveat(const AnalysisResult& r, bool en)
+{
+  if (r.mo2_providers_source != "analysis_time") {
+    return {};
+  }
+  const std::wstring profile = r.mo2_profile_name.empty()
+    ? std::wstring{}
+    : (en ? L" (profile " : L"(프로필 ") + r.mo2_profile_name + L")";
+  return en
+    ? L" — providers are candidates found in the MO2 installation at analysis time" + profile +
+        L"; the profile or mods at the time of the crash may differ."
+    : L" — 제공 모드는 분석 시점의 MO2 설치에서 찾은 후보입니다" + profile +
+        L". 크래시 당시의 프로필이나 모드와 다를 수 있습니다.";
+}
+
+i18n::ConfidenceLevel CapForMo2ProvidersSource(const AnalysisResult& r, i18n::ConfidenceLevel level)
+{
+  if (r.mo2_providers_source == "analysis_time" &&
+      (level == i18n::ConfidenceLevel::kHigh || level == i18n::ConfidenceLevel::kMedium)) {
+    return i18n::ConfidenceLevel::kLow;
+  }
+  return level;
+}
+
 std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(const std::vector<EventRow>& events, const std::vector<ResourceRow>& resources)
 {
   // Correlate hitch timestamps with nearby resource loads and their providers (MO2).

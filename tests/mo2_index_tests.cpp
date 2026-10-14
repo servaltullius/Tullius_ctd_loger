@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 using skydiag::dump_tool::FindMo2ProvidersForDataPath;
 using skydiag::dump_tool::InferMo2ModNameFromPath;
 using skydiag::dump_tool::TryBuildMo2IndexFromModulePaths;
@@ -24,6 +26,12 @@ void WriteTextFile(const std::filesystem::path& path, const std::string& text)
 void TouchFile(const std::filesystem::path& path)
 {
   WriteTextFile(path, "x");
+}
+
+std::string U8(const std::filesystem::path& path)
+{
+  const auto s = path.u8string();
+  return std::string(s.begin(), s.end());
 }
 
 }  // namespace
@@ -141,6 +149,68 @@ static void Test_ActiveProfileProviderScan_DoesNotIncludeDisabledMods()
   std::filesystem::remove_all(base, ec);
 }
 
+// Audit F05: a dump kept from one profile and analyzed after switching to
+// another described the new profile's mods. The helper now captures the
+// profile and its mod list while the game runs; that capture wins over disk.
+static void Test_CrashTimeCaptureWinsOverCurrentProfile()
+{
+  using skydiag::dump_tool::BuildMo2IndexFromCapture;
+  using skydiag::dump_tool::Mo2Index;
+  using skydiag::dump_tool::TryParseCapturedMo2State;
+
+  const auto base = std::filesystem::temp_directory_path() / "skydiag_mo2_index_capture_test";
+  std::error_code ec;
+  std::filesystem::remove_all(base, ec);
+
+  // On disk now: MO2 was switched to "Other", whose only mod also has the file.
+  WriteTextFile(base / "ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Other)\n");
+  WriteTextFile(base / "profiles" / "Other" / "modlist.txt", "+Other Mod\n");
+  const auto rel = std::filesystem::path("meshes") / "capture" / "test.nif";
+  TouchFile(base / "mods" / "Other Mod" / rel);
+  TouchFile(base / "mods" / "Crash Low" / rel);
+  TouchFile(base / "mods" / "Crash Winner" / rel);
+
+  nlohmann::json scan = {
+    { "plugins_source", "mo2_profile" },
+    { "mo2",
+      {
+        { "status", "captured" },
+        { "base_dir", U8(base) },
+        { "mods_dir", U8((base / "mods")) },
+        { "profiles_dir", U8((base / "profiles")) },
+        { "overwrite_dir", U8((base / "overwrite")) },
+        { "profile", "Crash" },
+        // "Removed Since" was enabled at the crash and deleted afterwards.
+        { "enabled_mods", { "Crash Winner", "Removed Since", "Crash Low" } },
+      } },
+  };
+  const auto captured = TryParseCapturedMo2State(scan.dump());
+  assert(captured.has_value());
+  assert(captured->profileName == L"Crash");
+  const auto idx = BuildMo2IndexFromCapture(*captured);
+  assert(idx.source == Mo2Index::Source::kCrashTime);
+  assert(idx.profileName == L"Crash");
+
+  const auto providers = FindMo2ProvidersForDataPath(idx, L"meshes/capture/test.nif", 8);
+  assert(providers.size() == 2);
+  assert(providers[0] == L"Crash Winner");
+  assert(providers[1] == L"Crash Low");
+
+  // The disk inference still describes the profile MO2 is on now.
+  const auto now = TryBuildMo2IndexFromModulePaths({ base.wstring() + L"\\mods\\Other Mod\\x.dll" });
+  assert(now.has_value() && now->source == Mo2Index::Source::kAnalysisTime && now->profileName == L"Other");
+
+  // Anything but a completed capture leaves the analyzer on its disk fallback.
+  scan["mo2"]["status"] = "no_modlist";
+  assert(!TryParseCapturedMo2State(scan.dump()).has_value());
+  scan.erase("mo2");
+  assert(!TryParseCapturedMo2State(scan.dump()).has_value());
+  assert(!TryParseCapturedMo2State("not json").has_value());
+  assert(!TryParseCapturedMo2State("").has_value());
+
+  std::filesystem::remove_all(base, ec);
+}
+
 // Folder names from a real MO2 setup that installed Nexus archives without
 // metadata, and names that must stay as they are.
 static void Test_CleanMo2ModFolderName()
@@ -182,6 +252,7 @@ int main()
   Test_InferBaseDir_EmptyPaths();
   Test_InferBaseDir_EmptyStringsIgnored();
   Test_ActiveProfileProviderScan_DoesNotIncludeDisabledMods();
+  Test_CrashTimeCaptureWinsOverCurrentProfile();
 
   return 0;
 }
