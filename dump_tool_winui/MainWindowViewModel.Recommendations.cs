@@ -269,6 +269,12 @@ internal sealed partial class MainWindowViewModel
                recommendation.StartsWith("[알려진 원인]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Known crash site]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[알려진 크래시 지점]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Modal dialog]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[Modal 대화상자]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Main thread]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[메인 스레드]", StringComparison.Ordinal) ||
+               recommendation.StartsWith("[Synchronization stall]", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.StartsWith("[동기화 정지]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[행동 우선 후보]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[Crash Logger frame]", StringComparison.OrdinalIgnoreCase) ||

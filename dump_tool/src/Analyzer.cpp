@@ -155,30 +155,19 @@ bool IsCrashLoggerFrameModuleLoadedFromSystemPath(
 }
 
 // The paired Crash Logger log is about this crash: not an ambiguous time
-// pairing, and where both name the exception location ("KERNELBASE.dll+00C483A"
-// and the dump's fault module and offset) they agree.
+// pairing, and its exception location ("KERNELBASE.dll+00C483A", possibly
+// path-qualified) does not contradict the dump's fault. A fault inside Crash
+// Logger itself is a secondary fault while it reported this crash, so the log
+// still describes it. DowngradeCrashLoggerLogForOtherLocation already folds a
+// contradicting location into the ambiguous flag; the check stays here so the
+// gate holds on its own.
 bool CrashLoggerLogDescribesThisCrash(const AnalysisResult& out)
 {
-  if (out.crash_logger_log_path.empty() || out.crash_logger_pairing_ambiguous) {
-    return false;
-  }
-  const std::wstring& location = out.crash_logger_exception_location;
-  const auto plus = location.rfind(L'+');
-  if (plus == std::wstring::npos || plus == 0 || out.fault_module_filename.empty()) {
-    return out.crash_logger_pairing_confidence != "low";
-  }
-  std::uint64_t offset = 0;
-  try {
-    std::size_t used = 0;
-    offset = std::stoull(location.substr(plus + 1), &used, 16);
-    if (used == 0) {
-      return out.crash_logger_pairing_confidence != "low";
-    }
-  } catch (...) {
-    return out.crash_logger_pairing_confidence != "low";
-  }
-  return WideLower(location.substr(0, plus)) == WideLower(out.fault_module_filename) &&
-         offset == out.fault_module_offset;
+  return !out.crash_logger_log_path.empty() && !out.crash_logger_pairing_ambiguous &&
+         !crashlogger_core::CrashLoggerLocationContradictsDumpFault(
+           out.crash_logger_exception_location,
+           out.fault_module_filename,
+           out.fault_module_offset);
 }
 
 // The time pairing (up to 120 s apart) can pick another crash's log even with

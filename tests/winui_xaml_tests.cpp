@@ -463,6 +463,25 @@ static void TestWinUiKoreanStaticCopyIsLocalized()
   RequireContains(vm, "Tullius 콜스택 첫 후보", "Korean candidate copy must localize the Tullius callstack-first label.");
   RequireContains(vm, "DLL 점검 안내", "Korean recommendation copy must localize DLL guidance.");
   RequireContains(vm, "Crash Logger 직접 오류 프레임", "Korean candidate copy must localize the direct-fault frame label.");
+  RequireNotContains(vm, "_isKorean ? \"Tullius callstack\"", "Korean share text must not use the English callstack label.");
+  RequireContains(vm, "\"first_chance_context\" => T(", "Candidate families must name the first-chance context family.");
+}
+
+// Cells and worldspaces only say where the player was: like the native
+// analyzer, the viewer never shows their plugin as the culprit, and freeze
+// guidance about the main thread is an action to take now.
+static void TestWinUiSkipsLocationRefsAndGroupsFreezeActions()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  RequireContains(summary, "public bool IsLocation", "Crash Logger refs must know whether they are a location.");
+  RequireContains(summary, "CulpritRef => CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation)", "The culprit ref skips locations.");
+  RequireContains(summary, "crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName", "The inferred mod skips locations.");
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireNotContains(vm, "CrashLoggerRefs[0]", "Culprit displays must go through CulpritRef.");
+  RequireContains(vm, "StartsWith(\"[메인 스레드]\"", "Main-thread freeze guidance belongs to Do This Now.");
+  RequireContains(vm, "StartsWith(\"[Modal 대화상자]\"", "Modal dialog guidance belongs to Do This Now.");
+  RequireContains(vm, "StartsWith(\"[동기화 정지]\"", "Synchronization stall guidance belongs to Do This Now.");
 }
 
 static void TestReviewFeedbackFollowsPrimaryGuidance()
@@ -538,6 +557,7 @@ int main()
   TestWinUiUsesAvailableWidthAndStacksQuickCards();
   TestWinUiUsesFocusedEmptyStates();
   TestWinUiKoreanStaticCopyIsLocalized();
+  TestWinUiSkipsLocationRefsAndGroupsFreezeActions();
   TestReviewFeedbackFollowsPrimaryGuidance();
   TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
 

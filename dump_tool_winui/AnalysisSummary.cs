@@ -38,6 +38,8 @@ internal sealed class AnalysisSummary
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
+    // The most relevant ref that can name a culprit plugin (not a cell or worldspace).
+    public CrashLoggerRefItem? CulpritRef => CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation);
     public string CrashLoggerDirectFaultModule { get; init; } = string.Empty;
     public string CrashLoggerFirstActionableProbableModule { get; init; } = string.Empty;
     public string CrashLoggerProbableStreakModule { get; init; } = string.Empty;
@@ -148,7 +150,7 @@ internal sealed class AnalysisSummary
             CrashBucketKey = ReadString(root, "crash_bucket_key"),
             ModulePlusOffset = ReadString(exception, "module_plus_offset"),
             InferredModName = FirstNonEmpty(
-                crashLoggerRefs.FirstOrDefault()?.EspName ?? string.Empty,
+                crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName ?? string.Empty,
                 ReadString(exception, "inferred_mod_name"),
                 suspects.FirstOrDefault()?.Module ?? string.Empty),
             IsCrashLike = ReadBool(analysis, "is_crash_like"),
@@ -353,4 +355,11 @@ public sealed record TriageReview
 }
 public sealed record CrashLoggerRefItem(
     string EspName, string ObjectType, string Location,
-    string ObjectName, string FormId, int RefCount, int RelevanceScore);
+    string ObjectName, string FormId, int RefCount, int RelevanceScore)
+{
+    // A cell or worldspace only says where the player was; like the native
+    // analyzer, never present the plugin defining it as the culprit.
+    public bool IsLocation =>
+        ObjectType.Contains("TESObjectCELL", StringComparison.OrdinalIgnoreCase) ||
+        ObjectType.Contains("TESWorldSpace", StringComparison.OrdinalIgnoreCase);
+}

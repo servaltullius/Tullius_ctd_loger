@@ -71,7 +71,7 @@ inline std::wstring_view ConfidenceLabel(Language lang, ConfidenceLevel level)
     case ConfidenceLevel::kHigh: return L"높음";
     case ConfidenceLevel::kMedium: return L"중간";
     case ConfidenceLevel::kLow: return L"낮음";
-    default: return L"(unknown)";
+    default: return L"(알 수 없음)";
   }
 }
 

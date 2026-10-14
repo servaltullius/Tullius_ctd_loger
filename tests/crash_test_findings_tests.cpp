@@ -126,6 +126,14 @@ void TestBlockedGameThreadLeadsTheFreezeReport()
         Contains(e.title, en ? L"was inside plugin code" : L"플러그인 코드 안에 있었음") && Contains(e.details, L"tid 40400"));
     }
     Require(hasEvidence, "evidence item for the blocked thread");
+    bool blockedIsCandidate = false;
+    for (const auto& c : r.actionable_candidates) {
+      Require(c.module_filename != L"hdtsmp64.dll", "the main thread's call path is not a candidate");
+      blockedIsCandidate = blockedIsCandidate || c.module_filename == L"CrashTester.dll";
+    }
+    Require(!r.actionable_candidates.empty() && blockedIsCandidate &&
+              r.actionable_candidates.front().module_filename == L"CrashTester.dll",
+      "the blocked plugin leads the actionable candidates, not only the summary");
   }
 
   auto r = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
@@ -139,8 +147,12 @@ void TestBlockedGameThreadLeadsTheFreezeReport()
     "report main_thread_wait line");
 
   const auto keys = skydiag::dump_tool::CollectHistoryCandidateKeys(r);
-  Require(keys.size() == 1u && keys[0].find("crashtester") != std::string::npos,
-    "history records the blocked plugin, not the call path");
+  // As a candidate it is recorded like any other: by mod name and DLL name.
+  Require(!keys.empty(), "history records the blocked plugin");
+  for (const auto& key : keys) {
+    Require(key.find("crashtester") != std::string::npos && key.find("hdtsmp") == std::string::npos,
+      "history records the blocked plugin, not the call path");
+  }
 }
 
 void TestBlockedPluginSplitsTheHangBucket()
@@ -381,6 +393,71 @@ void TestHookStubRaceNamesTheHookOwner()
 
 }  // namespace
 
+AnalysisResult::CrashLoggerModReference ObjectRef(std::wstring esp, std::wstring type, std::uint32_t relevance)
+{
+  AnalysisResult::CrashLoggerModReference ref{};
+  ref.esp_name = std::move(esp);
+  ref.best_object_type = std::move(type);
+  ref.best_location = L"RCX";
+  ref.ref_count = 1;
+  ref.relevance_score = relevance;
+  return ref;
+}
+
+AnalysisResult MakeExeCrashWithRefs(std::vector<AnalysisResult::CrashLoggerModReference> refs)
+{
+  AnalysisResult r{};
+  r.dump_path = L"SkyrimDiag_Crash_20261014_120000_000.dmp";
+  r.exc_code = 0xC0000005u;
+  r.fault_module_filename = L"SkyrimSE.exe";
+  r.crash_logger_log_path = L"crash-2026-10-14-12-00-00.log";
+  r.crash_logger_object_refs = std::move(refs);
+  return r;
+}
+
+// The 2026-10-07 field crash: the cell the player stood in came from Lux.esp.
+// Candidates already skipped it; the summary and advice still named it.
+void TestLocationRefIsNotTheCulprit()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto cellOnly = MakeExeCrashWithRefs({ ObjectRef(L"Lux.esp", L"TESObjectCELL*", 14) });
+    BuildEvidenceAndSummary(cellOnly, lang);
+    Require(!Contains(cellOnly.summary_sentence, L"Lux.esp"), "a cell's plugin is not named in the summary");
+    Require(!AnyStartsWith(cellOnly.recommendations, L"[ESP/ESM]", L"Lux.esp"), "no advice to disable the cell's plugin");
+    Require(cellOnly.actionable_candidates.empty(), "a cell is not a candidate");
+
+    auto withNpc = MakeExeCrashWithRefs({
+      ObjectRef(L"Lux.esp", L"TESWorldSpace*", 14),
+      ObjectRef(L"NpcMod.esp", L"TESNPC*", 12),
+    });
+    BuildEvidenceAndSummary(withNpc, lang);
+    Require(Contains(withNpc.summary_sentence, L"NpcMod.esp") && !Contains(withNpc.summary_sentence, L"Lux.esp"),
+      "the summary names the first non-location ref");
+    Require(AnyStartsWith(withNpc.recommendations, L"[ESP/ESM]", L"NpcMod.esp") || !withNpc.actionable_candidates.empty(),
+      "the advice points at the object's plugin");
+    Require(!AnyStartsWith(withNpc.recommendations, L"[ESP/ESM]", L"Lux.esp"), "never the worldspace's plugin");
+    (void)en;
+  }
+}
+
+// A fault inside Crash Logger is its memory probe while it reported another
+// crash; the summary said "known hook framework" while the advice explained it.
+void TestCrashLoggerSelfFaultSummary()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    AnalysisResult r{};
+    r.dump_path = L"SkyrimDiag_Crash_20261005_122858_100.dmp";
+    r.exc_code = 0xC0000005u;
+    r.fault_module_filename = L"CrashLogger.dll";
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, en ? L"secondary fault" : L"2차 예외"), "the summary explains the secondary fault");
+    Require(!Contains(r.summary_sentence, en ? L"known hook framework" : L"알려진 훅 프레임워크"),
+      "Crash Logger is not called a hook framework victim location");
+  }
+}
+
 int main()
 {
   try {
@@ -390,6 +467,8 @@ int main()
     TestConfirmedCppExceptionIsARealCrash();
     TestSkseRuntimeIsThePathNotASuspect();
     TestHookStubRaceNamesTheHookOwner();
+    TestLocationRefIsNotTheCulprit();
+    TestCrashLoggerSelfFaultSummary();
     std::puts("crash test findings tests passed");
     return 0;
   } catch (const std::exception& ex) {

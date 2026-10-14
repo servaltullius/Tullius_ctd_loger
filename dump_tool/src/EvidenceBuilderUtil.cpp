@@ -11,9 +11,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "CrashLoggerParseCore.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 #include "SkyrimDiagStringUtil.h"
+#include "Utf.h"
 
 namespace skydiag::dump_tool::internal {
 
@@ -515,6 +517,16 @@ std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(const std::ve
     }
   }
   return out;
+}
+
+const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const AnalysisResult& r)
+{
+  for (const auto& ref : r.crash_logger_object_refs) {
+    if (!crashlogger_core::IsLocationObjectTypeAscii(WideToUtf8(ref.best_object_type))) {
+      return &ref;
+    }
+  }
+  return nullptr;
 }
 
 bool IsActionableSuspect(const SuspectItem& s)

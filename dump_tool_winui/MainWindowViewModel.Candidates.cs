@@ -154,7 +154,7 @@ internal sealed partial class MainWindowViewModel
             return T("Crash Logger frame", "Crash Logger 프레임");
         }
 
-        if (summary.CrashLoggerRefs.Count > 0)
+        if (summary.CulpritRef is not null)
         {
             if (summary.ActionableCandidates.Count > 0 &&
                 summary.ActionableCandidates[0].StatusId == "reference_clue")
@@ -205,9 +205,8 @@ internal sealed partial class MainWindowViewModel
                 : $"{summary.CrashLoggerProbableStreakModule} — Crash Logger frame first probable frame streak x{summary.CrashLoggerProbableStreakLength} — {dllGuidance}";
         }
 
-        if (summary.CrashLoggerRefs.Count > 0)
+        if (summary.CulpritRef is { } topRef)
         {
-            var topRef = summary.CrashLoggerRefs[0];
             var espName = FirstNonEmpty(
                 topRef.EspName,
                 summary.InferredModName,
@@ -376,6 +375,7 @@ internal sealed partial class MainWindowViewModel
         "hook_stub_owner" => T("hook stub owner", "후킹 점프 코드 주인"),
         "resource_provider" => T("near resource provider", "인접 리소스 제공자"),
         "history_repeat" => T("history repeat", "반복 이력"),
+        "first_chance_context" => T("repeated first-chance context", "반복 선행 예외(first-chance)"),
         _ => familyId,
     };
 

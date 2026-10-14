@@ -119,7 +119,7 @@ internal sealed partial class MainWindowViewModel
         {
             ModNameText = DescribeActionableCandidateLabel(summary.ActionableCandidates[0]) + ": " + BuildPrimaryCandidateValue(summary);
         }
-        else if (summary.CrashLoggerRefs.Count > 0 && !string.IsNullOrWhiteSpace(summary.InferredModName))
+        else if (summary.CulpritRef is not null && !string.IsNullOrWhiteSpace(summary.InferredModName))
         {
             ModNameText = T("Referenced mod: ", "참조 모드: ") + summary.InferredModName;
         }
@@ -144,9 +144,9 @@ internal sealed partial class MainWindowViewModel
         {
             QuickConfidenceValue = BuildAgreementSummary(summary);
         }
-        else if (summary.CrashLoggerRefs.Count > 0)
+        else if (summary.CulpritRef is { } culpritRef)
         {
-            QuickConfidenceValue = MapRelevanceToConfidence(summary.CrashLoggerRefs[0].RelevanceScore);
+            QuickConfidenceValue = MapRelevanceToConfidence(culpritRef.RelevanceScore);
         }
         else
         {
@@ -181,7 +181,7 @@ internal sealed partial class MainWindowViewModel
         }
         else
         {
-            foreach (var espRef in summary.CrashLoggerRefs.Take(3))
+            foreach (var espRef in summary.CrashLoggerRefs.Where(r => !r.IsLocation).Take(3))
             {
                 Suspects.Add(new SuspectItem(
                     MapRelevanceToConfidence(espRef.RelevanceScore),
