@@ -78,6 +78,13 @@ void AssertNotContains(const std::string& haystack, const char* needle, const ch
   assert(haystack.find(needle) == std::string::npos && message);
 }
 
+void AssertOrdered(const std::string& haystack, const char* first, const char* second, const char* message)
+{
+  const auto firstPos = haystack.find(first);
+  assert(firstPos != std::string::npos && message);
+  assert(haystack.find(second, firstPos) != std::string::npos && message);
+}
+
 const ModuleStats* FindModule(const std::vector<ModuleStats>& stats, const std::string& name)
 {
   for (const auto& s : stats) {
@@ -1021,6 +1028,16 @@ void TestCrashLoggerFrameConsensusContracts()
     analyzerSrc,
     "if (out->crash_logger_pairing_ambiguous)",
     "Ambiguous CrashLogger pairing must not reorder independent stack suspects.");
+  AssertOrdered(
+    analyzerSrc,
+    "DowngradeCrashLoggerLogForOtherLocation(&out);",
+    "IntegrateCrashLoggerFrameSignals(allModules, &out);",
+    "A log naming another exception location must be downgraded before its frame signals are used.");
+  AssertOrdered(
+    analyzerSrc,
+    "out->crash_logger_location_mismatch = true;",
+    "out->crash_logger_pairing_ambiguous = true;",
+    "A location mismatch must take the ambiguous-pairing path for suspects and candidates.");
 }
 
 void TestFreezeAnalysisSourceContracts()

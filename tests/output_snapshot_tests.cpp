@@ -147,6 +147,7 @@ void TestGoldenJsonSchemaV2(const nlohmann::json& j)
   AssertIsType(cl["pairing"], "eligible_candidate_count", "number", "crash_logger.pairing");
   AssertIsType(cl["pairing"], "nearby_competitor_count", "number", "crash_logger.pairing");
   AssertIsType(cl["pairing"], "ambiguous", "boolean", "crash_logger.pairing");
+  AssertIsType(cl["pairing"], "location_mismatch", "boolean", "crash_logger.pairing");
   AssertIsType(cl["pairing"], "confidence", "string", "crash_logger.pairing");
   AssertIsType(cl, "top_modules", "array", "crash_logger");
   AssertIsType(cl, "direct_fault_eligible", "boolean", "crash_logger");

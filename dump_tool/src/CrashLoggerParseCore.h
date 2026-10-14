@@ -119,6 +119,16 @@ struct CrashLoggerExceptionLine {
   std::string instruction;  // "int3"
 };
 std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::string_view logUtf8);
+// The log's exception location ("KERNELBASE.dll+00C483A", the module may be
+// path-qualified) names a different module or offset than the dump's fault:
+// the time pairing most likely picked another crash's log. False when either
+// side has no module+offset, or when the dump faulted inside Crash Logger
+// itself (a secondary fault while it reported the original exception, which
+// the log then names).
+bool CrashLoggerLocationContradictsDumpFault(
+  std::wstring_view location,
+  std::wstring_view faultModuleFilename,
+  std::uint64_t faultModuleOffset);
 CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8);
 std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_view logUtf8);
 std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view logUtf8);

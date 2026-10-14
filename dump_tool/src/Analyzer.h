@@ -331,7 +331,10 @@ struct AnalysisResult
   std::string crash_logger_pairing_selected_kind;
   std::string crash_logger_pairing_confidence;
   bool crash_logger_pairing_same_directory = false;
+  // True for nearby competing logs, and for a log whose exception location
+  // differs from the dump's (crash_logger_location_mismatch).
   bool crash_logger_pairing_ambiguous = false;
+  bool crash_logger_location_mismatch = false;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
   std::wstring crash_logger_direct_fault_module;
   std::wstring crash_logger_first_actionable_probable_module;
@@ -489,10 +492,11 @@ struct AnalysisResult
 
 // The dump holds a C++ exception (0xE06D7363) that Crash Logger also logged as
 // its unhandled exception: a real crash, not a caught throw. With the default
-// CrashHookMode=1 the plugin records a C++ exception only in that case.
+// CrashHookMode=1 the plugin records a C++ exception only in that case. Not
+// when the log names another exception location (another crash's log).
 inline bool IsCrashLoggerConfirmedCppException(const AnalysisResult& r)
 {
-  if (r.exc_code != 0xE06D7363u) {
+  if (r.exc_code != 0xE06D7363u || r.crash_logger_location_mismatch) {
     return false;
   }
   std::wstring type = r.crash_logger_exception_type;

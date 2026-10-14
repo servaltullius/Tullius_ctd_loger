@@ -54,6 +54,7 @@
       "selected_kind": "crash",
       "same_directory": true,
       "ambiguous": false,
+      "location_mismatch": false,
       "confidence": "high"
     },
     "direct_fault_eligible": false,
