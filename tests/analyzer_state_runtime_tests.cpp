@@ -280,6 +280,19 @@ void TestCleanExitEvidenceFailsClosedAndRequiresExactMatch()
     assert(result.clean_exit_dump_state == "preserved");
   }
 
+  std::error_code lateEc;
+  std::filesystem::remove(root / L"SkyrimDiag_CleanExitEvidence_valid.json", lateEc);
+  {
+    // The helper released a crash the game outlived (late recovery); the
+    // context tells the report the process did not exit.
+    auto result = MakeCleanExitResult(identity);
+    auto late = MakeCleanExitEvidence(dump, result);
+    late["filter_context"] = "late_recovery";
+    WriteEvidence(root, L"SkyrimDiag_CleanExitEvidence_valid.json", late);
+    assert(TryConsumeCleanExitEvidence(dump.wstring(), result));
+    assert(result.clean_exit_filter_context == "late_recovery");
+  }
+
   std::error_code ec;
   std::filesystem::remove(root / L"SkyrimDiag_CleanExitEvidence_valid.json", ec);
   {

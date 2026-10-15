@@ -59,6 +59,7 @@ nlohmann::json BuildSummaryJson(
     summary["clean_exit_evidence"] = {
       { "validated", true },
       { "dump_state", r.clean_exit_dump_state },
+      { "filter_context", r.clean_exit_filter_context },
       { "sidecar_filename", WideToUtf8(r.clean_exit_evidence_filename) },
     };
   }

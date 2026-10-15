@@ -458,6 +458,30 @@ void TestCrashLoggerSelfFaultSummary()
   }
 }
 
+// A preserved dump the helper released because the game kept running after
+// the exception: the report must not claim the process exited with code 0.
+void TestLateRecoveredCleanExitWording()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    AnalysisResult r{};
+    r.dump_path = L"SkyrimDiag_Crash_20261015_120000_001.dmp";
+    r.exc_code = 0xC0000005u;
+    r.is_filtered_clean_exit = true;
+    r.clean_exit_dump_state = "preserved";
+    r.clean_exit_filter_context = "late_recovery";
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, en ? L"kept running" : L"계속 실행"), "the summary says the game kept running");
+    Require(!Contains(r.summary_sentence, en ? L"code 0" : L"종료 코드 0"), "no exit-code claim for a running game");
+    Require(!r.recommendations.empty() && Contains(r.recommendations[0], en ? L"kept running" : L"계속 실행"),
+      "the advice says the same");
+
+    r.clean_exit_filter_context = "process_exit";
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, en ? L"code 0" : L"종료 코드 0"), "a zero exit keeps its wording");
+  }
+}
+
 int main()
 {
   try {
@@ -469,6 +493,7 @@ int main()
     TestHookStubRaceNamesTheHookOwner();
     TestLocationRefIsNotTheCulprit();
     TestCrashLoggerSelfFaultSummary();
+    TestLateRecoveredCleanExitWording();
     std::puts("crash test findings tests passed");
     return 0;
   } catch (const std::exception& ex) {

@@ -224,22 +224,27 @@ bool WriteCleanExitEvidenceRecord(
 {
   nlohmann::json j = nlohmann::json::object();
   j["schema"] = "skydiag.clean_exit_evidence.v1";
+  // late_recovery: the process did not exit; it kept running past the
+  // late-recovery window, which proves the exception was handled.
+  const std::string why = context == L"late_recovery"
+    ? "strong_fault_published_but_game_kept_running"
+    : "strong_fault_published_but_process_exited_zero";
   j["dump_state"] = CleanExitDumpStateId(dumpState);
   switch (dumpState) {
     case CleanExitDumpState::kPendingDelete:
-      j["reason"] = "strong_fault_published_but_process_exited_zero_dump_delete_pending";
+      j["reason"] = why + "_dump_delete_pending";
       j["dump_preserved"] = nullptr;
       break;
     case CleanExitDumpState::kDiscarded:
-      j["reason"] = "strong_fault_published_but_process_exited_zero_dump_discarded";
+      j["reason"] = why + "_dump_discarded";
       j["dump_preserved"] = false;
       break;
     case CleanExitDumpState::kPreserved:
-      j["reason"] = "strong_fault_published_but_process_exited_zero_dump_preserved";
+      j["reason"] = why + "_dump_preserved";
       j["dump_preserved"] = true;
       break;
     case CleanExitDumpState::kDeleteFailed:
-      j["reason"] = "strong_fault_published_but_process_exited_zero_dump_delete_failed";
+      j["reason"] = why + "_dump_delete_failed";
       j["dump_preserved"] = true;
       break;
     case CleanExitDumpState::kNotCaptured:
@@ -1242,6 +1247,9 @@ bool HandleCrashEventTick(
 
   if (crashState) {
     crashState->latched = ShouldLatchCrashCapture(verdict);
+    if (crashState->latched && proc.shm) {
+      StartLateRecovery(&crashState->lateRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc);
+    }
   }
   AppendLogLine(outBase, L"Crash captured; waiting for process exit.");
   return true;

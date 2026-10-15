@@ -60,6 +60,46 @@ struct CleanExitDumpIdentity {
 // Helper-owned state for one captured crash generation. Keeping the immutable
 // CrashEventInfo snapshot beside the latch lets the later process-exit path
 // describe the same incident even after shared memory changes or disappears.
+// Late recovery: after a crash is kept, the game may keep running because
+// the exception was handled after all (the filters saw no heartbeat while
+// the main thread was busy, e.g. in a long load). A real CTD ends the
+// process well within a minute even with Crash Logger writing its log.
+inline constexpr std::uint64_t kLateRecoveryMinAliveMs = 60'000;
+inline constexpr std::uint64_t kLateRecoveryWindowMs = 5'000;
+inline constexpr std::uint32_t kLateRecoveryRequiredWindows = 6;  // 30 s of advancing heartbeat
+
+struct LateRecoveryState {
+  std::uint64_t latchedTick64 = 0;
+  std::uint64_t lastSampleTick64 = 0;
+  std::uint64_t lastHeartbeatQpc = 0;
+  std::uint32_t advancingWindows = 0;
+};
+
+inline void StartLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, std::uint64_t heartbeatQpc) noexcept
+{
+  if (!s) {
+    return;
+  }
+  *s = LateRecoveryState{ nowTick64, nowTick64, heartbeatQpc, 0 };
+}
+
+// Samples the heartbeat every kLateRecoveryWindowMs. True once the process
+// has stayed alive kLateRecoveryMinAliveMs since the crash was kept and the
+// heartbeat advanced in each of the last kLateRecoveryRequiredWindows windows;
+// a window without progress (a pause, a stall) starts the count again.
+inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, std::uint64_t heartbeatQpc) noexcept
+{
+  if (!s || s->latchedTick64 == 0 || nowTick64 < s->lastSampleTick64 ||
+      nowTick64 - s->lastSampleTick64 < kLateRecoveryWindowMs) {
+    return false;
+  }
+  s->advancingWindows = heartbeatQpc > s->lastHeartbeatQpc ? s->advancingWindows + 1u : 0u;
+  s->lastSampleTick64 = nowTick64;
+  s->lastHeartbeatQpc = heartbeatQpc;
+  return s->advancingWindows >= kLateRecoveryRequiredWindows &&
+         nowTick64 - s->latchedTick64 >= kLateRecoveryMinAliveMs;
+}
+
 struct CrashCaptureState {
   bool latched = false;
   CrashEventInfo capturedInfo{};
@@ -68,6 +108,7 @@ struct CrashCaptureState {
   std::filesystem::path cleanExitEvidencePath;
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
+  LateRecoveryState lateRecovery{};
 };
 
 struct StableSharedSnapshot {

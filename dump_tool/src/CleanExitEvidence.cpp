@@ -151,6 +151,7 @@ bool TryConsumeCleanExitEvidence(
 
     std::filesystem::path matchedPath;
     std::string matchedState;
+    std::string matchedContext;
     std::size_t matchCount = 0;
     for (const auto& entry : it) {
       if (!entry.is_regular_file(ec) || ec || !HasEvidenceFilename(entry.path())) {
@@ -173,6 +174,8 @@ bool TryConsumeCleanExitEvidence(
         ++matchCount;
         matchedPath = entry.path();
         matchedState = std::move(state);
+        const auto contextIt = root.find("filter_context");
+        matchedContext = (contextIt != root.end() && contextIt->is_string()) ? contextIt->get<std::string>() : std::string{};
       }
     }
 
@@ -181,6 +184,7 @@ bool TryConsumeCleanExitEvidence(
     }
 
     result.clean_exit_dump_state = std::move(matchedState);
+    result.clean_exit_filter_context = std::move(matchedContext);
     result.clean_exit_evidence_filename = matchedPath.filename().wstring();
     result.is_filtered_clean_exit = true;
     return true;

@@ -97,11 +97,17 @@ void DrainCrashEventBeforeExit(
   }
 }
 
-void CleanupCrashArtifactsAfterZeroExit(
+// Releases a latched crash capture that turned out not to be a CTD: the
+// process exited with code 0, or it kept running (HandleLateRecoveryTick).
+// `context` is the clean-exit evidence filter context; `logPrefix` names the
+// trigger in SkyrimDiagHelper.log.
+void CleanupFilteredCrashArtifacts(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
-  HelperLoopState* state)
+  HelperLoopState* state,
+  std::wstring_view context,
+  std::wstring_view logPrefix)
 {
   if (!state) {
     return;
@@ -135,7 +141,7 @@ void CleanupCrashArtifactsAfterZeroExit(
       cfg,
       outBase,
       &state->crashCaptured,
-      L"process_exit",
+      context,
       capturedDumpPath,
       CleanExitDumpState::kPreserved);
   } else if (evidenceRequired) {
@@ -143,7 +149,7 @@ void CleanupCrashArtifactsAfterZeroExit(
       cfg,
       outBase,
       &state->crashCaptured,
-      L"process_exit",
+      context,
       capturedDumpPath,
       CleanExitDumpState::kPendingDelete);
     if (!pendingDeleteRecorded) {
@@ -156,10 +162,10 @@ void CleanupCrashArtifactsAfterZeroExit(
       if (!TerminateProcess(state->pendingCrashAnalysis.process, 1)) {
         AppendLogLine(
           outBase,
-          L"exit_code=0 after crash capture; failed to terminate pending crash analysis process: "
+          std::wstring(logPrefix) + L" after crash capture; failed to terminate pending crash analysis process: "
             + std::to_wstring(GetLastError()));
       } else {
-        AppendLogLine(outBase, L"exit_code=0 after crash capture; terminated pending crash analysis process.");
+        AppendLogLine(outBase, std::wstring(logPrefix) + L" after crash capture; terminated pending crash analysis process.");
       }
     }
     ClearPendingCrashAnalysis(&state->pendingCrashAnalysis);
@@ -194,7 +200,7 @@ void CleanupCrashArtifactsAfterZeroExit(
             cfg,
             outBase,
             &state->crashCaptured,
-            L"process_exit",
+            context,
             capturedDumpPath,
             finalState)) {
         AppendLogLine(
@@ -207,11 +213,12 @@ void CleanupCrashArtifactsAfterZeroExit(
     if (preserveDump) {
       AppendLogLine(
         outBase,
-        (cfg.preserveFilteredCrashDumps
-           ? L"exit_code=0 after filtered crash; dump file preserved, removed "
-           : (dumpDeletionFailed
-                ? L"exit_code=0 after filtered crash; dump deletion failed or was not verifiable, removed "
-                : L"exit_code=0 clean-exit evidence write failed; dump preserved as a fail-safe, removed "))
+        std::wstring(logPrefix)
+          + (cfg.preserveFilteredCrashDumps
+               ? L" after filtered crash; dump file preserved, removed "
+               : (dumpDeletionFailed
+                    ? L" after filtered crash; dump deletion failed or was not verifiable, removed "
+                    : L" clean-exit evidence write failed; dump preserved as a fail-safe, removed "))
           + std::to_wstring(removal.removedCount)
           + L" derived crash artifact(s), without keeping the crashCaptured latch "
           + (cfg.preserveFilteredCrashDumps ? L"(PreserveFilteredCrashDumps=1): " : L": ")
@@ -219,7 +226,7 @@ void CleanupCrashArtifactsAfterZeroExit(
     } else {
       AppendLogLine(
         outBase,
-        L"exit_code=0 after crash capture; removed "
+        std::wstring(logPrefix) + L" after crash capture; removed "
           + std::to_wstring(removal.removedCount)
           + L" crash artifact(s): "
           + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
@@ -228,6 +235,52 @@ void CleanupCrashArtifactsAfterZeroExit(
   state->capturedCrashDumpPath.clear();
   state->pendingCrashViewerDumpPath.clear();
   state->crashCaptured.latched = false;
+}
+
+void CleanupCrashArtifactsAfterZeroExit(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state)
+{
+  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"process_exit", L"exit_code=0");
+}
+
+bool HandleLateRecoveryTick(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state)
+{
+  if (!state || !state->crashCaptured.latched || !proc.process || !proc.shm) {
+    return false;
+  }
+  if (WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
+    return false;  // the exit tick classifies an exited process
+  }
+  auto& crash = state->crashCaptured;
+  if (!AdvanceLateRecovery(&crash.lateRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc)) {
+    return false;
+  }
+
+  const std::uint32_t crashSeq = crash.capturedInfo.crashSeq;
+  const auto keptForSec = crash.lateRecovery.lastSampleTick64 >= crash.lateRecovery.latchedTick64
+    ? (crash.lateRecovery.lastSampleTick64 - crash.lateRecovery.latchedTick64) / 1000u
+    : 0u;
+  AppendLogLine(
+    outBase,
+    L"Game kept running " + std::to_wstring(keptForSec)
+      + L"s after a crash was captured, with the heartbeat advancing; the exception was handled "
+        L"(crash_seq=" + std::to_wstring(crashSeq) + L"). Releasing the capture.");
+  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running");
+  const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, crashSeq);
+  AppendLogLine(
+    outBase,
+    thawed
+      ? L"Late-recovered exception thawed blackbox/resource capture for a later real CTD."
+      : L"Late-recovered exception was not thawed because a newer crash record is already present.");
+  crash.lateRecovery = LateRecoveryState{};
+  return true;
 }
 
 void AppendExitClassificationLog(const std::filesystem::path& outBase)

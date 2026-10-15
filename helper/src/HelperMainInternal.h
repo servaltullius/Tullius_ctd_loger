@@ -82,6 +82,14 @@ void HandleProcessWaitFailed(
   const std::filesystem::path& outBase,
   DWORD waitError,
   HelperLoopState* state);
+// A crash kept while the game then keeps running is released as handled
+// (see AdvanceLateRecovery). Returns true when it released one this tick.
+bool HandleLateRecoveryTick(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state);
+
 bool HandleProcessExitTick(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
