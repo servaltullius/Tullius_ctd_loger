@@ -1159,6 +1159,52 @@ std::vector<std::string> ParseCrashLoggerObjectTypesAscii(std::string_view logUt
   return types;
 }
 
+namespace {
+
+// Leading tabs (or groups of four spaces) before a Crash Logger log line.
+std::size_t IndentDepth(std::string_view line)
+{
+  std::size_t depth = 0;
+  std::size_t spaces = 0;
+  for (const char c : line) {
+    if (c == '\t') {
+      ++depth;
+      spaces = 0;
+    } else if (c == ' ') {
+      if (++spaces == 4) {
+        ++depth;
+        spaces = 0;
+      }
+    } else {
+      break;
+    }
+  }
+  return depth;
+}
+
+// "RBP 0x...", "R9  0x...", or the older "RDI: (...)": the register's name.
+std::optional<std::string> RegisterNameAtLineStart(std::string_view trimmed)
+{
+  const auto end = trimmed.find_first_of(" \t:");
+  const std::string name = AsciiLower(trimmed.substr(0, end));
+  static constexpr std::string_view kRegisters[] = {
+    "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp", "rip",
+    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+  };
+  for (const auto reg : kRegisters) {
+    if (name == reg) {
+      std::string upper(trimmed.substr(0, end));
+      for (auto& c : upper) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+      }
+      return upper;
+    }
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
 std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_view logUtf8)
 {
   std::vector<CrashLoggerObjectRef> results;
@@ -1170,6 +1216,10 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
   enum class Section { kNone, kPossibleObjects, kRegisters };
   Section section = Section::kNone;
   std::string currentRegister;
+  std::size_t registerDepth = 0;
+  std::string registerType;
+  std::string registerName;
+  std::size_t registerRefStart = 0;
 
   while (std::getline(iss, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -1241,47 +1291,69 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
         continue;
       }
 
-      bool isSubLine = (!line.empty() && (line[0] == '\t' || line[0] == ' '));
-
-      if (!isSubLine) {
-        std::string location = ExtractLocation(trimmed);
-        if (!location.empty()) {
-          currentRegister = location;
-          auto espRefs = ExtractEspRefsFromLine(trimmed);
-          std::string objType = ExtractObjectType(trimmed);
-          std::string objName = ExtractObjectName(trimmed);
-          for (const auto& entry : espRefs) {
-            const std::string lower = AsciiLower(entry.esp_name);
-            if (IsVanillaDlcEspAsciiLower(lower)) continue;
-            CrashLoggerObjectRef ref;
-            ref.location = currentRegister;
-            ref.object_type = objType;
-            ref.esp_name = entry.esp_name;
-            ref.object_name = objName;
-            ref.form_id = entry.form_id;
-            ref.relevance_score = LocationWeight(currentRegister) + TypeWeight(objType);
-            results.push_back(std::move(ref));
+      // Real logs indent register lines one tab ("\tRBP 0x... (TESObjectBOOK*)")
+      // and the object's own fields one tab deeper ("\t\tFile: \"X.esp\"").
+      // Deeper lines describe other objects it points to, such as the cell
+      // under "ParentCell:" (where the player stood), so they are not this
+      // register's plugin.
+      const std::size_t depth = IndentDepth(line);
+      if (const auto reg = RegisterNameAtLineStart(trimmed)) {
+        currentRegister = *reg;
+        registerDepth = depth;
+        registerType = ExtractObjectType(trimmed);
+        registerName = ExtractObjectName(trimmed);
+        registerRefStart = results.size();
+        for (const auto& entry : ExtractEspRefsFromLine(trimmed)) {
+          if (IsVanillaDlcEspAsciiLower(AsciiLower(entry.esp_name))) continue;
+          CrashLoggerObjectRef ref;
+          ref.location = currentRegister;
+          ref.object_type = registerType;
+          ref.esp_name = entry.esp_name;
+          ref.object_name = registerName;
+          ref.form_id = entry.form_id;
+          ref.relevance_score = LocationWeight(currentRegister) + TypeWeight(registerType);
+          results.push_back(std::move(ref));
+        }
+        continue;
+      }
+      if (currentRegister.empty() || depth != registerDepth + 1) {
+        continue;
+      }
+      if (StartsWithCaseInsensitiveAscii(trimmed, "Modified by:")) {
+        continue;
+      }
+      if (StartsWithCaseInsensitiveAscii(trimmed, "FormID:")) {
+        const std::string formId(TrimAscii(trimmed.substr(7)));
+        for (std::size_t i = registerRefStart; i < results.size(); ++i) {
+          if (results[i].form_id.empty()) {
+            results[i].form_id = formId;
           }
         }
-      } else {
-        if (!currentRegister.empty()) {
-          if (StartsWithCaseInsensitiveAscii(trimmed, "Modified by:") ||
-              StartsWithCaseInsensitiveAscii(trimmed, "modified by:")) {
-            continue;
-          }
-          auto espRefs = ExtractEspRefsFromLine(trimmed);
-          for (const auto& entry : espRefs) {
-            const std::string lower = AsciiLower(entry.esp_name);
-            if (IsVanillaDlcEspAsciiLower(lower)) continue;
-            CrashLoggerObjectRef ref;
-            ref.location = currentRegister;
-            ref.object_type = "";
-            ref.esp_name = entry.esp_name;
-            ref.form_id = entry.form_id;
-            ref.relevance_score = LocationWeight(currentRegister) + TypeWeight("");
-            results.push_back(std::move(ref));
+        continue;
+      }
+      if (StartsWithCaseInsensitiveAscii(trimmed, "Name:")) {
+        std::string_view value = TrimAscii(trimmed.substr(5));
+        if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+          value = value.substr(1, value.size() - 2);
+        }
+        registerName = std::string(value);
+        for (std::size_t i = registerRefStart; i < results.size(); ++i) {
+          if (results[i].object_name.empty()) {
+            results[i].object_name = registerName;
           }
         }
+        continue;
+      }
+      for (const auto& entry : ExtractEspRefsFromLine(trimmed)) {
+        if (IsVanillaDlcEspAsciiLower(AsciiLower(entry.esp_name))) continue;
+        CrashLoggerObjectRef ref;
+        ref.location = currentRegister;
+        ref.object_type = registerType;
+        ref.esp_name = entry.esp_name;
+        ref.object_name = registerName;
+        ref.form_id = entry.form_id;
+        ref.relevance_score = LocationWeight(currentRegister) + TypeWeight(registerType);
+        results.push_back(std::move(ref));
       }
     }
   }
