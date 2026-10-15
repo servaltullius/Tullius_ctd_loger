@@ -33,6 +33,9 @@ struct HelperLoopState
   std::uint64_t nextCrashEventRetryTick64 = 0;
   std::uint64_t nextCrashEventWarnTick64 = 0;
   std::uint32_t postExitEvidenceSeq = 0;
+  // A crash viewer was opened for the dump when the game exited; it runs its
+  // own analysis of that dump.
+  bool crashViewerLaunchedAtExit = false;
 };
 
 struct CrashArtifactRemovalResult
@@ -82,6 +85,10 @@ void HandleProcessWaitFailed(
   const std::filesystem::path& outBase,
   DWORD waitError,
   HelperLoopState* state);
+// At helper shutdown: leave a running crash analysis to finish its report,
+// unless the viewer opened at exit analyzes the same dump.
+void ReleasePendingCrashAnalysisAtShutdown(const std::filesystem::path& outBase, HelperLoopState* state);
+
 // A crash kept while the game then keeps running is released as handled
 // (see AdvanceLateRecovery). Returns true when it released one this tick.
 bool HandleLateRecoveryTick(

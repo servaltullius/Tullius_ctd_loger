@@ -34,6 +34,21 @@ void ClearPendingCrashAnalysis(PendingCrashAnalysis* task)
   task->timeoutMs = 0;
 }
 
+void DetachPendingCrashAnalysis(PendingCrashAnalysis* task)
+{
+  if (!task) {
+    return;
+  }
+  if (task->process) {
+    CloseHandle(task->process);
+    task->process = nullptr;
+  }
+  task->active = false;
+  task->dumpPath.clear();
+  task->startedAtTick64 = 0;
+  task->timeoutMs = 0;
+}
+
 bool StartPendingCrashAnalysisTask(
   const skydiag::helper::HelperConfig& cfg,
   const std::wstring& dumpPath,
@@ -80,6 +95,14 @@ void FinalizePendingCrashAnalysisIfReady(
     const ULONGLONG nowTick = GetTickCount64();
     if (nowTick >= task->startedAtTick64 &&
         (nowTick - task->startedAtTick64) > static_cast<ULONGLONG>(task->timeoutMs)) {
+      // The timeout bounds the recapture decision, which needs the result
+      // while the game is still alive. Without recapture the analysis only
+      // writes the report, so a slow one (a large dump) is left to finish.
+      if (!cfg.enableAutoRecaptureOnUnknownCrash) {
+        AppendLogLine(outBase, L"Crash headless analysis still running after its window; leaving it to finish the report.");
+        DetachPendingCrashAnalysis(task);
+        return;
+      }
       TerminateProcess(task->process, 1);
       AppendLogLine(outBase, L"Crash headless analysis timeout; process terminated.");
       ClearPendingCrashAnalysis(task);

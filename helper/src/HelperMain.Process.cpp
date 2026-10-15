@@ -246,6 +246,24 @@ void CleanupCrashArtifactsAfterZeroExit(
   CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"process_exit", L"exit_code=0");
 }
 
+void ReleasePendingCrashAnalysisAtShutdown(const std::filesystem::path& outBase, HelperLoopState* state)
+{
+  if (!state || !state->pendingCrashAnalysis.active) {
+    return;
+  }
+  // The game exited after a crash (a zero exit already stopped the
+  // analyzer). Stopping it now would lose the report when no viewer runs
+  // (AutoOpenViewerOnCrash=0): let it finish, unless the viewer opened at
+  // exit is analyzing the same dump.
+  if (state->crashViewerLaunchedAtExit) {
+    AppendLogLine(outBase, L"Helper shutting down; the crash viewer analyzes the same dump, so the tracked analyzer is stopped.");
+    ClearPendingCrashAnalysis(&state->pendingCrashAnalysis);
+  } else {
+    AppendLogLine(outBase, L"Helper shutting down while crash analysis is still running; leaving it to finish the report.");
+    DetachPendingCrashAnalysis(&state->pendingCrashAnalysis);
+  }
+}
+
 bool HandleLateRecoveryTick(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
@@ -310,6 +328,7 @@ void LaunchDeferredViewersAfterExit(
       deferredDumpPath,
       outBase,
       L"crash_deferred_exit");
+    state->crashViewerLaunchedAtExit = launch == DumpToolViewerLaunchResult::kLaunched;
     if (launch == DumpToolViewerLaunchResult::kLaunched) {
       AppendLogLine(
         outBase,

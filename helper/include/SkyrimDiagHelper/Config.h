@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace skydiag::helper {
 
@@ -71,6 +73,23 @@ struct HelperConfig {
   std::uint32_t maxHelperLogBytes = 8u * 1024u * 1024u;
   std::uint32_t maxHelperLogFiles = 3;
 };
+
+// OutputDir as SkyrimDiagHelper.ini documents it: blank means the default
+// subfolder of the helper exe folder, and a relative value is relative to
+// that folder. Resolved to an absolute path once here: the dump tool is
+// started with the output folder as its working directory, so a relative
+// path would be looked up inside itself (MyLogs\MyLogs\x.dmp).
+inline std::filesystem::path ResolveOutputDirAgainstExeDir(
+  const std::wstring& raw,
+  const std::filesystem::path& exeDir,
+  std::wstring_view defaultSubdir)
+{
+  std::filesystem::path out = raw.empty() ? exeDir / defaultSubdir : std::filesystem::path(raw);
+  if (out.is_relative()) {
+    out = exeDir / out;
+  }
+  return out.lexically_normal();
+}
 
 HelperConfig LoadConfig(std::wstring* err);
 

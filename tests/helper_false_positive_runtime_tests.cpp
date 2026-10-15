@@ -942,6 +942,98 @@ void TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat()
   std::filesystem::remove_all(outBase);
 }
 
+// OutputDir is relative to the helper exe folder (SkyrimDiagHelper.ini). It
+// must reach the dump tool absolute: the tool runs with the output folder as
+// its working directory, so "MyLogs" used to become MyLogs\MyLogs\x.dmp.
+void TestOutputDirResolvesAgainstTheHelperFolder()
+{
+  using skydiag::helper::ResolveOutputDirAgainstExeDir;
+  const std::filesystem::path exeDir = L"C:\\Game\\Data\\SKSE\\Plugins";
+  Require(ResolveOutputDirAgainstExeDir(L"", exeDir, L"Tullius Ctd Logs") ==
+            std::filesystem::path(L"C:\\Game\\Data\\SKSE\\Plugins\\Tullius Ctd Logs"),
+    "Blank OutputDir is the default subfolder");
+  Require(ResolveOutputDirAgainstExeDir(L"MyLogs", exeDir, L"Tullius Ctd Logs") ==
+            std::filesystem::path(L"C:\\Game\\Data\\SKSE\\Plugins\\MyLogs"),
+    "A relative OutputDir is under the helper folder");
+  Require(ResolveOutputDirAgainstExeDir(L"..\\..\\..\\Logs", exeDir, L"Tullius Ctd Logs") ==
+            std::filesystem::path(L"C:\\Game\\Logs"),
+    "Parent references are normalized");
+  Require(ResolveOutputDirAgainstExeDir(L"D:\\SkyrimDiag", exeDir, L"Tullius Ctd Logs") ==
+            std::filesystem::path(L"D:\\SkyrimDiag"),
+    "An absolute OutputDir is kept");
+}
+
+HANDLE DuplicateProcessHandle(HANDLE process)
+{
+  HANDLE copy = nullptr;
+  Require(DuplicateHandle(GetCurrentProcess(), process, GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS) != FALSE,
+    "DuplicateHandle failed");
+  return copy;
+}
+
+// After a crash the game exits non-zero and the helper shuts down. With no
+// viewer opened (AutoOpenViewerOnCrash=0) the headless analyzer is the only
+// thing writing the report, so it must be left to finish. When the viewer
+// opened at exit analyzes the same dump, the tracked analyzer is stopped.
+void TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened()
+{
+  using skydiag::helper::internal::ReleasePendingCrashAnalysisAtShutdown;
+  const auto outBase = MakeTempDir(L"skydiag_helper_shutdown_analysis");
+  ClearLog(outBase);
+
+  {
+    auto analyzer = LaunchSleepingChildProcess();
+    skydiag::helper::internal::HelperLoopState state{};
+    state.pendingCrashAnalysis.active = true;
+    state.pendingCrashAnalysis.process = DuplicateProcessHandle(analyzer.pi.hProcess);
+    state.pendingCrashAnalysis.startedAtTick64 = GetTickCount64();
+    ReleasePendingCrashAnalysisAtShutdown(outBase, &state);
+    Require(!state.pendingCrashAnalysis.active, "No longer tracked");
+    Require(WaitForSingleObject(analyzer.pi.hProcess, 0) == WAIT_TIMEOUT, "The analyzer keeps running to write the report");
+    AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "leaving it to finish", "Log says it was left running");
+    TerminateChildProcess(&analyzer);
+  }
+  {
+    auto analyzer = LaunchSleepingChildProcess();
+    skydiag::helper::internal::HelperLoopState state{};
+    state.pendingCrashAnalysis.active = true;
+    state.pendingCrashAnalysis.process = DuplicateProcessHandle(analyzer.pi.hProcess);
+    state.pendingCrashAnalysis.startedAtTick64 = GetTickCount64();
+    state.crashViewerLaunchedAtExit = true;
+    ReleasePendingCrashAnalysisAtShutdown(outBase, &state);
+    Require(WaitForSingleObject(analyzer.pi.hProcess, 5000) == WAIT_OBJECT_0, "The viewer analyzes the dump: tracked analyzer stopped");
+    TerminateChildProcess(&analyzer);
+  }
+  std::filesystem::remove_all(outBase);
+}
+
+// The analysis timeout exists for the recapture decision. Without recapture
+// a slow analysis (a large dump) is left to finish instead of being killed.
+void TestAnalysisTimeoutOnlyKillsForRecapture()
+{
+  using skydiag::helper::internal::FinalizePendingCrashAnalysisIfReady;
+  const auto outBase = MakeTempDir(L"skydiag_helper_analysis_timeout");
+  ClearLog(outBase);
+  skydiag::helper::AttachedProcess proc{};
+
+  for (const bool recapture : { false, true }) {
+    HelperConfig cfg = MakeTestConfig();
+    cfg.enableAutoRecaptureOnUnknownCrash = recapture;
+    auto analyzer = LaunchSleepingChildProcess();
+    skydiag::helper::internal::PendingCrashAnalysis task{};
+    task.active = true;
+    task.process = DuplicateProcessHandle(analyzer.pi.hProcess);
+    task.startedAtTick64 = GetTickCount64() - 60'000;
+    task.timeoutMs = 20'000;
+    FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &task);
+    Require(!task.active, "No longer tracked after the window");
+    const bool stillRunning = WaitForSingleObject(analyzer.pi.hProcess, recapture ? 5000 : 0) == WAIT_TIMEOUT;
+    Require(stillRunning == !recapture, recapture ? "Recapture: the analysis is stopped at its timeout" : "No recapture: the analysis is left to finish");
+    TerminateChildProcess(&analyzer);
+  }
+  std::filesystem::remove_all(outBase);
+}
+
 int wmain(int argc, wchar_t** argv)
 {
   try {
@@ -992,6 +1084,9 @@ int wmain(int argc, wchar_t** argv)
     TestLateRecoveryNeedsAMinuteOfAdvancingHeartbeat();
     TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived();
     TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat();
+    TestOutputDirResolvesAgainstTheHelperFolder();
+    TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened();
+    TestAnalysisTimeoutOnlyKillsForRecapture();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

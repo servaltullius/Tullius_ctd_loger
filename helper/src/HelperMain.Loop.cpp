@@ -198,10 +198,7 @@ void ShutdownLoopState(
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
   UnregisterManualCaptureHotkeyIfEnabled(cfg);
 
-  if (state->pendingCrashAnalysis.active) {
-    AppendLogLine(outBase, L"Helper shutting down while crash analysis is still running; stopping the tracked analyzer process.");
-    ClearPendingCrashAnalysis(&state->pendingCrashAnalysis);
-  }
+  ReleasePendingCrashAnalysisAtShutdown(outBase, state);
 }
 
 }  // namespace skydiag::helper::internal
