@@ -772,6 +772,9 @@ static void Test_ParseObjectRefs_ModifiedBySkipped()
   assert(refs[0].esp_name == "MyMod.esp");
 }
 
+// A column-0 "RDI: (...)" register line is a synthetic shape no real Crash
+// Logger writes (they indent register lines; see the RealRegisterFormat tests);
+// kept so the depth rule stays relative to the register line.
 static void Test_ParseObjectRefs_RegisterFileField()
 {
   const std::string log =
@@ -1685,9 +1688,92 @@ static void Test_CrashLoggerLocationContradictsDumpFault()
   assert(!CrashLoggerLocationContradictsDumpFault(L"SkyrimSE.exe+0043756C", L"CrashLoggerSSE.dll", 0x1000u));
 }
 
+// Crash Logger before 1.22 has no POSSIBLE RELEVANT OBJECTS section: the
+// object a register holds is described under it, one tab deeper than the
+// register line (the shape of public 1.14/1.15 logs; names made up). Register
+// lines themselves start with a tab, which the parser used to read as
+// sub-lines, so these plugins were never found.
+static void Test_ParseObjectRefs_RealRegisterFormatBefore122()
+{
+  const std::string log =
+    "Skyrim SSE v1.6.1170\n"
+    "CrashLoggerSSE v1-15-0-0 Oct 12 2024 11:33:37\n"
+    "\n"
+    "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF600001000 SkyrimSE.exe+0001000\tmov rcx, [rax+0x28]\n"
+    "\n"
+    "REGISTERS:\n"
+    "\tRAX 0x0                (size_t) [0]\n"
+    "\tRBP 0x169B2DF9A80      (TESObjectBOOK*)\n"
+    "\t\tFile: \"Book Patches.esp\"\n"
+    "\t\tModified by: ccExample.esl -> Book Patches.esp\n"
+    "\t\tFlags: 0x00000009 kDestructible | kInitialized\n"
+    "\t\tName: \"A Made-up Book\"\n"
+    "\t\tFormID: 0x8612AB01\n"
+    "\t\tFormType: Book (27)\n"
+    "\tRSI 0x7FF6BC030DC0     (Inventory3DManager*)\n"
+    "\tR9  0x1B712B1EB00      (TESWeather*)\n"
+    "\t\tFile: \"WeatherOverhaul.esm\"\n"
+    "\t\tFlags: 0x00000009 kDestructible | kInitialized\n"
+    "\t\tFormID: 0x01000ABC\n"
+    "\t\tFormType: Weather (54)\n"
+    "\n"
+    "STACK:\n";
+
+  const auto refs = ParseCrashLoggerObjectRefsAscii(log);
+  bool book = false, weather = false;
+  for (const auto& r : refs) {
+    if (r.esp_name == "Book Patches.esp") {
+      book = true;
+      assert(r.location == "RBP");
+      assert(r.object_type == "TESObjectBOOK*");
+      assert(r.form_id == "0x8612AB01");
+      assert(r.object_name == "A Made-up Book");
+    }
+    if (r.esp_name == "WeatherOverhaul.esm") {
+      weather = true;
+      assert(r.location == "R9");
+      assert(r.object_type == "TESWeather*");
+      assert(r.form_id == "0x01000ABC");
+    }
+    // "Modified by:" lists every plugin that touched the record; only the
+    // defining file is the object's plugin here.
+    assert(r.esp_name != "ccExample.esl");
+  }
+  assert(book && weather);
+}
+
+// Files nested deeper than the register object's own fields belong to other
+// objects it points to. In Crash Logger 1.25 logs these are the cell under
+// "ParentCell:" (where the player stood, e.g. a location overhaul), which
+// must not become the character's plugin.
+static void Test_ParseObjectRefs_NestedRegisterFilesAreNotTheObject()
+{
+  const std::string log =
+    "CrashLoggerSSE v1-25-0-0 Aug 21 2026 09:19:20\n"
+    "\n"
+    "REGISTERS:\n"
+    "\tRCX 0x2A1B3C4D5E0      (Character*)\n"
+    "\t\tFlags: 0x00000009 kDestructible | kInitialized\n"
+    "\t\tName: \"Somebody\"\n"
+    "\t\tFormID: 0xFE000801\n"
+    "\t\tFormType: ActorCharacter (62)\n"
+    "\t\tParentCell: ---\n"
+    "\t\t\tFile: \"Location Overhaul.esp\"\n"
+    "\t\t\tFormID: 0x000AC5D2\n"
+    "\tRDX 0x0                (size_t) [0]\n"
+    "\n"
+    "STACK:\n";
+
+  for (const auto& r : ParseCrashLoggerObjectRefsAscii(log)) {
+    assert(r.esp_name != "Location Overhaul.esp");
+  }
+}
+
 int main()
 {
   Test_CrashLoggerLocationContradictsDumpFault();
+  Test_ParseObjectRefs_RealRegisterFormatBefore122();
+  Test_ParseObjectRefs_NestedRegisterFilesAreNotTheObject();
   Test_ParseExceptionLineAndObjectsWithoutPlugin();
   Test_ParseFrameTopModules_TiesKeepStackOrder();
   Test_LooksLikeCrashLogger_CrashLog();
