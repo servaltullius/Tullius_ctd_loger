@@ -151,7 +151,9 @@ jobs:
           python scripts/resolve_release_notes.py `
             --repo-root . `
             --tag $tag `
-            --output $notesPath
+            --output $notesPath `
+            --strict
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Create GitHub Release
         env:

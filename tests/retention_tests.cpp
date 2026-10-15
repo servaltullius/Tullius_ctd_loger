@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
+#include <vector>
 
 using skydiag::helper::RetentionLimits;
 using skydiag::helper::RotateLogFileIfNeeded;
@@ -25,12 +27,31 @@ static bool Exists(const std::filesystem::path& path)
   return std::filesystem::exists(path, ec);
 }
 
+// Unique per run (an unseeded rand() gave every run the same names, so a
+// previous run's leftovers were reused) and removed when the tests end.
+static std::vector<std::filesystem::path>& TempDirs()
+{
+  static std::vector<std::filesystem::path> dirs;
+  return dirs;
+}
+
 static std::filesystem::path MakeTempDir()
 {
-  const auto base = std::filesystem::temp_directory_path();
-  const auto dir = base / ("skydiag_retention_test_" + std::to_string(std::rand()));
+  static unsigned counter = 0;
+  const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+  const auto dir = std::filesystem::temp_directory_path() /
+    ("skydiag_retention_test_" + std::to_string(stamp) + "_" + std::to_string(++counter));
   std::filesystem::create_directories(dir);
+  TempDirs().push_back(dir);
   return dir;
+}
+
+static void RemoveTempDirs()
+{
+  std::error_code ec;
+  for (const auto& dir : TempDirs()) {
+    std::filesystem::remove_all(dir, ec);
+  }
 }
 
 static void Test_PrunesCrashDumpsAndArtifacts()
@@ -188,6 +209,35 @@ static void Test_PrunesCrashManifestWithPrecisionTimestamp()
   assert(Exists(dir / manifest1));
 }
 
+// A recapture dump (SkyrimDiag_Crash_<ts>_Richer.dmp) writes
+// SkyrimDiag_Incident_CrashRecapture_<ts>.json; it goes with its dump.
+static void Test_PrunesCrashRecaptureManifestWithItsDump()
+{
+  const auto dir = MakeTempDir();
+  const char* oldTs = "20260101_050000_100";
+  const char* newTs = "20260101_060000_100";
+  const auto oldDump = std::string("SkyrimDiag_Crash_") + oldTs + "_Richer.dmp";
+  const auto newDump = std::string("SkyrimDiag_Crash_") + newTs + "_Richer.dmp";
+  const auto oldManifest = std::string("SkyrimDiag_Incident_CrashRecapture_") + oldTs + ".json";
+  const auto newManifest = std::string("SkyrimDiag_Incident_CrashRecapture_") + newTs + ".json";
+  WriteFile(dir / oldDump);
+  WriteFile(dir / newDump);
+  WriteFile(dir / oldManifest);
+  WriteFile(dir / newManifest);
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(dir / oldDump));
+  assert(!Exists(dir / oldManifest));
+  assert(Exists(dir / newDump));
+  assert(Exists(dir / newManifest));
+}
+
 static void Test_RotatesHelperLog()
 {
   const auto dir = MakeTempDir();
@@ -342,6 +392,7 @@ int main()
   Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();
   Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();
   Test_PrunesCrashManifestWithPrecisionTimestamp();
+  Test_PrunesCrashRecaptureManifestWithItsDump();
   Test_RotatesHelperLog();
   Test_PrunesAroundNamesOutsideTheAnsiCodePage();
   Test_PrunesAnalysisCachesWithoutTheirDump();
@@ -349,5 +400,6 @@ int main()
 #ifdef _WIN32
   Test_PrunesAroundUnpairedSurrogateNames();
 #endif
+  RemoveTempDirs();
   return 0;
 }

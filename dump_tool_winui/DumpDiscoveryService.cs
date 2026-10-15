@@ -31,7 +31,10 @@ internal static class DumpDiscoveryService
                 continue;
             }
 
-            foreach (var file in EnumerateDumpFiles(root.Path, maxDirectories: 256, maxFiles: 96))
+            // The cap only bounds a runaway folder: files come in name order
+            // (oldest timestamp first), so a low cap dropped the newest dumps
+            // before the list below is sorted by time.
+            foreach (var file in EnumerateDumpFiles(root.Path, maxDirectories: 256, maxFiles: 4096))
             {
                 string fullPath;
                 try

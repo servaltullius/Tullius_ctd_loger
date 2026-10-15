@@ -522,5 +522,14 @@ int main()
     pluginMain.find("GetModuleFileNameW(mod, buf, MAX_PATH)") == std::string::npos &&
     "Plugin path resolution must not use MAX_PATH-sized fixed buffers.");
 
+  // The adjacent-duplicate check runs before the adaptive throttle, so a
+  // file reopened in a loop does not raise the sampling divisor and drop
+  // new files right before a crash.
+  {
+    const std::string resourceLog = ReadAllText(repoRoot / "plugin" / "src" / "ResourceLog.cpp");
+    AssertOrdered(resourceLog, "prev.path_hash == h", "ShouldRecordResourceEvent(shm, nowQpc)",
+      "Resource dedup must run before the adaptive throttle.");
+  }
+
   return 0;
 }

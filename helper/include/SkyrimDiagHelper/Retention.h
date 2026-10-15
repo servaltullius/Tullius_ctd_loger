@@ -273,6 +273,11 @@ inline void PruneDumpFilesFromCollected(
         if (it->second == 0) {
           const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dumps[i].ts + ".json");
           std::filesystem::remove(manifest, ec);
+          if (incidentKind == "Crash") {
+            // A recapture dump (SkyrimDiag_Crash_<ts>_Richer.dmp) writes its
+            // own manifest under the same timestamp.
+            std::filesystem::remove(dir / ("SkyrimDiag_Incident_CrashRecapture_" + dumps[i].ts + ".json"), ec);
+          }
         }
       }
     }

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
@@ -19,7 +20,8 @@ def _notes_version(tag: str) -> str:
     return match.group(1) if match is not None else tag
 
 
-def resolve_release_notes(repo_root: Path, tag: str) -> str:
+def find_release_notes(repo_root: Path, tag: str) -> str | None:
+    """The draft or CHANGELOG section for a tag, or None when neither exists."""
     tag = tag.strip()
     if not tag:
         raise ValueError("release tag must not be empty")
@@ -51,7 +53,12 @@ def resolve_release_notes(repo_root: Path, tag: str) -> str:
         if captured:
             return "\n".join(captured).rstrip() + "\n"
 
-    return f"Release {tag}\n"
+    return None
+
+
+def resolve_release_notes(repo_root: Path, tag: str) -> str:
+    notes = find_release_notes(repo_root, tag)
+    return notes if notes is not None else f"Release {tag.strip()}\n"
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -75,13 +82,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo-root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--tag", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail instead of publishing a one-line placeholder when no draft or CHANGELOG section exists",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root).resolve()
     output = Path(args.output)
     if not output.is_absolute():
         output = (root / output).resolve()
-    _atomic_write(output, resolve_release_notes(root, args.tag))
+    notes = find_release_notes(root, args.tag)
+    if notes is None:
+        if args.strict:
+            print(
+                f"No release notes for {args.tag}: add docs/release/drafts/{args.tag}.md "
+                "or a matching CHANGELOG.md section",
+                file=sys.stderr,
+            )
+            return 2
+        notes = f"Release {args.tag.strip()}\n"
+    _atomic_write(output, notes)
     print(f"Wrote release notes: {output}")
     return 0
 

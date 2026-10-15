@@ -470,6 +470,18 @@ static void TestWinUiKoreanStaticCopyIsLocalized()
 // Cells and worldspaces only say where the player was: like the native
 // analyzer, the viewer never shows their plugin as the culprit, and freeze
 // guidance about the main thread is an action to take now.
+// The blackbox card counts the whole log, not the 200 lines it shows, and
+// dump discovery does not cut the newest dumps before sorting by time.
+static void TestWinUiCountsAllEventsAndKeepsNewestDumps()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto vm = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindowViewModel.cs");
+  RequireContains(vm, "data.EventCount = totalEvents;", "Event count must be the whole blackbox log.");
+  RequireNotContains(vm, "data.EventCount = data.EventLines.Count;", "Event count must not be the 200-line tail size.");
+  const auto discovery = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryService.cs");
+  RequireNotContains(discovery, "maxFiles: 96", "Discovery must not cut dumps (name order, oldest first) before sorting.");
+}
+
 static void TestWinUiSkipsLocationRefsAndGroupsFreezeActions()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -558,6 +570,7 @@ int main()
   TestWinUiUsesFocusedEmptyStates();
   TestWinUiKoreanStaticCopyIsLocalized();
   TestWinUiSkipsLocationRefsAndGroupsFreezeActions();
+  TestWinUiCountsAllEventsAndKeepsNewestDumps();
   TestReviewFeedbackFollowsPrimaryGuidance();
   TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
 
