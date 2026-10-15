@@ -131,6 +131,7 @@ void RunHelperLoop(
       continue;
     }
 
+    (void)HandleLateRecoveryTick(cfg, proc, outBase, state);
     if (HandleProcessExitTick(cfg, proc, outBase, state)) {
       break;
     }

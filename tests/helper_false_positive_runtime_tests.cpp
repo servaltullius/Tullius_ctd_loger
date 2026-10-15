@@ -795,6 +795,153 @@ void TestEtwStopExitZeroRequiresNonEmptyArtifact()
 
 }  // namespace
 
+// The decision alone: alive for a minute after the crash was kept and the
+// heartbeat advancing in six consecutive five-second windows.
+void TestLateRecoveryNeedsAMinuteOfAdvancingHeartbeat()
+{
+  using skydiag::helper::internal::AdvanceLateRecovery;
+  using skydiag::helper::internal::LateRecoveryState;
+  using skydiag::helper::internal::StartLateRecovery;
+
+  LateRecoveryState s{};
+  Require(!AdvanceLateRecovery(&s, 100'000, 1), "Not started: never releases");
+
+  StartLateRecovery(&s, 1'000, 100);
+  std::uint64_t now = 1'000;
+  std::uint64_t hb = 100;
+  for (int i = 0; i < 6; ++i) {
+    now += 5'000;
+    hb += 50;
+    Require(!AdvanceLateRecovery(&s, now, hb), "30 s of heartbeat is not enough before a minute alive");
+  }
+  Require(!AdvanceLateRecovery(&s, now + 1'000, hb + 1), "Samples come no faster than every five seconds");
+  for (int i = 0; i < 5; ++i) {
+    now += 5'000;
+    hb += 50;
+    (void)AdvanceLateRecovery(&s, now, hb);
+  }
+  now += 5'000;
+  hb += 50;
+  Require(now - 1'000 >= 60'000, "test clock reached a minute");
+  Require(AdvanceLateRecovery(&s, now, hb), "A minute alive and 30 s of advancing heartbeat releases");
+
+  // A window without heartbeat (paused, minimized, stalled) restarts the count.
+  StartLateRecovery(&s, 1'000, 100);
+  now = 1'000;
+  hb = 100;
+  bool releasedBeforeStall = false;
+  for (int i = 0; i < 20; ++i) {
+    now += 5'000;
+    if (i != 15) {
+      hb += 50;
+    }
+    const bool released = AdvanceLateRecovery(&s, now, hb);
+    releasedBeforeStall = releasedBeforeStall || (i < 15 && released);
+    Require(!(i >= 15 && released), "A stalled window restarts the 30 s count");
+  }
+  Require(releasedBeforeStall, "Before the stall the release condition was met");
+}
+
+// A first-chance exception kept as a crash because the main thread was busy
+// during the filter window, after which the game kept running: the capture is
+// released like a zero exit, and the freeze is thawed for a later real CTD.
+void TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived()
+{
+  using skydiag::helper::internal::HandleLateRecoveryTick;
+
+  const auto outBase = MakeTempDir(L"skydiag_helper_late_recovery");
+  ClearLog(outBase);
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20261015_120000_001.dmp";
+  const auto reportPath = outBase / "SkyrimDiag_Crash_20261015_120000_001_SkyrimDiagReport.txt";
+  WriteAllTextUtf8(dumpPath, "dump");
+  WriteAllTextUtf8(reportPath, "report");
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.last_heartbeat_qpc = 100u;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HelperConfig cfg = MakeTestConfig();
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo =
+    skydiag::helper::internal::BuildCrashEventInfo(0xC0000005u, 0x12345678u, child.pi.dwThreadId, skydiag::kState_Frozen);
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  state.pendingCrashViewerDumpPath = dumpPath.wstring();
+
+  // Still within the window: nothing happens.
+  const auto now = GetTickCount64();
+  skydiag::helper::internal::StartLateRecovery(&state.crashCaptured.lateRecovery, now, 100u);
+  shared->header.last_heartbeat_qpc = 200u;
+  Require(!HandleLateRecoveryTick(cfg, proc, outBase, &state), "Too early: the capture is kept");
+  Require(state.crashCaptured.latched && FileExists(dumpPath), "Too early: dump and latch stay");
+
+  // Two minutes after the crash was kept, five advancing windows already seen.
+  auto& late = state.crashCaptured.lateRecovery;
+  late.latchedTick64 = now - 120'000;
+  late.lastSampleTick64 = now - 6'000;
+  late.lastHeartbeatQpc = 200u;
+  late.advancingWindows = 5u;
+  shared->header.last_heartbeat_qpc = 300u;
+  Require(HandleLateRecoveryTick(cfg, proc, outBase, &state), "The game outlived the crash: released");
+  Require(!state.crashCaptured.latched, "Latch cleared");
+  Require(!FileExists(dumpPath) && !FileExists(reportPath), "Filtered artifacts removed like a zero exit");
+  Require(state.pendingCrashViewerDumpPath.empty(), "Deferred viewer cancelled");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "Freeze thawed for a later CTD");
+
+  const auto evidence = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_CleanExitEvidence_", L".json"));
+  AssertContains(evidence, "strong_fault_published_but_game_kept_running_dump_discarded", "Evidence says the game kept running");
+  AssertContains(evidence, "\"filter_context\": \"late_recovery\"", "Late-recovery context is explicit");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "Game kept running", "Log explains the release");
+  AssertContains(log, "thawed", "Log confirms the thaw");
+
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// Without heartbeat progress (the game is stuck, or a real crash is still
+// being reported) the capture is never released, however long it waits.
+void TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat()
+{
+  using skydiag::helper::internal::HandleLateRecoveryTick;
+
+  const auto outBase = MakeTempDir(L"skydiag_helper_late_recovery_stuck");
+  ClearLog(outBase);
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20261015_120500_001.dmp";
+  WriteAllTextUtf8(dumpPath, "dump");
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.last_heartbeat_qpc = 500u;
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HelperConfig cfg = MakeTestConfig();
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  auto& late = state.crashCaptured.lateRecovery;
+  const auto now = GetTickCount64();
+  late.latchedTick64 = now - 600'000;
+  late.lastSampleTick64 = now - 6'000;
+  late.lastHeartbeatQpc = 500u;
+  late.advancingWindows = 5u;
+  Require(!HandleLateRecoveryTick(cfg, proc, outBase, &state), "No heartbeat progress: kept");
+  Require(state.crashCaptured.latched && FileExists(dumpPath), "Dump and latch stay");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) != 0u, "Still frozen");
+
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 int wmain(int argc, wchar_t** argv)
 {
   try {
@@ -842,6 +989,9 @@ int wmain(int argc, wchar_t** argv)
     TestCleanExitDumpDeletionFailureIsRecordedAsPreserved();
     TestEtwStopFailureRetriesThenConfirmsCancellation();
     TestEtwStopExitZeroRequiresNonEmptyArtifact();
+    TestLateRecoveryNeedsAMinuteOfAdvancingHeartbeat();
+    TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived();
+    TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

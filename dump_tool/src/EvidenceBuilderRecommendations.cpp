@@ -397,9 +397,14 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 {
   const bool en = ctx.en;
   if (ctx.isFilteredCleanExit) {
+    const bool lateRecovery = r.clean_exit_filter_context == "late_recovery";
     r.recommendations.push_back(en
-      ? L"[Clean exit] The validated helper record says the process exited with code 0. Do not blame a mod from this preserved diagnostic dump."
-      : L"[정상 종료] 검증된 헬퍼 레코드에 따르면 프로세스가 종료 코드 0으로 끝났습니다. 보존된 진단 덤프만으로 모드를 원인으로 지목하지 마세요.");
+      ? (lateRecovery
+           ? L"[Clean exit] The validated helper record says the game kept running after this exception. Do not blame a mod from this preserved diagnostic dump."
+           : L"[Clean exit] The validated helper record says the process exited with code 0. Do not blame a mod from this preserved diagnostic dump.")
+      : (lateRecovery
+           ? L"[정상 종료] 검증된 헬퍼 레코드에 따르면 이 예외 뒤에도 게임이 계속 실행됐습니다. 보존된 진단 덤프만으로 모드를 원인으로 지목하지 마세요."
+           : L"[정상 종료] 검증된 헬퍼 레코드에 따르면 프로세스가 종료 코드 0으로 끝났습니다. 보존된 진단 덤프만으로 모드를 원인으로 지목하지 마세요."));
     r.recommendations.push_back(en
       ? L"[Clean exit] Keep the dump, clean-exit evidence sidecar, and helper log together when reporting filter behavior."
       : L"[정상 종료] 필터 동작을 제보할 때 덤프, 정상 종료 증거 사이드카, 헬퍼 로그를 함께 보관하세요.");

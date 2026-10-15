@@ -158,7 +158,7 @@ int main()
     "MakeIncidentManifestV1(",
     "Post-processing helper must start ETW capture before writing incident manifest.");
 
-  const std::string zeroExitCleanupBody = ExtractFunctionBody(helperMain, "void CleanupCrashArtifactsAfterZeroExit(");
+  const std::string zeroExitCleanupBody = ExtractFunctionBody(helperMain, "void CleanupFilteredCrashArtifacts(");
   assert(
     zeroExitCleanupBody.find("exitCode0StrongCrash") == std::string::npos &&
     "Zero-exit cleanup must not preserve artifacts based on strong first-chance exception evidence.");

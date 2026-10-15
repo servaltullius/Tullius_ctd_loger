@@ -305,6 +305,9 @@ struct AnalysisResult
   std::uint64_t blackbox_exception_addr = 0;
   bool is_filtered_clean_exit = false;
   std::string clean_exit_dump_state;
+  // Helper filter context: "process_exit" (exit code 0) or "late_recovery"
+  // (the game kept running after the crash was captured).
+  std::string clean_exit_filter_context;
   std::wstring clean_exit_evidence_filename;
 
   std::uint32_t exc_code = 0;
