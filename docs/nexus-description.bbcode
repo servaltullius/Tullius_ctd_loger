@@ -12,6 +12,7 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 [*]Records [b]blackbox events[/b], [b]WCT[/b], and supporting incident artifacts around the failure
 [*]Generates a [b]human-readable report[/b] so you do not need WinDbg for the first pass
 [*]Automatically reads CrashLogger logs when CrashLoggerSSE is installed
+[*]Records the MO2 profile and mod list active at the crash, so the mods a report names are the ones you actually ran with
 [*]Reads the game objects a crash was handling straight from the dump: type, FormID, name, the plugins that define and change it, and a reference's base object
 [*]Explains freezes by what the game's main thread was waiting for: the GPU, the graphics driver, an error dialog a plugin opened, or a game thread stuck in a plugin's code
 [*]Records RAM, commit and VRAM at capture time, and warns about modules that hide crashes (such as SkyrimCrashGuard)
@@ -60,8 +61,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.65 Update Notice[/b]
-On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64. Replace the previous installation with the complete v0.2.65 zip. Do not copy only individual EXEs or DLLs: since v0.2.62 the plugin, analyzer, its data files and the viewer changed (the SharedLayout protocol is still v4). In MO2, remove the old mod or fully replace its files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.66 Update Notice[/b]
+Replace the previous installation with the complete v0.2.66 zip. Do not copy only individual EXEs or DLLs: v0.2.66 changes the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
 [b][size=4]Installation (MO2)[/size][/b]
@@ -118,7 +120,19 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.65[/size][/b]
+[b][size=4]What's New in v0.2.66[/size][/b]
+Fixes for reports that named the wrong mod: the deferred items from the v0.2.65 audit, and diagnosis issues from an outside review, each checked against the code and real dumps.[list]
+[*][b]MO2 profile at the crash:[/b] the Helper now stores the MO2 profile and enabled mod list (in priority order) with each dump, and the analyzer uses them. A dump analyzed later, after you switched profiles, no longer blames mods from the current profile. Older dumps say the providers were "found at analysis time" and are not used to rank suspects
+[*][b]SKSE log from an earlier run:[/b] a skse64.log written before the game started is no longer read as this session's log
+[*][b]Missing masters:[/b] base game and Creation Club masters that are really missing are now reported, but only when the Helper can see the game's Data folder (no MO2, or inside MO2's virtual file system). Checked in game with Creation Club files kept as an MO2 mod: no false reports
+[*][b]Crash Logger log from another crash:[/b] logs are paired by time (up to two minutes apart). When a crash leaves no log of its own (for example a stack overflow), the previous crash's log could pair and push its mod to the top. When the log's exception location differs from the dump, its clues are now downgraded
+[*][b]Freezes:[/b] when the main thread waited for a game thread stuck in a plugin, that plugin now also appears as a suspect card in the viewer, not only in the summary. Re-analyzing an old freeze dump after a mod update no longer blames an idle plugin thread (Hitch Hunter's wait loop)
+[*][b]Location mods:[/b] the mod that defines the cell or worldspace you were standing in is no longer suggested as the culprit in the summary, advice or viewer (it stays in the evidence)
+[*][b]1.7.104:[/b] the Engine Fixes FaceGen and ShadowSceneNode null crash spots are recognized on 1.7.104 too
+[*][b]Also:[/b] a fault inside Crash Logger itself is explained as its secondary fault; freeze and dialog guidance appears under "Do This Now" in the viewer
+[/list]
+
+[b][size=4]Earlier: v0.2.65[/size][/b]
 A sweep for places where the report said something false about your setup, started by a report that BEES was "not installed" while it was.[list]
 [*][b]BEES:[/b] BEES installs BackportedESLSupport.dll, but only bees.dll was checked, so 1.71-header plugins on runtimes before 1.6.1130 always got a "BEES not installed" warning. Both names count now, and the report says "not loaded" (not installed, or SKSE did not load it)
 [*][b]ENB/ReShade false positives:[/b] the Windows copies of d3d11.dll and dxgi.dll, which the game always loads, were taken for ENB and ReShade, so nearly every report said they were detected. Only copies loaded from outside Windows (the game folder) count now, named by DLL because ENB, ReShade and DXVK share those names; such a game-folder DLL can now be a suspect
@@ -168,6 +182,7 @@ Two real CTDs had reports that blamed the wrong DLL; both are fixed, and crashes
 [i]Validation scope:[/i] All release candidates were played on one MO2 setup (game 1.6.1170, SKSE 2.2.6, about 4,250 plugins, Crash Logger 1.25). For v0.2.61 a development-only test plugin caused 7 incidents of known cause in that game (access violation, breakpoint, C++ exception, a crash inside the game EXE, and freezes); after the fixes in v0.2.61 every report pointed at the right DLL. v0.2.62 was also loaded on 1.7.104 (Steam, no other mods, SKSE 2.3.1) with a manual capture and report. Not yet seen in real use: crashes and freezes on a modded 1.7.104 setup, the "stuck game thread" freeze rule on a real freeze, analysis after the next Windows update, and a real SkyrimCrashGuard install. There is still no reviewed real-incident accuracy corpus.
 For v0.2.63, the two real CTDs above were re-analyzed with the new analyzer (moving ContentCatalog.txt away did stop the first; the second matches a hook install the mod logged in the same millisecond), five more test-plugin incidents were caused in game (a crash in an event callback, in the plugin's own thread, a stack overflow, a spinning freeze and a callback freeze), and a build of this release's code was installed and played on the same MO2 setup. Not yet seen in real use: the new known crash spots on a real crash. The v0.2.64 fix was checked in the rebuilt plugin's machine code; it has not been run on 1.5.97 here.
 For v0.2.65, a test build ran on the same 1.6.1170 setup: the resource log started at the main menu, a manual capture held 120 recent files with their MO2 mods and no ENB/ReShade claim, and the game closed normally. 25 kept dumps re-analyzed against v0.2.64 changed only in wording. Not yet run here: 1.5.97 and 1.7.104 with the new resource hook (1.7.104 has the same layout in its RTTI).
+For v0.2.66, the release candidate was installed as an MO2 mod on the same setup (4,362 enabled mods) and a manual capture recorded the crash-time profile and mod list, a time-checked skse64.log, and no false missing masters with Creation Club files kept as an MO2 mod. 34 kept dumps were re-analyzed before and after the review fixes: only one wording change and the five test freezes (now naming the right plugin) differed. Not yet seen in real use: a real CTD with the new Helper, the 1.7.104 Engine Fixes spots, and 1.5.97.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -296,6 +311,7 @@ dump와 주변 단서를 모아서 [b]사람이 읽기 쉬운 보고서[/b]를 �
 [*]사고 직전의 [b]blackbox 이벤트[/b], [b]WCT[/b], 보조 로그를 함께 남깁니다.
 [*]결과를 [b]요약 + 근거 + 체크리스트[/b] 형태로 정리합니다.
 [*]CrashLoggerSSE가 있으면 관련 로그를 자동으로 찾아서 분석에 포함합니다.
+[*]크래시 당시의 MO2 프로필과 켜진 모드 목록을 함께 기록해, 리포트가 실제로 쓰던 모드를 기준으로 판단합니다.
 [*]크래시가 다루던 게임 오브젝트를 덤프에서 직접 읽습니다: 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트.
 [*]프리징을 게임 메인 스레드가 무엇을 기다렸는지로 설명합니다: GPU, 그래픽 드라이버, 플러그인이 띄운 오류 창, 플러그인 코드에 갇힌 게임 스레드.
 [*]캡처 당시 RAM·커밋·VRAM을 기록하고, 크래시를 숨기는 모듈(SkyrimCrashGuard 등)을 경고합니다.
@@ -344,8 +360,9 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.65 중요 업데이트 안내[/b]
-Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다. 기존 설치를 완전히 교체하고 v0.2.65 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.62 이후 플러그인, 분석기와 그 데이터 파일, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서 구버전 모드를 제거하거나 전체 파일을 완전히 교체하고, 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.66 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.66 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.66에서 Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
 [b][size=4]설치 (MO2)[/size][/b]
@@ -402,7 +419,19 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.65 새 기능[/size][/b]
+[b][size=4]v0.2.66 새 기능[/size][/b]
+리포트가 엉뚱한 모드를 지목하던 곳을 고쳤습니다. v0.2.65 감사에서 미뤄 둔 항목과, 외부 리뷰에서 나온 진단 문제를 코드와 실제 덤프로 확인해 고친 것입니다.[list]
+[*][b]크래시 당시의 MO2 프로필:[/b] Helper가 덤프와 함께 MO2 프로필과 켜진 모드 목록(우선순위 순)을 기록하고, 분석기는 그것을 씁니다. 덤프를 보관했다가 프로필을 바꾼 뒤 분석해도 지금 프로필의 모드를 범인으로 적지 않습니다. 이전 덤프는 "분석 시점에 찾은 제공 모드"라고 적고 후보 판단에 쓰지 않습니다
+[*][b]이전 실행의 SKSE 로그:[/b] 게임이 시작되기 전에 쓰인 skse64.log를 이번 실행의 로그로 읽지 않습니다
+[*][b]누락 마스터:[/b] 실제로 없는 기본·CC 마스터를 누락으로 알립니다. Helper가 게임의 Data 폴더를 볼 수 있을 때만(MO2 없이 실행, 또는 MO2 가상 파일 시스템 안) 그렇게 합니다. CC 파일을 MO2 모드로 둔 구성에서 실게임으로 확인했고 오탐은 없었습니다
+[*][b]다른 크래시의 Crash Logger 로그:[/b] 로그는 시각(최대 2분 차이)으로 짝을 짓습니다. 이번 크래시가 로그를 남기지 못하면(스택 오버플로 등) 직전 크래시의 로그가 붙어 그 모드를 1순위로 올릴 수 있었습니다. 이제 로그의 예외 위치가 덤프와 다르면 그 단서를 낮게 평가합니다
+[*][b]프리징:[/b] 메인 스레드가 플러그인 안에 멈춘 게임 스레드를 기다렸다면, 그 플러그인이 결론뿐 아니라 뷰어 후보 카드에도 나옵니다. 모드 업데이트 뒤 예전 프리징 덤프를 다시 분석할 때 쉬고 있던 플러그인 스레드(Hitch Hunter 대기 루프)를 범인으로 지목하지 않습니다
+[*][b]장소 모드:[/b] 플레이어가 서 있던 셀·월드스페이스를 정의한 모드를 결론·권장 조치·뷰어에서 범인으로 안내하지 않습니다(근거 항목에는 남습니다)
+[*][b]1.7.104:[/b] Engine Fixes가 막는 FaceGen·ShadowSceneNode 널 포인터 지점을 1.7.104에서도 알아봅니다
+[*][b]그 밖에:[/b] Crash Logger 안에서 난 예외를 "원래 크래시를 기록하다 난 2차 예외"로 설명하고, 뷰어에서 프리징·대화상자 안내를 "지금 바로" 묶음에 보여 줍니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.65[/size][/b]
 "BEES를 설치했는데 미설치라고 나온다"는 제보를 계기로, 리포트가 사용자 환경에 대해 틀린 말을 하던 곳을 전수 점검해 고쳤습니다.[list]
 [*][b]BEES:[/b] BEES가 설치하는 BackportedESLSupport.dll 대신 bees.dll만 찾아서, 1.6.1130 미만에서 1.71 헤더 플러그인을 쓰면 BEES가 있어도 항상 "미설치" 경고가 떴습니다. 이제 두 이름을 모두 보고, "로드되지 않음(설치하지 않았거나 SKSE가 로드하지 못함)"이라고 씁니다
 [*][b]ENB/ReShade 오탐:[/b] 게임이 항상 로드하는 Windows의 d3d11.dll·dxgi.dll을 ENB·ReShade로 착각해, 거의 모든 리포트가 감지됐다고 했습니다. 이제 Windows 밖(게임 폴더)에서 로드된 사본만 보고, ENB·ReShade·DXVK가 같은 이름을 쓰므로 DLL 이름으로 적습니다. 게임 폴더의 그런 DLL은 이제 후보가 될 수 있습니다
@@ -452,6 +481,7 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [i]검증 범위:[/i] 모든 RC를 한 MO2 환경(게임 1.6.1170, SKSE 2.2.6, 플러그인 약 4,250개, Crash Logger 1.25)에서 실제로 플레이하며 확인했습니다. v0.2.61에서는 개발용 테스트 플러그인으로 원인을 아는 사고 7건(접근 위반, 브레이크포인트, C++ 예외, 게임 EXE 안의 크래시, 프리징)을 그 게임에서 일으켰고, v0.2.61의 수정 뒤 모든 리포트가 올바른 DLL을 지목했습니다. v0.2.62는 1.7.104(Steam, 다른 모드 없음, SKSE 2.3.1)에서도 로드와 수동 캡처·리포트를 확인했습니다. 아직 실사용에서 보지 못한 것: 모드가 많은 1.7.104 환경의 크래시·프리징, 실제 프리징에서의 "갇힌 게임 스레드" 판정, 다음 Windows 업데이트 뒤 분석, 실제 SkyrimCrashGuard 설치 환경. 검수된 실사고 정확도 corpus는 아직 없습니다.
 v0.2.63에서는 위의 실사고 CTD 두 건을 새 분석기로 다시 분석했습니다(첫 번째는 ContentCatalog.txt를 옮기자 실제로 해결됐고, 두 번째는 그 모드가 같은 밀리초에 남긴 후킹 설치 기록과 맞음). 개발용 테스트 플러그인으로 사고 5건(이벤트 콜백 안의 크래시, 플러그인 자신의 스레드, 스택 오버플로, CPU를 도는 프리징, 콜백 프리징)을 더 일으켜 확인했고, 이 릴리즈와 같은 코드의 빌드를 같은 MO2 환경에 설치해 플레이했습니다. 아직 실사용에서 보지 못한 것: 새 알려진 크래시 지점이 실제 크래시에서 일치하는 경우. v0.2.64 수정은 다시 빌드한 플러그인의 기계어로 확인했고, 1.5.97 실게임에서는 아직 확인하지 못했습니다.
 v0.2.65는 같은 1.6.1170 환경에서 테스트 빌드로 실행했습니다. 메인 메뉴에서 리소스 기록이 시작됐고, 수동 캡처에 최근 파일 120개와 그 MO2 모드가 기록됐으며 ENB/ReShade 오탐은 없었고, 정상 종료했습니다. 보관 덤프 25개를 v0.2.64와 비교한 결과 문구만 바뀌었습니다. 아직 확인하지 못한 것: 1.5.97과 1.7.104에서의 새 리소스 후킹(1.7.104는 RTTI로 같은 구조임을 확인).
+v0.2.66은 RC를 같은 환경(켜진 모드 4,362개)에 MO2 모드로 설치해 수동 캡처했습니다. 크래시 당시 프로필과 모드 목록, 시각을 확인한 skse64.log가 기록됐고, CC 파일을 MO2 모드로 둔 구성에서 누락 마스터 오탐은 없었습니다. 보관 덤프 34개를 리뷰 수정 전후로 비교한 결과 문구 1건과 시험 프리징 5건(이제 올바른 플러그인을 지목)만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 새 Helper로 난 실제 CTD, 1.7.104 Engine Fixes 지점, 1.5.97.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
