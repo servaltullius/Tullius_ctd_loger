@@ -346,6 +346,7 @@ internal sealed partial class MainWindowViewModel
         if (File.Exists(blackboxPath))
         {
             var tail = new Queue<string>(capacity: 200);
+            var totalEvents = 0;
             foreach (var line in File.ReadLines(blackboxPath))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -354,6 +355,7 @@ internal sealed partial class MainWindowViewModel
                     continue;
                 }
 
+                totalEvents++;
                 if (tail.Count == 200)
                 {
                     tail.Dequeue();
@@ -389,7 +391,8 @@ internal sealed partial class MainWindowViewModel
                 }
             }
             data.EventLines.AddRange(tail);
-            data.EventCount = data.EventLines.Count;
+            // The list shows the last 200; the count is the whole log.
+            data.EventCount = totalEvents;
         }
 
         var reportPath = dumpIdentity.IsValid

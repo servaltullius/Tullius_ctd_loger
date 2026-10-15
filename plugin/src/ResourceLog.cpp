@@ -213,11 +213,6 @@ void NoteResourceOpen(std::string_view pathUtf8) noexcept
   if ((shm->header.state_flags & skydiag::kState_Frozen) != 0u) {
     return;
   }
-  const std::uint64_t nowQpc = QpcNow();
-  if (!ShouldRecordResourceEvent(shm, nowQpc)) {
-    return;
-  }
-
   char norm[skydiag::kResourcePathMaxBytes]{};
   std::size_t normLen = 0;
   const std::uint64_t h = NormalizePathUtf8(pathUtf8, norm, sizeof(norm), normLen);
@@ -225,13 +220,21 @@ void NoteResourceOpen(std::string_view pathUtf8) noexcept
     return;
   }
 
-  // Dedup adjacent duplicates (best-effort).
+  // Dedup adjacent duplicates (best-effort) before the throttle: a file the
+  // game reopens in a loop is never recorded twice anyway, and counting it
+  // raised the sampling divisor until new files right before a crash were
+  // dropped.
   const std::uint32_t prevIdx = shm->resources.write_index;
   if (prevIdx != 0) {
     const auto& prev = shm->resources.entries[(prevIdx - 1) % skydiag::kResourceCapacity];
     if ((prev.seq & 1u) == 0u && prev.path_hash == h) {
       return;
     }
+  }
+
+  const std::uint64_t nowQpc = QpcNow();
+  if (!ShouldRecordResourceEvent(shm, nowQpc)) {
+    return;
   }
 
   const auto idx = static_cast<std::uint32_t>(

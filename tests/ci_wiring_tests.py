@@ -197,6 +197,15 @@ def check_release_notes_rc_fallback(failures: list[str]) -> None:
                 "non-RC prerelease incorrectly fell back to base-version release notes"
             )
 
+        # The release workflow must not publish that one-line placeholder.
+        if "--strict" not in release_workflow:
+            failures.append("release.yml does not resolve release notes with --strict")
+        out = root / "notes.md"
+        if resolver.main(["--repo-root", str(root), "--tag", "v1.2.3-beta1", "--output", str(out), "--strict"]) == 0:
+            failures.append("--strict accepted a tag with no draft or CHANGELOG section")
+        if resolver.main(["--repo-root", str(root), "--tag", "v1.2.3-rc4", "--output", str(out), "--strict"]) != 0:
+            failures.append("--strict rejected a tag that has a draft")
+
 
 def check_release_prerelease_classification(failures: list[str]) -> None:
     contract = _load_script("release_contract.py")

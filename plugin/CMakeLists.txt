@@ -63,7 +63,7 @@ if(DEFINED ENV{SKYRIM_FOLDER})
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_skyrim_plugins}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${TARGET_NAME}>" "${_skyrim_plugins}/SkyrimDiag.dll"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_PDB_FILE:${TARGET_NAME}>" "${_skyrim_plugins}/SkyrimDiag.pdb"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJECT_SOURCE_DIR}/dist/SkyrimDiag.ini" "${_skyrim_plugins}/SkyrimDiag.ini"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/dist/SkyrimDiag.ini" "${_skyrim_plugins}/SkyrimDiag.ini"
   )
 elseif(DEFINED ENV{SKYRIM_MODS_FOLDER})
   set(_mods_plugins "$ENV{SKYRIM_MODS_FOLDER}/SkyrimDiag/SKSE/Plugins")
@@ -71,6 +71,6 @@ elseif(DEFINED ENV{SKYRIM_MODS_FOLDER})
     COMMAND ${CMAKE_COMMAND} -E make_directory "${_mods_plugins}"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:${TARGET_NAME}>" "${_mods_plugins}/SkyrimDiag.dll"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_PDB_FILE:${TARGET_NAME}>" "${_mods_plugins}/SkyrimDiag.pdb"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJECT_SOURCE_DIR}/dist/SkyrimDiag.ini" "${_mods_plugins}/SkyrimDiag.ini"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/dist/SkyrimDiag.ini" "${_mods_plugins}/SkyrimDiag.ini"
   )
 endif()
