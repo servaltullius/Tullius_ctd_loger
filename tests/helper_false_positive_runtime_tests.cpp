@@ -814,7 +814,16 @@ void TestLateRecoveryNeedsAMinuteOfAdvancingHeartbeat()
     hb += 50;
     Require(!AdvanceLateRecovery(&s, now, hb), "30 s of heartbeat is not enough before a minute alive");
   }
-  Require(!AdvanceLateRecovery(&s, now + 1'000, hb + 1), "Samples come no faster than every five seconds");
+  {
+    LateRecoveryState ready{};
+    StartLateRecovery(&ready, 1'000, 100);
+    ready.lastSampleTick64 = 70'000;
+    ready.lastHeartbeatQpc = 500;
+    ready.advancingWindows = 5;
+    Require(!AdvanceLateRecovery(&ready, 71'000, 600), "Samples come no faster than every five seconds");
+    Require(ready.advancingWindows == 5u, "A too-early call does not count a window");
+    Require(AdvanceLateRecovery(&ready, 75'000, 600), "The next window completes the count");
+  }
   for (int i = 0; i < 5; ++i) {
     now += 5'000;
     hb += 50;
@@ -874,15 +883,17 @@ void TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived()
   state.capturedCrashDumpPath = dumpPath.wstring();
   state.pendingCrashViewerDumpPath = dumpPath.wstring();
 
-  // Still within the window: nothing happens.
+  // Six advancing windows but only 30 s since the crash was kept: too early.
   const auto now = GetTickCount64();
-  skydiag::helper::internal::StartLateRecovery(&state.crashCaptured.lateRecovery, now, 100u);
+  auto& late = state.crashCaptured.lateRecovery;
+  skydiag::helper::internal::StartLateRecovery(&late, now - 30'000, 100u);
+  late.lastSampleTick64 = now - 6'000;
+  late.advancingWindows = 5u;
   shared->header.last_heartbeat_qpc = 200u;
   Require(!HandleLateRecoveryTick(cfg, proc, outBase, &state), "Too early: the capture is kept");
   Require(state.crashCaptured.latched && FileExists(dumpPath), "Too early: dump and latch stay");
 
   // Two minutes after the crash was kept, five advancing windows already seen.
-  auto& late = state.crashCaptured.lateRecovery;
   late.latchedTick64 = now - 120'000;
   late.lastSampleTick64 = now - 6'000;
   late.lastHeartbeatQpc = 200u;
@@ -890,12 +901,17 @@ void TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived()
   shared->header.last_heartbeat_qpc = 300u;
   Require(HandleLateRecoveryTick(cfg, proc, outBase, &state), "The game outlived the crash: released");
   Require(!state.crashCaptured.latched, "Latch cleared");
-  Require(!FileExists(dumpPath) && !FileExists(reportPath), "Filtered artifacts removed like a zero exit");
+  // The heartbeat does not prove the faulting thread recovered, so the dump
+  // is kept for review; its derived crash artifacts go.
+  Require(FileExists(dumpPath), "The dump is kept");
+  Require(!FileExists(reportPath), "Derived crash artifacts are removed");
+  Require(state.postExitEvidenceSeq == 2u, "A later non-zero exit does not re-report this exception");
   Require(state.pendingCrashViewerDumpPath.empty(), "Deferred viewer cancelled");
   Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "Freeze thawed for a later CTD");
 
   const auto evidence = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_CleanExitEvidence_", L".json"));
-  AssertContains(evidence, "strong_fault_published_but_game_kept_running_dump_discarded", "Evidence says the game kept running");
+  AssertContains(evidence, "strong_fault_published_but_game_kept_running_dump_preserved", "Evidence says the game kept running");
+  AssertContains(evidence, "kept running for over a minute", "The note does not claim an exit code");
   AssertContains(evidence, "\"filter_context\": \"late_recovery\"", "Late-recovery context is explicit");
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "Game kept running", "Log explains the release");
@@ -961,6 +977,12 @@ void TestOutputDirResolvesAgainstTheHelperFolder()
   Require(ResolveOutputDirAgainstExeDir(L"D:\\SkyrimDiag", exeDir, L"Tullius Ctd Logs") ==
             std::filesystem::path(L"D:\\SkyrimDiag"),
     "An absolute OutputDir is kept");
+  Require(ResolveOutputDirAgainstExeDir(L"D:\\Logs\\", exeDir, L"Tullius Ctd Logs") ==
+            std::filesystem::path(L"D:\\Logs"),
+    "A trailing separator is dropped (it would escape the closing quote on the command line)");
+  Require(ResolveOutputDirAgainstExeDir(L"D:\\", exeDir, L"Tullius Ctd Logs") ==
+            std::filesystem::path(L"D:\\"),
+    "A drive root keeps its separator");
 }
 
 HANDLE DuplicateProcessHandle(HANDLE process)
@@ -1026,9 +1048,16 @@ void TestAnalysisTimeoutOnlyKillsForRecapture()
     task.startedAtTick64 = GetTickCount64() - 60'000;
     task.timeoutMs = 20'000;
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &task);
-    Require(!task.active, "No longer tracked after the window");
     const bool stillRunning = WaitForSingleObject(analyzer.pi.hProcess, recapture ? 5000 : 0) == WAIT_TIMEOUT;
     Require(stillRunning == !recapture, recapture ? "Recapture: the analysis is stopped at its timeout" : "No recapture: the analysis is left to finish");
+    if (recapture) {
+      Require(!task.active, "Recapture: no longer tracked");
+    } else {
+      Require(task.active && task.process && task.timeoutMs == 0u,
+        "No recapture: still tracked without a timeout, so a filtered-crash cleanup can stop it");
+      skydiag::helper::internal::ClearPendingCrashAnalysis(&task);
+      Require(WaitForSingleObject(analyzer.pi.hProcess, 5000) == WAIT_OBJECT_0, "The cleanup can still stop it");
+    }
     TerminateChildProcess(&analyzer);
   }
   std::filesystem::remove_all(outBase);

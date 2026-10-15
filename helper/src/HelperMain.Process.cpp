@@ -107,7 +107,8 @@ void CleanupFilteredCrashArtifacts(
   const std::filesystem::path& outBase,
   HelperLoopState* state,
   std::wstring_view context,
-  std::wstring_view logPrefix)
+  std::wstring_view logPrefix,
+  bool keepDump)
 {
   if (!state) {
     return;
@@ -125,7 +126,8 @@ void CleanupFilteredCrashArtifacts(
   // deleting any filtered artifacts. When deletion is intended, commit a
   // pending record first and finalize it only after observing the filesystem.
   const bool evidenceRequired = IsCleanExitEvidenceRequired(cfg, &state->crashCaptured);
-  bool preserveDump = cfg.preserveFilteredCrashDumps;
+  const bool preserveRequested = cfg.preserveFilteredCrashDumps || keepDump;
+  bool preserveDump = preserveRequested;
   bool pendingDeleteRecorded = false;
   bool dumpDeletionFailed = false;
   if (evidenceRequired && capturedDumpPath.empty()) {
@@ -136,7 +138,7 @@ void CleanupFilteredCrashArtifacts(
       L"process_exit_metadata_drain",
       {},
       CleanExitDumpState::kNotCaptured);
-  } else if (evidenceRequired && cfg.preserveFilteredCrashDumps) {
+  } else if (evidenceRequired && preserveRequested) {
     (void)TryWriteCleanExitEvidenceRecord(
       cfg,
       outBase,
@@ -214,14 +216,15 @@ void CleanupFilteredCrashArtifacts(
       AppendLogLine(
         outBase,
         std::wstring(logPrefix)
-          + (cfg.preserveFilteredCrashDumps
+          + (preserveRequested
                ? L" after filtered crash; dump file preserved, removed "
                : (dumpDeletionFailed
                     ? L" after filtered crash; dump deletion failed or was not verifiable, removed "
                     : L" clean-exit evidence write failed; dump preserved as a fail-safe, removed "))
           + std::to_wstring(removal.removedCount)
           + L" derived crash artifact(s), without keeping the crashCaptured latch "
-          + (cfg.preserveFilteredCrashDumps ? L"(PreserveFilteredCrashDumps=1): " : L": ")
+          + (cfg.preserveFilteredCrashDumps ? L"(PreserveFilteredCrashDumps=1): "
+                                            : (keepDump ? L"(kept for review): " : L": "))
           + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
     } else {
       AppendLogLine(
@@ -243,7 +246,7 @@ void CleanupCrashArtifactsAfterZeroExit(
   const std::filesystem::path& outBase,
   HelperLoopState* state)
 {
-  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"process_exit", L"exit_code=0");
+  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"process_exit", L"exit_code=0", /*keepDump=*/false);
 }
 
 void ReleasePendingCrashAnalysisAtShutdown(const std::filesystem::path& outBase, HelperLoopState* state)
@@ -290,7 +293,13 @@ bool HandleLateRecoveryTick(
     L"Game kept running " + std::to_wstring(keptForSec)
       + L"s after a crash was captured, with the heartbeat advancing; the exception was handled "
         L"(crash_seq=" + std::to_wstring(crashSeq) + L"). Releasing the capture.");
-  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running");
+  // The heartbeat proves the main thread runs, not that the faulting thread
+  // recovered: a worker blocked for a minute in a crash handler would look
+  // the same. So the dump is kept (marked late_recovery) instead of deleted;
+  // only the crash actions and the freeze are released.
+  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running", /*keepDump=*/true);
+  // A later non-zero exit must not re-report this released exception.
+  state->postExitEvidenceSeq = crashSeq;
   const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, crashSeq);
   AppendLogLine(
     outBase,

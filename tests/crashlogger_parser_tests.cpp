@@ -1767,6 +1767,22 @@ static void Test_ParseObjectRefs_NestedRegisterFilesAreNotTheObject()
   for (const auto& r : ParseCrashLoggerObjectRefsAscii(log)) {
     assert(r.esp_name != "Location Overhaul.esp");
   }
+
+  // FormID printed before File: still belongs to the object.
+  const std::string formIdFirst =
+    "REGISTERS:\n"
+    "\tRDI 0x2A1B3C4D5E0      (TESObjectSTAT*)\n"
+    "\t\tFormID: 0x8612AB02\n"
+    "\t\tFile: \"Statics.esp\"\n"
+    "\n";
+  bool statics = false;
+  for (const auto& r : ParseCrashLoggerObjectRefsAscii(formIdFirst)) {
+    if (r.esp_name == "Statics.esp") {
+      statics = true;
+      assert(r.form_id == "0x8612AB02");
+    }
+  }
+  assert(statics);
 }
 
 int main()

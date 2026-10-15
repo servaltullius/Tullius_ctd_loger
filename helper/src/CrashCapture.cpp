@@ -274,21 +274,27 @@ bool WriteCleanExitEvidenceRecord(
       "The evidence record was committed before dump deletion. A final atomic update "
       "will record whether the dump was discarded or remained on disk.";
   } else if (dumpState == CleanExitDumpState::kPreserved) {
-    j["note"] =
-      "The game published a strong fault record but exited with code 0. The filtered "
-      "dump remains available; derived crash actions were suppressed.";
+    j["note"] = context == L"late_recovery"
+      ? "The game published a strong fault record but kept running for over a minute with "
+        "its heartbeat advancing. The dump remains available; derived crash actions were suppressed."
+      : "The game published a strong fault record but exited with code 0. The filtered "
+        "dump remains available; derived crash actions were suppressed.";
   } else if (dumpState == CleanExitDumpState::kDeleteFailed) {
-    j["note"] =
-      "The game published a strong fault record but exited with code 0. Dump deletion "
-      "failed, so the file remains available and the observed state is preserved.";
+    j["note"] = context == L"late_recovery"
+      ? "The game published a strong fault record but kept running. Dump deletion "
+        "failed, so the file remains available and the observed state is preserved."
+      : "The game published a strong fault record but exited with code 0. Dump deletion "
+        "failed, so the file remains available and the observed state is preserved.";
   } else if (dumpState == CleanExitDumpState::kNotCaptured) {
     j["note"] =
       "The strong fault was published after the helper's final live-process event poll. "
       "The process had already exited, so only immutable metadata could be preserved.";
   } else {
-    j["note"] =
-      "The game published a strong fault record but exited with code 0. The dump was "
-      "successfully discarded and derived crash actions were suppressed.";
+    j["note"] = context == L"late_recovery"
+      ? "The game published a strong fault record but kept running. The dump was "
+        "discarded and derived crash actions were suppressed."
+      : "The game published a strong fault record but exited with code 0. The dump was "
+        "successfully discarded and derived crash actions were suppressed.";
   }
 
   if (!WriteTextFileUtf8(recordPath, j.dump(2))) {

@@ -1219,6 +1219,7 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
   std::size_t registerDepth = 0;
   std::string registerType;
   std::string registerName;
+  std::string registerFormId;
   std::size_t registerRefStart = 0;
 
   while (std::getline(iss, line)) {
@@ -1302,6 +1303,7 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
         registerDepth = depth;
         registerType = ExtractObjectType(trimmed);
         registerName = ExtractObjectName(trimmed);
+        registerFormId.clear();
         registerRefStart = results.size();
         for (const auto& entry : ExtractEspRefsFromLine(trimmed)) {
           if (IsVanillaDlcEspAsciiLower(AsciiLower(entry.esp_name))) continue;
@@ -1323,10 +1325,10 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
         continue;
       }
       if (StartsWithCaseInsensitiveAscii(trimmed, "FormID:")) {
-        const std::string formId(TrimAscii(trimmed.substr(7)));
+        registerFormId = std::string(TrimAscii(trimmed.substr(7)));
         for (std::size_t i = registerRefStart; i < results.size(); ++i) {
           if (results[i].form_id.empty()) {
-            results[i].form_id = formId;
+            results[i].form_id = registerFormId;
           }
         }
         continue;
@@ -1351,7 +1353,7 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
         ref.object_type = registerType;
         ref.esp_name = entry.esp_name;
         ref.object_name = registerName;
-        ref.form_id = entry.form_id;
+        ref.form_id = entry.form_id.empty() ? registerFormId : entry.form_id;
         ref.relevance_score = LocationWeight(currentRegister) + TypeWeight(registerType);
         results.push_back(std::move(ref));
       }
