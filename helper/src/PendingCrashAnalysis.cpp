@@ -98,9 +98,12 @@ void FinalizePendingCrashAnalysisIfReady(
       // The timeout bounds the recapture decision, which needs the result
       // while the game is still alive. Without recapture the analysis only
       // writes the report, so a slow one (a large dump) is left to finish.
+      // It stays tracked: if the crash is later filtered (zero exit, late
+      // recovery) the cleanup must still be able to stop it, or it would
+      // write a CTD report for a dump that was discarded.
       if (!cfg.enableAutoRecaptureOnUnknownCrash) {
         AppendLogLine(outBase, L"Crash headless analysis still running after its window; leaving it to finish the report.");
-        DetachPendingCrashAnalysis(task);
+        task->timeoutMs = 0;
         return;
       }
       TerminateProcess(task->process, 1);

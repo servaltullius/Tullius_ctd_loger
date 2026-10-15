@@ -88,7 +88,13 @@ inline std::filesystem::path ResolveOutputDirAgainstExeDir(
   if (out.is_relative()) {
     out = exeDir / out;
   }
-  return out.lexically_normal();
+  out = out.lexically_normal();
+  // "D:\\Logs\\" would reach the dump tool as --out-dir "D:\\Logs\\", whose
+  // trailing backslash escapes the closing quote on the command line.
+  if (!out.has_filename() && out.has_relative_path()) {
+    out = out.parent_path();
+  }
+  return out;
 }
 
 HelperConfig LoadConfig(std::wstring* err);

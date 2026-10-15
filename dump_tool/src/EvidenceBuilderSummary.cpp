@@ -339,9 +339,11 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   std::wstring summary;
 
   if (ctx.isFilteredCleanExit && r.clean_exit_filter_context == "late_recovery") {
+    // The heartbeat shows the main thread kept running, not that the faulting
+    // thread recovered, so this stays below High.
     summary = en
-      ? L"Validated helper metadata matches this preserved dump. The game kept running for over a minute after this exception was captured, so it was handled and is not classified as a CTD. (Confidence: High)"
-      : L"검증된 헬퍼 메타데이터가 이 보존 덤프와 일치합니다. 이 예외가 잡힌 뒤에도 게임이 1분 넘게 계속 실행됐으므로 처리된 예외이며 CTD로 분류하지 않습니다. (신뢰도: 높음)";
+      ? L"Validated helper metadata matches this preserved dump. The game kept running for over a minute after this exception was captured, so it is not classified as a CTD. If the game closed shortly after, review this dump anyway. (Confidence: Medium)"
+      : L"검증된 헬퍼 메타데이터가 이 보존 덤프와 일치합니다. 이 예외가 잡힌 뒤에도 게임이 1분 넘게 계속 실행됐으므로 CTD로 분류하지 않습니다. 그 직후 게임이 꺼졌다면 이 덤프도 확인해 보세요. (신뢰도: 중간)";
   } else if (ctx.isFilteredCleanExit) {
     summary = en
       ? L"Validated clean-exit quarantine metadata matches this preserved dump. The process exited with code 0, so this is not classified as a CTD. (Confidence: High)"
