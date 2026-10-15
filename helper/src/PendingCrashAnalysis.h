@@ -22,6 +22,9 @@ struct PendingCrashAnalysis
 };
 
 void ClearPendingCrashAnalysis(PendingCrashAnalysis* task);
+// Stops tracking the analyzer without stopping it: it finishes and writes
+// its report on its own (outputs are written atomically).
+void DetachPendingCrashAnalysis(PendingCrashAnalysis* task);
 
 bool StartPendingCrashAnalysisTask(
   const skydiag::helper::HelperConfig& cfg,

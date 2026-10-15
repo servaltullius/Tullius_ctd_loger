@@ -78,12 +78,9 @@ std::uint32_t ReadIniUint32Clamped(
   return static_cast<std::uint32_t>(clamped);
 }
 
-std::wstring ResolveEffectiveOutputDir(std::wstring rawOutputDir)
+std::wstring ResolveEffectiveOutputDir(const std::wstring& rawOutputDir)
 {
-  if (!rawOutputDir.empty()) {
-    return rawOutputDir;
-  }
-  return (std::filesystem::path(ExeDir()) / kDefaultOutputSubdir).wstring();
+  return ResolveOutputDirAgainstExeDir(rawOutputDir, ExeDir(), kDefaultOutputSubdir).wstring();
 }
 
 }  // namespace
