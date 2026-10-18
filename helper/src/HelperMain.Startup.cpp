@@ -1,5 +1,7 @@
 #include "HelperMainInternal.h"
 
+#include <ShlObj.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
@@ -10,6 +12,7 @@
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagStringUtil.h"
 
 #include "CrashCapture.h"
 #include "HelperLog.h"
@@ -161,6 +164,62 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
   state->hangState.loadStartQpc = 0;
   state->nextCrashEventRetryTick64 = GetTickCount64();
   state->nextCrashEventWarnTick64 = 0;
+
+  // The plugin claims kState_Frozen before every publish, and only a helper
+  // clears it. So a committed generation with Frozen clear was already ACKed
+  // by an earlier helper that the plugin's watchdog replaced: released as
+  // handled, or (indistinguishable here) its dump could not be written. It
+  // is not reported again at exit. A generation still Frozen stays reportable.
+  CrashEventInfo committed{};
+  if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
+      (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    state->crashCaptured.releasedCrashSeq = committed.crashSeq;
+    state->crashCaptured.releasedCrashTick64 = GetTickCount64();
+    state->crashCaptured.releasedOnBriefHeartbeat = false;
+    state->crashCaptured.releasedInThreadDumpWindow = false;
+  }
+}
+
+std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc)
+{
+  std::vector<std::filesystem::path> dirs;
+  std::filesystem::path gameExeDir;
+  if (!skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+    return dirs;
+  }
+  // Only Crash Logger's thread dump hotkey opens the window this is for.
+  const auto crashLogger = CheckCrashLoggerThreadDumpHotkey(
+    gameExeDir / L"Data" / L"SKSE" / L"Plugins", cfg.manualCaptureHotkey);
+  if (!crashLogger.crashLoggerFound || !crashLogger.threadDump.enabled) {
+    return dirs;
+  }
+  // A Crashlog Directory set in CrashLogger.ini, relative to the game's
+  // folder (its working directory) unless absolute; it may not exist yet.
+  if (!crashLogger.crashlogDirectory.empty()) {
+    const std::filesystem::path custom(std::u8string(
+      crashLogger.crashlogDirectory.begin(), crashLogger.crashlogDirectory.end()));
+    dirs.push_back(custom.is_relative() ? gameExeDir / custom : custom);
+  }
+  // And the SKSE log folder it uses by default, Documents\My Games\<game
+  // folder>\SKSE; the game folder name differs by store ("Skyrim Special
+  // Edition", "... GOG").
+  wchar_t* documents = nullptr;
+  std::filesystem::path myGames;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents)) && documents) {
+    myGames = std::filesystem::path(documents) / L"My Games";
+  }
+  CoTaskMemFree(documents);  // required even when the call fails
+  if (!myGames.empty()) {
+    std::error_code iterEc;
+    for (std::filesystem::directory_iterator it(myGames, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+      std::error_code ec;
+      if (it->is_directory(ec) &&
+          skydiag::WideLower(it->path().filename().wstring()).rfind(L"skyrim special edition", 0) == 0) {
+        dirs.push_back(it->path() / L"SKSE");
+      }
+    }
+  }
+  return dirs;
 }
 
 void RegisterManualCaptureHotkeyIfEnabled(

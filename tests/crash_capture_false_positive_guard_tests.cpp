@@ -126,6 +126,13 @@ int main()
     firstChanceFilterBody,
     "HasNewerCrashRecord(shm, info.crashSeq)",
     "First-chance filter must compare committed crash sequences before declaring recovery.");
+  // A fault on the game's main thread is never one of Crash Logger's thread
+  // dump probes, so its dump does not wait for the heartbeat check.
+  AssertOrdered(
+    crashTickBody,
+    "InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes)",
+    "WriteDumpWithStreams(",
+    "The Crash Logger thread dump check must know the main thread before the dump is written.");
 
   const std::string processValidBody = ExtractFunctionBody(crashCapture, "void ProcessValidCrashDump(");
   AssertContains(
@@ -263,6 +270,11 @@ int main()
     "IsCloseOfUnresponsiveGame(",
     "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
     "A frozen game that was closed must not get the abnormal-exit WER hint.");
+  AssertOrdered(
+    processExitTickBody,
+    "} else if (crashOnRecord) {",
+    "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
+    "A fault the exit drain just recorded must not get the hint saying no exception was recorded.");
 
   const std::string drainBody = ExtractFunctionBody(helperMain, "bool DrainCrashEventBeforeExit(");
   AssertOrdered(
@@ -270,6 +282,35 @@ int main()
     "state->crashCaptured.releasedCrashSeq == info.crashSeq",
     "if (exitCode == 0u)",
     "The exit drain must skip a released crash generation before either exit-code path reports it.");
+  AssertContains(
+    drainBody,
+    "state->hangState.hangCapturedThisEpisode",
+    "A released fault must not be reported again when the game froze after its release.");
+  // A thread dump of a soft-locked game that was then ended looks like a
+  // worker's crash Crash Logger ended; only its crash log tells them apart.
+  AssertOrdered(
+    drainBody,
+    "if (crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {",
+    "TryWritePostExitCrashEvidenceRecord(",
+    "An early thread dump window release must need Crash Logger's crash log before it is recorded at exit.");
+  AssertOrdered(
+    crashTickBody,
+    "FilterFirstChanceException(",
+    "crashState->releasedInThreadDumpWindow = true;",
+    "The early thread dump window release must be marked for the exit path.");
+
+  // A helper the plugin's watchdog restarted must not report a generation an
+  // earlier helper already acknowledged by clearing its freeze.
+  const std::string initLoopBody = ExtractFunctionBody(helperMain, "void InitializeLoopState(");
+  AssertOrdered(
+    initLoopBody,
+    "TryCaptureCommittedCrashInfo(",
+    "state->crashCaptured.releasedCrashSeq = committed.crashSeq;",
+    "Loop state must seed the released generation from shared memory.");
+  AssertContains(
+    initLoopBody,
+    "(committed.stateFlags & skydiag::kState_Frozen) == 0u",
+    "Only a generation whose freeze was cleared counts as acknowledged.");
 
   AssertOrdered(
     processExitTickBody,
