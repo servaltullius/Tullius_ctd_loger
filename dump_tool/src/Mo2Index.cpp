@@ -1,4 +1,5 @@
 #include "Mo2Index.h"
+#include "SkyrimDiagQSettings.h"
 #include "SkyrimDiagStringUtil.h"
 #include "Utf.h"
 
@@ -83,18 +84,13 @@ std::optional<std::wstring> TryReadSelectedProfileName(const std::filesystem::pa
       continue;
     }
 
-    std::string_view v = line.substr(kKey.size());
-    v = Trim(v);
-    // Common MO2 format: selected_profile=@ByteArray(Default)
-    constexpr std::string_view kBA = "@ByteArray(";
-    if (StartsWith(v, kBA) && v.size() >= (kBA.size() + 1) && v.back() == ')') {
-      v = v.substr(kBA.size(), v.size() - kBA.size() - 1);
-      v = Trim(v);
-    }
+    // selected_profile=@ByteArray(Default); a name with Korean letters is
+    // written as \xNN escapes inside it (DecodeQSettingsIniValue).
+    const std::string v = skydiag::DecodeQSettingsIniValue(std::string(line.substr(kKey.size())));
     if (v.empty()) {
       return std::nullopt;
     }
-    return Utf8ToWide(v);
+    return Utf8OrAnsiToWide(v);
   }
   return std::nullopt;
 }

@@ -40,7 +40,7 @@ void TestPluginScannerImplExists()
 void TestMo2SelectedProfileByteArraySupportExists()
 {
   const auto impl = ReadFile("helper/src/PluginScanner.cpp");
-  assert(impl.find("@ByteArray(") != std::string::npos);
+  assert(impl.find("DecodeQSettingsIniValue") != std::string::npos);
   assert(impl.find("ParseSelectedProfileValue") != std::string::npos);
   assert(impl.find("ResolveMo2IniFromModulePath") != std::string::npos);
   assert(impl.find("usvfs_x64.dll") != std::string::npos);
