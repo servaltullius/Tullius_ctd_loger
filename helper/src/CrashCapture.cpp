@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cwchar>
@@ -937,6 +938,15 @@ bool TryWritePostExitCrashEvidenceRecord(
   return true;
 }
 
+namespace {
+std::atomic<std::uint64_t> g_lastManualCaptureTick64{ 0 };
+}  // namespace
+
+void NoteManualCaptureStarted(std::uint64_t tick64) noexcept
+{
+  g_lastManualCaptureTick64.store(tick64, std::memory_order_relaxed);
+}
+
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
@@ -1019,6 +1029,31 @@ bool HandleCrashEventTick(
       + L", tid=" + std::to_wstring(info.faultingTid)
       + L", crash_seq=" + std::to_wstring(info.crashSeq)
       + L").");
+
+  // Right after a manual capture, a C++ exception or breakpoint is most likely
+  // Crash Logger's thread dump on the same hotkey (IsLikelyCrashLoggerThreadDumpFault):
+  // check that the game keeps running before writing a dump, not after.
+  if (proc.process && proc.shm &&
+      IsLikelyCrashLoggerThreadDumpFault(
+        info.exceptionCode, GetTickCount64(), g_lastManualCaptureTick64.load(std::memory_order_relaxed))) {
+    const auto early = FilterFirstChanceException(
+      cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+    if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
+      const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
+        TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+      if (crashState) {
+        crashState->latched = false;
+      }
+      AppendLogLine(
+        outBase,
+        std::wstring(L"No dump written: this exception came within a minute of a manual capture, the hotkey Crash Logger "
+                     L"also uses for its thread dump, and the game ")
+          + (early == FilterVerdict::kDeleteRecovered ? L"kept running" : L"exited normally")
+          + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
+      return true;
+    }
+    AppendLogLine(outBase, L"The game did not keep running after this exception; writing the crash dump.");
+  }
 
   const auto ts = Timestamp();
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
