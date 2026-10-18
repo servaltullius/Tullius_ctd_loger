@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
 #include <thread>
 
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
@@ -41,6 +42,10 @@ private:
 // Crash Logger 1.25 polls the same keys for its thread dump, so it took the
 // press and no manual capture was made. The current down state is not
 // consumed by other readers, and a 20 ms poll does not miss a key press.
+//
+// The same thread watches Crash Logger's own thread dump hotkey and notes
+// when it is held (NoteCrashLoggerThreadDumpHotkeyPressed), since its thread
+// dump does not depend on the manual capture hotkey.
 class ManualCaptureKeyWatcher
 {
 public:
@@ -49,7 +54,11 @@ public:
   ManualCaptureKeyWatcher(const ManualCaptureKeyWatcher&) = delete;
   ManualCaptureKeyWatcher& operator=(const ManualCaptureKeyWatcher&) = delete;
 
-  void Start(const ManualCaptureHotkey& hotkey);
+  // Watches whichever of the two hotkeys is given; starts nothing when
+  // neither is.
+  void Start(
+    std::optional<ManualCaptureHotkey> manualCapture,
+    std::optional<CrashLoggerThreadDumpHotkey> crashLoggerThreadDump);
   void Stop();
 
   // True once for each chord press seen since the previous call.

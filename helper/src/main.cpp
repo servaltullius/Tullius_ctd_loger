@@ -133,7 +133,7 @@ int wmain(int argc, wchar_t** argv)
                  << adaptiveLoadingThresholdSec << L"s (fallback=" << cfg.hangThresholdLoadingSec << L"s)\n";
     }
 
-    skydiag::helper::internal::RegisterManualCaptureHotkeyIfEnabled(cfg, outBase);
+    skydiag::helper::internal::RegisterManualCaptureHotkeyIfEnabled(cfg, proc, outBase);
 
     LARGE_INTEGER attachNow{};
     QueryPerformanceCounter(&attachNow);

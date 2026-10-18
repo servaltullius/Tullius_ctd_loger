@@ -56,6 +56,12 @@ void TestParseAcceptsHotkeys()
   assert(Hotkey(L"Ctrl+Shift+Del") == Hotkey(L"Ctrl+Shift+Delete"));
   assert(Hotkey(L"Shift+Insert").virtualKey == 0x2Du);
   assert(Hotkey(L"Shift+PageDown").virtualKey == 0x22u);
+  // Letters and digits need Ctrl or Alt besides Shift; F4 goes with more than Alt.
+  assert(Hotkey(L"Shift+F9").virtualKey == 0x78u);
+  assert(Hotkey(L"Ctrl+Shift+P").virtualKey == 0x50u);
+  assert(Hotkey(L"Alt+Shift+1").virtualKey == 0x31u);
+  assert(Hotkey(L"Ctrl+Alt+F4").virtualKey == 0x73u);
+  assert(Hotkey(L"Shift+F4").virtualKey == 0x73u);
 }
 
 void TestParseRejectsOtherText()
@@ -75,6 +81,12 @@ void TestParseRejectsOtherText()
          L"Ctrl+Shift+Enter",
          L"Ctrl+Shift+F11 ; note",
          L"17,16,123",
+         L"Shift+P",                // types 'P' in every program, like a bare key
+         L"shift+z",
+         L"Shift+1",                // types '!'
+         L"Shift+0",
+         L"Alt+F4",                 // closes the window in front
+         L"alt+f4",
        }) {
     assert(!ParseManualCaptureHotkey(text));
   }
@@ -145,10 +157,17 @@ void TestCrashLoggerIniHotkeyList()
   // Nothing readable keeps the default.
   assert((ParseCrashLoggerThreadDumpHotkey("[Debug]\nThread Dump Hotkey = abc, ,\n").keys ==
           std::vector<int>{ 17, 16, 123 }));
-  // Section and key names ignore case; the last duplicate wins.
+  // Section and key names ignore case and surrounding blanks; the last
+  // duplicate wins.
+  assert((ParseCrashLoggerThreadDumpHotkey("[ debug ]\nThread Dump Hotkey = 16, 8\n").keys ==
+          std::vector<int>{ 16, 8 }));
   assert((ParseCrashLoggerThreadDumpHotkey(
-            "[ debug ]\nthread dump hotkey=18,123\n[Debug]\nTHREAD DUMP HOTKEY = 16, 123\n").keys ==
+            "[Debug]\nThread Dump Hotkey=18,123\n[ debug ]\nTHREAD DUMP HOTKEY = 16, 123\n").keys ==
           std::vector<int>{ 16, 123 }));
+  assert(!ParseCrashLoggerThreadDumpHotkey("[DEBUG]\nenable thread dump hotkey = false\n").enabled);
+  // A UTF-8 BOM right before the section header.
+  assert((ParseCrashLoggerThreadDumpHotkey("\xEF\xBB\xBF[Debug]\r\nThread Dump Hotkey = 16, 8\r\n").keys ==
+          std::vector<int>{ 16, 8 }));
   // Other sections and commented-out lines do not count.
   const auto other = ParseCrashLoggerThreadDumpHotkey(
     "[Other]\nEnable Thread Dump Hotkey = false\nThread Dump Hotkey = 1\n"
@@ -173,6 +192,27 @@ void TestCrashLoggerFiresOnHotkey()
   CrashLoggerThreadDumpHotkey leftCtrl;
   leftCtrl.keys = { 162, 16, 123 };
   assert(CrashLoggerThreadDumpFiresOnHotkey(leftCtrl, kOldCtrlShiftF12));
+
+  // Left / right Shift, Ctrl and Alt count as that modifier.
+  struct SideCase
+  {
+    int modifierKey;
+    const wchar_t* holding;
+    const wchar_t* notHolding;
+  };
+  for (const SideCase& c : {
+         SideCase{ 160, L"Ctrl+Shift+Backspace", L"Ctrl+Alt+Backspace" },
+         SideCase{ 161, L"Shift+Alt+Backspace", L"Ctrl+Backspace" },
+         SideCase{ 162, L"Ctrl+Backspace", L"Shift+Alt+Backspace" },
+         SideCase{ 163, L"Ctrl+Alt+Backspace", L"Shift+Backspace" },
+         SideCase{ 164, L"Ctrl+Alt+Backspace", L"Ctrl+Shift+Backspace" },
+         SideCase{ 165, L"Alt+Backspace", L"Ctrl+Shift+Backspace" },
+       }) {
+    CrashLoggerThreadDumpHotkey side;
+    side.keys = { c.modifierKey, 8 };
+    assert(CrashLoggerThreadDumpFiresOnHotkey(side, Hotkey(c.holding)));
+    assert(!CrashLoggerThreadDumpFiresOnHotkey(side, Hotkey(c.notHolding)));
+  }
 
   CrashLoggerThreadDumpHotkey f11;
   f11.keys = { 17, 16, 122 };

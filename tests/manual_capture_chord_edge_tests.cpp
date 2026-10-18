@@ -1,16 +1,20 @@
 // The polled manual capture hotkey detector must report one press per chord
 // press, in whatever order the keys go down, and nothing while it is held.
 // Like RegisterHotKey it needs exactly the chord's modifiers, so a chord that
-// also holds another of Ctrl, Shift and Alt does not fire it.
+// also holds another of Ctrl, Shift and Alt does not fire it. The same watcher
+// polls Crash Logger's thread dump hotkey, which matches like Crash Logger.
 
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <initializer_list>
 #include <set>
 
 #include "ManualCaptureKeyWatcher.h"
 
+using skydiag::helper::CrashLoggerThreadDumpHotkey;
+using skydiag::helper::IsCrashLoggerThreadDumpHotkeyDown;
 using skydiag::helper::kDefaultManualCaptureHotkey;
 using skydiag::helper::kVkAlt;
 using skydiag::helper::kVkBack;
@@ -88,6 +92,37 @@ void TestCrashLoggerThreadDumpChordDoesNotFireTheDefault()
   assert(!Poll(edge, { kVkControl, kVkShift, kVkF12 }));
 }
 
+// Crash Logger's own thread dump hotkey, watched for
+// IsLikelyCrashLoggerThreadDumpFault, matches the way Crash Logger does:
+// all of its keys down, extra keys or not.
+void TestCrashLoggerThreadDumpHotkeyDown()
+{
+  const CrashLoggerThreadDumpHotkey defaults;  // 17, 16, 123
+  assert(IsCrashLoggerThreadDumpHotkeyDown(defaults, Keys{ kVkControl, kVkShift, kVkF12 }));
+  assert(IsCrashLoggerThreadDumpHotkeyDown(defaults, Keys{ kVkControl, kVkShift, kVkAlt, kVkF12 }));
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(defaults, Keys{ kVkControl, kVkShift }));
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(defaults, Keys{ kVkControl, kVkF12 }));
+  // The new manual capture default does not hold Crash Logger's keys.
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(defaults, Keys{ kVkControl, kVkShift, kVkBack }));
+
+  CrashLoggerThreadDumpHotkey disabled;
+  disabled.enabled = false;
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(disabled, Keys{ kVkControl, kVkShift, kVkF12 }));
+
+  // Left / right modifier codes are their own keys to GetAsyncKeyState.
+  CrashLoggerThreadDumpHotkey leftCtrl;
+  leftCtrl.keys = { 162, 16, 123 };
+  assert(IsCrashLoggerThreadDumpHotkeyDown(leftCtrl, Keys{ 162u, kVkShift, kVkF12 }));
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(leftCtrl, Keys{ kVkControl, kVkShift, kVkF12 }));
+
+  // A code GetAsyncKeyState never reports down never fires.
+  CrashLoggerThreadDumpHotkey outOfRange;
+  outOfRange.keys = { 17, 0 };
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(outOfRange, [](std::uint32_t) { return true; }));
+  outOfRange.keys = { 17, 256 };
+  assert(!IsCrashLoggerThreadDumpHotkeyDown(outOfRange, [](std::uint32_t) { return true; }));
+}
+
 void TestConfiguredChord()
 {
   const auto hotkey = ParseManualCaptureHotkey(L"Shift+F9");
@@ -104,13 +139,19 @@ void TestConfiguredChord()
 
 int main()
 {
-  TestDefaultIsCtrlShiftBackspace();
-  TestOnePressPerChordHold();
-  TestKeyOrderDoesNotMatter();
-  TestPartialChordsNeverFire();
-  TestAnotherModifierNeverFires();
-  TestCrashLoggerThreadDumpChordDoesNotFireTheDefault();
-  TestConfiguredChord();
+  try {
+    TestDefaultIsCtrlShiftBackspace();
+    TestOnePressPerChordHold();
+    TestKeyOrderDoesNotMatter();
+    TestPartialChordsNeverFire();
+    TestAnotherModifierNeverFires();
+    TestCrashLoggerThreadDumpChordDoesNotFireTheDefault();
+    TestCrashLoggerThreadDumpHotkeyDown();
+    TestConfiguredChord();
+  } catch (const std::exception& ex) {
+    std::fprintf(stderr, "%s\n", ex.what());
+    return 1;
+  }
   std::puts("manual capture chord edge tests passed");
   return 0;
 }

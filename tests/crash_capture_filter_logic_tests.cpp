@@ -15,13 +15,14 @@ using skydiag::helper::internal::ShouldPreserveFilteredDump;
 using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
 using skydiag::helper::internal::kDumpWriteAttempts;
 
-// Crash Logger's thread dump can share the manual capture hotkey (both were
-// Ctrl+Shift+F12 up to v0.2.68-rc3).
+// A C++ exception or breakpoint within a minute of Crash Logger's thread dump
+// hotkey (its own keys, Ctrl+Shift+F12 by default, whatever the manual capture
+// hotkey is).
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u));
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80000003u, 61000u, 1000u));
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u), "an access violation");
-static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no manual capture");
+static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no Crash Logger hotkey");
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {

@@ -169,7 +169,10 @@ inline std::wstring KeyNameOf(std::uint32_t virtualKey)
 // in any order and case, and one key: F1-F24, A-Z, 0-9, Backspace, Insert,
 // Delete, Home, End, PageUp or PageDown. At least one modifier is required: a
 // bare key would be taken from every program while the helper runs and would
-// start a capture on each ordinary press. Returns nullopt for anything else.
+// start a capture on each ordinary press. For the same reason Shift alone does
+// not go with A-Z or 0-9 (Shift+P types 'P', Shift+1 types '!'), and Alt+F4,
+// which closes the window in front, is not taken. Returns nullopt for anything
+// else.
 inline std::optional<ManualCaptureHotkey> ParseManualCaptureHotkey(std::wstring_view text)
 {
   using namespace manual_capture_hotkey_detail;
@@ -208,6 +211,13 @@ inline std::optional<ManualCaptureHotkey> ParseManualCaptureHotkey(std::wstring_
     text.remove_prefix(plus + 1);
   }
   if (!haveKey || hotkey.modifiers == 0) {
+    return std::nullopt;
+  }
+  constexpr std::uint32_t kVkF4 = kVkF1 + 3u;
+  const bool typesCharacter = (hotkey.virtualKey >= 0x41u && hotkey.virtualKey <= 0x5Au) ||
+                              (hotkey.virtualKey >= 0x30u && hotkey.virtualKey <= 0x39u);
+  if ((hotkey.modifiers == kHotkeyModShift && typesCharacter) ||
+      (hotkey.modifiers == kHotkeyModAlt && hotkey.virtualKey == kVkF4)) {
     return std::nullopt;
   }
   return hotkey;
@@ -401,6 +411,19 @@ inline bool CrashLoggerThreadDumpFiresOnHotkey(
   return crashLogger.enabled && !crashLogger.keys.empty() &&
          std::all_of(crashLogger.keys.begin(), crashLogger.keys.end(), [&](int vk) {
            return manual_capture_hotkey_detail::HotkeyHoldsKey(hotkey, vk);
+         });
+}
+
+// True while Crash Logger's thread dump hotkey is held: it is enabled and all
+// of its keys are down, extra keys or not, the way Crash Logger matches them.
+// keyDown(virtualKey) tells whether a key is down now; a code outside 1-255
+// is never down (GetAsyncKeyState).
+template <class KeyDown>
+bool IsCrashLoggerThreadDumpHotkeyDown(const CrashLoggerThreadDumpHotkey& crashLogger, KeyDown&& keyDown)
+{
+  return crashLogger.enabled && !crashLogger.keys.empty() &&
+         std::all_of(crashLogger.keys.begin(), crashLogger.keys.end(), [&](int vk) {
+           return vk > 0 && vk <= 0xFF && static_cast<bool>(keyDown(static_cast<std::uint32_t>(vk)));
          });
 }
 

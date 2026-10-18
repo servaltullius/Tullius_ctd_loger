@@ -939,12 +939,12 @@ bool TryWritePostExitCrashEvidenceRecord(
 }
 
 namespace {
-std::atomic<std::uint64_t> g_lastManualCaptureTick64{ 0 };
+std::atomic<std::uint64_t> g_lastCrashLoggerHotkeyTick64{ 0 };
 }  // namespace
 
-void NoteManualCaptureStarted(std::uint64_t tick64) noexcept
+void NoteCrashLoggerThreadDumpHotkeyPressed(std::uint64_t tick64) noexcept
 {
-  g_lastManualCaptureTick64.store(tick64, std::memory_order_relaxed);
+  g_lastCrashLoggerHotkeyTick64.store(tick64, std::memory_order_relaxed);
 }
 
 bool HandleCrashEventTick(
@@ -1030,12 +1030,13 @@ bool HandleCrashEventTick(
       + L", crash_seq=" + std::to_wstring(info.crashSeq)
       + L").");
 
-  // Right after a manual capture, a C++ exception or breakpoint is most likely
-  // Crash Logger's thread dump on a shared hotkey (IsLikelyCrashLoggerThreadDumpFault):
-  // check that the game keeps running before writing a dump, not after.
+  // Right after Crash Logger's thread dump hotkey, a C++ exception or
+  // breakpoint is most likely one of its thread dump's probes
+  // (IsLikelyCrashLoggerThreadDumpFault): check that the game keeps running
+  // before writing a dump, not after.
   if (proc.process && proc.shm &&
       IsLikelyCrashLoggerThreadDumpFault(
-        info.exceptionCode, GetTickCount64(), g_lastManualCaptureTick64.load(std::memory_order_relaxed))) {
+        info.exceptionCode, GetTickCount64(), g_lastCrashLoggerHotkeyTick64.load(std::memory_order_relaxed))) {
     const auto early = FilterFirstChanceException(
       cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
     if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
@@ -1046,8 +1047,8 @@ bool HandleCrashEventTick(
       }
       AppendLogLine(
         outBase,
-        std::wstring(L"No dump written: this exception came within a minute of a manual capture, which can also start "
-                     L"Crash Logger's thread dump, and the game ")
+        std::wstring(L"No dump written: this exception came within a minute of Crash Logger's thread dump hotkey, "
+                     L"whose thread dump probes each thread, and the game ")
           + (early == FilterVerdict::kDeleteRecovered ? L"kept running" : L"exited normally")
           + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
       return true;
