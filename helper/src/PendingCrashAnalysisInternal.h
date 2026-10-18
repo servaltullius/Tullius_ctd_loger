@@ -35,7 +35,8 @@ bool TryEvaluateCrashRecapture(
   PendingCrashRecaptureContext* out,
   std::wstring* err);
 
-void ApplyCrashRecaptureDecision(
+// Returns the recapture written, if any.
+CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,

@@ -84,13 +84,14 @@ std::filesystem::path CrashRecaptureManifestPathForTimestamp(
 
 }  // namespace
 
-void ApplyCrashRecaptureDecision(
+CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
   const PendingCrashAnalysis& task,
   const PendingCrashRecaptureContext& context)
 {
+  CrashRecaptureArtifacts written{};
   if (!context.manifestPath.empty() && std::filesystem::exists(context.manifestPath)) {
     std::wstring manifestErr;
     if (!TryUpdateIncidentManifestRecaptureEvaluation(
@@ -138,6 +139,7 @@ void ApplyCrashRecaptureDecision(
         AppendLogLine(outBase, L"Crash recapture failed: " + fullDumpErr);
       } else {
         recaptureDumpWritten = true;
+        written.dump = recaptureDumpFs;
         const std::string targetProfileAscii =
           skydiag::helper::RecaptureTargetProfileToString(context.recaptureDecision.targetProfile);
         const std::wstring targetProfileW(targetProfileAscii.begin(), targetProfileAscii.end());
@@ -168,6 +170,7 @@ void ApplyCrashRecaptureDecision(
             cfg,
             cfg.incidentManifestIncludeConfigSnapshot);
           WriteTextFileUtf8(recaptureManifestPath, manifest.dump(2));
+          written.manifest = recaptureManifestPath;
           AppendLogLine(
             outBase,
             L"Crash recapture incident manifest written: " + recaptureManifestPath.wstring());
@@ -182,6 +185,7 @@ void ApplyCrashRecaptureDecision(
   if (recaptureDumpWritten) {
     ApplyRetentionFromConfig(cfg, outBase);
   }
+  return written;
 }
 
 }  // namespace skydiag::helper::internal

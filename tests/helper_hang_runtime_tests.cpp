@@ -12,6 +12,7 @@
 #include "HangCapture.h"
 #include "HangCaptureInternal.h"
 #include "HelperLog.h"
+#include "HelperMainInternal.h"
 #include "HelperRuntimeTestUtils.h"
 #include "RetentionWorker.h"
 #include "SkyrimDiagHelper/LoadStats.h"
@@ -24,6 +25,8 @@ using skydiag::helper::internal::ExecuteConfirmedHangCapture;
 using skydiag::helper::internal::HandleHangTick;
 using skydiag::helper::internal::HangCaptureState;
 using skydiag::helper::internal::HangTickResult;
+using skydiag::helper::internal::HelperLoopState;
+using skydiag::helper::internal::InitializeLoopState;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::tests::runtime::AssertContains;
 using skydiag::tests::runtime::CloseAttachedProcess;
@@ -302,12 +305,57 @@ void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
 
 }  // namespace
 
+// Loading at attach is the game starting up (the plugin keeps the flag on
+// until its data has loaded). Timing it from start_qpc put a 2-minute sample
+// next to every 25 s save load; only a load screen seen start to end counts.
+void TestStartupLoadingIsNotALoadingSample()
+{
+  const auto outBase = MakeTempDir(L"skydiag_startup_loading_sample");
+  const auto statsPath = outBase / L"SkyrimDiag_LoadStats.json";
+
+  auto shared = MakeSharedLayout();
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  shared->header.qpc_freq = 10'000'000ull;
+  shared->header.start_qpc = static_cast<std::uint64_t>(now.QuadPart) - (120ull * shared->header.qpc_freq);
+  shared->header.last_heartbeat_qpc = static_cast<std::uint64_t>(now.QuadPart);
+  shared->header.state_flags = skydiag::kState_Loading;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  auto cfg = MakeTestConfig();
+  HelperLoopState loop{};
+  InitializeLoopState(proc, &loop);
+  Require(loop.hangState.wasLoading, "attached while loading");
+
+  // The startup load ends.
+  shared->header.state_flags = skydiag::kState_None;
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  std::wstring pendingHangViewerDumpPath;
+  HandleHangTick(
+    cfg,
+    proc,
+    outBase,
+    &loadStats,
+    statsPath,
+    &adaptiveLoadingThresholdSec,
+    static_cast<std::uint64_t>(now.QuadPart),
+    &pendingHangViewerDumpPath,
+    &loop.hangState);
+  Require(!loadStats.HasSamples(), "the startup is no loading sample");
+  Require(!std::filesystem::exists(statsPath), "nothing is written");
+  CloseAttachedProcess(&proc);
+  std::error_code ec;
+  std::filesystem::remove_all(outBase, ec);
+}
+
 int main()
 {
   try {
     TestLoadStatsAtomicSaveFailurePreservesExistingState();
     TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample();
     TestHandleHangTick_SkipsWhenHeartbeatNotInitialized();
+    TestStartupLoadingIsNotALoadingSample();
     TestExecuteConfirmedHangCapture_WritesArtifacts();
     TestCaptureModalDialogsFindsMessageBoxOwnerThread();
     return 0;

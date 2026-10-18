@@ -12,6 +12,15 @@ struct HelperConfig;
 
 namespace skydiag::helper::internal {
 
+// A full recapture of a crash dump (EnableAutoRecaptureOnUnknownCrash) and its
+// incident manifest. If that crash is later filtered (zero exit, late
+// recovery) they are cleaned up with the original dump.
+struct CrashRecaptureArtifacts
+{
+  std::filesystem::path dump;
+  std::filesystem::path manifest;
+};
+
 struct PendingCrashAnalysis
 {
   bool active = false;
@@ -37,7 +46,8 @@ void FinalizePendingCrashAnalysisIfReady(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
-  PendingCrashAnalysis* task);
+  PendingCrashAnalysis* task,
+  CrashRecaptureArtifacts* recaptureOut = nullptr);
 
 }  // namespace skydiag::helper::internal
 

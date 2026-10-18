@@ -286,6 +286,51 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifac
   std::filesystem::remove_all(outBase);
 }
 
+// EnableAutoRecaptureOnUnknownCrash wrote a full dump of the same crash; it
+// is a handled exception too once the game exits with code 0.
+void TestCleanupCrashArtifactsAfterZeroExit_RemovesItsRecapture()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_false_positive_recapture");
+  ClearLog(outBase);
+
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20260315_130000_001.dmp";
+  const auto recapturePath = outBase / "SkyrimDiag_Crash_20260315_130030_002_Full.dmp";
+  const auto recaptureReport = outBase / "SkyrimDiag_Crash_20260315_130030_002_Full_SkyrimDiagReport.txt";
+  const auto recaptureManifest = outBase / "SkyrimDiag_Incident_CrashRecapture_20260315_130030_002.json";
+  WriteAllTextUtf8(dumpPath, "dump");
+  WriteAllTextUtf8(recapturePath, "full dump");
+  WriteAllTextUtf8(recaptureReport, "report");
+  WriteAllTextUtf8(recaptureManifest, "manifest");
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::AttachedProcess proc{};
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.latched = true;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  state.crashRecapture.dump = recapturePath;
+  state.crashRecapture.manifest = recaptureManifest;
+
+  CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &state);
+
+  Require(!FileExists(dumpPath), "the captured dump is removed");
+  Require(!FileExists(recapturePath), "its recapture is removed");
+  Require(!FileExists(recaptureReport), "the recapture's report is removed");
+  Require(!FileExists(recaptureManifest), "the recapture manifest is removed");
+  Require(state.crashRecapture.dump.empty(), "the recapture is forgotten");
+  AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "removed recapture dump",
+    "the removal is logged");
+
+  // A session without a captured exception has nothing to classify as handled.
+  ClearLog(outBase);
+  skydiag::helper::internal::AppendExitClassificationLog(outBase, /*hadCapturedCrash=*/false);
+  std::error_code ec;
+  Require(!std::filesystem::exists(outBase / "SkyrimDiagHelper.log", ec) ||
+            ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log").find("first-chance") == std::string::npos,
+    "no handled-exception line without a capture");
+
+  std::filesystem::remove_all(outBase);
+}
+
 void TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_false_positive_delayed_writer");
@@ -1101,6 +1146,7 @@ int wmain(int argc, wchar_t** argv)
     TestCorruptCrashBucketStatsAreQuarantinedBeforeRecovery();
     TestIncidentManifestUpdatePropagatesAtomicReplaceFailure();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts();
+    TestCleanupCrashArtifactsAfterZeroExit_RemovesItsRecapture();
     TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter();
     TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit();
     TestHandleProcessExitTick_TreatsStrongSharedMemoryExceptionAsHandledOnZeroExit();

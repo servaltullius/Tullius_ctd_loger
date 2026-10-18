@@ -39,9 +39,15 @@ void StoreInMenuFlag(skydiag::SharedLayout& shm, RE::UI& ui, bool openingMenuTak
   }
 }
 
+// Keeps the Loading and InMenu state flags the helper's hang thresholds read;
+// LogMenus=0 only leaves the menu events out of the blackbox. Before v0.2.68
+// LogMenus=0 skipped the sink, so a load never set Loading and the flag the
+// plugin sets at startup could stay on.
 class MenuSink final : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 {
 public:
+  bool logMenus = true;
+
   RE::BSEventNotifyControl ProcessEvent(
     const RE::MenuOpenCloseEvent* e,
     RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
@@ -74,7 +80,9 @@ public:
 
     auto* ui = RE::UI::GetSingleton();
     if (e->opening) {
-      PushEvent(skydiag::EventType::kMenuOpen, p, sizeof(p));
+      if (logMenus) {
+        PushEvent(skydiag::EventType::kMenuOpen, p, sizeof(p));
+      }
       if (ui) {
         // The UI counters may not include the menu being opened yet.
         const auto menu = ui->GetMenu(menuName);
@@ -86,13 +94,17 @@ public:
       }
 
       if (menuName == RE::LoadingMenu::MENU_NAME) {
-        PushEvent(skydiag::EventType::kLoadStart, p, sizeof(p));
+        if (logMenus) {
+          PushEvent(skydiag::EventType::kLoadStart, p, sizeof(p));
+        }
         InterlockedOr(
           reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
           static_cast<LONG>(skydiag::kState_Loading));
       }
     } else {
-      PushEvent(skydiag::EventType::kMenuClose, p, sizeof(p));
+      if (logMenus) {
+        PushEvent(skydiag::EventType::kMenuClose, p, sizeof(p));
+      }
 
       // Best-effort: the counters may still include the closing menu; the
       // heartbeat refresh settles the flag within one interval.
@@ -101,7 +113,9 @@ public:
       }
 
       if (menuName == RE::LoadingMenu::MENU_NAME) {
-        PushEvent(skydiag::EventType::kLoadEnd, p, sizeof(p));
+        if (logMenus) {
+          PushEvent(skydiag::EventType::kLoadEnd, p, sizeof(p));
+        }
         InterlockedAnd(
           reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
           ~static_cast<LONG>(skydiag::kState_Loading));
@@ -127,15 +141,12 @@ void RefreshInMenuFlag() noexcept
 
 bool RegisterEventSinks(bool logMenus)
 {
-  if (!logMenus) {
-    return true;
-  }
-
   auto* ui = RE::UI::GetSingleton();
   if (!ui) {
     return false;
   }
 
+  g_menuSink.logMenus = logMenus;
   ui->AddEventSink<RE::MenuOpenCloseEvent>(&g_menuSink);
   return true;
 }
