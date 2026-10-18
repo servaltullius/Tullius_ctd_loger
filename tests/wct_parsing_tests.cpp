@@ -49,38 +49,34 @@ static void Test_CycleThreadsPrioritized()
   assert(tids[1] == 300);
 }
 
-// waitTime is the tick at which the wait started: the longest waiter has the
-// smallest value, and a thread that is not blocked is not waiting at all.
-static void Test_NoCycle_SortedByEarliestWaitStart()
+static void Test_NoCycle_SortedByWaitTime()
 {
   const std::string json = R"({
     "threads": [
-      {"tid": 10, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":10,"waitTime":5001200}}]},
-      {"tid": 20, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":20,"waitTime":5002000}}]},
-      {"tid": 30, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":30,"waitTime":5000300}}]},
-      {"tid": 40, "isCycle": false, "nodes": [{"objectStatus":2,"thread":{"threadId":40,"waitTime":5000000}}]}
+      {"tid": 10, "isCycle": false, "nodes": [{"thread":{"waitTime":100}}]},
+      {"tid": 20, "isCycle": false, "nodes": [{"thread":{"waitTime":500}}]},
+      {"tid": 30, "isCycle": false, "nodes": [{"thread":{"waitTime":300}}]}
     ]
   })";
   const auto tids = ExtractWctCandidateThreadIds(json, 8);
-  assert(tids.size() == 4);
-  assert(tids[0] == 30);  // blocked since the earliest tick
-  assert(tids[1] == 10);
-  assert(tids[2] == 20);  // only just started waiting
-  assert(tids[3] == 40);  // running: after every blocked thread
+  assert(tids.size() == 3);
+  assert(tids[0] == 20);  // waitTime=500 (highest)
+  assert(tids[1] == 30);  // waitTime=300
+  assert(tids[2] == 10);  // waitTime=100
 }
 
 static void Test_MaxN_Limit()
 {
   const std::string json = R"({
     "threads": [
-      {"tid": 1, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":1,"waitTime":300}}]},
-      {"tid": 2, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":2,"waitTime":200}}]},
-      {"tid": 3, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":3,"waitTime":100}}]}
+      {"tid": 1, "isCycle": false, "nodes": [{"thread":{"waitTime":100}}]},
+      {"tid": 2, "isCycle": false, "nodes": [{"thread":{"waitTime":200}}]},
+      {"tid": 3, "isCycle": false, "nodes": [{"thread":{"waitTime":300}}]}
     ]
   })";
   const auto tids = ExtractWctCandidateThreadIds(json, 2);
   assert(tids.size() == 2);
-  assert(tids[0] == 3);   // waitTime=100 (earliest)
+  assert(tids[0] == 3);   // waitTime=300
   assert(tids[1] == 2);   // waitTime=200
 }
 
@@ -348,7 +344,7 @@ int main()
   Test_InvalidJson_ReturnsEmpty();
   Test_NoThreadsKey_ReturnsEmpty();
   Test_CycleThreadsPrioritized();
-  Test_NoCycle_SortedByEarliestWaitStart();
+  Test_NoCycle_SortedByWaitTime();
   Test_MaxN_Limit();
   Test_ZeroTid_Skipped();
   Test_StableContextSwitchesAcrossPasses();

@@ -1,7 +1,6 @@
 #include "WctTypes.h"
 
 #include <algorithm>
-#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -216,7 +215,7 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
     struct Row
     {
       std::uint32_t tid = 0;
-      std::uint64_t waitStartTick = 0;  // max: not blocked, or no wait start
+      std::uint64_t waitTime = 0;
     };
     std::vector<Row> nonCycle;
 
@@ -229,19 +228,32 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
         continue;
       }
 
-      const auto state = ReadOwnWaitState(t, tid);
-      const bool blocked = state.object_status == kWctObjectStatusBlocked && state.wait_start_tick != 0u;
-      nonCycle.push_back(Row{ tid, blocked ? state.wait_start_tick : std::numeric_limits<std::uint64_t>::max() });
+      std::uint64_t waitTime = 0;
+      const auto nodesIt = t.find("nodes");
+      if (nodesIt != t.end() && nodesIt->is_array()) {
+        for (const auto& node : *nodesIt) {
+          if (!node.is_object()) {
+            continue;
+          }
+          const auto thIt = node.find("thread");
+          if (thIt == node.end() || !thIt->is_object()) {
+            continue;
+          }
+          waitTime = std::max<std::uint64_t>(waitTime, thIt->value("waitTime", 0ull));
+        }
+      }
+      nonCycle.push_back(Row{ tid, waitTime });
     }
 
-    // Otherwise pick the longest-waiting threads (best-effort): the earliest
-    // wait start first (SkyrimDiagWctWait.h), then the threads not blocked.
+    // Otherwise a best-effort order, kept from before: the newest wait start
+    // first. The earliest ticks are not the stall either (idle pools, or the
+    // threads a process-wide suspend restarted at one tick; SkyrimDiagWctWait.h).
     if (maxN == 0) {
       return tids;
     }
     std::sort(nonCycle.begin(), nonCycle.end(), [](const Row& a, const Row& b) {
-      if (a.waitStartTick != b.waitStartTick) {
-        return a.waitStartTick < b.waitStartTick;
+      if (a.waitTime != b.waitTime) {
+        return a.waitTime > b.waitTime;
       }
       return a.tid < b.tid;
     });
