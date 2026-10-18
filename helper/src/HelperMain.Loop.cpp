@@ -91,6 +91,13 @@ void PumpManualCaptureInputs(
       L"key-state poll",
       &s_lastManualCaptureTick);
   }
+
+  // The old Ctrl+Shift+F12 (LegacyManualCaptureChordToWatch). Each press is
+  // logged: it takes no snapshot, and when it also starts Crash Logger's
+  // thread dump the line dates a freeze that follows.
+  if (ManualCaptureKeys().ConsumeLegacyPress()) {
+    AppendLogLine(outBase, LegacyManualCaptureHotkeyPressedMessage(cfg.manualCaptureHotkey));
+  }
 }
 
 void RunHelperLoop(

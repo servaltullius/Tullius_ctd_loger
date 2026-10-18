@@ -24,6 +24,9 @@ using skydiag::helper::kDefaultManualCaptureHotkey;
 using skydiag::helper::kHotkeyModAlt;
 using skydiag::helper::kHotkeyModControl;
 using skydiag::helper::kHotkeyModShift;
+using skydiag::helper::kLegacyManualCaptureHotkey;
+using skydiag::helper::LegacyManualCaptureChordToWatch;
+using skydiag::helper::LegacyManualCaptureHotkeyPressedMessage;
 using skydiag::helper::ManualCaptureHotkey;
 using skydiag::helper::ParseCrashLoggerCrashlogDirectory;
 using skydiag::helper::ParseCrashLoggerThreadDumpHotkey;
@@ -106,6 +109,33 @@ void TestFormat()
   assert(FormatVirtualKeyList({ 17, 16, 123 }) == L"Ctrl+Shift+F12");
   assert(FormatVirtualKeyList({ 162, 18, 8 }) == L"LCtrl+Alt+Backspace");
   assert(FormatVirtualKeyList({ 0, 300 }) == L"VK 0+VK 300");
+}
+
+// The old Ctrl+Shift+F12 is watched only while the manual capture hotkey is on
+// and set to another chord; a press of it is logged naming the configured one.
+void TestLegacyManualCaptureChord()
+{
+  assert(kLegacyManualCaptureHotkey == kOldCtrlShiftF12);
+  assert(FormatManualCaptureHotkey(kLegacyManualCaptureHotkey) == L"Ctrl+Shift+F12");
+
+  assert(LegacyManualCaptureChordToWatch(true, kDefaultManualCaptureHotkey) == kLegacyManualCaptureHotkey);
+  assert(LegacyManualCaptureChordToWatch(true, Hotkey(L"Shift+F9")) == kLegacyManualCaptureHotkey);
+  // A chord on F12 too passes through the old one while pressed: not watched.
+  assert(!LegacyManualCaptureChordToWatch(true, Hotkey(L"Ctrl+Shift+Alt+F12")));
+  assert(!LegacyManualCaptureChordToWatch(true, Hotkey(L"Ctrl+F12")));
+  // Still set to the old chord: it is the manual capture hotkey itself.
+  assert(!LegacyManualCaptureChordToWatch(true, kOldCtrlShiftF12));
+  // Manual capture hotkey off: nothing to point the press at.
+  assert(!LegacyManualCaptureChordToWatch(false, kDefaultManualCaptureHotkey));
+  assert(!LegacyManualCaptureChordToWatch(false, kOldCtrlShiftF12));
+
+  const std::wstring message = LegacyManualCaptureHotkeyPressedMessage(kDefaultManualCaptureHotkey);
+  assert(message.rfind(L"Ctrl+Shift+F12 was pressed", 0) == 0);
+  assert(message.find(L"no longer the manual capture hotkey (now Ctrl+Shift+Backspace)") != std::wstring::npos);
+  assert(message.find(L"no snapshot was taken") != std::wstring::npos);
+  assert(message.find(L"Crash Logger's thread dump") != std::wstring::npos);
+  assert(message.find(L"can freeze the game") != std::wstring::npos);
+  assert(LegacyManualCaptureHotkeyPressedMessage(Hotkey(L"Shift+F9")).find(L"(now Shift+F9)") != std::wstring::npos);
 }
 
 void TestCrashLoggerIniDefaults()
@@ -362,6 +392,7 @@ int main()
   TestParseAcceptsHotkeys();
   TestParseRejectsOtherText();
   TestFormat();
+  TestLegacyManualCaptureChord();
   TestCrashLoggerIniDefaults();
   TestCrashLoggerIniEnableFlag();
   TestCrashLoggerIniHotkeyList();

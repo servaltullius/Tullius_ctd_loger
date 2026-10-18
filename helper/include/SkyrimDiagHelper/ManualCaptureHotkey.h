@@ -60,6 +60,25 @@ struct ManualCaptureHotkey
 // Backspace is on every keyboard without Fn and has no gameplay binding.
 inline constexpr ManualCaptureHotkey kDefaultManualCaptureHotkey{ kHotkeyModControl | kHotkeyModShift, kVkBack };
 
+// The manual capture hotkey up to v0.2.68-rc3, Ctrl+Shift+F12, the one the
+// v0.2.67 README and Nexus page name.
+inline constexpr ManualCaptureHotkey kLegacyManualCaptureHotkey{ kHotkeyModControl | kHotkeyModShift, kVkF12 };
+
+// The old chord to watch, so that a press of it out of habit is logged as not
+// taking a snapshot (LegacyManualCaptureHotkeyPressedMessage): only while the
+// manual capture hotkey is on and set to another chord. A configured chord on
+// F12 too (e.g. Ctrl+Shift+Alt+F12) passes through the old one while it is
+// pressed, so its real snapshot would also be logged as not taken.
+inline std::optional<ManualCaptureHotkey> LegacyManualCaptureChordToWatch(
+  bool manualCaptureEnabled,
+  const ManualCaptureHotkey& configured)
+{
+  if (!manualCaptureEnabled || configured.virtualKey == kLegacyManualCaptureHotkey.virtualKey) {
+    return std::nullopt;
+  }
+  return kLegacyManualCaptureHotkey;
+}
+
 namespace manual_capture_hotkey_detail {
 
 struct KeyName
@@ -529,6 +548,16 @@ inline std::wstring CrashLoggerHotkeyCollisionWarning(
          L"). Its thread dump suspends the game's threads one at a time and can freeze the game; set "
          L"ManualCaptureHotkey in SkyrimDiagHelper.ini to another chord, or set Enable Thread Dump Hotkey = false "
          L"under [Debug] in CrashLogger.ini.";
+}
+
+// The helper log line for a press of the old Ctrl+Shift+F12 while the manual
+// capture hotkey is set to another chord, configured.
+inline std::wstring LegacyManualCaptureHotkeyPressedMessage(const ManualCaptureHotkey& configured)
+{
+  return FormatManualCaptureHotkey(kLegacyManualCaptureHotkey) +
+         L" was pressed, but it is no longer the manual capture hotkey (now " + FormatManualCaptureHotkey(configured) +
+         L"); no snapshot was taken. With Crash Logger's thread dump hotkey on these keys, the press starts Crash "
+         L"Logger's thread dump, which suspends the game's threads one at a time and can freeze the game.";
 }
 
 }  // namespace skydiag::helper
