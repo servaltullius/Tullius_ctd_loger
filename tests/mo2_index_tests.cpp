@@ -262,7 +262,8 @@ void Test_FolderCacheGivesTheSameProviders()
   for (const wchar_t* path : { L"meshes\\actors\\a.nif", L"Meshes/Actors/B.NIF", L"meshes\\clutter\\c.nif", L"meshes\\none.nif" }) {
     assert(FindMo2ProvidersForDataPath(idx, path, 8, &cache) == FindMo2ProvidersForDataPath(idx, path, 8));
   }
-  const auto a = FindMo2ProvidersForDataPath(idx, L"meshes\\actors\\a.nif", 8, &cache);
+  // Forward slashes: the Linux CI build has no backslash separator.
+  const auto a = FindMo2ProvidersForDataPath(idx, L"meshes/actors/a.nif", 8, &cache);
   assert(a.size() == 2 && a[0] == L"Winner" && a[1] == L"Loser");
   const auto& meshes = cache.presence.at(L"meshes");
   assert(meshes.size() == 4 && meshes[1] == 2u && meshes[2] == 2u);  // ruled out once
