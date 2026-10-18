@@ -296,9 +296,7 @@ internal sealed partial class MainWindowViewModel
                recommendation.StartsWith("[Hook framework]", StringComparison.OrdinalIgnoreCase) ||
                recommendation.StartsWith("[훅 프레임워크]", StringComparison.Ordinal) ||
                recommendation.StartsWith("[External software]", StringComparison.OrdinalIgnoreCase) ||
-               recommendation.StartsWith("[외부 프로그램]", StringComparison.Ordinal) ||
-               recommendation.StartsWith("[Earlier fault]", StringComparison.OrdinalIgnoreCase) ||
-               recommendation.StartsWith("[이전 예외]", StringComparison.Ordinal);
+               recommendation.StartsWith("[외부 프로그램]", StringComparison.Ordinal);
     }
 
     private static bool IsRecaptureRecommendation(string recommendation)

@@ -100,18 +100,8 @@ inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, s
          nowTick64 - s->latchedTick64 >= kLateRecoveryMinAliveMs;
 }
 
-// ADR-0017: a fault that was still being checked when a newer crash
-// published its own record. Its dump is kept, and the newer crash's incident
-// manifest names it.
-struct EarlierCrashFault {
-  std::wstring dumpPath;
-  CrashEventInfo info{};
-  std::uint64_t capturedTick64 = 0;
-};
-
 struct CrashCaptureState {
   bool latched = false;
-  EarlierCrashFault earlierFault{};
   CrashEventInfo capturedInfo{};
   bool cleanExitEvidenceWritten = false;
   bool cleanExitEvidenceFinalized = false;

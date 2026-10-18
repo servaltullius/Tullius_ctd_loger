@@ -79,16 +79,6 @@ void LoadIncidentCaptureProfile(
       capture_profile.value("ignore_inaccessible_memory", false);
     out.incident_capture_profile_full_memory = capture_profile.value("include_full_memory", false);
   }
-  if (incidentManifest.contains("context") && incidentManifest["context"].is_object() &&
-      incidentManifest["context"].contains("earlier_fault") && incidentManifest["context"]["earlier_fault"].is_object()) {
-    const auto& earlier = incidentManifest["context"]["earlier_fault"];
-    out.earlier_fault_dump = Utf8ToWide(earlier.value("dump", ""));
-    out.earlier_fault_present = !out.earlier_fault_dump.empty();
-    out.earlier_fault_code = earlier.value("exception_code", 0u);
-    out.earlier_fault_addr = earlier.value("exception_addr", std::uint64_t{ 0 });
-    out.earlier_fault_tid = earlier.value("faulting_tid", 0u);
-    out.earlier_fault_seconds_before = earlier.value("seconds_before", 0.0);
-  }
   if (incidentManifest.contains("recapture_evaluation") && incidentManifest["recapture_evaluation"].is_object()) {
     const auto& recapture_evaluation = incidentManifest["recapture_evaluation"];
     out.incident_recapture_evaluation_present = true;

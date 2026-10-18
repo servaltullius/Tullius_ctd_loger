@@ -447,16 +447,6 @@ struct AnalysisResult
   std::string incident_recapture_target_profile;  // none / crash_richer / crash_full / freeze_snapshot_richer
   std::uint32_t incident_recapture_escalation_level = 0;
   std::vector<std::string> incident_recapture_reasons;
-  // ADR-0017: another fatal exception was still being checked when this crash
-  // was published; the helper kept its dump (incident manifest
-  // context.earlier_fault). The module is resolved with this dump's modules.
-  bool earlier_fault_present = false;
-  std::wstring earlier_fault_dump;
-  std::uint32_t earlier_fault_code = 0;
-  std::uint64_t earlier_fault_addr = 0;
-  std::uint32_t earlier_fault_tid = 0;
-  double earlier_fault_seconds_before = 0.0;
-  std::wstring earlier_fault_module_plus_offset;
   bool online_symbol_source_allowed = false;
   bool online_symbol_source_used = false;
   bool path_redaction_applied = true;
