@@ -234,9 +234,10 @@ inline FilterVerdict ClassifyExitCodeVerdict(
   return FilterVerdict::kKeepDump;
 }
 
+// Not noexcept: queueing copies the path into a std::wstring, which can throw.
 inline bool QueueDeferredCrashViewer(
   const std::wstring& dumpPath,
-  std::wstring* pendingCrashViewerDumpPath) noexcept
+  std::wstring* pendingCrashViewerDumpPath)
 {
   if (!pendingCrashViewerDumpPath) {
     return false;
