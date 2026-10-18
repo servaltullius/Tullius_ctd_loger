@@ -237,8 +237,45 @@ static void Test_CleanMo2ModFolderName()
          L"SmoothCam");
 }
 
+// The folder cache rules out mods without a folder once and gives the same
+// providers, in the same order, as asking the disk for each file.
+void Test_FolderCacheGivesTheSameProviders()
+{
+  const auto base = std::filesystem::temp_directory_path() / "skydiag_mo2_folder_cache";
+  std::error_code ec;
+  std::filesystem::remove_all(base, ec);
+  TouchFile(base / "mods" / "Winner" / "meshes" / "actors" / "a.nif");
+  TouchFile(base / "mods" / "Winner" / "meshes" / "actors" / "b.nif");
+  TouchFile(base / "mods" / "TexturesOnly" / "textures" / "a.dds");
+  TouchFile(base / "mods" / "Loser" / "meshes" / "actors" / "a.nif");
+  TouchFile(base / "mods" / "Loser" / "meshes" / "clutter" / "c.nif");
+  std::filesystem::create_directories(base / "mods" / "EspOnly");
+
+  skydiag::dump_tool::Mo2Index idx{};
+  idx.overwriteDir = base / "overwrite";
+  for (const char* name : { "Winner", "TexturesOnly", "EspOnly", "Loser" }) {
+    idx.modDirs.push_back(base / "mods" / name);
+    idx.modNames.push_back(std::filesystem::path(name).wstring());
+  }
+
+  skydiag::dump_tool::Mo2FolderCache cache;
+  // Lower case and forward slashes: the Linux CI build has a case-sensitive
+  // file system and no backslash separator (Windows has neither).
+  for (const wchar_t* path : { L"meshes/actors/a.nif", L"meshes/actors/b.nif", L"meshes/clutter/c.nif", L"meshes/none.nif" }) {
+    assert(FindMo2ProvidersForDataPath(idx, path, 8, &cache) == FindMo2ProvidersForDataPath(idx, path, 8));
+  }
+  const auto a = FindMo2ProvidersForDataPath(idx, L"meshes/actors/a.nif", 8, &cache);
+  assert(a.size() == 2 && a[0] == L"Winner" && a[1] == L"Loser");
+  const auto& meshes = cache.presence.at(L"meshes");
+  assert(meshes.size() == 4 && meshes[1] == 2u && meshes[2] == 2u);  // ruled out once
+  assert(cache.presence.at(L"meshes\\actors")[3] == 1u);
+  std::filesystem::remove_all(base, ec);
+}
+
+
 int main()
 {
+  Test_FolderCacheGivesTheSameProviders();
   Test_CleanMo2ModFolderName();
   Test_InferModName_StandardPath();
   Test_InferModName_CaseInsensitive();

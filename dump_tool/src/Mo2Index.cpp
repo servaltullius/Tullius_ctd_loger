@@ -11,6 +11,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -458,7 +459,11 @@ Mo2Index BuildMo2IndexFromCapture(const CapturedMo2State& state)
   return idx;
 }
 
-std::vector<std::wstring> FindMo2ProvidersForDataPath(const Mo2Index& idx, std::wstring_view relPath, std::size_t maxProviders)
+std::vector<std::wstring> FindMo2ProvidersForDataPath(
+  const Mo2Index& idx,
+  std::wstring_view relPath,
+  std::size_t maxProviders,
+  Mo2FolderCache* folderCache)
 {
   std::vector<std::wstring> out;
   if (relPath.empty() || maxProviders == 0) {
@@ -487,8 +492,37 @@ std::vector<std::wstring> FindMo2ProvidersForDataPath(const Mo2Index& idx, std::
     }
   }
 
+  // The folders above the file, shallowest first, with their cache entries.
+  std::vector<std::pair<std::filesystem::path, std::vector<std::uint8_t>*>> folders;
+  if (folderCache) {
+    std::filesystem::path folder;
+    std::wstring key;
+    const auto parent = rel.parent_path();
+    for (const auto& part : parent) {
+      folder /= part;
+      if (!key.empty()) {
+        key += L'\\';
+      }
+      key += WideLower(part.wstring());
+      auto& presence = folderCache->presence[key];
+      presence.resize(idx.modDirs.size(), 0u);
+      folders.emplace_back(folder, &presence);
+    }
+  }
+
   for (std::size_t i = 0; i < idx.modDirs.size(); i++) {
-    if (std::filesystem::exists(idx.modDirs[i] / rel, ec)) {
+    bool possible = true;
+    for (auto& [folder, presence] : folders) {
+      auto& state = (*presence)[i];
+      if (state == 0u) {
+        state = std::filesystem::is_directory(idx.modDirs[i] / folder, ec) ? 1u : 2u;
+      }
+      if (state == 2u) {
+        possible = false;
+        break;
+      }
+    }
+    if (possible && std::filesystem::exists(idx.modDirs[i] / rel, ec)) {
       out.push_back(CleanMo2ModFolderName(idx.modNames[i]));
       if (out.size() >= maxProviders) {
         break;
