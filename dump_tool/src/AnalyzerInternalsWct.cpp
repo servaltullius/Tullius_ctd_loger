@@ -6,7 +6,82 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagWctWait.h"
+
 namespace skydiag::dump_tool::internal {
+namespace {
+
+struct ThreadWaitState
+{
+  std::uint32_t object_status = 0;
+  std::uint64_t wait_start_tick = 0;
+};
+
+// The queried thread's own node: WCT lists it first, before the objects it
+// waits on and their owner threads.
+ThreadWaitState ReadOwnWaitState(const nlohmann::json& thread, std::uint32_t tid)
+{
+  const auto nodesIt = thread.find("nodes");
+  if (nodesIt == thread.end() || !nodesIt->is_array() || nodesIt->empty() || !nodesIt->front().is_object()) {
+    return {};
+  }
+  const auto& node = nodesIt->front();
+  const auto thIt = node.find("thread");
+  if (thIt == node.end() || !thIt->is_object()) {
+    return {};
+  }
+  const auto idIt = thIt->find("threadId");
+  if (idIt != thIt->end() && idIt->is_number_unsigned() && idIt->get<std::uint32_t>() != tid) {
+    return {};
+  }
+  ThreadWaitState state{};
+  state.object_status = node.value("objectStatus", 0u);
+  state.wait_start_tick = thIt->value("waitTime", 0ull);
+  return state;
+}
+
+WctLongestWaiter FindLongestWaiter(const nlohmann::json& threads)
+{
+  WctLongestWaiter waiter;
+  if (!threads.is_array()) {
+    return waiter;
+  }
+  for (const auto& t : threads) {
+    if (!t.is_object()) {
+      continue;
+    }
+    const auto tid = t.value("tid", 0u);
+    const auto state = ReadOwnWaitState(t, tid);
+    waiter.Observe(tid, state.object_status, state.wait_start_tick);
+  }
+  return waiter;
+}
+
+// The same longest waiter in both passes. Helpers before this rule picked the
+// thread with the latest wait start, so the flag they wrote is recomputed from
+// the passes they recorded; nullopt when the capture has no two passes.
+std::optional<bool> LongestWaiterConsensusFromPasses(const nlohmann::json& j)
+{
+  const auto passesIt = j.find("passes");
+  if (passesIt == j.end() || !passesIt->is_array() || passesIt->size() < 2u) {
+    return std::nullopt;
+  }
+  WctLongestWaiter waiters[2];
+  for (std::size_t i = 0; i < 2u; ++i) {
+    const auto& pass = (*passesIt)[i];
+    if (!pass.is_object() || !pass.value("capture_usable", false)) {
+      return false;
+    }
+    const auto threadsIt = pass.find("threads");
+    if (threadsIt == pass.end()) {
+      return false;
+    }
+    waiters[i] = FindLongestWaiter(*threadsIt);
+  }
+  return waiters[0].tid() != 0u && waiters[0].tid() == waiters[1].tid();
+}
+
+}  // namespace
 
 std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJsonUtf8)
 {
@@ -25,7 +100,8 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
     summary.capture_passes = j.value("capture_passes", 0u);
     summary.cycle_consensus = j.value("cycle_consensus", false);
     summary.consistent_loading_signal = j.value("consistent_loading_signal", false);
-    summary.longest_wait_tid_consensus = j.value("longest_wait_tid_consensus", false);
+    summary.longest_wait_tid_consensus =
+      LongestWaiterConsensusFromPasses(j).value_or(j.value("longest_wait_tid_consensus", false));
 
     const auto repeatedCycleIt = j.find("repeated_cycle_tids");
     if (repeatedCycleIt != j.end() && repeatedCycleIt->is_array()) {
@@ -54,26 +130,10 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
             summary.cycle_thread_ids.push_back(tid);
           }
         }
-
-        std::uint64_t waitTime = 0;
-        const auto nodesIt = t.find("nodes");
-        if (nodesIt != t.end() && nodesIt->is_array()) {
-          for (const auto& node : *nodesIt) {
-            if (!node.is_object()) {
-              continue;
-            }
-            const auto thIt = node.find("thread");
-            if (thIt == node.end() || !thIt->is_object()) {
-              continue;
-            }
-            waitTime = std::max<std::uint64_t>(waitTime, thIt->value("waitTime", 0ull));
-          }
-        }
-        if (waitTime > summary.longest_wait_ms) {
-          summary.longest_wait_ms = waitTime;
-          summary.longest_wait_tid = tid;
-        }
       }
+      const auto waiter = FindLongestWaiter(*threadsIt);
+      summary.longest_wait_tid = waiter.tid();
+      summary.longest_wait_start_tick = waiter.wait_start_tick();
     }
 
     const auto dialogsIt = j.find("modal_dialogs");
@@ -185,7 +245,9 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
       nonCycle.push_back(Row{ tid, waitTime });
     }
 
-    // Otherwise pick the longest-waiting threads (best-effort).
+    // Otherwise a best-effort order, kept from before: the newest wait start
+    // first. The earliest ticks are not the stall either (idle pools, or the
+    // threads a process-wide suspend restarted at one tick; SkyrimDiagWctWait.h).
     if (maxN == 0) {
       return tids;
     }

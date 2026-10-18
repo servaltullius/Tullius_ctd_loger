@@ -8,7 +8,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 - **Not a crash-prevention mod.** It records signals and captures evidence; it does not swallow exceptions or attempt to keep playing.
 - **No uploads / telemetry.** All output is local. Online symbol downloads are OFF by default (`AllowOnlineSymbols=0`).
-- **CrashLoggerSSE integration** — auto-detects timestamped `crash-*.log` / `threaddump-*.log` artifacts, including the current v1.24 format, and surfaces top callstack modules, C++ exception blocks, and CrashLogger version. A normal runtime `CrashLogger.log` without a `Callstack:` section is not treated as crash evidence.
+- **CrashLoggerSSE integration** — auto-detects timestamped `crash-*.log` / `threaddump-*.log` artifacts, including the current v1.24 format, and surfaces top callstack modules (crash logs only; a thread dump's all-thread module tally is not used), C++ exception blocks, and CrashLogger version. A normal runtime `CrashLogger.log` without a `Callstack:` section is not treated as crash evidence.
 
 ## Components
 
