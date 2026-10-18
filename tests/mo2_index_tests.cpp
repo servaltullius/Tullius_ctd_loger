@@ -259,10 +259,11 @@ void Test_FolderCacheGivesTheSameProviders()
   }
 
   skydiag::dump_tool::Mo2FolderCache cache;
-  for (const wchar_t* path : { L"meshes\\actors\\a.nif", L"Meshes/Actors/B.NIF", L"meshes\\clutter\\c.nif", L"meshes\\none.nif" }) {
+  // Lower case and forward slashes: the Linux CI build has a case-sensitive
+  // file system and no backslash separator (Windows has neither).
+  for (const wchar_t* path : { L"meshes/actors/a.nif", L"meshes/actors/b.nif", L"meshes/clutter/c.nif", L"meshes/none.nif" }) {
     assert(FindMo2ProvidersForDataPath(idx, path, 8, &cache) == FindMo2ProvidersForDataPath(idx, path, 8));
   }
-  // Forward slashes: the Linux CI build has no backslash separator.
   const auto a = FindMo2ProvidersForDataPath(idx, L"meshes/actors/a.nif", 8, &cache);
   assert(a.size() == 2 && a[0] == L"Winner" && a[1] == L"Loser");
   const auto& meshes = cache.presence.at(L"meshes");
