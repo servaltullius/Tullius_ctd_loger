@@ -243,6 +243,7 @@ void TestExecuteConfirmedHangCapture_WritesArtifacts()
 
   Require(result == HangTickResult::kContinue, "Confirmed hang capture should continue helper loop");
   Require(state.hangCapturedThisEpisode, "Confirmed hang capture must mark episode captured");
+  Require(!state.modalDialogSeenThisEpisode, "No dialog was on screen at this hang capture");
   Require(pendingHangViewerDumpPath.empty(), "Viewer queue should remain empty when auto-open is disabled");
 
   Require(std::filesystem::exists(FindSingleFileWithExt(outBase, L".dmp")), "Hang capture must write a dump");

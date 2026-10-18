@@ -7,6 +7,7 @@ using skydiag::helper::internal::BuildCrashEventInfo;
 using skydiag::helper::internal::ClassifyExitCodeVerdict;
 using skydiag::helper::internal::CrashEventInfo;
 using skydiag::helper::internal::FilterVerdict;
+using skydiag::helper::internal::IsCloseOfUnresponsiveGame;
 using skydiag::helper::internal::IsCommittedCrashSequence;
 using skydiag::helper::internal::QueueDeferredCrashViewer;
 using skydiag::helper::internal::ShouldLatchCrashCapture;
@@ -21,6 +22,17 @@ static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u), "an access violation");
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no manual capture");
+
+// A frozen game closed with a non-zero exit gets no abnormal-exit WER hint
+// (exitCode, crashOnRecord, hangCaptured, modalDialogSeen, heartbeatStalled).
+static_assert(IsCloseOfUnresponsiveGame(1u, false, true, false, false), "closed after a hang capture");
+static_assert(IsCloseOfUnresponsiveGame(1u, false, false, false, true), "closed with a stalled heartbeat");
+static_assert(!IsCloseOfUnresponsiveGame(1u, false, false, false, false), "a responsive game");
+static_assert(!IsCloseOfUnresponsiveGame(0u, false, true, false, true), "a normal exit");
+static_assert(!IsCloseOfUnresponsiveGame(3u, false, true, true, true), "a dialog at the hang capture");
+static_assert(!IsCloseOfUnresponsiveGame(0xC0000409u, false, true, false, true), "an NTSTATUS crash exit code");
+static_assert(IsCloseOfUnresponsiveGame(0xBFFFFFFFu, false, true, false, true), "below the NTSTATUS error range");
+static_assert(!IsCloseOfUnresponsiveGame(1u, true, true, false, true), "a crash on record");
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {

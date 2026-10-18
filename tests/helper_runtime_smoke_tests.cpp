@@ -166,13 +166,82 @@ void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
 
   Require(handled, "the event is consumed");
   Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing is captured");
+  Require(crashState.releasedCrashSeq == 2u, "the exception is released, so the exit path does not report it again");
   bool anyDump = false;
   for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
     anyDump = anyDump || entry.path().extension() == L".dmp";
   }
   Require(!anyDump, "no dump is written");
   Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "the capture is thawed for a later CTD");
-  AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "No dump written", "the reason is logged");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "No dump written", "the reason is logged");
+  // rc3 logged "deleting dump" here although no dump had been written.
+  Require(log.find("deleting dump") == std::string::npos, "the filter does not claim to delete a dump");
+
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
+// A strong fault whose game keeps running is filtered after its dump was
+// written: the dump is deleted, the log says so, and the generation is
+// released so the exit path does not report it again.
+void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_recovered_after_dump");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  ParkedThread faulting;
+  const CONTEXT faultingContext = faulting.Context();
+  shared->header.crash.faulting_tid = faulting.tid();
+  shared->header.crash.exception_addr = faultingContext.Rip;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(faultingContext.Rip);
+  shared->header.crash.context = faultingContext;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  std::atomic_bool stop{ false };
+  std::thread game([&] {
+    while (!stop.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+
+  HelperConfig cfg = MakeTestConfig();
+  CrashCaptureState crashState{};
+  PendingCrashEtwCapture pendingCrashEtw{};
+  PendingCrashAnalysis pendingCrashAnalysis{};
+  std::wstring lastCrashDumpPath;
+  std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
+  const bool handled = HandleCrashEventTick(
+    cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
+    &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
+  stop.store(true);
+  game.join();
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  Require(handled, "the event is consumed");
+  if (log.find("dump deleted") == std::string::npos) {
+    std::fprintf(stderr, "%s\n", log.c_str());
+  }
+  Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing stays captured");
+  Require(crashState.releasedCrashSeq == 2u, "the recovered exception is released");
+  bool anyDump = false;
+  for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
+    anyDump = anyDump || entry.path().extension() == L".dmp";
+  }
+  Require(!anyDump, "the filtered dump is deleted");
+  AssertContains(log, "likely a handled first-chance exception", "the filter logs its evidence");
+  AssertContains(log, "Filtered crash event consumed; dump deleted", "the caller logs what happened to the dump");
+  Require(log.find("deleting dump") == std::string::npos, "the filter itself does not log the dump's fate");
 
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
@@ -430,6 +499,7 @@ int main()
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();
+    TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
     TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();

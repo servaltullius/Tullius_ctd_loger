@@ -131,6 +131,15 @@ struct CrashCaptureState {
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
   LateRecoveryState lateRecovery{};
+  // The crash generation last released as a handled exception (the game kept
+  // running or exited with code 0). Its record stays committed in shared
+  // memory, so the exit path must not report it again. A crash superseded by
+  // a newer one (kRetryNewerCrash) is not released.
+  std::uint32_t releasedCrashSeq = 0;
+  // The crash generation whose dump could not be written, and whether the
+  // game had already exited then. Its dump-failure WER hint stays at exit.
+  std::uint32_t dumpWriteFailedCrashSeq = 0;
+  bool dumpWriteFailedProcessExited = false;
 };
 
 struct StableSharedSnapshot {
@@ -263,6 +272,17 @@ inline bool ShouldQuarantineCleanExitEvidence(
   return exitCode == 0u && info.isStrong && IsCommittedCrashSequence(info.crashSeq);
 }
 
+// Why a committed fault is recorded only as metadata after the game exited.
+enum class PostExitEvidenceReason
+{
+  // Published after the helper's final live-process poll; never captured.
+  kPublishedAfterFinalLivePoll,
+  // Captured while the game ran, but its dump could not be written.
+  kDumpWriteFailed,
+  // Captured, but the game had exited before its dump could be written.
+  kDumpWriteFailedProcessExited,
+};
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
 bool TryCaptureCommittedCrashInfo(
   const skydiag::SharedHeader* shm,
@@ -270,7 +290,8 @@ bool TryCaptureCommittedCrashInfo(
 bool TryWritePostExitCrashEvidenceRecord(
   const std::filesystem::path& outBase,
   const CrashEventInfo& info,
-  DWORD exitCode);
+  DWORD exitCode,
+  PostExitEvidenceReason reason = PostExitEvidenceReason::kPublishedAfterFinalLivePoll);
 bool CaptureStableSharedSnapshot(
   const skydiag::SharedLayout* shm,
   std::size_t shmBytes,
@@ -319,6 +340,26 @@ inline std::string BuildWerFallbackHintText(WerFallbackReason reason, DWORD exit
 }
 
 void WriteWerFallbackHint(const std::filesystem::path& outBase, WerFallbackReason reason, DWORD exitCode);
+
+// A non-zero exit with no crash on record, after the game had stopped
+// responding (a hang was captured in this episode, or the heartbeat had
+// stalled past the hang threshold), is a frozen game being closed, by the user
+// or a watchdog. The abnormal-exit hint would point at a plugin's error dialog
+// and at WER LocalDumps, which cannot capture a hung or terminated game. It
+// still applies when a dialog was on screen at the hang capture (a plugin's
+// error dialog that then ends the game), and for an NTSTATUS error exit code
+// such as a fail-fast, which WER does capture.
+constexpr bool IsCloseOfUnresponsiveGame(
+  std::uint32_t exitCode,
+  bool crashOnRecord,
+  bool hangCapturedThisEpisode,
+  bool modalDialogSeenThisEpisode,
+  bool heartbeatStalled) noexcept
+{
+  return exitCode != 0u && exitCode < 0xC0000000u && !crashOnRecord && !modalDialogSeenThisEpisode &&
+         (hangCapturedThisEpisode || heartbeatStalled);
+}
+
 bool IsCleanExitEvidenceRequired(
   const skydiag::helper::HelperConfig& cfg,
   const CrashCaptureState* crashState) noexcept;

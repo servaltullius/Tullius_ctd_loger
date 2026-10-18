@@ -91,6 +91,9 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
   CloseAttachedProcess(&proc);
 
   Require(dialogVisible, "Test MessageBox never became visible");
+  Require(
+    state.modalDialogSeenThisEpisode,
+    "A dialog at the hang capture is remembered, so a later abnormal exit keeps its WER hint");
   const auto dumpPath = FindSingleFileWithExt(outBase, L".dmp");
   Require(std::filesystem::exists(dumpPath), "Hang capture must write a dump");
 

@@ -64,7 +64,10 @@ void PumpManualCaptureInputs(
   const std::filesystem::path& outBase,
   LoadStats* loadStats,
   std::uint32_t adaptiveLoadingThresholdSec);
-void DrainCrashEventBeforeExit(
+// After the process exited: true when a committed crash that the helper did
+// not release as handled is on record (captured, or recorded here as
+// metadata). A crash released earlier is not reported again.
+bool DrainCrashEventBeforeExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,

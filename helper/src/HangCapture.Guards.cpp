@@ -18,6 +18,7 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
     return;
   }
   state->hangCapturedThisEpisode = false;
+  state->modalDialogSeenThisEpisode = false;
   state->hangSuppressedNotForegroundThisEpisode = false;
   state->hangSuppressedForegroundGraceThisEpisode = false;
   state->hangSuppressedForegroundResponsiveThisEpisode = false;

@@ -258,6 +258,18 @@ int main()
     processExitTickBody,
     "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
     "Abnormal exit without an internal dump must emit WER LocalDumps fallback guidance.");
+  AssertOrdered(
+    processExitTickBody,
+    "IsCloseOfUnresponsiveGame(",
+    "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
+    "A frozen game that was closed must not get the abnormal-exit WER hint.");
+
+  const std::string drainBody = ExtractFunctionBody(helperMain, "bool DrainCrashEventBeforeExit(");
+  AssertOrdered(
+    drainBody,
+    "state->crashCaptured.releasedCrashSeq == info.crashSeq",
+    "if (exitCode == 0u)",
+    "The exit drain must skip a released crash generation before either exit-code path reports it.");
 
   AssertOrdered(
     processExitTickBody,
