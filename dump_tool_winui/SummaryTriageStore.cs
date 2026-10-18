@@ -120,6 +120,61 @@ internal static class SummaryTriageStore
             }
             throw;
         }
+
+        await MirrorToStemSummaryAsync(summaryPath, dumpPath, outDir, triageNode, options, cancellationToken);
+    }
+
+    // The analyzer also writes <stem>_SkyrimDiagSummary.json in the output
+    // folder, the file people open and share; the viewer edits the
+    // identity-bound copy. Update the stem file too, but only while it still
+    // describes this dump (another dump with the same file name shares that
+    // path). Best effort: the identity-bound state is what the next analysis
+    // reads back.
+    private static async Task MirrorToStemSummaryAsync(
+        string summaryPath,
+        string dumpPath,
+        string outDir,
+        JsonObject triageNode,
+        JsonSerializerOptions options,
+        CancellationToken cancellationToken)
+    {
+        var stemSummaryPath = Path.Combine(
+            outDir,
+            Path.GetFileNameWithoutExtension(dumpPath) + "_SkyrimDiagSummary.json");
+        if (!File.Exists(stemSummaryPath) ||
+            string.Equals(
+                Path.GetFullPath(stemSummaryPath),
+                Path.GetFullPath(summaryPath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var stemText = await File.ReadAllTextAsync(stemSummaryPath, cancellationToken);
+            using (var stemDocument = JsonDocument.Parse(stemText))
+            {
+                var stemIdentity = DumpIdentityContract.FromJson(stemDocument.RootElement);
+                if (!await stemIdentity.MatchesFileAsync(dumpPath, cancellationToken))
+                {
+                    return;
+                }
+            }
+            if (JsonNode.Parse(stemText) is not JsonObject stemRoot)
+            {
+                return;
+            }
+            stemRoot["triage"] = triageNode.DeepClone();
+            await AtomicFile.WriteAllTextAsync(
+                stemSummaryPath,
+                stemRoot.ToJsonString(options) + Environment.NewLine,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Debug.WriteLine($"Stem summary triage mirror skipped: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private static async Task RestoreAuthoritativeStateAsync(

@@ -173,6 +173,35 @@ internal static class Program
             Require((await File.ReadAllTextAsync(stateA)).Contains("A.esp"), "dump B overwrote dump A state");
             Require((await File.ReadAllTextAsync(stateB)).Contains("B.esp"), "dump B state was not saved");
 
+            // The stem summary next to the dump output gets the review when it
+            // describes the same dump, and is left alone when it does not.
+            var cDir = Path.Combine(root, "c");
+            Directory.CreateDirectory(cDir);
+            var dumpC = Path.Combine(cDir, "Unique.dmp");
+            await File.WriteAllBytesAsync(dumpC, Enumerable.Repeat((byte)0x43, 4096).ToArray());
+            var identityC = await DumpIdentityContract.ComputeAsync(dumpC, CancellationToken.None);
+            var summaryPathC = Path.Combine(identityC.ResolveArtifactDirectory(outDir), "Summary.json");
+            var stemSummaryC = Path.Combine(outDir, "Unique_SkyrimDiagSummary.json");
+            await AtomicFile.WriteAllTextAsync(summaryPathC, BuildSummary(identityC), CancellationToken.None);
+            await AtomicFile.WriteAllTextAsync(stemSummaryC, BuildSummary(identityC), CancellationToken.None);
+            await SummaryTriageStore.SaveAsync(
+                summaryPathC,
+                dumpC,
+                outDir,
+                new TriageReview { ReviewStatus = "confirmed", Reviewed = true, GroundTruthMod = "C.esp" },
+                CancellationToken.None);
+            Require(
+                AnalysisSummary.LoadFromSummaryFile(stemSummaryC).Triage.GroundTruthMod == "C.esp",
+                "the stem summary of the same dump must get the review");
+
+            var stemSummaryOfB = Path.Combine(outDir, "SameStem_SkyrimDiagSummary.json");
+            await AtomicFile.WriteAllTextAsync(stemSummaryOfB, BuildSummary(identityB), CancellationToken.None);
+            var stemOfBBefore = await File.ReadAllTextAsync(stemSummaryOfB);
+            await SummaryTriageStore.SaveAsync(summaryPathA, dumpA, outDir, reviewA, CancellationToken.None);
+            Require(
+                await File.ReadAllTextAsync(stemSummaryOfB) == stemOfBBefore,
+                "a stem summary of another dump with the same name must be left alone");
+
             var discoveryPath = Path.Combine(root, "dump-discovery.json");
             var discoveryA = new DumpDiscoveryState
             {
