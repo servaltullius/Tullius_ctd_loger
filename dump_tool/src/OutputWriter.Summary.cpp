@@ -167,6 +167,16 @@ nlohmann::json BuildSummaryJson(
   summary["exception"]["module_path"] = WideToUtf8(MaybeRedactPath(r.fault_module_path, redactPaths));
   summary["exception"]["inferred_mod_name"] = WideToUtf8(r.inferred_mod_name);
   summary["exception"]["external_software"] = WideToUtf8(r.fault_module_external_software);
+  if (r.earlier_fault_present) {
+    summary["earlier_fault"] = {
+      { "dump", WideToUtf8(r.earlier_fault_dump) },
+      { "exception_code", r.earlier_fault_code },
+      { "exception_addr", r.earlier_fault_addr },
+      { "faulting_tid", r.earlier_fault_tid },
+      { "seconds_before", r.earlier_fault_seconds_before },
+      { "module_plus_offset", WideToUtf8(r.earlier_fault_module_plus_offset) },
+    };
+  }
   summary["game_version"] = r.game_version;
 
   summary["crash_logger"] = nlohmann::json::object();

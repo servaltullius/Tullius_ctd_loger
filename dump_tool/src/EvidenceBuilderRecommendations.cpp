@@ -410,6 +410,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[정상 종료] 필터 동작을 제보할 때 덤프, 정상 종료 증거 사이드카, 헬퍼 로그를 함께 보관하세요.");
     return;
   }
+  if (r.earlier_fault_present) {
+    r.recommendations.push_back(en
+      ? (L"[Earlier fault] Another fatal exception was caught just before this crash and its dump was kept (" +
+          r.earlier_fault_dump + L"). If this report does not explain the crash, analyze that dump too.")
+      : (L"[이전 예외] 이 크래시 직전에 다른 치명적 예외가 잡혀 그 덤프를 남겨 두었습니다(" + r.earlier_fault_dump +
+          L"). 이 리포트로 설명되지 않으면 그 덤프도 분석해 보세요."));
+  }
   const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
