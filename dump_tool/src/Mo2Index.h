@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace skydiag::dump_tool {
@@ -67,7 +69,21 @@ std::optional<std::filesystem::path> TryInferMo2BaseDirFromModulePaths(const std
 // modulePaths are used only to infer the MO2 base folder.
 std::optional<Mo2Index> TryBuildMo2IndexFromModulePaths(const std::vector<std::wstring>& modulePaths);
 
+// Which mod folders lack a Data folder ("meshes\actors"), kept across
+// lookups: a mod without meshes\ is ruled out for every mesh with one check.
+// Asking the disk for each file in each mod was about 480,000 checks for 110
+// recent files and 4,362 mods (several seconds of every analysis).
+struct Mo2FolderCache
+{
+  // Lower-cased folder -> per mod in Mo2Index::modDirs: 0 unknown, 1 present, 2 absent.
+  std::unordered_map<std::wstring, std::vector<std::uint8_t>> presence;
+};
+
 // Returns provider names like "overwrite", "<ModName>" ... (best-effort).
-std::vector<std::wstring> FindMo2ProvidersForDataPath(const Mo2Index& idx, std::wstring_view relPath, std::size_t maxProviders);
+std::vector<std::wstring> FindMo2ProvidersForDataPath(
+  const Mo2Index& idx,
+  std::wstring_view relPath,
+  std::size_t maxProviders,
+  Mo2FolderCache* folderCache = nullptr);
 
 }  // namespace skydiag::dump_tool

@@ -203,6 +203,7 @@ void ParseBlackboxStream(
   out.resources.reserve(static_cast<std::size_t>(std::min<std::uint32_t>(rWrite, rCap)));
 
   std::unordered_map<std::wstring, std::vector<std::wstring>> mo2ProvidersCache;
+  Mo2FolderCache mo2FolderCache;
 
   const auto normMo2Key = [](std::wstring_view relPath) {
     std::wstring key(relPath);
@@ -253,7 +254,7 @@ void ParseBlackboxStream(
       const std::wstring key = normMo2Key(rr.path);
       auto it = mo2ProvidersCache.find(key);
       if (it == mo2ProvidersCache.end()) {
-        rr.providers = FindMo2ProvidersForDataPath(*mo2Index, rr.path, /*maxProviders=*/8);
+        rr.providers = FindMo2ProvidersForDataPath(*mo2Index, rr.path, /*maxProviders=*/8, &mo2FolderCache);
         it = mo2ProvidersCache.emplace(key, rr.providers).first;
       } else {
         rr.providers = it->second;
