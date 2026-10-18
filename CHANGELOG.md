@@ -13,7 +13,6 @@
 - **게임 시작 시간을 로딩 화면 시간으로 세지 않습니다.** Helper는 로딩 화면 시간을 모아 무한로딩 판정 기준을 자동으로 정하는데, 게임을 켤 때 데이터를 읽는 2분 남짓도 로딩 한 번으로 기록했습니다. 실제 기록(세이브 로딩 23~26초, 게임 시작 124~149초)에서 기준이 약 269초로 부풀어, 무한로딩을 늦게 알아챘습니다. 이제 처음부터 끝까지 본 로딩 화면만 셉니다(같은 기록이면 약 146초). 이미 저장된 시작 시간 기록은 새 로딩이 쌓이며 밀려납니다.
 - **`LogMenus=0`이어도 로딩·메뉴 상태를 추적합니다.** 이 설정은 메뉴 이벤트를 블랙박스에 남기지 않는 옵션인데, 메뉴 감시 자체를 꺼서 로딩 화면이 로딩으로 인식되지 않았고(짧은 일반 프리징 기준이 적용됨), 시작 때 켜 둔 로딩 상태가 꺼지지 않을 수 있었습니다.
 
-
 ### 수정
 - 분석기: 다음을 "외부 프로그램"으로 분류합니다. 파일 이름으로 NVIDIA 텔레메트리·캡처(`NvTelemetryBridge64.dll`, `NvTelemetryAPI64.dll`, `NvTelemetry64.dll`, `nvspcap64.dll`), Steam 오버레이(`GameOverlayRenderer64.dll`), Discord 오버레이(`DiscordHook64.dll`), RivaTuner Statistics Server(`RTSSHooks64.dll`), OBS 게임 캡처(`graphics-hook64.dll`). 설치 폴더로 `Program Files`(x86 포함) 아래 `NVIDIA Corporation`, `AMD`, `Intel`. Windows 폴더에 있는 사본은 지금처럼 시스템 모듈입니다.
 - 외부 프로그램 DLL은 콜스택·스택 스캔 후보, Crash Logger 콜스택 단서, 선행 예외(first-chance) 후보에서 빠집니다. Crash Logger 로그에는 경로가 없어 이름 목록으로 거릅니다.
