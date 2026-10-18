@@ -166,6 +166,7 @@ nlohmann::json BuildSummaryJson(
   summary["exception"]["fault_module_unknown"] = IsUnknownModuleField(r.fault_module_plus_offset);
   summary["exception"]["module_path"] = WideToUtf8(MaybeRedactPath(r.fault_module_path, redactPaths));
   summary["exception"]["inferred_mod_name"] = WideToUtf8(r.inferred_mod_name);
+  summary["exception"]["external_software"] = WideToUtf8(r.fault_module_external_software);
   summary["game_version"] = r.game_version;
 
   summary["crash_logger"] = nlohmann::json::object();

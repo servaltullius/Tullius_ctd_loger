@@ -51,6 +51,7 @@
 
 namespace skydiag::dump_tool {
 
+using skydiag::dump_tool::minidump::IsExternalSoftwareModule;
 using skydiag::dump_tool::minidump::IsGameExeModule;
 using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
@@ -133,6 +134,7 @@ bool CanPromoteCrashLoggerFrameModule(std::wstring_view module)
   }
   return !IsKnownHookFramework(module) &&
          !IsSystemishModule(module) &&
+         !IsExternalSoftwareModule(module) &&
          !IsGameExeModule(module);
 }
 
@@ -146,8 +148,9 @@ bool IsCrashLoggerFrameModuleLoadedFromSystemPath(
   }
 
   for (const auto& loaded : allModules) {
+    // A GPU vendor tool or overlay is no more a mod than a Windows DLL.
     if (WideLower(loaded.filename) == key &&
-        IsLikelyWindowsSystemModulePath(loaded.path)) {
+        (IsLikelyWindowsSystemModulePath(loaded.path) || !loaded.external_software.empty())) {
       return true;
     }
   }

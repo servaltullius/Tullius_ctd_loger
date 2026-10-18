@@ -413,6 +413,61 @@ bool IsSkseModule(std::wstring_view filename)
   return IsSkseModuleLower(LowerCopy(filename));
 }
 
+std::wstring ExternalSoftwareName(std::wstring_view filename, std::wstring_view modulePath)
+{
+  const std::wstring lowerPath = LowerCopy(modulePath);
+  if (IsLikelyWindowsSystemModulePathLower(lowerPath)) {
+    return {};
+  }
+
+  struct NamedDll
+  {
+    std::wstring_view filename;
+    std::wstring_view software;
+  };
+  static constexpr NamedDll kNamedDlls[] = {
+    { L"nvtelemetrybridge64.dll", L"NVIDIA" },
+    { L"nvtelemetryapi64.dll", L"NVIDIA" },
+    { L"nvtelemetry64.dll", L"NVIDIA" },
+    { L"nvspcap64.dll", L"NVIDIA" },
+    { L"gameoverlayrenderer64.dll", L"Steam overlay" },
+    { L"discordhook64.dll", L"Discord overlay" },
+    { L"rtsshooks64.dll", L"RivaTuner Statistics Server" },
+    { L"graphics-hook64.dll", L"OBS Studio" },
+  };
+  const std::wstring lowerName = LowerCopy(filename);
+  for (const auto& dll : kNamedDlls) {
+    if (lowerName == dll.filename) {
+      return std::wstring(dll.software);
+    }
+  }
+
+  struct VendorFolder
+  {
+    std::wstring_view folder;
+    std::wstring_view software;
+  };
+  static constexpr VendorFolder kVendorFolders[] = {
+    { L"\\program files\\nvidia corporation\\", L"NVIDIA" },
+    { L"\\program files (x86)\\nvidia corporation\\", L"NVIDIA" },
+    { L"\\program files\\amd\\", L"AMD" },
+    { L"\\program files (x86)\\amd\\", L"AMD" },
+    { L"\\program files\\intel\\", L"Intel" },
+    { L"\\program files (x86)\\intel\\", L"Intel" },
+  };
+  for (const auto& vendor : kVendorFolders) {
+    if (lowerPath.find(vendor.folder) != std::wstring::npos) {
+      return std::wstring(vendor.software);
+    }
+  }
+  return {};
+}
+
+bool IsExternalSoftwareModule(std::wstring_view filename, std::wstring_view modulePath)
+{
+  return !ExternalSoftwareName(filename, modulePath).empty();
+}
+
 std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
 {
   std::vector<ModuleInfo> out;
@@ -452,7 +507,12 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     // injector, a mod to suspect, not the system runtime.
     const bool inWindows = IsLikelyWindowsSystemModulePathLower(WideLower(mi.path));
     const bool graphicsProxy = !mi.path.empty() && !inWindows && IsGraphicsRuntimeName(mi.filename);
-    mi.is_systemish = inWindows || (IsSystemishModule(mi.filename) && !graphicsProxy);
+    // GPU vendor tools and overlays are not mods: like Windows DLLs they are
+    // never a suspect for being on the stack (a fault inside one is reported
+    // by the fault module, see EvidenceBuilder).
+    mi.external_software = ExternalSoftwareName(mi.filename, mi.path);
+    mi.is_systemish =
+      inWindows || (IsSystemishModule(mi.filename) && !graphicsProxy) || !mi.external_software.empty();
     mi.is_game_exe = IsGameExeModule(mi.filename);
     mi.is_known_hook_framework = IsKnownHookFramework(mi.filename);
     out.push_back(std::move(mi));

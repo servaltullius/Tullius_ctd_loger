@@ -44,7 +44,9 @@ struct EvidenceBuildContext
   bool isManualCapture = false;
 
   bool hasModule = false;
+  // Also true for a GPU vendor tool or overlay (externalSoftware names it).
   bool isSystem = false;
+  std::wstring externalSoftware;
   bool isGameExe = false;
   bool isHookFramework = false;
   bool hasSignatureMatch = false;
@@ -107,6 +109,9 @@ const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const Analy
 
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
+// Where a fault outside the mods happened, for the summary sentences:
+// "a Windows system DLL", or "external software (NVIDIA, NvTelemetryBridge64.dll)".
+std::wstring FaultPlace(const AnalysisResult& r, const EvidenceBuildContext& ctx);
 bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx);
 bool IsWeakFaultLocationActionableCandidate(
   const AnalysisResult& r,

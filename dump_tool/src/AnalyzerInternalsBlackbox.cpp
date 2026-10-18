@@ -41,6 +41,7 @@ bool IsActionableModuleName(const std::wstring& moduleName)
 {
   return !moduleName.empty() &&
          !minidump::IsSystemishModule(moduleName) &&
+         !minidump::IsExternalSoftwareModule(moduleName) &&
          !minidump::IsGameExeModule(moduleName);
 }
 

@@ -500,6 +500,19 @@ void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, c
       ? (L"The exception address is within " + r.fault_module_filename + L". (Module+Offset: " + r.fault_module_plus_offset + L")")
       : (L"예외 주소가 " + r.fault_module_filename + L" 범위에 포함됩니다. (Module+Offset: " + r.fault_module_plus_offset + L")");
     r.evidence.push_back(std::move(e));
+  } else if (hasModule && isSystem && !ctx.externalSoftware.empty()) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en
+      ? (L"Exception reported in external software (" + ctx.externalSoftware + L")")
+      : (L"크래시가 외부 프로그램(" + ctx.externalSoftware + L")에서 보고됨");
+    e.details = en
+      ? (L"The exception address is in " + r.fault_module_filename + L", which belongs to " + ctx.externalSoftware +
+          L", not to the game or a mod. (Module+Offset: " + r.fault_module_plus_offset + L")")
+      : (L"예외 주소가 " + r.fault_module_filename + L" 안에 있습니다. 게임이나 모드가 아니라 " + ctx.externalSoftware +
+          L" 프로그램의 DLL입니다. (Module+Offset: " + r.fault_module_plus_offset + L")");
+    r.evidence.push_back(std::move(e));
   } else if (hasModule && isSystem) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kLow;

@@ -27,6 +27,7 @@
 namespace skydiag::dump_tool {
 
 using skydiag::dump_tool::internal::output_writer::ReadTextFileUtf8;
+using skydiag::dump_tool::minidump::ExternalSoftwareName;
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::IsGameExeModule;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
@@ -97,6 +98,7 @@ void ResolveFaultModule(
     }
     out.inferred_mod_name = InferMo2ModNameFromPath(out.fault_module_path);
   }
+  out.fault_module_external_software = ExternalSoftwareName(out.fault_module_filename, out.fault_module_path);
 
   if (!out.inferred_mod_name.empty()) {
     const std::wstring inferredLower = WideLower(out.inferred_mod_name);
