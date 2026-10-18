@@ -55,6 +55,12 @@ bool IsSkseModule(std::wstring_view filename);
 // If JSON load fails or provides no valid entries, built-in defaults stay active.
 void LoadHookFrameworksFromJson(const std::filesystem::path& jsonPath);
 bool IsKnownHookFramework(std::wstring_view filename);
+// Software outside the game and its mods that injects into it (GPU vendor
+// tools, overlays): "NVIDIA", "Steam overlay", ... or empty. Matched by file
+// name (Crash Logger logs carry only names) or by its install folder; a copy
+// under Windows stays a system module.
+std::wstring ExternalSoftwareName(std::wstring_view filename, std::wstring_view modulePath = {});
+bool IsExternalSoftwareModule(std::wstring_view filename, std::wstring_view modulePath = {});
 
 struct ModuleInfo
 {
@@ -65,6 +71,8 @@ struct ModuleInfo
   std::wstring path;
   std::wstring filename;
   std::wstring inferred_mod_name;
+  // ExternalSoftwareName(); such a module also counts as is_systemish.
+  std::wstring external_software;
   bool is_systemish = false;
   bool is_game_exe = false;
   bool is_known_hook_framework = false;

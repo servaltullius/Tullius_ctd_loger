@@ -174,6 +174,20 @@ if(WIN32)
     COMMAND skydiag_crash_test_findings_tests
   )
 
+  add_executable(skydiag_external_software_tests
+    external_software_tests.cpp
+  )
+  target_include_directories(skydiag_external_software_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_external_software_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_external_software_tests
+    COMMAND skydiag_external_software_tests
+  )
+
   add_executable(skydiag_problematic_module_tests
     problematic_module_tests.cpp
   )

@@ -588,4 +588,13 @@ bool IsWeakFaultLocationActionableCandidate(
   return !hasQualifiedIndependentSupport;
 }
 
+std::wstring FaultPlace(const AnalysisResult& r, const EvidenceBuildContext& ctx)
+{
+  if (ctx.externalSoftware.empty()) {
+    return ctx.en ? L"a Windows system DLL" : L"Windows 시스템 DLL";
+  }
+  return (ctx.en ? L"external software (" : L"외부 프로그램(") + ctx.externalSoftware + L", " +
+    r.fault_module_filename + L")";
+}
+
 }  // namespace skydiag::dump_tool::internal

@@ -27,6 +27,7 @@ namespace {
 using minidump::WideLower;
 using minidump::IsSystemishModule;
 using minidump::IsGameExeModule;
+using minidump::IsExternalSoftwareModule;
 
 struct NormalizedCrashLoggerFrameSignals
 {
@@ -122,11 +123,12 @@ NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
     if (normalized.first_actionable_probable_module.empty() &&
         !threadEntryHook &&
         !IsSystemishModule(module) &&
+        !IsExternalSoftwareModule(module) &&
         !IsGameExeModule(module)) {
       normalized.first_actionable_probable_module = module;
     }
 
-    if (threadEntryHook || IsSystemishModule(module) || IsGameExeModule(module)) {
+    if (threadEntryHook || IsSystemishModule(module) || IsExternalSoftwareModule(module) || IsGameExeModule(module)) {
       currentLower.clear();
       currentModule.clear();
       currentLength = 0;
@@ -780,7 +782,7 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::unordered_map<std::wstring, ModuleCount> freqByLower;
   for (std::size_t i = 0; i < normalizedSignals.probable_modules_in_order.size(); ++i) {
     const auto& module = normalizedSignals.probable_modules_in_order[i];
-    if (IsSystemishModule(module) || IsGameExeModule(module) ||
+    if (IsSystemishModule(module) || IsExternalSoftwareModule(module) || IsGameExeModule(module) ||
         normalizedSignals.probable_frame_is_thread_entry_hook[i]) {
       continue;
     }
@@ -801,7 +803,7 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
     std::vector<std::wstring> seenLower;
     for (const auto& moduleLower : modulesLower) {
       std::wstring disp = CanonicalizeCrashLoggerModule(moduleLower, canonicalByFilenameLower);
-      if (IsSystemishModule(disp) || IsGameExeModule(disp)) {
+      if (IsSystemishModule(disp) || IsExternalSoftwareModule(disp) || IsGameExeModule(disp)) {
         continue;
       }
       const std::wstring key = WideLower(disp);

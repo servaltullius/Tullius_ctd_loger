@@ -69,7 +69,10 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   r.is_snapshot_like = isSnapshotLike;
   r.is_manual_capture = isManualCapture;
 
-  const bool isSystem = minidump::IsSystemishModule(r.fault_module_filename) || minidump::IsLikelyWindowsSystemModulePath(r.fault_module_path);
+  // A GPU vendor tool or overlay is not a mod to disable; it takes the system
+  // DLL path with its own wording (FaultPlace).
+  const bool isSystem = minidump::IsSystemishModule(r.fault_module_filename) ||
+    minidump::IsLikelyWindowsSystemModulePath(r.fault_module_path) || !r.fault_module_external_software.empty();
   const bool hasModule = !r.fault_module_filename.empty();
   const bool isGameExe = minidump::IsGameExeModule(r.fault_module_filename);
   const bool isHookFramework = minidump::IsKnownHookFramework(r.fault_module_filename);
@@ -88,6 +91,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.isManualCapture = isManualCapture;
   ctx.hasModule = hasModule;
   ctx.isSystem = isSystem;
+  ctx.externalSoftware = r.fault_module_external_software;
   ctx.isGameExe = isGameExe;
   ctx.isHookFramework = isHookFramework;
   ctx.hasSignatureMatch = r.signature_match.has_value();

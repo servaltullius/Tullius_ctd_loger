@@ -323,6 +323,9 @@ struct AnalysisResult
   std::wstring fault_module_filename;  // basename
   std::wstring fault_module_plus_offset;
   std::wstring inferred_mod_name;  // best-effort (MO2 mods\<modname>\...)
+  // The fault module is a GPU vendor tool or overlay ("NVIDIA", ...), not a
+  // mod (minidump::ExternalSoftwareName).
+  std::wstring fault_module_external_software;
 
   // Optional: Crash Logger SSE/AE integration (best-effort)
   std::wstring crash_logger_log_path;

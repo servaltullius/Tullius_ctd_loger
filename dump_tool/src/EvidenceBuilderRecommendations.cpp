@@ -833,9 +833,23 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? L"[Check] Disable recently added/updated SKSE plugin DLLs one by one and retest."
       : L"[점검] 최근 추가/업데이트한 SKSE 플러그인(DLL)부터 하나씩 제외하며 재현 여부 확인");
   } else if (allowTopSuspectActionRecommendations && hasModule && isSystem) {
-    r.recommendations.push_back(en
-      ? L"[Check] When a Windows system DLL is shown, the real culprit is often another mod/DLL."
-      : L"[점검] Windows 시스템 DLL로 표시될 때는 실제 원인이 다른 모드/DLL인 경우가 많습니다.");
+    if (!ctx.externalSoftware.empty()) {
+      // Not a mod: what the player can do is update it or turn it off.
+      r.recommendations.push_back(en
+        ? (L"[External software] The crash is inside " + r.fault_module_filename + L" from " + ctx.externalSoftware +
+            L", a program outside the game and its mods. Update or clean-reinstall it (for a GPU vendor, the driver and its app), "
+            L"or turn off its overlay and in-game features, then retest.")
+        : (L"[외부 프로그램] 크래시가 " + ctx.externalSoftware + L"의 " + r.fault_module_filename +
+            L" 안에서 났습니다. 게임과 모드 밖의 프로그램입니다. 업데이트하거나 깨끗이 다시 설치하고(그래픽 카드 제조사라면 드라이버와 그 앱), "
+            L"오버레이와 게임 내 기능을 끈 뒤 다시 시험해 보세요."));
+      r.recommendations.push_back(en
+        ? L"[Check] If it keeps crashing there, another mod/DLL may be corrupting memory that this program touches."
+        : L"[점검] 계속 같은 곳에서 난다면 다른 모드/DLL이 이 프로그램이 쓰는 메모리를 망가뜨렸을 수도 있습니다.");
+    } else {
+      r.recommendations.push_back(en
+        ? L"[Check] When a Windows system DLL is shown, the real culprit is often another mod/DLL."
+        : L"[점검] Windows 시스템 DLL로 표시될 때는 실제 원인이 다른 모드/DLL인 경우가 많습니다.");
+    }
     r.recommendations.push_back(en
       ? L"[Check] Disable recently added/updated SKSE plugin DLLs one by one and retest."
       : L"[점검] 최근 추가/업데이트한 SKSE 플러그인(DLL)부터 하나씩 제외하며 재현 여부 확인");

@@ -2,6 +2,16 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.68-rc1 (미배포)
+
+### 한눈에 보기
+- **그래픽 카드 제조사 프로그램과 오버레이 DLL을 모드처럼 지목하지 않습니다.** 넥서스 사용자 리포트에서 NVIDIA 텔레메트리 DLL(`NvTelemetryBridge64.dll`)이 크래시 후보로 나왔습니다. 분석기는 `Windows\System32` 등 Windows 폴더의 DLL만 시스템 모듈로 봤기 때문에, `Program Files\NVIDIA Corporation` 아래 DLL이나 Steam·Discord 오버레이 DLL은 SKSE 플러그인과 똑같이 후보가 되고 "모드를 꺼 보라"는 안내를 받았습니다.
+
+### 수정
+- 분석기: 다음을 "외부 프로그램"으로 분류합니다. 파일 이름으로 NVIDIA 텔레메트리·캡처(`NvTelemetryBridge64.dll`, `NvTelemetryAPI64.dll`, `NvTelemetry64.dll`, `nvspcap64.dll`), Steam 오버레이(`GameOverlayRenderer64.dll`), Discord 오버레이(`DiscordHook64.dll`), RivaTuner Statistics Server(`RTSSHooks64.dll`), OBS 게임 캡처(`graphics-hook64.dll`). 설치 폴더로 `Program Files`(x86 포함) 아래 `NVIDIA Corporation`, `AMD`, `Intel`. Windows 폴더에 있는 사본은 지금처럼 시스템 모듈입니다.
+- 외부 프로그램 DLL은 콜스택·스택 스캔 후보, Crash Logger 콜스택 단서, 선행 예외(first-chance) 후보에서 빠집니다. Crash Logger 로그에는 경로가 없어 이름 목록으로 거릅니다.
+- 예외가 외부 프로그램 DLL 안에서 났다면 결론에 "외부 프로그램(NVIDIA, NvTelemetryBridge64.dll)"이라고 적고, 권장 조치는 모드 선행 조건 확인 대신 그 프로그램(그래픽 카드라면 드라이버와 그 앱)의 업데이트·재설치, 오버레이 끄기를 안내합니다. 콜스택에 모드 DLL이 있으면 그 후보를 지금처럼 함께 보여 줍니다. 요약 JSON `exception.external_software`.
+
 ## v0.2.67 (2026-10-16)
 
 v0.2.67-rc1을 정식으로 내는 릴리즈입니다. rc1 이후 코드는 바뀌지 않았습니다. 항목별 자세한 내용은 아래 rc1 항목에 있습니다.

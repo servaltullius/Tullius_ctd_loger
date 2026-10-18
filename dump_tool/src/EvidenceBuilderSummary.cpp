@@ -570,13 +570,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L"로 보고되었지만, 지금은 예외가 난 위치라는 단서만 있습니다. 여전히 피해 위치일 수 있습니다. (신뢰도: 낮음)");
     }
   } else if (hasModule && isSystem) {
+    const std::wstring place = FaultPlace(r, ctx);
     if (topCandidate && topCandidate->status_id == "cross_validated") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
       summary = en
-        ? (L"Crash is reported in a Windows system DLL, but the strongest actionable candidate is " + candidateName +
+        ? (L"Crash is reported in " + place + L", but the strongest actionable candidate is " + candidateName +
             L" (" + families + L"). (Confidence: " + topCandidateConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, 가장 강한 실행 우선 후보는 " + candidateName +
+        : (L"크래시가 " + place + L"에서 보고되었지만, 가장 강한 실행 우선 후보는 " + candidateName +
             L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidateHasFrame && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
@@ -585,13 +586,13 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       const bool hasHistorySupport = CandidateHasScorableHistorySupport(r, *topCandidate);
       const bool hasResourceSupport = CandidateHasResourceSupport(*topCandidate);
       summary = en
-        ? (L"Crash is reported in a Windows system DLL, but " + frameSupport + L" points to DLL candidate " + candidateName +
+        ? (L"Crash is reported in " + place + L", but " + frameSupport + L" points to DLL candidate " + candidateName +
             L". This is stronger than an isolated object ref." +
             (hasFirstChanceSupport ? L" Repeated suspicious first-chance context also matched this candidate." : L"") +
             (hasHistorySupport ? L" Repeated crash bucket history also matched this candidate." : L"") +
             (hasResourceSupport ? L" Nearby resource provider activity also matched this candidate." : L"") +
             L" (Confidence: " + topCandidateConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + frameSupport + L"이 DLL 후보 " + candidateName +
+        : (L"크래시가 " + place + L"에서 보고되었지만, " + frameSupport + L"이 DLL 후보 " + candidateName +
             L"을(를) 가리킵니다. 이는 오브젝트 참조 하나보다 강한 신호입니다." +
             (hasFirstChanceSupport ? L" 반복된 의심스러운 선행 예외(first-chance)도 이 후보와 맞습니다." : L"") +
             (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
@@ -600,21 +601,21 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(*topCandidate)) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
-        ? (L"Crash is reported in a Windows system DLL, but Tullius callstack first points to DLL candidate " + candidateName +
+        ? (L"Crash is reported in " + place + L", but Tullius callstack first points to DLL candidate " + candidateName +
             L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, Tullius 콜스택이 DLL 후보 " + candidateName +
+        : (L"크래시가 " + place + L"에서 보고되었지만, Tullius 콜스택이 DLL 후보 " + candidateName +
             L"을(를) 가리킵니다. 이는 스택 스캔만으로 얻은 단서보다 강한 신호입니다. (신뢰도: " + topCandidateConf + L")");
     } else if (hasNonHookSuspect && !nonHookSuspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in a Windows system DLL, but " + suspectBasis + L" points to " + nonHookSuspectWho +
+        ? (L"Crash is reported in " + place + L", but " + suspectBasis + L" points to " + nonHookSuspectWho +
             L". (Confidence: " + nonHookSuspectConf + L")")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
+        : (L"크래시가 " + place + L"에서 보고되었지만, " + suspectBasis + L"에서는 " + nonHookSuspectWho +
             L" 가 유력합니다. (신뢰도: " + nonHookSuspectConf + L")");
     } else if (hasSuspect && !suspectWho.empty()) {
       summary = en
-        ? (L"Crash is reported in a Windows system DLL, and the top stack candidate is " + suspectWho +
+        ? (L"Crash is reported in " + place + L", and the top stack candidate is " + suspectWho +
             L". This can still be a victim location rather than the root cause. (Confidence: Low)")
-        : (L"크래시가 Windows 시스템 DLL에서 보고되었고, 스택 후보 1순위는 " + suspectWho +
+        : (L"크래시가 " + place + L"에서 보고되었고, 스택 후보 1순위는 " + suspectWho +
             L" 입니다. 이 경우에도 실제 원인은 다른 DLL/모드일 수 있습니다. (신뢰도: 낮음)");
     } else if (r.exc_code == 0xE06D7363u && IsCrashLoggerConfirmedCppException(r)) {
       // Crash Logger saw it end the game, so it is no caught throw (crash test,
@@ -626,8 +627,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           L"원인으로 볼 플러그인은 찾지 못했습니다. (신뢰도: 낮음)";
     } else if (r.exc_code == 0xE06D7363u) {
       summary = en
-        ? L"Reported in a Windows system DLL with 0xE06D7363 (C++ exception). Could be normal throw/catch; confirm this was an actual CTD. (Confidence: Low)"
-        : L"0xE06D7363(C++ 예외)로 Windows 시스템 DLL에서 보고되었습니다. 정상 동작 중 throw/catch일 수도 있어 실제 CTD 여부 확인이 필요합니다. (신뢰도: 낮음)";
+        ? (L"Reported in " + place + L" with 0xE06D7363 (C++ exception). Could be normal throw/catch; confirm this was an actual CTD. (Confidence: Low)")
+        : (L"0xE06D7363(C++ 예외)로 " + place + L"에서 보고되었습니다. 정상 동작 중 throw/catch일 수도 있어 실제 CTD 여부 확인이 필요합니다. (신뢰도: 낮음)");
+    } else if (!ctx.externalSoftware.empty()) {
+      summary = en
+        ? (L"Crash is reported in " + place + L", a program outside the game and its mods. Update or reinstall it, or "
+            L"turn off its overlay, and retest; it can also be a victim of another DLL. (Confidence: Low)")
+        : (L"크래시가 " + place + L"에서 보고되었습니다. 게임과 모드 밖의 프로그램입니다. 업데이트·재설치하거나 "
+            L"오버레이를 끄고 다시 시험해 보세요. 다른 DLL 때문에 피해를 본 위치일 수도 있습니다. (신뢰도: 낮음)");
     } else {
       summary = en
         ? L"Crash is reported in a Windows system DLL. The real culprit may be another mod/DLL. (Confidence: Low)"
