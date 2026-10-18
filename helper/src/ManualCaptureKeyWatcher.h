@@ -46,6 +46,11 @@ private:
 // The same thread watches Crash Logger's own thread dump hotkey and notes
 // when it is held (NoteCrashLoggerThreadDumpHotkeyPressed), since its thread
 // dump does not depend on the manual capture hotkey.
+//
+// It also watches the old Ctrl+Shift+F12 manual capture hotkey while the
+// hotkey is set to another chord (LegacyManualCaptureChordToWatch), so the
+// helper loop can log that such a press took no snapshot. The thread only
+// sets flags; the helper loop does the logging.
 class ManualCaptureKeyWatcher
 {
 public:
@@ -54,19 +59,23 @@ public:
   ManualCaptureKeyWatcher(const ManualCaptureKeyWatcher&) = delete;
   ManualCaptureKeyWatcher& operator=(const ManualCaptureKeyWatcher&) = delete;
 
-  // Watches whichever of the two hotkeys is given; starts nothing when
-  // neither is.
+  // Watches whichever of the hotkeys is given; starts nothing when none is.
   void Start(
     std::optional<ManualCaptureHotkey> manualCapture,
-    std::optional<CrashLoggerThreadDumpHotkey> crashLoggerThreadDump);
+    std::optional<CrashLoggerThreadDumpHotkey> crashLoggerThreadDump,
+    std::optional<ManualCaptureHotkey> legacyManualCapture);
   void Stop();
 
   // True once for each chord press seen since the previous call.
   bool ConsumePress() noexcept;
 
+  // True once for each press of the old chord seen since the previous call.
+  bool ConsumeLegacyPress() noexcept;
+
 private:
   std::atomic<bool> stop_{ false };
   std::atomic<bool> pressed_{ false };
+  std::atomic<bool> legacyPressed_{ false };
   std::thread thread_;
 };
 

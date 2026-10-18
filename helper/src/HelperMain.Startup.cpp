@@ -184,8 +184,14 @@ void RegisterManualCaptureHotkeyIfEnabled(
     }
   }
 
+  // Ctrl+Shift+F12, the manual capture hotkey up to v0.2.68-rc3, is watched
+  // while the hotkey is set to another chord, so a press of it from habit is
+  // logged as taking no snapshot, with or without Crash Logger.
+  const std::optional<ManualCaptureHotkey> legacyManualCapture =
+    LegacyManualCaptureChordToWatch(cfg.enableManualCaptureHotkey, cfg.manualCaptureHotkey);
+
   if (!cfg.enableManualCaptureHotkey) {
-    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump);
+    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump, legacyManualCapture);
     return;
   }
 
@@ -196,7 +202,7 @@ void RegisterManualCaptureHotkeyIfEnabled(
   // ManualCaptureKeyWatcher), so a failed registration only loses one path.
   const ManualCaptureHotkey& hotkey = cfg.manualCaptureHotkey;
   const std::wstring chord = FormatManualCaptureHotkey(hotkey);
-  ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump);
+  ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);
   if (!RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)) {
     const DWORD le = GetLastError();
     std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(" << chord << L") failed: " << le << L"\n";

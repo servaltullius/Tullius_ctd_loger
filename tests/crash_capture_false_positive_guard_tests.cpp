@@ -321,8 +321,33 @@ int main()
     "RegisterHotKey must register the configured manual capture hotkey.");
   AssertContains(
     helperMain,
-    "ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump);",
+    "ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);",
     "The key-state watcher must start with the configured manual capture hotkey.");
+  // A press of the old Ctrl+Shift+F12 is logged as taking no snapshot, with or
+  // without Crash Logger: the watcher polls the exact old chord on its own
+  // edge and only sets a flag, and the helper loop writes the log line.
+  AssertContains(
+    keyWatcher,
+    "legacyEdge.emplace(*legacyManualCapture);",
+    "The key-state watcher must poll the old manual capture chord on its own edge.");
+  AssertContains(
+    keyWatcher,
+    "legacyPressed_.store(true, std::memory_order_release);",
+    "The key-state watcher must flag presses of the old manual capture chord.");
+  if (keyWatcher.find("AppendLogLine") != std::string::npos) {
+    std::fprintf(stderr, "The key-state watcher thread must not write the helper log itself.\n");
+    std::abort();
+  }
+  AssertOrdered(
+    ExtractFunctionBody(helperMain, "void RegisterManualCaptureHotkeyIfEnabled("),
+    "LegacyManualCaptureChordToWatch(cfg.enableManualCaptureHotkey, cfg.manualCaptureHotkey)",
+    "ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump, legacyManualCapture);",
+    "The old manual capture chord must be chosen before the key-state watcher starts, Crash Logger or not.");
+  AssertContains(
+    manualCaptureBody,
+    "if (ManualCaptureKeys().ConsumeLegacyPress()) {\n"
+    "    AppendLogLine(outBase, LegacyManualCaptureHotkeyPressedMessage(cfg.manualCaptureHotkey));",
+    "The helper loop must log each press of the old manual capture chord.");
   // The Crash Logger thread dump window (IsLikelyCrashLoggerThreadDumpFault)
   // follows Crash Logger's own hotkey, which no longer matches the manual
   // capture hotkey by default: the watcher notes it, also with the manual
@@ -340,7 +365,8 @@ int main()
   AssertOrdered(
     registerHotkeyBody,
     "CheckCrashLoggerThreadDumpHotkey(",
-    "if (!cfg.enableManualCaptureHotkey) {\n    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump);",
+    "if (!cfg.enableManualCaptureHotkey) {\n"
+    "    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump, legacyManualCapture);",
     "Crash Logger's thread dump hotkey must be watched even with the manual capture hotkey off.");
   AssertContains(
     ExtractFunctionBody(helperMain, "void UnregisterManualCaptureHotkeyIfEnabled("),

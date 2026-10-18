@@ -16,6 +16,7 @@
 using skydiag::helper::CrashLoggerThreadDumpHotkey;
 using skydiag::helper::IsCrashLoggerThreadDumpHotkeyDown;
 using skydiag::helper::kDefaultManualCaptureHotkey;
+using skydiag::helper::kLegacyManualCaptureHotkey;
 using skydiag::helper::kVkAlt;
 using skydiag::helper::kVkBack;
 using skydiag::helper::kVkControl;
@@ -92,6 +93,29 @@ void TestCrashLoggerThreadDumpChordDoesNotFireTheDefault()
   assert(!Poll(edge, { kVkControl, kVkShift, kVkF12 }));
 }
 
+// The old Ctrl+Shift+F12, watched on its own edge to log presses of it, fires
+// once per press of exactly that chord.
+void TestLegacyChordEdge()
+{
+  ManualCaptureChordEdge legacy(kLegacyManualCaptureHotkey);
+  assert(!Poll(legacy, { kVkControl, kVkShift, kVkBack }));  // the new default
+  assert(!Poll(legacy, { kVkControl, kVkShift, kVkAlt, kVkF12 }));
+  assert(!Poll(legacy, { kVkControl, kVkF12 }));
+  assert(Poll(legacy, { kVkControl, kVkShift, kVkF12 }));
+  assert(!Poll(legacy, { kVkControl, kVkShift, kVkF12 }));  // still held
+  assert(!Poll(legacy, { kVkControl, kVkShift }));
+  assert(Poll(legacy, { kVkControl, kVkShift, kVkF12 }));  // pressed again
+
+  // The default edge and the legacy edge, polled side by side as the watcher
+  // does, each fire only on their own chord.
+  ManualCaptureChordEdge current;
+  ManualCaptureChordEdge old(kLegacyManualCaptureHotkey);
+  assert(Poll(current, { kVkControl, kVkShift, kVkBack }));
+  assert(!Poll(old, { kVkControl, kVkShift, kVkBack }));
+  assert(!Poll(current, { kVkControl, kVkShift, kVkF12 }));
+  assert(Poll(old, { kVkControl, kVkShift, kVkF12 }));
+}
+
 // Crash Logger's own thread dump hotkey, watched for
 // IsLikelyCrashLoggerThreadDumpFault, matches the way Crash Logger does:
 // all of its keys down, extra keys or not.
@@ -146,6 +170,7 @@ int main()
     TestPartialChordsNeverFire();
     TestAnotherModifierNeverFires();
     TestCrashLoggerThreadDumpChordDoesNotFireTheDefault();
+    TestLegacyChordEdge();
     TestCrashLoggerThreadDumpHotkeyDown();
     TestConfiguredChord();
   } catch (const std::exception& ex) {
