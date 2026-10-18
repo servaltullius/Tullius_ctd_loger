@@ -15,7 +15,6 @@
 - **처리된 예외를 확인하는 몇 초 사이에 난 진짜 CTD도 기록합니다(ADR-0017).** 기본 설정에서 Helper는 1차 예외를 덤프한 뒤 약 11초 동안 게임이 버텼는지 확인하는데, 그동안은 새 크래시가 기록될 수 없었습니다. 그 사이 진짜 CTD가 나면 기록되지 않았고, 처리됐을 수도 있는 첫 예외가 크래시로 남았습니다. 이제 확인하는 동안에도 새 크래시가 기록되고, 앞의 덤프는 지우지 않고 남기며 새 크래시 리포트가 그 덤프를 `[이전 예외]`로 가리킵니다.
 - **Crash Logger가 보고하는 처리되지 않은 C++ 예외를 다른 스레드의 잡힌 예외가 가리지 않습니다.** 플러그인은 이런 예외를 슬롯 하나에 보관했다가 Crash Logger가 그 스레드에서 보고할 때 기록하는데, 그 사이 다른 스레드에서 잡히는 C++ 예외가 나면 슬롯을 덮어써 진짜 크래시가 무시되고 덤프가 아예 생기지 않았습니다.
 
-
 ### 수정
 - 분석기: 다음을 "외부 프로그램"으로 분류합니다. 파일 이름으로 NVIDIA 텔레메트리·캡처(`NvTelemetryBridge64.dll`, `NvTelemetryAPI64.dll`, `NvTelemetry64.dll`, `nvspcap64.dll`), Steam 오버레이(`GameOverlayRenderer64.dll`), Discord 오버레이(`DiscordHook64.dll`), RivaTuner Statistics Server(`RTSSHooks64.dll`), OBS 게임 캡처(`graphics-hook64.dll`). 설치 폴더로 `Program Files`(x86 포함) 아래 `NVIDIA Corporation`, `AMD`, `Intel`. Windows 폴더에 있는 사본은 지금처럼 시스템 모듈입니다.
 - 외부 프로그램 DLL은 콜스택·스택 스캔 후보, Crash Logger 콜스택 단서, 선행 예외(first-chance) 후보에서 빠집니다. Crash Logger 로그에는 경로가 없어 이름 목록으로 거릅니다.
