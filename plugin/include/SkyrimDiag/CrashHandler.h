@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace skydiag::plugin {
@@ -71,6 +72,54 @@ constexpr bool ShouldReplaceKeptException(
     return true;
   }
   return !(keptCode == kCrashHandlerBreakpointCode && newCode != kCrashHandlerBreakpointCode);
+}
+
+// Kept exceptions live in one slot per recently throwing thread. With a
+// single slot, a caught throw on another thread (an audio or Papyrus worker)
+// replaced the unhandled one CrashLogger was still reporting, and the crash
+// was then ignored (review #5).
+inline constexpr std::size_t kKeptExceptionSlotCount = 8;
+
+struct KeptExceptionSlotView
+{
+  std::uint32_t tid = 0;
+  std::uint64_t qpc = 0;
+};
+
+constexpr bool IsKeptExceptionSlotRecent(
+  std::uint64_t keptQpc,
+  std::uint64_t nowQpc,
+  std::uint64_t maxAgeQpc) noexcept
+{
+  return keptQpc != 0u && nowQpc >= keptQpc && (nowQpc - keptQpc) <= maxAgeQpc;
+}
+
+// The slot a thread keeps its exception in: its own, else an empty or stale
+// one, else the oldest.
+constexpr std::size_t SelectKeptExceptionSlot(
+  const KeptExceptionSlotView* slots,
+  std::size_t count,
+  std::uint32_t tid,
+  std::uint64_t nowQpc,
+  std::uint64_t maxAgeQpc) noexcept
+{
+  for (std::size_t i = 0; i < count; ++i) {
+    if (slots[i].tid == tid) {
+      return i;
+    }
+  }
+  for (std::size_t i = 0; i < count; ++i) {
+    if (slots[i].tid == 0u || !IsKeptExceptionSlotRecent(slots[i].qpc, nowQpc, maxAgeQpc)) {
+      return i;
+    }
+  }
+  std::size_t oldest = 0;
+  for (std::size_t i = 1; i < count; ++i) {
+    if (slots[i].qpc < slots[oldest].qpc) {
+      oldest = i;
+    }
+  }
+  return oldest;
 }
 
 // What to do with a fatal-code exception raised inside CrashLogger.

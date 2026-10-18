@@ -706,6 +706,16 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
 
   LoadIncidentCaptureProfile(dumpPath, outDir, out);
+  if (out.earlier_fault_present && out.earlier_fault_addr != 0u) {
+    // Same process, so this dump's module list places the earlier address.
+    if (const auto idx = minidump::FindModuleIndexForAddress(allModules, out.earlier_fault_addr)) {
+      const auto& m = allModules[*idx];
+      wchar_t buf[512]{};
+      swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(),
+        static_cast<unsigned long long>(out.earlier_fault_addr - m.base));
+      out.earlier_fault_module_plus_offset = buf;
+    }
+  }
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
   if (!out.is_filtered_clean_exit) {

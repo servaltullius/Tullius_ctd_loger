@@ -482,9 +482,48 @@ void TestLateRecoveredCleanExitWording()
   }
 }
 
+// ADR-0017: the helper captured this crash while still checking an earlier
+// fatal exception and kept that dump; the report points at it.
+void TestEarlierFaultIsNamed()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    AnalysisResult r{};
+    r.dump_path = L"SkyrimDiag_Crash_20261018_120002_500.dmp";
+    r.exc_code = 0xC0000005u;
+    r.earlier_fault_present = true;
+    r.earlier_fault_dump = L"SkyrimDiag_Crash_20261018_120000_100.dmp";
+    r.earlier_fault_code = 0xC0000005u;
+    r.earlier_fault_tid = 4242u;
+    r.earlier_fault_seconds_before = 2.4;
+    r.earlier_fault_module_plus_offset = L"CrashTester.dll+0x1234";
+    BuildEvidenceAndSummary(r, lang);
+    bool hasEvidence = false;
+    for (const auto& e : r.evidence) {
+      hasEvidence = hasEvidence ||
+        (Contains(e.details, L"SkyrimDiag_Crash_20261018_120000_100.dmp") && Contains(e.details, L"CrashTester.dll+0x1234") &&
+         Contains(e.details, L"2.4"));
+    }
+    Require(hasEvidence, "the evidence names the earlier dump, where it faulted and when");
+    Require(AnyStartsWith(r.recommendations, en ? L"[Earlier fault]" : L"[이전 예외]", L"SkyrimDiag_Crash_20261018_120000_100.dmp"),
+      "the advice points at the kept dump");
+  }
+  AnalysisResult r{};
+  r.dump_path = L"SkyrimDiag_Crash_20261018_120002_500.dmp";
+  r.earlier_fault_present = true;
+  r.earlier_fault_dump = L"SkyrimDiag_Crash_20261018_120000_100.dmp";
+  r.earlier_fault_code = 0xC0000005u;
+  BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+  const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+  Require(summary["earlier_fault"]["dump"] == "SkyrimDiag_Crash_20261018_120000_100.dmp" &&
+            summary["earlier_fault"]["exception_code"] == 0xC0000005u,
+    "summary JSON");
+}
+
 int main()
 {
   try {
+    TestEarlierFaultIsNamed();
     TestTruncatedCallStackIsExplained();
     TestBlockedGameThreadLeadsTheFreezeReport();
     TestBlockedPluginSplitsTheHangBucket();

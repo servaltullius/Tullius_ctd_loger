@@ -67,19 +67,27 @@ PublishOnceModuleRange g_crashLoggerSseRange{};
 
 constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
 
-// The latest unrecorded breakpoint or C++ throw (see ShouldKeepUnrecordedException).
-// Static storage, so the handler never puts a CONTEXT on a possibly exhausted
-// stack. `busy` is a try-lock: a thread that finds it taken just skips.
+// A thread's latest unrecorded breakpoint or C++ throw (see
+// ShouldKeepUnrecordedException), one slot per recently throwing thread
+// (SelectKeptExceptionSlot). Static storage, so the handler never puts a
+// CONTEXT on a possibly exhausted stack. `busy` is a try-lock: a thread that
+// finds it taken just skips; tid and qpc are read without it to pick a slot.
 struct KeptException
 {
   std::atomic<LONG> busy{0};
-  DWORD tid = 0;
-  std::uint64_t qpc = 0;
+  std::atomic<DWORD> tid{0};
+  std::atomic<std::uint64_t> qpc{0};
   EXCEPTION_RECORD record{};
   CONTEXT context{};
 };
 
-KeptException g_keptException{};
+KeptException g_keptExceptions[kKeptExceptionSlotCount]{};
+
+// When the last crash record was published. The helper hands the incident
+// slot back while it checks a captured fault (ADR-0017), so CrashLogger may
+// probe on a thread whose kept exception is older than the crash it is
+// reporting; that one is not it.
+std::atomic<std::uint64_t> g_lastPublishedCrashQpc{0};
 
 // CrashLogger writes its report within seconds; this only bounds how stale a
 // kept exception may be when it is matched to a CrashLogger fault.
@@ -283,13 +291,30 @@ bool TryPublishCrashRecord(
     committed = 2L;
   }
   InterlockedExchange(sequence, committed);
+  g_lastPublishedCrashQpc.store(QpcNow(), std::memory_order_relaxed);
   return true;
+}
+
+std::uint64_t KeptExceptionMaxAgeQpc(const skydiag::SharedLayout* shm) noexcept
+{
+  const std::uint64_t qpcFreq = (shm && shm->header.qpc_freq != 0u) ? shm->header.qpc_freq : 10000000ull;
+  return kKeptExceptionMaxAgeSeconds * qpcFreq;
 }
 
 bool IsKeptExceptionRecent(const skydiag::SharedLayout* shm, std::uint64_t keptQpc, std::uint64_t nowQpc) noexcept
 {
-  const std::uint64_t qpcFreq = (shm && shm->header.qpc_freq != 0u) ? shm->header.qpc_freq : 10000000ull;
-  return keptQpc != 0u && nowQpc >= keptQpc && (nowQpc - keptQpc) <= kKeptExceptionMaxAgeSeconds * qpcFreq;
+  return IsKeptExceptionSlotRecent(keptQpc, nowQpc, KeptExceptionMaxAgeQpc(shm));
+}
+
+// The slot that holds this thread's kept exception, if any.
+KeptException* FindKeptException(DWORD tid) noexcept
+{
+  for (auto& slot : g_keptExceptions) {
+    if (slot.tid.load(std::memory_order_relaxed) == tid) {
+      return &slot;
+    }
+  }
+  return nullptr;
 }
 
 void KeepUnrecordedException(const skydiag::SharedLayout* shm, const EXCEPTION_POINTERS* ep) noexcept
@@ -307,20 +332,27 @@ void KeepUnrecordedException(const skydiag::SharedLayout* shm, const EXCEPTION_P
     return;
   }
 
-  auto& kept = g_keptException;
+  const DWORD tid = GetCurrentThreadId();
+  const auto nowQpc = QpcNow();
+  KeptExceptionSlotView views[kKeptExceptionSlotCount]{};
+  for (std::size_t i = 0; i < kKeptExceptionSlotCount; ++i) {
+    views[i].tid = g_keptExceptions[i].tid.load(std::memory_order_relaxed);
+    views[i].qpc = g_keptExceptions[i].qpc.load(std::memory_order_relaxed);
+  }
+  auto& kept = g_keptExceptions[SelectKeptExceptionSlot(
+    views, kKeptExceptionSlotCount, tid, nowQpc, KeptExceptionMaxAgeQpc(shm))];
   if (kept.busy.exchange(1, std::memory_order_acquire) != 0) {
     return;
   }
-  const DWORD tid = GetCurrentThreadId();
-  const auto nowQpc = QpcNow();
+  const DWORD keptTid = kept.tid.load(std::memory_order_relaxed);
   if (ShouldReplaceKeptException(
-        kept.tid != 0u,
-        kept.tid == tid,
-        IsKeptExceptionRecent(shm, kept.qpc, nowQpc),
+        keptTid != 0u,
+        keptTid == tid,
+        IsKeptExceptionRecent(shm, kept.qpc.load(std::memory_order_relaxed), nowQpc),
         kept.record.ExceptionCode,
         record.ExceptionCode)) {
-    kept.tid = tid;
-    kept.qpc = nowQpc;
+    kept.tid.store(tid, std::memory_order_relaxed);
+    kept.qpc.store(nowQpc, std::memory_order_relaxed);
     std::memcpy(&kept.record, ep->ExceptionRecord, sizeof(EXCEPTION_RECORD));
     std::memcpy(&kept.context, ep->ContextRecord, sizeof(CONTEXT));
   }
@@ -336,26 +368,36 @@ bool TryPublishKeptExceptionForCrashLoggerFault(
   DWORD* outCode,
   std::uint64_t* outAddress) noexcept
 {
-  auto& kept = g_keptException;
+  const DWORD tid = GetCurrentThreadId();
+  auto* const slot = FindKeptException(tid);
+  if (!slot) {
+    return false;
+  }
+  auto& kept = *slot;
   if (kept.busy.exchange(1, std::memory_order_acquire) != 0) {
     return false;
   }
   bool published = false;
+  const DWORD keptTid = kept.tid.load(std::memory_order_relaxed);
+  const auto keptQpc = kept.qpc.load(std::memory_order_relaxed);
+  // Recent, and kept after the last published crash (see g_lastPublishedCrashQpc).
+  const bool keptIsCurrent = IsKeptExceptionRecent(shm, keptQpc, QpcNow()) &&
+    keptQpc > g_lastPublishedCrashQpc.load(std::memory_order_relaxed);
   if (ClassifyCrashLoggerFault(
         IsCrashCaptureFrozen(shm),
         exceptionAddress,
         g_crashLoggerRange.Load(),
         g_crashLoggerSseRange.Load(),
-        kept.tid != 0u,
-        kept.tid == GetCurrentThreadId(),
-        IsKeptExceptionRecent(shm, kept.qpc, QpcNow())) == CrashLoggerFaultAction::kRecordKeptException) {
+        keptTid != 0u,
+        keptTid == tid,
+        keptIsCurrent) == CrashLoggerFaultAction::kRecordKeptException) {
     EXCEPTION_POINTERS keptPointers{ &kept.record, &kept.context };
     published = TryPublishCrashRecord(shm, &keptPointers, kept.record.ExceptionCode);
     if (published) {
       *outCode = kept.record.ExceptionCode;
       *outAddress = reinterpret_cast<std::uint64_t>(kept.record.ExceptionAddress);
-      kept.tid = 0;
-      kept.qpc = 0;
+      kept.tid.store(0, std::memory_order_relaxed);
+      kept.qpc.store(0, std::memory_order_relaxed);
     }
   }
   kept.busy.store(0, std::memory_order_release);

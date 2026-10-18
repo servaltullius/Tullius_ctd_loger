@@ -5,9 +5,12 @@
 //   F1  access violation inside CrashTester.dll while RCX holds the reference
 //       under the crosshair (the player when nothing is targeted)
 //   F2  breakpoint (0x80000003), the way a mod's failed internal check stops
-//   F3  unhandled C++ exception thrown from CrashTester.dll
+//   F3  unhandled C++ exception thrown from CrashTester.dll, while another
+//       thread keeps throwing and catching C++ exceptions
 //   F4  main thread held in Sleep inside CrashTester.dll for 45 s (a freeze);
 //       may be pressed again after the game recovers
+//   F5  an access violation CrashTester.dll catches itself, then 2 s later
+//       a real one on a thread of its own
 //   F6  access violation inside SkyrimSE.exe: CrashTester.dll passes a
 //       corrupt reference to the engine's TESObjectREFR::GetDisplayFullName
 //   F7  access violation in CrashTester.dll's menu event sink, called by the
@@ -92,6 +95,22 @@ __declspec(noinline) void Breakpoint()
 __declspec(noinline) void ThrowUnhandled()
 {
   throw std::runtime_error("CrashTester: intentional unhandled C++ exception");
+}
+
+// Another thread throwing and catching C++ exceptions while the unhandled one
+// is being reported. With one kept-exception slot these replaced it and the
+// crash was ignored (review #5).
+void StartCaughtThrowNoise()
+{
+  std::thread([] {
+    for (int i = 0; i < 20000; ++i) {
+      try {
+        throw std::runtime_error("CrashTester: caught noise");
+      } catch (const std::exception&) {
+      }
+      Sleep(1);
+    }
+  }).detach();
 }
 
 // Scenario 4.
@@ -219,6 +238,31 @@ void OpenJournalWith(SinkAction action, const char* what)
   });
 }
 
+// Scenario F5: a fatal-code exception the mod handles itself (the helper
+// records it and starts checking it), then a real CTD while it is still
+// checked. The report must be about the second, naming the first (ADR-0017).
+__declspec(noinline) int CaughtAccessViolation()
+{
+  __try {
+    volatile std::uint32_t* nowhere = nullptr;
+    return static_cast<int>(*nowhere);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return -1;
+  }
+}
+
+void CaughtThenRealCrash(const char* what)
+{
+  RunOnMainThread(what, [] {
+    spdlog::warn("CrashTester: F5 caught access violation returned {}", CaughtAccessViolation());
+    spdlog::default_logger()->flush();
+  });
+  std::thread([] {
+    Sleep(2000);
+    CrashOnOwnThread();
+  }).detach();
+}
+
 void CrashOnNewThread()
 {
   spdlog::warn("CrashTester: F8 access violation on a thread of its own");
@@ -247,6 +291,7 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool f2 = pressed(VK_F2);
     const bool f3 = pressed(VK_F3);
     const bool f4 = pressed(VK_F4);
+    const bool f5 = pressed(VK_F5);
     const bool f6 = pressed(VK_F6);
     const bool f7 = pressed(VK_F7);
     const bool f8 = pressed(VK_F8);
@@ -262,6 +307,9 @@ void HotkeyLoop(const std::stop_token& stop)
         } else {
           RunOnMainThread("F9 stack overflow", [] { spdlog::warn("CrashTester: depth {}", Recurse(0)); });
         }
+      }
+      if (f5 && !g_crashQueued.exchange(true)) {
+        CaughtThenRealCrash("F5 caught access violation, a real one 2 s later");
       }
       if (f10 && !g_freezeRunning.exchange(true)) {
         SpinJobThread();
@@ -280,6 +328,7 @@ void HotkeyLoop(const std::stop_token& stop)
         } else if (f2) {
           RunOnMainThread("F2 breakpoint", [] { Breakpoint(); });
         } else if (f3) {
+          StartCaughtThrowNoise();
           RunOnMainThread("F3 unhandled C++ exception", [] { ThrowUnhandled(); });
         } else {
           RunOnMainThread("F6 corrupt reference passed to SkyrimSE.exe", [] { EngineFaultWithCorruptReference(); });
@@ -302,8 +351,9 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..9  (1: freeze twice, then F1 on the nearest NPC; 2: F2;
-//                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11).
+// AutoScenario=1..10 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+//                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
+//                     10: F5).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
@@ -416,6 +466,7 @@ void RunAutoScenario()
     RunOnMainThread("auto F2 breakpoint", [] { Breakpoint(); });
     break;
   case 3:
+    StartCaughtThrowNoise();
     RunOnMainThread("auto F3 unhandled C++ exception", [] { ThrowUnhandled(); });
     break;
   case 4:
@@ -436,6 +487,9 @@ void RunAutoScenario()
     break;
   case 9:
     OpenJournalWith(SinkAction::kHold, "auto F11 Journal Menu event sink held for 45 s");
+    break;
+  case 10:
+    CaughtThenRealCrash("auto F5 caught access violation, a real one 2 s later");
     break;
   default:
     break;

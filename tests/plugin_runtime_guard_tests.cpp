@@ -54,6 +54,19 @@ int main()
   static_assert(ShouldReplaceKeptException(
     true, true, false, kCrashHandlerBreakpointCode, kCrashHandlerCppExceptionCode));
 
+  // One kept-exception slot per thread: a caught throw on another thread
+  // does not take the slot of the one CrashLogger is reporting (review #5).
+  using skydiag::plugin::KeptExceptionSlotView;
+  using skydiag::plugin::SelectKeptExceptionSlot;
+  constexpr std::uint64_t kAge = 600;
+  constexpr KeptExceptionSlotView kSlots[3] = { { 11u, 900u }, { 0u, 0u }, { 33u, 950u } };
+  static_assert(SelectKeptExceptionSlot(kSlots, 3, 33u, 1000u, kAge) == 2u, "a thread reuses its own slot");
+  static_assert(SelectKeptExceptionSlot(kSlots, 3, 44u, 1000u, kAge) == 1u, "another thread takes a free slot");
+  constexpr KeptExceptionSlotView kFull[3] = { { 11u, 900u }, { 22u, 100u }, { 33u, 950u } };
+  static_assert(SelectKeptExceptionSlot(kFull, 3, 44u, 1000u, kAge) == 1u, "or a stale one");
+  constexpr KeptExceptionSlotView kBusy[3] = { { 11u, 900u }, { 22u, 800u }, { 33u, 950u } };
+  static_assert(SelectKeptExceptionSlot(kBusy, 3, 44u, 1000u, kAge) == 1u, "or the oldest");
+
   static_assert(ClassifyCrashLoggerFault(
     false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, true) ==
     CrashLoggerFaultAction::kRecordKeptException);

@@ -26,6 +26,32 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     return;
   }
 
+  if (r.earlier_fault_present) {
+    // ADR-0017: the helper took this crash while still checking an earlier
+    // fatal exception; either can be the cause.
+    wchar_t code[16]{};
+    swprintf_s(code, L"0x%08X", r.earlier_fault_code);
+    wchar_t seconds[32]{};
+    swprintf_s(seconds, L"%.1f", r.earlier_fault_seconds_before);
+    const std::wstring where = r.earlier_fault_module_plus_offset.empty()
+      ? std::wstring{}
+      : (L" " + r.earlier_fault_module_plus_offset);
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = ctx.en
+      ? L"Another fatal exception came just before this crash"
+      : L"이 크래시 직전에 다른 치명적 예외가 있었음";
+    e.details = ctx.en
+      ? (L"About " + std::wstring(seconds) + L" s before this crash, exception " + code + where + L" on thread " +
+          std::to_wstring(r.earlier_fault_tid) + L" was still being checked (it might have been handled). Its dump was kept: " +
+          r.earlier_fault_dump + L". Either one can be the cause; if this report does not explain the crash, analyze that dump.")
+      : (L"이 크래시 약 " + std::wstring(seconds) + L"초 전, 스레드 " + std::to_wstring(r.earlier_fault_tid) + L"의 예외 " + code +
+          where + L"를 아직 확인하던 중이었습니다(처리된 예외였을 수도 있음). 그 덤프는 남겨 두었습니다: " + r.earlier_fault_dump +
+          L". 둘 중 어느 쪽이든 원인일 수 있으니, 이 리포트로 설명되지 않으면 그 덤프도 분석해 보세요.");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (r.signature_match.has_value()) {
     const auto& sig = *r.signature_match;
     EvidenceItem e{};
