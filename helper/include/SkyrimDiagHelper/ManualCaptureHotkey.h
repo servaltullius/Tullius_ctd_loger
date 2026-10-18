@@ -66,12 +66,14 @@ inline constexpr ManualCaptureHotkey kLegacyManualCaptureHotkey{ kHotkeyModContr
 
 // The old chord to watch, so that a press of it out of habit is logged as not
 // taking a snapshot (LegacyManualCaptureHotkeyPressedMessage): only while the
-// manual capture hotkey is on and set to another chord.
+// manual capture hotkey is on and set to another chord. A configured chord on
+// F12 too (e.g. Ctrl+Shift+Alt+F12) passes through the old one while it is
+// pressed, so its real snapshot would also be logged as not taken.
 inline std::optional<ManualCaptureHotkey> LegacyManualCaptureChordToWatch(
   bool manualCaptureEnabled,
   const ManualCaptureHotkey& configured)
 {
-  if (!manualCaptureEnabled || configured == kLegacyManualCaptureHotkey) {
+  if (!manualCaptureEnabled || configured.virtualKey == kLegacyManualCaptureHotkey.virtualKey) {
     return std::nullopt;
   }
   return kLegacyManualCaptureHotkey;

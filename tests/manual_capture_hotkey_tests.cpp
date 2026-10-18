@@ -119,8 +119,9 @@ void TestLegacyManualCaptureChord()
 
   assert(LegacyManualCaptureChordToWatch(true, kDefaultManualCaptureHotkey) == kLegacyManualCaptureHotkey);
   assert(LegacyManualCaptureChordToWatch(true, Hotkey(L"Shift+F9")) == kLegacyManualCaptureHotkey);
-  // A chord that also holds Alt is another chord: the exact old one is still watched.
-  assert(LegacyManualCaptureChordToWatch(true, Hotkey(L"Ctrl+Shift+Alt+F12")) == kLegacyManualCaptureHotkey);
+  // A chord on F12 too passes through the old one while pressed: not watched.
+  assert(!LegacyManualCaptureChordToWatch(true, Hotkey(L"Ctrl+Shift+Alt+F12")));
+  assert(!LegacyManualCaptureChordToWatch(true, Hotkey(L"Ctrl+F12")));
   // Still set to the old chord: it is the manual capture hotkey itself.
   assert(!LegacyManualCaptureChordToWatch(true, kOldCtrlShiftF12));
   // Manual capture hotkey off: nothing to point the press at.
