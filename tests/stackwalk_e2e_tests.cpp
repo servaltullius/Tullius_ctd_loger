@@ -29,6 +29,7 @@ using skydiag::tests::runtime::MakeSharedLayout;
 using skydiag::tests::runtime::MakeTempDir;
 using skydiag::tests::runtime::MakeTestConfig;
 using skydiag::tests::runtime::Require;
+using skydiag::tests::runtime::WriteAllTextUtf8;
 
 namespace {
 
@@ -141,6 +142,123 @@ void TestFormalStackwalkUnwindsRealCallerChain()
   std::filesystem::remove_all(outBase);
 }
 
+// A Crash Logger thread dump paired with a hang dump lists every thread's call
+// stack. Its module tally must not rank the stack suspects or become evidence
+// (2026-10-18 hang: plugins seen on idle threads were listed as the top
+// modules); the pairing itself stays.
+void TestThreadDumpPairingNamesNoSuspects()
+{
+  const auto outBase = MakeTempDir(L"skydiag_threaddump_pairing_e2e");
+  ClearLog(outBase);
+
+  g_release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  g_parked = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(g_release && g_parked, "CreateEventW failed");
+
+  DWORD parkedTid = 0;
+  std::thread parked([&]() {
+    parkedTid = GetCurrentThreadId();
+    DeepFrameA();
+  });
+  Require(WaitForSingleObject(g_parked, 5000) == WAIT_OBJECT_0, "Worker never reached the wait");
+  Sleep(100);
+
+  auto shared = MakeSharedLayout();
+  shared->header.last_heartbeat_qpc = 1;
+  auto& sessionStart = shared->events[0];
+  sessionStart.tid = parkedTid;
+  sessionStart.qpc = 2;
+  sessionStart.type = static_cast<std::uint16_t>(skydiag::EventType::kSessionStart);
+  sessionStart.seq = 2;
+  shared->header.write_index = 1;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  HangDecision decision{};
+  decision.isHang = true;
+  decision.secondsSinceHeartbeat = 30.0;
+  decision.thresholdSec = 10;
+  std::wstring pendingViewer;
+  HangCaptureState state{};
+  ExecuteConfirmedHangCapture(MakeTestConfig(), proc, outBase, decision, 0u, &pendingViewer, &state);
+
+  SetEvent(g_release);
+  parked.join();
+  ShutdownRetentionWorker();
+  CloseAttachedProcess(&proc);
+  CloseHandle(g_release);
+  CloseHandle(g_parked);
+
+  const auto dumpPath = FindSingleFileWithExt(outBase, L".dmp");
+  Require(std::filesystem::exists(dumpPath), "Hang capture must write a dump");
+
+  // Crash Logger's thread dump from the same second, beside the dump. The test
+  // executable heads it: it is also on the walked thread's stack.
+  const std::wstring stem = dumpPath.stem().wstring();  // SkyrimDiag_Hang_YYYYMMDD_HHMMSS_mmm
+  const std::wstring prefix = L"SkyrimDiag_Hang_";
+  Require(stem.rfind(prefix, 0) == 0 && stem.size() >= prefix.size() + 15u, "Unexpected hang dump name");
+  const std::wstring ts = stem.substr(prefix.size(), 15u);
+  const std::wstring logName = L"threaddump-" + ts.substr(0, 4) + L"-" + ts.substr(4, 2) + L"-" + ts.substr(6, 2) +
+                               L"-" + ts.substr(9, 2) + L"-" + ts.substr(11, 2) + L"-" + ts.substr(13, 2) + L".log";
+  wchar_t exePath[MAX_PATH]{};
+  Require(GetModuleFileNameW(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameW failed");
+  const std::string exeName = std::filesystem::path(exePath).filename().string();
+  WriteAllTextUtf8(
+    outBase / logName,
+    "========================================\n"
+    "THREAD DUMP (Manual Trigger)\n"
+    "========================================\n"
+    "TIME: 2097-07-13 12:00:00\n"
+    "CrashLoggerSSE v1-25-0-0\n"
+    "Total Threads: 2\n"
+    "\n"
+    "===== THREAD 1 (ID: 1111) =====\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x7FF612340001 " + exeName + "+0000001\n"
+    "\t[ 1] 0x7FF612340002 " + exeName + "+0000002\n"
+    "\t[ 2] 0x7FF612340003 ThreadDumpBystander.dll+0000003\n"
+    "\n"
+    "===== THREAD 2 (ID: 2222) =====\n"
+    "\tCALLSTACK:\n"
+    "\t[ 0] 0x7FF612340004 ThreadDumpBystander.dll+0000004\n"
+    "\n");
+
+  skydiag::dump_tool::AnalyzeOptions opt{};
+  opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
+  opt.output_dir = outBase.wstring();
+  skydiag::dump_tool::AnalysisResult result{};
+  std::wstring err;
+  Require(
+    skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err),
+    "AnalyzeDump failed on the thread-dump pairing dump");
+
+  Require(
+    std::filesystem::path(result.crash_logger_log_path).filename() == std::filesystem::path(logName),
+    "The thread dump must still pair with the hang dump");
+  Require(result.crash_logger_pairing_selected_kind == "thread_dump", "Pairing must record the thread-dump kind");
+  Require(result.crash_logger_top_modules.empty(), "A thread dump must supply no Crash Logger top modules");
+  Require(!result.suspects.empty(), "The walked thread's stack must still give suspects");
+  for (const auto& suspect : result.suspects) {
+    Require(
+      suspect.reason.find(L"Crash Logger") == std::wstring::npos,
+      "A thread dump must not promote a stack suspect");
+  }
+  for (const auto& evidence : result.evidence) {
+    Require(
+      evidence.title.find(L"top callstack modules") == std::wstring::npos,
+      "A thread dump must not appear as top-module evidence");
+    Require(
+      evidence.details.find(L"ThreadDumpBystander.dll") == std::wstring::npos,
+      "A module seen only in the thread dump must not appear in the evidence");
+  }
+  for (const auto& recommendation : result.recommendations) {
+    Require(
+      recommendation.find(L"ThreadDumpBystander.dll") == std::wstring::npos,
+      "A module seen only in the thread dump must not appear in the advice");
+  }
+
+  std::filesystem::remove_all(outBase);
+}
+
 }  // namespace
 
 // A recovered return address has to point into code. The local-image check
@@ -234,6 +352,7 @@ int main()
     TestFindFunctionStartFollowsChainedEntries();
     TestLocalImageRejectsNonCodeReturnAddresses();
     TestFormalStackwalkUnwindsRealCallerChain();
+    TestThreadDumpPairingNamesNoSuspects();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

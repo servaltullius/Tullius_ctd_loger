@@ -36,8 +36,10 @@ struct WctFreezeSummary
   std::vector<std::uint32_t> cycle_thread_ids;
   std::vector<std::uint32_t> repeated_cycle_tids;
   bool consistent_loading_signal = false;
+  // The blocked thread with the earliest wait start (a tick count, not a
+  // duration); 0 when none or several share it (SkyrimDiagWctWait.h).
   std::uint32_t longest_wait_tid = 0;
-  std::uint64_t longest_wait_ms = 0;
+  std::uint64_t longest_wait_start_tick = 0;
   bool longest_wait_tid_consensus = false;
   bool has_capture = false;
   std::string capture_kind;

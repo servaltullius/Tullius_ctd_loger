@@ -448,6 +448,7 @@ add_executable(skydiag_freeze_candidate_consensus_tests
 
 target_include_directories(skydiag_freeze_candidate_consensus_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 target_link_libraries(skydiag_freeze_candidate_consensus_tests PRIVATE
@@ -482,6 +483,7 @@ add_executable(skydiag_modal_dialog_wait_tests
 
 target_include_directories(skydiag_modal_dialog_wait_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 target_link_libraries(skydiag_modal_dialog_wait_tests PRIVATE

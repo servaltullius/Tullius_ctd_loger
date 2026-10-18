@@ -470,6 +470,11 @@ bool HasCrashLoggerThreadDumpHeaderAscii(std::string_view logUtf8)
 
 }  // namespace
 
+bool IsCrashLoggerThreadDumpLogAscii(std::string_view logUtf8)
+{
+  return HasCrashLoggerThreadDumpHeaderAscii(logUtf8);
+}
+
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8)
 {
   std::istringstream iss{ std::string(logUtf8) };

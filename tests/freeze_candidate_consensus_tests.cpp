@@ -69,7 +69,7 @@ void TestSourceContracts()
 void TestWctFreezeSummaryParsing()
 {
   const std::string json =
-    R"({"capture":{"kind":"hang","secondsSinceHeartbeat":15.0,"thresholdSec":10,"isLoading":true,"pss_snapshot_requested":true,"pss_snapshot_used":true,"pss_snapshot_capture_ms":42,"pss_snapshot_status":"ok","dump_transport":"pss_snapshot"},"threads":[{"tid":1234,"isCycle":true},{"tid":5678,"isCycle":false,"nodes":[{"thread":{"waitTime":500}}]}]})";
+    R"({"capture":{"kind":"hang","secondsSinceHeartbeat":15.0,"thresholdSec":10,"isLoading":true,"pss_snapshot_requested":true,"pss_snapshot_used":true,"pss_snapshot_capture_ms":42,"pss_snapshot_status":"ok","dump_transport":"pss_snapshot"},"threads":[{"tid":1234,"isCycle":true},{"tid":5678,"isCycle":false,"nodes":[{"objectStatus":3,"thread":{"waitTime":500}}]}]})";
 
   const auto parsed = skydiag::dump_tool::internal::TryParseWctFreezeSummary(json);
   assert(parsed.has_value());
@@ -79,7 +79,7 @@ void TestWctFreezeSummaryParsing()
   assert(parsed->cycle_thread_ids.size() == 1);
   assert(parsed->cycle_thread_ids[0] == 1234u);
   assert(parsed->longest_wait_tid == 5678u);
-  assert(parsed->longest_wait_ms == 500u);
+  assert(parsed->longest_wait_start_tick == 500u);
   assert(parsed->has_capture);
   assert(parsed->capture_kind == "hang");
   assert(parsed->isLoading);
