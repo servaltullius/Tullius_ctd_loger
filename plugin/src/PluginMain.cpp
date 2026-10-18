@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cwchar>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -145,6 +146,50 @@ void InstallFallbackLogger() noexcept
   }
 }
 
+// path::string() converts to the ANSI code page and throws for a character
+// outside it (a Korean user name on an English Windows). Log text is UTF-8.
+std::string PathForLog(const std::filesystem::path& path) noexcept
+{
+  try {
+    const auto u8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+  } catch (...) {
+    return "(path)";
+  }
+}
+
+std::optional<std::string> WideToAnsiExact(const std::wstring& wide)
+{
+  const UINT codePage = GetACP();
+  BOOL lossy = FALSE;
+  // CP_UTF8 takes neither flag nor the lossy check.
+  const DWORD flags = codePage == CP_UTF8 ? 0u : WC_NO_BEST_FIT_CHARS;
+  BOOL* lossyOut = codePage == CP_UTF8 ? nullptr : &lossy;
+  const int n = WideCharToMultiByte(codePage, flags, wide.c_str(), -1, nullptr, 0, nullptr, lossyOut);
+  if (n <= 0 || lossy) {
+    return std::nullopt;
+  }
+  std::string out(static_cast<std::size_t>(n), '\0');
+  WideCharToMultiByte(codePage, flags, wide.c_str(), -1, out.data(), n, nullptr, nullptr);
+  out.resize(static_cast<std::size_t>(n - 1));
+  return out;
+}
+
+// spdlog opens its file by an ANSI name. A folder outside the ANSI code page
+// has none; its short 8.3 name, where the volume keeps them, does.
+std::optional<std::string> AnsiFileName(const std::filesystem::path& path)
+{
+  if (auto name = WideToAnsiExact(path.wstring())) {
+    return name;
+  }
+  wchar_t shortDir[MAX_PATH * 2]{};
+  const DWORD n = GetShortPathNameW(path.parent_path().c_str(), shortDir, static_cast<DWORD>(std::size(shortDir)));
+  if (n == 0 || n >= std::size(shortDir)) {
+    return std::nullopt;
+  }
+  return WideToAnsiExact((std::filesystem::path(shortDir) / path.filename()).wstring());
+}
+
 bool SetupLog() noexcept
 {
   try {
@@ -155,7 +200,13 @@ bool SetupLog() noexcept
     }
 
     *path /= "SkyrimDiag.log";
-    auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
+    const auto fileName = AnsiFileName(*path);
+    if (!fileName) {
+      InstallFallbackLogger();
+      OutputDebugStringW(L"SkyrimDiag: the log folder has no ANSI name; using no-op fallback.\n");
+      return false;
+    }
+    auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(*fileName, true);
     auto logger = std::make_shared<spdlog::logger>("global log", std::move(sink));
     spdlog::set_default_logger(std::move(logger));
     spdlog::set_level(spdlog::level::info);
@@ -280,9 +331,9 @@ bool StartHelperProcess(const std::filesystem::path& helperPath, std::uint32_t p
 
   std::error_code pathEc;
   if (!std::filesystem::exists(helperPath, pathEc)) {
-    spdlog::warn("SkyrimDiag: helper path does not exist: {}", helperPath.string());
+    spdlog::warn("SkyrimDiag: helper path does not exist: {}", PathForLog(helperPath));
     if (pathEc) {
-      spdlog::warn("SkyrimDiag: helper path check error={} for {}", pathEc.value(), helperPath.string());
+      spdlog::warn("SkyrimDiag: helper path check error={} for {}", pathEc.value(), PathForLog(helperPath));
     }
     return false;
   }

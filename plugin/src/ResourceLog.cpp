@@ -11,6 +11,7 @@
 
 #include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
+#include "SkyrimDiagResourcePath.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::plugin {
@@ -63,77 +64,6 @@ bool IsInterestingResourcePath(std::string_view path) noexcept
   return EndsWithCaseInsensitiveAscii(path, ".nif") ||
          EndsWithCaseInsensitiveAscii(path, ".hkx") ||
          EndsWithCaseInsensitiveAscii(path, ".tri");
-}
-
-std::uint64_t NormalizePathUtf8(std::string_view in, char* out, std::size_t outCap, std::size_t& outLen) noexcept
-{
-  outLen = 0;
-  if (!out || outCap == 0) {
-    return 0;
-  }
-
-  std::size_t i = 0;
-
-  // Trim leading whitespace (rare, but safe).
-  while (i < in.size() && static_cast<unsigned char>(in[i]) <= 0x20) {
-    i++;
-  }
-
-  // If an absolute path is observed (e.g. "...\\Skyrim Special Edition\\Data\\meshes\\..."), strip everything up to
-  // the last "\data\" component. This keeps paths relative for MO2 provider lookup.
-  const auto is_sep = [](char c) noexcept { return c == '\\' || c == '/'; };
-  for (std::size_t pos = in.size(); pos-- > i;) {
-    if (!is_sep(in[pos])) {
-      continue;
-    }
-    if (pos + 5 >= in.size()) {  // need: sep + "data" + sep
-      continue;
-    }
-
-    const char d0 = ToLowerAscii(in[pos + 1]);
-    const char d1 = ToLowerAscii(in[pos + 2]);
-    const char d2 = ToLowerAscii(in[pos + 3]);
-    const char d3 = ToLowerAscii(in[pos + 4]);
-    const char d4 = in[pos + 5];
-    if (d0 == 'd' && d1 == 'a' && d2 == 't' && d3 == 'a' && is_sep(d4)) {
-      i = pos + 6;  // after "\data\"
-      break;
-    }
-  }
-
-  // Strip "data\\" prefix if present (case-insensitive).
-  if (i + 5 <= in.size()) {
-    const char d0 = ToLowerAscii(in[i + 0]);
-    const char d1 = ToLowerAscii(in[i + 1]);
-    const char d2 = ToLowerAscii(in[i + 2]);
-    const char d3 = ToLowerAscii(in[i + 3]);
-    const char d4 = in[i + 4];
-    if (d0 == 'd' && d1 == 'a' && d2 == 't' && d3 == 'a' && (d4 == '\\' || d4 == '/')) {
-      i += 5;
-    }
-  }
-
-  // Strip leading slashes.
-  while (i < in.size() && (in[i] == '\\' || in[i] == '/')) {
-    i++;
-  }
-
-  // Normalize into out buffer: lower-case ASCII + backslashes.
-  std::uint64_t hash = 14695981039346656037ull;  // FNV-1a 64 offset basis
-  for (; i < in.size() && (outLen + 1) < outCap; i++) {
-    char c = in[i];
-    if (c == '/') {
-      c = '\\';
-    }
-    c = ToLowerAscii(c);
-    out[outLen++] = c;
-
-    hash ^= static_cast<unsigned char>(c);
-    hash *= 1099511628211ull;
-  }
-
-  out[outLen] = '\0';
-  return hash;
 }
 
 std::uint64_t QpcFreqNow() noexcept
@@ -215,7 +145,8 @@ void NoteResourceOpen(std::string_view pathUtf8) noexcept
   }
   char norm[skydiag::kResourcePathMaxBytes]{};
   std::size_t normLen = 0;
-  const std::uint64_t h = NormalizePathUtf8(pathUtf8, norm, sizeof(norm), normLen);
+  // The hook hands over the game's ANSI path bytes (SkyrimDiagResourcePath.h).
+  const std::uint64_t h = skydiag::NormalizeResourcePath(pathUtf8, GetACP(), norm, sizeof(norm), normLen);
   if (normLen == 0 || norm[0] == '\0') {
     return;
   }

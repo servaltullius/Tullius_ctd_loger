@@ -246,7 +246,8 @@ void ParseBlackboxStream(
     rr.t_ms = (tmp.qpc >= start)
       ? (1000.0 * (static_cast<double>(tmp.qpc - start) / static_cast<double>(freq)))
       : 0.0;
-    rr.path = Utf8ToWide(std::string_view(tmp.path_utf8, len));
+    // Plugins before v0.2.68 stored the game's ANSI path bytes as they came.
+    rr.path = Utf8OrAnsiToWide(std::string_view(tmp.path_utf8, len));
     rr.kind = internal::ResourceKindFromPath(rr.path);
     if (mo2Index) {
       const std::wstring key = normMo2Key(rr.path);

@@ -20,6 +20,25 @@ std::wstring Utf8ToWide(std::string_view s)
   return out;
 }
 
+std::wstring Utf8OrAnsiToWide(std::string_view s)
+{
+  if (s.empty()) {
+    return {};
+  }
+  UINT codePage = CP_UTF8;
+  int needed = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0);
+  if (needed <= 0) {
+    codePage = CP_ACP;
+    needed = MultiByteToWideChar(CP_ACP, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+  }
+  if (needed <= 0) {
+    return {};
+  }
+  std::wstring out(static_cast<std::size_t>(needed), L'\0');
+  MultiByteToWideChar(codePage, 0, s.data(), static_cast<int>(s.size()), out.data(), needed);
+  return out;
+}
+
 std::string WideToUtf8(std::wstring_view w)
 {
   if (w.empty()) {
