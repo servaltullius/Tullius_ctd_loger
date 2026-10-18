@@ -131,6 +131,20 @@ struct CrashCaptureState {
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
   LateRecoveryState lateRecovery{};
+  // The crash generation last released as a handled exception (the game kept
+  // running or exited with code 0). Its record stays committed in shared
+  // memory, so the exit path must not report it again, unless
+  // ShouldReportReleasedCrashAtExit says otherwise. A crash superseded by a
+  // newer one (kRetryNewerCrash) is not released.
+  std::uint32_t releasedCrashSeq = 0;
+  // When that release happened (GetTickCount64), and whether it rested only on
+  // the heartbeat advancing for a few seconds after the crash dump.
+  std::uint64_t releasedCrashTick64 = 0;
+  bool releasedOnBriefHeartbeat = false;
+  // The crash generation whose dump could not be written, and whether the
+  // game had already exited then. Its dump-failure WER hint stays at exit.
+  std::uint32_t dumpWriteFailedCrashSeq = 0;
+  bool dumpWriteFailedProcessExited = false;
 };
 
 struct StableSharedSnapshot {
@@ -263,6 +277,44 @@ inline bool ShouldQuarantineCleanExitEvidence(
   return exitCode == 0u && info.isStrong && IsCommittedCrashSequence(info.crashSeq);
 }
 
+// A crash released as handled is normally not reported again at exit. The
+// release after its dump on a few seconds of advancing heartbeat is weak
+// evidence, though: a worker thread's crash handler (e.g. Crash Logger
+// writing its log) can run that long while the main thread still ticks, and
+// that dump is normally deleted. So a non-zero exit within kLateRecoveryMinAliveMs of
+// such a release, or any non-zero exit with the released exception's own
+// code, still records the released fault.
+constexpr bool ShouldReportReleasedCrashAtExit(
+  std::uint32_t exitCode,
+  std::uint32_t exceptionCode,
+  bool releasedOnBriefHeartbeat,
+  std::uint64_t releasedTick64,
+  std::uint64_t exitTick64) noexcept
+{
+  if (exitCode == 0u) {
+    return false;
+  }
+  if (exitCode == exceptionCode) {
+    return true;
+  }
+  return releasedOnBriefHeartbeat && exitTick64 >= releasedTick64 &&
+         exitTick64 - releasedTick64 < kLateRecoveryMinAliveMs;
+}
+
+// Why a committed fault is recorded only as metadata after the game exited.
+enum class PostExitEvidenceReason
+{
+  // Published after the helper's final live-process poll; never captured.
+  kPublishedAfterFinalLivePoll,
+  // Captured while the game ran, but its dump could not be written.
+  kDumpWriteFailed,
+  // Captured, but the game had exited before its dump could be written.
+  kDumpWriteFailedProcessExited,
+  // Released as handled, but the game then exited abnormally
+  // (ShouldReportReleasedCrashAtExit).
+  kReleasedFaultFollowedByAbnormalExit,
+};
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
 bool TryCaptureCommittedCrashInfo(
   const skydiag::SharedHeader* shm,
@@ -270,7 +322,8 @@ bool TryCaptureCommittedCrashInfo(
 bool TryWritePostExitCrashEvidenceRecord(
   const std::filesystem::path& outBase,
   const CrashEventInfo& info,
-  DWORD exitCode);
+  DWORD exitCode,
+  PostExitEvidenceReason reason = PostExitEvidenceReason::kPublishedAfterFinalLivePoll);
 bool CaptureStableSharedSnapshot(
   const skydiag::SharedLayout* shm,
   std::size_t shmBytes,
@@ -319,6 +372,40 @@ inline std::string BuildWerFallbackHintText(WerFallbackReason reason, DWORD exit
 }
 
 void WriteWerFallbackHint(const std::filesystem::path& outBase, WerFallbackReason reason, DWORD exitCode);
+
+// The exit code of a program Windows ended as not responding, after the user
+// chose to close it ("stopped interacting with Windows and was closed").
+inline constexpr std::uint32_t kExitCodeClosedAsNotResponding = 0xCFFFFFFFu;
+
+// A non-zero exit with no crash on record, after the game had stopped
+// responding (a hang was captured in this episode, the heartbeat had stalled
+// past the hang threshold, or Windows closed it as not responding), is a
+// frozen game being closed, by the user or a watchdog. The abnormal-exit hint
+// would point at a plugin's error dialog and at WER LocalDumps, which cannot
+// capture a hung or terminated game. It still applies when a dialog was on
+// screen at the hang capture (a plugin's error dialog that then ends the
+// game), and for an NTSTATUS error exit code such as a fail-fast, which WER
+// does capture. A stalled heartbeat does not count when the helper held back
+// this episode's hang capture because the game window still answered: a
+// plugin's error dialog keeps the window answering while the heartbeat stops.
+constexpr bool IsCloseOfUnresponsiveGame(
+  std::uint32_t exitCode,
+  bool crashOnRecord,
+  bool hangCapturedThisEpisode,
+  bool modalDialogSeenThisEpisode,
+  bool heartbeatStalled,
+  bool hangSuppressedAsResponsiveThisEpisode) noexcept
+{
+  if (exitCode == 0u || crashOnRecord || modalDialogSeenThisEpisode) {
+    return false;
+  }
+  if (exitCode == kExitCodeClosedAsNotResponding) {
+    return true;
+  }
+  return exitCode < 0xC0000000u &&
+         (hangCapturedThisEpisode || (heartbeatStalled && !hangSuppressedAsResponsiveThisEpisode));
+}
+
 bool IsCleanExitEvidenceRequired(
   const skydiag::helper::HelperConfig& cfg,
   const CrashCaptureState* crashState) noexcept;

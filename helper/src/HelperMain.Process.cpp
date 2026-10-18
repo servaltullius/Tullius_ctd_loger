@@ -8,10 +8,49 @@
 #include "CrashCapture.h"
 #include "DumpToolLaunch.h"
 #include "HelperLog.h"
+#include "SkyrimDiagHelper/HangDetect.h"
+#include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
+namespace {
 
-void DrainCrashEventBeforeExit(
+struct HeartbeatAtExit
+{
+  bool known = false;
+  bool stalled = false;
+  double secondsSince = 0.0;
+};
+
+// Whether the heartbeat had already stopped long enough to count as a hang
+// when the exit was observed, with HandleHangTick's thresholds (the configured
+// loading threshold stands in for the adaptive one).
+HeartbeatAtExit ReadHeartbeatAtExit(const HelperConfig& cfg, const AttachedProcess& proc)
+{
+  HeartbeatAtExit result{};
+  if (!proc.shm || proc.shm->header.last_heartbeat_qpc == 0 || proc.shm->header.qpc_freq == 0) {
+    return result;
+  }
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  const std::uint32_t stateFlags = proc.shm->header.state_flags;
+  const auto decision = skydiag::helper::EvaluateHang(
+    static_cast<std::uint64_t>(now.QuadPart),
+    proc.shm->header.last_heartbeat_qpc,
+    proc.shm->header.qpc_freq,
+    stateFlags,
+    (stateFlags & skydiag::kState_InMenu) != 0u
+      ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
+      : cfg.hangThresholdInGameSec,
+    cfg.hangThresholdLoadingSec);
+  result.known = true;
+  result.stalled = decision.isHang;
+  result.secondsSince = decision.secondsSinceHeartbeat;
+  return result;
+}
+
+}  // namespace
+
+bool DrainCrashEventBeforeExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
@@ -19,7 +58,7 @@ void DrainCrashEventBeforeExit(
   HelperLoopState* state)
 {
   if (!state) {
-    return;
+    return false;
   }
 
   const bool processExited =
@@ -36,7 +75,7 @@ void DrainCrashEventBeforeExit(
       &state->capturedCrashDumpPath,
       &state->pendingHangViewerDumpPath,
       &state->pendingCrashViewerDumpPath);
-    return;
+    return false;
   }
 
   if (proc.crashEvent && WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0) {
@@ -47,19 +86,48 @@ void DrainCrashEventBeforeExit(
     }
   }
   if (state->crashCaptured.latched) {
-    return;
+    return true;
   }
 
   CrashEventInfo info{};
   if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &info)) {
-    return;
+    return false;
+  }
+  // A handled exception released earlier (the game kept running, or exited 0
+  // during the filter) keeps its committed record; it is not a crash at exit,
+  // unless the release was weak evidence and the exit says otherwise.
+  if (state->crashCaptured.releasedCrashSeq == info.crashSeq) {
+    const auto& crash = state->crashCaptured;
+    const std::uint64_t nowTick64 = GetTickCount64();
+    if (!ShouldReportReleasedCrashAtExit(
+          exitCode, info.exceptionCode, crash.releasedOnBriefHeartbeat, crash.releasedCrashTick64, nowTick64)) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+          + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
+          + std::to_wstring(exitCode) + L").");
+      return false;
+    }
+    AppendLogLine(
+      outBase,
+      L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+        + L" was released as a handled exception, but the game then exited abnormally (exit_code="
+        + std::to_wstring(exitCode) + L", "
+        + std::to_wstring(nowTick64 >= crash.releasedCrashTick64 ? (nowTick64 - crash.releasedCrashTick64) / 1000u : 0u)
+        + L" s after the release); recording it after all.");
+    if (state->postExitEvidenceSeq != info.crashSeq &&
+        TryWritePostExitCrashEvidenceRecord(
+          outBase, info, exitCode, PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit)) {
+      state->postExitEvidenceSeq = info.crashSeq;
+    }
+    return true;
   }
 
   const bool sameCapturedSequence =
     state->crashCaptured.capturedInfo.crashSeq == info.crashSeq;
   if (exitCode == 0u) {
     if (!info.isStrong) {
-      return;
+      return false;
     }
     const bool priorEvidenceAttempt =
       state->crashCaptured.cleanExitEvidenceWritten ||
@@ -71,7 +139,7 @@ void DrainCrashEventBeforeExit(
         L"Preserving the existing clean-exit evidence attempt for crash_seq="
           + std::to_wstring(info.crashSeq)
           + L"; post-exit drain will not relabel it as not_captured.");
-      return;
+      return true;
     }
 
     state->crashCaptured.latched = true;
@@ -86,15 +154,22 @@ void DrainCrashEventBeforeExit(
       L"Drained committed strong-fault metadata after process exit (exit_code=0, crash_seq="
         + std::to_wstring(info.crashSeq)
         + L"); the process address space is already gone, so dump capture was not attempted.");
-    return;
+    return true;
   }
 
   if (state->postExitEvidenceSeq == info.crashSeq) {
-    return;
+    return true;
   }
-  if (TryWritePostExitCrashEvidenceRecord(outBase, info, exitCode)) {
+  auto reason = PostExitEvidenceReason::kPublishedAfterFinalLivePoll;
+  if (state->crashCaptured.dumpWriteFailedCrashSeq == info.crashSeq) {
+    reason = state->crashCaptured.dumpWriteFailedProcessExited
+      ? PostExitEvidenceReason::kDumpWriteFailedProcessExited
+      : PostExitEvidenceReason::kDumpWriteFailed;
+  }
+  if (TryWritePostExitCrashEvidenceRecord(outBase, info, exitCode, reason)) {
     state->postExitEvidenceSeq = info.crashSeq;
   }
+  return true;
 }
 
 // Releases a latched crash capture that turned out not to be a CTD: the
@@ -314,8 +389,10 @@ bool HandleLateRecoveryTick(
   // the same. So the dump is kept (marked late_recovery) instead of deleted;
   // only the crash actions and the freeze are released.
   CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running", /*keepDump=*/true);
-  // A later non-zero exit must not re-report this released exception.
-  state->postExitEvidenceSeq = crashSeq;
+  // A later exit must not re-report this released exception.
+  crash.releasedCrashSeq = crashSeq;
+  crash.releasedCrashTick64 = GetTickCount64();
+  crash.releasedOnBriefHeartbeat = false;
   const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, crashSeq);
   AppendLogLine(
     outBase,
@@ -441,15 +518,53 @@ bool HandleProcessExitTick(
     }
     // Always drain the committed crash generation after observing process exit.
     // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
-    DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
-    if (exitCode != 0 &&
-        !state->crashCaptured.latched &&
-        cfg.enableWerDumpFallbackHint) {
-      WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
-      AppendLogLine(
-        outBase,
-        L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
-          + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+    const bool crashOnRecord = DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
+    if (exitCode != 0 && !state->crashCaptured.latched) {
+      const auto& crash = state->crashCaptured;
+      const auto& hang = state->hangState;
+      const auto heartbeat = ReadHeartbeatAtExit(cfg, proc);
+      if (crash.dumpWriteFailedCrashSeq != 0u) {
+        // The hint written when that dump failed is the guidance that applies.
+        if (cfg.enableWerDumpFallbackHint) {
+          AppendLogLine(
+            outBase,
+            L"Abnormal process exit (exit_code=" + std::to_wstring(exitCode) + L") after crash_seq="
+              + std::to_wstring(crash.dumpWriteFailedCrashSeq)
+              + L", whose dump could not be written; keeping its WER LocalDumps hint.");
+        }
+      } else if (IsCloseOfUnresponsiveGame(
+                   exitCode,
+                   crashOnRecord,
+                   hang.hangCapturedThisEpisode,
+                   hang.modalDialogSeenThisEpisode,
+                   heartbeat.stalled,
+                   // Each suppression saw the window answering (the grace one
+                   // only follows a not-foreground suppression).
+                   hang.hangSuppressedNotForegroundThisEpisode || hang.hangSuppressedForegroundGraceThisEpisode ||
+                     hang.hangSuppressedForegroundResponsiveThisEpisode)) {
+        std::wstring evidence;
+        if (heartbeat.known) {
+          evidence += L", no heartbeat for "
+            + std::to_wstring(static_cast<std::uint64_t>(heartbeat.secondsSince)) + L" s";
+        }
+        if (hang.hangCapturedThisEpisode) {
+          evidence += L", hang captured";
+        }
+        if (exitCode == kExitCodeClosedAsNotResponding) {
+          evidence += L", closed by Windows as not responding";
+        }
+        AppendLogLine(
+          outBase,
+          L"The game was closed while not responding (exit_code=" + std::to_wstring(exitCode) + evidence
+            + L") with no unhandled crash on record; no WER LocalDumps hint, since WER cannot capture a "
+              L"frozen game that is ended.");
+      } else if (cfg.enableWerDumpFallbackHint) {
+        WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
+        AppendLogLine(
+          outBase,
+          L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
+            + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+      }
     }
     if (exitCode == 0) {
       const bool hadCapturedCrash = state->crashCaptured.latched;

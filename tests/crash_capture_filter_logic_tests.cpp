@@ -7,13 +7,16 @@ using skydiag::helper::internal::BuildCrashEventInfo;
 using skydiag::helper::internal::ClassifyExitCodeVerdict;
 using skydiag::helper::internal::CrashEventInfo;
 using skydiag::helper::internal::FilterVerdict;
+using skydiag::helper::internal::IsCloseOfUnresponsiveGame;
 using skydiag::helper::internal::IsCommittedCrashSequence;
 using skydiag::helper::internal::QueueDeferredCrashViewer;
 using skydiag::helper::internal::ShouldLatchCrashCapture;
 using skydiag::helper::internal::ShouldAttemptDumpWrite;
 using skydiag::helper::internal::ShouldPreserveFilteredDump;
 using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
+using skydiag::helper::internal::ShouldReportReleasedCrashAtExit;
 using skydiag::helper::internal::kDumpWriteAttempts;
+using skydiag::helper::internal::kExitCodeClosedAsNotResponding;
 
 // Crash Logger's thread dump shares Ctrl+Shift+F12 with the manual capture.
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u));
@@ -21,6 +24,38 @@ static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u), "an access violation");
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no manual capture");
+
+// A frozen game closed with a non-zero exit gets no abnormal-exit WER hint
+// (exitCode, crashOnRecord, hangCaptured, modalDialogSeen, heartbeatStalled,
+// hangSuppressedAsResponsive).
+static_assert(IsCloseOfUnresponsiveGame(1u, false, true, false, false, false), "closed after a hang capture");
+static_assert(IsCloseOfUnresponsiveGame(1u, false, false, false, true, false), "closed with a stalled heartbeat");
+static_assert(!IsCloseOfUnresponsiveGame(1u, false, false, false, false, false), "a responsive game");
+static_assert(!IsCloseOfUnresponsiveGame(0u, false, true, false, true, false), "a normal exit");
+static_assert(!IsCloseOfUnresponsiveGame(3u, false, true, true, true, false), "a dialog at the hang capture");
+static_assert(!IsCloseOfUnresponsiveGame(0xC0000409u, false, true, false, true, false), "an NTSTATUS crash exit code");
+static_assert(IsCloseOfUnresponsiveGame(0xBFFFFFFFu, false, true, false, true, false), "below the NTSTATUS error range");
+static_assert(!IsCloseOfUnresponsiveGame(1u, true, true, false, true, false), "a crash on record");
+// The hang capture was held back because the window still answered (e.g. a
+// plugin's error dialog while the game was in the background).
+static_assert(!IsCloseOfUnresponsiveGame(1u, false, false, false, true, true), "a stalled heartbeat, window answering");
+static_assert(IsCloseOfUnresponsiveGame(1u, false, true, false, true, true), "a hang captured after the suppression");
+// Windows ended the game as not responding.
+static_assert(kExitCodeClosedAsNotResponding == 0xCFFFFFFFu, "the hung-program close exit code");
+static_assert(IsCloseOfUnresponsiveGame(0xCFFFFFFFu, false, true, false, true, false), "closed as not responding");
+static_assert(IsCloseOfUnresponsiveGame(0xCFFFFFFFu, false, false, false, false, false), "before the hang threshold");
+static_assert(!IsCloseOfUnresponsiveGame(0xCFFFFFFFu, true, true, false, true, false), "not responding, crash on record");
+static_assert(!IsCloseOfUnresponsiveGame(0xCFFFFFFFu, false, true, true, true, false), "not responding, dialog seen");
+
+// A released crash is reported at a non-zero exit only shortly after a
+// brief-heartbeat release, or for its own exception code
+// (exitCode, exceptionCode, releasedOnBriefHeartbeat, releasedTick64, exitTick64).
+static_assert(ShouldReportReleasedCrashAtExit(1u, 0xC0000005u, true, 100'000u, 107'000u), "7 s after a post-dump release");
+static_assert(!ShouldReportReleasedCrashAtExit(1u, 0xC0000005u, true, 100'000u, 160'000u), "a minute after it");
+static_assert(!ShouldReportReleasedCrashAtExit(0u, 0xC0000005u, true, 100'000u, 107'000u), "a normal exit");
+static_assert(!ShouldReportReleasedCrashAtExit(1u, 0xE06D7363u, false, 100'000u, 107'000u), "an early thread-dump release");
+static_assert(ShouldReportReleasedCrashAtExit(0xC0000005u, 0xC0000005u, false, 100'000u, 900'000u), "its own code");
+static_assert(!ShouldReportReleasedCrashAtExit(1u, 0xE06D7363u, false, 100'000u, 244'000u), "the rc3 field case");
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {

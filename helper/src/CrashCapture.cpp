@@ -328,13 +328,15 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
     ? (L", check=" + std::to_wstring(checkIndex + 1))
     : L"";
 
+  // The filters only give the verdict; the caller logs what happens to the
+  // dump, since the early check runs before any dump is written.
   if (verdict == FilterVerdict::kDeleteBenign) {
     AppendLogLine(
       outBase,
       L"Crash event received but process exited normally (context=" + std::wstring(context)
         + L", exit_code=0"
         + checkSuffix
-        + L"); deleting dump (handled first-chance or shutdown exception)."
+        + L"); treating it as a handled first-chance or shutdown exception."
     );
     if (crashState && cfg.enableCleanExitEvidenceQuarantine &&
         ShouldQuarantineCleanExitEvidence(exitCode, info)) {
@@ -353,7 +355,7 @@ FilterVerdict ClassifyExitCodeVerdictWithContext(
         + checkSuffix
         + L", state_flags="
         + std::to_wstring(info.stateFlags)
-        + L"); keeping dump and preserving crash auto-actions.");
+        + L"); treating it as a crash and preserving crash auto-actions.");
   }
 
   return verdict;
@@ -399,7 +401,7 @@ bool TryReadExitCode(
     AppendLogLine(
       outBase,
       L"GetExitCodeProcess failed (error=" + std::to_wstring(GetLastError())
-        + L"); treating the exit code as unknown and keeping the dump.");
+        + L"); treating the exit code as unknown, not as a normal exit.");
     return false;
   }
   if (outExitCode) {
@@ -486,7 +488,7 @@ FilterVerdict FilterFirstChanceException(
             + std::to_wstring(attempt + 1)
             + L", advances="
             + std::to_wstring(heartbeatAdvanceCount)
-            + L"); deleting dump (likely handled first-chance exception)."
+            + L"); likely a handled first-chance exception."
         );
         return FilterVerdict::kDeleteRecovered;
       }
@@ -901,12 +903,26 @@ bool TryCaptureCommittedCrashInfo(
 bool TryWritePostExitCrashEvidenceRecord(
   const std::filesystem::path& outBase,
   const CrashEventInfo& info,
-  DWORD exitCode)
+  DWORD exitCode,
+  PostExitEvidenceReason reason)
 {
   const auto ts = Timestamp();
   nlohmann::json j = nlohmann::json::object();
   j["schema"] = "skydiag.post_exit_crash_evidence.v1";
-  j["reason"] = "committed_fault_published_after_final_live_process_poll";
+  switch (reason) {
+    case PostExitEvidenceReason::kPublishedAfterFinalLivePoll:
+      j["reason"] = "committed_fault_published_after_final_live_process_poll";
+      break;
+    case PostExitEvidenceReason::kDumpWriteFailed:
+      j["reason"] = "committed_fault_dump_write_failed";
+      break;
+    case PostExitEvidenceReason::kDumpWriteFailedProcessExited:
+      j["reason"] = "committed_fault_dump_write_failed_process_exited";
+      break;
+    case PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit:
+      j["reason"] = "released_fault_followed_by_abnormal_exit";
+      break;
+  }
   j["captured_at"] = WideToUtf8(ts);
   j["capture_status"] = "metadata_only_process_already_exited";
   j["dump_captured"] = false;
@@ -930,11 +946,24 @@ bool TryWritePostExitCrashEvidenceRecord(
       L"Failed to write post-exit crash evidence metadata: " + path.wstring());
     return false;
   }
-  AppendLogLine(
-    outBase,
-    L"Captured committed crash metadata after process exit; no live address space "
-    L"remained for dump capture: "
-      + path.wstring());
+  std::wstring logLine;
+  switch (reason) {
+    case PostExitEvidenceReason::kPublishedAfterFinalLivePoll:
+      logLine =
+        L"Captured committed crash metadata after process exit; no live address space "
+        L"remained for dump capture: ";
+      break;
+    case PostExitEvidenceReason::kDumpWriteFailed:
+    case PostExitEvidenceReason::kDumpWriteFailedProcessExited:
+      logLine = L"Recorded crash metadata after process exit for a crash whose dump could not be written: ";
+      break;
+    case PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit:
+      logLine =
+        L"Recorded crash metadata after process exit for an exception released as handled before the "
+        L"game exited abnormally: ";
+      break;
+  }
+  AppendLogLine(outBase, logLine + path.wstring());
   return true;
 }
 
@@ -1033,6 +1062,7 @@ bool HandleCrashEventTick(
   // Right after a manual capture, a C++ exception or breakpoint is most likely
   // Crash Logger's thread dump on the same hotkey (IsLikelyCrashLoggerThreadDumpFault):
   // check that the game keeps running before writing a dump, not after.
+  bool exitedBeforeDump = false;
   if (proc.process && proc.shm &&
       IsLikelyCrashLoggerThreadDumpFault(
         info.exceptionCode, GetTickCount64(), g_lastManualCaptureTick64.load(std::memory_order_relaxed))) {
@@ -1043,6 +1073,9 @@ bool HandleCrashEventTick(
         TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
       if (crashState) {
         crashState->latched = false;
+        crashState->releasedCrashSeq = info.crashSeq;
+        crashState->releasedCrashTick64 = GetTickCount64();
+        crashState->releasedOnBriefHeartbeat = false;
       }
       AppendLogLine(
         outBase,
@@ -1052,7 +1085,15 @@ bool HandleCrashEventTick(
           + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
       return true;
     }
-    AppendLogLine(outBase, L"The game did not keep running after this exception; writing the crash dump.");
+    // The filter keeps the dump when the game exited with a non-zero or
+    // unreadable exit code. Its address space is gone then: MiniDumpWriteDump
+    // can only fail and leave an empty file.
+    exitedBeforeDump = WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+    AppendLogLine(
+      outBase,
+      exitedBeforeDump
+        ? L"The game exited after this exception, before a crash dump could be written."
+        : L"The game did not keep running after this exception; writing the crash dump.");
   }
 
   const auto ts = Timestamp();
@@ -1068,9 +1109,9 @@ bool HandleCrashEventTick(
   // its record and will not signal again for this fault. Nothing would drive a
   // later attempt, so a transient failure (sharing violation, momentary disk
   // pressure) has to be retried here or the incident is lost outright.
-  std::wstring dumpErr;
+  std::wstring dumpErr = exitedBeforeDump ? L"the game process had already exited" : L"";
   bool dumpOk = false;
-  for (int attempt = 0; attempt < kDumpWriteAttempts; ++attempt) {
+  for (int attempt = 0; attempt < kDumpWriteAttempts && !exitedBeforeDump; ++attempt) {
     if (attempt > 0) {
       if (!ShouldAttemptDumpWrite(attempt, IsProcessStillActive(proc.process))) {
         AppendLogLine(
@@ -1139,12 +1180,15 @@ bool HandleCrashEventTick(
       AppendLogLine(
         outBase,
         thawed
-          ? L"Crash dump write failed after all retries; thawed capture so a later CTD can still be recorded."
-          : L"Crash dump write failed after all retries; capture was not thawed because a newer crash record "
+          ? L"Crash dump could not be written; thawed capture so a later CTD can still be recorded."
+          : L"Crash dump could not be written; capture was not thawed because a newer crash record "
             L"is already present.");
     }
     if (crashState) {
       crashState->latched = false;
+      crashState->dumpWriteFailedCrashSeq = info.crashSeq;
+      crashState->dumpWriteFailedProcessExited =
+        proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
     }
     return true;
   }
@@ -1268,8 +1312,17 @@ bool HandleCrashEventTick(
       }
       if (crashState) {
         crashState->latched = false;
+        if (verdict != FilterVerdict::kRetryNewerCrash) {
+          crashState->releasedCrashSeq = info.crashSeq;
+          crashState->releasedCrashTick64 = GetTickCount64();
+          crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
+        }
       }
-      AppendLogLine(outBase, L"Filtered crash event consumed; capture remains ready for a later CTD.");
+      AppendLogLine(
+        outBase,
+        preserveFilteredDump
+          ? L"Filtered crash event consumed; dump kept, capture remains ready for a later CTD."
+          : L"Filtered crash event consumed; dump deleted, capture remains ready for a later CTD.");
       return true;
     }
   }
