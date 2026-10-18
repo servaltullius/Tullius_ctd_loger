@@ -148,7 +148,7 @@ void InstallFallbackLogger() noexcept
 
 // path::string() converts to the ANSI code page and throws for a character
 // outside it (a Korean user name on an English Windows). Log text is UTF-8.
-std::string PathForLog(const std::filesystem::path& path) noexcept
+std::string PathForLog(const std::filesystem::path& path)
 {
   try {
     const auto u8 = path.u8string();
