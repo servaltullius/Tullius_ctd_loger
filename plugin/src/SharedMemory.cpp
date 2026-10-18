@@ -15,6 +15,7 @@ namespace {
 HANDLE g_mapping = nullptr;
 HANDLE g_crashEvent = nullptr;
 skydiag::SharedLayout* g_shared = nullptr;
+std::uint32_t g_mainThreadId = 0;
 
 }  // namespace
 
@@ -83,6 +84,8 @@ bool InitSharedMemory()
   g_shared->header.last_heartbeat_qpc = static_cast<std::uint64_t>(now.QuadPart);
   g_shared->header.state_flags = skydiag::kState_Loading;
 
+  g_mainThreadId = GetCurrentThreadId();
+
   // Session start marker.
   skydiag::EventPayload p{};
   p.a = pid;
@@ -105,6 +108,11 @@ void ShutdownSharedMemory()
     CloseHandle(g_mapping);
     g_mapping = nullptr;
   }
+}
+
+std::uint32_t GetMainThreadId() noexcept
+{
+  return g_mainThreadId;
 }
 
 skydiag::SharedLayout* GetShared() noexcept

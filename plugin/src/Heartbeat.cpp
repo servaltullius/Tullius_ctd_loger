@@ -70,13 +70,15 @@ inline void HeartbeatTaskOnMainThread() noexcept
   shm->header.last_heartbeat_qpc = now;
 
   // A Heartbeat event now and then names the main thread for the helper and
-  // the analyzer (MainThreadEventRank) after SessionStart left the ring.
+  // the analyzer (MainThreadIdFromEvent) after SessionStart left the ring.
   static std::uint64_t lastHeartbeatEventQpc = 0;
   const std::uint64_t heartbeatEventIntervalQpc = shm->header.qpc_freq * kHeartbeatEventIntervalSec;
   if (lastHeartbeatEventQpc == 0 || now >= lastHeartbeatEventQpc + heartbeatEventIntervalQpc) {
     lastHeartbeatEventQpc = now;
     skydiag::EventPayload hb{};
     hb.a = shm->header.state_flags;
+    // This task runs on a job thread on AE; name the main thread itself.
+    hb.b = GetMainThreadId();
     PushEvent(skydiag::EventType::kHeartbeat, hb, sizeof(hb));
   }
 

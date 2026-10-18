@@ -64,11 +64,11 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
 
   auto shared = MakeSharedLayout();
   shared->header.last_heartbeat_qpc = 1;
-  auto& heartbeat = shared->events[0];
-  heartbeat.tid = dialogTid;
-  heartbeat.qpc = 2;
-  heartbeat.type = static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat);
-  heartbeat.seq = 2;
+  auto& sessionStart = shared->events[0];
+  sessionStart.tid = dialogTid;
+  sessionStart.qpc = 2;
+  sessionStart.type = static_cast<std::uint16_t>(skydiag::EventType::kSessionStart);
+  sessionStart.seq = 2;
   shared->header.write_index = 1;
 
   auto proc = MakeSelfAttachedProcess(shared.get());
@@ -105,7 +105,7 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
 
   const auto& modal = result.modal_dialog_wait;
   Require(modal.detected, "Modal dialog wait must be detected");
-  Require(modal.main_thread_id == dialogTid, "Modal wait must be tied to the heartbeat thread");
+  Require(modal.main_thread_id == dialogTid, "Modal wait must be tied to the main thread SessionStart names");
   Require(modal.window_evidence, "Helper dialog capture must provide window evidence");
   Require(modal.dialog_title == kDialogTitle, "Dialog title must survive capture and analysis");
   Require(modal.stack_evidence, "Main-thread stack must match the MessageBox wait chain");

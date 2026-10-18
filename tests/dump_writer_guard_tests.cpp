@@ -78,7 +78,7 @@ int main()
   AssertContains(impl, "preferWctThreads", "DumpWriter shaping must honor WCT-thread preference from the dump profile.");
   AssertContains(impl, "InferMainThreadIdFromSnapshot", "Dump writer must recover the main thread from the blackbox snapshot.");
   AssertContains(impl, "effectiveProfile.preferMainThread", "preferMainThread must affect the callback preferred thread set.");
-  AssertContains(impl, "MainThreadEventRank", "The main thread is found from Heartbeat, SessionStart or other main-thread events.");
+  AssertContains(impl, "MainThreadIdFromEvent", "The main thread is the one SessionStart or a Heartbeat names.");
 
   AssertContains(crashCapture, "CaptureKind::Crash", "Crash capture must request the crash dump profile.");
   AssertContains(hangCapture, "CaptureKind::Hang", "Hang capture must request the hang dump profile.");
