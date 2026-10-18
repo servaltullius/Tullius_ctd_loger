@@ -1087,6 +1087,8 @@ bool HandleCrashEventTick(
       L"(tid=" + std::to_wstring(mainThreadId)
         + L"), so it is not one of its thread dump's probes: writing the crash dump now.");
   } else if (inThreadDumpWindow) {
+    FILETIME eventTime{};
+    GetSystemTimeAsFileTime(&eventTime);
     const auto early = FilterFirstChanceException(
       cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
     if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
@@ -1096,8 +1098,12 @@ bool HandleCrashEventTick(
         crashState->latched = false;
         crashState->releasedCrashSeq = info.crashSeq;
         crashState->releasedCrashTick64 = GetTickCount64();
-        // As weak as the release after a dump (ShouldReportReleasedCrashAtExit).
+        // As weak as the release after a dump (ShouldReportReleasedCrashAtExit),
+        // and a non-zero exit also needs Crash Logger's crash log to record it.
         crashState->releasedOnBriefHeartbeat = early == FilterVerdict::kDeleteRecovered;
+        crashState->releasedInThreadDumpWindow = true;
+        crashState->releasedCrashEventFileTimeUtc =
+          (static_cast<std::uint64_t>(eventTime.dwHighDateTime) << 32) | eventTime.dwLowDateTime;
       }
       AppendLogLine(
         outBase,
@@ -1338,6 +1344,7 @@ bool HandleCrashEventTick(
           crashState->releasedCrashSeq = info.crashSeq;
           crashState->releasedCrashTick64 = GetTickCount64();
           crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
+          crashState->releasedInThreadDumpWindow = false;
         }
       }
       AppendLogLine(

@@ -162,6 +162,13 @@ struct CrashCaptureState {
   // thread dump window) or after it.
   std::uint64_t releasedCrashTick64 = 0;
   bool releasedOnBriefHeartbeat = false;
+  // Whether that release was the early one in Crash Logger's thread dump
+  // window, and when its crash event came (FILETIME, UTC). There a thread dump
+  // probe and a worker's crash that Crash Logger reports look alike, so the
+  // exit path records it only with Crash Logger's crash log as evidence
+  // (DrainCrashEventBeforeExit).
+  bool releasedInThreadDumpWindow = false;
+  std::uint64_t releasedCrashEventFileTimeUtc = 0;
   // The crash generation whose dump could not be written, and whether the
   // game had already exited then. Its dump-failure WER hint stays at exit.
   std::uint32_t dumpWriteFailedCrashSeq = 0;
@@ -308,7 +315,10 @@ inline bool ShouldQuarantineCleanExitEvidence(
 // captured, the heartbeat stalled at exit, or Windows closed it as not
 // responding): a crash handler on a worker thread leaves the heartbeat
 // running, while a frozen game that was closed does not. Any non-zero exit
-// with the released exception's own code records it too.
+// with the released exception's own code records it too. A release in the
+// thread dump window also needs Crash Logger's crash log, since a soft-locked
+// game whose thread dump was taken before it was ended looks the same
+// (DrainCrashEventBeforeExit).
 constexpr bool ShouldReportReleasedCrashAtExit(
   std::uint32_t exitCode,
   std::uint32_t exceptionCode,

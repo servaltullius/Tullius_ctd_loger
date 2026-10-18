@@ -25,6 +25,7 @@ using skydiag::helper::kHotkeyModAlt;
 using skydiag::helper::kHotkeyModControl;
 using skydiag::helper::kHotkeyModShift;
 using skydiag::helper::ManualCaptureHotkey;
+using skydiag::helper::ParseCrashLoggerCrashlogDirectory;
 using skydiag::helper::ParseCrashLoggerThreadDumpHotkey;
 using skydiag::helper::ParseManualCaptureHotkey;
 
@@ -176,6 +177,29 @@ void TestCrashLoggerIniHotkeyList()
   assert((other.keys == std::vector<int>{ 17, 16, 123 }));
 }
 
+// Where Crash Logger writes its crash logs, for the helper's exit check.
+void TestCrashLoggerIniCrashlogDirectory()
+{
+  assert(ParseCrashLoggerCrashlogDirectory("").empty());
+  assert(ParseCrashLoggerCrashlogDirectory("[Debug]\r\nCrashlog Directory = \r\n").empty());
+  assert(ParseCrashLoggerCrashlogDirectory("[Debug]\nCrashlog Directory = D:\\Logs\\Crash Logger\n") ==
+         "D:\\Logs\\Crash Logger");
+  assert(ParseCrashLoggerCrashlogDirectory("\xEF\xBB\xBF[ debug ]\r\ncrashlog directory=CrashLogs\r\n") == "CrashLogs");
+  // A pair of surrounding quotes is dropped; the last duplicate wins.
+  assert(ParseCrashLoggerCrashlogDirectory("[Debug]\nCrashlog Directory = \" C:\\Logs \"\n") == "C:\\Logs");
+  assert(ParseCrashLoggerCrashlogDirectory("[Debug]\nCrashlog Directory = C:\\A\nCrashlog Directory = C:\\B\n") ==
+         "C:\\B");
+  // Other sections and commented-out lines do not count, and the hotkey
+  // entries next to it are still read.
+  assert(ParseCrashLoggerCrashlogDirectory(
+           "[Other]\nCrashlog Directory = C:\\A\n[Debug]\n;Crashlog Directory = C:\\B\n").empty());
+  const std::string_view ini =
+    "[Debug]\nEnable Thread Dump Hotkey = false\nCrashlog Directory = C:\\Logs\nThread Dump Hotkey = 16, 8\n";
+  assert(ParseCrashLoggerCrashlogDirectory(ini) == "C:\\Logs");
+  assert(!ParseCrashLoggerThreadDumpHotkey(ini).enabled);
+  assert((ParseCrashLoggerThreadDumpHotkey(ini).keys == std::vector<int>{ 16, 8 }));
+}
+
 void TestCrashLoggerFiresOnHotkey()
 {
   const CrashLoggerThreadDumpHotkey defaults;
@@ -282,6 +306,7 @@ void TestPreflightCheckFixtures()
     const auto check = CheckCrashLoggerThreadDumpHotkey(plugins.Path(), kOldCtrlShiftF12);
     assert(check.crashLoggerFound);
     assert(check.firesOnManualCapture);
+    assert(check.crashlogDirectory.empty());
     const std::wstring warning = CrashLoggerHotkeyCollisionWarning(check, kOldCtrlShiftF12);
     assert(warning.find(L"thread dump hotkey (Ctrl+Shift+F12)") != std::wstring::npos);
     assert(warning.find(L"manual capture hotkey (Ctrl+Shift+F12)") != std::wstring::npos);
@@ -316,11 +341,15 @@ void TestPreflightCheckFixtures()
   }
   {
     // A custom Crash Logger hotkey the manual capture hotkey holds: warn.
+    // Its Crashlog Directory comes along from the same file.
     PluginsDirFixture plugins;
     plugins.Write("CrashLogger.dll", "");
-    plugins.Write("CrashLogger.ini", "[Debug]\nEnable Thread Dump Hotkey = true\nThread Dump Hotkey = 17, 16, 8\n");
+    plugins.Write(
+      "CrashLogger.ini",
+      "[Debug]\nEnable Thread Dump Hotkey = true\nThread Dump Hotkey = 17, 16, 8\nCrashlog Directory = Logs\n");
     const auto check = CheckCrashLoggerThreadDumpHotkey(plugins.Path(), kDefaultManualCaptureHotkey);
     assert(check.firesOnManualCapture);
+    assert(check.crashlogDirectory == "Logs");
     assert(CrashLoggerHotkeyCollisionWarning(check, kDefaultManualCaptureHotkey).find(L"(Ctrl+Shift+Backspace)") !=
            std::wstring::npos);
   }
@@ -336,6 +365,7 @@ int main()
   TestCrashLoggerIniDefaults();
   TestCrashLoggerIniEnableFlag();
   TestCrashLoggerIniHotkeyList();
+  TestCrashLoggerIniCrashlogDirectory();
   TestCrashLoggerFiresOnHotkey();
   TestPreflightCheckFixtures();
   std::puts("manual capture hotkey tests passed");

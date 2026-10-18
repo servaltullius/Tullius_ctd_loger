@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
@@ -38,6 +39,9 @@ struct HelperLoopState
   bool crashViewerLaunchedAtExit = false;
   // The full recapture of the captured crash, cleaned up with it.
   CrashRecaptureArtifacts crashRecapture{};
+  // Where Crash Logger writes its logs (ResolveCrashLoggerLogDirs), for the
+  // exit path's look for its crash log.
+  std::vector<std::filesystem::path> crashLoggerLogDirs;
 };
 
 struct CrashArtifactRemovalResult
@@ -56,6 +60,10 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
+// The folders Crash Logger writes its crash-*.log to: the Crashlog Directory
+// set in CrashLogger.ini, and the SKSE log folder under Documents\My Games.
+// Empty unless Crash Logger is installed with its thread dump hotkey on.
+std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc);
 // Also starts watching Crash Logger's thread dump hotkey when Crash Logger is
 // installed with it on, whether or not the manual capture hotkey is enabled;
 // the unregister call stops both.

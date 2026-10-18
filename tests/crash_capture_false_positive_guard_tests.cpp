@@ -286,6 +286,18 @@ int main()
     drainBody,
     "state->hangState.hangCapturedThisEpisode",
     "A released fault must not be reported again when the game froze after its release.");
+  // A thread dump of a soft-locked game that was then ended looks like a
+  // worker's crash Crash Logger ended; only its crash log tells them apart.
+  AssertOrdered(
+    drainBody,
+    "if (crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {",
+    "TryWritePostExitCrashEvidenceRecord(",
+    "An early thread dump window release must need Crash Logger's crash log before it is recorded at exit.");
+  AssertOrdered(
+    crashTickBody,
+    "FilterFirstChanceException(",
+    "crashState->releasedInThreadDumpWindow = true;",
+    "The early thread dump window release must be marked for the exit path.");
 
   // A helper the plugin's watchdog restarted must not report a generation an
   // earlier helper already acknowledged by clearing its freeze.

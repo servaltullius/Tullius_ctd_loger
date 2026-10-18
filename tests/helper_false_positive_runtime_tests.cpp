@@ -1,6 +1,8 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -774,12 +776,15 @@ void TestHandleProcessExitTick_DoesNotReReportAReleasedThreadDumpFault()
 // Logger's thread dump hotkey reaches the record the same way as a thread
 // dump probe, and the main thread keeps ticking while Crash Logger writes its
 // log, so the early check releases it without a dump. Crash Logger then ends
-// the live game with exit code 1: the released fault is recorded after all,
-// and no hint claims that no exception was recorded.
+// the live game with exit code 1, after writing its crash-*.log: the released
+// fault is recorded after all, and no hint claims that no exception was
+// recorded.
 void TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_early_release_crash");
   ClearLog(outBase);
+  const auto crashLogDir = outBase / L"SKSE";
+  std::filesystem::create_directories(crashLogDir);
 
   auto shared = MakeSharedLayout();
   shared->header.qpc_freq = QpcFrequency();
@@ -797,6 +802,7 @@ void TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger()
   HelperConfig cfg = MakeTestConfig();
   cfg.enableWerDumpFallbackHint = true;
   skydiag::helper::internal::HelperLoopState state{};
+  state.crashLoggerLogDirs = { outBase / L"missing", crashLogDir };
 
   std::atomic_bool stop{ false };
   std::thread game([&] {
@@ -814,9 +820,14 @@ void TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger()
   Require(
     state.crashCaptured.releasedCrashSeq == 2u && state.crashCaptured.releasedOnBriefHeartbeat,
     "The early release rests on a few seconds of heartbeat");
+  Require(
+    state.crashCaptured.releasedInThreadDumpWindow && state.crashCaptured.releasedCrashEventFileTimeUtc != 0u,
+    "The early release is marked as one in Crash Logger's thread dump window");
   Require(!HasDumpFile(outBase), "No dump is written for the released fault");
 
-  // The heartbeat is still fresh: Crash Logger, not a freeze, ends the game.
+  // The heartbeat is still fresh: Crash Logger, not a freeze, ends the game,
+  // once it has written its crash log.
+  WriteAllTextUtf8(crashLogDir / L"crash-2026-10-18-12-00-00.log", "Skyrim SSE crash log\n");
   shared->header.last_heartbeat_qpc = QpcNow();
   TerminateWithExitCode(child, 1u);
   Require(HandleProcessExitTick(cfg, proc, outBase, &state), "Process exit tick must handle the exit");
@@ -833,6 +844,7 @@ void TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger()
     "The released fault is recorded as followed by an abnormal exit");
   AssertContains(evidence, "\"crash_seq\": 2", "The released generation is the one recorded");
   AssertContains(log, "recording it after all", "Recording the released fault is logged");
+  AssertContains(log, "Crash Logger wrote crash-2026-10-18-12-00-00.log", "The crash log it rests on is named");
   Require(
     !FileExists(outBase / "SkyrimDiag_WER_LocalDumps_Hint.txt"),
     "No hint claims the exit came without a recorded exception");
@@ -842,6 +854,185 @@ void TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger()
   proc.crashEvent = nullptr;
   TerminateChildProcess(&child);
   std::filesystem::remove_all(outBase);
+}
+
+// The twin without a crash: the user takes Crash Logger's thread dump of a
+// soft-locked game (its main loop, and so the heartbeat, still running), one
+// of its probes publishes a caught C++ exception, and the early check releases
+// it. The user then ends the game in Task Manager, also with exit code 1, and
+// Crash Logger wrote only its threaddump-*.log. That is no crash: no
+// PostExitCrashEvidence is written for the probe's exception.
+void TestHandleProcessExitTick_DoesNotReportAnEarlyReleasedFaultWithoutACrashLog()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_early_release_soft_lock");
+  ClearLog(outBase);
+  const auto crashLogDir = outBase / L"SKSE";
+  std::filesystem::create_directories(crashLogDir);
+  // A crash log from an earlier session does not count.
+  const auto oldCrashLog = crashLogDir / L"crash-2026-10-17-09-00-00.log";
+  WriteAllTextUtf8(oldCrashLog, "Skyrim SSE crash log\n");
+  std::filesystem::last_write_time(
+    oldCrashLog, std::filesystem::file_time_type::clock::now() - std::chrono::hours(20));
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash.exception_code = 0xE06D7363u;
+  shared->header.crash.faulting_tid = 53376u;
+  shared->header.crash_seq = 2u;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  HelperConfig cfg = MakeTestConfig();
+  cfg.enableWerDumpFallbackHint = true;
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashLoggerLogDirs = { crashLogDir };
+
+  std::atomic_bool stop{ false };
+  std::thread game([&] {
+    while (!stop.load()) {
+      shared->header.last_heartbeat_qpc = QpcNow();
+      Sleep(100);
+    }
+  });
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  stop.store(true);
+  game.join();
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
+  Require(handled && !state.crashCaptured.latched, "The probe's exception is released without a capture");
+  Require(
+    state.crashCaptured.releasedOnBriefHeartbeat && state.crashCaptured.releasedInThreadDumpWindow,
+    "The early release is a brief-heartbeat release in the thread dump window");
+
+  // The game never froze: the heartbeat is fresh when it is ended.
+  WriteAllTextUtf8(crashLogDir / L"threaddump-2026-10-18-12-00-00.log", "Skyrim SSE thread dump\n");
+  shared->header.last_heartbeat_qpc = QpcNow();
+  TerminateWithExitCode(child, 1u);
+  Require(HandleProcessExitTick(cfg, proc, outBase, &state), "Process exit tick must handle the exit");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  if (HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_")) {
+    std::fprintf(stderr, "%s\n", log.c_str());
+  }
+  Require(
+    !HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"),
+    "A thread dump probe's exception must not be recorded as a crash without Crash Logger's crash log");
+  AssertContains(log, "no Crash Logger crash log (crash-*.log) written since was found", "The skipped record is logged");
+  Require(log.find("recording it after all") == std::string::npos, "The released fault is not recorded");
+
+  CloseHandle(proc.crashEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// The exit path's check for an early release in Crash Logger's thread dump
+// window: a non-zero exit within a minute records it with Crash Logger's
+// crash-*.log written since its crash event, or with the exception's own exit
+// code, and not with a thread dump log or an older crash log alone.
+void TestHandleProcessExitTick_ThreadDumpWindowReleaseNeedsACrashLog()
+{
+  enum class CrashLog
+  {
+    kNone,
+    kThreadDumpOnly,
+    kOlderThanTheEvent,
+    kWrittenSince,
+  };
+  struct Case
+  {
+    const char* name;
+    DWORD exitCode;
+    CrashLog crashLog;
+    bool expectEvidence;
+    bool hangCaptured = false;
+  };
+  const Case cases[] = {
+    { "exit 1, no Crash Logger log: not recorded", 1u, CrashLog::kNone, false },
+    { "exit 1, thread dump log only: not recorded", 1u, CrashLog::kThreadDumpOnly, false },
+    { "exit 1, crash log older than the event: not recorded", 1u, CrashLog::kOlderThanTheEvent, false },
+    { "exit 1, crash log written since: recorded", 1u, CrashLog::kWrittenSince, true },
+    { "its own exit code, no crash log: recorded", 0xE06D7363u, CrashLog::kNone, true },
+    { "exit 1, crash log written since, hang captured: not recorded", 1u, CrashLog::kWrittenSince, false, true },
+  };
+
+  for (const auto& c : cases) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_thread_dump_window_exit");
+    ClearLog(outBase);
+    const auto crashLogDir = outBase / L"SKSE";
+    std::filesystem::create_directories(crashLogDir);
+
+    auto shared = MakeSharedLayout();
+    shared->header.crash_seq = 2u;
+    shared->header.crash.exception_code = 0xE06D7363u;
+    shared->header.crash.faulting_tid = 4242u;
+    shared->header.state_flags = 0u;  // thawed when it was released
+    shared->header.qpc_freq = QpcFrequency();
+    shared->header.last_heartbeat_qpc = QpcNow();
+
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    HelperConfig cfg = MakeTestConfig();
+    cfg.enableWerDumpFallbackHint = true;
+
+    FILETIME now{};
+    GetSystemTimeAsFileTime(&now);
+    const std::uint64_t nowFileTime = (static_cast<std::uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+    skydiag::helper::internal::HelperLoopState state{};
+    state.crashLoggerLogDirs = { crashLogDir };
+    state.crashCaptured.releasedCrashSeq = 2u;
+    state.crashCaptured.releasedOnBriefHeartbeat = true;
+    state.crashCaptured.releasedInThreadDumpWindow = true;
+    state.crashCaptured.releasedCrashTick64 = GetTickCount64() - 5'000u;
+    state.crashCaptured.releasedCrashEventFileTimeUtc = nowFileTime - 10ull * 10'000'000ull;  // 10 s ago
+    state.hangState.hangCapturedThisEpisode = c.hangCaptured;
+
+    switch (c.crashLog) {
+      case CrashLog::kNone:
+        break;
+      case CrashLog::kThreadDumpOnly:
+        WriteAllTextUtf8(crashLogDir / L"threaddump-2026-10-18-12-00-00.log", "Skyrim SSE thread dump\n");
+        break;
+      case CrashLog::kOlderThanTheEvent: {
+        const auto older = crashLogDir / L"crash-2026-10-18-11-00-00.log";
+        WriteAllTextUtf8(older, "Skyrim SSE crash log\n");
+        std::filesystem::last_write_time(
+          older, std::filesystem::file_time_type::clock::now() - std::chrono::minutes(2));
+        break;
+      }
+      case CrashLog::kWrittenSince:
+        WriteAllTextUtf8(crashLogDir / L"crash-2026-10-18-12-00-00.log", "Skyrim SSE crash log\n");
+        break;
+    }
+
+    TerminateWithExitCode(child, c.exitCode);
+    Require(HandleProcessExitTick(cfg, proc, outBase, &state), c.name);
+
+    const bool evidence = HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_");
+    const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+    if (evidence != c.expectEvidence) {
+      std::fprintf(stderr, "case: %s\n%s\n", c.name, log.c_str());
+    }
+    Require(evidence == c.expectEvidence, c.name);
+    if (c.expectEvidence) {
+      const auto record = ReadAllTextUtf8(
+        FindSingleFileByPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_", L".json"));
+      AssertContains(record, "\"reason\": \"released_fault_followed_by_abnormal_exit\"", c.name);
+      AssertContains(log, "recording it after all", c.name);
+    } else if (c.hangCaptured) {
+      AssertContains(log, "already released as a handled exception", c.name);
+    } else {
+      AssertContains(log, "no Crash Logger crash log (crash-*.log) written since was found", c.name);
+    }
+
+    TerminateChildProcess(&child);
+    std::filesystem::remove_all(outBase);
+  }
 }
 
 // The zero-exit twin: a strong fault released as handled came back at a
@@ -1833,6 +2024,8 @@ int wmain(int argc, wchar_t** argv)
     TestHandleProcessExitTick_PreservesPendingEvidenceAfterFinalizationFailure();
     TestHandleProcessExitTick_DoesNotReReportAReleasedThreadDumpFault();
     TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger();
+    TestHandleProcessExitTick_DoesNotReportAnEarlyReleasedFaultWithoutACrashLog();
+    TestHandleProcessExitTick_ThreadDumpWindowReleaseNeedsACrashLog();
     TestHandleProcessExitTick_ZeroExitDoesNotReportAReleasedStrongFault();
     TestHandleProcessExitTick_ReportsAFaultNewerThanTheReleasedOne();
     TestInitializeLoopState_SkipsAGenerationAnEarlierHelperAcknowledged();

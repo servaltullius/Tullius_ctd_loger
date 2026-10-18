@@ -343,18 +343,13 @@ inline bool HotkeyHoldsKey(const ManualCaptureHotkey& hotkey, int virtualKey) no
   }
 }
 
-}  // namespace manual_capture_hotkey_detail
-
-// Reads CrashLogger.ini text the way Crash Logger 1.25 does (SimpleIni,
-// UTF-8): section and key names ignore case and surrounding blanks, the last
-// of duplicate keys wins, ';' and '#' start comment lines, and the hotkey is
-// a comma-separated list of decimal virtual-key codes, each read like
-// std::stoi. An entry that does not read is skipped, and an empty or wholly
-// unreadable list keeps the default keys.
-inline CrashLoggerThreadDumpHotkey ParseCrashLoggerThreadDumpHotkey(std::string_view iniText)
+// Calls fn(key, value) for each key = value line under [Debug] in
+// CrashLogger.ini text, in file order, read the way Crash Logger 1.25 reads it
+// (SimpleIni, UTF-8): section names ignore case and surrounding blanks, ';'
+// and '#' start comment lines, and keys and values lose surrounding blanks.
+template <class Fn>
+void ForEachCrashLoggerDebugEntry(std::string_view iniText, Fn&& fn)
 {
-  using namespace manual_capture_hotkey_detail;
-  CrashLoggerThreadDumpHotkey out;
   if (iniText.size() >= 3 && iniText.substr(0, 3) == "\xEF\xBB\xBF") {
     iniText.remove_prefix(3);
   }
@@ -381,8 +376,23 @@ inline CrashLoggerThreadDumpHotkey ParseCrashLoggerThreadDumpHotkey(std::string_
     if (!inDebug || eq == std::string_view::npos) {
       continue;
     }
-    const std::string_view key = TrimSpacesAndTabs(line.substr(0, eq));
-    const std::string_view value = TrimSpacesAndTabs(line.substr(eq + 1));
+    fn(TrimSpacesAndTabs(line.substr(0, eq)), TrimSpacesAndTabs(line.substr(eq + 1)));
+  }
+}
+
+}  // namespace manual_capture_hotkey_detail
+
+// Reads CrashLogger.ini text the way Crash Logger 1.25 does (SimpleIni,
+// UTF-8): section and key names ignore case and surrounding blanks, the last
+// of duplicate keys wins, ';' and '#' start comment lines, and the hotkey is
+// a comma-separated list of decimal virtual-key codes, each read like
+// std::stoi. An entry that does not read is skipped, and an empty or wholly
+// unreadable list keeps the default keys.
+inline CrashLoggerThreadDumpHotkey ParseCrashLoggerThreadDumpHotkey(std::string_view iniText)
+{
+  using namespace manual_capture_hotkey_detail;
+  CrashLoggerThreadDumpHotkey out;
+  ForEachCrashLoggerDebugEntry(iniText, [&](std::string_view key, std::string_view value) {
     if (EqualsAsciiInsensitive(key, std::string_view("Enable Thread Dump Hotkey"))) {
       out.enabled = ParseSimpleIniBool(value).value_or(true);
     } else if (EqualsAsciiInsensitive(key, std::string_view("Thread Dump Hotkey"))) {
@@ -397,7 +407,27 @@ inline CrashLoggerThreadDumpHotkey ParseCrashLoggerThreadDumpHotkey(std::string_
       }
       out.keys = keys.empty() ? CrashLoggerThreadDumpHotkey{}.keys : keys;
     }
-  }
+  });
+  return out;
+}
+
+// CrashLogger.ini's "Crashlog Directory" under [Debug], read like the hotkey
+// above (a pair of surrounding double quotes is dropped): the folder Crash
+// Logger writes its crash and thread dump logs to, relative to the game's
+// folder unless absolute. Empty when unset: Crash Logger then writes them to
+// the SKSE log folder.
+inline std::string ParseCrashLoggerCrashlogDirectory(std::string_view iniText)
+{
+  using namespace manual_capture_hotkey_detail;
+  std::string out;
+  ForEachCrashLoggerDebugEntry(iniText, [&](std::string_view key, std::string_view value) {
+    if (EqualsAsciiInsensitive(key, std::string_view("Crashlog Directory"))) {
+      if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+        value = TrimSpacesAndTabs(value.substr(1, value.size() - 2));
+      }
+      out.assign(value);
+    }
+  });
   return out;
 }
 
@@ -457,11 +487,13 @@ inline std::wstring FormatVirtualKeyList(const std::vector<int>& keys)
 // Crash Logger (CrashLogger.dll, or CrashLoggerSSE.dll) in the game's
 // Data\SKSE\Plugins folder, its thread dump hotkey from CrashLogger.ini there
 // (the file it reads), and whether that fires on the manual capture hotkey.
+// Also the Crashlog Directory set there (UTF-8, empty when unset).
 struct CrashLoggerHotkeyCheck
 {
   bool crashLoggerFound = false;
   CrashLoggerThreadDumpHotkey threadDump;
   bool firesOnManualCapture = false;
+  std::string crashlogDirectory;
 };
 
 inline CrashLoggerHotkeyCheck CheckCrashLoggerThreadDumpHotkey(
@@ -480,6 +512,7 @@ inline CrashLoggerHotkeyCheck CheckCrashLoggerThreadDumpHotkey(
     std::ostringstream text;
     text << in.rdbuf();
     out.threadDump = ParseCrashLoggerThreadDumpHotkey(text.str());
+    out.crashlogDirectory = ParseCrashLoggerCrashlogDirectory(text.str());
   }
   out.firesOnManualCapture = CrashLoggerThreadDumpFiresOnHotkey(out.threadDump, hotkey);
   return out;
