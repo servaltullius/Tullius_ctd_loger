@@ -734,6 +734,9 @@ void TestHandleProcessExitTick_DoesNotReReportAReleasedThreadDumpFault()
   NoteManualCaptureStarted(0);
   Require(handled && !state.crashCaptured.latched, "The thread-dump fault is released without a capture");
   Require(state.crashCaptured.releasedCrashSeq == 2u, "The released generation is recorded");
+  // The exit below comes seconds after the release; only a release after a
+  // written dump is reported again for an early abnormal exit.
+  Require(!state.crashCaptured.releasedOnBriefHeartbeat, "The early thread-dump release is not a post-dump release");
   Require(!HasDumpFile(outBase), "No dump is written for the released fault");
 
   // The game then froze, a hang was captured, and the user closed it.
@@ -845,12 +848,94 @@ void TestHandleProcessExitTick_ReportsAFaultNewerThanTheReleasedOne()
   std::filesystem::remove_all(outBase);
 }
 
+// A strong fault released after its dump because the heartbeat advanced for a
+// few seconds may still be the fatal one: a worker's crash handler can run
+// that long while the main thread ticks, and the filter deleted the dump. A
+// non-zero exit soon after the release, or with the fault's own exit code,
+// records it after all; a later exit or a zero exit does not.
+void TestHandleProcessExitTick_ReportsAReleasedCrashFollowedByAnAbnormalExit()
+{
+  struct Case
+  {
+    const char* name;
+    DWORD exitCode;
+    bool releasedOnBriefHeartbeat;
+    std::uint64_t releasedAgoMs;
+    bool expectEvidence;
+  };
+  const Case cases[] = {
+    { "post-dump release 5 s before exit 1: recorded", 1u, true, 5'000u, true },
+    { "post-dump release 90 s before exit 1: not recorded", 1u, true, 90'000u, false },
+    { "post-dump release 5 s before exit 0: not recorded", 0u, true, 5'000u, false },
+    { "late recovery 5 s before exit 1: not recorded", 1u, false, 5'000u, false },
+    { "late recovery 90 s before its own exit code: recorded", 0xC0000005u, false, 90'000u, true },
+  };
+
+  for (const auto& c : cases) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_released_then_abnormal_exit");
+    ClearLog(outBase);
+
+    auto shared = MakeSharedLayout();
+    shared->header.crash_seq = 2u;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash.exception_addr = 0x12345678u;
+    shared->header.crash.faulting_tid = 4242u;
+    shared->header.state_flags = 0u;  // thawed when it was released
+
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    HelperConfig cfg = MakeTestConfig();
+    cfg.enableCleanExitEvidenceQuarantine = true;
+    cfg.enableWerDumpFallbackHint = true;
+
+    skydiag::helper::internal::HelperLoopState state{};
+    state.crashCaptured.capturedInfo =
+      skydiag::helper::internal::BuildCrashEventInfo(0xC0000005u, 0x12345678u, 4242u, skydiag::kState_Frozen);
+    state.crashCaptured.capturedInfo.crashSeq = 2u;
+    state.crashCaptured.releasedCrashSeq = 2u;
+    state.crashCaptured.releasedOnBriefHeartbeat = c.releasedOnBriefHeartbeat;
+    state.crashCaptured.releasedCrashTick64 = GetTickCount64() - c.releasedAgoMs;
+
+    TerminateWithExitCode(child, c.exitCode);
+    Require(HandleProcessExitTick(cfg, proc, outBase, &state), c.name);
+
+    const bool evidence = HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_");
+    const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+    if (evidence != c.expectEvidence) {
+      std::fprintf(stderr, "case: %s\n%s\n", c.name, log.c_str());
+    }
+    Require(evidence == c.expectEvidence, c.name);
+    Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_CleanExitEvidence_"), c.name);
+    if (c.expectEvidence) {
+      const auto record = ReadAllTextUtf8(
+        FindSingleFileByPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_", L".json"));
+      AssertContains(record, "\"reason\": \"released_fault_followed_by_abnormal_exit\"", c.name);
+      AssertContains(record, "\"crash_seq\": 2", c.name);
+      AssertContains(record, "\"faulting_tid\": 4242", c.name);
+      AssertContains(log, "recording it after all", c.name);
+    } else {
+      AssertContains(log, "already released as a handled exception", c.name);
+    }
+
+    TerminateChildProcess(&child);
+    std::filesystem::remove_all(outBase);
+  }
+}
+
 // After the game stopped responding, a non-zero exit with no crash on record
 // is a frozen game being closed: the abnormal-exit WER hint (a plugin's error
 // dialog, WER LocalDumps) does not apply. It still does after a dialog at the
-// hang capture, for an NTSTATUS exit code, and while the heartbeat is fresh.
+// hang capture, for an NTSTATUS exit code, while the heartbeat is fresh, and
+// when the hang capture was held back because the window still answered.
 void TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame()
 {
+  enum class Suppressed
+  {
+    kNone,
+    kNotForeground,
+    kForegroundGrace,
+    kForegroundResponsive,
+  };
   struct Case
   {
     const char* name;
@@ -860,6 +945,7 @@ void TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame()
     std::uint32_t stateFlags;
     double heartbeatAgeSec;
     bool expectHint;
+    Suppressed suppressed = Suppressed::kNone;
   };
   const Case cases[] = {
     { "hang captured, exit 1: no hint", 1u, true, false, 0u, 0.5, false },
@@ -868,6 +954,21 @@ void TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame()
     { "fail-fast exit code after a hang: hint", 0xC0000409u, true, false, 0u, 30.0, true },
     { "heartbeat stalled 20 s, exit 1: no hint", 1u, false, false, 0u, 20.0, false },
     { "loading, heartbeat 20 s old, exit 1: hint", 1u, false, false, skydiag::kState_Loading, 20.0, true },
+    // A plugin's error dialog keeps the window answering while the heartbeat
+    // stops; with the game in the background the hang capture is held back,
+    // so the dialog is never seen.
+    { "capture held back in the background, heartbeat stalled 60 s, exit 1: hint",
+      1u, false, false, 0u, 60.0, true, Suppressed::kNotForeground },
+    { "capture held back in the foreground grace, heartbeat stalled 60 s, exit 1: hint",
+      1u, false, false, 0u, 60.0, true, Suppressed::kForegroundGrace },
+    { "capture held back for an answering window, heartbeat stalled 60 s, exit 1: hint",
+      1u, false, false, 0u, 60.0, true, Suppressed::kForegroundResponsive },
+    { "hang captured after a held-back capture, exit 1: no hint",
+      1u, true, false, 0u, 60.0, false, Suppressed::kNotForeground },
+    // Windows' "not responding" close ends the program with 0xCFFFFFFF.
+    { "closed as not responding after a hang capture: no hint", 0xCFFFFFFFu, true, false, 0u, 30.0, false },
+    { "closed as not responding before the hang threshold: no hint", 0xCFFFFFFFu, false, false, 0u, 6.0, false },
+    { "closed as not responding with a dialog at the hang capture: hint", 0xCFFFFFFFu, true, true, 0u, 30.0, true },
   };
 
   for (const auto& c : cases) {
@@ -884,6 +985,9 @@ void TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame()
     skydiag::helper::internal::HelperLoopState state{};
     state.hangState.hangCapturedThisEpisode = c.hangCaptured;
     state.hangState.modalDialogSeenThisEpisode = c.dialogSeen;
+    state.hangState.hangSuppressedNotForegroundThisEpisode = c.suppressed == Suppressed::kNotForeground;
+    state.hangState.hangSuppressedForegroundGraceThisEpisode = c.suppressed == Suppressed::kForegroundGrace;
+    state.hangState.hangSuppressedForegroundResponsiveThisEpisode = c.suppressed == Suppressed::kForegroundResponsive;
 
     shared->header.last_heartbeat_qpc =
       QpcNow() - static_cast<std::uint64_t>(c.heartbeatAgeSec * static_cast<double>(shared->header.qpc_freq));
@@ -903,6 +1007,9 @@ void TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame()
     } else {
       AssertContains(log, "closed while not responding", c.name);
       Require(log.find("no dump was attempted") == std::string::npos, c.name);
+      if (c.exitCode == 0xCFFFFFFFu) {
+        AssertContains(log, "closed by Windows as not responding", c.name);
+      }
     }
 
     TerminateChildProcess(&child);
@@ -1004,7 +1111,11 @@ void TestThreadDumpFaultOfAnExitedGame_IsRecordedAsADumpFailure()
     "The post-exit record says the game exited before its dump");
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "before a crash dump could be written", "Skipping the dead-process dump is logged");
-  Require(log.find("Retrying crash dump write") == std::string::npos, "No dump write is attempted");
+  // An attempted write on the dead process fails the same way (empty file,
+  // deleted), so only the attempt's own log line tells the two paths apart.
+  Require(log.find("Crash dump attempt") == std::string::npos, "No dump write is attempted");
+  AssertContains(
+    log, "Crash dump failed: the game process had already exited", "The skipped write gives the exit as its reason");
 
   CloseHandle(proc.crashEvent);
   proc.crashEvent = nullptr;
@@ -1339,6 +1450,9 @@ void TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived()
   Require(FileExists(dumpPath), "The dump is kept");
   Require(!FileExists(reportPath), "Derived crash artifacts are removed");
   Require(state.crashCaptured.releasedCrashSeq == 2u, "A later exit does not re-report this exception");
+  Require(
+    !state.crashCaptured.releasedOnBriefHeartbeat && state.crashCaptured.releasedCrashTick64 != 0u,
+    "Late recovery is not a brief-heartbeat release");
   Require(state.pendingCrashViewerDumpPath.empty(), "Deferred viewer cancelled");
   Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "Freeze thawed for a later CTD");
 
@@ -1543,6 +1657,7 @@ int wmain(int argc, wchar_t** argv)
     TestHandleProcessExitTick_DoesNotReReportAReleasedThreadDumpFault();
     TestHandleProcessExitTick_ZeroExitDoesNotReportAReleasedStrongFault();
     TestHandleProcessExitTick_ReportsAFaultNewerThanTheReleasedOne();
+    TestHandleProcessExitTick_ReportsAReleasedCrashFollowedByAnAbnormalExit();
     TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame();
     TestHandleProcessExitTick_KeepsTheDumpFailureHint();
     TestThreadDumpFaultOfAnExitedGame_IsRecordedAsADumpFailure();

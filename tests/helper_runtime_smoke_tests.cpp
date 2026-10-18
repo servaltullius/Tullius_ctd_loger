@@ -167,6 +167,9 @@ void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
   Require(handled, "the event is consumed");
   Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing is captured");
   Require(crashState.releasedCrashSeq == 2u, "the exception is released, so the exit path does not report it again");
+  Require(
+    !crashState.releasedOnBriefHeartbeat && crashState.releasedCrashTick64 != 0u,
+    "an early abnormal exit does not bring the thread-dump fault back");
   bool anyDump = false;
   for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
     anyDump = anyDump || entry.path().extension() == L".dmp";
@@ -234,6 +237,10 @@ void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
   }
   Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing stays captured");
   Require(crashState.releasedCrashSeq == 2u, "the recovered exception is released");
+  // Its dump is gone, so an abnormal exit soon after must still record it.
+  Require(
+    crashState.releasedOnBriefHeartbeat && crashState.releasedCrashTick64 != 0u,
+    "the release rests on a few seconds of heartbeat");
   bool anyDump = false;
   for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
     anyDump = anyDump || entry.path().extension() == L".dmp";

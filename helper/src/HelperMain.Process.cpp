@@ -94,14 +94,33 @@ bool DrainCrashEventBeforeExit(
     return false;
   }
   // A handled exception released earlier (the game kept running, or exited 0
-  // during the filter) keeps its committed record; it is not a crash at exit.
+  // during the filter) keeps its committed record; it is not a crash at exit,
+  // unless the release was weak evidence and the exit says otherwise.
   if (state->crashCaptured.releasedCrashSeq == info.crashSeq) {
+    const auto& crash = state->crashCaptured;
+    const std::uint64_t nowTick64 = GetTickCount64();
+    if (!ShouldReportReleasedCrashAtExit(
+          exitCode, info.exceptionCode, crash.releasedOnBriefHeartbeat, crash.releasedCrashTick64, nowTick64)) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+          + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
+          + std::to_wstring(exitCode) + L").");
+      return false;
+    }
     AppendLogLine(
       outBase,
       L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
-        + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
-        + std::to_wstring(exitCode) + L").");
-    return false;
+        + L" was released as a handled exception, but the game then exited abnormally (exit_code="
+        + std::to_wstring(exitCode) + L", "
+        + std::to_wstring(nowTick64 >= crash.releasedCrashTick64 ? (nowTick64 - crash.releasedCrashTick64) / 1000u : 0u)
+        + L" s after the release); recording it after all.");
+    if (state->postExitEvidenceSeq != info.crashSeq &&
+        TryWritePostExitCrashEvidenceRecord(
+          outBase, info, exitCode, PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit)) {
+      state->postExitEvidenceSeq = info.crashSeq;
+    }
+    return true;
   }
 
   const bool sameCapturedSequence =
@@ -372,6 +391,8 @@ bool HandleLateRecoveryTick(
   CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running", /*keepDump=*/true);
   // A later exit must not re-report this released exception.
   crash.releasedCrashSeq = crashSeq;
+  crash.releasedCrashTick64 = GetTickCount64();
+  crash.releasedOnBriefHeartbeat = false;
   const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, crashSeq);
   AppendLogLine(
     outBase,
@@ -516,7 +537,11 @@ bool HandleProcessExitTick(
                    crashOnRecord,
                    hang.hangCapturedThisEpisode,
                    hang.modalDialogSeenThisEpisode,
-                   heartbeat.stalled)) {
+                   heartbeat.stalled,
+                   // Each suppression saw the window answering (the grace one
+                   // only follows a not-foreground suppression).
+                   hang.hangSuppressedNotForegroundThisEpisode || hang.hangSuppressedForegroundGraceThisEpisode ||
+                     hang.hangSuppressedForegroundResponsiveThisEpisode)) {
         std::wstring evidence;
         if (heartbeat.known) {
           evidence += L", no heartbeat for "
@@ -524,6 +549,9 @@ bool HandleProcessExitTick(
         }
         if (hang.hangCapturedThisEpisode) {
           evidence += L", hang captured";
+        }
+        if (exitCode == kExitCodeClosedAsNotResponding) {
+          evidence += L", closed by Windows as not responding";
         }
         AppendLogLine(
           outBase,

@@ -919,6 +919,9 @@ bool TryWritePostExitCrashEvidenceRecord(
     case PostExitEvidenceReason::kDumpWriteFailedProcessExited:
       j["reason"] = "committed_fault_dump_write_failed_process_exited";
       break;
+    case PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit:
+      j["reason"] = "released_fault_followed_by_abnormal_exit";
+      break;
   }
   j["captured_at"] = WideToUtf8(ts);
   j["capture_status"] = "metadata_only_process_already_exited";
@@ -943,13 +946,24 @@ bool TryWritePostExitCrashEvidenceRecord(
       L"Failed to write post-exit crash evidence metadata: " + path.wstring());
     return false;
   }
-  AppendLogLine(
-    outBase,
-    reason == PostExitEvidenceReason::kPublishedAfterFinalLivePoll
-      ? L"Captured committed crash metadata after process exit; no live address space "
-        L"remained for dump capture: " + path.wstring()
-      : L"Recorded crash metadata after process exit for a crash whose dump could not be written: "
-        + path.wstring());
+  std::wstring logLine;
+  switch (reason) {
+    case PostExitEvidenceReason::kPublishedAfterFinalLivePoll:
+      logLine =
+        L"Captured committed crash metadata after process exit; no live address space "
+        L"remained for dump capture: ";
+      break;
+    case PostExitEvidenceReason::kDumpWriteFailed:
+    case PostExitEvidenceReason::kDumpWriteFailedProcessExited:
+      logLine = L"Recorded crash metadata after process exit for a crash whose dump could not be written: ";
+      break;
+    case PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit:
+      logLine =
+        L"Recorded crash metadata after process exit for an exception released as handled before the "
+        L"game exited abnormally: ";
+      break;
+  }
+  AppendLogLine(outBase, logLine + path.wstring());
   return true;
 }
 
@@ -1060,6 +1074,8 @@ bool HandleCrashEventTick(
       if (crashState) {
         crashState->latched = false;
         crashState->releasedCrashSeq = info.crashSeq;
+        crashState->releasedCrashTick64 = GetTickCount64();
+        crashState->releasedOnBriefHeartbeat = false;
       }
       AppendLogLine(
         outBase,
@@ -1298,6 +1314,8 @@ bool HandleCrashEventTick(
         crashState->latched = false;
         if (verdict != FilterVerdict::kRetryNewerCrash) {
           crashState->releasedCrashSeq = info.crashSeq;
+          crashState->releasedCrashTick64 = GetTickCount64();
+          crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
         }
       }
       AppendLogLine(
