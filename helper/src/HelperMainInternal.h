@@ -56,7 +56,13 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
-void RegisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg, const std::filesystem::path& outBase);
+// Also starts watching Crash Logger's thread dump hotkey when Crash Logger is
+// installed with it on, whether or not the manual capture hotkey is enabled;
+// the unregister call stops both.
+void RegisterManualCaptureHotkeyIfEnabled(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase);
 void UnregisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg);
 void PumpManualCaptureInputs(
   const HelperConfig& cfg,

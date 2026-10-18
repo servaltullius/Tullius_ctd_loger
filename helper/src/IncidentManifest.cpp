@@ -42,6 +42,7 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
   j["foreground_grace_sec"] = cfg.foregroundGraceSec;
 
   j["enable_manual_capture_hotkey"] = cfg.enableManualCaptureHotkey;
+  j["manual_capture_hotkey"] = WideToUtf8(skydiag::helper::FormatManualCaptureHotkey(cfg.manualCaptureHotkey));
   j["enable_compatibility_preflight"] = cfg.enableCompatibilityPreflight;
   j["auto_analyze_dump"] = cfg.autoAnalyzeDump;
   j["allow_online_symbols"] = cfg.allowOnlineSymbols;

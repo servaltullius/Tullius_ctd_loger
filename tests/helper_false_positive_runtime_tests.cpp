@@ -28,7 +28,7 @@ using skydiag::helper::internal::HandleCrashEventTick;
 using skydiag::helper::internal::HandleProcessExitTick;
 using skydiag::helper::internal::LaunchDeferredViewersAfterExit;
 using skydiag::helper::internal::MaybeStopPendingCrashEtwCapture;
-using skydiag::helper::internal::NoteManualCaptureStarted;
+using skydiag::helper::internal::NoteCrashLoggerThreadDumpHotkeyPressed;
 using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::helper::internal::StopEtwCaptureToPath;
@@ -727,11 +727,11 @@ void TestHandleProcessExitTick_DoesNotReReportAReleasedThreadDumpFault()
       Sleep(100);
     }
   });
-  NoteManualCaptureStarted(GetTickCount64());
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
   const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
   stop.store(true);
   game.join();
-  NoteManualCaptureStarted(0);
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
   Require(handled && !state.crashCaptured.latched, "The thread-dump fault is released without a capture");
   Require(state.crashCaptured.releasedCrashSeq == 2u, "The released generation is recorded");
   // The exit below comes seconds after the release; only a release after a
@@ -1087,9 +1087,9 @@ void TestThreadDumpFaultOfAnExitedGame_IsRecordedAsADumpFailure()
   skydiag::helper::internal::HelperLoopState state{};
 
   TerminateWithExitCode(child, 1u);
-  NoteManualCaptureStarted(GetTickCount64());
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
   const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
-  NoteManualCaptureStarted(0);
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
   Require(handled && !state.crashCaptured.latched, "The event is consumed without a capture");
   Require(
     state.crashCaptured.dumpWriteFailedCrashSeq == 2u && state.crashCaptured.dumpWriteFailedProcessExited,

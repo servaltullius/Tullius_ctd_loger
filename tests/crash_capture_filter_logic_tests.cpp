@@ -18,12 +18,14 @@ using skydiag::helper::internal::ShouldReportReleasedCrashAtExit;
 using skydiag::helper::internal::kDumpWriteAttempts;
 using skydiag::helper::internal::kExitCodeClosedAsNotResponding;
 
-// Crash Logger's thread dump shares Ctrl+Shift+F12 with the manual capture.
+// A C++ exception or breakpoint within a minute of Crash Logger's thread dump
+// hotkey (its own keys, Ctrl+Shift+F12 by default, whatever the manual capture
+// hotkey is).
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u));
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80000003u, 61000u, 1000u));
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u), "an access violation");
-static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no manual capture");
+static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no Crash Logger hotkey");
 
 // A frozen game closed with a non-zero exit gets no abnormal-exit WER hint
 // (exitCode, crashOnRecord, hangCaptured, modalDialogSeen, heartbeatStalled,

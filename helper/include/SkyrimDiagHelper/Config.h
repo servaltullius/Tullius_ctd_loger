@@ -5,6 +5,8 @@
 #include <string>
 #include <string_view>
 
+#include "SkyrimDiagHelper/ManualCaptureHotkey.h"
+
 namespace skydiag::helper {
 
 enum class DumpMode : std::uint32_t {
@@ -20,6 +22,7 @@ struct HelperConfig {
   DumpMode dumpMode = DumpMode::kDefault;
   std::wstring outputDir;  // empty => next to exe
   bool enableManualCaptureHotkey = true;
+  ManualCaptureHotkey manualCaptureHotkey = kDefaultManualCaptureHotkey;
   bool enableCompatibilityPreflight = true;
   bool autoAnalyzeDump = true;
   std::wstring dumpToolExe = L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe";

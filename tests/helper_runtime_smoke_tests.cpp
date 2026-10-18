@@ -27,7 +27,7 @@ using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::helper::internal::StableSharedSnapshot;
 using skydiag::helper::internal::TryClearRecoveredCrashFreeze;
-using skydiag::helper::internal::NoteManualCaptureStarted;
+using skydiag::helper::internal::NoteCrashLoggerThreadDumpHotkeyPressed;
 using skydiag::tests::runtime::AssertContains;
 using skydiag::tests::runtime::CloseAttachedProcess;
 using skydiag::tests::runtime::FileExists;
@@ -120,9 +120,11 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   std::filesystem::remove_all(outBase);
 }
 
-// Crash Logger's thread dump on the shared Ctrl+Shift+F12 records a caught
-// C++ exception right after a manual capture; while the game keeps running no
-// dump is written (rc1/rc2 captures wrote and deleted 600 MB each time).
+// Crash Logger's thread dump on its own hotkey (Ctrl+Shift+F12 by default, no
+// longer the manual capture hotkey) records a caught C++ exception; while the
+// game keeps running no dump is written (rc1/rc2 captures wrote and deleted
+// 600 MB each time). No manual capture is involved: the key-state watcher
+// notes Crash Logger's hotkey itself.
 void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_threaddump_hotkey");
@@ -156,13 +158,13 @@ void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
   std::wstring lastCrashDumpPath;
   std::wstring pendingHangViewerDumpPath;
   std::wstring pendingCrashViewerDumpPath;
-  NoteManualCaptureStarted(GetTickCount64());
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
   const bool handled = HandleCrashEventTick(
     cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
     &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
   stop.store(true);
   game.join();
-  NoteManualCaptureStarted(0);
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
 
   Require(handled, "the event is consumed");
   Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing is captured");

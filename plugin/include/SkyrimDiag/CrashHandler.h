@@ -126,10 +126,10 @@ constexpr std::size_t SelectKeptExceptionSlot(
 //
 // CrashLogger catches the access violations its memory probes raise, both
 // while it reports a crash and while it writes a thread dump on its hotkey
-// (Ctrl+Shift+F12 in CrashLogger 1.25, the same keys as SkyrimDiag's manual
-// capture). Its own exception is therefore never the crash to record. Record
-// the exception it is reporting when one was kept on that thread; otherwise
-// ignore it. Recording the probes made every thread-dump hotkey press write
+// (Ctrl+Shift+F12 by default in CrashLogger 1.25, also SkyrimDiag's manual
+// capture hotkey up to v0.2.68-rc3). Its own exception is therefore never the
+// crash to record. Record the exception it is reporting when one was kept on
+// that thread; otherwise ignore it. Recording the probes made every thread-dump hotkey press write
 // and then discard full crash dumps while the game stalled.
 enum class CrashLoggerFaultAction
 {

@@ -297,8 +297,63 @@ int main()
     manualCaptureBody,
     "ManualCaptureKeys().ConsumePress()",
     "Manual capture must also take presses from the key-state watcher, which WM_HOTKEY can miss in gameplay.");
-  if (manualCaptureBody.find("GetAsyncKeyState(VK_F12) & 1") != std::string::npos) {
+  if (manualCaptureBody.find("GetAsyncKeyState(") != std::string::npos) {
+    std::fprintf(stderr, "Manual capture must take polled presses from the key-state watcher, not read keys itself.\n");
+    std::abort();
+  }
+  const std::string keyWatcher = ReadAllText(repoRoot / "helper" / "src" / "ManualCaptureKeyWatcher.cpp");
+  AssertContains(
+    keyWatcher,
+    "& 0x8000) != 0",
+    "The key-state watcher must read the keys' current down state.");
+  if (keyWatcher.find(") & 1)") != std::string::npos) {
     std::fprintf(stderr, "Manual capture must not read GetAsyncKeyState's shared pressed-since-last-call bit.\n");
+    std::abort();
+  }
+  // Both paths watch the configured ManualCaptureHotkey, not a fixed chord.
+  AssertContains(
+    keyWatcher,
+    "edge.emplace(*manualCapture);",
+    "The key-state watcher must poll the configured manual capture hotkey.");
+  AssertContains(
+    helperMain,
+    "RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)",
+    "RegisterHotKey must register the configured manual capture hotkey.");
+  AssertContains(
+    helperMain,
+    "ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump);",
+    "The key-state watcher must start with the configured manual capture hotkey.");
+  // The Crash Logger thread dump window (IsLikelyCrashLoggerThreadDumpFault)
+  // follows Crash Logger's own hotkey, which no longer matches the manual
+  // capture hotkey by default: the watcher notes it, also with the manual
+  // capture hotkey off, and a manual capture alone does not open the window.
+  AssertContains(
+    keyWatcher,
+    "IsCrashLoggerThreadDumpHotkeyDown(*crashLoggerThreadDump, IsKeyDown)",
+    "The key-state watcher must poll Crash Logger's thread dump hotkey.");
+  AssertContains(
+    keyWatcher,
+    "NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());",
+    "The key-state watcher must note when Crash Logger's thread dump hotkey is held.");
+  const std::string registerHotkeyBody =
+    ExtractFunctionBody(helperMain, "void RegisterManualCaptureHotkeyIfEnabled(");
+  AssertOrdered(
+    registerHotkeyBody,
+    "CheckCrashLoggerThreadDumpHotkey(",
+    "if (!cfg.enableManualCaptureHotkey) {\n    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump);",
+    "Crash Logger's thread dump hotkey must be watched even with the manual capture hotkey off.");
+  AssertContains(
+    ExtractFunctionBody(helperMain, "void UnregisterManualCaptureHotkeyIfEnabled("),
+    "}\n  ManualCaptureKeys().Stop();",
+    "The key-state watcher must stop whether or not the manual capture hotkey was on.");
+  if (crashCapture.find("NoteManualCaptureStarted") != std::string::npos ||
+      ReadAllText(repoRoot / "helper" / "src" / "ManualCapture.cpp").find("NoteCrashLoggerThreadDumpHotkeyPressed") !=
+        std::string::npos) {
+    std::fprintf(stderr, "A manual capture must not open the Crash Logger thread dump window by itself.\n");
+    std::abort();
+  }
+  if (helperMain.find("VK_F12") != std::string::npos || keyWatcher.find("VK_F12") != std::string::npos) {
+    std::fprintf(stderr, "The manual capture hotkey must not be hard-coded to F12.\n");
     std::abort();
   }
   AssertContains(
@@ -307,6 +362,18 @@ int main()
     "Manual capture debounce must use wall-clock gating to avoid duplicate capture bursts.");
 
   const std::string helperEntryBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
+  // Attaching reuses err and clears it on success, so the config warning
+  // (an invalid ManualCaptureHotkey, say) must be kept before attaching to
+  // reach the helper log.
+  AssertOrdered(
+    helperEntryBody,
+    "const std::wstring configWarning = err;",
+    "AttachByPid(",
+    "The config warning must be kept before attaching clears err.");
+  AssertContains(
+    helperEntryBody,
+    "AppendLogLine(outBase, L\"Config warning: \" + configWarning);",
+    "The config warning must be written to the helper log.");
   AssertContains(
     helperEntryBody,
     "if (!helperSingletonMutex)",

@@ -112,6 +112,16 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.enableManualCaptureHotkey =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableManualCaptureHotkey", 1, path.c_str()) != 0;
+  std::wstring warning;
+  const std::wstring hotkeyText = ReadIniString(path, L"SkyrimDiagHelper", L"ManualCaptureHotkey", L"");
+  if (!hotkeyText.empty()) {
+    if (const auto hotkey = ParseManualCaptureHotkey(hotkeyText)) {
+      cfg.manualCaptureHotkey = *hotkey;
+    } else {
+      warning = L"ManualCaptureHotkey=" + hotkeyText + L" is not a valid hotkey; using the default " +
+        FormatManualCaptureHotkey(cfg.manualCaptureHotkey) + L".";
+    }
+  }
   cfg.enableCompatibilityPreflight =
     GetPrivateProfileIntW(L"SkyrimDiagHelper", L"EnableCompatibilityPreflight", 1, path.c_str()) != 0;
 
@@ -220,7 +230,7 @@ HelperConfig LoadConfig(std::wstring* err)
     path, L"SkyrimDiagHelper", L"MaxHelperLogFiles", 3, 0, 20);
 
   if (err) {
-    err->clear();
+    *err = warning;
   }
   return cfg;
 }

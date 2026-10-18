@@ -100,27 +100,30 @@ inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, s
          nowTick64 - s->latchedTick64 >= kLateRecoveryMinAliveMs;
 }
 
-// Crash Logger 1.25 also takes Ctrl+Shift+F12, for its thread dump, and
-// probes on each thread it dumps. A thread that threw and caught a C++
-// exception (or hit a breakpoint) in the last minute then gets that exception
-// recorded as a crash (v0.2.68-rc1/rc2 captures, 2026-10-18: one or two per
-// press, each a 600 MB dump that the heartbeat filter deleted again). Only
-// those codes reach the crash record through Crash Logger's probes in the
-// default CrashHookMode=1.
+// Crash Logger 1.25 writes a thread dump on its own hotkey (Ctrl+Shift+F12 by
+// default, also the manual capture hotkey up to v0.2.68-rc3), and probes on
+// each thread it dumps. A thread that threw and caught a C++ exception (or hit
+// a breakpoint) in the last minute then gets that exception recorded as a
+// crash (v0.2.68-rc1/rc2 captures, 2026-10-18: one or two per press, each a
+// 600 MB dump that the heartbeat filter deleted again). Only those codes reach
+// the crash record through Crash Logger's probes in the default
+// CrashHookMode=1. The window runs from when Crash Logger's hotkey was last
+// seen held (ManualCaptureKeyWatcher), whatever the manual capture hotkey is.
 inline constexpr std::uint64_t kCrashLoggerThreadDumpWindowMs = 60000;
 
 constexpr bool IsLikelyCrashLoggerThreadDumpFault(
   std::uint32_t exceptionCode,
   std::uint64_t nowTick64,
-  std::uint64_t lastManualCaptureTick64) noexcept
+  std::uint64_t lastCrashLoggerHotkeyTick64) noexcept
 {
-  return lastManualCaptureTick64 != 0u && nowTick64 >= lastManualCaptureTick64 &&
-         nowTick64 - lastManualCaptureTick64 <= kCrashLoggerThreadDumpWindowMs &&
+  return lastCrashLoggerHotkeyTick64 != 0u && nowTick64 >= lastCrashLoggerHotkeyTick64 &&
+         nowTick64 - lastCrashLoggerHotkeyTick64 <= kCrashLoggerThreadDumpWindowMs &&
          (exceptionCode == 0xE06D7363u || exceptionCode == 0x80000003u);
 }
 
-// When the last manual capture started (GetTickCount64), for the check above.
-void NoteManualCaptureStarted(std::uint64_t tick64) noexcept;
+// When Crash Logger's thread dump hotkey was last seen held (GetTickCount64),
+// for the check above.
+void NoteCrashLoggerThreadDumpHotkeyPressed(std::uint64_t tick64) noexcept;
 
 struct CrashCaptureState {
   bool latched = false;

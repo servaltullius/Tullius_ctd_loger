@@ -291,8 +291,17 @@ add_executable(skydiag_manual_capture_chord_edge_tests
 )
 target_include_directories(skydiag_manual_capture_chord_edge_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
 )
 add_test(NAME skydiag_manual_capture_chord_edge_tests COMMAND skydiag_manual_capture_chord_edge_tests)
+
+add_executable(skydiag_manual_capture_hotkey_tests
+  manual_capture_hotkey_tests.cpp
+)
+target_include_directories(skydiag_manual_capture_hotkey_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+add_test(NAME skydiag_manual_capture_hotkey_tests COMMAND skydiag_manual_capture_hotkey_tests)
 
 add_executable(skydiag_dump_writer_guard_tests
   dump_writer_guard_tests.cpp
@@ -824,6 +833,20 @@ if(WIN32)
   )
   target_link_libraries(skydiag_helper_runtime_smoke_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_runtime_smoke_tests COMMAND skydiag_helper_runtime_smoke_tests)
+
+  # LoadConfig reads SkyrimDiagHelper.ini beside the running executable, so
+  # this test runs from its own directory and writes its ini there.
+  add_executable(skydiag_helper_config_runtime_tests
+    helper_config_runtime_tests.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/Config.cpp"
+  )
+  target_include_directories(skydiag_helper_config_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  )
+  set_target_properties(skydiag_helper_config_runtime_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/helper_config_runtime_tests"
+  )
+  add_test(NAME skydiag_helper_config_runtime_tests COMMAND skydiag_helper_config_runtime_tests)
 
   add_executable(skydiag_helper_false_positive_runtime_tests
     helper_false_positive_runtime_tests.cpp

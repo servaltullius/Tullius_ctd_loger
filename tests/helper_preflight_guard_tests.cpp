@@ -64,6 +64,22 @@ int main()
     "CRASH_LOGGER_CONFLICT",
     "Preflight must include crash-logger conflict checks.");
   AssertContains(
+    preflightCppText,
+    "CRASH_LOGGER_HOTKEY_COLLISION",
+    "Preflight must warn when Crash Logger's thread dump hotkey fires on the manual capture hotkey.");
+  AssertContains(
+    preflightCppText,
+    "CheckCrashLoggerThreadDumpHotkey(pluginsDir, cfg.manualCaptureHotkey)",
+    "The hotkey collision check must read CrashLogger.ini beside the DLL against the configured hotkey.");
+  AssertContains(
+    manualCaptureText,
+    "CrashLoggerHotkeyCollisionWarning(",
+    "A manual capture must log the Crash Logger hotkey collision warning.");
+  AssertContains(
+    helperIniText,
+    "ManualCaptureHotkey=Ctrl+Shift+Backspace",
+    "Helper ini must expose the manual capture hotkey with its default.");
+  AssertContains(
     helperMainText,
     "RunCompatibilityPreflight(",
     "Helper main loop must run compatibility preflight at startup.");

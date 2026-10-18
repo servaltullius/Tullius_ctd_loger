@@ -1,29 +1,40 @@
 #pragma once
 
 #include <atomic>
+#include <optional>
 #include <thread>
+
+#include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 
 namespace skydiag::helper::internal {
 
-// Turns polled Ctrl / Shift / F12 down states into one press per press of the
-// whole chord, however long it is held.
+// Turns polled key down states into one press per press of the whole hotkey,
+// however long it is held (see IsManualCaptureHotkeyDown).
 class ManualCaptureChordEdge
 {
 public:
-  bool Update(bool ctrlDown, bool shiftDown, bool f12Down) noexcept
+  explicit ManualCaptureChordEdge(const ManualCaptureHotkey& hotkey = kDefaultManualCaptureHotkey) noexcept
+    : hotkey_(hotkey)
   {
-    const bool chordDown = ctrlDown && shiftDown && f12Down;
+  }
+
+  // keyDown(virtualKey) tells whether a key is down now.
+  template <class KeyDown>
+  bool Update(KeyDown&& keyDown)
+  {
+    const bool chordDown = IsManualCaptureHotkeyDown(hotkey_, keyDown);
     const bool pressed = chordDown && !chordWasDown_;
     chordWasDown_ = chordDown;
     return pressed;
   }
 
 private:
+  ManualCaptureHotkey hotkey_;
   bool chordWasDown_ = false;
 };
 
-// Watches Ctrl+Shift+F12 by polling the keys' current down state on its own
-// thread, alongside the RegisterHotKey registration.
+// Watches the manual capture hotkey by polling the keys' current down state
+// on its own thread, alongside the RegisterHotKey registration.
 //
 // In the v0.2.59-rc5 field test WM_HOTKEY did not arrive while the game was in
 // gameplay (it did in a menu), and the old fallback read GetAsyncKeyState's
@@ -31,6 +42,10 @@ private:
 // Crash Logger 1.25 polls the same keys for its thread dump, so it took the
 // press and no manual capture was made. The current down state is not
 // consumed by other readers, and a 20 ms poll does not miss a key press.
+//
+// The same thread watches Crash Logger's own thread dump hotkey and notes
+// when it is held (NoteCrashLoggerThreadDumpHotkeyPressed), since its thread
+// dump does not depend on the manual capture hotkey.
 class ManualCaptureKeyWatcher
 {
 public:
@@ -39,7 +54,11 @@ public:
   ManualCaptureKeyWatcher(const ManualCaptureKeyWatcher&) = delete;
   ManualCaptureKeyWatcher& operator=(const ManualCaptureKeyWatcher&) = delete;
 
-  void Start();
+  // Watches whichever of the two hotkeys is given; starts nothing when
+  // neither is.
+  void Start(
+    std::optional<ManualCaptureHotkey> manualCapture,
+    std::optional<CrashLoggerThreadDumpHotkey> crashLoggerThreadDump);
   void Stop();
 
   // True once for each chord press seen since the previous call.

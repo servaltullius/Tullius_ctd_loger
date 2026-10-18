@@ -88,13 +88,13 @@
         "This dump was captured without an actual crash/hang",
         "It is useful for state inspection but NOT for identifying crash causes",
         "To diagnose a real issue, capture during an actual CTD or freeze",
-        "For freezes: use Ctrl+Shift+F12 or wait for auto hang detection"
+        "For freezes: use the manual capture hotkey (Ctrl+Shift+Backspace by default) or wait for auto hang detection"
       ],
       "steps_ko": [
         "이 덤프는 실제 크래시/행 없이 캡처되었습니다",
         "상태 검사에는 유용하지만 크래시 원인을 판별하기에는 부적합합니다",
         "실제 문제를 진단하려면 실제 CTD 또는 프리징 중에 캡처하세요",
-        "프리징의 경우: Ctrl+Shift+F12를 사용하거나 자동 행 감지를 기다리세요"
+        "프리징의 경우: 수동 캡처 단축키(기본 Ctrl+Shift+Backspace)를 사용하거나 자동 행 감지를 기다리세요"
       ]
     },
     {
