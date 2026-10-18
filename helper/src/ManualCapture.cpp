@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CaptureCommon.h"
+#include "CrashCapture.h"
 #include "DumpToolLaunch.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
@@ -52,6 +53,7 @@ void DoManualCapture(
   std::uint32_t adaptiveLoadingThresholdSec,
   std::wstring_view trigger)
 {
+  NoteManualCaptureStarted(GetTickCount64());
   const auto ts = Timestamp();
   const auto wctPath = outBase / (L"SkyrimDiag_WCT_Manual_" + ts + L".json");
   const auto dumpPath = (outBase / (L"SkyrimDiag_Manual_" + ts + L".dmp")).wstring();

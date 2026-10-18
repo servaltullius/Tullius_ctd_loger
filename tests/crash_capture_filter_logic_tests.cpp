@@ -15,6 +15,13 @@ using skydiag::helper::internal::ShouldPreserveFilteredDump;
 using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
 using skydiag::helper::internal::kDumpWriteAttempts;
 
+// Crash Logger's thread dump shares Ctrl+Shift+F12 with the manual capture.
+static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u));
+static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80000003u, 61000u, 1000u));
+static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");
+static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u), "an access violation");
+static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no manual capture");
+
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {
   const auto info = BuildCrashEventInfo(0u, 0u, 0u, 0u);

@@ -27,6 +27,7 @@ using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::helper::internal::StableSharedSnapshot;
 using skydiag::helper::internal::TryClearRecoveredCrashFreeze;
+using skydiag::helper::internal::NoteManualCaptureStarted;
 using skydiag::tests::runtime::AssertContains;
 using skydiag::tests::runtime::CloseAttachedProcess;
 using skydiag::tests::runtime::FileExists;
@@ -115,6 +116,64 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   ShutdownRetentionWorker();
   CloseHandle(proc.crashEvent);
   proc.crashEvent = nullptr;
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
+// Crash Logger's thread dump on the shared Ctrl+Shift+F12 records a caught
+// C++ exception right after a manual capture; while the game keeps running no
+// dump is written (rc1/rc2 captures wrote and deleted 600 MB each time).
+void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_threaddump_hotkey");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = 10'000'000ull;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash.exception_code = 0xE06D7363u;
+  shared->header.crash.faulting_tid = 12280u;
+  shared->header.crash_seq = 2u;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  std::atomic_bool stop{ false };
+  std::thread game([&] {
+    while (!stop.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+
+  HelperConfig cfg = MakeTestConfig();
+  cfg.autoOpenViewerOnCrash = false;
+  cfg.autoAnalyzeDump = false;
+  CrashCaptureState crashState{};
+  PendingCrashEtwCapture pendingCrashEtw{};
+  PendingCrashAnalysis pendingCrashAnalysis{};
+  std::wstring lastCrashDumpPath;
+  std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
+  NoteManualCaptureStarted(GetTickCount64());
+  const bool handled = HandleCrashEventTick(
+    cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
+    &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
+  stop.store(true);
+  game.join();
+  NoteManualCaptureStarted(0);
+
+  Require(handled, "the event is consumed");
+  Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing is captured");
+  bool anyDump = false;
+  for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
+    anyDump = anyDump || entry.path().extension() == L".dmp";
+  }
+  Require(!anyDump, "no dump is written");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "the capture is thawed for a later CTD");
+  AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "No dump written", "the reason is logged");
+
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
 }
@@ -370,6 +429,7 @@ int main()
 {
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
+    TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
     TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
