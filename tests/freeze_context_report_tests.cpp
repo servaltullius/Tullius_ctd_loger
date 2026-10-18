@@ -103,6 +103,31 @@ void TestBlackboxGameState()
     "an older heartbeat does not pull the reference back");
 }
 
+// The ring keeps 65,536 events: a long session loses SessionStart, and
+// plugins before v0.2.68 never wrote a Heartbeat event.
+void TestMainThreadFromEvents()
+{
+  using skydiag::EventType;
+  using skydiag::dump_tool::internal::InferMainThreadIdFromEvents;
+  const auto at = [](skydiag::EventType type, double tMs, std::uint32_t tid) {
+    auto row = Event(type, tMs);
+    row.tid = tid;
+    return row;
+  };
+
+  Require(!InferMainThreadIdFromEvents({ at(EventType::kThreadCreate, 1.0, 7) }).has_value(), "no main-thread event");
+  Require(InferMainThreadIdFromEvents({ at(EventType::kSessionStart, 1.0, 100), at(EventType::kMenuOpen, 2.0, 200) }) == 100u,
+    "SessionStart beats a menu event");
+  Require(InferMainThreadIdFromEvents({ at(EventType::kSessionStart, 1.0, 100), at(EventType::kHeartbeat, 2.0, 300),
+            at(EventType::kHeartbeat, 3.0, 301), at(EventType::kMenuClose, 4.0, 200) }) == 301u,
+    "the newest Heartbeat wins");
+  Require(InferMainThreadIdFromEvents({ at(EventType::kThreadCreate, 1.0, 7), at(EventType::kMenuOpen, 2.0, 200),
+            at(EventType::kPerfHitch, 3.0, 201), at(EventType::kFirstChanceException, 4.0, 9) }) == 201u,
+    "after SessionStart left the ring, the newest main-thread event");
+  Require(InferMainThreadIdFromEvents({ at(EventType::kHeartbeat, 1.0, 0), at(EventType::kLoadEnd, 2.0, 200) }) == 200u,
+    "an event without a tid is skipped");
+}
+
 AnalysisResult MakeHang()
 {
   AnalysisResult r{};
@@ -252,6 +277,54 @@ void TestStallOutranksTheWaitAdvice()
     Require(next == std::wstring::npos || r.recommendations[next].rfind(L"[Main thread]", 0) != 0,
       "NextAction is not the wait advice");
   }
+}
+
+// A WCT cycle or a loader stall is what the recommendations lead with; the
+// summary must not say instead that the engine wait cannot be explained.
+void TestStallOutranksTheWaitSummary()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    for (const auto& stateId : { std::string("deadlock_likely"), std::string("loader_stall_likely") }) {
+      auto r = MakeHang();
+      r.freeze_analysis.state_id = stateId;
+      r.freeze_analysis.confidence_level = i18n::ConfidenceLevel::kHigh;
+      r.main_thread_wait.kind = "engine_wait";
+      r.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+      r.main_thread_wait.path_modules = { L"CommunityShaders.dll" };
+      BuildEvidenceAndSummary(r, lang);
+      const bool deadlock = stateId == "deadlock_likely";
+      Require(Contains(r.summary_sentence,
+                deadlock ? (en ? L"a deadlock is the main interpretation" : L"데드락이 가장 유력한 해석")
+                         : (en ? L"a loader stall" : L"로딩 정지")),
+        "the summary leads with the stall");
+      Require(!Contains(r.summary_sentence, en ? L"cannot tell what the engine was waiting for" : L"무엇을 기다렸는지는"),
+        "not the unexplained engine wait");
+      Require(Contains(r.summary_sentence, en ? L"(Confidence: High)" : L"(신뢰도: 높음)"), "the freeze confidence");
+      Require(!Contains(r.summary_sentence, L"CommunityShaders.dll"), "the waiting main thread's stack is not named");
+    }
+  }
+
+  // The stack came from a thread of the cycle, not from the waiting main thread.
+  auto cycle = MakeHang();
+  cycle.freeze_analysis.state_id = "deadlock_likely";
+  cycle.freeze_analysis.confidence_level = i18n::ConfidenceLevel::kMedium;
+  cycle.main_thread_wait.kind = "engine_wait";
+  cycle.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+  cycle.suspects_from_main_thread = false;
+  BuildEvidenceAndSummary(cycle, i18n::Language::kEnglish);
+  Require(Contains(cycle.summary_sentence, L"The stack of a waiting thread points to CommunityShaders.dll"),
+    "a cycle thread's module is named");
+
+  // No stall state, but the suspect is from another thread: it is named, as
+  // its candidate is.
+  auto other = MakeHang();
+  other.main_thread_wait.kind = "engine_wait";
+  other.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+  other.suspects_from_main_thread = false;
+  BuildEvidenceAndSummary(other, i18n::Language::kEnglish);
+  Require(Contains(other.summary_sentence, L"CommunityShaders.dll"), "the other thread's suspect is in the summary");
+  Require(!Contains(other.summary_sentence, L"cannot tell what the engine was waiting for"), "not the bystander sentence");
 }
 
 // The report keeps an overview and the most recent events; the full ring
@@ -463,6 +536,8 @@ int main()
     TestEngineGpuQueryPoll();
     TestOtherThreadSuspectsKeepTheirSignal();
     TestStallOutranksTheWaitAdvice();
+    TestStallOutranksTheWaitSummary();
+    TestMainThreadFromEvents();
     TestReportKeepsRecentEvents();
     TestFreezesGroupByTheMainThreadWait();
     TestBystanderStackIsNotRecordedInHistory();

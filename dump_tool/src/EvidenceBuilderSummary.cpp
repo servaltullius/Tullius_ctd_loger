@@ -210,6 +210,44 @@ std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang,
         L" 엔진이 무엇을 기다렸는지는 이 덤프만으로 알 수 없습니다. (신뢰도: " + conf + L")");
 }
 
+// A WCT cycle or a loader stall explains the freeze (FreezeCandidateConsensus).
+// A stack module is named only when it does not come from a main thread that
+// sat in an engine or driver wait (ADR-0009).
+std::wstring DescribeExplainedStall(
+  const AnalysisResult& r,
+  i18n::Language lang,
+  bool en,
+  const std::wstring& suspectWho,
+  const std::wstring& suspectConf)
+{
+  const auto level = r.freeze_analysis.confidence_level == i18n::ConfidenceLevel::kUnknown
+    ? i18n::ConfidenceLevel::kMedium
+    : r.freeze_analysis.confidence_level;
+  const std::wstring conf = ConfidenceText(lang, level);
+  const bool nameSuspect =
+    !suspectWho.empty() && !(IsBystanderWait(r.main_thread_wait) && r.suspects_from_main_thread);
+  if (r.freeze_analysis.state_id == "deadlock_likely") {
+    const std::wstring lead = nameSuspect
+      ? (en ? (L" The stack of a waiting thread points to " + suspectWho + L" (" + suspectConf + L").")
+            : (L" 기다리던 스레드의 스택은 " + suspectWho + L"을(를) 가리킵니다(" + suspectConf + L")."))
+      : std::wstring{};
+    return en
+      ? (L"Windows Wait Chain Traversal found threads waiting on each other in a cycle, so a deadlock is the main "
+          L"interpretation." + lead + L" (Confidence: " + conf + L")")
+      : (L"Windows 대기 체인(WCT)에서 스레드끼리 서로를 기다리는 순환이 확인되어 데드락이 가장 유력한 해석입니다." + lead +
+          L" (신뢰도: " + conf + L")");
+  }
+  const std::wstring lead = nameSuspect
+    ? (en ? (L" Stack candidate: " + suspectWho + L" (" + suspectConf + L").")
+          : (L" 스택 후보: " + suspectWho + L"(" + suspectConf + L")."))
+    : std::wstring{};
+  return en
+    ? (L"It froze while loading, so a loader stall (meshes, animations, physics or precaching) is the main "
+        L"interpretation rather than a generic DLL." + lead + L" (Confidence: " + conf + L")")
+    : (L"로딩 중에 멈춰서, 일반 DLL보다 로딩 정지(메시·애니메이션·물리·프리캐시)가 가장 유력한 해석입니다." + lead +
+        L" (신뢰도: " + conf + L")");
+}
+
 std::wstring DescribeModalDialogWait(const ModalDialogWaitInfo& modal, i18n::Language lang, bool en)
 {
   const auto level = (modal.window_evidence && modal.stack_evidence)
@@ -810,7 +848,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
               std::to_wstring(consensus.matching_thread_count - 1u) + L"개 스레드에서 " +
               consensus.module_filename +
               L"이(가) 반복되어 모듈 내부 동기화 정지 가능성이 높습니다. WCT가 OS 잠금 사이클을 입증한 것은 아닙니다. (신뢰도: 중간)");
-      } else if (IsBystanderWait(r.main_thread_wait)) {
+      } else if (r.freeze_analysis.state_id == "deadlock_likely" || r.freeze_analysis.state_id == "loader_stall_likely") {
+        // The recommendations and the freeze reasons put these first; the
+        // engine wait on the main thread does not overrule them.
+        summary = hangPrefix + L" " + DescribeExplainedStall(r, lang, en, hasSuspect ? suspectWho : std::wstring{}, suspectConf);
+      } else if (IsBystanderWait(r.main_thread_wait) &&
+                 (r.suspects_from_main_thread || !hasSuspect || HasBlockedGameThread(r.main_thread_wait))) {
+        // Suspects from another thread (a WCT cycle member) are not the
+        // main thread's call path; they keep their candidate below.
         summary = hangPrefix + L" " + DescribeBystanderWait(r, lang, en);
       } else if (hasSuspect && !suspectWho.empty()) {
         if (!r.suspects_from_stackwalk) {
