@@ -100,14 +100,18 @@ public sealed partial class MainWindow
                 return;
             }
 
-            await PromoteLearnedDumpLocationAsync(dumpPath);
-            await RefreshDiscoveredDumpsAsync();
-
+            // Take over from a running analysis before the first await, so a
+            // second click cannot interleave with this one and win with the
+            // older selection.
             _analysisCts?.Cancel();
             _analysisCts?.Dispose();
             analysisCts = new CancellationTokenSource();
             _analysisCts = analysisCts;
             var cancellationToken = analysisCts.Token;
+
+            await PromoteLearnedDumpLocationAsync(dumpPath);
+            await RefreshDiscoveredDumpsAsync();
+            cancellationToken.ThrowIfCancellationRequested();
 
             var options = _vm.BuildInvocationOptions(
                 dumpPath, OutputDirBox.Text.Trim(), _startupOptions.Language, false, _startupOptions);
