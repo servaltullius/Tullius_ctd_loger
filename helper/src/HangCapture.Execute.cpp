@@ -98,6 +98,9 @@ HangTickResult ExecuteConfirmedHangCapture(
     AppendLogLine(
       outBase,
       L"Visible dialog windows at hang capture: " + std::to_wstring(modalDialogs.size()));
+    if (state) {
+      state->modalDialogSeenThisEpisode = true;
+    }
   }
 
   wctJson["capture"] = nlohmann::json::object();

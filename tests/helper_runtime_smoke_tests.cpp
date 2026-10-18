@@ -27,7 +27,7 @@ using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::helper::internal::StableSharedSnapshot;
 using skydiag::helper::internal::TryClearRecoveredCrashFreeze;
-using skydiag::helper::internal::NoteManualCaptureStarted;
+using skydiag::helper::internal::NoteCrashLoggerThreadDumpHotkeyPressed;
 using skydiag::tests::runtime::AssertContains;
 using skydiag::tests::runtime::CloseAttachedProcess;
 using skydiag::tests::runtime::FileExists;
@@ -45,6 +45,20 @@ using skydiag::tests::runtime::TerminateChildProcess;
 using skydiag::tests::runtime::WriteAllTextUtf8;
 
 namespace {
+
+// Appends a committed Heartbeat event that names `mainTid` as the game's main
+// thread (MainThreadIdFromEvent), as the plugin's heartbeat task does.
+void AddHeartbeatNamingMainThread(skydiag::SharedLayout* shared, std::uint32_t mainTid)
+{
+  auto& event = shared->events[shared->header.write_index % skydiag::kEventCapacity];
+  event.tid = 40000u;  // a job thread runs the heartbeat task on AE
+  event.qpc = shared->header.last_heartbeat_qpc;
+  event.type = static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat);
+  event.size = static_cast<std::uint16_t>(sizeof(event.payload));
+  event.payload.b = mainTid;
+  event.seq = 2u;
+  shared->header.write_index = shared->header.write_index + 1u;
+}
 
 void TestHandleCrashEventTick_WritesCrashArtifacts()
 {
@@ -120,9 +134,11 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   std::filesystem::remove_all(outBase);
 }
 
-// Crash Logger's thread dump on the shared Ctrl+Shift+F12 records a caught
-// C++ exception right after a manual capture; while the game keeps running no
-// dump is written (rc1/rc2 captures wrote and deleted 600 MB each time).
+// Crash Logger's thread dump on its own hotkey (Ctrl+Shift+F12 by default, no
+// longer the manual capture hotkey) records a caught C++ exception; while the
+// game keeps running no dump is written (rc1/rc2 captures wrote and deleted
+// 600 MB each time). No manual capture is involved: the key-state watcher
+// notes Crash Logger's hotkey itself.
 void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_threaddump_hotkey");
@@ -134,6 +150,8 @@ void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
   shared->header.crash.exception_code = 0xE06D7363u;
   shared->header.crash.faulting_tid = 12280u;
   shared->header.crash_seq = 2u;
+  // The blackbox names another thread as the main thread: a thread dump probe.
+  AddHeartbeatNamingMainThread(shared.get(), 25652u);
 
   auto proc = MakeSelfAttachedProcess(shared.get());
   proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
@@ -156,23 +174,158 @@ void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()
   std::wstring lastCrashDumpPath;
   std::wstring pendingHangViewerDumpPath;
   std::wstring pendingCrashViewerDumpPath;
-  NoteManualCaptureStarted(GetTickCount64());
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
   const bool handled = HandleCrashEventTick(
     cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
     &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
   stop.store(true);
   game.join();
-  NoteManualCaptureStarted(0);
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
 
   Require(handled, "the event is consumed");
   Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing is captured");
+  Require(crashState.releasedCrashSeq == 2u, "the exception is released, so the exit path does not report it again");
+  // A real worker-thread crash looks the same while Crash Logger writes its
+  // log, so an abnormal exit soon after (with the game still live) records it.
+  Require(
+    crashState.releasedOnBriefHeartbeat && crashState.releasedCrashTick64 != 0u,
+    "the release rests on a few seconds of heartbeat");
   bool anyDump = false;
   for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
     anyDump = anyDump || entry.path().extension() == L".dmp";
   }
   Require(!anyDump, "no dump is written");
   Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "the capture is thawed for a later CTD");
-  AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "No dump written", "the reason is logged");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "No dump written", "the reason is logged");
+  // rc3 logged "deleting dump" here although no dump had been written.
+  Require(log.find("deleting dump") == std::string::npos, "the filter does not claim to delete a dump");
+
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
+// A C++ exception on the game's main thread within a minute of Crash Logger's
+// thread dump hotkey is not one of its probes (those fault on Crash Logger's
+// own threads) but a crash Crash Logger is reporting, which can end the game
+// within seconds. Its dump is written at once, not after the heartbeat check.
+void TestHandleCrashEventTick_WritesTheDumpAtOnceForAMainThreadFault()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_threaddump_main_thread");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xE06D7363u;
+  ParkedThread mainThread;
+  const CONTEXT mainContext = mainThread.Context();
+  shared->header.crash.faulting_tid = mainThread.tid();
+  shared->header.crash.exception_addr = mainContext.Rip;
+  shared->header.crash.exception_record.ExceptionCode = 0xE06D7363u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(mainContext.Rip);
+  shared->header.crash.context = mainContext;
+  AddHeartbeatNamingMainThread(shared.get(), mainThread.tid());
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  HelperConfig cfg = MakeTestConfig();
+  CrashCaptureState crashState{};
+  PendingCrashEtwCapture pendingCrashEtw{};
+  PendingCrashAnalysis pendingCrashAnalysis{};
+  std::wstring lastCrashDumpPath;
+  std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
+  const bool handled = HandleCrashEventTick(
+    cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
+    &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  Require(handled, "the event is consumed");
+  if (!crashState.latched) {
+    std::fprintf(stderr, "%s\n", log.c_str());
+  }
+  Require(crashState.latched && FileExists(lastCrashDumpPath), "the crash is captured with its dump");
+  Require(crashState.releasedCrashSeq == 0u, "nothing is released");
+  AssertContains(log, "on the game's main thread", "skipping the thread dump check is logged");
+  // The early check logs one of these whenever it runs.
+  Require(log.find("No dump written") == std::string::npos, "the early check did not release it");
+  Require(log.find("did not keep running after this exception") == std::string::npos, "the early check did not run");
+  Require(log.find("before a crash dump could be written") == std::string::npos, "the early check did not run");
+
+  ShutdownRetentionWorker();
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
+// A strong fault whose game keeps running is filtered after its dump was
+// written: the dump is deleted, the log says so, and the generation is
+// released so the exit path does not report it again.
+void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_recovered_after_dump");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  ParkedThread faulting;
+  const CONTEXT faultingContext = faulting.Context();
+  shared->header.crash.faulting_tid = faulting.tid();
+  shared->header.crash.exception_addr = faultingContext.Rip;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(faultingContext.Rip);
+  shared->header.crash.context = faultingContext;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  std::atomic_bool stop{ false };
+  std::thread game([&] {
+    while (!stop.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+
+  HelperConfig cfg = MakeTestConfig();
+  CrashCaptureState crashState{};
+  PendingCrashEtwCapture pendingCrashEtw{};
+  PendingCrashAnalysis pendingCrashAnalysis{};
+  std::wstring lastCrashDumpPath;
+  std::wstring pendingHangViewerDumpPath;
+  std::wstring pendingCrashViewerDumpPath;
+  const bool handled = HandleCrashEventTick(
+    cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
+    &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
+  stop.store(true);
+  game.join();
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  Require(handled, "the event is consumed");
+  if (log.find("dump deleted") == std::string::npos) {
+    std::fprintf(stderr, "%s\n", log.c_str());
+  }
+  Require(!crashState.latched && lastCrashDumpPath.empty(), "nothing stays captured");
+  Require(crashState.releasedCrashSeq == 2u, "the recovered exception is released");
+  // Its dump is gone, so an abnormal exit soon after must still record it.
+  Require(
+    crashState.releasedOnBriefHeartbeat && crashState.releasedCrashTick64 != 0u,
+    "the release rests on a few seconds of heartbeat");
+  bool anyDump = false;
+  for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
+    anyDump = anyDump || entry.path().extension() == L".dmp";
+  }
+  Require(!anyDump, "the filtered dump is deleted");
+  AssertContains(log, "likely a handled first-chance exception", "the filter logs its evidence");
+  AssertContains(log, "Filtered crash event consumed; dump deleted", "the caller logs what happened to the dump");
+  Require(log.find("deleting dump") == std::string::npos, "the filter itself does not log the dump's fate");
 
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
@@ -430,6 +583,8 @@ int main()
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();
+    TestHandleCrashEventTick_WritesTheDumpAtOnceForAMainThreadFault();
+    TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
     TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();

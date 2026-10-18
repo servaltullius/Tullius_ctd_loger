@@ -108,6 +108,9 @@ bool EqualsCaseInsensitiveAscii(std::string_view a, std::string_view b);
 std::optional<std::string> ParseCrashLoggerVersionAscii(std::string_view logUtf8);
 std::optional<std::string> ParseCrashLoggerIniCrashlogDirectoryAscii(std::string_view iniUtf8);
 bool LooksLikeCrashLoggerLogTextCore(std::string_view utf8Prefix);
+// The log is a thread dump ("THREAD DUMP (Manual Trigger)" header): every
+// thread's call stack, not the report of one crash.
+bool IsCrashLoggerThreadDumpLogAscii(std::string_view logUtf8);
 std::optional<std::string_view> TryExtractModulePlusOffsetTokenAscii(std::string_view line);
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8);
 

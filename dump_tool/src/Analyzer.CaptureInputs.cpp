@@ -489,7 +489,15 @@ void IntegrateCrashLoggerLog(
       canonicalByLower.emplace(WideLower(m.filename), m.filename);
     }
   }
-  out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
+  // A thread dump holds every thread's call stack, so its module ranking is a
+  // tally over all of them, not the stack of the thread that faulted or
+  // stalled: it names no suspect and feeds no evidence or advice.
+  if (pairing.selected_kind == "thread_dump" || crashlogger_core::IsCrashLoggerThreadDumpLogAscii(*logUtf8)) {
+    out.diagnostics.push_back(
+      L"[CrashLogger] paired log is a thread dump; its call-stack modules are not used as suspects");
+  } else {
+    out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
+  }
 
   if (auto cpp = crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii(*logUtf8)) {
     if (!cpp->type.empty()) {

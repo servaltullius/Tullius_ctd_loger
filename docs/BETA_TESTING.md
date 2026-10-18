@@ -80,7 +80,7 @@
 
 ### C. 수동 스냅샷(핫키)
 
-- `Ctrl+Shift+F12` : 현재 상태를 “스냅샷”으로 캡처합니다.
+- `Ctrl+Shift+Backspace` : 현재 상태를 “스냅샷”으로 캡처합니다. (`SkyrimDiagHelper.ini`의 `ManualCaptureHotkey=`로 변경할 수 있습니다. v0.2.68-rc3까지의 `Ctrl+Shift+F12`는 이제 Crash Logger 스레드 덤프만 동작시킵니다.)
 - 정상 상태에서 찍은 수동 스냅샷은 “문제가 있다”는 의미가 아닐 수 있습니다.
   - 진단은 **문제 상황(프리징/무한로딩/CTD 직전)** 에서 캡처했을 때 가장 유효합니다.
 

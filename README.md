@@ -8,7 +8,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 - **Not a crash-prevention mod.** It records signals and captures evidence; it does not swallow exceptions or attempt to keep playing.
 - **No uploads / telemetry.** All output is local. Online symbol downloads are OFF by default (`AllowOnlineSymbols=0`).
-- **CrashLoggerSSE integration** — auto-detects timestamped `crash-*.log` / `threaddump-*.log` artifacts, including the current v1.24 format, and surfaces top callstack modules, C++ exception blocks, and CrashLogger version. A normal runtime `CrashLogger.log` without a `Callstack:` section is not treated as crash evidence.
+- **CrashLoggerSSE integration** — auto-detects timestamped `crash-*.log` / `threaddump-*.log` artifacts, including the current v1.24 format, and surfaces top callstack modules (crash logs only; a thread dump's all-thread module tally is not used), C++ exception blocks, and CrashLogger version. A normal runtime `CrashLogger.log` without a `Callstack:` section is not treated as crash evidence.
 
 ## Components
 
@@ -41,10 +41,10 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
    - Or launch it from a command line: `SkyrimDiagDumpToolWinUI.exe "path\\to\\dump.dmp"`
    - In `v0.2.53+`, use the top-level launcher in `SkyrimDiagWinUI`; the many self-contained runtime files are kept under `SkyrimDiagWinUI\\app`.
 
-**Manual snapshot hotkey:** `Ctrl+Shift+F12`
+**Manual snapshot hotkey:** `Ctrl+Shift+Backspace` (change it with `ManualCaptureHotkey=` in `SkyrimDiagHelper.ini`)
 > Snapshots taken during normal gameplay may have low confidence. Best used when the game is already stuck (freeze / ILS) or right before a CTD.
 >
-> Crash Logger 1.25 uses the same keys for its thread dump, so with both installed one press also writes a Crash Logger `threaddump-*.log`.
+> Up to v0.2.68-rc3 the hotkey was `Ctrl+Shift+F12`. Crash Logger 1.25 uses those keys for its thread dump, which suspends the game's threads one at a time and can freeze the game, so pressing `Ctrl+Shift+F12` still starts Crash Logger's thread dump (not a Tullius snapshot). Do not set `ManualCaptureHotkey` to a chord that holds all of Crash Logger's keys; the startup preflight warns about it (`CRASH_LOGGER_HOTKEY_COLLISION`).
 
 ## Reading Results Safely
 
@@ -92,7 +92,7 @@ Capture and the text report work under Wine/Proton; the WinUI viewer does not ([
 |-----------|------------------|---------|
 | CTD (game crash) | `*_Crash_*.dmp` | Automatic |
 | Freeze / ILS | `*_Hang_*.dmp` | Automatic (threshold-based) |
-| Manual snapshot | `*_Manual_*.dmp` | `Ctrl+Shift+F12` |
+| Manual snapshot | `*_Manual_*.dmp` | `Ctrl+Shift+Backspace` (`ManualCaptureHotkey=`) |
 
 Hang detection thresholds are configurable in `SkyrimDiagHelper.ini`:
 - `HangThresholdInGameSec` / `HangThresholdLoadingSec`

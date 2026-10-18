@@ -59,7 +59,7 @@ Expected:
 ## 5) Manual Capture Behavior
 
 1. Launch Skyrim via SKSE.
-2. Press `Ctrl+Shift+F12` (manual capture).
+2. Press `Ctrl+Shift+Backspace` (manual capture; `ManualCaptureHotkey` in `SkyrimDiagHelper.ini`).
 
 Expected (default config):
 - Dump is produced.

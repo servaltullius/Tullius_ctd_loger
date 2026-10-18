@@ -18,7 +18,7 @@ struct ExtraDumpMemory
 // "possible relevant objects" do for registers and the stack.
 inline constexpr std::size_t kCrashObjectStackBytes = 0x800;
 // Upper bound on what one crash dump gains from this.
-inline constexpr std::size_t kCrashObjectMemoryBudget = 2u * 1024u * 1024u;
+inline constexpr std::size_t kCrashObjectMemoryBudget = std::size_t{2} * 1024u * 1024u;
 
 // Reads, in the live game process, the objects that the crash registers and
 // the top of the crash stack point at (shared/SkyrimDiagRtti.h) and returns

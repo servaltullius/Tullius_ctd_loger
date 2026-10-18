@@ -38,6 +38,8 @@ int wmain(int argc, wchar_t** argv)
   const bool runningUnderWine = skydiag::helper::internal::IsRunningUnderWine();
   const bool wineViewerPolicyApplied = skydiag::helper::ApplyWineViewerPolicy(&cfg, runningUnderWine);
   SetHelperLogRotation(cfg.maxHelperLogBytes, cfg.maxHelperLogFiles);
+  // Kept for the helper log: attaching reuses (and on success clears) err.
+  const std::wstring configWarning = err;
   if (!err.empty()) {
     std::wcerr << L"[SkyrimDiagHelper] Config warning: " << err << L"\n";
   }
@@ -71,7 +73,6 @@ int wmain(int argc, wchar_t** argv)
   }
 
   const auto outBase = MakeOutputBase(cfg);
-  const std::wstring configWarning = err;
   err.clear();
 
   HANDLE helperSingletonMutex = skydiag::helper::internal::AcquireHelperSingletonMutex(proc.pid, &err);
@@ -132,7 +133,7 @@ int wmain(int argc, wchar_t** argv)
                  << adaptiveLoadingThresholdSec << L"s (fallback=" << cfg.hangThresholdLoadingSec << L"s)\n";
     }
 
-    skydiag::helper::internal::RegisterManualCaptureHotkeyIfEnabled(cfg, outBase);
+    skydiag::helper::internal::RegisterManualCaptureHotkeyIfEnabled(cfg, proc, outBase);
 
     LARGE_INTEGER attachNow{};
     QueryPerformanceCounter(&attachNow);
@@ -140,6 +141,14 @@ int wmain(int argc, wchar_t** argv)
 
     skydiag::helper::internal::HelperLoopState loopState{};
     skydiag::helper::internal::InitializeLoopState(proc, &loopState);
+    loopState.crashLoggerLogDirs = skydiag::helper::internal::ResolveCrashLoggerLogDirs(cfg, proc);
+    if (loopState.crashCaptured.releasedCrashSeq != 0u) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(loopState.crashCaptured.releasedCrashSeq)
+          + L" was already acknowledged by an earlier helper (not frozen); it is not reported again at "
+            L"process exit unless the game exits with its exception code.");
+    }
     skydiag::helper::internal::RunHelperLoop(
       cfg,
       proc,

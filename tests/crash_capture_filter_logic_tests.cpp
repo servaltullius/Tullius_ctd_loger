@@ -7,20 +7,90 @@ using skydiag::helper::internal::BuildCrashEventInfo;
 using skydiag::helper::internal::ClassifyExitCodeVerdict;
 using skydiag::helper::internal::CrashEventInfo;
 using skydiag::helper::internal::FilterVerdict;
+using skydiag::helper::internal::IsCloseOfUnresponsiveGame;
 using skydiag::helper::internal::IsCommittedCrashSequence;
 using skydiag::helper::internal::QueueDeferredCrashViewer;
 using skydiag::helper::internal::ShouldLatchCrashCapture;
 using skydiag::helper::internal::ShouldAttemptDumpWrite;
 using skydiag::helper::internal::ShouldPreserveFilteredDump;
 using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
+using skydiag::helper::internal::ShouldReportReleasedCrashAtExit;
 using skydiag::helper::internal::kDumpWriteAttempts;
+using skydiag::helper::internal::kExitCodeClosedAsNotResponding;
 
-// Crash Logger's thread dump shares Ctrl+Shift+F12 with the manual capture.
-static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u));
-static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80000003u, 61000u, 1000u));
-static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");
-static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u), "an access violation");
-static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 2000u, 0u), "no manual capture");
+// A C++ exception or breakpoint within a minute of Crash Logger's thread dump
+// hotkey (its own keys, Ctrl+Shift+F12 by default, whatever the manual capture
+// hotkey is).
+static_assert(skydiag::helper::internal::IsInCrashLoggerThreadDumpWindow(0xE06D7363u, 30000u, 1000u));
+static_assert(skydiag::helper::internal::IsInCrashLoggerThreadDumpWindow(0x80000003u, 61000u, 1000u));
+static_assert(!skydiag::helper::internal::IsInCrashLoggerThreadDumpWindow(0xE06D7363u, 61001u, 1000u), "a minute later");
+static_assert(!skydiag::helper::internal::IsInCrashLoggerThreadDumpWindow(0xC0000005u, 2000u, 1000u), "an access violation");
+static_assert(!skydiag::helper::internal::IsInCrashLoggerThreadDumpWindow(0xE06D7363u, 2000u, 0u), "no Crash Logger hotkey");
+// ...and not on the game's main thread, which a thread dump never probes from
+// (exceptionCode, nowTick64, lastHotkeyTick64, faultingTid, mainThreadId).
+static_assert(
+  skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u, 53376u, 25652u),
+  "a worker thread");
+static_assert(
+  !skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u, 25652u, 25652u),
+  "the main thread");
+static_assert(
+  skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u, 25652u, 0u),
+  "the main thread not known: the window still applies");
+static_assert(
+  !skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u, 53376u, 25652u),
+  "a worker thread a minute later");
+static_assert(
+  !skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xC0000005u, 2000u, 1000u, 53376u, 0u),
+  "an access violation on a worker thread");
+
+// A frozen game closed with a non-zero exit gets no abnormal-exit WER hint
+// (exitCode, crashOnRecord, hangCaptured, modalDialogSeen, heartbeatStalled,
+// hangSuppressedAsResponsive).
+static_assert(IsCloseOfUnresponsiveGame(1u, false, true, false, false, false), "closed after a hang capture");
+static_assert(IsCloseOfUnresponsiveGame(1u, false, false, false, true, false), "closed with a stalled heartbeat");
+static_assert(!IsCloseOfUnresponsiveGame(1u, false, false, false, false, false), "a responsive game");
+static_assert(!IsCloseOfUnresponsiveGame(0u, false, true, false, true, false), "a normal exit");
+static_assert(!IsCloseOfUnresponsiveGame(3u, false, true, true, true, false), "a dialog at the hang capture");
+static_assert(!IsCloseOfUnresponsiveGame(0xC0000409u, false, true, false, true, false), "an NTSTATUS crash exit code");
+static_assert(IsCloseOfUnresponsiveGame(0xBFFFFFFFu, false, true, false, true, false), "below the NTSTATUS error range");
+static_assert(!IsCloseOfUnresponsiveGame(1u, true, true, false, true, false), "a crash on record");
+// The hang capture was held back because the window still answered (e.g. a
+// plugin's error dialog while the game was in the background).
+static_assert(!IsCloseOfUnresponsiveGame(1u, false, false, false, true, true), "a stalled heartbeat, window answering");
+static_assert(IsCloseOfUnresponsiveGame(1u, false, true, false, true, true), "a hang captured after the suppression");
+// Windows ended the game as not responding.
+static_assert(kExitCodeClosedAsNotResponding == 0xCFFFFFFFu, "the hung-program close exit code");
+static_assert(IsCloseOfUnresponsiveGame(0xCFFFFFFFu, false, true, false, true, false), "closed as not responding");
+static_assert(IsCloseOfUnresponsiveGame(0xCFFFFFFFu, false, false, false, false, false), "before the hang threshold");
+static_assert(!IsCloseOfUnresponsiveGame(0xCFFFFFFFu, true, true, false, true, false), "not responding, crash on record");
+static_assert(!IsCloseOfUnresponsiveGame(0xCFFFFFFFu, false, true, true, true, false), "not responding, dialog seen");
+
+// A released crash is reported at a non-zero exit only shortly after a
+// brief-heartbeat release when the game did not freeze after it, or for its
+// own exception code (exitCode, exceptionCode, releasedOnBriefHeartbeat,
+// gameFrozeAfterRelease, releasedTick64, exitTick64).
+static_assert(ShouldReportReleasedCrashAtExit(1u, 0xC0000005u, true, false, 100'000u, 107'000u), "7 s after a post-dump release");
+static_assert(!ShouldReportReleasedCrashAtExit(1u, 0xC0000005u, true, false, 100'000u, 160'000u), "a minute after it");
+static_assert(!ShouldReportReleasedCrashAtExit(0u, 0xC0000005u, true, false, 100'000u, 107'000u), "a normal exit");
+static_assert(!ShouldReportReleasedCrashAtExit(1u, 0xC0000005u, false, false, 100'000u, 107'000u), "7 s after a late recovery");
+// An early thread-dump release: Crash Logger ending a live game with exit 1
+// soon after is recorded; a game that froze after the release (a thread dump
+// deadlock, then closed) is not.
+static_assert(
+  ShouldReportReleasedCrashAtExit(1u, 0xE06D7363u, true, false, 100'000u, 107'000u),
+  "an early thread-dump release, then a live game ended 7 s later");
+static_assert(
+  !ShouldReportReleasedCrashAtExit(1u, 0xE06D7363u, true, true, 100'000u, 107'000u),
+  "the game froze after the release");
+static_assert(
+  !ShouldReportReleasedCrashAtExit(1u, 0xE06D7363u, true, true, 100'000u, 140'000u),
+  "a thread dump deadlock closed within a minute");
+static_assert(!ShouldReportReleasedCrashAtExit(1u, 0xE06D7363u, true, true, 100'000u, 244'000u), "the rc3 field case");
+static_assert(ShouldReportReleasedCrashAtExit(0xC0000005u, 0xC0000005u, false, false, 100'000u, 900'000u), "its own code");
+static_assert(
+  ShouldReportReleasedCrashAtExit(0xE06D7363u, 0xE06D7363u, true, true, 100'000u, 107'000u),
+  "its own code, also after a freeze");
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {

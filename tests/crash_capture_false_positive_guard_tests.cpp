@@ -126,6 +126,13 @@ int main()
     firstChanceFilterBody,
     "HasNewerCrashRecord(shm, info.crashSeq)",
     "First-chance filter must compare committed crash sequences before declaring recovery.");
+  // A fault on the game's main thread is never one of Crash Logger's thread
+  // dump probes, so its dump does not wait for the heartbeat check.
+  AssertOrdered(
+    crashTickBody,
+    "InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes)",
+    "WriteDumpWithStreams(",
+    "The Crash Logger thread dump check must know the main thread before the dump is written.");
 
   const std::string processValidBody = ExtractFunctionBody(crashCapture, "void ProcessValidCrashDump(");
   AssertContains(
@@ -258,6 +265,52 @@ int main()
     processExitTickBody,
     "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
     "Abnormal exit without an internal dump must emit WER LocalDumps fallback guidance.");
+  AssertOrdered(
+    processExitTickBody,
+    "IsCloseOfUnresponsiveGame(",
+    "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
+    "A frozen game that was closed must not get the abnormal-exit WER hint.");
+  AssertOrdered(
+    processExitTickBody,
+    "} else if (crashOnRecord) {",
+    "WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode)",
+    "A fault the exit drain just recorded must not get the hint saying no exception was recorded.");
+
+  const std::string drainBody = ExtractFunctionBody(helperMain, "bool DrainCrashEventBeforeExit(");
+  AssertOrdered(
+    drainBody,
+    "state->crashCaptured.releasedCrashSeq == info.crashSeq",
+    "if (exitCode == 0u)",
+    "The exit drain must skip a released crash generation before either exit-code path reports it.");
+  AssertContains(
+    drainBody,
+    "state->hangState.hangCapturedThisEpisode",
+    "A released fault must not be reported again when the game froze after its release.");
+  // A thread dump of a soft-locked game that was then ended looks like a
+  // worker's crash Crash Logger ended; only its crash log tells them apart.
+  AssertOrdered(
+    drainBody,
+    "if (crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {",
+    "TryWritePostExitCrashEvidenceRecord(",
+    "An early thread dump window release must need Crash Logger's crash log before it is recorded at exit.");
+  AssertOrdered(
+    crashTickBody,
+    "FilterFirstChanceException(",
+    "crashState->releasedInThreadDumpWindow = true;",
+    "The early thread dump window release must be marked for the exit path.");
+
+  // A helper the plugin's watchdog restarted must not report a generation an
+  // earlier helper already acknowledged by clearing its freeze.
+  const std::string initLoopBody = ExtractFunctionBody(helperMain, "void InitializeLoopState(");
+  AssertOrdered(
+    initLoopBody,
+    "TryCaptureCommittedCrashInfo(",
+    "state->crashCaptured.releasedCrashSeq = committed.crashSeq;",
+    "Loop state must seed the released generation from shared memory.");
+  AssertContains(
+    initLoopBody,
+    "(committed.stateFlags & skydiag::kState_Frozen) == 0u",
+    "Only a generation whose freeze was cleared counts as acknowledged.");
 
   AssertOrdered(
     processExitTickBody,
@@ -285,8 +338,89 @@ int main()
     manualCaptureBody,
     "ManualCaptureKeys().ConsumePress()",
     "Manual capture must also take presses from the key-state watcher, which WM_HOTKEY can miss in gameplay.");
-  if (manualCaptureBody.find("GetAsyncKeyState(VK_F12) & 1") != std::string::npos) {
+  if (manualCaptureBody.find("GetAsyncKeyState(") != std::string::npos) {
+    std::fprintf(stderr, "Manual capture must take polled presses from the key-state watcher, not read keys itself.\n");
+    std::abort();
+  }
+  const std::string keyWatcher = ReadAllText(repoRoot / "helper" / "src" / "ManualCaptureKeyWatcher.cpp");
+  AssertContains(
+    keyWatcher,
+    "& 0x8000) != 0",
+    "The key-state watcher must read the keys' current down state.");
+  if (keyWatcher.find(") & 1)") != std::string::npos) {
     std::fprintf(stderr, "Manual capture must not read GetAsyncKeyState's shared pressed-since-last-call bit.\n");
+    std::abort();
+  }
+  // Both paths watch the configured ManualCaptureHotkey, not a fixed chord.
+  AssertContains(
+    keyWatcher,
+    "edge.emplace(*manualCapture);",
+    "The key-state watcher must poll the configured manual capture hotkey.");
+  AssertContains(
+    helperMain,
+    "RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)",
+    "RegisterHotKey must register the configured manual capture hotkey.");
+  AssertContains(
+    helperMain,
+    "ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);",
+    "The key-state watcher must start with the configured manual capture hotkey.");
+  // A press of the old Ctrl+Shift+F12 is logged as taking no snapshot, with or
+  // without Crash Logger: the watcher polls the exact old chord on its own
+  // edge and only sets a flag, and the helper loop writes the log line.
+  AssertContains(
+    keyWatcher,
+    "legacyEdge.emplace(*legacyManualCapture);",
+    "The key-state watcher must poll the old manual capture chord on its own edge.");
+  AssertContains(
+    keyWatcher,
+    "legacyPressed_.store(true, std::memory_order_release);",
+    "The key-state watcher must flag presses of the old manual capture chord.");
+  if (keyWatcher.find("AppendLogLine") != std::string::npos) {
+    std::fprintf(stderr, "The key-state watcher thread must not write the helper log itself.\n");
+    std::abort();
+  }
+  AssertOrdered(
+    ExtractFunctionBody(helperMain, "void RegisterManualCaptureHotkeyIfEnabled("),
+    "LegacyManualCaptureChordToWatch(cfg.enableManualCaptureHotkey, cfg.manualCaptureHotkey)",
+    "ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump, legacyManualCapture);",
+    "The old manual capture chord must be chosen before the key-state watcher starts, Crash Logger or not.");
+  AssertContains(
+    manualCaptureBody,
+    "if (ManualCaptureKeys().ConsumeLegacyPress()) {\n"
+    "    AppendLogLine(outBase, LegacyManualCaptureHotkeyPressedMessage(cfg.manualCaptureHotkey));",
+    "The helper loop must log each press of the old manual capture chord.");
+  // The Crash Logger thread dump window (IsLikelyCrashLoggerThreadDumpFault)
+  // follows Crash Logger's own hotkey, which no longer matches the manual
+  // capture hotkey by default: the watcher notes it, also with the manual
+  // capture hotkey off, and a manual capture alone does not open the window.
+  AssertContains(
+    keyWatcher,
+    "IsCrashLoggerThreadDumpHotkeyDown(*crashLoggerThreadDump, IsKeyDown)",
+    "The key-state watcher must poll Crash Logger's thread dump hotkey.");
+  AssertContains(
+    keyWatcher,
+    "NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());",
+    "The key-state watcher must note when Crash Logger's thread dump hotkey is held.");
+  const std::string registerHotkeyBody =
+    ExtractFunctionBody(helperMain, "void RegisterManualCaptureHotkeyIfEnabled(");
+  AssertOrdered(
+    registerHotkeyBody,
+    "CheckCrashLoggerThreadDumpHotkey(",
+    "if (!cfg.enableManualCaptureHotkey) {\n"
+    "    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump, legacyManualCapture);",
+    "Crash Logger's thread dump hotkey must be watched even with the manual capture hotkey off.");
+  AssertContains(
+    ExtractFunctionBody(helperMain, "void UnregisterManualCaptureHotkeyIfEnabled("),
+    "}\n  ManualCaptureKeys().Stop();",
+    "The key-state watcher must stop whether or not the manual capture hotkey was on.");
+  if (crashCapture.find("NoteManualCaptureStarted") != std::string::npos ||
+      ReadAllText(repoRoot / "helper" / "src" / "ManualCapture.cpp").find("NoteCrashLoggerThreadDumpHotkeyPressed") !=
+        std::string::npos) {
+    std::fprintf(stderr, "A manual capture must not open the Crash Logger thread dump window by itself.\n");
+    std::abort();
+  }
+  if (helperMain.find("VK_F12") != std::string::npos || keyWatcher.find("VK_F12") != std::string::npos) {
+    std::fprintf(stderr, "The manual capture hotkey must not be hard-coded to F12.\n");
     std::abort();
   }
   AssertContains(
@@ -295,6 +429,18 @@ int main()
     "Manual capture debounce must use wall-clock gating to avoid duplicate capture bursts.");
 
   const std::string helperEntryBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
+  // Attaching reuses err and clears it on success, so the config warning
+  // (an invalid ManualCaptureHotkey, say) must be kept before attaching to
+  // reach the helper log.
+  AssertOrdered(
+    helperEntryBody,
+    "const std::wstring configWarning = err;",
+    "AttachByPid(",
+    "The config warning must be kept before attaching clears err.");
+  AssertContains(
+    helperEntryBody,
+    "AppendLogLine(outBase, L\"Config warning: \" + configWarning);",
+    "The config warning must be written to the helper log.");
   AssertContains(
     helperEntryBody,
     "if (!helperSingletonMutex)",

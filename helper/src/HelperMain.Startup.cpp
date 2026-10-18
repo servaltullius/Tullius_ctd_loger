@@ -1,13 +1,18 @@
 #include "HelperMainInternal.h"
 
+#include <ShlObj.h>
+
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagStringUtil.h"
 
 #include "CrashCapture.h"
 #include "HelperLog.h"
@@ -159,34 +164,120 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
   state->hangState.loadStartQpc = 0;
   state->nextCrashEventRetryTick64 = GetTickCount64();
   state->nextCrashEventWarnTick64 = 0;
+
+  // The plugin claims kState_Frozen before every publish, and only a helper
+  // clears it. So a committed generation with Frozen clear was already ACKed
+  // by an earlier helper that the plugin's watchdog replaced: released as
+  // handled, or (indistinguishable here) its dump could not be written. It
+  // is not reported again at exit. A generation still Frozen stays reportable.
+  CrashEventInfo committed{};
+  if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
+      (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    state->crashCaptured.releasedCrashSeq = committed.crashSeq;
+    state->crashCaptured.releasedCrashTick64 = GetTickCount64();
+    state->crashCaptured.releasedOnBriefHeartbeat = false;
+    state->crashCaptured.releasedInThreadDumpWindow = false;
+  }
 }
 
-void RegisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg, const std::filesystem::path& outBase)
+std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc)
 {
+  std::vector<std::filesystem::path> dirs;
+  std::filesystem::path gameExeDir;
+  if (!skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+    return dirs;
+  }
+  // Only Crash Logger's thread dump hotkey opens the window this is for.
+  const auto crashLogger = CheckCrashLoggerThreadDumpHotkey(
+    gameExeDir / L"Data" / L"SKSE" / L"Plugins", cfg.manualCaptureHotkey);
+  if (!crashLogger.crashLoggerFound || !crashLogger.threadDump.enabled) {
+    return dirs;
+  }
+  // A Crashlog Directory set in CrashLogger.ini, relative to the game's
+  // folder (its working directory) unless absolute; it may not exist yet.
+  if (!crashLogger.crashlogDirectory.empty()) {
+    const std::filesystem::path custom(std::u8string(
+      crashLogger.crashlogDirectory.begin(), crashLogger.crashlogDirectory.end()));
+    dirs.push_back(custom.is_relative() ? gameExeDir / custom : custom);
+  }
+  // And the SKSE log folder it uses by default, Documents\My Games\<game
+  // folder>\SKSE; the game folder name differs by store ("Skyrim Special
+  // Edition", "... GOG").
+  wchar_t* documents = nullptr;
+  std::filesystem::path myGames;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, 0, nullptr, &documents)) && documents) {
+    myGames = std::filesystem::path(documents) / L"My Games";
+  }
+  CoTaskMemFree(documents);  // required even when the call fails
+  if (!myGames.empty()) {
+    std::error_code iterEc;
+    for (std::filesystem::directory_iterator it(myGames, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+      std::error_code ec;
+      if (it->is_directory(ec) &&
+          skydiag::WideLower(it->path().filename().wstring()).rfind(L"skyrim special edition", 0) == 0) {
+        dirs.push_back(it->path() / L"SKSE");
+      }
+    }
+  }
+  return dirs;
+}
+
+void RegisterManualCaptureHotkeyIfEnabled(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase)
+{
+  // Crash Logger's thread dump runs on its own hotkey whatever the manual
+  // capture hotkey is, so its keys are watched either way
+  // (IsLikelyCrashLoggerThreadDumpFault).
+  std::optional<CrashLoggerThreadDumpHotkey> crashLoggerThreadDump;
+  std::filesystem::path gameExeDir;
+  if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+    const auto check = CheckCrashLoggerThreadDumpHotkey(
+      gameExeDir / L"Data" / L"SKSE" / L"Plugins", cfg.manualCaptureHotkey);
+    if (check.crashLoggerFound && check.threadDump.enabled) {
+      crashLoggerThreadDump = check.threadDump;
+      AppendLogLine(outBase, L"Watching Crash Logger's thread dump hotkey (" +
+        FormatVirtualKeyList(check.threadDump.keys) +
+        L") so its thread dump's probes do not get crash dumps while the game keeps running.");
+    }
+  }
+
+  // Ctrl+Shift+F12, the manual capture hotkey up to v0.2.68-rc3, is watched
+  // while the hotkey is set to another chord, so a press of it from habit is
+  // logged as taking no snapshot, with or without Crash Logger.
+  const std::optional<ManualCaptureHotkey> legacyManualCapture =
+    LegacyManualCaptureChordToWatch(cfg.enableManualCaptureHotkey, cfg.manualCaptureHotkey);
+
   if (!cfg.enableManualCaptureHotkey) {
+    ManualCaptureKeys().Start(std::nullopt, crashLoggerThreadDump, legacyManualCapture);
     return;
   }
 
+  static_assert(kHotkeyModAlt == MOD_ALT && kHotkeyModControl == MOD_CONTROL && kHotkeyModShift == MOD_SHIFT);
+  static_assert(kVkShift == VK_SHIFT && kVkControl == VK_CONTROL && kVkAlt == VK_MENU && kVkBack == VK_BACK);
+
   // Key-state polling also catches presses WM_HOTKEY never delivers (see
   // ManualCaptureKeyWatcher), so a failed registration only loses one path.
-  ManualCaptureKeys().Start();
-  if (!RegisterHotKey(nullptr, kHotkeyId, MOD_CONTROL | MOD_SHIFT, VK_F12)) {
+  const ManualCaptureHotkey& hotkey = cfg.manualCaptureHotkey;
+  const std::wstring chord = FormatManualCaptureHotkey(hotkey);
+  ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);
+  if (!RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)) {
     const DWORD le = GetLastError();
-    std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " << le << L"\n";
-    AppendLogLine(outBase, L"Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " + std::to_wstring(le) +
-      L" (key-state polling still watches Ctrl+Shift+F12)");
+    std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(" << chord << L") failed: " << le << L"\n";
+    AppendLogLine(outBase, L"Warning: RegisterHotKey(" + chord + L") failed: " + std::to_wstring(le) +
+      L" (key-state polling still watches " + chord + L")");
   } else {
-    std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: Ctrl+Shift+F12\n";
-    AppendLogLine(outBase, L"Manual capture hotkey registered: Ctrl+Shift+F12 (also watched by key-state polling)");
+    std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: " << chord << L"\n";
+    AppendLogLine(outBase, L"Manual capture hotkey registered: " + chord + L" (also watched by key-state polling)");
   }
 }
 
 void UnregisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg)
 {
-  if (!cfg.enableManualCaptureHotkey) {
-    return;
+  if (cfg.enableManualCaptureHotkey) {
+    UnregisterHotKey(nullptr, kHotkeyId);
   }
-  UnregisterHotKey(nullptr, kHotkeyId);
   ManualCaptureKeys().Stop();
 }
 

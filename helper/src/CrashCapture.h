@@ -100,27 +100,47 @@ inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, s
          nowTick64 - s->latchedTick64 >= kLateRecoveryMinAliveMs;
 }
 
-// Crash Logger 1.25 also takes Ctrl+Shift+F12, for its thread dump, and
-// probes on each thread it dumps. A thread that threw and caught a C++
-// exception (or hit a breakpoint) in the last minute then gets that exception
-// recorded as a crash (v0.2.68-rc1/rc2 captures, 2026-10-18: one or two per
-// press, each a 600 MB dump that the heartbeat filter deleted again). Only
-// those codes reach the crash record through Crash Logger's probes in the
-// default CrashHookMode=1.
+// Crash Logger 1.25 writes a thread dump on its own hotkey (Ctrl+Shift+F12 by
+// default, also the manual capture hotkey up to v0.2.68-rc3), and probes on
+// each thread it dumps. A thread that threw and caught a C++ exception (or hit
+// a breakpoint) in the last minute then gets that exception recorded as a
+// crash (v0.2.68-rc1/rc2 captures, 2026-10-18: one or two per press, each a
+// 600 MB dump that the heartbeat filter deleted again). Only those codes reach
+// the crash record through Crash Logger's probes in the default
+// CrashHookMode=1. The window runs from when Crash Logger's hotkey was last
+// seen held (ManualCaptureKeyWatcher), whatever the manual capture hotkey is.
 inline constexpr std::uint64_t kCrashLoggerThreadDumpWindowMs = 60000;
 
-constexpr bool IsLikelyCrashLoggerThreadDumpFault(
+constexpr bool IsInCrashLoggerThreadDumpWindow(
   std::uint32_t exceptionCode,
   std::uint64_t nowTick64,
-  std::uint64_t lastManualCaptureTick64) noexcept
+  std::uint64_t lastCrashLoggerHotkeyTick64) noexcept
 {
-  return lastManualCaptureTick64 != 0u && nowTick64 >= lastManualCaptureTick64 &&
-         nowTick64 - lastManualCaptureTick64 <= kCrashLoggerThreadDumpWindowMs &&
+  return lastCrashLoggerHotkeyTick64 != 0u && nowTick64 >= lastCrashLoggerHotkeyTick64 &&
+         nowTick64 - lastCrashLoggerHotkeyTick64 <= kCrashLoggerThreadDumpWindowMs &&
          (exceptionCode == 0xE06D7363u || exceptionCode == 0x80000003u);
 }
 
-// When the last manual capture started (GetTickCount64), for the check above.
-void NoteManualCaptureStarted(std::uint64_t tick64) noexcept;
+// Crash Logger's thread dump probes the other threads from its own threads,
+// and a kept exception is recorded only when a probe faults on the thread
+// that threw it. The game's main thread is only a suspended target there, so
+// a fault recorded on it is not a probe but a crash Crash Logger is reporting
+// from its handler on that thread, which can end the game within seconds. A
+// main thread id of 0 (not known from the blackbox) keeps the window.
+constexpr bool IsLikelyCrashLoggerThreadDumpFault(
+  std::uint32_t exceptionCode,
+  std::uint64_t nowTick64,
+  std::uint64_t lastCrashLoggerHotkeyTick64,
+  std::uint32_t faultingTid,
+  std::uint32_t mainThreadId) noexcept
+{
+  return IsInCrashLoggerThreadDumpWindow(exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64) &&
+         (mainThreadId == 0u || faultingTid != mainThreadId);
+}
+
+// When Crash Logger's thread dump hotkey was last seen held (GetTickCount64),
+// for the check above.
+void NoteCrashLoggerThreadDumpHotkeyPressed(std::uint64_t tick64) noexcept;
 
 struct CrashCaptureState {
   bool latched = false;
@@ -131,6 +151,28 @@ struct CrashCaptureState {
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
   LateRecoveryState lateRecovery{};
+  // The crash generation last released as a handled exception (the game kept
+  // running or exited with code 0). Its record stays committed in shared
+  // memory, so the exit path must not report it again, unless
+  // ShouldReportReleasedCrashAtExit says otherwise. A crash superseded by a
+  // newer one (kRetryNewerCrash) is not released.
+  std::uint32_t releasedCrashSeq = 0;
+  // When that release happened (GetTickCount64), and whether it rested only on
+  // the heartbeat advancing for a few seconds, before a dump (Crash Logger's
+  // thread dump window) or after it.
+  std::uint64_t releasedCrashTick64 = 0;
+  bool releasedOnBriefHeartbeat = false;
+  // Whether that release was the early one in Crash Logger's thread dump
+  // window, and when its crash event came (FILETIME, UTC). There a thread dump
+  // probe and a worker's crash that Crash Logger reports look alike, so the
+  // exit path records it only with Crash Logger's crash log as evidence
+  // (DrainCrashEventBeforeExit).
+  bool releasedInThreadDumpWindow = false;
+  std::uint64_t releasedCrashEventFileTimeUtc = 0;
+  // The crash generation whose dump could not be written, and whether the
+  // game had already exited then. Its dump-failure WER hint stays at exit.
+  std::uint32_t dumpWriteFailedCrashSeq = 0;
+  bool dumpWriteFailedProcessExited = false;
 };
 
 struct StableSharedSnapshot {
@@ -217,9 +259,10 @@ inline FilterVerdict ClassifyExitCodeVerdict(
   return FilterVerdict::kKeepDump;
 }
 
+// Not noexcept: queueing copies the path into a std::wstring, which can throw.
 inline bool QueueDeferredCrashViewer(
   const std::wstring& dumpPath,
-  std::wstring* pendingCrashViewerDumpPath) noexcept
+  std::wstring* pendingCrashViewerDumpPath)
 {
   if (!pendingCrashViewerDumpPath) {
     return false;
@@ -263,6 +306,52 @@ inline bool ShouldQuarantineCleanExitEvidence(
   return exitCode == 0u && info.isStrong && IsCommittedCrashSequence(info.crashSeq);
 }
 
+// A crash released as handled is normally not reported again at exit. A
+// release on a few seconds of advancing heartbeat is weak evidence, though,
+// before a dump (Crash Logger's thread dump window) as after one: a worker
+// thread's crash handler (e.g. Crash Logger writing its log) can run that long
+// while the main thread still ticks, and no dump is left either way. So a
+// non-zero exit within kLateRecoveryMinAliveMs of such a release still records
+// the released fault, unless the game froze after the release (a hang
+// captured, the heartbeat stalled at exit, or Windows closed it as not
+// responding): a crash handler on a worker thread leaves the heartbeat
+// running, while a frozen game that was closed does not. Any non-zero exit
+// with the released exception's own code records it too. A release in the
+// thread dump window also needs Crash Logger's crash log, since a soft-locked
+// game whose thread dump was taken before it was ended looks the same
+// (DrainCrashEventBeforeExit).
+constexpr bool ShouldReportReleasedCrashAtExit(
+  std::uint32_t exitCode,
+  std::uint32_t exceptionCode,
+  bool releasedOnBriefHeartbeat,
+  bool gameFrozeAfterRelease,
+  std::uint64_t releasedTick64,
+  std::uint64_t exitTick64) noexcept
+{
+  if (exitCode == 0u) {
+    return false;
+  }
+  if (exitCode == exceptionCode) {
+    return true;
+  }
+  return releasedOnBriefHeartbeat && !gameFrozeAfterRelease && exitTick64 >= releasedTick64 &&
+         exitTick64 - releasedTick64 < kLateRecoveryMinAliveMs;
+}
+
+// Why a committed fault is recorded only as metadata after the game exited.
+enum class PostExitEvidenceReason
+{
+  // Published after the helper's final live-process poll; never captured.
+  kPublishedAfterFinalLivePoll,
+  // Captured while the game ran, but its dump could not be written.
+  kDumpWriteFailed,
+  // Captured, but the game had exited before its dump could be written.
+  kDumpWriteFailedProcessExited,
+  // Released as handled, but the game then exited abnormally
+  // (ShouldReportReleasedCrashAtExit).
+  kReleasedFaultFollowedByAbnormalExit,
+};
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
 bool TryCaptureCommittedCrashInfo(
   const skydiag::SharedHeader* shm,
@@ -270,7 +359,8 @@ bool TryCaptureCommittedCrashInfo(
 bool TryWritePostExitCrashEvidenceRecord(
   const std::filesystem::path& outBase,
   const CrashEventInfo& info,
-  DWORD exitCode);
+  DWORD exitCode,
+  PostExitEvidenceReason reason = PostExitEvidenceReason::kPublishedAfterFinalLivePoll);
 bool CaptureStableSharedSnapshot(
   const skydiag::SharedLayout* shm,
   std::size_t shmBytes,
@@ -319,6 +409,43 @@ inline std::string BuildWerFallbackHintText(WerFallbackReason reason, DWORD exit
 }
 
 void WriteWerFallbackHint(const std::filesystem::path& outBase, WerFallbackReason reason, DWORD exitCode);
+
+// The exit code of a program Windows ended as not responding, after the user
+// chose to close it ("stopped interacting with Windows and was closed").
+inline constexpr std::uint32_t kExitCodeClosedAsNotResponding = 0xCFFFFFFFu;
+
+// A non-zero exit with no crash on record, after the game had stopped
+// responding (a hang was captured in this episode, the heartbeat had stalled
+// past the hang threshold, or Windows closed it as not responding), is a
+// frozen game being closed (by the user, a watchdog or Windows), or a crash
+// that a crash handler ended: Crash Logger ends a crash it reports with exit
+// code 1, also one SkyrimDiag does not record, and its log can take longer
+// than the hang threshold. Only kExitCodeClosedAsNotResponding tells a close
+// apart. The abnormal-exit hint would point at a plugin's error dialog and at
+// WER LocalDumps, which captures neither case. It still applies when a dialog
+// was on screen at the hang capture (a plugin's error dialog that then ends the
+// game), and for an NTSTATUS error exit code such as a fail-fast, which WER
+// does capture. A stalled heartbeat does not count when the helper held back
+// this episode's hang capture because the game window still answered: a
+// plugin's error dialog keeps the window answering while the heartbeat stops.
+constexpr bool IsCloseOfUnresponsiveGame(
+  std::uint32_t exitCode,
+  bool crashOnRecord,
+  bool hangCapturedThisEpisode,
+  bool modalDialogSeenThisEpisode,
+  bool heartbeatStalled,
+  bool hangSuppressedAsResponsiveThisEpisode) noexcept
+{
+  if (exitCode == 0u || crashOnRecord || modalDialogSeenThisEpisode) {
+    return false;
+  }
+  if (exitCode == kExitCodeClosedAsNotResponding) {
+    return true;
+  }
+  return exitCode < 0xC0000000u &&
+         (hangCapturedThisEpisode || (heartbeatStalled && !hangSuppressedAsResponsiveThisEpisode));
+}
+
 bool IsCleanExitEvidenceRequired(
   const skydiag::helper::HelperConfig& cfg,
   const CrashCaptureState* crashState) noexcept;

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/LoadStats.h"
@@ -38,6 +39,9 @@ struct HelperLoopState
   bool crashViewerLaunchedAtExit = false;
   // The full recapture of the captured crash, cleaned up with it.
   CrashRecaptureArtifacts crashRecapture{};
+  // Where Crash Logger writes its logs (ResolveCrashLoggerLogDirs), for the
+  // exit path's look for its crash log.
+  std::vector<std::filesystem::path> crashLoggerLogDirs;
 };
 
 struct CrashArtifactRemovalResult
@@ -56,7 +60,17 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
-void RegisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg, const std::filesystem::path& outBase);
+// The folders Crash Logger writes its crash-*.log to: the Crashlog Directory
+// set in CrashLogger.ini, and the SKSE log folder under Documents\My Games.
+// Empty unless Crash Logger is installed with its thread dump hotkey on.
+std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc);
+// Also starts watching Crash Logger's thread dump hotkey when Crash Logger is
+// installed with it on, whether or not the manual capture hotkey is enabled;
+// the unregister call stops both.
+void RegisterManualCaptureHotkeyIfEnabled(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase);
 void UnregisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg);
 void PumpManualCaptureInputs(
   const HelperConfig& cfg,
@@ -64,7 +78,10 @@ void PumpManualCaptureInputs(
   const std::filesystem::path& outBase,
   LoadStats* loadStats,
   std::uint32_t adaptiveLoadingThresholdSec);
-void DrainCrashEventBeforeExit(
+// After the process exited: true when a committed crash that the helper did
+// not release as handled is on record (captured, or recorded here as
+// metadata). A crash released earlier is not reported again.
+bool DrainCrashEventBeforeExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,

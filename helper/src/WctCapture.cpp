@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "SkyrimDiagShared.h"
+#include "SkyrimDiagWctWait.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -85,9 +86,10 @@ struct WctPassResult
   std::vector<std::uint32_t> cycleTids;
   bool hasUsableData = false;
   bool hasLoadingSignal = false;
-  std::uint32_t longestWaitTid = 0;
-  std::uint64_t longestWaitMs = 0;
+  skydiag::WctLongestWaiter longestWaiter;
 };
+
+static_assert(static_cast<std::uint32_t>(WctStatusBlocked) == skydiag::kWctObjectStatusBlocked);
 
 std::vector<std::uint32_t> SortedCycleThreadIds(const std::vector<std::uint32_t>& tids)
 {
@@ -137,19 +139,23 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
       out.cycleTids.push_back(tid);
     }
 
-    std::uint64_t threadLongestWait = 0;
+    // The first node is the queried thread itself; the rest are what it waits
+    // on and their owners. WaitTime is when it started waiting (a tick count).
+    if (nodeCount > 0 && nodes[0].ObjectType == WctThreadType) {
+      out.longestWaiter.Observe(
+        tid, static_cast<std::uint32_t>(nodes[0].ObjectStatus), nodes[0].ThreadObject.WaitTime);
+    }
+
     for (DWORD i = 0; i < nodeCount; ++i) {
       const auto& n = nodes[i];
       nlohmann::json node = nlohmann::json::object();
       node["objectType"] = static_cast<std::uint32_t>(n.ObjectType);
       node["objectStatus"] = static_cast<std::uint32_t>(n.ObjectStatus);
       if (n.ObjectType == WctThreadType) {
-        const std::uint64_t waitTime = n.ThreadObject.WaitTime;
-        threadLongestWait = std::max(threadLongestWait, waitTime);
         node["thread"] = {
           { "processId", n.ThreadObject.ProcessId },
           { "threadId", n.ThreadObject.ThreadId },
-          { "waitTime", waitTime },
+          { "waitTime", n.ThreadObject.WaitTime },
           { "contextSwitches", n.ThreadObject.ContextSwitches },
         };
       } else {
@@ -158,11 +164,6 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
       }
 
       thread["nodes"].push_back(std::move(node));
-    }
-
-    if (threadLongestWait > out.longestWaitMs) {
-      out.longestWaitMs = threadLongestWait;
-      out.longestWaitTid = tid;
     }
 
     out.threads.push_back(std::move(thread));
@@ -259,8 +260,8 @@ bool CaptureWct(
     { "threads", firstPass.threads },
     { "cycle_thread_ids", SortedCycleThreadIds(firstPass.cycleTids) },
     { "has_loading_signal", firstPass.hasLoadingSignal },
-    { "longest_wait_tid", firstPass.longestWaitTid },
-    { "longest_wait_ms", firstPass.longestWaitMs },
+    { "longest_wait_tid", firstPass.longestWaiter.tid() },
+    { "longest_wait_start_tick", firstPass.longestWaiter.wait_start_tick() },
   });
   passes.push_back(std::move(firstPass));
 
@@ -274,8 +275,8 @@ bool CaptureWct(
     { "threads", secondPass.threads },
     { "cycle_thread_ids", SortedCycleThreadIds(secondPass.cycleTids) },
     { "has_loading_signal", secondPass.hasLoadingSignal },
-    { "longest_wait_tid", secondPass.longestWaitTid },
-    { "longest_wait_ms", secondPass.longestWaitMs },
+    { "longest_wait_tid", secondPass.longestWaiter.tid() },
+    { "longest_wait_start_tick", secondPass.longestWaiter.wait_start_tick() },
   });
   passes.push_back(std::move(secondPass));
 
@@ -311,8 +312,8 @@ bool CaptureWct(
     out["cycle_consensus"] = !repeatedCycleTids.empty();
     out["consistent_loading_signal"] = passes[0].hasLoadingSignal && passes[1].hasLoadingSignal;
     out["longest_wait_tid_consensus"] =
-      passes[0].longestWaitTid != 0 &&
-      passes[0].longestWaitTid == passes[1].longestWaitTid;
+      passes[0].longestWaiter.tid() != 0 &&
+      passes[0].longestWaiter.tid() == passes[1].longestWaiter.tid();
   }
 
   CloseThreadWaitChainSession(session);

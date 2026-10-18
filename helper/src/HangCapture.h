@@ -19,6 +19,9 @@ namespace skydiag::helper::internal {
 struct HangCaptureState
 {
   bool hangCapturedThisEpisode = false;
+  // A dialog window was on screen at this episode's hang capture (e.g. a
+  // plugin's error dialog that may then end the game).
+  bool modalDialogSeenThisEpisode = false;
   bool warnedHeartbeatNotInitialized = false;
 
   bool hangSuppressedNotForegroundThisEpisode = false;

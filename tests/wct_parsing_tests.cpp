@@ -1,4 +1,5 @@
 #include "WctTypes.h"
+#include "SkyrimDiagWctWait.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -193,6 +194,104 @@ static void Test_FreezeSummary_ConsensusFields()
   assert(r->longest_wait_tid_consensus == true);
 }
 
+// ── Longest waiter (SkyrimDiagWctWait.h) ───────────────
+
+static void Test_LongestWaiter_EarliestBlockedWaitStartWins()
+{
+  skydiag::WctLongestWaiter waiter;
+  assert(waiter.tid() == 0u);
+  waiter.Observe(10u, skydiag::kWctObjectStatusBlocked, 5002000u);
+  waiter.Observe(20u, skydiag::kWctObjectStatusBlocked, 5001200u);
+  waiter.Observe(30u, 2u /*running*/, 5000000u);
+  waiter.Observe(40u, skydiag::kWctObjectStatusBlocked, 0u);
+  waiter.Observe(0u, skydiag::kWctObjectStatusBlocked, 1u);
+  waiter.Observe(20u, skydiag::kWctObjectStatusBlocked, 5001200u);  // the same thread again is no tie
+  assert(waiter.tid() == 20u);
+  assert(waiter.wait_start_tick() == 5001200u);
+
+  // A second blocked thread at the same tick (a process-wide suspend restarts
+  // every wait at once): no single longest waiter.
+  waiter.Observe(50u, skydiag::kWctObjectStatusBlocked, 5001200u);
+  assert(waiter.tid() == 0u);
+  assert(waiter.wait_start_tick() == 0u);
+
+  // An earlier wait start still settles it.
+  waiter.Observe(60u, skydiag::kWctObjectStatusBlocked, 5000300u);
+  assert(waiter.tid() == 60u);
+  assert(waiter.wait_start_tick() == 5000300u);
+}
+
+// Shaped like the 2026-10-18 hang: the game main thread waits on a critical
+// section whose owner was suspended first, a worker has just started a new
+// wait, and a running thread carries a tick older than all of them.
+static void Test_FreezeSummary_LongestWaiterIsEarliestBlockedThread()
+{
+  const std::string json = R"({
+    "threads": [
+      {"tid": 100, "isCycle": false, "nodes": [
+        {"objectType":8,"objectStatus":3,"thread":{"threadId":100,"waitTime":5001200}},
+        {"objectType":1,"objectStatus":6,"objectName":""},
+        {"objectType":8,"objectStatus":3,"thread":{"threadId":200,"waitTime":5001180}}]},
+      {"tid": 200, "isCycle": false, "nodes": [{"objectType":8,"objectStatus":3,"thread":{"threadId":200,"waitTime":5001180}}]},
+      {"tid": 300, "isCycle": false, "nodes": [{"objectType":8,"objectStatus":3,"thread":{"threadId":300,"waitTime":5002000}}]},
+      {"tid": 400, "isCycle": false, "nodes": [{"objectType":8,"objectStatus":2,"thread":{"threadId":400,"waitTime":5000300}}]}
+    ]
+  })";
+  const auto r = TryParseWctFreezeSummary(json);
+  assert(r.has_value());
+  assert(r->longest_wait_tid == 200u);  // not 300, which only just started waiting
+  assert(r->longest_wait_start_tick == 5001180u);
+}
+
+static void Test_FreezeSummary_TiedEarliestWaitStartHasNoLongestWaiter()
+{
+  const std::string json = R"({
+    "threads": [
+      {"tid": 100, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":100,"waitTime":5000300}}]},
+      {"tid": 200, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":200,"waitTime":5000300}}]},
+      {"tid": 300, "isCycle": false, "nodes": [{"objectStatus":3,"thread":{"threadId":300,"waitTime":5002000}}]}
+    ]
+  })";
+  const auto r = TryParseWctFreezeSummary(json);
+  assert(r.has_value());
+  assert(r->longest_wait_tid == 0u);
+  assert(r->longest_wait_start_tick == 0u);
+}
+
+// Helpers before the earliest-wait rule wrote longest_wait_tid_consensus for
+// the thread with the LATEST wait start; the parser recomputes it from the two
+// recorded passes and only falls back to the flag when there are none.
+static void Test_FreezeSummary_LongestWaitConsensusRecomputedFromPasses()
+{
+  const auto capture = [](const char* flag, const char* secondPassWorkerTick) {
+    return std::string(R"({"longest_wait_tid_consensus":)") + flag + R"(,"threads":[],"passes":[
+      {"capture_usable":true,"threads":[
+        {"tid":100,"nodes":[{"objectStatus":3,"thread":{"threadId":100,"waitTime":5001200}}]},
+        {"tid":300,"nodes":[{"objectStatus":3,"thread":{"threadId":300,"waitTime":5002000}}]}]},
+      {"capture_usable":true,"threads":[
+        {"tid":100,"nodes":[{"objectStatus":3,"thread":{"threadId":100,"waitTime":5001200}}]},
+        {"tid":300,"nodes":[{"objectStatus":3,"thread":{"threadId":300,"waitTime":)" +
+      secondPassWorkerTick + R"(}}]}]}]})";
+  };
+
+  // The old flag named the worker (latest start, 5002000 in both passes); the
+  // earliest waiter 100 is the same in both passes too.
+  auto r = TryParseWctFreezeSummary(capture("true", "5002100"));
+  assert(r.has_value() && r->longest_wait_tid_consensus);
+  r = TryParseWctFreezeSummary(capture("false", "5002100"));
+  assert(r.has_value() && r->longest_wait_tid_consensus);
+
+  // In the second pass the worker ties the main thread: no single longest
+  // waiter there, whatever the old flag said.
+  r = TryParseWctFreezeSummary(capture("true", "5001200"));
+  assert(r.has_value() && !r->longest_wait_tid_consensus);
+
+  // A pass the helper could not read gives no consensus.
+  r = TryParseWctFreezeSummary(
+    R"({"longest_wait_tid_consensus":true,"passes":[{"capture_usable":false,"threads":[]},{"capture_usable":true,"threads":[]}]})");
+  assert(r.has_value() && !r->longest_wait_tid_consensus);
+}
+
 static void Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -228,6 +327,15 @@ static void Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic()
   if (source.find("find(\"loader\")") != std::string::npos) {
     std::abort();
   }
+  // The helper's longest waiter follows the same earliest-wait-start rule the
+  // parser applies (the selection itself is tested above).
+  if (source.find("skydiag::WctLongestWaiter") == std::string::npos ||
+      source.find("longestWaiter.Observe(") == std::string::npos) {
+    std::abort();
+  }
+  if (source.find("longest_wait_ms") != std::string::npos) {
+    std::abort();
+  }
 }
 
 int main()
@@ -246,6 +354,10 @@ int main()
   Test_Capture_ValidCapture();
   Test_Capture_DefaultValues();
   Test_FreezeSummary_ConsensusFields();
+  Test_LongestWaiter_EarliestBlockedWaitStartWins();
+  Test_FreezeSummary_LongestWaiterIsEarliestBlockedThread();
+  Test_FreezeSummary_TiedEarliestWaitStartHasNoLongestWaiter();
+  Test_FreezeSummary_LongestWaitConsensusRecomputedFromPasses();
   Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic();
 
   return 0;

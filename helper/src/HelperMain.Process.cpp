@@ -3,15 +3,88 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "CrashCapture.h"
 #include "DumpToolLaunch.h"
 #include "HelperLog.h"
+#include "SkyrimDiagHelper/HangDetect.h"
+#include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
+namespace {
 
-void DrainCrashEventBeforeExit(
+struct HeartbeatAtExit
+{
+  bool known = false;
+  bool stalled = false;
+  double secondsSince = 0.0;
+};
+
+// Whether the heartbeat had already stopped long enough to count as a hang
+// when the exit was observed, with HandleHangTick's thresholds (the configured
+// loading threshold stands in for the adaptive one).
+HeartbeatAtExit ReadHeartbeatAtExit(const HelperConfig& cfg, const AttachedProcess& proc)
+{
+  HeartbeatAtExit result{};
+  if (!proc.shm || proc.shm->header.last_heartbeat_qpc == 0 || proc.shm->header.qpc_freq == 0) {
+    return result;
+  }
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  const std::uint32_t stateFlags = proc.shm->header.state_flags;
+  const auto decision = skydiag::helper::EvaluateHang(
+    static_cast<std::uint64_t>(now.QuadPart),
+    proc.shm->header.last_heartbeat_qpc,
+    proc.shm->header.qpc_freq,
+    stateFlags,
+    (stateFlags & skydiag::kState_InMenu) != 0u
+      ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
+      : cfg.hangThresholdInGameSec,
+    cfg.hangThresholdLoadingSec);
+  result.known = true;
+  result.stalled = decision.isHang;
+  result.secondsSince = decision.secondsSinceHeartbeat;
+  return result;
+}
+
+// Crash Logger writes a crash it reports to crash-<time>.log (a thread dump
+// goes to threaddump-<time>.log) and only then ends the game, so the file is
+// last written after the crash event it published. The first one in `dirs`
+// last written at or after `sinceFileTimeUtc` (FILETIME, UTC).
+std::optional<std::filesystem::path> FindCrashLoggerCrashLogWrittenSince(
+  const std::vector<std::filesystem::path>& dirs,
+  std::uint64_t sinceFileTimeUtc)
+{
+  for (const auto& dir : dirs) {
+    WIN32_FIND_DATAW found{};
+    const HANDLE find = FindFirstFileExW(
+      (dir / L"crash-*.log").c_str(), FindExInfoBasic, &found, FindExSearchNameMatch, nullptr, 0);
+    if (find == INVALID_HANDLE_VALUE) {
+      continue;
+    }
+    do {
+      const std::uint64_t lastWrite =
+        (static_cast<std::uint64_t>(found.ftLastWriteTime.dwHighDateTime) << 32) | found.ftLastWriteTime.dwLowDateTime;
+      if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 && lastWrite >= sinceFileTimeUtc) {
+        FindClose(find);
+        return dir / found.cFileName;
+      }
+    } while (FindNextFileW(find, &found));
+    FindClose(find);
+  }
+  return std::nullopt;
+}
+
+// Slack for the crash log's time check: file times and the event time come
+// from the same clock, so this only absorbs timestamp granularity.
+inline constexpr std::uint64_t kCrashLogTimeSlack100ns = 5ull * 10'000'000ull;
+
+}  // namespace
+
+bool DrainCrashEventBeforeExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
@@ -19,7 +92,7 @@ void DrainCrashEventBeforeExit(
   HelperLoopState* state)
 {
   if (!state) {
-    return;
+    return false;
   }
 
   const bool processExited =
@@ -36,7 +109,7 @@ void DrainCrashEventBeforeExit(
       &state->capturedCrashDumpPath,
       &state->pendingHangViewerDumpPath,
       &state->pendingCrashViewerDumpPath);
-    return;
+    return false;
   }
 
   if (proc.crashEvent && WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0) {
@@ -47,19 +120,83 @@ void DrainCrashEventBeforeExit(
     }
   }
   if (state->crashCaptured.latched) {
-    return;
+    return true;
   }
 
   CrashEventInfo info{};
   if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &info)) {
-    return;
+    return false;
+  }
+  // A handled exception released earlier (the game kept running, or exited 0
+  // during the filter) keeps its committed record; it is not a crash at exit,
+  // unless the release was weak evidence and the exit says otherwise.
+  if (state->crashCaptured.releasedCrashSeq == info.crashSeq) {
+    const auto& crash = state->crashCaptured;
+    const std::uint64_t nowTick64 = GetTickCount64();
+    // A frozen game that was closed, not a crash handler that ended it.
+    const bool frozeAfterRelease = state->hangState.hangCapturedThisEpisode ||
+      exitCode == kExitCodeClosedAsNotResponding || ReadHeartbeatAtExit(cfg, proc).stalled;
+    if (!ShouldReportReleasedCrashAtExit(
+          exitCode,
+          info.exceptionCode,
+          crash.releasedOnBriefHeartbeat,
+          frozeAfterRelease,
+          crash.releasedCrashTick64,
+          nowTick64)) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+          + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
+          + std::to_wstring(exitCode)
+          + (frozeAfterRelease ? L", the game had stopped responding since" : L"") + L").");
+      return false;
+    }
+    const auto secondsSinceRelease =
+      nowTick64 >= crash.releasedCrashTick64 ? (nowTick64 - crash.releasedCrashTick64) / 1000u : 0u;
+    // Released early in Crash Logger's thread dump window: a thread dump of a
+    // soft-locked game (its main loop still ticking) that was then ended in
+    // Task Manager (exit code 1, as Crash Logger's) looks the same in
+    // heartbeat and exit code as a worker's crash that Crash Logger ended.
+    // Only Crash Logger's crash log tells them apart.
+    std::wstring crashLogEvidence;
+    if (crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {
+      const std::uint64_t since = crash.releasedCrashEventFileTimeUtc > kCrashLogTimeSlack100ns
+        ? crash.releasedCrashEventFileTimeUtc - kCrashLogTimeSlack100ns
+        : 0u;
+      const auto crashLog = FindCrashLoggerCrashLogWrittenSince(state->crashLoggerLogDirs, since);
+      if (!crashLog) {
+        AppendLogLine(
+          outBase,
+          L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+            + L" was released in Crash Logger's thread dump window, and the game then exited (exit_code="
+            + std::to_wstring(exitCode) + L", " + std::to_wstring(secondsSinceRelease)
+            + L" s after the release), but no Crash Logger crash log (crash-*.log) written since was found; not "
+              L"recording it. "
+              L"This is most likely a thread dump of a stuck game that was then ended. If the game crashed "
+              L"instead, Crash Logger's crash-*.log from this time has the details.");
+        return false;
+      }
+      crashLogEvidence = L", and Crash Logger wrote " + crashLog->filename().wstring();
+    }
+    AppendLogLine(
+      outBase,
+      L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+        + L" was released as a handled exception, but the game then exited abnormally (exit_code="
+        + std::to_wstring(exitCode) + L", " + std::to_wstring(secondsSinceRelease) + L" s after the release"
+        + crashLogEvidence + L"); recording it after all.");
+    if (state->postExitEvidenceSeq != info.crashSeq &&
+        TryWritePostExitCrashEvidenceRecord(
+          outBase, info, exitCode, PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit)) {
+      state->postExitEvidenceSeq = info.crashSeq;
+    }
+    return true;
   }
 
   const bool sameCapturedSequence =
     state->crashCaptured.capturedInfo.crashSeq == info.crashSeq;
   if (exitCode == 0u) {
     if (!info.isStrong) {
-      return;
+      return false;
     }
     const bool priorEvidenceAttempt =
       state->crashCaptured.cleanExitEvidenceWritten ||
@@ -71,7 +208,7 @@ void DrainCrashEventBeforeExit(
         L"Preserving the existing clean-exit evidence attempt for crash_seq="
           + std::to_wstring(info.crashSeq)
           + L"; post-exit drain will not relabel it as not_captured.");
-      return;
+      return true;
     }
 
     state->crashCaptured.latched = true;
@@ -86,15 +223,22 @@ void DrainCrashEventBeforeExit(
       L"Drained committed strong-fault metadata after process exit (exit_code=0, crash_seq="
         + std::to_wstring(info.crashSeq)
         + L"); the process address space is already gone, so dump capture was not attempted.");
-    return;
+    return true;
   }
 
   if (state->postExitEvidenceSeq == info.crashSeq) {
-    return;
+    return true;
   }
-  if (TryWritePostExitCrashEvidenceRecord(outBase, info, exitCode)) {
+  auto reason = PostExitEvidenceReason::kPublishedAfterFinalLivePoll;
+  if (state->crashCaptured.dumpWriteFailedCrashSeq == info.crashSeq) {
+    reason = state->crashCaptured.dumpWriteFailedProcessExited
+      ? PostExitEvidenceReason::kDumpWriteFailedProcessExited
+      : PostExitEvidenceReason::kDumpWriteFailed;
+  }
+  if (TryWritePostExitCrashEvidenceRecord(outBase, info, exitCode, reason)) {
     state->postExitEvidenceSeq = info.crashSeq;
   }
+  return true;
 }
 
 // Releases a latched crash capture that turned out not to be a CTD: the
@@ -314,8 +458,11 @@ bool HandleLateRecoveryTick(
   // the same. So the dump is kept (marked late_recovery) instead of deleted;
   // only the crash actions and the freeze are released.
   CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running", /*keepDump=*/true);
-  // A later non-zero exit must not re-report this released exception.
-  state->postExitEvidenceSeq = crashSeq;
+  // A later exit must not re-report this released exception.
+  crash.releasedCrashSeq = crashSeq;
+  crash.releasedCrashTick64 = GetTickCount64();
+  crash.releasedOnBriefHeartbeat = false;
+  crash.releasedInThreadDumpWindow = false;
   const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, crashSeq);
   AppendLogLine(
     outBase,
@@ -441,15 +588,72 @@ bool HandleProcessExitTick(
     }
     // Always drain the committed crash generation after observing process exit.
     // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
-    DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
-    if (exitCode != 0 &&
-        !state->crashCaptured.latched &&
-        cfg.enableWerDumpFallbackHint) {
-      WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
-      AppendLogLine(
-        outBase,
-        L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
-          + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+    const bool crashOnRecord = DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
+    if (exitCode != 0 && !state->crashCaptured.latched) {
+      const auto& crash = state->crashCaptured;
+      const auto& hang = state->hangState;
+      const auto heartbeat = ReadHeartbeatAtExit(cfg, proc);
+      if (crash.dumpWriteFailedCrashSeq != 0u) {
+        // The hint written when that dump failed is the guidance that applies.
+        if (cfg.enableWerDumpFallbackHint) {
+          AppendLogLine(
+            outBase,
+            L"Abnormal process exit (exit_code=" + std::to_wstring(exitCode) + L") after crash_seq="
+              + std::to_wstring(crash.dumpWriteFailedCrashSeq)
+              + L", whose dump could not be written; keeping its WER LocalDumps hint.");
+        }
+      } else if (crashOnRecord) {
+        // The drain just recorded a fault as post-exit metadata, so the hint
+        // for an exit without a recorded exception does not apply.
+        if (cfg.enableWerDumpFallbackHint) {
+          AppendLogLine(
+            outBase,
+            L"Abnormal process exit (exit_code=" + std::to_wstring(exitCode)
+              + L") with a crash on record as post-exit metadata; no abnormal-exit WER LocalDumps hint.");
+        }
+      } else if (IsCloseOfUnresponsiveGame(
+                   exitCode,
+                   crashOnRecord,
+                   hang.hangCapturedThisEpisode,
+                   hang.modalDialogSeenThisEpisode,
+                   heartbeat.stalled,
+                   // Each suppression saw the window answering (the grace one
+                   // only follows a not-foreground suppression).
+                   hang.hangSuppressedNotForegroundThisEpisode || hang.hangSuppressedForegroundGraceThisEpisode ||
+                     hang.hangSuppressedForegroundResponsiveThisEpisode)) {
+        std::wstring evidence;
+        if (heartbeat.known) {
+          evidence += L", no heartbeat for "
+            + std::to_wstring(static_cast<std::uint64_t>(heartbeat.secondsSince)) + L" s";
+        }
+        if (hang.hangCapturedThisEpisode) {
+          evidence += L", hang captured";
+        }
+        if (exitCode == kExitCodeClosedAsNotResponding) {
+          evidence += L", closed by Windows as not responding";
+          AppendLogLine(
+            outBase,
+            L"The game was closed while not responding (exit_code=" + std::to_wstring(exitCode) + evidence
+              + L") with no unhandled crash on record; no WER LocalDumps hint, since WER cannot capture a "
+                L"frozen game that is ended.");
+        } else {
+          // Crash Logger ends a crash it reports with exit code 1, also one
+          // SkyrimDiag does not record, so this may have been a crash.
+          AppendLogLine(
+            outBase,
+            L"The game stopped responding and then exited (exit_code=" + std::to_wstring(exitCode) + evidence
+              + L") with no crash SkyrimDiag recorded. Either it was closed (Task Manager or a watchdog), or a "
+                L"crash handler ended it: Crash Logger ends a crash it reports with exit code 1, also an "
+                L"exception SkyrimDiag does not record. Check for a Crash Logger crash-*.log from this time. "
+                L"No WER LocalDumps hint, since WER captures neither case.");
+        }
+      } else if (cfg.enableWerDumpFallbackHint) {
+        WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
+        AppendLogLine(
+          outBase,
+          L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
+            + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+      }
     }
     if (exitCode == 0) {
       const bool hadCapturedCrash = state->crashCaptured.latched;

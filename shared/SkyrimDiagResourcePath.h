@@ -54,6 +54,7 @@ inline std::uint64_t NormalizeResourcePath(
   if (hasHighByte && codePage != CP_UTF8) {
     wchar_t wide[520];
     const int inLen = static_cast<int>(std::min<std::size_t>(in.size(), 512u));
+    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage) -- inLen bounds the read; no NUL is looked for.
     const int wideLen = MultiByteToWideChar(codePage, 0, in.data(), inLen, wide, 520);
     const int utf8Len = wideLen > 0
       ? WideCharToMultiByte(CP_UTF8, 0, wide, wideLen, utf8, static_cast<int>(sizeof(utf8)), nullptr, nullptr)

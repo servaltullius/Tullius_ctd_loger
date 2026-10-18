@@ -1471,6 +1471,43 @@ static void Test_ParseTopModules_CrashLog_IgnoresThreadDumpBannerLikeNote()
   assert(mods[1] == "othercrash.dll");
 }
 
+// A thread dump's module tally covers every thread, so the analyzer must not
+// rank suspects with it (2026-10-18 hang: plugins listed from idle threads).
+// Renamed logs are recognized by the header too.
+static void Test_IsCrashLoggerThreadDumpLog_HeaderOnly()
+{
+  using skydiag::dump_tool::crashlogger_core::IsCrashLoggerThreadDumpLogAscii;
+
+  assert(IsCrashLoggerThreadDumpLogAscii(
+    "========================================\r\n"
+    "THREAD DUMP (Manual Trigger)\r\n"
+    "========================================\r\n"
+    "TIME: 2097-07-13 12:00:00\r\n"
+    "CrashLoggerSSE v1-25-0-0\r\n"
+    "Total Threads: 2\r\n"
+    "\r\n"
+    "===== THREAD 1 (ID: 1234) =====\r\n"
+    "\tCALLSTACK:\r\n"
+    "\t[ 0] 0x7FF612340001        IdleWorker.dll+0000001\r\n"));
+  assert(IsCrashLoggerThreadDumpLogAscii("CrashLoggerSSE v1.20.0\nTHREAD DUMP\n\tCALLSTACK:\n"));
+
+  assert(!IsCrashLoggerThreadDumpLogAscii(""));
+  assert(!IsCrashLoggerThreadDumpLogAscii(
+    "CrashLoggerSSE v1.20.0 Feb 10 2026 04:25:35\n"
+    "CRASH TIME: 2026-03-24 12:34:56\n"
+    "THREAD DUMP NOTE: previous manual capture attached below for comparison only.\n"
+    "PROBABLE CALL STACK:\n"
+    "\t[ 0] 0x00007FF612340001 BannerCrash.dll+00000001\n"));
+  assert(!IsCrashLoggerThreadDumpLogAscii(
+    "[12:07:32.476] [41376] [I] Thread dump hotkey monitoring started (Ctrl+Shift+F12)\n"));
+
+  const auto captureInputs = ReadProjectText("dump_tool/src/Analyzer.CaptureInputs.cpp");
+  AssertContains(
+    captureInputs,
+    "pairing.selected_kind == \"thread_dump\" || crashlogger_core::IsCrashLoggerThreadDumpLogAscii(*logUtf8)",
+    "A paired thread dump must not supply Crash Logger top modules.");
+}
+
 static void Test_ParseCrashLoggerFrameSignals_RowDetailWithStackLabelDoesNotTerminate()
 {
   const std::string log =
@@ -1908,6 +1945,7 @@ int main()
   Test_ParseTopModules_ThreadDump_AcceptsNonManualHeaderVariant();
   Test_ParseTopModules_CrashLog_IgnoresThreadDumpSubstringNoise();
   Test_ParseTopModules_CrashLog_IgnoresThreadDumpBannerLikeNote();
+  Test_IsCrashLoggerThreadDumpLog_HeaderOnly();
   Test_ParseCrashLoggerFrameSignals_RowDetailWithStackLabelDoesNotTerminate();
   Test_ParseCrashLoggerFrameSignals_IgnoresLateDiagnosticFaultModuleLine();
   Test_ParseCrashLoggerFrameSignals_Fixture_DirectFaultDll();

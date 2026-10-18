@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 
 #include "SkyrimDiagHelper/Config.h"
@@ -24,6 +25,12 @@ bool WriteDumpWithStreams(
   const DumpProfile& dumpProfile,
   bool isProcessSnapshot,
   std::wstring* err);
+
+// The game's main thread, as the newest SessionStart or Heartbeat event in a
+// blackbox snapshot names it; nullopt when none does.
+std::optional<DWORD> InferMainThreadIdFromSnapshot(
+  const skydiag::SharedLayout* snapshot,
+  std::size_t snapshotBytes);
 
 // File writes performed by the dump callback under SKYDIAG_DUMP_IO_TRACE=1
 // since the process started; lets tests prove the traced path ran.
