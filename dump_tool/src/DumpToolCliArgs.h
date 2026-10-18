@@ -117,7 +117,7 @@ inline bool ParseDumpToolCliArgs(const std::vector<std::wstring_view>& argv, Dum
       continue;
     }
 
-    if (a.size() >= 1 && (a[0] == L'-' || a[0] == L'/')) {
+    if (!a.empty() && (a[0] == L'-' || a[0] == L'/')) {
       if (err) {
         *err = std::wstring(L"Unknown option: ") + std::wstring(a);
       }

@@ -40,6 +40,56 @@ def _load_script(name: str):
     return module
 
 
+def check_clang_tidy_header_filter(tidy_config: str, failures: list[str]) -> None:
+    """HeaderFilterRegex must reach project headers under either separator.
+
+    The Windows compile database spells include directories with backslashes,
+    so clang reports a header as G:\\...\\helper\\src\\CrashCapture.h, with a
+    forward slash only where the #include spelling has one. A "helper/" filter
+    matched no Windows header and every finding there was dropped as non-user
+    code. Python re stands in for llvm::Regex here; the pattern sticks to
+    syntax both read the same way ([\\\\/] is "backslash or slash" in each).
+    """
+    match = re.search(r"^HeaderFilterRegex:\s*'((?:[^']|'')*)'\s*$", tidy_config, re.MULTILINE)
+    if match is None:
+        failures.append(".clang-tidy must set HeaderFilterRegex as a single-quoted YAML string")
+        return
+    # Inside YAML single quotes a backslash is literal and '' is a quote.
+    pattern = match.group(1).replace("''", "'")
+    try:
+        header_filter = re.compile(pattern)
+    except re.error as exc:
+        failures.append(f".clang-tidy HeaderFilterRegex does not compile: {exc}")
+        return
+
+    project_headers = (
+        r"G:\r\helper\include\SkyrimDiagHelper/ManualCaptureHotkey.h",
+        r"G:\r\helper\src\CrashCapture.h",
+        r"G:\r\plugin\include\SkyrimDiag/CrashHandler.h",
+        r"G:\r\dump_tool\src\WctTypes.h",
+        r"G:\r\shared\SkyrimDiagWctWait.h",
+        "/home/runner/work/r/dump_tool/src/WctTypes.h",
+        "/home/runner/work/r/helper/src/CrashCapture.h",
+        "/home/runner/work/r/shared/SkyrimDiagWctWait.h",
+    )
+    for path in project_headers:
+        if header_filter.search(path) is None:
+            failures.append(
+                f".clang-tidy HeaderFilterRegex skips project header {path}; "
+                "its findings would never fail the gate"
+            )
+
+    dependency_headers = (
+        r"D:\a\r\build-win\vcpkg_installed\x64-windows-static\include\fmt\core.h",
+        "/home/runner/work/r/build-tidy/vcpkg_installed/x64-linux/include/fmt/core.h",
+    )
+    for path in dependency_headers:
+        if header_filter.search(path) is not None:
+            failures.append(
+                f".clang-tidy HeaderFilterRegex matches dependency header {path}"
+            )
+
+
 def check_clang_tidy_is_wired(failures: list[str]) -> None:
     tidy_config = _read(REPO_ROOT / ".clang-tidy")
     if "WarningsAsErrors: '*'" not in tidy_config:
@@ -47,6 +97,7 @@ def check_clang_tidy_is_wired(failures: list[str]) -> None:
             ".clang-tidy must keep WarningsAsErrors: '*' so a new finding fails "
             "CI instead of scrolling past in the log"
         )
+    check_clang_tidy_header_filter(tidy_config, failures)
 
     linux_runner = REPO_ROOT / "scripts" / "run_clang_tidy.sh"
     windows_runner = REPO_ROOT / "scripts" / "run_clang_tidy.py"
