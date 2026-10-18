@@ -161,6 +161,19 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
   state->hangState.loadStartQpc = 0;
   state->nextCrashEventRetryTick64 = GetTickCount64();
   state->nextCrashEventWarnTick64 = 0;
+
+  // The plugin claims kState_Frozen before every publish, and only a helper
+  // clears it. So a committed generation with Frozen clear was already ACKed
+  // by an earlier helper that the plugin's watchdog replaced: released as
+  // handled, or (indistinguishable here) its dump could not be written. It
+  // is not reported again at exit. A generation still Frozen stays reportable.
+  CrashEventInfo committed{};
+  if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
+      (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    state->crashCaptured.releasedCrashSeq = committed.crashSeq;
+    state->crashCaptured.releasedCrashTick64 = GetTickCount64();
+    state->crashCaptured.releasedOnBriefHeartbeat = false;
+  }
 }
 
 void RegisterManualCaptureHotkeyIfEnabled(

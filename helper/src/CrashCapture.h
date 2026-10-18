@@ -111,7 +111,7 @@ inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, s
 // seen held (ManualCaptureKeyWatcher), whatever the manual capture hotkey is.
 inline constexpr std::uint64_t kCrashLoggerThreadDumpWindowMs = 60000;
 
-constexpr bool IsLikelyCrashLoggerThreadDumpFault(
+constexpr bool IsInCrashLoggerThreadDumpWindow(
   std::uint32_t exceptionCode,
   std::uint64_t nowTick64,
   std::uint64_t lastCrashLoggerHotkeyTick64) noexcept
@@ -119,6 +119,23 @@ constexpr bool IsLikelyCrashLoggerThreadDumpFault(
   return lastCrashLoggerHotkeyTick64 != 0u && nowTick64 >= lastCrashLoggerHotkeyTick64 &&
          nowTick64 - lastCrashLoggerHotkeyTick64 <= kCrashLoggerThreadDumpWindowMs &&
          (exceptionCode == 0xE06D7363u || exceptionCode == 0x80000003u);
+}
+
+// Crash Logger's thread dump probes the other threads from its own threads,
+// and a kept exception is recorded only when a probe faults on the thread
+// that threw it. The game's main thread is only a suspended target there, so
+// a fault recorded on it is not a probe but a crash Crash Logger is reporting
+// from its handler on that thread, which can end the game within seconds. A
+// main thread id of 0 (not known from the blackbox) keeps the window.
+constexpr bool IsLikelyCrashLoggerThreadDumpFault(
+  std::uint32_t exceptionCode,
+  std::uint64_t nowTick64,
+  std::uint64_t lastCrashLoggerHotkeyTick64,
+  std::uint32_t faultingTid,
+  std::uint32_t mainThreadId) noexcept
+{
+  return IsInCrashLoggerThreadDumpWindow(exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64) &&
+         (mainThreadId == 0u || faultingTid != mainThreadId);
 }
 
 // When Crash Logger's thread dump hotkey was last seen held (GetTickCount64),
@@ -141,7 +158,8 @@ struct CrashCaptureState {
   // newer one (kRetryNewerCrash) is not released.
   std::uint32_t releasedCrashSeq = 0;
   // When that release happened (GetTickCount64), and whether it rested only on
-  // the heartbeat advancing for a few seconds after the crash dump.
+  // the heartbeat advancing for a few seconds, before a dump (Crash Logger's
+  // thread dump window) or after it.
   std::uint64_t releasedCrashTick64 = 0;
   bool releasedOnBriefHeartbeat = false;
   // The crash generation whose dump could not be written, and whether the
@@ -280,17 +298,22 @@ inline bool ShouldQuarantineCleanExitEvidence(
   return exitCode == 0u && info.isStrong && IsCommittedCrashSequence(info.crashSeq);
 }
 
-// A crash released as handled is normally not reported again at exit. The
-// release after its dump on a few seconds of advancing heartbeat is weak
-// evidence, though: a worker thread's crash handler (e.g. Crash Logger
-// writing its log) can run that long while the main thread still ticks, and
-// that dump is normally deleted. So a non-zero exit within kLateRecoveryMinAliveMs of
-// such a release, or any non-zero exit with the released exception's own
-// code, still records the released fault.
+// A crash released as handled is normally not reported again at exit. A
+// release on a few seconds of advancing heartbeat is weak evidence, though,
+// before a dump (Crash Logger's thread dump window) as after one: a worker
+// thread's crash handler (e.g. Crash Logger writing its log) can run that long
+// while the main thread still ticks, and no dump is left either way. So a
+// non-zero exit within kLateRecoveryMinAliveMs of such a release still records
+// the released fault, unless the game froze after the release (a hang
+// captured, the heartbeat stalled at exit, or Windows closed it as not
+// responding): a crash handler on a worker thread leaves the heartbeat
+// running, while a frozen game that was closed does not. Any non-zero exit
+// with the released exception's own code records it too.
 constexpr bool ShouldReportReleasedCrashAtExit(
   std::uint32_t exitCode,
   std::uint32_t exceptionCode,
   bool releasedOnBriefHeartbeat,
+  bool gameFrozeAfterRelease,
   std::uint64_t releasedTick64,
   std::uint64_t exitTick64) noexcept
 {
@@ -300,7 +323,7 @@ constexpr bool ShouldReportReleasedCrashAtExit(
   if (exitCode == exceptionCode) {
     return true;
   }
-  return releasedOnBriefHeartbeat && exitTick64 >= releasedTick64 &&
+  return releasedOnBriefHeartbeat && !gameFrozeAfterRelease && exitTick64 >= releasedTick64 &&
          exitTick64 - releasedTick64 < kLateRecoveryMinAliveMs;
 }
 
@@ -383,10 +406,13 @@ inline constexpr std::uint32_t kExitCodeClosedAsNotResponding = 0xCFFFFFFFu;
 // A non-zero exit with no crash on record, after the game had stopped
 // responding (a hang was captured in this episode, the heartbeat had stalled
 // past the hang threshold, or Windows closed it as not responding), is a
-// frozen game being closed, by the user or a watchdog. The abnormal-exit hint
-// would point at a plugin's error dialog and at WER LocalDumps, which cannot
-// capture a hung or terminated game. It still applies when a dialog was on
-// screen at the hang capture (a plugin's error dialog that then ends the
+// frozen game being closed (by the user, a watchdog or Windows), or a crash
+// that a crash handler ended: Crash Logger ends a crash it reports with exit
+// code 1, also one SkyrimDiag does not record, and its log can take longer
+// than the hang threshold. Only kExitCodeClosedAsNotResponding tells a close
+// apart. The abnormal-exit hint would point at a plugin's error dialog and at
+// WER LocalDumps, which captures neither case. It still applies when a dialog
+// was on screen at the hang capture (a plugin's error dialog that then ends the
 // game), and for an NTSTATUS error exit code such as a fail-fast, which WER
 // does capture. A stalled heartbeat does not count when the helper held back
 // this episode's hang capture because the game window still answered: a

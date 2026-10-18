@@ -278,6 +278,8 @@ std::vector<DWORD> ExtractPreferredWctThreadIds(std::string_view wctJsonUtf8)
   return tids;
 }
 
+}  // namespace
+
 std::optional<DWORD> InferMainThreadIdFromSnapshot(
   const skydiag::SharedLayout* snapshot,
   std::size_t snapshotBytes)
@@ -323,6 +325,8 @@ std::optional<DWORD> InferMainThreadIdFromSnapshot(
   }
   return mainTid;
 }
+
+namespace {
 
 bool ShouldShapePreferredThread(const DumpCallbackContext& ctx)
 {

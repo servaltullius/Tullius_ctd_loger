@@ -493,6 +493,11 @@ FilterVerdict FilterFirstChanceException(
         return FilterVerdict::kDeleteRecovered;
       }
     }
+    // The checks left cannot reach the required advances: keep the dump now
+    // rather than wait them out (a stalled main thread, a real crash).
+    if (heartbeatAdvanceCount + (kMaxHeartbeatChecks - attempt - 1) < kRequiredHeartbeatAdvances) {
+      break;
+    }
   }
 
   return FilterVerdict::kKeepDump;
@@ -1062,11 +1067,26 @@ bool HandleCrashEventTick(
   // Right after Crash Logger's thread dump hotkey, a C++ exception or
   // breakpoint is most likely one of its thread dump's probes
   // (IsLikelyCrashLoggerThreadDumpFault): check that the game keeps running
-  // before writing a dump, not after.
+  // before writing a dump, not after. Not for one on the game's main thread:
+  // that is a crash Crash Logger is reporting, and it may end the game before
+  // the check is done.
   bool exitedBeforeDump = false;
-  if (proc.process && proc.shm &&
-      IsLikelyCrashLoggerThreadDumpFault(
-        info.exceptionCode, GetTickCount64(), g_lastCrashLoggerHotkeyTick64.load(std::memory_order_relaxed))) {
+  const std::uint64_t nowTick64 = GetTickCount64();
+  const std::uint64_t lastCrashLoggerHotkeyTick64 = g_lastCrashLoggerHotkeyTick64.load(std::memory_order_relaxed);
+  const bool inThreadDumpWindow = proc.process && proc.shm &&
+    IsInCrashLoggerThreadDumpWindow(info.exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64);
+  const std::uint32_t mainThreadId = inThreadDumpWindow
+    ? skydiag::helper::InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes).value_or(0u)
+    : 0u;
+  if (inThreadDumpWindow &&
+      !IsLikelyCrashLoggerThreadDumpFault(
+        info.exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64, info.faultingTid, mainThreadId)) {
+    AppendLogLine(
+      outBase,
+      L"This exception came within a minute of Crash Logger's thread dump hotkey, but on the game's main thread "
+      L"(tid=" + std::to_wstring(mainThreadId)
+        + L"), so it is not one of its thread dump's probes: writing the crash dump now.");
+  } else if (inThreadDumpWindow) {
     const auto early = FilterFirstChanceException(
       cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
     if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
@@ -1076,7 +1096,8 @@ bool HandleCrashEventTick(
         crashState->latched = false;
         crashState->releasedCrashSeq = info.crashSeq;
         crashState->releasedCrashTick64 = GetTickCount64();
-        crashState->releasedOnBriefHeartbeat = false;
+        // As weak as the release after a dump (ShouldReportReleasedCrashAtExit).
+        crashState->releasedOnBriefHeartbeat = early == FilterVerdict::kDeleteRecovered;
       }
       AppendLogLine(
         outBase,

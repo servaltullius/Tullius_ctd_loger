@@ -99,13 +99,22 @@ bool DrainCrashEventBeforeExit(
   if (state->crashCaptured.releasedCrashSeq == info.crashSeq) {
     const auto& crash = state->crashCaptured;
     const std::uint64_t nowTick64 = GetTickCount64();
+    // A frozen game that was closed, not a crash handler that ended it.
+    const bool frozeAfterRelease = state->hangState.hangCapturedThisEpisode ||
+      exitCode == kExitCodeClosedAsNotResponding || ReadHeartbeatAtExit(cfg, proc).stalled;
     if (!ShouldReportReleasedCrashAtExit(
-          exitCode, info.exceptionCode, crash.releasedOnBriefHeartbeat, crash.releasedCrashTick64, nowTick64)) {
+          exitCode,
+          info.exceptionCode,
+          crash.releasedOnBriefHeartbeat,
+          frozeAfterRelease,
+          crash.releasedCrashTick64,
+          nowTick64)) {
       AppendLogLine(
         outBase,
         L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
           + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
-          + std::to_wstring(exitCode) + L").");
+          + std::to_wstring(exitCode)
+          + (frozeAfterRelease ? L", the game had stopped responding since" : L"") + L").");
       return false;
     }
     AppendLogLine(
@@ -532,6 +541,15 @@ bool HandleProcessExitTick(
               + std::to_wstring(crash.dumpWriteFailedCrashSeq)
               + L", whose dump could not be written; keeping its WER LocalDumps hint.");
         }
+      } else if (crashOnRecord) {
+        // The drain just recorded a fault as post-exit metadata, so the hint
+        // for an exit without a recorded exception does not apply.
+        if (cfg.enableWerDumpFallbackHint) {
+          AppendLogLine(
+            outBase,
+            L"Abnormal process exit (exit_code=" + std::to_wstring(exitCode)
+              + L") with a crash on record as post-exit metadata; no abnormal-exit WER LocalDumps hint.");
+        }
       } else if (IsCloseOfUnresponsiveGame(
                    exitCode,
                    crashOnRecord,
@@ -552,12 +570,22 @@ bool HandleProcessExitTick(
         }
         if (exitCode == kExitCodeClosedAsNotResponding) {
           evidence += L", closed by Windows as not responding";
+          AppendLogLine(
+            outBase,
+            L"The game was closed while not responding (exit_code=" + std::to_wstring(exitCode) + evidence
+              + L") with no unhandled crash on record; no WER LocalDumps hint, since WER cannot capture a "
+                L"frozen game that is ended.");
+        } else {
+          // Crash Logger ends a crash it reports with exit code 1, also one
+          // SkyrimDiag does not record, so this may have been a crash.
+          AppendLogLine(
+            outBase,
+            L"The game stopped responding and then exited (exit_code=" + std::to_wstring(exitCode) + evidence
+              + L") with no crash SkyrimDiag recorded. Either it was closed (Task Manager or a watchdog), or a "
+                L"crash handler ended it: Crash Logger ends a crash it reports with exit code 1, also an "
+                L"exception SkyrimDiag does not record. Check for a Crash Logger crash-*.log from this time. "
+                L"No WER LocalDumps hint, since WER captures neither case.");
         }
-        AppendLogLine(
-          outBase,
-          L"The game was closed while not responding (exit_code=" + std::to_wstring(exitCode) + evidence
-            + L") with no unhandled crash on record; no WER LocalDumps hint, since WER cannot capture a "
-              L"frozen game that is ended.");
       } else if (cfg.enableWerDumpFallbackHint) {
         WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
         AppendLogLine(

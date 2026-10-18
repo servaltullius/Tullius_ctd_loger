@@ -141,6 +141,13 @@ int wmain(int argc, wchar_t** argv)
 
     skydiag::helper::internal::HelperLoopState loopState{};
     skydiag::helper::internal::InitializeLoopState(proc, &loopState);
+    if (loopState.crashCaptured.releasedCrashSeq != 0u) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(loopState.crashCaptured.releasedCrashSeq)
+          + L" was already acknowledged by an earlier helper (not frozen); it is not reported again at "
+            L"process exit unless the game exits with its exception code.");
+    }
     skydiag::helper::internal::RunHelperLoop(
       cfg,
       proc,
