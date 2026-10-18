@@ -303,8 +303,8 @@ std::optional<DWORD> InferMainThreadIdFromSnapshot(
 
   const std::uint32_t writeIndex = snapshot->header.write_index;
   const std::uint32_t begin = (writeIndex > capacity) ? (writeIndex - capacity) : 0u;
-  std::optional<DWORD> sessionStartTid;
-  std::optional<DWORD> latestHeartbeatTid;
+  std::optional<DWORD> mainTid;
+  int mainRank = 0;
   for (std::uint32_t i = begin; i < writeIndex; ++i) {
     const auto& source = snapshot->events[i % capacity];
     const std::uint32_t seq1 = source.seq;
@@ -317,14 +317,14 @@ std::optional<DWORD> InferMainThreadIdFromSnapshot(
     if (seq1 != seq2 || (seq2 & 1u) != 0u || event.tid == 0u) {
       continue;
     }
-    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat)) {
-      latestHeartbeatTid = event.tid;
-    } else if (!sessionStartTid &&
-               event.type == static_cast<std::uint16_t>(skydiag::EventType::kSessionStart)) {
-      sessionStartTid = event.tid;
+    // Equal ranks: the newer event wins.
+    const int rank = skydiag::MainThreadEventRank(event.type);
+    if (rank > 0 && rank >= mainRank) {
+      mainRank = rank;
+      mainTid = event.tid;
     }
   }
-  return latestHeartbeatTid ? latestHeartbeatTid : sessionStartTid;
+  return mainTid;
 }
 
 bool ShouldShapePreferredThread(const DumpCallbackContext& ctx)

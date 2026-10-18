@@ -52,6 +52,7 @@ std::unordered_map<std::uint64_t, std::string> g_lastModuleNames;
 std::unordered_set<std::uint32_t> g_lastThreadIds;
 
 constexpr std::uint64_t kLifecyclePollIntervalMs = 1000;
+constexpr std::uint64_t kHeartbeatEventIntervalSec = 60;
 
 inline void HeartbeatTaskOnMainThread() noexcept
 {
@@ -67,6 +68,17 @@ inline void HeartbeatTaskOnMainThread() noexcept
   QueryPerformanceCounter(&li);
   const std::uint64_t now = static_cast<std::uint64_t>(li.QuadPart);
   shm->header.last_heartbeat_qpc = now;
+
+  // A Heartbeat event now and then names the main thread for the helper and
+  // the analyzer (MainThreadEventRank) after SessionStart left the ring.
+  static std::uint64_t lastHeartbeatEventQpc = 0;
+  const std::uint64_t heartbeatEventIntervalQpc = shm->header.qpc_freq * kHeartbeatEventIntervalSec;
+  if (lastHeartbeatEventQpc == 0 || now >= lastHeartbeatEventQpc + heartbeatEventIntervalQpc) {
+    lastHeartbeatEventQpc = now;
+    skydiag::EventPayload hb{};
+    hb.a = shm->header.state_flags;
+    PushEvent(skydiag::EventType::kHeartbeat, hb, sizeof(hb));
+  }
 
   static std::uint64_t lastLoggedQpc = 0;
 

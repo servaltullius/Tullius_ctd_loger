@@ -252,24 +252,20 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
 
 std::optional<std::uint32_t> InferMainThreadIdFromEvents(const std::vector<EventRow>& events)
 {
-  // Heartbeats are emitted from the game main thread and are the freshest
-  // authority when present.
-  for (auto it = events.rbegin(); it != events.rend(); ++it) {
-    if (it->type == static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat) && it->tid != 0) {
-      return it->tid;
-    }
-  }
-
-  // Some real hangs stop before a heartbeat event reaches the retained event
-  // window. SharedMemory initialization emits SessionStart synchronously on
-  // the same main thread, so keep it as the compatibility fallback for v1-v4
-  // captures that do not store a dedicated main-thread id in SharedHeader.
+  // Heartbeats (plugins before v0.2.68 never wrote one), then the
+  // SessionStart marker SharedMemory writes on the main thread, then hitches,
+  // menus and loads: a session past 65,536 events has lost SessionStart.
+  // Equal ranks: the newer event wins.
+  std::optional<std::uint32_t> mainTid;
+  int mainRank = 0;
   for (const auto& event : events) {
-    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kSessionStart) && event.tid != 0) {
-      return event.tid;
+    const int rank = skydiag::MainThreadEventRank(event.type);
+    if (event.tid != 0 && rank > 0 && rank >= mainRank) {
+      mainRank = rank;
+      mainTid = event.tid;
     }
   }
-  return std::nullopt;
+  return mainTid;
 }
 
 std::optional<double> InferHeartbeatAgeFromEventsSec(const std::vector<EventRow>& events)
