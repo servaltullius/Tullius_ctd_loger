@@ -106,7 +106,7 @@ inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, s
 struct EarlierCrashFault {
   std::wstring dumpPath;
   CrashEventInfo info{};
-  ULONGLONG capturedTick64 = 0;
+  std::uint64_t capturedTick64 = 0;
 };
 
 struct CrashCaptureState {
