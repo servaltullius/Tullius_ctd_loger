@@ -235,6 +235,22 @@ void CleanupFilteredCrashArtifacts(
           + std::filesystem::path(state->capturedCrashDumpPath).filename().wstring());
     }
   }
+  if (!state->crashRecapture.dump.empty()) {
+    // Its own headless analysis is not tracked: a report it finishes after
+    // this can still appear without its dump.
+    const auto removal = RemoveCrashArtifactsForDump(
+      outBase,
+      state->crashRecapture.dump.wstring(),
+      state->crashRecapture.manifest,
+      preserveDump);
+    AppendLogLine(
+      outBase,
+      std::wstring(logPrefix) + L" after filtered crash; "
+        + (preserveDump ? L"recapture dump preserved, removed " : L"removed recapture dump and ")
+        + std::to_wstring(removal.removedCount) + L" artifact(s): "
+        + state->crashRecapture.dump.filename().wstring());
+    state->crashRecapture = CrashRecaptureArtifacts{};
+  }
   state->capturedCrashDumpPath.clear();
   state->pendingCrashViewerDumpPath.clear();
   state->crashCaptured.latched = false;
@@ -310,11 +326,16 @@ bool HandleLateRecoveryTick(
   return true;
 }
 
-void AppendExitClassificationLog(const std::filesystem::path& outBase)
+void AppendExitClassificationLog(const std::filesystem::path& outBase, bool hadCapturedCrash)
 {
+  // Without a captured exception there is nothing to classify; the next
+  // line already says the process exited.
+  if (!hadCapturedCrash) {
+    return;
+  }
   AppendLogLine(
     outBase,
-    L"Process exited normally (exit_code=0); treating captured first-chance exceptions as handled "
+    L"Process exited normally (exit_code=0); treating the captured first-chance exception as handled "
     L"and suppressing crash viewer/deferred behavior.");
 }
 
@@ -431,8 +452,9 @@ bool HandleProcessExitTick(
           + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
     }
     if (exitCode == 0) {
+      const bool hadCapturedCrash = state->crashCaptured.latched;
       CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, state);
-      AppendExitClassificationLog(outBase);
+      AppendExitClassificationLog(outBase, hadCapturedCrash);
     }
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
     std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";

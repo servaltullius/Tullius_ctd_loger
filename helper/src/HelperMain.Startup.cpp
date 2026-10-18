@@ -152,7 +152,11 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
     return;
   }
   state->hangState.wasLoading = (proc.shm->header.state_flags & skydiag::kState_Loading) != 0u;
-  state->hangState.loadStartQpc = state->hangState.wasLoading ? proc.shm->header.start_qpc : 0;
+  // Loading at attach is the game starting up (the plugin sets the flag until
+  // its data has loaded), not a load screen: timing it from start_qpc put a
+  // 2-minute sample next to every 25 s save load and roughly doubled the
+  // adaptive loading threshold. Only load screens seen start to end count.
+  state->hangState.loadStartQpc = 0;
   state->nextCrashEventRetryTick64 = GetTickCount64();
   state->nextCrashEventWarnTick64 = 0;
 }

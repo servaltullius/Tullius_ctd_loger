@@ -36,6 +36,8 @@ struct HelperLoopState
   // A crash viewer was opened for the dump when the game exited; it runs its
   // own analysis of that dump.
   bool crashViewerLaunchedAtExit = false;
+  // The full recapture of the captured crash, cleaned up with it.
+  CrashRecaptureArtifacts crashRecapture{};
 };
 
 struct CrashArtifactRemovalResult
@@ -73,7 +75,7 @@ void CleanupCrashArtifactsAfterZeroExit(
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
   HelperLoopState* state);
-void AppendExitClassificationLog(const std::filesystem::path& outBase);
+void AppendExitClassificationLog(const std::filesystem::path& outBase, bool hadCapturedCrash);
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,

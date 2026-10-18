@@ -85,7 +85,8 @@ void FinalizePendingCrashAnalysisIfReady(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase,
-  PendingCrashAnalysis* task)
+  PendingCrashAnalysis* task,
+  CrashRecaptureArtifacts* recaptureOut)
 {
   if (!task || !task->active || !task->process) {
     return;
@@ -163,7 +164,10 @@ void FinalizePendingCrashAnalysisIfReady(
       L", bucketSeenCount=" + std::to_wstring(recaptureContext.bucketSeenCount) +
       L", unknownStreak=" + std::to_wstring(recaptureContext.unknownStreak));
 
-  ApplyCrashRecaptureDecision(cfg, proc, outBase, *task, recaptureContext);
+  const auto recapture = ApplyCrashRecaptureDecision(cfg, proc, outBase, *task, recaptureContext);
+  if (recaptureOut && !recapture.dump.empty()) {
+    *recaptureOut = recapture;
+  }
 
   ClearPendingCrashAnalysis(task);
 }
