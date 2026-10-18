@@ -111,110 +111,10 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   AssertContains(log, "Crash event signaled", "Crash capture must log crash-event intake");
   AssertContains(log, "Incident manifest written", "Crash capture must log incident manifest creation");
   AssertContains(log, "Crash captured; waiting for process exit.", "Crash capture must log post-capture state");
-  Require((shared->header.state_flags & skydiag::kState_Frozen) != 0u,
-    "a kept crash locks the incident slot again after filtering (ADR-0017)");
 
   ShutdownRetentionWorker();
   CloseHandle(proc.crashEvent);
   proc.crashEvent = nullptr;
-  CloseAttachedProcess(&proc);
-  std::filesystem::remove_all(outBase);
-}
-
-// ADR-0017: while the helper checks a captured fault, the incident slot is
-// open again; a real CTD in those seconds publishes its own record. The
-// earlier dump is kept and the newer crash's manifest names it.
-void TestHandleCrashEventTick_NewerCrashWhileFilteringKeepsBoth()
-{
-  const auto outBase = MakeTempDir(L"skydiag_helper_newer_crash");
-  ClearLog(outBase);
-
-  auto shared = MakeSharedLayout();
-  ParkedThread faulting;
-  const CONTEXT faultingContext = faulting.Context();
-  const auto publish = [&](std::uint32_t code) {
-    auto& crash = shared->header.crash;
-    crash.exception_code = code;
-    crash.faulting_tid = faulting.tid();
-    crash.exception_addr = faultingContext.Rip;
-    crash.exception_record = EXCEPTION_RECORD{};
-    crash.exception_record.ExceptionCode = code;
-    crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(faultingContext.Rip);
-    crash.context = faultingContext;
-  };
-  shared->header.state_flags = skydiag::kState_Frozen;
-  publish(0xC0000005u);
-  shared->header.crash_seq = 2u;
-
-  auto proc = MakeSelfAttachedProcess(shared.get());
-  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
-  Require(proc.crashEvent != nullptr, "CreateEventW failed");
-
-  // The "game": once the helper hands the slot back, a second fault claims it
-  // the way the plugin does and signals the helper.
-  std::atomic_bool published{ false };
-  std::thread game([&] {
-    for (int i = 0; i < 2000 && !published.load(); ++i) {
-      if (skydiag::TryClaimCrashIncidentOwnership(&shared->header.state_flags)) {
-        shared->header.crash_seq = 3u;
-        publish(0xC0000096u);
-        MemoryBarrier();
-        shared->header.crash_seq = 4u;
-        SetEvent(proc.crashEvent);
-        published.store(true);
-        return;
-      }
-      Sleep(5);
-    }
-  });
-
-  HelperConfig cfg = MakeTestConfig();
-  cfg.autoOpenViewerOnCrash = false;
-  cfg.autoAnalyzeDump = false;
-  cfg.enableIncidentManifest = true;
-  CrashCaptureState crashState{};
-  PendingCrashEtwCapture pendingCrashEtw{};
-  PendingCrashAnalysis pendingCrashAnalysis{};
-  std::wstring lastCrashDumpPath;
-  std::wstring pendingHangViewerDumpPath;
-  std::wstring pendingCrashViewerDumpPath;
-  const auto tick = [&] {
-    return HandleCrashEventTick(
-      cfg, proc, outBase, /*waitMs=*/0, &crashState, &pendingCrashEtw, &pendingCrashAnalysis,
-      &lastCrashDumpPath, &pendingHangViewerDumpPath, &pendingCrashViewerDumpPath);
-  };
-
-  Require(tick(), "the first fault is consumed");
-  game.join();
-  Require(published.load(), "the second fault could publish while the first was checked");
-  Require(!crashState.latched, "the first fault is not latched as the crash");
-  const auto earlierDump = crashState.earlierFault.dumpPath;
-  Require(!earlierDump.empty() && FileExists(earlierDump), "the earlier dump is kept");
-  Require(crashState.earlierFault.info.exceptionCode == 0xC0000005u, "with its exception");
-
-  Sleep(1100);  // the dump names carry seconds
-  Require(tick(), "the newer crash is captured next");
-  Require(crashState.latched && crashState.capturedInfo.crashSeq == 4u, "the newer crash is the captured one");
-  Require(crashState.earlierFault.dumpPath.empty(), "the earlier fault was handed to this capture");
-  const auto manifests = [&] {
-    std::wstring found;
-    for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
-      const auto name = entry.path().filename().wstring();
-      if (name.rfind(L"SkyrimDiag_Incident_Crash_", 0) == 0) {
-        const auto text = ReadAllTextUtf8(entry.path());
-        if (text.find("earlier_fault") != std::string::npos) {
-          found = entry.path().wstring();
-        }
-      }
-    }
-    return found;
-  }();
-  Require(!manifests.empty(), "the newer crash's manifest names the earlier fault");
-  const auto manifest = ReadAllTextUtf8(manifests);
-  AssertContains(manifest, std::filesystem::path(earlierDump).filename().string(), "by its dump");
-  AssertContains(manifest, "\"exception_code\": 3221225477", "and its exception code");
-
-  ShutdownRetentionWorker();
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
 }
@@ -470,7 +370,6 @@ int main()
 {
   try {
     TestHandleCrashEventTick_WritesCrashArtifacts();
-    TestHandleCrashEventTick_NewerCrashWhileFilteringKeepsBoth();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
     TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();

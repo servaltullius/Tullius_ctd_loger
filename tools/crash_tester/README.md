@@ -24,7 +24,7 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 | Ctrl+Shift+F2 | CrashTester.dll 안에서 `int 3` | `0x80000003`, 모드가 스스로 멈춘 것이라는 해석, 후보 CrashTester.dll |
 | Ctrl+Shift+F3 | CrashTester.dll에서 처리되지 않는 C++ 예외. 그동안 다른 스레드가 잡히는 C++ 예외를 계속 던짐 | C++ 예외(`0xE06D7363`), Crash Logger의 C++ 예외 정보와 대조. 다른 스레드의 잡힌 예외 때문에 크래시가 빠지지 않음(리뷰 #5) |
 | Ctrl+Shift+F4 | 작업 스레드를 CrashTester.dll 안의 `Sleep`으로 45초 붙잡음(다시 누를 수 있음) | 자동 프리징 캡처, 막힌 작업 스레드의 CrashTester.dll을 후보로, 두 번째는 같은 `HANG1-` 버킷 |
-| Ctrl+Shift+F5 | CrashTester.dll이 스스로 잡는 접근 위반, 2초 뒤 CrashTester.dll 스레드에서 진짜 접근 위반 | 두 번째 크래시의 리포트에 `[이전 예외]` 안내와 첫 덤프 이름. 첫 덤프도 남음(ADR-0017) |
+| Ctrl+Shift+F5 | CrashTester.dll이 스스로 잡는 접근 위반, 2초 뒤 CrashTester.dll 스레드에서 진짜 접근 위반 | 남은 한계(ADR-0017): 진짜 크래시는 기록되지 않고, 첫 예외가 크래시로 남음. 고친 뒤에는 두 번째 크래시가 잡혀야 함 |
 | Ctrl+Shift+F6 | CrashTester.dll이 읽을 수 없는 메모리를 레퍼런스로 엔진의 `TESObjectREFR::GetDisplayFullName`에 넘김 | 예외 모듈 SkyrimSE.exe, 콜스택으로 CrashTester.dll을 후보로 |
 | Ctrl+Shift+F7 | 저널 메뉴를 열어, 게임이 부르는 CrashTester.dll의 메뉴 이벤트 콜백 안에서 접근 위반 | 게임이 부른 플러그인 콜백의 크래시. 후보 CrashTester.dll, 그 아래는 게임의 이벤트 처리 프레임 |
 | Ctrl+Shift+F8 | CrashTester.dll이 직접 만든 스레드에서 접근 위반 | 아래에 게임 프레임이 없는 스레드. 후보 CrashTester.dll |

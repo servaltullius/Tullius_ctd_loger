@@ -339,12 +339,18 @@ void KeepUnrecordedException(const skydiag::SharedLayout* shm, const EXCEPTION_P
     views[i].tid = g_keptExceptions[i].tid.load(std::memory_order_relaxed);
     views[i].qpc = g_keptExceptions[i].qpc.load(std::memory_order_relaxed);
   }
-  auto& kept = g_keptExceptions[SelectKeptExceptionSlot(
-    views, kKeptExceptionSlotCount, tid, nowQpc, KeptExceptionMaxAgeQpc(shm))];
+  const std::size_t slot = SelectKeptExceptionSlot(
+    views, kKeptExceptionSlotCount, tid, nowQpc, KeptExceptionMaxAgeQpc(shm));
+  auto& kept = g_keptExceptions[slot];
   if (kept.busy.exchange(1, std::memory_order_acquire) != 0) {
     return;
   }
   const DWORD keptTid = kept.tid.load(std::memory_order_relaxed);
+  if (keptTid != views[slot].tid) {
+    // Another thread took this slot after it was picked; its exception stays.
+    kept.busy.store(0, std::memory_order_release);
+    return;
+  }
   if (ShouldReplaceKeptException(
         keptTid != 0u,
         keptTid == tid,

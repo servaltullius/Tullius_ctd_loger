@@ -8,7 +8,6 @@
 #include <cwchar>
 #include <cstring>
 #include <filesystem>
-#include <utility>
 #include <iostream>
 #include <iterator>
 #include <new>
@@ -504,7 +503,6 @@ void ProcessValidCrashDump(
   const std::wstring& ts,
   const CrashEventInfo& info,
   const PluginScanInputs& pluginScanInputs,
-  const EarlierCrashFault& earlierFault,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
   std::wstring* pendingCrashViewerDumpPath)
@@ -557,16 +555,6 @@ void ProcessValidCrashDump(
   if (cfg.enableIncidentManifest) {
     nlohmann::json ctx = nlohmann::json::object();
     ctx["reason"] = "crash_event";
-    if (!earlierFault.dumpPath.empty()) {
-      const auto secondsBefore = static_cast<double>(GetTickCount64() - earlierFault.capturedTick64) / 1000.0;
-      ctx["earlier_fault"] = {
-        { "dump", WideToUtf8(std::filesystem::path(earlierFault.dumpPath).filename().wstring()) },
-        { "exception_code", earlierFault.info.exceptionCode },
-        { "exception_addr", earlierFault.info.exceptionAddr },
-        { "faulting_tid", earlierFault.info.faultingTid },
-        { "seconds_before", secondsBefore },
-      };
-    }
     const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
       cfg.dumpMode,
       skydiag::helper::CaptureKind::Crash);
@@ -1016,9 +1004,6 @@ bool HandleCrashEventTick(
         L"(crash_seq=" + std::to_wstring(info.crashSeq) + L").");
     return false;
   }
-  const ULONGLONG capturedTick64 = GetTickCount64();
-  const EarlierCrashFault earlierFault =
-    crashState ? std::exchange(crashState->earlierFault, EarlierCrashFault{}) : EarlierCrashFault{};
   if (crashState) {
     crashState->capturedInfo = info;
     crashState->cleanExitEvidenceWritten = false;
@@ -1137,14 +1122,6 @@ bool HandleCrashEventTick(
   // exit, after which its exe path and module list can no longer be queried.
   const PluginScanInputs pluginScanInputs = CollectPluginScanInputs(proc);
 
-  // ADR-0017: the dump holds this record now, so the incident slot is handed
-  // back while the filters below check it. A real CTD in those seconds then
-  // publishes its own record and the filters switch to it, instead of being
-  // locked out by a fault that may yet turn out to be handled. A kept dump
-  // locks the slot again below.
-  const bool rearmedWhileFiltering =
-    proc.shmWritable && proc.process && TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
-
   auto verdict = FilterVerdict::kKeepDump;
   if (proc.process) {
     verdict = FilterShutdownException(
@@ -1168,21 +1145,9 @@ bool HandleCrashEventTick(
             ? L"Recovered first-chance exception thawed blackbox/resource capture for a later real CTD."
             : L"Recovered first-chance exception was not thawed because a newer crash record is already present.");
       } else if (verdict == FilterVerdict::kRetryNewerCrash) {
-        // ADR-0017: either fault can be the cause - a handled exception just
-        // before a real CTD, or a real CTD followed by a secondary fault - so
-        // this dump stays and the newer crash's report points at it.
-        if (crashState) {
-          crashState->earlierFault = EarlierCrashFault{ dumpPath, info, capturedTick64 };
-          crashState->latched = false;
-        }
-        if (lastCrashDumpPath) {
-          lastCrashDumpPath->clear();
-        }
         AppendLogLine(
           outBase,
-          L"A newer crash superseded this fault while it was checked; keeping its dump for the newer crash's report ("
-            + std::filesystem::path(dumpPath).filename().wstring() + L") and capturing the newer crash next.");
-        return true;
+          L"Discarding the superseded first-chance dump state and immediately retrying the newer crash event.");
       }
 
       bool preserveFilteredDump = cfg.preserveFilteredCrashDumps;
@@ -1274,14 +1239,6 @@ bool HandleCrashEventTick(
     }
   }
 
-  if (rearmedWhileFiltering) {
-    // Kept as the crash: lock the slot again, so from here late recovery or
-    // the process exit decides it as before.
-    InterlockedOr(
-      reinterpret_cast<volatile LONG*>(&proc.shmWritable->header.state_flags),
-      static_cast<LONG>(skydiag::kState_Frozen));
-  }
-
   ProcessValidCrashDump(
     cfg,
     proc,
@@ -1290,7 +1247,6 @@ bool HandleCrashEventTick(
     ts,
     info,
     pluginScanInputs,
-    earlierFault,
     pendingCrashEtw,
     pendingCrashAnalysis,
     pendingCrashViewerDumpPath);
