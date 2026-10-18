@@ -31,6 +31,11 @@ Accepted
    WCT가 실제 순환 대기를 보고하지 않았다면 OS 잠금 사이클이 입증됐다고 표현하지
    않는다.
 
+### 보충 (2026-10-18, v0.2.68-rc2)
+- v0.2.68 이전 플러그인은 `Heartbeat` 이벤트를 한 번도 쓰지 않아, 실제로는 늘 `SessionStart`가 기준이었습니다.
+- 1.6.1170에서 SKSE 작업(하트비트 작업 포함)과 메뉴·히치 이벤트는 게임의 작업 스레드(BSJobs)에서 돌아, 그 이벤트의 스레드 ID는 메인 스레드가 아닙니다(v0.2.68-rc1 실게임 캡처: 43864, 39912, 41636, 25652로 계속 바뀜).
+- 그래서 기준 스레드는 `SessionStart`의 스레드(플러그인을 로드한 스레드)이고, 60초마다 쓰는 `Heartbeat`는 그 스레드 ID를 `payload.b`에 실어 링에서 `SessionStart`가 밀려난 긴 세션을 메웁니다(`skydiag::MainThreadIdFromEvent`). 이벤트 자신의 스레드 ID는 쓰지 않습니다.
+
 ## Output Contract
 
 요약 JSON의 `freeze_analysis.thread_module_consensus`에는 다음이 기록된다.

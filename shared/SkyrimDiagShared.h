@@ -38,25 +38,22 @@ enum class EventType : std::uint16_t {
   kHangMark = 200,
 };
 
-// How surely an event's tid is the game main thread: the newest Heartbeat,
-// then the SessionStart marker, then other events the plugin records on the
-// main thread (hitches, menus, loads). 0 is no evidence. The ring keeps
-// kEventCapacity events, so a long session can lose SessionStart.
-constexpr int MainThreadEventRank(std::uint16_t type) noexcept
+// The game main thread an event names, or 0. SessionStart is pushed on it
+// while the plugin loads. A Heartbeat carries it in payload.b: the heartbeat
+// task itself runs on a job thread on AE (1.6.1170 hands SKSE tasks to
+// BSJobs threads), so the event's own tid is not the main thread, and neither
+// is the tid of menu or hitch events. Heartbeats before v0.2.68-rc2 carry 0.
+// The ring keeps kEventCapacity events, so a long session can lose
+// SessionStart; a Heartbeat comes every 60 s.
+constexpr std::uint32_t MainThreadIdFromEvent(std::uint16_t type, std::uint32_t tid, std::uint64_t payloadB) noexcept
 {
   switch (static_cast<EventType>(type)) {
     case EventType::kHeartbeat:
-      return 3;
+      return static_cast<std::uint32_t>(payloadB & 0xFFFFFFFFu);
     case EventType::kSessionStart:
-      return 2;
-    case EventType::kPerfHitch:
-    case EventType::kMenuOpen:
-    case EventType::kMenuClose:
-    case EventType::kLoadStart:
-    case EventType::kLoadEnd:
-      return 1;
+      return tid;
     default:
-      return 0;
+      return 0u;
   }
 }
 

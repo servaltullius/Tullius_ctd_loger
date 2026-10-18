@@ -109,23 +109,27 @@ void TestMainThreadFromEvents()
 {
   using skydiag::EventType;
   using skydiag::dump_tool::internal::InferMainThreadIdFromEvents;
-  const auto at = [](skydiag::EventType type, double tMs, std::uint32_t tid) {
+  const auto at = [](skydiag::EventType type, double tMs, std::uint32_t tid, std::uint64_t b = 0) {
     auto row = Event(type, tMs);
     row.tid = tid;
+    row.b = b;
     return row;
   };
 
   Require(!InferMainThreadIdFromEvents({ at(EventType::kThreadCreate, 1.0, 7) }).has_value(), "no main-thread event");
-  Require(InferMainThreadIdFromEvents({ at(EventType::kSessionStart, 1.0, 100), at(EventType::kMenuOpen, 2.0, 200) }) == 100u,
-    "SessionStart beats a menu event");
-  Require(InferMainThreadIdFromEvents({ at(EventType::kSessionStart, 1.0, 100), at(EventType::kHeartbeat, 2.0, 300),
-            at(EventType::kHeartbeat, 3.0, 301), at(EventType::kMenuClose, 4.0, 200) }) == 301u,
-    "the newest Heartbeat wins");
-  Require(InferMainThreadIdFromEvents({ at(EventType::kThreadCreate, 1.0, 7), at(EventType::kMenuOpen, 2.0, 200),
-            at(EventType::kPerfHitch, 3.0, 201), at(EventType::kFirstChanceException, 4.0, 9) }) == 201u,
-    "after SessionStart left the ring, the newest main-thread event");
-  Require(InferMainThreadIdFromEvents({ at(EventType::kHeartbeat, 1.0, 0), at(EventType::kLoadEnd, 2.0, 200) }) == 200u,
-    "an event without a tid is skipped");
+  // On 1.6.1170 menus, hitches and the heartbeat task run on job threads
+  // (rc1 capture, 2026-10-18: tids 43864, 39912, 41636, 25652), so their tid
+  // never names the main thread.
+  Require(InferMainThreadIdFromEvents({ at(EventType::kSessionStart, 1.0, 100), at(EventType::kMenuOpen, 2.0, 200),
+            at(EventType::kPerfHitch, 3.0, 201) }) == 100u,
+    "SessionStart, not a menu or hitch thread");
+  Require(InferMainThreadIdFromEvents({ at(EventType::kHeartbeat, 2.0, 43864, 100), at(EventType::kHeartbeat, 3.0, 25652, 100),
+            at(EventType::kMenuClose, 4.0, 200) }) == 100u,
+    "after SessionStart left the ring, the thread a Heartbeat names, not its own tid");
+  Require(!InferMainThreadIdFromEvents({ at(EventType::kHeartbeat, 1.0, 25652, 0), at(EventType::kLoadEnd, 2.0, 200) }).has_value(),
+    "an rc1 Heartbeat that names no thread is not evidence");
+  Require(InferMainThreadIdFromEvents({ at(EventType::kSessionStart, 1.0, 100), at(EventType::kHeartbeat, 2.0, 25652, 0) }) == 100u,
+    "and does not displace SessionStart");
 }
 
 AnalysisResult MakeHang()

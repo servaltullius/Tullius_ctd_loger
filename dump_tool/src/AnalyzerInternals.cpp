@@ -252,17 +252,13 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
 
 std::optional<std::uint32_t> InferMainThreadIdFromEvents(const std::vector<EventRow>& events)
 {
-  // Heartbeats (plugins before v0.2.68 never wrote one), then the
-  // SessionStart marker SharedMemory writes on the main thread, then hitches,
-  // menus and loads: a session past 65,536 events has lost SessionStart.
-  // Equal ranks: the newer event wins.
+  // The SessionStart marker SharedMemory writes on the main thread, or a
+  // Heartbeat that names it (MainThreadIdFromEvent): a session past 65,536
+  // events has lost SessionStart. The newest one wins.
   std::optional<std::uint32_t> mainTid;
-  int mainRank = 0;
   for (const auto& event : events) {
-    const int rank = skydiag::MainThreadEventRank(event.type);
-    if (event.tid != 0 && rank > 0 && rank >= mainRank) {
-      mainRank = rank;
-      mainTid = event.tid;
+    if (const auto named = skydiag::MainThreadIdFromEvent(event.type, event.tid, event.b); named != 0u) {
+      mainTid = named;
     }
   }
   return mainTid;

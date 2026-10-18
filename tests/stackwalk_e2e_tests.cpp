@@ -89,11 +89,11 @@ void TestFormalStackwalkUnwindsRealCallerChain()
   // The blackbox names the parked thread as the game main thread.
   auto shared = MakeSharedLayout();
   shared->header.last_heartbeat_qpc = 1;
-  auto& heartbeat = shared->events[0];
-  heartbeat.tid = parkedTid;
-  heartbeat.qpc = 2;
-  heartbeat.type = static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat);
-  heartbeat.seq = 2;
+  auto& sessionStart = shared->events[0];
+  sessionStart.tid = parkedTid;
+  sessionStart.qpc = 2;
+  sessionStart.type = static_cast<std::uint16_t>(skydiag::EventType::kSessionStart);
+  sessionStart.seq = 2;
   shared->header.write_index = 1;
 
   auto proc = MakeSelfAttachedProcess(shared.get());
