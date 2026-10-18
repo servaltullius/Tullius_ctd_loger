@@ -625,8 +625,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? L"[Snapshot] No exception/crash info is present. This dump alone is not enough to blame a mod."
       : L"[정상/스냅샷] 예외(크래시) 정보가 없습니다. 이 덤프만으로 '어떤 모드가 크래시 원인'인지 판단하기 어렵습니다.");
     r.recommendations.push_back(en
-      ? L"[Snapshot] Capture during a real issue for diagnosis: (1) real CTD dump, (2) manual capture during freeze/infinite loading (Ctrl+Shift+F12) or an auto hang dump."
-      : L"[정상/스냅샷] 문제 상황에서 캡처해야 진단이 가능합니다: (1) 실제 크래시 덤프, (2) 프리징/무한로딩 중 수동 캡처(Ctrl+Shift+F12) 또는 자동 감지 덤프");
+      ? L"[Snapshot] Capture during a real issue for diagnosis: (1) real CTD dump, (2) manual capture during freeze/infinite loading (Ctrl+Shift+Backspace by default) or an auto hang dump."
+      : L"[정상/스냅샷] 문제 상황에서 캡처해야 진단이 가능합니다: (1) 실제 크래시 덤프, (2) 프리징/무한로딩 중 수동 캡처(기본 Ctrl+Shift+Backspace) 또는 자동 감지 덤프");
   }
 
   if (r.exc_code != 0) {
@@ -920,9 +920,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : ((en ? L" (" : L"(") + JoinList(wait.path_modules, wait.path_modules.size(), L", ") + L")");
       r.recommendations.push_back(en
         ? (L"[Main thread] The main thread was waiting inside the game engine, not running mod code. Do not remove the plugins on its stack" +
-            path + L" on this evidence alone; if the freeze repeats, capture it again while frozen (Ctrl+Shift+F12) and compare what stays the same.")
+            path + L" on this evidence alone; if the freeze repeats, capture it again while frozen (Ctrl+Shift+Backspace by default) and compare what stays the same.")
         : (L"[메인 스레드] 메인 스레드는 모드 코드를 실행하던 것이 아니라 게임 엔진 안에서 대기 중이었습니다. 이 근거만으로 스택의 플러그인" +
-            path + L"을 빼지 마세요. 프리징이 반복되면 멈춘 상태에서 다시 캡처(Ctrl+Shift+F12)해 공통점을 비교하세요."));
+            path + L"을 빼지 마세요. 프리징이 반복되면 멈춘 상태에서 다시 캡처(기본 Ctrl+Shift+Backspace)해 공통점을 비교하세요."));
     }
     if (isHangLike) {
       const auto& state = r.blackbox_freeze_summary;

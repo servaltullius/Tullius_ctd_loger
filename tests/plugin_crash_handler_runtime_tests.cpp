@@ -103,7 +103,7 @@ void TestBreakpointReportedByCrashLoggerIsRecordedInsteadOfTheProbe(
 }
 
 // Field case (v0.2.59-rc4): CrashLogger 1.25 writes a thread dump on
-// Ctrl+Shift+F12, the same keys as the manual capture, and its probes there
+// Ctrl+Shift+F12, then the same keys as the manual capture, and its probes there
 // were recorded as crashes; each press wrote and discarded full crash dumps.
 void TestCrashLoggerProbeWithNothingToReportIsIgnored(skydiag::SharedLayout* shm)
 {

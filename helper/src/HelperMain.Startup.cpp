@@ -167,17 +167,22 @@ void RegisterManualCaptureHotkeyIfEnabled(const HelperConfig& cfg, const std::fi
     return;
   }
 
+  static_assert(kHotkeyModAlt == MOD_ALT && kHotkeyModControl == MOD_CONTROL && kHotkeyModShift == MOD_SHIFT);
+  static_assert(kVkShift == VK_SHIFT && kVkControl == VK_CONTROL && kVkAlt == VK_MENU && kVkBack == VK_BACK);
+
   // Key-state polling also catches presses WM_HOTKEY never delivers (see
   // ManualCaptureKeyWatcher), so a failed registration only loses one path.
-  ManualCaptureKeys().Start();
-  if (!RegisterHotKey(nullptr, kHotkeyId, MOD_CONTROL | MOD_SHIFT, VK_F12)) {
+  const ManualCaptureHotkey& hotkey = cfg.manualCaptureHotkey;
+  const std::wstring chord = FormatManualCaptureHotkey(hotkey);
+  ManualCaptureKeys().Start(hotkey);
+  if (!RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)) {
     const DWORD le = GetLastError();
-    std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " << le << L"\n";
-    AppendLogLine(outBase, L"Warning: RegisterHotKey(Ctrl+Shift+F12) failed: " + std::to_wstring(le) +
-      L" (key-state polling still watches Ctrl+Shift+F12)");
+    std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(" << chord << L") failed: " << le << L"\n";
+    AppendLogLine(outBase, L"Warning: RegisterHotKey(" + chord + L") failed: " + std::to_wstring(le) +
+      L" (key-state polling still watches " + chord + L")");
   } else {
-    std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: Ctrl+Shift+F12\n";
-    AppendLogLine(outBase, L"Manual capture hotkey registered: Ctrl+Shift+F12 (also watched by key-state polling)");
+    std::wcout << L"[SkyrimDiagHelper] Manual capture hotkey: " << chord << L"\n";
+    AppendLogLine(outBase, L"Manual capture hotkey registered: " + chord + L" (also watched by key-state polling)");
   }
 }
 

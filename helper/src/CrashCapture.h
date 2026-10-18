@@ -100,11 +100,13 @@ inline bool AdvanceLateRecovery(LateRecoveryState* s, std::uint64_t nowTick64, s
          nowTick64 - s->latchedTick64 >= kLateRecoveryMinAliveMs;
 }
 
-// Crash Logger 1.25 also takes Ctrl+Shift+F12, for its thread dump, and
-// probes on each thread it dumps. A thread that threw and caught a C++
-// exception (or hit a breakpoint) in the last minute then gets that exception
-// recorded as a crash (v0.2.68-rc1/rc2 captures, 2026-10-18: one or two per
-// press, each a 600 MB dump that the heartbeat filter deleted again). Only
+// Crash Logger 1.25 takes Ctrl+Shift+F12 by default for its thread dump (the
+// manual capture hotkey up to v0.2.68-rc3; a ManualCaptureHotkey holding
+// Crash Logger's keys still fires it), and probes on each thread it dumps. A
+// thread that threw and caught a C++ exception (or hit a breakpoint) in the
+// last minute then gets that exception recorded as a crash (v0.2.68-rc1/rc2
+// captures, 2026-10-18: one or two per press, each a 600 MB dump that the
+// heartbeat filter deleted again). Only
 // those codes reach the crash record through Crash Logger's probes in the
 // default CrashHookMode=1.
 inline constexpr std::uint64_t kCrashLoggerThreadDumpWindowMs = 60000;

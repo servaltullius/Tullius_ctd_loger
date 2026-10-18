@@ -22,6 +22,8 @@
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/LoadStats.h"
+#include "SkyrimDiagHelper/ManualCaptureHotkey.h"
+#include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagHelper/WctCapture.h"
 #include "SkyrimDiagShared.h"
@@ -81,6 +83,23 @@ void DoManualCapture(
     L", threshold=" + std::to_wstring(decision.thresholdSec) +
     L", loading=" + std::to_wstring(decision.isLoading ? 1 : 0) +
     L", inMenu=" + std::to_wstring(inMenu ? 1 : 0) + L")");
+
+  // Once per session: the press may also have started Crash Logger's thread
+  // dump, which can deadlock the game (the preflight warns about it too).
+  static bool s_crashLoggerHotkeyChecked = false;
+  if (!s_crashLoggerHotkeyChecked) {
+    s_crashLoggerHotkeyChecked = true;
+    std::filesystem::path gameExeDir;
+    if (skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
+      const auto crashLoggerHotkey = skydiag::helper::CheckCrashLoggerThreadDumpHotkey(
+        gameExeDir / L"Data" / L"SKSE" / L"Plugins", cfg.manualCaptureHotkey);
+      if (crashLoggerHotkey.firesOnManualCapture) {
+        AppendLogLine(
+          outBase,
+          L"Warning: " + skydiag::helper::CrashLoggerHotkeyCollisionWarning(crashLoggerHotkey, cfg.manualCaptureHotkey));
+      }
+    }
+  }
 
   nlohmann::json wctJson;
   std::wstring wctErr;

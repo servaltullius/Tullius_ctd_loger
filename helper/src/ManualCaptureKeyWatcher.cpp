@@ -2,14 +2,16 @@
 
 #include <Windows.h>
 
+#include <cstdint>
+
 namespace skydiag::helper::internal {
 namespace {
 
 constexpr DWORD kKeyPollIntervalMs = 20;
 
-bool IsKeyDown(int virtualKey) noexcept
+bool IsKeyDown(std::uint32_t virtualKey) noexcept
 {
-  return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+  return (GetAsyncKeyState(static_cast<int>(virtualKey)) & 0x8000) != 0;
 }
 
 }  // namespace
@@ -19,17 +21,17 @@ ManualCaptureKeyWatcher::~ManualCaptureKeyWatcher()
   Stop();
 }
 
-void ManualCaptureKeyWatcher::Start()
+void ManualCaptureKeyWatcher::Start(const ManualCaptureHotkey& hotkey)
 {
   if (thread_.joinable()) {
     return;
   }
   stop_.store(false, std::memory_order_relaxed);
   pressed_.store(false, std::memory_order_relaxed);
-  thread_ = std::thread([this] {
-    ManualCaptureChordEdge edge;
+  thread_ = std::thread([this, hotkey] {
+    ManualCaptureChordEdge edge(hotkey);
     while (!stop_.load(std::memory_order_relaxed)) {
-      if (edge.Update(IsKeyDown(VK_CONTROL), IsKeyDown(VK_SHIFT), IsKeyDown(VK_F12))) {
+      if (edge.Update(IsKeyDown)) {
         pressed_.store(true, std::memory_order_release);
       }
       Sleep(kKeyPollIntervalMs);

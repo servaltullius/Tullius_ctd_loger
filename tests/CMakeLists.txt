@@ -291,8 +291,17 @@ add_executable(skydiag_manual_capture_chord_edge_tests
 )
 target_include_directories(skydiag_manual_capture_chord_edge_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
 )
 add_test(NAME skydiag_manual_capture_chord_edge_tests COMMAND skydiag_manual_capture_chord_edge_tests)
+
+add_executable(skydiag_manual_capture_hotkey_tests
+  manual_capture_hotkey_tests.cpp
+)
+target_include_directories(skydiag_manual_capture_hotkey_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+add_test(NAME skydiag_manual_capture_hotkey_tests COMMAND skydiag_manual_capture_hotkey_tests)
 
 add_executable(skydiag_dump_writer_guard_tests
   dump_writer_guard_tests.cpp

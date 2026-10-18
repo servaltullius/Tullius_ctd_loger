@@ -285,8 +285,34 @@ int main()
     manualCaptureBody,
     "ManualCaptureKeys().ConsumePress()",
     "Manual capture must also take presses from the key-state watcher, which WM_HOTKEY can miss in gameplay.");
-  if (manualCaptureBody.find("GetAsyncKeyState(VK_F12) & 1") != std::string::npos) {
+  if (manualCaptureBody.find("GetAsyncKeyState(") != std::string::npos) {
+    std::fprintf(stderr, "Manual capture must take polled presses from the key-state watcher, not read keys itself.\n");
+    std::abort();
+  }
+  const std::string keyWatcher = ReadAllText(repoRoot / "helper" / "src" / "ManualCaptureKeyWatcher.cpp");
+  AssertContains(
+    keyWatcher,
+    "& 0x8000) != 0",
+    "The key-state watcher must read the keys' current down state.");
+  if (keyWatcher.find(") & 1)") != std::string::npos) {
     std::fprintf(stderr, "Manual capture must not read GetAsyncKeyState's shared pressed-since-last-call bit.\n");
+    std::abort();
+  }
+  // Both paths watch the configured ManualCaptureHotkey, not a fixed chord.
+  AssertContains(
+    keyWatcher,
+    "ManualCaptureChordEdge edge(hotkey);",
+    "The key-state watcher must poll the configured manual capture hotkey.");
+  AssertContains(
+    helperMain,
+    "RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)",
+    "RegisterHotKey must register the configured manual capture hotkey.");
+  AssertContains(
+    helperMain,
+    "ManualCaptureKeys().Start(hotkey);",
+    "The key-state watcher must start with the configured manual capture hotkey.");
+  if (helperMain.find("VK_F12") != std::string::npos || keyWatcher.find("VK_F12") != std::string::npos) {
+    std::fprintf(stderr, "The manual capture hotkey must not be hard-coded to F12.\n");
     std::abort();
   }
   AssertContains(

@@ -15,7 +15,8 @@ using skydiag::helper::internal::ShouldPreserveFilteredDump;
 using skydiag::helper::internal::ShouldQuarantineCleanExitEvidence;
 using skydiag::helper::internal::kDumpWriteAttempts;
 
-// Crash Logger's thread dump shares Ctrl+Shift+F12 with the manual capture.
+// Crash Logger's thread dump can share the manual capture hotkey (both were
+// Ctrl+Shift+F12 up to v0.2.68-rc3).
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 30000u, 1000u));
 static_assert(skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0x80000003u, 61000u, 1000u));
 static_assert(!skydiag::helper::internal::IsLikelyCrashLoggerThreadDumpFault(0xE06D7363u, 61001u, 1000u), "a minute later");

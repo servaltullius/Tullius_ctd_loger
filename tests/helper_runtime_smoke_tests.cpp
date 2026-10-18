@@ -120,7 +120,8 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   std::filesystem::remove_all(outBase);
 }
 
-// Crash Logger's thread dump on the shared Ctrl+Shift+F12 records a caught
+// Crash Logger's thread dump on a hotkey shared with the manual capture (both
+// Ctrl+Shift+F12 up to v0.2.68-rc3) records a caught
 // C++ exception right after a manual capture; while the game keeps running no
 // dump is written (rc1/rc2 captures wrote and deleted 600 MB each time).
 void TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump()

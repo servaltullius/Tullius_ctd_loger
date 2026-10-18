@@ -45,7 +45,8 @@ Runtime prerequisites for release distribution:
   - Startup preflight output: `SkyrimDiag_Preflight.json` (`EnableCompatibilityPreflight=1`)
   - Dump-failure fallback hint: `SkyrimDiag_WER_LocalDumps_Hint.txt` (`EnableWerDumpFallbackHint=1`)
 - Manual capture:
-  - `Ctrl+Shift+F12` writes a dump + WCT JSON (snapshot / capture evidence during a problematic moment).
+  - `Ctrl+Shift+Backspace` (`ManualCaptureHotkey` in `SkyrimDiagHelper.ini`) writes a dump + WCT JSON (snapshot / capture evidence during a problematic moment).
+  - Not `Ctrl+Shift+F12` (the default up to v0.2.68-rc3): Crash Logger polls those keys for its thread dump, which can deadlock the game, and fires on any chord that holds them all. The preflight check `CRASH_LOGGER_HOTKEY_COLLISION` warns when the configured hotkey does.
 - Dump analysis (no WinDbg required):
   - Helper can auto-run analysis after a dump is written (`AutoAnalyzeDump=1` in `SkyrimDiagHelper.ini`).
   - Viewer auto-open policy is configured via `SkyrimDiagHelper.ini` (see `dist/SkyrimDiagHelper.ini` for defaults).

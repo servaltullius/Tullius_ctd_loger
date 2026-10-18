@@ -95,7 +95,7 @@ Capture and the text report work under Wine/Proton, but the WinUI viewer does no
 [/list]
 
 [b]Manual snapshot[/b]
-You can capture a manual snapshot with [font=Courier New]Ctrl+Shift+F12[/font]. Crash Logger 1.25 uses the same keys for its thread dump, so with both installed one press also writes a Crash Logger threaddump log.
+You can capture a manual snapshot with [font=Courier New]Ctrl+Shift+Backspace[/font] (change it with [font=Courier New]ManualCaptureHotkey=[/font] in SkyrimDiagHelper.ini). Up to v0.2.68-rc3 it was [font=Courier New]Ctrl+Shift+F12[/font], which Crash Logger 1.25 also uses for its thread dump; that thread dump can freeze the game, so do not set the hotkey back to a chord that holds Crash Logger's keys.
 
 [i]Note:[/i] A snapshot taken during normal gameplay may show [b]low confidence[/b].
 It is most useful when the game is already stuck or behaving abnormally.
@@ -210,7 +210,7 @@ Situation              Dump pattern           Trigger
 ─────────────────────  ─────────────────────  ──────────────────────────
 CTD                    *_Crash_*.dmp          Automatic
 Freeze / ILS           *_Hang_*.dmp           Automatic (threshold)
-Manual snapshot        *_Manual_*.dmp         Ctrl+Shift+F12
+Manual snapshot        *_Manual_*.dmp         Ctrl+Shift+Backspace
 [/code]
 
 [b][size=4]Output Location[/size][/b]
@@ -404,7 +404,7 @@ Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰
 [/list]
 
 [b]수동 스냅샷[/b]
-[font=Courier New]Ctrl+Shift+F12[/font]로 즉시 수동 스냅샷을 찍을 수 있습니다. Crash Logger 1.25도 같은 키를 스레드 덤프 단축키로 써서, 둘 다 설치되어 있으면 Crash Logger의 threaddump 로그도 함께 생깁니다.
+[font=Courier New]Ctrl+Shift+Backspace[/font]로 즉시 수동 스냅샷을 찍을 수 있습니다(SkyrimDiagHelper.ini의 [font=Courier New]ManualCaptureHotkey=[/font]로 변경). v0.2.68-rc3까지는 [font=Courier New]Ctrl+Shift+F12[/font]였는데, Crash Logger 1.25도 같은 키를 스레드 덤프 단축키로 쓰고 이 스레드 덤프가 게임을 멈추게 할 수 있습니다. 단축키를 Crash Logger의 키를 모두 포함하는 조합으로 되돌리지 마세요.
 
 [i]주의:[/i] 정상 플레이 중 수동 스냅샷은 [b]신뢰도 낮음[/b]으로 나올 수 있습니다.
 이미 멈췄거나 이상한 상태일 때 확인용으로 쓰는 편이 좋습니다.
@@ -519,7 +519,7 @@ SKSE\Plugins\SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe
 ─────────────────────  ─────────────────────  ──────────────────────────
 CTD                    *_Crash_*.dmp          자동
 프리징 / 무한 로딩     *_Hang_*.dmp           자동 (임계값 기반)
-수동 스냅샷            *_Manual_*.dmp         Ctrl+Shift+F12
+수동 스냅샷            *_Manual_*.dmp         Ctrl+Shift+Backspace
 [/code]
 
 [b][size=4]출력 위치[/size][/b]

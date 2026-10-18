@@ -57,10 +57,10 @@ WinDbg 없이 **요약 / 근거 / 체크리스트** 형태로 보여주는 진�
    - 또는 커맨드라인에서 `SkyrimDiagDumpToolWinUI.exe "경로\\dump.dmp"` 실행
    - `v0.2.53+`에서는 `SkyrimDiagWinUI` 최상위의 `SkyrimDiagDumpToolWinUI.exe`가 런처입니다. 많은 런타임 파일은 `SkyrimDiagWinUI\\app` 아래에 모아 둡니다.
 
-**수동 스냅샷:** `Ctrl+Shift+F12`
+**수동 스냅샷:** `Ctrl+Shift+Backspace` (`SkyrimDiagHelper.ini`의 `ManualCaptureHotkey=`로 변경)
 > 정상 플레이 중 찍은 스냅샷은 신뢰도가 낮을 수 있습니다. 프리징/무한로딩/CTD 직전에 찍는 것이 가장 유효합니다.
 >
-> Crash Logger 1.25도 같은 키를 스레드 덤프 단축키로 씁니다. 둘 다 설치되어 있으면 한 번 누를 때 Crash Logger의 `threaddump-*.log`도 함께 생깁니다.
+> v0.2.68-rc3까지는 `Ctrl+Shift+F12`였습니다. Crash Logger 1.25가 같은 키를 스레드 덤프 단축키로 쓰는데, 이 스레드 덤프는 게임 스레드를 하나씩 멈추며 게임을 멈추게(교착) 할 수 있습니다. 그래서 지금 `Ctrl+Shift+F12`를 누르면 Tullius 스냅샷이 아니라 Crash Logger 스레드 덤프만 동작합니다. `ManualCaptureHotkey`를 Crash Logger 단축키의 키를 모두 포함하는 조합으로 바꾸지 마세요. 시작 시 사전 점검이 `CRASH_LOGGER_HOTKEY_COLLISION`으로 경고합니다.
 
 ## 결과를 안전하게 해석하는 법
 
@@ -95,7 +95,7 @@ Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰
 |------|---------------|--------|
 | CTD (게임 튕김) | `*_Crash_*.dmp` | 자동 |
 | 프리징 / 무한로딩 | `*_Hang_*.dmp` | 자동 (임계값 기반) |
-| 수동 스냅샷 | `*_Manual_*.dmp` | `Ctrl+Shift+F12` |
+| 수동 스냅샷 | `*_Manual_*.dmp` | `Ctrl+Shift+Backspace` (`ManualCaptureHotkey=`) |
 
 프리징 감지 임계값 (`SkyrimDiagHelper.ini`):
 - `HangThresholdInGameSec` / `HangThresholdLoadingSec`

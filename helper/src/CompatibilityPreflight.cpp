@@ -16,6 +16,7 @@
 
 #include "HelperCommon.h"
 #include "HelperLog.h"
+#include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagStringUtil.h"
 
@@ -417,7 +418,7 @@ void RunCompatibilityPreflight(
   const SymbolRuntimeHealth symbolHealth = CollectSymbolRuntimeHealth(cfg);
 
   std::vector<PreflightCheck> checks;
-  checks.reserve(10);
+  checks.reserve(11);
 
   checks.push_back(PreflightCheck{
     "PLUGIN_SCAN_SOURCE",
@@ -442,6 +443,33 @@ void RunCompatibilityPreflight(
       ? "Multiple crash logger binaries detected. Keep only one active."
       : "No duplicate crash logger binaries detected.",
   });
+
+  // Crash Logger's thread dump on the manual capture hotkey suspends the
+  // game's threads one at a time and can deadlock the game (2026-10-18).
+  {
+    const auto crashLoggerHotkey = CheckCrashLoggerThreadDumpHotkey(pluginsDir, cfg.manualCaptureHotkey);
+    const bool collides = cfg.enableManualCaptureHotkey && crashLoggerHotkey.firesOnManualCapture;
+    const std::string crashLoggerKeys = WideToUtf8(FormatVirtualKeyList(crashLoggerHotkey.threadDump.keys));
+    const std::string manualKeys = WideToUtf8(FormatManualCaptureHotkey(cfg.manualCaptureHotkey));
+    checks.push_back(PreflightCheck{
+      "CRASH_LOGGER_HOTKEY_COLLISION",
+      collides ? "warn" : "ok",
+      collides ? "high" : "low",
+      collides
+        ? ("Crash Logger의 스레드 덤프 단축키(" + crashLoggerKeys + ")가 수동 캡처 단축키(" + manualKeys +
+            ")를 누를 때 함께 동작합니다. 스레드 덤프는 게임 스레드를 하나씩 멈추며 게임을 멈추게(교착) 할 수 있습니다. "
+            "SkyrimDiagHelper.ini의 ManualCaptureHotkey를 다른 조합으로 바꾸거나, CrashLogger.ini [Debug]의 "
+            "Enable Thread Dump Hotkey를 false로 설정하세요.")
+        : (cfg.enableManualCaptureHotkey
+            ? "수동 캡처 단축키(" + manualKeys + ")가 Crash Logger 스레드 덤프를 동작시키지 않습니다."
+            : "수동 캡처 단축키가 꺼져 있습니다."),
+      collides
+        ? WideToUtf8(CrashLoggerHotkeyCollisionWarning(crashLoggerHotkey, cfg.manualCaptureHotkey))
+        : (cfg.enableManualCaptureHotkey
+            ? "The manual capture hotkey (" + manualKeys + ") does not trigger Crash Logger's thread dump."
+            : "The manual capture hotkey is disabled."),
+    });
+  }
 
   checks.push_back(PreflightCheck{
     "BEES_RUNTIME_COMPAT",

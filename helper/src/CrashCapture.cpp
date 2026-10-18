@@ -1031,7 +1031,7 @@ bool HandleCrashEventTick(
       + L").");
 
   // Right after a manual capture, a C++ exception or breakpoint is most likely
-  // Crash Logger's thread dump on the same hotkey (IsLikelyCrashLoggerThreadDumpFault):
+  // Crash Logger's thread dump on a shared hotkey (IsLikelyCrashLoggerThreadDumpFault):
   // check that the game keeps running before writing a dump, not after.
   if (proc.process && proc.shm &&
       IsLikelyCrashLoggerThreadDumpFault(
@@ -1046,8 +1046,8 @@ bool HandleCrashEventTick(
       }
       AppendLogLine(
         outBase,
-        std::wstring(L"No dump written: this exception came within a minute of a manual capture, the hotkey Crash Logger "
-                     L"also uses for its thread dump, and the game ")
+        std::wstring(L"No dump written: this exception came within a minute of a manual capture, which can also start "
+                     L"Crash Logger's thread dump, and the game ")
           + (early == FilterVerdict::kDeleteRecovered ? L"kept running" : L"exited normally")
           + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
       return true;
