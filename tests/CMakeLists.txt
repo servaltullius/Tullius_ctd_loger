@@ -114,6 +114,23 @@ if(WIN32)
     COMMAND skydiag_summary_writer_runtime_tests
   )
 
+  # The helper's SkyrimDiag_Preflight.json masks symbol paths as the dump
+  # tool's redacted summaries do.
+  add_executable(skydiag_helper_path_redaction_tests
+    helper_path_redaction_tests.cpp
+  )
+  target_include_directories(skydiag_helper_path_redaction_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  )
+  target_link_libraries(skydiag_helper_path_redaction_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_helper_path_redaction_tests
+    COMMAND skydiag_helper_path_redaction_tests
+  )
+
   # What the analyzer takes from a dump: the pointer-scan start (review H3),
   # paths it may open (M16), module names of any length (L8).
   add_executable(skydiag_analyzer_dump_input_tests

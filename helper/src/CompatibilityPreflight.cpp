@@ -17,6 +17,7 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
+#include "SkyrimDiagHelper/PathRedaction.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagStringUtil.h"
 
@@ -628,8 +629,11 @@ void RunPreflightChecks(
     { "dbghelp_version", symbolHealth.dbghelpVersion },
     { "msdia_path", WideToUtf8(symbolHealth.msdiaPath.wstring()) },
     { "msdia_available", symbolHealth.msdiaAvailable },
-    { "search_path", WideToUtf8(symbolHealth.symbolSearchPath) },
-    { "cache_path", WideToUtf8(symbolHealth.symbolCachePath.wstring()) },
+    // Users attach this file to reports. A search path from _NT_SYMBOL_PATH or
+    // SKYRIMDIAG_SYMBOL_PATH and the default cache under %LOCALAPPDATA% name
+    // the user's folders: mask them as the dump tool's summaries do.
+    { "search_path", WideToUtf8(skydiag::helper::RedactSymbolSearchPath(symbolHealth.symbolSearchPath)) },
+    { "cache_path", WideToUtf8(skydiag::helper::RedactPath(symbolHealth.symbolCachePath.wstring())) },
     { "cache_ready", symbolHealth.symbolCacheReady },
     { "online_symbol_source_allowed", cfg.allowOnlineSymbols },
     { "search_path_uses_remote", symbolHealth.searchPathUsesRemote },
