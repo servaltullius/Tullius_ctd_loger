@@ -7,6 +7,7 @@
 #include "OutputWriter.h"
 #include "Utf.h"
 
+#include <exception>
 #include <filesystem>
 #include <iostream>
 
@@ -111,14 +112,26 @@ int wmain(int argc, wchar_t** argv)
     opt.game_version = ToAscii(gameVersionW);
   }
 
+  // Same exit codes as a reported failure: an exception from a malformed dump
+  // or sidecar must not end the process through std::terminate.
   AnalysisResult result{};
   std::wstring err;
-  if (!AnalyzeDump(a.dump_path, a.out_dir, opt, result, &err)) {
-    std::wcerr << L"[SkyrimDiagDumpToolCli] AnalyzeDump failed: " << err << L"\n";
+  try {
+    if (!AnalyzeDump(a.dump_path, a.out_dir, opt, result, &err)) {
+      std::wcerr << L"[SkyrimDiagDumpToolCli] AnalyzeDump failed: " << err << L"\n";
+      return 3;
+    }
+  } catch (const std::exception& ex) {
+    std::wcerr << L"[SkyrimDiagDumpToolCli] AnalyzeDump threw: " << Utf8OrAnsiToWide(ex.what()) << L"\n";
     return 3;
   }
-  if (!WriteOutputs(result, &err)) {
-    std::wcerr << L"[SkyrimDiagDumpToolCli] WriteOutputs failed: " << err << L"\n";
+  try {
+    if (!WriteOutputs(result, &err)) {
+      std::wcerr << L"[SkyrimDiagDumpToolCli] WriteOutputs failed: " << err << L"\n";
+      return 4;
+    }
+  } catch (const std::exception& ex) {
+    std::wcerr << L"[SkyrimDiagDumpToolCli] WriteOutputs threw: " << Utf8OrAnsiToWide(ex.what()) << L"\n";
     return 4;
   }
 

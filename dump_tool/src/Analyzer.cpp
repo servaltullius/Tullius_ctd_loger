@@ -594,8 +594,15 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!out.suspects_from_stackwalk) {
     // Pointer-density scans do not prove that a raw stack slot is a return
     // address. Keep their user-visible confidence Low even when Crash Logger
-    // corroboration reorders the same module to the top.
+    // corroboration reorders the same module to the top. The blocked game
+    // thread's plugin is not one of them: it comes from the walk of that
+    // thread, so it keeps its Medium lead (ADR-0009, review L7).
+    const bool hasBlockedLead = HasBlockedGameThread(out.main_thread_wait);
     for (auto& suspect : out.suspects) {
+      if (hasBlockedLead &&
+          _wcsicmp(suspect.module_filename.c_str(), out.main_thread_wait.blocked_module.c_str()) == 0) {
+        continue;
+      }
       suspect.confidence_level = i18n::ConfidenceLevel::kLow;
       suspect.confidence = i18n::ConfidenceText(out.language, suspect.confidence_level);
     }

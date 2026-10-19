@@ -85,9 +85,7 @@ void ResolveFaultModule(
     out.fault_module_filename = m.filename;
     const std::uint64_t off = out.exc_addr - m.base;
     out.fault_module_offset = off;
-    wchar_t buf[1024]{};
-    swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(), static_cast<unsigned long long>(off));
-    out.fault_module_plus_offset = buf;
+    out.fault_module_plus_offset = minidump::ModulePlusOffsetText(m.filename, off);
     out.inferred_mod_name = m.inferred_mod_name;
   } else if (auto m = ModuleForAddress(dumpBase, dumpSize, out.exc_addr)) {
     out.fault_module_path = m->path;
@@ -672,7 +670,8 @@ void ComputeSuspects(
       allModules,
       scanTids,
       out.exc_tid,
-      opt.language);
+      opt.language,
+      excCtx ? &*excCtx : nullptr);
     // The walk or Crash Logger already showed these only wrap the thread's
     // entry; a raw stack slot holding their return address says no more.
     std::erase_if(out.suspects, [&](const SuspectItem& suspect) {

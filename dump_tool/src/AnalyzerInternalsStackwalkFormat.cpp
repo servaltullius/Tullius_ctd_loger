@@ -18,10 +18,7 @@ std::wstring FormatModulePlusOffset(const std::vector<ModuleInfo>& modules, std:
 {
   if (auto idx = FindModuleIndexForAddress(modules, addr)) {
     const auto& m = modules[*idx];
-    const std::uint64_t off = addr - m.base;
-    wchar_t buf[1024]{};
-    swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(), static_cast<unsigned long long>(off));
-    return buf;
+    return minidump::ModulePlusOffsetText(m.filename, addr - m.base);
   }
   wchar_t buf[64]{};
   swprintf_s(buf, L"0x%llx", static_cast<unsigned long long>(addr));

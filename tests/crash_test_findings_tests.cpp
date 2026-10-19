@@ -155,6 +155,25 @@ void TestBlockedGameThreadLeadsTheFreezeReport()
   }
 }
 
+// Review L7: the blocked thread was found by walking that thread, so the
+// plugin's candidate does not weaken when the main thread's own suspects came
+// from the pointer-scan fallback.
+void TestBlockedLeadKeepsItsWeightWithoutMainThreadWalk()
+{
+  auto walked = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
+  BuildEvidenceAndSummary(walked, i18n::Language::kEnglish);
+  auto scanned = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
+  scanned.suspects_from_stackwalk = false;
+  scanned.suspects[1].confidence_level = i18n::ConfidenceLevel::kLow;
+  BuildEvidenceAndSummary(scanned, i18n::Language::kEnglish);
+  Require(!walked.actionable_candidates.empty() && !scanned.actionable_candidates.empty(), "candidates");
+  const auto& a = walked.actionable_candidates.front();
+  const auto& b = scanned.actionable_candidates.front();
+  Require(b.module_filename == L"CrashTester.dll", "the blocked plugin still leads");
+  Require(a.score == b.score && a.status_id == b.status_id && a.confidence_level == b.confidence_level,
+    "with the same weight, status and confidence as after a main-thread walk");
+}
+
 void TestBlockedPluginSplitsTheHangBucket()
 {
   const auto key = [](std::wstring module, std::string state) {
@@ -487,6 +506,7 @@ int main()
   try {
     TestTruncatedCallStackIsExplained();
     TestBlockedGameThreadLeadsTheFreezeReport();
+    TestBlockedLeadKeepsItsWeightWithoutMainThreadWalk();
     TestBlockedPluginSplitsTheHangBucket();
     TestConfirmedCppExceptionIsARealCrash();
     TestSkseRuntimeIsThePathNotASuspect();

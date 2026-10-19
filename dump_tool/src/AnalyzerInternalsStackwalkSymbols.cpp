@@ -119,12 +119,17 @@ std::wstring FindBundledGameRuntimeDllPath(const std::vector<ModuleInfo>& module
   }
 
   const std::filesystem::path gameExeDir = InferGameExeDirFromModules(modules);
-  if (gameExeDir.empty()) {
+  // The folder comes from the dump and the DLL found there is loaded into
+  // this process (its DllMain runs): local fixed disks only (review M16).
+  if (gameExeDir.empty() || !minidump::IsLocalFixedDrivePath(gameExeDir.native())) {
     return {};
   }
 
+  // A drive that is not ready throws from the non-error_code overloads
+  // (review M15).
   const auto candidate = gameExeDir / L"Data" / L"SKSE" / L"Plugins" / moduleName;
-  return std::filesystem::exists(candidate) ? candidate.wstring() : std::wstring{};
+  std::error_code ec;
+  return std::filesystem::is_regular_file(candidate, ec) ? candidate.wstring() : std::wstring{};
 }
 
 std::wstring ReadEnvVar(const wchar_t* name)
@@ -172,7 +177,7 @@ std::wstring ResolveDefaultSymbolCacheDir(bool* outReady)
     std::error_code ec;
     std::filesystem::create_directories(fromEnv, ec);
     if (outReady) {
-      *outReady = !ec && std::filesystem::exists(fromEnv);
+      *outReady = !ec && std::filesystem::is_directory(fromEnv, ec);
     }
     return fromEnv;
   }
@@ -192,7 +197,7 @@ std::wstring ResolveDefaultSymbolCacheDir(bool* outReady)
     std::error_code ec;
     std::filesystem::create_directories(cacheDir, ec);
     if (outReady) {
-      *outReady = !ec && std::filesystem::exists(cacheDir);
+      *outReady = !ec && std::filesystem::is_directory(cacheDir, ec);
     }
   }
   return cacheDir.wstring();

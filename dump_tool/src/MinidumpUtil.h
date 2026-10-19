@@ -43,12 +43,23 @@ struct ModuleHit
 
 std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize, std::uint64_t addr);
 
+// "<filename>+0x<offset>". The name comes from the dump and has no length
+// limit, so it is not formatted into a fixed buffer (swprintf_s fast-fails
+// the process when it does not fit).
+std::wstring ModulePlusOffsetText(std::wstring_view filename, std::uint64_t offset);
+
 inline std::wstring WideLower(std::wstring_view s) { return skydiag::WideLower(s); }
 
 bool IsSystemishModule(std::wstring_view filename);
 // DirectX/OpenGL runtime names that graphics injectors also use for their proxies.
 bool IsGraphicsRuntimeName(std::wstring_view filename);
 bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath);
+// True for "X:\..." on a local fixed disk. A module path read from a dump is
+// whatever the capturing machine (or a crafted dump) says; the analyzer only
+// opens, maps or loads files there when this holds, so a dump cannot point it
+// at a UNC share (NTLM authentication, a DllMain from the network), a device
+// path, a mapped network drive or empty removable media.
+bool IsLocalFixedDrivePath(std::wstring_view path);
 bool IsGameExeModule(std::wstring_view filename);
 bool IsSkseModule(std::wstring_view filename);
 // Best-effort override for known hook framework DLL list.

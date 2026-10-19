@@ -126,7 +126,10 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   }
 
   nlohmann::json summary = BuildSummaryJson(r, outBase, stem, redactPaths);
-  const std::string summaryText = summary.dump(2) + "\n";
+  // Text read from the dump or its sidecars is not guaranteed to be UTF-8;
+  // replace bad bytes instead of throwing and losing every output.
+  const std::string summaryText =
+    summary.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
   const std::string reportText = BuildReportText(r, summary, redactPaths);
 
   std::string blackboxText;
