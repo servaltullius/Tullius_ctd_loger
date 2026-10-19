@@ -67,8 +67,8 @@ int main()
 
   AssertContains(
     pending,
-    "if (!cfg.enableAutoRecaptureOnUnknownCrash)",
-    "Tracked crash analysis must not enter recapture evaluation when the policy is disabled.");
+    "if (!cfg.enableAutoRecaptureOnUnknownCrash || task->recaptureExpired)",
+    "Tracked crash analysis must not enter recapture evaluation when the policy is disabled or its window passed.");
 
   AssertContains(
     crashCapture,

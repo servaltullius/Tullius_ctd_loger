@@ -1944,9 +1944,11 @@ void TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened()
   std::filesystem::remove_all(outBase);
 }
 
-// The analysis timeout exists for the recapture decision. Without recapture
-// a slow analysis (a large dump) is left to finish instead of being killed.
-void TestAnalysisTimeoutOnlyKillsForRecapture()
+// The analysis timeout exists for the recapture decision, but the analysis
+// also writes the crash report: a slow one (a large dump) is left to finish
+// instead of being killed, and with recapture on its late result decides no
+// recapture.
+void TestAnalysisTimeoutLeavesTheReportToFinish()
 {
   using skydiag::helper::internal::FinalizePendingCrashAnalysisIfReady;
   const auto outBase = MakeTempDir(L"skydiag_helper_analysis_timeout");
@@ -1963,13 +1965,18 @@ void TestAnalysisTimeoutOnlyKillsForRecapture()
     task.startedAtTick64 = GetTickCount64() - 60'000;
     task.timeoutMs = 20'000;
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &task);
-    const bool stillRunning = WaitForSingleObject(analyzer.pi.hProcess, recapture ? 5000 : 0) == WAIT_TIMEOUT;
-    Require(stillRunning == !recapture, recapture ? "Recapture: the analysis is stopped at its timeout" : "No recapture: the analysis is left to finish");
+    Require(WaitForSingleObject(analyzer.pi.hProcess, 0) == WAIT_TIMEOUT, "The analysis is left to finish the report");
+    Require(task.active && task.process && task.timeoutMs == 0u,
+      "Still tracked without a timeout, so a filtered-crash cleanup can stop it");
+    Require(task.recaptureExpired == recapture, "With recapture on, its window is marked as passed");
     if (recapture) {
-      Require(!task.active, "Recapture: no longer tracked");
+      // It finishes late: no recapture decision, the handle is released.
+      Require(TerminateProcess(analyzer.pi.hProcess, 0u) != FALSE, "TerminateProcess failed");
+      Require(WaitForSingleObject(analyzer.pi.hProcess, 5000) == WAIT_OBJECT_0, "the analyzer did not end");
+      FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &task);
+      Require(!task.active, "No longer tracked once it finished");
+      AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "recapture skipped", "The skipped recapture is logged");
     } else {
-      Require(task.active && task.process && task.timeoutMs == 0u,
-        "No recapture: still tracked without a timeout, so a filtered-crash cleanup can stop it");
       skydiag::helper::internal::ClearPendingCrashAnalysis(&task);
       Require(WaitForSingleObject(analyzer.pi.hProcess, 5000) == WAIT_OBJECT_0, "The cleanup can still stop it");
     }
@@ -2251,7 +2258,7 @@ int wmain(int argc, wchar_t** argv)
     TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat();
     TestOutputDirResolvesAgainstTheHelperFolder();
     TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened();
-    TestAnalysisTimeoutOnlyKillsForRecapture();
+    TestAnalysisTimeoutLeavesTheReportToFinish();
     TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles();
     TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash();
     TestExpireReleasedCrashDumpIfOutlived();
