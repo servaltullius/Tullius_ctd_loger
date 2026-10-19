@@ -39,7 +39,7 @@ static void TestStackScanUsesProximityWeight()
 
   const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
   const auto applyPos = analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out, allModules);");
-  const auto clampPos = analyzer.find("if (!out.suspects_from_stackwalk)", applyPos);
+  const auto clampPos = analyzer.find("CapPointerScanSuspectConfidence(out);", applyPos);
   assert(applyPos != std::string::npos);
   assert(clampPos != std::string::npos);
   assert(clampPos > applyPos);

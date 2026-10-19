@@ -8,6 +8,7 @@
 #include "ProblematicModules.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
+#include "WctTypes.h"
 
 namespace skydiag::dump_tool::internal {
 namespace {
@@ -670,11 +671,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : L"[해석] Crash Logger도 이 C++ 예외를 게임을 끝낸 처리되지 않은 예외로 기록했습니다. 잡힌 예외(오탐)가 아니라 실제 CTD입니다. 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
     } else if (r.exc_code == 0xE06D7363u) {
       // With the default CrashHookMode=1 the plugin records a C++ exception
-      // only while Crash Logger reports it as a crash (CrashHandler.cpp), so
-      // lead with that; a caught throw is the CrashHookMode=2 case.
+      // only when nothing handled it: Crash Logger's report, the unhandled-
+      // exception filter or abort() (CrashHandler.cpp), so lead with that; a
+      // caught throw is the CrashHookMode=2 case.
       r.recommendations.push_back(en
-        ? L"[Interpretation] 0xE06D7363 is a C++ exception (throw). With the default CrashHookMode=1 it is recorded only while Crash Logger reports it as a crash, so if the game closed, start with the module that threw it (the first non-system module in the call stack)."
-        : L"[해석] 0xE06D7363은 C++ 예외(throw) 코드입니다. 기본값 CrashHookMode=1에서는 Crash Logger가 크래시로 보고할 때만 기록되므로, 게임이 꺼졌다면 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
+        ? L"[Interpretation] 0xE06D7363 is a C++ exception (throw). With the default CrashHookMode=1 it is recorded only when nothing handled it (Crash Logger's report, the unhandled-exception filter, or abort()), so if the game closed, start with the module that threw it (the first non-system module in the call stack)."
+        : L"[해석] 0xE06D7363은 C++ 예외(throw) 코드입니다. 기본값 CrashHookMode=1에서는 어디에서도 처리되지 않은 예외만(Crash Logger 보고, 처리되지 않은 예외 필터, abort()) 기록되므로, 게임이 꺼졌다면 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
       r.recommendations.push_back(en
         ? L"[Interpretation] If the game kept running, this dump is not a real CTD: the exception was caught and handled."
         : L"[해석] 게임이 계속 실행됐다면 이 덤프는 실제 CTD가 아니라, 게임이 잡아서 처리한 예외입니다.");
@@ -1044,15 +1046,18 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? L"[Hang] If it repeats, use Events tab (just before the freeze) to narrow related mods."
         : L"[프리징] 프리징이 반복되면 문제 상황 직전에 실행된 이벤트(이벤트 탭)를 기준으로 관련 모드를 점검");
     } else if (isManualCapture && isSnapshotLike) {
-      if (wct && wct->has_capture && wct->thresholdSec > 0u && wct->secondsSinceHeartbeat < static_cast<double>(wct->thresholdSec)) {
+      // The freeze verdict's rule (FreezeCandidateConsensus.cpp): under the
+      // helper's threshold alone a load can still be stuck.
+      if (wct && wct->has_capture && wct->thresholdSec > 0u &&
+          wct->secondsSinceHeartbeat < internal::kNotHangHeartbeatAgeSec) {
         wchar_t buf[256]{};
         swprintf_s(
           buf,
           en
-            ? L"[Manual] At capture time, heartbeatAge=%.1fs < threshold=%us, so it is not considered a hang."
-            : L"[수동] 수동 캡처 당시 heartbeatAge=%.1fs < threshold=%us 이므로 '프리징/무한로딩'으로 판단되지 않습니다.",
+            ? L"[Manual] At capture time, heartbeatAge=%.1fs (under %.0fs): the main thread was still responding, so it is not considered a hang."
+            : L"[수동] 수동 캡처 당시 heartbeatAge=%.1fs(%.0f초 미만)로 메인 스레드가 아직 응답하고 있었으므로 '프리징/무한로딩'으로 판단되지 않습니다.",
           wct->secondsSinceHeartbeat,
-          wct->thresholdSec);
+          internal::kNotHangHeartbeatAgeSec);
         r.recommendations.push_back(buf);
       }
       r.recommendations.push_back(en

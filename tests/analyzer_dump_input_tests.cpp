@@ -147,7 +147,7 @@ void TestDumpTimeRspWithoutAUsableExceptionContext()
   const auto modules = Modules();
   // No exception context: the old start.
   auto suspects = ComputeStackScanSuspects(
-    dump.data(), dump.size(), modules, { kExceptionTid }, kExceptionTid, i18n::Language::kEnglish);
+    dump.data(), dump.size(), modules, { kExceptionTid }, kExceptionTid, i18n::Language::kEnglish, nullptr);
   Require(!suspects.empty() && suspects.front().module_filename == L"HandlerHost.dll", "no context: dump-time Rsp");
 
   // A faulting Rsp outside the captured stack (a stack overflow into the

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CrashLoggerParseCore.h"
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -40,8 +42,11 @@ std::optional<std::string> ReadWholeFileUtf8(const std::filesystem::path& path, 
 
 // Parse "PROBABLE CALL STACK:" section and return modules sorted by frequency.
 // canonicalByFilenameLower maps lowercased filename (e.g. "hdtsmp64.dll") to a canonical display filename (e.g. "hdtSMP64.dll").
+// isSystemNamedMod tells a mod named like a Windows DLL (ENB d3d11.dll) from
+// the Windows DLL; an empty function ranks by name alone.
 std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::string_view logUtf8,
-  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower);
+  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower,
+  const crashlogger_core::CrashLoggerSystemNamedModFn& isSystemNamedMod);
 
 }  // namespace skydiag::dump_tool

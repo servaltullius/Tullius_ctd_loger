@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,7 +27,19 @@ struct CrashLoggerFrameSignals {
   // (ThreadEntryHooks.h); never the first actionable module or a top module.
   std::vector<std::string> thread_entry_hook_modules;
   std::vector<bool> probable_frame_is_thread_entry_hook;
+  // Frames named like a Windows DLL that the caller placed in a mod's copy
+  // (an ENB or ReShade d3d11.dll/dxgi.dll, review H4). They count as plugin
+  // frames above; all false without a CrashLoggerSystemNamedModFn.
+  std::vector<bool> probable_frame_in_system_named_mod;
+  bool direct_fault_in_system_named_mod = false;
+  bool first_actionable_probable_in_system_named_mod = false;
+  bool probable_streak_in_system_named_mod = false;
 };
+
+// Whether a frame whose module is named like a Windows DLL (d3d11.dll,
+// dxgi.dll) lies in a mod's copy loaded from elsewhere. Gets the module as
+// the log writes it and the frame's address (0 when the line has none).
+using CrashLoggerSystemNamedModFn = std::function<bool(std::string_view module, std::uint64_t address)>;
 
 // Parsed date/time components from a filename pattern.
 struct ParsedTimestamp
@@ -133,6 +146,10 @@ bool CrashLoggerLocationContradictsDumpFault(
   std::wstring_view faultModuleFilename,
   std::uint64_t faultModuleOffset);
 CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8);
+// Same, with frames in a mod named like a Windows DLL counted as plugin frames.
+CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(
+  std::string_view logUtf8,
+  const CrashLoggerSystemNamedModFn& isSystemNamedMod);
 std::vector<std::string> ParseCrashLoggerFrameTopModulesAsciiLower(std::string_view logUtf8);
 std::vector<std::string> ParseCrashLoggerTopModulesAsciiLower(std::string_view logUtf8);
 

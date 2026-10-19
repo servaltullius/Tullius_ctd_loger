@@ -132,11 +132,15 @@ static void TestPointerScanConfidenceClampRunsAfterCorroboration()
   const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
   const auto applyPos = analyzer.find("ApplyCrashLoggerCorroborationToSuspects(&out, allModules);");
   assert(applyPos != std::string::npos);
-  const auto clampPos = analyzer.find("if (!out.suspects_from_stackwalk)", applyPos);
+  const auto clampPos = analyzer.find("CapPointerScanSuspectConfidence(out);", applyPos);
   assert(clampPos != std::string::npos);
+  const auto clampFn = analyzer.find("void CapPointerScanSuspectConfidence(AnalysisResult& out)");
+  assert(clampFn != std::string::npos);
+  const auto walkPos = analyzer.find("if (out.suspects_from_stackwalk)", clampFn);
+  assert(walkPos != std::string::npos);
   const auto lowPos = analyzer.find(
     "suspect.confidence_level = i18n::ConfidenceLevel::kLow",
-    clampPos);
+    walkPos);
   assert(lowPos != std::string::npos);
 }
 

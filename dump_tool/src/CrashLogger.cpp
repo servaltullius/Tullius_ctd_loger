@@ -49,6 +49,7 @@ struct NormalizedCrashLoggerFrameSignals
   std::uint32_t probable_streak_length = 0;
   std::vector<std::wstring> probable_modules_in_order;
   std::vector<bool> probable_frame_is_thread_entry_hook;  // ThreadEntryHooks.h
+  std::vector<bool> probable_frame_in_system_named_mod;   // ENB/ReShade d3d11.dll, dxgi.dll
 };
 
 enum class DumpIncidentKind {
@@ -123,6 +124,8 @@ NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
   normalized.probable_modules_in_order.reserve(raw.probable_modules_in_order.size());
   normalized.probable_frame_is_thread_entry_hook = raw.probable_frame_is_thread_entry_hook;
   normalized.probable_frame_is_thread_entry_hook.resize(raw.probable_modules_in_order.size(), false);
+  normalized.probable_frame_in_system_named_mod = raw.probable_frame_in_system_named_mod;
+  normalized.probable_frame_in_system_named_mod.resize(raw.probable_modules_in_order.size(), false);
   std::wstring currentLower;
   std::wstring currentModule;
   std::uint32_t currentLength = 0;
@@ -131,16 +134,19 @@ NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
     normalized.probable_modules_in_order.push_back(module);
     // A plugin that only wraps the thread's entry is neither actionable nor a streak.
     const bool threadEntryHook = normalized.probable_frame_is_thread_entry_hook[i];
+    // A mod named like a Windows DLL (review H4) is judged by its frame.
+    const bool systemish =
+      IsSystemishModule(module) && !normalized.probable_frame_in_system_named_mod[i];
 
     if (normalized.first_actionable_probable_module.empty() &&
         !threadEntryHook &&
-        !IsSystemishModule(module) &&
+        !systemish &&
         !IsExternalSoftwareModule(module) &&
         !IsGameExeModule(module)) {
       normalized.first_actionable_probable_module = module;
     }
 
-    if (threadEntryHook || IsSystemishModule(module) || IsExternalSoftwareModule(module) || IsGameExeModule(module)) {
+    if (threadEntryHook || systemish || IsExternalSoftwareModule(module) || IsGameExeModule(module)) {
       currentLower.clear();
       currentModule.clear();
       currentLength = 0;
@@ -787,11 +793,12 @@ std::optional<std::string> ReadWholeFileUtf8(const std::filesystem::path& path, 
 
 std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::string_view logUtf8,
-  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
+  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower,
+  const crashlogger_core::CrashLoggerSystemNamedModFn& isSystemNamedMod)
 {
   const auto normalizedSignals =
     BuildNormalizedCrashLoggerFrameSignals(
-      crashlogger_core::ParseCrashLoggerFrameSignalsAscii(logUtf8),
+      crashlogger_core::ParseCrashLoggerFrameSignalsAscii(logUtf8, isSystemNamedMod),
       canonicalByFilenameLower);
 
   struct ModuleCount
@@ -804,7 +811,9 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::unordered_map<std::wstring, ModuleCount> freqByLower;
   for (std::size_t i = 0; i < normalizedSignals.probable_modules_in_order.size(); ++i) {
     const auto& module = normalizedSignals.probable_modules_in_order[i];
-    if (IsSystemishModule(module) || IsExternalSoftwareModule(module) || IsGameExeModule(module) ||
+    const bool systemish =
+      IsSystemishModule(module) && !normalizedSignals.probable_frame_in_system_named_mod[i];
+    if (systemish || IsExternalSoftwareModule(module) || IsGameExeModule(module) ||
         normalizedSignals.probable_frame_is_thread_entry_hook[i]) {
       continue;
     }
