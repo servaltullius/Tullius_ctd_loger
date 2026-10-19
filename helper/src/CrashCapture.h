@@ -207,12 +207,18 @@ constexpr void NoteRecoveredFault(
   history->nextReplace = (history->nextReplace + 1u) % kRecoveredFaultHistoryCapacity;
 }
 
+// Not for a C++ throw or a breakpoint: their address is always the same
+// RaiseException / DebugBreak in KernelBase, so code and address match every
+// unrelated throw, not the same fault.
 constexpr bool IsRepeatedRecoveredFault(
   const RecoveredFaultHistory& history,
   std::uint32_t exceptionCode,
   std::uint64_t exceptionAddr,
   std::uint64_t nowTick64) noexcept
 {
+  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
+    return false;
+  }
   for (const auto& entry : history.entries) {
     if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
       return entry.count >= kRepeatedRecoveredFaultMinCount && nowTick64 >= entry.lastTick64 &&

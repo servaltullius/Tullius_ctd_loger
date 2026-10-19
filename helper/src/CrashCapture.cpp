@@ -1165,8 +1165,11 @@ bool HandleCrashEventTick(
   // A fault released as handled again and again gets the minimal dump first
   // (IsRepeatedRecoveredFault); if it is kept as a crash after all while the
   // game still runs, the dump is written again at the configured size below.
+  // Not on the game's main thread: a fault there that is not handled ends
+  // the game before a second dump could be written.
   const bool reducedDumpForRepeatedFault = crashState && cfg.dumpMode != skydiag::helper::DumpMode::kMini &&
-    IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
+    IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64()) &&
+    skydiag::helper::InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes).value_or(0u) != info.faultingTid;
   const auto dumpProfile = reducedDumpForRepeatedFault
     ? skydiag::helper::ResolveDumpProfile(skydiag::helper::DumpMode::kMini, skydiag::helper::CaptureKind::Crash)
     : configuredDumpProfile;

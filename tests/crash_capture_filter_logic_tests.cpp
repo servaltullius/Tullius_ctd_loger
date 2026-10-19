@@ -131,6 +131,20 @@ static_assert([] {
 }(), "a repeated handled fault within the cooldown");
 static_assert([] {
   using namespace skydiag::helper::internal;
+  // A C++ throw or a breakpoint is raised at the same KernelBase address
+  // whatever threw it: code and address do not make it the same fault.
+  RecoveredFaultHistory h{};
+  for (const std::uint32_t code : { 0xE06D7363u, 0x80000003u }) {
+    NoteRecoveredFault(&h, code, 0x7FF800001000u, 1'000u);
+    NoteRecoveredFault(&h, code, 0x7FF800001000u, 2'000u);
+    if (IsRepeatedRecoveredFault(h, code, 0x7FF800001000u, 3'000u)) {
+      return false;
+    }
+  }
+  return true;
+}(), "C++ throws and breakpoints never get the reduced dump");
+static_assert([] {
+  using namespace skydiag::helper::internal;
   // A full history replaces entries in turn and keeps tracking new faults.
   RecoveredFaultHistory h{};
   for (std::uint64_t addr = 1; addr <= kRecoveredFaultHistoryCapacity + 1u; ++addr) {
