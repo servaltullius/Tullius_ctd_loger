@@ -90,6 +90,22 @@ if(WIN32)
     COMMAND skydiag_analyzer_state_runtime_tests
   )
 
+  # BuildSummaryJson/BuildReportText output: schema, path redaction, the
+  # plugin scan preview and the incident manifest lookup.
+  add_executable(skydiag_summary_writer_runtime_tests
+    summary_writer_runtime_tests.cpp
+  )
+  target_include_directories(skydiag_summary_writer_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_summary_writer_runtime_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_summary_writer_runtime_tests
+    COMMAND skydiag_summary_writer_runtime_tests
+  )
+
   add_executable(skydiag_exception_code_recommendation_tests
     exception_code_recommendation_tests.cpp
   )

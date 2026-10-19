@@ -53,7 +53,16 @@ bool IsUnknownModuleField(std::wstring_view modulePlusOffset);
 
 std::wstring MaybeRedactPath(std::wstring_view path, bool redactPaths);
 
-std::wstring ReplaceAll(std::wstring text, std::wstring_view from, std::wstring_view to);
+// Redacts every absolute directory in a DbgHelp symbol search path
+// ("C:\Sym;srv*C:\Cache*https://..."), keeping separators and URLs.
+std::wstring RedactSymbolSearchPath(std::wstring_view searchPath, bool redactPaths);
+
+// Replaces every string in `value` (recursively) that is an absolute path with
+// its redacted form, as MaybeRedactPath does.
+void RedactAbsolutePathStrings(nlohmann::json* value);
+
+// At most maxBytes of UTF-8 text, cut on a code point boundary.
+std::string TruncateUtf8(std::string_view text, std::size_t maxBytes);
 
 std::filesystem::path DefaultOutDirForDump(const std::filesystem::path& dumpPath);
 
