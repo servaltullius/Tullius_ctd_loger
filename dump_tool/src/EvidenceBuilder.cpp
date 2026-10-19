@@ -20,6 +20,18 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   r.evidence.clear();
   r.recommendations.clear();
 
+  // A missing master stops the game while it loads plugins at startup. A
+  // session that finished loading a save or cell had its masters, so the
+  // scanned list is stale or not the one the game used: a clue, not a cause.
+  if (internal::GameReachedWorld(r)) {
+    for (auto& pd : r.plugin_diagnostics) {
+      if (pd.rule_id == "MISSING_MASTER") {
+        pd.confidence_level = i18n::ConfidenceLevel::kLow;
+        pd.confidence = i18n::ConfidenceText(lang, pd.confidence_level);
+      }
+    }
+  }
+
   // Capture type (best-effort from filename / streams)
   std::wstring lowerName = minidump::WideLower(std::filesystem::path(r.dump_path).filename().wstring());
   const bool nameCrash = (lowerName.find(L"_crash_") != std::wstring::npos);

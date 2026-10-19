@@ -107,6 +107,12 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
 // here as they are for candidates and history; evidence still lists them.
 const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const AnalysisResult& r);
 
+// The blackbox saw a save or cell finish loading in this session, so the game
+// got past loading its plugins (and their masters) at startup.
+bool GameReachedWorld(const AnalysisResult& r);
+// The plugin_rules.json diagnosis for missing masters, if it fired.
+const PluginRuleDiagnosis* FindMissingMasterDiagnosis(const AnalysisResult& r);
+
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
 // minidump::IsSystemishModuleAt for a module known here only by file name (an

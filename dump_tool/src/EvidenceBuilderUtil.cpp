@@ -529,6 +529,24 @@ const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const Analy
   return nullptr;
 }
 
+bool GameReachedWorld(const AnalysisResult& r)
+{
+  return std::any_of(r.events.begin(), r.events.end(), [](const EventRow& ev) {
+    return ev.type == static_cast<std::uint16_t>(skydiag::EventType::kLoadEnd) ||
+           ev.type == static_cast<std::uint16_t>(skydiag::EventType::kCellChange);
+  });
+}
+
+const PluginRuleDiagnosis* FindMissingMasterDiagnosis(const AnalysisResult& r)
+{
+  for (const auto& pd : r.plugin_diagnostics) {
+    if (pd.rule_id == "MISSING_MASTER") {
+      return &pd;
+    }
+  }
+  return nullptr;
+}
+
 bool IsActionableSuspect(const SuspectItem& s)
 {
   return !minidump::IsKnownHookFramework(s.module_filename) &&

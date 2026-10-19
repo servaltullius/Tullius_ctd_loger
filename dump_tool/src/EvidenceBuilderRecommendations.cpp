@@ -620,7 +620,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[BEES] BEES를 설치하거나(이미 설치했다면 skse64.log에서 BackportedESLSupport.dll이 로드되었는지 확인) 게임 런타임을 1.6.1130 이상으로 업데이트하세요.");
   }
 
-  if (!r.missing_masters.empty()) {
+  // The plugin_rules.json diagnosis already says this (with its own grade).
+  if (!r.missing_masters.empty() && !FindMissingMasterDiagnosis(r)) {
     r.recommendations.push_back(en
       ? L"[Masters] Install missing masters or disable dependent plugins."
       : L"[마스터] 누락된 마스터를 설치하거나 의존 플러그인을 비활성화하세요.");
