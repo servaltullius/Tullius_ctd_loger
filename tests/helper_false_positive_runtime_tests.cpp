@@ -1137,7 +1137,7 @@ void TestInitializeLoopState_SkipsAGenerationAnEarlierHelperAcknowledged()
     skydiag::helper::AttachedProcess proc{};
     proc.shm = shared.get();
     skydiag::helper::internal::HelperLoopState state{};
-    InitializeLoopState(proc, &state);
+    InitializeLoopState(proc, {}, &state);
     Require(state.crashCaptured.releasedCrashSeq == 0u, "No crash yet: nothing is acknowledged");
   }
 
@@ -1172,7 +1172,7 @@ void TestInitializeLoopState_SkipsAGenerationAnEarlierHelperAcknowledged()
     cfg.enableWerDumpFallbackHint = true;
 
     skydiag::helper::internal::HelperLoopState state{};
-    InitializeLoopState(proc, &state);
+    InitializeLoopState(proc, outBase, &state);
     Require((state.crashCaptured.releasedCrashSeq == 2u) == c.expectAcknowledged, c.name);
     Require(!state.crashCaptured.releasedOnBriefHeartbeat, c.name);
 
@@ -2005,6 +2005,8 @@ void TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles()
     { "still frozen, game exited: left to the exit drain", skydiag::kState_Frozen, false, false },
   };
   for (const auto& c : cases) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_rearm");
+    ClearLog(outBase);
     auto shared = MakeSharedLayout();
     shared->header.crash_seq = 2u;
     shared->header.crash.exception_code = 0xC0000005u;
@@ -2018,20 +2020,78 @@ void TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles()
     }
 
     skydiag::helper::internal::HelperLoopState state{};
-    InitializeLoopState(proc, &state);
+    InitializeLoopState(proc, outBase, &state);
     const bool signaled = WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0;
     Require(signaled == c.expectRearmed, c.name);
     Require(state.rearmedFrozenCrashSeq == (c.expectRearmed ? 2u : 0u), c.name);
+    Require(HasFileWithPrefix(outBase, L"SkyrimDiag_CrashRearm_") == c.expectRearmed, c.name);
 
     CloseHandle(proc.crashEvent);
     TerminateChildProcess(&child);
+    std::filesystem::remove_all(outBase);
   }
+}
+
+// A helper that dies on a crash every time (an antivirus killing it while it
+// writes the dump) is restarted by the plugin's watchdog. Each one finding
+// the generation still Frozen must not signal it again forever, the game
+// stuttering at every dump attempt: it is signaled again once, then thawed
+// so a later crash is recorded again. The marker goes when the game exits.
+void TestRearmFrozenCrash_SignalsAGenerationAgainOnlyOnce()
+{
+  using skydiag::helper::internal::InitializeLoopState;
+  using skydiag::helper::internal::RearmFrozenCrashFromEarlierHelper;
+  const auto outBase = MakeTempDir(L"skydiag_helper_rearm_once");
+  ClearLog(outBase);
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  // The first restarted helper signals it again; it dies before handling it.
+  Require(RearmFrozenCrashFromEarlierHelper(proc, outBase) == 2u, "signaled again the first time");
+  Require(WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0, "its crash event is set");
+  Require(ResetEvent(proc.crashEvent) != FALSE, "ResetEvent failed");
+
+  // The next one finds it still Frozen.
+  skydiag::helper::internal::HelperLoopState state{};
+  InitializeLoopState(proc, outBase, &state);
+  Require(state.rearmedFrozenCrashSeq == 0u, "not signaled a second time");
+  Require(WaitForSingleObject(proc.crashEvent, 0) == WAIT_TIMEOUT, "its crash event stays clear");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "thawed so a later crash is recorded");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "not signaling it again. Thawed capture", "the give-up is logged");
+
+  // Another game process with the same crash_seq is not affected by it.
+  auto other = LaunchSleepingChildProcess();
+  auto otherProc = MakeAttachedProcessForChild(other, shared.get());
+  otherProc.crashEvent = proc.crashEvent;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  Require(RearmFrozenCrashFromEarlierHelper(otherProc, outBase) == 2u, "another game's generation is its own");
+  Require(ResetEvent(proc.crashEvent) != FALSE, "ResetEvent failed");
+
+  // The game exits: the helper's shutdown deletes its markers, not another game's.
+  TerminateWithExitCode(child, 1u);
+  skydiag::helper::internal::ShutdownLoopState(MakeTestConfig(), proc, outBase, &state);
+  Require(HasFileWithPrefix(outBase, skydiag::helper::internal::FrozenCrashRearmMarkerPrefix(otherProc)),
+    "another game's marker stays");
+  Require(!HasFileWithPrefix(outBase, skydiag::helper::internal::FrozenCrashRearmMarkerPrefix(proc)),
+    "the exited game's marker is deleted");
+
+  CloseHandle(proc.crashEvent);
+  TerminateChildProcess(&other);
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
 }
 
 // A crash released on a few seconds of heartbeat keeps its dump until the
 // release is settled. When the exit then reports the fault after all, that
-// dump becomes its crash dump instead of a metadata-only record; when the
-// exit does not report it, the dump is deleted.
+// dump becomes its crash dump instead of a metadata-only record, under its
+// crash name again; when the exit does not report it, the dump is deleted.
 void TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash()
 {
   struct Case
@@ -2260,6 +2320,7 @@ int wmain(int argc, wchar_t** argv)
     TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened();
     TestAnalysisTimeoutLeavesTheReportToFinish();
     TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles();
+    TestRearmFrozenCrash_SignalsAGenerationAgainOnlyOnce();
     TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash();
     TestExpireReleasedCrashDumpIfOutlived();
     TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown();

@@ -148,7 +148,7 @@ void RunHelperLoop(
         if (skydiag::helper::TryAttachCrashEvent(proc, nullptr)) {
           AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
           state->nextCrashEventWarnTick64 = 0;
-          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc); rearmed != 0u) {
+          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc, outBase); rearmed != 0u) {
             AppendLogLine(
               outBase,
               L"Committed crash_seq=" + std::to_wstring(rearmed)
@@ -224,6 +224,12 @@ void ShutdownLoopState(
   }
 
   ReleasePendingCrashAnalysisAtShutdown(outBase, state);
+  // Its crash generations can no longer be signaled again once the game is
+  // gone. A helper stopped while the game runs leaves them to a later helper
+  // (and retention).
+  if (proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0) {
+    RemoveFrozenCrashRearmMarkers(proc, outBase);
+  }
 }
 
 }  // namespace skydiag::helper::internal

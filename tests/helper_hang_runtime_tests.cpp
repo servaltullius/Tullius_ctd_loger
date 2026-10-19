@@ -382,7 +382,7 @@ void TestStartupLoadingIsNotALoadingSample()
   auto proc = MakeSelfAttachedProcess(shared.get());
   auto cfg = MakeTestConfig();
   HelperLoopState loop{};
-  InitializeLoopState(proc, &loop);
+  InitializeLoopState(proc, outBase, &loop);
   Require(loop.hangState.wasLoading, "attached while loading");
 
   // The startup load ends.
@@ -616,7 +616,7 @@ void TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait()
   LoadStats loadStats;
   std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
   HelperLoopState loop{};
-  InitializeLoopState(proc, &loop);
+  InitializeLoopState(proc, outBase, &loop);
 
   // The first hang tick starts its 1.5 s grace wait about 250 ms in.
   std::thread killer([&] {
