@@ -2122,6 +2122,71 @@ void TestExpireReleasedCrashDumpIfOutlived()
   std::filesystem::remove_all(outBase);
 }
 
+// A hang still open when the game exits with code 0 is a slow shutdown (a
+// large load order quitting): the dump stays, but no freeze viewer opens
+// after the game closed normally.
+void TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_slow_shutdown_hang");
+  ClearLog(outBase);
+  HelperConfig cfg = MakeTestConfig();
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.pendingHangViewerDumpPath = L"C:\\Temp\\SyntheticHang.dmp";
+  state.hangState.hangCapturedThisEpisode = true;
+  LaunchDeferredViewersAfterExit(cfg, outBase, /*exitCode=*/0, &state);
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "Suppressed hang viewer launch", "the skipped viewer is logged");
+  Require(log.find("Hang viewer auto-open attempt failed") == std::string::npos, "no viewer launch was tried");
+  Require(log.find("Auto-opened DumpTool viewer") == std::string::npos, "no viewer launch was tried");
+  std::filesystem::remove_all(outBase);
+}
+
+// A hang capture's ETW trace is stopped from the helper loop, one wpr call
+// per tick, so a crash is still noticed in between; the old synchronous
+// finalize could block for minutes. The fake wpr here (this test exe) fails
+// every -stop of this file and confirms -cancel.
+void TestPendingHangEtwStopRunsOneWprCallPerTick()
+{
+  using skydiag::helper::internal::MaybeFinalizePendingHangEtwCapture;
+  using skydiag::helper::internal::PendingHangEtwCapture;
+  const auto outBase = MakeTempDir(L"skydiag_hang_etw_pending");
+  ClearLog(outBase);
+  HelperConfig cfg = MakeTestConfig();
+  cfg.etwWprExe = CurrentExecutablePath().wstring();
+  const auto manifestPath = outBase / L"SkyrimDiag_Incident_Hang_20261019_120000_001.json";
+  WriteAllTextUtf8(manifestPath, "{}");
+
+  PendingHangEtwCapture pending{};
+  pending.active = true;
+  pending.etwPath = outBase / L"synthetic-hang.etl";
+  pending.manifestPath = manifestPath;
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(pending.active && pending.stopAttempts == 1u, "one wpr -stop on the first tick");
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(pending.active && pending.stopAttempts == 2u, "one more on the next");
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(!pending.active, "after the last stop attempt, wpr -cancel settles it");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "attempt 3 of 3", "each stop attempt is logged");
+  AssertContains(log, "WPR cancellation was confirmed", "the cancel is logged");
+  AssertContains(
+    ReadAllTextUtf8(manifestPath), "\"etw_status\": \"cancelled_after_stop_failure\"", "the manifest gets the ETW outcome");
+
+  // At helper shutdown every remaining step runs at once.
+  PendingHangEtwCapture atShutdown{};
+  atShutdown.active = true;
+  atShutdown.etwPath = outBase / L"synthetic-hang-2.etl";
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &atShutdown);
+  Require(!atShutdown.active, "forced: settled in one call");
+  std::filesystem::remove_all(outBase);
+}
+
 int wmain(int argc, wchar_t** argv)
 {
   try {
@@ -2190,6 +2255,8 @@ int wmain(int argc, wchar_t** argv)
     TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles();
     TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash();
     TestExpireReleasedCrashDumpIfOutlived();
+    TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown();
+    TestPendingHangEtwStopRunsOneWprCallPerTick();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

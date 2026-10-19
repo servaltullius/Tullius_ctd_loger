@@ -104,6 +104,12 @@ static_assert(
   !skydiag::helper::internal::ShouldHoldHangDetectionForCapturedCrash(false, 500u, 500u),
   "no crash captured");
 
+// A hang still open at a zero exit is a slow shutdown; a non-zero exit, or a
+// hang that ended before the exit, keeps its viewer.
+static_assert(skydiag::helper::internal::IsHangDuringNormalShutdown(0u, true), "slow shutdown");
+static_assert(!skydiag::helper::internal::IsHangDuringNormalShutdown(1u, true), "a frozen game that was ended");
+static_assert(!skydiag::helper::internal::IsHangDuringNormalShutdown(0u, false), "a freeze the game came back from");
+
 // The same handled fault released twice within the cooldown gets the minimal
 // dump first; once is not enough, and another fault or address is unaffected.
 static_assert([] {

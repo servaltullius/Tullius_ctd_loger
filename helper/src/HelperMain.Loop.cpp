@@ -119,6 +119,7 @@ void RunHelperLoop(
 
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &state->pendingCrashAnalysis, &state->crashRecapture);
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &state->pendingCrashEtw);
+    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &state->hangState.pendingEtw);
 
     // Drain a published crash record before polling process exit. The process
     // handle and crash event commonly become signaled in the same scheduler
@@ -216,6 +217,7 @@ void ShutdownLoopState(
   }
 
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &state->hangState.pendingEtw);
   UnregisterManualCaptureHotkeyIfEnabled(cfg);
   if (!state->crashCaptured.releasedDumpPath.empty()) {
     AppendLogLine(

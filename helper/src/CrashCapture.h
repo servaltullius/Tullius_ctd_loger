@@ -540,6 +540,16 @@ constexpr bool IsCloseOfUnresponsiveGame(
          (hangCapturedThisEpisode || (heartbeatStalled && !hangSuppressedAsResponsiveThisEpisode));
 }
 
+// A hang whose episode was still open when the game exited with code 0: the
+// game stopped answering while it shut down (a large load order can take
+// longer than the hang threshold to quit), which a frozen game that is ended
+// does not do (Task Manager, a watchdog and Windows' not-responding close all
+// give a non-zero code). Its dump stays, but its viewer is not opened.
+constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpisodeOpenAtExit) noexcept
+{
+  return exitCode == 0u && hangEpisodeOpenAtExit;
+}
+
 // Deletes the held dump of a released crash (releasedDumpPath), unless
 // filtered dumps are preserved, logging `reason`, and clears it.
 void DiscardReleasedCrashDump(

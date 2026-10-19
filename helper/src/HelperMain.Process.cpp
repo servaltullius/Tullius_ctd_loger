@@ -603,7 +603,14 @@ void LaunchDeferredViewersAfterExit(
     state->pendingCrashViewerDumpPath.clear();
   }
 
-  if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
+  if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit &&
+      IsHangDuringNormalShutdown(exitCode, state->hangState.hangCapturedThisEpisode)) {
+    AppendLogLine(
+      outBase,
+      L"Suppressed hang viewer launch: the game was still not responding when it exited normally (exit_code=0), "
+      L"a slow shutdown rather than a freeze; the hang dump is kept: "
+        + std::filesystem::path(state->pendingHangViewerDumpPath).filename().wstring());
+  } else if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
     const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
     if (delayMs > 0) {
       Sleep(delayMs);

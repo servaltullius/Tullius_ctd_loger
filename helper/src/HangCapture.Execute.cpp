@@ -55,19 +55,6 @@ HangTickResult ExecuteConfirmedHangCapture(
   const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Hang_" + ts + L".json");
   bool manifestWritten = false;
 
-  bool etwStarted = false;
-  if (cfg.enableEtwCaptureOnHang) {
-    std::wstring etwUsedProfile;
-    std::wstring etwErr;
-    if (StartEtwCaptureForHang(cfg, outBase, &etwUsedProfile, &etwErr)) {
-      etwStarted = true;
-      AppendLogLine(outBase, L"ETW hang capture started (profile=" + etwUsedProfile + L").");
-    } else {
-      AppendLogLine(outBase, L"ETW hang capture start failed: " + etwErr);
-    }
-  }
-  std::string etwStatus = cfg.enableEtwCaptureOnHang ? (etwStarted ? "recording" : "start_failed") : "disabled";
-
   nlohmann::json wctJson;
   std::wstring wctErr;
   if (!skydiag::helper::CaptureWct(proc.pid, &proc.shm->header.state_flags, wctJson, &wctErr)) {
@@ -177,6 +164,27 @@ HangTickResult ExecuteConfirmedHangCapture(
   } else {
     ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     dumpWritten = true;
+  }
+
+  // The trace starts after the dump, so wpr -start (up to the ETW timeout)
+  // does not delay it, and is stopped from the helper loop
+  // (MaybeFinalizePendingHangEtwCapture) rather than here.
+  bool etwStarted = false;
+  if (cfg.enableEtwCaptureOnHang && state && state->pendingEtw.active) {
+    AppendLogLine(outBase, L"ETW hang capture not started: the previous hang's trace is still being stopped.");
+  } else if (cfg.enableEtwCaptureOnHang) {
+    std::wstring etwUsedProfile;
+    std::wstring etwErr;
+    if (StartEtwCaptureForHang(cfg, outBase, &etwUsedProfile, &etwErr)) {
+      etwStarted = true;
+      AppendLogLine(outBase, L"ETW hang capture started (profile=" + etwUsedProfile + L").");
+    } else {
+      AppendLogLine(outBase, L"ETW hang capture start failed: " + etwErr);
+    }
+  }
+  const std::string etwStatus = cfg.enableEtwCaptureOnHang ? (etwStarted ? "recording" : "start_failed") : "disabled";
+
+  if (dumpWritten) {
     std::wcout << L"[SkyrimDiagHelper] Hang dump written: " << dumpPath << L"\n";
     std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
     std::wcout << L"[SkyrimDiagHelper] Hang decision: secondsSinceHeartbeat=" << decision.secondsSinceHeartbeat
@@ -237,36 +245,14 @@ HangTickResult ExecuteConfirmedHangCapture(
   }
 
   if (etwStarted) {
-    std::wstring etwErr;
-    const auto finalizeStatus = FinalizeEtwCaptureWithCleanup(
-      cfg,
-      outBase,
-      etwPath,
-      /*maxStopAttempts=*/3u,
-      &etwErr);
-    switch (finalizeStatus) {
-      case EtwFinalizeStatus::kWritten:
-        AppendLogLine(outBase, L"ETW hang capture written: " + etwPath.wstring());
-        etwStatus = "written";
-        break;
-      case EtwFinalizeStatus::kCancelledAfterStopFailure:
-        AppendLogLine(
-          outBase,
-          L"ETW hang capture stop failed repeatedly; WPR cancellation was confirmed: " + etwErr);
-        etwStatus = "cancelled_after_stop_failure";
-        break;
-      case EtwFinalizeStatus::kCleanupUnconfirmed:
-        AppendLogLine(
-          outBase,
-          L"ETW hang capture cleanup remains unconfirmed after stop retries and wpr -cancel: " + etwErr);
-        etwStatus = "cleanup_unconfirmed";
-        break;
-    }
-    if (manifestWritten) {
-      std::wstring updErr;
-      if (!TryUpdateIncidentManifestEtw(manifestPath, etwPath, etwStatus, &updErr)) {
-        AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
-      }
+    PendingHangEtwCapture pending{};
+    pending.active = true;
+    pending.etwPath = etwPath;
+    pending.manifestPath = manifestWritten ? manifestPath : std::filesystem::path{};
+    if (state) {
+      state->pendingEtw = pending;
+    } else {
+      MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &pending);
     }
   }
 
@@ -278,6 +264,56 @@ HangTickResult ExecuteConfirmedHangCapture(
     state->hangCapturedThisEpisode = true;
   }
   return HangTickResult::kContinue;
+}
+
+void MaybeFinalizePendingHangEtwCapture(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  bool force,
+  PendingHangEtwCapture* pending)
+{
+  constexpr std::uint32_t kMaxHangEtwStopAttempts = 3u;
+  if (!pending || !pending->active) {
+    return;
+  }
+
+  std::string etwStatus;
+  while (pending->stopAttempts < kMaxHangEtwStopAttempts) {
+    std::wstring stopErr;
+    if (StopEtwCaptureToPath(cfg, outBase, pending->etwPath, &stopErr)) {
+      AppendLogLine(outBase, L"ETW hang capture written: " + pending->etwPath.wstring());
+      etwStatus = "written";
+      break;
+    }
+    ++pending->stopAttempts;
+    AppendLogLine(
+      outBase,
+      L"ETW hang capture stop failed (attempt " + std::to_wstring(pending->stopAttempts) + L" of "
+        + std::to_wstring(kMaxHangEtwStopAttempts) + L"): " + stopErr);
+    if (!force && pending->stopAttempts < kMaxHangEtwStopAttempts) {
+      return;  // the next tick tries again
+    }
+  }
+  if (etwStatus.empty()) {
+    std::wstring cancelErr;
+    if (CancelEtwCapture(cfg, outBase, &cancelErr)) {
+      AppendLogLine(outBase, L"ETW hang capture stop failed repeatedly; WPR cancellation was confirmed.");
+      etwStatus = "cancelled_after_stop_failure";
+    } else {
+      AppendLogLine(
+        outBase,
+        L"ETW hang capture cleanup remains unconfirmed after stop retries and wpr -cancel: " + cancelErr);
+      etwStatus = "cleanup_unconfirmed";
+    }
+  }
+
+  if (!pending->manifestPath.empty()) {
+    std::wstring updErr;
+    if (!TryUpdateIncidentManifestEtw(pending->manifestPath, pending->etwPath, etwStatus, &updErr)) {
+      AppendLogLine(outBase, L"Incident manifest ETW update failed: " + updErr);
+    }
+  }
+  *pending = PendingHangEtwCapture{};
 }
 
 }  // namespace skydiag::helper::internal
