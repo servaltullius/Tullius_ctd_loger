@@ -358,7 +358,7 @@ int main()
     "The key-state watcher must poll the configured manual capture hotkey.");
   AssertContains(
     helperMain,
-    "RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)",
+    "RegisterHotKey(nullptr, kHotkeyId, ManualCaptureHotkeyRegistrationModifiers(hotkey), hotkey.virtualKey)",
     "RegisterHotKey must register the configured manual capture hotkey.");
   AssertContains(
     helperMain,

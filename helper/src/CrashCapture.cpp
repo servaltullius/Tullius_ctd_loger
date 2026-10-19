@@ -369,6 +369,8 @@ bool HasNewerCrashRecord(
   return current != 0u && current != expectedCrashSeq;
 }
 
+}  // namespace
+
 DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noexcept
 {
   if (crashEvent && process) {
@@ -387,6 +389,8 @@ DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noe
   }
   return WAIT_FAILED;
 }
+
+namespace {
 
 // Reads the exit code, reporting whether it is trustworthy. A failed query used
 // to leave the STILL_ACTIVE initializer in place, which reads as a non-zero
@@ -682,6 +686,32 @@ void ProcessValidCrashDump(
   ApplyRetentionFromConfig(cfg, outBase);
 }
 
+}
+
+void DiscardReleasedCrashDump(
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState,
+  std::wstring_view reason)
+{
+  if (!crashState || crashState->releasedDumpPath.empty()) {
+    return;
+  }
+  const std::filesystem::path dumpPath(crashState->releasedDumpPath);
+  const std::wstring filename = dumpPath.filename().wstring();
+  if (crashState->releasedDumpPreserve) {
+    AppendLogLine(
+      outBase,
+      L"Released crash dump kept (PreserveFilteredCrashDumps=1); " + std::wstring(reason) + L": " + filename);
+  } else {
+    const auto removal = RemoveFileAndObserve(dumpPath);
+    AppendLogLine(
+      outBase,
+      (removal.existsAfter ? L"Released crash dump could not be removed; " : L"Released crash dump deleted; ")
+        + std::wstring(reason) + L": " + filename);
+  }
+  crashState->releasedDumpPath.clear();
+  crashState->releasedDumpPreserve = false;
+  crashState->releasedDumpRecovery = LateRecoveryState{};
 }
 
 bool IsCleanExitEvidenceRequired(
@@ -1055,6 +1085,9 @@ bool HandleCrashEventTick(
     crashState->cleanExitEvidencePath.clear();
     crashState->cleanExitDumpIdentity = CleanExitDumpIdentity{};
     crashState->cleanExitFilterContext.clear();
+    // The exit path only ever reports the newest committed crash, so an
+    // earlier released one's dump is no longer needed.
+    DiscardReleasedCrashDump(outBase, crashState, L"a newer crash event arrived");
   }
   AppendLogLine(
     outBase,
@@ -1126,9 +1159,24 @@ bool HandleCrashEventTick(
 
   const auto ts = Timestamp();
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
-  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
+  const auto configuredDumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
     skydiag::helper::CaptureKind::Crash);
+  // A fault released as handled again and again gets the minimal dump first
+  // (IsRepeatedRecoveredFault); if it is kept as a crash after all while the
+  // game still runs, the dump is written again at the configured size below.
+  const bool reducedDumpForRepeatedFault = crashState && cfg.dumpMode != skydiag::helper::DumpMode::kMini &&
+    IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
+  const auto dumpProfile = reducedDumpForRepeatedFault
+    ? skydiag::helper::ResolveDumpProfile(skydiag::helper::DumpMode::kMini, skydiag::helper::CaptureKind::Crash)
+    : configuredDumpProfile;
+  if (reducedDumpForRepeatedFault) {
+    AppendLogLine(
+      outBase,
+      L"This exception (same code and address) was released as handled repeatedly in the last "
+        + std::to_wstring(kRepeatedRecoveredFaultCooldownMs / 60000u)
+        + L" minutes; writing a minimal dump first.");
+  }
   if (pendingHangViewerDumpPath) {
     pendingHangViewerDumpPath->clear();
   }
@@ -1315,6 +1363,10 @@ bool HandleCrashEventTick(
           }
         }
       }
+      // A release on a few seconds of heartbeat may still be followed by the
+      // crash it was (ShouldReportReleasedCrashAtExit), so its dump is held
+      // until that is settled (CrashCaptureState::releasedDumpPath).
+      const bool holdReleasedDump = verdict == FilterVerdict::kDeleteRecovered && crashState;
       if (preserveFilteredDump) {
         AppendLogLine(
           outBase,
@@ -1323,6 +1375,11 @@ bool HandleCrashEventTick(
               L"(PreserveFilteredCrashDumps=1)."
             : L"Clean-exit evidence metadata write failed; preserved the filtered dump as a fail-safe "
               L"without crash post-processing or capture latch.");
+      } else if (holdReleasedDump) {
+        AppendLogLine(
+          outBase,
+          L"Keeping the released dump until the game exits or outlives this exception: "
+            + std::filesystem::path(dumpPath).filename().wstring());
       } else if (!dumpRemovalHandled) {
         const auto removal = RemoveFileAndObserve(dumpPath);
         if (removal.existsAfter) {
@@ -1346,13 +1403,52 @@ bool HandleCrashEventTick(
           crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
           crashState->releasedInThreadDumpWindow = false;
         }
+        if (holdReleasedDump) {
+          NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
+          crashState->releasedDumpPath = dumpPath;
+          crashState->releasedDumpPreserve = preserveFilteredDump;
+          StartLateRecovery(
+            &crashState->releasedDumpRecovery,
+            GetTickCount64(),
+            proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u);
+        }
       }
       AppendLogLine(
         outBase,
-        preserveFilteredDump
+        (preserveFilteredDump || holdReleasedDump)
           ? L"Filtered crash event consumed; dump kept, capture remains ready for a later CTD."
           : L"Filtered crash event consumed; dump deleted, capture remains ready for a later CTD.");
       return true;
+    }
+  }
+
+  // Kept as a crash after a minimal first dump (reducedDumpForRepeatedFault):
+  // while the game still runs, write it again at the configured size. The
+  // minimal dump stays if that fails.
+  if (reducedDumpForRepeatedFault && IsProcessStillActive(proc.process)) {
+    const std::wstring fullDumpPath = dumpPath + L".full.tmp";
+    std::wstring fullDumpErr;
+    const bool fullWritten = skydiag::helper::WriteDumpWithStreams(
+      proc.process,
+      proc.pid,
+      fullDumpPath,
+      dumpSnapshot,
+      dumpSnapshotBytes,
+      {},
+      {},
+      true,
+      configuredDumpProfile,
+      /*isProcessSnapshot=*/false,
+      &fullDumpErr);
+    if (fullWritten && MoveFileExW(fullDumpPath.c_str(), dumpPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+      AppendLogLine(outBase, L"This time the exception was kept as a crash; rewrote its dump at the configured size.");
+    } else {
+      if (fullWritten) {
+        fullDumpErr = L"MoveFileExW failed: " + std::to_wstring(GetLastError());
+      }
+      std::error_code ec;
+      std::filesystem::remove(fullDumpPath, ec);
+      AppendLogLine(outBase, L"Keeping the minimal crash dump; rewriting it at the configured size failed: " + fullDumpErr);
     }
   }
 
@@ -1371,6 +1467,7 @@ bool HandleCrashEventTick(
   if (crashState) {
     crashState->latched = ShouldLatchCrashCapture(verdict);
     if (crashState->latched && proc.shm) {
+      crashState->latchedHeartbeatQpc = proc.shm->header.last_heartbeat_qpc;
       StartLateRecovery(&crashState->lateRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc);
     }
   }

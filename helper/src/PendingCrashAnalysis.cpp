@@ -32,6 +32,7 @@ void ClearPendingCrashAnalysis(PendingCrashAnalysis* task)
   task->dumpPath.clear();
   task->startedAtTick64 = 0;
   task->timeoutMs = 0;
+  task->recaptureExpired = false;
 }
 
 void DetachPendingCrashAnalysis(PendingCrashAnalysis* task)
@@ -47,6 +48,7 @@ void DetachPendingCrashAnalysis(PendingCrashAnalysis* task)
   task->dumpPath.clear();
   task->startedAtTick64 = 0;
   task->timeoutMs = 0;
+  task->recaptureExpired = false;
 }
 
 bool StartPendingCrashAnalysisTask(
@@ -75,6 +77,7 @@ bool StartPendingCrashAnalysisTask(
   task->process = processHandle;
   task->startedAtTick64 = GetTickCount64();
   task->timeoutMs = CrashAnalysisTimeoutMs(cfg);
+  task->recaptureExpired = false;
   if (err) {
     err->clear();
   }
@@ -97,19 +100,22 @@ void FinalizePendingCrashAnalysisIfReady(
     if (nowTick >= task->startedAtTick64 &&
         (nowTick - task->startedAtTick64) > static_cast<ULONGLONG>(task->timeoutMs)) {
       // The timeout bounds the recapture decision, which needs the result
-      // while the game is still alive. Without recapture the analysis only
-      // writes the report, so a slow one (a large dump) is left to finish.
+      // while the game is still alive. The analysis also writes the crash
+      // report, so a slow one (a large dump) is left to finish; with
+      // recapture on, its late result no longer decides a recapture.
       // It stays tracked: if the crash is later filtered (zero exit, late
       // recovery) the cleanup must still be able to stop it, or it would
       // write a CTD report for a dump that was discarded.
-      if (!cfg.enableAutoRecaptureOnUnknownCrash) {
+      if (cfg.enableAutoRecaptureOnUnknownCrash) {
+        task->recaptureExpired = true;
+        AppendLogLine(
+          outBase,
+          L"Crash headless analysis still running after its recapture window; leaving it to finish the report "
+          L"without a recapture decision.");
+      } else {
         AppendLogLine(outBase, L"Crash headless analysis still running after its window; leaving it to finish the report.");
-        task->timeoutMs = 0;
-        return;
       }
-      TerminateProcess(task->process, 1);
-      AppendLogLine(outBase, L"Crash headless analysis timeout; process terminated.");
-      ClearPendingCrashAnalysis(task);
+      task->timeoutMs = 0;
       return;
     }
   }
@@ -136,8 +142,12 @@ void FinalizePendingCrashAnalysisIfReady(
     return;
   }
 
-  if (!cfg.enableAutoRecaptureOnUnknownCrash) {
-    AppendLogLine(outBase, L"Crash headless analysis finished; tracked process handle released.");
+  if (!cfg.enableAutoRecaptureOnUnknownCrash || task->recaptureExpired) {
+    AppendLogLine(
+      outBase,
+      task->recaptureExpired
+        ? L"Crash headless analysis finished after its recapture window; recapture skipped, tracked process handle released."
+        : L"Crash headless analysis finished; tracked process handle released.");
     ClearPendingCrashAnalysis(task);
     return;
   }

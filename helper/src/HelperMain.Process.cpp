@@ -11,6 +11,7 @@
 #include "DumpToolLaunch.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/HangDetect.h"
+#include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
@@ -82,6 +83,53 @@ std::optional<std::filesystem::path> FindCrashLoggerCrashLogWrittenSince(
 // from the same clock, so this only absorbs timestamp granularity.
 inline constexpr std::uint64_t kCrashLogTimeSlack100ns = 5ull * 10'000'000ull;
 
+// A released crash that the exit path reports after all, whose dump was held
+// since the release (CrashCaptureState::releasedDumpPath): that dump becomes
+// the crash's dump, with the crash viewer or analysis a captured crash gets.
+// False when no held dump is left.
+bool PromoteReleasedCrashDump(
+  const HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  HelperLoopState* state)
+{
+  auto& crash = state->crashCaptured;
+  if (crash.releasedDumpPath.empty()) {
+    return false;
+  }
+  const std::wstring dumpPath = crash.releasedDumpPath;
+  crash.releasedDumpPath.clear();
+  crash.releasedDumpPreserve = false;
+  crash.releasedDumpRecovery = LateRecoveryState{};
+  std::error_code ec;
+  if (!std::filesystem::exists(dumpPath, ec) || ec) {
+    AppendLogLine(outBase, L"The dump held since the release is gone: " + std::filesystem::path(dumpPath).filename().wstring());
+    return false;
+  }
+
+  crash.latched = true;
+  crash.capturedInfo = info;
+  state->capturedCrashDumpPath = dumpPath;
+  AppendLogLine(
+    outBase,
+    L"Its dump was kept since the release; reporting it as the crash dump: "
+      + std::filesystem::path(dumpPath).filename().wstring());
+  // The game has exited, so a queued viewer opens right after this
+  // (LaunchDeferredViewersAfterExit) and analyzes the dump itself.
+  const bool viewerQueued = cfg.autoOpenViewerOnCrash && QueueDeferredCrashViewer(dumpPath, &state->pendingCrashViewerDumpPath);
+  if (ShouldRunHeadlessDumpAnalysis(cfg, viewerQueued, /*analysisRequired=*/false)) {
+    std::wstring analyzeErr;
+    if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, &state->pendingCrashAnalysis, &analyzeErr)) {
+      AppendLogLine(outBase, L"Crash headless analysis queued for the released crash's dump.");
+    } else {
+      AppendLogLine(outBase, L"Crash headless analysis queue failed: " + analyzeErr);
+    }
+  } else if (viewerQueued) {
+    AppendLogLine(outBase, L"Queued the released crash's dump for the crash viewer.");
+  }
+  return true;
+}
+
 }  // namespace
 
 bool DrainCrashEventBeforeExit(
@@ -149,6 +197,7 @@ bool DrainCrashEventBeforeExit(
           + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
           + std::to_wstring(exitCode)
           + (frozeAfterRelease ? L", the game had stopped responding since" : L"") + L").");
+      DiscardReleasedCrashDump(outBase, &state->crashCaptured, L"the exit did not report its exception");
       return false;
     }
     const auto secondsSinceRelease =
@@ -184,6 +233,9 @@ bool DrainCrashEventBeforeExit(
         + L" was released as a handled exception, but the game then exited abnormally (exit_code="
         + std::to_wstring(exitCode) + L", " + std::to_wstring(secondsSinceRelease) + L" s after the release"
         + crashLogEvidence + L"); recording it after all.");
+    if (PromoteReleasedCrashDump(cfg, outBase, info, state)) {
+      return true;
+    }
     if (state->postExitEvidenceSeq != info.crashSeq &&
         TryWritePostExitCrashEvidenceRecord(
           outBase, info, exitCode, PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit)) {
@@ -473,6 +525,24 @@ bool HandleLateRecoveryTick(
   return true;
 }
 
+void ExpireReleasedCrashDumpIfOutlived(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state)
+{
+  if (!state || state->crashCaptured.releasedDumpPath.empty() || !proc.process || !proc.shm) {
+    return;
+  }
+  if (WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
+    return;  // the exit tick settles it
+  }
+  if (AdvanceLateRecovery(
+        &state->crashCaptured.releasedDumpRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc)) {
+    DiscardReleasedCrashDump(
+      outBase, &state->crashCaptured, L"the game kept running for over a minute after its exception");
+  }
+}
+
 void AppendExitClassificationLog(const std::filesystem::path& outBase, bool hadCapturedCrash)
 {
   // Without a captured exception there is nothing to classify; the next
@@ -533,7 +603,14 @@ void LaunchDeferredViewersAfterExit(
     state->pendingCrashViewerDumpPath.clear();
   }
 
-  if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
+  if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit &&
+      IsHangDuringNormalShutdown(exitCode, state->hangState.hangCapturedThisEpisode)) {
+    AppendLogLine(
+      outBase,
+      L"Suppressed hang viewer launch: the game was still not responding when it exited normally (exit_code=0), "
+      L"a slow shutdown rather than a freeze; the hang dump is kept: "
+        + std::filesystem::path(state->pendingHangViewerDumpPath).filename().wstring());
+  } else if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
     const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
     if (delayMs > 0) {
       Sleep(delayMs);
@@ -589,6 +666,9 @@ bool HandleProcessExitTick(
     // Always drain the committed crash generation after observing process exit.
     // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
     const bool crashOnRecord = DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
+    // A dump held for a released crash that the drain did not report (or
+    // whose record is gone) is not needed any more.
+    DiscardReleasedCrashDump(outBase, &state->crashCaptured, L"the game exited without reporting its exception");
     if (exitCode != 0 && !state->crashCaptured.latched) {
       const auto& crash = state->crashCaptured;
       const auto& hang = state->hangState;

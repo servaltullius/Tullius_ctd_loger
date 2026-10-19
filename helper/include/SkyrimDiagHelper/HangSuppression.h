@@ -91,4 +91,13 @@ inline HangSuppressionResult EvaluateHangSuppression(
   return {};
 }
 
+// After Alt-Tab and back, a window that still answers usually means a game
+// paused in the background. A modal dialog (e.g. a plugin's error MessageBox)
+// answers too while the main thread waits in it, so with a dialog of the game
+// on screen that suppression no longer applies.
+constexpr bool IsHangSuppressionLiftedByModalDialog(HangSuppressionReason reason, bool modalDialogVisible) noexcept
+{
+  return reason == HangSuppressionReason::kForegroundResponsive && modalDialogVisible;
+}
+
 }  // namespace skydiag::helper

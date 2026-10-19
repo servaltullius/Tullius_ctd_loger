@@ -26,10 +26,7 @@ bool TryTriggerManualCapture(
   std::wstring_view source,
   ULONGLONG* lastManualCaptureTick)
 {
-  const ULONGLONG now = GetTickCount64();
-  if (lastManualCaptureTick &&
-      *lastManualCaptureTick != 0 &&
-      now - *lastManualCaptureTick < kManualCaptureDebounceMs) {
+  if (lastManualCaptureTick && ShouldDebounceManualCapture(GetTickCount64(), *lastManualCaptureTick)) {
     return false;
   }
 
@@ -119,6 +116,7 @@ void RunHelperLoop(
 
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &state->pendingCrashAnalysis, &state->crashRecapture);
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &state->pendingCrashEtw);
+    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &state->hangState.pendingEtw);
 
     // Drain a published crash record before polling process exit. The process
     // handle and crash event commonly become signaled in the same scheduler
@@ -139,6 +137,7 @@ void RunHelperLoop(
     }
 
     (void)HandleLateRecoveryTick(cfg, proc, outBase, state);
+    ExpireReleasedCrashDumpIfOutlived(proc, outBase, state);
     if (HandleProcessExitTick(cfg, proc, outBase, state)) {
       break;
     }
@@ -149,6 +148,12 @@ void RunHelperLoop(
         if (skydiag::helper::TryAttachCrashEvent(proc, nullptr)) {
           AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
           state->nextCrashEventWarnTick64 = 0;
+          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc); rearmed != 0u) {
+            AppendLogLine(
+              outBase,
+              L"Committed crash_seq=" + std::to_wstring(rearmed)
+                + L" is still frozen with no helper handling it; signaled its crash event again.");
+          }
         } else {
           state->nextCrashEventRetryTick64 = nowTick + kCrashEventRetryIntervalMs;
           if (state->nextCrashEventWarnTick64 == 0 || nowTick >= state->nextCrashEventWarnTick64) {
@@ -177,6 +182,12 @@ void RunHelperLoop(
           &state->pendingCrashViewerDumpPath)) {
       continue;
     }
+    if (proc.shm && ShouldHoldHangDetectionForCapturedCrash(
+                      state->crashCaptured.latched,
+                      state->crashCaptured.latchedHeartbeatQpc,
+                      proc.shm->header.last_heartbeat_qpc)) {
+      continue;
+    }
     if (HandleHangTick(
           cfg,
           proc,
@@ -203,7 +214,14 @@ void ShutdownLoopState(
   }
 
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &state->hangState.pendingEtw);
   UnregisterManualCaptureHotkeyIfEnabled(cfg);
+  if (!state->crashCaptured.releasedDumpPath.empty()) {
+    AppendLogLine(
+      outBase,
+      L"Keeping the dump of a released crash: the helper stopped before the game's exit settled it: "
+        + std::filesystem::path(state->crashCaptured.releasedDumpPath).filename().wstring());
+  }
 
   ReleasePendingCrashAnalysisAtShutdown(outBase, state);
 }

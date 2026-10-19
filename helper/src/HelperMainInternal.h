@@ -22,6 +22,22 @@ namespace skydiag::helper::internal {
 inline constexpr int kHotkeyId = 0x5344;  // 'SD' (arbitrary)
 inline constexpr ULONGLONG kManualCaptureDebounceMs = 250;
 
+// A press within kManualCaptureDebounceMs of the end of the last manual
+// capture starts no new one (a last tick of 0 means none yet).
+constexpr bool ShouldDebounceManualCapture(ULONGLONG nowTick64, ULONGLONG lastCaptureTick64) noexcept
+{
+  return lastCaptureTick64 != 0 && nowTick64 >= lastCaptureTick64 &&
+         nowTick64 - lastCaptureTick64 < kManualCaptureDebounceMs;
+}
+
+// RegisterHotKey's modifiers for the manual capture hotkey: MOD_NOREPEAT, so
+// holding the chord down on a frozen game does not deliver WM_HOTKEY again
+// for each key repeat (each one a dump). Not part of the configured chord.
+constexpr UINT ManualCaptureHotkeyRegistrationModifiers(const ManualCaptureHotkey& hotkey) noexcept
+{
+  return static_cast<UINT>(hotkey.modifiers) | MOD_NOREPEAT;
+}
+
 struct HelperLoopState
 {
   CrashCaptureState crashCaptured{};
@@ -42,6 +58,9 @@ struct HelperLoopState
   // Where Crash Logger writes its logs (ResolveCrashLoggerLogDirs), for the
   // exit path's look for its crash log.
   std::vector<std::filesystem::path> crashLoggerLogDirs;
+  // The still-frozen crash generation InitializeLoopState signaled again
+  // (RearmFrozenCrashFromEarlierHelper), 0 when none.
+  std::uint32_t rearmedFrozenCrashSeq = 0;
 };
 
 struct CrashArtifactRemovalResult
@@ -60,6 +79,18 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
+// A committed crash generation that is still Frozen while the game runs was
+// published and claimed, but the helper handling it is gone (it was killed or
+// crashed, and the plugin's watchdog started this one). Nothing would signal
+// it again, and while it stays Frozen the plugin records no later crash, so
+// its event is signaled again for this helper to handle it from the start; a
+// second dump of it is the worst case. Returns that generation's crash_seq,
+// or 0 when nothing was signaled.
+std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc);
+// CrashLogger.ini's Crashlog Directory value (its raw bytes) as a path: UTF-8
+// as Crash Logger reads it, else the ANSI code page. Empty when it decodes in
+// neither. Never throws on bad bytes, unlike a path built from a u8string.
+std::filesystem::path DecodeCrashLoggerIniPath(const std::string& bytes);
 // The folders Crash Logger writes its crash-*.log to: the Crashlog Directory
 // set in CrashLogger.ini, and the SKSE log folder under Documents\My Games.
 // Empty unless Crash Logger is installed with its thread dump hotkey on.
@@ -112,6 +143,15 @@ void ReleasePendingCrashAnalysisAtShutdown(const std::filesystem::path& outBase,
 // (see AdvanceLateRecovery). Returns true when it released one this tick.
 bool HandleLateRecoveryTick(
   const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state);
+
+// Deletes the dump held for a crash released on a brief heartbeat once the
+// game has outlived it (as late recovery: a minute alive, 30 s of advancing
+// heartbeat); after that the exit path no longer reports it at the usual
+// abnormal exit.
+void ExpireReleasedCrashDumpIfOutlived(
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
   HelperLoopState* state);

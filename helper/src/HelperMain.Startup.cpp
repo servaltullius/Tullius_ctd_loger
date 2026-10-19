@@ -3,10 +3,12 @@
 #include <ShlObj.h>
 
 #include <algorithm>
+#include <climits>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
@@ -169,7 +171,8 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
   // clears it. So a committed generation with Frozen clear was already ACKed
   // by an earlier helper that the plugin's watchdog replaced: released as
   // handled, or (indistinguishable here) its dump could not be written. It
-  // is not reported again at exit. A generation still Frozen stays reportable.
+  // is not reported again at exit. A generation still Frozen stays reportable,
+  // and is handled again while the game runs (RearmFrozenCrashFromEarlierHelper).
   CrashEventInfo committed{};
   if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
       (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
@@ -178,6 +181,42 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
     state->crashCaptured.releasedOnBriefHeartbeat = false;
     state->crashCaptured.releasedInThreadDumpWindow = false;
   }
+  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc);
+}
+
+std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc)
+{
+  if (!proc.crashEvent || !proc.process || WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
+    return 0u;  // an exited game's record is drained by the exit path
+  }
+  CrashEventInfo committed{};
+  if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) ||
+      (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    return 0u;
+  }
+  return SetEvent(proc.crashEvent) ? committed.crashSeq : 0u;
+}
+
+std::filesystem::path DecodeCrashLoggerIniPath(const std::string& bytes)
+{
+  if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX)) {
+    return {};
+  }
+  const int size = static_cast<int>(bytes.size());
+  // Crash Logger reads the file as UTF-8; an editor may have saved it in the
+  // ANSI code page instead (e.g. CP949). MB_ERR_INVALID_CHARS makes a code
+  // page that does not fit fail rather than guess.
+  for (const UINT codePage : { static_cast<UINT>(CP_UTF8), static_cast<UINT>(CP_ACP) }) {
+    const int needed = MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS, bytes.data(), size, nullptr, 0);
+    if (needed <= 0) {
+      continue;
+    }
+    std::wstring wide(static_cast<std::size_t>(needed), L'\0');
+    if (MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS, bytes.data(), size, wide.data(), needed) == needed) {
+      return std::filesystem::path(std::move(wide));
+    }
+  }
+  return {};
 }
 
 std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc)
@@ -195,9 +234,10 @@ std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig&
   }
   // A Crashlog Directory set in CrashLogger.ini, relative to the game's
   // folder (its working directory) unless absolute; it may not exist yet.
-  if (!crashLogger.crashlogDirectory.empty()) {
-    const std::filesystem::path custom(std::u8string(
-      crashLogger.crashlogDirectory.begin(), crashLogger.crashlogDirectory.end()));
+  // A value that decodes neither as UTF-8 nor in the ANSI code page is
+  // skipped (a path built from invalid UTF-8 throws).
+  const std::filesystem::path custom = DecodeCrashLoggerIniPath(crashLogger.crashlogDirectory);
+  if (!custom.empty()) {
     dirs.push_back(custom.is_relative() ? gameExeDir / custom : custom);
   }
   // And the SKSE log folder it uses by default, Documents\My Games\<game
@@ -262,7 +302,7 @@ void RegisterManualCaptureHotkeyIfEnabled(
   const ManualCaptureHotkey& hotkey = cfg.manualCaptureHotkey;
   const std::wstring chord = FormatManualCaptureHotkey(hotkey);
   ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);
-  if (!RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)) {
+  if (!RegisterHotKey(nullptr, kHotkeyId, ManualCaptureHotkeyRegistrationModifiers(hotkey), hotkey.virtualKey)) {
     const DWORD le = GetLastError();
     std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(" << chord << L") failed: " << le << L"\n";
     AppendLogLine(outBase, L"Warning: RegisterHotKey(" + chord + L") failed: " + std::to_wstring(le) +

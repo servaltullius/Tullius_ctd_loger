@@ -28,6 +28,9 @@ struct PendingCrashAnalysis
   HANDLE process = nullptr;
   ULONGLONG startedAtTick64 = 0;
   DWORD timeoutMs = 0;
+  // It ran past its recapture window: left to finish the report, but its
+  // result no longer decides a recapture.
+  bool recaptureExpired = false;
 };
 
 void ClearPendingCrashAnalysis(PendingCrashAnalysis* task);

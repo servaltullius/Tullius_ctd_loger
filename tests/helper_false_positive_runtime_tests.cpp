@@ -1944,9 +1944,11 @@ void TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened()
   std::filesystem::remove_all(outBase);
 }
 
-// The analysis timeout exists for the recapture decision. Without recapture
-// a slow analysis (a large dump) is left to finish instead of being killed.
-void TestAnalysisTimeoutOnlyKillsForRecapture()
+// The analysis timeout exists for the recapture decision, but the analysis
+// also writes the crash report: a slow one (a large dump) is left to finish
+// instead of being killed, and with recapture on its late result decides no
+// recapture.
+void TestAnalysisTimeoutLeavesTheReportToFinish()
 {
   using skydiag::helper::internal::FinalizePendingCrashAnalysisIfReady;
   const auto outBase = MakeTempDir(L"skydiag_helper_analysis_timeout");
@@ -1963,18 +1965,232 @@ void TestAnalysisTimeoutOnlyKillsForRecapture()
     task.startedAtTick64 = GetTickCount64() - 60'000;
     task.timeoutMs = 20'000;
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &task);
-    const bool stillRunning = WaitForSingleObject(analyzer.pi.hProcess, recapture ? 5000 : 0) == WAIT_TIMEOUT;
-    Require(stillRunning == !recapture, recapture ? "Recapture: the analysis is stopped at its timeout" : "No recapture: the analysis is left to finish");
+    Require(WaitForSingleObject(analyzer.pi.hProcess, 0) == WAIT_TIMEOUT, "The analysis is left to finish the report");
+    Require(task.active && task.process && task.timeoutMs == 0u,
+      "Still tracked without a timeout, so a filtered-crash cleanup can stop it");
+    Require(task.recaptureExpired == recapture, "With recapture on, its window is marked as passed");
     if (recapture) {
-      Require(!task.active, "Recapture: no longer tracked");
+      // It finishes late: no recapture decision, the handle is released.
+      Require(TerminateProcess(analyzer.pi.hProcess, 0u) != FALSE, "TerminateProcess failed");
+      Require(WaitForSingleObject(analyzer.pi.hProcess, 5000) == WAIT_OBJECT_0, "the analyzer did not end");
+      FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &task);
+      Require(!task.active, "No longer tracked once it finished");
+      AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "recapture skipped", "The skipped recapture is logged");
     } else {
-      Require(task.active && task.process && task.timeoutMs == 0u,
-        "No recapture: still tracked without a timeout, so a filtered-crash cleanup can stop it");
       skydiag::helper::internal::ClearPendingCrashAnalysis(&task);
       Require(WaitForSingleObject(analyzer.pi.hProcess, 5000) == WAIT_OBJECT_0, "The cleanup can still stop it");
     }
     TerminateChildProcess(&analyzer);
   }
+  std::filesystem::remove_all(outBase);
+}
+
+// A helper the plugin's watchdog started after the one handling a crash died
+// finds that generation still Frozen while the game runs. Nothing else would
+// signal it again, and while it stays Frozen the plugin records no later
+// crash, so the new helper signals its event and handles it.
+void TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles()
+{
+  using skydiag::helper::internal::InitializeLoopState;
+  struct Case
+  {
+    const char* name;
+    std::uint32_t stateFlags;
+    bool gameRunning;
+    bool expectRearmed;
+  };
+  const Case cases[] = {
+    { "still frozen, game running: signaled again", skydiag::kState_Frozen, true, true },
+    { "acknowledged (thawed): not signaled", 0u, true, false },
+    { "still frozen, game exited: left to the exit drain", skydiag::kState_Frozen, false, false },
+  };
+  for (const auto& c : cases) {
+    auto shared = MakeSharedLayout();
+    shared->header.crash_seq = 2u;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.state_flags = c.stateFlags;
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    proc.crashEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    Require(proc.crashEvent != nullptr, "CreateEventW failed");
+    if (!c.gameRunning) {
+      TerminateWithExitCode(child, 1u);
+    }
+
+    skydiag::helper::internal::HelperLoopState state{};
+    InitializeLoopState(proc, &state);
+    const bool signaled = WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0;
+    Require(signaled == c.expectRearmed, c.name);
+    Require(state.rearmedFrozenCrashSeq == (c.expectRearmed ? 2u : 0u), c.name);
+
+    CloseHandle(proc.crashEvent);
+    TerminateChildProcess(&child);
+  }
+}
+
+// A crash released on a few seconds of heartbeat keeps its dump until the
+// release is settled. When the exit then reports the fault after all, that
+// dump becomes its crash dump instead of a metadata-only record; when the
+// exit does not report it, the dump is deleted.
+void TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash()
+{
+  struct Case
+  {
+    const char* name;
+    DWORD exitCode;
+    std::uint64_t releasedAgoMs;
+    bool expectReported;
+  };
+  const Case cases[] = {
+    { "exit 1 five seconds after the release: reported with its dump", 1u, 5'000u, true },
+    { "a normal exit: dump deleted", 0u, 5'000u, false },
+    { "exit 1 long after the release: dump deleted", 1u, 90'000u, false },
+  };
+  for (const auto& c : cases) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_released_held_dump");
+    ClearLog(outBase);
+    const auto heldDump = outBase / L"SkyrimDiag_Crash_20261019_120000_001.dmp";
+    WriteAllTextUtf8(heldDump, "dump");
+
+    auto shared = MakeSharedLayout();
+    shared->header.crash_seq = 2u;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash.exception_addr = 0x12345678u;
+    shared->header.crash.faulting_tid = 4242u;
+    shared->header.qpc_freq = QpcFrequency();
+    shared->header.last_heartbeat_qpc = QpcNow();
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    HelperConfig cfg = MakeTestConfig();
+
+    skydiag::helper::internal::HelperLoopState state{};
+    state.crashCaptured.releasedCrashSeq = 2u;
+    state.crashCaptured.releasedOnBriefHeartbeat = true;
+    state.crashCaptured.releasedCrashTick64 = GetTickCount64() - c.releasedAgoMs;
+    state.crashCaptured.releasedDumpPath = heldDump.wstring();
+
+    TerminateWithExitCode(child, c.exitCode);
+    Require(HandleProcessExitTick(cfg, proc, outBase, &state), c.name);
+
+    const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+    Require(state.crashCaptured.releasedDumpPath.empty(), c.name);
+    if (c.expectReported) {
+      if (!FileExists(heldDump)) {
+        std::fprintf(stderr, "%s\n", log.c_str());
+      }
+      Require(FileExists(heldDump), c.name);
+      Require(state.crashCaptured.latched && state.capturedCrashDumpPath == heldDump.wstring(), c.name);
+      Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), c.name);
+      AssertContains(log, "reporting it as the crash dump", c.name);
+    } else {
+      Require(!FileExists(heldDump), c.name);
+      Require(!state.crashCaptured.latched, c.name);
+      AssertContains(log, "Released crash dump deleted", c.name);
+    }
+    TerminateChildProcess(&child);
+    std::filesystem::remove_all(outBase);
+  }
+}
+
+// The held dump goes once the game has outlived its exception (a minute
+// alive, 30 s of advancing heartbeat), not before.
+void TestExpireReleasedCrashDumpIfOutlived()
+{
+  using skydiag::helper::internal::ExpireReleasedCrashDumpIfOutlived;
+  const auto outBase = MakeTempDir(L"skydiag_helper_released_dump_expiry");
+  ClearLog(outBase);
+  const auto heldDump = outBase / L"SkyrimDiag_Crash_20261019_120500_001.dmp";
+  WriteAllTextUtf8(heldDump, "dump");
+  auto shared = MakeSharedLayout();
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.releasedDumpPath = heldDump.wstring();
+  auto& recovery = state.crashCaptured.releasedDumpRecovery;
+  const auto now = GetTickCount64();
+  skydiag::helper::internal::StartLateRecovery(&recovery, now - 30'000, 100u);
+  recovery.lastSampleTick64 = now - 6'000;
+  recovery.advancingWindows = 5u;
+  shared->header.last_heartbeat_qpc = 200u;
+  ExpireReleasedCrashDumpIfOutlived(proc, outBase, &state);
+  Require(FileExists(heldDump) && !state.crashCaptured.releasedDumpPath.empty(), "Too early: the dump is held");
+
+  recovery.latchedTick64 = now - 120'000;
+  recovery.lastSampleTick64 = now - 6'000;
+  recovery.lastHeartbeatQpc = 200u;
+  recovery.advancingWindows = 5u;
+  shared->header.last_heartbeat_qpc = 300u;
+  ExpireReleasedCrashDumpIfOutlived(proc, outBase, &state);
+  Require(!FileExists(heldDump) && state.crashCaptured.releasedDumpPath.empty(), "Outlived: the dump is deleted");
+  AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "kept running for over a minute", "Logged");
+
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// A hang still open when the game exits with code 0 is a slow shutdown (a
+// large load order quitting): the dump stays, but no freeze viewer opens
+// after the game closed normally.
+void TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_slow_shutdown_hang");
+  ClearLog(outBase);
+  HelperConfig cfg = MakeTestConfig();
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.pendingHangViewerDumpPath = L"C:\\Temp\\SyntheticHang.dmp";
+  state.hangState.hangCapturedThisEpisode = true;
+  LaunchDeferredViewersAfterExit(cfg, outBase, /*exitCode=*/0, &state);
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "Suppressed hang viewer launch", "the skipped viewer is logged");
+  Require(log.find("Hang viewer auto-open attempt failed") == std::string::npos, "no viewer launch was tried");
+  Require(log.find("Auto-opened DumpTool viewer") == std::string::npos, "no viewer launch was tried");
+  std::filesystem::remove_all(outBase);
+}
+
+// A hang capture's ETW trace is stopped from the helper loop, one wpr call
+// per tick, so a crash is still noticed in between; the old synchronous
+// finalize could block for minutes. The fake wpr here (this test exe) fails
+// every -stop of this file and confirms -cancel.
+void TestPendingHangEtwStopRunsOneWprCallPerTick()
+{
+  using skydiag::helper::internal::MaybeFinalizePendingHangEtwCapture;
+  using skydiag::helper::internal::PendingHangEtwCapture;
+  const auto outBase = MakeTempDir(L"skydiag_hang_etw_pending");
+  ClearLog(outBase);
+  HelperConfig cfg = MakeTestConfig();
+  cfg.etwWprExe = CurrentExecutablePath().wstring();
+  const auto manifestPath = outBase / L"SkyrimDiag_Incident_Hang_20261019_120000_001.json";
+  WriteAllTextUtf8(manifestPath, "{}");
+
+  PendingHangEtwCapture pending{};
+  pending.active = true;
+  pending.etwPath = outBase / L"synthetic-hang.etl";
+  pending.manifestPath = manifestPath;
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(pending.active && pending.stopAttempts == 1u, "one wpr -stop on the first tick");
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(pending.active && pending.stopAttempts == 2u, "one more on the next");
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(!pending.active, "after the last stop attempt, wpr -cancel settles it");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "attempt 3 of 3", "each stop attempt is logged");
+  AssertContains(log, "WPR cancellation was confirmed", "the cancel is logged");
+  AssertContains(
+    ReadAllTextUtf8(manifestPath), "\"etw_status\": \"cancelled_after_stop_failure\"", "the manifest gets the ETW outcome");
+
+  // At helper shutdown every remaining step runs at once.
+  PendingHangEtwCapture atShutdown{};
+  atShutdown.active = true;
+  atShutdown.etwPath = outBase / L"synthetic-hang-2.etl";
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &atShutdown);
+  Require(!atShutdown.active, "forced: settled in one call");
   std::filesystem::remove_all(outBase);
 }
 
@@ -2042,7 +2258,12 @@ int wmain(int argc, wchar_t** argv)
     TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat();
     TestOutputDirResolvesAgainstTheHelperFolder();
     TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened();
-    TestAnalysisTimeoutOnlyKillsForRecapture();
+    TestAnalysisTimeoutLeavesTheReportToFinish();
+    TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles();
+    TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash();
+    TestExpireReleasedCrashDumpIfOutlived();
+    TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown();
+    TestPendingHangEtwStopRunsOneWprCallPerTick();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());
