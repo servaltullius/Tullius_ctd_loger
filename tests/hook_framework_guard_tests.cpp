@@ -47,24 +47,8 @@ int main()
 
   AssertContains(
     stackwalkScoring,
-    "topIsCrashLogger",
-    "Stackwalk scoring must explicitly treat CrashLogger as a special hook-framework false-positive case.");
-  AssertContains(
-    stackwalkScoring,
-    "crashlogger.dll",
-    "Stackwalk scoring must include CrashLogger.dll alias handling.");
-  AssertContains(
-    stackwalkScoring,
-    "topIsSkseRuntime",
-    "Stackwalk scoring must include SKSE runtime alias handling.");
-  AssertContains(
-    stackwalkScoring,
-    "topIsMo2Vfs",
-    "Stackwalk scoring must include MO2 VFS alias handling.");
-  AssertContains(
-    stackwalkScoring,
-    "IsSkseModule",
-    "Stackwalk scoring must use shared SKSE module detection.");
+    "const bool topIsPassiveHook = IsPassiveHookModule(",
+    "Stackwalk scoring must treat Crash Logger, the SKSE runtime and MO2 VFS as passive hooks through the shared list.");
   AssertContains(
     stackwalkScoring,
     "promotedHookTop",
@@ -81,24 +65,20 @@ int main()
 
   AssertContains(
     stackScan,
-    "topIsCrashLogger",
-    "Stack-scan scoring must explicitly treat CrashLogger as a special hook-framework false-positive case.");
+    "const bool topIsPassiveHook = IsPassiveHookModule(",
+    "Stack-scan scoring must treat Crash Logger, the SKSE runtime and MO2 VFS as passive hooks through the shared list.");
   AssertContains(
-    stackScan,
-    "crashlogger.dll",
-    "Stack-scan scoring must include CrashLogger.dll alias handling.");
+    minidumpUtil,
+    "lower == L\"crashlogger.dll\" || lower == L\"crashloggersse.dll\"",
+    "The shared passive-hook list must include both Crash Logger DLL names.");
   AssertContains(
-    stackScan,
-    "topIsSkseRuntime",
-    "Stack-scan scoring must include SKSE runtime alias handling.");
+    minidumpUtil,
+    "lower == L\"usvfs_x64.dll\" || lower == L\"uvsfs64.dll\"",
+    "The shared passive-hook list must include MO2 VFS aliases.");
   AssertContains(
-    stackScan,
-    "topIsMo2Vfs",
-    "Stack-scan scoring must include MO2 VFS alias handling.");
-  AssertContains(
-    stackScan,
-    "IsSkseModule",
-    "Stack-scan scoring must use shared SKSE module detection.");
+    minidumpUtil,
+    "return IsSkseModuleLower(lower) ||",
+    "The shared passive-hook list must include the SKSE runtime.");
   AssertContains(
     minidumpUtil,
     "skse64_",
