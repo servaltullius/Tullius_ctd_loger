@@ -497,10 +497,10 @@ void RunPreflightChecks(
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty()) ? "ok" : "warn",
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty()) ? "low" : "high",
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty())
-      ? ("dbghelp.dll 런타임 확인: " + WideToUtf8(symbolHealth.dbghelpPath.wstring()))
+      ? ("dbghelp.dll 런타임 확인: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.dbghelpPath.wstring())))
       : "dbghelp.dll 런타임을 확인하지 못했습니다. 스택워크 품질이 저하될 수 있습니다.",
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty())
-      ? ("dbghelp.dll runtime detected: " + WideToUtf8(symbolHealth.dbghelpPath.wstring()))
+      ? ("dbghelp.dll runtime detected: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.dbghelpPath.wstring())))
       : "Failed to resolve dbghelp.dll runtime; stackwalk quality may be degraded.",
   });
 
@@ -509,10 +509,10 @@ void RunPreflightChecks(
     symbolHealth.msdiaAvailable ? "ok" : "warn",
     symbolHealth.msdiaAvailable ? "low" : "medium",
     symbolHealth.msdiaAvailable
-      ? ("msdia140.dll 사용 가능: " + WideToUtf8(symbolHealth.msdiaPath.wstring()))
+      ? ("msdia140.dll 사용 가능: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.msdiaPath.wstring())))
       : "msdia140.dll을 찾지 못했습니다. 소스 라인 해석이 제한될 수 있습니다.",
     symbolHealth.msdiaAvailable
-      ? ("msdia140.dll available: " + WideToUtf8(symbolHealth.msdiaPath.wstring()))
+      ? ("msdia140.dll available: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.msdiaPath.wstring())))
       : "msdia140.dll not found; source line resolution may be limited.",
   });
 
@@ -619,15 +619,15 @@ void RunPreflightChecks(
   nlohmann::json out = nlohmann::json::object();
   out["schema"] = { { "name", "SkyrimDiagPreflight" }, { "version", 1 } };
   out["pid"] = proc.pid;
-  out["game_exe_dir"] = WideToUtf8(gameExeDir.wstring());
+  out["game_exe_dir"] = WideToUtf8(skydiag::helper::RedactPath(gameExeDir.wstring()));
   out["game_exe_version"] = pluginScan.game_exe_version;
   out["plugins_source"] = pluginScan.plugins_source;
   out["mo2_detected"] = pluginScan.mo2_detected;
   out["loaded_module_count"] = moduleNames.size();
   out["symbol_runtime"] = {
-    { "dbghelp_path", WideToUtf8(symbolHealth.dbghelpPath.wstring()) },
+    { "dbghelp_path", WideToUtf8(skydiag::helper::RedactPath(symbolHealth.dbghelpPath.wstring())) },
     { "dbghelp_version", symbolHealth.dbghelpVersion },
-    { "msdia_path", WideToUtf8(symbolHealth.msdiaPath.wstring()) },
+    { "msdia_path", WideToUtf8(skydiag::helper::RedactPath(symbolHealth.msdiaPath.wstring())) },
     { "msdia_available", symbolHealth.msdiaAvailable },
     // Users attach this file to reports. A search path from _NT_SYMBOL_PATH or
     // SKYRIMDIAG_SYMBOL_PATH and the default cache under %LOCALAPPDATA% name
