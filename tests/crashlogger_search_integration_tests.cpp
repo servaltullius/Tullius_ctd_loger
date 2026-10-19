@@ -1,3 +1,4 @@
+#include "AnalyzerPipeline.h"
 #include "CrashLogger.h"
 
 #include <Windows.h>
@@ -12,8 +13,11 @@
 
 namespace {
 
+using skydiag::dump_tool::AnalysisResult;
+using skydiag::dump_tool::IntegrateCrashLoggerLog;
 using skydiag::dump_tool::TryFindCrashLoggerLogForDump;
 using skydiag::dump_tool::CrashLoggerPairingMetadata;
+using skydiag::dump_tool::minidump::ModuleInfo;
 
 constexpr const char* kCrashLogText =
   "CrashLoggerSSE v1.20.0\n"
@@ -265,6 +269,115 @@ void TestRuntimeLogHotkeyLineCannotBeatRealCrashLog()
           "the selected artifact must retain crash provenance");
 }
 
+std::string Utf8(const std::filesystem::path& path)
+{
+  const auto u8 = path.u8string();
+  return std::string(u8.begin(), u8.end());
+}
+
+// <root>\Game\Data\SKSE\Plugins\CrashLogger.ini with the given Crashlog
+// Directory line; returns the game root to search with.
+std::filesystem::path WriteGameWithCrashLoggerIni(const std::filesystem::path& root, std::string_view crashlogDirLine)
+{
+  const auto plugins = root / L"Game" / L"Data" / L"SKSE" / L"Plugins";
+  std::error_code ec;
+  std::filesystem::create_directories(plugins, ec);
+  Require(!ec, "failed to create the game folder fixture");
+  WriteFile(plugins, L"CrashLogger.ini", "[Debug]\r\n" + std::string(crashlogDirLine) + "\r\n");
+  return root / L"Game";
+}
+
+std::optional<std::filesystem::path> SearchWithGameRoot(
+  const std::filesystem::path& dumpPath,
+  const std::filesystem::path& gameRoot,
+  CrashLoggerPairingMetadata* metadata)
+{
+  std::wstring error = L"not cleared";
+  const auto found = TryFindCrashLoggerLogForDump(dumpPath, std::nullopt, nullptr, gameRoot, &error, metadata);
+  Require(error.empty(), "CrashLogger search unexpectedly returned an error");
+  return found;
+}
+
+// Review L17: "Crashlog Directory=<dump folder>\" names the folder already
+// searched next to the dump; the one log there must not compete with itself.
+void TestIniFolderWithTrailingSeparatorIsSearchedOnce()
+{
+  TempDirectory temp("ini-trailing-separator");
+  const auto logs = temp.path() / L"Logs";
+  std::filesystem::create_directories(logs);
+  const auto dump = WriteFile(logs, L"Tullius_crash_20970719_120000.dmp", "dump");
+  WriteFile(logs, L"crash-2097-07-19-12-00-00.log", kCrashLogText);
+  const auto game = WriteGameWithCrashLoggerIni(temp.path(), "Crashlog Directory=" + Utf8(logs) + "\\");
+
+  CrashLoggerPairingMetadata metadata{};
+  RequireFoundFilename(SearchWithGameRoot(dump, game, &metadata), L"crash-2097-07-19-12-00-00.log",
+    "the log next to the dump is found");
+  Require(metadata.eligible_candidate_count == 1u, "the same log is one candidate");
+  Require(!metadata.ambiguous && metadata.nearby_competitor_count == 0u, "and does not make the pairing ambiguous");
+}
+
+// Review M23: Crash Logger keeps a '#' inside the value as part of the
+// folder name; the analyzer must look in the same folder.
+void TestIniFolderNameWithHashIsKept()
+{
+  TempDirectory temp("ini-hash-folder");
+  const auto dumps = temp.path() / L"Dumps";
+  const auto logs = temp.path() / L"Skyrim #2" / L"CrashLogs";
+  std::filesystem::create_directories(dumps);
+  std::filesystem::create_directories(logs);
+  const auto dump = WriteFile(dumps, L"Tullius_crash_20970720_120000.dmp", "dump");
+  WriteFile(logs, L"crash-2097-07-20-12-00-00.log", kCrashLogText);
+  const auto game = WriteGameWithCrashLoggerIni(temp.path(), "Crashlog Directory = " + Utf8(logs));
+
+  CrashLoggerPairingMetadata metadata{};
+  RequireFoundFilename(SearchWithGameRoot(dump, game, &metadata), L"crash-2097-07-20-12-00-00.log",
+    "the log in the configured folder is found");
+}
+
+// Review M16 follow-up: the MO2 folder and game folder the analyzer searches
+// for Crash Logger logs come from the dump's module paths. One that is not
+// on a local fixed disk is not read (a crafted dump could name a UNC share);
+// a "\\?\" path to a real local folder stands in for it here.
+void TestDumpFoldersOffALocalFixedDiskAreNotSearched()
+{
+  TempDirectory temp("dump-folder-locality");
+  const auto dumps = temp.path() / L"Dumps";
+  const auto mo2 = temp.path() / L"MO2";
+  const auto overwriteSkse = mo2 / L"overwrite" / L"SKSE";
+  const auto gameLogs = temp.path() / L"GameLogs";
+  for (const auto& dir : { dumps, overwriteSkse, mo2 / L"mods" / L"X", gameLogs }) {
+    std::filesystem::create_directories(dir);
+  }
+
+  const auto mo2Dump = WriteFile(dumps, L"Tullius_crash_20970721_120000.dmp", "dump");
+  WriteFile(overwriteSkse, L"crash-2097-07-21-12-00-00.log", kCrashLogText);
+  const std::wstring moduleUnderMods = (mo2 / L"mods" / L"X" / L"x.dll").wstring();
+
+  AnalysisResult localMo2{};
+  IntegrateCrashLoggerLog(mo2Dump.wstring(), {}, { moduleUnderMods }, std::nullopt, localMo2);
+  Require(std::filesystem::path(localMo2.crash_logger_log_path).filename() == L"crash-2097-07-21-12-00-00.log",
+    "the overwrite folder of a local MO2 instance is searched");
+  AnalysisResult otherMo2{};
+  IntegrateCrashLoggerLog(mo2Dump.wstring(), {}, { L"\\\\?\\" + moduleUnderMods }, std::nullopt, otherMo2);
+  Require(otherMo2.crash_logger_log_path.empty(), "an MO2 folder off a local fixed disk is not searched");
+
+  const auto gameDump = WriteFile(dumps, L"Tullius_crash_20970722_120000.dmp", "dump");
+  WriteFile(gameLogs, L"crash-2097-07-22-12-00-00.log", kCrashLogText);
+  const auto game = WriteGameWithCrashLoggerIni(temp.path(), "Crashlog Directory=" + Utf8(gameLogs));
+  ModuleInfo exe{};
+  exe.filename = L"SkyrimSE.exe";
+  exe.path = (game / L"SkyrimSE.exe").wstring();
+
+  AnalysisResult localGame{};
+  IntegrateCrashLoggerLog(gameDump.wstring(), { exe }, {}, std::nullopt, localGame);
+  Require(std::filesystem::path(localGame.crash_logger_log_path).filename() == L"crash-2097-07-22-12-00-00.log",
+    "CrashLogger.ini in a local game folder is read");
+  exe.path = L"\\\\?\\" + exe.path;
+  AnalysisResult otherGame{};
+  IntegrateCrashLoggerLog(gameDump.wstring(), { exe }, {}, std::nullopt, otherGame);
+  Require(otherGame.crash_logger_log_path.empty(), "a game folder off a local fixed disk is not read");
+}
+
 }  // namespace
 
 int main()
@@ -276,6 +389,9 @@ int main()
     TestEqualTimestampTieBreakIsDeterministic();
     TestNearbyCompetingLogMarksPairingAmbiguous();
     TestRuntimeLogHotkeyLineCannotBeatRealCrashLog();
+    TestIniFolderWithTrailingSeparatorIsSearchedOnce();
+    TestIniFolderNameWithHashIsKept();
+    TestDumpFoldersOffALocalFixedDiskAreNotSearched();
     std::cout << "crashlogger search integration tests passed\n";
     return 0;
   } catch (const std::exception& ex) {

@@ -43,13 +43,20 @@ FirstChanceSummary BuildFirstChanceSummary(
 
 std::wstring ResourceKindFromPath(std::wstring_view path);
 
+// exceptionContext: the faulting context from the exception stream. The
+// exception thread's scan starts at its Rsp when that lies in the captured
+// stack: by the time the dump is written the thread is inside the crash
+// handlers (Crash Logger, WER), and their frames below the fault would
+// otherwise take the heaviest slots. No default: a caller passes nullptr
+// only when the dump has no exception context.
 std::vector<SuspectItem> ComputeStackScanSuspects(
   void* dumpBase,
   std::uint64_t dumpSize,
   const std::vector<minidump::ModuleInfo>& modules,
   const std::vector<std::uint32_t>& targetTids,
   std::uint32_t exceptionTid,
-  i18n::Language lang);
+  i18n::Language lang,
+  const CONTEXT* exceptionContext);
 
 std::vector<std::uint32_t> FindThreadsWithNearStackModule(
   void* dumpBase,

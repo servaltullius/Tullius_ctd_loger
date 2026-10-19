@@ -32,17 +32,37 @@ internal static class SummaryTriageStore
     {
         ArgumentNullException.ThrowIfNull(writeSummaryMirrorAsync);
 
-        await using var outputFamilyLock = await AcquireOutputFamilyLockAsync(
-            outDir,
-            dumpPath,
-            cancellationToken);
-        var jsonText = await File.ReadAllTextAsync(summaryPath, cancellationToken);
-        using var identityDocument = JsonDocument.Parse(jsonText);
-        var identity = DumpIdentityContract.FromJson(identityDocument.RootElement);
+        // Hash the dump once, before taking the output-family lock. The native
+        // analyzer waits on the same lock with a bounded timeout, so hashing a
+        // multi-GB dump while holding it can fail a concurrent reanalysis.
+        DumpIdentityContract identity;
+        using (var preflightDocument = JsonDocument.Parse(
+                   await File.ReadAllTextAsync(summaryPath, cancellationToken)))
+        {
+            identity = DumpIdentityContract.FromJson(preflightDocument.RootElement);
+        }
         if (!await identity.MatchesFileAsync(dumpPath, cancellationToken))
         {
             throw new InvalidDataException(
                 "The summary belongs to a different dump. Reanalyze this dump before saving review feedback.");
+        }
+
+        await using var outputFamilyLock = await AcquireOutputFamilyLockAsync(
+            outDir,
+            dumpPath,
+            cancellationToken);
+        // Under the lock, only confirm nothing moved since the hash: the
+        // summary still describes the verified identity and the dump keeps the
+        // size and FILETIME that were hashed.
+        var jsonText = await File.ReadAllTextAsync(summaryPath, cancellationToken);
+        using (var identityDocument = JsonDocument.Parse(jsonText))
+        {
+            if (DumpIdentityContract.FromJson(identityDocument.RootElement) != identity ||
+                !identity.MatchesFileMetadata(dumpPath))
+            {
+                throw new InvalidDataException(
+                    "The summary or dump changed while the review was being saved. Reanalyze this dump before saving review feedback.");
+            }
         }
 
         var rootNode = JsonNode.Parse(jsonText) as JsonObject
@@ -121,7 +141,14 @@ internal static class SummaryTriageStore
             throw;
         }
 
-        await MirrorToStemSummaryAsync(summaryPath, dumpPath, outDir, triageNode, options, cancellationToken);
+        await MirrorToStemSummaryAsync(
+            summaryPath,
+            dumpPath,
+            outDir,
+            identity,
+            triageNode,
+            options,
+            cancellationToken);
     }
 
     // The analyzer also writes <stem>_SkyrimDiagSummary.json in the output
@@ -129,11 +156,13 @@ internal static class SummaryTriageStore
     // identity-bound copy. Update the stem file too, but only while it still
     // describes this dump (another dump with the same file name shares that
     // path). Best effort: the identity-bound state is what the next analysis
-    // reads back.
+    // reads back. The dump was already verified against `identity`, so the
+    // stem file only has to carry the same identity record.
     private static async Task MirrorToStemSummaryAsync(
         string summaryPath,
         string dumpPath,
         string outDir,
+        DumpIdentityContract identity,
         JsonObject triageNode,
         JsonSerializerOptions options,
         CancellationToken cancellationToken)
@@ -156,7 +185,7 @@ internal static class SummaryTriageStore
             using (var stemDocument = JsonDocument.Parse(stemText))
             {
                 var stemIdentity = DumpIdentityContract.FromJson(stemDocument.RootElement);
-                if (!await stemIdentity.MatchesFileAsync(dumpPath, cancellationToken))
+                if (stemIdentity != identity)
                 {
                     return;
                 }

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <sstream>
 #include <unordered_map>
 
@@ -176,68 +177,58 @@ bool EqualsCaseInsensitiveAscii(std::string_view a, std::string_view b)
 
 std::optional<std::string> ParseCrashLoggerIniCrashlogDirectoryAscii(std::string_view iniUtf8)
 {
-  std::istringstream iss{ std::string(iniUtf8) };
-  std::string line;
+  // Read the way Crash Logger reads it (SimpleIni) and the helper reads it
+  // (ManualCaptureHotkey.h ParseCrashLoggerCrashlogDirectory): a UTF-8 BOM is
+  // skipped, only lines that start with ';' or '#' are comments (a '#' or ';'
+  // inside a value is part of the folder name), the last "Crashlog
+  // Directory" under [Debug] wins, and a pair of surrounding double quotes is
+  // dropped. An empty value means unset.
+  if (iniUtf8.size() >= 3 && iniUtf8.substr(0, 3) == "\xEF\xBB\xBF") {
+    iniUtf8.remove_prefix(3);
+  }
 
+  std::optional<std::string> found;
   bool inDebug = false;
-  while (std::getline(iss, line)) {
+  while (!iniUtf8.empty()) {
+    const std::size_t eol = iniUtf8.find('\n');
+    std::string_view line = iniUtf8.substr(0, eol);
+    iniUtf8.remove_prefix(eol == std::string_view::npos ? iniUtf8.size() : eol + 1);
     if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
+      line.remove_suffix(1);
     }
 
-    std::string_view s = TrimAscii(line);
-    if (s.empty()) {
-      continue;
-    }
-    const char c0 = s.front();
-    if (c0 == ';' || c0 == '#') {
+    const std::string_view s = TrimAscii(line);
+    if (s.empty() || s.front() == ';' || s.front() == '#') {
       continue;
     }
 
-    if (c0 == '[' && s.back() == ']') {
-      const std::string_view sec = TrimAscii(s.substr(1, s.size() - 2));
-      inDebug = EqualsCaseInsensitiveAscii(sec, "debug");
-      continue;
-    }
-
-    if (!inDebug) {
+    if (s.front() == '[') {
+      const auto close = s.find(']');
+      if (close != std::string_view::npos) {
+        inDebug = EqualsCaseInsensitiveAscii(TrimAscii(s.substr(1, close - 1)), "debug");
+      }
       continue;
     }
 
     const auto eq = s.find('=');
-    if (eq == std::string_view::npos) {
+    if (!inDebug || eq == std::string_view::npos) {
       continue;
     }
-    const std::string_view key = TrimRightAscii(s.substr(0, eq));
+    if (!EqualsCaseInsensitiveAscii(TrimAscii(s.substr(0, eq)), "crashlog directory")) {
+      continue;
+    }
+
     std::string_view val = TrimAscii(s.substr(eq + 1));
-
-    if (!EqualsCaseInsensitiveAscii(key, "crashlog directory")) {
-      continue;
+    if (val.size() >= 2 && val.front() == '"' && val.back() == '"') {
+      val = TrimAscii(val.substr(1, val.size() - 2));
     }
-
-    // Strip quotes and/or inline comments.
-    if (!val.empty() && val.front() == '"') {
-      const auto endq = val.find('"', 1);
-      if (endq != std::string_view::npos) {
-        val = val.substr(1, endq - 1);
-      } else {
-        val.remove_prefix(1);
-      }
-      val = TrimAscii(val);
-    } else {
-      const auto cut = val.find_first_of(";#");
-      if (cut != std::string_view::npos) {
-        val = TrimRightAscii(val.substr(0, cut));
-      }
-    }
-
-    if (val.empty()) {
-      return std::nullopt;
-    }
-    return std::string(val);
+    found = std::string(val);
   }
 
-  return std::nullopt;
+  if (!found || found->empty()) {
+    return std::nullopt;
+  }
+  return found;
 }
 
 bool IsSystemishModuleAsciiLower(std::string_view filenameLower)
@@ -385,6 +376,31 @@ std::optional<std::string> TryExtractModuleNameFromLineAscii(std::string_view li
   }
 
   return std::nullopt;
+}
+
+// The address written right before the module+offset token
+// ("[ 0] 0x7FF612340001 d3d11.dll+0012345", "at 0x7FF612345678 d3d11.dll+..."),
+// or 0.
+std::uint64_t TryExtractFrameAddressAscii(std::string_view line)
+{
+  const auto token = TryExtractModulePlusOffsetTokenAscii(line);
+  if (!token) {
+    return 0;
+  }
+  std::size_t end = static_cast<std::size_t>(token->data() - line.data());
+  while (end > 0 && (line[end - 1] == ' ' || line[end - 1] == '\t')) {
+    end--;
+  }
+  std::size_t start = end;
+  while (start > 0 && std::isxdigit(static_cast<unsigned char>(line[start - 1]))) {
+    start--;
+  }
+  if (start == end || start < 2 || line[start - 2] != '0' || (line[start - 1] != 'x' && line[start - 1] != 'X')) {
+    return 0;
+  }
+  std::uint64_t address = 0;
+  const auto [ptr, ec] = std::from_chars(line.data() + start, line.data() + end, address, 16);
+  return (ec == std::errc{} && ptr == line.data() + end) ? address : 0;
 }
 
 bool IsCrashLoggerProbableSectionTerminator(std::string_view line)
@@ -539,10 +555,23 @@ std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetail
 
 CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8)
 {
+  return ParseCrashLoggerFrameSignalsAscii(logUtf8, CrashLoggerSystemNamedModFn{});
+}
+
+CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(
+  std::string_view logUtf8,
+  const CrashLoggerSystemNamedModFn& isSystemNamedMod)
+{
   CrashLoggerFrameSignals out{};
   if (logUtf8.empty()) {
     return out;
   }
+  // A frame named like a Windows DLL in a mod's copy (ENB/ReShade d3d11.dll in
+  // the game folder) is a plugin frame (review H4).
+  const auto inSystemNamedMod = [&](std::string_view lineText, const std::string& module) {
+    return isSystemNamedMod && IsSystemishModuleAsciiLower(AsciiLower(module)) &&
+           isSystemNamedMod(module, TryExtractFrameAddressAscii(lineText));
+  };
 
   std::istringstream iss{ std::string(logUtf8) };
   std::string line;
@@ -562,6 +591,7 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
         IsCrashLoggerDirectFaultLineAscii(line)) {
       if (auto module = TryExtractModuleNameFromLineAscii(line)) {
         out.direct_fault_module = *module;
+        out.direct_fault_in_system_named_mod = inSystemNamedMod(line, *module);
       }
     }
 
@@ -585,11 +615,13 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
     if (auto module = TryExtractModuleNameFromLineAscii(line)) {
       out.probable_modules_in_order.push_back(*module);
       const std::string moduleLower = AsciiLower(*module);
+      const bool systemNamedMod = inSystemNamedMod(line, *module);
+      out.probable_frame_in_system_named_mod.push_back(systemNamedMod);
       moduleRows.push_back(rowKinds.size());
       rowKinds.push_back(
-        IsSystemishModuleAsciiLower(moduleLower) ? StackFrameKind::kSystem
-        : IsGameExeModuleAsciiLower(moduleLower) ? StackFrameKind::kGame
-                                                 : StackFrameKind::kPlugin);
+        (IsSystemishModuleAsciiLower(moduleLower) && !systemNamedMod) ? StackFrameKind::kSystem
+        : IsGameExeModuleAsciiLower(moduleLower)                      ? StackFrameKind::kGame
+                                                                      : StackFrameKind::kPlugin);
     } else if (const auto trimmed = TrimAscii(line); !trimmed.empty() && trimmed.front() == '[') {
       // A frame in no module (JIT code, a freed DLL) keeps its place, so the
       // frames around it are not taken as adjacent (ThreadEntryHooks.h).
@@ -619,12 +651,14 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
   for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
     if (kinds[i] == StackFrameKind::kPlugin && !out.probable_frame_is_thread_entry_hook[i]) {
       out.first_actionable_probable_module = out.probable_modules_in_order[i];
+      out.first_actionable_probable_in_system_named_mod = out.probable_frame_in_system_named_mod[i];
       break;
     }
   }
 
   std::string currentLower;
   std::string currentModule;
+  bool currentInSystemNamedMod = false;
   std::uint32_t currentLength = 0;
   for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
     const auto& module = out.probable_modules_in_order[i];
@@ -635,18 +669,22 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUt
       currentLength = 0;
       continue;
     }
+    // The mod's copy and the Windows DLL of the same name are no one streak.
+    const bool inMod = out.probable_frame_in_system_named_mod[i];
     const std::string moduleLower = AsciiLower(module);
-    if (moduleLower == currentLower) {
+    if (moduleLower == currentLower && inMod == currentInSystemNamedMod) {
       currentLength++;
     } else {
       currentLower = moduleLower;
       currentModule = module;
+      currentInSystemNamedMod = inMod;
       currentLength = 1;
     }
 
     if (currentLength > out.probable_streak_length) {
       out.probable_streak_length = currentLength;
       out.probable_streak_module = currentModule;
+      out.probable_streak_in_system_named_mod = currentInSystemNamedMod;
     }
   }
 

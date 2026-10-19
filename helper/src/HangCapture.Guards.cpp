@@ -7,6 +7,7 @@
 
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/HangSuppression.h"
+#include "SkyrimDiagHelper/ModalDialogProbe.h"
 #include "WindowHeuristics.h"
 #include "SkyrimDiagShared.h"
 
@@ -22,6 +23,7 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->hangSuppressedNotForegroundThisEpisode = false;
   state->hangSuppressedForegroundGraceThisEpisode = false;
   state->hangSuppressedForegroundResponsiveThisEpisode = false;
+  state->hangSuppressionLiftedForDialogThisEpisode = false;
   state->hangSuppressionState = {};
 }
 
@@ -64,6 +66,19 @@ bool SuppressHangAndLogIfNeeded(
     proc.shm->header.qpc_freq,
     cfg.foregroundGraceSec);
   if (!hangSup.suppress) {
+    return false;
+  }
+  // Only probed in that one state, since it enumerates windows.
+  if (hangSup.reason == skydiag::helper::HangSuppressionReason::kForegroundResponsive &&
+      skydiag::helper::IsHangSuppressionLiftedByModalDialog(
+        hangSup.reason, !skydiag::helper::CaptureModalDialogs(proc.pid).empty())) {
+    if (!state->hangSuppressionLiftedForDialogThisEpisode) {
+      state->hangSuppressionLiftedForDialogThisEpisode = true;
+      AppendLogLine(
+        outBase,
+        L"Hang after returning to foreground with a responsive window, but a dialog window of the game is "
+        L"visible (e.g. a plugin's error message); not treating it as an Alt-Tab pause.");
+    }
     return false;
   }
 

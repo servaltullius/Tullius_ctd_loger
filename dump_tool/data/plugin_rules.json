@@ -28,8 +28,8 @@
         "has_missing_master": true
       },
       "diagnosis": {
-        "cause_ko": "플러그인의 마스터 파일이 누락됨 - 로드 시 CTD 확정",
-        "cause_en": "Plugin master file is missing - guaranteed CTD on load",
+        "cause_ko": "활성 플러그인의 마스터 파일이 플러그인 목록에 없습니다. 정말 없다면 게임이 시작하면서 플러그인을 읽을 때 튕깁니다",
+        "cause_en": "A master of an active plugin is not in the plugin list. If it is really missing, the game crashes at startup while it loads plugins",
         "confidence": "high",
         "recommendations_ko": [
           "[필수] 누락된 마스터 모드를 설치하거나, 해당 플러그인을 비활성화하세요",
@@ -68,10 +68,10 @@
         "cause_en": "Non-ESL plugin count is close to the limit (254). It is not a crash cause by itself below the limit, but plugins past it do not load",
         "confidence": "low",
         "recommendations_ko": [
-          "[정리] 플러그인을 더 추가할 계획이면 ESL로 바꿀 수 있는 ESP를 정리하세요(SSEEdit의 'Compact FormIDs for ESL')"
+          "[정리] 플러그인을 더 추가할 계획이면, FormID를 바꾸지 않고 ESL 플래그만 붙일 수 있는 ESP부터 ESL로 바꾸세요. SSEEdit의 'Compact FormIDs for ESL'은 FormID를 바꾸므로 기존 세이브와, 다른 곳(SPID·KID·SkyPatcher 설정, 스크립트)에서 FormID로 가리키는 참조가 깨집니다. 새 게임을 시작하기 전에, FormID로 참조되지 않는 플러그인에만 쓰세요"
         ],
         "recommendations_en": [
-          "[Upkeep] If you plan to add more plugins, ESL-flag the ESPs that can be (SSEEdit's 'Compact FormIDs for ESL')"
+          "[Upkeep] If you plan to add more plugins, first ESL-flag the ESPs that can take the flag without changing FormIDs. SSEEdit's 'Compact FormIDs for ESL' renumbers FormIDs, which breaks existing saves and FormID references kept elsewhere (SPID, KID or SkyPatcher configs, scripts); use it only before starting a new game, and only on plugins nothing references by FormID"
         ]
       }
     }

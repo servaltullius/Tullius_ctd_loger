@@ -308,6 +308,14 @@ static void Test_Resets_WhenNoHang()
   assert(s.foregroundResumeQpc == 0);
 }
 
+// A modal dialog (a plugin's error MessageBox) keeps the window answering
+// while the main thread waits in it, so after Alt-Tab and back a visible
+// dialog lifts the responsive-window suppression; nothing else does.
+static_assert(skydiag::helper::IsHangSuppressionLiftedByModalDialog(HangSuppressionReason::kForegroundResponsive, true));
+static_assert(!skydiag::helper::IsHangSuppressionLiftedByModalDialog(HangSuppressionReason::kForegroundResponsive, false));
+static_assert(!skydiag::helper::IsHangSuppressionLiftedByModalDialog(HangSuppressionReason::kForegroundGrace, true));
+static_assert(!skydiag::helper::IsHangSuppressionLiftedByModalDialog(HangSuppressionReason::kNotForeground, true));
+
 int main()
 {
   Test_Suppresses_WhenNotForeground_AndResponsive();

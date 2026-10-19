@@ -11,7 +11,7 @@ namespace {
 
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::GetThreadStackBytes;
-using skydiag::dump_tool::minidump::IsSkseModule;
+using skydiag::dump_tool::minidump::IsPassiveHookModule;
 using skydiag::dump_tool::minidump::LoadThreads;
 using skydiag::dump_tool::minidump::ModuleInfo;
 using skydiag::dump_tool::minidump::ReadThreadContextWin64;
@@ -45,7 +45,8 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint32_t>& targetTids,
   std::uint32_t exceptionTid,
-  i18n::Language lang)
+  i18n::Language lang,
+  const CONTEXT* exceptionContext)
 {
   std::vector<SuspectItem> out;
   if (!dumpBase || modules.empty() || targetTids.empty()) {
@@ -71,7 +72,6 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
     if (!ReadThreadContextWin64(dumpBase, dumpSize, *it, ctx)) {
       continue;
     }
-    const std::uint64_t sp = ctx.Rsp;
 
     const std::uint8_t* stackBytes = nullptr;
     std::size_t stackSize = 0;
@@ -80,8 +80,15 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
       continue;
     }
 
+    const auto inStack = [&](std::uint64_t sp) {
+      return sp >= stackBase && sp < stackBase + static_cast<std::uint64_t>(stackSize);
+    };
+    std::uint64_t sp = ctx.Rsp;
+    if (exceptionContext && exceptionTid != 0u && tid == exceptionTid && inStack(exceptionContext->Rsp)) {
+      sp = exceptionContext->Rsp;
+    }
     std::size_t startOff = 0;
-    if (sp >= stackBase && sp < stackBase + static_cast<std::uint64_t>(stackSize)) {
+    if (inStack(sp)) {
       startOff = static_cast<std::size_t>(sp - stackBase);
     }
     const std::size_t endOff = std::min<std::size_t>(stackSize, startOff + kMaxScanBytes);
@@ -150,11 +157,8 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
       return !modules[r.modIndex].is_known_hook_framework;
     });
     if (fallbackIt != rows.end()) {
-      const std::wstring topLower = WideLower(modules[rows[0].modIndex].filename);
-      const bool topIsCrashLogger = (topLower == L"crashloggersse.dll" || topLower == L"crashlogger.dll");
-      const bool topIsSkseRuntime = IsSkseModule(topLower);
-      const bool topIsMo2Vfs = (topLower == L"usvfs_x64.dll" || topLower == L"uvsfs64.dll");
-      const bool topIsPassiveHook = topIsCrashLogger || topIsSkseRuntime || topIsMo2Vfs;
+      // Crash Logger, the SKSE runtime or MO2's VFS (IsPassiveHookModule).
+      const bool topIsPassiveHook = IsPassiveHookModule(modules[rows[0].modIndex].filename);
       const std::uint32_t minimumFallbackScore = topIsPassiveHook
         ? kPassiveHookFallbackMinScore
         : kOtherHookFallbackMinScore;

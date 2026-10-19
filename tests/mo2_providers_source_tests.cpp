@@ -206,6 +206,63 @@ void TestCaptureInTheScanWinsOverTheDisk()
   Require(oldDump.mo2_providers_source == "analysis_time", "and the result says the providers are from analysis time");
 }
 
+// Review M16 follow-up: the MO2 folders come from the dump (module paths, the
+// helper's plugin scan). One that is not on a local fixed disk is not read,
+// so a crafted dump cannot make the analyzer list a UNC share; a "\\?\"
+// path to a real local folder stands in for it here. A captured mod or
+// profile name is one folder name, never a path of its own.
+void TestFoldersOffALocalFixedDiskAreNotRead()
+{
+  const auto base = std::filesystem::temp_directory_path() / "skydiag_mo2_local_folder_test";
+  std::error_code ec;
+  std::filesystem::remove_all(base, ec);
+  WriteText(base / "ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Now)\n");
+  WriteText(base / "profiles" / "Now" / "modlist.txt", "+Now Mod\n");
+  WriteText(base / "mods" / "Now Mod" / "x.txt", "x");
+  const std::filesystem::path other(L"\\\\?\\" + base.wstring());
+  const std::vector<std::wstring> otherModulePaths = { other.wstring() + L"\\mods\\Now Mod\\x.dll" };
+
+  AnalysisResult fromModules{};
+  const auto modulesIdx = BuildMo2IndexForDump(otherModulePaths, fromModules);
+
+  AnalysisResult fromCapture{};
+  fromCapture.plugin_scan_json_utf8 = nlohmann::json{
+    { "mo2",
+      { { "status", "captured" },
+        { "base_dir", U8(other) },
+        { "mods_dir", U8(other / "mods") },
+        { "profiles_dir", U8(other / "profiles") },
+        { "overwrite_dir", U8(other / "overwrite") },
+        { "profile", "At Crash" },
+        { "enabled_mods", { "Crash Mod" } } } },
+  }.dump();
+  const auto captureIdx = BuildMo2IndexForDump(otherModulePaths, fromCapture);
+
+  AnalysisResult names{};
+  names.plugin_scan_json_utf8 = nlohmann::json{
+    { "mo2",
+      { { "status", "captured" },
+        { "base_dir", U8(base) },
+        { "mods_dir", U8(base / "mods") },
+        { "profiles_dir", U8(base / "profiles") },
+        { "overwrite_dir", U8(base / "overwrite") },
+        { "profile", "..\\..\\Elsewhere" },
+        { "enabled_mods", { "Good Mod", "\\\\server\\share", "..", "..\\Up", "C:\\Abs", "D:Rel", "Also/Bad" } } } },
+  }.dump();
+  const auto namesIdx = BuildMo2IndexForDump({}, names);
+  std::filesystem::remove_all(base, ec);
+
+  Require(!modulesIdx.has_value() && fromModules.mo2_providers_source.empty(),
+    "an MO2 folder off a local fixed disk named by module paths is not read");
+  Require(!captureIdx.has_value() && fromCapture.mo2_providers_source.empty(),
+    "captured MO2 folders off a local fixed disk are not read");
+  Require(namesIdx.has_value() && namesIdx->modNames == std::vector<std::wstring>{ L"Good Mod" } &&
+            namesIdx->modDirs.size() == 1u && namesIdx->modDirs[0] == base / "mods" / "Good Mod",
+    "a captured mod name that is not one plain folder name is dropped");
+  Require(namesIdx->profileDir.empty() && namesIdx->modlistPath.empty(),
+    "a captured profile name that is not one plain folder name names no folder");
+}
+
 }  // namespace
 
 int main()
@@ -214,6 +271,7 @@ int main()
     TestAnalysisTimeProvidersAreLabelledAndCapped();
     TestAnalysisTimeProvidersDoNotSupportCandidates();
     TestCaptureInTheScanWinsOverTheDisk();
+    TestFoldersOffALocalFixedDiskAreNotRead();
     std::puts("mo2 providers source tests passed");
     return 0;
   } catch (const std::exception& ex) {

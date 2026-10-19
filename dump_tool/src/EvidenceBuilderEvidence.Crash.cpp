@@ -255,7 +255,7 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
                : (module + L" 프레임에 스택 해제 정보가 없어 그 호출자를 찾을 수 없습니다");
       // ADR-0011: a Windows DLL's unwind data comes from the dump (v0.2.61+)
       // or from a local file of the same build, which a Windows update replaces.
-      if (minidump::IsSystemishModule(r.stackwalk_truncation_module)) {
+      if (DumpModuleIsSystemish(r, r.stackwalk_truncation_module)) {
         why += en ? L" (typical of a dump from before v0.2.61 opened after a Windows update; newer dumps carry it)"
                   : L"(v0.2.61 이전 덤프를 Windows 업데이트 뒤에 열 때 흔합니다. 새 덤프는 이 정보를 담습니다)";
       }

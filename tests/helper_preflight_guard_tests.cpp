@@ -83,6 +83,20 @@ int main()
     helperMainText,
     "RunCompatibilityPreflight(",
     "Helper main loop must run compatibility preflight at startup.");
+  // Review M13: the preflight runs before monitoring starts; an exception out
+  // of it ended the helper before any capture.
+  AssertContains(
+    preflightCppText,
+    "  try {\n    RunPreflightChecks(cfg, proc, outBase);\n  } catch (const std::exception& ex) {",
+    "Compatibility preflight must run its checks inside an exception guard.");
+  AssertContains(
+    preflightCppText,
+    "} catch (...) {\n    AppendLogLine(outBase, L\"Compatibility preflight failed; monitoring continues without it.\");",
+    "Compatibility preflight must also swallow non-standard exceptions.");
+  assert(
+    preflightCppText.find("std::filesystem::exists(candidate))") == std::string::npos &&
+    preflightCppText.find("std::filesystem::exists(dir / n))") == std::string::npos &&
+    "Preflight existence checks must use the non-throwing error_code overload.");
   AssertContains(
     helperIniText,
     "EnableCompatibilityPreflight",

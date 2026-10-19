@@ -17,6 +17,7 @@
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
+#include "SkyrimDiagHelper/PathRedaction.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagStringUtil.h"
 
@@ -189,7 +190,7 @@ std::wstring ResolveDefaultSymbolCacheDir(bool* outReady)
 
   std::error_code ec;
   std::filesystem::create_directories(cacheDir, ec);
-  const bool ready = !ec && std::filesystem::exists(cacheDir);
+  const bool ready = !ec && std::filesystem::exists(cacheDir, ec);
   if (outReady) {
     *outReady = ready;
   }
@@ -325,7 +326,8 @@ bool FileExistsAny(const std::filesystem::path& dir, std::initializer_list<const
     if (!n || !*n) {
       continue;
     }
-    if (std::filesystem::exists(dir / n)) {
+    std::error_code ec;
+    if (std::filesystem::exists(dir / n, ec)) {
       return true;
     }
   }
@@ -372,17 +374,11 @@ nlohmann::json ToJson(const PreflightCheck& c)
   };
 }
 
-}  // namespace
-
-void RunCompatibilityPreflight(
+void RunPreflightChecks(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase)
 {
-  if (!cfg.enableCompatibilityPreflight) {
-    return;
-  }
-
   std::filesystem::path gameExeDir;
   if (!skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
     AppendLogLine(outBase, L"Compatibility preflight skipped: failed to resolve game exe directory.");
@@ -396,7 +392,8 @@ void RunCompatibilityPreflight(
   std::filesystem::path gameExePath;
   for (const wchar_t* name : { L"SkyrimSE.exe", L"SkyrimVR.exe", L"Skyrim.exe" }) {
     const auto candidate = gameExeDir / name;
-    if (std::filesystem::exists(candidate)) {
+    std::error_code ec;
+    if (std::filesystem::exists(candidate, ec)) {
       gameExePath = candidate;
       break;
     }
@@ -500,10 +497,10 @@ void RunCompatibilityPreflight(
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty()) ? "ok" : "warn",
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty()) ? "low" : "high",
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty())
-      ? ("dbghelp.dll 런타임 확인: " + WideToUtf8(symbolHealth.dbghelpPath.wstring()))
+      ? ("dbghelp.dll 런타임 확인: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.dbghelpPath.wstring())))
       : "dbghelp.dll 런타임을 확인하지 못했습니다. 스택워크 품질이 저하될 수 있습니다.",
     (!symbolHealth.dbghelpPath.empty() && !symbolHealth.dbghelpVersion.empty())
-      ? ("dbghelp.dll runtime detected: " + WideToUtf8(symbolHealth.dbghelpPath.wstring()))
+      ? ("dbghelp.dll runtime detected: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.dbghelpPath.wstring())))
       : "Failed to resolve dbghelp.dll runtime; stackwalk quality may be degraded.",
   });
 
@@ -512,10 +509,10 @@ void RunCompatibilityPreflight(
     symbolHealth.msdiaAvailable ? "ok" : "warn",
     symbolHealth.msdiaAvailable ? "low" : "medium",
     symbolHealth.msdiaAvailable
-      ? ("msdia140.dll 사용 가능: " + WideToUtf8(symbolHealth.msdiaPath.wstring()))
+      ? ("msdia140.dll 사용 가능: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.msdiaPath.wstring())))
       : "msdia140.dll을 찾지 못했습니다. 소스 라인 해석이 제한될 수 있습니다.",
     symbolHealth.msdiaAvailable
-      ? ("msdia140.dll available: " + WideToUtf8(symbolHealth.msdiaPath.wstring()))
+      ? ("msdia140.dll available: " + WideToUtf8(skydiag::helper::RedactPath(symbolHealth.msdiaPath.wstring())))
       : "msdia140.dll not found; source line resolution may be limited.",
   });
 
@@ -622,18 +619,21 @@ void RunCompatibilityPreflight(
   nlohmann::json out = nlohmann::json::object();
   out["schema"] = { { "name", "SkyrimDiagPreflight" }, { "version", 1 } };
   out["pid"] = proc.pid;
-  out["game_exe_dir"] = WideToUtf8(gameExeDir.wstring());
+  out["game_exe_dir"] = WideToUtf8(skydiag::helper::RedactPath(gameExeDir.wstring()));
   out["game_exe_version"] = pluginScan.game_exe_version;
   out["plugins_source"] = pluginScan.plugins_source;
   out["mo2_detected"] = pluginScan.mo2_detected;
   out["loaded_module_count"] = moduleNames.size();
   out["symbol_runtime"] = {
-    { "dbghelp_path", WideToUtf8(symbolHealth.dbghelpPath.wstring()) },
+    { "dbghelp_path", WideToUtf8(skydiag::helper::RedactPath(symbolHealth.dbghelpPath.wstring())) },
     { "dbghelp_version", symbolHealth.dbghelpVersion },
-    { "msdia_path", WideToUtf8(symbolHealth.msdiaPath.wstring()) },
+    { "msdia_path", WideToUtf8(skydiag::helper::RedactPath(symbolHealth.msdiaPath.wstring())) },
     { "msdia_available", symbolHealth.msdiaAvailable },
-    { "search_path", WideToUtf8(symbolHealth.symbolSearchPath) },
-    { "cache_path", WideToUtf8(symbolHealth.symbolCachePath.wstring()) },
+    // Users attach this file to reports. A search path from _NT_SYMBOL_PATH or
+    // SKYRIMDIAG_SYMBOL_PATH and the default cache under %LOCALAPPDATA% name
+    // the user's folders: mask them as the dump tool's summaries do.
+    { "search_path", WideToUtf8(skydiag::helper::RedactSymbolSearchPath(symbolHealth.symbolSearchPath)) },
+    { "cache_path", WideToUtf8(skydiag::helper::RedactPath(symbolHealth.symbolCachePath.wstring())) },
     { "cache_ready", symbolHealth.symbolCacheReady },
     { "online_symbol_source_allowed", cfg.allowOnlineSymbols },
     { "search_path_uses_remote", symbolHealth.searchPathUsesRemote },
@@ -654,6 +654,29 @@ void RunCompatibilityPreflight(
     outBase,
     L"Compatibility preflight written: " + preflightPath.wstring() +
       L" (warn=" + std::to_wstring(warnCount) + L", error=" + std::to_wstring(errorCount) + L")");
+}
+
+}  // namespace
+
+void RunCompatibilityPreflight(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase)
+{
+  if (!cfg.enableCompatibilityPreflight) {
+    return;
+  }
+  // The preflight runs before monitoring starts and is only advice: a throwing
+  // filesystem call (ERROR_NOT_READY behind a junction, an access error from
+  // usvfs) or a JSON error must not end the helper before it captures
+  // anything (review M13).
+  try {
+    RunPreflightChecks(cfg, proc, outBase);
+  } catch (const std::exception& ex) {
+    AppendLogLine(outBase, L"Compatibility preflight failed; monitoring continues without it: " + AnsiExceptionText(ex));
+  } catch (...) {
+    AppendLogLine(outBase, L"Compatibility preflight failed; monitoring continues without it.");
+  }
 }
 
 }  // namespace skydiag::helper::internal

@@ -548,6 +548,44 @@ void TestOptionalArtifactCleanupIsFailSafe()
   std::filesystem::remove_all(root, ec);
 }
 
+// With redaction on, the WCT companion masks absolute paths like the summary;
+// without it, it is the helper's capture byte for byte.
+void TestWctCompanionFollowsPathRedaction()
+{
+  const auto root = MakeTempDir(L"wct_redaction");
+  const auto outDir = root / L"out";
+  const auto dump = root / L"Wct.dmp";
+  const std::vector<std::uint8_t> bytes(4096u, 0x52u);
+  WriteBytes(dump, bytes);
+  const auto identity = ComputeIdentity(dump, bytes);
+  auto result = MakeIdentityBoundResult(dump, outDir, identity, L"wct");
+  result.has_wct = true;
+  result.wct_json_utf8 =
+    R"({"capture":{"kind":"manual"},"modal_dialogs":[{"title":"C:\\Users\\Someone\\Documents\\My Games\\Skyrim.ini","text":"x"}]})";
+  const auto legacyWct = outDir / L"Wct_SkyrimDiagWct.json";
+
+  std::wstring err;
+  assert(WriteOutputs(result, &err));
+  const auto masked = ReadAllText(legacyWct);
+  assert(masked.find("Someone") == std::string::npos);
+  assert(masked.find("Skyrim.ini") != std::string::npos);
+  assert(ReadAllText(IdentityArtifactDirectory(outDir, identity) / L"Wct.json") == masked);
+
+  // A capture that does not parse is left out rather than copied unmasked.
+  result.wct_json_utf8 = R"({"title":"C:\\Users\\Someone\\x.ini")";
+  assert(WriteOutputs(result, &err));
+  assert(!std::filesystem::exists(legacyWct));
+
+  result.path_redaction_applied = false;
+  result.wct_json_utf8 =
+    R"({"capture":{"kind":"manual"},"modal_dialogs":[{"title":"C:\\Users\\Someone\\x.ini"}]})";
+  assert(WriteOutputs(result, &err));
+  assert(ReadAllText(legacyWct) == result.wct_json_utf8);
+
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+}
+
 }  // namespace
 
 int main()
@@ -559,5 +597,6 @@ int main()
   TestSameStemArtifactFamiliesAndTriageAreIsolated();
   TestOutputFamilyLockSerializesConcurrentPublish();
   TestOptionalArtifactCleanupIsFailSafe();
+  TestWctCompanionFollowsPathRedaction();
   return 0;
 }

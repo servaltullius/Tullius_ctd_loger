@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cwchar>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -140,14 +141,28 @@ int wmain(int argc, wchar_t** argv)
     const std::uint64_t attachNowQpc = static_cast<std::uint64_t>(attachNow.QuadPart);
 
     skydiag::helper::internal::HelperLoopState loopState{};
-    skydiag::helper::internal::InitializeLoopState(proc, &loopState);
-    loopState.crashLoggerLogDirs = skydiag::helper::internal::ResolveCrashLoggerLogDirs(cfg, proc);
+    skydiag::helper::internal::InitializeLoopState(proc, outBase, &loopState);
+    // Only used to look for Crash Logger's crash log at exit: a failure here
+    // must not keep the capture loop from starting.
+    try {
+      loopState.crashLoggerLogDirs = skydiag::helper::internal::ResolveCrashLoggerLogDirs(cfg, proc);
+    } catch (const std::exception&) {
+      loopState.crashLoggerLogDirs.clear();
+      AppendLogLine(outBase, L"Warning: could not resolve Crash Logger's log folders; continuing without them.");
+    }
     if (loopState.crashCaptured.releasedCrashSeq != 0u) {
       AppendLogLine(
         outBase,
         L"Committed crash_seq=" + std::to_wstring(loopState.crashCaptured.releasedCrashSeq)
           + L" was already acknowledged by an earlier helper (not frozen); it is not reported again at "
             L"process exit unless the game exits with its exception code.");
+    }
+    if (loopState.rearmedFrozenCrashSeq != 0u) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(loopState.rearmedFrozenCrashSeq)
+          + L" is still frozen while the game runs, so the helper handling it is gone; signaled its crash event "
+            L"again to handle it now.");
     }
     skydiag::helper::internal::RunHelperLoop(
       cfg,

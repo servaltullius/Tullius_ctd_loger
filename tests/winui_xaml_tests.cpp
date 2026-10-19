@@ -309,6 +309,38 @@ static void TestAnalyzePanelHasDumpDiscoveryFlow()
   RequireContains(store, "LearnedRoots", "Dump discovery store must persist learned search roots.");
 }
 
+// The 2026-10-19 review's final pass: a failed or canceled re-analysis of the
+// same dump keeps saving its review, and results arriving in the background
+// do not replace an analysis status or failure.
+static void TestWinUiKeepsSaveTargetAndAnalysisStatus()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto analysis = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Analysis.cs");
+  const auto targetChanged = analysis.find("if (targetChanged)");
+  const auto cleared = analysis.find("_currentSummaryPath = null;");
+  RequireContains(analysis, "_currentSummaryPath = null;", "A new dump must drop the previous summary path.");
+  if (targetChanged == std::string::npos || cleared < targetChanged ||
+      analysis.find("_currentSummaryPath = null;", cleared + 1) != std::string::npos) {
+    std::cerr << "The summary path is dropped only when the dump or output folder changed.\n";
+    std::exit(1);
+  }
+
+  const auto window = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  RequireContains(window, "private void ShowBackgroundStatus(string statusAtStart, string message)",
+    "Background results must go through one status rule.");
+  const auto triage = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Triage.cs");
+  RequireContains(triage, "ShowBackgroundStatus(savingStatus, T(\"Failed to save review: \"",
+    "A review save failure must not replace an analysis status.");
+  RequireNotContains(triage, "StatusText.Text = T(\n                \"Review feedback saved to the summary JSON.\"",
+    "A saved review must not replace an analysis status.");
+  RequireNotContains(triage, "StatusText.Text = T(\n                        \"Review feedback saved for the previously selected dump: \"",
+    "A review saved for another dump must not replace an analysis status.");
+  const auto discovery = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.DumpDiscovery.cs");
+  RequireContains(discovery, "ShowBackgroundStatus(statusAtStart, T(\"Dump discovery failed: \"",
+    "A background dump scan failure must not replace an analysis status.");
+}
+
 static void TestDumpDiscoveryUsesOutputLocationsOnly()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -332,6 +364,26 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
     "Path.Combine(mo2BaseDirectory, \"overwrite\", \"SKSE\", \"Plugins\", \"Tullius Ctd Logs\")",
     "MO2 blank default should target the dedicated output subfolder.");
   RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");
+  RequireContains(
+    service,
+    "StartsWith(\"SkyrimDiag_Released_\", StringComparison.OrdinalIgnoreCase)",
+    "Discovery must not list a released crash's held dump (or one a stopped helper left behind) as a crash.");
+  RequireContains(
+    service,
+    "roots.AddRange(BuildOutputDirFallbackRoots(layout, isKorean));",
+    "Discovery must also search the folders the helper falls back to when OutputDir cannot be written.");
+  RequireContains(
+    service,
+    "candidates.Add(Path.Combine(layout.HelperDirectoryPath, DefaultOutputSubfolderName));",
+    "The helper's first OutputDir fallback is the default folder next to it.");
+  RequireContains(
+    service,
+    "candidates.Add(Path.Combine(localAppData, \"SkyrimDiag\", DefaultOutputSubfolderName));",
+    "The helper's last OutputDir fallback is %LOCALAPPDATA%\\SkyrimDiag\\Tullius Ctd Logs.");
+  RequireContains(
+    service,
+    "if (Directory.Exists(candidate))",
+    "Fallback folders are listed only when they exist.");
 
   const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "덤프 출력 위치", "User-facing copy must talk about dump output locations.");
@@ -563,6 +615,7 @@ int main()
   TestMainWindowShareTextUsesCrashLoggerReadingPath();
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
+  TestWinUiKeepsSaveTargetAndAnalysisStatus();
   TestWinUiConsumesRecaptureContext();
   TestWinUiUsesRepresentativeCandidateIdentifiers();
   TestWinUiRawDataTextBoxesExposeScrollbars();

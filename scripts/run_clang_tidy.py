@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -166,6 +167,28 @@ def _changed_paths(repo_root: Path, base: str) -> list[str] | None:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def parse_llvm_major_version(version_output: str) -> int:
+    """The major version in `clang-tidy --version` output, or 0."""
+    match = re.search(r"LLVM version (\d+)\.", version_output)
+    return int(match.group(1)) if match else 0
+
+
+def clang_tidy_major_version(tidy_binary: str) -> int:
+    try:
+        result = subprocess.run(
+            [tidy_binary, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return 0
+    return parse_llvm_major_version(result.stdout)
+
+
 def _lint_one(
     tidy_binary: str,
     database_dir: Path,
@@ -203,6 +226,12 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="pull requests: lint only production sources changed since this base commit",
     )
+    parser.add_argument(
+        "--expect-major",
+        type=int,
+        default=0,
+        help="fail unless clang-tidy has this major version (CI: the runner image's LLVM)",
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root).resolve()
@@ -224,6 +253,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.jobs < 1:
         print("ERROR: --jobs must be at least 1", file=sys.stderr)
+        return 2
+
+    # .clang-tidy sets WarningsAsErrors, so a newer LLVM on the runner image
+    # can fail CI with checks it added rather than with a change here. Name the
+    # version in the log, and with --expect-major stop on it explicitly.
+    major = clang_tidy_major_version(args.clang_tidy)
+    print(f"==> clang-tidy: {args.clang_tidy} (LLVM major {major if major else 'unknown'})")
+    if args.expect_major and major != args.expect_major:
+        print(
+            f"ERROR: expected clang-tidy {args.expect_major}.x, found "
+            f"{major if major else 'an unknown version'}; review the new checks, then "
+            "update --expect-major in the workflows",
+            file=sys.stderr,
+        )
         return 2
 
     if args.changed_since:

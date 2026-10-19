@@ -29,6 +29,18 @@ using minidump::IsSystemishModule;
 using minidump::IsGameExeModule;
 using minidump::IsExternalSoftwareModule;
 
+// One spelling per folder: "...\SKSE\" from CrashLogger.ini and the default
+// "...\SKSE" must not be searched twice, or the same log competes with itself
+// and the pairing turns ambiguous (review L17).
+std::wstring CrashLoggerDirectoryKey(const std::filesystem::path& dir)
+{
+  std::wstring key = WideLower(dir.lexically_normal().wstring());
+  while (key.size() > 3 && (key.back() == L'\\' || key.back() == L'/')) {
+    key.pop_back();
+  }
+  return key;
+}
+
 struct NormalizedCrashLoggerFrameSignals
 {
   std::wstring direct_fault_module;
@@ -37,6 +49,7 @@ struct NormalizedCrashLoggerFrameSignals
   std::uint32_t probable_streak_length = 0;
   std::vector<std::wstring> probable_modules_in_order;
   std::vector<bool> probable_frame_is_thread_entry_hook;  // ThreadEntryHooks.h
+  std::vector<bool> probable_frame_in_system_named_mod;   // ENB/ReShade d3d11.dll, dxgi.dll
 };
 
 enum class DumpIncidentKind {
@@ -111,6 +124,8 @@ NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
   normalized.probable_modules_in_order.reserve(raw.probable_modules_in_order.size());
   normalized.probable_frame_is_thread_entry_hook = raw.probable_frame_is_thread_entry_hook;
   normalized.probable_frame_is_thread_entry_hook.resize(raw.probable_modules_in_order.size(), false);
+  normalized.probable_frame_in_system_named_mod = raw.probable_frame_in_system_named_mod;
+  normalized.probable_frame_in_system_named_mod.resize(raw.probable_modules_in_order.size(), false);
   std::wstring currentLower;
   std::wstring currentModule;
   std::uint32_t currentLength = 0;
@@ -119,16 +134,19 @@ NormalizedCrashLoggerFrameSignals BuildNormalizedCrashLoggerFrameSignals(
     normalized.probable_modules_in_order.push_back(module);
     // A plugin that only wraps the thread's entry is neither actionable nor a streak.
     const bool threadEntryHook = normalized.probable_frame_is_thread_entry_hook[i];
+    // A mod named like a Windows DLL (review H4) is judged by its frame.
+    const bool systemish =
+      IsSystemishModule(module) && !normalized.probable_frame_in_system_named_mod[i];
 
     if (normalized.first_actionable_probable_module.empty() &&
         !threadEntryHook &&
-        !IsSystemishModule(module) &&
+        !systemish &&
         !IsExternalSoftwareModule(module) &&
         !IsGameExeModule(module)) {
       normalized.first_actionable_probable_module = module;
     }
 
-    if (threadEntryHook || IsSystemishModule(module) || IsExternalSoftwareModule(module) || IsGameExeModule(module)) {
+    if (threadEntryHook || systemish || IsExternalSoftwareModule(module) || IsGameExeModule(module)) {
       currentLower.clear();
       currentModule.clear();
       currentLength = 0;
@@ -513,7 +531,9 @@ std::optional<std::filesystem::path> TryReadCrashLoggerCrashlogDirFromIni(
     return std::nullopt;
   }
 
-  std::wstring w = Utf8ToWide(*dirUtf8);
+  // A value saved in the ANSI code page (Notepad on a Korean system) is not
+  // UTF-8; read it as the helper does rather than as replacement characters.
+  std::wstring w = Utf8OrAnsiToWide(*dirUtf8);
   while (!w.empty() && (w.front() == L' ' || w.front() == L'\t')) {
     w.erase(w.begin());
   }
@@ -572,10 +592,10 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   if (auto customDir = TryReadCrashLoggerCrashlogDirFromIni(mo2Index, gameRootDir)) {
     std::error_code ec;
     if (std::filesystem::is_directory(*customDir, ec)) {
-      const std::wstring lower = WideLower(customDir->wstring());
+      const std::wstring key = CrashLoggerDirectoryKey(*customDir);
       bool already = false;
       for (const auto& d : dirs) {
-        if (WideLower(d.wstring()) == lower) {
+        if (CrashLoggerDirectoryKey(d) == key) {
           already = true;
           break;
         }
@@ -606,7 +626,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   std::vector<std::filesystem::path> uniqueDirs;
   std::vector<std::wstring> uniqueDirKeys;
   for (const auto& dir : dirs) {
-    const std::wstring key = WideLower(dir.lexically_normal().wstring());
+    const std::wstring key = CrashLoggerDirectoryKey(dir);
     if (std::find(uniqueDirKeys.begin(), uniqueDirKeys.end(), key) == uniqueDirKeys.end()) {
       uniqueDirKeys.push_back(key);
       uniqueDirs.push_back(dir);
@@ -646,6 +666,13 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
         }
       }
 
+      // The time window drops nearly every log in a long-lived folder; check
+      // it before reading 256 KB of each one (review L19).
+      const std::uint64_t diff = AbsDiffU64(ft, targetTime);
+      if (!crashlogger_core::IsCrashLoggerPairingDiffAllowed(diff)) {
+        continue;
+      }
+
       std::wstring prefixErr;
       auto prefix = ReadFilePrefixUtf8(p, std::size_t{256} * 1024u, &prefixErr);
       if (!prefix) {
@@ -654,13 +681,14 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       if (!LooksLikeCrashLoggerLogText(*prefix)) {
         continue;
       }
-
-      const std::uint64_t diff = AbsDiffU64(ft, targetTime);
-      if (!crashlogger_core::IsCrashLoggerPairingDiffAllowed(diff)) {
-        continue;
-      }
       const bool sameDirectory = WideLower(p.parent_path().wstring()) == dumpParentLower;
       const std::wstring stablePath = WideLower(p.lexically_normal().wstring());
+      // The same file reached through two spellings of its folder is one
+      // candidate, not a nearby competitor.
+      if (std::any_of(candidates.begin(), candidates.end(),
+            [&](const PairCandidate& c) { return c.stablePath == stablePath; })) {
+        continue;
+      }
       candidates.push_back({ p, diff, artifactKind, sameDirectory, stablePath });
     }
   }
@@ -765,11 +793,12 @@ std::optional<std::string> ReadWholeFileUtf8(const std::filesystem::path& path, 
 
 std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::string_view logUtf8,
-  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower)
+  const std::unordered_map<std::wstring, std::wstring>& canonicalByFilenameLower,
+  const crashlogger_core::CrashLoggerSystemNamedModFn& isSystemNamedMod)
 {
   const auto normalizedSignals =
     BuildNormalizedCrashLoggerFrameSignals(
-      crashlogger_core::ParseCrashLoggerFrameSignalsAscii(logUtf8),
+      crashlogger_core::ParseCrashLoggerFrameSignalsAscii(logUtf8, isSystemNamedMod),
       canonicalByFilenameLower);
 
   struct ModuleCount
@@ -782,7 +811,9 @@ std::vector<std::wstring> ParseCrashLoggerTopModules(
   std::unordered_map<std::wstring, ModuleCount> freqByLower;
   for (std::size_t i = 0; i < normalizedSignals.probable_modules_in_order.size(); ++i) {
     const auto& module = normalizedSignals.probable_modules_in_order[i];
-    if (IsSystemishModule(module) || IsExternalSoftwareModule(module) || IsGameExeModule(module) ||
+    const bool systemish =
+      IsSystemishModule(module) && !normalizedSignals.probable_frame_in_system_named_mod[i];
+    if (systemish || IsExternalSoftwareModule(module) || IsGameExeModule(module) ||
         normalizedSignals.probable_frame_is_thread_entry_hook[i]) {
       continue;
     }

@@ -19,6 +19,7 @@ namespace skydiag::dump_tool {
 using skydiag::dump_tool::internal::output_writer::DefaultOutDirForDump;
 using skydiag::dump_tool::internal::output_writer::IdentityArtifactDirectory;
 using skydiag::dump_tool::internal::output_writer::OutputFamilyLockPath;
+using skydiag::dump_tool::internal::output_writer::RedactAbsolutePathStrings;
 using skydiag::dump_tool::internal::output_writer::TriageHasReviewContent;
 using skydiag::dump_tool::internal::output_writer::WriteTextUtf8;
 using skydiag::dump_tool::internal::output_writer::WriteTriageState;
@@ -126,7 +127,10 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   }
 
   nlohmann::json summary = BuildSummaryJson(r, outBase, stem, redactPaths);
-  const std::string summaryText = summary.dump(2) + "\n";
+  // Text read from the dump or its sidecars is not guaranteed to be UTF-8;
+  // replace bad bytes instead of throwing and losing every output.
+  const std::string summaryText =
+    summary.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
   const std::string reportText = BuildReportText(r, summary, redactPaths);
 
   std::string blackboxText;
@@ -150,6 +154,22 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     }
     blackboxText = bb.str();
   }
+
+  // The WCT companion is the helper's capture as is, unless paths are
+  // redacted: then absolute paths in it are masked like the summary's, and a
+  // capture that does not parse is left out rather than copied unmasked.
+  bool writeWct = r.has_wct;
+  std::string wctText;
+  if (r.has_wct && redactPaths) {
+    auto wct = nlohmann::json::parse(r.wct_json_utf8, nullptr, /*allow_exceptions=*/false);
+    if (wct.is_discarded()) {
+      writeWct = false;
+    } else {
+      RedactAbsolutePathStrings(&wct);
+      wctText = wct.dump(2, ' ', false, nlohmann::json::error_handler_t::replace) + "\n";
+    }
+  }
+  const std::string& wctOut = redactPaths ? wctText : r.wct_json_utf8;
 
   std::wstring writeErr;
   const auto removeArtifactIfPresent = [&](const std::filesystem::path& path, std::wstring_view artifactName) {
@@ -187,8 +207,8 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
     } else if (!removeArtifactIfPresent(familyBlackboxPath, L"blackbox companion")) {
       return false;
     }
-    if (r.has_wct) {
-      if (!WriteTextUtf8(familyWctPath, r.wct_json_utf8, &writeErr)) {
+    if (writeWct) {
+      if (!WriteTextUtf8(familyWctPath, wctOut, &writeErr)) {
         return false;
       }
     } else if (!removeArtifactIfPresent(familyWctPath, L"WCT companion")) {

@@ -322,16 +322,16 @@
       },
       "diagnosis": {
         "scope": "mechanism",
-        "cause_ko": "C++ 예외(throw/catch)로 보이며, 실제 CTD가 아니라면 오탐일 수 있습니다",
-        "cause_en": "C++ exception (throw/catch); may be a false positive if no real CTD happened",
+        "cause_ko": "C++ 예외(0xE06D7363)입니다. 기본값 CrashHookMode=1에서는 어디에서도 처리되지 않은 예외만(Crash Logger 보고, 처리되지 않은 예외 필터, abort()) 기록되므로 대개 실제 CTD입니다. CrashHookMode=2로 바꿨다면 게임이 잡아서 처리한 예외일 수도 있습니다",
+        "cause_en": "C++ exception (0xE06D7363). With the default CrashHookMode=1 it is recorded only when nothing handled it (Crash Logger's report, the unhandled-exception filter, or abort()), so it is usually a real CTD; with CrashHookMode=2 it can also be an exception the game caught and handled",
         "confidence": "low",
         "recommendations_ko": [
-          "[해석] 0xE06D7363은 흔한 C++ 예외 코드입니다. 게임이 정상 동작했다면 무시할 수 있습니다.",
-          "[설정] SkyrimDiag.ini에서 CrashHookMode=1(치명 예외만)로 설정해 오탐을 줄이세요."
+          "[해석] 게임이 실제로 꺼졌다면 실제 CTD로 보고, 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요. 게임이 계속 정상 동작했다면 무시해도 됩니다.",
+          "[설정] SkyrimDiag.ini에서 CrashHookMode=2로 바꿨다면 기본값 1로 되돌리세요. 2에서는 게임이 잡아서 처리한 C++ 예외까지 기록됩니다."
         ],
         "recommendations_en": [
-          "[Interpretation] 0xE06D7363 is a common C++ exception code. If the game ran normally, this may be ignored.",
-          "[Setting] Set CrashHookMode=1 in SkyrimDiag.ini to reduce such false positives."
+          "[Interpretation] If the game actually closed, treat this as a real CTD and start with the module that threw it (the first non-system module in the call stack). If the game kept running normally, it can be ignored.",
+          "[Setting] If you changed CrashHookMode to 2 in SkyrimDiag.ini, set it back to 1 (the default); mode 2 also records C++ exceptions the game caught and handled."
         ]
       }
     },
@@ -369,12 +369,12 @@
         "confidence": "high",
         "recommendations_ko": [
           "[디스크] SSD/HDD 상태를 점검하세요.",
-          "[파일] Steam 무결성 검사를 실행하세요.",
+          "[파일] 문제가 된 파일이나 모드를 다시 설치하거나 원본에서 다시 복사하세요. Steam 무결성 검사는 다운그레이드했거나 버전을 고정한 SkyrimSE.exe를 최신 버전으로 바꿔 SKSE와 버전 전용 플러그인을 깨뜨리므로, 실행하려면 먼저 게임 폴더의 exe와 Data 폴더를 백업하세요.",
           "[보안] 백신/보안툴 예외 목록에 게임 경로를 추가하세요."
         ],
         "recommendations_en": [
           "[Disk] Check SSD/HDD health.",
-          "[Files] Verify game file integrity via Steam.",
+          "[Files] Reinstall or re-copy the affected file or mod. A Steam file integrity check replaces a downgraded or version-pinned SkyrimSE.exe with the latest build and breaks SKSE and version-specific plugins, so back up the game's exe and Data folder before running one.",
           "[Security] Add game folders to antivirus exclusions."
         ]
       }

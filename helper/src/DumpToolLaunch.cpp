@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "ProcessUtil.h"
@@ -40,17 +41,20 @@ std::filesystem::path ResolveDumpToolExe(const skydiag::helper::HelperConfig& cf
   std::filesystem::path configured =
     cfg.dumpToolExe.empty() ? L"SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe" : cfg.dumpToolExe;
   std::filesystem::path resolved = toAbs(configured);
-  if (!resolved.empty() && std::filesystem::exists(resolved)) {
+  // DumpToolExe comes from the ini and may name an unready or unreachable
+  // drive; the throwing exists() would end the helper there.
+  std::error_code ec;
+  if (!resolved.empty() && std::filesystem::exists(resolved, ec)) {
     return resolved;
   }
 
   const std::filesystem::path fallbackWinUiSubdir = baseDir / L"SkyrimDiagWinUI" / L"SkyrimDiagDumpToolWinUI.exe";
-  if (std::filesystem::exists(fallbackWinUiSubdir)) {
+  if (std::filesystem::exists(fallbackWinUiSubdir, ec)) {
     return fallbackWinUiSubdir;
   }
 
   const std::filesystem::path fallbackWinUiFlat = baseDir / L"SkyrimDiagDumpToolWinUI.exe";
-  if (std::filesystem::exists(fallbackWinUiFlat)) {
+  if (std::filesystem::exists(fallbackWinUiFlat, ec)) {
     return fallbackWinUiFlat;
   }
 

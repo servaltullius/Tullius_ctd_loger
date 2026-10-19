@@ -446,13 +446,22 @@ Mo2Index BuildMo2IndexFromCapture(const CapturedMo2State& state)
   idx.overwriteDir = state.overwriteDir;
   idx.profilesDir = state.profilesDir;
   idx.profileName = state.profileName;
-  if (!state.profilesDir.empty() && !state.profileName.empty()) {
+  // The names come from the dump. Each is one folder under profiles or mods:
+  // a separator, a drive or ".." would make it name another folder (an
+  // absolute "\\server\share" replaces the parent path outright).
+  const auto isPlainFolderName = [](const std::wstring& name) {
+    return !name.empty() && name != L"." && name != L".." && name.find_first_of(L"\\/:") == std::wstring::npos;
+  };
+  if (!state.profilesDir.empty() && isPlainFolderName(state.profileName)) {
     idx.profileDir = state.profilesDir / state.profileName;
     idx.modlistPath = idx.profileDir / L"modlist.txt";
   }
   idx.modDirs.reserve(state.enabledModsWinnerFirst.size());
   idx.modNames.reserve(state.enabledModsWinnerFirst.size());
   for (const auto& name : state.enabledModsWinnerFirst) {
+    if (!isPlainFolderName(name)) {
+      continue;
+    }
     idx.modDirs.push_back(state.modsDir / name);
     idx.modNames.push_back(name);
   }

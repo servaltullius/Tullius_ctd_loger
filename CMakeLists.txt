@@ -7,6 +7,17 @@ cmake_minimum_required(VERSION 3.24)
 if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   set(VCPKG_TARGET_TRIPLET "x64-windows-static-md" CACHE STRING "")
 endif()
+# Same-named overlay of that triplet: the static vcpkg libraries linked into
+# the plugin and helper (spdlog, fmt) must not use the constexpr std::mutex
+# constructor either (see _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR below).
+# Appended, not only set when undefined: the vcpkg toolchain caches the
+# variable (empty when nothing set it), so a build folder configured before
+# this overlay existed would otherwise never get it.
+set(SKYRIMDIAG_VCPKG_TRIPLET_OVERLAY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/triplets")
+if(NOT SKYRIMDIAG_VCPKG_TRIPLET_OVERLAY IN_LIST VCPKG_OVERLAY_TRIPLETS)
+  list(APPEND VCPKG_OVERLAY_TRIPLETS "${SKYRIMDIAG_VCPKG_TRIPLET_OVERLAY}")
+  set(VCPKG_OVERLAY_TRIPLETS "${VCPKG_OVERLAY_TRIPLETS}" CACHE STRING "" FORCE)
+endif()
 
 project(
   SkyrimDiag
@@ -21,6 +32,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
   add_compile_options(/utf-8)
+  # MSVC 14.40+ makes std::mutex's constructor constexpr. Binaries built that
+  # way crash on their first lock (for example SKSE::Init) when the process
+  # loads an msvcp140.dll older than 14.40, which an outdated VC++ runtime or
+  # a copy shipped next to the game still provides. Every target, the
+  # CommonLibSSE-NG subdirectory and the vcpkg ports (cmake/triplets) keep the
+  # runtime-initialized constructor that works with old and new runtimes.
+  add_compile_definitions(_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
 endif()
 if(WIN32)
   enable_language(RC)

@@ -86,6 +86,89 @@ std::vector<int> ParseVersionSegments(std::string_view s)
   return out;
 }
 
+bool IsGamePluginList(std::string_view pluginsSource)
+{
+  return pluginsSource == "mo2_profile" || pluginsSource == "standard";
+}
+
+// A non-negative JSON integer as a count, or nullopt for any other value.
+std::optional<std::size_t> ReadCount(const nlohmann::json& value)
+{
+  if (value.is_number_unsigned()) {
+    return static_cast<std::size_t>(value.get<std::uint64_t>());
+  }
+  if (value.is_number_integer() && value.get<std::int64_t>() >= 0) {
+    return static_cast<std::size_t>(value.get<std::int64_t>());
+  }
+  return std::nullopt;
+}
+
+struct RuleCondition
+{
+  std::optional<double> any_plugin_header_version_gte;
+  std::optional<std::string> game_version_lt;
+  std::vector<std::wstring> modules_not_loaded_lower;
+  std::optional<bool> has_missing_master;
+  std::optional<std::size_t> esl_count_gte;
+  std::optional<std::size_t> full_plugin_count_gte;
+};
+
+// Reads a rule's conditions. Any unknown key, mistyped value or an empty
+// condition rejects the rule: ignoring one would broaden it until it fires on
+// every report (the same policy as crash_signatures.json).
+bool ParseRuleCondition(const nlohmann::json& cond, RuleCondition* rule)
+{
+  if (cond.empty()) {
+    return false;
+  }
+  for (auto it = cond.begin(); it != cond.end(); ++it) {
+    const std::string& key = it.key();
+    const auto& value = it.value();
+    if (key == "any_plugin_header_version_gte") {
+      if (!value.is_number()) {
+        return false;
+      }
+      rule->any_plugin_header_version_gte = value.get<double>();
+    } else if (key == "game_version_lt") {
+      if (!value.is_string() || value.get_ref<const std::string&>().empty()) {
+        return false;
+      }
+      rule->game_version_lt = value.get<std::string>();
+    } else if (key == "module_not_loaded") {
+      if (value.is_string() && !value.get_ref<const std::string&>().empty()) {
+        rule->modules_not_loaded_lower.push_back(WideLower(Utf8ToWide(value.get<std::string>())));
+      } else if (value.is_array() && !value.empty()) {
+        for (const auto& name : value) {
+          if (!name.is_string() || name.get_ref<const std::string&>().empty()) {
+            return false;
+          }
+          rule->modules_not_loaded_lower.push_back(WideLower(Utf8ToWide(name.get<std::string>())));
+        }
+      } else {
+        return false;
+      }
+    } else if (key == "has_missing_master") {
+      if (!value.is_boolean()) {
+        return false;
+      }
+      rule->has_missing_master = value.get<bool>();
+    } else if (key == "esl_count_gte" || key == "full_plugin_count_gte") {
+      const auto count = ReadCount(value);
+      if (!count) {
+        return false;
+      }
+      if (key == "esl_count_gte") {
+        rule->esl_count_gte = count;
+      } else {
+        rule->full_plugin_count_gte = count;
+      }
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
@@ -370,7 +453,9 @@ bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)
     if (!j.is_object() || !j.contains("rules") || !j["rules"].is_array()) {
       return false;
     }
-    if (!j.contains("version") || !j["version"].is_number_unsigned()) {
+    // Only schema 1 is understood; a newer file may carry conditions this
+    // build would read too broadly.
+    if (!j.contains("version") || !j["version"].is_number_unsigned() || j["version"].get<std::uint64_t>() != 1u) {
       return false;
     }
 
@@ -389,46 +474,18 @@ bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)
         continue;
       }
 
+      RuleCondition cond{};
+      if (!ParseRuleCondition(*itCondition, &cond)) {
+        continue;
+      }
       Rule rule{};
       rule.id = itId->get<std::string>();
-
-      const auto& cond = *itCondition;
-      if (auto it = cond.find("any_plugin_header_version_gte"); it != cond.end() && it->is_number()) {
-        rule.any_plugin_header_version_gte = it->get<double>();
-      }
-      if (auto it = cond.find("game_version_lt"); it != cond.end() && it->is_string()) {
-        rule.game_version_lt = it->get<std::string>();
-      }
-      if (auto it = cond.find("module_not_loaded"); it != cond.end()) {
-        if (it->is_string()) {
-          rule.modules_not_loaded_lower.push_back(WideLower(Utf8ToWide(it->get<std::string>())));
-        } else if (it->is_array()) {
-          for (const auto& name : *it) {
-            if (name.is_string()) {
-              rule.modules_not_loaded_lower.push_back(WideLower(Utf8ToWide(name.get<std::string>())));
-            }
-          }
-        }
-      }
-      if (auto it = cond.find("has_missing_master"); it != cond.end() && it->is_boolean()) {
-        rule.has_missing_master = it->get<bool>();
-      }
-      if (auto it = cond.find("esl_count_gte"); it != cond.end() && it->is_number_unsigned()) {
-        rule.esl_count_gte = static_cast<std::size_t>(it->get<std::uint64_t>());
-      } else if (auto it2 = cond.find("esl_count_gte"); it2 != cond.end() && it2->is_number_integer()) {
-        const auto v = it2->get<std::int64_t>();
-        if (v >= 0) {
-          rule.esl_count_gte = static_cast<std::size_t>(v);
-        }
-      }
-      if (auto it = cond.find("full_plugin_count_gte"); it != cond.end() && it->is_number_unsigned()) {
-        rule.full_plugin_count_gte = static_cast<std::size_t>(it->get<std::uint64_t>());
-      } else if (auto it2 = cond.find("full_plugin_count_gte"); it2 != cond.end() && it2->is_number_integer()) {
-        const auto v = it2->get<std::int64_t>();
-        if (v >= 0) {
-          rule.full_plugin_count_gte = static_cast<std::size_t>(v);
-        }
-      }
+      rule.any_plugin_header_version_gte = cond.any_plugin_header_version_gte;
+      rule.game_version_lt = std::move(cond.game_version_lt);
+      rule.modules_not_loaded_lower = std::move(cond.modules_not_loaded_lower);
+      rule.has_missing_master = cond.has_missing_master;
+      rule.esl_count_gte = cond.esl_count_gte;
+      rule.full_plugin_count_gte = cond.full_plugin_count_gte;
 
       const auto& diag = *itDiagnosis;
       rule.cause_ko = Utf8ToWide(diag.value("cause_ko", ""));
@@ -520,6 +577,14 @@ std::vector<PluginRuleDiagnosis> PluginRules::Evaluate(const PluginRulesContext&
     PluginRuleDiagnosis diag{};
     diag.rule_id = rule.id;
     diag.confidence_level = ParseConfidenceLevel(rule.confidence);
+    // A missing master is only as certain as the list it was read from. Only
+    // the game's own list (the MO2 profile's or the standard plugins.txt) is
+    // trusted beyond Low; a plugins.txt beside the exe may be stale.
+    if (rule.has_missing_master.value_or(false) && !IsGamePluginList(scan.plugins_source) &&
+        (diag.confidence_level == i18n::ConfidenceLevel::kHigh ||
+         diag.confidence_level == i18n::ConfidenceLevel::kMedium)) {
+      diag.confidence_level = i18n::ConfidenceLevel::kLow;
+    }
     diag.confidence = std::wstring(i18n::ConfidenceLabel(
       ctx.use_korean ? i18n::Language::kKorean : i18n::Language::kEnglish,
       diag.confidence_level));

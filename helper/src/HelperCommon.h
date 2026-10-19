@@ -13,6 +13,10 @@ struct HelperConfig;
 namespace skydiag::helper::internal {
 
 std::wstring Timestamp();
+// Creates the folder and checks that a file can be written in it; err says why not.
+bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* err);
+// cfg.outputDir, or the first writable cfg.outputDirFallbacks entry when it
+// cannot be written (logged as the first line of the helper log session).
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg);
 
 bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s);

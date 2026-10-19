@@ -26,7 +26,9 @@ using skydiag::dump_tool::internal::output_writer::FindIncidentManifestForDump;
 using skydiag::dump_tool::internal::output_writer::IsUnknownModuleField;
 using skydiag::dump_tool::internal::output_writer::LoadExistingSummaryTriage;
 using skydiag::dump_tool::internal::output_writer::MaybeRedactPath;
-using skydiag::dump_tool::internal::output_writer::ReplaceAll;
+using skydiag::dump_tool::internal::output_writer::RedactAbsolutePathStrings;
+using skydiag::dump_tool::internal::output_writer::RedactSymbolSearchPath;
+using skydiag::dump_tool::internal::output_writer::TruncateUtf8;
 using skydiag::dump_tool::internal::output_writer::TryLoadIncidentManifestJson;
 
 nlohmann::json BuildSummaryJson(
@@ -358,9 +360,13 @@ nlohmann::json BuildSummaryJson(
     auto parsedPluginScan = nlohmann::json::parse(r.plugin_scan_json_utf8, nullptr, false);
     if (parsedPluginScan.is_discarded()) {
       summary["plugin_scan"] = nullptr;
-      // Enough to see what went wrong; the full scan stays in the dump.
-      constexpr std::size_t kRawPreviewBytes = 4096;
-      summary["plugin_scan_raw"] = r.plugin_scan_json_utf8.substr(0, kRawPreviewBytes);
+      // Enough to see what went wrong; the full scan stays in the dump. The
+      // text cannot be parsed, so its paths (the MO2 folders come first)
+      // cannot be redacted one by one: a redacted summary leaves it out.
+      if (!redactPaths) {
+        constexpr std::size_t kRawPreviewBytes = 4096;
+        summary["plugin_scan_raw"] = TruncateUtf8(r.plugin_scan_json_utf8, kRawPreviewBytes);
+      }
     } else {
       // The per-plugin list (about 1 MB for a 4,000-plugin load order) is
       // input to the analysis, which reads it from the dump's own stream; the
@@ -377,6 +383,11 @@ nlohmann::json BuildSummaryJson(
         parsedPluginScan["active_plugin_count"] = active;
         parsedPluginScan["light_plugin_count"] = light;
         parsedPluginScan.erase("plugins");
+      }
+      if (redactPaths) {
+        // mo2.ini_path / base_dir / mods_dir / profiles_dir / overwrite_dir
+        // are absolute and usually under the user's profile folder.
+        RedactAbsolutePathStrings(&parsedPluginScan);
       }
       summary["plugin_scan"] = std::move(parsedPluginScan);
     }
@@ -471,10 +482,7 @@ nlohmann::json BuildSummaryJson(
     summary["callstack"]["frames"].push_back(WideToUtf8(f));
   }
   const std::wstring redactedSymbolCachePath = MaybeRedactPath(r.symbol_cache_path, redactPaths);
-  const std::wstring redactedSymbolSearchPath = ReplaceAll(
-    std::wstring(r.symbol_search_path),
-    std::wstring_view(r.symbol_cache_path),
-    std::wstring_view(redactedSymbolCachePath));
+  const std::wstring redactedSymbolSearchPath = RedactSymbolSearchPath(r.symbol_search_path, redactPaths);
   const std::wstring redactedDbghelpPath = MaybeRedactPath(r.dbghelp_path, redactPaths);
   const std::wstring redactedMsdiaPath = MaybeRedactPath(r.msdia_path, redactPaths);
   summary["symbolization"] = {

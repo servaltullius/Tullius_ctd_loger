@@ -68,7 +68,7 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
   sessionStart.tid = dialogTid;
   sessionStart.qpc = 2;
   sessionStart.type = static_cast<std::uint16_t>(skydiag::EventType::kSessionStart);
-  sessionStart.seq = 2;
+  sessionStart.seq = 0;  // ring index 0 committed (index * 2)
   shared->header.write_index = 1;
 
   auto proc = MakeSelfAttachedProcess(shared.get());
@@ -82,11 +82,8 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
     ExecuteConfirmedHangCapture(MakeTestConfig(), proc, outBase, decision, 0u, &pendingViewer, &state);
   }
 
-  if (!skydiag::tests::runtime::CloseDialogAndWait(kDialogTitle)) {
-    dialogThread.detach();
-    Require(false, "Test MessageBox did not close");
-  }
-  dialogThread.join();
+  Require(
+    skydiag::tests::runtime::CloseDialogAndJoin(dialogThread, kDialogTitle), "Test MessageBox did not close");
   ShutdownRetentionWorker();
   CloseAttachedProcess(&proc);
 

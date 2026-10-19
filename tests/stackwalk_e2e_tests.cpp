@@ -94,7 +94,7 @@ void TestFormalStackwalkUnwindsRealCallerChain()
   sessionStart.tid = parkedTid;
   sessionStart.qpc = 2;
   sessionStart.type = static_cast<std::uint16_t>(skydiag::EventType::kSessionStart);
-  sessionStart.seq = 2;
+  sessionStart.seq = 0;  // ring index 0 committed (index * 2)
   shared->header.write_index = 1;
 
   auto proc = MakeSelfAttachedProcess(shared.get());
@@ -169,7 +169,7 @@ void TestThreadDumpPairingNamesNoSuspects()
   sessionStart.tid = parkedTid;
   sessionStart.qpc = 2;
   sessionStart.type = static_cast<std::uint16_t>(skydiag::EventType::kSessionStart);
-  sessionStart.seq = 2;
+  sessionStart.seq = 0;  // ring index 0 committed (index * 2)
   shared->header.write_index = 1;
 
   auto proc = MakeSelfAttachedProcess(shared.get());

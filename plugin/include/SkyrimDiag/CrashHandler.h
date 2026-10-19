@@ -156,6 +156,48 @@ constexpr CrashLoggerFaultAction ClassifyCrashLoggerFault(
   return CrashLoggerFaultAction::kIgnore;
 }
 
+// While CrashLogger reports a kept exception, its report can also fault
+// outside its own image, in game or runtime code it calls (a stale form's
+// name, for example). That fault is nested in the dispatch of the kept
+// exception: on the same thread, below the CONTEXT the dispatcher keeps for
+// the kept exception (still unchanged there), with CrashLogger's frames
+// between the two. The handler scans that part of the stack for a CrashLogger
+// address and, if one is there, records the kept exception instead of the
+// fault. Any other fault is recorded as before; the scan never makes a fault
+// ignored.
+struct CrashLoggerStackScanWindow
+{
+  std::uintptr_t begin = 0;
+  std::uintptr_t end = 0;
+};
+
+// The pointer-aligned stack range to scan: from the fault's stack pointer up
+// to the kept exception's dispatch CONTEXT, at most maxBytes, and only inside
+// this thread's stack [stackLow, stackHigh). Empty when the fault is not
+// nested below that CONTEXT on that stack.
+constexpr CrashLoggerStackScanWindow SelectCrashLoggerStackScanWindow(
+  std::uintptr_t faultSp,
+  std::uintptr_t keptContextAddress,
+  std::uintptr_t stackLow,
+  std::uintptr_t stackHigh,
+  std::uintptr_t maxBytes) noexcept
+{
+  constexpr std::uintptr_t kAlign = sizeof(std::uintptr_t);
+  if (stackLow >= stackHigh || faultSp < stackLow || keptContextAddress > stackHigh ||
+      faultSp >= keptContextAddress) {
+    return {};
+  }
+  const std::uintptr_t begin = (faultSp + (kAlign - 1u)) & ~(kAlign - 1u);
+  std::uintptr_t end = keptContextAddress & ~(kAlign - 1u);
+  if (begin >= end) {
+    return {};
+  }
+  if (end - begin > maxBytes) {
+    end = begin + (maxBytes & ~(kAlign - 1u));
+  }
+  return { begin, end };
+}
+
 // Protocol v4 preserves the first selected exception for one incident.
 //
 // kState_Frozen is the cross-process incident ownership/ACK bit. A fatal writer
@@ -170,6 +212,14 @@ constexpr CrashLoggerFaultAction ClassifyCrashLoggerFault(
 //   0 = Off
 //   1 = Fatal exceptions only (recommended; avoids many false positives)
 //   2 = All exceptions (can false-trigger on handled exceptions)
+//
+// Mode 1 also chains a top-level unhandled exception filter and a SIGABRT
+// handler. They record an unhandled C++ throw or breakpoint when CrashLogger is
+// not there to fault while reporting it: the filter sees one no frame handled,
+// and the SIGABRT handler the kept throw that terminate() ends the process for
+// (a throw out of a noexcept function never reaches the filter). Neither runs
+// for a handled exception, and both use only the fatal path's fixed-size,
+// allocation-free steps.
 bool InstallCrashHandler(std::uint32_t crashHookMode);
 
 // Caches the CrashLogger module image ranges used by nested-exception

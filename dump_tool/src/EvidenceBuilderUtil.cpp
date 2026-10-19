@@ -529,12 +529,57 @@ const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const Analy
   return nullptr;
 }
 
+bool GameReachedWorld(const AnalysisResult& r)
+{
+  return std::any_of(r.events.begin(), r.events.end(), [](const EventRow& ev) {
+    return ev.type == static_cast<std::uint16_t>(skydiag::EventType::kLoadEnd) ||
+           ev.type == static_cast<std::uint16_t>(skydiag::EventType::kCellChange);
+  });
+}
+
+const PluginRuleDiagnosis* FindMissingMasterDiagnosis(const AnalysisResult& r)
+{
+  for (const auto& pd : r.plugin_diagnostics) {
+    if (pd.rule_id == "MISSING_MASTER") {
+      return &pd;
+    }
+  }
+  return nullptr;
+}
+
 bool IsActionableSuspect(const SuspectItem& s)
 {
   return !minidump::IsKnownHookFramework(s.module_filename) &&
-         !minidump::IsSystemishModule(s.module_filename) &&
-         !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+         !minidump::IsSystemishModuleAt(s.module_filename, s.module_path) &&
          !minidump::IsGameExeModule(s.module_filename);
+}
+
+bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename)
+{
+  const std::wstring lower = WideLower(filename);
+  std::wstring_view path;
+  if (!r.fault_module_path.empty() && WideLower(r.fault_module_filename) == lower) {
+    path = r.fault_module_path;
+  } else {
+    for (const auto& s : r.suspects) {
+      if (!s.module_path.empty() && WideLower(s.module_filename) == lower) {
+        path = s.module_path;
+        break;
+      }
+    }
+  }
+  return minidump::IsSystemishModuleAt(filename, path);
+}
+
+bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const ActionableCandidate& candidate)
+{
+  const auto has = [&](std::string_view family) {
+    return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), family) !=
+           candidate.supporting_families.end();
+  };
+  return r.suspects_from_stackwalk && has("actionable_stack") && !has("hang_thread_group") &&
+         !has("crash_logger_frame") && !has("crash_logger_object_ref") && !has("resource_provider") &&
+         candidate.stack_weight >= 5u;
 }
 
 bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx)

@@ -59,13 +59,23 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
         ? (L"Plugin diagnostics: " + ToWideAscii(pd.rule_id))
         : (L"플러그인 진단: " + ToWideAscii(pd.rule_id));
       e.details = pd.cause;
+      // One item for missing masters: the rule's and the list below said the
+      // same thing twice, both High.
+      if (pd.rule_id == "MISSING_MASTER" && !r.missing_masters.empty()) {
+        e.details += (en ? L" | Missing: " : L" | 누락: ") + JoinList(r.missing_masters, 4, L", ");
+        if (GameReachedWorld(r)) {
+          e.details += en
+            ? L" | The game finished loading a save or cell in this session, so it had these masters; the scanned plugin list may be stale."
+            : L" | 이번 실행에서 세이브나 셀 로드가 끝났으므로 게임은 이 마스터를 읽었습니다. 스캔한 플러그인 목록이 오래됐을 수 있습니다.";
+        }
+      }
       r.evidence.push_back(std::move(e));
     }
   }
 
-  if (!r.missing_masters.empty()) {
+  if (!r.missing_masters.empty() && !FindMissingMasterDiagnosis(r)) {
     EvidenceItem e{};
-    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence_level = GameReachedWorld(r) ? i18n::ConfidenceLevel::kLow : i18n::ConfidenceLevel::kHigh;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en
       ? L"Missing plugin masters detected"

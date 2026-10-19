@@ -30,8 +30,7 @@ using skydiag::dump_tool::internal::output_writer::ReadTextFileUtf8;
 using skydiag::dump_tool::minidump::ExternalSoftwareName;
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::IsGameExeModule;
-using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
-using skydiag::dump_tool::minidump::IsSystemishModule;
+using skydiag::dump_tool::minidump::IsSystemishModuleAt;
 using skydiag::dump_tool::minidump::LoadThreads;
 using skydiag::dump_tool::minidump::ModuleForAddress;
 using skydiag::dump_tool::minidump::ModuleInfo;
@@ -85,9 +84,7 @@ void ResolveFaultModule(
     out.fault_module_filename = m.filename;
     const std::uint64_t off = out.exc_addr - m.base;
     out.fault_module_offset = off;
-    wchar_t buf[1024]{};
-    swprintf_s(buf, L"%s+0x%llx", m.filename.c_str(), static_cast<unsigned long long>(off));
-    out.fault_module_plus_offset = buf;
+    out.fault_module_plus_offset = minidump::ModulePlusOffsetText(m.filename, off);
     out.inferred_mod_name = m.inferred_mod_name;
   } else if (auto m = ModuleForAddress(dumpBase, dumpSize, out.exc_addr)) {
     out.fault_module_path = m->path;
@@ -106,8 +103,7 @@ void ResolveFaultModule(
     const bool inferredLooksBinaryName =
       (inferredLower.size() >= 4 && inferredLower.substr(inferredLower.size() - 4) == L".dll") ||
       (inferredLower.size() >= 4 && inferredLower.substr(inferredLower.size() - 4) == L".exe");
-    const bool faultIsSystem =
-      IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
+    const bool faultIsSystem = IsSystemishModuleAt(out.fault_module_filename, out.fault_module_path);
     if (faultIsSystem || IsGameExeModule(out.fault_module_filename) || inferredLooksBinaryName || inferredLower == faultLower) {
       out.inferred_mod_name.clear();
     }
@@ -159,7 +155,9 @@ void ParseBlackboxStream(
   for (std::uint32_t i = begin; i < writeIndex; i++) {
     const auto& ev = snap->events[i % cap];
     const std::uint32_t seq1 = ev.seq;
-    if ((seq1 & 1u) != 0u) {
+    // The writer commits ring index i as seq i*2. Any other even value is a
+    // slot a lap behind or one that two writers of different laps spliced.
+    if ((seq1 & 1u) != 0u || seq1 != i * 2u) {
       continue;
     }
 
@@ -222,7 +220,8 @@ void ParseBlackboxStream(
   for (std::uint32_t i = rBegin; i < rWrite; i++) {
     const auto& ent = rl.entries[i % rCap];
     const std::uint32_t seq1 = ent.seq;
-    if ((seq1 & 1u) != 0u) {
+    // Committed as seq i*2, as in the event ring above.
+    if ((seq1 & 1u) != 0u || seq1 != i * 2u) {
       continue;
     }
 
@@ -294,15 +293,67 @@ void LoadPluginScanJson(
   }
 }
 
+namespace {
+
+// The MO2 and game folders below come from the dump: its module paths and
+// the helper's plugin scan. Like the module files themselves (review M16),
+// they are read only on a local fixed disk, so a crafted dump cannot make
+// the analyzer list or open files on a UNC share.
+bool IsLocalFixedDriveFolder(const std::filesystem::path& dir)
+{
+  return minidump::IsLocalFixedDrivePath(dir.native());
+}
+
+// The first module path under an MO2 "mods" folder on a local fixed disk, as
+// the list the Mo2Index helpers take; empty when there is none. *refused (if
+// given) is set when a module path names an MO2 folder elsewhere.
+std::vector<std::wstring> LocalMo2ModulePath(const std::vector<std::wstring>& modulePaths, bool* refused)
+{
+  for (const auto& path : modulePaths) {
+    const auto base = TryInferMo2BaseDirFromModulePaths({ path });
+    if (!base) {
+      continue;
+    }
+    if (IsLocalFixedDriveFolder(*base)) {
+      return { path };
+    }
+    if (refused) {
+      *refused = true;
+    }
+  }
+  return {};
+}
+
+bool CapturedMo2FoldersAreLocal(const CapturedMo2State& state)
+{
+  for (const auto* dir : { &state.base, &state.modsDir, &state.overwriteDir, &state.profilesDir }) {
+    if (!dir->empty() && !IsLocalFixedDriveFolder(*dir)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out)
 {
   std::optional<Mo2Index> idx;
-  if (auto captured = TryParseCapturedMo2State(out.plugin_scan_json_utf8)) {
+  bool refused = false;
+  auto captured = TryParseCapturedMo2State(out.plugin_scan_json_utf8);
+  if (captured && !CapturedMo2FoldersAreLocal(*captured)) {
+    refused = true;
+    captured.reset();
+  }
+  if (captured) {
     idx = BuildMo2IndexFromCapture(*captured);
   } else {
     // A dump captured before the helper recorded MO2 state, or state it could
     // not read: what is on disk now may be another profile or changed mods.
-    idx = TryBuildMo2IndexFromModulePaths(modulePaths);
+    idx = TryBuildMo2IndexFromModulePaths(LocalMo2ModulePath(modulePaths, &refused));
+  }
+  if (refused && !idx) {
+    out.diagnostics.push_back(L"[MO2] the dump names an MO2 folder that is not on a local fixed disk; not read");
   }
   if (idx) {
     out.mo2_providers_source = idx->source == Mo2Index::Source::kCrashTime ? "crash_time" : "analysis_time";
@@ -401,10 +452,9 @@ bool DetermineHangLike(
     }
 
     if (!capSaysHang && !hasHangEvent) {
-      constexpr double kNotHangHeartbeatAgeSec = 5.0;
       if (out.has_blackbox) {
         if (auto hbAge = internal::InferHeartbeatAgeFromEventsSec(out.events)) {
-          if (*hbAge < kNotHangHeartbeatAgeSec) {
+          if (*hbAge < internal::kNotHangHeartbeatAgeSec) {
             hangLike = false;
           }
         }
@@ -415,6 +465,37 @@ bool DetermineHangLike(
   }
 
   return hangLike;
+}
+
+crashlogger_core::CrashLoggerSystemNamedModFn CrashLoggerSystemNamedModTest(
+  const std::vector<ModuleInfo>& allModules)
+{
+  return [&allModules](std::string_view moduleUtf8, std::uint64_t address) {
+    const std::wstring module = Utf8ToWide(std::string(moduleUtf8));
+    const auto isModCopy = [](const ModuleInfo& m) {
+      return !IsSystemishModuleAt(m.filename, m.path) && m.external_software.empty();
+    };
+    // Such a proxy loads the Windows DLL of the same name too, so the frame
+    // address picks the copy.
+    if (address != 0) {
+      if (const auto index = FindModuleIndexForAddress(allModules, address)) {
+        const auto& m = allModules[*index];
+        return WideLower(m.filename) == WideLower(module) && isModCopy(m);
+      }
+    }
+    // Without one, only a name no Windows copy shares.
+    bool found = false;
+    for (const auto& m : allModules) {
+      if (WideLower(m.filename) != WideLower(module)) {
+        continue;
+      }
+      if (!isModCopy(m)) {
+        return false;
+      }
+      found = true;
+    }
+    return found;
+  };
 }
 
 void IntegrateCrashLoggerLog(
@@ -433,12 +514,15 @@ void IntegrateCrashLoggerLog(
     }
     const std::wstring lower = WideLower(m.filename);
     if (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe") {
-      gameRootDir = std::filesystem::path(m.path).parent_path();
+      // CrashLogger.ini and a relative Crashlog Directory are read from here.
+      if (const auto dir = std::filesystem::path(m.path).parent_path(); IsLocalFixedDriveFolder(dir)) {
+        gameRootDir = dir;
+      }
       break;
     }
   }
 
-  const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
+  const auto mo2Base = TryInferMo2BaseDirFromModulePaths(LocalMo2ModulePath(modulePaths, nullptr));
   CrashLoggerPairingMetadata pairing{};
   auto logPath = TryFindCrashLoggerLogForDump(
     dumpFs,
@@ -496,7 +580,8 @@ void IntegrateCrashLoggerLog(
     out.diagnostics.push_back(
       L"[CrashLogger] paired log is a thread dump; its call-stack modules are not used as suspects");
   } else {
-    out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
+    out.crash_logger_top_modules =
+      ParseCrashLoggerTopModules(*logUtf8, canonicalByLower, CrashLoggerSystemNamedModTest(allModules));
   }
 
   if (auto cpp = crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii(*logUtf8)) {
@@ -669,7 +754,8 @@ void ComputeSuspects(
       allModules,
       scanTids,
       out.exc_tid,
-      opt.language);
+      opt.language,
+      excCtx ? &*excCtx : nullptr);
     // The walk or Crash Logger already showed these only wrap the thread's
     // entry; a raw stack slot holding their return address says no more.
     std::erase_if(out.suspects, [&](const SuspectItem& suspect) {

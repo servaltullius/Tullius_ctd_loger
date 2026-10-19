@@ -110,15 +110,28 @@ public sealed partial class MainWindow
             var cancellationToken = analysisCts.Token;
 
             await PromoteLearnedDumpLocationAsync(dumpPath);
-            await RefreshDiscoveredDumpsAsync();
+            // The recent-dump list refreshes in the background; the analysis
+            // does not depend on it.
+            _ = RefreshDiscoveredDumpsAsync();
             cancellationToken.ThrowIfCancellationRequested();
 
             var options = _vm.BuildInvocationOptions(
                 dumpPath, OutputDirBox.Text.Trim(), _startupOptions.Language, false, _startupOptions);
             var outDir = NativeAnalyzerBridge.ResolveOutputDirectory(dumpPath, options.OutDir);
+            var targetChanged =
+                !string.Equals(_vm.CurrentDumpPath, dumpPath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(_vm.CurrentOutDir, outDir, StringComparison.OrdinalIgnoreCase);
             _vm.CurrentDumpPath = dumpPath;
             _vm.CurrentOutDir = outDir;
-            _currentSummaryPath = null;
+            if (targetChanged)
+            {
+                // The panels still show the previous dump. If this analysis
+                // fails or is canceled they must not stay under the new name.
+                // A failed or canceled re-analysis of the same dump keeps the
+                // shown summary, and saving it keeps working.
+                _currentSummaryPath = null;
+                ClearRenderedSummary();
+            }
 
             if (preferExistingArtifacts)
             {
@@ -262,6 +275,18 @@ public sealed partial class MainWindow
         }
 
         PopulateTriageEditor(summary);
+    }
+
+    private void ClearRenderedSummary()
+    {
+        _vm.ClearSummary();
+        SetAnalysisContentVisibility(false);
+        CopySummaryButton.IsEnabled = false;
+        CopyShareButton.IsEnabled = false;
+        SetTriageEditorEnabled(false);
+        ReportTextBox.Text = string.Empty;
+        WctTextBox.Text = string.Empty;
+        SetRawDataContentVisibility(hasReport: false, hasWct: false);
     }
 
     private void CopySummaryButton_Click(object sender, RoutedEventArgs e)

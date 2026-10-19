@@ -47,6 +47,11 @@ internal static class Program
                     identityAWithDifferentFileTime.ResolveTriageStatePath(outDir),
                 "triage storage key must include SHA256, size, and FILETIME");
 
+            Require(identityA.MatchesFileMetadata(dumpA), "hashed identity must match its unchanged dump metadata");
+            Require(
+                !identityA.MatchesFileMetadata(dumpAWithDifferentFileTime),
+                "metadata re-check must reject a dump with another FILETIME");
+
             var summaryPathA = Path.Combine(identityA.ResolveArtifactDirectory(outDir), "Summary.json");
             var summaryPathB = Path.Combine(identityB.ResolveArtifactDirectory(outDir), "Summary.json");
             await AtomicFile.WriteAllTextAsync(
@@ -236,6 +241,64 @@ internal static class Program
             Require(
                 await File.ReadAllTextAsync(discoveryPath) == authoritativeDiscovery,
                 "failed discovery-state write destroyed the previous authoritative file");
+            // Two viewers start from the same snapshot. The second one's change
+            // must be applied to the file as it is now, not to its snapshot.
+            var staleSnapshot = DumpDiscoveryStore.LoadFromPath(discoveryPath);
+            await DumpDiscoveryStore.UpdateAtPathAsync(
+                discoveryPath,
+                state => DumpDiscoveryStore.AddRegisteredRoot(state, bDir),
+                CancellationToken.None);
+            Require(
+                staleSnapshot.RegisteredRoots.Count == 1,
+                "fixture snapshot must predate the other viewer's change");
+            var merged = await DumpDiscoveryStore.UpdateAtPathAsync(
+                discoveryPath,
+                state => DumpDiscoveryStore.PromoteLearnedRoot(state, cDir),
+                CancellationToken.None);
+            var reloaded = DumpDiscoveryStore.LoadFromPath(discoveryPath);
+            Require(
+                reloaded.RegisteredRoots.Contains(Path.GetFullPath(aDir), StringComparer.OrdinalIgnoreCase) &&
+                reloaded.RegisteredRoots.Contains(Path.GetFullPath(bDir), StringComparer.OrdinalIgnoreCase),
+                "a discovery update dropped a folder another viewer registered");
+            Require(
+                reloaded.LearnedRoots.Contains(Path.GetFullPath(cDir), StringComparer.OrdinalIgnoreCase),
+                "a discovery update lost its own change");
+            Require(
+                merged.RegisteredRoots.SequenceEqual(reloaded.RegisteredRoots) &&
+                merged.LearnedRoots.SequenceEqual(reloaded.LearnedRoots),
+                "a discovery update must return the state it saved");
+
+            // A state file that does not parse is not saved over with an
+            // empty list: the update fails and the file keeps its folders.
+            var corruptDiscovery = "{ \"RegisteredRoots\": [ " + Environment.NewLine;
+            await File.WriteAllTextAsync(discoveryPath, corruptDiscovery);
+            var corruptUpdateFailed = false;
+            try
+            {
+                await DumpDiscoveryStore.UpdateAtPathAsync(
+                    discoveryPath,
+                    state => DumpDiscoveryStore.PromoteLearnedRoot(state, cDir),
+                    CancellationToken.None);
+            }
+            catch (JsonException)
+            {
+                corruptUpdateFailed = true;
+            }
+            Require(corruptUpdateFailed, "a discovery update over an unreadable state file must fail");
+            Require(
+                await File.ReadAllTextAsync(discoveryPath) == corruptDiscovery,
+                "a failed discovery update must leave the state file alone");
+
+            // A missing file is an empty state.
+            File.Delete(discoveryPath);
+            var fromMissing = await DumpDiscoveryStore.UpdateAtPathAsync(
+                discoveryPath,
+                state => DumpDiscoveryStore.AddRegisteredRoot(state, aDir),
+                CancellationToken.None);
+            Require(
+                fromMissing.RegisteredRoots.Count == 1 && fromMissing.LearnedRoots.Count == 0,
+                "a discovery update without a state file starts from an empty state");
+
             Require(
                 !Directory.EnumerateFiles(root, "*.tmp.*", SearchOption.AllDirectories).Any(),
                 "atomic writes left temporary files behind");

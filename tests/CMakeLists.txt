@@ -30,6 +30,14 @@ target_include_directories(skydiag_hang_suppression_tests PRIVATE
 
 add_test(NAME skydiag_hang_suppression_tests COMMAND skydiag_hang_suppression_tests)
 
+add_executable(skydiag_helper_ini_text_tests
+  helper_ini_text_tests.cpp
+)
+target_include_directories(skydiag_helper_ini_text_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+add_test(NAME skydiag_helper_ini_text_tests COMMAND skydiag_helper_ini_text_tests)
+
 add_executable(skydiag_crashlogger_parser_tests
   crashlogger_parser_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashLoggerParseCore.cpp"
@@ -88,6 +96,55 @@ if(WIN32)
   add_test(
     NAME skydiag_analyzer_state_runtime_tests
     COMMAND skydiag_analyzer_state_runtime_tests
+  )
+
+  # BuildSummaryJson/BuildReportText output: schema, path redaction, the
+  # plugin scan preview and the incident manifest lookup.
+  add_executable(skydiag_summary_writer_runtime_tests
+    summary_writer_runtime_tests.cpp
+  )
+  target_include_directories(skydiag_summary_writer_runtime_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_summary_writer_runtime_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_summary_writer_runtime_tests
+    COMMAND skydiag_summary_writer_runtime_tests
+  )
+
+  # The helper's SkyrimDiag_Preflight.json masks symbol paths as the dump
+  # tool's redacted summaries do.
+  add_executable(skydiag_helper_path_redaction_tests
+    helper_path_redaction_tests.cpp
+  )
+  target_include_directories(skydiag_helper_path_redaction_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  )
+  target_link_libraries(skydiag_helper_path_redaction_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_helper_path_redaction_tests
+    COMMAND skydiag_helper_path_redaction_tests
+  )
+
+  # What the analyzer takes from a dump: the pointer-scan start (review H3),
+  # paths it may open (M16), module names of any length (L8).
+  add_executable(skydiag_analyzer_dump_input_tests
+    analyzer_dump_input_tests.cpp
+  )
+  target_include_directories(skydiag_analyzer_dump_input_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_analyzer_dump_input_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_analyzer_dump_input_tests
+    COMMAND skydiag_analyzer_dump_input_tests
   )
 
   add_executable(skydiag_exception_code_recommendation_tests
@@ -186,6 +243,20 @@ if(WIN32)
   add_test(
     NAME skydiag_external_software_tests
     COMMAND skydiag_external_software_tests
+  )
+
+  add_executable(skydiag_evidence_interpretation_tests
+    evidence_interpretation_tests.cpp
+  )
+  target_include_directories(skydiag_evidence_interpretation_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_evidence_interpretation_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_evidence_interpretation_tests
+    COMMAND skydiag_evidence_interpretation_tests
   )
 
   add_executable(skydiag_non_ascii_path_tests
@@ -377,6 +448,12 @@ add_executable(skydiag_helper_preflight_guard_tests
 )
 
 add_test(NAME skydiag_helper_preflight_guard_tests COMMAND skydiag_helper_preflight_guard_tests)
+
+add_executable(skydiag_helper_nothrow_filesystem_guard_tests
+  helper_nothrow_filesystem_guard_tests.cpp
+)
+
+add_test(NAME skydiag_helper_nothrow_filesystem_guard_tests COMMAND skydiag_helper_nothrow_filesystem_guard_tests)
 
 add_executable(skydiag_retention_tests
   retention_tests.cpp
@@ -786,8 +863,10 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangDetect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperCommon.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperLog.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Loop.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Process.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Startup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ManualCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ManualCaptureKeyWatcher.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/IncidentManifest.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/LoadStats.cpp"
@@ -796,6 +875,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.Decision.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PendingCrashAnalysis.Execute.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PluginScanner.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessAttach.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessUtil.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PssSnapshot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/RetentionWorker.cpp"
@@ -850,6 +930,12 @@ if(WIN32)
   )
   add_test(NAME skydiag_helper_config_runtime_tests COMMAND skydiag_helper_config_runtime_tests)
 
+  add_executable(skydiag_helper_output_dir_fallback_tests
+    helper_output_dir_fallback_tests.cpp
+  )
+  target_link_libraries(skydiag_helper_output_dir_fallback_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_helper_output_dir_fallback_tests COMMAND skydiag_helper_output_dir_fallback_tests)
+
   add_executable(skydiag_helper_false_positive_runtime_tests
     helper_false_positive_runtime_tests.cpp
   )
@@ -861,6 +947,8 @@ if(WIN32)
   )
   target_link_libraries(skydiag_helper_hang_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_hang_runtime_tests COMMAND skydiag_helper_hang_runtime_tests)
+  # Opens a MessageBox; a stuck one must fail the run, not hold the CI job.
+  set_tests_properties(skydiag_helper_hang_runtime_tests PROPERTIES TIMEOUT 300)
 
   # Real MiniDumpWriteDump of a child process with crash contexts whose
   # registers point at unmapped memory (bad function-pointer calls).
@@ -893,6 +981,7 @@ if(WIN32)
   # parallel (ctest -j) one would close the other's dialog.
   set_tests_properties(skydiag_modal_dialog_hang_e2e_tests skydiag_modal_dialog_hang_e2e_dump_only_tests PROPERTIES
     RESOURCE_LOCK skydiag_modal_dialog_window
+    TIMEOUT 300
   )
 
   # ADR-0010: the crash dump writer adds the objects the crash registers point
@@ -946,14 +1035,18 @@ if(WIN32)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fakes/crashlogger"
   )
 
+  # Also runs copies of itself that end on an unhandled exception, attached to
+  # through the helper's ProcessAttach as the helper would.
   add_executable(skydiag_plugin_crash_handler_runtime_tests
     plugin_crash_handler_runtime_tests.cpp
     ../plugin/src/Blackbox.cpp
     ../plugin/src/CrashHandler.cpp
     ../plugin/src/SharedMemory.cpp
+    ../helper/src/ProcessAttach.cpp
   )
   target_include_directories(skydiag_plugin_crash_handler_runtime_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
   )
   target_compile_definitions(skydiag_plugin_crash_handler_runtime_tests PRIVATE _UNICODE UNICODE)
   target_link_libraries(skydiag_plugin_crash_handler_runtime_tests PRIVATE skydiag_shared Psapi)

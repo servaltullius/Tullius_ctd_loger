@@ -67,10 +67,7 @@ HookStubRaceInfo DetectHookStubRace(
         IsCallRel32To(call.data(), ret, out.exc_addr)) {
       const std::uint64_t site = ret - call.size();
       if (const auto ci = minidump::FindModuleIndexForAddress(modules, site)) {
-        wchar_t buf[512]{};
-        swprintf_s(buf, L"%s+0x%llx", modules[*ci].filename.c_str(),
-          static_cast<unsigned long long>(site - modules[*ci].base));
-        info.call_site = buf;
+        info.call_site = minidump::ModulePlusOffsetText(modules[*ci].filename, site - modules[*ci].base);
       }
     }
   }

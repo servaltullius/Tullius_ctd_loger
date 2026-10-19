@@ -561,6 +561,103 @@ void TestEslSlotRuleCountsOnlyActivePlugins()
   std::filesystem::remove(tmp, ec);
 }
 
+bool LoadRulesText(PluginRules* rules, const std::string& text, const char* fileName)
+{
+  const auto tmp = std::filesystem::temp_directory_path() / fileName;
+  {
+    std::ofstream f(tmp);
+    assert(f.is_open());
+    f << text;
+  }
+  const bool loaded = rules->LoadFromJson(tmp);
+  std::error_code ec;
+  std::filesystem::remove(tmp, ec);
+  return loaded;
+}
+
+// A typo or a wrong type in a condition used to be ignored, leaving a rule
+// that fired on every report (review L14).
+void TestRulesRejectUnknownOrMistypedConditions()
+{
+  const std::string rulesJson = R"JSON(
+{
+  "version": 1,
+  "rules": [
+    { "id": "TYPO_KEY", "condition": { "has_missing_mastr": true },
+      "diagnosis": { "cause_en": "typo", "confidence": "high" } },
+    { "id": "STRING_COUNT", "condition": { "esl_count_gte": "3800" },
+      "diagnosis": { "cause_en": "string", "confidence": "high" } },
+    { "id": "NEGATIVE_COUNT", "condition": { "full_plugin_count_gte": -1 },
+      "diagnosis": { "cause_en": "negative", "confidence": "high" } },
+    { "id": "EMPTY_CONDITION", "condition": {},
+      "diagnosis": { "cause_en": "empty", "confidence": "high" } },
+    { "id": "BAD_MODULE_LIST", "condition": { "module_not_loaded": ["bees.dll", 3] },
+      "diagnosis": { "cause_en": "bad list", "confidence": "high" } },
+    { "id": "VALID", "condition": { "has_missing_master": true },
+      "diagnosis": { "cause_en": "missing master", "confidence": "high" } }
+  ]
+}
+)JSON";
+  PluginRules rules;
+  const bool loaded = LoadRulesText(&rules, rulesJson, "skydiag_plugin_rules_invalid_conditions.json");
+  assert(loaded);
+  assert(rules.RuleCount() == 1u);
+
+  ParsedPluginScan scan{};
+  const bool parsed = ParsePluginScanJson(R"JSON({ "plugins_source": "mo2_profile", "plugins": [] })JSON", &scan);
+  assert(parsed);
+  PluginRulesContext ctx{};
+  ctx.scan = &scan;
+  assert(rules.Evaluate(ctx).empty());
+
+  const std::string newerSchema = R"JSON(
+{
+  "version": 2,
+  "rules": [
+    { "id": "VALID", "condition": { "has_missing_master": true },
+      "diagnosis": { "cause_en": "missing master", "confidence": "high" } }
+  ]
+}
+)JSON";
+  PluginRules newer;
+  const bool newerLoaded = LoadRulesText(&newer, newerSchema, "skydiag_plugin_rules_newer_schema.json");
+  assert(!newerLoaded);
+}
+
+// Only the game's own plugin list (MO2 profile or the standard plugins.txt)
+// makes a missing master more than a clue (review L10).
+void TestMissingMasterTrustsOnlyTheGamePluginList()
+{
+  const std::string rulesJson = R"JSON(
+{
+  "version": 1,
+  "rules": [
+    { "id": "MISSING_MASTER", "condition": { "has_missing_master": true },
+      "diagnosis": { "cause_en": "missing master", "confidence": "high" } }
+  ]
+}
+)JSON";
+  PluginRules rules;
+  const bool loaded = LoadRulesText(&rules, rulesJson, "skydiag_plugin_rules_missing_master_source.json");
+  assert(loaded);
+
+  for (const std::string source : { "mo2_profile", "standard", "fallback", "" }) {
+    ParsedPluginScan scan{};
+    std::string json = std::string(kScanJson);
+    json.replace(json.find("mo2_profile"), std::string_view("mo2_profile").size(), source);
+    const bool parsed = ParsePluginScanJson(json, &scan);
+    assert(parsed);
+    assert(scan.plugins_source == source);
+    PluginRulesContext ctx{};
+    ctx.scan = &scan;
+    const auto diags = rules.Evaluate(ctx);
+    assert(diags.size() == 1u && diags[0].rule_id == "MISSING_MASTER");
+    const bool gameList = source == "mo2_profile" || source == "standard";
+    assert(diags[0].confidence_level ==
+      (gameList ? skydiag::dump_tool::i18n::ConfidenceLevel::kHigh : skydiag::dump_tool::i18n::ConfidenceLevel::kLow));
+  }
+}
+
 }  // namespace
 
 int main()
@@ -577,5 +674,7 @@ int main()
   TestRulesEvaluateFromJson();
   TestFullPluginSlotRuleRequiresActiveFullThreshold();
   TestEslSlotRuleCountsOnlyActivePlugins();
+  TestRulesRejectUnknownOrMistypedConditions();
+  TestMissingMasterTrustsOnlyTheGamePluginList();
   return 0;
 }

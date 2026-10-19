@@ -7,6 +7,7 @@
 #include "EvidenceBuilderPrivate.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
+#include "WctTypes.h"
 
 namespace skydiag::dump_tool {
 
@@ -19,6 +20,18 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 
   r.evidence.clear();
   r.recommendations.clear();
+
+  // A missing master stops the game while it loads plugins at startup. A
+  // session that finished loading a save or cell had its masters, so the
+  // scanned list is stale or not the one the game used: a clue, not a cause.
+  if (internal::GameReachedWorld(r)) {
+    for (auto& pd : r.plugin_diagnostics) {
+      if (pd.rule_id == "MISSING_MASTER") {
+        pd.confidence_level = i18n::ConfidenceLevel::kLow;
+        pd.confidence = i18n::ConfidenceText(lang, pd.confidence_level);
+      }
+    }
+  }
 
   // Capture type (best-effort from filename / streams)
   std::wstring lowerName = minidump::WideLower(std::filesystem::path(r.dump_path).filename().wstring());
@@ -38,9 +51,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   }
 
   const auto wct = (r.has_wct && !r.wct_json_utf8.empty()) ? internal::TrySummarizeWct(r.wct_json_utf8) : std::nullopt;
-  constexpr double kNotHangHeartbeatAgeSec = 5.0;
   const auto hbAge = internal::InferHeartbeatAgeFromResultSec(r);
-  const bool heartbeatSuggestsNotHang = hbAge && (*hbAge < kNotHangHeartbeatAgeSec);
+  const bool heartbeatSuggestsNotHang = hbAge && (*hbAge < internal::kNotHangHeartbeatAgeSec);
   const bool manualFromWct = wct && wct->has_capture && (wct->capture_kind == "manual");
   const bool wctSuggestsHang = wct && ((wct->cycles > 0) || wct->suggestsHang);
   const bool manualCaptureHint = nameManual || manualFromWct;
@@ -71,8 +83,9 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 
   // A GPU vendor tool or overlay is not a mod to disable; it takes the system
   // DLL path with its own wording (FaultPlace).
-  const bool isSystem = minidump::IsSystemishModule(r.fault_module_filename) ||
-    minidump::IsLikelyWindowsSystemModulePath(r.fault_module_path) || !r.fault_module_external_software.empty();
+  // An ENB/ReShade d3d11.dll in the game folder is a mod, not Windows.
+  const bool isSystem = minidump::IsSystemishModuleAt(r.fault_module_filename, r.fault_module_path) ||
+    !r.fault_module_external_software.empty();
   const bool hasModule = !r.fault_module_filename.empty();
   const bool isGameExe = minidump::IsGameExeModule(r.fault_module_filename);
   const bool isHookFramework = minidump::IsKnownHookFramework(r.fault_module_filename);

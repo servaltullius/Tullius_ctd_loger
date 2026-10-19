@@ -56,6 +56,7 @@ using skydiag::dump_tool::minidump::IsGameExeModule;
 using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
 using skydiag::dump_tool::minidump::IsSystemishModule;
+using skydiag::dump_tool::minidump::IsSystemishModuleAt;
 using skydiag::dump_tool::minidump::LoadHookFrameworksFromJson;
 using skydiag::dump_tool::minidump::LoadAllModules;
 using skydiag::dump_tool::minidump::MappedFile;
@@ -220,7 +221,9 @@ void IntegrateCrashLoggerFrameSignals(
     }
   }
 
-  const auto rawSignals = crashlogger_core::ParseCrashLoggerFrameSignalsAscii(*logUtf8);
+  // An ENB/ReShade d3d11.dll or dxgi.dll outside Windows is a mod (review H4).
+  const auto rawSignals =
+    crashlogger_core::ParseCrashLoggerFrameSignalsAscii(*logUtf8, CrashLoggerSystemNamedModTest(allModules));
   if (!rawSignals.direct_fault_module.empty()) {
     out->crash_logger_direct_fault_module =
       CanonicalizeCrashLoggerFrameModule(rawSignals.direct_fault_module, canonicalByFilenameLower);
@@ -242,20 +245,25 @@ void IntegrateCrashLoggerFrameSignals(
     }
   }
 
+  // A frame the parser placed in a mod named like a Windows DLL is promotable
+  // by that frame; the name checks below would call it a Windows DLL.
   out->crash_logger_direct_fault_eligible =
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module) &&
-    !IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_direct_fault_module, allModules);
+    rawSignals.direct_fault_in_system_named_mod ||
+    (CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module) &&
+     !IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_direct_fault_module, allModules));
   out->crash_logger_first_actionable_probable_eligible =
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module) &&
-    !IsCrashLoggerFrameModuleLoadedFromSystemPath(
-      out->crash_logger_first_actionable_probable_module,
-      allModules);
+    rawSignals.first_actionable_probable_in_system_named_mod ||
+    (CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module) &&
+     !IsCrashLoggerFrameModuleLoadedFromSystemPath(
+       out->crash_logger_first_actionable_probable_module,
+       allModules));
   out->crash_logger_probable_streak_eligible =
     (out->crash_logger_probable_streak_length >= 2u) &&
-    CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module) &&
-    !IsCrashLoggerFrameModuleLoadedFromSystemPath(
-      out->crash_logger_probable_streak_module,
-      allModules);
+    (rawSignals.probable_streak_in_system_named_mod ||
+     (CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module) &&
+      !IsCrashLoggerFrameModuleLoadedFromSystemPath(
+        out->crash_logger_probable_streak_module,
+        allModules)));
 
   out->crash_logger_frame_signal_strength = 0;
   if (out->crash_logger_direct_fault_eligible) {
@@ -426,6 +434,27 @@ void ApplyCrashLoggerCorroborationToSuspects(
   }
 }
 
+void CapPointerScanSuspectConfidence(AnalysisResult& out)
+{
+  if (out.suspects_from_stackwalk) {
+    return;
+  }
+  // Pointer-density scans do not prove that a raw stack slot is a return
+  // address. Keep their user-visible confidence Low even when Crash Logger
+  // corroboration reorders the same module to the top. The blocked game
+  // thread's plugin is not one of them: it comes from the walk of that
+  // thread, so it keeps its Medium lead (ADR-0009, review L7).
+  const bool hasBlockedLead = HasBlockedGameThread(out.main_thread_wait);
+  for (auto& suspect : out.suspects) {
+    if (hasBlockedLead &&
+        _wcsicmp(suspect.module_filename.c_str(), out.main_thread_wait.blocked_module.c_str()) == 0) {
+      continue;
+    }
+    suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+    suspect.confidence = i18n::ConfidenceText(out.language, suspect.confidence_level);
+  }
+}
+
 // ===== Main analysis orchestrator =====
 
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
@@ -591,15 +620,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     // modules with Crash Logger frames would only re-promote them.
     ApplyCrashLoggerCorroborationToSuspects(&out, allModules);
   }
-  if (!out.suspects_from_stackwalk) {
-    // Pointer-density scans do not prove that a raw stack slot is a return
-    // address. Keep their user-visible confidence Low even when Crash Logger
-    // corroboration reorders the same module to the top.
-    for (auto& suspect : out.suspects) {
-      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
-      suspect.confidence = i18n::ConfidenceText(out.language, suspect.confidence_level);
-    }
-  }
+  CapPointerScanSuspectConfidence(out);
   if (out.hook_stub_race.detected) {
     // ADR-0016: the dump names whose hook stub the crash ran into; the stack
     // above an address outside every module is guesswork by comparison.
@@ -662,8 +683,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       if (out.exc_code == 0xC0000005u && out.exc_info.size() >= 2u) {
         input.access_violation_address = out.exc_info[1];
       }
-      input.fault_module_is_system =
-        IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
+      input.fault_module_is_system = IsSystemishModuleAt(out.fault_module_filename, out.fault_module_path);
       input.callstack_modules.reserve(
         out.stackwalk_primary_frames.size() +
         out.crash_logger_top_modules.size() +

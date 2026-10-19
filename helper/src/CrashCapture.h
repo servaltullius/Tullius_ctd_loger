@@ -142,8 +142,97 @@ constexpr bool IsLikelyCrashLoggerThreadDumpFault(
 // for the check above.
 void NoteCrashLoggerThreadDumpHotkeyPressed(std::uint64_t tick64) noexcept;
 
+// By the time a crash is latched the heartbeat has usually stopped for about
+// a hang threshold already (the filters' waits, the dump), and a game that is
+// still in its crash keeps it stopped. That is the captured crash, not a
+// second incident: hang detection waits until the heartbeat moves past where
+// it was when the crash was latched. A real freeze after an exception that
+// was handled after all is still detected, since the heartbeat moved first.
+constexpr bool ShouldHoldHangDetectionForCapturedCrash(
+  bool latched,
+  std::uint64_t latchedHeartbeatQpc,
+  std::uint64_t heartbeatQpc) noexcept
+{
+  return latched && heartbeatQpc <= latchedHeartbeatQpc;
+}
+
+// A fault the heartbeat filter releases as handled is often one that a mod
+// raises and catches again and again (e.g. an SEH-guarded probe), and each
+// one gets a dump of the configured size, which suspends the game while it is
+// written. Once the same code at the same address was released
+// kRepeatedRecoveredFaultMinCount times, and the last time within
+// kRepeatedRecoveredFaultCooldownMs, its next dump is written at the minimal
+// size first. A fault seen for the first time still gets the full dump first.
+inline constexpr std::size_t kRecoveredFaultHistoryCapacity = 16;
+inline constexpr std::uint32_t kRepeatedRecoveredFaultMinCount = 2;
+inline constexpr std::uint64_t kRepeatedRecoveredFaultCooldownMs = 10ull * 60ull * 1000ull;
+
+struct RecoveredFaultHistory
+{
+  struct Entry
+  {
+    std::uint32_t exceptionCode = 0;
+    std::uint64_t exceptionAddr = 0;
+    std::uint32_t count = 0;
+    std::uint64_t lastTick64 = 0;
+  };
+  Entry entries[kRecoveredFaultHistoryCapacity]{};
+  std::size_t nextReplace = 0;
+};
+
+constexpr void NoteRecoveredFault(
+  RecoveredFaultHistory* history,
+  std::uint32_t exceptionCode,
+  std::uint64_t exceptionAddr,
+  std::uint64_t nowTick64) noexcept
+{
+  if (!history) {
+    return;
+  }
+  for (auto& entry : history->entries) {
+    if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
+      ++entry.count;
+      entry.lastTick64 = nowTick64;
+      return;
+    }
+  }
+  for (auto& entry : history->entries) {
+    if (entry.count == 0u) {
+      entry = { exceptionCode, exceptionAddr, 1u, nowTick64 };
+      return;
+    }
+  }
+  // Full: replace in turn, so a long session keeps tracking new faults.
+  history->entries[history->nextReplace] = { exceptionCode, exceptionAddr, 1u, nowTick64 };
+  history->nextReplace = (history->nextReplace + 1u) % kRecoveredFaultHistoryCapacity;
+}
+
+// Not for a C++ throw or a breakpoint: their address is always the same
+// RaiseException / DebugBreak in KernelBase, so code and address match every
+// unrelated throw, not the same fault.
+constexpr bool IsRepeatedRecoveredFault(
+  const RecoveredFaultHistory& history,
+  std::uint32_t exceptionCode,
+  std::uint64_t exceptionAddr,
+  std::uint64_t nowTick64) noexcept
+{
+  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
+    return false;
+  }
+  for (const auto& entry : history.entries) {
+    if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
+      return entry.count >= kRepeatedRecoveredFaultMinCount && nowTick64 >= entry.lastTick64 &&
+             nowTick64 - entry.lastTick64 <= kRepeatedRecoveredFaultCooldownMs;
+    }
+  }
+  return false;
+}
+
 struct CrashCaptureState {
   bool latched = false;
+  // The heartbeat when the crash was latched
+  // (ShouldHoldHangDetectionForCapturedCrash).
+  std::uint64_t latchedHeartbeatQpc = 0;
   CrashEventInfo capturedInfo{};
   bool cleanExitEvidenceWritten = false;
   bool cleanExitEvidenceFinalized = false;
@@ -169,6 +258,17 @@ struct CrashCaptureState {
   // (DrainCrashEventBeforeExit).
   bool releasedInThreadDumpWindow = false;
   std::uint64_t releasedCrashEventFileTimeUtc = 0;
+  // The dump of a crash released on a few seconds of advancing heartbeat
+  // (FilterVerdict::kDeleteRecovered). It is kept until that release is
+  // settled, since the exit path may still report the fault
+  // (ShouldReportReleasedCrashAtExit): deleted at a zero exit, once the game
+  // outlived it (releasedDumpRecovery, as late recovery), or when a newer
+  // crash supersedes it; made the crash's dump when the fault is reported.
+  std::wstring releasedDumpPath;
+  bool releasedDumpPreserve = false;
+  LateRecoveryState releasedDumpRecovery{};
+  // Faults released as handled this session (IsRepeatedRecoveredFault).
+  RecoveredFaultHistory recoveredFaults{};
   // The crash generation whose dump could not be written, and whether the
   // game had already exited then. Its dump-failure WER hint stays at exit.
   std::uint32_t dumpWriteFailedCrashSeq = 0;
@@ -446,6 +546,53 @@ constexpr bool IsCloseOfUnresponsiveGame(
          (hangCapturedThisEpisode || (heartbeatStalled && !hangSuppressedAsResponsiveThisEpisode));
 }
 
+// A hang whose episode was still open when the game exited with code 0: the
+// game stopped answering while it shut down (a large load order can take
+// longer than the hang threshold to quit), which a frozen game that is ended
+// does not do (Task Manager, a watchdog and Windows' not-responding close all
+// give a non-zero code). Its dump stays, but its viewer is not opened.
+constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpisodeOpenAtExit) noexcept
+{
+  return exitCode == 0u && hangEpisodeOpenAtExit;
+}
+
+// The held dump of a released crash is renamed from SkyrimDiag_Crash_<ts>.dmp
+// to SkyrimDiag_Released_<ts>.dmp while it is held, so one a stopped helper
+// leaves behind is not listed as a crash (retention bounds those), and back
+// when the crash is reported after all. A path with neither prefix comes back
+// unchanged.
+inline constexpr std::wstring_view kCrashDumpPrefix = L"SkyrimDiag_Crash_";
+inline constexpr std::wstring_view kReleasedDumpPrefix = L"SkyrimDiag_Released_";
+
+inline std::wstring SwapDumpFilenamePrefix(
+  const std::filesystem::path& dumpPath,
+  std::wstring_view fromPrefix,
+  std::wstring_view toPrefix)
+{
+  const std::wstring filename = dumpPath.filename().wstring();
+  if (filename.size() <= fromPrefix.size() || filename.compare(0, fromPrefix.size(), fromPrefix) != 0) {
+    return dumpPath.wstring();
+  }
+  return (dumpPath.parent_path() / (std::wstring(toPrefix) + filename.substr(fromPrefix.size()))).wstring();
+}
+
+inline std::wstring ReleasedDumpPathFor(const std::filesystem::path& crashDumpPath)
+{
+  return SwapDumpFilenamePrefix(crashDumpPath, kCrashDumpPrefix, kReleasedDumpPrefix);
+}
+
+inline std::wstring CrashDumpPathForReleased(const std::filesystem::path& releasedDumpPath)
+{
+  return SwapDumpFilenamePrefix(releasedDumpPath, kReleasedDumpPrefix, kCrashDumpPrefix);
+}
+
+// Deletes the held dump of a released crash (releasedDumpPath), unless
+// filtered dumps are preserved, logging `reason`, and clears it.
+void DiscardReleasedCrashDump(
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState,
+  std::wstring_view reason);
+
 bool IsCleanExitEvidenceRequired(
   const skydiag::helper::HelperConfig& cfg,
   const CrashCaptureState* crashState) noexcept;
@@ -464,6 +611,14 @@ inline bool ShouldPreserveFilteredDump(
 {
   return preserveConfigured || (evidenceRequired && !evidenceWritten);
 }
+
+#ifdef _WIN32
+// Waits for the crash event or the process: WAIT_OBJECT_0 for the crash
+// event, WAIT_OBJECT_0 + 1 for the process exit (also when there is no crash
+// event), WAIT_TIMEOUT or WAIT_FAILED otherwise. The crash event wins when
+// both are signaled.
+DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noexcept;
+#endif
 
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,

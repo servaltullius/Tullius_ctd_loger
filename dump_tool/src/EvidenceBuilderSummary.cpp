@@ -68,16 +68,6 @@ bool CandidateHasResourceSupport(const ActionableCandidate& candidate)
   return LocalCandidateHasFamily(candidate, "resource_provider");
 }
 
-bool CandidateHasStandaloneCallstackSupport(const ActionableCandidate& candidate)
-{
-  return LocalCandidateHasFamily(candidate, "actionable_stack") &&
-         !LocalCandidateHasFamily(candidate, "hang_thread_group") &&
-         !LocalCandidateHasFamily(candidate, "crash_logger_frame") &&
-         !LocalCandidateHasFamily(candidate, "crash_logger_object_ref") &&
-         !LocalCandidateHasFamily(candidate, "resource_provider") &&
-         candidate.score >= 5u;
-}
-
 std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
 {
   if (r.crash_logger_direct_fault_eligible &&
@@ -342,7 +332,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const bool hasNonHookSuspect = (firstNonHookSuspect != nullptr);
   const bool topSuspectIsHookFramework = (topSuspect != nullptr) && minidump::IsKnownHookFramework(topSuspect->module_filename);
   const bool topSuspectIsSystem = (topSuspect != nullptr) &&
-    (minidump::IsSystemishModule(topSuspect->module_filename) || minidump::IsLikelyWindowsSystemModulePath(topSuspect->module_path));
+    minidump::IsSystemishModuleAt(topSuspect->module_filename, topSuspect->module_path);
   const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
   const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
   const std::wstring topCandidateConf = topCandidate && !topCandidate->confidence.empty()
@@ -362,7 +352,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     topCandidate &&
     !topCandidate->module_filename.empty() &&
     !minidump::IsKnownHookFramework(topCandidate->module_filename) &&
-    !minidump::IsSystemishModule(topCandidate->module_filename) &&
+    !DumpModuleIsSystemish(r, topCandidate->module_filename) &&
     !minidump::IsGameExeModule(topCandidate->module_filename);
 
   std::wstring who;
@@ -453,7 +443,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx);
     const bool topCandidateHasStandaloneCallstack =
       topCandidate &&
-      CandidateHasStandaloneCallstackSupport(*topCandidate);
+      CandidateHasStandaloneCallstackSupport(r, *topCandidate);
     const bool topCandidateHasFirstChanceSupport =
       topCandidate &&
       CandidateHasScorableFirstChanceSupport(r, *topCandidate);
@@ -636,7 +626,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
             (hasResourceSupport ? L" 근처 리소스를 제공한 모드도 이 후보와 맞습니다." : L"") +
             L" (신뢰도: " + topCandidateConf + L")");
-    } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(*topCandidate)) {
+    } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(r, *topCandidate)) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
         ? (L"Crash is reported in " + place + L", but Tullius callstack first points to DLL candidate " + candidateName +
@@ -664,9 +654,16 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : L"Crash Logger도 처리되지 않은 예외로 기록한 C++ 예외(0xE06D7363)로 게임이 종료되었습니다. 콜스택에서 "
           L"원인으로 볼 플러그인은 찾지 못했습니다. (신뢰도: 낮음)";
     } else if (r.exc_code == 0xE06D7363u) {
+      // With the default CrashHookMode=1 the plugin records a C++ exception only
+      // when nothing handled it (Crash Logger's report, the unhandled-exception
+      // filter or abort()), so a missing Crash Logger log is no reason to doubt it.
       summary = en
-        ? (L"Reported in " + place + L" with 0xE06D7363 (C++ exception). Could be normal throw/catch; confirm this was an actual CTD. (Confidence: Low)")
-        : (L"0xE06D7363(C++ 예외)로 " + place + L"에서 보고되었습니다. 정상 동작 중 throw/catch일 수도 있어 실제 CTD 여부 확인이 필요합니다. (신뢰도: 낮음)");
+        ? (L"Reported in " + place + L" with 0xE06D7363 (C++ exception). With the default CrashHookMode=1 a C++ exception "
+           L"is recorded only when nothing handled it (Crash Logger's report, the unhandled-exception filter, or abort()), so "
+           L"this usually ended the game; the call stack shows no plugin to suspect. (Confidence: Low)")
+        : (L"0xE06D7363(C++ 예외)로 " + place + L"에서 보고되었습니다. 기본값 CrashHookMode=1에서는 어디에서도 처리되지 "
+           L"않은 C++ 예외만(Crash Logger 보고, 처리되지 않은 예외 필터, abort()) 기록되므로 대개 이 예외로 게임이 "
+           L"종료된 것입니다. 다만 콜스택에서 원인으로 볼 플러그인은 찾지 못했습니다. (신뢰도: 낮음)");
     } else if (!ctx.externalSoftware.empty()) {
       summary = en
         ? (L"Crash is reported in " + place + L", a program outside the game and its mods. Update or reinstall it, or "
@@ -727,7 +724,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
-      if (CandidateHasStandaloneCallstackSupport(*topCandidate)) {
+      if (CandidateHasStandaloneCallstackSupport(r, *topCandidate)) {
         summary = en
           ? (L"Crash is reported in the game executable. Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")

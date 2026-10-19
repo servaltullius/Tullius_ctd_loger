@@ -10,6 +10,7 @@
 #include <string>
 
 #include "CaptureCommon.h"
+#include "CrashCapture.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -134,17 +135,24 @@ HangTickResult HandleHangTick(
 
   // Avoid generating hang dumps during normal shutdown or transient stalls:
   // Re-check after a short grace period. If the process exits or heartbeats recover, skip capture.
+  // A crash published meanwhile, or the process exit, is left to the helper
+  // loop's next iteration: the crash capture comes first, and the exit tick
+  // drains the crash record, classifies the exit and opens deferred viewers.
   if (proc.process) {
-    const DWORD w = WaitForSingleObject(proc.process, 1500);
-    if (w == WAIT_OBJECT_0) {
+    const DWORD w = WaitForCrashOrProcess(proc.crashEvent, proc.process, 1500);
+    if (w == WAIT_OBJECT_0 && proc.crashEvent) {
+      AppendLogLine(outBase, L"Hang detected but a crash event arrived during the grace period; handling the crash first.");
+      return HangTickResult::kContinue;
+    }
+    if (w == WAIT_OBJECT_0 + 1u) {
       AppendLogLine(outBase, L"Hang detected but target process exited during grace period; skipping hang dump.");
-      return HangTickResult::kBreak;
+      return HangTickResult::kContinue;
     }
     if (w == WAIT_FAILED) {
       const DWORD le = GetLastError();
-      std::wcerr << L"[SkyrimDiagHelper] Target process wait failed (err=" << le << L").\n";
-      AppendLogLine(outBase, L"Target process wait failed: " + std::to_wstring(le));
-      return HangTickResult::kBreak;
+      std::wcerr << L"[SkyrimDiagHelper] Hang grace wait failed (err=" << le << L").\n";
+      AppendLogLine(outBase, L"Hang grace wait failed: " + std::to_wstring(le) + L"; skipping hang dump this tick.");
+      return HangTickResult::kContinue;
     }
   }
 
@@ -179,6 +187,13 @@ HangTickResult HandleHangTick(
         static_cast<std::uint64_t>(now2.QuadPart),
         /*confirmedPhase=*/true,
         state)) {
+    return HangTickResult::kContinue;
+  }
+
+  // The suppression check above can take a moment (a window probe); a crash
+  // published by then is captured first.
+  if (proc.crashEvent && WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0) {
+    AppendLogLine(outBase, L"Hang confirmed but a crash event arrived; handling the crash first.");
     return HangTickResult::kContinue;
   }
 

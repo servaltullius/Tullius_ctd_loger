@@ -148,6 +148,20 @@ def check_clang_tidy_is_wired(failures: list[str]) -> None:
             failures.append(
                 f"{name} does not export the Windows compile database"
             )
+        # WarningsAsErrors with the runner image's unpinned LLVM: a new major
+        # must stop with a version message, not with unexplained new findings.
+        if re.search(r"scripts/run_clang_tidy\.py[^\n]*--expect-major \d+", caller) is None:
+            failures.append(f"{name} must pass --expect-major to the Windows clang-tidy runner")
+
+    runner = _load_script("run_clang_tidy.py")
+    for output, expected in (
+        ("LLVM (http://llvm.org/):\n  LLVM version 20.1.8\n  Optimized build.\n", 20),
+        ("Ubuntu LLVM version 18.1.3\n", 18),
+        ("not clang-tidy\n", 0),
+    ):
+        got = runner.parse_llvm_major_version(output)
+        if got != expected:
+            failures.append(f"run_clang_tidy.py parsed LLVM major {got} from {output!r}, expected {expected}")
 
 
 def check_clang_tidy_rejects_test_only_entries(failures: list[str]) -> None:
@@ -421,14 +435,24 @@ def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
     # A third-party action moved by its owner, or vcpkg master moving on,
     # changes the build without a commit here; a hung step otherwise holds a
     # runner for the 6-hour default.
+    # GitHub's own actions too: a tag can be moved, a commit cannot.
     for path in sorted(WORKFLOWS.glob("*.yml")):
         text = _read(path)
         for match in re.finditer(r"uses:\s*([^\s#]+)@([^\s#]+)", text):
             action, ref = match.groups()
-            if action.startswith(("actions/", "./")):
+            if action.startswith("./"):
                 continue
             if re.fullmatch(r"[0-9a-f]{40}", ref) is None:
                 failures.append(f"{path.name}: {action} must be pinned to a commit SHA, not {ref}")
+        # The token stays out of .git/config for the rest of the job, where
+        # every build script and action could read it.
+        for match in re.finditer(r"uses:\s*actions/checkout@[^\n]*\n((?:[ \t]{8,}[^\n]*\n)*)", text):
+            if not re.search(r"^\s+persist-credentials:\s*false\s*$", match.group(1), re.M):
+                failures.append(f"{path.name}: every checkout must set persist-credentials: false")
+        # The ports' ABI includes the overlay triplet (cmake/triplets), so the
+        # cache key must change with it or stale archives are never replaced.
+        if "vcpkg/archives" in text and "cmake/triplets/" not in text:
+            failures.append(f"{path.name}: the vcpkg binary cache key must hash cmake/triplets")
         for job, body in _job_blocks(text).items():
             if re.search(r"^    runs-on:", body, re.M) and not re.search(r"^    timeout-minutes:\s*\d+", body, re.M):
                 failures.append(f"{path.name}: job {job} needs a job-level timeout-minutes")
@@ -438,6 +462,44 @@ def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
         if "git clone https://github.com/microsoft/vcpkg" in text:
             if "'default-registry'.baseline" not in text or "checkout --quiet --detach $baseline" not in text:
                 failures.append(f"{path.name}: the vcpkg clone must be checked out at the manifest baseline")
+
+
+def check_release_job_hardening(failures: list[str]) -> None:
+    text = _read(WORKFLOWS / "release.yml")
+    jobs = _job_blocks(text)
+    header = text.split("\njobs:", 1)[0]
+    if re.search(r"^permissions:\s*\n\s+contents:\s*read\s*$", header, re.M) is None:
+        failures.append("release.yml must default the token to contents: read")
+    for name, body in jobs.items():
+        writes = re.search(r"^\s+contents:\s*write\b", body, re.M) is not None
+        if writes != (name == "release"):
+            failures.append(f"release.yml: only the release job may have contents: write (job {name})")
+
+    release = jobs.get("release", "")
+    # pwsh only fails a step on its last command's exit code.
+    if re.search(
+        r"python scripts/verify_release_zip\.py[^\n]*(?:\n[^\n]*`[ \t]*)*\n[^\n]*\n[ \t]*if \(\$LASTEXITCODE -ne 0\) \{ throw",
+        release,
+    ) is None:
+        failures.append("release.yml must fail the readback when verify_release_zip.py fails")
+
+    # The zip ships without PDBs; the shipped binaries' PDBs are kept as an
+    # artifact of the release run.
+    if "--no-pdb" not in release:
+        failures.append("release.yml must package the zip without PDBs")
+    upload = re.search(r"uses: actions/upload-artifact@[^\n]*\n((?:[ \t]{8,}[^\n]*\n)*)", release)
+    if upload is None:
+        failures.append("release.yml must upload the PDBs of the shipped binaries")
+    else:
+        for pdb in (
+            "SkyrimDiag.pdb",
+            "SkyrimDiagHelper.pdb",
+            "SkyrimDiagDumpToolNative.pdb",
+            "SkyrimDiagDumpToolCli.pdb",
+            "SkyrimDiagDumpToolWinUI.pdb",
+        ):
+            if f"build-win/bin/{pdb}" not in upload.group(1):
+                failures.append(f"release.yml symbol artifact is missing {pdb}")
 
 
 def check_dump_stress_repeats_only_after_a_build(failures: list[str]) -> None:
@@ -547,6 +609,21 @@ def check_docs_only_detector_behaviour(failures: list[str]) -> None:
                 failures.append(f"docs-only detector, {name}: expected code={expected}, got {got!r}")
 
 
+def check_vcpkg_overlay_reaches_existing_build_dirs(failures: list[str]) -> None:
+    # The vcpkg toolchain caches VCPKG_OVERLAY_TRIPLETS, empty when nothing set
+    # it, so a build folder configured before the overlay existed only gets it
+    # when the top-level CMakeLists.txt appends it and forces the cache value.
+    text = _read(REPO_ROOT / "CMakeLists.txt")
+    if "if(NOT DEFINED VCPKG_OVERLAY_TRIPLETS)" in text:
+        failures.append("CMakeLists.txt must not skip the triplet overlay when the toolchain cached the variable")
+    if "IN_LIST VCPKG_OVERLAY_TRIPLETS" not in text or not re.search(
+        r'set\(VCPKG_OVERLAY_TRIPLETS "\$\{VCPKG_OVERLAY_TRIPLETS\}" CACHE STRING "" FORCE\)', text
+    ):
+        failures.append("CMakeLists.txt must append the triplet overlay when missing and force the cache value")
+    if text.find("VCPKG_OVERLAY_TRIPLETS") > text.find("project("):
+        failures.append("CMakeLists.txt must set the triplet overlay before project()")
+
+
 def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
@@ -562,7 +639,9 @@ def main() -> int:
     check_dump_stress_repeats_only_after_a_build(failures)
     check_pull_request_tidy_scope(failures)
     check_compiler_cache_is_ci_only(failures)
+    check_vcpkg_overlay_reaches_existing_build_dirs(failures)
     check_workflows_are_pinned_and_bounded(failures)
+    check_release_job_hardening(failures)
 
     if failures:
         for failure in failures:

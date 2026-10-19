@@ -84,7 +84,9 @@ std::wstring RedactPathValue(std::wstring_view path)
 
 std::optional<std::wstring> TryExtractTimestampTokenW(std::wstring_view s)
 {
-  // Search for pattern: YYYYMMDD_HHMMSS (15 chars)
+  // Search for pattern: YYYYMMDD_HHMMSS (15 chars), plus the precision suffix
+  // the helper has written since 2026-02 (YYYYMMDD_HHMMSS_mmm): the same
+  // token rule as the helper's retention (Retention.h TryExtractTimestampToken).
   auto is_digits = [](std::wstring_view v) {
     for (const wchar_t c : v) {
       if (!std::iswdigit(c)) {
@@ -107,7 +109,18 @@ std::optional<std::wstring> TryExtractTimestampTokenW(std::wstring_view s)
     if (!is_digits(time)) {
       continue;
     }
-    best = std::wstring(s.substr(i, 15));
+    std::size_t tokenLen = 15;
+    const std::size_t suffixSep = i + tokenLen;
+    if (suffixSep < s.size() && s[suffixSep] == L'_') {
+      std::size_t suffixEnd = suffixSep + 1;
+      while (suffixEnd < s.size() && std::iswdigit(s[suffixEnd])) {
+        suffixEnd++;
+      }
+      if (suffixEnd > suffixSep + 1) {
+        tokenLen = suffixEnd - i;
+      }
+    }
+    best = std::wstring(s.substr(i, tokenLen));
   }
   return best;
 }
@@ -415,17 +428,68 @@ std::wstring MaybeRedactPath(std::wstring_view path, bool redactPaths)
   return RedactPathValue(path);
 }
 
-std::wstring ReplaceAll(std::wstring text, std::wstring_view from, std::wstring_view to)
+std::wstring RedactSymbolSearchPath(std::wstring_view searchPath, bool redactPaths)
 {
-  if (text.empty() || from.empty()) {
-    return text;
+  if (!redactPaths || searchPath.empty()) {
+    return std::wstring(searchPath);
   }
-  std::size_t pos = 0;
-  while ((pos = text.find(from, pos)) != std::wstring::npos) {
-    text.replace(pos, from.size(), to);
-    pos += to.size();
+  // A DbgHelp search path is ';'-separated elements, each a directory or a
+  // "srv*<cache>*<url>" / "cache*<dir>" chain. It may come from
+  // _NT_SYMBOL_PATH or SKYRIMDIAG_SYMBOL_PATH, so redact every absolute
+  // directory in it, not only the cache directory this tool picked.
+  std::wstring out;
+  out.reserve(searchPath.size());
+  std::size_t start = 0;
+  for (;;) {
+    const std::size_t sep = searchPath.find_first_of(L";*", start);
+    const std::size_t stop = sep == std::wstring_view::npos ? searchPath.size() : sep;
+    const std::wstring_view element = searchPath.substr(start, stop - start);
+    std::size_t lead = 0;
+    while (lead < element.size() && (element[lead] == L' ' || element[lead] == L'\t')) {
+      ++lead;
+    }
+    out.append(element.substr(0, lead));
+    out += MaybeRedactPath(element.substr(lead), true);
+    if (sep == std::wstring_view::npos) {
+      break;
+    }
+    out.push_back(searchPath[sep]);
+    start = sep + 1;
   }
-  return text;
+  return out;
+}
+
+void RedactAbsolutePathStrings(nlohmann::json* value)
+{
+  if (!value) {
+    return;
+  }
+  if (value->is_string()) {
+    const std::wstring text = Utf8ToWide(value->get_ref<const std::string&>());
+    if (LooksLikeAbsolutePath(text)) {
+      *value = WideToUtf8(RedactPathValue(text));
+    }
+    return;
+  }
+  if (value->is_array() || value->is_object()) {
+    for (auto& child : *value) {
+      RedactAbsolutePathStrings(&child);
+    }
+  }
+}
+
+std::string TruncateUtf8(std::string_view text, std::size_t maxBytes)
+{
+  if (text.size() <= maxBytes) {
+    return std::string(text);
+  }
+  std::size_t cut = maxBytes;
+  // Back up over continuation bytes (10xxxxxx) so the cut never splits a
+  // code point.
+  while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0u) == 0x80u) {
+    --cut;
+  }
+  return std::string(text.substr(0, cut));
 }
 
 std::filesystem::path DefaultOutDirForDump(const std::filesystem::path& dumpPath)

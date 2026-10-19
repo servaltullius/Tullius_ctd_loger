@@ -11,6 +11,7 @@ public sealed partial class MainWindow : Window
     private readonly DumpToolInvocationOptions _startupOptions;
     private readonly MainWindowViewModel _vm;
     private DumpDiscoveryState _dumpDiscoveryState = DumpDiscoveryStore.Load();
+    private int _dumpDiscoveryGeneration;
     private enum LayoutTier { Wide, Compact, Narrow }
     private LayoutTier _currentLayoutTier = (LayoutTier)(-1);
     private CancellationTokenSource? _analysisCts;
@@ -75,7 +76,9 @@ public sealed partial class MainWindow : Window
             _ = RunUiEventAsync(
                 async () =>
                 {
-                    await RefreshDiscoveredDumpsAsync();
+                    // Not awaited: an offline registered folder must not hold
+                    // back the analysis of the dump the helper opened us for.
+                    _ = RefreshDiscoveredDumpsAsync();
                     if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
                     {
                         await AnalyzeAsync(preferExistingArtifacts: true);
@@ -114,6 +117,17 @@ public sealed partial class MainWindow : Window
                     $"original={ex.GetType().Name}: {ex.Message}");
             }
         }
+    }
+
+    // A result that arrives in the background (a review saved, a dump scan)
+    // replaces the status only while it still shows what was there when the
+    // operation started; otherwise an analysis status or failure set meanwhile
+    // stays, and the result is added on a new line.
+    private void ShowBackgroundStatus(string statusAtStart, string message)
+    {
+        StatusText.Text = string.Equals(StatusText.Text, statusAtStart, StringComparison.Ordinal)
+            ? message
+            : StatusText.Text + Environment.NewLine + message;
     }
 
     private void SetBusy(bool isBusy, string message)

@@ -3,10 +3,13 @@
 #include <ShlObj.h>
 
 #include <algorithm>
+#include <climits>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
@@ -15,6 +18,7 @@
 #include "SkyrimDiagStringUtil.h"
 
 #include "CrashCapture.h"
+#include "HelperCommon.h"
 #include "HelperLog.h"
 #include "ManualCaptureKeyWatcher.h"
 
@@ -151,7 +155,7 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   return result;
 }
 
-void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
+void InitializeLoopState(const AttachedProcess& proc, const std::filesystem::path& outBase, HelperLoopState* state)
 {
   if (!state) {
     return;
@@ -169,7 +173,8 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
   // clears it. So a committed generation with Frozen clear was already ACKed
   // by an earlier helper that the plugin's watchdog replaced: released as
   // handled, or (indistinguishable here) its dump could not be written. It
-  // is not reported again at exit. A generation still Frozen stays reportable.
+  // is not reported again at exit. A generation still Frozen stays reportable,
+  // and is handled again while the game runs (RearmFrozenCrashFromEarlierHelper).
   CrashEventInfo committed{};
   if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
       (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
@@ -178,6 +183,100 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
     state->crashCaptured.releasedOnBriefHeartbeat = false;
     state->crashCaptured.releasedInThreadDumpWindow = false;
   }
+  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc, outBase);
+}
+
+std::wstring FrozenCrashRearmMarkerPrefix(const AttachedProcess& proc)
+{
+  // The game's creation time keeps a later process that reuses the pid from
+  // matching an old marker.
+  FILETIME created{};
+  FILETIME unusedExit{};
+  FILETIME unusedKernel{};
+  FILETIME unusedUser{};
+  std::uint64_t createdUtc = 0;
+  if (proc.process && GetProcessTimes(proc.process, &created, &unusedExit, &unusedKernel, &unusedUser)) {
+    createdUtc = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+  }
+  return std::wstring(kFrozenCrashRearmMarkerPrefix) + std::to_wstring(proc.pid) + L"_" + std::to_wstring(createdUtc) +
+    L"_";
+}
+
+void RemoveFrozenCrashRearmMarkers(const AttachedProcess& proc, const std::filesystem::path& outBase)
+{
+  if (outBase.empty()) {
+    return;
+  }
+  const std::wstring prefix = FrozenCrashRearmMarkerPrefix(proc);
+  std::error_code iterEc;
+  for (std::filesystem::directory_iterator it(outBase, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+    const std::wstring name = it->path().filename().wstring();
+    if (name.rfind(prefix, 0) == 0) {
+      std::error_code ec;
+      std::filesystem::remove(it->path(), ec);
+    }
+  }
+}
+
+std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, const std::filesystem::path& outBase)
+{
+  if (!proc.crashEvent || !proc.process || WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
+    return 0u;  // an exited game's record is drained by the exit path
+  }
+  CrashEventInfo committed{};
+  if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) ||
+      (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    return 0u;
+  }
+
+  // A helper that dies on this crash every time (an antivirus killing it
+  // during MiniDumpWriteDump, a helper bug) would be restarted by the
+  // plugin's watchdog and signaled again forever, the game stuttering at each
+  // dump attempt. So a generation is signaled again only once, remembered in
+  // a marker file across helper restarts. The next time it is thawed instead,
+  // so the plugin records a later crash again. Without a marker there is no
+  // bound, so a marker that cannot be written also thaws: the dump would go
+  // to the same folder.
+  const auto marker = outBase / (FrozenCrashRearmMarkerPrefix(proc) + std::to_wstring(committed.crashSeq) + L".marker");
+  std::error_code existsEc;
+  const bool alreadyRearmed = std::filesystem::exists(marker, existsEc) || existsEc;
+  if (alreadyRearmed || !WriteTextFileUtf8(marker, "rearmed\n")) {
+    const bool thawed = proc.shmWritable && TryClearRecoveredCrashFreeze(proc.shmWritable, committed.crashSeq);
+    AppendLogLine(
+      outBase,
+      L"Committed crash_seq=" + std::to_wstring(committed.crashSeq)
+        + (alreadyRearmed
+             ? L" is still frozen after its crash event was already signaled again once for an earlier helper, "
+               L"which did not finish it either; not signaling it again"
+             : L" is still frozen with no helper handling it, but its rearm marker could not be written; not "
+               L"signaling it again")
+        + (thawed ? L". Thawed capture so a later CTD can still be recorded."
+                  : L" (capture not thawed: a newer crash record is present)."));
+    return 0u;
+  }
+  return SetEvent(proc.crashEvent) ? committed.crashSeq : 0u;
+}
+
+std::filesystem::path DecodeCrashLoggerIniPath(const std::string& bytes)
+{
+  if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX)) {
+    return {};
+  }
+  const int size = static_cast<int>(bytes.size());
+  // Crash Logger reads the file as UTF-8; an editor may have saved it in the
+  // ANSI code page instead (e.g. CP949). MB_ERR_INVALID_CHARS makes a code
+  // page that does not fit fail rather than guess.
+  for (const UINT codePage : { static_cast<UINT>(CP_UTF8), static_cast<UINT>(CP_ACP) }) {
+    const int needed = MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS, bytes.data(), size, nullptr, 0);
+    if (needed <= 0) {
+      continue;
+    }
+    std::wstring wide(static_cast<std::size_t>(needed), L'\0');
+    if (MultiByteToWideChar(codePage, MB_ERR_INVALID_CHARS, bytes.data(), size, wide.data(), needed) == needed) {
+      return std::filesystem::path(std::move(wide));
+    }
+  }
+  return {};
 }
 
 std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc)
@@ -195,9 +294,10 @@ std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig&
   }
   // A Crashlog Directory set in CrashLogger.ini, relative to the game's
   // folder (its working directory) unless absolute; it may not exist yet.
-  if (!crashLogger.crashlogDirectory.empty()) {
-    const std::filesystem::path custom(std::u8string(
-      crashLogger.crashlogDirectory.begin(), crashLogger.crashlogDirectory.end()));
+  // A value that decodes neither as UTF-8 nor in the ANSI code page is
+  // skipped (a path built from invalid UTF-8 throws).
+  const std::filesystem::path custom = DecodeCrashLoggerIniPath(crashLogger.crashlogDirectory);
+  if (!custom.empty()) {
     dirs.push_back(custom.is_relative() ? gameExeDir / custom : custom);
   }
   // And the SKSE log folder it uses by default, Documents\My Games\<game
@@ -262,7 +362,7 @@ void RegisterManualCaptureHotkeyIfEnabled(
   const ManualCaptureHotkey& hotkey = cfg.manualCaptureHotkey;
   const std::wstring chord = FormatManualCaptureHotkey(hotkey);
   ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);
-  if (!RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)) {
+  if (!RegisterHotKey(nullptr, kHotkeyId, ManualCaptureHotkeyRegistrationModifiers(hotkey), hotkey.virtualKey)) {
     const DWORD le = GetLastError();
     std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(" << chord << L") failed: " << le << L"\n";
     AppendLogLine(outBase, L"Warning: RegisterHotKey(" + chord + L") failed: " + std::to_wstring(le) +
