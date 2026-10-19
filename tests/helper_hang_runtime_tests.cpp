@@ -288,11 +288,7 @@ void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
     }
   }
 
-  if (!skydiag::tests::runtime::CloseDialogAndWait(kTitle)) {
-    dialogThread.detach();
-    Require(false, "Test MessageBox did not close");
-  }
-  dialogThread.join();
+  Require(skydiag::tests::runtime::CloseDialogAndJoin(dialogThread, kTitle), "Test MessageBox did not close");
 
   Require(found != nullptr, "Visible MessageBox owned by this process must be captured");
   Require(found->tid == dialogTid, "Captured dialog must report the thread that pumps it");

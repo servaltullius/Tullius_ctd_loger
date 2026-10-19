@@ -82,11 +82,8 @@ void TestModalDialogHangIsClassifiedAndAttributedToDialogCaller()
     ExecuteConfirmedHangCapture(MakeTestConfig(), proc, outBase, decision, 0u, &pendingViewer, &state);
   }
 
-  if (!skydiag::tests::runtime::CloseDialogAndWait(kDialogTitle)) {
-    dialogThread.detach();
-    Require(false, "Test MessageBox did not close");
-  }
-  dialogThread.join();
+  Require(
+    skydiag::tests::runtime::CloseDialogAndJoin(dialogThread, kDialogTitle), "Test MessageBox did not close");
   ShutdownRetentionWorker();
   CloseAttachedProcess(&proc);
 
