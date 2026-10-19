@@ -188,6 +188,20 @@ if(WIN32)
     COMMAND skydiag_external_software_tests
   )
 
+  add_executable(skydiag_evidence_interpretation_tests
+    evidence_interpretation_tests.cpp
+  )
+  target_include_directories(skydiag_evidence_interpretation_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_evidence_interpretation_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_evidence_interpretation_tests
+    COMMAND skydiag_evidence_interpretation_tests
+  )
+
   add_executable(skydiag_non_ascii_path_tests
     non_ascii_path_tests.cpp
   )
