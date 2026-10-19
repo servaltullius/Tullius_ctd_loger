@@ -158,9 +158,9 @@ bool ParseRuleCondition(const nlohmann::json& cond, RuleCondition* rule)
         return false;
       }
       if (key == "esl_count_gte") {
-        rule->esl_count_gte = *count;
+        rule->esl_count_gte = count;
       } else {
-        rule->full_plugin_count_gte = *count;
+        rule->full_plugin_count_gte = count;
       }
     } else {
       return false;
