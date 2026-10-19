@@ -79,14 +79,33 @@ PssSnapshotAttempt TryCapturePssSnapshotForFreeze(bool enabled, HANDLE process)
   }
 
   result.apiAvailable = true;
+
+  // PSS_CAPTURE_VA_CLONE needs PROCESS_CREATE_PROCESS, which the attach
+  // handle does not hold (and does not otherwise need), so the capture uses
+  // a handle of its own. The target is still running (a hang), so its pid
+  // still names it.
+  if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) {
+    result.status = L"target_process_not_running";
+    return result;
+  }
+  HANDLE captureProcess = OpenProcess(
+    PROCESS_CREATE_PROCESS | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE | SYNCHRONIZE,
+    FALSE,
+    GetProcessId(process));
+  if (!captureProcess) {
+    result.status = L"OpenProcess(PROCESS_CREATE_PROCESS) failed: " + std::to_wstring(GetLastError());
+    return result;
+  }
+
   HPSS snapshot = nullptr;
   const ULONGLONG startTick = GetTickCount64();
   const DWORD status = api.capture(
-    process,
+    captureProcess,
     kFreezeSnapshotFlags,
     CONTEXT_ALL,
     &snapshot);
   result.captureDurationMs = static_cast<std::uint32_t>(GetTickCount64() - startTick);
+  CloseHandle(captureProcess);
 
   if (status != ERROR_SUCCESS || !snapshot) {
     result.status = L"PssCaptureSnapshot failed: " + std::to_wstring(status);

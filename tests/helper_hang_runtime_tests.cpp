@@ -17,7 +17,10 @@
 #include "HelperLog.h"
 #include "HelperMainInternal.h"
 #include "HelperRuntimeTestUtils.h"
+#include "PssSnapshot.h"
 #include "RetentionWorker.h"
+#include "SkyrimDiagHelper/DumpProfile.h"
+#include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ModalDialogProbe.h"
@@ -532,6 +535,42 @@ void TestHandleHangTick_YieldsToACrashEvent()
   std::filesystem::remove_all(outBase);
 }
 
+// PSS_CAPTURE_VA_CLONE needs PROCESS_CREATE_PROCESS, which the helper's attach
+// handle does not have; the opt-in freeze snapshot failed every time with it.
+void TestPssSnapshotWorksFromTheAttachHandle()
+{
+  const auto outBase = MakeTempDir(L"skydiag_pss_snapshot");
+  const HANDLE process = OpenSelfProcessHandle();  // the attach handle's rights
+  auto snapshot = skydiag::helper::internal::TryCapturePssSnapshotForFreeze(true, process);
+  if (!snapshot.used) {
+    std::fwprintf(stderr, L"PSS status: %ls\n", snapshot.status.c_str());
+  }
+  Require(snapshot.used && snapshot.snapshotHandle != nullptr, "the freeze snapshot is captured");
+
+  auto shared = MakeSharedLayout();
+  std::wstring err;
+  const auto dumpPath = (outBase / L"SkyrimDiag_Hang_pss.dmp").wstring();
+  const bool written = skydiag::helper::WriteDumpWithStreams(
+    snapshot.snapshotHandle,
+    GetCurrentProcessId(),
+    dumpPath,
+    shared.get(),
+    sizeof(skydiag::SharedLayout),
+    "{}",
+    {},
+    /*isCrash=*/false,
+    skydiag::helper::ResolveDumpProfile(skydiag::helper::DumpMode::kMini, skydiag::helper::CaptureKind::Hang),
+    /*isProcessSnapshot=*/true,
+    &err);
+  skydiag::helper::internal::ReleasePssSnapshotForFreeze(process, snapshot.snapshotHandle);
+  CloseHandle(process);
+  if (!written) {
+    std::fwprintf(stderr, L"snapshot dump: %ls\n", err.c_str());
+  }
+  Require(written && std::filesystem::file_size(dumpPath) > 0u, "the hang dump is written from the snapshot");
+  std::filesystem::remove_all(outBase);
+}
+
 // The helper loop end to end: the game exits during the hang grace wait, and
 // the loop still reaches its exit handling.
 void TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait()
@@ -613,6 +652,7 @@ int main()
     TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode();
     TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick();
     TestHandleHangTick_YieldsToACrashEvent();
+    TestPssSnapshotWorksFromTheAttachHandle();
     TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait();
     TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame();
     TestLoadStatsAtomicSaveFailurePreservesExistingState();
