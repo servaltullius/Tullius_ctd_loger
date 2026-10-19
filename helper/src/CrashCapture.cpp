@@ -369,6 +369,8 @@ bool HasNewerCrashRecord(
   return current != 0u && current != expectedCrashSeq;
 }
 
+}  // namespace
+
 DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noexcept
 {
   if (crashEvent && process) {
@@ -387,6 +389,8 @@ DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noe
   }
   return WAIT_FAILED;
 }
+
+namespace {
 
 // Reads the exit code, reporting whether it is trustworthy. A failed query used
 // to leave the STILL_ACTIVE initializer in place, which reads as a non-zero
@@ -1371,6 +1375,7 @@ bool HandleCrashEventTick(
   if (crashState) {
     crashState->latched = ShouldLatchCrashCapture(verdict);
     if (crashState->latched && proc.shm) {
+      crashState->latchedHeartbeatQpc = proc.shm->header.last_heartbeat_qpc;
       StartLateRecovery(&crashState->lateRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc);
     }
   }

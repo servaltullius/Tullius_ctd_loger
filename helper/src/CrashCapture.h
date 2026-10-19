@@ -142,8 +142,25 @@ constexpr bool IsLikelyCrashLoggerThreadDumpFault(
 // for the check above.
 void NoteCrashLoggerThreadDumpHotkeyPressed(std::uint64_t tick64) noexcept;
 
+// By the time a crash is latched the heartbeat has usually stopped for about
+// a hang threshold already (the filters' waits, the dump), and a game that is
+// still in its crash keeps it stopped. That is the captured crash, not a
+// second incident: hang detection waits until the heartbeat moves past where
+// it was when the crash was latched. A real freeze after an exception that
+// was handled after all is still detected, since the heartbeat moved first.
+constexpr bool ShouldHoldHangDetectionForCapturedCrash(
+  bool latched,
+  std::uint64_t latchedHeartbeatQpc,
+  std::uint64_t heartbeatQpc) noexcept
+{
+  return latched && heartbeatQpc <= latchedHeartbeatQpc;
+}
+
 struct CrashCaptureState {
   bool latched = false;
+  // The heartbeat when the crash was latched
+  // (ShouldHoldHangDetectionForCapturedCrash).
+  std::uint64_t latchedHeartbeatQpc = 0;
   CrashEventInfo capturedInfo{};
   bool cleanExitEvidenceWritten = false;
   bool cleanExitEvidenceFinalized = false;
@@ -464,6 +481,14 @@ inline bool ShouldPreserveFilteredDump(
 {
   return preserveConfigured || (evidenceRequired && !evidenceWritten);
 }
+
+#ifdef _WIN32
+// Waits for the crash event or the process: WAIT_OBJECT_0 for the crash
+// event, WAIT_OBJECT_0 + 1 for the process exit (also when there is no crash
+// event), WAIT_TIMEOUT or WAIT_FAILED otherwise. The crash event wins when
+// both are signaled.
+DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noexcept;
+#endif
 
 bool HandleCrashEventTick(
   const skydiag::helper::HelperConfig& cfg,

@@ -177,6 +177,12 @@ void RunHelperLoop(
           &state->pendingCrashViewerDumpPath)) {
       continue;
     }
+    if (proc.shm && ShouldHoldHangDetectionForCapturedCrash(
+                      state->crashCaptured.latched,
+                      state->crashCaptured.latchedHeartbeatQpc,
+                      proc.shm->header.last_heartbeat_qpc)) {
+      continue;
+    }
     if (HandleHangTick(
           cfg,
           proc,

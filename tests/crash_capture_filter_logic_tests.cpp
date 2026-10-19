@@ -92,6 +92,18 @@ static_assert(
   ShouldReportReleasedCrashAtExit(0xE06D7363u, 0xE06D7363u, true, true, 100'000u, 107'000u),
   "its own code, also after a freeze");
 
+// A latched crash holds hang detection until the heartbeat moves past where
+// it was at the latch (latched, latchedHeartbeatQpc, heartbeatQpc).
+static_assert(
+  skydiag::helper::internal::ShouldHoldHangDetectionForCapturedCrash(true, 500u, 500u),
+  "the game is still in its crash");
+static_assert(
+  !skydiag::helper::internal::ShouldHoldHangDetectionForCapturedCrash(true, 500u, 501u),
+  "the heartbeat moved: a freeze from here on is a new incident");
+static_assert(
+  !skydiag::helper::internal::ShouldHoldHangDetectionForCapturedCrash(false, 500u, 500u),
+  "no crash captured");
+
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {
   const auto info = BuildCrashEventInfo(0u, 0u, 0u, 0u);
