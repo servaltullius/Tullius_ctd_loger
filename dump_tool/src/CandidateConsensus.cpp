@@ -195,6 +195,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.score += weight;
   }
   std::sort(candidate.supporting_families.begin(), candidate.supporting_families.end());
+  candidate.stack_weight = FamilyWeight(*row, kFamilyStack);
   candidate.family_count = static_cast<std::uint32_t>(candidate.supporting_families.size());
   const std::wstring fallbackLabel = candidate.display_name;
   candidate.primary_identifier = PickDisplayName(candidate);
@@ -204,7 +205,6 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasCrashLoggerFrame = HasFamily(candidate, kFamilyCrashLoggerFrame);
   const bool hasCrashLoggerObjectRef = HasFamily(candidate, kFamilyCrashLoggerObjectRef);
   const bool hasStack = HasFamily(candidate, kFamilyStack);
-  const bool hasResource = HasFamily(candidate, kFamilyResource);
   const bool hasModalDialogOwner = HasFamily(candidate, kFamilyModalDialogOwner);
   const bool hasHookStubOwner = HasFamily(candidate, kFamilyHookStubOwner);
   const bool conflict = candidate.has_conflict;
@@ -278,7 +278,10 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     candidate.status_id = "reference_clue";
     candidate.confidence_level = i18n::ConfidenceLevel::kLow;
     candidate.cross_validated = false;
-  } else if (hasStack || hasResource) {
+  } else if (hasStack) {
+    // Resource ownership alone is timeline context (IsBoostOnlyFamily): with
+    // only history next to it, it would keep naming the same texture pack in
+    // every later crash of the bucket after one entry in history.
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kLow;
     candidate.cross_validated = false;
@@ -293,10 +296,12 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
 
 bool IsStandaloneCandidateAllowed(const ActionableCandidate& candidate)
 {
-  if (candidate.supporting_families.empty()) {
-    return false;
-  }
-  if (candidate.supporting_families.size() == 1 && IsBoostOnlyFamily(candidate.supporting_families.front())) {
+  // Boost-only families (history, resource provider) only reinforce: two of
+  // them together are still no execution evidence.
+  const bool hasNonBoostFamily = std::any_of(
+    candidate.supporting_families.begin(), candidate.supporting_families.end(),
+    [](const std::string& familyId) { return !IsBoostOnlyFamily(familyId); });
+  if (!hasNonBoostFamily) {
     return false;
   }
   return !candidate.status_id.empty();

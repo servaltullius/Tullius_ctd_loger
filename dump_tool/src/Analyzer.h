@@ -71,6 +71,9 @@ struct ActionableCandidate
   std::vector<std::string> supporting_families;
   std::vector<std::string> conflicting_families;
   std::uint32_t score = 0;
+  // Weight of the actionable_stack family alone (0 without it); score also
+  // counts history and first-chance context.
+  std::uint32_t stack_weight = 0;
   std::uint32_t family_count = 0;
   bool cross_validated = false;
   bool has_conflict = false;

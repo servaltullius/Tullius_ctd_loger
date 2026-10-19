@@ -68,16 +68,6 @@ bool CandidateHasResourceSupport(const ActionableCandidate& candidate)
   return LocalCandidateHasFamily(candidate, "resource_provider");
 }
 
-bool CandidateHasStandaloneCallstackSupport(const ActionableCandidate& candidate)
-{
-  return LocalCandidateHasFamily(candidate, "actionable_stack") &&
-         !LocalCandidateHasFamily(candidate, "hang_thread_group") &&
-         !LocalCandidateHasFamily(candidate, "crash_logger_frame") &&
-         !LocalCandidateHasFamily(candidate, "crash_logger_object_ref") &&
-         !LocalCandidateHasFamily(candidate, "resource_provider") &&
-         candidate.score >= 5u;
-}
-
 std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
 {
   if (r.crash_logger_direct_fault_eligible &&
@@ -453,7 +443,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx);
     const bool topCandidateHasStandaloneCallstack =
       topCandidate &&
-      CandidateHasStandaloneCallstackSupport(*topCandidate);
+      CandidateHasStandaloneCallstackSupport(r, *topCandidate);
     const bool topCandidateHasFirstChanceSupport =
       topCandidate &&
       CandidateHasScorableFirstChanceSupport(r, *topCandidate);
@@ -636,7 +626,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
             (hasResourceSupport ? L" 근처 리소스를 제공한 모드도 이 후보와 맞습니다." : L"") +
             L" (신뢰도: " + topCandidateConf + L")");
-    } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(*topCandidate)) {
+    } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(r, *topCandidate)) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
         ? (L"Crash is reported in " + place + L", but Tullius callstack first points to DLL candidate " + candidateName +
@@ -727,7 +717,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
-      if (CandidateHasStandaloneCallstackSupport(*topCandidate)) {
+      if (CandidateHasStandaloneCallstackSupport(r, *topCandidate)) {
         summary = en
           ? (L"Crash is reported in the game executable. Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")

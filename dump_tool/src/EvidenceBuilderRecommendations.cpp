@@ -205,27 +205,34 @@ void AddActionableCandidateRecommendations(
   const bool hasHistoryFamily = CandidateHasFamily(*topCandidate, "history_repeat");
   const bool hasResourceFamily = CandidateHasFamily(*topCandidate, "resource_provider");
   const bool hasHangThreadGroupFamily = CandidateHasFamily(*topCandidate, "hang_thread_group");
-  const bool hasStandaloneCallstackFamily =
-    r.suspects_from_stackwalk &&
-    CandidateHasFamily(*topCandidate, "actionable_stack") &&
-    !hasFrameFamily &&
-    !CandidateHasFamily(*topCandidate, "crash_logger_object_ref") &&
-    !hasResourceFamily &&
-    topCandidate->score >= 5u;
+  // The same test as the summary sentence, so both name the Tullius callstack
+  // only when a real stack walk carries the candidate.
+  const bool hasStandaloneCallstackFamily = CandidateHasStandaloneCallstackSupport(r, *topCandidate);
   const bool hasScorableFirstChance = hasFirstChanceFamily && HasScorableFirstChanceContext(r.first_chance_summary);
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
   if (weakFaultLocationTopCandidate && hasFrameFamily) {
     const bool nearby = HasNearbyProbableDll(r);
+    // Only a candidate the stack also supports may say "both"; a frame alone
+    // is the reference clue the candidate list already calls it.
+    const bool hasStackFamily = CandidateHasFamily(*topCandidate, "actionable_stack");
+    const std::wstring nextEn = nearby
+      ? std::wstring(L"Compare nearby Crash Logger probable DLLs before isolating this mod.")
+      : std::wstring(L"Crash Logger names no other DLL nearby, so disable or update this mod and see whether the crash still happens.");
+    const std::wstring nextKo = nearby
+      ? std::wstring(L"이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
+      : std::wstring(L"Crash Logger가 함께 지목한 다른 DLL은 없으니, 이 모드를 끄거나 업데이트해 재현 여부를 확인하세요.");
     r.recommendations.push_back(en
-      ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
-          L", but this is still only the current fault-location cluster. " +
-          (nearby ? std::wstring(L"Compare nearby Crash Logger probable DLLs before isolating this mod.")
-                  : std::wstring(L"Crash Logger names no other DLL nearby, so disable or update this mod and see whether the crash still happens.")))
-      : (L"[행동 우선 후보] " + frameSupport + L"과 같은 덤프의 스택이 모두 " + candidateName +
-          L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. " +
-          (nearby ? std::wstring(L"이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
-                  : std::wstring(L"Crash Logger가 함께 지목한 다른 DLL은 없으니, 이 모드를 끄거나 업데이트해 재현 여부를 확인하세요."))));
+      ? (hasStackFamily
+          ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
+              L", but this is still only the current fault-location cluster. " + nextEn)
+          : (L"[Actionable candidate] " + frameSupport + L" lands in " + candidateName +
+              L", but this is still only the current fault location. " + nextEn))
+      : (hasStackFamily
+          ? (L"[행동 우선 후보] " + frameSupport + L"과 같은 덤프의 스택이 모두 " + candidateName +
+              L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. " + nextKo)
+          : (L"[행동 우선 후보] " + frameSupport + L"이 " + candidateName +
+              L"을(를) 가리키지만, 예외가 난 위치를 보여 줄 뿐입니다. " + nextKo)));
     r.recommendations.push_back(en
       ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
       : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 더 많은 정보를 담는 재수집 설정을 먼저 쓰세요.");
@@ -293,6 +300,20 @@ void AddActionableCandidateRecommendations(
                   L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")
               : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
                   L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL부터 확인하세요.")))
+      // One family is no multi-signal support; a Low one (the pointer scan)
+      // is a weak clue, a stronger one (a hook stub owner) just one signal.
+      : (topCandidate->family_count <= 1u && topCandidate->confidence_level == i18n::ConfidenceLevel::kLow)
+      ? (en
+          ? (L"[Actionable candidate] A single weak clue points to " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it, but do not treat it as the cause on this alone.")
+          : (L"[행동 우선 후보] 약한 단서 하나가 " + candidateName +
+              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 확인은 하되 이것만으로 원인이라고 단정하지 마세요."))
+      : topCandidate->family_count <= 1u
+      ? (en
+          ? (L"[Actionable candidate] One signal points to " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+          : (L"[행동 우선 후보] 신호 하나가 " + candidateName +
+              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."))
       : (en
           ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
               L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")

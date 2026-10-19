@@ -553,6 +553,17 @@ bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename)
   return minidump::IsSystemishModuleAt(filename, path);
 }
 
+bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const ActionableCandidate& candidate)
+{
+  const auto has = [&](std::string_view family) {
+    return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), family) !=
+           candidate.supporting_families.end();
+  };
+  return r.suspects_from_stackwalk && has("actionable_stack") && !has("hang_thread_group") &&
+         !has("crash_logger_frame") && !has("crash_logger_object_ref") && !has("resource_provider") &&
+         candidate.stack_weight >= 5u;
+}
+
 bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx)
 {
   if (!ctx.isCrashLike || ctx.isHangLike || ctx.isSnapshotLike || !ctx.hasModule || ctx.isSystem || ctx.isGameExe ||

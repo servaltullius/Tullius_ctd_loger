@@ -175,6 +175,7 @@ void TestStrongStackOnlyBecomesMediumRelated()
   AssertStatus(candidates[0], "related");
   assert(!candidates[0].cross_validated);
   assert(candidates[0].confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(candidates[0].stack_weight == 5u);
 }
 
 void TestHangThreadGroupCorroboratesWeakMainStack()
@@ -656,6 +657,28 @@ void TestResourceOnlyDoesNotCreateStandaloneCandidate()
   assert(candidates.empty());
 }
 
+void TestResourceAndHistoryDoNotCreateStandaloneCandidate()
+{
+  // Two boost-only families are still no execution evidence: a texture pack
+  // once recorded in history must not be recommended in every later crash of
+  // the bucket on a nearby resource alone (review M17).
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("resource_provider", L"texturepack", L"Texture Pack", 5, L"", L"Texture Pack"),
+    MakeSignal("history_repeat", L"texturepack", L"Texture Pack", 3, L"", L"Texture Pack"),
+  };
+  assert(BuildCandidateConsensus(signals, Language::kEnglish).empty());
+
+  // A stack signal still lets them reinforce it.
+  std::vector<CandidateSignal> withStack = signals;
+  withStack.push_back(
+    MakeSignal("actionable_stack", L"texturepack", L"Texture Pack", 2, L"", L"Texture Pack", L"TexturePack.dll"));
+  const auto candidates = BuildCandidateConsensus(withStack, Language::kEnglish);
+  assert(candidates.size() == 1u);
+  AssertStatus(candidates[0], "related");
+  assert(candidates[0].stack_weight == 2u);
+  assert(candidates[0].score == 10u);
+}
+
 void TestCaptureQualityDoesNotCrossValidateWeakStackAgreement()
 {
   const std::vector<CandidateSignal> signals = {
@@ -838,6 +861,7 @@ int main()
   TestSortActionableCandidatesRestoresStatusPriorityAndKeepsScoreRanking();
   TestTotalScoreStillRanksCandidatesWithinSameStatus();
   TestResourceOnlyDoesNotCreateStandaloneCandidate();
+  TestResourceAndHistoryDoNotCreateStandaloneCandidate();
   TestCaptureQualityDoesNotCrossValidateWeakStackAgreement();
   TestCaptureQualityDoesNotUpgradeStandaloneStack();
   TestCanonicalCandidateKeyPreservesUnicodeAndSeparators();

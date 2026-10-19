@@ -114,6 +114,11 @@ bool IsActionableSuspect(const SuspectItem& s);
 // stack suspect of that name, so an ENB/ReShade d3d11.dll in the game folder
 // stays a mod.
 bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename);
+// The candidate rests on the Tullius callstack alone: a real stack walk (not
+// the pointer scan) put it first with Medium weight (>= 5), and no Crash Logger
+// frame or object ref, nearby resource or thread group backs it. History and
+// first-chance context do not count toward that weight.
+bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const ActionableCandidate& candidate);
 // Where a fault outside the mods happened, for the summary sentences:
 // "a Windows system DLL", or "external software (NVIDIA, NvTelemetryBridge64.dll)".
 std::wstring FaultPlace(const AnalysisResult& r, const EvidenceBuildContext& ctx);
