@@ -78,15 +78,24 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   std::wstring_view dumpPath,
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
-void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
+void InitializeLoopState(const AttachedProcess& proc, const std::filesystem::path& outBase, HelperLoopState* state);
+// The marker files RearmFrozenCrashFromEarlierHelper leaves in the output
+// folder: <prefix><pid>_<game creation time>_<crash_seq>.marker.
+inline constexpr std::wstring_view kFrozenCrashRearmMarkerPrefix = L"SkyrimDiag_CrashRearm_";
+// The marker name up to the crash_seq for this game process.
+std::wstring FrozenCrashRearmMarkerPrefix(const AttachedProcess& proc);
 // A committed crash generation that is still Frozen while the game runs was
 // published and claimed, but the helper handling it is gone (it was killed or
 // crashed, and the plugin's watchdog started this one). Nothing would signal
 // it again, and while it stays Frozen the plugin records no later crash, so
 // its event is signaled again for this helper to handle it from the start; a
-// second dump of it is the worst case. Returns that generation's crash_seq,
-// or 0 when nothing was signaled.
-std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc);
+// second dump of it is the worst case. That happens once per generation (a
+// marker file in outBase): found still Frozen after that, it is thawed
+// instead. Returns that generation's crash_seq, or 0 when nothing was
+// signaled.
+std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, const std::filesystem::path& outBase);
+// Deletes this game process's rearm markers (once it has exited).
+void RemoveFrozenCrashRearmMarkers(const AttachedProcess& proc, const std::filesystem::path& outBase);
 // CrashLogger.ini's Crashlog Directory value (its raw bytes) as a path: UTF-8
 // as Crash Logger reads it, else the ANSI code page. Empty when it decodes in
 // neither. Never throws on bad bytes, unlike a path built from a u8string.

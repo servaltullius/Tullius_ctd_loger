@@ -141,7 +141,7 @@ int wmain(int argc, wchar_t** argv)
     const std::uint64_t attachNowQpc = static_cast<std::uint64_t>(attachNow.QuadPart);
 
     skydiag::helper::internal::HelperLoopState loopState{};
-    skydiag::helper::internal::InitializeLoopState(proc, &loopState);
+    skydiag::helper::internal::InitializeLoopState(proc, outBase, &loopState);
     // Only used to look for Crash Logger's crash log at exit: a failure here
     // must not keep the capture loop from starting.
     try {

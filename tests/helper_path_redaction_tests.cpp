@@ -76,6 +76,17 @@ void TestPreflightMasksTheSymbolPaths()
     "SkyrimDiag_Preflight.json masks the symbol search path");
   Require(text.find("{ \"cache_path\", WideToUtf8(skydiag::helper::RedactPath(") != std::string::npos,
     "SkyrimDiag_Preflight.json masks the symbol cache folder");
+  Require(text.find("out[\"game_exe_dir\"] = WideToUtf8(skydiag::helper::RedactPath(gameExeDir.wstring()));") !=
+            std::string::npos,
+    "SkyrimDiag_Preflight.json masks the game folder");
+  Require(text.find("{ \"dbghelp_path\", WideToUtf8(skydiag::helper::RedactPath(") != std::string::npos &&
+            text.find("{ \"msdia_path\", WideToUtf8(skydiag::helper::RedactPath(") != std::string::npos,
+    "SkyrimDiag_Preflight.json masks the dbghelp and msdia paths");
+  // The DBGHELP_RUNTIME and MSDIA_RUNTIME check messages name those paths too.
+  for (const char* raw : { "WideToUtf8(symbolHealth.dbghelpPath.wstring())", "WideToUtf8(symbolHealth.msdiaPath.wstring())",
+                           "WideToUtf8(gameExeDir.wstring())" }) {
+    Require(text.find(raw) == std::string::npos, (std::string("an unmasked path is written: ") + raw).c_str());
+  }
 }
 
 }  // namespace

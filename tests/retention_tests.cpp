@@ -385,9 +385,51 @@ static void Test_PrunedDumpLeavesNoAnalysisCopy()
   std::filesystem::remove_all(dir, ec);
 }
 
+// What a stopped helper leaves behind is bounded: older held dumps of
+// released crashes, a day-old one, an unfinished full-size rewrite and a
+// day-old rearm marker go; the newest held dump, a rewrite that may still be
+// in progress and a fresh marker stay. Crash dumps are not touched.
+static void Test_PrunesHelperLeftovers()
+{
+  const auto dir = MakeTempDir();
+  const auto crash = dir / "SkyrimDiag_Crash_20260101_000000_000.dmp";
+  const auto olderReleased = dir / "SkyrimDiag_Released_20260101_000001_000.dmp";
+  const auto newestReleased = dir / "SkyrimDiag_Released_20260101_000002_000.dmp";
+  const auto oldPartial = dir / "SkyrimDiag_Crash_20260101_000003_000.dmp.full.tmp";
+  const auto freshPartial = dir / "SkyrimDiag_Crash_20260101_000004_000.dmp.full.tmp";
+  const auto oldMarker = dir / "SkyrimDiag_CrashRearm_1234_5678_2.marker";
+  const auto freshMarker = dir / "SkyrimDiag_CrashRearm_4321_8765_4.marker";
+  for (const auto& file : { crash, olderReleased, newestReleased, oldPartial, freshPartial, oldMarker, freshMarker }) {
+    WriteFile(file);
+  }
+  SetAge(oldPartial, std::chrono::hours(1));
+  SetAge(oldMarker, std::chrono::hours(48));
+  SetAge(crash, std::chrono::hours(48));
+
+  ApplyRetentionToOutputDir(dir, RetentionLimits{});
+
+  assert(Exists(crash));
+  assert(!Exists(olderReleased));
+  assert(Exists(newestReleased));
+  assert(!Exists(oldPartial));
+  assert(Exists(freshPartial));
+  assert(!Exists(oldMarker));
+  assert(Exists(freshMarker));
+
+  // A day old, the newest held dump goes too.
+  SetAge(newestReleased, std::chrono::hours(48));
+  ApplyRetentionToOutputDir(dir, RetentionLimits{});
+  assert(!Exists(newestReleased));
+  assert(Exists(crash));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
+  Test_PrunesHelperLeftovers();
   Test_PrunesHangWctAndEtlWithDump();
   Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();
   Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();

@@ -10,8 +10,13 @@ endif()
 # Same-named overlay of that triplet: the static vcpkg libraries linked into
 # the plugin and helper (spdlog, fmt) must not use the constexpr std::mutex
 # constructor either (see _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR below).
-if(NOT DEFINED VCPKG_OVERLAY_TRIPLETS)
-  set(VCPKG_OVERLAY_TRIPLETS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/triplets" CACHE STRING "")
+# Appended, not only set when undefined: the vcpkg toolchain caches the
+# variable (empty when nothing set it), so a build folder configured before
+# this overlay existed would otherwise never get it.
+set(SKYRIMDIAG_VCPKG_TRIPLET_OVERLAY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/triplets")
+if(NOT SKYRIMDIAG_VCPKG_TRIPLET_OVERLAY IN_LIST VCPKG_OVERLAY_TRIPLETS)
+  list(APPEND VCPKG_OVERLAY_TRIPLETS "${SKYRIMDIAG_VCPKG_TRIPLET_OVERLAY}")
+  set(VCPKG_OVERLAY_TRIPLETS "${VCPKG_OVERLAY_TRIPLETS}" CACHE STRING "" FORCE)
 endif()
 
 project(

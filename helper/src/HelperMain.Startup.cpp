@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -17,6 +18,7 @@
 #include "SkyrimDiagStringUtil.h"
 
 #include "CrashCapture.h"
+#include "HelperCommon.h"
 #include "HelperLog.h"
 #include "ManualCaptureKeyWatcher.h"
 
@@ -153,7 +155,7 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   return result;
 }
 
-void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
+void InitializeLoopState(const AttachedProcess& proc, const std::filesystem::path& outBase, HelperLoopState* state)
 {
   if (!state) {
     return;
@@ -181,10 +183,42 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
     state->crashCaptured.releasedOnBriefHeartbeat = false;
     state->crashCaptured.releasedInThreadDumpWindow = false;
   }
-  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc);
+  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc, outBase);
 }
 
-std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc)
+std::wstring FrozenCrashRearmMarkerPrefix(const AttachedProcess& proc)
+{
+  // The game's creation time keeps a later process that reuses the pid from
+  // matching an old marker.
+  FILETIME created{};
+  FILETIME unusedExit{};
+  FILETIME unusedKernel{};
+  FILETIME unusedUser{};
+  std::uint64_t createdUtc = 0;
+  if (proc.process && GetProcessTimes(proc.process, &created, &unusedExit, &unusedKernel, &unusedUser)) {
+    createdUtc = (static_cast<std::uint64_t>(created.dwHighDateTime) << 32) | created.dwLowDateTime;
+  }
+  return std::wstring(kFrozenCrashRearmMarkerPrefix) + std::to_wstring(proc.pid) + L"_" + std::to_wstring(createdUtc) +
+    L"_";
+}
+
+void RemoveFrozenCrashRearmMarkers(const AttachedProcess& proc, const std::filesystem::path& outBase)
+{
+  if (outBase.empty()) {
+    return;
+  }
+  const std::wstring prefix = FrozenCrashRearmMarkerPrefix(proc);
+  std::error_code iterEc;
+  for (std::filesystem::directory_iterator it(outBase, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+    const std::wstring name = it->path().filename().wstring();
+    if (name.rfind(prefix, 0) == 0) {
+      std::error_code ec;
+      std::filesystem::remove(it->path(), ec);
+    }
+  }
+}
+
+std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, const std::filesystem::path& outBase)
 {
   if (!proc.crashEvent || !proc.process || WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
     return 0u;  // an exited game's record is drained by the exit path
@@ -192,6 +226,32 @@ std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc)
   CrashEventInfo committed{};
   if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) ||
       (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    return 0u;
+  }
+
+  // A helper that dies on this crash every time (an antivirus killing it
+  // during MiniDumpWriteDump, a helper bug) would be restarted by the
+  // plugin's watchdog and signaled again forever, the game stuttering at each
+  // dump attempt. So a generation is signaled again only once, remembered in
+  // a marker file across helper restarts. The next time it is thawed instead,
+  // so the plugin records a later crash again. Without a marker there is no
+  // bound, so a marker that cannot be written also thaws: the dump would go
+  // to the same folder.
+  const auto marker = outBase / (FrozenCrashRearmMarkerPrefix(proc) + std::to_wstring(committed.crashSeq) + L".marker");
+  std::error_code existsEc;
+  const bool alreadyRearmed = std::filesystem::exists(marker, existsEc) || existsEc;
+  if (alreadyRearmed || !WriteTextFileUtf8(marker, "rearmed\n")) {
+    const bool thawed = proc.shmWritable && TryClearRecoveredCrashFreeze(proc.shmWritable, committed.crashSeq);
+    AppendLogLine(
+      outBase,
+      L"Committed crash_seq=" + std::to_wstring(committed.crashSeq)
+        + (alreadyRearmed
+             ? L" is still frozen after its crash event was already signaled again once for an earlier helper, "
+               L"which did not finish it either; not signaling it again"
+             : L" is still frozen with no helper handling it, but its rearm marker could not be written; not "
+               L"signaling it again")
+        + (thawed ? L". Thawed capture so a later CTD can still be recorded."
+                  : L" (capture not thawed: a newer crash record is present)."));
     return 0u;
   }
   return SetEvent(proc.crashEvent) ? committed.crashSeq : 0u;

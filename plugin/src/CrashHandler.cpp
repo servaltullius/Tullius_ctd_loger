@@ -100,8 +100,9 @@ constexpr std::uint64_t kKeptExceptionMaxAgeSeconds = 60;
 
 // terminate() follows an unhandled throw at once (a noexcept frame or a
 // catch(...) that terminates), so a kept throw older than this was handled
-// and is not why abort() runs.
-constexpr std::uint64_t kAbortKeptExceptionMaxAgeSeconds = 5;
+// and is not why abort() runs. Short, so an unrelated abort() soon after a
+// caught throw on the same thread is not blamed on it.
+constexpr std::uint64_t kAbortKeptExceptionMaxAgeMs = 500;
 
 // Bounds the stack scan for CrashLogger frames (see
 // SelectCrashLoggerStackScanWindow).
@@ -618,7 +619,8 @@ void __cdecl AbortSignalHandler(int signalNumber) noexcept
 {
   if (auto* shm = GetShared(); shm && g_crashHookMode == 1) {
     const std::uint64_t qpcFreq = shm->header.qpc_freq != 0u ? shm->header.qpc_freq : 10000000ull;
-    const std::uint64_t maxAgeQpc = kAbortKeptExceptionMaxAgeSeconds * qpcFreq;
+    // Arithmetic only: this runs as a signal handler.
+    const std::uint64_t maxAgeQpc = kAbortKeptExceptionMaxAgeMs * qpcFreq / 1000u;
     DWORD code = 0;
     std::uint64_t address = 0;
     if (TryPublishThreadKeptException(

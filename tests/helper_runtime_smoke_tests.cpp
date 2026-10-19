@@ -322,6 +322,14 @@ void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
   Require(
     !crashState.releasedDumpPath.empty() && FileExists(crashState.releasedDumpPath),
     "the released dump is held until the release is settled");
+  // Held under its own name, so one a stopped helper leaves behind is not
+  // listed as a crash.
+  Require(
+    std::filesystem::path(crashState.releasedDumpPath).filename().wstring().rfind(L"SkyrimDiag_Released_", 0) == 0,
+    "the held dump is renamed while it is held");
+  Require(
+    !FileExists(skydiag::helper::internal::CrashDumpPathForReleased(crashState.releasedDumpPath)),
+    "no dump with the crash name is left");
   Require(crashState.releasedDumpRecovery.latchedTick64 != 0u, "its outlived check is running");
   AssertContains(log, "likely a handled first-chance exception", "the filter logs its evidence");
   AssertContains(log, "Keeping the released dump", "the caller logs what happened to the dump");
@@ -340,10 +348,16 @@ void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
 // A handled fault that keeps coming back (same code and address, released
 // twice within the cooldown) gets the minimal dump first, not a full-size one
 // each time. Kept as a crash while the game still runs, it is written again
-// at the configured size.
+// at the configured size. Not on the game's main thread: unhandled there, it
+// ends the game before a second dump could be written.
 void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
 {
-  for (const bool gameKeepsRunning : { true, false }) {
+  struct Case
+  {
+    bool gameKeepsRunning;
+    bool onMainThread;
+  };
+  for (const auto [gameKeepsRunning, onMainThread] : { Case{ true, false }, Case{ false, false }, Case{ true, true } }) {
     const auto outBase = MakeTempDir(L"skydiag_helper_repeated_fault");
     ClearLog(outBase);
 
@@ -358,14 +372,17 @@ void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
     shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
     shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(faultingContext.Rip);
     shared->header.crash.context = faultingContext;
+    if (onMainThread) {
+      AddHeartbeatNamingMainThread(shared.get(), faulting.tid());
+    }
 
     auto proc = MakeSelfAttachedProcess(shared.get());
     proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
     Require(proc.crashEvent != nullptr, "CreateEventW failed");
 
     std::atomic_bool stop{ false };
-    std::thread game([&] {
-      while (gameKeepsRunning && !stop.load()) {
+    std::thread game([&, keepsRunning = gameKeepsRunning] {
+      while (keepsRunning && !stop.load()) {
         shared->header.last_heartbeat_qpc += 1'000'000ull;
         Sleep(100);
       }
@@ -389,7 +406,11 @@ void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
 
     const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
     Require(handled, "the event is consumed");
-    AssertContains(log, "writing a minimal dump first", "the smaller first dump is logged");
+    if (onMainThread) {
+      Require(log.find("writing a minimal dump first") == std::string::npos, "a main-thread fault gets its full dump");
+    } else {
+      AssertContains(log, "writing a minimal dump first", "the smaller first dump is logged");
+    }
     if (gameKeepsRunning) {
       Require(!crashState.latched && FileExists(crashState.releasedDumpPath), "released again, its dump held");
     } else {

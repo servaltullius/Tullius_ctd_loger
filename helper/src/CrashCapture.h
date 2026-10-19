@@ -207,12 +207,18 @@ constexpr void NoteRecoveredFault(
   history->nextReplace = (history->nextReplace + 1u) % kRecoveredFaultHistoryCapacity;
 }
 
+// Not for a C++ throw or a breakpoint: their address is always the same
+// RaiseException / DebugBreak in KernelBase, so code and address match every
+// unrelated throw, not the same fault.
 constexpr bool IsRepeatedRecoveredFault(
   const RecoveredFaultHistory& history,
   std::uint32_t exceptionCode,
   std::uint64_t exceptionAddr,
   std::uint64_t nowTick64) noexcept
 {
+  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
+    return false;
+  }
   for (const auto& entry : history.entries) {
     if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
       return entry.count >= kRepeatedRecoveredFaultMinCount && nowTick64 >= entry.lastTick64 &&
@@ -548,6 +554,36 @@ constexpr bool IsCloseOfUnresponsiveGame(
 constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpisodeOpenAtExit) noexcept
 {
   return exitCode == 0u && hangEpisodeOpenAtExit;
+}
+
+// The held dump of a released crash is renamed from SkyrimDiag_Crash_<ts>.dmp
+// to SkyrimDiag_Released_<ts>.dmp while it is held, so one a stopped helper
+// leaves behind is not listed as a crash (retention bounds those), and back
+// when the crash is reported after all. A path with neither prefix comes back
+// unchanged.
+inline constexpr std::wstring_view kCrashDumpPrefix = L"SkyrimDiag_Crash_";
+inline constexpr std::wstring_view kReleasedDumpPrefix = L"SkyrimDiag_Released_";
+
+inline std::wstring SwapDumpFilenamePrefix(
+  const std::filesystem::path& dumpPath,
+  std::wstring_view fromPrefix,
+  std::wstring_view toPrefix)
+{
+  const std::wstring filename = dumpPath.filename().wstring();
+  if (filename.size() <= fromPrefix.size() || filename.compare(0, fromPrefix.size(), fromPrefix) != 0) {
+    return dumpPath.wstring();
+  }
+  return (dumpPath.parent_path() / (std::wstring(toPrefix) + filename.substr(fromPrefix.size()))).wstring();
+}
+
+inline std::wstring ReleasedDumpPathFor(const std::filesystem::path& crashDumpPath)
+{
+  return SwapDumpFilenamePrefix(crashDumpPath, kCrashDumpPrefix, kReleasedDumpPrefix);
+}
+
+inline std::wstring CrashDumpPathForReleased(const std::filesystem::path& releasedDumpPath)
+{
+  return SwapDumpFilenamePrefix(releasedDumpPath, kReleasedDumpPrefix, kCrashDumpPrefix);
 }
 
 // Deletes the held dump of a released crash (releasedDumpPath), unless

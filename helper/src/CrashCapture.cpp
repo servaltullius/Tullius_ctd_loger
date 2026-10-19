@@ -1165,8 +1165,11 @@ bool HandleCrashEventTick(
   // A fault released as handled again and again gets the minimal dump first
   // (IsRepeatedRecoveredFault); if it is kept as a crash after all while the
   // game still runs, the dump is written again at the configured size below.
+  // Not on the game's main thread: a fault there that is not handled ends
+  // the game before a second dump could be written.
   const bool reducedDumpForRepeatedFault = crashState && cfg.dumpMode != skydiag::helper::DumpMode::kMini &&
-    IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
+    IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64()) &&
+    skydiag::helper::InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes).value_or(0u) != info.faultingTid;
   const auto dumpProfile = reducedDumpForRepeatedFault
     ? skydiag::helper::ResolveDumpProfile(skydiag::helper::DumpMode::kMini, skydiag::helper::CaptureKind::Crash)
     : configuredDumpProfile;
@@ -1367,6 +1370,7 @@ bool HandleCrashEventTick(
       // crash it was (ShouldReportReleasedCrashAtExit), so its dump is held
       // until that is settled (CrashCaptureState::releasedDumpPath).
       const bool holdReleasedDump = verdict == FilterVerdict::kDeleteRecovered && crashState;
+      std::wstring heldDumpPath = dumpPath;
       if (preserveFilteredDump) {
         AppendLogLine(
           outBase,
@@ -1376,10 +1380,21 @@ bool HandleCrashEventTick(
             : L"Clean-exit evidence metadata write failed; preserved the filtered dump as a fail-safe "
               L"without crash post-processing or capture latch.");
       } else if (holdReleasedDump) {
+        // Held under its own name (ReleasedDumpPathFor): a helper that stops
+        // before the release is settled leaves no dump that reads as a crash.
+        const std::wstring releasedPath = ReleasedDumpPathFor(dumpPath);
+        if (MoveFileExW(dumpPath.c_str(), releasedPath.c_str(), 0)) {
+          heldDumpPath = releasedPath;
+        } else {
+          AppendLogLine(
+            outBase,
+            L"Could not rename the released dump while it is held (err=" + std::to_wstring(GetLastError())
+              + L"); keeping its crash name.");
+        }
         AppendLogLine(
           outBase,
           L"Keeping the released dump until the game exits or outlives this exception: "
-            + std::filesystem::path(dumpPath).filename().wstring());
+            + std::filesystem::path(heldDumpPath).filename().wstring());
       } else if (!dumpRemovalHandled) {
         const auto removal = RemoveFileAndObserve(dumpPath);
         if (removal.existsAfter) {
@@ -1405,7 +1420,7 @@ bool HandleCrashEventTick(
         }
         if (holdReleasedDump) {
           NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
-          crashState->releasedDumpPath = dumpPath;
+          crashState->releasedDumpPath = heldDumpPath;
           crashState->releasedDumpPreserve = preserveFilteredDump;
           StartLateRecovery(
             &crashState->releasedDumpRecovery,

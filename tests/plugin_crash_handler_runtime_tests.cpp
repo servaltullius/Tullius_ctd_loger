@@ -304,6 +304,14 @@ int RunChild(const char* mode, const char* goEventName)
   if (std::strcmp(mode, "noexcept-throw") == 0) {
     CallThrowerFromNoexcept();
   }
+  if (std::strcmp(mode, "abort-after-caught-throw") == 0) {
+    try {
+      ThrowRuntimeError();
+    } catch (const std::runtime_error&) {
+    }
+    Sleep(1500);
+    std::abort();
+  }
   return 92;
 }
 
@@ -414,6 +422,16 @@ void TestUnhandledExceptionsWithoutCrashLoggerAreRecorded()
     RunChildToCrash("noexcept-throw"), kCppException, kChildAbortExitCode, "throw out of a noexcept function");
 }
 
+// abort() well after a throw the thread caught is not that throw's
+// terminate(): the throw was handled, so it must not be published as the crash.
+void TestAbortAfterACaughtThrowIsNotBlamedOnIt()
+{
+  const auto outcome = RunChildToCrash("abort-after-caught-throw");
+  Require(!outcome.crashEventSignaled, "an abort after a caught throw must not signal a crash");
+  Require(outcome.crashSeq == 0u, "an abort after a caught throw must not publish a crash record");
+  Require(outcome.exitCode == kChildAbortExitCode, "the SIGABRT handler installed before the plugin's must still run");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -444,6 +462,7 @@ int main(int argc, char** argv)
     TestCrashLoggerSideFaultRecordsTheExceptionItReports(shm);
     TestFaultWithoutCrashLoggerFramesIsRecordedItself(shm);
     TestUnhandledExceptionsWithoutCrashLoggerAreRecorded();
+    TestAbortAfterACaughtThrowIsNotBlamedOnIt();
     std::puts("plugin crash handler runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {

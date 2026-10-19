@@ -116,7 +116,6 @@ void RunHelperLoop(
 
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &state->pendingCrashAnalysis, &state->crashRecapture);
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &state->pendingCrashEtw);
-    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &state->hangState.pendingEtw);
 
     // Drain a published crash record before polling process exit. The process
     // handle and crash event commonly become signaled in the same scheduler
@@ -135,6 +134,9 @@ void RunHelperLoop(
           &state->pendingCrashViewerDumpPath)) {
       continue;
     }
+    // After the crash event's first chance: a wpr call here can block for a
+    // while.
+    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &state->hangState.pendingEtw);
 
     (void)HandleLateRecoveryTick(cfg, proc, outBase, state);
     ExpireReleasedCrashDumpIfOutlived(proc, outBase, state);
@@ -148,7 +150,7 @@ void RunHelperLoop(
         if (skydiag::helper::TryAttachCrashEvent(proc, nullptr)) {
           AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
           state->nextCrashEventWarnTick64 = 0;
-          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc); rearmed != 0u) {
+          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc, outBase); rearmed != 0u) {
             AppendLogLine(
               outBase,
               L"Committed crash_seq=" + std::to_wstring(rearmed)
@@ -224,6 +226,12 @@ void ShutdownLoopState(
   }
 
   ReleasePendingCrashAnalysisAtShutdown(outBase, state);
+  // Its crash generations can no longer be signaled again once the game is
+  // gone. A helper stopped while the game runs leaves them to a later helper
+  // (and retention).
+  if (proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0) {
+    RemoveFrozenCrashRearmMarkers(proc, outBase);
+  }
 }
 
 }  // namespace skydiag::helper::internal
