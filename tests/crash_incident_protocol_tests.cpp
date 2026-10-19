@@ -75,7 +75,7 @@ std::vector<std::byte> BuildBlackboxMinidump(std::uint32_t protocolVersion)
   snapshot->header.crash.exception_addr = 0x12345678u;
 
   auto& event = snapshot->events[0];
-  event.seq = 2u;
+  event.seq = 0u;  // ring index 0 committed (the writer stores index * 2)
   event.tid = 77u;
   event.qpc = 150u;
   event.type = static_cast<std::uint16_t>(skydiag::EventType::kCrash);
@@ -131,6 +131,33 @@ void TestOfflineParserAcceptsV3AndV4OnlyAsSupportedGenerations()
   assert(futureResult.events.empty());
 }
 
+// The ring has advanced to index 1, but its only slot still holds index 0's
+// committed event (a lap behind): it is not index 1's event and must be
+// dropped, as must a committed resource entry from another lap.
+void TestOfflineParserDropsRingEntriesFromAnotherLap()
+{
+  auto dump = BuildBlackboxMinidump(skydiag::kVersion);
+  const std::size_t streamOffset = dump.size() - sizeof(skydiag::SharedLayout);
+  auto* snapshot = reinterpret_cast<skydiag::SharedLayout*>(dump.data() + streamOffset);
+  snapshot->header.write_index = 2u;
+  snapshot->resources.write_index = 1u;
+  snapshot->resources.entries[0].seq = 2u * skydiag::kResourceCapacity;
+  std::memcpy(snapshot->resources.entries[0].path_utf8, "meshes\\a.nif", sizeof("meshes\\a.nif"));
+
+  skydiag::dump_tool::AnalysisResult result{};
+  skydiag::dump_tool::ParseBlackboxStream(dump.data(), dump.size(), std::nullopt, {}, result);
+  assert(result.has_blackbox);
+  assert(result.events.empty());
+  assert(result.resources.empty());
+
+  snapshot->header.write_index = 1u;
+  snapshot->resources.entries[0].seq = 0u;
+  skydiag::dump_tool::AnalysisResult current{};
+  skydiag::dump_tool::ParseBlackboxStream(dump.data(), dump.size(), std::nullopt, {}, current);
+  assert(current.events.size() == 1u);
+  assert(current.resources.size() == 1u);
+}
+
 }  // namespace
 
 int main()
@@ -169,5 +196,6 @@ int main()
   assert(!skydiag::TryClaimCrashIncidentOwnership(&flags));
 
   TestOfflineParserAcceptsV3AndV4OnlyAsSupportedGenerations();
+  TestOfflineParserDropsRingEntriesFromAnotherLap();
   return 0;
 }

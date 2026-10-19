@@ -56,7 +56,7 @@ void AddHeartbeatNamingMainThread(skydiag::SharedLayout* shared, std::uint32_t m
   event.type = static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat);
   event.size = static_cast<std::uint16_t>(sizeof(event.payload));
   event.payload.b = mainTid;
-  event.seq = 2u;
+  event.seq = shared->header.write_index * 2u;  // committed for its ring index, as the plugin writes it
   shared->header.write_index = shared->header.write_index + 1u;
 }
 
