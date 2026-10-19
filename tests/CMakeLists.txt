@@ -861,6 +861,8 @@ if(WIN32)
   )
   target_link_libraries(skydiag_helper_hang_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_hang_runtime_tests COMMAND skydiag_helper_hang_runtime_tests)
+  # Opens a MessageBox; a stuck one must fail the run, not hold the CI job.
+  set_tests_properties(skydiag_helper_hang_runtime_tests PROPERTIES TIMEOUT 300)
 
   # Real MiniDumpWriteDump of a child process with crash contexts whose
   # registers point at unmapped memory (bad function-pointer calls).
@@ -893,6 +895,7 @@ if(WIN32)
   # parallel (ctest -j) one would close the other's dialog.
   set_tests_properties(skydiag_modal_dialog_hang_e2e_tests skydiag_modal_dialog_hang_e2e_dump_only_tests PROPERTIES
     RESOURCE_LOCK skydiag_modal_dialog_window
+    TIMEOUT 300
   )
 
   # ADR-0010: the crash dump writer adds the objects the crash registers point
@@ -946,14 +949,18 @@ if(WIN32)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test-fakes/crashlogger"
   )
 
+  # Also runs copies of itself that end on an unhandled exception, attached to
+  # through the helper's ProcessAttach as the helper would.
   add_executable(skydiag_plugin_crash_handler_runtime_tests
     plugin_crash_handler_runtime_tests.cpp
     ../plugin/src/Blackbox.cpp
     ../plugin/src/CrashHandler.cpp
     ../plugin/src/SharedMemory.cpp
+    ../helper/src/ProcessAttach.cpp
   )
   target_include_directories(skydiag_plugin_crash_handler_runtime_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
   )
   target_compile_definitions(skydiag_plugin_crash_handler_runtime_tests PRIVATE _UNICODE UNICODE)
   target_link_libraries(skydiag_plugin_crash_handler_runtime_tests PRIVATE skydiag_shared Psapi)

@@ -159,7 +159,9 @@ void ParseBlackboxStream(
   for (std::uint32_t i = begin; i < writeIndex; i++) {
     const auto& ev = snap->events[i % cap];
     const std::uint32_t seq1 = ev.seq;
-    if ((seq1 & 1u) != 0u) {
+    // The writer commits ring index i as seq i*2. Any other even value is a
+    // slot a lap behind or one that two writers of different laps spliced.
+    if ((seq1 & 1u) != 0u || seq1 != i * 2u) {
       continue;
     }
 
@@ -222,7 +224,8 @@ void ParseBlackboxStream(
   for (std::uint32_t i = rBegin; i < rWrite; i++) {
     const auto& ent = rl.entries[i % rCap];
     const std::uint32_t seq1 = ent.seq;
-    if ((seq1 & 1u) != 0u) {
+    // Committed as seq i*2, as in the event ring above.
+    if ((seq1 & 1u) != 0u || seq1 != i * 2u) {
       continue;
     }
 

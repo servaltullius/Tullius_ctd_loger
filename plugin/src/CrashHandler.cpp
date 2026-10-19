@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <csignal>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -79,6 +80,10 @@ struct KeptException
   std::atomic<std::uint64_t> qpc{0};
   EXCEPTION_RECORD record{};
   CONTEXT context{};
+  // Where the dispatcher keeps this exception's CONTEXT on the thread's stack;
+  // it stays there, unchanged, while the exception is still being dispatched
+  // (IsCrashLoggerReportingKeptException).
+  std::uintptr_t dispatchContextAddress = 0;
 };
 
 KeptException g_keptExceptions[kKeptExceptionSlotCount]{};
@@ -92,6 +97,21 @@ std::atomic<std::uint64_t> g_lastPublishedCrashQpc{0};
 // CrashLogger writes its report within seconds; this only bounds how stale a
 // kept exception may be when it is matched to a CrashLogger fault.
 constexpr std::uint64_t kKeptExceptionMaxAgeSeconds = 60;
+
+// terminate() follows an unhandled throw at once (a noexcept frame or a
+// catch(...) that terminates), so a kept throw older than this was handled
+// and is not why abort() runs.
+constexpr std::uint64_t kAbortKeptExceptionMaxAgeSeconds = 5;
+
+// Bounds the stack scan for CrashLogger frames (see
+// SelectCrashLoggerStackScanWindow).
+constexpr std::uintptr_t kCrashLoggerStackScanMaxBytes = 0x10000u;  // 64 KB
+
+// The filter and SIGABRT handler that were installed before ours; both are
+// chained so this never changes what happens after it records the crash.
+std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_previousUnhandledExceptionFilter{ nullptr };
+using AbortSignalHandlerFn = void(__cdecl*)(int);
+std::atomic<AbortSignalHandlerFn> g_previousAbortSignalHandler{ nullptr };
 
 CrashHandlerModuleRange QueryLoadedModuleRange(const wchar_t* moduleName) noexcept
 {
@@ -361,16 +381,26 @@ void KeepUnrecordedException(const skydiag::SharedLayout* shm, const EXCEPTION_P
     kept.qpc.store(nowQpc, std::memory_order_relaxed);
     std::memcpy(&kept.record, ep->ExceptionRecord, sizeof(EXCEPTION_RECORD));
     std::memcpy(&kept.context, ep->ContextRecord, sizeof(CONTEXT));
+    kept.dispatchContextAddress = reinterpret_cast<std::uintptr_t>(ep->ContextRecord);
   }
   kept.busy.store(0, std::memory_order_release);
 }
 
-// Handles a fatal-code exception inside CrashLogger (see ClassifyCrashLoggerFault):
-// records the kept exception CrashLogger is reporting, if any. Returns false
-// when the exception should be ignored. On success the incident is frozen.
-bool TryPublishKeptExceptionForCrashLoggerFault(
+// Kept recently enough and after the last published crash (see
+// g_lastPublishedCrashQpc).
+bool IsKeptExceptionCurrent(std::uint64_t keptQpc, std::uint64_t maxAgeQpc) noexcept
+{
+  return IsKeptExceptionSlotRecent(keptQpc, QpcNow(), maxAgeQpc) &&
+         keptQpc > g_lastPublishedCrashQpc.load(std::memory_order_relaxed);
+}
+
+// Records this thread's kept exception when `accept(kept, keptTid)` agrees,
+// then clears the slot. Returns false when there is none, its slot is busy,
+// `accept` refuses, or the incident is already owned.
+template <class Accept>
+bool TryPublishThreadKeptException(
   skydiag::SharedLayout* shm,
-  std::uintptr_t exceptionAddress,
+  Accept accept,
   DWORD* outCode,
   std::uint64_t* outAddress) noexcept
 {
@@ -385,18 +415,7 @@ bool TryPublishKeptExceptionForCrashLoggerFault(
   }
   bool published = false;
   const DWORD keptTid = kept.tid.load(std::memory_order_relaxed);
-  const auto keptQpc = kept.qpc.load(std::memory_order_relaxed);
-  // Recent, and kept after the last published crash (see g_lastPublishedCrashQpc).
-  const bool keptIsCurrent = IsKeptExceptionRecent(shm, keptQpc, QpcNow()) &&
-    keptQpc > g_lastPublishedCrashQpc.load(std::memory_order_relaxed);
-  if (ClassifyCrashLoggerFault(
-        IsCrashCaptureFrozen(shm),
-        exceptionAddress,
-        g_crashLoggerRange.Load(),
-        g_crashLoggerSseRange.Load(),
-        keptTid != 0u,
-        keptTid == tid,
-        keptIsCurrent) == CrashLoggerFaultAction::kRecordKeptException) {
+  if (accept(kept, keptTid)) {
     EXCEPTION_POINTERS keptPointers{ &kept.record, &kept.context };
     published = TryPublishCrashRecord(shm, &keptPointers, kept.record.ExceptionCode);
     if (published) {
@@ -408,6 +427,106 @@ bool TryPublishKeptExceptionForCrashLoggerFault(
   }
   kept.busy.store(0, std::memory_order_release);
   return published;
+}
+
+// Handles a fatal-code exception inside CrashLogger (see ClassifyCrashLoggerFault):
+// records the kept exception CrashLogger is reporting, if any. Returns false
+// when the exception should be ignored. On success the incident is frozen.
+bool TryPublishKeptExceptionForCrashLoggerFault(
+  skydiag::SharedLayout* shm,
+  std::uintptr_t exceptionAddress,
+  DWORD* outCode,
+  std::uint64_t* outAddress) noexcept
+{
+  const DWORD tid = GetCurrentThreadId();
+  return TryPublishThreadKeptException(
+    shm,
+    [&](const KeptException& kept, DWORD keptTid) noexcept {
+      return ClassifyCrashLoggerFault(
+               IsCrashCaptureFrozen(shm),
+               exceptionAddress,
+               g_crashLoggerRange.Load(),
+               g_crashLoggerSseRange.Load(),
+               keptTid != 0u,
+               keptTid == tid,
+               IsKeptExceptionCurrent(kept.qpc.load(std::memory_order_relaxed), KeptExceptionMaxAgeQpc(shm))) ==
+             CrashLoggerFaultAction::kRecordKeptException;
+    },
+    outCode,
+    outAddress);
+}
+
+// Whether the fault is nested in the dispatch of this thread's kept exception
+// with CrashLogger between the two (SelectCrashLoggerStackScanWindow): the
+// kept exception's CONTEXT is still in place above the fault, and a CrashLogger
+// code address is on the stack between them. Reads only the current thread's
+// stack above the fault, which is committed, and at most a bounded amount.
+bool IsCrashLoggerReportingKeptException(std::uintptr_t faultSp, const KeptException& kept) noexcept
+{
+  const auto crashLoggerRange = g_crashLoggerRange.Load();
+  const auto crashLoggerSseRange = g_crashLoggerSseRange.Load();
+  if (crashLoggerRange.begin == 0u && crashLoggerSseRange.begin == 0u) {
+    return false;
+  }
+  const auto* const tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+  const auto stackLow = reinterpret_cast<std::uintptr_t>(tib->StackLimit);
+  const auto stackHigh = reinterpret_cast<std::uintptr_t>(tib->StackBase);
+  const auto contextAddress = kept.dispatchContextAddress;
+  const auto window = SelectCrashLoggerStackScanWindow(
+    faultSp, contextAddress, stackLow, stackHigh, kCrashLoggerStackScanMaxBytes);
+  if (window.begin == 0u || contextAddress > stackHigh - sizeof(CONTEXT)) {
+    return false;
+  }
+  // Once the exception was handled, its stack was unwound and reused.
+  const auto* const dispatchContext = reinterpret_cast<const volatile CONTEXT*>(contextAddress);
+  if (dispatchContext->Rip != kept.context.Rip || dispatchContext->Rsp != kept.context.Rsp) {
+    return false;
+  }
+  for (auto at = window.begin; at < window.end; at += sizeof(std::uintptr_t)) {
+    const auto value = *reinterpret_cast<const volatile std::uintptr_t*>(at);
+    if (IsInCrashLoggerModule(value, crashLoggerRange, crashLoggerSseRange)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Handles a fatal-code exception outside CrashLogger. When CrashLogger is
+// reporting this thread's kept exception and its report faults in game or
+// runtime code, that fault is a side effect: record the kept exception
+// instead. Returns false otherwise, and the fault itself is then recorded as
+// before; the scan never makes a fault ignored.
+bool TryPublishKeptExceptionForCrashLoggerSideFault(
+  skydiag::SharedLayout* shm,
+  const CONTEXT* faultContext,
+  DWORD* outCode,
+  std::uint64_t* outAddress) noexcept
+{
+  if (g_crashHookMode != 1) {
+    return false;
+  }
+  return TryPublishThreadKeptException(
+    shm,
+    [&](const KeptException& kept, DWORD keptTid) noexcept {
+      return keptTid == GetCurrentThreadId() &&
+             IsKeptExceptionCurrent(kept.qpc.load(std::memory_order_relaxed), KeptExceptionMaxAgeQpc(shm)) &&
+             IsCrashLoggerReportingKeptException(static_cast<std::uintptr_t>(faultContext->Rsp), kept);
+    },
+    outCode,
+    outAddress);
+}
+
+// Signals the helper about a crash record published outside the vectored
+// handler. Same fixed-size, allocation-free steps as the VEH fatal path.
+void SignalPublishedCrash(DWORD code, std::uint64_t address) noexcept
+{
+  skydiag::EventPayload p{};
+  p.a = code;
+  p.b = address;
+  PushEventAlways(skydiag::EventType::kCrash, p, sizeof(p));
+  if (HANDLE ev = GetCrashEvent()) {
+    SetEvent(ev);
+  }
 }
 
 LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
@@ -434,7 +553,9 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
       if (!TryPublishKeptExceptionForCrashLoggerFault(shm, exceptionAddress, &recordedCode, &recordedAddress)) {
         return EXCEPTION_CONTINUE_SEARCH;
       }
-    } else if (!TryPublishCrashRecord(shm, ep, code)) {
+    } else if (
+      !TryPublishKeptExceptionForCrashLoggerSideFault(shm, ep->ContextRecord, &recordedCode, &recordedAddress) &&
+      !TryPublishCrashRecord(shm, ep, code)) {
       return EXCEPTION_CONTINUE_SEARCH;
     }
 
@@ -468,6 +589,55 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// Top-level filter, chained in front of the previous one. Windows calls it
+// only for an exception that no frame handler took, right before the process
+// ends. In fatal-only mode the vectored handler skips C++ throws, breakpoints
+// and other non-fatal codes because they are usually handled; when one gets
+// here it was not, so this records it. Without CrashLogger faulting on the
+// same thread (TryPublishKeptExceptionForCrashLoggerFault), nothing recorded
+// it: the CRT's filter calls terminate() and the process ends by __fastfail.
+LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
+{
+  auto* shm = GetShared();
+  if (shm && ep && ep->ExceptionRecord && ep->ContextRecord && g_crashHookMode == 1) {
+    const DWORD code = ep->ExceptionRecord->ExceptionCode;
+    // Fatal codes were offered to the vectored handler at first chance.
+    if (!ShouldRecordException(code) && TryPublishCrashRecord(shm, ep, code)) {
+      SignalPublishedCrash(code, reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress));
+    }
+  }
+  const auto previous = g_previousUnhandledExceptionFilter.load(std::memory_order_acquire);
+  return previous ? previous(ep) : EXCEPTION_CONTINUE_SEARCH;
+}
+
+// abort() raises SIGABRT before it ends the process. A throw that leaves a
+// noexcept function, or one caught only to call terminate(), never reaches the
+// top-level filter: terminate() and abort() run right after it is thrown.
+// Record this thread's kept throw then, if it is that recent.
+void __cdecl AbortSignalHandler(int signalNumber) noexcept
+{
+  if (auto* shm = GetShared(); shm && g_crashHookMode == 1) {
+    const std::uint64_t qpcFreq = shm->header.qpc_freq != 0u ? shm->header.qpc_freq : 10000000ull;
+    const std::uint64_t maxAgeQpc = kAbortKeptExceptionMaxAgeSeconds * qpcFreq;
+    DWORD code = 0;
+    std::uint64_t address = 0;
+    if (TryPublishThreadKeptException(
+          shm,
+          [&](const KeptException& kept, DWORD keptTid) noexcept {
+            return keptTid == GetCurrentThreadId() &&
+                   IsKeptExceptionCurrent(kept.qpc.load(std::memory_order_relaxed), maxAgeQpc);
+          },
+          &code,
+          &address)) {
+      SignalPublishedCrash(code, address);
+    }
+  }
+  const auto previous = g_previousAbortSignalHandler.load(std::memory_order_acquire);
+  if (previous != SIG_DFL && previous != SIG_IGN && previous != SIG_ERR) {
+    previous(signalNumber);
+  }
+}
+
 }  // namespace
 
 void RefreshCrashLoggerModuleRanges() noexcept
@@ -487,6 +657,18 @@ bool InstallCrashHandler(std::uint32_t crashHookMode)
 
   // First=1 to run early, but we never consume the exception.
   PVOID h = AddVectoredExceptionHandler(/*First=*/1, VectoredHandler);
+
+  // Fatal-only mode leaves unhandled C++ throws and breakpoints to these two;
+  // mode 2 already records every exception at first chance. Each is installed
+  // once and chains the handler it replaces (installing twice would chain to
+  // itself).
+  static std::atomic<bool> s_lastChanceHandlersInstalled{ false };
+  if (h != nullptr && crashHookMode == 1 && !s_lastChanceHandlersInstalled.exchange(true)) {
+    g_previousUnhandledExceptionFilter.store(
+      SetUnhandledExceptionFilter(UnhandledExceptionFilterHook), std::memory_order_release);
+    const AbortSignalHandlerFn previousAbort = std::signal(SIGABRT, AbortSignalHandler);
+    g_previousAbortSignalHandler.store(previousAbort == SIG_ERR ? nullptr : previousAbort, std::memory_order_release);
+  }
   return h != nullptr;
 }
 

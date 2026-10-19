@@ -92,6 +92,29 @@ int main()
     false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, false) ==
     CrashLoggerFaultAction::kIgnore);
 
+  // A fault outside CrashLogger is checked for CrashLogger frames only between
+  // it and the kept exception's dispatch CONTEXT, on this thread's stack.
+  using skydiag::plugin::SelectCrashLoggerStackScanWindow;
+  constexpr std::uintptr_t kStackLow = 0x10000u;
+  constexpr std::uintptr_t kStackHigh = 0x40000u;
+  constexpr std::uintptr_t kScanMax = 0x10000u;
+  constexpr auto kNested = SelectCrashLoggerStackScanWindow(0x20004u, 0x22000u, kStackLow, kStackHigh, kScanMax);
+  static_assert(kNested.begin == 0x20008u && kNested.end == 0x22000u, "aligned window from the fault up");
+  constexpr auto kDeep = SelectCrashLoggerStackScanWindow(0x20000u, 0x3F000u, kStackLow, kStackHigh, kScanMax);
+  static_assert(kDeep.begin == 0x20000u && kDeep.end == 0x30000u, "bounded scan");
+  static_assert(
+    SelectCrashLoggerStackScanWindow(0x22000u, 0x20000u, kStackLow, kStackHigh, kScanMax).begin == 0u,
+    "a fault above the kept exception is not nested in its dispatch");
+  static_assert(
+    SelectCrashLoggerStackScanWindow(0x8000u, 0x22000u, kStackLow, kStackHigh, kScanMax).begin == 0u,
+    "a stack pointer below the thread's stack is not scanned");
+  static_assert(
+    SelectCrashLoggerStackScanWindow(0x20000u, 0x48000u, kStackLow, kStackHigh, kScanMax).begin == 0u,
+    "a kept exception from another stack is not scanned");
+  static_assert(
+    SelectCrashLoggerStackScanWindow(0x20000u, 0u, kStackLow, kStackHigh, kScanMax).begin == 0u,
+    "no window without a kept exception");
+
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const auto heartbeatPath = repoRoot / "plugin" / "src" / "Heartbeat.cpp";
   const auto resourceHooksPath = repoRoot / "plugin" / "src" / "ResourceHooks.cpp";
@@ -386,6 +409,28 @@ int main()
     "RefreshCrashLoggerModuleRanges()",
     "AddVectoredExceptionHandler(",
     "CrashLogger module ranges must be cached before the vectored handler can run.");
+  AssertContains(
+    installCrashHandlerBody,
+    "SetUnhandledExceptionFilter(UnhandledExceptionFilterHook)",
+    "Fatal-only mode must record an unhandled C++ throw or breakpoint that no CrashLogger fault reports.");
+  AssertContains(
+    installCrashHandlerBody,
+    "std::signal(SIGABRT, AbortSignalHandler)",
+    "Fatal-only mode must record a throw that terminate() ends the process for.");
+  const std::string unhandledFilterBody =
+    ExtractFunctionBody(crashHandler, "LONG WINAPI UnhandledExceptionFilterHook(");
+  AssertContains(
+    unhandledFilterBody,
+    "!ShouldRecordException(code)",
+    "The top-level filter must leave fatal codes to the vectored handler's first-chance record.");
+  AssertContains(
+    unhandledFilterBody,
+    "previous(ep)",
+    "The top-level filter must chain the filter it replaced.");
+  AssertContains(
+    ExtractFunctionBody(crashHandler, "void __cdecl AbortSignalHandler("),
+    "previous(signalNumber)",
+    "The SIGABRT handler must chain the handler it replaced.");
 
   // CrashLogger is an SKSE plugin and can load after us, leaving the install-time
   // lookup empty. Without a lifecycle refresh, nested-fault suppression would be

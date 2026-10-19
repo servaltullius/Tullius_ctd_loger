@@ -29,8 +29,9 @@ jobs:
       code: ${{ steps.diff.outputs.code }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Compare with the base branch
@@ -78,18 +79,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          persist-credentials: false
           fetch-depth: 0  # the pull request diff below needs the base commit
           submodules: true  # extern/CommonLibSSE-NG (VR is off, so not recursive)
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           dotnet-version: "8.0.x"
 
@@ -108,10 +110,10 @@ jobs:
           & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
 
       - name: Setup vcpkg binary cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/AppData/Local/vcpkg/archives
-          key: vcpkg-archives-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json') }}
+          key: vcpkg-archives-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/triplets/*.cmake') }}
           restore-keys: |
             vcpkg-archives-
 
@@ -174,7 +176,7 @@ jobs:
           if (-not $tidy) { throw "clang-tidy.exe not found" }
           $scope = @()
           if ($env:EVENT_NAME -eq "pull_request" -and $env:BASE_SHA) { $scope = @("--changed-since", $env:BASE_SHA) }
-          python scripts/run_clang_tidy.py --build-dir build-win --clang-tidy "$tidy" --jobs 4 @scope
+          python scripts/run_clang_tidy.py --build-dir build-win --clang-tidy "$tidy" --jobs 4 --expect-major 20 @scope
 
       - name: Build WinUI shell
         shell: cmd
@@ -213,7 +215,7 @@ jobs:
 
       - name: Upload zip artifacts
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tullius-ctd-logger-windows-zip
           path: |

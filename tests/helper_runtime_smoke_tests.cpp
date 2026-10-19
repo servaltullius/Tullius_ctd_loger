@@ -56,7 +56,7 @@ void AddHeartbeatNamingMainThread(skydiag::SharedLayout* shared, std::uint32_t m
   event.type = static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat);
   event.size = static_cast<std::uint16_t>(sizeof(event.payload));
   event.payload.b = mainTid;
-  event.seq = 2u;
+  event.seq = shared->header.write_index * 2u;  // committed for its ring index, as the plugin writes it
   shared->header.write_index = shared->header.write_index + 1u;
 }
 
@@ -396,11 +396,15 @@ void TestStableSnapshot_PerEntrySeqlocksRejectTornRingData()
   Require(
     CaptureStableSharedSnapshot(shared.get(), sizeof(*shared), &unstableSnapshot),
     "An unstable ring entry must not invalidate the coherent crash snapshot");
+  // The source entries are odd already, so a plain copy would also be odd:
+  // the snapshot must hold the cleared invalid marker (seq 1, no payload).
+  const auto& unstableEvent = unstableSnapshot.layout()->events[0];
   Require(
-    (unstableSnapshot.layout()->events[0].seq & 1u) != 0u,
+    unstableEvent.seq == 1u && unstableEvent.payload.a == 0u,
     "Overlapping blackbox entry must be marked invalid instead of copied torn");
+  const auto& unstableResource = unstableSnapshot.layout()->resources.entries[0];
   Require(
-    (unstableSnapshot.layout()->resources.entries[0].seq & 1u) != 0u,
+    unstableResource.seq == 1u && unstableResource.path_hash == 0u,
     "Overlapping resource entry must be marked invalid instead of copied torn");
 
   std::atomic<bool> stop{false};

@@ -365,21 +365,28 @@ inline skydiag::helper::HelperConfig MakeTestConfig()
   return cfg;
 }
 
-// Closes a MessageBox shown by another thread of this process and waits until
-// it is gone. A single-button MessageBox gives its OK button the IDCANCEL id,
-// so WM_COMMAND/IDOK is ignored; WM_CLOSE works for every MessageBox type.
-inline bool CloseDialogAndWait(const wchar_t* title, DWORD timeoutMs = 10000)
+// Closes the MessageBox that `dialogThread` shows and joins the thread. It
+// keeps closing until the thread has returned, so a dialog that appears late
+// is closed too; checking only that no dialog was open let join() wait
+// forever on one that appeared afterwards. On timeout the thread is detached
+// and false returned, so the test fails instead of hanging. A single-button
+// MessageBox gives its OK button the IDCANCEL id, so WM_COMMAND/IDOK is
+// ignored; WM_CLOSE works for every MessageBox type.
+inline bool CloseDialogAndJoin(std::thread& dialogThread, const wchar_t* title, DWORD timeoutMs = 30000)
 {
+  const HANDLE thread = static_cast<HANDLE>(dialogThread.native_handle());
   const ULONGLONG deadline = GetTickCount64() + timeoutMs;
-  while (GetTickCount64() < deadline) {
-    const HWND hwnd = FindWindowW(L"#32770", title);
-    if (!hwnd) {
-      return true;
+  while (WaitForSingleObject(thread, 50) == WAIT_TIMEOUT) {
+    if (GetTickCount64() >= deadline) {
+      dialogThread.detach();
+      return false;
     }
-    PostMessageW(hwnd, WM_CLOSE, 0, 0);
-    Sleep(50);
+    if (const HWND hwnd = FindWindowW(L"#32770", title)) {
+      PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    }
   }
-  return FindWindowW(L"#32770", title) == nullptr;
+  dialogThread.join();
+  return true;
 }
 
 inline void AssertContains(std::string_view haystack, std::string_view needle, const char* message)
