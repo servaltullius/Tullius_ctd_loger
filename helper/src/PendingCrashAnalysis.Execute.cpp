@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "CaptureCommon.h"
 #include "DumpToolLaunch.h"
@@ -92,7 +93,8 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
   const PendingCrashRecaptureContext& context)
 {
   CrashRecaptureArtifacts written{};
-  if (!context.manifestPath.empty() && std::filesystem::exists(context.manifestPath)) {
+  std::error_code manifestEc;
+  if (!context.manifestPath.empty() && std::filesystem::exists(context.manifestPath, manifestEc)) {
     std::wstring manifestErr;
     if (!TryUpdateIncidentManifestRecaptureEvaluation(
           context.manifestPath,

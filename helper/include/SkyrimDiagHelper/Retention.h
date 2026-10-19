@@ -137,17 +137,17 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::filesystem::path& dir, 
   //   <stem>_SkyrimDiagSummary.json
   //   <stem>_SkyrimDiagReport.txt
   //   <stem>_SkyrimDiagBlackbox.jsonl
-  std::error_code ec;
-  for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
-    if (ec) {
-      break;
-    }
-    if (!ent.is_regular_file(ec)) {
+  // increment(ec), not the range-for's operator++, which throws when the
+  // folder becomes unreadable mid-scan (a removed drive).
+  std::error_code iterEc;
+  for (std::filesystem::directory_iterator it(dir, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+    std::error_code ec;
+    if (!it->is_regular_file(ec)) {
       continue;
     }
-    const auto name = PathPartUtf8(ent.path().filename());
+    const auto name = PathPartUtf8(it->path().filename());
     if (StartsWith(name, stem + "_")) {
-      std::filesystem::remove(ent.path(), ec);
+      std::filesystem::remove(it->path(), ec);
     }
   }
 }
@@ -160,15 +160,13 @@ struct DatedFile {
 inline std::vector<std::filesystem::path> CollectRegularFiles(const std::filesystem::path& dir)
 {
   std::vector<std::filesystem::path> files;
-  std::error_code ec;
-  for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
-    if (ec) {
-      break;
-    }
-    if (!ent.is_regular_file(ec)) {
+  std::error_code iterEc;
+  for (std::filesystem::directory_iterator it(dir, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
+    std::error_code ec;
+    if (!it->is_regular_file(ec)) {
       continue;
     }
-    files.push_back(ent.path());
+    files.push_back(it->path());
   }
   return files;
 }

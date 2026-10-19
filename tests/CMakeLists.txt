@@ -432,6 +432,12 @@ add_executable(skydiag_helper_preflight_guard_tests
 
 add_test(NAME skydiag_helper_preflight_guard_tests COMMAND skydiag_helper_preflight_guard_tests)
 
+add_executable(skydiag_helper_nothrow_filesystem_guard_tests
+  helper_nothrow_filesystem_guard_tests.cpp
+)
+
+add_test(NAME skydiag_helper_nothrow_filesystem_guard_tests COMMAND skydiag_helper_nothrow_filesystem_guard_tests)
+
 add_executable(skydiag_retention_tests
   retention_tests.cpp
 )
