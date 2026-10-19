@@ -332,6 +332,22 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
     "Path.Combine(mo2BaseDirectory, \"overwrite\", \"SKSE\", \"Plugins\", \"Tullius Ctd Logs\")",
     "MO2 blank default should target the dedicated output subfolder.");
   RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");
+  RequireContains(
+    service,
+    "roots.AddRange(BuildOutputDirFallbackRoots(layout, isKorean));",
+    "Discovery must also search the folders the helper falls back to when OutputDir cannot be written.");
+  RequireContains(
+    service,
+    "candidates.Add(Path.Combine(layout.HelperDirectoryPath, DefaultOutputSubfolderName));",
+    "The helper's first OutputDir fallback is the default folder next to it.");
+  RequireContains(
+    service,
+    "candidates.Add(Path.Combine(localAppData, \"SkyrimDiag\", DefaultOutputSubfolderName));",
+    "The helper's last OutputDir fallback is %LOCALAPPDATA%\\SkyrimDiag\\Tullius Ctd Logs.");
+  RequireContains(
+    service,
+    "if (Directory.Exists(candidate))",
+    "Fallback folders are listed only when they exist.");
 
   const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "덤프 출력 위치", "User-facing copy must talk about dump output locations.");

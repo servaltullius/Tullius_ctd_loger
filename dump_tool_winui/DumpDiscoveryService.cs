@@ -183,22 +183,62 @@ internal static class DumpDiscoveryService
     {
         if (!TryResolveHelperLayout(out var layout))
         {
-            return Array.Empty<DumpSearchRoot>();
+            return BuildOutputDirFallbackRoots(null, isKorean);
         }
 
+        var roots = new List<DumpSearchRoot>();
         if (TryResolveConfiguredOutputRoot(layout, out var configuredOutputRoot))
         {
-            return new[]
-            {
-                new DumpSearchRoot(
-                    configuredOutputRoot,
-                    DumpSearchRootKind.Automatic,
-                    isKorean ? "설정된 OutputDir" : "Configured OutputDir",
-                    false),
-            };
+            roots.Add(new DumpSearchRoot(
+                configuredOutputRoot,
+                DumpSearchRootKind.Automatic,
+                isKorean ? "설정된 OutputDir" : "Configured OutputDir",
+                false));
+        }
+        else
+        {
+            roots.AddRange(BuildDefaultOutputRoots(layout, isKorean));
         }
 
-        return BuildDefaultOutputRoots(layout, isKorean);
+        roots.AddRange(BuildOutputDirFallbackRoots(layout, isKorean));
+        return roots;
+    }
+
+    // The helper writes here when OutputDir cannot be written (MakeOutputBase
+    // in helper/src/HelperCommon.cpp): the default "Tullius Ctd Logs" folder
+    // next to the helper (MO2 overwrite under MO2), then
+    // %LOCALAPPDATA%\SkyrimDiag\Tullius Ctd Logs. Listed only when they exist;
+    // BuildSearchRoots drops one that is already a search root.
+    private static IReadOnlyList<DumpSearchRoot> BuildOutputDirFallbackRoots(HelperLayout? layout, bool isKorean)
+    {
+        var candidates = new List<string>();
+        if (layout is not null)
+        {
+            if (TryInferMo2BaseDirectory(layout.HelperDirectoryPath, out var mo2BaseDirectory))
+            {
+                candidates.Add(Path.Combine(mo2BaseDirectory, "overwrite", "SKSE", "Plugins", DefaultOutputSubfolderName));
+            }
+
+            candidates.Add(Path.Combine(layout.HelperDirectoryPath, DefaultOutputSubfolderName));
+        }
+
+        var localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (!string.IsNullOrWhiteSpace(localAppData) && Path.IsPathFullyQualified(localAppData))
+        {
+            candidates.Add(Path.Combine(localAppData, "SkyrimDiag", DefaultOutputSubfolderName));
+        }
+
+        var label = isKorean ? "OutputDir 대체 출력 위치" : "OutputDir fallback folder";
+        var roots = new List<DumpSearchRoot>();
+        foreach (var candidate in candidates)
+        {
+            if (Directory.Exists(candidate))
+            {
+                roots.Add(new DumpSearchRoot(candidate, DumpSearchRootKind.Automatic, label, false));
+            }
+        }
+
+        return roots;
     }
 
     private static bool TryResolveHelperLayout(out HelperLayout layout)
