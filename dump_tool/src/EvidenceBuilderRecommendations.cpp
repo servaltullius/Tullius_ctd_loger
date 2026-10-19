@@ -669,15 +669,18 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? L"[Interpretation] Crash Logger logged this C++ exception as the unhandled exception that crashed the game, so this is a real CTD, not a caught throw. Start with the module that threw it (first non-system module in the call stack)."
         : L"[해석] Crash Logger도 이 C++ 예외를 게임을 끝낸 처리되지 않은 예외로 기록했습니다. 잡힌 예외(오탐)가 아니라 실제 CTD입니다. 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
     } else if (r.exc_code == 0xE06D7363u) {
+      // With the default CrashHookMode=1 the plugin records a C++ exception
+      // only while Crash Logger reports it as a crash (CrashHandler.cpp), so
+      // lead with that; a caught throw is the CrashHookMode=2 case.
       r.recommendations.push_back(en
-        ? L"[Interpretation] 0xE06D7363 is a common C++ exception (throw) code. It can occur during normal throw/catch."
-        : L"[해석] 0xE06D7363은 흔한 C++ 예외(throw) 코드입니다. 정상 동작 중에도 throw/catch로 발생할 수 있습니다.");
+        ? L"[Interpretation] 0xE06D7363 is a C++ exception (throw). With the default CrashHookMode=1 it is recorded only while Crash Logger reports it as a crash, so if the game closed, start with the module that threw it (the first non-system module in the call stack)."
+        : L"[해석] 0xE06D7363은 C++ 예외(throw) 코드입니다. 기본값 CrashHookMode=1에서는 Crash Logger가 크래시로 보고할 때만 기록되므로, 게임이 꺼졌다면 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
       r.recommendations.push_back(en
-        ? L"[Interpretation] If the game did not actually crash, this dump may be a handled exception false positive."
-        : L"[해석] 게임이 실제로 튕기지 않았다면, 이 덤프는 '실제 CTD'가 아니라 'handled exception 오탐'일 수 있습니다.");
+        ? L"[Interpretation] If the game kept running, this dump is not a real CTD: the exception was caught and handled."
+        : L"[해석] 게임이 계속 실행됐다면 이 덤프는 실제 CTD가 아니라, 게임이 잡아서 처리한 예외입니다.");
       r.recommendations.push_back(en
-        ? L"[Config] Using SkyrimDiag.ini CrashHookMode=1 (fatal only) greatly reduces these false positives."
-        : L"[설정] SkyrimDiag.ini의 CrashHookMode=1(치명 예외만)로 두면 이런 오탐을 크게 줄일 수 있습니다.");
+        ? L"[Config] If you changed CrashHookMode to 2 in SkyrimDiag.ini, set it back to 1 (the default); mode 2 also records C++ exceptions the game caught and handled."
+        : L"[설정] SkyrimDiag.ini에서 CrashHookMode=2로 바꿨다면 기본값 1로 되돌리세요. 2에서는 게임이 잡아서 처리한 C++ 예외까지 기록됩니다.");
     }
   }
 
@@ -885,7 +888,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if ((r.state_flags & skydiag::kState_Loading) != 0u) {
+  // Crash advice; a freeze or snapshot taken on a loading screen is not one.
+  if (isCrashLike && (r.state_flags & skydiag::kState_Loading) != 0u) {
     r.recommendations.push_back(en
       ? L"[Loading] Crashes right after load screens often involve animation/mesh/texture/skeleton/script initialization."
       : L"[로딩 중] 로딩 화면/세이브 로드 직후 크래시는 애니메이션/메쉬/텍스처/스켈레톤/스크립트 초기화 쪽이 흔합니다.");
