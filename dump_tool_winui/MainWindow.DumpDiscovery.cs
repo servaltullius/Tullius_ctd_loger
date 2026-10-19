@@ -9,16 +9,34 @@ namespace SkyrimDiagDumpToolWinUI;
 
 public sealed partial class MainWindow
 {
-    private Task<bool> RefreshDiscoveredDumpsAsync()
+    private async Task<bool> RefreshDiscoveredDumpsAsync()
     {
+        // The scan touches every registered folder, and an offline network
+        // folder can stall it for tens of seconds, so it runs off the UI
+        // thread. Only the newest scan may update the list.
+        var generation = ++_dumpDiscoveryGeneration;
         try
         {
             var hintDumpPath = !string.IsNullOrWhiteSpace(DumpPathBox.Text)
                 ? DumpPathBox.Text.Trim()
                 : _startupOptions.DumpPath;
+            var isKorean = _vm.IsKorean;
 
-            var recentDumps = DumpDiscoveryService.DiscoverRecentDumps(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
-            var searchLocations = DumpDiscoveryService.BuildSearchLocationItems(_dumpDiscoveryState, hintDumpPath, _vm.IsKorean);
+            var (state, recentDumps, searchLocations) = await Task.Run(() =>
+            {
+                // Pick up folders another viewer window registered meanwhile.
+                var latestState = DumpDiscoveryStore.Load();
+                return (
+                    latestState,
+                    DumpDiscoveryService.DiscoverRecentDumps(latestState, hintDumpPath, isKorean),
+                    DumpDiscoveryService.BuildSearchLocationItems(latestState, hintDumpPath, isKorean));
+            });
+            if (generation != _dumpDiscoveryGeneration)
+            {
+                return true;
+            }
+
+            _dumpDiscoveryState = state;
             _vm.PopulateDumpDiscovery(recentDumps, searchLocations, BuildDumpDiscoveryStatusText(recentDumps.Count, searchLocations.Count));
 
             RecentDumpsStatusText.Text = _vm.RecentDumpStatusText;
@@ -26,12 +44,17 @@ public sealed partial class MainWindow
             RecentDumpsEmptyState.Visibility = _vm.RecentDumps.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
             DumpSearchLocationsEmptyText.Visibility = _vm.DumpSearchLocations.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
             UpdateDumpSearchLocationSelectionState();
-            return Task.FromResult(true);
+            return true;
         }
         catch (Exception ex)
         {
+            if (generation != _dumpDiscoveryGeneration)
+            {
+                return true;
+            }
+
             StatusText.Text = T("Dump discovery failed: ", "덤프 검색 실패: ") + ex.Message;
-            return Task.FromResult(false);
+            return false;
         }
     }
 
@@ -69,9 +92,9 @@ public sealed partial class MainWindow
 
         try
         {
-            var nextState = DumpDiscoveryStore.PromoteLearnedRoot(_dumpDiscoveryState, directoryPath);
-            await DumpDiscoveryStore.SaveAsync(nextState, CancellationToken.None);
-            _dumpDiscoveryState = nextState;
+            _dumpDiscoveryState = await DumpDiscoveryStore.UpdateAsync(
+                state => DumpDiscoveryStore.PromoteLearnedRoot(state, directoryPath),
+                CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -128,9 +151,10 @@ public sealed partial class MainWindow
                     return;
                 }
 
-                var nextState = DumpDiscoveryStore.AddRegisteredRoot(_dumpDiscoveryState, folder.Path);
-                await DumpDiscoveryStore.SaveAsync(nextState, CancellationToken.None);
-                _dumpDiscoveryState = nextState;
+                var folderPath = folder.Path;
+                _dumpDiscoveryState = await DumpDiscoveryStore.UpdateAsync(
+                    state => DumpDiscoveryStore.AddRegisteredRoot(state, folderPath),
+                    CancellationToken.None);
                 DumpSearchLocationsPanel.Visibility = Visibility.Visible;
                 if (await RefreshDiscoveredDumpsAsync())
                 {
@@ -151,9 +175,10 @@ public sealed partial class MainWindow
                     return;
                 }
 
-                var nextState = DumpDiscoveryStore.RemoveRoot(_dumpDiscoveryState, item.Path);
-                await DumpDiscoveryStore.SaveAsync(nextState, CancellationToken.None);
-                _dumpDiscoveryState = nextState;
+                var removedPath = item.Path;
+                _dumpDiscoveryState = await DumpDiscoveryStore.UpdateAsync(
+                    state => DumpDiscoveryStore.RemoveRoot(state, removedPath),
+                    CancellationToken.None);
                 if (await RefreshDiscoveredDumpsAsync())
                 {
                     StatusText.Text = T("Removed dump output location.", "덤프 출력 위치를 제거했습니다.");

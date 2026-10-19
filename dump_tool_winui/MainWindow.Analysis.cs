@@ -110,7 +110,9 @@ public sealed partial class MainWindow
             var cancellationToken = analysisCts.Token;
 
             await PromoteLearnedDumpLocationAsync(dumpPath);
-            await RefreshDiscoveredDumpsAsync();
+            // The recent-dump list refreshes in the background; the analysis
+            // does not depend on it.
+            _ = RefreshDiscoveredDumpsAsync();
             cancellationToken.ThrowIfCancellationRequested();
 
             var options = _vm.BuildInvocationOptions(

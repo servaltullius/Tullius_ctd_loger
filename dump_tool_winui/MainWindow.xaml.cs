@@ -11,6 +11,7 @@ public sealed partial class MainWindow : Window
     private readonly DumpToolInvocationOptions _startupOptions;
     private readonly MainWindowViewModel _vm;
     private DumpDiscoveryState _dumpDiscoveryState = DumpDiscoveryStore.Load();
+    private int _dumpDiscoveryGeneration;
     private enum LayoutTier { Wide, Compact, Narrow }
     private LayoutTier _currentLayoutTier = (LayoutTier)(-1);
     private CancellationTokenSource? _analysisCts;
@@ -75,7 +76,9 @@ public sealed partial class MainWindow : Window
             _ = RunUiEventAsync(
                 async () =>
                 {
-                    await RefreshDiscoveredDumpsAsync();
+                    // Not awaited: an offline registered folder must not hold
+                    // back the analysis of the dump the helper opened us for.
+                    _ = RefreshDiscoveredDumpsAsync();
                     if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
                     {
                         await AnalyzeAsync(preferExistingArtifacts: true);
