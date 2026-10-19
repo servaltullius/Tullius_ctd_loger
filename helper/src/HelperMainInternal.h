@@ -22,6 +22,22 @@ namespace skydiag::helper::internal {
 inline constexpr int kHotkeyId = 0x5344;  // 'SD' (arbitrary)
 inline constexpr ULONGLONG kManualCaptureDebounceMs = 250;
 
+// A press within kManualCaptureDebounceMs of the end of the last manual
+// capture starts no new one (a last tick of 0 means none yet).
+constexpr bool ShouldDebounceManualCapture(ULONGLONG nowTick64, ULONGLONG lastCaptureTick64) noexcept
+{
+  return lastCaptureTick64 != 0 && nowTick64 >= lastCaptureTick64 &&
+         nowTick64 - lastCaptureTick64 < kManualCaptureDebounceMs;
+}
+
+// RegisterHotKey's modifiers for the manual capture hotkey: MOD_NOREPEAT, so
+// holding the chord down on a frozen game does not deliver WM_HOTKEY again
+// for each key repeat (each one a dump). Not part of the configured chord.
+constexpr UINT ManualCaptureHotkeyRegistrationModifiers(const ManualCaptureHotkey& hotkey) noexcept
+{
+  return static_cast<UINT>(hotkey.modifiers) | MOD_NOREPEAT;
+}
+
 struct HelperLoopState
 {
   CrashCaptureState crashCaptured{};

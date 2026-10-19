@@ -17,6 +17,7 @@
 #include "HelperLog.h"
 #include "HelperMainInternal.h"
 #include "HelperRuntimeTestUtils.h"
+#include "ManualCapture.h"
 #include "PssSnapshot.h"
 #include "RetentionWorker.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
@@ -571,6 +572,41 @@ void TestPssSnapshotWorksFromTheAttachHandle()
   std::filesystem::remove_all(outBase);
 }
 
+// The manual capture (hotkey) path: its dump and WCT names.
+void TestManualCaptureWritesItsArtifacts()
+{
+  const auto outBase = MakeTempDir(L"skydiag_manual_capture");
+  ClearLog(outBase);
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  LoadStats loadStats;
+  skydiag::helper::internal::DoManualCapture(MakeHangTestConfig(), proc, outBase, loadStats, 600u, L"test hotkey");
+
+  Require(
+    std::filesystem::exists(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Manual_", L".dmp")),
+    "a manual dump is written");
+  Require(
+    std::filesystem::exists(FindSingleFileByPrefix(outBase, L"SkyrimDiag_WCT_Manual_", L".json")),
+    "its wait chains are written");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "Manual capture triggered via test hotkey", "the trigger is logged");
+  ShutdownRetentionWorker();
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
+// A press within 250 ms of the end of the last manual capture starts none.
+static_assert(!skydiag::helper::internal::ShouldDebounceManualCapture(1'000u, 0u), "no capture yet");
+static_assert(skydiag::helper::internal::ShouldDebounceManualCapture(1'100u, 1'000u), "100 ms after one");
+static_assert(!skydiag::helper::internal::ShouldDebounceManualCapture(1'250u, 1'000u), "250 ms after one");
+static_assert(!skydiag::helper::internal::ShouldDebounceManualCapture(900u, 1'000u), "a clock behind the last one");
+// Holding the chord down must not register a capture per key repeat.
+static_assert(
+  skydiag::helper::internal::ManualCaptureHotkeyRegistrationModifiers({ MOD_CONTROL | MOD_SHIFT, VK_BACK }) ==
+  (MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT));
+
 // The helper loop end to end: the game exits during the hang grace wait, and
 // the loop still reaches its exit handling.
 void TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait()
@@ -653,6 +689,7 @@ int main()
     TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick();
     TestHandleHangTick_YieldsToACrashEvent();
     TestPssSnapshotWorksFromTheAttachHandle();
+    TestManualCaptureWritesItsArtifacts();
     TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait();
     TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame();
     TestLoadStatsAtomicSaveFailurePreservesExistingState();

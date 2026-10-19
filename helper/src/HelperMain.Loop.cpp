@@ -26,10 +26,7 @@ bool TryTriggerManualCapture(
   std::wstring_view source,
   ULONGLONG* lastManualCaptureTick)
 {
-  const ULONGLONG now = GetTickCount64();
-  if (lastManualCaptureTick &&
-      *lastManualCaptureTick != 0 &&
-      now - *lastManualCaptureTick < kManualCaptureDebounceMs) {
+  if (lastManualCaptureTick && ShouldDebounceManualCapture(GetTickCount64(), *lastManualCaptureTick)) {
     return false;
   }
 

@@ -302,7 +302,7 @@ void RegisterManualCaptureHotkeyIfEnabled(
   const ManualCaptureHotkey& hotkey = cfg.manualCaptureHotkey;
   const std::wstring chord = FormatManualCaptureHotkey(hotkey);
   ManualCaptureKeys().Start(hotkey, crashLoggerThreadDump, legacyManualCapture);
-  if (!RegisterHotKey(nullptr, kHotkeyId, hotkey.modifiers, hotkey.virtualKey)) {
+  if (!RegisterHotKey(nullptr, kHotkeyId, ManualCaptureHotkeyRegistrationModifiers(hotkey), hotkey.virtualKey)) {
     const DWORD le = GetLastError();
     std::wcerr << L"[SkyrimDiagHelper] Warning: RegisterHotKey(" << chord << L") failed: " << le << L"\n";
     AppendLogLine(outBase, L"Warning: RegisterHotKey(" + chord + L") failed: " + std::to_wstring(le) +
