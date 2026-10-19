@@ -2,6 +2,7 @@
 
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
+#include "Utf.h"
 
 #include <algorithm>
 #include <cwchar>
@@ -208,7 +209,8 @@ void BuildHistoryEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
       if (!details.empty()) {
         details += L"\n";
       }
-      const std::wstring modW = ToWideAscii(ms.module_name);
+      // History stores module names as UTF-8 (a Korean DLL name stays readable).
+      const std::wstring modW = Utf8ToWide(ms.module_name);
       if (ctx.en) {
         details += modW + L": " + std::to_wstring(ms.total_appearances) + L"/" +
           std::to_wstring(ms.total_crashes) + L" crashes, top " + std::to_wstring(ms.as_top_suspect) + L"x";

@@ -205,27 +205,34 @@ void AddActionableCandidateRecommendations(
   const bool hasHistoryFamily = CandidateHasFamily(*topCandidate, "history_repeat");
   const bool hasResourceFamily = CandidateHasFamily(*topCandidate, "resource_provider");
   const bool hasHangThreadGroupFamily = CandidateHasFamily(*topCandidate, "hang_thread_group");
-  const bool hasStandaloneCallstackFamily =
-    r.suspects_from_stackwalk &&
-    CandidateHasFamily(*topCandidate, "actionable_stack") &&
-    !hasFrameFamily &&
-    !CandidateHasFamily(*topCandidate, "crash_logger_object_ref") &&
-    !hasResourceFamily &&
-    topCandidate->score >= 5u;
+  // The same test as the summary sentence, so both name the Tullius callstack
+  // only when a real stack walk carries the candidate.
+  const bool hasStandaloneCallstackFamily = CandidateHasStandaloneCallstackSupport(r, *topCandidate);
   const bool hasScorableFirstChance = hasFirstChanceFamily && HasScorableFirstChanceContext(r.first_chance_summary);
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
   if (weakFaultLocationTopCandidate && hasFrameFamily) {
     const bool nearby = HasNearbyProbableDll(r);
+    // Only a candidate the stack also supports may say "both"; a frame alone
+    // is the reference clue the candidate list already calls it.
+    const bool hasStackFamily = CandidateHasFamily(*topCandidate, "actionable_stack");
+    const std::wstring nextEn = nearby
+      ? std::wstring(L"Compare nearby Crash Logger probable DLLs before isolating this mod.")
+      : std::wstring(L"Crash Logger names no other DLL nearby, so disable or update this mod and see whether the crash still happens.");
+    const std::wstring nextKo = nearby
+      ? std::wstring(L"이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
+      : std::wstring(L"Crash Logger가 함께 지목한 다른 DLL은 없으니, 이 모드를 끄거나 업데이트해 재현 여부를 확인하세요.");
     r.recommendations.push_back(en
-      ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
-          L", but this is still only the current fault-location cluster. " +
-          (nearby ? std::wstring(L"Compare nearby Crash Logger probable DLLs before isolating this mod.")
-                  : std::wstring(L"Crash Logger names no other DLL nearby, so disable or update this mod and see whether the crash still happens.")))
-      : (L"[행동 우선 후보] " + frameSupport + L"과 같은 덤프의 스택이 모두 " + candidateName +
-          L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. " +
-          (nearby ? std::wstring(L"이 모드를 바로 빼기 전에 Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
-                  : std::wstring(L"Crash Logger가 함께 지목한 다른 DLL은 없으니, 이 모드를 끄거나 업데이트해 재현 여부를 확인하세요."))));
+      ? (hasStackFamily
+          ? (L"[Actionable candidate] " + frameSupport + L" and the same-dump stack both land in " + candidateName +
+              L", but this is still only the current fault-location cluster. " + nextEn)
+          : (L"[Actionable candidate] " + frameSupport + L" lands in " + candidateName +
+              L", but this is still only the current fault location. " + nextEn))
+      : (hasStackFamily
+          ? (L"[행동 우선 후보] " + frameSupport + L"과 같은 덤프의 스택이 모두 " + candidateName +
+              L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. " + nextKo)
+          : (L"[행동 우선 후보] " + frameSupport + L"이 " + candidateName +
+              L"을(를) 가리키지만, 예외가 난 위치를 보여 줄 뿐입니다. " + nextKo)));
     r.recommendations.push_back(en
       ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
       : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 더 많은 정보를 담는 재수집 설정을 먼저 쓰세요.");
@@ -293,6 +300,20 @@ void AddActionableCandidateRecommendations(
                   L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")
               : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
                   L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL부터 확인하세요.")))
+      // One family is no multi-signal support; a Low one (the pointer scan)
+      // is a weak clue, a stronger one (a hook stub owner) just one signal.
+      : (topCandidate->family_count <= 1u && topCandidate->confidence_level == i18n::ConfidenceLevel::kLow)
+      ? (en
+          ? (L"[Actionable candidate] A single weak clue points to " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it, but do not treat it as the cause on this alone.")
+          : (L"[행동 우선 후보] 약한 단서 하나가 " + candidateName +
+              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 확인은 하되 이것만으로 원인이라고 단정하지 마세요."))
+      : topCandidate->family_count <= 1u
+      ? (en
+          ? (L"[Actionable candidate] One signal points to " + candidateName +
+              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+          : (L"[행동 우선 후보] 신호 하나가 " + candidateName +
+              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."))
       : (en
           ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
               L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
@@ -424,8 +445,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const SuspectItem* firstNonHookStackCandidate = nullptr;
   auto isActionableStackCandidate = [&](const SuspectItem& s) {
     return !minidump::IsKnownHookFramework(s.module_filename) &&
-           !minidump::IsSystemishModule(s.module_filename) &&
-           !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+           !minidump::IsSystemishModuleAt(s.module_filename, s.module_path) &&
            !minidump::IsGameExeModule(s.module_filename);
   };
   if (hasStackCandidate) {
@@ -439,8 +459,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool hasNonHookStackCandidate = (firstNonHookStackCandidate != nullptr);
   const bool topStackCandidateIsHookFramework = hasStackCandidate && minidump::IsKnownHookFramework(r.suspects[0].module_filename);
   const bool topStackCandidateIsSystem =
-    hasStackCandidate &&
-    (minidump::IsSystemishModule(r.suspects[0].module_filename) || minidump::IsLikelyWindowsSystemModulePath(r.suspects[0].module_path));
+    hasStackCandidate && minidump::IsSystemishModuleAt(r.suspects[0].module_filename, r.suspects[0].module_path);
   const bool preferStackCandidateOverFault =
     ctx.isHookFramework &&
     hasNonHookStackCandidate;
@@ -601,7 +620,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[BEES] BEES를 설치하거나(이미 설치했다면 skse64.log에서 BackportedESLSupport.dll이 로드되었는지 확인) 게임 런타임을 1.6.1130 이상으로 업데이트하세요.");
   }
 
-  if (!r.missing_masters.empty()) {
+  // The plugin_rules.json diagnosis already says this (with its own grade).
+  if (!r.missing_masters.empty() && !FindMissingMasterDiagnosis(r)) {
     r.recommendations.push_back(en
       ? L"[Masters] Install missing masters or disable dependent plugins."
       : L"[마스터] 누락된 마스터를 설치하거나 의존 플러그인을 비활성화하세요.");
@@ -649,15 +669,18 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         ? L"[Interpretation] Crash Logger logged this C++ exception as the unhandled exception that crashed the game, so this is a real CTD, not a caught throw. Start with the module that threw it (first non-system module in the call stack)."
         : L"[해석] Crash Logger도 이 C++ 예외를 게임을 끝낸 처리되지 않은 예외로 기록했습니다. 잡힌 예외(오탐)가 아니라 실제 CTD입니다. 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
     } else if (r.exc_code == 0xE06D7363u) {
+      // With the default CrashHookMode=1 the plugin records a C++ exception
+      // only while Crash Logger reports it as a crash (CrashHandler.cpp), so
+      // lead with that; a caught throw is the CrashHookMode=2 case.
       r.recommendations.push_back(en
-        ? L"[Interpretation] 0xE06D7363 is a common C++ exception (throw) code. It can occur during normal throw/catch."
-        : L"[해석] 0xE06D7363은 흔한 C++ 예외(throw) 코드입니다. 정상 동작 중에도 throw/catch로 발생할 수 있습니다.");
+        ? L"[Interpretation] 0xE06D7363 is a C++ exception (throw). With the default CrashHookMode=1 it is recorded only while Crash Logger reports it as a crash, so if the game closed, start with the module that threw it (the first non-system module in the call stack)."
+        : L"[해석] 0xE06D7363은 C++ 예외(throw) 코드입니다. 기본값 CrashHookMode=1에서는 Crash Logger가 크래시로 보고할 때만 기록되므로, 게임이 꺼졌다면 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
       r.recommendations.push_back(en
-        ? L"[Interpretation] If the game did not actually crash, this dump may be a handled exception false positive."
-        : L"[해석] 게임이 실제로 튕기지 않았다면, 이 덤프는 '실제 CTD'가 아니라 'handled exception 오탐'일 수 있습니다.");
+        ? L"[Interpretation] If the game kept running, this dump is not a real CTD: the exception was caught and handled."
+        : L"[해석] 게임이 계속 실행됐다면 이 덤프는 실제 CTD가 아니라, 게임이 잡아서 처리한 예외입니다.");
       r.recommendations.push_back(en
-        ? L"[Config] Using SkyrimDiag.ini CrashHookMode=1 (fatal only) greatly reduces these false positives."
-        : L"[설정] SkyrimDiag.ini의 CrashHookMode=1(치명 예외만)로 두면 이런 오탐을 크게 줄일 수 있습니다.");
+        ? L"[Config] If you changed CrashHookMode to 2 in SkyrimDiag.ini, set it back to 1 (the default); mode 2 also records C++ exceptions the game caught and handled."
+        : L"[설정] SkyrimDiag.ini에서 CrashHookMode=2로 바꿨다면 기본값 1로 되돌리세요. 2에서는 게임이 잡아서 처리한 C++ 예외까지 기록됩니다.");
     }
   }
 
@@ -865,7 +888,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
-  if ((r.state_flags & skydiag::kState_Loading) != 0u) {
+  // Crash advice; a freeze or snapshot taken on a loading screen is not one.
+  if (isCrashLike && (r.state_flags & skydiag::kState_Loading) != 0u) {
     r.recommendations.push_back(en
       ? L"[Loading] Crashes right after load screens often involve animation/mesh/texture/skeleton/script initialization."
       : L"[로딩 중] 로딩 화면/세이브 로드 직후 크래시는 애니메이션/메쉬/텍스처/스켈레톤/스크립트 초기화 쪽이 흔합니다.");

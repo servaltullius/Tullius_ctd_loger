@@ -107,8 +107,24 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
 // here as they are for candidates and history; evidence still lists them.
 const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const AnalysisResult& r);
 
+// The blackbox saw a save or cell finish loading in this session, so the game
+// got past loading its plugins (and their masters) at startup.
+bool GameReachedWorld(const AnalysisResult& r);
+// The plugin_rules.json diagnosis for missing masters, if it fired.
+const PluginRuleDiagnosis* FindMissingMasterDiagnosis(const AnalysisResult& r);
+
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
+// minidump::IsSystemishModuleAt for a module known here only by file name (an
+// actionable candidate): the path is taken from the dump's fault module or a
+// stack suspect of that name, so an ENB/ReShade d3d11.dll in the game folder
+// stays a mod.
+bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename);
+// The candidate rests on the Tullius callstack alone: a real stack walk (not
+// the pointer scan) put it first with Medium weight (>= 5), and no Crash Logger
+// frame or object ref, nearby resource or thread group backs it. History and
+// first-chance context do not count toward that weight.
+bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const ActionableCandidate& candidate);
 // Where a fault outside the mods happened, for the summary sentences:
 // "a Windows system DLL", or "external software (NVIDIA, NvTelemetryBridge64.dll)".
 std::wstring FaultPlace(const AnalysisResult& r, const EvidenceBuildContext& ctx);

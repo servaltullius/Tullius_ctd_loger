@@ -160,10 +160,63 @@ void TestConsensusModuleThreadGroupSupportsLogicalSynchronizationStall()
   const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
   assert(result.has_analysis);
   assert(result.state_id == "synchronization_stall_likely");
-  assert(result.support_quality == "multi_thread_consensus");
+  // support_quality describes the capture; the thread group is in state_id.
+  assert(result.support_quality == "unknown");
   assert(result.confidence_level == ConfidenceLevel::kMedium);
   assert(result.thread_module_consensus.module_filename == L"hdtsmp64.dll");
   assert(result.primary_reasons.size() == 3u);
+
+  // A PSS fallback stays visible next to a thread-group consensus (review L11).
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->pss_snapshot_requested = true;
+  input.wct->pss_snapshot_used = false;
+  const auto fallback = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(fallback.state_id == "synchronization_stall_likely");
+  assert(fallback.support_quality == "snapshot_fallback");
+}
+
+// A manual snapshot taken while the main thread still answered is no stuck
+// load; one taken while it did not, or an automatic hang capture, still is
+// (review L12).
+void TestManualLoadingSnapshotWithFreshHeartbeatIsNoLoaderStall()
+{
+  FreezeSignalInput input{};
+  input.is_snapshot_like = true;
+  input.is_manual_capture = true;
+  input.loading_context = true;
+  input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  input.wct->has = true;
+  input.wct->has_capture = true;
+  input.wct->capture_kind = "manual";
+  input.wct->isLoading = true;
+  input.wct->thresholdSec = 600u;
+  input.wct->secondsSinceHeartbeat = 0.4;
+
+  const auto fresh = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(fresh.state_id == "freeze_ambiguous");
+  assert(fresh.confidence_level == ConfidenceLevel::kLow);
+  bool explained = false;
+  for (const auto& reason : fresh.primary_reasons) {
+    explained = explained || reason.find(L"main thread was still responding") != std::wstring::npos;
+  }
+  assert(explained);
+
+  FreezeSignalInput stale = input;
+  stale.wct->secondsSinceHeartbeat = 45.0;
+  assert(BuildFreezeCandidateConsensus(stale, Language::kEnglish).state_id == "loader_stall_likely");
+
+  FreezeSignalInput hang = input;
+  hang.is_snapshot_like = false;
+  hang.is_manual_capture = false;
+  hang.is_hang_like = true;
+  assert(BuildFreezeCandidateConsensus(hang, Language::kEnglish).state_id == "loader_stall_likely");
+
+  // Without the helper's heartbeat age the load still counts as stuck.
+  FreezeSignalInput unknownAge = input;
+  unknownAge.wct->thresholdSec = 0u;
+  assert(BuildFreezeCandidateConsensus(unknownAge, Language::kEnglish).state_id == "loader_stall_likely");
 }
 
 void TestConsensusLoaderStallLikely()
@@ -450,6 +503,7 @@ int main()
   TestConsensusLoaderStallWithBlackboxChurn();
   TestConsensusLoaderStallWithFirstChanceContext();
   TestConsensusLoaderStallNeedsContextForConsistentLoadingSignal();
+  TestManualLoadingSnapshotWithFreshHeartbeatIsNoLoaderStall();
   TestConsensusSnapshotFallbackAndSnapshotBackedStayStateConservative();
   TestConsensusFreezeCandidateAndAmbiguous();
   TestConsensusModalDialogWaitOutranksOtherStates();

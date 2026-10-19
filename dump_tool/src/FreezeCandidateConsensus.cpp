@@ -10,6 +10,9 @@
 namespace skydiag::dump_tool {
 namespace {
 
+// Same limit as the evidence builder's "not a hang" heartbeat age.
+constexpr double kFreshHeartbeatSec = 5.0;
+
 std::wstring PickCandidateName(const ActionableCandidate& candidate)
 {
   if (!candidate.display_name.empty()) {
@@ -261,10 +264,16 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   const bool strongLoaderContext =
     (loadingSignal && input.blackbox.has_value() && input.blackbox->module_churn_score >= 3u) ||
     strongFirstChanceLoaderSignal;
+  // Capture quality only; a thread-group consensus is reported by state_id and
+  // thread_module_consensus, and must not hide a snapshot fallback.
   result.support_quality = DetermineSupportQuality(input, consensusBackedDeadlock, consensusBackedLoaderSignal);
-  if (result.thread_module_consensus.has_consensus) {
-    result.support_quality = "multi_thread_consensus";
-  }
+  // A capture taken while the main thread still answered (a manual snapshot
+  // during a load that was still progressing) is no stuck load. Without the
+  // helper's heartbeat age (it writes thresholdSec beside it) the load counts
+  // as stuck, as before.
+  const bool heartbeatFresh = input.wct && input.wct->has_capture && input.wct->thresholdSec > 0u &&
+    input.wct->secondsSinceHeartbeat < kFreshHeartbeatSec;
+  const bool loaderStallPossible = loadingSignal && (input.is_hang_like || !heartbeatFresh);
 
   const bool modalWait = input.modal_dialog_wait.has_value() && input.modal_dialog_wait->detected;
   if (modalWait) {
@@ -330,7 +339,7 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
       language == i18n::Language::kEnglish
         ? L"This supports a logical synchronization stall, but WCT did not prove an OS lock cycle"
         : L"논리적 동기화 정지를 뒷받침하지만 WCT가 OS 잠금 사이클을 입증한 것은 아님");
-  } else if (loadingSignal && freezeLike) {
+  } else if (loaderStallPossible) {
     result.state_id = "loader_stall_likely";
     result.confidence_level = (strongLoaderContext || consensusBackedLoaderSignal)
       ? i18n::ConfidenceLevel::kHigh
@@ -413,6 +422,13 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     }
   }
 
+  if (loadingSignal && !loaderStallPossible &&
+      (result.state_id == "freeze_candidate" || result.state_id == "freeze_ambiguous")) {
+    result.primary_reasons.push_back(
+      language == i18n::Language::kEnglish
+        ? L"Captured during loading while the main thread was still responding, so the load was not stuck at that moment"
+        : L"로딩 중에 캡처됐지만 메인 스레드가 아직 응답하고 있었으므로, 그 시점에 로딩이 멈춘 것은 아님");
+  }
   if (!modalWait && input.main_thread_wait.has_value()) {
     AddMainThreadWaitReason(*input.main_thread_wait, language, &result);
   }

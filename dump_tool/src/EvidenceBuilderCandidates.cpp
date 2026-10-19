@@ -221,12 +221,14 @@ void AddStackSignals(const AnalysisResult& r, bool en, std::vector<CandidateSign
     // through their hooks. For a hang, however, the top module on the
     // authoritative main-thread scan is the owner of the observed wait path.
     // Keep that one weak clue, while still excluding system/game modules and
-    // all secondary pointer-density noise.
+    // all secondary pointer-density noise. The SKSE runtime, Crash Logger and
+    // MO2's usvfs sit under nearly every stack without owning a wait, so they
+    // never take it (a hook framework such as hdtsmp64.dll still can).
     const bool topHangMainThreadOwner =
       weakHangPointerScan && i == 0u &&
-      !minidump::IsSystemishModule(suspect.module_filename) &&
-      !minidump::IsLikelyWindowsSystemModulePath(suspect.module_path) &&
-      !minidump::IsGameExeModule(suspect.module_filename);
+      !minidump::IsSystemishModuleAt(suspect.module_filename, suspect.module_path) &&
+      !minidump::IsGameExeModule(suspect.module_filename) &&
+      !minidump::IsPassiveHookModule(suspect.module_filename);
     if (!IsActionableSuspect(suspect) && !topHangMainThreadOwner) {
       continue;
     }
