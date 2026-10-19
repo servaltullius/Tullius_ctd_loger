@@ -176,68 +176,58 @@ bool EqualsCaseInsensitiveAscii(std::string_view a, std::string_view b)
 
 std::optional<std::string> ParseCrashLoggerIniCrashlogDirectoryAscii(std::string_view iniUtf8)
 {
-  std::istringstream iss{ std::string(iniUtf8) };
-  std::string line;
+  // Read the way Crash Logger reads it (SimpleIni) and the helper reads it
+  // (ManualCaptureHotkey.h ParseCrashLoggerCrashlogDirectory): a UTF-8 BOM is
+  // skipped, only lines that start with ';' or '#' are comments (a '#' or ';'
+  // inside a value is part of the folder name), the last "Crashlog
+  // Directory" under [Debug] wins, and a pair of surrounding double quotes is
+  // dropped. An empty value means unset.
+  if (iniUtf8.size() >= 3 && iniUtf8.substr(0, 3) == "\xEF\xBB\xBF") {
+    iniUtf8.remove_prefix(3);
+  }
 
+  std::optional<std::string> found;
   bool inDebug = false;
-  while (std::getline(iss, line)) {
+  while (!iniUtf8.empty()) {
+    const std::size_t eol = iniUtf8.find('\n');
+    std::string_view line = iniUtf8.substr(0, eol);
+    iniUtf8.remove_prefix(eol == std::string_view::npos ? iniUtf8.size() : eol + 1);
     if (!line.empty() && line.back() == '\r') {
-      line.pop_back();
+      line.remove_suffix(1);
     }
 
-    std::string_view s = TrimAscii(line);
-    if (s.empty()) {
-      continue;
-    }
-    const char c0 = s.front();
-    if (c0 == ';' || c0 == '#') {
+    const std::string_view s = TrimAscii(line);
+    if (s.empty() || s.front() == ';' || s.front() == '#') {
       continue;
     }
 
-    if (c0 == '[' && s.back() == ']') {
-      const std::string_view sec = TrimAscii(s.substr(1, s.size() - 2));
-      inDebug = EqualsCaseInsensitiveAscii(sec, "debug");
-      continue;
-    }
-
-    if (!inDebug) {
+    if (s.front() == '[') {
+      const auto close = s.find(']');
+      if (close != std::string_view::npos) {
+        inDebug = EqualsCaseInsensitiveAscii(TrimAscii(s.substr(1, close - 1)), "debug");
+      }
       continue;
     }
 
     const auto eq = s.find('=');
-    if (eq == std::string_view::npos) {
+    if (!inDebug || eq == std::string_view::npos) {
       continue;
     }
-    const std::string_view key = TrimRightAscii(s.substr(0, eq));
+    if (!EqualsCaseInsensitiveAscii(TrimAscii(s.substr(0, eq)), "crashlog directory")) {
+      continue;
+    }
+
     std::string_view val = TrimAscii(s.substr(eq + 1));
-
-    if (!EqualsCaseInsensitiveAscii(key, "crashlog directory")) {
-      continue;
+    if (val.size() >= 2 && val.front() == '"' && val.back() == '"') {
+      val = TrimAscii(val.substr(1, val.size() - 2));
     }
-
-    // Strip quotes and/or inline comments.
-    if (!val.empty() && val.front() == '"') {
-      const auto endq = val.find('"', 1);
-      if (endq != std::string_view::npos) {
-        val = val.substr(1, endq - 1);
-      } else {
-        val.remove_prefix(1);
-      }
-      val = TrimAscii(val);
-    } else {
-      const auto cut = val.find_first_of(";#");
-      if (cut != std::string_view::npos) {
-        val = TrimRightAscii(val.substr(0, cut));
-      }
-    }
-
-    if (val.empty()) {
-      return std::nullopt;
-    }
-    return std::string(val);
+    found = std::string(val);
   }
 
-  return std::nullopt;
+  if (!found || found->empty()) {
+    return std::nullopt;
+  }
+  return found;
 }
 
 bool IsSystemishModuleAsciiLower(std::string_view filenameLower)

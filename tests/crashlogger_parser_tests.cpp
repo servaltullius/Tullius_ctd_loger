@@ -468,15 +468,38 @@ static void Test_ParseTopModules_ManyModules_CappedAt8()
 
 // ── Group 5: INI parsing edge cases ──
 
+// Crash Logger (SimpleIni) and the helper treat only whole lines starting
+// with '#' or ';' as comments: a '#' or ';' later in the value is part of the
+// folder name (review M23).
 static void Test_ParseCrashLoggerIni_HashComment()
 {
   const std::string s =
     "# comment line\n"
     "[Debug]\n"
-    "Crashlog Directory=C:\\\\Logs # inline comment\n";
+    "; Crashlog Directory=C:\\Commented\n"
+    "Crashlog Directory=D:\\Games\\Skyrim #2\\CrashLogs; old\n";
   const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
   assert(dir);
-  assert(*dir == "C:\\\\Logs");
+  assert(*dir == "D:\\Games\\Skyrim #2\\CrashLogs; old");
+}
+
+static void Test_ParseCrashLoggerIni_LastKeyWinsAndBom()
+{
+  const std::string s =
+    "\xEF\xBB\xBF[Debug]\r\n"
+    "Crashlog Directory=C:\\First\r\n"
+    "[General]\r\n"
+    "Crashlog Directory=C:\\Wrong\r\n"
+    "[ DEBUG ] ; trailing text after the section name\r\n"
+    "crashlog directory = \"E:\\Last Logs\"\r\n";
+  const auto dir = ParseCrashLoggerIniCrashlogDirectoryAscii(s);
+  assert(dir);
+  assert(*dir == "E:\\Last Logs");
+
+  // A later empty value unsets an earlier one; an unpaired quote stays.
+  assert(!ParseCrashLoggerIniCrashlogDirectoryAscii("[Debug]\nCrashlog Directory=C:\\A\nCrashlog Directory=\n"));
+  const auto unpaired = ParseCrashLoggerIniCrashlogDirectoryAscii("[Debug]\nCrashlog Directory=\"C:\\A\n");
+  assert(unpaired && *unpaired == "\"C:\\A");
 }
 
 static void Test_ParseCrashLoggerIni_NoDebugSection()
@@ -1870,6 +1893,7 @@ int main()
 
   // Group 5: INI parsing edge cases
   Test_ParseCrashLoggerIni_HashComment();
+  Test_ParseCrashLoggerIni_LastKeyWinsAndBom();
   Test_ParseCrashLoggerIni_NoDebugSection();
 
   // Group 6: TryExtractToken direct tests
