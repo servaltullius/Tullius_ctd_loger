@@ -10,9 +10,6 @@
 namespace skydiag::dump_tool {
 namespace {
 
-// Same limit as the evidence builder's "not a hang" heartbeat age.
-constexpr double kFreshHeartbeatSec = 5.0;
-
 std::wstring PickCandidateName(const ActionableCandidate& candidate)
 {
   if (!candidate.display_name.empty()) {
@@ -272,7 +269,7 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   // helper's heartbeat age (it writes thresholdSec beside it) the load counts
   // as stuck, as before.
   const bool heartbeatFresh = input.wct && input.wct->has_capture && input.wct->thresholdSec > 0u &&
-    input.wct->secondsSinceHeartbeat < kFreshHeartbeatSec;
+    input.wct->secondsSinceHeartbeat < internal::kNotHangHeartbeatAgeSec;
   const bool loaderStallPossible = loadingSignal && (input.is_hang_like || !heartbeatFresh);
 
   const bool modalWait = input.modal_dialog_wait.has_value() && input.modal_dialog_wait->detected;

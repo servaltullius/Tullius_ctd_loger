@@ -1,25 +1,32 @@
 // Interpretation fixes from the 2026-10-19 full code review, pinned on the
 // evidence builder's output:
 // - H4: an ENB/ReShade d3d11.dll or dxgi.dll in the game folder is a mod, not
-//   a Windows system DLL, wherever the analyzer asks;
+//   a Windows system DLL, wherever the analyzer asks (also in a paired Crash
+//   Logger log's frames);
 // - M18: the SKSE runtime, Crash Logger and usvfs never own a freeze from the
 //   pointer scan, and one weak clue is not called multi-signal support;
 // - M20: a fault-location frame alone does not claim the stack agrees;
 // - M21: the pointer scan is not called the "Tullius callstack";
 // - L9: C++ exception advice matches the default CrashHookMode=1;
 // - L10: one missing-master item, Low once the game reached the world;
-// - L13: no crash-during-loading advice for a snapshot on a loading screen;
+// - L12/L13: one heartbeat rule for a manual capture on a loading screen, and
+//   no crash-during-loading advice for a snapshot there;
 // - L16: crash history shows UTF-8 module names as written.
 
 #include <cstdio>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "Analyzer.h"
+#include "AnalyzerPipeline.h"
+#include "CrashLogger.h"
 #include "EvidenceBuilder.h"
+#include "FreezeCandidateConsensus.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 #include "Utf.h"
@@ -144,6 +151,111 @@ void TestEnbD3d11FaultIsAMod()
   }
 }
 
+using skydiag::dump_tool::minidump::ModuleInfo;
+
+ModuleInfo LoadedModule(std::wstring filename, std::wstring dir, std::uint64_t base)
+{
+  ModuleInfo m{};
+  m.filename = filename;
+  m.path = dir + filename;
+  m.base = base;
+  m.end = base + 0x100000ull;
+  return m;
+}
+
+// The ENB proxy loads the Windows d3d11.dll too, so the module list holds
+// both; the frame addresses tell them apart.
+std::vector<ModuleInfo> EnbModules()
+{
+  return {
+    LoadedModule(L"SkyrimSE.exe", kGameDir, 0x7FF612300000ull),
+    LoadedModule(L"d3d11.dll", kGameDir, 0x7FF900000000ull),
+    LoadedModule(L"d3d11.dll", L"C:\\Windows\\System32\\", 0x7FFA00000000ull),
+    LoadedModule(L"KERNEL32.DLL", L"C:\\Windows\\System32\\", 0x7FFB00000000ull),
+    LoadedModule(L"ntdll.dll", L"C:\\Windows\\System32\\", 0x7FFC00000000ull),
+  };
+}
+
+// A crash in the d3d11.dll at `top` (the ENB copy at 0x7FF9..., the Windows
+// one at 0x7FFA...), two frames there, then the game and the thread start.
+std::string CrashLoggerLogWithD3d11Top(const char* top)
+{
+  const std::string t(top);
+  return "CRASH TIME: 2026-10-19 12:00:00\n"
+         "CrashLoggerSSE v1-24-0-0 Jun 28 2026 00:14:22\n\n"
+         "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x" + t + "1234 d3d11.dll+0001234\tmov rax, [rcx]\n\n"
+         "PROBABLE CALL STACK:\n"
+         "\t[ 0] 0x" + t + "1234 d3d11.dll+0001234\n"
+         "\t[ 1] 0x" + t + "5678 d3d11.dll+0005678\n"
+         "\t[ 2] 0x7FF612340001 SkyrimSE.exe+0040001\n"
+         "\t[ 3] 0x7FFB00001000 KERNEL32.DLL+0001000\n"
+         "\t[ 4] 0x7FFC00002000 ntdll.dll+0002000\n\n"
+         "REGISTERS:\n";
+}
+
+AnalysisResult IntegrateD3d11CrashLog(const char* top, const std::filesystem::path& logPath)
+{
+  {
+    std::ofstream log(logPath, std::ios::binary | std::ios::trunc);
+    log << CrashLoggerLogWithD3d11Top(top);
+  }
+  AnalysisResult r = MakeCrashIn(L"d3d11.dll", std::wstring(kGameDir) + L"d3d11.dll");
+  r.fault_module_offset = 0x1234u;
+  r.crash_logger_log_path = logPath.wstring();
+  skydiag::dump_tool::IntegrateCrashLoggerFrameSignals(EnbModules(), &r);
+  return r;
+}
+
+void TestEnbD3d11CrashLoggerFramesAreAMod()
+{
+  const auto logPath = std::filesystem::temp_directory_path() / "skydiag_h4_enb_crashlogger.log.txt";
+  const auto modules = EnbModules();
+
+  auto enb = IntegrateD3d11CrashLog("7FF90000", logPath);
+  Require(enb.crash_logger_direct_fault_module == L"d3d11.dll" && enb.crash_logger_direct_fault_eligible,
+    "the fault in the game-folder d3d11.dll is a promotable direct fault");
+  Require(enb.crash_logger_first_actionable_probable_module == L"d3d11.dll" &&
+            enb.crash_logger_first_actionable_probable_eligible,
+    "its top frame is the first actionable frame");
+  Require(enb.crash_logger_probable_streak_module == L"d3d11.dll" && enb.crash_logger_probable_streak_length == 2u &&
+            enb.crash_logger_probable_streak_eligible,
+    "and its two frames a streak");
+  Require(enb.crash_logger_frame_signal_strength > 0u, "the frames carry weight");
+  BuildEvidenceAndSummary(enb, i18n::Language::kEnglish);
+  bool candidate = false;
+  for (const auto& c : enb.actionable_candidates) {
+    candidate = candidate || c.module_filename == L"d3d11.dll";
+  }
+  Require(candidate, "the ENB d3d11.dll is a candidate from the Crash Logger frames");
+
+  const std::unordered_map<std::wstring, std::wstring> noCanonical;
+  const auto log = CrashLoggerLogWithD3d11Top("7FF90000");
+  const auto top = skydiag::dump_tool::ParseCrashLoggerTopModules(
+    log, noCanonical, skydiag::dump_tool::CrashLoggerSystemNamedModTest(modules));
+  Require(!top.empty() && top.front() == L"d3d11.dll", "and ranks first among the log's modules");
+
+  // The same frames in the Windows copy stay a system DLL.
+  auto windows = IntegrateD3d11CrashLog("7FFA0000", logPath);
+  Require(!windows.crash_logger_direct_fault_eligible, "a fault in System32's d3d11.dll promotes nothing");
+  Require(windows.crash_logger_first_actionable_probable_module.empty() &&
+            !windows.crash_logger_first_actionable_probable_eligible,
+    "no first actionable frame");
+  Require(!windows.crash_logger_probable_streak_eligible, "no streak");
+  Require(skydiag::dump_tool::ParseCrashLoggerTopModules(
+            CrashLoggerLogWithD3d11Top("7FFA0000"), noCanonical,
+            skydiag::dump_tool::CrashLoggerSystemNamedModTest(modules)).empty(),
+    "nor a top module");
+  std::error_code ec;
+  std::filesystem::remove(logPath, ec);
+
+  // A frame without an address is judged by name: only when no Windows copy
+  // of that name is loaded.
+  const auto bothLoaded = skydiag::dump_tool::CrashLoggerSystemNamedModTest(modules);
+  Require(!bothLoaded("d3d11.dll", 0u), "both copies loaded: ambiguous, so Windows");
+  const std::vector<ModuleInfo> enbOnly = { LoadedModule(L"d3d11.dll", kGameDir, 0x7FF900000000ull) };
+  Require(skydiag::dump_tool::CrashLoggerSystemNamedModTest(enbOnly)("D3D11.DLL", 0u), "only the game-folder copy");
+}
+
 AnalysisResult MakePointerScanHang(std::wstring topModule, std::wstring topPath)
 {
   AnalysisResult r{};
@@ -259,8 +371,19 @@ void TestUnconfirmedCppExceptionAdvice()
       "CrashHookMode advice is about undoing mode 2");
     Require(!AnyContains(r.recommendations, en ? L"CrashHookMode=1 (fatal only)" : L"CrashHookMode=1(치명 예외만)로 두면"),
       "no advice to set the default that is already set");
-    Require(Contains(r.summary_sentence, en ? L"no Crash Logger log confirmed it" : L"Crash Logger 로그로 확인하지 못했습니다"),
-      "the summary says what is missing");
+    // rc5's plugin also records an unhandled throw without Crash Logger, so a
+    // missing Crash Logger log is no reason for doubt.
+    Require(Contains(r.summary_sentence, en ? L"only when nothing handled it" : L"어디에서도 처리되지 않은 C++ 예외만"),
+      "the summary says what the default mode records");
+    Require(Contains(r.summary_sentence, L"abort()"), "including the paths without Crash Logger");
+    Require(!Contains(r.summary_sentence, en ? L"no Crash Logger log confirmed it" : L"Crash Logger 로그로 확인하지 못했습니다"),
+      "no Crash Logger log is no reason for low confidence");
+    Require(!Contains(r.summary_sentence, en ? L"only while Crash Logger reports it" : L"Crash Logger가 크래시로 보고할 때만"),
+      "nor is Crash Logger the only way it is recorded");
+    for (const auto& line : r.recommendations) {
+      Require(!Contains(line, en ? L"only while Crash Logger reports it" : L"Crash Logger가 크래시로 보고할 때만"),
+        "the advice agrees");
+    }
   }
 }
 
@@ -330,6 +453,41 @@ void TestLoadingSnapshotGetsNoCrashAdvice()
   }
 }
 
+// A manual capture on a loading screen gets one verdict: the freeze state and
+// the [Manual] advice both use kNotHangHeartbeatAgeSec, not the helper's
+// longer hang threshold.
+void TestManualLoadingCaptureHasOneHeartbeatRule()
+{
+  for (const double age : { 0.4, 20.0 }) {
+    const bool fresh = age < skydiag::dump_tool::internal::kNotHangHeartbeatAgeSec;
+    skydiag::dump_tool::FreezeSignalInput input{};
+    input.is_snapshot_like = true;
+    input.is_manual_capture = true;
+    input.loading_context = true;
+    input.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+    input.wct->has = true;
+    input.wct->has_capture = true;
+    input.wct->capture_kind = "manual";
+    input.wct->isLoading = true;
+    input.wct->thresholdSec = 60u;
+    input.wct->secondsSinceHeartbeat = age;
+
+    AnalysisResult r{};
+    r.dump_path = L"C:\\Logs\\SkyrimDiag_Manual_20261019_120000_000.dmp";
+    r.state_flags = skydiag::kState_Loading;
+    r.has_wct = true;
+    r.wct_json_utf8 = std::string(R"({"capture":{"kind":"manual","secondsSinceHeartbeat":)") +
+                      (fresh ? "0.4" : "20.0") + R"(,"thresholdSec":60,"isLoading":true},"threads":[]})";
+    r.freeze_analysis = skydiag::dump_tool::BuildFreezeCandidateConsensus(input, i18n::Language::kEnglish);
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    Require(r.is_snapshot_like, "a manual snapshot");
+    const bool stuck = r.freeze_analysis.state_id == "loader_stall_likely";
+    const bool notAHang = AnyStartsWith(r.recommendations, L"[Manual] At capture time");
+    Require(stuck == !fresh, "a stuck load only when the main thread had stopped answering");
+    Require(notAHang == fresh, "'not a hang' only when the freeze verdict agrees");
+  }
+}
+
 void TestHistoryShowsUtf8ModuleNames()
 {
   auto r = MakeCrashIn(L"SkyrimSE.exe", std::wstring(kGameDir) + L"SkyrimSE.exe");
@@ -354,12 +512,14 @@ int main()
   try {
     TestSystemishByPath();
     TestEnbD3d11FaultIsAMod();
+    TestEnbD3d11CrashLoggerFramesAreAMod();
     TestPassiveHookDoesNotOwnAFreeze();
     TestFrameOnlyFaultLocationDoesNotClaimTheStack();
     TestPointerScanIsNotTheTulliusCallstack();
     TestUnconfirmedCppExceptionAdvice();
     TestOneMissingMasterItemLowAfterLoad();
     TestLoadingSnapshotGetsNoCrashAdvice();
+    TestManualLoadingCaptureHasOneHeartbeatRule();
     TestHistoryShowsUtf8ModuleNames();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());

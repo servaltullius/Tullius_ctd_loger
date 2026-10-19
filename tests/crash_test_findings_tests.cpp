@@ -164,7 +164,11 @@ void TestBlockedLeadKeepsItsWeightWithoutMainThreadWalk()
   BuildEvidenceAndSummary(walked, i18n::Language::kEnglish);
   auto scanned = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
   scanned.suspects_from_stackwalk = false;
-  scanned.suspects[1].confidence_level = i18n::ConfidenceLevel::kLow;
+  scanned.suspects[1].confidence_level = i18n::ConfidenceLevel::kMedium;
+  // The step AnalyzeDump runs after a pointer-scan fallback.
+  skydiag::dump_tool::CapPointerScanSuspectConfidence(scanned);
+  Require(scanned.suspects[0].confidence_level == i18n::ConfidenceLevel::kMedium, "the blocked plugin keeps Medium");
+  Require(scanned.suspects[1].confidence_level == i18n::ConfidenceLevel::kLow, "the scanned suspects are Low");
   BuildEvidenceAndSummary(scanned, i18n::Language::kEnglish);
   Require(!walked.actionable_candidates.empty() && !scanned.actionable_candidates.empty(), "candidates");
   const auto& a = walked.actionable_candidates.front();

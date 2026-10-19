@@ -15,6 +15,8 @@ public sealed partial class MainWindow
         // folder can stall it for tens of seconds, so it runs off the UI
         // thread. Only the newest scan may update the list.
         var generation = ++_dumpDiscoveryGeneration;
+        // An analysis may run meanwhile (AnalyzeAsync starts this scan).
+        var statusAtStart = StatusText.Text;
         try
         {
             var hintDumpPath = !string.IsNullOrWhiteSpace(DumpPathBox.Text)
@@ -53,7 +55,7 @@ public sealed partial class MainWindow
                 return true;
             }
 
-            StatusText.Text = T("Dump discovery failed: ", "덤프 검색 실패: ") + ex.Message;
+            ShowBackgroundStatus(statusAtStart, T("Dump discovery failed: ", "덤프 검색 실패: ") + ex.Message);
             return false;
         }
     }

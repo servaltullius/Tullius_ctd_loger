@@ -322,8 +322,8 @@
       },
       "diagnosis": {
         "scope": "mechanism",
-        "cause_ko": "C++ 예외(0xE06D7363)입니다. 기본값 CrashHookMode=1에서는 Crash Logger가 크래시로 보고할 때만 기록되므로 대개 실제 CTD입니다. CrashHookMode=2로 바꿨다면 게임이 잡아서 처리한 예외일 수도 있습니다",
-        "cause_en": "C++ exception (0xE06D7363). With the default CrashHookMode=1 it is recorded only while Crash Logger reports it as a crash, so it is usually a real CTD; with CrashHookMode=2 it can also be an exception the game caught and handled",
+        "cause_ko": "C++ 예외(0xE06D7363)입니다. 기본값 CrashHookMode=1에서는 어디에서도 처리되지 않은 예외만(Crash Logger 보고, 처리되지 않은 예외 필터, abort()) 기록되므로 대개 실제 CTD입니다. CrashHookMode=2로 바꿨다면 게임이 잡아서 처리한 예외일 수도 있습니다",
+        "cause_en": "C++ exception (0xE06D7363). With the default CrashHookMode=1 it is recorded only when nothing handled it (Crash Logger's report, the unhandled-exception filter, or abort()), so it is usually a real CTD; with CrashHookMode=2 it can also be an exception the game caught and handled",
         "confidence": "low",
         "recommendations_ko": [
           "[해석] 게임이 실제로 꺼졌다면 실제 CTD로 보고, 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요. 게임이 계속 정상 동작했다면 무시해도 됩니다.",

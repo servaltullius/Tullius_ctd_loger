@@ -7,6 +7,7 @@
 #include "EvidenceBuilderPrivate.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
+#include "WctTypes.h"
 
 namespace skydiag::dump_tool {
 
@@ -50,9 +51,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   }
 
   const auto wct = (r.has_wct && !r.wct_json_utf8.empty()) ? internal::TrySummarizeWct(r.wct_json_utf8) : std::nullopt;
-  constexpr double kNotHangHeartbeatAgeSec = 5.0;
   const auto hbAge = internal::InferHeartbeatAgeFromResultSec(r);
-  const bool heartbeatSuggestsNotHang = hbAge && (*hbAge < kNotHangHeartbeatAgeSec);
+  const bool heartbeatSuggestsNotHang = hbAge && (*hbAge < internal::kNotHangHeartbeatAgeSec);
   const bool manualFromWct = wct && wct->has_capture && (wct->capture_kind == "manual");
   const bool wctSuggestsHang = wct && ((wct->cycles > 0) || wct->suggestsHang);
   const bool manualCaptureHint = nameManual || manualFromWct;

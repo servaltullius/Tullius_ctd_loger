@@ -452,10 +452,9 @@ bool DetermineHangLike(
     }
 
     if (!capSaysHang && !hasHangEvent) {
-      constexpr double kNotHangHeartbeatAgeSec = 5.0;
       if (out.has_blackbox) {
         if (auto hbAge = internal::InferHeartbeatAgeFromEventsSec(out.events)) {
-          if (*hbAge < kNotHangHeartbeatAgeSec) {
+          if (*hbAge < internal::kNotHangHeartbeatAgeSec) {
             hangLike = false;
           }
         }
@@ -466,6 +465,37 @@ bool DetermineHangLike(
   }
 
   return hangLike;
+}
+
+crashlogger_core::CrashLoggerSystemNamedModFn CrashLoggerSystemNamedModTest(
+  const std::vector<ModuleInfo>& allModules)
+{
+  return [&allModules](std::string_view moduleUtf8, std::uint64_t address) {
+    const std::wstring module = Utf8ToWide(std::string(moduleUtf8));
+    const auto isModCopy = [](const ModuleInfo& m) {
+      return !IsSystemishModuleAt(m.filename, m.path) && m.external_software.empty();
+    };
+    // Such a proxy loads the Windows DLL of the same name too, so the frame
+    // address picks the copy.
+    if (address != 0) {
+      if (const auto index = FindModuleIndexForAddress(allModules, address)) {
+        const auto& m = allModules[*index];
+        return WideLower(m.filename) == WideLower(module) && isModCopy(m);
+      }
+    }
+    // Without one, only a name no Windows copy shares.
+    bool found = false;
+    for (const auto& m : allModules) {
+      if (WideLower(m.filename) != WideLower(module)) {
+        continue;
+      }
+      if (!isModCopy(m)) {
+        return false;
+      }
+      found = true;
+    }
+    return found;
+  };
 }
 
 void IntegrateCrashLoggerLog(
@@ -550,7 +580,8 @@ void IntegrateCrashLoggerLog(
     out.diagnostics.push_back(
       L"[CrashLogger] paired log is a thread dump; its call-stack modules are not used as suspects");
   } else {
-    out.crash_logger_top_modules = ParseCrashLoggerTopModules(*logUtf8, canonicalByLower);
+    out.crash_logger_top_modules =
+      ParseCrashLoggerTopModules(*logUtf8, canonicalByLower, CrashLoggerSystemNamedModTest(allModules));
   }
 
   if (auto cpp = crashlogger_core::ParseCrashLoggerCppExceptionDetailsAscii(*logUtf8)) {

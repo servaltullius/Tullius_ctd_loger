@@ -47,7 +47,8 @@ std::wstring ResourceKindFromPath(std::wstring_view path);
 // exception thread's scan starts at its Rsp when that lies in the captured
 // stack: by the time the dump is written the thread is inside the crash
 // handlers (Crash Logger, WER), and their frames below the fault would
-// otherwise take the heaviest slots.
+// otherwise take the heaviest slots. No default: a caller passes nullptr
+// only when the dump has no exception context.
 std::vector<SuspectItem> ComputeStackScanSuspects(
   void* dumpBase,
   std::uint64_t dumpSize,
@@ -55,7 +56,7 @@ std::vector<SuspectItem> ComputeStackScanSuspects(
   const std::vector<std::uint32_t>& targetTids,
   std::uint32_t exceptionTid,
   i18n::Language lang,
-  const CONTEXT* exceptionContext = nullptr);
+  const CONTEXT* exceptionContext);
 
 std::vector<std::uint32_t> FindThreadsWithNearStackModule(
   void* dumpBase,

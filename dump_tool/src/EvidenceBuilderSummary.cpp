@@ -654,11 +654,16 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : L"Crash Logger도 처리되지 않은 예외로 기록한 C++ 예외(0xE06D7363)로 게임이 종료되었습니다. 콜스택에서 "
           L"원인으로 볼 플러그인은 찾지 못했습니다. (신뢰도: 낮음)";
     } else if (r.exc_code == 0xE06D7363u) {
+      // With the default CrashHookMode=1 the plugin records a C++ exception only
+      // when nothing handled it (Crash Logger's report, the unhandled-exception
+      // filter or abort()), so a missing Crash Logger log is no reason to doubt it.
       summary = en
-        ? (L"Reported in " + place + L" with 0xE06D7363 (C++ exception). With the default settings this is recorded only while "
-           L"Crash Logger reports it as a crash, but no Crash Logger log confirmed it here; check that the game actually closed. (Confidence: Low)")
-        : (L"0xE06D7363(C++ 예외)로 " + place + L"에서 보고되었습니다. 기본 설정에서는 Crash Logger가 크래시로 보고할 때만 "
-           L"기록되지만, 이번에는 Crash Logger 로그로 확인하지 못했습니다. 게임이 실제로 꺼졌는지 확인하세요. (신뢰도: 낮음)");
+        ? (L"Reported in " + place + L" with 0xE06D7363 (C++ exception). With the default CrashHookMode=1 a C++ exception "
+           L"is recorded only when nothing handled it (Crash Logger's report, the unhandled-exception filter, or abort()), so "
+           L"this usually ended the game; the call stack shows no plugin to suspect. (Confidence: Low)")
+        : (L"0xE06D7363(C++ 예외)로 " + place + L"에서 보고되었습니다. 기본값 CrashHookMode=1에서는 어디에서도 처리되지 "
+           L"않은 C++ 예외만(Crash Logger 보고, 처리되지 않은 예외 필터, abort()) 기록되므로 대개 이 예외로 게임이 "
+           L"종료된 것입니다. 다만 콜스택에서 원인으로 볼 플러그인은 찾지 못했습니다. (신뢰도: 낮음)");
     } else if (!ctx.externalSoftware.empty()) {
       summary = en
         ? (L"Crash is reported in " + place + L", a program outside the game and its mods. Update or reinstall it, or "

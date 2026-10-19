@@ -88,7 +88,7 @@ void TestCrashLoggerStackSkipsIt()
     "\t[ 3] 0x00007FF612340004 SkyrimSE.exe+00000004\n"
     "\n"
     "REGISTERS:\n";
-  const auto modules = ParseCrashLoggerTopModules(log, std::unordered_map<std::wstring, std::wstring>{});
+  const auto modules = ParseCrashLoggerTopModules(log, std::unordered_map<std::wstring, std::wstring>{}, {});
   Require(!modules.empty() && modules.front() == L"ExampleMod.dll", "the mod DLL leads");
   for (const auto& module : modules) {
     Require(module != L"NvTelemetryBridge64.dll", "the NVIDIA DLL is no suspect");

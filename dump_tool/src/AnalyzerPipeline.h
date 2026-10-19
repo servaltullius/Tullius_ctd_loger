@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Analyzer.h"
+#include "CrashLoggerParseCore.h"
 #include "MinidumpUtil.h"
 #include "Mo2Index.h"
 
@@ -62,6 +63,23 @@ void IntegrateCrashLoggerLog(
   const std::vector<std::wstring>& modulePaths,
   const std::optional<Mo2Index>& mo2Index,
   AnalysisResult& out);
+
+// Tells a Crash Logger frame in a mod named like a Windows DLL (an ENB or
+// ReShade d3d11.dll/dxgi.dll outside Windows, review H4) from one in the
+// Windows DLL, by the frame address in the dump's modules. Keeps a reference
+// to allModules.
+crashlogger_core::CrashLoggerSystemNamedModFn CrashLoggerSystemNamedModTest(
+  const std::vector<minidump::ModuleInfo>& allModules);
+
+// After a pointer-scan fallback every suspect is Low, except the plugin of a
+// blocked game thread, which comes from the walk of that thread.
+void CapPointerScanSuspectConfidence(AnalysisResult& out);
+
+// Direct-fault, first-actionable and streak modules of the paired Crash
+// Logger log, and whether each may promote a suspect.
+void IntegrateCrashLoggerFrameSignals(
+  const std::vector<minidump::ModuleInfo>& allModules,
+  AnalysisResult* out);
 
 void ComputeSuspects(
   void* dumpBase,

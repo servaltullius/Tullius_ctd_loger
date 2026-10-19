@@ -32,10 +32,11 @@ public sealed partial class MainWindow
         // if it is still the dump on screen.
         var dumpPath = _vm.CurrentDumpPath;
         var outDir = _vm.CurrentOutDir;
+        var savingStatus = T("Saving review feedback...", "검토 피드백을 저장하는 중입니다...");
         try
         {
             SaveTriageButton.IsEnabled = false;
-            StatusText.Text = T("Saving review feedback...", "검토 피드백을 저장하는 중입니다...");
+            StatusText.Text = savingStatus;
 
             if (string.IsNullOrWhiteSpace(dumpPath))
             {
@@ -56,22 +57,22 @@ public sealed partial class MainWindow
             {
                 if (_analysisCts is null)
                 {
-                    StatusText.Text = T(
+                    ShowBackgroundStatus(savingStatus, T(
                         "Review feedback saved for the previously selected dump: ",
-                        "이전에 선택한 덤프의 검토 피드백을 저장했습니다: ") + Path.GetFileName(dumpPath);
+                        "이전에 선택한 덤프의 검토 피드백을 저장했습니다: ") + Path.GetFileName(dumpPath));
                 }
                 return;
             }
 
             var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
             RenderSummary(summary);
-            StatusText.Text = T(
+            ShowBackgroundStatus(savingStatus, T(
                 "Review feedback saved to the summary JSON.",
-                "검토 피드백을 요약 JSON에 저장했습니다.");
+                "검토 피드백을 요약 JSON에 저장했습니다."));
         }
         catch (Exception ex)
         {
-            StatusText.Text = T("Failed to save review: ", "검토 저장 실패: ") + ex.Message;
+            ShowBackgroundStatus(savingStatus, T("Failed to save review: ", "검토 저장 실패: ") + ex.Message);
         }
         finally
         {

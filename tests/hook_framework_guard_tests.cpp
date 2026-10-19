@@ -203,7 +203,7 @@ int main()
     "Crash Logger corroboration must not overwrite a raw suspect with High confidence.");
   AssertContains(
     analyzer,
-    "if (!out.suspects_from_stackwalk)",
+    "CapPointerScanSuspectConfidence(out);",
     "Analyzer must apply the final Low-confidence clamp after pointer-scan fallback.");
 
   return 0;

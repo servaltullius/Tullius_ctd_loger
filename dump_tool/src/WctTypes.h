@@ -8,6 +8,12 @@
 
 namespace skydiag::dump_tool::internal {
 
+// A main thread that answered within this many seconds of the capture was not
+// frozen, nor stuck in a load, at that moment. The helper's own hang threshold
+// (thresholdSec) is longer: a manual capture between the two still shows a
+// stall in progress, so it is not called "not a hang".
+inline constexpr double kNotHangHeartbeatAgeSec = 5.0;
+
 struct WctCaptureDecision
 {
   bool has = false;

@@ -119,6 +119,17 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // A result that arrives in the background (a review saved, a dump scan)
+    // replaces the status only while it still shows what was there when the
+    // operation started; otherwise an analysis status or failure set meanwhile
+    // stays, and the result is added on a new line.
+    private void ShowBackgroundStatus(string statusAtStart, string message)
+    {
+        StatusText.Text = string.Equals(StatusText.Text, statusAtStart, StringComparison.Ordinal)
+            ? message
+            : StatusText.Text + Environment.NewLine + message;
+    }
+
     private void SetBusy(bool isBusy, string message)
     {
         BusyRing.IsActive = isBusy;
