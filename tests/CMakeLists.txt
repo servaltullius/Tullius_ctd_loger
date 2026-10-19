@@ -30,6 +30,14 @@ target_include_directories(skydiag_hang_suppression_tests PRIVATE
 
 add_test(NAME skydiag_hang_suppression_tests COMMAND skydiag_hang_suppression_tests)
 
+add_executable(skydiag_helper_ini_text_tests
+  helper_ini_text_tests.cpp
+)
+target_include_directories(skydiag_helper_ini_text_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+)
+add_test(NAME skydiag_helper_ini_text_tests COMMAND skydiag_helper_ini_text_tests)
+
 add_executable(skydiag_crashlogger_parser_tests
   crashlogger_parser_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashLoggerParseCore.cpp"
