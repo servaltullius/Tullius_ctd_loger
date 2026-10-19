@@ -77,6 +77,24 @@ internal sealed partial class MainWindowViewModel
         PopulateResources(summary);
     }
 
+    // Drops the rendered analysis so nothing (Copy, Share, triage) can pair it
+    // with a newly selected dump whose analysis fails or is canceled.
+    public void ClearSummary()
+    {
+        CurrentSummary = null;
+        Suspects.Clear();
+        Recommendations.Clear();
+        RecommendationGroups.Clear();
+        ImmediateRecommendations.Clear();
+        VerificationRecommendations.Clear();
+        RecaptureRecommendations.Clear();
+        ConflictComparisonRows.Clear();
+        CallstackFrames.Clear();
+        EvidenceItems.Clear();
+        ResourceItems.Clear();
+        EventItems.Clear();
+    }
+
     private void PopulateHeaderFields(AnalysisSummary summary)
     {
         SummarySentence = string.IsNullOrWhiteSpace(summary.SummarySentence)

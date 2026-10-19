@@ -174,6 +174,11 @@ def test_gpu_wait_hang_follows_report_next_action() -> None:
         assert "(detected: ENB)" in next_lines[0], actual
 
 
+def test_cleared_summary_produces_no_share_text() -> None:
+    actual = _run_harness("frame_first_summary.json", "cleared")
+    assert actual == "", actual
+
+
 if __name__ == "__main__":
     test_frame_first_community_share_fixture()
     test_frame_first_summary_clipboard_fixture()
@@ -192,4 +197,5 @@ if __name__ == "__main__":
     test_standalone_stackwalk_related_community_share_fixture()
     test_standalone_stackwalk_related_summary_clipboard_fixture()
     test_gpu_wait_hang_follows_report_next_action()
+    test_cleared_summary_produces_no_share_text()
     print("share_text_fixture_tests: OK")
