@@ -84,7 +84,9 @@ std::wstring RedactPathValue(std::wstring_view path)
 
 std::optional<std::wstring> TryExtractTimestampTokenW(std::wstring_view s)
 {
-  // Search for pattern: YYYYMMDD_HHMMSS (15 chars)
+  // Search for pattern: YYYYMMDD_HHMMSS (15 chars), plus the precision suffix
+  // the helper has written since 2026-02 (YYYYMMDD_HHMMSS_mmm): the same
+  // token rule as the helper's retention (Retention.h TryExtractTimestampToken).
   auto is_digits = [](std::wstring_view v) {
     for (const wchar_t c : v) {
       if (!std::iswdigit(c)) {
@@ -107,7 +109,18 @@ std::optional<std::wstring> TryExtractTimestampTokenW(std::wstring_view s)
     if (!is_digits(time)) {
       continue;
     }
-    best = std::wstring(s.substr(i, 15));
+    std::size_t tokenLen = 15;
+    const std::size_t suffixSep = i + tokenLen;
+    if (suffixSep < s.size() && s[suffixSep] == L'_') {
+      std::size_t suffixEnd = suffixSep + 1;
+      while (suffixEnd < s.size() && std::iswdigit(s[suffixEnd])) {
+        suffixEnd++;
+      }
+      if (suffixEnd > suffixSep + 1) {
+        tokenLen = suffixEnd - i;
+      }
+    }
+    best = std::wstring(s.substr(i, tokenLen));
   }
   return best;
 }

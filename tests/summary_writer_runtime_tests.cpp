@@ -5,6 +5,7 @@
 //   folders in the plugin scan, a symbol path from _NT_SYMBOL_PATH, ...);
 // - an unparsable plugin scan preview stays valid UTF-8 and is left out of a
 //   redacted summary;
+// - the incident manifest is found for the helper's millisecond timestamps.
 
 #include <Windows.h>
 
@@ -32,6 +33,7 @@ using skydiag::dump_tool::BuildReportText;
 using skydiag::dump_tool::BuildSummaryJson;
 using skydiag::dump_tool::ResourceRow;
 using skydiag::dump_tool::SuspectItem;
+using skydiag::dump_tool::internal::output_writer::FindIncidentManifestForDump;
 using skydiag::dump_tool::internal::output_writer::RedactSymbolSearchPath;
 using skydiag::tests::summary_schema::ValidateSummarySchemaV2;
 
@@ -184,6 +186,7 @@ void TestRedactedOutputsHoldNoUserFolder()
     Require(strings.find(kProbeUser) != std::string::npos, "fixture puts the probe user into the summary");
     Require(summary["plugin_scan"]["mo2"]["base_dir"].get<std::string>().find(kProbeUser) != std::string::npos,
       "unredacted MO2 base_dir");
+    Require(summary.contains("incident"), "manifest found");
   }
 
   const auto summary = BuildSummaryJson(r, outBase, stem, true);
@@ -209,6 +212,9 @@ void TestRedactedOutputsHoldNoUserFolder()
   Require(summary["symbolization"]["search_path"] ==
             "<redacted>\\LocalSyms;srv*<redacted>\\Symbols*https://msdl.microsoft.com/download/symbols",
     "every directory of an env-provided symbol path is redacted, the URL stays");
+  Require(summary["incident"]["capture_kind"] == "crash", "incident kept");
+  Require(summary["incident"]["manifest_path"] == "<redacted>\\SkyrimDiag_Incident_Crash_20261019_120000_123.json",
+    "manifest path redacted");
   std::filesystem::remove_all(outBase);
 }
 
@@ -247,6 +253,38 @@ void TestUnparsablePluginScanPreview()
     "a redacted summary leaves the unredactable preview out");
 }
 
+void TestIncidentManifestMatchesHelperTimestamps()
+{
+  const auto outBase = MakeTempDir(L"manifest");
+  // helper Timestamp(): YYYYMMDD_HHMMSS_mmm (HelperCommon.cpp).
+  WriteText(outBase / L"SkyrimDiag_Incident_Crash_20261007_123742_440.json", "{}");
+  WriteText(outBase / L"SkyrimDiag_Incident_Hang_20261018_190444_914.json", "{}");
+  WriteText(outBase / L"SkyrimDiag_Incident_Manual_20261018_190409_880.json", "{}");
+  WriteText(outBase / L"SkyrimDiag_Incident_CrashRecapture_20261019_120500_456.json", "{}");
+  // Helpers before 2026-02 wrote whole seconds.
+  WriteText(outBase / L"SkyrimDiag_Incident_Crash_20260101_101010.json", "{}");
+  // Another capture in the same second.
+  WriteText(outBase / L"SkyrimDiag_Incident_Crash_20261007_123742_999.json", "{}");
+
+  const auto name = [&](std::wstring_view stem) {
+    return FindIncidentManifestForDump(outBase, stem).filename().wstring();
+  };
+  Require(name(L"SkyrimDiag_Crash_20261007_123742_440") == L"SkyrimDiag_Incident_Crash_20261007_123742_440.json",
+    "crash");
+  Require(name(L"SkyrimDiag_Hang_20261018_190444_914") == L"SkyrimDiag_Incident_Hang_20261018_190444_914.json",
+    "hang");
+  Require(name(L"SkyrimDiag_Manual_20261018_190409_880") == L"SkyrimDiag_Incident_Manual_20261018_190409_880.json",
+    "manual");
+  Require(name(L"SkyrimDiag_Crash_20261019_120500_456_Full") ==
+            L"SkyrimDiag_Incident_CrashRecapture_20261019_120500_456.json",
+    "recapture dump with a profile suffix");
+  Require(name(L"SkyrimDiag_Crash_20260101_101010") == L"SkyrimDiag_Incident_Crash_20260101_101010.json",
+    "second-precision names still match");
+  Require(name(L"SkyrimDiag_Crash_20261007_123742_441").empty(), "no manifest for another millisecond");
+  Require(name(L"SkyrimDiag_Crash").empty(), "no timestamp, no manifest");
+  std::filesystem::remove_all(outBase);
+}
+
 }  // namespace
 
 int main()
@@ -256,6 +294,7 @@ int main()
     TestRedactedOutputsHoldNoUserFolder();
     TestSymbolSearchPathRedaction();
     TestUnparsablePluginScanPreview();
+    TestIncidentManifestMatchesHelperTimestamps();
   } catch (const std::exception& ex) {
     std::cerr << "summary_writer_runtime_tests failed: " << ex.what() << "\n";
     return 1;
