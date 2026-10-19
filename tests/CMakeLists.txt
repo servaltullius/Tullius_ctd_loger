@@ -106,6 +106,22 @@ if(WIN32)
     COMMAND skydiag_summary_writer_runtime_tests
   )
 
+  # What the analyzer takes from a dump: the pointer-scan start (review H3),
+  # paths it may open (M16), module names of any length (L8).
+  add_executable(skydiag_analyzer_dump_input_tests
+    analyzer_dump_input_tests.cpp
+  )
+  target_include_directories(skydiag_analyzer_dump_input_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_analyzer_dump_input_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_analyzer_dump_input_tests
+    COMMAND skydiag_analyzer_dump_input_tests
+  )
+
   add_executable(skydiag_exception_code_recommendation_tests
     exception_code_recommendation_tests.cpp
   )

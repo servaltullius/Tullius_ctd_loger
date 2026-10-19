@@ -669,7 +669,8 @@ void ComputeSuspects(
       allModules,
       scanTids,
       out.exc_tid,
-      opt.language);
+      opt.language,
+      excCtx ? &*excCtx : nullptr);
     // The walk or Crash Logger already showed these only wrap the thread's
     // entry; a raw stack slot holding their return address says no more.
     std::erase_if(out.suspects, [&](const SuspectItem& suspect) {
