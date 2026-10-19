@@ -116,7 +116,6 @@ void RunHelperLoop(
 
     FinalizePendingCrashAnalysisIfReady(cfg, proc, outBase, &state->pendingCrashAnalysis, &state->crashRecapture);
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/false, &state->pendingCrashEtw);
-    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &state->hangState.pendingEtw);
 
     // Drain a published crash record before polling process exit. The process
     // handle and crash event commonly become signaled in the same scheduler
@@ -135,6 +134,9 @@ void RunHelperLoop(
           &state->pendingCrashViewerDumpPath)) {
       continue;
     }
+    // After the crash event's first chance: a wpr call here can block for a
+    // while.
+    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &state->hangState.pendingEtw);
 
     (void)HandleLateRecoveryTick(cfg, proc, outBase, state);
     ExpireReleasedCrashDumpIfOutlived(proc, outBase, state);

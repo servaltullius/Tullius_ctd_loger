@@ -2213,14 +2213,18 @@ void TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown()
   std::filesystem::remove_all(outBase);
 }
 
-// A hang capture's ETW trace is stopped from the helper loop, one wpr call
-// per tick, so a crash is still noticed in between; the old synchronous
-// finalize could block for minutes. The fake wpr here (this test exe) fails
-// every -stop of this file and confirms -cancel.
+// A hang capture's ETW trace records for its window after the hang dump
+// (it starts after the dump) and is then stopped from the helper loop, one
+// wpr call per tick, so a crash is still noticed in between; the old
+// synchronous finalize could block for minutes. The fake wpr here (this test
+// exe) fails every -stop of this file and confirms -cancel.
 void TestPendingHangEtwStopRunsOneWprCallPerTick()
 {
+  using skydiag::helper::internal::HangEtwCaptureSeconds;
   using skydiag::helper::internal::MaybeFinalizePendingHangEtwCapture;
   using skydiag::helper::internal::PendingHangEtwCapture;
+  static_assert(HangEtwCaptureSeconds(20u) == 10u, "EtwMaxDurationSec=20 (default): a 10 s window");
+  static_assert(HangEtwCaptureSeconds(4u) == 4u, "a shorter EtwMaxDurationSec is kept");
   const auto outBase = MakeTempDir(L"skydiag_hang_etw_pending");
   ClearLog(outBase);
   HelperConfig cfg = MakeTestConfig();
@@ -2232,8 +2236,17 @@ void TestPendingHangEtwStopRunsOneWprCallPerTick()
   pending.active = true;
   pending.etwPath = outBase / L"synthetic-hang.etl";
   pending.manifestPath = manifestPath;
+  pending.startedAtTick64 = GetTickCount64();
+  pending.captureSeconds = HangEtwCaptureSeconds(cfg.etwMaxDurationSec);
   MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
-  Require(pending.active && pending.stopAttempts == 1u, "one wpr -stop on the first tick");
+  Require(pending.active && pending.stopAttempts == 0u, "just started: the trace keeps recording");
+  Require(!FileExists(outBase / "SkyrimDiagHelper.log") ||
+            ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log").find("ETW hang capture") == std::string::npos,
+    "no wpr call yet");
+
+  pending.startedAtTick64 = GetTickCount64() - (static_cast<std::uint64_t>(pending.captureSeconds) * 1000u + 1u);
+  MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
+  Require(pending.active && pending.stopAttempts == 1u, "one wpr -stop on the first tick after the window");
   MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
   Require(pending.active && pending.stopAttempts == 2u, "one more on the next");
   MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/false, &pending);
@@ -2245,10 +2258,13 @@ void TestPendingHangEtwStopRunsOneWprCallPerTick()
   AssertContains(
     ReadAllTextUtf8(manifestPath), "\"etw_status\": \"cancelled_after_stop_failure\"", "the manifest gets the ETW outcome");
 
-  // At helper shutdown every remaining step runs at once.
+  // At helper shutdown (after the game exited) every remaining step runs at
+  // once, within the window too.
   PendingHangEtwCapture atShutdown{};
   atShutdown.active = true;
   atShutdown.etwPath = outBase / L"synthetic-hang-2.etl";
+  atShutdown.startedAtTick64 = GetTickCount64();
+  atShutdown.captureSeconds = 10u;
   MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &atShutdown);
   Require(!atShutdown.active, "forced: settled in one call");
   std::filesystem::remove_all(outBase);

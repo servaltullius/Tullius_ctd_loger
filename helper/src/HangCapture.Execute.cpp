@@ -167,9 +167,10 @@ HangTickResult ExecuteConfirmedHangCapture(
   }
 
   // The trace starts after the dump, so wpr -start (up to the ETW timeout)
-  // does not delay it, and is stopped from the helper loop
-  // (MaybeFinalizePendingHangEtwCapture) rather than here.
+  // does not delay it, and is stopped from the helper loop once it has
+  // recorded for a while (MaybeFinalizePendingHangEtwCapture) rather than here.
   bool etwStarted = false;
+  std::uint64_t etwStartedAtTick64 = 0;
   if (cfg.enableEtwCaptureOnHang && state && state->pendingEtw.active) {
     AppendLogLine(outBase, L"ETW hang capture not started: the previous hang's trace is still being stopped.");
   } else if (cfg.enableEtwCaptureOnHang) {
@@ -177,6 +178,7 @@ HangTickResult ExecuteConfirmedHangCapture(
     std::wstring etwErr;
     if (StartEtwCaptureForHang(cfg, outBase, &etwUsedProfile, &etwErr)) {
       etwStarted = true;
+      etwStartedAtTick64 = GetTickCount64();
       AppendLogLine(outBase, L"ETW hang capture started (profile=" + etwUsedProfile + L").");
     } else {
       AppendLogLine(outBase, L"ETW hang capture start failed: " + etwErr);
@@ -249,6 +251,8 @@ HangTickResult ExecuteConfirmedHangCapture(
     pending.active = true;
     pending.etwPath = etwPath;
     pending.manifestPath = manifestWritten ? manifestPath : std::filesystem::path{};
+    pending.startedAtTick64 = etwStartedAtTick64;
+    pending.captureSeconds = HangEtwCaptureSeconds(cfg.etwMaxDurationSec);
     if (state) {
       state->pendingEtw = pending;
     } else {
@@ -275,6 +279,15 @@ void MaybeFinalizePendingHangEtwCapture(
   constexpr std::uint32_t kMaxHangEtwStopAttempts = 3u;
   if (!pending || !pending->active) {
     return;
+  }
+  // Until the first stop, the trace is left to record for its window; a
+  // stop right after the start would cover almost nothing.
+  if (!force && pending->stopAttempts == 0u) {
+    const std::uint64_t nowTick64 = GetTickCount64();
+    const std::uint64_t windowMs = static_cast<std::uint64_t>(pending->captureSeconds) * 1000u;
+    if (nowTick64 >= pending->startedAtTick64 && nowTick64 - pending->startedAtTick64 < windowMs) {
+      return;
+    }
   }
 
   std::string etwStatus;
