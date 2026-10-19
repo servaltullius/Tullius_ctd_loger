@@ -65,6 +65,19 @@ internal sealed record DumpIdentityContract(
         return this == computed;
     }
 
+    // Cheap re-check for an identity that was already hashed: the dump still
+    // has the size and FILETIME that were verified.
+    public bool MatchesFileMetadata(string dumpPath)
+    {
+        if (!IsValid)
+        {
+            return false;
+        }
+
+        var current = ReadMetadata(Path.GetFullPath(dumpPath));
+        return current.size == SizeBytes && current.modified == LastWriteTimeUtc100ns;
+    }
+
     public static async Task<DumpIdentityContract> ComputeAsync(
         string dumpPath,
         CancellationToken cancellationToken)

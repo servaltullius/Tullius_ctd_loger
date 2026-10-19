@@ -47,6 +47,11 @@ internal static class Program
                     identityAWithDifferentFileTime.ResolveTriageStatePath(outDir),
                 "triage storage key must include SHA256, size, and FILETIME");
 
+            Require(identityA.MatchesFileMetadata(dumpA), "hashed identity must match its unchanged dump metadata");
+            Require(
+                !identityA.MatchesFileMetadata(dumpAWithDifferentFileTime),
+                "metadata re-check must reject a dump with another FILETIME");
+
             var summaryPathA = Path.Combine(identityA.ResolveArtifactDirectory(outDir), "Summary.json");
             var summaryPathB = Path.Combine(identityB.ResolveArtifactDirectory(outDir), "Summary.json");
             await AtomicFile.WriteAllTextAsync(
