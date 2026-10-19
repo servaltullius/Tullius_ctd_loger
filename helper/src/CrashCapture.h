@@ -556,6 +556,36 @@ constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpiso
   return exitCode == 0u && hangEpisodeOpenAtExit;
 }
 
+// The held dump of a released crash is renamed from SkyrimDiag_Crash_<ts>.dmp
+// to SkyrimDiag_Released_<ts>.dmp while it is held, so one a stopped helper
+// leaves behind is not listed as a crash (retention bounds those), and back
+// when the crash is reported after all. A path with neither prefix comes back
+// unchanged.
+inline constexpr std::wstring_view kCrashDumpPrefix = L"SkyrimDiag_Crash_";
+inline constexpr std::wstring_view kReleasedDumpPrefix = L"SkyrimDiag_Released_";
+
+inline std::wstring SwapDumpFilenamePrefix(
+  const std::filesystem::path& dumpPath,
+  std::wstring_view fromPrefix,
+  std::wstring_view toPrefix)
+{
+  const std::wstring filename = dumpPath.filename().wstring();
+  if (filename.size() <= fromPrefix.size() || filename.compare(0, fromPrefix.size(), fromPrefix) != 0) {
+    return dumpPath.wstring();
+  }
+  return (dumpPath.parent_path() / (std::wstring(toPrefix) + filename.substr(fromPrefix.size()))).wstring();
+}
+
+inline std::wstring ReleasedDumpPathFor(const std::filesystem::path& crashDumpPath)
+{
+  return SwapDumpFilenamePrefix(crashDumpPath, kCrashDumpPrefix, kReleasedDumpPrefix);
+}
+
+inline std::wstring CrashDumpPathForReleased(const std::filesystem::path& releasedDumpPath)
+{
+  return SwapDumpFilenamePrefix(releasedDumpPath, kReleasedDumpPrefix, kCrashDumpPrefix);
+}
+
 // Deletes the held dump of a released crash (releasedDumpPath), unless
 // filtered dumps are preserved, logging `reason`, and clears it.
 void DiscardReleasedCrashDump(

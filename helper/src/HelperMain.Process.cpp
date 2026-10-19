@@ -97,7 +97,7 @@ bool PromoteReleasedCrashDump(
   if (crash.releasedDumpPath.empty()) {
     return false;
   }
-  const std::wstring dumpPath = crash.releasedDumpPath;
+  std::wstring dumpPath = crash.releasedDumpPath;
   crash.releasedDumpPath.clear();
   crash.releasedDumpPreserve = false;
   crash.releasedDumpRecovery = LateRecoveryState{};
@@ -105,6 +105,17 @@ bool PromoteReleasedCrashDump(
   if (!std::filesystem::exists(dumpPath, ec) || ec) {
     AppendLogLine(outBase, L"The dump held since the release is gone: " + std::filesystem::path(dumpPath).filename().wstring());
     return false;
+  }
+  // Held as SkyrimDiag_Released_<ts>.dmp: it is a crash dump again.
+  if (const std::wstring crashPath = CrashDumpPathForReleased(dumpPath); crashPath != dumpPath) {
+    if (MoveFileExW(dumpPath.c_str(), crashPath.c_str(), 0)) {
+      dumpPath = crashPath;
+    } else {
+      AppendLogLine(
+        outBase,
+        L"Could not give the released crash's dump its crash name (err=" + std::to_wstring(GetLastError())
+          + L"); reporting it as it is.");
+    }
   }
 
   crash.latched = true;

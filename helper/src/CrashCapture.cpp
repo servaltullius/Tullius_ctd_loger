@@ -1370,6 +1370,7 @@ bool HandleCrashEventTick(
       // crash it was (ShouldReportReleasedCrashAtExit), so its dump is held
       // until that is settled (CrashCaptureState::releasedDumpPath).
       const bool holdReleasedDump = verdict == FilterVerdict::kDeleteRecovered && crashState;
+      std::wstring heldDumpPath = dumpPath;
       if (preserveFilteredDump) {
         AppendLogLine(
           outBase,
@@ -1379,10 +1380,21 @@ bool HandleCrashEventTick(
             : L"Clean-exit evidence metadata write failed; preserved the filtered dump as a fail-safe "
               L"without crash post-processing or capture latch.");
       } else if (holdReleasedDump) {
+        // Held under its own name (ReleasedDumpPathFor): a helper that stops
+        // before the release is settled leaves no dump that reads as a crash.
+        const std::wstring releasedPath = ReleasedDumpPathFor(dumpPath);
+        if (MoveFileExW(dumpPath.c_str(), releasedPath.c_str(), 0)) {
+          heldDumpPath = releasedPath;
+        } else {
+          AppendLogLine(
+            outBase,
+            L"Could not rename the released dump while it is held (err=" + std::to_wstring(GetLastError())
+              + L"); keeping its crash name.");
+        }
         AppendLogLine(
           outBase,
           L"Keeping the released dump until the game exits or outlives this exception: "
-            + std::filesystem::path(dumpPath).filename().wstring());
+            + std::filesystem::path(heldDumpPath).filename().wstring());
       } else if (!dumpRemovalHandled) {
         const auto removal = RemoveFileAndObserve(dumpPath);
         if (removal.existsAfter) {
@@ -1408,7 +1420,7 @@ bool HandleCrashEventTick(
         }
         if (holdReleasedDump) {
           NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
-          crashState->releasedDumpPath = dumpPath;
+          crashState->releasedDumpPath = heldDumpPath;
           crashState->releasedDumpPreserve = preserveFilteredDump;
           StartLateRecovery(
             &crashState->releasedDumpRecovery,

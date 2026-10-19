@@ -334,6 +334,10 @@ static void TestDumpDiscoveryUsesOutputLocationsOnly()
   RequireNotContains(service, "CrashDumps", "Generic CrashDumps fallback should not appear in output-root-only discovery.");
   RequireContains(
     service,
+    "StartsWith(\"SkyrimDiag_Released_\", StringComparison.OrdinalIgnoreCase)",
+    "Discovery must not list a released crash's held dump (or one a stopped helper left behind) as a crash.");
+  RequireContains(
+    service,
     "roots.AddRange(BuildOutputDirFallbackRoots(layout, isKorean));",
     "Discovery must also search the folders the helper falls back to when OutputDir cannot be written.");
   RequireContains(

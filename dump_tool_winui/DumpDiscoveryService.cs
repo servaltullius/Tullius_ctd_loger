@@ -450,6 +450,13 @@ internal static class DumpDiscoveryService
 
             foreach (var file in files)
             {
+                // The helper holds a released crash's dump under this name
+                // until the release is settled; one left behind is not a crash.
+                if (Path.GetFileName(file).StartsWith("SkyrimDiag_Released_", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 yield return file;
                 yieldedFiles++;
                 if (yieldedFiles >= maxFiles)

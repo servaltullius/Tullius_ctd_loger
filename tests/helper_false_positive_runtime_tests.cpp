@@ -2109,7 +2109,8 @@ void TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash()
   for (const auto& c : cases) {
     const auto outBase = MakeTempDir(L"skydiag_helper_released_held_dump");
     ClearLog(outBase);
-    const auto heldDump = outBase / L"SkyrimDiag_Crash_20261019_120000_001.dmp";
+    const auto heldDump = outBase / L"SkyrimDiag_Released_20261019_120000_001.dmp";
+    const auto crashDump = outBase / L"SkyrimDiag_Crash_20261019_120000_001.dmp";
     WriteAllTextUtf8(heldDump, "dump");
 
     auto shared = MakeSharedLayout();
@@ -2135,11 +2136,11 @@ void TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash()
     const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
     Require(state.crashCaptured.releasedDumpPath.empty(), c.name);
     if (c.expectReported) {
-      if (!FileExists(heldDump)) {
+      if (!FileExists(crashDump)) {
         std::fprintf(stderr, "%s\n", log.c_str());
       }
-      Require(FileExists(heldDump), c.name);
-      Require(state.crashCaptured.latched && state.capturedCrashDumpPath == heldDump.wstring(), c.name);
+      Require(FileExists(crashDump) && !FileExists(heldDump), c.name);
+      Require(state.crashCaptured.latched && state.capturedCrashDumpPath == crashDump.wstring(), c.name);
       Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), c.name);
       AssertContains(log, "reporting it as the crash dump", c.name);
     } else {

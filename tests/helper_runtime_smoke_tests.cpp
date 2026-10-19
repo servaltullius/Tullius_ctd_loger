@@ -322,6 +322,14 @@ void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
   Require(
     !crashState.releasedDumpPath.empty() && FileExists(crashState.releasedDumpPath),
     "the released dump is held until the release is settled");
+  // Held under its own name, so one a stopped helper leaves behind is not
+  // listed as a crash.
+  Require(
+    std::filesystem::path(crashState.releasedDumpPath).filename().wstring().rfind(L"SkyrimDiag_Released_", 0) == 0,
+    "the held dump is renamed while it is held");
+  Require(
+    !FileExists(skydiag::helper::internal::CrashDumpPathForReleased(crashState.releasedDumpPath)),
+    "no dump with the crash name is left");
   Require(crashState.releasedDumpRecovery.latchedTick64 != 0u, "its outlived check is running");
   AssertContains(log, "likely a handled first-chance exception", "the filter logs its evidence");
   AssertContains(log, "Keeping the released dump", "the caller logs what happened to the dump");
