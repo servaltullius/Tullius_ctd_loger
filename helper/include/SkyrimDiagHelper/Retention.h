@@ -410,6 +410,48 @@ inline void PruneOrphanedAnalysisCaches(
   }
 }
 
+// Files a helper leaves behind when it stops (or is killed) in the middle of
+// something:
+// - SkyrimDiag_Released_<ts>.dmp, the dump of a released crash held until
+//   the release is settled. A helper holds one at a time, its newest, so the
+//   newest is kept for a day and every older one goes.
+// - SkyrimDiag_Crash_<ts>.dmp.full.tmp, a full-size rewrite of a crash dump
+//   that did not finish. Kept for a while so a rewrite in progress is never
+//   touched.
+// - SkyrimDiag_CrashRearm_<...>.marker, a crash generation signaled again for
+//   a restarted helper (HelperMain RearmFrozenCrashFromEarlierHelper),
+//   deleted when its game exits. A day old, that game is long gone.
+inline void PruneHelperLeftovers(
+  const std::vector<std::filesystem::path>& files,
+  std::chrono::seconds heldMaxAge = std::chrono::hours(24),
+  std::chrono::seconds partialMinAge = std::chrono::minutes(10))
+{
+  const auto now = std::filesystem::file_time_type::clock::now();
+  const auto olderThan = [&](const std::filesystem::path& path, std::chrono::seconds age) {
+    std::error_code timeEc;
+    const auto written = std::filesystem::last_write_time(path, timeEc);
+    return !timeEc && now - written >= age;
+  };
+
+  std::error_code ec;
+  const auto released = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Released_", ".dmp");
+  for (std::size_t i = 0; i < released.size(); ++i) {
+    if (i > 0 || olderThan(released[i].path, heldMaxAge)) {
+      std::filesystem::remove(released[i].path, ec);
+    }
+  }
+  for (const auto& file : files) {
+    const auto name = PathPartUtf8(file.filename());
+    const bool partialDump = StartsWith(name, "SkyrimDiag_Crash_") && EndsWith(name, ".dmp.full.tmp") &&
+      olderThan(file, partialMinAge);
+    const bool staleMarker = StartsWith(name, "SkyrimDiag_CrashRearm_") && EndsWith(name, ".marker") &&
+      olderThan(file, heldMaxAge);
+    if (partialDump || staleMarker) {
+      std::filesystem::remove(file, ec);
+    }
+  }
+}
+
 inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, const RetentionLimits& limits)
 {
   if (outBase.empty()) {
@@ -457,6 +499,7 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
   etls.insert(etls.end(), crashEtls.begin(), crashEtls.end());
   PruneEtwTracesFromCollected(std::move(etls), limits.maxEtwTraces);
 
+  PruneHelperLeftovers(files);
   PruneOrphanedAnalysisCaches(outBase);
 }
 
