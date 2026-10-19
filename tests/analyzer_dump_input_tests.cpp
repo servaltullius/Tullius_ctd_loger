@@ -4,7 +4,9 @@
 //   crash handlers (the plugin's VEH returned after signalling the helper,
 //   then Crash Logger or WER ran). The pointer-scan fallback must start at
 //   the faulting Rsp from the exception stream, not at the dump-time Rsp, or
-//   the handlers' own frames take the heaviest slots.
+//   the handlers' own frames take the heaviest slots;
+// - review M16: module paths the analyzer may open or load from;
+// - review L8: module names of any length.
 
 #include <Windows.h>
 
@@ -24,7 +26,10 @@ namespace {
 
 using skydiag::dump_tool::SuspectItem;
 using skydiag::dump_tool::internal::ComputeStackScanSuspects;
+using skydiag::dump_tool::minidump::IsLocalFixedDrivePath;
 using skydiag::dump_tool::minidump::ModuleInfo;
+using skydiag::dump_tool::minidump::ModulePlusOffsetText;
+using skydiag::dump_tool::minidump::ReadMinidumpStringUtf8;
 namespace i18n = skydiag::dump_tool::i18n;
 
 constexpr std::uint32_t kExceptionTid = 4242;
@@ -163,6 +168,39 @@ void TestDumpTimeRspWithoutAUsableExceptionContext()
     "a scan without an exception thread ignores the context");
 }
 
+void TestOnlyLocalFixedDrivePathsAreOpened()
+{
+  Require(!IsLocalFixedDrivePath(L"\\\\attacker\\share\\SkyrimSE.exe"), "UNC share");
+  Require(!IsLocalFixedDrivePath(L"//attacker/share/SkyrimSE.exe"), "UNC share, forward slashes");
+  Require(!IsLocalFixedDrivePath(L"\\\\?\\UNC\\attacker\\share\\x.dll"), "long UNC path");
+  Require(!IsLocalFixedDrivePath(L"\\\\.\\PhysicalDrive0"), "device path");
+  Require(!IsLocalFixedDrivePath(L"Data\\SKSE\\Plugins\\x.dll"), "relative path");
+  Require(!IsLocalFixedDrivePath(L"C:x.dll"), "drive-relative path");
+  Require(!IsLocalFixedDrivePath(L""), "empty");
+  wchar_t system[MAX_PATH]{};
+  const UINT n = GetSystemDirectoryW(system, MAX_PATH);
+  Require(n > 0 && n < MAX_PATH, "system directory");
+  Require(IsLocalFixedDrivePath(system), "the system drive is a local fixed disk");
+}
+
+void TestLongModuleNames()
+{
+  const std::wstring name(5000, L'a');
+  Require(ModulePlusOffsetText(name, 0x1234) == name + L"+0x1234", "a 5000-character name is formatted, not truncated");
+
+  // A MINIDUMP_STRING longer than any Windows path is refused.
+  std::vector<std::uint8_t> dump(16 + 70000, 0);
+  const std::uint32_t tooLong = 32768u * 2u;
+  std::memcpy(dump.data() + 16, &tooLong, sizeof(tooLong));
+  std::string out;
+  Require(!ReadMinidumpStringUtf8(dump.data(), dump.size(), 16, out), "an over-long string is refused");
+  const std::uint32_t ok = 4u;
+  std::memcpy(dump.data() + 16, &ok, sizeof(ok));
+  const wchar_t ab[] = L"ab";
+  std::memcpy(dump.data() + 20, ab, 4);
+  Require(ReadMinidumpStringUtf8(dump.data(), dump.size(), 16, out) && out == "ab", "a normal string reads");
+}
+
 }  // namespace
 
 int main()
@@ -170,6 +208,8 @@ int main()
   try {
     TestScanStartsAtTheFaultingRsp();
     TestDumpTimeRspWithoutAUsableExceptionContext();
+    TestOnlyLocalFixedDrivePathsAreOpened();
+    TestLongModuleNames();
   } catch (const std::exception& ex) {
     std::cerr << "analyzer_dump_input_tests failed: " << ex.what() << "\n";
     return 1;

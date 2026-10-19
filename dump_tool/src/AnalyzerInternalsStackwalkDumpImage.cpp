@@ -31,7 +31,9 @@ bool LocalFileMatchesModule(const minidump::ModuleInfo& module)
   if (IgnoreLocalImagesForTesting()) {
     return false;
   }
-  if (module.path.empty()) {
+  // The path comes from the dump; DbgHelp then opens the file there too
+  // (review M16).
+  if (module.path.empty() || !minidump::IsLocalFixedDrivePath(module.path)) {
     return false;
   }
   if (module.time_date_stamp == 0) {

@@ -241,6 +241,12 @@ bool ReadMinidumpStringUtf8(void* dumpBase, std::uint64_t dumpSize, RVA rva, std
   if ((lenBytes % 2u) != 0u) {
     return false;
   }
+  // No Windows path is longer than 32767 characters; a longer string is a
+  // damaged or crafted dump.
+  constexpr std::uint32_t kMaxStringBytes = 32767u * sizeof(wchar_t);
+  if (lenBytes > kMaxStringBytes) {
+    return false;
+  }
   if (off + sizeof(std::uint32_t) + lenBytes > dumpSize) {
     return false;
   }
@@ -287,19 +293,24 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
     std::filesystem::path p(wpath);
     const auto file = p.filename().wstring();
 
-    const std::uint64_t off = addr - base;
-    wchar_t buf[1024]{};
-    swprintf_s(buf, L"%s+0x%llx", file.c_str(), static_cast<unsigned long long>(off));
-
     ModuleHit hit{};
     hit.base = base;
     hit.path = wpath;
     hit.filename = file;
-    hit.plusOffset = buf;
+    hit.plusOffset = ModulePlusOffsetText(file, addr - base);
     return hit;
   }
 
   return std::nullopt;
+}
+
+std::wstring ModulePlusOffsetText(std::wstring_view filename, std::uint64_t offset)
+{
+  wchar_t hex[32]{};
+  swprintf_s(hex, L"+0x%llx", static_cast<unsigned long long>(offset));
+  std::wstring out(filename);
+  out += hex;
+  return out;
 }
 
 bool IsGraphicsRuntimeName(std::wstring_view filename)
@@ -339,6 +350,21 @@ bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath)
 {
   const std::wstring lower = LowerCopy(modulePath);
   return IsLikelyWindowsSystemModulePathLower(lower);
+}
+
+bool IsLocalFixedDrivePath(std::wstring_view path)
+{
+  // Drive-letter paths only: "\\server\share", "\\?\" and "\\.\" device
+  // paths and relative paths are refused outright.
+  if (path.size() < 3 || path[1] != L':' || (path[2] != L'\\' && path[2] != L'/')) {
+    return false;
+  }
+  const wchar_t drive = path[0];
+  if (!((drive >= L'A' && drive <= L'Z') || (drive >= L'a' && drive <= L'z'))) {
+    return false;
+  }
+  const wchar_t root[] = { drive, L':', L'\\', L'\0' };
+  return GetDriveTypeW(root) == DRIVE_FIXED;
 }
 
 bool IsGameExeModule(std::wstring_view filename)

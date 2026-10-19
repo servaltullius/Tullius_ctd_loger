@@ -109,7 +109,7 @@ const LocalImageMemory::Image* LocalImageMemory::Resolve(std::uint64_t addr) con
   }
   if (!image.attempted) {
     image.attempted = true;
-    if (IgnoreLocalImagesForTesting()) {
+    if (IgnoreLocalImagesForTesting() || !minidump::IsLocalFixedDrivePath(image.module->path)) {
       return nullptr;
     }
     // Image-resource mapping lays sections out at their RVAs without running
