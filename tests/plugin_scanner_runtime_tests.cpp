@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -75,6 +77,7 @@ void TestImplicitPluginsAreActiveUnderMo2()
 
   const auto data = root / L"Data";
   WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"portable.txt", "");  // MO2 runs this portable install whatever the registry says
   // The profile lists one CC file itself; it must not appear twice.
   WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "*ccListed.esl\n*Mod.esp\n");
   WriteText(root / L"Skyrim.ccc", "ccPresent.esl\nccListed.esl\nccNotInstalled.esl\n");
@@ -128,6 +131,7 @@ void TestMo2StateIsCapturedWithConfiguredDirectories()
   iniText += instance.generic_string();
   iniText += "\nprofiles_directory=%BASE_DIR%/my profiles\nmod_directory=%BASE_DIR%\\\\my mods\n";
   WriteText(root / L"ModOrganizer.ini", iniText);
+  WriteText(root / L"portable.txt", "");  // MO2 runs this portable install whatever the registry says
   // The default profiles folder exists too; the configured one must be used.
   WriteText(root / L"profiles" / L"Crash Profile" / L"plugins.txt", "*Wrong.esp\n");
   const auto profile = instance / L"my profiles" / L"Crash Profile";
@@ -170,6 +174,7 @@ void TestAnsiPluginNamesDoNotThrow()
   std::filesystem::remove_all(root, ec);
 
   WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"portable.txt", "");  // MO2 runs this portable install whatever the registry says
   WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "*Caf\xE9.esp\n*Mod.esp\n");
   WriteText(root / L"Skyrim.ccc", "cc\xE9.esl\n");
   WriteText(root / L"Data" / L"Mod.esp", "");
@@ -289,11 +294,211 @@ void TestSkseLogIsMatchedByImageBase()
   Require(!staleJson.at("skse_log").contains("issues"), "an unmatched log contributes no plugin results");
 }
 
+void AppendField(std::string& out, const char* type, const std::string& data)
+{
+  out.append(type, 4);
+  const auto size = static_cast<std::uint16_t>(data.size());
+  out.push_back(static_cast<char>(size & 0xFF));
+  out.push_back(static_cast<char>(size >> 8));
+  out += data;
+}
+
+// A TES4 record with HEDR 1.71, `masters` MAST/DATA pairs and a trailing INTV.
+std::string MakeTes4(std::uint32_t flags, const std::vector<std::string>& masters)
+{
+  std::string fields;
+  const float version = 1.71f;
+  std::string hedr(12, '\0');
+  std::memcpy(hedr.data(), &version, 4);
+  AppendField(fields, "HEDR", hedr);
+  AppendField(fields, "CNAM", std::string("author\0", 7));
+  for (const auto& master : masters) {
+    AppendField(fields, "MAST", master + '\0');
+    AppendField(fields, "DATA", std::string(8, '\0'));
+  }
+  AppendField(fields, "INTV", std::string(4, '\0'));
+  std::string record = "TES4";
+  const auto dataSize = static_cast<std::uint32_t>(fields.size());
+  record.append(reinterpret_cast<const char*>(&dataSize), 4);
+  record.append(reinterpret_cast<const char*>(&flags), 4);
+  record.append(12, '\0');
+  return record + fields;
+}
+
+std::vector<std::string> ManyMasters(std::size_t count)
+{
+  std::vector<std::string> masters;
+  for (std::size_t i = 0; i < count; ++i) {
+    masters.push_back("A Fairly Long Master Plugin Name Number " + std::to_string(i) + ".esp");
+  }
+  return masters;
+}
+
+std::filesystem::path FreshRoot(const wchar_t* name)
+{
+  const auto root = std::filesystem::temp_directory_path() / (name + std::to_wstring(GetCurrentProcessId()));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  return root;
+}
+
+// Review M12: only the first 4 KB of a plugin were read, so a plugin with ~90
+// or more masters (DynDOLOD.esp, big patches) lost the rest of its list and a
+// missing master past that point was never reported.
+void TestMastersBeyondFourKilobytesAreRead()
+{
+  const auto masters = ManyMasters(150);
+  const auto tes4 = MakeTes4(0, masters);
+  Require(tes4.size() > 8192u, "the synthetic header is larger than the old 4 KB read");
+
+  const auto root = FreshRoot(L"skydiag_plugin_scanner_masters_");
+  WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"portable.txt", "");
+  WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "*Big.esp\n");
+  WriteText(root / L"Data" / L"Big.esp", tes4 + std::string(64, 'R'));
+  const auto result = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+  const auto json = nlohmann::json::parse(SerializePluginScanResult(result));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  Require(result.plugins.size() == 1u, "the plugin is scanned");
+  const auto& big = result.plugins.front();
+  Require(big.masters == masters, "every master of a header larger than 4 KB is read");
+  Require(!big.masters_truncated, "a complete header is not marked truncated");
+  Require(!json.at("plugins").at(0).contains("masters_truncated"), "the flag is only serialized when set");
+
+  // A record cut off inside the master list says so; one cut off after it
+  // (past INTV) still has every master.
+  skydiag::helper::PluginMeta cut{};
+  Require(skydiag::helper::ParseTes4Header(
+            reinterpret_cast<const std::uint8_t*>(tes4.data()), tes4.size() / 2, cut),
+    "a cut-off header still parses");
+  Require(cut.masters_truncated && !cut.masters.empty() && cut.masters.size() < masters.size(),
+    "a header cut inside the master list is marked truncated");
+  const auto padded = tes4.substr(0, 4) + std::string("\xFF\xFF\x00\x00", 4) + tes4.substr(8);
+  skydiag::helper::PluginMeta past{};
+  skydiag::helper::ParseTes4Header(reinterpret_cast<const std::uint8_t*>(padded.data()), padded.size(), past);
+  Require(past.masters.size() == masters.size() && !past.masters_truncated,
+    "a header cut after the master list keeps every master and is not marked truncated");
+}
+
+// Review L5: the game loads every .esl as light; a renamed one without the
+// header flag counted as a full plugin toward the 254 limit.
+void TestEslExtensionIsLightWithoutTheFlag()
+{
+  const auto root = FreshRoot(L"skydiag_plugin_scanner_esl_");
+  WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"portable.txt", "");
+  WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "*Renamed.esl\n*Full.esp\n");
+  WriteText(root / L"Data" / L"Renamed.esl", MakeTes4(0, {}));
+  WriteText(root / L"Data" / L"Full.esp", MakeTes4(0, {}));
+  const auto result = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+
+  bool sawRenamed = false;
+  bool sawFull = false;
+  for (const auto& plugin : result.plugins) {
+    if (plugin.filename == "Renamed.esl") {
+      sawRenamed = true;
+      Require(plugin.is_esl && plugin.slot_type_known, "a .esl without the ESL flag is light");
+    } else if (plugin.filename == "Full.esp") {
+      sawFull = true;
+      Require(!plugin.is_esl && plugin.slot_type_known, "a .esp without the flag stays full");
+    }
+  }
+  Require(sawRenamed && sawFull, "both plugins are scanned");
+}
+
+// Review M14: a portable ModOrganizer.ini left next to the game won over the
+// global instance MO2 actually runs. MO2 runs a portable install holding
+// portable.txt, else the registry's CurrentInstance, else the portable one.
+void TestMo2InstanceChoiceFollowsMo2()
+{
+  using skydiag::helper::ChooseMo2InstanceIni;
+  using skydiag::helper::Mo2InstanceCandidate;
+  const std::filesystem::path stale = L"C:\\Old\\ModOrganizer.ini";
+  const std::filesystem::path locked = L"C:\\List\\ModOrganizer.ini";
+  const std::filesystem::path global = L"C:\\Users\\u\\AppData\\Local\\ModOrganizer\\SSE\\ModOrganizer.ini";
+
+  const auto prefersGlobal = ChooseMo2InstanceIni({ Mo2InstanceCandidate{ stale, false } }, global);
+  Require(prefersGlobal.ini == global && prefersGlobal.source == "global" && prefersGlobal.ambiguous,
+    "the registry's global instance wins over an unlocked portable ini, flagged as ambiguous");
+
+  const auto lockedWins = ChooseMo2InstanceIni(
+    { Mo2InstanceCandidate{ stale, false }, Mo2InstanceCandidate{ locked, true } }, global);
+  Require(lockedWins.ini == locked && lockedWins.source == "portable_locked" && !lockedWins.ambiguous,
+    "a portable install locked by portable.txt always wins");
+
+  const auto portableOnly = ChooseMo2InstanceIni({ Mo2InstanceCandidate{ stale, false } }, {});
+  Require(portableOnly.ini == stale && portableOnly.source == "portable", "no global instance means portable");
+
+  const auto globalOnly = ChooseMo2InstanceIni({}, global);
+  Require(globalOnly.ini == global && !globalOnly.ambiguous, "a lone global instance is not ambiguous");
+
+  Require(ChooseMo2InstanceIni({}, {}).ini.empty(), "nothing found means no ini");
+
+  // portable.txt next to the scanned ini is detected and recorded.
+  const auto root = FreshRoot(L"skydiag_plugin_scanner_instance_");
+  WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"portable.txt", "");
+  WriteText(root / L"profiles" / L"Default" / L"modlist.txt", "+Mod\n");
+  WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "");
+  const auto result = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+  const auto json = nlohmann::json::parse(SerializePluginScanResult(result));
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  Require(result.mo2.instance_source == "portable_locked" && !result.mo2.instance_ambiguous,
+    "a locked portable install is recorded as such");
+  Require(json.at("mo2").at("instance_source") == "portable_locked", "the instance source is serialized");
+}
+
+// path::u8string() throws on an unpaired UTF-16 surrogate and u8path() on
+// bytes that are not UTF-8; on MSVC either one cost the whole MO2 capture.
+void TestOddPathsDoNotThrow()
+{
+  bool threw = false;
+  std::filesystem::path resolved;
+  try {
+    resolved = skydiag::helper::ResolveMo2Directory("D:\\caf\xE9\xFF", L"C:\\MO2", L"mods");
+  } catch (...) {
+    threw = true;
+  }
+  Require(!threw && !resolved.empty(), "a configured directory that is not UTF-8 must not throw");
+
+  const auto root = FreshRoot(L"skydiag_plugin_scanner_surrogate_\xD800_");
+  WriteText(root / L"ModOrganizer.ini", "[General]\nselected_profile=@ByteArray(Default)\n");
+  WriteText(root / L"portable.txt", "");
+  WriteText(root / L"profiles" / L"Default" / L"plugins.txt", "*Mod.esp\n");
+  WriteText(root / L"profiles" / L"Default" / L"modlist.txt", "+Mod\n");
+  WriteText(root / L"Data" / L"Mod.esp", MakeTes4(0, { "Skyrim.esm" }));
+  PluginScanResult result{};
+  std::string json;
+  threw = false;
+  try {
+    result = ScanPlugins(root, { L"usvfs_x64.dll" }, nullptr);
+    json = SerializePluginScanResult(result);
+  } catch (...) {
+    threw = true;
+  }
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  Require(!threw, "an unpaired surrogate in the MO2 folder must not throw out of the scan");
+  Require(result.mo2.status == "captured", "the MO2 state is still captured");
+  Require(result.mo2.ini_path.find("\xEF\xBF\xBD") != std::string::npos, "the odd character becomes U+FFFD");
+  Require(!nlohmann::json::parse(json, nullptr, false).is_discarded(), "the scan JSON stays valid");
+  Require(Contains(ActiveNames(result), "Mod.esp"), "plugins under that folder are still scanned");
+}
+
 }  // namespace
 
 int main()
 {
   try {
+    TestMastersBeyondFourKilobytesAreRead();
+    TestEslExtensionIsLightWithoutTheFlag();
+    TestMo2InstanceChoiceFollowsMo2();
+    TestOddPathsDoNotThrow();
     TestCreationClubListParsing();
     TestImplicitPluginsAreActiveUnderMo2();
     TestSkseLogIsMatchedByImageBase();

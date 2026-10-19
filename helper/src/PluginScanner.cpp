@@ -70,6 +70,15 @@ void TrimAsciiInPlace(std::string& s)
   }
 }
 
+// std::filesystem::exists(path) throws on errors such as ERROR_NOT_READY (an
+// empty card reader behind a junction) or an access error from usvfs; the
+// scan is optional context and must never throw for that (review M13).
+bool ExistsNoThrow(const std::filesystem::path& path)
+{
+  std::error_code ec;
+  return std::filesystem::exists(path, ec);
+}
+
 bool HasModule(const std::vector<std::wstring>& modules, const wchar_t* moduleName)
 {
   const std::wstring target = WideLower(moduleName ? moduleName : L"");
@@ -102,7 +111,7 @@ std::filesystem::path ResolveGameExePathFromDir(const std::filesystem::path& gam
 {
   for (const wchar_t* name : { L"SkyrimSE.exe", L"SkyrimVR.exe", L"Skyrim.exe" }) {
     const auto candidate = gameExeDir / name;
-    if (std::filesystem::exists(candidate)) {
+    if (ExistsNoThrow(candidate)) {
       return candidate;
     }
   }
@@ -161,33 +170,45 @@ std::filesystem::path ResolveMo2IniFromModulePath(const std::filesystem::path& m
   }
 
   for (const auto& candidate : candidates) {
-    if (std::filesystem::exists(candidate)) {
+    if (ExistsNoThrow(candidate)) {
       return candidate;
     }
   }
   return {};
 }
 
-std::filesystem::path FindMo2IniFromModulePaths(const std::vector<std::wstring>* modulePaths)
+// Portable ModOrganizer.ini files that may belong to the running MO2: next to
+// or above the game folder, then next to the loaded usvfs DLL. Existing files
+// only, in that order, without duplicates.
+std::vector<Mo2InstanceCandidate> CollectPortableMo2Inis(
+  const std::filesystem::path& gameExeDir,
+  const std::vector<std::wstring>* modulePaths)
 {
-  if (!modulePaths) {
-    return {};
+  std::vector<Mo2InstanceCandidate> out;
+  std::unordered_set<std::wstring> seenInis;
+  const auto add = [&](const std::filesystem::path& ini) {
+    if (ini.empty() || !ExistsNoThrow(ini)) {
+      return;
+    }
+    const auto normalized = ini.lexically_normal();
+    if (!seenInis.insert(WideLower(normalized.wstring())).second) {
+      return;
+    }
+    // MO2 always runs the portable instance of an install holding portable.txt.
+    out.push_back(Mo2InstanceCandidate{ normalized, ExistsNoThrow(normalized.parent_path() / L"portable.txt") });
+  };
+  add(gameExeDir / "ModOrganizer.ini");
+  add(gameExeDir.parent_path() / "ModOrganizer.ini");
+  if (modulePaths) {
+    std::unordered_set<std::wstring> seenModules;
+    for (const auto& rawPath : *modulePaths) {
+      if (rawPath.empty() || !seenModules.insert(WideLower(rawPath)).second) {
+        continue;
+      }
+      add(ResolveMo2IniFromModulePath(std::filesystem::path(rawPath)));
+    }
   }
-
-  std::unordered_set<std::wstring> seen;
-  for (const auto& rawPath : *modulePaths) {
-    if (rawPath.empty()) {
-      continue;
-    }
-    const std::wstring lowered = WideLower(rawPath);
-    if (!seen.insert(lowered).second) {
-      continue;
-    }
-    if (const auto iniPath = ResolveMo2IniFromModulePath(std::filesystem::path(rawPath)); !iniPath.empty()) {
-      return iniPath;
-    }
-  }
-  return {};
+  return out;
 }
 
 // The game and SKSE read and write plugin and DLL names through the ANSI
@@ -218,10 +239,83 @@ std::string AnsiToUtf8IfNeeded(const std::string& text)
   return utf8;
 }
 
+// path::u8string() throws on an unpaired UTF-16 surrogate (an NTFS name can
+// hold one) and u8path() throws on bytes that are not UTF-8. These never
+// throw: such a character becomes U+FFFD instead.
 std::string PathToUtf8(const std::filesystem::path& path)
 {
-  const auto u8 = path.u8string();
-  return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+  const std::wstring& wide = path.native();
+  if (wide.empty() || wide.size() > static_cast<std::size_t>(INT_MAX)) {
+    return {};
+  }
+  const int len = static_cast<int>(wide.size());
+  const int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wide.data(), len, nullptr, 0, nullptr, nullptr);
+  if (utf8Len <= 0) {
+    return {};
+  }
+  std::string utf8(static_cast<std::size_t>(utf8Len), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide.data(), len, utf8.data(), utf8Len, nullptr, nullptr);
+  return utf8;
+}
+
+std::filesystem::path Utf8ToPath(const std::string& utf8)
+{
+  if (utf8.empty() || utf8.size() > static_cast<std::size_t>(INT_MAX)) {
+    return {};
+  }
+  const int len = static_cast<int>(utf8.size());
+  const int wideLen = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), len, nullptr, 0);
+  if (wideLen <= 0) {
+    return {};
+  }
+  std::wstring wide(static_cast<std::size_t>(wideLen), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, utf8.data(), len, wide.data(), wideLen);
+  return std::filesystem::path(std::move(wide));
+}
+
+// The TES4 record (24-byte header plus its data) at the start of a plugin.
+// The master list of a plugin with ~90 or more masters runs past 4 KB, which
+// is all that used to be read (review M12); the record's own size says how
+// much to read, capped against a corrupt size. Masters precede ONAM, the only
+// large TES4 field, so the cap does not cut them in practice.
+std::vector<std::uint8_t> ReadTes4Record(const std::filesystem::path& path)
+{
+  std::vector<std::uint8_t> buf;
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    return buf;
+  }
+  constexpr std::size_t kRecordHeaderBytes = 24;
+  constexpr std::size_t kMaxTes4RecordBytes = std::size_t{256} * 1024;
+  buf.resize(kRecordHeaderBytes);
+  in.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
+  buf.resize(static_cast<std::size_t>(in.gcount()));
+  if (buf.size() < kRecordHeaderBytes || std::memcmp(buf.data(), "TES4", 4) != 0) {
+    return buf;
+  }
+  std::uint32_t dataSize = 0;
+  std::memcpy(&dataSize, buf.data() + 4, 4);
+  const std::size_t want =
+    std::min<std::size_t>(kRecordHeaderBytes + static_cast<std::size_t>(dataSize), kMaxTes4RecordBytes);
+  buf.resize(want);
+  in.read(reinterpret_cast<char*>(buf.data() + kRecordHeaderBytes),
+    static_cast<std::streamsize>(want - kRecordHeaderBytes));
+  buf.resize(kRecordHeaderBytes + static_cast<std::size_t>(in.gcount()));
+  return buf;
+}
+
+// CreateToolhelp32Snapshot fails with ERROR_BAD_LENGTH while the target is
+// loading or unloading modules (review L6), e.g. when the helper attaches
+// while SKSE plugins load; retry briefly instead of reporting no modules.
+HANDLE SnapModulesWithRetry(std::uint32_t pid)
+{
+  for (int attempt = 0;; ++attempt) {
+    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+    if (snap != INVALID_HANDLE_VALUE || GetLastError() != ERROR_BAD_LENGTH || attempt >= 4) {
+      return snap;
+    }
+    Sleep(20);
+  }
 }
 
 bool ReadWholeFile(const std::filesystem::path& path, std::string* out)
@@ -258,6 +352,33 @@ std::filesystem::path FindGlobalMo2InstanceIni()
 }
 
 }  // namespace
+
+Mo2InstanceChoice ChooseMo2InstanceIni(
+  const std::vector<Mo2InstanceCandidate>& portableInis,
+  const std::filesystem::path& globalInstanceIni)
+{
+  Mo2InstanceChoice choice{};
+  for (const auto& candidate : portableInis) {
+    if (candidate.portableLocked) {
+      choice.ini = candidate.ini;
+      choice.source = "portable_locked";
+      return choice;
+    }
+  }
+  if (!globalInstanceIni.empty()) {
+    choice.ini = globalInstanceIni;
+    choice.source = "global";
+    // A portable ModOrganizer.ini is around too. MO2 would pick the global
+    // instance, but one started with an explicit instance argument may not.
+    choice.ambiguous = !portableInis.empty();
+    return choice;
+  }
+  if (!portableInis.empty()) {
+    choice.ini = portableInis.front().ini;
+    choice.source = "portable";
+  }
+  return choice;
+}
 
 Mo2IniSettings ParseMo2Ini(const std::string& content)
 {
@@ -317,7 +438,7 @@ std::filesystem::path ResolveMo2Directory(
   if (const auto pos = AsciiLower(value).find(kBaseDir); pos != std::string::npos) {
     value = value.substr(0, pos) + PathToUtf8(baseDir) + value.substr(pos + kBaseDir.size());
   }
-  std::filesystem::path path = std::filesystem::u8path(value);
+  std::filesystem::path path = Utf8ToPath(value);
   if (path.is_relative()) {
     path = baseDir / path;
   }
@@ -368,19 +489,38 @@ bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out
   out.is_esl = (flags & 0x0200u) != 0u;
   out.header_version = 0.0f;
   out.masters.clear();
+  out.masters_truncated = false;
 
   const std::size_t headerEnd = 24;
-  const std::size_t recordEnd = std::min<std::size_t>(size, headerEnd + dataSize);
+  const std::size_t fullRecordEnd = headerEnd + static_cast<std::size_t>(dataSize);
+  const std::size_t recordEnd = std::min<std::size_t>(size, fullRecordEnd);
   std::size_t pos = headerEnd;
+  // Set once a field that follows the master list (ONAM, INTV, INCC, ...) is
+  // reached: a record cut off after that point still has every master.
+  bool pastMasterList = false;
+  // An XXXX field carries the 32-bit size of the next field.
+  std::optional<std::uint32_t> nextSizeOverride;
   while (pos + 6 <= recordEnd) {
     char subType[5]{};
     std::memcpy(subType, data + pos, 4);
-    std::uint16_t subSize = 0;
-    std::memcpy(&subSize, data + pos + 4, 2);
+    std::uint16_t subSize16 = 0;
+    std::memcpy(&subSize16, data + pos + 4, 2);
     pos += 6;
+    const std::size_t subSize = nextSizeOverride ? *nextSizeOverride : subSize16;
+    nextSizeOverride.reset();
 
-    if (pos + subSize > recordEnd) {
+    if (subSize > recordEnd - pos) {
       break;
+    }
+
+    if (std::strcmp(subType, "XXXX") == 0 && subSize == 4) {
+      std::uint32_t nextSize = 0;
+      std::memcpy(&nextSize, data + pos, 4);
+      nextSizeOverride = nextSize;
+    } else if (std::strcmp(subType, "HEDR") != 0 && std::strcmp(subType, "CNAM") != 0 &&
+               std::strcmp(subType, "SNAM") != 0 && std::strcmp(subType, "MAST") != 0 &&
+               std::strcmp(subType, "DATA") != 0) {
+      pastMasterList = true;
     }
 
     if (std::strcmp(subType, "HEDR") == 0 && subSize >= 4) {
@@ -400,6 +540,9 @@ bool ParseTes4Header(const std::uint8_t* data, std::size_t size, PluginMeta& out
     pos += subSize;
   }
 
+  // The bytes given end inside the record before the master list was known to
+  // be complete: missing-master checks only see the masters listed here.
+  out.masters_truncated = size < fullRecordEnd && !pastMasterList;
   return true;
 }
 
@@ -485,7 +628,7 @@ std::vector<std::wstring> CollectModuleFilenamesBestEffort(std::uint32_t pid)
     return modules;
   }
 
-  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+  HANDLE snap = SnapModulesWithRetry(pid);
   if (snap == INVALID_HANDLE_VALUE) {
     return modules;
   }
@@ -515,7 +658,7 @@ std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid)
     return paths;
   }
 
-  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+  HANDLE snap = SnapModulesWithRetry(pid);
   if (snap == INVALID_HANDLE_VALUE) {
     return paths;
   }
@@ -544,7 +687,7 @@ std::uint64_t QueryMainModuleBaseBestEffort(std::uint32_t pid)
   if (pid == 0) {
     return 0;
   }
-  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
+  HANDLE snap = SnapModulesWithRetry(pid);
   if (snap == INVALID_HANDLE_VALUE) {
     return 0;
   }
@@ -679,26 +822,26 @@ PluginScanResult ScanPlugins(
   std::filesystem::path pluginsTxtPath;
 
   if (result.mo2_detected) {
-    auto moIni = gameExeDir / "ModOrganizer.ini";
-    if (!std::filesystem::exists(moIni)) {
-      moIni = gameExeDir.parent_path() / "ModOrganizer.ini";
-    }
-    if (!std::filesystem::exists(moIni)) {
-      moIni = FindMo2IniFromModulePaths(modulePaths);
-    }
-    if (!std::filesystem::exists(moIni)) {
-      moIni = FindGlobalMo2InstanceIni();
-    }
+    // Review M14: a portable ModOrganizer.ini left next to the game used to win
+    // over the global instance MO2 actually runs; MO2's own order is used now.
+    const auto instance = ChooseMo2InstanceIni(
+      CollectPortableMo2Inis(gameExeDir, modulePaths), FindGlobalMo2InstanceIni());
+    const auto& moIni = instance.ini;
     std::string iniText;
     if (moIni.empty() || !ReadWholeFile(moIni, &iniText)) {
       result.mo2.status = "no_ini";
     } else {
       try {
+        result.mo2.instance_source = instance.source;
+        result.mo2.instance_ambiguous = instance.ambiguous;
         // MO2 cannot switch profiles while the game runs, so what the INI and the
         // profile say now is what the game was started with.
         auto settings = ParseMo2Ini(AnsiToUtf8IfNeeded(iniText));
         // An @ByteArray \xNN escape can leave bytes that are not UTF-8.
-        settings.selected_profile = AnsiToUtf8IfNeeded(settings.selected_profile);
+        for (auto* value : { &settings.selected_profile, &settings.base_directory, &settings.mod_directory,
+                             &settings.profiles_directory, &settings.overwrite_directory }) {
+          *value = AnsiToUtf8IfNeeded(*value);
+        }
         const auto iniDir = moIni.parent_path().lexically_normal();
         const auto baseDir = settings.base_directory.empty()
           ? iniDir
@@ -711,7 +854,7 @@ PluginScanResult ScanPlugins(
         result.mo2.overwrite_dir = PathToUtf8(ResolveMo2Directory(settings.overwrite_directory, baseDir, L"overwrite"));
         result.mo2.profile = settings.selected_profile;
 
-        const auto profileDir = profilesDir / std::filesystem::u8path(settings.selected_profile);
+        const auto profileDir = profilesDir / Utf8ToPath(settings.selected_profile);
         std::error_code ec;
         if (settings.selected_profile.empty() || !std::filesystem::is_directory(profileDir, ec)) {
           result.mo2.status = "no_profile";
@@ -750,13 +893,13 @@ PluginScanResult ScanPlugins(
       // GOG and Epic keep their list under their own folder name (MO2 tells
       // them apart by Galaxy64.dll / EOSSDK-Win64-Shipping.dll next to the
       // exe); reading the Steam list there would describe another install.
-      const wchar_t* folder = std::filesystem::exists(gameExeDir / L"Galaxy64.dll")
+      const wchar_t* folder = ExistsNoThrow(gameExeDir / L"Galaxy64.dll")
         ? L"Skyrim Special Edition GOG"
-        : std::filesystem::exists(gameExeDir / L"EOSSDK-Win64-Shipping.dll") ? L"Skyrim Special Edition EPIC"
-                                                                             : L"Skyrim Special Edition";
+        : ExistsNoThrow(gameExeDir / L"EOSSDK-Win64-Shipping.dll") ? L"Skyrim Special Edition EPIC"
+                                                                  : L"Skyrim Special Edition";
       const auto standardPath = std::filesystem::path(localAppData) / folder / L"plugins.txt";
       CoTaskMemFree(localAppData);
-      if (std::filesystem::exists(standardPath)) {
+      if (ExistsNoThrow(standardPath)) {
         pluginsTxtPath = standardPath;
         result.plugins_source = "standard";
       }
@@ -765,7 +908,7 @@ PluginScanResult ScanPlugins(
 
   if (pluginsTxtPath.empty()) {
     const auto fallbackPath = gameExeDir / "plugins.txt";
-    if (std::filesystem::exists(fallbackPath)) {
+    if (ExistsNoThrow(fallbackPath)) {
       pluginsTxtPath = fallbackPath;
       result.plugins_source = "fallback";
     }
@@ -800,7 +943,7 @@ PluginScanResult ScanPlugins(
       return;
     }
     std::error_code ec;
-    if (std::filesystem::exists(dataDir / std::filesystem::u8path(name), ec)) {
+    if (std::filesystem::exists(dataDir / Utf8ToPath(name), ec)) {
       seen.insert(AsciiLower(name));
       activePlugins.push_back(name);
     }
@@ -832,21 +975,18 @@ PluginScanResult ScanPlugins(
     meta.filename = pluginName;
     meta.is_active = true;
 
-    const auto pluginPath = dataDir / std::filesystem::u8path(pluginName);
+    const auto pluginPath = dataDir / Utf8ToPath(pluginName);
     std::error_code existsEc;
     if (std::filesystem::exists(pluginPath, existsEc)) {
-      std::ifstream pf(pluginPath, std::ios::binary);
-      if (pf.is_open()) {
-        std::vector<std::uint8_t> buf(4096);
-        pf.read(reinterpret_cast<char*>(buf.data()), static_cast<std::streamsize>(buf.size()));
-        const std::size_t bytesRead = static_cast<std::size_t>(pf.gcount());
-        meta.slot_type_known = ParseTes4Header(buf.data(), bytesRead, meta);
-        for (auto& master : meta.masters) {
-          master = AnsiToUtf8IfNeeded(master);
-        }
+      const auto record = ReadTes4Record(pluginPath);
+      meta.slot_type_known = ParseTes4Header(record.data(), record.size(), meta);
+      for (auto& master : meta.masters) {
+        master = AnsiToUtf8IfNeeded(master);
       }
     }
-    if (!meta.slot_type_known && EndsWithAsciiInsensitive(pluginName, ".esl")) {
+    // The game loads every .esl file as light whatever its header flag says
+    // (review L5): a renamed .esl without the flag used the full count.
+    if (EndsWithAsciiInsensitive(pluginName, ".esl")) {
       meta.is_esl = true;
       meta.slot_type_known = true;
     }
@@ -875,6 +1015,9 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
     p["is_active"] = plugin.is_active;
     p["slot_type_known"] = plugin.slot_type_known;
     p["masters"] = plugin.masters;
+    if (plugin.masters_truncated) {
+      p["masters_truncated"] = true;
+    }
     j["plugins"].push_back(std::move(p));
   }
 
@@ -891,6 +1034,10 @@ std::string SerializePluginScanResult(const PluginScanResult& result)
       { "enabled_mods", mo2.enabled_mods },
       { "enabled_mods_truncated", mo2.enabled_mods_truncated },
     };
+    if (!mo2.instance_source.empty()) {
+      j["mo2"]["instance_source"] = mo2.instance_source;
+      j["mo2"]["instance_ambiguous"] = mo2.instance_ambiguous;
+    }
   }
 
   if (!result.skse_log.status.empty()) {

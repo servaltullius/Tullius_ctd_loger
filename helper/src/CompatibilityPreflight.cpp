@@ -189,7 +189,7 @@ std::wstring ResolveDefaultSymbolCacheDir(bool* outReady)
 
   std::error_code ec;
   std::filesystem::create_directories(cacheDir, ec);
-  const bool ready = !ec && std::filesystem::exists(cacheDir);
+  const bool ready = !ec && std::filesystem::exists(cacheDir, ec);
   if (outReady) {
     *outReady = ready;
   }
@@ -325,7 +325,8 @@ bool FileExistsAny(const std::filesystem::path& dir, std::initializer_list<const
     if (!n || !*n) {
       continue;
     }
-    if (std::filesystem::exists(dir / n)) {
+    std::error_code ec;
+    if (std::filesystem::exists(dir / n, ec)) {
       return true;
     }
   }
@@ -372,17 +373,11 @@ nlohmann::json ToJson(const PreflightCheck& c)
   };
 }
 
-}  // namespace
-
-void RunCompatibilityPreflight(
+void RunPreflightChecks(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
   const std::filesystem::path& outBase)
 {
-  if (!cfg.enableCompatibilityPreflight) {
-    return;
-  }
-
   std::filesystem::path gameExeDir;
   if (!skydiag::helper::TryResolveGameExeDir(proc.process, gameExeDir)) {
     AppendLogLine(outBase, L"Compatibility preflight skipped: failed to resolve game exe directory.");
@@ -396,7 +391,8 @@ void RunCompatibilityPreflight(
   std::filesystem::path gameExePath;
   for (const wchar_t* name : { L"SkyrimSE.exe", L"SkyrimVR.exe", L"Skyrim.exe" }) {
     const auto candidate = gameExeDir / name;
-    if (std::filesystem::exists(candidate)) {
+    std::error_code ec;
+    if (std::filesystem::exists(candidate, ec)) {
       gameExePath = candidate;
       break;
     }
@@ -654,6 +650,29 @@ void RunCompatibilityPreflight(
     outBase,
     L"Compatibility preflight written: " + preflightPath.wstring() +
       L" (warn=" + std::to_wstring(warnCount) + L", error=" + std::to_wstring(errorCount) + L")");
+}
+
+}  // namespace
+
+void RunCompatibilityPreflight(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase)
+{
+  if (!cfg.enableCompatibilityPreflight) {
+    return;
+  }
+  // The preflight runs before monitoring starts and is only advice: a throwing
+  // filesystem call (ERROR_NOT_READY behind a junction, an access error from
+  // usvfs) or a JSON error must not end the helper before it captures
+  // anything (review M13).
+  try {
+    RunPreflightChecks(cfg, proc, outBase);
+  } catch (const std::exception& ex) {
+    AppendLogLine(outBase, L"Compatibility preflight failed; monitoring continues without it: " + AnsiExceptionText(ex));
+  } catch (...) {
+    AppendLogLine(outBase, L"Compatibility preflight failed; monitoring continues without it.");
+  }
 }
 
 }  // namespace skydiag::helper::internal

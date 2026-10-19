@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 
@@ -21,6 +22,9 @@ struct HelperConfig {
   std::uint32_t hangThresholdLoadingSec = 600;
   DumpMode dumpMode = DumpMode::kDefault;
   std::wstring outputDir;  // empty => next to exe
+  // Tried in order when outputDir cannot be created or written (see
+  // MakeOutputBase): without them a bad OutputDir lost every capture and log.
+  std::vector<std::wstring> outputDirFallbacks;
   bool enableManualCaptureHotkey = true;
   ManualCaptureHotkey manualCaptureHotkey = kDefaultManualCaptureHotkey;
   bool enableCompatibilityPreflight = true;

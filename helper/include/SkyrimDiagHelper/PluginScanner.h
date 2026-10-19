@@ -21,6 +21,9 @@ struct PluginMeta
   bool is_active = false;
   bool slot_type_known = false;
   std::vector<std::string> masters;
+  // The TES4 record was cut off (corrupt size, or past the read cap) before
+  // the master list was known to be complete.
+  bool masters_truncated = false;
 };
 
 struct SkseLogScan
@@ -50,7 +53,32 @@ struct Mo2Capture
   // The profile's enabled mods (modlist.txt "+" entries), highest priority first.
   std::vector<std::string> enabled_mods;
   bool enabled_mods_truncated = false;
+  // Which ModOrganizer.ini was read: portable_locked / global / portable
+  // (ChooseMo2InstanceIni). Ambiguous when a portable ini was also found.
+  std::string instance_source;
+  bool instance_ambiguous = false;
 };
+
+struct Mo2InstanceCandidate
+{
+  std::filesystem::path ini;
+  bool portableLocked = false;  // portable.txt next to it
+};
+
+struct Mo2InstanceChoice
+{
+  std::filesystem::path ini;  // empty when there is none
+  std::string source;
+  bool ambiguous = false;
+};
+
+// MO2's own choice (InstanceManager::currentInstance): an install holding
+// portable.txt always runs its portable instance; otherwise a non-empty
+// registry CurrentInstance (globalInstanceIni) wins, and only an empty one
+// means the portable ModOrganizer.ini. portableInis are in priority order.
+Mo2InstanceChoice ChooseMo2InstanceIni(
+  const std::vector<Mo2InstanceCandidate>& portableInis,
+  const std::filesystem::path& globalInstanceIni);
 
 // ModOrganizer.ini values the capture needs, decoded from Qt's INI format.
 struct Mo2IniSettings
