@@ -8,6 +8,9 @@ internal sealed class DumpToolInvocationOptions
     public bool Headless { get; set; }
     public bool Debug { get; set; }
     public bool AllowOnlineSymbols { get; set; }
+    // --simple-ui / --advanced-ui (sent by the helper from the deprecated
+    // AutoOpenViewerBeginnerMode key) are accepted for compatibility only:
+    // the viewer has a single layout and ignores them.
     public bool ForceSimpleUi { get; set; }
     public bool ForceAdvancedUi { get; set; }
 
