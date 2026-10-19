@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cwchar>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -141,7 +142,14 @@ int wmain(int argc, wchar_t** argv)
 
     skydiag::helper::internal::HelperLoopState loopState{};
     skydiag::helper::internal::InitializeLoopState(proc, &loopState);
-    loopState.crashLoggerLogDirs = skydiag::helper::internal::ResolveCrashLoggerLogDirs(cfg, proc);
+    // Only used to look for Crash Logger's crash log at exit: a failure here
+    // must not keep the capture loop from starting.
+    try {
+      loopState.crashLoggerLogDirs = skydiag::helper::internal::ResolveCrashLoggerLogDirs(cfg, proc);
+    } catch (const std::exception&) {
+      loopState.crashLoggerLogDirs.clear();
+      AppendLogLine(outBase, L"Warning: could not resolve Crash Logger's log folders; continuing without them.");
+    }
     if (loopState.crashCaptured.releasedCrashSeq != 0u) {
       AppendLogLine(
         outBase,

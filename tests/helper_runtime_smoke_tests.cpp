@@ -578,9 +578,39 @@ void TestHelperLogSessionKeepsThePreviousLog()
   Require(current.find("next session line") != std::string::npos, "the new session writes to the current log");
 }
 
+// v0.2.68-rc4 built the Crashlog Directory path from CrashLogger.ini's bytes
+// as UTF-8, which throws on a value saved in the ANSI code page (e.g. CP949
+// from Notepad), and the helper died at every start before its capture loop.
+void TestCrashLoggerIniPathDecodesWithoutThrowing()
+{
+  using skydiag::helper::internal::DecodeCrashLoggerIniPath;
+  Require(DecodeCrashLoggerIniPath("").empty(), "an unset value is no folder");
+  Require(DecodeCrashLoggerIniPath("Logs") == std::filesystem::path(L"Logs"), "ASCII decodes as is");
+
+  // D:\<game>\<log> in Hangul, as UTF-8 and as CP949.
+  const std::wstring expected = L"D:\\\uAC8C\uC784\\\uB85C\uADF8";
+  const std::string utf8 = "D:\\\xEA\xB2\x8C\xEC\x9E\x84\\\xEB\xA1\x9C\xEA\xB7\xB8";
+  const std::string cp949 = "D:\\\xB0\xD4\xC0\xD3\\\xB7\xCE\xB1\xD7";
+  Require(DecodeCrashLoggerIniPath(utf8) == std::filesystem::path(expected), "UTF-8 is read as Crash Logger reads it");
+
+  bool threw = false;
+  std::filesystem::path decoded;
+  try {
+    decoded = DecodeCrashLoggerIniPath(cp949);
+  } catch (...) {
+    threw = true;
+  }
+  Require(!threw, "bytes that are not UTF-8 must not throw");
+  if (GetACP() == 949u) {
+    Require(decoded == std::filesystem::path(expected), "the ANSI code page is the fallback");
+  } else {
+    Require(decoded.empty() || decoded.wstring().rfind(L"D:\\", 0) == 0, "a fallback decode keeps the plain bytes");
+  }
+}
 int main()
 {
   try {
+    TestCrashLoggerIniPathDecodesWithoutThrowing();
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();
     TestHandleCrashEventTick_WritesTheDumpAtOnceForAMainThreadFault();

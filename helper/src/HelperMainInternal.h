@@ -60,6 +60,10 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state);
+// CrashLogger.ini's Crashlog Directory value (its raw bytes) as a path: UTF-8
+// as Crash Logger reads it, else the ANSI code page. Empty when it decodes in
+// neither. Never throws on bad bytes, unlike a path built from a u8string.
+std::filesystem::path DecodeCrashLoggerIniPath(const std::string& bytes);
 // The folders Crash Logger writes its crash-*.log to: the Crashlog Directory
 // set in CrashLogger.ini, and the SKSE log folder under Documents\My Games.
 // Empty unless Crash Logger is installed with its thread dump hotkey on.
