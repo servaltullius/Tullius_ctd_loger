@@ -54,7 +54,7 @@ Runtime prerequisites for release distribution:
 DumpTool language:
 - Headless CLI: `SkyrimDiagDumpToolCli.exe --lang en|ko <dump> [--out-dir <dir>]`
 - WinUI: `SkyrimDiagDumpToolWinUI.exe --lang en|ko <dump>`
-  - Compatibility flags accepted: `--simple-ui`, `--advanced-ui`
+  - Compatibility flags accepted and ignored (single layout): `--simple-ui`, `--advanced-ui`; the helper's `AutoOpenViewerBeginnerMode` key that selects them is deprecated
 
 ## Validate (Optional)
 

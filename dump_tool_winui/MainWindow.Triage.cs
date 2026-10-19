@@ -27,25 +27,41 @@ public sealed partial class MainWindow
             return;
         }
 
+        // Recent dumps and Analyze stay usable while a large dump is hashed
+        // for the save, so pin the target now and repaint it afterwards only
+        // if it is still the dump on screen.
+        var dumpPath = _vm.CurrentDumpPath;
+        var outDir = _vm.CurrentOutDir;
         try
         {
             SaveTriageButton.IsEnabled = false;
             StatusText.Text = T("Saving review feedback...", "검토 피드백을 저장하는 중입니다...");
 
-            if (string.IsNullOrWhiteSpace(_vm.CurrentDumpPath))
+            if (string.IsNullOrWhiteSpace(dumpPath))
             {
                 throw new InvalidOperationException("The current dump path is unavailable.");
             }
-            if (string.IsNullOrWhiteSpace(_vm.CurrentOutDir))
+            if (string.IsNullOrWhiteSpace(outDir))
             {
                 throw new InvalidOperationException("The current output directory is unavailable.");
             }
             await SummaryTriageStore.SaveAsync(
                 summaryPath,
-                _vm.CurrentDumpPath,
-                _vm.CurrentOutDir,
+                dumpPath,
+                outDir,
                 BuildTriageReviewFromEditor(),
                 CancellationToken.None);
+
+            if (!IsShownTriageTarget(dumpPath, summaryPath))
+            {
+                if (_analysisCts is null)
+                {
+                    StatusText.Text = T(
+                        "Review feedback saved for the previously selected dump: ",
+                        "이전에 선택한 덤프의 검토 피드백을 저장했습니다: ") + Path.GetFileName(dumpPath);
+                }
+                return;
+            }
 
             var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
             RenderSummary(summary);
@@ -59,8 +75,17 @@ public sealed partial class MainWindow
         }
         finally
         {
-            SaveTriageButton.IsEnabled = _vm.CurrentSummary is not null;
+            // An analysis started meanwhile owns the editor until it finishes.
+            SaveTriageButton.IsEnabled = _vm.CurrentSummary is not null && _analysisCts is null;
         }
+    }
+
+    private bool IsShownTriageTarget(string dumpPath, string summaryPath)
+    {
+        return _analysisCts is null &&
+               _vm.CurrentSummary is not null &&
+               string.Equals(_vm.CurrentDumpPath, dumpPath, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(_currentSummaryPath, summaryPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private void PopulateTriageEditor(AnalysisSummary summary)

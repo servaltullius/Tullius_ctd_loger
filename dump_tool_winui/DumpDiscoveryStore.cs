@@ -18,9 +18,13 @@ internal static class DumpDiscoveryStore
 
     public static DumpDiscoveryState Load()
     {
+        return LoadFromPath(GetStatePath());
+    }
+
+    internal static DumpDiscoveryState LoadFromPath(string path)
+    {
         try
         {
-            var path = GetStatePath();
             if (!File.Exists(path))
             {
                 return new DumpDiscoveryState();
@@ -39,6 +43,27 @@ internal static class DumpDiscoveryStore
     public static async Task SaveAsync(DumpDiscoveryState state, CancellationToken cancellationToken)
     {
         await SaveToPathAsync(state, GetStatePath(), cancellationToken);
+    }
+
+    // Several viewer windows share one state file. Apply each change to the
+    // file as it is now, not to this window's startup snapshot, so a change
+    // made in another viewer is not overwritten.
+    public static Task<DumpDiscoveryState> UpdateAsync(
+        Func<DumpDiscoveryState, DumpDiscoveryState> change,
+        CancellationToken cancellationToken)
+    {
+        return UpdateAtPathAsync(GetStatePath(), change, cancellationToken);
+    }
+
+    internal static async Task<DumpDiscoveryState> UpdateAtPathAsync(
+        string path,
+        Func<DumpDiscoveryState, DumpDiscoveryState> change,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var nextState = Sanitize(change(LoadFromPath(path)));
+        await SaveToPathAsync(nextState, path, cancellationToken);
+        return nextState;
     }
 
     internal static async Task SaveToPathAsync(
