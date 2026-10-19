@@ -2,9 +2,12 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "HelperCommon.h"
 #include "SkyrimDiagHelper/Retention.h"
@@ -14,8 +17,31 @@ namespace {
 
 std::uint64_t g_maxHelperLogBytes = 0;
 std::uint32_t g_maxHelperLogFiles = 0;
+std::vector<std::wstring> g_sessionStartLines;
+
+void RotateAndStartSession(const std::filesystem::path& outBase)
+{
+  std::error_code ec;
+  const auto path = outBase / L"SkyrimDiagHelper.log";
+  if (!std::filesystem::exists(path, ec) || std::filesystem::file_size(path, ec) == 0) {
+    return;
+  }
+  const auto previous = outBase / L"SkyrimDiagHelper.previous.log";
+  std::filesystem::remove(previous, ec);
+  std::filesystem::rename(path, previous, ec);
+  if (ec) {
+    ClearLog(outBase);  // a locked log is still restarted, as before
+  }
+}
 
 }  // namespace
+
+void QueueSessionStartLogLine(std::wstring line)
+{
+  if (std::find(g_sessionStartLines.begin(), g_sessionStartLines.end(), line) == g_sessionStartLines.end()) {
+    g_sessionStartLines.push_back(std::move(line));
+  }
+}
 
 void SetHelperLogRotation(std::uint64_t maxBytes, std::uint32_t maxFiles)
 {
@@ -35,17 +61,11 @@ void ClearLog(const std::filesystem::path& outBase)
 
 void StartHelperLogSession(const std::filesystem::path& outBase)
 {
-  std::error_code ec;
-  const auto path = outBase / L"SkyrimDiagHelper.log";
-  if (!std::filesystem::exists(path, ec) || std::filesystem::file_size(path, ec) == 0) {
-    return;
+  RotateAndStartSession(outBase);
+  for (const auto& line : g_sessionStartLines) {
+    AppendLogLine(outBase, line);
   }
-  const auto previous = outBase / L"SkyrimDiagHelper.previous.log";
-  std::filesystem::remove(previous, ec);
-  std::filesystem::rename(path, previous, ec);
-  if (ec) {
-    ClearLog(outBase);  // a locked log is still restarted, as before
-  }
+  g_sessionStartLines.clear();
 }
 
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)

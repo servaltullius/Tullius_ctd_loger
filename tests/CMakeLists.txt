@@ -858,6 +858,12 @@ if(WIN32)
   )
   add_test(NAME skydiag_helper_config_runtime_tests COMMAND skydiag_helper_config_runtime_tests)
 
+  add_executable(skydiag_helper_output_dir_fallback_tests
+    helper_output_dir_fallback_tests.cpp
+  )
+  target_link_libraries(skydiag_helper_output_dir_fallback_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_helper_output_dir_fallback_tests COMMAND skydiag_helper_output_dir_fallback_tests)
+
   add_executable(skydiag_helper_false_positive_runtime_tests
     helper_false_positive_runtime_tests.cpp
   )

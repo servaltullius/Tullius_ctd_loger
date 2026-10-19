@@ -194,6 +194,24 @@ void TestLookupsMatchTheWindowsApi()
   }
 }
 
+// Review M11: a custom OutputDir that cannot be written falls back to the
+// default folder next to the helper, then to %LOCALAPPDATA%.
+void TestOutputDirFallbacks(const IniFile& ini)
+{
+  ini.Write("[SkyrimDiagHelper]\r\nOutputDir=Z:\\Custom Logs\r\n");
+  const HelperConfig custom = LoadConfig(nullptr);
+  const auto exeDir = IniBesideExe().parent_path();
+  Require(custom.outputDirFallbacks.size() == 2u, "a custom OutputDir has two fallbacks");
+  Require(std::filesystem::path(custom.outputDirFallbacks[0]) == exeDir / L"Tullius Ctd Logs",
+    "the first fallback is the default folder next to the helper");
+  Require(custom.outputDirFallbacks[1].find(L"\\SkyrimDiag\\Tullius Ctd Logs") != std::wstring::npos,
+    "the second fallback is under %LOCALAPPDATA%");
+
+  ini.Write("[SkyrimDiagHelper]\r\nOutputDir=\r\n");
+  const HelperConfig blank = LoadConfig(nullptr);
+  Require(blank.outputDirFallbacks.size() == 1u, "the default folder is not its own fallback");
+}
+
 }  // namespace
 
 int main()
@@ -207,6 +225,7 @@ int main()
     TestUtf16OutputDirIsRead(ini);
     TestAnsiOutputDirUsesTheCodePage(ini);
     TestLookupsMatchTheWindowsApi();
+    TestOutputDirFallbacks(ini);
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "FAILED: %s\n", ex.what());
     return 1;

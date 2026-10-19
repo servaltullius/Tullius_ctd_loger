@@ -9,6 +9,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -16,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
 
 namespace skydiag::helper::internal {
@@ -73,12 +75,81 @@ bool IsRunningUnderWine()
   return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
 }
 
+bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* err)
+{
+  if (err) {
+    err->clear();
+  }
+  if (dir.empty()) {
+    if (err) {
+      *err = L"empty path";
+    }
+    return false;
+  }
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  if (ec) {
+    if (err) {
+      *err = L"create_directories failed (error " + std::to_wstring(ec.value()) + L")";
+    }
+    return false;
+  }
+  // A folder that exists can still refuse writes (Program Files, a read-only
+  // share): create and drop a probe file the way captures write theirs.
+  static std::atomic<std::uint32_t> probeSequence{0};
+  DWORD lastError = ERROR_SUCCESS;
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    const auto probe = dir /
+      (L".SkyrimDiag_write_probe_" + std::to_wstring(GetCurrentProcessId()) + L"_" +
+        std::to_wstring(probeSequence.fetch_add(1, std::memory_order_relaxed)) + L".tmp");
+    const HANDLE file = CreateFileW(
+      probe.c_str(),
+      GENERIC_WRITE,
+      0,
+      nullptr,
+      CREATE_NEW,
+      FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_HIDDEN | FILE_FLAG_DELETE_ON_CLOSE,
+      nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+      CloseHandle(file);
+      return true;
+    }
+    lastError = GetLastError();
+    if (lastError != ERROR_FILE_EXISTS) {
+      break;
+    }
+  }
+  if (err) {
+    *err = L"folder is not writable (error " + std::to_wstring(lastError) + L")";
+  }
+  return false;
+}
+
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
 {
-  std::filesystem::path out(cfg.outputDir);
-  std::error_code ec;
-  std::filesystem::create_directories(out, ec);
-  return out;
+  const std::filesystem::path configured(cfg.outputDir);
+  std::wstring configuredErr;
+  if (PrepareWritableOutputDir(configured, &configuredErr)) {
+    return configured;
+  }
+  // Without a writable folder every dump, report and log line of the session
+  // is lost without a trace; use the first fallback that works and say so.
+  for (const auto& fallback : cfg.outputDirFallbacks) {
+    const std::filesystem::path candidate(fallback);
+    std::wstring fallbackErr;
+    if (!PrepareWritableOutputDir(candidate, &fallbackErr)) {
+      continue;
+    }
+    const std::wstring warning =
+      L"WARNING: OutputDir \"" + configured.wstring() + L"\" cannot be used (" + configuredErr +
+      L"); captures and logs go to \"" + candidate.wstring() + L"\" instead. Fix OutputDir in SkyrimDiagHelper.ini.";
+    std::wcerr << L"[SkyrimDiagHelper] " << warning << L"\n";
+    QueueSessionStartLogLine(warning);
+    return candidate;
+  }
+  std::wcerr << L"[SkyrimDiagHelper] WARNING: OutputDir \"" << configured.wstring() << L"\" cannot be used ("
+             << configuredErr << L") and no fallback folder is writable; captures may be lost.\n";
+  return configured;
 }
 
 bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)

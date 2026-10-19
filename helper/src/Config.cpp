@@ -102,6 +102,40 @@ std::wstring ResolveEffectiveOutputDir(const std::wstring& rawOutputDir)
   return ResolveOutputDirAgainstExeDir(rawOutputDir, ExeDir(), kDefaultOutputSubdir).wstring();
 }
 
+// Where captures go when OutputDir cannot be written: the default folder next
+// to the helper, then %LOCALAPPDATA%\SkyrimDiag\<default subfolder>.
+std::vector<std::wstring> OutputDirFallbacks(const std::wstring& outputDir)
+{
+  std::vector<std::wstring> out;
+  const auto add = [&](const std::filesystem::path& candidate) {
+    if (candidate.empty()) {
+      return;
+    }
+    const std::wstring normalized = candidate.lexically_normal().wstring();
+    if (CompareStringOrdinal(normalized.c_str(), -1, outputDir.c_str(), -1, TRUE) == CSTR_EQUAL) {
+      return;
+    }
+    for (const auto& existing : out) {
+      if (CompareStringOrdinal(normalized.c_str(), -1, existing.c_str(), -1, TRUE) == CSTR_EQUAL) {
+        return;
+      }
+    }
+    out.push_back(normalized);
+  };
+  if (const auto exeDir = ExeDir(); !exeDir.empty()) {
+    add(ResolveOutputDirAgainstExeDir(L"", exeDir, kDefaultOutputSubdir));
+  }
+  std::vector<wchar_t> buf(32768, L'\0');
+  const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf.data(), static_cast<DWORD>(buf.size()));
+  if (n > 0 && n < buf.size()) {
+    const std::filesystem::path localAppData(std::wstring(buf.data(), n));
+    if (localAppData.is_absolute()) {
+      add(localAppData / L"SkyrimDiag" / kDefaultOutputSubdir);
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 HelperConfig LoadConfig(std::wstring* err)
@@ -128,6 +162,7 @@ HelperConfig LoadConfig(std::wstring* err)
   }
 
   cfg.outputDir = ResolveEffectiveOutputDir(ReadIniString(ini, L"SkyrimDiagHelper", L"OutputDir", L""));
+  cfg.outputDirFallbacks = OutputDirFallbacks(cfg.outputDir);
 
   cfg.enableManualCaptureHotkey =
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"EnableManualCaptureHotkey", 1) != 0;
