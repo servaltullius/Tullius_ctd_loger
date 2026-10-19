@@ -293,15 +293,67 @@ void LoadPluginScanJson(
   }
 }
 
+namespace {
+
+// The MO2 and game folders below come from the dump: its module paths and
+// the helper's plugin scan. Like the module files themselves (review M16),
+// they are read only on a local fixed disk, so a crafted dump cannot make
+// the analyzer list or open files on a UNC share.
+bool IsLocalFixedDriveFolder(const std::filesystem::path& dir)
+{
+  return minidump::IsLocalFixedDrivePath(dir.native());
+}
+
+// The first module path under an MO2 "mods" folder on a local fixed disk, as
+// the list the Mo2Index helpers take; empty when there is none. *refused (if
+// given) is set when a module path names an MO2 folder elsewhere.
+std::vector<std::wstring> LocalMo2ModulePath(const std::vector<std::wstring>& modulePaths, bool* refused)
+{
+  for (const auto& path : modulePaths) {
+    const auto base = TryInferMo2BaseDirFromModulePaths({ path });
+    if (!base) {
+      continue;
+    }
+    if (IsLocalFixedDriveFolder(*base)) {
+      return { path };
+    }
+    if (refused) {
+      *refused = true;
+    }
+  }
+  return {};
+}
+
+bool CapturedMo2FoldersAreLocal(const CapturedMo2State& state)
+{
+  for (const auto* dir : { &state.base, &state.modsDir, &state.overwriteDir, &state.profilesDir }) {
+    if (!dir->empty() && !IsLocalFixedDriveFolder(*dir)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out)
 {
   std::optional<Mo2Index> idx;
-  if (auto captured = TryParseCapturedMo2State(out.plugin_scan_json_utf8)) {
+  bool refused = false;
+  auto captured = TryParseCapturedMo2State(out.plugin_scan_json_utf8);
+  if (captured && !CapturedMo2FoldersAreLocal(*captured)) {
+    refused = true;
+    captured.reset();
+  }
+  if (captured) {
     idx = BuildMo2IndexFromCapture(*captured);
   } else {
     // A dump captured before the helper recorded MO2 state, or state it could
     // not read: what is on disk now may be another profile or changed mods.
-    idx = TryBuildMo2IndexFromModulePaths(modulePaths);
+    idx = TryBuildMo2IndexFromModulePaths(LocalMo2ModulePath(modulePaths, &refused));
+  }
+  if (refused && !idx) {
+    out.diagnostics.push_back(L"[MO2] the dump names an MO2 folder that is not on a local fixed disk; not read");
   }
   if (idx) {
     out.mo2_providers_source = idx->source == Mo2Index::Source::kCrashTime ? "crash_time" : "analysis_time";
@@ -432,12 +484,15 @@ void IntegrateCrashLoggerLog(
     }
     const std::wstring lower = WideLower(m.filename);
     if (lower == L"skyrimse.exe" || lower == L"skyrimae.exe" || lower == L"skyrimvr.exe" || lower == L"skyrim.exe") {
-      gameRootDir = std::filesystem::path(m.path).parent_path();
+      // CrashLogger.ini and a relative Crashlog Directory are read from here.
+      if (const auto dir = std::filesystem::path(m.path).parent_path(); IsLocalFixedDriveFolder(dir)) {
+        gameRootDir = dir;
+      }
       break;
     }
   }
 
-  const auto mo2Base = TryInferMo2BaseDirFromModulePaths(modulePaths);
+  const auto mo2Base = TryInferMo2BaseDirFromModulePaths(LocalMo2ModulePath(modulePaths, nullptr));
   CrashLoggerPairingMetadata pairing{};
   auto logPath = TryFindCrashLoggerLogForDump(
     dumpFs,

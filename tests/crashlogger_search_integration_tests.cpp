@@ -1,3 +1,4 @@
+#include "AnalyzerPipeline.h"
 #include "CrashLogger.h"
 
 #include <Windows.h>
@@ -12,8 +13,11 @@
 
 namespace {
 
+using skydiag::dump_tool::AnalysisResult;
+using skydiag::dump_tool::IntegrateCrashLoggerLog;
 using skydiag::dump_tool::TryFindCrashLoggerLogForDump;
 using skydiag::dump_tool::CrashLoggerPairingMetadata;
+using skydiag::dump_tool::minidump::ModuleInfo;
 
 constexpr const char* kCrashLogText =
   "CrashLoggerSSE v1.20.0\n"
@@ -330,6 +334,50 @@ void TestIniFolderNameWithHashIsKept()
     "the log in the configured folder is found");
 }
 
+// Review M16 follow-up: the MO2 folder and game folder the analyzer searches
+// for Crash Logger logs come from the dump's module paths. One that is not
+// on a local fixed disk is not read (a crafted dump could name a UNC share);
+// a "\\?\" path to a real local folder stands in for it here.
+void TestDumpFoldersOffALocalFixedDiskAreNotSearched()
+{
+  TempDirectory temp("dump-folder-locality");
+  const auto dumps = temp.path() / L"Dumps";
+  const auto mo2 = temp.path() / L"MO2";
+  const auto overwriteSkse = mo2 / L"overwrite" / L"SKSE";
+  const auto gameLogs = temp.path() / L"GameLogs";
+  for (const auto& dir : { dumps, overwriteSkse, mo2 / L"mods" / L"X", gameLogs }) {
+    std::filesystem::create_directories(dir);
+  }
+
+  const auto mo2Dump = WriteFile(dumps, L"Tullius_crash_20970721_120000.dmp", "dump");
+  WriteFile(overwriteSkse, L"crash-2097-07-21-12-00-00.log", kCrashLogText);
+  const std::wstring moduleUnderMods = (mo2 / L"mods" / L"X" / L"x.dll").wstring();
+
+  AnalysisResult localMo2{};
+  IntegrateCrashLoggerLog(mo2Dump.wstring(), {}, { moduleUnderMods }, std::nullopt, localMo2);
+  Require(std::filesystem::path(localMo2.crash_logger_log_path).filename() == L"crash-2097-07-21-12-00-00.log",
+    "the overwrite folder of a local MO2 instance is searched");
+  AnalysisResult otherMo2{};
+  IntegrateCrashLoggerLog(mo2Dump.wstring(), {}, { L"\\\\?\\" + moduleUnderMods }, std::nullopt, otherMo2);
+  Require(otherMo2.crash_logger_log_path.empty(), "an MO2 folder off a local fixed disk is not searched");
+
+  const auto gameDump = WriteFile(dumps, L"Tullius_crash_20970722_120000.dmp", "dump");
+  WriteFile(gameLogs, L"crash-2097-07-22-12-00-00.log", kCrashLogText);
+  const auto game = WriteGameWithCrashLoggerIni(temp.path(), "Crashlog Directory=" + Utf8(gameLogs));
+  ModuleInfo exe{};
+  exe.filename = L"SkyrimSE.exe";
+  exe.path = (game / L"SkyrimSE.exe").wstring();
+
+  AnalysisResult localGame{};
+  IntegrateCrashLoggerLog(gameDump.wstring(), { exe }, {}, std::nullopt, localGame);
+  Require(std::filesystem::path(localGame.crash_logger_log_path).filename() == L"crash-2097-07-22-12-00-00.log",
+    "CrashLogger.ini in a local game folder is read");
+  exe.path = L"\\\\?\\" + exe.path;
+  AnalysisResult otherGame{};
+  IntegrateCrashLoggerLog(gameDump.wstring(), { exe }, {}, std::nullopt, otherGame);
+  Require(otherGame.crash_logger_log_path.empty(), "a game folder off a local fixed disk is not read");
+}
+
 }  // namespace
 
 int main()
@@ -343,6 +391,7 @@ int main()
     TestRuntimeLogHotkeyLineCannotBeatRealCrashLog();
     TestIniFolderWithTrailingSeparatorIsSearchedOnce();
     TestIniFolderNameWithHashIsKept();
+    TestDumpFoldersOffALocalFixedDiskAreNotSearched();
     std::cout << "crashlogger search integration tests passed\n";
     return 0;
   } catch (const std::exception& ex) {
