@@ -309,6 +309,38 @@ static void TestAnalyzePanelHasDumpDiscoveryFlow()
   RequireContains(store, "LearnedRoots", "Dump discovery store must persist learned search roots.");
 }
 
+// The 2026-10-19 review's final pass: a failed or canceled re-analysis of the
+// same dump keeps saving its review, and results arriving in the background
+// do not replace an analysis status or failure.
+static void TestWinUiKeepsSaveTargetAndAnalysisStatus()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+
+  const auto analysis = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Analysis.cs");
+  const auto targetChanged = analysis.find("if (targetChanged)");
+  const auto cleared = analysis.find("_currentSummaryPath = null;");
+  RequireContains(analysis, "_currentSummaryPath = null;", "A new dump must drop the previous summary path.");
+  if (targetChanged == std::string::npos || cleared < targetChanged ||
+      analysis.find("_currentSummaryPath = null;", cleared + 1) != std::string::npos) {
+    std::cerr << "The summary path is dropped only when the dump or output folder changed.\n";
+    std::exit(1);
+  }
+
+  const auto window = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  RequireContains(window, "private void ShowBackgroundStatus(string statusAtStart, string message)",
+    "Background results must go through one status rule.");
+  const auto triage = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Triage.cs");
+  RequireContains(triage, "ShowBackgroundStatus(savingStatus, T(\"Failed to save review: \"",
+    "A review save failure must not replace an analysis status.");
+  RequireNotContains(triage, "StatusText.Text = T(\n                \"Review feedback saved to the summary JSON.\"",
+    "A saved review must not replace an analysis status.");
+  RequireNotContains(triage, "StatusText.Text = T(\n                        \"Review feedback saved for the previously selected dump: \"",
+    "A review saved for another dump must not replace an analysis status.");
+  const auto discovery = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.DumpDiscovery.cs");
+  RequireContains(discovery, "ShowBackgroundStatus(statusAtStart, T(\"Dump discovery failed: \"",
+    "A background dump scan failure must not replace an analysis status.");
+}
+
 static void TestDumpDiscoveryUsesOutputLocationsOnly()
 {
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -579,6 +611,7 @@ int main()
   TestMainWindowShareTextUsesCrashLoggerReadingPath();
   TestAnalyzePanelHasDumpDiscoveryFlow();
   TestDumpDiscoveryUsesOutputLocationsOnly();
+  TestWinUiKeepsSaveTargetAndAnalysisStatus();
   TestWinUiConsumesRecaptureContext();
   TestWinUiUsesRepresentativeCandidateIdentifiers();
   TestWinUiRawDataTextBoxesExposeScrollbars();

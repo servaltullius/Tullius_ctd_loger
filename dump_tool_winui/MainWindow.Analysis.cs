@@ -123,11 +123,13 @@ public sealed partial class MainWindow
                 !string.Equals(_vm.CurrentOutDir, outDir, StringComparison.OrdinalIgnoreCase);
             _vm.CurrentDumpPath = dumpPath;
             _vm.CurrentOutDir = outDir;
-            _currentSummaryPath = null;
             if (targetChanged)
             {
                 // The panels still show the previous dump. If this analysis
                 // fails or is canceled they must not stay under the new name.
+                // A failed or canceled re-analysis of the same dump keeps the
+                // shown summary, and saving it keeps working.
+                _currentSummaryPath = null;
                 ClearRenderedSummary();
             }
 
