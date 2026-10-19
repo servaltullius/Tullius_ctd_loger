@@ -61,9 +61,29 @@ internal static class DumpDiscoveryStore
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(change);
-        var nextState = Sanitize(change(LoadFromPath(path)));
+        var nextState = Sanitize(change(LoadForUpdate(path)));
         await SaveToPathAsync(nextState, path, cancellationToken);
         return nextState;
+    }
+
+    // Only a missing file is an empty state here. A file that cannot be read
+    // or parsed throws instead of being saved over with every folder gone;
+    // the callers show the error.
+    private static DumpDiscoveryState LoadForUpdate(string path)
+    {
+        string json;
+        try
+        {
+            json = File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new DumpDiscoveryState();
+        }
+
+        var loaded = JsonSerializer.Deserialize<DumpDiscoveryState>(json)
+            ?? throw new InvalidDataException("The dump discovery state file holds no state: " + path);
+        return Sanitize(loaded);
     }
 
     internal static async Task SaveToPathAsync(

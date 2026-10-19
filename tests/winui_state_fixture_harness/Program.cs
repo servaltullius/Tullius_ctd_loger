@@ -268,6 +268,37 @@ internal static class Program
                 merged.LearnedRoots.SequenceEqual(reloaded.LearnedRoots),
                 "a discovery update must return the state it saved");
 
+            // A state file that does not parse is not saved over with an
+            // empty list: the update fails and the file keeps its folders.
+            var corruptDiscovery = "{ \"RegisteredRoots\": [ " + Environment.NewLine;
+            await File.WriteAllTextAsync(discoveryPath, corruptDiscovery);
+            var corruptUpdateFailed = false;
+            try
+            {
+                await DumpDiscoveryStore.UpdateAtPathAsync(
+                    discoveryPath,
+                    state => DumpDiscoveryStore.PromoteLearnedRoot(state, cDir),
+                    CancellationToken.None);
+            }
+            catch (JsonException)
+            {
+                corruptUpdateFailed = true;
+            }
+            Require(corruptUpdateFailed, "a discovery update over an unreadable state file must fail");
+            Require(
+                await File.ReadAllTextAsync(discoveryPath) == corruptDiscovery,
+                "a failed discovery update must leave the state file alone");
+
+            // A missing file is an empty state.
+            File.Delete(discoveryPath);
+            var fromMissing = await DumpDiscoveryStore.UpdateAtPathAsync(
+                discoveryPath,
+                state => DumpDiscoveryStore.AddRegisteredRoot(state, aDir),
+                CancellationToken.None);
+            Require(
+                fromMissing.RegisteredRoots.Count == 1 && fromMissing.LearnedRoots.Count == 0,
+                "a discovery update without a state file starts from an empty state");
+
             Require(
                 !Directory.EnumerateFiles(root, "*.tmp.*", SearchOption.AllDirectories).Any(),
                 "atomic writes left temporary files behind");
