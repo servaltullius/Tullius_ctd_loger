@@ -105,7 +105,7 @@ constexpr std::uint64_t kAbortKeptExceptionMaxAgeSeconds = 5;
 
 // Bounds the stack scan for CrashLogger frames (see
 // SelectCrashLoggerStackScanWindow).
-constexpr std::uintptr_t kCrashLoggerStackScanMaxBytes = 64u * 1024u;
+constexpr std::uintptr_t kCrashLoggerStackScanMaxBytes = 0x10000u;  // 64 KB
 
 // The filter and SIGABRT handler that were installed before ours; both are
 // chained so this never changes what happens after it records the crash.
