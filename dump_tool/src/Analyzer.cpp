@@ -56,6 +56,7 @@ using skydiag::dump_tool::minidump::IsGameExeModule;
 using skydiag::dump_tool::minidump::IsKnownHookFramework;
 using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
 using skydiag::dump_tool::minidump::IsSystemishModule;
+using skydiag::dump_tool::minidump::IsSystemishModuleAt;
 using skydiag::dump_tool::minidump::LoadHookFrameworksFromJson;
 using skydiag::dump_tool::minidump::LoadAllModules;
 using skydiag::dump_tool::minidump::MappedFile;
@@ -662,8 +663,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       if (out.exc_code == 0xC0000005u && out.exc_info.size() >= 2u) {
         input.access_violation_address = out.exc_info[1];
       }
-      input.fault_module_is_system =
-        IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
+      input.fault_module_is_system = IsSystemishModuleAt(out.fault_module_filename, out.fault_module_path);
       input.callstack_modules.reserve(
         out.stackwalk_primary_frames.size() +
         out.crash_logger_top_modules.size() +

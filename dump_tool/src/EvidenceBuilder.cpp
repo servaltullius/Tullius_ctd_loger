@@ -71,8 +71,9 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 
   // A GPU vendor tool or overlay is not a mod to disable; it takes the system
   // DLL path with its own wording (FaultPlace).
-  const bool isSystem = minidump::IsSystemishModule(r.fault_module_filename) ||
-    minidump::IsLikelyWindowsSystemModulePath(r.fault_module_path) || !r.fault_module_external_software.empty();
+  // An ENB/ReShade d3d11.dll in the game folder is a mod, not Windows.
+  const bool isSystem = minidump::IsSystemishModuleAt(r.fault_module_filename, r.fault_module_path) ||
+    !r.fault_module_external_software.empty();
   const bool hasModule = !r.fault_module_filename.empty();
   const bool isGameExe = minidump::IsGameExeModule(r.fault_module_filename);
   const bool isHookFramework = minidump::IsKnownHookFramework(r.fault_module_filename);

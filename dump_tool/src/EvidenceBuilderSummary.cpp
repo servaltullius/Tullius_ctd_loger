@@ -342,7 +342,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   const bool hasNonHookSuspect = (firstNonHookSuspect != nullptr);
   const bool topSuspectIsHookFramework = (topSuspect != nullptr) && minidump::IsKnownHookFramework(topSuspect->module_filename);
   const bool topSuspectIsSystem = (topSuspect != nullptr) &&
-    (minidump::IsSystemishModule(topSuspect->module_filename) || minidump::IsLikelyWindowsSystemModulePath(topSuspect->module_path));
+    minidump::IsSystemishModuleAt(topSuspect->module_filename, topSuspect->module_path);
   const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
   const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
   const std::wstring topCandidateConf = topCandidate && !topCandidate->confidence.empty()
@@ -362,7 +362,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     topCandidate &&
     !topCandidate->module_filename.empty() &&
     !minidump::IsKnownHookFramework(topCandidate->module_filename) &&
-    !minidump::IsSystemishModule(topCandidate->module_filename) &&
+    !DumpModuleIsSystemish(r, topCandidate->module_filename) &&
     !minidump::IsGameExeModule(topCandidate->module_filename);
 
   std::wstring who;

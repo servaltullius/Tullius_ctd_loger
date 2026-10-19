@@ -109,6 +109,11 @@ const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const Analy
 
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
+// minidump::IsSystemishModuleAt for a module known here only by file name (an
+// actionable candidate): the path is taken from the dump's fault module or a
+// stack suspect of that name, so an ENB/ReShade d3d11.dll in the game folder
+// stays a mod.
+bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename);
 // Where a fault outside the mods happened, for the summary sentences:
 // "a Windows system DLL", or "external software (NVIDIA, NvTelemetryBridge64.dll)".
 std::wstring FaultPlace(const AnalysisResult& r, const EvidenceBuildContext& ctx);

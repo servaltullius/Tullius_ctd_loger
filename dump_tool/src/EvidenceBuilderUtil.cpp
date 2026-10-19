@@ -532,9 +532,25 @@ const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const Analy
 bool IsActionableSuspect(const SuspectItem& s)
 {
   return !minidump::IsKnownHookFramework(s.module_filename) &&
-         !minidump::IsSystemishModule(s.module_filename) &&
-         !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+         !minidump::IsSystemishModuleAt(s.module_filename, s.module_path) &&
          !minidump::IsGameExeModule(s.module_filename);
+}
+
+bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename)
+{
+  const std::wstring lower = WideLower(filename);
+  std::wstring_view path;
+  if (!r.fault_module_path.empty() && WideLower(r.fault_module_filename) == lower) {
+    path = r.fault_module_path;
+  } else {
+    for (const auto& s : r.suspects) {
+      if (!s.module_path.empty() && WideLower(s.module_filename) == lower) {
+        path = s.module_path;
+        break;
+      }
+    }
+  }
+  return minidump::IsSystemishModuleAt(filename, path);
 }
 
 bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx)

@@ -341,6 +341,28 @@ bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath)
   return IsLikelyWindowsSystemModulePathLower(lower);
 }
 
+bool IsSystemishModuleAt(std::wstring_view filename, std::wstring_view modulePath)
+{
+  const std::wstring lowerPath = LowerCopy(modulePath);
+  if (IsLikelyWindowsSystemModulePathLower(lowerPath)) {
+    return true;
+  }
+  // ENB, ReShade and DXVK ship proxies named like the DirectX runtime
+  // (d3d11.dll, dxgi.dll, ...). A copy loaded from outside Windows is that
+  // injector, a mod to suspect, not the system runtime.
+  if (!lowerPath.empty() && IsGraphicsRuntimeName(filename)) {
+    return false;
+  }
+  return IsSystemishModule(filename);
+}
+
+bool IsPassiveHookModule(std::wstring_view filename)
+{
+  const std::wstring lower = LowerCopy(filename);
+  return IsSkseModuleLower(lower) || lower == L"crashlogger.dll" || lower == L"crashloggersse.dll" ||
+         lower == L"usvfs_x64.dll" || lower == L"uvsfs64.dll";
+}
+
 bool IsGameExeModule(std::wstring_view filename)
 {
   const std::wstring lower = WideLower(filename);
@@ -502,17 +524,11 @@ std::vector<ModuleInfo> LoadAllModules(void* dumpBase, std::uint64_t dumpSize)
     mi.path = Utf8ToWide(utf8);
     mi.filename = std::filesystem::path(mi.path).filename().wstring();
     mi.inferred_mod_name = InferMo2ModNameFromPath(mi.path);
-    // ENB, ReShade and DXVK ship proxies named like the DirectX runtime
-    // (d3d11.dll, dxgi.dll, ...). A copy loaded from outside Windows is that
-    // injector, a mod to suspect, not the system runtime.
-    const bool inWindows = IsLikelyWindowsSystemModulePathLower(WideLower(mi.path));
-    const bool graphicsProxy = !mi.path.empty() && !inWindows && IsGraphicsRuntimeName(mi.filename);
     // GPU vendor tools and overlays are not mods: like Windows DLLs they are
     // never a suspect for being on the stack (a fault inside one is reported
     // by the fault module, see EvidenceBuilder).
     mi.external_software = ExternalSoftwareName(mi.filename, mi.path);
-    mi.is_systemish =
-      inWindows || (IsSystemishModule(mi.filename) && !graphicsProxy) || !mi.external_software.empty();
+    mi.is_systemish = IsSystemishModuleAt(mi.filename, mi.path) || !mi.external_software.empty();
     mi.is_game_exe = IsGameExeModule(mi.filename);
     mi.is_known_hook_framework = IsKnownHookFramework(mi.filename);
     out.push_back(std::move(mi));

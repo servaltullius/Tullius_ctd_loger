@@ -424,8 +424,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const SuspectItem* firstNonHookStackCandidate = nullptr;
   auto isActionableStackCandidate = [&](const SuspectItem& s) {
     return !minidump::IsKnownHookFramework(s.module_filename) &&
-           !minidump::IsSystemishModule(s.module_filename) &&
-           !minidump::IsLikelyWindowsSystemModulePath(s.module_path) &&
+           !minidump::IsSystemishModuleAt(s.module_filename, s.module_path) &&
            !minidump::IsGameExeModule(s.module_filename);
   };
   if (hasStackCandidate) {
@@ -439,8 +438,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool hasNonHookStackCandidate = (firstNonHookStackCandidate != nullptr);
   const bool topStackCandidateIsHookFramework = hasStackCandidate && minidump::IsKnownHookFramework(r.suspects[0].module_filename);
   const bool topStackCandidateIsSystem =
-    hasStackCandidate &&
-    (minidump::IsSystemishModule(r.suspects[0].module_filename) || minidump::IsLikelyWindowsSystemModulePath(r.suspects[0].module_path));
+    hasStackCandidate && minidump::IsSystemishModuleAt(r.suspects[0].module_filename, r.suspects[0].module_path);
   const bool preferStackCandidateOverFault =
     ctx.isHookFramework &&
     hasNonHookStackCandidate;

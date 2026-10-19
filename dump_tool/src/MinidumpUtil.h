@@ -45,10 +45,20 @@ std::optional<ModuleHit> ModuleForAddress(void* dumpBase, std::uint64_t dumpSize
 
 inline std::wstring WideLower(std::wstring_view s) { return skydiag::WideLower(s); }
 
+// By file name only; use IsSystemishModuleAt when the module's path is known.
 bool IsSystemishModule(std::wstring_view filename);
 // DirectX/OpenGL runtime names that graphics injectors also use for their proxies.
 bool IsGraphicsRuntimeName(std::wstring_view filename);
 bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath);
+// The rule LoadAllModules uses for is_systemish (minus external software): a
+// module under a Windows folder is a system module; a DirectX/OpenGL runtime
+// name loaded from anywhere else (ENB, ReShade or DXVK in the game folder) is
+// that injector, a mod; otherwise the file name decides. Without a path only
+// the name is known, so a d3d11.dll stays a system module.
+bool IsSystemishModuleAt(std::wstring_view filename, std::wstring_view modulePath);
+// Hooks that sit under most stacks without driving them: the SKSE runtime,
+// Crash Logger and MO2's virtual file system.
+bool IsPassiveHookModule(std::wstring_view filename);
 bool IsGameExeModule(std::wstring_view filename);
 bool IsSkseModule(std::wstring_view filename);
 // Best-effort override for known hook framework DLL list.

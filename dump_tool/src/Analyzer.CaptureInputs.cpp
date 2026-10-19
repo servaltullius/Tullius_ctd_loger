@@ -30,8 +30,7 @@ using skydiag::dump_tool::internal::output_writer::ReadTextFileUtf8;
 using skydiag::dump_tool::minidump::ExternalSoftwareName;
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
 using skydiag::dump_tool::minidump::IsGameExeModule;
-using skydiag::dump_tool::minidump::IsLikelyWindowsSystemModulePath;
-using skydiag::dump_tool::minidump::IsSystemishModule;
+using skydiag::dump_tool::minidump::IsSystemishModuleAt;
 using skydiag::dump_tool::minidump::LoadThreads;
 using skydiag::dump_tool::minidump::ModuleForAddress;
 using skydiag::dump_tool::minidump::ModuleInfo;
@@ -106,8 +105,7 @@ void ResolveFaultModule(
     const bool inferredLooksBinaryName =
       (inferredLower.size() >= 4 && inferredLower.substr(inferredLower.size() - 4) == L".dll") ||
       (inferredLower.size() >= 4 && inferredLower.substr(inferredLower.size() - 4) == L".exe");
-    const bool faultIsSystem =
-      IsSystemishModule(out.fault_module_filename) || IsLikelyWindowsSystemModulePath(out.fault_module_path);
+    const bool faultIsSystem = IsSystemishModuleAt(out.fault_module_filename, out.fault_module_path);
     if (faultIsSystem || IsGameExeModule(out.fault_module_filename) || inferredLooksBinaryName || inferredLower == faultLower) {
       out.inferred_mod_name.clear();
     }
