@@ -139,6 +139,7 @@ void RunHelperLoop(
     }
 
     (void)HandleLateRecoveryTick(cfg, proc, outBase, state);
+    ExpireReleasedCrashDumpIfOutlived(proc, outBase, state);
     if (HandleProcessExitTick(cfg, proc, outBase, state)) {
       break;
     }
@@ -149,6 +150,12 @@ void RunHelperLoop(
         if (skydiag::helper::TryAttachCrashEvent(proc, nullptr)) {
           AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
           state->nextCrashEventWarnTick64 = 0;
+          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc); rearmed != 0u) {
+            AppendLogLine(
+              outBase,
+              L"Committed crash_seq=" + std::to_wstring(rearmed)
+                + L" is still frozen with no helper handling it; signaled its crash event again.");
+          }
         } else {
           state->nextCrashEventRetryTick64 = nowTick + kCrashEventRetryIntervalMs;
           if (state->nextCrashEventWarnTick64 == 0 || nowTick >= state->nextCrashEventWarnTick64) {
@@ -210,6 +217,12 @@ void ShutdownLoopState(
 
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
   UnregisterManualCaptureHotkeyIfEnabled(cfg);
+  if (!state->crashCaptured.releasedDumpPath.empty()) {
+    AppendLogLine(
+      outBase,
+      L"Keeping the dump of a released crash: the helper stopped before the game's exit settled it: "
+        + std::filesystem::path(state->crashCaptured.releasedDumpPath).filename().wstring());
+  }
 
   ReleasePendingCrashAnalysisAtShutdown(outBase, state);
 }

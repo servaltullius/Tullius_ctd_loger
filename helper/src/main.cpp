@@ -157,6 +157,13 @@ int wmain(int argc, wchar_t** argv)
           + L" was already acknowledged by an earlier helper (not frozen); it is not reported again at "
             L"process exit unless the game exits with its exception code.");
     }
+    if (loopState.rearmedFrozenCrashSeq != 0u) {
+      AppendLogLine(
+        outBase,
+        L"Committed crash_seq=" + std::to_wstring(loopState.rearmedFrozenCrashSeq)
+          + L" is still frozen while the game runs, so the helper handling it is gone; signaled its crash event "
+            L"again to handle it now.");
+    }
     skydiag::helper::internal::RunHelperLoop(
       cfg,
       proc,

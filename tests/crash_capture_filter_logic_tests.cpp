@@ -104,6 +104,37 @@ static_assert(
   !skydiag::helper::internal::ShouldHoldHangDetectionForCapturedCrash(false, 500u, 500u),
   "no crash captured");
 
+// The same handled fault released twice within the cooldown gets the minimal
+// dump first; once is not enough, and another fault or address is unaffected.
+static_assert([] {
+  using namespace skydiag::helper::internal;
+  RecoveredFaultHistory h{};
+  if (IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 1'000u)) {
+    return false;
+  }
+  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u, 1'000u);
+  if (IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 2'000u)) {
+    return false;  // seen once
+  }
+  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u, 2'000u);
+  return IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 3'000u) &&
+         !IsRepeatedRecoveredFault(h, 0xC0000005u, 0x2000u, 3'000u) &&
+         !IsRepeatedRecoveredFault(h, 0xE06D7363u, 0x1000u, 3'000u) &&
+         IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 2'000u + kRepeatedRecoveredFaultCooldownMs) &&
+         !IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 2'001u + kRepeatedRecoveredFaultCooldownMs);
+}(), "a repeated handled fault within the cooldown");
+static_assert([] {
+  using namespace skydiag::helper::internal;
+  // A full history replaces entries in turn and keeps tracking new faults.
+  RecoveredFaultHistory h{};
+  for (std::uint64_t addr = 1; addr <= kRecoveredFaultHistoryCapacity + 1u; ++addr) {
+    NoteRecoveredFault(&h, 0xC0000005u, addr, 1'000u);
+    NoteRecoveredFault(&h, 0xC0000005u, addr, 1'000u);
+  }
+  return IsRepeatedRecoveredFault(h, 0xC0000005u, kRecoveredFaultHistoryCapacity + 1u, 1'000u) &&
+         !IsRepeatedRecoveredFault(h, 0xC0000005u, 1u, 1'000u);
+}(), "a full history");
+
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
 {
   const auto info = BuildCrashEventInfo(0u, 0u, 0u, 0u);

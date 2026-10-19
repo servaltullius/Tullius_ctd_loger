@@ -171,7 +171,8 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
   // clears it. So a committed generation with Frozen clear was already ACKed
   // by an earlier helper that the plugin's watchdog replaced: released as
   // handled, or (indistinguishable here) its dump could not be written. It
-  // is not reported again at exit. A generation still Frozen stays reportable.
+  // is not reported again at exit. A generation still Frozen stays reportable,
+  // and is handled again while the game runs (RearmFrozenCrashFromEarlierHelper).
   CrashEventInfo committed{};
   if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
       (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
@@ -180,6 +181,20 @@ void InitializeLoopState(const AttachedProcess& proc, HelperLoopState* state)
     state->crashCaptured.releasedOnBriefHeartbeat = false;
     state->crashCaptured.releasedInThreadDumpWindow = false;
   }
+  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc);
+}
+
+std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc)
+{
+  if (!proc.crashEvent || !proc.process || WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
+    return 0u;  // an exited game's record is drained by the exit path
+  }
+  CrashEventInfo committed{};
+  if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) ||
+      (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
+    return 0u;
+  }
+  return SetEvent(proc.crashEvent) ? committed.crashSeq : 0u;
 }
 
 std::filesystem::path DecodeCrashLoggerIniPath(const std::string& bytes)
