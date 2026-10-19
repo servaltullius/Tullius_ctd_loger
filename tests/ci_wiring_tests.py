@@ -609,6 +609,21 @@ def check_docs_only_detector_behaviour(failures: list[str]) -> None:
                 failures.append(f"docs-only detector, {name}: expected code={expected}, got {got!r}")
 
 
+def check_vcpkg_overlay_reaches_existing_build_dirs(failures: list[str]) -> None:
+    # The vcpkg toolchain caches VCPKG_OVERLAY_TRIPLETS, empty when nothing set
+    # it, so a build folder configured before the overlay existed only gets it
+    # when the top-level CMakeLists.txt appends it and forces the cache value.
+    text = _read(REPO_ROOT / "CMakeLists.txt")
+    if "if(NOT DEFINED VCPKG_OVERLAY_TRIPLETS)" in text:
+        failures.append("CMakeLists.txt must not skip the triplet overlay when the toolchain cached the variable")
+    if "IN_LIST VCPKG_OVERLAY_TRIPLETS" not in text or not re.search(
+        r'set\(VCPKG_OVERLAY_TRIPLETS "\$\{VCPKG_OVERLAY_TRIPLETS\}" CACHE STRING "" FORCE\)', text
+    ):
+        failures.append("CMakeLists.txt must append the triplet overlay when missing and force the cache value")
+    if text.find("VCPKG_OVERLAY_TRIPLETS") > text.find("project("):
+        failures.append("CMakeLists.txt must set the triplet overlay before project()")
+
+
 def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
@@ -624,6 +639,7 @@ def main() -> int:
     check_dump_stress_repeats_only_after_a_build(failures)
     check_pull_request_tidy_scope(failures)
     check_compiler_cache_is_ci_only(failures)
+    check_vcpkg_overlay_reaches_existing_build_dirs(failures)
     check_workflows_are_pinned_and_bounded(failures)
     check_release_job_hardening(failures)
 
