@@ -274,8 +274,10 @@ void AddBlockedGameThreadSignal(const AnalysisResult& r, bool en, std::vector<Ca
   signal.detail = en
     ? (L"The game thread the main thread waited for was inside " + name)
     : (L"메인 스레드가 기다린 게임 스레드가 " + name + L" 코드 안에 있었음");
+  // The blocked thread was found by walking that thread's stack, whether or
+  // not the main thread's own walk produced the other suspects (review L7).
   signal.weight = policy::ActionableStackSignalWeight(
-    r.suspects_from_stackwalk,
+    /*fromStackwalk=*/true,
     r.symbol_runtime_degraded,
     /*suspectAtLeastMedium=*/true,
     /*firstVisibleSuspect=*/true);
