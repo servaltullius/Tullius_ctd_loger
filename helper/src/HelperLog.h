@@ -9,10 +9,17 @@
 namespace skydiag::helper::internal {
 
 void SetHelperLogRotation(std::uint64_t maxBytes, std::uint32_t maxFiles);
+// Earlier sessions' logs kept by StartHelperLogSession (MaxHelperSessionLogs).
+inline constexpr std::uint32_t kDefaultHelperSessionLogsToKeep = 5;
+void SetHelperSessionLogsToKeep(std::uint32_t sessions);
+// The log of the session `age` starts back: 1 = SkyrimDiagHelper.previous.log,
+// 2 = SkyrimDiagHelper.previous.2.log, ...
+std::filesystem::path HelperSessionLogPath(const std::filesystem::path& outBase, std::uint32_t age);
 void ClearLog(const std::filesystem::path& outBase);
 // Starts a new log for a newly attached game. The previous session's log is
-// kept as SkyrimDiagHelper.previous.log: users are told to read the helper log
-// after a crash, often after relaunching the game.
+// kept as SkyrimDiagHelper.previous.log, older ones as previous.2.log and so
+// on (SetHelperSessionLogsToKeep): users are told to read the helper log after
+// a crash, often after relaunching the game more than once.
 // Lines queued with QueueSessionStartLogLine are written right after the new
 // log starts.
 void StartHelperLogSession(const std::filesystem::path& outBase);

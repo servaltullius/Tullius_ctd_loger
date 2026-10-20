@@ -29,6 +29,20 @@ using skydiag::helper::internal::SetHelperLogRotation;
 using skydiag::helper::internal::RunCompatibilityPreflight;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 
+namespace {
+
+std::wstring SessionStartTimeText()
+{
+  SYSTEMTIME st{};
+  GetLocalTime(&st);
+  wchar_t buf[32]{};
+  swprintf_s(
+    buf, L"%04u-%02u-%02u %02u:%02u:%02u", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+  return buf;
+}
+
+}  // namespace
+
 int wmain(int argc, wchar_t** argv)
 {
   // Keep helper overhead minimal vs. the game.
@@ -39,6 +53,7 @@ int wmain(int argc, wchar_t** argv)
   const bool runningUnderWine = skydiag::helper::internal::IsRunningUnderWine();
   const bool wineViewerPolicyApplied = skydiag::helper::ApplyWineViewerPolicy(&cfg, runningUnderWine);
   SetHelperLogRotation(cfg.maxHelperLogBytes, cfg.maxHelperLogFiles);
+  skydiag::helper::internal::SetHelperSessionLogsToKeep(cfg.maxHelperSessionLogs);
   // Kept for the helper log: attaching reuses (and on success clears) err.
   const std::wstring configWarning = err;
   if (!err.empty()) {
@@ -93,7 +108,11 @@ int wmain(int argc, wchar_t** argv)
 
   skydiag::helper::internal::StartHelperLogSession(outBase);
   std::wcout << L"[SkyrimDiagHelper] Attached to pid=" << proc.pid << L", output=" << outBase.wstring() << L"\n";
-  AppendLogLine(outBase, L"Attached to pid=" + std::to_wstring(proc.pid) + L", output=" + outBase.wstring());
+  // The session's start time tells the kept session logs apart.
+  AppendLogLine(
+    outBase,
+    L"Attached to pid=" + std::to_wstring(proc.pid) + L" at " + SessionStartTimeText() + L", output=" +
+      outBase.wstring());
   if (!configWarning.empty()) {
     AppendLogLine(outBase, L"Config warning: " + configWarning);
   }
