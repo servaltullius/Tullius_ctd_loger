@@ -61,8 +61,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.67 Update Notice[/b]
-Replace the previous installation with the complete v0.2.67 zip. Do not copy only individual EXEs or DLLs: v0.2.67 changes the plugin, the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.68 Update Notice[/b]
+Replace the previous installation with the complete v0.2.68 zip. Do not copy only individual EXEs or DLLs: v0.2.68 changes the plugin, the Helper, the analyzer, the viewer and SkyrimDiagHelper.ini (the SharedLayout protocol is still v4). The manual capture hotkey is now [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -120,7 +120,19 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.67[/size][/b]
+[b][size=4]What's New in v0.2.68[/size][/b]
+Five release candidates: a full code review of the whole project, a freeze traced to Crash Logger's thread dump, and reports from Nexus users.[list]
+[*][b]New manual capture hotkey:[/b] [font=Courier New]Ctrl+Shift+Backspace[/font] instead of [font=Courier New]Ctrl+Shift+F12[/font], which Crash Logger 1.25 also uses for its thread dump. That thread dump suspends the game's threads one by one and can deadlock the game (seen here once). Set it with [font=Courier New]ManualCaptureHotkey=[/font]; the preflight warns when it overlaps Crash Logger's keys, and pressing the old keys leaves a note in the Helper log
+[*][b]Crashes no longer missed or recorded twice:[/b] unhandled C++ exceptions, breakpoints and noexcept violations are recorded without Crash Logger too; a captured CTD is no longer dumped again as a "freeze"; a Helper that died while handling a crash no longer leaves the rest of the session unrecorded; handled C++ exceptions on other threads no longer hide a real one
+[*][b]Right DLLs blamed:[/b] GPU vendor tools and overlays (NVIDIA telemetry, Steam, Discord, RivaTuner, OBS) are treated as external software, not mods; ENB/ReShade/DXVK [font=Courier New]d3d11.dll[/font]/[font=Courier New]dxgi.dll[/font] in the game folder count as mods, not Windows DLLs; Crash Logger itself and the module list of a Crash Logger thread dump are no longer suspects; weak evidence is worded as weak
+[*][b]Freezes on 1.6.1170:[/b] the main thread is found correctly (SKSE tasks run on worker threads there), and the freeze summary agrees with the deadlock and stuck-loading verdicts
+[*][b]Non-English setups:[/b] non-ASCII mesh and animation paths, MO2 profile names, and SkyrimDiagHelper.ini saved as UTF-8 with BOM, UTF-16 or ANSI (including a non-ASCII [font=Courier New]OutputDir[/font]) are read correctly. If the output folder cannot be written, the Helper falls back to a default folder and says so
+[*][b]Privacy:[/b] with path masking on, reports, summaries, the WCT copy and the preflight file no longer contain absolute paths with your user name (MO2 folders, symbol paths)
+[*][b]Helper logs of the last five sessions:[/b] [font=Courier New]SkyrimDiagHelper.previous.log[/font], [font=Courier New]previous.2.log[/font], ... so a crashed session's log survives relaunches; each starts with its start time
+[*][b]Also:[/b] analysis is much faster with large mod lists (11-15 s to about 1 s with 4,362 mods); the startup load no longer inflates the stuck-loading threshold; the viewer keeps the review save and copied text tied to the selected dump and no longer hangs on an offline network folder; the In-Page Error advice no longer suggests a Steam file check that undoes a downgrade
+[/list]
+
+[b][size=4]Earlier: v0.2.67[/size][/b]
 Fixes from an outside review and from public crash reports: how the Helper handles exceptions the game survives, reports lost when the game closes, and older Crash Logger logs.[list]
 [*][b]Handled exceptions no longer freeze recording:[/b] by default the plugin records a fatal-looking exception before the game handles it, and the Helper watches the heartbeat for about 11 seconds to tell a real crash from a handled one. If the main thread was busy then (a long load), a handled exception stayed marked as a crash, and the black box and resource log stopped for the rest of the session, so a later real CTD was not recorded either. Now, when the game is still alive more than 60 seconds later and the heartbeat has advanced for 30 seconds in a row, the Helper stops the crash follow-up (delayed viewer, analysis) and resumes recording. The dump is kept and marked "late recovery"
 [*][b]Reports kept when the game closes:[/b] the Helper ended a running background analysis when the game exited after a crash. With [font=Courier New]AutoOpenViewerOnCrash=0[/font] that analysis is the only thing that writes the report, so the report was lost. It now runs to the end
@@ -193,6 +205,7 @@ For v0.2.63, the two real CTDs above were re-analyzed with the new analyzer (mov
 For v0.2.65, a test build ran on the same 1.6.1170 setup: the resource log started at the main menu, a manual capture held 120 recent files with their MO2 mods and no ENB/ReShade claim, and the game closed normally. 25 kept dumps re-analyzed against v0.2.64 changed only in wording. Not yet run here: 1.5.97 and 1.7.104 with the new resource hook (1.7.104 has the same layout in its RTTI).
 For v0.2.66, the release candidate was installed as an MO2 mod on the same setup (4,362 enabled mods) and a manual capture recorded the crash-time profile and mod list, a time-checked skse64.log, and no false missing masters with Creation Club files kept as an MO2 mod. 34 kept dumps were re-analyzed before and after the review fixes: only one wording change and the five test freezes (now naming the right plugin) differed. Not yet seen in real use: a real CTD with the new Helper, the 1.7.104 Engine Fixes spots, and 1.5.97.
 For v0.2.67, the release candidate was installed as an MO2 mod on the same setup and played with a manual capture: attach, preflight, MO2 profile capture, SKSE log, dump and report all behaved as before, and the game closed normally. 36 kept dumps re-analyzed against v0.2.66 did not change. The late recovery, the report after the game closes, and the analysis time limit were checked with runtime tests that run a real child process. Not yet seen in real use: a late recovery (no exception was caught in that session) and a real CTD with the new Helper.
+For v0.2.68, each of the five release candidates was installed as an MO2 mod on the same setup and played: the main thread in heartbeat events matched the session start, Crash Logger's thread dump probes no longer wrote dumps, a manual capture with the new hotkey started no Crash Logger thread dump and left no user name in any output, and a real CTD (a divide by zero in an upscaler's FSR3 DLL) was recorded once, without a second freeze dump, and paired with its Crash Logger log. The kept dumps re-analyzed against the previous candidate changed only where the fixes intended. Not yet seen in real use: the viewer's dump switching during an analysis, an unhandled C++ exception recorded by the new filter with Crash Logger or Trainwreck installed, and the five kept session logs (all covered by runtime tests).
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -370,8 +383,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.67 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.67 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.67에서 플러그인, Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.68 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.68 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.68에서 플러그인, Helper, 분석기, 뷰어, SkyrimDiagHelper.ini가 바뀌었습니다(SharedLayout protocol은 그대로 v4). 수동 캡처 단축키는 이제 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -429,7 +442,19 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.67 새 기능[/size][/b]
+[b][size=4]v0.2.68 새 기능[/size][/b]
+릴리즈 후보 다섯 번에 걸쳐, 프로젝트 전체 코드 리뷰, Crash Logger 스레드 덤프로 생긴 프리징 조사, 넥서스 사용자 제보를 반영했습니다.[list]
+[*][b]수동 캡처 단축키 변경:[/b] [font=Courier New]Ctrl+Shift+F12[/font] 대신 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 예전 키는 Crash Logger 1.25의 스레드 덤프 단축키와 같은데, 그 스레드 덤프는 게임 스레드를 하나씩 멈추며 드물게 게임을 멈추게 합니다(실게임에서 한 번 관찰). [font=Courier New]ManualCaptureHotkey=[/font]로 바꿀 수 있고, Crash Logger 키와 겹치면 사전점검이 경고하며, 예전 키를 누르면 Helper 로그에 안내가 남습니다
+[*][b]크래시 누락·중복 기록 수정:[/b] 처리되지 않은 C++ 예외·중단점·noexcept 위반을 Crash Logger 없이도 기록합니다. 잡힌 CTD를 "프리징"으로 한 번 더 덤프하지 않고, 크래시를 처리하다 죽은 Helper 때문에 그 세션의 이후 크래시가 빠지지 않으며, 다른 스레드의 잡힌 C++ 예외가 진짜 크래시를 가리지 않습니다
+[*][b]올바른 DLL 지목:[/b] 그래픽 제조사 프로그램과 오버레이(NVIDIA 텔레메트리, Steam, Discord, RivaTuner, OBS)는 모드가 아닌 외부 프로그램으로, 게임 폴더의 ENB/ReShade/DXVK [font=Courier New]d3d11.dll[/font]·[font=Courier New]dxgi.dll[/font]은 Windows DLL이 아닌 모드로 봅니다. Crash Logger 자신과 Crash Logger 스레드 덤프의 모듈 목록은 용의자로 쓰지 않고, 약한 근거는 약하다고 씁니다
+[*][b]1.6.1170 프리징:[/b] 메인 스레드를 바르게 찾고(그 버전에서는 SKSE 작업이 작업 스레드에서 돎), 프리징 결론이 데드락·로딩 정지 판정과 맞습니다
+[*][b]한글 환경:[/b] 한글 메시·애니메이션 경로, MO2 프로필 이름, UTF-8 BOM·UTF-16·ANSI로 저장한 SkyrimDiagHelper.ini(한글 [font=Courier New]OutputDir[/font] 포함)를 바르게 읽습니다. 출력 폴더에 쓸 수 없으면 기본 폴더에 저장하고 그 사실을 남깁니다
+[*][b]개인정보:[/b] 경로 가리기가 켜져 있으면 리포트, 요약, WCT 사본, 사전점검 파일에 사용자 이름이 든 절대 경로(MO2 폴더, 심볼 경로)가 남지 않습니다
+[*][b]최근 5개 세션의 Helper 로그 보관:[/b] [font=Courier New]SkyrimDiagHelper.previous.log[/font], [font=Courier New]previous.2.log[/font] … 로 남아 게임을 다시 켜도 크래시 난 세션의 로그가 사라지지 않고, 첫 줄에 세션 시작 시각이 있습니다
+[*][b]그 밖에:[/b] 모드가 많은 환경에서 분석이 크게 빨라졌습니다(켜진 모드 4,362개 기준 11~15초 → 약 1초). 게임 시작 로딩이 무한로딩 기준을 부풀리지 않습니다. 뷰어는 검토 저장과 복사 내용을 선택한 덤프에 맞추고, 오프라인 네트워크 폴더에서 멈추지 않습니다. In-Page Error 안내가 다운그레이드를 되돌리는 Steam 파일 검사를 권하지 않습니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.67[/size][/b]
 외부 리뷰와 공개 크래시 사례에서 찾은 문제를 고쳤습니다. 게임이 버텨 낸 예외를 Helper가 다루는 방식, 게임 종료 때 사라지던 리포트, 예전 Crash Logger 로그입니다.[list]
 [*][b]처리된 예외가 기록을 멈추지 않습니다:[/b] 기본 설정에서 플러그인은 치명적으로 보이는 예외를 게임이 처리하기 전에 기록하고, Helper는 약 11초 동안 하트비트를 보고 진짜 크래시인지 가립니다. 그 사이 메인 스레드가 바빴다면(긴 로딩 등) 처리된 예외가 크래시로 남았고, 그 세션 내내 블랙박스·리소스 기록이 멈춰 이후의 진짜 CTD도 기록되지 못했습니다. 이제 60초 넘게 게임이 살아 있고 하트비트가 30초 연속 전진하면, 크래시 후속 동작(지연 뷰어, 분석)을 멈추고 기록을 다시 시작합니다. 덤프는 지우지 않고 "늦은 복구"로 표시해 남깁니다
 [*][b]게임이 꺼져도 리포트를 씁니다:[/b] 크래시 뒤 게임이 종료되면 Helper가 진행 중인 백그라운드 분석을 끝냈습니다. [font=Courier New]AutoOpenViewerOnCrash=0[/font]에서는 그 분석이 리포트를 쓰는 유일한 경로라 리포트가 사라졌습니다. 이제 끝까지 쓰게 둡니다
@@ -502,6 +527,7 @@ v0.2.63에서는 위의 실사고 CTD 두 건을 새 분석기로 다시 분석�
 v0.2.65는 같은 1.6.1170 환경에서 테스트 빌드로 실행했습니다. 메인 메뉴에서 리소스 기록이 시작됐고, 수동 캡처에 최근 파일 120개와 그 MO2 모드가 기록됐으며 ENB/ReShade 오탐은 없었고, 정상 종료했습니다. 보관 덤프 25개를 v0.2.64와 비교한 결과 문구만 바뀌었습니다. 아직 확인하지 못한 것: 1.5.97과 1.7.104에서의 새 리소스 후킹(1.7.104는 RTTI로 같은 구조임을 확인).
 v0.2.66은 RC를 같은 환경(켜진 모드 4,362개)에 MO2 모드로 설치해 수동 캡처했습니다. 크래시 당시 프로필과 모드 목록, 시각을 확인한 skse64.log가 기록됐고, CC 파일을 MO2 모드로 둔 구성에서 누락 마스터 오탐은 없었습니다. 보관 덤프 34개를 리뷰 수정 전후로 비교한 결과 문구 1건과 시험 프리징 5건(이제 올바른 플러그인을 지목)만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 새 Helper로 난 실제 CTD, 1.7.104 Engine Fixes 지점, 1.5.97.
 v0.2.67은 RC를 같은 환경에 MO2 모드로 설치해 플레이하고 수동 캡처했습니다. 연결, 사전 점검, MO2 프로필 캡처, SKSE 로그, 덤프와 리포트가 이전과 같이 동작했고 정상 종료했습니다. 보관 덤프 36개를 v0.2.66과 비교한 결과 바뀐 것은 없었습니다. 늦은 복구, 게임 종료 뒤 리포트, 분석 시간 제한은 실제 자식 프로세스를 돌리는 런타임 테스트로 확인했습니다. 아직 실사용에서 보지 못한 것: 늦은 복구(그 세션에 잡힌 예외가 없었음), 새 Helper로 난 실제 CTD.
+v0.2.68은 릴리즈 후보 다섯 개를 각각 같은 환경에 MO2 모드로 설치해 플레이했습니다. 하트비트 이벤트의 메인 스레드가 세션 시작과 같았고, Crash Logger 스레드 덤프의 탐침 예외에 덤프를 쓰지 않았으며, 새 단축키 수동 캡처가 Crash Logger 스레드 덤프를 실행하지 않고 어떤 출력에도 사용자 이름을 남기지 않았습니다. 실제 CTD(업스케일러 FSR3 DLL의 0으로 나누기)는 프리징 덤프 없이 한 번만 기록되고 Crash Logger 로그와 짝지어졌습니다. 보관 덤프를 이전 후보와 비교한 결과 의도한 곳만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 분석 중 뷰어에서 덤프 바꾸기, Crash Logger나 Trainwreck이 있을 때 새 예외 필터로 기록되는 처리되지 않은 C++ 예외, 5개 세션 로그 보관(모두 런타임 테스트로 확인).
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
