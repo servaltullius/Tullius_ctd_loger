@@ -679,6 +679,36 @@ void TestHelperLogSessionKeepsThePreviousLog()
   Require(current.find("next session line") != std::string::npos, "the new session writes to the current log");
 }
 
+// v0.2.68-rc5 field case (2026-10-21): two relaunches after a session that
+// exited abnormally overwrote its log, since only previous.log was kept.
+void TestHelperLogSessionKeepsSeveralEarlierSessions()
+{
+  using skydiag::helper::internal::AppendLogLine;
+  using skydiag::helper::internal::HelperSessionLogPath;
+  using skydiag::helper::internal::SetHelperSessionLogsToKeep;
+  using skydiag::helper::internal::StartHelperLogSession;
+  const auto outBase = MakeTempDir(L"skydiag_helper_log_sessions");
+  SetHelperSessionLogsToKeep(3);
+  for (int session = 1; session <= 5; ++session) {
+    StartHelperLogSession(outBase);
+    AppendLogLine(outBase, L"session " + std::to_wstring(session));
+  }
+  const auto current = ReadAllTextUtf8(outBase / L"SkyrimDiagHelper.log");
+  const auto age1 = ReadAllTextUtf8(HelperSessionLogPath(outBase, 1));
+  const auto age2 = ReadAllTextUtf8(HelperSessionLogPath(outBase, 2));
+  const auto age3 = ReadAllTextUtf8(HelperSessionLogPath(outBase, 3));
+  std::error_code ec;
+  const bool age4Exists = std::filesystem::exists(HelperSessionLogPath(outBase, 4), ec);
+  std::filesystem::remove_all(outBase, ec);
+  SetHelperSessionLogsToKeep(skydiag::helper::internal::kDefaultHelperSessionLogsToKeep);
+  Require(current.find("session 5") != std::string::npos, "the current session writes to the current log");
+  Require(age1.find("session 4") != std::string::npos, "the last session is previous.log");
+  Require(age2.find("session 3") != std::string::npos, "the one before is previous.2.log");
+  Require(age3.find("session 2") != std::string::npos, "the oldest kept session is previous.3.log");
+  Require(!age4Exists, "sessions beyond the limit are removed");
+  Require(HelperSessionLogPath(outBase, 1).filename() == L"SkyrimDiagHelper.previous.log", "previous.log keeps its name");
+}
+
 // v0.2.68-rc4 built the Crashlog Directory path from CrashLogger.ini's bytes
 // as UTF-8, which throws on a value saved in the ANSI code page (e.g. CP949
 // from Notepad), and the helper died at every start before its capture loop.
@@ -723,6 +753,7 @@ int main()
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledStrongCrashArtifacts();
     TestHelperLogSessionKeepsThePreviousLog();
+    TestHelperLogSessionKeepsSeveralEarlierSessions();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

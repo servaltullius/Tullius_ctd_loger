@@ -282,6 +282,8 @@ HelperConfig LoadConfig(std::wstring* err)
     ini, L"SkyrimDiagHelper", L"MaxHelperLogBytes", 8 * 1024 * 1024, 0, 100 * 1024 * 1024);
   cfg.maxHelperLogFiles = ReadIniUint32Clamped(
     ini, L"SkyrimDiagHelper", L"MaxHelperLogFiles", 3, 0, 20);
+  cfg.maxHelperSessionLogs = ReadIniUint32Clamped(
+    ini, L"SkyrimDiagHelper", L"MaxHelperSessionLogs", 5, 1, 20);
 
   if (err) {
     *err = warning;

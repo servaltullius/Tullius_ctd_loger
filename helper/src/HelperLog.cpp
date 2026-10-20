@@ -17,6 +17,7 @@ namespace {
 
 std::uint64_t g_maxHelperLogBytes = 0;
 std::uint32_t g_maxHelperLogFiles = 0;
+std::uint32_t g_helperSessionLogsToKeep = kDefaultHelperSessionLogsToKeep;
 std::vector<std::wstring> g_sessionStartLines;
 
 void RotateAndStartSession(const std::filesystem::path& outBase)
@@ -26,8 +27,19 @@ void RotateAndStartSession(const std::filesystem::path& outBase)
   if (!std::filesystem::exists(path, ec) || std::filesystem::file_size(path, ec) == 0) {
     return;
   }
-  const auto previous = outBase / L"SkyrimDiagHelper.previous.log";
+  // Earlier sessions shift down: previous.log -> previous.2.log -> ... A crash
+  // is often followed by several relaunches before anyone reads the logs.
+  const auto keep = std::max<std::uint32_t>(1u, g_helperSessionLogsToKeep);
+  std::filesystem::remove(HelperSessionLogPath(outBase, keep), ec);
+  for (std::uint32_t i = keep; i > 1u; --i) {
+    const auto src = HelperSessionLogPath(outBase, i - 1u);
+    if (std::filesystem::exists(src, ec)) {
+      std::filesystem::rename(src, HelperSessionLogPath(outBase, i), ec);
+    }
+  }
+  const auto previous = HelperSessionLogPath(outBase, 1u);
   std::filesystem::remove(previous, ec);
+  ec.clear();
   std::filesystem::rename(path, previous, ec);
   if (ec) {
     ClearLog(outBase);  // a locked log is still restarted, as before
@@ -47,6 +59,19 @@ void SetHelperLogRotation(std::uint64_t maxBytes, std::uint32_t maxFiles)
 {
   g_maxHelperLogBytes = maxBytes;
   g_maxHelperLogFiles = maxFiles;
+}
+
+void SetHelperSessionLogsToKeep(std::uint32_t sessions)
+{
+  g_helperSessionLogsToKeep = sessions;
+}
+
+std::filesystem::path HelperSessionLogPath(const std::filesystem::path& outBase, std::uint32_t age)
+{
+  if (age <= 1u) {
+    return outBase / L"SkyrimDiagHelper.previous.log";
+  }
+  return outBase / (L"SkyrimDiagHelper.previous." + std::to_wstring(age) + L".log");
 }
 
 void ClearLog(const std::filesystem::path& outBase)
