@@ -603,6 +603,35 @@ nlohmann::json BuildSummaryJson(
       };
     }
   }
+  if (r.main_thread_lock_owner.tid != 0u) {
+    const auto& owner = r.main_thread_lock_owner;
+    auto frames = nlohmann::json::array();
+    for (const auto& frame : owner.top_frames) {
+      frames.push_back(WideToUtf8(frame));
+    }
+    summary["freeze_analysis"]["lock_owner"] = {
+      { "tid", owner.tid },
+      { "thread_name", WideToUtf8(owner.thread_name) },
+      { "lock_type", owner.lock_type },
+      { "confirmed", owner.confirmed },
+      { "top_module", WideToUtf8(owner.top_module) },
+      { "top_mod_name", WideToUtf8(owner.top_mod_name) },
+      { "top_frames", std::move(frames) },
+      { "blocked_without_wait_object", owner.blocked_without_wait_object },
+      { "context_switches_stable", owner.context_switches_stable },
+      { "ip_state", owner.ip_state },
+    };
+    const auto& deadlock = r.crash_logger_thread_dump_deadlock;
+    summary["freeze_analysis"]["crash_logger_thread_dump_deadlock"] = {
+      { "detected", deadlock.detected },
+      { "crash_logger_tid", deadlock.crash_logger_tid },
+      { "crash_logger_module", WideToUtf8(deadlock.crash_logger_module) },
+      { "thread_dump_truncated", deadlock.thread_dump_truncated },
+      { "thread_dump_records", deadlock.thread_dump_records },
+      { "thread_dump_total_threads", deadlock.thread_dump_total_threads },
+      { "thread_dump_before_capture", deadlock.thread_dump_before_capture },
+    };
+  }
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
   for (const auto& reason : r.freeze_analysis.primary_reasons) {
     summary["freeze_analysis"]["primary_reasons"].push_back(WideToUtf8(reason));

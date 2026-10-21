@@ -491,6 +491,76 @@ void TestConsensusMainThreadWaitLeadsTheReasons()
   assert(deadlockResult.primary_reasons.back().find(L"waiting inside the game engine") != std::wstring::npos);
 }
 
+// The 2026-10-18 freeze, synthetic: Crash Logger's thread dump suspended the
+// owner of the DXGI critical section the main thread waited on.
+static void TestConsensusCrashLoggerThreadDumpDeadlock()
+{
+  skydiag::dump_tool::MainThreadWaitInfo driverWait{};
+  driverWait.kind = "graphics_driver_wait";
+  driverWait.wait_api = L"ntdll.dll!RtlEnterCriticalSection";
+  driverWait.waiting_module = L"dxgi.dll";
+  driverWait.path_modules = { L"HitchHunter.dll", L"hdtsmp64.dll" };
+
+  skydiag::dump_tool::MainThreadLockOwnerInfo owner{};
+  owner.tid = 51944;
+  owner.lock_type = "critical_section";
+  owner.confirmed = true;
+  owner.thread_name = L"nv.sl.dlss_g.thread.dlssg";
+  owner.top_module = L"nvwgf2umx.dll";
+  owner.blocked_without_wait_object = true;
+  owner.context_switches_stable = true;
+  owner.ip_state = "not_after_syscall";
+
+  skydiag::dump_tool::CrashLoggerThreadDumpDeadlockInfo deadlock{};
+  deadlock.detected = true;
+  deadlock.crash_logger_tid = 54776;
+  deadlock.crash_logger_module = L"CrashLogger.dll";
+  deadlock.thread_dump_truncated = true;
+  deadlock.thread_dump_records = 167;
+  deadlock.thread_dump_total_threads = 292;
+  deadlock.thread_dump_before_capture = true;
+
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.main_thread_wait = driverWait;
+  input.lock_owner = owner;
+  input.crash_logger_thread_dump_deadlock = deadlock;
+  input.actionable_candidates.push_back(MakeCandidate(L"HitchHunter.dll", ConfidenceLevel::kLow));
+  input.blackbox = skydiag::dump_tool::BlackboxFreezeSummary{};
+  input.blackbox->has_context = true;
+  input.blackbox->recent_non_system_modules = { L"SomeRecent.dll" };
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.state_id == "crash_logger_thread_dump_deadlock");
+  assert(result.confidence_level == ConfidenceLevel::kHigh);
+  assert(result.primary_reasons.size() == 4u);
+  assert(result.primary_reasons[0].find(L"thread 54776") != std::wstring::npos);
+  assert(result.primary_reasons[1].find(L"thread 51944 (nv.sl.dlss_g.thread.dlssg") != std::wstring::npos);
+  assert(result.primary_reasons[2].find(L"167 of 292 threads") != std::wstring::npos);
+  // The main thread's wait names the lock owner, not the graphics driver.
+  assert(result.primary_reasons[3].find(L"for a critical section held by thread 51944") != std::wstring::npos);
+  assert(result.primary_reasons[3].find(L"graphics driver") == std::wstring::npos);
+  for (const auto& related : result.related_candidates) {
+    assert(related.display_name != L"SomeRecent.dll");
+  }
+
+  // Without the deadlock the lock owner still leads the main-thread reason,
+  // and the state stays what the other signals say.
+  FreezeSignalInput ownerOnly = input;
+  ownerOnly.crash_logger_thread_dump_deadlock.reset();
+  ownerOnly.lock_owner->confirmed = false;
+  const auto ownerResult = BuildFreezeCandidateConsensus(ownerOnly, Language::kKorean);
+  assert(ownerResult.state_id == "freeze_candidate");
+  assert(ownerResult.primary_reasons.front().find(L"스레드 51944(nv.sl.dlss_g.thread.dlssg") != std::wstring::npos);
+  assert(ownerResult.primary_reasons.front().find(L"두 번째 WCT로는 확인되지 않음") != std::wstring::npos);
+  assert(ownerResult.primary_reasons.front().find(L"HitchHunter.dll, hdtsmp64.dll") != std::wstring::npos);
+
+  // A modal dialog outranks both.
+  FreezeSignalInput modal = input;
+  modal.modal_dialog_wait = skydiag::dump_tool::ModalDialogWaitInfo{};
+  modal.modal_dialog_wait->detected = true;
+  assert(BuildFreezeCandidateConsensus(modal, Language::kEnglish).state_id == "modal_dialog_wait");
+}
+
 int main()
 {
   TestSourceContracts();
@@ -508,5 +578,6 @@ int main()
   TestConsensusFreezeCandidateAndAmbiguous();
   TestConsensusModalDialogWaitOutranksOtherStates();
   TestConsensusMainThreadWaitLeadsTheReasons();
+  TestConsensusCrashLoggerThreadDumpDeadlock();
   return 0;
 }

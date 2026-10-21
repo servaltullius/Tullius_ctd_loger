@@ -413,4 +413,92 @@ bool TryComputeStackwalkSuspects(
   return true;
 }
 
+CrashLoggerThreadDumpProbe ProbeCrashLoggerThreadDump(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<ThreadRecord>& threads,
+  std::uint32_t mainTid,
+  std::uint32_t ownerTid)
+{
+  CrashLoggerThreadDumpProbe probe{};
+  MinidumpMemoryView mem;
+  if (!dumpBase || threads.empty() || !mem.Init(dumpBase, dumpSize, &threads)) {
+    return probe;
+  }
+  // Code the dump left out (it usually keeps ntdll's) is read from the
+  // matching local file.
+  const LocalImageMemory localImages(modules);
+  mem.image_fallback = &localImages;
+  const auto codeBefore = [&](std::uint64_t addr, std::size_t n) {
+    std::vector<std::uint8_t> bytes(n);
+    std::size_t got = 0;
+    if (addr < n || !mem.Read(addr - n, bytes.data(), n, got) || got != n) {
+      bytes.clear();
+    }
+    return bytes;
+  };
+
+  if (ownerTid != 0u) {
+    const auto it = std::find_if(threads.begin(), threads.end(), [&](const ThreadRecord& tr) { return tr.tid == ownerTid; });
+    CONTEXT ctx{};
+    if (it != threads.end() && ReadThreadContextWin64(dumpBase, dumpSize, *it, ctx) && ctx.Rip != 0) {
+      const auto bytes = codeBefore(ctx.Rip, 2u);
+      if (!bytes.empty()) {
+        probe.owner_ip_state = EndsWithSyscall(bytes) ? "after_syscall" : "not_after_syscall";
+      }
+    }
+  }
+
+  std::vector<const ModuleInfo*> crashLogger;
+  for (const auto& m : modules) {
+    const auto lower = minidump::WideLower(m.filename);
+    if ((lower == L"crashlogger.dll" || lower == L"crashloggersse.dll") && m.end > m.base) {
+      crashLogger.push_back(&m);
+    }
+  }
+  if (crashLogger.empty()) {
+    return probe;
+  }
+  constexpr std::size_t kMaxScanBytes = 0x10000;
+  std::uint32_t bestCount = 0;
+  for (const auto& thread : threads) {
+    if (thread.tid == 0u || thread.tid == mainTid || thread.tid == ownerTid) {
+      continue;
+    }
+    CONTEXT ctx{};
+    const std::uint8_t* stackBytes = nullptr;
+    std::size_t stackSize = 0;
+    std::uint64_t stackBase = 0;
+    if (!ReadThreadContextWin64(dumpBase, dumpSize, thread, ctx) ||
+        !minidump::GetThreadStackBytes(dumpBase, dumpSize, thread, stackBytes, stackSize, stackBase)) {
+      continue;
+    }
+    std::size_t start = 0;
+    if (ctx.Rsp >= stackBase && ctx.Rsp - stackBase < stackSize) {
+      start = static_cast<std::size_t>(ctx.Rsp - stackBase);
+    }
+    const std::size_t end = start + std::min<std::size_t>(stackSize - start, kMaxScanBytes);
+    std::uint32_t count = 0;
+    const ModuleInfo* hitModule = nullptr;
+    for (std::size_t off = start; off + sizeof(std::uint64_t) <= end; off += sizeof(std::uint64_t)) {
+      std::uint64_t value = 0;
+      std::memcpy(&value, stackBytes + off, sizeof(value));
+      const auto moduleIt = std::find_if(crashLogger.begin(), crashLogger.end(), [&](const ModuleInfo* m) {
+        return value >= m->base && value < m->end;
+      });
+      if (moduleIt != crashLogger.end() && EndsWithCallInstruction(codeBefore(value, 7u))) {
+        ++count;
+        hitModule = *moduleIt;
+      }
+    }
+    if (count > bestCount && hitModule) {
+      bestCount = count;
+      probe.crash_logger_tid = thread.tid;
+      probe.crash_logger_module = hitModule->filename;
+    }
+  }
+  return probe;
+}
+
 }  // namespace skydiag::dump_tool::internal

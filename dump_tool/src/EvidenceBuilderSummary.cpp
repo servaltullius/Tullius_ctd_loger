@@ -200,6 +200,59 @@ std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang,
         L" 엔진이 무엇을 기다렸는지는 이 덤프만으로 알 수 없습니다. (신뢰도: " + conf + L")");
 }
 
+// WCT named the thread holding the lock the main thread waits on, so the
+// sentence points at that thread, not at the module the main thread waited in.
+std::wstring DescribeLockOwnerWait(const AnalysisResult& r, i18n::Language lang, bool en)
+{
+  const auto& wait = r.main_thread_wait;
+  const auto& owner = r.main_thread_lock_owner;
+  const std::wstring conf =
+    ConfidenceText(lang, owner.confirmed ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow);
+  const std::wstring where = wait.waiting_module.empty()
+    ? wait.wait_api
+    : (wait.waiting_module + (wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api)));
+  const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
+  return en
+    ? (L"The game main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
+        DescribeLockOwnerThread(owner, en) + (where.empty() ? std::wstring{} : (L" (in " + where + L")")) +
+        L". The stall is on the thread holding the lock." +
+        (path.empty() ? std::wstring{}
+                      : (L" Plugins further down the main thread's stack (" + path +
+                          L") are on the call path, not shown to be the cause.")) +
+        (owner.confirmed ? std::wstring{} : std::wstring(L" Only one WCT pass named this owner.")) +
+        L" (Confidence: " + conf + L")")
+    : (L"게임 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥐고 있는 " + DescribeLockType(owner, en) +
+        L" 잠금을 기다리고 있었습니다" + (where.empty() ? std::wstring{} : (L"(대기 위치: " + where + L")")) +
+        L". 멈춘 곳은 그 잠금을 쥔 스레드 쪽입니다." +
+        (path.empty() ? std::wstring{}
+                      : (L" 메인 스레드 스택 아래쪽 플러그인(" + path + L")은 호출 경로일 뿐 원인으로 확인된 것이 아닙니다.")) +
+        (owner.confirmed ? std::wstring{} : std::wstring(L" 이 소유 스레드는 WCT 한 번에서만 확인됐습니다.")) +
+        L" (신뢰도: " + conf + L")");
+}
+
+// crash_logger_thread_dump_deadlock (FreezeCandidateConsensus): Crash
+// Logger's thread dump, not a mod, stopped the game.
+std::wstring DescribeCrashLoggerThreadDumpDeadlock(const AnalysisResult& r, i18n::Language lang, bool en)
+{
+  const auto& owner = r.main_thread_lock_owner;
+  const std::wstring conf =
+    ConfidenceText(lang, CrashLoggerThreadDumpDeadlockConfidence(owner, r.crash_logger_thread_dump_deadlock));
+  const auto& path = r.main_thread_wait.path_modules;
+  const std::wstring mods = path.empty() ? std::wstring{} : JoinWaitPath(path);
+  return en
+    ? (L"Crash Logger's thread dump deadlocked and froze the game. It suspended " + DescribeLockOwnerThread(owner, en) +
+        L" and then loaded PDB symbols, which needed a lock that suspended thread held, so it never resumed it. "
+        L"The main thread was only waiting for a " + DescribeLockType(owner, en) + L" that thread holds; the mods on "
+        L"the main thread's stack" + (mods.empty() ? std::wstring{} : (L" (" + mods + L")")) +
+        L" are not the cause. (Confidence: " + conf + L")")
+    : (L"Crash Logger의 스레드 덤프가 교착 상태(deadlock)에 빠져 게임이 멈췄습니다. 스레드 덤프가 " +
+        DescribeLockOwnerThread(owner, en) +
+        L"을(를) 일시 정지시킨 채 PDB(디버그 심볼)를 읽으려 했는데, 그 작업에 필요한 잠금을 정지된 스레드가 쥐고 있어서 "
+        L"덤프가 끝나지 못했고 그 스레드도 재개되지 못했습니다. 메인 스레드는 그 스레드가 쥔 " +
+        DescribeLockType(owner, en) + L" 잠금을 기다리다 멈췄을 뿐이며, 메인 스레드 스택의 모드" +
+        (mods.empty() ? std::wstring{} : (L"(" + mods + L")")) + L"는 원인이 아닙니다. (신뢰도: " + conf + L")");
+}
+
 // A WCT cycle or a loader stall explains the freeze (FreezeCandidateConsensus).
 // A stack module is named only when it does not come from a main thread that
 // sat in an engine or driver wait (ADR-0009).
@@ -835,6 +888,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
 
       if (r.modal_dialog_wait.detected) {
         summary = hangPrefix + L" " + DescribeModalDialogWait(r.modal_dialog_wait, lang, en);
+      } else if (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) {
+        summary = hangPrefix + L" " + DescribeCrashLoggerThreadDumpDeadlock(r, lang, en);
       } else if (r.hang_thread_module_consensus.has_consensus) {
         const auto& consensus = r.hang_thread_module_consensus;
         summary = en
@@ -849,6 +904,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         // The recommendations and the freeze reasons put these first; the
         // engine wait on the main thread does not overrule them.
         summary = hangPrefix + L" " + DescribeExplainedStall(r, lang, en, hasSuspect ? suspectWho : std::wstring{}, suspectConf);
+      } else if (r.main_thread_lock_owner.tid != 0u) {
+        summary = hangPrefix + L" " + DescribeLockOwnerWait(r, lang, en);
       } else if (IsBystanderWait(r.main_thread_wait) &&
                  (r.suspects_from_main_thread || !hasSuspect || HasBlockedGameThread(r.main_thread_wait))) {
         // Suspects from another thread (a WCT cycle member) are not the

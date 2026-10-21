@@ -1845,8 +1845,72 @@ static void Test_ParseObjectRefs_NestedRegisterFilesAreNotTheObject()
   assert(statics);
 }
 
+// A synthetic Crash Logger 1.25 thread dump: every record ends with a call
+// stack, and the record of the dumping thread itself, "[CURRENT THREAD]",
+// comes last.
+static std::string ThreadDumpRecord(int index, int tid, bool current = false)
+{
+  return "===== THREAD " + std::to_string(index) + " (ID: " + std::to_string(tid) + ")" +
+         (current ? " [CURRENT THREAD]" : "") + " =====\r\n"
+         "REGISTERS:\r\n"
+         "\tRAX 0x1                (size_t) [1]\r\n"
+         "\r\n"
+         "\tCALLSTACK:\r\n"
+         "\t[0] 0x7FFCA13A5A24    ntdll.dll+0165A24\r\n"
+         "\t[1] 0x7FFCA033DDA7 KERNEL32.DLL+002DDA7\r\n"
+         "\r\n";
+}
+
+static std::string ThreadDumpHeader(int totalThreads)
+{
+  return "========================================\r\n"
+         "THREAD DUMP (Manual Trigger)\r\n"
+         "========================================\r\n"
+         "TIME: 2026-10-18 19:04:09\r\n"
+         "Skyrim SSE v1.6.1170\r\n"
+         "CrashLoggerSSE v1-25-0-0 Aug 21 2026 09:19:20\r\n"
+         "Total Threads: " + std::to_string(totalThreads) + "\r\n"
+         "\r\n";
+}
+
+static void Test_ThreadDumpProgress_TruncatedAndComplete()
+{
+  using skydiag::dump_tool::crashlogger_core::ParseCrashLoggerThreadDumpProgressAscii;
+
+  // Cut off inside the fourth record, as a 4 KiB write buffer leaves it: three
+  // of five threads, no [CURRENT THREAD] record.
+  std::string truncated = ThreadDumpHeader(5);
+  truncated += ThreadDumpRecord(1, 30100) + ThreadDumpRecord(6, 38060) + ThreadDumpRecord(36, 45324);
+  truncated += "===== THREAD 5 (ID: 43564) =====\r\nREGISTERS:\r\n\tRAX 0x0";
+  const auto cut = ParseCrashLoggerThreadDumpProgressAscii(truncated);
+  assert(cut.is_thread_dump);
+  assert(cut.total_threads == 5u);
+  assert(cut.thread_records == 4u);
+  assert(!cut.has_current_thread);
+
+  std::string complete = ThreadDumpHeader(3);
+  complete += ThreadDumpRecord(1, 30100) + ThreadDumpRecord(2, 38060) + ThreadDumpRecord(3, 43792, /*current=*/true);
+  const auto full = ParseCrashLoggerThreadDumpProgressAscii(complete);
+  assert(full.is_thread_dump);
+  assert(full.total_threads == 3u);
+  assert(full.thread_records == 3u);
+  assert(full.has_current_thread);
+
+  // A crash log is no thread dump; its "Total Threads"-free text counts nothing.
+  const auto crash = ParseCrashLoggerThreadDumpProgressAscii(
+    "CrashLoggerSSE v1-25-0-0\nUnhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF6 SkyrimSE.exe+0BAB4CF\n"
+    "===== THREAD 1 (ID: 1) =====\n");
+  assert(!crash.is_thread_dump);
+  assert(crash.thread_records == 0u);
+
+  // A malformed total is ignored, not misread.
+  const auto junk = ParseCrashLoggerThreadDumpProgressAscii("THREAD DUMP (Manual Trigger)\nTotal Threads: 29x\n");
+  assert(junk.is_thread_dump && junk.total_threads == 0u);
+}
+
 int main()
 {
+  Test_ThreadDumpProgress_TruncatedAndComplete();
   Test_CrashLoggerLocationContradictsDumpFault();
   Test_ParseObjectRefs_RealRegisterFormatBefore122();
   Test_ParseObjectRefs_NestedRegisterFilesAreNotTheObject();

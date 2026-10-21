@@ -81,7 +81,144 @@ std::optional<bool> LongestWaiterConsensusFromPasses(const nlohmann::json& j)
   return waiters[0].tid() != 0u && waiters[0].tid() == waiters[1].tid();
 }
 
+const nlohmann::json* FindThreadEntry(const nlohmann::json& threads, std::uint32_t tid)
+{
+  if (!threads.is_array()) {
+    return nullptr;
+  }
+  for (const auto& t : threads) {
+    if (t.is_object() && t.value("tid", 0u) == tid) {
+      return &t;
+    }
+  }
+  return nullptr;
+}
+
+std::uint32_t NodeThreadId(const nlohmann::json& node)
+{
+  if (!node.is_object()) {
+    return 0u;
+  }
+  const auto thIt = node.find("thread");
+  if (thIt == node.end() || !thIt->is_object()) {
+    return 0u;
+  }
+  const auto idIt = thIt->find("threadId");
+  return (idIt != thIt->end() && idIt->is_number_unsigned()) ? idIt->get<std::uint32_t>() : 0u;
+}
+
+struct ChainLock
+{
+  bool found = false;
+  std::uint32_t object_type = 0;
+  std::uint32_t owner_tid = 0;
+};
+
+// The waiter's own chain: [waiter thread] -> [owned critical section or
+// mutex] -> [owner thread] -> ... Only the first lock and its direct owner.
+ChainLock ReadChainLock(const nlohmann::json& threads, std::uint32_t waiterTid)
+{
+  const auto* entry = FindThreadEntry(threads, waiterTid);
+  if (!entry || entry->value("isCycle", false)) {
+    return {};
+  }
+  const auto nodesIt = entry->find("nodes");
+  if (nodesIt == entry->end() || !nodesIt->is_array() || nodesIt->size() < 2u ||
+      NodeThreadId((*nodesIt)[0]) != waiterTid) {
+    return {};
+  }
+  const auto& object = (*nodesIt)[1];
+  if (!object.is_object()) {
+    return {};
+  }
+  const auto type = object.value("objectType", 0u);
+  if ((type != kWctObjectTypeCriticalSection && type != kWctObjectTypeMutex) ||
+      object.value("objectStatus", 0u) != kWctObjectStatusOwned) {
+    return {};
+  }
+  ChainLock lock{};
+  lock.found = true;
+  lock.object_type = type;
+  if (nodesIt->size() >= 3u && (*nodesIt)[2].is_object() &&
+      (*nodesIt)[2].value("objectType", 0u) == kWctObjectTypeThread) {
+    lock.owner_tid = NodeThreadId((*nodesIt)[2]);
+  }
+  return lock;
+}
+
+// The thread's entry has only its own node and that node is blocked: WCT
+// found nothing it waits on.
+bool IsBlockedWithoutWaitObject(const nlohmann::json& threads, std::uint32_t tid)
+{
+  const auto* entry = FindThreadEntry(threads, tid);
+  if (!entry) {
+    return false;
+  }
+  const auto nodesIt = entry->find("nodes");
+  return nodesIt != entry->end() && nodesIt->is_array() && nodesIt->size() == 1u &&
+         NodeThreadId(nodesIt->front()) == tid &&
+         nodesIt->front().value("objectStatus", 0u) == kWctObjectStatusBlocked;
+}
+
 }  // namespace
+
+std::optional<WctLockOwner> FindWctLockOwner(std::string_view wctJsonUtf8, std::uint32_t waiterTid)
+{
+  if (wctJsonUtf8.empty() || waiterTid == 0u) {
+    return std::nullopt;
+  }
+  try {
+    const auto j = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
+    if (!j.is_object()) {
+      return std::nullopt;
+    }
+    const auto threadsIt = j.find("threads");
+    if (threadsIt == j.end()) {
+      return std::nullopt;
+    }
+    const auto lock = ReadChainLock(*threadsIt, waiterTid);
+    if (!lock.found) {
+      return std::nullopt;
+    }
+    WctLockOwner owner{};
+    owner.object_type = lock.object_type;
+    owner.owner_tid = lock.owner_tid == waiterTid ? 0u : lock.owner_tid;
+    if (owner.owner_tid == 0u) {
+      return owner;
+    }
+
+    owner.owner_blocked_without_wait_object = IsBlockedWithoutWaitObject(*threadsIt, owner.owner_tid);
+    const auto passesIt = j.find("passes");
+    if (passesIt != j.end() && passesIt->is_array() && passesIt->size() >= 2u) {
+      bool agree = true;
+      for (std::size_t i = 0; i < 2u; ++i) {
+        const auto& pass = (*passesIt)[i];
+        if (!pass.is_object() || !pass.value("capture_usable", false)) {
+          agree = false;
+          continue;
+        }
+        const auto passThreadsIt = pass.find("threads");
+        if (passThreadsIt == pass.end()) {
+          agree = false;
+          continue;
+        }
+        if (ReadChainLock(*passThreadsIt, waiterTid).owner_tid != owner.owner_tid) {
+          agree = false;
+        }
+        if (FindThreadEntry(*passThreadsIt, owner.owner_tid) &&
+            !IsBlockedWithoutWaitObject(*passThreadsIt, owner.owner_tid)) {
+          owner.owner_blocked_without_wait_object = false;
+        }
+      }
+      owner.confirmed = agree;
+    }
+    owner.owner_context_switches_stable =
+      CountWctThreadsWithStableContextSwitches(wctJsonUtf8, { owner.owner_tid }) == 1u;
+    return owner;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
 
 std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJsonUtf8)
 {

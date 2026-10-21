@@ -63,6 +63,33 @@ struct WctFreezeSummary
   std::vector<WctModalDialog> modal_dialogs;
 };
 
+// WCT_OBJECT_TYPE and WCT_OBJECT_STATUS values (wct.h) the lock-owner chain uses.
+inline constexpr std::uint32_t kWctObjectTypeCriticalSection = 1u;
+inline constexpr std::uint32_t kWctObjectTypeMutex = 3u;
+inline constexpr std::uint32_t kWctObjectTypeThread = 8u;
+inline constexpr std::uint32_t kWctObjectStatusOwned = 6u;
+
+// The thread holding the lock a thread waits on, read from that thread's own
+// wait chain: its thread node, an owned critical section or mutex, then the
+// owner's thread node. Only chains that are not cycles (those are deadlocks).
+struct WctLockOwner
+{
+  std::uint32_t owner_tid = 0;    // 0: the lock's owner was not reported
+  std::uint32_t object_type = 0;  // kWctObjectTypeCriticalSection / kWctObjectTypeMutex
+  // Two usable passes both named this owner; false with one pass, when they
+  // disagree or the owner is unknown.
+  bool confirmed = false;
+  // The owner's own entry, in every pass that has it: blocked, with no wait
+  // object after its thread node. A thread suspended from outside looks like
+  // this (so does a wait WCT cannot see, such as an SRW lock).
+  bool owner_blocked_without_wait_object = false;
+  // The owner made no context switch between the first and last pass.
+  bool owner_context_switches_stable = false;
+};
+
+// nullopt when the waiter's chain holds no owned critical section or mutex.
+std::optional<WctLockOwner> FindWctLockOwner(std::string_view wctJsonUtf8, std::uint32_t waiterTid);
+
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN);
 
 std::uint32_t CountWctThreadsWithStableContextSwitches(

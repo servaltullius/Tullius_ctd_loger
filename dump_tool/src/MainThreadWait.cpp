@@ -1,6 +1,7 @@
 #include "MainThreadWait.h"
 
 #include <algorithm>
+#include <cwchar>
 #include <string>
 
 namespace skydiag::dump_tool {
@@ -356,6 +357,123 @@ void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTop
 bool HasBlockedGameThread(const MainThreadWaitInfo& wait)
 {
   return wait.blocked_thread_tid != 0u && !wait.blocked_module.empty();
+}
+
+bool EndsWithSyscall(const std::vector<std::uint8_t>& codeBefore)
+{
+  const std::size_t n = codeBefore.size();
+  return n >= 2u && codeBefore[n - 2u] == 0x0F && codeBefore[n - 1u] == 0x05;
+}
+
+bool EndsWithCallInstruction(const std::vector<std::uint8_t>& codeBefore)
+{
+  const std::size_t n = codeBefore.size();
+  if (n < 7u) {
+    return false;
+  }
+  if (codeBefore[n - 5u] == 0xE8) {
+    return true;  // call rel32
+  }
+  // call r/m64 (FF /2): the opcode 2 (call reg), 3 (disp8), 4 (SIB + disp8),
+  // 6 (disp32 or rip-relative) or 7 (SIB + disp32) bytes back.
+  for (const std::size_t back : { 2u, 3u, 4u, 6u, 7u }) {
+    if (codeBefore[n - back] == 0xFF && (codeBefore[n - back + 1u] & 0x38) == 0x10) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void DescribeLockOwnerFrames(MainThreadLockOwnerInfo& owner, const std::vector<ModalStackFrame>& frames)
+{
+  constexpr std::size_t kShownFrames = 6;
+  owner.top_frames.clear();
+  owner.top_module.clear();
+  owner.top_mod_name.clear();
+  for (const auto& frame : frames) {
+    if (owner.top_frames.size() < kShownFrames) {
+      if (!frame.has_module) {
+        wchar_t buf[32]{};
+        std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"0x%llx", static_cast<unsigned long long>(frame.pc));
+        owner.top_frames.emplace_back(buf);
+      } else if (frame.symbol.empty() || frame.displacement > kMaxWaitApiDisplacement) {
+        // An export-only symbol far from pc names some other function.
+        owner.top_frames.push_back(frame.module_filename);
+      } else {
+        wchar_t disp[32]{};
+        std::swprintf(disp, sizeof(disp) / sizeof(disp[0]), L"+0x%llx", static_cast<unsigned long long>(frame.displacement));
+        owner.top_frames.push_back(frame.module_filename + L"!" + frame.symbol + disp);
+      }
+    }
+    if (owner.top_module.empty() && frame.has_module &&
+        (!frame.is_system || IsGraphicsStackModule(frame.module_filename))) {
+      owner.top_module = frame.module_filename;
+      owner.top_mod_name = frame.inferred_mod_name;
+    }
+  }
+}
+
+std::wstring DescribeLockOwnerThread(const MainThreadLockOwnerInfo& owner, bool en)
+{
+  std::vector<std::wstring> parts;
+  if (!owner.thread_name.empty()) {
+    parts.push_back(owner.thread_name);
+  }
+  if (!owner.top_module.empty()) {
+    parts.push_back((en ? L"top module: " : L"맨 위 모듈: ") + owner.top_module);
+  }
+  std::wstring details;
+  for (const auto& part : parts) {
+    details += (details.empty() ? L"" : L", ") + part;
+  }
+  const std::wstring tid = std::to_wstring(owner.tid);
+  if (details.empty()) {
+    return (en ? L"thread " : L"스레드 ") + tid;
+  }
+  return en ? (L"thread " + tid + L" (" + details + L")") : (L"스레드 " + tid + L"(" + details + L")");
+}
+
+std::wstring DescribeLockType(const MainThreadLockOwnerInfo& owner, bool en)
+{
+  if (owner.lock_type == "mutex") {
+    return en ? L"mutex" : L"뮤텍스";
+  }
+  return en ? L"critical section" : L"크리티컬 섹션";
+}
+
+bool IsCrashLoggerThreadDumpTruncated(const CrashLoggerThreadDumpSignals& signals)
+{
+  if (!signals.is_thread_dump_log) {
+    return false;
+  }
+  return !signals.thread_dump_has_current_thread ||
+         (signals.thread_dump_total_threads > 0u && signals.thread_dump_records < signals.thread_dump_total_threads);
+}
+
+CrashLoggerThreadDumpDeadlockInfo EvaluateCrashLoggerThreadDumpDeadlock(
+  const MainThreadLockOwnerInfo& owner,
+  const CrashLoggerThreadDumpSignals& signals)
+{
+  CrashLoggerThreadDumpDeadlockInfo info{};
+  info.crash_logger_tid = signals.crash_logger_tid;
+  info.crash_logger_module = signals.crash_logger_module;
+  info.thread_dump_truncated = IsCrashLoggerThreadDumpTruncated(signals);
+  info.thread_dump_records = signals.thread_dump_records;
+  info.thread_dump_total_threads = signals.thread_dump_total_threads;
+  info.thread_dump_before_capture = signals.is_thread_dump_log && signals.log_before_dump;
+  const bool crashLoggerThread = signals.crash_logger_tid != 0u && signals.crash_logger_tid != owner.tid;
+  const bool ownerSuspended = owner.tid != 0u && owner.blocked_without_wait_object && owner.ip_state == "not_after_syscall";
+  info.detected = crashLoggerThread && ownerSuspended && info.thread_dump_truncated;
+  return info;
+}
+
+i18n::ConfidenceLevel CrashLoggerThreadDumpDeadlockConfidence(
+  const MainThreadLockOwnerInfo& owner,
+  const CrashLoggerThreadDumpDeadlockInfo& deadlock)
+{
+  return (owner.confirmed && owner.context_switches_stable && deadlock.thread_dump_before_capture)
+    ? i18n::ConfidenceLevel::kHigh
+    : i18n::ConfidenceLevel::kMedium;
 }
 
 }  // namespace skydiag::dump_tool

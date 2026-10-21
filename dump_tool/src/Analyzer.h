@@ -202,10 +202,50 @@ struct MainThreadWaitInfo
   std::uint32_t blocked_thread_count = 0;  // game threads found in plugin code
 };
 
+// The thread holding the lock (critical section or mutex) that the game main
+// thread waits on, from WCT: main thread -> owned lock -> owner thread. The
+// owner, not the modules on the main thread's stack, is where the stall is.
+struct MainThreadLockOwnerInfo
+{
+  std::uint32_t tid = 0;  // 0: no owned lock in the main thread's chain, or no owner reported
+  std::string lock_type;  // critical_section / mutex
+  bool confirmed = false; // both WCT passes named this owner
+  std::wstring thread_name;  // from the dump's ThreadNamesStream; empty when unnamed
+  // The first module on top of its stack that is not a Windows DLL (graphics
+  // drivers count), e.g. "nvwgf2umx.dll"; empty when the walk found none.
+  std::wstring top_module;
+  std::wstring top_mod_name;
+  std::vector<std::wstring> top_frames;  // innermost first, "module!symbol+0x.." or "module"
+  // WCT: blocked with no wait object of its own (every pass).
+  bool blocked_without_wait_object = false;
+  bool context_switches_stable = false;
+  // after_syscall: the bytes before its instruction pointer are a syscall
+  // (0F 05), so it waits in the kernel; not_after_syscall: they are not, so a
+  // blocked thread there was stopped from outside; empty: code not readable.
+  std::string ip_state;
+};
+
+// crash_logger_thread_dump_deadlock: Crash Logger's thread dump suspended a
+// thread (the main thread's lock owner) that held a lock the dump's own PDB
+// loading then needed, so it never resumed it.
+struct CrashLoggerThreadDumpDeadlockInfo
+{
+  bool detected = false;
+  // The non-main thread with Crash Logger return addresses on its stack.
+  std::uint32_t crash_logger_tid = 0;
+  std::wstring crash_logger_module;  // CrashLogger.dll / CrashLoggerSSE.dll
+  // The paired Crash Logger thread dump stopped early (fewer thread records
+  // than "Total Threads", or no [CURRENT THREAD] record).
+  bool thread_dump_truncated = false;
+  std::uint32_t thread_dump_records = 0;
+  std::uint32_t thread_dump_total_threads = 0;
+  bool thread_dump_before_capture = false;  // the thread dump started before this capture
+};
+
 struct FreezeAnalysisResult
 {
-  // state ids: modal_dialog_wait / deadlock_likely / synchronization_stall_likely /
-  // loader_stall_likely / freeze_candidate / freeze_ambiguous
+  // state ids: modal_dialog_wait / crash_logger_thread_dump_deadlock / deadlock_likely /
+  // synchronization_stall_likely / loader_stall_likely / freeze_candidate / freeze_ambiguous
   bool has_analysis = false;
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;
@@ -345,6 +385,15 @@ struct AnalysisResult
   bool crash_logger_pairing_ambiguous = false;
   bool crash_logger_location_mismatch = false;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
+  // The paired log is a Crash Logger thread dump: its thread records, its
+  // "Total Threads" line (0 when absent) and whether it reached the
+  // [CURRENT THREAD] record it writes last.
+  bool crash_logger_is_thread_dump = false;
+  std::uint32_t crash_logger_thread_dump_records = 0;
+  std::uint32_t crash_logger_thread_dump_total_threads = 0;
+  bool crash_logger_thread_dump_has_current_thread = false;
+  // The paired log's time (its file name, else its last write) is not after the dump's.
+  bool crash_logger_pairing_log_before_dump = false;
   std::wstring crash_logger_direct_fault_module;
   std::wstring crash_logger_first_actionable_probable_module;
   std::wstring crash_logger_probable_streak_module;
@@ -475,6 +524,8 @@ struct AnalysisResult
   HangThreadModuleConsensus hang_thread_module_consensus;
   ModalDialogWaitInfo modal_dialog_wait;
   MainThreadWaitInfo main_thread_wait;
+  MainThreadLockOwnerInfo main_thread_lock_owner;
+  CrashLoggerThreadDumpDeadlockInfo crash_logger_thread_dump_deadlock;
   // The suspects came from the game main thread's stack (a freeze's stack walk
   // can pick a WCT cycle thread instead). A bystander wait only speaks for
   // the main thread's own stack.

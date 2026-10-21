@@ -124,6 +124,16 @@ bool LooksLikeCrashLoggerLogTextCore(std::string_view utf8Prefix);
 // The log is a thread dump ("THREAD DUMP (Manual Trigger)" header): every
 // thread's call stack, not the report of one crash.
 bool IsCrashLoggerThreadDumpLogAscii(std::string_view logUtf8);
+// How far a thread dump got: its "===== THREAD n (ID: tid) =====" records,
+// its "Total Threads: N" line (0 when absent), and whether it holds the
+// "[CURRENT THREAD]" record Crash Logger writes last.
+struct CrashLoggerThreadDumpProgress {
+  bool is_thread_dump = false;
+  std::uint32_t thread_records = 0;
+  std::uint32_t total_threads = 0;
+  bool has_current_thread = false;
+};
+CrashLoggerThreadDumpProgress ParseCrashLoggerThreadDumpProgressAscii(std::string_view logUtf8);
 std::optional<std::string_view> TryExtractModulePlusOffsetTokenAscii(std::string_view line);
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8);
 
