@@ -451,6 +451,16 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
       }
       // NOLINTEND(bugprone-unchecked-optional-access)
     }
+  } else if (lockOwner && lockOwner->confirmed) {
+    // Both WCT passes showed the main thread blocked on a lock that the same
+    // other thread held: the stall is on that thread, and the modules on the
+    // main thread's stack only called into the wait.
+    result.state_id = "lock_owner_wait";
+    result.confidence_level = i18n::ConfidenceLevel::kMedium;
+    result.primary_reasons.push_back(
+      language == i18n::Language::kEnglish
+        ? L"Both WCT passes showed the main thread blocked on a lock held by the same other thread"
+        : L"WCT 두 번 모두 메인 스레드가 같은 스레드의 잠금에 막혀 있었음");
   } else if (!input.actionable_candidates.empty()) {
     result.state_id = "freeze_candidate";
     result.confidence_level = i18n::ConfidenceLevel::kLow;
@@ -491,7 +501,11 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   }
   result.confidence = i18n::ConfidenceText(language, result.confidence_level);
   std::unordered_set<std::wstring> seenNames;
-  const std::size_t maxCandidates = std::min<std::size_t>(input.actionable_candidates.size(), 2u);
+  // Under a lock-owner wait the stack candidates are the main thread's
+  // bystanders, not related to the stall.
+  const bool stackCandidatesAreBystanders = result.state_id == "lock_owner_wait";
+  const std::size_t maxCandidates =
+    stackCandidatesAreBystanders ? 0u : std::min<std::size_t>(input.actionable_candidates.size(), 2u);
   for (std::size_t i = 0; i < maxCandidates; ++i) {
     auto related = ToRelatedCandidate(input.actionable_candidates[i], language);
     seenNames.insert(related.display_name);

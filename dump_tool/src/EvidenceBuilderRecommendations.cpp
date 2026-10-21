@@ -713,14 +713,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
-  AddActionableCandidateRecommendations(
-    r,
-    en,
-    topCandidate,
-    secondCandidate,
-    topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+  // A lock-owner wait (both WCT passes) puts the stall on the owner thread,
+  // and Crash Logger's thread-dump deadlock on Crash Logger; candidates from
+  // the main thread's stack only called into the wait.
+  const bool lockOwnerWait = r.freeze_analysis.state_id == "lock_owner_wait" ||
+    r.freeze_analysis.state_id == "crash_logger_thread_dump_deadlock";
+  if (!lockOwnerWait) {
+    AddActionableCandidateRecommendations(
+      r,
+      en,
+      topCandidate,
+      secondCandidate,
+      topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+  }
 
-  const bool allowTopSuspectActionRecommendations = !isSnapshotLike;
+  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !lockOwnerWait;
   if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
       !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
@@ -926,6 +933,30 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
             L"스레드 덤프 단축키(기본 Ctrl+Shift+F12)를 누르지 마세요. 아예 끄려면 CrashLogger.ini의 [Debug] 항목에서 "
             L"\"Enable Thread Dump Hotkey = false\"로 바꾸면 됩니다. 메인 스레드 스택에 보이는 모드" + mods +
             L"는 원인이 아니므로 뺄 필요가 없습니다."));
+    } else if (isHangLike && r.main_thread_lock_owner.confirmed &&
+               IsGraphicsStackModule(r.main_thread_lock_owner.top_module)) {
+      // The thread holding the lock was itself in the graphics driver.
+      const auto& owner = r.main_thread_lock_owner;
+      const auto& injectors = r.graphics_env.injection_modules;
+      const std::wstring detected = injectors.empty()
+        ? std::wstring{}
+        : (en ? (L" (detected: " + JoinList(injectors, injectors.size(), L", ") + L")")
+              : (L" (감지됨: " + JoinList(injectors, injectors.size(), L", ") + L")"));
+      const auto& path = wait.path_modules;
+      const std::wstring mods = path.empty() ? std::wstring{} : JoinList(path, path.size(), L", ");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
+            DescribeLockOwnerThread(owner, en) + L", and that thread was inside the graphics driver (" + owner.top_module +
+            L"). Update or clean-install the GPU driver, then test without graphics injectors, upscalers and frame generation" +
+            detected + L"." +
+            (mods.empty() ? std::wstring{}
+                          : (L" The plugins on the main thread's stack (" + mods + L") only called into the wait.")))
+        : (L"[메인 스레드] 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥔 " + DescribeLockType(owner, en) +
+            L" 잠금을 기다리고 있었고, 그 스레드는 그래픽 드라이버(" + owner.top_module +
+            L") 안에 있었습니다. GPU 드라이버를 업데이트하거나 클린 설치한 뒤, 그래픽 인젝터·업스케일러·프레임 생성" + detected +
+            L" 없이 시험해 보세요." +
+            (mods.empty() ? std::wstring{}
+                          : (L" 메인 스레드 스택의 플러그인(" + mods + L")은 그 대기를 호출했을 뿐입니다."))));
     } else if (isHangLike && r.main_thread_lock_owner.tid != 0u) {
       const auto& owner = r.main_thread_lock_owner;
       r.recommendations.push_back(en

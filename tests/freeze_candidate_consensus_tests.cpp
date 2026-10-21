@@ -554,6 +554,34 @@ static void TestConsensusCrashLoggerThreadDumpDeadlock()
   assert(ownerResult.primary_reasons.front().find(L"두 번째 WCT로는 확인되지 않음") != std::wstring::npos);
   assert(ownerResult.primary_reasons.front().find(L"HitchHunter.dll, hdtsmp64.dll") != std::wstring::npos);
 
+  // Confirmed by both passes: its own state at medium confidence, the lock
+  // owner first, and no stack candidate among the related ones.
+  FreezeSignalInput confirmedOwner = input;
+  confirmedOwner.crash_logger_thread_dump_deadlock.reset();
+  const auto confirmedResult = BuildFreezeCandidateConsensus(confirmedOwner, Language::kEnglish);
+  assert(confirmedResult.state_id == "lock_owner_wait");
+  assert(confirmedResult.confidence_level == ConfidenceLevel::kMedium);
+  assert(confirmedResult.primary_reasons.size() == 2u);
+  assert(confirmedResult.primary_reasons.front().find(L"for a critical section held by thread 51944") != std::wstring::npos);
+  assert(confirmedResult.primary_reasons.front().find(L"both WCT passes named the same owner") != std::wstring::npos);
+  for (const auto& related : confirmedResult.related_candidates) {
+    assert(related.display_name != L"HitchHunter.dll");
+  }
+  bool keptRecent = false;
+  for (const auto& related : confirmedResult.related_candidates) {
+    keptRecent = keptRecent || related.display_name == L"SomeRecent.dll";
+  }
+  assert(keptRecent);
+  // A WCT cycle or a stuck load still outranks the lock owner.
+  FreezeSignalInput cycle = confirmedOwner;
+  cycle.wct = skydiag::dump_tool::internal::WctFreezeSummary{};
+  cycle.wct->has = true;
+  cycle.wct->cycles = 2;
+  assert(BuildFreezeCandidateConsensus(cycle, Language::kEnglish).state_id == "deadlock_likely");
+  FreezeSignalInput loading = confirmedOwner;
+  loading.loading_context = true;
+  assert(BuildFreezeCandidateConsensus(loading, Language::kEnglish).state_id == "loader_stall_likely");
+
   // A modal dialog outranks both.
   FreezeSignalInput modal = input;
   modal.modal_dialog_wait = skydiag::dump_tool::ModalDialogWaitInfo{};

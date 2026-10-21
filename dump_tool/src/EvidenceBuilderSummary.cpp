@@ -212,10 +212,16 @@ std::wstring DescribeLockOwnerWait(const AnalysisResult& r, i18n::Language lang,
     ? wait.wait_api
     : (wait.waiting_module + (wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api)));
   const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
+  // A confirmed owner inside the graphics driver points at the GPU side.
+  const bool ownerInGraphics = owner.confirmed && IsGraphicsStackModule(owner.top_module);
   return en
     ? (L"The game main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
         DescribeLockOwnerThread(owner, en) + (where.empty() ? std::wstring{} : (L" (in " + where + L")")) +
         L". The stall is on the thread holding the lock." +
+        (ownerInGraphics
+          ? (L" That thread was inside the graphics driver (" + owner.top_module +
+              L"), so look at the GPU side first - the driver and graphics mods such as upscalers or frame generation.")
+          : std::wstring{}) +
         (path.empty() ? std::wstring{}
                       : (L" Plugins further down the main thread's stack (" + path +
                           L") are on the call path, not shown to be the cause.")) +
@@ -224,6 +230,10 @@ std::wstring DescribeLockOwnerWait(const AnalysisResult& r, i18n::Language lang,
     : (L"게임 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥐고 있는 " + DescribeLockType(owner, en) +
         L" 잠금을 기다리고 있었습니다" + (where.empty() ? std::wstring{} : (L"(대기 위치: " + where + L")")) +
         L". 멈춘 곳은 그 잠금을 쥔 스레드 쪽입니다." +
+        (ownerInGraphics
+          ? (L" 그 스레드는 그래픽 드라이버(" + owner.top_module +
+              L") 안에 있었으므로 GPU 쪽(드라이버, 업스케일러·프레임 생성 같은 그래픽 모드)부터 확인하세요.")
+          : std::wstring{}) +
         (path.empty() ? std::wstring{}
                       : (L" 메인 스레드 스택 아래쪽 플러그인(" + path + L")은 호출 경로일 뿐 원인으로 확인된 것이 아닙니다.")) +
         (owner.confirmed ? std::wstring{} : std::wstring(L" 이 소유 스레드는 WCT 한 번에서만 확인됐습니다.")) +

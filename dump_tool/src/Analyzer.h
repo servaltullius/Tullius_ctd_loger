@@ -245,7 +245,8 @@ struct CrashLoggerThreadDumpDeadlockInfo
 struct FreezeAnalysisResult
 {
   // state ids: modal_dialog_wait / crash_logger_thread_dump_deadlock / deadlock_likely /
-  // synchronization_stall_likely / loader_stall_likely / freeze_candidate / freeze_ambiguous
+  // synchronization_stall_likely / loader_stall_likely / lock_owner_wait / freeze_candidate /
+  // freeze_ambiguous
   bool has_analysis = false;
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;

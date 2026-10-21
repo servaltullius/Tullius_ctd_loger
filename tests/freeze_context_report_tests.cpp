@@ -283,6 +283,77 @@ void TestStallOutranksTheWaitAdvice()
   }
 }
 
+// The 2026-10-18 freeze without its Crash Logger log: both WCT passes show the
+// main thread blocked in dxgi.dll on a critical section held by the DLSS
+// frame-generation thread, which sat in the NVIDIA driver. The report leads
+// with that thread; the main thread's stack plugins get no candidate advice.
+AnalysisResult MakeLockOwnerWait(bool confirmed, std::wstring ownerTopModule)
+{
+  auto r = MakeHang();
+  r.suspects[0].module_filename = L"HitchHunter.dll";
+  r.suspects[0].inferred_mod_name = L"Hitch Hunter And Fixes";
+  r.freeze_analysis.state_id = confirmed ? "lock_owner_wait" : "freeze_ambiguous";
+  r.freeze_analysis.confidence_level = confirmed ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+  r.main_thread_wait.kind = "graphics_driver_wait";
+  r.main_thread_wait.wait_class = "sync";
+  r.main_thread_wait.wait_api = L"ntdll.dll!RtlEnterCriticalSection";
+  r.main_thread_wait.waiting_module = L"dxgi.dll";
+  r.main_thread_wait.path_modules = { L"HitchHunter.dll", L"hdtsmp64.dll" };
+  r.graphics_env.injection_modules = { L"dxgi.dll" };
+  auto& owner = r.main_thread_lock_owner;
+  owner.tid = 51944;
+  owner.lock_type = "critical_section";
+  owner.confirmed = confirmed;
+  owner.thread_name = L"nv.sl.dlss_g.thread.dlssg";
+  owner.top_module = std::move(ownerTopModule);
+  return r;
+}
+
+void TestLockOwnerWaitLeadsTheReport()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = MakeLockOwnerWait(/*confirmed=*/true, L"nvwgf2umx.dll");
+    BuildEvidenceAndSummary(r, lang);
+
+    Require(Contains(r.summary_sentence, en ? L"held by thread 51944 (nv.sl.dlss_g.thread.dlssg" : L"스레드 51944(nv.sl.dlss_g.thread.dlssg"),
+      "the summary names the lock owner");
+    Require(Contains(r.summary_sentence, en ? L"inside the graphics driver (nvwgf2umx.dll)" : L"그래픽 드라이버(nvwgf2umx.dll) 안에"),
+      "an owner in the GPU driver is said so");
+    Require(Contains(r.summary_sentence, en ? L"Confidence: Medium" : L"신뢰도: 중간"), "a confirmed owner is medium");
+    Require(!Contains(r.summary_sentence, en ? L"waiting inside the graphics driver (dxgi.dll" : L"그래픽 드라이버(dxgi.dll"),
+      "the main thread's own wait module is not blamed");
+    Require(!AnyStartsWith(r.recommendations, en ? L"[Top suspect]" : L"[유력 후보]"), "no stack-candidate advice");
+    Require(!AnyStartsWith(r.recommendations, en ? L"[Actionable candidate]" : L"[행동 우선 후보]"), "no candidate advice");
+    const auto next = SelectNextActionIndex(r.recommendations);
+    Require(next != std::wstring::npos && r.recommendations[next].rfind(en ? L"[Main thread]" : L"[메인 스레드]", 0) == 0 &&
+              Contains(r.recommendations[next], en ? L"held by thread 51944" : L"스레드 51944") &&
+              Contains(r.recommendations[next], L"(nvwgf2umx.dll)") &&
+              Contains(r.recommendations[next], en ? L"GPU driver" : L"GPU 드라이버"),
+      "NextAction is the lock owner in the GPU driver");
+    Require(!AnyStartsWith(r.recommendations, en ? L"[Main thread] The main thread was waiting in the graphics driver" : L"[메인 스레드] 메인 스레드가 그래픽 드라이버"),
+      "no advice blaming the main thread's driver wait");
+    Require(!AnyStartsWith(r.recommendations, en ? L"[Hang] No WCT cycle" : L"[프리징] WCT cycle이 없으면"), "a lock wait is no busy wait");
+  }
+
+  // An owner outside the graphics stack: no GPU advice, look at that thread.
+  auto plugin = MakeLockOwnerWait(/*confirmed=*/true, L"SomePlugin.dll");
+  BuildEvidenceAndSummary(plugin, i18n::Language::kEnglish);
+  Require(!Contains(plugin.summary_sentence, L"GPU"), "no GPU hint for a plugin owner");
+  Require(AnyStartsWith(plugin.recommendations, L"[Main thread]", L"Look at what that thread runs"), "owner advice");
+  Require(!AnyStartsWith(plugin.recommendations, L"[Main thread]", L"GPU driver"), "no GPU advice");
+  Require(!AnyStartsWith(plugin.recommendations, L"[Top suspect]"), "no stack-candidate advice");
+
+  // One WCT pass only: as before, a low-confidence pointer at the owner, and
+  // the stack candidates keep their advice.
+  auto unconfirmed = MakeLockOwnerWait(/*confirmed=*/false, L"nvwgf2umx.dll");
+  BuildEvidenceAndSummary(unconfirmed, i18n::Language::kEnglish);
+  Require(Contains(unconfirmed.summary_sentence, L"Only one WCT pass named this owner"), "unconfirmed owner said so");
+  Require(Contains(unconfirmed.summary_sentence, L"Confidence: Low"), "unconfirmed owner is low");
+  Require(!Contains(unconfirmed.summary_sentence, L"GPU"), "no GPU hint for an unconfirmed owner");
+  Require(AnyStartsWith(unconfirmed.recommendations, L"[Top suspect]"), "unconfirmed owner keeps the stack-candidate advice");
+}
+
 // A WCT cycle or a loader stall is what the recommendations lead with; the
 // summary must not say instead that the engine wait cannot be explained.
 void TestStallOutranksTheWaitSummary()
@@ -541,6 +612,7 @@ int main()
     TestOtherThreadSuspectsKeepTheirSignal();
     TestStallOutranksTheWaitAdvice();
     TestStallOutranksTheWaitSummary();
+    TestLockOwnerWaitLeadsTheReport();
     TestMainThreadFromEvents();
     TestReportKeepsRecentEvents();
     TestFreezesGroupByTheMainThreadWait();
