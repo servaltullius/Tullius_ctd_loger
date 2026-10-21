@@ -791,6 +791,17 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   out.freeze_analysis.first_chance_context = out.first_chance_summary;
+  // A lock-owner freeze state is known only now and is bucketed by the owner,
+  // so the history read under the main thread's wait key is read again and
+  // the candidates it fed are rebuilt from it.
+  if (internal::RekeyLockOwnerFreezeBucket(out) && !out.is_filtered_clean_exit) {
+    LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
+    out.freeze_analysis = {};
+    BuildEvidenceAndSummary(out, opt.language);
+    freezeSignals.actionable_candidates = out.actionable_candidates;
+    out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
+    out.freeze_analysis.first_chance_context = out.first_chance_summary;
+  }
   if (out.freeze_analysis.has_analysis) {
     BuildEvidenceAndSummary(out, opt.language);
   }

@@ -87,6 +87,32 @@ static void Test_HangKey_IsStableAndSeparateFromCrashKeys()
   assert(a.starts_with(L"HANG1-") && a.size() == 6 + 16);
 }
 
+static void Test_LockOwnerKey_GroupsByTheOwnerThread()
+{
+  using skydiag::dump_tool::ComputeHangBucketKey;
+  using skydiag::dump_tool::ComputeLockOwnerBucketKey;
+  using skydiag::dump_tool::ThreadNameClass;
+
+  const auto a = ComputeLockOwnerBucketKey("lock_owner_wait", L"nvwgf2umx.dll", L"nv.sl.dlss_g.present");
+  assert(a.starts_with(L"HANG1-") && a.size() == 6 + 16);
+  assert(a == ComputeLockOwnerBucketKey("lock_owner_wait", L"nvwgf2umx.dll", L"nv.sl.dlss_g.present"));
+  // Case, padding and thread numbering change between runs; the owner does not.
+  assert(a == ComputeLockOwnerBucketKey("lock_owner_wait", L" NVWGF2UMX.DLL ", L"NV.SL.DLSS_G.Present"));
+  const auto w1 = ComputeLockOwnerBucketKey("lock_owner_wait", L"SomePlugin.dll", L"Worker 3");
+  assert(w1 == ComputeLockOwnerBucketKey("lock_owner_wait", L"SomePlugin.dll", L"Worker 17"));
+  assert(ThreadNameClass(L"Worker 17") == "worker #");
+  assert(ThreadNameClass(L"") == "");
+
+  // A different owner module, thread kind or state is a different bucket.
+  assert(a != ComputeLockOwnerBucketKey("lock_owner_wait", L"amdxx64.dll", L"nv.sl.dlss_g.present"));
+  assert(a != ComputeLockOwnerBucketKey("lock_owner_wait", L"nvwgf2umx.dll", L"BSJobs::JobThread"));
+  assert(a != ComputeLockOwnerBucketKey("crash_logger_thread_dump_deadlock", L"nvwgf2umx.dll", L"nv.sl.dlss_g.present"));
+  assert(w1 != ComputeLockOwnerBucketKey("lock_owner_wait", L"OtherPlugin.dll", L"Worker 3"));
+
+  // Never the key of a main-thread wait.
+  assert(a != ComputeHangBucketKey("v=1|kind=graphics_driver_wait|detail=|module=nvwgf2umx.dll|api="));
+}
+
 int main()
 {
   Test_SameInput_ProducesStableKey();
@@ -95,5 +121,6 @@ int main()
   Test_DifferentModuleOffset_ChangesKey();
   Test_CaseDifferences_DoNotChangeCanonicalKey();
   Test_HangKey_IsStableAndSeparateFromCrashKeys();
+  Test_LockOwnerKey_GroupsByTheOwnerThread();
   return 0;
 }

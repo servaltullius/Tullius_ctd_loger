@@ -129,6 +129,12 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
   std::vector<std::string> keys;
   std::unordered_set<std::string> seen;
 
+  // lock_owner_wait is bucketed by the owner thread; the candidates are the
+  // main thread's bystanders and would vote for themselves in every repeat.
+  if (out.freeze_analysis.state_id == "lock_owner_wait") {
+    return keys;
+  }
+
   if (!out.actionable_candidates.empty()) {
     const auto limit = std::min<std::size_t>(out.actionable_candidates.size(), 5u);
     for (std::size_t i = 0; i < limit; ++i) {
@@ -173,6 +179,10 @@ void LoadCrashHistoryContext(
   const std::string& analysisTimestamp,
   AnalysisResult& out)
 {
+  // Read again when a lock-owner freeze changes the bucket key.
+  out.history_stats.clear();
+  out.bucket_candidate_repeats.clear();
+  out.history_correlation = {};
   if (historyPath.empty()) {
     return;
   }

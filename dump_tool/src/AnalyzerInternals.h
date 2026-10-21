@@ -115,5 +115,9 @@ HookStubRaceInfo DetectHookStubRace(
   const std::optional<CONTEXT>& excCtx);
 
 void ComputeCrashBucket(AnalysisResult& out);
+// After freeze_analysis is built: a lock_owner_wait or
+// crash_logger_thread_dump_deadlock is keyed by the lock owner instead of the
+// main thread's wait. True when that changed crash_bucket_key.
+bool RekeyLockOwnerFreezeBucket(AnalysisResult& out);
 
 }  // namespace skydiag::dump_tool::internal

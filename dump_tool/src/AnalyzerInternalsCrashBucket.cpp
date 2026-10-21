@@ -41,10 +41,30 @@ std::optional<std::string> HangWaitCanonical(const AnalysisResult& out)
   return std::nullopt;  // running or unknown: the stack is all there is
 }
 
+// lock_owner_wait and crash_logger_thread_dump_deadlock: the main thread waits
+// the same way in all of them (often in the graphics driver), so its wait
+// would put them in the bucket of every ordinary driver wait. The owner
+// thread is what tells them apart.
+std::optional<std::wstring> LockOwnerFreezeBucketKey(const AnalysisResult& out)
+{
+  const auto& state = out.freeze_analysis.state_id;
+  if ((state != "lock_owner_wait" && state != "crash_logger_thread_dump_deadlock") ||
+      out.main_thread_lock_owner.tid == 0u) {
+    return std::nullopt;
+  }
+  const auto& owner = out.main_thread_lock_owner;
+  return ComputeLockOwnerBucketKey(state, owner.top_module, owner.thread_name);
+}
+
 }  // namespace
 
 void ComputeCrashBucket(AnalysisResult& out)
 {
+  if (auto key = LockOwnerFreezeBucketKey(out)) {
+    out.crash_bucket_version = 3;
+    out.crash_bucket_key = std::move(*key);
+    return;
+  }
   if (const auto canonical = HangWaitCanonical(out)) {
     out.crash_bucket_version = 3;
     out.crash_bucket_key = ComputeHangBucketKey(*canonical);
@@ -97,6 +117,16 @@ void ComputeCrashBucket(AnalysisResult& out)
     faultModule,
     out.fault_module_offset,
     bucketFrames);
+}
+
+bool RekeyLockOwnerFreezeBucket(AnalysisResult& out)
+{
+  const auto key = LockOwnerFreezeBucketKey(out);
+  if (!key || *key == out.crash_bucket_key) {
+    return false;
+  }
+  ComputeCrashBucket(out);
+  return true;
 }
 
 }  // namespace skydiag::dump_tool::internal

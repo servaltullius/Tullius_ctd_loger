@@ -469,6 +469,57 @@ void TestFreezesGroupByTheMainThreadWait()
   Require(crash.crash_bucket_key.rfind(L"CTD3-", 0) == 0, "crashes keep the stack bucket");
 }
 
+// A lock-owner freeze is bucketed by the owner thread, not by the driver wait
+// the main thread shares with every ordinary driver freeze.
+void TestLockOwnerFreezesGroupByTheOwner()
+{
+  const auto lockOwnerFreeze = [](const char* state, std::uint32_t tid, const wchar_t* topModule) {
+    auto r = MakeHang();
+    r.main_thread_wait.kind = "graphics_driver_wait";
+    r.main_thread_wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+    r.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+    r.main_thread_lock_owner.tid = tid;
+    r.main_thread_lock_owner.confirmed = true;
+    r.main_thread_lock_owner.thread_name = L"nv.sl.dlss_g.present";
+    r.main_thread_lock_owner.top_module = topModule;
+    r.main_thread_lock_owner.top_frames = { std::wstring(topModule) + L"+0x" + std::to_wstring(tid) };
+    skydiag::dump_tool::internal::ComputeCrashBucket(r);
+    const auto waitKey = r.crash_bucket_key;
+    r.freeze_analysis.state_id = state;
+    const bool rekeyed = skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(r);
+    Require(rekeyed && r.crash_bucket_key != waitKey, "the owner replaces the main thread's wait in the key");
+    Require(!skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(r), "rekeying twice changes nothing");
+    auto direct = r;
+    skydiag::dump_tool::internal::ComputeCrashBucket(direct);
+    Require(direct.crash_bucket_key == r.crash_bucket_key, "the same key whichever way it is computed");
+    return r.crash_bucket_key;
+  };
+  const auto first = lockOwnerFreeze("lock_owner_wait", 4012, L"nvwgf2umx.dll");
+  Require(first.rfind(L"HANG1-", 0) == 0, "a freeze bucket");
+  Require(lockOwnerFreeze("lock_owner_wait", 9120, L"nvwgf2umx.dll") == first, "the owner's tid does not split it");
+  Require(lockOwnerFreeze("lock_owner_wait", 4012, L"SomePlugin.dll") != first, "a different owner module does");
+  const auto deadlock = lockOwnerFreeze("crash_logger_thread_dump_deadlock", 4012, L"nvwgf2umx.dll");
+  Require(deadlock != first, "the Crash Logger deadlock has its own bucket");
+  Require(lockOwnerFreeze("crash_logger_thread_dump_deadlock", 7700, L"nvwgf2umx.dll") == deadlock,
+    "and it does not depend on the tid either");
+
+  // Any other state keeps the wait key, even with a lock owner named.
+  auto ordinary = MakeHang();
+  ordinary.main_thread_wait.kind = "graphics_driver_wait";
+  ordinary.main_thread_wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+  ordinary.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  skydiag::dump_tool::internal::ComputeCrashBucket(ordinary);
+  const auto ordinaryKey = ordinary.crash_bucket_key;
+  ordinary.main_thread_lock_owner.tid = 4012;
+  ordinary.main_thread_lock_owner.top_module = L"nvwgf2umx.dll";
+  for (const char* state : { "freeze_ambiguous", "deadlock_likely", "loader_stall_likely" }) {
+    ordinary.freeze_analysis.state_id = state;
+    Require(!skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(ordinary) &&
+              ordinary.crash_bucket_key == ordinaryKey,
+      "other freeze states keep the main thread's wait key");
+  }
+}
+
 // Plugins on a waiting main thread's stack are bystanders; recording them as
 // the bucket's candidates would let every repeat of the freeze vote for them.
 void TestBystanderStackIsNotRecordedInHistory()
@@ -482,6 +533,16 @@ void TestBystanderStackIsNotRecordedInHistory()
   running.main_thread_wait.kind = "running";
   const auto keys = skydiag::dump_tool::CollectHistoryCandidateKeys(running);
   Require(!keys.empty(), "a running main thread still records its stack suspects");
+
+  auto lockOwner = running;
+  lockOwner.freeze_analysis.state_id = "lock_owner_wait";
+  lockOwner.main_thread_lock_owner.tid = 4012;
+  skydiag::dump_tool::ActionableCandidate candidate{};
+  candidate.display_name = L"CommunityShaders";
+  candidate.module_filename = L"CommunityShaders.dll";
+  lockOwner.actionable_candidates.push_back(candidate);
+  Require(skydiag::dump_tool::CollectHistoryCandidateKeys(lockOwner).empty(),
+    "a lock-owner wait does not record the main thread's bystanders in the owner's bucket");
 }
 
 // The summary keeps plugin counts, not the ~1 MB per-plugin list that the
@@ -616,6 +677,7 @@ int main()
     TestMainThreadFromEvents();
     TestReportKeepsRecentEvents();
     TestFreezesGroupByTheMainThreadWait();
+    TestLockOwnerFreezesGroupByTheOwner();
     TestBystanderStackIsNotRecordedInHistory();
     TestSummaryKeepsPluginCountsOnly();
     TestAdviceFitsTheCapture();
