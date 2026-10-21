@@ -713,14 +713,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[훅 프레임워크] 이 모드는 게임 엔진을 광범위하게 훅합니다. 다른 모드의 메모리 오염으로 인한 피해자일 수 있으며, 이 모드 자체가 원인이 아닐 수 있습니다. 다른 후보 모드를 먼저 점검하세요.");
   }
 
-  AddActionableCandidateRecommendations(
-    r,
-    en,
-    topCandidate,
-    secondCandidate,
-    topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+  // A lock-owner wait (both WCT passes) puts the stall on the owner thread,
+  // and Crash Logger's thread-dump deadlock on Crash Logger; candidates from
+  // the main thread's stack only called into the wait.
+  const bool lockOwnerWait = r.freeze_analysis.state_id == "lock_owner_wait" ||
+    r.freeze_analysis.state_id == "crash_logger_thread_dump_deadlock";
+  if (!lockOwnerWait) {
+    AddActionableCandidateRecommendations(
+      r,
+      en,
+      topCandidate,
+      secondCandidate,
+      topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+  }
 
-  const bool allowTopSuspectActionRecommendations = !isSnapshotLike;
+  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !lockOwnerWait;
   if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
       !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
@@ -910,6 +917,56 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       stateId == "loader_stall_likely" || r.hang_thread_module_consensus.has_consensus;
     if (stallExplained) {
       // No [Main thread] advice.
+    } else if (isHangLike && r.crash_logger_thread_dump_deadlock.detected) {
+      // Crash Logger's thread dump caused it: neither the GPU advice nor the
+      // modules on the main thread's stack apply.
+      const auto& path = wait.path_modules;
+      const std::wstring mods = path.empty()
+        ? std::wstring{}
+        : ((en ? L" (" : L"(") + JoinList(path, path.size(), L", ") + L")");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] This freeze came from Crash Logger's thread dump deadlocking. Do not press Crash Logger's "
+            L"thread-dump hotkey (Ctrl+Shift+F12 by default) while playing, or turn it off in CrashLogger.ini: under [Debug], "
+            L"set \"Enable Thread Dump Hotkey = false\". The mods on the main thread's stack" + mods +
+            L" are not the cause, so there is no need to remove them.")
+        : (L"[메인 스레드] 이번 프리징은 Crash Logger의 스레드 덤프가 교착 상태에 빠져서 생겼습니다. 게임 중에는 Crash Logger의 "
+            L"스레드 덤프 단축키(기본 Ctrl+Shift+F12)를 누르지 마세요. 아예 끄려면 CrashLogger.ini의 [Debug] 항목에서 "
+            L"\"Enable Thread Dump Hotkey = false\"로 바꾸면 됩니다. 메인 스레드 스택에 보이는 모드" + mods +
+            L"는 원인이 아니므로 뺄 필요가 없습니다."));
+    } else if (isHangLike && r.main_thread_lock_owner.confirmed &&
+               IsGraphicsStackModule(r.main_thread_lock_owner.top_module)) {
+      // The thread holding the lock was itself in the graphics driver.
+      const auto& owner = r.main_thread_lock_owner;
+      const auto& injectors = r.graphics_env.injection_modules;
+      const std::wstring detected = injectors.empty()
+        ? std::wstring{}
+        : (en ? (L" (detected: " + JoinList(injectors, injectors.size(), L", ") + L")")
+              : (L" (감지됨: " + JoinList(injectors, injectors.size(), L", ") + L")"));
+      const auto& path = wait.path_modules;
+      const std::wstring mods = path.empty() ? std::wstring{} : JoinList(path, path.size(), L", ");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
+            DescribeLockOwnerThread(owner, en) + L", and that thread was inside the graphics driver (" + owner.top_module +
+            L"). Update or clean-install the GPU driver, then test without graphics injectors, upscalers and frame generation" +
+            detected + L"." +
+            (mods.empty() ? std::wstring{}
+                          : (L" The plugins on the main thread's stack (" + mods + L") only called into the wait.")))
+        : (L"[메인 스레드] 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥔 " + DescribeLockType(owner, en) +
+            L" 잠금을 기다리고 있었고, 그 스레드는 그래픽 드라이버(" + owner.top_module +
+            L") 안에 있었습니다. GPU 드라이버를 업데이트하거나 클린 설치한 뒤, 그래픽 인젝터·업스케일러·프레임 생성" + detected +
+            L" 없이 시험해 보세요." +
+            (mods.empty() ? std::wstring{}
+                          : (L" 메인 스레드 스택의 플러그인(" + mods + L")은 그 대기를 호출했을 뿐입니다."))));
+    } else if (isHangLike && r.main_thread_lock_owner.tid != 0u) {
+      const auto& owner = r.main_thread_lock_owner;
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
+            DescribeLockOwnerThread(owner, en) +
+            L". Look at what that thread runs rather than at the plugins on the main thread's stack; if the freeze repeats, "
+            L"capture it again while frozen and check whether the same thread holds the lock.")
+        : (L"[메인 스레드] 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥔 " + DescribeLockType(owner, en) +
+            L" 잠금을 기다리고 있었습니다. 메인 스레드 스택의 플러그인보다 그 스레드가 실행하던 모듈을 먼저 확인하세요. "
+            L"프리징이 반복되면 멈춘 상태에서 다시 캡처해 같은 스레드가 잠금을 쥐고 있는지 비교하세요."));
     } else if (isHangLike && IsGpuWait(wait)) {
       // The injector DLLs found in the game folder, by file name: the same
       // d3d11.dll/dxgi.dll pair can be ENB, ReShade or DXVK.
@@ -1036,15 +1093,18 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
           r.recommendations.push_back(en
             ? L"[Hang] WCT detected isCycle=true thread(s). Deadlock is likely."
             : L"[프리징] WCT에서 isCycle=true 스레드가 감지되었습니다. 데드락 가능성이 높습니다.");
-        } else {
+        } else if (r.main_thread_lock_owner.tid == 0u) {
+          // A main thread blocked on a lock WCT can name is no busy wait.
           r.recommendations.push_back(en
             ? L"[Hang] No WCT cycle: possible infinite loop / busy wait."
             : L"[프리징] WCT cycle이 없으면 무한루프/바쁜 대기(busy wait) 가능성도 있습니다.");
         }
       }
-      r.recommendations.push_back(en
-        ? L"[Hang] If it repeats, use Events tab (just before the freeze) to narrow related mods."
-        : L"[프리징] 프리징이 반복되면 문제 상황 직전에 실행된 이벤트(이벤트 탭)를 기준으로 관련 모드를 점검");
+      if (!r.crash_logger_thread_dump_deadlock.detected) {
+        r.recommendations.push_back(en
+          ? L"[Hang] If it repeats, use Events tab (just before the freeze) to narrow related mods."
+          : L"[프리징] 프리징이 반복되면 문제 상황 직전에 실행된 이벤트(이벤트 탭)를 기준으로 관련 모드를 점검");
+      }
     } else if (isManualCapture && isSnapshotLike) {
       // The freeze verdict's rule (FreezeCandidateConsensus.cpp): under the
       // helper's threshold alone a load can still be stuck.

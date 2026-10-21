@@ -2,6 +2,7 @@
 #include "SkyrimDiagWctWait.h"
 
 #include <cassert>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -338,6 +339,104 @@ static void Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic()
   }
 }
 
+// ── FindWctLockOwner ────────────────────────────────────
+
+// One pass's threads: the main thread (100) waits on a lock of the given type
+// and status owned by ownerTid (0: no owner node), and the owner's own entry
+// is blocked with no wait object.
+static std::string LockChainThreads(std::uint32_t ownerTid, std::uint32_t objectType = 1, std::uint32_t status = 6,
+  std::uint64_t ownerSwitches = 6634)
+{
+  std::string chain =
+    R"({"tid":100,"isCycle":false,"nodes":[)"
+    R"({"objectStatus":3,"objectType":8,"thread":{"contextSwitches":181004,"threadId":100,"waitTime":7753219}},)"
+    R"({"objectName":"","objectStatus":)" + std::to_string(status) + R"(,"objectType":)" + std::to_string(objectType) + "}";
+  if (ownerTid != 0u) {
+    chain += R"(,{"objectStatus":3,"objectType":8,"thread":{"contextSwitches":)" + std::to_string(ownerSwitches) +
+             R"(,"threadId":)" + std::to_string(ownerTid) + R"(,"waitTime":7753219}})";
+  }
+  chain += "]}";
+  std::string threads = "[" + chain;
+  if (ownerTid != 0u) {
+    threads += R"(,{"tid":)" + std::to_string(ownerTid) +
+               R"(,"isCycle":false,"nodes":[{"objectStatus":3,"objectType":8,"thread":{"contextSwitches":)" +
+               std::to_string(ownerSwitches) + R"(,"threadId":)" + std::to_string(ownerTid) + R"(,"waitTime":7753219}}]})";
+  }
+  threads += "]";
+  return threads;
+}
+
+static std::string TwoPassCapture(const std::string& pass0, const std::string& pass1)
+{
+  return R"({"capture_passes":2,"threads":)" + pass0 + R"(,"passes":[{"pass_index":0,"capture_usable":true,"threads":)" +
+         pass0 + R"(},{"pass_index":1,"capture_usable":true,"threads":)" + pass1 + "}]}";
+}
+
+static void Test_LockOwner_CriticalSectionChainConfirmedByBothPasses()
+{
+  const auto json = TwoPassCapture(LockChainThreads(51944), LockChainThreads(51944));
+  const auto owner = skydiag::dump_tool::internal::FindWctLockOwner(json, 100);
+  assert(owner.has_value());
+  assert(owner->owner_tid == 51944u);
+  assert(owner->object_type == skydiag::dump_tool::internal::kWctObjectTypeCriticalSection);
+  assert(owner->confirmed);
+  assert(owner->owner_blocked_without_wait_object);
+  assert(owner->owner_context_switches_stable);
+
+  // A mutex owner counts the same way.
+  const auto mutexJson = TwoPassCapture(LockChainThreads(77, 3), LockChainThreads(77, 3));
+  const auto mutexOwner = skydiag::dump_tool::internal::FindWctLockOwner(mutexJson, 100);
+  assert(mutexOwner.has_value() && mutexOwner->owner_tid == 77u && mutexOwner->confirmed);
+}
+
+static void Test_LockOwner_PassesDisagreeStayUnconfirmed()
+{
+  // The second pass names another owner; the owner also kept switching.
+  const auto json = TwoPassCapture(LockChainThreads(51944), LockChainThreads(4242));
+  const auto owner = skydiag::dump_tool::internal::FindWctLockOwner(json, 100);
+  assert(owner.has_value());
+  assert(owner->owner_tid == 51944u);
+  assert(!owner->confirmed);
+
+  const auto moving = TwoPassCapture(LockChainThreads(51944, 1, 6, 10), LockChainThreads(51944, 1, 6, 11));
+  const auto movingOwner = skydiag::dump_tool::internal::FindWctLockOwner(moving, 100);
+  assert(movingOwner.has_value() && movingOwner->confirmed && !movingOwner->owner_context_switches_stable);
+
+  // A capture without passes (older helpers) has nothing to confirm with.
+  const auto single = R"({"threads":)" + LockChainThreads(51944) + "}";
+  const auto singleOwner = skydiag::dump_tool::internal::FindWctLockOwner(single, 100);
+  assert(singleOwner.has_value() && singleOwner->owner_tid == 51944u && !singleOwner->confirmed);
+}
+
+static void Test_LockOwner_UnknownOwnerOrOtherChainsNameNoOne()
+{
+  // The lock is reported owned, but WCT could not name the owner.
+  const auto unknown = TwoPassCapture(LockChainThreads(0), LockChainThreads(0));
+  const auto owner = skydiag::dump_tool::internal::FindWctLockOwner(unknown, 100);
+  assert(owner.has_value());
+  assert(owner->owner_tid == 0u);
+  assert(!owner->confirmed);
+
+  // A SendMessage wait (type 2) or a lock not owned (status 7) is no lock owner.
+  assert(!skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(LockChainThreads(5, 2), LockChainThreads(5, 2)), 100));
+  assert(!skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(LockChainThreads(5, 1, 7), LockChainThreads(5, 1, 7)), 100));
+  // Another waiter, no JSON, a cycle chain.
+  assert(!skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(LockChainThreads(5), LockChainThreads(5)), 200));
+  assert(!skydiag::dump_tool::internal::FindWctLockOwner("{bad json", 100));
+  std::string cycle = LockChainThreads(5);
+  cycle.replace(cycle.find(R"("isCycle":false)"), std::string(R"("isCycle":false)").size(), R"("isCycle":true)");
+  assert(!skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(cycle, cycle), 100));
+
+  // An owner that waits on something itself is not "blocked with no wait object".
+  std::string waiting = LockChainThreads(5);
+  const std::string ownerEntryEnd = R"("waitTime":7753219}}]})";
+  const auto last = waiting.rfind(ownerEntryEnd);
+  waiting.replace(last, ownerEntryEnd.size(),
+    R"("waitTime":7753219}},{"objectName":"","objectStatus":3,"objectType":1}]})");
+  const auto waitingOwner = skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(waiting, waiting), 100);
+  assert(waitingOwner.has_value() && waitingOwner->owner_tid == 5u && !waitingOwner->owner_blocked_without_wait_object);
+}
+
 int main()
 {
   Test_EmptyInput_ReturnsEmpty();
@@ -359,6 +458,9 @@ int main()
   Test_FreezeSummary_TiedEarliestWaitStartHasNoLongestWaiter();
   Test_FreezeSummary_LongestWaitConsensusRecomputedFromPasses();
   Test_HelperSource_PreservesPassesAndAvoidsLoaderHeuristic();
+  Test_LockOwner_CriticalSectionChainConfirmedByBothPasses();
+  Test_LockOwner_PassesDisagreeStayUnconfirmed();
+  Test_LockOwner_UnknownOwnerOrOtherChainsNameNoOne();
 
   return 0;
 }

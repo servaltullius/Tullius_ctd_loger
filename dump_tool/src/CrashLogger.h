@@ -22,6 +22,8 @@ struct CrashLoggerPairingMetadata
   std::uint32_t nearby_competitor_count = 0;
   std::string selected_kind;
   bool selected_same_directory = false;
+  // The selected log's time is not after the dump's.
+  bool selected_before_dump = false;
   bool ambiguous = false;
 };
 

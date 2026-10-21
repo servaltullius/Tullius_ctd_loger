@@ -387,6 +387,31 @@ std::string BuildReportText(
       }
       rpt << "\n";
     }
+    if (r.main_thread_lock_owner.tid != 0u) {
+      const auto& owner = r.main_thread_lock_owner;
+      rpt << "  lock_owner tid=" << owner.tid << " lock=" << owner.lock_type
+          << " confirmed=" << (owner.confirmed ? "1" : "0");
+      if (!owner.thread_name.empty()) {
+        rpt << " name=" << WideToUtf8(owner.thread_name);
+      }
+      if (!owner.top_module.empty()) {
+        rpt << " top_module=" << WideToUtf8(owner.top_module);
+      }
+      rpt << " blocked_without_wait_object=" << (owner.blocked_without_wait_object ? "1" : "0")
+          << " context_switches_stable=" << (owner.context_switches_stable ? "1" : "0")
+          << " ip_state=" << (owner.ip_state.empty() ? "unknown" : owner.ip_state) << "\n";
+      if (!owner.top_frames.empty()) {
+        rpt << "  lock_owner_top=" << WideToUtf8(JoinList(owner.top_frames, owner.top_frames.size(), L" <- ")) << "\n";
+      }
+      const auto& deadlock = r.crash_logger_thread_dump_deadlock;
+      if (deadlock.detected || deadlock.crash_logger_tid != 0u) {
+        rpt << "  crash_logger_thread_dump detected=" << (deadlock.detected ? "1" : "0")
+            << " crash_logger_tid=" << deadlock.crash_logger_tid
+            << " module=" << WideToUtf8(deadlock.crash_logger_module)
+            << " truncated=" << (deadlock.thread_dump_truncated ? "1" : "0")
+            << " records=" << deadlock.thread_dump_records << "/" << deadlock.thread_dump_total_threads << "\n";
+      }
+    }
     {
       const auto& state = r.blackbox_freeze_summary;
       if (!state.open_menus.empty() || state.seconds_since_load_end >= 0.0 || state.pause_gap_seconds > 0.0) {

@@ -5,6 +5,7 @@
 #include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
 #include "MainThreadWait.h"
+#include "MinidumpThreadNames.h"
 #include "ModalDialogWait.h"
 #include "Mo2Index.h"
 #include "OutputWriterInternals.h"
@@ -576,9 +577,16 @@ void IntegrateCrashLoggerLog(
   // A thread dump holds every thread's call stack, so its module ranking is a
   // tally over all of them, not the stack of the thread that faulted or
   // stalled: it names no suspect and feeds no evidence or advice.
+  out.crash_logger_pairing_log_before_dump = pairing.selected_before_dump;
   if (pairing.selected_kind == "thread_dump" || crashlogger_core::IsCrashLoggerThreadDumpLogAscii(*logUtf8)) {
     out.diagnostics.push_back(
       L"[CrashLogger] paired log is a thread dump; its call-stack modules are not used as suspects");
+    // How far the dump got, for crash_logger_thread_dump_deadlock.
+    const auto progress = crashlogger_core::ParseCrashLoggerThreadDumpProgressAscii(*logUtf8);
+    out.crash_logger_is_thread_dump = progress.is_thread_dump;
+    out.crash_logger_thread_dump_records = progress.thread_records;
+    out.crash_logger_thread_dump_total_threads = progress.total_threads;
+    out.crash_logger_thread_dump_has_current_thread = progress.has_current_thread;
   } else {
     out.crash_logger_top_modules =
       ParseCrashLoggerTopModules(*logUtf8, canonicalByLower, CrashLoggerSystemNamedModTest(allModules));
@@ -664,16 +672,27 @@ void ComputeSuspects(
       tids.push_back(*mainTid);
     }
   }
+  // The thread holding the critical section or mutex the main thread waits
+  // on (WCT: main thread -> owned lock -> owner).
+  std::optional<internal::WctLockOwner> lockOwner;
+  if (out.exc_tid == 0u && mainTid.has_value()) {
+    lockOwner = internal::FindWctLockOwner(out.wct_json_utf8, *mainTid);
+  }
+  const std::uint32_t lockOwnerTid = lockOwner ? lockOwner->owner_tid : 0u;
   if (out.exc_tid != 0) {
     tids.push_back(out.exc_tid);
   } else if (mainTid.has_value()) {
     // ADR-0005: a freeze is judged from the game main thread. Other threads
-    // join only when WCT proves they are in a wait cycle; long-waiting worker
-    // threads (a plugin's own idle loop) are not evidence of the stall.
+    // join only when WCT proves they are in a wait cycle, or hold the lock the
+    // main thread waits on; long-waiting worker threads (a plugin's own idle
+    // loop) are not evidence of the stall.
     if (const auto wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8)) {
       for (const auto tid : wct->cycle_thread_ids) {
         tids.push_back(tid);
       }
+    }
+    if (lockOwnerTid != 0u) {
+      tids.push_back(lockOwnerTid);
     }
   } else if (out.has_wct) {
     for (const auto tid : internal::ExtractWctCandidateThreadIds(out.wct_json_utf8, /*maxN=*/8)) {
@@ -716,6 +735,13 @@ void ComputeSuspects(
       }
     }
   }
+  // The lock owner's top frames come from the same side walk.
+  std::vector<std::uint32_t> sideTids = gameThreadTids;
+  const bool lockOwnerIsGameThread =
+    std::find(gameThreadTids.begin(), gameThreadTids.end(), lockOwnerTid) != gameThreadTids.end();
+  if (modalProbeTid != 0u && lockOwnerTid != 0u && lockOwnerTid != modalProbeTid && !lockOwnerIsGameThread) {
+    sideTids.push_back(lockOwnerTid);
+  }
   if (!internal::TryComputeStackwalkSuspects(
         dumpBase,
         dumpSize,
@@ -729,10 +755,22 @@ void ComputeSuspects(
         out,
         modalProbeTid,
         &mainThreadFrames,
-        gameThreadTids.empty() ? nullptr : &gameThreadTids,
+        sideTids.empty() ? nullptr : &sideTids,
         &gameThreadFrames,
         gameFunctions)) {
     out.suspects_from_stackwalk = false;
+  }
+  std::vector<ModalStackFrame> lockOwnerFrames;
+  if (lockOwnerTid != 0u) {
+    const auto it = std::find_if(gameThreadFrames.begin(), gameThreadFrames.end(),
+      [&](const ThreadTopFrames& t) { return t.tid == lockOwnerTid; });
+    if (it != gameThreadFrames.end()) {
+      lockOwnerFrames = it->frames;
+      if (!lockOwnerIsGameThread) {
+        // Only game-started threads are FindBlockedGameThread's to judge.
+        gameThreadFrames.erase(it);
+      }
+    }
   }
   if (!out.suspects_from_stackwalk && out.stackwalk_only_thread_entry_hook_plugins) {
     // The walk reached the thread start and its only plugin frames wrap the
@@ -801,6 +839,43 @@ void ComputeSuspects(
     // The pointer-scan fallback reads only the main thread for freezes.
     out.suspects_from_main_thread =
       !out.suspects_from_stackwalk || out.stackwalk_primary_tid == modalProbeTid;
+
+    if (lockOwner.has_value() && lockOwnerTid != 0u && lockOwnerTid != modalProbeTid) {
+      auto& owner = out.main_thread_lock_owner;
+      owner.tid = lockOwnerTid;
+      owner.lock_type =
+        lockOwner->object_type == internal::kWctObjectTypeMutex ? "mutex" : "critical_section";
+      owner.confirmed = lockOwner->confirmed;
+      owner.blocked_without_wait_object = lockOwner->owner_blocked_without_wait_object;
+      owner.context_switches_stable = lockOwner->owner_context_switches_stable;
+      for (const auto& [tid, name] : minidump::LoadThreadNames(dumpBase, dumpSize)) {
+        if (tid == lockOwnerTid) {
+          owner.thread_name.assign(name.begin(), name.end());
+          break;
+        }
+      }
+      DescribeLockOwnerFrames(owner, lockOwnerFrames);
+
+      const auto probe =
+        internal::ProbeCrashLoggerThreadDump(dumpBase, dumpSize, allModules, threads, modalProbeTid, lockOwnerTid);
+      owner.ip_state = probe.owner_ip_state;
+      CrashLoggerThreadDumpSignals signals{};
+      signals.crash_logger_tid = probe.crash_logger_tid;
+      signals.crash_logger_module = probe.crash_logger_module;
+      signals.is_thread_dump_log = out.crash_logger_is_thread_dump;
+      signals.thread_dump_records = out.crash_logger_thread_dump_records;
+      signals.thread_dump_total_threads = out.crash_logger_thread_dump_total_threads;
+      signals.thread_dump_has_current_thread = out.crash_logger_thread_dump_has_current_thread;
+      signals.log_before_dump = out.crash_logger_pairing_log_before_dump;
+      out.crash_logger_thread_dump_deadlock = EvaluateCrashLoggerThreadDumpDeadlock(owner, signals);
+    }
+  }
+  if (out.crash_logger_thread_dump_deadlock.detected) {
+    // Crash Logger's thread dump stopped the lock owner; the plugins on the
+    // main thread's stack were only on its call path.
+    out.diagnostics.push_back(
+      L"[Freeze] crash_logger_thread_dump_deadlock: stack-module suspects dropped (main-thread call path only)");
+    out.suspects.clear();
   }
   if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread) {
     // The main thread was sitting in a wait it did not get from these

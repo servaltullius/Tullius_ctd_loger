@@ -616,6 +616,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       crashlogger_core::CrashLoggerArtifactKind::kUnknown;
     bool sameDirectory = false;
     std::wstring stablePath;
+    bool beforeDump = false;
   };
   std::vector<PairCandidate> candidates;
   const DumpIncidentKind dumpKind = ClassifyDumpIncidentKind(dumpPath);
@@ -689,7 +690,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
             [&](const PairCandidate& c) { return c.stablePath == stablePath; })) {
         continue;
       }
-      candidates.push_back({ p, diff, artifactKind, sameDirectory, stablePath });
+      candidates.push_back({ p, diff, artifactKind, sameDirectory, stablePath, ft <= targetTime });
     }
   }
 
@@ -717,6 +718,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
     pairingMetadata->eligible_candidate_count = static_cast<std::uint32_t>(
       std::min<std::size_t>(candidates.size(), std::numeric_limits<std::uint32_t>::max()));
     pairingMetadata->selected_same_directory = best.sameDirectory;
+    pairingMetadata->selected_before_dump = best.beforeDump;
     switch (best.artifactKind) {
       case crashlogger_core::CrashLoggerArtifactKind::kCrash:
         pairingMetadata->selected_kind = "crash";

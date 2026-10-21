@@ -1141,6 +1141,15 @@ target_link_libraries(skydiag_wct_parsing_tests PRIVATE
 
 add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
 
+# ThreadNamesStream reader on hand-built minidump bytes (header-only, portable).
+add_executable(skydiag_minidump_thread_names_tests
+  minidump_thread_names_tests.cpp
+)
+target_include_directories(skydiag_minidump_thread_names_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_minidump_thread_names_tests COMMAND skydiag_minidump_thread_names_tests)
+
 # E2E output snapshot / schema contract tests (nlohmann_json is required above).
 add_executable(skydiag_output_snapshot_tests
   output_snapshot_tests.cpp

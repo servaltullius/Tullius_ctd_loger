@@ -84,6 +84,26 @@ bool TryComputeStackwalkSuspects(
   std::vector<ThreadTopFrames>* outSideFrames = nullptr,
   const AddressResolver* gameFunctions = nullptr);
 
+// What crash_logger_thread_dump_deadlock reads from the dump itself.
+struct CrashLoggerThreadDumpProbe
+{
+  // The thread other than the main thread and the lock owner with the most
+  // Crash Logger return addresses on its stack (raw scan; Crash Logger ships
+  // no PDB, so it is matched by module); 0 when none.
+  std::uint32_t crash_logger_tid = 0;
+  std::wstring crash_logger_module;
+  // MainThreadLockOwnerInfo::ip_state of the lock owner.
+  std::string owner_ip_state;
+};
+
+CrashLoggerThreadDumpProbe ProbeCrashLoggerThreadDump(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  std::uint32_t mainTid,
+  std::uint32_t ownerTid);
+
 // ADR-0016: the crash ran the int3 padding of a hook stub that was being
 // written; detected only for EXCEPTION_BREAKPOINT outside every module.
 HookStubRaceInfo DetectHookStubRace(

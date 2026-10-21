@@ -405,6 +405,156 @@ void TestBlockedGameThreadIsNotInvented()
 
 }  // namespace
 
+namespace {
+
+// The 2026-10-18 freeze, synthetic: the main thread waits on a DXGI critical
+// section owned by the DLSS frame-generation thread, which Crash Logger's
+// thread dump (on another thread) suspended; the dump log stopped at 167 of
+// 292 threads.
+skydiag::dump_tool::MainThreadLockOwnerInfo SuspendedLockOwner()
+{
+  skydiag::dump_tool::MainThreadLockOwnerInfo owner{};
+  owner.tid = 51944;
+  owner.lock_type = "critical_section";
+  owner.confirmed = true;
+  owner.thread_name = L"nv.sl.dlss_g.thread.dlssg";
+  owner.blocked_without_wait_object = true;
+  owner.context_switches_stable = true;
+  owner.ip_state = "not_after_syscall";
+  return owner;
+}
+
+skydiag::dump_tool::CrashLoggerThreadDumpSignals TruncatedThreadDump()
+{
+  skydiag::dump_tool::CrashLoggerThreadDumpSignals signals{};
+  signals.crash_logger_tid = 54776;
+  signals.crash_logger_module = L"CrashLogger.dll";
+  signals.is_thread_dump_log = true;
+  signals.thread_dump_records = 167;
+  signals.thread_dump_total_threads = 292;
+  signals.thread_dump_has_current_thread = false;
+  signals.log_before_dump = true;
+  return signals;
+}
+
+void TestCrashLoggerThreadDumpDeadlockFires()
+{
+  using skydiag::dump_tool::CrashLoggerThreadDumpDeadlockConfidence;
+  using skydiag::dump_tool::EvaluateCrashLoggerThreadDumpDeadlock;
+  using skydiag::dump_tool::i18n::ConfidenceLevel;
+
+  const auto owner = SuspendedLockOwner();
+  const auto deadlock = EvaluateCrashLoggerThreadDumpDeadlock(owner, TruncatedThreadDump());
+  assert(deadlock.detected);
+  assert(deadlock.crash_logger_tid == 54776u);
+  assert(deadlock.thread_dump_truncated);
+  assert(deadlock.thread_dump_records == 167u && deadlock.thread_dump_total_threads == 292u);
+  assert(CrashLoggerThreadDumpDeadlockConfidence(owner, deadlock) == ConfidenceLevel::kHigh);
+
+  // All records but no [CURRENT THREAD] still stopped early.
+  auto noCurrent = TruncatedThreadDump();
+  noCurrent.thread_dump_records = 292;
+  assert(EvaluateCrashLoggerThreadDumpDeadlock(owner, noCurrent).detected);
+
+  // One WCT pass, or a thread dump paired from after the capture: medium.
+  auto onePass = owner;
+  onePass.confirmed = false;
+  assert(CrashLoggerThreadDumpDeadlockConfidence(onePass, EvaluateCrashLoggerThreadDumpDeadlock(onePass, TruncatedThreadDump())) ==
+         ConfidenceLevel::kMedium);
+  auto later = TruncatedThreadDump();
+  later.log_before_dump = false;
+  const auto laterDeadlock = EvaluateCrashLoggerThreadDumpDeadlock(owner, later);
+  assert(laterDeadlock.detected);
+  assert(CrashLoggerThreadDumpDeadlockConfidence(owner, laterDeadlock) == ConfidenceLevel::kMedium);
+}
+
+void TestCrashLoggerThreadDumpDeadlockNeedsEverySignal()
+{
+  using skydiag::dump_tool::EvaluateCrashLoggerThreadDumpDeadlock;
+
+  // The owner sits in a system call: it waits by itself, nobody suspended it.
+  auto inSyscall = SuspendedLockOwner();
+  inSyscall.ip_state = "after_syscall";
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(inSyscall, TruncatedThreadDump()).detected);
+  // Its code could not be read: no claim either.
+  auto unreadable = SuspendedLockOwner();
+  unreadable.ip_state.clear();
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(unreadable, TruncatedThreadDump()).detected);
+  // The owner waits on something WCT can see.
+  auto waiting = SuspendedLockOwner();
+  waiting.blocked_without_wait_object = false;
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(waiting, TruncatedThreadDump()).detected);
+  // No owner.
+  auto noOwner = SuspendedLockOwner();
+  noOwner.tid = 0;
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(noOwner, TruncatedThreadDump()).detected);
+
+  // No Crash Logger frames on any other thread, or only on the owner itself.
+  auto noCrashLogger = TruncatedThreadDump();
+  noCrashLogger.crash_logger_tid = 0;
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), noCrashLogger).detected);
+  auto ownerIsCrashLogger = TruncatedThreadDump();
+  ownerIsCrashLogger.crash_logger_tid = 51944;
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), ownerIsCrashLogger).detected);
+
+  // The thread dump finished (it resumed every thread), or there is no
+  // thread dump log to show it stopped.
+  auto complete = TruncatedThreadDump();
+  complete.thread_dump_records = 292;
+  complete.thread_dump_has_current_thread = true;
+  const auto finished = EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), complete);
+  assert(!finished.detected && !finished.thread_dump_truncated);
+  auto noLog = TruncatedThreadDump();
+  noLog.is_thread_dump_log = false;
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), noLog).detected);
+}
+
+void TestCodeBeforeShapes()
+{
+  using skydiag::dump_tool::EndsWithCallInstruction;
+  using skydiag::dump_tool::EndsWithSyscall;
+
+  // ntdll!NtWaitForAlertByThreadId: mov r10,rcx; mov eax,1E4h; ... syscall.
+  assert(EndsWithSyscall({ 0x4C, 0x8B, 0xD1, 0x0F, 0x05 }));
+  assert(!EndsWithSyscall({ 0x00, 0x00 }));
+  assert(!EndsWithSyscall({ 0x05 }));
+
+  assert(EndsWithCallInstruction({ 0x90, 0x90, 0xE8, 0x10, 0x20, 0x30, 0x40 }));        // call rel32
+  assert(EndsWithCallInstruction({ 0x90, 0xFF, 0x15, 0x10, 0x20, 0x30, 0x40 }));        // call [rip+disp32]
+  assert(EndsWithCallInstruction({ 0x90, 0x90, 0x90, 0x90, 0x90, 0xFF, 0xD0 }));        // call rax
+  assert(EndsWithCallInstruction({ 0x90, 0x90, 0x90, 0x90, 0xFF, 0x50, 0x18 }));        // call [rax+18h]
+  assert(!EndsWithCallInstruction({ 0x48, 0x8B, 0x05, 0x10, 0x20, 0x30, 0x40 }));       // mov rax,[rip+..]
+  assert(!EndsWithCallInstruction({ 0xE8, 0x00, 0x00, 0x00 }));                          // too short
+}
+
+void TestLockOwnerFramesNameTheFirstNonWindowsModule()
+{
+  using skydiag::dump_tool::DescribeLockOwnerFrames;
+  using skydiag::dump_tool::DescribeLockOwnerThread;
+
+  auto owner = SuspendedLockOwner();
+  auto driver = System(L"nvwgf2umx.dll", L"NVAPI_DirectMethods", 0x92b19);
+  DescribeLockOwnerFrames(owner, {
+    System(L"ntdll.dll", L"LdrGetDllHandle", 0x2da),
+    System(L"KERNELBASE.dll", L"GetModuleHandleA", 0x9b),
+    driver,
+    Plugin(L"sl.dlss_g.dll"),
+  });
+  // The driver sits under Windows paths but still names the work.
+  assert(owner.top_module == L"nvwgf2umx.dll");
+  assert(owner.top_frames.size() == 4u);
+  assert(owner.top_frames[0] == L"ntdll.dll!LdrGetDllHandle+0x2da");
+  // A far export name says nothing about the function.
+  assert(owner.top_frames[2] == L"nvwgf2umx.dll");
+  assert(DescribeLockOwnerThread(owner, true) ==
+         L"thread 51944 (nv.sl.dlss_g.thread.dlssg, top module: nvwgf2umx.dll)");
+  owner.thread_name.clear();
+  owner.top_module.clear();
+  assert(DescribeLockOwnerThread(owner, false) == L"스레드 51944");
+}
+
+}  // namespace
+
 int main()
 {
   TestEngineSleepWaitInRenderPass();
@@ -415,5 +565,9 @@ int main()
   TestEngineWaitNamesTheGpuQueryPoll();
   TestBlockedGameThreadIsFound();
   TestBlockedGameThreadIsNotInvented();
+  TestCrashLoggerThreadDumpDeadlockFires();
+  TestCrashLoggerThreadDumpDeadlockNeedsEverySignal();
+  TestCodeBeforeShapes();
+  TestLockOwnerFramesNameTheFirstNonWindowsModule();
   return 0;
 }

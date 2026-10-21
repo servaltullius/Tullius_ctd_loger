@@ -784,6 +784,10 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!out.main_thread_wait.kind.empty()) {
     freezeSignals.main_thread_wait = out.main_thread_wait;
   }
+  if (out.main_thread_lock_owner.tid != 0u) {
+    freezeSignals.lock_owner = out.main_thread_lock_owner;
+    freezeSignals.crash_logger_thread_dump_deadlock = out.crash_logger_thread_dump_deadlock;
+  }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   out.freeze_analysis.first_chance_context = out.first_chance_summary;

@@ -55,4 +55,59 @@ void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTop
 // The main thread waited for another game thread that was inside plugin code.
 bool HasBlockedGameThread(const MainThreadWaitInfo& wait);
 
+// The code bytes before an instruction pointer end with a syscall (0F 05): a
+// thread stopped there is in a system call. A blocked thread stopped anywhere
+// else did not wait by itself; it was suspended.
+bool EndsWithSyscall(const std::vector<std::uint8_t>& codeBefore);
+
+// The code bytes before a stack value end with a call instruction (call rel32,
+// or call r/m64 in its 2-, 3-, 4-, 6- and 7-byte forms), so the value can be
+// a return address. Needs the 7 bytes before it.
+bool EndsWithCallInstruction(const std::vector<std::uint8_t>& codeBefore);
+
+// The lock owner's top frames: the first module that is not a Windows DLL
+// (graphics drivers and runtimes count), and its frames as text.
+void DescribeLockOwnerFrames(MainThreadLockOwnerInfo& owner, const std::vector<ModalStackFrame>& frames);
+
+// "thread 51944 (nv.sl.dlss_g.thread.dlssg, top module: nvwgf2umx.dll)" /
+// "스레드 51944(nv.sl.dlss_g.thread.dlssg, 맨 위 모듈: nvwgf2umx.dll)".
+std::wstring DescribeLockOwnerThread(const MainThreadLockOwnerInfo& owner, bool en);
+// "critical section" / "크리티컬 섹션", "mutex" / "뮤텍스".
+std::wstring DescribeLockType(const MainThreadLockOwnerInfo& owner, bool en);
+
+// What the dump and the paired Crash Logger log say, for
+// EvaluateCrashLoggerThreadDumpDeadlock.
+struct CrashLoggerThreadDumpSignals
+{
+  // A non-main thread with Crash Logger return addresses on its stack.
+  std::uint32_t crash_logger_tid = 0;
+  std::wstring crash_logger_module;
+  bool is_thread_dump_log = false;
+  std::uint32_t thread_dump_records = 0;
+  std::uint32_t thread_dump_total_threads = 0;
+  bool thread_dump_has_current_thread = false;
+  bool log_before_dump = false;
+};
+
+// A Crash Logger thread dump that stopped early: fewer thread records than
+// its "Total Threads" line, or without the [CURRENT THREAD] record it writes
+// last. Not "the last record is the stuck thread": the log is written through
+// a 4 KiB buffer, so the stuck thread is usually past the last record.
+bool IsCrashLoggerThreadDumpTruncated(const CrashLoggerThreadDumpSignals& signals);
+
+// crash_logger_thread_dump_deadlock: a Crash Logger thread, the main thread's
+// lock owner blocked without a wait object of its own while not in a system
+// call (suspended from outside), and a paired thread dump that stopped early.
+// MINIDUMP_THREAD.SuspendCount is no evidence (DbgHelp records 0 for threads
+// another thread suspended).
+CrashLoggerThreadDumpDeadlockInfo EvaluateCrashLoggerThreadDumpDeadlock(
+  const MainThreadLockOwnerInfo& owner,
+  const CrashLoggerThreadDumpSignals& signals);
+
+// High when both WCT passes named the owner, it made no context switch
+// between them and the thread dump started before the capture; else medium.
+i18n::ConfidenceLevel CrashLoggerThreadDumpDeadlockConfidence(
+  const MainThreadLockOwnerInfo& owner,
+  const CrashLoggerThreadDumpDeadlockInfo& deadlock);
+
 }  // namespace skydiag::dump_tool

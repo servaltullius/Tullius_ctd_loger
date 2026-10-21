@@ -491,6 +491,52 @@ bool IsCrashLoggerThreadDumpLogAscii(std::string_view logUtf8)
   return HasCrashLoggerThreadDumpHeaderAscii(logUtf8);
 }
 
+CrashLoggerThreadDumpProgress ParseCrashLoggerThreadDumpProgressAscii(std::string_view logUtf8)
+{
+  CrashLoggerThreadDumpProgress progress{};
+  std::size_t pos = 0;
+  while (pos < logUtf8.size()) {
+    std::size_t end = logUtf8.find('\n', pos);
+    if (end == std::string_view::npos) {
+      end = logUtf8.size();
+    }
+    std::string_view raw = logUtf8.substr(pos, end - pos);
+    if (!raw.empty() && raw.back() == '\r') {
+      raw.remove_suffix(1);
+    }
+    const std::string_view line = TrimAscii(raw);
+    pos = end + 1u;
+    if (!progress.is_thread_dump) {
+      progress.is_thread_dump = IsCrashLoggerThreadDumpHeaderLineAscii(line);
+      continue;
+    }
+    if (StartsWithCaseInsensitiveAscii(line, "===== THREAD ")) {
+      ++progress.thread_records;
+      if (ContainsCaseInsensitiveAscii(line, "[CURRENT THREAD]")) {
+        progress.has_current_thread = true;
+      }
+      continue;
+    }
+    constexpr std::string_view kTotal = "Total Threads:";
+    if (progress.thread_records == 0u && StartsWithCaseInsensitiveAscii(line, kTotal)) {
+      const std::string_view value = TrimAscii(line.substr(kTotal.size()));
+      std::uint32_t total = 0;
+      bool digits = !value.empty();
+      for (const char ch : value) {
+        if (ch < '0' || ch > '9' || total > 100'000u) {
+          digits = false;
+          break;
+        }
+        total = total * 10u + static_cast<std::uint32_t>(ch - '0');
+      }
+      if (digits) {
+        progress.total_threads = total;
+      }
+    }
+  }
+  return progress;
+}
+
 std::optional<CrashLoggerCppExceptionDetails> ParseCrashLoggerCppExceptionDetailsAscii(std::string_view logUtf8)
 {
   std::istringstream iss{ std::string(logUtf8) };

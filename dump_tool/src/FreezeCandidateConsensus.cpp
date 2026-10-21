@@ -134,12 +134,27 @@ std::wstring JoinNames(const std::vector<std::wstring>& names)
 
 // What the main thread was doing, as the first reason: it decides how much the
 // modules on its stack mean (ADR-0009).
-void AddMainThreadWaitReason(const MainThreadWaitInfo& wait, i18n::Language language, FreezeAnalysisResult* result)
+void AddMainThreadWaitReason(
+  const MainThreadWaitInfo& wait,
+  const MainThreadLockOwnerInfo* lockOwner,
+  i18n::Language language,
+  FreezeAnalysisResult* result)
 {
   const bool en = language == i18n::Language::kEnglish;
   const std::wstring api = wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api);
+  const std::wstring where = wait.waiting_module.empty() ? wait.wait_api : (wait.waiting_module + api);
   std::wstring line;
-  if (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll") {
+  if (lockOwner) {
+    // WCT named the thread holding the lock: the wait's own module (dxgi.dll
+    // for a DXGI critical section) only says where the main thread called in.
+    line = en
+      ? (L"The main thread was waiting" + (where.empty() ? std::wstring{} : (L" (in " + where + L")")) + L" for a " +
+          DescribeLockType(*lockOwner, en) + L" held by " + DescribeLockOwnerThread(*lockOwner, en) +
+          (lockOwner->confirmed ? L"; both WCT passes named the same owner" : L"; not confirmed by a second WCT pass"))
+      : (L"메인 스레드가 " + DescribeLockOwnerThread(*lockOwner, en) + L"이(가) 쥔 " + DescribeLockType(*lockOwner, en) +
+          L" 잠금을 기다리고 있었음" + (where.empty() ? std::wstring{} : (L"(대기 위치: " + where + L")")) +
+          (lockOwner->confirmed ? L"; WCT 두 번 모두 같은 소유 스레드를 가리킴" : L"; 두 번째 WCT로는 확인되지 않음"));
+  } else if (wait.kind == "engine_wait" && wait.engine_wait_detail == "gpu_query_poll") {
     line = en
       ? (L"The main thread was waiting for the GPU: the engine was polling a Direct3D query "
           L"(ID3D11DeviceContext::GetData) in a Sleep loop (" + wait.waiting_module + api + L")")
@@ -166,19 +181,52 @@ void AddMainThreadWaitReason(const MainThreadWaitInfo& wait, i18n::Language lang
   } else {
     return;
   }
-  if (IsBystanderWait(wait) && !wait.path_modules.empty()) {
+  if ((IsBystanderWait(wait) || lockOwner) && !wait.path_modules.empty()) {
     line += en
       ? (L"; plugins further down its stack (call path only): " + JoinNames(wait.path_modules))
       : (L"; 스택 아래쪽 플러그인(호출 경로일 뿐): " + JoinNames(wait.path_modules));
   }
   // A deadlock, module-level stall or loader stall keeps its own reasons first.
   const bool stallExplained = result->state_id == "deadlock_likely" ||
-    result->state_id == "synchronization_stall_likely" || result->state_id == "loader_stall_likely";
+    result->state_id == "synchronization_stall_likely" || result->state_id == "loader_stall_likely" ||
+    result->state_id == "crash_logger_thread_dump_deadlock";
   if (stallExplained) {
     result->primary_reasons.push_back(std::move(line));
   } else {
     result->primary_reasons.insert(result->primary_reasons.begin(), std::move(line));
   }
+}
+
+void AddCrashLoggerThreadDumpDeadlockReasons(
+  const MainThreadLockOwnerInfo& owner,
+  const CrashLoggerThreadDumpDeadlockInfo& deadlock,
+  i18n::Language language,
+  FreezeAnalysisResult* result)
+{
+  const bool en = language == i18n::Language::kEnglish;
+  const std::wstring clTid = std::to_wstring(deadlock.crash_logger_tid);
+  result->primary_reasons.push_back(en
+    ? (L"Crash Logger's thread dump was running on thread " + clTid + L" (" + deadlock.crash_logger_module +
+        L" return addresses on its stack)")
+    : (L"Crash Logger의 스레드 덤프가 스레드 " + clTid + L"에서 실행 중이었음(스택에 " + deadlock.crash_logger_module +
+        L" 반환 주소)"));
+  result->primary_reasons.push_back(en
+    ? (L"The lock owner, " + DescribeLockOwnerThread(owner, en) +
+        L", was stopped from outside: WCT shows it blocked with nothing to wait on, and it was not in a system call")
+    : (L"잠금을 쥔 " + DescribeLockOwnerThread(owner, en) +
+        L"은(는) 밖에서 정지된 상태였음: WCT에서 기다리는 대상 없이 blocked인데 시스템 호출 안도 아님"));
+  const std::wstring records = std::to_wstring(deadlock.thread_dump_records);
+  result->primary_reasons.push_back(en
+    ? (L"The paired Crash Logger thread dump stopped early: " + records +
+        (deadlock.thread_dump_total_threads > 0u
+          ? (L" of " + std::to_wstring(deadlock.thread_dump_total_threads) + L" threads")
+          : std::wstring(L" threads")) +
+        L" written, no [CURRENT THREAD] record")
+    : (L"짝지은 Crash Logger 스레드 덤프가 중간에 멈춤: " +
+        (deadlock.thread_dump_total_threads > 0u
+          ? (std::to_wstring(deadlock.thread_dump_total_threads) + L"개 스레드 중 ")
+          : std::wstring{}) +
+        records + L"개만 기록, [CURRENT THREAD] 기록 없음"));
 }
 
 std::wstring DescribeModalDialogCaller(const ModalDialogWaitInfo& modal)
@@ -273,6 +321,12 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   const bool loaderStallPossible = loadingSignal && (input.is_hang_like || !heartbeatFresh);
 
   const bool modalWait = input.modal_dialog_wait.has_value() && input.modal_dialog_wait->detected;
+  const MainThreadLockOwnerInfo* lockOwner =
+    (!modalWait && input.lock_owner.has_value() && input.lock_owner->tid != 0u) ? &*input.lock_owner : nullptr;
+  const CrashLoggerThreadDumpDeadlockInfo* threadDumpDeadlock =
+    (lockOwner && input.crash_logger_thread_dump_deadlock.has_value() && input.crash_logger_thread_dump_deadlock->detected)
+      ? &*input.crash_logger_thread_dump_deadlock
+      : nullptr;
   if (modalWait) {
     // Checked first: the main thread is the heartbeat source, so a dialog it
     // is pumping fully explains the stall regardless of other wait chains.
@@ -282,6 +336,12 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
       ? i18n::ConfidenceLevel::kHigh
       : i18n::ConfidenceLevel::kMedium;
     AddModalDialogReasons(modal, language, &result);
+  } else if (threadDumpDeadlock) {
+    // Crash Logger's thread dump suspended the main thread's lock owner and
+    // then waited on a lock that owner held: no mod on the stacks is the cause.
+    result.state_id = "crash_logger_thread_dump_deadlock";
+    result.confidence_level = CrashLoggerThreadDumpDeadlockConfidence(*lockOwner, *threadDumpDeadlock);
+    AddCrashLoggerThreadDumpDeadlockReasons(*lockOwner, *threadDumpDeadlock, language, &result);
   } else if (input.wct && input.wct->cycles > 0) {
     result.state_id = "deadlock_likely";
     const bool repeatedCycleSupport =
@@ -391,6 +451,16 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
       }
       // NOLINTEND(bugprone-unchecked-optional-access)
     }
+  } else if (lockOwner && lockOwner->confirmed) {
+    // Both WCT passes showed the main thread blocked on a lock that the same
+    // other thread held: the stall is on that thread, and the modules on the
+    // main thread's stack only called into the wait.
+    result.state_id = "lock_owner_wait";
+    result.confidence_level = i18n::ConfidenceLevel::kMedium;
+    result.primary_reasons.push_back(
+      language == i18n::Language::kEnglish
+        ? L"Both WCT passes showed the main thread blocked on a lock held by the same other thread"
+        : L"WCT 두 번 모두 메인 스레드가 같은 스레드의 잠금에 막혀 있었음");
   } else if (!input.actionable_candidates.empty()) {
     result.state_id = "freeze_candidate";
     result.confidence_level = i18n::ConfidenceLevel::kLow;
@@ -427,18 +497,23 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
         : L"로딩 중에 캡처됐지만 메인 스레드가 아직 응답하고 있었으므로, 그 시점에 로딩이 멈춘 것은 아님");
   }
   if (!modalWait && input.main_thread_wait.has_value()) {
-    AddMainThreadWaitReason(*input.main_thread_wait, language, &result);
+    AddMainThreadWaitReason(*input.main_thread_wait, lockOwner, language, &result);
   }
   result.confidence = i18n::ConfidenceText(language, result.confidence_level);
   std::unordered_set<std::wstring> seenNames;
-  const std::size_t maxCandidates = std::min<std::size_t>(input.actionable_candidates.size(), 2u);
+  // Under a lock-owner wait the stack candidates are the main thread's
+  // bystanders, not related to the stall.
+  const bool stackCandidatesAreBystanders = result.state_id == "lock_owner_wait";
+  const std::size_t maxCandidates =
+    stackCandidatesAreBystanders ? 0u : std::min<std::size_t>(input.actionable_candidates.size(), 2u);
   for (std::size_t i = 0; i < maxCandidates; ++i) {
     auto related = ToRelatedCandidate(input.actionable_candidates[i], language);
     seenNames.insert(related.display_name);
     result.related_candidates.push_back(std::move(related));
   }
-  if (modalWait) {
-    // Recent module loads are timeline noise next to a dialog the user can see.
+  if (modalWait || threadDumpDeadlock) {
+    // Recent module loads are timeline noise next to a dialog the user can
+    // see, or a deadlock Crash Logger's thread dump caused.
     return result;
   }
   if (input.blackbox.has_value()) {

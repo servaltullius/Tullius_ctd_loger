@@ -172,6 +172,51 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     }
   }
 
+  if (!r.modal_dialog_wait.detected && r.main_thread_lock_owner.tid != 0u) {
+    const auto& owner = r.main_thread_lock_owner;
+    EvidenceItem e{};
+    e.confidence_level = owner.confirmed ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"The lock the main thread waited on was held by another thread (WCT)"
+                 : L"메인 스레드가 기다린 잠금을 다른 스레드가 쥐고 있었음(WCT)";
+    std::vector<std::wstring> parts = {
+      (en ? L"owner: " : L"소유 스레드: ") + DescribeLockOwnerThread(owner, en),
+      (en ? L"lock: " : L"잠금: ") + DescribeLockType(owner, en),
+      owner.confirmed ? (en ? L"both WCT passes agree" : L"WCT 두 번 모두 일치")
+                      : (en ? L"one WCT pass only" : L"WCT 한 번에서만 확인"),
+    };
+    if (!owner.top_frames.empty()) {
+      parts.push_back((en ? L"its top frames: " : L"그 스레드의 맨 위 프레임: ") +
+        JoinList(owner.top_frames, owner.top_frames.size(), L" <- "));
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) {
+    const auto& deadlock = r.crash_logger_thread_dump_deadlock;
+    EvidenceItem e{};
+    e.confidence_level = CrashLoggerThreadDumpDeadlockConfidence(r.main_thread_lock_owner, deadlock);
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Crash Logger's thread dump deadlocked with the lock owner"
+                 : L"Crash Logger 스레드 덤프가 잠금 소유 스레드와 교착됨";
+    const std::wstring progress = deadlock.thread_dump_total_threads > 0u
+      ? (std::to_wstring(deadlock.thread_dump_records) + L"/" + std::to_wstring(deadlock.thread_dump_total_threads))
+      : std::to_wstring(deadlock.thread_dump_records);
+    std::vector<std::wstring> parts = {
+      (en ? L"Crash Logger thread: tid " : L"Crash Logger 스레드: tid ") + std::to_wstring(deadlock.crash_logger_tid) +
+        L" (" + deadlock.crash_logger_module + L")",
+      en ? (L"thread " + std::to_wstring(r.main_thread_lock_owner.tid) +
+             L" suspended: WCT blocked with no wait object, not in a system call")
+         : (L"스레드 " + std::to_wstring(r.main_thread_lock_owner.tid) +
+             L" 정지됨: WCT상 대기 대상 없이 blocked, 시스템 호출 안이 아님"),
+      (en ? L"thread dump stopped early: " : L"스레드 덤프가 중간에 멈춤: ") + progress +
+        (en ? L" threads written" : L"개 스레드 기록"),
+    };
+    e.details = JoinList(parts, parts.size(), L" | ");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (r.modal_dialog_wait.detected) {
     const auto& modal = r.modal_dialog_wait;
     EvidenceItem e{};
