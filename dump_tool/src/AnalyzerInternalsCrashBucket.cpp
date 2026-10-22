@@ -43,16 +43,22 @@ std::optional<std::string> HangWaitCanonical(const AnalysisResult& out)
 
 // lock_owner_wait and crash_logger_thread_dump_deadlock: the main thread waits
 // the same way in all of them (often in the graphics driver), so its wait
-// would put them in the bucket of every ordinary driver wait. The owner
-// thread is what tells them apart.
+// would put them in the bucket of every ordinary driver wait. The deadlock is
+// one cause whichever thread it suspended; a lock-owner wait is told apart by
+// the owner thread, and keeps the wait key when nothing names that thread.
 std::optional<std::wstring> LockOwnerFreezeBucketKey(const AnalysisResult& out)
 {
   const auto& state = out.freeze_analysis.state_id;
-  if ((state != "lock_owner_wait" && state != "crash_logger_thread_dump_deadlock") ||
-      out.main_thread_lock_owner.tid == 0u) {
+  if (!IsLockOwnerFreezeState(state) || out.main_thread_lock_owner.tid == 0u) {
     return std::nullopt;
   }
+  if (state == "crash_logger_thread_dump_deadlock") {
+    return ComputeFreezeStateBucketKey(state);
+  }
   const auto& owner = out.main_thread_lock_owner;
+  if (owner.top_module.empty() && owner.thread_name.empty()) {
+    return std::nullopt;
+  }
   return ComputeLockOwnerBucketKey(state, owner.top_module, owner.thread_name);
 }
 

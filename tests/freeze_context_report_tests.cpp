@@ -501,8 +501,19 @@ void TestLockOwnerFreezesGroupByTheOwner()
   Require(lockOwnerFreeze("lock_owner_wait", 4012, L"SomePlugin.dll") != first, "a different owner module does");
   const auto deadlock = lockOwnerFreeze("crash_logger_thread_dump_deadlock", 4012, L"nvwgf2umx.dll");
   Require(deadlock != first, "the Crash Logger deadlock has its own bucket");
-  Require(lockOwnerFreeze("crash_logger_thread_dump_deadlock", 7700, L"nvwgf2umx.dll") == deadlock,
-    "and it does not depend on the tid either");
+  Require(lockOwnerFreeze("crash_logger_thread_dump_deadlock", 7700, L"SomePlugin.dll") == deadlock,
+    "whichever thread the dump suspended");
+
+  // A lock-owner wait with nothing naming the owner keeps the wait key.
+  auto unnamed = MakeHang();
+  unnamed.main_thread_wait.kind = "graphics_driver_wait";
+  unnamed.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  skydiag::dump_tool::internal::ComputeCrashBucket(unnamed);
+  const auto unnamedWaitKey = unnamed.crash_bucket_key;
+  unnamed.main_thread_lock_owner.tid = 4012;
+  unnamed.freeze_analysis.state_id = "lock_owner_wait";
+  Require(!skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(unnamed) && unnamed.crash_bucket_key == unnamedWaitKey,
+    "an owner with no module and no name does not split the wait bucket");
 
   // Any other state keeps the wait key, even with a lock owner named.
   auto ordinary = MakeHang();

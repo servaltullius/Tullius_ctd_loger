@@ -113,6 +113,18 @@ static void Test_LockOwnerKey_GroupsByTheOwnerThread()
   assert(a != ComputeHangBucketKey("v=1|kind=graphics_driver_wait|detail=|module=nvwgf2umx.dll|api="));
 }
 
+static void Test_FreezeStateKey_IsTheStateAlone()
+{
+  using skydiag::dump_tool::ComputeFreezeStateBucketKey;
+  using skydiag::dump_tool::ComputeLockOwnerBucketKey;
+
+  const auto deadlock = ComputeFreezeStateBucketKey("crash_logger_thread_dump_deadlock");
+  assert(deadlock.starts_with(L"HANG1-") && deadlock.size() == 6 + 16);
+  assert(deadlock == ComputeFreezeStateBucketKey("crash_logger_thread_dump_deadlock"));
+  assert(deadlock != ComputeFreezeStateBucketKey("lock_owner_wait"));
+  assert(deadlock != ComputeLockOwnerBucketKey("crash_logger_thread_dump_deadlock", L"", L""));
+}
+
 int main()
 {
   Test_SameInput_ProducesStableKey();
@@ -122,5 +134,6 @@ int main()
   Test_CaseDifferences_DoNotChangeCanonicalKey();
   Test_HangKey_IsStableAndSeparateFromCrashKeys();
   Test_LockOwnerKey_GroupsByTheOwnerThread();
+  Test_FreezeStateKey_IsTheStateAlone();
   return 0;
 }
