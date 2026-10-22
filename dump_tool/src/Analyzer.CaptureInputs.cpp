@@ -848,12 +848,7 @@ void ComputeSuspects(
       owner.confirmed = lockOwner->confirmed;
       owner.blocked_without_wait_object = lockOwner->owner_blocked_without_wait_object;
       owner.context_switches_stable = lockOwner->owner_context_switches_stable;
-      for (const auto& [tid, name] : minidump::LoadThreadNames(dumpBase, dumpSize)) {
-        if (tid == lockOwnerTid) {
-          owner.thread_name.assign(name.begin(), name.end());
-          break;
-        }
-      }
+      owner.thread_name = minidump::ThreadNameForDisplay(minidump::FindThreadName(dumpBase, dumpSize, lockOwnerTid));
       DescribeLockOwnerFrames(owner, lockOwnerFrames);
 
       const auto probe =
