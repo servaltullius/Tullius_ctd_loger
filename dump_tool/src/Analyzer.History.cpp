@@ -129,9 +129,9 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
   std::vector<std::string> keys;
   std::unordered_set<std::string> seen;
 
-  // lock_owner_wait is bucketed by the owner thread; the candidates are the
-  // main thread's bystanders and would vote for themselves in every repeat.
-  if (out.freeze_analysis.state_id == "lock_owner_wait") {
+  // A lock-owner freeze is bucketed by the owner thread or the deadlock; the
+  // main thread's bystanders would vote for themselves in every repeat.
+  if (IsLockOwnerFreezeState(out.freeze_analysis.state_id)) {
     return keys;
   }
 

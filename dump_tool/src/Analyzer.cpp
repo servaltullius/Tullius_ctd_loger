@@ -802,6 +802,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
     out.freeze_analysis.first_chance_context = out.first_chance_summary;
   }
+  if (out.freeze_analysis.state_id == "crash_logger_thread_dump_deadlock") {
+    // The generic freeze checklist ends in "disable recently added mods",
+    // which this cause does not call for.
+    out.troubleshooting_title.clear();
+    out.troubleshooting_steps.clear();
+  }
   if (out.freeze_analysis.has_analysis) {
     BuildEvidenceAndSummary(out, opt.language);
   }

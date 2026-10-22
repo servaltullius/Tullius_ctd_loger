@@ -217,7 +217,8 @@ std::wstring DescribeLockOwnerWait(const AnalysisResult& r, i18n::Language lang,
   return en
     ? (L"The game main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
         DescribeLockOwnerThread(owner, en) + (where.empty() ? std::wstring{} : (L" (in " + where + L")")) +
-        L". The stall is on the thread holding the lock." +
+        (owner.confirmed ? std::wstring(L". The stall is on the thread holding the lock.")
+                         : std::wstring(L". The stall may be on the thread holding the lock.")) +
         (ownerInGraphics
           ? (L" That thread was inside the graphics driver (" + owner.top_module +
               L"), so look at the GPU side first - the driver and graphics mods such as upscalers or frame generation.")
@@ -229,7 +230,8 @@ std::wstring DescribeLockOwnerWait(const AnalysisResult& r, i18n::Language lang,
         L" (Confidence: " + conf + L")")
     : (L"게임 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥐고 있는 " + DescribeLockType(owner, en) +
         L" 잠금을 기다리고 있었습니다" + (where.empty() ? std::wstring{} : (L"(대기 위치: " + where + L")")) +
-        L". 멈춘 곳은 그 잠금을 쥔 스레드 쪽입니다." +
+        (owner.confirmed ? std::wstring(L". 멈춘 곳은 그 잠금을 쥔 스레드 쪽입니다.")
+                         : std::wstring(L". 멈춘 곳은 그 잠금을 쥔 스레드 쪽일 수 있습니다.")) +
         (ownerInGraphics
           ? (L" 그 스레드는 그래픽 드라이버(" + owner.top_module +
               L") 안에 있었으므로 GPU 쪽(드라이버, 업스케일러·프레임 생성 같은 그래픽 모드)부터 확인하세요.")
@@ -251,14 +253,15 @@ std::wstring DescribeCrashLoggerThreadDumpDeadlock(const AnalysisResult& r, i18n
   const std::wstring mods = path.empty() ? std::wstring{} : JoinWaitPath(path);
   return en
     ? (L"Crash Logger's thread dump deadlocked and froze the game. It suspended " + DescribeLockOwnerThread(owner, en) +
-        L" and then loaded PDB symbols, which needed a lock that suspended thread held, so it never resumed it. "
+        L" and then appears to have needed, while reading PDB symbols, a lock that suspended thread held, so it never "
+        L"resumed it. "
         L"The main thread was only waiting for a " + DescribeLockType(owner, en) + L" that thread holds; the mods on "
         L"the main thread's stack" + (mods.empty() ? std::wstring{} : (L" (" + mods + L")")) +
         L" are not the cause. (Confidence: " + conf + L")")
     : (L"Crash Logger의 스레드 덤프가 교착 상태(deadlock)에 빠져 게임이 멈췄습니다. 스레드 덤프가 " +
         DescribeLockOwnerThread(owner, en) +
-        L"을(를) 일시 정지시킨 채 PDB(디버그 심볼)를 읽으려 했는데, 그 작업에 필요한 잠금을 정지된 스레드가 쥐고 있어서 "
-        L"덤프가 끝나지 못했고 그 스레드도 재개되지 못했습니다. 메인 스레드는 그 스레드가 쥔 " +
+        L"을(를) 일시 정지시킨 채 PDB(디버그 심볼)를 읽다가, 정지된 스레드가 쥔 잠금이 필요해져 덤프가 끝나지 못했고 "
+        L"그 스레드도 재개되지 못한 것으로 보입니다. 메인 스레드는 그 스레드가 쥔 " +
         DescribeLockType(owner, en) + L" 잠금을 기다리다 멈췄을 뿐이며, 메인 스레드 스택의 모드" +
         (mods.empty() ? std::wstring{} : (L"(" + mods + L")")) + L"는 원인이 아닙니다. (신뢰도: " + conf + L")");
 }

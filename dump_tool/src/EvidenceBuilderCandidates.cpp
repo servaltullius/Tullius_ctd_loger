@@ -634,6 +634,16 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
     SortActionableCandidates(r.actionable_candidates);
     return;
   }
+  if (IsLockOwnerFreezeState(r.freeze_analysis.state_id) ||
+      (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u)) {
+    // The stall is on the lock owner (or Crash Logger's thread dump): frames,
+    // stack density, thread groups and nearby resources all describe the main
+    // thread's bystanders, and the viewer would lead with them.
+    AddHistorySignals(r, en, &signals);
+    r.actionable_candidates = BuildCandidateConsensus(signals, lang);
+    SortActionableCandidates(r.actionable_candidates);
+    return;
+  }
   if (r.hook_stub_race.detected) {
     // ADR-0016: the crash address is a hook stub outside every module, so
     // Crash Logger frames, object refs and the stack scan describe whatever

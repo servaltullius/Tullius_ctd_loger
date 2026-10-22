@@ -22,6 +22,7 @@
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "SkyrimDiagShared.h"
+#include "Utf.h"
 
 namespace {
 
@@ -520,6 +521,87 @@ void TestLockOwnerFreezesGroupByTheOwner()
   }
 }
 
+// AnalyzeDump reads the history again once a lock-owner state rekeys the
+// bucket: what it holds must then be the new bucket's alone, not both.
+void TestHistoryFollowsTheRekeyedBucket()
+{
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "skydiag_rekey_history_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir);
+  const fs::path historyPath = dir / "crash_history.json";
+
+  auto r = MakeHang();
+  r.main_thread_wait.kind = "graphics_driver_wait";
+  r.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  r.main_thread_lock_owner.tid = 4012;
+  r.main_thread_lock_owner.confirmed = true;
+  r.main_thread_lock_owner.top_module = L"SomePlugin.dll";
+  r.freeze_analysis.state_id.clear();
+  skydiag::dump_tool::internal::ComputeCrashBucket(r);
+  const auto waitKey = skydiag::dump_tool::WideToUtf8(r.crash_bucket_key);
+  auto rekeyed = r;
+  rekeyed.freeze_analysis.state_id = "lock_owner_wait";
+  Require(skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(rekeyed), "the state rekeys the bucket");
+  const auto ownerKey = skydiag::dump_tool::WideToUtf8(rekeyed.crash_bucket_key);
+
+  skydiag::dump_tool::CrashHistory history;
+  for (int i = 0; i < 3; ++i) {
+    skydiag::dump_tool::CrashHistoryEntry entry{};
+    entry.timestamp_utc = "2026-10-1" + std::to_string(i) + "T00:00:00Z";
+    entry.dump_file = "wait_" + std::to_string(i) + ".dmp";
+    entry.bucket_key = waitKey;
+    entry.candidate_keys = { "communityshaders" };
+    history.AddEntry(entry);
+  }
+  skydiag::dump_tool::CrashHistoryEntry ownerEntry{};
+  ownerEntry.timestamp_utc = "2026-10-15T00:00:00Z";
+  ownerEntry.dump_file = "owner.dmp";
+  ownerEntry.bucket_key = ownerKey;
+  ownerEntry.candidate_keys = { "someplugin" };
+  history.AddEntry(ownerEntry);
+  Require(history.SaveToFile(historyPath), "history saved");
+
+  const std::wstring dumpPath = (dir / L"SkyrimDiag_Hang_20261018_190444_914.dmp").wstring();
+  skydiag::dump_tool::LoadCrashHistoryContext(historyPath, dumpPath, "2026-10-22T00:00:00Z", r);
+  Require(r.history_correlation.count == 4u, "the wait bucket's three earlier freezes");
+  Require(r.bucket_candidate_repeats.size() == 1u && r.bucket_candidate_repeats[0].candidate_key == "communityshaders",
+    "the wait bucket's candidate");
+
+  r.freeze_analysis.state_id = "lock_owner_wait";
+  Require(skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(r), "rekeyed after freeze analysis");
+  skydiag::dump_tool::LoadCrashHistoryContext(historyPath, dumpPath, "2026-10-22T00:00:00Z", r);
+  Require(r.history_correlation.count == 2u && r.history_correlation.first_seen == "2026-10-15T00:00:00Z",
+    "only the owner bucket's earlier freeze");
+  Require(r.bucket_candidate_repeats.size() == 1u && r.bucket_candidate_repeats[0].candidate_key == "someplugin",
+    "the wait bucket's candidates are gone, not added to");
+
+  fs::remove_all(dir, ec);
+}
+
+// Under a lock-owner state the main thread's stack names no candidate, so the
+// JSON, the report and the viewer's headline cannot lead with a bystander.
+void TestLockOwnerStatesHaveNoStackCandidates()
+{
+  for (const char* state : { "lock_owner_wait", "crash_logger_thread_dump_deadlock" }) {
+    auto r = MakeHang();
+    r.main_thread_wait.kind = "running";
+    r.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+    r.main_thread_lock_owner.tid = 4012;
+    r.main_thread_lock_owner.confirmed = true;
+    r.freeze_analysis.state_id = state;
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    Require(r.actionable_candidates.empty(), "no stack-derived actionable candidate under a lock-owner state");
+
+    auto running = MakeHang();
+    running.main_thread_wait.kind = "running";
+    running.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+    BuildEvidenceAndSummary(running, i18n::Language::kEnglish);
+    Require(!running.actionable_candidates.empty(), "the same stack still names a candidate otherwise");
+  }
+}
+
 // Plugins on a waiting main thread's stack are bystanders; recording them as
 // the bucket's candidates would let every repeat of the freeze vote for them.
 void TestBystanderStackIsNotRecordedInHistory()
@@ -678,6 +760,8 @@ int main()
     TestReportKeepsRecentEvents();
     TestFreezesGroupByTheMainThreadWait();
     TestLockOwnerFreezesGroupByTheOwner();
+    TestHistoryFollowsTheRekeyedBucket();
+    TestLockOwnerStatesHaveNoStackCandidates();
     TestBystanderStackIsNotRecordedInHistory();
     TestSummaryKeepsPluginCountsOnly();
     TestAdviceFitsTheCapture();
