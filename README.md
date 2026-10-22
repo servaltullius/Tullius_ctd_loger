@@ -4,7 +4,7 @@
 
 > [**한국어 안내 →**](docs/README_KO.md)
 
-A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freezes, and infinite loading screens**, then produces a readable report (summary + evidence + checklist) — no WinDbg required.
+A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freezes, and infinite loading screens**, then produces a report that starts with a plain-language **quick answer** (what happened, the suspected mod and how likely it is, one thing to try), with the details below it (summary + evidence + checklist) — no WinDbg required.
 
 - **Not a crash-prevention mod.** It records signals and captures evidence; it does not swallow exceptions or attempt to keep playing.
 - **No uploads / telemetry.** All output is local. Online symbol downloads are OFF by default (`AllowOnlineSymbols=0`).
