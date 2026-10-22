@@ -17,6 +17,7 @@
 
 #include "CrashObjectMemory.h"
 #include "GpuMemory.h"
+#include "HangObjectMemory.h"
 #include "ModuleUnwindMemory.h"
 #include "SkyrimDiagProtocol.h"
 
@@ -61,12 +62,18 @@ struct DumpCallbackContext
   // handed to the writer one range per MemoryCallback.
   std::vector<internal::ExtraDumpMemory> extraMemory;
   std::size_t nextExtraMemory = 0;
+  // Freeze and manual dumps: objects of the threads that matter, read from
+  // the contexts the writer reports and added to extraMemory at the first
+  // MemoryCallback (ADR-0010, addendum 2026-10-22).
+  internal::HangObjectMemoryCollector* hangObjects = nullptr;
+  bool hangObjectsAdded = false;
   DumpProgress progress{};
 };
 
 std::atomic<std::uint64_t> g_tracedDumpWrites{ 0 };
 std::atomic<std::uint64_t> g_xstateSizedContexts{ 0 };
 std::atomic<std::uint64_t> g_crashObjectMemoryBytes{ 0 };
+std::atomic<std::uint64_t> g_hangObjectMemoryBytes{ 0 };
 std::atomic<std::uint64_t> g_moduleUnwindMemoryBytes{ 0 };
 
 std::uint64_t TotalBytes(const std::vector<internal::ExtraDumpMemory>& ranges)
@@ -421,6 +428,22 @@ BOOL CALLBACK MiniDumpCallback(
   }
   ctx->progress.lastCallbackType = static_cast<ULONG>(callbackType);
   ctx->progress.lastCallbackSubject = CallbackSubject(*callbackInput);
+  if (ctx->hangObjects && (callbackType == ThreadCallback || callbackType == ThreadExCallback)) {
+    // The context the dump stores for this thread (both callbacks start alike).
+    const auto& thread = callbackInput->Thread;
+    ctx->hangObjects->OnThreadContext(thread.ThreadId, thread.Context);
+    return TRUE;
+  }
+  if (callbackType == MemoryCallback && ctx->hangObjects && !ctx->hangObjectsAdded) {
+    // Every thread has been reported by now, and the writer still holds them
+    // suspended.
+    ctx->hangObjectsAdded = true;
+    const auto& ranges = ctx->hangObjects->Collect();
+    if (!ranges.empty()) {
+      ctx->extraMemory.insert(ctx->extraMemory.end(), ranges.begin(), ranges.end());
+      ctx->extraMemory = internal::MergeExtraDumpMemory(std::move(ctx->extraMemory));
+    }
+  }
   if (callbackType == MemoryCallback && callbackOutput && !ctx->extraMemory.empty()) {
     // Called until it returns FALSE; each TRUE adds one range.
     if (ctx->nextExtraMemory >= ctx->extraMemory.size()) {
@@ -461,8 +484,12 @@ bool WriteDumpWithStreams(
   bool isCrash,
   const DumpProfile& dumpProfile,
   bool isProcessSnapshot,
-  std::wstring* err)
+  std::wstring* err,
+  DumpObjectMemoryStats* objectMemory)
 {
+  if (objectMemory) {
+    *objectMemory = DumpObjectMemoryStats{};
+  }
   if (!process) {
     if (err) *err = L"Invalid process handle";
     return false;
@@ -588,6 +615,16 @@ bool WriteDumpWithStreams(
       AppendPreferredThreadId(callbackContext.preferredThreadIds, tid);
     }
   }
+  // Freeze and manual dumps of the live process hold no heap unless they are
+  // full-memory dumps; a PSS snapshot handle cannot be read from here.
+  std::optional<internal::HangObjectMemoryCollector> hangObjects;
+  const bool snapshotKind = effectiveProfile.captureKind == CaptureKind::Hang ||
+    effectiveProfile.captureKind == CaptureKind::Manual;
+  if (!isCrash && snapshotKind && !isProcessSnapshot && !effectiveProfile.includeFullMemory) {
+    const auto mainTid = InferMainThreadIdFromSnapshot(shmSnapshot, shmSnapshotBytes);
+    hangObjects.emplace(process, internal::SelectHangObjectThreads(process, mainTid, wctJsonUtf8));
+    callbackContext.hangObjects = &*hangObjects;
+  }
   callbackContext.isProcessSnapshot = isProcessSnapshot;
   callbackContext.traceIo = DumpIoTraceRequested();
   MINIDUMP_CALLBACK_INFORMATION callbackInfo{};
@@ -614,6 +651,8 @@ bool WriteDumpWithStreams(
     }
 
     callbackContext.progress.Reset();
+    // A retry hands the writer the same ranges again.
+    callbackContext.nextExtraMemory = 0;
     const BOOL ok = MiniDumpWriteDump(
       process,
       pid,
@@ -629,6 +668,12 @@ bool WriteDumpWithStreams(
     if (ok) {
       if (err) {
         err->clear();
+      }
+      if (hangObjects) {
+        g_hangObjectMemoryBytes.fetch_add(hangObjects->Stats().bytes, std::memory_order_relaxed);
+        if (objectMemory) {
+          *objectMemory = hangObjects->Stats();
+        }
       }
       return true;
     }
@@ -653,6 +698,11 @@ std::uint64_t ModuleUnwindMemoryBytes() noexcept
 std::uint64_t CrashObjectMemoryBytes() noexcept
 {
   return g_crashObjectMemoryBytes.load(std::memory_order_relaxed);
+}
+
+std::uint64_t HangObjectMemoryBytes() noexcept
+{
+  return g_hangObjectMemoryBytes.load(std::memory_order_relaxed);
 }
 
 std::uint64_t XStateSizedContextCount() noexcept

@@ -12,6 +12,7 @@
 #include <string_view>
 #include <utility>
 
+#include "DumpObjects.h"
 #include "MainThreadWait.h"
 #include "MinidumpUtil.h"
 
@@ -620,6 +621,18 @@ QuickAnswer Finish(std::string kind, const Lead& lead, bool en)
   return answer;
 }
 
+// ADR-0010 addendum: the form the stuck thread held, after the doubt it
+// belongs to. Never a lead: it names no mod as the cause.
+void AddFreezeObjectClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
+{
+  if (answer.why_not_certain.empty()) {
+    return;
+  }
+  if (const auto clue = FreezeTargetObjectClue(r, en); !clue.empty()) {
+    answer.why_not_certain += L" " + clue + L".";
+  }
+}
+
 }  // namespace
 
 QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -691,6 +704,9 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
       doubt.doubt = Doubt::kKnownIssue;
       known.why_not_certain =
         !r.signature_match->why_not_certain.empty() ? r.signature_match->why_not_certain : WhyFor(doubt, kind, en);
+    }
+    if (freezePath) {
+      AddFreezeObjectClue(r, en, known);
     }
     return known;
   }
@@ -773,6 +789,7 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
               : L"게임이 띄운 오류 창(게임 창 뒤에 있을 수 있음)을 읽어 보세요. 보통 어떤 모드가 왜 문제인지 적혀 있습니다.");
     }
   }
+  AddFreezeObjectClue(r, en, freeze);
   return freeze;
 }
 

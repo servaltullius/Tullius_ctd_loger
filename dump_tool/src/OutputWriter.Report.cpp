@@ -444,6 +444,18 @@ std::string BuildReportText(
             << " records=" << deadlock.thread_dump_records << "/" << deadlock.thread_dump_total_threads << "\n";
       }
     }
+    // ADR-0010 addendum: the objects those threads pointed at (a clue).
+    for (const auto& thread : r.freeze_thread_objects) {
+      std::string roles;
+      for (const auto& role : thread.roles) {
+        roles += (roles.empty() ? "" : ",") + role;
+      }
+      rpt << "  thread_objects tid=" << thread.tid << " roles=" << roles << "\n";
+      constexpr std::size_t kReportObjectsPerThread = 5;
+      for (std::size_t i = 0; i < thread.objects.size() && i < kReportObjectsPerThread; ++i) {
+        rpt << "    " << WideToUtf8(DescribeDumpObject(thread.objects[i])) << "\n";
+      }
+    }
     {
       const auto& state = r.blackbox_freeze_summary;
       if (!state.open_menus.empty() || state.seconds_since_load_end >= 0.0 || state.pause_gap_seconds > 0.0) {

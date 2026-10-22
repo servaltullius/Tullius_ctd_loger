@@ -653,6 +653,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.crash_logger_object_refs.clear();
     out.crash_logger_unattributed_objects.clear();
     out.dump_objects.clear();
+    out.freeze_thread_objects.clear();
     out.crash_logger_top_modules.clear();
     out.thread_entry_hook_modules.clear();
     out.stackwalk_truncation.clear();

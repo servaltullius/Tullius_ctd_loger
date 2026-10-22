@@ -506,6 +506,113 @@ void TestFreezeKnownAiPathingFix()
   }
 }
 
+skydiag::dump_tool::DumpObject FormObject(
+  std::wstring location,
+  std::wstring type,
+  std::wstring name,
+  std::uint32_t formId,
+  std::vector<std::wstring> files)
+{
+  skydiag::dump_tool::DumpObject o{};
+  o.location = std::move(location);
+  o.type_name = std::move(type);
+  o.name = std::move(name);
+  o.is_form = true;
+  o.form_id = formId;
+  o.source_files = std::move(files);
+  return o;
+}
+
+// ADR-0010 addendum: the objects the stuck thread held are a clue after the
+// doubt; the lead, its likelihood and the candidates stay as they were.
+void TestFreezeObjectClue()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = EngineCallPathHang();
+    r.freeze_analysis.state_id = "engine_spin_nan";
+    r.engine_spin.loop_found = true;
+    r.engine_spin.nan_detected = true;
+    r.engine_spin.tid = 19588;
+    r.engine_spin.rip_module = L"SkyrimSE.exe";
+    r.engine_spin.rip_offset = 0xd17465;
+    r.engine_spin.compare = "comiss";
+    r.engine_spin.nan_register = "xmm0";
+    const auto before = BuildQuickAnswer(r, lang, FreezeContext(en));
+
+    // Objects on another thread say nothing about the loop.
+    skydiag::dump_tool::FreezeThreadObjects mainThread{};
+    mainThread.tid = 7;
+    mainThread.roles = { "main" };
+    mainThread.objects = { FormObject(L"RCX", L"PlayerCharacter", L"Prisoner", 0x14u, { L"Skyrim.esm" }) };
+    r.freeze_thread_objects.push_back(mainThread);
+    Require(BuildQuickAnswer(r, lang, FreezeContext(en)).why_not_certain == before.why_not_certain,
+      "only the verdict thread's objects count");
+
+    skydiag::dump_tool::FreezeThreadObjects spin{};
+    spin.tid = 19588;
+    spin.roles = { "blocked_thread", "engine_spin" };
+    skydiag::dump_tool::DumpObject pathing{};
+    pathing.location = L"RBX";
+    pathing.type_name = L"BSPathingRequest";
+    pathing.module = L"SkyrimSE.exe";
+    spin.objects = { pathing,
+      FormObject(L"R14", L"Character", L"Lydia", 0xFF0036F8u, {}),
+      FormObject(L"RSP+40", L"TESObjectCELL", L"", 0x0000A2C4u, { L"Skyrim.esm" }) };
+    spin.objects[1].has_base_object = true;
+    spin.objects[1].base_type_name = L"TESNPC";
+    spin.objects[1].base_form_id = 0x000A2C94u;
+    spin.objects[1].base_source_files = { L"Skyrim.esm", L"MyFollower.esp" };
+    r.freeze_thread_objects.push_back(spin);
+
+    const auto qa = BuildQuickAnswer(r, lang, FreezeContext(en));
+    const std::wstring clue = (en ? L"The stuck calculation was handling: " : L"멈춘 계산이 다루던 대상: ") +
+      std::wstring(L"Character \"Lydia\" (FormID 0xFF0036F8, base TESNPC 0x000A2C94 Skyrim.esm -> MyFollower.esp).");
+    Require(qa.why_not_certain == before.why_not_certain + L" " + clue, "the first form, after the doubt");
+    Require(qa.case_id == before.case_id && qa.likelihood == before.likelihood && qa.headline == before.headline &&
+              qa.action == before.action && qa.suspect_mod.empty() && qa.suspect_file.empty(),
+      "the answer is otherwise unchanged and names no mod");
+
+    BuildEvidenceAndSummary(r, lang);
+    bool evidence = false;
+    for (const auto& e : r.evidence) {
+      if (Contains(e.title, en ? L"stuck thread's registers" : L"멈춘 스레드의 레지스터")) {
+        evidence = e.confidence_level == i18n::ConfidenceLevel::kLow &&
+          Contains(e.details, L"R14: Character \"Lydia\" [0xFF0036F8] (base TESNPC [0x000A2C94] Skyrim.esm -> MyFollower.esp)");
+      }
+    }
+    Require(evidence, "a low evidence item lists the thread's objects");
+    for (const auto& candidate : r.actionable_candidates) {
+      Require(candidate.module_filename != L"MyFollower.esp", "a plugin that defines a form is not a candidate");
+    }
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::path(L"C:\\Logs"), L"stem", true);
+    const auto& verdict = summary["freeze_analysis"]["verdict_thread_object"];
+    Require(verdict["tid"] == 19588u && verdict["type"] == "Character" && verdict["form_id"] == 0xFF0036F8u,
+      "the summary names the verdict thread's form");
+    Require(summary["freeze_analysis"]["thread_objects"].size() == 2u, "every thread with objects");
+
+    // The lock owner of a lock-owner wait is the thread the verdict is about.
+    AnalysisResult owner{};
+    owner.freeze_analysis.has_analysis = true;
+    owner.freeze_analysis.state_id = "lock_owner_wait";
+    owner.main_thread_wait.kind = "engine_wait";
+    owner.main_thread_wait.waiting_module = L"SkyrimSE.exe";
+    owner.main_thread_lock_owner.tid = 51944;
+    owner.main_thread_lock_owner.confirmed = true;
+    owner.main_thread_lock_owner.top_module = L"nvwgf2umx.dll";
+    skydiag::dump_tool::FreezeThreadObjects held{};
+    held.tid = 51944;
+    held.roles = { "lock_owner" };
+    held.objects = { FormObject(L"RDI", L"TESObjectREFR", L"", 0x0001A332u, { L"Skyrim.esm" }) };
+    owner.freeze_thread_objects.push_back(held);
+    const auto gpu = BuildQuickAnswer(owner, lang, FreezeContext(en));
+    Require(gpu.case_id == "gpu_driver" &&
+              Contains(gpu.why_not_certain, (en ? L"The stuck thread was handling: " : L"멈춘 스레드가 다루던 대상: ") +
+                std::wstring(L"TESObjectREFR (FormID 0x0001A332, Skyrim.esm).")),
+      "the lock owner's form");
+  }
+}
+
 AnalysisResult ModalHang(bool callerResolved)
 {
   AnalysisResult r{};
@@ -753,6 +860,7 @@ int main()
     TestFreezeEngineCallPathNamesNoMod();
     TestFreezeEngineSpinNan();
     TestFreezeKnownAiPathingFix();
+    TestFreezeObjectClue();
     TestModalDialog();
     TestModalDialogNamedModule();
     TestModalDialogNamesNoSingleModule();

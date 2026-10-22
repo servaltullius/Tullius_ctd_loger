@@ -10,6 +10,7 @@
 
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagHelper/Retention.h"
@@ -30,6 +31,18 @@ inline skydiag::helper::RetentionLimits BuildRetentionLimits(const skydiag::help
 inline void ApplyRetentionFromConfig(const skydiag::helper::HelperConfig& cfg, const std::filesystem::path& outBase)
 {
   QueueRetentionSweep(outBase, BuildRetentionLimits(cfg));
+}
+
+// One line per freeze or manual dump: what the object memory added to it.
+inline void LogDumpObjectMemory(const std::filesystem::path& outBase, const skydiag::helper::DumpObjectMemoryStats& stats)
+{
+  if (stats.threads_selected == 0u) {
+    return;  // not collected (PSS snapshot or full-memory dump)
+  }
+  AppendLogLine(outBase,
+    L"Object memory: threads=" + std::to_wstring(stats.threads_read) + L"/" + std::to_wstring(stats.threads_selected) +
+      L" ranges=" + std::to_wstring(stats.ranges) + L" bytes=" + std::to_wstring(stats.bytes) +
+      L" time_us=" + std::to_wstring(stats.elapsed_us) + (stats.budget_reached ? L" (budget reached)" : L""));
 }
 
 // What the plugin scan needs from the live game process. The exe path and the

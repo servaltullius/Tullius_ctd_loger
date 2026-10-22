@@ -145,6 +145,7 @@ HangTickResult ExecuteConfirmedHangCapture(
 
   bool dumpWritten = false;
   std::wstring dumpErr;
+  skydiag::helper::DumpObjectMemoryStats objectMemory{};
   const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
   if (!skydiag::helper::WriteDumpWithStreams(
         dumpSource,
@@ -157,7 +158,8 @@ HangTickResult ExecuteConfirmedHangCapture(
         /*isCrash=*/false,
         dumpProfile,
         /*isProcessSnapshot=*/pssSnapshot.used,
-        &dumpErr)) {
+        &dumpErr,
+        &objectMemory)) {
     ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     std::wcerr << L"[SkyrimDiagHelper] Hang dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Hang dump failed: " + dumpErr);
@@ -192,6 +194,7 @@ HangTickResult ExecuteConfirmedHangCapture(
     std::wcout << L"[SkyrimDiagHelper] Hang decision: secondsSinceHeartbeat=" << decision.secondsSinceHeartbeat
                << L" threshold=" << decision.thresholdSec << L" loading=" << (decision.isLoading ? L"1" : L"0") << L"\n";
     AppendLogLine(outBase, L"Hang dump written: " + dumpPath);
+    LogDumpObjectMemory(outBase, objectMemory);
     AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
     AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
       L" threshold=" + std::to_wstring(decision.thresholdSec) + L" loading=" + std::to_wstring(decision.isLoading ? 1 : 0));

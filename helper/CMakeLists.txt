@@ -19,6 +19,7 @@ add_executable(${PROJECT_NAME}
   src/HangCapture.cpp
   src/HangCapture.Guards.cpp
   src/HangCapture.Execute.cpp
+  src/HangObjectMemory.cpp
   src/HelperCommon.cpp
   src/HelperLog.cpp
   src/HelperMain.Startup.cpp
@@ -45,6 +46,7 @@ add_executable(${PROJECT_NAME}
   src/CompatibilityPreflight.h
   src/CrashObjectMemory.h
   src/GpuMemory.h
+  src/HangObjectMemory.h
   src/ModuleUnwindMemory.h
   include/SkyrimDiagHelper/Config.h
   include/SkyrimDiagHelper/DumpProfile.h

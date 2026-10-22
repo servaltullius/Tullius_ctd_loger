@@ -140,6 +140,68 @@ std::wstring DescribeDumpObject(const DumpObject& object)
   return text;
 }
 
+const DumpObject* FirstFormObject(const std::vector<DumpObject>& objects)
+{
+  const auto it = std::find_if(objects.begin(), objects.end(), [](const DumpObject& o) { return o.is_form; });
+  return it != objects.end() ? &*it : nullptr;
+}
+
+std::wstring DescribeDumpObjectTarget(const DumpObject& object)
+{
+  std::wstring text = object.type_name;
+  if (!object.name.empty()) {
+    text += L" \"" + object.name + L"\"";
+  }
+  if (!object.is_form) {
+    return text;
+  }
+  text += L" (FormID " + FormIdText(object.form_id);
+  if (const auto files = FilesText(object.source_files); !files.empty()) {
+    text += L", " + files;
+  } else if (object.has_base_object) {
+    text += L", base " + object.base_type_name + L" " + FormIdText(object.base_form_id);
+    if (const auto baseFiles = FilesText(object.base_source_files); !baseFiles.empty()) {
+      text += L" " + baseFiles;
+    }
+  }
+  return text + L")";
+}
+
+std::uint32_t FreezeVerdictThreadId(const AnalysisResult& r)
+{
+  if (r.engine_spin.nan_detected) {
+    return r.engine_spin.tid;
+  }
+  if (IsLockOwnerFreezeState(r.freeze_analysis.state_id) && r.main_thread_lock_owner.tid != 0u) {
+    return r.main_thread_lock_owner.tid;
+  }
+  return r.main_thread_wait.blocked_thread_tid;
+}
+
+const DumpObject* FreezeVerdictForm(const AnalysisResult& r)
+{
+  const std::uint32_t tid = FreezeVerdictThreadId(r);
+  if (tid == 0u) {
+    return nullptr;
+  }
+  const auto it = std::find_if(r.freeze_thread_objects.begin(), r.freeze_thread_objects.end(),
+    [tid](const FreezeThreadObjects& t) { return t.tid == tid; });
+  return it != r.freeze_thread_objects.end() ? FirstFormObject(it->objects) : nullptr;
+}
+
+std::wstring FreezeTargetObjectClue(const AnalysisResult& r, bool en)
+{
+  const DumpObject* form = FreezeVerdictForm(r);
+  if (!form) {
+    return {};
+  }
+  const bool calculation = r.engine_spin.nan_detected;
+  const std::wstring label = en
+    ? (calculation ? L"The stuck calculation was handling: " : L"The stuck thread was handling: ")
+    : (calculation ? L"멈춘 계산이 다루던 대상: " : L"멈춘 스레드가 다루던 대상: ");
+  return label + DescribeDumpObjectTarget(*form);
+}
+
 std::vector<DumpObject> ReadDumpObjects(
   void* dumpBase,
   std::uint64_t dumpSize,

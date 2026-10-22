@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "DumpObjects.h"
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "NextAction.h"
@@ -31,6 +32,46 @@ using skydiag::dump_tool::internal::output_writer::RedactAbsolutePathStrings;
 using skydiag::dump_tool::internal::output_writer::RedactSymbolSearchPath;
 using skydiag::dump_tool::internal::output_writer::TruncateUtf8;
 using skydiag::dump_tool::internal::output_writer::TryLoadIncidentManifestJson;
+
+namespace {
+
+// ADR-0010: one object read from the dump, as dump_objects[] and
+// freeze_analysis.thread_objects[].objects[] carry it.
+nlohmann::json DumpObjectJson(const DumpObject& object)
+{
+  nlohmann::json files = nlohmann::json::array();
+  for (const auto& file : object.source_files) {
+    files.push_back(WideToUtf8(file));
+  }
+  char address[32]{};
+  std::snprintf(address, sizeof(address), "0x%llX", static_cast<unsigned long long>(object.address));
+  nlohmann::json entry = {
+    { "location", WideToUtf8(object.location) },
+    { "address", address },
+    { "type", WideToUtf8(object.type_name) },
+    { "module", WideToUtf8(object.module) },
+    { "is_form", object.is_form },
+    { "form_id", object.form_id },
+    { "form_type", object.form_type },
+    { "source_files", std::move(files) },
+    { "name", WideToUtf8(object.name) },
+    { "relevance", object.relevance },
+  };
+  if (object.has_base_object) {
+    nlohmann::json baseFiles = nlohmann::json::array();
+    for (const auto& file : object.base_source_files) {
+      baseFiles.push_back(WideToUtf8(file));
+    }
+    entry["base_object"] = {
+      { "type", WideToUtf8(object.base_type_name) },
+      { "form_id", object.base_form_id },
+      { "source_files", std::move(baseFiles) },
+    };
+  }
+  return entry;
+}
+
+}  // namespace
 
 nlohmann::json BuildSummaryJson(
   const AnalysisResult& r,
@@ -261,36 +302,7 @@ nlohmann::json BuildSummaryJson(
     // ADR-0010: objects read from the dump itself.
     summary["dump_objects"] = nlohmann::json::array();
     for (const auto& object : r.dump_objects) {
-      nlohmann::json files = nlohmann::json::array();
-      for (const auto& file : object.source_files) {
-        files.push_back(WideToUtf8(file));
-      }
-      char address[32]{};
-      std::snprintf(address, sizeof(address), "0x%llX", static_cast<unsigned long long>(object.address));
-      nlohmann::json entry = {
-        { "location", WideToUtf8(object.location) },
-        { "address", address },
-        { "type", WideToUtf8(object.type_name) },
-        { "module", WideToUtf8(object.module) },
-        { "is_form", object.is_form },
-        { "form_id", object.form_id },
-        { "form_type", object.form_type },
-        { "source_files", std::move(files) },
-        { "name", WideToUtf8(object.name) },
-        { "relevance", object.relevance },
-      };
-      if (object.has_base_object) {
-        nlohmann::json baseFiles = nlohmann::json::array();
-        for (const auto& file : object.base_source_files) {
-          baseFiles.push_back(WideToUtf8(file));
-        }
-        entry["base_object"] = {
-          { "type", WideToUtf8(object.base_type_name) },
-          { "form_id", object.base_form_id },
-          { "source_files", std::move(baseFiles) },
-        };
-      }
-      summary["dump_objects"].push_back(std::move(entry));
+      summary["dump_objects"].push_back(DumpObjectJson(object));
     }
   }
 
@@ -700,6 +712,25 @@ nlohmann::json BuildSummaryJson(
       { "freeze_started_after_thread_dump", deadlock.freeze_started_after_thread_dump },
       { "thread_dump_stopped_before_capture", deadlock.thread_dump_stopped_before_capture },
     };
+  }
+  if (!r.freeze_thread_objects.empty()) {
+    // ADR-0010 addendum: what the threads that matter were handling.
+    auto threads = nlohmann::json::array();
+    for (const auto& thread : r.freeze_thread_objects) {
+      auto objects = nlohmann::json::array();
+      for (const auto& object : thread.objects) {
+        objects.push_back(DumpObjectJson(object));
+      }
+      threads.push_back({ { "tid", thread.tid }, { "roles", thread.roles }, { "objects", std::move(objects) } });
+    }
+    summary["freeze_analysis"]["thread_objects"] = std::move(threads);
+    if (const auto* form = FreezeVerdictForm(r)) {
+      // The form the quick answer's clue names, for the thread the verdict is about.
+      auto entry = DumpObjectJson(*form);
+      entry["tid"] = FreezeVerdictThreadId(r);
+      entry["text"] = WideToUtf8(DescribeDumpObjectTarget(*form));
+      summary["freeze_analysis"]["verdict_thread_object"] = std::move(entry);
+    }
   }
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();
   for (const auto& reason : r.freeze_analysis.primary_reasons) {
