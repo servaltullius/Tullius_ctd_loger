@@ -668,13 +668,17 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
       : r.signature_match->confidence_level;
     known.likelihood = LikelihoodId(level);
     known.likelihood_text = LikelihoodText(level, en);
-    known.headline = KindPhrase(kind, en) +
-      (en ? L" It matches a known problem that has a known fix." : L" 해결 방법이 알려진 문제와 일치합니다.");
+    // A signature may say it in its own words (a known freeze does).
+    known.headline = KindPhrase(kind, en) + L" " +
+      (!r.signature_match->headline.empty()
+          ? r.signature_match->headline
+          : (en ? L"It matches a known problem that has a known fix." : L"해결 방법이 알려진 문제와 일치합니다."));
     known.action = FirstSentenceWithoutTag(r.signature_match->recommendations.front());
     if (level != i18n::ConfidenceLevel::kHigh) {
       Lead doubt;
       doubt.doubt = Doubt::kKnownIssue;
-      known.why_not_certain = WhyFor(doubt, kind, en);
+      known.why_not_certain =
+        !r.signature_match->why_not_certain.empty() ? r.signature_match->why_not_certain : WhyFor(doubt, kind, en);
     }
     return known;
   }

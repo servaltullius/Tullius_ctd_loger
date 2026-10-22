@@ -332,6 +332,122 @@ void TestKnownCrashSiteSignaturesRuntime()
   assert(!allocMiss || allocMiss->id != "CPP_BAD_ALLOC");
 }
 
+// A known freeze (the 2026-10-22 hangs): engine_spin_nan in the loop at
+// SkyrimSE.exe+0xD17465 on 1.6.1170, which stopped after the player installed
+// AI Pathing Freeze Fix (Nexus 190049). Offsets differ per runtime, so only
+// that version, state and instruction match.
+void TestAiPathingFreezeSignatureRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+
+  SignatureMatchInput freeze{};
+  freeze.game_version = "1.6.1170.0";
+  freeze.freeze_state = "engine_spin_nan";
+  freeze.freeze_loop_module = L"SkyrimSE.exe";
+  freeze.freeze_loop_offset = 0xD17465ull;
+  freeze.loaded_modules = { L"SkyrimSE.exe", L"skse64_1_6_1170.dll", L"SkyrimUpscaler.dll" };
+  const auto hit = db.Match(freeze, /*useKorean=*/false);
+  assert(hit && hit->id == "AI_PATHING_FREEZE_1_6_1170");
+  assert(hit->scope == "root_cause");
+  assert(hit->confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(hit->fix_module == L"TMS_AIPathingFreezeFix.dll" && !hit->fix_module_loaded);
+  assert(hit->headline == L"It matches a known AI pathing freeze.");
+  assert(hit->why_not_certain.find(L"other causes can produce the same loop") != std::wstring::npos);
+  assert(hit->recommendations.size() == 1u);
+  assert(hit->recommendations[0].rfind(L"[Known cause] Install \"AI Pathing Freeze Fix\" (Nexus mod 190049)", 0) == 0);
+  assert(hit->recommendations[0].find(L"https://www.nexusmods.com/skyrimspecialedition/mods/190049") !=
+         std::wstring::npos);
+  const auto hitKo = db.Match(freeze, /*useKorean=*/true);
+  assert(hitKo && hitKo->headline == L"알려진 AI 길찾기 프리징과 일치합니다.");
+  assert(hitKo->recommendations[0].rfind(L"[알려진 원인] 모드 관리자로 \"AI Pathing Freeze Fix\"", 0) == 0);
+
+  // The fix already loaded: it is not recommended again.
+  auto loaded = freeze;
+  loaded.loaded_modules.push_back(L"tms_aipathingfreezefix.DLL");
+  for (const bool ko : { false, true }) {
+    const auto fixLoaded = db.Match(loaded, ko);
+    assert(fixLoaded && fixLoaded->id == "AI_PATHING_FREEZE_1_6_1170" && fixLoaded->fix_module_loaded);
+    assert(fixLoaded->recommendations.size() == 1u);
+    const auto& rec = fixLoaded->recommendations[0];
+    assert(rec.find(ko ? L"이미 로드되어 있는데도" : L"is already loaded, but this freeze still happened") !=
+           std::wstring::npos);
+    assert(rec.find(ko ? L"설치한 뒤 다시" : L"Install") == std::wstring::npos);
+  }
+
+  auto otherOffset = freeze;
+  otherOffset.freeze_loop_offset = 0xD17466ull;
+  assert(!db.Match(otherOffset, /*useKorean=*/false).has_value());
+  auto otherModule = freeze;
+  otherModule.freeze_loop_module = L"SkyrimVR.exe";
+  assert(!db.Match(otherModule, /*useKorean=*/false).has_value());
+  for (const char* version : { "1.6.640.0", "1.7.104.0", "1.5.97.0", "" }) {
+    auto otherVersion = freeze;
+    otherVersion.game_version = version;
+    assert(!db.Match(otherVersion, /*useKorean=*/false).has_value());
+  }
+  auto otherState = freeze;
+  otherState.freeze_state = "freeze_candidate";
+  assert(!db.Match(otherState, /*useKorean=*/false).has_value());
+
+  // A crash at that address is not this freeze, and crash signatures do not
+  // match a freeze.
+  SignatureMatchInput crash{};
+  crash.exc_code = 0xC0000005u;
+  crash.game_version = "1.6.1170.0";
+  crash.fault_module = L"SkyrimSE.exe";
+  crash.fault_offset = 0xD17465ull;
+  crash.access_violation_address = 0x10ull;
+  const auto crashHit = db.Match(crash, /*useKorean=*/false);
+  assert(crashHit && crashHit->id == "ACCESS_VIOLATION_NULL");
+  auto freezeWithCrashFields = crash;
+  freezeWithCrashFields.freeze_state = "freeze_candidate";
+  assert(!db.Match(freezeWithCrashFields, /*useKorean=*/false).has_value());
+}
+
+// A loop location without a freeze state, half a location, or a fix DLL
+// without the advice for when it is loaded drops the entry.
+void TestFreezeSignatureRejectsMalformedEntries()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_freeze_constraints_test.json";
+  {
+    std::ofstream out(tempPath, std::ios::binary);
+    out <<
+      "{\n"
+      "  \"version\": 2,\n"
+      "  \"signatures\": [\n"
+      "    {\"id\": \"NO_STATE\", \"match\": {\"game_version\": \"1.6.1170.0\", "
+      "\"freeze_loop_module\": \"SkyrimSE.exe\", \"freeze_loop_offset\": \"0x10\"},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"NO_OFFSET\", \"match\": {\"freeze_state\": \"engine_spin_nan\", "
+      "\"freeze_loop_module\": \"SkyrimSE.exe\"},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"BAD_OFFSET\", \"match\": {\"freeze_state\": \"engine_spin_nan\", "
+      "\"freeze_loop_module\": \"SkyrimSE.exe\", \"freeze_loop_offset\": 16},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}},\n"
+      "    {\"id\": \"FIX_WITHOUT_LOADED_ADVICE\", \"match\": {\"freeze_state\": \"engine_spin_nan\"},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\", "
+      "\"fix_module\": \"Fix.dll\", \"recommendations_fix_loaded_en\": [\"x\"]}},\n"
+      "    {\"id\": \"GOOD\", \"match\": {\"freeze_state\": \"engine_spin_nan\", "
+      "\"freeze_loop_module\": \"SkyrimSE.exe\", \"freeze_loop_offset\": \"0x10\"},\n"
+      "     \"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}}\n"
+      "  ]\n"
+      "}\n";
+  }
+  SignatureDatabase db;
+  assert(db.LoadFromJson(tempPath));
+  assert(db.Size() == 1u);
+  SignatureMatchInput input{};
+  input.freeze_state = "engine_spin_nan";
+  input.freeze_loop_module = L"skyrimse.exe";
+  input.freeze_loop_offset = 0x10ull;
+  const auto matched = db.Match(input, /*useKorean=*/false);
+  assert(matched && matched->id == "GOOD" && matched->fix_module.empty());
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
+}
+
 void TestSignatureRejectsMalformedExceptionAndObjectConstraints()
 {
   const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_object_constraints_test.json";
@@ -1325,6 +1441,8 @@ int main()
   TestSignatureCallstackContainsRuntime();
   TestContentCatalogSignatureRuntime();
   TestKnownCrashSiteSignaturesRuntime();
+  TestAiPathingFreezeSignatureRuntime();
+  TestFreezeSignatureRejectsMalformedEntries();
   TestSignatureRejectsMalformedExceptionAndObjectConstraints();
   TestSignatureDatabaseToleratesMalformedEntries();
   TestAddressResolverRuntime();

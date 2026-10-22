@@ -805,6 +805,26 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
     out.freeze_analysis.first_chance_context = out.first_chance_summary;
   }
+  // A known freeze is matched by its freeze state, which is known only now
+  // (the summary below is rebuilt with it).
+  if (!out.signature_match && out.freeze_analysis.has_analysis && !out.freeze_analysis.state_id.empty() &&
+      !out.is_filtered_clean_exit && !opt.data_dir.empty()) {
+    SignatureDatabase sigDb;
+    if (sigDb.LoadFromJson(std::filesystem::path(opt.data_dir) / L"crash_signatures.json")) {
+      SignatureMatchInput input{};
+      input.game_version = out.game_version;
+      input.freeze_state = out.freeze_analysis.state_id;
+      if (out.engine_spin.loop_found) {
+        input.freeze_loop_module = out.engine_spin.rip_module;
+        input.freeze_loop_offset = out.engine_spin.rip_offset;
+      }
+      input.loaded_modules.reserve(allModules.size());
+      for (const auto& m : allModules) {
+        input.loaded_modules.push_back(m.filename);
+      }
+      out.signature_match = sigDb.Match(input, opt.language == i18n::Language::kKorean);
+    }
+  }
   if (out.freeze_analysis.state_id == "crash_logger_thread_dump_deadlock") {
     // The generic freeze checklist ends in "disable recently added mods",
     // which this cause does not call for.

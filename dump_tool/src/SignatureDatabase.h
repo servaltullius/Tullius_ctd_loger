@@ -18,6 +18,14 @@ struct SignatureMatch
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;  // localized match-confidence label
   std::vector<std::wstring> recommendations;
+  // Optional quick-answer lines of a known freeze (the generic known-issue
+  // lines otherwise).
+  std::wstring headline;
+  std::wstring why_not_certain;
+  // The fix's DLL, and whether this dump had it loaded (then the
+  // recommendations are the fix-loaded ones).
+  std::wstring fix_module;
+  bool fix_module_loaded = false;
 };
 
 struct SignatureMatchInput
@@ -35,6 +43,14 @@ struct SignatureMatchInput
   // Object types near the crash: Crash Logger's POSSIBLE RELEVANT OBJECTS and
   // REGISTERS, and the dump objects ("InstalledContent", "Character").
   std::vector<std::wstring> object_types;
+  // A freeze: its state (FreezeAnalysisResult::state_id, e.g. engine_spin_nan)
+  // and the engine loop it spun in. A freeze input matches only signatures
+  // with a freeze_state, and those match nothing else.
+  std::string freeze_state;
+  std::wstring freeze_loop_module;
+  std::uint64_t freeze_loop_offset = 0;
+  // File names of the modules loaded in the dump.
+  std::vector<std::wstring> loaded_modules;
 };
 
 class SignatureDatabase
