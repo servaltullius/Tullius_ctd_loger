@@ -54,6 +54,12 @@ public sealed partial class MainWindow
                 {
                     return false;
                 }
+                // A summary written before v0.2.69 has no quick answer; analyze
+                // the dump again so the quick answer card is shown.
+                if (summary.QuickAnswer is null)
+                {
+                    return false;
+                }
                 _currentSummaryPath = summaryPath;
                 RenderSummary(summary);
                 await RenderAdvancedArtifactsAsync(

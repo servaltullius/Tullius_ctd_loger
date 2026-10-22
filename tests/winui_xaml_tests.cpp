@@ -595,6 +595,8 @@ static void TestWinUiShowsQuickAnswerFirst()
   const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "QuickAnswerCard.Visibility = _vm.HasQuickAnswer", "Rendering must show the card only with a quick answer.");
   RequireContains(cs, "T(\"Quick answer\", \"빠른 답\")", "The card label must be localized.");
+  RequireContains(cs, "if (summary.QuickAnswer is null)",
+    "A saved summary without a quick answer (older analyzer) must be analyzed again, not reused.");
 
   const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireContains(vm, "BuildQuickAnswerLines(summary)", "Share texts must start from the quick answer lines.");
