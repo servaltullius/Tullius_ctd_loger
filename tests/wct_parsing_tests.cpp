@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using skydiag::dump_tool::internal::ExtractWctCandidateThreadIds;
 using skydiag::dump_tool::internal::CountWctThreadsWithStableContextSwitches;
@@ -115,6 +116,37 @@ static void Test_StableContextSwitchesAcrossPasses()
   assert(CountWctThreadsWithStableContextSwitches(
     R"({"passes":[{"capture_usable":false,"threads":[]},{"capture_usable":true,"threads":[]}]})",
     { 10u }) == 0u);
+}
+
+// engine_spin_nan: the 2026-10-22 freeze's game thread 19588 was Running
+// (objectStatus 2) in both passes with contextSwitches 35263 both times.
+static void Test_RunningWithoutContextSwitch()
+{
+  const auto node = [](int tid, int status, int switches) {
+    return R"({"tid":)" + std::to_string(tid) + R"(,"isCycle":false,"nodes":[{"objectStatus":)" +
+      std::to_string(status) + R"(,"objectType":8,"thread":{"contextSwitches":)" + std::to_string(switches) +
+      R"(,"processId":45008,"threadId":)" + std::to_string(tid) + R"(,"waitTime":8707855}}]})";
+  };
+  const auto pass = [](bool usable, const std::string& threads) {
+    return std::string(R"({"capture_usable":)") + (usable ? "true" : "false") + R"(,"threads":[)" + threads + "]}";
+  };
+  const std::string first = node(19588, 2, 35263) + "," + node(12860, 2, 100) + "," + node(48060, 3, 173618) + "," +
+    node(7, 2, 5);
+  const std::string last = node(19588, 2, 35263) + "," + node(12860, 2, 101) + "," + node(48060, 3, 173618) + "," +
+    node(7, 3, 5);
+  const std::string json = R"({"passes":[)" + pass(true, first) + "," + pass(true, last) + "]}";
+  using skydiag::dump_tool::internal::FindWctThreadsRunningWithoutContextSwitch;
+  // 12860 switched, 48060 was blocked (a waiting thread does not switch
+  // either), 7 blocked in the last pass, 99 is not in WCT.
+  const auto running = FindWctThreadsRunningWithoutContextSwitch(json, { 48060u, 12860u, 19588u, 7u, 99u, 19588u });
+  assert((running == std::vector<std::uint32_t>{ 19588u }));
+  // One pass, an unusable pass, no input.
+  assert(FindWctThreadsRunningWithoutContextSwitch(R"({"passes":[)" + pass(true, first) + "]}", { 19588u }).empty());
+  assert(FindWctThreadsRunningWithoutContextSwitch(
+    R"({"passes":[)" + pass(false, first) + "," + pass(true, last) + "]}", { 19588u }).empty());
+  assert(FindWctThreadsRunningWithoutContextSwitch("", { 19588u }).empty());
+  assert(FindWctThreadsRunningWithoutContextSwitch("{bad json", { 19588u }).empty());
+  assert(FindWctThreadsRunningWithoutContextSwitch(json, {}).empty());
 }
 
 // ── TryParseWctCaptureDecision ─────────────────────────
@@ -490,6 +522,7 @@ int main()
   Test_MaxN_Limit();
   Test_ZeroTid_Skipped();
   Test_StableContextSwitchesAcrossPasses();
+  Test_RunningWithoutContextSwitch();
 
   Test_Capture_EmptyInput();
   Test_Capture_NoCaptureKey();

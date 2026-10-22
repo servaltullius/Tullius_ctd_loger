@@ -339,6 +339,95 @@ void TestCrashLoggerThreadDumpDeadlock()
   }
 }
 
+// The 2026-10-22 freeze: the main thread waited in the engine for game thread
+// 19588, which ran engine code five frames above SkyrimUpscaler.dll.
+AnalysisResult EngineCallPathHang()
+{
+  AnalysisResult r{};
+  r.dump_path = L"C:\\Logs\\SkyrimDiag_Hang_20261022_120435_196.dmp";
+  r.freeze_analysis.has_analysis = true;
+  r.freeze_analysis.state_id = "freeze_candidate";
+  auto& wait = r.main_thread_wait;
+  wait.kind = "engine_wait";
+  wait.wait_class = "sync";
+  wait.waiting_module = L"SkyrimSE.exe";
+  wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+  wait.blocked_thread_tid = 19588;
+  wait.blocked_module = L"SkyrimUpscaler.dll";
+  wait.blocked_mod_name = L"houseCARL - SkyrimUpscalerAIOBuild22";
+  wait.blocked_state = "engine_call_path";
+  wait.blocked_top = L"SkyrimSE.exe";
+  wait.blocked_path_modules = { L"SkyrimUpscaler.dll", L"ScrabsPapyrusExtender.dll" };
+  SuspectItem s{};
+  s.module_filename = L"hdtsmp64.dll";
+  s.inferred_mod_name = L"FSMP";
+  s.confidence_level = i18n::ConfidenceLevel::kLow;
+  r.suspects.push_back(s);
+  r.suspects_from_stackwalk = true;
+  r.suspects_from_main_thread = true;
+  return r;
+}
+
+void TestFreezeEngineCallPathNamesNoMod()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = EngineCallPathHang();
+    const auto qa = BuildQuickAnswer(r, lang, FreezeContext(en));
+    Require(qa.kind == "freeze" && qa.likelihood == "none", "no lead from a plugin deep below engine code");
+    Require(qa.suspect_mod.empty() && qa.suspect_file.empty(), "the upscaler is not named");
+
+    // The same thread with the plugin on top is the lead, as before.
+    r.main_thread_wait.blocked_state = "engine_call_from_plugin";
+    r.main_thread_wait.blocked_path_modules.clear();
+    const auto lead = BuildQuickAnswer(r, lang, FreezeContext(en));
+    Require(lead.case_id == "blocked_thread" && lead.suspect_file == L"SkyrimUpscaler.dll", "a near plugin leads");
+  }
+}
+
+void TestFreezeEngineSpinNan()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = EngineCallPathHang();
+    r.freeze_analysis.state_id = "engine_spin_nan";
+    auto& spin = r.engine_spin;
+    spin.loop_found = true;
+    spin.nan_detected = true;
+    spin.tid = 19588;
+    spin.rip_module = L"SkyrimSE.exe";
+    spin.rip_offset = 0xd17465;
+    spin.compare = "comiss";
+    spin.nan_register = "xmm0";
+    spin.call_path_modules = r.main_thread_wait.blocked_path_modules;
+    const auto qa = BuildQuickAnswer(r, lang, FreezeContext(en));
+    Require(qa.kind == "freeze" && qa.case_id == "engine_spin_nan", "the engine NaN loop");
+    Require(qa.likelihood == "medium", "medium");
+    Require(qa.suspect_mod.empty() && qa.suspect_file.empty(), "no single mod");
+    Require(Contains(qa.headline, en ? L"became NaN (not a number), so the engine kept repeating the same calculation"
+                                     : L"게임 계산 값이 숫자가 아닌 값(NaN)이 되어, 엔진이 같은 계산을 끝없이 반복하다 멈췄습니다"),
+      "plain words");
+    Require(Contains(qa.action, en ? L"combat, animation, AI/pathing" : L"전투, 애니메이션, AI/길찾기"), "what to check");
+    Require(Contains(qa.action, L"SkyrimUpscaler.dll, ScrabsPapyrusExtender.dll"), "the call path is said");
+    Require(!qa.why_not_certain.empty(), "why not certain");
+    RequirePlainWords(qa, "engine spin nan");
+
+    // The summary sentence says the same, and names no mod as the cause.
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, L"SkyrimSE.exe+0xd17465") && Contains(r.summary_sentence, L"xmm0"),
+      "the summary names the loop");
+    Require(r.quick_answer.case_id == "engine_spin_nan", "built with the summary");
+    bool mainThreadFirst = false;
+    for (const auto& rec : r.recommendations) {
+      if (rec.rfind(en ? L"[Main thread]" : L"[메인 스레드]", 0) == 0) {
+        mainThreadFirst = Contains(rec, L"NaN");
+        break;
+      }
+    }
+    Require(mainThreadFirst, "the [Main thread] advice is the NaN loop");
+  }
+}
+
 AnalysisResult ModalHang(bool callerResolved)
 {
   AnalysisResult r{};
@@ -495,6 +584,8 @@ int main()
     TestHookStubRaceIsLikely();
     TestFreezeLockOwnerInGpuDriver();
     TestCrashLoggerThreadDumpDeadlock();
+    TestFreezeEngineCallPathNamesNoMod();
+    TestFreezeEngineSpinNan();
     TestModalDialog();
     TestLoadingFreezeWithoutSuspect();
     TestFreezeStackScanIsWeak();

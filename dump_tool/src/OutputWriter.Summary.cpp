@@ -1,5 +1,6 @@
 #include "OutputWriterPipeline.h"
 
+#include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
@@ -616,7 +617,37 @@ nlohmann::json BuildSummaryJson(
         { "top", WideToUtf8(r.main_thread_wait.blocked_top) },
         { "thread_count", r.main_thread_wait.blocked_thread_count },
       };
+      if (!r.main_thread_wait.blocked_path_modules.empty()) {
+        auto below = nlohmann::json::array();
+        for (const auto& module : r.main_thread_wait.blocked_path_modules) {
+          below.push_back(WideToUtf8(module));
+        }
+        summary["freeze_analysis"]["main_thread_wait"]["blocked_thread"]["path_modules"] = std::move(below);
+      }
     }
+  }
+  if (r.engine_spin.loop_found) {
+    const auto& spin = r.engine_spin;
+    auto callPath = nlohmann::json::array();
+    for (const auto& module : spin.call_path_modules) {
+      callPath.push_back(WideToUtf8(module));
+    }
+    char bits[32]{};
+    std::snprintf(bits, sizeof(bits), "0x%llx", static_cast<unsigned long long>(spin.nan_bits));
+    summary["freeze_analysis"]["engine_spin"] = {
+      { "state", spin.nan_detected ? "engine_spin_nan" : "float_compare_loop" },
+      { "nan_detected", spin.nan_detected },
+      { "tid", spin.tid },
+      { "is_main_thread", spin.is_main_thread },
+      { "rip", WideToUtf8(EngineSpinLocation(spin)) },
+      { "rip_module", WideToUtf8(spin.rip_module) },
+      { "rip_offset", spin.rip_offset },
+      { "compare", spin.compare },
+      { "nan_register", spin.nan_register },
+      { "nan_bits", spin.nan_detected ? std::string(bits) : std::string{} },
+      { "mxcsr", spin.mxcsr },
+      { "call_path_modules", std::move(callPath) },
+    };
   }
   if (r.main_thread_lock_owner.tid != 0u) {
     const auto& owner = r.main_thread_lock_owner;

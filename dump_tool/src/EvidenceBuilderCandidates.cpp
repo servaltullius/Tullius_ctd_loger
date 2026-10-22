@@ -635,10 +635,12 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
     return;
   }
   if (IsLockOwnerFreezeState(r.freeze_analysis.state_id) ||
-      (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u)) {
-    // The stall is on the lock owner (or Crash Logger's thread dump): frames,
-    // stack density, thread groups and nearby resources all describe the main
-    // thread's bystanders, and the viewer would lead with them.
+      (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) ||
+      r.engine_spin.nan_detected) {
+    // The stall is on the lock owner (or Crash Logger's thread dump, or an
+    // engine loop on a NaN value): frames, stack density, thread groups and
+    // nearby resources all describe bystanders, and the viewer would lead
+    // with them.
     AddHistorySignals(r, en, &signals);
     r.actionable_candidates = BuildCandidateConsensus(signals, lang);
     SortActionableCandidates(r.actionable_candidates);

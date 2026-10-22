@@ -514,6 +514,64 @@ std::uint32_t CountWctThreadsWithStableContextSwitches(
   }
 }
 
+std::vector<std::uint32_t> FindWctThreadsRunningWithoutContextSwitch(
+  std::string_view wctJsonUtf8,
+  const std::vector<std::uint32_t>& targetTids)
+{
+  std::vector<std::uint32_t> running;
+  if (wctJsonUtf8.empty() || targetTids.empty()) {
+    return running;
+  }
+  try {
+    const auto json = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
+    const auto passesIt = json.find("passes");
+    if (passesIt == json.end() || !passesIt->is_array() || passesIt->size() < 2u) {
+      return running;
+    }
+    // The thread's own node (listed first): its status and context switches.
+    const auto readOwn = [](const nlohmann::json& pass, std::uint32_t tid) -> std::optional<std::uint64_t> {
+      if (!pass.is_object() || !pass.value("capture_usable", false)) {
+        return std::nullopt;
+      }
+      const auto threadsIt = pass.find("threads");
+      if (threadsIt == pass.end()) {
+        return std::nullopt;
+      }
+      const auto* entry = FindThreadEntry(*threadsIt, tid);
+      if (!entry) {
+        return std::nullopt;
+      }
+      const auto nodesIt = entry->find("nodes");
+      if (nodesIt == entry->end() || !nodesIt->is_array() || nodesIt->empty()) {
+        return std::nullopt;
+      }
+      const auto& node = nodesIt->front();
+      if (NodeThreadId(node) != tid || node.value("objectStatus", 0u) != kWctObjectStatusRunning) {
+        return std::nullopt;
+      }
+      const auto thIt = node.find("thread");  // present: NodeThreadId read it
+      const auto switchesIt = thIt->find("contextSwitches");
+      if (switchesIt == thIt->end() || !switchesIt->is_number_unsigned()) {
+        return std::nullopt;
+      }
+      return switchesIt->get<std::uint64_t>();
+    };
+    for (const auto tid : targetTids) {
+      if (tid == 0u || std::find(running.begin(), running.end(), tid) != running.end()) {
+        continue;
+      }
+      const auto first = readOwn(passesIt->front(), tid);
+      const auto last = readOwn(passesIt->back(), tid);
+      if (first && last && *first == *last) {
+        running.push_back(tid);
+      }
+    }
+  } catch (...) {
+    running.clear();
+  }
+  return running;
+}
+
 std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wctJsonUtf8)
 {
   const auto freeze = TryParseWctFreezeSummary(wctJsonUtf8);

@@ -568,6 +568,15 @@ target_include_directories(skydiag_main_thread_wait_tests PRIVATE
 )
 add_test(NAME skydiag_main_thread_wait_tests COMMAND skydiag_main_thread_wait_tests)
 
+add_executable(skydiag_engine_spin_loop_tests
+  engine_spin_loop_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/EngineSpinLoop.cpp"
+)
+target_include_directories(skydiag_engine_spin_loop_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_engine_spin_loop_tests COMMAND skydiag_engine_spin_loop_tests)
+
 add_executable(skydiag_rtti_decoder_tests
   rtti_decoder_tests.cpp
 )

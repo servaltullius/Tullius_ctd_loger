@@ -131,7 +131,9 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
 
   // A lock-owner freeze is bucketed by the owner thread or the deadlock; the
   // main thread's bystanders would vote for themselves in every repeat.
-  if (IsLockOwnerFreezeState(out.freeze_analysis.state_id)) {
+  // So is an engine loop on a NaN value, by the loop: its stack plugins are
+  // the call path.
+  if (IsLockOwnerFreezeState(out.freeze_analysis.state_id) || out.engine_spin.nan_detected) {
     return keys;
   }
 

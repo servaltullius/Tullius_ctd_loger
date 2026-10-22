@@ -359,6 +359,12 @@ Lead FreezeLead(const AnalysisResult& r, bool en)
     lead.doubt = Doubt::kCrashLogger;
     return lead;
   }
+  if (r.engine_spin.nan_detected) {
+    // No mod is named: the engine looped on a NaN value (BuildQuickAnswer
+    // says so in its own words).
+    lead.case_id = "engine_spin_nan";
+    return lead;
+  }
   if (r.hang_thread_module_consensus.has_consensus) {
     const auto& file = r.hang_thread_module_consensus.module_filename;
     if (IsModModule(r, file)) {
@@ -686,6 +692,33 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
 
   const Lead lead = FreezeLead(r, en);
   QuickAnswer freeze = Finish(kind, lead, en);
+  if (lead.case_id == "engine_spin_nan") {
+    const auto& mods = r.engine_spin.call_path_modules;
+    std::wstring callPath;
+    for (const auto& mod : mods) {
+      callPath += (callPath.empty() ? L"" : L", ") + mod;
+    }
+    freeze.likelihood = LikelihoodId(i18n::ConfidenceLevel::kMedium);
+    freeze.likelihood_text = LikelihoodText(i18n::ConfidenceLevel::kMedium, en);
+    freeze.headline = KindPhrase(freeze.kind, en) +
+      (en ? L" A value the game was calculating became NaN (not a number), so the engine kept repeating the same "
+            L"calculation and froze."
+          : L" 게임 계산 값이 숫자가 아닌 값(NaN)이 되어, 엔진이 같은 계산을 끝없이 반복하다 멈췄습니다.");
+    freeze.action = en
+      ? (L"Check the mods you recently added or updated that change combat, animation, AI/pathing or how actors move: "
+          L"disable them one at a time and see whether the freeze stops." +
+          (callPath.empty() ? std::wstring{}
+                            : (L" The mods seen on the stuck task (" + callPath +
+                                L") only called into the game there, so there is no need to remove them for this.")))
+      : (L"최근에 추가하거나 업데이트한 모드 중 전투, 애니메이션, AI/길찾기, 캐릭터 움직임을 바꾸는 모드를 하나씩 꺼 보며 "
+          L"멈춤이 사라지는지 확인해 보세요." +
+          (callPath.empty() ? std::wstring{}
+                            : (L" 멈춘 작업에서 함께 보인 모드(" + callPath +
+                                L")는 게임 기능을 불렀을 뿐이라 이것 때문에 뺄 필요는 없습니다.")));
+    freeze.why_not_certain = en
+      ? L"The endless loop on a NaN value is seen directly in the dump, but which mod produced that value is not."
+      : L"NaN 값으로 끝없이 반복한 것은 덤프에서 직접 보이지만, 그 값을 어느 모드가 만들었는지는 보이지 않습니다.";
+  }
   if (r.modal_dialog_wait.detected) {
     const auto& modal = r.modal_dialog_wait;
     const std::wstring title = modal.dialog_title.empty() ? std::wstring{} : (L"(\"" + modal.dialog_title + L"\")");

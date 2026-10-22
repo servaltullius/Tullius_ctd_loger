@@ -788,6 +788,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     freezeSignals.lock_owner = out.main_thread_lock_owner;
     freezeSignals.crash_logger_thread_dump_deadlock = out.crash_logger_thread_dump_deadlock;
   }
+  if (out.engine_spin.loop_found) {
+    freezeSignals.engine_spin = out.engine_spin;
+  }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   out.freeze_analysis.first_chance_context = out.first_chance_summary;

@@ -150,4 +150,18 @@ inline std::wstring ComputeFreezeStateBucketKey(std::string_view freezeState)
   return ComputeHangBucketKey("v=1|kind=" + std::string(freezeState));
 }
 
+// engine_spin_nan: the engine loop itself (module and offset of the spinning
+// instruction), whichever thread ran it and whichever plugins were below it.
+inline std::wstring ComputeEngineSpinBucketKey(
+  std::string_view freezeState,
+  std::wstring_view ripModule,
+  std::uint64_t ripOffset)
+{
+  std::ostringstream canonical;
+  canonical << "v=1|kind=" << freezeState
+            << "|rip=" << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(ripModule)) << "+0x" << std::hex
+            << std::nouppercase << ripOffset;
+  return ComputeHangBucketKey(canonical.str());
+}
+
 }  // namespace skydiag::dump_tool

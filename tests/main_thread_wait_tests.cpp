@@ -349,6 +349,114 @@ void TestBlockedGameThreadIsFound()
   assert(sendMessage.blocked_module == L"Sender.dll" && sendMessage.blocked_state == "waiting_in_plugin");
 }
 
+// The 2026-10-22 freeze as the walk saw it: two game threads at the same
+// engine instruction, five engine frames above SkyrimUpscaler.dll (which only
+// called the engine's update) and ScrabsPapyrusExtender.dll.
+skydiag::dump_tool::ThreadTopFrames EngineAboveUpscaler(std::uint32_t tid)
+{
+  auto upscaler = Plugin(L"SkyrimUpscaler.dll", L"houseCARL - SkyrimUpscalerAIOBuild22");
+  return Thread(tid, {
+    GameExe(), GameExe(), GameExe(), GameExe(), GameExe(),
+    upscaler, Plugin(L"ScrabsPapyrusExtender.dll"), GameExe(), GameExe(), GameExe(), GameExe(), GameExe(),
+  });
+}
+
+void TestDeepPluginIsOnlyTheCallPath()
+{
+  using skydiag::dump_tool::FindBlockedGameThread;
+  using skydiag::dump_tool::HasBlockedGameThread;
+  using skydiag::dump_tool::HasCallPathGameThread;
+  using skydiag::dump_tool::kCallPathPluginDepth;
+
+  auto deep = EngineSyncWait();
+  FindBlockedGameThread(deep, { IdleHookedThread(43468), EngineAboveUpscaler(19588), EngineAboveUpscaler(12860) });
+  assert(!HasBlockedGameThread(deep));
+  assert(HasCallPathGameThread(deep));
+  assert(deep.blocked_thread_tid == 19588u && deep.blocked_state == "engine_call_path");
+  assert(deep.blocked_top == L"SkyrimSE.exe" && deep.blocked_thread_count == 2u);
+  assert((deep.blocked_path_modules == std::vector<std::wstring>{ L"SkyrimUpscaler.dll", L"ScrabsPapyrusExtender.dll" }));
+
+  // Plugin code at or near the top keeps the lead: four engine frames above
+  // it (the crash tester's shape) is still engine code the plugin called.
+  static_assert(kCallPathPluginDepth == 5u);
+  auto nearTop = EngineSyncWait();
+  FindBlockedGameThread(nearTop, {
+    Thread(9532, { GameExe(), GameExe(), GameExe(), GameExe(), Plugin(L"CrashTester.dll"), Skse() }),
+  });
+  assert(HasBlockedGameThread(nearTop) && nearTop.blocked_state == "engine_call_from_plugin");
+  assert(nearTop.blocked_path_modules.empty());
+  auto top = EngineSyncWait();
+  FindBlockedGameThread(top, { Thread(1, { Plugin(L"Busy.dll"), GameExe(), GameExe(), GameExe(), GameExe(), GameExe() }) });
+  assert(HasBlockedGameThread(top) && top.blocked_state == "running_in_plugin");
+
+  // Any thread with plugin code on top or waiting in it outranks one whose
+  // plugin is only on the call path.
+  auto ranked = EngineSyncWait();
+  FindBlockedGameThread(ranked, {
+    EngineAboveUpscaler(19588),
+    Thread(7, { System(L"KERNELBASE.dll", L"SleepEx"), GameExe(), Plugin(L"Deep.dll") }),
+  });
+  assert(HasBlockedGameThread(ranked) && ranked.blocked_thread_tid == 7u && ranked.blocked_module == L"Deep.dll");
+  assert(ranked.blocked_thread_count == 2u);
+
+  // A plugin waiting under only system frames is not engine code at all.
+  auto waiting = EngineSyncWait();
+  FindBlockedGameThread(waiting, {
+    Thread(8, { System(L"ntdll.dll", L"ZwDelayExecution"), System(L"ntdll.dll", L"RtlDelayExecution", 0x34),
+                System(L"KERNELBASE.dll", L"SleepEx", 0x91), System(L"KERNELBASE.dll", L"SleepEx", 0x91),
+                System(L"KERNELBASE.dll", L"SleepEx", 0x91), Plugin(L"Waiter.dll") }),
+  });
+  assert(HasBlockedGameThread(waiting) && waiting.blocked_state == "waiting_in_plugin");
+}
+
+void TestEngineSpinNanVerdict()
+{
+  using skydiag::dump_tool::ApplyEngineSpinNanVerdict;
+  using skydiag::dump_tool::CallPathModules;
+  using skydiag::dump_tool::EngineSpinInfo;
+  using skydiag::dump_tool::EngineSpinLocation;
+  using skydiag::dump_tool::FindBlockedGameThread;
+  using skydiag::dump_tool::HasBlockedGameThread;
+  using skydiag::dump_tool::HasCallPathGameThread;
+
+  EngineSpinInfo spin{};
+  spin.loop_found = true;
+  spin.nan_detected = true;
+  spin.tid = 9532;
+  spin.rip_module = L"SkyrimSE.exe";
+  spin.rip_offset = 0xd17465;
+  spin.call_path_modules = { L"CrashTester.dll" };
+  assert(EngineSpinLocation(spin) == L"SkyrimSE.exe+0xd17465");
+
+  // The spinning thread was the lead: it stays, as call path only.
+  auto same = EngineSyncWait();
+  FindBlockedGameThread(same, {
+    Thread(9532, { GameExe(), GameExe(), Plugin(L"CrashTester.dll"), Skse() }),
+  });
+  assert(HasBlockedGameThread(same));
+  ApplyEngineSpinNanVerdict(same, spin);
+  assert(!HasBlockedGameThread(same) && HasCallPathGameThread(same));
+  assert((same.blocked_path_modules == std::vector<std::wstring>{ L"CrashTester.dll" }));
+
+  // Another thread's lead is dropped: the engine loop names no plugin.
+  auto other = EngineSyncWait();
+  FindBlockedGameThread(other, { Thread(40, { Plugin(L"Busy.dll"), GameExe() }) });
+  ApplyEngineSpinNanVerdict(other, spin);
+  assert(!HasBlockedGameThread(other) && !HasCallPathGameThread(other) && other.blocked_thread_tid == 0u);
+
+  // Without NaN nothing changes.
+  auto plain = EngineSyncWait();
+  FindBlockedGameThread(plain, { Thread(40, { Plugin(L"Busy.dll"), GameExe() }) });
+  spin.nan_detected = false;
+  ApplyEngineSpinNanVerdict(plain, spin);
+  assert(HasBlockedGameThread(plain) && plain.blocked_module == L"Busy.dll");
+
+  // Call path modules: no Windows, game, SKSE or graphics frames, once each.
+  auto driver = Plugin(L"nvwgf2umx.dll");
+  assert((CallPathModules({ System(L"ntdll.dll", L"NtWaitForSingleObject"), GameExe(), Plugin(L"A.dll"), Skse(), driver,
+                            Plugin(L"a.DLL"), Plugin(L"B.dll") }) == std::vector<std::wstring>{ L"A.dll", L"B.dll" }));
+}
+
 void TestBlockedGameThreadIsNotInvented()
 {
   using skydiag::dump_tool::FindBlockedGameThread;
@@ -650,6 +758,8 @@ int main()
   TestEngineWaitNamesTheGpuQueryPoll();
   TestBlockedGameThreadIsFound();
   TestBlockedGameThreadIsNotInvented();
+  TestDeepPluginIsOnlyTheCallPath();
+  TestEngineSpinNanVerdict();
   TestCrashLoggerThreadDumpDeadlockFires();
   TestCrashLoggerThreadDumpDeadlockNeedsEverySignal();
   TestThreadDumpTiming();

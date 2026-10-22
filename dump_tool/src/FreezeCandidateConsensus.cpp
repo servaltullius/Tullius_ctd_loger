@@ -189,11 +189,47 @@ void AddMainThreadWaitReason(
   // A deadlock, module-level stall or loader stall keeps its own reasons first.
   const bool stallExplained = result->state_id == "deadlock_likely" ||
     result->state_id == "synchronization_stall_likely" || result->state_id == "loader_stall_likely" ||
-    result->state_id == "crash_logger_thread_dump_deadlock";
+    result->state_id == "crash_logger_thread_dump_deadlock" || result->state_id == "engine_spin_nan";
   if (stallExplained) {
     result->primary_reasons.push_back(std::move(line));
   } else {
     result->primary_reasons.insert(result->primary_reasons.begin(), std::move(line));
+  }
+  if (HasCallPathGameThread(wait) && result->state_id != "engine_spin_nan") {
+    const std::wstring tid = std::to_wstring(wait.blocked_thread_tid);
+    const std::wstring path = JoinNames(wait.blocked_path_modules);
+    result->primary_reasons.push_back(en
+      ? (L"The game thread it waited for (tid " + tid + L") was running game engine code (top: " + wait.blocked_top +
+          L")" + (path.empty() ? std::wstring{} : (L"; plugins further down its stack (call path only): " + path)))
+      : (L"메인 스레드가 기다린 게임 스레드(tid " + tid + L")는 게임 엔진 코드를 실행 중이었음(맨 위: " +
+          wait.blocked_top + L")" + (path.empty() ? std::wstring{} : (L"; 스택 아래쪽 플러그인(호출 경로일 뿐): " + path))));
+  }
+}
+
+// engine_spin_nan: an engine float compare loop on a NaN value, which never
+// ends; the plugins on that thread's stack only called into the engine.
+void AddEngineSpinNanReasons(const EngineSpinInfo& spin, i18n::Language language, FreezeAnalysisResult* result)
+{
+  const bool en = language == i18n::Language::kEnglish;
+  const std::wstring who = spin.is_main_thread
+    ? (en ? std::wstring(L"The main thread") : std::wstring(L"메인 스레드"))
+    : (en ? (L"Thread " + std::to_wstring(spin.tid)) : (L"스레드 " + std::to_wstring(spin.tid)));
+  result->primary_reasons.push_back(en
+    ? (who + L" was running in both WCT passes without a single context switch between them: it was spinning")
+    : (who + L"은(는) WCT 두 번 모두 실행 중(Running)이었고 그 사이 컨텍스트 스위치가 한 번도 없었음: 같은 자리에서 계속 돌고 있었음"));
+  const std::wstring compare(spin.compare.begin(), spin.compare.end());  // ASCII
+  const std::wstring reg(spin.nan_register.begin(), spin.nan_register.end());
+  result->primary_reasons.push_back(en
+    ? (L"Its instruction was a floating-point compare loop in the game engine (" + EngineSpinLocation(spin) + L", " +
+        compare + L" with a backward jump), and " + reg +
+        L" held NaN; NaN compares unordered, so the loop's exit test never passes")
+    : (L"그 위치는 게임 엔진의 부동소수점 비교 루프(" + EngineSpinLocation(spin) + L", " + compare +
+        L" 뒤 되돌아가는 분기)였고 " + reg + L" 값이 NaN이었음. NaN은 어떤 값과도 크기 비교가 되지 않아 루프의 종료 조건이 끝내 "
+        L"맞지 않음"));
+  if (!spin.call_path_modules.empty()) {
+    result->primary_reasons.push_back(en
+      ? (L"Plugins on that thread's stack were only on the call path: " + JoinNames(spin.call_path_modules))
+      : (L"그 스레드 스택의 플러그인은 호출 경로에 있었을 뿐임: " + JoinNames(spin.call_path_modules)));
   }
 }
 
@@ -340,6 +376,8 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     (lockOwner && input.crash_logger_thread_dump_deadlock.has_value() && input.crash_logger_thread_dump_deadlock->detected)
       ? &*input.crash_logger_thread_dump_deadlock
       : nullptr;
+  const EngineSpinInfo* engineSpinNan =
+    (input.engine_spin.has_value() && input.engine_spin->nan_detected) ? &*input.engine_spin : nullptr;
   if (modalWait) {
     // Checked first: the main thread is the heartbeat source, so a dialog it
     // is pumping fully explains the stall regardless of other wait chains.
@@ -355,6 +393,13 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     result.state_id = "crash_logger_thread_dump_deadlock";
     result.confidence_level = CrashLoggerThreadDumpDeadlockConfidence(*lockOwner, *threadDumpDeadlock);
     AddCrashLoggerThreadDumpDeadlockReasons(*lockOwner, *threadDumpDeadlock, language, &result);
+  } else if (engineSpinNan) {
+    // The thread the main thread waits on (or the main thread) is stuck in an
+    // engine loop that a NaN value never lets end. Which mod produced the
+    // value is not in the dump, so no single mod is named.
+    result.state_id = "engine_spin_nan";
+    result.confidence_level = i18n::ConfidenceLevel::kMedium;
+    AddEngineSpinNanReasons(*engineSpinNan, language, &result);
   } else if (input.wct && input.wct->cycles > 0) {
     result.state_id = "deadlock_likely";
     const bool repeatedCycleSupport =
@@ -514,9 +559,9 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   }
   result.confidence = i18n::ConfidenceText(language, result.confidence_level);
   std::unordered_set<std::wstring> seenNames;
-  // Under a lock-owner wait or the thread-dump deadlock the stack candidates
-  // are the main thread's bystanders, not related to the stall.
-  const bool stackCandidatesAreBystanders = IsLockOwnerFreezeState(result.state_id);
+  // Under a lock-owner wait, the thread-dump deadlock or an engine NaN loop
+  // the stack candidates are bystanders, not related to the stall.
+  const bool stackCandidatesAreBystanders = IsLockOwnerFreezeState(result.state_id) || engineSpinNan != nullptr;
   const std::size_t maxCandidates =
     stackCandidatesAreBystanders ? 0u : std::min<std::size_t>(input.actionable_candidates.size(), 2u);
   for (std::size_t i = 0; i < maxCandidates; ++i) {
@@ -524,9 +569,10 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     seenNames.insert(related.display_name);
     result.related_candidates.push_back(std::move(related));
   }
-  if (modalWait || threadDumpDeadlock) {
+  if (modalWait || threadDumpDeadlock || engineSpinNan) {
     // Recent module loads are timeline noise next to a dialog the user can
-    // see, or a deadlock Crash Logger's thread dump caused.
+    // see, a deadlock Crash Logger's thread dump caused, or an engine loop
+    // that no module on the stacks is shown to have caused.
     return result;
   }
   if (input.blackbox.has_value()) {

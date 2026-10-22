@@ -2,6 +2,7 @@
 
 #include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
+#include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
 #include "NextAction.h"
@@ -393,6 +394,28 @@ std::string BuildReportText(
         rpt << " blocked_tid=" << wait.blocked_thread_tid << " blocked_module=" << WideToUtf8(wait.blocked_module)
             << " blocked_state=" << wait.blocked_state << " blocked_top=" << WideToUtf8(wait.blocked_top)
             << " blocked_threads=" << wait.blocked_thread_count;
+        if (!wait.blocked_path_modules.empty()) {
+          rpt << " blocked_path="
+              << WideToUtf8(JoinList(wait.blocked_path_modules, wait.blocked_path_modules.size(), L","));
+        }
+      }
+      rpt << "\n";
+    }
+    if (r.engine_spin.loop_found) {
+      const auto& spin = r.engine_spin;
+      rpt << "  engine_spin state=" << (spin.nan_detected ? "engine_spin_nan" : "float_compare_loop")
+          << " tid=" << spin.tid << " main_thread=" << (spin.is_main_thread ? "1" : "0")
+          << " rip=" << WideToUtf8(EngineSpinLocation(spin)) << " compare=" << spin.compare;
+      if (spin.nan_detected) {
+        char bits[32]{};
+        std::snprintf(bits, sizeof(bits), "0x%llx", static_cast<unsigned long long>(spin.nan_bits));
+        rpt << " nan_register=" << spin.nan_register << " nan_bits=" << bits;
+      }
+      char mxcsr[16]{};
+      std::snprintf(mxcsr, sizeof(mxcsr), "0x%x", static_cast<unsigned>(spin.mxcsr));
+      rpt << " mxcsr=" << mxcsr;
+      if (!spin.call_path_modules.empty()) {
+        rpt << " call_path=" << WideToUtf8(JoinList(spin.call_path_modules, spin.call_path_modules.size(), L","));
       }
       rpt << "\n";
     }

@@ -199,9 +199,37 @@ struct MainThreadWaitInfo
   // waiting_in_plugin: the plugin called a sleep/wait
   // engine_call_from_plugin: engine code the plugin called was on top
   // running_in_plugin: plugin code was on top
+  // engine_call_path: game engine code was running, with the plugin frames
+  // kCallPathPluginDepth or more frames down: those plugins were only on the
+  // thread's call path, so no plugin leads (HasBlockedGameThread is false)
   std::string blocked_state;
   std::wstring blocked_top;  // top frame, e.g. "KERNELBASE.dll!SleepEx"
   std::uint32_t blocked_thread_count = 0;  // game threads found in plugin code
+  // engine_call_path only: the plugin DLLs on that thread's stack, innermost first.
+  std::vector<std::wstring> blocked_path_modules;
+};
+
+// engine_spin_nan: a thread (the one the main thread waits on, or the main
+// thread itself) that WCT saw running in both passes without a context
+// switch, sitting in an engine floating-point compare loop whose compared
+// register holds NaN. NaN compares unordered, so a loop such as
+// "while (x < 0) x += 2*pi" never ends (2026-10-22 freeze, SkyrimSE.exe+0xd17465).
+struct EngineSpinInfo
+{
+  // A float compare loop was found at the instruction pointer of such a thread.
+  bool loop_found = false;
+  // ...and its compared XMM register held NaN (the freeze state engine_spin_nan).
+  bool nan_detected = false;
+  std::uint32_t tid = 0;
+  bool is_main_thread = false;
+  std::wstring rip_module;          // e.g. "SkyrimSE.exe"
+  std::uint64_t rip_offset = 0;
+  std::string compare;              // comiss / ucomiss / comisd / ucomisd
+  std::string nan_register;         // e.g. "xmm0"; empty without NaN
+  std::uint64_t nan_bits = 0;       // the register's low lane
+  std::uint32_t mxcsr = 0;
+  // Plugin DLLs on that thread's stack (call path only), innermost first.
+  std::vector<std::wstring> call_path_modules;
 };
 
 // The thread holding the lock (critical section or mutex) that the game main
@@ -251,8 +279,8 @@ struct CrashLoggerThreadDumpDeadlockInfo
 struct FreezeAnalysisResult
 {
   // state ids: modal_dialog_wait / crash_logger_thread_dump_deadlock / deadlock_likely /
-  // synchronization_stall_likely / loader_stall_likely / lock_owner_wait / freeze_candidate /
-  // freeze_ambiguous
+  // synchronization_stall_likely / loader_stall_likely / lock_owner_wait / engine_spin_nan /
+  // freeze_candidate / freeze_ambiguous
   bool has_analysis = false;
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;
@@ -546,6 +574,7 @@ struct AnalysisResult
   MainThreadWaitInfo main_thread_wait;
   MainThreadLockOwnerInfo main_thread_lock_owner;
   CrashLoggerThreadDumpDeadlockInfo crash_logger_thread_dump_deadlock;
+  EngineSpinInfo engine_spin;
   // The suspects came from the game main thread's stack (a freeze's stack walk
   // can pick a WCT cycle thread instead). A bystander wait only speaks for
   // the main thread's own stack.

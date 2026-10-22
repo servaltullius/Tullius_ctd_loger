@@ -32,8 +32,9 @@ std::optional<std::string> HangWaitCanonical(const AnalysisResult& out)
     canonical << "kind=" << wait.kind << "|detail=" << wait.engine_wait_detail << "|module=" << lower(wait.waiting_module)
               << "|api=" << lower(wait.wait_api);
     // The main thread waits the same way for every game thread; which plugin
-    // held the thread it waited for tells these freezes apart.
-    if (wait.blocked_thread_tid != 0u) {
+    // held the thread it waited for tells these freezes apart. A plugin only on
+    // that thread's call path (engine_call_path) does not.
+    if (HasBlockedGameThread(wait)) {
       canonical << "|blocked=" << lower(wait.blocked_module) << "|state=" << wait.blocked_state;
     }
     return canonical.str();
@@ -66,6 +67,12 @@ std::optional<std::wstring> LockOwnerFreezeBucketKey(const AnalysisResult& out)
 
 void ComputeCrashBucket(AnalysisResult& out)
 {
+  if (out.engine_spin.nan_detected && !out.engine_spin.rip_module.empty()) {
+    out.crash_bucket_version = 3;
+    out.crash_bucket_key =
+      ComputeEngineSpinBucketKey("engine_spin_nan", out.engine_spin.rip_module, out.engine_spin.rip_offset);
+    return;
+  }
   if (auto key = LockOwnerFreezeBucketKey(out)) {
     out.crash_bucket_version = 3;
     out.crash_bucket_key = std::move(*key);
