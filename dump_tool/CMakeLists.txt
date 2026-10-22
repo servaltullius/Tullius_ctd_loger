@@ -27,6 +27,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsStackwalkMemory.cpp
   src/AnalyzerInternalsStackwalkPriv.h
   src/AnalyzerInternalsStackwalkSymbols.cpp
+  src/EngineSpinLoop.cpp
+  src/EngineSpinLoop.h
   src/EvidenceBuilder.cpp
   src/EvidenceBuilder.h
   src/EvidenceBuilderCandidates.cpp

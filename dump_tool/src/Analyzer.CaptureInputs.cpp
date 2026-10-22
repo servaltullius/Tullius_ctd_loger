@@ -335,6 +335,78 @@ bool CapturedMo2FoldersAreLocal(const CapturedMo2State& state)
   return true;
 }
 
+// engine_spin_nan (Analyzer.h EngineSpinInfo): the threads the main thread may
+// be waiting on (the game thread FindBlockedGameThread named, the lock owner,
+// game threads running engine code while the main thread waits on a sync
+// object) and the main thread itself, in that order; only those WCT saw
+// running in both passes are probed. The code pattern and the NaN are the
+// gate: a NaN in such a loop never lets it end.
+void DetectEngineSpin(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& allModules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  std::uint32_t mainTid,
+  const std::vector<ModalStackFrame>& mainThreadFrames,
+  const std::vector<ThreadTopFrames>& gameThreadFrames,
+  const std::vector<ModalStackFrame>& lockOwnerFrames,
+  AnalysisResult& out)
+{
+  const auto& wait = out.main_thread_wait;
+  std::vector<std::uint32_t> tids;
+  if (wait.blocked_thread_tid != 0u) {
+    tids.push_back(wait.blocked_thread_tid);
+  }
+  if (out.main_thread_lock_owner.tid != 0u) {
+    tids.push_back(out.main_thread_lock_owner.tid);
+  }
+  if (wait.kind == "engine_wait" && wait.wait_class == "sync") {
+    for (const auto& thread : gameThreadFrames) {
+      if (!thread.frames.empty() && thread.frames.front().is_game_exe) {
+        tids.push_back(thread.tid);
+      }
+    }
+  }
+  tids.push_back(mainTid);
+  const auto running = internal::FindWctThreadsRunningInBothPasses(out.wct_json_utf8, tids);
+  for (const auto tid : running) {
+    const auto probe = internal::ProbeFloatCompareSpin(dumpBase, dumpSize, allModules, threads, tid);
+    if (!probe.loop_found) {
+      continue;
+    }
+    const auto mi = FindModuleIndexForAddress(allModules, probe.rip);
+    if (!mi || !allModules[*mi].is_game_exe) {
+      continue;  // a loop in a plugin is that plugin running, as before
+    }
+    if (out.engine_spin.loop_found && (out.engine_spin.nan_detected || !probe.nan)) {
+      continue;  // the first NaN loop wins, else the first loop
+    }
+    const std::vector<ModalStackFrame>* frames = nullptr;
+    if (tid == mainTid) {
+      frames = &mainThreadFrames;
+    } else if (tid == out.main_thread_lock_owner.tid && !lockOwnerFrames.empty()) {
+      frames = &lockOwnerFrames;
+    } else {
+      const auto it = std::find_if(gameThreadFrames.begin(), gameThreadFrames.end(),
+        [&](const ThreadTopFrames& t) { return t.tid == tid; });
+      frames = it != gameThreadFrames.end() ? &it->frames : nullptr;
+    }
+    auto& spin = out.engine_spin;
+    spin = EngineSpinInfo{};
+    spin.loop_found = true;
+    spin.nan_detected = probe.nan;
+    spin.tid = tid;
+    spin.is_main_thread = tid == mainTid;
+    spin.rip_module = allModules[*mi].filename;
+    spin.rip_offset = probe.rip - allModules[*mi].base;
+    spin.compare = probe.compare;
+    spin.nan_register = probe.nan_register;
+    spin.nan_bits = probe.nan_bits;
+    spin.mxcsr = probe.mxcsr;
+    spin.call_path_modules = frames ? CallPathModules(*frames) : std::vector<std::wstring>{};
+  }
+}
+
 }  // namespace
 
 std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out)
@@ -887,7 +959,29 @@ void ComputeSuspects(
       L"[Freeze] crash_logger_thread_dump_deadlock: stack-module suspects dropped (main-thread call path only)");
     ApplyCrashLoggerThreadDumpDeadlockVerdict(out);
   }
-  if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread) {
+  if (modalProbeTid != 0u && !out.crash_logger_thread_dump_deadlock.detected) {
+    DetectEngineSpin(
+      dumpBase, dumpSize, allModules, threads, modalProbeTid, mainThreadFrames, gameThreadFrames, lockOwnerFrames, out);
+  }
+  if (out.engine_spin.nan_detected) {
+    // The engine looped on a NaN value: no plugin on the stacks leads, and the
+    // game thread the main thread waited for keeps only its call path.
+    ApplyEngineSpinNanVerdict(out.main_thread_wait, out.engine_spin);
+    const auto& spin = out.engine_spin;
+    out.diagnostics.push_back(L"[Freeze] engine_spin_nan: tid=" + std::to_wstring(spin.tid) + L" rip=" +
+      EngineSpinLocation(spin) + L" " + Utf8ToWide(spin.nan_register) +
+      L"=NaN; stack-module suspects kept as call path only");
+    for (auto& suspect : out.suspects) {
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(opt.language, suspect.confidence_level);
+      suspect.reason += opt.language == i18n::Language::kEnglish
+        ? L" (the game engine was looping on a NaN value; modules on the stacks are on the call path, not shown to "
+          L"be the freeze cause)"
+        : L" (게임 엔진이 NaN 값으로 같은 계산을 반복하고 있었으므로 스택의 모듈은 호출 경로일 뿐 프리징 원인으로 확인된 것이 "
+          L"아님)";
+    }
+  }
+  if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread && !out.engine_spin.nan_detected) {
     // The main thread was sitting in a wait it did not get from these
     // modules: the engine's own sleep/wait or the graphics driver. Plugins on
     // its stack were only on the call path (ADR-0009).
@@ -925,7 +1019,7 @@ void ComputeSuspects(
     out.suspects.insert(out.suspects.begin(), std::move(lead));
   }
 
-  if (hangLike && mainTid.has_value() && !out.suspects.empty()) {
+  if (hangLike && mainTid.has_value() && !out.suspects.empty() && !out.engine_spin.nan_detected) {
     constexpr std::size_t kNearStackSlots = 32u;
     constexpr std::size_t kMinimumThreadGroup = 4u;
     const auto matchingTids = internal::FindThreadsWithNearStackModule(

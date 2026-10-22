@@ -169,7 +169,48 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
       }
       blocked.details = JoinList(details, details.size(), L" | ");
       r.evidence.push_back(std::move(blocked));
+    } else if (HasCallPathGameThread(wait) &&
+               !(r.engine_spin.nan_detected && r.engine_spin.tid == wait.blocked_thread_tid)) {
+      // (The engine NaN loop's own item below describes that thread.)
+      EvidenceItem callPath{};
+      callPath.confidence_level = i18n::ConfidenceLevel::kLow;
+      callPath.confidence = ConfidenceText(lang, callPath.confidence_level);
+      callPath.title = en ? L"The game thread the main thread waited for was running game engine code"
+                          : L"메인 스레드가 기다린 게임 스레드는 게임 엔진 코드를 실행 중이었음";
+      std::vector<std::wstring> details = {
+        L"tid " + std::to_wstring(wait.blocked_thread_tid),
+        (en ? L"top: " : L"맨 위: ") + wait.blocked_top,
+      };
+      if (!wait.blocked_path_modules.empty()) {
+        details.push_back((en ? L"plugins further down (call path only): " : L"스택 아래쪽 플러그인(호출 경로일 뿐): ") +
+          JoinList(wait.blocked_path_modules, wait.blocked_path_modules.size(), L", "));
+      }
+      callPath.details = JoinList(details, details.size(), L" | ");
+      r.evidence.push_back(std::move(callPath));
     }
+  }
+
+  if (r.engine_spin.nan_detected) {
+    const auto& spin = r.engine_spin;
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"The game engine was looping on a NaN value" : L"게임 엔진이 NaN 값으로 같은 계산을 반복하고 있었음";
+    wchar_t bits[32]{};
+    swprintf_s(bits, L"0x%llX", static_cast<unsigned long long>(spin.nan_bits));
+    std::vector<std::wstring> parts = {
+      (spin.is_main_thread ? (en ? L"main thread " : L"메인 스레드 ") : (en ? L"thread " : L"스레드 ")) +
+        std::to_wstring(spin.tid),
+      en ? L"WCT: running in both passes" : L"WCT: 두 번 모두 실행 중",
+      (en ? L"loop: " : L"루프: ") + EngineSpinLocation(spin) + L" (" + ToWideAscii(spin.compare) + L")",
+      ToWideAscii(spin.nan_register) + L" = " + bits + L" (NaN)",
+    };
+    if (!spin.call_path_modules.empty()) {
+      parts.push_back((en ? L"plugins on its stack (call path only): " : L"그 스레드 스택의 플러그인(호출 경로일 뿐): ") +
+        JoinList(spin.call_path_modules, spin.call_path_modules.size(), L", "));
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
+    r.evidence.push_back(std::move(e));
   }
 
   if (!r.modal_dialog_wait.detected && r.main_thread_lock_owner.tid != 0u) {

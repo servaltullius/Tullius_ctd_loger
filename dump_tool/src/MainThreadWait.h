@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -44,13 +45,22 @@ struct ThreadTopFrames
 // Frames searched for plugin code on a game thread.
 inline constexpr std::size_t kBlockedThreadTopFrames = 12;
 
+// Game engine code on top of a game thread with the first plugin frame this
+// many frames down (or deeper): the engine was doing its own work, and the
+// plugin only started the call (engine_call_path). In the 2026-10-22 freeze
+// the engine spun five frames above SkyrimUpscaler.dll, which only called the
+// engine's update. A plugin within the top four frames is still the lead.
+inline constexpr std::size_t kCallPathPluginDepth = 5;
+
 // Only for an engine_wait on a sync object (the main thread waiting for other
 // game threads): fills wait.blocked_* with the game thread that was inside
 // plugin code. Threads waiting inside the plugin come first, then engine code
 // the plugin called, then plugin code running; the shallower plugin frame
-// wins a tie. The Windows system, the game, the SKSE runtime, the graphics
-// stack, known hook frameworks and SkyrimDiag itself are not plugin code.
-// When WCT named the thread holding the lock the main thread waits on
+// wins a tie. A thread running engine code with its first plugin frame
+// kCallPathPluginDepth or more frames down comes last, as engine_call_path:
+// no plugin leads then. The Windows system, the game, the SKSE runtime, the
+// graphics stack, known hook frameworks and SkyrimDiag itself are not plugin
+// code. When WCT named the thread holding the lock the main thread waits on
 // (lockOwnerTid != 0), the main thread waits for that thread only, so no
 // other game thread is considered.
 void FindBlockedGameThread(
@@ -58,8 +68,26 @@ void FindBlockedGameThread(
   const std::vector<ThreadTopFrames>& gameThreads,
   std::uint32_t lockOwnerTid = 0);
 
-// The main thread waited for another game thread that was inside plugin code.
+// The main thread waited for another game thread that was inside plugin code
+// (not engine_call_path: that names no plugin).
 bool HasBlockedGameThread(const MainThreadWaitInfo& wait);
+
+// The main thread waited for another game thread that was running engine code,
+// with plugins only further down its stack (engine_call_path).
+bool HasCallPathGameThread(const MainThreadWaitInfo& wait);
+
+// The modules on a stack other than Windows, the game, the SKSE runtime and
+// the graphics stack, once each, innermost first, at most six.
+std::vector<std::wstring> CallPathModules(const std::vector<ModalStackFrame>& frames);
+
+// After an engine_spin_nan verdict: the engine itself looped, so no plugin on
+// the stacks leads. A game thread the main thread waited for keeps its record
+// as engine_call_path when it is the spinning thread (its plugins listed as
+// call path), and is dropped otherwise.
+void ApplyEngineSpinNanVerdict(MainThreadWaitInfo& wait, const EngineSpinInfo& spin);
+
+// "SkyrimSE.exe+0xd17465".
+std::wstring EngineSpinLocation(const EngineSpinInfo& spin);
 
 // The code bytes before an instruction pointer end with a syscall (0F 05): a
 // thread stopped there is in a system call. A blocked thread stopped anywhere

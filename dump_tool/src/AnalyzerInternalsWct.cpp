@@ -514,6 +514,54 @@ std::uint32_t CountWctThreadsWithStableContextSwitches(
   }
 }
 
+std::vector<std::uint32_t> FindWctThreadsRunningInBothPasses(
+  std::string_view wctJsonUtf8,
+  const std::vector<std::uint32_t>& targetTids)
+{
+  std::vector<std::uint32_t> running;
+  if (wctJsonUtf8.empty() || targetTids.empty()) {
+    return running;
+  }
+  try {
+    const auto json = nlohmann::json::parse(wctJsonUtf8, nullptr, /*allow_exceptions=*/true);
+    const auto passesIt = json.find("passes");
+    if (passesIt == json.end() || !passesIt->is_array() || passesIt->size() < 2u) {
+      return running;
+    }
+    // The thread's own node (listed first) is Running in this usable pass.
+    const auto runningIn = [](const nlohmann::json& pass, std::uint32_t tid) {
+      if (!pass.is_object() || !pass.value("capture_usable", false)) {
+        return false;
+      }
+      const auto threadsIt = pass.find("threads");
+      if (threadsIt == pass.end()) {
+        return false;
+      }
+      const auto* entry = FindThreadEntry(*threadsIt, tid);
+      if (!entry) {
+        return false;
+      }
+      const auto nodesIt = entry->find("nodes");
+      if (nodesIt == entry->end() || !nodesIt->is_array() || nodesIt->empty()) {
+        return false;
+      }
+      const auto& node = nodesIt->front();
+      return NodeThreadId(node) == tid && node.value("objectStatus", 0u) == kWctObjectStatusRunning;
+    };
+    for (const auto tid : targetTids) {
+      if (tid == 0u || std::find(running.begin(), running.end(), tid) != running.end()) {
+        continue;
+      }
+      if (runningIn(passesIt->front(), tid) && runningIn(passesIt->back(), tid)) {
+        running.push_back(tid);
+      }
+    }
+  } catch (...) {
+    running.clear();
+  }
+  return running;
+}
+
 std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wctJsonUtf8)
 {
   const auto freeze = TryParseWctFreezeSummary(wctJsonUtf8);

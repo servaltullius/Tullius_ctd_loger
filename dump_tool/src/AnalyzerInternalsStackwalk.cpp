@@ -3,10 +3,12 @@
 #include "AddressResolver.h"
 #include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
+#include "EngineSpinLoop.h"
 #include "ThreadEntryHooks.h"
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace skydiag::dump_tool::internal {
 namespace {
@@ -497,6 +499,72 @@ CrashLoggerThreadDumpProbe ProbeCrashLoggerThreadDump(
       probe.crash_logger_tid = thread.tid;
       probe.crash_logger_module = hitModule->filename;
     }
+  }
+  return probe;
+}
+
+FloatCompareSpinProbe ProbeFloatCompareSpin(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<ThreadRecord>& threads,
+  std::uint32_t tid)
+{
+  FloatCompareSpinProbe probe{};
+  const auto it = std::find_if(threads.begin(), threads.end(), [&](const ThreadRecord& tr) { return tr.tid == tid; });
+  CONTEXT ctx{};
+  const std::uint8_t* contextBytes = nullptr;
+  std::size_t contextSize = 0;
+  if (tid == 0u || it == threads.end() || !ReadThreadContextWin64(dumpBase, dumpSize, *it, ctx) || ctx.Rip == 0 ||
+      !minidump::GetThreadContextBytes(dumpBase, dumpSize, *it, contextBytes, contextSize)) {
+    return probe;
+  }
+  probe.rip = ctx.Rip;
+  MinidumpMemoryView mem;
+  if (!mem.Init(dumpBase, dumpSize, &threads)) {
+    return probe;
+  }
+  // The dump's own code bytes first (a local SkyrimSE.exe has its code
+  // encrypted on disk), then the matching local image.
+  const LocalImageMemory localImages(modules);
+  const auto readWindow = [&](const MinidumpMemoryView& view, std::size_t before, std::size_t after,
+                              std::vector<std::uint8_t>& out) {
+    if (ctx.Rip < before) {
+      return false;
+    }
+    out.assign(before + after, 0);
+    std::size_t got = 0;
+    return view.Read(ctx.Rip - before, out.data(), out.size(), got) && got == out.size();
+  };
+  MinidumpMemoryView withImages = mem;
+  withImages.image_fallback = &localImages;
+  std::vector<std::uint8_t> code;
+  std::size_t ripOffset = 0;
+  // A shorter window when the full one crosses the end of what is readable.
+  for (const std::size_t divisor : { 1u, 2u }) {
+    const std::size_t before = kSpinLoopWindowBefore / divisor;
+    const std::size_t after = kSpinLoopWindowAfter / divisor;
+    if (readWindow(mem, before, after, code) || readWindow(withImages, before, after, code)) {
+      ripOffset = before;
+      break;
+    }
+    code.clear();
+  }
+  if (code.empty()) {
+    return probe;
+  }
+  const auto loop = FindFloatCompareLoop(code, ripOffset);
+  if (!loop.found) {
+    return probe;
+  }
+  probe.loop_found = true;
+  probe.compare = FloatCompareMnemonic(loop);
+  probe.mxcsr = ReadContextMxCsr(contextBytes, contextSize).value_or(0u);
+  std::uint64_t bits = 0;
+  if (const auto reg = FindNaNCompareRegister(loop, contextBytes, contextSize, &bits)) {
+    probe.nan = true;
+    probe.nan_register = "xmm" + std::to_string(static_cast<unsigned>(*reg));
+    probe.nan_bits = bits;
   }
   return probe;
 }

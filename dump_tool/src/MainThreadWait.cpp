@@ -297,8 +297,12 @@ struct BlockedCandidate
 {
   const ThreadTopFrames* thread = nullptr;
   std::size_t pluginIndex = 0;
-  int rank = 0;  // 0 waiting in the plugin, 1 engine called by it, 2 plugin running
+  // 0 waiting in the plugin, 1 engine called by it, 2 plugin running, 3 engine
+  // running with the plugin only on its call path
+  int rank = 0;
 };
+
+constexpr int kCallPathRank = 3;
 
 }  // namespace
 
@@ -336,7 +340,11 @@ void FindBlockedGameThread(
                        Contains(kSleepApis, above.symbol) || Contains(kSyncApis, above.symbol) ||
                        IsSystemCallStub(above);
       }
-      BlockedCandidate candidate{ &thread, i, i == 0 ? 2 : (engineAbove ? 1 : (mayWaitAbove ? 0 : 2)) };
+      int rank = i == 0 ? 2 : (engineAbove ? 1 : (mayWaitAbove ? 0 : 2));
+      if (rank == 1 && i >= kCallPathPluginDepth) {
+        rank = kCallPathRank;
+      }
+      BlockedCandidate candidate{ &thread, i, rank };
       candidates.push_back(candidate);
       break;
     }
@@ -353,18 +361,79 @@ void FindBlockedGameThread(
   wait.blocked_module = plugin.module_filename;
   wait.blocked_module_path = plugin.module_path;
   wait.blocked_mod_name = plugin.inferred_mod_name;
-  wait.blocked_state = best.rank == 0 ? "waiting_in_plugin" : (best.rank == 1 ? "engine_call_from_plugin" : "running_in_plugin");
+  wait.blocked_state = best.rank == 0 ? "waiting_in_plugin"
+    : best.rank == 1                  ? "engine_call_from_plugin"
+    : best.rank == 2                  ? "running_in_plugin"
+                                      : "engine_call_path";
   // The call the plugin made (KERNELBASE.dll!SleepEx) reads better than the
   // syscall stub on top.
   const auto& topFrame = (best.rank == 0 && best.pluginIndex > 0) ? best.thread->frames[best.pluginIndex - 1]
                                                                    : best.thread->frames.front();
   wait.blocked_top = FrameName(topFrame);
   wait.blocked_thread_count = static_cast<std::uint32_t>(candidates.size());
+  wait.blocked_path_modules.clear();
+  if (best.rank == kCallPathRank) {
+    wait.blocked_path_modules = CallPathModules(best.thread->frames);
+  }
 }
 
 bool HasBlockedGameThread(const MainThreadWaitInfo& wait)
 {
-  return wait.blocked_thread_tid != 0u && !wait.blocked_module.empty();
+  return wait.blocked_thread_tid != 0u && !wait.blocked_module.empty() && wait.blocked_state != "engine_call_path";
+}
+
+bool HasCallPathGameThread(const MainThreadWaitInfo& wait)
+{
+  return wait.blocked_thread_tid != 0u && wait.blocked_state == "engine_call_path";
+}
+
+std::vector<std::wstring> CallPathModules(const std::vector<ModalStackFrame>& frames)
+{
+  std::vector<std::wstring> modules;
+  std::vector<std::wstring> seen;
+  for (const auto& frame : frames) {
+    if (!frame.has_module || frame.is_system || frame.is_game_exe || frame.is_skse_runtime ||
+        IsGraphicsStackModule(frame.module_filename)) {
+      continue;
+    }
+    const auto lower = LowerAscii(frame.module_filename);
+    if (std::find(seen.begin(), seen.end(), lower) != seen.end()) {
+      continue;
+    }
+    seen.push_back(lower);
+    modules.push_back(frame.module_filename);
+    if (modules.size() >= kMaxPathModules) {
+      break;
+    }
+  }
+  return modules;
+}
+
+void ApplyEngineSpinNanVerdict(MainThreadWaitInfo& wait, const EngineSpinInfo& spin)
+{
+  if (!spin.nan_detected || wait.blocked_thread_tid == 0u) {
+    return;
+  }
+  if (wait.blocked_thread_tid == spin.tid) {
+    wait.blocked_state = "engine_call_path";
+    wait.blocked_path_modules = spin.call_path_modules;
+    return;
+  }
+  wait.blocked_thread_tid = 0;
+  wait.blocked_module.clear();
+  wait.blocked_module_path.clear();
+  wait.blocked_mod_name.clear();
+  wait.blocked_state.clear();
+  wait.blocked_top.clear();
+  wait.blocked_thread_count = 0;
+  wait.blocked_path_modules.clear();
+}
+
+std::wstring EngineSpinLocation(const EngineSpinInfo& spin)
+{
+  wchar_t offset[32]{};
+  std::swprintf(offset, sizeof(offset) / sizeof(offset[0]), L"+0x%llx", static_cast<unsigned long long>(spin.rip_offset));
+  return spin.rip_module + offset;
 }
 
 bool EndsWithSyscall(const std::vector<std::uint8_t>& codeBefore)
@@ -507,6 +576,7 @@ void ApplyCrashLoggerThreadDumpDeadlockVerdict(AnalysisResult& out)
   wait.blocked_state.clear();
   wait.blocked_top.clear();
   wait.blocked_thread_count = 0;
+  wait.blocked_path_modules.clear();
 }
 
 i18n::ConfidenceLevel CrashLoggerThreadDumpDeadlockConfidence(

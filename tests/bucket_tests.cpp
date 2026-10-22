@@ -125,6 +125,22 @@ static void Test_FreezeStateKey_IsTheStateAlone()
   assert(deadlock != ComputeLockOwnerBucketKey("crash_logger_thread_dump_deadlock", L"", L""));
 }
 
+// engine_spin_nan: keyed by the spinning engine instruction alone.
+static void Test_EngineSpinKey_IsTheLoopLocation()
+{
+  using skydiag::dump_tool::ComputeEngineSpinBucketKey;
+  using skydiag::dump_tool::ComputeFreezeStateBucketKey;
+  using skydiag::dump_tool::ComputeHangBucketKey;
+
+  const auto spin = ComputeEngineSpinBucketKey("engine_spin_nan", L"SkyrimSE.exe", 0xd17465);
+  assert(spin.starts_with(L"HANG1-") && spin.size() == 6 + 16);
+  assert(spin == ComputeEngineSpinBucketKey("engine_spin_nan", L" skyrimse.EXE ", 0xd17465));
+  assert(spin == ComputeHangBucketKey("v=1|kind=engine_spin_nan|rip=skyrimse.exe+0xd17465"));
+  assert(spin != ComputeEngineSpinBucketKey("engine_spin_nan", L"SkyrimSE.exe", 0xd17466));
+  assert(spin != ComputeEngineSpinBucketKey("engine_spin_nan", L"SkyrimVR.exe", 0xd17465));
+  assert(spin != ComputeFreezeStateBucketKey("engine_spin_nan"));
+}
+
 int main()
 {
   Test_SameInput_ProducesStableKey();
@@ -135,5 +151,6 @@ int main()
   Test_HangKey_IsStableAndSeparateFromCrashKeys();
   Test_LockOwnerKey_GroupsByTheOwnerThread();
   Test_FreezeStateKey_IsTheStateAlone();
+  Test_EngineSpinKey_IsTheLoopLocation();
   return 0;
 }

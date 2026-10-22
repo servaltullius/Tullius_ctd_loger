@@ -161,6 +161,25 @@ std::wstring DescribeBystanderWait(const AnalysisResult& r, i18n::Language lang,
           L"그래픽 모드, 비디오 메모리)을 가리킵니다. (신뢰도: " + conf + L")");
   }
   const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
+  if (HasCallPathGameThread(wait)) {
+    // Engine code was running on that thread; the plugins below it only
+    // started the call (kCallPathPluginDepth).
+    const std::wstring tid = std::to_wstring(wait.blocked_thread_tid);
+    const std::wstring below = wait.blocked_path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.blocked_path_modules);
+    return en
+      ? (L"The game main thread was waiting inside the game engine (" + wait.waiting_module + api +
+          L") for another game thread to finish. That thread (tid " + tid + L") was running game engine code (top: " +
+          wait.blocked_top + L")" +
+          (below.empty() ? std::wstring(L".")
+                         : (L"; plugins further down its stack (" + below +
+                             L") were only on the call path, not shown to be the cause.")) +
+          L" This dump alone cannot tell why the engine did not finish. (Confidence: " + conf + L")")
+      : (L"게임 메인 스레드는 게임 엔진(" + wait.waiting_module + api + L") 안에서 다른 게임 스레드의 작업이 끝나기를 기다리고 "
+          L"있었습니다. 그 스레드(tid " + tid + L")는 게임 엔진 코드를 실행하고 있었고(맨 위: " + wait.blocked_top + L")" +
+          (below.empty() ? std::wstring(L".")
+                         : (L", 스택 아래쪽 플러그인(" + below + L")은 호출 경로에 있었을 뿐 원인으로 확인된 것이 아닙니다.")) +
+          L" 엔진이 왜 끝나지 않았는지는 이 덤프만으로 알 수 없습니다. (신뢰도: " + conf + L")");
+  }
   if (HasBlockedGameThread(wait)) {
     const std::wstring medium = ConfidenceText(lang, i18n::ConfidenceLevel::kMedium);
     const std::wstring who = DescribeBlockedPlugin(wait);
@@ -264,6 +283,33 @@ std::wstring DescribeCrashLoggerThreadDumpDeadlock(const AnalysisResult& r, i18n
         L"그 스레드도 재개되지 못한 것으로 보입니다. 메인 스레드는 그 스레드가 쥔 " +
         DescribeLockType(owner, en) + L" 잠금을 기다리다 멈췄을 뿐이며, 메인 스레드 스택의 모드" +
         (mods.empty() ? std::wstring{} : (L"(" + mods + L")")) + L"는 원인이 아닙니다. (신뢰도: " + conf + L")");
+}
+
+// engine_spin_nan (FreezeCandidateConsensus): an engine loop on a NaN value,
+// in plain words; no mod is named, the stack plugins are the call path.
+std::wstring DescribeEngineSpinNan(const AnalysisResult& r, i18n::Language lang, bool en)
+{
+  const auto& spin = r.engine_spin;
+  const std::wstring conf = ConfidenceText(lang, i18n::ConfidenceLevel::kMedium);
+  const std::wstring reg(spin.nan_register.begin(), spin.nan_register.end());  // ASCII
+  const std::wstring mods = spin.call_path_modules.empty() ? std::wstring{} : JoinWaitPath(spin.call_path_modules);
+  const std::wstring who = spin.is_main_thread
+    ? (en ? std::wstring(L"The main thread") : std::wstring(L"메인 스레드"))
+    : (en ? (L"Game thread " + std::to_wstring(spin.tid)) : (L"게임 스레드 " + std::to_wstring(spin.tid)));
+  return en
+    ? (L"A value the game was calculating became NaN (not a number), so the engine kept repeating the same "
+        L"calculation and froze. " + who + L" was stuck in an engine loop (" + EngineSpinLocation(spin) +
+        L") whose compared value (" + reg + L") was NaN, so the loop could never end. This dump does not show which mod "
+        L"produced that value" +
+        (mods.empty() ? std::wstring(L".")
+                      : (L"; the plugins on that thread's stack (" + mods + L") were only on the call path.")) +
+        L" (Confidence: " + conf + L")")
+    : (L"게임 계산 값이 숫자가 아닌 값(NaN)이 되어, 엔진이 같은 계산을 끝없이 반복하다 멈췄습니다. " + who +
+        L"이(가) 게임 엔진의 계산 루프(" + EngineSpinLocation(spin) + L")에서 빠져나오지 못하고 있었고, 비교하던 값(" + reg +
+        L")이 NaN이라 루프가 끝날 수 없었습니다. 이 값을 어느 모드가 만들었는지는 이 덤프에 나타나지 않습니다" +
+        (mods.empty() ? std::wstring(L".")
+                      : (L". 그 스레드 스택의 플러그인(" + mods + L")은 호출 경로에 있었을 뿐입니다.")) +
+        L" (신뢰도: " + conf + L")");
 }
 
 // A WCT cycle or a loader stall explains the freeze (FreezeCandidateConsensus).
@@ -903,6 +949,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = hangPrefix + L" " + DescribeModalDialogWait(r.modal_dialog_wait, lang, en);
       } else if (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) {
         summary = hangPrefix + L" " + DescribeCrashLoggerThreadDumpDeadlock(r, lang, en);
+      } else if (r.engine_spin.nan_detected) {
+        summary = hangPrefix + L" " + DescribeEngineSpinNan(r, lang, en);
       } else if (r.hang_thread_module_consensus.has_consensus) {
         const auto& consensus = r.hang_thread_module_consensus;
         summary = en

@@ -23,6 +23,9 @@ struct FreezeSignalInput
   // Crash Logger thread-dump deadlock read from it.
   std::optional<MainThreadLockOwnerInfo> lock_owner;
   std::optional<CrashLoggerThreadDumpDeadlockInfo> crash_logger_thread_dump_deadlock;
+  // A thread spinning in an engine float compare loop (engine_spin_nan when
+  // nan_detected).
+  std::optional<EngineSpinInfo> engine_spin;
   std::vector<ActionableCandidate> actionable_candidates;
 };
 

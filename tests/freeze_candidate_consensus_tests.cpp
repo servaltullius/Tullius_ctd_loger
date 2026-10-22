@@ -601,6 +601,74 @@ static void TestConsensusCrashLoggerThreadDumpDeadlock()
   assert(BuildFreezeCandidateConsensus(modal, Language::kEnglish).state_id == "modal_dialog_wait");
 }
 
+// The 2026-10-22 freeze: the main thread waited in the engine; game thread
+// 19588 spun in the engine's angle loop with xmm0 = NaN, five engine frames
+// above SkyrimUpscaler.dll.
+static void TestConsensusEngineSpinNan()
+{
+  skydiag::dump_tool::MainThreadWaitInfo engineWait{};
+  engineWait.kind = "engine_wait";
+  engineWait.wait_class = "sync";
+  engineWait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+  engineWait.waiting_module = L"SkyrimSE.exe";
+  engineWait.path_modules = { L"hdtsmp64.dll" };
+  engineWait.blocked_thread_tid = 19588;
+  engineWait.blocked_module = L"SkyrimUpscaler.dll";
+  engineWait.blocked_state = "engine_call_path";
+  engineWait.blocked_top = L"SkyrimSE.exe";
+  engineWait.blocked_path_modules = { L"SkyrimUpscaler.dll", L"ScrabsPapyrusExtender.dll" };
+
+  skydiag::dump_tool::EngineSpinInfo spin{};
+  spin.loop_found = true;
+  spin.nan_detected = true;
+  spin.tid = 19588;
+  spin.rip_module = L"SkyrimSE.exe";
+  spin.rip_offset = 0xd17465;
+  spin.compare = "comiss";
+  spin.nan_register = "xmm0";
+  spin.call_path_modules = engineWait.blocked_path_modules;
+
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.main_thread_wait = engineWait;
+  input.engine_spin = spin;
+  input.actionable_candidates.push_back(MakeCandidate(L"hdtsmp64.dll", ConfidenceLevel::kLow));
+  input.blackbox = skydiag::dump_tool::BlackboxFreezeSummary{};
+  input.blackbox->has_context = true;
+  input.blackbox->recent_non_system_modules = { L"SomeRecent.dll" };
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.state_id == "engine_spin_nan");
+  assert(result.confidence_level == ConfidenceLevel::kMedium);
+  assert(result.primary_reasons.size() == 4u);
+  assert(result.primary_reasons[0].find(L"Thread 19588 was running in both WCT passes") != std::wstring::npos);
+  assert(result.primary_reasons[1].find(L"SkyrimSE.exe+0xd17465, comiss") != std::wstring::npos);
+  assert(result.primary_reasons[1].find(L"xmm0 held NaN") != std::wstring::npos);
+  assert(result.primary_reasons[2].find(L"call path: SkyrimUpscaler.dll, ScrabsPapyrusExtender.dll") != std::wstring::npos);
+  // The main thread's own wait comes after the loop's reasons.
+  assert(result.primary_reasons[3].find(L"waiting inside the game engine") != std::wstring::npos);
+  // No mod is named: neither stack candidates nor recent modules.
+  assert(result.related_candidates.empty());
+
+  // A loop without NaN is no verdict; the thread is only the call path.
+  FreezeSignalInput noNan = input;
+  noNan.engine_spin->nan_detected = false;
+  const auto plain = BuildFreezeCandidateConsensus(noNan, Language::kKorean);
+  assert(plain.state_id == "freeze_candidate");
+  bool callPathReason = false;
+  for (const auto& reason : plain.primary_reasons) {
+    callPathReason = callPathReason ||
+      reason.find(L"게임 스레드(tid 19588)는 게임 엔진 코드를 실행 중이었음") != std::wstring::npos;
+  }
+  assert(callPathReason);
+  assert(!plain.related_candidates.empty());
+
+  // A modal dialog still outranks it.
+  FreezeSignalInput modal = input;
+  modal.modal_dialog_wait = skydiag::dump_tool::ModalDialogWaitInfo{};
+  modal.modal_dialog_wait->detected = true;
+  assert(BuildFreezeCandidateConsensus(modal, Language::kEnglish).state_id == "modal_dialog_wait");
+}
+
 int main()
 {
   TestSourceContracts();
@@ -619,5 +687,6 @@ int main()
   TestConsensusModalDialogWaitOutranksOtherStates();
   TestConsensusMainThreadWaitLeadsTheReasons();
   TestConsensusCrashLoggerThreadDumpDeadlock();
+  TestConsensusEngineSpinNan();
   return 0;
 }

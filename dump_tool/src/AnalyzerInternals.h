@@ -104,6 +104,28 @@ CrashLoggerThreadDumpProbe ProbeCrashLoggerThreadDump(
   std::uint32_t mainTid,
   std::uint32_t ownerTid);
 
+// What engine_spin_nan reads from the dump for one thread: a floating-point
+// compare loop at its instruction pointer (EngineSpinLoop.h), from the code
+// bytes the dump holds or else the matching local image, and whether the
+// compared XMM register (low lane, from the thread's own context) is NaN.
+struct FloatCompareSpinProbe
+{
+  bool loop_found = false;
+  bool nan = false;
+  std::uint64_t rip = 0;
+  std::string compare;       // comiss / ucomiss / comisd / ucomisd
+  std::string nan_register;  // e.g. "xmm0"
+  std::uint64_t nan_bits = 0;
+  std::uint32_t mxcsr = 0;
+};
+
+FloatCompareSpinProbe ProbeFloatCompareSpin(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  std::uint32_t tid);
+
 // ADR-0016: the crash ran the int3 padding of a hook stub that was being
 // written; detected only for EXCEPTION_BREAKPOINT outside every module.
 HookStubRaceInfo DetectHookStubRace(

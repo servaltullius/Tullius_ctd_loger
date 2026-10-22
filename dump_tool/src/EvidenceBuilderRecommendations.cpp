@@ -736,8 +736,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // A lock-owner wait (both WCT passes) puts the stall on the owner thread,
   // and Crash Logger's thread-dump deadlock on Crash Logger; candidates from
   // the main thread's stack only called into the wait.
+  // An engine loop on a NaN value (engine_spin_nan) names no mod either: the
+  // stack plugins only called into the engine.
   const bool lockOwnerWait = IsLockOwnerFreezeState(r.freeze_analysis.state_id);
-  if (!lockOwnerWait) {
+  const bool stackIsCallPathOnly = lockOwnerWait || r.engine_spin.nan_detected;
+  if (!stackIsCallPathOnly) {
     AddActionableCandidateRecommendations(
       r,
       en,
@@ -746,7 +749,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
   }
 
-  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !lockOwnerWait;
+  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !stackIsCallPathOnly;
   if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
       !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
@@ -934,7 +937,25 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     const auto& stateId = r.freeze_analysis.state_id;
     const bool stallExplained = stateId == "deadlock_likely" || stateId == "synchronization_stall_likely" ||
       stateId == "loader_stall_likely" || r.hang_thread_module_consensus.has_consensus;
-    if (stallExplained) {
+    if (isHangLike && r.engine_spin.nan_detected) {
+      // engine_spin_nan comes first: the stuck thread itself is read.
+      const auto& mods = r.engine_spin.call_path_modules;
+      const std::wstring path = mods.empty() ? std::wstring{} : JoinList(mods, mods.size(), L", ");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] A value the game was calculating became NaN (not a number), and the engine looped on it "
+            L"forever (" + EngineSpinLocation(r.engine_spin) +
+            L"). Check the mods you recently added or updated that change combat, animation, AI/pathing or how actors "
+            L"move, disabling them one at a time." +
+            (path.empty() ? std::wstring{}
+                          : (L" The plugins on the stuck thread's stack (" + path +
+                              L") were only on the call path; do not remove them on this evidence alone.")))
+        : (L"[메인 스레드] 게임 계산 값이 숫자가 아닌 값(NaN)이 되어 엔진이 같은 계산을 끝없이 반복했습니다(" +
+            EngineSpinLocation(r.engine_spin) +
+            L"). 최근에 추가하거나 업데이트한 모드 중 전투, 애니메이션, AI/길찾기, 캐릭터 움직임을 바꾸는 모드를 하나씩 꺼 보며 "
+            L"확인하세요." +
+            (path.empty() ? std::wstring{}
+                          : (L" 멈춘 스레드 스택의 플러그인(" + path + L")은 호출 경로에 있었을 뿐이므로 이 근거만으로 빼지 마세요."))));
+    } else if (stallExplained) {
       // No [Main thread] advice.
     } else if (isHangLike && r.main_thread_lock_owner.confirmed &&
                IsGraphicsStackModule(r.main_thread_lock_owner.top_module)) {
@@ -1001,6 +1022,20 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
             who + L" (top: " + wait.blocked_top + L"). Disable or update " + who + L" and reproduce the same situation.")
         : (L"[메인 스레드] 메인 스레드는 게임 엔진 안에서 다른 게임 스레드를 기다리고 있었고, 그 스레드는 " + who +
             L" 코드 안에 있었습니다(맨 위: " + wait.blocked_top + L"). " + who + L"을(를) 끄거나 업데이트한 뒤 같은 상황을 재현해 보세요."));
+    } else if (isHangLike && HasCallPathGameThread(wait)) {
+      const auto& below = wait.blocked_path_modules;
+      const std::wstring path = below.empty()
+        ? std::wstring{}
+        : ((en ? L" (" : L"(") + JoinList(below, below.size(), L", ") + L")");
+      r.recommendations.push_back(en
+        ? (L"[Main thread] The main thread was waiting inside the game engine for another game thread, and that thread "
+            L"was running game engine code (top: " + wait.blocked_top + L"); the plugins further down its stack" + path +
+            L" were only on the call path. Do not remove them on this evidence alone; if the freeze repeats, capture it "
+            L"again while frozen (Ctrl+Shift+Backspace by default) and compare what stays the same.")
+        : (L"[메인 스레드] 메인 스레드는 게임 엔진 안에서 다른 게임 스레드를 기다리고 있었고, 그 스레드는 게임 엔진 코드를 "
+            L"실행하고 있었습니다(맨 위: " + wait.blocked_top + L"). 그 스레드 스택 아래쪽 플러그인" + path +
+            L"은 호출 경로에 있었을 뿐이니 이 근거만으로 빼지 마세요. 프리징이 반복되면 멈춘 상태에서 다시 캡처(기본 "
+            L"Ctrl+Shift+Backspace)해 공통점을 비교하세요."));
     } else if (isHangLike && wait.kind == "engine_wait") {
       const std::wstring path = wait.path_modules.empty()
         ? std::wstring{}

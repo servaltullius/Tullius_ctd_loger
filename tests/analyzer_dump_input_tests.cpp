@@ -12,6 +12,7 @@
 
 #include <DbgHelp.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -201,6 +202,106 @@ void TestLongModuleNames()
   Require(ReadMinidumpStringUtf8(dump.data(), dump.size(), 16, out) && out == "ab", "a normal string reads");
 }
 
+// engine_spin_nan from a dump: one thread whose captured memory holds the
+// 2026-10-22 loop (addss xmm0,xmm6; comiss xmm0,xmm7; jb -9) around its Rip,
+// with xmm0 = NaN in its context. The context's DataSize decides how much of
+// the context exists; the XMM read must stay inside it.
+constexpr std::uint32_t kSpinTid = 19588;
+constexpr std::uint64_t kCodeStart = 0x7ff780297440ull;
+constexpr std::size_t kCodeSize = 0x40;
+constexpr std::size_t kLoopOffset = 0x25;  // Rip = kCodeStart + 0x25 = ...297465
+
+std::vector<std::uint8_t> BuildSpinDump(std::uint32_t contextSize, std::uint32_t xmm0, bool loop = true)
+{
+  const std::size_t dirOff = sizeof(MINIDUMP_HEADER);
+  const std::size_t listOff = dirOff + sizeof(MINIDUMP_DIRECTORY);
+  const std::size_t listSize = offsetof(MINIDUMP_THREAD_LIST, Threads) + sizeof(MINIDUMP_THREAD);
+  const std::size_t contextOff = listOff + listSize;
+  const std::size_t codeOff = contextOff + sizeof(CONTEXT);
+  std::vector<std::uint8_t> dump(codeOff + kCodeSize, 0);
+
+  MINIDUMP_HEADER header{};
+  header.Signature = MINIDUMP_SIGNATURE;
+  header.Version = MINIDUMP_VERSION;
+  header.NumberOfStreams = 1;
+  header.StreamDirectoryRva = static_cast<RVA>(dirOff);
+  Put(dump, 0, header);
+  MINIDUMP_DIRECTORY dir{};
+  dir.StreamType = ThreadListStream;
+  dir.Location.DataSize = static_cast<ULONG32>(listSize);
+  dir.Location.Rva = static_cast<RVA>(listOff);
+  Put(dump, dirOff, dir);
+  const ULONG32 count = 1;
+  Put(dump, listOff, count);
+  // The code goes where the thread's stack memory would: without a memory
+  // list the analyzer reads thread memory ranges.
+  MINIDUMP_THREAD thread{};
+  thread.ThreadId = kSpinTid;
+  thread.Stack.StartOfMemoryRange = kCodeStart;
+  thread.Stack.Memory.DataSize = static_cast<ULONG32>(kCodeSize);
+  thread.Stack.Memory.Rva = static_cast<RVA>(codeOff);
+  thread.ThreadContext.DataSize = contextSize;
+  thread.ThreadContext.Rva = static_cast<RVA>(contextOff);
+  Put(dump, listOff + offsetof(MINIDUMP_THREAD_LIST, Threads), thread);
+
+  CONTEXT ctx{};
+  ctx.Rip = kCodeStart + kLoopOffset;
+  ctx.Rsp = 0x10000;
+  ctx.MxCsr = 0x1fbf;
+  ctx.FltSave.XmmRegisters[0].Low = xmm0;
+  ctx.FltSave.XmmRegisters[6].Low = 0x40C90FDBu;  // 2*pi
+  Put(dump, contextOff, ctx);
+
+  std::fill(dump.begin() + static_cast<std::ptrdiff_t>(codeOff), dump.end(), std::uint8_t{ 0xCC });
+  const std::uint8_t fieldLoop[] = { 0xF3, 0x0F, 0x58, 0xC6, 0x0F, 0x2F, 0xC7, 0x72, 0xF7 };
+  if (loop) {
+    std::memcpy(dump.data() + codeOff + kLoopOffset, fieldLoop, sizeof(fieldLoop));
+  }
+  return dump;
+}
+
+void TestEngineSpinProbeReadsTheDump()
+{
+  using skydiag::dump_tool::internal::ProbeFloatCompareSpin;
+  using skydiag::dump_tool::minidump::LoadThreads;
+  const std::vector<ModuleInfo> noModules;
+
+  auto dump = BuildSpinDump(static_cast<std::uint32_t>(sizeof(CONTEXT)), 0x7FE500DDu);
+  auto threads = LoadThreads(dump.data(), dump.size());
+  auto probe = ProbeFloatCompareSpin(dump.data(), dump.size(), noModules, threads, kSpinTid);
+  Require(probe.loop_found && probe.nan, "the field loop with NaN");
+  Require(probe.rip == kCodeStart + kLoopOffset, "the thread's Rip");
+  Require(probe.compare == "comiss" && probe.nan_register == "xmm0", "comiss on xmm0");
+  Require(probe.nan_bits == 0x7FE500DDu && probe.mxcsr == 0x1fbfu, "the NaN bits and MxCsr");
+
+  // A real number in xmm0: the loop is there, NaN is not.
+  dump = BuildSpinDump(static_cast<std::uint32_t>(sizeof(CONTEXT)), 0xBF800000u);
+  threads = LoadThreads(dump.data(), dump.size());
+  probe = ProbeFloatCompareSpin(dump.data(), dump.size(), noModules, threads, kSpinTid);
+  Require(probe.loop_found && !probe.nan && probe.nan_register.empty(), "a loop without NaN");
+
+  // A context cut off before the XMM registers: no NaN read past it.
+  dump = BuildSpinDump(0x1A0u, 0x7FE500DDu);
+  threads = LoadThreads(dump.data(), dump.size());
+  probe = ProbeFloatCompareSpin(dump.data(), dump.size(), noModules, threads, kSpinTid);
+  Require(probe.loop_found && !probe.nan, "XMM registers outside DataSize are not read");
+
+  // A context running past the end of the file is refused.
+  dump = BuildSpinDump(static_cast<std::uint32_t>(sizeof(CONTEXT)), 0x7FE500DDu);
+  dump.resize(dump.size() - kCodeSize - sizeof(CONTEXT) + 0x100u);
+  threads = LoadThreads(dump.data(), dump.size());
+  probe = ProbeFloatCompareSpin(dump.data(), dump.size(), noModules, threads, kSpinTid);
+  Require(!probe.loop_found && !probe.nan, "a truncated dump yields nothing");
+
+  // Other code at Rip, another thread id.
+  dump = BuildSpinDump(static_cast<std::uint32_t>(sizeof(CONTEXT)), 0x7FE500DDu, /*loop=*/false);
+  threads = LoadThreads(dump.data(), dump.size());
+  Require(!ProbeFloatCompareSpin(dump.data(), dump.size(), noModules, threads, kSpinTid).loop_found, "no loop");
+  dump = BuildSpinDump(static_cast<std::uint32_t>(sizeof(CONTEXT)), 0x7FE500DDu);
+  threads = LoadThreads(dump.data(), dump.size());
+  Require(!ProbeFloatCompareSpin(dump.data(), dump.size(), noModules, threads, 1234).loop_found, "unknown thread");
+}
+
 }  // namespace
 
 int main()
@@ -210,6 +311,7 @@ int main()
     TestDumpTimeRspWithoutAUsableExceptionContext();
     TestOnlyLocalFixedDrivePathsAreOpened();
     TestLongModuleNames();
+    TestEngineSpinProbeReadsTheDump();
   } catch (const std::exception& ex) {
     std::cerr << "analyzer_dump_input_tests failed: " << ex.what() << "\n";
     return 1;

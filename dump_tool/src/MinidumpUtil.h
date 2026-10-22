@@ -133,5 +133,13 @@ bool GetThreadStackBytes(
   const std::uint8_t*& outPtr,
   std::size_t& outSize,
   std::uint64_t& outBaseAddr);
+// The thread's context as the dump stores it (DataSize bytes, which may be
+// fewer than sizeof(CONTEXT)); false when it lies outside the dump.
+bool GetThreadContextBytes(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const ThreadRecord& tr,
+  const std::uint8_t*& outPtr,
+  std::size_t& outSize);
 
 }  // namespace skydiag::dump_tool::minidump

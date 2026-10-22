@@ -67,6 +67,7 @@ struct WctFreezeSummary
 inline constexpr std::uint32_t kWctObjectTypeCriticalSection = 1u;
 inline constexpr std::uint32_t kWctObjectTypeMutex = 3u;
 inline constexpr std::uint32_t kWctObjectTypeThread = 8u;
+inline constexpr std::uint32_t kWctObjectStatusRunning = 2u;
 inline constexpr std::uint32_t kWctObjectStatusOwned = 6u;
 
 // The thread holding the lock a thread waits on, read from that thread's own
@@ -96,6 +97,15 @@ std::optional<WctLockOwner> FindWctLockOwner(std::string_view wctJsonUtf8, std::
 std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJsonUtf8, std::size_t maxN);
 
 std::uint32_t CountWctThreadsWithStableContextSwitches(
+  std::string_view wctJsonUtf8,
+  const std::vector<std::uint32_t>& targetTids);
+
+// The threads of targetTids (in their order) whose own node is Running in the
+// first and the last usable pass: not waiting on anything. contextSwitches
+// may change (a spinning thread is still preempted: 41992 in the 2026-10-22
+// 12:38 freeze made 60 switches between passes). Empty without two usable
+// passes.
+std::vector<std::uint32_t> FindWctThreadsRunningInBothPasses(
   std::string_view wctJsonUtf8,
   const std::vector<std::uint32_t>& targetTids);
 

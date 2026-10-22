@@ -708,6 +708,25 @@ bool ReadThreadContextWin64(void* dumpBase, std::uint64_t dumpSize, const Thread
   return true;
 }
 
+bool GetThreadContextBytes(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const ThreadRecord& tr,
+  const std::uint8_t*& outPtr,
+  std::size_t& outSize)
+{
+  outPtr = nullptr;
+  outSize = 0;
+  const std::uint64_t rva = static_cast<std::uint64_t>(tr.context.Rva);
+  const std::uint64_t sz = static_cast<std::uint64_t>(tr.context.DataSize);
+  if (!dumpBase || rva == 0 || sz == 0 || rva > dumpSize || sz > (dumpSize - rva)) {
+    return false;
+  }
+  outPtr = static_cast<const std::uint8_t*>(dumpBase) + rva;
+  outSize = static_cast<std::size_t>(sz);
+  return true;
+}
+
 bool GetThreadStackBytes(
   void* dumpBase,
   std::uint64_t dumpSize,
