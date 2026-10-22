@@ -58,6 +58,7 @@ public sealed partial class MainWindow
         QuickEventsValueText.Text = "-";
 
         SummarySentenceText.Text = T("No analysis yet.", "아직 분석 결과가 없습니다.");
+        QuickAnswerLabelText.Text = T("Quick answer", "빠른 답");
         CallstackLabelText.Text = T("Callstack", "콜스택");
         EvidenceLabelText.Text = T("Evidence", "근거");
         ResourcesLabelText.Text = T("Recent Resources", "최근 리소스");

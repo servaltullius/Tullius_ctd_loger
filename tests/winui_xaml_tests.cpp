@@ -574,6 +574,34 @@ static void TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth()
     "Root scroll viewer must reserve vertical scrollbar width to prevent Triage layout shifts.");
 }
 
+// Players read the first card: the quick answer leads the analysis view,
+// above the technical summary sentence, and starts hidden.
+static void TestWinUiShowsQuickAnswerFirst()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  const auto card = xaml.find("x:Name=\"QuickAnswerCard\"");
+  const auto summaryCard = xaml.find("x:Name=\"SummarySentenceCard\"");
+  if (card == std::string::npos || summaryCard == std::string::npos || card > summaryCard) {
+    std::cerr << "The quick answer card must come before the summary sentence card.\n";
+    std::exit(1);
+  }
+  RequireContains(xaml, "x:Name=\"QuickAnswerCard\"\n                    Visibility=\"Collapsed\"",
+    "The quick answer card must start collapsed.");
+  RequireContains(xaml, "x:Name=\"QuickAnswerHeadlineText\"", "Quick answer headline text.");
+  RequireContains(xaml, "x:Name=\"QuickAnswerActionText\"", "Quick answer action text.");
+  RequireContains(xaml, "x:Name=\"QuickAnswerWhyText\"", "Quick answer doubt text.");
+
+  const auto cs = ReadMainWindowCodeBehindText(repoRoot);
+  RequireContains(cs, "QuickAnswerCard.Visibility = _vm.HasQuickAnswer", "Rendering must show the card only with a quick answer.");
+  RequireContains(cs, "T(\"Quick answer\", \"빠른 답\")", "The card label must be localized.");
+
+  const auto vm = ReadMainWindowViewModelText(repoRoot);
+  RequireContains(vm, "BuildQuickAnswerLines(summary)", "Share texts must start from the quick answer lines.");
+  const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
+  RequireContains(summary, "\"quick_answer\"", "The viewer must read the summary's quick_answer object.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -626,6 +654,7 @@ int main()
   TestWinUiCountsAllEventsAndKeepsNewestDumps();
   TestReviewFeedbackFollowsPrimaryGuidance();
   TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
+  TestWinUiShowsQuickAnswerFirst();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

@@ -193,7 +193,7 @@ public sealed partial class MainWindow
                 outDir,
                 summary.DumpIdentity,
                 cancellationToken);
-            SetBusy(false, T("Analysis complete. Review the candidates and checklist.", "분석 완료. 원인 후보와 체크리스트를 확인하세요."));
+            SetBusy(false, T("Analysis complete. The quick answer is at the top; details are below it.", "분석 완료. 맨 위의 빠른 답을 먼저 보고, 자세한 내용은 그 아래에서 확인하세요."));
             NavView.SelectedItem = NavTriage;
         }
         catch (OperationCanceledException)
@@ -218,6 +218,14 @@ public sealed partial class MainWindow
     {
         _vm.PopulateSummary(summary);
         SetAnalysisContentVisibility(true);
+
+        QuickAnswerHeadlineText.Text = _vm.QuickAnswerHeadline;
+        QuickAnswerActionText.Text = _vm.QuickAnswerAction;
+        QuickAnswerWhyText.Text = _vm.QuickAnswerWhy;
+        QuickAnswerWhyText.Visibility = string.IsNullOrWhiteSpace(_vm.QuickAnswerWhy)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        QuickAnswerCard.Visibility = _vm.HasQuickAnswer ? Visibility.Visible : Visibility.Collapsed;
 
         SummarySentenceText.Text = _vm.SummarySentence;
         BucketText.Text = _vm.BucketText;

@@ -407,6 +407,30 @@
               </StackPanel>
             </Border>
 
+            <!-- Quick answer: what happened, the suspect and one thing to try, in plain words -->
+            <Border x:Name="QuickAnswerCard"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource CardAcrylicBrush}"
+                    BorderBrush="{ThemeResource GlowBorderBrush}"
+                    BorderThickness="1" CornerRadius="8" Padding="20">
+              <StackPanel Spacing="6">
+                <TextBlock x:Name="QuickAnswerLabelText"
+                           FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}">
+                  Quick answer
+                </TextBlock>
+                <TextBlock x:Name="QuickAnswerHeadlineText"
+                           TextWrapping="WrapWholeWords" FontSize="20" FontWeight="SemiBold"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="QuickAnswerActionText"
+                           TextWrapping="WrapWholeWords" FontSize="15"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="QuickAnswerWhyText"
+                           TextWrapping="WrapWholeWords" FontSize="13"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Visibility="Collapsed" />
+              </StackPanel>
+            </Border>
+
             <!-- Summary sentence (full-width) -->
             <Border x:Name="SummarySentenceCard"
                     Background="{ThemeResource CardAcrylicBrush}"

@@ -4,6 +4,30 @@ namespace SkyrimDiagDumpToolWinUI;
 
 internal sealed partial class MainWindowViewModel
 {
+    // The quick answer as the report shows it: the headline with its
+    // likelihood, then "What to try" and, when the lead is not certain,
+    // "Why not certain". Empty for summaries written before it existed.
+    internal List<string> BuildQuickAnswerLines(AnalysisSummary summary)
+    {
+        var lines = new List<string>();
+        var quickAnswer = summary.QuickAnswer;
+        if (quickAnswer is null)
+        {
+            return lines;
+        }
+
+        lines.Add(quickAnswer.HeadlineLine);
+        if (!string.IsNullOrWhiteSpace(quickAnswer.Action))
+        {
+            lines.Add(T("What to try: ", "해볼 일: ") + quickAnswer.Action);
+        }
+        if (!string.IsNullOrWhiteSpace(quickAnswer.WhyNotCertain))
+        {
+            lines.Add(T("Why not certain: ", "확실하지 않은 이유: ") + quickAnswer.WhyNotCertain);
+        }
+        return lines;
+    }
+
     public string? BuildSummaryClipboardText()
     {
         var summary = CurrentSummary;
@@ -16,6 +40,17 @@ internal sealed partial class MainWindowViewModel
         {
             _isKorean ? "SkyrimDiag 리포트" : "SkyrimDiag report",
         };
+
+        // Players read the first lines: the quick answer comes first, the
+        // detailed fields after it.
+        var quickAnswerLines = BuildQuickAnswerLines(summary);
+        if (quickAnswerLines.Count > 0)
+        {
+            lines.Add((_isKorean ? "빠른 답: " : "Quick answer: ") + quickAnswerLines[0]);
+            lines.AddRange(quickAnswerLines.Skip(1));
+            lines.Add(string.Empty);
+            lines.Add(_isKorean ? "자세한 분석" : "Details");
+        }
 
         if (!string.IsNullOrWhiteSpace(CurrentDumpPath))
         {
@@ -130,6 +165,16 @@ internal sealed partial class MainWindowViewModel
             : isHangLike
                 ? (_isKorean ? "🟠 Skyrim 프리징/무한로딩 리포트 — SkyrimDiag" : "🟠 Skyrim Freeze/ILS Report — SkyrimDiag")
                 : (_isKorean ? "🔴 Skyrim CTD 리포트 — SkyrimDiag" : "🔴 Skyrim CTD Report — SkyrimDiag"));
+
+        var quickAnswerLines = BuildQuickAnswerLines(summary);
+        if (quickAnswerLines.Count > 0)
+        {
+            lines.Add($"💬 {(_isKorean ? "빠른 답" : "Quick answer")}: {quickAnswerLines[0]}");
+            foreach (var line in quickAnswerLines.Skip(1))
+            {
+                lines.Add($"👉 {line}");
+            }
+        }
 
         if (summary.ActionableCandidates.Count > 0)
         {

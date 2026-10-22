@@ -174,6 +174,35 @@ def test_gpu_wait_hang_follows_report_next_action() -> None:
         assert "(detected: ENB)" in next_lines[0], actual
 
 
+def test_quick_answer_leads_the_share_texts() -> None:
+    # Players read the first lines: right under the title come the quick
+    # answer's headline, what to try and why it is not certain; the detailed
+    # fields follow unchanged.
+    community = _run_harness("quick_answer_summary.json", "community")
+    assert community == _read_expected("quick_answer_community_share.expected.txt")
+    lines = community.split("\n")
+    assert lines[1].startswith("💬 Quick answer: The game crashed to desktop (CTD)."), community
+    assert lines[1].endswith(" — possible"), community
+    assert "What to try: Disable or update Precision - Accurate Melee Collisions" in lines[2], community
+    assert "Why not certain:" in lines[3], community
+
+    clipboard = _run_harness("quick_answer_summary.json", "clipboard")
+    assert clipboard == _read_expected("quick_answer_summary_clipboard.expected.txt")
+    lines = clipboard.split("\n")
+    assert lines[1].startswith("Quick answer: The game crashed to desktop (CTD)."), clipboard
+    assert lines[2].startswith("What to try: "), clipboard
+    assert lines[3].startswith("Why not certain: "), clipboard
+    assert lines[5] == "Details", clipboard
+    assert lines[6].startswith("Dump: "), clipboard
+
+
+def test_summary_without_quick_answer_keeps_its_share_texts() -> None:
+    # Summaries written before the quick answer existed read as before.
+    for mode in ("community", "clipboard"):
+        actual = _run_harness("frame_first_summary.json", mode)
+        assert "Quick answer" not in actual, actual
+
+
 def test_cleared_summary_produces_no_share_text() -> None:
     actual = _run_harness("frame_first_summary.json", "cleared")
     assert actual == "", actual
@@ -197,5 +226,7 @@ if __name__ == "__main__":
     test_standalone_stackwalk_related_community_share_fixture()
     test_standalone_stackwalk_related_summary_clipboard_fixture()
     test_gpu_wait_hang_follows_report_next_action()
+    test_quick_answer_leads_the_share_texts()
+    test_summary_without_quick_answer_keeps_its_share_texts()
     test_cleared_summary_produces_no_share_text()
     print("share_text_fixture_tests: OK")
