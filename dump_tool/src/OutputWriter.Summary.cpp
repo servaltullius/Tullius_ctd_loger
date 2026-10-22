@@ -630,6 +630,8 @@ nlohmann::json BuildSummaryJson(
       { "thread_dump_records", deadlock.thread_dump_records },
       { "thread_dump_total_threads", deadlock.thread_dump_total_threads },
       { "thread_dump_before_capture", deadlock.thread_dump_before_capture },
+      { "freeze_started_after_thread_dump", deadlock.freeze_started_after_thread_dump },
+      { "thread_dump_stopped_before_capture", deadlock.thread_dump_stopped_before_capture },
     };
   }
   summary["freeze_analysis"]["primary_reasons"] = nlohmann::json::array();

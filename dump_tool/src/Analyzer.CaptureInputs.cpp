@@ -578,6 +578,9 @@ void IntegrateCrashLoggerLog(
   // tally over all of them, not the stack of the thread that faulted or
   // stalled: it names no suspect and feeds no evidence or advice.
   out.crash_logger_pairing_log_before_dump = pairing.selected_before_dump;
+  out.crash_logger_log_name_time = pairing.selected_name_time;
+  out.crash_logger_log_last_write_time = pairing.selected_last_write_time;
+  out.crash_logger_pairing_dump_time = pairing.dump_time;
   if (pairing.selected_kind == "thread_dump" || crashlogger_core::IsCrashLoggerThreadDumpLogAscii(*logUtf8)) {
     out.diagnostics.push_back(
       L"[CrashLogger] paired log is a thread dump; its call-stack modules are not used as suspects");
@@ -834,13 +837,19 @@ void ComputeSuspects(
   }
 
   if (modalProbeTid != 0u) {
+    // WCT can name a thread the dump does not hold (one in another process,
+    // or one that exited between the WCT pass and the dump): no owner then.
+    const bool ownerInDump = std::any_of(threads.begin(), threads.end(),
+      [&](const auto& tr) { return tr.tid == lockOwnerTid; });
+    const bool hasLockOwner =
+      lockOwner.has_value() && lockOwnerTid != 0u && lockOwnerTid != modalProbeTid && ownerInDump;
     out.main_thread_wait = ClassifyMainThreadWait(mainThreadFrames);
-    FindBlockedGameThread(out.main_thread_wait, gameThreadFrames);
+    FindBlockedGameThread(out.main_thread_wait, gameThreadFrames, hasLockOwner ? lockOwnerTid : 0u);
     // The pointer-scan fallback reads only the main thread for freezes.
     out.suspects_from_main_thread =
       !out.suspects_from_stackwalk || out.stackwalk_primary_tid == modalProbeTid;
 
-    if (lockOwner.has_value() && lockOwnerTid != 0u && lockOwnerTid != modalProbeTid) {
+    if (hasLockOwner) {
       auto& owner = out.main_thread_lock_owner;
       owner.tid = lockOwnerTid;
       owner.lock_type =
@@ -862,6 +871,12 @@ void ComputeSuspects(
       signals.thread_dump_total_threads = out.crash_logger_thread_dump_total_threads;
       signals.thread_dump_has_current_thread = out.crash_logger_thread_dump_has_current_thread;
       signals.log_before_dump = out.crash_logger_pairing_log_before_dump;
+      if (const auto wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8); wct && wct->has_capture) {
+        signals.freeze_started_after_thread_dump = FreezeStartedAfterThreadDump(
+          out.crash_logger_pairing_dump_time, wct->secondsSinceHeartbeat, out.crash_logger_log_name_time);
+      }
+      signals.log_stopped_before_capture =
+        ThreadDumpLogStoppedBeforeCapture(out.crash_logger_log_last_write_time, out.crash_logger_pairing_dump_time);
       out.crash_logger_thread_dump_deadlock = EvaluateCrashLoggerThreadDumpDeadlock(owner, signals);
     }
   }
@@ -870,7 +885,7 @@ void ComputeSuspects(
     // main thread's stack were only on its call path.
     out.diagnostics.push_back(
       L"[Freeze] crash_logger_thread_dump_deadlock: stack-module suspects dropped (main-thread call path only)");
-    out.suspects.clear();
+    ApplyCrashLoggerThreadDumpDeadlockVerdict(out);
   }
   if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread) {
     // The main thread was sitting in a wait it did not get from these

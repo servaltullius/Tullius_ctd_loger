@@ -1,6 +1,7 @@
 #include "WctTypes.h"
 
 #include <algorithm>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -107,6 +108,20 @@ std::uint32_t NodeThreadId(const nlohmann::json& node)
   return (idIt != thIt->end() && idIt->is_number_unsigned()) ? idIt->get<std::uint32_t>() : 0u;
 }
 
+// The node's thread.processId; nullopt when WCT left it out.
+std::optional<std::uint32_t> NodeProcessId(const nlohmann::json& node)
+{
+  const auto thIt = node.find("thread");
+  if (thIt == node.end() || !thIt->is_object()) {
+    return std::nullopt;
+  }
+  const auto pidIt = thIt->find("processId");
+  if (pidIt == thIt->end() || !pidIt->is_number_unsigned()) {
+    return std::nullopt;
+  }
+  return pidIt->get<std::uint32_t>();
+}
+
 struct ChainLock
 {
   bool found = false;
@@ -115,7 +130,11 @@ struct ChainLock
 };
 
 // The waiter's own chain: [waiter thread] -> [owned critical section or
-// mutex] -> [owner thread] -> ... Only the first lock and its direct owner.
+// mutex] -> [owner A] -> [what A waits on] -> [thread B] -> ... The owner is
+// the last thread node of the chain, where the wait ends (B when A waits on a
+// lock B holds). A thread in another process (a named mutex an overlay or
+// launcher holds) ends the walk: the owner is the last thread before it, and
+// no one when the lock's direct owner is already outside the game.
 ChainLock ReadChainLock(const nlohmann::json& threads, std::uint32_t waiterTid)
 {
   const auto* entry = FindThreadEntry(threads, waiterTid);
@@ -139,9 +158,20 @@ ChainLock ReadChainLock(const nlohmann::json& threads, std::uint32_t waiterTid)
   ChainLock lock{};
   lock.found = true;
   lock.object_type = type;
-  if (nodesIt->size() >= 3u && (*nodesIt)[2].is_object() &&
-      (*nodesIt)[2].value("objectType", 0u) == kWctObjectTypeThread) {
-    lock.owner_tid = NodeThreadId((*nodesIt)[2]);
+  const auto waiterPid = NodeProcessId((*nodesIt)[0]);
+  for (std::size_t i = 2; i < nodesIt->size(); ++i) {
+    const auto& node = (*nodesIt)[i];
+    if (!node.is_object() || node.value("objectType", 0u) != kWctObjectTypeThread) {
+      continue;
+    }
+    const auto pid = NodeProcessId(node);
+    if (waiterPid && pid && *pid != *waiterPid) {
+      break;
+    }
+    const auto tid = NodeThreadId(node);
+    if (tid != 0u) {
+      lock.owner_tid = tid;
+    }
   }
   return lock;
 }

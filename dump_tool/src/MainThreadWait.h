@@ -50,7 +50,13 @@ inline constexpr std::size_t kBlockedThreadTopFrames = 12;
 // the plugin called, then plugin code running; the shallower plugin frame
 // wins a tie. The Windows system, the game, the SKSE runtime, the graphics
 // stack, known hook frameworks and SkyrimDiag itself are not plugin code.
-void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTopFrames>& gameThreads);
+// When WCT named the thread holding the lock the main thread waits on
+// (lockOwnerTid != 0), the main thread waits for that thread only, so no
+// other game thread is considered.
+void FindBlockedGameThread(
+  MainThreadWaitInfo& wait,
+  const std::vector<ThreadTopFrames>& gameThreads,
+  std::uint32_t lockOwnerTid = 0);
 
 // The main thread waited for another game thread that was inside plugin code.
 bool HasBlockedGameThread(const MainThreadWaitInfo& wait);
@@ -75,6 +81,21 @@ std::wstring DescribeLockOwnerThread(const MainThreadLockOwnerInfo& owner, bool 
 // "critical section" / "크리티컬 섹션", "mutex" / "뮤텍스".
 std::wstring DescribeLockType(const MainThreadLockOwnerInfo& owner, bool en);
 
+// Both file names carry whole seconds and the heartbeat runs every 100 ms by
+// default, so a freeze that began just after the dump started can measure up
+// to about 1.1 s before it.
+inline constexpr double kThreadDumpStartToleranceSec = 2.0;
+
+// The freeze began (capture time minus the heartbeat age) no earlier than the
+// thread dump started, less kThreadDumpStartToleranceSec. Times are FILETIME
+// (UTC, 100 ns); 0 or a negative age is unknown and returns false. A player
+// who pressed the dump hotkey because the game had already frozen fails this.
+bool FreezeStartedAfterThreadDump(std::uint64_t captureTime, double heartbeatAgeSec, std::uint64_t threadDumpStartTime);
+
+// The thread dump log was last written before the capture: it had stopped,
+// not still being written. 0 is unknown and returns false.
+bool ThreadDumpLogStoppedBeforeCapture(std::uint64_t logLastWriteTime, std::uint64_t captureTime);
+
 // What the dump and the paired Crash Logger log say, for
 // EvaluateCrashLoggerThreadDumpDeadlock.
 struct CrashLoggerThreadDumpSignals
@@ -87,6 +108,8 @@ struct CrashLoggerThreadDumpSignals
   std::uint32_t thread_dump_total_threads = 0;
   bool thread_dump_has_current_thread = false;
   bool log_before_dump = false;
+  bool freeze_started_after_thread_dump = false;  // FreezeStartedAfterThreadDump
+  bool log_stopped_before_capture = false;        // ThreadDumpLogStoppedBeforeCapture
 };
 
 // A Crash Logger thread dump that stopped early: fewer thread records than
@@ -96,16 +119,26 @@ struct CrashLoggerThreadDumpSignals
 bool IsCrashLoggerThreadDumpTruncated(const CrashLoggerThreadDumpSignals& signals);
 
 // crash_logger_thread_dump_deadlock: a Crash Logger thread, the main thread's
-// lock owner blocked without a wait object of its own while not in a system
-// call (suspended from outside), and a paired thread dump that stopped early.
+// lock owner blocked without a wait object of its own (suspended from outside;
+// its code readable), a paired thread dump that stopped early and before the
+// capture, and a freeze that began after the dump started. Crash Logger's idle
+// hotkey thread also carries Crash Logger return addresses, so the thread
+// alone proves little; the log and the timing carry the verdict.
 // MINIDUMP_THREAD.SuspendCount is no evidence (DbgHelp records 0 for threads
 // another thread suspended).
 CrashLoggerThreadDumpDeadlockInfo EvaluateCrashLoggerThreadDumpDeadlock(
   const MainThreadLockOwnerInfo& owner,
   const CrashLoggerThreadDumpSignals& signals);
 
-// High when both WCT passes named the owner, it made no context switch
-// between them and the thread dump started before the capture; else medium.
+// After a crash_logger_thread_dump_deadlock verdict: Crash Logger stopped the
+// game, so neither the main thread's stack (suspects) nor a game thread it
+// may have waited for (wait.blocked_*) names a mod.
+void ApplyCrashLoggerThreadDumpDeadlockVerdict(AnalysisResult& out);
+
+// High when the owner was not in a system call, both WCT passes named it, it
+// made no context switch between them and the thread dump started before the
+// capture; else medium (an owner suspended inside a system call is medium).
+// Unlike the suspend itself, the PDB lock is inferred, not read from the dump.
 i18n::ConfidenceLevel CrashLoggerThreadDumpDeadlockConfidence(
   const MainThreadLockOwnerInfo& owner,
   const CrashLoggerThreadDumpDeadlockInfo& deadlock);

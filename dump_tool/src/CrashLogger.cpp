@@ -617,6 +617,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
     bool sameDirectory = false;
     std::wstring stablePath;
     bool beforeDump = false;
+    std::uint64_t nameTime = 0;  // 0: the time came from the last write
   };
   std::vector<PairCandidate> candidates;
   const DumpIncidentKind dumpKind = ClassifyDumpIncidentKind(dumpPath);
@@ -658,8 +659,10 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       }
 
       std::uint64_t ft = 0;
+      std::uint64_t nameTime = 0;
       if (auto nameFt = TryParseCrashLoggerTimestampInFilenameToFileTimeUtc(p.stem().wstring())) {
         ft = *nameFt;
+        nameTime = *nameFt;
       } else {
         std::wstring timeErr;
         if (!TryGetFileLastWriteTimeU64(p.wstring(), ft, &timeErr)) {
@@ -690,7 +693,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
             [&](const PairCandidate& c) { return c.stablePath == stablePath; })) {
         continue;
       }
-      candidates.push_back({ p, diff, artifactKind, sameDirectory, stablePath, ft <= targetTime });
+      candidates.push_back({ p, diff, artifactKind, sameDirectory, stablePath, ft <= targetTime, nameTime });
     }
   }
 
@@ -719,6 +722,12 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
       std::min<std::size_t>(candidates.size(), std::numeric_limits<std::uint32_t>::max()));
     pairingMetadata->selected_same_directory = best.sameDirectory;
     pairingMetadata->selected_before_dump = best.beforeDump;
+    pairingMetadata->selected_name_time = best.nameTime;
+    pairingMetadata->dump_time = targetTime;
+    std::wstring lastWriteErr;
+    if (!TryGetFileLastWriteTimeU64(best.path.wstring(), pairingMetadata->selected_last_write_time, &lastWriteErr)) {
+      pairingMetadata->selected_last_write_time = 0;
+    }
     switch (best.artifactKind) {
       case crashlogger_core::CrashLoggerArtifactKind::kCrash:
         pairingMetadata->selected_kind = "crash";
