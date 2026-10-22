@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "I18nCore.h"
+#include "QuickAnswer.h"
 #include "SignatureDatabase.h"
 
 namespace skydiag::dump_tool {
@@ -560,6 +561,8 @@ struct AnalysisResult
   bool is_manual_capture = false;
 
   std::wstring summary_sentence;
+  // The summary in everyday words for players (QuickAnswer.h).
+  QuickAnswer quick_answer;
   std::vector<EvidenceItem> evidence;
   std::vector<std::wstring> recommendations;
   std::vector<std::wstring> troubleshooting_steps;

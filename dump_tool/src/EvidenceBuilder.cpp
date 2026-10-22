@@ -125,6 +125,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   internal::BuildEvidenceItems(r, lang, ctx);
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);
+  r.quick_answer = internal::BuildQuickAnswer(r, lang, ctx);
 }
 
 }  // namespace

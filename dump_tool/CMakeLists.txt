@@ -36,6 +36,7 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/EvidenceBuilderEvidence.Crash.cpp
   src/EvidenceBuilderEvidence.Freeze.cpp
   src/EvidenceBuilderPrivate.h
+  src/EvidenceBuilderQuickAnswer.cpp
   src/EvidenceBuilderRecommendations.cpp
   src/EvidenceBuilderSummary.cpp
   src/EvidenceBuilderUtil.cpp
@@ -65,6 +66,7 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/TroubleshootingGuide.cpp
   src/TroubleshootingGuide.h
   src/NextAction.cpp
+  src/QuickAnswer.h
   src/PluginRules.cpp
   src/PluginRules.h
   src/AddressResolver.cpp

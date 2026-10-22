@@ -259,6 +259,22 @@ if(WIN32)
     COMMAND skydiag_evidence_interpretation_tests
   )
 
+  # The quick answer players read first: each case, the summary JSON field
+  # and its place at the top of the report.
+  add_executable(skydiag_quick_answer_tests
+    quick_answer_tests.cpp
+  )
+  target_include_directories(skydiag_quick_answer_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_quick_answer_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_quick_answer_tests
+    COMMAND skydiag_quick_answer_tests
+  )
+
   add_executable(skydiag_non_ascii_path_tests
     non_ascii_path_tests.cpp
   )
@@ -1094,6 +1110,15 @@ target_include_directories(skydiag_next_action_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
 )
 add_test(NAME skydiag_next_action_tests COMMAND skydiag_next_action_tests)
+
+# The quick answer block format (header-only, portable).
+add_executable(skydiag_quick_answer_format_tests
+  quick_answer_format_tests.cpp
+)
+target_include_directories(skydiag_quick_answer_format_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_quick_answer_format_tests COMMAND skydiag_quick_answer_format_tests)
 
 add_executable(skydiag_skse_log_parser_tests
   skse_log_parser_tests.cpp
