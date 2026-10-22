@@ -1017,10 +1017,14 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
   if (r.signature_match.has_value()) {
     const auto& sig = *r.signature_match;
     if (sig.scope == "root_cause") {
+      const std::wstring fixLoaded = !sig.fix_module_loaded
+        ? std::wstring{}
+        : (en ? (L" Its fix (" + sig.fix_module + L") was already loaded when this happened.")
+              : (L" 이를 고치는 파일(" + sig.fix_module + L")이 이때 이미 로드되어 있었습니다."));
       return en
-        ? (L"Known root-cause pattern [" + ToWideAscii(sig.id) + L"]: " + sig.cause +
+        ? (L"Known root-cause pattern [" + ToWideAscii(sig.id) + L"]: " + sig.cause + fixLoaded +
            L" (Root-cause confidence: " + sig.confidence + L"). " + summary)
-        : (L"알려진 근본 원인 패턴 [" + ToWideAscii(sig.id) + L"]: " + sig.cause +
+        : (L"알려진 근본 원인 패턴 [" + ToWideAscii(sig.id) + L"]: " + sig.cause + fixLoaded +
            L" (근본 원인 신뢰도: " + sig.confidence + L"). " + summary);
     }
     return en

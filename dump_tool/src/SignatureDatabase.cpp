@@ -85,6 +85,20 @@ std::wstring Utf8ToWidePortable(const std::string& s)
   }
 }
 
+std::vector<std::wstring> ReadStringArray(const nlohmann::json& obj, const char* key)
+{
+  std::vector<std::wstring> out;
+  const auto it = obj.find(key);
+  if (it != obj.end() && it->is_array()) {
+    for (const auto& v : *it) {
+      if (v.is_string() && !v.get_ref<const std::string&>().empty()) {
+        out.push_back(Utf8ToWidePortable(v.get<std::string>()));
+      }
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 struct SignatureDatabase::Signature
@@ -118,12 +132,24 @@ struct SignatureDatabase::Signature
   std::wstring cpp_exception_info_contains;  // lowercase, empty = any
   std::vector<std::wstring> object_type_any;  // lowercase, empty = any
 
+  std::string freeze_state;           // empty = a crash signature
+  std::wstring freeze_loop_module;    // lowercase, empty = any
+  std::uint64_t freeze_loop_offset = 0;
+  bool has_freeze_loop_offset = false;
+
   std::wstring cause_ko;
   std::wstring cause_en;
   std::string scope = "mechanism";
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::vector<std::wstring> recommendations_ko;
   std::vector<std::wstring> recommendations_en;
+  std::wstring headline_ko;
+  std::wstring headline_en;
+  std::wstring why_not_certain_ko;
+  std::wstring why_not_certain_en;
+  std::wstring fix_module;  // as written, e.g. "TMS_AIPathingFreezeFix.dll"
+  std::vector<std::wstring> recommendations_fix_loaded_ko;
+  std::vector<std::wstring> recommendations_fix_loaded_en;
 };
 
 SignatureDatabase::SignatureDatabase() = default;
@@ -194,7 +220,10 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
             key != "exc_address_near_zero" &&
             key != "callstack_contains" &&
             key != "cpp_exception_info_contains" &&
-            key != "object_type_any") {
+            key != "object_type_any" &&
+            key != "freeze_state" &&
+            key != "freeze_loop_module" &&
+            key != "freeze_loop_offset") {
           // A typo or newer constraint must invalidate this entry rather than
           // being ignored and broadening its match.
           valid = false;
@@ -357,6 +386,40 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
           hasMatchConstraint = true;
         }
       }
+      if (m.contains("freeze_state")) {
+        if (m["freeze_state"].is_string() && !m["freeze_state"].get_ref<const std::string&>().empty()) {
+          sig.freeze_state = m["freeze_state"].get<std::string>();
+          hasMatchConstraint = true;
+        } else {
+          valid = false;
+        }
+      }
+      if (m.contains("freeze_loop_module")) {
+        if (m["freeze_loop_module"].is_string()) {
+          sig.freeze_loop_module = WideLower(Utf8ToWidePortable(m["freeze_loop_module"].get<std::string>()));
+        }
+        if (sig.freeze_loop_module.empty()) {
+          valid = false;
+        }
+      }
+      if (m.contains("freeze_loop_offset")) {
+        if (m["freeze_loop_offset"].is_string()) {
+          try {
+            sig.freeze_loop_offset = ParseHexU64(m["freeze_loop_offset"].get<std::string>());
+            sig.has_freeze_loop_offset = true;
+          } catch (...) {
+            valid = false;
+          }
+        } else {
+          valid = false;
+        }
+      }
+      // The loop is an exact instruction of one module, and only a freeze has
+      // one: both parts, and a freeze state, or the entry is dropped.
+      if ((!sig.freeze_loop_module.empty() || sig.has_freeze_loop_offset) &&
+          (sig.freeze_loop_module.empty() || !sig.has_freeze_loop_offset || sig.freeze_state.empty())) {
+        valid = false;
+      }
 
       if (!hasMatchConstraint) {
         valid = false;
@@ -404,6 +467,22 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
           }
         }
       }
+      sig.headline_ko = Utf8ToWidePortable(d.value("headline_ko", ""));
+      sig.headline_en = Utf8ToWidePortable(d.value("headline_en", ""));
+      sig.why_not_certain_ko = Utf8ToWidePortable(d.value("why_not_certain_ko", ""));
+      sig.why_not_certain_en = Utf8ToWidePortable(d.value("why_not_certain_en", ""));
+      if (d.contains("fix_module")) {
+        // A fix that is already loaded must not be recommended again, so the
+        // entry needs the advice for that case.
+        sig.fix_module = d["fix_module"].is_string() ? Utf8ToWidePortable(d["fix_module"].get<std::string>())
+                                                     : std::wstring{};
+        sig.recommendations_fix_loaded_ko = ReadStringArray(d, "recommendations_fix_loaded_ko");
+        sig.recommendations_fix_loaded_en = ReadStringArray(d, "recommendations_fix_loaded_en");
+        if (sig.fix_module.empty() || sig.recommendations_fix_loaded_ko.empty() ||
+            sig.recommendations_fix_loaded_en.empty()) {
+          continue;
+        }
+      }
 
       loaded.push_back(std::move(sig));
     }
@@ -418,6 +497,17 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
 std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput& input, bool useKorean) const
 {
   for (const auto& sig : m_signatures) {
+    // Crash and freeze signatures never match each other's input.
+    if (sig.freeze_state != input.freeze_state) {
+      continue;
+    }
+
+    if (!sig.freeze_loop_module.empty() &&
+        (WideLower(input.freeze_loop_module) != sig.freeze_loop_module ||
+         input.freeze_loop_offset != sig.freeze_loop_offset)) {
+      continue;
+    }
+
     if (sig.has_exc_code && sig.exc_code != input.exc_code) {
       continue;
     }
@@ -506,6 +596,19 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
       useKorean ? i18n::Language::kKorean : i18n::Language::kEnglish,
       sig.confidence_level));
     result.recommendations = useKorean ? sig.recommendations_ko : sig.recommendations_en;
+    result.headline = useKorean ? sig.headline_ko : sig.headline_en;
+    result.why_not_certain = useKorean ? sig.why_not_certain_ko : sig.why_not_certain_en;
+    if (!sig.fix_module.empty()) {
+      const std::wstring fix = WideLower(sig.fix_module);
+      result.fix_module = sig.fix_module;
+      result.fix_module_loaded =
+        std::any_of(input.loaded_modules.begin(), input.loaded_modules.end(), [&](const std::wstring& m) {
+          return WideLower(m) == fix;
+        });
+      if (result.fix_module_loaded) {
+        result.recommendations = useKorean ? sig.recommendations_fix_loaded_ko : sig.recommendations_fix_loaded_en;
+      }
+    }
     return result;
   }
   return std::nullopt;

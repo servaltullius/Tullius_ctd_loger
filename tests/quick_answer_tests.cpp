@@ -19,6 +19,7 @@
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
 #include "OutputWriterPipeline.h"
+#include "SignatureDatabase.h"
 #include "Utf.h"
 
 namespace {
@@ -428,6 +429,82 @@ void TestFreezeEngineSpinNan()
   }
 }
 
+// The same loop at SkyrimSE.exe+0xd17465 on 1.6.1170 is a known AI pathing
+// freeze (crash_signatures.json): the quick answer names its fix, or, with the
+// fix already loaded, says to update it or tell its author.
+void TestFreezeKnownAiPathingFix()
+{
+  skydiag::dump_tool::SignatureDatabase db;
+  Require(db.LoadFromJson(std::filesystem::path(__FILE__).parent_path().parent_path() / "dump_tool" / "data" /
+                          "crash_signatures.json"),
+    "the bundled signatures load");
+  for (const bool fixLoaded : { false, true }) {
+    for (const auto lang : kLanguages) {
+      const bool en = lang == i18n::Language::kEnglish;
+      auto r = EngineCallPathHang();
+      r.game_version = "1.6.1170.0";
+      r.freeze_analysis.state_id = "engine_spin_nan";
+      auto& spin = r.engine_spin;
+      spin.loop_found = true;
+      spin.nan_detected = true;
+      spin.tid = 19588;
+      spin.rip_module = L"SkyrimSE.exe";
+      spin.rip_offset = 0xd17465;
+      spin.compare = "comiss";
+      spin.nan_register = "xmm0";
+      spin.call_path_modules = r.main_thread_wait.blocked_path_modules;
+      skydiag::dump_tool::SignatureMatchInput input{};
+      input.game_version = r.game_version;
+      input.freeze_state = r.freeze_analysis.state_id;
+      input.freeze_loop_module = spin.rip_module;
+      input.freeze_loop_offset = spin.rip_offset;
+      input.loaded_modules = { L"SkyrimSE.exe", L"SkyrimUpscaler.dll" };
+      if (fixLoaded) {
+        input.loaded_modules.push_back(L"TMS_AIPathingFreezeFix.dll");
+      }
+      r.signature_match = db.Match(input, !en);
+      Require(r.signature_match && r.signature_match->id == "AI_PATHING_FREEZE_1_6_1170", "the known freeze");
+
+      const auto qa = BuildQuickAnswer(r, lang, FreezeContext(en));
+      Require(qa.kind == "freeze" && qa.case_id == "known_issue", "still a freeze, a known one");
+      Require(qa.likelihood == "medium" && qa.likelihood_text == (en ? L"possible" : L"가능성 중간"), "medium");
+      Require(qa.headline == (en ? L"The game froze. It matches a known AI pathing freeze."
+                                 : L"게임이 멈췄습니다(프리징). 알려진 AI 길찾기 프리징과 일치합니다."),
+        "the headline names the known freeze");
+      Require(qa.why_not_certain == (en
+          ? L"Only one player has confirmed this fix so far, and other causes can produce the same loop."
+          : L"이 해결 방법은 사용자 한 명이 확인했을 뿐이고, 다른 원인으로도 같은 반복이 생길 수 있습니다."),
+        "other causes can make the same loop");
+      if (!fixLoaded) {
+        Require(qa.action == (en ? L"Install \"AI Pathing Freeze Fix\" (Nexus mod 190049) with your mod manager, then play again."
+                                 : L"모드 관리자로 \"AI Pathing Freeze Fix\"(Nexus 모드 190049)를 설치한 뒤 다시 플레이해 보세요."),
+          "install the fix");
+      } else {
+        Require(qa.action == (en ? L"AI Pathing Freeze Fix is already loaded, but this freeze still happened: check for an "
+                                   L"update, or tell its author and share this report."
+                                 : L"AI Pathing Freeze Fix가 이미 로드되어 있는데도 이 프리징이 일어났으니, 새 버전이 있는지 "
+                                   L"확인하거나 이 리포트와 함께 제작자에게 알려 주세요."),
+          "already loaded: update or report");
+      }
+      Require(!Contains(qa.headline, L"SkyrimUpscaler") && !Contains(qa.action, L"SkyrimUpscaler"), "no other mod named");
+      RequirePlainWords(qa, "known ai pathing freeze");
+
+      // The summary and the first recommendation say the same.
+      BuildEvidenceAndSummary(r, lang);
+      Require(r.quick_answer.case_id == "known_issue", "built with the summary");
+      Require(Contains(r.summary_sentence, L"[AI_PATHING_FREEZE_1_6_1170]") &&
+                Contains(r.summary_sentence, L"SkyrimSE.exe+0xd17465"),
+        "the summary names the known freeze and the loop");
+      Require(Contains(r.summary_sentence, en ? L"was already loaded" : L"이미 로드되어 있었습니다") == fixLoaded,
+        "the summary says when the fix was loaded");
+      Require(!r.recommendations.empty() &&
+                r.recommendations[0].rfind(en ? L"[Known cause]" : L"[알려진 원인]", 0) == 0 &&
+                Contains(r.recommendations[0], L"https://www.nexusmods.com/skyrimspecialedition/mods/190049"),
+        "the fix with its Nexus link comes first");
+    }
+  }
+}
+
 AnalysisResult ModalHang(bool callerResolved)
 {
   AnalysisResult r{};
@@ -586,6 +663,7 @@ int main()
     TestCrashLoggerThreadDumpDeadlock();
     TestFreezeEngineCallPathNamesNoMod();
     TestFreezeEngineSpinNan();
+    TestFreezeKnownAiPathingFix();
     TestModalDialog();
     TestLoadingFreezeWithoutSuspect();
     TestFreezeStackScanIsWeak();

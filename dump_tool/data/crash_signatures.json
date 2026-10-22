@@ -293,6 +293,38 @@
       }
     },
     {
+      "id": "AI_PATHING_FREEZE_1_6_1170",
+      "match": {
+        "game_version": "1.6.1170.0",
+        "freeze_state": "engine_spin_nan",
+        "freeze_loop_module": "SkyrimSE.exe",
+        "freeze_loop_offset": "0xD17465"
+      },
+      "diagnosis": {
+        "scope": "root_cause",
+        "cause_ko": "1.6.1170에서 게임 엔진이 SkyrimSE.exe+0xD17465의 계산 루프에서 NaN 값으로 끝없이 반복하다 멈췄습니다. 액터 AI 길찾기와 관련된 알려진 프리징과 일치하며, AI Pathing Freeze Fix(Nexus 190049)를 설치한 뒤 같은 프리징이 멈췄다는 사용자 확인이 한 건 있습니다.",
+        "cause_en": "On 1.6.1170 the game engine looped forever on a NaN value at SkyrimSE.exe+0xD17465. This matches a known freeze related to actor AI pathing; one player confirmed the same freeze stopped after installing AI Pathing Freeze Fix (Nexus 190049).",
+        "confidence": "medium",
+        "headline_ko": "알려진 AI 길찾기 프리징과 일치합니다.",
+        "headline_en": "It matches a known AI pathing freeze.",
+        "why_not_certain_ko": "이 해결 방법은 사용자 한 명이 확인했을 뿐이고, 다른 원인으로도 같은 반복이 생길 수 있습니다.",
+        "why_not_certain_en": "Only one player has confirmed this fix so far, and other causes can produce the same loop.",
+        "recommendations_ko": [
+          "[알려진 원인] 모드 관리자로 \"AI Pathing Freeze Fix\"(Nexus 모드 190049)를 설치한 뒤 다시 플레이해 보세요. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/190049 (설치한 뒤 같은 프리징이 멈췄다는 사용자 확인이 한 건 있습니다.)"
+        ],
+        "recommendations_en": [
+          "[Known cause] Install \"AI Pathing Freeze Fix\" (Nexus mod 190049) with your mod manager, then play again. Download: https://www.nexusmods.com/skyrimspecialedition/mods/190049 (one player confirmed the same freeze stopped after installing it)."
+        ],
+        "fix_module": "TMS_AIPathingFreezeFix.dll",
+        "recommendations_fix_loaded_ko": [
+          "[알려진 원인] AI Pathing Freeze Fix가 이미 로드되어 있는데도 이 프리징이 일어났으니, 새 버전이 있는지 확인하거나 이 리포트와 함께 제작자에게 알려 주세요. 이 덤프에는 TMS_AIPathingFreezeFix.dll이 로드되어 있었습니다. https://www.nexusmods.com/skyrimspecialedition/mods/190049"
+        ],
+        "recommendations_fix_loaded_en": [
+          "[Known cause] AI Pathing Freeze Fix is already loaded, but this freeze still happened: check for an update, or tell its author and share this report. TMS_AIPathingFreezeFix.dll was loaded in this dump. https://www.nexusmods.com/skyrimspecialedition/mods/190049"
+        ]
+      }
+    },
+    {
       "id": "CPP_BAD_ALLOC",
       "match": {
         "exc_code": "0xE06D7363",
