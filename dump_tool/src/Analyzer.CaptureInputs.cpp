@@ -892,6 +892,12 @@ void ComputeSuspects(
     modalInput.main_thread_id = modalProbeTid;
     modalInput.wct = wctSummary ? &*wctSummary : nullptr;
     modalInput.main_thread_frames = &mainThreadFrames;
+    std::vector<ModalLoadedModule> loadedModules;
+    loadedModules.reserve(allModules.size());
+    for (const auto& m : allModules) {
+      loadedModules.push_back(ModalLoadedModule{ m.filename, m.inferred_mod_name, m.is_systemish, m.is_game_exe });
+    }
+    modalInput.loaded_modules = &loadedModules;
     out.modal_dialog_wait = ResolveModalDialogWait(modalInput);
   }
 

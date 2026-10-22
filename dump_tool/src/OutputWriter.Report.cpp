@@ -465,6 +465,10 @@ std::string BuildReportText(
       if (!modal.address_library_issue.empty()) {
         rpt << " address_library_issue=" << modal.address_library_issue;
       }
+      if (!modal.named_module_filename.empty()) {
+        rpt << " dialog_named_module=" << WideToUtf8(modal.named_module_filename)
+            << " source=" << modal.named_module_source;
+      }
       rpt << "\n";
       if (!modal.dialog_title.empty()) {
         rpt << "  modal_dialog_title=" << WideToUtf8(modal.dialog_title) << "\n";

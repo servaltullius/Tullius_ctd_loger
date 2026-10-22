@@ -595,6 +595,27 @@ nlohmann::json BuildSummaryJson(
     { "other_thread_dialog_count", r.modal_dialog_wait.other_thread_dialog_count },
   };
   {
+    // File and mod names only (never paths), read from the already masked
+    // dialog title and text.
+    const auto& modal = r.modal_dialog_wait;
+    auto& out = summary["freeze_analysis"]["modal_dialog_wait"];
+    out["dialog_named_module"] = WideToUtf8(modal.named_module_filename);
+    out["dialog_named_mod_name"] = WideToUtf8(modal.named_mod_name);
+    out["dialog_named_module_source"] = modal.named_module_source;
+    out["dialog_named_module_likelihood"] = modal.named_module_filename.empty() ? ""
+      : (modal.named_module_level == i18n::ConfidenceLevel::kHigh ? "high" : "medium");
+    auto loaded = nlohmann::json::array();
+    for (const auto& name : modal.named_loaded_modules) {
+      loaded.push_back(WideToUtf8(name));
+    }
+    out["dialog_named_loaded_modules"] = std::move(loaded);
+    auto unloaded = nlohmann::json::array();
+    for (const auto& name : modal.named_unloaded_modules) {
+      unloaded.push_back(WideToUtf8(name));
+    }
+    out["dialog_named_unloaded_modules"] = std::move(unloaded);
+  }
+  {
     auto path = nlohmann::json::array();
     for (const auto& module : r.main_thread_wait.path_modules) {
       path.push_back(WideToUtf8(module));

@@ -18,6 +18,7 @@
 #include "Analyzer.h"
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
+#include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "SignatureDatabase.h"
 #include "Utf.h"
@@ -542,6 +543,94 @@ void TestModalDialog()
   }
 }
 
+// No opener on the stack, but the dialog's title is the plugin's file name
+// (the 2026-10-05 SmoothCam hang): the quick answer, the summary, the next
+// action and the recommendations name the same mod.
+void TestModalDialogNamedModule()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = ModalHang(false);
+    r.game_version = "1.6.1170.0";
+    auto& modal = r.modal_dialog_wait;
+    modal.stack_evidence = false;
+    modal.dialog_text = L"REL/ID.h(223): Unsupported address library format: 2 / This means this script extender "
+                        L"plugin is incompatible with the address library available for this version of the game";
+    modal.named_module_filename = L"SmoothCam.dll";
+    modal.named_mod_name = L"SmoothCam";
+    modal.named_module_source = "title";
+    modal.named_module_level = i18n::ConfidenceLevel::kHigh;
+    modal.named_module_version_issue = true;
+
+    const auto qa = BuildQuickAnswer(r, lang, FreezeContext(en));
+    Require(qa.case_id == "modal_dialog" && qa.likelihood == "high", "the mod the dialog names, high");
+    Require(qa.suspect_mod == L"SmoothCam" && qa.suspect_file == L"SmoothCam.dll", "its mod and file");
+    Require(Contains(qa.headline, en ? L"Suspected mod: SmoothCam (SmoothCam.dll)"
+                                     : L"의심되는 모드: SmoothCam (SmoothCam.dll)"),
+      "the headline names it");
+    Require(qa.action == (en ? L"Update SmoothCam to a version made for your game version, or disable it (see what "
+                               L"the error window says)."
+                             : L"SmoothCam을(를) 지금 게임 버전에 맞는 버전으로 업데이트하거나 끄세요(오류 창에 적힌 내용 참고)."),
+      "update or disable it");
+    Require(qa.why_not_certain.empty(), "high needs no doubt line");
+    RequirePlainWords(qa, "modal dialog named module");
+
+    BuildEvidenceAndSummary(r, lang);
+    Require(r.quick_answer.suspect_mod == L"SmoothCam", "built with the summary");
+    Require(Contains(r.summary_sentence, en ? L"suspected mod: SmoothCam (SmoothCam.dll) — likely"
+                                            : L"의심되는 모드: SmoothCam (SmoothCam.dll) — 가능성 높음"),
+      "the summary names it with the same likelihood");
+    const auto next = skydiag::dump_tool::SelectNextActionIndex(r.recommendations);
+    Require(next < r.recommendations.size() && Contains(r.recommendations[next], L"SmoothCam (SmoothCam.dll)") &&
+              Contains(r.recommendations[next], en ? L"Update" : L"업데이트하거나 끄세요"),
+      "the next action updates or disables it");
+    bool textKept = false;
+    for (const auto& rec : r.recommendations) {
+      textKept = textKept || Contains(rec, en ? L"Captured dialog text" : L"캡처된 대화상자 내용");
+    }
+    Require(textKept, "the dialog text is still pointed at");
+
+    // Named only in the text, with nothing about the game version: medium.
+    modal.named_module_source = "text";
+    modal.named_module_level = i18n::ConfidenceLevel::kMedium;
+    modal.named_module_version_issue = false;
+    modal.address_library_issue.clear();
+    const auto medium = BuildQuickAnswer(r, lang, FreezeContext(en));
+    Require(medium.likelihood == "medium" && medium.suspect_mod == L"SmoothCam", "medium from the text");
+    Require(!medium.why_not_certain.empty(), "says why it is not certain");
+    Require(Contains(medium.action, en ? L"update or disable SmoothCam" : L"SmoothCam을(를) 업데이트하거나 끄세요"),
+      "follow the window or update or disable it");
+    RequirePlainWords(medium, "modal dialog named in text");
+  }
+}
+
+// Several loaded mod DLLs, or only DLLs the game did not load: no mod is
+// picked; the names are listed in plain words.
+void TestModalDialogNamesNoSingleModule()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto several = ModalHang(false);
+    several.modal_dialog_wait.dialog_title = L"Error";
+    several.modal_dialog_wait.named_loaded_modules = { L"FooPlugin.dll", L"BarPlugin.dll" };
+    const auto qa = BuildQuickAnswer(several, lang, FreezeContext(en));
+    Require(qa.likelihood == "none" && qa.suspect_mod.empty(), "no single mod");
+    Require(Contains(qa.headline, L"FooPlugin.dll, BarPlugin.dll"), "both names listed");
+    RequirePlainWords(qa, "several named modules");
+
+    auto unloaded = ModalHang(false);
+    unloaded.modal_dialog_wait.dialog_title = L"Error";
+    unloaded.modal_dialog_wait.named_unloaded_modules = { L"MissingDep.dll" };
+    const auto missing = BuildQuickAnswer(unloaded, lang, FreezeContext(en));
+    Require(missing.likelihood == "none", "a file the game did not load is no suspect");
+    Require(Contains(missing.headline, en ? L"MissingDep.dll, which the game did not load"
+                                          : L"MissingDep.dll은(는) 게임에 로드되지 않은 파일"),
+      "says it was not loaded");
+    BuildEvidenceAndSummary(unloaded, lang);
+    Require(Contains(unloaded.summary_sentence, L"MissingDep.dll"), "the summary lists it too");
+  }
+}
+
 void TestLoadingFreezeWithoutSuspect()
 {
   for (const auto lang : kLanguages) {
@@ -665,6 +754,8 @@ int main()
     TestFreezeEngineSpinNan();
     TestFreezeKnownAiPathingFix();
     TestModalDialog();
+    TestModalDialogNamedModule();
+    TestModalDialogNamesNoSingleModule();
     TestLoadingFreezeWithoutSuspect();
     TestFreezeStackScanIsWeak();
     TestSnapshotsAndCleanExit();

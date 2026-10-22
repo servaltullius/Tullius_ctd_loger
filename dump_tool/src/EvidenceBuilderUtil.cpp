@@ -554,6 +554,33 @@ bool IsActionableSuspect(const SuspectItem& s)
          !minidump::IsGameExeModule(s.module_filename);
 }
 
+std::wstring DialogNamedModuleDisplay(const ModalDialogWaitInfo& modal)
+{
+  if (modal.named_mod_name.empty() || modal.named_mod_name == modal.named_module_filename) {
+    return modal.named_module_filename;
+  }
+  return modal.named_mod_name + L" (" + modal.named_module_filename + L")";
+}
+
+std::wstring DescribeDialogNamedFiles(const ModalDialogWaitInfo& modal, bool en)
+{
+  constexpr std::size_t kMaxNames = 5;
+  if (!modal.named_module_filename.empty()) {
+    return {};
+  }
+  if (modal.named_loaded_modules.size() >= 2u) {
+    const auto names = JoinList(modal.named_loaded_modules, kMaxNames, L", ");
+    return en ? (L"The error window names more than one mod file (" + names + L"), so no single mod is picked.")
+              : (L"오류 창에 모드 파일이 여럿 적혀 있어(" + names + L") 하나로 정하지 않았습니다.");
+  }
+  if (!modal.named_unloaded_modules.empty()) {
+    const auto names = JoinList(modal.named_unloaded_modules, kMaxNames, L", ");
+    return en ? (L"The error window names " + names + L", which the game did not load.")
+              : (L"오류 창에 적힌 " + names + L"은(는) 게임에 로드되지 않은 파일입니다.");
+  }
+  return {};
+}
+
 bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename)
 {
   const std::wstring lower = WideLower(filename);

@@ -165,6 +165,19 @@ struct ModalDialogWaitInfo
   // plugin_incompatible / address_library_missing / empty (from the dialog text)
   std::string address_library_issue;
   std::uint32_t other_thread_dialog_count = 0;
+  // Only without a plugin or hook framework caller: the one loaded mod DLL
+  // (not a system or game module) the dialog's title, else its text, names.
+  std::wstring named_module_filename;
+  std::wstring named_mod_name;      // MO2 mod name, when known
+  std::string named_module_source;  // title / text / empty
+  // High when the title is exactly that DLL's name or the text says the
+  // plugin does not support this game version (Address Library); else Medium.
+  i18n::ConfidenceLevel named_module_level = i18n::ConfidenceLevel::kUnknown;
+  bool named_module_version_issue = false;
+  // When no single DLL is picked: the loaded mod DLLs the dialog names (two or
+  // more), and the DLL names it quotes that the game did not load.
+  std::vector<std::wstring> named_loaded_modules;
+  std::vector<std::wstring> named_unloaded_modules;
 };
 
 // What the game main thread was doing when a freeze was captured, read from the
