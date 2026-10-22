@@ -115,6 +115,12 @@ const PluginRuleDiagnosis* FindMissingMasterDiagnosis(const AnalysisResult& r);
 
 // True if a suspect is neither a hook framework, system DLL, nor game exe.
 bool IsActionableSuspect(const SuspectItem& s);
+// The mod DLL a modal dialog names: "SmoothCam (SmoothCam.dll)" or the file.
+std::wstring DialogNamedModuleDisplay(const ModalDialogWaitInfo& modal);
+// When the dialog names no single loaded mod DLL: the DLL names it does give,
+// as one plain sentence (several loaded ones, or ones the game did not load);
+// empty when it names none.
+std::wstring DescribeDialogNamedFiles(const ModalDialogWaitInfo& modal, bool en);
 // minidump::IsSystemishModuleAt for a module known here only by file name (an
 // actionable candidate): the path is taken from the dump's fault module or a
 // stack suspect of that name, so an ENB/ReShade d3d11.dll in the game folder

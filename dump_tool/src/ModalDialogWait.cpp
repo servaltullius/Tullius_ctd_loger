@@ -113,6 +113,152 @@ bool ContainsName(const std::array<std::wstring_view, N>& names, std::wstring_vi
   return std::find(names.begin(), names.end(), symbol) != names.end();
 }
 
+bool IsAsciiAlnum(wchar_t ch)
+{
+  return (ch >= L'a' && ch <= L'z') || (ch >= L'A' && ch <= L'Z') || (ch >= L'0' && ch <= L'9');
+}
+
+// Characters that continue a file name on either side of a quoted DLL name.
+// Non-ASCII ones do not: a Korean particle may follow the name directly.
+bool IsFileNameChar(wchar_t ch)
+{
+  return IsAsciiAlnum(ch) || ch == L'_' || ch == L'-' || ch == L'+' || ch == L'.';
+}
+
+// A name ends where no word character follows; "SmoothCam.dll." at the end of
+// a sentence still ends at the DLL name.
+bool EndsNameAt(std::wstring_view text, std::size_t end)
+{
+  if (end >= text.size()) {
+    return true;
+  }
+  const wchar_t next = text[end];
+  if (next == L'.') {
+    return end + 1u >= text.size() || !IsFileNameChar(text[end + 1u]);
+  }
+  return !IsFileNameChar(next);
+}
+
+// The whole file name appears in the text (both already lowercased).
+bool ContainsFileNameToken(std::wstring_view lowerText, std::wstring_view lowerName)
+{
+  if (lowerName.empty()) {
+    return false;
+  }
+  std::size_t pos = lowerText.find(lowerName);
+  while (pos != std::wstring_view::npos) {
+    const bool startsName = pos == 0u || !IsFileNameChar(lowerText[pos - 1u]);
+    if (startsName && EndsNameAt(lowerText, pos + lowerName.size())) {
+      return true;
+    }
+    pos = lowerText.find(lowerName, pos + 1u);
+  }
+  return false;
+}
+
+// "Foo.dll" names quoted in the text (a path keeps only its file name).
+void AppendQuotedDllNames(std::wstring_view text, std::vector<std::wstring>* out)
+{
+  const std::wstring lower = LowerAscii(text);
+  constexpr std::wstring_view kDll = L".dll";
+  std::size_t pos = lower.find(kDll);
+  while (pos != std::wstring::npos) {
+    const std::size_t end = pos + kDll.size();
+    if (EndsNameAt(lower, end)) {
+      std::size_t start = pos;
+      while (start > 0u && IsFileNameChar(text[start - 1u])) {
+        --start;
+      }
+      while (start < pos && text[start] == L'.') {
+        ++start;
+      }
+      if (start < pos) {
+        std::wstring name(text.substr(start, end - start));
+        const std::wstring lowerName = LowerAscii(name);
+        const bool seen = std::any_of(out->begin(), out->end(),
+          [&](const std::wstring& existing) { return LowerAscii(existing) == lowerName; });
+        if (!seen) {
+          out->push_back(std::move(name));
+        }
+      }
+    }
+    pos = lower.find(kDll, pos + 1u);
+  }
+}
+
+// Loaded mod modules (not system, not the game) whose file name the text names.
+std::vector<const ModalLoadedModule*> FindNamedLoadedModules(
+  std::wstring_view text,
+  const std::vector<ModalLoadedModule>& modules)
+{
+  std::vector<const ModalLoadedModule*> out;
+  const std::wstring lowerText = LowerAscii(text);
+  for (const auto& module : modules) {
+    if (module.is_system || module.is_game_exe || module.filename.empty()) {
+      continue;
+    }
+    const std::wstring lowerName = LowerAscii(module.filename);
+    const bool seen = std::any_of(out.begin(), out.end(),
+      [&](const ModalLoadedModule* existing) { return LowerAscii(existing->filename) == lowerName; });
+    if (!seen && ContainsFileNameToken(lowerText, lowerName)) {
+      out.push_back(&module);
+    }
+  }
+  return out;
+}
+
+std::wstring TrimSpaces(std::wstring_view text)
+{
+  std::size_t begin = 0;
+  std::size_t end = text.size();
+  while (begin < end && (text[begin] == L' ' || text[begin] == L'\t')) {
+    ++begin;
+  }
+  while (end > begin && (text[end - 1u] == L' ' || text[end - 1u] == L'\t')) {
+    --end;
+  }
+  return std::wstring(text.substr(begin, end - begin));
+}
+
+// With no plugin caller on the stack, the dialog's own words name the mod.
+void ResolveDialogNamedModule(const std::vector<ModalLoadedModule>& modules, ModalDialogWaitInfo* info)
+{
+  const auto inTitle = FindNamedLoadedModules(info->dialog_title, modules);
+  const auto inText = inTitle.empty() ? FindNamedLoadedModules(info->dialog_text, modules)
+                                      : std::vector<const ModalLoadedModule*>{};
+  const auto& matches = inTitle.empty() ? inText : inTitle;
+  if (matches.size() == 1u) {
+    const auto& module = *matches.front();
+    info->named_module_filename = module.filename;
+    info->named_mod_name = module.inferred_mod_name;
+    info->named_module_source = inTitle.empty() ? "text" : "title";
+    info->named_module_version_issue =
+      !info->address_library_issue.empty() || DialogTextReportsUnsupportedGameVersion(info->dialog_text);
+    const bool exactTitle = LowerAscii(TrimSpaces(info->dialog_title)) == LowerAscii(module.filename);
+    info->named_module_level = (exactTitle || info->named_module_version_issue) ? i18n::ConfidenceLevel::kHigh
+                                                                                : i18n::ConfidenceLevel::kMedium;
+    return;
+  }
+  for (const auto* module : matches) {
+    info->named_loaded_modules.push_back(module->filename);
+  }
+  if (!matches.empty()) {
+    return;
+  }
+  std::vector<std::wstring> quoted;
+  AppendQuotedDllNames(info->dialog_title, &quoted);
+  AppendQuotedDllNames(info->dialog_text, &quoted);
+  for (auto& name : quoted) {
+    const std::wstring lowerName = LowerAscii(name);
+    // A loaded system or game module is no mod and is not "missing" either.
+    const bool loaded = std::any_of(modules.begin(), modules.end(),
+      [&](const ModalLoadedModule& module) { return LowerAscii(module.filename) == lowerName; });
+    if (!loaded) {
+      info->named_unloaded_modules.push_back(std::move(name));
+    }
+  }
+}
+
 }  // namespace
 
 bool IsModalDialogApiFrame(const ModalStackFrame& frame)
@@ -209,6 +355,18 @@ std::string ClassifyAddressLibraryDialogText(std::wstring_view text)
   return {};
 }
 
+bool DialogTextReportsUnsupportedGameVersion(std::wstring_view text)
+{
+  if (!ClassifyAddressLibraryDialogText(text).empty()) {
+    return true;
+  }
+  const auto lower = LowerAscii(text);
+  const auto has = [&](std::wstring_view needle) { return lower.find(needle) != std::wstring::npos; };
+  const bool unsupported = has(L"not support") || has(L"unsupported") || has(L"incompatible") ||
+    has(L"not compatible");
+  return unsupported && (has(L"version") || has(L"address library"));
+}
+
 ModalDialogWaitInfo ResolveModalDialogWait(const ModalDialogWaitInput& input)
 {
   ModalDialogWaitInfo info{};
@@ -250,6 +408,12 @@ ModalDialogWaitInfo ResolveModalDialogWait(const ModalDialogWaitInput& input)
         info.caller_kind = ClassifyModalDialogCaller(caller);
       }
     }
+  }
+
+  // A plugin or hook framework caller already names the opener.
+  if (input.loaded_modules && info.window_evidence && info.caller_kind != "plugin" &&
+      info.caller_kind != "hook_framework") {
+    ResolveDialogNamedModule(*input.loaded_modules, &info);
   }
 
   info.detected = info.window_evidence || info.stack_evidence;

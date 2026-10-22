@@ -327,6 +327,149 @@ void TestResolveTagsAddressLibraryDialog()
   assert(ResolveModalDialogWait(stackOnly).address_library_issue.empty());
 }
 
+using skydiag::dump_tool::ModalLoadedModule;
+
+std::vector<ModalLoadedModule> LoadedModules()
+{
+  return {
+    { L"SkyrimSE.exe", L"", false, true },
+    { L"d3d11.dll", L"", true, false },
+    { L"user32.dll", L"", true, false },
+    { L"SmoothCam.dll", L"SmoothCam", false, false },
+    { L"FooPlugin.dll", L"Foo Mod", false, false },
+    { L"BarPlugin.dll", L"", false, false },
+  };
+}
+
+skydiag::dump_tool::ModalDialogWaitInfo ResolveDialog(const char* title, const char* text)
+{
+  const auto wct = WctWithDialog(100, title, text);
+  const auto modules = LoadedModules();
+  ModalDialogWaitInput input{};
+  input.main_thread_id = 100;
+  input.wct = &wct;
+  input.loaded_modules = &modules;
+  return ResolveModalDialogWait(input);
+}
+
+void TestDialogTitleExactlyNamesLoadedPlugin()
+{
+  const auto info = ResolveDialog("SmoothCam.dll", "Plugin failed to load");
+  assert(info.caller_kind == "none");
+  assert(info.named_module_filename == L"SmoothCam.dll");
+  assert(info.named_mod_name == L"SmoothCam");
+  assert(info.named_module_source == "title");
+  assert(info.named_module_level == skydiag::dump_tool::i18n::ConfidenceLevel::kHigh);
+  assert(!info.named_module_version_issue);
+  assert(info.named_loaded_modules.empty() && info.named_unloaded_modules.empty());
+
+  // Case-insensitive; the CommonLib text says the version is not supported.
+  const auto smooth = ResolveDialog("smoothcam.DLL", kSmoothCamDialogText);
+  assert(smooth.named_module_filename == L"SmoothCam.dll");
+  assert(smooth.named_module_version_issue);
+  assert(smooth.named_module_level == skydiag::dump_tool::i18n::ConfidenceLevel::kHigh);
+}
+
+void TestDialogTextNamesLoadedPlugin()
+{
+  const auto info = ResolveDialog("Fatal Error", "Failed to initialize FooPlugin.dll. Check its settings.");
+  assert(info.named_module_filename == L"FooPlugin.dll");
+  assert(info.named_mod_name == L"Foo Mod");
+  assert(info.named_module_source == "text");
+  assert(info.named_module_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+
+  // A text that says this game version is not supported makes it high; a
+  // path to the DLL names it too.
+  const auto version = ResolveDialog(
+    "Error", "D:\\Mods\\SKSE\\Plugins\\FooPlugin.dll does not support this version of the game (1.6.1170).");
+  assert(version.named_module_filename == L"FooPlugin.dll");
+  assert(version.named_module_version_issue);
+  assert(version.named_module_level == skydiag::dump_tool::i18n::ConfidenceLevel::kHigh);
+
+  // A Korean particle may follow the name directly.
+  const auto korean = ResolveDialog("오류", "FooPlugin.dll을 불러오지 못했습니다");
+  assert(korean.named_module_filename == L"FooPlugin.dll");
+
+  // Only whole file names count.
+  const auto partial = ResolveDialog("Error", "MySmoothCam.dll and SmoothCam.dllx and SmoothCam.dll_old failed");
+  assert(partial.named_module_filename.empty());
+  assert(partial.named_loaded_modules.empty());
+}
+
+void TestDialogNamingTwoLoadedPluginsPicksNone()
+{
+  const auto info = ResolveDialog("Error", "FooPlugin.dll requires BarPlugin.dll version 2 or later.");
+  assert(info.named_module_filename.empty());
+  assert(info.named_loaded_modules.size() == 2u);
+  assert(info.named_loaded_modules[0] == L"FooPlugin.dll");
+  assert(info.named_loaded_modules[1] == L"BarPlugin.dll");
+  assert(info.named_unloaded_modules.empty());
+
+  // The title comes first: one there wins over others in the text.
+  const auto title = ResolveDialog("FooPlugin.dll", "FooPlugin.dll requires BarPlugin.dll.");
+  assert(title.named_module_filename == L"FooPlugin.dll");
+  assert(title.named_module_source == "title");
+}
+
+void TestDialogNamingUnloadedDllPicksNone()
+{
+  const auto info = ResolveDialog("Error", "Could not find C:/Users/someone/Mods/MissingDep.dll (required by a plugin).");
+  assert(info.named_module_filename.empty());
+  assert(info.named_loaded_modules.empty());
+  assert(info.named_unloaded_modules.size() == 1u);
+  assert(info.named_unloaded_modules[0] == L"MissingDep.dll");
+}
+
+void TestDialogNamingSystemDllPicksNone()
+{
+  const auto info = ResolveDialog("d3d11.dll", "d3d11.dll failed to create a device. See user32.dll.");
+  assert(info.named_module_filename.empty());
+  assert(info.named_loaded_modules.empty());
+  // Loaded system modules are no mods, and they are not missing either.
+  assert(info.named_unloaded_modules.empty());
+
+  const auto game = ResolveDialog("SkyrimSE.exe", "SkyrimSE.exe stopped");
+  assert(game.named_module_filename.empty());
+}
+
+void TestDialogNamedModuleKeepsPluginCaller()
+{
+  // A plugin opened the dialog: it stays the opener, whatever the text says.
+  const auto wct = WctWithDialog(100, "FooPlugin.dll", "BarPlugin.dll is outdated");
+  auto frames = MessageBoxChain();
+  frames.push_back(Plugin(L"SmoothCam.dll", L"SmoothCam"));
+  const auto modules = LoadedModules();
+  ModalDialogWaitInput input{};
+  input.main_thread_id = 100;
+  input.wct = &wct;
+  input.main_thread_frames = &frames;
+  input.loaded_modules = &modules;
+  const auto info = ResolveModalDialogWait(input);
+  assert(info.caller_kind == "plugin");
+  assert(info.caller_module_filename == L"SmoothCam.dll");
+  assert(info.named_module_filename.empty());
+  assert(info.named_loaded_modules.empty() && info.named_unloaded_modules.empty());
+
+  // The SKSE runtime opening it is no plugin caller: the title names the mod.
+  auto skseFrames = MessageBoxChain();
+  skseFrames.push_back(Skse());
+  input.main_thread_frames = &skseFrames;
+  const auto skse = ResolveModalDialogWait(input);
+  assert(skse.caller_kind == "skse_runtime");
+  assert(skse.named_module_filename == L"FooPlugin.dll");
+}
+
+void TestDialogTextReportsUnsupportedGameVersion()
+{
+  using skydiag::dump_tool::DialogTextReportsUnsupportedGameVersion;
+  assert(DialogTextReportsUnsupportedGameVersion(L"Unsupported address library format: 2"));
+  assert(DialogTextReportsUnsupportedGameVersion(L"This plugin is not compatible with this game version."));
+  assert(DialogTextReportsUnsupportedGameVersion(L"Failed to locate an appropriate address library"));
+  assert(!DialogTextReportsUnsupportedGameVersion(L"Plugin failed to load"));
+  assert(!DialogTextReportsUnsupportedGameVersion(L"Unsupported setting in the ini file"));
+  assert(!DialogTextReportsUnsupportedGameVersion(L""));
+}
+
 }  // namespace
 
 int main()
@@ -344,5 +487,12 @@ int main()
   TestDialogTextRedactsUserProfileAndFlattensLines();
   TestClassifyAddressLibraryDialogText();
   TestResolveTagsAddressLibraryDialog();
+  TestDialogTitleExactlyNamesLoadedPlugin();
+  TestDialogTextNamesLoadedPlugin();
+  TestDialogNamingTwoLoadedPluginsPicksNone();
+  TestDialogNamingUnloadedDllPicksNone();
+  TestDialogNamingSystemDllPicksNone();
+  TestDialogNamedModuleKeepsPluginCaller();
+  TestDialogTextReportsUnsupportedGameVersion();
   return 0;
 }

@@ -51,6 +51,12 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
      설치하라고 안내하고, 이미 있다면 다른 판(SE/AE)용 빌드일 수 있다고 덧붙인다.
    - 판정은 본문만 보며 신뢰도와 후보는 바꾸지 않는다. 호출 모듈을 못 찾으면
      CommonLib이 제목에 넣는 플러그인 파일 이름으로 대상을 부른다.
+9. 창 근거가 있고 호출자가 일반 플러그인이나 hook framework가 아니면, 로드된 모듈의
+   파일 이름(대소문자 무시, 이름 전체 일치)을 가린 뒤의 제목에서 먼저, 없으면 본문에서
+   찾는다. 시스템 모듈과 게임 EXE를 뺀 로드된 모드 DLL이 정확히 하나면 의심 모드로
+   부른다. 제목이 그 DLL 이름과 같거나 본문이 게임 버전/Address Library 미지원을 말하면
+   `High`, 아니면 `Medium`이다. 여럿이거나 로드되지 않은 이름만 있으면 고르지 않고
+   이름만 알린다. 후보(`actionable_candidates`)와 버킷 키는 바꾸지 않는다.
 
 ## Output Contract
 
@@ -62,6 +68,15 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
 - `caller_kind` (`plugin` / `skse_runtime` / `hook_framework` / `game_exe` / `none`)
 - `address_library_issue` (`plugin_incompatible` / `address_library_missing` / 빈 문자열)
 - `other_thread_dialog_count`
+- `dialog_named_module`, `dialog_named_mod_name`: 결정 9로 고른 DLL 파일 이름과 MO2 모드
+  이름(경로는 쓰지 않음), 없으면 빈 문자열
+- `dialog_named_module_source` (`title` / `text` / 빈 문자열)
+- `dialog_named_module_likelihood` (`high` / `medium` / 빈 문자열)
+- `dialog_named_loaded_modules`: 고르지 않았을 때 이름이 적힌 로드된 모드 DLL(둘 이상), 그 외 빈 배열
+- `dialog_named_unloaded_modules`: 고르지 않았을 때 적혀 있지만 로드되지 않은 DLL 이름, 그 외 빈 배열
+
+리포트의 `modal_dialog_wait` 줄에는 고른 DLL이 있을 때
+`dialog_named_module=<파일 이름> source=<title|text>`가 붙는다.
 
 ## Consequences
 
@@ -81,7 +96,9 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
 ## Verification
 
 - `skydiag_modal_dialog_wait_tests`: 스택 매칭, 호출자 분류, WCT 파싱, 근거 결합, 경로 가림,
-  Address Library 오류 문구 분류.
+  Address Library 오류 문구 분류, 제목/본문에 적힌 모드 DLL 판정.
+- `skydiag_quick_answer_tests`: 제목/본문에 적힌 모드를 빠른 답, 요약, NextAction, 권장 사항이
+  같게 부르는지와 고르지 않는 경우.
 - `skydiag_modal_dialog_recommendation_tests`: Address Library 오류별 요약 문장과 안내.
 - `skydiag_freeze_candidate_consensus_tests`, `skydiag_candidate_consensus_tests`: 상태 우선순위와 후보 신뢰도.
 - `skydiag_helper_hang_runtime_tests`: 실제 MessageBox의 소유 스레드와 본문 캡처.

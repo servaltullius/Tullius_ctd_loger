@@ -367,7 +367,20 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
   const std::wstring caller = !modal.caller_inferred_mod_name.empty()
     ? (modal.caller_inferred_mod_name + L" (" + modal.caller_module_filename + L")")
     : modal.caller_module_filename;
+  const std::wstring named = modal.named_module_filename.empty() ? std::wstring{} : DialogNamedModuleDisplay(modal);
 
+  // The mod the dialog names comes first, as in the quick answer (and so it is
+  // the next action).
+  if (!named.empty()) {
+    r.recommendations.push_back(modal.named_module_version_issue
+      ? (en ? (L"[Modal dialog] Update " + named +
+                L" to a version made for your game version, or disable it (see what the error window says).")
+            : (L"[Modal 대화상자] " + named + L"을(를) 지금 게임 버전에 맞는 버전으로 업데이트하거나 끄세요(오류 창에 적힌 내용 참고)."))
+      : (en ? (L"[Modal dialog] The error window names " + named +
+                L". Follow what the window says, or update or disable that mod.")
+            : (L"[Modal 대화상자] 오류 창에 " + named +
+                L"이(가) 적혀 있습니다. 창에 적힌 내용을 따르거나, 그 모드를 업데이트하거나 끄세요.")));
+  }
   r.recommendations.push_back(en
     ? L"[Modal dialog] The game is waiting for a dialog to be closed. Alt-Tab or check the taskbar for an error window hidden behind the game, then read its message."
     : L"[Modal 대화상자] 게임이 대화상자가 닫히기를 기다리고 있습니다. Alt-Tab 또는 작업 표시줄에서 게임 창 뒤에 숨은 오류 창을 찾아 메시지를 확인하세요.");
@@ -376,9 +389,15 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
       ? (L"[Modal dialog] Captured dialog text: " + modal.dialog_text)
       : (L"[Modal 대화상자] 캡처된 대화상자 내용: " + modal.dialog_text));
   }
+  if (const auto files = DescribeDialogNamedFiles(modal, en); !files.empty()) {
+    r.recommendations.push_back(en
+      ? (L"[Modal dialog] " + files + L" Read the window to see which mod it is about.")
+      : (L"[Modal 대화상자] " + files + L" 창 내용을 읽고 어느 모드에 대한 것인지 확인하세요."));
+  }
   // CommonLib puts the plugin's file name in the dialog title, so it names the
   // plugin even when the stack walk could not resolve the caller.
-  std::wstring plugin = (modal.caller_kind == "plugin" && !caller.empty()) ? caller : modal.dialog_title;
+  std::wstring plugin = (modal.caller_kind == "plugin" && !caller.empty()) ? caller
+    : (!named.empty() ? named : modal.dialog_title);
   if (plugin.empty()) {
     plugin = en ? L"The plugin" : L"해당 플러그인";
   }

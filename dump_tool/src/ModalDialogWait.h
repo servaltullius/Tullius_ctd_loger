@@ -59,11 +59,27 @@ std::string ClassifyModalDialogCaller(const ModalStackFrame& frame);
 // address_library_missing (no database file for this game version), or empty.
 std::string ClassifyAddressLibraryDialogText(std::wstring_view text);
 
+// True when the dialog text says the plugin does not support this game version
+// or its Address Library (CommonLib's texts and plain wordings like it).
+bool DialogTextReportsUnsupportedGameVersion(std::wstring_view text);
+
+// A module loaded in the game process, for matching DLL names in the dialog.
+struct ModalLoadedModule
+{
+  std::wstring filename;
+  std::wstring inferred_mod_name;
+  bool is_system = false;
+  bool is_game_exe = false;
+};
+
 struct ModalDialogWaitInput
 {
   std::uint32_t main_thread_id = 0;
   const internal::WctFreezeSummary* wct = nullptr;
   const std::vector<ModalStackFrame>* main_thread_frames = nullptr;
+  // Read only when no plugin opened the dialog: its title and text then name
+  // the mod DLL (CommonLib puts the plugin's file name in the title).
+  const std::vector<ModalLoadedModule>* loaded_modules = nullptr;
 };
 
 ModalDialogWaitInfo ResolveModalDialogWait(const ModalDialogWaitInput& input);

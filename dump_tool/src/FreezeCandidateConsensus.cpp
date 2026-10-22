@@ -321,6 +321,14 @@ void AddModalDialogReasons(const ModalDialogWaitInfo& modal, i18n::Language lang
       ? L"The dialog was opened by the game executable"
       : L"대화상자를 연 주체는 게임 실행 파일임");
   }
+  if (!modal.named_module_filename.empty()) {
+    const bool inTitle = modal.named_module_source == "title";
+    result->primary_reasons.push_back(en
+      ? (std::wstring(inTitle ? L"The dialog's title names loaded mod DLL " : L"The dialog's text names loaded mod DLL ") +
+          modal.named_module_filename)
+      : (std::wstring(inTitle ? L"대화상자 제목에 로드된 모드 DLL " : L"대화상자 내용에 로드된 모드 DLL ") +
+          modal.named_module_filename + L"이(가) 적혀 있음"));
+  }
   result->primary_reasons.push_back(en
     ? L"Modules on the waiting stack are bystanders of the dialog, not the hang cause"
     : L"대기 중인 스택의 모듈은 대화상자 대기의 구경꾼일 뿐 프리징 원인이 아님");

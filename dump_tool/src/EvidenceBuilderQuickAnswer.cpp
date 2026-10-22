@@ -43,6 +43,7 @@ enum class Doubt : std::uint8_t {
   kCrashLogger,      // the thread dump deadlock is inferred
   kKnownIssue,       // matches a known problem
   kModalCaller,      // the dialog's opener
+  kModalNamed,       // the DLL the dialog names (its opener was not seen)
 };
 
 struct Lead
@@ -110,6 +111,9 @@ std::wstring ModNameForModule(const AnalysisResult& r, std::wstring_view file)
   if (!r.modal_dialog_wait.caller_inferred_mod_name.empty() &&
       SameFile(r.modal_dialog_wait.caller_module_filename, file)) {
     return r.modal_dialog_wait.caller_inferred_mod_name;
+  }
+  if (!r.modal_dialog_wait.named_mod_name.empty() && SameFile(r.modal_dialog_wait.named_module_filename, file)) {
+    return r.modal_dialog_wait.named_mod_name;
   }
   return {};
 }
@@ -347,6 +351,11 @@ Lead FreezeLead(const AnalysisResult& r, bool en)
       lead = ModLead(r, modal.caller_module_filename, modal.caller_inferred_mod_name, level);
       lead.case_id = "modal_dialog";
       lead.doubt = Doubt::kModalCaller;
+    } else if (!modal.named_module_filename.empty()) {
+      // No opener on the stack: the dialog's own title or text names the DLL.
+      lead = ModLead(r, modal.named_module_filename, modal.named_mod_name, modal.named_module_level);
+      lead.case_id = "modal_dialog";
+      lead.doubt = Doubt::kModalNamed;
     }
     return lead;
   }
@@ -565,6 +574,9 @@ std::wstring WhyFor(const Lead& lead, std::string_view kind, bool en)
     case Doubt::kModalCaller:
       return en ? L"This mod opened the window, but the window may be about another mod."
                 : L"이 모드가 창을 띄웠지만, 창의 내용은 다른 모드에 대한 것일 수도 있습니다.";
+    case Doubt::kModalNamed:
+      return en ? L"The error window names this mod's file, but which mod opened the window was not seen."
+                : L"오류 창에 이 모드의 파일 이름이 적혀 있지만, 창을 띄운 모드를 직접 확인하지는 못했습니다.";
     default:
       return {};
   }
@@ -726,23 +738,40 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
   if (r.modal_dialog_wait.detected) {
     const auto& modal = r.modal_dialog_wait;
     const std::wstring title = modal.dialog_title.empty() ? std::wstring{} : (L"(\"" + modal.dialog_title + L"\")");
-    const std::wstring opener = lead.type == LeadType::kNone
-      ? std::wstring{}
-      : (en ? (L" Window opened by: " + Display(lead)) : (L" 창을 띄운 모드: " + Display(lead)));
+    const bool named = lead.doubt == Doubt::kModalNamed;
+    std::wstring opener;
+    if (named) {
+      opener = L" " + SuspectPhrase(lead, en);
+    } else if (lead.type != LeadType::kNone) {
+      opener = en ? (L" Window opened by: " + Display(lead)) : (L" 창을 띄운 모드: " + Display(lead));
+    } else if (const auto files = DescribeDialogNamedFiles(modal, en); !files.empty()) {
+      opener = L" " + files;
+    }
     freeze.headline = KindPhrase(freeze.kind, en) +
       (en ? (L" It is waiting for an error window it opened" + (title.empty() ? title : L" " + title) +
               L" to be closed.")
           : (L" 게임이 띄운 오류 창" + title + L"이 닫히기를 기다리고 있습니다.")) +
       opener;
     const bool versionIssue = !modal.address_library_issue.empty();
-    freeze.action = versionIssue
-      ? (en ? L"Read the window the game showed (it may be behind the game window): it says the mod named there does "
-              L"not support your game version, so update that mod or disable it."
-            : L"게임이 띄운 오류 창(게임 창 뒤에 있을 수 있음)을 읽어 보세요. 창에 적힌 모드가 지금 게임 버전을 지원하지 않는다는 "
-              L"내용이니, 그 모드를 업데이트하거나 끄세요.")
-      : (en ? L"Read the window the game showed (it may be behind the game window); it usually names the mod with the "
-              L"problem."
-            : L"게임이 띄운 오류 창(게임 창 뒤에 있을 수 있음)을 읽어 보세요. 보통 어떤 모드가 왜 문제인지 적혀 있습니다.");
+    if (named) {
+      freeze.action = modal.named_module_version_issue
+        ? (en ? (L"Update " + lead.name + L" to a version made for your game version, or disable it (see what the "
+                  L"error window says).")
+              : (lead.name + L"을(를) 지금 게임 버전에 맞는 버전으로 업데이트하거나 끄세요(오류 창에 적힌 내용 참고)."))
+        : (en ? (L"Follow what the error window says (it may be behind the game window), or update or disable " +
+                  lead.name + L".")
+              : (L"게임이 띄운 오류 창(게임 창 뒤에 있을 수 있음)에 적힌 내용을 따르거나, " + lead.name +
+                  L"을(를) 업데이트하거나 끄세요."));
+    } else {
+      freeze.action = versionIssue
+        ? (en ? L"Read the window the game showed (it may be behind the game window): it says the mod named there does "
+                L"not support your game version, so update that mod or disable it."
+              : L"게임이 띄운 오류 창(게임 창 뒤에 있을 수 있음)을 읽어 보세요. 창에 적힌 모드가 지금 게임 버전을 지원하지 않는다는 "
+                L"내용이니, 그 모드를 업데이트하거나 끄세요.")
+        : (en ? L"Read the window the game showed (it may be behind the game window); it usually names the mod with the "
+                L"problem."
+              : L"게임이 띄운 오류 창(게임 창 뒤에 있을 수 있음)을 읽어 보세요. 보통 어떤 모드가 왜 문제인지 적혀 있습니다.");
+    }
   }
   return freeze;
 }

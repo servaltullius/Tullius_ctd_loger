@@ -373,6 +373,19 @@ std::wstring DescribeModalDialogWait(const ModalDialogWaitInfo& modal, i18n::Lan
   } else if (modal.caller_kind == "game_exe") {
     owner = en ? L" It was opened by the game executable." : L" 대화상자를 연 주체는 게임 실행 파일입니다.";
   }
+  if (!modal.named_module_filename.empty()) {
+    // The quick answer names the same mod with the same likelihood.
+    const bool high = modal.named_module_level == i18n::ConfidenceLevel::kHigh;
+    const bool inTitle = modal.named_module_source == "title";
+    owner += en
+      ? (std::wstring(inTitle ? L" The dialog's title names the suspected mod: "
+                              : L" The dialog's text names the suspected mod: ") +
+          DialogNamedModuleDisplay(modal) + (high ? L" — likely." : L" — possible."))
+      : (std::wstring(inTitle ? L" 대화상자 제목으로 보아 의심되는 모드: " : L" 대화상자 내용으로 보아 의심되는 모드: ") +
+          DialogNamedModuleDisplay(modal) + (high ? L" — 가능성 높음." : L" — 가능성 중간."));
+  } else if (const auto files = DescribeDialogNamedFiles(modal, en); !files.empty()) {
+    owner += L" " + files;
+  }
   if (modal.address_library_issue == "plugin_incompatible") {
     owner += en
       ? L" The dialog says this plugin could not use the Address Library of this game version (format or address missing)."
