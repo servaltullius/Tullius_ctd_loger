@@ -9,8 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
-#include <utility>
-#include <vector>
+#include <string_view>
 
 namespace skydiag::dump_tool::minidump {
 
@@ -39,15 +38,20 @@ inline bool ReadU64(const std::uint8_t* base, std::uint64_t size, std::uint64_t 
 
 }  // namespace thread_names_detail
 
-// Thread id -> name (UTF-16, as the dump stores it), in stream order. Empty
-// without the stream or when the stream does not fit in the dump; an entry
-// whose name does not fit is skipped, and so is an empty name.
-inline std::vector<std::pair<std::uint32_t, std::u16string>> LoadThreadNames(const void* dumpBase, std::uint64_t dumpSize)
+// The name of one thread (UTF-16, as the dump stores it): the first entry for
+// that thread id whose name fits in the dump. Empty without the stream, when
+// the stream does not fit in the dump, or when the thread has no name. Only
+// that one name is copied: a dump's entries can all point at one 64 KiB name,
+// and copying every entry would let a crafted stream ask for tens of GB.
+inline std::u16string FindThreadName(const void* dumpBase, std::uint64_t dumpSize, std::uint32_t threadId)
 {
   using thread_names_detail::ReadU32;
   using thread_names_detail::ReadU64;
-  std::vector<std::pair<std::uint32_t, std::u16string>> out;
+  std::u16string out;
   const auto* base = static_cast<const std::uint8_t*>(dumpBase);
+  if (threadId == 0u) {
+    return out;
+  }
   // MINIDUMP_HEADER: Signature, Version, NumberOfStreams, StreamDirectoryRva, ...
   std::uint32_t signature = 0;
   std::uint32_t streamCount = 0;
@@ -92,7 +96,6 @@ inline std::vector<std::pair<std::uint32_t, std::u16string>> LoadThreadNames(con
   }
   // A Windows thread description is at most 32767 UTF-16 code units.
   constexpr std::uint32_t kMaxNameBytes = 32767u * 2u;
-  out.reserve(nameCount);
   for (std::uint32_t i = 0; i < nameCount; ++i) {
     const std::uint64_t entry = streamRva + 4u + i * kNameEntrySize;
     std::uint32_t tid = 0;
@@ -102,14 +105,27 @@ inline std::vector<std::pair<std::uint32_t, std::u16string>> LoadThreadNames(con
       break;
     }
     // MINIDUMP_STRING: Length in bytes (no terminator), then UTF-16 code units.
-    if (tid == 0u || nameRva == 0u || !ReadU32(base, dumpSize, nameRva, lengthBytes) || lengthBytes == 0u ||
+    if (tid != threadId || nameRva == 0u || !ReadU32(base, dumpSize, nameRva, lengthBytes) || lengthBytes == 0u ||
         (lengthBytes % 2u) != 0u || lengthBytes > kMaxNameBytes || nameRva + 4u > dumpSize ||
         lengthBytes > dumpSize - (nameRva + 4u)) {
       continue;
     }
-    std::u16string name(lengthBytes / 2u, u'\0');
-    std::memcpy(name.data(), base + nameRva + 4u, lengthBytes);
-    out.emplace_back(tid, std::move(name));
+    out.assign(lengthBytes / 2u, u'\0');
+    std::memcpy(out.data(), base + nameRva + 4u, lengthBytes);
+    return out;
+  }
+  return out;
+}
+
+// A thread name for reports, JSON and bucket keys: a control character
+// (CR, LF, NUL, ...) becomes U+FFFD so a name cannot break a report line.
+inline std::wstring ThreadNameForDisplay(std::u16string_view name)
+{
+  std::wstring out;
+  out.reserve(name.size());
+  for (const char16_t c : name) {
+    const bool control = c < 0x20u || (c >= 0x7Fu && c <= 0x9Fu);
+    out.push_back(control ? static_cast<wchar_t>(0xFFFDu) : static_cast<wchar_t>(c));
   }
   return out;
 }

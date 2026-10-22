@@ -203,15 +203,19 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     const std::wstring progress = deadlock.thread_dump_total_threads > 0u
       ? (std::to_wstring(deadlock.thread_dump_records) + L"/" + std::to_wstring(deadlock.thread_dump_total_threads))
       : std::to_wstring(deadlock.thread_dump_records);
+    const bool inSyscall = r.main_thread_lock_owner.ip_state == "after_syscall";
     std::vector<std::wstring> parts = {
       (en ? L"Crash Logger thread: tid " : L"Crash Logger 스레드: tid ") + std::to_wstring(deadlock.crash_logger_tid) +
         L" (" + deadlock.crash_logger_module + L")",
       en ? (L"thread " + std::to_wstring(r.main_thread_lock_owner.tid) +
-             L" suspended: WCT blocked with no wait object, not in a system call")
+             (inSyscall ? L" blocked with no wait object WCT can see, inside a system call"
+                        : L" suspended: WCT blocked with no wait object, not in a system call"))
          : (L"스레드 " + std::to_wstring(r.main_thread_lock_owner.tid) +
-             L" 정지됨: WCT상 대기 대상 없이 blocked, 시스템 호출 안이 아님"),
+             (inSyscall ? L": WCT상 대기 대상 없이 blocked, 시스템 호출 중"
+                        : L" 정지됨: WCT상 대기 대상 없이 blocked, 시스템 호출 중도 아니었음")),
       (en ? L"thread dump stopped early: " : L"스레드 덤프가 중간에 멈춤: ") + progress +
-        (en ? L" threads written" : L"개 스레드 기록"),
+        (en ? L" threads written, before the capture" : L"개 스레드 기록, 캡처 전에 멈춤"),
+      en ? L"the game froze after the thread dump started" : L"게임은 스레드 덤프가 시작된 뒤에 멈춤",
     };
     e.details = JoinList(parts, parts.size(), L" | ");
     r.evidence.push_back(std::move(e));

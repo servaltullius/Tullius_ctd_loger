@@ -434,6 +434,8 @@ skydiag::dump_tool::CrashLoggerThreadDumpSignals TruncatedThreadDump()
   signals.thread_dump_total_threads = 292;
   signals.thread_dump_has_current_thread = false;
   signals.log_before_dump = true;
+  signals.freeze_started_after_thread_dump = true;
+  signals.log_stopped_before_capture = true;
   return signals;
 }
 
@@ -456,27 +458,25 @@ void TestCrashLoggerThreadDumpDeadlockFires()
   noCurrent.thread_dump_records = 292;
   assert(EvaluateCrashLoggerThreadDumpDeadlock(owner, noCurrent).detected);
 
-  // One WCT pass, or a thread dump paired from after the capture: medium.
+  // One WCT pass: medium.
   auto onePass = owner;
   onePass.confirmed = false;
   assert(CrashLoggerThreadDumpDeadlockConfidence(onePass, EvaluateCrashLoggerThreadDumpDeadlock(onePass, TruncatedThreadDump())) ==
          ConfidenceLevel::kMedium);
-  auto later = TruncatedThreadDump();
-  later.log_before_dump = false;
-  const auto laterDeadlock = EvaluateCrashLoggerThreadDumpDeadlock(owner, later);
-  assert(laterDeadlock.detected);
-  assert(CrashLoggerThreadDumpDeadlockConfidence(owner, laterDeadlock) == ConfidenceLevel::kMedium);
+
+  // Suspended inside a system call: the other signals carry it, at medium.
+  auto inSyscall = SuspendedLockOwner();
+  inSyscall.ip_state = "after_syscall";
+  const auto syscallDeadlock = EvaluateCrashLoggerThreadDumpDeadlock(inSyscall, TruncatedThreadDump());
+  assert(syscallDeadlock.detected);
+  assert(CrashLoggerThreadDumpDeadlockConfidence(inSyscall, syscallDeadlock) == ConfidenceLevel::kMedium);
 }
 
 void TestCrashLoggerThreadDumpDeadlockNeedsEverySignal()
 {
   using skydiag::dump_tool::EvaluateCrashLoggerThreadDumpDeadlock;
 
-  // The owner sits in a system call: it waits by itself, nobody suspended it.
-  auto inSyscall = SuspendedLockOwner();
-  inSyscall.ip_state = "after_syscall";
-  assert(!EvaluateCrashLoggerThreadDumpDeadlock(inSyscall, TruncatedThreadDump()).detected);
-  // Its code could not be read: no claim either.
+  // Its code could not be read: no claim.
   auto unreadable = SuspendedLockOwner();
   unreadable.ip_state.clear();
   assert(!EvaluateCrashLoggerThreadDumpDeadlock(unreadable, TruncatedThreadDump()).detected);
@@ -507,6 +507,91 @@ void TestCrashLoggerThreadDumpDeadlockNeedsEverySignal()
   auto noLog = TruncatedThreadDump();
   noLog.is_thread_dump_log = false;
   assert(!EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), noLog).detected);
+
+  // The game had frozen before the thread dump started: the player pressed
+  // the hotkey because of the freeze, which the dump did not cause.
+  auto alreadyFrozen = TruncatedThreadDump();
+  alreadyFrozen.freeze_started_after_thread_dump = false;
+  const auto pressedDuringFreeze = EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), alreadyFrozen);
+  assert(!pressedDuringFreeze.detected && !pressedDuringFreeze.freeze_started_after_thread_dump);
+  // The log was still being written at capture time: not stopped.
+  auto stillWriting = TruncatedThreadDump();
+  stillWriting.log_stopped_before_capture = false;
+  assert(!EvaluateCrashLoggerThreadDumpDeadlock(SuspendedLockOwner(), stillWriting).detected);
+}
+
+// FILETIME ticks per second.
+constexpr std::uint64_t kSecond = 10'000'000ull;
+
+void TestThreadDumpTiming()
+{
+  using skydiag::dump_tool::FreezeStartedAfterThreadDump;
+  using skydiag::dump_tool::ThreadDumpLogStoppedBeforeCapture;
+
+  // 2026-10-18: thread dump log 19:04:09, capture 19:04:44 with the
+  // heartbeat 11.6 s old, so the game froze at about 19:04:32.
+  const std::uint64_t logStart = 1000 * kSecond;
+  const std::uint64_t capture = logStart + 35 * kSecond;
+  assert(FreezeStartedAfterThreadDump(capture, 11.6, logStart));
+  // Frozen 40 s before the capture, 5 s before the dump started: the hotkey
+  // was pressed during an existing freeze.
+  assert(!FreezeStartedAfterThreadDump(capture, 40.0, logStart));
+  // Whole-second file names: up to the tolerance before the dump still counts.
+  assert(FreezeStartedAfterThreadDump(capture, 36.5, logStart));
+  assert(!FreezeStartedAfterThreadDump(capture, 37.5, logStart));
+  // Unknown inputs never pass.
+  assert(!FreezeStartedAfterThreadDump(0, 11.6, logStart));
+  assert(!FreezeStartedAfterThreadDump(capture, 11.6, 0));
+  assert(!FreezeStartedAfterThreadDump(capture, -1.0, logStart));
+
+  assert(ThreadDumpLogStoppedBeforeCapture(logStart + 2 * kSecond, capture));
+  assert(!ThreadDumpLogStoppedBeforeCapture(capture, capture));
+  assert(!ThreadDumpLogStoppedBeforeCapture(capture + kSecond, capture));
+  assert(!ThreadDumpLogStoppedBeforeCapture(0, capture));
+  assert(!ThreadDumpLogStoppedBeforeCapture(logStart, 0));
+}
+
+// The deadlock verdict leaves no mod lead: the main thread's suspects go, and
+// so does a game thread FindBlockedGameThread named (it would come back as a
+// medium lead after the suspects were dropped).
+void TestDeadlockVerdictDropsEveryStackLead()
+{
+  skydiag::dump_tool::AnalysisResult r{};
+  skydiag::dump_tool::SuspectItem suspect{};
+  suspect.module_filename = L"hdtsmp64.dll";
+  r.suspects.push_back(suspect);
+  r.main_thread_wait = EngineSyncWait();
+  skydiag::dump_tool::FindBlockedGameThread(r.main_thread_wait, {
+    Thread(40400, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"CrashTester.dll") }),
+  });
+  assert(skydiag::dump_tool::HasBlockedGameThread(r.main_thread_wait));
+  skydiag::dump_tool::ApplyCrashLoggerThreadDumpDeadlockVerdict(r);
+  assert(r.suspects.empty());
+  assert(!skydiag::dump_tool::HasBlockedGameThread(r.main_thread_wait));
+  assert(r.main_thread_wait.blocked_thread_tid == 0u && r.main_thread_wait.blocked_top.empty());
+  assert(r.main_thread_wait.kind == "engine_wait");
+}
+
+// With a lock owner WCT named, the main thread waits for that thread: another
+// game thread in plugin code is not the lead, the owner can be.
+void TestBlockedGameThreadIsTheLockOwner()
+{
+  using skydiag::dump_tool::FindBlockedGameThread;
+  using skydiag::dump_tool::HasBlockedGameThread;
+
+  const std::vector<skydiag::dump_tool::ThreadTopFrames> threads = {
+    Thread(40400, { System(L"KERNELBASE.dll", L"SleepEx"), Plugin(L"CrashTester.dll") }),
+    Thread(51000, { GameExe(), Plugin(L"Owner.dll") }),
+  };
+  auto other = EngineSyncWait();
+  FindBlockedGameThread(other, threads, /*lockOwnerTid=*/51944);
+  assert(!HasBlockedGameThread(other));
+  auto owner = EngineSyncWait();
+  FindBlockedGameThread(owner, threads, /*lockOwnerTid=*/51000);
+  assert(HasBlockedGameThread(owner) && owner.blocked_thread_tid == 51000u && owner.blocked_module == L"Owner.dll");
+  auto none = EngineSyncWait();
+  FindBlockedGameThread(none, threads);
+  assert(none.blocked_thread_tid == 40400u);
 }
 
 void TestCodeBeforeShapes()
@@ -567,6 +652,9 @@ int main()
   TestBlockedGameThreadIsNotInvented();
   TestCrashLoggerThreadDumpDeadlockFires();
   TestCrashLoggerThreadDumpDeadlockNeedsEverySignal();
+  TestThreadDumpTiming();
+  TestDeadlockVerdictDropsEveryStackLead();
+  TestBlockedGameThreadIsTheLockOwner();
   TestCodeBeforeShapes();
   TestLockOwnerFramesNameTheFirstNonWindowsModule();
   return 0;

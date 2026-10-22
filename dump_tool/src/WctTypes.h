@@ -71,10 +71,13 @@ inline constexpr std::uint32_t kWctObjectStatusOwned = 6u;
 
 // The thread holding the lock a thread waits on, read from that thread's own
 // wait chain: its thread node, an owned critical section or mutex, then the
-// owner's thread node. Only chains that are not cycles (those are deadlocks).
+// owner's thread node, followed to the chain's last thread in the same
+// process (the owner may itself wait on a lock another thread holds). Only
+// chains that are not cycles (those are deadlocks).
 struct WctLockOwner
 {
-  std::uint32_t owner_tid = 0;    // 0: the lock's owner was not reported
+  // 0: the lock's owner was not reported, or is in another process
+  std::uint32_t owner_tid = 0;
   std::uint32_t object_type = 0;  // kWctObjectTypeCriticalSection / kWctObjectTypeMutex
   // Two usable passes both named this owner; false with one pass, when they
   // disagree or the owner is unknown.

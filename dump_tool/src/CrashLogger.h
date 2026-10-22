@@ -24,6 +24,11 @@ struct CrashLoggerPairingMetadata
   bool selected_same_directory = false;
   // The selected log's time is not after the dump's.
   bool selected_before_dump = false;
+  // FILETIME (UTC); 0 when unknown: the selected log's time from its file
+  // name, its last write, and the dump's time.
+  std::uint64_t selected_name_time = 0;
+  std::uint64_t selected_last_write_time = 0;
+  std::uint64_t dump_time = 0;
   bool ambiguous = false;
 };
 

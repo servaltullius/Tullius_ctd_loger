@@ -210,11 +210,21 @@ void AddCrashLoggerThreadDumpDeadlockReasons(
         L" return addresses on its stack)")
     : (L"Crash Logger의 스레드 덤프가 스레드 " + clTid + L"에서 실행 중이었음(스택에 " + deadlock.crash_logger_module +
         L" 반환 주소)"));
-  result->primary_reasons.push_back(en
-    ? (L"The lock owner, " + DescribeLockOwnerThread(owner, en) +
-        L", was stopped from outside: WCT shows it blocked with nothing to wait on, and it was not in a system call")
-    : (L"잠금을 쥔 " + DescribeLockOwnerThread(owner, en) +
-        L"은(는) 밖에서 정지된 상태였음: WCT에서 기다리는 대상 없이 blocked인데 시스템 호출 안도 아님"));
+  if (owner.ip_state == "after_syscall") {
+    result->primary_reasons.push_back(en
+      ? (L"The lock owner, " + DescribeLockOwnerThread(owner, en) +
+          L", was blocked with nothing WCT could see to wait on; it was inside a system call, so it may have been "
+          L"waiting by itself rather than stopped from outside")
+      : (L"잠금을 쥔 " + DescribeLockOwnerThread(owner, en) +
+          L"은(는) WCT에서 기다리는 대상 없이 blocked였음. 시스템 호출 중이었으므로 밖에서 정지된 것이 아니라 "
+          L"스스로 기다리고 있었을 수도 있음"));
+  } else {
+    result->primary_reasons.push_back(en
+      ? (L"The lock owner, " + DescribeLockOwnerThread(owner, en) +
+          L", was stopped from outside: WCT shows it blocked with nothing to wait on, and it was not in a system call")
+      : (L"잠금을 쥔 " + DescribeLockOwnerThread(owner, en) +
+          L"은(는) 밖에서 정지된 상태였음: WCT에서 기다리는 대상 없이 blocked인데 시스템 호출 중도 아니었음"));
+  }
   const std::wstring records = std::to_wstring(deadlock.thread_dump_records);
   result->primary_reasons.push_back(en
     ? (L"The paired Crash Logger thread dump stopped early: " + records +
@@ -227,6 +237,9 @@ void AddCrashLoggerThreadDumpDeadlockReasons(
           ? (std::to_wstring(deadlock.thread_dump_total_threads) + L"개 스레드 중 ")
           : std::wstring{}) +
         records + L"개만 기록, [CURRENT THREAD] 기록 없음"));
+  result->primary_reasons.push_back(en
+    ? L"The game froze after the thread dump started, and the dump's log was last written before this capture"
+    : L"게임은 스레드 덤프가 시작된 뒤에 멈췄고, 덤프 로그는 이번 캡처 전에 마지막으로 기록됨");
 }
 
 std::wstring DescribeModalDialogCaller(const ModalDialogWaitInfo& modal)
@@ -501,9 +514,9 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   }
   result.confidence = i18n::ConfidenceText(language, result.confidence_level);
   std::unordered_set<std::wstring> seenNames;
-  // Under a lock-owner wait the stack candidates are the main thread's
-  // bystanders, not related to the stall.
-  const bool stackCandidatesAreBystanders = result.state_id == "lock_owner_wait";
+  // Under a lock-owner wait or the thread-dump deadlock the stack candidates
+  // are the main thread's bystanders, not related to the stall.
+  const bool stackCandidatesAreBystanders = IsLockOwnerFreezeState(result.state_id);
   const std::size_t maxCandidates =
     stackCandidatesAreBystanders ? 0u : std::min<std::size_t>(input.actionable_candidates.size(), 2u);
   for (std::size_t i = 0; i < maxCandidates; ++i) {

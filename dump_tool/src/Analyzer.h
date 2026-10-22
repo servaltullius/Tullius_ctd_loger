@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -240,6 +241,10 @@ struct CrashLoggerThreadDumpDeadlockInfo
   std::uint32_t thread_dump_records = 0;
   std::uint32_t thread_dump_total_threads = 0;
   bool thread_dump_before_capture = false;  // the thread dump started before this capture
+  // The freeze began after the thread dump started, and the log was last
+  // written before the capture (both required).
+  bool freeze_started_after_thread_dump = false;
+  bool thread_dump_stopped_before_capture = false;
 };
 
 struct FreezeAnalysisResult
@@ -258,6 +263,14 @@ struct FreezeAnalysisResult
   FirstChanceSummary first_chance_context;
   HangThreadModuleConsensus thread_module_consensus;
 };
+
+// lock_owner_wait and crash_logger_thread_dump_deadlock: the stall is on the
+// thread holding the lock the main thread waits on (or on Crash Logger, which
+// suspended it), so candidates from the main thread's stack are bystanders.
+inline bool IsLockOwnerFreezeState(std::string_view stateId)
+{
+  return stateId == "lock_owner_wait" || stateId == "crash_logger_thread_dump_deadlock";
+}
 
 struct EventRow
 {
@@ -395,6 +408,11 @@ struct AnalysisResult
   bool crash_logger_thread_dump_has_current_thread = false;
   // The paired log's time (its file name, else its last write) is not after the dump's.
   bool crash_logger_pairing_log_before_dump = false;
+  // FILETIME (UTC); 0 when unknown: the log's start from its file name, its
+  // last write, and the dump's time the pairing compared against.
+  std::uint64_t crash_logger_log_name_time = 0;
+  std::uint64_t crash_logger_log_last_write_time = 0;
+  std::uint64_t crash_logger_pairing_dump_time = 0;
   std::wstring crash_logger_direct_fault_module;
   std::wstring crash_logger_first_actionable_probable_module;
   std::wstring crash_logger_probable_streak_module;

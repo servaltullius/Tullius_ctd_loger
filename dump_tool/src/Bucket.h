@@ -108,4 +108,46 @@ inline std::wstring ComputeHangBucketKey(std::string_view waitCanonical)
   return wss.str();
 }
 
+// A thread name without its numbering ("Worker 12" -> "worker #"), so the
+// same kind of thread names the same bucket in every run.
+inline std::string ThreadNameClass(std::wstring_view threadName)
+{
+  const std::string lower = bucket::NarrowAsciiFallback(bucket::LowerTrimmed(threadName));
+  std::string out;
+  out.reserve(lower.size());
+  for (const char c : lower) {
+    if (c >= '0' && c <= '9') {
+      if (out.empty() || out.back() != '#') {
+        out.push_back('#');
+      }
+      continue;
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+
+// lock_owner_wait: the main thread's own wait is the same for every such
+// freeze, so they are grouped by the thread holding the lock instead, its top
+// non-Windows module and its kind of thread. Tids and addresses are left out;
+// they change with every run.
+inline std::wstring ComputeLockOwnerBucketKey(
+  std::string_view freezeState,
+  std::wstring_view ownerTopModule,
+  std::wstring_view ownerThreadName)
+{
+  std::ostringstream canonical;
+  canonical << "v=1|kind=" << freezeState
+            << "|owner_module=" << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(ownerTopModule))
+            << "|owner_thread=" << ThreadNameClass(ownerThreadName);
+  return ComputeHangBucketKey(canonical.str());
+}
+
+// A freeze whose state alone is the cause (crash_logger_thread_dump_deadlock:
+// whichever thread the dump happened to suspend is incidental).
+inline std::wstring ComputeFreezeStateBucketKey(std::string_view freezeState)
+{
+  return ComputeHangBucketKey("v=1|kind=" + std::string(freezeState));
+}
+
 }  // namespace skydiag::dump_tool

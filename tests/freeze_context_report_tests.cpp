@@ -22,6 +22,7 @@
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "SkyrimDiagShared.h"
+#include "Utf.h"
 
 namespace {
 
@@ -469,6 +470,149 @@ void TestFreezesGroupByTheMainThreadWait()
   Require(crash.crash_bucket_key.rfind(L"CTD3-", 0) == 0, "crashes keep the stack bucket");
 }
 
+// A lock-owner freeze is bucketed by the owner thread, not by the driver wait
+// the main thread shares with every ordinary driver freeze.
+void TestLockOwnerFreezesGroupByTheOwner()
+{
+  const auto lockOwnerFreeze = [](const char* state, std::uint32_t tid, const wchar_t* topModule) {
+    auto r = MakeHang();
+    r.main_thread_wait.kind = "graphics_driver_wait";
+    r.main_thread_wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+    r.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+    r.main_thread_lock_owner.tid = tid;
+    r.main_thread_lock_owner.confirmed = true;
+    r.main_thread_lock_owner.thread_name = L"nv.sl.dlss_g.present";
+    r.main_thread_lock_owner.top_module = topModule;
+    r.main_thread_lock_owner.top_frames = { std::wstring(topModule) + L"+0x" + std::to_wstring(tid) };
+    skydiag::dump_tool::internal::ComputeCrashBucket(r);
+    const auto waitKey = r.crash_bucket_key;
+    r.freeze_analysis.state_id = state;
+    const bool rekeyed = skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(r);
+    Require(rekeyed && r.crash_bucket_key != waitKey, "the owner replaces the main thread's wait in the key");
+    Require(!skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(r), "rekeying twice changes nothing");
+    auto direct = r;
+    skydiag::dump_tool::internal::ComputeCrashBucket(direct);
+    Require(direct.crash_bucket_key == r.crash_bucket_key, "the same key whichever way it is computed");
+    return r.crash_bucket_key;
+  };
+  const auto first = lockOwnerFreeze("lock_owner_wait", 4012, L"nvwgf2umx.dll");
+  Require(first.rfind(L"HANG1-", 0) == 0, "a freeze bucket");
+  Require(lockOwnerFreeze("lock_owner_wait", 9120, L"nvwgf2umx.dll") == first, "the owner's tid does not split it");
+  Require(lockOwnerFreeze("lock_owner_wait", 4012, L"SomePlugin.dll") != first, "a different owner module does");
+  const auto deadlock = lockOwnerFreeze("crash_logger_thread_dump_deadlock", 4012, L"nvwgf2umx.dll");
+  Require(deadlock != first, "the Crash Logger deadlock has its own bucket");
+  Require(lockOwnerFreeze("crash_logger_thread_dump_deadlock", 7700, L"SomePlugin.dll") == deadlock,
+    "whichever thread the dump suspended");
+
+  // A lock-owner wait with nothing naming the owner keeps the wait key.
+  auto unnamed = MakeHang();
+  unnamed.main_thread_wait.kind = "graphics_driver_wait";
+  unnamed.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  skydiag::dump_tool::internal::ComputeCrashBucket(unnamed);
+  const auto unnamedWaitKey = unnamed.crash_bucket_key;
+  unnamed.main_thread_lock_owner.tid = 4012;
+  unnamed.freeze_analysis.state_id = "lock_owner_wait";
+  Require(!skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(unnamed) && unnamed.crash_bucket_key == unnamedWaitKey,
+    "an owner with no module and no name does not split the wait bucket");
+
+  // Any other state keeps the wait key, even with a lock owner named.
+  auto ordinary = MakeHang();
+  ordinary.main_thread_wait.kind = "graphics_driver_wait";
+  ordinary.main_thread_wait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+  ordinary.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  skydiag::dump_tool::internal::ComputeCrashBucket(ordinary);
+  const auto ordinaryKey = ordinary.crash_bucket_key;
+  ordinary.main_thread_lock_owner.tid = 4012;
+  ordinary.main_thread_lock_owner.top_module = L"nvwgf2umx.dll";
+  for (const char* state : { "freeze_ambiguous", "deadlock_likely", "loader_stall_likely" }) {
+    ordinary.freeze_analysis.state_id = state;
+    Require(!skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(ordinary) &&
+              ordinary.crash_bucket_key == ordinaryKey,
+      "other freeze states keep the main thread's wait key");
+  }
+}
+
+// AnalyzeDump reads the history again once a lock-owner state rekeys the
+// bucket: what it holds must then be the new bucket's alone, not both.
+void TestHistoryFollowsTheRekeyedBucket()
+{
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "skydiag_rekey_history_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir);
+  const fs::path historyPath = dir / "crash_history.json";
+
+  auto r = MakeHang();
+  r.main_thread_wait.kind = "graphics_driver_wait";
+  r.main_thread_wait.waiting_module = L"nvwgf2umx.dll";
+  r.main_thread_lock_owner.tid = 4012;
+  r.main_thread_lock_owner.confirmed = true;
+  r.main_thread_lock_owner.top_module = L"SomePlugin.dll";
+  r.freeze_analysis.state_id.clear();
+  skydiag::dump_tool::internal::ComputeCrashBucket(r);
+  const auto waitKey = skydiag::dump_tool::WideToUtf8(r.crash_bucket_key);
+  auto rekeyed = r;
+  rekeyed.freeze_analysis.state_id = "lock_owner_wait";
+  Require(skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(rekeyed), "the state rekeys the bucket");
+  const auto ownerKey = skydiag::dump_tool::WideToUtf8(rekeyed.crash_bucket_key);
+
+  skydiag::dump_tool::CrashHistory history;
+  for (int i = 0; i < 3; ++i) {
+    skydiag::dump_tool::CrashHistoryEntry entry{};
+    entry.timestamp_utc = "2026-10-1" + std::to_string(i) + "T00:00:00Z";
+    entry.dump_file = "wait_" + std::to_string(i) + ".dmp";
+    entry.bucket_key = waitKey;
+    entry.candidate_keys = { "communityshaders" };
+    history.AddEntry(entry);
+  }
+  skydiag::dump_tool::CrashHistoryEntry ownerEntry{};
+  ownerEntry.timestamp_utc = "2026-10-15T00:00:00Z";
+  ownerEntry.dump_file = "owner.dmp";
+  ownerEntry.bucket_key = ownerKey;
+  ownerEntry.candidate_keys = { "someplugin" };
+  history.AddEntry(ownerEntry);
+  Require(history.SaveToFile(historyPath), "history saved");
+
+  const std::wstring dumpPath = (dir / L"SkyrimDiag_Hang_20261018_190444_914.dmp").wstring();
+  skydiag::dump_tool::LoadCrashHistoryContext(historyPath, dumpPath, "2026-10-22T00:00:00Z", r);
+  Require(r.history_correlation.count == 4u, "the wait bucket's three earlier freezes");
+  Require(r.bucket_candidate_repeats.size() == 1u && r.bucket_candidate_repeats[0].candidate_key == "communityshaders",
+    "the wait bucket's candidate");
+
+  r.freeze_analysis.state_id = "lock_owner_wait";
+  Require(skydiag::dump_tool::internal::RekeyLockOwnerFreezeBucket(r), "rekeyed after freeze analysis");
+  skydiag::dump_tool::LoadCrashHistoryContext(historyPath, dumpPath, "2026-10-22T00:00:00Z", r);
+  Require(r.history_correlation.count == 2u && r.history_correlation.first_seen == "2026-10-15T00:00:00Z",
+    "only the owner bucket's earlier freeze");
+  Require(r.bucket_candidate_repeats.size() == 1u && r.bucket_candidate_repeats[0].candidate_key == "someplugin",
+    "the wait bucket's candidates are gone, not added to");
+
+  fs::remove_all(dir, ec);
+}
+
+// Under a lock-owner state the main thread's stack names no candidate, so the
+// JSON, the report and the viewer's headline cannot lead with a bystander.
+void TestLockOwnerStatesHaveNoStackCandidates()
+{
+  for (const char* state : { "lock_owner_wait", "crash_logger_thread_dump_deadlock" }) {
+    auto r = MakeHang();
+    r.main_thread_wait.kind = "running";
+    r.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+    r.main_thread_lock_owner.tid = 4012;
+    r.main_thread_lock_owner.confirmed = true;
+    r.freeze_analysis.state_id = state;
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    Require(r.actionable_candidates.empty(), "no stack-derived actionable candidate under a lock-owner state");
+
+    auto running = MakeHang();
+    running.main_thread_wait.kind = "running";
+    running.suspects[0].confidence_level = i18n::ConfidenceLevel::kHigh;
+    BuildEvidenceAndSummary(running, i18n::Language::kEnglish);
+    Require(!running.actionable_candidates.empty(), "the same stack still names a candidate otherwise");
+  }
+}
+
 // Plugins on a waiting main thread's stack are bystanders; recording them as
 // the bucket's candidates would let every repeat of the freeze vote for them.
 void TestBystanderStackIsNotRecordedInHistory()
@@ -482,6 +626,16 @@ void TestBystanderStackIsNotRecordedInHistory()
   running.main_thread_wait.kind = "running";
   const auto keys = skydiag::dump_tool::CollectHistoryCandidateKeys(running);
   Require(!keys.empty(), "a running main thread still records its stack suspects");
+
+  auto lockOwner = running;
+  lockOwner.freeze_analysis.state_id = "lock_owner_wait";
+  lockOwner.main_thread_lock_owner.tid = 4012;
+  skydiag::dump_tool::ActionableCandidate candidate{};
+  candidate.display_name = L"CommunityShaders";
+  candidate.module_filename = L"CommunityShaders.dll";
+  lockOwner.actionable_candidates.push_back(candidate);
+  Require(skydiag::dump_tool::CollectHistoryCandidateKeys(lockOwner).empty(),
+    "a lock-owner wait does not record the main thread's bystanders in the owner's bucket");
 }
 
 // The summary keeps plugin counts, not the ~1 MB per-plugin list that the
@@ -616,6 +770,9 @@ int main()
     TestMainThreadFromEvents();
     TestReportKeepsRecentEvents();
     TestFreezesGroupByTheMainThreadWait();
+    TestLockOwnerFreezesGroupByTheOwner();
+    TestHistoryFollowsTheRekeyedBucket();
+    TestLockOwnerStatesHaveNoStackCandidates();
     TestBystanderStackIsNotRecordedInHistory();
     TestSummaryKeepsPluginCountsOnly();
     TestAdviceFitsTheCapture();

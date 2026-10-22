@@ -437,6 +437,49 @@ static void Test_LockOwner_UnknownOwnerOrOtherChainsNameNoOne()
   assert(waitingOwner.has_value() && waitingOwner->owner_tid == 5u && !waitingOwner->owner_blocked_without_wait_object);
 }
 
+static std::string ThreadNode(std::uint32_t tid, std::uint32_t pid)
+{
+  return R"({"objectStatus":3,"objectType":8,"thread":{"contextSwitches":6634,"processId":)" + std::to_string(pid) +
+         R"(,"threadId":)" + std::to_string(tid) + R"(,"waitTime":7753219}})";
+}
+
+static std::string OwnEntry(std::uint32_t tid, std::uint32_t pid)
+{
+  return R"({"tid":)" + std::to_string(tid) + R"(,"isCycle":false,"nodes":[)" + ThreadNode(tid, pid) + "]}";
+}
+
+static void Test_LockOwner_FollowsTheChainToItsLastThread()
+{
+  // main (100) -> critical section -> A (200) -> critical section -> B (300):
+  // A only waits too; B, blocked with nothing to wait on, is the owner.
+  const std::string lock = R"({"objectName":"","objectStatus":6,"objectType":1})";
+  const std::string threads = "[" + std::string(R"({"tid":100,"isCycle":false,"nodes":[)") + ThreadNode(100, 49416) + "," +
+    lock + "," + ThreadNode(200, 49416) + "," + lock + "," + ThreadNode(300, 49416) + "]}," +
+    R"({"tid":200,"isCycle":false,"nodes":[)" + ThreadNode(200, 49416) + "," + lock + "," + ThreadNode(300, 49416) + "]}," +
+    OwnEntry(300, 49416) + "]";
+  const auto owner = skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(threads, threads), 100);
+  assert(owner.has_value() && owner->owner_tid == 300u && owner->confirmed);
+  assert(owner->owner_blocked_without_wait_object);
+}
+
+static void Test_LockOwner_InAnotherProcessIsNoOwner()
+{
+  // A named mutex held by a thread of another process (an overlay).
+  const std::string mutex = R"({"objectName":"Overlay","objectStatus":6,"objectType":3})";
+  const std::string direct = "[" + std::string(R"({"tid":100,"isCycle":false,"nodes":[)") + ThreadNode(100, 49416) + "," +
+    mutex + "," + ThreadNode(900, 1234) + "]}]";
+  const auto outside = skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(direct, direct), 100);
+  assert(outside.has_value() && outside->owner_tid == 0u && !outside->confirmed);
+
+  // The owner in the game waits on another process: it stays the owner.
+  const std::string lock = R"({"objectName":"","objectStatus":6,"objectType":1})";
+  const std::string chained = "[" + std::string(R"({"tid":100,"isCycle":false,"nodes":[)") + ThreadNode(100, 49416) +
+    "," + lock + "," + ThreadNode(200, 49416) + "," + mutex + "," + ThreadNode(900, 1234) + "]}," +
+    OwnEntry(200, 49416) + "]";
+  const auto inGame = skydiag::dump_tool::internal::FindWctLockOwner(TwoPassCapture(chained, chained), 100);
+  assert(inGame.has_value() && inGame->owner_tid == 200u && inGame->confirmed);
+}
+
 int main()
 {
   Test_EmptyInput_ReturnsEmpty();
@@ -461,6 +504,8 @@ int main()
   Test_LockOwner_CriticalSectionChainConfirmedByBothPasses();
   Test_LockOwner_PassesDisagreeStayUnconfirmed();
   Test_LockOwner_UnknownOwnerOrOtherChainsNameNoOne();
+  Test_LockOwner_FollowsTheChainToItsLastThread();
+  Test_LockOwner_InAnotherProcessIsNoOwner();
 
   return 0;
 }

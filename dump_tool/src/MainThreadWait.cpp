@@ -58,6 +58,8 @@ constexpr std::wstring_view kGraphicsRuntimes[] = {
 
 constexpr std::size_t kMaxPathModules = 6;
 
+constexpr double kFileTimeTicksPerSecond = 10'000'000.0;
+
 // A system call stub (ntdll.dll!NtReadFile, win32u.dll!NtUserGetMessage): the
 // thread is in the kernel, which for a thread found there is usually a wait.
 bool IsSystemCallStub(const ModalStackFrame& frame)
@@ -300,13 +302,19 @@ struct BlockedCandidate
 
 }  // namespace
 
-void FindBlockedGameThread(MainThreadWaitInfo& wait, const std::vector<ThreadTopFrames>& gameThreads)
+void FindBlockedGameThread(
+  MainThreadWaitInfo& wait,
+  const std::vector<ThreadTopFrames>& gameThreads,
+  std::uint32_t lockOwnerTid)
 {
   if (wait.kind != "engine_wait" || wait.wait_class != "sync") {
     return;
   }
   std::vector<BlockedCandidate> candidates;
   for (const auto& thread : gameThreads) {
+    if (lockOwnerTid != 0u && thread.tid != lockOwnerTid) {
+      continue;
+    }
     const std::size_t limit = std::min(thread.frames.size(), kBlockedThreadTopFrames);
     for (std::size_t i = 0; i < limit; ++i) {
       if (!IsPluginFrame(thread.frames[i])) {
@@ -450,6 +458,21 @@ bool IsCrashLoggerThreadDumpTruncated(const CrashLoggerThreadDumpSignals& signal
          (signals.thread_dump_total_threads > 0u && signals.thread_dump_records < signals.thread_dump_total_threads);
 }
 
+bool FreezeStartedAfterThreadDump(std::uint64_t captureTime, double heartbeatAgeSec, std::uint64_t threadDumpStartTime)
+{
+  // NaN fails the comparison too.
+  if (captureTime == 0u || threadDumpStartTime == 0u || !(heartbeatAgeSec >= 0.0)) {
+    return false;
+  }
+  const double freezeStart = static_cast<double>(captureTime) - heartbeatAgeSec * kFileTimeTicksPerSecond;
+  return freezeStart >= static_cast<double>(threadDumpStartTime) - kThreadDumpStartToleranceSec * kFileTimeTicksPerSecond;
+}
+
+bool ThreadDumpLogStoppedBeforeCapture(std::uint64_t logLastWriteTime, std::uint64_t captureTime)
+{
+  return logLastWriteTime != 0u && captureTime != 0u && logLastWriteTime < captureTime;
+}
+
 CrashLoggerThreadDumpDeadlockInfo EvaluateCrashLoggerThreadDumpDeadlock(
   const MainThreadLockOwnerInfo& owner,
   const CrashLoggerThreadDumpSignals& signals)
@@ -461,17 +484,37 @@ CrashLoggerThreadDumpDeadlockInfo EvaluateCrashLoggerThreadDumpDeadlock(
   info.thread_dump_records = signals.thread_dump_records;
   info.thread_dump_total_threads = signals.thread_dump_total_threads;
   info.thread_dump_before_capture = signals.is_thread_dump_log && signals.log_before_dump;
+  info.freeze_started_after_thread_dump = signals.is_thread_dump_log && signals.freeze_started_after_thread_dump;
+  info.thread_dump_stopped_before_capture = signals.is_thread_dump_log && signals.log_stopped_before_capture;
   const bool crashLoggerThread = signals.crash_logger_tid != 0u && signals.crash_logger_tid != owner.tid;
-  const bool ownerSuspended = owner.tid != 0u && owner.blocked_without_wait_object && owner.ip_state == "not_after_syscall";
-  info.detected = crashLoggerThread && ownerSuspended && info.thread_dump_truncated;
+  // Outside a system call it can only have been stopped from outside; inside
+  // one it may have been, which the other signals then have to carry (medium).
+  const bool ownerSuspended = owner.tid != 0u && owner.blocked_without_wait_object &&
+    (owner.ip_state == "not_after_syscall" || owner.ip_state == "after_syscall");
+  info.detected = crashLoggerThread && ownerSuspended && info.thread_dump_truncated &&
+    info.freeze_started_after_thread_dump && info.thread_dump_stopped_before_capture;
   return info;
+}
+
+void ApplyCrashLoggerThreadDumpDeadlockVerdict(AnalysisResult& out)
+{
+  out.suspects.clear();
+  auto& wait = out.main_thread_wait;
+  wait.blocked_thread_tid = 0;
+  wait.blocked_module.clear();
+  wait.blocked_module_path.clear();
+  wait.blocked_mod_name.clear();
+  wait.blocked_state.clear();
+  wait.blocked_top.clear();
+  wait.blocked_thread_count = 0;
 }
 
 i18n::ConfidenceLevel CrashLoggerThreadDumpDeadlockConfidence(
   const MainThreadLockOwnerInfo& owner,
   const CrashLoggerThreadDumpDeadlockInfo& deadlock)
 {
-  return (owner.confirmed && owner.context_switches_stable && deadlock.thread_dump_before_capture)
+  return (owner.ip_state == "not_after_syscall" && owner.confirmed && owner.context_switches_stable &&
+          deadlock.thread_dump_before_capture)
     ? i18n::ConfidenceLevel::kHigh
     : i18n::ConfidenceLevel::kMedium;
 }

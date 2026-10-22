@@ -640,6 +640,26 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     return;
   }
 
+  if (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) {
+    // Crash Logger's thread dump caused it: neither the GPU advice, the
+    // resource and conflict checklist nor the modules on the main thread's
+    // stack apply, so this is the only advice (as the summary leads with it).
+    const auto& path = r.main_thread_wait.path_modules;
+    const std::wstring mods = path.empty()
+      ? std::wstring{}
+      : ((en ? L" (" : L"(") + JoinList(path, path.size(), L", ") + L")");
+    r.recommendations.push_back(en
+      ? (L"[Main thread] This freeze came from Crash Logger's thread dump deadlocking. Do not press Crash Logger's "
+          L"thread-dump hotkey (Ctrl+Shift+F12 by default) while playing, or turn it off in CrashLogger.ini: under [Debug], "
+          L"set \"Enable Thread Dump Hotkey = false\". The mods on the main thread's stack" + mods +
+          L" are not the cause, so there is no need to remove them.")
+      : (L"[메인 스레드] 이번 프리징은 Crash Logger의 스레드 덤프가 교착 상태에 빠져서 생겼습니다. 게임 중에는 Crash Logger의 "
+          L"스레드 덤프 단축키(기본 Ctrl+Shift+F12)를 누르지 마세요. 아예 끄려면 CrashLogger.ini의 [Debug] 항목에서 "
+          L"\"Enable Thread Dump Hotkey = false\"로 바꾸면 됩니다. 메인 스레드 스택에 보이는 모드" + mods +
+          L"는 원인이 아니므로 뺄 필요가 없습니다."));
+    return;
+  }
+
   // Recommendations (checklist)
   if (isSnapshotLike) {
     r.recommendations.push_back(en
@@ -716,8 +736,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // A lock-owner wait (both WCT passes) puts the stall on the owner thread,
   // and Crash Logger's thread-dump deadlock on Crash Logger; candidates from
   // the main thread's stack only called into the wait.
-  const bool lockOwnerWait = r.freeze_analysis.state_id == "lock_owner_wait" ||
-    r.freeze_analysis.state_id == "crash_logger_thread_dump_deadlock";
+  const bool lockOwnerWait = IsLockOwnerFreezeState(r.freeze_analysis.state_id);
   if (!lockOwnerWait) {
     AddActionableCandidateRecommendations(
       r,
@@ -917,22 +936,6 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       stateId == "loader_stall_likely" || r.hang_thread_module_consensus.has_consensus;
     if (stallExplained) {
       // No [Main thread] advice.
-    } else if (isHangLike && r.crash_logger_thread_dump_deadlock.detected) {
-      // Crash Logger's thread dump caused it: neither the GPU advice nor the
-      // modules on the main thread's stack apply.
-      const auto& path = wait.path_modules;
-      const std::wstring mods = path.empty()
-        ? std::wstring{}
-        : ((en ? L" (" : L"(") + JoinList(path, path.size(), L", ") + L")");
-      r.recommendations.push_back(en
-        ? (L"[Main thread] This freeze came from Crash Logger's thread dump deadlocking. Do not press Crash Logger's "
-            L"thread-dump hotkey (Ctrl+Shift+F12 by default) while playing, or turn it off in CrashLogger.ini: under [Debug], "
-            L"set \"Enable Thread Dump Hotkey = false\". The mods on the main thread's stack" + mods +
-            L" are not the cause, so there is no need to remove them.")
-        : (L"[메인 스레드] 이번 프리징은 Crash Logger의 스레드 덤프가 교착 상태에 빠져서 생겼습니다. 게임 중에는 Crash Logger의 "
-            L"스레드 덤프 단축키(기본 Ctrl+Shift+F12)를 누르지 마세요. 아예 끄려면 CrashLogger.ini의 [Debug] 항목에서 "
-            L"\"Enable Thread Dump Hotkey = false\"로 바꾸면 됩니다. 메인 스레드 스택에 보이는 모드" + mods +
-            L"는 원인이 아니므로 뺄 필요가 없습니다."));
     } else if (isHangLike && r.main_thread_lock_owner.confirmed &&
                IsGraphicsStackModule(r.main_thread_lock_owner.top_module)) {
       // The thread holding the lock was itself in the graphics driver.
@@ -957,16 +960,17 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
             L" 없이 시험해 보세요." +
             (mods.empty() ? std::wstring{}
                           : (L" 메인 스레드 스택의 플러그인(" + mods + L")은 그 대기를 호출했을 뿐입니다."))));
-    } else if (isHangLike && r.main_thread_lock_owner.tid != 0u) {
+    } else if (isHangLike && r.main_thread_lock_owner.confirmed) {
+      // One WCT pass is not enough to send the player away from the stack.
       const auto& owner = r.main_thread_lock_owner;
       r.recommendations.push_back(en
         ? (L"[Main thread] The main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
             DescribeLockOwnerThread(owner, en) +
             L". Look at what that thread runs rather than at the plugins on the main thread's stack; if the freeze repeats, "
-            L"capture it again while frozen and check whether the same thread holds the lock.")
+            L"take a new capture while frozen and check whether the same thread holds the lock.")
         : (L"[메인 스레드] 메인 스레드는 " + DescribeLockOwnerThread(owner, en) + L"이(가) 쥔 " + DescribeLockType(owner, en) +
             L" 잠금을 기다리고 있었습니다. 메인 스레드 스택의 플러그인보다 그 스레드가 실행하던 모듈을 먼저 확인하세요. "
-            L"프리징이 반복되면 멈춘 상태에서 다시 캡처해 같은 스레드가 잠금을 쥐고 있는지 비교하세요."));
+            L"프리징이 반복되면 멈춘 상태에서 새로 캡처해 같은 스레드가 잠금을 쥐고 있는지 비교하세요."));
     } else if (isHangLike && IsGpuWait(wait)) {
       // The injector DLLs found in the game folder, by file name: the same
       // d3d11.dll/dxgi.dll pair can be ENB, ReShade or DXVK.

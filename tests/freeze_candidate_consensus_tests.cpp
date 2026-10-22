@@ -532,16 +532,28 @@ static void TestConsensusCrashLoggerThreadDumpDeadlock()
   const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
   assert(result.state_id == "crash_logger_thread_dump_deadlock");
   assert(result.confidence_level == ConfidenceLevel::kHigh);
-  assert(result.primary_reasons.size() == 4u);
+  assert(result.primary_reasons.size() == 5u);
   assert(result.primary_reasons[0].find(L"thread 54776") != std::wstring::npos);
   assert(result.primary_reasons[1].find(L"thread 51944 (nv.sl.dlss_g.thread.dlssg") != std::wstring::npos);
+  assert(result.primary_reasons[1].find(L"was stopped from outside") != std::wstring::npos);
   assert(result.primary_reasons[2].find(L"167 of 292 threads") != std::wstring::npos);
+  assert(result.primary_reasons[3].find(L"froze after the thread dump started") != std::wstring::npos);
   // The main thread's wait names the lock owner, not the graphics driver.
-  assert(result.primary_reasons[3].find(L"for a critical section held by thread 51944") != std::wstring::npos);
-  assert(result.primary_reasons[3].find(L"graphics driver") == std::wstring::npos);
-  for (const auto& related : result.related_candidates) {
-    assert(related.display_name != L"SomeRecent.dll");
-  }
+  assert(result.primary_reasons[4].find(L"for a critical section held by thread 51944") != std::wstring::npos);
+  assert(result.primary_reasons[4].find(L"graphics driver") == std::wstring::npos);
+  // The main thread's stack candidates are bystanders here as well.
+  assert(result.related_candidates.empty());
+
+  // An owner suspended inside a system call: no claim that it was stopped
+  // from outside.
+  FreezeSignalInput inSyscall = input;
+  inSyscall.lock_owner->ip_state = "after_syscall";
+  const auto syscallResult = BuildFreezeCandidateConsensus(inSyscall, Language::kKorean);
+  assert(syscallResult.state_id == "crash_logger_thread_dump_deadlock");
+  assert(syscallResult.confidence_level == ConfidenceLevel::kMedium);
+  assert(syscallResult.primary_reasons[1].find(L"시스템 호출 중이었으므로") != std::wstring::npos);
+  assert(BuildFreezeCandidateConsensus(input, Language::kKorean).primary_reasons[1].find(L"시스템 호출 중도 아니었음") !=
+         std::wstring::npos);
 
   // Without the deadlock the lock owner still leads the main-thread reason,
   // and the state stays what the other signals say.

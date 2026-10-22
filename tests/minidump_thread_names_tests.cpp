@@ -1,16 +1,17 @@
-// ThreadNamesStream reader on hand-built minidump bytes: names come back, and
-// every count, RVA and length that points outside the file is refused.
+// ThreadNamesStream reader on hand-built minidump bytes: a thread's name comes
+// back, and every count, RVA and length that points outside the file is refused.
 
 #include "MinidumpThreadNames.h"
 
 #include <cassert>
 #include <cstdint>
+#include <cstddef>
 #include <cstring>
 #include <string>
-#include <utility>
 #include <vector>
 
-using skydiag::dump_tool::minidump::LoadThreadNames;
+using skydiag::dump_tool::minidump::FindThreadName;
+using skydiag::dump_tool::minidump::ThreadNameForDisplay;
 
 namespace {
 
@@ -71,30 +72,30 @@ Layout BuildDump(const std::vector<Name>& names, std::uint32_t streamType = 24u)
   return layout;
 }
 
-std::vector<std::pair<std::uint32_t, std::u16string>> Load(const std::vector<std::uint8_t>& bytes)
+std::u16string Find(const std::vector<std::uint8_t>& bytes, std::uint32_t tid)
 {
-  return LoadThreadNames(bytes.data(), bytes.size());
+  return FindThreadName(bytes.data(), bytes.size(), tid);
 }
 
 void TestNamesAreRead()
 {
   const auto layout = BuildDump({ { 51944u, u"nv.sl.dlss_g.thread.dlssg" }, { 30100u, u"Main" } });
-  const auto names = Load(layout.bytes);
-  assert(names.size() == 2u);
-  assert(names[0].first == 51944u && names[0].second == u"nv.sl.dlss_g.thread.dlssg");
-  assert(names[1].first == 30100u && names[1].second == u"Main");
+  assert(Find(layout.bytes, 51944u) == u"nv.sl.dlss_g.thread.dlssg");
+  assert(Find(layout.bytes, 30100u) == u"Main");
+  assert(Find(layout.bytes, 7u).empty());
+  assert(Find(layout.bytes, 0u).empty());
 }
 
 void TestMissingStreamOrHeader()
 {
   const auto otherStream = BuildDump({ { 1u, u"a" } }, /*streamType=*/3u);
-  assert(Load(otherStream.bytes).empty());
+  assert(Find(otherStream.bytes, 1u).empty());
   auto badSignature = BuildDump({ { 1u, u"a" } });
   PutU32(badSignature.bytes, 0, 0u);
-  assert(Load(badSignature.bytes).empty());
-  assert(LoadThreadNames(nullptr, 100u).empty());
+  assert(Find(badSignature.bytes, 1u).empty());
+  assert(FindThreadName(nullptr, 100u, 1u).empty());
   const std::vector<std::uint8_t> tiny(8u, 0u);
-  assert(Load(tiny).empty());
+  assert(Find(tiny, 1u).empty());
 }
 
 void TestOutOfBoundsDirectoryAndStream()
@@ -102,26 +103,26 @@ void TestOutOfBoundsDirectoryAndStream()
   // Directory beyond the file, or more streams than fit.
   auto layout = BuildDump({ { 1u, u"a" } });
   PutU32(layout.bytes, 12, static_cast<std::uint32_t>(layout.bytes.size()));
-  assert(Load(layout.bytes).empty());
+  assert(Find(layout.bytes, 1u).empty());
   layout = BuildDump({ { 1u, u"a" } });
   PutU32(layout.bytes, 8, 0x10000000u);
-  assert(Load(layout.bytes).empty());
+  assert(Find(layout.bytes, 1u).empty());
 
   // Stream RVA or size beyond the file.
   layout = BuildDump({ { 1u, u"a" } });
   PutU32(layout.bytes, layout.directory + 8u, 0xFFFFFFF0u);
-  assert(Load(layout.bytes).empty());
+  assert(Find(layout.bytes, 1u).empty());
   layout = BuildDump({ { 1u, u"a" } });
   PutU32(layout.bytes, layout.directory + 4u, static_cast<std::uint32_t>(layout.bytes.size()));
-  assert(Load(layout.bytes).empty());
+  assert(Find(layout.bytes, 1u).empty());
 
   // More names than the stream holds.
   layout = BuildDump({ { 1u, u"a" } });
   PutU32(layout.bytes, layout.stream, 2u);
-  assert(Load(layout.bytes).empty());
+  assert(Find(layout.bytes, 1u).empty());
   layout = BuildDump({ { 1u, u"a" } });
   PutU32(layout.bytes, layout.stream, 0xFFFFFFFFu);
-  assert(Load(layout.bytes).empty());
+  assert(Find(layout.bytes, 1u).empty());
 }
 
 void TestBadNameEntriesAreSkipped()
@@ -130,32 +131,67 @@ void TestBadNameEntriesAreSkipped()
   // end: that entry is skipped, the good one stays.
   auto layout = BuildDump({ { 1u, u"bad" }, { 2u, u"good" } });
   PutU64(layout.bytes, layout.name_entries[0] + 4u, layout.bytes.size());
-  auto names = Load(layout.bytes);
-  assert(names.size() == 1u && names[0].first == 2u && names[0].second == u"good");
+  assert(Find(layout.bytes, 1u).empty() && Find(layout.bytes, 2u) == u"good");
 
   layout = BuildDump({ { 1u, u"bad" }, { 2u, u"good" } });
   PutU64(layout.bytes, layout.name_entries[0] + 4u, ~std::uint64_t{ 0 } - 2u);
-  names = Load(layout.bytes);
-  assert(names.size() == 1u && names[0].first == 2u);
+  assert(Find(layout.bytes, 1u).empty() && Find(layout.bytes, 2u) == u"good");
 
   layout = BuildDump({ { 1u, u"bad" }, { 2u, u"good" } });
   std::uint64_t firstString = 0;
   std::memcpy(&firstString, layout.bytes.data() + layout.name_entries[0] + 4u, sizeof(firstString));
   PutU32(layout.bytes, static_cast<std::size_t>(firstString), 5u);
-  names = Load(layout.bytes);
-  assert(names.size() == 1u && names[0].first == 2u);
+  assert(Find(layout.bytes, 1u).empty() && Find(layout.bytes, 2u) == u"good");
 
   layout = BuildDump({ { 1u, u"good" }, { 2u, u"bad" } });
   std::uint64_t lastString = 0;
   std::memcpy(&lastString, layout.bytes.data() + layout.name_entries[1] + 4u, sizeof(lastString));
   PutU32(layout.bytes, static_cast<std::size_t>(lastString), 0x1000u);
-  names = Load(layout.bytes);
-  assert(names.size() == 1u && names[0].first == 1u && names[0].second == u"good");
+  assert(Find(layout.bytes, 1u) == u"good" && Find(layout.bytes, 2u).empty());
 
-  // An empty name and thread id 0 are no entries.
-  layout = BuildDump({ { 1u, u"" }, { 0u, u"zero" }, { 3u, u"ok" } });
-  names = Load(layout.bytes);
-  assert(names.size() == 1u && names[0].first == 3u);
+  // An empty name is no name; a later good entry for the same thread counts.
+  layout = BuildDump({ { 1u, u"" }, { 3u, u"ok" }, { 1u, u"second" } });
+  assert(Find(layout.bytes, 1u) == u"second" && Find(layout.bytes, 3u) == u"ok");
+}
+
+// Every entry can point at the same maximal name. Only the one asked for is
+// copied, so a crafted stream cannot make the reader allocate per entry.
+void TestManyEntriesSharingOneLargeName()
+{
+  const std::u16string longName(32767u, u'x');
+  constexpr std::uint32_t kEntries = 200000u;
+  Layout layout = BuildDump({ { 9u, longName } });
+  // Grow the list to kEntries entries, all naming thread 1 with that string,
+  // except the last one (thread 42).
+  std::uint64_t stringRva = 0;
+  std::memcpy(&stringRva, layout.bytes.data() + layout.name_entries[0] + 4u, sizeof(stringRva));
+  std::vector<std::uint8_t> strings(layout.bytes.begin() + static_cast<std::ptrdiff_t>(stringRva), layout.bytes.end());
+  const std::size_t listSize = 4u + std::size_t{ kEntries } * 12u;
+  const std::size_t newStringRva = layout.stream + listSize;
+  layout.bytes.resize(newStringRva);
+  layout.bytes.insert(layout.bytes.end(), strings.begin(), strings.end());
+  PutU32(layout.bytes, layout.directory + 4u, static_cast<std::uint32_t>(listSize));
+  PutU32(layout.bytes, layout.stream, kEntries);
+  for (std::uint32_t i = 0; i < kEntries; ++i) {
+    const std::size_t entry = layout.stream + 4u + std::size_t{ i } * 12u;
+    PutU32(layout.bytes, entry, i + 1u == kEntries ? 42u : 1u);
+    PutU64(layout.bytes, entry + 4u, newStringRva);
+  }
+  assert(Find(layout.bytes, 42u) == longName);
+  assert(Find(layout.bytes, 1u) == longName);
+  assert(Find(layout.bytes, 5u).empty());
+}
+
+// A name with control characters cannot break a report line.
+void TestControlCharactersAreReplaced()
+{
+  const std::u16string raw(u"bad\r\nname\0x", 11u);
+  const std::wstring shown = ThreadNameForDisplay(raw);
+  assert(shown.find(L'\r') == std::wstring::npos && shown.find(L'\n') == std::wstring::npos);
+  assert(shown.find(L'\0') == std::wstring::npos);
+  assert(shown.size() == 11u && shown.substr(0, 3) == L"bad" && shown.substr(5, 4) == L"name");
+  assert(shown[3] == static_cast<wchar_t>(0xFFFDu));
+  assert(ThreadNameForDisplay(u"nv.sl.dlss_g.thread.dlssg") == L"nv.sl.dlss_g.thread.dlssg");
 }
 
 }  // namespace
@@ -166,5 +202,7 @@ int main()
   TestMissingStreamOrHeader();
   TestOutOfBoundsDirectoryAndStream();
   TestBadNameEntriesAreSkipped();
+  TestManyEntriesSharingOneLargeName();
+  TestControlCharactersAreReplaced();
   return 0;
 }
