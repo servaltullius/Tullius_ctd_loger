@@ -215,8 +215,8 @@ void AddEngineSpinNanReasons(const EngineSpinInfo& spin, i18n::Language language
     ? (en ? std::wstring(L"The main thread") : std::wstring(L"메인 스레드"))
     : (en ? (L"Thread " + std::to_wstring(spin.tid)) : (L"스레드 " + std::to_wstring(spin.tid)));
   result->primary_reasons.push_back(en
-    ? (who + L" was running in both WCT passes without a single context switch between them: it was spinning")
-    : (who + L"은(는) WCT 두 번 모두 실행 중(Running)이었고 그 사이 컨텍스트 스위치가 한 번도 없었음: 같은 자리에서 계속 돌고 있었음"));
+    ? (who + L" was running in both WCT passes, not waiting on anything")
+    : (who + L"은(는) WCT 두 번 모두 실행 중(Running)이었고 무언가를 기다리고 있지 않았음"));
   const std::wstring compare(spin.compare.begin(), spin.compare.end());  // ASCII
   const std::wstring reg(spin.nan_register.begin(), spin.nan_register.end());
   result->primary_reasons.push_back(en

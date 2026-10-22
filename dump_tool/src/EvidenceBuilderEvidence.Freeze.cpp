@@ -201,7 +201,7 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     std::vector<std::wstring> parts = {
       (spin.is_main_thread ? (en ? L"main thread " : L"메인 스레드 ") : (en ? L"thread " : L"스레드 ")) +
         std::to_wstring(spin.tid),
-      en ? L"WCT: running in both passes, no context switch" : L"WCT: 두 번 모두 실행 중, 컨텍스트 스위치 없음",
+      en ? L"WCT: running in both passes" : L"WCT: 두 번 모두 실행 중",
       (en ? L"loop: " : L"루프: ") + EngineSpinLocation(spin) + L" (" + ToWideAscii(spin.compare) + L")",
       ToWideAscii(spin.nan_register) + L" = " + bits + L" (NaN)",
     };

@@ -339,7 +339,8 @@ bool CapturedMo2FoldersAreLocal(const CapturedMo2State& state)
 // be waiting on (the game thread FindBlockedGameThread named, the lock owner,
 // game threads running engine code while the main thread waits on a sync
 // object) and the main thread itself, in that order; only those WCT saw
-// running in both passes without a context switch are probed.
+// running in both passes are probed. The code pattern and the NaN are the
+// gate: a NaN in such a loop never lets it end.
 void DetectEngineSpin(
   void* dumpBase,
   std::uint64_t dumpSize,
@@ -367,7 +368,7 @@ void DetectEngineSpin(
     }
   }
   tids.push_back(mainTid);
-  const auto running = internal::FindWctThreadsRunningWithoutContextSwitch(out.wct_json_utf8, tids);
+  const auto running = internal::FindWctThreadsRunningInBothPasses(out.wct_json_utf8, tids);
   for (const auto tid : running) {
     const auto probe = internal::ProbeFloatCompareSpin(dumpBase, dumpSize, allModules, threads, tid);
     if (!probe.loop_found) {

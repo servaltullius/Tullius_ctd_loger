@@ -210,8 +210,8 @@ struct MainThreadWaitInfo
 };
 
 // engine_spin_nan: a thread (the one the main thread waits on, or the main
-// thread itself) that WCT saw running in both passes without a context
-// switch, sitting in an engine floating-point compare loop whose compared
+// thread itself) that WCT saw running (not waiting) in both passes, sitting
+// in an engine floating-point compare loop whose compared
 // register holds NaN. NaN compares unordered, so a loop such as
 // "while (x < 0) x += 2*pi" never ends (2026-10-22 freeze, SkyrimSE.exe+0xd17465).
 struct EngineSpinInfo
