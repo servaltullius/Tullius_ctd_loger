@@ -885,6 +885,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.Guards.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.Execute.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangObjectMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangDetect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperCommon.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperLog.cpp"
@@ -1174,6 +1175,18 @@ target_link_libraries(skydiag_wct_parsing_tests PRIVATE
 )
 
 add_test(NAME skydiag_wct_parsing_tests COMMAND skydiag_wct_parsing_tests)
+
+# Freeze object threads (shared/SkyrimDiagHangObjectThreads.h, header-only, portable).
+add_executable(skydiag_hang_object_threads_tests
+  hang_object_threads_tests.cpp
+)
+target_include_directories(skydiag_hang_object_threads_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+target_link_libraries(skydiag_hang_object_threads_tests PRIVATE
+  nlohmann_json::nlohmann_json
+)
+add_test(NAME skydiag_hang_object_threads_tests COMMAND skydiag_hang_object_threads_tests)
 
 # ThreadNamesStream reader on hand-built minidump bytes (header-only, portable).
 add_executable(skydiag_minidump_thread_names_tests

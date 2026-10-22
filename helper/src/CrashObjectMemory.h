@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -26,6 +27,16 @@ inline constexpr std::size_t kCrashObjectMemoryBudget = std::size_t{2} * 1024u *
 // lets the analyzer read the same objects back (ADR-0010). The game's heap is
 // otherwise not in the dump.
 std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONTEXT& context);
+
+// The same for one thread of a game that keeps running afterwards (a freeze
+// or manual capture): only committed, readable pages are touched (no guard,
+// no-access, or executable pages outside a module image), at most
+// budgetBytes are read, and no new value is examined after `deadline`.
+std::vector<ExtraDumpMemory> CollectThreadObjectMemory(
+  HANDLE process,
+  const CONTEXT& context,
+  std::size_t budgetBytes,
+  std::chrono::steady_clock::time_point deadline);
 
 // Sorts and merges overlapping or touching ranges.
 std::vector<ExtraDumpMemory> MergeExtraDumpMemory(std::vector<ExtraDumpMemory> ranges);

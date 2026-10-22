@@ -175,6 +175,7 @@ void DoManualCapture(
   WriteTextFileUtf8(wctPath, wctUtf8);
 
   std::wstring dumpErr;
+  skydiag::helper::DumpObjectMemoryStats objectMemory{};
   const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
   if (!skydiag::helper::WriteDumpWithStreams(
         dumpSource,
@@ -187,7 +188,8 @@ void DoManualCapture(
         /*isCrash=*/false,
         dumpProfile,
         /*isProcessSnapshot=*/pssSnapshot.used,
-        &dumpErr)) {
+        &dumpErr,
+        &objectMemory)) {
     ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
     std::wcerr << L"[SkyrimDiagHelper] Manual dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, L"Manual dump failed: " + dumpErr);
@@ -196,6 +198,7 @@ void DoManualCapture(
     std::wcout << L"[SkyrimDiagHelper] Manual dump written: " << dumpPath << L"\n";
     std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
     AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
+    LogDumpObjectMemory(outBase, objectMemory);
     AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
 
     if (cfg.enableIncidentManifest) {
