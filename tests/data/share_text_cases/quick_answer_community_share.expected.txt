@@ -1,0 +1,12 @@
+🔴 Skyrim CTD Report — SkyrimDiag
+💬 Quick answer: The game crashed to desktop (CTD). Suspected mod: Precision - Accurate Melee Collisions (Precision.dll) — possible
+👉 What to try: Disable or update Precision - Accurate Melee Collisions, then play again.
+👉 Why not certain: The game crashed inside this mod, but another mod can cause a crash that shows up here.
+📌 Actionable candidate: Precision.dll
+🧭 Evidence agreement: Corroborated fault location
+🧩 CrashLogger context: Precision.dll — Crash Logger frame first (direct DLL fault) — DLL guidance
+🔍 Type: CTD-precision-direct-fault
+📍 Module+Offset: SkyrimSE.exe+0x00ABCDEF
+💡 Conclusion: Crash Logger's direct-fault frame and the Tullius same-event stack both land in Precision.dll, but this corroborates the current fault location rather than independently validating a root cause. (Confidence: Medium)
+🛠️ Next action: DLL guidance: check Precision.dll before generic EXE/system triage
+— Tullius CTD Logger

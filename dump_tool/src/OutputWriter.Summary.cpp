@@ -48,6 +48,21 @@ nlohmann::json BuildSummaryJson(
   summary["pid"] = r.pid;
   summary["state_flags"] = r.state_flags;
   summary["summary_sentence"] = WideToUtf8(r.summary_sentence);
+  // Additive (schema v2 consumers ignore it): the summary in everyday words.
+  if (!r.quick_answer.headline.empty()) {
+    const auto& qa = r.quick_answer;
+    summary["quick_answer"] = {
+      { "kind", qa.kind },
+      { "case", qa.case_id },
+      { "suspect_mod", WideToUtf8(qa.suspect_mod) },
+      { "suspect_file", WideToUtf8(qa.suspect_file) },
+      { "likelihood", qa.likelihood },
+      { "likelihood_text", WideToUtf8(qa.likelihood_text) },
+      { "headline", WideToUtf8(qa.headline) },
+      { "action", WideToUtf8(qa.action) },
+      { "why_not_certain", WideToUtf8(qa.why_not_certain) },
+    };
+  }
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
   summary["crash_bucket_version"] = r.crash_bucket_version;
   summary["analysis"] = {

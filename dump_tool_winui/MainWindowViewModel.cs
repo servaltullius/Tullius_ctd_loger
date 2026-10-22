@@ -42,6 +42,11 @@ internal sealed partial class MainWindowViewModel
 
     // ── Summary fields for UI ─────────────────────────────────
     public string SummarySentence { get; private set; } = string.Empty;
+    // The quick answer card (first in the analysis view); empty for older summaries.
+    public bool HasQuickAnswer { get; private set; }
+    public string QuickAnswerHeadline { get; private set; } = string.Empty;
+    public string QuickAnswerAction { get; private set; } = string.Empty;
+    public string QuickAnswerWhy { get; private set; } = string.Empty;
     public string BucketText { get; private set; } = string.Empty;
     public string ModuleText { get; private set; } = string.Empty;
     public string ModNameText { get; private set; } = string.Empty;
@@ -82,6 +87,10 @@ internal sealed partial class MainWindowViewModel
     public void ClearSummary()
     {
         CurrentSummary = null;
+        HasQuickAnswer = false;
+        QuickAnswerHeadline = string.Empty;
+        QuickAnswerAction = string.Empty;
+        QuickAnswerWhy = string.Empty;
         Suspects.Clear();
         Recommendations.Clear();
         RecommendationGroups.Clear();
@@ -97,6 +106,12 @@ internal sealed partial class MainWindowViewModel
 
     private void PopulateHeaderFields(AnalysisSummary summary)
     {
+        var quickAnswerLines = BuildQuickAnswerLines(summary);
+        HasQuickAnswer = quickAnswerLines.Count > 0;
+        QuickAnswerHeadline = quickAnswerLines.Count > 0 ? quickAnswerLines[0] : string.Empty;
+        QuickAnswerAction = quickAnswerLines.Count > 1 ? quickAnswerLines[1] : string.Empty;
+        QuickAnswerWhy = quickAnswerLines.Count > 2 ? quickAnswerLines[2] : string.Empty;
+
         SummarySentence = string.IsNullOrWhiteSpace(summary.SummarySentence)
             ? T("No summary sentence produced.", "요약 문장이 생성되지 않았습니다.")
             : summary.SummarySentence;

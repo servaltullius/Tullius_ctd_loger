@@ -139,5 +139,7 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
 void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
+// The lead BuildSummarySentence follows, in everyday words (QuickAnswer.h).
+QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 
 }  // namespace skydiag::dump_tool::internal

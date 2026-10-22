@@ -6,6 +6,7 @@
 #include "ProblematicModules.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
+#include "QuickAnswer.h"
 #include "Utf.h"
 #include "WctTypes.h"
 
@@ -85,6 +86,14 @@ std::string BuildReportText(
 
   std::ostringstream rpt;
   rpt << (en ? "SkyrimDiag Report\n" : "SkyrimDiag 리포트\n");
+  // Players read the first lines: the quick answer comes before any
+  // technical metadata, and the rest of the report is the detailed part.
+  if (const auto quick = QuickAnswerReportLines(r.quick_answer, en); !quick.empty()) {
+    for (const auto& line : quick) {
+      rpt << WideToUtf8(line) << "\n";
+    }
+    rpt << "\n" << (en ? "Details" : "자세한 분석") << "\n";
+  }
   rpt << (en ? "Dump: " : "덤프: ") << WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths)) << "\n";
   rpt << (en ? "Summary: " : "결론: ") << WideToUtf8(r.summary_sentence) << "\n";
   rpt << (en ? "PathRedactionApplied: " : "경로 마스킹 적용: ") << (redactPaths ? "1" : "0") << "\n";

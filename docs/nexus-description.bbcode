@@ -1,7 +1,7 @@
 [b][size=5]Tullius CTD Logger (SkyrimDiag)[/size][/b]
 
 Diagnostic tool for Skyrim SE/AE.
-When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b] state, it captures dumps and surrounding clues, then generates a [b]readable report[/b] with summary, evidence, and a checklist.
+When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b] state, it captures dumps and surrounding clues, then generates a report that opens with a [b]quick answer[/b] in plain words (what happened, the suspected mod, one thing to try); the summary, evidence, and checklist follow below it.
 
 [b]Quick Links[/b]
 [url=https://github.com/servaltullius/Tullius_ctd_loger]GitHub (source)[/url] · [url=https://github.com/servaltullius/Tullius_ctd_loger/releases/latest]Latest release[/url] · [url=https://github.com/servaltullius/Tullius_ctd_loger/issues]Issue reporting[/url]
@@ -10,7 +10,7 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 [list]
 [*]Captures [b]dumps (.dmp)[/b] for CTD, freeze, and ILS scenarios
 [*]Records [b]blackbox events[/b], [b]WCT[/b], and supporting incident artifacts around the failure
-[*]Generates a [b]human-readable report[/b] so you do not need WinDbg for the first pass
+[*]Starts every report, the viewer, and the share text with a [b]quick answer[/b]: what happened, the suspected mod and how likely it is, and one thing to try. The technical details stay below it, so you do not need WinDbg for the first pass
 [*]Automatically reads CrashLogger logs when CrashLoggerSSE is installed
 [*]Records the MO2 profile and mod list active at the crash, so the mods a report names are the ones you actually ran with
 [*]Reads the game objects a crash was handling straight from the dump: type, FormID, name, the plugins that define and change it, and a reference's base object
@@ -323,7 +323,7 @@ GPL-3.0-or-later. Source: [url=https://github.com/servaltullius/Tullius_ctd_loge
 [b][size=5]한국어 안내[/size][/b]
 
 Skyrim SE/AE에서 [b]CTD(튕김)[/b], [b]프리징[/b], [b]무한 로딩(ILS)[/b]이 났을 때
-dump와 주변 단서를 모아서 [b]사람이 읽기 쉬운 보고서[/b]를 만들어 주는 진단 도구입니다.
+dump와 주변 단서를 모아서, 맨 위에 [b]빠른 답[/b](무슨 일이 있었는지, 의심되는 모드, 해볼 일)이 있고 그 아래에 자세한 분석이 이어지는 보고서를 만들어 주는 진단 도구입니다.
 
 [b]퀵 링크[/b]
 [url=https://github.com/servaltullius/Tullius_ctd_loger]GitHub (소스)[/url] · [url=https://github.com/servaltullius/Tullius_ctd_loger/releases/latest]최신 릴리즈[/url] · [url=https://github.com/servaltullius/Tullius_ctd_loger/issues]이슈 제보[/url]
@@ -332,7 +332,7 @@ dump와 주변 단서를 모아서 [b]사람이 읽기 쉬운 보고서[/b]를 �
 [list]
 [*]CTD / 프리징 / 무한 로딩에서 [b]dump(.dmp)[/b]를 생성합니다.
 [*]사고 직전의 [b]blackbox 이벤트[/b], [b]WCT[/b], 보조 로그를 함께 남깁니다.
-[*]결과를 [b]요약 + 근거 + 체크리스트[/b] 형태로 정리합니다.
+[*]리포트, 뷰어, 공유 문구 맨 위에 [b]빠른 답[/b]을 먼저 보여 줍니다: 무슨 일이 있었는지, 의심되는 모드와 그 가능성, 해볼 일 한 가지. 그 아래에 [b]요약 + 근거 + 체크리스트[/b]가 자세히 이어집니다.
 [*]CrashLoggerSSE가 있으면 관련 로그를 자동으로 찾아서 분석에 포함합니다.
 [*]크래시 당시의 MO2 프로필과 켜진 모드 목록을 함께 기록해, 리포트가 실제로 쓰던 모드를 기준으로 판단합니다.
 [*]크래시가 다루던 게임 오브젝트를 덤프에서 직접 읽습니다: 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트.

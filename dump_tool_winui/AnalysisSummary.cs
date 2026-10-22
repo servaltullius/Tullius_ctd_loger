@@ -6,6 +6,8 @@ namespace SkyrimDiagDumpToolWinUI;
 internal sealed class AnalysisSummary
 {
     public required string SummarySentence { get; init; }
+    // The plain-language answer for players; null in summaries written before it.
+    public QuickAnswerItem? QuickAnswer { get; init; }
     public required string CrashBucketKey { get; init; }
     public required string ModulePlusOffset { get; init; }
     public required string InferredModName { get; init; }
@@ -144,9 +146,26 @@ internal sealed class AnalysisSummary
             && incidentElement.TryGetProperty("recapture_evaluation", out var recaptureTemp)
             && recaptureTemp.ValueKind == JsonValueKind.Object ? recaptureTemp : default;
 
+        var quickAnswerElement = root.TryGetProperty("quick_answer", out var quickAnswerTemp)
+            && quickAnswerTemp.ValueKind == JsonValueKind.Object ? quickAnswerTemp : default;
+        var quickAnswer = quickAnswerElement.ValueKind == JsonValueKind.Object &&
+                          !string.IsNullOrWhiteSpace(ReadString(quickAnswerElement, "headline"))
+            ? new QuickAnswerItem(
+                ReadString(quickAnswerElement, "kind"),
+                ReadString(quickAnswerElement, "case"),
+                ReadString(quickAnswerElement, "suspect_mod"),
+                ReadString(quickAnswerElement, "suspect_file"),
+                ReadString(quickAnswerElement, "likelihood"),
+                ReadString(quickAnswerElement, "likelihood_text"),
+                ReadString(quickAnswerElement, "headline"),
+                ReadString(quickAnswerElement, "action"),
+                ReadString(quickAnswerElement, "why_not_certain"))
+            : null;
+
         return new AnalysisSummary
         {
             SummarySentence = ReadString(root, "summary_sentence"),
+            QuickAnswer = quickAnswer,
             CrashBucketKey = ReadString(root, "crash_bucket_key"),
             ModulePlusOffset = ReadString(exception, "module_plus_offset"),
             InferredModName = FirstNonEmpty(
@@ -318,6 +337,22 @@ internal sealed class AnalysisSummary
 }
 
 public sealed record SuspectItem(string Confidence, string Module, string Reason);
+public sealed record QuickAnswerItem(
+    string Kind,
+    string Case,
+    string SuspectMod,
+    string SuspectFile,
+    string Likelihood,
+    string LikelihoodText,
+    string Headline,
+    string Action,
+    string WhyNotCertain)
+{
+    // "<headline> — <likelihood>", as the report's first line shows it.
+    public string HeadlineLine => string.IsNullOrWhiteSpace(LikelihoodText)
+        ? Headline
+        : Headline + " — " + LikelihoodText;
+}
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
 public sealed record RecommendationGroupItem(string Title, IReadOnlyList<string> Items);

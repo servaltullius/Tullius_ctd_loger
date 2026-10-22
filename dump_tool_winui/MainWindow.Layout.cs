@@ -89,6 +89,11 @@ public sealed partial class MainWindow
     {
         var contentVisibility = hasAnalysis ? Visibility.Visible : Visibility.Collapsed;
         TriageEmptyStateCard.Visibility = hasAnalysis ? Visibility.Collapsed : Visibility.Visible;
+        if (!hasAnalysis)
+        {
+            // RenderSummary shows it again when the summary has a quick answer.
+            QuickAnswerCard.Visibility = Visibility.Collapsed;
+        }
         SummarySentenceCard.Visibility = contentVisibility;
         QuickSummaryGrid.Visibility = contentVisibility;
         TriageTwoColumnGrid.Visibility = contentVisibility;
