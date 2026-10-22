@@ -47,6 +47,19 @@ struct DumpObject
   std::uint32_t relevance = 0;  // Crash Logger's location + type weights
 };
 
+// ADR-0010 addendum (2026-10-22): the objects one thread of a freeze or
+// manual capture pointed at (shared/SkyrimDiagHangObjectThreads.h picks the
+// threads), read from the memory the helper added. A clue to what the stuck
+// work was handling, never a cause on its own.
+struct FreezeThreadObjects
+{
+  std::uint32_t tid = 0;
+  // main / wait_chain / lock_owner / blocked_thread / engine_spin / running,
+  // in that order; a thread can hold several.
+  std::vector<std::string> roles;
+  std::vector<DumpObject> objects;  // DumpObjects order (most relevant first)
+};
+
 struct SuspectItem
 {
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
@@ -499,6 +512,8 @@ struct AnalysisResult
   std::vector<CrashLoggerModReference> crash_logger_unattributed_objects;
   // ADR-0010: objects read from the crash dump itself (crashes only).
   std::vector<DumpObject> dump_objects;
+  // Freezes and manual captures: the same per thread, threads with objects only.
+  std::vector<FreezeThreadObjects> freeze_thread_objects;
   MemorySnapshot memory;
   std::vector<ProblematicModule> problematic_modules;
 

@@ -22,6 +22,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagHangObjectThreads.h"
 #include "SkyrimDiagProtocol.h"
 #include "SkyrimDiagShared.h"
 
@@ -404,6 +405,64 @@ void DetectEngineSpin(
     spin.nan_bits = probe.nan_bits;
     spin.mxcsr = probe.mxcsr;
     spin.call_path_modules = frames ? CallPathModules(*frames) : std::vector<std::wstring>{};
+  }
+}
+
+// ADR-0010 addendum (2026-10-22): the objects the threads that matter in a
+// freeze pointed at (shared/SkyrimDiagHangObjectThreads.h, plus the threads
+// the verdicts name), read from the memory the helper kept for them. Dumps
+// without that memory give none. A clue, never a candidate.
+void ReadFreezeThreadObjects(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& allModules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  std::uint32_t mainTid,
+  const std::vector<std::uint32_t>& gameThreadTids,
+  AnalysisResult& out)
+{
+  auto tids = skydiag::hang_objects::SelectThreadIds(mainTid, out.wct_json_utf8, gameThreadTids);
+  const auto chain = skydiag::hang_objects::WaitChainThreadIds(mainTid, out.wct_json_utf8);
+  const std::uint32_t ownerTid = out.main_thread_lock_owner.tid;
+  const std::uint32_t blockedTid = out.main_thread_wait.blocked_thread_tid;
+  const std::uint32_t spinTid = out.engine_spin.loop_found ? out.engine_spin.tid : 0u;
+  for (const auto tid : { ownerTid, blockedTid, spinTid }) {
+    if (tid != 0u && std::find(tids.begin(), tids.end(), tid) == tids.end()) {
+      tids.push_back(tid);
+    }
+  }
+  for (const auto tid : tids) {
+    const auto record = std::find_if(threads.begin(), threads.end(), [tid](const auto& t) { return t.tid == tid; });
+    CONTEXT context{};
+    if (record == threads.end() || !minidump::ReadThreadContextWin64(dumpBase, dumpSize, *record, context)) {
+      continue;
+    }
+    auto objects = ReadDumpObjects(dumpBase, dumpSize, threads, allModules, context);
+    if (objects.empty()) {
+      continue;
+    }
+    FreezeThreadObjects entry{};
+    entry.tid = tid;
+    if (tid == mainTid) {
+      entry.roles.emplace_back("main");
+    }
+    if (tid != ownerTid && std::find(chain.begin(), chain.end(), tid) != chain.end()) {
+      entry.roles.emplace_back("wait_chain");
+    }
+    if (tid == ownerTid) {
+      entry.roles.emplace_back("lock_owner");
+    }
+    if (tid == blockedTid) {
+      entry.roles.emplace_back("blocked_thread");
+    }
+    if (tid == spinTid) {
+      entry.roles.emplace_back("engine_spin");
+    }
+    if (entry.roles.empty()) {
+      entry.roles.emplace_back("running");
+    }
+    entry.objects = std::move(objects);
+    out.freeze_thread_objects.push_back(std::move(entry));
   }
 }
 
@@ -986,6 +1045,9 @@ void ComputeSuspects(
         : L" (게임 엔진이 NaN 값으로 같은 계산을 반복하고 있었으므로 스택의 모듈은 호출 경로일 뿐 프리징 원인으로 확인된 것이 "
           L"아님)";
     }
+  }
+  if (hangLike && out.exc_tid == 0u) {
+    ReadFreezeThreadObjects(dumpBase, dumpSize, allModules, threads, modalProbeTid, gameThreadTids, out);
   }
   if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread && !out.engine_spin.nan_detected) {
     // The main thread was sitting in a wait it did not get from these

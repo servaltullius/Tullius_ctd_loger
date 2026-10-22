@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "DumpObjects.h"
 #include "MainThreadWait.h"
 #include "SkyrimDiagShared.h"
 
@@ -211,6 +212,29 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     }
     e.details = JoinList(parts, parts.size(), L" | ");
     r.evidence.push_back(std::move(e));
+  }
+
+  // ADR-0010 addendum: what the thread the verdict is about was handling,
+  // read from the dump. Context for the reader, not a cause on its own.
+  if (const std::uint32_t tid = FreezeVerdictThreadId(r); tid != 0u) {
+    const auto it = std::find_if(r.freeze_thread_objects.begin(), r.freeze_thread_objects.end(),
+      [tid](const FreezeThreadObjects& t) { return t.tid == tid; });
+    if (it != r.freeze_thread_objects.end()) {
+      EvidenceItem e{};
+      e.confidence_level = i18n::ConfidenceLevel::kLow;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = en ? L"Objects the stuck thread's registers and stack pointed at (read from the dump)"
+                   : L"멈춘 스레드의 레지스터·스택이 가리킨 오브젝트(덤프에서 읽음)";
+      std::vector<std::wstring> parts = { (en ? L"thread " : L"스레드 ") + std::to_wstring(tid) };
+      for (const auto& object : it->objects) {
+        if (parts.size() > 5u) {
+          break;
+        }
+        parts.push_back(DescribeDumpObject(object));
+      }
+      e.details = JoinList(parts, parts.size(), L" | ");
+      r.evidence.push_back(std::move(e));
+    }
   }
 
   if (!r.modal_dialog_wait.detected && r.main_thread_lock_owner.tid != 0u) {
