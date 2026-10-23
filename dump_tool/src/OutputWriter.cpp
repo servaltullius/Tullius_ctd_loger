@@ -156,8 +156,9 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   }
 
   // The WCT companion is the helper's capture as is, unless paths are
-  // redacted: then absolute paths in it are masked like the summary's, and a
-  // capture that does not parse is left out rather than copied unmasked.
+  // redacted: then absolute paths in it, also those inside a dialog's text,
+  // are masked like the summary's, and a capture that does not parse is left
+  // out rather than copied unmasked.
   bool writeWct = r.has_wct;
   std::string wctText;
   if (r.has_wct && redactPaths) {
