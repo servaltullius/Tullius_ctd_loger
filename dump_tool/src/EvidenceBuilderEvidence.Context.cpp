@@ -234,13 +234,12 @@ void BuildHistoryEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     e.confidence_level = i18n::ConfidenceLevel::kHigh;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = ctx.en ? L"Repeated crash pattern" : L"반복 크래시 패턴";
-    wchar_t buf[256]{};
-    swprintf_s(buf,
-      ctx.en ? L"Same bucket_key matched %zu times (first: %s)"
-             : L"동일 패턴이 %zu회 발생 (최초: %s)",
-      r.history_correlation.count,
-      ToWideAscii(r.history_correlation.first_seen).c_str());
-    e.details = buf;
+    // No fixed buffer: first_seen is read back from crash_history.json.
+    const std::wstring count = std::to_wstring(r.history_correlation.count);
+    const std::wstring firstSeen = ToWideAscii(r.history_correlation.first_seen);
+    e.details = ctx.en
+      ? (L"Same bucket_key matched " + count + L" times (first: " + firstSeen + L")")
+      : (L"동일 패턴이 " + count + L"회 발생 (최초: " + firstSeen + L")");
     r.evidence.push_back(std::move(e));
   }
 }
