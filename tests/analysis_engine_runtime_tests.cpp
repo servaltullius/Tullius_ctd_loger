@@ -394,6 +394,28 @@ void TestKnownCrashSiteSignaturesRuntime()
   assert(collisionFixedHit && collisionFixedHit->fix_module_loaded);
   assert(collisionFixedHit->recommendations[0].find(L"is already loaded") != std::wstring::npos);
 
+  // The 2026-10-07 crash: trap-contact handling (AE ID 26034 +0x1C1) read a
+  // null pointer after a trap an actor touched went away; Calamity 2 before
+  // 2.2.6 did this with its trap markers.
+  SignatureMatchInput trap{};
+  trap.exc_code = 0xC0000005u;
+  trap.game_version = "1.6.1170.0";
+  trap.fault_module = L"SkyrimSE.exe";
+  trap.fault_offset = 0x3FF101ull;  // movups xmm0,[rax+0x30]
+  trap.access_violation_address = 0x30ull;
+  const auto trapHit = db.Match(trap, /*useKorean=*/false);
+  assert(trapHit && trapHit->id == "TRAP_CONTACT_REMOVED_1_6_1170" && trapHit->scope == "mechanism");
+  assert(trapHit->confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(!trapHit->fix_module_loaded && trapHit->recommendations[0].find(L"create or remove traps") != std::wstring::npos);
+  trap.loaded_modules = { L"SkyrimSE.exe", L"CalamityAffixes.dll" };
+  const auto trapCalamity = db.Match(trap, /*useKorean=*/true);
+  assert(trapCalamity && trapCalamity->fix_module_loaded);
+  assert(trapCalamity->recommendations[0].find(L"2.2.6 이상으로 업데이트") != std::wstring::npos);
+  auto trapOther = trap;
+  trapOther.game_version = "1.5.97.0";
+  const auto trapMiss = db.Match(trapOther, /*useKorean=*/false);
+  assert(!trapMiss || trapMiss->id.rfind("TRAP", 0) != 0);
+
   SignatureMatchInput badAlloc{};
   badAlloc.exc_code = 0xE06D7363u;
   badAlloc.cpp_exception_info = L"bad allocation";
