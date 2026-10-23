@@ -1168,15 +1168,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       // helper's threshold alone a load can still be stuck.
       if (wct && wct->has_capture && wct->thresholdSec > 0u &&
           wct->secondsSinceHeartbeat < internal::kNotHangHeartbeatAgeSec) {
-        wchar_t buf[256]{};
-        swprintf_s(
-          buf,
-          en
-            ? L"[Manual] At capture time, heartbeatAge=%.1fs (under %.0fs): the main thread was still responding, so it is not considered a hang."
-            : L"[수동] 수동 캡처 당시 heartbeatAge=%.1fs(%.0f초 미만)로 메인 스레드가 아직 응답하고 있었으므로 '프리징/무한로딩'으로 판단되지 않습니다.",
-          wct->secondsSinceHeartbeat,
-          internal::kNotHangHeartbeatAgeSec);
-        r.recommendations.push_back(buf);
+        // No fixed buffer: the heartbeat age comes from the dump's WCT stream
+        // (a crafted -1e308 is over 300 digits).
+        const std::wstring age = FormatDecimal(wct->secondsSinceHeartbeat, 1);
+        const std::wstring limit = FormatDecimal(internal::kNotHangHeartbeatAgeSec, 0);
+        r.recommendations.push_back(en
+          ? (L"[Manual] At capture time, heartbeatAge=" + age + L"s (under " + limit +
+              L"s): the main thread was still responding, so it is not considered a hang.")
+          : (L"[수동] 수동 캡처 당시 heartbeatAge=" + age + L"s(" + limit +
+              L"초 미만)로 메인 스레드가 아직 응답하고 있었으므로 '프리징/무한로딩'으로 판단되지 않습니다."));
       }
       r.recommendations.push_back(en
         ? L"[Manual] Manual captures include WCT. For real freezes/infinite loading, check the WCT tab from a capture taken during the issue."

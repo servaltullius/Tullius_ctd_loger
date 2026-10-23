@@ -26,6 +26,7 @@ namespace skydiag::dump_tool {
 
 using skydiag::dump_tool::internal::output_writer::JoinList;
 using skydiag::dump_tool::internal::output_writer::MaybeRedactPath;
+using skydiag::dump_tool::internal::output_writer::RedactPathsInText;
 
 std::string BuildReportText(
   const AnalysisResult& r,
@@ -637,7 +638,10 @@ std::string BuildReportText(
     }
   }
 
-  return rpt.str();
+  // The path fields are masked above; this also masks the paths quoted in
+  // free text (Crash Logger's exception text, an error dialog, the evidence
+  // and advice that repeat them), as the summary does.
+  return redactPaths ? RedactPathsInText(rpt.str()) : rpt.str();
 }
 
 }  // namespace skydiag::dump_tool

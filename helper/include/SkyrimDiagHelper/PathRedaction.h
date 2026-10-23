@@ -24,16 +24,28 @@ inline bool LooksLikeAbsolutePathForRedaction(std::wstring_view path)
     ((path[0] == L'\\' && path[1] == L'\\') || (path[0] == L'/' && path[1] == L'/'));
 }
 
-// "C:\Users\A\Symbols" -> "<redacted>\Symbols"; anything that is not an
-// absolute path comes back unchanged.
+// "C:\Users\A\Symbols" -> "<redacted>\Symbols"; the profile folder itself
+// ("C:\Users\A") -> "<redacted>\<user>"; anything that is not an absolute
+// path comes back unchanged.
 inline std::wstring RedactPath(std::wstring_view path)
 {
   if (path.empty() || !LooksLikeAbsolutePathForRedaction(path)) {
     return std::wstring(path);
   }
-  const std::wstring filename = std::filesystem::path(path).filename().wstring();
+  const std::filesystem::path fsPath(path);
+  const std::wstring filename = fsPath.filename().wstring();
   if (filename.empty()) {
     return L"<redacted>";
+  }
+  const std::wstring parent = fsPath.parent_path().filename().wstring();
+  constexpr std::wstring_view kUsers = L"users";
+  bool underUsers = parent.size() == kUsers.size();
+  for (std::size_t i = 0; underUsers && i < kUsers.size(); ++i) {
+    const wchar_t c = parent[i];
+    underUsers = (c >= L'A' && c <= L'Z' ? static_cast<wchar_t>(c - L'A' + L'a') : c) == kUsers[i];
+  }
+  if (underUsers) {
+    return L"<redacted>\\<user>";
   }
   return L"<redacted>\\" + filename;
 }

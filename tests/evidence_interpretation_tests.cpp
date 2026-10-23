@@ -505,6 +505,35 @@ void TestHistoryShowsUtf8ModuleNames()
   Require(shown, "the Korean module name is readable");
 }
 
+// Text from the dump's WCT stream and from crash_history.json reaches the
+// evidence, summary and advice without a fixed buffer: swprintf_s ends the
+// process when the text does not fit.
+void TestLongDumpTextNeedsNoFixedBuffer()
+{
+  const std::string kind(4000, 'k');
+  for (const char* age : { "1e308", "-1e308" }) {
+    for (const bool manual : { false, true }) {
+      AnalysisResult r{};
+      r.dump_path = manual ? L"C:\\Logs\\SkyrimDiag_Manual_20261019_120000_000.dmp"
+                           : L"C:\\Logs\\SkyrimDiag_Hang_20261019_120000_000.dmp";
+      r.has_wct = true;
+      r.wct_json_utf8 = std::string(R"({"capture":{"kind":")") + kind + R"(","secondsSinceHeartbeat":)" + age +
+                        R"(,"thresholdSec":10,"isLoading":false},"threads":[]})";
+      r.history_correlation.count = 3;
+      r.history_correlation.first_seen = std::string(4000, '9');
+      BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+      bool wctShown = false;
+      bool historyShown = false;
+      for (const auto& e : r.evidence) {
+        wctShown = wctShown || Contains(e.details, L"capture=" + std::wstring(4000, L'k') + L", threads=0");
+        historyShown = historyShown || Contains(e.details, L"(first: " + std::wstring(4000, L'9') + L")");
+      }
+      Require(wctShown, "the whole WCT capture kind is in the WCT summary");
+      Require(historyShown, "the whole first_seen is in the repeated-pattern evidence");
+    }
+  }
+}
+
 }  // namespace
 
 int main()
@@ -521,6 +550,7 @@ int main()
     TestLoadingSnapshotGetsNoCrashAdvice();
     TestManualLoadingCaptureHasOneHeartbeatRule();
     TestHistoryShowsUtf8ModuleNames();
+    TestLongDumpTextNeedsNoFixedBuffer();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;

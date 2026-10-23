@@ -412,11 +412,6 @@ nlohmann::json BuildSummaryJson(
         parsedPluginScan["light_plugin_count"] = light;
         parsedPluginScan.erase("plugins");
       }
-      if (redactPaths) {
-        // mo2.ini_path / base_dir / mods_dir / profiles_dir / overwrite_dir
-        // are absolute and usually under the user's profile folder.
-        RedactAbsolutePathStrings(&parsedPluginScan);
-      }
       summary["plugin_scan"] = std::move(parsedPluginScan);
     }
 
@@ -857,6 +852,19 @@ nlohmann::json BuildSummaryJson(
       diags.push_back(WideToUtf8(d));
     }
     summary["diagnostics"] = std::move(diags);
+  }
+
+  if (redactPaths) {
+    // Besides the path fields above: the plugin scan's MO2 folders
+    // (mo2.ini_path, base_dir, ...), and paths quoted in text from the dump
+    // and its logs (a C++ exception's message, an error dialog) and in the
+    // evidence and advice that repeat it. The triage notes are the
+    // reviewer's own words and stay as written.
+    for (auto it = summary.begin(); it != summary.end(); ++it) {
+      if (it.key() != "triage") {
+        RedactAbsolutePathStrings(&it.value());
+      }
+    }
   }
 
   return summary;

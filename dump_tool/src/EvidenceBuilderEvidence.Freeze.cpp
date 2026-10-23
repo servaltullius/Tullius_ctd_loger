@@ -353,22 +353,17 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     e.confidence_level = i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en ? L"WCT summary" : L"WCT 요약";
-    wchar_t buf[512]{};
+    // Built without a fixed buffer: the capture kind and heartbeat age come
+    // from the dump's WCT stream and have no length limit.
+    std::wstring details = L"threads=" + std::to_wstring(wct->threads) +
+      L", cycleThreads=" + std::to_wstring(wct->cycles);
     if (wct->has_capture && wct->thresholdSec > 0u) {
-      const std::wstring kindW = ToWideAscii(wct->capture_kind);
-      swprintf_s(
-        buf,
-        L"capture=%s, threads=%d, cycleThreads=%d, heartbeatAge=%.1fs (threshold=%us, loading=%d)",
-        kindW.c_str(),
-        wct->threads,
-        wct->cycles,
-        wct->secondsSinceHeartbeat,
-        wct->thresholdSec,
-        wct->isLoading ? 1 : 0);
-    } else {
-      swprintf_s(buf, L"threads=%d, cycleThreads=%d", wct->threads, wct->cycles);
+      details = L"capture=" + ToWideAscii(wct->capture_kind) + L", " + details +
+        L", heartbeatAge=" + FormatDecimal(wct->secondsSinceHeartbeat, 1) +
+        L"s (threshold=" + std::to_wstring(wct->thresholdSec) +
+        L"s, loading=" + (wct->isLoading ? L"1" : L"0") + L")";
     }
-    e.details = buf;
+    e.details = std::move(details);
     r.evidence.push_back(std::move(e));
   }
 }

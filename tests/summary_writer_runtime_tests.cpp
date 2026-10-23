@@ -2,7 +2,8 @@
 // BuildReportText), not a hand-written fixture:
 // - they keep the SkyrimDiagSummary v2 schema for a minimal and a full result;
 // - with path redaction on, no user folder survives anywhere in them (the MO2
-//   folders in the plugin scan, a symbol path from _NT_SYMBOL_PATH, ...);
+//   folders in the plugin scan, a symbol path from _NT_SYMBOL_PATH, paths
+//   quoted in Crash Logger's exception text or an error dialog, ...);
 // - an unparsable plugin scan preview stays valid UTF-8 and is left out of a
 //   redacted summary;
 // - the incident manifest is found for the helper's millisecond timestamps.
@@ -34,10 +35,14 @@ using skydiag::dump_tool::BuildSummaryJson;
 using skydiag::dump_tool::ResourceRow;
 using skydiag::dump_tool::SuspectItem;
 using skydiag::dump_tool::internal::output_writer::FindIncidentManifestForDump;
+using skydiag::dump_tool::internal::output_writer::MaybeRedactPath;
+using skydiag::dump_tool::internal::output_writer::RedactAbsolutePathStrings;
+using skydiag::dump_tool::internal::output_writer::RedactPathsInText;
 using skydiag::dump_tool::internal::output_writer::RedactSymbolSearchPath;
 using skydiag::tests::summary_schema::ValidateSummarySchemaV2;
 
 constexpr std::string_view kProbeUser = "SkydiagProbeUser";
+constexpr std::string_view kProbeUserKo = "홍길동프로브";
 
 void Require(bool condition, const char* message)
 {
@@ -149,6 +154,32 @@ AnalysisResult MakeFullResult(const std::filesystem::path& outBase)
   r.modal_dialog_wait.caller_module_path = home + L"\\mods\\Dialog.dll";
   r.main_thread_wait.blocked_module_path = home + L"\\mods\\Blocked.dll";
   r.hook_stub_race.target_module_path = home + L"\\mods\\Hook.dll";
+
+  // Free text that quotes paths, under the probe user and a Korean one:
+  // Crash Logger's exception text, an error dialog (as the report prints it
+  // in a freeze), and evidence, advice, steps and diagnostics repeating them.
+  const std::wstring koHome = L"C:\\Users\\" + skydiag::dump_tool::Utf8ToWide(std::string(kProbeUserKo));
+  r.crash_logger_cpp_exception_type = L"std::filesystem::filesystem_error";
+  r.crash_logger_cpp_exception_info = L"filesystem error: cannot open: [" + home + L"\\AppData\\Local\\x.json]";
+  r.crash_logger_cpp_exception_throw_location = koHome + L"\\src\\Plugin.cpp:120";
+  r.crash_logger_exception_type = L"EXCEPTION_ACCESS_VIOLATION";
+  r.crash_logger_exception_location = L"BadPlugin.dll+0x1234";
+  r.freeze_analysis.has_analysis = true;
+  r.modal_dialog_wait.detected = true;
+  r.modal_dialog_wait.dialog_title = L"Bad.dll";
+  r.modal_dialog_wait.dialog_text = L"Failed to load \\\\?\\" + home +
+    L"\\Documents\\My Games\\Skyrim Special Edition\\Bad.ini / See \\\\nas\\share\\" +
+    skydiag::dump_tool::Utf8ToWide(std::string(kProbeUserKo)) + L"\\log.txt";
+  skydiag::dump_tool::EvidenceItem e{};
+  e.confidence = L"High";
+  e.title = L"dialog";
+  e.details = L"text: " + r.modal_dialog_wait.dialog_text;
+  r.evidence.push_back(e);
+  r.recommendations.push_back(L"[Check] Remove " + koHome + L"\\Desktop\\Bad Mod\\Bad.esp, then see https://www.nexusmods.com/skyrimspecialedition/mods/32444");
+  r.troubleshooting_title = L"steps";
+  r.troubleshooting_steps.push_back(L"Open C:/Users/SkydiagProbeUser/Documents/My Games/Skyrim.ini");
+  r.diagnostics.push_back(L"[symbols] search path " + home + L"\\Syms");
+  r.stackwalk_primary_frames.push_back(L"BadPlugin.dll!Foo+0x12 (" + home + L"\\src\\foo.cpp:42)");
   return r;
 }
 
@@ -184,9 +215,13 @@ void TestRedactedOutputsHoldNoUserFolder()
     std::string strings;
     CollectStrings(summary, &strings);
     Require(strings.find(kProbeUser) != std::string::npos, "fixture puts the probe user into the summary");
+    Require(strings.find(kProbeUserKo) != std::string::npos, "fixture puts the Korean probe user into the summary");
     Require(summary["plugin_scan"]["mo2"]["base_dir"].get<std::string>().find(kProbeUser) != std::string::npos,
       "unredacted MO2 base_dir");
     Require(summary.contains("incident"), "manifest found");
+    const std::string report = BuildReportText(r, summary, false);
+    Require(report.find(kProbeUser) != std::string::npos && report.find(kProbeUserKo) != std::string::npos,
+      "fixture puts both probe users into the report");
   }
 
   const auto summary = BuildSummaryJson(r, outBase, stem, true);
@@ -195,6 +230,32 @@ void TestRedactedOutputsHoldNoUserFolder()
   CollectStrings(summary, &strings);
   Require(strings.find(kProbeUser) == std::string::npos, "redacted summary names no user folder");
   Require(report.find(kProbeUser) == std::string::npos, "redacted report names no user folder");
+  Require(strings.find(kProbeUserKo) == std::string::npos, "redacted summary names no Korean user folder");
+  Require(report.find(kProbeUserKo) == std::string::npos, "redacted report names no Korean user folder");
+  Require(report.find(":\\Users") == std::string::npos && report.find(":/Users") == std::string::npos &&
+            strings.find(":\\Users") == std::string::npos && strings.find(":/Users") == std::string::npos,
+    "no profile folder is left in the redacted outputs");
+
+  // The paths inside text keep their last element; the text around them stays.
+  Require(summary["crash_logger"]["cpp_exception"]["info"] == "filesystem error: cannot open: [<redacted>\\x.json]",
+    "a path in Crash Logger's exception text");
+  Require(summary["crash_logger"]["cpp_exception"]["throw_location"] == "<redacted>\\Plugin.cpp:120",
+    "a throw location keeps its file and line");
+  Require(summary["freeze_analysis"]["modal_dialog_wait"]["dialog_text"] ==
+            "Failed to load <redacted>\\Bad.ini / See <redacted>\\log.txt",
+    "paths in the middle of a dialog's text");
+  Require(report.find("modal_dialog_text=Failed to load <redacted>\\Bad.ini / See <redacted>\\log.txt\n") !=
+            std::string::npos,
+    "the report's dialog line is masked the same way");
+  Require(summary["recommendations"][0] ==
+            "[Check] Remove <redacted>\\Bad.esp, then see https://www.nexusmods.com/skyrimspecialedition/mods/32444",
+    "a path in advice text; the URL stays");
+  Require(summary["callstack"]["frames"][0] == "BadPlugin.dll!Foo+0x12 (<redacted>\\foo.cpp:42)",
+    "a source path in a frame; the module and offset stay");
+  Require(summary["exception"]["module_plus_offset"] == "BadPlugin.dll+0x1234" &&
+            summary["crash_logger"]["exception"]["location"] == "BadPlugin.dll+0x1234",
+    "module names are not paths");
+  Require(report.find("Module+Offset: BadPlugin.dll+0x1234\n") != std::string::npos, "report module+offset kept");
 
   // The temp folder (the manifest, the output base) is under the real profile.
   wchar_t profile[MAX_PATH]{};
@@ -218,6 +279,22 @@ void TestRedactedOutputsHoldNoUserFolder()
   std::filesystem::remove_all(outBase);
 }
 
+// A path field that is the profile folder itself keeps no account name.
+void TestProfileFolderPathField()
+{
+  const std::wstring ko = skydiag::dump_tool::Utf8ToWide(std::string(kProbeUserKo));
+  Require(MaybeRedactPath(L"C:\\Users\\" + ko, true) == L"<redacted>\\<user>", "a Korean profile folder");
+  Require(MaybeRedactPath(L"C:/users/SkydiagProbeUser", true) == L"<redacted>\\<user>", "forward slashes, any case");
+  Require(MaybeRedactPath(L"\\\\?\\C:\\Users\\" + ko + L"\\", true) == L"<redacted>", "a trailing separator");
+  Require(MaybeRedactPath(L"C:\\Users\\" + ko + L"\\Symbols", true) == L"<redacted>\\Symbols",
+    "a folder under the profile keeps its own name");
+  Require(MaybeRedactPath(L"C:\\Users", true) == L"<redacted>\\Users", "the Users folder names nobody");
+  Require(MaybeRedactPath(L"C:\\Users\\" + ko, false) == L"C:\\Users\\" + ko, "redaction off");
+  Require(RedactSymbolSearchPath(L"C:\\Users\\" + ko + L";srv*D:\\Users\\Kim*https://msdl.microsoft.com/download/symbols",
+            true) == L"<redacted>\\<user>;srv*<redacted>\\<user>*https://msdl.microsoft.com/download/symbols",
+    "profile folders in a symbol path");
+}
+
 void TestSymbolSearchPathRedaction()
 {
   Require(RedactSymbolSearchPath(L"C:\\Users\\A\\Sym", false) == L"C:\\Users\\A\\Sym", "redaction off");
@@ -228,6 +305,67 @@ void TestSymbolSearchPathRedaction()
   Require(RedactSymbolSearchPath(L" D:\\Sym ; srv*https://msdl.microsoft.com/download/symbols", true) ==
             L" <redacted>\\Sym ; srv*https://msdl.microsoft.com/download/symbols",
     "blanks around elements are kept and do not hide a path");
+}
+
+void TestPathsInTextRedaction()
+{
+  const auto check = [](std::string_view in, std::string_view want, const char* message) {
+    const std::string got = RedactPathsInText(in);
+    if (got != want) {
+      throw std::runtime_error(std::string(message) + ": got \"" + got + "\"");
+    }
+    Require(RedactPathsInText(got) == got, message);  // masking twice changes nothing
+  };
+  check("Failed to read C:\\Users\\홍길동\\Documents\\My Games\\Skyrim Special Edition\\SKSE\\x.ini / See D:\\Mods\\a b\\c.dll.",
+    "Failed to read <redacted>\\x.ini / See <redacted>\\c.dll.", "drive paths with blanks and Korean folders");
+  check("C:/Users/<user>/git/SkyrimSE-SmoothCam/REL/ID.h(223): Unsupported address library format: 2 / This means",
+    "<redacted>\\ID.h(223): Unsupported address library format: 2 / This means",
+    "a forward-slash path ends at its ':'; the dialog's message stays");
+  check("open \\\\?\\C:\\Users\\kim\\AppData\\x.dll and \\\\?\\UNC\\nas\\share\\y.esp",
+    "open <redacted>\\x.dll and <redacted>\\y.esp", "\\\\?\\ prefixed paths");
+  check("load \\\\nas\\share\\홍길동\\file.esp failed", "load <redacted>\\file.esp failed", "a UNC share");
+  check("C:\\Users\\김철수 is not writable", "<redacted>\\<user> is not writable", "a profile folder keeps no name");
+  check("C:\\Users\\Kim\\", "<redacted>", "nothing after the last separator");
+  check("See /users/other/log.txt and \\Users\\Name\\x", "See /users/<user>/log.txt and \\Users\\<user>\\x",
+    "a profile folder without its drive");
+  check("[C:\\Program Files (x86)\\Steam\\steamapps\\common\\Skyrim Special Edition\\SkyrimSE.exe] crashed",
+    "[<redacted>\\SkyrimSE.exe] crashed", "Program Files (x86)");
+  check("srv*C:\\Users\\A\\Symbols*https://msdl.microsoft.com/download/symbols",
+    "srv*<redacted>\\Symbols*https://msdl.microsoft.com/download/symbols", "a symbol path chain");
+  check("file:///C:/Users/A/report.txt", "file:///<redacted>\\report.txt", "a file URL is a local path");
+  check("Loaded C:\\Mods\\a.dll then D:\\x\\y.dll", "Loaded <redacted>\\a.dll then <redacted>\\y.dll",
+    "two paths in one sentence");
+
+  // Not paths: module names, FormIDs, URLs, relative data paths, words before ':'.
+  for (const std::string_view kept : {
+         std::string_view("SkyrimSE.exe+0x1A2B3C"),
+         std::string_view("BadPlugin.dll!Foo+0x12"),
+         std::string_view("FormID 0xFF000800 [FE:001] Skyrim.esm:0x00012EB7 (Skyrim.esm|0x0001A2B3)"),
+         std::string_view("https://www.nexusmods.com/skyrimspecialedition/mods/32444 and https://github.com/users/x/y"),
+         std::string_view("Data/SKSE/Plugins/version-1-6-1170-0.bin"),
+         std::string_view("meshes\\actors\\character\\a.nif"),
+         std::string_view("Exception:\\n code: 0xC0000005"),
+         std::string_view("// comment and a://b and \\\\ alone"),
+         std::string_view("<redacted>\\x.dll"),
+         std::string_view("홍길동 모드 C: 드라이브"),
+       }) {
+    check(kept, kept, "text without an absolute path stays as it is");
+  }
+}
+
+// The WCT companion is masked string by string: a dialog text that starts
+// with a path keeps its message, and the other fields stay.
+void TestWctCompanionDialogText()
+{
+  auto wct = nlohmann::json::parse(R"({"capture":{"kind":"hang"},"threads":[{"tid":7,"dialogs":[{"title":"SmoothCam.dll",
+    "text":"C:/Users/SkydiagProbeUser/git/SmoothCam/REL/ID.h(223): Unsupported address library format: 2\r\nThis means this plugin is incompatible."}]}]})");
+  RedactAbsolutePathStrings(&wct);
+  const auto& dialog = wct["threads"][0]["dialogs"][0];
+  Require(dialog["text"] ==
+            "<redacted>\\ID.h(223): Unsupported address library format: 2\r\nThis means this plugin is incompatible.",
+    "the dialog text keeps its message");
+  Require(dialog["title"] == "SmoothCam.dll" && wct["capture"]["kind"] == "hang" && wct["threads"][0]["tid"] == 7,
+    "the other fields stay");
 }
 
 void TestUnparsablePluginScanPreview()
@@ -293,6 +431,9 @@ int main()
     TestWriterOutputKeepsSchema();
     TestRedactedOutputsHoldNoUserFolder();
     TestSymbolSearchPathRedaction();
+    TestProfileFolderPathField();
+    TestPathsInTextRedaction();
+    TestWctCompanionDialogText();
     TestUnparsablePluginScanPreview();
     TestIncidentManifestMatchesHelperTimestamps();
   } catch (const std::exception& ex) {

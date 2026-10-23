@@ -1,6 +1,7 @@
 #include "EvidenceBuilderPrivate.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cwchar>
 #include <cwctype>
 #include <filesystem>
@@ -49,6 +50,18 @@ std::wstring ToWideAscii(std::string_view s)
     out.push_back(static_cast<wchar_t>(c));
   }
   return out;
+}
+
+std::wstring FormatDecimal(double value, int decimals)
+{
+  const int length = std::snprintf(nullptr, 0, "%.*f", decimals, value);
+  if (length <= 0) {
+    return {};
+  }
+  std::string text(static_cast<std::size_t>(length) + 1u, '\0');
+  std::snprintf(text.data(), text.size(), "%.*f", decimals, value);
+  text.resize(static_cast<std::size_t>(length));
+  return ToWideAscii(text);
 }
 
 bool HasNearbyProbableDll(const AnalysisResult& r)

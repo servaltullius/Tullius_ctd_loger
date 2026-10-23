@@ -57,8 +57,15 @@ std::wstring MaybeRedactPath(std::wstring_view path, bool redactPaths);
 // ("C:\Sym;srv*C:\Cache*https://..."), keeping separators and URLs.
 std::wstring RedactSymbolSearchPath(std::wstring_view searchPath, bool redactPaths);
 
-// Replaces every string in `value` (recursively) that is an absolute path with
-// its redacted form, as MaybeRedactPath does.
+// Masks every absolute path inside UTF-8 text the way MaybeRedactPath masks
+// a path field: "C:\...", "\\?\C:\...", "\\server\share\..." and their
+// forward-slash spellings keep only their last element ("<redacted>\x.dll"),
+// a user's profile folder becomes "<user>" (also without a drive:
+// "/users/<user>/"). URLs, module names and FormIDs are left as they are.
+std::string RedactPathsInText(std::string_view text);
+
+// RedactPathsInText over every string in `value` (recursively): a string that
+// is a path, and the paths a message or dialog text quotes.
 void RedactAbsolutePathStrings(nlohmann::json* value);
 
 // At most maxBytes of UTF-8 text, cut on a code point boundary.

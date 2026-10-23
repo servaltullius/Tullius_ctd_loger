@@ -940,15 +940,11 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     if (isHangLike) {
       std::wstring hangPrefix = en ? L"Likely a freeze/infinite loading." : L"프리징/무한로딩으로 추정됩니다.";
       if (wct && wct->has_capture && wct->thresholdSec > 0u) {
-        const std::wstring kindW = ToWideAscii(wct->capture_kind);
-        wchar_t hb[256]{};
-        swprintf_s(
-          hb,
-          en ? L"Hang detected (capture=%s, heartbeatAge=%.1fs >= %us)." : L"프리징 감지(capture=%s, heartbeatAge=%.1fs >= %us).",
-          kindW.c_str(),
-          wct->secondsSinceHeartbeat,
-          wct->thresholdSec);
-        hangPrefix = hb;
+        // No fixed buffer: the capture kind and heartbeat age come from the
+        // dump's WCT stream and have no length limit.
+        hangPrefix = (en ? L"Hang detected (capture=" : L"프리징 감지(capture=") + ToWideAscii(wct->capture_kind) +
+          L", heartbeatAge=" + FormatDecimal(wct->secondsSinceHeartbeat, 1) + L"s >= " +
+          std::to_wstring(wct->thresholdSec) + L"s).";
       }
       if (!r.modal_dialog_wait.detected) {
         // ADR-0009: what the player had open (the Console in most of the

@@ -63,6 +63,9 @@ struct EvidenceBuildContext
 
 std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, std::wstring_view sep);
 std::wstring ToWideAscii(std::string_view s);
+// printf's "%.*f" without a fixed buffer: a value read from the dump (a WCT
+// heartbeat age of 1e308) can be hundreds of digits long.
+std::wstring FormatDecimal(double value, int decimals);
 // "12 seconds" / "84 minutes" (Korean: "12초" / "84분").
 std::wstring DescribeDuration(double seconds, bool en);
 // Crash Logger's top modules other than the fault module and the SKSE runtime

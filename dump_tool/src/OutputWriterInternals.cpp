@@ -79,7 +79,168 @@ std::wstring RedactPathValue(std::wstring_view path)
   if (filename.empty()) {
     return L"<redacted>";
   }
+  // "C:\Users\<name>" ends with the account name itself.
+  if (_wcsicmp(p.parent_path().filename().c_str(), L"Users") == 0) {
+    return L"<redacted>\\<user>";
+  }
   return L"<redacted>\\" + filename;
+}
+
+// --- Paths quoted inside text (RedactPathsInText) ---------------------------
+// The text is UTF-8, but every byte the rules look at is ASCII, and the bytes
+// of a non-ASCII character are never ASCII.
+
+bool IsAsciiAlpha(char c)
+{
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+bool IsAsciiWordChar(char c)
+{
+  return IsAsciiAlpha(c) || (c >= '0' && c <= '9') || c == '_';
+}
+
+bool IsPathSeparator(char c)
+{
+  return c == '\\' || c == '/';
+}
+
+// Characters a file or folder name cannot hold (':' only after the drive),
+// and the ends of a line.
+bool EndsPathInText(char c)
+{
+  return c == '"' || c == '|' || c == '*' || c == '?' || c == ':' || c == '\r' || c == '\n' || c == '\t' ||
+    c == '\0';
+}
+
+char CharAt(std::string_view text, std::size_t pos)
+{
+  return pos < text.size() ? text[pos] : '\0';
+}
+
+bool EndsWithUsersFolder(std::string_view dir)
+{
+  constexpr std::string_view kUsers = "users";
+  if (dir.size() < kUsers.size() + 2u || !IsPathSeparator(dir.back())) {
+    return false;
+  }
+  const std::size_t start = dir.size() - 1u - kUsers.size();
+  if (!IsPathSeparator(dir[start - 1u])) {
+    return false;
+  }
+  for (std::size_t i = 0; i < kUsers.size(); ++i) {
+    const char c = dir[start + i];
+    if (static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c) != kUsers[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// End of a "scheme://..." URL starting at `pos` (left as it is), or `pos`.
+// file:// URLs name local paths, so they are not skipped.
+std::size_t UrlEndAt(std::string_view text, std::size_t pos)
+{
+  if (!IsAsciiAlpha(text[pos]) || (pos > 0 && IsAsciiWordChar(text[pos - 1]))) {
+    return pos;
+  }
+  std::size_t i = pos;
+  while (i < text.size() && (IsAsciiWordChar(text[i]) || text[i] == '+' || text[i] == '-' || text[i] == '.')) {
+    ++i;
+  }
+  if (i - pos < 2u || text.compare(i, 3, "://") != 0) {
+    return pos;
+  }
+  std::string scheme(text.substr(pos, i - pos));
+  for (auto& c : scheme) {
+    c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+  }
+  if (scheme == "file") {
+    return pos;
+  }
+  while (i < text.size() && text[i] != ' ' && text[i] != '"' && text[i] != '\r' && text[i] != '\n' &&
+         text[i] != '\t') {
+    ++i;
+  }
+  return i;
+}
+
+// Length of the root of an absolute path starting at `pos` ("C:\",
+// "\\?\C:\", "\\?\", "\\server"), or 0.
+std::size_t AbsolutePathRootAt(std::string_view text, std::size_t pos)
+{
+  const char prev = pos > 0 ? text[pos - 1] : ' ';
+  const auto at = [&](std::size_t i) { return CharAt(text, pos + i); };
+  if (IsAsciiAlpha(at(0)) && at(1) == ':' && IsPathSeparator(at(2))) {
+    // "Exception:\" ends a word, and "x://" is a URL.
+    if (IsAsciiWordChar(prev) || (at(2) == '/' && at(3) == '/')) {
+      return 0;
+    }
+    return 3;
+  }
+  const bool backslashes = at(0) == '\\' && at(1) == '\\';
+  const bool slashes = at(0) == '/' && at(1) == '/';
+  if (!backslashes && !slashes) {
+    return 0;
+  }
+  // "scheme://" is a URL; "a\\b" is not a share.
+  if (prev == ':' || IsPathSeparator(prev) || IsAsciiWordChar(prev)) {
+    return 0;
+  }
+  if (backslashes && (at(2) == '?' || at(2) == '.') && at(3) == '\\') {
+    if (IsAsciiAlpha(at(4)) && at(5) == ':' && IsPathSeparator(at(6))) {
+      return 7;
+    }
+    return 4;
+  }
+  const char first = at(2);
+  if (first == ' ' || IsPathSeparator(first) || EndsPathInText(first)) {
+    return 0;
+  }
+  return 2;
+}
+
+// End of the absolute path whose root ends at `pos + root`; `*nameStart`
+// is where its last element begins. A folder name may hold blanks ("Program
+// Files (x86)", "My Games"): the path goes on over a blank only when a few
+// words reach another separator, and a separator after a blank (" / ",
+// flattened dialog lines) starts new text.
+std::size_t AbsolutePathEnd(std::string_view text, std::size_t pos, std::size_t root, std::size_t* nameStart)
+{
+  constexpr std::size_t kMaxBlanksInFolder = 3;
+  constexpr std::size_t kMaxBlankRun = 64;
+  std::size_t i = pos + root;
+  *nameStart = i;
+  while (i < text.size()) {
+    const char c = text[i];
+    if (EndsPathInText(c)) {
+      break;
+    }
+    if (IsPathSeparator(c)) {
+      if (text[i - 1] == ' ') {
+        break;
+      }
+      ++i;
+      *nameStart = i;
+      continue;
+    }
+    if (c == ' ') {
+      std::size_t k = i;
+      std::size_t blanks = 0;
+      while (k < text.size() && !IsPathSeparator(text[k]) && !EndsPathInText(text[k])) {
+        blanks += text[k] == ' ' ? 1u : 0u;
+        ++k;
+      }
+      if (k < text.size() && IsPathSeparator(text[k]) && text[k - 1] != ' ' && blanks <= kMaxBlanksInFolder &&
+          k - i <= kMaxBlankRun) {
+        i = k;
+        continue;
+      }
+      break;
+    }
+    ++i;
+  }
+  return i;
 }
 
 std::optional<std::wstring> TryExtractTimestampTokenW(std::wstring_view s)
@@ -459,16 +620,62 @@ std::wstring RedactSymbolSearchPath(std::wstring_view searchPath, bool redactPat
   return out;
 }
 
+std::string RedactPathsInText(std::string_view text)
+{
+  constexpr std::string_view kRedacted = "<redacted>";
+  constexpr std::string_view kUser = "<user>";
+  std::string out;
+  out.reserve(text.size());
+  std::size_t pos = 0;
+  while (pos < text.size()) {
+    if (const std::size_t urlEnd = UrlEndAt(text, pos); urlEnd > pos) {
+      out.append(text.substr(pos, urlEnd - pos));
+      pos = urlEnd;
+      continue;
+    }
+    if (const std::size_t root = AbsolutePathRootAt(text, pos); root > 0) {
+      std::size_t nameStart = 0;
+      const std::size_t end = AbsolutePathEnd(text, pos, root, &nameStart);
+      // As MaybeRedactPath: only the last element stays, unless it is the
+      // account's own folder ("C:\Users\<name>").
+      out.append(kRedacted);
+      if (nameStart < end) {
+        out.push_back('\\');
+        if (EndsWithUsersFolder(text.substr(pos, nameStart - pos))) {
+          out.append(kUser);
+        } else {
+          out.append(text.substr(nameStart, end - nameStart));
+        }
+      }
+      pos = end;
+      continue;
+    }
+    // A profile folder without its drive ("/users/<name>/log.txt").
+    if (IsPathSeparator(text[pos]) && EndsWithUsersFolder(text.substr(pos, std::min<std::size_t>(7u, text.size() - pos)))) {
+      out.append(text.substr(pos, 7));
+      std::size_t end = pos + 7u;
+      while (end < text.size() && !IsPathSeparator(text[end]) && !EndsPathInText(text[end]) && text[end] != ' ') {
+        ++end;
+      }
+      if (end > pos + 7u) {
+        out.append(kUser);
+      }
+      pos = end;
+      continue;
+    }
+    out.push_back(text[pos]);
+    ++pos;
+  }
+  return out;
+}
+
 void RedactAbsolutePathStrings(nlohmann::json* value)
 {
   if (!value) {
     return;
   }
   if (value->is_string()) {
-    const std::wstring text = Utf8ToWide(value->get_ref<const std::string&>());
-    if (LooksLikeAbsolutePath(text)) {
-      *value = WideToUtf8(RedactPathValue(text));
-    }
+    *value = RedactPathsInText(value->get_ref<const std::string&>());
     return;
   }
   if (value->is_array() || value->is_object()) {

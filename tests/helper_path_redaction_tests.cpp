@@ -33,6 +33,15 @@ void TestRedactPath()
   Require(RedactPath(L"D:\\") == L"<redacted>", "a drive root has no element to keep");
   Require(RedactPath(L"relative\\syms") == L"relative\\syms", "a relative path stays");
   Require(RedactPath(L"").empty(), "empty stays empty");
+  // The profile folder itself ends with the account name.
+  Require(RedactPath(L"C:\\Users\\홍길동") == L"<redacted>\\<user>", "a Korean profile folder keeps no name");
+  Require(RedactPath(L"C:/users/SomeOne") == L"<redacted>\\<user>", "forward slashes, any case");
+  Require(RedactPath(L"C:\\Users\\홍길동\\") == L"<redacted>", "a trailing separator keeps nothing");
+  Require(RedactPath(L"C:\\Users\\홍길동\\Symbols") == L"<redacted>\\Symbols", "a folder under it keeps its own name");
+  Require(RedactPath(L"C:\\Users") == L"<redacted>\\Users", "the Users folder names nobody");
+  Require(RedactSymbolSearchPath(L"C:\\Users\\홍길동;srv*D:\\Users\\Kim*https://msdl.microsoft.com/download/symbols") ==
+            L"<redacted>\\<user>;srv*<redacted>\\<user>*https://msdl.microsoft.com/download/symbols",
+    "profile folders in a symbol path");
 }
 
 void TestRedactSymbolSearchPath()
@@ -59,6 +68,11 @@ void TestSameMaskingAsTheDumpTool()
     L"cache*C:\\Users\\A\\Cache;\\\\server\\share\\syms;relative",
     L" D:\\Sym ; srv*https://msdl.microsoft.com/download/symbols",
     L"E:/Forward/Slashes;;*",
+    L"C:\\Users\\홍길동",
+    L"C:/users/SomeOne",
+    L"\\\\?\\C:\\Users\\홍길동\\",
+    L"C:\\Users\\홍길동\\Symbols;srv*D:\\USERS\\Kim*https://msdl.microsoft.com/download/symbols",
+    L"C:\\Users",
   };
   for (const wchar_t* path : paths) {
     Require(RedactSymbolSearchPath(path) == dump_tool_writer::RedactSymbolSearchPath(path, true),
