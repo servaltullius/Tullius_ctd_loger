@@ -21,6 +21,10 @@ internal sealed class AnalysisSummary
     public string CleanExitEvidenceFilename { get; init; } = string.Empty;
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
+    // The analyzer's group and tag id for each entry of Recommendations (same
+    // order); empty in summaries written before recommendation_classes.
+    public IReadOnlyList<RecommendationClassItem> RecommendationClasses { get; init; } =
+        Array.Empty<RecommendationClassItem>();
     // Index of the report's NextAction in Recommendations (-1 = none).
     public int NextActionIndex { get; init; }
     // Older summaries have no next_action_index; the viewer then picks by tag.
@@ -101,6 +105,7 @@ internal sealed class AnalysisSummary
             ReadInt32(item, "relevance_score")));
 
         var recommendations = ParseStringArray(root, "recommendations");
+        var recommendationClasses = ParseRecommendationClasses(root);
         var callstackFrames = ParseStringArray(root, "callstack.frames");
 
         var evidenceItems = ParseObjectArray(root, "evidence", item => new EvidenceViewItem(
@@ -183,6 +188,9 @@ internal sealed class AnalysisSummary
             CleanExitEvidenceFilename = ReadString(cleanExitEvidence, "sidecar_filename"),
             Suspects = suspects,
             Recommendations = recommendations,
+            RecommendationClasses = recommendationClasses.Count == recommendations.Count
+                ? recommendationClasses
+                : Array.Empty<RecommendationClassItem>(),
             NextActionIndex = ReadInt32(root, "next_action_index"),
             HasNextActionIndex = root.TryGetProperty("next_action_index", out var nextActionIndexElement) &&
                                  nextActionIndexElement.ValueKind == JsonValueKind.Number,
@@ -276,6 +284,32 @@ internal sealed class AnalysisSummary
         return result;
     }
 
+    // recommendation_classes[i] describes recommendations[i]; keep the classes
+    // of the entries ParseStringArray keeps so both lists stay in step.
+    private static List<RecommendationClassItem> ParseRecommendationClasses(JsonElement root)
+    {
+        var result = new List<RecommendationClassItem>();
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("recommendations", out var texts) ||
+            texts.ValueKind != JsonValueKind.Array ||
+            !root.TryGetProperty("recommendation_classes", out var classes) ||
+            classes.ValueKind != JsonValueKind.Array ||
+            classes.GetArrayLength() != texts.GetArrayLength())
+            return result;
+        var index = 0;
+        foreach (var text in texts.EnumerateArray())
+        {
+            var item = classes[index++];
+            if (text.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(text.GetString()))
+                continue;
+            // Anything but an object leaves the group empty: that line falls back to its text.
+            result.Add(item.ValueKind == JsonValueKind.Object
+                ? new RecommendationClassItem(ReadString(item, "group"), ReadString(item, "kind"))
+                : new RecommendationClassItem(string.Empty, string.Empty));
+        }
+        return result;
+    }
+
     private static List<T> ParseObjectArray<T>(JsonElement root, string propertyName,
         Func<JsonElement, T> mapper)
     {
@@ -356,6 +390,9 @@ public sealed record QuickAnswerItem(
 public sealed record EvidenceViewItem(string Confidence, string Title, string Details);
 public sealed record ResourceViewItem(string Kind, string Path, string Providers, string Conflict);
 public sealed record RecommendationGroupItem(string Title, IReadOnlyList<string> Items);
+// Group: "immediate", "verify" or "recapture"; Kind: the leading tag's id
+// ("known_cause", "actionable_candidate", ...) or empty.
+public sealed record RecommendationClassItem(string Group, string Kind);
 public sealed record ConflictComparisonRow(string Candidate, string Signals, string Detail);
 public sealed record ActionableCandidateItem(
     string StatusId,

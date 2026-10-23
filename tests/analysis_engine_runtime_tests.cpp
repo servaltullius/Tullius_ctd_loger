@@ -321,6 +321,73 @@ void TestKnownCrashSiteSignaturesRuntime()
   const auto waterHit = db.Match(water, /*useKorean=*/false);
   assert(waterHit && waterHit->id == "WATER_REFLECTIONS_ADDWATER_1_6_1170");
 
+  // 2026-10-23 research: fix-mod authors' own 1.6.1170 samples, each checked
+  // against the code bytes in a 1.6.1170 dump.
+  SignatureMatchInput keyboard{};
+  keyboard.exc_code = 0xC0000005u;
+  keyboard.game_version = "1.6.1170.0";
+  keyboard.fault_module = L"SkyrimSE.exe";
+  keyboard.fault_offset = 0xCDE0AEull;  // mov [r14+rbx+0x168],r8b
+  keyboard.access_violation_address = 0x2A0F1234567ull;
+  const auto keyboardHit = db.Match(keyboard, /*useKorean=*/false);
+  assert(keyboardHit && keyboardHit->id == "KEYBOARD_INVALID_KEY_INDEX_1_6_1170");
+  assert(keyboardHit->fix_module == L"KeyboardInputOffsetCrashFix.dll" && !keyboardHit->fix_module_loaded);
+  assert(keyboardHit->recommendations[0].find(L"Nexus mod 187246") != std::wstring::npos);
+  keyboard.loaded_modules = { L"SkyrimSE.exe", L"keyboardinputoffsetcrashfix.dll" };
+  const auto keyboardFixed = db.Match(keyboard, /*useKorean=*/true);
+  assert(keyboardFixed && keyboardFixed->fix_module_loaded);
+  assert(keyboardFixed->recommendations[0].find(L"이미 로드되어 있는데도") != std::wstring::npos);
+  auto keyboardOther = keyboard;
+  keyboardOther.game_version = "1.6.640.0";
+  const auto keyboardMiss = db.Match(keyboardOther, /*useKorean=*/false);
+  assert(!keyboardMiss || keyboardMiss->id.rfind("KEYBOARD", 0) != 0);
+
+  SignatureMatchInput solver{};
+  solver.exc_code = 0x80000003u;  // int3
+  solver.game_version = "1.6.1170.0";
+  solver.fault_module = L"SkyrimSE.exe";
+  solver.fault_offset = 0xBFC079ull;
+  const auto solverHit = db.Match(solver, /*useKorean=*/false);
+  assert(solverHit && solverHit->id == "HAVOK_SOLVER_BREAKPOINT_1_6_1170");
+  assert(solverHit->recommendations[0].find(L"bSolverProtection") != std::wstring::npos);
+  solver.exc_code = 0xC0000005u;
+  solver.fault_offset = 0xC0C455ull;  // movss [rax+0x18],xmm1
+  solver.access_violation_address = 0x7FF6DEADBEEFull;
+  const auto overwriteHit = db.Match(solver, /*useKorean=*/false);
+  assert(overwriteHit && overwriteHit->id == "HAVOK_SOLVER_OVERWRITE_1_6_1170");
+
+  // call [rax+0x28] / [rax+0x10] / [rax+0x38] in the three cleanup callbacks.
+  for (const auto offset : { 0xB4BAD9ull, 0xB4B729ull, 0xB41AA5ull }) {
+    auto cleanup = solver;
+    cleanup.fault_offset = offset;
+    const auto cleanupHit = db.Match(cleanup, /*useKorean=*/false);
+    assert(cleanupHit && cleanupHit->id == "HAVOK_CLEANUP_STALE_LISTENER_1_6_1170");
+    assert(cleanupHit->recommendations[0].find(L"bCleanupProtection") != std::wstring::npos);
+  }
+  auto cleanupNear = solver;
+  cleanupNear.fault_offset = 0xB4BAD8ull;
+  const auto cleanupMiss = db.Match(cleanupNear, /*useKorean=*/false);
+  assert(!cleanupMiss || cleanupMiss->id.rfind("HAVOK", 0) != 0);
+  auto cleanupLonger = solver;
+  cleanupLonger.fault_offset = 0x1B4BAD9ull;  // the pattern is anchored
+  const auto longerMiss = db.Match(cleanupLonger, /*useKorean=*/false);
+  assert(!longerMiss || longerMiss->id.rfind("HAVOK", 0) != 0);
+
+  // call [rax+0x1D0] and cmp qword [rcx+0x10],0 on a freed water body.
+  for (const auto offset : { 0x51E220ull, 0x51E253ull }) {
+    auto collision = water;
+    collision.fault_offset = offset;
+    const auto collisionHit = db.Match(collision, /*useKorean=*/false);
+    assert(collisionHit && collisionHit->id == "WATER_COLLISION_FREED_BODY_1_6_1170");
+    assert(collisionHit->recommendations[0].find(L"BGSWaterCollision - CrashFix") != std::wstring::npos);
+  }
+  auto collisionFixed = water;
+  collisionFixed.fault_offset = 0x51E253ull;
+  collisionFixed.loaded_modules = { L"WaterCollisionCrashFix.dll" };
+  const auto collisionFixedHit = db.Match(collisionFixed, /*useKorean=*/false);
+  assert(collisionFixedHit && collisionFixedHit->fix_module_loaded);
+  assert(collisionFixedHit->recommendations[0].find(L"is already loaded") != std::wstring::npos);
+
   SignatureMatchInput badAlloc{};
   badAlloc.exc_code = 0xE06D7363u;
   badAlloc.cpp_exception_info = L"bad allocation";

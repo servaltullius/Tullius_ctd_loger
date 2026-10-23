@@ -6,7 +6,7 @@ internal static class Program
     {
         if (args.Length != 2)
         {
-            Console.Error.WriteLine("usage: ShareTextFixtureHarness <summary.json> <community|clipboard|cleared>");
+            Console.Error.WriteLine("usage: ShareTextFixtureHarness <summary.json> <community|clipboard|cleared|groups>");
             return 2;
         }
 
@@ -25,6 +25,7 @@ internal static class Program
             "community" => vm.BuildCommunityShareText(),
             "clipboard" => vm.BuildSummaryClipboardText(),
             "cleared" => ClearedShareText(vm),
+            "groups" => RecommendationGroupsText(vm),
             _ => throw new InvalidOperationException("unsupported mode: " + mode),
         };
 
@@ -34,6 +35,17 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    // The recommendation sections and the next action as the viewer shows them.
+    private static string RecommendationGroupsText(MainWindowViewModel vm)
+    {
+        var lines = new List<string>();
+        lines.AddRange(vm.ImmediateRecommendations.Select(item => "immediate: " + item));
+        lines.AddRange(vm.VerificationRecommendations.Select(item => "verify: " + item));
+        lines.AddRange(vm.RecaptureRecommendations.Select(item => "recapture: " + item));
+        lines.Add("next: " + vm.QuickActionsValue);
+        return string.Join("\n", lines) + "\n";
     }
 
     // A newly selected dump drops the rendered summary; neither copy action

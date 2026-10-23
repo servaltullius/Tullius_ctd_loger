@@ -543,6 +543,11 @@ static void TestWinUiSkipsLocationRefsAndGroupsFreezeActions()
   RequireContains(summary, "crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName", "The inferred mod skips locations.");
   const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireNotContains(vm, "CrashLoggerRefs[0]", "Culprit displays must go through CulpritRef.");
+  // ADR-0018: the analyzer's recommendation_classes decide the section; the
+  // tag matching below only places lines of summaries written before it.
+  RequireContains(summary, "\"recommendation_classes\"", "The viewer must read the analyzer's recommendation classes.");
+  RequireContains(vm, "ResolveRecommendationGroup(recommendation, i < classes.Count ? classes[i] : null)",
+    "Recommendation sections must follow recommendation_classes when the summary has them.");
   RequireContains(vm, "StartsWith(\"[메인 스레드]\"", "Main-thread freeze guidance belongs to Do This Now.");
   RequireContains(vm, "StartsWith(\"[Modal 대화상자]\"", "Modal dialog guidance belongs to Do This Now.");
   RequireContains(vm, "StartsWith(\"[동기화 정지]\"", "Synchronization stall guidance belongs to Do This Now.");

@@ -71,6 +71,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/TroubleshootingGuide.cpp
   src/TroubleshootingGuide.h
   src/NextAction.cpp
+  src/RecommendationClass.cpp
+  src/RecommendationClass.h
   src/QuickAnswer.h
   src/PluginRules.cpp
   src/PluginRules.h
