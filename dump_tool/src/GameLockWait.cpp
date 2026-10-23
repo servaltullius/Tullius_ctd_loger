@@ -125,9 +125,25 @@ std::vector<GameLockWaitThread> FindGameLockWaits(
     entry.wait_offset = entry.frames.front().offset;
 
     if (!image.writable.empty() && read) {
-      for (const auto& [location, value] : thread.roots) {
+      // The lock it waits on is kept by the sleep and the lock function
+      // (registers, their own frames); slots further up belong to its callers,
+      // whose stale values to locks they already let go would add waits that
+      // are not there. The lock function's frame ends at the slot holding the
+      // return address into its caller; without that slot only the registers
+      // are read.
+      const auto isStackSlot = [](const std::wstring& location) { return location.rfind(L"RSP+", 0) == 0; };
+      const std::uint64_t callerReturn = *site + 1 < thread.top_frames.size() ? thread.top_frames[*site + 1].pc : 0u;
+      const auto frameEnd = static_cast<std::size_t>(
+        std::find_if(thread.roots.begin(), thread.roots.end(), [&](const auto& root) {
+          return callerReturn != 0u && isStackSlot(root.first) && root.second == callerReturn;
+        }) - thread.roots.begin());
+      for (std::size_t i = 0; i < thread.roots.size(); ++i) {
+        const auto& [location, value] = thread.roots[i];
         if (entry.candidates.size() >= kGameLockMaxCandidates) {
           break;
+        }
+        if (isStackSlot(location) && i >= frameEnd) {
+          continue;
         }
         if (!PointsIntoWritable(image.writable, value)) {
           continue;

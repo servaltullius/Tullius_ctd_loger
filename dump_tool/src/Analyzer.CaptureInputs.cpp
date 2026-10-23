@@ -508,6 +508,46 @@ std::vector<std::pair<std::wstring, std::uint64_t>> GameLockRoots(
   return roots;
 }
 
+// The signature input's engine-lock facts, from game data already read.
+void FillGameLockSignatureInputFrom(const DumpGameData& data, const AnalysisResult& out, SignatureMatchInput& input)
+{
+  input.game_lock_threads.clear();
+  for (const auto& wait : out.game_lock_waits) {
+    SignatureGameLockThread thread{};
+    thread.tid = wait.tid;
+    for (const auto& frame : wait.frames) {
+      thread.frames.emplace_back(frame.module, frame.offset);
+    }
+    input.game_lock_threads.push_back(std::move(thread));
+  }
+  input.game_lock_cycle_tids.clear();
+  for (const auto& link : out.engine_lock_deadlock.cycle) {
+    input.game_lock_cycle_tids.push_back(link.tid);
+  }
+  input.read_game_lock = nullptr;
+  if (out.game_lock_waits.empty() || !data.memory || data.image.writable.empty()) {
+    return;
+  }
+  input.read_game_lock = [memory = data.memory, image = data.image](
+                           std::uint64_t rva, std::uint32_t& word0, std::uint32_t& word1) {
+    if (rva > UINT64_MAX - image.base) {
+      return false;
+    }
+    const std::uint64_t address = image.base + rva;
+    if (!skydiag::game_locks::PointsIntoWritable(image.writable, address)) {
+      return false;
+    }
+    std::uint32_t words[2]{};
+    std::size_t got = 0;
+    if (!memory->Read(address, words, sizeof(words), got) || got != sizeof(words)) {
+      return false;
+    }
+    word0 = words[0];
+    word1 = words[1];
+    return true;
+  };
+}
+
 // ADR-0021: the game threads (and the main thread) waiting in a delay under
 // game code, the held engine locks they point at, and a wait-for cycle among
 // them. Without one, a known deadlock pattern whose stacks and lock memory a
@@ -578,7 +618,7 @@ void DetectGameLockWaits(
   SignatureMatchInput input{};
   input.game_version = out.game_version;
   input.freeze_state = "engine_lock_deadlock";
-  internal::FillGameLockSignatureInput(dumpBase, dumpSize, allModules, out, input);
+  FillGameLockSignatureInputFrom(data, out, input);
   // Only a pattern that names the threads and their locks can say there is a
   // deadlock; a signature on the state alone would assume it.
   const auto match = sigDb.Match(input, /*useKorean=*/false);
@@ -658,45 +698,11 @@ void FillGameLockSignatureInput(
   const AnalysisResult& out,
   SignatureMatchInput& input)
 {
-  input.game_lock_threads.clear();
-  for (const auto& wait : out.game_lock_waits) {
-    SignatureGameLockThread thread{};
-    thread.tid = wait.tid;
-    for (const auto& frame : wait.frames) {
-      thread.frames.emplace_back(frame.module, frame.offset);
-    }
-    input.game_lock_threads.push_back(std::move(thread));
-  }
-  input.game_lock_cycle_tids.clear();
-  for (const auto& link : out.engine_lock_deadlock.cycle) {
-    input.game_lock_cycle_tids.push_back(link.tid);
-  }
-  input.read_game_lock = nullptr;
-  if (out.game_lock_waits.empty()) {
-    return;
-  }
-  auto data = ReadDumpGameData(dumpBase, dumpSize, modules, LoadThreads(dumpBase, dumpSize));
-  if (!data.memory || data.image.writable.empty()) {
-    return;
-  }
-  input.read_game_lock = [memory = data.memory, image = std::move(data.image)](
-                           std::uint64_t rva, std::uint32_t& word0, std::uint32_t& word1) {
-    if (rva > UINT64_MAX - image.base) {
-      return false;
-    }
-    const std::uint64_t address = image.base + rva;
-    if (!skydiag::game_locks::PointsIntoWritable(image.writable, address)) {
-      return false;
-    }
-    std::uint32_t words[2]{};
-    std::size_t got = 0;
-    if (!memory->Read(address, words, sizeof(words), got) || got != sizeof(words)) {
-      return false;
-    }
-    word0 = words[0];
-    word1 = words[1];
-    return true;
-  };
+  // The dump is read again only when there are waits to match.
+  FillGameLockSignatureInputFrom(
+    out.game_lock_waits.empty() ? DumpGameData{} : ReadDumpGameData(dumpBase, dumpSize, modules, LoadThreads(dumpBase, dumpSize)),
+    out,
+    input);
 }
 
 }  // namespace internal
@@ -1093,18 +1099,22 @@ void ComputeSuspects(
   // main thread may be waiting for one of them (FindBlockedGameThread).
   std::vector<std::uint32_t> gameThreadTids;
   std::vector<ThreadTopFrames> gameThreadFrames;
-  if (modalProbeTid != 0u) {
+  // ADR-0021: an engine-lock deadlock between game threads needs no main
+  // thread, so a freeze whose main thread is unknown still walks them, for
+  // DetectGameLockWaits only (gameThreadTids stays for the main-thread checks).
+  std::vector<std::uint32_t> lockOnlyTids;
+  if (hangLike) {
     const auto gameExe = std::find_if(allModules.begin(), allModules.end(), [](const ModuleInfo& m) { return m.is_game_exe; });
     if (gameExe != allModules.end()) {
       for (const auto& [tid, start] : minidump::LoadThreadStartAddresses(dumpBase, dumpSize)) {
         if (tid != modalProbeTid && start >= gameExe->base && start < gameExe->end) {
-          gameThreadTids.push_back(tid);
+          (modalProbeTid != 0u ? gameThreadTids : lockOnlyTids).push_back(tid);
         }
       }
     }
   }
   // The lock owner's top frames come from the same side walk.
-  std::vector<std::uint32_t> sideTids = gameThreadTids;
+  std::vector<std::uint32_t> sideTids = modalProbeTid != 0u ? gameThreadTids : lockOnlyTids;
   const bool lockOwnerIsGameThread =
     std::find(gameThreadTids.begin(), gameThreadTids.end(), lockOwnerTid) != gameThreadTids.end();
   if (modalProbeTid != 0u && lockOwnerTid != 0u && lockOwnerTid != modalProbeTid && !lockOwnerIsGameThread) {
@@ -1262,7 +1272,7 @@ void ComputeSuspects(
     DetectEngineSpin(
       dumpBase, dumpSize, allModules, threads, modalProbeTid, mainThreadFrames, gameThreadFrames, lockOwnerFrames, out);
   }
-  if (modalProbeTid != 0u && !out.crash_logger_thread_dump_deadlock.detected) {
+  if (hangLike && !out.crash_logger_thread_dump_deadlock.detected) {
     DetectGameLockWaits(
       dumpBase, dumpSize, allModules, threads, modalProbeTid, mainThreadFrames, gameThreadFrames, opt, out);
   }

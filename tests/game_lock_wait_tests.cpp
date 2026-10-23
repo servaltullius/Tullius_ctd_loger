@@ -177,7 +177,9 @@ ModalStackFrame Exe()
 }
 
 // A game thread sleeping in the engine's lock wait: NtDelayExecution,
-// RtlDelayExecution, SleepEx, then game frames (offsets given).
+// RtlDelayExecution, SleepEx, then game frames (offsets given). With a
+// caller below the lock function, a last stack slot holds the return address
+// into it (the end of the lock function's frame), after the given roots.
 GameLockThreadInput Sleeper(
   std::uint32_t tid,
   std::vector<std::uint64_t> exeFrames,
@@ -189,10 +191,15 @@ GameLockThreadInput Sleeper(
     System(L"ntdll.dll", L"RtlDelayExecution", 0x34), System(L"KERNELBASE.dll", L"SleepEx", 0x91) };
   input.frames = { { L"ntdll.dll", 0x9D1D24 }, { L"ntdll.dll", 0x9A1234 }, { L"KERNELBASE.dll", 0x2E40F } };
   for (const auto offset : exeFrames) {
-    input.top_frames.push_back(Exe());
+    auto frame = Exe();
+    frame.pc = kBase + offset;
+    input.top_frames.push_back(frame);
     input.frames.push_back(GameFrameRef{ L"SkyrimSE.exe", offset });
   }
   input.roots = std::move(roots);
+  if (exeFrames.size() >= 2u) {
+    input.roots.emplace_back(L"RSP+3F8", kBase + exeFrames[1]);
+  }
   return input;
 }
 
@@ -272,6 +279,31 @@ void TestAbbaCycle()
   Require(skydiag::dump_tool::JoinThreadIds(skydiag::dump_tool::EngineLockDeadlockThreads(deadlock)) == L"5096, 18456",
     "Its threads");
   Require(skydiag::dump_tool::IsReportedGameLockWait(waits[2], deadlock), "A waiter with a lock is reported");
+}
+
+// Only the lock function's own frame is read: a value further up the stack
+// (a caller's stale pointer to a lock it let go, now held by another waiter)
+// adds no wait, and without the frame's end only the registers are read.
+void TestOnlyTheLockFunctionsFrame()
+{
+  Memory memory;
+  memory.words = { { kLockA, { 5096u, 1u } }, { kLockB, { 18456u, 1u } } };
+  auto a = Sleeper(5096, { 0x132C5A, 0x6D9750 }, { { L"RSP+88", kLockB } });
+  a.roots.emplace_back(L"RSP+400", kLockB);  // beyond the frame end: ignored either way
+  auto b = Sleeper(18456, { 0x132C5A, 0x296C3D }, {});
+  b.roots.emplace_back(L"RSP+400", kLockA);  // a caller's stale pointer
+  auto waits = FindGameLockWaits({ a, b }, Image(), memory, kDumpTids);
+  Require(waits.size() == 2u && waits[0].candidates.size() == 1u && waits[1].candidates.empty(),
+    "A value above the lock function's frame is no wait");
+  Require(FindEngineLockCycle(waits).empty(), "No cycle from a caller's stale pointer");
+
+  // No slot with the return address into the caller: registers only.
+  auto noEnd = Sleeper(18456, { 0x132C5A }, { { L"RSP+40", kLockA } });
+  noEnd.roots.emplace_back(L"RBX", kLockA);
+  noEnd.roots.insert(noEnd.roots.begin(), { L"R12", kLockA });
+  waits = FindGameLockWaits({ noEnd }, Image(), memory, kDumpTids);
+  Require(waits.size() == 1u && waits[0].candidates.size() == 1u && waits[0].candidates[0].location == L"R12",
+    "Without the frame end, registers only");
 }
 
 void TestNoCycle()
@@ -390,6 +422,7 @@ void TestThreeThreadCycleAndDeterminism()
 int main()
 {
   try {
+    TestOnlyTheLockFunctionsFrame();
     TestWritableSections();
     TestSelectWindows();
     TestDecodeLocks();
