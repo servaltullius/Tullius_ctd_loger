@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -28,7 +30,11 @@ def _dotnet_arg_path(path: Path) -> str:
 
 
 def _run_harness(summary_name: str, mode: str) -> str:
-    summary_path = DATA_DIR / summary_name
+    return _run_harness_on(DATA_DIR / summary_name, mode)
+
+
+def _run_harness_on(summary_path: Path, mode: str) -> str:
+    summary_name = summary_path.name
     completed = subprocess.run(
         [
             "dotnet",
@@ -203,6 +209,35 @@ def test_summary_without_quick_answer_keeps_its_share_texts() -> None:
         assert "Quick answer" not in actual, actual
 
 
+def test_recommendation_classes_decide_the_sections() -> None:
+    # ADR-0018: the analyzer's recommendation_classes place each line, whatever
+    # its text tag; a group this viewer does not know falls back to the text,
+    # and the next action treats an actionable_candidate kind as candidate-level.
+    actual = _run_harness("recommendation_classes_summary.json", "groups")
+    assert actual == (
+        "immediate: Disable Foo.dll and retest.\n"
+        "immediate: Look at the load order.\n"
+        "verify: Read the linked article first.\n"
+        "recapture: ExceptionCode=0xC0000005.\n"
+        "next: Update or isolate Foo.dll first\n"
+    ), actual
+
+    # Without recommendation_classes (older analyzers) the text tags decide.
+    summary = json.loads((DATA_DIR / "recommendation_classes_summary.json").read_text(encoding="utf-8"))
+    del summary["recommendation_classes"]
+    with tempfile.TemporaryDirectory() as tmp:
+        older = Path(tmp) / "older_summary.json"
+        older.write_text(json.dumps(summary), encoding="utf-8")
+        actual = _run_harness_on(older, "groups")
+    assert actual == (
+        "immediate: Read the linked article first.\n"
+        "immediate: Look at the load order.\n"
+        "verify: Disable Foo.dll and retest.\n"
+        "verify: ExceptionCode=0xC0000005.\n"
+        "next: Disable Foo.dll and retest.\n"
+    ), actual
+
+
 def test_cleared_summary_produces_no_share_text() -> None:
     actual = _run_harness("frame_first_summary.json", "cleared")
     assert actual == "", actual
@@ -228,5 +263,6 @@ if __name__ == "__main__":
     test_gpu_wait_hang_follows_report_next_action()
     test_quick_answer_leads_the_share_texts()
     test_summary_without_quick_answer_keeps_its_share_texts()
+    test_recommendation_classes_decide_the_sections()
     test_cleared_summary_produces_no_share_text()
     print("share_text_fixture_tests: OK")

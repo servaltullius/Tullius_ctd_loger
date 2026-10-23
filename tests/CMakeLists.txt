@@ -1121,6 +1121,20 @@ target_include_directories(skydiag_next_action_tests PRIVATE
 )
 add_test(NAME skydiag_next_action_tests COMMAND skydiag_next_action_tests)
 
+# The viewer section of each recommendation (ADR-0018), and every [tag] the
+# analyzer and its data files write is classified or known to stay in verify.
+add_executable(skydiag_recommendation_class_tests
+  recommendation_class_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/RecommendationClass.cpp"
+)
+target_include_directories(skydiag_recommendation_class_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_recommendation_class_tests COMMAND skydiag_recommendation_class_tests)
+set_tests_properties(skydiag_recommendation_class_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
 # The quick answer block format (header-only, portable).
 add_executable(skydiag_quick_answer_format_tests
   quick_answer_format_tests.cpp

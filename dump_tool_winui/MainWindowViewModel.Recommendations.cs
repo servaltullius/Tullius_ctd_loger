@@ -13,11 +13,11 @@ internal sealed partial class MainWindowViewModel
         {
             Recommendations.Add(T("No recommendation text was generated.", "권장 조치 문구가 생성되지 않았습니다."));
         }
-        PopulateRecommendationGroups();
+        PopulateRecommendationGroups(summary.RecommendationClasses);
         QuickActionsValue = BuildNextActionSummary(summary);
     }
 
-    private void PopulateRecommendationGroups()
+    private void PopulateRecommendationGroups(IReadOnlyList<RecommendationClassItem> classes)
     {
         RecommendationGroups.Clear();
         ImmediateRecommendations.Clear();
@@ -28,25 +28,26 @@ internal sealed partial class MainWindowViewModel
         var verification = new List<string>();
         var recapture = new List<string>();
 
-        foreach (var recommendation in Recommendations)
+        for (var i = 0; i < Recommendations.Count; i++)
         {
+            var recommendation = Recommendations[i];
             var plain = StripRecommendationTag(recommendation);
             if (string.IsNullOrWhiteSpace(plain))
             {
                 continue;
             }
 
-            if (IsRecaptureRecommendation(recommendation))
+            switch (ResolveRecommendationGroup(recommendation, i < classes.Count ? classes[i] : null))
             {
-                recapture.Add(plain);
-            }
-            else if (IsImmediateActionRecommendation(recommendation))
-            {
-                immediate.Add(plain);
-            }
-            else
-            {
-                verification.Add(plain);
+                case RecommendationGroupRecapture:
+                    recapture.Add(plain);
+                    break;
+                case RecommendationGroupImmediate:
+                    immediate.Add(plain);
+                    break;
+                default:
+                    verification.Add(plain);
+                    break;
             }
         }
 
@@ -109,6 +110,30 @@ internal sealed partial class MainWindowViewModel
             : string.Join(" | ", parts);
     }
 
+    private const string RecommendationGroupImmediate = "immediate";
+    private const string RecommendationGroupVerify = "verify";
+    private const string RecommendationGroupRecapture = "recapture";
+
+    // The analyzer's recommendation_classes decide the group (ADR-0018).
+    // Summaries written before it, or a group this viewer does not know, fall
+    // back to matching the English and Korean tags and wording of the text.
+    private static string ResolveRecommendationGroup(string recommendation, RecommendationClassItem? recommendationClass)
+    {
+        var group = recommendationClass?.Group;
+        if (group is RecommendationGroupImmediate or RecommendationGroupVerify or RecommendationGroupRecapture)
+        {
+            return group;
+        }
+
+        if (IsRecaptureRecommendation(recommendation))
+        {
+            return RecommendationGroupRecapture;
+        }
+        return IsImmediateActionRecommendation(recommendation)
+            ? RecommendationGroupImmediate
+            : RecommendationGroupVerify;
+    }
+
     private IReadOnlyList<RecommendationGroupItem> BuildRecommendationGroups(
         IReadOnlyList<string> immediate,
         IReadOnlyList<string> verification,
@@ -142,7 +167,7 @@ internal sealed partial class MainWindowViewModel
             summary.NextActionIndex < summary.Recommendations.Count)
         {
             var chosen = summary.Recommendations[summary.NextActionIndex];
-            if (!(summary.ActionableCandidates.Count > 0 && IsCandidateLevelRecommendation(chosen)) &&
+            if (!(summary.ActionableCandidates.Count > 0 && IsCandidateLevelRecommendation(summary, summary.NextActionIndex)) &&
                 !string.IsNullOrWhiteSpace(chosen))
             {
                 return StripRecommendationTag(chosen);
@@ -216,6 +241,22 @@ internal sealed partial class MainWindowViewModel
     }
 
     // Module-triage lines about the same candidate the viewer names above.
+    private static readonly HashSet<string> CandidateLevelKinds = new(StringComparer.Ordinal)
+    {
+        "actionable_candidate",
+        "top_suspect",
+        "synchronization_stall",
+        "crash_logger_frame",
+    };
+
+    private static bool IsCandidateLevelRecommendation(AnalysisSummary summary, int index)
+    {
+        return index < summary.RecommendationClasses.Count
+            ? CandidateLevelKinds.Contains(summary.RecommendationClasses[index].Kind)
+            : IsCandidateLevelRecommendation(summary.Recommendations[index]);
+    }
+
+    // Older summaries without recommendation_classes.
     private static bool IsCandidateLevelRecommendation(string recommendation)
     {
         return recommendation.StartsWith("[Actionable candidate]", StringComparison.OrdinalIgnoreCase) ||

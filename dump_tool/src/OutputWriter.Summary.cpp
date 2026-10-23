@@ -5,6 +5,7 @@
 #include "MemorySnapshot.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
+#include "RecommendationClass.h"
 #include "Utf.h"
 #include "WctTypes.h"
 
@@ -806,8 +807,16 @@ nlohmann::json BuildSummaryJson(
     });
   }
   summary["recommendations"] = nlohmann::json::array();
+  // recommendation_classes[i] is the viewer section and tag id of
+  // recommendations[i] (ADR-0018).
+  summary["recommendation_classes"] = nlohmann::json::array();
   for (const auto& s : r.recommendations) {
     summary["recommendations"].push_back(WideToUtf8(s));
+    const auto cls = ClassifyRecommendation(s);
+    summary["recommendation_classes"].push_back({
+      { "group", std::string(cls.group) },
+      { "kind", std::string(cls.kind) },
+    });
   }
   // Index into "recommendations" of the report's NextAction; -1 when there is none.
   const auto nextAction = SelectNextActionIndex(r.recommendations);
