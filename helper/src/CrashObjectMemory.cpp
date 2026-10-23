@@ -198,6 +198,11 @@ std::vector<ExtraDumpMemory> CollectObjectMemory(
 
 }  // namespace
 
+bool IsReadableRegion(const MEMORY_BASIC_INFORMATION& info)
+{
+  return ReadableRegion(info);
+}
+
 std::vector<ExtraDumpMemory> MergeExtraDumpMemory(std::vector<ExtraDumpMemory> ranges)
 {
   std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) { return a.base < b.base; });

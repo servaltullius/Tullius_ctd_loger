@@ -622,7 +622,10 @@ bool WriteDumpWithStreams(
     effectiveProfile.captureKind == CaptureKind::Manual;
   if (!isCrash && snapshotKind && !isProcessSnapshot && !effectiveProfile.includeFullMemory) {
     const auto mainTid = InferMainThreadIdFromSnapshot(shmSnapshot, shmSnapshotBytes);
-    hangObjects.emplace(process, internal::SelectHangObjectThreads(process, mainTid, wctJsonUtf8));
+    auto gameThreads = internal::GameThreadIds(process);
+    hangObjects.emplace(process, internal::SelectHangObjectThreads(mainTid, wctJsonUtf8, gameThreads));
+    // ADR-0021: the engine-lock windows of game threads waiting in a delay.
+    hangObjects->EnableGameLocks(std::move(gameThreads), internal::GameDelayStubAddress(process));
     callbackContext.hangObjects = &*hangObjects;
   }
   callbackContext.isProcessSnapshot = isProcessSnapshot;

@@ -43,6 +43,14 @@ inline void LogDumpObjectMemory(const std::filesystem::path& outBase, const skyd
     L"Object memory: threads=" + std::to_wstring(stats.threads_read) + L"/" + std::to_wstring(stats.threads_selected) +
       L" ranges=" + std::to_wstring(stats.ranges) + L" bytes=" + std::to_wstring(stats.bytes) +
       L" time_us=" + std::to_wstring(stats.elapsed_us) + (stats.budget_reached ? L" (budget reached)" : L""));
+  // ADR-0021: the engine-lock windows (only when the game's delay stub matched ours).
+  if (stats.lock_enabled) {
+    AppendLogLine(outBase,
+      L"Lock memory: threads=" + std::to_wstring(stats.lock_threads) + L" pointers=" +
+        std::to_wstring(stats.lock_pointers) + L" ranges=" + std::to_wstring(stats.lock_ranges) + L" bytes=" +
+        std::to_wstring(stats.lock_bytes) + L" time_us=" + std::to_wstring(stats.lock_elapsed_us) +
+        (stats.lock_budget_reached ? L" (budget reached)" : L""));
+  }
 }
 
 // What the plugin scan needs from the live game process. The exe path and the

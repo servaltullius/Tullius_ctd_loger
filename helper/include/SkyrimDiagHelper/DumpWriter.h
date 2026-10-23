@@ -24,6 +24,16 @@ struct DumpObjectMemoryStats
   std::uint64_t bytes = 0;
   std::uint32_t elapsed_us = 0;
   bool budget_reached = false;  // the byte or time budget stopped it early
+
+  // ADR-0021: windows of the game executable's writable data around the
+  // values of game threads waiting in a delay (where engine locks live).
+  bool lock_enabled = false;        // the game's delay stub was found
+  std::uint32_t lock_threads = 0;   // game threads found waiting in a delay
+  std::uint32_t lock_pointers = 0;  // their values that pointed into writable data
+  std::uint32_t lock_ranges = 0;    // windows kept (plus the image header)
+  std::uint64_t lock_bytes = 0;
+  std::uint32_t lock_elapsed_us = 0;
+  bool lock_budget_reached = false;
 };
 
 bool WriteDumpWithStreams(
