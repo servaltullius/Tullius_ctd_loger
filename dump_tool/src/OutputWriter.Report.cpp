@@ -604,7 +604,9 @@ std::string BuildReportText(
       rpt << (r.mo2_profile_name.empty() ? "" : " (" + WideToUtf8(r.mo2_profile_name) + ")") << "\n";
     }
     for (const auto& rr : r.resources) {
-      rpt << "- t_ms=" << rr.t_ms << " tid=" << rr.tid << " [" << WideToUtf8(rr.kind) << "] "
+      char time[32]{};
+      std::snprintf(time, sizeof(time), "%.0f", rr.t_ms);  // never scientific notation (2.91565e+06)
+      rpt << "- t_ms=" << time << " tid=" << rr.tid << " [" << WideToUtf8(rr.kind) << "] "
           << WideToUtf8(MaybeRedactPath(rr.path, redactPaths));
       if (!rr.providers.empty()) {
         rpt << " providers=" << WideToUtf8(JoinList(rr.providers, 10, L", "));
