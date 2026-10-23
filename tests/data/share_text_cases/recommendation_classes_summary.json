@@ -1,0 +1,55 @@
+{
+  "summary_sentence": "Synthetic crash whose recommendation_classes disagree with the text tags.",
+  "crash_bucket_key": "SYNTH-recommendation-classes",
+  "next_action_index": 0,
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false
+  },
+  "exception": {
+    "module_plus_offset": "Foo.dll+0x10",
+    "inferred_mod_name": "Foo"
+  },
+  "suspects": [],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Hint] Disable Foo.dll and retest.",
+    "[Known cause] Read the linked article first.",
+    "[Basics] ExceptionCode=0xC0000005.",
+    "[Check] Look at the load order."
+  ],
+  "recommendation_classes": [
+    { "group": "immediate", "kind": "actionable_candidate" },
+    { "group": "verify", "kind": "" },
+    { "group": "recapture", "kind": "" },
+    { "group": "a_later_group", "kind": "" }
+  ],
+  "actionable_candidates": [
+    {
+      "status_id": "cross_validated",
+      "confidence": "High",
+      "display_name": "Foo.dll",
+      "primary_identifier": "Foo.dll",
+      "secondary_label": "",
+      "plugin_name": "",
+      "mod_name": "",
+      "module_filename": "Foo.dll",
+      "explanation": "Synthetic candidate.",
+      "family_count": 2,
+      "score": 10,
+      "cross_validated": true,
+      "has_conflict": false,
+      "supporting_families": [
+        "actionable_stack",
+        "history_repeat"
+      ],
+      "conflicting_families": []
+    }
+  ]
+}

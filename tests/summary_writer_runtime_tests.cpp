@@ -193,6 +193,14 @@ void TestWriterOutputKeepsSchema()
     const auto summary = BuildSummaryJson(full, outBase, L"SkyrimDiag_Crash_20261019_120000_123", redact);
     ValidateSummarySchemaV2(summary);
     Require(!summary["suspects"].empty(), "full result keeps its suspect");
+    // ADR-0018: one class per recommendation, in the same order.
+    Require(minimal["recommendation_classes"].is_array() &&
+              minimal["recommendation_classes"].size() == minimal["recommendations"].size(),
+      "recommendation_classes follows recommendations");
+    Require(summary["recommendation_classes"].size() == summary["recommendations"].size() &&
+              summary["recommendation_classes"][0]["group"] == "immediate" &&
+              summary["recommendation_classes"][0]["kind"] == "check",
+      "a [Check] line is an immediate action");
     Require(summary["privacy"]["path_redaction_applied"].get<bool>() == redact, "privacy flag");
     Require(!BuildReportText(full, summary, redact).empty(), "report text");
   }
