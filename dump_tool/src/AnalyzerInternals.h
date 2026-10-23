@@ -22,6 +22,14 @@ class AddressResolver;
 
 namespace skydiag::dump_tool::internal {
 
+// The Crash Logger SKSE plugin's own DLL (CrashLogger.dll, or CrashLoggerSSE.dll
+// in older builds), by file name.
+inline bool IsCrashLoggerModuleName(std::wstring_view filename)
+{
+  const auto lower = minidump::WideLower(filename);
+  return lower == L"crashlogger.dll" || lower == L"crashloggersse.dll";
+}
+
 std::wstring EventTypeName(std::uint16_t t);
 
 std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d);

@@ -5,8 +5,9 @@ namespace SkyrimDiagDumpToolWinUI;
 internal sealed partial class MainWindowViewModel
 {
     // The quick answer as the report shows it: the headline with its
-    // likelihood, then "What to try" and, when the lead is not certain,
-    // "Why not certain". Empty for summaries written before it existed.
+    // likelihood, then "What to try", "Why not certain" when the lead is not
+    // certain, and "How it crashed" when the faulting instruction was decoded.
+    // Empty for summaries written before it existed.
     internal List<string> BuildQuickAnswerLines(AnalysisSummary summary)
     {
         var lines = new List<string>();
@@ -17,16 +18,34 @@ internal sealed partial class MainWindowViewModel
         }
 
         lines.Add(quickAnswer.HeadlineLine);
-        if (!string.IsNullOrWhiteSpace(quickAnswer.Action))
+        foreach (var line in new[]
+                 {
+                     QuickAnswerActionLine(quickAnswer),
+                     QuickAnswerWhyLine(quickAnswer),
+                     QuickAnswerHowLine(quickAnswer),
+                 })
         {
-            lines.Add(T("What to try: ", "해볼 일: ") + quickAnswer.Action);
-        }
-        if (!string.IsNullOrWhiteSpace(quickAnswer.WhyNotCertain))
-        {
-            lines.Add(T("Why not certain: ", "확실하지 않은 이유: ") + quickAnswer.WhyNotCertain);
+            if (!string.IsNullOrEmpty(line))
+            {
+                lines.Add(line);
+            }
         }
         return lines;
     }
+
+    // Each quick answer line with its label; empty when the answer has none.
+    private string QuickAnswerActionLine(QuickAnswerItem quickAnswer) =>
+        string.IsNullOrWhiteSpace(quickAnswer.Action) ? string.Empty : T("What to try: ", "해볼 일: ") + quickAnswer.Action;
+
+    private string QuickAnswerWhyLine(QuickAnswerItem quickAnswer) =>
+        string.IsNullOrWhiteSpace(quickAnswer.WhyNotCertain)
+            ? string.Empty
+            : T("Why not certain: ", "확실하지 않은 이유: ") + quickAnswer.WhyNotCertain;
+
+    private string QuickAnswerHowLine(QuickAnswerItem quickAnswer) =>
+        string.IsNullOrWhiteSpace(quickAnswer.HowItCrashed)
+            ? string.Empty
+            : T("How it crashed: ", "어떻게 튕겼나: ") + quickAnswer.HowItCrashed;
 
     public string? BuildSummaryClipboardText()
     {

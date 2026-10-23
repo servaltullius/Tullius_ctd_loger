@@ -812,7 +812,7 @@ void TestSummaryAndReportStartWithIt()
     Require(summary.contains("quick_answer") && summary["quick_answer"].is_object(), "summary JSON field");
     const auto& qa = summary["quick_answer"];
     for (const char* key : { "kind", "case", "suspect_mod", "suspect_file", "likelihood", "likelihood_text", "headline",
-                             "action", "why_not_certain" }) {
+                             "action", "why_not_certain", "how_it_crashed" }) {
       Require(qa.contains(key) && qa[key].is_string(), key);
     }
     Require(qa["suspect_mod"].get<std::string>() == "Example Mod", "the mod in the JSON");
@@ -842,10 +842,11 @@ void TestSummaryAndReportStartWithIt()
   Require(manual.quick_answer.case_id == "manual_snapshot", "manual snapshot end to end");
 }
 
-// ADR-0018, in the shape of the 2026-09-18 crash: "mov rbx, [rax+0x10]" in
+// ADR-0019, in the shape of the 2026-09-18 crash: "mov rbx, [rax+0x10]" in
 // SkyrimUpscaler.dll with rax = 0 (read at 0x10). The evidence, the quick
-// answer's doubt line, the summary JSON and the report say what it did; the
-// lead, the candidates and the summary sentence do not change.
+// answer's how-it-crashed line, the summary JSON and the report say what it
+// did; the lead, the doubt line, the candidates and the summary sentence do
+// not change.
 void TestFaultInstructionClue()
 {
   using skydiag::dump_tool::DescribeFaultInstruction;
@@ -875,20 +876,22 @@ void TestFaultInstructionClue()
     const auto before = BuildQuickAnswer(r, lang, CrashContext(en, r.fault_module_filename));
     r.fault_instruction = decoded;
     const auto qa = BuildQuickAnswer(r, lang, CrashContext(en, r.fault_module_filename));
-    Require(!before.why_not_certain.empty() &&
-              qa.why_not_certain == before.why_not_certain + L" " + DescribeFaultInstructionPlain(decoded, en),
-      "the plain clue after the doubt");
+    Require(before.how_it_crashed.empty() && qa.how_it_crashed == DescribeFaultInstructionPlain(decoded, en) &&
+              !qa.how_it_crashed.empty(),
+      "the plain clue on its own line");
     Require(qa.case_id == before.case_id && qa.likelihood == before.likelihood && qa.headline == before.headline &&
-              qa.action == before.action && qa.suspect_mod == before.suspect_mod,
+              qa.action == before.action && qa.suspect_mod == before.suspect_mod &&
+              qa.why_not_certain == before.why_not_certain,
       "the answer is otherwise unchanged");
     RequirePlainWords(qa, "fault instruction clue");
 
-    // A likely lead has no doubt line to add it to.
+    // A likely lead has no doubt line, and still says how it crashed.
     auto likely = r;
     likely.actionable_candidates.push_back(Candidate("cross_validated", i18n::ConfidenceLevel::kHigh,
       L"SkyrimUpscaler.dll", L"SkyrimUpscalerAIOBuild16-Hotfix1", { "actionable_stack", "crash_logger_frame" }));
-    Require(BuildQuickAnswer(likely, lang, CrashContext(en, r.fault_module_filename)).why_not_certain.empty(),
-      "no doubt line when likely");
+    const auto likelyQa = BuildQuickAnswer(likely, lang, CrashContext(en, r.fault_module_filename));
+    Require(likelyQa.why_not_certain.empty() && likelyQa.how_it_crashed == qa.how_it_crashed,
+      "how it crashed without a doubt line");
 
     auto plain = crash();
     BuildEvidenceAndSummary(plain, lang);
@@ -916,7 +919,8 @@ void TestFaultInstructionClue()
     Require(fi["verdict"] == "null_pointer" && fi["access"] == "read" && fi["address"] == "0x10" &&
               fi["mnemonic"] == "mov" && fi["operand"] == "qword ptr [rax+0x10]" && fi["bytes"] == "48 8B 58 10" &&
               fi["access_size"] == 8 && fi["address_matches"] == true && fi["effective_address"] == "0x10" &&
-              fi["base_register"] == "rax" && fi["base_value"] == "0x0" && fi["index_register"] == "" &&
+              fi["base_register"] == "rax" && fi["base_value"] == "0x0" && !fi.contains("index_register") &&
+              !fi.contains("index_value") && !fi.contains("scale") &&
               fi["text"] == WideToUtf8(sentence),
       "summary JSON fault_instruction");
     Require(!summary.contains("fault_instruction") || !fi.contains("call_site"), "no call site for a data fault");
@@ -930,6 +934,11 @@ void TestFaultInstructionClue()
                         "mov qword ptr [rax+0x10] (48 8B 58 10), read 0x10, rax=0x0 -> null_pointer\n") !=
               std::string::npos,
       "the report line");
+    Require(report.find(std::string(en ? "  How it crashed: " : "  어떻게 튕겼나: ") +
+                        WideToUtf8(DescribeFaultInstructionPlain(decoded, en)) + "\n") != std::string::npos,
+      "the quick answer block's how-it-crashed line");
+    Require(summary["quick_answer"]["how_it_crashed"] == WideToUtf8(DescribeFaultInstructionPlain(decoded, en)),
+      "summary JSON how_it_crashed");
   }
 
   // Registers that do not give the address: a medium item that only states
@@ -939,8 +948,8 @@ void TestFaultInstructionClue()
   noRegisters.has_registers = false;
   unproven.fault_instruction = ExplainFaultInstruction(noRegisters, code.data(), code.size());
   const auto before = BuildQuickAnswer(crash(), i18n::Language::kEnglish, CrashContext(true, L"SkyrimUpscaler.dll"));
-  Require(BuildQuickAnswer(unproven, i18n::Language::kEnglish, CrashContext(true, L"SkyrimUpscaler.dll")).why_not_certain ==
-            before.why_not_certain,
+  const auto unprovenQa = BuildQuickAnswer(unproven, i18n::Language::kEnglish, CrashContext(true, L"SkyrimUpscaler.dll"));
+  Require(unprovenQa.why_not_certain == before.why_not_certain && unprovenQa.how_it_crashed.empty(),
     "no clue without the registers");
   BuildEvidenceAndSummary(unproven, i18n::Language::kEnglish);
   bool medium = false;

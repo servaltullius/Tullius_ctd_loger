@@ -104,6 +104,7 @@ nlohmann::json BuildSummaryJson(
       { "headline", WideToUtf8(qa.headline) },
       { "action", WideToUtf8(qa.action) },
       { "why_not_certain", WideToUtf8(qa.why_not_certain) },
+      { "how_it_crashed", WideToUtf8(qa.how_it_crashed) },
     };
   }
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
@@ -476,11 +477,16 @@ nlohmann::json BuildSummaryJson(
     };
     if (fi.address_matches) {
       j["effective_address"] = hex(fi.effective_address);
-      j["base_register"] = fi.base_register;
-      j["base_value"] = fi.base_register.empty() ? std::string{} : hex(fi.base_value);
-      j["index_register"] = fi.index_register;
-      j["index_value"] = fi.index_register.empty() ? std::string{} : hex(fi.index_value);
-      j["scale"] = fi.scale;
+      // A register the operand does not use is left out, not written empty.
+      if (!fi.base_register.empty()) {
+        j["base_register"] = fi.base_register;
+        j["base_value"] = hex(fi.base_value);
+      }
+      if (!fi.index_register.empty()) {
+        j["index_register"] = fi.index_register;
+        j["index_value"] = hex(fi.index_value);
+        j["scale"] = fi.scale;
+      }
     }
     if (!fi.call_site.empty()) {
       j["call_site"] = WideToUtf8(fi.call_site);

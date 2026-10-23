@@ -633,16 +633,12 @@ void AddFreezeObjectClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
   }
 }
 
-// ADR-0019: what the faulting instruction did, after the doubt it belongs to.
-// Never a lead: it says how the game crashed, not which mod made it.
+// ADR-0019: what the faulting instruction did, on a line of its own so it is
+// there with or without a doubt line. Never a lead: it says how the game
+// crashed, not which mod made it.
 void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
 {
-  if (answer.why_not_certain.empty()) {
-    return;
-  }
-  if (const auto clue = DescribeFaultInstructionPlain(r.fault_instruction, en); !clue.empty()) {
-    answer.why_not_certain += L" " + clue;
-  }
+  answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
 }
 
 }  // namespace

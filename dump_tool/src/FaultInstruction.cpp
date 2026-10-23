@@ -791,11 +791,14 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
   if (verdict.empty()) {
     const std::uint64_t scaledIndex = m.index >= 0 ? info.index_value * m.scale : 0u;
     const bool bigIndex = m.index >= 0 && scaledIndex >= kNullPageEnd && (0ull - scaledIndex) >= kNullPageEnd;
-    if (insn->stack_slot || m.base == kRsp) {
+    // An rsp operand with a large index is a wrong index into a local array,
+    // not a broken stack; an index with no base (a table at a fixed address)
+    // is the index's address, not a fixed one.
+    if (insn->stack_slot || (m.base == kRsp && !bigIndex)) {
       verdict = "stack";
     } else if (m.base >= 0 && info.base_value < kNullPageEnd) {
       verdict = "null_pointer";
-    } else if (bigIndex) {
+    } else if (bigIndex || (m.base < 0 && m.index >= 0)) {
       verdict = "bad_index";
     } else if (m.base >= 0) {
       verdict = "bad_pointer";
@@ -822,6 +825,12 @@ std::optional<X64Instruction> FindCallTo(
   // The call pushed the return address: at the call, rsp was 8 higher.
   X64Registers atCall = registers;
   atCall[kRsp] += 8u;
+  // The shortest call that goes there, unless a longer one ending at the same
+  // byte reads differently and also goes there (41 FF D0 is call r8, its tail
+  // FF D0 call rax): then the bytes do not say which call it was. A longer one
+  // that reads the same (a redundant REX) does not count.
+  std::optional<X64Instruction> found;
+  std::size_t foundLength = 0;
   const std::size_t longest = std::min(size, kMaxX64InstructionBytes);
   for (std::size_t length = 2; length <= longest; ++length) {
     const std::uint8_t* start = before + (size - length);
@@ -837,14 +846,20 @@ std::optional<X64Instruction> FindCallTo(
     } else if (const auto slot = X64EffectiveAddress(*insn, returnAddress - length, atCall); slot && readQword) {
       went = readQword(*slot);
     }
-    if (went && *went == target) {
-      if (outLength) {
-        *outLength = length;
-      }
-      return insn;
+    if (!went || *went != target) {
+      continue;
+    }
+    if (!found) {
+      found = insn;
+      foundLength = length;
+    } else if (FormatX64Call(*insn, returnAddress) != FormatX64Call(*found, returnAddress)) {
+      return std::nullopt;
     }
   }
-  return std::nullopt;
+  if (found && outLength) {
+    *outLength = foundLength;
+  }
+  return found;
 }
 
 namespace {
@@ -1044,8 +1059,8 @@ std::wstring DescribeFaultInstructionPlain(const FaultInstructionInfo& info, boo
               : L"이미 해제된 메모리나 망가진 포인터를 쓰다가 튕겼습니다.";
   }
   if (v == "bad_index") {
-    return en ? L"It crashed reading far outside a list or table (a wrong index), or through a broken pointer."
-              : L"목록이나 표의 범위를 크게 벗어난 위치(잘못된 인덱스)나 망가진 포인터를 쓰다가 튕겼습니다.";
+    return en ? L"It crashed using a position outside a list or table (a wrong index), or a broken pointer."
+              : L"목록이나 표의 범위를 벗어난 위치(잘못된 인덱스)나 망가진 포인터를 쓰다가 튕겼습니다.";
   }
   if (v == "noncanonical") {
     return en ? L"It crashed on a pointer that had been overwritten with other data (corrupted memory)."

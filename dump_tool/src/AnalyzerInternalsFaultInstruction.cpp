@@ -14,12 +14,6 @@ namespace {
 
 constexpr std::uint32_t kExceptionAccessViolation = 0xC0000005u;
 
-bool IsCrashLoggerModule(std::wstring_view filename)
-{
-  const auto lower = minidump::WideLower(filename);
-  return lower == L"crashlogger.dll" || lower == L"crashloggersse.dll";
-}
-
 }  // namespace
 
 FaultInstructionInfo ProbeFaultInstruction(
@@ -30,7 +24,7 @@ FaultInstructionInfo ProbeFaultInstruction(
   const AnalysisResult& out,
   const std::optional<CONTEXT>& excCtx)
 {
-  if (out.exc_code != kExceptionAccessViolation || out.exc_info.size() < 2u || IsCrashLoggerModule(out.fault_module_filename)) {
+  if (out.exc_code != kExceptionAccessViolation || out.exc_info.size() < 2u || IsCrashLoggerModuleName(out.fault_module_filename)) {
     return {};
   }
   // The dump's own memory only: a local SkyrimSE.exe has its code encrypted

@@ -182,8 +182,8 @@ def test_gpu_wait_hang_follows_report_next_action() -> None:
 
 def test_quick_answer_leads_the_share_texts() -> None:
     # Players read the first lines: right under the title come the quick
-    # answer's headline, what to try and why it is not certain; the detailed
-    # fields follow unchanged.
+    # answer's headline, what to try, why it is not certain and how it crashed;
+    # the detailed fields follow unchanged.
     community = _run_harness("quick_answer_summary.json", "community")
     assert community == _read_expected("quick_answer_community_share.expected.txt")
     lines = community.split("\n")
@@ -191,6 +191,7 @@ def test_quick_answer_leads_the_share_texts() -> None:
     assert lines[1].endswith(" — possible"), community
     assert "What to try: Disable or update Precision - Accurate Melee Collisions" in lines[2], community
     assert "Why not certain:" in lines[3], community
+    assert "How it crashed: It crashed while using an object" in lines[4], community
 
     clipboard = _run_harness("quick_answer_summary.json", "clipboard")
     assert clipboard == _read_expected("quick_answer_summary_clipboard.expected.txt")
@@ -198,8 +199,9 @@ def test_quick_answer_leads_the_share_texts() -> None:
     assert lines[1].startswith("Quick answer: The game crashed to desktop (CTD)."), clipboard
     assert lines[2].startswith("What to try: "), clipboard
     assert lines[3].startswith("Why not certain: "), clipboard
-    assert lines[5] == "Details", clipboard
-    assert lines[6].startswith("Dump: "), clipboard
+    assert lines[4].startswith("How it crashed: "), clipboard
+    assert lines[6] == "Details", clipboard
+    assert lines[7].startswith("Dump: "), clipboard
 
 
 def test_summary_without_quick_answer_keeps_its_share_texts() -> None:

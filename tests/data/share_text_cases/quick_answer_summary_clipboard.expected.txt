@@ -2,6 +2,7 @@ SkyrimDiag report
 Quick answer: The game crashed to desktop (CTD). Suspected mod: Precision - Accurate Melee Collisions (Precision.dll) — possible
 What to try: Disable or update Precision - Accurate Melee Collisions, then play again.
 Why not certain: The game crashed inside this mod, but another mod can cause a crash that shows up here.
+How it crashed: It crashed while using an object that was already gone or never created (a null pointer).
 
 Details
 Dump: quick_answer_summary.dmp

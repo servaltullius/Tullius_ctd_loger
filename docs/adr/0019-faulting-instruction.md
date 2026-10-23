@@ -21,14 +21,14 @@ Accepted
    - 예외 스트림의 컨텍스트 RIP가 예외 주소와 같을 때만 레지스터를 씁니다.
    - 명령어의 읽기/쓰기가 예외의 종류와 맞고, 레지스터로 계산한 주소가 예외 주소와 같거나 그 접근 범위 안(페이지 경계를 넘는 읽기)일 때만 레지스터 값을 말합니다. 그렇지 않으면 `address_only`: 읽기/쓰기와 주소만 말하고 레지스터와 명령어는 문장에 넣지 않습니다.
    - 일반 보호 예외(예외 주소 `0xFFFFFFFFFFFFFFFF`): 계산한 주소가 canonical이 아니면 `noncanonical`, 16바이트 정렬이 필요한 SSE에서 정렬이 안 맞으면 `misaligned`, 그 밖에는 아무것도 말하지 않습니다.
-   - 판정: `null_pointer`(기준 레지스터가 0 또는 64KB 미만), `bad_index`(기준 + 인덱스×배율에서 인덱스 몫이 64KB 이상), `bad_pointer`(기준 레지스터가 메모리가 없는 주소), `noncanonical`, `misaligned`, `fixed_address`(레지스터 없는 절대·RIP 상대 주소), `stack`(push/pop, rsp 기준), `address_only`.
+   - 판정: `null_pointer`(기준 레지스터가 0 또는 64KB 미만), `bad_index`(인덱스×배율이 64KB 이상, 또는 기준 레지스터 없이 인덱스로 고른 주소), `bad_pointer`(기준 레지스터가 메모리가 없는 주소), `noncanonical`, `misaligned`, `fixed_address`(레지스터 없는 절대·RIP 상대 주소), `stack`(push/pop, 인덱스 없는 rsp 기준; 인덱스가 크면 `bad_index`), `address_only`.
    - 명령어를 가져오다 난 예외(종류가 실행이거나, 예외 주소 자체를 읽다 남): `null_jump`(64KB 미만) / `bad_jump`. 스택 맨 위 반환 주소 바로 앞이 그 주소로 가는 call이면(`call rel32`는 대상, `call reg`는 레지스터, `call [mem]`은 덤프에서 읽은 슬롯 값으로 확인) 호출 위치(`모듈+오프셋`)와 그 명령어를 덧붙입니다.
-   - 예외가 CrashLogger.dll/CrashLoggerSSE.dll 안이면 건너뜁니다. 다른 크래시를 기록하며 메모리를 조사하다 낸 2차 예외라는 기존 해석과 같습니다.
+   - 예외가 CrashLogger.dll/CrashLoggerSSE.dll 안이면 건너뜁니다(`IsCrashLoggerModuleName`, Crash Logger 스레드 판별과 같은 이름 목록). 다른 크래시를 기록하며 메모리를 조사하다 낸 2차 예외라는 기존 해석과 같습니다.
 3. **출력 계약**
    - 근거 항목 "예외를 낸 명령어가 한 일(덤프에서 해독)" / "What the faulting instruction did (decoded from the dump)"을 "예외 파라미터 분석" 바로 뒤에 둡니다. 레지스터로 증명된 판정과 명령어 가져오기 예외는 신뢰도 높음, `address_only`는 중간입니다. 예: `SkyrimSE.exe+0x3ff101의 명령어(movups)가 [rax+0x30]에서 16바이트를 읽으려 했는데 rax가 0이었습니다. 이미 사라졌거나 만들어진 적 없는 오브젝트를 썼다는 뜻입니다(null 포인터).`
-   - 빠른 답: "확실하지 않은 이유" 뒤에 쉬운 말 한 문장을 덧붙입니다(`null_pointer`, `bad_pointer`, `bad_index`, `noncanonical`, `null_jump`, `bad_jump`만). 빠른 답 제목 줄, 해볼 일, 결론 문장, 후보와 신뢰도, 다음 조치, 시그니처, 버킷 키는 바꾸지 않습니다. 어느 모드가 원인인지가 아니라 어떻게 터졌는지만 말하기 때문입니다. 확실하지 않은 이유가 없는 빠른 답(가능성 높음)에는 넣지 않습니다.
+   - 빠른 답: 쉬운 말 한 문장을 "어떻게 튕겼나" / "How it crashed" 줄로 따로 둡니다(`quick_answer.how_it_crashed`, `null_pointer`, `bad_pointer`, `bad_index`, `noncanonical`, `null_jump`, `bad_jump`만). 확실하지 않은 이유가 없는 빠른 답(의심 모드가 없거나 가능성 높음)에도 나옵니다. 빠른 답 제목 줄, 해볼 일, 확실하지 않은 이유, 결론 문장, 후보와 신뢰도, 다음 조치, 시그니처, 버킷 키는 바꾸지 않습니다. 어느 모드가 원인인지가 아니라 어떻게 터졌는지만 말하기 때문입니다. 뷰어 카드와 요약 복사·공유 텍스트는 확실하지 않은 이유 다음에 이 줄을 보여 줍니다.
    - 리포트: `Module+Offset:` 다음 줄에 `FaultInstruction:` / `예외 명령어:` (`mov qword ptr [rax+0x10] (48 8B 58 10), read 0x10, rax=0x0 -> null_pointer`, 호출 위치가 있으면 덧붙임).
-   - 요약 JSON `fault_instruction`(추가 필드, 판정이 있을 때만): `verdict`, `access`(`read`/`write`/`execute`), `address`, `mnemonic`, `operand`, `bytes`, `access_size`, `address_matches`, `text`(근거 문장과 같음). `address_matches`일 때 `effective_address`, `base_register`, `base_value`, `index_register`, `index_value`, `scale`. 호출 위치가 있으면 `call_site`, `call_instruction`. 주소와 값은 `0x` 대문자 16진 문자열입니다.
+   - 요약 JSON `fault_instruction`(추가 필드, 판정이 있을 때만): `verdict`, `access`(`read`/`write`/`execute`), `address`, `mnemonic`, `operand`, `bytes`, `access_size`, `address_matches`, `text`(근거 문장과 같음). `address_matches`일 때 `effective_address`, 기준 레지스터가 있으면 `base_register`·`base_value`, 인덱스가 있으면 `index_register`·`index_value`·`scale`(없는 쪽은 키를 쓰지 않음). 호출 위치가 있으면 `call_site`, `call_instruction`. 주소와 값은 `0x` 대문자 16진 문자열입니다.
    - 메모리 내용은 명령어 자신의 바이트(최대 15바이트) 말고는 출력하지 않습니다. 경로는 없습니다.
    - 정상 종료로 격리된 덤프에서는 비웁니다.
 
@@ -45,6 +45,6 @@ Accepted
 - 예외 주소가 모듈 밖인 실행 예외는 덤프에 반환 주소가 남아 있을 때만 호출 위치가 나옵니다(꼬리 호출 `jmp`는 남기지 않음).
 
 ## Verification
-- `skydiag_fault_instruction_tests`(Linux 포함): 위 형식마다 합성 바이트열의 해독(크기, 읽기/쓰기, 피연산자 문자열, SIB·r12/r13·REX.X·disp32·RIP 상대 주소·즉값 길이), 거부 형식(VEX/EVEX, 67, GS, 0F 38, MMX, popcnt, rep, 잘린 바이트), 판정마다의 교차 검증과 영어·한국어 문장(레지스터가 0인 경우 전체 문장 일치), `address_only`에서 레지스터를 말하지 않음, 호출 위치 찾기(`call [rax+0x18]`, `call [rsp+8]`의 rsp 보정, `call reg`, `call rel32`)
+- `skydiag_fault_instruction_tests`(Linux 포함): 위 형식마다 합성 바이트열의 해독(크기, 읽기/쓰기, 피연산자 문자열, SIB·r12/r13·REX.X·disp32·RIP 상대 주소·즉값 길이), 거부 형식(VEX/EVEX, 67, GS, 0F 38, MMX, popcnt, rep, 잘린 바이트), 판정마다의 교차 검증과 영어·한국어 문장(레지스터가 0인 경우 전체 문장 일치), `address_only`에서 레지스터를 말하지 않음, 호출 위치 찾기(`call [rax+0x18]`, `call [rsp+8]`의 rsp 보정, `call reg`, `call rel32`, 긴 호출 명령어의 꼬리가 짧은 호출로 보이는 경우)
 - `skydiag_quick_answer_tests`: 근거 항목의 위치·신뢰도·문장, 빠른 답의 덧붙인 문장과 나머지 불변, 요약 JSON `fault_instruction`, 리포트 줄, 레지스터 없는 경우
 - 보관 덤프 19건을 변경 전후로 나란히 재분석

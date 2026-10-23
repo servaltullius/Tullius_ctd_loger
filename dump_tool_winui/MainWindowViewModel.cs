@@ -47,6 +47,7 @@ internal sealed partial class MainWindowViewModel
     public string QuickAnswerHeadline { get; private set; } = string.Empty;
     public string QuickAnswerAction { get; private set; } = string.Empty;
     public string QuickAnswerWhy { get; private set; } = string.Empty;
+    public string QuickAnswerHow { get; private set; } = string.Empty;
     public string BucketText { get; private set; } = string.Empty;
     public string ModuleText { get; private set; } = string.Empty;
     public string ModNameText { get; private set; } = string.Empty;
@@ -91,6 +92,7 @@ internal sealed partial class MainWindowViewModel
         QuickAnswerHeadline = string.Empty;
         QuickAnswerAction = string.Empty;
         QuickAnswerWhy = string.Empty;
+        QuickAnswerHow = string.Empty;
         Suspects.Clear();
         Recommendations.Clear();
         RecommendationGroups.Clear();
@@ -106,11 +108,14 @@ internal sealed partial class MainWindowViewModel
 
     private void PopulateHeaderFields(AnalysisSummary summary)
     {
-        var quickAnswerLines = BuildQuickAnswerLines(summary);
-        HasQuickAnswer = quickAnswerLines.Count > 0;
-        QuickAnswerHeadline = quickAnswerLines.Count > 0 ? quickAnswerLines[0] : string.Empty;
-        QuickAnswerAction = quickAnswerLines.Count > 1 ? quickAnswerLines[1] : string.Empty;
-        QuickAnswerWhy = quickAnswerLines.Count > 2 ? quickAnswerLines[2] : string.Empty;
+        // Each card line from its own field: an answer without an action or a
+        // doubt line must not shift the next line into the wrong text block.
+        var quickAnswer = summary.QuickAnswer;
+        HasQuickAnswer = quickAnswer is not null;
+        QuickAnswerHeadline = quickAnswer?.HeadlineLine ?? string.Empty;
+        QuickAnswerAction = quickAnswer is null ? string.Empty : QuickAnswerActionLine(quickAnswer);
+        QuickAnswerWhy = quickAnswer is null ? string.Empty : QuickAnswerWhyLine(quickAnswer);
+        QuickAnswerHow = quickAnswer is null ? string.Empty : QuickAnswerHowLine(quickAnswer);
 
         SummarySentence = string.IsNullOrWhiteSpace(summary.SummarySentence)
             ? T("No summary sentence produced.", "요약 문장이 생성되지 않았습니다.")

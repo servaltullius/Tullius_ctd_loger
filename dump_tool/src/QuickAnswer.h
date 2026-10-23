@@ -27,6 +27,9 @@ struct QuickAnswer
   std::wstring headline;         // what happened and who is suspected
   std::wstring action;           // one thing to try
   std::wstring why_not_certain;  // empty when likelihood is high or nothing is named
+  // ADR-0019: what the faulting instruction did, in everyday words; empty
+  // when it was not decoded. It says how the game crashed, never who did it.
+  std::wstring how_it_crashed;
 };
 
 // The headline with its likelihood: "... — 가능성 중간" / "... — possible".
@@ -38,7 +41,7 @@ inline std::wstring QuickAnswerHeadlineLine(const QuickAnswer& answer)
   return answer.headline + L" — " + answer.likelihood_text;
 }
 
-// The report's first block: a title and up to three indented lines.
+// The report's first block: a title and up to four indented lines.
 inline std::vector<std::wstring> QuickAnswerReportLines(const QuickAnswer& answer, bool en)
 {
   std::vector<std::wstring> lines;
@@ -52,6 +55,9 @@ inline std::vector<std::wstring> QuickAnswerReportLines(const QuickAnswer& answe
   }
   if (!answer.why_not_certain.empty()) {
     lines.push_back((en ? L"  Why not certain: " : L"  확실하지 않은 이유: ") + answer.why_not_certain);
+  }
+  if (!answer.how_it_crashed.empty()) {
+    lines.push_back((en ? L"  How it crashed: " : L"  어떻게 튕겼나: ") + answer.how_it_crashed);
   }
   return lines;
 }

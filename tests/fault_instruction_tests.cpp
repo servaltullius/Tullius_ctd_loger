@@ -393,6 +393,30 @@ void TestOtherVerdicts()
   info = Explain(Fault(kAccessViolationWrite, 0x2FF8, regs), { 0x53 });
   assert(info.verdict == "stack");
   assert(DescribeFaultInstruction(info, L"", true).find(L"the stack pointer was broken") != std::wstring::npos);
+  // An rsp operand with no index on a broken stack pointer.
+  info = Explain(Fault(kAccessViolationRead, 0x3020, regs), { 0x48, 0x8B, 0x44, 0x24, 0x20 });
+  assert(info.verdict == "stack");
+
+  // A local array read with a wild index is the index, not the stack:
+  // mov rax,[rsp+rcx*8+0x20].
+  regs[kRsp] = 0x7FF000005000ull;
+  regs[kRcx] = 0x10000000ull;
+  info = Explain(Fault(kAccessViolationRead, 0x7FF080005020ull, regs), { 0x48, 0x8B, 0x44, 0xCC, 0x20 });
+  assert(info.verdict == "bad_index" && info.base_register == "rsp" && info.index_register == "rcx");
+
+  // A table at a fixed address chosen by an index (mov eax,[rcx*4+0x1000000])
+  // is the index's address, not a fixed one, even with a small index.
+  regs[kRcx] = 0x20;
+  info = Explain(Fault(kAccessViolationRead, 0x1000080ull, regs), { 0x8B, 0x04, 0x8D, 0x00, 0x00, 0x00, 0x01 });
+  assert(info.verdict == "bad_index" && info.base_register.empty() && info.index_register == "rcx");
+  text = DescribeFaultInstruction(info, L"", true);
+  assert(text.find(L"the address is rcx (0x20) × 4 + 0x1000000") != std::wstring::npos);
+  assert(text.find(L"fixed address") == std::wstring::npos);
+  // The everyday sentence fits a write as well as a read.
+  info = Explain(Fault(kAccessViolationWrite, 0x1000080ull, regs), { 0x89, 0x04, 0x8D, 0x00, 0x00, 0x00, 0x01 });
+  assert(info.verdict == "bad_index" && info.access == "write");
+  assert(DescribeFaultInstructionPlain(info, true) ==
+         L"It crashed using a position outside a list or table (a wrong index), or a broken pointer.");
 
   // An 8-byte read that runs into the next page faults on that page.
   regs[kRcx] = 0x7FF012345FF8ull;
@@ -515,6 +539,23 @@ void TestFindCallTo()
   bytes = window({ 0x48, 0x8B, 0x41, 0x24 });
   assert(!FindCallTo(bytes.data(), bytes.size(), kRet, kTarget, regs, read, &length));
   assert(!FindCallTo(nullptr, 0, kRet, kTarget, regs, read, &length));
+
+  // 41 FF D0 is call r8; its tail FF D0 reads as call rax. With only r8 going
+  // there it is call r8; with both, the bytes do not say which call it was.
+  auto both = regs;
+  both[kR8] = kTarget;
+  both[kRax] = 0x1234;
+  bytes = window({ 0x41, 0xFF, 0xD0 });
+  call = FindCallTo(bytes.data(), bytes.size(), kRet, kTarget, both, read, &length);
+  assert(call && length == 3u && FormatX64Call(*call, kRet) == "call r8");
+  both[kRax] = kTarget;
+  assert(!FindCallTo(bytes.data(), bytes.size(), kRet, kTarget, both, read, &length));
+
+  // A redundant REX before a rel32 call reads the same: the shorter call.
+  bytes = window({ 0x48, 0xE8, 0x00, 0x00, 0x00, 0x00 });
+  std::memcpy(bytes.data() + bytes.size() - 4u, &rel, sizeof(rel));
+  call = FindCallTo(bytes.data(), bytes.size(), kRet, kRet + 0x100u, regs, read, &length);
+  assert(call && length == 5u && call->call_is_relative);
 }
 
 }  // namespace

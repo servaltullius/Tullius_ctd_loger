@@ -454,8 +454,7 @@ CrashLoggerThreadDumpProbe ProbeCrashLoggerThreadDump(
 
   std::vector<const ModuleInfo*> crashLogger;
   for (const auto& m : modules) {
-    const auto lower = minidump::WideLower(m.filename);
-    if ((lower == L"crashlogger.dll" || lower == L"crashloggersse.dll") && m.end > m.base) {
+    if (IsCrashLoggerModuleName(m.filename) && m.end > m.base) {
       crashLogger.push_back(&m);
     }
   }

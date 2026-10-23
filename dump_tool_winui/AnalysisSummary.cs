@@ -164,7 +164,8 @@ internal sealed class AnalysisSummary
                 ReadString(quickAnswerElement, "likelihood_text"),
                 ReadString(quickAnswerElement, "headline"),
                 ReadString(quickAnswerElement, "action"),
-                ReadString(quickAnswerElement, "why_not_certain"))
+                ReadString(quickAnswerElement, "why_not_certain"),
+                ReadString(quickAnswerElement, "how_it_crashed"))
             : null;
 
         return new AnalysisSummary
@@ -380,7 +381,9 @@ public sealed record QuickAnswerItem(
     string LikelihoodText,
     string Headline,
     string Action,
-    string WhyNotCertain)
+    string WhyNotCertain,
+    // What the faulting instruction did (ADR-0019); empty when not decoded.
+    string HowItCrashed)
 {
     // "<headline> — <likelihood>", as the report's first line shows it.
     public string HeadlineLine => string.IsNullOrWhiteSpace(LikelihoodText)
