@@ -810,6 +810,10 @@ void TestSummaryAndReportStartWithIt()
 
     const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
     Require(summary.contains("quick_answer") && summary["quick_answer"].is_object(), "summary JSON field");
+    // The viewer analyzes a summary again when its analyzer was older.
+    Require(summary.contains("analyzer_version") && summary["analyzer_version"].is_string() &&
+              summary["analyzer_version"].get<std::string>().find('.') != std::string::npos,
+      "the analyzer's product version");
     const auto& qa = summary["quick_answer"];
     for (const char* key : { "kind", "case", "suspect_mod", "suspect_file", "likelihood", "likelihood_text", "headline",
                              "action", "why_not_certain", "how_it_crashed" }) {

@@ -106,7 +106,8 @@ target_link_libraries(SkyrimDiagDumpToolCore
 target_compile_definitions(SkyrimDiagDumpToolCore
   PRIVATE
     _UNICODE
-    UNICODE)
+    UNICODE
+    SKYDIAG_ANALYZER_VERSION="${CMAKE_PROJECT_VERSION}")
 
 set_property(TARGET SkyrimDiagDumpToolCore PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 

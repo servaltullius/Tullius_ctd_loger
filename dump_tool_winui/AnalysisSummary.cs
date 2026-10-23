@@ -5,7 +5,36 @@ namespace SkyrimDiagDumpToolWinUI;
 
 internal sealed class AnalysisSummary
 {
+    // A saved summary is shown again only when the analyzer that wrote it is
+    // not older than this viewer (major.minor.patch). Older ones, and those
+    // with no analyzer_version (v0.2.70-rc1 and earlier), lack fields added
+    // since, such as the quick answer or how it crashed: analyze them again.
+    // A newer summary (opened by an older viewer) is shown as it is. RCs of
+    // one version share it, so an RC does not re-analyze another RC's
+    // summaries. Without a viewer version only the quick answer decides.
+    public bool NeedsReanalysisFor(System.Version? viewerVersion)
+    {
+        if (QuickAnswer is null)
+        {
+            return true;
+        }
+        if (viewerVersion is null)
+        {
+            return false;
+        }
+        if (!System.Version.TryParse(AnalyzerVersion, out var written))
+        {
+            return true;
+        }
+        static System.Version Release(System.Version v) =>
+            new(v.Major, v.Minor, System.Math.Max(v.Build, 0));
+        return Release(written) < Release(viewerVersion);
+    }
+
     public required string SummarySentence { get; init; }
+    // The product version of the analyzer that wrote the summary ("0.2.70");
+    // empty in summaries written by v0.2.70-rc1 and earlier.
+    public string AnalyzerVersion { get; init; } = string.Empty;
     // The plain-language answer for players; null in summaries written before it.
     public QuickAnswerItem? QuickAnswer { get; init; }
     public required string CrashBucketKey { get; init; }
@@ -171,6 +200,7 @@ internal sealed class AnalysisSummary
         return new AnalysisSummary
         {
             SummarySentence = ReadString(root, "summary_sentence"),
+            AnalyzerVersion = ReadString(root, "analyzer_version"),
             QuickAnswer = quickAnswer,
             CrashBucketKey = ReadString(root, "crash_bucket_key"),
             ModulePlusOffset = ReadString(exception, "module_plus_offset"),
