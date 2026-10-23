@@ -62,7 +62,7 @@ SKSE/Plugins/SkyrimDiagWinUI/
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
 [b]Important v0.2.69 Update Notice[/b]
-Replace the previous installation with the complete v0.2.69 zip. Do not copy only individual EXEs or DLLs: v0.2.69 changes the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+Replace the previous installation with the complete v0.2.69 zip. Do not copy only individual EXEs or DLLs: v0.2.69 changes the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. Dumps analyzed by an older version show no quick answer in the viewer until you press Analyze again (the next release re-analyzes them automatically). In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -393,7 +393,7 @@ SKSE/Plugins/SkyrimDiagWinUI/
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
 [b]v0.2.69 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.69 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.69에서 Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+기존 설치를 완전히 교체하고 v0.2.69 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.69에서 Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 분석 버튼을 다시 눌러야 빠른 답이 나옵니다(다음 릴리즈부터는 자동으로 다시 분석). MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
