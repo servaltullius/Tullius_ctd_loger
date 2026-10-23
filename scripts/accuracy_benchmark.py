@@ -213,12 +213,14 @@ def print_table(report: dict[str, Any]) -> None:
 
 # ------------------------------------------------------------------ add-case
 
-def run_analyzer(cli: list[str], dump: Path, out_dir: Path, with_crash_logger: bool) -> dict[str, Any]:
+def run_analyzer(
+    cli: list[str], dump: Path, out_dir: Path, with_crash_logger: bool, lang: str = "en"
+) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     # CreateProcess does not search the working directory for "dir/x.exe".
     program = Path(cli[0])
     cli = [str(program.resolve()) if program.is_file() else cli[0], *cli[1:]]
-    args = [*cli, str(dump), "--out-dir", str(out_dir), "--lang", "en", "--no-online-symbols"]
+    args = [*cli, str(dump), "--out-dir", str(out_dir), "--lang", lang, "--no-online-symbols"]
     if not with_crash_logger:
         args.append("--no-crash-logger")
     proc = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
