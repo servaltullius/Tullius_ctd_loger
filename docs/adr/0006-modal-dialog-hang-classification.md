@@ -63,7 +63,9 @@ stackwalk 루프는 `StackWalk64`의 첫 호출(컨텍스트 자신의 프레임
 요약 JSON의 `freeze_analysis.modal_dialog_wait`에는 다음이 기록된다.
 
 - `detected`, `window_evidence`, `stack_evidence`, `main_thread_id`
-- `wait_api`, `dialog_title`, `dialog_text`
+- `wait_api`, `dialog_title`, `dialog_text`: 사용자 프로필 폴더 이름은 항상 `<user>`로 바뀐다.
+  경로 마스킹이 켜져 있으면(기본값) 제목과 본문 안의 절대 경로도 마지막 요소만 남긴다
+  (`<redacted>\ID.h(223): ...`). 리포트, 근거, 권고, WCT 사본에 다시 적힌 대화상자 내용도 같다.
 - `caller_module_filename`, `caller_inferred_mod_name`
 - `caller_kind` (`plugin` / `skse_runtime` / `hook_framework` / `game_exe` / `none`)
 - `address_library_issue` (`plugin_incompatible` / `address_library_missing` / 빈 문자열)
