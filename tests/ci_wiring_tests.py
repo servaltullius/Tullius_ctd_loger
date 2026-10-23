@@ -624,6 +624,29 @@ def check_vcpkg_overlay_reaches_existing_build_dirs(failures: list[str]) -> None
         failures.append("CMakeLists.txt must set the triplet overlay before project()")
 
 
+def check_apt_installs_are_bounded(failures: list[str]) -> None:
+    # 2026-10-22: an unbounded apt-get in "Install fuzz dependencies" ran into
+    # the Fuzz job's limit and cancelled the v0.2.69 release run. Every apt
+    # install goes through scripts/ci_apt_install.sh (bounded attempts with
+    # retries) and has its own step timeout.
+    script = REPO_ROOT / "scripts" / "ci_apt_install.sh"
+    if not script.is_file():
+        failures.append("scripts/ci_apt_install.sh is missing")
+    else:
+        text = _read(script)
+        for needle in ("timeout ", "Acquire::Retries", "Acquire::http::Timeout", "attempts"):
+            if needle not in text:
+                failures.append(f"ci_apt_install.sh lost its bound: {needle!r}")
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = _read(path)
+        if re.search(r"\bapt-get\b", text):
+            failures.append(f"{path.name}: call scripts/ci_apt_install.sh instead of apt-get")
+        for match in re.finditer(r"^( +)- name: ([^\n]*)\n((?:\1  [^\n]*\n)*)", text, re.M):
+            body = match.group(3)
+            if "ci_apt_install.sh" in body and not re.search(r"^\s+timeout-minutes:\s*\d+", body, re.M):
+                failures.append(f"{path.name}: step {match.group(2).strip()!r} needs a step timeout-minutes")
+
+
 def main() -> int:
     failures: list[str] = []
     check_clang_tidy_is_wired(failures)
@@ -642,6 +665,7 @@ def main() -> int:
     check_vcpkg_overlay_reaches_existing_build_dirs(failures)
     check_workflows_are_pinned_and_bounded(failures)
     check_release_job_hardening(failures)
+    check_apt_installs_are_bounded(failures)
 
     if failures:
         for failure in failures:
