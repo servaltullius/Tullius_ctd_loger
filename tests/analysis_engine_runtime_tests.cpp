@@ -333,6 +333,10 @@ void TestKnownCrashSiteSignaturesRuntime()
   assert(keyboardHit && keyboardHit->id == "KEYBOARD_INVALID_KEY_INDEX_1_6_1170");
   assert(keyboardHit->fix_module == L"KeyboardInputOffsetCrashFix.dll" && !keyboardHit->fix_module_loaded);
   assert(keyboardHit->recommendations[0].find(L"Nexus mod 187246") != std::wstring::npos);
+  // The fix removes the engine bug at this site, so the quick answer leads
+  // with it (a root cause, like the AI pathing freeze).
+  assert(keyboardHit->scope == "root_cause" && keyboardHit->headline == L"It matches a known keyboard input crash.");
+  assert(keyboardHit->recommendations[0].rfind(L"[Known cause] Install \"Keyboard Offset Crash Fix SE-AE\"", 0) == 0);
   keyboard.loaded_modules = { L"SkyrimSE.exe", L"keyboardinputoffsetcrashfix.dll" };
   const auto keyboardFixed = db.Match(keyboard, /*useKorean=*/true);
   assert(keyboardFixed && keyboardFixed->fix_module_loaded);
@@ -348,7 +352,7 @@ void TestKnownCrashSiteSignaturesRuntime()
   solver.fault_module = L"SkyrimSE.exe";
   solver.fault_offset = 0xBFC079ull;
   const auto solverHit = db.Match(solver, /*useKorean=*/false);
-  assert(solverHit && solverHit->id == "HAVOK_SOLVER_BREAKPOINT_1_6_1170");
+  assert(solverHit && solverHit->id == "HAVOK_SOLVER_BREAKPOINT_1_6_1170" && solverHit->scope == "root_cause");
   assert(solverHit->recommendations[0].find(L"bSolverProtection") != std::wstring::npos);
   solver.exc_code = 0xC0000005u;
   solver.fault_offset = 0xC0C455ull;  // movss [rax+0x18],xmm1
