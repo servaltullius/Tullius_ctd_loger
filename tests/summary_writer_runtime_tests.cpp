@@ -35,6 +35,7 @@ using skydiag::dump_tool::BuildSummaryJson;
 using skydiag::dump_tool::ResourceRow;
 using skydiag::dump_tool::SuspectItem;
 using skydiag::dump_tool::internal::output_writer::FindIncidentManifestForDump;
+using skydiag::dump_tool::internal::output_writer::MaybeRedactPath;
 using skydiag::dump_tool::internal::output_writer::RedactAbsolutePathStrings;
 using skydiag::dump_tool::internal::output_writer::RedactPathsInText;
 using skydiag::dump_tool::internal::output_writer::RedactSymbolSearchPath;
@@ -278,6 +279,22 @@ void TestRedactedOutputsHoldNoUserFolder()
   std::filesystem::remove_all(outBase);
 }
 
+// A path field that is the profile folder itself keeps no account name.
+void TestProfileFolderPathField()
+{
+  const std::wstring ko = skydiag::dump_tool::Utf8ToWide(std::string(kProbeUserKo));
+  Require(MaybeRedactPath(L"C:\\Users\\" + ko, true) == L"<redacted>\\<user>", "a Korean profile folder");
+  Require(MaybeRedactPath(L"C:/users/SkydiagProbeUser", true) == L"<redacted>\\<user>", "forward slashes, any case");
+  Require(MaybeRedactPath(L"\\\\?\\C:\\Users\\" + ko + L"\\", true) == L"<redacted>", "a trailing separator");
+  Require(MaybeRedactPath(L"C:\\Users\\" + ko + L"\\Symbols", true) == L"<redacted>\\Symbols",
+    "a folder under the profile keeps its own name");
+  Require(MaybeRedactPath(L"C:\\Users", true) == L"<redacted>\\Users", "the Users folder names nobody");
+  Require(MaybeRedactPath(L"C:\\Users\\" + ko, false) == L"C:\\Users\\" + ko, "redaction off");
+  Require(RedactSymbolSearchPath(L"C:\\Users\\" + ko + L";srv*D:\\Users\\Kim*https://msdl.microsoft.com/download/symbols",
+            true) == L"<redacted>\\<user>;srv*<redacted>\\<user>*https://msdl.microsoft.com/download/symbols",
+    "profile folders in a symbol path");
+}
+
 void TestSymbolSearchPathRedaction()
 {
   Require(RedactSymbolSearchPath(L"C:\\Users\\A\\Sym", false) == L"C:\\Users\\A\\Sym", "redaction off");
@@ -414,6 +431,7 @@ int main()
     TestWriterOutputKeepsSchema();
     TestRedactedOutputsHoldNoUserFolder();
     TestSymbolSearchPathRedaction();
+    TestProfileFolderPathField();
     TestPathsInTextRedaction();
     TestWctCompanionDialogText();
     TestUnparsablePluginScanPreview();

@@ -79,6 +79,10 @@ std::wstring RedactPathValue(std::wstring_view path)
   if (filename.empty()) {
     return L"<redacted>";
   }
+  // "C:\Users\<name>" ends with the account name itself.
+  if (_wcsicmp(p.parent_path().filename().c_str(), L"Users") == 0) {
+    return L"<redacted>\\<user>";
+  }
   return L"<redacted>\\" + filename;
 }
 
