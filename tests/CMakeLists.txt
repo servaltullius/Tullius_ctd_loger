@@ -577,6 +577,15 @@ target_include_directories(skydiag_engine_spin_loop_tests PRIVATE
 )
 add_test(NAME skydiag_engine_spin_loop_tests COMMAND skydiag_engine_spin_loop_tests)
 
+add_executable(skydiag_fault_instruction_tests
+  fault_instruction_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/FaultInstruction.cpp"
+)
+target_include_directories(skydiag_fault_instruction_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_fault_instruction_tests COMMAND skydiag_fault_instruction_tests)
+
 add_executable(skydiag_rtti_decoder_tests
   rtti_decoder_tests.cpp
 )

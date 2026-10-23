@@ -9,7 +9,8 @@
     "likelihood_text": "possible",
     "headline": "The game crashed to desktop (CTD). Suspected mod: Precision - Accurate Melee Collisions (Precision.dll)",
     "action": "Disable or update Precision - Accurate Melee Collisions, then play again.",
-    "why_not_certain": "The game crashed inside this mod, but another mod can cause a crash that shows up here."
+    "why_not_certain": "The game crashed inside this mod, but another mod can cause a crash that shows up here.",
+    "how_it_crashed": "It crashed while using an object that was already gone or never created (a null pointer)."
   },
   "crash_bucket_key": "CTD-precision-direct-fault",
   "analysis": {

@@ -633,6 +633,14 @@ void AddFreezeObjectClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
   }
 }
 
+// ADR-0019: what the faulting instruction did, on a line of its own so it is
+// there with or without a doubt line. Never a lead: it says how the game
+// crashed, not which mod made it.
+void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
+{
+  answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
+}
+
 }  // namespace
 
 QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -707,6 +715,8 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     }
     if (freezePath) {
       AddFreezeObjectClue(r, en, known);
+    } else {
+      AddFaultInstructionClue(r, en, known);
     }
     return known;
   }
@@ -719,7 +729,9 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
   }
 
   if (!freezePath) {
-    return Finish(kind, CrashLead(r, ctx), en);
+    QuickAnswer crash = Finish(kind, CrashLead(r, ctx), en);
+    AddFaultInstructionClue(r, en, crash);
+    return crash;
   }
 
   const Lead lead = FreezeLead(r, en);

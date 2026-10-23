@@ -596,6 +596,7 @@ static void TestWinUiShowsQuickAnswerFirst()
   RequireContains(xaml, "x:Name=\"QuickAnswerHeadlineText\"", "Quick answer headline text.");
   RequireContains(xaml, "x:Name=\"QuickAnswerActionText\"", "Quick answer action text.");
   RequireContains(xaml, "x:Name=\"QuickAnswerWhyText\"", "Quick answer doubt text.");
+  RequireContains(xaml, "x:Name=\"QuickAnswerHowText\"", "Quick answer how-it-crashed text (ADR-0019).");
 
   const auto cs = ReadMainWindowCodeBehindText(repoRoot);
   RequireContains(cs, "QuickAnswerCard.Visibility = _vm.HasQuickAnswer", "Rendering must show the card only with a quick answer.");

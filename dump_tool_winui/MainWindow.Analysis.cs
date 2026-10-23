@@ -231,6 +231,10 @@ public sealed partial class MainWindow
         QuickAnswerWhyText.Visibility = string.IsNullOrWhiteSpace(_vm.QuickAnswerWhy)
             ? Visibility.Collapsed
             : Visibility.Visible;
+        QuickAnswerHowText.Text = _vm.QuickAnswerHow;
+        QuickAnswerHowText.Visibility = string.IsNullOrWhiteSpace(_vm.QuickAnswerHow)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         QuickAnswerCard.Visibility = _vm.HasQuickAnswer ? Visibility.Visible : Visibility.Collapsed;
 
         SummarySentenceText.Text = _vm.SummarySentence;

@@ -22,6 +22,14 @@ class AddressResolver;
 
 namespace skydiag::dump_tool::internal {
 
+// The Crash Logger SKSE plugin's own DLL (CrashLogger.dll, or CrashLoggerSSE.dll
+// in older builds), by file name.
+inline bool IsCrashLoggerModuleName(std::wstring_view filename)
+{
+  const auto lower = minidump::WideLower(filename);
+  return lower == L"crashlogger.dll" || lower == L"crashloggersse.dll";
+}
+
 std::wstring EventTypeName(std::uint16_t t);
 
 std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_t b, std::uint64_t c, std::uint64_t d);
@@ -125,6 +133,18 @@ FloatCompareSpinProbe ProbeFloatCompareSpin(
   const std::vector<minidump::ModuleInfo>& modules,
   const std::vector<minidump::ThreadRecord>& threads,
   std::uint32_t tid);
+
+// ADR-0019: an access violation's faulting instruction, decoded from the
+// code bytes the dump holds at the exception address and checked against the
+// exception record with the faulting context's registers (FaultInstruction.h).
+// Not for a fault inside Crash Logger (its own memory probes).
+FaultInstructionInfo ProbeFaultInstruction(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const AnalysisResult& out,
+  const std::optional<CONTEXT>& excCtx);
 
 // ADR-0016: the crash ran the int3 padding of a hook stub that was being
 // written; detected only for EXCEPTION_BREAKPOINT outside every module.

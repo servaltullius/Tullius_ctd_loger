@@ -428,6 +428,10 @@
                            TextWrapping="WrapWholeWords" FontSize="13"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            Visibility="Collapsed" />
+                <TextBlock x:Name="QuickAnswerHowText"
+                           TextWrapping="WrapWholeWords" FontSize="13"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Visibility="Collapsed" />
               </StackPanel>
             </Border>
 

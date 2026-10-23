@@ -44,6 +44,12 @@ void TestFullBlock()
   assert(ko[0] == L"빠른 답");
   assert(ko[2].rfind(L"  해볼 일: ", 0) == 0);
   assert(ko[3].rfind(L"  확실하지 않은 이유: ", 0) == 0);
+
+  // ADR-0019: how it crashed, after the doubt line.
+  qa.how_it_crashed = L"It crashed while using an object that was already gone or never created (a null pointer).";
+  const auto withHow = QuickAnswerReportLines(qa, true);
+  assert(withHow.size() == 5u && withHow[4] == L"  How it crashed: " + qa.how_it_crashed);
+  assert(QuickAnswerReportLines(qa, false)[4].rfind(L"  어떻게 튕겼나: ", 0) == 0);
 }
 
 void TestNoLikelihoodNoDoubt()

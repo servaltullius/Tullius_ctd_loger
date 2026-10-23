@@ -21,3 +21,4 @@ ADR index:
 - `0016-hook-install-race.md`
 - `0017-second-fault-while-filtering.md`
 - `0018-recommendation-classes.md`
+- `0019-faulting-instruction.md`

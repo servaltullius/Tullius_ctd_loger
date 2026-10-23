@@ -104,6 +104,7 @@ nlohmann::json BuildSummaryJson(
       { "headline", WideToUtf8(qa.headline) },
       { "action", WideToUtf8(qa.action) },
       { "why_not_certain", WideToUtf8(qa.why_not_certain) },
+      { "how_it_crashed", WideToUtf8(qa.how_it_crashed) },
     };
   }
   summary["crash_bucket_key"] = WideToUtf8(r.crash_bucket_key);
@@ -453,6 +454,45 @@ nlohmann::json BuildSummaryJson(
   }
   if (!r.fault_unloaded_module.empty()) {
     summary["fault_unloaded_module"] = WideToUtf8(r.fault_unloaded_module);
+  }
+  // Additive (ADR-0019): what the faulting instruction of an access violation
+  // did. Only the instruction's own bytes and register values; no memory.
+  if (!r.fault_instruction.verdict.empty()) {
+    const auto& fi = r.fault_instruction;
+    const auto hex = [](std::uint64_t value) {
+      char buf[32]{};
+      std::snprintf(buf, sizeof(buf), "0x%llX", static_cast<unsigned long long>(value));
+      return std::string(buf);
+    };
+    nlohmann::json j = {
+      { "verdict", fi.verdict },
+      { "access", fi.access },
+      { "address", hex(fi.address) },
+      { "mnemonic", fi.mnemonic },
+      { "operand", fi.operand },
+      { "bytes", fi.bytes },
+      { "access_size", fi.access_size },
+      { "address_matches", fi.address_matches },
+      { "text", WideToUtf8(DescribeFaultInstruction(fi, r.fault_module_plus_offset, r.language == i18n::Language::kEnglish)) },
+    };
+    if (fi.address_matches) {
+      j["effective_address"] = hex(fi.effective_address);
+      // A register the operand does not use is left out, not written empty.
+      if (!fi.base_register.empty()) {
+        j["base_register"] = fi.base_register;
+        j["base_value"] = hex(fi.base_value);
+      }
+      if (!fi.index_register.empty()) {
+        j["index_register"] = fi.index_register;
+        j["index_value"] = hex(fi.index_value);
+        j["scale"] = fi.scale;
+      }
+    }
+    if (!fi.call_site.empty()) {
+      j["call_site"] = WideToUtf8(fi.call_site);
+      j["call_instruction"] = fi.call_instruction;
+    }
+    summary["fault_instruction"] = std::move(j);
   }
   if (r.hook_stub_race.detected) {
     const auto& race = r.hook_stub_race;
