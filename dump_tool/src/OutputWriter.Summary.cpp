@@ -453,7 +453,7 @@ nlohmann::json BuildSummaryJson(
   if (!r.fault_unloaded_module.empty()) {
     summary["fault_unloaded_module"] = WideToUtf8(r.fault_unloaded_module);
   }
-  // Additive (ADR-0018): what the faulting instruction of an access violation
+  // Additive (ADR-0019): what the faulting instruction of an access violation
   // did. Only the instruction's own bytes and register values; no memory.
   if (!r.fault_instruction.verdict.empty()) {
     const auto& fi = r.fault_instruction;

@@ -10,7 +10,7 @@
 
 namespace skydiag::dump_tool {
 
-// ADR-0018: what the instruction at an access violation was doing, in plain
+// ADR-0019: what the instruction at an access violation was doing, in plain
 // words ("it read 8 bytes from [rcx+0x24] and rcx was 0").
 //
 // A small x64 decoder for the instruction forms game and plugin code faults
@@ -118,7 +118,7 @@ struct FaultRecord
   X64Registers registers{};
 };
 
-// What the faulting instruction of an access violation did (ADR-0018).
+// What the faulting instruction of an access violation did (ADR-0019).
 struct FaultInstructionInfo
 {
   // verdict values:

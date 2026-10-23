@@ -551,7 +551,7 @@ struct AnalysisResult
   std::wstring stackwalk_truncation_module;         // no_unwind_info: the frame's module
   std::wstring stackwalk_truncation_unloaded_module;  // the cut address lies in this unloaded DLL
   std::wstring fault_unloaded_module;  // the exception address lies in this unloaded DLL
-  // ADR-0018: what the faulting instruction of an access violation did
+  // ADR-0019: what the faulting instruction of an access violation did
   // (verdict empty: nothing to say).
   FaultInstructionInfo fault_instruction;
   HookStubRaceInfo hook_stub_race;

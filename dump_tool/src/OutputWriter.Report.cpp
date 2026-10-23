@@ -235,7 +235,7 @@ std::string BuildReportText(
   rpt << "ThreadId: " << r.exc_tid << "\n";
   rpt << "Module+Offset: " << WideToUtf8(r.fault_module_plus_offset) << "\n";
   if (const auto instruction = FaultInstructionReportText(r.fault_instruction); !instruction.empty()) {
-    // ADR-0018: the faulting instruction as decoded from the dump.
+    // ADR-0019: the faulting instruction as decoded from the dump.
     rpt << (en ? "FaultInstruction: " : "예외 명령어: ") << instruction;
     if (!r.fault_instruction.call_site.empty()) {
       rpt << (en ? " (call at " : " (호출 위치 ") << WideToUtf8(r.fault_instruction.call_site) << ")";

@@ -633,7 +633,7 @@ void AddFreezeObjectClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
   }
 }
 
-// ADR-0018: what the faulting instruction did, after the doubt it belongs to.
+// ADR-0019: what the faulting instruction did, after the doubt it belongs to.
 // Never a lead: it says how the game crashed, not which mod made it.
 void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
 {

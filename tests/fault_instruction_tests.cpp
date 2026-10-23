@@ -1,4 +1,4 @@
-// ADR-0018: the faulting-instruction decoder and its cross-check with the
+// ADR-0019: the faulting-instruction decoder and its cross-check with the
 // exception record (FaultInstruction.h), on synthetic byte sequences. The
 // register and address shapes of the null, bad-index and non-canonical cases
 // are those of real crash dumps (2026-09-18 SkyrimUpscaler.dll "mov rbx,

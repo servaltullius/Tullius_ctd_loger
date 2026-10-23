@@ -156,7 +156,7 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       e.details = *info;
       r.evidence.push_back(std::move(e));
     }
-    // ADR-0018: what the faulting instruction did, in plain words.
+    // ADR-0019: what the faulting instruction did, in plain words.
     if (const auto text = DescribeFaultInstruction(r.fault_instruction, r.fault_module_plus_offset, en); !text.empty()) {
       const auto& fi = r.fault_instruction;
       const bool proven = fi.address_matches || fi.access == "execute";
