@@ -821,6 +821,11 @@ add_test(
 )
 
 add_test(
+  NAME skydiag_compare_analyses_tests
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/compare_analyses_tests.py"
+)
+
+add_test(
   NAME skydiag_winui_state_fixture_tests
   COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/winui_state_fixture_tests.py"
 )

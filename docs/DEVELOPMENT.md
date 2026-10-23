@@ -225,6 +225,18 @@ python scripts/accuracy_benchmark.py score --corpus <corpus> --out-json <corpus>
 
 Keep the corpus outside the repo: the summaries carry mod lists and local paths. Add a case only when the cause is confirmed (the crash stopped after removing the mod, a crash test, a known fix); re-run `add-case --replace` for every case after an analyzer change so all views come from the same build. Crash tests are cases whose answer we chose, so report them apart from real incidents, and do not publish a percentage until real incidents dominate the corpus. Crash Logger writes no log for freezes, so its view abstains on them.
 
+## Comparing Two Builds on Real Dumps
+
+`scripts/compare_analyses.py` shows what an analyzer change did to the output of dumps you keep locally. It runs a baseline and a changed `SkyrimDiagDumpToolCli.exe` on every dump (Korean and English by default) and lists, per dump and language, what a reader would see change: the conclusion, freeze state and confidence, bucket, known signature, quick answer, suspects, actionable candidates, recommendations and their groups, the faulting instruction, and summary keys that appeared or went. Evidence details, events, paths and history counts move with every run and are left out.
+
+```bash
+python scripts/compare_analyses.py --dumps <folder of .dmp or files> \
+  --base-cli <baseline build>/SkyrimDiagDumpToolCli.exe \
+  --new-cli build-win/bin/SkyrimDiagDumpToolCli.exe --jobs 3 --out <short folder outside the repo>
+```
+
+A released zip makes a convenient baseline (its `SKSE/Plugins/SkyrimDiagDumpToolCli.exe`). Each analysis maps a whole dump, so keep `--jobs` low. The summaries stay in `--out` (default: a new temp folder) for a closer look; remove it afterwards. `--fail-on-diff` exits with 1 when anything changed. Dumps and their summaries carry mod lists and local paths: never commit them.
+
 ## Issue Reporting / Troubleshooting
 
 - Issue reporting guide: `docs/BETA_TESTING.md`
