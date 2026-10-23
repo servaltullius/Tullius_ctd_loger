@@ -453,6 +453,40 @@ nlohmann::json BuildSummaryJson(
   if (!r.fault_unloaded_module.empty()) {
     summary["fault_unloaded_module"] = WideToUtf8(r.fault_unloaded_module);
   }
+  // Additive (ADR-0018): what the faulting instruction of an access violation
+  // did. Only the instruction's own bytes and register values; no memory.
+  if (!r.fault_instruction.verdict.empty()) {
+    const auto& fi = r.fault_instruction;
+    const auto hex = [](std::uint64_t value) {
+      char buf[32]{};
+      std::snprintf(buf, sizeof(buf), "0x%llX", static_cast<unsigned long long>(value));
+      return std::string(buf);
+    };
+    nlohmann::json j = {
+      { "verdict", fi.verdict },
+      { "access", fi.access },
+      { "address", hex(fi.address) },
+      { "mnemonic", fi.mnemonic },
+      { "operand", fi.operand },
+      { "bytes", fi.bytes },
+      { "access_size", fi.access_size },
+      { "address_matches", fi.address_matches },
+      { "text", WideToUtf8(DescribeFaultInstruction(fi, r.fault_module_plus_offset, r.language == i18n::Language::kEnglish)) },
+    };
+    if (fi.address_matches) {
+      j["effective_address"] = hex(fi.effective_address);
+      j["base_register"] = fi.base_register;
+      j["base_value"] = fi.base_register.empty() ? std::string{} : hex(fi.base_value);
+      j["index_register"] = fi.index_register;
+      j["index_value"] = fi.index_register.empty() ? std::string{} : hex(fi.index_value);
+      j["scale"] = fi.scale;
+    }
+    if (!fi.call_site.empty()) {
+      j["call_site"] = WideToUtf8(fi.call_site);
+      j["call_instruction"] = fi.call_instruction;
+    }
+    summary["fault_instruction"] = std::move(j);
+  }
   if (r.hook_stub_race.detected) {
     const auto& race = r.hook_stub_race;
     char stub[32]{};

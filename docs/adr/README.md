@@ -20,3 +20,4 @@ ADR index:
 - `0015-thread-entry-hooks-and-known-causes.md`
 - `0016-hook-install-race.md`
 - `0017-second-fault-while-filtering.md`
+- `0018-faulting-instruction.md`

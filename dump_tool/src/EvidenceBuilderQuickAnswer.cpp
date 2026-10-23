@@ -633,6 +633,18 @@ void AddFreezeObjectClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
   }
 }
 
+// ADR-0018: what the faulting instruction did, after the doubt it belongs to.
+// Never a lead: it says how the game crashed, not which mod made it.
+void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
+{
+  if (answer.why_not_certain.empty()) {
+    return;
+  }
+  if (const auto clue = DescribeFaultInstructionPlain(r.fault_instruction, en); !clue.empty()) {
+    answer.why_not_certain += L" " + clue;
+  }
+}
+
 }  // namespace
 
 QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -707,6 +719,8 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     }
     if (freezePath) {
       AddFreezeObjectClue(r, en, known);
+    } else {
+      AddFaultInstructionClue(r, en, known);
     }
     return known;
   }
@@ -719,7 +733,9 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
   }
 
   if (!freezePath) {
-    return Finish(kind, CrashLead(r, ctx), en);
+    QuickAnswer crash = Finish(kind, CrashLead(r, ctx), en);
+    AddFaultInstructionClue(r, en, crash);
+    return crash;
   }
 
   const Lead lead = FreezeLead(r, en);

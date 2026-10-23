@@ -3,6 +3,7 @@
 #include "Bucket.h"
 #include "CrashHistory.h"
 #include "DumpIdentity.h"
+#include "FaultInstruction.h"
 #include "GraphicsInjectionDiag.h"
 #include "PluginRules.h"
 #include <cstdint>
@@ -550,6 +551,9 @@ struct AnalysisResult
   std::wstring stackwalk_truncation_module;         // no_unwind_info: the frame's module
   std::wstring stackwalk_truncation_unloaded_module;  // the cut address lies in this unloaded DLL
   std::wstring fault_unloaded_module;  // the exception address lies in this unloaded DLL
+  // ADR-0018: what the faulting instruction of an access violation did
+  // (verdict empty: nothing to say).
+  FaultInstructionInfo fault_instruction;
   HookStubRaceInfo hook_stub_race;
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)

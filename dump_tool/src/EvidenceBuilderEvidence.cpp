@@ -156,6 +156,17 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       e.details = *info;
       r.evidence.push_back(std::move(e));
     }
+    // ADR-0018: what the faulting instruction did, in plain words.
+    if (const auto text = DescribeFaultInstruction(r.fault_instruction, r.fault_module_plus_offset, en); !text.empty()) {
+      const auto& fi = r.fault_instruction;
+      const bool proven = fi.address_matches || fi.access == "execute";
+      EvidenceItem e{};
+      e.confidence_level = proven ? i18n::ConfidenceLevel::kHigh : i18n::ConfidenceLevel::kMedium;
+      e.confidence = ConfidenceText(lang, e.confidence_level);
+      e.title = en ? L"What the faulting instruction did (decoded from the dump)" : L"예외를 낸 명령어가 한 일(덤프에서 해독)";
+      e.details = text;
+      r.evidence.push_back(std::move(e));
+    }
   }
 
   if (ctx.isSnapshotLike) {

@@ -842,6 +842,118 @@ void TestSummaryAndReportStartWithIt()
   Require(manual.quick_answer.case_id == "manual_snapshot", "manual snapshot end to end");
 }
 
+// ADR-0018, in the shape of the 2026-09-18 crash: "mov rbx, [rax+0x10]" in
+// SkyrimUpscaler.dll with rax = 0 (read at 0x10). The evidence, the quick
+// answer's doubt line, the summary JSON and the report say what it did; the
+// lead, the candidates and the summary sentence do not change.
+void TestFaultInstructionClue()
+{
+  using skydiag::dump_tool::DescribeFaultInstruction;
+  using skydiag::dump_tool::DescribeFaultInstructionPlain;
+  using skydiag::dump_tool::ExplainFaultInstruction;
+  using skydiag::dump_tool::FaultRecord;
+  const std::vector<std::uint8_t> code = { 0x48, 0x8B, 0x58, 0x10, 0x48, 0x8B, 0x35 };
+  const auto crash = []() {
+    auto r = CrashIn(L"SkyrimUpscaler.dll", L"SkyrimUpscalerAIOBuild16-Hotfix1");
+    r.exc_addr = 0x7FFA3CB46144ull;
+    r.exc_info = { 0, 0x10 };
+    r.fault_module_plus_offset = L"SkyrimUpscaler.dll+0x156144";
+    return r;
+  };
+  FaultRecord fault{};
+  fault.exception_address = 0x7FFA3CB46144ull;
+  fault.access_kind = 0;
+  fault.address = 0x10;
+  fault.has_registers = true;
+  fault.registers[3] = 0x7FFA3CD29780ull;  // rbx, the destination
+  const auto decoded = ExplainFaultInstruction(fault, code.data(), code.size());
+  Require(decoded.verdict == "null_pointer", "decoded");
+
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = crash();
+    const auto before = BuildQuickAnswer(r, lang, CrashContext(en, r.fault_module_filename));
+    r.fault_instruction = decoded;
+    const auto qa = BuildQuickAnswer(r, lang, CrashContext(en, r.fault_module_filename));
+    Require(!before.why_not_certain.empty() &&
+              qa.why_not_certain == before.why_not_certain + L" " + DescribeFaultInstructionPlain(decoded, en),
+      "the plain clue after the doubt");
+    Require(qa.case_id == before.case_id && qa.likelihood == before.likelihood && qa.headline == before.headline &&
+              qa.action == before.action && qa.suspect_mod == before.suspect_mod,
+      "the answer is otherwise unchanged");
+    RequirePlainWords(qa, "fault instruction clue");
+
+    // A likely lead has no doubt line to add it to.
+    auto likely = r;
+    likely.actionable_candidates.push_back(Candidate("cross_validated", i18n::ConfidenceLevel::kHigh,
+      L"SkyrimUpscaler.dll", L"SkyrimUpscalerAIOBuild16-Hotfix1", { "actionable_stack", "crash_logger_frame" }));
+    Require(BuildQuickAnswer(likely, lang, CrashContext(en, r.fault_module_filename)).why_not_certain.empty(),
+      "no doubt line when likely");
+
+    auto plain = crash();
+    BuildEvidenceAndSummary(plain, lang);
+    BuildEvidenceAndSummary(r, lang);
+    Require(r.summary_sentence == plain.summary_sentence, "summary sentence unchanged");
+    Require(r.actionable_candidates.size() == plain.actionable_candidates.size(), "candidates unchanged");
+    Require(r.evidence.size() == plain.evidence.size() + 1u, "one evidence item more");
+    const std::wstring sentence = DescribeFaultInstruction(decoded, L"SkyrimUpscaler.dll+0x156144", en);
+    Require(Contains(sentence, en ? L"(mov) tried to read 8 bytes from [rax+0x10], and rax was 0"
+                                  : L"(mov)가 [rax+0x10]에서 8바이트를 읽으려 했는데 rax가 0이었습니다."),
+      "the sentence");
+    bool afterParameters = false;
+    for (std::size_t i = 1; i < r.evidence.size(); ++i) {
+      if (Contains(r.evidence[i].title, en ? L"What the faulting instruction did" : L"예외를 낸 명령어가 한 일")) {
+        afterParameters = r.evidence[i].details == sentence &&
+          r.evidence[i].confidence_level == i18n::ConfidenceLevel::kHigh &&
+          Contains(r.evidence[i - 1].title, en ? L"Exception parameter analysis" : L"예외 파라미터 분석");
+      }
+    }
+    Require(afterParameters, "a high evidence item right after the exception parameters");
+
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary.contains("fault_instruction"), "summary JSON field");
+    const auto& fi = summary["fault_instruction"];
+    Require(fi["verdict"] == "null_pointer" && fi["access"] == "read" && fi["address"] == "0x10" &&
+              fi["mnemonic"] == "mov" && fi["operand"] == "qword ptr [rax+0x10]" && fi["bytes"] == "48 8B 58 10" &&
+              fi["access_size"] == 8 && fi["address_matches"] == true && fi["effective_address"] == "0x10" &&
+              fi["base_register"] == "rax" && fi["base_value"] == "0x0" && fi["index_register"] == "" &&
+              fi["text"] == WideToUtf8(sentence),
+      "summary JSON fault_instruction");
+    Require(!summary.contains("fault_instruction") || !fi.contains("call_site"), "no call site for a data fault");
+    Require(!plain.evidence.empty() &&
+              !skydiag::dump_tool::BuildSummaryJson(plain, std::filesystem::temp_directory_path(), L"stem", true)
+                 .contains("fault_instruction"),
+      "no field without a decoded instruction");
+
+    const auto report = skydiag::dump_tool::BuildReportText(r, summary, true);
+    Require(report.find(std::string(en ? "FaultInstruction: " : "예외 명령어: ") +
+                        "mov qword ptr [rax+0x10] (48 8B 58 10), read 0x10, rax=0x0 -> null_pointer\n") !=
+              std::string::npos,
+      "the report line");
+  }
+
+  // Registers that do not give the address: a medium item that only states
+  // the read and the address, and no quick-answer clue.
+  auto unproven = crash();
+  auto noRegisters = fault;
+  noRegisters.has_registers = false;
+  unproven.fault_instruction = ExplainFaultInstruction(noRegisters, code.data(), code.size());
+  const auto before = BuildQuickAnswer(crash(), i18n::Language::kEnglish, CrashContext(true, L"SkyrimUpscaler.dll"));
+  Require(BuildQuickAnswer(unproven, i18n::Language::kEnglish, CrashContext(true, L"SkyrimUpscaler.dll")).why_not_certain ==
+            before.why_not_certain,
+    "no clue without the registers");
+  BuildEvidenceAndSummary(unproven, i18n::Language::kEnglish);
+  bool medium = false;
+  for (const auto& e : unproven.evidence) {
+    if (Contains(e.title, L"What the faulting instruction did")) {
+      medium = e.confidence_level == i18n::ConfidenceLevel::kMedium &&
+        e.details == L"The code at SkyrimUpscaler.dll+0x156144 tried to read memory at 0x10 and could not. An address "
+                     L"this close to 0 usually means a null pointer: an object that was already gone or never created.";
+    }
+  }
+  Require(medium, "address-only evidence");
+}
+
 }  // namespace
 
 int main()
@@ -868,6 +980,7 @@ int main()
     TestFreezeStackScanIsWeak();
     TestSnapshotsAndCleanExit();
     TestSummaryAndReportStartWithIt();
+    TestFaultInstructionClue();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;

@@ -852,6 +852,7 @@ void ComputeSuspects(
   if (!hangLike) {
     out.hook_stub_race = internal::DetectHookStubRace(dumpBase, dumpSize, allModules, threads, out, excCtx);
   }
+  out.fault_instruction = internal::ProbeFaultInstruction(dumpBase, dumpSize, allModules, threads, out, excCtx);
   const std::uint32_t preferredTid = out.exc_tid != 0u ? out.exc_tid : mainTid.value_or(0u);
   const std::uint32_t modalProbeTid = (hangLike && mainTid.has_value()) ? *mainTid : 0u;
   std::vector<ModalStackFrame> mainThreadFrames;

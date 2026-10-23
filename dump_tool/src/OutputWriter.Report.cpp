@@ -234,6 +234,14 @@ std::string BuildReportText(
   rpt << "ExceptionAddress: 0x" << std::hex << r.exc_addr << std::dec << "\n";
   rpt << "ThreadId: " << r.exc_tid << "\n";
   rpt << "Module+Offset: " << WideToUtf8(r.fault_module_plus_offset) << "\n";
+  if (const auto instruction = FaultInstructionReportText(r.fault_instruction); !instruction.empty()) {
+    // ADR-0018: the faulting instruction as decoded from the dump.
+    rpt << (en ? "FaultInstruction: " : "예외 명령어: ") << instruction;
+    if (!r.fault_instruction.call_site.empty()) {
+      rpt << (en ? " (call at " : " (호출 위치 ") << WideToUtf8(r.fault_instruction.call_site) << ")";
+    }
+    rpt << "\n";
+  }
   if (!r.inferred_mod_name.empty()) {
     rpt << (en ? "InferredMod: " : "추정 모드: ") << WideToUtf8(r.inferred_mod_name) << "\n";
   }

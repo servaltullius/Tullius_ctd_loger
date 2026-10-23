@@ -126,6 +126,18 @@ FloatCompareSpinProbe ProbeFloatCompareSpin(
   const std::vector<minidump::ThreadRecord>& threads,
   std::uint32_t tid);
 
+// ADR-0018: an access violation's faulting instruction, decoded from the
+// code bytes the dump holds at the exception address and checked against the
+// exception record with the faulting context's registers (FaultInstruction.h).
+// Not for a fault inside Crash Logger (its own memory probes).
+FaultInstructionInfo ProbeFaultInstruction(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const AnalysisResult& out,
+  const std::optional<CONTEXT>& excCtx);
+
 // ADR-0016: the crash ran the int3 padding of a hook stub that was being
 // written; detected only for EXCEPTION_BREAKPOINT outside every module.
 HookStubRaceInfo DetectHookStubRace(

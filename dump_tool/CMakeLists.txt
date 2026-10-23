@@ -17,6 +17,7 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsBlackbox.cpp
   src/AnalyzerInternalsFirstChance.cpp
   src/AnalyzerInternalsCrashBucket.cpp
+  src/AnalyzerInternalsFaultInstruction.cpp
   src/AnalyzerInternalsHookStubRace.cpp
   src/AnalyzerInternalsStackScan.cpp
   src/AnalyzerInternalsWct.cpp
@@ -29,6 +30,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsStackwalkSymbols.cpp
   src/EngineSpinLoop.cpp
   src/EngineSpinLoop.h
+  src/FaultInstruction.cpp
+  src/FaultInstruction.h
   src/EvidenceBuilder.cpp
   src/EvidenceBuilder.h
   src/EvidenceBuilderCandidates.cpp
