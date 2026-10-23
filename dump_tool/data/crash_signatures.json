@@ -293,6 +293,125 @@
       }
     },
     {
+      "id": "KEYBOARD_INVALID_KEY_INDEX_1_6_1170",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.6.1170.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset": "0xCDE0AE"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "1.6.1170의 알려진 키보드 입력 크래시 지점과 일치합니다. 게임이 키보드 입력 장치(DirectInput)가 보낸 키 번호를 검사하지 않고 키 상태 배열에 쓰는데, 가끔 들어오는 잘못된 번호(0xFFFFFFFF)가 배열 밖에 쓰여 크래시가 납니다. 메뉴, 달리기, 가만히 서 있을 때 등 아무 때나 날 수 있습니다. 잘못된 입력을 보내는 장치나 프로그램은 이 덤프만으로 알 수 없습니다.",
+        "cause_en": "Matches the known 1.6.1170 keyboard input crash site. The game writes keyboard key numbers from DirectInput into its key state array without checking them, and an occasional invalid number (0xFFFFFFFF) is written outside the array. It can happen at any time, in menus, while running or standing still. Which device or program sent the bad input is not known from this dump.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] 모드 관리자로 \"Keyboard Offset Crash Fix SE-AE\"(Nexus 모드 187246)를 설치하세요. 잘못된 키 입력을 버리고 로그로 남겨 이 크래시를 막습니다. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/187246"
+        ],
+        "recommendations_en": [
+          "[Known crash site] Install \"Keyboard Offset Crash Fix SE-AE\" (Nexus mod 187246) with your mod manager. It drops the invalid key input and logs it, which stops this crash. Download: https://www.nexusmods.com/skyrimspecialedition/mods/187246"
+        ],
+        "fix_module": "KeyboardInputOffsetCrashFix.dll",
+        "recommendations_fix_loaded_ko": [
+          "[알려진 크래시 지점] Keyboard Offset Crash Fix가 이미 로드되어 있는데도 이 크래시가 났으니, 새 버전이 있는지 확인하거나 이 리포트와 함께 제작자에게 알려 주세요. 이 덤프에는 KeyboardInputOffsetCrashFix.dll이 로드되어 있었습니다. https://www.nexusmods.com/skyrimspecialedition/mods/187246"
+        ],
+        "recommendations_fix_loaded_en": [
+          "[Known crash site] Keyboard Offset Crash Fix is already loaded, but this crash still happened: check for an update, or tell its author and share this report. KeyboardInputOffsetCrashFix.dll was loaded in this dump. https://www.nexusmods.com/skyrimspecialedition/mods/187246"
+        ]
+      }
+    },
+    {
+      "id": "HAVOK_SOLVER_BREAKPOINT_1_6_1170",
+      "match": {
+        "exc_code": "0x80000003",
+        "game_version": "1.6.1170.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset": "0xBFC079"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "1.6.1170의 알려진 물리 엔진(Havok) 계산 크래시 지점과 일치합니다. 서로 닿은 물체들을 계산하기 전에 잡는 작업 공간이 가끔 너무 작게 잡혀 Havok이 중단점에서 멈춥니다. 생물이 많은 전투나 래그돌 모드를 쓸 때 잘 납니다. 어떤 물체나 모드가 계기가 됐는지는 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "Matches the known 1.6.1170 physics (Havok) solver crash site. The work buffer Havok reserves before solving a group of touching bodies is sometimes counted too small, and Havok stops at a breakpoint. It shows up in fights with many creatures or with ragdoll mods. Which object or mod set it off is not known from this pattern alone.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] 모드 관리자로 \"Havok Solver Crash Fix - SKSE\"(Nexus 모드 194392)를 설치하고, 설정에서 bSolverProtection이 켜져 있는지 확인하세요. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/194392"
+        ],
+        "recommendations_en": [
+          "[Known crash site] Install \"Havok Solver Crash Fix - SKSE\" (Nexus mod 194392) with your mod manager and check that bSolverProtection is on. Download: https://www.nexusmods.com/skyrimspecialedition/mods/194392"
+        ]
+      }
+    },
+    {
+      "id": "HAVOK_SOLVER_OVERWRITE_1_6_1170",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.6.1170.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset": "0xC0C455"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "1.6.1170의 알려진 물리 엔진(Havok) 계산 크래시 지점과 일치합니다. 서로 닿은 물체들을 계산하는 작업 공간이 너무 작게 잡혀 데이터가 덮어써지고, 그다음 단계가 망가진 값을 쓰다 크래시가 납니다. 생물이 많은 전투나 래그돌 모드를 쓸 때 잘 납니다. 어떤 물체나 모드가 계기가 됐는지는 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "Matches the known 1.6.1170 physics (Havok) solver crash site. The work buffer for solving a group of touching bodies is counted too small, the data overwrites itself, and the next step crashes on the damaged values. It shows up in fights with many creatures or with ragdoll mods. Which object or mod set it off is not known from this pattern alone.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] 모드 관리자로 \"Havok Solver Crash Fix - SKSE\"(Nexus 모드 194392)를 설치하고, 설정에서 bSolverProtection이 켜져 있는지 확인하세요. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/194392"
+        ],
+        "recommendations_en": [
+          "[Known crash site] Install \"Havok Solver Crash Fix - SKSE\" (Nexus mod 194392) with your mod manager and check that bSolverProtection is on. Download: https://www.nexusmods.com/skyrimspecialedition/mods/194392"
+        ]
+      }
+    },
+    {
+      "id": "HAVOK_CLEANUP_STALE_LISTENER_1_6_1170",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.6.1170.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset_regex": "^(B4BAD9|B4B729|B41AA5)$"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "1.6.1170의 알려진 물리 엔진(Havok) 정리 크래시 지점과 일치합니다. 게임이 물체를 넣거나 빼거나 지울 때 Havok은 그 물리 몸체에 붙어 있는 것들에 알리는데, 그중 이미 지워졌지만 떼어지지 않은 것을 부르다 크래시가 납니다. 주변 물체가 로드되거나 내려갈 때 잘 납니다. 어떤 물체나 모드가 남긴 것인지는 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "Matches a known 1.6.1170 physics (Havok) cleanup crash site. When the game adds, removes or deletes an object, Havok notifies everything still attached to its physics body, and it crashes calling one that was already removed but never detached. It shows up as objects around you load or unload. Which object or mod left it behind is not known from this pattern alone.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] 모드 관리자로 \"Havok Solver Crash Fix - SKSE\"(Nexus 모드 194392)를 설치하고, 설정에서 bCleanupProtection이 켜져 있는지 확인하세요. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/194392"
+        ],
+        "recommendations_en": [
+          "[Known crash site] Install \"Havok Solver Crash Fix - SKSE\" (Nexus mod 194392) with your mod manager and check that bCleanupProtection is on. Download: https://www.nexusmods.com/skyrimspecialedition/mods/194392"
+        ]
+      }
+    },
+    {
+      "id": "WATER_COLLISION_FREED_BODY_1_6_1170",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.6.1170.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset_regex": "^(51E220|51E253)$"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "1.6.1170의 알려진 물 충돌 크래시 지점과 일치합니다. 배치된 물의 충돌 몸체가 해제된 뒤에도 물 충돌 관리자의 목록에 남아, 셀을 다시 붙일 때 이미 해제된 메모리를 읽다 크래시가 납니다. 실내와 실외를 오가는 등 셀 로드가 잦을 때, 모드가 많은 환경에서 잘 납니다.",
+        "cause_en": "Matches the known 1.6.1170 water collision crash site. A placed water body's collision is freed but stays in the water collision manager's list, and when the cell attaches again the manager reads the freed memory. It shows up with frequent cell loads, such as moving between interiors and exteriors, in large mod lists.",
+        "confidence": "high",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] 모드 관리자로 \"Water Collision Crash Fix NG\"(Nexus 모드 190886)를 설치하세요. 다른 수정 모드인 \"BGSWaterCollision - CrashFix\"와는 함께 쓰지 말고 둘 중 하나만 쓰세요. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/190886"
+        ],
+        "recommendations_en": [
+          "[Known crash site] Install \"Water Collision Crash Fix NG\" (Nexus mod 190886) with your mod manager. Do not use it together with the other fix, \"BGSWaterCollision - CrashFix\"; use only one of them. Download: https://www.nexusmods.com/skyrimspecialedition/mods/190886"
+        ],
+        "fix_module": "WaterCollisionCrashFix.dll",
+        "recommendations_fix_loaded_ko": [
+          "[알려진 크래시 지점] Water Collision Crash Fix NG가 이미 로드되어 있는데도 이 크래시가 났으니, 새 버전이 있는지 확인하거나 이 리포트와 함께 제작자에게 알려 주세요. 이 덤프에는 WaterCollisionCrashFix.dll이 로드되어 있었습니다. https://www.nexusmods.com/skyrimspecialedition/mods/190886"
+        ],
+        "recommendations_fix_loaded_en": [
+          "[Known crash site] Water Collision Crash Fix NG is already loaded, but this crash still happened: check for an update, or tell its author and share this report. WaterCollisionCrashFix.dll was loaded in this dump. https://www.nexusmods.com/skyrimspecialedition/mods/190886"
+        ]
+      }
+    },
+    {
       "id": "AI_PATHING_FREEZE_1_6_1170",
       "match": {
         "game_version": "1.6.1170.0",
