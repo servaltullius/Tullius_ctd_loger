@@ -150,6 +150,31 @@ inline std::wstring ComputeFreezeStateBucketKey(std::string_view freezeState)
   return ComputeHangBucketKey("v=1|kind=" + std::string(freezeState));
 }
 
+// engine_lock_deadlock (ADR-0021): the locks of the cycle (sorted, so which
+// thread came first does not matter), or the known pattern that matched,
+// whichever threads and plugins were involved.
+inline std::wstring ComputeEngineLockBucketKey(
+  std::string_view freezeState,
+  std::wstring_view module,
+  std::vector<std::uint64_t> lockRvas,
+  std::string_view knownPattern)
+{
+  std::ostringstream canonical;
+  canonical << "v=1|kind=" << freezeState;
+  if (!knownPattern.empty()) {
+    canonical << "|pattern=" << knownPattern;
+  } else {
+    std::sort(lockRvas.begin(), lockRvas.end());
+    lockRvas.erase(std::unique(lockRvas.begin(), lockRvas.end()), lockRvas.end());
+    canonical << "|locks=";
+    for (std::size_t i = 0; i < lockRvas.size(); ++i) {
+      canonical << (i == 0 ? "" : ",") << bucket::NarrowAsciiFallback(bucket::LowerTrimmed(module)) << "+0x" << std::hex
+                << std::nouppercase << lockRvas[i] << std::dec;
+    }
+  }
+  return ComputeHangBucketKey(canonical.str());
+}
+
 // engine_spin_nan: the engine loop itself (module and offset of the spinning
 // instruction), whichever thread ran it and whichever plugins were below it.
 inline std::wstring ComputeEngineSpinBucketKey(

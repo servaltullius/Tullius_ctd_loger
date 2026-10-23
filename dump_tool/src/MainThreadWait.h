@@ -40,7 +40,14 @@ struct ThreadTopFrames
 {
   std::uint32_t tid = 0;
   std::vector<ModalStackFrame> frames;
+  // Every frame the walk found (deeper than frames), for the engine-lock
+  // signatures' anchors (ADR-0021).
+  std::vector<std::uint64_t> pcs;
 };
+
+// Frames walked on a game thread: the top ones, and the deeper anchors of a
+// known engine-lock deadlock.
+inline constexpr std::size_t kSideWalkFrames = 40;
 
 // Frames searched for plugin code on a game thread.
 inline constexpr std::size_t kBlockedThreadTopFrames = 12;
@@ -85,6 +92,11 @@ std::vector<std::wstring> CallPathModules(const std::vector<ModalStackFrame>& fr
 // as engine_call_path when it is the spinning thread (its plugins listed as
 // call path), and is dropped otherwise.
 void ApplyEngineSpinNanVerdict(MainThreadWaitInfo& wait, const EngineSpinInfo& spin);
+
+// After an engine_lock_deadlock verdict (ADR-0021): game threads deadlocked on
+// the engine's own locks, so no game thread the main thread waited for leads
+// (it is one of them, or waits behind them); its record is dropped.
+void ApplyEngineLockDeadlockVerdict(MainThreadWaitInfo& wait);
 
 // "SkyrimSE.exe+0xd17465".
 std::wstring EngineSpinLocation(const EngineSpinInfo& spin);

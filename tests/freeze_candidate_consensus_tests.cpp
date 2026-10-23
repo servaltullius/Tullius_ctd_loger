@@ -669,6 +669,69 @@ static void TestConsensusEngineSpinNan()
   assert(BuildFreezeCandidateConsensus(modal, Language::kEnglish).state_id == "modal_dialog_wait");
 }
 
+// ADR-0021: game threads deadlocked on the engine's own locks name no mod.
+static void TestConsensusEngineLockDeadlock()
+{
+  skydiag::dump_tool::MainThreadWaitInfo engineWait{};
+  engineWait.kind = "engine_wait";
+  engineWait.wait_class = "sync";
+  engineWait.wait_api = L"KERNELBASE.dll!WaitForSingleObjectEx";
+  engineWait.waiting_module = L"SkyrimSE.exe";
+  engineWait.path_modules = { L"hdtsmp64.dll" };
+
+  skydiag::dump_tool::EngineLockDeadlockInfo deadlock{};
+  deadlock.detected = true;
+  deadlock.module = L"SkyrimSE.exe";
+  deadlock.cycle = {
+    { 5096u, 0x2f3b8e8ull, "spin", 18456u },
+    { 18456u, 0x2eff8e0ull, "spin", 5096u },
+  };
+
+  FreezeSignalInput input{};
+  input.is_hang_like = true;
+  input.main_thread_wait = engineWait;
+  input.engine_lock_deadlock = deadlock;
+  input.actionable_candidates.push_back(MakeCandidate(L"hdtsmp64.dll", ConfidenceLevel::kLow));
+  input.blackbox = skydiag::dump_tool::BlackboxFreezeSummary{};
+  input.blackbox->has_context = true;
+  input.blackbox->recent_non_system_modules = { L"SomeRecent.dll" };
+  const auto result = BuildFreezeCandidateConsensus(input, Language::kEnglish);
+  assert(result.state_id == "engine_lock_deadlock");
+  assert(result.confidence_level == ConfidenceLevel::kMedium);
+  assert(result.primary_reasons.size() == 4u);
+  assert(result.primary_reasons[0].find(L"Game threads 5096, 18456 were each waiting") != std::wstring::npos);
+  assert(result.primary_reasons[0].find(
+           L"thread 5096 waited for SkyrimSE.exe+0x2f3b8e8 (spin lock), held by thread 18456; thread 18456 waited for "
+           L"SkyrimSE.exe+0x2eff8e0 (spin lock), held by thread 5096") != std::wstring::npos);
+  assert(result.primary_reasons[2].find(L"only on the call path") != std::wstring::npos);
+  // The main thread's own wait comes after the deadlock's reasons.
+  assert(result.primary_reasons[3].find(L"waiting inside the game engine") != std::wstring::npos);
+  assert(result.related_candidates.empty());
+
+  // A known pattern without a readable cycle (a lock held for read).
+  auto known = input;
+  known.engine_lock_deadlock->cycle.clear();
+  known.engine_lock_deadlock->known_pattern = "CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97";
+  known.engine_lock_deadlock->pattern_tids = { 42u };
+  const auto ko = BuildFreezeCandidateConsensus(known, Language::kKorean);
+  assert(ko.state_id == "engine_lock_deadlock");
+  assert(ko.primary_reasons[0].find(L"CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97") != std::wstring::npos);
+  assert(ko.primary_reasons[0].find(L"(42)") != std::wstring::npos);
+  assert(ko.related_candidates.empty());
+
+  // Not detected: no verdict.
+  auto none = input;
+  none.engine_lock_deadlock->detected = false;
+  assert(BuildFreezeCandidateConsensus(none, Language::kEnglish).state_id == "freeze_candidate");
+
+  // A dialog the main thread pumps still comes first.
+  auto modal = input;
+  modal.modal_dialog_wait = skydiag::dump_tool::ModalDialogWaitInfo{};
+  modal.modal_dialog_wait->detected = true;
+  modal.modal_dialog_wait->stack_evidence = true;
+  assert(BuildFreezeCandidateConsensus(modal, Language::kEnglish).state_id == "modal_dialog_wait");
+}
+
 int main()
 {
   TestSourceContracts();
@@ -688,5 +751,6 @@ int main()
   TestConsensusMainThreadWaitLeadsTheReasons();
   TestConsensusCrashLoggerThreadDumpDeadlock();
   TestConsensusEngineSpinNan();
+  TestConsensusEngineLockDeadlock();
   return 0;
 }

@@ -17,7 +17,7 @@ struct QuickAnswer
   // candidate / suspect / fault_module / object_ref / hook_stub_race /
   // hook_framework / external_software / known_issue / modal_dialog /
   // crash_logger_thread_dump / gpu_driver / lock_owner / blocked_thread /
-  // thread_group / engine_spin_nan / snapshot / manual_snapshot / clean_exit / none.
+  // thread_group / engine_lock_deadlock / engine_spin_nan / snapshot / manual_snapshot / clean_exit / none.
   std::string case_id;
   // high / medium / low; "none" when nothing is named.
   std::string likelihood = "none";

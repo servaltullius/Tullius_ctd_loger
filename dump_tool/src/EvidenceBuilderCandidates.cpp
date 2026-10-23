@@ -636,9 +636,10 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   }
   if (IsLockOwnerFreezeState(r.freeze_analysis.state_id) ||
       (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) ||
-      r.engine_spin.nan_detected) {
-    // The stall is on the lock owner (or Crash Logger's thread dump, or an
-    // engine loop on a NaN value): frames, stack density, thread groups and
+      r.engine_spin.nan_detected || r.engine_lock_deadlock.detected) {
+    // The stall is on the lock owner (or Crash Logger's thread dump, an engine
+    // loop on a NaN value, or a deadlock on the engine's own locks): frames,
+    // stack density, thread groups and
     // nearby resources all describe bystanders, and the viewer would lead
     // with them.
     AddHistorySignals(r, en, &signals);

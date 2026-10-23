@@ -112,6 +112,16 @@ CrashLoggerThreadDumpProbe ProbeCrashLoggerThreadDump(
   std::uint32_t mainTid,
   std::uint32_t ownerTid);
 
+// ADR-0021: the engine-lock facts a freeze signature matches on: the game
+// threads waiting in a delay (out.game_lock_waits), the wait-for cycle, and a
+// reader of the game executable's writable data that the dump itself holds.
+void FillGameLockSignatureInput(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const AnalysisResult& out,
+  SignatureMatchInput& input);
+
 // What engine_spin_nan reads from the dump for one thread: a floating-point
 // compare loop at its instruction pointer (EngineSpinLoop.h), from the code
 // bytes the dump holds or else the matching local image, and whether the

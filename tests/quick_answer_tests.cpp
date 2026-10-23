@@ -430,6 +430,166 @@ void TestFreezeEngineSpinNan()
   }
 }
 
+// ADR-0021: two worker threads deadlocked on the engine's spin locks (the
+// FreezeLogger capture's shape). No mod is named; the summary JSON and the
+// report carry the waits and the cycle; with the 1.5.97 pattern known, its
+// fix leads.
+AnalysisResult EngineLockDeadlockHang()
+{
+  auto r = EngineCallPathHang();
+  r.main_thread_wait.blocked_thread_tid = 0;
+  r.main_thread_wait.blocked_module.clear();
+  r.main_thread_wait.blocked_state.clear();
+  r.main_thread_wait.blocked_path_modules.clear();
+  r.freeze_analysis.state_id = "engine_lock_deadlock";
+  r.freeze_analysis.confidence_level = i18n::ConfidenceLevel::kMedium;
+  auto& deadlock = r.engine_lock_deadlock;
+  deadlock.detected = true;
+  deadlock.module = L"SkyrimSE.exe";
+  deadlock.cycle = {
+    { 5096u, 0x2f3b8e8ull, "spin", 18456u },
+    { 18456u, 0x2eff8e0ull, "spin", 5096u },
+  };
+  skydiag::dump_tool::GameLockWaitThread a{};
+  a.tid = 5096;
+  a.wait_module = L"SkyrimSE.exe";
+  a.wait_offset = 0x132c5a;
+  a.frames = { { L"SkyrimSE.exe", 0x132c5a }, { L"SkyrimSE.exe", 0x6d9750 } };
+  a.candidates = { { L"RSP+88", 0x2f3b8e8ull, "spin", 18456u, 1u, true } };
+  auto b = a;
+  b.tid = 18456;
+  b.frames = { { L"SkyrimSE.exe", 0x132c5a }, { L"SkyrimSE.exe", 0x296c3d } };
+  b.candidates = { { L"RSP+40", 0x2eff8e0ull, "spin", 5096u, 1u, true } };
+  skydiag::dump_tool::GameLockWaitThread quiet{};  // waiting, but nothing held: not listed
+  quiet.tid = 777;
+  quiet.wait_module = L"SkyrimSE.exe";
+  quiet.wait_offset = 0x132c5a;
+  r.game_lock_waits = { a, b, quiet };
+  return r;
+}
+
+void TestFreezeEngineLockDeadlock()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = EngineLockDeadlockHang();
+    const auto qa = BuildQuickAnswer(r, lang, FreezeContext(en));
+    Require(qa.kind == "freeze" && qa.case_id == "engine_lock_deadlock", "the engine lock deadlock");
+    Require(qa.likelihood == "medium", "medium");
+    Require(qa.suspect_mod.empty() && qa.suspect_file.empty(), "no single mod");
+    Require(Contains(qa.headline, en ? L"waiting on the game engine's own locks" : L"게임 엔진 자체 잠금을 기다리다"),
+      "plain words");
+    Require(!Contains(qa.headline, L"hdtsmp") && !Contains(qa.action, L"hdtsmp"), "no stack mod named");
+    Require(!qa.why_not_certain.empty(), "why not certain");
+    RequirePlainWords(qa, "engine lock deadlock");
+
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, L"SkyrimSE.exe+0x2f3b8e8") && Contains(r.summary_sentence, L"5096, 18456"),
+      "the summary names the threads and locks");
+    Require(r.quick_answer.case_id == "engine_lock_deadlock", "built with the summary");
+    bool mainThread = false;
+    for (const auto& rec : r.recommendations) {
+      if (rec.rfind(en ? L"[Main thread]" : L"[메인 스레드]", 0) == 0) {
+        mainThread = Contains(rec, L"5096, 18456");
+        break;
+      }
+    }
+    Require(mainThread, "the [Main thread] advice is the deadlock");
+    for (const auto& rec : r.recommendations) {
+      Require(!Contains(rec, L"FSMP") && !Contains(rec, L"hdtsmp64.dll' "), "no stack mod advice");
+    }
+    bool evidence = false;
+    for (const auto& e : r.evidence) {
+      evidence = evidence || (Contains(e.details, L"waits at SkyrimSE.exe+0x132c5a") ||
+                              Contains(e.details, L"대기 위치: SkyrimSE.exe+0x132c5a"));
+    }
+    Require(evidence, "the evidence lists the threads' wait sites");
+
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+    const auto& freeze = summary["freeze_analysis"];
+    Require(freeze.contains("game_lock_waits") && freeze["game_lock_waits"].size() == 2u, "two waits listed");
+    const auto& w0 = freeze["game_lock_waits"][0];
+    Require(w0["tid"] == 5096 && w0["wait_site"] == "SkyrimSE.exe+0x132c5a" && w0["frames"].size() == 2u,
+      "wait site and frames");
+    const auto& c0 = w0["candidate_locks"][0];
+    Require(c0["rva"] == "0x2f3b8e8" && c0["kind"] == "spin" && c0["owner_tid"] == 18456 && c0["count"] == 1 &&
+              c0["owner_waiting"] == true && c0["location"] == "RSP+88",
+      "the candidate lock");
+    const auto& deadlock = freeze["engine_lock_deadlock"];
+    Require(deadlock["kind"] == "cycle" && deadlock["threads"] == nlohmann::json::array({ 5096, 18456 }) &&
+              deadlock["cycle"].size() == 2u && deadlock["cycle"][1]["lock"] == "SkyrimSE.exe+0x2eff8e0" &&
+              deadlock["known_pattern"] == "",
+      "the deadlock in the JSON");
+    const auto report = skydiag::dump_tool::BuildReportText(r, summary, false);
+    Require(report.find("  game_lock_wait tid=5096 main_thread=0 site=SkyrimSE.exe+0x132c5a "
+                        "lock=RSP+88:0x2f3b8e8:spin:owner=18456:count=1:owner_waiting") != std::string::npos,
+      "the report line");
+    Require(report.find("engine_lock_deadlock threads=5096, 18456") != std::string::npos, "the report deadlock line");
+    Require(report.find("tid=777") == std::string::npos, "a wait with nothing held is not listed");
+  }
+
+  // A known pattern of one thread waiting on its own lock: no "each other".
+  {
+    auto r = EngineLockDeadlockHang();
+    r.engine_lock_deadlock.cycle.clear();
+    r.engine_lock_deadlock.known_pattern = "CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97";
+    r.engine_lock_deadlock.pattern_tids = { 42u };
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    Require(Contains(r.summary_sentence, L"game threads 42 could not go on") &&
+              Contains(r.summary_sentence, L"(CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97)") &&
+              !Contains(r.summary_sentence, L"another of them"),
+      "the known pattern in the summary");
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
+    Require(summary["freeze_analysis"]["engine_lock_deadlock"]["kind"] == "known_pattern" &&
+              summary["freeze_analysis"]["engine_lock_deadlock"]["threads"] == nlohmann::json::array({ 42 }),
+      "known_pattern in the JSON");
+  }
+
+  // Without the lock memory (dumps before this): no new fields.
+  AnalysisResult old = EngineCallPathHang();
+  BuildEvidenceAndSummary(old, i18n::Language::kEnglish);
+  const auto oldSummary =
+    skydiag::dump_tool::BuildSummaryJson(old, std::filesystem::temp_directory_path(), L"stem", false);
+  Require(!oldSummary["freeze_analysis"].contains("game_lock_waits") &&
+            !oldSummary["freeze_analysis"].contains("engine_lock_deadlock"),
+    "additive only");
+
+  // The known 1.5.97 pattern: its fix comes first.
+  skydiag::dump_tool::SignatureDatabase db;
+  Require(db.LoadFromJson(std::filesystem::path(__FILE__).parent_path().parent_path() / "dump_tool" / "data" /
+                          "crash_signatures.json"),
+    "the bundled signatures load");
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = EngineLockDeadlockHang();
+    r.game_version = "1.5.97.0";
+    skydiag::dump_tool::SignatureMatchInput input{};
+    input.game_version = r.game_version;
+    input.freeze_state = r.freeze_analysis.state_id;
+    input.game_lock_threads = {
+      { 5096u, { { L"SkyrimSE.exe", 0x132c5a }, { L"SkyrimSE.exe", 0x6d9750 }, { L"SkyrimSE.exe", 0x297ddb },
+                 { L"SkyrimSE.exe", 0x2971a4 } } },
+      { 18456u, { { L"SkyrimSE.exe", 0x132c5a }, { L"SkyrimSE.exe", 0x296c3d }, { L"SkyrimSE.exe", 0x6025fb },
+                  { L"SkyrimSE.exe", 0x6ef480 } } },
+    };
+    input.game_lock_cycle_tids = { 5096u, 18456u };
+    input.read_game_lock = [](std::uint64_t rva, std::uint32_t& w0, std::uint32_t& w1) {
+      w1 = 1u;
+      w0 = rva == 0x2eff8e0ull ? 5096u : (rva == 0x2f3b8e8ull ? 18456u : 0u);
+      return w0 != 0u;
+    };
+    r.signature_match = db.Match(input, !en);
+    Require(r.signature_match && r.signature_match->id == "WORKER_SPINLOCK_ABBA_DEADLOCK_1_5_97", "the known deadlock");
+    BuildEvidenceAndSummary(r, lang);
+    Require(r.quick_answer.case_id == "known_issue" && r.quick_answer.likelihood == "high", "a known one");
+    Require(Contains(r.quick_answer.action, L"WorkerSpinLockFix"), "install the fix");
+    Require(Contains(r.summary_sentence, L"[WORKER_SPINLOCK_ABBA_DEADLOCK_1_5_97]"), "the summary names it");
+    Require(!r.recommendations.empty() && r.recommendations[0].rfind(en ? L"[Known cause]" : L"[알려진 원인]", 0) == 0 &&
+              Contains(r.recommendations[0], L"[phase4_defer]"),
+      "the fix and its setting come first");
+  }
+}
+
 // The same loop at SkyrimSE.exe+0xd17465 on 1.6.1170 is a known AI pathing
 // freeze (crash_signatures.json): the quick answer names its fix, or, with the
 // fix already loaded, says to update it or tell its author.
@@ -984,6 +1144,7 @@ int main()
     TestCrashLoggerThreadDumpDeadlock();
     TestFreezeEngineCallPathNamesNoMod();
     TestFreezeEngineSpinNan();
+    TestFreezeEngineLockDeadlock();
     TestFreezeKnownAiPathingFix();
     TestFreezeObjectClue();
     TestModalDialog();

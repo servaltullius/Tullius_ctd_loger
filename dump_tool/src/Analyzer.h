@@ -303,11 +303,65 @@ struct CrashLoggerThreadDumpDeadlockInfo
   bool thread_dump_stopped_before_capture = false;
 };
 
+// ADR-0021: a frame as module + offset ("SkyrimSE.exe" + 0x132c5a).
+struct GameFrameRef
+{
+  std::wstring module;
+  std::uint64_t offset = 0;
+};
+
+// A held engine lock that a game thread waiting in a delay may be waiting
+// on: a value in its non-volatile registers or stack top that points at the
+// game's writable data (kept in the dump by the helper) where a BSSpinLock or
+// a BSReadWriteLock held for write by another thread of the dump sits.
+struct GameLockCandidate
+{
+  std::wstring location;  // "RBX", "RSP+88"
+  std::uint64_t rva = 0;  // in the game executable
+  std::string kind;       // spin / rw_write
+  std::uint32_t owner_tid = 0;
+  std::uint32_t count = 0;     // lock count (spin) or write depth
+  bool owner_waiting = false;  // the owner is a game thread waiting in a delay too
+};
+
+// A game thread waiting in a delay (Sleep) called by the game executable,
+// which is how the engine's spin and read/write locks wait.
+struct GameLockWaitThread
+{
+  std::uint32_t tid = 0;
+  bool is_main_thread = false;
+  std::wstring wait_module;  // the frame that called the sleep: the game executable
+  std::uint64_t wait_offset = 0;
+  // From that frame down, innermost first (signature anchors).
+  std::vector<GameFrameRef> frames;
+  std::vector<GameLockCandidate> candidates;  // the helper's order
+};
+
+// engine_lock_deadlock: game threads deadlocked on the engine's own locks.
+// Either a wait-for cycle read from the lock memory (each thread waits on a
+// lock the next one holds), or a known deadlock pattern whose stacks and lock
+// memory a signature matched (crash_signatures.json, game_lock_threads).
+struct EngineLockDeadlockInfo
+{
+  struct Link
+  {
+    std::uint32_t tid = 0;  // waits on lock_rva...
+    std::uint64_t lock_rva = 0;
+    std::string kind;            // spin / rw_write
+    std::uint32_t owner_tid = 0;  // ...which this thread holds (the next link's tid)
+  };
+  bool detected = false;
+  std::wstring module;  // the game executable the lock RVAs are in
+  std::vector<Link> cycle;
+  std::string known_pattern;               // signature id, when one matched
+  std::vector<std::uint32_t> pattern_tids;  // the threads it matched, in its order
+};
+
 struct FreezeAnalysisResult
 {
-  // state ids: modal_dialog_wait / crash_logger_thread_dump_deadlock / deadlock_likely /
-  // synchronization_stall_likely / loader_stall_likely / lock_owner_wait / engine_spin_nan /
-  // freeze_candidate / freeze_ambiguous
+  // state ids: modal_dialog_wait / crash_logger_thread_dump_deadlock / engine_lock_deadlock /
+  // deadlock_likely / synchronization_stall_likely / loader_stall_likely / lock_owner_wait /
+  // engine_spin_nan / freeze_candidate / freeze_ambiguous
   bool has_analysis = false;
   i18n::ConfidenceLevel confidence_level = i18n::ConfidenceLevel::kUnknown;
   std::wstring confidence;
@@ -607,6 +661,10 @@ struct AnalysisResult
   MainThreadLockOwnerInfo main_thread_lock_owner;
   CrashLoggerThreadDumpDeadlockInfo crash_logger_thread_dump_deadlock;
   EngineSpinInfo engine_spin;
+  // ADR-0021: game threads waiting in a delay under game code, with the held
+  // engine locks they point at, and the deadlock among them when there is one.
+  std::vector<GameLockWaitThread> game_lock_waits;
+  EngineLockDeadlockInfo engine_lock_deadlock;
   // The suspects came from the game main thread's stack (a freeze's stack walk
   // can pick a WCT cycle thread instead). A bystander wait only speaks for
   // the main thread's own stack.

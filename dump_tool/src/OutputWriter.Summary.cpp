@@ -1,6 +1,7 @@
 #include "OutputWriterPipeline.h"
 
 #include "DumpObjects.h"
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "NextAction.h"
@@ -726,6 +727,68 @@ nlohmann::json BuildSummaryJson(
       { "mxcsr", spin.mxcsr },
       { "call_path_modules", std::move(callPath) },
     };
+  }
+  {
+    // ADR-0021: game threads waiting in a delay under game code, with the
+    // held engine locks they point at (only when the dump holds that memory).
+    const auto hex = [](std::uint64_t value) {
+      char text[32]{};
+      std::snprintf(text, sizeof(text), "0x%llx", static_cast<unsigned long long>(value));
+      return std::string(text);
+    };
+    constexpr std::size_t kSummaryLockFrames = 16;
+    auto waits = nlohmann::json::array();
+    for (const auto& wait : r.game_lock_waits) {
+      if (!IsReportedGameLockWait(wait, r.engine_lock_deadlock)) {
+        continue;
+      }
+      auto frames = nlohmann::json::array();
+      for (std::size_t i = 0; i < wait.frames.size() && i < kSummaryLockFrames; ++i) {
+        frames.push_back(WideToUtf8(GameFrameText(wait.frames[i])));
+      }
+      auto candidates = nlohmann::json::array();
+      for (const auto& candidate : wait.candidates) {
+        candidates.push_back({
+          { "location", WideToUtf8(candidate.location) },
+          { "rva", hex(candidate.rva) },
+          { "kind", candidate.kind },
+          { "owner_tid", candidate.owner_tid },
+          { "count", candidate.count },
+          { "owner_waiting", candidate.owner_waiting },
+        });
+      }
+      waits.push_back({
+        { "tid", wait.tid },
+        { "is_main_thread", wait.is_main_thread },
+        { "wait_site", WideToUtf8(GameFrameText(GameFrameRef{ wait.wait_module, wait.wait_offset })) },
+        { "wait_module", WideToUtf8(wait.wait_module) },
+        { "wait_offset", wait.wait_offset },
+        { "frames", std::move(frames) },
+        { "candidate_locks", std::move(candidates) },
+      });
+    }
+    if (!waits.empty()) {
+      summary["freeze_analysis"]["game_lock_waits"] = std::move(waits);
+    }
+    const auto& deadlock = r.engine_lock_deadlock;
+    if (deadlock.detected) {
+      auto cycle = nlohmann::json::array();
+      for (const auto& link : deadlock.cycle) {
+        cycle.push_back({
+          { "tid", link.tid },
+          { "lock", WideToUtf8(GameFrameText(GameFrameRef{ deadlock.module, link.lock_rva })) },
+          { "lock_rva", hex(link.lock_rva) },
+          { "kind", link.kind },
+          { "owner_tid", link.owner_tid },
+        });
+      }
+      summary["freeze_analysis"]["engine_lock_deadlock"] = {
+        { "kind", deadlock.cycle.empty() ? "known_pattern" : "cycle" },
+        { "threads", EngineLockDeadlockThreads(deadlock) },
+        { "cycle", std::move(cycle) },
+        { "known_pattern", deadlock.known_pattern },
+      };
+    }
   }
   if (r.main_thread_lock_owner.tid != 0u) {
     const auto& owner = r.main_thread_lock_owner;

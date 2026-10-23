@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -26,6 +27,17 @@ struct SignatureMatch
   // recommendations are the fix-loaded ones).
   std::wstring fix_module;
   bool fix_module_loaded = false;
+  // ADR-0021: the threads a signature's game_lock_threads matched, in its
+  // order.
+  std::vector<std::uint32_t> game_lock_tids;
+};
+
+// ADR-0021: a game thread waiting in a delay under game code, with its frames
+// from the one that called the sleep down (module + offset, innermost first).
+struct SignatureGameLockThread
+{
+  std::uint32_t tid = 0;
+  std::vector<std::pair<std::wstring, std::uint64_t>> frames;
 };
 
 struct SignatureMatchInput
@@ -51,6 +63,13 @@ struct SignatureMatchInput
   std::uint64_t freeze_loop_offset = 0;
   // File names of the modules loaded in the dump.
   std::vector<std::wstring> loaded_modules;
+  // ADR-0021, freezes only: the game threads waiting in a delay, the threads
+  // of a wait-for cycle on engine locks (empty without one), and a reader of
+  // the two 32-bit words at a game-executable RVA from the game's writable
+  // data the dump holds (false when it does not hold them).
+  std::vector<SignatureGameLockThread> game_lock_threads;
+  std::vector<std::uint32_t> game_lock_cycle_tids;
+  std::function<bool(std::uint64_t rva, std::uint32_t& word0, std::uint32_t& word1)> read_game_lock;
 };
 
 class SignatureDatabase

@@ -419,6 +419,11 @@ void ApplyEngineSpinNanVerdict(MainThreadWaitInfo& wait, const EngineSpinInfo& s
     wait.blocked_path_modules = spin.call_path_modules;
     return;
   }
+  ApplyEngineLockDeadlockVerdict(wait);
+}
+
+void ApplyEngineLockDeadlockVerdict(MainThreadWaitInfo& wait)
+{
   wait.blocked_thread_tid = 0;
   wait.blocked_module.clear();
   wait.blocked_module_path.clear();

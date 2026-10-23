@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 
 namespace skydiag::dump_tool {
@@ -189,7 +190,8 @@ void AddMainThreadWaitReason(
   // A deadlock, module-level stall or loader stall keeps its own reasons first.
   const bool stallExplained = result->state_id == "deadlock_likely" ||
     result->state_id == "synchronization_stall_likely" || result->state_id == "loader_stall_likely" ||
-    result->state_id == "crash_logger_thread_dump_deadlock" || result->state_id == "engine_spin_nan";
+    result->state_id == "crash_logger_thread_dump_deadlock" || result->state_id == "engine_spin_nan" ||
+    result->state_id == "engine_lock_deadlock";
   if (stallExplained) {
     result->primary_reasons.push_back(std::move(line));
   } else {
@@ -231,6 +233,40 @@ void AddEngineSpinNanReasons(const EngineSpinInfo& spin, i18n::Language language
       ? (L"Plugins on that thread's stack were only on the call path: " + JoinNames(spin.call_path_modules))
       : (L"그 스레드 스택의 플러그인은 호출 경로에 있었을 뿐임: " + JoinNames(spin.call_path_modules)));
   }
+}
+
+// engine_lock_deadlock (ADR-0021): game threads waiting on each other's engine
+// locks, read from the lock memory the helper kept, or a known pattern.
+void AddEngineLockDeadlockReasons(
+  const EngineLockDeadlockInfo& deadlock,
+  i18n::Language language,
+  FreezeAnalysisResult* result)
+{
+  const bool en = language == i18n::Language::kEnglish;
+  const std::wstring tids = JoinThreadIds(EngineLockDeadlockThreads(deadlock));
+  if (!deadlock.cycle.empty()) {
+    result->primary_reasons.push_back(en
+      ? (L"Game threads " + tids + L" were each waiting in the game engine for a lock another of them held: " +
+          DescribeEngineLockCycle(deadlock, en))
+      : (L"게임 스레드 " + tids + L"이(가) 게임 엔진 안에서 서로가 쥔 잠금을 기다리고 있었음: " +
+          DescribeEngineLockCycle(deadlock, en)));
+    result->primary_reasons.push_back(en
+      ? L"They were sleeping between tries in the engine's lock wait; the lock owners were read from game memory kept "
+        L"in this dump, and such a cycle never resolves by itself"
+      : L"모두 엔진의 잠금 대기에서 다시 시도하기 전에 잠들어 있었음. 잠금 소유 스레드는 이 덤프에 담긴 게임 메모리에서 읽었고, "
+        L"이런 순환 대기는 스스로 풀리지 않음");
+  }
+  if (!deadlock.known_pattern.empty()) {
+    const std::wstring id(deadlock.known_pattern.begin(), deadlock.known_pattern.end());
+    result->primary_reasons.push_back(en
+      ? (L"The waiting game threads (" + JoinThreadIds(deadlock.pattern_tids) + L") match the known engine deadlock " + id +
+          L": their call stacks and the engine lock memory in this dump are that deadlock's")
+      : (L"기다리던 게임 스레드(" + JoinThreadIds(deadlock.pattern_tids) + L")가 알려진 엔진 데드락 " + id +
+          L"과(와) 일치함: 이 덤프의 호출 스택과 엔진 잠금 메모리가 그 데드락의 모습임"));
+  }
+  result->primary_reasons.push_back(en
+    ? L"The freeze is inside the game engine; plugins on these threads' stacks were only on the call path"
+    : L"프리징은 게임 엔진 안에서 일어났음. 이 스레드들 스택의 플러그인은 호출 경로에 있었을 뿐임");
 }
 
 void AddCrashLoggerThreadDumpDeadlockReasons(
@@ -386,6 +422,9 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
       : nullptr;
   const EngineSpinInfo* engineSpinNan =
     (input.engine_spin.has_value() && input.engine_spin->nan_detected) ? &*input.engine_spin : nullptr;
+  const EngineLockDeadlockInfo* engineLockDeadlock =
+    (input.engine_lock_deadlock.has_value() && input.engine_lock_deadlock->detected) ? &*input.engine_lock_deadlock
+                                                                                      : nullptr;
   if (modalWait) {
     // Checked first: the main thread is the heartbeat source, so a dialog it
     // is pumping fully explains the stall regardless of other wait chains.
@@ -401,6 +440,12 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     result.state_id = "crash_logger_thread_dump_deadlock";
     result.confidence_level = CrashLoggerThreadDumpDeadlockConfidence(*lockOwner, *threadDumpDeadlock);
     AddCrashLoggerThreadDumpDeadlockReasons(*lockOwner, *threadDumpDeadlock, language, &result);
+  } else if (engineLockDeadlock) {
+    // Game threads deadlocked on the engine's own locks: the freeze is inside
+    // the engine, and no mod on the stacks is shown to have caused it.
+    result.state_id = "engine_lock_deadlock";
+    result.confidence_level = i18n::ConfidenceLevel::kMedium;
+    AddEngineLockDeadlockReasons(*engineLockDeadlock, language, &result);
   } else if (engineSpinNan) {
     // The thread the main thread waits on (or the main thread) is stuck in an
     // engine loop that a NaN value never lets end. Which mod produced the
@@ -569,7 +614,8 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
   std::unordered_set<std::wstring> seenNames;
   // Under a lock-owner wait, the thread-dump deadlock or an engine NaN loop
   // the stack candidates are bystanders, not related to the stall.
-  const bool stackCandidatesAreBystanders = IsLockOwnerFreezeState(result.state_id) || engineSpinNan != nullptr;
+  const bool stackCandidatesAreBystanders =
+    IsLockOwnerFreezeState(result.state_id) || engineSpinNan != nullptr || engineLockDeadlock != nullptr;
   const std::size_t maxCandidates =
     stackCandidatesAreBystanders ? 0u : std::min<std::size_t>(input.actionable_candidates.size(), 2u);
   for (std::size_t i = 0; i < maxCandidates; ++i) {
@@ -577,7 +623,7 @@ FreezeAnalysisResult BuildFreezeCandidateConsensus(const FreezeSignalInput& inpu
     seenNames.insert(related.display_name);
     result.related_candidates.push_back(std::move(related));
   }
-  if (modalWait || threadDumpDeadlock || engineSpinNan) {
+  if (modalWait || threadDumpDeadlock || engineSpinNan || engineLockDeadlock) {
     // Recent module loads are timeline noise next to a dialog the user can
     // see, a deadlock Crash Logger's thread dump caused, or an engine loop
     // that no module on the stacks is shown to have caused.

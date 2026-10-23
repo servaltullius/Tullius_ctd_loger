@@ -2,6 +2,7 @@
 
 #include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
@@ -452,6 +453,34 @@ std::string BuildReportText(
             << " truncated=" << (deadlock.thread_dump_truncated ? "1" : "0")
             << " records=" << deadlock.thread_dump_records << "/" << deadlock.thread_dump_total_threads << "\n";
       }
+    }
+    // ADR-0021: game threads waiting on engine locks, and the deadlock.
+    for (const auto& wait : r.game_lock_waits) {
+      if (!IsReportedGameLockWait(wait, r.engine_lock_deadlock)) {
+        continue;
+      }
+      rpt << "  game_lock_wait tid=" << wait.tid << " main_thread=" << (wait.is_main_thread ? "1" : "0")
+          << " site=" << WideToUtf8(GameFrameText(GameFrameRef{ wait.wait_module, wait.wait_offset }));
+      for (const auto& candidate : wait.candidates) {
+        char rva[32]{};
+        std::snprintf(rva, sizeof(rva), "0x%llx", static_cast<unsigned long long>(candidate.rva));
+        rpt << " lock=" << WideToUtf8(candidate.location) << ":" << rva << ":" << candidate.kind
+            << ":owner=" << candidate.owner_tid << ":count=" << candidate.count
+            << (candidate.owner_waiting ? ":owner_waiting" : "");
+      }
+      rpt << "\n";
+    }
+    if (r.engine_lock_deadlock.detected) {
+      const auto& deadlock = r.engine_lock_deadlock;
+      rpt << "  engine_lock_deadlock threads="
+          << WideToUtf8(JoinThreadIds(EngineLockDeadlockThreads(deadlock)));
+      if (!deadlock.cycle.empty()) {
+        rpt << " cycle=" << WideToUtf8(DescribeEngineLockCycle(deadlock, /*en=*/true));
+      }
+      if (!deadlock.known_pattern.empty()) {
+        rpt << " pattern=" << deadlock.known_pattern;
+      }
+      rpt << "\n";
     }
     // ADR-0010 addendum: the objects those threads pointed at (a clue).
     for (const auto& thread : r.freeze_thread_objects) {

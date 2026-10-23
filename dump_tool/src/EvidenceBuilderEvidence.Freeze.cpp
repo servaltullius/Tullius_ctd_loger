@@ -4,6 +4,7 @@
 #include <cwchar>
 
 #include "DumpObjects.h"
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "SkyrimDiagShared.h"
 
@@ -209,6 +210,34 @@ void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuil
     if (!spin.call_path_modules.empty()) {
       parts.push_back((en ? L"plugins on its stack (call path only): " : L"그 스레드 스택의 플러그인(호출 경로일 뿐): ") +
         JoinList(spin.call_path_modules, spin.call_path_modules.size(), L", "));
+    }
+    e.details = JoinList(parts, parts.size(), L" | ");
+    r.evidence.push_back(std::move(e));
+  }
+
+  if (r.engine_lock_deadlock.detected) {
+    // ADR-0021: the deadlocked threads and the locks, read from the dump.
+    const auto& deadlock = r.engine_lock_deadlock;
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Game threads were deadlocked on the game engine's own locks"
+                 : L"게임 스레드들이 게임 엔진 자체 잠금에서 서로를 기다리고 있었음";
+    std::vector<std::wstring> parts;
+    if (!deadlock.cycle.empty()) {
+      parts.push_back(DescribeEngineLockCycle(deadlock, en));
+    }
+    if (!deadlock.known_pattern.empty()) {
+      parts.push_back((en ? L"known pattern: " : L"알려진 패턴: ") +
+        std::wstring(deadlock.known_pattern.begin(), deadlock.known_pattern.end()));
+    }
+    for (const auto tid : EngineLockDeadlockThreads(deadlock)) {
+      const auto it = std::find_if(r.game_lock_waits.begin(), r.game_lock_waits.end(),
+        [tid](const GameLockWaitThread& w) { return w.tid == tid; });
+      if (it != r.game_lock_waits.end()) {
+        parts.push_back((en ? L"thread " : L"스레드 ") + std::to_wstring(tid) + (en ? L" waits at " : L" 대기 위치: ") +
+          GameFrameText(GameFrameRef{ it->wait_module, it->wait_offset }));
+      }
     }
     e.details = JoinList(parts, parts.size(), L" | ");
     r.evidence.push_back(std::move(e));

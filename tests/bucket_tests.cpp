@@ -141,8 +141,26 @@ static void Test_EngineSpinKey_IsTheLoopLocation()
   assert(spin != ComputeFreezeStateBucketKey("engine_spin_nan"));
 }
 
+// engine_lock_deadlock (ADR-0021): keyed by the cycle's locks, in any order,
+// or by the known pattern.
+static void Test_EngineLockKey_IsTheLocksOrThePattern()
+{
+  using skydiag::dump_tool::ComputeEngineLockBucketKey;
+  using skydiag::dump_tool::ComputeHangBucketKey;
+
+  const auto key = ComputeEngineLockBucketKey("engine_lock_deadlock", L"SkyrimSE.exe", { 0x2f3b8e8, 0x2eff8e0 }, "");
+  assert(key.starts_with(L"HANG1-"));
+  assert(key == ComputeEngineLockBucketKey("engine_lock_deadlock", L"skyrimse.exe", { 0x2eff8e0, 0x2f3b8e8, 0x2eff8e0 }, ""));
+  assert(key == ComputeHangBucketKey("v=1|kind=engine_lock_deadlock|locks=skyrimse.exe+0x2eff8e0,skyrimse.exe+0x2f3b8e8"));
+  assert(key != ComputeEngineLockBucketKey("engine_lock_deadlock", L"SkyrimSE.exe", { 0x2f3b8e8 }, ""));
+  const auto known = ComputeEngineLockBucketKey("engine_lock_deadlock", L"SkyrimSE.exe", {}, "CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97");
+  assert(known == ComputeHangBucketKey("v=1|kind=engine_lock_deadlock|pattern=CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97"));
+  assert(known != key);
+}
+
 int main()
 {
+  Test_EngineLockKey_IsTheLocksOrThePattern();
   Test_SameInput_ProducesStableKey();
   Test_DifferentTopFrame_ChangesKey();
   Test_DifferentExceptionCode_ChangesKey();

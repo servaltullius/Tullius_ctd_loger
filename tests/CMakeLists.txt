@@ -544,6 +544,7 @@ set_tests_properties(skydiag_candidate_consensus_tests PROPERTIES
 add_executable(skydiag_freeze_candidate_consensus_tests
   freeze_candidate_consensus_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/FreezeCandidateConsensus.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/GameLockWait.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/MainThreadWait.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AnalyzerInternalsWct.cpp"
 )
@@ -567,6 +568,19 @@ target_include_directories(skydiag_main_thread_wait_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
 )
 add_test(NAME skydiag_main_thread_wait_tests COMMAND skydiag_main_thread_wait_tests)
+
+# Engine-lock deadlocks (ADR-0021): the helper's window selection and lock
+# decoding (shared/SkyrimDiagGameLocks.h) and the analyzer's waits and cycle.
+add_executable(skydiag_game_lock_wait_tests
+  game_lock_wait_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/GameLockWait.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/MainThreadWait.cpp"
+)
+target_include_directories(skydiag_game_lock_wait_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+add_test(NAME skydiag_game_lock_wait_tests COMMAND skydiag_game_lock_wait_tests)
 
 add_executable(skydiag_engine_spin_loop_tests
   engine_spin_loop_tests.cpp

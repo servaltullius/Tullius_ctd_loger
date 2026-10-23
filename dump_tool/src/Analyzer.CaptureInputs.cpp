@@ -1,9 +1,11 @@
 #include "AnalyzerPipeline.h"
 
 #include "AnalyzerInternals.h"
+#include "AnalyzerInternalsStackwalkPriv.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MinidumpThreadNames.h"
 #include "ModalDialogWait.h"
@@ -16,12 +18,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <array>
 #include <filesystem>
+#include <memory>
 #include <string_view>
 #include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagGameLocks.h"
 #include "SkyrimDiagHangObjectThreads.h"
 #include "SkyrimDiagProtocol.h"
 #include "SkyrimDiagShared.h"
@@ -408,6 +413,182 @@ void DetectEngineSpin(
   }
 }
 
+// ADR-0021: the game executable as the dump holds it: its writable data
+// sections (from the image header the helper keeps with the lock windows) and
+// a reader of the dump's own memory. Dumps without that header give no
+// writable data, so no lock is read from them.
+struct DumpGameData
+{
+  std::shared_ptr<internal::stackwalk_internal::MinidumpMemoryView> memory;
+  GameLockImage image;
+};
+
+DumpGameData ReadDumpGameData(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& allModules,
+  const std::vector<minidump::ThreadRecord>& threads)
+{
+  DumpGameData data;
+  auto memory = std::make_shared<internal::stackwalk_internal::MinidumpMemoryView>();
+  if (!memory->Init(dumpBase, dumpSize, &threads)) {
+    return data;
+  }
+  data.memory = memory;
+  const auto exe = std::find_if(allModules.begin(), allModules.end(), [](const ModuleInfo& m) { return m.is_game_exe; });
+  if (exe == allModules.end()) {
+    return data;
+  }
+  data.image.module = exe->filename;
+  data.image.base = exe->base;
+  std::vector<std::uint8_t> header(skydiag::game_locks::kHeaderBytes);
+  std::size_t got = 0;
+  if (memory->Read(exe->base, header.data(), header.size(), got) && got == header.size()) {
+    data.image.writable = skydiag::game_locks::WritableSections(header.data(), header.size(), exe->base);
+    // A section the header puts outside the module is not trusted.
+    std::erase_if(data.image.writable, [&](const skydiag::game_locks::AddressRange& r) {
+      return r.begin < exe->base || r.end > exe->end || r.begin >= r.end;
+    });
+  }
+  return data;
+}
+
+DumpMemoryReader DumpOnlyReader(const std::shared_ptr<internal::stackwalk_internal::MinidumpMemoryView>& memory)
+{
+  if (!memory) {
+    return {};
+  }
+  return [memory](std::uint64_t address, void* destination, std::size_t size) {
+    std::size_t got = 0;
+    return memory->Read(address, destination, size, got) && got == size;
+  };
+}
+
+std::vector<GameFrameRef> FrameRefs(const std::vector<ModuleInfo>& allModules, const std::vector<std::uint64_t>& pcs)
+{
+  std::vector<GameFrameRef> refs;
+  refs.reserve(pcs.size());
+  for (const auto pc : pcs) {
+    GameFrameRef ref{};
+    if (const auto index = FindModuleIndexForAddress(allModules, pc)) {
+      ref.module = allModules[*index].filename;
+      ref.offset = pc - allModules[*index].base;
+    } else {
+      ref.offset = pc;
+    }
+    refs.push_back(std::move(ref));
+  }
+  return refs;
+}
+
+// The registers and stack slots the helper looked at
+// (shared/SkyrimDiagGameLocks.h), from the thread's dump context.
+std::vector<std::pair<std::wstring, std::uint64_t>> GameLockRoots(
+  const internal::stackwalk_internal::MinidumpMemoryView& memory,
+  const CONTEXT& c)
+{
+  const std::array<std::uint64_t, skydiag::game_locks::kRegisterNames.size()> registers = {
+    c.Rbx, c.Rbp, c.Rsi, c.Rdi, c.R12, c.R13, c.R14, c.R15,
+  };
+  std::vector<std::pair<std::wstring, std::uint64_t>> roots;
+  for (std::size_t i = 0; i < registers.size(); ++i) {
+    const std::string_view name = skydiag::game_locks::kRegisterNames[i];
+    roots.emplace_back(std::wstring(name.begin(), name.end()), registers[i]);
+  }
+  for (std::size_t offset = 0; offset < skydiag::game_locks::kStackBytes; offset += 8) {
+    std::uint64_t value = 0;
+    std::size_t got = 0;
+    if (!memory.Read(c.Rsp + offset, &value, sizeof(value), got) || got != sizeof(value)) {
+      break;
+    }
+    wchar_t location[32]{};
+    swprintf_s(location, L"RSP+%llX", static_cast<unsigned long long>(offset));
+    roots.emplace_back(location, value);
+  }
+  return roots;
+}
+
+// ADR-0021: the game threads (and the main thread) waiting in a delay under
+// game code, the held engine locks they point at, and a wait-for cycle among
+// them. Without one, a known deadlock pattern whose stacks and lock memory a
+// signature matches is the deadlock instead (a lock held for read names no
+// owner, so such a cycle cannot be read from memory alone).
+void DetectGameLockWaits(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<ModuleInfo>& allModules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  std::uint32_t mainTid,
+  const std::vector<ModalStackFrame>& mainThreadFrames,
+  const std::vector<ThreadTopFrames>& gameThreadFrames,
+  const AnalyzeOptions& opt,
+  AnalysisResult& out)
+{
+  const auto data = ReadDumpGameData(dumpBase, dumpSize, allModules, threads);
+  if (!data.memory || data.image.module.empty()) {
+    return;
+  }
+  std::vector<GameLockThreadInput> inputs;
+  const auto addInput = [&](std::uint32_t tid, bool isMain, const std::vector<ModalStackFrame>& top,
+                          const std::vector<std::uint64_t>& pcs) {
+    const auto record = std::find_if(threads.begin(), threads.end(), [tid](const auto& t) { return t.tid == tid; });
+    CONTEXT context{};
+    if (top.empty() || record == threads.end() ||
+        !minidump::ReadThreadContextWin64(dumpBase, dumpSize, *record, context)) {
+      return;
+    }
+    GameLockThreadInput input{};
+    input.tid = tid;
+    input.is_main_thread = isMain;
+    input.top_frames = top;
+    input.frames = FrameRefs(allModules, pcs);
+    input.roots = GameLockRoots(*data.memory, context);
+    inputs.push_back(std::move(input));
+  };
+  {
+    std::vector<std::uint64_t> pcs;
+    pcs.reserve(mainThreadFrames.size());
+    for (const auto& frame : mainThreadFrames) {
+      pcs.push_back(frame.pc);
+    }
+    addInput(mainTid, true, mainThreadFrames, pcs);
+  }
+  for (const auto& thread : gameThreadFrames) {
+    if (thread.tid != mainTid) {
+      addInput(thread.tid, false, thread.frames, thread.pcs);
+    }
+  }
+  std::vector<std::uint32_t> dumpTids;
+  dumpTids.reserve(threads.size());
+  for (const auto& t : threads) {
+    dumpTids.push_back(t.tid);
+  }
+  out.game_lock_waits = FindGameLockWaits(inputs, data.image, DumpOnlyReader(data.memory), dumpTids);
+  auto& deadlock = out.engine_lock_deadlock;
+  deadlock.module = data.image.module;
+  deadlock.cycle = FindEngineLockCycle(out.game_lock_waits);
+  deadlock.detected = !deadlock.cycle.empty();
+  if (deadlock.detected || out.game_lock_waits.empty() || data.image.writable.empty() || opt.data_dir.empty()) {
+    return;
+  }
+  SignatureDatabase sigDb;
+  if (!sigDb.LoadFromJson(std::filesystem::path(opt.data_dir) / L"crash_signatures.json")) {
+    return;
+  }
+  SignatureMatchInput input{};
+  input.game_version = out.game_version;
+  input.freeze_state = "engine_lock_deadlock";
+  internal::FillGameLockSignatureInput(dumpBase, dumpSize, allModules, out, input);
+  // Only a pattern that names the threads and their locks can say there is a
+  // deadlock; a signature on the state alone would assume it.
+  const auto match = sigDb.Match(input, /*useKorean=*/false);
+  if (match && !match->game_lock_tids.empty()) {
+    deadlock.detected = true;
+    deadlock.known_pattern = match->id;
+    deadlock.pattern_tids = match->game_lock_tids;
+  }
+}
+
 // ADR-0010 addendum (2026-10-22): the objects the threads that matter in a
 // freeze pointed at (shared/SkyrimDiagHangObjectThreads.h, plus the threads
 // the verdicts name), read from the memory the helper kept for them. Dumps
@@ -467,6 +648,58 @@ void ReadFreezeThreadObjects(
 }
 
 }  // namespace
+
+namespace internal {
+
+void FillGameLockSignatureInput(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const AnalysisResult& out,
+  SignatureMatchInput& input)
+{
+  input.game_lock_threads.clear();
+  for (const auto& wait : out.game_lock_waits) {
+    SignatureGameLockThread thread{};
+    thread.tid = wait.tid;
+    for (const auto& frame : wait.frames) {
+      thread.frames.emplace_back(frame.module, frame.offset);
+    }
+    input.game_lock_threads.push_back(std::move(thread));
+  }
+  input.game_lock_cycle_tids.clear();
+  for (const auto& link : out.engine_lock_deadlock.cycle) {
+    input.game_lock_cycle_tids.push_back(link.tid);
+  }
+  input.read_game_lock = nullptr;
+  if (out.game_lock_waits.empty()) {
+    return;
+  }
+  auto data = ReadDumpGameData(dumpBase, dumpSize, modules, LoadThreads(dumpBase, dumpSize));
+  if (!data.memory || data.image.writable.empty()) {
+    return;
+  }
+  input.read_game_lock = [memory = data.memory, image = std::move(data.image)](
+                           std::uint64_t rva, std::uint32_t& word0, std::uint32_t& word1) {
+    if (rva > UINT64_MAX - image.base) {
+      return false;
+    }
+    const std::uint64_t address = image.base + rva;
+    if (!skydiag::game_locks::PointsIntoWritable(image.writable, address)) {
+      return false;
+    }
+    std::uint32_t words[2]{};
+    std::size_t got = 0;
+    if (!memory->Read(address, words, sizeof(words), got) || got != sizeof(words)) {
+      return false;
+    }
+    word0 = words[0];
+    word1 = words[1];
+    return true;
+  };
+}
+
+}  // namespace internal
 
 std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out)
 {
@@ -1029,6 +1262,39 @@ void ComputeSuspects(
     DetectEngineSpin(
       dumpBase, dumpSize, allModules, threads, modalProbeTid, mainThreadFrames, gameThreadFrames, lockOwnerFrames, out);
   }
+  if (modalProbeTid != 0u && !out.crash_logger_thread_dump_deadlock.detected) {
+    DetectGameLockWaits(
+      dumpBase, dumpSize, allModules, threads, modalProbeTid, mainThreadFrames, gameThreadFrames, opt, out);
+  }
+  if (out.engine_lock_deadlock.detected) {
+    // The game's own threads deadlocked on engine locks: no plugin on the
+    // stacks leads, and the game thread the main thread waited for is one of
+    // them or waits behind them.
+    ApplyEngineLockDeadlockVerdict(out.main_thread_wait);
+    const auto& deadlock = out.engine_lock_deadlock;
+    std::wstring tids;
+    if (!deadlock.cycle.empty()) {
+      for (const auto& link : deadlock.cycle) {
+        tids += (tids.empty() ? L"" : L",") + std::to_wstring(link.tid);
+      }
+    } else {
+      for (const auto tid : deadlock.pattern_tids) {
+        tids += (tids.empty() ? L"" : L",") + std::to_wstring(tid);
+      }
+    }
+    out.diagnostics.push_back(L"[Freeze] engine_lock_deadlock: threads=" + tids +
+      (deadlock.known_pattern.empty() ? std::wstring{} : (L" pattern=" + Utf8ToWide(deadlock.known_pattern))) +
+      L"; stack-module suspects kept as call path only");
+    for (auto& suspect : out.suspects) {
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(opt.language, suspect.confidence_level);
+      suspect.reason += opt.language == i18n::Language::kEnglish
+        ? L" (game threads were deadlocked on the engine's own locks; modules on the stacks are on the call path, "
+          L"not shown to be the freeze cause)"
+        : L" (게임 스레드들이 엔진 자체 잠금에서 서로를 기다리며 멈췄으므로 스택의 모듈은 호출 경로일 뿐 프리징 원인으로 "
+          L"확인된 것이 아님)";
+    }
+  }
   if (out.engine_spin.nan_detected) {
     // The engine looped on a NaN value: no plugin on the stacks leads, and the
     // game thread the main thread waited for keeps only its call path.
@@ -1050,7 +1316,8 @@ void ComputeSuspects(
   if (hangLike && out.exc_tid == 0u) {
     ReadFreezeThreadObjects(dumpBase, dumpSize, allModules, threads, modalProbeTid, gameThreadTids, out);
   }
-  if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread && !out.engine_spin.nan_detected) {
+  if (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread && !out.engine_spin.nan_detected &&
+      !out.engine_lock_deadlock.detected) {
     // The main thread was sitting in a wait it did not get from these
     // modules: the engine's own sleep/wait or the graphics driver. Plugins on
     // its stack were only on the call path (ADR-0009).
@@ -1088,7 +1355,8 @@ void ComputeSuspects(
     out.suspects.insert(out.suspects.begin(), std::move(lead));
   }
 
-  if (hangLike && mainTid.has_value() && !out.suspects.empty() && !out.engine_spin.nan_detected) {
+  if (hangLike && mainTid.has_value() && !out.suspects.empty() && !out.engine_spin.nan_detected &&
+      !out.engine_lock_deadlock.detected) {
     constexpr std::size_t kNearStackSlots = 32u;
     constexpr std::size_t kMinimumThreadGroup = 4u;
     const auto matchingTids = internal::FindThreadsWithNearStackModule(

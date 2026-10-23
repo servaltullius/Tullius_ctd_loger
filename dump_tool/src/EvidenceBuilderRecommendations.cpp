@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
@@ -758,7 +759,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // An engine loop on a NaN value (engine_spin_nan) names no mod either: the
   // stack plugins only called into the engine.
   const bool lockOwnerWait = IsLockOwnerFreezeState(r.freeze_analysis.state_id);
-  const bool stackIsCallPathOnly = lockOwnerWait || r.engine_spin.nan_detected;
+  // Nor does a deadlock on the engine's own locks (engine_lock_deadlock).
+  const bool stackIsCallPathOnly = lockOwnerWait || r.engine_spin.nan_detected ||
+    r.freeze_analysis.state_id == "engine_lock_deadlock";
   if (!stackIsCallPathOnly) {
     AddActionableCandidateRecommendations(
       r,
@@ -956,7 +959,20 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     const auto& stateId = r.freeze_analysis.state_id;
     const bool stallExplained = stateId == "deadlock_likely" || stateId == "synchronization_stall_likely" ||
       stateId == "loader_stall_likely" || r.hang_thread_module_consensus.has_consensus;
-    if (isHangLike && r.engine_spin.nan_detected) {
+    if (isHangLike && stateId == "engine_lock_deadlock") {
+      // ADR-0021: the deadlocked threads themselves are read; a known pattern
+      // adds its own [Known cause] fix.
+      const std::wstring tids = JoinThreadIds(EngineLockDeadlockThreads(r.engine_lock_deadlock));
+      r.recommendations.push_back(en
+        ? (L"[Main thread] Game threads " + tids +
+            L" deadlocked on the game engine's own locks. No mod is shown to have caused it: do not remove mods only "
+            L"because they are on these threads' stacks. If it keeps happening, look for an engine fix mod for this "
+            L"freeze for your game version and share this report when asking for help.")
+        : (L"[메인 스레드] 게임 스레드 " + tids +
+            L"이(가) 게임 엔진 자체 잠금에서 교착 상태에 빠졌습니다. 어느 모드가 일으켰다는 근거는 없으니 이 스레드들 "
+            L"스택에 있다는 이유만으로 모드를 빼지 마세요. 계속 반복되면 지금 게임 버전에서 이 프리징을 고치는 엔진 수정 "
+            L"모드가 있는지 찾아보고, 도움을 요청할 때 이 리포트를 공유하세요."));
+    } else if (isHangLike && r.engine_spin.nan_detected) {
       // engine_spin_nan comes first: the stuck thread itself is read.
       const auto& mods = r.engine_spin.call_path_modules;
       const std::wstring path = mods.empty() ? std::wstring{} : JoinList(mods, mods.size(), L", ");

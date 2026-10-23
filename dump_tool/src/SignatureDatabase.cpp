@@ -15,6 +15,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "SkyrimDiagGameLocks.h"
+
 namespace skydiag::dump_tool {
 namespace {
 
@@ -99,6 +101,119 @@ std::vector<std::wstring> ReadStringArray(const nlohmann::json& obj, const char*
   return out;
 }
 
+using GameFrame = std::pair<std::wstring, std::uint64_t>;
+
+// "SkyrimSE.exe+0x132C5A": the module (lowercased) and the offset.
+bool ParseGameFrame(const nlohmann::json& v, GameFrame& out)
+{
+  if (!v.is_string()) {
+    return false;
+  }
+  const auto& text = v.get_ref<const std::string&>();
+  const auto plus = text.rfind('+');
+  if (plus == std::string::npos || plus == 0 || plus + 1 >= text.size()) {
+    return false;
+  }
+  try {
+    out.first = WideLower(Utf8ToWidePortable(text.substr(0, plus)));
+    out.second = ParseHexU64(text.substr(plus + 1));
+  } catch (...) {
+    return false;
+  }
+  return !out.first.empty();
+}
+
+struct GameLockConstraint
+{
+  std::uint64_t rva = 0;
+  bool rw = false;
+  int owner_thread = -1;  // index into game_lock_threads; -1 for a lock held for read
+};
+
+// The thread's frames start at the first anchor, and the other anchors follow
+// in order further down (other frames may sit between them).
+bool GameLockAnchorsMatch(const std::vector<GameFrame>& anchors, const SignatureGameLockThread& thread)
+{
+  const auto same = [](const GameFrame& anchor, const GameFrame& frame) {
+    return anchor.second == frame.second && anchor.first == WideLower(frame.first);
+  };
+  if (anchors.empty() || thread.frames.empty() || !same(anchors.front(), thread.frames.front())) {
+    return false;
+  }
+  std::size_t at = 1;
+  for (std::size_t i = 1; i < anchors.size(); ++i) {
+    while (at < thread.frames.size() && !same(anchors[i], thread.frames[at])) {
+      ++at;
+    }
+    if (at >= thread.frames.size()) {
+      return false;
+    }
+    ++at;
+  }
+  return true;
+}
+
+// Every lock reads from the dump as the signature says; a lock the dump does
+// not hold matches nothing.
+bool GameLocksHold(
+  const std::vector<GameLockConstraint>& locks,
+  const std::vector<std::uint32_t>& tids,
+  const SignatureMatchInput& input)
+{
+  for (const auto& lock : locks) {
+    std::uint32_t word0 = 0;
+    std::uint32_t word1 = 0;
+    if (!input.read_game_lock || !input.read_game_lock(lock.rva, word0, word1)) {
+      return false;
+    }
+    if (lock.owner_thread < 0) {
+      if (!skydiag::game_locks::RwReaders(word0, word1)) {
+        return false;
+      }
+      continue;
+    }
+    const auto held = skydiag::game_locks::DecodeHeldLock(word0, word1);
+    const auto want = lock.rw ? skydiag::game_locks::HeldKind::kRwWrite : skydiag::game_locks::HeldKind::kSpin;
+    if (held.kind != want || held.owner != tids[static_cast<std::size_t>(lock.owner_thread)]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Distinct input threads for the signature's threads (in its order) that
+// match their anchors, hold the locks and, when asked, are all in the cycle.
+bool AssignGameLockThreads(
+  const std::vector<std::vector<GameFrame>>& anchors,
+  const std::vector<GameLockConstraint>& locks,
+  bool inCycle,
+  const SignatureMatchInput& input,
+  std::vector<std::uint32_t>& tids)
+{
+  if (tids.size() == anchors.size()) {
+    if (inCycle && !std::all_of(tids.begin(), tids.end(), [&](std::uint32_t tid) {
+          return std::find(input.game_lock_cycle_tids.begin(), input.game_lock_cycle_tids.end(), tid) !=
+                 input.game_lock_cycle_tids.end();
+        })) {
+      return false;
+    }
+    return GameLocksHold(locks, tids, input);
+  }
+  const auto& want = anchors[tids.size()];
+  for (const auto& thread : input.game_lock_threads) {
+    if (thread.tid == 0u || std::find(tids.begin(), tids.end(), thread.tid) != tids.end() ||
+        !GameLockAnchorsMatch(want, thread)) {
+      continue;
+    }
+    tids.push_back(thread.tid);
+    if (AssignGameLockThreads(anchors, locks, inCycle, input, tids)) {
+      return true;
+    }
+    tids.pop_back();
+  }
+  return false;
+}
+
 }  // namespace
 
 struct SignatureDatabase::Signature
@@ -136,6 +251,15 @@ struct SignatureDatabase::Signature
   std::wstring freeze_loop_module;    // lowercase, empty = any
   std::uint64_t freeze_loop_offset = 0;
   bool has_freeze_loop_offset = false;
+
+  // ADR-0021: game threads waiting in a delay, each matched by ordered frame
+  // anchors (the first is the frame that called the sleep, the rest follow
+  // in order further down), on distinct threads; engine locks at RVAs, held
+  // by one of those threads (spin, or read/write for write) or held for read;
+  // and whether those threads must be in the wait-for cycle.
+  std::vector<std::vector<GameFrame>> game_lock_threads;
+  std::vector<GameLockConstraint> game_locks;
+  bool game_lock_cycle = false;
 
   std::wstring cause_ko;
   std::wstring cause_en;
@@ -223,7 +347,10 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
             key != "object_type_any" &&
             key != "freeze_state" &&
             key != "freeze_loop_module" &&
-            key != "freeze_loop_offset") {
+            key != "freeze_loop_offset" &&
+            key != "game_lock_threads" &&
+            key != "game_locks" &&
+            key != "game_lock_cycle") {
           // A typo or newer constraint must invalidate this entry rather than
           // being ignored and broadening its match.
           valid = false;
@@ -414,6 +541,112 @@ bool SignatureDatabase::LoadFromJson(const std::filesystem::path& jsonPath)
           valid = false;
         }
       }
+      if (m.contains("game_lock_threads")) {
+        const auto& v = m["game_lock_threads"];
+        constexpr std::size_t kMaxGameLockThreads = 4;
+        if (!v.is_array() || v.empty() || v.size() > kMaxGameLockThreads) {
+          valid = false;
+        } else {
+          for (const auto& thread : v) {
+            const auto frames = thread.is_object() ? thread.find("frames") : thread.end();
+            if (!thread.is_object() || thread.size() != 1u || frames == thread.end() || !frames->is_array() ||
+                frames->empty()) {
+              valid = false;
+              break;
+            }
+            std::vector<GameFrame> anchors;
+            for (const auto& frame : *frames) {
+              GameFrame anchor;
+              if (!ParseGameFrame(frame, anchor)) {
+                valid = false;
+                break;
+              }
+              anchors.push_back(std::move(anchor));
+            }
+            sig.game_lock_threads.push_back(std::move(anchors));
+          }
+          hasMatchConstraint = true;
+        }
+      }
+      if (m.contains("game_locks")) {
+        const auto& v = m["game_locks"];
+        if (!v.is_array() || v.empty()) {
+          valid = false;
+        } else {
+          for (const auto& lock : v) {
+            if (!lock.is_object()) {
+              valid = false;
+              break;
+            }
+            for (auto it = lock.begin(); it != lock.end(); ++it) {
+              if (it.key() != "rva" && it.key() != "kind" && it.key() != "owner_thread" && it.key() != "state") {
+                valid = false;
+              }
+            }
+            GameLockConstraint parsed{};
+            const auto rva = lock.find("rva");
+            const auto kind = lock.find("kind");
+            const auto owner = lock.find("owner_thread");
+            const auto state = lock.find("state");
+            if (rva == lock.end() || !rva->is_string() || kind == lock.end() || !kind->is_string()) {
+              valid = false;
+              break;
+            }
+            try {
+              parsed.rva = ParseHexU64(rva->get<std::string>());
+            } catch (...) {
+              valid = false;
+              break;
+            }
+            const auto& kindText = kind->get_ref<const std::string&>();
+            parsed.rw = kindText == "rw";
+            if (kindText != "spin" && !parsed.rw) {
+              valid = false;
+              break;
+            }
+            const bool hasOwner = owner != lock.end();
+            const bool readHeld = state != lock.end();
+            if (hasOwner) {
+              if (!owner->is_number_unsigned() ||
+                  owner->get<std::uint64_t>() >= static_cast<std::uint64_t>(sig.game_lock_threads.size())) {
+                valid = false;
+                break;
+              }
+              parsed.owner_thread = static_cast<int>(owner->get<std::uint64_t>());
+            }
+            // A spin lock is held by a thread; a read/write lock either by a
+            // writer thread or for read (which names no thread).
+            if (readHeld && (!parsed.rw || hasOwner || !state->is_string() || state->get<std::string>() != "read")) {
+              valid = false;
+              break;
+            }
+            if (!hasOwner && !readHeld) {
+              valid = false;
+              break;
+            }
+            sig.game_locks.push_back(parsed);
+          }
+          hasMatchConstraint = true;
+        }
+      }
+      if (m.contains("game_lock_cycle")) {
+        if (m["game_lock_cycle"].is_boolean() && m["game_lock_cycle"].get<bool>()) {
+          sig.game_lock_cycle = true;
+          hasMatchConstraint = true;
+        } else {
+          valid = false;
+        }
+      }
+      // Engine-lock facts describe threads of one freeze of one game version:
+      // locks and the cycle need the threads, and the threads need a freeze
+      // state and the version their anchors are RVAs of.
+      if ((!sig.game_locks.empty() || sig.game_lock_cycle) && sig.game_lock_threads.empty()) {
+        valid = false;
+      }
+      if (!sig.game_lock_threads.empty() && (sig.freeze_state.empty() || sig.game_version.empty())) {
+        valid = false;
+      }
+
       // The loop is an exact instruction of one module, and only a freeze has
       // one: both parts, and a freeze state, or the entry is dropped.
       if ((!sig.freeze_loop_module.empty() || sig.has_freeze_loop_offset) &&
@@ -587,8 +820,15 @@ std::optional<SignatureMatch> SignatureDatabase::Match(const SignatureMatchInput
       }
     }
 
+    std::vector<std::uint32_t> gameLockTids;
+    if (!sig.game_lock_threads.empty() &&
+        !AssignGameLockThreads(sig.game_lock_threads, sig.game_locks, sig.game_lock_cycle, input, gameLockTids)) {
+      continue;
+    }
+
     SignatureMatch result{};
     result.id = sig.id;
+    result.game_lock_tids = std::move(gameLockTids);
     result.scope = sig.scope;
     result.cause = useKorean ? sig.cause_ko : sig.cause_en;
     result.confidence_level = sig.confidence_level;

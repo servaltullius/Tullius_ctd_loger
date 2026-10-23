@@ -67,6 +67,17 @@ std::optional<std::wstring> LockOwnerFreezeBucketKey(const AnalysisResult& out)
 
 void ComputeCrashBucket(AnalysisResult& out)
 {
+  if (out.engine_lock_deadlock.detected) {
+    const auto& deadlock = out.engine_lock_deadlock;
+    std::vector<std::uint64_t> locks;
+    for (const auto& link : deadlock.cycle) {
+      locks.push_back(link.lock_rva);
+    }
+    out.crash_bucket_version = 3;
+    out.crash_bucket_key =
+      ComputeEngineLockBucketKey("engine_lock_deadlock", deadlock.module, std::move(locks), deadlock.known_pattern);
+    return;
+  }
   if (out.engine_spin.nan_detected && !out.engine_spin.rip_module.empty()) {
     out.crash_bucket_version = 3;
     out.crash_bucket_key =
