@@ -23,3 +23,4 @@ ADR index:
 - `0018-recommendation-classes.md`
 - `0019-faulting-instruction.md`
 - `0020-reanalyze-older-summaries.md`
+- `0021-engine-lock-deadlocks.md`

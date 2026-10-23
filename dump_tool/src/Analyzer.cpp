@@ -793,6 +793,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.engine_spin.loop_found) {
     freezeSignals.engine_spin = out.engine_spin;
   }
+  if (out.engine_lock_deadlock.detected) {
+    freezeSignals.engine_lock_deadlock = out.engine_lock_deadlock;
+  }
   freezeSignals.actionable_candidates = out.actionable_candidates;
   out.freeze_analysis = BuildFreezeCandidateConsensus(freezeSignals, opt.language);
   out.freeze_analysis.first_chance_context = out.first_chance_summary;
@@ -820,6 +823,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
         input.freeze_loop_module = out.engine_spin.rip_module;
         input.freeze_loop_offset = out.engine_spin.rip_offset;
       }
+      internal::FillGameLockSignatureInput(dumpBase, dumpSize, allModules, out, input);
       input.loaded_modules.reserve(allModules.size());
       for (const auto& m : allModules) {
         input.loaded_modules.push_back(m.filename);

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cwchar>
 
+#include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MinidumpUtil.h"
 
@@ -310,6 +311,33 @@ std::wstring DescribeEngineSpinNan(const AnalysisResult& r, i18n::Language lang,
         (mods.empty() ? std::wstring(L".")
                       : (L". 그 스레드 스택의 플러그인(" + mods + L")은 호출 경로에 있었을 뿐입니다.")) +
         L" (신뢰도: " + conf + L")");
+}
+
+// engine_lock_deadlock (ADR-0021): game threads waiting on each other's
+// engine locks, in plain words; no mod is named.
+std::wstring DescribeEngineLockDeadlock(const AnalysisResult& r, i18n::Language lang, bool en)
+{
+  const auto& deadlock = r.engine_lock_deadlock;
+  const std::wstring conf = ConfidenceText(lang, r.freeze_analysis.confidence_level);
+  const std::wstring tids = JoinThreadIds(EngineLockDeadlockThreads(deadlock));
+  const std::wstring pattern(deadlock.known_pattern.begin(), deadlock.known_pattern.end());
+  // A known pattern can be one thread waiting on a lock it holds itself.
+  const std::wstring what = !deadlock.cycle.empty()
+    ? (en ? (L" were each waiting for a lock that another of them held, so none of them could go on. " +
+              DescribeEngineLockCycle(deadlock, en) + L".")
+          : (L"이(가) 서로가 쥔 잠금을 기다리느라 아무도 진행하지 못했습니다. " + DescribeEngineLockCycle(deadlock, en) +
+              L"."))
+    : (en ? (L" could not go on: their call stacks and the engine's lock memory match a known deadlock (" + pattern +
+              L").")
+          : (L"이(가) 진행하지 못했습니다. 호출 스택과 엔진 잠금 메모리가 알려진 교착 상태(" + pattern +
+              L")와 일치합니다."));
+  return en
+    ? (L"The game engine deadlocked on its own locks: game threads " + tids + what +
+        L" No mod is shown to have caused it; mods on those threads' stacks were only on the call path. (Confidence: " +
+        conf + L")")
+    : (L"게임 엔진이 자체 잠금에서 교착 상태(deadlock)에 빠졌습니다. 게임 스레드 " + tids + what +
+        L" 어느 모드가 일으켰다는 근거는 없으며, 그 스레드들 스택의 모드는 호출 경로에 있었을 뿐입니다. (신뢰도: " + conf +
+        L")");
 }
 
 // A WCT cycle or a loader stall explains the freeze (FreezeCandidateConsensus).
@@ -958,6 +986,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = hangPrefix + L" " + DescribeModalDialogWait(r.modal_dialog_wait, lang, en);
       } else if (r.crash_logger_thread_dump_deadlock.detected && r.main_thread_lock_owner.tid != 0u) {
         summary = hangPrefix + L" " + DescribeCrashLoggerThreadDumpDeadlock(r, lang, en);
+      } else if (r.freeze_analysis.state_id == "engine_lock_deadlock") {
+        summary = hangPrefix + L" " + DescribeEngineLockDeadlock(r, lang, en);
       } else if (r.engine_spin.nan_detected) {
         summary = hangPrefix + L" " + DescribeEngineSpinNan(r, lang, en);
       } else if (r.hang_thread_module_consensus.has_consensus) {

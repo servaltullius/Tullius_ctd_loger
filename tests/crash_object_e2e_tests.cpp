@@ -704,9 +704,85 @@ void TestRealHangCaptureKeepsTheMainThreadsObject()
 
 }  // namespace
 
+// ADR-0021: engine-lock windows of this process's own writable data (the
+// test executable stands in for the game: it is the first module).
+alignas(8) std::uint32_t g_registerLock[2] = { 0u, 0u };
+alignas(8) std::uint32_t g_stackLock[2] = { 0u, 0u };
+
+void TestGameLockMemoryWindows()
+{
+  using skydiag::helper::internal::CollectGameLockMemory;
+  using skydiag::helper::internal::GameDelayStubAddress;
+  using skydiag::helper::internal::HangObjectMemoryCollector;
+  const HANDLE process = OpenSelfProcessHandle();
+  const std::uint64_t stub = GameDelayStubAddress(process);
+  Require(stub != 0u && stub == reinterpret_cast<std::uint64_t>(
+                                  GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtDelayExecution")),
+    "The game's NtDelayExecution is ours");
+
+  // A context as the dump writer reports it: a register on one lock, a stack
+  // slot on another, plus a code address, a heap pointer and a number.
+  auto heap = std::make_unique<std::uint64_t[]>(4);
+  std::vector<std::uint64_t> stack(0x400 / 8, 7u);
+  stack[3] = reinterpret_cast<std::uint64_t>(&g_stackLock[0]);
+  stack[4] = reinterpret_cast<std::uint64_t>(heap.get());
+  CONTEXT c{};
+  c.Rip = stub + 0x14;
+  c.Rsp = reinterpret_cast<DWORD64>(stack.data());
+  c.Rbx = reinterpret_cast<DWORD64>(&g_registerLock[0]);
+  c.Rsi = reinterpret_cast<DWORD64>(&TestGameLockMemoryWindows);
+  DumpObjectMemoryStats stats{};
+  const auto ranges = CollectGameLockMemory(process, { c }, std::chrono::steady_clock::now() + std::chrono::seconds(5), stats);
+  const auto covers = [&](const void* p, std::size_t size) {
+    const auto a = reinterpret_cast<std::uint64_t>(p);
+    return std::any_of(ranges.begin(), ranges.end(),
+      [&](const auto& r) { return a >= r.base && a + size <= r.base + r.size; });
+  };
+  const auto image = reinterpret_cast<std::uint64_t>(GetModuleHandleW(nullptr));
+  Require(covers(g_registerLock, 8) && covers(g_stackLock, 8), "Both locks are kept");
+  Require(covers(reinterpret_cast<const void*>(image), 0x1000), "The image header is kept");
+  Require(!covers(heap.get(), 8) && !covers(reinterpret_cast<const void*>(&TestGameLockMemoryWindows), 1),
+    "No heap, no code");
+  std::printf("Lock memory: threads=%u pointers=%u ranges=%u bytes=%llu time_us=%u\n", stats.lock_threads,
+    stats.lock_pointers, stats.lock_ranges, static_cast<unsigned long long>(stats.lock_bytes), stats.lock_elapsed_us);
+  Require(stats.lock_threads == 1u && stats.lock_pointers == 2u && stats.lock_bytes <= 0x1000u + 4u * 0x40u &&
+            !stats.lock_budget_reached,
+    "Small and counted");
+  Require(CollectGameLockMemory(process, {}, std::chrono::steady_clock::now() + std::chrono::seconds(5), stats).empty(),
+    "No waiting thread, nothing");
+  DumpObjectMemoryStats late{};
+  Require(CollectGameLockMemory(process, { c }, std::chrono::steady_clock::now(), late).empty() &&
+            late.lock_budget_reached,
+    "No time, nothing");
+
+  // The collector keeps only game threads sitting in the delay stub.
+  const DWORD tid = GetCurrentThreadId();
+  HangObjectMemoryCollector collector(process, {});
+  collector.EnableGameLocks({ tid }, stub);
+  collector.OnThreadContext(tid + 4u, c);  // not a game thread
+  CONTEXT running = c;
+  running.Rip = reinterpret_cast<DWORD64>(&TestGameLockMemoryWindows);
+  collector.OnThreadContext(tid, running);
+  Require(collector.Collect().empty() && collector.Stats().lock_enabled && collector.Stats().lock_threads == 0u,
+    "A running thread is not waiting on a lock");
+  HangObjectMemoryCollector waiting(process, {});
+  waiting.EnableGameLocks({ tid }, stub);
+  waiting.OnThreadContext(tid, c);
+  waiting.OnThreadContext(tid, c);  // ThreadExCallback after ThreadCallback: once
+  const auto kept = waiting.Collect();
+  Require(waiting.Stats().lock_threads == 1u && !kept.empty() && waiting.Stats().bytes == 0u,
+    "The waiting thread's windows, apart from the object bytes");
+  HangObjectMemoryCollector disabled(process, {});
+  disabled.EnableGameLocks({ tid }, 0u);
+  disabled.OnThreadContext(tid, c);
+  Require(disabled.Collect().empty() && !disabled.Stats().lock_enabled, "No stub, no windows");
+  CloseHandle(process);
+}
+
 int main()
 {
   try {
+    TestGameLockMemoryWindows();
     TestCrashObjectsAreReadBackFromTheDump();
     TestHangObjectsAreReadBackFromTheDump();
     TestHangObjectBudgets();

@@ -26,6 +26,8 @@ struct FreezeSignalInput
   // A thread spinning in an engine float compare loop (engine_spin_nan when
   // nan_detected).
   std::optional<EngineSpinInfo> engine_spin;
+  // Game threads deadlocked on the engine's own locks (ADR-0021; detected).
+  std::optional<EngineLockDeadlockInfo> engine_lock_deadlock;
   std::vector<ActionableCandidate> actionable_candidates;
 };
 

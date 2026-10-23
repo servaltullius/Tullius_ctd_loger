@@ -220,12 +220,12 @@ bool TryComputeStackwalkSuspects(
       if (it == threads.end() || !ReadThreadContextWin64(dumpBase, dumpSize, *it, ctx) || ctx.Rip == 0 || ctx.Rsp == 0) {
         continue;
       }
-      const auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/kBlockedThreadTopFrames + 4u);
+      const auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/kSideWalkFrames);
       if (pcs.empty()) {
         continue;
       }
       outSideFrames->push_back(ThreadTopFrames{
-        tid, stackwalk::BuildModalProbeFrames(sym.process, modules, pcs, kBlockedThreadTopFrames) });
+        tid, stackwalk::BuildModalProbeFrames(sym.process, modules, pcs, kBlockedThreadTopFrames), pcs });
     }
   }
 

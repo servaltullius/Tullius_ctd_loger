@@ -49,6 +49,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/CandidateConsensus.h
   src/FreezeCandidateConsensus.cpp
   src/FreezeCandidateConsensus.h
+  src/GameLockWait.cpp
+  src/GameLockWait.h
   src/MainThreadWait.cpp
   src/MemorySnapshot.cpp
   src/MemorySnapshot.h

@@ -369,6 +369,12 @@ Lead FreezeLead(const AnalysisResult& r, bool en)
     lead.doubt = Doubt::kCrashLogger;
     return lead;
   }
+  if (r.freeze_analysis.state_id == "engine_lock_deadlock") {
+    // No mod is named: game threads deadlocked on the engine's own locks
+    // (BuildQuickAnswer says so in its own words).
+    lead.case_id = "engine_lock_deadlock";
+    return lead;
+  }
   if (r.engine_spin.nan_detected) {
     // No mod is named: the engine looped on a NaN value (BuildQuickAnswer
     // says so in its own words).
@@ -762,6 +768,23 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     freeze.why_not_certain = en
       ? L"The endless loop on a NaN value is seen directly in the dump, but which mod produced that value is not."
       : L"NaN 값으로 끝없이 반복한 것은 덤프에서 직접 보이지만, 그 값을 어느 모드가 만들었는지는 보이지 않습니다.";
+  }
+  if (lead.case_id == "engine_lock_deadlock") {
+    freeze.likelihood = LikelihoodId(i18n::ConfidenceLevel::kMedium);
+    freeze.likelihood_text = LikelihoodText(i18n::ConfidenceLevel::kMedium, en);
+    freeze.headline = KindPhrase(freeze.kind, en) +
+      (en ? L" Game threads got stuck waiting on the game engine's own locks and could never go on (a deadlock)."
+          : L" 게임 스레드들이 게임 엔진 자체 잠금을 기다리다 더 진행하지 못하고 멈췄습니다(교착 상태).");
+    freeze.action = en
+      ? L"No mod is shown to have caused this, so do not remove mods only because they appear in this report. If it "
+        L"keeps happening, look for an engine fix mod for freezes like this one for your game version, and share this "
+        L"report when asking for help."
+      : L"어느 모드가 일으켰다는 근거는 없으니, 이 리포트에 보인다는 이유만으로 모드를 빼지는 마세요. 계속 반복되면 지금 게임 "
+        L"버전에서 이런 프리징을 고치는 엔진 수정 모드가 있는지 찾아보고, 도움을 요청할 때 이 리포트를 공유하세요.";
+    freeze.why_not_certain = en
+      ? L"The threads waiting on each other are seen directly in the dump, but what made them take the locks in that "
+        L"order is not."
+      : L"스레드들이 서로를 기다린 것은 덤프에서 직접 보이지만, 무엇 때문에 그 순서로 잠금을 잡게 됐는지는 보이지 않습니다.";
   }
   if (r.modal_dialog_wait.detected) {
     const auto& modal = r.modal_dialog_wait;

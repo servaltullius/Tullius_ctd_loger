@@ -38,6 +38,10 @@ std::vector<ExtraDumpMemory> CollectThreadObjectMemory(
   std::size_t budgetBytes,
   std::chrono::steady_clock::time_point deadline);
 
+// Committed, readable and never a guard page; an executable page only inside
+// a module image (the rule CollectThreadObjectMemory reads by).
+bool IsReadableRegion(const MEMORY_BASIC_INFORMATION& info);
+
 // Sorts and merges overlapping or touching ranges.
 std::vector<ExtraDumpMemory> MergeExtraDumpMemory(std::vector<ExtraDumpMemory> ranges);
 

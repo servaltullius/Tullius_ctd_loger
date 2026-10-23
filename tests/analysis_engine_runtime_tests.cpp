@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -474,6 +476,233 @@ void TestAiPathingFreezeSignatureRuntime()
   auto freezeWithCrashFields = crash;
   freezeWithCrashFields.freeze_state = "freeze_candidate";
   assert(!db.Match(freezeWithCrashFields, /*useKorean=*/false).has_value());
+}
+
+// ADR-0021: the engine-lock deadlocks of 1.5.97 with fix mods, matched on the
+// threads waiting in a delay (frames from the one that called the sleep down)
+// and the engine lock memory the dump holds.
+using LockWords = std::map<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>>;
+
+skydiag::dump_tool::SignatureGameLockThread LockThread(std::uint32_t tid, std::initializer_list<std::uint64_t> exeFrames)
+{
+  skydiag::dump_tool::SignatureGameLockThread thread{};
+  thread.tid = tid;
+  for (const auto offset : exeFrames) {
+    thread.frames.emplace_back(L"SkyrimSE.exe", offset);
+  }
+  return thread;
+}
+
+SignatureMatchInput LockDeadlockInput(std::shared_ptr<LockWords> memory)
+{
+  SignatureMatchInput input{};
+  input.game_version = "1.5.97.0";
+  input.freeze_state = "engine_lock_deadlock";
+  input.loaded_modules = { L"SkyrimSE.exe", L"skse64_1_5_97.dll" };
+  input.read_game_lock = [memory](std::uint64_t rva, std::uint32_t& w0, std::uint32_t& w1) {
+    const auto it = memory->find(rva);
+    if (it == memory->end()) {
+      return false;
+    }
+    w0 = it->second.first;
+    w1 = it->second.second;
+    return true;
+  };
+  return input;
+}
+
+void TestCellLoadLockOrderDeadlockSignatureRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+  // Thread 100 holds the read/write lock for read (it is past +0x39c of
+  // FUN_1406d3ff0) and waits for the spin lock; 200 holds the spin lock and
+  // waits to write. A job thread sleeping elsewhere comes first.
+  auto memory = std::make_shared<LockWords>(LockWords{
+    { 0x2F3B8E8ull, { 200u, 1u } },
+    { 0x2F3B8F0ull, { 0u, 1u } },
+  });
+  auto input = LockDeadlockInput(memory);
+  input.game_lock_threads = {
+    LockThread(300, { 0x132C5Aull, 0x111111ull }),
+    LockThread(100, { 0x132C5Aull, 0x6D9750ull, 0x6D4A48ull, 0x6D43ECull, 0x5B3F9Full, 0xC32A81ull }),
+    LockThread(200, { 0xC073ABull, 0x6D34BBull, 0x60944Aull, 0x5CDD80ull, 0x6929DBull, 0xD2A4D0ull }),
+  };
+  const auto hit = db.Match(input, /*useKorean=*/false);
+  assert(hit && hit->id == "CELL_LOAD_LOCK_ORDER_DEADLOCK_1_5_97");
+  assert(hit->scope == "root_cause" && hit->confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert((hit->game_lock_tids == std::vector<std::uint32_t>{ 100u, 200u }));
+  assert(hit->fix_module == L"skyrim-freeze-fix.dll" && !hit->fix_module_loaded);
+  assert(hit->recommendations.size() == 1u);
+  assert(hit->recommendations[0].rfind(L"[Known cause] Install \"Skyrim Cell load Freeze fix NG\" (Nexus mod 160704)", 0) == 0);
+  const auto ko = db.Match(input, /*useKorean=*/true);
+  assert(ko && ko->recommendations[0].rfind(L"[알려진 원인]", 0) == 0);
+
+  auto loaded = input;
+  loaded.loaded_modules.push_back(L"Skyrim-Freeze-Fix.DLL");
+  const auto fixLoaded = db.Match(loaded, /*useKorean=*/false);
+  assert(fixLoaded && fixLoaded->fix_module_loaded &&
+         fixLoaded->recommendations[0].find(L"is already loaded") != std::wstring::npos);
+
+  // Near misses.
+  for (const char* version : { "1.6.1170.0", "1.6.640.0", "" }) {
+    auto other = input;
+    other.game_version = version;
+    assert(!db.Match(other, /*useKorean=*/false).has_value());
+  }
+  auto missingAnchor = input;
+  missingAnchor.game_lock_threads[1] = LockThread(100, { 0x132C5Aull, 0x6D9750ull, 0x6D4A48ull, 0x5B3F9Full });
+  assert(!db.Match(missingAnchor, /*useKorean=*/false).has_value());
+  auto wrongSite = input;
+  wrongSite.game_lock_threads[2] = LockThread(200, { 0x6D34BBull, 0x60944Aull, 0x5CDD80ull, 0x6929DBull });
+  assert(!db.Match(wrongSite, /*useKorean=*/false).has_value());
+  auto wrongOwner = std::make_shared<LockWords>(*memory);
+  (*wrongOwner)[0x2F3B8E8ull] = { 100u, 1u };
+  auto wrongOwnerInput = input;
+  wrongOwnerInput.read_game_lock = LockDeadlockInput(wrongOwner).read_game_lock;
+  assert(!db.Match(wrongOwnerInput, /*useKorean=*/false).has_value());
+  auto notHeld = std::make_shared<LockWords>(*memory);
+  (*notHeld)[0x2F3B8E8ull] = { 0u, 0u };
+  auto notHeldInput = input;
+  notHeldInput.read_game_lock = LockDeadlockInput(notHeld).read_game_lock;
+  assert(!db.Match(notHeldInput, /*useKorean=*/false).has_value());
+  auto writeHeld = std::make_shared<LockWords>(*memory);
+  (*writeHeld)[0x2F3B8F0ull] = { 100u, 0x80000001u };  // held for write, not read
+  auto writeHeldInput = input;
+  writeHeldInput.read_game_lock = LockDeadlockInput(writeHeld).read_game_lock;
+  assert(!db.Match(writeHeldInput, /*useKorean=*/false).has_value());
+  auto noMemory = input;
+  noMemory.read_game_lock = nullptr;  // a dump without the game's lock memory
+  assert(!db.Match(noMemory, /*useKorean=*/false).has_value());
+  auto oneThreadOnly = input;  // both anchors on the same thread do not count twice
+  oneThreadOnly.game_lock_threads = { LockThread(200, { 0xC073ABull, 0x6D34BBull, 0x60944Aull, 0x5CDD80ull, 0x6929DBull }) };
+  assert(!db.Match(oneThreadOnly, /*useKorean=*/false).has_value());
+  auto otherState = input;
+  otherState.freeze_state = "freeze_ambiguous";
+  assert(!db.Match(otherState, /*useKorean=*/false).has_value());
+}
+
+void TestCellLoadSelfDeadlockSignatureRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+  auto memory = std::make_shared<LockWords>(LockWords{ { 0x2F3B8F0ull, { 0u, 1u } } });
+  auto input = LockDeadlockInput(memory);
+  input.game_lock_threads = { LockThread(42, { 0xC073ABull, 0x6D356Bull, 0x5F0E5Eull, 0x27DAB3ull, 0x297C08ull,
+    0x5D4200ull, 0x645303ull, 0x5D6DB6ull, 0x6D4A31ull, 0x6D43ECull, 0x5B3F9Full }) };
+  const auto hit = db.Match(input, /*useKorean=*/false);
+  assert(hit && hit->id == "CELL_LOAD_READ_WRITE_SELF_DEADLOCK_1_5_97");
+  assert((hit->game_lock_tids == std::vector<std::uint32_t>{ 42u }));
+  assert(hit->recommendations[0].find(L"0.0.4 or later") != std::wstring::npos);
+
+  auto beforeReadLock = input;  // not yet past the read-lock site
+  beforeReadLock.game_lock_threads = { LockThread(42, { 0xC073ABull, 0x6D356Bull, 0x5F0E5Eull, 0x27DAB3ull,
+    0x6D4A31ull, 0x5B3F9Full }) };
+  assert(!db.Match(beforeReadLock, /*useKorean=*/false).has_value());
+  auto unlocked = std::make_shared<LockWords>(LockWords{ { 0x2F3B8F0ull, { 0u, 0u } } });
+  auto unlockedInput = input;
+  unlockedInput.read_game_lock = LockDeadlockInput(unlocked).read_game_lock;
+  assert(!db.Match(unlockedInput, /*useKorean=*/false).has_value());
+  auto writer = std::make_shared<LockWords>(LockWords{ { 0x2F3B8F0ull, { 7u, 0x80000001u } } });
+  auto writerInput = input;
+  writerInput.read_game_lock = LockDeadlockInput(writer).read_game_lock;
+  assert(!db.Match(writerInput, /*useKorean=*/false).has_value());
+  auto ae = input;
+  ae.game_version = "1.6.1170.0";
+  assert(!db.Match(ae, /*useKorean=*/false).has_value());
+}
+
+void TestWorkerSpinLockDeadlockSignatureRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+  // 5096 holds LockA and spins on LockB; 18456 holds LockB and spins on LockA.
+  auto memory = std::make_shared<LockWords>(LockWords{
+    { 0x2EFF8E0ull, { 5096u, 1u } },
+    { 0x2F3B8E8ull, { 18456u, 1u } },
+  });
+  auto input = LockDeadlockInput(memory);
+  input.game_lock_threads = {
+    LockThread(18456, { 0x132C5Aull, 0x296C3Dull, 0x6025FBull, 0x61C780ull, 0x6EF480ull, 0x6D468Aull }),
+    LockThread(5096, { 0x132C5Aull, 0x6D9750ull, 0x297DDBull, 0x22D176ull, 0x2971A4ull, 0x6025FBull }),
+  };
+  input.game_lock_cycle_tids = { 5096u, 18456u };
+  const auto hit = db.Match(input, /*useKorean=*/false);
+  assert(hit && hit->id == "WORKER_SPINLOCK_ABBA_DEADLOCK_1_5_97");
+  assert(hit->confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kHigh);
+  assert((hit->game_lock_tids == std::vector<std::uint32_t>{ 5096u, 18456u }));
+  assert(hit->fix_module == L"WorkerSpinLockFix.dll");
+  assert(hit->recommendations[0].find(L"[phase4_defer]") != std::wstring::npos);
+  assert(hit->recommendations[0].find(L"https://www.nexusmods.com/skyrimspecialedition/mods/180884") !=
+         std::wstring::npos);
+
+  auto noCycle = input;
+  noCycle.game_lock_cycle_tids.clear();
+  assert(!db.Match(noCycle, /*useKorean=*/false).has_value());
+  auto swapped = std::make_shared<LockWords>(LockWords{
+    { 0x2EFF8E0ull, { 18456u, 1u } },
+    { 0x2F3B8E8ull, { 5096u, 1u } },
+  });
+  auto swappedInput = input;
+  swappedInput.read_game_lock = LockDeadlockInput(swapped).read_game_lock;
+  assert(!db.Match(swappedInput, /*useKorean=*/false).has_value());
+  auto freeLockA = std::make_shared<LockWords>(*memory);
+  freeLockA->erase(0x2EFF8E0ull);  // not in the dump
+  auto freeInput = input;
+  freeInput.read_game_lock = LockDeadlockInput(freeLockA).read_game_lock;
+  assert(!db.Match(freeInput, /*useKorean=*/false).has_value());
+  auto ae = input;
+  ae.game_version = "1.6.640.0";
+  assert(!db.Match(ae, /*useKorean=*/false).has_value());
+  // A crash or another freeze state never takes these.
+  auto crash = input;
+  crash.freeze_state.clear();
+  assert(!db.Match(crash, /*useKorean=*/false).has_value());
+}
+
+// Engine-lock constraints that cannot be read safely drop the entry.
+void TestGameLockSignatureRejectsMalformedEntries()
+{
+  const auto tempPath = std::filesystem::temp_directory_path() / "skydiag_signature_game_lock_test.json";
+  {
+    const std::string threads = "\"game_lock_threads\": [{\"frames\": [\"SkyrimSE.exe+0x10\"]}]";
+    const std::string base = "\"freeze_state\": \"engine_lock_deadlock\", \"game_version\": \"1.5.97.0\", ";
+    const std::string diagnosis = "\"diagnosis\": {\"cause_ko\": \"t\", \"cause_en\": \"t\", \"confidence\": \"low\"}";
+    std::ofstream out(tempPath, std::ios::binary);
+    out << "{\n  \"version\": 2,\n  \"signatures\": [\n"
+        << "    {\"id\": \"NO_VERSION\", \"match\": {\"freeze_state\": \"engine_lock_deadlock\", " << threads << "}, "
+        << diagnosis << "},\n"
+        << "    {\"id\": \"NO_STATE\", \"match\": {\"game_version\": \"1.5.97.0\", " << threads << "}, " << diagnosis
+        << "},\n"
+        << "    {\"id\": \"BAD_FRAME\", \"match\": {" << base
+        << "\"game_lock_threads\": [{\"frames\": [\"SkyrimSE.exe0x10\"]}]}, " << diagnosis << "},\n"
+        << "    {\"id\": \"EXTRA_KEY\", \"match\": {" << base
+        << "\"game_lock_threads\": [{\"frames\": [\"SkyrimSE.exe+0x10\"], \"tid\": 1}]}, " << diagnosis << "},\n"
+        << "    {\"id\": \"LOCKS_WITHOUT_THREADS\", \"match\": {" << base
+        << "\"game_locks\": [{\"rva\": \"0x20\", \"kind\": \"rw\", \"state\": \"read\"}]}, " << diagnosis << "},\n"
+        << "    {\"id\": \"OWNER_OUT_OF_RANGE\", \"match\": {" << base << threads
+        << ", \"game_locks\": [{\"rva\": \"0x20\", \"kind\": \"spin\", \"owner_thread\": 1}]}, " << diagnosis << "},\n"
+        << "    {\"id\": \"SPIN_READ\", \"match\": {" << base << threads
+        << ", \"game_locks\": [{\"rva\": \"0x20\", \"kind\": \"spin\", \"state\": \"read\"}]}, " << diagnosis << "},\n"
+        << "    {\"id\": \"RW_NOTHING\", \"match\": {" << base << threads
+        << ", \"game_locks\": [{\"rva\": \"0x20\", \"kind\": \"rw\"}]}, " << diagnosis << "},\n"
+        << "    {\"id\": \"CYCLE_FALSE\", \"match\": {" << base << threads << ", \"game_lock_cycle\": false}, "
+        << diagnosis << "},\n"
+        << "    {\"id\": \"GOOD\", \"match\": {" << base << threads
+        << ", \"game_locks\": [{\"rva\": \"0x20\", \"kind\": \"spin\", \"owner_thread\": 0}]}, " << diagnosis << "}\n"
+        << "  ]\n}\n";
+  }
+  SignatureDatabase db;
+  assert(db.LoadFromJson(tempPath));
+  assert(db.Size() == 1u);
+  auto memory = std::make_shared<LockWords>(LockWords{ { 0x20ull, { 9u, 1u } } });
+  auto input = LockDeadlockInput(memory);
+  input.game_lock_threads = { LockThread(9, { 0x10ull }) };
+  const auto matched = db.Match(input, /*useKorean=*/false);
+  assert(matched && matched->id == "GOOD");
+
+  std::error_code ec;
+  std::filesystem::remove(tempPath, ec);
 }
 
 // A loop location without a freeze state, half a location, or a fix DLL
@@ -1513,6 +1742,10 @@ int main()
   TestContentCatalogSignatureRuntime();
   TestKnownCrashSiteSignaturesRuntime();
   TestAiPathingFreezeSignatureRuntime();
+  TestCellLoadLockOrderDeadlockSignatureRuntime();
+  TestCellLoadSelfDeadlockSignatureRuntime();
+  TestWorkerSpinLockDeadlockSignatureRuntime();
+  TestGameLockSignatureRejectsMalformedEntries();
   TestFreezeSignatureRejectsMalformedEntries();
   TestSignatureRejectsMalformedExceptionAndObjectConstraints();
   TestSignatureDatabaseToleratesMalformedEntries();
