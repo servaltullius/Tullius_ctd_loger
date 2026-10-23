@@ -345,6 +345,7 @@ internal sealed partial class MainWindowViewModel
         return recommendation.Contains("DumpMode=2", StringComparison.OrdinalIgnoreCase) ||
                recommendation.Contains("capture another", StringComparison.OrdinalIgnoreCase) ||
                recommendation.Contains("recapture", StringComparison.OrdinalIgnoreCase) ||
+               recommendation.Contains("repeat capture", StringComparison.OrdinalIgnoreCase) ||
                recommendation.Contains("capture taken during", StringComparison.OrdinalIgnoreCase) ||
                recommendation.Contains("second signal", StringComparison.OrdinalIgnoreCase) ||
                recommendation.Contains("break the tie", StringComparison.OrdinalIgnoreCase) ||

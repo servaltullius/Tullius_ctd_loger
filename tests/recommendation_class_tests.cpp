@@ -193,6 +193,8 @@ int main()
   Expect(L"[충돌] 두 번째 신호를 비교하세요.", "recapture", "conflict");
   Expect(L"[기본] 한 번 더 모아 보세요.", "recapture", "");
   Expect(L"[프리징] 다시 캡처하세요.", "recapture", "");
+  // The English form of the same freeze line goes to the same group.
+  Expect(L"[Freeze] Compare related candidates and repeat capture during the issue.", "recapture", "");
   Expect(L"[행동 우선 후보] 재수집 전에 확인하세요.", "recapture", "actionable_candidate");
 
   // Verify Next: everything else, including no tag and a tag not at the start.

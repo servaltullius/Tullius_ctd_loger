@@ -41,7 +41,8 @@ constexpr TagRule kTagRules[] = {
 // Capture-again wording anywhere in the text outranks the tag: a known cause
 // or a candidate line that asks for another dump is a recapture line.
 constexpr std::wstring_view kRecaptureWordingEn[] = {
-  L"DumpMode=2", L"capture another", L"recapture", L"capture taken during", L"second signal", L"break the tie",
+  L"DumpMode=2", L"capture another", L"recapture", L"repeat capture", L"capture taken during", L"second signal",
+  L"break the tie",
 };
 constexpr std::wstring_view kRecaptureWordingKo[] = {
   L"다시 캡처", L"재수집", L"한 번 더", L"두 번째 신호",
