@@ -422,6 +422,34 @@
       }
     },
     {
+      "id": "TRAP_CONTACT_REMOVED_1_6_1170",
+      "match": {
+        "exc_code": "0xC0000005",
+        "game_version": "1.6.1170.0",
+        "fault_module": "SkyrimSE.exe",
+        "fault_offset": "0x3FF101"
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "cause_ko": "1.6.1170의 알려진 함정 접촉 크래시 지점(Address Library ID 26034 +0x1C1)과 일치합니다. 액터가 닿아 있던 함정 오브젝트가 사라졌는데, 게임이 그 함정의 접촉 정보를 계속 처리하다 비어 있는 포인터를 읽었습니다. 모드가 만든 임시 함정(함정 충돌을 쓰는 메시)이 동료 등 액터와 닿은 채 지워질 때 알려진 사례가 있습니다. 어떤 함정이 원인인지는 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "Matches the known 1.6.1170 trap-contact crash site (Address Library ID 26034 +0x1C1). A trap object that an actor was touching went away, and the game kept handling that trap's contact and read an empty pointer. A known case is a mod's temporary trap (a mesh on the trap collision layer) removed while an actor such as a follower touched it. Which trap it was is not known from this pattern alone.",
+        "confidence": "medium",
+        "recommendations_ko": [
+          "[알려진 크래시 지점] 함정을 만들거나 지우는 모드(임시 함정 효과, 함정 배치·제거 모드, 함정 메시 교체 모드)를 확인하세요. 크래시 직전 동료나 NPC가 함정 근처에 있었는지도 함께 보세요."
+        ],
+        "recommendations_en": [
+          "[Known crash site] Check mods that create or remove traps (temporary trap effects, trap placement or removal mods, trap mesh replacers), and whether a follower or NPC stood near a trap just before the crash."
+        ],
+        "fix_module": "CalamityAffixes.dll",
+        "recommendations_fix_loaded_ko": [
+          "[알려진 크래시 지점] Calamity 2 - Reactive Loot and Affixes(CalamityAffixes.dll)가 로드되어 있습니다. 2.2.6 이전 버전은 함정 어픽스의 덫 표시물이 액터와 닿은 채 사라질 때 이 크래시가 나므로, 2.2.6 이상으로 업데이트하세요. 받는 곳: https://www.nexusmods.com/skyrimspecialedition/mods/193193 (2.2.6 이상인데도 났다면 다른 모드의 함정일 수 있습니다.)"
+        ],
+        "recommendations_fix_loaded_en": [
+          "[Known crash site] Calamity 2 - Reactive Loot and Affixes (CalamityAffixes.dll) is loaded. Versions before 2.2.6 crash here when a trap affix's ground marker expires while an actor touches it: update to 2.2.6 or later. Download: https://www.nexusmods.com/skyrimspecialedition/mods/193193 (if it already is 2.2.6 or later, another mod's trap may be the cause)."
+        ]
+      }
+    },
+    {
       "id": "AI_PATHING_FREEZE_1_6_1170",
       "match": {
         "game_version": "1.6.1170.0",

@@ -717,6 +717,12 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
           input.callstack_modules.push_back(s.module_filename);
         }
       }
+      // A signature's fix_module is told loaded or not from these, for a
+      // crash as for a freeze.
+      input.loaded_modules.reserve(allModules.size());
+      for (const auto& m : allModules) {
+        input.loaded_modules.push_back(m.filename);
+      }
       out.signature_match = sigDb.Match(input, opt.language == i18n::Language::kKorean);
       // "may be a caught throw" does not fit a throw Crash Logger saw crash
       // the game (crash test, 2026-10-12).

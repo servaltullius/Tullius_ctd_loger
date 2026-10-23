@@ -77,6 +77,12 @@ static void TestAnalyzerUsesVersionAndAccessedAddressForSignatureInput()
   assert(analyzer.find("input.game_version = out.game_version") != std::string::npos);
   assert(analyzer.find("out.exc_info.size() >= 2u") != std::string::npos);
   assert(analyzer.find("input.access_violation_address = out.exc_info[1]") != std::string::npos);
+  // Both the crash and the freeze match tell a signature's fix_module from
+  // the dump's modules (a crash used to have none, so "already loaded" never
+  // showed for a crash).
+  const auto first = analyzer.find("input.loaded_modules.push_back(m.filename)");
+  assert(first != std::string::npos &&
+         analyzer.find("input.loaded_modules.push_back(m.filename)", first + 1) != std::string::npos);
   assert(analyzer.find("input.exc_address = out.exc_addr") == std::string::npos);
   assert(signatures.find("access_violation_address_near_zero") != std::string::npos);
   assert(signatures.find("\"exc_address_near_zero\"") != std::string::npos);
