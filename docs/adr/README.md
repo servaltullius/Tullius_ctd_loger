@@ -22,3 +22,4 @@ ADR index:
 - `0017-second-fault-while-filtering.md`
 - `0018-recommendation-classes.md`
 - `0019-faulting-instruction.md`
+- `0020-reanalyze-older-summaries.md`

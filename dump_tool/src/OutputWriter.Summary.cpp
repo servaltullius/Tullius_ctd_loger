@@ -74,6 +74,11 @@ nlohmann::json DumpObjectJson(const DumpObject& object)
 
 }  // namespace
 
+#ifndef SKYDIAG_ANALYZER_VERSION
+#define SKYDIAG_ANALYZER_VERSION ""
+#endif
+constexpr const char* kAnalyzerVersion = SKYDIAG_ANALYZER_VERSION;
+
 nlohmann::json BuildSummaryJson(
   const AnalysisResult& r,
   const std::filesystem::path& outBase,
@@ -86,6 +91,10 @@ nlohmann::json BuildSummaryJson(
     { "name", "SkyrimDiagSummary" },
     { "version", kSummarySchemaVersion },
   };
+  // Additive: the product version of the analyzer that wrote this summary.
+  // The viewer analyzes a dump again when its saved summary is older than
+  // itself, so fields added since then show without pressing Analyze.
+  summary["analyzer_version"] = kAnalyzerVersion;
   summary["dump_path"] = WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths));
   summary["dump_identity"] = DumpIdentityJson(r.dump_identity);
   summary["pid"] = r.pid;

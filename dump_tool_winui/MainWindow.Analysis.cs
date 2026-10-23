@@ -54,9 +54,10 @@ public sealed partial class MainWindow
                 {
                     return false;
                 }
-                // A summary written before v0.2.69 has no quick answer; analyze
-                // the dump again so the quick answer card is shown.
-                if (summary.QuickAnswer is null)
+                // A summary written by an older analyzer (or before v0.2.69,
+                // with no quick answer) lacks fields added since: analyze the
+                // dump again instead of showing it.
+                if (summary.NeedsReanalysisFor(typeof(MainWindow).Assembly.GetName().Version))
                 {
                     return false;
                 }

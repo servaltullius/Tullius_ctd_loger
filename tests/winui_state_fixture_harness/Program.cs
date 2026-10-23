@@ -303,6 +303,8 @@ internal static class Program
                 !Directory.EnumerateFiles(root, "*.tmp.*", SearchOption.AllDirectories).Any(),
                 "atomic writes left temporary files behind");
 
+            await CheckReanalysisByAnalyzerVersion(root, identityA);
+
             Console.WriteLine("winui_state_fixture_harness: OK");
             return 0;
         }
@@ -316,6 +318,46 @@ internal static class Program
             {
             }
         }
+    }
+
+    // A saved summary is reused only when the analyzer that wrote it is not
+    // older than the viewer; one without analyzer_version or without a quick
+    // answer is analyzed again.
+    private static async Task CheckReanalysisByAnalyzerVersion(string root, DumpIdentityContract identity)
+    {
+        async Task<AnalysisSummary> Load(string? analyzerVersion, bool withQuickAnswer)
+        {
+            var node = JsonNode.Parse(BuildSummary(identity))!.AsObject();
+            if (analyzerVersion is not null)
+            {
+                node["analyzer_version"] = analyzerVersion;
+            }
+            if (withQuickAnswer)
+            {
+                node["quick_answer"] = new JsonObject
+                {
+                    ["kind"] = "crash",
+                    ["headline"] = "The game crashed to desktop (CTD).",
+                };
+            }
+            var dir = Path.Combine(root, "reanalysis");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".json");
+            await AtomicFile.WriteAllTextAsync(path, node.ToJsonString(), CancellationToken.None);
+            return AnalysisSummary.LoadFromSummaryFile(path);
+        }
+
+        var viewer = new Version(0, 2, 71, 0);  // AssemblyVersion is the product version + ".0"
+        Require((await Load("0.2.71", true)).AnalyzerVersion == "0.2.71", "analyzer_version is read");
+        Require(!(await Load("0.2.71", true)).NeedsReanalysisFor(viewer), "the same version is reused");
+        Require(!(await Load("0.2.72", true)).NeedsReanalysisFor(viewer), "a newer analyzer's summary is reused");
+        Require((await Load("0.2.70", true)).NeedsReanalysisFor(viewer), "an older analyzer's summary is analyzed again");
+        Require((await Load("0.2.9", true)).NeedsReanalysisFor(new Version(0, 2, 10, 0)),
+            "versions compare as numbers, not text");
+        Require((await Load(null, true)).NeedsReanalysisFor(viewer), "no analyzer_version: analyzed again");
+        Require((await Load("not a version", true)).NeedsReanalysisFor(viewer), "an unreadable version: analyzed again");
+        Require((await Load("0.2.71", false)).NeedsReanalysisFor(viewer), "no quick answer: analyzed again");
+        Require(!(await Load(null, true)).NeedsReanalysisFor(null), "no viewer version: only the quick answer decides");
     }
 
     private static string BuildSummary(DumpIdentityContract identity)
