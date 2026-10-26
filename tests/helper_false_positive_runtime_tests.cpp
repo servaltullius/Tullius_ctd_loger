@@ -1560,6 +1560,23 @@ void TestForcedCloseCrash_SkipsTheViewer()
 
   auto child = LaunchSleepingChildProcess();
   shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  // The faulting thread's real registers, as the plugin hands them over. An
+  // all-zero context for a thread that exists makes Windows Server 2022's
+  // dbghelp fail the dump with 0x800706F8 on AMX hosts (CI only; see the
+  // v0.2.60-rc3 XSTATE fix), which no real crash produces.
+  CONTEXT faultContext{};
+  faultContext.ContextFlags = CONTEXT_FULL;
+  const HANDLE faultThread =
+    OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, child.pi.dwThreadId);
+  Require(faultThread != nullptr, "OpenThread failed");
+  Require(SuspendThread(faultThread) != static_cast<DWORD>(-1), "SuspendThread failed");
+  const bool gotContext = GetThreadContext(faultThread, &faultContext) != FALSE;
+  Require(ResumeThread(faultThread) != static_cast<DWORD>(-1), "ResumeThread failed");
+  CloseHandle(faultThread);
+  Require(gotContext, "GetThreadContext failed");
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(0x7FF7055F0000ull);
   auto proc = MakeAttachedProcessForChild(child, shared.get());
   proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
   Require(proc.crashEvent != nullptr, "CreateEventW failed");
