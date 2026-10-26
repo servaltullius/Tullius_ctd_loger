@@ -161,6 +161,60 @@ static_assert(Decides(false, 0, false, 50000 - skydiag::kQuitFlagMenuRecentMs - 
   CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));
 // The second test's case: no menu, keys not seen.
 static_assert(Decides(false, 0, false, 0, 345779, CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));
+// The key sampler (2026-10-26 19:58 in-game test): the crash came in the very
+// frame that handled Alt+F4, before the heartbeat task saw the quit flag, so
+// the sampler records the press itself. Both keys, the game in front; one
+// event per press.
+using skydiag::AltF4KeySampler;
+using skydiag::IsAltF4AlreadyRecorded;
+using skydiag::ObserveAltF4Keys;
+static_assert([] {
+  AltF4KeySampler s{};
+  return ObserveAltF4Keys(&s, true, true, true) &&   // pressed
+         !ObserveAltF4Keys(&s, true, true, true) &&  // still held: the same press
+         !ObserveAltF4Keys(&s, true, false, false) &&
+         ObserveAltF4Keys(&s, true, true, true);  // pressed again
+}());
+static_assert([] {
+  AltF4KeySampler s{};
+  return !ObserveAltF4Keys(&s, true, false, false) &&  // Alt alone
+         !ObserveAltF4Keys(&s, false, true, false) &&  // F4 alone
+         !ObserveAltF4Keys(&s, true, true, false) &&   // Alt+F4 in another program
+         !s.held && !ObserveAltF4Keys(nullptr, true, true, true);
+}());
+// Alt+F4 pressed in another program, then the game comes in front while the
+// keys are still down: that is the game's Alt+F4 now.
+static_assert([] {
+  AltF4KeySampler s{};
+  return !ObserveAltF4Keys(&s, true, true, false) && ObserveAltF4Keys(&s, true, true, true);
+}());
+
+// One press, several sources: the sampler records it at 1000; the crash
+// handler (1020) and the quit flag (2200) see the same press within
+// kQuitFlagAltF4RecentMs and record nothing; a press 1.1 s after the
+// sampler's is a new one for the sampler.
+constexpr bool OnePressAcrossSources()
+{
+  std::uint64_t recorded = 0;
+  const auto claim = [&recorded](std::uint64_t now, std::uint64_t window) {
+    if (IsAltF4AlreadyRecorded(recorded, now, window)) {
+      return false;
+    }
+    recorded = now;
+    return true;
+  };
+  return claim(1000, skydiag::kCloseRequestRepeatMs) &&
+         !claim(1020, skydiag::kQuitFlagAltF4RecentMs) &&
+         !claim(2200, skydiag::kQuitFlagAltF4RecentMs) &&
+         claim(2101, skydiag::kCloseRequestRepeatMs) &&
+         !claim(2500, skydiag::kCloseRequestRepeatMs);
+}
+static_assert(OnePressAcrossSources());
+// When the sampler missed the keys, the crash handler or the quit flag
+// records it; nothing recorded yet (0) is never a repeat.
+static_assert(!IsAltF4AlreadyRecorded(0, 5000, skydiag::kQuitFlagAltF4RecentMs));
+static_assert(!IsAltF4AlreadyRecorded(5001, 5000, skydiag::kQuitFlagAltF4RecentMs), "a tick from the future");
+
 // A tick from the future (clock read order) is not "recent".
 static_assert(Decides(false, 50001, false, 50001, 50000, CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));
 

@@ -13,9 +13,9 @@
 
 namespace skydiag {
 
-// EventType::kCloseRequest payload.a. Payload b is the window message (0 for
-// the quit flag), c its wParam, d 1 when the message was posted (seen by the
-// WH_GETMESSAGE hook) and 0 when it was sent (WH_CALLWNDPROC).
+// EventType::kCloseRequest payload.a. Payload b is the window message (0 when
+// none), c its wParam (the QuitFlagReason for the quit flag), d the
+// CloseRequestSource.
 enum class CloseRequestKind : std::uint8_t
 {
   kNone = 0,
@@ -35,6 +35,16 @@ enum class CloseRequestKind : std::uint8_t
   // a forced quit, most likely Alt+F4 (Skyrim reads the keyboard through
   // DirectInput and quits on Alt+F4 itself; no window message carries it).
   kForcedQuit = 5,
+};
+
+// Where the plugin saw it (payload d).
+enum class CloseRequestSource : std::uint8_t
+{
+  kSentMessage = 0,    // WH_CALLWNDPROC
+  kPostedMessage = 1,  // WH_GETMESSAGE
+  kQuitFlag = 2,       // Main::quitGame became set (heartbeat task)
+  kKeys = 3,           // Alt+F4 held with the game in front (25 ms key sampler)
+  kKeysAtCrash = 4,    // Alt+F4 held with the game in front when the crash was recorded
 };
 
 constexpr bool IsCloseRequestKind(std::uint64_t value) noexcept
@@ -234,6 +244,37 @@ constexpr QuitFlagDecision QuitFlagCloseRequestKind(
     return { CloseRequestKind::kGameQuit, QuitFlagReason::kMenuClosed };
   }
   return { CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys };
+}
+
+// The 25 ms key sampler: true on the sample where Alt and F4 become held
+// together while the game window is the foreground window (Alt+F4 in
+// another program while the game runs behind it does not count). Holding
+// the keys records one press; releasing and pressing again records another,
+// subject to the shared repeat check below.
+struct AltF4KeySampler
+{
+  bool held = false;
+};
+
+constexpr bool ObserveAltF4Keys(AltF4KeySampler* sampler, bool altDown, bool f4Down, bool gameForeground) noexcept
+{
+  if (!sampler) {
+    return false;
+  }
+  const bool held = altDown && f4Down && gameForeground;
+  const bool pressed = held && !sampler->held;
+  sampler->held = held;
+  return pressed;
+}
+
+// One Alt+F4 can be seen by the key sampler, a window hook, the crash
+// handler and the quit flag; the first records it, and an Alt+F4 recorded
+// within windowMs before is the same press (kCloseRequestRepeatMs for the
+// sampler and the hooks, kQuitFlagAltF4RecentMs for the quit flag and the
+// crash, which come later in the same press).
+constexpr bool IsAltF4AlreadyRecorded(std::uint64_t recordedMs, std::uint64_t nowMs, std::uint64_t windowMs) noexcept
+{
+  return recordedMs != 0u && nowMs >= recordedMs && nowMs - recordedMs <= windowMs;
 }
 
 // A crash this soon after a close request is part of the game closing: after

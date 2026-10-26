@@ -1276,6 +1276,12 @@ void TestForcedClose()
       "a posted key-down");
     Require(internal::FormatEventDetail(events[1].type, 4, 0, 1, 0) == L"kind=game_quit quit_flag reason=menu_open",
       "game quit detail");
+    Require(internal::FormatEventDetail(events[1].type, 1, 0, 0, 3) == L"kind=alt_f4 keys_held", "the key sampler");
+    Require(internal::FormatEventDetail(events[1].type, 1, 0, 0, 4) == L"kind=alt_f4 keys_held_at_crash",
+      "keys held at the crash");
+    Require(internal::FormatEventDetail(events[1].type, 5, 0, 3, 2) ==
+              L"kind=forced_quit quit_flag reason=no_menu_no_keys",
+      "quit flag source");
     Require(internal::FormatEventDetail(events[1].type, 5, 0, 3, 0) ==
               L"kind=forced_quit quit_flag reason=no_menu_no_keys",
       "forced quit detail");

@@ -248,7 +248,8 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
     }
 
     case EventType::kCloseRequest: {
-      // a=CloseRequestKind b=window message c=wParam d=1 posted (ADR-0022)
+      // a=CloseRequestKind b=window message c=wParam/QuitFlagReason
+      // d=CloseRequestSource (ADR-0022)
       std::wstring s;
       for (const char* id = skydiag::CloseRequestKindId(static_cast<skydiag::CloseRequestKind>(a & 0xFFu)); *id; ++id) {
         s += static_cast<wchar_t>(*id);
@@ -259,7 +260,11 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
         std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L" msg=0x%04X wparam=0x%04X",
           static_cast<unsigned>(b & 0xFFFFu), static_cast<unsigned>(c & 0xFFFFu));
         s += buf;
-        s += d != 0u ? L" posted" : L" sent";
+        s += d == 1u ? L" posted" : L" sent";
+      } else if (d == 3u) {
+        s += L" keys_held";
+      } else if (d == 4u) {
+        s += L" keys_held_at_crash";
       } else {
         // The quit flag; c is the QuitFlagReason.
         constexpr const wchar_t* kReasons[] = { L"alt_f4_held", L"menu_open", L"menu_closed", L"no_menu_no_keys" };

@@ -21,10 +21,19 @@ bool InstallCloseRequestHooks() noexcept;
 // only signal Alt+F4 gives. Does nothing until InstallCloseRequestHooks ran.
 void PollGameQuitRequest() noexcept;
 
-// Notes Alt+F4 held (GetAsyncKeyState, which DirectInput does not hide), so
-// a quit flag seen a little later still knows. Called every 25 ms from the
-// heartbeat scheduler thread; two key-state reads.
+// The key sampler, every 25 ms on the heartbeat scheduler thread: records an
+// alt_f4 close request when Alt and F4 become held together while the game
+// window (captured at install) is the foreground window. GetAsyncKeyState
+// is the system's key state, which DirectInput does not hide. Two key-state
+// reads per call, the foreground window only while both are held; never
+// touches Main.
 void SampleCloseKeys() noexcept;
+
+// From the crash handler, once a crash is recorded: Alt+F4 still held with
+// the game in front records an alt_f4 close request (unless this press was
+// already recorded) before the Crash event, for a crash in the very frame
+// that handles Alt+F4. No allocation, no logging.
+void RecordCloseKeysAtCrash() noexcept;
 
 // From the menu event sink (UI thread): a menu one quits from opened or
 // closed.

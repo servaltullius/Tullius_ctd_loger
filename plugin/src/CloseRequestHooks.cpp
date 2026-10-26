@@ -18,16 +18,23 @@
 namespace skydiag::plugin {
 namespace {
 
+using skydiag::CloseRequestKind;
+using skydiag::CloseRequestSource;
+
 std::atomic_bool g_installed{ false };
 HHOOK g_getMessageHook = nullptr;
 HHOOK g_callWndProcHook = nullptr;
 std::atomic_bool g_firstRequestLogged{ false };
+// The game window, captured at install: the key sampler and the crash
+// handler compare the foreground window with it without touching Main.
+std::atomic<std::uintptr_t> g_gameWindowValue{ 0 };
 
-// For the quit flag (QuitFlagCloseRequestKind). Written by the key sampler
-// (heartbeat scheduler thread) and the menu sink (UI thread), read by the
+// Written by the key sampler (heartbeat scheduler thread), the menu sink (UI
+// thread), the hooks (game window thread) and the crash handler, read by the
 // heartbeat task: atomics only.
-std::atomic<std::uint64_t> g_altF4SeenMs{ 0 };
-std::atomic<std::uint32_t> g_quitMenusOpen{ 0 };  // bit per kQuitMenus entry
+std::atomic<std::uint64_t> g_altF4SeenMs{ 0 };      // Alt+F4 last seen held with the game in front
+std::atomic<std::uint64_t> g_altF4RecordedMs{ 0 };  // an alt_f4 request last recorded (any source)
+std::atomic<std::uint32_t> g_quitMenusOpen{ 0 };     // bit per kQuitMenus entry
 std::atomic<std::uint64_t> g_quitMenuClosedMs{ 0 };
 std::atomic<std::uint32_t> g_lastQuitMenu{ 0 };
 
@@ -40,13 +47,36 @@ constexpr std::string_view kQuitMenus[] = {
   RE::Console::MENU_NAME,
 };
 
+// Only the game window's thread runs the hooks, so it alone touches this.
+skydiag::CloseRequestTracker g_tracker{};
+// Only the heartbeat scheduler thread touches this.
+skydiag::AltF4KeySampler g_keySampler{};
+
 bool AltF4HeldNow() noexcept
 {
   return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 && (GetAsyncKeyState(VK_F4) & 0x8000) != 0;
 }
 
-// Only the game window's thread runs the hooks, so it alone touches this.
-skydiag::CloseRequestTracker g_tracker{};
+bool GameIsForeground() noexcept
+{
+  const auto game = g_gameWindowValue.load(std::memory_order_relaxed);
+  return game != 0u && reinterpret_cast<std::uintptr_t>(GetForegroundWindow()) == game;
+}
+
+// One Alt+F4 is recorded once whichever source sees it first
+// (IsAltF4AlreadyRecorded); false when it already was.
+bool TryClaimAltF4(std::uint64_t nowMs, std::uint64_t windowMs) noexcept
+{
+  std::uint64_t previous = g_altF4RecordedMs.load();
+  for (;;) {
+    if (skydiag::IsAltF4AlreadyRecorded(previous, nowMs, windowMs)) {
+      return false;
+    }
+    if (g_altF4RecordedMs.compare_exchange_weak(previous, nowMs)) {
+      return true;
+    }
+  }
+}
 
 HWND GameWindow() noexcept
 {
@@ -73,32 +103,25 @@ const char* MessageName(UINT message) noexcept
     case WM_QUIT:
       return "WM_QUIT";
     default:
-      return "quit flag";
+      return "message";
   }
 }
 
-// how: the log's reason for the quit flag (message 0).
+// how: why, for the SkyrimDiag.log line ("WM_SYSKEYDOWN posted",
+// "quit flag, Alt+F4 held", "keys held, game foreground").
 void Record(
-  skydiag::CloseRequestKind kind,
+  CloseRequestKind kind,
   UINT message,
   std::uint64_t wParam,
-  bool posted,
-  std::string_view how = {}) noexcept
+  CloseRequestSource source,
+  std::string_view how) noexcept
 {
-  PushCloseRequestEvent(kind, message, wParam, posted);
+  PushCloseRequestEvent(kind, message, wParam, static_cast<std::uint64_t>(source));
   // One SkyrimDiag.log line for the first one, so a test shows it was seen
   // without a crash.
   if (!g_firstRequestLogged.exchange(true)) {
     try {
-      if (message == 0u) {
-        spdlog::info("SkyrimDiag: close request seen: {} (quit flag, {})", skydiag::CloseRequestKindId(kind), how);
-      } else {
-        spdlog::info(
-          "SkyrimDiag: close request seen: {} ({} {})",
-          skydiag::CloseRequestKindId(kind),
-          MessageName(message),
-          posted ? "posted" : "sent");
-      }
+      spdlog::info("SkyrimDiag: close request seen: {} ({})", skydiag::CloseRequestKindId(kind), how);
     } catch (...) {
       // Logging is optional; the blackbox event is already written.
       OutputDebugStringW(L"SkyrimDiag: could not log the first close request.\n");
@@ -127,6 +150,7 @@ void Observe(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, bool posted)
   // The input state of the message being handled.
   const bool altDown = (GetKeyState(VK_MENU) & 0x8000) != 0;
   const bool f4Down = (GetKeyState(VK_F4) & 0x8000) != 0;
+  const std::uint64_t now = GetTickCount64();
   const auto kind = skydiag::ObserveCloseRequestMessage(
     &g_tracker,
     message,
@@ -134,17 +158,32 @@ void Observe(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, bool posted)
     static_cast<std::uint64_t>(lParam),
     altDown,
     f4Down,
-    GetTickCount64());
-  if (kind != skydiag::CloseRequestKind::kNone) {
-    Record(kind, message, static_cast<std::uint64_t>(wParam), posted);
+    now);
+  if (kind == CloseRequestKind::kNone ||
+      (kind == CloseRequestKind::kAltF4 && !TryClaimAltF4(now, skydiag::kCloseRequestRepeatMs))) {
+    return;
+  }
+  try {
+    const std::string how = std::string(MessageName(message)) + (posted ? " posted" : " sent");
+    Record(
+      kind,
+      message,
+      static_cast<std::uint64_t>(wParam),
+      posted ? CloseRequestSource::kPostedMessage : CloseRequestSource::kSentMessage,
+      how);
+  } catch (...) {
+    Record(
+      kind,
+      message,
+      static_cast<std::uint64_t>(wParam),
+      posted ? CloseRequestSource::kPostedMessage : CloseRequestSource::kSentMessage,
+      MessageName(message));
   }
 }
 
-// Posted messages as the game's loop takes them from the queue: Alt+F4 is a
-// posted WM_SYSKEYDOWN, and DefWindowProc posts the SC_CLOSE it becomes.
-// Only on PM_REMOVE: a PeekMessage(PM_NOREMOVE) shows the same message again
-// later. Looks only: the MSG is never changed, and the next hook always
-// gets it.
+// Posted messages as the game's loop takes them from the queue. Only on
+// PM_REMOVE: a PeekMessage(PM_NOREMOVE) shows the same message again later.
+// Looks only: the MSG is never changed, and the next hook always gets it.
 LRESULT CALLBACK GetMessageHook(int code, WPARAM wParam, LPARAM lParam) noexcept
 {
   if (code == HC_ACTION && wParam == PM_REMOVE && lParam != 0) {
@@ -182,24 +221,58 @@ bool InstallCloseRequestHooks() noexcept
   }
   // Thread hooks in this process: no DLL is injected anywhere, and the
   // module is pinned (PinThisModuleForWorkerLifetime), so the hook procedures
-  // stay valid for the process lifetime. They are never removed.
+  // stay valid for the process lifetime. They are never removed. Skyrim
+  // reads the keyboard through DirectInput, so they do not see Alt+F4 (the
+  // key sampler and the quit flag do); they see the X button and close
+  // requests from other programs.
   if (!g_getMessageHook) {
     g_getMessageHook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageHook, nullptr, threadId);
   }
   if (!g_callWndProcHook) {
     g_callWndProcHook = SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, threadId);
   }
-  if (!g_getMessageHook && !g_callWndProcHook) {
-    return false;
-  }
+  // The key sampler and the quit flag work without the hooks.
+  g_gameWindowValue.store(reinterpret_cast<std::uintptr_t>(window));
   g_installed.store(true);
   return true;
 }
 
 void SampleCloseKeys() noexcept
 {
-  if (g_installed.load(std::memory_order_relaxed) && AltF4HeldNow()) {
-    g_altF4SeenMs.store(GetTickCount64(), std::memory_order_relaxed);
+  if (!g_installed.load(std::memory_order_relaxed)) {
+    return;
+  }
+  const bool altDown = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+  const bool f4Down = (GetAsyncKeyState(VK_F4) & 0x8000) != 0;
+  // The foreground window only when both keys are down.
+  const bool foreground = altDown && f4Down && GameIsForeground();
+  if (!skydiag::ObserveAltF4Keys(&g_keySampler, altDown, f4Down, foreground)) {
+    if (foreground) {
+      g_altF4SeenMs.store(GetTickCount64(), std::memory_order_relaxed);
+    }
+    return;
+  }
+  const std::uint64_t now = GetTickCount64();
+  g_altF4SeenMs.store(now, std::memory_order_relaxed);
+  // Recorded now, not left to the quit flag: the crash can come in the very
+  // frame that handles Alt+F4 (2026-10-26 19:58), before the heartbeat task
+  // ever sees the flag.
+  if (TryClaimAltF4(now, skydiag::kCloseRequestRepeatMs)) {
+    Record(CloseRequestKind::kAltF4, 0u, 0u, CloseRequestSource::kKeys, "keys held, game foreground");
+  }
+}
+
+void RecordCloseKeysAtCrash() noexcept
+{
+  // Allocation-free and lock-free on our side: three win32k key/window
+  // reads and one blackbox write, no logging.
+  if (!g_installed.load(std::memory_order_relaxed) || !AltF4HeldNow() || !GameIsForeground()) {
+    return;
+  }
+  const std::uint64_t now = GetTickCount64();
+  g_altF4SeenMs.store(now, std::memory_order_relaxed);
+  if (TryClaimAltF4(now, skydiag::kQuitFlagAltF4RecentMs)) {
+    PushCloseRequestEvent(CloseRequestKind::kAltF4, 0u, 0u, static_cast<std::uint64_t>(CloseRequestSource::kKeysAtCrash));
   }
 }
 
@@ -247,7 +320,11 @@ void PollGameQuitRequest() noexcept
   const std::uint32_t open = g_quitMenusOpen.load();
   const std::uint64_t closedMs = g_quitMenuClosedMs.load();
   const auto decision = skydiag::QuitFlagCloseRequestKind(
-    AltF4HeldNow(), g_altF4SeenMs.load(), open != 0u, closedMs, now);
+    AltF4HeldNow() && GameIsForeground(), g_altF4SeenMs.load(), open != 0u, closedMs, now);
+  // The same Alt+F4 the key sampler or the crash handler already recorded.
+  if (decision.kind == CloseRequestKind::kAltF4 && !TryClaimAltF4(now, skydiag::kQuitFlagAltF4RecentMs)) {
+    return;
+  }
   std::string how;
   try {
     std::uint32_t menu = g_lastQuitMenu.load();
@@ -260,22 +337,22 @@ void PollGameQuitRequest() noexcept
     const std::string menuName(kQuitMenus[menu < std::size(kQuitMenus) ? menu : 0u]);
     switch (decision.reason) {
       case skydiag::QuitFlagReason::kAltF4Held:
-        how = "Alt+F4 held";
+        how = "quit flag, Alt+F4 held";
         break;
       case skydiag::QuitFlagReason::kMenuOpen:
-        how = menuName + " open";
+        how = "quit flag, " + menuName + " open";
         break;
       case skydiag::QuitFlagReason::kMenuClosed:
-        how = menuName + " closed " + std::to_string(now - closedMs) + " ms before";
+        how = "quit flag, " + menuName + " closed " + std::to_string(now - closedMs) + " ms before";
         break;
       case skydiag::QuitFlagReason::kNoMenuNoKeys:
-        how = "no menu, keys not held";
+        how = "quit flag, no menu, keys not held";
         break;
     }
   } catch (...) {
     how.clear();
   }
-  Record(decision.kind, 0u, static_cast<std::uint64_t>(decision.reason), false, how);
+  Record(decision.kind, 0u, static_cast<std::uint64_t>(decision.reason), CloseRequestSource::kQuitFlag, how);
 }
 
 }  // namespace skydiag::plugin

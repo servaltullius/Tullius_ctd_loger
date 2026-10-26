@@ -245,7 +245,7 @@ void OnDataLoaded(const PluginConfig& cfg)
   // ADR-0022: the game window exists by now.
   if (cfg.enableCloseRequestLog) {
     if (skydiag::plugin::InstallCloseRequestHooks()) {
-      spdlog::info("SkyrimDiag: close request log on (game window thread hook)");
+      spdlog::info("SkyrimDiag: close request log on (key sampler, quit flag, game window thread hooks)");
     } else {
       spdlog::warn("SkyrimDiag: close request log off (game window not found or hook refused, err={})", GetLastError());
     }
