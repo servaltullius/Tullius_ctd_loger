@@ -35,63 +35,132 @@ void Require(bool condition, std::string_view message)
   }
 }
 
-// Alt+F4: DefWindowProc turns the key into SC_CLOSE, then SC_CLOSE into
-// WM_CLOSE; one close request is recorded, as Alt+F4.
-constexpr bool AltF4IsOneAltF4Request()
+using skydiag::kKeyAltContextBit;
+using skydiag::kKeyRepeatBit;
+using skydiag::kVkF4;
+using skydiag::kWmQuit;
+using skydiag::kWmSysKeyDown;
+
+constexpr CloseRequestKind Obs(
+  CloseRequestTracker& t,
+  std::uint32_t message,
+  std::uint64_t wParam,
+  std::uint64_t lParam,
+  bool altDown,
+  bool f4Down,
+  std::uint64_t nowMs)
+{
+  return ObserveCloseRequestMessage(&t, message, wParam, lParam, altDown, f4Down, nowMs);
+}
+
+// The lParam of an Alt+F4 key-down (scan code 0x3E, Alt held).
+constexpr std::uint64_t kAltF4KeyLParam = kKeyAltContextBit | (0x3Eull << 16) | 1u;
+
+// Alt+F4 as Windows delivers it (2026-10-26 in-game test): the key-down is
+// posted, DefWindowProc posts SC_CLOSE for it, and SC_CLOSE becomes a sent
+// WM_CLOSE. The key-down alone is the Alt+F4 request; the rest is the same
+// one, also once the keys are up.
+constexpr bool PostedAltF4IsOneRequest()
 {
   CloseRequestTracker t{};
-  return ObserveCloseRequestMessage(&t, kWmSysCommand, kScClose, true, 1000) == CloseRequestKind::kAltF4 &&
-         ObserveCloseRequestMessage(&t, kWmClose, 0, true, 1001) == CloseRequestKind::kNone;
+  return Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam, true, true, 1000) == CloseRequestKind::kAltF4 &&
+         Obs(t, kWmSysCommand, kScClose, 0, false, false, 1010) == CloseRequestKind::kNone &&
+         Obs(t, kWmClose, 0, 0, false, false, 1011) == CloseRequestKind::kNone &&
+         Obs(t, kWmQuit, 0, 0, false, false, 1020) == CloseRequestKind::kNone;
 }
-static_assert(AltF4IsOneAltF4Request());
+static_assert(PostedAltF4IsOneRequest());
+
+// A game that turns Alt+F4 into its own quit never lets SC_CLOSE come: the
+// key-down is enough. Alt comes from the context bit or from the key state.
+static_assert([] {
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam, false, false, 5) == CloseRequestKind::kAltF4;
+}());
+static_assert([] {
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysKeyDown, kVkF4, 1u, true, true, 5) == CloseRequestKind::kAltF4;
+}());
+// F4 without Alt, another system key, or the auto-repeat of a held Alt+F4
+// is not a new request.
+static_assert([] {
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysKeyDown, kVkF4, 1u, false, true, 5) == CloseRequestKind::kNone &&
+         Obs(t, kWmSysKeyDown, 0x12u, kAltF4KeyLParam, true, false, 6) == CloseRequestKind::kNone &&
+         Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam | kKeyRepeatBit, true, true, 7) == CloseRequestKind::kNone &&
+         !t.recorded;
+}());
+
+// Sent only (no key-down seen): SC_CLOSE while Alt and F4 are held is
+// still Alt+F4, and its WM_CLOSE the same request.
+constexpr bool SentAltF4IsOneRequest()
+{
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysCommand, kScClose, 0, true, true, 1000) == CloseRequestKind::kAltF4 &&
+         Obs(t, kWmClose, 0, 0, true, true, 1001) == CloseRequestKind::kNone;
+}
+static_assert(SentAltF4IsOneRequest());
 
 // The X button (SC_CLOSE without the keys) and its WM_CLOSE.
 constexpr bool XButtonIsOneWindowClose()
 {
   CloseRequestTracker t{};
-  return ObserveCloseRequestMessage(&t, kWmSysCommand, kScClose | 0x2u, false, 5000) ==
-           CloseRequestKind::kWindowClose &&
-         ObserveCloseRequestMessage(&t, kWmClose, 0, false, 5010) == CloseRequestKind::kNone;
+  return Obs(t, kWmSysCommand, kScClose | 0x2u, 0, false, false, 5000) == CloseRequestKind::kWindowClose &&
+         Obs(t, kWmClose, 0, 0, false, false, 5010) == CloseRequestKind::kNone;
 }
 static_assert(XButtonIsOneWindowClose(), "the low bits of an SC_ command are ignored");
+// Alt held alone (Alt+click) is not Alt+F4.
+static_assert([] {
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysCommand, kScClose, 0, true, false, 5000) == CloseRequestKind::kWindowClose;
+}());
 
 // WM_CLOSE alone (Task Manager's End task, another program, the game itself).
-constexpr bool BareCloseMessage()
-{
+static_assert([] {
   CloseRequestTracker t{};
-  return ObserveCloseRequestMessage(&t, kWmClose, 0, false, 100) == CloseRequestKind::kCloseMessage;
-}
-static_assert(BareCloseMessage());
+  return Obs(t, kWmClose, 0, 0, false, false, 100) == CloseRequestKind::kCloseMessage;
+}());
 
-// A WM_CLOSE long after an SC_CLOSE is a new request of its own.
-constexpr bool LateCloseMessageIsItsOwn()
-{
+// WM_QUIT alone: the game's loop is ending on its own (Quit to desktop).
+static_assert([] {
   CloseRequestTracker t{};
-  return ObserveCloseRequestMessage(&t, kWmSysCommand, kScClose, false, 100) == CloseRequestKind::kWindowClose &&
-         ObserveCloseRequestMessage(&t, kWmClose, 0, false, 100 + skydiag::kCloseRequestRepeatMs + 1) ==
+  return Obs(t, kWmQuit, 0, 0, false, false, 100) == CloseRequestKind::kGameQuit;
+}());
+
+// A WM_CLOSE long after an SC_CLOSE is a new request of its own, and an
+// SC_CLOSE long after an Alt+F4 key-down is no longer Alt+F4.
+static_assert([] {
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysCommand, kScClose, 0, false, false, 100) == CloseRequestKind::kWindowClose &&
+         Obs(t, kWmClose, 0, 0, false, false, 100 + skydiag::kCloseRequestRepeatMs + 1) ==
            CloseRequestKind::kCloseMessage;
-}
-static_assert(LateCloseMessageIsItsOwn());
+}());
+static_assert([] {
+  CloseRequestTracker t{};
+  return Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam, true, true, 0) == CloseRequestKind::kAltF4 &&
+         Obs(t, kWmSysCommand, kScClose, 0, false, false, skydiag::kCloseRequestRepeatMs + 1) ==
+           CloseRequestKind::kWindowClose;
+}());
 
 // Pressing Alt+F4 again after a second (the game is slow to close) records
 // it again; the window keeps the nearer one.
-constexpr bool RepeatedAltF4AfterASecond()
-{
+static_assert([] {
   CloseRequestTracker t{};
-  return ObserveCloseRequestMessage(&t, kWmSysCommand, kScClose, true, 0) == CloseRequestKind::kAltF4 &&
-         ObserveCloseRequestMessage(&t, kWmSysCommand, kScClose, true, 500) == CloseRequestKind::kNone &&
-         ObserveCloseRequestMessage(&t, kWmSysCommand, kScClose, true, 1500) == CloseRequestKind::kAltF4;
-}
-static_assert(RepeatedAltF4AfterASecond());
+  return Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam, true, true, 0) == CloseRequestKind::kAltF4 &&
+         Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam, true, true, 500) == CloseRequestKind::kNone &&
+         Obs(t, kWmSysKeyDown, kVkF4, kAltF4KeyLParam, true, true, 1500) == CloseRequestKind::kAltF4;
+}());
 
 // Other messages and other system commands are not close requests.
 constexpr bool OtherMessagesAreIgnored()
 {
+  constexpr std::uint32_t kWmKeyDown = 0x0100u;
   CloseRequestTracker t{};
-  return ObserveCloseRequestMessage(&t, kWmSysCommand, kScMinimize, false, 1) == CloseRequestKind::kNone &&
-         ObserveCloseRequestMessage(&t, kWmSysCommand, kScKeyMenu, true, 2) == CloseRequestKind::kNone &&
-         ObserveCloseRequestMessage(&t, kWmSize, 0, true, 3) == CloseRequestKind::kNone &&
-         ObserveCloseRequestMessage(nullptr, kWmClose, 0, true, 4) == CloseRequestKind::kNone && !t.recorded;
+  return Obs(t, kWmSysCommand, kScMinimize, 0, false, false, 1) == CloseRequestKind::kNone &&
+         Obs(t, kWmSysCommand, kScKeyMenu, 0, true, false, 2) == CloseRequestKind::kNone &&
+         Obs(t, kWmSize, 0, 0, true, true, 3) == CloseRequestKind::kNone &&
+         Obs(t, kWmKeyDown, kVkF4, kAltF4KeyLParam, true, true, 4) == CloseRequestKind::kNone &&
+         ObserveCloseRequestMessage(nullptr, kWmClose, 0, 0, true, true, 4) == CloseRequestKind::kNone &&
+         !t.recorded;
 }
 static_assert(OtherMessagesAreIgnored());
 

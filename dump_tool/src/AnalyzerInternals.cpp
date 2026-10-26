@@ -248,7 +248,7 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
     }
 
     case EventType::kCloseRequest: {
-      // a=CloseRequestKind b=window message c=wParam (ADR-0022)
+      // a=CloseRequestKind b=window message c=wParam d=1 posted (ADR-0022)
       std::wstring s;
       for (const char* id = skydiag::CloseRequestKindId(static_cast<skydiag::CloseRequestKind>(a & 0xFFu)); *id; ++id) {
         s += static_cast<wchar_t>(*id);
@@ -259,6 +259,7 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
         std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L" msg=0x%04X wparam=0x%04X",
           static_cast<unsigned>(b & 0xFFFFu), static_cast<unsigned>(c & 0xFFFFu));
         s += buf;
+        s += d != 0u ? L" posted" : L" sent";
       }
       return s;
     }

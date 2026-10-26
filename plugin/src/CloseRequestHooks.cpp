@@ -7,6 +7,8 @@
 
 #include <atomic>
 
+#include <spdlog/spdlog.h>
+
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiagCloseRequest.h"
 
@@ -14,9 +16,11 @@ namespace skydiag::plugin {
 namespace {
 
 std::atomic_bool g_installed{ false };
+HHOOK g_getMessageHook = nullptr;
 HHOOK g_callWndProcHook = nullptr;
+std::atomic_bool g_firstRequestLogged{ false };
 
-// Only the game window's thread runs the hook, so it alone touches this.
+// Only the game window's thread runs the hooks, so it alone touches this.
 skydiag::CloseRequestTracker g_tracker{};
 
 HWND GameWindow() noexcept
@@ -25,40 +29,105 @@ HWND GameWindow() noexcept
   return main ? reinterpret_cast<HWND>(main->wnd) : nullptr;
 }
 
-void ObserveSentMessage(const CWPSTRUCT& sent) noexcept
+// The game window or a child of it (a posted key goes to the focus window).
+bool IsGameWindowOrChild(HWND hwnd) noexcept
 {
-  // The fast path for every other message: two compares.
-  if (sent.message != WM_SYSCOMMAND && sent.message != WM_CLOSE) {
-    return;
-  }
-  if (sent.message == WM_SYSCOMMAND && (sent.wParam & 0xFFF0u) != SC_CLOSE) {
-    return;
-  }
-  // The game window only, not a dialog or a helper window of another plugin
-  // on the same thread.
-  if (!sent.hwnd || sent.hwnd != GameWindow()) {
-    return;
-  }
-  // The input state of the message being handled: Alt+F4 that DefWindowProc
-  // turned into this SC_CLOSE / WM_CLOSE.
-  const bool altF4Held = (GetKeyState(VK_MENU) & 0x8000) != 0 && (GetKeyState(VK_F4) & 0x8000) != 0;
-  const auto kind = skydiag::ObserveCloseRequestMessage(
-    &g_tracker,
-    sent.message,
-    static_cast<std::uint64_t>(sent.wParam),
-    altF4Held,
-    GetTickCount64());
-  if (kind != skydiag::CloseRequestKind::kNone) {
-    PushCloseRequestEvent(kind, sent.message, static_cast<std::uint64_t>(sent.wParam));
+  const HWND game = GameWindow();
+  return hwnd && game && (hwnd == game || GetAncestor(hwnd, GA_ROOT) == game);
+}
+
+const char* MessageName(UINT message) noexcept
+{
+  switch (message) {
+    case WM_SYSKEYDOWN:
+      return "WM_SYSKEYDOWN";
+    case WM_SYSCOMMAND:
+      return "WM_SYSCOMMAND SC_CLOSE";
+    case WM_CLOSE:
+      return "WM_CLOSE";
+    case WM_QUIT:
+      return "WM_QUIT";
+    default:
+      return "quit flag";
   }
 }
 
-// Looks only: WH_CALLWNDPROC cannot change the message, and the next hook
-// (and then the window procedure, whoever subclassed it) always gets it.
+void Record(skydiag::CloseRequestKind kind, UINT message, std::uint64_t wParam, bool posted) noexcept
+{
+  PushCloseRequestEvent(kind, message, wParam, posted);
+  // One SkyrimDiag.log line for the first one, so a test shows it was seen
+  // without a crash.
+  if (!g_firstRequestLogged.exchange(true)) {
+    try {
+      spdlog::info(
+        "SkyrimDiag: close request seen: {} ({} {})",
+        skydiag::CloseRequestKindId(kind),
+        MessageName(message),
+        message == 0u ? "polled" : (posted ? "posted" : "sent"));
+    } catch (...) {
+      // Logging is optional; the blackbox event is already written.
+      OutputDebugStringW(L"SkyrimDiag: could not log the first close request.\n");
+    }
+  }
+}
+
+void Observe(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, bool posted) noexcept
+{
+  // The fast path for every other message: four compares.
+  if (message != WM_SYSKEYDOWN && message != WM_SYSCOMMAND && message != WM_CLOSE && message != WM_QUIT) {
+    return;
+  }
+  if (message == WM_SYSKEYDOWN && wParam != VK_F4) {
+    return;
+  }
+  if (message == WM_SYSCOMMAND && (wParam & 0xFFF0u) != SC_CLOSE) {
+    return;
+  }
+  // WM_QUIT belongs to the thread (no window); the hooks run only on the
+  // game window's thread, so it is the game's message loop ending. The rest
+  // must be for the game window, not a dialog or another plugin's window.
+  if (message != WM_QUIT && !IsGameWindowOrChild(hwnd)) {
+    return;
+  }
+  // The input state of the message being handled.
+  const bool altDown = (GetKeyState(VK_MENU) & 0x8000) != 0;
+  const bool f4Down = (GetKeyState(VK_F4) & 0x8000) != 0;
+  const auto kind = skydiag::ObserveCloseRequestMessage(
+    &g_tracker,
+    message,
+    static_cast<std::uint64_t>(wParam),
+    static_cast<std::uint64_t>(lParam),
+    altDown,
+    f4Down,
+    GetTickCount64());
+  if (kind != skydiag::CloseRequestKind::kNone) {
+    Record(kind, message, static_cast<std::uint64_t>(wParam), posted);
+  }
+}
+
+// Posted messages as the game's loop takes them from the queue: Alt+F4 is a
+// posted WM_SYSKEYDOWN, and DefWindowProc posts the SC_CLOSE it becomes.
+// Only on PM_REMOVE: a PeekMessage(PM_NOREMOVE) shows the same message again
+// later. Looks only: the MSG is never changed, and the next hook always
+// gets it.
+LRESULT CALLBACK GetMessageHook(int code, WPARAM wParam, LPARAM lParam) noexcept
+{
+  if (code == HC_ACTION && wParam == PM_REMOVE && lParam != 0) {
+    const auto& msg = *reinterpret_cast<const MSG*>(lParam);
+    Observe(msg.hwnd, msg.message, msg.wParam, msg.lParam, true);
+  }
+  return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+// Sent messages: the WM_CLOSE DefWindowProc sends for SC_CLOSE, and an
+// SC_CLOSE sent by the X button. WH_CALLWNDPROC cannot change the message,
+// and the next hook (and then the window procedure, whoever subclassed it)
+// always gets it.
 LRESULT CALLBACK CallWndProcHook(int code, WPARAM wParam, LPARAM lParam) noexcept
 {
   if (code == HC_ACTION && lParam != 0) {
-    ObserveSentMessage(*reinterpret_cast<const CWPSTRUCT*>(lParam));
+    const auto& sent = *reinterpret_cast<const CWPSTRUCT*>(lParam);
+    Observe(sent.hwnd, sent.message, sent.wParam, sent.lParam, false);
   }
   return CallNextHookEx(nullptr, code, wParam, lParam);
 }
@@ -76,11 +145,16 @@ bool InstallCloseRequestHooks() noexcept
   if (threadId == 0u || pid != GetCurrentProcessId()) {
     return false;
   }
-  // A thread hook in this process: no DLL is injected anywhere, and the
-  // module is pinned (PinThisModuleForWorkerLifetime), so the hook procedure
-  // stays valid for the process lifetime. It is never removed.
-  g_callWndProcHook = SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, threadId);
+  // Thread hooks in this process: no DLL is injected anywhere, and the
+  // module is pinned (PinThisModuleForWorkerLifetime), so the hook procedures
+  // stay valid for the process lifetime. They are never removed.
+  if (!g_getMessageHook) {
+    g_getMessageHook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageHook, nullptr, threadId);
+  }
   if (!g_callWndProcHook) {
+    g_callWndProcHook = SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, threadId);
+  }
+  if (!g_getMessageHook && !g_callWndProcHook) {
     return false;
   }
   g_installed.store(true);
@@ -108,7 +182,7 @@ void PollGameQuitRequest() noexcept
   }
   if (seenClear) {
     recorded = true;
-    PushCloseRequestEvent(skydiag::CloseRequestKind::kGameQuit, 0u, 0u);
+    Record(skydiag::CloseRequestKind::kGameQuit, 0u, 0u, false);
   }
 }
 

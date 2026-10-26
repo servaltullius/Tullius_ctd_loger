@@ -33,12 +33,13 @@ void PushFirstChanceExceptionEvent(
   std::uint32_t addressBucket,
   std::string_view moduleBasenameUtf8) noexcept;
 
-// ADR-0022: a, the CloseRequestKind; b, the window message (0 for kGameQuit);
-// c, its wParam.
+// ADR-0022: a, the CloseRequestKind; b, the window message (0 for the quit
+// flag); c, its wParam; d, 1 when the message was posted, 0 when sent.
 void PushCloseRequestEvent(
   skydiag::CloseRequestKind kind,
   std::uint32_t message,
-  std::uint64_t wParam) noexcept;
+  std::uint64_t wParam,
+  bool posted) noexcept;
 
 inline void Note(std::uint64_t tag, std::uint64_t a = 0, std::uint64_t b = 0) noexcept
 {

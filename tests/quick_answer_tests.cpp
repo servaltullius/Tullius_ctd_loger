@@ -1264,8 +1264,11 @@ void TestForcedClose()
       "detected from the blackbox");
     Require(!internal::DetectForcedClose({ events[0], events[2] }).detected, "no close request, no forced close");
     Require(internal::EventTypeName(events[1].type) == L"CloseRequest", "the event's name");
-    Require(internal::FormatEventDetail(events[1].type, 1, 0x0112, 0xF060, 0) == L"kind=alt_f4 msg=0x0112 wparam=0xF060",
+    Require(internal::FormatEventDetail(events[1].type, 1, 0x0112, 0xF060, 0) ==
+              L"kind=alt_f4 msg=0x0112 wparam=0xF060 sent",
       "the event's detail");
+    Require(internal::FormatEventDetail(events[1].type, 1, 0x0104, 0x73, 1) == L"kind=alt_f4 msg=0x0104 wparam=0x0073 posted",
+      "a posted key-down");
     Require(internal::FormatEventDetail(events[1].type, 4, 0, 0, 0) == L"kind=game_quit", "game quit detail");
   }
 
