@@ -171,14 +171,17 @@ internal sealed partial class MainWindowViewModel
                               summary.SummarySentence.Contains("무한로딩", StringComparison.Ordinal);
 
         var isFilteredCleanExit = summary.IsFilteredCleanExit;
-        var isSnapshotLike = !isFilteredCleanExit &&
+        var isForcedClose = !isFilteredCleanExit && summary.IsForcedClose;
+        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose &&
                              (summary.IsSnapshotLike ||
                              looksSnapshotByText ||
                              HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]"));
-        var isHangLike = !isFilteredCleanExit && !isSnapshotLike &&
+        var isHangLike = !isFilteredCleanExit && !isForcedClose && !isSnapshotLike &&
                          (summary.IsHangLike || looksHangByText || HasAnyPrefix(recs, "[Hang]", "[프리징]"));
         lines.Add(isFilteredCleanExit
             ? (_isKorean ? "🟢 Skyrim 정상 종료 진단 리포트 — SkyrimDiag" : "🟢 Skyrim Clean-Exit Diagnostic Report — SkyrimDiag")
+            : isForcedClose
+            ? (_isKorean ? "⚪ Skyrim 강제 종료 중 오류 리포트 — SkyrimDiag" : "⚪ Skyrim Forced-Close Error Report — SkyrimDiag")
             : isSnapshotLike
             ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
             : isHangLike
@@ -234,11 +237,13 @@ internal sealed partial class MainWindowViewModel
 
         if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
         {
-            var typeLabel = isFilteredCleanExit || isSnapshotLike
+            var typeLabel = isFilteredCleanExit || isForcedClose || isSnapshotLike
                 ? (_isKorean ? "분류" : "Category")
                 : (_isKorean ? "유형" : "Type");
             var typeValue = isFilteredCleanExit
                 ? "CLEAN_EXIT"
+                : isForcedClose
+                ? "FORCED_CLOSE"
                 : isSnapshotLike
                 ? "SNAPSHOT"
                 : isHangLike
@@ -265,6 +270,12 @@ internal sealed partial class MainWindowViewModel
                 firstAction = summary.Recommendations.FirstOrDefault(r =>
                     r.StartsWith("[Clean exit]", StringComparison.OrdinalIgnoreCase) ||
                     r.StartsWith("[정상 종료]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
+            }
+            else if (isForcedClose && !summary.HasNextActionIndex)
+            {
+                firstAction = summary.Recommendations.FirstOrDefault(r =>
+                    r.StartsWith("[Forced close]", StringComparison.OrdinalIgnoreCase) ||
+                    r.StartsWith("[강제 종료]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
             }
             else if (isSnapshotLike)
             {

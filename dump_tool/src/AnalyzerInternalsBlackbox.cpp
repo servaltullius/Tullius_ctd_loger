@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "MinidumpUtil.h"
+#include "SkyrimDiagCloseRequest.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -109,6 +110,26 @@ void AddGameStateContext(const std::vector<EventRow>& events, double lastMs, Bla
 }
 
 }  // namespace
+
+ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
+{
+  skydiag::ForcedCloseScanner scanner;
+  for (const auto& event : events) {
+    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest)) {
+      scanner.AddCloseRequest(event.t_ms, event.a);
+    } else if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash)) {
+      scanner.AddCrash(event.t_ms);
+    }
+  }
+  const auto match = scanner.Result();
+  ForcedCloseInfo info{};
+  if (match.matched()) {
+    info.detected = true;
+    info.kind = skydiag::CloseRequestKindId(match.kind);
+    info.seconds_before_crash = match.msBeforeCrash / 1000.0;
+  }
+  return info;
+}
 
 BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   const std::vector<EventRow>& events,

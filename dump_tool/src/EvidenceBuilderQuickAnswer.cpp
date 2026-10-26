@@ -672,6 +672,16 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     }
     return answer;
   }
+  if (ctx.isForcedClose) {
+    // ADR-0022: no lead and no "how it crashed" line; the detail is in the
+    // report for mod authors.
+    answer.kind = "forced_close";
+    answer.case_id = "forced_close";
+    answer.headline = ForcedCloseLead(r.forced_close, en) +
+      (en ? L" Saves are usually unaffected." : L" 세이브에는 보통 영향이 없습니다.");
+    answer.action = en ? L"Nothing to do." : L"따로 할 일은 없습니다.";
+    return answer;
+  }
   if (ctx.isSnapshotLike) {
     answer.kind = "snapshot";
     answer.case_id = ctx.isManualCapture ? "manual_snapshot" : "snapshot";

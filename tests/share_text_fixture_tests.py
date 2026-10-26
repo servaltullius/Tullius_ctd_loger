@@ -240,6 +240,23 @@ def test_recommendation_classes_decide_the_sections() -> None:
     ), actual
 
 
+def test_forced_close_is_not_shared_as_a_ctd() -> None:
+    # ADR-0022: a crash right after Alt+F4 is shared as a forced-close error,
+    # not under the CTD header, with nothing to do as its next action.
+    community = _run_harness("forced_close_summary.json", "community")
+    lines = community.split("\n")
+    assert lines[0] == "⚪ Skyrim Forced-Close Error Report — SkyrimDiag", community
+    assert lines[1].startswith("💬 Quick answer: This error happened while you force-quit the game (Alt+F4)."), community
+    assert "👉 What to try: Nothing to do." in lines, community
+    assert "🔍 Category: FORCED_CLOSE" in lines, community
+    assert "CTD Report" not in community, community
+    next_action = [line for line in lines if line.startswith("🛠️ Next action: ")]
+    assert next_action and next_action[0].startswith("🛠️ Next action: This error happened while you force-quit"), community
+
+    clipboard = _run_harness("forced_close_summary.json", "clipboard")
+    assert clipboard.split("\n")[1].startswith("Quick answer: This error happened while you force-quit"), clipboard
+
+
 def test_cleared_summary_produces_no_share_text() -> None:
     actual = _run_harness("frame_first_summary.json", "cleared")
     assert actual == "", actual
@@ -266,5 +283,6 @@ if __name__ == "__main__":
     test_quick_answer_leads_the_share_texts()
     test_summary_without_quick_answer_keeps_its_share_texts()
     test_recommendation_classes_decide_the_sections()
+    test_forced_close_is_not_shared_as_a_ctd()
     test_cleared_summary_produces_no_share_text()
     print("share_text_fixture_tests: OK")

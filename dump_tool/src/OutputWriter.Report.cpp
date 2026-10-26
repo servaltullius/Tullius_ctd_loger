@@ -99,6 +99,13 @@ std::string BuildReportText(
   }
   rpt << (en ? "Dump: " : "덤프: ") << WideToUtf8(MaybeRedactPath(r.dump_path, redactPaths)) << "\n";
   rpt << (en ? "Summary: " : "결론: ") << WideToUtf8(r.summary_sentence) << "\n";
+  if (r.forced_close.detected) {
+    // ADR-0022: classified as a forced close, not a CTD.
+    char seconds[32]{};
+    std::snprintf(seconds, sizeof(seconds), "%.1f", r.forced_close.seconds_before_crash);
+    rpt << (en ? "Classification: FORCED_CLOSE (not a CTD; " : "분류: 강제 종료 (CTD 아님; ") << r.forced_close.kind
+        << (en ? ", " : ", 오류 ") << seconds << (en ? " s before the error)" : "초 전)") << "\n";
+  }
   rpt << (en ? "PathRedactionApplied: " : "경로 마스킹 적용: ") << (redactPaths ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceAllowed: " : "온라인 심볼 소스 허용: ") << (r.online_symbol_source_allowed ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceUsed: " : "온라인 심볼 소스 사용: ") << (r.online_symbol_source_used ? "1" : "0") << "\n";

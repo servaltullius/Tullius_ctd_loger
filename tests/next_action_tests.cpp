@@ -24,6 +24,19 @@ int main()
            L"[Modal dialog] Read the dialog.",
          }) == 0u);
 
+  // A forced close (ADR-0022) has nothing to do, ahead of a known cause or a
+  // candidate the analysis below still names for mod authors.
+  assert(SelectNextActionIndex({
+           L"[Basics] ExceptionCode=0xC0000005 (Access Violation).",
+           L"[Known cause] Move ContentCatalog.txt to the Recycle Bin.",
+           L"[Actionable candidate] Check PrismaUI.dll first.",
+           L"[Forced close] This error happened while you force-quit the game (Alt+F4). Nothing to do.",
+         }) == 3u);
+  assert(SelectNextActionIndex({
+           L"[행동 우선 후보] PrismaUI.dll 부터 확인하세요.",
+           L"[강제 종료] Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다.",
+         }) == 1u);
+
   // SmoothCam CTD: background first, candidate second.
   assert(SelectNextActionIndex({
            L"[Basics] ExceptionCode=0xC0000005 (Access Violation).",

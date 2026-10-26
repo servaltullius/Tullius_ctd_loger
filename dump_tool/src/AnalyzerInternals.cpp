@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <string_view>
 
+#include "SkyrimDiagCloseRequest.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -33,6 +34,7 @@ std::wstring EventTypeName(std::uint16_t t)
     case EventType::kThreadCreate: return L"ThreadCreate";
     case EventType::kThreadExit: return L"ThreadExit";
     case EventType::kFirstChanceException: return L"FirstChanceException";
+    case EventType::kCloseRequest: return L"CloseRequest";
     case EventType::kCrash: return L"Crash";
     case EventType::kHangMark: return L"HangMark";
     default: return L"Unknown";
@@ -241,6 +243,22 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
       const auto label = DecodePackedShortText(b, c, d);
       if (!label.empty()) {
         s += L" module=" + label;
+      }
+      return s;
+    }
+
+    case EventType::kCloseRequest: {
+      // a=CloseRequestKind b=window message c=wParam (ADR-0022)
+      std::wstring s;
+      for (const char* id = skydiag::CloseRequestKindId(static_cast<skydiag::CloseRequestKind>(a & 0xFFu)); *id; ++id) {
+        s += static_cast<wchar_t>(*id);
+      }
+      s = L"kind=" + (s.empty() ? std::to_wstring(a) : s);
+      if (b != 0u) {
+        wchar_t buf[48];
+        std::swprintf(buf, sizeof(buf) / sizeof(buf[0]), L" msg=0x%04X wparam=0x%04X",
+          static_cast<unsigned>(b & 0xFFFFu), static_cast<unsigned>(c & 0xFFFFu));
+        s += buf;
       }
       return s;
     }

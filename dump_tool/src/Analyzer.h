@@ -122,6 +122,17 @@ struct BlackboxFreezeSummary
   double pause_gap_ended_seconds_before = 0.0;
 };
 
+// ADR-0022: the blackbox recorded a request to close the game (Alt+F4, the
+// window's X button, the game's Quit) at most kForcedCloseCrashWindowMs before
+// this crash. It is an error during a forced close, not a CTD: kept out of
+// the crash history like a clean exit, but analyzed in full.
+struct ForcedCloseInfo
+{
+  bool detected = false;
+  std::string kind;  // alt_f4 / window_close / close_message / game_quit (CloseRequestKindId)
+  double seconds_before_crash = 0.0;
+};
+
 struct FirstChanceSummary
 {
   bool has_context = false;
@@ -476,6 +487,7 @@ struct AnalysisResult
   // (the game kept running after the crash was captured).
   std::string clean_exit_filter_context;
   std::wstring clean_exit_evidence_filename;
+  ForcedCloseInfo forced_close;
 
   std::uint32_t exc_code = 0;
   std::uint32_t exc_tid = 0;

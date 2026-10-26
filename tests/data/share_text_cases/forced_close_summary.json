@@ -1,0 +1,53 @@
+{
+  "summary_sentence": "This error happened while you force-quit the game (Alt+F4). It is not a crash during play. Top suspect: PrismaUI.dll — based on callstack heuristic. (Confidence: Medium)",
+  "quick_answer": {
+    "kind": "forced_close",
+    "case": "forced_close",
+    "suspect_mod": "",
+    "suspect_file": "",
+    "likelihood": "none",
+    "likelihood_text": "",
+    "headline": "This error happened while you force-quit the game (Alt+F4). It is not a crash during play. Saves are usually unaffected.",
+    "action": "Nothing to do.",
+    "why_not_certain": "",
+    "how_it_crashed": ""
+  },
+  "crash_bucket_key": "CTD-prismaui-bad-jump",
+  "analysis": {
+    "is_crash_like": true,
+    "is_hang_like": false,
+    "is_snapshot_like": false,
+    "is_manual_capture": false,
+    "is_filtered_clean_exit": false,
+    "is_forced_close": true
+  },
+  "forced_close": {
+    "kind": "alt_f4",
+    "seconds_before_crash": 0.8,
+    "window_seconds": 10.0
+  },
+  "exception": {
+    "module_plus_offset": "",
+    "inferred_mod_name": ""
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "PrismaUI.dll",
+      "module_path": "",
+      "inferred_mod_name": "PrismaUI",
+      "reason": "callstack frame",
+      "score": 9
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Forced close] This error happened while you force-quit the game (Alt+F4). It is not a crash during play. Nothing to do. If the same error comes every time you close the game, pass the analysis below to the author of the mod it names.",
+    "[Basics] ExceptionCode=0xC0000005 (Access Violation). Often caused by DLL hooks / invalid memory access."
+  ],
+  "next_action_index": 0
+}

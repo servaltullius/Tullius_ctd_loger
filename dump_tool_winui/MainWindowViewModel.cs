@@ -123,6 +123,8 @@ internal sealed partial class MainWindowViewModel
 
         BucketText = summary.IsFilteredCleanExit
             ? T("Classification: CLEAN_EXIT (not CTD)", "분류: 정상 종료 (CTD 아님)")
+            : summary.IsForcedClose
+            ? T("Classification: FORCED_CLOSE (not CTD)", "분류: 강제 종료 (CTD 아님)")
             : string.IsNullOrWhiteSpace(summary.CrashBucketKey)
             ? T("Crash bucket: unavailable", "크래시 버킷: 없음")
             : T("Crash bucket: ", "크래시 버킷: ") + summary.CrashBucketKey;
@@ -168,11 +170,13 @@ internal sealed partial class MainWindowViewModel
                 : T("Inferred mod: ", "추정 모드: ") + summary.InferredModName;
         }
 
-        QuickPrimaryLabel = summary.IsFilteredCleanExit
+        QuickPrimaryLabel = summary.IsFilteredCleanExit || summary.IsForcedClose
             ? T("Classification", "분류")
             : BuildCrashLoggerContextLabel(summary);
         QuickPrimaryValue = summary.IsFilteredCleanExit
             ? T("Clean exit — not a CTD", "정상 종료 — CTD 아님")
+            : summary.IsForcedClose
+            ? T("Forced close — not a CTD", "강제 종료 — CTD 아님")
             : CrashLoggerContextSummary;
         if (summary.IsFilteredCleanExit)
         {

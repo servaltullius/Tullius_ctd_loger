@@ -514,6 +514,7 @@ void ProcessValidCrashDump(
   const std::wstring& dumpPath,
   const std::wstring& ts,
   const CrashEventInfo& info,
+  const skydiag::ForcedCloseMatch& forcedClose,
   const PluginScanInputs& pluginScanInputs,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
@@ -600,7 +601,11 @@ void ProcessValidCrashDump(
   }
 
   bool viewerNow = false;
-  if (cfg.autoOpenViewerOnCrash) {
+  if (cfg.autoOpenViewerOnCrash && forcedClose.matched()) {
+    // ADR-0022: the player closed the game; this is no CTD to pop up for.
+    // The headless analysis below still writes the report and summary.
+    AppendLogLine(outBase, L"Skipped viewer auto-open: " + DescribeForcedCloseForLog(forcedClose) + L".");
+  } else if (cfg.autoOpenViewerOnCrash) {
     if (!cfg.autoOpenCrashOnlyIfProcessExited) {
       const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"crash");
       viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
@@ -878,6 +883,41 @@ bool TryClearRecoveredCrashFreeze(
   return true;
 }
 
+skydiag::ForcedCloseMatch FindForcedCloseInSnapshot(
+  const skydiag::SharedLayout* snapshot,
+  std::size_t snapshotBytes) noexcept
+{
+  if (!snapshot || snapshotBytes < sizeof(skydiag::SharedLayout) || snapshot->header.magic != skydiag::kMagic ||
+      snapshot->header.qpc_freq == 0u) {
+    return {};
+  }
+  const auto& header = snapshot->header;
+  std::uint32_t capacity = header.capacity;
+  if (capacity == 0u || capacity > skydiag::kEventCapacity) {
+    capacity = skydiag::kEventCapacity;
+  }
+  const auto toMs = [&](std::uint64_t qpc) {
+    const std::uint64_t since = qpc > header.start_qpc ? qpc - header.start_qpc : 0u;
+    return 1000.0 * static_cast<double>(since) / static_cast<double>(header.qpc_freq);
+  };
+  skydiag::ForcedCloseScanner scanner;
+  const std::uint32_t writeIndex = header.write_index;
+  const std::uint32_t begin = writeIndex > capacity ? writeIndex - capacity : 0u;
+  for (std::uint32_t i = begin; i < writeIndex; ++i) {
+    const auto& event = snapshot->events[i % capacity];
+    // The snapshot marks an entry it could not copy stably with an odd seq.
+    if ((event.seq & 1u) != 0u) {
+      continue;
+    }
+    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest)) {
+      scanner.AddCloseRequest(toMs(event.qpc), event.payload.a);
+    } else if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash)) {
+      scanner.AddCrash(toMs(event.qpc));
+    }
+  }
+  return scanner.Result();
+}
+
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept
 {
   if (!shm) {
@@ -1096,6 +1136,16 @@ bool HandleCrashEventTick(
       + L", tid=" + std::to_wstring(info.faultingTid)
       + L", crash_seq=" + std::to_wstring(info.crashSeq)
       + L").");
+  const auto forcedClose = FindForcedCloseInSnapshot(dumpSnapshot, dumpSnapshotBytes);
+  if (crashState) {
+    crashState->forcedClose = forcedClose;
+  }
+  if (forcedClose.matched()) {
+    AppendLogLine(
+      outBase,
+      L"This " + DescribeForcedCloseForLog(forcedClose)
+        + L": an error while the game was being closed, not a CTD (the viewer will not open).");
+  }
 
   // Right after Crash Logger's thread dump hotkey, a C++ exception or
   // breakpoint is most likely one of its thread dump's probes
@@ -1135,6 +1185,7 @@ bool HandleCrashEventTick(
         // and a non-zero exit also needs Crash Logger's crash log to record it.
         crashState->releasedOnBriefHeartbeat = early == FilterVerdict::kDeleteRecovered;
         crashState->releasedInThreadDumpWindow = true;
+        crashState->releasedForcedClose = forcedClose;
         crashState->releasedCrashEventFileTimeUtc =
           (static_cast<std::uint64_t>(eventTime.dwHighDateTime) << 32) | eventTime.dwLowDateTime;
       }
@@ -1417,6 +1468,7 @@ bool HandleCrashEventTick(
           crashState->releasedCrashTick64 = GetTickCount64();
           crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
           crashState->releasedInThreadDumpWindow = false;
+          crashState->releasedForcedClose = forcedClose;
         }
         if (holdReleasedDump) {
           NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
@@ -1474,6 +1526,7 @@ bool HandleCrashEventTick(
     dumpPath,
     ts,
     info,
+    forcedClose,
     pluginScanInputs,
     pendingCrashEtw,
     pendingCrashAnalysis,

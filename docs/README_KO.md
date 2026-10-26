@@ -154,6 +154,7 @@ MO2는 USVFS 가상 파일 시스템 안에서 스카이림을 실행합니다. 
 | `ResourceLogThrottleHighWatermarkPerSec` | `1500` | 초당 이벤트 임계값. 초과 시 적응형 샘플링 시작. |
 | `ResourceLogThrottleMaxSampleDivisor` | `8` | burst 상황 최대 샘플링 배수(값이 클수록 오버헤드↓, 세부 로그↓). |
 | `EnablePerfHitchLog` | `1` | 메인 스레드 스톨 기록 (가벼움). |
+| `EnableCloseRequestLog` | `1` | Alt+F4·창 닫기·종료 요청 기록. 게임을 닫는 중에 난 오류를 CTD로 보고하지 않음. |
 | `CrashHookMode` | `1` | **1 유지 권장.** 2 = 모든 예외 기록 (비권장). |
 | `AllowOnlineSymbols` | `0` | 로컬/오프라인 캐시 우선 분석. |
 

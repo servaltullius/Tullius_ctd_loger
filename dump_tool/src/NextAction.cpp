@@ -31,6 +31,8 @@ std::size_t FindFirstTagged(const std::vector<std::wstring>& recommendations, co
 // candidate-level tags the checklist emits.
 // What the main thread was doing (modal dialog, engine or driver wait) comes
 // before any module triage.
+// A forced close (ADR-0022) says there is nothing to do, before any module.
+constexpr std::wstring_view kForcedClose[] = { L"[Forced close]", L"[강제 종료]" };
 // A known root cause (crash_signatures.json) names the fix itself.
 constexpr std::wstring_view kKnownCause[] = { L"[Known cause]", L"[알려진 원인]" };
 constexpr std::wstring_view kModalDialog[] = {
@@ -58,6 +60,7 @@ std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendatio
     return std::wstring::npos;
   }
   for (const std::size_t found : {
+         FindFirstTagged(recommendations, kForcedClose),
          FindFirstTagged(recommendations, kKnownCause),
          FindFirstTagged(recommendations, kModalDialog),
          FindFirstTagged(recommendations, kCandidate),

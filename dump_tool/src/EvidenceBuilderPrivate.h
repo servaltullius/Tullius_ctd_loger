@@ -38,6 +38,9 @@ struct EvidenceBuildContext
 
   bool hasException = false;
   bool isFilteredCleanExit = false;
+  // ADR-0022: a crash right after the player asked the game to close. Still
+  // crash-like (the analysis stays for mod authors), but never called a CTD.
+  bool isForcedClose = false;
   bool isCrashLike = false;
   bool isHangLike = false;
   bool isSnapshotLike = false;
@@ -142,6 +145,11 @@ bool IsWeakFaultLocationActionableCandidate(
   const AnalysisResult& r,
   const ActionableCandidate& candidate,
   const EvidenceBuildContext& ctx);
+
+// ADR-0022: "Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다. 플레이 중에 튕긴
+// CTD가 아닙니다." / "This error happened while you force-quit the game
+// (Alt+F4). It is not a crash during play.", by the close request's kind.
+std::wstring ForcedCloseLead(const ForcedCloseInfo& forcedClose, bool en);
 
 // Split parts of BuildEvidenceAndSummaryImpl.
 void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

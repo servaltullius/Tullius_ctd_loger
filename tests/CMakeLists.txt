@@ -600,6 +600,15 @@ target_include_directories(skydiag_fault_instruction_tests PRIVATE
 )
 add_test(NAME skydiag_fault_instruction_tests COMMAND skydiag_fault_instruction_tests)
 
+# ADR-0022: close-request classification and the forced-close window.
+add_executable(skydiag_close_request_tests
+  close_request_tests.cpp
+)
+target_include_directories(skydiag_close_request_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+add_test(NAME skydiag_close_request_tests COMMAND skydiag_close_request_tests)
+
 add_executable(skydiag_rtti_decoder_tests
   rtti_decoder_tests.cpp
 )

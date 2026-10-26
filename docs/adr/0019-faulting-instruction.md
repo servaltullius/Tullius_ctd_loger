@@ -44,6 +44,18 @@ Accepted
 - "rax가 0"은 어떤 오브젝트였는지, 어느 모드가 그 값을 만들었는지 말하지 않습니다. 오브젝트는 ADR-0010의 덤프 오브젝트와 Crash Logger 참조가 보여 줍니다.
 - 예외 주소가 모듈 밖인 실행 예외는 덤프에 반환 주소가 남아 있을 때만 호출 위치가 나옵니다(꼬리 호출 `jmp`는 남기지 않음).
 
+## Addendum (2026-10-26): 이동한 곳의 메모리 상태
+- 2026-10-26 강제 종료 덤프(ADR-0022)의 `bad_jump`는 0x7FF7055F0000으로 갔고, 그 주소는 덤프의 메모리 정보 스트림(`MemoryInfoListStream`)에서 `MEM_FREE`였습니다(해제된 후킹 트램펄린). "잘못된(해제됐거나 망가진) 함수 포인터"보다 분명하게 말할 수 있습니다.
+- `ProbeFaultInstruction`(분석기 쪽, Windows 헤더 사용)이 `bad_jump`의 대상 주소를 메모리 정보 스트림에서 찾아 `FaultInstructionInfo::target_state`에 넣습니다: `freed`(MEM_FREE), `reserved`(MEM_RESERVE), `not_executable`(커밋됐지만 실행 권한 없음, 또는 guard/noaccess), `executable`. 스트림이 없거나 주소를 덮지 않으면 비웁니다. 해독기(`FaultInstruction.cpp`)는 이 문자열만 읽으므로 Windows 헤더 없이 그대로입니다.
+- `null_jump`은 대상이 처음 64KB(할당된 적 없는 영역)라 해제됐다고 하지 않으므로 상태를 넣지 않습니다.
+- 문장
+  - `freed`: 근거 "코드가 X 주소의 명령을 실행하려 했지만 그곳에는 할당된 메모리가 없었습니다. 해제된 메모리(예: 제거된 후킹 코드)로 이동했다는 뜻입니다." / "The code tried to run instructions at X, but no memory was allocated there: it jumped into memory that had been freed (for example a hook stub that was removed).", 빠른 답 "해제된 메모리(예: 제거된 후킹 코드)로 이동하다가 튕겼습니다." / "It crashed jumping into memory that had been freed (for example a hook stub that was removed)."
+  - `not_executable`: 근거 "…그곳은 실행할 수 없는 데이터 메모리입니다. 데이터를 가리키는 잘못된 함수 포인터나 반환 주소로…" / "…which is memory holding data, not code (it is not executable)…", 빠른 답 "코드가 아닌 데이터 주소로 이동하다가 튕겼습니다(망가진 함수 포인터)." / "It crashed jumping to data instead of code (a broken function pointer)."
+  - 그 밖(`reserved`, `executable`, 빈 값): 기존 문장.
+  - 호출 위치 문장은 그대로 뒤에 붙습니다.
+- 출력 계약: 요약 JSON `fault_instruction.target_state`(값이 있을 때만), 리포트 `FaultInstruction: execute 0x7FF7055F0000 (freed), from call qword ptr [rsp+0x20] -> bad_jump`.
+- 검증: `skydiag_fault_instruction_tests`(문장·빠른 답·리포트 줄, 다른 상태는 기존 문장, null_jump은 freed라 하지 않음), `skydiag_quick_answer_tests`(요약 JSON `target_state`, 리포트 줄). 보관 덤프 21건 재분석에서 바뀐 것은 `SkyrimDiag_Crash_20261026_140735_958`(`target_state` = `freed`, 근거·빠른 답·리포트 줄) 하나이고, 나머지 덤프에는 `bad_jump`이 없어 그대로입니다.
+
 ## Verification
 - `skydiag_fault_instruction_tests`(Linux 포함): 위 형식마다 합성 바이트열의 해독(크기, 읽기/쓰기, 피연산자 문자열, SIB·r12/r13·REX.X·disp32·RIP 상대 주소·즉값 길이), 거부 형식(VEX/EVEX, 67, GS, 0F 38, MMX, popcnt, rep, 잘린 바이트), 판정마다의 교차 검증과 영어·한국어 문장(레지스터가 0인 경우 전체 문장 일치), `address_only`에서 레지스터를 말하지 않음, 호출 위치 찾기(`call [rax+0x18]`, `call [rsp+8]`의 rsp 보정, `call reg`, `call rel32`, 긴 호출 명령어의 꼬리가 짧은 호출로 보이는 경우)
 - `skydiag_quick_answer_tests`: 근거 항목의 위치·신뢰도·문장, 빠른 답의 덧붙인 문장과 나머지 불변, 요약 JSON `fault_instruction`, 리포트 줄, 레지스터 없는 경우

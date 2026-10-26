@@ -18,6 +18,7 @@
 #include <spdlog/sinks/null_sink.h>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/CrashHandler.h"
 #include "SkyrimDiag/EventSinks.h"
 #include "SkyrimDiag/Heartbeat.h"
@@ -43,6 +44,7 @@ struct PluginConfig
   bool enablePerfHitchLog = true;
   std::uint32_t perfHitchThresholdMs = 250;
   std::uint32_t perfHitchCooldownMs = 3000;
+  bool enableCloseRequestLog = true;
 };
 
 PluginConfig g_cfg{};
@@ -128,6 +130,7 @@ PluginConfig LoadConfig()
     L"SkyrimDiag", L"PerfHitchThresholdMs", 250, iniPath, 1, 10000);
   cfg.perfHitchCooldownMs = ReadIniUint32Clamped(
     L"SkyrimDiag", L"PerfHitchCooldownMs", 3000, iniPath, 0, 60000);
+  cfg.enableCloseRequestLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableCloseRequestLog", 1, iniPath) != 0;
 
   return cfg;
 }
@@ -238,6 +241,15 @@ void OnDataLoaded(const PluginConfig& cfg)
     cfg.perfHitchThresholdMs,
     cfg.perfHitchCooldownMs,
   });
+
+  // ADR-0022: the game window exists by now.
+  if (cfg.enableCloseRequestLog) {
+    if (skydiag::plugin::InstallCloseRequestHooks()) {
+      spdlog::info("SkyrimDiag: close request log on (game window thread hook)");
+    } else {
+      spdlog::warn("SkyrimDiag: close request log off (game window not found or hook refused, err={})", GetLastError());
+    }
+  }
 
   spdlog::info("SkyrimDiag: data loaded; heartbeat={}ms crashHookMode={} logMenus={}",
                cfg.heartbeatIntervalMs,

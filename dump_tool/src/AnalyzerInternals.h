@@ -45,6 +45,10 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   bool loadingContext,
   double lastHeartbeatMs = -1.0);
 
+// ADR-0022: the close request the newest Crash event came at most
+// kForcedCloseCrashWindowMs after; detected is false without one.
+ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events);
+
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,
   bool loadingContext);

@@ -127,7 +127,12 @@ bool PromoteReleasedCrashDump(
       + std::filesystem::path(dumpPath).filename().wstring());
   // The game has exited, so a queued viewer opens right after this
   // (LaunchDeferredViewersAfterExit) and analyzes the dump itself.
-  const bool viewerQueued = cfg.autoOpenViewerOnCrash && QueueDeferredCrashViewer(dumpPath, &state->pendingCrashViewerDumpPath);
+  // ADR-0022: no viewer for an error while the game was being closed.
+  if (cfg.autoOpenViewerOnCrash && crash.releasedForcedClose.matched()) {
+    AppendLogLine(outBase, L"Skipped viewer auto-open: " + DescribeForcedCloseForLog(crash.releasedForcedClose) + L".");
+  }
+  const bool viewerQueued = cfg.autoOpenViewerOnCrash && !crash.releasedForcedClose.matched() &&
+    QueueDeferredCrashViewer(dumpPath, &state->pendingCrashViewerDumpPath);
   if (ShouldRunHeadlessDumpAnalysis(cfg, viewerQueued, /*analysisRequired=*/false)) {
     std::wstring analyzeErr;
     if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, &state->pendingCrashAnalysis, &analyzeErr)) {

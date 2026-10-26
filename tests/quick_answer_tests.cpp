@@ -16,11 +16,13 @@
 #include <nlohmann/json.hpp>
 
 #include "Analyzer.h"
+#include "AnalyzerInternals.h"
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "SignatureDatabase.h"
+#include "SkyrimDiagShared.h"
 #include "Utf.h"
 
 namespace {
@@ -1127,6 +1129,155 @@ void TestFaultInstructionClue()
   Require(medium, "address-only evidence");
 }
 
+// ADR-0022, in the shape of the 2026-10-26 case: Alt+F4, and 0.8 s later
+// PrismaUI.dll's present hook called a freed hook trampoline. The player reads
+// that this was the forced close, not a CTD, and that there is nothing to do;
+// the analysis below stays for mod authors. Never called a CTD.
+void TestForcedClose()
+{
+  using skydiag::dump_tool::ExplainFaultInstruction;
+  using skydiag::dump_tool::FaultRecord;
+  const auto crash = []() {
+    auto r = CrashIn(L"PrismaUI.dll", L"PrismaUI");
+    r.exc_addr = 0x7FF7055F0000ull;
+    r.exc_info = { 8, 0x7FF7055F0000ull };
+    FaultRecord fault{};
+    fault.exception_address = r.exc_addr;
+    fault.access_kind = 8;
+    fault.address = r.exc_addr;
+    r.fault_instruction = ExplainFaultInstruction(fault, nullptr, 0);
+    r.fault_instruction.target_state = "freed";
+    r.suspects.push_back(SuspectItem{});
+    r.suspects.back().module_filename = L"PrismaUI.dll";
+    r.suspects.back().confidence_level = i18n::ConfidenceLevel::kMedium;
+    return r;
+  };
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto plain = crash();
+    BuildEvidenceAndSummary(plain, lang);
+    auto r = crash();
+    r.forced_close.detected = true;
+    r.forced_close.kind = "alt_f4";
+    r.forced_close.seconds_before_crash = 0.8;
+    BuildEvidenceAndSummary(r, lang);
+
+    const auto& qa = r.quick_answer;
+    Require(qa.kind == "forced_close" && qa.case_id == "forced_close" && qa.likelihood == "none" &&
+              qa.suspect_mod.empty() && qa.why_not_certain.empty() && qa.how_it_crashed.empty(),
+      "a forced close names no suspect");
+    Require(qa.headline == (en ? L"This error happened while you force-quit the game (Alt+F4). It is not a crash during "
+                                 L"play. Saves are usually unaffected."
+                               : L"Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다. 플레이 중에 튕긴 CTD가 "
+                                 L"아닙니다. 세이브에는 보통 영향이 없습니다."),
+      "the forced-close headline");
+    Require(qa.action == (en ? L"Nothing to do." : L"따로 할 일은 없습니다."), "nothing to do");
+    RequirePlainWords(qa, "forced close");
+
+    // The summary sentence leads with it and keeps the analysis after it.
+    const std::wstring lead = en ? L"This error happened while you force-quit the game (Alt+F4). It is not a crash "
+                                   L"during play. "
+                                 : L"Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다. 플레이 중에 튕긴 CTD가 아닙니다. ";
+    Require(r.summary_sentence == lead + plain.summary_sentence, "summary prefix");
+    Require(r.suspects.size() == plain.suspects.size() && r.fault_instruction.verdict == "bad_jump",
+      "the analysis stays");
+
+    Require(!r.evidence.empty() &&
+              r.evidence[0].title == (en ? L"Error during a forced close (not a CTD)" : L"강제 종료 중 오류(CTD 아님)") &&
+              r.evidence[0].confidence_level == i18n::ConfidenceLevel::kHigh &&
+              Contains(r.evidence[0].details, en ? L"Alt+F4 0.8 s before this error" : L"0.8초 전 Alt+F4 입력"),
+      "the forced-close evidence item first");
+    Require(r.evidence.size() == plain.evidence.size() + 1u, "the rest of the evidence stays");
+    Require(!r.recommendations.empty() &&
+              r.recommendations[0].rfind(en ? L"[Forced close] " : L"[강제 종료] ", 0) == 0 &&
+              skydiag::dump_tool::SelectNextActionIndex(r.recommendations) == 0u,
+      "the forced-close line is the next action");
+    for (const auto& text : r.recommendations) {
+      Require(!Contains(text, L"real CTD") && !Contains(text, L"실제 CTD"), "never called a real CTD");
+    }
+
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["analysis"]["is_forced_close"] == true && summary["analysis"]["is_crash_like"] == true,
+      "summary JSON analysis flags");
+    Require(summary["forced_close"]["kind"] == "alt_f4" && summary["forced_close"]["seconds_before_crash"] == 0.8 &&
+              summary["forced_close"]["window_seconds"] == 10.0,
+      "summary JSON forced_close");
+    Require(summary["quick_answer"]["kind"] == "forced_close", "summary JSON quick answer");
+    Require(summary["fault_instruction"]["target_state"] == "freed", "summary JSON target_state");
+    Require(!skydiag::dump_tool::BuildSummaryJson(plain, std::filesystem::temp_directory_path(), L"stem", true)
+               .contains("forced_close"),
+      "no field for an ordinary crash");
+
+    const auto report = skydiag::dump_tool::BuildReportText(r, summary, true);
+    Require(report.find(en ? "Classification: FORCED_CLOSE (not a CTD; alt_f4, 0.8 s before the error)\n"
+                           : "분류: 강제 종료 (CTD 아님; alt_f4, 오류 0.8초 전)\n") != std::string::npos,
+      "the report line");
+    Require(report.find(std::string(en ? "FaultInstruction: " : "예외 명령어: ") + "execute 0x7FF7055F0000 (freed) -> bad_jump") !=
+              std::string::npos,
+      "the report's fault instruction says freed");
+  }
+
+  // The other kinds keep to the player's own action.
+  struct KindCase
+  {
+    const char* kind;
+    const wchar_t* en;
+    const wchar_t* ko;
+  };
+  for (const auto& c : { KindCase{ "window_close", L"This error happened while you closed the game window.",
+                                   L"게임 창을 닫아 게임을 종료하는 과정에서 난 오류입니다." },
+                         KindCase{ "close_message", L"This error happened while you closed the game window.",
+                                   L"게임 창을 닫아 게임을 종료하는 과정에서 난 오류입니다." },
+                         KindCase{ "game_quit", L"This error happened while the game was closing after you chose to quit.",
+                                   L"게임 종료를 고른 뒤 게임이 닫히는 과정에서 난 오류입니다." } }) {
+    for (const auto lang : kLanguages) {
+      const bool en = lang == i18n::Language::kEnglish;
+      auto r = crash();
+      r.forced_close.detected = true;
+      r.forced_close.kind = c.kind;
+      r.forced_close.seconds_before_crash = 2.0;
+      BuildEvidenceAndSummary(r, lang);
+      Require(r.quick_answer.headline.rfind(en ? c.en : c.ko, 0) == 0, c.kind);
+    }
+  }
+
+  // From the blackbox: the newest Crash event 0.8 s after a CloseRequest.
+  {
+    using skydiag::dump_tool::EventRow;
+    namespace internal = skydiag::dump_tool::internal;
+    const auto row = [](double t, skydiag::EventType type, std::uint64_t a, std::uint64_t b = 0, std::uint64_t c = 0) {
+      EventRow e{};
+      e.t_ms = t;
+      e.type = static_cast<std::uint16_t>(type);
+      e.a = a;
+      e.b = b;
+      e.c = c;
+      return e;
+    };
+    const std::vector<EventRow> events = {
+      row(1000.0, skydiag::EventType::kHeartbeat, 0),
+      row(120000.0, skydiag::EventType::kCloseRequest, 1, 0x0112, 0xF060),
+      row(120800.0, skydiag::EventType::kCrash, 0xC0000005u),
+    };
+    const auto fc = internal::DetectForcedClose(events);
+    Require(fc.detected && fc.kind == "alt_f4" && fc.seconds_before_crash > 0.79 && fc.seconds_before_crash < 0.81,
+      "detected from the blackbox");
+    Require(!internal::DetectForcedClose({ events[0], events[2] }).detected, "no close request, no forced close");
+    Require(internal::EventTypeName(events[1].type) == L"CloseRequest", "the event's name");
+    Require(internal::FormatEventDetail(events[1].type, 1, 0x0112, 0xF060, 0) == L"kind=alt_f4 msg=0x0112 wparam=0xF060",
+      "the event's detail");
+    Require(internal::FormatEventDetail(events[1].type, 4, 0, 0, 0) == L"kind=game_quit", "game quit detail");
+  }
+
+  // A validated clean exit says more (code 0) and wins.
+  auto clean = crash();
+  clean.forced_close.detected = true;
+  clean.forced_close.kind = "alt_f4";
+  clean.is_filtered_clean_exit = true;
+  BuildEvidenceAndSummary(clean, i18n::Language::kEnglish);
+  Require(clean.quick_answer.kind == "clean_exit", "clean exit first");
+}
+
 }  // namespace
 
 int main()
@@ -1155,6 +1306,7 @@ int main()
     TestSnapshotsAndCleanExit();
     TestSummaryAndReportStartWithIt();
     TestFaultInstructionClue();
+    TestForcedClose();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;

@@ -7,6 +7,7 @@
 using DWORD = std::uint32_t;
 #endif
 
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
@@ -15,6 +16,7 @@ using DWORD = std::uint32_t;
 #include <string>
 #include <string_view>
 
+#include "SkyrimDiagCloseRequest.h"
 #include "SkyrimDiagCrashCodes.h"
 
 namespace skydiag {
@@ -240,6 +242,11 @@ struct CrashCaptureState {
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
   LateRecoveryState lateRecovery{};
+  // ADR-0022: the close request this crash followed (FindForcedCloseInSnapshot),
+  // and the one the released crash below followed. A forced-close error opens
+  // no viewer.
+  skydiag::ForcedCloseMatch forcedClose{};
+  skydiag::ForcedCloseMatch releasedForcedClose{};
   // The crash generation last released as a handled exception (the game kept
   // running or exited with code 0). Its record stays committed in shared
   // memory, so the exit path must not report it again, unless
@@ -358,6 +365,21 @@ inline FilterVerdict ClassifyExitCodeVerdict(
   }
   return FilterVerdict::kKeepDump;
 }
+
+// "crash followed a close request (Alt+F4) 0.8 s earlier", for the helper log.
+inline std::wstring DescribeForcedCloseForLog(const skydiag::ForcedCloseMatch& match)
+{
+  const double ms = match.msBeforeCrash > 0.0 ? match.msBeforeCrash : 0.0;
+  const auto tenths = static_cast<std::uint64_t>(std::llround(ms / 100.0));
+  return L"crash followed a close request (" + std::wstring(skydiag::CloseRequestKindLabel(match.kind)) + L") " +
+    std::to_wstring(tenths / 10u) + L"." + std::to_wstring(tenths % 10u) + L" s earlier";
+}
+
+// The close request (ADR-0022) the newest crash in a blackbox snapshot came at
+// most kForcedCloseCrashWindowMs after; no match without one.
+skydiag::ForcedCloseMatch FindForcedCloseInSnapshot(
+  const skydiag::SharedLayout* snapshot,
+  std::size_t snapshotBytes) noexcept;
 
 // Not noexcept: queueing copies the path into a std::wstring, which can throw.
 inline bool QueueDeferredCrashViewer(

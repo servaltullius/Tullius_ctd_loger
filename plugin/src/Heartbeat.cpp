@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/EventSinks.h"
 #include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
@@ -63,6 +64,7 @@ inline void HeartbeatTaskOnMainThread() noexcept
   }
 
   RefreshInMenuFlag();
+  PollGameQuitRequest();
 
   LARGE_INTEGER li{};
   QueryPerformanceCounter(&li);
