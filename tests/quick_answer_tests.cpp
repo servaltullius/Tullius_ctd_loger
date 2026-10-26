@@ -1229,7 +1229,12 @@ void TestForcedClose()
                          KindCase{ "close_message", L"This error happened while you closed the game window.",
                                    L"게임 창을 닫아 게임을 종료하는 과정에서 난 오류입니다." },
                          KindCase{ "game_quit", L"This error happened while the game was closing after you chose to quit.",
-                                   L"게임 종료를 고른 뒤 게임이 닫히는 과정에서 난 오류입니다." } }) {
+                                   L"게임 종료를 고른 뒤 게임이 닫히는 과정에서 난 오류입니다." },
+                         KindCase{ "forced_quit",
+                                   L"This error happened while the game was being force-quit (Alt+F4 or similar). It is "
+                                   L"not a crash during play. Saves are usually unaffected.",
+                                   L"게임을 강제로 끄는 과정(Alt+F4 등)에서 난 오류입니다. 플레이 중에 튕긴 CTD가 아닙니다. "
+                                   L"세이브에는 보통 영향이 없습니다." } }) {
     for (const auto lang : kLanguages) {
       const bool en = lang == i18n::Language::kEnglish;
       auto r = crash();
@@ -1269,7 +1274,11 @@ void TestForcedClose()
       "the event's detail");
     Require(internal::FormatEventDetail(events[1].type, 1, 0x0104, 0x73, 1) == L"kind=alt_f4 msg=0x0104 wparam=0x0073 posted",
       "a posted key-down");
-    Require(internal::FormatEventDetail(events[1].type, 4, 0, 0, 0) == L"kind=game_quit", "game quit detail");
+    Require(internal::FormatEventDetail(events[1].type, 4, 0, 1, 0) == L"kind=game_quit quit_flag reason=menu_open",
+      "game quit detail");
+    Require(internal::FormatEventDetail(events[1].type, 5, 0, 3, 0) ==
+              L"kind=forced_quit quit_flag reason=no_menu_no_keys",
+      "forced quit detail");
   }
 
   // A validated clean exit says more (code 0) and wins.

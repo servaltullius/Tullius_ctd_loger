@@ -6,6 +6,9 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <cstdint>
+#include <string>
+#include <string_view>
 
 #include <spdlog/spdlog.h>
 
@@ -19,6 +22,28 @@ std::atomic_bool g_installed{ false };
 HHOOK g_getMessageHook = nullptr;
 HHOOK g_callWndProcHook = nullptr;
 std::atomic_bool g_firstRequestLogged{ false };
+
+// For the quit flag (QuitFlagCloseRequestKind). Written by the key sampler
+// (heartbeat scheduler thread) and the menu sink (UI thread), read by the
+// heartbeat task: atomics only.
+std::atomic<std::uint64_t> g_altF4SeenMs{ 0 };
+std::atomic<std::uint32_t> g_quitMenusOpen{ 0 };  // bit per kQuitMenus entry
+std::atomic<std::uint64_t> g_quitMenuClosedMs{ 0 };
+std::atomic<std::uint32_t> g_lastQuitMenu{ 0 };
+
+// Menus one quits from: the Journal's system tab and its confirmation, the
+// main menu, the console (qqq).
+constexpr std::string_view kQuitMenus[] = {
+  RE::JournalMenu::MENU_NAME,
+  RE::MessageBoxMenu::MENU_NAME,
+  RE::MainMenu::MENU_NAME,
+  RE::Console::MENU_NAME,
+};
+
+bool AltF4HeldNow() noexcept
+{
+  return (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 && (GetAsyncKeyState(VK_F4) & 0x8000) != 0;
+}
 
 // Only the game window's thread runs the hooks, so it alone touches this.
 skydiag::CloseRequestTracker g_tracker{};
@@ -52,18 +77,28 @@ const char* MessageName(UINT message) noexcept
   }
 }
 
-void Record(skydiag::CloseRequestKind kind, UINT message, std::uint64_t wParam, bool posted) noexcept
+// how: the log's reason for the quit flag (message 0).
+void Record(
+  skydiag::CloseRequestKind kind,
+  UINT message,
+  std::uint64_t wParam,
+  bool posted,
+  std::string_view how = {}) noexcept
 {
   PushCloseRequestEvent(kind, message, wParam, posted);
   // One SkyrimDiag.log line for the first one, so a test shows it was seen
   // without a crash.
   if (!g_firstRequestLogged.exchange(true)) {
     try {
-      spdlog::info(
-        "SkyrimDiag: close request seen: {} ({} {})",
-        skydiag::CloseRequestKindId(kind),
-        MessageName(message),
-        message == 0u ? "polled" : (posted ? "posted" : "sent"));
+      if (message == 0u) {
+        spdlog::info("SkyrimDiag: close request seen: {} (quit flag, {})", skydiag::CloseRequestKindId(kind), how);
+      } else {
+        spdlog::info(
+          "SkyrimDiag: close request seen: {} ({} {})",
+          skydiag::CloseRequestKindId(kind),
+          MessageName(message),
+          posted ? "posted" : "sent");
+      }
     } catch (...) {
       // Logging is optional; the blackbox event is already written.
       OutputDebugStringW(L"SkyrimDiag: could not log the first close request.\n");
@@ -161,6 +196,30 @@ bool InstallCloseRequestHooks() noexcept
   return true;
 }
 
+void SampleCloseKeys() noexcept
+{
+  if (g_installed.load(std::memory_order_relaxed) && AltF4HeldNow()) {
+    g_altF4SeenMs.store(GetTickCount64(), std::memory_order_relaxed);
+  }
+}
+
+void NoteMenuForQuit(std::string_view menuName, bool opening) noexcept
+{
+  for (std::uint32_t i = 0; i < std::size(kQuitMenus); ++i) {
+    if (menuName != kQuitMenus[i]) {
+      continue;
+    }
+    const std::uint32_t bit = 1u << i;
+    if (opening) {
+      g_quitMenusOpen.fetch_or(bit);
+    } else if ((g_quitMenusOpen.fetch_and(~bit) & bit) != 0u) {
+      g_quitMenuClosedMs.store(GetTickCount64());
+    }
+    g_lastQuitMenu.store(i);
+    return;
+  }
+}
+
 void PollGameQuitRequest() noexcept
 {
   if (!g_installed.load()) {
@@ -180,10 +239,43 @@ void PollGameQuitRequest() noexcept
     seenClear = true;
     return;
   }
-  if (seenClear) {
-    recorded = true;
-    Record(skydiag::CloseRequestKind::kGameQuit, 0u, 0u, false);
+  if (!seenClear) {
+    return;
   }
+  recorded = true;
+  const std::uint64_t now = GetTickCount64();
+  const std::uint32_t open = g_quitMenusOpen.load();
+  const std::uint64_t closedMs = g_quitMenuClosedMs.load();
+  const auto decision = skydiag::QuitFlagCloseRequestKind(
+    AltF4HeldNow(), g_altF4SeenMs.load(), open != 0u, closedMs, now);
+  std::string how;
+  try {
+    std::uint32_t menu = g_lastQuitMenu.load();
+    for (std::uint32_t i = 0; i < std::size(kQuitMenus); ++i) {
+      if ((open & (1u << i)) != 0u) {
+        menu = i;
+        break;
+      }
+    }
+    const std::string menuName(kQuitMenus[menu < std::size(kQuitMenus) ? menu : 0u]);
+    switch (decision.reason) {
+      case skydiag::QuitFlagReason::kAltF4Held:
+        how = "Alt+F4 held";
+        break;
+      case skydiag::QuitFlagReason::kMenuOpen:
+        how = menuName + " open";
+        break;
+      case skydiag::QuitFlagReason::kMenuClosed:
+        how = menuName + " closed " + std::to_string(now - closedMs) + " ms before";
+        break;
+      case skydiag::QuitFlagReason::kNoMenuNoKeys:
+        how = "no menu, keys not held";
+        break;
+    }
+  } catch (...) {
+    how.clear();
+  }
+  Record(decision.kind, 0u, static_cast<std::uint64_t>(decision.reason), false, how);
 }
 
 }  // namespace skydiag::plugin

@@ -32,7 +32,9 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     if (fc.kind == "alt_f4") {
       request = en ? L"Alt+F4" : L"Alt+F4 입력";
     } else if (fc.kind == "game_quit") {
-      request = en ? L"the game's own quit request" : L"게임 자체의 종료 요청";
+      request = en ? L"quitting from the game's menu" : L"게임 메뉴의 종료 선택";
+    } else if (fc.kind == "forced_quit") {
+      request = en ? L"the game being force-quit (Alt+F4 or similar)" : L"게임 강제 종료(Alt+F4 등)";
     } else if (fc.kind == "close_message") {
       request = en ? L"a request to close the game window (WM_CLOSE)" : L"게임 창 닫기 요청(WM_CLOSE)";
     } else {

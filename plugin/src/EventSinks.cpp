@@ -9,6 +9,7 @@
 #include <string_view>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagShared.h"
@@ -77,6 +78,9 @@ public:
       std::memcpy(dst, menuName.data(), copyLen);
       dst[copyLen] = '\0';
     }
+
+    // ADR-0022: which menu a quit came from.
+    NoteMenuForQuit(menuName, e->opening);
 
     auto* ui = RE::UI::GetSingleton();
     if (e->opening) {

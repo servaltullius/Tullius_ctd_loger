@@ -74,6 +74,9 @@ std::wstring ForcedCloseLead(const ForcedCloseInfo& forcedClose, bool en)
   } else if (forcedClose.kind == "game_quit") {
     what = en ? L"This error happened while the game was closing after you chose to quit."
               : L"게임 종료를 고른 뒤 게임이 닫히는 과정에서 난 오류입니다.";
+  } else if (forcedClose.kind == "forced_quit") {
+    what = en ? L"This error happened while the game was being force-quit (Alt+F4 or similar)."
+              : L"게임을 강제로 끄는 과정(Alt+F4 등)에서 난 오류입니다.";
   } else {
     what = en ? L"This error happened while you closed the game window."
               : L"게임 창을 닫아 게임을 종료하는 과정에서 난 오류입니다.";

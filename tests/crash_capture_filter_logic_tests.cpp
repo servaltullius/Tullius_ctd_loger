@@ -338,7 +338,9 @@ static void TestDescribeForcedCloseForLog()
   match = { skydiag::CloseRequestKind::kWindowClose, 2349.0 };
   assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (window closed) 2.3 s earlier");
   match = { skydiag::CloseRequestKind::kGameQuit, 9960.0 };
-  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (quit from the game) 10.0 s earlier");
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (quit from the game's menu) 10.0 s earlier");
+  match = { skydiag::CloseRequestKind::kForcedQuit, 0.0 };
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (forced quit, probably Alt+F4) 0.0 s earlier");
   match = { skydiag::CloseRequestKind::kCloseMessage, -5.0 };
   assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (close request to the window) 0.0 s earlier");
 }

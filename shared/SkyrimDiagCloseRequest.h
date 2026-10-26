@@ -27,16 +27,20 @@ enum class CloseRequestKind : std::uint8_t
   // WM_CLOSE with no SC_CLOSE before it: another program (Task Manager's End
   // task) or the game itself asked the window to close.
   kCloseMessage = 3,
-  // The game is quitting on its own: its quit flag (Main::quitGame) became
-  // set, or WM_QUIT reached its message loop (Quit to desktop in its menus,
-  // or the game quitting after one of the above).
+  // The game's quit flag (Main::quitGame) became set while a menu one quits
+  // from was open or had just closed: Quit (to desktop) in its menus, or qqq
+  // in the console.
   kGameQuit = 4,
+  // The quit flag became set with no such menu and without Alt+F4 seen held:
+  // a forced quit, most likely Alt+F4 (Skyrim reads the keyboard through
+  // DirectInput and quits on Alt+F4 itself; no window message carries it).
+  kForcedQuit = 5,
 };
 
 constexpr bool IsCloseRequestKind(std::uint64_t value) noexcept
 {
   return value >= static_cast<std::uint64_t>(CloseRequestKind::kAltF4) &&
-         value <= static_cast<std::uint64_t>(CloseRequestKind::kGameQuit);
+         value <= static_cast<std::uint64_t>(CloseRequestKind::kForcedQuit);
 }
 
 // Summary JSON / report / helper log id.
@@ -51,6 +55,8 @@ constexpr const char* CloseRequestKindId(CloseRequestKind kind) noexcept
       return "close_message";
     case CloseRequestKind::kGameQuit:
       return "game_quit";
+    case CloseRequestKind::kForcedQuit:
+      return "forced_quit";
     default:
       return "";
   }
@@ -67,7 +73,9 @@ constexpr const wchar_t* CloseRequestKindLabel(CloseRequestKind kind) noexcept
     case CloseRequestKind::kCloseMessage:
       return L"close request to the window";
     case CloseRequestKind::kGameQuit:
-      return L"quit from the game";
+      return L"quit from the game's menu";
+    case CloseRequestKind::kForcedQuit:
+      return L"forced quit, probably Alt+F4";
     default:
       return L"";
   }
@@ -151,7 +159,12 @@ constexpr CloseRequestKind ObserveCloseRequestMessage(
     tracker->sysCloseSeen = true;
     tracker->sysCloseMs = nowMs;
   } else if (message == kWmQuit) {
-    kind = afterAltF4 ? CloseRequestKind::kAltF4 : CloseRequestKind::kGameQuit;
+    // The loop ends after any quit; alone it does not say which one (the
+    // quit flag does, QuitFlagCloseRequestKind).
+    if (!afterAltF4) {
+      return CloseRequestKind::kNone;
+    }
+    kind = CloseRequestKind::kAltF4;
   } else if (message == kWmClose) {
     if (afterAltF4) {
       kind = CloseRequestKind::kAltF4;
@@ -173,6 +186,56 @@ constexpr CloseRequestKind ObserveCloseRequestMessage(
   return kind;
 }
 
+// Skyrim takes Alt+F4 through DirectInput and sets its quit flag itself, so
+// the change of Main::quitGame is the signal every quit gives; what it was is
+// decided when it is seen:
+//   - Alt and F4 held then, or seen held (GetAsyncKeyState, which DirectInput
+//     does not hide) within kQuitFlagAltF4RecentMs: Alt+F4;
+//   - else a menu one quits from (Journal, its confirmation MessageBoxMenu,
+//     Main Menu, Console) open, or closed within kQuitFlagMenuRecentMs (the
+//     game closes its menus as it quits): Quit from the menu;
+//   - else a forced quit, most likely Alt+F4 the plugin did not see held.
+inline constexpr std::uint64_t kQuitFlagAltF4RecentMs = 1500;
+inline constexpr std::uint64_t kQuitFlagMenuRecentMs = 3000;
+
+enum class QuitFlagReason : std::uint8_t
+{
+  kAltF4Held,
+  kMenuOpen,
+  kMenuClosed,
+  kNoMenuNoKeys,
+};
+
+struct QuitFlagDecision
+{
+  CloseRequestKind kind = CloseRequestKind::kForcedQuit;
+  QuitFlagReason reason = QuitFlagReason::kNoMenuNoKeys;
+};
+
+// altF4HeldNow: both keys down when the flag was seen. altF4SeenMs /
+// quitMenuClosedMs: GetTickCount64 of the last time (0: never).
+constexpr QuitFlagDecision QuitFlagCloseRequestKind(
+  bool altF4HeldNow,
+  std::uint64_t altF4SeenMs,
+  bool quitMenuOpen,
+  std::uint64_t quitMenuClosedMs,
+  std::uint64_t nowMs) noexcept
+{
+  const auto recent = [nowMs](std::uint64_t thenMs, std::uint64_t windowMs) {
+    return thenMs != 0u && nowMs >= thenMs && nowMs - thenMs <= windowMs;
+  };
+  if (altF4HeldNow || recent(altF4SeenMs, kQuitFlagAltF4RecentMs)) {
+    return { CloseRequestKind::kAltF4, QuitFlagReason::kAltF4Held };
+  }
+  if (quitMenuOpen) {
+    return { CloseRequestKind::kGameQuit, QuitFlagReason::kMenuOpen };
+  }
+  if (recent(quitMenuClosedMs, kQuitFlagMenuRecentMs)) {
+    return { CloseRequestKind::kGameQuit, QuitFlagReason::kMenuClosed };
+  }
+  return { CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys };
+}
+
 // A crash this soon after a close request is part of the game closing: after
 // Alt+F4 Skyrim stops its main loop and tears down (renderer, heaps, plugin
 // DLLs), which takes a few seconds with a large load order. Ten seconds covers
@@ -190,8 +253,8 @@ struct ForcedCloseMatch
 };
 
 // Which request names the close when several came: the player's own key or
-// click first, then the game's quit flag, then a bare WM_CLOSE (which the
-// game may send itself while quitting).
+// click first, then the quit flag (menu, then forced), then a bare WM_CLOSE
+// (which the game may send itself while quitting).
 constexpr int CloseRequestRank(CloseRequestKind kind) noexcept
 {
   switch (kind) {
@@ -201,10 +264,12 @@ constexpr int CloseRequestRank(CloseRequestKind kind) noexcept
       return 1;
     case CloseRequestKind::kGameQuit:
       return 2;
-    case CloseRequestKind::kCloseMessage:
+    case CloseRequestKind::kForcedQuit:
       return 3;
-    default:
+    case CloseRequestKind::kCloseMessage:
       return 4;
+    default:
+      return 5;
   }
 }
 

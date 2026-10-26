@@ -129,7 +129,7 @@ struct BlackboxFreezeSummary
 struct ForcedCloseInfo
 {
   bool detected = false;
-  std::string kind;  // alt_f4 / window_close / close_message / game_quit (CloseRequestKindId)
+  std::string kind;  // alt_f4 / window_close / close_message / game_quit / forced_quit (CloseRequestKindId)
   double seconds_before_crash = 0.0;
 };
 

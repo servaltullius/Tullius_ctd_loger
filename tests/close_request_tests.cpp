@@ -120,11 +120,49 @@ static_assert([] {
   return Obs(t, kWmClose, 0, 0, false, false, 100) == CloseRequestKind::kCloseMessage;
 }());
 
-// WM_QUIT alone: the game's loop is ending on its own (Quit to desktop).
+// WM_QUIT alone ends the loop after any quit and does not say which one
+// (the quit flag does): nothing is recorded for it.
 static_assert([] {
   CloseRequestTracker t{};
-  return Obs(t, kWmQuit, 0, 0, false, false, 100) == CloseRequestKind::kGameQuit;
+  return Obs(t, kWmQuit, 0, 0, false, false, 100) == CloseRequestKind::kNone && !t.recorded;
 }());
+
+// The quit flag (2026-10-26 19:30 in-game test): Skyrim takes Alt+F4 through
+// DirectInput, so no window message carried it and the flag was the only
+// signal. Its kind: Alt+F4 held (now, or seen by the 25 ms sampler within
+// 1.5 s), else a quit menu open or closed within 3 s, else a forced quit.
+using skydiag::QuitFlagCloseRequestKind;
+using skydiag::QuitFlagReason;
+constexpr bool Decides(
+  bool heldNow,
+  std::uint64_t seenMs,
+  bool menuOpen,
+  std::uint64_t menuClosedMs,
+  std::uint64_t nowMs,
+  CloseRequestKind kind,
+  QuitFlagReason reason)
+{
+  const auto d = QuitFlagCloseRequestKind(heldNow, seenMs, menuOpen, menuClosedMs, nowMs);
+  return d.kind == kind && d.reason == reason;
+}
+static_assert(Decides(true, 0, false, 0, 50000, CloseRequestKind::kAltF4, QuitFlagReason::kAltF4Held));
+static_assert(Decides(false, 49000, false, 0, 50000, CloseRequestKind::kAltF4, QuitFlagReason::kAltF4Held),
+  "keys released, but seen held a second ago");
+static_assert(Decides(false, 50000 - skydiag::kQuitFlagAltF4RecentMs, false, 0, 50000, CloseRequestKind::kAltF4,
+  QuitFlagReason::kAltF4Held));
+static_assert(Decides(false, 50000 - skydiag::kQuitFlagAltF4RecentMs - 1, false, 0, 50000,
+  CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys), "an older Alt+F4 is not this quit");
+// Alt+F4 outranks an open menu: it can be pressed with the Journal open.
+static_assert(Decides(true, 0, true, 0, 50000, CloseRequestKind::kAltF4, QuitFlagReason::kAltF4Held));
+static_assert(Decides(false, 0, true, 0, 50000, CloseRequestKind::kGameQuit, QuitFlagReason::kMenuOpen));
+// The game closes its menus as it quits.
+static_assert(Decides(false, 0, false, 48000, 50000, CloseRequestKind::kGameQuit, QuitFlagReason::kMenuClosed));
+static_assert(Decides(false, 0, false, 50000 - skydiag::kQuitFlagMenuRecentMs - 1, 50000,
+  CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));
+// The second test's case: no menu, keys not seen.
+static_assert(Decides(false, 0, false, 0, 345779, CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));
+// A tick from the future (clock read order) is not "recent".
+static_assert(Decides(false, 50001, false, 50001, 50000, CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));
 
 // A WM_CLOSE long after an SC_CLOSE is a new request of its own, and an
 // SC_CLOSE long after an Alt+F4 key-down is no longer Alt+F4.
@@ -221,6 +259,18 @@ static_assert(Scan({ 9000.0 },
                 { { 1000.0, K(CloseRequestKind::kCloseMessage) }, { 1200.0, K(CloseRequestKind::kGameQuit) } })
                 .Result()
                 .kind == CloseRequestKind::kGameQuit);
+// The X button is named over the quit flag it leads to; a forced quit over
+// the WM_CLOSE the game may send itself.
+static_assert(Scan({ 9000.0 },
+                { { 1000.0, K(CloseRequestKind::kWindowClose) }, { 1100.0, K(CloseRequestKind::kForcedQuit) } })
+                .Result()
+                .kind == CloseRequestKind::kWindowClose);
+static_assert(Scan({ 9000.0 },
+                { { 1000.0, K(CloseRequestKind::kCloseMessage) }, { 1100.0, K(CloseRequestKind::kForcedQuit) } })
+                .Result()
+                .kind == CloseRequestKind::kForcedQuit);
+static_assert(Scan({ 345779.0 }, { { 345779.0, K(CloseRequestKind::kForcedQuit) } }).Result().matched(),
+  "the flag seen right before the crash");
 // Of the same kind, the nearer one gives the time.
 static_assert(Scan({ 9000.0 },
                 { { 1000.0, K(CloseRequestKind::kAltF4) }, { 8000.0, K(CloseRequestKind::kAltF4) } })
@@ -236,6 +286,7 @@ int main()
   Require(std::strcmp(CloseRequestKindId(CloseRequestKind::kWindowClose), "window_close") == 0, "window_close id");
   Require(std::strcmp(CloseRequestKindId(CloseRequestKind::kCloseMessage), "close_message") == 0, "close_message id");
   Require(std::strcmp(CloseRequestKindId(CloseRequestKind::kGameQuit), "game_quit") == 0, "game_quit id");
+  Require(std::strcmp(CloseRequestKindId(CloseRequestKind::kForcedQuit), "forced_quit") == 0, "forced_quit id");
   Require(std::strcmp(CloseRequestKindId(CloseRequestKind::kNone), "") == 0, "no id for kNone");
 
   // Only the newest kKeptRequests requests are kept; a flood of old ones does

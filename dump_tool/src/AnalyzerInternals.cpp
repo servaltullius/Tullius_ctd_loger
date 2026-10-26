@@ -260,6 +260,14 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
           static_cast<unsigned>(b & 0xFFFFu), static_cast<unsigned>(c & 0xFFFFu));
         s += buf;
         s += d != 0u ? L" posted" : L" sent";
+      } else {
+        // The quit flag; c is the QuitFlagReason.
+        constexpr const wchar_t* kReasons[] = { L"alt_f4_held", L"menu_open", L"menu_closed", L"no_menu_no_keys" };
+        s += L" quit_flag";
+        if (c < std::size(kReasons)) {
+          s += L" reason=";
+          s += kReasons[c];
+        }
       }
       return s;
     }
