@@ -26,7 +26,7 @@
 // CloseRequestHooks.cpp needs CommonLibSSE; with no game window there the
 // crash handler's call into it records nothing anyway (ADR-0022).
 namespace skydiag::plugin {
-void RecordCloseKeysAtCrash() noexcept {}
+void RecordCloseRequestAtCrash() noexcept {}
 }  // namespace skydiag::plugin
 
 namespace {

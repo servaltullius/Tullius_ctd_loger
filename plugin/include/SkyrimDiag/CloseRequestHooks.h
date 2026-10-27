@@ -14,11 +14,13 @@ namespace skydiag::plugin {
 // could not be found or both hooks were refused.
 bool InstallCloseRequestHooks() noexcept;
 
-// The game's own quit flag (Main::quitGame), read from the heartbeat task
-// while the main loop still runs; records one close request when it becomes
-// set, its kind from QuitFlagCloseRequestKind (Alt+F4 held, a quit menu, or
-// a forced quit). Skyrim takes Alt+F4 through DirectInput, so this is the
-// only signal Alt+F4 gives. Does nothing until InstallCloseRequestHooks ran.
+// From the heartbeat task: refreshes the game window and looks at the game's
+// own quit flag (Main::quitGame). The flag's change from clear to set is
+// recorded once, by whichever of this, the key sampler and the crash handler
+// sees it first, its kind from QuitFlagCloseRequestKind (Alt+F4 held, a quit
+// menu, or a forced quit). The flag is read through ReadProcessMemory, so a
+// Main already gone at shutdown cannot fault. Does nothing until
+// InstallCloseRequestHooks ran.
 void PollGameQuitRequest() noexcept;
 
 // True once InstallCloseRequestHooks ran: the heartbeat scheduler then wakes
@@ -30,17 +32,19 @@ bool CloseKeySamplingOn() noexcept;
 // window (captured at install, refreshed by PollGameQuitRequest) is the
 // foreground window. GetAsyncKeyState
 // is the system's key state, which DirectInput does not hide. Two key-state
-// reads per call, the foreground window only while both are held; never
-// touches Main.
+// reads per call, the foreground window only while both are held. Also looks
+// at the quit flag (as PollGameQuitRequest does): a Quit from a menu ends the
+// main loop before the heartbeat task runs again.
 void SampleCloseKeys() noexcept;
 
-// From the crash handler, once a crash is recorded: Alt+F4 still held with
-// the game in front records an alt_f4 close request (unless this press was
-// already recorded) before the Crash event, for a crash in the very frame
-// that handles Alt+F4. Only on a thread that is already a GUI thread
-// (IsGUIThread(FALSE)), so the crash never converts one. No allocation, no
+// From the crash handler, once a crash is recorded, before the Crash event:
+// Alt+F4 still held with the game in front records an alt_f4 close request
+// (unless this press was already recorded), for a crash in the very frame
+// that handles Alt+F4; the keys only on a thread that is already a GUI thread
+// (IsGUIThread(FALSE)), so the crash never converts one. Then a quit flag set
+// since the pollers last looked records its close request. No allocation, no
 // logging.
-void RecordCloseKeysAtCrash() noexcept;
+void RecordCloseRequestAtCrash() noexcept;
 
 // From the menu event sink (UI thread): a menu open as one quits
 // (MessageBoxMenu, Main Menu, Console) opened or closed.
