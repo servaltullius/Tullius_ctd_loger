@@ -202,7 +202,7 @@ constexpr CloseRequestKind ObserveCloseRequestMessage(
 //   - Alt and F4 held then, or seen held (GetAsyncKeyState, which DirectInput
 //     does not hide) within kQuitFlagAltF4RecentMs: Alt+F4;
 //   - else a menu open as one quits (the confirmation MessageBoxMenu, Main
-//     Menu, Console) still open, or the confirmation closed within
+//     Menu, Console, the Journal's System page) still open, or the confirmation closed within
 //     kQuitFlagMenuRecentMs (the game closes it as it quits): Quit from the
 //     menu. Any other menu just closed does not count: a console closed
 //     before an Alt+F4 the sampler missed would read as Quit;

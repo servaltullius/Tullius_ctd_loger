@@ -46,17 +46,19 @@ std::atomic<std::uintptr_t> g_quitFlagAddress{ 0 };
 std::atomic_bool g_quitFlagSeenClear{ false };
 std::atomic_bool g_quitFlagRecorded{ false };
 
-// Menus open as one quits: the confirmation (MessageBoxMenu; the Journal's
-// Quit asks through it), the main menu, the console (qqq). The Journal
-// itself is not one: a quit from it passes through the confirmation, and a
-// Journal just closed says nothing about the next quit.
+// Menus open as one quits: the confirmation (MessageBoxMenu), the main menu,
+// the console (qqq), and the Journal, whose System page asks its own
+// confirmation inside the Journal: a Quit from it read as "no menu" in game
+// (2026-10-27 17:09) while the Journal was left out.
 constexpr std::string_view kQuitMenus[] = {
   RE::MessageBoxMenu::MENU_NAME,
   RE::MainMenu::MENU_NAME,
   RE::Console::MENU_NAME,
+  RE::JournalMenu::MENU_NAME,
 };
 // Only the confirmation counts once closed (the game closes it as it quits):
-// a console closed before an Alt+F4 the sampler missed must not read as Quit.
+// a console or Journal closed before an Alt+F4 the sampler missed must not
+// read as Quit.
 constexpr std::uint32_t kQuitConfirmMenu = 0;
 
 // Only the game window's thread runs the hooks, so it alone touches this.
