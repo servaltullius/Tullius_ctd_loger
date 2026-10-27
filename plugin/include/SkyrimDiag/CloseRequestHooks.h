@@ -47,7 +47,7 @@ void SampleCloseKeys() noexcept;
 void RecordCloseRequestAtCrash() noexcept;
 
 // From the menu event sink (UI thread): a menu open as one quits
-// (MessageBoxMenu, Main Menu, Console) opened or closed.
+// (MessageBoxMenu, Main Menu, Console, Journal Menu) opened or closed.
 void NoteMenuForQuit(std::string_view menuName, bool opening) noexcept;
 
 }  // namespace skydiag::plugin
