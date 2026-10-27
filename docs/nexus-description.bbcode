@@ -14,7 +14,9 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 [*]Automatically reads CrashLogger logs when CrashLoggerSSE is installed
 [*]Records the MO2 profile and mod list active at the crash, so the mods a report names are the ones you actually ran with
 [*]Reads the game objects a crash was handling straight from the dump: type, FormID, name, the plugins that define and change it, and a reference's base object
-[*]Explains freezes by what the game's main thread was waiting for: the GPU, the graphics driver, an error dialog a plugin opened, or a game thread stuck in a plugin's code
+[*]Explains freezes by what the game's main thread was waiting for: the GPU, the graphics driver, an error dialog a plugin opened, a game thread stuck in a plugin's code, or game threads waiting on each other's engine locks
+[*]Says in plain words how an access violation happened: an object that was already gone (null pointer), a bad index, a jump into freed memory such as a removed hook, and so on
+[*]Tells an error while you force-close the game (Alt+F4, the window's X button, Quit) apart from a CTD: the viewer does not pop up and it is not counted as a crash
 [*]Records RAM, commit and VRAM at capture time, and warns about modules that hide crashes (such as SkyrimCrashGuard)
 [*]Recognizes known causes and known engine crash spots that a public fix guards, and puts that fix first in the next steps
 [/list]
@@ -61,8 +63,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.69 Update Notice[/b]
-Replace the previous installation with the complete v0.2.69 zip. Do not copy only individual EXEs or DLLs: v0.2.69 changes the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. Dumps analyzed by an older version show no quick answer in the viewer until you press Analyze again (the next release re-analyzes them automatically). In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.70 Update Notice[/b]
+Replace the previous installation with the complete v0.2.70 zip. Do not copy only individual EXEs or DLLs: v0.2.70 changes the SKSE plugin, the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -120,7 +122,16 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.69[/size][/b]
+[b][size=4]What's New in v0.2.70[/size][/b]
+More known crashes, plain words for how a crash happened, engine lock deadlocks, and Alt+F4 errors no longer reported as CTDs.[list]
+[*][b]More known 1.6.1170 crashes with a fix:[/b] the keyboard input crash ([url=https://www.nexusmods.com/skyrimspecialedition/mods/187246]Keyboard Offset Crash Fix SE-AE[/url]), five Havok physics crash spots ([url=https://www.nexusmods.com/skyrimspecialedition/mods/194392]Havok Solver Crash Fix - SKSE[/url]), the water collision crash ([url=https://www.nexusmods.com/skyrimspecialedition/mods/190886]Water Collision Crash Fix NG[/url]) and a trap contact crash. The quick answer names the fix, or asks you to update it when it is already loaded
+[*][b]How it crashed:[/b] for an access violation the quick answer adds one plain line (an object that was already gone, a bad index, a jump into freed memory such as a removed hook, …), and the details name the instruction and the register that was most likely wrong. Registers are named only when the recomputed address matches the exception
+[*][b]Engine lock deadlocks:[/b] the game engine sleeps instead of waiting in Windows when it waits for its own locks, so these freezes never showed in WCT. Freeze captures now keep the lock memory the sleeping game threads point at, and the report says which thread holds which lock. Three known 1.5.97 deadlocks point to [url=https://www.nexusmods.com/skyrimspecialedition/mods/160704]Skyrim Cell load Freeze fix NG[/url] or [url=https://www.nexusmods.com/skyrimspecialedition/mods/180884]WorkerSpinLockFix[/url]
+[*][b]Errors while you force-close the game:[/b] when the game shuts down after Alt+F4, some mods' hook code can be called after it was unloaded. The SKSE plugin now records Alt+F4, the window's X button and Quit, and an error within 10 seconds of that is reported as an error during a forced close, not a CTD: no viewer popup, not counted as a crash. Turn it off with [font=Courier New]EnableCloseRequestLog=0[/font] in [font=Courier New]SkyrimDiag.ini[/font]
+[*][b]Older analyses refreshed:[/b] the viewer re-analyzes a dump once when its saved analysis came from an older analyzer, so new lines such as the quick answer show up without pressing Analyze
+[/list]
+
+[b][size=4]Earlier: v0.2.69[/size][/b]
 Answers players can read first, and freezes traced to the right place, from Nexus feedback and three freezes seen here.[list]
 [*][b]Quick answer first:[/b] the report, the viewer and the copied text now start with three or four plain lines: what happened, the suspected mod (by its MO2 mod name) and how likely it is, one thing to try, and why it is not certain when it isn't. The detailed analysis follows below
 [*][b]Freeze causes:[/b] when the main thread waits on a lock another thread holds, that thread is named; a freeze caused by Crash Logger's thread dump hotkey is recognised; an engine loop stuck on a NaN value is recognised and, for the known 1.6.1170 AI pathing freeze, the report suggests [url=https://www.nexusmods.com/skyrimspecialedition/mods/190049]AI Pathing Freeze Fix[/url]; a freeze behind an error window names the mod the window's title names
@@ -215,6 +226,7 @@ For v0.2.66, the release candidate was installed as an MO2 mod on the same setup
 For v0.2.67, the release candidate was installed as an MO2 mod on the same setup and played with a manual capture: attach, preflight, MO2 profile capture, SKSE log, dump and report all behaved as before, and the game closed normally. 36 kept dumps re-analyzed against v0.2.66 did not change. The late recovery, the report after the game closes, and the analysis time limit were checked with runtime tests that run a real child process. Not yet seen in real use: a late recovery (no exception was caught in that session) and a real CTD with the new Helper.
 For v0.2.68, each of the five release candidates was installed as an MO2 mod on the same setup and played: the main thread in heartbeat events matched the session start, Crash Logger's thread dump probes no longer wrote dumps, a manual capture with the new hotkey started no Crash Logger thread dump and left no user name in any output, and a real CTD (a divide by zero in an upscaler's FSR3 DLL) was recorded once, without a second freeze dump, and paired with its Crash Logger log. The kept dumps re-analyzed against the previous candidate changed only where the fixes intended. Not yet seen in real use: the viewer's dump switching during an analysis, an unhandled C++ exception recorded by the new filter with Crash Logger or Trainwreck installed, and the five kept session logs (all covered by runtime tests).
 For v0.2.69, the three release candidates ran on the same setup. Two v0.2.68 freezes after loading the same Whiterun interior were traced in their dumps to an engine loop stuck on a NaN value, with the upscaler only on the call path; they stopped after installing AI Pathing Freeze Fix. A rc3 manual capture kept 12.8 KB of object memory for 16 threads in 8.9 ms with no change in dump size, the game kept running, and a handled access violation was held and then deleted once the game ran on. The kept dumps re-analyzed against the previous candidate changed only where the fixes intended. Not yet seen in real use: the object clue in a real freeze, and a real Crash Logger deadlock or lock-owner wait with the new verdicts (checked on the kept 10-18 dump and with runtime tests).
+For v0.2.70, the release candidates ran on the same setup. A manual capture kept the lock memory of four sleeping game threads (4.2 KB in 0.4 ms) and the game kept running. A PrismaUI test build that called its unloaded hook code on every Alt+F4 was recorded by rc2 as a CTD with the viewer popping up; with the forced-close build the same Alt+F4 was recorded as a close request, the viewer stayed closed and the quick answer said forced close. The kept dumps re-analyzed against v0.2.69 changed only where the new features intended. Not yet seen in real use: an engine lock deadlock in a real freeze (synthetic tests only), the new known crashes in real play, an error after Quit or the window's X button.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -286,6 +298,9 @@ A: An exception during save/cosave may be internally handled, so the game can co
 In that case, the shown suspect is [b]a warning signal[/b], not a confirmed root cause.
 To reduce popups, use [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] or [font=Courier New]AutoOpenViewerOnCrash=0[/font].
 
+[b]Q: I closed the game with Alt+F4, an error was recorded, but the viewer did not open.[/b]
+A: That is intended from v0.2.70. An error within 10 seconds of Alt+F4, the window's X button or Quit is an error during a forced close, not a CTD while playing; saves are usually not affected. The dump and report are still in the output folder. Set [font=Courier New]EnableCloseRequestLog=0[/font] in [font=Courier New]SkyrimDiag.ini[/font] to report it as a CTD again.
+
 [b]Q: Where are the dump files?[/b]
 A: With [font=Courier New]OutputDir=[/font] left blank, new dumps go to MO2 [font=Courier New]overwrite\SKSE\Plugins\Tullius Ctd Logs\[/font].
 You can collect them in another folder by setting [font=Courier New]OutputDir=[/font].
@@ -345,7 +360,9 @@ dump와 주변 단서를 모아서, 맨 위에 [b]빠른 답[/b](무슨 일이 �
 [*]CrashLoggerSSE가 있으면 관련 로그를 자동으로 찾아서 분석에 포함합니다.
 [*]크래시 당시의 MO2 프로필과 켜진 모드 목록을 함께 기록해, 리포트가 실제로 쓰던 모드를 기준으로 판단합니다.
 [*]크래시가 다루던 게임 오브젝트를 덤프에서 직접 읽습니다: 타입, FormID, 이름, 정의·수정한 플러그인, 레퍼런스의 기반 오브젝트.
-[*]프리징을 게임 메인 스레드가 무엇을 기다렸는지로 설명합니다: GPU, 그래픽 드라이버, 플러그인이 띄운 오류 창, 플러그인 코드에 갇힌 게임 스레드.
+[*]프리징을 게임 메인 스레드가 무엇을 기다렸는지로 설명합니다: GPU, 그래픽 드라이버, 플러그인이 띄운 오류 창, 플러그인 코드에 갇힌 게임 스레드, 엔진 잠금에서 서로를 기다리는 게임 스레드.
+[*]접근 위반 크래시가 어떻게 났는지 쉬운 말로 알려 줍니다: 이미 사라진 오브젝트(null 포인터), 잘못된 인덱스, 해제된 메모리(예: 제거된 후킹 코드)로의 이동 등.
+[*]게임을 강제로 끄다(Alt+F4, 창의 X 버튼, 종료) 난 오류를 CTD와 구분합니다. 뷰어가 뜨지 않고 크래시 기록에 넣지 않습니다.
 [*]캡처 당시 RAM·커밋·VRAM을 기록하고, 크래시를 숨기는 모듈(SkyrimCrashGuard 등)을 경고합니다.
 [*]원인이 알려진 크래시와 공개된 수정 모드가 막아 주는 엔진 크래시 지점을 알아보고, 그 해결책을 다음 조치 맨 앞에 둡니다.
 [/list]
@@ -392,8 +409,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.69 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.69 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.69에서 Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 분석 버튼을 다시 눌러야 빠른 답이 나옵니다(다음 릴리즈부터는 자동으로 다시 분석). MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.70 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.70 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.70에서 SKSE 플러그인, Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -451,7 +468,16 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.69 새 기능[/size][/b]
+[b][size=4]v0.2.70 새 기능[/size][/b]
+알려진 크래시를 늘리고, 크래시가 어떻게 났는지 쉬운 말로 알려 주며, 엔진 잠금 교착을 알아보고, Alt+F4로 끄다 난 오류를 CTD로 보고하지 않습니다.[list]
+[*][b]수정 모드가 있는 1.6.1170 크래시 추가:[/b] 키보드 입력 크래시([url=https://www.nexusmods.com/skyrimspecialedition/mods/187246]Keyboard Offset Crash Fix SE-AE[/url]), 물리 엔진(Havok) 크래시 지점 5곳([url=https://www.nexusmods.com/skyrimspecialedition/mods/194392]Havok Solver Crash Fix - SKSE[/url]), 물 충돌 크래시([url=https://www.nexusmods.com/skyrimspecialedition/mods/190886]Water Collision Crash Fix NG[/url]), 함정 접촉 크래시. 빠른 답이 해결 모드를 안내하고, 이미 로드돼 있으면 업데이트를 확인하라고 합니다
+[*][b]어떻게 튕겼나:[/b] 접근 위반이면 빠른 답에 쉬운 말 한 줄(이미 사라진 오브젝트, 잘못된 인덱스, 해제된 메모리(예: 제거된 후킹 코드)로 이동 등)을 더하고, 자세한 분석에 명령어와 잘못됐을 가능성이 큰 레지스터를 적습니다. 레지스터로 다시 계산한 주소가 예외와 맞을 때만 레지스터를 짚습니다
+[*][b]엔진 잠금 교착:[/b] 게임 엔진은 자기 잠금을 기다릴 때 Windows 대기 대신 잠깐씩 잠들어서 이런 프리징이 WCT에 보이지 않았습니다. 이제 프리징 캡처에 잠든 게임 스레드가 가리키는 잠금 메모리를 담고, 어느 스레드가 어느 잠금을 쥐고 기다리는지 알려 줍니다. 1.5.97의 알려진 교착 3종은 [url=https://www.nexusmods.com/skyrimspecialedition/mods/160704]Skyrim Cell load Freeze fix NG[/url]나 [url=https://www.nexusmods.com/skyrimspecialedition/mods/180884]WorkerSpinLockFix[/url]를 안내합니다
+[*][b]강제 종료 중 오류:[/b] Alt+F4로 게임이 닫힐 때 일부 모드의 후킹 코드가 이미 사라진 뒤에 불려 오류가 나는 경우가 있습니다. 이제 SKSE 플러그인이 Alt+F4·창의 X 버튼·종료를 기록하고, 그로부터 10초 안의 오류는 CTD가 아닌 강제 종료 중 오류로 보고합니다. 뷰어가 뜨지 않고 크래시 기록에 넣지 않습니다. [font=Courier New]SkyrimDiag.ini[/font]의 [font=Courier New]EnableCloseRequestLog=0[/font]으로 끌 수 있습니다
+[*][b]예전 분석 결과 자동 갱신:[/b] 저장된 분석이 더 오래된 분석기의 것이면 뷰어가 열 때 한 번 다시 분석해, 빠른 답 같은 새 줄이 분석 버튼 없이 나옵니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.69[/size][/b]
 넥서스 피드백과 직접 겪은 프리징 세 번을 반영해, 먼저 읽을 수 있는 답과 더 정확한 프리징 원인을 담았습니다.[list]
 [*][b]빠른 답:[/b] 리포트, 뷰어, 복사한 요약이 쉬운 말 3~4줄로 시작합니다. 무슨 일이 있었는지, 의심되는 모드(MO2 모드 이름)와 가능성, 해볼 일 하나, 확실하지 않으면 그 이유를 먼저 보여 주고 자세한 분석은 아래에 둡니다
 [*][b]프리징 원인:[/b] 메인 스레드가 다른 스레드가 쥔 잠금을 기다리면 그 스레드를 알려 주고, Crash Logger 스레드 덤프 단축키로 생긴 교착을 알아보며, 엔진이 NaN 값으로 같은 계산을 끝없이 반복하다 멈춘 경우를 알아봅니다. 1.6.1170의 알려진 AI 길찾기 프리징이면 [url=https://www.nexusmods.com/skyrimspecialedition/mods/190049]AI Pathing Freeze Fix[/url] 설치를 안내합니다. 오류 창 때문에 멈추면 창 제목에 적힌 모드를 짚습니다
@@ -546,6 +572,7 @@ v0.2.66은 RC를 같은 환경(켜진 모드 4,362개)에 MO2 모드로 설치�
 v0.2.67은 RC를 같은 환경에 MO2 모드로 설치해 플레이하고 수동 캡처했습니다. 연결, 사전 점검, MO2 프로필 캡처, SKSE 로그, 덤프와 리포트가 이전과 같이 동작했고 정상 종료했습니다. 보관 덤프 36개를 v0.2.66과 비교한 결과 바뀐 것은 없었습니다. 늦은 복구, 게임 종료 뒤 리포트, 분석 시간 제한은 실제 자식 프로세스를 돌리는 런타임 테스트로 확인했습니다. 아직 실사용에서 보지 못한 것: 늦은 복구(그 세션에 잡힌 예외가 없었음), 새 Helper로 난 실제 CTD.
 v0.2.68은 릴리즈 후보 다섯 개를 각각 같은 환경에 MO2 모드로 설치해 플레이했습니다. 하트비트 이벤트의 메인 스레드가 세션 시작과 같았고, Crash Logger 스레드 덤프의 탐침 예외에 덤프를 쓰지 않았으며, 새 단축키 수동 캡처가 Crash Logger 스레드 덤프를 실행하지 않고 어떤 출력에도 사용자 이름을 남기지 않았습니다. 실제 CTD(업스케일러 FSR3 DLL의 0으로 나누기)는 프리징 덤프 없이 한 번만 기록되고 Crash Logger 로그와 짝지어졌습니다. 보관 덤프를 이전 후보와 비교한 결과 의도한 곳만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 분석 중 뷰어에서 덤프 바꾸기, Crash Logger나 Trainwreck이 있을 때 새 예외 필터로 기록되는 처리되지 않은 C++ 예외, 5개 세션 로그 보관(모두 런타임 테스트로 확인).
 v0.2.69는 릴리즈 후보 세 개를 같은 환경에서 플레이했습니다. 같은 화이트런 실내를 불러온 직후 난 v0.2.68 프리징 두 번은 덤프에서 엔진이 NaN 값으로 반복하고 업스케일러는 호출 경로에 있었을 뿐인 것으로 확인했고, AI Pathing Freeze Fix 설치 뒤 다시 나지 않았습니다. rc3 수동 캡처는 스레드 16개의 오브젝트 메모리 12.8KB를 8.9ms에 담았고 덤프 크기는 그대로였으며 게임도 계속 돌았습니다. 처리된 접근 위반은 보관됐다가 게임이 계속 돌자 지워졌습니다. 보관 덤프를 이전 후보와 비교한 결과 의도한 곳만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 실제 프리징에서의 오브젝트 단서, 실제 Crash Logger 교착과 잠금 대기의 새 판정(보관한 10-18 덤프와 런타임 테스트로 확인).
+v0.2.70은 릴리즈 후보들을 같은 환경에서 플레이했습니다. 수동 캡처가 잠든 게임 스레드 네 개의 잠금 메모리(4.2KB, 0.4ms)를 담았고 게임도 계속 돌았습니다. Alt+F4 때마다 해제된 후킹 코드를 부르던 PrismaUI 테스트 빌드의 오류를 rc2는 CTD로 기록하고 뷰어를 띄웠는데, 강제 종료 구분 빌드에서는 같은 Alt+F4가 닫기 요청으로 기록되고 뷰어가 뜨지 않았으며 빠른 답이 강제 종료라고 했습니다. 보관 덤프를 v0.2.69와 비교한 결과 새 기능이 의도한 곳만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 실제 프리징에서의 엔진 잠금 교착(합성 테스트만), 실제 플레이 중 새 알려진 크래시, 종료 메뉴나 창의 X 버튼 뒤의 오류.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
@@ -618,6 +645,9 @@ SkyrimDiagDumpToolWinUI.exe --lang ko
 A: 저장/코세이브 과정의 예외가 내부에서 처리되면 게임이 계속될 수 있습니다.
 이 경우 표시된 후보는 [b]확정 원인[/b]이 아니라 [b]위험 신호[/b]로 보는 게 맞습니다.
 팝업을 줄이고 싶다면 [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] 또는 [font=Courier New]AutoOpenViewerOnCrash=0[/font]을 사용하세요.
+
+[b]Q: Alt+F4로 껐더니 오류가 기록됐는데 뷰어가 뜨지 않았어요.[/b]
+A: v0.2.70부터 의도한 동작입니다. Alt+F4, 창의 X 버튼, 종료 뒤 10초 안에 난 오류는 플레이 중 CTD가 아니라 강제 종료 중 오류이고, 세이브에는 보통 영향이 없습니다. 덤프와 리포트는 출력 폴더에 그대로 남습니다. CTD로 다시 보고하게 하려면 [font=Courier New]SkyrimDiag.ini[/font]에서 [font=Courier New]EnableCloseRequestLog=0[/font]으로 설정하세요.
 
 [b]Q: dump 파일은 어디 있나요?[/b]
 A: [font=Courier New]OutputDir=[/font]를 비워 두면 새 dump는 MO2 [font=Courier New]overwrite\SKSE\Plugins\Tullius Ctd Logs\[/font] 아래에 생성됩니다.
