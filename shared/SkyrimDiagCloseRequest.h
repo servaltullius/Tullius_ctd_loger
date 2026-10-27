@@ -201,9 +201,11 @@ constexpr CloseRequestKind ObserveCloseRequestMessage(
 // decided when it is seen:
 //   - Alt and F4 held then, or seen held (GetAsyncKeyState, which DirectInput
 //     does not hide) within kQuitFlagAltF4RecentMs: Alt+F4;
-//   - else a menu one quits from (Journal, its confirmation MessageBoxMenu,
-//     Main Menu, Console) open, or closed within kQuitFlagMenuRecentMs (the
-//     game closes its menus as it quits): Quit from the menu;
+//   - else a menu open as one quits (the confirmation MessageBoxMenu, Main
+//     Menu, Console) still open, or the confirmation closed within
+//     kQuitFlagMenuRecentMs (the game closes it as it quits): Quit from the
+//     menu. Any other menu just closed does not count: a console closed
+//     before an Alt+F4 the sampler missed would read as Quit;
 //   - else a forced quit, most likely Alt+F4 the plugin did not see held.
 inline constexpr std::uint64_t kQuitFlagAltF4RecentMs = 1500;
 inline constexpr std::uint64_t kQuitFlagMenuRecentMs = 3000;

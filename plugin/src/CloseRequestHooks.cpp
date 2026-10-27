@@ -25,8 +25,9 @@ std::atomic_bool g_installed{ false };
 HHOOK g_getMessageHook = nullptr;
 HHOOK g_callWndProcHook = nullptr;
 std::atomic_bool g_firstRequestLogged{ false };
-// The game window, captured at install: the key sampler and the crash
-// handler compare the foreground window with it without touching Main.
+// The game window, captured at install and kept current by the heartbeat
+// task (the window can be recreated): the key sampler and the crash handler
+// compare the foreground window with it without touching Main.
 std::atomic<std::uintptr_t> g_gameWindowValue{ 0 };
 
 // Written by the key sampler (heartbeat scheduler thread), the menu sink (UI
@@ -35,17 +36,20 @@ std::atomic<std::uintptr_t> g_gameWindowValue{ 0 };
 std::atomic<std::uint64_t> g_altF4SeenMs{ 0 };      // Alt+F4 last seen held with the game in front
 std::atomic<std::uint64_t> g_altF4RecordedMs{ 0 };  // an alt_f4 request last recorded (any source)
 std::atomic<std::uint32_t> g_quitMenusOpen{ 0 };     // bit per kQuitMenus entry
-std::atomic<std::uint64_t> g_quitMenuClosedMs{ 0 };
-std::atomic<std::uint32_t> g_lastQuitMenu{ 0 };
+std::atomic<std::uint64_t> g_quitConfirmClosedMs{ 0 };
 
-// Menus one quits from: the Journal's system tab and its confirmation, the
-// main menu, the console (qqq).
+// Menus open as one quits: the confirmation (MessageBoxMenu; the Journal's
+// Quit asks through it), the main menu, the console (qqq). The Journal
+// itself is not one: a quit from it passes through the confirmation, and a
+// Journal just closed says nothing about the next quit.
 constexpr std::string_view kQuitMenus[] = {
-  RE::JournalMenu::MENU_NAME,
   RE::MessageBoxMenu::MENU_NAME,
   RE::MainMenu::MENU_NAME,
   RE::Console::MENU_NAME,
 };
+// Only the confirmation counts once closed (the game closes it as it quits):
+// a console closed before an Alt+F4 the sampler missed must not read as Quit.
+constexpr std::uint32_t kQuitConfirmMenu = 0;
 
 // Only the game window's thread runs the hooks, so it alone touches this.
 skydiag::CloseRequestTracker g_tracker{};
@@ -237,6 +241,11 @@ bool InstallCloseRequestHooks() noexcept
   return true;
 }
 
+bool CloseKeySamplingOn() noexcept
+{
+  return g_installed.load(std::memory_order_relaxed);
+}
+
 void SampleCloseKeys() noexcept
 {
   if (!g_installed.load(std::memory_order_relaxed)) {
@@ -265,8 +274,12 @@ void SampleCloseKeys() noexcept
 void RecordCloseKeysAtCrash() noexcept
 {
   // Allocation-free and lock-free on our side: three win32k key/window
-  // reads and one blackbox write, no logging.
-  if (!g_installed.load(std::memory_order_relaxed) || !AltF4HeldNow() || !GameIsForeground()) {
+  // reads and one blackbox write, no logging. Only on a thread that is
+  // already a GUI thread: on any other, the first win32k call converts it,
+  // a callback into user32 that is not ours to run in a crash. The input
+  // thread that crashed on Alt+F4 (2026-10-26 19:58, tid 33300) was one.
+  if (!g_installed.load(std::memory_order_relaxed) || !IsGUIThread(FALSE) || !AltF4HeldNow() ||
+      !GameIsForeground()) {
     return;
   }
   const std::uint64_t now = GetTickCount64();
@@ -285,10 +298,9 @@ void NoteMenuForQuit(std::string_view menuName, bool opening) noexcept
     const std::uint32_t bit = 1u << i;
     if (opening) {
       g_quitMenusOpen.fetch_or(bit);
-    } else if ((g_quitMenusOpen.fetch_and(~bit) & bit) != 0u) {
-      g_quitMenuClosedMs.store(GetTickCount64());
+    } else if ((g_quitMenusOpen.fetch_and(~bit) & bit) != 0u && i == kQuitConfirmMenu) {
+      g_quitConfirmClosedMs.store(GetTickCount64());
     }
-    g_lastQuitMenu.store(i);
     return;
   }
 }
@@ -298,14 +310,19 @@ void PollGameQuitRequest() noexcept
   if (!g_installed.load()) {
     return;
   }
+  auto* main = RE::Main::GetSingleton();
+  if (!main) {
+    return;
+  }
+  // A display mode change can recreate the game window; without this the
+  // key sampler and the crash handler would compare with the old one.
+  if (const auto window = reinterpret_cast<std::uintptr_t>(main->wnd); window != 0u) {
+    g_gameWindowValue.store(window, std::memory_order_relaxed);
+  }
   // Recorded once, on the change from clear to set.
   static bool seenClear = false;
   static bool recorded = false;
   if (recorded) {
-    return;
-  }
-  auto* main = RE::Main::GetSingleton();
-  if (!main) {
     return;
   }
   if (!main->GetRuntimeData().quitGame) {
@@ -318,7 +335,7 @@ void PollGameQuitRequest() noexcept
   recorded = true;
   const std::uint64_t now = GetTickCount64();
   const std::uint32_t open = g_quitMenusOpen.load();
-  const std::uint64_t closedMs = g_quitMenuClosedMs.load();
+  const std::uint64_t closedMs = g_quitConfirmClosedMs.load();
   const auto decision = skydiag::QuitFlagCloseRequestKind(
     AltF4HeldNow() && GameIsForeground(), g_altF4SeenMs.load(), open != 0u, closedMs, now);
   // The same Alt+F4 the key sampler or the crash handler already recorded.
@@ -327,14 +344,15 @@ void PollGameQuitRequest() noexcept
   }
   std::string how;
   try {
-    std::uint32_t menu = g_lastQuitMenu.load();
+    // The open one for kMenuOpen; the confirmation for kMenuClosed.
+    std::uint32_t menu = kQuitConfirmMenu;
     for (std::uint32_t i = 0; i < std::size(kQuitMenus); ++i) {
       if ((open & (1u << i)) != 0u) {
         menu = i;
         break;
       }
     }
-    const std::string menuName(kQuitMenus[menu < std::size(kQuitMenus) ? menu : 0u]);
+    const std::string menuName(kQuitMenus[menu]);
     switch (decision.reason) {
       case skydiag::QuitFlagReason::kAltF4Held:
         how = "quit flag, Alt+F4 held";

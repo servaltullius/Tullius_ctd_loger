@@ -152,10 +152,10 @@ static_assert(Decides(false, 50000 - skydiag::kQuitFlagAltF4RecentMs, false, 0, 
   QuitFlagReason::kAltF4Held));
 static_assert(Decides(false, 50000 - skydiag::kQuitFlagAltF4RecentMs - 1, false, 0, 50000,
   CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys), "an older Alt+F4 is not this quit");
-// Alt+F4 outranks an open menu: it can be pressed with the Journal open.
+// Alt+F4 outranks an open menu: it can be pressed with the console open.
 static_assert(Decides(true, 0, true, 0, 50000, CloseRequestKind::kAltF4, QuitFlagReason::kAltF4Held));
 static_assert(Decides(false, 0, true, 0, 50000, CloseRequestKind::kGameQuit, QuitFlagReason::kMenuOpen));
-// The game closes its menus as it quits.
+// The game closes the quit confirmation as it quits (only that one counts).
 static_assert(Decides(false, 0, false, 48000, 50000, CloseRequestKind::kGameQuit, QuitFlagReason::kMenuClosed));
 static_assert(Decides(false, 0, false, 50000 - skydiag::kQuitFlagMenuRecentMs - 1, 50000,
   CloseRequestKind::kForcedQuit, QuitFlagReason::kNoMenuNoKeys));

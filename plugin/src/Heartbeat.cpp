@@ -412,7 +412,12 @@ void SchedulerLoop(const std::stop_token& st)
       g_lastThreadIds.clear();
     }
     // The interval in 25 ms steps, each sampling Alt+F4 (ADR-0022): a quick
-    // tap can be over before the heartbeat task sees the quit flag.
+    // tap can be over before the heartbeat task sees the quit flag. With the
+    // close request log off (or before data load), the interval as set.
+    if (!CloseKeySamplingOn()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
+      continue;
+    }
     const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(intervalMs);
     for (;;) {
       SampleCloseKeys();

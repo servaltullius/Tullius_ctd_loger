@@ -21,9 +21,14 @@ bool InstallCloseRequestHooks() noexcept;
 // only signal Alt+F4 gives. Does nothing until InstallCloseRequestHooks ran.
 void PollGameQuitRequest() noexcept;
 
+// True once InstallCloseRequestHooks ran: the heartbeat scheduler then wakes
+// every 25 ms to call SampleCloseKeys, and otherwise sleeps its interval.
+bool CloseKeySamplingOn() noexcept;
+
 // The key sampler, every 25 ms on the heartbeat scheduler thread: records an
 // alt_f4 close request when Alt and F4 become held together while the game
-// window (captured at install) is the foreground window. GetAsyncKeyState
+// window (captured at install, refreshed by PollGameQuitRequest) is the
+// foreground window. GetAsyncKeyState
 // is the system's key state, which DirectInput does not hide. Two key-state
 // reads per call, the foreground window only while both are held; never
 // touches Main.
@@ -32,11 +37,13 @@ void SampleCloseKeys() noexcept;
 // From the crash handler, once a crash is recorded: Alt+F4 still held with
 // the game in front records an alt_f4 close request (unless this press was
 // already recorded) before the Crash event, for a crash in the very frame
-// that handles Alt+F4. No allocation, no logging.
+// that handles Alt+F4. Only on a thread that is already a GUI thread
+// (IsGUIThread(FALSE)), so the crash never converts one. No allocation, no
+// logging.
 void RecordCloseKeysAtCrash() noexcept;
 
-// From the menu event sink (UI thread): a menu one quits from opened or
-// closed.
+// From the menu event sink (UI thread): a menu open as one quits
+// (MessageBoxMenu, Main Menu, Console) opened or closed.
 void NoteMenuForQuit(std::string_view menuName, bool opening) noexcept;
 
 }  // namespace skydiag::plugin
