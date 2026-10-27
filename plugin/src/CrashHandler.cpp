@@ -562,10 +562,11 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     }
 
     // ADR-0022: Alt+F4 still held as the crash is recorded (a crash in the
-    // frame that handles it), before the Crash event. Not on a stack
-    // overflow, where the little stack left is the handler's.
+    // frame that handles it), or the quit flag set since the pollers last
+    // looked, before the Crash event. Not on a stack overflow, where the
+    // little stack left is the handler's.
     if (code != EXCEPTION_STACK_OVERFLOW) {
-      RecordCloseKeysAtCrash();
+      RecordCloseRequestAtCrash();
     }
 
     skydiag::EventPayload p{};
