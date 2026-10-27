@@ -937,6 +937,22 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
                    L"뜻입니다. 예를 들어 이미 사라졌거나 만들어진 적 없는 오브젝트의 함수입니다.")) +
       callSite;
   }
+  if (info.verdict == "bad_jump" && info.target_state == "freed") {
+    return (en ? (L"The code tried to run instructions at " + address +
+                   L", but no memory was allocated there: it jumped into memory that had been freed (for example a "
+                   L"hook stub that was removed).")
+               : (L"코드가 " + address + L" 주소의 명령을 실행하려 했지만 그곳에는 할당된 메모리가 없었습니다. 해제된 "
+                   L"메모리(예: 제거된 후킹 코드)로 이동했다는 뜻입니다.")) +
+      callSite;
+  }
+  if (info.verdict == "bad_jump" && info.target_state == "not_executable") {
+    return (en ? (L"The code tried to run instructions at " + address +
+                   L", which is memory holding data, not code (it is not executable): it called or jumped through a "
+                   L"function pointer or return address that pointed at data.")
+               : (L"코드가 " + address + L" 주소의 명령을 실행하려 했지만 그곳은 실행할 수 없는 데이터 메모리입니다. "
+                   L"데이터를 가리키는 잘못된 함수 포인터나 반환 주소로 호출하거나 이동했다는 뜻입니다.")) +
+      callSite;
+  }
   if (info.verdict == "bad_jump") {
     return (en ? (L"The code tried to run instructions at " + address +
                    L", which is not code: it called or jumped through a function pointer or return address that was "
@@ -1070,6 +1086,14 @@ std::wstring DescribeFaultInstructionPlain(const FaultInstructionInfo& info, boo
     return en ? L"It crashed calling a function through an empty (null) pointer."
               : L"비어 있는(null) 함수 포인터로 함수를 부르다가 튕겼습니다.";
   }
+  if (v == "bad_jump" && info.target_state == "freed") {
+    return en ? L"It crashed jumping into memory that had been freed (for example a hook stub that was removed)."
+              : L"해제된 메모리(예: 제거된 후킹 코드)로 이동하다가 튕겼습니다.";
+  }
+  if (v == "bad_jump" && info.target_state == "not_executable") {
+    return en ? L"It crashed jumping to data instead of code (a broken function pointer)."
+              : L"코드가 아닌 데이터 주소로 이동하다가 튕겼습니다(망가진 함수 포인터).";
+  }
   if (v == "bad_jump") {
     return en ? L"It crashed jumping to an address that is not code (a broken function pointer)."
               : L"코드가 아닌 주소로 이동하다가 튕겼습니다(망가진 함수 포인터).";
@@ -1085,6 +1109,9 @@ std::string FaultInstructionReportText(const FaultInstructionInfo& info)
   std::string text;
   if (info.mnemonic.empty()) {
     text = "execute " + Hex(info.address);
+    if (!info.target_state.empty()) {
+      text += " (" + info.target_state + ")";
+    }
     if (!info.call_instruction.empty()) {
       text += ", from " + info.call_instruction;
     }

@@ -26,6 +26,34 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     return;
   }
 
+  if (ctx.isForcedClose) {
+    const auto& fc = r.forced_close;
+    std::wstring request;
+    if (fc.kind == "alt_f4") {
+      request = en ? L"Alt+F4" : L"Alt+F4 입력";
+    } else if (fc.kind == "game_quit") {
+      request = en ? L"quitting from the game's menu" : L"게임 메뉴의 종료 선택";
+    } else if (fc.kind == "forced_quit") {
+      request = en ? L"the game being force-quit (Alt+F4 or similar)" : L"게임 강제 종료(Alt+F4 등)";
+    } else if (fc.kind == "close_message") {
+      request = en ? L"a request to close the game window (WM_CLOSE)" : L"게임 창 닫기 요청(WM_CLOSE)";
+    } else {
+      request = en ? L"closing the game window (X button)" : L"게임 창 닫기(X 버튼 등)";
+    }
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kHigh;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Error during a forced close (not a CTD)" : L"강제 종료 중 오류(CTD 아님)";
+    e.details = en
+      ? (L"The blackbox recorded " + request + L" " + FormatDecimal(fc.seconds_before_crash, 1) +
+         L" s before this error, so it happened while the game was being closed. It is not classified as a CTD and "
+         L"is left out of the crash history and bucket statistics; the analysis below is kept for mod authors.")
+      : (L"블랙박스에 이 오류 " + FormatDecimal(fc.seconds_before_crash, 1) + L"초 전 " + request +
+         L"이 기록돼 있어, 게임을 닫는 과정에서 난 오류입니다. CTD로 분류하지 않고 크래시 이력과 버킷 통계에서 뺍니다. "
+         L"아래 분석은 모드 제작자를 위해 그대로 둡니다.");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (r.signature_match.has_value()) {
     const auto& sig = *r.signature_match;
     EvidenceItem e{};

@@ -98,6 +98,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.en = en;
   ctx.hasException = hasException;
   ctx.isFilteredCleanExit = r.is_filtered_clean_exit;
+  ctx.isForcedClose = r.forced_close.detected && !r.is_filtered_clean_exit;
   ctx.isCrashLike = isCrashLike;
   ctx.isHangLike = isHangLike;
   ctx.isSnapshotLike = isSnapshotLike;
@@ -125,6 +126,11 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   internal::BuildEvidenceItems(r, lang, ctx);
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);
+  if (ctx.isForcedClose) {
+    // The detail stays for mod authors; the player reads first that this is
+    // no crash in play.
+    r.summary_sentence = internal::ForcedCloseLead(r.forced_close, en) + L" " + r.summary_sentence;
+  }
   r.quick_answer = internal::BuildQuickAnswer(r, lang, ctx);
 }
 

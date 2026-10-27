@@ -155,7 +155,10 @@ void FinalizePendingCrashAnalysisIfReady(
   PendingCrashRecaptureContext recaptureContext{};
   std::wstring summaryErr;
   if (!TryEvaluateCrashRecapture(cfg, *task, outBase, &recaptureContext, &summaryErr)) {
-    AppendLogLine(outBase, L"Crash summary parse failed for recapture policy: " + summaryErr);
+    AppendLogLine(
+      outBase,
+      (recaptureContext.summaryInfo.forcedClose ? L"Crash recapture policy: " : L"Crash summary parse failed for recapture policy: ")
+        + summaryErr);
     ClearPendingCrashAnalysis(task);
     return;
   }

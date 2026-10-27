@@ -7,12 +7,14 @@
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
 #include "RecommendationClass.h"
+#include "SkyrimDiagCloseRequest.h"
 #include "Utf.h"
 #include "WctTypes.h"
 
 #include <Windows.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cwctype>
@@ -125,6 +127,7 @@ nlohmann::json BuildSummaryJson(
     { "is_snapshot_like", r.is_snapshot_like },
     { "is_manual_capture", r.is_manual_capture },
     { "is_filtered_clean_exit", r.is_filtered_clean_exit },
+    { "is_forced_close", r.forced_close.detected },
   };
   if (r.is_filtered_clean_exit) {
     summary["clean_exit_evidence"] = {
@@ -132,6 +135,14 @@ nlohmann::json BuildSummaryJson(
       { "dump_state", r.clean_exit_dump_state },
       { "filter_context", r.clean_exit_filter_context },
       { "sidecar_filename", WideToUtf8(r.clean_exit_evidence_filename) },
+    };
+  }
+  // Additive (ADR-0022): the close request this crash followed.
+  if (r.forced_close.detected) {
+    summary["forced_close"] = {
+      { "kind", r.forced_close.kind },
+      { "seconds_before_crash", std::round(r.forced_close.seconds_before_crash * 1000.0) / 1000.0 },
+      { "window_seconds", static_cast<double>(skydiag::kForcedCloseCrashWindowMs) / 1000.0 },
     };
   }
   summary["privacy"] = {
@@ -501,6 +512,9 @@ nlohmann::json BuildSummaryJson(
     if (!fi.call_site.empty()) {
       j["call_site"] = WideToUtf8(fi.call_site);
       j["call_instruction"] = fi.call_instruction;
+    }
+    if (!fi.target_state.empty()) {
+      j["target_state"] = fi.target_state;
     }
     summary["fault_instruction"] = std::move(j);
   }

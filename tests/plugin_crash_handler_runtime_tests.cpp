@@ -23,6 +23,12 @@
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagShared.h"
 
+// CloseRequestHooks.cpp needs CommonLibSSE; with no game window there the
+// crash handler's call into it records nothing anyway (ADR-0022).
+namespace skydiag::plugin {
+void RecordCloseKeysAtCrash() noexcept {}
+}  // namespace skydiag::plugin
+
 namespace {
 
 constexpr std::uint32_t kBreakpoint = 0x80000003u;

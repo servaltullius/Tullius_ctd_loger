@@ -119,6 +119,7 @@ Options that may have marginal impact on heavy modpacks:
 | `ResourceLogThrottleHighWatermarkPerSec` | `1500` | Per-second event threshold that starts adaptive sampling. |
 | `ResourceLogThrottleMaxSampleDivisor` | `8` | Maximum sampling divisor under burst load (higher = lower overhead, less detail). |
 | `EnablePerfHitchLog` | `1` | Logs main-thread stalls (lightweight). |
+| `EnableCloseRequestLog` | `1` | Logs Alt+F4 / window close / Quit, so a crash while the game closes is not reported as a CTD. |
 | `CrashHookMode` | `1` | **Keep at 1.** Mode 2 (all exceptions) is not recommended. |
 | `AllowOnlineSymbols` | `0` | Offline/local cache analysis by default. |
 

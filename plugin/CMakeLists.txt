@@ -13,6 +13,7 @@ configure_file(
 
 set(headers
   include/SkyrimDiag/Blackbox.h
+  include/SkyrimDiag/CloseRequestHooks.h
   include/SkyrimDiag/CrashHandler.h
   include/SkyrimDiag/EventSinks.h
   include/SkyrimDiag/Hash.h
@@ -22,6 +23,7 @@ set(headers
 
 set(sources
   src/Blackbox.cpp
+  src/CloseRequestHooks.cpp
   src/CrashHandler.cpp
   src/EventSinks.cpp
   src/Heartbeat.cpp

@@ -1,0 +1,67 @@
+# ADR-0022: 강제 종료 중 오류 (Alt+F4, 창 닫기, 종료)
+
+## Status
+Accepted
+
+## Context
+- 2026-10-26 1.6.1170 실사고: 사용자가 Alt+F4로 게임을 강제 종료했고, 그 직후 접근 위반이 났습니다. 헬퍼는 평소 CTD처럼 덤프를 쓰고 뷰어를 자동으로 열었습니다(`reason=crash_exit`, 이어서 `Target process exited (exit_code=1)`).
+- 덤프의 메인 스레드는 아직 프레임을 그리던 중이었습니다: `BSGraphics::Renderer::End` → `PrismaUI.dll!PrismaUI::Core::D3DPresent` → `REL::Relocation<void(unsigned)>::operator()` → PrismaUI.dll+0x59ce2의 `call qword ptr [rsp+0x20]` → 0x7FF7055F0000 실행 예외. 그 주소는 덤프의 메모리 정보 스트림에서 `MEM_FREE`였고, SkyrimSE.exe 바로 아래 64KB 간격으로 놓인 4KB `PAGE_EXECUTE_READWRITE` 개인 페이지 줄(후킹 라이브러리의 트램펄린) 중 그 페이지와 이웃 둘이 해제돼 있었습니다. 닫는 동안 풀린 후킹 트램펄린을 다른 플러그인의 present 후킹이 계속 불렀다는 뜻입니다.
+- 어느 스레드에도 아직 종료·언로드 코드(ExitProcess, LdrShutdownProcess, FreeLibrary, DestroyWindow)가 없어서, 덤프만 보고는 종료 중이었음을 알 수 없었습니다. 정상 종료 처리(헬퍼의 종료 코드 0 격리, `CleanExitEvidence`)도 종료 코드 1이라 해당하지 않습니다.
+- 사용자 결정: 이것은 "게임이 닫히다 난 크래시"가 아니라 사용자가 강제 종료한 것입니다. CTD로 분류하지 않고(크래시 이력·버킷 통계에서 제외), 뷰어를 자동으로 열지 않으며, 덤프·리포트·요약은 그대로 씁니다. 빠른 답은 "Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다. 플레이 중에 튕긴 CTD가 아닙니다." / "세이브에는 보통 영향이 없습니다" / "따로 할 일은 없습니다". 상세 분석(예외 명령어, 호출 경로, 모듈)은 모드 제작자에게 도움이 되므로 그대로 둡니다.
+
+## Decision
+
+1. **플러그인: 닫기 요청 기록**(`plugin/src/CloseRequestHooks.cpp`, 공통 규칙 `shared/SkyrimDiagCloseRequest.h`)
+   - `kDataLoaded`(게임 창이 있는 시점)에 `RE::Main::wnd`의 스레드에 `SetWindowsHookExW(…, nullptr, threadId)`로 스레드 훅 둘을 겁니다: 게시(posted) 메시지를 보는 `WH_GETMESSAGE`와 보내진(sent) 메시지를 보는 `WH_CALLWNDPROC`. 같은 프로세스의 스레드 훅이라 다른 프로세스에 DLL을 넣지 않고, 모듈은 이미 고정(pin)돼 있어 훅 프로시저가 프로세스 수명 동안 유효합니다. 훅은 풀지 않습니다.
+   - 처음(8657a2e)에는 `WH_CALLWNDPROC`만 걸었고, 2026-10-26 19:06 게임 내 시험에서 Alt+F4 뒤 크래시의 블랙박스에 닫기 요청이 하나도 없었습니다(훅 설치 로그는 있음). Alt+F4는 게시된 `WM_SYSKEYDOWN(VK_F4)`로 오고, DefWindowProc는 그에 대한 `WM_SYSCOMMAND(SC_CLOSE)`를 보내지 않고 게시합니다(ReactOS·Wine의 DefWindowProc가 `PostMessage`를 씀, Windows도 같은 동작으로 봄). 게임 창 프로시저가 `SC_CLOSE`를 스스로 처리하면 보내진 `WM_CLOSE`도 생기지 않으므로, 보내진 메시지만 보는 훅에는 아무것도 오지 않습니다.
+   - 보는 메시지(게임 창이나 그 자식, 루트는 `GetAncestor(GA_ROOT)`, 창은 `Main::wnd`를 메시지마다 다시 읽음):
+     - 게시: `WM_SYSKEYDOWN`의 `VK_F4`에 Alt(lParam 29번 비트, 또는 `GetKeyState(VK_MENU)`), 자동 반복(30번 비트)은 제외 → `alt_f4`. 키 입력만으로 Alt+F4로 봅니다. 게임이 Alt+F4를 자기 종료로 바꾸면 `SC_CLOSE`가 아예 오지 않기 때문입니다. 게임이 그 키를 무시하면 아무것도 닫히지 않고, 그 뒤 10초 안에 크래시가 났을 때만 강제 종료로 오인됩니다.
+     - 게시·보내짐: `WM_SYSCOMMAND(SC_CLOSE)`, `WM_CLOSE`. 그 순간 Alt와 F4가 눌려 있거나(`GetKeyState`) 1초 안에 Alt+F4 키 입력이 있었으면 `alt_f4`, 아니면 `SC_CLOSE`는 `window_close`, `SC_CLOSE` 없이 온 `WM_CLOSE`(작업 관리자의 작업 끝내기, 다른 프로그램, 게임 자신)는 `close_message`.
+     - 게시: `WM_QUIT`(창이 없는 스레드 메시지; 훅이 게임 창 스레드에만 있으므로 게임의 메시지 루프가 끝난다는 뜻) → 1초 안의 Alt+F4 뒤면 `alt_f4`(같은 요청이라 중복 제거됨). 혼자서는 어느 종료인지 말하지 않으므로 기록하지 않습니다(그것은 종료 플래그가 정함).
+   - 중복 제거: `WH_GETMESSAGE`는 `PM_REMOVE`(GetMessage 포함)일 때만 봅니다. `PeekMessage(PM_NOREMOVE)`는 같은 메시지를 다시 보여 주기 때문입니다. 그리고 같은 종류가 1초 안에 다시 오면 같은 요청으로 봅니다. 그래서 Alt+F4 한 번(키 입력 → 게시된 `SC_CLOSE` → 보내진 `WM_CLOSE` → `WM_QUIT`)은 이벤트 하나입니다. 1초 넘게 지나 다시 누르면 새로 기록합니다.
+   - payload d는 게시 1, 보내짐 0입니다. 처음 본 닫기 요청은 `SkyrimDiag.log`에 한 줄 남깁니다: `SkyrimDiag: close request seen: alt_f4 (WM_SYSKEYDOWN posted)`. 크래시가 없어도 잡혔는지 바로 확인할 수 있습니다.
+   - 두 번째 게임 내 시험(2026-10-26 19:30, a5fcaff)에서도 두 훅은 Alt+F4에 아무것도 보지 못했고, 잡힌 것은 종료 플래그(`Main::quitGame`)뿐이었습니다. 스카이림은 키보드를 DirectInput(전용 모드, Raw Input 기반이라 레거시 키 메시지가 창에 오지 않음)으로 읽고 Alt+F4를 스스로 처리해 종료 플래그를 켭니다. 그래서 **종료 플래그가 꺼짐→켜짐으로 바뀌는 순간이 모든 종료가 주는 신호**이고, 창 훅은 X 버튼·작업 끝내기·다른 프로그램의 닫기 요청을 위해 그대로 둡니다. `WM_INPUT`을 보려면 마우스 이동마다 `GetRawInputData`를 불러야 하므로 보지 않습니다.
+   - 세 번째 게임 내 시험(2026-10-26 19:58, 647b652)에서는 아무것도 기록되지 않았습니다. 크래시(tid 33300, 메인 스레드 아님)가 Alt+F4를 처리하는 바로 그 프레임의 입력 처리 안(`SkyrimUpscaler.dll` ← `RicochetFramework.dll!Events::MainEvent::ProcessInputHookTemplate` ← `SkyPrompt.dll`)에서 해제된 트램펄린(0x7FF705600000, 지난번 0x7FF7055F0000의 옆 페이지)을 부르다 났습니다. 종료 플래그는 그 뒤에야 켜지므로 하트비트 작업이 볼 틈이 없고, 키 샘플은 시각만 적어 두었습니다. 그래서 Alt+F4는 이제 아래 둘이 **직접** 기록합니다:
+     - 키 샘플(`SampleCloseKeys`, 하트비트 스케줄러 스레드, 25ms마다): Alt와 F4가 함께 눌리기 시작한 샘플에서, 게임 창(설치 때 잡아 두고, 디스플레이 모드 변경 등으로 창이 다시 만들어질 수 있어 하트비트 작업이 `Main::wnd`로 계속 갱신하는 HWND 값)이 전경 창이면 `alt_f4`를 기록합니다(`ObserveAltF4Keys`). 전경 창 확인은 두 키가 다 눌렸을 때만 하고, 다른 프로그램에서 누른 Alt+F4는 세지 않습니다. 이 스레드는 `Main`을 읽지 않습니다. 기록은 프레임과 무관하게 바로 블랙박스 링에 들어가므로 다음 프레임의 크래시보다 앞섭니다(링은 원래 여러 스레드가 잠금 없이 씀).
+     - 크래시 순간(`RecordCloseKeysAtCrash`, 플러그인의 벡터 예외 처리기에서 크래시 기록이 게시된 뒤, `Crash` 이벤트 전): Alt+F4가 아직 눌려 있고 게임이 전경이면 `alt_f4`를 기록합니다. 키 입력에서 크래시까지 한 프레임 남짓이라 25ms 샘플이 놓칠 수 있는 경우를 덮습니다. win32k 읽기 세 번(`GetAsyncKeyState` 둘, `GetForegroundWindow`)과 링 쓰기 하나뿐이고, 할당·로그·로더 호출이 없습니다. 스택 오버플로에서는 하지 않습니다. 이미 GUI 스레드인 스레드(`IsGUIThread(FALSE)`)에서만 합니다: 다른 스레드는 첫 win32k 호출에서 GUI 스레드로 바뀌고 그때 user32로 콜백이 들어가는데, 깨진 힙 위의 크래시 처리기에서 그것을 일으키지 않기 위해서입니다. 19:58 시험에서 크래시 난 입력 스레드(tid 33300)는 덤프의 TEB `Win32ThreadInfo`가 0이 아닌 GUI 스레드였습니다. 이 확인은 `Crash` 이벤트와 신호보다 앞에 둡니다: 뒤에 두면 요청 시각이 크래시보다 늦어져 규칙이 세지 않습니다.
+     - 한 번의 Alt+F4를 여러 곳이 보면 먼저 본 곳만 기록합니다(`IsAltF4AlreadyRecorded`, 원자 변수 하나를 compare-exchange로 차지): 키 샘플과 창 훅은 1초, 크래시 순간과 종료 플래그는 같은 누름의 뒤쪽이므로 1.5초 안의 기록이 있으면 넘깁니다.
+     - 닫기 요청은 크래시 기록이 동결(`kState_Frozen`)된 동안에도 씁니다(`PushEventAlways`). 규칙은 크래시 앞의 요청만 세므로 동결된 사고에는 영향이 없고, 헬퍼가 그 사고를 풀어 준 뒤 이어지는 크래시에 쓰입니다. 이 시험의 21.8초 무이벤트 구간은 동결 때문이 아니었습니다: 헬퍼는 첫 예외(21.8초 전, 처리됨)를 풀어 주며 기록을 다시 열었고(`thawed`), 그 사이 메뉴·로딩·끊김이 없었으며 하트비트 이벤트는 60초마다(213초, 다음은 273초)라 원래 쓸 것이 없었습니다. 동결 중이었다면 두 번째 크래시는 게시되지도 못했습니다.
+   - 종료 플래그(`PollGameQuitRequest`): 하트비트 작업이 `Main::quitGame`의 꺼짐→켜짐을 한 번 기록합니다. 하트비트 작업은 SKSE UI 작업이라 SE는 메인 스레드, AE(1.6.1170)는 프레임 안의 BSJobs 스레드에서 돌고, 그 동안 `Main`은 살아 있습니다(같은 작업이 이미 `RE::UI`를 읽음). 여기서는 `Main`의 bool 하나와 아래 원자 변수, `GetAsyncKeyState`만 읽습니다. 종류는 `QuitFlagCloseRequestKind`(Windows 헤더 없는 순수 함수)가 정합니다:
+     1. 그때 Alt와 F4가 눌려 있거나(`GetAsyncKeyState`), 1.5초(`kQuitFlagAltF4RecentMs`) 안에 눌린 것이 보였으면 `alt_f4`. `GetAsyncKeyState`는 win32k가 모든 키 입력에서 갱신하는 전역 상태라 DirectInput 전용 모드나 `RIDEV_NOLEGACY`가 가리지 않습니다(헬퍼의 수동 캡처 단축키도 게임 중 같은 함수로 읽음). F4를 짧게 눌러 하트비트 작업(100ms 주기, 큐 대기 포함) 전에 떼도 되도록, 하트비트 스케줄러 스레드가 대기 시간을 25ms 단위로 나눠 그때마다 두 키를 읽고(`SampleCloseKeys`) 둘 다 눌린 마지막 시각을 원자 변수에 둡니다. 하트비트 간격은 그대로이고, 추가 비용은 초당 40번의 키 상태 읽기 두 번입니다. 닫기 요청 기록을 끄면(`EnableCloseRequestLog=0`) 또는 데이터 로드 전에는 스케줄러가 설정한 간격(`HeartbeatIntervalMs`)대로만 깹니다. `Main`은 이 스레드에서 읽지 않습니다(정리 중 해제된 `Main`을 읽다 우리 스레드가 예외를 낼 수 있음).
+     2. 아니면 종료할 때 열려 있는 메뉴(종료 확인 창 MessageBoxMenu, Main Menu, Console의 qqq)가 아직 열려 있거나, 확인 창이 3초(`kQuitFlagMenuRecentMs`) 안에 닫혔으면(게임이 종료하며 닫음) `game_quit`. 일지(Journal Menu)의 종료는 확인 창을 거치므로 일지 자체는 보지 않고, 확인 창이 아닌 메뉴가 막 닫힌 것은 세지 않습니다(콘솔을 닫고 곧바로 누른 Alt+F4를 키 샘플이 놓쳤을 때 "게임 종료를 고른 뒤"로 잘못 나오지 않게). 메뉴 상태는 기존 메뉴 이벤트 싱크(UI 스레드)가 원자 변수에 적고 종료 플래그 쪽은 읽기만 하므로, 다른 스레드에서 `RE::UI`의 메뉴 맵을 잠그지 않습니다.
+     3. 아니면 `forced_quit`: 강제 종료, 아마 키를 보지 못한 Alt+F4.
+     Alt+F4가 메뉴보다 먼저인 것은 메뉴를 연 채로도 Alt+F4를 누를 수 있기 때문입니다. 남는 한계: 콘솔이나 Main Menu, 확인 창을 연 채로 누른 Alt+F4를 키 샘플이 놓치거나, 다른 일로 뜬 확인 창을 닫고 3초 안에 누른 Alt+F4를 놓치면 `game_quit`이 됩니다.
+   - 처음 본 닫기 요청의 로그는 어느 규칙인지 적습니다: `close request seen: alt_f4 (keys held, game foreground)`(키 샘플), `alt_f4 (quit flag, Alt+F4 held)`, `game_quit (quit flag, Console open)`, `game_quit (quit flag, MessageBoxMenu closed 420 ms before)`, `forced_quit (quit flag, no menu, keys not held)`. 창 메시지면 `alt_f4 (WM_SYSKEYDOWN posted)`처럼 메시지와 게시/보내짐을 적습니다.
+   - 서브클래싱(`SetWindowLongPtr(GWLP_WNDPROC)`) 대신 `WH_CALLWNDPROC`를 고른 이유: ENB·ReShade·오버레이·UI 모드가 창 프로시저를 서브클래싱하는데, 우리가 끼어들면 체인 순서와 해제 순서를 맞춰야 하고 ANSI/Unicode 프로시저 변환 위험도 생깁니다. `WH_CALLWNDPROC`는 창 프로시저를 건드리지 않고, 메시지를 바꿀 수 없으며(문서상 관찰 전용), 항상 `CallNextHookEx`로 넘기므로 메시지 처리를 바꾸지 않습니다. 다른 훅과는 OS의 훅 체인으로 공존합니다.
+   - `WH_GETMESSAGE`도 관찰만 합니다: `MSG`를 바꾸지 않고 항상 `CallNextHookEx`로 넘깁니다.
+   - 비용: 큐에서 꺼내는 메시지와 보내진 메시지마다 메시지 번호 비교 네 번(마우스·키 입력도 이 비교만 지남). 해당 메시지일 때만 `GetAncestor`와 `GetKeyState`를 부르고, 기록은 기존 블랙박스 링에 잠금 없이 한 번 씁니다.
+   - `SkyrimDiag.ini`의 `EnableCloseRequestLog=1`(기본 켬)으로 끌 수 있습니다.
+2. **프로토콜**: `EventType::kCloseRequest = 90`, payload a=`CloseRequestKind`(1 alt_f4, 2 window_close, 3 close_message, 4 game_quit, 5 forced_quit), b=창 메시지(종료 플래그는 0), c=wParam(종료 플래그는 `QuitFlagReason`: 0 Alt+F4 눌림, 1 메뉴 열림, 2 메뉴 막 닫힘, 3 메뉴·키 없음), d=출처(`CloseRequestSource`: 0 보내진 메시지, 1 게시된 메시지, 2 종료 플래그, 3 키 샘플, 4 크래시 순간의 키). `kFirstChanceException`(80)을 더할 때처럼 레이아웃과 기존 이벤트의 해석은 그대로이고 이전 헬퍼·분석기는 모르는 종류를 건너뛰므로(분석기는 `Unknown`으로 표시) `kVersion`은 올리지 않습니다(ADR-0004의 버전 증가 조건에 해당하지 않음, 배포는 여전히 한 zip).
+3. **규칙**(`ForcedCloseScanner`): 블랙박스에서 가장 최근 `kCrash` 이벤트보다 앞서고 그로부터 `kForcedCloseCrashWindowMs` = **10초** 안에 있는 닫기 요청이 있으면 강제 종료 중 오류입니다. Alt+F4 뒤 스카이림은 메인 루프를 멈추고 렌더러·힙·플러그인 DLL을 정리하며, 큰 로드오더에서는 몇 초 걸립니다. 10초는 느린 정리까지 덮고, 게임이 무시한 닫기 요청 직후 플레이 중 크래시가 날 가능성보다 정리 중 크래시가 훨씬 흔합니다. 여럿이면 Alt+F4 > 창 닫기 > game_quit > forced_quit > close_message(게임이 종료하며 스스로 보낼 수 있음) 순으로 이름을 정하고, 같은 종류면 가까운 것으로 시간을 잽니다. 크래시 뒤의 요청, 더 오래된 크래시 근처의 요청은 세지 않습니다. 헬퍼와 분석기가 같은 상수를 쓰므로 INI로 바꾸지 않습니다(바꾸면 둘이 어긋남).
+4. **헬퍼**(`CrashCapture.cpp`): 크래시 이벤트 때 잡은 블랙박스 스냅샷에 규칙을 적용합니다(`FindForcedCloseInSnapshot`). 맞으면 `This crash followed a close request (Alt+F4) 0.8 s earlier: …`를 남기고, 뷰어를 바로 열지도, 종료 시로 미루지도 않습니다(`Skipped viewer auto-open: crash followed a close request (Alt+F4) 0.8 s earlier.`). 핸들된 예외로 풀렸다가 비정상 종료로 다시 보고되는 경우(`PromoteReleasedCrashDump`)도 같습니다. 덤프·매니페스트·헤드리스 분석(리포트·요약)은 그대로 진행합니다. 요약의 `analysis.is_forced_close`가 참이면 재수집 정책용 크래시 버킷 통계(`SkyrimDiag_CrashBucketStats.json`)를 갱신하지 않습니다.
+5. **분석기**: 덤프의 블랙박스 스트림에 같은 규칙을 적용해 `AnalysisResult::forced_close`를 채웁니다(예외가 있는 덤프만, 검증된 정상 종료가 있으면 그것이 우선).
+   - 정상 종료 플래그(`is_filtered_clean_exit`)를 재사용하지 않고 형제 플래그를 둔 이유: 정상 종료는 헬퍼 사이드카로만 확인되고 "종료 코드 0, 원인 모드 지목 안 함"을 뜻해 후보·예외 명령어 등 분석을 모두 비웁니다. 강제 종료는 덤프 자체로 확인되고 분석을 그대로 남겨야 하며 예외로 끝난(종료 코드 1) 경우입니다. 대신 정상 종료가 하는 제외 처리는 똑같이 따릅니다: 크래시 이력 읽기/추가(`crash_history.json`, 반복 횟수·버킷 상관), 문제 해결 가이드를 건너뜁니다. `is_crash_like`는 참으로 둡니다(분석 경로 유지).
+   - 사용자 문장은 항상 사용자의 행동으로 씁니다(게임이 스스로 꺼졌다고 하지 않음). Alt+F4: "Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다." / "This error happened while you force-quit the game (Alt+F4).", 창 닫기·close_message: "게임 창을 닫아 게임을 종료하는 과정에서 난 오류입니다." / "This error happened while you closed the game window.", game_quit: "게임 종료를 고른 뒤 게임이 닫히는 과정에서 난 오류입니다." / "This error happened while the game was closing after you chose to quit.", forced_quit: "게임을 강제로 끄는 과정(Alt+F4 등)에서 난 오류입니다." / "This error happened while the game was being force-quit (Alt+F4 or similar)." 뒤에 "플레이 중에 튕긴 CTD가 아닙니다." / "It is not a crash during play."
+   - 빠른 답: `kind`/`case` = `forced_close`, 제목 = 위 두 문장 + "세이브에는 보통 영향이 없습니다." / "Saves are usually unaffected.", 해볼 일 = "따로 할 일은 없습니다." / "Nothing to do.", 의심 모드·확실하지 않은 이유·어떻게 튕겼나 줄 없음.
+   - 결론 문장: 위 두 문장을 앞에 붙이고 기존 결론을 그대로 잇습니다. 근거 첫 항목 "강제 종료 중 오류(CTD 아님)" / "Error during a forced close (not a CTD)"(신뢰도 높음, 몇 초 전 무슨 요청인지). 권장 첫 줄 `[강제 종료]` / `[Forced close]`(다음 조치로 선택, 즉시 그룹 `forced_close`). "실제 CTD"라고 하는 C++ 예외 해석 줄과 `CPP_EXCEPTION_HANDLED` 시그니처는 내지 않습니다.
+6. **출력 계약**(추가 필드)
+   - 요약 JSON `analysis.is_forced_close`(항상), `forced_close`(감지 시): `kind`, `seconds_before_crash`(0.001초 단위), `window_seconds`(10).
+   - 리포트: `Summary:` 다음 줄 `Classification: FORCED_CLOSE (not a CTD; alt_f4, 0.8 s before the error)` / `분류: 강제 종료 (CTD 아님; alt_f4, 오류 0.8초 전)`.
+   - 블랙박스 이벤트 이름 `CloseRequest`, 상세 `kind=alt_f4 msg=0x0104 wparam=0x0073 posted`, 종료 플래그는 `kind=forced_quit quit_flag reason=no_menu_no_keys`(`alt_f4_held`, `menu_open`, `menu_closed`).
+   - `crash_bucket_key`는 정상 종료처럼 그대로 씁니다(이력에 넣지 않을 뿐).
+7. **뷰어**: 정상 종료 표시 경로를 따라 버킷 줄 "분류: 강제 종료 (CTD 아님)" / "Classification: FORCED_CLOSE (not CTD)", 빠른 요약의 분류 "강제 종료 — CTD 아님", 공유 텍스트 머리글 "⚪ Skyrim 강제 종료 중 오류 리포트" / "⚪ Skyrim Forced-Close Error Report"(CTD 리포트 아님), 유형 줄 `FORCED_CLOSE`. 후보 목록은 그대로 보여 줍니다.
+
+## Consequences
+- 닫기 요청 기록이 없는 이전 덤프는 아무것도 바뀌지 않습니다.
+- Alt+F4는 키 샘플(25ms), 크래시 순간의 키, 종료 플래그 중 하나가 보면 기록됩니다. 셋 다 놓치는 것은 키를 25ms 안에 떼고, 크래시가 키를 뗀 뒤이면서 종료 플래그를 하트비트 작업이 보기 전인 경우입니다. 그때는 이전과 같이 CTD로 보고됩니다.
+- 키 샘플이 놓치고 종료 플래그만 보면 `forced_quit`("Alt+F4 등")으로 남습니다. 문장이 사용자의 강제 종료를 말하므로 틀린 안내는 아닙니다.
+- 게임이 전경일 때 누른 Alt+F4는 게임이 그 키를 무시해도 기록되며, 그 뒤 10초 안의 크래시는 강제 종료로 분류됩니다.
+- 사용자가 닫기를 요청했는데 게임이 무시하고 10초 안에 플레이 중 크래시가 나면 강제 종료로 잘못 분류됩니다. 이 경우에도 상세 분석은 그대로입니다.
+- 게임 창을 찾지 못하면 `SkyrimDiag.log`에 `close request log off`가 남고, 동작은 이전과 같습니다. 창 훅이 거부돼도 키 샘플과 종료 플래그는 동작합니다(`close request log on (key sampler, quit flag, game window thread hooks)`).
+
+## Verification
+- `skydiag_close_request_tests`(Linux 포함): 메시지 분류(게시된 Alt+F4 키 입력과 이어지는 SC_CLOSE·WM_CLOSE·WM_QUIT이 한 요청, 키 입력만으로 Alt+F4, Alt는 29번 비트나 키 상태로, 자동 반복·Alt 없는 F4·다른 키 제외, 보내진 SC_CLOSE의 Alt+F4, X 버튼, Alt만 누른 SC_CLOSE, WM_CLOSE 단독, WM_QUIT 단독은 기록 안 함, 1초 뒤 새 요청, 다른 메시지·SC_ 명령), 키 샘플(두 키와 전경 창이 모두 필요, 누르는 동안 한 번, 떼고 다시 누르면 다시, 다른 프로그램에서 누르다 게임이 전경이 되면 그때), 여러 출처의 한 누름(키 샘플 뒤 크래시 순간·종료 플래그는 기록 안 함, 1.1초 뒤 새 누름), 종료 플래그 판정(지금 눌림·1.5초 안에 보임·경계, 메뉴보다 Alt+F4 우선, 메뉴 열림·3초 안에 닫힘·경계, 둘 다 없으면 forced_quit, 미래 시각 무시), 10초 경계, 크래시 뒤 요청·오래된 크래시·모르는 종류 제외, 우선순위, 링 보관 개수.
+- `skydiag_crash_capture_filter_logic_tests`: 헬퍼 로그 문장. `skydiag_helper_false_positive_runtime_tests`: 스냅샷 판정과, 실제 덤프를 쓰는 크래시 이벤트 처리에서 뷰어를 열지도 미루지도 않고 로그를 남기는지.
+- `skydiag_quick_answer_tests`: 블랙박스 판정, 이벤트 이름·상세, 한국어·영어 빠른 답·결론 접두·근거·권장·다음 조치, 요약 JSON, 리포트 줄, 종류별 문장, 정상 종료 우선, "실제 CTD" 문구 없음. `skydiag_next_action_tests`, `skydiag_recommendation_class_tests`: `[강제 종료]` 태그.
+- `share_text_fixture_tests.py`: 공유 텍스트 머리글·분류·다음 조치.
+- 보관 덤프 21건(한국어·영어 42회)을 main 빌드와 나란히 재분석(`scripts/compare_analyses.py`): 닫기 요청 이벤트가 있는 덤프가 없으므로 강제 종료로 분류된 것은 없고(`analysis.is_forced_close` 모두 false), 바뀐 것은 ADR-0019 부록의 `SkyrimDiag_Crash_20261026_140735_958` 빠른 답 "어떻게 튕겼나" 줄(해제된 메모리)뿐입니다.

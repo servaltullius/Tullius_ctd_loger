@@ -33,6 +33,10 @@ enum class EventType : std::uint16_t {
   kThreadCreate = 70,
   kThreadExit = 71,
   kFirstChanceException = 80,
+  // ADR-0022: the player asked the game to close (SkyrimDiagCloseRequest.h).
+  // Additive like kFirstChanceException: the layout is unchanged and older
+  // readers skip a type they do not know, so kVersion stays.
+  kCloseRequest = 90,
 
   kCrash = 100,
   kHangMark = 200,

@@ -48,6 +48,10 @@ internal sealed class AnalysisSummary
     public bool IsFilteredCleanExit { get; init; }
     public string CleanExitDumpState { get; init; } = string.Empty;
     public string CleanExitEvidenceFilename { get; init; } = string.Empty;
+    // ADR-0022: a crash right after the player asked the game to close: an
+    // error during a forced close, not a CTD. The analysis is still shown.
+    public bool IsForcedClose { get; init; }
+    public string ForcedCloseKind { get; init; } = string.Empty;
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
     // The analyzer's group and tag id for each entry of Recommendations (same
@@ -217,6 +221,11 @@ internal sealed class AnalysisSummary
                                   ReadBool(cleanExitEvidence, "validated"),
             CleanExitDumpState = ReadString(cleanExitEvidence, "dump_state"),
             CleanExitEvidenceFilename = ReadString(cleanExitEvidence, "sidecar_filename"),
+            IsForcedClose = ReadBool(analysis, "is_forced_close"),
+            ForcedCloseKind = root.TryGetProperty("forced_close", out var forcedCloseNode) &&
+                              forcedCloseNode.ValueKind == JsonValueKind.Object
+                ? ReadString(forcedCloseNode, "kind")
+                : string.Empty,
             Suspects = suspects,
             Recommendations = recommendations,
             RecommendationClasses = recommendationClasses.Count == recommendations.Count

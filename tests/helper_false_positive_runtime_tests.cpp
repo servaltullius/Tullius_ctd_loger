@@ -1491,6 +1491,117 @@ void TestThreadDumpFaultOfAnExitedGame_IsRecordedAsADumpFailure()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0022: one blackbox event of the plugin.
+void PutEvent(skydiag::SharedLayout* shared, skydiag::EventType type, double secondsAfterStart, std::uint64_t a)
+{
+  const std::uint32_t index = shared->header.write_index++;
+  auto& e = shared->events[index % shared->header.capacity];
+  e.seq = index * 2u;
+  e.type = static_cast<std::uint16_t>(type);
+  e.qpc = shared->header.start_qpc + static_cast<std::uint64_t>(secondsAfterStart * shared->header.qpc_freq);
+  e.payload.a = a;
+}
+
+// The close request the newest crash came after, from the snapshot the helper
+// takes when the crash event comes.
+void TestFindForcedCloseInSnapshot()
+{
+  using skydiag::helper::internal::FindForcedCloseInSnapshot;
+  constexpr auto kAltF4 = static_cast<std::uint64_t>(skydiag::CloseRequestKind::kAltF4);
+  {
+    auto shared = MakeSharedLayout();
+    PutEvent(shared.get(), skydiag::EventType::kHeartbeat, 1.0, 0u);
+    PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 120.0, kAltF4);
+    PutEvent(shared.get(), skydiag::EventType::kCrash, 120.8, 0xC0000005u);
+    const auto match = FindForcedCloseInSnapshot(shared.get(), sizeof(skydiag::SharedLayout));
+    Require(match.kind == skydiag::CloseRequestKind::kAltF4, "Alt+F4 0.8 s before the crash");
+    Require(match.msBeforeCrash > 799.0 && match.msBeforeCrash < 801.0, "0.8 s");
+  }
+  {
+    auto shared = MakeSharedLayout();
+    PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 100.0, kAltF4);
+    PutEvent(shared.get(), skydiag::EventType::kCrash, 111.0, 0xC0000005u);
+    Require(!FindForcedCloseInSnapshot(shared.get(), sizeof(skydiag::SharedLayout)).matched(), "11 s is too long");
+  }
+  {
+    // An entry the snapshot could not copy stably (odd seq) is skipped.
+    auto shared = MakeSharedLayout();
+    PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 100.0, kAltF4);
+    shared->events[0].seq = 1u;
+    PutEvent(shared.get(), skydiag::EventType::kCrash, 100.5, 0xC0000005u);
+    Require(!FindForcedCloseInSnapshot(shared.get(), sizeof(skydiag::SharedLayout)).matched(), "unstable entry");
+  }
+  {
+    auto shared = MakeSharedLayout();
+    PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 100.0, kAltF4);
+    PutEvent(shared.get(), skydiag::EventType::kCrash, 100.5, 0xC0000005u);
+    shared->header.magic = 0u;
+    Require(!FindForcedCloseInSnapshot(shared.get(), sizeof(skydiag::SharedLayout)).matched(), "not a blackbox");
+    Require(!FindForcedCloseInSnapshot(nullptr, 0u).matched(), "no snapshot");
+  }
+}
+
+// End to end, the 2026-10-26 case: Alt+F4 and 0.8 s later an access
+// violation while the game still runs. The dump is written and kept as a
+// crash, but no viewer is opened or queued for the game's exit.
+void TestForcedCloseCrash_SkipsTheViewer()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_forced_close");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = 0x7FF7055F0000ull;
+  shared->header.crash_seq = 2u;
+  PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 120.0,
+    static_cast<std::uint64_t>(skydiag::CloseRequestKind::kAltF4));
+  PutEvent(shared.get(), skydiag::EventType::kCrash, 120.8, 0xC0000005u);
+
+  auto child = LaunchSleepingChildProcess();
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  // The faulting thread's real registers, as the plugin hands them over. An
+  // all-zero context for a thread that exists makes Windows Server 2022's
+  // dbghelp fail the dump with 0x800706F8 on AMX hosts (CI only; see the
+  // v0.2.60-rc3 XSTATE fix), which no real crash produces.
+  CONTEXT faultContext{};
+  faultContext.ContextFlags = CONTEXT_FULL;
+  const HANDLE faultThread =
+    OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, child.pi.dwThreadId);
+  Require(faultThread != nullptr, "OpenThread failed");
+  Require(SuspendThread(faultThread) != static_cast<DWORD>(-1), "SuspendThread failed");
+  const bool gotContext = GetThreadContext(faultThread, &faultContext) != FALSE;
+  Require(ResumeThread(faultThread) != static_cast<DWORD>(-1), "ResumeThread failed");
+  CloseHandle(faultThread);
+  Require(gotContext, "GetThreadContext failed");
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(0x7FF7055F0000ull);
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  HelperConfig cfg = MakeTestConfig();
+  cfg.autoOpenViewerOnCrash = true;
+  cfg.autoOpenCrashOnlyIfProcessExited = true;
+  skydiag::helper::internal::HelperLoopState state{};
+
+  Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "The crash event is handled");
+  Require(state.crashCaptured.latched, "The crash is kept");
+  Require(state.crashCaptured.forcedClose.kind == skydiag::CloseRequestKind::kAltF4, "It followed Alt+F4");
+  Require(HasDumpFile(outBase), "Its dump is written");
+  Require(state.pendingCrashViewerDumpPath.empty(), "No viewer is queued for the exit");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "Skipped viewer auto-open: crash followed a close request (Alt+F4) 0.8 s earlier.", "The skip is logged");
+  Require(log.find("deferring viewer") == std::string::npos, "No viewer deferred");
+  Require(log.find("Auto-opened DumpTool viewer") == std::string::npos, "No viewer opened");
+
+  CloseHandle(proc.crashEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_false_positive_preserve_no_latch");
@@ -2326,6 +2437,8 @@ int wmain(int argc, wchar_t** argv)
     TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame();
     TestHandleProcessExitTick_KeepsTheDumpFailureHint();
     TestThreadDumpFaultOfAnExitedGame_IsRecordedAsADumpFailure();
+    TestFindForcedCloseInSnapshot();
+    TestForcedCloseCrash_SkipsTheViewer();
     TestPreservedFilteredDump_DoesNotKeepCaptureLatch();
     TestCleanExitDumpDeletionFailureIsRecordedAsPreserved();
     TestEtwStopFailureRetriesThenConfirmsCancellation();

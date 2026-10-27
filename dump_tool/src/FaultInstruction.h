@@ -158,6 +158,11 @@ struct FaultInstructionInfo
   // address on the stack does not show one.
   std::wstring call_site;
   std::string call_instruction;
+  // bad_jump: the target's memory in the dump's memory-info stream
+  // (ProbeFaultInstruction): "freed" (MEM_FREE, e.g. a removed hook stub),
+  // "reserved", "not_executable" (committed without execute access) or
+  // "executable"; empty when the dump does not say.
+  std::string target_state;
 };
 
 // Reads read/write AVs from the code bytes at the exception address (code,

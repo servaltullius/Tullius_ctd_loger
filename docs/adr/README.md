@@ -24,3 +24,4 @@ ADR index:
 - `0019-faulting-instruction.md`
 - `0020-reanalyze-older-summaries.md`
 - `0021-engine-lock-deadlocks.md`
+- `0022-forced-close-errors.md`

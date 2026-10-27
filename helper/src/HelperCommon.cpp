@@ -344,6 +344,11 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
   }
 
   info.bucketKey = TrimAscii(root.value("crash_bucket_key", std::string{}));
+  if (root.contains("analysis") && root["analysis"].is_object()) {
+    const auto& analysis = root["analysis"];
+    info.forcedClose = analysis.contains("is_forced_close") && analysis["is_forced_close"].is_boolean() &&
+      analysis["is_forced_close"].get<bool>();
+  }
 
   std::optional<bool> unknownFromField;
   if (root.contains("exception") && root["exception"].is_object()) {

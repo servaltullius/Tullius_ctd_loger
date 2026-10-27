@@ -452,6 +452,14 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       : L"[정상 종료] 필터 동작을 제보할 때 덤프, 정상 종료 증거 사이드카, 헬퍼 로그를 함께 보관하세요.");
     return;
   }
+  if (ctx.isForcedClose) {
+    // ADR-0022: first, so it is the next action (NextAction.cpp).
+    r.recommendations.push_back(
+      (en ? L"[Forced close] " : L"[강제 종료] ") + ForcedCloseLead(r.forced_close, en) +
+      (en ? L" Nothing to do. If the same error comes every time you close the game, pass the analysis below to the "
+            L"author of the mod it names."
+          : L" 따로 할 일은 없습니다. 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 거기 나온 모드의 제작자에게 전해 주세요."));
+  }
   const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
@@ -705,11 +713,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       r.recommendations.push_back(buf);
     }
 
-    if (IsCrashLoggerConfirmedCppException(r)) {
+    // A forced close gets neither "a real CTD" nor "if the game kept
+    // running": the player closed it (ADR-0022).
+    if (!ctx.isForcedClose && IsCrashLoggerConfirmedCppException(r)) {
       r.recommendations.push_back(en
         ? L"[Interpretation] Crash Logger logged this C++ exception as the unhandled exception that crashed the game, so this is a real CTD, not a caught throw. Start with the module that threw it (first non-system module in the call stack)."
         : L"[해석] Crash Logger도 이 C++ 예외를 게임을 끝낸 처리되지 않은 예외로 기록했습니다. 잡힌 예외(오탐)가 아니라 실제 CTD입니다. 예외를 던진 모듈(콜스택에서 시스템 DLL이 아닌 첫 모듈)부터 확인하세요.");
-    } else if (r.exc_code == 0xE06D7363u) {
+    } else if (!ctx.isForcedClose && r.exc_code == 0xE06D7363u) {
       // With the default CrashHookMode=1 the plugin records a C++ exception
       // only when nothing handled it: Crash Logger's report, the unhandled-
       // exception filter or abort() (CrashHandler.cpp), so lead with that; a

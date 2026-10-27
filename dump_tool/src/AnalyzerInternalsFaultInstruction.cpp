@@ -3,8 +3,10 @@
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "FaultInstruction.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <string>
 
 namespace skydiag::dump_tool::internal {
 
@@ -13,6 +15,44 @@ using stackwalk_internal::MinidumpMemoryView;
 namespace {
 
 constexpr std::uint32_t kExceptionAccessViolation = 0xC0000005u;
+
+// The dump's memory-info stream entry for `address` (MiniDumpWithFullMemoryInfo
+// lists free regions too): freed / reserved / not_executable / executable, or
+// empty when the stream is missing or does not cover it.
+std::string MemoryStateAt(void* dumpBase, std::uint64_t dumpSize, std::uint64_t address)
+{
+  void* ptr = nullptr;
+  ULONG size = 0;
+  if (!minidump::ReadStreamSized(dumpBase, dumpSize, MemoryInfoListStream, &ptr, &size) || !ptr ||
+      size < sizeof(MINIDUMP_MEMORY_INFO_LIST)) {
+    return {};
+  }
+  const auto* list = static_cast<const MINIDUMP_MEMORY_INFO_LIST*>(ptr);
+  if (list->SizeOfHeader < sizeof(MINIDUMP_MEMORY_INFO_LIST) || list->SizeOfEntry < sizeof(MINIDUMP_MEMORY_INFO) ||
+      list->SizeOfHeader > size) {
+    return {};
+  }
+  const std::uint64_t available = (size - list->SizeOfHeader) / list->SizeOfEntry;
+  const std::uint64_t count = std::min<std::uint64_t>(list->NumberOfEntries, available);
+  const auto* entries = static_cast<const std::uint8_t*>(ptr) + list->SizeOfHeader;
+  for (std::uint64_t i = 0; i < count; ++i) {
+    MINIDUMP_MEMORY_INFO info{};
+    std::memcpy(&info, entries + i * list->SizeOfEntry, sizeof(info));
+    if (address < info.BaseAddress || address - info.BaseAddress >= info.RegionSize) {
+      continue;
+    }
+    if (info.State == MEM_FREE) {
+      return "freed";
+    }
+    if (info.State == MEM_RESERVE) {
+      return "reserved";
+    }
+    constexpr ULONG32 kExecute = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    const bool executable = (info.Protect & kExecute) != 0u && (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0u;
+    return executable ? "executable" : "not_executable";
+  }
+  return {};
+}
 
 }  // namespace
 
@@ -53,6 +93,11 @@ FaultInstructionInfo ProbeFaultInstruction(
     got = 0;
   }
   auto info = ExplainFaultInstruction(fault, code.data(), got);
+  // A null_jump target is in the first 64 KB, which is never allocated: it
+  // was not freed, so only bad_jump says what the target memory was.
+  if (info.verdict == "bad_jump") {
+    info.target_state = MemoryStateAt(dumpBase, dumpSize, fault.address);
+  }
   if ((info.verdict != "null_jump" && info.verdict != "bad_jump") || !fault.has_registers) {
     return info;
   }

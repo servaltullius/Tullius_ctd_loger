@@ -4,6 +4,7 @@
 #include "CrashCapture.h"
 
 using skydiag::helper::internal::BuildCrashEventInfo;
+using skydiag::helper::internal::DescribeForcedCloseForLog;
 using skydiag::helper::internal::ClassifyExitCodeVerdict;
 using skydiag::helper::internal::CrashEventInfo;
 using skydiag::helper::internal::FilterVerdict;
@@ -329,6 +330,21 @@ static void TestDumpWriteRetry_BudgetIsBounded()
 // Quarantine marks zero-exit filters that carried real fault evidence. The
 // verdict stays filtered, while dump preservation is decided separately from
 // the metadata-write result.
+// ADR-0022: the helper log line for a crash after a close request.
+static void TestDescribeForcedCloseForLog()
+{
+  skydiag::ForcedCloseMatch match{ skydiag::CloseRequestKind::kAltF4, 800.0 };
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (Alt+F4) 0.8 s earlier");
+  match = { skydiag::CloseRequestKind::kWindowClose, 2349.0 };
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (window closed) 2.3 s earlier");
+  match = { skydiag::CloseRequestKind::kGameQuit, 9960.0 };
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (quit from the game's menu) 10.0 s earlier");
+  match = { skydiag::CloseRequestKind::kForcedQuit, 0.0 };
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (forced quit, probably Alt+F4) 0.0 s earlier");
+  match = { skydiag::CloseRequestKind::kCloseMessage, -5.0 };
+  assert(DescribeForcedCloseForLog(match) == L"crash followed a close request (close request to the window) 0.0 s earlier");
+}
+
 static void TestQuarantineCleanExit_StrongCommittedZeroExit()
 {
   auto info = BuildCrashEventInfo(0xC0000005u, 0x439Eu, 17120u, 0u);
@@ -439,6 +455,7 @@ int main()
   TestDumpWriteRetry_RetriesOnlyWhileProcessAlive();
   TestDumpWriteRetry_BudgetIsBounded();
 
+  TestDescribeForcedCloseForLog();
   TestQuarantineCleanExit_StrongCommittedZeroExit();
   TestQuarantineCleanExit_RequiresZeroExit();
   TestQuarantineCleanExit_RequiresStrongException();

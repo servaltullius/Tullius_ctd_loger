@@ -16,6 +16,7 @@ struct TagRule
 // tests/recommendation_class_tests.cpp checks that each tag the analyzer and
 // its data files write is either listed here or known to stay in verify.
 constexpr TagRule kTagRules[] = {
+  { "forced_close", kRecommendationGroupImmediate, L"[Forced close]", L"[강제 종료]" },
   { "known_cause", kRecommendationGroupImmediate, L"[Known cause]", L"[알려진 원인]" },
   { "known_crash_site", kRecommendationGroupImmediate, L"[Known crash site]", L"[알려진 크래시 지점]" },
   { "modal_dialog", kRecommendationGroupImmediate, L"[Modal dialog]", L"[Modal 대화상자]" },

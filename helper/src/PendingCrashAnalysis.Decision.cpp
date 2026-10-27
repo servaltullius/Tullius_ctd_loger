@@ -57,6 +57,13 @@ bool TryEvaluateCrashRecapture(
   if (!TryLoadCrashSummaryInfo(summaryPath, &out->summaryInfo, err)) {
     return false;
   }
+  // Kept out of the crash bucket stats, as a clean exit is (ADR-0022).
+  if (out->summaryInfo.forcedClose) {
+    if (err) {
+      *err = L"the crash followed a close request (forced close); crash bucket stats and recapture policy skipped.";
+    }
+    return false;
+  }
   if (out->summaryInfo.bucketKey.empty()) {
     if (err) {
       *err = L"Crash summary has empty crash_bucket_key; recapture policy skipped.";

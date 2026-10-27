@@ -492,6 +492,59 @@ void TestExecute()
   assert(FaultInstructionReportText(info) == "execute 0x1F2E3D4C5B60, from call qword ptr [rax+0x18] -> bad_jump");
 }
 
+// The 2026-10-26 forced close: PrismaUI.dll's present hook called a hook
+// trampoline below SkyrimSE.exe whose page had been freed (MEM_FREE in the
+// dump's memory-info stream). The probe sets target_state; the decoder words
+// it. Committed data memory says so too; any other state keeps the wording.
+void TestJumpTargetState()
+{
+  FaultRecord fault{};
+  fault.access_kind = kAccessViolationExecute;
+  fault.exception_address = 0x7FF7055F0000ull;
+  fault.address = 0x7FF7055F0000ull;
+  const auto plain = ExplainFaultInstruction(fault, nullptr, 0);
+  assert(plain.verdict == "bad_jump" && plain.target_state.empty());
+
+  auto freed = plain;
+  freed.target_state = "freed";
+  freed.call_site = L"PrismaUI.dll+0x59ce2";
+  freed.call_instruction = "call qword ptr [rsp+0x20]";
+  assert(DescribeFaultInstruction(freed, L"", true) ==
+         L"The code tried to run instructions at 0x7FF7055F0000, but no memory was allocated there: it jumped into "
+         L"memory that had been freed (for example a hook stub that was removed). The call was made at "
+         L"PrismaUI.dll+0x59ce2 (call qword ptr [rsp+0x20]).");
+  assert(DescribeFaultInstruction(freed, L"", false) ==
+         L"코드가 0x7FF7055F0000 주소의 명령을 실행하려 했지만 그곳에는 할당된 메모리가 없었습니다. 해제된 메모리(예: "
+         L"제거된 후킹 코드)로 이동했다는 뜻입니다. 호출한 곳은 PrismaUI.dll+0x59ce2(call qword ptr [rsp+0x20])입니다.");
+  assert(DescribeFaultInstructionPlain(freed, true) ==
+         L"It crashed jumping into memory that had been freed (for example a hook stub that was removed).");
+  assert(DescribeFaultInstructionPlain(freed, false) == L"해제된 메모리(예: 제거된 후킹 코드)로 이동하다가 튕겼습니다.");
+  assert(FaultInstructionReportText(freed) ==
+         "execute 0x7FF7055F0000 (freed), from call qword ptr [rsp+0x20] -> bad_jump");
+
+  auto data = plain;
+  data.target_state = "not_executable";
+  assert(DescribeFaultInstruction(data, L"", true).find(L"which is memory holding data, not code (it is not "
+                                                        L"executable)") != std::wstring::npos);
+  assert(DescribeFaultInstruction(data, L"", false).find(L"실행할 수 없는 데이터 메모리입니다") != std::wstring::npos);
+  assert(DescribeFaultInstructionPlain(data, true) ==
+         L"It crashed jumping to data instead of code (a broken function pointer).");
+  assert(FaultInstructionReportText(data) == "execute 0x7FF7055F0000 (not_executable) -> bad_jump");
+
+  // Reserved or executable memory, or no memory-info stream: today's wording.
+  for (const char* state : { "", "reserved", "executable" }) {
+    auto other = plain;
+    other.target_state = state;
+    assert(DescribeFaultInstruction(other, L"", true) == DescribeFaultInstruction(plain, L"", true));
+    assert(DescribeFaultInstructionPlain(other, false) == DescribeFaultInstructionPlain(plain, false));
+  }
+  // A null_jump is never called freed: the first 64 KB is never allocated.
+  auto nullJump = plain;
+  nullJump.verdict = "null_jump";
+  nullJump.target_state = "freed";
+  assert(DescribeFaultInstruction(nullJump, L"", true).find(L"freed") == std::wstring::npos);
+}
+
 void TestFindCallTo()
 {
   constexpr std::uint64_t kRet = 0x7FF700001000ull;
@@ -574,6 +627,7 @@ int main()
   TestAddressOnly();
   TestNothingToSay();
   TestExecute();
+  TestJumpTargetState();
   TestFindCallTo();
   return 0;
 }

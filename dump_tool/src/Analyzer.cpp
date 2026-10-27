@@ -544,6 +544,13 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   // SkyrimDiag blackbox (optional)
   ParseBlackboxStream(dumpBase, dumpSize, mo2Index, modulePaths, out);
   TryConsumeCleanExitEvidence(dumpPath, out);
+  // ADR-0022: a crash right after the player asked the game to close. A
+  // validated clean exit already says more (the game exited with code 0).
+  if (!out.is_filtered_clean_exit && out.exc_code != 0u) {
+    out.forced_close = internal::DetectForcedClose(out.events);
+  }
+  // Kept out of the crash history and its statistics, as a clean exit is.
+  const bool keepOutOfHistory = out.is_filtered_clean_exit || out.forced_close.detected;
 
   // WCT stream (optional)
   void* wctPtr = nullptr;
@@ -730,18 +737,23 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
           IsCrashLoggerConfirmedCppException(out)) {
         out.signature_match.reset();
       }
+      // Its text calls the throw a real CTD, which a forced close is not.
+      if (out.signature_match && out.signature_match->id == "CPP_EXCEPTION_HANDLED" && out.forced_close.detected) {
+        out.signature_match.reset();
+      }
     }
   }
 
   LoadIncidentCaptureProfile(dumpPath, outDir, out);
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
-  if (!out.is_filtered_clean_exit) {
+  if (!keepOutOfHistory) {
     LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
   }
 
-  // Best-effort troubleshooting guide matching.
-  if (!out.is_filtered_clean_exit && !opt.data_dir.empty()) {
+  // Best-effort troubleshooting guide matching. Not for a forced close: the
+  // player has nothing to do (ADR-0022).
+  if (!keepOutOfHistory && !opt.data_dir.empty()) {
     TroubleshootingGuideDatabase tsDb;
     const auto guidesPath = std::filesystem::path(opt.data_dir) / L"troubleshooting_guides.json";
     if (!tsDb.LoadFromJson(guidesPath)) {
@@ -808,7 +820,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   // A lock-owner freeze state is known only now and is bucketed by the owner,
   // so the history read under the main thread's wait key is read again and
   // the candidates it fed are rebuilt from it.
-  if (internal::RekeyLockOwnerFreezeBucket(out) && !out.is_filtered_clean_exit) {
+  if (internal::RekeyLockOwnerFreezeBucket(out) && !keepOutOfHistory) {
     LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
     out.freeze_analysis = {};
     BuildEvidenceAndSummary(out, opt.language);
@@ -846,7 +858,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.freeze_analysis.has_analysis) {
     BuildEvidenceAndSummary(out, opt.language);
   }
-  if (!out.is_filtered_clean_exit) {
+  if (!keepOutOfHistory) {
     AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out);
   }
   if (err) err->clear();

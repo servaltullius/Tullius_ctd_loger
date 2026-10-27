@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/EventSinks.h"
 #include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
@@ -53,6 +54,7 @@ std::unordered_set<std::uint32_t> g_lastThreadIds;
 
 constexpr std::uint64_t kLifecyclePollIntervalMs = 1000;
 constexpr std::uint64_t kHeartbeatEventIntervalSec = 60;
+constexpr std::chrono::milliseconds kCloseKeySampleStep{ 25 };
 
 inline void HeartbeatTaskOnMainThread() noexcept
 {
@@ -63,6 +65,7 @@ inline void HeartbeatTaskOnMainThread() noexcept
   }
 
   RefreshInMenuFlag();
+  PollGameQuitRequest();
 
   LARGE_INTEGER li{};
   QueryPerformanceCounter(&li);
@@ -408,7 +411,22 @@ void SchedulerLoop(const std::stop_token& st)
       g_lastModuleNames.clear();
       g_lastThreadIds.clear();
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
+    // The interval in 25 ms steps, each sampling Alt+F4 (ADR-0022): a quick
+    // tap can be over before the heartbeat task sees the quit flag. With the
+    // close request log off (or before data load), the interval as set.
+    if (!CloseKeySamplingOn()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(intervalMs));
+      continue;
+    }
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(intervalMs);
+    for (;;) {
+      SampleCloseKeys();
+      const auto now = std::chrono::steady_clock::now();
+      if (now >= until || st.stop_requested()) {
+        break;
+      }
+      std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(until - now, kCloseKeySampleStep));
+    }
   }
 }
 

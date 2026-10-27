@@ -43,6 +43,8 @@ struct CrashSummaryInfo
   bool stackwalkDegraded = false;
   bool symbolRuntimeDegraded = false;
   bool firstChanceCandidateWeak = false;
+  // ADR-0022: an error while the game was being closed, not a CTD.
+  bool forcedClose = false;
 };
 
 std::filesystem::path SummaryPathForDump(const std::wstring& dumpPath, const std::filesystem::path& outBase);

@@ -139,4 +139,18 @@ void PushFirstChanceExceptionEvent(
   PushEvent(skydiag::EventType::kFirstChanceException, payload, sizeof(payload));
 }
 
+void PushCloseRequestEvent(
+  skydiag::CloseRequestKind kind,
+  std::uint32_t message,
+  std::uint64_t wParam,
+  std::uint64_t source) noexcept
+{
+  skydiag::EventPayload payload{};
+  payload.a = static_cast<std::uint64_t>(kind);
+  payload.b = message;
+  payload.c = wParam;
+  payload.d = source;
+  PushEventAlways(skydiag::EventType::kCloseRequest, payload, sizeof(payload));
+}
+
 }  // namespace skydiag::plugin

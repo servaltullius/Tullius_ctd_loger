@@ -12,6 +12,7 @@
 #include <limits>
 
 #include "SkyrimDiag/Blackbox.h"
+#include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagCrashCodes.h"
 #include "SkyrimDiagShared.h"
@@ -558,6 +559,13 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
       !TryPublishKeptExceptionForCrashLoggerSideFault(shm, ep->ContextRecord, &recordedCode, &recordedAddress) &&
       !TryPublishCrashRecord(shm, ep, code)) {
       return EXCEPTION_CONTINUE_SEARCH;
+    }
+
+    // ADR-0022: Alt+F4 still held as the crash is recorded (a crash in the
+    // frame that handles it), before the Crash event. Not on a stack
+    // overflow, where the little stack left is the handler's.
+    if (code != EXCEPTION_STACK_OVERFLOW) {
+      RecordCloseKeysAtCrash();
     }
 
     skydiag::EventPayload p{};
