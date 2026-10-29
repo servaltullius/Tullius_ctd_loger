@@ -242,12 +242,13 @@ void OnDataLoaded(const PluginConfig& cfg)
     cfg.perfHitchCooldownMs,
   });
 
-  // ADR-0022: the game window exists by now.
+  // ADR-0022: the game window exists by now. This runs on the loader thread,
+  // so the window hooks wait for the heartbeat task on the window's thread.
   if (cfg.enableCloseRequestLog) {
-    if (skydiag::plugin::InstallCloseRequestHooks()) {
-      spdlog::info("SkyrimDiag: close request log on (key sampler, quit flag, game window thread hooks)");
+    if (skydiag::plugin::StartCloseRequestLog()) {
+      spdlog::info("SkyrimDiag: close request log on (key sampler, quit flag; window hooks from the game window's thread)");
     } else {
-      spdlog::warn("SkyrimDiag: close request log off (game window not found or hook refused, err={})", GetLastError());
+      spdlog::warn("SkyrimDiag: close request log off (game window not found, err={})", GetLastError());
     }
   }
 

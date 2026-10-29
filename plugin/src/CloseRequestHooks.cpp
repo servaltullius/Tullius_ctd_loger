@@ -22,12 +22,13 @@ using skydiag::CloseRequestKind;
 using skydiag::CloseRequestSource;
 
 std::atomic_bool g_installed{ false };
-HHOOK g_getMessageHook = nullptr;
-HHOOK g_callWndProcHook = nullptr;
+// The window hooks, set once by the game window's own thread.
+std::atomic_bool g_windowHooksSet{ false };
+std::atomic_bool g_windowHooksWaitLogged{ false };
 std::atomic_bool g_firstRequestLogged{ false };
-// The game window, captured at install and kept current by the heartbeat
-// task (the window can be recreated): the key sampler and the crash handler
-// compare the foreground window with it without touching Main.
+// The game window, captured when the log starts and kept current by the
+// heartbeat task (the window can be recreated): the key sampler and the crash
+// handler compare the foreground window with it without touching Main.
 std::atomic<std::uintptr_t> g_gameWindowValue{ 0 };
 
 // Written by the key sampler (heartbeat scheduler thread), the menu sink (UI
@@ -38,10 +39,10 @@ std::atomic<std::uint64_t> g_altF4RecordedMs{ 0 };  // an alt_f4 request last re
 std::atomic<std::uint32_t> g_quitMenusOpen{ 0 };     // bit per kQuitMenus entry
 std::atomic<std::uint64_t> g_quitConfirmClosedMs{ 0 };
 
-// The quit flag (&Main::quitGame), captured at install. Read by the heartbeat
-// task, the key sampler and the crash handler, whichever sees it set first:
-// a Quit from a menu ends the main loop in the next frame, before the
-// heartbeat task (a UI task) runs again (2026-10-27 15:11 and 16:15).
+// The quit flag (&Main::quitGame), captured when the log starts. Read by the
+// heartbeat task, the key sampler and the crash handler, whichever sees it
+// set first: a Quit from a menu ends the main loop in the next frame, before
+// the heartbeat task (a UI task) runs again (2026-10-27 15:11 and 16:15).
 std::atomic<std::uintptr_t> g_quitFlagAddress{ 0 };
 std::atomic_bool g_quitFlagSeenClear{ false };
 std::atomic_bool g_quitFlagRecorded{ false };
@@ -226,10 +227,11 @@ void Observe(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, bool posted)
 
 // Posted messages as the game's loop takes them from the queue. Only on
 // PM_REMOVE: a PeekMessage(PM_NOREMOVE) shows the same message again later.
+// The hook gets PeekMessage's flags, so PM_REMOVE | PM_NOYIELD arrives as 3.
 // Looks only: the MSG is never changed, and the next hook always gets it.
 LRESULT CALLBACK GetMessageHook(int code, WPARAM wParam, LPARAM lParam) noexcept
 {
-  if (code == HC_ACTION && wParam == PM_REMOVE && lParam != 0) {
+  if (code == HC_ACTION && (wParam & PM_REMOVE) != 0u && lParam != 0) {
     const auto& msg = *reinterpret_cast<const MSG*>(lParam);
     Observe(msg.hwnd, msg.message, msg.wParam, msg.lParam, true);
   }
@@ -247,6 +249,62 @@ LRESULT CALLBACK CallWndProcHook(int code, WPARAM wParam, LPARAM lParam) noexcep
     Observe(sent.hwnd, sent.message, sent.wParam, sent.lParam, false);
   }
   return CallNextHookEx(nullptr, code, wParam, lParam);
+}
+
+// A hook belongs to the thread that sets it, and Windows removes it when
+// that thread exits. kDataLoaded runs on the game's loader thread, which
+// exits right after the main menu opens, so hooks set there were gone by the
+// time anyone closed the game: no in-game test ever saw one fire (2026-10-29,
+// the window thread had no WH_CALLWNDPROC hook in its TEB). The game window's
+// own thread sets them instead, from the heartbeat task once it runs there,
+// and they live as long as that thread. Thread hooks in this process: no DLL
+// is injected anywhere, and the module is pinned
+// (PinThisModuleForWorkerLifetime), so the hook procedures stay valid. They
+// are never removed. Tried once; a refusal is logged, not retried.
+void SetWindowHooksOnWindowThread(HWND window) noexcept
+{
+  if (g_windowHooksSet.load(std::memory_order_relaxed)) {
+    return;
+  }
+  DWORD pid = 0;
+  const DWORD windowThread = GetWindowThreadProcessId(window, &pid);
+  if (windowThread == 0u || pid != GetCurrentProcessId()) {
+    return;
+  }
+  const DWORD thisThread = GetCurrentThreadId();
+  if (thisThread != windowThread) {
+    // While loading, the heartbeat task runs on the loader thread.
+    if (!g_windowHooksWaitLogged.exchange(true)) {
+      try {
+        spdlog::info(
+          "SkyrimDiag: window hooks wait for the game window's thread {} (heartbeat task on thread {})",
+          windowThread,
+          thisThread);
+      } catch (...) {
+        OutputDebugStringW(L"SkyrimDiag: could not log the window hooks wait.\n");
+      }
+    }
+    return;
+  }
+  g_windowHooksSet.store(true);
+  const HHOOK getMessageHook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageHook, nullptr, thisThread);
+  const DWORD getMessageError = getMessageHook ? 0u : GetLastError();
+  const HHOOK callWndProcHook = SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, thisThread);
+  const DWORD callWndProcError = callWndProcHook ? 0u : GetLastError();
+  try {
+    if (getMessageHook && callWndProcHook) {
+      spdlog::info("SkyrimDiag: window hooks on (game window thread {})", thisThread);
+    } else {
+      // The key sampler and the quit flag work without them.
+      spdlog::warn(
+        "SkyrimDiag: window hooks refused (game window thread {}: WH_GETMESSAGE err={}, WH_CALLWNDPROC err={})",
+        thisThread,
+        getMessageError,
+        callWndProcError);
+    }
+  } catch (...) {
+    OutputDebugStringW(L"SkyrimDiag: could not log the window hooks result.\n");
+  }
 }
 
 // The quit flag's change, recorded from the heartbeat task or the key sampler
@@ -298,7 +356,7 @@ void RecordQuitFlagChange() noexcept
 
 }  // namespace
 
-bool InstallCloseRequestHooks() noexcept
+bool StartCloseRequestLog() noexcept
 {
   if (g_installed.load()) {
     return true;
@@ -309,19 +367,9 @@ bool InstallCloseRequestHooks() noexcept
   if (threadId == 0u || pid != GetCurrentProcessId()) {
     return false;
   }
-  // Thread hooks in this process: no DLL is injected anywhere, and the
-  // module is pinned (PinThisModuleForWorkerLifetime), so the hook procedures
-  // stay valid for the process lifetime. They are never removed. Skyrim
-  // reads the keyboard through DirectInput, so they do not see Alt+F4 (the
-  // key sampler and the quit flag do); they see the X button and close
-  // requests from other programs.
-  if (!g_getMessageHook) {
-    g_getMessageHook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageHook, nullptr, threadId);
-  }
-  if (!g_callWndProcHook) {
-    g_callWndProcHook = SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, threadId);
-  }
-  // The key sampler and the quit flag work without the hooks.
+  // No window hooks here: this is the loader thread, and they would go with
+  // it (SetWindowHooksOnWindowThread). The key sampler and the quit flag
+  // start now and work without them.
   g_gameWindowValue.store(reinterpret_cast<std::uintptr_t>(window));
   if (auto* main = RE::Main::GetSingleton()) {
     g_quitFlagAddress.store(reinterpret_cast<std::uintptr_t>(&main->GetRuntimeData().quitGame));
@@ -429,6 +477,7 @@ void PollGameQuitRequest() noexcept
   // key sampler and the crash handler would compare with the old one.
   if (const auto window = reinterpret_cast<std::uintptr_t>(main->wnd); window != 0u) {
     g_gameWindowValue.store(window, std::memory_order_relaxed);
+    SetWindowHooksOnWindowThread(reinterpret_cast<HWND>(window));
   }
   RecordQuitFlagChange();
 }
