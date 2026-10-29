@@ -258,6 +258,47 @@ int main()
     "SetWindowsHookExW(WH_CALLWNDPROC",
     "Window hooks must be set only by the game window's own thread.");
   AssertContains(
+    ExtractFunctionBody(setWindowHooksBody, "if (thisThread != windowThread)"),
+    "return;",
+    "Another thread must wait, not fall through to setting the hooks.");
+  for (const char* hook : {
+         "SetWindowsHookExW(WH_GETMESSAGE, GetMessageHook, nullptr, thisThread)",
+         "SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, thisThread)",
+       }) {
+    AssertContains(setWindowHooksBody, hook, "The game window's thread must hook itself.");
+  }
+  AssertContains(
+    setWindowHooksBody,
+    "windowThread == g_hookedThread.load(",
+    "Window hooks must follow the game window to a new thread, once per thread.");
+  // Inside the hooks: the window the heartbeat last saw, not Main (gone at
+  // shutdown while the window still gets messages), only the hooked thread,
+  // and closes only for the game window itself.
+  const std::string observeBody = ExtractFunctionBody(closeRequestHooks, "void Observe(HWND hwnd,");
+  const std::string isGameWindowOrChildBody =
+    ExtractFunctionBody(closeRequestHooks, "bool IsGameWindowOrChild(HWND hwnd) noexcept");
+  const std::string knownGameWindowBody = ExtractFunctionBody(closeRequestHooks, "HWND KnownGameWindow() noexcept");
+  const auto count = [](const std::string& text, const char* needle) {
+    std::size_t n = 0;
+    for (auto pos = text.find(needle); pos != std::string::npos; pos = text.find(needle, pos + 1)) {
+      ++n;
+    }
+    return n;
+  };
+  for (const std::string* body : { &observeBody, &isGameWindowOrChildBody, &knownGameWindowBody }) {
+    assert(body->find("RE::Main") == std::string::npos && "Window hooks must not read Main.");
+    // GameWindow() reads Main; KnownGameWindow() does not.
+    assert(count(*body, "GameWindow(") == count(*body, "KnownGameWindow(") && "Window hooks must not read Main.");
+  }
+  AssertContains(
+    observeBody,
+    "GetCurrentThreadId() != g_hookedThread.load(",
+    "Window hooks must ignore threads whose hooks are no longer current.");
+  AssertContains(
+    observeBody,
+    "hwnd != KnownGameWindow()",
+    "A close must be for the game window itself, not a child window.");
+  AssertContains(
     ExtractFunctionBody(closeRequestHooks, "void PollGameQuitRequest() noexcept"),
     "SetWindowHooksOnWindowThread(",
     "The heartbeat task must set the window hooks once it runs on the game window's thread.");

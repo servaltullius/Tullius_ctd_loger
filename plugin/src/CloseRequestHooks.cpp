@@ -22,9 +22,10 @@ using skydiag::CloseRequestKind;
 using skydiag::CloseRequestSource;
 
 std::atomic_bool g_installed{ false };
-// The window hooks, set once by the game window's own thread.
-std::atomic_bool g_windowHooksSet{ false };
-std::atomic_bool g_windowHooksWaitLogged{ false };
+// The game window thread that set the window hooks (tried there once), and
+// the one a wait was last logged for.
+std::atomic<DWORD> g_hookedThread{ 0 };
+std::atomic<DWORD> g_hooksWaitLoggedFor{ 0 };
 std::atomic_bool g_firstRequestLogged{ false };
 // The game window, captured when the log starts and kept current by the
 // heartbeat task (the window can be recreated): the key sampler and the crash
@@ -62,7 +63,8 @@ constexpr std::string_view kQuitMenus[] = {
 // read as Quit.
 constexpr std::uint32_t kQuitConfirmMenu = 0;
 
-// Only the game window's thread runs the hooks, so it alone touches this.
+// Only the hooked game window thread gets past Observe's thread check, so it
+// alone touches this.
 skydiag::CloseRequestTracker g_tracker{};
 // Only the heartbeat scheduler thread touches this.
 skydiag::AltF4KeySampler g_keySampler{};
@@ -128,10 +130,26 @@ HWND GameWindow() noexcept
   return main ? reinterpret_cast<HWND>(main->wnd) : nullptr;
 }
 
+// The thread of a window of this process, or 0.
+DWORD WindowThreadInThisProcess(HWND window) noexcept
+{
+  DWORD pid = 0;
+  const DWORD thread = window ? GetWindowThreadProcessId(window, &pid) : 0u;
+  return thread != 0u && pid == GetCurrentProcessId() ? thread : 0u;
+}
+
+// The game window as the heartbeat task last saw it. The hooks compare with
+// this instead of reading Main: at shutdown Main can be gone while the window
+// still gets messages, and a fault there would be recorded as our own crash.
+HWND KnownGameWindow() noexcept
+{
+  return reinterpret_cast<HWND>(g_gameWindowValue.load(std::memory_order_relaxed));
+}
+
 // The game window or a child of it (a posted key goes to the focus window).
 bool IsGameWindowOrChild(HWND hwnd) noexcept
 {
-  const HWND game = GameWindow();
+  const HWND game = KnownGameWindow();
   return hwnd && game && (hwnd == game || GetAncestor(hwnd, GA_ROOT) == game);
 }
 
@@ -185,10 +203,21 @@ void Observe(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, bool posted)
   if (message == WM_SYSCOMMAND && (wParam & 0xFFF0u) != SC_CLOSE) {
     return;
   }
-  // WM_QUIT belongs to the thread (no window); the hooks run only on the
-  // game window's thread, so it is the game's message loop ending. The rest
-  // must be for the game window, not a dialog or another plugin's window.
-  if (message != WM_QUIT && !IsGameWindowOrChild(hwnd)) {
+  // Only on the thread whose hooks are current: a window thread the game
+  // left keeps our hooks, and the tracker belongs to one thread.
+  if (GetCurrentThreadId() != g_hookedThread.load(std::memory_order_relaxed)) {
+    return;
+  }
+  // WM_QUIT belongs to the thread (no window), so it is the game's message
+  // loop ending. A posted key goes to the focus window, which may be a child
+  // of the game window. A close must be for the game window itself: another
+  // plugin closing its own child window, or a dialog, is not the player
+  // closing the game (DefWindowProc sends Alt+F4's SC_CLOSE to the root).
+  if (message == WM_SYSKEYDOWN) {
+    if (!IsGameWindowOrChild(hwnd)) {
+      return;
+    }
+  } else if (message != WM_QUIT && (hwnd == nullptr || hwnd != KnownGameWindow())) {
     return;
   }
   // The input state of the message being handled.
@@ -260,21 +289,19 @@ LRESULT CALLBACK CallWndProcHook(int code, WPARAM wParam, LPARAM lParam) noexcep
 // and they live as long as that thread. Thread hooks in this process: no DLL
 // is injected anywhere, and the module is pinned
 // (PinThisModuleForWorkerLifetime), so the hook procedures stay valid. They
-// are never removed. Tried once; a refusal is logged, not retried.
+// are never removed. Tried once per window thread; a refusal is logged, not
+// retried. A window recreated on another thread gets them on that thread
+// (the old thread's stay, and Observe ignores them).
 void SetWindowHooksOnWindowThread(HWND window) noexcept
 {
-  if (g_windowHooksSet.load(std::memory_order_relaxed)) {
-    return;
-  }
-  DWORD pid = 0;
-  const DWORD windowThread = GetWindowThreadProcessId(window, &pid);
-  if (windowThread == 0u || pid != GetCurrentProcessId()) {
+  const DWORD windowThread = WindowThreadInThisProcess(window);
+  if (windowThread == 0u || windowThread == g_hookedThread.load(std::memory_order_relaxed)) {
     return;
   }
   const DWORD thisThread = GetCurrentThreadId();
   if (thisThread != windowThread) {
     // While loading, the heartbeat task runs on the loader thread.
-    if (!g_windowHooksWaitLogged.exchange(true)) {
+    if (g_hooksWaitLoggedFor.exchange(windowThread) != windowThread) {
       try {
         spdlog::info(
           "SkyrimDiag: window hooks wait for the game window's thread {} (heartbeat task on thread {})",
@@ -286,7 +313,7 @@ void SetWindowHooksOnWindowThread(HWND window) noexcept
     }
     return;
   }
-  g_windowHooksSet.store(true);
+  g_hookedThread.store(thisThread);
   const HHOOK getMessageHook = SetWindowsHookExW(WH_GETMESSAGE, GetMessageHook, nullptr, thisThread);
   const DWORD getMessageError = getMessageHook ? 0u : GetLastError();
   const HHOOK callWndProcHook = SetWindowsHookExW(WH_CALLWNDPROC, CallWndProcHook, nullptr, thisThread);
@@ -361,10 +388,11 @@ bool StartCloseRequestLog() noexcept
   if (g_installed.load()) {
     return true;
   }
+  // The caller logs the error: 0 when Main had no window of this process,
+  // not one left over from an unrelated call.
+  SetLastError(ERROR_SUCCESS);
   const HWND window = GameWindow();
-  DWORD pid = 0;
-  const DWORD threadId = window ? GetWindowThreadProcessId(window, &pid) : 0u;
-  if (threadId == 0u || pid != GetCurrentProcessId()) {
+  if (WindowThreadInThisProcess(window) == 0u) {
     return false;
   }
   // No window hooks here: this is the loader thread, and they would go with

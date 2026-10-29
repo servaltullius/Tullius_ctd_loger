@@ -16,10 +16,12 @@ bool StartCloseRequestLog() noexcept;
 // sees it first, its kind from QuitFlagCloseRequestKind (Alt+F4 held, a quit
 // menu, or a forced quit). The flag is read through ReadProcessMemory, so a
 // Main already gone at shutdown cannot fault. The first time the task runs on
-// the game window's thread, also sets the two hooks there (a hook goes away
-// with the thread that set it): WH_GETMESSAGE sees the posted Alt+F4
-// key-down, SC_CLOSE, WM_CLOSE and WM_QUIT; WH_CALLWNDPROC the sent SC_CLOSE
-// and WM_CLOSE (the X button, DefWindowProc's WM_CLOSE). They only look and
+// the game window's thread (again if the window moves to another thread),
+// also sets the two hooks there (a hook goes away with the thread that set
+// it): WH_GETMESSAGE sees the posted Alt+F4 key-down, SC_CLOSE, WM_CLOSE and
+// WM_QUIT; WH_CALLWNDPROC the sent SC_CLOSE and WM_CLOSE (the X button,
+// DefWindowProc's WM_CLOSE), the closes only for the game window itself and
+// compared with the window this task last saw, not Main. They only look and
 // always pass the message on (CallNextHookEx), so they change no message
 // handling and do not touch the window procedure other plugins subclass.
 // Does nothing until StartCloseRequestLog ran.
