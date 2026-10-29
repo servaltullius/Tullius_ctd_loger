@@ -5,31 +5,35 @@
 namespace skydiag::plugin {
 
 // ADR-0022: records EventType::kCloseRequest when the player asks the game to
-// close. Two hooks on the game window's thread: WH_GETMESSAGE sees the posted
-// Alt+F4 key-down, SC_CLOSE, WM_CLOSE and WM_QUIT; WH_CALLWNDPROC the sent
-// SC_CLOSE and WM_CLOSE (the X button, DefWindowProc's WM_CLOSE). They only
-// look and always pass the message on (CallNextHookEx), so they change no
-// message handling and do not touch the window procedure other plugins
-// subclass. Call once the game window exists (kDataLoaded); false when it
-// could not be found or both hooks were refused.
-bool InstallCloseRequestHooks() noexcept;
+// close. Starts the key sampler and the quit flag reads; call once the game
+// window exists (kDataLoaded); false when it could not be found. The two
+// hooks on the game window's thread follow from PollGameQuitRequest.
+bool StartCloseRequestLog() noexcept;
 
 // From the heartbeat task: refreshes the game window and looks at the game's
 // own quit flag (Main::quitGame). The flag's change from clear to set is
 // recorded once, by whichever of this, the key sampler and the crash handler
 // sees it first, its kind from QuitFlagCloseRequestKind (Alt+F4 held, a quit
 // menu, or a forced quit). The flag is read through ReadProcessMemory, so a
-// Main already gone at shutdown cannot fault. Does nothing until
-// InstallCloseRequestHooks ran.
+// Main already gone at shutdown cannot fault. The first time the task runs on
+// the game window's thread (again if the window moves to another thread),
+// also sets the two hooks there (a hook goes away with the thread that set
+// it): WH_GETMESSAGE sees the posted Alt+F4 key-down, SC_CLOSE, WM_CLOSE and
+// WM_QUIT; WH_CALLWNDPROC the sent SC_CLOSE and WM_CLOSE (the X button,
+// DefWindowProc's WM_CLOSE), the closes only for the game window itself and
+// compared with the window this task last saw, not Main. They only look and
+// always pass the message on (CallNextHookEx), so they change no message
+// handling and do not touch the window procedure other plugins subclass.
+// Does nothing until StartCloseRequestLog ran.
 void PollGameQuitRequest() noexcept;
 
-// True once InstallCloseRequestHooks ran: the heartbeat scheduler then wakes
+// True once StartCloseRequestLog ran: the heartbeat scheduler then wakes
 // every 25 ms to call SampleCloseKeys, and otherwise sleeps its interval.
 bool CloseKeySamplingOn() noexcept;
 
 // The key sampler, every 25 ms on the heartbeat scheduler thread: records an
 // alt_f4 close request when Alt and F4 become held together while the game
-// window (captured at install, refreshed by PollGameQuitRequest) is the
+// window (captured at start, refreshed by PollGameQuitRequest) is the
 // foreground window. GetAsyncKeyState
 // is the system's key state, which DirectInput does not hide. Two key-state
 // reads per call, the foreground window only while both are held. Also looks
