@@ -46,9 +46,9 @@ struct CodeImage
 };
 
 // The code kept for one value that points into an executable section of
-// `image`: the .pdata function holding it, when at most
-// kMaxStackCodeFunctionBytes long, and a window around it (both inside the
-// image). A return address belongs to the call before it, so it is looked up
+// `image`, both inside the image: a window around it, then the .pdata
+// function holding it when there is one at most kMaxStackCodeFunctionBytes
+// long. A return address belongs to the call before it, so it is looked up
 // one byte back first; a RIP is looked up as is. False, and nothing added,
 // when the value is not in an executable section of the image. Exposed for
 // tests.

@@ -164,7 +164,7 @@ Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 |------|--------|------|
 | `EnableCompatibilityPreflight` | `1` | 시작 시 `SkyrimDiag_Preflight.json` 생성(호환성 사전 점검). |
 | `EnableWerDumpFallbackHint` | `1` | 덤프 실패 시 `SkyrimDiag_WER_LocalDumps_Hint.txt` 생성. |
-| `DumpAllModuleCode` | `0` | `DumpMode=1` 덤프는 게임 EXE의 코드는 전부, 다른 모듈은 스레드 스택이 가리키는 코드만 담습니다(큰 모드팩에서 덤프 하나에 약 50~100MB). `1`이면 v0.2.71까지처럼 모든 모듈의 코드와, 크래시 덤프에는 모든 모듈의 헤더·리소스까지 담습니다(0.5~0.9GB). 덤프만 보는 역공학 도구용입니다. |
+| `DumpAllModuleCode` | `0` | `DumpMode=1` 덤프는 게임 EXE의 코드는 전부, 다른 모듈은 스레드 스택이 가리키는 코드만 담습니다(큰 모드팩에서 덤프 하나에 약 50~100MB로 추정). `1`이면 v0.2.71까지처럼 모든 모듈의 코드와, 크래시 덤프에는 모든 모듈의 헤더·리소스까지 담습니다(0.5~0.9GB). 덤프만 보는 역공학 도구용입니다. |
 
 ## 덤프 보관 / 디스크 정리
 

@@ -320,6 +320,86 @@ void TestDumpKeepsGameCodeAndStackCode()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0023: the collector on its own, with no game image, so the main image
+// is an ordinary module (not under the Windows folder). A return address into
+// its code brings its header and .pdata along, a RIP in its data still keeps
+// the bytes around it, and the scan goes past the stack's guard page, which
+// keeps its guard.
+void TestStackCodeCollector()
+{
+  using skydiag::helper::internal::ExtraDumpMemory;
+  using skydiag::helper::internal::StackCodeMemoryCollector;
+  const HANDLE process = OpenSelfProcessHandle();
+  const auto* image = reinterpret_cast<const BYTE*>(GetModuleHandleW(nullptr));
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+    image + reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
+  const auto imageBase = reinterpret_cast<std::uint64_t>(image);
+  const auto& pdata = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+  Require(pdata.Size != 0, "The test executable must have .pdata");
+  wchar_t path[MAX_PATH]{};
+  Require(GetModuleFileNameW(nullptr, path, MAX_PATH) != 0, "GetModuleFileNameW failed");
+  const auto text = SectionRange(nullptr, ".text");
+  const auto rdata = SectionRange(nullptr, ".rdata");
+
+  // A stack of three pages with a guard page in the middle, and a return
+  // address into the main image's code above it.
+  SYSTEM_INFO system{};
+  GetSystemInfo(&system);
+  const std::size_t page = system.dwPageSize;
+  auto* stack = static_cast<BYTE*>(VirtualAlloc(nullptr, 3 * page, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+  Require(stack != nullptr, "VirtualAlloc failed");
+  const std::uint64_t returnAddress = text.first + 0x40;
+  std::memcpy(stack + 2 * page, &returnAddress, sizeof(returnAddress));
+  DWORD oldProtect = 0;
+  Require(VirtualProtect(stack + page, page, PAGE_READWRITE | PAGE_GUARD, &oldProtect) != FALSE, "VirtualProtect failed");
+
+  StackCodeMemoryCollector collector(process, /*gameImageBase=*/0, {}, /*exceptionRip=*/0);
+  collector.OnModule(imageBase, nt->OptionalHeader.SizeOfImage, path);
+  CONTEXT context{};
+  context.Rip = rdata.first + 0x10;  // in data, not code
+  context.Rsp = 0;                    // outside the stack: scanned from its low end
+  const auto stackLow = reinterpret_cast<std::uint64_t>(stack);
+  collector.OnThread(1, context, stackLow + 3 * page, stackLow);
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> ranges;
+  for (const ExtraDumpMemory& range : collector.Collect()) {
+    ranges.emplace_back(range.base, range.base + range.size);
+  }
+  const auto& stats = collector.Stats();
+
+  MEMORY_BASIC_INFORMATION guard{};
+  Require(VirtualQuery(stack + page, &guard, sizeof(guard)) == sizeof(guard), "VirtualQuery failed");
+  const bool guardKept = (guard.Protect & PAGE_GUARD) != 0;
+  VirtualFree(stack, 0, MEM_RELEASE);
+  CloseHandle(process);
+
+  Require(guardKept, "The stack's guard page must keep its guard");
+  Require(stats.values == 1u && stats.modules == 1u, "The return address and its module");
+  Require(CoveredBytes(ranges, returnAddress - 0x100u, returnAddress + 0x40u) == 0x140u,
+    "The bytes around the return address");
+  Require(CoveredBytes(ranges, imageBase, imageBase + 0x200u) == 0x200u, "The module's header");
+  Require(CoveredBytes(ranges, imageBase + pdata.VirtualAddress, imageBase + pdata.VirtualAddress + pdata.Size) ==
+      pdata.Size,
+    "The module's .pdata");
+  Require(CoveredBytes(ranges, context.Rip - 0x100u, context.Rip + 0x100u) == 0x200u,
+    "The bytes around a RIP outside module code");
+
+  // Out of time before the first thread: the crash RIP's module still gets
+  // its unwind data, which is taken right after the RIP, not after every stack.
+  const HANDLE again = OpenSelfProcessHandle();
+  StackCodeMemoryCollector late(again, /*gameImageBase=*/0, {}, /*exceptionRip=*/returnAddress, std::chrono::milliseconds{ 0 });
+  late.OnModule(imageBase, nt->OptionalHeader.SizeOfImage, path);
+  late.OnThread(1, context, 0, 0);
+  ranges.clear();
+  for (const ExtraDumpMemory& range : late.Collect()) {
+    ranges.emplace_back(range.base, range.base + range.size);
+  }
+  CloseHandle(again);
+  Require(late.Stats().budget_reached && late.Stats().threads == 0u, "No thread is examined after the deadline");
+  Require(late.Stats().modules == 1u &&
+      CoveredBytes(ranges, imageBase + pdata.VirtualAddress, imageBase + pdata.VirtualAddress + pdata.Size) == pdata.Size,
+    "The crash RIP's module keeps its .pdata past the deadline");
+}
+
 }  // namespace
 
 // ADR-0023: the code kept around one value: the window, and the .pdata
@@ -401,6 +481,7 @@ int main()
   try {
     TestUnwindInfoRanges();
     TestStackCodeRanges();
+    TestStackCodeCollector();
     TestDumpKeepsGameCodeAndStackCode();
     TestCrashDumpSurvivesUnmappedRegisterTargets();
     TestTracedDumpWritesAreComplete();

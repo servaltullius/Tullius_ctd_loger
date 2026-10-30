@@ -129,7 +129,7 @@ Helper diagnostics options (`SkyrimDiagHelper.ini`):
 |--------|---------|------|
 | `EnableCompatibilityPreflight` | `1` | Writes startup compatibility checks to `SkyrimDiag_Preflight.json`. |
 | `EnableWerDumpFallbackHint` | `1` | Writes WER LocalDumps setup hint when dump capture fails. |
-| `DumpAllModuleCode` | `0` | With `DumpMode=1` a dump holds the game executable's code whole and, of other modules, the code the threads' stacks point at (about 50–100 MB a dump on a large load order). `1` writes every module's code and, in crash dumps, every module's headers and resources, as up to v0.2.71 (0.5–0.9 GB), for reverse-engineering tools that read only the dump. |
+| `DumpAllModuleCode` | `0` | With `DumpMode=1` a dump holds the game executable's code whole and, of other modules, the code the threads' stacks point at (an estimated 50–100 MB a dump on a large load order). `1` writes every module's code and, in crash dumps, every module's headers and resources, as up to v0.2.71 (0.5–0.9 GB), for reverse-engineering tools that read only the dump. |
 
 ## Retention / Disk Cleanup
 

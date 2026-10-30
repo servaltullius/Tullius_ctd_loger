@@ -16,7 +16,6 @@ namespace {
 constexpr std::uint16_t kMaxSections = 96;
 constexpr std::size_t kMaxPdataBytes = std::size_t{ 16 } * 1024u * 1024u;
 constexpr std::size_t kStackReadChunk = 0x10000;
-constexpr std::uint64_t kPageBytes = 0x1000;
 
 bool ReadExact(HANDLE process, std::uint64_t address, void* destination, std::size_t size)
 {
@@ -42,7 +41,7 @@ std::uint64_t TotalBytes(const std::vector<ExtraDumpMemory>& ranges)
 
 // Committed and readable, never a guard page. Unlike IsReadableRegion, an
 // executable page outside a module image counts: a RIP there is in a hook
-// trampoline (ADR-0016).
+// trampoline (ADR-0016). Used for the stacks too.
 bool ReadableCodeRegion(const MEMORY_BASIC_INFORMATION& info)
 {
   if (info.State != MEM_COMMIT || (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) {
@@ -125,7 +124,9 @@ bool ReadCodeImage(HANDLE process, std::uint64_t base, std::uint32_t size, CodeI
 }
 
 // Calls onValue with each 8-byte value from RSP to the top of the stack (at
-// most kMaxStackScanBytes). A page that cannot be read skips only itself.
+// most kMaxStackScanBytes). Like the other collectors it reads only
+// committed, readable regions, never a guard page; an unreadable region is
+// skipped whole and the scan goes on above it.
 template <typename OnValue>
 void ScanStack(
   HANDLE process,
@@ -133,6 +134,7 @@ void ScanStack(
   std::uint64_t low,
   std::uint64_t high,
   std::chrono::steady_clock::time_point deadline,
+  std::vector<std::uint8_t>& buffer,
   OnValue&& onValue)
 {
   if (high <= low) {
@@ -141,15 +143,25 @@ void ScanStack(
   std::uint64_t at = (rsp >= low && rsp < high) ? rsp : low;
   at = (at + 7u) & ~std::uint64_t{ 7 };
   const std::uint64_t end = std::min<std::uint64_t>(high, at + kMaxStackScanBytes);
-  std::vector<std::uint8_t> buffer(kStackReadChunk);
+  buffer.resize(kStackReadChunk);
   while (at < end && std::chrono::steady_clock::now() < deadline) {
-    std::size_t chunk = static_cast<std::size_t>(std::min<std::uint64_t>(kStackReadChunk, end - at));
+    MEMORY_BASIC_INFORMATION info{};
+    if (VirtualQueryEx(process, reinterpret_cast<LPCVOID>(at), &info, sizeof(info)) != sizeof(info) ||
+        info.RegionSize == 0) {
+      return;
+    }
+    const auto regionEnd = reinterpret_cast<std::uint64_t>(info.BaseAddress) + info.RegionSize;
+    if (regionEnd <= at) {
+      return;
+    }
+    if (!ReadableCodeRegion(info)) {
+      at = regionEnd;
+      continue;
+    }
+    const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>({ kStackReadChunk, end - at, regionEnd - at }));
     if (!ReadExact(process, at, buffer.data(), chunk)) {
-      chunk = static_cast<std::size_t>(std::min<std::uint64_t>(kPageBytes - (at % kPageBytes), end - at));
-      if (!ReadExact(process, at, buffer.data(), chunk)) {
-        at += chunk;
-        continue;
-      }
+      at += chunk;
+      continue;
     }
     for (std::size_t offset = 0; offset + sizeof(std::uint64_t) <= chunk; offset += sizeof(std::uint64_t)) {
       std::uint64_t value = 0;
@@ -266,8 +278,8 @@ const std::vector<ExtraDumpMemory>& StackCodeMemoryCollector::Collect()
   };
 
   // Headers, exports and unwind data: the game's first, then each module's
-  // in the order the threads below first point into it. The Windows modules
-  // come with ADR-0011's collection already.
+  // as the threads below first point into it. The Windows modules come with
+  // ADR-0011's collection already.
   const std::wstring windowsPrefix = WindowsDirectoryPrefix();
   std::vector<ExtraDumpMemory> moduleData;
   std::uint64_t moduleBytes = 0;
@@ -303,6 +315,7 @@ const std::vector<ExtraDumpMemory>& StackCodeMemoryCollector::Collect()
   std::vector<std::uint8_t> isPointedInto(modules_.size(), 0);
   std::unordered_set<std::uint64_t> seenRips;
   std::unordered_set<std::uint64_t> seenValues;
+  std::unordered_set<std::uint64_t> keptFunctions;
   std::vector<ExtraDumpMemory> code;
   std::uint64_t codeBytes = 0;
   std::vector<ExtraDumpMemory> pieces;
@@ -322,9 +335,14 @@ const std::vector<ExtraDumpMemory>& StackCodeMemoryCollector::Collect()
     }
     pieces.clear();
     const std::size_t index = moduleAt(value);
-    if (index == kNone) {
+    if (index != kNone && imageState[index] == 0) {
+      imageState[index] = ReadCodeImage(process_, modules_[index].base, modules_[index].size, images[index]) ? 1 : 2;
+    }
+    if (index == kNone || imageState[index] != 1 || !StackCodeRanges(images[index], value, isRip, pieces)) {
       if (isRip) {
-        // Outside every module: kept if readable (a hook trampoline).
+        // Not in module code (a hook trampoline, data run by mistake, an
+        // image whose header cannot be read): kept where readable.
+        pieces.clear();
         const std::uint64_t begin = value - std::min<std::uint64_t>(value, kRipWindowBytes);
         const std::uint64_t end =
           value > std::numeric_limits<std::uint64_t>::max() - kRipWindowBytes ? value : value + kRipWindowBytes;
@@ -333,20 +351,19 @@ const std::vector<ExtraDumpMemory>& StackCodeMemoryCollector::Collect()
       }
       return;
     }
-    if (imageState[index] == 0) {
-      imageState[index] = ReadCodeImage(process_, modules_[index].base, modules_[index].size, images[index]) ? 1 : 2;
-    }
-    if (imageState[index] != 1 || !StackCodeRanges(images[index], value, isRip, pieces)) {
-      return;
-    }
     ++stats_.values;
     if (isPointedInto[index] == 0) {
       isPointedInto[index] = 1;
       pointedInto.push_back(index);
     }
-    if (index != game) {
-      keep();  // the game's code is written whole
+    if (index == game) {
+      return;  // the game's code is written whole
     }
+    // Many values share a function: keep (and count) it once.
+    if (pieces.size() > 1u && !keptFunctions.insert(pieces[1].base).second) {
+      pieces.pop_back();
+    }
+    keep();
   };
 
   std::vector<const Thread*> order;
@@ -363,9 +380,21 @@ const std::vector<ExtraDumpMemory>& StackCodeMemoryCollector::Collect()
     }
   }
 
+  // The module data of each thread's modules goes in right after its scan,
+  // so a deadline drops the threads that matter least, not every module.
+  std::size_t modulesDone = 0;
+  const auto addNewModuleData = [&]() {
+    for (; modulesDone < pointedInto.size(); ++modulesDone) {
+      if (pointedInto[modulesDone] != game) {
+        addModuleData(pointedInto[modulesDone]);
+      }
+    }
+  };
   if (exceptionRip_ != 0) {
     examine(exceptionRip_, true);
+    addNewModuleData();
   }
+  std::vector<std::uint8_t> stackBuffer;
   for (const Thread* thread : order) {
     if (std::chrono::steady_clock::now() >= deadline) {
       stats_.budget_reached = true;
@@ -373,18 +402,9 @@ const std::vector<ExtraDumpMemory>& StackCodeMemoryCollector::Collect()
     }
     ++stats_.threads;
     examine(thread->rip, true);
-    ScanStack(process_, thread->rsp, thread->stackLow, thread->stackHigh, deadline,
+    ScanStack(process_, thread->rsp, thread->stackLow, thread->stackHigh, deadline, stackBuffer,
       [&](std::uint64_t value) { examine(value, false); });
-  }
-  for (const std::size_t index : pointedInto) {
-    if (index == game) {
-      continue;
-    }
-    if (std::chrono::steady_clock::now() >= deadline) {
-      stats_.budget_reached = true;
-      break;
-    }
-    addModuleData(index);
+    addNewModuleData();
   }
 
   code = MergeExtraDumpMemory(std::move(code));
