@@ -64,7 +64,7 @@ SKSE/Plugins/SkyrimDiagWinUI/
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
 [b]Important v0.2.72 Update Notice[/b]
-Replace the previous installation with the complete v0.2.72 zip. Do not copy only individual EXEs or DLLs: v0.2.72 changes the Helper, the analyzer and the viewer (the SharedLayout protocol is still v4). [b]On the first launch after updating, if the dump folder holds more than 5 GB, the oldest dumps are deleted with their reports[/b] (the new [font=Courier New]MaxTotalDumpGB=5[/font]). Move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+Replace the previous installation with the complete v0.2.72 zip. Do not copy only individual EXEs or DLLs. The previous release on Nexus was v0.2.69; v0.2.70 and v0.2.71 were released on GitHub only, and their changes are listed below after v0.2.72's. Since v0.2.69 the SKSE plugin, the Helper, the analyzer and the viewer have all changed (the SharedLayout protocol is still v4). The new settings ([font=Courier New]EnableCloseRequestLog[/font] in SkyrimDiag.ini, [font=Courier New]DumpAllModuleCode[/font] and [font=Courier New]MaxTotalDumpGB[/font] in SkyrimDiagHelper.ini) use their defaults when an older ini lacks them. [b]On the first launch after updating, if the dump folder holds more than 5 GB, the oldest dumps are deleted with their reports[/b] (the new [font=Courier New]MaxTotalDumpGB=5[/font]). Move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -130,13 +130,13 @@ Dumps about a tenth of their size, a size cap for the dump folder, and fixes fro
 [*]The viewer re-analyzes dumps analyzed by v0.2.71 once when you open them. On 31 kept dumps the result did not change
 [/list]
 
-[b][size=4]Earlier: v0.2.71[/size][/b]
+[b][size=4]Also new since v0.2.69: v0.2.71[/size][/b]
 The window's X button and the taskbar's Close window are now recorded as a window close.[list]
 [*][b]Window close fixed:[/b] v0.2.70 set its window hooks from the game's loading thread. Windows removes a thread's hooks when that thread ends, and it ends right after the main menu opens, so the v0.2.70 hooks never worked in the game. The SKSE plugin now sets them on the game window's own thread. v0.2.70 still reported these errors as a forced close (the game's quit flag caught them), but as Quit or another forced close; now they say window close ([font=Courier New]window_close[/font])
 [*]The viewer re-analyzes dumps analyzed by v0.2.70 once when you open them. The analyzer did not change, so the result is the same
 [/list]
 
-[b][size=4]Earlier: v0.2.70[/size][/b]
+[b][size=4]Also new since v0.2.69: v0.2.70[/size][/b]
 More known crashes, plain words for how a crash happened, engine lock deadlocks, and Alt+F4 errors no longer reported as CTDs.[list]
 [*][b]More known 1.6.1170 crashes with a fix:[/b] the keyboard input crash ([url=https://www.nexusmods.com/skyrimspecialedition/mods/187246]Keyboard Offset Crash Fix SE-AE[/url]), five Havok physics crash spots ([url=https://www.nexusmods.com/skyrimspecialedition/mods/194392]Havok Solver Crash Fix - SKSE[/url]), the water collision crash ([url=https://www.nexusmods.com/skyrimspecialedition/mods/190886]Water Collision Crash Fix NG[/url]) and a trap contact crash. The quick answer names the fix, or asks you to update it when it is already loaded
 [*][b]How it crashed:[/b] for an access violation the quick answer adds one plain line (an object that was already gone, a bad index, a jump into freed memory such as a removed hook, …), and the details name the instruction and the register that was most likely wrong. Registers are named only when the recomputed address matches the exception
@@ -433,7 +433,7 @@ SKSE/Plugins/SkyrimDiagWinUI/
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
 [b]v0.2.72 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.72 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. v0.2.72에서 Helper, 분석기, 뷰어가 바뀌었습니다(SharedLayout protocol은 그대로 v4). [b]업데이트 뒤 처음 게임을 켜면, 덤프 폴더가 5GB를 넘을 때 오래된 덤프가 리포트와 함께 지워집니다[/b](새 설정 [font=Courier New]MaxTotalDumpGB=5[/font]). 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+기존 설치를 완전히 교체하고 v0.2.72 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. 넥서스의 이전 버전은 v0.2.69입니다. v0.2.70과 v0.2.71은 GitHub에만 올렸고, 그 변경 내용은 아래 v0.2.72 새 기능 뒤에 있습니다. v0.2.69 이후 SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol은 그대로 v4). 새 설정(SkyrimDiag.ini의 [font=Courier New]EnableCloseRequestLog[/font], SkyrimDiagHelper.ini의 [font=Courier New]DumpAllModuleCode[/font]와 [font=Courier New]MaxTotalDumpGB[/font])은 예전 ini에 없으면 기본값으로 동작합니다. [b]업데이트 뒤 처음 게임을 켜면, 덤프 폴더가 5GB를 넘을 때 오래된 덤프가 리포트와 함께 지워집니다[/b](새 설정 [font=Courier New]MaxTotalDumpGB=5[/font]). 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -499,13 +499,13 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]뷰어는 v0.2.71이 분석해 둔 덤프를 열 때 한 번 다시 분석합니다. 보관 덤프 31개에서는 결과가 바뀌지 않았습니다
 [/list]
 
-[b][size=4]이전 변경: v0.2.71[/size][/b]
+[b][size=4]v0.2.69 이후 변경: v0.2.71[/size][/b]
 창의 X 버튼과 작업 표시줄의 "창 닫기"를 이제 창 닫기로 기록합니다.[list]
 [*][b]창 닫기 기록 수정:[/b] v0.2.70은 창 훅을 게임이 데이터를 불러오는 스레드에서 걸었습니다. Windows는 훅을 건 스레드가 끝나면 그 훅을 지우는데, 그 스레드는 메인 메뉴가 뜬 직후 끝나서 v0.2.70의 창 훅은 게임에서 동작하지 않았습니다. 이제 SKSE 플러그인이 게임 창 스레드에서 훅을 겁니다. v0.2.70에서도 이런 오류는 강제 종료로 분류됐지만(게임의 종료 플래그로 잡힘) 메뉴의 종료나 그 밖의 강제 종료로 나왔고, 이제 창 닫기([font=Courier New]window_close[/font])로 나옵니다
 [*]뷰어는 v0.2.70이 분석해 둔 덤프를 열 때 한 번 다시 분석합니다. 분석기는 바뀌지 않아 결과는 같습니다
 [/list]
 
-[b][size=4]이전 변경: v0.2.70[/size][/b]
+[b][size=4]v0.2.69 이후 변경: v0.2.70[/size][/b]
 알려진 크래시를 늘리고, 크래시가 어떻게 났는지 쉬운 말로 알려 주며, 엔진 잠금 교착을 알아보고, Alt+F4로 끄다 난 오류를 CTD로 보고하지 않습니다.[list]
 [*][b]수정 모드가 있는 1.6.1170 크래시 추가:[/b] 키보드 입력 크래시([url=https://www.nexusmods.com/skyrimspecialedition/mods/187246]Keyboard Offset Crash Fix SE-AE[/url]), 물리 엔진(Havok) 크래시 지점 5곳([url=https://www.nexusmods.com/skyrimspecialedition/mods/194392]Havok Solver Crash Fix - SKSE[/url]), 물 충돌 크래시([url=https://www.nexusmods.com/skyrimspecialedition/mods/190886]Water Collision Crash Fix NG[/url]), 함정 접촉 크래시. 빠른 답이 해결 모드를 안내하고, 이미 로드돼 있으면 업데이트를 확인하라고 합니다
 [*][b]어떻게 튕겼나:[/b] 접근 위반이면 빠른 답에 쉬운 말 한 줄(이미 사라진 오브젝트, 잘못된 인덱스, 해제된 메모리(예: 제거된 후킹 코드)로 이동 등)을 더하고, 자세한 분석에 명령어와 잘못됐을 가능성이 큰 레지스터를 적습니다. 레지스터로 다시 계산한 주소가 예외와 맞을 때만 레지스터를 짚습니다
