@@ -570,7 +570,8 @@ void ProcessValidCrashDump(
     ctx["reason"] = "crash_event";
     const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
       cfg.dumpMode,
-      skydiag::helper::CaptureKind::Crash);
+      skydiag::helper::CaptureKind::Crash,
+      cfg.dumpAllModuleCode);
     const auto manifest = MakeIncidentManifestV1(
       "crash",
       ts,
@@ -1212,7 +1213,8 @@ bool HandleCrashEventTick(
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
   const auto configuredDumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
-    skydiag::helper::CaptureKind::Crash);
+    skydiag::helper::CaptureKind::Crash,
+    cfg.dumpAllModuleCode);
   // A fault released as handled again and again gets the minimal dump first
   // (IsRepeatedRecoveredFault); if it is kept as a crash after all while the
   // game still runs, the dump is written again at the configured size below.
@@ -1241,6 +1243,7 @@ bool HandleCrashEventTick(
   // pressure) has to be retried here or the incident is lost outright.
   std::wstring dumpErr = exitedBeforeDump ? L"the game process had already exited" : L"";
   bool dumpOk = false;
+  skydiag::helper::DumpObjectMemoryStats dumpMemory{};
   for (int attempt = 0; attempt < kDumpWriteAttempts && !exitedBeforeDump; ++attempt) {
     if (attempt > 0) {
       if (!ShouldAttemptDumpWrite(attempt, IsProcessStillActive(proc.process))) {
@@ -1271,13 +1274,15 @@ bool HandleCrashEventTick(
       true,
       dumpProfile,
       /*isProcessSnapshot=*/false,
-      &dumpErr);
+      &dumpErr,
+      &dumpMemory);
     if (dumpOk) {
       if (attempt > 0) {
         AppendLogLine(
           outBase,
           L"Crash dump succeeded on attempt " + std::to_wstring(attempt + 1) + L".");
       }
+      LogDumpCodeMemory(outBase, dumpMemory.code);
       break;
     }
 
@@ -1495,6 +1500,7 @@ bool HandleCrashEventTick(
   if (reducedDumpForRepeatedFault && IsProcessStillActive(proc.process)) {
     const std::wstring fullDumpPath = dumpPath + L".full.tmp";
     std::wstring fullDumpErr;
+    skydiag::helper::DumpObjectMemoryStats fullDumpMemory{};
     const bool fullWritten = skydiag::helper::WriteDumpWithStreams(
       proc.process,
       proc.pid,
@@ -1506,9 +1512,11 @@ bool HandleCrashEventTick(
       true,
       configuredDumpProfile,
       /*isProcessSnapshot=*/false,
-      &fullDumpErr);
+      &fullDumpErr,
+      &fullDumpMemory);
     if (fullWritten && MoveFileExW(fullDumpPath.c_str(), dumpPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
       AppendLogLine(outBase, L"This time the exception was kept as a crash; rewrote its dump at the configured size.");
+      LogDumpCodeMemory(outBase, fullDumpMemory.code);
     } else {
       if (fullWritten) {
         fullDumpErr = L"MoveFileExW failed: " + std::to_wstring(GetLastError());

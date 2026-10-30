@@ -20,6 +20,7 @@
 #include "HangObjectMemory.h"
 #include "ModuleUnwindMemory.h"
 #include "SkyrimDiagProtocol.h"
+#include "StackCodeMemory.h"
 
 namespace skydiag::helper {
 namespace {
@@ -66,7 +67,13 @@ struct DumpCallbackContext
   // the contexts the writer reports and added to extraMemory at the first
   // MemoryCallback (ADR-0010, addendum 2026-10-22).
   internal::HangObjectMemoryCollector* hangObjects = nullptr;
-  bool hangObjectsAdded = false;
+  // ADR-0023: dumps that write only the game executable's code whole. The
+  // other modules' code is left out in ModuleCallback, and the collector,
+  // fed the modules and contexts the writer reports, adds the code the
+  // stacks point at at the first MemoryCallback.
+  std::uint64_t gameImageBase = 0;
+  internal::StackCodeMemoryCollector* stackCode = nullptr;
+  bool lateMemoryAdded = false;
   DumpProgress progress{};
 };
 
@@ -428,21 +435,38 @@ BOOL CALLBACK MiniDumpCallback(
   }
   ctx->progress.lastCallbackType = static_cast<ULONG>(callbackType);
   ctx->progress.lastCallbackSubject = CallbackSubject(*callbackInput);
-  if (ctx->hangObjects && (callbackType == ThreadCallback || callbackType == ThreadExCallback)) {
+  if ((ctx->hangObjects || ctx->stackCode) && (callbackType == ThreadCallback || callbackType == ThreadExCallback)) {
     // The context the dump stores for this thread (both callbacks start alike).
     const auto& thread = callbackInput->Thread;
-    ctx->hangObjects->OnThreadContext(thread.ThreadId, thread.Context);
+    if (ctx->hangObjects) {
+      ctx->hangObjects->OnThreadContext(thread.ThreadId, thread.Context);
+    }
+    if (ctx->stackCode) {
+      ctx->stackCode->OnThread(thread.ThreadId, thread.Context, thread.StackBase, thread.StackEnd);
+    }
     return TRUE;
   }
-  if (callbackType == MemoryCallback && ctx->hangObjects && !ctx->hangObjectsAdded) {
+  if (ctx->stackCode && callbackType == ModuleCallback) {
+    const auto& module = callbackInput->Module;
+    ctx->stackCode->OnModule(module.BaseOfImage, module.SizeOfImage, module.FullPath);
+    if (callbackOutput && module.BaseOfImage != ctx->gameImageBase) {
+      callbackOutput->ModuleWriteFlags &= ~static_cast<ULONG>(ModuleWriteCodeSegs);
+    }
+    return TRUE;
+  }
+  if (callbackType == MemoryCallback && (ctx->hangObjects || ctx->stackCode) && !ctx->lateMemoryAdded) {
     // Every thread has been reported by now, and the writer still holds them
     // suspended.
-    ctx->hangObjectsAdded = true;
-    const auto& ranges = ctx->hangObjects->Collect();
-    if (!ranges.empty()) {
+    ctx->lateMemoryAdded = true;
+    if (ctx->hangObjects) {
+      const auto& ranges = ctx->hangObjects->Collect();
       ctx->extraMemory.insert(ctx->extraMemory.end(), ranges.begin(), ranges.end());
-      ctx->extraMemory = internal::MergeExtraDumpMemory(std::move(ctx->extraMemory));
     }
+    if (ctx->stackCode) {
+      const auto& ranges = ctx->stackCode->Collect();
+      ctx->extraMemory.insert(ctx->extraMemory.end(), ranges.begin(), ranges.end());
+    }
+    ctx->extraMemory = internal::MergeExtraDumpMemory(std::move(ctx->extraMemory));
   }
   if (callbackType == MemoryCallback && callbackOutput && !ctx->extraMemory.empty()) {
     // Called until it returns FALSE; each TRUE adds one range.
@@ -589,7 +613,8 @@ bool WriteDumpWithStreams(
     meiPtr = &mei;
   }
 
-  const DumpProfile effectiveProfile = ResolveDumpProfile(dumpProfile.baseMode, dumpProfile.captureKind);
+  const DumpProfile effectiveProfile =
+    ResolveDumpProfile(dumpProfile.baseMode, dumpProfile.captureKind, dumpProfile.allModuleCode);
   MINIDUMP_TYPE dumpType = ApplyProfileToDumpType(effectiveProfile);
   DumpCallbackContext callbackContext{};
   callbackContext.profile = effectiveProfile;
@@ -627,6 +652,22 @@ bool WriteDumpWithStreams(
     // ADR-0021: the engine-lock windows of game threads waiting in a delay.
     hangObjects->EnableGameLocks(std::move(gameThreads), internal::GameDelayStubAddress(process));
     callbackContext.hangObjects = &*hangObjects;
+  }
+  // ADR-0023: a PSS snapshot handle cannot be read for the stack code, and
+  // without the game executable's base the writer could not tell its code
+  // apart; both write every module's code.
+  std::optional<internal::StackCodeMemoryCollector> stackCode;
+  DumpCodeMemoryStats codeWithoutCollector{};
+  if (effectiveProfile.gameAndStackCodeOnly && !isProcessSnapshot) {
+    std::uint64_t gameBase = 0;
+    std::uint64_t gameEnd = 0;
+    if (internal::GameImageRange(process, gameBase, gameEnd) && gameBase != 0) {
+      stackCode.emplace(process, gameBase, callbackContext.preferredThreadIds, meiPtr ? ctx.Rip : 0u);
+      callbackContext.gameImageBase = gameBase;
+      callbackContext.stackCode = &*stackCode;
+    } else {
+      codeWithoutCollector.all_modules_fallback = true;
+    }
   }
   callbackContext.isProcessSnapshot = isProcessSnapshot;
   callbackContext.traceIo = DumpIoTraceRequested();
@@ -677,6 +718,9 @@ bool WriteDumpWithStreams(
         if (objectMemory) {
           *objectMemory = hangObjects->Stats();
         }
+      }
+      if (objectMemory) {
+        objectMemory->code = stackCode ? stackCode->Stats() : codeWithoutCollector;
       }
       return true;
     }

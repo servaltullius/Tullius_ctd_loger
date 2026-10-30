@@ -160,6 +160,7 @@ HelperConfig LoadConfig(std::wstring* err)
   } else {
     cfg.dumpMode = DumpMode::kDefault;
   }
+  cfg.dumpAllModuleCode = ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"DumpAllModuleCode", 0) != 0;
 
   cfg.outputDir = ResolveEffectiveOutputDir(ReadIniString(ini, L"SkyrimDiagHelper", L"OutputDir", L""));
   cfg.outputDirFallbacks = OutputDirFallbacks(cfg.outputDir);

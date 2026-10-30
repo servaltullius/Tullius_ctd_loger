@@ -34,6 +34,7 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
   // Keep this snapshot privacy-safe: avoid absolute paths (OutputDir, DumpToolExe, EtwWprExe).
   nlohmann::json j = nlohmann::json::object();
   j["dump_mode"] = DumpModeToString(cfg.dumpMode);
+  j["dump_all_module_code"] = cfg.dumpAllModuleCode;
 
   j["hang_threshold_in_game_sec"] = cfg.hangThresholdInGameSec;
   j["hang_threshold_in_menu_sec"] = cfg.hangThresholdInMenuSec;
@@ -105,6 +106,7 @@ nlohmann::json MakeCaptureProfileJson(const skydiag::helper::DumpProfile& dumpPr
     { "include_handle_data", dumpProfile.includeHandleData },
     { "include_unloaded_modules", dumpProfile.includeUnloadedModules },
     { "include_code_segments", dumpProfile.includeCodeSegments },
+    { "code_segments_scope", skydiag::helper::CodeSegmentsScopeToString(dumpProfile) },
     { "include_full_memory", dumpProfile.includeFullMemory },
     { "include_process_thread_data", dumpProfile.includeProcessThreadData },
     { "include_full_memory_info", dumpProfile.includeFullMemoryInfo },

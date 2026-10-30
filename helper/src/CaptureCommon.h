@@ -23,9 +23,38 @@ inline void ApplyRetentionFromConfig(const skydiag::helper::HelperConfig& cfg, c
   QueueRetentionSweep(outBase, skydiag::helper::RetentionLimitsFromConfig(cfg));
 }
 
+// ADR-0023: what the stack code added to a dump in place of every module's
+// code (nothing for dumps that write every module's code).
+inline void LogDumpCodeMemory(const std::filesystem::path& outBase, const skydiag::helper::DumpCodeMemoryStats& code)
+{
+  if (code.all_modules_fallback) {
+    AppendLogLine(outBase, L"Code memory: the game executable was not found; every module's code was written.");
+    return;
+  }
+  if (!code.collected) {
+    return;
+  }
+  AppendLogLine(outBase,
+    L"Code memory: threads=" + std::to_wstring(code.threads) + L" values=" + std::to_wstring(code.values) +
+      L" ranges=" + std::to_wstring(code.code_ranges) + L" bytes=" + std::to_wstring(code.code_bytes) +
+      L" modules=" + std::to_wstring(code.modules) + L" module_bytes=" + std::to_wstring(code.module_bytes) +
+      L" time_us=" + std::to_wstring(code.elapsed_us) + (code.budget_reached ? L" (budget reached)" : L""));
+}
+
+// The capture profile a dump was written with: from a PSS snapshot, or when
+// the game executable was not found, every module's code went in (ADR-0023).
+inline skydiag::helper::DumpProfile WrittenDumpProfile(
+  skydiag::helper::DumpProfile profile,
+  const skydiag::helper::DumpObjectMemoryStats& stats)
+{
+  profile.gameAndStackCodeOnly = profile.gameAndStackCodeOnly && stats.code.collected;
+  return profile;
+}
+
 // One line per freeze or manual dump: what the object memory added to it.
 inline void LogDumpObjectMemory(const std::filesystem::path& outBase, const skydiag::helper::DumpObjectMemoryStats& stats)
 {
+  LogDumpCodeMemory(outBase, stats.code);
   if (stats.threads_selected == 0u) {
     return;  // not collected (PSS snapshot or full-memory dump)
   }

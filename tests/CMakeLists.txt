@@ -943,6 +943,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PssSnapshot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/RetentionWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/StackCodeMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WctCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WindowHeuristics.cpp"
   )

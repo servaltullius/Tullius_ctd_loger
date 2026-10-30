@@ -164,12 +164,13 @@ Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 |------|--------|------|
 | `EnableCompatibilityPreflight` | `1` | 시작 시 `SkyrimDiag_Preflight.json` 생성(호환성 사전 점검). |
 | `EnableWerDumpFallbackHint` | `1` | 덤프 실패 시 `SkyrimDiag_WER_LocalDumps_Hint.txt` 생성. |
+| `DumpAllModuleCode` | `0` | `DumpMode=1` 덤프는 게임 EXE의 코드는 전부, 다른 모듈은 스레드 스택이 가리키는 코드만 담습니다(큰 모드팩에서 덤프 하나에 약 50~100MB). `1`이면 v0.2.71까지처럼 모든 모듈의 코드와, 크래시 덤프에는 모든 모듈의 헤더·리소스까지 담습니다(0.5~0.9GB). 덤프만 보는 역공학 도구용입니다. |
 
 ## 덤프 보관 / 디스크 정리
 
 `SkyrimDiagHelper.ini`에서 자동 정리:
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = 무제한)
-- `MaxTotalDumpGB` (기본 5, 0 = 무제한): 크래시·프리징·수동 덤프를 모두 합친 크기(GB). 큰 모드팩에서는 덤프 하나가 보통 0.5~0.9GB입니다. 이 크기를 넘으면 종류와 상관없이 오래된 덤프부터 리포트와 함께 지웁니다. 가장 최근 캡처와, 하루가 지나지 않은 종류별 최신 캡처(뷰어가 아직 열 수 있음)는 항상 남깁니다. `DumpMode=2`나 크래시 재캡처를 쓰면 덤프 하나가 몇 GB가 될 수 있으니, 그런 덤프를 더 남기려면 값을 올려 주세요.
+- `MaxTotalDumpGB` (기본 5, 0 = 무제한): 크래시·프리징·수동 덤프를 모두 합친 크기(GB). 이 크기를 넘으면 종류와 상관없이 오래된 덤프부터 리포트와 함께 지웁니다. 가장 최근 캡처와, 하루가 지나지 않은 종류별 최신 캡처(뷰어가 아직 열 수 있음)는 항상 남깁니다. `DumpAllModuleCode=1`이면 큰 모드팩에서 덤프 하나가 0.5~0.9GB이고, `DumpMode=2`나 크래시 재캡처를 쓰면 몇 GB가 될 수 있으니, 그런 덤프를 더 남기려면 값을 올려 주세요.
 - `MaxHelperLogBytes`, `MaxHelperLogFiles` (로그 로테이션), `MaxHelperSessionLogs` (이전 세션 로그 보관 개수, 기본 5)
 
 ## 이슈 제보

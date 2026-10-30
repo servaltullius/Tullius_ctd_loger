@@ -25,4 +25,4 @@ ADR index:
 - `0020-reanalyze-older-summaries.md`
 - `0021-engine-lock-deadlocks.md`
 - `0022-forced-close-errors.md`
-- `0023-dump-module-memory-scope.md` (Proposed)
+- `0023-dump-module-memory-scope.md`

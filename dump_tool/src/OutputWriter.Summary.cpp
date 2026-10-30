@@ -178,6 +178,13 @@ nlohmann::json BuildSummaryJson(
     if (!captureProfile.contains("include_code_segments")) {
       captureProfile["include_code_segments"] = false;
     }
+    if (!captureProfile.contains("code_segments_scope")) {
+      // Manifests before ADR-0023: code segments meant every module's code.
+      captureProfile["code_segments_scope"] =
+        captureProfile["include_code_segments"].is_boolean() && captureProfile["include_code_segments"].get<bool>()
+          ? "all"
+          : "none";
+    }
     if (!captureProfile.contains("include_process_thread_data")) {
       captureProfile["include_process_thread_data"] = false;
     }

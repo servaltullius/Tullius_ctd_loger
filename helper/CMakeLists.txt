@@ -40,6 +40,7 @@ add_executable(${PROJECT_NAME}
   src/ProcessUtil.cpp
   src/RetentionWorker.cpp
   src/SkseLogParser.cpp
+  src/StackCodeMemory.cpp
   src/WctCapture.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
@@ -48,6 +49,7 @@ add_executable(${PROJECT_NAME}
   src/GpuMemory.h
   src/HangObjectMemory.h
   src/ModuleUnwindMemory.h
+  src/StackCodeMemory.h
   include/SkyrimDiagHelper/Config.h
   include/SkyrimDiagHelper/DumpProfile.h
   include/SkyrimDiagHelper/DumpWriter.h

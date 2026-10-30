@@ -3,6 +3,8 @@
 #include <Windows.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <string>
 #include <vector>
 
 #include "CrashObjectMemory.h"
@@ -20,6 +22,19 @@ inline constexpr std::size_t kModuleUnwindMemoryBudget = std::size_t{ 24 } * 102
 // files, after which the local copies no longer match a dump taken before it
 // (ADR-0011). Crash, freeze and manual dumps all get them.
 std::vector<ExtraDumpMemory> CollectModuleUnwindMemory(HANDLE process);
+
+// The same ranges for one module (ADR-0023 adds them for the game and the
+// modules the stacks point into). Returns the bytes added to `out`.
+std::size_t AddModuleUnwindMemory(
+  HANDLE process,
+  std::uint64_t base,
+  std::uint32_t imageSize,
+  std::vector<ExtraDumpMemory>& out);
+
+// The Windows directory, lower case with a trailing backslash ("c:\windows\");
+// empty when it cannot be read. CollectModuleUnwindMemory covers the modules
+// whose lower-case path starts with it.
+std::wstring WindowsDirectoryPrefix();
 
 // The UNWIND_INFO ranges for a .pdata table, given the image bytes that hold
 // the unwind data starting at `spanRva`. Exposed for tests.

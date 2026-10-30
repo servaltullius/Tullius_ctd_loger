@@ -118,7 +118,8 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
         DumpModeForRecaptureTarget(context.recaptureDecision.targetProfile, cfg.dumpMode);
       const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
         recaptureDumpMode,
-        skydiag::helper::CaptureKind::CrashRecapture);
+        skydiag::helper::CaptureKind::CrashRecapture,
+        cfg.dumpAllModuleCode);
 
       const std::string pluginScanJson = CollectPluginScanJson(
         proc,
