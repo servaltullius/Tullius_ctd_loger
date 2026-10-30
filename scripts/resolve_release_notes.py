@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import os
 import re
 import sys
@@ -18,6 +19,69 @@ def _notes_version(tag: str) -> str:
     """Use the base version only for the project's v<semver>-rc... tags."""
     match = RC_TAG_PATTERN.fullmatch(tag)
     return match.group(1) if match is not None else tag
+
+
+# GitHub pairs the `~` of two ranges such as `0.5~0.9GB ... 58~60MB` in one
+# paragraph into strikethrough, so release notes write a range as `0.5\~0.9GB`.
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_NEW_BLOCK = re.compile(r"^\s*(?:#{1,6}(?:\s|$)|[-*+]\s|\d{1,9}[.)]\s|>|\|)")
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
+_TILDE_RUN = re.compile(r"(?<![\\~])~+(?!~)")
+
+
+def find_strikethrough_tildes(text: str) -> list[int]:
+    """1-based lines holding an unescaped `~` that GitHub may pair into strikethrough.
+
+    Over-approximates GFM: two unescaped runs of one or two tildes in the same
+    paragraph, list item, heading or table row count as a pair unless a run has
+    whitespace on both sides. Tildes in code spans and fenced blocks are ignored.
+    """
+    flagged: set[int] = set()
+    block: list[tuple[int, str]] = []
+
+    def close_block() -> None:
+        if not block:
+            return
+        joined = "\n".join(line for _, line in block)
+        joined = _CODE_SPAN.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), joined)
+        starts: list[int] = []
+        offset = 0
+        for _, line in block:
+            starts.append(offset)
+            offset += len(line) + 1
+        runs: dict[int, list[int]] = {}
+        for match in _TILDE_RUN.finditer(joined):
+            if len(match.group(0)) > 2:
+                continue
+            before = joined[match.start() - 1] if match.start() > 0 else " "
+            after = joined[match.end()] if match.end() < len(joined) else " "
+            if before.isspace() and after.isspace():
+                continue
+            line_number = block[bisect.bisect_right(starts, match.start()) - 1][0]
+            runs.setdefault(len(match.group(0)), []).append(line_number)
+        for lines in runs.values():
+            if len(lines) >= 2:
+                flagged.update(lines)
+        block.clear()
+
+    fence: str | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        fence_match = _FENCE.match(line)
+        if fence is not None:
+            marker = fence_match.group(1) if fence_match else ""
+            if marker[:1] == fence[0] and len(marker) >= len(fence):
+                fence = None
+            continue
+        if fence_match:
+            close_block()
+            fence = fence_match.group(1)
+            continue
+        if not line.strip() or _NEW_BLOCK.match(line):
+            close_block()
+        if line.strip():
+            block.append((number, line))
+    close_block()
+    return sorted(flagged)
 
 
 def find_release_notes(repo_root: Path, tag: str) -> str | None:
