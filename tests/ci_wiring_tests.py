@@ -272,6 +272,34 @@ def check_release_notes_rc_fallback(failures: list[str]) -> None:
             failures.append("--strict rejected a tag that has a draft")
 
 
+def check_release_notes_have_no_strikethrough_ranges(failures: list[str]) -> None:
+    # v0.2.72 shipped with `0.5~0.9GB ... 58~60MB` struck through on GitHub.
+    resolver = _load_script("resolve_release_notes.py")
+    cases = {
+        "덤프 0.5~0.9GB였고, 수동 캡처가 58~60MB였습니다.\n": [1],
+        "- 첫 줄 0.5~0.9GB\n  이어지는 줄 58~60MB\n": [1, 2],
+        "덤프 0.5\\~0.9GB였고, 수동 캡처가 58\\~60MB였습니다.\n": [],
+        "- 0.5~0.9GB\n- 58~60MB\n": [],
+        "0.5~0.9GB\n\n58~60MB\n": [],
+        "`a~b` 그리고 c~d\n": [],
+        "~~~\n0.5~0.9 58~60\n~~~\n": [],
+        "rc1~rc5 확인, 범위 a ~ b\n": [],
+    }
+    for text, expected in cases.items():
+        actual = resolver.find_strikethrough_tildes(text)
+        if actual != expected:
+            failures.append(f"find_strikethrough_tildes({text!r}) = {actual}, expected {expected}")
+
+    notes = [REPO_ROOT / "CHANGELOG.md"]
+    notes += sorted((REPO_ROOT / "docs" / "release" / "drafts").glob("*.md"))
+    for path in notes:
+        for line in resolver.find_strikethrough_tildes(_read(path)):
+            failures.append(
+                f"{path.relative_to(REPO_ROOT).as_posix()}:{line}: GitHub renders text between "
+                "two `~` as strikethrough; write ranges as `\\~`"
+            )
+
+
 def check_release_prerelease_classification(failures: list[str]) -> None:
     contract = _load_script("release_contract.py")
     stable_cases = ("v0.2.58", "v1.0.0")
@@ -663,6 +691,7 @@ def main() -> int:
     check_clang_tidy_is_wired(failures)
     check_clang_tidy_rejects_test_only_entries(failures)
     check_release_notes_rc_fallback(failures)
+    check_release_notes_have_no_strikethrough_ranges(failures)
     check_release_prerelease_classification(failures)
     check_fuzzers_are_wired(failures)
     check_sanitizers_are_wired(failures)
