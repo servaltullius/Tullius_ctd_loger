@@ -12,6 +12,7 @@
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpToolResolve.h"
+#include "SkyrimDiagLongPath.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -89,7 +90,7 @@ bool StartDumpToolProcessWithHandle(
   STARTUPINFOW si{};
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
-  const std::wstring cwd = outBase.wstring();
+  const std::wstring cwd = WorkingDirectoryFor(outBase);
 
   const BOOL ok = CreateProcessW(
     exe.c_str(),
@@ -156,7 +157,7 @@ void StartDumpToolHeadlessIfConfigured(
 
   const auto exe = ResolveDumpToolHeadlessExeForConfig(cfg);
   std::wstring cmd =
-    QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
+    QuoteArg(exe.wstring()) + L" " + QuoteArg(skydiag::PlainPath(dumpPath).wstring()) + L" --out-dir " + QuoteArg(skydiag::PlainPath(outBase).wstring()) + L" --headless";
   AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
 
   std::wstring err;
@@ -184,7 +185,7 @@ bool StartDumpToolHeadlessAsync(
 
   const auto exe = ResolveDumpToolHeadlessExeForConfig(cfg);
   std::wstring cmd =
-    QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring()) + L" --headless";
+    QuoteArg(exe.wstring()) + L" " + QuoteArg(skydiag::PlainPath(dumpPath).wstring()) + L" --out-dir " + QuoteArg(skydiag::PlainPath(outBase).wstring()) + L" --headless";
   AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
   return StartDumpToolProcessWithHandle(exe, std::move(cmd), outBase, CREATE_NO_WINDOW, outProcess, err, nullptr);
 }
@@ -196,7 +197,7 @@ DumpToolViewerLaunchResult StartDumpToolViewer(
   std::wstring_view reason)
 {
   const auto exe = ResolveDumpToolExe(cfg);
-  std::wstring cmd = QuoteArg(exe.wstring()) + L" " + QuoteArg(dumpPath) + L" --out-dir " + QuoteArg(outBase.wstring());
+  std::wstring cmd = QuoteArg(exe.wstring()) + L" " + QuoteArg(skydiag::PlainPath(dumpPath).wstring()) + L" --out-dir " + QuoteArg(skydiag::PlainPath(outBase).wstring());
   AppendOnlineSymbolFlag(&cmd, cfg.allowOnlineSymbols);
   cmd += cfg.autoOpenViewerBeginnerMode ? L" --simple-ui" : L" --advanced-ui";
 

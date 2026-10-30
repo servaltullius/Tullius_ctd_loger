@@ -2,6 +2,7 @@
 
 #include "Analyzer.h"
 #include "OutputWriterInternals.h"
+#include "SkyrimDiagLongPath.h"
 #include "Utf.h"
 
 #include <Windows.h>
@@ -144,7 +145,8 @@ bool TryConsumeCleanExitEvidence(
       : std::filesystem::current_path();
 
     std::error_code ec;
-    std::filesystem::directory_iterator it(parent, ec);
+    // The evidence files in a long output folder (SkyrimDiagLongPath.h).
+    std::filesystem::directory_iterator it(skydiag::PathForIo(parent, 96), ec);
     if (ec) {
       return false;
     }

@@ -8,6 +8,7 @@
 #include "HelperCommon.h"
 #include "ProcessUtil.h"
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagLongPath.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -305,7 +306,7 @@ bool StopEtwCaptureToPath(
   }
 
   const std::wstring wprExe = ResolveEtwWprExecutablePath(cfg).wstring();
-  std::wstring cmd = QuoteArg(wprExe) + L" -stop " + QuoteArg(etlPath.wstring());
+  std::wstring cmd = QuoteArg(wprExe) + L" -stop " + QuoteArg(skydiag::PlainPath(etlPath).wstring());
   if (!RunHiddenProcessAndWait(
         wprExe,
         std::move(cmd),

@@ -1,6 +1,7 @@
 #include "ProcessUtil.h"
 
 #include "SkyrimDiagHandle.h"
+#include "SkyrimDiagLongPath.h"
 
 namespace skydiag::helper::internal {
 
@@ -28,6 +29,12 @@ std::wstring QuoteArg(std::wstring_view s)
   return out;
 }
 
+std::wstring WorkingDirectoryFor(const std::filesystem::path& dir)
+{
+  std::wstring plain = skydiag::PlainPath(dir).wstring();
+  return plain.size() <= skydiag::kMaxPlainPathChars ? plain : std::wstring{};
+}
+
 bool RunHiddenProcessAndWait(std::wstring cmdLine, const std::filesystem::path& cwd, DWORD timeoutMs, std::wstring* err)
 {
   return RunHiddenProcessAndWait(std::wstring{}, std::move(cmdLine), cwd, timeoutMs, err);
@@ -44,7 +51,7 @@ bool RunHiddenProcessAndWait(
   si.cb = sizeof(si);
   PROCESS_INFORMATION pi{};
 
-  std::wstring cwdW = cwd.wstring();
+  std::wstring cwdW = WorkingDirectoryFor(cwd);
   const BOOL ok = CreateProcessW(
     /*lpApplicationName=*/applicationPath.empty() ? nullptr : applicationPath.c_str(),
     cmdLine.data(),

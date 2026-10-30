@@ -1,6 +1,7 @@
 #include "MinidumpUtil.h"
 
 #include "Mo2Index.h"
+#include "SkyrimDiagLongPath.h"
 #include "Utf.h"
 
 #include <algorithm>
@@ -113,8 +114,9 @@ bool MappedFile::Open(const std::wstring& path, std::wstring* err)
 {
   Close();
 
+  // A dump in a long output folder (SkyrimDiagLongPath.h).
   HANDLE rawFile = CreateFileW(
-    path.c_str(),
+    skydiag::PathForIo(path).c_str(),
     GENERIC_READ,
     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
     nullptr,

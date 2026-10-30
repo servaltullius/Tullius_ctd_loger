@@ -26,7 +26,7 @@ bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
   if (out) {
     out->clear();
   }
-  std::ifstream in(skydiag::ExtendedLengthPath(path), std::ios::binary);
+  std::ifstream in(skydiag::PathForIo(path), std::ios::binary);
   if (!in) {
     return false;
   }
@@ -312,12 +312,14 @@ std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, 
 bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content, std::wstring* err)
 {
   // The copies under .skydiag-analysis\<sha256>\<key>\ pass MAX_PATH below
-  // an output folder of about 100 characters (SkyrimDiagLongPath.h).
-  const auto ioPath = skydiag::ExtendedLengthPath(path);
+  // an output folder of about 100 characters; the temporary name below adds
+  // up to kTempSuffixChars (SkyrimDiagLongPath.h).
+  constexpr std::size_t kTempSuffixChars = 64;
+  const auto ioPath = skydiag::PathForIo(path, kTempSuffixChars);
   std::error_code ec;
   const auto parent = path.parent_path();
   if (!parent.empty()) {
-    skydiag::CreateDirectoriesExtended(parent, ec);
+    skydiag::CreateDirectoriesForIo(parent, ec);
   }
   if (ec) {
     if (err) *err = L"Failed to create output directory: " + parent.wstring();
@@ -731,7 +733,7 @@ std::filesystem::path FindIncidentManifestForDump(const std::filesystem::path& o
   std::error_code ec;
   for (const auto& name : candidates) {
     const auto p = outBase / name;
-    if (std::filesystem::exists(p, ec) && std::filesystem::is_regular_file(p, ec)) {
+    if (std::filesystem::is_regular_file(skydiag::PathForIo(p), ec)) {
       return p;
     }
   }

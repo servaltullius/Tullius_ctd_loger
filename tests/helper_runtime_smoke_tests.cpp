@@ -11,12 +11,14 @@
 
 #include "CrashCapture.h"
 #include "CrashEtwCapture.h"
+#include "HelperCommon.h"
 #include "HelperLog.h"
 #include "HelperMainInternal.h"
 #include "HelperRuntimeTestUtils.h"
 #include "PendingCrashAnalysis.h"
 #include "ProcessUtil.h"
 #include "RetentionWorker.h"
+#include "SkyrimDiagLongPath.h"
 
 using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
@@ -25,6 +27,7 @@ using skydiag::helper::internal::CaptureStableSharedSnapshot;
 using skydiag::helper::internal::CrashCaptureState;
 using skydiag::helper::internal::ExtractCrashInfo;
 using skydiag::helper::internal::HandleCrashEventTick;
+using skydiag::helper::internal::MakeOutputBase;
 using skydiag::helper::internal::PendingCrashAnalysis;
 using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
@@ -63,9 +66,8 @@ void AddHeartbeatNamingMainThread(skydiag::SharedLayout* shared, std::uint32_t m
   shared->header.write_index = shared->header.write_index + 1u;
 }
 
-void TestHandleCrashEventTick_WritesCrashArtifacts()
+void CheckCrashArtifactsAreWritten(const std::filesystem::path& outBase)
 {
-  const auto outBase = MakeTempDir(L"skydiag_helper_runtime_smoke");
   ClearLog(outBase);
 
   auto shared = MakeSharedLayout();
@@ -134,7 +136,44 @@ void TestHandleCrashEventTick_WritesCrashArtifacts()
   CloseHandle(proc.crashEvent);
   proc.crashEvent = nullptr;
   CloseAttachedProcess(&proc);
+}
+
+void TestHandleCrashEventTick_WritesCrashArtifacts()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_runtime_smoke");
+  CheckCrashArtifactsAreWritten(outBase);
   std::filesystem::remove_all(outBase);
+}
+
+// An OutputDir long enough that MakeOutputBase hands out its extended-length
+// form: the dump, the incident manifest and the log still land in it.
+void TestHandleCrashEventTick_WritesCrashArtifactsUnderALongOutputDir()
+{
+  const auto root = MakeTempDir(L"skydiag_helper_runtime_long");
+  auto longDir = root;
+  while (longDir.native().size() < 230u) {
+    longDir /= L"a_long_output_folder_segment";
+  }
+  HelperConfig cfg = MakeTestConfig();
+  cfg.outputDir = longDir.wstring();
+  const auto outBase = MakeOutputBase(cfg);
+  Require(outBase.native().starts_with(LR"(\\?\)"), "a long OutputDir must be used in its extended-length form");
+  CheckCrashArtifactsAreWritten(outBase);
+  std::error_code ec;
+  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
+}
+
+void TestWorkingDirectoryForLongFolders()
+{
+  using skydiag::helper::internal::WorkingDirectoryFor;
+  Require(WorkingDirectoryFor(L"C:\\Logs") == L"C:\\Logs", "a usual folder stays the working directory");
+  Require(WorkingDirectoryFor(LR"(\\?\C:\Logs)") == L"C:\\Logs", "an extended-length folder is passed plain");
+  std::wstring longDir = L"C:\\Logs";
+  while (longDir.size() < 260u) {
+    longDir += L"\\a_long_output_folder_segment";
+  }
+  Require(WorkingDirectoryFor(longDir).empty(), "CreateProcessW refuses a working directory this long");
+  Require(WorkingDirectoryFor(LR"(\\?\)" + longDir).empty(), "nor in its extended-length form");
 }
 
 // Crash Logger's thread dump on its own hotkey (Ctrl+Shift+F12 by default, no
@@ -776,7 +815,9 @@ int main()
   try {
     TestQuoteArgRoundTripsThroughCommandLineToArgvW();
     TestCrashLoggerIniPathDecodesWithoutThrowing();
+    TestWorkingDirectoryForLongFolders();
     TestHandleCrashEventTick_WritesCrashArtifacts();
+    TestHandleCrashEventTick_WritesCrashArtifactsUnderALongOutputDir();
     TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();
     TestHandleCrashEventTick_WritesTheDumpAtOnceForAMainThreadFault();
     TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump();

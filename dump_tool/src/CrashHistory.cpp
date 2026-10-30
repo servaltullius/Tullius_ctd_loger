@@ -1,4 +1,5 @@
 #include "CrashHistory.h"
+#include "SkyrimDiagLongPath.h"
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -72,7 +73,7 @@ void UpsertHistoryEntry(std::vector<CrashHistoryEntry>* entries, CrashHistoryEnt
 bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
 {
   try {
-    std::ifstream f(path);
+    std::ifstream f(skydiag::PathForIo(path));
     if (!f.is_open()) {
       return false;
     }
@@ -156,12 +157,15 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
     std::error_code ec;
     const auto parent = path.parent_path();
     if (!parent.empty()) {
-      std::filesystem::create_directories(parent, ec);
+      skydiag::CreateDirectoriesForIo(parent, ec);
       if (ec) {
         return false;
       }
     }
-    auto tempPath = path;
+    // A long output folder (SkyrimDiagLongPath.h); the temporary name adds up
+    // to 48 characters.
+    const auto ioPath = skydiag::PathForIo(path, 48);
+    auto tempPath = ioPath;
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     tempPath += ".tmp." + std::to_string(now) + "." +
       std::to_string(g_historyTempCounter.fetch_add(1u, std::memory_order_relaxed));
@@ -186,13 +190,13 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
 #ifdef _WIN32
     if (!MoveFileExW(
           tempPath.c_str(),
-          path.c_str(),
+          ioPath.c_str(),
           MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
       std::filesystem::remove(tempPath, ec);
       return false;
     }
 #else
-    std::filesystem::rename(tempPath, path, ec);
+    std::filesystem::rename(tempPath, ioPath, ec);
     if (ec) {
       std::filesystem::remove(tempPath, ec);
       return false;
