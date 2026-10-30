@@ -10,15 +10,15 @@ Skyrim SE/AE 환경에서 **CTD(크래시) / 프리징 / 무한로딩**을 best-
 
 - **크래시를 막아주는 모드가 아닙니다.** 예외를 삼키거나 실행을 계속하지 않습니다.
 - **업로드/텔레메트리 없음.** 결과물은 로컬에 저장되며, 온라인 심볼 다운로드는 기본 OFF (`AllowOnlineSymbols=0`).
-- **CrashLoggerSSE 연동** — 현재 v1.24 형식을 포함한 시각별 `crash-*.log` / `threaddump-*.log`를 자동으로 찾아서 함께 표시합니다. `Callstack:` 섹션이 없는 일반 런타임 `CrashLogger.log`는 크래시 근거로 사용하지 않습니다.
+- **CrashLoggerSSE 연동** — 현재 v1.24 형식을 포함한 시각별 `crash-*.log` / `threaddump-*.log`를 자동으로 찾아서 함께 표시합니다(콜스택 상위 모듈은 크래시 로그에서만 집계하고, 스레드 덤프의 전체 스레드 모듈 집계는 쓰지 않습니다). `Callstack:` 섹션이 없는 일반 런타임 `CrashLogger.log`는 크래시 근거로 사용하지 않습니다.
 
 ---
 
 ## 필수 요구사항
 
-- **Skyrim SE / AE** (Windows)
-- [SKSE64](https://skse.silverlock.org/)
-- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444)
+- **Skyrim SE / AE** (Windows): 1.5.97, 1.6.x, 1.7.104 (`v0.2.62+`; VR은 지원하지 않습니다)
+- [SKSE64](https://skse.silverlock.org/): 게임 버전에 맞는 것(1.7.104는 SKSE 2.3.1 필요)
+- [Address Library for SKSE Plugins](https://www.nexusmods.com/skyrimspecialedition/mods/32444) (1.7.104는 v13 All in One 필요)
 - WinUI 뷰어 런타임:
   - 릴리즈 zip의 WinUI 뷰어는 `v0.2.52`부터 self-contained로 포함됩니다. 사용자가 .NET Desktop Runtime 8 또는 Windows App Runtime 1.8을 따로 설치할 필요가 없습니다.
   - `SkyrimDiagWinUI\\app` 아래의 많은 파일은 함께 동봉된 .NET / Windows App SDK 런타임입니다. 파일을 개별 삭제하거나 뷰어 EXE만 복사하지 마세요. 업데이트할 때는 기존 `SkyrimDiagWinUI` 폴더를 제거한 뒤 새 릴리즈 zip 전체를 설치하세요.
@@ -172,6 +172,7 @@ Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = 무제한)
 - `MaxTotalDumpGB` (기본 5, 0 = 무제한): 크래시·프리징·수동 덤프를 모두 합친 크기(GB). 이 크기를 넘으면 종류와 상관없이 오래된 덤프부터 리포트와 함께 지웁니다. 가장 최근 캡처와, 하루가 지나지 않은 종류별 최신 캡처(뷰어가 아직 열 수 있음)는 항상 남깁니다. `DumpAllModuleCode=1`이면 큰 모드팩에서 덤프 하나가 0.5~0.9GB이고, `DumpMode=2`나 크래시 재캡처를 쓰면 몇 GB가 될 수 있으니, 그런 덤프를 더 남기려면 값을 올려 주세요.
 - `MaxHelperLogBytes`, `MaxHelperLogFiles` (로그 로테이션), `MaxHelperSessionLogs` (이전 세션 로그 보관 개수, 기본 5)
+- 덤프가 없어진 `.skydiag-analysis/`의 분석 사본과 `.skydiag-locks/`의 잠금 파일은 하루가 지나면 지웁니다. `.skydiag-triage/`의 검토 상태는 남깁니다.
 
 ## 이슈 제보
 

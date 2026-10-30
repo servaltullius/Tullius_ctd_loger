@@ -12,5 +12,6 @@
     <Compile Include="..\..\dump_tool_winui\AtomicFile.cs" Link="AtomicFile.cs" />
     <Compile Include="..\..\dump_tool_winui\DumpDiscoveryStore.cs" Link="DumpDiscoveryStore.cs" />
     <Compile Include="..\..\dump_tool_winui\SummaryTriageStore.cs" Link="SummaryTriageStore.cs" />
+    <Compile Include="..\..\dump_tool_winui\IniTextDecoder.cs" Link="IniTextDecoder.cs" />
   </ItemGroup>
 </Project>

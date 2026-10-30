@@ -45,7 +45,7 @@
     - `EnableAutoRecaptureOnUnknownCrash=1`
     - `AutoRecaptureUnknownBucketThreshold=2`
     - `AutoRecaptureAnalysisTimeoutSec=20`
-    - 같은 crash bucket에서 fault module 미확정이 반복되면, 프로세스가 살아있는 경우 FullMemory crash dump를 1회 추가 캡처
+    - 같은 crash bucket이 기준 횟수만큼 반복되고 분석이 약할 때(fault module 미확정, 후보 충돌, 스택 해제 실패), 게임이 아직 살아 있으면 다시 캡처: 정보를 더 담은 덤프(`_Richer`), 약한 근거가 더 겹쳐 반복되면 전체 메모리 덤프(`_Full`)
   - 시작 호환성 점검(기본 ON):
     - `EnableCompatibilityPreflight=1`
     - 결과 파일: `SkyrimDiag_Preflight.json` (Crash Logger 중복/BEES 위험/플러그인 스캔 상태 점검)

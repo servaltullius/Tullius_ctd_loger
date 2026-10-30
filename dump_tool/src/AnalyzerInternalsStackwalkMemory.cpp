@@ -223,10 +223,12 @@ bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std:
     ULONG size = 0;
     if (ReadStreamSized(dumpBase, dumpSize, Memory64ListStream, &ptr, &size) && ptr && size >= sizeof(MINIDUMP_MEMORY64_LIST)) {
       const auto* list = static_cast<const MINIDUMP_MEMORY64_LIST*>(ptr);
-      const std::uint64_t need =
-        static_cast<std::uint64_t>(offsetof(MINIDUMP_MEMORY64_LIST, MemoryRanges)) +
-        static_cast<std::uint64_t>(list->NumberOfMemoryRanges) * static_cast<std::uint64_t>(sizeof(MINIDUMP_MEMORY_DESCRIPTOR64));
-      if (need <= static_cast<std::uint64_t>(size)) {
+      // Compared by division: count * 16 wraps for a count of 2^60 or more
+      // and would pass, and reserve() would then throw for the whole analysis.
+      const std::uint64_t fits =
+        (static_cast<std::uint64_t>(size) - offsetof(MINIDUMP_MEMORY64_LIST, MemoryRanges)) /
+        sizeof(MINIDUMP_MEMORY_DESCRIPTOR64);
+      if (list->NumberOfMemoryRanges <= fits) {
         std::uint64_t cursor = list->BaseRva;
         ranges.reserve(static_cast<std::size_t>(list->NumberOfMemoryRanges));
         for (ULONG i = 0; i < list->NumberOfMemoryRanges; i++) {

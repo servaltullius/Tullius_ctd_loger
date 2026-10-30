@@ -294,6 +294,17 @@ def check_release_prerelease_classification(failures: list[str]) -> None:
         failures.append(f"invalid release tag was accepted: {tag}")
 
     release_workflow = _read(WORKFLOWS / "release.yml")
+    # Nothing is public before the readback: created as a draft, verified,
+    # then published.
+    create = release_workflow.find('"release", "create"')
+    readback = release_workflow.find("Verify public release readback")
+    publish = release_workflow.find("--draft=false")
+    if create < 0 or '"--draft"' not in release_workflow[create:create + 200]:
+        failures.append("release.yml must create the release as a draft")
+    if not (0 <= create < readback < publish):
+        failures.append("release.yml must publish the release only after the readback check")
+    if "_symbols.zip" not in release_workflow:
+        failures.append("release.yml must attach the release symbols (PDBs) to the release")
     for contract_text in (
         "release_tag_is_prerelease",
         "is_prerelease=$isPrerelease",

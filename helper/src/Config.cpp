@@ -197,7 +197,7 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.autoOpenCrashOnlyIfProcessExited =
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"AutoOpenCrashOnlyIfProcessExited", 1) != 0;
   cfg.autoOpenCrashWaitForExitMs = ReadIniUint32Clamped(
-    ini, L"SkyrimDiagHelper", L"AutoOpenCrashWaitForExitMs", 2000, 0, 60000);
+    ini, L"SkyrimDiagHelper", L"AutoOpenCrashWaitForExitMs", 2000, 0, 10000);
   cfg.enableAutoRecaptureOnUnknownCrash =
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"EnableAutoRecaptureOnUnknownCrash", 0) != 0;
   cfg.autoRecaptureUnknownBucketThreshold = ReadIniUint32Clamped(
@@ -210,7 +210,7 @@ HelperConfig LoadConfig(std::wstring* err)
   cfg.autoOpenHangAfterProcessExit =
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"AutoOpenHangAfterProcessExit", 1) != 0;
   cfg.autoOpenHangDelayMs = ReadIniUint32Clamped(
-    ini, L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, 0, 60000);
+    ini, L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, 0, 10000);
   cfg.autoOpenViewerUnderWine =
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"AutoOpenViewerUnderWine", 0) != 0;
   cfg.autoOpenViewerBeginnerMode =

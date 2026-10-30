@@ -2,6 +2,7 @@
 #include "SourceGuardTestUtils.h"
 
 #include <cassert>
+#include <chrono>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -1908,8 +1909,39 @@ static void Test_ThreadDumpProgress_TruncatedAndComplete()
   assert(junk.is_thread_dump && junk.total_threads == 0u);
 }
 
+// A crafted log line (a megabyte of '(' with no ')', of "File:" with no
+// quotes, or of references with no FormID) is read in linear time; each of
+// these took minutes to hours. The ordinary forms still parse.
+static void Test_ExtractEspRefs_LongHostileLinesStayLinear()
+{
+  const auto started = std::chrono::steady_clock::now();
+  const std::size_t n = 1u << 20;
+  assert(ExtractEspRefsFromLine("x: " + std::string(n, '(')).empty());
+  assert(ExtractEspRefsFromLine("x: " + std::string(n, '(') + ")").empty());
+  std::string files;
+  std::string quotedParens;
+  std::string refs;
+  while (files.size() < n) files += "File:";
+  while (quotedParens.size() < n) quotedParens += "(\"";
+  while (refs.size() < n) refs += "](B.esp)";
+  assert(ExtractEspRefsFromLine(files).empty());
+  assert(ExtractEspRefsFromLine(quotedParens + ")").empty());
+  assert(!ExtractEspRefsFromLine(refs).empty());
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  assert(elapsed < std::chrono::seconds(5));
+
+  const auto ordinary = ExtractEspRefsFromLine(
+    "RCX 0x1 (TESObjectREFR*) [0x0001ABCD] File: \"My Mod.esp\" (\"Other.esm\") (Third.esl) [ 0x00000014 ](Fourth.esp)");
+  assert(ordinary.size() == 4);
+  assert(ordinary[0].esp_name == "My Mod.esp" && ordinary[0].form_id == "0x0001ABCD");
+  assert(ordinary[1].esp_name == "Other.esm");
+  assert(ordinary[2].esp_name == "Third.esl");
+  assert(ordinary[3].esp_name == "Fourth.esp" && ordinary[3].form_id == "0x00000014");
+}
+
 int main()
 {
+  Test_ExtractEspRefs_LongHostileLinesStayLinear();
   Test_ThreadDumpProgress_TruncatedAndComplete();
   Test_CrashLoggerLocationContradictsDumpFault();
   Test_ParseObjectRefs_RealRegisterFormatBefore122();

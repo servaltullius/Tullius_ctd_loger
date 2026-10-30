@@ -7,6 +7,54 @@
 
 namespace skydiag::dump_tool::internal::policy {
 
+// Callstack frame weights: frames closer to the crash point are weighted higher
+// to reflect their higher likelihood of being the actual crash cause.
+inline constexpr std::uint32_t kWeightDepth0      = 16;  // crash frame itself
+inline constexpr std::uint32_t kWeightDepth1      = 12;  // immediate caller
+inline constexpr std::uint32_t kWeightDepth2      = 8;   // 2nd caller
+inline constexpr std::uint32_t kWeightDepth3to5   = 4;   // near callers
+inline constexpr std::uint32_t kWeightDepth6to10  = 2;   // mid-range callers
+inline constexpr std::uint32_t kWeightDeepFrame   = 1;   // deep callers (depth > 10)
+
+// Confidence thresholds: empirically tuned against real Skyrim crash dumps.
+// "High" requires a near-top suspect with a clear lead over the runner-up.
+inline constexpr std::size_t   kHighConfMaxDepth     = 2;
+inline constexpr std::uint32_t kHighConfMinScore     = 24;
+inline constexpr std::uint32_t kHighConfMinMargin    = 12;
+inline constexpr std::size_t   kMedConfMaxDepth      = 6;
+inline constexpr std::uint32_t kMedConfMinScore      = 12;
+inline constexpr std::uint32_t kMedConfMinMargin     = 6;
+
+constexpr std::uint32_t CallstackFrameWeight(std::size_t depth) noexcept
+{
+  if (depth == 0) return kWeightDepth0;
+  if (depth == 1) return kWeightDepth1;
+  if (depth == 2) return kWeightDepth2;
+  if (depth <= 5) return kWeightDepth3to5;
+  if (depth <= 10) return kWeightDepth6to10;
+  return kWeightDeepFrame;
+}
+
+// The top callstack suspect's confidence. A strong score alone is High only
+// when it also leads the runner-up: two modules tied on the stack are not
+// told apart with High (Medium at most).
+constexpr i18n::ConfidenceLevel TopSuspectCallstackConfidence(
+  std::uint32_t topScore,
+  std::uint32_t secondScore,
+  std::size_t firstDepth) noexcept
+{
+  const std::uint64_t top = topScore;
+  const std::uint64_t second = secondScore;
+  if (firstDepth <= kHighConfMaxDepth &&
+      ((top >= kHighConfMinScore && top > second) || top >= second + kHighConfMinMargin)) {
+    return i18n::ConfidenceLevel::kHigh;
+  }
+  if (firstDepth <= kMedConfMaxDepth && (top >= kMedConfMinScore || top >= second + kMedConfMinMargin)) {
+    return i18n::ConfidenceLevel::kMedium;
+  }
+  return i18n::ConfidenceLevel::kLow;
+}
+
 // The capture's authoritative thread (the exception thread for CTDs or the
 // inferred game main thread for hangs) is the primary stack whenever it
 // produced a usable candidate. Numeric TID ordering and a higher score on an
