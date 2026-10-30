@@ -369,6 +369,7 @@ add_executable(skydiag_dump_profile_tests
 
 target_include_directories(skydiag_dump_profile_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_dump_profile_tests COMMAND skydiag_dump_profile_tests)
@@ -477,6 +478,7 @@ add_executable(skydiag_retention_tests
 
 target_include_directories(skydiag_retention_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_retention_tests COMMAND skydiag_retention_tests)
@@ -712,6 +714,7 @@ add_executable(skydiag_crash_recapture_policy_tests
 
 target_include_directories(skydiag_crash_recapture_policy_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_crash_recapture_policy_tests COMMAND skydiag_crash_recapture_policy_tests)
@@ -766,6 +769,7 @@ add_executable(skydiag_headless_analysis_policy_tests
 
 target_include_directories(skydiag_headless_analysis_policy_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 add_test(NAME skydiag_headless_analysis_policy_tests COMMAND skydiag_headless_analysis_policy_tests)
@@ -988,6 +992,7 @@ if(WIN32)
   )
   target_include_directories(skydiag_helper_config_runtime_tests PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
   )
   set_target_properties(skydiag_helper_config_runtime_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/helper_config_runtime_tests"

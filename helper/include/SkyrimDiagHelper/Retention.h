@@ -13,6 +13,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "SkyrimDiagLongPath.h"
+
 namespace skydiag::helper {
 
 // path::string() converts through the ANSI code page: it substitutes '?' for
@@ -527,8 +529,11 @@ inline void PruneOrphanedAnalysisCaches(
     return entries;
   };
 
+  // A copy's files lie about 130 characters below outBase, past MAX_PATH
+  // for a long output folder (SkyrimDiagLongPath.h).
+  const auto cacheBase = ExtendedLengthPath(outBase);
   std::error_code ec;
-  for (const auto& identity : listDir(outBase / ".skydiag-analysis")) {
+  for (const auto& identity : listDir(cacheBase / ".skydiag-analysis")) {
     if (!identity.is_directory(ec)) {
       continue;
     }
@@ -548,7 +553,7 @@ inline void PruneOrphanedAnalysisCaches(
     }
   }
 
-  for (const auto& lock : listDir(outBase / ".skydiag-locks")) {
+  for (const auto& lock : listDir(cacheBase / ".skydiag-locks")) {
     const auto name = PathPartUtf8(lock.path().filename());
     if (!EndsWith(name, ".lock") || dumpStems.count(name.substr(0, name.size() - 5)) != 0 ||
         !lock.is_regular_file(ec) || !oldEnough(lock.path())) {

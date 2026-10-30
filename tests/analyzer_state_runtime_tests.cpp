@@ -17,6 +17,7 @@
 #include "MinidumpUtil.h"
 #include "OutputWriter.h"
 #include "OutputWriterInternals.h"
+#include "SkyrimDiagLongPath.h"
 
 namespace {
 
@@ -586,6 +587,63 @@ void TestWctCompanionFollowsPathRedaction()
   std::filesystem::remove_all(root, ec);
 }
 
+void TestExtendedLengthPathForms()
+{
+  using skydiag::ExtendedLengthPath;
+  assert(ExtendedLengthPath(L"C:\\Logs\\Out").native() == LR"(\\?\C:\Logs\Out)");
+  // Win32's own clean-up comes first: "/", "." and "..", a trailing dot.
+  assert(ExtendedLengthPath(L"C:/Logs/./x/../Out.").native() == LR"(\\?\C:\Logs\Out)");
+  assert(ExtendedLengthPath(LR"(\\server\share\Logs)").native() == LR"(\\?\UNC\server\share\Logs)");
+  assert(ExtendedLengthPath(LR"(\\?\C:\Logs)").native() == LR"(\\?\C:\Logs)");
+  assert(ExtendedLengthPath(LR"(\\.\pipe\x)").native() == LR"(\\.\pipe\x)");
+  assert(ExtendedLengthPath(L"").empty());
+  assert(ExtendedLengthPath(L"relative\\Out").native() ==
+         L"\\\\?\\" + (std::filesystem::current_path() / L"relative" / L"Out").native());
+}
+
+// An output folder long enough that the copies under
+// .skydiag-analysis\<sha256>\<key>\ pass MAX_PATH: every write, the lock and
+// the review state still work.
+void TestLongOutputDirPublishes()
+{
+  const auto root = MakeTempDir(L"long_out");
+  auto outDir = root;
+  while (outDir.native().size() < 200u) {
+    outDir /= L"a_long_output_folder_segment";
+  }
+  const auto dump = root / L"Long.dmp";
+  const std::vector<std::uint8_t> bytes(4096u, 0x4Cu);
+  WriteBytes(dump, bytes);
+  const auto identity = ComputeIdentity(dump, bytes);
+  const auto family = IdentityArtifactDirectory(outDir, identity);
+  assert((family / L"Blackbox.jsonl").native().size() >= MAX_PATH);
+  auto result = MakeIdentityBoundResult(dump, outDir, identity, L"summary-long");
+  result.has_blackbox = true;
+
+  std::wstring err;
+  assert(WriteOutputs(result, &err));
+  assert(err.empty());
+  const nlohmann::json triage = {
+    { "review_status", "confirmed" },
+    { "reviewed", true },
+    { "ground_truth_mod", "Long.esp" },
+  };
+  assert(WriteTriageState(outDir, identity, triage, &err));
+  assert(WriteOutputs(result, &err));
+
+  const auto ioFamily = skydiag::ExtendedLengthPath(family);
+  const auto summary = nlohmann::json::parse(ReadAllText(ioFamily / L"Summary.json"));
+  assert(summary["summary_sentence"] == "summary-long");
+  assert(summary["triage"]["ground_truth_mod"] == "Long.esp");
+  assert(std::filesystem::exists(ioFamily / L"Blackbox.jsonl"));
+  const auto legacy = nlohmann::json::parse(
+    ReadAllText(skydiag::ExtendedLengthPath(outDir / L"Long_SkyrimDiagSummary.json")));
+  assert(legacy["dump_identity"] == DumpIdentityJson(identity));
+
+  std::error_code ec;
+  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
+}
+
 }  // namespace
 
 int main()
@@ -598,5 +656,7 @@ int main()
   TestOutputFamilyLockSerializesConcurrentPublish();
   TestOptionalArtifactCleanupIsFailSafe();
   TestWctCompanionFollowsPathRedaction();
+  TestExtendedLengthPathForms();
+  TestLongOutputDirPublishes();
   return 0;
 }

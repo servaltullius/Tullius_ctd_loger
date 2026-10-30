@@ -1,5 +1,6 @@
 #include "OutputWriterInternals.h"
 #include "DumpIdentity.h"
+#include "SkyrimDiagLongPath.h"
 #include "Utf.h"
 
 #include <Windows.h>
@@ -25,7 +26,7 @@ bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
   if (out) {
     out->clear();
   }
-  std::ifstream in(path, std::ios::binary);
+  std::ifstream in(skydiag::ExtendedLengthPath(path), std::ios::binary);
   if (!in) {
     return false;
   }
@@ -310,13 +311,16 @@ std::wstring JoinList(const std::vector<std::wstring>& items, std::size_t maxN, 
 
 bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content, std::wstring* err)
 {
+  // The copies under .skydiag-analysis\<sha256>\<key>\ pass MAX_PATH below
+  // an output folder of about 100 characters (SkyrimDiagLongPath.h).
+  const auto ioPath = skydiag::ExtendedLengthPath(path);
   std::error_code ec;
-  const auto parent = path.parent_path();
+  const auto parent = ioPath.parent_path();
   if (!parent.empty()) {
     std::filesystem::create_directories(parent, ec);
   }
   if (ec) {
-    if (err) *err = L"Failed to create output directory: " + parent.wstring();
+    if (err) *err = L"Failed to create output directory: " + path.parent_path().wstring();
     return false;
   }
 
@@ -324,7 +328,7 @@ bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content
   HANDLE file = INVALID_HANDLE_VALUE;
   constexpr int kMaxTempCreateAttempts = 8;
   for (int attempt = 0; attempt < kMaxTempCreateAttempts; ++attempt) {
-    tempPath = path;
+    tempPath = ioPath;
     tempPath += L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." +
       std::to_wstring(GetTickCount64()) + L"." +
       std::to_wstring(g_atomicWriteCounter.fetch_add(1u, std::memory_order_relaxed));
@@ -369,7 +373,7 @@ bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content
   }
   if (ok && !MoveFileExW(
       tempPath.c_str(),
-      path.c_str(),
+      ioPath.c_str(),
       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
     ok = false;
   }
