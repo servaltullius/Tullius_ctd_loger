@@ -18,19 +18,9 @@
 
 namespace skydiag::helper::internal {
 
-inline skydiag::helper::RetentionLimits BuildRetentionLimits(const skydiag::helper::HelperConfig& cfg)
-{
-  skydiag::helper::RetentionLimits limits{};
-  limits.maxCrashDumps = cfg.maxCrashDumps;
-  limits.maxHangDumps = cfg.maxHangDumps;
-  limits.maxManualDumps = cfg.maxManualDumps;
-  limits.maxEtwTraces = cfg.maxEtwTraces;
-  return limits;
-}
-
 inline void ApplyRetentionFromConfig(const skydiag::helper::HelperConfig& cfg, const std::filesystem::path& outBase)
 {
-  QueueRetentionSweep(outBase, BuildRetentionLimits(cfg));
+  QueueRetentionSweep(outBase, skydiag::helper::RetentionLimitsFromConfig(cfg));
 }
 
 // One line per freeze or manual dump: what the object memory added to it.

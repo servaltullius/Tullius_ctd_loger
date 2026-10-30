@@ -2,15 +2,23 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#ifdef _WIN32
+#include <Windows.h>
+#include <winioctl.h>
+#endif
+
 using skydiag::helper::RetentionLimits;
 using skydiag::helper::RotateLogFileIfNeeded;
 using skydiag::helper::ApplyRetentionToOutputDir;
+using skydiag::helper::PruneDumpsOverTotalBytes;
 
 static void WriteFile(const std::filesystem::path& path, std::size_t bytes = 1)
 {
@@ -426,9 +434,217 @@ static void Test_PrunesHelperLeftovers()
   std::filesystem::remove_all(dir, ec);
 }
 
+// Past the total budget the oldest dumps of any kind go with their files,
+// newest first: once one does not fit, every older one goes too, even one
+// small enough to fit. The newest dump of each kind stays.
+static void Test_PrunesOldestDumpsOverTheTotalBudget()
+{
+  const auto dir = MakeTempDir();
+  const auto crash1 = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
+  const auto hang2 = std::string("SkyrimDiag_Hang_20260101_000002_000");
+  const auto crash3 = dir / "SkyrimDiag_Crash_20260101_000003_000.dmp";
+  const auto manual4 = dir / "SkyrimDiag_Manual_20260101_000004_000.dmp";
+  const auto hang5 = dir / "SkyrimDiag_Hang_20260101_000005_000.dmp";
+  const auto crash6 = dir / "SkyrimDiag_Crash_20260101_000006_000.dmp";
+  WriteFile(crash1, 5);
+  WriteFile(dir / (hang2 + ".dmp"), 30);
+  WriteFile(dir / (hang2 + "_SkyrimDiagSummary.json"));
+  WriteFile(dir / "SkyrimDiag_WCT_20260101_000002_000.json");
+  WriteFile(dir / "SkyrimDiag_Incident_Hang_20260101_000002_000.json");
+  WriteFile(crash3, 40);
+  WriteFile(manual4, 20);
+  WriteFile(dir / "SkyrimDiag_WCT_Manual_20260101_000004_000.json");
+  WriteFile(hang5, 30);
+  WriteFile(crash6, 40);
+
+  // Newest of each kind: 40 + 30 + 20 = 90. crash3 fits (130), hang2 does
+  // not (160), and crash1 goes with it although 135 would fit.
+  PruneDumpsOverTotalBytes(dir, 150);
+
+  assert(Exists(crash6));
+  assert(Exists(hang5));
+  assert(Exists(manual4));
+  assert(Exists(dir / "SkyrimDiag_WCT_Manual_20260101_000004_000.json"));
+  assert(Exists(crash3));
+  assert(!Exists(dir / (hang2 + ".dmp")));
+  assert(!Exists(dir / (hang2 + "_SkyrimDiagSummary.json")));
+  assert(!Exists(dir / "SkyrimDiag_WCT_20260101_000002_000.json"));
+  assert(!Exists(dir / "SkyrimDiag_Incident_Hang_20260101_000002_000.json"));
+  assert(!Exists(crash1));
+}
+
+// A budget smaller than the newest dumps keeps the newest of each kind
+// written within the last day and only those; 0 is unlimited.
+static void Test_TotalBudgetKeepsTheRecentNewestOfEachKind()
+{
+  const auto dir = MakeTempDir();
+  const auto oldCrash = dir / "SkyrimDiag_Crash_20260101_000000_000.dmp";
+  const auto crash = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
+  const auto hang = dir / "SkyrimDiag_Hang_20260101_000002_000.dmp";
+  const auto manual = dir / "SkyrimDiag_Manual_20260101_000003_000.dmp";
+  WriteFile(oldCrash, 1);
+  WriteFile(crash, 100);
+  WriteFile(hang, 100);
+  WriteFile(manual, 100);
+
+  PruneDumpsOverTotalBytes(dir, 0);
+  assert(Exists(oldCrash));
+
+  PruneDumpsOverTotalBytes(dir, 50);
+  assert(!Exists(oldCrash));
+  assert(Exists(crash));
+  assert(Exists(hang));
+  assert(Exists(manual));
+}
+
+// A newest-of-its-kind older than a day does not hold budget: an old freeze
+// dump goes, while the latest capture stays however old and large it is.
+static void Test_TotalBudgetDropsAnOldNewestOfItsKind()
+{
+  const auto dir = MakeTempDir();
+  const auto oldHang = dir / "SkyrimDiag_Hang_20260101_000000_000.dmp";
+  const auto latestCrash = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
+  WriteFile(oldHang, 100);
+  WriteFile(latestCrash, 200);
+  SetAge(oldHang, std::chrono::hours(48));
+  SetAge(latestCrash, std::chrono::hours(48));
+
+  PruneDumpsOverTotalBytes(dir, 150);
+
+  assert(!Exists(oldHang));
+  assert(Exists(latestCrash));
+}
+
+// A crash recapture (SkyrimDiag_Crash_<ts>_Full.dmp, a full-memory dump)
+// shares its crash's timestamp and stays with it however large it is; the
+// sweep right after the recapture must not delete it.
+static void Test_TotalBudgetKeepsARecaptureWithItsCrash()
+{
+  const auto dir = MakeTempDir();
+  const auto older = dir / "SkyrimDiag_Crash_20260101_000000_000.dmp";
+  const auto crash = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
+  const auto recapture = dir / "SkyrimDiag_Crash_20260101_000001_000_Full.dmp";
+  const auto manifest = dir / "SkyrimDiag_Incident_CrashRecapture_20260101_000001_000.json";
+  WriteFile(older, 10);
+  WriteFile(crash, 10);
+  WriteFile(recapture, 500);
+  WriteFile(manifest);
+
+  PruneDumpsOverTotalBytes(dir, 50);
+
+  assert(!Exists(older));
+  assert(Exists(crash));
+  assert(Exists(recapture));
+  assert(Exists(manifest));
+}
+
+#ifdef _WIN32
+// A dump that cannot be deleted (open without FILE_SHARE_DELETE, as during an
+// analysis) keeps its reports; the next sweep removes both.
+static void Test_TotalBudgetKeepsReportsOfADumpInUse()
+{
+  const auto dir = MakeTempDir();
+  const auto stem = std::string("SkyrimDiag_Crash_20260101_000000_000");
+  const auto older = dir / (stem + ".dmp");
+  const auto summary = dir / (stem + "_SkyrimDiagSummary.json");
+  WriteFile(older, 100);
+  WriteFile(summary);
+  WriteFile(dir / "SkyrimDiag_Crash_20260101_000001_000.dmp", 100);
+
+  const HANDLE open = CreateFileW(older.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  assert(open != INVALID_HANDLE_VALUE);
+  PruneDumpsOverTotalBytes(dir, 150);
+  assert(Exists(older));
+  assert(Exists(summary));
+
+  CloseHandle(open);
+  PruneDumpsOverTotalBytes(dir, 150);
+  assert(!Exists(older));
+  assert(!Exists(summary));
+}
+#endif
+
+// A file of the given size that takes no disk space, so that a budget in
+// GiB can be reached. False where the file system cannot make one.
+static bool WriteSparseFile(const std::filesystem::path& path, std::uint64_t bytes)
+{
+#ifdef _WIN32
+  const HANDLE file =
+    CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  DWORD returned = 0;
+  FILE_END_OF_FILE_INFO end{};
+  end.EndOfFile.QuadPart = static_cast<LONGLONG>(bytes);
+  const bool ok = DeviceIoControl(file, FSCTL_SET_SPARSE, nullptr, 0, nullptr, 0, &returned, nullptr) &&
+    SetFileInformationByHandle(file, FileEndOfFileInfo, &end, sizeof(end));
+  CloseHandle(file);
+  return ok;
+#else
+  WriteFile(path);
+  std::error_code ec;
+  std::filesystem::resize_file(path, bytes, ec);
+  return !ec;
+#endif
+}
+
+// The sweep applies the budget, in GiB: two dumps of just over 1 GiB under
+// MaxTotalDumpGB=1 leave the newer one. The older one's trace goes with it
+// and does not take a MaxEtwTraces place from a trace that is left.
+static void Test_SweepAppliesTheTotalBudget()
+{
+  const auto dir = MakeTempDir();
+  const auto older = dir / "SkyrimDiag_Crash_20260101_000002_000.dmp";
+  const auto newer = dir / "SkyrimDiag_Crash_20260101_000003_000.dmp";
+  if (!WriteSparseFile(older, (1ull << 30u) + 1u) || !WriteSparseFile(newer, (1ull << 30u) + 1u)) {
+    std::puts("skipped Test_SweepAppliesTheTotalBudget: no sparse files in the temp folder");
+    return;
+  }
+  // The oldest trace has no dump left; the budget deletes the one of
+  // `older`. One place: the oldest trace must not lose it to a deleted one.
+  const auto keptTrace = dir / "SkyrimDiag_Hang_20260101_000001_000.etl";
+  WriteFile(keptTrace);
+  WriteFile(dir / "SkyrimDiag_Crash_20260101_000002_000.etl");
+
+  RetentionLimits limits{};
+  limits.maxTotalDumpGB = 1;
+  limits.maxEtwTraces = 1;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  assert(!Exists(older));
+  assert(!Exists(dir / "SkyrimDiag_Crash_20260101_000002_000.etl"));
+  assert(Exists(newer));
+  assert(Exists(keptTrace));
+}
+
+// The setting is in GiB: small dumps under a 1 GiB budget all stay.
+static void Test_TotalBudgetIsInGibibytes()
+{
+  const auto dir = MakeTempDir();
+  for (int i = 0; i < 4; ++i) {
+    WriteFile(dir / ("SkyrimDiag_Crash_20260101_00000" + std::to_string(i) + "_000.dmp"), 10);
+  }
+  RetentionLimits limits{};
+  limits.maxTotalDumpGB = 1;
+  ApplyRetentionToOutputDir(dir, limits);
+  for (int i = 0; i < 4; ++i) {
+    assert(Exists(dir / ("SkyrimDiag_Crash_20260101_00000" + std::to_string(i) + "_000.dmp")));
+  }
+}
+
 int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
+  Test_PrunesOldestDumpsOverTheTotalBudget();
+  Test_TotalBudgetKeepsTheRecentNewestOfEachKind();
+  Test_TotalBudgetDropsAnOldNewestOfItsKind();
+  Test_TotalBudgetKeepsARecaptureWithItsCrash();
+#ifdef _WIN32
+  Test_TotalBudgetKeepsReportsOfADumpInUse();
+#endif
+  Test_TotalBudgetIsInGibibytes();
+  Test_SweepAppliesTheTotalBudget();
   Test_PrunesHelperLeftovers();
   Test_PrunesHangWctAndEtlWithDump();
   Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();

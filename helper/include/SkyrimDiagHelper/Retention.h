@@ -70,6 +70,8 @@ struct RetentionLimits {
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
   std::uint32_t maxEtwTraces = 5;
+  // Crash, freeze and manual dumps together, in GiB.
+  std::uint32_t maxTotalDumpGB = 5;
 };
 
 inline bool StartsWith(std::string_view s, std::string_view prefix)
@@ -148,6 +150,19 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::filesystem::path& dir, 
     const auto name = PathPartUtf8(it->path().filename());
     if (StartsWith(name, stem + "_")) {
       std::filesystem::remove(it->path(), ec);
+    }
+  }
+}
+
+// The same from a listing already taken, for a sweep that deletes many
+// dumps: one folder scan instead of one per dump.
+inline void DeleteAssociatedDumpToolArtifacts(const std::vector<std::filesystem::path>& listing, const std::string& stem)
+{
+  const auto prefix = stem + "_";
+  std::error_code ec;
+  for (const auto& file : listing) {
+    if (StartsWith(PathPartUtf8(file.filename()), prefix)) {
+      std::filesystem::remove(file, ec);
     }
   }
 }
@@ -233,6 +248,70 @@ inline std::unordered_map<std::string, std::uint32_t> BuildTimestampRefCounts(co
   return refs;
 }
 
+// Removes one dump and what was written for it. tsRefs counts the dumps of
+// its kind per timestamp; the incident manifest goes with the last of them.
+// A dump that cannot be deleted (open in an analysis) keeps its reports, so
+// it is not left without them; a later sweep tries again. listing, when
+// given, is the folder as the sweep found it.
+inline void RemoveDumpAndArtifacts(
+  const std::filesystem::path& dir,
+  const DatedFile& dump,
+  std::string_view dumpPrefix,
+  std::unordered_map<std::string, std::uint32_t>& tsRefs,
+  bool deleteWctForTimestamp,
+  bool deleteManualWctForTimestamp,
+  bool deleteEtlForStem,
+  const std::vector<std::filesystem::path>* listing = nullptr)
+{
+  std::error_code ec;
+  const std::string_view incidentKind = IncidentKindForDumpPrefix(dumpPrefix);
+  const auto& p = dump.path;
+  const auto stem = PathPartUtf8(p.stem());
+
+  std::filesystem::remove(p, ec);
+  if (ec) {
+    return;
+  }
+  if (listing) {
+    DeleteAssociatedDumpToolArtifacts(*listing, stem);
+  } else {
+    DeleteAssociatedDumpToolArtifacts(dir, stem);
+  }
+
+  if (deleteEtlForStem) {
+    auto etl = p;
+    etl.replace_extension(".etl");
+    std::filesystem::remove(etl, ec);
+  }
+
+  if (!incidentKind.empty()) {
+    auto it = tsRefs.find(dump.ts);
+    if (it != tsRefs.end()) {
+      if (it->second > 0) {
+        --it->second;
+      }
+      if (it->second == 0) {
+        const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dump.ts + ".json");
+        std::filesystem::remove(manifest, ec);
+        if (incidentKind == "Crash") {
+          // A recapture dump (SkyrimDiag_Crash_<ts>_Richer.dmp) writes its
+          // own manifest under the same timestamp.
+          std::filesystem::remove(dir / ("SkyrimDiag_Incident_CrashRecapture_" + dump.ts + ".json"), ec);
+        }
+      }
+    }
+  }
+
+  if (deleteWctForTimestamp) {
+    const auto wct = dir / ("SkyrimDiag_WCT_" + dump.ts + ".json");
+    std::filesystem::remove(wct, ec);
+  }
+  if (deleteManualWctForTimestamp) {
+    const auto wct = dir / ("SkyrimDiag_WCT_Manual_" + dump.ts + ".json");
+    std::filesystem::remove(wct, ec);
+  }
+}
+
 inline void PruneDumpFilesFromCollected(
   const std::filesystem::path& dir,
   const std::vector<DatedFile>& dumps,
@@ -246,48 +325,10 @@ inline void PruneDumpFilesFromCollected(
     return;
   }
 
-  std::error_code ec;
-  const std::string_view incidentKind = IncidentKindForDumpPrefix(dumpPrefix);
   auto tsRefs = BuildTimestampRefCounts(dumps);
   for (std::size_t i = maxCount; i < dumps.size(); i++) {
-    const auto p = dumps[i].path;
-    const auto stem = PathPartUtf8(p.stem());
-
-    std::filesystem::remove(p, ec);
-    DeleteAssociatedDumpToolArtifacts(dir, stem);
-
-    if (deleteEtlForStem) {
-      auto etl = p;
-      etl.replace_extension(".etl");
-      std::filesystem::remove(etl, ec);
-    }
-
-    if (!incidentKind.empty()) {
-      auto it = tsRefs.find(dumps[i].ts);
-      if (it != tsRefs.end()) {
-        if (it->second > 0) {
-          --it->second;
-        }
-        if (it->second == 0) {
-          const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dumps[i].ts + ".json");
-          std::filesystem::remove(manifest, ec);
-          if (incidentKind == "Crash") {
-            // A recapture dump (SkyrimDiag_Crash_<ts>_Richer.dmp) writes its
-            // own manifest under the same timestamp.
-            std::filesystem::remove(dir / ("SkyrimDiag_Incident_CrashRecapture_" + dumps[i].ts + ".json"), ec);
-          }
-        }
-      }
-    }
-
-    if (deleteWctForTimestamp) {
-      const auto wct = dir / ("SkyrimDiag_WCT_" + dumps[i].ts + ".json");
-      std::filesystem::remove(wct, ec);
-    }
-    if (deleteManualWctForTimestamp) {
-      const auto wct = dir / ("SkyrimDiag_WCT_Manual_" + dumps[i].ts + ".json");
-      std::filesystem::remove(wct, ec);
-    }
+    RemoveDumpAndArtifacts(
+      dir, dumps[i], dumpPrefix, tsRefs, deleteWctForTimestamp, deleteManualWctForTimestamp, deleteEtlForStem);
   }
 }
 
@@ -334,6 +375,114 @@ inline void PruneEtwTraces(const std::filesystem::path& dir, std::uint32_t maxCo
   auto crash = CollectFilesByPrefixAndExt(dir, "SkyrimDiag_Crash_", ".etl");
   etls.insert(etls.end(), crash.begin(), crash.end());
   PruneEtwTracesFromCollected(std::move(etls), maxCount);
+}
+
+// Each dump kind and the files that go with one of its dumps.
+struct DumpKindFiles {
+  std::string_view prefix;
+  bool deleteWctForTimestamp;
+  bool deleteManualWctForTimestamp;
+  bool deleteEtlForStem;
+};
+
+inline constexpr DumpKindFiles kCrashDumpFiles{ "SkyrimDiag_Crash_", false, false, true };
+inline constexpr DumpKindFiles kHangDumpFiles{ "SkyrimDiag_Hang_", true, false, true };
+inline constexpr DumpKindFiles kManualDumpFiles{ "SkyrimDiag_Manual_", false, true, false };
+
+// The count limits bound each kind, but a dump of a large load order is
+// 0.5-0.9 GB (it holds the code of every loaded module), so the default
+// counts alone allow about 40 GB. Past maxTotalBytes the oldest dumps of any
+// kind go, with what was written for them: newest first, once one does not
+// fit, it and every older one go. Two captures always stay, with every dump
+// of their timestamp (a crash recapture, _Full or _Richer, shares its
+// crash's):
+// - the latest capture, so the folder is never emptied;
+// - the newest capture of each kind while it is younger than recentAge, which
+//   a viewer may still open after the game exits.
+// A newest-of-its-kind that is older (a manual capture from months ago) does
+// not hold budget forever. 0 = unlimited.
+inline void PruneDumpsOverTotalBytes(
+  const std::filesystem::path& dir,
+  std::uint64_t maxTotalBytes,
+  std::chrono::seconds recentAge = std::chrono::hours(24))
+{
+  if (maxTotalBytes == 0) {
+    return;
+  }
+
+  struct SizedDump {
+    DatedFile dump;
+    std::size_t kind = 0;
+    std::uint64_t bytes = 0;
+  };
+  const DumpKindFiles* kinds[] = { &kCrashDumpFiles, &kHangDumpFiles, &kManualDumpFiles };
+  std::unordered_map<std::string, std::uint32_t> tsRefs[std::size(kinds)];
+  std::string newestOfKind[std::size(kinds)];
+  std::vector<SizedDump> all;
+  const auto files = CollectRegularFiles(dir);
+  for (std::size_t k = 0; k < std::size(kinds); ++k) {
+    const auto dumps = CollectFilesByPrefixAndExt(files, kinds[k]->prefix, ".dmp");
+    tsRefs[k] = BuildTimestampRefCounts(dumps);
+    if (!dumps.empty()) {
+      newestOfKind[k] = dumps.front().ts;
+    }
+    for (const auto& dump : dumps) {
+      std::error_code sizeEc;
+      const auto size = std::filesystem::file_size(dump.path, sizeEc);
+      all.push_back(SizedDump{ dump, k, sizeEc ? 0u : static_cast<std::uint64_t>(size) });
+    }
+  }
+  if (all.empty()) {
+    return;
+  }
+  std::sort(all.begin(), all.end(), [](const SizedDump& a, const SizedDump& b) {
+    if (a.dump.ts != b.dump.ts) {
+      return a.dump.ts > b.dump.ts;
+    }
+    return PathPartUtf8(a.dump.path.filename()) < PathPartUtf8(b.dump.path.filename());
+  });
+
+  const auto latestTs = all.front().dump.ts;
+  const auto now = std::filesystem::file_time_type::clock::now();
+  const auto alwaysKept = [&](const SizedDump& entry) {
+    if (entry.dump.ts != newestOfKind[entry.kind]) {
+      return false;
+    }
+    if (entry.dump.ts == latestTs) {
+      return true;
+    }
+    std::error_code timeEc;
+    const auto written = std::filesystem::last_write_time(entry.dump.path, timeEc);
+    return timeEc || now - written < recentAge;
+  };
+
+  std::uint64_t total = 0;
+  std::vector<const SizedDump*> rest;
+  for (const auto& entry : all) {
+    if (alwaysKept(entry)) {
+      total += entry.bytes;
+    } else {
+      rest.push_back(&entry);
+    }
+  }
+  bool full = false;
+  for (const auto* entry : rest) {
+    if (!full && total + entry->bytes <= maxTotalBytes) {
+      total += entry->bytes;
+      continue;
+    }
+    full = true;
+    const auto& kind = *kinds[entry->kind];
+    RemoveDumpAndArtifacts(
+      dir,
+      entry->dump,
+      kind.prefix,
+      tsRefs[entry->kind],
+      kind.deleteWctForTimestamp,
+      kind.deleteManualWctForTimestamp,
+      kind.deleteEtlForStem,
+      &files);
+  }
 }
 
 // The dump tool keeps an identity-bound copy of every analysis under
@@ -463,43 +612,30 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
   }
 
   const auto files = CollectRegularFiles(outBase);
-  const auto crashDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".dmp");
-  const auto hangDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Hang_", ".dmp");
-  const auto manualDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Manual_", ".dmp");
+  const auto pruneByCount = [&](const DumpKindFiles& kind, std::uint32_t maxCount) {
+    PruneDumpFilesFromCollected(
+      outBase,
+      CollectFilesByPrefixAndExt(files, kind.prefix, ".dmp"),
+      kind.prefix,
+      maxCount,
+      kind.deleteWctForTimestamp,
+      kind.deleteManualWctForTimestamp,
+      kind.deleteEtlForStem);
+  };
+  pruneByCount(kCrashDumpFiles, limits.maxCrashDumps);
+  pruneByCount(kHangDumpFiles, limits.maxHangDumps);
+  pruneByCount(kManualDumpFiles, limits.maxManualDumps);
+  PruneDumpsOverTotalBytes(outBase, static_cast<std::uint64_t>(limits.maxTotalDumpGB) << 30u);
 
-  PruneDumpFilesFromCollected(
-    outBase,
-    crashDumps,
-    "SkyrimDiag_Crash_",
-    limits.maxCrashDumps,
-    /*deleteWctForTimestamp=*/false,
-    /*deleteManualWctForTimestamp=*/false,
-    /*deleteEtlForStem=*/true);
-
-  PruneDumpFilesFromCollected(
-    outBase,
-    hangDumps,
-    "SkyrimDiag_Hang_",
-    limits.maxHangDumps,
-    /*deleteWctForTimestamp=*/true,
-    /*deleteManualWctForTimestamp=*/false,
-    /*deleteEtlForStem=*/true);
-
-  PruneDumpFilesFromCollected(
-    outBase,
-    manualDumps,
-    "SkyrimDiag_Manual_",
-    limits.maxManualDumps,
-    /*deleteWctForTimestamp=*/false,
-    /*deleteManualWctForTimestamp=*/true,
-    /*deleteEtlForStem=*/false);
-
-  auto etls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Hang_", ".etl");
-  auto crashEtls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".etl");
+  // The steps above deleted dumps with their traces; a trace already gone
+  // must not take one of the MaxEtwTraces places.
+  const auto remaining = CollectRegularFiles(outBase);
+  auto etls = CollectFilesByPrefixAndExt(remaining, "SkyrimDiag_Hang_", ".etl");
+  auto crashEtls = CollectFilesByPrefixAndExt(remaining, "SkyrimDiag_Crash_", ".etl");
   etls.insert(etls.end(), crashEtls.begin(), crashEtls.end());
   PruneEtwTracesFromCollected(std::move(etls), limits.maxEtwTraces);
 
-  PruneHelperLeftovers(files);
+  PruneHelperLeftovers(remaining);
   PruneOrphanedAnalysisCaches(outBase);
 }
 

@@ -24,6 +24,7 @@ using skydiag::helper::kDefaultManualCaptureHotkey;
 using skydiag::helper::kHotkeyModAlt;
 using skydiag::helper::kHotkeyModControl;
 using skydiag::helper::LoadConfig;
+using skydiag::helper::RetentionLimitsFromConfig;
 
 namespace {
 
@@ -212,6 +213,28 @@ void TestOutputDirFallbacks(const IniFile& ini)
   Require(blank.outputDirFallbacks.size() == 1u, "the default folder is not its own fallback");
 }
 
+// MaxTotalDumpGB: 5 when missing, read as written, 0 = unlimited, and
+// clamped to 1024. The retention sweep gets it (and the counts) from the
+// config: 0 must reach it as unlimited, not fall back to the default.
+void TestTotalDumpBudgetIsRead(const IniFile& ini)
+{
+  ini.Write("[SkyrimDiagHelper]\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 5u, "MaxTotalDumpGB defaults to 5");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=12\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 12u, "MaxTotalDumpGB is read");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=5000\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 1024u, "MaxTotalDumpGB is clamped to 1024");
+
+  ini.Write(
+    "[SkyrimDiagHelper]\r\nMaxTotalDumpGB=0\r\nMaxCrashDumps=3\r\nMaxHangDumps=4\r\nMaxManualDumps=6\r\n"
+    "MaxEtwTraces=7\r\n");
+  const auto limits = RetentionLimitsFromConfig(LoadConfig(nullptr));
+  Require(limits.maxTotalDumpGB == 0u, "MaxTotalDumpGB=0 reaches the sweep as unlimited");
+  Require(limits.maxCrashDumps == 3u && limits.maxHangDumps == 4u && limits.maxManualDumps == 6u,
+    "the dump counts reach the sweep");
+  Require(limits.maxEtwTraces == 7u, "MaxEtwTraces reaches the sweep");
+}
+
 }  // namespace
 
 int main()
@@ -226,6 +249,7 @@ int main()
     TestAnsiOutputDirUsesTheCodePage(ini);
     TestLookupsMatchTheWindowsApi();
     TestOutputDirFallbacks(ini);
+    TestTotalDumpBudgetIsRead(ini);
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "FAILED: %s\n", ex.what());
     return 1;

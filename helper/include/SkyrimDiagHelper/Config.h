@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
+#include "SkyrimDiagHelper/Retention.h"
 
 namespace skydiag::helper {
 
@@ -75,6 +76,8 @@ struct HelperConfig {
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
   std::uint32_t maxEtwTraces = 5;
+  // Crash, freeze and manual dumps together, in GiB.
+  std::uint32_t maxTotalDumpGB = 5;
 
   // Helper log rotation (0 = unlimited/disabled)
   std::uint32_t maxHelperLogBytes = 8u * 1024u * 1024u;
@@ -107,5 +110,17 @@ inline std::filesystem::path ResolveOutputDirAgainstExeDir(
 }
 
 HelperConfig LoadConfig(std::wstring* err);
+
+// The retention settings of a config, as every retention sweep applies them.
+inline RetentionLimits RetentionLimitsFromConfig(const HelperConfig& cfg)
+{
+  RetentionLimits limits{};
+  limits.maxCrashDumps = cfg.maxCrashDumps;
+  limits.maxHangDumps = cfg.maxHangDumps;
+  limits.maxManualDumps = cfg.maxManualDumps;
+  limits.maxEtwTraces = cfg.maxEtwTraces;
+  limits.maxTotalDumpGB = cfg.maxTotalDumpGB;
+  return limits;
+}
 
 }  // namespace skydiag::helper
