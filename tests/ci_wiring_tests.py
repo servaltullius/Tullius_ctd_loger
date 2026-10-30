@@ -272,8 +272,9 @@ def check_release_notes_rc_fallback(failures: list[str]) -> None:
             failures.append("--strict rejected a tag that has a draft")
 
 
-def check_release_notes_have_no_strikethrough_ranges(failures: list[str]) -> None:
-    # v0.2.72 shipped with `0.5~0.9GB ... 58~60MB` struck through on GitHub.
+def check_markdown_has_no_strikethrough_ranges(failures: list[str]) -> None:
+    # v0.2.72 shipped with `0.5~0.9GB ... 58~60MB` struck through on GitHub,
+    # and the same ranges sat in README_KO and two ADRs.
     resolver = _load_script("resolve_release_notes.py")
     cases = {
         "덤프 0.5~0.9GB였고, 수동 캡처가 58~60MB였습니다.\n": [1],
@@ -290,8 +291,9 @@ def check_release_notes_have_no_strikethrough_ranges(failures: list[str]) -> Non
         if actual != expected:
             failures.append(f"find_strikethrough_tildes({text!r}) = {actual}, expected {expected}")
 
-    notes = [REPO_ROOT / "CHANGELOG.md"]
-    notes += sorted((REPO_ROOT / "docs" / "release" / "drafts").glob("*.md"))
+    notes = sorted(REPO_ROOT.glob("*.md"))
+    for folder in ("doc", "docs", "tests", "tools"):
+        notes += sorted((REPO_ROOT / folder).rglob("*.md"))
     for path in notes:
         for line in resolver.find_strikethrough_tildes(_read(path)):
             failures.append(
@@ -691,7 +693,7 @@ def main() -> int:
     check_clang_tidy_is_wired(failures)
     check_clang_tidy_rejects_test_only_entries(failures)
     check_release_notes_rc_fallback(failures)
-    check_release_notes_have_no_strikethrough_ranges(failures)
+    check_markdown_has_no_strikethrough_ranges(failures)
     check_release_prerelease_classification(failures)
     check_fuzzers_are_wired(failures)
     check_sanitizers_are_wired(failures)
