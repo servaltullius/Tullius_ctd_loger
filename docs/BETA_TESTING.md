@@ -39,6 +39,7 @@
     - `ResourceLogThrottleMaxSampleDivisor=8`
 - `SkyrimDiagHelper.ini`
   - `DumpMode=1` 기본 권장 (FullMemory는 파일이 매우 커질 수 있음)
+  - 덤프를 외부 역공학 도구로 직접 볼 때만 `DumpAllModuleCode=1` (모든 모듈 코드, 덤프 하나 0.5~0.9GB)
   - “fault module을 특정하지 못함”이 반복되면 **해당 문제 상황에서만** `DumpMode=2`로 올려 재캡처
   - 반복 버킷 자동 재캡처(기본 OFF):
     - `EnableAutoRecaptureOnUnknownCrash=1`

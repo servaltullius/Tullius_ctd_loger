@@ -22,6 +22,10 @@ struct HelperConfig {
   std::uint32_t hangThresholdInMenuSec = 30;
   std::uint32_t hangThresholdLoadingSec = 600;
   DumpMode dumpMode = DumpMode::kDefault;
+  // ADR-0023: DumpMode=1 dumps write only the game executable's code whole,
+  // and of other modules the code the stacks point at. 1 writes every
+  // module's code (and module headers in crash dumps), as through v0.2.71.
+  bool dumpAllModuleCode = false;
   std::wstring outputDir;  // empty => next to exe
   // Tried in order when outputDir cannot be created or written (see
   // MakeOutputBase): without them a bad OutputDir lost every capture and log.

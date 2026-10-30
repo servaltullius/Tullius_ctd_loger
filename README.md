@@ -129,12 +129,13 @@ Helper diagnostics options (`SkyrimDiagHelper.ini`):
 |--------|---------|------|
 | `EnableCompatibilityPreflight` | `1` | Writes startup compatibility checks to `SkyrimDiag_Preflight.json`. |
 | `EnableWerDumpFallbackHint` | `1` | Writes WER LocalDumps setup hint when dump capture fails. |
+| `DumpAllModuleCode` | `0` | With `DumpMode=1` a dump holds the game executable's code whole and, of other modules, the code the threads' stacks point at (an estimated 50–100 MB a dump on a large load order). `1` writes every module's code and, in crash dumps, every module's headers and resources, as up to v0.2.71 (0.5–0.9 GB), for reverse-engineering tools that read only the dump. |
 
 ## Retention / Disk Cleanup
 
 Helper auto-cleans old dumps and artifacts via `SkyrimDiagHelper.ini`:
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = unlimited)
-- `MaxTotalDumpGB` (default 5, 0 = unlimited): total size of crash, hang and manual dumps together. One dump of a large load order is often 0.5–0.9 GB. Over this size the oldest dumps of any kind are deleted with their reports. Always kept: the latest capture, and the newest capture of each kind for a day (a viewer may still open it). With `DumpMode=2` or crash recapture a single dump can take several GB; raise the limit to keep more of those.
+- `MaxTotalDumpGB` (default 5, 0 = unlimited): total size of crash, hang and manual dumps together. Over this size the oldest dumps of any kind are deleted with their reports. Always kept: the latest capture, and the newest capture of each kind for a day (a viewer may still open it). With `DumpAllModuleCode=1` a dump of a large load order takes 0.5–0.9 GB, and with `DumpMode=2` or crash recapture a single dump can take several GB; raise the limit to keep more of those.
 - `MaxHelperLogBytes`, `MaxHelperLogFiles` (log rotation), `MaxHelperSessionLogs` (earlier sessions' logs kept, default 5)
 - Analysis copies under `.skydiag-analysis/` and lock files under `.skydiag-locks/` whose dump is gone are removed after a day. Review state under `.skydiag-triage/` is kept.
 

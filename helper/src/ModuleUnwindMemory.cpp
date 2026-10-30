@@ -30,6 +30,8 @@ std::wstring Lower(std::wstring text)
   return text;
 }
 
+}  // namespace
+
 std::wstring WindowsDirectoryPrefix()
 {
   wchar_t buffer[MAX_PATH]{};
@@ -44,8 +46,11 @@ std::wstring WindowsDirectoryPrefix()
   return prefix;
 }
 
-// Adds the ranges for one module. Returns the bytes added.
-std::size_t AddModule(HANDLE process, std::uint64_t base, std::uint32_t imageSize, std::vector<ExtraDumpMemory>& out)
+std::size_t AddModuleUnwindMemory(
+  HANDLE process,
+  std::uint64_t base,
+  std::uint32_t imageSize,
+  std::vector<ExtraDumpMemory>& out)
 {
   IMAGE_DOS_HEADER dos{};
   if (!ReadExact(process, base, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew <= 0 ||
@@ -110,8 +115,6 @@ std::size_t AddModule(HANDLE process, std::uint64_t base, std::uint32_t imageSiz
   }
   return added;
 }
-
-}  // namespace
 
 std::vector<ExtraDumpMemory> UnwindInfoRanges(
   std::uint64_t imageBase,
@@ -198,7 +201,7 @@ std::vector<ExtraDumpMemory> CollectModuleUnwindMemory(HANDLE process)
       continue;  // game, SKSE and mod files do not change under a Windows update
     }
     std::vector<ExtraDumpMemory> moduleRanges;
-    const std::size_t bytes = AddModule(
+    const std::size_t bytes = AddModuleUnwindMemory(
       process, reinterpret_cast<std::uint64_t>(info.lpBaseOfDll), info.SizeOfImage, moduleRanges);
     if (total + bytes > kModuleUnwindMemoryBudget) {
       continue;  // a smaller module later may still fit

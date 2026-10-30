@@ -30,6 +30,11 @@ struct DumpProfile
   bool preferMainThread = false;
   bool preferWctThreads = false;
   bool preferCrashContext = false;
+  // DumpAllModuleCode, as the profile was resolved with.
+  bool allModuleCode = false;
+  // ADR-0023: of the module code, only the game executable's is written
+  // whole; the writer adds what the stacks point at instead.
+  bool gameAndStackCodeOnly = false;
 };
 
 // MINIDUMP_TYPE flag MiniDumpIgnoreInaccessibleMemory, spelled out so this
@@ -51,6 +56,10 @@ constexpr bool ShouldRetryDumpIgnoringInaccessibleMemory(std::uint32_t dumpType,
 }
 
 const char* CaptureKindToString(CaptureKind captureKind);
-DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind);
+// allModuleCode (ini DumpAllModuleCode=1): every module's code and, for
+// crash dumps, MiniDumpWithModuleHeaders, as through v0.2.71 (ADR-0023).
+DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind, bool allModuleCode = false);
+// "none", "all" or "game_and_stacks": the module code the profile writes.
+const char* CodeSegmentsScopeToString(const DumpProfile& profile);
 
 }  // namespace skydiag::helper

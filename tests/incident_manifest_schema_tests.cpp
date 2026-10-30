@@ -100,6 +100,10 @@ int main()
     std::cerr << "ERROR: Incident manifest schema must include code-segment capture flags\n";
     return 1;
   }
+  if (!Contains(incidentManifest, "code_segments_scope") || !Contains(outputWriter, "code_segments_scope")) {
+    std::cerr << "ERROR: Incident manifest and summary must record which modules' code the dump holds (ADR-0023)\n";
+    return 1;
+  }
   if (!Contains(incidentManifest, "recapture_evaluation")) {
     std::cerr << "ERROR: Incident manifest schema must include recapture_evaluation\n";
     return 1;

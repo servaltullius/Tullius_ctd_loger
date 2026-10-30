@@ -183,6 +183,7 @@ void TestOutputWriterEmitsAllFields()
     "\"reasons\"",
     "\"escalation_level\"",
     "\"include_code_segments\"",
+    "\"code_segments_scope\"",
     "\"include_process_thread_data\"",
     "\"include_full_memory_info\"",
     "\"include_module_headers\"",

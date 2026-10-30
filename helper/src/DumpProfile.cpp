@@ -17,11 +17,12 @@ const char* CaptureKindToString(CaptureKind captureKind)
   return "crash";
 }
 
-DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind)
+DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind, bool allModuleCode)
 {
   DumpProfile profile{};
   profile.captureKind = captureKind;
   profile.baseMode = baseMode;
+  profile.allModuleCode = allModuleCode;
 
   if (baseMode != DumpMode::kMini) {
     profile.includeThreadInfo = true;
@@ -40,7 +41,10 @@ DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind)
       if (baseMode == DumpMode::kDefault) {
         profile.includeProcessThreadData = true;
         profile.includeFullMemoryInfo = true;
-        profile.includeModuleHeaders = true;
+        // ADR-0023: this flag adds every module's resources and relocations
+        // as well; the writer adds the headers, exports and unwind data the
+        // analysis needs instead.
+        profile.includeModuleHeaders = allModuleCode;
       }
       break;
     case CaptureKind::Hang:
@@ -75,7 +79,20 @@ DumpProfile ResolveDumpProfile(DumpMode baseMode, CaptureKind captureKind)
       break;
   }
 
+  // ADR-0023: DumpMode=1 crash, freeze and manual dumps. A crash recapture is
+  // asked for to get more, and keeps every module's code.
+  profile.gameAndStackCodeOnly = baseMode == DumpMode::kDefault && captureKind != CaptureKind::CrashRecapture &&
+    profile.includeCodeSegments && !allModuleCode;
+
   return profile;
+}
+
+const char* CodeSegmentsScopeToString(const DumpProfile& profile)
+{
+  if (!profile.includeCodeSegments && !profile.includeFullMemory) {
+    return "none";
+  }
+  return profile.gameAndStackCodeOnly ? "game_and_stacks" : "all";
 }
 
 }  // namespace skydiag::helper

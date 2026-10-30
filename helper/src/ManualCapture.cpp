@@ -131,7 +131,8 @@ void DoManualCapture(
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
   const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
-    skydiag::helper::CaptureKind::Manual);
+    skydiag::helper::CaptureKind::Manual,
+    cfg.dumpAllModuleCode);
   auto pssSnapshot = TryCapturePssSnapshotForFreeze(cfg.enablePssSnapshotForFreeze, proc.process);
   if (pssSnapshot.requested) {
     if (pssSnapshot.used) {
@@ -215,6 +216,7 @@ void DoManualCapture(
       ctx["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
       ctx["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
+      const auto writtenProfile = WrittenDumpProfile(dumpProfile, objectMemory);
       const auto manifest = MakeIncidentManifestV1(
         "manual",
         ts,
@@ -225,7 +227,7 @@ void DoManualCapture(
         /*etwStatus=*/"disabled",
         stateFlags,
         ctx,
-        &dumpProfile,
+        &writtenProfile,
         &freezeRecaptureDecision,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);

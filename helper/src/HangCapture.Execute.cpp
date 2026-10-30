@@ -100,7 +100,8 @@ HangTickResult ExecuteConfirmedHangCapture(
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
   const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
-    skydiag::helper::CaptureKind::Hang);
+    skydiag::helper::CaptureKind::Hang,
+    cfg.dumpAllModuleCode);
   auto pssSnapshot = TryCapturePssSnapshotForFreeze(cfg.enablePssSnapshotForFreeze, proc.process);
   if (pssSnapshot.requested) {
     if (pssSnapshot.used) {
@@ -211,6 +212,7 @@ HangTickResult ExecuteConfirmedHangCapture(
       ctx["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
       ctx["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
+      const auto writtenProfile = WrittenDumpProfile(dumpProfile, objectMemory);
       const auto manifest = MakeIncidentManifestV1(
         "hang",
         ts,
@@ -221,7 +223,7 @@ HangTickResult ExecuteConfirmedHangCapture(
         etwStatus,
         stateFlags,
         ctx,
-        &dumpProfile,
+        &writtenProfile,
         &freezeRecaptureDecision,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);

@@ -13,9 +13,29 @@
 
 namespace skydiag::helper {
 
+// ADR-0023: dumps that write only the game executable's code whole get the
+// code their threads' RIPs and stack values point at instead, and the
+// headers, exports and unwind data of the game and of the modules those
+// point into. All zero for dumps that write every module's code.
+struct DumpCodeMemoryStats
+{
+  bool collected = false;
+  // The game executable was not found, so every module's code was written.
+  bool all_modules_fallback = false;
+  std::uint32_t threads = 0;  // threads examined
+  std::uint32_t values = 0;   // RIPs and stack values that pointed into module code
+  std::uint32_t code_ranges = 0;
+  std::uint64_t code_bytes = 0;
+  std::uint32_t modules = 0;  // modules given headers, exports and unwind data
+  std::uint64_t module_bytes = 0;
+  std::uint32_t elapsed_us = 0;
+  bool budget_reached = false;  // the byte or time budget stopped it early
+};
+
 // Freeze and manual dumps: the game objects that the registers and stack top
 // of the threads that matter pointed at, kept in the dump (ADR-0010, addendum
-// 2026-10-22). All zero for crash dumps, PSS snapshots and full-memory dumps.
+// 2026-10-22). All zero for crash dumps, PSS snapshots and full-memory dumps,
+// except `code`.
 struct DumpObjectMemoryStats
 {
   std::uint32_t threads_selected = 0;
@@ -34,6 +54,8 @@ struct DumpObjectMemoryStats
   std::uint64_t lock_bytes = 0;
   std::uint32_t lock_elapsed_us = 0;
   bool lock_budget_reached = false;
+
+  DumpCodeMemoryStats code{};
 };
 
 bool WriteDumpWithStreams(

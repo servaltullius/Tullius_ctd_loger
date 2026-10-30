@@ -131,7 +131,12 @@ std::string BuildReportText(
       }
       if (captureProfile.contains("include_code_segments") && captureProfile["include_code_segments"].is_boolean()) {
         rpt << "CaptureProfileCodeSegments: "
-            << (captureProfile["include_code_segments"].get<bool>() ? "1" : "0") << "\n";
+            << (captureProfile["include_code_segments"].get<bool>() ? "1" : "0");
+        // ADR-0023: which modules' code ("game_and_stacks", "all", "none").
+        if (captureProfile.contains("code_segments_scope") && captureProfile["code_segments_scope"].is_string()) {
+          rpt << " (" << captureProfile["code_segments_scope"].get<std::string>() << ")";
+        }
+        rpt << "\n";
       }
       if (captureProfile.contains("include_process_thread_data") &&
           captureProfile["include_process_thread_data"].is_boolean()) {

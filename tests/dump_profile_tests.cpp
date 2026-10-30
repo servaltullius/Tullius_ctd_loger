@@ -7,6 +7,7 @@
 
 using skydiag::helper::CaptureKind;
 using skydiag::helper::CaptureKindToString;
+using skydiag::helper::CodeSegmentsScopeToString;
 using skydiag::helper::DumpMode;
 using skydiag::helper::DumpProfile;
 using skydiag::helper::ResolveDumpProfile;
@@ -120,9 +121,24 @@ int main()
   AssertDefaultCrashBase(crashDefault);
   assert(crashDefault.includeProcessThreadData);
   assert(crashDefault.includeFullMemoryInfo);
-  assert(crashDefault.includeModuleHeaders);
+  // ADR-0023: module headers bring every module's resources along; the writer
+  // adds the headers, exports and unwind data it needs instead.
+  assert(!crashDefault.includeModuleHeaders);
   assert(!crashDefault.includeIndirectMemory);
   assert(!crashDefault.ignoreInaccessibleMemory);
+  assert(!crashDefault.allModuleCode);
+  assert(crashDefault.gameAndStackCodeOnly);
+  assert(std::string_view(CodeSegmentsScopeToString(crashDefault)) == "game_and_stacks");
+
+  // DumpAllModuleCode=1: the v0.2.71 crash profile.
+  const DumpProfile crashDefaultAllCode = ResolveDumpProfile(DumpMode::kDefault, CaptureKind::Crash, true);
+  AssertDefaultCrashBase(crashDefaultAllCode);
+  assert(crashDefaultAllCode.includeProcessThreadData);
+  assert(crashDefaultAllCode.includeFullMemoryInfo);
+  assert(crashDefaultAllCode.includeModuleHeaders);
+  assert(crashDefaultAllCode.allModuleCode);
+  assert(!crashDefaultAllCode.gameAndStackCodeOnly);
+  assert(std::string_view(CodeSegmentsScopeToString(crashDefaultAllCode)) == "all");
 
   const DumpProfile crashMini = ResolveDumpProfile(DumpMode::kMini, CaptureKind::Crash);
   assert(crashMini.captureKind == CaptureKind::Crash);
@@ -136,6 +152,8 @@ int main()
   assert(crashMini.preferCrashContext);
   assert(!crashMini.preferWctThreads);
   AssertCrashRicherFlagsDisabled(crashMini);
+  assert(!crashMini.gameAndStackCodeOnly);
+  assert(std::string_view(CodeSegmentsScopeToString(crashMini)) == "none");
 
   const DumpProfile crashFull = ResolveDumpProfile(DumpMode::kFull, CaptureKind::Crash);
   assert(crashFull.captureKind == CaptureKind::Crash);
@@ -149,6 +167,8 @@ int main()
   assert(crashFull.preferCrashContext);
   assert(!crashFull.preferWctThreads);
   AssertCrashRicherFlagsDisabled(crashFull);
+  assert(!crashFull.gameAndStackCodeOnly);
+  assert(std::string_view(CodeSegmentsScopeToString(crashFull)) == "all");
 
   const DumpProfile recaptureDefault = ResolveDumpProfile(DumpMode::kDefault, CaptureKind::CrashRecapture);
   assert(recaptureDefault.captureKind == CaptureKind::CrashRecapture);
@@ -159,6 +179,9 @@ int main()
   assert(recaptureDefault.includeModuleHeaders);
   assert(recaptureDefault.includeIndirectMemory);
   assert(recaptureDefault.ignoreInaccessibleMemory);
+  // A recapture is asked for to get more: every module's code, as before.
+  assert(!recaptureDefault.gameAndStackCodeOnly);
+  assert(std::string_view(CodeSegmentsScopeToString(recaptureDefault)) == "all");
 
   const DumpProfile recaptureMini = ResolveDumpProfile(DumpMode::kMini, CaptureKind::CrashRecapture);
   assert(recaptureMini.captureKind == CaptureKind::CrashRecapture);
@@ -198,6 +221,12 @@ int main()
   assert(hangDefault.preferWctThreads);
   assert(!hangDefault.preferCrashContext);
   AssertCrashRecaptureExtraFlagsDisabled(hangDefault);
+  assert(hangDefault.gameAndStackCodeOnly);
+  assert(std::string_view(CodeSegmentsScopeToString(hangDefault)) == "game_and_stacks");
+  const DumpProfile hangDefaultAllCode = ResolveDumpProfile(DumpMode::kDefault, CaptureKind::Hang, true);
+  assert(hangDefaultAllCode.includeCodeSegments);
+  assert(!hangDefaultAllCode.gameAndStackCodeOnly);
+  AssertCrashRecaptureExtraFlagsDisabled(hangDefaultAllCode);
 
   const DumpProfile hangMini = ResolveDumpProfile(DumpMode::kMini, CaptureKind::Hang);
   assert(hangMini.captureKind == CaptureKind::Hang);
@@ -211,6 +240,7 @@ int main()
   assert(hangMini.preferWctThreads);
   assert(!hangMini.preferCrashContext);
   AssertCrashRecaptureExtraFlagsDisabled(hangMini);
+  assert(std::string_view(CodeSegmentsScopeToString(hangMini)) == "none");
 
   const DumpProfile manualDefault = ResolveDumpProfile(DumpMode::kDefault, CaptureKind::Manual);
   assert(manualDefault.captureKind == CaptureKind::Manual);
@@ -224,6 +254,7 @@ int main()
   assert(manualDefault.preferWctThreads);
   assert(!manualDefault.preferCrashContext);
   AssertCrashRecaptureExtraFlagsDisabled(manualDefault);
+  assert(manualDefault.gameAndStackCodeOnly);
 
   const DumpProfile manualMini = ResolveDumpProfile(DumpMode::kMini, CaptureKind::Manual);
   assert(manualMini.captureKind == CaptureKind::Manual);

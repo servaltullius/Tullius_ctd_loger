@@ -235,6 +235,17 @@ void TestTotalDumpBudgetIsRead(const IniFile& ini)
   Require(limits.maxEtwTraces == 7u, "MaxEtwTraces reaches the sweep");
 }
 
+// DumpAllModuleCode (ADR-0023): off when missing, and read as written.
+void TestDumpAllModuleCodeIsRead(const IniFile& ini)
+{
+  ini.Write("[SkyrimDiagHelper]\r\n");
+  Require(!LoadConfig(nullptr).dumpAllModuleCode, "DumpAllModuleCode defaults to 0");
+  ini.Write("[SkyrimDiagHelper]\r\nDumpAllModuleCode=1\r\n");
+  Require(LoadConfig(nullptr).dumpAllModuleCode, "DumpAllModuleCode=1 is read");
+  ini.Write("[SkyrimDiagHelper]\r\nDumpAllModuleCode=0\r\n");
+  Require(!LoadConfig(nullptr).dumpAllModuleCode, "DumpAllModuleCode=0 is read");
+}
+
 }  // namespace
 
 int main()
@@ -250,6 +261,7 @@ int main()
     TestLookupsMatchTheWindowsApi();
     TestOutputDirFallbacks(ini);
     TestTotalDumpBudgetIsRead(ini);
+    TestDumpAllModuleCodeIsRead(ini);
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "FAILED: %s\n", ex.what());
     return 1;
