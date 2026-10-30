@@ -49,7 +49,7 @@ public:
     const auto lockPath = OutputFamilyLockPath(outBase, dumpStem);
     const auto ioLockPath = skydiag::ExtendedLengthPath(lockPath);
     std::error_code directoryError;
-    std::filesystem::create_directories(ioLockPath.parent_path(), directoryError);
+    skydiag::CreateDirectoriesExtended(lockPath.parent_path(), directoryError);
     if (directoryError) {
       if (err) {
         *err = L"Failed to create output-family lock directory: " +
@@ -106,7 +106,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   const std::filesystem::path dumpFs(r.dump_path);
   std::filesystem::path outBase = r.out_dir.empty() ? DefaultOutDirForDump(dumpFs) : std::filesystem::path(r.out_dir);
   std::error_code ec;
-  std::filesystem::create_directories(skydiag::ExtendedLengthPath(outBase), ec);
+  skydiag::CreateDirectoriesExtended(outBase, ec);
 
   const std::wstring stem = dumpFs.stem().wstring();
   const bool redactPaths = r.path_redaction_applied;

@@ -315,23 +315,25 @@ bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content
   // an output folder of about 100 characters (SkyrimDiagLongPath.h).
   const auto ioPath = skydiag::ExtendedLengthPath(path);
   std::error_code ec;
-  const auto parent = ioPath.parent_path();
+  const auto parent = path.parent_path();
   if (!parent.empty()) {
-    std::filesystem::create_directories(parent, ec);
+    skydiag::CreateDirectoriesExtended(parent, ec);
   }
   if (ec) {
-    if (err) *err = L"Failed to create output directory: " + path.parent_path().wstring();
+    if (err) *err = L"Failed to create output directory: " + parent.wstring();
     return false;
   }
 
   std::filesystem::path tempPath;
+  std::wstring tempSuffix;
   HANDLE file = INVALID_HANDLE_VALUE;
   constexpr int kMaxTempCreateAttempts = 8;
   for (int attempt = 0; attempt < kMaxTempCreateAttempts; ++attempt) {
-    tempPath = ioPath;
-    tempPath += L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." +
+    tempSuffix = L".tmp." + std::to_wstring(GetCurrentProcessId()) + L"." +
       std::to_wstring(GetTickCount64()) + L"." +
       std::to_wstring(g_atomicWriteCounter.fetch_add(1u, std::memory_order_relaxed));
+    tempPath = ioPath;
+    tempPath += tempSuffix;
     file = CreateFileW(
       tempPath.c_str(),
       GENERIC_WRITE,
@@ -349,7 +351,7 @@ bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content
     }
   }
   if (file == INVALID_HANDLE_VALUE) {
-    if (err) *err = L"Failed to create temporary output: " + tempPath.wstring();
+    if (err) *err = L"Failed to create temporary output: " + path.wstring() + tempSuffix;
     return false;
   }
 

@@ -46,4 +46,24 @@ inline std::filesystem::path ExtendedLengthPath(const std::filesystem::path& pat
 #endif
 }
 
+// create_directories on the extended-length form of a volume or share root
+// ("\\?\D:\", "\\?\UNC\server\share\") fails with access denied where the
+// plain "D:\" succeeds, because MSVC asks CreateDirectoryW for the root
+// itself; a directory that already exists is what callers want, so that is
+// no error. Pass the plain directory: the parent of
+// ExtendedLengthPath(file) loses a root's trailing backslash, and "\\?\D:"
+// names the volume rather than its root directory.
+inline bool CreateDirectoriesExtended(const std::filesystem::path& dir, std::error_code& ec)
+{
+  const auto ioDir = ExtendedLengthPath(dir);
+  std::filesystem::create_directories(ioDir, ec);
+  if (ec) {
+    std::error_code existsEc;
+    if (std::filesystem::is_directory(ioDir, existsEc)) {
+      ec.clear();
+    }
+  }
+  return !ec;
+}
+
 }  // namespace skydiag

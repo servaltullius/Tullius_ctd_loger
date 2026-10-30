@@ -39,7 +39,8 @@ std::filesystem::path MakeTempDir(std::wstring_view suffix)
     (L"skydiag_analyzer_state_" + std::to_wstring(GetCurrentProcessId()) + L"_" +
      std::wstring(suffix));
   std::error_code ec;
-  std::filesystem::remove_all(root, ec);
+  // A run that stopped in TestLongOutputDirPublishes leaves files past MAX_PATH.
+  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
   std::filesystem::create_directories(root, ec);
   assert(!ec);
   return root;
@@ -601,6 +602,20 @@ void TestExtendedLengthPathForms()
          L"\\\\?\\" + (std::filesystem::current_path() / L"relative" / L"Out").native());
 }
 
+// A dump at a drive root is analyzed into that root. create_directories on
+// "\\?\C:\" fails with access denied, so the root has to count as existing;
+// checked on the temp folder's drive without writing to its root.
+void TestCreateDirectoriesAtVolumeRoot()
+{
+  const auto root = std::filesystem::temp_directory_path().root_path();
+  assert(root.native().size() == 3u);
+  std::error_code ec;
+  assert(skydiag::CreateDirectoriesExtended(root, ec));
+  assert(!ec);
+  assert(skydiag::CreateDirectoriesExtended((root / L"Out.json").parent_path(), ec));
+  assert(!ec);
+}
+
 // An output folder long enough that the copies under
 // .skydiag-analysis\<sha256>\<key>\ pass MAX_PATH: every write, the lock and
 // the review state still work.
@@ -657,6 +672,7 @@ int main()
   TestOptionalArtifactCleanupIsFailSafe();
   TestWctCompanionFollowsPathRedaction();
   TestExtendedLengthPathForms();
+  TestCreateDirectoriesAtVolumeRoot();
   TestLongOutputDirPublishes();
   return 0;
 }

@@ -276,6 +276,7 @@ def check_markdown_has_no_strikethrough_ranges(failures: list[str]) -> None:
     # v0.2.72 shipped with `0.5~0.9GB ... 58~60MB` struck through on GitHub,
     # and the same ranges sat in README_KO and two ADRs.
     resolver = _load_script("resolve_release_notes.py")
+    # Each expectation is what GitHub's renderer (gh api markdown, gfm) struck.
     cases = {
         "덤프 0.5~0.9GB였고, 수동 캡처가 58~60MB였습니다.\n": [1],
         "- 첫 줄 0.5~0.9GB\n  이어지는 줄 58~60MB\n": [1, 2],
@@ -285,15 +286,39 @@ def check_markdown_has_no_strikethrough_ranges(failures: list[str]) -> None:
         "`a~b` 그리고 c~d\n": [],
         "~~~\n0.5~0.9 58~60\n~~~\n": [],
         "rc1~rc5 확인, 범위 a ~ b\n": [],
+        "> 덤프 0.5~0.9GB였고\n> 수동 58~60MB였습니다\n": [1, 2],
+        "> 0.5~0.9GB\n>\n> 58~60MB\n": [],
+        "> - 0.5~0.9GB\n> - 58~60MB\n": [],
+        "범위 0.5~0.9GB였고\n2. 수동 58~60MB였습니다\n": [1, 2],
+        "1. 0.5~0.9GB\n2. 58~60MB\n": [],
+        "PR CI(#170, #172~#176, #178, #180~#183)\n": [],
+        "# 제목 0.5~0.9GB\n본문 58~60MB\n": [],
+        "| a | b |\n|---|---|\n| 0.5~0.9GB | 58~60MB |\n": [],
+        "| 설명 |\n|---|\n| 0.5~0.9GB와 58~60MB |\n": [3],
+        "```\na\n```python\nb~c d~e\n```\n": [],
+        "0.5~0.9GB → 58~60MB\n": [1],
+        "a~ b ~c\n": [],
+        "0.5~~0.9 and 1~2\n": [],
+        "a\\\\~b c~d\n": [1],
+        "제목 0.5~0.9\n---\n본문 58~60\n": [],
     }
     for text, expected in cases.items():
         actual = resolver.find_strikethrough_tildes(text)
         if actual != expected:
             failures.append(f"find_strikethrough_tildes({text!r}) = {actual}, expected {expected}")
 
-    notes = sorted(REPO_ROOT.glob("*.md"))
-    for folder in ("doc", "docs", "tests", "tools"):
-        notes += sorted((REPO_ROOT / folder).rglob("*.md"))
+    # The files GitHub shows; a local note outside git is not checked.
+    try:
+        listed = subprocess.run(
+            ["git", "ls-files", "-z", "--", "*.md"], cwd=REPO_ROOT, capture_output=True,
+            text=True, encoding="utf-8", check=True).stdout
+        notes = sorted(REPO_ROOT / name for name in listed.split("\0") if name)
+    except (OSError, subprocess.CalledProcessError):
+        notes = sorted(REPO_ROOT.glob("*.md"))
+        for folder in ("doc", "docs", "tests", "tools"):
+            notes += sorted((REPO_ROOT / folder).rglob("*.md"))
+    if not notes:
+        failures.append("found no markdown files to check for strikethrough ranges")
     for path in notes:
         for line in resolver.find_strikethrough_tildes(_read(path)):
             failures.append(
