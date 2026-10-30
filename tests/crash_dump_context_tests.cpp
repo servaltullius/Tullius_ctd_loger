@@ -174,6 +174,26 @@ void TestTracedDumpWritesAreComplete()
   std::filesystem::remove_all(outBase);
 }
 
+// A write that fails (here: the process has already exited, as when the game
+// ends before its dump) leaves no file that the viewer or retention would
+// take for a dump.
+void TestFailedDumpLeavesNoFile()
+{
+  const auto outBase = MakeTempDir(L"skydiag_failed_dump");
+  ParkedThread faulting;
+  auto child = skydiag::tests::runtime::LaunchSleepingChildProcess();
+  Require(TerminateProcess(child.pi.hProcess, 1) != FALSE, "TerminateProcess failed");
+  Require(WaitForSingleObject(child.pi.hProcess, 10000) == WAIT_OBJECT_0, "the child did not exit");
+  const auto path = outBase / L"failed.dmp";
+  std::wstring err;
+  const bool ok = WriteCrashDump(
+    child.pi.hProcess, child.pi.dwProcessId, faulting.tid(), faulting.Context(), DumpMode::kDefault, path, &err);
+  skydiag::tests::runtime::TerminateChildProcess(&child);
+  Require(!ok, "A dump without read access fails");
+  Require(!std::filesystem::exists(path), "A failed dump leaves no file");
+  std::filesystem::remove_all(outBase);
+}
+
 // The memory ranges a dump holds, [begin, end).
 std::vector<std::pair<std::uint64_t, std::uint64_t>> ReadDumpMemoryRanges(const std::filesystem::path& path)
 {
@@ -482,6 +502,7 @@ int main()
     TestUnwindInfoRanges();
     TestStackCodeRanges();
     TestStackCodeCollector();
+    TestFailedDumpLeavesNoFile();
     TestDumpKeepsGameCodeAndStackCode();
     TestCrashDumpSurvivesUnmappedRegisterTargets();
     TestTracedDumpWritesAreComplete();

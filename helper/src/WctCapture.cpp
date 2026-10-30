@@ -134,6 +134,9 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
     }
 
     out.hasUsableData = true;
+    // With ERROR_MORE_DATA the count is the chain's full length, which can
+    // exceed the array; only its first WCT_MAX_NODE_COUNT nodes were written.
+    nodeCount = std::min<DWORD>(nodeCount, WCT_MAX_NODE_COUNT);
 
     if (isCycle) {
       out.cycleTids.push_back(tid);

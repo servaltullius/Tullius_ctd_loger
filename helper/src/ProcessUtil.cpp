@@ -6,15 +6,24 @@ namespace skydiag::helper::internal {
 
 std::wstring QuoteArg(std::wstring_view s)
 {
+  // CommandLineToArgvW and the CRT read backslashes literally except before a
+  // quote, where each pair is one backslash. So backslashes before a quote in
+  // the value, and before the closing quote (OutputDir=D:\ ends in one), are
+  // doubled; "D:\" alone would swallow the closing quote and the next arguments.
   std::wstring out;
   out.reserve(s.size() + 2);
   out.push_back(L'"');
+  std::size_t backslashes = 0;
   for (const wchar_t c : s) {
-    if (c == L'"') {
-      out.push_back(L'\\');
+    if (c == L'\\') {
+      ++backslashes;
+      continue;
     }
+    out.append(c == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
+    backslashes = 0;
     out.push_back(c);
   }
+  out.append(backslashes * 2, L'\\');
   out.push_back(L'"');
   return out;
 }

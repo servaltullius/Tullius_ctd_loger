@@ -31,6 +31,31 @@ std::filesystem::path CrashBucketStatsPath(const std::filesystem::path& outBase)
   return outBase / L"SkyrimDiag_CrashBucketStats.json";
 }
 
+// The unsigned number or string at `key`, or `fallback` when it is missing or
+// of another type. nlohmann's value() throws type_error on a wrong type, and
+// these files can be edited by hand or come from another version; an
+// exception here would end the helper (nothing above RunHelperLoop catches).
+std::uint32_t JsonUintOr(const nlohmann::json& object, const char* key, std::uint32_t fallback)
+{
+  if (!object.is_object()) {
+    return fallback;
+  }
+  const auto it = object.find(key);
+  if (it == object.end() || !it->is_number_unsigned() || it->get<std::uint64_t>() > UINT32_MAX) {
+    return fallback;
+  }
+  return static_cast<std::uint32_t>(it->get<std::uint64_t>());
+}
+
+std::string JsonStringOr(const nlohmann::json& object, const char* key)
+{
+  if (!object.is_object()) {
+    return {};
+  }
+  const auto it = object.find(key);
+  return it != object.end() && it->is_string() ? it->get<std::string>() : std::string{};
+}
+
 bool JsonArrayContainsString(const nlohmann::json& array, std::string_view needle)
 {
   if (!array.is_array() || needle.empty()) {
@@ -334,7 +359,7 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
   CrashSummaryInfo info{};
   if (root.contains("schema") && root["schema"].is_object()) {
     const auto& schema = root["schema"];
-    info.schemaVersion = schema.value("version", info.schemaVersion);
+    info.schemaVersion = JsonUintOr(schema, "version", info.schemaVersion);
   }
   if (info.schemaVersion < kMinSupportedSummarySchemaVersion || info.schemaVersion > kMaxSupportedSummarySchemaVersion) {
     if (err) {
@@ -343,7 +368,7 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
     return false;
   }
 
-  info.bucketKey = TrimAscii(root.value("crash_bucket_key", std::string{}));
+  info.bucketKey = TrimAscii(JsonStringOr(root, "crash_bucket_key"));
   if (root.contains("analysis") && root["analysis"].is_object()) {
     const auto& analysis = root["analysis"];
     info.forcedClose = analysis.contains("is_forced_close") && analysis["is_forced_close"].is_boolean() &&
@@ -357,7 +382,7 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
       unknownFromField = exceptionObj["fault_module_unknown"].get<bool>();
     }
     if (!unknownFromField.has_value()) {
-      const std::string modulePlusOffset = exceptionObj.value("module_plus_offset", std::string{});
+      const std::string modulePlusOffset = JsonStringOr(exceptionObj, "module_plus_offset");
       unknownFromField = IsUnknownModuleField(modulePlusOffset);
     }
   }
@@ -367,7 +392,7 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
       !root["actionable_candidates"].empty()) {
     const auto& first = root["actionable_candidates"].front();
     if (first.is_object()) {
-      const auto statusId = TrimAscii(first.value("status_id", std::string{}));
+      const auto statusId = TrimAscii(JsonStringOr(first, "status_id"));
       info.candidateConflict = (statusId == "conflicting");
       info.referenceClueOnly = (statusId == "reference_clue");
     }
@@ -387,15 +412,15 @@ bool TryLoadCrashSummaryInfo(const std::filesystem::path& summaryPath, CrashSumm
   }
 
   const auto parseFirstChanceContext = [&root, &info](const nlohmann::json& firstChance) {
-    const auto repeatedSignatureCount = firstChance.value("repeated_signature_count", 0u);
-    const auto loadingWindowCount = firstChance.value("loading_window_count", 0u);
+    const auto repeatedSignatureCount = JsonUintOr(firstChance, "repeated_signature_count", 0u);
+    const auto loadingWindowCount = JsonUintOr(firstChance, "loading_window_count", 0u);
     const bool hasStrongFirstChance = repeatedSignatureCount > 0u || loadingWindowCount > 0u;
     bool candidateWeak = true;
     if (root.contains("actionable_candidates") && root["actionable_candidates"].is_array() &&
         !root["actionable_candidates"].empty()) {
       const auto& first = root["actionable_candidates"].front();
       if (first.is_object()) {
-        const auto statusId = TrimAscii(first.value("status_id", std::string{}));
+        const auto statusId = TrimAscii(JsonStringOr(first, "status_id"));
         candidateWeak = (statusId == "related" || statusId == "reference_clue");
       }
     }
@@ -489,9 +514,9 @@ bool UpdateCrashBucketStats(
     bucket = nlohmann::json::object();
   }
 
-  std::uint32_t seenTotal = bucket.value("seen_total", 0u);
-  std::uint32_t unknownTotal = bucket.value("unknown_total", 0u);
-  std::uint32_t unknownStreak = bucket.value("unknown_streak", 0u);
+  std::uint32_t seenTotal = JsonUintOr(bucket, "seen_total", 0u);
+  std::uint32_t unknownTotal = JsonUintOr(bucket, "unknown_total", 0u);
+  std::uint32_t unknownStreak = JsonUintOr(bucket, "unknown_streak", 0u);
 
   seenTotal++;
   if (info.unknownFaultModule) {
@@ -507,7 +532,8 @@ bool UpdateCrashBucketStats(
   bucket["last_unknown_fault_module"] = info.unknownFaultModule;
   bucket["updated_at_epoch"] = static_cast<std::int64_t>(std::time(nullptr));
 
-  if (!WriteTextFileUtf8(path, root.dump(2))) {
+  // A bucket key from a summary is not checked for UTF-8; dump() would throw.
+  if (!WriteTextFileUtf8(path, root.dump(2, ' ', false, nlohmann::json::error_handler_t::replace))) {
     if (err) {
       *err = L"crash bucket stats atomic write failed";
     }

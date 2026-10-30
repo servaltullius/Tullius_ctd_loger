@@ -515,6 +515,7 @@ void ProcessValidCrashDump(
   const std::wstring& ts,
   const CrashEventInfo& info,
   const skydiag::ForcedCloseMatch& forcedClose,
+  const skydiag::helper::DumpProfile& writtenProfile,
   const PluginScanInputs& pluginScanInputs,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
@@ -568,10 +569,6 @@ void ProcessValidCrashDump(
   if (cfg.enableIncidentManifest) {
     nlohmann::json ctx = nlohmann::json::object();
     ctx["reason"] = "crash_event";
-    const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
-      cfg.dumpMode,
-      skydiag::helper::CaptureKind::Crash,
-      cfg.dumpAllModuleCode);
     const auto manifest = MakeIncidentManifestV1(
       "crash",
       ts,
@@ -582,7 +579,7 @@ void ProcessValidCrashDump(
       etwStatus,
       info.stateFlags,
       ctx,
-      &dumpProfile,
+      &writtenProfile,
       /*recaptureDecision=*/nullptr,
       cfg,
       cfg.incidentManifestIncludeConfigSnapshot);
@@ -1494,6 +1491,10 @@ bool HandleCrashEventTick(
     }
   }
 
+  // The profile the kept dump was written with, for its manifest (ADR-0023):
+  // the minimal one unless its rewrite at the configured size below succeeds.
+  auto writtenProfile = WrittenDumpProfile(dumpProfile, dumpMemory);
+
   // Kept as a crash after a minimal first dump (reducedDumpForRepeatedFault):
   // while the game still runs, write it again at the configured size. The
   // minimal dump stays if that fails.
@@ -1517,6 +1518,7 @@ bool HandleCrashEventTick(
     if (fullWritten && MoveFileExW(fullDumpPath.c_str(), dumpPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
       AppendLogLine(outBase, L"This time the exception was kept as a crash; rewrote its dump at the configured size.");
       LogDumpCodeMemory(outBase, fullDumpMemory.code);
+      writtenProfile = WrittenDumpProfile(configuredDumpProfile, fullDumpMemory);
     } else {
       if (fullWritten) {
         fullDumpErr = L"MoveFileExW failed: " + std::to_wstring(GetLastError());
@@ -1535,6 +1537,7 @@ bool HandleCrashEventTick(
     ts,
     info,
     forcedClose,
+    writtenProfile,
     pluginScanInputs,
     pendingCrashEtw,
     pendingCrashAnalysis,

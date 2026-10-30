@@ -1,5 +1,7 @@
 #include <Windows.h>
 
+#include <shellapi.h>
+
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
@@ -13,6 +15,7 @@
 #include "HelperMainInternal.h"
 #include "HelperRuntimeTestUtils.h"
 #include "PendingCrashAnalysis.h"
+#include "ProcessUtil.h"
 #include "RetentionWorker.h"
 
 using skydiag::helper::HelperConfig;
@@ -420,6 +423,10 @@ void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
       Require(crashState.latched && FileExists(lastCrashDumpPath), "kept as a crash with its dump");
       AssertContains(log, "rewrote its dump at the configured size", "the kept crash gets the configured dump size");
       Require(!FileExists(lastCrashDumpPath + L".full.tmp"), "no temporary dump is left");
+      // ADR-0023: the manifest describes the dump as rewritten, not the minimal first one.
+      const auto manifest = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json"));
+      AssertContains(manifest, "\"base_mode\": \"default\"", "the manifest records the configured dump mode");
+      AssertContains(manifest, "\"code_segments_scope\": \"game_and_stacks\"", "and the code it holds");
     }
 
     ShutdownRetentionWorker();
@@ -739,9 +746,35 @@ void TestCrashLoggerIniPathDecodesWithoutThrowing()
   }
 }
 
+// QuoteArg values read back as written through Windows' own command-line
+// parsing: a trailing backslash (OutputDir=D:\, a share root), embedded
+// quotes, and backslashes before them.
+void TestQuoteArgRoundTripsThroughCommandLineToArgvW()
+{
+  const std::wstring values[] = {
+    L"D:\\",
+    L"\\\\server\\share\\",
+    L"C:\\Program Files\\Skyrim\\SkyrimDiagDumpToolCli.exe",
+    L"a\"b",
+    L"a\\\"b",
+    L"trailing\\\\",
+    L"",
+  };
+  for (const auto& value : values) {
+    const std::wstring commandLine = L"x.exe " + skydiag::helper::internal::QuoteArg(value) + L" --headless";
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(commandLine.c_str(), &argc);
+    Require(argv != nullptr, "CommandLineToArgvW failed");
+    const bool ok = argc == 3 && value == argv[1] && std::wstring(argv[2]) == L"--headless";
+    LocalFree(argv);
+    Require(ok, "a quoted value must read back as one argument, followed by the next");
+  }
+}
+
 int main()
 {
   try {
+    TestQuoteArgRoundTripsThroughCommandLineToArgvW();
     TestCrashLoggerIniPathDecodesWithoutThrowing();
     TestHandleCrashEventTick_WritesCrashArtifacts();
     TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();

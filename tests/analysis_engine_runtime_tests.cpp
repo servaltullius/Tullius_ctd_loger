@@ -1458,8 +1458,8 @@ void TestCrashLoggerFrameConsensusContracts()
   AssertContains(consensusSrc, "conflicting", "Candidate consensus must support conflicting outcomes.");
   AssertContains(
     consensusSrc,
-    "PairingAdjustedCrashLoggerWeight",
-    "Ambiguous CrashLogger pairing must downgrade candidate signal weights.");
+    "if (!out || r.crash_logger_pairing_ambiguous)",
+    "An ambiguous CrashLogger pairing must raise no candidate (evidence_interpretation_tests checks the result).");
 
   const auto analyzerSrc = ReadAllText(root / "dump_tool" / "src" / "Analyzer.cpp");
   AssertContains(
