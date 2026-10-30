@@ -25,6 +25,7 @@ inline skydiag::helper::RetentionLimits BuildRetentionLimits(const skydiag::help
   limits.maxHangDumps = cfg.maxHangDumps;
   limits.maxManualDumps = cfg.maxManualDumps;
   limits.maxEtwTraces = cfg.maxEtwTraces;
+  limits.maxTotalDumpGB = cfg.maxTotalDumpGB;
   return limits;
 }
 

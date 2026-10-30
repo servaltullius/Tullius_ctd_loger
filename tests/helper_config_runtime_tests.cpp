@@ -212,6 +212,20 @@ void TestOutputDirFallbacks(const IniFile& ini)
   Require(blank.outputDirFallbacks.size() == 1u, "the default folder is not its own fallback");
 }
 
+// MaxTotalDumpGB: 5 when missing, read as written, 0 = unlimited, and
+// clamped to 1024.
+void TestTotalDumpBudgetIsRead(const IniFile& ini)
+{
+  ini.Write("[SkyrimDiagHelper]\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 5u, "MaxTotalDumpGB defaults to 5");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=12\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 12u, "MaxTotalDumpGB is read");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=0\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 0u, "MaxTotalDumpGB=0 is unlimited");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=5000\r\n");
+  Require(LoadConfig(nullptr).maxTotalDumpGB == 1024u, "MaxTotalDumpGB is clamped to 1024");
+}
+
 }  // namespace
 
 int main()
@@ -226,6 +240,7 @@ int main()
     TestAnsiOutputDirUsesTheCodePage(ini);
     TestLookupsMatchTheWindowsApi();
     TestOutputDirFallbacks(ini);
+    TestTotalDumpBudgetIsRead(ini);
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "FAILED: %s\n", ex.what());
     return 1;

@@ -85,6 +85,7 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
     { "max_hang_dumps", cfg.maxHangDumps },
     { "max_manual_dumps", cfg.maxManualDumps },
     { "max_etw_traces", cfg.maxEtwTraces },
+    { "max_total_dump_gb", cfg.maxTotalDumpGB },
   };
 
   return j;

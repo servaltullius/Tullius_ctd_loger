@@ -54,6 +54,7 @@
   - 저장/로드 중 팝업이 거슬리면 `AutoOpenCrashOnlyIfProcessExited=1` 유지(기본): 게임이 종료될 때만 크래시 뷰어 자동 오픈
   - 디스크 정리(기본값 권장, `0`=무제한):
     - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces`
+    - `MaxTotalDumpGB` (기본 5GB): 덤프 전체 크기 상한. 넘으면 오래된 덤프부터 지우고, 종류별 최신 덤프는 남김
     - `MaxHelperLogBytes`, `MaxHelperLogFiles`
   - `HangThresholdInMenuSec` : 메뉴/종료 직전 같은 “메뉴 상태”에서의 프리징 기준(기본 30초)
     - 정상 종료 직전에 일시적으로 heartbeat가 멈춰도 hang dump가 쌓이지 않도록, 메뉴 상태에서는 더 높은 임계값을 사용합니다.

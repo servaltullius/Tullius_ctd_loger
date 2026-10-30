@@ -75,6 +75,8 @@ struct HelperConfig {
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
   std::uint32_t maxEtwTraces = 5;
+  // Crash, freeze and manual dumps together, in GiB.
+  std::uint32_t maxTotalDumpGB = 5;
 
   // Helper log rotation (0 = unlimited/disabled)
   std::uint32_t maxHelperLogBytes = 8u * 1024u * 1024u;
