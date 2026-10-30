@@ -47,9 +47,9 @@ public:
     std::wstring* err)
   {
     const auto lockPath = OutputFamilyLockPath(outBase, dumpStem);
-    const auto ioLockPath = skydiag::ExtendedLengthPath(lockPath);
+    const auto ioLockPath = skydiag::PathForIo(lockPath);
     std::error_code directoryError;
-    skydiag::CreateDirectoriesExtended(lockPath.parent_path(), directoryError);
+    skydiag::CreateDirectoriesForIo(lockPath.parent_path(), directoryError);
     if (directoryError) {
       if (err) {
         *err = L"Failed to create output-family lock directory: " +
@@ -106,7 +106,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   const std::filesystem::path dumpFs(r.dump_path);
   std::filesystem::path outBase = r.out_dir.empty() ? DefaultOutDirForDump(dumpFs) : std::filesystem::path(r.out_dir);
   std::error_code ec;
-  skydiag::CreateDirectoriesExtended(outBase, ec);
+  skydiag::CreateDirectoriesForIo(outBase, ec);
 
   const std::wstring stem = dumpFs.stem().wstring();
   const bool redactPaths = r.path_redaction_applied;
@@ -177,7 +177,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   std::wstring writeErr;
   const auto removeArtifactIfPresent = [&](const std::filesystem::path& path, std::wstring_view artifactName) {
     std::error_code removeEc;
-    std::filesystem::remove(skydiag::ExtendedLengthPath(path), removeEc);
+    std::filesystem::remove(skydiag::PathForIo(path), removeEc);
     if (!removeEc) {
       return true;
     }

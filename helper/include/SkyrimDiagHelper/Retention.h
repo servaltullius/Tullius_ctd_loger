@@ -529,9 +529,10 @@ inline void PruneOrphanedAnalysisCaches(
     return entries;
   };
 
-  // A copy's files lie about 130 characters below outBase, past MAX_PATH
-  // for a long output folder (SkyrimDiagLongPath.h).
-  const auto cacheBase = ExtendedLengthPath(outBase);
+  // A copy's files lie up to about 165 characters below outBase with a
+  // leftover temporary name, past MAX_PATH for a long output folder
+  // (SkyrimDiagLongPath.h).
+  const auto cacheBase = PathForIo(outBase, 168);
   std::error_code ec;
   for (const auto& identity : listDir(cacheBase / ".skydiag-analysis")) {
     if (!identity.is_directory(ec)) {

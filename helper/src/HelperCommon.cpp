@@ -19,9 +19,16 @@
 
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagLongPath.h"
 
 namespace skydiag::helper::internal {
 namespace {
+
+// The longest name the helper writes in the output folder, with the
+// separator: SkyrimDiag_PostExitCrashEvidence_<timestamp>_<seq>.json while
+// WriteTextFileUtf8 adds .tmp.<pid>.<tick>.<n>. The analysis copies lie
+// deeper; Retention.h and the dump tool convert those paths themselves.
+constexpr std::size_t kLongestOutputNameChars = 100;
 
 constexpr std::uint32_t kMinSupportedSummarySchemaVersion = 1;
 constexpr std::uint32_t kMaxSupportedSummarySchemaVersion = 2;
@@ -152,7 +159,10 @@ bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* er
 
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
 {
-  const std::filesystem::path configured(cfg.outputDir);
+  // A long output folder is used in its extended-length form, so every path
+  // the helper builds under it works (SkyrimDiagLongPath.h); a usual one is
+  // left as it is.
+  const std::filesystem::path configured = skydiag::PathForIo(cfg.outputDir, kLongestOutputNameChars);
   std::wstring configuredErr;
   if (PrepareWritableOutputDir(configured, &configuredErr)) {
     return configured;
@@ -160,19 +170,19 @@ std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
   // Without a writable folder every dump, report and log line of the session
   // is lost without a trace; use the first fallback that works and say so.
   for (const auto& fallback : cfg.outputDirFallbacks) {
-    const std::filesystem::path candidate(fallback);
+    const std::filesystem::path candidate = skydiag::PathForIo(fallback, kLongestOutputNameChars);
     std::wstring fallbackErr;
     if (!PrepareWritableOutputDir(candidate, &fallbackErr)) {
       continue;
     }
     const std::wstring warning =
-      L"WARNING: OutputDir \"" + configured.wstring() + L"\" cannot be used (" + configuredErr +
-      L"); captures and logs go to \"" + candidate.wstring() + L"\" instead. Fix OutputDir in SkyrimDiagHelper.ini.";
+      L"WARNING: OutputDir \"" + cfg.outputDir + L"\" cannot be used (" + configuredErr +
+      L"); captures and logs go to \"" + fallback + L"\" instead. Fix OutputDir in SkyrimDiagHelper.ini.";
     std::wcerr << L"[SkyrimDiagHelper] " << warning << L"\n";
     QueueSessionStartLogLine(warning);
     return candidate;
   }
-  std::wcerr << L"[SkyrimDiagHelper] WARNING: OutputDir \"" << configured.wstring() << L"\" cannot be used ("
+  std::wcerr << L"[SkyrimDiagHelper] WARNING: OutputDir \"" << cfg.outputDir << L"\" cannot be used ("
              << configuredErr << L") and no fallback folder is writable; captures may be lost.\n";
   return configured;
 }

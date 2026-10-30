@@ -602,18 +602,70 @@ void TestExtendedLengthPathForms()
          L"\\\\?\\" + (std::filesystem::current_path() / L"relative" / L"Out").native());
 }
 
-// A dump at a drive root is analyzed into that root. create_directories on
-// "\\?\C:\" fails with access denied, so the root has to count as existing;
+// Only paths too long for the plain calls change, so the usual ones reach
+// Windows (and MO2's virtual file system) exactly as before.
+void TestPathForIoChangesOnlyLongPaths()
+{
+  using skydiag::PathForIo;
+  using skydiag::PlainPath;
+  assert(PathForIo(L"C:\\Logs\\Out.json").native() == L"C:\\Logs\\Out.json");
+  assert(PathForIo(L"relative\\Out.json").native() == L"relative\\Out.json");
+  std::wstring longDir = L"C:\\Logs";
+  while (longDir.size() < 240u) {
+    longDir += L"\\a_long_output_folder_segment";
+  }
+  const auto shortDir = longDir.substr(0, 200);
+  assert(PathForIo(shortDir).native() == shortDir);
+  assert(PathForIo(shortDir, 64).native() == L"\\\\?\\" + shortDir);
+  assert(PathForIo(longDir).native() == L"\\\\?\\" + longDir);
+  assert(PathForIo(L"\\\\?\\" + longDir).native() == L"\\\\?\\" + longDir);
+
+  assert(PlainPath(LR"(\\?\C:\Logs)").native() == L"C:\\Logs");
+  assert(PlainPath(LR"(\\?\UNC\server\share\Logs)").native() == LR"(\\server\share\Logs)");
+  assert(PlainPath(L"C:\\Logs").native() == L"C:\\Logs");
+  assert(PlainPath(LR"(\\.\pipe\x)").native() == LR"(\\.\pipe\x)");
+}
+
+// A dump at a drive root is analyzed into that root. PathForIo leaves a root
+// plain, but --out-dir "\\?\C:\" arrives extended, and create_directories on
+// that fails with access denied, so the root has to count as existing;
 // checked on the temp folder's drive without writing to its root.
 void TestCreateDirectoriesAtVolumeRoot()
 {
   const auto root = std::filesystem::temp_directory_path().root_path();
   assert(root.native().size() == 3u);
   std::error_code ec;
-  assert(skydiag::CreateDirectoriesExtended(root, ec));
+  assert(skydiag::CreateDirectoriesForIo(root, ec));
   assert(!ec);
-  assert(skydiag::CreateDirectoriesExtended((root / L"Out.json").parent_path(), ec));
+  assert(skydiag::CreateDirectoriesForIo(skydiag::ExtendedLengthPath(root), ec));
   assert(!ec);
+}
+
+// A dump whose own path passes MAX_PATH, analyzed into its folder (no
+// --out-dir): the dump opens, and its outputs land beside it.
+void TestLongDumpPathIsAnalyzed()
+{
+  const auto root = MakeTempDir(L"long_dump");
+  auto dir = root;
+  while (dir.native().size() < 230u) {
+    dir /= L"a_long_output_folder_segment";
+  }
+  const auto dump = dir / L"SkyrimDiag_Manual_20261031_000000_000.dmp";
+  assert(dump.native().size() >= MAX_PATH);
+  const std::vector<std::uint8_t> bytes(4096u, 0x44u);
+  WriteBytes(skydiag::ExtendedLengthPath(dump), bytes);
+  const auto identity = ComputeIdentity(dump, bytes);
+  auto result = MakeIdentityBoundResult(dump, std::filesystem::path(), identity, L"summary-long-dump");
+
+  std::wstring err;
+  assert(WriteOutputs(result, &err));
+  assert(err.empty());
+  const auto summary = nlohmann::json::parse(ReadAllText(
+    skydiag::ExtendedLengthPath(dir / L"SkyrimDiag_Manual_20261031_000000_000_SkyrimDiagSummary.json")));
+  assert(summary["summary_sentence"] == "summary-long-dump");
+
+  std::error_code ec;
+  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
 }
 
 // An output folder long enough that the copies under
@@ -672,7 +724,9 @@ int main()
   TestOptionalArtifactCleanupIsFailSafe();
   TestWctCompanionFollowsPathRedaction();
   TestExtendedLengthPathForms();
+  TestPathForIoChangesOnlyLongPaths();
   TestCreateDirectoriesAtVolumeRoot();
   TestLongOutputDirPublishes();
+  TestLongDumpPathIsAnalyzed();
   return 0;
 }
