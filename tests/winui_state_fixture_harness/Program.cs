@@ -304,6 +304,7 @@ internal static class Program
                 "atomic writes left temporary files behind");
 
             await CheckReanalysisByAnalyzerVersion(root, identityA);
+            CheckIniTextDecoding();
 
             Console.WriteLine("winui_state_fixture_harness: OK");
             return 0;
@@ -391,6 +392,31 @@ internal static class Program
             },
         };
         return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+    }
+
+    // SkyrimDiagHelper.ini decodes as the helper reads it (IniText.h): every
+    // BOM, UTF-16LE without one, UTF-8, and bytes that are not UTF-8 in the
+    // ANSI code page (a Korean OutputDir saved in CP949).
+    private static void CheckIniTextDecoding()
+    {
+        const string text = "[SkyrimDiagHelper]\r\nOutputDir=D:\\스카이림 로그\r\n";
+        byte[] WithPreamble(System.Text.Encoding encoding) =>
+            encoding.GetPreamble().Concat(encoding.GetBytes(text)).ToArray();
+        Require(IniTextDecoder.Decode(System.Text.Encoding.UTF8.GetBytes(text)) == text, "UTF-8 ini");
+        Require(IniTextDecoder.Decode(WithPreamble(System.Text.Encoding.UTF8)) == text, "UTF-8 BOM ini");
+        Require(IniTextDecoder.Decode(WithPreamble(System.Text.Encoding.Unicode)) == text, "UTF-16LE BOM ini");
+        Require(IniTextDecoder.Decode(System.Text.Encoding.Unicode.GetBytes(text)) == text, "UTF-16LE ini without a BOM");
+        Require(IniTextDecoder.Decode(WithPreamble(System.Text.Encoding.BigEndianUnicode)) == text, "UTF-16BE BOM ini");
+
+        // CP949 given explicitly: the machine's own ANSI code page may be UTF-8
+        // (the "worldwide language support" option), where no bytes reach the fallback.
+        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+        var cp949 = System.Text.Encoding.GetEncoding(949);
+        const string sample = "[SkyrimDiagHelper]\r\nOutputDir=D:\\스카이림 로그\r\n";
+        Require(IniTextDecoder.Decode(cp949.GetBytes(sample), cp949) == sample,
+            "an ini that is not UTF-8 decodes with the ANSI code page");
+        Require(IniTextDecoder.AnsiEncoding() is not null, "the system ANSI code page resolves");
+        Require(IniTextDecoder.Decode(Array.Empty<byte>()) == string.Empty, "an empty ini");
     }
 
     private static void Require(bool condition, string message)

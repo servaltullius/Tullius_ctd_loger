@@ -17,31 +17,37 @@ static std::string ReadFile(const char* relPath)
   return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
+// The weights the stack walk gives a frame by its depth (called, not read
+// from the source text: a text match passed with any constant changed).
 static void TestCallstackFrameWeightConstants()
 {
+  using skydiag::dump_tool::internal::policy::CallstackFrameWeight;
+  static_assert(CallstackFrameWeight(0) == 16);
+  static_assert(CallstackFrameWeight(1) == 12);
+  static_assert(CallstackFrameWeight(2) == 8);
+  static_assert(CallstackFrameWeight(3) == 4 && CallstackFrameWeight(5) == 4);
+  static_assert(CallstackFrameWeight(6) == 2 && CallstackFrameWeight(10) == 2);
+  static_assert(CallstackFrameWeight(11) == 1 && CallstackFrameWeight(100) == 1);
   const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
-  // Named constants: kWeightDepth0=16, kWeightDepth1=12, kWeightDepth2=8
-  assert(src.find("kWeightDepth0") != std::string::npos);
-  assert(src.find("kWeightDepth1") != std::string::npos);
-  assert(src.find("kWeightDepth2") != std::string::npos);
-  assert(src.find("= 16") != std::string::npos);
-  assert(src.find("= 12") != std::string::npos);
-  assert(src.find("= 8") != std::string::npos);
+  assert(src.find("CallstackFrameWeight(i)") != std::string::npos);
+  assert(src.find("policy::TopSuspectCallstackConfidence(") != std::string::npos);
 }
 
+// High needs a suspect within the top three frames that leads the runner-up:
+// by a strong score, or by a clear margin. A tie is Medium at most.
 static void TestStackwalkConfidenceThresholds()
 {
-  const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalkScoring.cpp");
-  // Named constants for confidence thresholds
-  assert(src.find("kHighConfMaxDepth") != std::string::npos);
-  assert(src.find("kHighConfMinScore") != std::string::npos);
-  assert(src.find("kMedConfMaxDepth") != std::string::npos);
-  assert(src.find("kMedConfMinScore") != std::string::npos);
-  // Values
-  assert(src.find("= 2") != std::string::npos);   // kHighConfMaxDepth
-  assert(src.find("= 24") != std::string::npos);   // kHighConfMinScore
-  assert(src.find("= 6") != std::string::npos);    // kMedConfMaxDepth or kMedConfMinMargin
-  assert(src.find("= 12") != std::string::npos);   // kMedConfMinScore or kHighConfMinMargin
+  using skydiag::dump_tool::internal::policy::TopSuspectCallstackConfidence;
+  using Level = skydiag::dump_tool::i18n::ConfidenceLevel;
+  static_assert(TopSuspectCallstackConfidence(28, 16, 0) == Level::kHigh);    // strong and ahead
+  static_assert(TopSuspectCallstackConfidence(24, 24, 0) == Level::kMedium);  // strong but tied
+  static_assert(TopSuspectCallstackConfidence(16, 4, 1) == Level::kHigh);     // a clear margin
+  static_assert(TopSuspectCallstackConfidence(28, 16, 3) == Level::kMedium);  // too deep for High
+  static_assert(TopSuspectCallstackConfidence(12, 12, 6) == Level::kMedium);
+  static_assert(TopSuspectCallstackConfidence(8, 2, 6) == Level::kMedium);    // margin 6
+  static_assert(TopSuspectCallstackConfidence(8, 4, 6) == Level::kLow);
+  static_assert(TopSuspectCallstackConfidence(40, 0, 7) == Level::kLow);      // too deep for Medium
+  static_assert(TopSuspectCallstackConfidence(0xFFFFFFFFu, 0xFFFFFFF0u, 0) == Level::kHigh);
 }
 
 static void TestStackwalkHookPromotionThreshold()

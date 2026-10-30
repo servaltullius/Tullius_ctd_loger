@@ -346,9 +346,45 @@ void TestFindFunctionStartFollowsChainedEntries()
   Require(!sw::FindFunctionStart(mem, kBase, kBase + 0x2150).has_value(), "a leaf function has no start");
 }
 
+// A shared dump whose Memory64List claims 2^60 ranges: count * 16 wraps to 0,
+// so a multiplied size check passed and reserve() threw out of the analysis.
+// The list must be rejected like any other that does not fit its stream.
+void TestMemory64ListCountOverflowIsRejected()
+{
+  // Header, one directory entry, then the list: its count and base RVA (the
+  // SDK declares MemoryRanges as a zero-length array) and one descriptor.
+  constexpr std::size_t kListRva = sizeof(MINIDUMP_HEADER) + sizeof(MINIDUMP_DIRECTORY);
+  constexpr std::size_t kListBytes = 2 * sizeof(ULONG64) + sizeof(MINIDUMP_MEMORY_DESCRIPTOR64);
+  std::vector<std::uint8_t> dump(kListRva + kListBytes);
+  MINIDUMP_HEADER header{};
+  header.Signature = MINIDUMP_SIGNATURE;
+  header.Version = MINIDUMP_VERSION;
+  header.NumberOfStreams = 1;
+  header.StreamDirectoryRva = sizeof(MINIDUMP_HEADER);
+  MINIDUMP_DIRECTORY directory{};
+  directory.StreamType = Memory64ListStream;
+  directory.Location.DataSize = static_cast<ULONG32>(kListBytes);
+  directory.Location.Rva = static_cast<RVA>(kListRva);
+  const ULONG64 rangeCount = 1ull << 60;
+  const ULONG64 baseRva = dump.size();
+  MINIDUMP_MEMORY_DESCRIPTOR64 range{};
+  range.StartOfMemoryRange = 0x10000;
+  std::memcpy(dump.data(), &header, sizeof(header));
+  std::memcpy(dump.data() + sizeof(header), &directory, sizeof(directory));
+  std::memcpy(dump.data() + kListRva, &rangeCount, sizeof(rangeCount));
+  std::memcpy(dump.data() + kListRva + sizeof(rangeCount), &baseRva, sizeof(baseRva));
+  std::memcpy(dump.data() + kListRva + 2 * sizeof(ULONG64), &range, sizeof(range));
+
+  namespace sw = skydiag::dump_tool::internal::stackwalk_internal;
+  sw::MinidumpMemoryView mem;
+  const bool loaded = mem.Init(dump.data(), dump.size(), /*threads=*/nullptr);
+  Require(!loaded && mem.ranges.empty(), "a Memory64List with an impossible range count is rejected");
+}
+
 int main()
 {
   try {
+    TestMemory64ListCountOverflowIsRejected();
     TestFindFunctionStartFollowsChainedEntries();
     TestLocalImageRejectsNonCodeReturnAddresses();
     TestFormalStackwalkUnwindsRealCallerChain();

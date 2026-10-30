@@ -1002,13 +1002,18 @@ bool LooksLikePluginExtension(std::string_view s)
 
 std::string ExtractFormIdBefore(std::string_view line, std::size_t pos)
 {
+  // "[0x0001ABCD]" with some spaces fits in this; looking further back for the
+  // '[' made a line of many references quadratic.
+  constexpr std::size_t kMaxFormIdText = 64;
   if (pos == 0) return {};
   std::size_t p = pos;
   while (p > 0 && (line[p - 1] == ' ' || line[p - 1] == '\t')) --p;
   if (p == 0 || line[p - 1] != ']') return {};
   --p;
-  auto bracket = line.rfind('[', p);
-  if (bracket == std::string_view::npos || bracket >= p) return {};
+  const std::size_t windowStart = p > kMaxFormIdText ? p - kMaxFormIdText : 0;
+  auto bracket = line.substr(windowStart, p - windowStart).rfind('[');
+  if (bracket == std::string_view::npos) return {};
+  bracket += windowStart;
   std::string_view inside = line.substr(bracket + 1, p - bracket - 1);
   while (!inside.empty() && (inside.front() == ' ' || inside.front() == '\t')) inside.remove_prefix(1);
   while (!inside.empty() && (inside.back() == ' ' || inside.back() == '\t')) inside.remove_suffix(1);
@@ -1019,24 +1024,60 @@ std::string ExtractFormIdBefore(std::string_view line, std::size_t pos)
   return std::string(inside);
 }
 
+namespace {
+
+// The next occurrence of a needle at or after a position that only grows: the
+// last answer is reused while it still lies ahead, and "none" stays none. A
+// line is then scanned once per needle; searching again for every '(' made a
+// crafted line of one megabyte of '(' take hours.
+class ForwardFinder
+{
+public:
+  ForwardFinder(std::string_view text, std::string_view needle) : text_(text), needle_(needle) {}
+
+  std::size_t Next(std::size_t from)
+  {
+    if (!valid_ || from < from_ || (found_ != std::string_view::npos && found_ < from)) {
+      found_ = text_.find(needle_, from);
+      from_ = from;
+      valid_ = true;
+    }
+    return found_;
+  }
+
+private:
+  std::string_view text_;
+  std::string_view needle_;
+  std::size_t from_ = 0;
+  std::size_t found_ = std::string_view::npos;
+  bool valid_ = false;
+};
+
+}  // namespace
+
 std::vector<EspRefEntry> ExtractEspRefsFromLine(std::string_view line)
 {
   std::vector<EspRefEntry> results;
   std::size_t pos = 0;
+  ForwardFinder fileUpper(line, "File:");
+  ForwardFinder fileLower(line, "file:");
+  ForwardFinder quote(line, "\"");
+  ForwardFinder closeParen(line, ")");
+  ForwardFinder quoteCloseParen(line, "\")");
 
   while (pos < line.size()) {
     auto nextParen = line.find('(', pos);
-    auto nextFile = line.find("File:", pos);
-    if (nextFile == std::string_view::npos) nextFile = line.find("file:", pos);
+    auto nextFile = fileUpper.Next(pos);
+    if (nextFile == std::string_view::npos) nextFile = fileLower.Next(pos);
 
     if (nextParen == std::string_view::npos && nextFile == std::string_view::npos) break;
 
     // Handle File: pattern if it comes before next paren
     if (nextFile != std::string_view::npos &&
         (nextParen == std::string_view::npos || nextFile < nextParen)) {
-      auto fq = line.find('"', nextFile + 5);
+      auto fq = quote.Next(nextFile + 5);
       if (fq == std::string_view::npos) { pos = nextFile + 5; continue; }
-      auto fqe = line.find('"', fq + 1);
+      auto fqe = quote.Next(fq + 1);
       if (fqe == std::string_view::npos) { pos = fq + 1; continue; }
       std::string_view name = line.substr(fq + 1, fqe - (fq + 1));
       // Quoting already gives us an exact filename boundary. Spaces are valid
@@ -1052,11 +1093,11 @@ std::vector<EspRefEntry> ExtractEspRefsFromLine(std::string_view line)
     }
 
     // Handle paren pattern
-    auto cp = line.find(')', nextParen + 1);
+    auto cp = closeParen.Next(nextParen + 1);
     if (cp == std::string_view::npos) { pos = nextParen + 1; continue; }
 
     if (nextParen + 1 < line.size() && line[nextParen + 1] == '"') {
-      auto endq = line.find("\")", nextParen + 2);
+      auto endq = quoteCloseParen.Next(nextParen + 2);
       if (endq != std::string_view::npos) {
         std::string_view name = line.substr(nextParen + 2, endq - (nextParen + 2));
         if (LooksLikePluginExtension(name)) {

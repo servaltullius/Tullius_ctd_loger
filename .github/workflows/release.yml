@@ -140,7 +140,8 @@ jobs:
 
       # The zip ships without PDBs; keep the ones matching the released
       # binaries so a SkyrimDiag.dll+0x... crash in a user's report can be
-      # symbolized later.
+      # symbolized later. The workflow artifact expires after 90 days; the
+      # same files also go on the release itself (symbols zip below).
       - name: Upload release symbols
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -175,19 +176,47 @@ jobs:
             --strict
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Create GitHub Release
+      - name: Package release symbols
+        id: release_symbols
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $symbolsPath = "dist/Tullius_ctd_loger_${tag}_symbols.zip"
+          Compress-Archive -Force -DestinationPath $symbolsPath -Path @(
+            "build-win/bin/SkyrimDiag.pdb",
+            "build-win/bin/SkyrimDiagHelper.pdb",
+            "build-win/bin/SkyrimDiagDumpToolNative.pdb",
+            "build-win/bin/SkyrimDiagDumpToolCli.pdb",
+            "build-win/bin/SkyrimDiagDumpToolWinUI.pdb")
+          "symbols_path=$symbolsPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Created as a draft: nothing is public until the readback below has
+      # verified the uploaded zip. A draft left by a failed earlier run of
+      # this tag is replaced, so the job can be re-run; a published release
+      # is never touched.
+      - name: Create GitHub Release (draft)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
           $expectedPrerelease = "${{ steps.release_zip.outputs.is_prerelease }}" -eq "true"
-          $args = @("release", "create", $tag, "--title", $tag, "--notes-file", "${{ steps.release_notes.outputs.notes_path }}")
+          $existing = gh release view $tag --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (-not [bool]($existing | ConvertFrom-Json).isDraft) {
+              throw "A published release already exists for $tag"
+            }
+            gh release delete $tag --yes
+            if ($LASTEXITCODE -ne 0) { throw "Could not replace the earlier draft release of $tag" }
+          }
+          $args = @("release", "create", $tag, "--draft", "--title", $tag, "--notes-file", "${{ steps.release_notes.outputs.notes_path }}")
           if ($expectedPrerelease) {
             $args += "--prerelease"
           }
           $args += "${{ steps.release_zip.outputs.zip_path }}"
+          $args += "${{ steps.release_symbols.outputs.symbols_path }}"
           gh @args
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed (exit $LASTEXITCODE)" }
 
       - name: Verify public release readback
         env:
@@ -227,3 +256,21 @@ jobs:
             throw "GitHub prerelease state mismatch: tag=$tag expected=$expectedPrerelease actual=$actualPrerelease"
           }
           Write-Host "Public release readback SHA256=$publicHash"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $expectedPrerelease = "${{ steps.release_zip.outputs.is_prerelease }}" -eq "true"
+          if ($expectedPrerelease) {
+            gh release edit $tag --draft=false
+          } else {
+            gh release edit $tag --draft=false --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "gh release edit failed (exit $LASTEXITCODE)" }
+          $published = gh release view $tag --json isDraft,isPrerelease | ConvertFrom-Json
+          if ([bool]$published.isDraft -or ([bool]$published.isPrerelease -ne $expectedPrerelease)) {
+            throw "Release $tag was not published as expected: isDraft=$($published.isDraft) isPrerelease=$($published.isPrerelease)"
+          }

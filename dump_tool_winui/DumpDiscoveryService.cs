@@ -381,7 +381,8 @@ internal static class DumpDiscoveryService
         IEnumerable<string> lines;
         try
         {
-            lines = File.ReadLines(iniPath);
+            // Decoded as the helper decodes it (IniTextDecoder); lines split at CR or LF.
+            lines = IniTextDecoder.Decode(File.ReadAllBytes(iniPath)).Split('\r', '\n');
         }
         catch
         {
