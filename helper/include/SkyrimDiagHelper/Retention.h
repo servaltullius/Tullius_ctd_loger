@@ -154,6 +154,19 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::filesystem::path& dir, 
   }
 }
 
+// The same from a listing already taken, for a sweep that deletes many
+// dumps: one folder scan instead of one per dump.
+inline void DeleteAssociatedDumpToolArtifacts(const std::vector<std::filesystem::path>& listing, const std::string& stem)
+{
+  const auto prefix = stem + "_";
+  std::error_code ec;
+  for (const auto& file : listing) {
+    if (StartsWith(PathPartUtf8(file.filename()), prefix)) {
+      std::filesystem::remove(file, ec);
+    }
+  }
+}
+
 struct DatedFile {
   std::filesystem::path path;
   std::string ts;
@@ -237,6 +250,9 @@ inline std::unordered_map<std::string, std::uint32_t> BuildTimestampRefCounts(co
 
 // Removes one dump and what was written for it. tsRefs counts the dumps of
 // its kind per timestamp; the incident manifest goes with the last of them.
+// A dump that cannot be deleted (open in an analysis) keeps its reports, so
+// it is not left without them; a later sweep tries again. listing, when
+// given, is the folder as the sweep found it.
 inline void RemoveDumpAndArtifacts(
   const std::filesystem::path& dir,
   const DatedFile& dump,
@@ -244,7 +260,8 @@ inline void RemoveDumpAndArtifacts(
   std::unordered_map<std::string, std::uint32_t>& tsRefs,
   bool deleteWctForTimestamp,
   bool deleteManualWctForTimestamp,
-  bool deleteEtlForStem)
+  bool deleteEtlForStem,
+  const std::vector<std::filesystem::path>* listing = nullptr)
 {
   std::error_code ec;
   const std::string_view incidentKind = IncidentKindForDumpPrefix(dumpPrefix);
@@ -252,7 +269,14 @@ inline void RemoveDumpAndArtifacts(
   const auto stem = PathPartUtf8(p.stem());
 
   std::filesystem::remove(p, ec);
-  DeleteAssociatedDumpToolArtifacts(dir, stem);
+  if (ec) {
+    return;
+  }
+  if (listing) {
+    DeleteAssociatedDumpToolArtifacts(*listing, stem);
+  } else {
+    DeleteAssociatedDumpToolArtifacts(dir, stem);
+  }
 
   if (deleteEtlForStem) {
     auto etl = p;
@@ -369,10 +393,18 @@ inline constexpr DumpKindFiles kManualDumpFiles{ "SkyrimDiag_Manual_", false, tr
 // 0.5-0.9 GB (it holds the code of every loaded module), so the default
 // counts alone allow about 40 GB. Past maxTotalBytes the oldest dumps of any
 // kind go, with what was written for them: newest first, once one does not
-// fit, it and every older one go. The newest dump of each kind always stays,
-// so a dump a viewer is about to open survives, and a budget smaller than one
-// dump does not empty the folder. 0 = unlimited.
-inline void PruneDumpsOverTotalBytes(const std::filesystem::path& dir, std::uint64_t maxTotalBytes)
+// fit, it and every older one go. Two captures always stay, with every dump
+// of their timestamp (a crash recapture, _Full or _Richer, shares its
+// crash's):
+// - the latest capture, so the folder is never emptied;
+// - the newest capture of each kind while it is younger than recentAge, which
+//   a viewer may still open after the game exits.
+// A newest-of-its-kind that is older (a manual capture from months ago) does
+// not hold budget forever. 0 = unlimited.
+inline void PruneDumpsOverTotalBytes(
+  const std::filesystem::path& dir,
+  std::uint64_t maxTotalBytes,
+  std::chrono::seconds recentAge = std::chrono::hours(24))
 {
   if (maxTotalBytes == 0) {
     return;
@@ -380,51 +412,76 @@ inline void PruneDumpsOverTotalBytes(const std::filesystem::path& dir, std::uint
 
   struct SizedDump {
     DatedFile dump;
-    const DumpKindFiles* kind = nullptr;
-    std::unordered_map<std::string, std::uint32_t>* tsRefs = nullptr;
+    std::size_t kind = 0;
     std::uint64_t bytes = 0;
   };
   const DumpKindFiles* kinds[] = { &kCrashDumpFiles, &kHangDumpFiles, &kManualDumpFiles };
   std::unordered_map<std::string, std::uint32_t> tsRefs[std::size(kinds)];
-  std::vector<SizedDump> older;
-  std::uint64_t total = 0;
+  std::string newestOfKind[std::size(kinds)];
+  std::vector<SizedDump> all;
   const auto files = CollectRegularFiles(dir);
   for (std::size_t k = 0; k < std::size(kinds); ++k) {
     const auto dumps = CollectFilesByPrefixAndExt(files, kinds[k]->prefix, ".dmp");
     tsRefs[k] = BuildTimestampRefCounts(dumps);
-    for (std::size_t i = 0; i < dumps.size(); ++i) {
+    if (!dumps.empty()) {
+      newestOfKind[k] = dumps.front().ts;
+    }
+    for (const auto& dump : dumps) {
       std::error_code sizeEc;
-      const auto size = std::filesystem::file_size(dumps[i].path, sizeEc);
-      const std::uint64_t bytes = sizeEc ? 0u : static_cast<std::uint64_t>(size);
-      if (i == 0) {
-        total += bytes;
-      } else {
-        older.push_back(SizedDump{ dumps[i], kinds[k], &tsRefs[k], bytes });
-      }
+      const auto size = std::filesystem::file_size(dump.path, sizeEc);
+      all.push_back(SizedDump{ dump, k, sizeEc ? 0u : static_cast<std::uint64_t>(size) });
     }
   }
-
-  std::sort(older.begin(), older.end(), [](const SizedDump& a, const SizedDump& b) {
+  if (all.empty()) {
+    return;
+  }
+  std::sort(all.begin(), all.end(), [](const SizedDump& a, const SizedDump& b) {
     if (a.dump.ts != b.dump.ts) {
       return a.dump.ts > b.dump.ts;
     }
     return PathPartUtf8(a.dump.path.filename()) < PathPartUtf8(b.dump.path.filename());
   });
-  bool full = false;
-  for (const auto& entry : older) {
-    if (!full && total + entry.bytes <= maxTotalBytes) {
+
+  const auto latestTs = all.front().dump.ts;
+  const auto now = std::filesystem::file_time_type::clock::now();
+  const auto alwaysKept = [&](const SizedDump& entry) {
+    if (entry.dump.ts != newestOfKind[entry.kind]) {
+      return false;
+    }
+    if (entry.dump.ts == latestTs) {
+      return true;
+    }
+    std::error_code timeEc;
+    const auto written = std::filesystem::last_write_time(entry.dump.path, timeEc);
+    return timeEc || now - written < recentAge;
+  };
+
+  std::uint64_t total = 0;
+  std::vector<const SizedDump*> rest;
+  for (const auto& entry : all) {
+    if (alwaysKept(entry)) {
       total += entry.bytes;
+    } else {
+      rest.push_back(&entry);
+    }
+  }
+  bool full = false;
+  for (const auto* entry : rest) {
+    if (!full && total + entry->bytes <= maxTotalBytes) {
+      total += entry->bytes;
       continue;
     }
     full = true;
+    const auto& kind = *kinds[entry->kind];
     RemoveDumpAndArtifacts(
       dir,
-      entry.dump,
-      entry.kind->prefix,
-      *entry.tsRefs,
-      entry.kind->deleteWctForTimestamp,
-      entry.kind->deleteManualWctForTimestamp,
-      entry.kind->deleteEtlForStem);
+      entry->dump,
+      kind.prefix,
+      tsRefs[entry->kind],
+      kind.deleteWctForTimestamp,
+      kind.deleteManualWctForTimestamp,
+      kind.deleteEtlForStem,
+      &files);
   }
 }
 
@@ -555,31 +612,30 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
   }
 
   const auto files = CollectRegularFiles(outBase);
-  const auto crashDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".dmp");
-  const auto hangDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Hang_", ".dmp");
-  const auto manualDumps = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Manual_", ".dmp");
-
-  const auto pruneByCount = [&](const std::vector<DatedFile>& dumps, const DumpKindFiles& kind, std::uint32_t maxCount) {
+  const auto pruneByCount = [&](const DumpKindFiles& kind, std::uint32_t maxCount) {
     PruneDumpFilesFromCollected(
       outBase,
-      dumps,
+      CollectFilesByPrefixAndExt(files, kind.prefix, ".dmp"),
       kind.prefix,
       maxCount,
       kind.deleteWctForTimestamp,
       kind.deleteManualWctForTimestamp,
       kind.deleteEtlForStem);
   };
-  pruneByCount(crashDumps, kCrashDumpFiles, limits.maxCrashDumps);
-  pruneByCount(hangDumps, kHangDumpFiles, limits.maxHangDumps);
-  pruneByCount(manualDumps, kManualDumpFiles, limits.maxManualDumps);
+  pruneByCount(kCrashDumpFiles, limits.maxCrashDumps);
+  pruneByCount(kHangDumpFiles, limits.maxHangDumps);
+  pruneByCount(kManualDumpFiles, limits.maxManualDumps);
   PruneDumpsOverTotalBytes(outBase, static_cast<std::uint64_t>(limits.maxTotalDumpGB) << 30u);
 
-  auto etls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Hang_", ".etl");
-  auto crashEtls = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Crash_", ".etl");
+  // The steps above deleted dumps with their traces; a trace already gone
+  // must not take one of the MaxEtwTraces places.
+  const auto remaining = CollectRegularFiles(outBase);
+  auto etls = CollectFilesByPrefixAndExt(remaining, "SkyrimDiag_Hang_", ".etl");
+  auto crashEtls = CollectFilesByPrefixAndExt(remaining, "SkyrimDiag_Crash_", ".etl");
   etls.insert(etls.end(), crashEtls.begin(), crashEtls.end());
   PruneEtwTracesFromCollected(std::move(etls), limits.maxEtwTraces);
 
-  PruneHelperLeftovers(files);
+  PruneHelperLeftovers(remaining);
   PruneOrphanedAnalysisCaches(outBase);
 }
 

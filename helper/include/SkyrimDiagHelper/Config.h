@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
+#include "SkyrimDiagHelper/Retention.h"
 
 namespace skydiag::helper {
 
@@ -109,5 +110,17 @@ inline std::filesystem::path ResolveOutputDirAgainstExeDir(
 }
 
 HelperConfig LoadConfig(std::wstring* err);
+
+// The retention settings of a config, as every retention sweep applies them.
+inline RetentionLimits RetentionLimitsFromConfig(const HelperConfig& cfg)
+{
+  RetentionLimits limits{};
+  limits.maxCrashDumps = cfg.maxCrashDumps;
+  limits.maxHangDumps = cfg.maxHangDumps;
+  limits.maxManualDumps = cfg.maxManualDumps;
+  limits.maxEtwTraces = cfg.maxEtwTraces;
+  limits.maxTotalDumpGB = cfg.maxTotalDumpGB;
+  return limits;
+}
 
 }  // namespace skydiag::helper
