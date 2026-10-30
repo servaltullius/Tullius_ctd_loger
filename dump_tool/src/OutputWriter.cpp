@@ -1,6 +1,7 @@
 #include "OutputWriter.h"
 #include "OutputWriterPipeline.h"
 #include "OutputWriterInternals.h"
+#include "SkyrimDiagLongPath.h"
 #include "Utf.h"
 
 #include <Windows.h>
@@ -46,8 +47,9 @@ public:
     std::wstring* err)
   {
     const auto lockPath = OutputFamilyLockPath(outBase, dumpStem);
+    const auto ioLockPath = skydiag::ExtendedLengthPath(lockPath);
     std::error_code directoryError;
-    std::filesystem::create_directories(lockPath.parent_path(), directoryError);
+    std::filesystem::create_directories(ioLockPath.parent_path(), directoryError);
     if (directoryError) {
       if (err) {
         *err = L"Failed to create output-family lock directory: " +
@@ -62,7 +64,7 @@ public:
     DWORD openError = ERROR_SUCCESS;
     do {
       handle_ = CreateFileW(
-        lockPath.c_str(),
+        ioLockPath.c_str(),
         GENERIC_READ | GENERIC_WRITE,
         0,
         nullptr,
@@ -104,7 +106,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   const std::filesystem::path dumpFs(r.dump_path);
   std::filesystem::path outBase = r.out_dir.empty() ? DefaultOutDirForDump(dumpFs) : std::filesystem::path(r.out_dir);
   std::error_code ec;
-  std::filesystem::create_directories(outBase, ec);
+  std::filesystem::create_directories(skydiag::ExtendedLengthPath(outBase), ec);
 
   const std::wstring stem = dumpFs.stem().wstring();
   const bool redactPaths = r.path_redaction_applied;
@@ -175,7 +177,7 @@ bool WriteOutputs(const AnalysisResult& r, std::wstring* err)
   std::wstring writeErr;
   const auto removeArtifactIfPresent = [&](const std::filesystem::path& path, std::wstring_view artifactName) {
     std::error_code removeEc;
-    std::filesystem::remove(path, removeEc);
+    std::filesystem::remove(skydiag::ExtendedLengthPath(path), removeEc);
     if (!removeEc) {
       return true;
     }

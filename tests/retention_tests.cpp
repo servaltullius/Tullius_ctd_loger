@@ -1,5 +1,6 @@
 #include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagHelper/CrashRecapturePolicy.h"
+#include "SkyrimDiagLongPath.h"
 
 #include <cassert>
 #include <chrono>
@@ -20,6 +21,7 @@ using skydiag::helper::RetentionLimits;
 using skydiag::helper::RotateLogFileIfNeeded;
 using skydiag::helper::ApplyRetentionToOutputDir;
 using skydiag::helper::PruneDumpsOverTotalBytes;
+using skydiag::ExtendedLengthPath;
 
 static void WriteFile(const std::filesystem::path& path, std::size_t bytes = 1)
 {
@@ -368,6 +370,29 @@ static void Test_PrunesAnalysisCachesWithoutTheirDump()
   std::filesystem::remove_all(dir, ec);
 }
 
+// The same under an output folder long enough that a copy's files pass
+// MAX_PATH, where Windows reaches them only through extended-length paths.
+static void Test_PrunesAnalysisCachesUnderALongOutputDir()
+{
+  const auto root = MakeTempDir();
+  auto dir = root;
+  while (dir.native().size() < 200u) {
+    dir /= "a_long_output_folder_segment";
+  }
+  const auto orphan = dir / ".skydiag-analysis" / std::string(64, 'b') / "0000000000000014.01dd000000000001";
+  assert((orphan / "Summary.json").native().size() >= 260u);
+  WriteFile(ExtendedLengthPath(orphan / "Summary.json"));
+  SetAge(ExtendedLengthPath(orphan), std::chrono::hours(48));
+
+  ApplyRetentionToOutputDir(dir, RetentionLimits{});
+
+  assert(!Exists(ExtendedLengthPath(orphan)));
+  assert(!Exists(ExtendedLengthPath(dir / ".skydiag-analysis" / std::string(64, 'b'))));
+
+  std::error_code ec;
+  std::filesystem::remove_all(ExtendedLengthPath(root), ec);
+}
+
 // A dump pruned by the count limit takes its analysis copy with it once
 // that copy is old enough.
 static void Test_PrunedDumpLeavesNoAnalysisCopy()
@@ -658,6 +683,7 @@ int main()
   Test_RotatesHelperLog();
   Test_PrunesAroundNamesOutsideTheAnsiCodePage();
   Test_PrunesAnalysisCachesWithoutTheirDump();
+  Test_PrunesAnalysisCachesUnderALongOutputDir();
   Test_PrunedDumpLeavesNoAnalysisCopy();
 #ifdef _WIN32
   Test_PrunesAroundUnpairedSurrogateNames();
