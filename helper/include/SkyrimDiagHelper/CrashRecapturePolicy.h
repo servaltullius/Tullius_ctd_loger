@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <string>
 #include <vector>
 
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/Retention.h"
 
 namespace skydiag::helper {
 
@@ -66,6 +69,15 @@ inline const char* RecaptureReasonToString(RecaptureReason reason)
       return "freeze_candidate_weak";
   }
   return "unknown_fault_module";
+}
+
+// A crash recapture is named and recorded under its crash's timestamp
+// (SkyrimDiag_Crash_<ts>_Richer.dmp, SkyrimDiag_Incident_CrashRecapture_<ts>.json),
+// so retention keeps and removes it with that crash (PruneDumpsOverTotalBytes,
+// RemoveDumpAndArtifacts). Empty when the crash dump's name has no timestamp.
+inline std::string CrashRecaptureTimestamp(const std::filesystem::path& crashDumpPath)
+{
+  return TryExtractTimestampToken(PathPartUtf8(crashDumpPath.stem())).value_or(std::string{});
 }
 
 inline const char* RecaptureTargetProfileToString(RecaptureTargetProfile profile)

@@ -781,7 +781,13 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
   }
 
-  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !stackIsCallPathOnly;
+  // A main thread waiting in the engine, the GPU or a driver only has the
+  // stack plugins on its call path (ADR-0009): the summary says not to remove
+  // them, so they get no update/disable advice either. A lock owner named by
+  // WCT comes first in the summary; one WCT pass alone keeps the stack advice.
+  const bool stackIsBystander = IsBystanderWait(r.main_thread_wait) && r.suspects_from_main_thread &&
+    r.main_thread_lock_owner.tid == 0u;
+  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !stackIsCallPathOnly && !stackIsBystander;
   if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
       !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en

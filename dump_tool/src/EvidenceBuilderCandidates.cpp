@@ -32,11 +32,6 @@ std::uint32_t CrashLoggerWeight(const AnalysisResult::CrashLoggerModReference& r
   return 3u;
 }
 
-std::uint32_t PairingAdjustedCrashLoggerWeight(const AnalysisResult& r, std::uint32_t weight)
-{
-  return r.crash_logger_pairing_ambiguous ? std::min<std::uint32_t>(weight, 3u) : weight;
-}
-
 std::wstring WideLowerLocal(std::wstring_view value)
 {
   std::wstring out;
@@ -98,7 +93,10 @@ void AddCrashLoggerFrameSignal(
 
 void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
 {
-  if (!out) {
+  // A log that may belong to another crash (an ambiguous time pairing, or a
+  // different exception location) stays in the evidence as a Low clue but
+  // raises no candidate (Analyzer.cpp, DowngradeCrashLoggerLogForOtherLocation).
+  if (!out || r.crash_logger_pairing_ambiguous) {
     return;
   }
 
@@ -106,7 +104,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
     AddCrashLoggerFrameSignal(
       r,
       r.crash_logger_direct_fault_module,
-      PairingAdjustedCrashLoggerWeight(r, 8u),
+      8u,
       en
         ? (L"CrashLogger direct-fault frame: " + r.crash_logger_direct_fault_module)
         : (L"CrashLogger direct-fault 프레임: " + r.crash_logger_direct_fault_module),
@@ -118,7 +116,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
     AddCrashLoggerFrameSignal(
       r,
       r.crash_logger_first_actionable_probable_module,
-      PairingAdjustedCrashLoggerWeight(r, 6u),
+      6u,
       en
         ? (L"CrashLogger first actionable probable frame: " + r.crash_logger_first_actionable_probable_module)
         : (L"Crash Logger 첫 번째 유력 DLL 프레임: " + r.crash_logger_first_actionable_probable_module),
@@ -131,7 +129,7 @@ void AddCrashLoggerFrameSignals(const AnalysisResult& r, bool en, std::vector<Ca
     AddCrashLoggerFrameSignal(
       r,
       r.crash_logger_probable_streak_module,
-      PairingAdjustedCrashLoggerWeight(r, (r.crash_logger_probable_streak_length >= 3u) ? 6u : 5u),
+      (r.crash_logger_probable_streak_length >= 3u) ? 6u : 5u,
       en
         ? (L"CrashLogger probable frame streak (" + std::to_wstring(r.crash_logger_probable_streak_length) +
            L"x): " + r.crash_logger_probable_streak_module)
@@ -179,7 +177,8 @@ std::uint32_t FirstChanceWeight(const FirstChanceSummary& summary)
 
 void AddCrashLoggerSignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
 {
-  if (!out) {
+  // As for the frames: an ambiguous pairing raises no candidate.
+  if (!out || r.crash_logger_pairing_ambiguous) {
     return;
   }
 
@@ -199,7 +198,7 @@ void AddCrashLoggerSignals(const AnalysisResult& r, bool en, std::vector<Candida
     signal.detail = en
       ? (L"CrashLogger object ref: " + ref.esp_name)
       : (L"CrashLogger 오브젝트 참조: " + ref.esp_name);
-    signal.weight = PairingAdjustedCrashLoggerWeight(r, CrashLoggerWeight(ref));
+    signal.weight = CrashLoggerWeight(ref);
     if (!signal.candidate_key.empty()) {
       out->push_back(std::move(signal));
     }

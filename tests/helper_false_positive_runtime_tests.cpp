@@ -35,6 +35,7 @@ using skydiag::helper::internal::PendingCrashEtwCapture;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::helper::internal::StopEtwCaptureToPath;
 using skydiag::helper::internal::CrashSummaryInfo;
+using skydiag::helper::internal::TryLoadCrashSummaryInfo;
 using skydiag::helper::internal::TryWriteCleanExitEvidenceRecord;
 using skydiag::helper::internal::TryUpdateIncidentManifestEtw;
 using skydiag::helper::internal::UpdateCrashBucketStats;
@@ -206,6 +207,36 @@ void TestCorruptCrashBucketStatsAreQuarantinedBeforeRecovery()
     }
   }
   Require(foundQuarantine, "Corrupt crash bucket stats must be retained under a quarantine name");
+  std::filesystem::remove_all(outBase);
+}
+
+// Values of the wrong type (a hand edit, another version) read as missing:
+// nlohmann's value() would throw, and nothing above the helper loop catches.
+void TestWrongTypesInCrashBucketStatsAndSummaryAreDefaults()
+{
+  const auto outBase = MakeTempDir(L"skydiag_wrong_type_bucket_stats");
+  const auto statsPath = outBase / "SkyrimDiag_CrashBucketStats.json";
+  WriteAllTextUtf8(statsPath,
+    "{\"version\":1,\"buckets\":{\"test-bucket\":{\"seen_total\":null,\"unknown_total\":\"3\",\"unknown_streak\":-1}}}");
+
+  CrashSummaryInfo info{};
+  info.bucketKey = "test-bucket";
+  info.unknownFaultModule = true;
+  std::uint32_t unknownStreak = 0;
+  std::uint32_t seenCount = 0;
+  std::wstring err;
+  Require(UpdateCrashBucketStats(outBase, info, &unknownStreak, &seenCount, &err),
+    "Wrong-typed bucket counters must not throw");
+  Require(unknownStreak == 1u && seenCount == 1u, "Wrong-typed bucket counters restart at zero");
+
+  const auto summaryPath = outBase / "SkyrimDiag_Crash_20260101_000000_000_SkyrimDiagSummary.json";
+  WriteAllTextUtf8(summaryPath,
+    "{\"schema\":{\"version\":\"2\"},\"crash_bucket_key\":7,\"exception\":{\"module_plus_offset\":null},"
+    "\"actionable_candidates\":[{\"status_id\":3}],\"first_chance_context\":{\"repeated_signature_count\":\"x\"}}");
+  CrashSummaryInfo loaded{};
+  Require(TryLoadCrashSummaryInfo(summaryPath, &loaded, &err), "Wrong-typed summary fields must not throw");
+  Require(loaded.schemaVersion == 1u, "A non-numeric schema version reads as the default");
+  Require(loaded.bucketKey.empty(), "A non-string bucket key reads as none");
   std::filesystem::remove_all(outBase);
 }
 
@@ -2418,6 +2449,7 @@ int wmain(int argc, wchar_t** argv)
     TestCleanExitEvidenceWriteFailureDoesNotClaimSuccess();
     TestAtomicTextWriteFailurePreservesExistingFile();
     TestCorruptCrashBucketStatsAreQuarantinedBeforeRecovery();
+    TestWrongTypesInCrashBucketStatsAndSummaryAreDefaults();
     TestIncidentManifestUpdatePropagatesAtomicReplaceFailure();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesItsRecapture();

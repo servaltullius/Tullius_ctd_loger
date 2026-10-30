@@ -328,6 +328,36 @@ void TestFrameOnlyFaultLocationDoesNotClaimTheStack()
   }
 }
 
+// A Crash Logger log that may belong to another crash (an ambiguous time
+// pairing, or a different exception location) is a Low clue in the evidence
+// and raises no candidate; the same log paired cleanly does.
+void TestAmbiguousCrashLoggerPairingRaisesNoCandidate()
+{
+  for (const auto lang : kLanguages) {
+    for (const bool ambiguous : { false, true }) {
+      auto r = MakeCrashIn(L"SkyrimSE.exe", std::wstring(kGameDir) + L"SkyrimSE.exe");
+      r.crash_logger_log_path = L"crash-2026-10-30-16-52-59.log";
+      r.crash_logger_first_actionable_probable_eligible = true;
+      r.crash_logger_first_actionable_probable_module = L"Mod.dll";
+      r.crash_logger_probable_streak_eligible = true;
+      r.crash_logger_probable_streak_module = L"Mod.dll";
+      r.crash_logger_probable_streak_length = 2;
+      r.crash_logger_pairing_ambiguous = ambiguous;
+      BuildEvidenceAndSummary(r, lang);
+      bool named = false;
+      for (const auto& candidate : r.actionable_candidates) {
+        named = named || candidate.module_filename == L"Mod.dll";
+      }
+      if (ambiguous) {
+        Require(!named, "an ambiguous Crash Logger pairing raises no candidate");
+        Require(!Contains(r.summary_sentence, L"Mod.dll"), "nor names its module in the summary");
+      } else {
+        Require(named, "the same log paired cleanly raises its frame module");
+      }
+    }
+  }
+}
+
 AnalysisResult MakeExeCrashWithFirstChance(bool fromStackwalk, i18n::ConfidenceLevel suspectLevel)
 {
   auto r = MakeCrashIn(L"SkyrimSE.exe", std::wstring(kGameDir) + L"SkyrimSE.exe");
@@ -544,6 +574,7 @@ int main()
     TestEnbD3d11CrashLoggerFramesAreAMod();
     TestPassiveHookDoesNotOwnAFreeze();
     TestFrameOnlyFaultLocationDoesNotClaimTheStack();
+    TestAmbiguousCrashLoggerPairingRaisesNoCandidate();
     TestPointerScanIsNotTheTulliusCallstack();
     TestUnconfirmedCppExceptionAdvice();
     TestOneMissingMasterItemLowAfterLoad();

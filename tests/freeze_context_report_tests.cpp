@@ -176,6 +176,8 @@ void TestEngineWaitWithConsoleOpen()
       "NextAction explains what the main thread was doing");
     Require(AnyStartsWith(r.recommendations, en ? L"[Context]" : L"[상황]", en ? L"Console" : L"콘솔"),
       "the open Console is pointed out");
+    Require(!AnyStartsWith(r.recommendations, en ? L"[Top suspect]" : L"[유력 후보]"),
+      "no update/disable advice for a plugin that is only on the waiting main thread's stack");
     bool hasWaitEvidence = false;
     for (const auto& e : r.evidence) {
       hasWaitEvidence = hasWaitEvidence || Contains(e.title, en ? L"inside the game engine" : L"게임 엔진 안에서");

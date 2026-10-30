@@ -730,6 +730,9 @@ bool WriteDumpWithStreams(
     dumpType = static_cast<MINIDUMP_TYPE>(dumpType | MiniDumpIgnoreInaccessibleMemory);
   }
 
+  // What a failed write left would pass for a dump: the viewer would list it
+  // and retention would keep it as the newest capture.
+  DeleteFileW(dumpPath.c_str());
   if (err) {
     *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr) + L" (" + Hex(lastErr) + L", " +
       DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";

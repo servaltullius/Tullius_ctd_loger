@@ -108,7 +108,9 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
   if (context.recaptureDecision.shouldRecapture) {
     std::wstring aliveErr;
     if (IsProcessStillAlive(proc.process, &aliveErr)) {
-      const auto tsFull = Timestamp();
+      // The crash's own timestamp, so retention keeps the recapture with it.
+      const auto crashTs = skydiag::helper::CrashRecaptureTimestamp(task.dumpPath);
+      const std::wstring tsFull = crashTs.empty() ? Timestamp() : std::wstring(crashTs.begin(), crashTs.end());
       const auto recaptureDumpFs =
         outBase / (L"SkyrimDiag_Crash_" + tsFull +
                    RecaptureSuffixForTarget(context.recaptureDecision.targetProfile) +

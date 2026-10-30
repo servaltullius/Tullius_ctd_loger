@@ -1,4 +1,5 @@
 #include "SkyrimDiagHelper/Retention.h"
+#include "SkyrimDiagHelper/CrashRecapturePolicy.h"
 
 #include <cassert>
 #include <chrono>
@@ -517,14 +518,17 @@ static void Test_TotalBudgetDropsAnOldNewestOfItsKind()
 
 // A crash recapture (SkyrimDiag_Crash_<ts>_Full.dmp, a full-memory dump)
 // shares its crash's timestamp and stays with it however large it is; the
-// sweep right after the recapture must not delete it.
+// sweep right after the recapture must not delete it. The names come from
+// CrashRecaptureTimestamp, as the helper builds them.
 static void Test_TotalBudgetKeepsARecaptureWithItsCrash()
 {
   const auto dir = MakeTempDir();
   const auto older = dir / "SkyrimDiag_Crash_20260101_000000_000.dmp";
   const auto crash = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
-  const auto recapture = dir / "SkyrimDiag_Crash_20260101_000001_000_Full.dmp";
-  const auto manifest = dir / "SkyrimDiag_Incident_CrashRecapture_20260101_000001_000.json";
+  const auto ts = skydiag::helper::CrashRecaptureTimestamp(crash);
+  assert(ts == "20260101_000001_000");
+  const auto recapture = dir / ("SkyrimDiag_Crash_" + ts + "_Full.dmp");
+  const auto manifest = dir / ("SkyrimDiag_Incident_CrashRecapture_" + ts + ".json");
   WriteFile(older, 10);
   WriteFile(crash, 10);
   WriteFile(recapture, 500);

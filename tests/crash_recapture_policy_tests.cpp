@@ -161,8 +161,19 @@ void TestStrongFreezeStateSkipsRecapture()
 
 }  // namespace
 
+// The recapture takes its crash's timestamp from the crash dump's name.
+static void TestCrashRecaptureTimestamp()
+{
+  using skydiag::helper::CrashRecaptureTimestamp;
+  assert(CrashRecaptureTimestamp(std::filesystem::path("Logs") / "SkyrimDiag_Crash_20261030_165259_564.dmp") ==
+         "20261030_165259_564");
+  assert(CrashRecaptureTimestamp("SkyrimDiag_Crash_20261030_165259.dmp") == "20261030_165259");
+  assert(CrashRecaptureTimestamp("crash.dmp").empty());
+}
+
 int main()
 {
+  TestCrashRecaptureTimestamp();
   TestCrashPolicyDisabledSkips();
   TestCrashRicherEscalationIncludesNewWeakSignals();
   TestCrashRicherEscalationForRepeatedUnknownModule();
