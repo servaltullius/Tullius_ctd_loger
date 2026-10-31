@@ -1319,6 +1319,41 @@ void TestCrashHistorySameStemIdentityIsolation()
   assert(history.Size() == 0u);
 }
 
+// Load says why it did not load, so the caller never saves over a history it
+// could not read; a field of another type in one entry no longer loses all.
+void TestCrashHistoryLoadSaysWhy()
+{
+  using skydiag::dump_tool::CrashHistoryLoad;
+  const auto root = std::filesystem::temp_directory_path() / "skydiag_history_load_results";
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::create_directories(root);
+  const auto path = root / "crash_history.json";
+  const auto write = [&](const char* text) { std::ofstream(path, std::ios::binary) << text; };
+
+  CrashHistory history;
+  assert(history.Load(path) == CrashHistoryLoad::kMissing);
+  write("not json");
+  assert(history.Load(path) == CrashHistoryLoad::kDamaged);
+  write("{\"version\": 3}");
+  assert(history.Load(path) == CrashHistoryLoad::kDamaged);
+  write("{\"version\": 9, \"entries\": []}");
+  assert(history.Load(path) == CrashHistoryLoad::kUnsupportedVersion);
+  write(
+    "{\"version\": 3, \"entries\": [{\"dump_file\": \"a.dmp\", \"bucket_key\": null, \"confidence\": 2},"
+    " {\"dump_file\": \"b.dmp\", \"bucket_key\": \"b\"}]}");
+  assert(history.Load(path) == CrashHistoryLoad::kLoaded);
+  assert(history.Size() == 2u);
+  assert(history.GetBucketStats("b").count == 1u);
+#ifdef _WIN32
+  const HANDLE locked = CreateFileW(path.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  assert(locked != INVALID_HANDLE_VALUE);
+  assert(history.Load(path) == CrashHistoryLoad::kUnreadable);
+  CloseHandle(locked);
+#endif
+  std::filesystem::remove_all(root, ec);
+}
+
 #ifdef _WIN32
 void TestCrashHistoryFailedReplacementPreservesExistingFile()
 {
@@ -1781,6 +1816,7 @@ int main()
   TestCrashHistoryCandidateKeyVersionMigration();
   TestCrashHistorySameDumpIsIdempotent();
   TestCrashHistorySameStemIdentityIsolation();
+  TestCrashHistoryLoadSaysWhy();
 #ifdef _WIN32
   TestCrashHistoryFailedReplacementPreservesExistingFile();
 #endif

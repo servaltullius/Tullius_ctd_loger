@@ -161,12 +161,17 @@ bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* er
   return false;
 }
 
-std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
+std::filesystem::path ConfiguredOutputBase(const skydiag::helper::HelperConfig& cfg)
 {
   // A long output folder is used in its extended-length form, so every path
   // the helper builds under it works (SkyrimDiagLongPath.h); a usual one is
   // left as it is.
-  const std::filesystem::path configured = skydiag::PathForIo(cfg.outputDir, kLongestOutputNameChars);
+  return skydiag::PathForIo(cfg.outputDir, kLongestOutputNameChars);
+}
+
+std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
+{
+  const std::filesystem::path configured = ConfiguredOutputBase(cfg);
   std::wstring configuredErr;
   if (PrepareWritableOutputDir(configured, &configuredErr)) {
     return configured;
@@ -521,6 +526,11 @@ bool UpdateCrashBucketStats(
         }
         return false;
       }
+      // Retention keeps the newest copy for a day by its write time, which
+      // the rename kept from the last good update (days ago, say).
+      std::error_code touchEc;
+      std::filesystem::last_write_time(
+        skydiag::PathForIo(quarantinePath), std::filesystem::file_time_type::clock::now(), touchEc);
     }
   }
   if (!root.contains("version")) {
@@ -554,8 +564,11 @@ bool UpdateCrashBucketStats(
   bucket["updated_at_epoch"] = static_cast<std::int64_t>(std::time(nullptr));
 
   // One entry per distinct crash ever seen grew the file without end; the
-  // least recently updated go past kMaxCrashBucketStats (never this one).
+  // least recently updated go past kMaxCrashBucketStats (never this one). A
+  // time later than now came from a clock that was wrong: it says nothing
+  // about recency, and would keep that bucket ahead of every real one.
   constexpr std::size_t kMaxCrashBucketStats = 200;
+  const auto now = static_cast<std::int64_t>(std::time(nullptr));
   auto& buckets = root["buckets"];
   if (buckets.size() > kMaxCrashBucketStats) {
     std::vector<std::pair<std::int64_t, std::string>> byAge;
@@ -568,7 +581,7 @@ bool UpdateCrashBucketStats(
           updated = time->get<std::int64_t>();
         }
       }
-      byAge.emplace_back(updated, it.key());
+      byAge.emplace_back(updated > now ? 0 : updated, it.key());
     }
     std::sort(byAge.begin(), byAge.end());
     std::size_t excess = buckets.size() - kMaxCrashBucketStats;
@@ -584,7 +597,7 @@ bool UpdateCrashBucketStats(
   }
 
   // A bucket key from a summary is not checked for UTF-8; dump() would throw.
-  if (!WriteTextFileUtf8(path, root.dump(2, ' ', false, nlohmann::json::error_handler_t::replace))) {
+  if (!WriteTextFileUtf8(path, DumpJsonForFile(root))) {
     if (err) {
       *err = L"crash bucket stats atomic write failed";
     }

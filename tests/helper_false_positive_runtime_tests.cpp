@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <string>
@@ -178,6 +179,8 @@ void TestCorruptCrashBucketStatsAreQuarantinedBeforeRecovery()
   const auto outBase = MakeTempDir(L"skydiag_corrupt_bucket_stats");
   const auto statsPath = outBase / "SkyrimDiag_CrashBucketStats.json";
   WriteAllTextUtf8(statsPath, "{ definitely not valid json");
+  // Last written days ago: the copy must still count as new for retention.
+  std::filesystem::last_write_time(statsPath, std::filesystem::file_time_type::clock::now() - std::chrono::hours(72));
 
   CrashSummaryInfo info{};
   info.bucketKey = "test-bucket";
@@ -204,6 +207,10 @@ void TestCorruptCrashBucketStatsAreQuarantinedBeforeRecovery()
       Require(
         ReadAllTextUtf8(entry.path()) == "{ definitely not valid json",
         "Quarantine must preserve the exact corrupt bytes");
+      Require(
+        std::filesystem::file_time_type::clock::now() - std::filesystem::last_write_time(entry.path()) <
+          std::chrono::hours(1),
+        "The copy is dated now, so retention keeps it for a day");
     }
   }
   Require(foundQuarantine, "Corrupt crash bucket stats must be retained under a quarantine name");
@@ -249,33 +256,35 @@ std::size_t CountOccurrences(const std::string& text, std::string_view needle)
   return count;
 }
 
-// Past 200 buckets the least recently updated go (one without a time first);
-// the bucket just updated stays even when the clock went back.
+// Past 200 buckets the least recently updated go (one without a time first,
+// and one dated in the future, by a clock that was wrong, as if it had none);
+// the bucket just updated never goes.
 void TestCrashBucketStatsKeepTheMostRecentBuckets()
 {
   const auto outBase = MakeTempDir(L"skydiag_bucket_stats_cap");
   const auto statsPath = outBase / "SkyrimDiag_CrashBucketStats.json";
-  const auto writeBuckets = [&](const char* prefix, std::int64_t firstEpoch, int count, bool untimed) {
+  // count buckets <prefix>-NNN dated firstEpoch + i * step, then `extra` as is.
+  const auto writeBuckets = [&](const char* prefix, std::int64_t firstEpoch, int step, int count, const char* extra) {
     std::string json = "{\"version\":1,\"buckets\":{";
-    if (untimed) {
-      json += "\"untimed\":{\"seen_total\":1},";
-    }
+    json += extra;
     for (int i = 0; i < count; ++i) {
       char key[32]{};
       std::snprintf(key, sizeof(key), "%s-%03d", prefix, i);
-      json += std::string(i == 0 ? "" : ",") + "\"" + key + "\":{\"seen_total\":1,\"updated_at_epoch\":" +
-        std::to_string(firstEpoch + i) + "}";
+      json += std::string(i == 0 && *extra == '\0' ? "" : ",") + "\"" + key +
+        "\":{\"seen_total\":1,\"updated_at_epoch\":" + std::to_string(firstEpoch + static_cast<std::int64_t>(i) * step) +
+        "}";
     }
     json += "}}";
     WriteAllTextUtf8(statsPath, json);
   };
+  const auto now = static_cast<std::int64_t>(std::time(nullptr));
 
   CrashSummaryInfo info{};
   info.bucketKey = "new-bucket";
   std::uint32_t unknownStreak = 0;
   std::uint32_t seenCount = 0;
   std::wstring err;
-  writeBuckets("old", 1000, 204, true);
+  writeBuckets("old", 1000, 1, 204, "\"untimed\":{\"seen_total\":1}");
   Require(UpdateCrashBucketStats(outBase, info, &unknownStreak, &seenCount, &err), "Bucket stats update failed");
   auto text = ReadAllTextUtf8(statsPath);
   Require(CountOccurrences(text, "\"seen_total\"") == 200u, "Bucket stats must stop at 200 buckets");
@@ -285,15 +294,25 @@ void TestCrashBucketStatsKeepTheMostRecentBuckets()
   Require(text.find("\"old-203\"") != std::string::npos, "The most recent buckets must stay");
   Require(text.find("\"new-bucket\"") != std::string::npos, "The updated bucket must stay");
 
-  // Times from a clock that later went back: the new bucket is the oldest.
-  writeBuckets("ahead", 4102444800, 200, false);
-  info.bucketKey = "now-bucket";
+  // A future time counts as none: it goes before a real, older one.
+  writeBuckets("recent", now - 1000, 1, 199, "\"future\":{\"seen_total\":1,\"updated_at_epoch\":4102444800}");
+  info.bucketKey = "new-bucket";
   Require(UpdateCrashBucketStats(outBase, info, &unknownStreak, &seenCount, &err), "Bucket stats update failed");
   text = ReadAllTextUtf8(statsPath);
   Require(CountOccurrences(text, "\"seen_total\"") == 200u, "Bucket stats must stop at 200 buckets");
-  Require(text.find("\"now-bucket\"") != std::string::npos, "The updated bucket must never go");
-  Require(text.find("\"ahead-000\"") == std::string::npos, "The next oldest bucket goes in its place");
-  Require(text.find("\"ahead-001\"") != std::string::npos, "Only one bucket was past the cap");
+  Require(text.find("\"future\"") == std::string::npos, "A bucket dated in the future must go first");
+  Require(text.find("\"recent-000\"") != std::string::npos, "The oldest real bucket stays");
+
+  // All dated now (the same second, mostly): the updated bucket sorts first
+  // by its key, and never goes.
+  writeBuckets("same", now, 0, 200, "");
+  info.bucketKey = "0-now";
+  Require(UpdateCrashBucketStats(outBase, info, &unknownStreak, &seenCount, &err), "Bucket stats update failed");
+  text = ReadAllTextUtf8(statsPath);
+  Require(CountOccurrences(text, "\"seen_total\"") == 200u, "Bucket stats must stop at 200 buckets");
+  Require(text.find("\"0-now\"") != std::string::npos, "The updated bucket must never go");
+  Require(text.find("\"same-000\"") == std::string::npos, "The next oldest bucket goes in its place");
+  Require(text.find("\"same-001\"") != std::string::npos, "Only one bucket was past the cap");
   std::filesystem::remove_all(outBase);
 }
 
@@ -1752,6 +1771,33 @@ void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()
   std::filesystem::remove_all(outBase);
 }
 
+// Without a durable pending_delete record the filtered dump is the fail-safe
+// and is kept (ShouldPreserveFilteredDump): here no record can be written,
+// as the output folder is a file.
+void TestCleanExitDumpIsKeptWhenThePendingRecordFails()
+{
+  const auto root = MakeTempDir(L"skydiag_clean_exit_pending_failure");
+  const auto blockedOutBase = root / L"not_a_directory";
+  WriteAllTextUtf8(blockedOutBase, "blocks the evidence record");
+  const auto dumpPath = root / L"dumps" / L"SkyrimDiag_Crash_20260315_150000_002.dmp";
+  std::filesystem::create_directories(dumpPath.parent_path());
+  WriteAllTextUtf8(dumpPath, "filtered dump");
+
+  HelperConfig cfg = MakeTestConfig();
+  cfg.enableCleanExitEvidenceQuarantine = true;
+  skydiag::helper::AttachedProcess proc{};
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo =
+    skydiag::helper::internal::BuildCrashEventInfo(0xC0000005u, 0xABCDEF01u, 88u, skydiag::kState_Frozen);
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+
+  CleanupCrashArtifactsAfterZeroExit(cfg, proc, blockedOutBase, &state);
+  Require(FileExists(dumpPath), "Without a durable pending record the filtered dump must be kept");
+  std::filesystem::remove_all(root);
+}
+
 void TestCleanExitDumpDeletionFailureIsRecordedAsPreserved()
 {
   const auto outBase = MakeTempDir(L"skydiag_clean_exit_delete_failure");
@@ -2529,6 +2575,7 @@ int wmain(int argc, wchar_t** argv)
     TestFindForcedCloseInSnapshot();
     TestForcedCloseCrash_SkipsTheViewer();
     TestPreservedFilteredDump_DoesNotKeepCaptureLatch();
+    TestCleanExitDumpIsKeptWhenThePendingRecordFails();
     TestCleanExitDumpDeletionFailureIsRecordedAsPreserved();
     TestEtwStopFailureRetriesThenConfirmsCancellation();
     TestEtwStopExitZeroRequiresNonEmptyArtifact();

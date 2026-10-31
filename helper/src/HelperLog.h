@@ -27,8 +27,12 @@ void StartHelperLogSession(const std::filesystem::path& outBase);
 // folder fallback); written once by StartHelperLogSession.
 void QueueSessionStartLogLine(std::wstring line);
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line);
-// The output folder of the session log StartHelperLogSession started; empty
-// before that. For the last line of a helper that stops on an exception.
+// Where the helper logs before StartHelperLogSession: the configured
+// OutputDir, set once the config is read.
+void SetHelperPreSessionOutBase(const std::filesystem::path& outBase);
+// The output folder of the session log StartHelperLogSession started, or the
+// pre-session one before that (empty before the config is read). For the
+// last line of a helper that stops on an exception.
 std::filesystem::path HelperSessionOutBase();
 // what() of a standard-library exception is in the ANSI code page (e.g. a
 // localized system message or a path); widen it for the log.

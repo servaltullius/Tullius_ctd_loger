@@ -82,6 +82,22 @@ void TestVersionCompare()
   assert(IsGameVersionLessThan("1.6.1130.9", "1.6.1131"));
 }
 
+// A field of another type (a hand edit, another version) costs that field:
+// it made value() throw, and the whole scan read as unparsable.
+void TestParseKeepsAPluginWithAFieldOfAnotherType()
+{
+  ParsedPluginScan scan{};
+  assert(ParsePluginScanJson(
+    R"({"game_exe_version": 1, "mo2_detected": "yes", "plugins": [)"
+    R"({"filename": "A.esm", "is_active": "no", "header_version": "1.71"},)"
+    R"({"filename": "B.esp", "is_active": true, "is_esl": true}]})",
+    &scan));
+  assert(scan.game_exe_version.empty() && !scan.mo2_detected);
+  assert(scan.plugins.size() == 2);
+  assert(scan.plugins[0].filename == "A.esm" && !scan.plugins[0].is_active && scan.plugins[0].header_version == 0.0f);
+  assert(scan.plugins[1].is_active && scan.plugins[1].is_esl);
+}
+
 void TestParseAndMissingMasters()
 {
   ParsedPluginScan scan{};
@@ -664,6 +680,7 @@ int main()
 {
   TestVersionCompare();
   TestParseAndMissingMasters();
+  TestParseKeepsAPluginWithAFieldOfAnotherType();
   TestParseSkseLogSection();
   TestDescribeSkseLoadStatus();
   TestMissingMastersIgnoreInactivePlugins();

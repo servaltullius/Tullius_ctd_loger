@@ -19,6 +19,9 @@ std::wstring Timestamp();
 bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* err);
 // cfg.outputDir, or the first writable cfg.outputDirFallbacks entry when it
 // cannot be written (logged as the first line of the helper log session).
+// The configured OutputDir as the helper uses it, without checking it
+// (MakeOutputBase checks it and may pick a fallback).
+std::filesystem::path ConfiguredOutputBase(const skydiag::helper::HelperConfig& cfg);
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg);
 
 bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s);

@@ -44,12 +44,24 @@ struct BucketCandidateStats
   std::size_t count = 0;
 };
 
+// Why a history was or was not loaded: a caller must not save over a file it
+// could not read, or every earlier entry is replaced by the new one.
+enum class CrashHistoryLoad
+{
+  kLoaded,
+  kMissing,             // no file yet
+  kUnreadable,          // there, but it could not be read (locked, no access)
+  kDamaged,             // not JSON, or not a crash history
+  kUnsupportedVersion,  // a version this analyzer does not know (a newer one wrote it)
+};
+
 class CrashHistory
 {
 public:
   static constexpr std::size_t kMaxEntries = 100;
 
-  bool LoadFromFile(const std::filesystem::path& path);
+  CrashHistoryLoad Load(const std::filesystem::path& path);
+  bool LoadFromFile(const std::filesystem::path& path) { return Load(path) == CrashHistoryLoad::kLoaded; }
   bool SaveToFile(const std::filesystem::path& path) const;
 
   void AddEntry(CrashHistoryEntry entry);

@@ -103,7 +103,15 @@ bool PromoteReleasedCrashDump(
   crash.releasedDumpPreserve = false;
   crash.releasedDumpRecovery = LateRecoveryState{};
   std::error_code ec;
-  if (!ExistsForIo(dumpPath, ec) || ec) {
+  const bool exists = ExistsForIo(dumpPath, ec);
+  if (ec) {
+    // Held open or locked is not gone: report it, and the viewer says if it
+    // cannot be read.
+    AppendLogLine(
+      outBase,
+      L"Could not check the dump held since the release (error " + std::to_wstring(ec.value()) +
+        L"); reporting it as it is: " + std::filesystem::path(dumpPath).filename().wstring());
+  } else if (!exists) {
     AppendLogLine(outBase, L"The dump held since the release is gone: " + std::filesystem::path(dumpPath).filename().wstring());
     return false;
   }

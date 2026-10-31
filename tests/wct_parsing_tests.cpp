@@ -232,6 +232,29 @@ static void Test_FreezeSummary_ConsensusFields()
   assert(r->longest_wait_tid_consensus == true);
 }
 
+// A field of another type costs that field: value() threw, and the whole
+// freeze summary read as unparsable.
+static void Test_FreezeSummary_FieldOfAnotherTypeKeepsTheRest()
+{
+  const std::string json = R"({
+    "capture_passes": "2",
+    "cycle_consensus": true,
+    "threads": [
+      {"tid": "200", "isCycle": true},
+      {"tid": 300, "isCycle": true}
+    ],
+    "capture": {"kind": 5, "thresholdSec": 10}
+  })";
+
+  const auto r = TryParseWctFreezeSummary(json);
+  assert(r.has_value());
+  assert(r->capture_passes == 0);
+  assert(r->cycle_consensus == true);
+  assert(r->cycles == 2);
+  assert(r->cycle_thread_ids.size() == 1 && r->cycle_thread_ids[0] == 300);
+  assert(r->capture_kind.empty() && r->thresholdSec == 10);
+}
+
 // ── Longest waiter (SkyrimDiagWctWait.h) ───────────────
 
 static void Test_LongestWaiter_EarliestBlockedWaitStartWins()
@@ -534,6 +557,7 @@ int main()
   Test_Capture_ValidCapture();
   Test_Capture_DefaultValues();
   Test_FreezeSummary_ConsensusFields();
+  Test_FreezeSummary_FieldOfAnotherTypeKeepsTheRest();
   Test_LongestWaiter_EarliestBlockedWaitStartWins();
   Test_FreezeSummary_LongestWaiterIsEarliestBlockedThread();
   Test_FreezeSummary_TiedEarliestWaitStartHasNoLongestWaiter();

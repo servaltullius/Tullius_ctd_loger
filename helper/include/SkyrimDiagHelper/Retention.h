@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -568,8 +569,10 @@ inline void PruneOrphanedAnalysisCaches(
 // - SkyrimDiag_CrashRearm_<...>.marker, a crash generation signaled again for
 //   a restarted helper (HelperMain RearmFrozenCrashFromEarlierHelper),
 //   deleted when its game exits. A day old, that game is long gone.
-// - SkyrimDiag_CrashBucketStats.json.corrupt.<ts>, a stats file that did not
-//   parse, kept as it was: the newest for a day, as a held dump.
+// - SkyrimDiag_CrashBucketStats.json.corrupt.<ts> (UpdateCrashBucketStats)
+//   and crash_history.json.corrupt.<ts> (the analyzer's history), a file
+//   that did not parse, kept as it was; one more came with every failure.
+//   The newest is kept for a day, as a held dump.
 inline void PruneHelperLeftovers(
   const std::vector<std::filesystem::path>& files,
   std::chrono::seconds heldMaxAge = std::chrono::hours(24),
@@ -583,27 +586,30 @@ inline void PruneHelperLeftovers(
   };
 
   std::error_code ec;
-  const auto released = CollectFilesByPrefixAndExt(files, "SkyrimDiag_Released_", ".dmp");
-  for (std::size_t i = 0; i < released.size(); ++i) {
-    if (i > 0 || olderThan(released[i].path, heldMaxAge)) {
-      std::filesystem::remove(released[i].path, ec);
+  const auto keepNewestForADay = [&](const std::vector<std::filesystem::path>& newestFirst) {
+    for (std::size_t i = 0; i < newestFirst.size(); ++i) {
+      if (i > 0 || olderThan(newestFirst[i], heldMaxAge)) {
+        std::filesystem::remove(newestFirst[i], ec);
+      }
     }
+  };
+  std::vector<std::filesystem::path> released;
+  for (const auto& dump : CollectFilesByPrefixAndExt(files, "SkyrimDiag_Released_", ".dmp")) {
+    released.push_back(dump.path);
   }
-  // One more came with every parse failure (UpdateCrashBucketStats).
-  std::vector<std::filesystem::path> corruptStats;
-  for (const auto& file : files) {
-    if (StartsWith(PathPartUtf8(file.filename()), "SkyrimDiag_CrashBucketStats.json.corrupt.")) {
-      corruptStats.push_back(file);
+  keepNewestForADay(released);
+  for (const char* prefix : { "SkyrimDiag_CrashBucketStats.json.corrupt.", "crash_history.json.corrupt." }) {
+    std::vector<std::filesystem::path> copies;
+    for (const auto& file : files) {
+      if (StartsWith(PathPartUtf8(file.filename()), prefix)) {
+        copies.push_back(file);
+      }
     }
-  }
-  // The <ts> suffix (YYYYMMDD_HHMMSS_mmm) sorts by time: newest first.
-  std::sort(corruptStats.begin(), corruptStats.end(), [](const auto& a, const auto& b) {
-    return PathPartUtf8(a.filename()) > PathPartUtf8(b.filename());
-  });
-  for (std::size_t i = 0; i < corruptStats.size(); ++i) {
-    if (i > 0 || olderThan(corruptStats[i], heldMaxAge)) {
-      std::filesystem::remove(corruptStats[i], ec);
-    }
+    // The <ts> suffix sorts by time.
+    std::sort(copies.begin(), copies.end(), [](const auto& a, const auto& b) {
+      return PathPartUtf8(a.filename()) > PathPartUtf8(b.filename());
+    });
+    keepNewestForADay(copies);
   }
   for (const auto& file : files) {
     const auto name = PathPartUtf8(file.filename());

@@ -22,6 +22,7 @@ std::uint32_t g_maxHelperLogFiles = 0;
 std::uint32_t g_helperSessionLogsToKeep = kDefaultHelperSessionLogsToKeep;
 std::vector<std::wstring> g_sessionStartLines;
 std::filesystem::path g_sessionOutBase;
+std::filesystem::path g_preSessionOutBase;
 
 void RotateAndStartSession(const std::filesystem::path& outBase)
 {
@@ -77,9 +78,14 @@ void StartHelperLogSession(const std::filesystem::path& outBase)
   g_sessionStartLines.clear();
 }
 
+void SetHelperPreSessionOutBase(const std::filesystem::path& outBase)
+{
+  g_preSessionOutBase = outBase;
+}
+
 std::filesystem::path HelperSessionOutBase()
 {
-  return g_sessionOutBase;
+  return g_sessionOutBase.empty() ? g_preSessionOutBase : g_sessionOutBase;
 }
 
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)

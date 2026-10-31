@@ -278,11 +278,15 @@ def check_release_notes_rc_fallback(failures: list[str]) -> None:
             "## v1.2.6\n\n### 변경\n- 실제 내용\n\n## v1.2.5 - 2026-10-31\n\n### 수정\n\n## v1.2.3\nbase changelog\n",
             encoding="utf-8",
         )
-        for tag, why in (("v1.2.4", "an empty draft"), ("v1.2.5", "a CHANGELOG section of headings only")):
+        (drafts / "v1.2.7.md").write_text("# v1.2.7\n\n<!-- 작성 예정:\n- 변경 -->\n", encoding="utf-8")
+        (drafts / "v1.2.8.md").write_text("# v1.2.8\n<!-- 메모 -->\n- 실제 내용\n", encoding="utf-8")
+        for tag, why in (("v1.2.4", "an empty draft"), ("v1.2.5", "a CHANGELOG section of headings only"),
+                         ("v1.2.7", "a draft of a heading and a comment")):
             if resolver.main(["--repo-root", str(root), "--tag", tag, "--output", str(out), "--strict"]) == 0:
                 failures.append(f"--strict accepted {why}")
-        if resolver.main(["--repo-root", str(root), "--tag", "v1.2.6", "--output", str(out), "--strict"]) != 0:
-            failures.append("--strict rejected a CHANGELOG section with text")
+        for tag, why in (("v1.2.6", "a CHANGELOG section with text"), ("v1.2.8", "a draft with a comment and text")):
+            if resolver.main(["--repo-root", str(root), "--tag", tag, "--output", str(out), "--strict"]) != 0:
+                failures.append(f"--strict rejected {why}")
 
 
 def check_markdown_has_no_strikethrough_ranges(failures: list[str]) -> None:
@@ -731,18 +735,21 @@ def check_release_gate_behaviour(failures: list[str]) -> None:
     filler = [f"SKSE/Plugins/Filler/{i:05d}.txt" for i in range(30000)]
     winui = 'REQUIRED_WINUI_BUILD_OUTPUTS = ["App.exe"]\n'
     cases = [
-        # (name, contract's WinUI list, zip entries, expected in stdout, not expected in stdout)
-        ("unreadable contract list", "", ["SKSE/Plugins/Required.dll"], [], ["[gate] 2/8"]),
+        # (name, contract's WinUI list, zip entries, expected in stdout, not expected in stdout,
+        #  expected in stderr). The unreadable list must stop the gate on that list, not on any
+        # earlier failure: its ImportError is in stderr, and no step has started.
+        ("unreadable contract list", "", ["SKSE/Plugins/Required.dll"], [], ["[gate] repo="],
+         ["REQUIRED_WINUI_BUILD_OUTPUTS"]),
         ("empty contract list", "REQUIRED_WINUI_BUILD_OUTPUTS = []\n", ["SKSE/Plugins/Required.dll"],
-         ["lists no required"], ["[gate] 2/8"]),
+         ["lists no required"], ["[gate] 2/8"], []),
         ("nested path first in a long listing", winui,
          ["SKSE/Plugins/Viewer/Viewer/App.exe", *filler, "SKSE/Plugins/Required.dll"],
-         ["nested winui output detected in zip"], ["[gate] 6/8"]),
+         ["nested winui output detected in zip"], ["[gate] 6/8"], []),
         ("required entry first in a long listing", winui, ["SKSE/Plugins/Required.dll", *filler],
-         ["[gate] 6/8"], ["missing zip entry"]),
+         ["[gate] 6/8"], ["missing zip entry"], []),
     ]
     with tempfile.TemporaryDirectory(prefix="skydiag_gate_") as tmp:
-        for name, winui_list, entries, expected, unexpected in cases:
+        for name, winui_list, entries, expected, unexpected, expected_stderr in cases:
             root = Path(tmp) / name.replace(" ", "_")
             (root / "scripts").mkdir(parents=True)
             (root / "scripts" / "verify_release_gate.sh").write_bytes(gate_text.encode("utf-8"))
@@ -768,6 +775,9 @@ def check_release_gate_behaviour(failures: list[str]) -> None:
             for needle in unexpected:
                 if needle in result.stdout:
                     failures.append(f"release gate, {name}: {needle!r} in its output:\n{result.stdout}")
+            for needle in expected_stderr:
+                if needle not in result.stderr:
+                    failures.append(f"release gate, {name}: no {needle!r} in its errors:\n{result.stderr}")
 
 
 def check_vcpkg_overlay_reaches_existing_build_dirs(failures: list[str]) -> None:

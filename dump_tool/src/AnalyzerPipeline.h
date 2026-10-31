@@ -4,9 +4,11 @@
 #include "CrashLoggerParseCore.h"
 #include "MinidumpUtil.h"
 #include "Mo2Index.h"
+#include "Utf.h"
 
 #include <Windows.h>
 
+#include <exception>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -114,5 +116,33 @@ void AppendCrashHistoryEntry(
   const std::wstring& dumpPath,
   const std::string& analysisTimestamp,
   AnalysisResult& out);
+
+// An optional input from outside the dump (the plugin scan and MO2 state,
+// the Crash Logger log, the incident manifest, the crash history) that
+// cannot be read leaves its part out with a diagnostics line instead of
+// failing the whole analysis (exit 3) over one field of another type. A step
+// that fails part way leaves the result as it was before it (keeping its
+// diagnostics lines): a half-read input, such as a Crash Logger log path
+// without its frames, would pass for a whole one.
+template <class Step>
+void RunOptionalStep(const wchar_t* name, AnalysisResult& out, Step&& step)
+{
+  AnalysisResult before = out;
+  const auto restore = [&](const std::wstring& cause) {
+    auto diagnostics = std::move(out.diagnostics);
+    out = std::move(before);
+    out.diagnostics = std::move(diagnostics);
+    out.diagnostics.push_back(std::wstring(L"[Optional input] ") + name + L" skipped" + cause);
+  };
+  try {
+    step();
+  } catch (const std::exception& ex) {
+    // what() of the standard library is in the ANSI code page on Windows (a
+    // path, a localized system message).
+    restore(L": " + Utf8OrAnsiToWide(ex.what()));
+  } catch (...) {
+    restore({});
+  }
+}
 
 }  // namespace skydiag::dump_tool

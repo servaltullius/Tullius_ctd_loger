@@ -1,4 +1,5 @@
 #include "CrashHistory.h"
+#include "JsonValue.h"
 #include "SkyrimDiagLongPath.h"
 
 #ifdef _WIN32
@@ -70,20 +71,22 @@ void UpsertHistoryEntry(std::vector<CrashHistoryEntry>* entries, CrashHistoryEnt
 
 }  // namespace
 
-bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
+CrashHistoryLoad CrashHistory::Load(const std::filesystem::path& path)
 {
   try {
     std::ifstream f(skydiag::PathForIo(path));
     if (!f.is_open()) {
-      return false;
+      std::error_code ec;
+      const bool exists = skydiag::ExistsForIo(path, ec);
+      return (!exists && !ec) ? CrashHistoryLoad::kMissing : CrashHistoryLoad::kUnreadable;
     }
-    const auto j = nlohmann::json::parse(f, nullptr, true);
-    if (!j.is_object() || !j.contains("entries") || !j["entries"].is_array()) {
-      return false;
+    const auto j = nlohmann::json::parse(f, nullptr, /*allow_exceptions=*/false);
+    if (j.is_discarded() || !j.is_object() || !j.contains("entries") || !j["entries"].is_array()) {
+      return CrashHistoryLoad::kDamaged;
     }
-    const auto historyVersion = j.value("version", 1u);
+    const auto historyVersion = JsonValueOr(j, "version", 1u);
     if (historyVersion != 1u && historyVersion != 2u && historyVersion != 3u) {
-      return false;
+      return CrashHistoryLoad::kUnsupportedVersion;
     }
 
     std::vector<CrashHistoryEntry> loaded;
@@ -94,17 +97,17 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
         continue;
       }
       CrashHistoryEntry row{};
-      row.candidate_key_version = e.value("candidate_key_version", historyVersion >= 2u ? 2u : 1u);
+      row.candidate_key_version = JsonValueOr(e, "candidate_key_version", historyVersion >= 2u ? 2u : 1u);
       if (row.candidate_key_version != 1u && row.candidate_key_version != 2u) {
         row.candidate_key_version = 1u;
       }
-      row.timestamp_utc = e.value("timestamp_utc", "");
-      row.dump_file = e.value("dump_file", "");
-      row.dump_identity_key = e.value("dump_identity_key", "");
-      row.bucket_key = e.value("bucket_key", "");
-      row.top_suspect = e.value("top_suspect", "");
-      row.confidence = e.value("confidence", "");
-      row.signature_id = e.value("signature_id", "");
+      row.timestamp_utc = JsonValueOr(e, "timestamp_utc", std::string{});
+      row.dump_file = JsonValueOr(e, "dump_file", std::string{});
+      row.dump_identity_key = JsonValueOr(e, "dump_identity_key", std::string{});
+      row.bucket_key = JsonValueOr(e, "bucket_key", std::string{});
+      row.top_suspect = JsonValueOr(e, "top_suspect", std::string{});
+      row.confidence = JsonValueOr(e, "confidence", std::string{});
+      row.signature_id = JsonValueOr(e, "signature_id", std::string{});
       if (e.contains("all_suspects") && e["all_suspects"].is_array()) {
         for (const auto& s : e["all_suspects"]) {
           if (s.is_string()) {
@@ -127,9 +130,10 @@ bool CrashHistory::LoadFromFile(const std::filesystem::path& path)
     }
 
     m_entries = std::move(loaded);
-    return true;
+    return CrashHistoryLoad::kLoaded;
   } catch (...) {
-    return false;
+    // Out of memory or a read error: not proof the file is damaged.
+    return CrashHistoryLoad::kUnreadable;
   }
 }
 
