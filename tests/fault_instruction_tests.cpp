@@ -512,10 +512,13 @@ void TestJumpTargetState()
   assert(DescribeFaultInstruction(freed, L"", true) ==
          L"The code tried to run instructions at 0x7FF7055F0000, but no memory was allocated there: it jumped into "
          L"memory that had been freed (for example a hook stub that was removed). The call was made at "
-         L"PrismaUI.dll+0x59ce2 (call qword ptr [rsp+0x20]).");
+         L"PrismaUI.dll+0x59ce2 (call qword ptr [rsp+0x20]). The caller may only have used that address (for example "
+         L"another plugin's hook it kept as the original function); the dump does not show who freed the code.");
   assert(DescribeFaultInstruction(freed, L"", false) ==
          L"코드가 0x7FF7055F0000 주소의 명령을 실행하려 했지만 그곳에는 할당된 메모리가 없었습니다. 해제된 메모리(예: "
-         L"제거된 후킹 코드)로 이동했다는 뜻입니다. 호출한 곳은 PrismaUI.dll+0x59ce2(call qword ptr [rsp+0x20])입니다.");
+         L"제거된 후킹 코드)로 이동했다는 뜻입니다. 호출한 곳은 PrismaUI.dll+0x59ce2(call qword ptr [rsp+0x20])입니다. "
+         L"호출한 쪽은 그 주소(예: 다른 플러그인이 건 훅을 원래 함수로 알고 저장해 둔 주소)를 불렀을 뿐일 수 있고, 누가 "
+         L"코드를 해제했는지는 덤프로 알 수 없습니다.");
   assert(DescribeFaultInstructionPlain(freed, true) ==
          L"It crashed jumping into memory that had been freed (for example a hook stub that was removed).");
   assert(DescribeFaultInstructionPlain(freed, false) == L"해제된 메모리(예: 제거된 후킹 코드)로 이동하다가 튕겼습니다.");

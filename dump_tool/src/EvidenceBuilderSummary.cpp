@@ -1041,7 +1041,19 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           : (hangPrefix + L" 덤프만으로 후보를 특정하기 어렵습니다. (신뢰도: 낮음)");
       }
     } else {
-      if (hasSuspect && !suspectWho.empty()) {
+      if (FaultJumpedIntoFreedCode(r)) {
+        // The caller only used the freed address (FaultJumpedIntoFreedCode).
+        const std::wstring freedCaller = FaultCallSiteModule(r);
+        summary = en
+          ? (L"The crash jumped into code that had been freed (for example a removed hook)." +
+              (freedCaller.empty() ? std::wstring{}
+                                   : (L" " + freedCaller + L" only called it and may be a victim of another plugin's hook.")) +
+              L" The dump does not show who freed it. (Confidence: Low)")
+          : (L"해제된 코드(예: 제거된 후킹 코드)로 이동하다가 튕겼습니다." +
+              (freedCaller.empty() ? std::wstring{}
+                                   : (L" " + freedCaller + L"은(는) 그 코드를 호출했을 뿐이라 다른 플러그인 훅의 피해자일 수 있습니다.")) +
+              L" 누가 해제했는지는 덤프로 알 수 없습니다. (신뢰도: 낮음)");
+      } else if (hasSuspect && !suspectWho.empty()) {
         summary = en
           ? (L"Top suspect: " + suspectWho + L" — based on " + suspectBasis + L" heuristic. (Confidence: " + suspectConf + L")")
           : (L"유력 후보: " + suspectWho + L" — " + suspectBasis + L" 기반 추정입니다. (신뢰도: " + suspectConf + L")");

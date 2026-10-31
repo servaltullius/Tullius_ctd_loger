@@ -297,6 +297,10 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
         lead.doubt = Doubt::kNearbyOnly;
       }
     }
+  } else if (FaultJumpedIntoFreedCode(r)) {
+    // No lead: the caller of freed code is no suspect on that alone, and who
+    // freed it is not in the dump (FaultJumpedIntoFreedCode). how_it_crashed
+    // still says what happened.
   } else if (topSuspect && IsModModule(r, topSuspect->module_filename)) {
     lead = SuspectLead(r, *topSuspect, suspectLevel(*topSuspect));
     if (!r.suspects_from_stackwalk) {

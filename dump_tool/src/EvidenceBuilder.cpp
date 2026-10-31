@@ -123,6 +123,21 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
       ? L" (fault-location clue only; may be victim location)"
       : L" (fault-location 단서만 있음; 피해 위치일 수 있음)";
   }
+  if (internal::FaultJumpedIntoFreedCode(r)) {
+    // The module that called the freed code only used its address
+    // (FaultJumpedIntoFreedCode): low, whatever its frame weight.
+    const auto caller = minidump::WideLower(internal::FaultCallSiteModule(r));
+    for (auto& suspect : r.suspects) {
+      if (caller.empty() || minidump::WideLower(suspect.module_filename) != caller) {
+        continue;
+      }
+      suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+      suspect.confidence = i18n::ConfidenceText(lang, suspect.confidence_level);
+      suspect.reason += en
+        ? L" (called code that had been freed; may be a victim of another plugin's removed hook)"
+        : L" (해제된 코드를 호출했을 뿐; 다른 플러그인이 제거한 훅의 피해자일 수 있음)";
+    }
+  }
   internal::BuildEvidenceItems(r, lang, ctx);
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);

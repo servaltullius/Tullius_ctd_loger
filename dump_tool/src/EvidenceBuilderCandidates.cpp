@@ -657,6 +657,15 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
     SortActionableCandidates(r.actionable_candidates);
     return;
   }
+  if (FaultJumpedIntoFreedCode(r)) {
+    // The same for a jump into freed code (FaultJumpedIntoFreedCode): the
+    // frames and the stack scan start at the caller, which only used the
+    // address; whoever freed it is not in the dump. Only repeats remain.
+    AddHistorySignals(r, en, &signals);
+    r.actionable_candidates = BuildCandidateConsensus(signals, lang);
+    SortActionableCandidates(r.actionable_candidates);
+    return;
+  }
   AddCrashLoggerFrameSignals(r, en, &signals);
   AddCrashLoggerSignals(r, en, &signals);
   // A main thread waiting in the engine or the graphics driver says nothing
