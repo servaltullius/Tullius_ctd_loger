@@ -14,6 +14,8 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -550,6 +552,36 @@ bool UpdateCrashBucketStats(
   bucket["unknown_streak"] = unknownStreak;
   bucket["last_unknown_fault_module"] = info.unknownFaultModule;
   bucket["updated_at_epoch"] = static_cast<std::int64_t>(std::time(nullptr));
+
+  // One entry per distinct crash ever seen grew the file without end; the
+  // least recently updated go past kMaxCrashBucketStats (never this one).
+  constexpr std::size_t kMaxCrashBucketStats = 200;
+  auto& buckets = root["buckets"];
+  if (buckets.size() > kMaxCrashBucketStats) {
+    std::vector<std::pair<std::int64_t, std::string>> byAge;
+    byAge.reserve(buckets.size());
+    for (auto it = buckets.begin(); it != buckets.end(); ++it) {
+      std::int64_t updated = 0;
+      if (it->is_object()) {
+        const auto time = it->find("updated_at_epoch");
+        if (time != it->end() && time->is_number_integer()) {
+          updated = time->get<std::int64_t>();
+        }
+      }
+      byAge.emplace_back(updated, it.key());
+    }
+    std::sort(byAge.begin(), byAge.end());
+    std::size_t excess = buckets.size() - kMaxCrashBucketStats;
+    for (const auto& [updated, key] : byAge) {
+      if (excess == 0u) {
+        break;
+      }
+      if (key != info.bucketKey) {
+        buckets.erase(key);
+        --excess;
+      }
+    }
+  }
 
   // A bucket key from a summary is not checked for UTF-8; dump() would throw.
   if (!WriteTextFileUtf8(path, root.dump(2, ' ', false, nlohmann::json::error_handler_t::replace))) {

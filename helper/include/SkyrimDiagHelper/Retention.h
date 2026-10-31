@@ -568,6 +568,8 @@ inline void PruneOrphanedAnalysisCaches(
 // - SkyrimDiag_CrashRearm_<...>.marker, a crash generation signaled again for
 //   a restarted helper (HelperMain RearmFrozenCrashFromEarlierHelper),
 //   deleted when its game exits. A day old, that game is long gone.
+// - SkyrimDiag_CrashBucketStats.json.corrupt.<ts>, a stats file that did not
+//   parse, kept as it was: the newest for a day, as a held dump.
 inline void PruneHelperLeftovers(
   const std::vector<std::filesystem::path>& files,
   std::chrono::seconds heldMaxAge = std::chrono::hours(24),
@@ -585,6 +587,22 @@ inline void PruneHelperLeftovers(
   for (std::size_t i = 0; i < released.size(); ++i) {
     if (i > 0 || olderThan(released[i].path, heldMaxAge)) {
       std::filesystem::remove(released[i].path, ec);
+    }
+  }
+  // One more came with every parse failure (UpdateCrashBucketStats).
+  std::vector<std::filesystem::path> corruptStats;
+  for (const auto& file : files) {
+    if (StartsWith(PathPartUtf8(file.filename()), "SkyrimDiag_CrashBucketStats.json.corrupt.")) {
+      corruptStats.push_back(file);
+    }
+  }
+  // The <ts> suffix (YYYYMMDD_HHMMSS_mmm) sorts by time: newest first.
+  std::sort(corruptStats.begin(), corruptStats.end(), [](const auto& a, const auto& b) {
+    return PathPartUtf8(a.filename()) > PathPartUtf8(b.filename());
+  });
+  for (std::size_t i = 0; i < corruptStats.size(); ++i) {
+    if (i > 0 || olderThan(corruptStats[i], heldMaxAge)) {
+      std::filesystem::remove(corruptStats[i], ec);
     }
   }
   for (const auto& file : files) {

@@ -476,6 +476,38 @@ static void Test_PrunesHelperLeftovers()
   std::filesystem::remove_all(dir, ec);
 }
 
+// A stats file that did not parse is kept as it was, one more copy per
+// failure: only the newest stays, and only for a day. The stats file stays.
+static void Test_PrunesCorruptBucketStatsCopies()
+{
+  const auto dir = MakeTempDir();
+  const auto stats = dir / "SkyrimDiag_CrashBucketStats.json";
+  const auto oldest = dir / "SkyrimDiag_CrashBucketStats.json.corrupt.20260101_000000_000";
+  const auto older = dir / "SkyrimDiag_CrashBucketStats.json.corrupt.20260102_000000_000";
+  const auto newest = dir / "SkyrimDiag_CrashBucketStats.json.corrupt.20260103_000000_000";
+  for (const auto& file : { stats, oldest, older, newest }) {
+    WriteFile(file);
+  }
+  // Write times say nothing here: the name orders them.
+  SetAge(newest, std::chrono::hours(2));
+  SetAge(stats, std::chrono::hours(48));
+
+  ApplyRetentionToOutputDir(dir, RetentionLimits{});
+
+  assert(Exists(stats));
+  assert(!Exists(oldest));
+  assert(!Exists(older));
+  assert(Exists(newest));
+
+  SetAge(newest, std::chrono::hours(48));
+  ApplyRetentionToOutputDir(dir, RetentionLimits{});
+  assert(!Exists(newest));
+  assert(Exists(stats));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
 // Past the total budget the oldest dumps of any kind go with their files,
 // newest first: once one does not fit, every older one goes too, even one
 // small enough to fit. The newest dump of each kind stays.
@@ -723,6 +755,7 @@ int main()
   Test_TotalBudgetIsInGibibytes();
   Test_SweepAppliesTheTotalBudget();
   Test_PrunesHelperLeftovers();
+  Test_PrunesCorruptBucketStatsCopies();
   Test_PrunesHangWctAndEtlWithDump();
   Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();
   Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();
