@@ -1,4 +1,6 @@
 #include <cassert>
+#include <cstdint>
+#include <initializer_list>
 #include <string>
 
 #include "CrashCapture.h"
@@ -385,6 +387,20 @@ static void TestQuarantineCleanExit_RequiresCommittedSequence()
   assert(!ShouldQuarantineCleanExitEvidence(0u, info));
 }
 
+// A zero exit after a code routinely raised and handled in play is not a
+// crash; any other code is strong, so a misleading exit code does not hide
+// a real one.
+static void TestStrongCrashExceptionCodes()
+{
+  for (const std::uint32_t weak : { 0u, 0xC0000008u, 0xE06D7363u, 0xE0434F4Du, 0x80000003u, 0xC000013Au,
+                                    0x80000004u, 0x406D1388u, 0x40010006u, 0x4001000Au }) {
+    assert(!BuildCrashEventInfo(weak, 0u, 0u, 0u).isStrong);
+  }
+  for (const std::uint32_t strong : { 0xC0000005u, 0xC000001Du, 0xC00000FDu, 0xC0000409u, 0xC0000374u }) {
+    assert(BuildCrashEventInfo(strong, 0u, 0u, 0u).isStrong);
+  }
+}
+
 static void TestQuarantineWriteFailurePreservesDumpAsFailSafe()
 {
   assert(ShouldPreserveFilteredDump(
@@ -460,6 +476,7 @@ int main()
   TestQuarantineCleanExit_RequiresZeroExit();
   TestQuarantineCleanExit_RequiresStrongException();
   TestQuarantineCleanExit_RequiresCommittedSequence();
+  TestStrongCrashExceptionCodes();
   TestQuarantineWriteFailurePreservesDumpAsFailSafe();
   return 0;
 }

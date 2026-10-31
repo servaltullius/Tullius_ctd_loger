@@ -367,9 +367,8 @@ void CleanupFilteredCrashArtifacts(
       context,
       capturedDumpPath,
       CleanExitDumpState::kPendingDelete);
-    if (!pendingDeleteRecorded) {
-      preserveDump = true;
-    }
+    // Without a durable pending record, keep the dump as the fail-safe.
+    preserveDump = ShouldPreserveFilteredDump(preserveRequested, evidenceRequired, pendingDeleteRecorded);
   }
 
   if (state->pendingCrashAnalysis.active) {

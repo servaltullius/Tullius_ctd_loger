@@ -117,10 +117,16 @@ inline std::filesystem::path FindSingleFileByPrefix(
   return found;
 }
 
+// A failed check stops the test: read as "not there", it passed every "the
+// file is gone" check without checking anything.
 inline bool FileExists(const std::filesystem::path& path)
 {
   std::error_code ec;
-  return std::filesystem::exists(path, ec) && !ec;
+  const bool exists = std::filesystem::exists(path, ec);
+  if (ec) {
+    Fail("exists() failed: " + ec.message());
+  }
+  return exists;
 }
 
 inline std::wstring ToWide(std::string_view text)

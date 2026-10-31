@@ -420,8 +420,7 @@ void TestCleanupCrashArtifactsAfterZeroExit_RemovesItsRecapture()
   // A session without a captured exception has nothing to classify as handled.
   ClearLog(outBase);
   skydiag::helper::internal::AppendExitClassificationLog(outBase, /*hadCapturedCrash=*/false);
-  std::error_code ec;
-  Require(!std::filesystem::exists(outBase / "SkyrimDiagHelper.log", ec) ||
+  Require(!FileExists(outBase / "SkyrimDiagHelper.log") ||
             ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log").find("first-chance") == std::string::npos,
     "no handled-exception line without a capture");
 

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "../dump_tool/src/AnalyzerScoringPolicy.h"
+#include "SourceGuardTestUtils.h"
 
 static std::string ReadFile(const char* relPath)
 {
@@ -96,7 +97,9 @@ static void TestConfidenceDowngradePresent()
 
 static void TestCrashLoggerCorroborationRankingPresent()
 {
-  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  // All of Analyzer.cpp's parts: a line that must stay gone could come back
+  // in any of them.
+  const auto analyzer = skydiag::tests::source_guard::ReadProjectText("dump_tool/src/Analyzer.cpp");
   assert(analyzer.find("ApplyCrashLoggerCorroborationToSuspects") != std::string::npos);
   assert(analyzer.find("CrashLoggerRankBonus") != std::string::npos);
   assert(analyzer.find("Crash Logger frame promotion=+") != std::string::npos);
