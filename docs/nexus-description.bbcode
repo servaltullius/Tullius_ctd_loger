@@ -63,8 +63,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.72 Update Notice[/b]
-Replace the previous installation with the complete v0.2.72 zip. Do not copy only individual EXEs or DLLs. The previous release on Nexus was v0.2.69; v0.2.70 and v0.2.71 were released on GitHub only, and their changes are listed below after v0.2.72's. Since v0.2.69 the SKSE plugin, the Helper, the analyzer and the viewer have all changed (the SharedLayout protocol is still v4). The new settings ([font=Courier New]EnableCloseRequestLog[/font] in SkyrimDiag.ini, [font=Courier New]DumpAllModuleCode[/font] and [font=Courier New]MaxTotalDumpGB[/font] in SkyrimDiagHelper.ini) use their defaults when an older ini lacks them. [b]On the first launch after updating, if the dump folder holds more than 5 GB, the oldest dumps are deleted with their reports[/b] (the new [font=Courier New]MaxTotalDumpGB=5[/font]). Move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.73 Update Notice[/b]
+Replace the previous installation with the complete v0.2.73 zip. Do not copy only individual EXEs or DLLs. The SKSE plugin, the Helper, the analyzer and the viewer have all changed (the SharedLayout protocol is still v4); there are no new settings. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -122,7 +122,17 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.72[/size][/b]
+[b][size=4]What's New in v0.2.73[/size][/b]
+Long output folders (MO2 too), advice that matches the analysis, and analyses that survive one bad value.[list]
+[*][b]Long output folder paths:[/b] with a long output folder path the analysis was not written (from about 130 characters, about 140 under MO2), and with a longer one saving the dump and starting the analyzer or the viewer failed too (from about 190). Steam's default install path was close to the limit. Long paths are now used in Windows' extended form, and the file checks MO2's virtual file system refuses past MAX_PATH go through file handles. Usual paths are handled as before
+[*][b]Advice that matches the analysis:[/b] a mod is no longer named (or "disable it") from the object references of a Crash Logger log that may belong to another crash; in a crash that jumped into freed code (often while the game closes) the mod that called it is not blamed; the wording for manual captures, freezes and errors while closing the game is fixed; the viewer's share text and labels agree with the report
+[*][b]One bad value no longer costs the analysis:[/b] a value of another type in the Helper's incident record, the plugin scan or the crash history made the whole analysis fail; now only that value falls back. A crash history that could not be read is no longer replaced by a new file holding one entry
+[*][b]Whose hook the freed code was:[/b] the Helper records the hook jump code in the game's executable memory every 30 seconds, and for a crash that jumped into freed code the report names the plugin whose hook it was. The record cannot tell whether that plugin or the caller needs the fix
+[*][b]Plugin log history:[/b] SkyrimDiag.log of the last five sessions is kept as SkyrimDiag.previous.log, SkyrimDiag.previous.2.log and so on
+[*]The viewer re-analyzes dumps analyzed by v0.2.72 once when you open them
+[/list]
+
+[b][size=4]Earlier: v0.2.72[/size][/b]
 Dumps about a tenth of their size, a size cap for the dump folder, and fixes from a full review.[list]
 [*][b]Smaller dumps:[/b] in a large load order a dump took 0.5-0.9 GB, almost all of it the code of every loaded module (about 500) and, in crash dumps, every module's resources. The analysis only reads code near where a thread runs or where its stack points, so with the default [font=Courier New]DumpMode=1[/font] a dump now holds the game executable's code whole and, of the other modules, only the code the threads' stacks point at. In real play a manual capture took 58-60 MB (was about 570 MB) and a crash dump 67 MB (was about 870 MB). For reverse-engineering tools that read only the dump, [font=Courier New]DumpAllModuleCode=1[/font] in SkyrimDiagHelper.ini writes every module's code as before
 [*][b]Dump folder size cap:[/b] [font=Courier New]MaxTotalDumpGB[/font] (default 5, 0 = unlimited) caps crash, freeze and manual dumps together; over it the oldest are deleted with their reports. The latest capture and each kind's newest capture from the last day are always kept. Before, only the count per kind (20 each) was capped, so about 40 GB could pile up
@@ -130,13 +140,13 @@ Dumps about a tenth of their size, a size cap for the dump folder, and fixes fro
 [*]The viewer re-analyzes dumps analyzed by v0.2.71 once when you open them. On 31 kept dumps the result did not change
 [/list]
 
-[b][size=4]Also new since v0.2.69: v0.2.71[/size][/b]
+[b][size=4]Earlier: v0.2.71[/size][/b]
 The window's X button and the taskbar's Close window are now recorded as a window close.[list]
 [*][b]Window close fixed:[/b] v0.2.70 set its window hooks from the game's loading thread. Windows removes a thread's hooks when that thread ends, and it ends right after the main menu opens, so the v0.2.70 hooks never worked in the game. The SKSE plugin now sets them on the game window's own thread. v0.2.70 still reported these errors as a forced close (the game's quit flag caught them), but as Quit or another forced close; now they say window close ([font=Courier New]window_close[/font])
 [*]The viewer re-analyzes dumps analyzed by v0.2.70 once when you open them. The analyzer did not change, so the result is the same
 [/list]
 
-[b][size=4]Also new since v0.2.69: v0.2.70[/size][/b]
+[b][size=4]Earlier: v0.2.70[/size][/b]
 More known crashes, plain words for how a crash happened, engine lock deadlocks, and Alt+F4 errors no longer reported as CTDs.[list]
 [*][b]More known 1.6.1170 crashes with a fix:[/b] the keyboard input crash ([url=https://www.nexusmods.com/skyrimspecialedition/mods/187246]Keyboard Offset Crash Fix SE-AE[/url]), five Havok physics crash spots ([url=https://www.nexusmods.com/skyrimspecialedition/mods/194392]Havok Solver Crash Fix - SKSE[/url]), the water collision crash ([url=https://www.nexusmods.com/skyrimspecialedition/mods/190886]Water Collision Crash Fix NG[/url]) and a trap contact crash. The quick answer names the fix, or asks you to update it when it is already loaded
 [*][b]How it crashed:[/b] for an access violation the quick answer adds one plain line (an object that was already gone, a bad index, a jump into freed memory such as a removed hook, …), and the details name the instruction and the register that was most likely wrong. Registers are named only when the recomputed address matches the exception
@@ -243,6 +253,7 @@ For v0.2.69, the three release candidates ran on the same setup. Two v0.2.68 fre
 For v0.2.70, the release candidates ran on the same setup. A manual capture kept the lock memory of four sleeping game threads (4.2 KB in 0.4 ms) and the game kept running. A PrismaUI test build that called its unloaded hook code on every Alt+F4 was recorded by rc2 as a CTD with the viewer popping up; with the forced-close build the same Alt+F4 was recorded as a close request, the viewer stayed closed and the quick answer said forced close. rc3 missed a Quit chosen from a game menu (the game ends its main loop before the check that read the quit flag ran again); the final reads the flag every 25 ms and at the crash itself, and counts the Journal's System page as a quit menu. With Engine Fixes' safe exit, a menu Quit that closes without an error can still leave no SkyrimDiag.log line, because the process ends within a frame; an error in that frame is still classified. The kept dumps re-analyzed against v0.2.69 changed only where the new features intended. Not yet seen in real use: an engine lock deadlock in a real freeze (synthetic tests only), the new known crashes in real play, an error after a menu Quit or the window's X button.
 For v0.2.71, a test build with the same plugin code ran on the same setup. The log showed the hooks set on the game window's thread 3 to 4 seconds after data load. A taskbar Close window during play in borderless mode was recorded as [font=Courier New]window_close[/font], and the shutdown error that followed was reported as a forced close without the viewer. A Quit from the Journal closed normally and left its quit line in SkyrimDiag.log. Not yet seen in real use: a direct click on the X button in windowed mode, Alt+F4 with the hooks on, and long play with the hooks on.
 For v0.2.72, a test build with the smaller dumps and the size cap ran on the same setup. Its first launch cut the output folder from 31 dumps (21.67 GB) to the newest 5 (4.23 GB). Five manual captures took 58-60 MB and a crash dump 67 MB; each analyzed the same with and without the local module files, and the crash call stack unwound from the dump alone through five mod DLLs. Not yet seen in real use: a freeze dump with the new scope, and the full-review fixes (covered by tests and the 31 kept dumps).
+For v0.2.73, test builds ran on the same setup. With a 205-character output folder under MO2, a manual capture and an F4 freeze both wrote their analyses (with 337-character cache paths) and the viewer opened the freeze. The hook stub record ran every 30 seconds and found 41 to 71 executable pages with jump stubs; a scan took 140-280 ms, so the module list now comes from one Toolhelp snapshot. The same check found that the plugin's previous-session log was not kept (CommonLib's own log emptied it first), which is fixed. Not yet seen in real use: the freed-hook owner on a real crash (the exit crashes seen here stopped after October 30), and those two fixes in game.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -432,8 +443,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.72 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.72 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. 넥서스의 이전 버전은 v0.2.69입니다. v0.2.70과 v0.2.71은 GitHub에만 올렸고, 그 변경 내용은 아래 v0.2.72 새 기능 뒤에 있습니다. v0.2.69 이후 SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol은 그대로 v4). 새 설정(SkyrimDiag.ini의 [font=Courier New]EnableCloseRequestLog[/font], SkyrimDiagHelper.ini의 [font=Courier New]DumpAllModuleCode[/font]와 [font=Courier New]MaxTotalDumpGB[/font])은 예전 ini에 없으면 기본값으로 동작합니다. [b]업데이트 뒤 처음 게임을 켜면, 덤프 폴더가 5GB를 넘을 때 오래된 덤프가 리포트와 함께 지워집니다[/b](새 설정 [font=Courier New]MaxTotalDumpGB=5[/font]). 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.73 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.73 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었고(SharedLayout protocol은 그대로 v4), 새 설정은 없습니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -491,7 +502,17 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.72 새 기능[/size][/b]
+[b][size=4]v0.2.73 새 기능[/size][/b]
+긴 출력 폴더(MO2 포함) 지원, 분석 결과와 맞는 조언, 값 하나에 무너지지 않는 분석.[list]
+[*][b]긴 출력 폴더 경로:[/b] 출력 폴더 경로가 길면 분석 결과를 쓰지 못했고(약 130자부터, MO2에서는 약 140자부터), 더 길면 덤프 저장과 분석기·뷰어 실행까지 실패했습니다(약 190자부터). Steam 기본 설치 경로도 한계에 가까웠습니다. 이제 긴 경로는 Windows의 긴 경로 형식으로 다루고, MO2 가상 파일 시스템이 MAX_PATH를 넘는 경로에서 막는 파일 확인은 파일 핸들로 처리합니다. 보통 길이의 경로는 예전과 같습니다
+[*][b]분석 결과와 맞는 조언:[/b] 다른 크래시의 것일 수 있는 Crash Logger 로그의 오브젝트 참조로 모드를 지목하거나 "꺼 보세요"라고 하지 않습니다. 해제된 코드로 이동한 크래시(게임 종료 중에 자주 남)에서 그 코드를 호출한 모드를 원인으로 단정하지 않습니다. 수동 캡처, 프리징, 게임 종료 중 오류의 안내 문구를 고쳤고, 뷰어의 공유 텍스트와 표시가 리포트와 맞습니다
+[*][b]값 하나에 분석이 무너지지 않음:[/b] Helper의 사고 기록, 플러그인 스캔, 크래시 기록에 타입이 다른 값이 하나 있으면 분석 전체가 실패했습니다. 이제 그 값만 기본값으로 둡니다. 읽지 못한 크래시 기록 파일을 항목 하나짜리 새 파일로 덮어쓰지 않습니다
+[*][b]해제된 후킹 코드의 주인:[/b] Helper가 게임 중 30초마다 실행 메모리의 후킹 점프 코드를 기록해 두고, 해제된 코드로 이동한 크래시에서 그 코드가 어느 플러그인의 후킹이었는지 리포트에 적습니다. 그 플러그인과 호출한 쪽 중 어느 쪽을 고쳐야 하는지는 기록으로 알 수 없습니다
+[*][b]플러그인 로그 보관:[/b] 이전 다섯 세션의 SkyrimDiag.log를 SkyrimDiag.previous.log, SkyrimDiag.previous.2.log 순으로 남깁니다
+[*]뷰어는 v0.2.72가 분석해 둔 덤프를 열 때 한 번 다시 분석합니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.72[/size][/b]
 덤프 크기를 약 10분의 1로 줄이고, 덤프 폴더 전체 크기에 상한을 두고, 전체 검수에서 찾은 문제를 고쳤습니다.[list]
 [*][b]덤프 크기 축소:[/b] 큰 모드팩에서 덤프 하나가 0.5~0.9GB였고, 거의 전부 로드된 모든 모듈(약 500개)의 코드와, 크래시 덤프에서는 모든 모듈의 리소스였습니다. 분석은 스레드가 실행 중인 위치나 스택이 가리키는 곳 근처의 코드만 읽으므로, 기본 설정 [font=Courier New]DumpMode=1[/font]의 덤프는 이제 게임 EXE의 코드 전체와, 다른 모듈은 스레드 스택이 가리키는 코드만 담습니다. 실게임에서 수동 캡처가 58~60MB(이전 약 570MB), 크래시 덤프가 67MB(이전 약 870MB)였습니다. 덤프만 읽는 역공학 도구를 쓴다면 SkyrimDiagHelper.ini의 [font=Courier New]DumpAllModuleCode=1[/font]로 예전처럼 모든 모듈 코드를 담을 수 있습니다
 [*][b]덤프 폴더 용량 상한:[/b] [font=Courier New]MaxTotalDumpGB[/font](기본 5, 0은 무제한)가 크래시·프리징·수동 덤프를 합친 크기를 묶고, 넘치면 오래된 덤프부터 리포트와 함께 지웁니다. 가장 최근 캡처와, 하루가 지나지 않은 종류별 최신 캡처는 항상 남깁니다. 지금까지는 종류별 개수(각 20개)만 묶어 약 40GB까지 쌓일 수 있었습니다
@@ -499,13 +520,13 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]뷰어는 v0.2.71이 분석해 둔 덤프를 열 때 한 번 다시 분석합니다. 보관 덤프 31개에서는 결과가 바뀌지 않았습니다
 [/list]
 
-[b][size=4]v0.2.69 이후 변경: v0.2.71[/size][/b]
+[b][size=4]이전 변경: v0.2.71[/size][/b]
 창의 X 버튼과 작업 표시줄의 "창 닫기"를 이제 창 닫기로 기록합니다.[list]
 [*][b]창 닫기 기록 수정:[/b] v0.2.70은 창 훅을 게임이 데이터를 불러오는 스레드에서 걸었습니다. Windows는 훅을 건 스레드가 끝나면 그 훅을 지우는데, 그 스레드는 메인 메뉴가 뜬 직후 끝나서 v0.2.70의 창 훅은 게임에서 동작하지 않았습니다. 이제 SKSE 플러그인이 게임 창 스레드에서 훅을 겁니다. v0.2.70에서도 이런 오류는 강제 종료로 분류됐지만(게임의 종료 플래그로 잡힘) 메뉴의 종료나 그 밖의 강제 종료로 나왔고, 이제 창 닫기([font=Courier New]window_close[/font])로 나옵니다
 [*]뷰어는 v0.2.70이 분석해 둔 덤프를 열 때 한 번 다시 분석합니다. 분석기는 바뀌지 않아 결과는 같습니다
 [/list]
 
-[b][size=4]v0.2.69 이후 변경: v0.2.70[/size][/b]
+[b][size=4]이전 변경: v0.2.70[/size][/b]
 알려진 크래시를 늘리고, 크래시가 어떻게 났는지 쉬운 말로 알려 주며, 엔진 잠금 교착을 알아보고, Alt+F4로 끄다 난 오류를 CTD로 보고하지 않습니다.[list]
 [*][b]수정 모드가 있는 1.6.1170 크래시 추가:[/b] 키보드 입력 크래시([url=https://www.nexusmods.com/skyrimspecialedition/mods/187246]Keyboard Offset Crash Fix SE-AE[/url]), 물리 엔진(Havok) 크래시 지점 5곳([url=https://www.nexusmods.com/skyrimspecialedition/mods/194392]Havok Solver Crash Fix - SKSE[/url]), 물 충돌 크래시([url=https://www.nexusmods.com/skyrimspecialedition/mods/190886]Water Collision Crash Fix NG[/url]), 함정 접촉 크래시. 빠른 답이 해결 모드를 안내하고, 이미 로드돼 있으면 업데이트를 확인하라고 합니다
 [*][b]어떻게 튕겼나:[/b] 접근 위반이면 빠른 답에 쉬운 말 한 줄(이미 사라진 오브젝트, 잘못된 인덱스, 해제된 메모리(예: 제거된 후킹 코드)로 이동 등)을 더하고, 자세한 분석에 명령어와 잘못됐을 가능성이 큰 레지스터를 적습니다. 레지스터로 다시 계산한 주소가 예외와 맞을 때만 레지스터를 짚습니다
@@ -612,6 +633,7 @@ v0.2.69는 릴리즈 후보 세 개를 같은 환경에서 플레이했습니다
 v0.2.70은 릴리즈 후보들을 같은 환경에서 플레이했습니다. 수동 캡처가 잠든 게임 스레드 네 개의 잠금 메모리(4.2KB, 0.4ms)를 담았고 게임도 계속 돌았습니다. Alt+F4 때마다 해제된 후킹 코드를 부르던 PrismaUI 테스트 빌드의 오류를 rc2는 CTD로 기록하고 뷰어를 띄웠는데, 강제 종료 구분 빌드에서는 같은 Alt+F4가 닫기 요청으로 기록되고 뷰어가 뜨지 않았으며 빠른 답이 강제 종료라고 했습니다. rc3는 게임 메뉴에서 고른 종료를 놓쳤습니다(종료 플래그를 읽는 작업이 다시 돌기 전에 게임이 메인 루프를 끝냄). 정식에서는 25ms마다, 그리고 오류 순간에 플래그를 읽고, 일지의 시스템 탭도 종료 메뉴로 봅니다. Engine Fixes의 safe exit를 쓰면 메뉴로 종료해 오류 없이 꺼졌을 때 프로세스가 한 프레임 안에 끝나 SkyrimDiag.log에 줄이 남지 않을 수 있지만, 그 사이에 난 오류는 그대로 분류됩니다. 보관 덤프를 v0.2.69와 비교한 결과 새 기능이 의도한 곳만 바뀌었습니다. 아직 실사용에서 보지 못한 것: 실제 프리징에서의 엔진 잠금 교착(합성 테스트만), 실제 플레이 중 새 알려진 크래시, 종료 메뉴나 창의 X 버튼 뒤의 오류.
 v0.2.71은 같은 플러그인 코드의 시험 빌드를 같은 환경에서 플레이했습니다. 데이터를 불러온 3~4초 뒤 게임 창 스레드에 훅이 걸렸다는 줄이 로그에 남았습니다. 전체 창 모드로 플레이하다 작업 표시줄 "창 닫기"로 끄자 [font=Courier New]window_close[/font]로 기록됐고, 뒤이은 종료 중 오류는 뷰어 없이 강제 종료로 보고됐습니다. 일지에서 종료하면 SkyrimDiag.log에 종료 줄을 남기고 정상 종료했습니다. 아직 실사용에서 보지 못한 것: 창 모드에서 X 버튼 직접 클릭, 훅이 켜진 채 Alt+F4, 훅이 켜진 채 오래 플레이하기.
 v0.2.72는 덤프 크기 축소와 용량 상한이 들어간 시험 빌드를 같은 환경에서 플레이했습니다. 첫 실행에서 출력 폴더의 덤프 31개(21.67GB)를 최신 5개(4.23GB)로 줄였습니다. 수동 캡처 5건은 58~60MB, 크래시 덤프는 67MB였고, 로컬 모듈 파일을 쓸 때와 덤프만 쓸 때 분석 결과가 같았으며, 크래시 콜스택은 덤프만으로 모드 DLL 5개를 지나 풀렸습니다. 아직 실사용에서 보지 못한 것: 새 범위로 쓴 프리징 덤프, 전체 검수 수정(테스트와 보관 덤프 31개로 확인).
+v0.2.73은 시험 빌드들을 같은 환경에서 플레이했습니다. MO2에서 205자 출력 폴더로 수동 캡처와 F4 프리징 모두 분석 결과가 만들어졌고(분석 캐시 경로 337자), 뷰어에서 프리징 결과를 열었습니다. 후킹 점프 코드 기록은 30초마다 돌아 점프 코드가 있는 실행 페이지 41~71개를 찾았고, 한 번 스캔에 140~280ms가 걸려 모듈 목록을 Toolhelp 스냅샷 한 번으로 만들도록 고쳤습니다. 같은 확인에서 플러그인 로그의 이전 세션이 남지 않는 것(CommonLib 자체 로그가 먼저 비움)을 찾아 고쳤습니다. 아직 실사용에서 보지 못한 것: 실제 크래시에서 해제된 후킹 코드의 주인(이 PC의 종료 중 크래시가 10/30 뒤로 나지 않음), 위 두 수정의 게임 안 확인.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
