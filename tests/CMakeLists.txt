@@ -776,7 +776,7 @@ add_test(NAME skydiag_headless_analysis_policy_tests COMMAND skydiag_headless_an
 
 add_test(
   NAME skydiag_bucket_quality_script_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/bucket_quality_script_tests.py"
 )
 
 # Build synthetic summaries from raw signal fixtures through the production
@@ -797,7 +797,7 @@ target_link_libraries(skydiag_quality_corpus_runner PRIVATE
 
 add_test(
   NAME skydiag_quality_corpus_gate_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/quality_corpus_gate_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/quality_corpus_gate_tests.py"
     --runner "$<TARGET_FILE:skydiag_quality_corpus_runner>"
 )
 
@@ -805,42 +805,42 @@ add_test(
 # ctest run. Each of those was committed as configuration that nothing called.
 add_test(
   NAME skydiag_ci_wiring_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/ci_wiring_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/ci_wiring_tests.py"
 )
 
 add_test(
   NAME skydiag_packaging_includes_cli_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/packaging_includes_cli_tests.py"
 )
 
 add_test(
   NAME skydiag_release_zip_verifier_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/release_zip_verifier_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/release_zip_verifier_tests.py"
 )
 
 add_test(
   NAME skydiag_share_text_fixture_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/share_text_fixture_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/share_text_fixture_tests.py"
 )
 
 add_test(
   NAME skydiag_game_function_names_generator_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/game_function_names_generator_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/game_function_names_generator_tests.py"
 )
 
 add_test(
   NAME skydiag_accuracy_benchmark_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/accuracy_benchmark_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/accuracy_benchmark_tests.py"
 )
 
 add_test(
   NAME skydiag_compare_analyses_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/compare_analyses_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/compare_analyses_tests.py"
 )
 
 add_test(
   NAME skydiag_winui_state_fixture_tests
-  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/winui_state_fixture_tests.py"
+  COMMAND "${Python3_EXECUTABLE}" -E "${CMAKE_CURRENT_SOURCE_DIR}/winui_state_fixture_tests.py"
 )
 
 

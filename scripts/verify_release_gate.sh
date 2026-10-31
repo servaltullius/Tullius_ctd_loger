@@ -38,28 +38,38 @@ PY
 })"
 DEFAULT_RELEASE_ZIP_NAME="${DEFAULT_RELEASE_ZIP_NAME%$'\r'}"
 
-readarray -t REQUIRED_WINUI_BUILD_OUTPUTS < <(
+# Command substitutions, not readarray < <(...): set -e never sees a failed
+# process substitution, and the empty list that came out of one let steps 2
+# and 3 pass without checking anything.
+REQUIRED_WINUI_BUILD_OUTPUTS_TEXT="$({
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
 from release_contract import REQUIRED_WINUI_BUILD_OUTPUTS
 
 for item in REQUIRED_WINUI_BUILD_OUTPUTS:
     print(item)
 PY
-)
-for i in "${!REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
-  REQUIRED_WINUI_BUILD_OUTPUTS[$i]="${REQUIRED_WINUI_BUILD_OUTPUTS[$i]%$'\r'}"
-done
-
-WINUI_BUILD_ROOT="${WIN_ROOT}/build-winui"
-
-readarray -t REQUIRED_ZIP_ENTRIES < <(
+})"
+REQUIRED_ZIP_ENTRIES_TEXT="$({
   PYTHONPATH="${REPO_ROOT}/scripts" "${PYTHON_BIN}" - <<'PY'
 from release_contract import REQUIRED_ZIP_ENTRIES
 
 for item in REQUIRED_ZIP_ENTRIES:
     print(item)
 PY
-)
+})"
+if [[ -z "${REQUIRED_WINUI_BUILD_OUTPUTS_TEXT}" || -z "${REQUIRED_ZIP_ENTRIES_TEXT}" ]]; then
+  echo "release_contract.py lists no required WinUI outputs or zip entries"
+  exit 1
+fi
+
+readarray -t REQUIRED_WINUI_BUILD_OUTPUTS <<< "${REQUIRED_WINUI_BUILD_OUTPUTS_TEXT}"
+for i in "${!REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
+  REQUIRED_WINUI_BUILD_OUTPUTS[$i]="${REQUIRED_WINUI_BUILD_OUTPUTS[$i]%$'\r'}"
+done
+
+WINUI_BUILD_ROOT="${WIN_ROOT}/build-winui"
+
+readarray -t REQUIRED_ZIP_ENTRIES <<< "${REQUIRED_ZIP_ENTRIES_TEXT}"
 for i in "${!REQUIRED_ZIP_ENTRIES[@]}"; do
   REQUIRED_ZIP_ENTRIES[$i]="${REQUIRED_ZIP_ENTRIES[$i]%$'\r'}"
 done
@@ -153,9 +163,12 @@ for asset in "${REQUIRED_WINUI_BUILD_OUTPUTS[@]}"; do
 done
 
 echo "[gate] 3/8 required zip entries"
+# grep reads a here-string, not a pipe: grep -q stops at its first match, the
+# writer then dies of SIGPIPE, and under pipefail the pipeline fails. Here
+# that reported an entry as missing; in step 5 it passed a nested path.
 entries="$(unzip -Z1 "${ZIP_PATH}")"
 for p in "${REQUIRED_ZIP_ENTRIES[@]}"; do
-  printf '%s\n' "${entries}" | grep -Fxq "${p}" || { echo "missing zip entry: ${p}"; exit 1; }
+  grep -Fxq -- "${p}" <<< "${entries}" || { echo "missing zip entry: ${p}"; exit 1; }
 done
 
 echo "[gate] 4/8 size guard"
@@ -167,8 +180,13 @@ if (( size_bytes > 100 * 1024 * 1024 )); then
 fi
 
 echo "[gate] 5/8 nested path guard"
-if unzip -Z1 "${ZIP_PATH}" | grep -Eq "${NESTED_WINUI_REGEX}"; then
+nested_status=0
+grep -Eq -- "${NESTED_WINUI_REGEX}" <<< "${entries}" || nested_status=$?
+if (( nested_status == 0 )); then
   echo "nested winui output detected in zip"
+  exit 1
+elif (( nested_status != 1 )); then
+  echo "nested path check failed: grep exit ${nested_status}"
   exit 1
 fi
 

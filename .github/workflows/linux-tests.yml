@@ -47,7 +47,7 @@ jobs:
         run: cmake --build build-linux
 
       - name: Run tests
-        run: ctest --test-dir build-linux --output-on-failure
+        run: ctest --test-dir build-linux --output-on-failure --timeout 600
 
   asan:
     name: Linux ASan + UBSan
@@ -81,7 +81,7 @@ jobs:
         run: cmake --build build-asan
 
       - name: Run tests under sanitizers
-        run: ctest --test-dir build-asan --output-on-failure
+        run: ctest --test-dir build-asan --output-on-failure --timeout 600
 
   clang-tidy:
     name: Linux clang-tidy
