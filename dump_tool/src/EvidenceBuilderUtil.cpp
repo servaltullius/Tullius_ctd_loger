@@ -554,12 +554,23 @@ std::vector<std::wstring> InferPerfSuspectsFromResourceCorrelation(const std::ve
 
 const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const AnalysisResult& r)
 {
+  // A log that may be another crash's (an ambiguous pairing, or one whose
+  // exception location differs from the dump's) names no culprit: its refs
+  // stay a low clue, as its frames do (AddCrashLoggerSignals).
+  if (r.crash_logger_pairing_ambiguous) {
+    return nullptr;
+  }
   for (const auto& ref : r.crash_logger_object_refs) {
     if (!crashlogger_core::IsLocationObjectTypeAscii(WideToUtf8(ref.best_object_type))) {
       return &ref;
     }
   }
   return nullptr;
+}
+
+bool FaultIsJumpToNoCode(const AnalysisResult& r)
+{
+  return r.fault_instruction.verdict == "null_jump" || r.fault_instruction.verdict == "bad_jump";
 }
 
 bool GameReachedWorld(const AnalysisResult& r)
