@@ -119,6 +119,16 @@ const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const Analy
 // there, not because the dump lacks the module list.
 bool FaultIsJumpToNoCode(const AnalysisResult& r);
 
+// A jump into memory that had been freed (target_state "freed"), such as a
+// hook stub a plugin removed while another one still held its address as the
+// original function (the 2026-10 exit crashes, called from PrismaUI.dll). The
+// caller only used that address, and the dump does not show who freed it, so
+// the caller is no suspect on that alone (as with ADR-0016's hook stubs).
+bool FaultJumpedIntoFreedCode(const AnalysisResult& r);
+// The module of the decoded call site ("PrismaUI.dll" of "PrismaUI.dll+0x59ce2"),
+// or empty.
+std::wstring FaultCallSiteModule(const AnalysisResult& r);
+
 // The blackbox saw a save or cell finish loading in this session, so the game
 // got past loading its plugins (and their masters) at startup.
 bool GameReachedWorld(const AnalysisResult& r);

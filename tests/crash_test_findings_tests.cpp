@@ -552,6 +552,60 @@ void TestFaultModuleUnknownOnlyWhereItIsMissing()
   }
 }
 
+// The 2026-10 exit crashes: a plugin freed its hook page while PrismaUI still
+// called that address as the original function. The analysis named PrismaUI
+// "Top suspect (High)" from its call frame and told the player to pass the
+// analysis to its author.
+void TestCallerOfFreedCodeIsNoSuspect()
+{
+  const auto makeFreedJump = [](bool forcedClose, std::string targetState) {
+    AnalysisResult r{};
+    r.dump_path = L"SkyrimDiag_Crash_20261027_160630_435.dmp";
+    r.exc_code = 0xC0000005u;
+    r.fault_instruction.verdict = "bad_jump";
+    r.fault_instruction.access = "execute";
+    r.fault_instruction.target_state = std::move(targetState);
+    r.fault_instruction.call_site = L"PrismaUI.dll+0x59ce2";
+    r.fault_instruction.call_instruction = "call qword ptr [rsp+0x20]";
+    r.suspects = { Suspect(L"PrismaUI.dll", L"Prisma UI", i18n::ConfidenceLevel::kHigh) };
+    r.suspects_from_stackwalk = true;
+    if (forcedClose) {
+      r.forced_close.detected = true;
+      r.forced_close.kind = "alt_f4";
+      r.forced_close.seconds_before_crash = 0.05;
+    }
+    return r;
+  };
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    for (const bool forcedClose : { true, false }) {
+      auto r = makeFreedJump(forcedClose, "freed");
+      BuildEvidenceAndSummary(r, lang);
+      for (const auto& c : r.actionable_candidates) {
+        Require(c.module_filename != L"PrismaUI.dll", "the caller of freed code is no candidate");
+      }
+      Require(!Contains(r.summary_sentence, en ? L"Top suspect: Prisma" : L"유력 후보: Prisma"), "nor the top suspect");
+      Require(Contains(r.summary_sentence, en ? L"may be a victim" : L"피해자일 수"), "the summary says it may be a victim");
+      Require(r.suspects.front().confidence_level == i18n::ConfidenceLevel::kLow, "its suspect entry is low");
+      Require(!Contains(r.quick_answer.suspect_file, L"PrismaUI"), "the quick answer names no suspect");
+      Require(!AnyContains(r.recommendations, en ? L"pass the analysis below to the author" : L"거기 나온 모드의 제작자에게"),
+        "no advice to report it to the caller's author");
+      Require(!AnyContains(r.recommendations, L"Prisma UI") && !AnyContains(r.recommendations, L"PrismaUI.dll"),
+        "nor to update, reinstall or disable it (2026-10-31 corpus run)");
+      if (forcedClose) {
+        Require(r.quick_answer.case_id == "forced_close", "still a forced close");
+      }
+    }
+
+    // A jump into memory that is only reserved keeps its caller as before
+    // (control): nothing says it was a removed hook.
+    auto reserved = makeFreedJump(false, "reserved");
+    BuildEvidenceAndSummary(reserved, lang);
+    Require(Contains(reserved.summary_sentence, en ? L"Top suspect: Prisma" : L"유력 후보: Prisma"),
+      "a jump into reserved memory still names the caller (control)");
+  }
+}
+
 // "No WCT cycle: possible busy wait" stayed after the main thread's wait was
 // traced to a game thread stuck in a plugin.
 void TestBusyWaitLineNeedsAnUnexplainedWait()
@@ -631,6 +685,7 @@ int main()
     TestLocationRefIsNotTheCulprit();
     TestAmbiguousLogNamesNoCulprit();
     TestFaultModuleUnknownOnlyWhereItIsMissing();
+    TestCallerOfFreedCodeIsNoSuspect();
     TestBusyWaitLineNeedsAnUnexplainedWait();
     TestCrashLoggerSelfFaultSummary();
     TestLateRecoveredCleanExitWording();

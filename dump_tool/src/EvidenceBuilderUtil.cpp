@@ -573,6 +573,18 @@ bool FaultIsJumpToNoCode(const AnalysisResult& r)
   return r.fault_instruction.verdict == "null_jump" || r.fault_instruction.verdict == "bad_jump";
 }
 
+bool FaultJumpedIntoFreedCode(const AnalysisResult& r)
+{
+  return r.fault_instruction.verdict == "bad_jump" && r.fault_instruction.target_state == "freed";
+}
+
+std::wstring FaultCallSiteModule(const AnalysisResult& r)
+{
+  const auto& site = r.fault_instruction.call_site;
+  const auto plus = site.find(L'+');
+  return plus == std::wstring::npos ? std::wstring{} : site.substr(0, plus);
+}
+
 bool GameReachedWorld(const AnalysisResult& r)
 {
   return std::any_of(r.events.begin(), r.events.end(), [](const EventRow& ev) {

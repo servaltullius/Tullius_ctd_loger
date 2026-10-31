@@ -938,12 +938,20 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
       callSite;
   }
   if (info.verdict == "bad_jump" && info.target_state == "freed") {
+    // The caller only used the address, possibly another plugin's hook it
+    // kept as the original function; this says how, never who.
+    const std::wstring callerNote = info.call_site.empty()
+      ? std::wstring{}
+      : (en ? L" The caller may only have used that address (for example another plugin's hook it kept as the original "
+              L"function); the dump does not show who freed the code."
+            : L" 호출한 쪽은 그 주소(예: 다른 플러그인이 건 훅을 원래 함수로 알고 저장해 둔 주소)를 불렀을 뿐일 수 있고, 누가 "
+              L"코드를 해제했는지는 덤프로 알 수 없습니다.");
     return (en ? (L"The code tried to run instructions at " + address +
                    L", but no memory was allocated there: it jumped into memory that had been freed (for example a "
                    L"hook stub that was removed).")
                : (L"코드가 " + address + L" 주소의 명령을 실행하려 했지만 그곳에는 할당된 메모리가 없었습니다. 해제된 "
                    L"메모리(예: 제거된 후킹 코드)로 이동했다는 뜻입니다.")) +
-      callSite;
+      callSite + callerNote;
   }
   if (info.verdict == "bad_jump" && info.target_state == "not_executable") {
     return (en ? (L"The code tried to run instructions at " + address +

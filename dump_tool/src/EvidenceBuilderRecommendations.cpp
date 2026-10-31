@@ -453,12 +453,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     return;
   }
   if (ctx.isForcedClose) {
-    // ADR-0022: first, so it is the next action (NextAction.cpp).
+    // ADR-0022: first, so it is the next action (NextAction.cpp). A jump into
+    // freed code names its caller below, which only used the address
+    // (FaultJumpedIntoFreedCode): not a mod to report to.
     r.recommendations.push_back(
       (en ? L"[Forced close] " : L"[강제 종료] ") + ForcedCloseLead(r.forced_close, en) +
-      (en ? L" Nothing to do. If the same error comes every time you close the game, pass the analysis below to the "
-            L"author of the mod it names."
-          : L" 따로 할 일은 없습니다. 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 거기 나온 모드의 제작자에게 전해 주세요."));
+      (FaultJumpedIntoFreedCode(r)
+         ? (en ? L" Nothing to do. While the game was closing, code that had been freed was called (for example a hook "
+                 L"another plugin removed). The mod that called it may only be a victim, and the dump does not show who "
+                 L"freed it."
+               : L" 따로 할 일은 없습니다. 게임이 닫히는 중에 이미 해제된 코드(예: 다른 플러그인이 제거한 후킹 코드)가 "
+                 L"호출됐습니다. 그것을 호출한 모드는 피해자일 수 있고, 누가 해제했는지는 덤프로 알 수 없습니다.")
+         : (en ? L" Nothing to do. If the same error comes every time you close the game, pass the analysis below to the "
+                 L"author of the mod it names."
+               : L" 따로 할 일은 없습니다. 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 거기 나온 모드의 제작자에게 전해 "
+                 L"주세요.")));
   }
   const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
@@ -787,7 +796,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // WCT comes first in the summary; one WCT pass alone keeps the stack advice.
   const bool stackIsBystander = IsBystanderWait(r.main_thread_wait) && r.suspects_from_main_thread &&
     r.main_thread_lock_owner.tid == 0u;
-  const bool allowTopSuspectActionRecommendations = !isSnapshotLike && !stackIsCallPathOnly && !stackIsBystander;
+  // Nor after a jump into freed code: the stack starts at its caller, which
+  // only used the address (FaultJumpedIntoFreedCode).
+  const bool allowTopSuspectActionRecommendations =
+    !isSnapshotLike && !stackIsCallPathOnly && !stackIsBystander && !FaultJumpedIntoFreedCode(r);
   if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
       !r.inferred_mod_name.empty() && !preferStackCandidateOverFault && allowFaultModuleTopSuspectRecommendations) {
     r.recommendations.push_back(en
