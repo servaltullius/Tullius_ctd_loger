@@ -1,6 +1,6 @@
 #include "HookPageRecord.h"
 
-#include <Psapi.h>
+#include <TlHelp32.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -22,35 +22,28 @@ struct ModuleRange
   std::wstring name;
 };
 
+// One Toolhelp snapshot reads the game's loader list once. GetModuleInformation
+// and GetModuleBaseNameW walk it again for each module: with some 600 modules
+// a scan took 140-280 ms in game (2026-10-31).
 std::vector<ModuleRange> ListModules(HANDLE process)
 {
-  std::vector<HMODULE> handles(1024);
-  DWORD needed = 0;
-  if (!EnumProcessModulesEx(process, handles.data(), static_cast<DWORD>(handles.size() * sizeof(HMODULE)), &needed,
-        LIST_MODULES_64BIT)) {
+  const DWORD pid = GetProcessId(process);
+  HANDLE snapshot = INVALID_HANDLE_VALUE;
+  // ERROR_BAD_LENGTH while a module is being loaded: try again.
+  for (int attempt = 0; attempt < 3 && snapshot == INVALID_HANDLE_VALUE; ++attempt) {
+    snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
+  }
+  if (snapshot == INVALID_HANDLE_VALUE) {
     return {};
   }
-  if (needed > handles.size() * sizeof(HMODULE)) {
-    handles.resize(needed / sizeof(HMODULE));
-    if (!EnumProcessModulesEx(process, handles.data(), static_cast<DWORD>(handles.size() * sizeof(HMODULE)), &needed,
-          LIST_MODULES_64BIT)) {
-      return {};
-    }
-  }
-  handles.resize(std::min<std::size_t>(handles.size(), needed / sizeof(HMODULE)));
-
   std::vector<ModuleRange> modules;
-  modules.reserve(handles.size());
-  for (const HMODULE handle : handles) {
-    MODULEINFO info{};
-    wchar_t name[MAX_PATH]{};
-    if (!GetModuleInformation(process, handle, &info, sizeof(info)) ||
-        GetModuleBaseNameW(process, handle, name, MAX_PATH) == 0) {
-      continue;
-    }
-    const auto base = reinterpret_cast<std::uint64_t>(info.lpBaseOfDll);
-    modules.push_back({ base, base + info.SizeOfImage, name });
+  MODULEENTRY32W entry{};
+  entry.dwSize = sizeof(entry);
+  for (BOOL ok = Module32FirstW(snapshot, &entry); ok; ok = Module32NextW(snapshot, &entry)) {
+    const auto base = reinterpret_cast<std::uint64_t>(entry.modBaseAddr);
+    modules.push_back({ base, base + entry.modBaseSize, entry.szModule });
   }
+  CloseHandle(snapshot);
   std::sort(modules.begin(), modules.end(), [](const auto& a, const auto& b) { return a.base < b.base; });
   return modules;
 }

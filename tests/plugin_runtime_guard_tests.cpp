@@ -598,6 +598,13 @@ int main()
     pluginLoadBody,
     "if (!SetupLog())",
     "Plugin load must explicitly tolerate file logger setup failure.");
+  // CommonLib's default log opens SkyrimDiag.log truncated before SetupLog
+  // could keep the last session's (2026-10-31 in game: no previous log).
+  AssertOrdered(
+    pluginLoadBody,
+    "SKSE::Init(skse, false);",
+    "if (!SetupLog())",
+    "SKSE::Init must not open its own log before SetupLog keeps the last session's.");
   AssertContains(
     pluginLoadBody,
     "catch (...)",
