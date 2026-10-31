@@ -628,7 +628,10 @@ extern "C" __declspec(dllexport) void SkyrimDiagShutdownWorkers() noexcept
 SKSEPluginLoad(const SKSE::LoadInterface *skse) {
   bool skseInitialized = false;
   try {
-    SKSE::Init(skse);
+    // Without CommonLib's own log: it opens SkyrimDiag.log truncated before
+    // SetupLog can keep the last session's (2026-10-31: no previous log in
+    // game, as KeepSessionLog leaves an empty log alone).
+    SKSE::Init(skse, false);
     skseInitialized = true;
     if (!SetupLog()) {
       OutputDebugStringW(
@@ -691,7 +694,7 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
       msg->RegisterListener(OnSkseMessage);
     }
 
-    spdlog::info("SkyrimDiag: loaded");
+    spdlog::info("SkyrimDiag: loaded (v{})", SKSE::GetPluginVersion().string("."));
     return true;
   } catch (...) {
     // Never unwind through the SKSE C ABI. Once SKSE initialization completed,
