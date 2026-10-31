@@ -151,7 +151,10 @@ internal static class NativeAnalyzerBridge
         {
             startInfo.ArgumentList.Add("--debug");
         }
-        startInfo.ArgumentList.Add(options.AllowOnlineSymbols ? "--allow-online-symbols" : "--no-online-symbols");
+        if (options.AllowOnlineSymbols is bool allowOnlineSymbols)
+        {
+            startInfo.ArgumentList.Add(allowOnlineSymbols ? "--allow-online-symbols" : "--no-online-symbols");
+        }
         startInfo.ArgumentList.Add(dumpPath);
 
         using var process = new Process
@@ -235,9 +238,14 @@ internal static class NativeAnalyzerBridge
                 cancellationToken.ThrowIfCancellationRequested();
                 var err = new StringBuilder(4096);
                 var previous = Environment.GetEnvironmentVariable("SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS");
-                Environment.SetEnvironmentVariable(
-                    "SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS",
-                    options.AllowOnlineSymbols ? "1" : "0");
+                // Only an explicit flag overrides the variable; without one the
+                // analyzer follows the user's setting, as the CLI does.
+                if (options.AllowOnlineSymbols is bool allowOnlineSymbols)
+                {
+                    Environment.SetEnvironmentVariable(
+                        "SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS",
+                        allowOnlineSymbols ? "1" : "0");
+                }
                 try
                 {
                     var rc = SkyrimDiagAnalyzeDumpW(

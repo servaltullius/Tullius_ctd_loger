@@ -57,33 +57,39 @@ int __stdcall SkyrimDiagAnalyzeDumpW(
     return 2;
   }
 
-  AnalyzeOptions opt{};
-  opt.debug = (debug != 0);
-  opt.allow_online_symbols = ReadEnvBool(L"SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS", false);
-  opt.redact_paths = !opt.debug;
-  if (languageToken && languageToken[0] != L'\0') {
-    const std::string ascii = ToAscii(languageToken);
-    opt.language = i18n::ParseLanguageTokenAscii(ascii);
-  }
-  const std::wstring exeDir = GetCurrentExeDir();
-  if (!exeDir.empty()) {
-    opt.data_dir = (std::filesystem::path(exeDir) / L"data").wstring();
-  }
-  if (outDir && outDir[0] != L'\0') {
-    opt.output_dir = outDir;
-  }
-  const std::wstring gameVersionW = ReadEnvString(L"SKYRIMDIAG_GAME_VERSION");
-  if (!gameVersionW.empty()) {
-    opt.game_version = ToAscii(gameVersionW);
-  }
-
   AnalysisResult result{};
   std::wstring err;
 
-  const std::wstring dumpPathW(dumpPath);
-  const std::wstring outDirW = (outDir ? std::wstring(outDir) : std::wstring{});
-
+  // The options are built inside the try as well: nothing may unwind into
+  // the viewer through this C ABI.
   try {
+    AnalyzeOptions opt{};
+    opt.debug = (debug != 0);
+    opt.allow_online_symbols = ReadEnvBool(L"SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS", false);
+    opt.redact_paths = !opt.debug;
+    if (languageToken && languageToken[0] != L'\0') {
+      const std::string ascii = ToAscii(languageToken);
+      opt.language = i18n::ParseLanguageTokenAscii(ascii);
+    } else {
+      // As the CLI: the viewer's headless run (the helper starts it when the
+      // CLI is missing) passes no language, and a Korean display language
+      // must not get an English report.
+      opt.language = i18n::LanguageFromWindowsUiLangId(GetUserDefaultUILanguage());
+    }
+    const std::wstring exeDir = GetCurrentExeDir();
+    if (!exeDir.empty()) {
+      opt.data_dir = (std::filesystem::path(exeDir) / L"data").wstring();
+    }
+    if (outDir && outDir[0] != L'\0') {
+      opt.output_dir = outDir;
+    }
+    const std::wstring gameVersionW = ReadEnvString(L"SKYRIMDIAG_GAME_VERSION");
+    if (!gameVersionW.empty()) {
+      opt.game_version = ToAscii(gameVersionW);
+    }
+
+    const std::wstring dumpPathW(dumpPath);
+    const std::wstring outDirW = (outDir ? std::wstring(outDir) : std::wstring{});
     if (!AnalyzeDump(dumpPathW, outDirW, opt, result, &err)) {
       SetError(err, errorBuf, errorBufChars);
       return 3;

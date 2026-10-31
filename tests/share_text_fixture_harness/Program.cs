@@ -13,6 +13,32 @@ internal static class Program
         var summaryPath = Path.GetFullPath(args[0]);
         var mode = args[1].Trim().ToLowerInvariant();
 
+        // The OutputDir the viewer reads from a SkyrimDiagHelper.ini (args[0]).
+        if (mode == "ini-outputdir")
+        {
+            Console.Write(DumpDiscoveryService.TryReadIniValue(summaryPath, "SkyrimDiagHelper", "OutputDir") ?? "<none>");
+            return 0;
+        }
+
+        // Command-line options the viewer passes on (args[0] unused).
+        if (mode == "options")
+        {
+            static string Symbols(params string[] a) =>
+                DumpToolInvocationOptions.Parse(a).AllowOnlineSymbols?.ToString() ?? "null";
+            Console.Write(string.Join("|", new[]
+            {
+                Symbols("x.dmp"),
+                Symbols("x.dmp", "--allow-online-symbols"),
+                Symbols("x.dmp", "--no-online-symbols"),
+                DumpToolInvocationOptions.IsKoreanLanguageToken("korean").ToString(),
+                DumpToolInvocationOptions.IsKoreanLanguageToken("KOR").ToString(),
+                DumpToolInvocationOptions.IsKoreanLanguageToken("ko").ToString(),
+                DumpToolInvocationOptions.IsKoreanLanguageToken("en").ToString(),
+                DumpToolInvocationOptions.IsKoreanLanguageToken(null).ToString(),
+            }));
+            return 0;
+        }
+
         var summary = AnalysisSummary.LoadFromSummaryFile(summaryPath);
         var vm = new MainWindowViewModel(isKorean: false)
         {

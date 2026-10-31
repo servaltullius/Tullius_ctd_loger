@@ -142,42 +142,13 @@ internal sealed partial class MainWindowViewModel
 
         var lines = new List<string>();
 
-        static bool HasAnyPrefix(IEnumerable<string> values, params string[] prefixes)
-        {
-            foreach (var v in values)
-            {
-                if (string.IsNullOrWhiteSpace(v))
-                {
-                    continue;
-                }
-
-                foreach (var p in prefixes)
-                {
-                    if (v.StartsWith(p, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
-        var recs = summary.Recommendations;
-        var looksSnapshotByText = summary.SummarySentence.Contains("snapshot", StringComparison.OrdinalIgnoreCase) ||
-                                  summary.SummarySentence.Contains("스냅샷", StringComparison.Ordinal);
-        var looksHangByText = summary.SummarySentence.Contains("freeze", StringComparison.OrdinalIgnoreCase) ||
-                              summary.SummarySentence.Contains("infinite loading", StringComparison.OrdinalIgnoreCase) ||
-                              summary.SummarySentence.Contains("프리징", StringComparison.Ordinal) ||
-                              summary.SummarySentence.Contains("무한로딩", StringComparison.Ordinal);
-
+        // The analyzer's flags only: words in the summary sentence (a mod or DLL
+        // named "...Freeze...") or a recommendation tag once made a CTD read as a
+        // freeze. Every summary the viewer shows has them (NeedsReanalysisFor).
         var isFilteredCleanExit = summary.IsFilteredCleanExit;
         var isForcedClose = !isFilteredCleanExit && summary.IsForcedClose;
-        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose &&
-                             (summary.IsSnapshotLike ||
-                             looksSnapshotByText ||
-                             HasAnyPrefix(recs, "[Snapshot]", "[정상/스냅샷]", "[Manual]", "[수동]"));
-        var isHangLike = !isFilteredCleanExit && !isForcedClose && !isSnapshotLike &&
-                         (summary.IsHangLike || looksHangByText || HasAnyPrefix(recs, "[Hang]", "[프리징]"));
+        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose && summary.IsSnapshotLike;
+        var isHangLike = !isFilteredCleanExit && !isForcedClose && !isSnapshotLike && summary.IsHangLike;
         lines.Add(isFilteredCleanExit
             ? (_isKorean ? "🟢 Skyrim 정상 종료 진단 리포트 — SkyrimDiag" : "🟢 Skyrim Clean-Exit Diagnostic Report — SkyrimDiag")
             : isForcedClose

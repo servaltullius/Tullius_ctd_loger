@@ -20,8 +20,11 @@ public static class Program
             }
             catch (Exception ex)
             {
+                // An output folder that cannot be made, for one: report it with
+                // an exit code like the CLI's, not as a crash of this process.
                 HeadlessBootstrapLog.Write("main.headless.exception", ex.ToString());
-                throw;
+                Console.Error.WriteLine("SkyrimDiagDumpToolWinUI headless failed: " + ex.Message);
+                return 3;
             }
         }
 

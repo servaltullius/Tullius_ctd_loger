@@ -180,6 +180,15 @@ AnalysisResult MakeFullResult(const std::filesystem::path& outBase)
   r.troubleshooting_steps.push_back(L"Open C:/Users/SkydiagProbeUser/Documents/My Games/Skyrim.ini");
   r.diagnostics.push_back(L"[symbols] search path " + home + L"\\Syms");
   r.stackwalk_primary_frames.push_back(L"BadPlugin.dll!Foo+0x12 (" + home + L"\\src\\foo.cpp:42)");
+  skydiag::dump_tool::ActionableCandidate candidate{};
+  candidate.status_id = "related";
+  candidate.display_name = L"BadPlugin.dll";
+  candidate.module_filename = L"BadPlugin.dll";
+  candidate.supporting_families = { "actionable_stack" };
+  candidate.score = 6;
+  candidate.stack_weight = 6;
+  candidate.standalone_callstack = true;
+  r.actionable_candidates.push_back(candidate);
   return r;
 }
 
@@ -193,6 +202,8 @@ void TestWriterOutputKeepsSchema()
     const auto summary = BuildSummaryJson(full, outBase, L"SkyrimDiag_Crash_20261019_120000_123", redact);
     ValidateSummarySchemaV2(summary);
     Require(!summary["suspects"].empty(), "full result keeps its suspect");
+    // The viewer reads the analyzer's verdict instead of its own rule.
+    Require(summary["actionable_candidates"][0]["standalone_callstack"].get<bool>(), "standalone_callstack written");
     // ADR-0018: one class per recommendation, in the same order.
     Require(minimal["recommendation_classes"].is_array() &&
               minimal["recommendation_classes"].size() == minimal["recommendations"].size(),

@@ -115,6 +115,9 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.suspectBasis = suspectBasis;
 
   internal::BuildActionableCandidates(r, lang, ctx);
+  for (auto& candidate : r.actionable_candidates) {
+    candidate.standalone_callstack = internal::CandidateHasStandaloneCallstackSupport(r, candidate);
+  }
   if (internal::IsWeakFaultLocationOnlySuspect(r, ctx) && !r.suspects.empty()) {
     auto& topSuspect = r.suspects[0];
     topSuspect.confidence_level = i18n::ConfidenceLevel::kLow;

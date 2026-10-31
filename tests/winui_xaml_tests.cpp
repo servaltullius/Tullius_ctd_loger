@@ -539,8 +539,11 @@ static void TestWinUiSkipsLocationRefsAndGroupsFreezeActions()
   const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
   const auto summary = ReadAllText(repoRoot / "dump_tool_winui" / "AnalysisSummary.cs");
   RequireContains(summary, "public bool IsLocation", "Crash Logger refs must know whether they are a location.");
-  RequireContains(summary, "CulpritRef => CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation)", "The culprit ref skips locations.");
-  RequireContains(summary, "crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName", "The inferred mod skips locations.");
+  RequireContains(summary, "CrashLoggerPairingAmbiguous ? null : CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation)",
+    "The culprit ref skips locations and an ambiguous pairing.");
+  RequireContains(summary, "(crashLoggerPairingAmbiguous ? null : crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName)",
+    "The inferred mod skips locations and an ambiguous pairing.");
+  RequireContains(summary, "ReadBool(pairingNode, \"ambiguous\")", "The viewer must read crash_logger.pairing.ambiguous.");
   const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireNotContains(vm, "CrashLoggerRefs[0]", "Culprit displays must go through CulpritRef.");
   // ADR-0018: the analyzer's recommendation_classes decide the section; the

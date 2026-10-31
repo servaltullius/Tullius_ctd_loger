@@ -93,6 +93,10 @@ struct ActionableCandidate
   std::uint32_t family_count = 0;
   bool cross_validated = false;
   bool has_conflict = false;
+  // The callstack alone supports it strongly enough to lead
+  // (CandidateHasStandaloneCallstackSupport); written to the summary so the
+  // viewer labels and words it as the report does.
+  bool standalone_callstack = false;
 };
 
 struct FreezeRelatedCandidate

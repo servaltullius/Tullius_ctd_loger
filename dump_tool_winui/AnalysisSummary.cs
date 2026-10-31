@@ -77,8 +77,13 @@ internal sealed class AnalysisSummary
     public string TroubleshootingTitle { get; init; } = string.Empty;
     public IReadOnlyList<string> TroubleshootingSteps { get; init; } = Array.Empty<string>();
     public required IReadOnlyList<CrashLoggerRefItem> CrashLoggerRefs { get; init; }
-    // The most relevant ref that can name a culprit plugin (not a cell or worldspace).
-    public CrashLoggerRefItem? CulpritRef => CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation);
+    // The paired log may be another crash's (crash_logger.pairing.ambiguous): its
+    // refs stay a low clue and name no culprit, as in the analyzer.
+    public bool CrashLoggerPairingAmbiguous { get; init; }
+    // The most relevant ref that can name a culprit plugin (not a cell or worldspace),
+    // none from an ambiguous pairing (the analyzer's FirstCulpritObjectRef).
+    public CrashLoggerRefItem? CulpritRef =>
+        CrashLoggerPairingAmbiguous ? null : CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation);
     public string CrashLoggerDirectFaultModule { get; init; } = string.Empty;
     public string CrashLoggerFirstActionableProbableModule { get; init; } = string.Empty;
     public string CrashLoggerProbableStreakModule { get; init; } = string.Empty;
@@ -136,6 +141,12 @@ internal sealed class AnalysisSummary
             ReadString(item, "form_id"),
             ReadInt32(item, "ref_count"),
             ReadInt32(item, "relevance_score")));
+        var pairingNode = crashLoggerNode.ValueKind == JsonValueKind.Object &&
+                          crashLoggerNode.TryGetProperty("pairing", out var pairing) &&
+                          pairing.ValueKind == JsonValueKind.Object
+            ? pairing
+            : default;
+        var crashLoggerPairingAmbiguous = ReadBool(pairingNode, "ambiguous");
 
         var recommendations = ParseStringArray(root, "recommendations");
         var recommendationClasses = ParseRecommendationClasses(root);
@@ -160,6 +171,7 @@ internal sealed class AnalysisSummary
             ReadInt32(item, "score"),
             ReadBool(item, "cross_validated"),
             ReadBool(item, "has_conflict"),
+            ReadBool(item, "standalone_callstack"),
             ParseStringArray(item, "supporting_families"),
             ParseStringArray(item, "conflicting_families")));
 
@@ -209,7 +221,7 @@ internal sealed class AnalysisSummary
             CrashBucketKey = ReadString(root, "crash_bucket_key"),
             ModulePlusOffset = ReadString(exception, "module_plus_offset"),
             InferredModName = FirstNonEmpty(
-                crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName ?? string.Empty,
+                (crashLoggerPairingAmbiguous ? null : crashLoggerRefs.FirstOrDefault(r => !r.IsLocation)?.EspName) ?? string.Empty,
                 ReadString(exception, "inferred_mod_name"),
                 suspects.FirstOrDefault()?.Module ?? string.Empty),
             IsCrashLike = ReadBool(analysis, "is_crash_like"),
@@ -238,6 +250,7 @@ internal sealed class AnalysisSummary
             EvidenceItems = evidenceItems,
             ActionableCandidates = actionableCandidates,
             CrashLoggerRefs = crashLoggerRefs,
+            CrashLoggerPairingAmbiguous = crashLoggerPairingAmbiguous,
             CrashLoggerDirectFaultModule = ReadString(crashLoggerNode, "direct_fault_module"),
             CrashLoggerFirstActionableProbableModule = ReadString(crashLoggerNode, "first_actionable_probable_module"),
             CrashLoggerProbableStreakModule = ReadString(crashLoggerNode, "probable_streak_module"),
@@ -450,6 +463,9 @@ public sealed record ActionableCandidateItem(
     int Score,
     bool CrossValidated,
     bool HasConflict,
+    // The analyzer's CandidateHasStandaloneCallstackSupport; false in summaries
+    // written before it (they are re-analyzed, NeedsReanalysisFor).
+    bool StandaloneCallstack,
     IReadOnlyList<string> SupportingFamilies,
     IReadOnlyList<string> ConflictingFamilies);
 public sealed record TriageReview
