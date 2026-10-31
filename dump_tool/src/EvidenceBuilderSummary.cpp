@@ -1052,10 +1052,10 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           : (freed.owner_mod_name + L" (" + freed.owner_module + L")");
         summary = en
           ? (L"The crash jumped into a hook of " + owner + L" after it had been freed (recorded while the game ran)." +
-              (freedCaller.empty() ? std::wstring{} : (L" " + freedCaller + L" only called it.")) +
+              (freedCaller.empty() ? std::wstring{} : (L" " + freedCaller + L" called it after it was freed.")) +
               (freed.exact ? L" (Confidence: Medium)" : L" (Confidence: Low)"))
           : (L"해제된 " + owner + L"의 후킹 코드로 이동하다가 튕겼습니다(게임 중 기록)." +
-              (freedCaller.empty() ? std::wstring{} : (L" " + freedCaller + L"은(는) 그 코드를 호출했을 뿐입니다.")) +
+              (freedCaller.empty() ? std::wstring{} : (L" " + freedCaller + L"이(가) 해제된 뒤에 그 코드를 호출했습니다.")) +
               (freed.exact ? L" (신뢰도: 중간)" : L" (신뢰도: 낮음)"));
       } else if (FaultJumpedIntoFreedCode(r)) {
         // The caller only used the freed address (FaultJumpedIntoFreedCode).
