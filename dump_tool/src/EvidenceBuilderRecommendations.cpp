@@ -57,6 +57,9 @@ std::wstring DescribeFamily(std::string_view familyId, bool en)
   if (familyId == "hook_stub_owner") {
     return en ? L"hook stub owner" : L"후킹 점프 코드 주인";
   }
+  if (familyId == "freed_hook_owner") {
+    return en ? L"freed hook owner" : L"해제된 후킹 코드 주인";
+  }
   return en ? L"other signal" : L"기타 신호";
 }
 
@@ -455,10 +458,24 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   if (ctx.isForcedClose) {
     // ADR-0022: first, so it is the next action (NextAction.cpp). A jump into
     // freed code names its caller below, which only used the address
-    // (FaultJumpedIntoFreedCode): not a mod to report to.
+    // (FaultJumpedIntoFreedCode): not a mod to report to. Whose hook the
+    // freed code was comes from the helper's record, when there is one
+    // (ADR-0024).
+    const auto& freed = r.freed_hook;
+    const std::wstring freedOwner = !freed.detected || freed.owner_module.empty() ? std::wstring{}
+      : freed.owner_mod_name.empty()                                         ? freed.owner_module
+                                                                              : (freed.owner_mod_name + L" (" + freed.owner_module + L")");
     r.recommendations.push_back(
       (en ? L"[Forced close] " : L"[강제 종료] ") + ForcedCloseLead(r.forced_close, en) +
-      (FaultJumpedIntoFreedCode(r)
+      (FaultJumpedIntoFreedCode(r) && !freedOwner.empty()
+         ? (en ? (L" Nothing to do. While the game was closing, a hook of " + freedOwner +
+                  L" was called after it had been freed (recorded while the game ran). If the same error comes every "
+                  L"time you close the game, pass the analysis below to the author of " + freedOwner +
+                  L"; the mod that called it only kept the address.")
+               : (L" 따로 할 일은 없습니다. 게임이 닫히는 중에 이미 해제된 " + freedOwner +
+                  L"의 후킹 코드가 호출됐습니다(게임 중 기록). 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 " +
+                  freedOwner + L" 제작자에게 전해 주세요. 그것을 호출한 모드는 주소를 갖고 있었을 뿐입니다."))
+         : FaultJumpedIntoFreedCode(r)
          ? (en ? L" Nothing to do. While the game was closing, code that had been freed was called (for example a hook "
                  L"another plugin removed). The mod that called it may only be a victim, and the dump does not show who "
                  L"freed it."

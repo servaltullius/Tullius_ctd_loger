@@ -52,6 +52,7 @@ Tullius complements CrashLogger rather than replacing it. There is no reviewed r
 
 - **Stronger evidence:** the dump fault module and an eligible CrashLogger frame point to the same non-system DLL. This is a priority for source review or isolation, not automatic proof of root cause.
 - **Possible victim location:** `CrashLogger.dll`, a hook framework, the game EXE, or a system DLL can be where corrupted state is finally observed. `v0.2.57+` preserves an already captured original exception from later CrashLogger-internal faults and cautiously prefers an eligible non-hook frame candidate when the paired log supports it.
+- **Jump into freed code:** the module that called it only used the address. While the game runs, the Helper records the hook jump code in the game's executable memory every 30 seconds (ADR-0024), so when the freed code was such a hook, the report names whose hook it was: Medium when a recorded jump started at that address, Low when only that memory's other jumps point to the module.
 - **Context only:** referenced ESP/ESM records, recently loaded resources, and resource providers show correlation around the incident. They must not be treated as the culprit without an independent stack, reproduction, or source-level match.
 - **Pairing quality matters:** ambiguous or distant CrashLogger log matches are recorded with reduced confidence and cannot independently promote a candidate to High confidence.
 

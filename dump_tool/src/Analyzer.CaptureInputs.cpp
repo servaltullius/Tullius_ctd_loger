@@ -1092,6 +1092,11 @@ void ComputeSuspects(
     out.hook_stub_race = internal::DetectHookStubRace(dumpBase, dumpSize, allModules, threads, out, excCtx);
   }
   out.fault_instruction = internal::ProbeFaultInstruction(dumpBase, dumpSize, allModules, threads, out, excCtx);
+  if (out.fault_instruction.verdict == "bad_jump" && out.fault_instruction.target_state == "freed") {
+    // ADR-0024: the freed page is gone from the dump; the helper's record
+    // while the game ran says whose hook it was.
+    internal::ResolveFreedHookOwner(dumpBase, dumpSize, allModules, out);
+  }
   const std::uint32_t preferredTid = out.exc_tid != 0u ? out.exc_tid : mainTid.value_or(0u);
   const std::uint32_t modalProbeTid = (hangLike && mainTid.has_value()) ? *mainTid : 0u;
   std::vector<ModalStackFrame> mainThreadFrames;

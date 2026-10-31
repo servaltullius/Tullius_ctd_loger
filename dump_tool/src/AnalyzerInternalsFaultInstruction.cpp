@@ -2,11 +2,15 @@
 
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "FaultInstruction.h"
+#include "FreedHook.h"
+#include "SkyrimDiagProtocol.h"
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 namespace skydiag::dump_tool::internal {
 
@@ -131,6 +135,53 @@ FaultInstructionInfo ProbeFaultInstruction(
     info.call_instruction = FormatX64Call(*call, ret);
   }
   return info;
+}
+
+void ResolveFreedHookOwner(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  AnalysisResult& out)
+{
+  void* ptr = nullptr;
+  ULONG size = 0;
+  if (!minidump::ReadStreamSized(dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_HookPages, &ptr, &size) ||
+      !ptr || size == 0u) {
+    return;
+  }
+  HookPageRecordInfo record{};
+  if (!ParseHookPageRecordJson(std::string_view(static_cast<const char*>(ptr), size), &record)) {
+    return;
+  }
+  const auto moduleNamed = [&](const std::wstring& name) -> const minidump::ModuleInfo* {
+    for (const auto& m : modules) {
+      if (_wcsicmp(m.filename.c_str(), name.c_str()) == 0) {
+        return &m;
+      }
+    }
+    return nullptr;
+  };
+  // The game EXE and Windows own no hook stub; a module the dump no longer
+  // lists (unloaded) may well be the owner.
+  auto info = ResolveFreedHook(record, out.fault_instruction.address, [&](const std::wstring& name) {
+    const auto* m = moduleNamed(name);
+    return m && (m->is_systemish || m->is_game_exe || minidump::IsLikelyWindowsSystemModulePath(m->path));
+  });
+  if (info.owner_module.empty()) {
+    out.freed_hook = std::move(info);
+    return;
+  }
+  if (const auto* m = moduleNamed(info.owner_module)) {
+    info.owner_module_path = m->path;
+    info.owner_mod_name = m->inferred_mod_name;
+  }
+  out.fault_instruction.freed_hook_owner = info.owner_module;
+  if (info.exact) {
+    wchar_t offset[24]{};
+    swprintf_s(offset, L"+0x%llx", static_cast<unsigned long long>(info.owner_offset));
+    out.fault_instruction.freed_hook_stub_target = info.owner_module + offset;
+  }
+  out.freed_hook = std::move(info);
 }
 
 }  // namespace skydiag::dump_tool::internal

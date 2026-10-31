@@ -61,6 +61,10 @@ struct HelperLoopState
   // The still-frozen crash generation InitializeLoopState signaled again
   // (RearmFrozenCrashFromEarlierHelper), 0 when none.
   std::uint32_t rearmedFrozenCrashSeq = 0;
+  // ADR-0024: when the hook stub record is read next, and the page count last
+  // logged (none yet: SIZE_MAX).
+  std::uint64_t nextHookPageScanTick64 = 0;
+  std::size_t loggedHookPageCount = static_cast<std::size_t>(-1);
 };
 
 struct CrashArtifactRemovalResult

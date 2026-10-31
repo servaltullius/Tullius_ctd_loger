@@ -25,6 +25,7 @@ add_executable(${PROJECT_NAME}
   src/HelperMain.Startup.cpp
   src/HelperMain.Process.cpp
   src/HelperMain.Loop.cpp
+  src/HookPageRecord.cpp
   src/HangDetect.cpp
   src/IncidentManifest.cpp
   src/LoadStats.cpp
@@ -48,6 +49,7 @@ add_executable(${PROJECT_NAME}
   src/CrashObjectMemory.h
   src/GpuMemory.h
   src/HangObjectMemory.h
+  src/HookPageRecord.h
   src/ModuleUnwindMemory.h
   src/StackCodeMemory.h
   include/SkyrimDiagHelper/Config.h

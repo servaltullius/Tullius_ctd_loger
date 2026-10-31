@@ -163,6 +163,12 @@ struct FaultInstructionInfo
   // "reserved", "not_executable" (committed without execute access) or
   // "executable"; empty when the dump does not say.
   std::string target_state;
+  // bad_jump into freed code: whose hook stub the target was, from the
+  // helper's record while the game ran (ADR-0024). freed_hook_owner is the
+  // module; freed_hook_stub_target is "Foo.dll+0x1234" when a recorded stub
+  // started at the target, empty when only the page's stubs point there.
+  std::wstring freed_hook_owner;
+  std::wstring freed_hook_stub_target;
 };
 
 // Reads read/write AVs from the code bytes at the exception address (code,

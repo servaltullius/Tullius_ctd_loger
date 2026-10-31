@@ -4,6 +4,7 @@
 #include "CrashHistory.h"
 #include "DumpIdentity.h"
 #include "FaultInstruction.h"
+#include "FreedHook.h"
 #include "GraphicsInjectionDiag.h"
 #include "PluginRules.h"
 #include <cstdint>
@@ -625,6 +626,9 @@ struct AnalysisResult
   // (verdict empty: nothing to say).
   FaultInstructionInfo fault_instruction;
   HookStubRaceInfo hook_stub_race;
+  // ADR-0024: whose hook the freed code a bad_jump went to was, from the
+  // helper's record of hook stubs while the game ran.
+  FreedHookInfo freed_hook;
   std::wstring symbol_search_path;  // effective DbgHelp search path (best-effort)
   std::wstring symbol_cache_path;   // inferred/selected local cache path (best-effort)
   std::wstring dbghelp_path;        // effective dbghelp runtime path (best-effort)

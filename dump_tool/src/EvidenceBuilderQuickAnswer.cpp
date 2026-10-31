@@ -298,9 +298,17 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
       }
     }
   } else if (FaultJumpedIntoFreedCode(r)) {
-    // No lead: the caller of freed code is no suspect on that alone, and who
-    // freed it is not in the dump (FaultJumpedIntoFreedCode). how_it_crashed
-    // still says what happened.
+    // The caller of freed code is no suspect on that alone, and who freed it
+    // is not in the dump (FaultJumpedIntoFreedCode). The helper's record may
+    // name whose hook the freed code was (ADR-0024): Medium for a recorded
+    // stub at the address, Low for the page's stubs; otherwise no lead.
+    // how_it_crashed still says what happened.
+    const auto& freed = r.freed_hook;
+    if (freed.detected && !freed.owner_module.empty()) {
+      lead = ModLead(r, freed.owner_module, freed.owner_mod_name,
+        freed.exact ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow);
+      lead.case_id = "freed_hook_owner";
+    }
   } else if (topSuspect && IsModModule(r, topSuspect->module_filename)) {
     lead = SuspectLead(r, *topSuspect, suspectLevel(*topSuspect));
     if (!r.suspects_from_stackwalk) {
