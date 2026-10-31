@@ -440,10 +440,10 @@ std::vector<std::filesystem::path> BuildCrashLoggerCandidateDirs(const std::opti
     }
 
     if (std::filesystem::is_directory(profiles, ec)) {
-      for (const auto& ent : std::filesystem::directory_iterator(profiles, ec)) {
-        if (ec) {
-          break;
-        }
+      // increment(ec): the range-for's operator++ throws when a folder becomes
+      // unreadable mid-scan, and a failed check no longer ends the scan.
+      for (std::filesystem::directory_iterator it(profiles, ec), end; !ec && it != end; it.increment(ec)) {
+        const auto& ent = *it;
         if (!ent.is_directory(ec)) {
           continue;
         }
@@ -638,10 +638,8 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   std::error_code ec;
   for (const auto& dir : uniqueDirs) {
     ec.clear();
-    for (const auto& ent : std::filesystem::directory_iterator(dir, ec)) {
-      if (ec) {
-        break;
-      }
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+      const auto& ent = *it;
       if (!ent.is_regular_file(ec)) {
         continue;
       }

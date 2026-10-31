@@ -319,8 +319,7 @@ internal sealed class AnalysisSummary
         var current = root;
         foreach (var segment in propertyPath.Split('.'))
         {
-            if (current.ValueKind != JsonValueKind.Object &&
-                current.ValueKind != JsonValueKind.Array)
+            if (current.ValueKind != JsonValueKind.Object)
                 return result;
             if (!current.TryGetProperty(segment, out current))
                 return result;
@@ -378,8 +377,9 @@ internal sealed class AnalysisSummary
 
     private static string ReadString(JsonElement node, string name)
     {
-        if (node.ValueKind == JsonValueKind.Undefined ||
-            node.ValueKind == JsonValueKind.Null ||
+        // TryGetProperty throws on anything but an object (an array entry that is
+        // a string, a field copied from another version's sidecar).
+        if (node.ValueKind != JsonValueKind.Object ||
             !node.TryGetProperty(name, out var child))
         {
             return string.Empty;
@@ -390,8 +390,9 @@ internal sealed class AnalysisSummary
 
     private static bool ReadBool(JsonElement node, string name)
     {
-        if (node.ValueKind == JsonValueKind.Undefined ||
-            node.ValueKind == JsonValueKind.Null ||
+        // TryGetProperty throws on anything but an object (an array entry that is
+        // a string, a field copied from another version's sidecar).
+        if (node.ValueKind != JsonValueKind.Object ||
             !node.TryGetProperty(name, out var child))
         {
             return false;
@@ -403,11 +404,12 @@ internal sealed class AnalysisSummary
 
     private static int ReadInt32(JsonElement node, string name)
     {
-        if (node.ValueKind == JsonValueKind.Undefined ||
-            node.ValueKind == JsonValueKind.Null ||
+        // TryGetProperty throws on anything but an object (an array entry that is
+        // a string, a field copied from another version's sidecar).
+        if (node.ValueKind != JsonValueKind.Object ||
             !node.TryGetProperty(name, out var child))
             return 0;
-        return child.TryGetInt32(out var n) ? n : 0;
+        return child.ValueKind == JsonValueKind.Number && child.TryGetInt32(out var n) ? n : 0;
     }
 
     private static string FirstNonEmpty(params string[] values)

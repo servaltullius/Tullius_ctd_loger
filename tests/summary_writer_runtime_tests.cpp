@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 
 #include "Analyzer.h"
+#include "AnalyzerPipeline.h"
 #include "OutputWriterInternals.h"
 #include "OutputWriterPipeline.h"
 #include "SummarySchemaV2Checks.h"
@@ -442,11 +443,46 @@ void TestIncidentManifestMatchesHelperTimestamps()
   std::filesystem::remove_all(outBase);
 }
 
+// A field of another type in a sidecar (a manifest from another version, a
+// damaged plugin scan) made nlohmann's value() throw: the analysis failed
+// with exit 3, or WriteOutputs with exit 4, leaving no summary or report.
+void TestSidecarFieldsOfAnotherTypeKeepTheOutput()
+{
+  const auto outBase = MakeTempDir(L"sidecar_types");
+  WriteText(outBase / L"SkyrimDiag_Incident_Crash_20261019_120000_123.json",
+    R"({"incident_id": 5, "capture_kind": ["crash"],
+        "capture_profile": {"base_mode": 3, "include_code_segments": "yes"},
+        "recapture_evaluation": {"triggered": "no", "kind": 1, "escalation_level": "2"}})");
+  auto r = MakeMinimalResult();
+  r.dump_path = (outBase / L"SkyrimDiag_Crash_20261019_120000_123.dmp").wstring();
+  r.out_dir = outBase.wstring();
+  r.has_plugin_scan = true;
+  r.plugin_scan_json_utf8 =
+    R"({"plugins":[{"name":"A.esp","is_active":1,"is_esl":"no"},{"name":"B.esp","is_active":true,"is_esl":true}]})";
+
+  const auto summary = BuildSummaryJson(r, outBase, L"SkyrimDiag_Crash_20261019_120000_123", false);
+  Require(summary["incident"]["incident_id"] == "" && summary["incident"]["capture_kind"] == "",
+    "a manifest field of another type is left empty");
+  Require(summary["plugin_scan"]["active_plugin_count"] == 1 && summary["plugin_scan"]["light_plugin_count"] == 1,
+    "a plugin flag of another type counts as unset");
+
+  AnalysisResult loaded{};
+  skydiag::dump_tool::LoadIncidentCaptureProfile(r.dump_path, outBase.wstring(), loaded);
+  Require(loaded.incident_capture_profile_present && loaded.incident_capture_profile_base_mode.empty() &&
+            !loaded.incident_capture_profile_code_segments,
+    "the analysis reads the same manifest with its defaults");
+  Require(loaded.incident_recapture_evaluation_present && !loaded.incident_recapture_triggered &&
+            loaded.incident_recapture_kind.empty() && loaded.incident_recapture_escalation_level == 0u,
+    "recapture fields of another type keep their defaults");
+  std::filesystem::remove_all(outBase);
+}
+
 }  // namespace
 
 int main()
 {
   try {
+    TestSidecarFieldsOfAnotherTypeKeepTheOutput();
     TestWriterOutputKeepsSchema();
     TestRedactedOutputsHoldNoUserFolder();
     TestSymbolSearchPathRedaction();

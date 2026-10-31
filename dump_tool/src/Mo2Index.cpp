@@ -1,4 +1,5 @@
 #include "Mo2Index.h"
+#include "JsonValue.h"
 #include "SkyrimDiagQSettings.h"
 #include "SkyrimDiagStringUtil.h"
 #include "Utf.h"
@@ -120,10 +121,11 @@ std::optional<std::filesystem::path> TryPickMo2ProfileDir(const std::filesystem:
   std::filesystem::path bestPath;
   std::wstring bestName;
 
-  for (const auto& ent : std::filesystem::directory_iterator(profilesDir, ec)) {
-    if (ec) {
-      break;
-    }
+  // increment(ec), not the range-for's operator++, which throws when the
+  // folder becomes unreadable mid-scan; a failed check on one entry no
+  // longer ends the scan either (increment resets ec).
+  for (std::filesystem::directory_iterator it(profilesDir, ec), end; !ec && it != end; it.increment(ec)) {
+    const auto& ent = *it;
     if (!ent.is_directory(ec)) {
       continue;
     }
@@ -328,10 +330,8 @@ std::optional<Mo2Index> TryBuildMo2IndexFromModulePaths(const std::vector<std::w
   dirByLower.reserve(512);
   nameByLower.reserve(512);
 
-  for (const auto& ent : std::filesystem::directory_iterator(idx.modsDir, ec)) {
-    if (ec) {
-      break;
-    }
+  for (std::filesystem::directory_iterator it(idx.modsDir, ec), end; !ec && it != end; it.increment(ec)) {
+    const auto& ent = *it;
     if (!ent.is_directory(ec)) {
       continue;
     }
@@ -406,7 +406,7 @@ std::optional<CapturedMo2State> TryParseCapturedMo2State(std::string_view plugin
     return std::nullopt;
   }
   const auto it = j.find("mo2");
-  if (it == j.end() || !it->is_object() || it->value("status", std::string{}) != "captured") {
+  if (it == j.end() || !it->is_object() || JsonValueOr(*it, "status", std::string{}) != "captured") {
     return std::nullopt;
   }
   const auto pathOf = [&](const char* key) {
