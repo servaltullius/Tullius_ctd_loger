@@ -480,8 +480,9 @@ static void Test_PrunesHelperLeftovers()
   std::filesystem::remove_all(dir, ec);
 }
 
-// A stats file that did not parse is kept as it was, one more copy per
-// failure: only the newest stays, and only for a day. The stats file stays.
+// A stats file or crash history that did not parse is kept as it was, one
+// more copy per failure: only the newest of each stays, and only for a day.
+// The files themselves stay.
 static void Test_PrunesCorruptBucketStatsCopies()
 {
   const auto dir = MakeTempDir();
@@ -489,12 +490,16 @@ static void Test_PrunesCorruptBucketStatsCopies()
   const auto oldest = dir / "SkyrimDiag_CrashBucketStats.json.corrupt.20260101_000000_000";
   const auto older = dir / "SkyrimDiag_CrashBucketStats.json.corrupt.20260102_000000_000";
   const auto newest = dir / "SkyrimDiag_CrashBucketStats.json.corrupt.20260103_000000_000";
-  for (const auto& file : { stats, oldest, older, newest }) {
+  const auto history = dir / "crash_history.json";
+  const auto olderHistory = dir / "crash_history.json.corrupt.20260101T000000Z";
+  const auto newestHistory = dir / "crash_history.json.corrupt.20260102T000000Z";
+  for (const auto& file : { stats, oldest, older, newest, history, olderHistory, newestHistory }) {
     WriteFile(file);
   }
   // Write times say nothing here: the name orders them.
   SetAge(newest, std::chrono::hours(2));
   SetAge(stats, std::chrono::hours(48));
+  SetAge(history, std::chrono::hours(48));
 
   ApplyRetentionToOutputDir(dir, RetentionLimits{});
 
@@ -502,11 +507,17 @@ static void Test_PrunesCorruptBucketStatsCopies()
   assert(!Exists(oldest));
   assert(!Exists(older));
   assert(Exists(newest));
+  assert(Exists(history));
+  assert(!Exists(olderHistory));
+  assert(Exists(newestHistory));
 
   SetAge(newest, std::chrono::hours(48));
+  SetAge(newestHistory, std::chrono::hours(48));
   ApplyRetentionToOutputDir(dir, RetentionLimits{});
   assert(!Exists(newest));
+  assert(!Exists(newestHistory));
   assert(Exists(stats));
+  assert(Exists(history));
 
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);

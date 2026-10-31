@@ -430,6 +430,18 @@ int main()
     "ExitProcess(",
     "An unexpected exception must be logged before the helper exits.");
   const std::string helperEntryBody = ExtractFunctionBody(helperMain, "static int RunHelper(int argc, wchar_t** argv)");
+  // Before the session log starts, wmain logs an exception to the configured
+  // OutputDir: it is known as soon as the config is read, before attaching.
+  AssertOrdered(
+    helperEntryBody,
+    "LoadConfig(",
+    "SetHelperPreSessionOutBase(",
+    "The pre-session log folder comes from the config.");
+  AssertOrdered(
+    helperEntryBody,
+    "SetHelperPreSessionOutBase(",
+    "AttachByPid(",
+    "An exception while attaching must have a log folder.");
   // Attaching reuses err and clears it on success, so the config warning
   // (an invalid ManualCaptureHotkey, say) must be kept before attaching to
   // reach the helper log.

@@ -4,10 +4,13 @@
 // NVIDIA driver, and a freeze right after an 84-minute pause.
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -601,6 +604,79 @@ void TestHistoryFollowsTheRekeyedBucket()
   fs::remove_all(dir, ec);
 }
 
+// A history this analyzer cannot read is never saved over: every earlier
+// entry would be replaced by the new one. A damaged one is set aside as it
+// was and a new one starts; one of a version it does not know stays as is.
+// A field of another type in one entry costs that field, not the history.
+void TestHistoryThatDoesNotLoadIsKept()
+{
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "skydiag_unreadable_history_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir);
+  const fs::path historyPath = dir / "crash_history.json";
+  const auto write = [](const fs::path& path, const std::string& text) {
+    std::ofstream(path, std::ios::binary) << text;
+  };
+  const auto read = [](const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  };
+  const auto append = [&](const wchar_t* dumpName, const char* timestamp) {
+    AnalysisResult r{};
+    skydiag::dump_tool::AppendCrashHistoryEntry(historyPath, (dir / dumpName).wstring(), timestamp, r);
+    return r;
+  };
+
+  const std::string damaged = "{ \"version\": 3, \"entries\": [ {";
+  write(historyPath, damaged);
+  fs::last_write_time(historyPath, fs::file_time_type::clock::now() - std::chrono::hours(72));
+  auto r = append(L"SkyrimDiag_Crash_20261031_120000_000.dmp", "2026-10-31T12:00:00Z");
+  const fs::path aside = dir / "crash_history.json.corrupt.20261031T120000Z";
+  Require(fs::exists(aside) && read(aside) == damaged, "a damaged history is set aside as it was");
+  Require(fs::file_time_type::clock::now() - fs::last_write_time(aside) < std::chrono::hours(1),
+    "the copy is dated now, so retention keeps it for a day");
+  Require(AnyStartsWith(r.diagnostics, L"[History]", L"crash_history.json.corrupt."), "the analysis names the copy");
+  skydiag::dump_tool::CrashHistory history;
+  Require(history.LoadFromFile(historyPath) && history.Size() == 1u, "a new history starts with this crash");
+
+  const std::string unknownVersion = "{\"version\": 9, \"entries\": []}";
+  write(historyPath, unknownVersion);
+  r = append(L"SkyrimDiag_Crash_20261031_120001_000.dmp", "2026-10-31T12:00:01Z");
+  Require(read(historyPath) == unknownVersion, "a history of an unknown version is not saved over");
+  Require(AnyStartsWith(r.diagnostics, L"[History]", L"version"), "the analysis says it was left as is");
+
+  write(historyPath,
+    R"({"version":3,"entries":[{"timestamp_utc":"2026-10-01T00:00:00Z","dump_file":"old.dmp","bucket_key":7,)"
+    R"("top_suspect":["x"],"candidate_keys":["a"]}]})");
+  append(L"SkyrimDiag_Crash_20261031_120002_000.dmp", "2026-10-31T12:00:02Z");
+  Require(history.LoadFromFile(historyPath) && history.Size() == 2u, "an entry with a field of another type stays");
+
+  fs::remove_all(dir, ec);
+}
+
+// A step that fails part way leaves the result as it was before it, keeping
+// its diagnostics and a line naming it; a step that works keeps its result.
+void TestFailedOptionalStepLeavesNoHalfResult()
+{
+  AnalysisResult r{};
+  r.crash_logger_version = L"v1-27-0-0";
+  skydiag::dump_tool::RunOptionalStep(L"Crash Logger log", r, [&] {
+    r.crash_logger_log_path = L"C:\\SKSE\\crash-2026-10-31-12-00-00.log";
+    r.crash_logger_version = L"half read";
+    r.diagnostics.push_back(L"[CrashLogger] paired");
+    throw std::runtime_error("bad frame");
+  });
+  Require(r.crash_logger_log_path.empty() && r.crash_logger_version == L"v1-27-0-0",
+    "a failed step leaves no half result");
+  Require(r.diagnostics.size() == 2u && r.diagnostics[0] == L"[CrashLogger] paired" &&
+            r.diagnostics[1] == L"[Optional input] Crash Logger log skipped: bad frame",
+    "its own diagnostics stay, and a line names it");
+  skydiag::dump_tool::RunOptionalStep(L"plugin scan", r, [&] { r.has_plugin_scan = true; });
+  Require(r.has_plugin_scan && r.diagnostics.size() == 2u, "a step that works keeps its result");
+}
+
 // Under a lock-owner state the main thread's stack names no candidate, so the
 // JSON, the report and the viewer's headline cannot lead with a bystander.
 void TestLockOwnerStatesHaveNoStackCandidates()
@@ -782,6 +858,8 @@ int main()
     TestFreezesGroupByTheMainThreadWait();
     TestLockOwnerFreezesGroupByTheOwner();
     TestHistoryFollowsTheRekeyedBucket();
+    TestHistoryThatDoesNotLoadIsKept();
+    TestFailedOptionalStepLeavesNoHalfResult();
     TestLockOwnerStatesHaveNoStackCandidates();
     TestBystanderStackIsNotRecordedInHistory();
     TestSummaryKeepsPluginCountsOnly();

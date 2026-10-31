@@ -195,10 +195,15 @@ def find_release_notes(repo_root: Path, tag: str) -> str | None:
     return None
 
 
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
 def has_release_text(notes: str) -> bool:
-    """Whether notes say anything beyond headings: an empty draft or a bare
-    CHANGELOG heading would publish a release page with no notes."""
-    return any(line.strip() and not _HEADING.match(line) for line in _LINE_END.split(notes))
+    """Whether notes say anything beyond headings and HTML comments: an empty
+    draft, a bare CHANGELOG heading or a template's comments would publish a
+    release page with no notes."""
+    visible = _HTML_COMMENT.sub("", notes)
+    return any(line.strip() and not _HEADING.match(line) for line in _LINE_END.split(visible))
 
 
 def resolve_release_notes(repo_root: Path, tag: str) -> str:
@@ -231,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         "--strict",
         action="store_true",
         help="fail instead of publishing a one-line placeholder when no draft or CHANGELOG section exists, "
-        "or when the one found has no text beyond headings",
+        "or when the one found has no text beyond headings and comments",
     )
     args = parser.parse_args(argv)
 
@@ -242,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
     notes = find_release_notes(root, args.tag)
     if args.strict and notes is not None and not has_release_text(notes):
         print(
-            f"The release notes for {args.tag} have no text beyond headings: fill in the draft "
+            f"The release notes for {args.tag} have no text beyond headings and comments: fill in the draft "
             "or the CHANGELOG.md section",
             file=sys.stderr,
         )

@@ -7,6 +7,7 @@
 #include "MainThreadWait.h"
 #include "OutputWriterInternals.h"
 #include "ScopedHistoryFileLock.h"
+#include "SkyrimDiagLongPath.h"
 #include "Utf.h"
 
 #include <algorithm>
@@ -225,6 +226,42 @@ void LoadCrashHistoryContext(
   }
 }
 
+namespace {
+
+// A history that does not parse is kept as crash_history.json.corrupt.<time>,
+// as the helper keeps a damaged bucket stats file, and a new one starts (the
+// helper's retention keeps the newest copy for a day). A rename keeps the old
+// write time, which retention ages the copy by, so it is set to now.
+bool SetDamagedHistoryAside(
+  const std::filesystem::path& historyPath,
+  const std::string& analysisTimestamp,
+  AnalysisResult& out)
+{
+  std::string stamp;
+  for (const char c : analysisTimestamp) {
+    if ((c >= '0' && c <= '9') || c == 'T' || c == 'Z') {
+      stamp.push_back(c);
+    }
+  }
+  auto aside = historyPath;
+  aside += ".corrupt." + (stamp.empty() ? std::string("0") : stamp);
+  std::error_code ec;
+  std::filesystem::rename(skydiag::PathForIo(historyPath), skydiag::PathForIo(aside), ec);
+  if (ec) {
+    out.diagnostics.push_back(
+      L"[History] crash_history.json does not parse and could not be set aside (error " + std::to_wstring(ec.value()) +
+      L"); it is left as is, and this crash is not added");
+    return false;
+  }
+  std::error_code timeEc;
+  std::filesystem::last_write_time(skydiag::PathForIo(aside), std::filesystem::file_time_type::clock::now(), timeEc);
+  out.diagnostics.push_back(
+    L"[History] crash_history.json does not parse; kept as " + aside.filename().wstring() + L", and a new history started");
+  return true;
+}
+
+}  // namespace
+
 void AppendCrashHistoryEntry(
   const std::filesystem::path& historyPath,
   const std::wstring& dumpPath,
@@ -241,8 +278,26 @@ void AppendCrashHistoryEntry(
     return;
   }
 
+  // Saving after a failed load would replace every earlier entry with this one.
   CrashHistory history;
-  history.LoadFromFile(historyPath);
+  switch (history.Load(historyPath)) {
+    case CrashHistoryLoad::kLoaded:
+    case CrashHistoryLoad::kMissing:
+      break;
+    case CrashHistoryLoad::kDamaged:
+      if (!SetDamagedHistoryAside(historyPath, analysisTimestamp, out)) {
+        return;
+      }
+      break;
+    case CrashHistoryLoad::kUnreadable:
+      out.diagnostics.push_back(L"[History] crash_history.json could not be read; it is left as is, and this crash is not added");
+      return;
+    case CrashHistoryLoad::kUnsupportedVersion:
+      out.diagnostics.push_back(
+        L"[History] crash_history.json has a version this analyzer does not know; it is left as is, and this crash is "
+        L"not added");
+      return;
+  }
 
   CrashHistoryEntry entry{};
   entry.timestamp_utc = analysisTimestamp;

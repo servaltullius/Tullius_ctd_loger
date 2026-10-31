@@ -50,6 +50,9 @@ static int RunHelper(int argc, wchar_t** argv)
 
   std::wstring err;
   auto cfg = skydiag::helper::LoadConfig(&err);
+  // An exception before the session log starts (attaching, say) still gets
+  // its line (wmain).
+  skydiag::helper::internal::SetHelperPreSessionOutBase(skydiag::helper::internal::ConfiguredOutputBase(cfg));
   const bool runningUnderWine = skydiag::helper::internal::IsRunningUnderWine();
   const bool wineViewerPolicyApplied = skydiag::helper::ApplyWineViewerPolicy(&cfg, runningUnderWine);
   SetHelperLogRotation(cfg.maxHelperLogBytes, cfg.maxHelperLogFiles);
@@ -206,8 +209,10 @@ static int RunHelper(int argc, wchar_t** argv)
 // Nothing above RunHelperLoop caught an exception: an unexpected one (out of
 // memory, a bug) ended the helper with no line in its log, as it runs with
 // no console, and with the retention thread still joinable std::terminate
-// followed. The cause now goes to the session log, and the process ends at
-// once; the plugin starts a new helper, which picks up a frozen crash.
+// followed. The cause now goes to the session log (before the session, to
+// the configured OutputDir's log; only an exception reading the config has
+// nowhere to go), and the process ends at once; the plugin starts a new
+// helper, which picks up a frozen crash.
 int wmain(int argc, wchar_t** argv)
 {
   std::wstring cause;

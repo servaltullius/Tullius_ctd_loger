@@ -457,26 +457,6 @@ void CapPointerScanSuspectConfidence(AnalysisResult& out)
 
 // ===== Main analysis orchestrator =====
 
-namespace {
-
-// An optional input from outside the dump (the plugin scan and MO2 state,
-// the Crash Logger log, the incident manifest, the crash history) that
-// cannot be read leaves its part out with a diagnostics line instead of
-// failing the whole analysis (exit 3) over one field of another type.
-template <class Step>
-void RunOptionalStep(const wchar_t* name, AnalysisResult& out, Step&& step)
-{
-  try {
-    step();
-  } catch (const std::exception& ex) {
-    out.diagnostics.push_back(std::wstring(L"[Optional input] ") + name + L" skipped: " + Utf8ToWide(ex.what()));
-  } catch (...) {
-    out.diagnostics.push_back(std::wstring(L"[Optional input] ") + name + L" skipped");
-  }
-}
-
-}  // namespace
-
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
 {
   out = AnalysisResult{};

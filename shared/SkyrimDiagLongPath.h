@@ -431,6 +431,11 @@ inline bool CreateDirectoriesForIo(const std::filesystem::path& dir, std::error_
   const auto ioDir = PathForIo(dir);
 #ifdef _WIN32
   if (long_path_detail::IsExtended(ioDir)) {
+    // Usually there already (the helper log calls this for every line): one
+    // handle, not a CreateDirectoryW and a handle for every folder of it.
+    if (long_path_detail::IsDirectoryByHandle(ioDir)) {
+      return true;
+    }
     const std::wstring& text = ioDir.native();
     const std::size_t root = long_path_detail::RootLength(text);
     for (std::size_t pos = root; pos < text.size();) {

@@ -1,4 +1,5 @@
 #include "WctTypes.h"
+#include "JsonValue.h"
 
 #include <algorithm>
 #include <optional>
@@ -36,8 +37,8 @@ ThreadWaitState ReadOwnWaitState(const nlohmann::json& thread, std::uint32_t tid
     return {};
   }
   ThreadWaitState state{};
-  state.object_status = node.value("objectStatus", 0u);
-  state.wait_start_tick = thIt->value("waitTime", 0ull);
+  state.object_status = JsonValueOr(node, "objectStatus", 0u);
+  state.wait_start_tick = JsonValueOr(*thIt, "waitTime", 0ull);
   return state;
 }
 
@@ -51,7 +52,7 @@ WctLongestWaiter FindLongestWaiter(const nlohmann::json& threads)
     if (!t.is_object()) {
       continue;
     }
-    const auto tid = t.value("tid", 0u);
+    const auto tid = JsonValueOr(t, "tid", 0u);
     const auto state = ReadOwnWaitState(t, tid);
     waiter.Observe(tid, state.object_status, state.wait_start_tick);
   }
@@ -70,7 +71,7 @@ std::optional<bool> LongestWaiterConsensusFromPasses(const nlohmann::json& j)
   WctLongestWaiter waiters[2];
   for (std::size_t i = 0; i < 2u; ++i) {
     const auto& pass = (*passesIt)[i];
-    if (!pass.is_object() || !pass.value("capture_usable", false)) {
+    if (!pass.is_object() || !JsonValueOr(pass, "capture_usable", false)) {
       return false;
     }
     const auto threadsIt = pass.find("threads");
@@ -88,7 +89,7 @@ const nlohmann::json* FindThreadEntry(const nlohmann::json& threads, std::uint32
     return nullptr;
   }
   for (const auto& t : threads) {
-    if (t.is_object() && t.value("tid", 0u) == tid) {
+    if (t.is_object() && JsonValueOr(t, "tid", 0u) == tid) {
       return &t;
     }
   }
@@ -138,7 +139,7 @@ struct ChainLock
 ChainLock ReadChainLock(const nlohmann::json& threads, std::uint32_t waiterTid)
 {
   const auto* entry = FindThreadEntry(threads, waiterTid);
-  if (!entry || entry->value("isCycle", false)) {
+  if (!entry || JsonValueOr(*entry, "isCycle", false)) {
     return {};
   }
   const auto nodesIt = entry->find("nodes");
@@ -150,9 +151,9 @@ ChainLock ReadChainLock(const nlohmann::json& threads, std::uint32_t waiterTid)
   if (!object.is_object()) {
     return {};
   }
-  const auto type = object.value("objectType", 0u);
+  const auto type = JsonValueOr(object, "objectType", 0u);
   if ((type != kWctObjectTypeCriticalSection && type != kWctObjectTypeMutex) ||
-      object.value("objectStatus", 0u) != kWctObjectStatusOwned) {
+      JsonValueOr(object, "objectStatus", 0u) != kWctObjectStatusOwned) {
     return {};
   }
   ChainLock lock{};
@@ -161,7 +162,7 @@ ChainLock ReadChainLock(const nlohmann::json& threads, std::uint32_t waiterTid)
   const auto waiterPid = NodeProcessId((*nodesIt)[0]);
   for (std::size_t i = 2; i < nodesIt->size(); ++i) {
     const auto& node = (*nodesIt)[i];
-    if (!node.is_object() || node.value("objectType", 0u) != kWctObjectTypeThread) {
+    if (!node.is_object() || JsonValueOr(node, "objectType", 0u) != kWctObjectTypeThread) {
       continue;
     }
     const auto pid = NodeProcessId(node);
@@ -187,7 +188,7 @@ bool IsBlockedWithoutWaitObject(const nlohmann::json& threads, std::uint32_t tid
   const auto nodesIt = entry->find("nodes");
   return nodesIt != entry->end() && nodesIt->is_array() && nodesIt->size() == 1u &&
          NodeThreadId(nodesIt->front()) == tid &&
-         nodesIt->front().value("objectStatus", 0u) == kWctObjectStatusBlocked;
+         JsonValueOr(nodesIt->front(), "objectStatus", 0u) == kWctObjectStatusBlocked;
 }
 
 }  // namespace
@@ -223,7 +224,7 @@ std::optional<WctLockOwner> FindWctLockOwner(std::string_view wctJsonUtf8, std::
       bool agree = true;
       for (std::size_t i = 0; i < 2u; ++i) {
         const auto& pass = (*passesIt)[i];
-        if (!pass.is_object() || !pass.value("capture_usable", false)) {
+        if (!pass.is_object() || !JsonValueOr(pass, "capture_usable", false)) {
           agree = false;
           continue;
         }
@@ -264,11 +265,11 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
 
     WctFreezeSummary summary{};
     summary.has = true;
-    summary.capture_passes = j.value("capture_passes", 0u);
-    summary.cycle_consensus = j.value("cycle_consensus", false);
-    summary.consistent_loading_signal = j.value("consistent_loading_signal", false);
+    summary.capture_passes = JsonValueOr(j, "capture_passes", 0u);
+    summary.cycle_consensus = JsonValueOr(j, "cycle_consensus", false);
+    summary.consistent_loading_signal = JsonValueOr(j, "consistent_loading_signal", false);
     summary.longest_wait_tid_consensus =
-      LongestWaiterConsensusFromPasses(j).value_or(j.value("longest_wait_tid_consensus", false));
+      LongestWaiterConsensusFromPasses(j).value_or(JsonValueOr(j, "longest_wait_tid_consensus", false));
 
     const auto repeatedCycleIt = j.find("repeated_cycle_tids");
     if (repeatedCycleIt != j.end() && repeatedCycleIt->is_array()) {
@@ -290,8 +291,8 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
         if (!t.is_object()) {
           continue;
         }
-        const auto tid = t.value("tid", 0u);
-        if (t.value("isCycle", false)) {
+        const auto tid = JsonValueOr(t, "tid", 0u);
+        if (JsonValueOr(t, "isCycle", false)) {
           summary.cycles++;
           if (tid != 0u) {
             summary.cycle_thread_ids.push_back(tid);
@@ -338,15 +339,15 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
     const auto capIt = j.find("capture");
     if (capIt != j.end() && capIt->is_object()) {
       summary.has_capture = true;
-      summary.capture_kind = capIt->value("kind", std::string{});
-      summary.secondsSinceHeartbeat = capIt->value("secondsSinceHeartbeat", 0.0);
-      summary.thresholdSec = capIt->value("thresholdSec", 0u);
-      summary.isLoading = capIt->value("isLoading", false);
-      summary.pss_snapshot_requested = capIt->value("pss_snapshot_requested", false);
-      summary.pss_snapshot_used = capIt->value("pss_snapshot_used", false);
-      summary.pss_snapshot_capture_ms = capIt->value("pss_snapshot_capture_ms", 0u);
-      summary.pss_snapshot_status = capIt->value("pss_snapshot_status", std::string{});
-      summary.dump_transport = capIt->value("dump_transport", std::string{});
+      summary.capture_kind = JsonValueOr(*capIt, "kind", std::string{});
+      summary.secondsSinceHeartbeat = JsonValueOr(*capIt, "secondsSinceHeartbeat", 0.0);
+      summary.thresholdSec = JsonValueOr(*capIt, "thresholdSec", 0u);
+      summary.isLoading = JsonValueOr(*capIt, "isLoading", false);
+      summary.pss_snapshot_requested = JsonValueOr(*capIt, "pss_snapshot_requested", false);
+      summary.pss_snapshot_used = JsonValueOr(*capIt, "pss_snapshot_used", false);
+      summary.pss_snapshot_capture_ms = JsonValueOr(*capIt, "pss_snapshot_capture_ms", 0u);
+      summary.pss_snapshot_status = JsonValueOr(*capIt, "pss_snapshot_status", std::string{});
+      summary.dump_transport = JsonValueOr(*capIt, "dump_transport", std::string{});
       summary.suggestsHang =
         (summary.capture_kind == "hang") ||
         (summary.thresholdSec > 0u && summary.secondsSinceHeartbeat >= static_cast<double>(summary.thresholdSec));
@@ -390,7 +391,7 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
       if (!t.is_object()) {
         continue;
       }
-      const auto tid = t.value("tid", 0u);
+      const auto tid = JsonValueOr(t, "tid", 0u);
       if (tid == 0u) {
         continue;
       }
@@ -406,7 +407,7 @@ std::vector<std::uint32_t> ExtractWctCandidateThreadIds(std::string_view wctJson
           if (thIt == node.end() || !thIt->is_object()) {
             continue;
           }
-          waitTime = std::max<std::uint64_t>(waitTime, thIt->value("waitTime", 0ull));
+          waitTime = std::max<std::uint64_t>(waitTime, JsonValueOr(*thIt, "waitTime", 0ull));
         }
       }
       nonCycle.push_back(Row{ tid, waitTime });
@@ -457,7 +458,7 @@ std::uint32_t CountWctThreadsWithStableContextSwitches(
     const std::unordered_set<std::uint32_t> targets(targetTids.begin(), targetTids.end());
     const auto readPass = [&](const nlohmann::json& pass) {
       std::unordered_map<std::uint32_t, std::uint64_t> switchesByTid;
-      if (!pass.is_object() || !pass.value("capture_usable", false)) {
+      if (!pass.is_object() || !JsonValueOr(pass, "capture_usable", false)) {
         return switchesByTid;
       }
       const auto threadsIt = pass.find("threads");
@@ -468,7 +469,7 @@ std::uint32_t CountWctThreadsWithStableContextSwitches(
         if (!thread.is_object()) {
           continue;
         }
-        const std::uint32_t tid = thread.value("tid", 0u);
+        const std::uint32_t tid = JsonValueOr(thread, "tid", 0u);
         if (tid == 0u || !targets.contains(tid)) {
           continue;
         }
@@ -530,7 +531,7 @@ std::vector<std::uint32_t> FindWctThreadsRunningInBothPasses(
     }
     // The thread's own node (listed first) is Running in this usable pass.
     const auto runningIn = [](const nlohmann::json& pass, std::uint32_t tid) {
-      if (!pass.is_object() || !pass.value("capture_usable", false)) {
+      if (!pass.is_object() || !JsonValueOr(pass, "capture_usable", false)) {
         return false;
       }
       const auto threadsIt = pass.find("threads");
@@ -546,7 +547,7 @@ std::vector<std::uint32_t> FindWctThreadsRunningInBothPasses(
         return false;
       }
       const auto& node = nodesIt->front();
-      return NodeThreadId(node) == tid && node.value("objectStatus", 0u) == kWctObjectStatusRunning;
+      return NodeThreadId(node) == tid && JsonValueOr(node, "objectStatus", 0u) == kWctObjectStatusRunning;
     };
     for (const auto tid : targetTids) {
       if (tid == 0u || std::find(running.begin(), running.end(), tid) != running.end()) {

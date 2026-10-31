@@ -1,4 +1,5 @@
 #include "PluginRules.h"
+#include "JsonValue.h"
 #include "SkyrimDiagStringUtil.h"
 
 #include <algorithm>
@@ -184,11 +185,11 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
     }
 
     ParsedPluginScan parsed{};
-    parsed.game_exe_version = j.value("game_exe_version", "");
-    parsed.plugins_source = j.value("plugins_source", "");
-    parsed.mo2_detected = j.value("mo2_detected", false);
-    parsed.implicit_plugins_included = j.value("implicit_plugins_included", false);
-    parsed.implicit_masters_verified = j.value("implicit_masters_verified", false);
+    parsed.game_exe_version = JsonValueOr(j, "game_exe_version", std::string{});
+    parsed.plugins_source = JsonValueOr(j, "plugins_source", std::string{});
+    parsed.mo2_detected = JsonValueOr(j, "mo2_detected", false);
+    parsed.implicit_plugins_included = JsonValueOr(j, "implicit_plugins_included", false);
+    parsed.implicit_masters_verified = JsonValueOr(j, "implicit_masters_verified", false);
 
     if (auto it = j.find("plugins"); it != j.end() && it->is_array()) {
       parsed.plugins.reserve(it->size());
@@ -197,11 +198,11 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
           continue;
         }
         PluginEntryInfo info{};
-        info.filename = p.value("filename", "");
-        info.header_version = p.value("header_version", 0.0f);
-        info.is_esl = p.value("is_esl", false);
-        info.is_active = p.value("is_active", false);
-        info.slot_type_known = p.value("slot_type_known", true);
+        info.filename = JsonValueOr(p, "filename", std::string{});
+        info.header_version = JsonValueOr(p, "header_version", 0.0f);
+        info.is_esl = JsonValueOr(p, "is_esl", false);
+        info.is_active = JsonValueOr(p, "is_active", false);
+        info.slot_type_known = JsonValueOr(p, "slot_type_known", true);
         if (auto itMasters = p.find("masters"); itMasters != p.end() && itMasters->is_array()) {
           for (const auto& m : *itMasters) {
             if (m.is_string()) {
@@ -215,22 +216,22 @@ bool ParsePluginScanJson(std::string_view jsonUtf8, ParsedPluginScan* out)
 
     if (auto it = j.find("skse_log"); it != j.end() && it->is_object()) {
       auto& log = parsed.skse_log;
-      log.status = it->value("status", "");
-      log.skse_version = it->value("skse_version", "");
-      log.checked_count = it->value("checked_count", 0u);
-      log.loaded_count = it->value("loaded_count", 0u);
-      log.issue_count = it->value("issue_count", 0u);
-      log.time_checked = it->value("time_checked", false);
+      log.status = JsonValueOr(*it, "status", std::string{});
+      log.skse_version = JsonValueOr(*it, "skse_version", std::string{});
+      log.checked_count = JsonValueOr(*it, "checked_count", 0u);
+      log.loaded_count = JsonValueOr(*it, "loaded_count", 0u);
+      log.issue_count = JsonValueOr(*it, "issue_count", 0u);
+      log.time_checked = JsonValueOr(*it, "time_checked", false);
       if (auto itIssues = it->find("issues"); itIssues != it->end() && itIssues->is_array()) {
         for (const auto& issue : *itIssues) {
           if (!issue.is_object()) {
             continue;
           }
           SkseLogIssueInfo info{};
-          info.dll_name = issue.value("dll", "");
-          info.plugin_name = issue.value("name", "");
-          info.status = issue.value("status", "");
-          info.error_code = issue.value("code", static_cast<std::int64_t>(0));
+          info.dll_name = JsonValueOr(issue, "dll", std::string{});
+          info.plugin_name = JsonValueOr(issue, "name", std::string{});
+          info.status = JsonValueOr(issue, "status", std::string{});
+          info.error_code = JsonValueOr(issue, "code", static_cast<std::int64_t>(0));
           if (!info.dll_name.empty()) {
             log.issues.push_back(std::move(info));
           }
@@ -488,9 +489,9 @@ bool PluginRules::LoadFromJson(const std::filesystem::path& jsonPath)
       rule.full_plugin_count_gte = cond.full_plugin_count_gte;
 
       const auto& diag = *itDiagnosis;
-      rule.cause_ko = Utf8ToWide(diag.value("cause_ko", ""));
-      rule.cause_en = Utf8ToWide(diag.value("cause_en", ""));
-      rule.confidence = AsciiLower(diag.value("confidence", ""));
+      rule.cause_ko = Utf8ToWide(JsonValueOr(diag, "cause_ko", std::string{}));
+      rule.cause_en = Utf8ToWide(JsonValueOr(diag, "cause_en", std::string{}));
+      rule.confidence = AsciiLower(JsonValueOr(diag, "confidence", std::string{}));
 
       if (auto it = diag.find("recommendations_ko"); it != diag.end() && it->is_array()) {
         rule.recommendations_ko.reserve(it->size());
