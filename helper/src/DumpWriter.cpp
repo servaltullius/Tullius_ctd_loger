@@ -18,6 +18,7 @@
 #include "CrashObjectMemory.h"
 #include "GpuMemory.h"
 #include "HangObjectMemory.h"
+#include "HookPageRecord.h"
 #include "ModuleUnwindMemory.h"
 #include "SkyrimDiagProtocol.h"
 #include "StackCodeMemory.h"
@@ -537,7 +538,7 @@ bool WriteDumpWithStreams(
   }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
-  streams.reserve(4);
+  streams.reserve(5);
 
   MINIDUMP_USER_STREAM s1{};
   s1.Type = skydiag::protocol::kMinidumpUserStream_Blackbox;
@@ -570,6 +571,16 @@ bool WriteDumpWithStreams(
     s4.BufferSize = static_cast<ULONG>(gpuMemoryJson.size());
     s4.Buffer = const_cast<char*>(gpuMemoryJson.data());
     streams.push_back(s4);
+  }
+
+  // ADR-0024: a jump into freed code finds here whose hook stub it was.
+  const std::string hookPagesJson = internal::HookPages().ToJson(GetTickCount64());
+  MINIDUMP_USER_STREAM s5{};
+  if (!hookPagesJson.empty()) {
+    s5.Type = skydiag::protocol::kMinidumpUserStream_HookPages;
+    s5.BufferSize = static_cast<ULONG>(hookPagesJson.size());
+    s5.Buffer = const_cast<char*>(hookPagesJson.data());
+    streams.push_back(s5);
   }
 
   MINIDUMP_USER_STREAM_INFORMATION usi{};

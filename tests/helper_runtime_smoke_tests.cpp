@@ -3,7 +3,9 @@
 #include <shellapi.h>
 
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <exception>
 #include <string>
@@ -17,6 +19,7 @@
 #include "HelperLog.h"
 #include "HelperMainInternal.h"
 #include "HelperRuntimeTestUtils.h"
+#include "HookPageRecord.h"
 #include "PendingCrashAnalysis.h"
 #include "ProcessUtil.h"
 #include "RetentionWorker.h"
@@ -175,6 +178,77 @@ void TestDumpJsonForFileReplacesInvalidUtf8()
   const nlohmann::json j = { { "name", std::string("bad\xFF") } };
   const auto text = skydiag::helper::internal::DumpJsonForFile(j);
   Require(text.find("bad\xEF\xBF\xBD") != std::string::npos, "invalid UTF-8 is replaced, not thrown on");
+}
+
+// ADR-0024: a page a later scan no longer finds keeps its last content (a
+// freed hook page is what a crash needs), a page over it replaces it, and
+// the dump stream holds both.
+void TestHookPageRecordKeepsAFreedPage()
+{
+  using skydiag::helper::internal::RecordedHookPage;
+  using skydiag::helper::internal::RecordedHookStub;
+  const auto page = [](std::uint64_t base, std::uint64_t size, const wchar_t* module) {
+    RecordedHookPage p{};
+    p.base = base;
+    p.size = size;
+    RecordedHookStub stub{};
+    stub.length = 14;
+    stub.kind = "jmp_abs";
+    stub.target = 0x7FFA00001234ull;
+    stub.module = module;
+    stub.moduleOffset = 0x1234;
+    p.stubs.push_back(stub);
+    return p;
+  };
+  skydiag::helper::internal::HookPageRecord record;
+  Require(record.ToJson(0).empty(), "no stream before the first scan");
+  record.Merge({ page(0x10000, 0x1000, L"Owner.dll"), page(0x20000, 0x1000, L"Other.dll") }, 1000);
+  record.Merge({ page(0x20000, 0x1000, L"Other.dll"), RecordedHookPage{ 0x30000, 0x1000 } }, 31000);
+  Require(record.Scans() == 2u && record.PageCount() == 2u, "a page without stubs is not recorded");
+  auto json = nlohmann::json::parse(record.ToJson(41000));
+  Require(json["scans"] == 2 && json["last_scan_ms_ago"] == 10000, "the stream says when it was read");
+  Require(json["pages"][0]["base"] == "0x10000" && json["pages"][0]["last_scan"] == 1 &&
+            json["pages"][0]["last_seen_ms_ago"] == 40000 && json["pages"][0]["stubs"][0]["module"] == "Owner.dll",
+    "the page gone since the first scan keeps its stubs");
+  Require(json["pages"][1]["first_scan"] == 1 && json["pages"][1]["last_scan"] == 2, "a page seen again keeps its first scan");
+
+  // Freed and its memory allocated again: a page over it replaces it.
+  record.Merge({ page(0xF000, 0x2000, L"Newer.dll") }, 61000);
+  json = nlohmann::json::parse(record.ToJson(61000));
+  Require(json["pages"].size() == 2u && json["pages"][0]["base"] == "0xF000" &&
+            json["pages"][0]["stubs"][0]["module"] == "Newer.dll" && json["pages"][0]["first_scan"] == 3,
+    "a page recorded over an old one replaces it");
+}
+
+// The scan finds a jump stub in this process's own executable private memory
+// and names the module it jumps into.
+void TestScanFindsAHookStubInThisProcess()
+{
+  auto* page = static_cast<std::uint8_t*>(VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+  Require(page != nullptr, "VirtualAlloc failed");
+  HMODULE self = GetModuleHandleW(nullptr);
+  const auto target = reinterpret_cast<std::uint64_t>(self) + 0x1000u;
+  page[100] = 0xFF;
+  page[101] = 0x25;
+  std::memcpy(page + 106, &target, sizeof(target));
+
+  const auto pages = skydiag::helper::internal::ScanHookPages(GetCurrentProcess());
+  VirtualFree(page, 0, MEM_RELEASE);
+  wchar_t selfPath[MAX_PATH]{};
+  GetModuleFileNameW(nullptr, selfPath, MAX_PATH);
+  const auto selfName = std::filesystem::path(selfPath).filename().wstring();
+  bool found = false;
+  for (const auto& recorded : pages) {
+    if (recorded.base != reinterpret_cast<std::uint64_t>(page)) {
+      continue;
+    }
+    found = true;
+    Require(recorded.stubs.size() == 1u && recorded.stubs[0].offset == 100u && recorded.stubs[0].target == target,
+      "the stub is read where it was written");
+    Require(_wcsicmp(recorded.stubs[0].module.c_str(), selfName.c_str()) == 0 && recorded.stubs[0].moduleOffset == 0x1000u,
+      "its target is named by module and offset");
+  }
+  Require(found, "the scan finds the executable page with a stub");
 }
 
 void TestWorkingDirectoryForLongFolders()
@@ -829,6 +903,8 @@ int main()
   try {
     TestQuoteArgRoundTripsThroughCommandLineToArgvW();
     TestDumpJsonForFileReplacesInvalidUtf8();
+    TestHookPageRecordKeepsAFreedPage();
+    TestScanFindsAHookStubInThisProcess();
     TestCrashLoggerIniPathDecodesWithoutThrowing();
     TestWorkingDirectoryForLongFolders();
     TestHandleCrashEventTick_WritesCrashArtifacts();

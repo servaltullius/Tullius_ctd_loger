@@ -26,3 +26,4 @@ ADR index:
 - `0021-engine-lock-deadlocks.md`
 - `0022-forced-close-errors.md`
 - `0023-dump-module-memory-scope.md`
+- `0024-freed-hook-page-record.md`

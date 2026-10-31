@@ -670,6 +670,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.fault_unloaded_module.clear();
     out.fault_instruction = {};
     out.hook_stub_race = {};
+    out.freed_hook = {};
     out.crash_logger_object_types.clear();
     out.inferred_mod_name.clear();
     out.graphics_diag.reset();

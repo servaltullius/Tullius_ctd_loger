@@ -111,6 +111,8 @@ std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en
       labels.push_back(en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈");
     } else if (family == "hook_stub_owner") {
       labels.push_back(en ? L"hook stub owner" : L"후킹 점프 코드 주인");
+    } else if (family == "freed_hook_owner") {
+      labels.push_back(en ? L"freed hook owner" : L"해제된 후킹 코드 주인");
     }
   }
   return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
@@ -1041,7 +1043,21 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           : (hangPrefix + L" 덤프만으로 후보를 특정하기 어렵습니다. (신뢰도: 낮음)");
       }
     } else {
-      if (FaultJumpedIntoFreedCode(r)) {
+      if (FaultJumpedIntoFreedCode(r) && r.freed_hook.detected && !r.freed_hook.owner_module.empty()) {
+        // The helper's record names whose hook the freed code was (ADR-0024).
+        const auto& freed = r.freed_hook;
+        const std::wstring freedCaller = FaultCallSiteModule(r);
+        const std::wstring owner = freed.owner_mod_name.empty()
+          ? freed.owner_module
+          : (freed.owner_mod_name + L" (" + freed.owner_module + L")");
+        summary = en
+          ? (L"The crash jumped into a hook of " + owner + L" after it had been freed (recorded while the game ran)." +
+              (freedCaller.empty() ? std::wstring{} : (L" " + freedCaller + L" only called it.")) +
+              (freed.exact ? L" (Confidence: Medium)" : L" (Confidence: Low)"))
+          : (L"해제된 " + owner + L"의 후킹 코드로 이동하다가 튕겼습니다(게임 중 기록)." +
+              (freedCaller.empty() ? std::wstring{} : (L" " + freedCaller + L"은(는) 그 코드를 호출했을 뿐입니다.")) +
+              (freed.exact ? L" (신뢰도: 중간)" : L" (신뢰도: 낮음)"));
+      } else if (FaultJumpedIntoFreedCode(r)) {
         // The caller only used the freed address (FaultJumpedIntoFreedCode).
         const std::wstring freedCaller = FaultCallSiteModule(r);
         summary = en

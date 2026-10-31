@@ -62,6 +62,11 @@ internal sealed partial class MainWindowViewModel
             return T("Crash ran its unfinished hook stub", "다 써지지 않은 후킹 코드에서 크래시");
         }
 
+        if (HasFamily(candidate, "freed_hook_owner"))
+        {
+            return T("Crash jumped into its freed hook code", "해제된 후킹 코드로 이동해 크래시");
+        }
+
         if (HasFamily(candidate, "hang_thread_group"))
         {
             return T("Main-thread + stable worker group", "메인 스레드 + 정지 워커 그룹");
@@ -370,6 +375,7 @@ internal sealed partial class MainWindowViewModel
         "hang_thread_group" => T("stable same-module thread group", "동일 모듈 정지 스레드 그룹"),
         "modal_dialog_owner" => T("modal dialog owner", "modal 대화상자 호출 모듈"),
         "hook_stub_owner" => T("hook stub owner", "후킹 점프 코드 주인"),
+        "freed_hook_owner" => T("freed hook owner", "해제된 후킹 코드 주인"),
         "resource_provider" => T("near resource provider", "인접 리소스 제공자"),
         "history_repeat" => T("history repeat", "반복 이력"),
         "first_chance_context" => T("repeated first-chance context", "반복 선행 예외(first-chance)"),

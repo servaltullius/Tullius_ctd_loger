@@ -27,6 +27,7 @@ constexpr const char* kFamilyFirstChance = "first_chance_context";
 constexpr const char* kFamilyHangThreadGroup = "hang_thread_group";
 constexpr const char* kFamilyModalDialogOwner = "modal_dialog_owner";
 constexpr const char* kFamilyHookStubOwner = "hook_stub_owner";
+constexpr const char* kFamilyFreedHookOwner = "freed_hook_owner";
 constexpr std::uint32_t kCrossValidatedScoreThreshold = 10u;
 constexpr std::uint32_t kQualifiedStackWeightThreshold = 4u;
 constexpr std::uint32_t kFrameConflictWeightThreshold = 6u;
@@ -95,7 +96,8 @@ bool HasStrongFamily(const ActionableCandidate& candidate)
          HasFamily(candidate, kFamilyStack) ||
          HasFamily(candidate, kFamilyHangThreadGroup) ||
          HasFamily(candidate, kFamilyModalDialogOwner) ||
-         HasFamily(candidate, kFamilyHookStubOwner);
+         HasFamily(candidate, kFamilyHookStubOwner) ||
+         HasFamily(candidate, kFamilyFreedHookOwner);
 }
 
 bool HasQualifiedCrossValidation(const CandidateRow& row)
@@ -207,6 +209,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool hasStack = HasFamily(candidate, kFamilyStack);
   const bool hasModalDialogOwner = HasFamily(candidate, kFamilyModalDialogOwner);
   const bool hasHookStubOwner = HasFamily(candidate, kFamilyHookStubOwner);
+  const bool hasFreedHookOwner = HasFamily(candidate, kFamilyFreedHookOwner);
   const bool conflict = candidate.has_conflict;
   const std::size_t nonBoostFamilyCount = CountNonBoostFamilies(*row);
   const std::uint32_t coreScore = CoreRowScore(*row);
@@ -238,6 +241,15 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
     // before it was complete. One signal, but not a guess from the stack.
     candidate.status_id = "related";
     candidate.confidence_level = i18n::ConfidenceLevel::kHigh;
+    candidate.cross_validated = false;
+  } else if (hasFreedHookOwner) {
+    // ADR-0024: the helper's record names whose hook the freed code was.
+    // Whether that plugin freed it too early or the caller kept the address
+    // too long, the record cannot say: Medium for a recorded stub at the
+    // address, Low for a page whose stubs mostly went there.
+    candidate.status_id = "related";
+    candidate.confidence_level = FamilyWeight(*row, kFamilyFreedHookOwner) >= 6u ? i18n::ConfidenceLevel::kMedium
+                                                                               : i18n::ConfidenceLevel::kLow;
     candidate.cross_validated = false;
   } else if (frameAndStack) {
     candidate.status_id = "related";

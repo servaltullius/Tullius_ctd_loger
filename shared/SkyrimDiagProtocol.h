@@ -17,6 +17,9 @@ inline constexpr std::uint32_t kMinidumpUserStream_WctJson = 0x10000u + 0x5743u;
 inline constexpr std::uint32_t kMinidumpUserStream_PluginInfo = 0x10000u + 0x504Cu;  // arbitrary "PL"
 // JSON: the game process's GPU memory per adapter at capture time ("GM").
 inline constexpr std::uint32_t kMinidumpUserStream_GpuMemory = 0x10000u + 0x474Du;
+// JSON: the hook stubs the helper read in the game's executable private
+// memory while it ran (ADR-0024, "HP").
+inline constexpr std::uint32_t kMinidumpUserStream_HookPages = 0x10000u + 0x4850u;
 
 // Build a kernel object name from PID and suffix.
 inline std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)

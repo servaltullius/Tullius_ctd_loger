@@ -483,6 +483,16 @@ target_include_directories(skydiag_retention_tests PRIVATE
 
 add_test(NAME skydiag_retention_tests COMMAND skydiag_retention_tests)
 
+add_executable(skydiag_hook_stub_decoder_tests
+  hook_stub_decoder_tests.cpp
+)
+
+target_include_directories(skydiag_hook_stub_decoder_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+
+add_test(NAME skydiag_hook_stub_decoder_tests COMMAND skydiag_hook_stub_decoder_tests)
+
 add_executable(skydiag_summary_schema_fields_tests
   summary_schema_fields_tests.cpp
 )
@@ -933,6 +943,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Loop.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Process.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HelperMain.Startup.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HookPageRecord.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ManualCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ManualCaptureKeyWatcher.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/IncidentManifest.cpp"

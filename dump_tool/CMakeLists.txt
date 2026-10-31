@@ -31,6 +31,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/EngineSpinLoop.cpp
   src/EngineSpinLoop.h
   src/FaultInstruction.cpp
+  src/FreedHook.cpp
+  src/FreedHook.h
   src/FaultInstruction.h
   src/EvidenceBuilder.cpp
   src/EvidenceBuilder.h

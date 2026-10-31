@@ -160,6 +160,15 @@ FaultInstructionInfo ProbeFaultInstruction(
   const AnalysisResult& out,
   const std::optional<CONTEXT>& excCtx);
 
+// ADR-0024: for a bad_jump into freed code, whose hook stub the target was,
+// from the helper's record in the dump (kMinidumpUserStream_HookPages); sets
+// out.freed_hook and the fault instruction's freed_hook_* fields.
+void ResolveFreedHookOwner(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  AnalysisResult& out);
+
 // ADR-0016: the crash ran the int3 padding of a hook stub that was being
 // written; detected only for EXCEPTION_BREAKPOINT outside every module.
 HookStubRaceInfo DetectHookStubRace(

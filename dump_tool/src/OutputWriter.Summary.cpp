@@ -540,6 +540,30 @@ nlohmann::json BuildSummaryJson(
       { "call_site", WideToUtf8(race.call_site) },
     };
   }
+  if (r.freed_hook.detected) {
+    // ADR-0024: whose hook the freed code was, from the helper's record.
+    const auto& freed = r.freed_hook;
+    const auto hex = [](std::uint64_t value) {
+      char text[24]{};
+      std::snprintf(text, sizeof(text), "0x%llX", static_cast<unsigned long long>(value));
+      return std::string(text);
+    };
+    nlohmann::json pageModules = nlohmann::json::array();
+    for (const auto& [module, stubs] : freed.page_modules) {
+      pageModules.push_back({ { "module", WideToUtf8(module) }, { "stubs", stubs } });
+    }
+    summary["freed_hook"] = {
+      { "address", hex(freed.address) },
+      { "page_base", hex(freed.page_base) },
+      { "exact", freed.exact },
+      { "stub_kind", freed.stub_kind },
+      { "owner_module", WideToUtf8(freed.owner_module) },
+      { "owner_offset", freed.exact ? hex(freed.owner_offset) : std::string{} },
+      { "owner_mod_name", WideToUtf8(freed.owner_mod_name) },
+      { "last_seen_ms_ago", freed.last_seen_ms_ago },
+      { "page_modules", std::move(pageModules) },
+    };
+  }
 
   if (!r.thread_entry_hook_modules.empty()) {
     nlohmann::json hooks = nlohmann::json::array();

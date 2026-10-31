@@ -448,6 +448,33 @@ void AddHookStubOwnerSignal(const AnalysisResult& r, bool en, std::vector<Candid
   }
 }
 
+// ADR-0024: the helper's record names whose hook the freed code was. Exact (a
+// recorded stub started at the address) outweighs a page's stubs mostly
+// going to the module (CandidateConsensus: Medium / Low).
+void AddFreedHookOwnerSignal(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
+{
+  const auto& freed = r.freed_hook;
+  if (!out || !freed.detected || freed.owner_module.empty()) {
+    return;
+  }
+
+  CandidateSignal signal{};
+  signal.family_id = "freed_hook_owner";
+  signal.display_name = !freed.owner_mod_name.empty() ? freed.owner_mod_name : freed.owner_module;
+  signal.candidate_key = CanonicalCandidateKey(signal.display_name);
+  signal.mod_name = freed.owner_mod_name;
+  signal.module_filename = freed.owner_module;
+  signal.detail = freed.exact
+    ? (en ? L"The crash jumped into this plugin's hook code after it was freed (recorded while the game ran)"
+          : L"해제된 이 플러그인의 후킹 코드로 크래시가 이동함(게임 중 기록)")
+    : (en ? L"The freed memory the crash jumped into held hook jumps into this plugin (recorded while the game ran)"
+          : L"크래시가 이동한 해제된 메모리에 이 플러그인으로 가는 후킹 점프 코드가 있었음(게임 중 기록)");
+  signal.weight = freed.exact ? 6u : 3u;
+  if (!signal.candidate_key.empty()) {
+    out->push_back(std::move(signal));
+  }
+}
+
 void AddHistorySignals(const AnalysisResult& r, bool en, std::vector<CandidateSignal>* out)
 {
   if (!out) {
@@ -660,7 +687,9 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   if (FaultJumpedIntoFreedCode(r)) {
     // The same for a jump into freed code (FaultJumpedIntoFreedCode): the
     // frames and the stack scan start at the caller, which only used the
-    // address; whoever freed it is not in the dump. Only repeats remain.
+    // address; whoever freed it is not in the dump, only in the helper's
+    // record (ADR-0024). That and repeats remain.
+    AddFreedHookOwnerSignal(r, en, &signals);
     AddHistorySignals(r, en, &signals);
     r.actionable_candidates = BuildCandidateConsensus(signals, lang);
     SortActionableCandidates(r.actionable_candidates);

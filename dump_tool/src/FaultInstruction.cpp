@@ -939,13 +939,30 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
   }
   if (info.verdict == "bad_jump" && info.target_state == "freed") {
     // The caller only used the address, possibly another plugin's hook it
-    // kept as the original function; this says how, never who.
-    const std::wstring callerNote = info.call_site.empty()
-      ? std::wstring{}
-      : (en ? L" The caller may only have used that address (for example another plugin's hook it kept as the original "
-              L"function); the dump does not show who freed the code."
-            : L" 호출한 쪽은 그 주소(예: 다른 플러그인이 건 훅을 원래 함수로 알고 저장해 둔 주소)를 불렀을 뿐일 수 있고, 누가 "
-              L"코드를 해제했는지는 덤프로 알 수 없습니다.");
+    // kept as the original function. Whose hook it was comes only from the
+    // helper's record while the game ran (ADR-0024).
+    std::wstring callerNote;
+    if (!info.freed_hook_stub_target.empty()) {
+      callerNote = en
+        ? (L" The helper had recorded that address while the game ran: a hook jump that went to " +
+           info.freed_hook_stub_target + L", so the freed code was " + info.freed_hook_owner +
+           L"'s hook. The caller only used the address.")
+        : (L" Helper가 게임 중에 그 주소를 기록해 두었습니다. " + info.freed_hook_stub_target +
+           L"(으)로 가는 후킹 점프 코드였으므로, 해제된 코드는 " + info.freed_hook_owner +
+           L"의 후킹입니다. 호출한 쪽은 그 주소를 불렀을 뿐입니다.");
+    } else if (!info.freed_hook_owner.empty()) {
+      callerNote = en
+        ? (L" The helper had recorded that memory while the game ran: its hook jumps went to " + info.freed_hook_owner +
+           L", so the freed code was most likely " + info.freed_hook_owner + L"'s hook.")
+        : (L" Helper가 게임 중에 그 메모리를 기록해 두었습니다. 그 안의 후킹 점프 코드가 " + info.freed_hook_owner +
+           L"(으)로 갔으므로, 해제된 코드는 " + info.freed_hook_owner + L"의 후킹일 가능성이 높습니다.");
+    } else if (!info.call_site.empty()) {
+      callerNote = en
+        ? L" The caller may only have used that address (for example another plugin's hook it kept as the original "
+          L"function); the dump does not show who freed the code."
+        : L" 호출한 쪽은 그 주소(예: 다른 플러그인이 건 훅을 원래 함수로 알고 저장해 둔 주소)를 불렀을 뿐일 수 있고, 누가 "
+          L"코드를 해제했는지는 덤프로 알 수 없습니다.";
+    }
     return (en ? (L"The code tried to run instructions at " + address +
                    L", but no memory was allocated there: it jumped into memory that had been freed (for example a "
                    L"hook stub that was removed).")
@@ -1095,6 +1112,10 @@ std::wstring DescribeFaultInstructionPlain(const FaultInstructionInfo& info, boo
               : L"비어 있는(null) 함수 포인터로 함수를 부르다가 튕겼습니다.";
   }
   if (v == "bad_jump" && info.target_state == "freed") {
+    if (!info.freed_hook_owner.empty()) {
+      return en ? (L"It crashed jumping into a hook of " + info.freed_hook_owner + L" that had been freed.")
+                : (L"해제된 " + info.freed_hook_owner + L"의 후킹 코드로 이동하다가 튕겼습니다.");
+    }
     return en ? L"It crashed jumping into memory that had been freed (for example a hook stub that was removed)."
               : L"해제된 메모리(예: 제거된 후킹 코드)로 이동하다가 튕겼습니다.";
   }

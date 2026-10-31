@@ -5,6 +5,7 @@
 
 #include "CrashCapture.h"
 #include "HelperLog.h"
+#include "HookPageRecord.h"
 #include "ManualCapture.h"
 #include "ManualCaptureKeyWatcher.h"
 
@@ -142,6 +143,20 @@ void RunHelperLoop(
     ExpireReleasedCrashDumpIfOutlived(proc, outBase, state);
     if (HandleProcessExitTick(cfg, proc, outBase, state)) {
       break;
+    }
+
+    // ADR-0024: whose hook stubs the executable pages hold, for a later jump
+    // into one of them after it is freed.
+    const auto scanStart = GetTickCount64();
+    if (MaybeRecordHookPages(proc.process, state->crashCaptured.latched, scanStart, &state->nextHookPageScanTick64)) {
+      const auto pages = HookPages().PageCount();
+      if (pages != state->loggedHookPageCount) {
+        state->loggedHookPageCount = pages;
+        AppendLogLine(
+          outBase,
+          L"Hook stub record: " + std::to_wstring(pages) + L" executable pages with jump stubs (scan " +
+            std::to_wstring(HookPages().Scans()) + L", " + std::to_wstring(GetTickCount64() - scanStart) + L" ms).");
+      }
     }
 
     if (!proc.crashEvent) {

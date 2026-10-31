@@ -606,6 +606,125 @@ void TestCallerOfFreedCodeIsNoSuspect()
   }
 }
 
+// ADR-0024: the helper recorded the hook pages while the game ran, so the
+// freed code has an owner. A stub that started at the address names it
+// (following a stub into another recorded stub); otherwise the page's stubs,
+// leaving out the game EXE. A malformed page or stub is skipped.
+void TestFreedHookIsResolvedFromTheRecord()
+{
+  using skydiag::dump_tool::HookPageRecordInfo;
+  using skydiag::dump_tool::ParseHookPageRecordJson;
+  using skydiag::dump_tool::ResolveFreedHook;
+  HookPageRecordInfo record{};
+  Require(ParseHookPageRecordJson(
+            R"({"version":1,"scans":3,"pages":[)"
+            R"({"base":"0x7FF6848B0000","size":4096,"last_seen_ms_ago":12000,"stubs":[)"
+            R"({"offset":0,"length":14,"kind":"jmp_abs","target":"0x7FFA10001234","module":"OwnerHooks.dll","module_offset":"0x1234"},)"
+            R"({"offset":14,"length":14,"kind":"jmp_abs","target":"0x7FFA10005678","module":"OwnerHooks.dll","module_offset":"0x5678"},)"
+            R"({"offset":28,"length":14,"kind":"jmp_abs","target":"0x7FF703C00000","module":"SkyrimSE.exe","module_offset":"0x40000"},)"
+            R"({"offset":42,"length":14,"kind":"jmp_abs","target":"0x7FF6848C0000","module":"","module_offset":"0x0"},)"
+            R"({"offset":56,"length":14,"kind":"jmp_abs","target":7}]},)"
+            R"({"base":"0x7FF6848C0000","size":4096,"last_seen_ms_ago":12000,"stubs":[)"
+            R"({"offset":0,"length":14,"kind":"jmp_abs","target":"0x7FFA20000010","module":"Chained.dll","module_offset":"0x10"}]},)"
+            R"({"base":"bad","size":4096}]})",
+            &record),
+    "the record parses");
+  Require(record.scans == 3u && record.pages.size() == 2u && record.pages[0].stubs.size() == 4u,
+    "a malformed page and stub are skipped");
+  const auto notOwner = [](const std::wstring& name) { return name == L"SkyrimSE.exe"; };
+
+  auto freed = ResolveFreedHook(record, 0x7FF6848B000Eull, notOwner);
+  Require(freed.detected && freed.exact && freed.owner_module == L"OwnerHooks.dll" && freed.owner_offset == 0x5678u &&
+            freed.stub_kind == "jmp_abs" && freed.last_seen_ms_ago == 12000u,
+    "a stub at the address names its owner");
+  Require(freed.page_modules.size() == 1u && freed.page_modules[0].first == L"OwnerHooks.dll" &&
+            freed.page_modules[0].second == 2u,
+    "the page's stubs per module, the game EXE left out");
+  freed = ResolveFreedHook(record, 0x7FF6848B002Aull, notOwner);
+  Require(freed.exact && freed.owner_module == L"Chained.dll", "a stub into another recorded stub is followed");
+  freed = ResolveFreedHook(record, 0x7FF6848B001Cull, notOwner);
+  Require(freed.detected && !freed.exact && freed.owner_module == L"OwnerHooks.dll",
+    "a stub into the game EXE names no owner: the page's stubs do");
+  freed = ResolveFreedHook(record, 0x7FF6848B0800ull, notOwner);
+  Require(freed.detected && !freed.exact && freed.owner_module == L"OwnerHooks.dll", "no stub there: the page's stubs");
+  Require(!ResolveFreedHook(record, 0x7FF6848D0000ull, notOwner).detected, "outside every recorded page");
+  Require(!ParseHookPageRecordJson("not json", &record) && !record.present, "no record");
+}
+
+// The owner then has a name in the outputs: it leads during play (Medium for
+// a recorded stub at the address, Low for the page's stubs), a forced close's
+// line for mod authors names it, and the caller stays out.
+void TestFreedHookOwnerIsNamed()
+{
+  const auto makeFreedHookJump = [](bool forcedClose, bool exact) {
+    AnalysisResult r{};
+    r.dump_path = L"SkyrimDiag_Crash_20261027_160630_435.dmp";
+    r.exc_code = 0xC0000005u;
+    r.fault_instruction.verdict = "bad_jump";
+    r.fault_instruction.access = "execute";
+    r.fault_instruction.address = 0x7FF6848B000Eull;
+    r.fault_instruction.target_state = "freed";
+    r.fault_instruction.call_site = L"PrismaUI.dll+0x59ce2";
+    r.fault_instruction.call_instruction = "call qword ptr [rsp+0x20]";
+    r.fault_instruction.freed_hook_owner = L"OwnerHooks.dll";
+    r.fault_instruction.freed_hook_stub_target = exact ? L"OwnerHooks.dll+0x5678" : L"";
+    r.freed_hook.detected = true;
+    r.freed_hook.exact = exact;
+    r.freed_hook.address = 0x7FF6848B000Eull;
+    r.freed_hook.page_base = 0x7FF6848B0000ull;
+    r.freed_hook.owner_module = L"OwnerHooks.dll";
+    r.freed_hook.owner_offset = exact ? 0x5678u : 0u;
+    r.freed_hook.page_modules = { { L"OwnerHooks.dll", 2u } };
+    r.suspects = { Suspect(L"PrismaUI.dll", L"Prisma UI", i18n::ConfidenceLevel::kHigh) };
+    r.suspects_from_stackwalk = true;
+    if (forcedClose) {
+      r.forced_close.detected = true;
+      r.forced_close.kind = "alt_f4";
+      r.forced_close.seconds_before_crash = 0.05;
+    }
+    return r;
+  };
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    for (const bool exact : { true, false }) {
+      auto r = makeFreedHookJump(false, exact);
+      BuildEvidenceAndSummary(r, lang);
+      const auto level = exact ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+      Require(!r.actionable_candidates.empty() && r.actionable_candidates[0].module_filename == L"OwnerHooks.dll" &&
+                r.actionable_candidates[0].confidence_level == level &&
+                r.actionable_candidates[0].supporting_families == std::vector<std::string>{ "freed_hook_owner" },
+        "the owner is the candidate");
+      for (const auto& c : r.actionable_candidates) {
+        Require(c.module_filename != L"PrismaUI.dll", "the caller of freed code is no candidate");
+      }
+      Require(r.quick_answer.suspect_file == L"OwnerHooks.dll", "the quick answer leads with the owner");
+      Require(Contains(r.quick_answer.how_it_crashed, L"OwnerHooks.dll"), "how it crashed names it");
+      Require(Contains(r.summary_sentence, L"OwnerHooks.dll") && !Contains(r.summary_sentence, L"Top suspect: Prisma"),
+        "the summary names the owner, not the caller");
+      bool evidenceNamesStub = false;
+      for (const auto& e : r.evidence) {
+        evidenceNamesStub = evidenceNamesStub || (exact ? Contains(e.details, L"OwnerHooks.dll+0x5678")
+                                                        : Contains(e.details, en ? L"most likely OwnerHooks.dll"
+                                                                                 : L"OwnerHooks.dll의 후킹일 가능성"));
+      }
+      Require(evidenceNamesStub, "the evidence says how the record names it");
+      const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+      Require(summary["freed_hook"]["owner_module"] == "OwnerHooks.dll" && summary["freed_hook"]["exact"] == exact &&
+                summary["freed_hook"]["page_base"] == "0x7FF6848B0000",
+        "summary JSON freed_hook");
+    }
+
+    auto closing = makeFreedHookJump(true, true);
+    BuildEvidenceAndSummary(closing, lang);
+    Require(closing.quick_answer.case_id == "forced_close", "still a forced close");
+    Require(!closing.recommendations.empty() &&
+              closing.recommendations[0].rfind(en ? L"[Forced close] " : L"[강제 종료] ", 0) == 0 &&
+              Contains(closing.recommendations[0], L"OwnerHooks.dll") &&
+              !Contains(closing.recommendations[0], L"Prisma"),
+      "the forced-close line names the owner for mod authors, not the caller");
+  }
+}
+
 // "No WCT cycle: possible busy wait" stayed after the main thread's wait was
 // traced to a game thread stuck in a plugin.
 void TestBusyWaitLineNeedsAnUnexplainedWait()
@@ -686,6 +805,8 @@ int main()
     TestAmbiguousLogNamesNoCulprit();
     TestFaultModuleUnknownOnlyWhereItIsMissing();
     TestCallerOfFreedCodeIsNoSuspect();
+    TestFreedHookIsResolvedFromTheRecord();
+    TestFreedHookOwnerIsNamed();
     TestBusyWaitLineNeedsAnUnexplainedWait();
     TestCrashLoggerSelfFaultSummary();
     TestLateRecoveredCleanExitWording();
