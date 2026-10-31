@@ -292,7 +292,7 @@ internal static class DumpDiscoveryService
             return false;
         }
 
-        var trimmed = configuredValue.Trim().Trim('"');
+        var trimmed = configuredValue.Trim();
         if (string.IsNullOrWhiteSpace(trimmed))
         {
             return false;
@@ -375,9 +375,11 @@ internal static class DumpDiscoveryService
         return false;
     }
 
-    private static string? TryReadIniValue(string iniPath, string sectionName, string keyName)
+    // Read as the helper reads it (IniText.h IniDocument::FindValue), so both find
+    // the same folder: the first section of that name only, its first such key,
+    // and one pair of matching quotes (" or ') removed.
+    internal static string? TryReadIniValue(string iniPath, string sectionName, string keyName)
     {
-        string? currentSection = null;
         IEnumerable<string> lines;
         try
         {
@@ -389,21 +391,29 @@ internal static class DumpDiscoveryService
             return null;
         }
 
+        var inSection = false;
         foreach (var rawLine in lines)
         {
-            var line = rawLine.Trim();
+            var nul = rawLine.IndexOf('\0');
+            var line = (nul >= 0 ? rawLine[..nul] : rawLine).Trim();
             if (line.Length == 0 || line.StartsWith(';') || line.StartsWith('#'))
             {
                 continue;
             }
 
-            if (line.StartsWith('[') && line.EndsWith(']'))
+            if (line.StartsWith('['))
             {
-                currentSection = line[1..^1].Trim();
+                if (inSection)
+                {
+                    return null;  // a later section of the same name is not searched
+                }
+                var close = line.IndexOf(']');
+                var name = (close < 0 ? line[1..] : line[1..close]).Trim();
+                inSection = string.Equals(name, sectionName, StringComparison.OrdinalIgnoreCase);
                 continue;
             }
 
-            if (!string.Equals(currentSection, sectionName, StringComparison.OrdinalIgnoreCase))
+            if (!inSection)
             {
                 continue;
             }
@@ -420,7 +430,12 @@ internal static class DumpDiscoveryService
                 continue;
             }
 
-            return line[(separatorIndex + 1)..].Trim();
+            var value = line[(separatorIndex + 1)..].Trim();
+            if (value.Length >= 2 && (value[0] == '"' || value[0] == '\'') && value[^1] == value[0])
+            {
+                value = value[1..^1];
+            }
+            return value;
         }
 
         return null;

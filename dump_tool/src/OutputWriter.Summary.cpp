@@ -642,6 +642,7 @@ nlohmann::json BuildSummaryJson(
       { "score", c.score },
       { "cross_validated", c.cross_validated },
       { "has_conflict", c.has_conflict },
+      { "standalone_callstack", c.standalone_callstack },
       { "supporting_families", std::move(supportingFamilies) },
       { "conflicting_families", std::move(conflictingFamilies) },
     });

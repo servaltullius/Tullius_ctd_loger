@@ -45,6 +45,7 @@
       "score": 10,
       "cross_validated": true,
       "has_conflict": false,
+      "standalone_callstack": true,
       "supporting_families": [
         "actionable_stack",
         "history_repeat"

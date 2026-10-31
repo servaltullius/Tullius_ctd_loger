@@ -226,7 +226,9 @@ internal sealed partial class MainWindowViewModel
             foreach (var espRef in summary.CrashLoggerRefs.Where(r => !r.IsLocation).Take(3))
             {
                 Suspects.Add(new SuspectItem(
-                    MapRelevanceToConfidence(espRef.RelevanceScore),
+                    summary.CrashLoggerPairingAmbiguous
+                        ? T("ESP ref (low, log may be another crash's)", "ESP 참조 (낮음, 다른 크래시의 로그일 수 있음)")
+                        : MapRelevanceToConfidence(espRef.RelevanceScore),
                     espRef.EspName,
                     BuildEspRefReason(espRef)));
             }

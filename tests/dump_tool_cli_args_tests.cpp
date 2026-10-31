@@ -110,8 +110,22 @@ static void Test_CliMainPrintsMachineReadableOutputPaths()
   assert(src.find("std::cout") != std::string::npos);
 }
 
+// Both entry points follow the Windows display language when no language is
+// given. The native one (the viewer's, also its headless run that the helper
+// starts when the CLI is missing) fell back to English.
+static void Test_EntryPointsDefaultToTheDisplayLanguage()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  for (const auto* file : { "DumpToolCliMain.cpp", "NativeApi.cpp" }) {
+    const auto src = ReadAllText(repoRoot / "dump_tool" / "src" / file);
+    assert(src.find("LanguageFromWindowsUiLangId(GetUserDefaultUILanguage())") != std::string::npos &&
+           "an entry point without a language must follow the display language");
+  }
+}
+
 int main()
 {
+  Test_EntryPointsDefaultToTheDisplayLanguage();
   Test_ParsesDumpPathAndOutDir();
   Test_ParsesOnlineSymbolsFlags();
   Test_RejectsMissingDumpPath();

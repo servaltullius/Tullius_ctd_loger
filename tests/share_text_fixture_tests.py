@@ -257,6 +257,88 @@ def test_forced_close_is_not_shared_as_a_ctd() -> None:
     assert clipboard.split("\n")[1].startswith("Quick answer: This error happened while you force-quit"), clipboard
 
 
+def _run_harness_on_modified(base_name: str, modify, mode: str) -> str:
+    summary = json.loads((DATA_DIR / base_name).read_text(encoding="utf-8"))
+    modify(summary)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / base_name
+        path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+        return _run_harness_on(path, mode)
+
+
+def test_ambiguous_crash_logger_log_names_no_mod() -> None:
+    # A log that may be another crash's names no culprit (the analyzer's
+    # FirstCulpritObjectRef); its refs were still shown as "Referenced mod".
+    def with_ref(ambiguous: bool):
+        def modify(summary: dict) -> None:
+            summary["actionable_candidates"] = []
+            summary["crash_logger"]["object_refs"] = [{
+                "esp_name": "NpcMod.esp",
+                "best_object_type": "TESNPC*",
+                "best_location": "RCX",
+                "object_name": "",
+                "form_id": "",
+                "ref_count": 1,
+                "relevance_score": 18,
+            }]
+            summary["crash_logger"]["pairing"] = {"ambiguous": ambiguous, "confidence": "low" if ambiguous else "high"}
+        return modify
+
+    paired = _run_harness_on_modified("reference_clue_summary.json", with_ref(False), "community")
+    assert "📌 Referenced mod (ESP): NpcMod.esp" in paired, paired
+    ambiguous = _run_harness_on_modified("reference_clue_summary.json", with_ref(True), "community")
+    assert "📌 Referenced mod (ESP): NpcMod.esp" not in ambiguous, ambiguous
+
+
+def test_ctd_named_freeze_stays_a_ctd() -> None:
+    # The header follows the analyzer's flags, not words in the summary
+    # sentence: a CTD in "FreezeFix.dll" was shared as a freeze.
+    def modify(summary: dict) -> None:
+        summary["summary_sentence"] = "Crash in FreezeFix.dll (Freeze Fix): possible snapshot of a freeze."
+
+    community = _run_harness_on_modified("frame_first_summary.json", modify, "community")
+    assert community.split("\n")[0] == "🔴 Skyrim CTD Report — SkyrimDiag", community
+
+
+def test_callstack_label_follows_the_analyzer() -> None:
+    # The analyzer's standalone_callstack decides (its stack weight); the
+    # viewer's own rule compared the total score, history included.
+    def not_standalone(summary: dict) -> None:
+        summary["actionable_candidates"][0]["standalone_callstack"] = False
+
+    community = _run_harness_on_modified("standalone_stackwalk_related_summary.json", not_standalone, "community")
+    assert "🧩 Tullius callstack:" not in community, community
+    assert "Next action: Tullius callstack:" not in community, community
+    expected = _read_expected("standalone_stackwalk_related_community_share.expected.txt")
+    assert "🧩 Tullius callstack:" in expected, expected
+
+
+def test_viewer_options_match_the_analyzer() -> None:
+    # No symbols flag leaves SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS to the analyzer
+    # (null), as the CLI does; ko, kor and korean are Korean in both.
+    actual = _run_harness("frame_first_summary.json", "options")
+    assert actual == "null|True|False|True|True|True|False|False", actual
+
+
+def test_viewer_reads_helper_ini_like_the_helper() -> None:
+    # IniText.h FindValue: one matching pair of " or ' removed, the first
+    # section of that name only, a header up to its "]". The viewer stripped
+    # double quotes only and searched every section of that name.
+    cases = [
+        ("[SkyrimDiagHelper]\nOutputDir='D:\\Logs'\n", "D:\\Logs"),
+        ("[SkyrimDiagHelper]\nOutputDir=\"D:\\Logs\"\n", "D:\\Logs"),
+        ("[SkyrimDiagHelper] ; settings\nOutputDir=D:\\Logs\n", "D:\\Logs"),
+        ("[SkyrimDiagHelper]\nMaxCrashDumps=3\n[Other]\nOutputDir=E:\\No\n[SkyrimDiagHelper]\nOutputDir=F:\\Later\n", "<none>"),
+        ("[SkyrimDiagHelper]\nOutputDir=\n", ""),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (text, expected) in enumerate(cases):
+            path = Path(tmp) / f"helper_{i}.ini"
+            path.write_text(text, encoding="utf-8")
+            actual = _run_harness_on(path, "ini-outputdir")
+            assert actual == expected, (text, actual)
+
+
 def test_cleared_summary_produces_no_share_text() -> None:
     actual = _run_harness("frame_first_summary.json", "cleared")
     assert actual == "", actual
@@ -284,5 +366,10 @@ if __name__ == "__main__":
     test_summary_without_quick_answer_keeps_its_share_texts()
     test_recommendation_classes_decide_the_sections()
     test_forced_close_is_not_shared_as_a_ctd()
+    test_ambiguous_crash_logger_log_names_no_mod()
+    test_ctd_named_freeze_stays_a_ctd()
+    test_callstack_label_follows_the_analyzer()
+    test_viewer_options_match_the_analyzer()
+    test_viewer_reads_helper_ini_like_the_helper()
     test_cleared_summary_produces_no_share_text()
     print("share_text_fixture_tests: OK")

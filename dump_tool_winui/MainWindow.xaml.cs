@@ -20,7 +20,7 @@ public sealed partial class MainWindow : Window
     internal MainWindow(DumpToolInvocationOptions startupOptions, string? startupWarning)
     {
         _startupOptions = startupOptions;
-        var isKorean = string.Equals(_startupOptions.Language, "ko", StringComparison.OrdinalIgnoreCase) ||
+        var isKorean = DumpToolInvocationOptions.IsKoreanLanguageToken(_startupOptions.Language) ||
                        (string.IsNullOrWhiteSpace(_startupOptions.Language) &&
                         string.Equals(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName, "ko", StringComparison.OrdinalIgnoreCase));
         _vm = new MainWindowViewModel(isKorean);

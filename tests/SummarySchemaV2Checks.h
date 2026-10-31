@@ -199,6 +199,7 @@ inline void ValidateSummarySchemaV2(const nlohmann::json& j)
     AssertIsType(c, "module_filename", "string", "actionable_candidates[]");
     AssertIsType(c, "family_count", "number", "actionable_candidates[]");
     AssertIsType(c, "score", "number", "actionable_candidates[]");
+    AssertIsType(c, "standalone_callstack", "boolean", "actionable_candidates[]");
     AssertIsType(c, "supporting_families", "array", "actionable_candidates[]");
     AssertIsType(c, "conflicting_families", "array", "actionable_candidates[]");
   }

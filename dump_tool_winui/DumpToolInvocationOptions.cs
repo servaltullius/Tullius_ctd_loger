@@ -7,12 +7,20 @@ internal sealed class DumpToolInvocationOptions
     public string? Language { get; set; }
     public bool Headless { get; set; }
     public bool Debug { get; set; }
-    public bool AllowOnlineSymbols { get; set; }
+    // null: neither --allow-online-symbols nor --no-online-symbols, so the
+    // analyzer follows SKYRIMDIAG_ALLOW_ONLINE_SYMBOLS as the CLI does.
+    public bool? AllowOnlineSymbols { get; set; }
     // --simple-ui / --advanced-ui (sent by the helper from the deprecated
     // AutoOpenViewerBeginnerMode key) are accepted for compatibility only:
     // the viewer has a single layout and ignores them.
     public bool ForceSimpleUi { get; set; }
     public bool ForceAdvancedUi { get; set; }
+
+    // The analyzer's tokens (I18nCore ParseLanguageTokenAscii): ko, kor, korean.
+    public static bool IsKoreanLanguageToken(string? token) =>
+        string.Equals(token, "ko", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(token, "kor", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(token, "korean", StringComparison.OrdinalIgnoreCase);
 
     public static DumpToolInvocationOptions Parse(IReadOnlyList<string> args)
     {

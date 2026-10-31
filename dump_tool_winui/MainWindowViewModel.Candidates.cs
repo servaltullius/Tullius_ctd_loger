@@ -273,14 +273,11 @@ internal sealed partial class MainWindowViewModel
             "이번 캡처에는 크래시 컨텍스트 정보가 제한적입니다.");
     }
 
+    // The analyzer decides (stack weight, not the total score this used to
+    // compare), so the label and the next action match the report.
     private static bool IsStrongStandaloneCallstackCandidate(ActionableCandidateItem candidate)
     {
-        return HasFamily(candidate, "actionable_stack") &&
-               !HasFamily(candidate, "hang_thread_group") &&
-               !HasFamily(candidate, "crash_logger_frame") &&
-               !HasFamily(candidate, "crash_logger_object_ref") &&
-               !HasFamily(candidate, "resource_provider") &&
-               candidate.Score >= 5;
+        return candidate.StandaloneCallstack;
     }
 
     private string BuildFamilySummary(ActionableCandidateItem candidate)
