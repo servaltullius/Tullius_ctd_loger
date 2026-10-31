@@ -111,7 +111,13 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
 // The most relevant Crash Logger object ref that can name a culprit plugin.
 // Cells and worldspaces only say where the player was, so they are skipped
 // here as they are for candidates and history; evidence still lists them.
+// None from a log that may be another crash's (crash_logger_pairing_ambiguous).
 const AnalysisResult::CrashLoggerModReference* FirstCulpritObjectRef(const AnalysisResult& r);
+
+// ADR-0019: the CPU was sent to run code where there is none (null_jump /
+// bad_jump). The fault address is then in no module because there is no code
+// there, not because the dump lacks the module list.
+bool FaultIsJumpToNoCode(const AnalysisResult& r);
 
 // The blackbox saw a save or cell finish loading in this session, so the game
 // got past loading its plugins (and their masters) at startup.

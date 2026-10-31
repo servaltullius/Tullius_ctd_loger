@@ -526,7 +526,9 @@ void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, c
       : (L"예외 주소가 " + r.fault_module_filename +
           L" 에서 보고됩니다. 이 경우 실제 원인은 다른 DLL/모드일 수 있습니다. (Module+Offset: " + r.fault_module_plus_offset + L")");
     r.evidence.push_back(std::move(e));
-  } else if (!hasModule) {
+  } else if (!hasModule && ctx.isCrashLike && !FaultIsJumpToNoCode(r)) {
+    // Only a crash has a fault module to miss: a freeze or snapshot has no
+    // exception, and a jump to no code has none to find.
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kLow;
     e.confidence = ConfidenceText(lang, e.confidence_level);

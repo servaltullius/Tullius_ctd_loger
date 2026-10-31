@@ -44,6 +44,9 @@ constexpr std::wstring_view kCandidate[] = {
 };
 constexpr std::wstring_view kCrashLoggerFrame[] = { L"[Crash Logger frame]", L"[Crash Logger 프레임]" };
 constexpr std::wstring_view kObjectRef[] = { L"[Object ref]", L"[오브젝트 참조]" };
+// A snapshot of a running game has nothing to fix (its quick answer says so);
+// a file two mods provide among its recent loads is no reason to act.
+constexpr std::wstring_view kSnapshot[] = { L"[Snapshot]", L"[정상/스냅샷]", L"[Manual]", L"[수동]" };
 constexpr std::wstring_view kConflict[] = { L"[Conflict]", L"[충돌]" };
 
 // Explanations and upkeep that never make a first action on their own.
@@ -66,6 +69,7 @@ std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendatio
          FindFirstTagged(recommendations, kCandidate),
          FindFirstTagged(recommendations, kCrashLoggerFrame),
          FindFirstTagged(recommendations, kObjectRef),
+         FindFirstTagged(recommendations, kSnapshot),
          FindFirstTagged(recommendations, kConflict),
        }) {
     if (found != std::wstring::npos) {

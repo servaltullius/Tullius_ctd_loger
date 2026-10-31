@@ -949,8 +949,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       ? L"[Check] Verify SKSE version, game runtime (AE/SE/VR), and Address Library all match."
       : L"[점검] SKSE 버전/게임 버전(AE/SE/VR)/Address Library 버전이 서로 맞는지 확인");
   } else {
-    // Only a crash has a faulting module to look for; a freeze has none.
-    if (isCrashLike) {
+    // Only a crash has a faulting module to look for; a freeze has none. Nor
+    // is a richer dump the next step when the game was being closed anyway
+    // (ADR-0022) or the decoded jump to no code names its call (ADR-0019).
+    const bool jumpFromKnownCall = FaultIsJumpToNoCode(r) && !r.fault_instruction.call_site.empty();
+    if (isCrashLike && !ctx.isForcedClose && !jumpFromKnownCall) {
     r.recommendations.push_back(en
       ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile (full memory info / module headers / indirect memory) before escalating to FullMemory (DumpMode=2)."
       : L"[점검] 덤프에서 예외가 난 모듈을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 더 많은 정보를 담는 재수집 설정(full memory info / module headers / indirect memory)으로 먼저 다시 캡처하세요.");
@@ -1183,8 +1186,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
           r.recommendations.push_back(en
             ? L"[Hang] WCT detected isCycle=true thread(s). Deadlock is likely."
             : L"[프리징] WCT에서 isCycle=true 스레드가 감지되었습니다. 데드락 가능성이 높습니다.");
-        } else if (r.main_thread_lock_owner.tid == 0u) {
-          // A main thread blocked on a lock WCT can name is no busy wait.
+        } else if (r.main_thread_lock_owner.tid == 0u && !HasBlockedGameThread(r.main_thread_wait)) {
+          // A main thread blocked on a lock WCT can name, or waiting for a
+          // game thread stuck in a plugin, is no busy wait.
           r.recommendations.push_back(en
             ? L"[Hang] No WCT cycle: possible infinite loop / busy wait."
             : L"[프리징] WCT cycle이 없으면 무한루프/바쁜 대기(busy wait) 가능성도 있습니다.");

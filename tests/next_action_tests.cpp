@@ -85,6 +85,20 @@ int main()
            L"[Performance] PerfHitch events were recorded.",
          }) == 0u);
 
+  // Also when a file among its recent loads has two providers, as on most
+  // large load orders (a real manual capture of 2026-10-30 picked [충돌]).
+  assert(SelectNextActionIndex({
+           L"[정상/스냅샷] 예외(크래시) 정보가 없습니다.",
+           L"[정상/스냅샷] 문제 상황에서 캡처해야 진단이 가능합니다.",
+           L"[메쉬/애니] 최근 로드된 리소스 기록이 포함되어 있습니다.",
+           L"[충돌] 같은 파일을 제공하는 모드가 2개 이상이면 충돌 가능성이 큽니다.",
+         }) == 0u);
+  // A conflict still leads a crash without a stronger clue.
+  assert(SelectNextActionIndex({
+           L"[Basics] ExceptionCode=0xC0000005 (Access Violation).",
+           L"[Conflict] If multiple mods provide the same file, conflicts are common.",
+         }) == 1u);
+
   // Only background left: fall back to the first entry rather than nothing.
   assert(SelectNextActionIndex({ L"[Basics] a", L"[Performance] b" }) == 0u);
   assert(SelectNextActionIndex({}) == std::wstring::npos);

@@ -464,6 +464,119 @@ void TestLocationRefIsNotTheCulprit()
   }
 }
 
+// A Crash Logger log that may be another crash's (an ambiguous pairing, or
+// another exception location) raised no candidate, yet its first object ref
+// still led the quick answer ("object_ref", Medium), named the plugin in the
+// summary, advised disabling it and voted for it in the crash history.
+void TestAmbiguousLogNamesNoCulprit()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    auto paired = MakeExeCrashWithRefs({ ObjectRef(L"NpcMod.esp", L"TESNPC*", 12) });
+    BuildEvidenceAndSummary(paired, lang);
+    Require(paired.quick_answer.case_id == "object_ref", "a paired log's ref leads (control)");
+
+    auto ambiguous = MakeExeCrashWithRefs({ ObjectRef(L"NpcMod.esp", L"TESNPC*", 12) });
+    ambiguous.crash_logger_pairing_ambiguous = true;
+    BuildEvidenceAndSummary(ambiguous, lang);
+    Require(ambiguous.quick_answer.case_id != "object_ref", "no quick answer from an ambiguous log's ref");
+    Require(!Contains(ambiguous.quick_answer.headline, L"NpcMod.esp"), "the quick answer does not name it");
+    Require(!Contains(ambiguous.summary_sentence, L"NpcMod.esp"), "the summary does not name it");
+    Require(!AnyStartsWith(ambiguous.recommendations, L"[ESP/ESM]", L"NpcMod.esp"), "no advice to disable it");
+    Require(ambiguous.actionable_candidates.empty(), "nor a candidate");
+    for (const auto& key : skydiag::dump_tool::CollectHistoryCandidateKeys(ambiguous)) {
+      Require(key.find("npcmod") == std::string::npos, "nor a vote in the crash history");
+    }
+  }
+}
+
+bool AnyContains(const std::vector<std::wstring>& lines, std::wstring_view needle)
+{
+  for (const auto& line : lines) {
+    if (Contains(line, needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool HasEvidenceTitled(const AnalysisResult& r, std::wstring_view title)
+{
+  for (const auto& e : r.evidence) {
+    if (Contains(e.title, title)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// "Could not determine the fault module" and "capture again with a richer
+// profile" came where nothing was missing: a freeze or snapshot (no
+// exception), a forced close, and a jump to no code whose call is known
+// (the 2026-10 freed hook trampoline crashes).
+void TestFaultModuleUnknownOnlyWhereItIsMissing()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const std::wstring_view noModuleEvidence = en ? L"Could not determine the fault module" : L"fault module을 특정하지 못함";
+    const std::wstring_view recapture = en ? L"Capture again with a richer crash recapture profile" : L"재수집 설정";
+    const auto makeCrash = [] {
+      AnalysisResult r{};
+      r.dump_path = L"SkyrimDiag_Crash_20261031_120000_000.dmp";
+      r.exc_code = 0xC0000005u;
+      return r;
+    };
+
+    auto unknown = makeCrash();
+    BuildEvidenceAndSummary(unknown, lang);
+    Require(HasEvidenceTitled(unknown, noModuleEvidence) && AnyContains(unknown.recommendations, recapture),
+      "a crash with no module and nothing decoded keeps both (control)");
+
+    auto freeze = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
+    BuildEvidenceAndSummary(freeze, lang);
+    Require(!HasEvidenceTitled(freeze, noModuleEvidence), "a freeze has no fault module to miss");
+
+    auto jump = makeCrash();
+    jump.fault_instruction.verdict = "bad_jump";
+    jump.fault_instruction.target_state = "freed";
+    jump.fault_instruction.call_site = L"SkyrimUpscaler.dll+0x1A2B3";
+    BuildEvidenceAndSummary(jump, lang);
+    Require(!HasEvidenceTitled(jump, noModuleEvidence), "a jump to no code is not missing module data");
+    Require(!AnyContains(jump.recommendations, recapture), "nor needs a richer dump when its call is known");
+
+    auto forced = makeCrash();
+    forced.forced_close.detected = true;
+    forced.forced_close.kind = "alt_f4";
+    forced.forced_close.seconds_before_crash = 0.2;
+    BuildEvidenceAndSummary(forced, lang);
+    Require(!AnyContains(forced.recommendations, recapture), "a forced close has nothing to recapture");
+  }
+}
+
+// "No WCT cycle: possible busy wait" stayed after the main thread's wait was
+// traced to a game thread stuck in a plugin.
+void TestBusyWaitLineNeedsAnUnexplainedWait()
+{
+  const std::string wctJson =
+    R"({"threads":[{"tid":1,"isCycle":false}],"capture":{"kind":"hang","secondsSinceHeartbeat":20.0,"thresholdSec":10}})";
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const std::wstring_view busyWait = en ? L"busy wait" : L"바쁜 대기";
+
+    auto blocked = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
+    blocked.has_wct = true;
+    blocked.wct_json_utf8 = wctJson;
+    BuildEvidenceAndSummary(blocked, lang);
+    Require(!AnyContains(blocked.recommendations, busyWait), "no busy wait when the blocked plugin is known");
+
+    auto unexplained = MakeBlockedFreeze(L"CrashTester.dll", "waiting_in_plugin");
+    unexplained.main_thread_wait = {};
+    unexplained.has_wct = true;
+    unexplained.wct_json_utf8 = wctJson;
+    BuildEvidenceAndSummary(unexplained, lang);
+    Require(AnyContains(unexplained.recommendations, busyWait), "an unexplained freeze keeps it (control)");
+  }
+}
+
 // A fault inside Crash Logger is its memory probe while it reported another
 // crash; the summary said "known hook framework" while the advice explained it.
 void TestCrashLoggerSelfFaultSummary()
@@ -516,6 +629,9 @@ int main()
     TestSkseRuntimeIsThePathNotASuspect();
     TestHookStubRaceNamesTheHookOwner();
     TestLocationRefIsNotTheCulprit();
+    TestAmbiguousLogNamesNoCulprit();
+    TestFaultModuleUnknownOnlyWhereItIsMissing();
+    TestBusyWaitLineNeedsAnUnexplainedWait();
     TestCrashLoggerSelfFaultSummary();
     TestLateRecoveredCleanExitWording();
     std::puts("crash test findings tests passed");

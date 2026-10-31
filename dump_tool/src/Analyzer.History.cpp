@@ -155,7 +155,11 @@ std::vector<std::string> CollectHistoryCandidateKeys(const AnalysisResult& out)
   const bool stackIsBystander = out.modal_dialog_wait.detected ||
     (IsBystanderWait(out.main_thread_wait) && out.suspects_from_main_thread);
   if (keys.empty()) {
+    // Nor the refs of a log that may be another crash's (FirstCulpritObjectRef).
     for (const auto& ref : out.crash_logger_object_refs) {
+      if (out.crash_logger_pairing_ambiguous) {
+        break;
+      }
       if (crashlogger_core::IsLocationObjectTypeAscii(WideToUtf8(ref.best_object_type))) {
         continue;  // where the player was, not a candidate
       }
