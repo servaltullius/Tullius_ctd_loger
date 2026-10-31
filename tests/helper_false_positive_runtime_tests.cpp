@@ -240,6 +240,63 @@ void TestWrongTypesInCrashBucketStatsAndSummaryAreDefaults()
   std::filesystem::remove_all(outBase);
 }
 
+std::size_t CountOccurrences(const std::string& text, std::string_view needle)
+{
+  std::size_t count = 0;
+  for (auto pos = text.find(needle); pos != std::string::npos; pos = text.find(needle, pos + needle.size())) {
+    ++count;
+  }
+  return count;
+}
+
+// Past 200 buckets the least recently updated go (one without a time first);
+// the bucket just updated stays even when the clock went back.
+void TestCrashBucketStatsKeepTheMostRecentBuckets()
+{
+  const auto outBase = MakeTempDir(L"skydiag_bucket_stats_cap");
+  const auto statsPath = outBase / "SkyrimDiag_CrashBucketStats.json";
+  const auto writeBuckets = [&](const char* prefix, std::int64_t firstEpoch, int count, bool untimed) {
+    std::string json = "{\"version\":1,\"buckets\":{";
+    if (untimed) {
+      json += "\"untimed\":{\"seen_total\":1},";
+    }
+    for (int i = 0; i < count; ++i) {
+      char key[32]{};
+      std::snprintf(key, sizeof(key), "%s-%03d", prefix, i);
+      json += std::string(i == 0 ? "" : ",") + "\"" + key + "\":{\"seen_total\":1,\"updated_at_epoch\":" +
+        std::to_string(firstEpoch + i) + "}";
+    }
+    json += "}}";
+    WriteAllTextUtf8(statsPath, json);
+  };
+
+  CrashSummaryInfo info{};
+  info.bucketKey = "new-bucket";
+  std::uint32_t unknownStreak = 0;
+  std::uint32_t seenCount = 0;
+  std::wstring err;
+  writeBuckets("old", 1000, 204, true);
+  Require(UpdateCrashBucketStats(outBase, info, &unknownStreak, &seenCount, &err), "Bucket stats update failed");
+  auto text = ReadAllTextUtf8(statsPath);
+  Require(CountOccurrences(text, "\"seen_total\"") == 200u, "Bucket stats must stop at 200 buckets");
+  Require(text.find("\"untimed\"") == std::string::npos, "A bucket without a time must go first");
+  Require(text.find("\"old-004\"") == std::string::npos, "The least recently updated buckets must go");
+  Require(text.find("\"old-005\"") != std::string::npos, "Only the buckets past the cap may go");
+  Require(text.find("\"old-203\"") != std::string::npos, "The most recent buckets must stay");
+  Require(text.find("\"new-bucket\"") != std::string::npos, "The updated bucket must stay");
+
+  // Times from a clock that later went back: the new bucket is the oldest.
+  writeBuckets("ahead", 4102444800, 200, false);
+  info.bucketKey = "now-bucket";
+  Require(UpdateCrashBucketStats(outBase, info, &unknownStreak, &seenCount, &err), "Bucket stats update failed");
+  text = ReadAllTextUtf8(statsPath);
+  Require(CountOccurrences(text, "\"seen_total\"") == 200u, "Bucket stats must stop at 200 buckets");
+  Require(text.find("\"now-bucket\"") != std::string::npos, "The updated bucket must never go");
+  Require(text.find("\"ahead-000\"") == std::string::npos, "The next oldest bucket goes in its place");
+  Require(text.find("\"ahead-001\"") != std::string::npos, "Only one bucket was past the cap");
+  std::filesystem::remove_all(outBase);
+}
+
 void TestIncidentManifestUpdatePropagatesAtomicReplaceFailure()
 {
   const auto outBase = MakeTempDir(L"skydiag_manifest_replace_failure");
@@ -2450,6 +2507,7 @@ int wmain(int argc, wchar_t** argv)
     TestAtomicTextWriteFailurePreservesExistingFile();
     TestCorruptCrashBucketStatsAreQuarantinedBeforeRecovery();
     TestWrongTypesInCrashBucketStatsAndSummaryAreDefaults();
+    TestCrashBucketStatsKeepTheMostRecentBuckets();
     TestIncidentManifestUpdatePropagatesAtomicReplaceFailure();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesHandledAccessViolationArtifacts();
     TestCleanupCrashArtifactsAfterZeroExit_RemovesItsRecapture();
