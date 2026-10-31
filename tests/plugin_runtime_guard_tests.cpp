@@ -581,6 +581,11 @@ int main()
     setupLogBody,
     "InstallFallbackLogger()",
     "Logger setup failure must install a safe fallback logger.");
+  AssertOrdered(
+    setupLogBody,
+    "skydiag::KeepSessionLog(*path, kPluginSessionLogsToKeep)",
+    "basic_file_sink_mt",
+    "The last session's SkyrimDiag.log must be moved aside before the truncating sink opens it.");
   AssertContains(
     pluginMain,
     "spdlog::sinks::null_sink_mt",

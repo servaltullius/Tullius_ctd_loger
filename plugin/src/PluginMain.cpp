@@ -25,6 +25,7 @@
 #include "SkyrimDiag/ResourceLog.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagSessionLogs.h"
 
 namespace {
 
@@ -193,6 +194,12 @@ std::optional<std::string> AnsiFileName(const std::filesystem::path& path)
   return WideToAnsiExact((std::filesystem::path(shortDir) / path.filename()).wstring());
 }
 
+// Earlier sessions' SkyrimDiag.log kept as SkyrimDiag.previous.log,
+// SkyrimDiag.previous.2.log, ..., as many as the helper keeps by default: a
+// test such as a quit after a freeze is often followed by another launch
+// before anyone reads the log, which then started over (2026-10-31).
+constexpr std::uint32_t kPluginSessionLogsToKeep = 5;
+
 bool SetupLog() noexcept
 {
   try {
@@ -203,6 +210,8 @@ bool SetupLog() noexcept
     }
 
     *path /= "SkyrimDiag.log";
+    // A log that cannot be moved is started over below, as before.
+    skydiag::KeepSessionLog(*path, kPluginSessionLogsToKeep);
     const auto fileName = AnsiFileName(*path);
     if (!fileName) {
       InstallFallbackLogger();

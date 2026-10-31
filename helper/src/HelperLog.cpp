@@ -11,6 +11,7 @@
 
 #include "HelperCommon.h"
 #include "SkyrimDiagHelper/Retention.h"
+#include "SkyrimDiagSessionLogs.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -22,26 +23,9 @@ std::vector<std::wstring> g_sessionStartLines;
 
 void RotateAndStartSession(const std::filesystem::path& outBase)
 {
-  std::error_code ec;
-  const auto path = outBase / L"SkyrimDiagHelper.log";
-  if (!std::filesystem::exists(path, ec) || std::filesystem::file_size(path, ec) == 0) {
-    return;
-  }
-  // Earlier sessions shift down: previous.log -> previous.2.log -> ... A crash
-  // is often followed by several relaunches before anyone reads the logs.
-  const auto keep = std::max<std::uint32_t>(1u, g_helperSessionLogsToKeep);
-  std::filesystem::remove(HelperSessionLogPath(outBase, keep), ec);
-  for (std::uint32_t i = keep; i > 1u; --i) {
-    const auto src = HelperSessionLogPath(outBase, i - 1u);
-    if (std::filesystem::exists(src, ec)) {
-      std::filesystem::rename(src, HelperSessionLogPath(outBase, i), ec);
-    }
-  }
-  const auto previous = HelperSessionLogPath(outBase, 1u);
-  std::filesystem::remove(previous, ec);
-  ec.clear();
-  std::filesystem::rename(path, previous, ec);
-  if (ec) {
+  // A crash is often followed by several relaunches before anyone reads the
+  // logs.
+  if (!skydiag::KeepSessionLog(outBase / L"SkyrimDiagHelper.log", g_helperSessionLogsToKeep)) {
     ClearLog(outBase);  // a locked log is still restarted, as before
   }
 }
@@ -68,10 +52,7 @@ void SetHelperSessionLogsToKeep(std::uint32_t sessions)
 
 std::filesystem::path HelperSessionLogPath(const std::filesystem::path& outBase, std::uint32_t age)
 {
-  if (age <= 1u) {
-    return outBase / L"SkyrimDiagHelper.previous.log";
-  }
-  return outBase / (L"SkyrimDiagHelper.previous." + std::to_wstring(age) + L".log");
+  return skydiag::PreviousSessionLogPath(outBase / L"SkyrimDiagHelper.log", age);
 }
 
 void ClearLog(const std::filesystem::path& outBase)

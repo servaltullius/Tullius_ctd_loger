@@ -1245,6 +1245,15 @@ target_link_libraries(skydiag_hang_object_threads_tests PRIVATE
 )
 add_test(NAME skydiag_hang_object_threads_tests COMMAND skydiag_hang_object_threads_tests)
 
+# Earlier sessions' logs (shared/SkyrimDiagSessionLogs.h, header-only, portable).
+add_executable(skydiag_session_logs_tests
+  session_logs_tests.cpp
+)
+target_include_directories(skydiag_session_logs_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+add_test(NAME skydiag_session_logs_tests COMMAND skydiag_session_logs_tests)
+
 # ThreadNamesStream reader on hand-built minidump bytes (header-only, portable).
 add_executable(skydiag_minidump_thread_names_tests
   minidump_thread_names_tests.cpp
