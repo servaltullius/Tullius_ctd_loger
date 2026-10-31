@@ -132,7 +132,7 @@ jobs:
         shell: pwsh
         env:
           SKYDIAG_DUMP_IO_TRACE: ${{ inputs.io_trace && '1' || '0' }}
-        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure --timeout 600
 
       # Runs even when the full suite failed (to keep hunting the flake), but
       # not after a failed build, which would only repeat the build error.
@@ -148,3 +148,4 @@ jobs:
           -R "$env:STRESS_TESTS"
           --repeat "until-fail:$env:STRESS_REPEAT"
           --output-on-failure
+          --timeout 600

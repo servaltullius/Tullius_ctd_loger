@@ -195,6 +195,12 @@ def find_release_notes(repo_root: Path, tag: str) -> str | None:
     return None
 
 
+def has_release_text(notes: str) -> bool:
+    """Whether notes say anything beyond headings: an empty draft or a bare
+    CHANGELOG heading would publish a release page with no notes."""
+    return any(line.strip() and not _HEADING.match(line) for line in _LINE_END.split(notes))
+
+
 def resolve_release_notes(repo_root: Path, tag: str) -> str:
     notes = find_release_notes(repo_root, tag)
     return notes if notes is not None else f"Release {tag.strip()}\n"
@@ -224,7 +230,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="fail instead of publishing a one-line placeholder when no draft or CHANGELOG section exists",
+        help="fail instead of publishing a one-line placeholder when no draft or CHANGELOG section exists, "
+        "or when the one found has no text beyond headings",
     )
     args = parser.parse_args(argv)
 
@@ -233,6 +240,13 @@ def main(argv: list[str] | None = None) -> int:
     if not output.is_absolute():
         output = (root / output).resolve()
     notes = find_release_notes(root, args.tag)
+    if args.strict and notes is not None and not has_release_text(notes):
+        print(
+            f"The release notes for {args.tag} have no text beyond headings: fill in the draft "
+            "or the CHANGELOG.md section",
+            file=sys.stderr,
+        )
+        return 2
     if notes is None:
         if args.strict:
             print(

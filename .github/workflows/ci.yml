@@ -191,7 +191,7 @@ jobs:
       # step those tests never ran anywhere.
       - name: Run tests (Windows)
         shell: pwsh
-        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure
+        run: ctest --test-dir build-win -C RelWithDebInfo --output-on-failure --timeout 600
 
       - name: Resolve release zip path
         id: release_zip

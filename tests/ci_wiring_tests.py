@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -271,6 +272,18 @@ def check_release_notes_rc_fallback(failures: list[str]) -> None:
         if resolver.main(["--repo-root", str(root), "--tag", "v1.2.3-rc4", "--output", str(out), "--strict"]) != 0:
             failures.append("--strict rejected a tag that has a draft")
 
+        # Notes that are only headings are no notes either.
+        (drafts / "v1.2.4.md").write_text("\n", encoding="utf-8")
+        (root / "CHANGELOG.md").write_text(
+            "## v1.2.6\n\n### 변경\n- 실제 내용\n\n## v1.2.5 - 2026-10-31\n\n### 수정\n\n## v1.2.3\nbase changelog\n",
+            encoding="utf-8",
+        )
+        for tag, why in (("v1.2.4", "an empty draft"), ("v1.2.5", "a CHANGELOG section of headings only")):
+            if resolver.main(["--repo-root", str(root), "--tag", tag, "--output", str(out), "--strict"]) == 0:
+                failures.append(f"--strict accepted {why}")
+        if resolver.main(["--repo-root", str(root), "--tag", "v1.2.6", "--output", str(out), "--strict"]) != 0:
+            failures.append("--strict rejected a CHANGELOG section with text")
+
 
 def check_markdown_has_no_strikethrough_ranges(failures: list[str]) -> None:
     # v0.2.72 shipped with `0.5~0.9GB ... 58~60MB` struck through on GitHub,
@@ -405,6 +418,18 @@ def check_windows_tests_are_wired(failures: list[str]) -> None:
         text = _read(WORKFLOWS / name)
         if "ctest --test-dir build-win" not in text:
             failures.append(f"{name} builds Windows targets but never runs ctest on them")
+
+
+def check_test_runs_are_bounded(failures: list[str]) -> None:
+    # A hung test held the job until its own limit and never said which test
+    # it was; ctest --timeout stops it and names it. Python tests run with -E,
+    # so a developer's PYTHONPATH or PYTHONSTARTUP does not change them.
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for match in re.finditer(r"\bctest --test-dir\b[^\n]*(?:\n[ \t]+-\S[^\n]*)*", _read(path)):
+            if "--timeout" not in match.group(0):
+                failures.append(f"{path.name}: ctest without --timeout: {match.group(0).splitlines()[0].strip()}")
+    for match in re.finditer(r'COMMAND "\$\{Python3_EXECUTABLE\}"(?! -E )[^\n]*', _read(REPO_ROOT / "tests" / "CMakeLists.txt")):
+        failures.append(f"tests/CMakeLists.txt: Python test without -E: {match.group(0)}")
 
 
 def check_windows_build_retries_once(failures: list[str]) -> None:
@@ -675,6 +700,76 @@ def check_docs_only_detector_behaviour(failures: list[str]) -> None:
                 failures.append(f"docs-only detector, {name}: expected code={expected}, got {got!r}")
 
 
+_FAKE_RELEASE_CONTRACT = '''\
+REQUIRED_ZIP_ENTRIES = ["SKSE/Plugins/Required.dll"]
+
+
+def project_version(root):
+    return "1.2.3"
+
+
+def release_zip_name(tag):
+    return f"Fake_{tag}.zip"
+
+
+def nested_winui_path_regex():
+    return r"^SKSE/Plugins/Viewer/Viewer/"
+'''
+
+
+def check_release_gate_behaviour(failures: list[str]) -> None:
+    # Run the gate itself on a fake repository. Steps 1-5 read only its
+    # release_contract.py, build-winui and the zip; step 6 then stops on the
+    # missing verify_release_zip.py, so reaching it means steps 1-5 passed.
+    bash = _find_bash()
+    if not bash or subprocess.run(
+        [bash, "-c", "command -v unzip && command -v sha256sum"], capture_output=True
+    ).returncode != 0:
+        print("ci_wiring_tests: bash/unzip not found; release gate behaviour not checked")
+        return
+    gate_text = _read(REPO_ROOT / "scripts" / "verify_release_gate.sh").replace("\r\n", "\n")
+    filler = [f"SKSE/Plugins/Filler/{i:05d}.txt" for i in range(30000)]
+    winui = 'REQUIRED_WINUI_BUILD_OUTPUTS = ["App.exe"]\n'
+    cases = [
+        # (name, contract's WinUI list, zip entries, expected in stdout, not expected in stdout)
+        ("unreadable contract list", "", ["SKSE/Plugins/Required.dll"], [], ["[gate] 2/8"]),
+        ("empty contract list", "REQUIRED_WINUI_BUILD_OUTPUTS = []\n", ["SKSE/Plugins/Required.dll"],
+         ["lists no required"], ["[gate] 2/8"]),
+        ("nested path first in a long listing", winui,
+         ["SKSE/Plugins/Viewer/Viewer/App.exe", *filler, "SKSE/Plugins/Required.dll"],
+         ["nested winui output detected in zip"], ["[gate] 6/8"]),
+        ("required entry first in a long listing", winui, ["SKSE/Plugins/Required.dll", *filler],
+         ["[gate] 6/8"], ["missing zip entry"]),
+    ]
+    with tempfile.TemporaryDirectory(prefix="skydiag_gate_") as tmp:
+        for name, winui_list, entries, expected, unexpected in cases:
+            root = Path(tmp) / name.replace(" ", "_")
+            (root / "scripts").mkdir(parents=True)
+            (root / "scripts" / "verify_release_gate.sh").write_bytes(gate_text.encode("utf-8"))
+            (root / "scripts" / "release_contract.py").write_text(
+                _FAKE_RELEASE_CONTRACT + winui_list, encoding="utf-8")
+            (root / "build-winui").mkdir()
+            (root / "build-winui" / "App.exe").write_bytes(b"")
+            zip_path = root / "dist" / "Fake_v1.2.3.zip"
+            zip_path.parent.mkdir()
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                for entry in entries:
+                    archive.writestr(entry, b"")
+            result = subprocess.run(
+                [bash, (root / "scripts" / "verify_release_gate.sh").as_posix(),
+                 root.as_posix(), root.as_posix(), zip_path.as_posix()],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+            )
+            if result.returncode == 0:
+                failures.append(f"release gate, {name}: passed a fake repository with no verifier")
+            for needle in expected:
+                if needle not in result.stdout:
+                    failures.append(f"release gate, {name}: no {needle!r} in its output:\n{result.stdout}")
+            for needle in unexpected:
+                if needle in result.stdout:
+                    failures.append(f"release gate, {name}: {needle!r} in its output:\n{result.stdout}")
+
+
 def check_vcpkg_overlay_reaches_existing_build_dirs(failures: list[str]) -> None:
     # The vcpkg toolchain caches VCPKG_OVERLAY_TRIPLETS, empty when nothing set
     # it, so a build folder configured before the overlay existed only gets it
@@ -723,9 +818,11 @@ def main() -> int:
     check_fuzzers_are_wired(failures)
     check_sanitizers_are_wired(failures)
     check_windows_tests_are_wired(failures)
+    check_test_runs_are_bounded(failures)
     check_windows_build_retries_once(failures)
     check_docs_only_skip_is_pr_only(failures)
     check_docs_only_detector_behaviour(failures)
+    check_release_gate_behaviour(failures)
     check_dump_stress_repeats_only_after_a_build(failures)
     check_pull_request_tidy_scope(failures)
     check_compiler_cache_is_ci_only(failures)
