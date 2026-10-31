@@ -457,6 +457,26 @@ void CapPointerScanSuspectConfidence(AnalysisResult& out)
 
 // ===== Main analysis orchestrator =====
 
+namespace {
+
+// An optional input from outside the dump (the plugin scan and MO2 state,
+// the Crash Logger log, the incident manifest, the crash history) that
+// cannot be read leaves its part out with a diagnostics line instead of
+// failing the whole analysis (exit 3) over one field of another type.
+template <class Step>
+void RunOptionalStep(const wchar_t* name, AnalysisResult& out, Step&& step)
+{
+  try {
+    step();
+  } catch (const std::exception& ex) {
+    out.diagnostics.push_back(std::wstring(L"[Optional input] ") + name + L" skipped: " + Utf8ToWide(ex.what()));
+  } catch (...) {
+    out.diagnostics.push_back(std::wstring(L"[Optional input] ") + name + L" skipped");
+  }
+}
+
+}  // namespace
+
 bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const AnalyzeOptions& opt, AnalysisResult& out, std::wstring* err)
 {
   out = AnalysisResult{};
@@ -505,8 +525,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       modulePaths.push_back(m.path);
     }
   }
-  LoadPluginScanJson(dumpPath, dumpBase, dumpSize, out);
-  const auto mo2Index = BuildMo2IndexForDump(modulePaths, out);
+  RunOptionalStep(L"plugin scan", out, [&] { LoadPluginScanJson(dumpPath, dumpBase, dumpSize, out); });
+  std::optional<Mo2Index> mo2Index;
+  RunOptionalStep(L"MO2 index", out, [&] { mo2Index = BuildMo2IndexForDump(modulePaths, out); });
   out.problematic_modules = FindProblematicModules(allModules);
 
   // Exception info + fault module
@@ -570,7 +591,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   }
 
   // Plugin scan + rules
-  IntegratePluginScan(dumpPath, allModules, dumpBase, dumpSize, opt, out);
+  RunOptionalStep(L"plugin scan rules", out, [&] { IntegratePluginScan(dumpPath, allModules, dumpBase, dumpSize, opt, out); });
 
   // Hang detection
   const bool hangLike = DetermineHangLike(nameHang, out);
@@ -582,9 +603,11 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       !out.is_filtered_clean_exit &&
       ((out.exc_code != 0) || nameCrash || hangLike);
     if (shouldSearchCrashLogger) {
-      IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
-      DowngradeCrashLoggerLogForOtherLocation(&out);
-      IntegrateCrashLoggerFrameSignals(allModules, &out);
+      RunOptionalStep(L"Crash Logger log", out, [&] {
+        IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
+        DowngradeCrashLoggerLogForOtherLocation(&out);
+        IntegrateCrashLoggerFrameSignals(allModules, &out);
+      });
     }
   }
 
@@ -744,11 +767,11 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
-  LoadIncidentCaptureProfile(dumpPath, outDir, out);
+  RunOptionalStep(L"incident manifest", out, [&] { LoadIncidentCaptureProfile(dumpPath, outDir, out); });
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
   if (!keepOutOfHistory) {
-    LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
+    RunOptionalStep(L"crash history", out, [&] { LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out); });
   }
 
   // Best-effort troubleshooting guide matching. Not for a forced close: the
@@ -821,7 +844,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   // so the history read under the main thread's wait key is read again and
   // the candidates it fed are rebuilt from it.
   if (internal::RekeyLockOwnerFreezeBucket(out) && !keepOutOfHistory) {
-    LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out);
+    RunOptionalStep(L"crash history", out, [&] { LoadCrashHistoryContext(historyPath, dumpPath, analysisTimestamp, out); });
     out.freeze_analysis = {};
     BuildEvidenceAndSummary(out, opt.language);
     freezeSignals.actionable_candidates = out.actionable_candidates;
@@ -859,7 +882,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     BuildEvidenceAndSummary(out, opt.language);
   }
   if (!keepOutOfHistory) {
-    AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out);
+    RunOptionalStep(L"crash history update", out, [&] { AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out); });
   }
   if (err) err->clear();
   return true;

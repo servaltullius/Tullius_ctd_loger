@@ -320,6 +320,20 @@ def test_viewer_options_match_the_analyzer() -> None:
     assert actual == "null|True|False|True|True|True|False|False", actual
 
 
+def test_viewer_survives_fields_of_another_type() -> None:
+    # TryGetProperty, TryGetInt32 and GetString throw on a node or value of
+    # another kind: an array entry that is a string, or the incident's
+    # recapture_evaluation copied as is from another version's manifest.
+    def modify(summary: dict) -> None:
+        summary["actionable_candidates"].append("not an object")
+        summary["crash_logger"].setdefault("object_refs", []).append("not an object")
+        summary["incident"] = {"recapture_evaluation": {"escalation_level": "2", "triggered": "yes", "reasons": [1]}}
+        summary["dump_identity"] = {"schema": 5, "sha256": 7, "size_bytes": "big", "last_write_time_utc_100ns": "x"}
+
+    community = _run_harness_on_modified("frame_first_summary.json", modify, "community")
+    assert community.split("\n")[0] == "🔴 Skyrim CTD Report — SkyrimDiag", community
+
+
 def test_viewer_reads_helper_ini_like_the_helper() -> None:
     # IniText.h FindValue: one matching pair of " or ' removed, the first
     # section of that name only, a header up to its "]". The viewer stripped
@@ -370,6 +384,7 @@ if __name__ == "__main__":
     test_ctd_named_freeze_stays_a_ctd()
     test_callstack_label_follows_the_analyzer()
     test_viewer_options_match_the_analyzer()
+    test_viewer_survives_fields_of_another_type()
     test_viewer_reads_helper_ini_like_the_helper()
     test_cleared_summary_produces_no_share_text()
     print("share_text_fixture_tests: OK")

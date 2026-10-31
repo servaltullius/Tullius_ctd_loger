@@ -3,6 +3,7 @@
 #include "CandidateConsensus.h"
 #include "CrashHistory.h"
 #include "CrashLoggerParseCore.h"
+#include "JsonValue.h"
 #include "MainThreadWait.h"
 #include "OutputWriterInternals.h"
 #include "ScopedHistoryFileLock.h"
@@ -62,30 +63,30 @@ void LoadIncidentCaptureProfile(
     return;
   }
 
-  out.incident_capture_kind = incidentManifest.value("capture_kind", "");
+  out.incident_capture_kind = JsonValueOr(incidentManifest, "capture_kind", std::string{});
   if (incidentManifest.contains("capture_profile") && incidentManifest["capture_profile"].is_object()) {
     const auto& capture_profile = incidentManifest["capture_profile"];
     out.incident_capture_profile_present = true;
     if (out.incident_capture_kind.empty()) {
-      out.incident_capture_kind = capture_profile.value("capture_kind", "");
+      out.incident_capture_kind = JsonValueOr(capture_profile, "capture_kind", std::string{});
     }
-    out.incident_capture_profile_base_mode = capture_profile.value("base_mode", "");
-    out.incident_capture_profile_code_segments = capture_profile.value("include_code_segments", false);
-    out.incident_capture_profile_process_thread_data = capture_profile.value("include_process_thread_data", false);
-    out.incident_capture_profile_full_memory_info = capture_profile.value("include_full_memory_info", false);
-    out.incident_capture_profile_module_headers = capture_profile.value("include_module_headers", false);
-    out.incident_capture_profile_indirect_memory = capture_profile.value("include_indirect_memory", false);
+    out.incident_capture_profile_base_mode = JsonValueOr(capture_profile, "base_mode", std::string{});
+    out.incident_capture_profile_code_segments = JsonValueOr(capture_profile, "include_code_segments", false);
+    out.incident_capture_profile_process_thread_data = JsonValueOr(capture_profile, "include_process_thread_data", false);
+    out.incident_capture_profile_full_memory_info = JsonValueOr(capture_profile, "include_full_memory_info", false);
+    out.incident_capture_profile_module_headers = JsonValueOr(capture_profile, "include_module_headers", false);
+    out.incident_capture_profile_indirect_memory = JsonValueOr(capture_profile, "include_indirect_memory", false);
     out.incident_capture_profile_ignore_inaccessible_memory =
-      capture_profile.value("ignore_inaccessible_memory", false);
-    out.incident_capture_profile_full_memory = capture_profile.value("include_full_memory", false);
+      JsonValueOr(capture_profile, "ignore_inaccessible_memory", false);
+    out.incident_capture_profile_full_memory = JsonValueOr(capture_profile, "include_full_memory", false);
   }
   if (incidentManifest.contains("recapture_evaluation") && incidentManifest["recapture_evaluation"].is_object()) {
     const auto& recapture_evaluation = incidentManifest["recapture_evaluation"];
     out.incident_recapture_evaluation_present = true;
-    out.incident_recapture_triggered = recapture_evaluation.value("triggered", false);
-    out.incident_recapture_kind = recapture_evaluation.value("kind", "");
-    out.incident_recapture_target_profile = recapture_evaluation.value("target_profile", "");
-    out.incident_recapture_escalation_level = recapture_evaluation.value("escalation_level", 0u);
+    out.incident_recapture_triggered = JsonValueOr(recapture_evaluation, "triggered", false);
+    out.incident_recapture_kind = JsonValueOr(recapture_evaluation, "kind", std::string{});
+    out.incident_recapture_target_profile = JsonValueOr(recapture_evaluation, "target_profile", std::string{});
+    out.incident_recapture_escalation_level = JsonValueOr(recapture_evaluation, "escalation_level", 0u);
     out.incident_recapture_reasons.clear();
     if (recapture_evaluation.contains("reasons") && recapture_evaluation["reasons"].is_array()) {
       for (const auto& reason : recapture_evaluation["reasons"]) {

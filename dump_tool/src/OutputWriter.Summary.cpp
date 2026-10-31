@@ -2,6 +2,7 @@
 
 #include "DumpObjects.h"
 #include "GameLockWait.h"
+#include "JsonValue.h"
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
 #include "NextAction.h"
@@ -222,8 +223,8 @@ nlohmann::json BuildSummaryJson(
     }
 
     summary["incident"] = {
-      { "incident_id", incidentManifest.value("incident_id", "") },
-      { "capture_kind", incidentManifest.value("capture_kind", "") },
+      { "incident_id", JsonValueOr(incidentManifest, "incident_id", std::string{}) },
+      { "capture_kind", JsonValueOr(incidentManifest, "capture_kind", std::string{}) },
       { "artifacts", std::move(artifacts) },
       { "capture_profile", std::move(captureProfile) },
       { "recapture_evaluation", std::move(recaptureEvaluation) },
@@ -434,8 +435,8 @@ nlohmann::json BuildSummaryJson(
         std::size_t active = 0;
         std::size_t light = 0;
         for (const auto& plugin : parsedPluginScan["plugins"]) {
-          active += plugin.value("is_active", false) ? 1u : 0u;
-          light += plugin.value("is_esl", false) ? 1u : 0u;
+          active += JsonValueOr(plugin, "is_active", false) ? 1u : 0u;
+          light += JsonValueOr(plugin, "is_esl", false) ? 1u : 0u;
         }
         parsedPluginScan["plugin_count"] = parsedPluginScan["plugins"].size();
         parsedPluginScan["active_plugin_count"] = active;

@@ -28,12 +28,17 @@ internal sealed record DumpIdentityContract(
         {
             node = nested;
         }
+        // GetString and TryGetInt64 throw on a value of another kind.
         if (node.ValueKind != JsonValueKind.Object ||
             !node.TryGetProperty("schema", out var schema) ||
+            schema.ValueKind != JsonValueKind.String ||
             schema.GetString() != "skydiag.dump_identity.v1" ||
             !node.TryGetProperty("sha256", out var sha) ||
+            sha.ValueKind != JsonValueKind.String ||
             !node.TryGetProperty("size_bytes", out var size) ||
             !node.TryGetProperty("last_write_time_utc_100ns", out var modified) ||
+            size.ValueKind != JsonValueKind.Number ||
+            modified.ValueKind != JsonValueKind.Number ||
             !size.TryGetInt64(out var sizeValue) ||
             !modified.TryGetInt64(out var modifiedValue))
         {
