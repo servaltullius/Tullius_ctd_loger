@@ -208,55 +208,17 @@ bool TryGetFileLastWriteTimeU64(const std::wstring& path, std::uint64_t& out, st
   return true;
 }
 
-std::optional<std::uint64_t> TryParseLocalTimestampInFilenameToFileTimeUtc(std::wstring_view stem)
+// A time read from a file name is local time: as a UTC FILETIME, or nullopt
+// when Windows cannot convert it (Feb 30, say).
+std::optional<std::uint64_t> LocalTimestampToFileTimeUtc(const crashlogger_core::ParsedTimestamp& ts)
 {
-  // Search for pattern: YYYYMMDD_HHMMSS (local time)
-  const auto is_digits = [](std::wstring_view s) {
-    for (wchar_t c : s) {
-      if (c < L'0' || c > L'9') {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  std::optional<std::size_t> bestPos;
-  for (std::size_t i = 0; i + 15 <= stem.size(); i++) {
-    const std::wstring_view date = stem.substr(i, 8);
-    if (!is_digits(date)) {
-      continue;
-    }
-    if (stem[i + 8] != L'_') {
-      continue;
-    }
-    const std::wstring_view time = stem.substr(i + 9, 6);
-    if (!is_digits(time)) {
-      continue;
-    }
-    bestPos = i;
-  }
-  if (!bestPos) {
-    return std::nullopt;
-  }
-
-  const std::size_t pos = *bestPos;
-  const std::wstring_view date = stem.substr(pos, 8);
-  const std::wstring_view time = stem.substr(pos + 9, 6);
-
-  const int y = std::stoi(std::wstring(date.substr(0, 4)));
-  const int mo = std::stoi(std::wstring(date.substr(4, 2)));
-  const int d = std::stoi(std::wstring(date.substr(6, 2)));
-  const int hh = std::stoi(std::wstring(time.substr(0, 2)));
-  const int mm = std::stoi(std::wstring(time.substr(2, 2)));
-  const int ss = std::stoi(std::wstring(time.substr(4, 2)));
-
   SYSTEMTIME local{};
-  local.wYear = static_cast<WORD>(y);
-  local.wMonth = static_cast<WORD>(mo);
-  local.wDay = static_cast<WORD>(d);
-  local.wHour = static_cast<WORD>(hh);
-  local.wMinute = static_cast<WORD>(mm);
-  local.wSecond = static_cast<WORD>(ss);
+  local.wYear = static_cast<WORD>(ts.year);
+  local.wMonth = static_cast<WORD>(ts.month);
+  local.wDay = static_cast<WORD>(ts.day);
+  local.wHour = static_cast<WORD>(ts.hour);
+  local.wMinute = static_cast<WORD>(ts.minute);
+  local.wSecond = static_cast<WORD>(ts.second);
 
   SYSTEMTIME utc{};
   if (!TzSpecificLocalTimeToSystemTime(nullptr, &local, &utc)) {
@@ -270,66 +232,19 @@ std::optional<std::uint64_t> TryParseLocalTimestampInFilenameToFileTimeUtc(std::
   return FileTimeToU64(ft);
 }
 
+// YYYYMMDD_HHMMSS (our dumps). The parsers are crashlogger_core's, which the
+// tests cover; this file kept its own copies before.
+std::optional<std::uint64_t> TryParseLocalTimestampInFilenameToFileTimeUtc(std::wstring_view stem)
+{
+  const auto ts = crashlogger_core::TryExtractCompactTimestampFromStem(stem);
+  return ts ? LocalTimestampToFileTimeUtc(*ts) : std::nullopt;
+}
+
+// YYYY-MM-DD-HH-MM-SS (Crash Logger's logs).
 std::optional<std::uint64_t> TryParseCrashLoggerTimestampInFilenameToFileTimeUtc(std::wstring_view stem)
 {
-  // Search for pattern: YYYY-MM-DD-HH-MM-SS (local time)
-  const auto is_digits = [](std::wstring_view s) {
-    for (wchar_t c : s) {
-      if (c < L'0' || c > L'9') {
-        return false;
-      }
-    }
-    return true;
-  };
-
-  for (std::size_t i = 0; i + 19 <= stem.size(); i++) {
-    const std::wstring_view v = stem.substr(i, 19);
-    if (v[4] != L'-' || v[7] != L'-' || v[10] != L'-' || v[13] != L'-' || v[16] != L'-') {
-      continue;
-    }
-
-    const std::wstring_view yS = v.substr(0, 4);
-    const std::wstring_view moS = v.substr(5, 2);
-    const std::wstring_view dS = v.substr(8, 2);
-    const std::wstring_view hhS = v.substr(11, 2);
-    const std::wstring_view mmS = v.substr(14, 2);
-    const std::wstring_view ssS = v.substr(17, 2);
-    if (!is_digits(yS) || !is_digits(moS) || !is_digits(dS) || !is_digits(hhS) || !is_digits(mmS) || !is_digits(ssS)) {
-      continue;
-    }
-
-    const int y = std::stoi(std::wstring(yS));
-    const int mo = std::stoi(std::wstring(moS));
-    const int d = std::stoi(std::wstring(dS));
-    const int hh = std::stoi(std::wstring(hhS));
-    const int mm = std::stoi(std::wstring(mmS));
-    const int ss = std::stoi(std::wstring(ssS));
-
-    if (mo < 1 || mo > 12 || d < 1 || d > 31 || hh < 0 || hh > 23 || mm < 0 || mm > 59 || ss < 0 || ss > 59) {
-      continue;
-    }
-
-    SYSTEMTIME local{};
-    local.wYear = static_cast<WORD>(y);
-    local.wMonth = static_cast<WORD>(mo);
-    local.wDay = static_cast<WORD>(d);
-    local.wHour = static_cast<WORD>(hh);
-    local.wMinute = static_cast<WORD>(mm);
-    local.wSecond = static_cast<WORD>(ss);
-
-    SYSTEMTIME utc{};
-    if (!TzSpecificLocalTimeToSystemTime(nullptr, &local, &utc)) {
-      return std::nullopt;
-    }
-
-    FILETIME ft{};
-    if (!SystemTimeToFileTime(&utc, &ft)) {
-      return std::nullopt;
-    }
-    return FileTimeToU64(ft);
-  }
-
-  return std::nullopt;
+  const auto ts = crashlogger_core::TryExtractDashedTimestampFromStem(stem);
+  return ts ? LocalTimestampToFileTimeUtc(*ts) : std::nullopt;
 }
 
 std::uint64_t BestEffortDumpTimestampFileTimeUtc(const std::filesystem::path& dumpPath)

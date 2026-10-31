@@ -34,10 +34,14 @@ static void WriteFile(const std::filesystem::path& path, std::size_t bytes = 1)
   f.write(blob.data(), static_cast<std::streamsize>(blob.size()));
 }
 
+// A failed check stops the test: read as "not there", it passed every "the
+// file is gone" check without checking anything.
 static bool Exists(const std::filesystem::path& path)
 {
   std::error_code ec;
-  return std::filesystem::exists(path, ec);
+  const bool exists = std::filesystem::exists(path, ec);
+  assert(!ec && "exists() failed");
+  return exists;
 }
 
 // Unique per run (an unseeded rand() gave every run the same names, so a

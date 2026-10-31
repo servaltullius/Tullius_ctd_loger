@@ -1394,10 +1394,10 @@ bool HandleCrashEventTick(
             context,
             dumpPath,
             CleanExitDumpState::kPendingDelete);
-          if (!pendingWritten) {
-            // Without a durable pending record, keep the dump as the fail-safe.
-            preserveFilteredDump = true;
-          } else {
+          // Without a durable pending record, keep the dump as the fail-safe.
+          preserveFilteredDump =
+            ShouldPreserveFilteredDump(cfg.preserveFilteredCrashDumps, evidenceRequired, pendingWritten);
+          if (!preserveFilteredDump) {
             const auto removal = RemoveFileAndObserve(dumpPath);
             dumpRemovalHandled = true;
             preserveFilteredDump = removal.existsAfter;

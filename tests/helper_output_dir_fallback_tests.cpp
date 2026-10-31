@@ -95,7 +95,7 @@ void TestWritableOutputDirIsKept(const std::filesystem::path& root)
   cfg.outputDirFallbacks = { (root / L"unused").wstring() };
   Require(MakeOutputBase(cfg) == root / L"configured", "a writable OutputDir is used as configured");
   std::error_code ec;
-  Require(!std::filesystem::exists(root / L"unused", ec), "no fallback is created when it is not needed");
+  Require(!std::filesystem::exists(root / L"unused", ec) && !ec, "no fallback is created when it is not needed");
 }
 
 void TestNothingWritableKeepsTheConfiguredPath(const std::filesystem::path& root)

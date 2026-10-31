@@ -8,6 +8,8 @@
 #include <iterator>
 #include <string>
 
+#include "SourceGuardTestUtils.h"
+
 static std::string ReadFile(const char* relPath)
 {
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
@@ -71,7 +73,9 @@ static void TestAnalyzerUsesRealCallstackForSignatureInput()
 
 static void TestAnalyzerUsesVersionAndAccessedAddressForSignatureInput()
 {
-  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  // All of Analyzer.cpp's parts: a line that must stay gone could come back
+  // in any of them.
+  const auto analyzer = skydiag::tests::source_guard::ReadProjectText("dump_tool/src/Analyzer.cpp");
   const auto signatures = ReadFile("dump_tool/data/crash_signatures.json");
 
   assert(analyzer.find("input.game_version = out.game_version") != std::string::npos);
@@ -90,7 +94,7 @@ static void TestAnalyzerUsesVersionAndAccessedAddressForSignatureInput()
 
 static void TestUnmatchedCrashLoggerCandidateIsNotConfidencePromoted()
 {
-  const auto analyzer = ReadFile("dump_tool/src/Analyzer.cpp");
+  const auto analyzer = skydiag::tests::source_guard::ReadProjectText("dump_tool/src/Analyzer.cpp");
   assert(analyzer.find("topRow.matchedRank && *topRow.matchedRank <= 1u") != std::string::npos);
   assert(analyzer.find("!topRow.matchedRank || *topRow.matchedRank <= 1u") == std::string::npos);
 }
