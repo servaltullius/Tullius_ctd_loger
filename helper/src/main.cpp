@@ -43,7 +43,7 @@ std::wstring SessionStartTimeText()
 
 }  // namespace
 
-int wmain(int argc, wchar_t** argv)
+static int RunHelper(int argc, wchar_t** argv)
 {
   // Keep helper overhead minimal vs. the game.
   SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
@@ -201,4 +201,30 @@ int wmain(int argc, wchar_t** argv)
   }
   skydiag::helper::Detach(proc);
   return 0;
+}
+
+// Nothing above RunHelperLoop caught an exception: an unexpected one (out of
+// memory, a bug) ended the helper with no line in its log, as it runs with
+// no console, and with the retention thread still joinable std::terminate
+// followed. The cause now goes to the session log, and the process ends at
+// once; the plugin starts a new helper, which picks up a frozen crash.
+int wmain(int argc, wchar_t** argv)
+{
+  std::wstring cause;
+  try {
+    return RunHelper(argc, argv);
+  } catch (const std::exception& ex) {
+    cause = skydiag::helper::internal::AnsiExceptionText(ex);
+  } catch (...) {
+    cause = L"unknown exception";
+  }
+  try {
+    const auto outBase = skydiag::helper::internal::HelperSessionOutBase();
+    if (!outBase.empty()) {
+      skydiag::helper::internal::AppendLogLine(outBase, L"Helper stopped by an unexpected error: " + cause);
+    }
+    std::wcerr << L"[SkyrimDiagHelper] Stopped by an unexpected error: " << cause << L"\n";
+  } catch (...) {  // NOLINT(bugprone-empty-catch): logging failed too; nothing is left to report to
+  }
+  ExitProcess(3);
 }

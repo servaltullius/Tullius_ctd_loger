@@ -430,7 +430,7 @@ inline void PruneDumpsOverTotalBytes(
     }
     for (const auto& dump : dumps) {
       std::error_code sizeEc;
-      const auto size = std::filesystem::file_size(dump.path, sizeEc);
+      const auto size = FileSizeForIo(dump.path, sizeEc);
       all.push_back(SizedDump{ dump, k, sizeEc ? 0u : static_cast<std::uint64_t>(size) });
     }
   }
@@ -454,7 +454,7 @@ inline void PruneDumpsOverTotalBytes(
       return true;
     }
     std::error_code timeEc;
-    const auto written = std::filesystem::last_write_time(entry.dump.path, timeEc);
+    const auto written = LastWriteTimeForIo(entry.dump.path, timeEc);
     return timeEc || now - written < recentAge;
   };
 
@@ -507,7 +507,7 @@ inline void PruneOrphanedAnalysisCaches(
       continue;
     }
     std::error_code sizeEc;
-    const auto size = std::filesystem::file_size(file, sizeEc);
+    const auto size = FileSizeForIo(file, sizeEc);
     if (!sizeEc) {
       dumpSizes.insert(static_cast<std::uint64_t>(size));
     }
@@ -576,7 +576,7 @@ inline void PruneHelperLeftovers(
   const auto now = std::filesystem::file_time_type::clock::now();
   const auto olderThan = [&](const std::filesystem::path& path, std::chrono::seconds age) {
     std::error_code timeEc;
-    const auto written = std::filesystem::last_write_time(path, timeEc);
+    const auto written = LastWriteTimeForIo(path, timeEc);
     return !timeEc && now - written >= age;
   };
 

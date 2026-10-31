@@ -9,6 +9,8 @@
 #include <string>
 #include <thread>
 
+#include <nlohmann/json.hpp>
+
 #include "CrashCapture.h"
 #include "CrashEtwCapture.h"
 #include "HelperCommon.h"
@@ -163,6 +165,16 @@ void TestHandleCrashEventTick_WritesCrashArtifactsUnderALongOutputDir()
   CheckCrashArtifactsAreWritten(outBase);
   std::error_code ec;
   skydiag::RemoveAllForIo(skydiag::ExtendedLengthPath(root), ec);
+}
+
+// The capture files are written with DumpJsonForFile: json::dump()'s default
+// throws on invalid UTF-8, which would cost the capture its file (and, with
+// nothing above the helper loop catching, the helper).
+void TestDumpJsonForFileReplacesInvalidUtf8()
+{
+  const nlohmann::json j = { { "name", std::string("bad\xFF") } };
+  const auto text = skydiag::helper::internal::DumpJsonForFile(j);
+  Require(text.find("bad\xEF\xBF\xBD") != std::string::npos, "invalid UTF-8 is replaced, not thrown on");
 }
 
 void TestWorkingDirectoryForLongFolders()
@@ -816,6 +828,7 @@ int main()
 {
   try {
     TestQuoteArgRoundTripsThroughCommandLineToArgvW();
+    TestDumpJsonForFileReplacesInvalidUtf8();
     TestCrashLoggerIniPathDecodesWithoutThrowing();
     TestWorkingDirectoryForLongFolders();
     TestHandleCrashEventTick_WritesCrashArtifacts();

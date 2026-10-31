@@ -649,7 +649,7 @@ void RunPreflightChecks(
   };
 
   const auto preflightPath = outBase / L"SkyrimDiag_Preflight.json";
-  WriteTextFileUtf8(preflightPath, out.dump(2));
+  WriteTextFileUtf8(preflightPath, DumpJsonForFile(out));
   AppendLogLine(
     outBase,
     L"Compatibility preflight written: " + preflightPath.wstring() +

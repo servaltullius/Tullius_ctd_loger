@@ -1,4 +1,5 @@
 #include "PendingCrashAnalysisInternal.h"
+#include "SkyrimDiagLongPath.h"
 
 #include <filesystem>
 #include <optional>
@@ -94,7 +95,7 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
 {
   CrashRecaptureArtifacts written{};
   std::error_code manifestEc;
-  if (!context.manifestPath.empty() && std::filesystem::exists(context.manifestPath, manifestEc)) {
+  if (!context.manifestPath.empty() && ExistsForIo(context.manifestPath, manifestEc)) {
     std::wstring manifestErr;
     if (!TryUpdateIncidentManifestRecaptureEvaluation(
           context.manifestPath,
@@ -174,7 +175,7 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
             &context.recaptureDecision,
             cfg,
             cfg.incidentManifestIncludeConfigSnapshot);
-          WriteTextFileUtf8(recaptureManifestPath, manifest.dump(2));
+          WriteTextFileUtf8(recaptureManifestPath, DumpJsonForFile(manifest));
           written.manifest = recaptureManifestPath;
           AppendLogLine(
             outBase,

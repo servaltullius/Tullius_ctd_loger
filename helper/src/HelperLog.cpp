@@ -12,6 +12,7 @@
 #include "HelperCommon.h"
 #include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagSessionLogs.h"
+#include "SkyrimDiagLongPath.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -20,6 +21,7 @@ std::uint64_t g_maxHelperLogBytes = 0;
 std::uint32_t g_maxHelperLogFiles = 0;
 std::uint32_t g_helperSessionLogsToKeep = kDefaultHelperSessionLogsToKeep;
 std::vector<std::wstring> g_sessionStartLines;
+std::filesystem::path g_sessionOutBase;
 
 void RotateAndStartSession(const std::filesystem::path& outBase)
 {
@@ -67,6 +69,7 @@ void ClearLog(const std::filesystem::path& outBase)
 
 void StartHelperLogSession(const std::filesystem::path& outBase)
 {
+  g_sessionOutBase = outBase;
   RotateAndStartSession(outBase);
   for (const auto& line : g_sessionStartLines) {
     AppendLogLine(outBase, line);
@@ -74,10 +77,15 @@ void StartHelperLogSession(const std::filesystem::path& outBase)
   g_sessionStartLines.clear();
 }
 
+std::filesystem::path HelperSessionOutBase()
+{
+  return g_sessionOutBase;
+}
+
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
 {
   std::error_code ec;
-  std::filesystem::create_directories(outBase, ec);
+  skydiag::CreateDirectoriesForIo(outBase, ec);
 
   const auto path = outBase / L"SkyrimDiagHelper.log";
   skydiag::helper::RotateLogFileIfNeeded(path, g_maxHelperLogBytes, g_maxHelperLogFiles);

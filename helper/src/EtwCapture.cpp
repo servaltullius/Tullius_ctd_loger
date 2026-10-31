@@ -178,9 +178,10 @@ bool ValidateWrittenEtwArtifact(
     return false;
   }
 
+  // The *ForIo calls: under MO2 the attribute calls fail on a trace past
+  // MAX_PATH, and a written trace read as missing (SkyrimDiagLongPath.h).
   std::error_code ec;
-  const auto status = std::filesystem::status(etlPath, ec);
-  if (ec || !std::filesystem::exists(status)) {
+  if (!ExistsForIo(etlPath, ec) || ec) {
     if (err) {
       *err =
         L"wpr -stop exited successfully but did not create the ETL file: "
@@ -191,7 +192,7 @@ bool ValidateWrittenEtwArtifact(
     }
     return false;
   }
-  if (!std::filesystem::is_regular_file(status)) {
+  if (!IsRegularFileForIo(etlPath)) {
     if (err) {
       *err =
         L"wpr -stop exited successfully but the ETL output is not a regular file: "
@@ -200,7 +201,7 @@ bool ValidateWrittenEtwArtifact(
     return false;
   }
 
-  const auto size = std::filesystem::file_size(etlPath, ec);
+  const auto size = FileSizeForIo(etlPath, ec);
   if (ec || size == 0u) {
     if (err) {
       *err =

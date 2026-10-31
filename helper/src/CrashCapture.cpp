@@ -1,4 +1,5 @@
 #include "CrashCapture.h"
+#include "SkyrimDiagLongPath.h"
 
 #include <Windows.h>
 
@@ -70,23 +71,30 @@ struct FileRemovalObservation {
 FileRemovalObservation RemoveFileAndObserve(const std::filesystem::path& path) noexcept
 {
   FileRemovalObservation result{};
-  std::error_code ec;
-  result.existedBefore = std::filesystem::exists(path, ec);
-  if (ec) {
-    result.error = ec;
-    result.existsAfter = true;
-    return result;
-  }
+  try {
+    std::error_code ec;
+    // ExistsForIo: under MO2 a dump past MAX_PATH read as already gone.
+    result.existedBefore = ExistsForIo(path, ec);
+    if (ec) {
+      result.error = ec;
+      result.existsAfter = true;
+      return result;
+    }
 
-  std::filesystem::remove(path, ec);
-  if (ec) {
-    result.error = ec;
-  }
-  ec.clear();
-  result.existsAfter = std::filesystem::exists(path, ec);
-  if (ec) {
-    result.error = ec;
-    // Fail closed when the final state cannot be observed.
+    std::filesystem::remove(path, ec);
+    if (ec) {
+      result.error = ec;
+    }
+    ec.clear();
+    result.existsAfter = ExistsForIo(path, ec);
+    if (ec) {
+      result.error = ec;
+      // Fail closed when the final state cannot be observed.
+      result.existsAfter = true;
+    }
+  } catch (...) {
+    // ExistsForIo builds paths (out of memory): fail closed as above.
+    result.error = std::make_error_code(std::errc::not_enough_memory);
     result.existsAfter = true;
   }
   return result;
@@ -298,7 +306,7 @@ bool WriteCleanExitEvidenceRecord(
         "successfully discarded and derived crash actions were suppressed.";
   }
 
-  if (!WriteTextFileUtf8(recordPath, j.dump(2))) {
+  if (!WriteTextFileUtf8(recordPath, DumpJsonForFile(j))) {
     AppendLogLine(
       recordPath.parent_path(),
       L"Failed to atomically update clean-exit evidence metadata; any existing record remains authoritative: "
@@ -583,7 +591,7 @@ void ProcessValidCrashDump(
       /*recaptureDecision=*/nullptr,
       cfg,
       cfg.incidentManifestIncludeConfigSnapshot);
-    WriteTextFileUtf8(manifestPath, manifest.dump(2));
+    WriteTextFileUtf8(manifestPath, DumpJsonForFile(manifest));
     AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
   }
 
@@ -1013,7 +1021,7 @@ bool TryWritePostExitCrashEvidenceRecord(
        + L"_"
        + std::to_wstring(info.crashSeq)
        + L".json");
-  if (!WriteTextFileUtf8(path, j.dump(2))) {
+  if (!WriteTextFileUtf8(path, DumpJsonForFile(j))) {
     AppendLogLine(
       outBase,
       L"Failed to write post-exit crash evidence metadata: " + path.wstring());

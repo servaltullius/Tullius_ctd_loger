@@ -1,4 +1,5 @@
 #include "HelperMainInternal.h"
+#include "SkyrimDiagLongPath.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -102,7 +103,7 @@ bool PromoteReleasedCrashDump(
   crash.releasedDumpPreserve = false;
   crash.releasedDumpRecovery = LateRecoveryState{};
   std::error_code ec;
-  if (!std::filesystem::exists(dumpPath, ec) || ec) {
+  if (!ExistsForIo(dumpPath, ec) || ec) {
     AppendLogLine(outBase, L"The dump held since the release is gone: " + std::filesystem::path(dumpPath).filename().wstring());
     return false;
   }

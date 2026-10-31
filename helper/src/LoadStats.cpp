@@ -86,7 +86,7 @@ bool LoadStats::SaveToFile(const std::filesystem::path& path) const
   // This state survives across helper runs. Reuse the helper's checked
   // write/flush/replace path so a disk or sharing failure cannot truncate the
   // last known-good adaptive-loading history.
-  return internal::WriteTextFileUtf8(path, j.dump(2));
+  return internal::WriteTextFileUtf8(path, internal::DumpJsonForFile(j));
 }
 
 void LoadStats::AddLoadingSampleSeconds(std::uint32_t seconds)

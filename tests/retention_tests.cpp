@@ -515,6 +515,37 @@ static void Test_PrunesOldestDumpsOverTheTotalBudget()
   assert(!Exists(crash1));
 }
 
+// The same under an output folder whose dumps pass MAX_PATH, given in its
+// extended form as the helper does. Under MO2 the dump sizes came back as
+// errors (file_size by path), every dump counted 0 bytes and the budget
+// never pruned (the *ForIo calls of SkyrimDiagLongPath.h).
+static void Test_TotalBudgetUnderALongOutputDir()
+{
+  const auto root = MakeTempDir();
+  auto dir = root;
+  while (dir.native().size() < 230u) {
+    dir /= "a_long_output_folder_segment";
+  }
+  const auto outBase = ExtendedLengthPath(dir);
+  const auto crash1 = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
+  const auto crash2 = dir / "SkyrimDiag_Crash_20260101_000002_000.dmp";
+  const auto crash3 = dir / "SkyrimDiag_Crash_20260101_000003_000.dmp";
+  assert(crash1.native().size() >= 260u);
+  WriteFile(ExtendedLengthPath(crash1), 40);
+  WriteFile(ExtendedLengthPath(crash2), 40);
+  WriteFile(ExtendedLengthPath(crash3), 40);
+
+  // 40 + 40 fit, the oldest makes 120.
+  PruneDumpsOverTotalBytes(outBase, 100);
+
+  assert(skydiag::IsRegularFileForIo(crash3));
+  assert(skydiag::IsRegularFileForIo(crash2));
+  assert(!skydiag::IsRegularFileForIo(crash1));
+
+  std::error_code ec;
+  skydiag::RemoveAllForIo(ExtendedLengthPath(root), ec);
+}
+
 // A budget smaller than the newest dumps keeps the newest of each kind
 // written within the last day and only those; 0 is unlimited.
 static void Test_TotalBudgetKeepsTheRecentNewestOfEachKind()
@@ -682,6 +713,7 @@ int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
   Test_PrunesOldestDumpsOverTheTotalBudget();
+  Test_TotalBudgetUnderALongOutputDir();
   Test_TotalBudgetKeepsTheRecentNewestOfEachKind();
   Test_TotalBudgetDropsAnOldNewestOfItsKind();
   Test_TotalBudgetKeepsARecaptureWithItsCrash();
