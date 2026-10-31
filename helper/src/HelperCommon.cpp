@@ -41,7 +41,7 @@ std::filesystem::path CrashBucketStatsPath(const std::filesystem::path& outBase)
 // The unsigned number or string at `key`, or `fallback` when it is missing or
 // of another type. nlohmann's value() throws type_error on a wrong type, and
 // these files can be edited by hand or come from another version; an
-// exception here would end the helper (nothing above RunHelperLoop catches).
+// exception here would end the helper (only wmain catches, and exits).
 std::uint32_t JsonUintOr(const nlohmann::json& object, const char* key, std::uint32_t fallback)
 {
   if (!object.is_object()) {
@@ -119,7 +119,9 @@ bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* er
     return false;
   }
   std::error_code ec;
-  std::filesystem::create_directories(dir, ec);
+  // CreateDirectoriesForIo: create_directories fails on a long folder that
+  // exists under MO2 (SkyrimDiagLongPath.h).
+  CreateDirectoriesForIo(dir, ec);
   if (ec) {
     if (err) {
       *err = L"create_directories failed (error " + std::to_wstring(ec.value()) + L")";
@@ -254,6 +256,11 @@ bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
     std::filesystem::remove(tempPath, removeEc);
   }
   return ok;
+}
+
+std::string DumpJsonForFile(const nlohmann::json& j)
+{
+  return j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out)
@@ -481,7 +488,7 @@ bool UpdateCrashBucketStats(
 
   nlohmann::json root = nlohmann::json::object();
   std::error_code existsEc;
-  const bool statsExist = std::filesystem::exists(path, existsEc);
+  const bool statsExist = ExistsForIo(path, existsEc);
   if (existsEc) {
     if (err) {
       *err = L"crash bucket stats existence check failed: "

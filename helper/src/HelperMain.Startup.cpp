@@ -1,4 +1,5 @@
 #include "HelperMainInternal.h"
+#include "SkyrimDiagLongPath.h"
 
 #include <ShlObj.h>
 
@@ -115,7 +116,7 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
     std::error_code ec;
     const bool isDump = path == dumpFs;
     if (isDump) {
-      result.dumpExistedBefore = std::filesystem::exists(path, ec);
+      result.dumpExistedBefore = ExistsForIo(path, ec);
       if (ec) {
         result.dumpError = ec;
         AppendLogLine(
@@ -142,7 +143,7 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   }
 
   std::error_code existsEc;
-  result.dumpExistsAfter = std::filesystem::exists(dumpFs, existsEc);
+  result.dumpExistsAfter = ExistsForIo(dumpFs, existsEc);
   if (existsEc) {
     result.dumpError = existsEc;
     // Fail closed: an unobservable final state must not be reported as deleted.
@@ -239,7 +240,9 @@ std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, con
   // to the same folder.
   const auto marker = outBase / (FrozenCrashRearmMarkerPrefix(proc) + std::to_wstring(committed.crashSeq) + L".marker");
   std::error_code existsEc;
-  const bool alreadyRearmed = std::filesystem::exists(marker, existsEc) || existsEc;
+  // ExistsForIo: under MO2 a marker past MAX_PATH read as missing, so the
+  // same frozen crash was signaled again by every new helper.
+  const bool alreadyRearmed = ExistsForIo(marker, existsEc) || existsEc;
   if (alreadyRearmed || !WriteTextFileUtf8(marker, "rearmed\n")) {
     const bool thawed = proc.shmWritable && TryClearRecoveredCrashFreeze(proc.shmWritable, committed.crashSeq);
     AppendLogLine(

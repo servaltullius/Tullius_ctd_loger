@@ -732,7 +732,9 @@ bool WriteDumpWithStreams(
 
   // What a failed write left would pass for a dump: the viewer would list it
   // and retention would keep it as the newest capture.
-  DeleteFileW(dumpPath.c_str());
+  // remove, not DeleteFileW, which MO2 refuses past MAX_PATH (SkyrimDiagLongPath.h).
+  std::error_code removeEc;
+  std::filesystem::remove(std::filesystem::path(dumpPath), removeEc);
   if (err) {
     *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr) + L" (" + Hex(lastErr) + L", " +
       DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";

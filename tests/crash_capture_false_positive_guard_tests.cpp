@@ -428,7 +428,20 @@ int main()
     "GetTickCount64()",
     "Manual capture debounce must use wall-clock gating to avoid duplicate capture bursts.");
 
-  const std::string helperEntryBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
+  // wmain only guards RunHelper: an exception reaches the session log and the
+  // process ends at once (a joinable retention thread would std::terminate).
+  const std::string helperWmainBody = ExtractFunctionBody(helperMain, "int wmain(int argc, wchar_t** argv)");
+  AssertOrdered(
+    helperWmainBody,
+    "return RunHelper(argc, argv);",
+    "catch (...)",
+    "wmain must run the helper inside a catch-all.");
+  AssertOrdered(
+    helperWmainBody,
+    "Helper stopped by an unexpected error: ",
+    "ExitProcess(",
+    "An unexpected exception must be logged before the helper exits.");
+  const std::string helperEntryBody = ExtractFunctionBody(helperMain, "static int RunHelper(int argc, wchar_t** argv)");
   // Attaching reuses err and clears it on success, so the config warning
   // (an invalid ManualCaptureHotkey, say) must be kept before attaching to
   // reach the helper log.

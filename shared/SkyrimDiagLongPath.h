@@ -277,6 +277,67 @@ inline bool IsRegularFileForIo(const std::filesystem::path& path)
   return std::filesystem::is_regular_file(ioPath, ec);
 }
 
+// exists, file_size and last_write_time, through a handle on an
+// extended-length path (above). ExistsForIo is false without an error when
+// the path is not there, so an error is not taken for "gone".
+inline bool ExistsForIo(const std::filesystem::path& path, std::error_code& ec)
+{
+  ec.clear();
+  const auto ioPath = PathForIo(path);
+#ifdef _WIN32
+  if (long_path_detail::IsExtended(ioPath)) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (long_path_detail::QueryByHandle(ioPath, &info)) {
+      return true;
+    }
+    const DWORD error = GetLastError();
+    if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) {
+      ec.assign(static_cast<int>(error != ERROR_SUCCESS ? error : ERROR_GEN_FAILURE), std::system_category());
+    }
+    return false;
+  }
+#endif
+  return std::filesystem::exists(ioPath, ec);
+}
+
+inline std::uintmax_t FileSizeForIo(const std::filesystem::path& path, std::error_code& ec)
+{
+  ec.clear();
+  const auto ioPath = PathForIo(path);
+#ifdef _WIN32
+  if (long_path_detail::IsExtended(ioPath)) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!long_path_detail::QueryByHandle(ioPath, &info)) {
+      const DWORD error = GetLastError();
+      ec.assign(static_cast<int>(error != ERROR_SUCCESS ? error : ERROR_GEN_FAILURE), std::system_category());
+      return static_cast<std::uintmax_t>(-1);
+    }
+    return (static_cast<std::uintmax_t>(info.nFileSizeHigh) << 32u) | info.nFileSizeLow;
+  }
+#endif
+  return std::filesystem::file_size(ioPath, ec);
+}
+
+inline std::filesystem::file_time_type LastWriteTimeForIo(const std::filesystem::path& path, std::error_code& ec)
+{
+  ec.clear();
+  const auto ioPath = PathForIo(path);
+#ifdef _WIN32
+  if (long_path_detail::IsExtended(ioPath)) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!long_path_detail::QueryByHandle(ioPath, &info)) {
+      const DWORD error = GetLastError();
+      ec.assign(static_cast<int>(error != ERROR_SUCCESS ? error : ERROR_GEN_FAILURE), std::system_category());
+      return (std::filesystem::file_time_type::min)();  // parenthesized: Windows.h's min macro
+    }
+    const auto ticks = (static_cast<std::uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32u) |
+      info.ftLastWriteTime.dwLowDateTime;
+    return long_path_detail::FileTimeFromTicks(static_cast<LONGLONG>(ticks));
+  }
+#endif
+  return std::filesystem::last_write_time(ioPath, ec);
+}
+
 struct DirectoryEntryForIo
 {
   std::filesystem::path path;  // in the form the directory was listed in

@@ -6,6 +6,8 @@
 #include <string>
 #include <string_view>
 
+#include <nlohmann/json_fwd.hpp>
+
 namespace skydiag::helper {
 struct HelperConfig;
 }
@@ -20,6 +22,9 @@ bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* er
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg);
 
 bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s);
+// j as indented text for a file, invalid UTF-8 replaced: dump()'s default
+// throws on it, which would cost the capture the file it writes.
+std::string DumpJsonForFile(const nlohmann::json& j);
 bool ReadTextFileUtf8(const std::filesystem::path& path, std::string* out);
 
 std::string TrimAscii(std::string_view s);

@@ -141,7 +141,7 @@ HangTickResult ExecuteConfirmedHangCapture(
     /*bucketSeenCount=*/1u,
     cfg.autoRecaptureUnknownBucketThreshold);
 
-  const std::string wctUtf8 = wctJson.dump(2);
+  const std::string wctUtf8 = DumpJsonForFile(wctJson);
   WriteTextFileUtf8(wctPath, wctUtf8);
 
   bool dumpWritten = false;
@@ -227,7 +227,7 @@ HangTickResult ExecuteConfirmedHangCapture(
         &freezeRecaptureDecision,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);
-      WriteTextFileUtf8(manifestPath, manifest.dump(2));
+      WriteTextFileUtf8(manifestPath, DumpJsonForFile(manifest));
       AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
       manifestWritten = true;
     }

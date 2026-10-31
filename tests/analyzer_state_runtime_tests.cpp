@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -736,6 +737,18 @@ void TestLongPathHelpers()
   assert(skydiag::IsRegularFileForIo(file));
   assert(!skydiag::IsDirectoryForIo(file));
   assert(!skydiag::IsRegularFileForIo(leaf / L"Missing.json"));
+  // exists, file_size and last_write_time; a missing path is no error.
+  assert(skydiag::ExistsForIo(file, ec) && !ec);
+  assert(skydiag::ExistsForIo(leaf, ec) && !ec);
+  assert(!skydiag::ExistsForIo(leaf / L"Missing.json", ec) && !ec);
+  assert(!skydiag::ExistsForIo(leaf / L"missing" / L"Missing.json", ec) && !ec);
+  assert(skydiag::FileSizeForIo(file, ec) == 7u && !ec);
+  skydiag::FileSizeForIo(leaf / L"Missing.json", ec);
+  assert(ec);
+  const auto written = skydiag::LastWriteTimeForIo(file, ec);
+  assert(!ec);
+  const auto age = std::filesystem::file_time_type::clock::now() - written;
+  assert(age > -std::chrono::minutes(1) && age < std::chrono::minutes(10));
   // A file where a folder of the path should be.
   assert(!skydiag::CreateDirectoriesForIo(file / L"below", ec) && ec);
 
