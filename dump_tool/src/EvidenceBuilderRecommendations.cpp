@@ -457,8 +457,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   }
   if (ctx.isForcedClose) {
     // ADR-0022: first, so it is the next action (NextAction.cpp). A jump into
-    // freed code names its caller below, which only used the address
-    // (FaultJumpedIntoFreedCode): not a mod to report to. Whose hook the
+    // freed code names its caller below, which may only have used the address
+    // (FaultJumpedIntoFreedCode): not a mod to report to on that alone. Whose hook the
     // freed code was comes from the helper's record, when there is one
     // (ADR-0024).
     const auto& freed = r.freed_hook;
@@ -470,11 +470,10 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       (FaultJumpedIntoFreedCode(r) && !freedOwner.empty()
          ? (en ? (L" Nothing to do. While the game was closing, a hook of " + freedOwner +
                   L" was called after it had been freed (recorded while the game ran). If the same error comes every "
-                  L"time you close the game, pass the analysis below to the author of " + freedOwner +
-                  L"; the mod that called it only kept the address.")
+                  L"time you close the game, pass the analysis below to the author of " + freedOwner + L".")
                : (L" 따로 할 일은 없습니다. 게임이 닫히는 중에 이미 해제된 " + freedOwner +
                   L"의 후킹 코드가 호출됐습니다(게임 중 기록). 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 " +
-                  freedOwner + L" 제작자에게 전해 주세요. 그것을 호출한 모드는 주소를 갖고 있었을 뿐입니다."))
+                  freedOwner + L" 제작자에게 전해 주세요."))
          : FaultJumpedIntoFreedCode(r)
          ? (en ? L" Nothing to do. While the game was closing, code that had been freed was called (for example a hook "
                  L"another plugin removed). The mod that called it may only be a victim, and the dump does not show who "
@@ -814,7 +813,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool stackIsBystander = IsBystanderWait(r.main_thread_wait) && r.suspects_from_main_thread &&
     r.main_thread_lock_owner.tid == 0u;
   // Nor after a jump into freed code: the stack starts at its caller, which
-  // only used the address (FaultJumpedIntoFreedCode).
+  // may only have used the address (FaultJumpedIntoFreedCode).
   const bool allowTopSuspectActionRecommendations =
     !isSnapshotLike && !stackIsCallPathOnly && !stackIsBystander && !FaultJumpedIntoFreedCode(r);
   if (!hasActionableCandidates && allowTopSuspectActionRecommendations && !weakFaultLocationOnly &&
