@@ -28,6 +28,7 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -282,11 +283,23 @@ void SpinJobThread()
 
 void HotkeyLoop(const std::stop_token& stop)
 {
+  // A key counts as pressed when it is down now and was up at the previous
+  // poll. GetAsyncKeyState's "pressed since the last call" bit is shared with
+  // every other caller, and SkyrimDiag samples F4 every 25 ms for its Alt+F4
+  // log (ADR-0022), so that bit was mostly gone by the time this loop looked
+  // and Ctrl+Shift+F4 often did nothing (2026-10-31).
+  std::array<bool, 12> wasDown{};
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-    const auto pressed = [](int key) { return (GetAsyncKeyState(key) & 1) != 0; };
-    // Read every key so stale "pressed since last poll" bits do not linger.
+    const auto pressed = [&](int key) {
+      const bool down = (GetAsyncKeyState(key) & 0x8000) != 0;
+      bool& before = wasDown[static_cast<std::size_t>(key - VK_F1)];
+      const bool edge = down && !before;
+      before = down;
+      return edge;
+    };
+    // Read every key so a key held from before the chord does not fire later.
     const bool f1 = pressed(VK_F1);
     const bool f2 = pressed(VK_F2);
     const bool f3 = pressed(VK_F3);

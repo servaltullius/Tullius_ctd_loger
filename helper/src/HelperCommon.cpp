@@ -249,7 +249,9 @@ bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
   }
   if (!ok) {
-    DeleteFileW(tempPath.c_str());
+    // remove, not DeleteFileW, which MO2 refuses past MAX_PATH (SkyrimDiagLongPath.h).
+    std::error_code removeEc;
+    std::filesystem::remove(tempPath, removeEc);
   }
   return ok;
 }

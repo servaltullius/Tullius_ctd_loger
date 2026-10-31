@@ -515,53 +515,45 @@ inline void PruneOrphanedAnalysisCaches(
   }
 
   const auto now = std::filesystem::file_time_type::clock::now();
-  const auto oldEnough = [&](const std::filesystem::path& path) {
-    std::error_code timeEc;
-    const auto written = std::filesystem::last_write_time(path, timeEc);
-    return !timeEc && now - written >= minAge;
-  };
-  const auto listDir = [](const std::filesystem::path& dir) {
-    std::vector<std::filesystem::directory_entry> entries;
-    std::error_code iterEc;
-    for (std::filesystem::directory_iterator it(dir, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
-      entries.push_back(*it);
-    }
-    return entries;
+  const auto oldEnough = [&](const DirectoryEntryForIo& entry) {
+    return entry.lastWrite.has_value() && now - *entry.lastWrite >= minAge;
   };
 
   // A copy's files lie up to about 165 characters below outBase with a
-  // leftover temporary name, past MAX_PATH for a long output folder
-  // (SkyrimDiagLongPath.h).
+  // leftover temporary name, past MAX_PATH for a long output folder, where
+  // listing, times and remove_all go through ListDirectoryForIo and
+  // RemoveAllForIo (SkyrimDiagLongPath.h).
   const auto cacheBase = PathForIo(outBase, 168);
   std::error_code ec;
-  for (const auto& identity : listDir(cacheBase / ".skydiag-analysis")) {
-    if (!identity.is_directory(ec)) {
+  for (const auto& identity : ListDirectoryForIo(cacheBase / ".skydiag-analysis", ec)) {
+    if (!identity.directory) {
       continue;
     }
-    for (const auto& generation : listDir(identity.path())) {
+    std::error_code listEc;
+    for (const auto& generation : ListDirectoryForIo(identity.path, listEc)) {
       // "<16 hex size>.<16 hex mtime>"; anything else is not ours.
-      const auto key = PathPartUtf8(generation.path().filename());
+      const auto key = PathPartUtf8(generation.path.filename());
       std::uint64_t size = 0;
       const auto parsed = std::from_chars(key.data(), key.data() + key.size(), size, 16);
       const bool isKey = key.size() == 33 && parsed.ec == std::errc() && parsed.ptr == key.data() + 16 && key[16] == '.';
-      if (!isKey || !generation.is_directory(ec) || dumpSizes.count(size) != 0 || !oldEnough(generation.path())) {
+      if (!isKey || !generation.directory || dumpSizes.count(size) != 0 || !oldEnough(generation)) {
         continue;
       }
-      std::filesystem::remove_all(generation.path(), ec);
+      RemoveAllForIo(generation.path, ec);
     }
-    if (std::filesystem::is_empty(identity.path(), ec) && !ec) {
-      std::filesystem::remove(identity.path(), ec);
+    if (ListDirectoryForIo(identity.path, listEc).empty() && !listEc) {
+      std::filesystem::remove(identity.path, ec);
     }
   }
 
-  for (const auto& lock : listDir(cacheBase / ".skydiag-locks")) {
-    const auto name = PathPartUtf8(lock.path().filename());
+  for (const auto& lock : ListDirectoryForIo(cacheBase / ".skydiag-locks", ec)) {
+    const auto name = PathPartUtf8(lock.path.filename());
     if (!EndsWith(name, ".lock") || dumpStems.count(name.substr(0, name.size() - 5)) != 0 ||
-        !lock.is_regular_file(ec) || !oldEnough(lock.path())) {
+        lock.directory || !oldEnough(lock)) {
       continue;
     }
     // Fails harmlessly while an analysis holds the lock open.
-    std::filesystem::remove(lock.path(), ec);
+    std::filesystem::remove(lock.path, ec);
   }
 }
 

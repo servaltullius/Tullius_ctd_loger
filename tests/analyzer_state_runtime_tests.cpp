@@ -40,7 +40,7 @@ std::filesystem::path MakeTempDir(std::wstring_view suffix)
      std::wstring(suffix));
   std::error_code ec;
   // A run that stopped in TestLongOutputDirPublishes leaves files past MAX_PATH.
-  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
+  skydiag::RemoveAllForIo(skydiag::ExtendedLengthPath(root), ec);
   std::filesystem::create_directories(root, ec);
   assert(!ec);
   return root;
@@ -58,7 +58,7 @@ std::string ReadAllText(const std::filesystem::path& path)
 void WriteBytes(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes)
 {
   std::error_code ec;
-  std::filesystem::create_directories(path.parent_path(), ec);
+  skydiag::CreateDirectoriesForIo(path.parent_path(), ec);
   assert(!ec);
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   assert(out);
@@ -665,7 +665,7 @@ void TestLongDumpPathIsAnalyzed()
   assert(summary["summary_sentence"] == "summary-long-dump");
 
   std::error_code ec;
-  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
+  skydiag::RemoveAllForIo(skydiag::ExtendedLengthPath(root), ec);
 }
 
 // An output folder long enough that the copies under
@@ -702,13 +702,67 @@ void TestLongOutputDirPublishes()
   const auto summary = nlohmann::json::parse(ReadAllText(ioFamily / L"Summary.json"));
   assert(summary["summary_sentence"] == "summary-long");
   assert(summary["triage"]["ground_truth_mod"] == "Long.esp");
-  assert(std::filesystem::exists(ioFamily / L"Blackbox.jsonl"));
+  assert(skydiag::IsRegularFileForIo(family / L"Blackbox.jsonl"));
   const auto legacy = nlohmann::json::parse(
     ReadAllText(skydiag::ExtendedLengthPath(outDir / L"Long_SkyrimDiagSummary.json")));
   assert(legacy["dump_identity"] == DumpIdentityJson(identity));
 
   std::error_code ec;
-  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
+  skydiag::RemoveAllForIo(skydiag::ExtendedLengthPath(root), ec);
+}
+
+// The helpers for paths past MAX_PATH, which take a handle where MO2 refuses
+// the attribute and listing calls (SkyrimDiagLongPath.h). Run inside MO2's
+// virtual file system too, where std::filesystem fails on the same paths.
+void TestLongPathHelpers()
+{
+  const auto root = MakeTempDir(L"long_helpers");
+  auto dir = root;
+  while (dir.native().size() < 270u) {
+    dir /= L"a_long_output_folder_segment";
+  }
+  const auto leaf = dir / L"0000000003b8f2c1.01dd68dd1b147105";
+  std::error_code ec;
+  assert(skydiag::CreateDirectoriesForIo(leaf, ec) && !ec);
+  // Again, once every folder exists; then with only the last one missing.
+  assert(skydiag::CreateDirectoriesForIo(leaf, ec) && !ec);
+  const auto sibling = dir / L"sibling";
+  assert(skydiag::CreateDirectoriesForIo(sibling, ec) && !ec);
+  assert(skydiag::IsDirectoryForIo(leaf));
+  assert(!skydiag::IsRegularFileForIo(leaf));
+
+  const auto file = leaf / L"Summary.json";
+  WriteBytes(skydiag::ExtendedLengthPath(file), std::vector<std::uint8_t>(7u, 0x53u));
+  assert(skydiag::IsRegularFileForIo(file));
+  assert(!skydiag::IsDirectoryForIo(file));
+  assert(!skydiag::IsRegularFileForIo(leaf / L"Missing.json"));
+  // A file where a folder of the path should be.
+  assert(!skydiag::CreateDirectoriesForIo(file / L"below", ec) && ec);
+
+  const auto entries = skydiag::ListDirectoryForIo(dir, ec);
+  assert(!ec);
+  assert(entries.size() == 2u);
+  for (const auto& entry : entries) {
+    assert(entry.directory);
+    assert(entry.lastWrite.has_value());
+    assert(entry.path.filename() == leaf.filename() || entry.path.filename() == sibling.filename());
+  }
+  const auto files = skydiag::ListDirectoryForIo(leaf, ec);
+  assert(!ec);
+  assert(files.size() == 1u);
+  assert(!files[0].directory && files[0].size == 7u && files[0].path.filename() == L"Summary.json");
+  skydiag::ListDirectoryForIo(dir / L"missing", ec);
+  assert(ec);
+
+  // The folders below root, with the file, leaf and sibling in them. A tree
+  // that reaches past MAX_PATH is passed in its extended form.
+  const auto top = skydiag::ExtendedLengthPath(root / L"a_long_output_folder_segment");
+  const auto removed = skydiag::RemoveAllForIo(top, ec);
+  assert(!ec);
+  assert(removed >= 4u);
+  assert(!skydiag::IsDirectoryForIo(dir));
+  assert(skydiag::RemoveAllForIo(top, ec) == 0u && !ec);
+  skydiag::RemoveAllForIo(skydiag::ExtendedLengthPath(root), ec);
 }
 
 }  // namespace
@@ -728,5 +782,6 @@ int main()
   TestCreateDirectoriesAtVolumeRoot();
   TestLongOutputDirPublishes();
   TestLongDumpPathIsAnalyzed();
+  TestLongPathHelpers();
   return 0;
 }

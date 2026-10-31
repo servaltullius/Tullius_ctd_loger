@@ -25,7 +25,9 @@ using skydiag::ExtendedLengthPath;
 
 static void WriteFile(const std::filesystem::path& path, std::size_t bytes = 1)
 {
-  std::filesystem::create_directories(path.parent_path());
+  std::error_code ec;
+  skydiag::CreateDirectoriesForIo(path.parent_path(), ec);
+  assert(!ec && "Failed to create the file's folder");
   std::ofstream f(path, std::ios::binary);
   assert(f && "Failed to open file for writing");
   const std::string blob(bytes, 'x');
@@ -370,27 +372,41 @@ static void Test_PrunesAnalysisCachesWithoutTheirDump()
   std::filesystem::remove_all(dir, ec);
 }
 
-// The same under an output folder long enough that a copy's files pass
-// MAX_PATH, where Windows reaches them only through extended-length paths.
+// The same under an output folder long enough that a copy's folders and the
+// locks pass MAX_PATH, where Windows reaches them only through
+// extended-length paths, and MO2's virtual file system only through a handle
+// (SkyrimDiagLongPath.h); hence IsDirectoryForIo, not Exists, below.
 static void Test_PrunesAnalysisCachesUnderALongOutputDir()
 {
   const auto root = MakeTempDir();
   auto dir = root;
-  while (dir.native().size() < 200u) {
+  while (dir.native().size() < 220u) {
     dir /= "a_long_output_folder_segment";
   }
-  const auto orphan = dir / ".skydiag-analysis" / std::string(64, 'b') / "0000000000000014.01dd000000000001";
-  assert((orphan / "Summary.json").native().size() >= 260u);
+  const auto cache = dir / ".skydiag-analysis";
+  const auto orphan = cache / std::string(64, 'b') / "0000000000000014.01dd000000000001";
+  const auto recent = cache / std::string(64, 'c') / "0000000000000015.01dd000000000001";
+  assert(orphan.native().size() >= 260u);
   WriteFile(ExtendedLengthPath(orphan / "Summary.json"));
+  WriteFile(ExtendedLengthPath(recent / "Summary.json"));
   SetAge(ExtendedLengthPath(orphan), std::chrono::hours(48));
+  const auto oldLock = dir / ".skydiag-locks" / "SkyrimDiag_Manual_20261031_111106_520.lock";
+  const auto newLock = dir / ".skydiag-locks" / "SkyrimDiag_Manual_20261031_111107_521.lock";
+  assert(oldLock.native().size() >= 260u);
+  WriteFile(ExtendedLengthPath(oldLock), 0);
+  WriteFile(ExtendedLengthPath(newLock), 0);
+  SetAge(ExtendedLengthPath(oldLock), std::chrono::hours(48));
 
   ApplyRetentionToOutputDir(dir, RetentionLimits{});
 
-  assert(!Exists(ExtendedLengthPath(orphan)));
-  assert(!Exists(ExtendedLengthPath(dir / ".skydiag-analysis" / std::string(64, 'b'))));
+  assert(!skydiag::IsDirectoryForIo(orphan));
+  assert(!skydiag::IsDirectoryForIo(cache / std::string(64, 'b')));
+  assert(skydiag::IsRegularFileForIo(recent / "Summary.json"));
+  assert(!skydiag::IsRegularFileForIo(oldLock));
+  assert(skydiag::IsRegularFileForIo(newLock));
 
   std::error_code ec;
-  std::filesystem::remove_all(ExtendedLengthPath(root), ec);
+  skydiag::RemoveAllForIo(ExtendedLengthPath(root), ec);
 }
 
 // A dump pruned by the count limit takes its analysis copy with it once
