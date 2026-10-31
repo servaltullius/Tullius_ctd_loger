@@ -382,7 +382,9 @@ bool WriteTextUtf8(const std::filesystem::path& path, const std::string& content
     ok = false;
   }
   if (!ok) {
-    DeleteFileW(tempPath.c_str());
+    // remove, not DeleteFileW, which MO2 refuses past MAX_PATH (SkyrimDiagLongPath.h).
+    std::error_code removeEc;
+    std::filesystem::remove(tempPath, removeEc);
     if (err) *err = L"Failed to atomically write output: " + path.wstring();
     return false;
   }
@@ -730,10 +732,9 @@ std::filesystem::path FindIncidentManifestForDump(const std::filesystem::path& o
     L"SkyrimDiag_Incident_Manual_" + ts + L".json",
   };
 
-  std::error_code ec;
   for (const auto& name : candidates) {
     const auto p = outBase / name;
-    if (std::filesystem::is_regular_file(skydiag::PathForIo(p), ec)) {
+    if (skydiag::IsRegularFileForIo(p)) {
       return p;
     }
   }

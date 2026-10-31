@@ -122,9 +122,11 @@ void CheckCrashArtifactsAreWritten(const std::filesystem::path& outBase)
       crashState.capturedInfo.exceptionCode == 0xC0000005u,
     "Crash capture state must retain the immutable crash metadata for exit-time classification");
   Require(!lastCrashDumpPath.empty(), "Crash dump path should be recorded");
-  Require(FileExists(lastCrashDumpPath), "Crash dump file must exist");
+  // IsRegularFileForIo: under a long OutputDir these pass MAX_PATH, where MO2's
+  // virtual file system answers only through a handle (SkyrimDiagLongPath.h).
+  Require(skydiag::IsRegularFileForIo(lastCrashDumpPath), "Crash dump file must exist");
   Require(
-    FileExists(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json")),
+    skydiag::IsRegularFileForIo(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json")),
     "Crash incident manifest must be written");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
@@ -160,7 +162,7 @@ void TestHandleCrashEventTick_WritesCrashArtifactsUnderALongOutputDir()
   Require(outBase.native().starts_with(LR"(\\?\)"), "a long OutputDir must be used in its extended-length form");
   CheckCrashArtifactsAreWritten(outBase);
   std::error_code ec;
-  std::filesystem::remove_all(skydiag::ExtendedLengthPath(root), ec);
+  skydiag::RemoveAllForIo(skydiag::ExtendedLengthPath(root), ec);
 }
 
 void TestWorkingDirectoryForLongFolders()
