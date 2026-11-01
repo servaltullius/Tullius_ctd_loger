@@ -452,12 +452,20 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(
   }
   // Other saves failing in the day before the first failure of this one: the
   // player may have tried them first.
-  if (const auto firstAt = ParseUtcSeconds(m_entries[first].timestamp_utc)) {
+  if (const auto firstAt = ParseUtcSeconds(m_entries[first].timestamp_utc); firstAt.has_value()) {
     constexpr std::int64_t kDaySeconds = std::int64_t{ 24 } * 60 * 60;
+    const std::int64_t firstSeconds = firstAt.value();
     for (std::size_t i = 0; i < first; ++i) {
       const auto& e = m_entries[i];
+      if (e.loading_save_key.empty()) {
+        continue;
+      }
       const auto at = ParseUtcSeconds(e.timestamp_utc);
-      if (!e.loading_save_key.empty() && at && *at <= *firstAt && *firstAt - *at <= kDaySeconds) {
+      if (!at.has_value()) {
+        continue;
+      }
+      const std::int64_t atSeconds = at.value();
+      if (atSeconds <= firstSeconds && firstSeconds - atSeconds <= kDaySeconds) {
         result.other_save_count += 1;
       }
     }
