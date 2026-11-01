@@ -6,7 +6,6 @@
 #include <string_view>
 
 #include "SkyrimDiagHash.h"
-#include "SkyrimDiagShared.h"
 
 namespace skydiag {
 
@@ -63,8 +62,18 @@ enum class SaveLoadResult : std::uint64_t
   kNewGame = 2,
 };
 
+// The event's four payload words (EventPayload a..d), here without
+// SkyrimDiagShared.h, which needs Windows.h, so portable tests can build them.
+struct SaveLoadStartWords
+{
+  std::uint64_t a = 0;
+  std::uint64_t b = 0;
+  std::uint64_t c = 0;
+  std::uint64_t d = 0;
+};
+
 // The name's bytes kept in b..d: 23 and a terminating 0.
-inline constexpr std::size_t kSaveNameTextBytes = sizeof(EventPayload::b) * 3u - 1u;
+inline constexpr std::size_t kSaveNameTextBytes = sizeof(std::uint64_t) * 3u - 1u;
 
 // A cut name ends before a UTF-8 character it would split (a byte 10xxxxxx
 // continues the one before it).
@@ -79,12 +88,12 @@ constexpr std::size_t SaveNameTextLength(std::string_view name) noexcept
   return len;
 }
 
-inline EventPayload MakeSaveLoadStartPayload(std::string_view saveName) noexcept
+inline SaveLoadStartWords MakeSaveLoadStartPayload(std::string_view saveName) noexcept
 {
   const auto name = SaveNameForEvent(saveName);
-  EventPayload payload{};
+  SaveLoadStartWords payload{};
   payload.a = SaveNameKey(name);
-  char text[sizeof(EventPayload::b) * 3u]{};
+  char text[kSaveNameTextBytes + 1u]{};
   name.copy(text, SaveNameTextLength(name));
   std::memcpy(&payload.b, text, sizeof(payload.b));
   std::memcpy(&payload.c, text + sizeof(payload.b), sizeof(payload.c));

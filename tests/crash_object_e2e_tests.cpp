@@ -805,7 +805,13 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
     };
     push(0, 2, skydiag::EventType::kSessionStart, {});
     // What the plugin writes for SKSE's PreLoadGame.
-    push(1, 100'000'000ull, skydiag::EventType::kSaveLoadStart, skydiag::MakeSaveLoadStartPayload(kSaveName));  // 10 s
+    const auto words = skydiag::MakeSaveLoadStartPayload(kSaveName);
+    skydiag::EventPayload save{};
+    save.a = words.a;
+    save.b = words.b;
+    save.c = words.c;
+    save.d = words.d;
+    push(1, 100'000'000ull, skydiag::EventType::kSaveLoadStart, save);  // 10 s
     skydiag::EventPayload crash{};
     crash.a = 0xC0000005u;
     push(2, 290'000'000ull, skydiag::EventType::kCrash, crash);  // 29 s
