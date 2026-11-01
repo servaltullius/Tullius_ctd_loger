@@ -938,18 +938,21 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
       callSite;
   }
   if (info.verdict == "bad_jump" && info.target_state == "freed") {
-    // The caller only used the address, possibly another plugin's hook it
-    // kept as the original function. Whose hook it was comes only from the
-    // helper's record while the game ran (ADR-0024).
+    // The caller may only have used the address, possibly another plugin's
+    // hook it kept as the original function. Whose hook it was comes only
+    // from the helper's record while the game ran (ADR-0024), which cannot
+    // tell whether that plugin or the caller needs the fix.
     std::wstring callerNote;
     if (!info.freed_hook_stub_target.empty()) {
       callerNote = en
         ? (L" The helper had recorded that address while the game ran: a hook jump that went to " +
            info.freed_hook_stub_target + L", so the freed code was " + info.freed_hook_owner +
-           L"'s hook. The caller only used the address.")
+           L"'s hook, called after it was freed. The record does not show whether that plugin or the caller "
+           L"needs the fix.")
         : (L" Helper가 게임 중에 그 주소를 기록해 두었습니다. " + info.freed_hook_stub_target +
            L"(으)로 가는 후킹 점프 코드였으므로, 해제된 코드는 " + info.freed_hook_owner +
-           L"의 후킹입니다. 호출한 쪽은 그 주소를 불렀을 뿐입니다.");
+           L"의 후킹이고, 해제된 뒤에 호출됐습니다. 그 플러그인과 호출한 쪽 중 어느 쪽을 고쳐야 하는지는 기록으로 알 수 "
+           L"없습니다.");
     } else if (!info.freed_hook_owner.empty()) {
       callerNote = en
         ? (L" The helper had recorded that memory while the game ran: its hook jumps went to " + info.freed_hook_owner +
