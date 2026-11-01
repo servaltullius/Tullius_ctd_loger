@@ -192,6 +192,9 @@ void LoadCrashHistoryContext(
   out.history_stats.clear();
   out.bucket_candidate_repeats.clear();
   out.history_correlation = {};
+  out.save_load.earlier_crashes = 0;
+  out.save_load.crash_places = 0;
+  out.save_load.other_save_crashes = 0;
   if (historyPath.empty()) {
     return;
   }
@@ -223,6 +226,15 @@ void LoadCrashHistoryContext(
     out.history_correlation.count = bucketStats.count + 1;
     out.history_correlation.first_seen = bucketStats.first_seen.empty() ? analysisTimestamp : bucketStats.first_seen;
     out.history_correlation.last_seen = analysisTimestamp;
+  }
+
+  // ADR-0025: earlier crashes while loading the same save, and in how many
+  // places (buckets) they and this one crashed.
+  if (out.save_load.in_progress && !out.save_load.key.empty()) {
+    const auto saveStats = history.GetSaveLoadCrashStats(out.save_load.key, bucketKey);
+    out.save_load.earlier_crashes = saveStats.count;
+    out.save_load.other_save_crashes = saveStats.other_save_count;
+    out.save_load.crash_places = saveStats.bucket_keys.size();
   }
 }
 
@@ -317,6 +329,10 @@ void AppendCrashHistoryEntry(
     entry.signature_id = out.signature_match->id;
   }
   entry.candidate_keys = CollectHistoryCandidateKeys(out);
+  if (out.save_load.in_progress && !out.save_load.key.empty()) {
+    entry.loading_save_key = out.save_load.key;
+    entry.loading_save_name = WideToUtf8(out.save_load.name);
+  }
 
   history.AddEntry(std::move(entry));
   if (!history.SaveToFile(historyPath)) {

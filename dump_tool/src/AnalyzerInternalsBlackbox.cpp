@@ -1,6 +1,7 @@
 #include "AnalyzerInternals.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <iterator>
 #include <string_view>
@@ -127,6 +128,39 @@ ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
     info.detected = true;
     info.kind = skydiag::CloseRequestKindId(match.kind);
     info.seconds_before_crash = match.msBeforeCrash / 1000.0;
+  }
+  return info;
+}
+
+SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
+{
+  SaveLoadInfo info{};
+  double startedMs = 0.0;
+  double lastMs = 0.0;
+  for (const auto& event : events) {
+    lastMs = std::max(lastMs, event.t_ms);
+    switch (static_cast<skydiag::EventType>(event.type)) {
+      case skydiag::EventType::kSaveLoadStart: {
+        info.seen = true;
+        info.in_progress = true;
+        info.name = DecodePackedShortText(event);
+        char key[17]{};
+        std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(event.a));
+        info.key = event.a != 0u ? key : "";
+        startedMs = event.t_ms;
+        break;
+      }
+      case skydiag::EventType::kSaveLoadEnd:
+        if (info.seen && event.t_ms >= startedMs) {
+          info.in_progress = false;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  if (info.in_progress) {
+    info.seconds_loading = std::max(0.0, (lastMs - startedMs) / 1000.0);
   }
   return info;
 }

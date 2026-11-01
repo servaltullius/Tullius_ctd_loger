@@ -21,6 +21,9 @@ struct CrashHistoryEntry
   std::string signature_id;
   std::vector<std::string> all_suspects;
   std::vector<std::string> candidate_keys;
+  // ADR-0025: the save being loaded when the game crashed; empty otherwise.
+  std::string loading_save_key;   // SaveLoadInfo::key
+  std::string loading_save_name;  // SaveLoadInfo::name, for reading the file
 };
 
 struct ModuleStats
@@ -42,6 +45,14 @@ struct BucketCandidateStats
 {
   std::string candidate_key;
   std::size_t count = 0;
+};
+
+// ADR-0025: the entries that crashed while loading one save.
+struct SaveLoadCrashStats
+{
+  std::size_t count = 0;
+  std::vector<std::string> bucket_keys;  // distinct, in history order
+  std::size_t other_save_count = 0;      // later entries that crashed loading another save
 };
 
 // Why a history was or was not loaded: a caller must not save over a file it
@@ -71,6 +82,10 @@ public:
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
   BucketStats GetBucketStats(const std::string& bucketKey) const;
   std::vector<BucketCandidateStats> GetBucketCandidateStats(const std::string& bucketKey) const;
+  // Counted from the first entry with this save key; an empty key counts nothing.
+  // currentBucketKey, the crash being analyzed, is one of the places when there
+  // are earlier entries (it is not one of them: its own entry is removed first).
+  SaveLoadCrashStats GetSaveLoadCrashStats(const std::string& saveKey, const std::string& currentBucketKey = {}) const;
 
   std::size_t Size() const { return m_entries.size(); }
 

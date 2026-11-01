@@ -49,6 +49,10 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
 // kForcedCloseCrashWindowMs after; detected is false without one.
 ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events);
 
+// ADR-0025: the newest SaveLoadStart and whether a SaveLoadEnd followed it.
+// Fills the blackbox part of SaveLoadInfo; the history counts stay 0.
+SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events);
+
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,
   bool loadingContext);

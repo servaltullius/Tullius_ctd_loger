@@ -485,6 +485,11 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
                : L" 따로 할 일은 없습니다. 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 거기 나온 모드의 제작자에게 전해 "
                  L"주세요.")));
   }
+  if (ctx.isDamagedSaveSuspected) {
+    // ADR-0025: first, so it is the next action (NextAction.cpp).
+    r.recommendations.push_back(
+      (en ? L"[Damaged save] " : L"[세이브 손상] ") + DamagedSaveLead(r.save_load, en) + L" " + DamagedSaveAction(en));
+  }
   const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
@@ -996,6 +1001,26 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(en
       ? L"[Loading] Check mods affecting that stage first (animations/skeleton/body/physics/precaching)."
       : L"[로딩 중] 해당 시점에 개입하는 모드(애니메이션/스켈레톤/바디/물리/프리캐시)를 우선 점검");
+  }
+
+  // ADR-0025: a save load that failed once is no damaged save yet; say what
+  // would tell.
+  if (r.save_load.in_progress && !ctx.isDamagedSaveSuspected && !ctx.isForcedClose && (isCrashLike || isHangLike)) {
+    const std::wstring name = r.save_load.name.empty() ? std::wstring{} : (L" (" + r.save_load.name + L")");
+    const std::wstring nameKo = r.save_load.name.empty() ? std::wstring{} : (L"(" + r.save_load.name + L")");
+    if (r.save_load.other_save_crashes > 0) {
+      r.recommendations.push_back(en
+        ? (L"[Save] The game failed while loading a save" + name +
+            L", and loading other saves has failed too: the mod setup is more likely than one save.")
+        : (L"[세이브] 세이브" + nameKo +
+            L"를 불러오다 문제가 났고, 다른 세이브를 불러오다 난 사고도 있습니다. 세이브 하나보다 모드 구성 쪽일 가능성이 큽니다."));
+    } else {
+      r.recommendations.push_back(en
+        ? (L"[Save] The game " + std::wstring(isCrashLike ? L"crashed" : L"froze") + L" while loading a save" + name +
+            L". If loading it fails again, load a save made before it: if that one loads, the problem is this save only.")
+        : (L"[세이브] 세이브" + nameKo + L"를 불러오다 " + std::wstring(isCrashLike ? L"튕겼습니다" : L"멈췄습니다") +
+            L". 같은 세이브에서 또 그러면 그보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면 이 세이브만의 문제입니다."));
+    }
   }
 
   if (r.freeze_analysis.has_analysis) {

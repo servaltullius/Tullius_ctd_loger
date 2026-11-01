@@ -138,6 +138,21 @@ struct ForcedCloseInfo
   double seconds_before_crash = 0.0;
 };
 
+// ADR-0025: the save the newest load started with (SaveLoadStart), and the
+// crashes crash_history.json holds from loading the same save.
+struct SaveLoadInfo
+{
+  bool seen = false;         // a SaveLoadStart is in the blackbox
+  bool in_progress = false;  // no SaveLoadEnd after it: captured before the load finished
+  std::wstring name;         // up to 23 characters of the save's name
+  std::string key;           // 16 hex digits of SaveNameKey; what history entries match
+  double seconds_loading = 0.0;  // from the load's start to the newest event, while in progress
+  // This dump's own entry is left out of these.
+  std::size_t earlier_crashes = 0;     // earlier crashes while loading the same save
+  std::size_t crash_places = 0;        // distinct crash buckets among them and this crash
+  std::size_t other_save_crashes = 0;  // crashes while loading another save since the first of them
+};
+
 struct FirstChanceSummary
 {
   bool has_context = false;
@@ -493,6 +508,7 @@ struct AnalysisResult
   std::string clean_exit_filter_context;
   std::wstring clean_exit_evidence_filename;
   ForcedCloseInfo forced_close;
+  SaveLoadInfo save_load;
 
   std::uint32_t exc_code = 0;
   std::uint32_t exc_tid = 0;

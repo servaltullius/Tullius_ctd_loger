@@ -103,6 +103,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.isHangLike = isHangLike;
   ctx.isSnapshotLike = isSnapshotLike;
   ctx.isManualCapture = isManualCapture;
+  ctx.isDamagedSaveSuspected = isCrashLike && !ctx.isForcedClose && !ctx.isFilteredCleanExit &&
+                               internal::SaveLoadSuggestsDamagedSave(r.save_load);
   ctx.hasModule = hasModule;
   ctx.isSystem = isSystem;
   ctx.externalSoftware = r.fault_module_external_software;
@@ -148,6 +150,9 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     // The detail stays for mod authors; the player reads first that this is
     // no crash in play.
     r.summary_sentence = internal::ForcedCloseLead(r.forced_close, en) + L" " + r.summary_sentence;
+  } else if (ctx.isDamagedSaveSuspected) {
+    // ADR-0025: what the repeats say comes before what this one dump says.
+    r.summary_sentence = internal::DamagedSaveLead(r.save_load, en) + L" " + r.summary_sentence;
   }
   r.quick_answer = internal::BuildQuickAnswer(r, lang, ctx);
 }

@@ -524,6 +524,17 @@ int main()
     onSkseMessageBody,
     "kPostLoad",
     "CrashLogger range refresh must start at the earliest post-load lifecycle stage.");
+  // ADR-0025: the save a load starts with, and the end of that load.
+  AssertOrdered(
+    onSkseMessageBody,
+    "SKSE::MessagingInterface::kPreLoadGame",
+    "PushSaveLoadStartEvent(name)",
+    "PreLoadGame must record the save being loaded.");
+  AssertOrdered(
+    onSkseMessageBody,
+    "SKSE::MessagingInterface::kPostLoadGame",
+    "PushSaveLoadEndEvent(loaded)",
+    "PostLoadGame must record the end of the load.");
 
   AssertContains(
     vectoredHandlerBody,

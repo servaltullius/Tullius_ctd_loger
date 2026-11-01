@@ -18,6 +18,7 @@
 
 #include "AddressResolver.h"
 #include "CrashHistory.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SignatureDatabase.h"
 
 using skydiag::dump_tool::AddressResolver;
@@ -1321,6 +1322,75 @@ void TestCrashHistorySameStemIdentityIsolation()
 
 // Load says why it did not load, so the caller never saves over a history it
 // could not read; a field of another type in one entry no longer loses all.
+// ADR-0025: crashes while loading one save, counted from its first one.
+void TestCrashHistorySaveLoadStats()
+{
+  using skydiag::SaveNameKey;
+  static_assert(skydiag::SaveNameForEvent("C:\\Saves\\Save76_X.ess") == "Save76_X");
+  static_assert(skydiag::SaveNameForEvent("Saves/Save76_X") == "Save76_X");
+  static_assert(skydiag::SaveNameForEvent("Save76_X.ESS") == "Save76_X");
+  static_assert(skydiag::SaveNameForEvent("Quicksave0") == "Quicksave0");
+  static_assert(SaveNameKey("Save76_X") == SaveNameKey("save76_x.ess"));
+  static_assert(SaveNameKey("Save76_X") != SaveNameKey("Save75_X"));
+  static_assert(SaveNameKey("") != 0u);
+
+  CrashHistory history;
+  const auto add = [&](const char* dump, const char* bucket, const char* saveKey) {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = "2026-11-01T07:00:00Z";
+    e.dump_file = dump;
+    e.bucket_key = bucket;
+    e.loading_save_key = saveKey;
+    e.loading_save_name = *saveKey ? "Save76_FC70D793_0_646F7" : "";
+    history.AddEntry(std::move(e));
+  };
+  add("a.dmp", "CTD3-old", "");             // before: not counted
+  add("b.dmp", "CTD3-other", "save75key");  // another save before the first of save76: not counted
+  add("c.dmp", "CTD3-7dba", "save76key");
+  add("d.dmp", "CTD3-2d9f", "save76key");
+  add("e.dmp", "CTD3-2d9f", "save76key");
+  add("f.dmp", "CTD3-x", "");               // not loading a save: not counted
+
+  auto stats = history.GetSaveLoadCrashStats("save76key");
+  assert(stats.count == 3u);
+  assert((stats.bucket_keys == std::vector<std::string>{ "CTD3-7dba", "CTD3-2d9f" }));
+  assert(stats.other_save_count == 0u);
+  assert(history.GetSaveLoadCrashStats("").count == 0u);
+  // The crash being analyzed is a place too, once there is an earlier one.
+  assert(history.GetSaveLoadCrashStats("save76key", "CTD3-new").bucket_keys.size() == 3u);
+  assert(history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f").bucket_keys.size() == 2u);
+  assert(history.GetSaveLoadCrashStats("unseenkey", "CTD3-new").bucket_keys.empty());
+  {
+    // 2026-11-01: Save76 failed to load at 16:18, then at 16:34 elsewhere.
+    CrashHistory first;
+    CrashHistoryEntry e{};
+    e.dump_file = "SkyrimDiag_Crash_20261101_161808_940.dmp";
+    e.bucket_key = "CTD3-7dbaf39d10226dde";
+    e.loading_save_key = "save76key";
+    first.AddEntry(std::move(e));
+    const auto second = first.GetSaveLoadCrashStats("save76key", "CTD3-2d9fca2cfea093da");
+    assert(second.count == 1u && second.bucket_keys.size() == 2u && second.other_save_count == 0u);
+  }
+
+  add("g.dmp", "CTD3-y", "save77key");      // another save after: counted
+  stats = history.GetSaveLoadCrashStats("save76key");
+  assert(stats.other_save_count == 1u);
+
+  const auto historyPath = std::filesystem::temp_directory_path() / "skydiag_crash_history_save_load_test.json";
+  const bool saved = history.SaveToFile(historyPath);
+  assert(saved);
+  const auto text = ReadAllText(historyPath);
+  AssertContains(text, "\"loading_save_key\": \"save76key\"", "a load crash keeps its save");
+  AssertContains(text, "\"loading_save_name\": \"Save76_FC70D793_0_646F7\"", "and the save's name");
+  CrashHistory loaded;
+  const bool historyLoaded = loaded.LoadFromFile(historyPath);
+  assert(historyLoaded);
+  const auto reloaded = loaded.GetSaveLoadCrashStats("save76key");
+  assert(reloaded.count == 3u && reloaded.bucket_keys.size() == 2u && reloaded.other_save_count == 1u);
+  std::error_code ec;
+  std::filesystem::remove(historyPath, ec);
+}
+
 void TestCrashHistoryLoadSaysWhy()
 {
   using skydiag::dump_tool::CrashHistoryLoad;
@@ -1816,6 +1886,7 @@ int main()
   TestCrashHistoryCandidateKeyVersionMigration();
   TestCrashHistorySameDumpIsIdempotent();
   TestCrashHistorySameStemIdentityIsolation();
+  TestCrashHistorySaveLoadStats();
   TestCrashHistoryLoadSaysWhy();
 #ifdef _WIN32
   TestCrashHistoryFailedReplacementPreservesExistingFile();

@@ -106,6 +106,27 @@ std::string BuildReportText(
     rpt << (en ? "Classification: FORCED_CLOSE (not a CTD; " : "분류: 강제 종료 (CTD 아님; ") << r.forced_close.kind
         << (en ? ", " : ", 오류 ") << seconds << (en ? " s before the error)" : "초 전)") << "\n";
   }
+  if (r.save_load.seen) {
+    // ADR-0025: the save the newest load started with.
+    const auto& save = r.save_load;
+    rpt << (en ? "Save: " : "세이브: ") << WideToUtf8(save.name);
+    if (save.in_progress) {
+      char seconds[32]{};
+      std::snprintf(seconds, sizeof(seconds), "%.1f", save.seconds_loading);
+      rpt << (en ? " (loading, " : " (불러오는 중, ") << seconds << (en ? " s in" : "초째");
+      if (save.earlier_crashes > 0) {
+        rpt << (en ? "; earlier failed loads " : "; 이전에 불러오다 난 사고 ") << save.earlier_crashes
+            << (en ? ", places " : "번, 난 곳 ") << save.crash_places << (en ? "" : "곳");
+      }
+      if (save.other_save_crashes > 0) {
+        rpt << (en ? "; other saves since " : "; 그 뒤 다른 세이브 ") << save.other_save_crashes << (en ? "" : "번");
+      }
+      rpt << ")";
+    } else {
+      rpt << (en ? " (loaded before the capture)" : " (캡처 전에 불러오기 끝남)");
+    }
+    rpt << "\n";
+  }
   rpt << (en ? "PathRedactionApplied: " : "경로 마스킹 적용: ") << (redactPaths ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceAllowed: " : "온라인 심볼 소스 허용: ") << (r.online_symbol_source_allowed ? "1" : "0") << "\n";
   rpt << (en ? "OnlineSymbolSourceUsed: " : "온라인 심볼 소스 사용: ") << (r.online_symbol_source_used ? "1" : "0") << "\n";

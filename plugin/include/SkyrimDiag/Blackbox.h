@@ -43,6 +43,11 @@ void PushCloseRequestEvent(
   std::uint64_t wParam,
   std::uint64_t source) noexcept;
 
+// ADR-0025: the save a load starts with (SkyrimDiagSaveLoad.h), and whether
+// that load finished.
+void PushSaveLoadStartEvent(std::string_view saveName) noexcept;
+void PushSaveLoadEndEvent(bool loaded) noexcept;
+
 inline void Note(std::uint64_t tag, std::uint64_t a = 0, std::uint64_t b = 0) noexcept
 {
   skydiag::EventPayload p{};

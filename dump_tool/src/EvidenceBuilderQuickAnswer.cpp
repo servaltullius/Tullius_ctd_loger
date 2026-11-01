@@ -756,6 +756,23 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     return Finish(kind, lead, en);
   }
 
+  // ADR-0025: one save that keeps failing to load, in different places, says
+  // more than the mods this one dump shows.
+  if (ctx.isDamagedSaveSuspected && !freezePath) {
+    Lead lead;
+    lead.case_id = "damaged_save";
+    QuickAnswer save = Finish(kind, lead, en);
+    save.likelihood = LikelihoodId(i18n::ConfidenceLevel::kMedium);
+    save.likelihood_text = LikelihoodText(i18n::ConfidenceLevel::kMedium, en);
+    save.headline = KindPhrase(kind, en) + L" " + DamagedSaveLead(r.save_load, en);
+    save.action = DamagedSaveAction(en);
+    save.why_not_certain = en
+      ? L"The crash history keeps only the loads that failed, so how other saves load is not known."
+      : L"크래시 기록에는 실패한 불러오기만 남아서, 다른 세이브는 어떻게 불러와지는지 알 수 없습니다.";
+    AddFaultInstructionClue(r, en, save);
+    return save;
+  }
+
   if (!freezePath) {
     QuickAnswer crash = Finish(kind, CrashLead(r, ctx), en);
     AddFaultInstructionClue(r, en, crash);

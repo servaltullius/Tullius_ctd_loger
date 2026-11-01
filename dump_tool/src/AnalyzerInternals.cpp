@@ -26,6 +26,8 @@ std::wstring EventTypeName(std::uint16_t t)
     case EventType::kMenuClose: return L"MenuClose";
     case EventType::kLoadStart: return L"LoadStart";
     case EventType::kLoadEnd: return L"LoadEnd";
+    case EventType::kSaveLoadStart: return L"SaveLoadStart";
+    case EventType::kSaveLoadEnd: return L"SaveLoadEnd";
     case EventType::kCellChange: return L"CellChange";
     case EventType::kNote: return L"Note";
     case EventType::kPerfHitch: return L"PerfHitch";
@@ -211,6 +213,14 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
       }
       return {};
     }
+
+    case EventType::kSaveLoadStart: {
+      // ADR-0025: a, the name's key; b..d, its first 23 bytes.
+      const auto name = DecodePackedShortText(b, c, d);
+      return name.empty() ? std::wstring{} : (L"save=" + name);
+    }
+    case EventType::kSaveLoadEnd:
+      return a != 0u ? L"loaded" : L"failed";
 
     case EventType::kModuleLoad:
     case EventType::kModuleUnload: {

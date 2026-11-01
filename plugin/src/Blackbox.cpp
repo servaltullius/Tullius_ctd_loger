@@ -8,6 +8,7 @@
 
 #include "SkyrimDiag/Hash.h"
 #include "SkyrimDiag/SharedMemory.h"
+#include "SkyrimDiagSaveLoad.h"
 
 namespace skydiag::plugin {
 namespace {
@@ -137,6 +138,22 @@ void PushFirstChanceExceptionEvent(
   payload.a = (static_cast<std::uint64_t>(addressBucket) << 32) | static_cast<std::uint64_t>(exceptionCode);
   PackShortText(moduleBasenameUtf8, payload);
   PushEvent(skydiag::EventType::kFirstChanceException, payload, sizeof(payload));
+}
+
+void PushSaveLoadStartEvent(std::string_view saveName) noexcept
+{
+  const auto name = skydiag::SaveNameForEvent(saveName);
+  skydiag::EventPayload payload{};
+  payload.a = skydiag::SaveNameKey(name);
+  PackShortText(name, payload);
+  PushEvent(skydiag::EventType::kSaveLoadStart, payload, sizeof(payload));
+}
+
+void PushSaveLoadEndEvent(bool loaded) noexcept
+{
+  skydiag::EventPayload payload{};
+  payload.a = loaded ? 1u : 0u;
+  PushEvent(skydiag::EventType::kSaveLoadEnd, payload, sizeof(payload));
 }
 
 void PushCloseRequestEvent(

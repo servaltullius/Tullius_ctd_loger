@@ -37,6 +37,19 @@ int main()
            L"[강제 종료] Alt+F4로 게임을 강제 종료하는 과정에서 난 오류입니다.",
          }) == 1u);
 
+  // One save failing to load in different places (ADR-0025) comes before the
+  // modules this dump shows; a known cause still comes first.
+  assert(SelectNextActionIndex({
+           L"[Basics] ExceptionCode=0xC0000005 (Access Violation).",
+           L"[Actionable candidate] Check LocationalEncounterZones.dll first.",
+           L"[Damaged save] Loading the same save has crashed or frozen 2 times so far.",
+           L"[Save] The game crashed while loading a save.",
+         }) == 2u);
+  assert(SelectNextActionIndex({
+           L"[세이브 손상] 같은 세이브를 불러오다 이번까지 2번 튕기거나 멈췄습니다.",
+           L"[알려진 원인] ContentCatalog.txt를 휴지통으로 옮기세요.",
+         }) == 1u);
+
   // SmoothCam CTD: background first, candidate second.
   assert(SelectNextActionIndex({
            L"[Basics] ExceptionCode=0xC0000005 (Access Violation).",

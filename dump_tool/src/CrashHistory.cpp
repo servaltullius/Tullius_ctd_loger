@@ -108,6 +108,8 @@ CrashHistoryLoad CrashHistory::Load(const std::filesystem::path& path)
       row.top_suspect = JsonValueOr(e, "top_suspect", std::string{});
       row.confidence = JsonValueOr(e, "confidence", std::string{});
       row.signature_id = JsonValueOr(e, "signature_id", std::string{});
+      row.loading_save_key = JsonValueOr(e, "loading_save_key", std::string{});
+      row.loading_save_name = JsonValueOr(e, "loading_save_name", std::string{});
       if (e.contains("all_suspects") && e["all_suspects"].is_array()) {
         for (const auto& s : e["all_suspects"]) {
           if (s.is_string()) {
@@ -144,7 +146,7 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
     j["version"] = 3;
     j["entries"] = nlohmann::json::array();
     for (const auto& e : m_entries) {
-      j["entries"].push_back({
+      nlohmann::json row = {
         { "candidate_key_version", e.candidate_key_version },
         { "timestamp_utc", e.timestamp_utc },
         { "dump_file", e.dump_file },
@@ -155,7 +157,13 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
         { "signature_id", e.signature_id },
         { "all_suspects", e.all_suspects },
         { "candidate_keys", e.candidate_keys },
-      });
+      };
+      // Only a crash while loading a save has these (ADR-0025).
+      if (!e.loading_save_key.empty()) {
+        row["loading_save_key"] = e.loading_save_key;
+        row["loading_save_name"] = e.loading_save_name;
+      }
+      j["entries"].push_back(std::move(row));
     }
 
     std::error_code ec;
@@ -355,6 +363,32 @@ std::vector<BucketCandidateStats> CrashHistory::GetBucketCandidateStats(const st
     }
     return a.candidate_key < b.candidate_key;
   });
+  return result;
+}
+
+SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const std::string& saveKey, const std::string& currentBucketKey) const
+{
+  SaveLoadCrashStats result{};
+  if (saveKey.empty()) {
+    return result;
+  }
+  bool started = false;
+  for (const auto& e : m_entries) {
+    if (e.loading_save_key == saveKey) {
+      started = true;
+      result.count += 1;
+      if (!e.bucket_key.empty() &&
+          std::find(result.bucket_keys.begin(), result.bucket_keys.end(), e.bucket_key) == result.bucket_keys.end()) {
+        result.bucket_keys.push_back(e.bucket_key);
+      }
+    } else if (started && !e.loading_save_key.empty()) {
+      result.other_save_count += 1;
+    }
+  }
+  if (result.count > 0 && !currentBucketKey.empty() &&
+      std::find(result.bucket_keys.begin(), result.bucket_keys.end(), currentBucketKey) == result.bucket_keys.end()) {
+    result.bucket_keys.push_back(currentBucketKey);
+  }
   return result;
 }
 

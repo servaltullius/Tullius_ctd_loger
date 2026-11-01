@@ -19,6 +19,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -33,6 +34,7 @@
 #include "MinidumpUtil.h"
 #include "OutputWriterPipeline.h"
 #include "RetentionWorker.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 
@@ -779,11 +781,112 @@ void TestGameLockMemoryWindows()
   CloseHandle(process);
 }
 
+// ADR-0025, from the dumps: two crashes while loading one save, in two places.
+// The first analysis keeps the save in crash_history.json, and the second one
+// reads it back and leads with the save.
+__declspec(noinline) int OtherCrashSite(int value)
+{
+  return value * 3 + 1;
+}
+
+void TestRepeatedSaveLoadCrashFromTheDumps()
+{
+  constexpr std::string_view kSaveName = "Save76_FC70D793_0_646F726F_Tamriel_000843_20261101071101_14_1";
+  const auto layoutLoading = [&](DWORD mainTid) {
+    auto shared = MakeSharedLayout();
+    const auto push = [&](std::uint32_t index, std::uint64_t qpc, skydiag::EventType type, skydiag::EventPayload payload) {
+      auto& e = shared->events[index];
+      e.tid = mainTid;
+      e.qpc = qpc;
+      e.type = static_cast<std::uint16_t>(type);
+      e.size = sizeof(payload);
+      e.payload = payload;
+      e.seq = index * 2u;  // committed
+    };
+    push(0, 2, skydiag::EventType::kSessionStart, {});
+    skydiag::EventPayload save{};
+    save.a = skydiag::SaveNameKey(kSaveName);
+    char text[24]{};
+    kSaveName.copy(text, 23);
+    std::memcpy(&save.b, text, 8);
+    std::memcpy(&save.c, text + 8, 8);
+    std::memcpy(&save.d, text + 16, 8);
+    push(1, 100'000'000ull, skydiag::EventType::kSaveLoadStart, save);  // 10 s
+    skydiag::EventPayload crash{};
+    crash.a = 0xC0000005u;
+    push(2, 290'000'000ull, skydiag::EventType::kCrash, crash);  // 29 s
+    shared->header.write_index = 3;
+    shared->header.state_flags = skydiag::kState_Loading;
+    return shared;
+  };
+
+  const auto outBase = MakeTempDir(L"skydiag_save_load_e2e");
+  ParkedThread faulting;
+  const auto analyze = [&](const wchar_t* dumpName, DWORD64 crashAddress) {
+    CONTEXT ctx = faulting.Context();
+    ctx.Rip = crashAddress;
+    auto shared = layoutLoading(faulting.tid());
+    shared->header.crash_seq = 2;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash.faulting_tid = faulting.tid();
+    shared->header.crash.exception_addr = crashAddress;
+    shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+    shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(crashAddress);
+    shared->header.crash.context = ctx;
+
+    const auto dumpPath = outBase / dumpName;
+    const HANDLE process = OpenSelfProcessHandle();
+    std::wstring err;
+    const bool written = WriteDumpWithStreams(
+      process,
+      GetCurrentProcessId(),
+      dumpPath.wstring(),
+      shared.get(),
+      sizeof(skydiag::SharedLayout),
+      {},
+      {},
+      /*isCrash=*/true,
+      ResolveDumpProfile(DumpMode::kDefault, CaptureKind::Crash),
+      /*isProcessSnapshot=*/false,
+      &err);
+    CloseHandle(process);
+    Require(written, "The crash dump must be written");
+
+    skydiag::dump_tool::AnalyzeOptions opt{};
+    opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
+    opt.output_dir = outBase.wstring();
+    skydiag::dump_tool::AnalysisResult result{};
+    Require(skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err), "AnalyzeDump failed");
+    return result;
+  };
+
+  const auto first = analyze(L"SkyrimDiag_Crash_20261101_161808_940.dmp", faulting.Context().Rip);
+  Require(first.save_load.seen && first.save_load.in_progress && first.save_load.name == L"Save76_FC70D793_0_646F7" &&
+            first.save_load.seconds_loading > 18.9 && first.save_load.seconds_loading < 19.1,
+    "The save being loaded is read from the dump's blackbox");
+  Require(first.save_load.earlier_crashes == 0u && first.quick_answer.case_id != "damaged_save",
+    "One failed load names no damaged save");
+
+  const auto second = analyze(
+    L"SkyrimDiag_Crash_20261101_163419_163.dmp", reinterpret_cast<DWORD64>(&OtherCrashSite));
+  Require(!first.crash_bucket_key.empty() && second.crash_bucket_key != first.crash_bucket_key,
+    "The two crashes are in different places");
+  Require(second.save_load.earlier_crashes == 1u && second.save_load.crash_places == 2u &&
+            second.save_load.other_save_crashes == 0u,
+    "The second analysis reads the first one's save from crash_history.json");
+  Require(second.quick_answer.case_id == "damaged_save" && !second.recommendations.empty() &&
+            second.recommendations[0].rfind(L"[Damaged save] ", 0) == 0,
+    "The second analysis leads with the save");
+
+  std::filesystem::remove_all(outBase);
+}
+
 int main()
 {
   try {
     TestGameLockMemoryWindows();
     TestCrashObjectsAreReadBackFromTheDump();
+    TestRepeatedSaveLoadCrashFromTheDumps();
     TestHangObjectsAreReadBackFromTheDump();
     TestHangObjectBudgets();
     TestRealHangCaptureKeepsTheMainThreadsObject();

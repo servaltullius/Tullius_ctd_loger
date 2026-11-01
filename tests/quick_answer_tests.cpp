@@ -3,8 +3,10 @@
 // happened, the suspect, one thing to try and why it is not certain, in plain
 // words, before any technical detail; the analysis itself is unchanged.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <sstream>
@@ -22,6 +24,7 @@
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "SignatureDatabase.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagShared.h"
 #include "Utf.h"
 
@@ -1133,6 +1136,190 @@ void TestFaultInstructionClue()
 // PrismaUI.dll's present hook called a freed hook trampoline. The player reads
 // that this was the forced close, not a CTD, and that there is nothing to do;
 // the analysis below stays for mod authors. Never called a CTD.
+// ADR-0025: a save that keeps failing to load in different places.
+void TestDamagedSave()
+{
+  using skydiag::dump_tool::EventRow;
+  namespace internal = skydiag::dump_tool::internal;
+  constexpr wchar_t kSave[] = L"Save76_FC70D793_0_646F7";
+
+  // From the blackbox: the newest SaveLoadStart with no SaveLoadEnd after it.
+  {
+    const auto start = [](double t, std::string_view name) {
+      EventRow e{};
+      e.t_ms = t;
+      e.type = static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadStart);
+      e.a = skydiag::SaveNameKey(name);
+      char text[24]{};
+      name.copy(text, std::min<std::size_t>(name.size(), 23u));
+      std::memcpy(&e.b, text, 8);
+      std::memcpy(&e.c, text + 8, 8);
+      std::memcpy(&e.d, text + 16, 8);
+      return e;
+    };
+    const auto at = [](double t, skydiag::EventType type, std::uint64_t a = 0) {
+      EventRow e{};
+      e.t_ms = t;
+      e.type = static_cast<std::uint16_t>(type);
+      e.a = a;
+      return e;
+    };
+    const std::string_view name76 = "Save76_FC70D793_0_646F726F_Tamriel_000843_20261101071101_14_1";
+    const std::string_view name75 = "Save75_FC70D793_0_646F726F_Tamriel_000839_20261101064910_14_1";
+    auto info = internal::DetectSaveLoad({ at(1000.0, skydiag::EventType::kHeartbeat), start(240100.0, name76),
+      at(259600.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    char key[17]{};
+    std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(skydiag::SaveNameKey(name76)));
+    Require(info.seen && info.in_progress && info.name == kSave && info.key == key &&
+              info.seconds_loading > 19.49 && info.seconds_loading < 19.51,
+      "a crash while loading a save");
+    info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
+      at(60000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.seen && !info.in_progress && info.seconds_loading == 0.0 && info.name == L"Save75_FC70D793_0_646F7",
+      "a crash after the load finished");
+    info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
+      start(20000.0, name76), at(25000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.in_progress && info.name == kSave, "the newest load counts");
+    Require(!internal::DetectSaveLoad({ at(1000.0, skydiag::EventType::kCrash, 0xC0000005u) }).seen, "no load seen");
+
+    Require(internal::EventTypeName(start(0.0, name76).type) == L"SaveLoadStart" &&
+              internal::EventTypeName(static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd)) == L"SaveLoadEnd",
+      "the events' names");
+    const auto e = start(0.0, name76);
+    Require(internal::FormatEventDetail(e.type, e.a, e.b, e.c, e.d) == std::wstring(L"save=") + kSave &&
+              internal::FormatEventDetail(static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd), 1, 0, 0, 0) ==
+                L"loaded" &&
+              internal::FormatEventDetail(static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd), 0, 0, 0, 0) ==
+                L"failed",
+      "the events' details");
+  }
+
+  const auto crash = [&](std::size_t earlier, std::size_t places, std::size_t otherSaves) {
+    auto r = CrashIn(L"LocationalEncounterZones.dll", L"Locational Encounter Zones");
+    r.suspects.push_back(SuspectItem{});
+    r.suspects.back().module_filename = L"LocationalEncounterZones.dll";
+    r.suspects.back().confidence_level = i18n::ConfidenceLevel::kMedium;
+    r.state_flags = skydiag::kState_Loading;
+    r.save_load.seen = true;
+    r.save_load.in_progress = true;
+    r.save_load.name = kSave;
+    r.save_load.key = "0123456789abcdef";
+    r.save_load.seconds_loading = 19.4;
+    r.save_load.earlier_crashes = earlier;
+    r.save_load.crash_places = places;
+    r.save_load.other_save_crashes = otherSaves;
+    return r;
+  };
+  const auto saveLine = [](const AnalysisResult& r, std::wstring_view tag) {
+    for (std::size_t i = 0; i < r.recommendations.size(); ++i) {
+      if (r.recommendations[i].rfind(tag, 0) == 0) {
+        return i;
+      }
+    }
+    return r.recommendations.size();
+  };
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const std::wstring damagedTag = en ? L"[Damaged save] " : L"[세이브 손상] ";
+    const std::wstring saveTag = en ? L"[Save] " : L"[세이브] ";
+
+    // Two failed loads of one save, in two places: the save leads.
+    auto plain = crash(0, 0, 0);
+    plain.save_load = {};
+    BuildEvidenceAndSummary(plain, lang);
+    auto r = crash(1, 2, 0);
+    BuildEvidenceAndSummary(r, lang);
+    const auto& qa = r.quick_answer;
+    const std::wstring lead = en
+      ? std::wstring(L"Loading the same save (") + kSave + L") has crashed or frozen 2 times so far, in 2 different "
+          L"places. The save's data may be damaged; one mod is less likely."
+      : std::wstring(L"같은 세이브(") + kSave + L")를 불러오다 이번까지 2번 튕기거나 멈췄고, 난 곳이 2곳으로 서로 "
+          L"달랐습니다. 모드 하나의 문제보다 이 세이브의 데이터가 깨졌을 가능성이 있습니다.";
+    Require(qa.kind == "crash" && qa.case_id == "damaged_save" && qa.likelihood == "medium" && qa.suspect_mod.empty(),
+      "the damaged save leads");
+    Require(qa.headline == (en ? L"The game crashed to desktop (CTD). " : L"게임이 튕겼습니다(CTD). ") + lead,
+      "the damaged-save headline");
+    Require(Contains(qa.action, en ? L"Load a save made before this one." : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요."),
+      "load an earlier save");
+    Require(!qa.why_not_certain.empty(), "why it is not certain");
+    RequirePlainWords(qa, "damaged save");
+    Require(r.summary_sentence == lead + L" " + plain.summary_sentence, "summary prefix");
+    Require(!r.recommendations.empty() && r.recommendations[0].rfind(damagedTag, 0) == 0 &&
+              skydiag::dump_tool::SelectNextActionIndex(r.recommendations) == 0u,
+      "the damaged-save line is the next action");
+    Require(saveLine(r, saveTag) == r.recommendations.size(), "no one-off save line beside it");
+    bool evidence = false;
+    for (const auto& item : r.evidence) {
+      if (item.title == (en ? L"Captured while a save was loading" : L"캡처 당시 세이브를 불러오는 중")) {
+        evidence = item.confidence_level == i18n::ConfidenceLevel::kMedium &&
+                   Contains(item.details, en ? L"19.4 s after its load started" : L"19.4초 뒤") &&
+                   Contains(item.details, en ? L"Earlier failed loads of the same save: 1 (in 2 places with this one)."
+                                             : L"같은 세이브를 불러오다 난 이전 사고: 1번(이번까지 난 곳 2곳).");
+      }
+    }
+    Require(evidence, "the save-load evidence item");
+
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["save_load"]["name"] == WideToUtf8(kSave) && summary["save_load"]["in_progress"] == true &&
+              summary["save_load"]["seconds_loading"] == 19.4 && summary["save_load"]["earlier_failed_loads"] == 1 &&
+              summary["save_load"]["failed_load_places"] == 2 && summary["save_load"]["other_save_failed_loads"] == 0 &&
+              summary["save_load"]["damaged_save_suspected"] == true && summary["quick_answer"]["case"] == "damaged_save",
+      "summary JSON save_load");
+    Require(!skydiag::dump_tool::BuildSummaryJson(plain, std::filesystem::temp_directory_path(), L"stem", true)
+               .contains("save_load"),
+      "no field without a save load");
+    const auto report = skydiag::dump_tool::BuildReportText(r, summary, true);
+    Require(report.find(en ? "Save: Save76_FC70D793_0_646F7 (loading, 19.4 s in; earlier failed loads 1, places 2)\n"
+                           : "세이브: Save76_FC70D793_0_646F7 (불러오는 중, 19.4초째; 이전에 불러오다 난 사고 1번, 난 곳 2곳)\n") !=
+              std::string::npos,
+      "the report's save line");
+
+    // The same place again may be one mod's bug with this save: the mod leads.
+    auto samePlace = crash(1, 1, 0);
+    BuildEvidenceAndSummary(samePlace, lang);
+    Require(samePlace.quick_answer.case_id == plain.quick_answer.case_id &&
+              samePlace.summary_sentence == plain.summary_sentence,
+      "same place: the analysis leads");
+    const auto once = saveLine(samePlace, saveTag);
+    Require(once < samePlace.recommendations.size() && saveLine(samePlace, damagedTag) == samePlace.recommendations.size() &&
+              Contains(samePlace.recommendations[once],
+                en ? L"crashed while loading a save (Save76_FC70D793_0_646F7). If loading it fails again"
+                   : L"세이브(Save76_FC70D793_0_646F7)를 불러오다 튕겼습니다. 같은 세이브에서 또 그러면") &&
+              skydiag::dump_tool::SelectNextActionIndex(samePlace.recommendations) != once,
+      "same place: a save line, not the next action");
+
+    // Other saves failed too: the mod setup, not one save.
+    auto otherSaves = crash(1, 2, 1);
+    BuildEvidenceAndSummary(otherSaves, lang);
+    const auto setup = saveLine(otherSaves, saveTag);
+    Require(otherSaves.quick_answer.case_id != "damaged_save" && setup < otherSaves.recommendations.size() &&
+              Contains(otherSaves.recommendations[setup], en ? L"the mod setup is more likely" : L"모드 구성 쪽일 가능성이 큽니다"),
+      "other saves failed too");
+
+    // A load that finished before the crash says nothing about the save.
+    auto loaded = crash(1, 2, 0);
+    loaded.save_load.in_progress = false;
+    BuildEvidenceAndSummary(loaded, lang);
+    Require(loaded.quick_answer.case_id != "damaged_save" && saveLine(loaded, saveTag) == loaded.recommendations.size(),
+      "a finished load");
+    const auto loadedSummary =
+      skydiag::dump_tool::BuildSummaryJson(loaded, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(skydiag::dump_tool::BuildReportText(loaded, loadedSummary, true)
+                .find(en ? "Save: Save76_FC70D793_0_646F7 (loaded before the capture)\n"
+                         : "세이브: Save76_FC70D793_0_646F7 (캡처 전에 불러오기 끝남)\n") != std::string::npos,
+      "the report's finished-load line");
+
+    // A forced close stays a forced close.
+    auto closing = crash(1, 2, 0);
+    closing.forced_close.detected = true;
+    closing.forced_close.kind = "alt_f4";
+    BuildEvidenceAndSummary(closing, lang);
+    Require(closing.quick_answer.case_id == "forced_close" && saveLine(closing, damagedTag) == closing.recommendations.size() &&
+              saveLine(closing, saveTag) == closing.recommendations.size(),
+      "a forced close");
+  }
+}
+
 void TestForcedClose()
 {
   using skydiag::dump_tool::ExplainFaultInstruction;
@@ -1325,6 +1512,7 @@ int main()
     TestSummaryAndReportStartWithIt();
     TestFaultInstructionClue();
     TestForcedClose();
+    TestDamagedSave();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;

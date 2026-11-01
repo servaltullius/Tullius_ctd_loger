@@ -18,6 +18,7 @@ struct TagRule
 constexpr TagRule kTagRules[] = {
   { "forced_close", kRecommendationGroupImmediate, L"[Forced close]", L"[강제 종료]" },
   { "known_cause", kRecommendationGroupImmediate, L"[Known cause]", L"[알려진 원인]" },
+  { "damaged_save", kRecommendationGroupImmediate, L"[Damaged save]", L"[세이브 손상]" },
   { "known_crash_site", kRecommendationGroupImmediate, L"[Known crash site]", L"[알려진 크래시 지점]" },
   { "modal_dialog", kRecommendationGroupImmediate, L"[Modal dialog]", L"[Modal 대화상자]" },
   { "main_thread", kRecommendationGroupImmediate, L"[Main thread]", L"[메인 스레드]" },

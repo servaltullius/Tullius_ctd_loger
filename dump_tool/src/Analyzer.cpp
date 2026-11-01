@@ -550,6 +550,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!out.is_filtered_clean_exit && out.exc_code != 0u) {
     out.forced_close = internal::DetectForcedClose(out.events);
   }
+  // ADR-0025: a save load the capture came before the end of.
+  out.save_load = internal::DetectSaveLoad(out.events);
   // Kept out of the crash history and its statistics, as a clean exit is.
   const bool keepOutOfHistory = out.is_filtered_clean_exit || out.forced_close.detected;
 

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -287,6 +288,27 @@ void OnSkseMessage(SKSE::MessagingInterface::Message* message)
   }
   if (message->type == SKSE::MessagingInterface::kDataLoaded) {
     OnDataLoaded(g_cfg);
+  }
+  // ADR-0025: which save a load started with, so a crash before it finished
+  // can be matched with earlier crashes loading the same save. SKSE passes the
+  // name (data) and its length (dataLen); PostLoadGame's data is the result.
+  if (message->type == SKSE::MessagingInterface::kPreLoadGame) {
+    std::string_view name;
+    if (const auto* text = static_cast<const char*>(message->data)) {
+      const std::size_t maxLen = std::min<std::size_t>(message->dataLen, 512u);
+      std::size_t len = 0;
+      while (len < maxLen && text[len] != '\0') {
+        ++len;
+      }
+      name = std::string_view(text, len);
+    }
+    skydiag::plugin::PushSaveLoadStartEvent(name);
+    spdlog::info("SkyrimDiag: loading save {}", name);
+  }
+  if (message->type == SKSE::MessagingInterface::kPostLoadGame) {
+    const bool loaded = message->data != nullptr;
+    skydiag::plugin::PushSaveLoadEndEvent(loaded);
+    spdlog::info("SkyrimDiag: save load {}", loaded ? "finished" : "failed");
   }
 }
 
