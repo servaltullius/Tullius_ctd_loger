@@ -1014,6 +1014,20 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
             L", and loading other saves has failed too: the mod setup is more likely than one save.")
         : (L"[세이브] 세이브" + nameKo +
             L"를 불러오다 문제가 났고, 다른 세이브를 불러오다 난 사고도 있습니다. 세이브 하나보다 모드 구성 쪽일 가능성이 큽니다."));
+    } else if (r.save_load.earlier_crashes > 0) {
+      // Failed before: in one place every time, or a freeze (which never
+      // leads with the save).
+      const std::wstring times = std::to_wstring(r.save_load.earlier_crashes + 1);
+      const bool samePlace = r.save_load.crash_places <= 1;
+      r.recommendations.push_back(en
+        ? (L"[Save] Loading this save" + name + L" has crashed or frozen " + times + L" times so far" +
+            (samePlace ? L", in the same place each time: a mod may fail on this save's data. "
+                       : L". ") +
+            L"Load a save made before it: if that one loads, the problem is this save only.")
+        : (L"[세이브] 세이브" + nameKo + L"를 불러오다 이번까지 " + times + L"번 튕기거나 멈췄습니다" +
+            (samePlace ? L". 매번 같은 곳이라, 어떤 모드가 이 세이브의 데이터에서 매번 같은 자리에서 실패하는 것일 수 있습니다. "
+                       : L". ") +
+            L"그보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면 이 세이브만의 문제입니다."));
     } else {
       r.recommendations.push_back(en
         ? (L"[Save] The game " + std::wstring(isCrashLike ? L"crashed" : L"froze") + L" while loading a save" + name +

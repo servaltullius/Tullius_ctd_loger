@@ -1145,16 +1145,16 @@ void TestDamagedSave()
 
   // From the blackbox: the newest SaveLoadStart with no SaveLoadEnd after it.
   {
+    // The plugin's own payload (SkyrimDiagSaveLoad.h).
     const auto start = [](double t, std::string_view name) {
       EventRow e{};
       e.t_ms = t;
       e.type = static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadStart);
-      e.a = skydiag::SaveNameKey(name);
-      char text[24]{};
-      name.copy(text, std::min<std::size_t>(name.size(), 23u));
-      std::memcpy(&e.b, text, 8);
-      std::memcpy(&e.c, text + 8, 8);
-      std::memcpy(&e.d, text + 16, 8);
+      const auto payload = skydiag::MakeSaveLoadStartPayload(name);
+      e.a = payload.a;
+      e.b = payload.b;
+      e.c = payload.c;
+      e.d = payload.d;
       return e;
     };
     const auto at = [](double t, skydiag::EventType type, std::uint64_t a = 0) {
@@ -1170,9 +1170,24 @@ void TestDamagedSave()
       at(259600.0, skydiag::EventType::kCrash, 0xC0000005u) });
     char key[17]{};
     std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(skydiag::SaveNameKey(name76)));
-    Require(info.seen && info.in_progress && info.name == kSave && info.key == key &&
+    Require(info.seen && info.in_progress && info.name == kSave && info.key == key && info.timed_to_crash &&
               info.seconds_loading > 19.49 && info.seconds_loading < 19.51,
       "a crash while loading a save");
+    // A freeze has no Crash event: the newest event is all there is.
+    info = internal::DetectSaveLoad({ start(1000.0, name76), at(41000.0, skydiag::EventType::kHeartbeat) });
+    Require(info.in_progress && !info.timed_to_crash && info.seconds_loading == 40.0, "a load with no crash");
+    // A new game leaves no save in play.
+    info = internal::DetectSaveLoad({ start(1000.0, name76), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
+      at(20000.0, skydiag::EventType::kSaveLoadEnd, 2), at(60000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(!info.seen && !info.in_progress && info.name.empty() && info.key.empty(), "a new game after a load");
+    // No name: no key, so unnamed loads never match each other.
+    info = internal::DetectSaveLoad({ start(1000.0, ""), at(2000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.seen && info.in_progress && info.key.empty(), "a load with no name");
+    // A UTF-8 name is read as UTF-8 and cut before a character it would split
+    // (seven 3-byte letters fit in 23 bytes; /utf-8 makes this literal UTF-8).
+    info = internal::DetectSaveLoad(
+      { start(1000.0, "한글세이브이름입니다"), at(2000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.name == L"한글세이브이름", "a UTF-8 save name");
     info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
       at(60000.0, skydiag::EventType::kCrash, 0xC0000005u) });
     Require(info.seen && !info.in_progress && info.seconds_loading == 0.0 && info.name == L"Save75_FC70D793_0_646F7",
@@ -1190,7 +1205,9 @@ void TestDamagedSave()
               internal::FormatEventDetail(static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd), 1, 0, 0, 0) ==
                 L"loaded" &&
               internal::FormatEventDetail(static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd), 0, 0, 0, 0) ==
-                L"failed",
+                L"failed" &&
+              internal::FormatEventDetail(static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd), 2, 0, 0, 0) ==
+                L"new_game",
       "the events' details");
   }
 
@@ -1205,6 +1222,7 @@ void TestDamagedSave()
     r.save_load.name = kSave;
     r.save_load.key = "0123456789abcdef";
     r.save_load.seconds_loading = 19.4;
+    r.save_load.timed_to_crash = true;
     r.save_load.earlier_crashes = earlier;
     r.save_load.crash_places = places;
     r.save_load.other_save_crashes = otherSaves;
@@ -1283,10 +1301,63 @@ void TestDamagedSave()
     const auto once = saveLine(samePlace, saveTag);
     Require(once < samePlace.recommendations.size() && saveLine(samePlace, damagedTag) == samePlace.recommendations.size() &&
               Contains(samePlace.recommendations[once],
-                en ? L"crashed while loading a save (Save76_FC70D793_0_646F7). If loading it fails again"
-                   : L"세이브(Save76_FC70D793_0_646F7)를 불러오다 튕겼습니다. 같은 세이브에서 또 그러면") &&
+                en ? L"Loading this save (Save76_FC70D793_0_646F7) has crashed or frozen 2 times so far, in the same "
+                     L"place each time"
+                   : L"세이브(Save76_FC70D793_0_646F7)를 불러오다 이번까지 2번 튕기거나 멈췄습니다. 매번 같은 곳이라") &&
               skydiag::dump_tool::SelectNextActionIndex(samePlace.recommendations) != once,
       "same place: a save line, not the next action");
+
+    // The first failed load of a save: what would tell.
+    auto first = crash(0, 0, 0);
+    BuildEvidenceAndSummary(first, lang);
+    const auto firstLine = saveLine(first, saveTag);
+    Require(first.quick_answer.case_id == plain.quick_answer.case_id && firstLine < first.recommendations.size() &&
+              Contains(first.recommendations[firstLine],
+                en ? L"crashed while loading a save (Save76_FC70D793_0_646F7). If loading it fails again"
+                   : L"세이브(Save76_FC70D793_0_646F7)를 불러오다 튕겼습니다. 같은 세이브에서 또 그러면"),
+      "the first failed load");
+
+    // A capture with no Crash event says when the last record was, not the crash.
+    auto stuck = crash(0, 0, 0);
+    stuck.save_load.timed_to_crash = false;
+    BuildEvidenceAndSummary(stuck, lang);
+    bool lastRecord = false;
+    for (const auto& item : stuck.evidence) {
+      lastRecord = lastRecord || Contains(item.details, en ? L"the last record is 19.4 s after its load started"
+                                                           : L"마지막 기록은 불러오기를 시작한 지 19.4초 뒤입니다");
+    }
+    const auto stuckSummary =
+      skydiag::dump_tool::BuildSummaryJson(stuck, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(lastRecord && stuckSummary["save_load"]["timed_to_crash"] == false &&
+              skydiag::dump_tool::BuildReportText(stuck, stuckSummary, true)
+                  .find(en ? "(loading, last record 19.4 s in)" : "(불러오는 중, 마지막 기록 19.4초째)") != std::string::npos,
+      "no Crash event: the last record");
+
+    // Which captures count as a failed load in the crash history.
+    {
+      namespace internal = skydiag::dump_tool::internal;
+      auto counted = crash(0, 0, 0);
+      counted.is_crash_like = true;
+      Require(internal::CountsAsFailedLoad(counted), "a crash while loading counts");
+      auto autoFreeze = crash(0, 0, 0);
+      autoFreeze.is_hang_like = true;
+      Require(internal::CountsAsFailedLoad(autoFreeze), "an automatic freeze capture counts");
+      auto manual = autoFreeze;
+      manual.is_manual_capture = true;
+      Require(!internal::CountsAsFailedLoad(manual), "a manual capture does not");
+      auto snapshot = crash(0, 0, 0);
+      snapshot.is_snapshot_like = true;
+      Require(!internal::CountsAsFailedLoad(snapshot), "a snapshot does not");
+      auto closing = counted;
+      closing.forced_close.detected = true;
+      Require(!internal::CountsAsFailedLoad(closing), "a forced close does not");
+      auto unnamed = counted;
+      unnamed.save_load.key.clear();
+      Require(!internal::CountsAsFailedLoad(unnamed), "a load with no name does not");
+      auto finished = counted;
+      finished.save_load.in_progress = false;
+      Require(!internal::CountsAsFailedLoad(finished), "a finished load does not");
+    }
 
     // Other saves failed too: the mod setup, not one save.
     auto otherSaves = crash(1, 2, 1);

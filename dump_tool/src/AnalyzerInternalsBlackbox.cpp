@@ -10,7 +10,9 @@
 
 #include "MinidumpUtil.h"
 #include "SkyrimDiagCloseRequest.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagShared.h"
+#include "Utf.h"
 
 namespace skydiag::dump_tool::internal {
 namespace {
@@ -132,27 +134,48 @@ ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
   return info;
 }
 
+std::wstring DecodeSaveLoadName(std::uint64_t b, std::uint64_t c, std::uint64_t d)
+{
+  char buf[sizeof(b) * 3]{};
+  std::memcpy(buf, &b, sizeof(b));
+  std::memcpy(buf + sizeof(b), &c, sizeof(c));
+  std::memcpy(buf + sizeof(b) * 2, &d, sizeof(d));
+  return Utf8OrAnsiToWide(std::string_view(buf, strnlen(buf, skydiag::kSaveNameTextBytes)));
+}
+
 SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
 {
   SaveLoadInfo info{};
   double startedMs = 0.0;
   double lastMs = 0.0;
+  double crashMs = -1.0;
   for (const auto& event : events) {
     lastMs = std::max(lastMs, event.t_ms);
     switch (static_cast<skydiag::EventType>(event.type)) {
       case skydiag::EventType::kSaveLoadStart: {
+        info = SaveLoadInfo{};
         info.seen = true;
         info.in_progress = true;
-        info.name = DecodePackedShortText(event);
-        char key[17]{};
-        std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(event.a));
-        info.key = event.a != 0u ? key : "";
+        info.name = DecodeSaveLoadName(event.b, event.c, event.d);
+        if (event.a != 0u) {
+          char key[17]{};
+          std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(event.a));
+          info.key = key;
+        }
         startedMs = event.t_ms;
+        crashMs = -1.0;
         break;
       }
       case skydiag::EventType::kSaveLoadEnd:
-        if (info.seen && event.t_ms >= startedMs) {
+        if (event.a == static_cast<std::uint64_t>(skydiag::SaveLoadResult::kNewGame)) {
+          info = SaveLoadInfo{};  // a new game: no save is in play
+        } else if (info.seen && event.t_ms >= startedMs) {
           info.in_progress = false;
+        }
+        break;
+      case skydiag::EventType::kCrash:
+        if (info.in_progress && event.t_ms >= startedMs) {
+          crashMs = event.t_ms;
         }
         break;
       default:
@@ -160,9 +183,16 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
     }
   }
   if (info.in_progress) {
-    info.seconds_loading = std::max(0.0, (lastMs - startedMs) / 1000.0);
+    info.timed_to_crash = crashMs >= 0.0;
+    info.seconds_loading = std::max(0.0, ((info.timed_to_crash ? crashMs : lastMs) - startedMs) / 1000.0);
   }
   return info;
+}
+
+bool CountsAsFailedLoad(const AnalysisResult& r)
+{
+  return r.save_load.in_progress && !r.save_load.key.empty() && !r.is_filtered_clean_exit &&
+         !r.forced_close.detected && (r.is_crash_like || (r.is_hang_like && !r.is_manual_capture));
 }
 
 BlackboxFreezeSummary BuildBlackboxFreezeSummary(

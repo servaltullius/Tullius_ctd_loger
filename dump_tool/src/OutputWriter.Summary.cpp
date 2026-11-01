@@ -154,6 +154,7 @@ nlohmann::json BuildSummaryJson(
       { "key", save.key },
       { "in_progress", save.in_progress },
       { "seconds_loading", std::round(save.seconds_loading * 10.0) / 10.0 },
+      { "timed_to_crash", save.timed_to_crash },
       { "earlier_failed_loads", save.earlier_crashes },
       { "failed_load_places", save.crash_places },
       { "other_save_failed_loads", save.other_save_crashes },

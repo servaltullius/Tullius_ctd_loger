@@ -52,7 +52,9 @@ struct SaveLoadCrashStats
 {
   std::size_t count = 0;
   std::vector<std::string> bucket_keys;  // distinct, in history order
-  std::size_t other_save_count = 0;      // later entries that crashed loading another save
+  // Entries that failed loading another save after the first of these, or in
+  // the day before it (a broken mod setup fails every save).
+  std::size_t other_save_count = 0;
 };
 
 // Why a history was or was not loaded: a caller must not save over a file it
@@ -82,10 +84,15 @@ public:
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
   BucketStats GetBucketStats(const std::string& bucketKey) const;
   std::vector<BucketCandidateStats> GetBucketCandidateStats(const std::string& bucketKey) const;
-  // Counted from the first entry with this save key; an empty key counts nothing.
-  // currentBucketKey, the crash being analyzed, is one of the places when there
-  // are earlier entries (it is not one of them: its own entry is removed first).
-  SaveLoadCrashStats GetSaveLoadCrashStats(const std::string& saveKey, const std::string& currentBucketKey = {}) const;
+  // An empty key counts nothing. Only entries before the current dump's own
+  // entry count (a re-analysis leaves out the crashes after it); without one,
+  // every entry is earlier. The current crash's bucket is one of the places
+  // when there are earlier entries.
+  SaveLoadCrashStats GetSaveLoadCrashStats(
+    const std::string& saveKey,
+    const std::string& currentBucketKey = {},
+    std::string_view currentDumpFile = {},
+    std::string_view currentDumpIdentityKey = {}) const;
 
   std::size_t Size() const { return m_entries.size(); }
 

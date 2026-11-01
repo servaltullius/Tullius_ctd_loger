@@ -316,9 +316,14 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     wchar_t seconds[32]{};
     std::swprintf(seconds, sizeof(seconds) / sizeof(seconds[0]), L"%.1f", save.seconds_loading);
     const std::wstring name = save.name.empty() ? (en ? L"A save" : L"세이브") : save.name;
-    e.details = en
-      ? (name + L": captured " + seconds + L" s after its load started, before the load finished.")
-      : (name + L": 불러오기를 시작한 지 " + seconds + L"초 뒤, 불러오기가 끝나기 전에 캡처됐습니다.");
+    // Without a Crash event the newest event is all there is: a stuck game may
+    // have stopped writing long before the capture.
+    e.details = save.timed_to_crash
+      ? (en ? (name + L": crashed " + seconds + L" s after its load started, before the load finished.")
+            : (name + L": 불러오기를 시작한 지 " + seconds + L"초 뒤, 불러오기가 끝나기 전에 튕겼습니다."))
+      : (en ? (name + L": captured before the load finished; the last record is " + seconds +
+                L" s after its load started.")
+            : (name + L": 불러오기가 끝나기 전에 캡처됐습니다. 마지막 기록은 불러오기를 시작한 지 " + seconds + L"초 뒤입니다."));
     if (save.earlier_crashes > 0) {
       e.details += en
         ? (L" Earlier failed loads of the same save: " + std::to_wstring(save.earlier_crashes) + L" (in " +

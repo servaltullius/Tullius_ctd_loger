@@ -142,15 +142,19 @@ struct ForcedCloseInfo
 // crashes crash_history.json holds from loading the same save.
 struct SaveLoadInfo
 {
-  bool seen = false;         // a SaveLoadStart is in the blackbox
+  bool seen = false;         // a SaveLoadStart is in the blackbox (and no new game after it)
   bool in_progress = false;  // no SaveLoadEnd after it: captured before the load finished
-  std::wstring name;         // up to 23 characters of the save's name
-  std::string key;           // 16 hex digits of SaveNameKey; what history entries match
-  double seconds_loading = 0.0;  // from the load's start to the newest event, while in progress
-  // This dump's own entry is left out of these.
-  std::size_t earlier_crashes = 0;     // earlier crashes while loading the same save
-  std::size_t crash_places = 0;        // distinct crash buckets among them and this crash
-  std::size_t other_save_crashes = 0;  // crashes while loading another save since the first of them
+  std::wstring name;         // the save's name, up to its first 23 bytes
+  std::string key;           // 16 hex digits of SaveNameKey, empty without a name; what history entries match
+  // While in progress: from the load's start to the Crash event (timed_to_crash),
+  // or else to the newest event, which a stuck game may have stopped writing.
+  double seconds_loading = 0.0;
+  bool timed_to_crash = false;
+  // From crash_history.json, counted up to this dump's own entry (later crashes left out).
+  std::size_t earlier_crashes = 0;     // earlier failed loads of the same save
+  std::size_t crash_places = 0;        // distinct crash buckets among them and this capture
+  // Failed loads of other saves after the first of them, or in the day before it.
+  std::size_t other_save_crashes = 0;
 };
 
 struct FirstChanceSummary

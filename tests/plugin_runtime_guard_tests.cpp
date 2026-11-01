@@ -528,13 +528,22 @@ int main()
   AssertOrdered(
     onSkseMessageBody,
     "SKSE::MessagingInterface::kPreLoadGame",
-    "PushSaveLoadStartEvent(name)",
+    "PushSaveLoadStartEvent(path)",
     "PreLoadGame must record the save being loaded.");
+  AssertContains(
+    onSkseMessageBody,
+    "spdlog::info(\"SkyrimDiag: loading save {}\", skydiag::SaveNameForEvent(path))",
+    "The log names the save only: a folder would carry the Windows user name.");
   AssertOrdered(
     onSkseMessageBody,
     "SKSE::MessagingInterface::kPostLoadGame",
-    "PushSaveLoadEndEvent(loaded)",
+    "PushSaveLoadEndEvent(loaded ? skydiag::SaveLoadResult::kLoaded : skydiag::SaveLoadResult::kFailed)",
     "PostLoadGame must record the end of the load.");
+  AssertOrdered(
+    onSkseMessageBody,
+    "SKSE::MessagingInterface::kNewGame",
+    "PushSaveLoadEndEvent(skydiag::SaveLoadResult::kNewGame)",
+    "A new game must clear the save in play.");
 
   AssertContains(
     vectoredHandlerBody,

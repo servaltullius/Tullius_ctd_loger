@@ -1,5 +1,6 @@
 #include "AnalyzerPipeline.h"
 
+#include "AnalyzerInternals.h"
 #include "CandidateConsensus.h"
 #include "CrashHistory.h"
 #include "CrashLoggerParseCore.h"
@@ -207,13 +208,24 @@ void LoadCrashHistoryContext(
 
   CrashHistory history;
   history.LoadFromFile(historyPath);
-  history.RemoveEntriesForDumpFile(
-    WideToUtf8(std::filesystem::path(dumpPath).filename().wstring()),
-    CrashHistoryIdentityKey(out));
+  const auto dumpFile = WideToUtf8(std::filesystem::path(dumpPath).filename().wstring());
+  const auto dumpIdentityKey = CrashHistoryIdentityKey(out);
+  const auto bucketKey = WideToUtf8(out.crash_bucket_key);
+
+  // ADR-0025: earlier failed loads of the same save, and in how many places
+  // (buckets) they and this capture failed. Counted before this dump's own
+  // entry is removed: a re-analysis counts only the crashes before it.
+  if (out.save_load.in_progress && !out.save_load.key.empty()) {
+    const auto saveStats = history.GetSaveLoadCrashStats(out.save_load.key, bucketKey, dumpFile, dumpIdentityKey);
+    out.save_load.earlier_crashes = saveStats.count;
+    out.save_load.other_save_crashes = saveStats.other_save_count;
+    out.save_load.crash_places = saveStats.bucket_keys.size();
+  }
+
+  history.RemoveEntriesForDumpFile(dumpFile, dumpIdentityKey);
 
   out.history_stats = history.GetModuleStats(20);
 
-  const auto bucketKey = WideToUtf8(out.crash_bucket_key);
   for (const auto& stats : history.GetBucketCandidateStats(bucketKey)) {
     if (stats.count == 0 || stats.candidate_key.empty()) {
       continue;
@@ -228,14 +240,6 @@ void LoadCrashHistoryContext(
     out.history_correlation.last_seen = analysisTimestamp;
   }
 
-  // ADR-0025: earlier crashes while loading the same save, and in how many
-  // places (buckets) they and this one crashed.
-  if (out.save_load.in_progress && !out.save_load.key.empty()) {
-    const auto saveStats = history.GetSaveLoadCrashStats(out.save_load.key, bucketKey);
-    out.save_load.earlier_crashes = saveStats.count;
-    out.save_load.other_save_crashes = saveStats.other_save_count;
-    out.save_load.crash_places = saveStats.bucket_keys.size();
-  }
 }
 
 namespace {
@@ -329,7 +333,7 @@ void AppendCrashHistoryEntry(
     entry.signature_id = out.signature_match->id;
   }
   entry.candidate_keys = CollectHistoryCandidateKeys(out);
-  if (out.save_load.in_progress && !out.save_load.key.empty()) {
+  if (internal::CountsAsFailedLoad(out)) {
     entry.loading_save_key = out.save_load.key;
     entry.loading_save_name = WideToUtf8(out.save_load.name);
   }

@@ -113,7 +113,8 @@ std::string BuildReportText(
     if (save.in_progress) {
       char seconds[32]{};
       std::snprintf(seconds, sizeof(seconds), "%.1f", save.seconds_loading);
-      rpt << (en ? " (loading, " : " (불러오는 중, ") << seconds << (en ? " s in" : "초째");
+      rpt << (en ? " (loading, " : " (불러오는 중, ") << (save.timed_to_crash ? "" : (en ? "last record " : "마지막 기록 "))
+          << seconds << (en ? " s in" : "초째");
       if (save.earlier_crashes > 0) {
         rpt << (en ? "; earlier failed loads " : "; 이전에 불러오다 난 사고 ") << save.earlier_crashes
             << (en ? ", places " : "번, 난 곳 ") << save.crash_places << (en ? "" : "곳");

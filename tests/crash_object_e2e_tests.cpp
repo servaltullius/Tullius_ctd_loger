@@ -804,14 +804,8 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
       e.seq = index * 2u;  // committed
     };
     push(0, 2, skydiag::EventType::kSessionStart, {});
-    skydiag::EventPayload save{};
-    save.a = skydiag::SaveNameKey(kSaveName);
-    char text[24]{};
-    kSaveName.copy(text, 23);
-    std::memcpy(&save.b, text, 8);
-    std::memcpy(&save.c, text + 8, 8);
-    std::memcpy(&save.d, text + 16, 8);
-    push(1, 100'000'000ull, skydiag::EventType::kSaveLoadStart, save);  // 10 s
+    // What the plugin writes for SKSE's PreLoadGame.
+    push(1, 100'000'000ull, skydiag::EventType::kSaveLoadStart, skydiag::MakeSaveLoadStartPayload(kSaveName));  // 10 s
     skydiag::EventPayload crash{};
     crash.a = 0xC0000005u;
     push(2, 290'000'000ull, skydiag::EventType::kCrash, crash);  // 29 s

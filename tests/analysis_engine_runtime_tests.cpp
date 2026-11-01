@@ -3,6 +3,7 @@
 #endif
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -1332,20 +1333,38 @@ void TestCrashHistorySaveLoadStats()
   static_assert(skydiag::SaveNameForEvent("Quicksave0") == "Quicksave0");
   static_assert(SaveNameKey("Save76_X") == SaveNameKey("save76_x.ess"));
   static_assert(SaveNameKey("Save76_X") != SaveNameKey("Save75_X"));
-  static_assert(SaveNameKey("") != 0u);
+  static_assert(SaveNameKey("") == 0u && SaveNameKey("C:\\Saves\\.ess") != 0u);
+  // The plugin's payload: the key of the whole name, 23 bytes of text, cut
+  // before a UTF-8 character it would split.
+  {
+    constexpr std::string_view kLong = "Save76_FC70D793_0_646F726F_Tamriel_000843_20261101071101_14_1";
+    const auto payload = skydiag::MakeSaveLoadStartPayload(std::string("C:\\Saves\\") + std::string(kLong) + ".ess");
+    assert(payload.a == SaveNameKey(kLong));
+    char text[24]{};
+    std::memcpy(text, &payload.b, 8);
+    std::memcpy(text + 8, &payload.c, 8);
+    std::memcpy(text + 16, &payload.d, 8);
+    assert(std::string(text) == "Save76_FC70D793_0_646F7");
+    assert(skydiag::MakeSaveLoadStartPayload("").a == 0u && skydiag::MakeSaveLoadStartPayload("").b == 0u);
+    static_assert(skydiag::SaveNameTextLength("ab") == 2u);
+    static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrstuvwxyz") == 23u);
+    // 21 ASCII bytes and a 3-byte letter: the letter would end past 23.
+    static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrstu\xED\x95\x9C") == 21u);
+    static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrst\xED\x95\x9C") == 23u);
+  }
 
   CrashHistory history;
-  const auto add = [&](const char* dump, const char* bucket, const char* saveKey) {
+  const auto add = [&](const char* dump, const char* bucket, const char* saveKey, const char* at = "2026-11-01T07:00:00Z") {
     CrashHistoryEntry e{};
-    e.timestamp_utc = "2026-11-01T07:00:00Z";
+    e.timestamp_utc = at;
     e.dump_file = dump;
     e.bucket_key = bucket;
     e.loading_save_key = saveKey;
     e.loading_save_name = *saveKey ? "Save76_FC70D793_0_646F7" : "";
     history.AddEntry(std::move(e));
   };
-  add("a.dmp", "CTD3-old", "");             // before: not counted
-  add("b.dmp", "CTD3-other", "save75key");  // another save before the first of save76: not counted
+  add("a.dmp", "CTD3-old", "");                                    // not loading a save
+  add("b.dmp", "CTD3-other", "save75key", "2026-10-29T07:00:00Z");  // another save, days before: not counted
   add("c.dmp", "CTD3-7dba", "save76key");
   add("d.dmp", "CTD3-2d9f", "save76key");
   add("e.dmp", "CTD3-2d9f", "save76key");
@@ -1360,6 +1379,39 @@ void TestCrashHistorySaveLoadStats()
   assert(history.GetSaveLoadCrashStats("save76key", "CTD3-new").bucket_keys.size() == 3u);
   assert(history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f").bucket_keys.size() == 2u);
   assert(history.GetSaveLoadCrashStats("unseenkey", "CTD3-new").bucket_keys.empty());
+  // The analyzer counts before it removes the dump's own entry, and keeps a
+  // save only for a capture that is a failed load.
+  {
+    const auto analyzerHistory = ReadAllText(ProjectRoot() / "dump_tool" / "src" / "Analyzer.History.cpp");
+    AssertOrdered(analyzerHistory, "history.GetSaveLoadCrashStats(", "history.RemoveEntriesForDumpFile(dumpFile",
+      "Save-load stats must be counted before the dump's own entry is removed.");
+    AssertContains(analyzerHistory, "if (internal::CountsAsFailedLoad(out)) {",
+      "Only a failed load may keep its save in the crash history.");
+  }
+  // A re-analysis counts only the crashes before the dump: d.dmp's own entry
+  // and the later e.dmp are left out.
+  {
+    const auto reanalysis = history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f", "D.DMP");
+    assert(reanalysis.count == 1u && reanalysis.bucket_keys.size() == 2u && reanalysis.other_save_count == 0u);
+  }
+  // Another save failing in the day before the first failure counts (the
+  // player may have tried it first); one days before does not.
+  {
+    CrashHistory tried;
+    const auto row = [&](const char* dump, const char* bucket, const char* saveKey, const char* at) {
+      CrashHistoryEntry e{};
+      e.timestamp_utc = at;
+      e.dump_file = dump;
+      e.bucket_key = bucket;
+      e.loading_save_key = saveKey;
+      tried.AddEntry(std::move(e));
+    };
+    row("old.dmp", "CTD3-a", "saveAkey", "2026-10-30T05:00:00Z");
+    row("a.dmp", "CTD3-a", "saveAkey", "2026-11-01T06:30:00Z");
+    row("b1.dmp", "CTD3-b1", "saveBkey", "2026-11-01T07:00:00Z");
+    const auto b = tried.GetSaveLoadCrashStats("saveBkey", "CTD3-b2");
+    assert(b.count == 1u && b.bucket_keys.size() == 2u && b.other_save_count == 1u);
+  }
   {
     // 2026-11-01: Save76 failed to load at 16:18, then at 16:34 elsewhere.
     CrashHistory first;

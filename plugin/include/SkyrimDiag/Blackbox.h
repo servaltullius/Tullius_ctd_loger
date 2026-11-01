@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "SkyrimDiagCloseRequest.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::plugin {
@@ -43,10 +44,10 @@ void PushCloseRequestEvent(
   std::uint64_t wParam,
   std::uint64_t source) noexcept;
 
-// ADR-0025: the save a load starts with (SkyrimDiagSaveLoad.h), and whether
-// that load finished.
+// ADR-0025: the save a load starts with (SkyrimDiagSaveLoad.h), and how that
+// load ended, or a new game.
 void PushSaveLoadStartEvent(std::string_view saveName) noexcept;
-void PushSaveLoadEndEvent(bool loaded) noexcept;
+void PushSaveLoadEndEvent(skydiag::SaveLoadResult result) noexcept;
 
 inline void Note(std::uint64_t tag, std::uint64_t a = 0, std::uint64_t b = 0) noexcept
 {
