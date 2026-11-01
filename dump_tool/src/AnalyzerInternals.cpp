@@ -7,6 +7,8 @@
 #include <string_view>
 
 #include "SkyrimDiagCloseRequest.h"
+#include "SkyrimDiagHash.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool::internal {
@@ -26,6 +28,8 @@ std::wstring EventTypeName(std::uint16_t t)
     case EventType::kMenuClose: return L"MenuClose";
     case EventType::kLoadStart: return L"LoadStart";
     case EventType::kLoadEnd: return L"LoadEnd";
+    case EventType::kSaveLoadStart: return L"SaveLoadStart";
+    case EventType::kSaveLoadEnd: return L"SaveLoadEnd";
     case EventType::kCellChange: return L"CellChange";
     case EventType::kNote: return L"Note";
     case EventType::kPerfHitch: return L"PerfHitch";
@@ -43,15 +47,7 @@ std::wstring EventTypeName(std::uint16_t t)
 
 namespace {
 
-constexpr std::uint64_t Fnv1a64(std::string_view s) noexcept
-{
-  std::uint64_t hash = 14695981039346656037ull;
-  for (const unsigned char c : s) {
-    hash ^= c;
-    hash *= 1099511628211ull;
-  }
-  return hash;
-}
+using skydiag::hash::Fnv1a64;
 
 struct MenuHashEntry {
   std::uint64_t hash;
@@ -211,6 +207,18 @@ std::wstring FormatEventDetail(std::uint16_t type, std::uint64_t a, std::uint64_
       }
       return {};
     }
+
+    case EventType::kSaveLoadStart: {
+      // ADR-0025: a, the name's key; b..d, its first 23 bytes.
+      const auto name = DecodeSaveLoadName(b, c, d);
+      return name.empty() ? std::wstring{} : (L"save=" + name);
+    }
+    case EventType::kSaveLoadEnd:
+      switch (static_cast<skydiag::SaveLoadResult>(a)) {
+        case skydiag::SaveLoadResult::kLoaded: return L"loaded";
+        case skydiag::SaveLoadResult::kNewGame: return L"new_game";
+        default: return L"failed";
+      }
 
     case EventType::kModuleLoad:
     case EventType::kModuleUnload: {

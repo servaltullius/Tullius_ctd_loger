@@ -2,6 +2,8 @@
 #include "SkyrimDiagShared.h"
 #include "Utf.h"
 
+#include <cwchar>
+
 namespace skydiag::dump_tool::internal {
 
 void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -302,6 +304,38 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.details = en
       ? L"The Loading flag is set in state_flags. (Likely mesh/texture/script init stage)"
       : L"state_flags에 Loading 플래그가 설정되어 있습니다. (메쉬/텍스처/스크립트 초기화 단계일 수 있음)";
+    r.evidence.push_back(std::move(e));
+  }
+
+  // ADR-0025: the save being loaded, and its earlier failed loads.
+  if (const auto& save = r.save_load; save.in_progress) {
+    EvidenceItem e{};
+    e.confidence_level = ctx.isDamagedSaveSuspected ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Captured while a save was loading" : L"캡처 당시 세이브를 불러오는 중";
+    wchar_t seconds[32]{};
+    std::swprintf(seconds, sizeof(seconds) / sizeof(seconds[0]), L"%.1f", save.seconds_loading);
+    const std::wstring name = save.name.empty() ? (en ? L"A save" : L"세이브") : save.name;
+    // Without a Crash event the newest event is all there is: a stuck game may
+    // have stopped writing long before the capture.
+    e.details = save.timed_to_crash
+      ? (en ? (name + L": crashed " + seconds + L" s after its load started, before the load finished.")
+            : (name + L": 불러오기를 시작한 지 " + seconds + L"초 뒤, 불러오기가 끝나기 전에 튕겼습니다."))
+      : (en ? (name + L": captured before the load finished; the last record is " + seconds +
+                L" s after its load started.")
+            : (name + L": 불러오기가 끝나기 전에 캡처됐습니다. 마지막 기록은 불러오기를 시작한 지 " + seconds + L"초 뒤입니다."));
+    if (save.earlier_crashes > 0) {
+      e.details += en
+        ? (L" Earlier failed loads of the same save: " + std::to_wstring(save.earlier_crashes) + L" (in " +
+            std::to_wstring(save.crash_places) + L" places with this one).")
+        : (L" 같은 세이브를 불러오다 난 이전 사고: " + std::to_wstring(save.earlier_crashes) + L"번(이번까지 난 곳 " +
+            std::to_wstring(save.crash_places) + L"곳).");
+    }
+    if (save.other_save_crashes > 0) {
+      e.details += en
+        ? (L" Failed loads of other saves since then: " + std::to_wstring(save.other_save_crashes) + L".")
+        : (L" 그 뒤 다른 세이브를 불러오다 난 사고: " + std::to_wstring(save.other_save_crashes) + L"번.");
+    }
     r.evidence.push_back(std::move(e));
   }
 

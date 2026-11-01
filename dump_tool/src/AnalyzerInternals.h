@@ -49,6 +49,16 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
 // kForcedCloseCrashWindowMs after; detected is false without one.
 ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events);
 
+// ADR-0025: the newest SaveLoadStart and whether a SaveLoadEnd followed it.
+// Fills the blackbox part of SaveLoadInfo; the history counts stay 0.
+SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events);
+// The save name a SaveLoadStart carries in b..d, read as UTF-8 (else ANSI).
+std::wstring DecodeSaveLoadName(std::uint64_t b, std::uint64_t c, std::uint64_t d);
+// Whether this capture is a failed load for crash_history.json: a crash or an
+// automatic freeze capture before the load finished. A manual capture may be
+// taken during a load that would have finished.
+bool CountsAsFailedLoad(const AnalysisResult& r);
+
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,
   bool loadingContext);

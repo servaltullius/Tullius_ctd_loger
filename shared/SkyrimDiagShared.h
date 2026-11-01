@@ -24,6 +24,10 @@ enum class EventType : std::uint16_t {
 
   kLoadStart = 20,
   kLoadEnd = 21,
+  // ADR-0025: SKSE's PreLoadGame (the save, SkyrimDiagSaveLoad.h) and
+  // PostLoadGame (a: 1 when the load succeeded). Additive like kCloseRequest.
+  kSaveLoadStart = 22,
+  kSaveLoadEnd = 23,
 
   kCellChange = 30,
   kNote = 40,

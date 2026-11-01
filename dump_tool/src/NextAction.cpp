@@ -35,6 +35,9 @@ std::size_t FindFirstTagged(const std::vector<std::wstring>& recommendations, co
 constexpr std::wstring_view kForcedClose[] = { L"[Forced close]", L"[강제 종료]" };
 // A known root cause (crash_signatures.json) names the fix itself.
 constexpr std::wstring_view kKnownCause[] = { L"[Known cause]", L"[알려진 원인]" };
+// One save that keeps failing to load in different places (ADR-0025) says more
+// than the modules this dump shows.
+constexpr std::wstring_view kDamagedSave[] = { L"[Damaged save]", L"[세이브 손상]" };
 constexpr std::wstring_view kModalDialog[] = {
   L"[Modal dialog]", L"[Modal 대화상자]", L"[Main thread]", L"[메인 스레드]",
 };
@@ -65,6 +68,7 @@ std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendatio
   for (const std::size_t found : {
          FindFirstTagged(recommendations, kForcedClose),
          FindFirstTagged(recommendations, kKnownCause),
+         FindFirstTagged(recommendations, kDamagedSave),
          FindFirstTagged(recommendations, kModalDialog),
          FindFirstTagged(recommendations, kCandidate),
          FindFirstTagged(recommendations, kCrashLoggerFrame),

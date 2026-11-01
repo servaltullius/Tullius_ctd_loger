@@ -524,6 +524,26 @@ int main()
     onSkseMessageBody,
     "kPostLoad",
     "CrashLogger range refresh must start at the earliest post-load lifecycle stage.");
+  // ADR-0025: the save a load starts with, and the end of that load.
+  AssertOrdered(
+    onSkseMessageBody,
+    "SKSE::MessagingInterface::kPreLoadGame",
+    "PushSaveLoadStartEvent(path)",
+    "PreLoadGame must record the save being loaded.");
+  AssertContains(
+    onSkseMessageBody,
+    "spdlog::info(\"SkyrimDiag: loading save {}\", skydiag::SaveNameForEvent(path))",
+    "The log names the save only: a folder would carry the Windows user name.");
+  AssertOrdered(
+    onSkseMessageBody,
+    "SKSE::MessagingInterface::kPostLoadGame",
+    "PushSaveLoadEndEvent(loaded ? skydiag::SaveLoadResult::kLoaded : skydiag::SaveLoadResult::kFailed)",
+    "PostLoadGame must record the end of the load.");
+  AssertOrdered(
+    onSkseMessageBody,
+    "SKSE::MessagingInterface::kNewGame",
+    "PushSaveLoadEndEvent(skydiag::SaveLoadResult::kNewGame)",
+    "A new game must clear the save in play.");
 
   AssertContains(
     vectoredHandlerBody,

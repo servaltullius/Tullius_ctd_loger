@@ -139,6 +139,25 @@ void PushFirstChanceExceptionEvent(
   PushEvent(skydiag::EventType::kFirstChanceException, payload, sizeof(payload));
 }
 
+void PushSaveLoadStartEvent(std::string_view saveName) noexcept
+{
+  static_assert(sizeof(skydiag::SaveLoadStartWords) == sizeof(skydiag::EventPayload));
+  const auto words = skydiag::MakeSaveLoadStartPayload(saveName);
+  skydiag::EventPayload payload{};
+  payload.a = words.a;
+  payload.b = words.b;
+  payload.c = words.c;
+  payload.d = words.d;
+  PushEvent(skydiag::EventType::kSaveLoadStart, payload, sizeof(payload));
+}
+
+void PushSaveLoadEndEvent(skydiag::SaveLoadResult result) noexcept
+{
+  skydiag::EventPayload payload{};
+  payload.a = static_cast<std::uint64_t>(result);
+  PushEvent(skydiag::EventType::kSaveLoadEnd, payload, sizeof(payload));
+}
+
 void PushCloseRequestEvent(
   skydiag::CloseRequestKind kind,
   std::uint32_t message,

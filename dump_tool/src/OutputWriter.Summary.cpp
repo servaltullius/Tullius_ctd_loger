@@ -146,6 +146,21 @@ nlohmann::json BuildSummaryJson(
       { "window_seconds", static_cast<double>(skydiag::kForcedCloseCrashWindowMs) / 1000.0 },
     };
   }
+  // Additive (ADR-0025): the save the newest load started with.
+  if (r.save_load.seen) {
+    const auto& save = r.save_load;
+    summary["save_load"] = {
+      { "name", WideToUtf8(save.name) },
+      { "key", save.key },
+      { "in_progress", save.in_progress },
+      { "seconds_loading", std::round(save.seconds_loading * 10.0) / 10.0 },
+      { "timed_to_crash", save.timed_to_crash },
+      { "earlier_failed_loads", save.earlier_crashes },
+      { "failed_load_places", save.crash_places },
+      { "other_save_failed_loads", save.other_save_crashes },
+      { "damaged_save_suspected", r.quick_answer.case_id == "damaged_save" },
+    };
+  }
   summary["privacy"] = {
     { "path_redaction_applied", redactPaths },
     { "online_symbol_source_allowed", r.online_symbol_source_allowed },

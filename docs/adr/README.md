@@ -27,3 +27,4 @@ ADR index:
 - `0022-forced-close-errors.md`
 - `0023-dump-module-memory-scope.md`
 - `0024-freed-hook-page-record.md`
+- `0025-save-load-crashes.md`

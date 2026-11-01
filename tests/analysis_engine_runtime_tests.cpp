@@ -3,6 +3,7 @@
 #endif
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -18,6 +19,7 @@
 
 #include "AddressResolver.h"
 #include "CrashHistory.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "SignatureDatabase.h"
 
 using skydiag::dump_tool::AddressResolver;
@@ -1321,6 +1323,126 @@ void TestCrashHistorySameStemIdentityIsolation()
 
 // Load says why it did not load, so the caller never saves over a history it
 // could not read; a field of another type in one entry no longer loses all.
+// ADR-0025: crashes while loading one save, counted from its first one.
+void TestCrashHistorySaveLoadStats()
+{
+  using skydiag::SaveNameKey;
+  static_assert(skydiag::SaveNameForEvent("C:\\Saves\\Save76_X.ess") == "Save76_X");
+  static_assert(skydiag::SaveNameForEvent("Saves/Save76_X") == "Save76_X");
+  static_assert(skydiag::SaveNameForEvent("Save76_X.ESS") == "Save76_X");
+  static_assert(skydiag::SaveNameForEvent("Quicksave0") == "Quicksave0");
+  static_assert(SaveNameKey("Save76_X") == SaveNameKey("save76_x.ess"));
+  static_assert(SaveNameKey("Save76_X") != SaveNameKey("Save75_X"));
+  static_assert(SaveNameKey("") == 0u && SaveNameKey("C:\\Saves\\.ess") != 0u);
+  // The plugin's payload: the key of the whole name, 23 bytes of text, cut
+  // before a UTF-8 character it would split.
+  {
+    constexpr std::string_view kLong = "Save76_FC70D793_0_646F726F_Tamriel_000843_20261101071101_14_1";
+    const auto payload = skydiag::MakeSaveLoadStartPayload(std::string("C:\\Saves\\") + std::string(kLong) + ".ess");
+    assert(payload.a == SaveNameKey(kLong));
+    char text[24]{};
+    std::memcpy(text, &payload.b, 8);
+    std::memcpy(text + 8, &payload.c, 8);
+    std::memcpy(text + 16, &payload.d, 8);
+    assert(std::string(text) == "Save76_FC70D793_0_646F7");
+    assert(skydiag::MakeSaveLoadStartPayload("").a == 0u && skydiag::MakeSaveLoadStartPayload("").b == 0u);
+    static_assert(skydiag::SaveNameTextLength("ab") == 2u);
+    static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrstuvwxyz") == 23u);
+    // 21 ASCII bytes and a 3-byte letter: the letter would end past 23.
+    static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrstu\xED\x95\x9C") == 21u);
+    static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrst\xED\x95\x9C") == 23u);
+  }
+
+  CrashHistory history;
+  const auto add = [&](const char* dump, const char* bucket, const char* saveKey, const char* at = "2026-11-01T07:00:00Z") {
+    CrashHistoryEntry e{};
+    e.timestamp_utc = at;
+    e.dump_file = dump;
+    e.bucket_key = bucket;
+    e.loading_save_key = saveKey;
+    e.loading_save_name = *saveKey ? "Save76_FC70D793_0_646F7" : "";
+    history.AddEntry(std::move(e));
+  };
+  add("a.dmp", "CTD3-old", "");                                    // not loading a save
+  add("b.dmp", "CTD3-other", "save75key", "2026-10-29T07:00:00Z");  // another save, days before: not counted
+  add("c.dmp", "CTD3-7dba", "save76key");
+  add("d.dmp", "CTD3-2d9f", "save76key");
+  add("e.dmp", "CTD3-2d9f", "save76key");
+  add("f.dmp", "CTD3-x", "");               // not loading a save: not counted
+
+  auto stats = history.GetSaveLoadCrashStats("save76key");
+  assert(stats.count == 3u);
+  assert((stats.bucket_keys == std::vector<std::string>{ "CTD3-7dba", "CTD3-2d9f" }));
+  assert(stats.other_save_count == 0u);
+  assert(history.GetSaveLoadCrashStats("").count == 0u);
+  // The crash being analyzed is a place too, once there is an earlier one.
+  assert(history.GetSaveLoadCrashStats("save76key", "CTD3-new").bucket_keys.size() == 3u);
+  assert(history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f").bucket_keys.size() == 2u);
+  assert(history.GetSaveLoadCrashStats("unseenkey", "CTD3-new").bucket_keys.empty());
+  // The analyzer counts before it removes the dump's own entry, and keeps a
+  // save only for a capture that is a failed load.
+  {
+    const auto analyzerHistory = ReadAllText(ProjectRoot() / "dump_tool" / "src" / "Analyzer.History.cpp");
+    AssertOrdered(analyzerHistory, "history.GetSaveLoadCrashStats(", "history.RemoveEntriesForDumpFile(dumpFile",
+      "Save-load stats must be counted before the dump's own entry is removed.");
+    AssertContains(analyzerHistory, "if (internal::CountsAsFailedLoad(out)) {",
+      "Only a failed load may keep its save in the crash history.");
+  }
+  // A re-analysis counts only the crashes before the dump: d.dmp's own entry
+  // and the later e.dmp are left out.
+  {
+    const auto reanalysis = history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f", "D.DMP");
+    assert(reanalysis.count == 1u && reanalysis.bucket_keys.size() == 2u && reanalysis.other_save_count == 0u);
+  }
+  // Another save failing in the day before the first failure counts (the
+  // player may have tried it first); one days before does not.
+  {
+    CrashHistory tried;
+    const auto row = [&](const char* dump, const char* bucket, const char* saveKey, const char* at) {
+      CrashHistoryEntry e{};
+      e.timestamp_utc = at;
+      e.dump_file = dump;
+      e.bucket_key = bucket;
+      e.loading_save_key = saveKey;
+      tried.AddEntry(std::move(e));
+    };
+    row("old.dmp", "CTD3-a", "saveAkey", "2026-10-30T05:00:00Z");
+    row("a.dmp", "CTD3-a", "saveAkey", "2026-11-01T06:30:00Z");
+    row("b1.dmp", "CTD3-b1", "saveBkey", "2026-11-01T07:00:00Z");
+    const auto b = tried.GetSaveLoadCrashStats("saveBkey", "CTD3-b2");
+    assert(b.count == 1u && b.bucket_keys.size() == 2u && b.other_save_count == 1u);
+  }
+  {
+    // 2026-11-01: Save76 failed to load at 16:18, then at 16:34 elsewhere.
+    CrashHistory first;
+    CrashHistoryEntry e{};
+    e.dump_file = "SkyrimDiag_Crash_20261101_161808_940.dmp";
+    e.bucket_key = "CTD3-7dbaf39d10226dde";
+    e.loading_save_key = "save76key";
+    first.AddEntry(std::move(e));
+    const auto second = first.GetSaveLoadCrashStats("save76key", "CTD3-2d9fca2cfea093da");
+    assert(second.count == 1u && second.bucket_keys.size() == 2u && second.other_save_count == 0u);
+  }
+
+  add("g.dmp", "CTD3-y", "save77key");      // another save after: counted
+  stats = history.GetSaveLoadCrashStats("save76key");
+  assert(stats.other_save_count == 1u);
+
+  const auto historyPath = std::filesystem::temp_directory_path() / "skydiag_crash_history_save_load_test.json";
+  const bool saved = history.SaveToFile(historyPath);
+  assert(saved);
+  const auto text = ReadAllText(historyPath);
+  AssertContains(text, "\"loading_save_key\": \"save76key\"", "a load crash keeps its save");
+  AssertContains(text, "\"loading_save_name\": \"Save76_FC70D793_0_646F7\"", "and the save's name");
+  CrashHistory loaded;
+  const bool historyLoaded = loaded.LoadFromFile(historyPath);
+  assert(historyLoaded);
+  const auto reloaded = loaded.GetSaveLoadCrashStats("save76key");
+  assert(reloaded.count == 3u && reloaded.bucket_keys.size() == 2u && reloaded.other_save_count == 1u);
+  std::error_code ec;
+  std::filesystem::remove(historyPath, ec);
+}
+
 void TestCrashHistoryLoadSaysWhy()
 {
   using skydiag::dump_tool::CrashHistoryLoad;
@@ -1816,6 +1938,7 @@ int main()
   TestCrashHistoryCandidateKeyVersionMigration();
   TestCrashHistorySameDumpIsIdempotent();
   TestCrashHistorySameStemIdentityIsolation();
+  TestCrashHistorySaveLoadStats();
   TestCrashHistoryLoadSaysWhy();
 #ifdef _WIN32
   TestCrashHistoryFailedReplacementPreservesExistingFile();

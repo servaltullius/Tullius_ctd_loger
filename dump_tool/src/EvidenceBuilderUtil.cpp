@@ -84,6 +84,34 @@ std::wstring ForcedCloseLead(const ForcedCloseInfo& forcedClose, bool en)
   return what + (en ? L" It is not a crash during play." : L" 플레이 중에 튕긴 CTD가 아닙니다.");
 }
 
+bool SaveLoadSuggestsDamagedSave(const SaveLoadInfo& saveLoad)
+{
+  return saveLoad.in_progress && saveLoad.earlier_crashes > 0 && saveLoad.crash_places >= 2 &&
+         saveLoad.other_save_crashes == 0;
+}
+
+std::wstring DamagedSaveLead(const SaveLoadInfo& saveLoad, bool en)
+{
+  const std::wstring times = std::to_wstring(saveLoad.earlier_crashes + 1);
+  const std::wstring places = std::to_wstring(saveLoad.crash_places);
+  const std::wstring save = saveLoad.name.empty() ? std::wstring{} : (L" (" + saveLoad.name + L")");
+  return en
+    ? (L"Loading the same save" + save + L" has crashed or frozen " + times + L" times so far, in " + places +
+        L" different places. The save's data may be damaged; one mod is less likely.")
+    : (L"같은 세이브" + (saveLoad.name.empty() ? std::wstring{} : (L"(" + saveLoad.name + L")")) +
+        L"를 불러오다 이번까지 " + times + L"번 튕기거나 멈췄고, 난 곳이 " + places +
+        L"곳으로 서로 달랐습니다. 모드 하나의 문제보다 이 세이브의 데이터가 깨졌을 가능성이 있습니다.");
+}
+
+std::wstring DamagedSaveAction(bool en)
+{
+  return en
+    ? L"Load a save made before this one. If it loads, the problem is this save only, so carry on from that one; if it "
+      L"fails too, the problem is in the mod setup, not the save."
+    : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면 이 세이브만의 문제이니 그 세이브부터 이어 하세요. "
+      L"그 세이브도 안 되면 세이브가 아니라 모드 구성 쪽 문제입니다.";
+}
+
 bool HasNearbyProbableDll(const AnalysisResult& r)
 {
   const std::wstring faultLower = minidump::WideLower(r.fault_module_filename);
@@ -325,6 +353,8 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
       case skydiag::EventType::kMenuClose:
       case skydiag::EventType::kLoadStart:
       case skydiag::EventType::kLoadEnd:
+      case skydiag::EventType::kSaveLoadStart:
+      case skydiag::EventType::kSaveLoadEnd:
       case skydiag::EventType::kCellChange:
       case skydiag::EventType::kPerfHitch: {
         std::wstring line = e.type_name;

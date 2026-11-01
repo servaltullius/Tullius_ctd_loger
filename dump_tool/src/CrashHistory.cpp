@@ -11,6 +11,8 @@
 #include <cctype>
 #include <chrono>
 #include <fstream>
+#include <optional>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -69,6 +71,54 @@ void UpsertHistoryEntry(std::vector<CrashHistoryEntry>* entries, CrashHistoryEnt
   *existing = std::move(entry);
 }
 
+// The rows RemoveEntriesForDumpFile removes for a dump (dumpKey normalized).
+bool IsEntryForDump(const CrashHistoryEntry& row, std::string_view dumpKey, std::string_view dumpIdentityKey)
+{
+  if (!dumpIdentityKey.empty() && !row.dump_identity_key.empty()) {
+    return row.dump_identity_key == dumpIdentityKey;
+  }
+  // Legacy rows have no identity. Exclude same-basename legacy evidence
+  // conservatively for current-incident correlation, but never merge it
+  // into a new identity-bound row during persistence.
+  return row.dump_identity_key.empty() && !dumpKey.empty() && NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
+}
+
+// Seconds since 1970 of "YYYY-MM-DDTHH:MM:SS..." (UTC, as timestamp_utc is
+// written), or nothing.
+std::optional<std::int64_t> ParseUtcSeconds(std::string_view text)
+{
+  if (text.size() < 19u || text[4] != '-' || text[7] != '-' || text[10] != 'T' || text[13] != ':' || text[16] != ':') {
+    return std::nullopt;
+  }
+  const auto number = [&](std::size_t at, std::size_t len) -> std::optional<int> {
+    int value = 0;
+    for (std::size_t i = at; i < at + len; ++i) {
+      if (text[i] < '0' || text[i] > '9') {
+        return std::nullopt;
+      }
+      value = value * 10 + (text[i] - '0');
+    }
+    return value;
+  };
+  const auto y = number(0, 4);
+  const auto mo = number(5, 2);
+  const auto d = number(8, 2);
+  const auto h = number(11, 2);
+  const auto mi = number(14, 2);
+  const auto s = number(17, 2);
+  if (!y || !mo || !d || !h || !mi || !s || *mo < 1 || *mo > 12 || *d < 1 || *d > 31) {
+    return std::nullopt;
+  }
+  // Days from 1970-01-01 (H. Hinnant's days_from_civil).
+  const std::int64_t year = *y - (*mo <= 2 ? 1 : 0);
+  const std::int64_t era = year / 400;
+  const std::int64_t yoe = year - era * 400;
+  const std::int64_t doy = (153 * (*mo + (*mo > 2 ? -3 : 9)) + 2) / 5 + *d - 1;
+  const std::int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const std::int64_t days = era * 146097 + doe - 719468;
+  return days * 86400 + std::int64_t{ *h } * 3600 + std::int64_t{ *mi } * 60 + *s;
+}
+
 }  // namespace
 
 CrashHistoryLoad CrashHistory::Load(const std::filesystem::path& path)
@@ -108,6 +158,8 @@ CrashHistoryLoad CrashHistory::Load(const std::filesystem::path& path)
       row.top_suspect = JsonValueOr(e, "top_suspect", std::string{});
       row.confidence = JsonValueOr(e, "confidence", std::string{});
       row.signature_id = JsonValueOr(e, "signature_id", std::string{});
+      row.loading_save_key = JsonValueOr(e, "loading_save_key", std::string{});
+      row.loading_save_name = JsonValueOr(e, "loading_save_name", std::string{});
       if (e.contains("all_suspects") && e["all_suspects"].is_array()) {
         for (const auto& s : e["all_suspects"]) {
           if (s.is_string()) {
@@ -144,7 +196,7 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
     j["version"] = 3;
     j["entries"] = nlohmann::json::array();
     for (const auto& e : m_entries) {
-      j["entries"].push_back({
+      nlohmann::json row = {
         { "candidate_key_version", e.candidate_key_version },
         { "timestamp_utc", e.timestamp_utc },
         { "dump_file", e.dump_file },
@@ -155,7 +207,13 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
         { "signature_id", e.signature_id },
         { "all_suspects", e.all_suspects },
         { "candidate_keys", e.candidate_keys },
-      });
+      };
+      // Only a crash while loading a save has these (ADR-0025).
+      if (!e.loading_save_key.empty()) {
+        row["loading_save_key"] = e.loading_save_key;
+        row["loading_save_name"] = e.loading_save_name;
+      }
+      j["entries"].push_back(std::move(row));
     }
 
     std::error_code ec;
@@ -231,15 +289,7 @@ std::size_t CrashHistory::RemoveEntriesForDumpFile(
   const auto oldSize = m_entries.size();
   m_entries.erase(
     std::remove_if(m_entries.begin(), m_entries.end(), [&](const CrashHistoryEntry& row) {
-      if (!dumpIdentityKey.empty() && !row.dump_identity_key.empty()) {
-        return row.dump_identity_key == dumpIdentityKey;
-      }
-      // Legacy rows have no identity. Exclude same-basename legacy evidence
-      // conservatively for current-incident correlation, but never merge it
-      // into a new identity-bound row during persistence.
-      return row.dump_identity_key.empty() &&
-        !dumpKey.empty() &&
-        NormalizeStoredCandidateKey(row.dump_file) == dumpKey;
+      return IsEntryForDump(row, dumpKey, dumpIdentityKey);
     }),
     m_entries.end());
   return oldSize - m_entries.size();
@@ -355,6 +405,75 @@ std::vector<BucketCandidateStats> CrashHistory::GetBucketCandidateStats(const st
     }
     return a.candidate_key < b.candidate_key;
   });
+  return result;
+}
+
+SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(
+  const std::string& saveKey,
+  const std::string& currentBucketKey,
+  std::string_view currentDumpFile,
+  std::string_view currentDumpIdentityKey) const
+{
+  SaveLoadCrashStats result{};
+  if (saveKey.empty()) {
+    return result;
+  }
+  // Entries after the current dump's own entry crashed after it.
+  const auto dumpKey = NormalizeStoredCandidateKey(currentDumpFile);
+  std::size_t end = m_entries.size();
+  if (!dumpKey.empty() || !currentDumpIdentityKey.empty()) {
+    for (std::size_t i = 0; i < m_entries.size(); ++i) {
+      if (IsEntryForDump(m_entries[i], dumpKey, currentDumpIdentityKey)) {
+        end = i;
+        break;
+      }
+    }
+  }
+  std::size_t first = end;
+  for (std::size_t i = 0; i < end; ++i) {
+    const auto& e = m_entries[i];
+    if (e.loading_save_key != saveKey) {
+      if (first < end && !e.loading_save_key.empty()) {
+        result.other_save_count += 1;
+      }
+      continue;
+    }
+    if (first == end) {
+      first = i;
+    }
+    result.count += 1;
+    if (!e.bucket_key.empty() &&
+        std::find(result.bucket_keys.begin(), result.bucket_keys.end(), e.bucket_key) == result.bucket_keys.end()) {
+      result.bucket_keys.push_back(e.bucket_key);
+    }
+  }
+  if (result.count == 0) {
+    return result;
+  }
+  // Other saves failing in the day before the first failure of this one: the
+  // player may have tried them first.
+  if (const auto firstAt = ParseUtcSeconds(m_entries[first].timestamp_utc); firstAt.has_value()) {
+    constexpr std::int64_t kDaySeconds = std::int64_t{ 24 } * 60 * 60;
+    const std::int64_t firstSeconds = firstAt.value();
+    for (std::size_t i = 0; i < first; ++i) {
+      const auto& e = m_entries[i];
+      if (e.loading_save_key.empty()) {
+        continue;
+      }
+      const auto at = ParseUtcSeconds(e.timestamp_utc);
+      if (!at.has_value()) {
+        continue;
+      }
+      const std::int64_t atSeconds = at.value();
+      if (atSeconds <= firstSeconds && firstSeconds - atSeconds <= kDaySeconds) {
+        result.other_save_count += 1;
+      }
+    }
+  }
+  if (!currentBucketKey.empty() &&
+      std::find(result.bucket_keys.begin(), result.bucket_keys.end(), currentBucketKey) == result.bucket_keys.end()) {
+    result.bucket_keys.push_back(currentBucketKey);
+  }
   return result;
 }
 

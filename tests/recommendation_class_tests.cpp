@@ -149,6 +149,8 @@ int main()
   Expect(L"[Known crash site] x", "immediate", "known_crash_site");
   Expect(L"[Forced close] Nothing to do.", "immediate", "forced_close");
   Expect(L"[강제 종료] 따로 할 일은 없습니다.", "immediate", "forced_close");
+  Expect(L"[Damaged save] Load a save made before this one.", "immediate", "damaged_save");
+  Expect(L"[세이브 손상] 이 세이브보다 먼저 만든 세이브를 불러와 보세요.", "immediate", "damaged_save");
   Expect(L"[알려진 크래시 지점] x", "immediate", "known_crash_site");
   Expect(L"[MODAL DIALOG] Read the dialog.", "immediate", "modal_dialog");
   Expect(L"[Modal 대화상자] 대화상자를 확인하세요.", "immediate", "modal_dialog");

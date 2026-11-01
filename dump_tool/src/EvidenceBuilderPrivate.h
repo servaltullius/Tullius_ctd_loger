@@ -45,6 +45,8 @@ struct EvidenceBuildContext
   bool isHangLike = false;
   bool isSnapshotLike = false;
   bool isManualCapture = false;
+  // ADR-0025: SaveLoadSuggestsDamagedSave, for a crash.
+  bool isDamagedSaveSuspected = false;
 
   bool hasModule = false;
   // Also true for a GPU vendor tool or overlay (externalSoftware names it).
@@ -166,6 +168,16 @@ bool IsWeakFaultLocationActionableCandidate(
 // CTD가 아닙니다." / "This error happened while you force-quit the game
 // (Alt+F4). It is not a crash during play.", by the close request's kind.
 std::wstring ForcedCloseLead(const ForcedCloseInfo& forcedClose, bool en);
+
+// ADR-0025: the capture came while loading a save that failed to load before,
+// it and the earlier ones failed in at least two places (crash buckets), and
+// no other save failed to load since: that save's data may be damaged.
+bool SaveLoadSuggestsDamagedSave(const SaveLoadInfo& saveLoad);
+// "같은 세이브(Save76_...)를 불러오다 이번까지 2번 튕기거나 멈췄고, 난 곳이 2곳으로 서로
+// 달랐습니다. ..." / "Loading the same save (...) has crashed or frozen 2 times so far, ..."
+std::wstring DamagedSaveLead(const SaveLoadInfo& saveLoad, bool en);
+// What to do about it: load an earlier save, and what either outcome means.
+std::wstring DamagedSaveAction(bool en);
 
 // Split parts of BuildEvidenceAndSummaryImpl.
 void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
