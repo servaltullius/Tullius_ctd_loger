@@ -3,7 +3,6 @@
 
 #include <Windows.h>
 
-#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -72,10 +71,6 @@ HangTickResult HandleHangTick(
     state->wasLoading = isLoading;
   }
 
-  const std::uint32_t loadingThresholdSec = (cfg.enableAdaptiveLoadingThreshold && loadStats->HasSamples())
-    ? *adaptiveLoadingThresholdSec
-    : cfg.hangThresholdLoadingSec;
-
   // Check plugin heartbeat initialization: if last_heartbeat_qpc is still 0,
   // the plugin hasn't started its heartbeat scheduler yet.  Auto hang capture
   // is unreliable without a working heartbeat, so skip until it initializes.
@@ -97,15 +92,15 @@ HangTickResult HandleHangTick(
     return HangTickResult::kContinue;
   }
 
+  const auto thresholds = skydiag::helper::ComputeHangThresholds(
+    cfg, stateFlags, loadStats->HasSamples(), *adaptiveLoadingThresholdSec);
   const auto decision = skydiag::helper::EvaluateHang(
     static_cast<std::uint64_t>(now.QuadPart),
     proc.shm->header.last_heartbeat_qpc,
     proc.shm->header.qpc_freq,
     stateFlags,
-    ((stateFlags & skydiag::kState_InMenu) != 0u)
-      ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
-      : cfg.hangThresholdInGameSec,
-    loadingThresholdSec);
+    thresholds.inGameSec,
+    thresholds.loadingSec);
 
   if (!decision.isHang) {
     ResetHangCaptureEpisode(state);
@@ -159,19 +154,15 @@ HangTickResult HandleHangTick(
   LARGE_INTEGER now2{};
   QueryPerformanceCounter(&now2);
   const auto stateFlags2 = proc.shm->header.state_flags;
-  const std::uint32_t inGameThresholdSec2 = ((stateFlags2 & skydiag::kState_InMenu) != 0u)
-    ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
-    : cfg.hangThresholdInGameSec;
-  const std::uint32_t loadingThresholdSec2 = (cfg.enableAdaptiveLoadingThreshold && loadStats->HasSamples())
-    ? *adaptiveLoadingThresholdSec
-    : cfg.hangThresholdLoadingSec;
+  const auto thresholds2 = skydiag::helper::ComputeHangThresholds(
+    cfg, stateFlags2, loadStats->HasSamples(), *adaptiveLoadingThresholdSec);
   const auto decision2 = skydiag::helper::EvaluateHang(
     static_cast<std::uint64_t>(now2.QuadPart),
     proc.shm->header.last_heartbeat_qpc,
     proc.shm->header.qpc_freq,
     stateFlags2,
-    inGameThresholdSec2,
-    loadingThresholdSec2);
+    thresholds2.inGameSec,
+    thresholds2.loadingSec);
   if (!decision2.isHang) {
     AppendLogLine(outBase, L"Hang detected but recovered during grace period; skipping hang dump.");
     ResetHangCaptureEpisode(state);

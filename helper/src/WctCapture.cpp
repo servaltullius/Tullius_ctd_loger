@@ -324,4 +324,17 @@ bool CaptureWct(
   return true;
 }
 
+bool WctHasCycle(const nlohmann::json& wct)
+{
+  if (!wct.is_object() || !wct.contains("threads") || !wct["threads"].is_array()) {
+    return false;
+  }
+  for (const auto& thread : wct["threads"]) {
+    if (thread.is_object() && thread.value("isCycle", false)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace skydiag::helper

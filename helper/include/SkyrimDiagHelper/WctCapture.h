@@ -13,4 +13,7 @@ bool CaptureWct(
   nlohmann::json& out,
   std::wstring* err);
 
+// Whether a CaptureWct result has a thread whose wait chain is a cycle (a deadlock).
+bool WctHasCycle(const nlohmann::json& wct);
+
 }  // namespace skydiag::helper

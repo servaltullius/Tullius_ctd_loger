@@ -25,6 +25,7 @@
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ModalDialogProbe.h"
+#include "SkyrimDiagHelper/WctCapture.h"
 
 using skydiag::helper::HangDecision;
 using skydiag::helper::LoadStats;
@@ -434,6 +435,41 @@ void TestEvaluateHangDecisions()
   Require(!EvaluateHang(100'000u, 1'000u, 100u, skydiag::kState_None, 0u, 60u).isHang, "a zero threshold never fires");
 }
 
+// The thresholds the hang tick, a manual capture and the exit check hand to
+// EvaluateHang (cfg, stateFlags, haveLoadingSamples, adaptiveLoadingThresholdSec).
+void TestComputeHangThresholds()
+{
+  using skydiag::helper::ComputeHangThresholds;
+  skydiag::helper::HelperConfig cfg{};
+  cfg.hangThresholdInGameSec = 10u;
+  cfg.hangThresholdInMenuSec = 30u;
+  cfg.hangThresholdLoadingSec = 600u;
+  cfg.enableAdaptiveLoadingThreshold = true;
+  {
+    const auto t = ComputeHangThresholds(cfg, skydiag::kState_None, true, 90u);
+    Require(t.inGameSec == 10u && t.loadingSec == 90u, "in game: the in-game threshold, adaptive loading once sampled");
+  }
+  Require(ComputeHangThresholds(cfg, skydiag::kState_InMenu, true, 90u).inGameSec == 30u, "an open menu raises it");
+  cfg.hangThresholdInMenuSec = 5u;
+  Require(ComputeHangThresholds(cfg, skydiag::kState_InMenu, true, 90u).inGameSec == 10u,
+    "a menu threshold below the in-game one does not lower it");
+  Require(ComputeHangThresholds(cfg, skydiag::kState_None, false, 90u).loadingSec == 600u,
+    "no loading samples yet: the configured loading threshold");
+  cfg.enableAdaptiveLoadingThreshold = false;
+  Require(ComputeHangThresholds(cfg, skydiag::kState_Loading, true, 90u).loadingSec == 600u,
+    "adaptive threshold turned off: the configured one");
+}
+
+void TestWctHasCycle()
+{
+  using skydiag::helper::WctHasCycle;
+  Require(WctHasCycle(nlohmann::json::parse(R"({"threads":[{"tid":1,"isCycle":false},{"tid":2,"isCycle":true}]})")),
+    "a cycle thread is a deadlock");
+  Require(!WctHasCycle(nlohmann::json::parse(R"({"threads":[{"tid":1,"isCycle":false},{"tid":2}]})")), "no cycle thread");
+  Require(!WctHasCycle(nlohmann::json::parse(R"({"threads":{}})")), "threads that are not a list");
+  Require(!WctHasCycle(nlohmann::json::array()), "not an object");
+}
+
 // A heartbeat stalled past the threshold is captured once per episode (dump
 // and WCT after the grace check), and the episode ends when it comes back.
 void TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode()
@@ -681,6 +717,8 @@ int main()
 {
   try {
     TestEvaluateHangDecisions();
+    TestComputeHangThresholds();
+    TestWctHasCycle();
     TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode();
     TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick();
     TestHandleHangTick_YieldsToACrashEvent();
