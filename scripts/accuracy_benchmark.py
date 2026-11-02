@@ -24,7 +24,9 @@ the two sets of numbers answer different questions and are never mixed.
 Ground truth is either the module(s)/mod(s) at fault, or "none" when no
 plugin caused it (a game or setup problem, e.g. the 2026-10-13 ContentCatalog
 CTD); then the right answer is to lead with no plugin. A case can also name
-the known-cause signature our analyzer should report.
+the known-cause signature our analyzer should report. Reviewers can separately
+label the quick answer's case ID and/or its expected English action text.
+Only labelled fields enter the guidance scores. Text ignores whitespace differences.
 
 The corpus holds analysis summaries, not dumps: keep it outside the repo (the
 summaries carry mod lists and paths) and keep the dumps where they are.
@@ -32,7 +34,8 @@ summaries carry mod lists and paths) and keep the dumps where they are.
   python scripts/accuracy_benchmark.py add-case --corpus <dir> --id <id> \
       --kind ctd|freeze --dump <dmp> [--crash-logger-log <log>] \
       (--expect-module <dll or mod> ... | --expect-none) \
-      [--expect-known-cause <signature id>] [--note <text>] \
+      [--expect-known-cause <signature id>] [--expect-quick-case <case id>] \
+      [--expect-quick-action <English text>] [--note <text>] \
       --cli build-win/bin/SkyrimDiagDumpToolCli.exe
   python scripts/accuracy_benchmark.py score --corpus <dir> [--out-json <file>]
 """
@@ -152,6 +155,7 @@ def quick_answer_view(summary: dict[str, Any]) -> dict[str, Any]:
         "lead": labels,
         "single_answer": True,
         "case": case,
+        "action": qa.get("action", ""),
         "known_cause": (signature.get("id", "") if isinstance(signature, dict) else "") if case == "known_issue" else "",
     }
 
@@ -181,6 +185,19 @@ def score_view(view: dict[str, Any], truth: dict[str, Any]) -> dict[str, Any]:
                               "lead": lead if isinstance(lead, str) else (lead[0] if lead else "")}
     if view.get("single_answer"):
         result["case"] = view.get("case", "")
+        guidance = {}
+        for field in ("case", "action"):
+            expected_text = truth.get("quick_answer", {}).get(field)
+            if not expected_text:
+                continue
+            actual = view.get(field)
+            if not isinstance(actual, str) or not actual.strip():
+                guidance[field] = "missing"
+            else:
+                guidance[field] = "correct" if actual.split() == expected_text.split() else "wrong"
+            result[field] = actual
+        if guidance:
+            result["guidance"] = guidance
     want_cause = str(truth.get("known_cause", "")).strip()
     if want_cause and "known_cause" in view:
         result["known_cause_hit"] = view["known_cause"] == want_cause
@@ -228,6 +245,19 @@ def score_corpus(corpus: Path) -> dict[str, Any]:
         }
         for name, t in totals.items()
     }
+    for name in QUICK_ANSWER_VIEWS:
+        guidance = {}
+        for field in ("case", "action"):
+            counts = {"correct": 0, "wrong": 0, "missing": 0}
+            for case in cases_out:
+                outcome = case["views"][name].get("guidance", {}).get(field)
+                if outcome is not None:
+                    counts[outcome] += 1
+            labelled = sum(counts.values())
+            if labelled:
+                guidance[field] = {**counts, "accuracy": rate(counts["correct"], labelled)}
+        if guidance:
+            overall[name]["guidance"] = guidance
     return {
         "schema_version": SCHEMA_VERSION,
         "view_groups": {group: list(views) for group, views in VIEW_GROUPS.items()},
@@ -250,12 +280,20 @@ def print_table(report: dict[str, Any]) -> None:
             o = report["overall"][name]
             print(f"  {name:38} {o['cases']:>5} {fmt(o['top1_accuracy']):>6} {fmt(o['wrong_lead_rate']):>6} "
                   f"{fmt(o['abstain_rate']):>8} {fmt(o['top3_recall']):>6} {fmt(o['known_cause_rate']):>6}")
+            for field, counts in o.get("guidance", {}).items():
+                print(f"    reviewed {field}: {fmt(counts['accuracy'])}  correct={counts['correct']}  "
+                      f"wrong={counts['wrong']}  missing={counts['missing']}")
         print()
     for case in report["cases"]:
         for group, names in VIEW_GROUPS.items():
             marks = "  ".join(f"{name}={case['views'][name]['outcome']}({case['views'][name]['lead'] or '-'})"
                               for name in names)
             print(f"{case['id']} [{group}]: {marks}")
+            for name in names:
+                guidance = case["views"][name].get("guidance")
+                if guidance:
+                    checks = ", ".join(f"{field}={score}" for field, score in guidance.items())
+                    print(f"    {name} guidance: {checks}")
 
 
 # ------------------------------------------------------------------ add-case
@@ -295,6 +333,12 @@ def add_case(args: argparse.Namespace) -> int:
         raise SystemExit("give --expect-module (one or more) or --expect-none")
     if args.expect_none and args.expect_module:
         raise SystemExit("--expect-none and --expect-module are exclusive")
+    guidance = {}
+    for field, label in (("case", args.expect_quick_case), ("action", args.expect_quick_action)):
+        if label is not None:
+            if not label.strip():
+                raise SystemExit(f"--expect-quick-{field} needs a nonempty label")
+            guidance[field] = label.strip()
     case_dir = corpus / "cases" / args.id
     if case_dir.exists() and not args.replace:
         raise SystemExit(f"case {args.id} exists; pass --replace to rebuild it")
@@ -317,6 +361,8 @@ def add_case(args: argparse.Namespace) -> int:
     truth: dict[str, Any] = {"none": True} if args.expect_none else {"modules": args.expect_module}
     if args.expect_known_cause:
         truth["known_cause"] = args.expect_known_cause
+    if guidance:
+        truth["quick_answer"] = guidance
     entry = {
         "id": args.id,
         "kind": args.kind,
@@ -344,6 +390,8 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--expect-module", action="append", default=[])
     add.add_argument("--expect-none", action="store_true")
     add.add_argument("--expect-known-cause")
+    add.add_argument("--expect-quick-case", help="reviewed quick-answer case ID")
+    add.add_argument("--expect-quick-action", help="reviewed English quick-answer action text")
     add.add_argument("--note")
     add.add_argument("--replace", action="store_true")
     add.add_argument("--cli", nargs="+", required=True, help="analyzer command (SkyrimDiagDumpToolCli.exe)")
