@@ -161,7 +161,7 @@ void AddActionableCandidateRecommendations(
   const bool hasHangThreadGroupFamily = CandidateHasFamily(*topCandidate, "hang_thread_group");
   // The same test as the summary sentence, so both name the Tullius callstack
   // only when a real stack walk carries the candidate.
-  const bool hasStandaloneCallstackFamily = CandidateHasStandaloneCallstackSupport(r, *topCandidate);
+  const bool hasStandaloneCallstackFamily = topCandidate->standalone_callstack;
   const bool hasScorableFirstChance = hasFirstChanceFamily && HasScorableFirstChanceContext(r.first_chance_summary);
   const bool hasScorableHistory = hasHistoryFamily && (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
   const auto frameSupport = hasFrameFamily ? DescribeCrashLoggerFrameSupport(r, *topCandidate, en) : std::wstring{};
@@ -476,9 +476,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
   const ActionableCandidate* secondCandidate = (r.actionable_candidates.size() > 1u) ? &r.actionable_candidates[1] : nullptr;
   const bool hasActionableCandidates = (topCandidate != nullptr);
-  const bool weakFaultLocationOnly =
-    IsWeakFaultLocationOnlySuspect(r, ctx) ||
-    (topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+  const bool weakFaultLocationOnly = ctx.weakFaultLocationSuspect || ctx.weakFaultLocationTopCandidate;
   const bool topCandidateMatchesFaultModule =
     topCandidate &&
     CandidateMatchesModule(*topCandidate, r.fault_module_filename);
@@ -757,7 +755,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       en,
       topCandidate,
       secondCandidate,
-      topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+      ctx.weakFaultLocationTopCandidate);
   }
 
   // A main thread waiting in the engine, the GPU or a driver only has the

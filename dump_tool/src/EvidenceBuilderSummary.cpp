@@ -557,12 +557,8 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     const bool topCandidateMatchesFaultModule =
       topCandidate &&
       CandidateMatchesModule(*topCandidate, r.fault_module_filename);
-    const bool weakFaultLocationTopCandidate =
-      topCandidate &&
-      IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx);
-    const bool topCandidateHasStandaloneCallstack =
-      topCandidate &&
-      CandidateHasStandaloneCallstackSupport(r, *topCandidate);
+    const bool weakFaultLocationTopCandidate = ctx.weakFaultLocationTopCandidate;
+    const bool topCandidateHasStandaloneCallstack = topCandidate && topCandidate->standalone_callstack;
     const bool topCandidateHasFirstChanceSupport =
       topCandidate &&
       CandidateHasScorableFirstChanceSupport(r, *topCandidate);
@@ -745,7 +741,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             (hasHistorySupport ? L" 반복 크래시 버킷 이력도 이 후보와 맞습니다." : L"") +
             (hasResourceSupport ? L" 근처 리소스를 제공한 모드도 이 후보와 맞습니다." : L"") +
             L" (신뢰도: " + topCandidateConf + L")");
-    } else if (topCandidate && topCandidate->status_id == "related" && CandidateHasStandaloneCallstackSupport(r, *topCandidate)) {
+    } else if (topCandidate && topCandidate->status_id == "related" && topCandidate->standalone_callstack) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       summary = en
         ? (L"Crash is reported in " + place + L", but Tullius callstack first points to DLL candidate " + candidateName +
@@ -843,7 +839,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidate && topCandidate->status_id == "related") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
-      if (CandidateHasStandaloneCallstackSupport(r, *topCandidate)) {
+      if (topCandidate->standalone_callstack) {
         summary = en
           ? (L"Crash is reported in the game executable. Tullius callstack first points to DLL candidate " + candidateName +
               L" (actionable stack). This is stronger than stack scan only. (Confidence: " + topCandidateConf + L")")

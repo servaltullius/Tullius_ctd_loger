@@ -58,6 +58,15 @@ struct EvidenceBuildContext
 
   bool wctSuggestsHang = false;
 
+  // The lead's inputs, set once after the candidates (EvidenceBuilder.cpp) so
+  // the evidence, the checklist, the summary sentence and the quick answer
+  // read the same values. A candidate's Tullius-callstack-alone test is
+  // ActionableCandidate::standalone_callstack, set at the same point.
+  // IsWeakFaultLocationOnlySuspect.
+  bool weakFaultLocationSuspect = false;
+  // IsWeakFaultLocationActionableCandidate for actionable_candidates[0].
+  bool weakFaultLocationTopCandidate = false;
+
   HitchSummary hitch{};
   std::optional<WctInfo> wct{};
   std::wstring suspectBasis;

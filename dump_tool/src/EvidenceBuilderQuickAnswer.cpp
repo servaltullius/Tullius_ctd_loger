@@ -236,7 +236,7 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
       lead.case_id = "hook_framework";
     }
   } else if (ctx.hasModule && !ctx.isSystem && !ctx.isGameExe) {
-    const bool weakFaultLocation = top && IsWeakFaultLocationActionableCandidate(r, *top, ctx);
+    const bool weakFaultLocation = ctx.weakFaultLocationTopCandidate;
     if (topMatchesFault && weakFaultLocation) {
       lead = CandidateLead(r, *top);
     } else if (top && top->status_id == "conflicting" && second) {
@@ -256,7 +256,7 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
       lead = CandidateLead(r, *top);
     } else if (top && topHasFrame && topBackedByFrame) {
       lead = CandidateLead(r, *top);
-    } else if (top && top->status_id == "related" && CandidateHasStandaloneCallstackSupport(r, *top)) {
+    } else if (top && top->status_id == "related" && top->standalone_callstack) {
       lead = CandidateLead(r, *top);
     } else if (nonHookSuspect) {
       lead = SuspectLead(r, *nonHookSuspect, suspectLevel(*nonHookSuspect));

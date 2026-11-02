@@ -189,10 +189,7 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
 void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
 {
   const bool en = ctx.en;
-  const ActionableCandidate* topCandidate = !r.actionable_candidates.empty() ? &r.actionable_candidates[0] : nullptr;
-  const bool weakFaultLocationOnly =
-    IsWeakFaultLocationOnlySuspect(r, ctx) ||
-    (topCandidate && IsWeakFaultLocationActionableCandidate(r, *topCandidate, ctx));
+  const bool weakFaultLocationOnly = ctx.weakFaultLocationSuspect || ctx.weakFaultLocationTopCandidate;
 
   if (!r.stackwalk_primary_frames.empty()) {
     EvidenceItem e{};
