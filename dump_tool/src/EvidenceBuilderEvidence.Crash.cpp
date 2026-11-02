@@ -404,6 +404,7 @@ void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const Evidenc
       ? L"Same file provided by multiple mods (possible conflict)"
       : L"동일 파일을 여러 모드가 제공(충돌 가능)";
     c.details = JoinList(conflicts, 4, L" | ") + Mo2ProvidersCaveat(r, en);
+    c.setup_note = true;
     r.evidence.push_back(std::move(c));
   }
 

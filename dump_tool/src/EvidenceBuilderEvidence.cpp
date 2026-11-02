@@ -88,6 +88,10 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       e.title = en
         ? (L"Plugin diagnostics: " + ToWideAscii(pd.rule_id))
         : (L"플러그인 진단: " + ToWideAscii(pd.rule_id));
+      // A slot limit is the load order, not this incident; a missing master or
+      // a header the game cannot read may be the cause itself.
+      const std::string_view ruleId = pd.rule_id;
+      e.setup_note = ruleId.size() > 16 && ruleId.substr(ruleId.size() - 16) == "_SLOT_NEAR_LIMIT";
       e.details = pd.cause;
       // One item for missing masters: the rule's and the list below said the
       // same thing twice, both High.
@@ -130,6 +134,7 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       : ((thisSession ? L"이번 실행에서" : L"이미지 베이스가 같은 skse64.log 기준(이번 실행인지 시각으로 확인 못 함)") +
           std::wstring(L" SKSE가 정상적으로 로드하지 못한 DLL ") + std::to_wstring(r.skse_log.issue_count) + L"개");
     e.details = SummarizeSkseLogIssues(r.skse_log, en, 6, L" | ");
+    e.setup_note = true;
     r.evidence.push_back(std::move(e));
   }
 
@@ -154,6 +159,7 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
       ? L"Capture profile metadata"
       : L"캡처 프로필 메타데이터";
     e.details = DescribeCaptureProfileEvidence(r, en);
+    e.setup_note = true;
     r.evidence.push_back(std::move(e));
   }
 

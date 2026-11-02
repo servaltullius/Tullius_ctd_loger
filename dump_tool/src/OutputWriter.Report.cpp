@@ -5,6 +5,8 @@
 #include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MemorySnapshot.h"
+#include "ModNames.h"
+#include "SkyrimDiagShared.h"
 #include "ProblematicModules.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
@@ -265,10 +267,13 @@ std::string BuildReportText(
         << WideToUtf8(JoinList(diagIds, 8, L", ")) << "\n";
   }
   rpt << "\n";
-  rpt << "ExceptionCode: 0x" << std::hex << r.exc_code << std::dec << "\n";
-  rpt << "ExceptionAddress: 0x" << std::hex << r.exc_addr << std::dec << "\n";
-  rpt << "ThreadId: " << r.exc_tid << "\n";
-  rpt << "Module+Offset: " << WideToUtf8(r.fault_module_plus_offset) << "\n";
+  // A freeze or a manual capture has no exception: no block of zeros.
+  if (r.exc_code != 0u) {
+    rpt << "ExceptionCode: 0x" << std::hex << r.exc_code << std::dec << "\n";
+    rpt << "ExceptionAddress: 0x" << std::hex << r.exc_addr << std::dec << "\n";
+    rpt << "ThreadId: " << r.exc_tid << "\n";
+    rpt << "Module+Offset: " << WideToUtf8(r.fault_module_plus_offset) << "\n";
+  }
   if (const auto instruction = FaultInstructionReportText(r.fault_instruction); !instruction.empty()) {
     // ADR-0019: the faulting instruction as decoded from the dump.
     rpt << (en ? "FaultInstruction: " : "예외 명령어: ") << instruction;
@@ -601,10 +606,25 @@ std::string BuildReportText(
       rpt << " [" << WideToUtf8(candidate.confidence) << "]\n";
     }
   }
+  // Every line of a detail under its item, not only the first.
+  const auto writeEvidence = [&](const EvidenceItem& e) {
+    rpt << "- [" << WideToUtf8(e.confidence) << "] " << WideToUtf8(e.title) << "\n";
+    std::wstring details = e.details;
+    for (std::size_t at = details.find(L'\n'); at != std::wstring::npos; at = details.find(L'\n', at + 3)) {
+      details.replace(at, 1, L"\n  ");
+    }
+    rpt << "  " << WideToUtf8(details) << "\n";
+  };
   rpt << (en ? "\nEvidence:\n" : "\n근거:\n");
   for (const auto& e : r.evidence) {
-    rpt << "- [" << WideToUtf8(e.confidence) << "] " << WideToUtf8(e.title) << "\n";
-    rpt << "  " << WideToUtf8(e.details) << "\n";
+    if (!e.setup_note) {
+      writeEvidence(e);
+    }
+  }
+  // What to do comes before the long lists it refers to.
+  rpt << (en ? "\nRecommendations (checklist):\n" : "\n권장 조치(체크리스트):\n");
+  for (const auto& s : r.recommendations) {
+    rpt << "- " << WideToUtf8(s) << "\n";
   }
   if (!r.stackwalk_primary_frames.empty()) {
     rpt << (en ? "\nCallstack (primary, tid=" : "\n콜스택(대표, tid=") << r.stackwalk_primary_tid << "):\n";
@@ -637,13 +657,26 @@ std::string BuildReportText(
         : "  providers: 분석 시점의 MO2 설치 기준 후보 (크래시 당시 프로필이나 모드와 다를 수 있음)");
       rpt << (r.mo2_profile_name.empty() ? "" : " (" + WideToUtf8(r.mo2_profile_name) + ")") << "\n";
     }
-    for (const auto& rr : r.resources) {
+    // The newest ones; all of them are in the summary JSON.
+    constexpr std::size_t kReportResources = 40;
+    const std::size_t firstResource = r.resources.size() > kReportResources ? r.resources.size() - kReportResources : 0;
+    if (firstResource > 0) {
+      rpt << (en ? "  (last " : "  (마지막 ") << kReportResources << (en ? " of " : "개 / 전체 ") << r.resources.size()
+          << (en ? "; all of them are in *_SkyrimDiagSummary.json)\n" : "개. 전체 목록은 *_SkyrimDiagSummary.json에 있습니다)\n");
+    }
+    for (std::size_t ri = firstResource; ri < r.resources.size(); ++ri) {
+      const auto& rr = r.resources[ri];
       char time[32]{};
       std::snprintf(time, sizeof(time), "%.0f", rr.t_ms);  // never scientific notation (2.91565e+06)
       rpt << "- t_ms=" << time << " tid=" << rr.tid << " [" << WideToUtf8(rr.kind) << "] "
           << WideToUtf8(MaybeRedactPath(rr.path, redactPaths));
       if (!rr.providers.empty()) {
-        rpt << " providers=" << WideToUtf8(JoinList(rr.providers, 10, L", "));
+        std::vector<std::wstring> providers;
+        providers.reserve(rr.providers.size());
+        for (const auto& provider : rr.providers) {
+          providers.push_back(ReadableModName(provider));
+        }
+        rpt << " providers=" << WideToUtf8(JoinList(providers, 10, L", "));
       }
       if (rr.is_conflict) {
         rpt << " (conflict)";
@@ -651,9 +684,15 @@ std::string BuildReportText(
       rpt << "\n";
     }
   }
-  rpt << (en ? "\nRecommendations (checklist):\n" : "\n권장 조치(체크리스트):\n");
-  for (const auto& s : r.recommendations) {
-    rpt << "- " << WideToUtf8(s) << "\n";
+  // About the installation, not this incident: the same on every report.
+  if (std::any_of(r.evidence.begin(), r.evidence.end(), [](const EvidenceItem& e) { return e.setup_note; })) {
+    rpt << (en ? "\nSetup notes (about the installation; they can repeat on every report):\n"
+               : "\n설치 환경 메모(이번 사고보다 설치에 관한 것이라 매번 나올 수 있음):\n");
+    for (const auto& e : r.evidence) {
+      if (e.setup_note) {
+        writeEvidence(e);
+      }
+    }
   }
   if (!r.events.empty()) {
     // The full ring buffer (often over a thousand module loads) is in the
@@ -692,15 +731,44 @@ std::string BuildReportText(
       rpt << (en ? "  (last " : "  (마지막 ") << shown << (en ? " of " : "개 / 전체 ") << r.events.size()
           << (en ? "; all of them are in *_SkyrimDiagBlackbox.jsonl)\n" : "개. 전체 목록은 *_SkyrimDiagBlackbox.jsonl에 있습니다)\n");
     }
-    for (std::size_t i = r.events.size() - shown; i < r.events.size(); ++i) {
+    std::size_t i = r.events.size() - shown;
+    while (i < r.events.size()) {
       const auto& ev = r.events[i];
       char time[32]{};
       std::snprintf(time, sizeof(time), "%.1f", ev.t_ms);  // never scientific notation
+      // A run of thread or module churn says one thing: one line for it.
+      const bool churn = ev.type == static_cast<std::uint16_t>(skydiag::EventType::kThreadCreate) ||
+                         ev.type == static_cast<std::uint16_t>(skydiag::EventType::kThreadExit) ||
+                         ev.type == static_cast<std::uint16_t>(skydiag::EventType::kModuleLoad);
+      std::size_t run = 1;
+      while (churn && i + run < r.events.size() && r.events[i + run].type == ev.type) {
+        ++run;
+      }
+      if (run > 1) {
+        char last[32]{};
+        std::snprintf(last, sizeof(last), "%.1f", r.events[i + run - 1].t_ms);
+        rpt << "[" << ev.i << "-" << r.events[i + run - 1].i << "] t_ms=" << time << "-" << last << " "
+            << WideToUtf8(ev.type_name) << " x" << run;
+        // Which DLLs loaded is worth keeping; thread ids are not.
+        if (ev.type == static_cast<std::uint16_t>(skydiag::EventType::kModuleLoad)) {
+          std::vector<std::wstring> names;
+          for (std::size_t k = i; k < i + run; ++k) {
+            names.push_back(r.events[k].detail);
+          }
+          rpt << ": " << WideToUtf8(JoinList(names, 8, L", "));
+        }
+        rpt << "\n";
+        i += run;
+        continue;
+      }
       rpt << "[" << ev.i << "] t_ms=" << time << " tid=" << ev.tid << " " << WideToUtf8(ev.type_name);
       if (!ev.detail.empty()) {
         rpt << " | " << WideToUtf8(ev.detail);
+      } else {
+        rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d;
       }
-      rpt << " a=" << ev.a << " b=" << ev.b << " c=" << ev.c << " d=" << ev.d << "\n";
+      rpt << "\n";
+      ++i;
     }
   }
 
