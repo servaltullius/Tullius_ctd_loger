@@ -915,12 +915,12 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   // nothing from it.
   if (hitch.count > 0 && !isCrashLike) {
     r.recommendations.push_back(en
-      ? L"[Performance] PerfHitch events were recorded. Check Events tab (t_ms and hitch(ms)) to see when the stutter happens."
-      : L"[성능] PerfHitch 이벤트가 기록되었습니다. 이벤트 탭에서 t_ms와 hitch(ms)를 확인해 '언제 끊기는지' 먼저 파악하세요.");
+      ? L"[Performance] PerfHitch events were recorded. Check the events (the viewer's Events tab, or 'Last events' in the text report) for t_ms and hitch(ms) to see when the stutter happens."
+      : L"[성능] PerfHitch 이벤트가 기록되었습니다. 이벤트 기록(뷰어의 이벤트 탭, 텍스트 리포트의 '최근 이벤트')에서 t_ms와 hitch(ms)를 확인해 '언제 끊기는지' 먼저 파악하세요.");
     if (!r.resources.empty()) {
       r.recommendations.push_back(en
-        ? L"[Performance] Check Resources tab for .nif/.hkx/.tri loaded right before/after the hitch, and their providing mods. (Correlation, not proof)"
-        : L"[성능] 리소스 탭에서 히치 직전/직후 로드된 .nif/.hkx/.tri 및 제공 모드를 확인하세요. (상관관계 기반, 확정 아님)");
+        ? L"[Performance] Check the recent resources (the viewer's Resources tab, or 'Recent resources' in the text report) for .nif/.hkx/.tri loaded right before/after the hitch, and their providing mods. (Correlation, not proof)"
+        : L"[성능] 최근 리소스(뷰어의 리소스 탭, 텍스트 리포트의 '최근 리소스')에서 히치 직전/직후 로드된 .nif/.hkx/.tri 및 제공 모드를 확인하세요. (상관관계 기반, 확정 아님)");
     }
   }
 
@@ -1263,8 +1263,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       }
       if (!r.crash_logger_thread_dump_deadlock.detected) {
         r.recommendations.push_back(en
-          ? L"[Hang] If it repeats, use Events tab (just before the freeze) to narrow related mods."
-          : L"[프리징] 프리징이 반복되면 문제 상황 직전에 실행된 이벤트(이벤트 탭)를 기준으로 관련 모드를 점검");
+          ? L"[Hang] If it repeats, use the events just before the freeze (the viewer's Events tab, or 'Last events' in the text report) to narrow related mods."
+          : L"[프리징] 프리징이 반복되면 문제 상황 직전에 실행된 이벤트(뷰어의 이벤트 탭, 텍스트 리포트의 '최근 이벤트')를 기준으로 관련 모드를 점검");
       }
     } else if (isManualCapture && isSnapshotLike) {
       // The freeze verdict's rule (FreezeCandidateConsensus.cpp): under the
@@ -1282,8 +1282,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
               L"초 미만)로 메인 스레드가 아직 응답하고 있었으므로 '프리징/무한로딩'으로 판단되지 않습니다."));
       }
       r.recommendations.push_back(en
-        ? L"[Manual] Manual captures include WCT. For real freezes/infinite loading, check the WCT tab from a capture taken during the issue."
-        : L"[수동] 수동 캡처에는 WCT가 포함됩니다. 실제 프리징/무한로딩 중 캡처한 덤프에서 WCT 탭을 참고하세요.");
+        ? L"[Manual] Manual captures include WCT. For real freezes/infinite loading, check the WCT from a capture taken during the issue (the viewer's WCT tab, or *_SkyrimDiagWct.json)."
+        : L"[수동] 수동 캡처에는 WCT가 포함됩니다. 실제 프리징/무한로딩 중 캡처한 덤프의 WCT(뷰어의 WCT 탭, 또는 *_SkyrimDiagWct.json)를 참고하세요.");
     }
   }
 

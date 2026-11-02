@@ -4,6 +4,7 @@
 // candidates and confidence without changing them.
 
 #include "EvidenceBuilderEvidencePipeline.h"
+#include "ModNames.h"
 #include "EvidenceBuilderPrivate.h"
 
 #include <cstdint>
@@ -124,7 +125,8 @@ Lead ModLead(const AnalysisResult& r, std::wstring_view file, std::wstring_view 
   Lead lead;
   lead.type = LeadType::kMod;
   lead.file = BaseName(file);
-  lead.name = !modName.empty() ? std::wstring(modName) : ModNameForModule(r, lead.file);
+  // The quick answer is read by players: no modlist tags in the name.
+  lead.name = ReadableModName(!modName.empty() ? std::wstring(modName) : ModNameForModule(r, lead.file));
   if (lead.name.empty()) {
     lead.name = lead.file;
   }

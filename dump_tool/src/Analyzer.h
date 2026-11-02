@@ -26,6 +26,10 @@ struct EvidenceItem
   std::wstring confidence;  // "높음/중간/낮음"
   std::wstring title;
   std::wstring details;
+  // About the installation rather than this incident (a plugin slot limit,
+  // DLLs SKSE did not load, files two mods provide, the capture profile): the
+  // text report lists these apart, after the checklist, as they repeat.
+  bool setup_note = false;
 };
 
 // ADR-0010: an object that a crash register or the top of the crash stack

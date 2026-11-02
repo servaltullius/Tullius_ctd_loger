@@ -21,6 +21,7 @@
 #include "AnalyzerInternals.h"
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
+#include "ModNames.h"
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
 #include "SignatureDatabase.h"
@@ -1438,6 +1439,103 @@ void TestDamagedSave()
   }
 }
 
+// Batch D: what a player reads first in the text report, and no noise in it.
+void TestReportReadability()
+{
+  using skydiag::dump_tool::EvidenceItem;
+  using skydiag::dump_tool::EventRow;
+  using skydiag::dump_tool::ReadableModName;
+  using skydiag::dump_tool::ResourceRow;
+
+  Require(ReadableModName(L"[NoDelete] 0444 Refraction on Critical Hit") == L"Refraction on Critical Hit" &&
+            ReadableModName(L"[NoDelete] Echoes of Skyrim") == L"Echoes of Skyrim" &&
+            ReadableModName(L"Val Serano - Pirate Follower") == L"Val Serano - Pirate Follower" &&
+            ReadableModName(L"1000 Words") == L"1000 Words" && ReadableModName(L"[NoDelete]") == L"[NoDelete]" &&
+            ReadableModName(L"[A] [B] 0137 Mod") == L"Mod",
+    "modlist tags and the order number go, a name stays");
+
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const auto build = [&](bool crash) {
+      auto r = CrashIn(L"SmoothCam.dll", L"[NoDelete] 0137 SmoothCam");
+      if (!crash) {
+        r = AnalysisResult{};
+        r.dump_path = L"C:\\Logs\\SkyrimDiag_Manual_20261101_193046_489.dmp";
+      }
+      BuildEvidenceAndSummary(r, lang);  // the quick answer; the lists below replace the rest
+      EvidenceItem slot{};
+      slot.title = L"slot limit";
+      slot.details = L"near the limit";
+      slot.setup_note = true;
+      EvidenceItem history{};
+      history.title = L"history";
+      history.details = L"first line\nsecond line";
+      r.evidence = { slot, history };
+      for (int i = 0; i < 50; ++i) {
+        ResourceRow rr{};
+        rr.t_ms = 1000.0 + i;
+        rr.kind = L"nif";
+        rr.path = L"meshes\\m" + std::to_wstring(i) + L".nif";
+        rr.providers = { L"[NoDelete] 0444 Refraction on Critical Hit" };
+        r.resources.push_back(rr);
+      }
+      const auto event = [](std::uint32_t i, skydiag::EventType type, std::wstring detail) {
+        EventRow e{};
+        e.i = i;
+        e.t_ms = 2000.0 + i;
+        e.type = static_cast<std::uint16_t>(type);
+        e.type_name = skydiag::dump_tool::internal::EventTypeName(e.type);
+        e.detail = std::move(detail);
+        e.a = 7;
+        return e;
+      };
+      for (std::uint32_t i = 0; i < 5; ++i) {
+        r.events.push_back(event(i, skydiag::EventType::kThreadCreate, L"tid=1"));
+      }
+      r.events.push_back(event(5, skydiag::EventType::kMenuOpen, L"Loading Menu"));
+      r.events.push_back(event(6, skydiag::EventType::kNote, L""));
+      r.events.push_back(event(7, skydiag::EventType::kModuleLoad, L"DNSAPI.dll"));
+      r.events.push_back(event(8, skydiag::EventType::kModuleLoad, L"NSI.dll"));
+      r.recommendations = { L"[Check] do this first" };
+      const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+      return skydiag::dump_tool::BuildReportText(r, summary, true);
+    };
+
+    const auto crash = build(true);
+    const auto manual = build(false);
+    Require(crash.find("ExceptionCode: 0x") != std::string::npos && manual.find("ExceptionCode:") == std::string::npos &&
+              manual.find("ThreadId: 0") == std::string::npos,
+      "no exception block without an exception");
+
+    const auto at = [&](const std::string& text, const char* what) { return text.find(what); };
+    const auto checklist = at(crash, en ? "Recommendations (checklist):" : "권장 조치(체크리스트):");
+    const auto resources = at(crash, en ? "Recent resources" : "최근 리소스(");
+    const auto events = at(crash, en ? "Last events" : "최근 이벤트(");
+    const auto setup = at(crash, en ? "Setup notes" : "설치 환경 메모");
+    Require(checklist != std::string::npos && checklist < resources && checklist < events && setup != std::string::npos &&
+              checklist < setup,
+      "the checklist comes before the long lists, and setup notes after it");
+    Require(crash.find("slot limit") > setup && crash.find("history") < checklist, "a setup note is listed apart");
+    Require(crash.find("  first line\n  second line\n") != std::string::npos, "every detail line is indented");
+    Require(crash.find(en ? "(last 40 of 50; all of them are in *_SkyrimDiagSummary.json)"
+                          : "(마지막 40개 / 전체 50개. 전체 목록은 *_SkyrimDiagSummary.json에 있습니다)") != std::string::npos &&
+              crash.find("meshes\\m9.nif") == std::string::npos && crash.find("meshes\\m10.nif") != std::string::npos,
+      "the newest 40 resources");
+    // Text for people loses the tags; paths and the analysis keep the folder name.
+    const std::string quick = crash.substr(0, at(crash, en ? "Details" : "자세한 분석"));
+    Require(crash.find("providers=Refraction on Critical Hit") != std::string::npos &&
+              crash.find("providers=[NoDelete]") == std::string::npos && quick.find("SmoothCam") != std::string::npos &&
+              quick.find("[NoDelete]") == std::string::npos,
+      "providers and the quick answer without modlist tags");
+    Require(crash.find("[0-4] t_ms=2000.0-2004.0 ThreadCreate x5\n") != std::string::npos &&
+              crash.find("[7-8] t_ms=2007.0-2008.0 ModuleLoad x2: DNSAPI.dll, NSI.dll\n") != std::string::npos,
+      "a run of thread churn on one line, and a run of module loads with their names");
+    Require(crash.find("Loading Menu\n") != std::string::npos && crash.find("Loading Menu a=") == std::string::npos &&
+              crash.find("Note a=7 b=0 c=0 d=0\n") != std::string::npos,
+      "raw words only for an event with no detail");
+  }
+}
+
 void TestForcedClose()
 {
   using skydiag::dump_tool::ExplainFaultInstruction;
@@ -1631,6 +1729,7 @@ int main()
     TestFaultInstructionClue();
     TestForcedClose();
     TestDamagedSave();
+    TestReportReadability();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;
