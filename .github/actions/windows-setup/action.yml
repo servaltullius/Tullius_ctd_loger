@@ -1,0 +1,47 @@
+name: Windows build setup
+description: >
+  Python, the .NET SDK (WinUI viewer), the MSVC environment and vcpkg at the
+  manifest's baseline with its binary cache: the steps every Windows job takes
+  between checkout (with submodules) and configure.
+
+inputs:
+  dotnet:
+    description: Install the .NET SDK for the WinUI viewer build
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      with:
+        python-version: "3.12"
+
+    - name: Setup .NET SDK
+      if: ${{ inputs.dotnet == 'true' }}
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+      with:
+        dotnet-version: "8.0.x"
+
+    - name: Setup MSVC environment
+      uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+    - name: Bootstrap vcpkg
+      shell: pwsh
+      run: |
+        git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP\vcpkg"
+        # The vcpkg tool from the manifest's baseline commit, not whatever
+        # vcpkg master is on the day of the run.
+        $baseline = (Get-Content vcpkg-configuration.json -Raw | ConvertFrom-Json).'default-registry'.baseline
+        git -C "$env:RUNNER_TEMP\vcpkg" checkout --quiet --detach $baseline
+        if ($LASTEXITCODE -ne 0) { throw "vcpkg checkout of baseline $baseline failed" }
+        & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
+
+    - name: Setup vcpkg binary cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ~/AppData/Local/vcpkg/archives
+        key: vcpkg-archives-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'cmake/triplets/*.cmake') }}
+        restore-keys: |
+          vcpkg-archives-
