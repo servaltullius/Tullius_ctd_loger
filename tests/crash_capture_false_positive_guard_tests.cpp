@@ -9,6 +9,7 @@
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::AssertOrdered;
 using skydiag::tests::source_guard::ExtractFunctionBody;
+using skydiag::tests::source_guard::ExtractFunctionFlow;
 using skydiag::tests::source_guard::ReadAllText;
 using skydiag::tests::source_guard::ReadSplitAwareText;
 
@@ -41,7 +42,12 @@ int main()
     "FILE_MAP_READ | FILE_MAP_WRITE",
     "Helper shared-memory mapping must be writable so a recovered exception can thaw telemetry safely.");
 
-  const std::string crashTickBody = ExtractFunctionBody(crashCapture, "bool HandleCrashEventTick(");
+  // HandleCrashEventTick with its steps (CheckCrashLoggerThreadDumpWindow, ...).
+  const std::string crashTickBody = ExtractFunctionFlow(
+    crashCapture,
+    "bool HandleCrashEventTick(",
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
   AssertContains(
     crashTickBody,
     "WaitForSingleObject(proc.crashEvent, waitMs)",

@@ -159,13 +159,17 @@ int main()
     "PssFreeSnapshot",
     "PSS spike helper must release snapshots with PssFreeSnapshot.");
   AssertContains(
-    hangCaptureText,
+    ReadAllText(repoRoot / "helper" / "src" / "FreezeCapture.cpp"),
     "TryCapturePssSnapshotForFreeze",
-    "Hang capture spike must attempt PSS snapshot capture through the shared helper.");
+    "The shared freeze capture must attempt a PSS snapshot through the shared helper.");
+  AssertContains(
+    hangCaptureText,
+    "CaptureFreezeDumpAndWct(",
+    "Hang capture must take its dump through the shared freeze capture.");
   AssertContains(
     manualCaptureText,
-    "TryCapturePssSnapshotForFreeze",
-    "Manual capture spike must attempt PSS snapshot capture through the shared helper.");
+    "CaptureFreezeDumpAndWct(",
+    "Manual capture must take its dump through the shared freeze capture.");
 
   return 0;
 }

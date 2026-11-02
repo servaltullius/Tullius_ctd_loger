@@ -264,6 +264,26 @@ inline std::string ExtractFunctionBody(const std::string& source, const char* si
   return {};
 }
 
+// A function body with the bodies of the steps it calls placed right after
+// their first call, so ordering checks still read one flow after a step moves
+// into its own function. Each step is given by its definition up to the "("
+// ("void ReleaseFilteredCrashDump("); the call is the name after the last space.
+inline std::string ExtractFunctionFlow(
+  const std::string& source,
+  const char* signature,
+  std::initializer_list<const char*> stepDefinitions)
+{
+  std::string flow = ExtractFunctionBody(source, signature);
+  for (const char* definition : stepDefinitions) {
+    const std::string def(definition);
+    const std::string call = def.substr(def.find_last_of(' ') + 1);
+    const auto callPos = flow.find(call);
+    assert(callPos != std::string::npos && "Step is not called from the function");
+    flow.insert(callPos + call.size(), "/*step*/" + ExtractFunctionBody(source, definition) + "/*end step*/");
+  }
+  return flow;
+}
+
 inline void AssertOrdered(const std::string& haystack, const char* first, const char* second, const char* message)
 {
   const auto firstPos = haystack.find(first);

@@ -937,6 +937,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpToolLaunch.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpWriter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/EtwCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/FreezeCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.Guards.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/HangCapture.Execute.cpp"

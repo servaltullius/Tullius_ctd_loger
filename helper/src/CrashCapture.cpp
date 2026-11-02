@@ -1050,6 +1050,399 @@ bool TryWritePostExitCrashEvidenceRecord(
 
 namespace {
 std::atomic<std::uint64_t> g_lastCrashLoggerHotkeyTick64{ 0 };
+
+enum class ThreadDumpWindowOutcome
+{
+  kWriteDump,
+  kExitedBeforeDump,
+  kReleased,
+};
+
+  // Right after Crash Logger's thread dump hotkey, a C++ exception or
+  // breakpoint is most likely one of its thread dump's probes
+  // (IsLikelyCrashLoggerThreadDumpFault): check that the game keeps running
+  // before writing a dump, not after. Not for one on the game's main thread:
+  // that is a crash Crash Logger is reporting, and it may end the game before
+  // the check is done.
+ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  const skydiag::SharedLayout* dumpSnapshot,
+  std::size_t dumpSnapshotBytes,
+  const skydiag::ForcedCloseMatch& forcedClose,
+  CrashCaptureState* crashState)
+{
+  const std::uint64_t nowTick64 = GetTickCount64();
+  const std::uint64_t lastCrashLoggerHotkeyTick64 = g_lastCrashLoggerHotkeyTick64.load(std::memory_order_relaxed);
+  const bool inThreadDumpWindow = proc.process && proc.shm &&
+    IsInCrashLoggerThreadDumpWindow(info.exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64);
+  const std::uint32_t mainThreadId = inThreadDumpWindow
+    ? skydiag::helper::InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes).value_or(0u)
+    : 0u;
+  if (inThreadDumpWindow &&
+      !IsLikelyCrashLoggerThreadDumpFault(
+        info.exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64, info.faultingTid, mainThreadId)) {
+    AppendLogLine(
+      outBase,
+      L"This exception came within a minute of Crash Logger's thread dump hotkey, but on the game's main thread "
+      L"(tid=" + std::to_wstring(mainThreadId)
+        + L"), so it is not one of its thread dump's probes: writing the crash dump now.");
+  } else if (inThreadDumpWindow) {
+    FILETIME eventTime{};
+    GetSystemTimeAsFileTime(&eventTime);
+    const auto early = FilterFirstChanceException(
+      cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+    if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
+      const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
+        TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+      if (crashState) {
+        crashState->latched = false;
+        crashState->releasedCrashSeq = info.crashSeq;
+        crashState->releasedCrashTick64 = GetTickCount64();
+        // As weak as the release after a dump (ShouldReportReleasedCrashAtExit),
+        // and a non-zero exit also needs Crash Logger's crash log to record it.
+        crashState->releasedOnBriefHeartbeat = early == FilterVerdict::kDeleteRecovered;
+        crashState->releasedInThreadDumpWindow = true;
+        crashState->releasedForcedClose = forcedClose;
+        crashState->releasedCrashEventFileTimeUtc =
+          (static_cast<std::uint64_t>(eventTime.dwHighDateTime) << 32) | eventTime.dwLowDateTime;
+      }
+      AppendLogLine(
+        outBase,
+        std::wstring(L"No dump written: this exception came within a minute of Crash Logger's thread dump hotkey, "
+                     L"whose thread dump probes each thread, and the game ")
+          + (early == FilterVerdict::kDeleteRecovered ? L"kept running" : L"exited normally")
+          + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
+      return ThreadDumpWindowOutcome::kReleased;
+    }
+    // The filter keeps the dump when the game exited with a non-zero or
+    // unreadable exit code. Its address space is gone then: MiniDumpWriteDump
+    // can only fail and leave an empty file.
+    const bool exitedBeforeDump = WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+    AppendLogLine(
+      outBase,
+      exitedBeforeDump
+        ? L"The game exited after this exception, before a crash dump could be written."
+        : L"The game did not keep running after this exception; writing the crash dump.");
+    return exitedBeforeDump ? ThreadDumpWindowOutcome::kExitedBeforeDump : ThreadDumpWindowOutcome::kWriteDump;
+  }
+  return ThreadDumpWindowOutcome::kWriteDump;
+}
+
+  // The crash event was already consumed and reset, and the game has committed
+  // its record and will not signal again for this fault. Nothing would drive a
+  // later attempt, so a transient failure (sharing violation, momentary disk
+  // pressure) has to be retried here or the incident is lost outright.
+bool WriteCrashDumpWithRetries(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const std::wstring& dumpPath,
+  const skydiag::SharedLayout* dumpSnapshot,
+  std::size_t dumpSnapshotBytes,
+  const skydiag::helper::DumpProfile& dumpProfile,
+  bool exitedBeforeDump,
+  std::wstring* dumpErrOut,
+  skydiag::helper::DumpObjectMemoryStats* dumpMemoryOut)
+{
+  std::wstring dumpErr = exitedBeforeDump ? L"the game process had already exited" : L"";
+  bool dumpOk = false;
+  skydiag::helper::DumpObjectMemoryStats dumpMemory{};
+  for (int attempt = 0; attempt < kDumpWriteAttempts && !exitedBeforeDump; ++attempt) {
+    if (attempt > 0) {
+      if (!ShouldAttemptDumpWrite(attempt, IsProcessStillActive(proc.process))) {
+        AppendLogLine(
+          outBase,
+          L"Skipping remaining crash dump retries because the game process already exited; "
+            L"its address space is gone and no dump can be produced.");
+        break;
+      }
+      Sleep(kDumpRetryBackoffMs);
+      std::error_code retryEc;
+      std::filesystem::remove(dumpPath, retryEc);
+      AppendLogLine(
+        outBase,
+        L"Retrying crash dump write (attempt " + std::to_wstring(attempt + 1)
+          + L" of " + std::to_wstring(kDumpWriteAttempts) + L").");
+    }
+
+    dumpErr.clear();
+    dumpOk = skydiag::helper::WriteDumpWithStreams(
+      proc.process,
+      proc.pid,
+      dumpPath,
+      dumpSnapshot,
+      dumpSnapshotBytes,
+      {},
+      {},
+      true,
+      dumpProfile,
+      /*isProcessSnapshot=*/false,
+      &dumpErr,
+      &dumpMemory);
+    if (dumpOk) {
+      if (attempt > 0) {
+        AppendLogLine(
+          outBase,
+          L"Crash dump succeeded on attempt " + std::to_wstring(attempt + 1) + L".");
+      }
+      LogDumpCodeMemory(outBase, dumpMemory.code);
+      break;
+    }
+
+    AppendLogLine(
+      outBase,
+      L"Crash dump attempt " + std::to_wstring(attempt + 1) + L" failed: " + dumpErr);
+  }
+  *dumpErrOut = dumpErr;
+  *dumpMemoryOut = dumpMemory;
+  return dumpOk;
+}
+
+// No dump could be written for this crash event: the WER hint, and a thaw so
+// a later CTD can still be recorded.
+void HandleCrashDumpWriteFailure(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const std::wstring& dumpPath,
+  const std::wstring& dumpErr,
+  const CrashEventInfo& info,
+  CrashCaptureState* crashState,
+  std::wstring* lastCrashDumpPath)
+{
+  AppendLogLine(outBase, L"Crash dump failed: " + dumpErr);
+  std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
+  if (cfg.enableWerDumpFallbackHint) {
+    WriteWerFallbackHint(outBase, WerFallbackReason::kDumpWriteFailed, 0);
+    AppendLogLine(
+      outBase,
+      L"Wrote WER LocalDumps fallback hint: " + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+  }
+  std::error_code ec;
+  std::filesystem::remove(dumpPath, ec);
+  if (lastCrashDumpPath) {
+    lastCrashDumpPath->clear();
+  }
+
+  // Terminal state for this incident: no dump exists, so there is no evidence
+  // left to protect. Leaving the game frozen would keep blackbox recording
+  // stopped and, with strong-fault preservation active, would block every
+  // later CTD from being published. Thawing restores normal capture.
+  if (proc.shmWritable) {
+    const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+    AppendLogLine(
+      outBase,
+      thawed
+        ? L"Crash dump could not be written; thawed capture so a later CTD can still be recorded."
+        : L"Crash dump could not be written; capture was not thawed because a newer crash record "
+          L"is already present.");
+  }
+  if (crashState) {
+    crashState->latched = false;
+    crashState->dumpWriteFailedCrashSeq = info.crashSeq;
+    crashState->dumpWriteFailedProcessExited =
+      proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+  }
+}
+
+// A crash event the shutdown or first-chance filter released: thaw the
+// capture, keep, hold or delete the dump, and record the release.
+void ReleaseFilteredCrashDump(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const std::wstring& dumpPath,
+  const CrashEventInfo& info,
+  const skydiag::ForcedCloseMatch& forcedClose,
+  FilterVerdict verdict,
+  CrashCaptureState* crashState,
+  std::wstring* lastCrashDumpPath)
+{
+  if (verdict == FilterVerdict::kDeleteRecovered) {
+    const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+    AppendLogLine(
+      outBase,
+      thawed
+        ? L"Recovered first-chance exception thawed blackbox/resource capture for a later real CTD."
+        : L"Recovered first-chance exception was not thawed because a newer crash record is already present.");
+  } else if (verdict == FilterVerdict::kRetryNewerCrash) {
+    AppendLogLine(
+      outBase,
+      L"Discarding the superseded first-chance dump state and immediately retrying the newer crash event.");
+  }
+
+  bool preserveFilteredDump = cfg.preserveFilteredCrashDumps;
+  bool dumpRemovalHandled = false;
+  if (verdict == FilterVerdict::kDeleteBenign) {
+    const std::wstring_view context =
+      (crashState && !crashState->cleanExitFilterContext.empty())
+        ? std::wstring_view(crashState->cleanExitFilterContext)
+        : std::wstring_view(L"filtered_exit");
+    const bool evidenceRequired = IsCleanExitEvidenceRequired(cfg, crashState);
+    if (evidenceRequired && cfg.preserveFilteredCrashDumps) {
+      (void)TryWriteCleanExitEvidenceRecord(
+        cfg,
+        outBase,
+        crashState,
+        context,
+        dumpPath,
+        CleanExitDumpState::kPreserved);
+      preserveFilteredDump = true;
+    } else if (evidenceRequired) {
+      const bool pendingWritten = TryWriteCleanExitEvidenceRecord(
+        cfg,
+        outBase,
+        crashState,
+        context,
+        dumpPath,
+        CleanExitDumpState::kPendingDelete);
+      // Without a durable pending record, keep the dump as the fail-safe.
+      preserveFilteredDump =
+        ShouldPreserveFilteredDump(cfg.preserveFilteredCrashDumps, evidenceRequired, pendingWritten);
+      if (!preserveFilteredDump) {
+        const auto removal = RemoveFileAndObserve(dumpPath);
+        dumpRemovalHandled = true;
+        preserveFilteredDump = removal.existsAfter;
+        const auto finalState = removal.existsAfter
+          ? CleanExitDumpState::kDeleteFailed
+          : CleanExitDumpState::kDiscarded;
+        if (!TryWriteCleanExitEvidenceRecord(
+              cfg,
+              outBase,
+              crashState,
+              context,
+              dumpPath,
+              finalState)) {
+          AppendLogLine(
+            outBase,
+            L"Clean-exit evidence finalization failed; the durable pending_delete record "
+            L"does not claim an unobserved dump state.");
+        }
+        if (removal.existsAfter) {
+          AppendLogLine(
+            outBase,
+            L"Filtered crash dump removal failed or could not be verified; preserving observed file state"
+              + (removal.error
+                   ? L" (err=" + std::to_wstring(removal.error.value()) + L")."
+                   : L"."));
+        }
+      }
+    }
+  }
+  // A release on a few seconds of heartbeat may still be followed by the
+  // crash it was (ShouldReportReleasedCrashAtExit), so its dump is held
+  // until that is settled (CrashCaptureState::releasedDumpPath).
+  const bool holdReleasedDump = verdict == FilterVerdict::kDeleteRecovered && crashState;
+  std::wstring heldDumpPath = dumpPath;
+  if (preserveFilteredDump) {
+    AppendLogLine(
+      outBase,
+      cfg.preserveFilteredCrashDumps
+        ? L"Filtered dump file preserved without crash post-processing or capture latch "
+          L"(PreserveFilteredCrashDumps=1)."
+        : L"Clean-exit evidence metadata write failed; preserved the filtered dump as a fail-safe "
+          L"without crash post-processing or capture latch.");
+  } else if (holdReleasedDump) {
+    // Held under its own name (ReleasedDumpPathFor): a helper that stops
+    // before the release is settled leaves no dump that reads as a crash.
+    const std::wstring releasedPath = ReleasedDumpPathFor(dumpPath);
+    if (MoveFileExW(dumpPath.c_str(), releasedPath.c_str(), 0)) {
+      heldDumpPath = releasedPath;
+    } else {
+      AppendLogLine(
+        outBase,
+        L"Could not rename the released dump while it is held (err=" + std::to_wstring(GetLastError())
+          + L"); keeping its crash name.");
+    }
+    AppendLogLine(
+      outBase,
+      L"Keeping the released dump until the game exits or outlives this exception: "
+        + std::filesystem::path(heldDumpPath).filename().wstring());
+  } else if (!dumpRemovalHandled) {
+    const auto removal = RemoveFileAndObserve(dumpPath);
+    if (removal.existsAfter) {
+      preserveFilteredDump = true;
+      AppendLogLine(
+        outBase,
+        L"Filtered crash dump removal failed or could not be verified; file remains on disk"
+          + (removal.error
+               ? L" (err=" + std::to_wstring(removal.error.value()) + L")."
+               : L"."));
+    }
+  }
+  if (lastCrashDumpPath) {
+    lastCrashDumpPath->clear();
+  }
+  if (crashState) {
+    crashState->latched = false;
+    if (verdict != FilterVerdict::kRetryNewerCrash) {
+      crashState->releasedCrashSeq = info.crashSeq;
+      crashState->releasedCrashTick64 = GetTickCount64();
+      crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
+      crashState->releasedInThreadDumpWindow = false;
+      crashState->releasedForcedClose = forcedClose;
+    }
+    if (holdReleasedDump) {
+      NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
+      crashState->releasedDumpPath = heldDumpPath;
+      crashState->releasedDumpPreserve = preserveFilteredDump;
+      StartLateRecovery(
+        &crashState->releasedDumpRecovery,
+        GetTickCount64(),
+        proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u);
+    }
+  }
+  AppendLogLine(
+    outBase,
+    (preserveFilteredDump || holdReleasedDump)
+      ? L"Filtered crash event consumed; dump kept, capture remains ready for a later CTD."
+      : L"Filtered crash event consumed; dump deleted, capture remains ready for a later CTD.");
+}
+
+  // Kept as a crash after a minimal first dump (reducedDumpForRepeatedFault):
+  // while the game still runs, write it again at the configured size. The
+  // minimal dump stays if that fails.
+void RewriteCrashDumpAtConfiguredSize(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const std::wstring& dumpPath,
+  const skydiag::SharedLayout* dumpSnapshot,
+  std::size_t dumpSnapshotBytes,
+  const skydiag::helper::DumpProfile& configuredDumpProfile,
+  skydiag::helper::DumpProfile* writtenProfile)
+{
+  const std::wstring fullDumpPath = dumpPath + L".full.tmp";
+  std::wstring fullDumpErr;
+  skydiag::helper::DumpObjectMemoryStats fullDumpMemory{};
+  const bool fullWritten = skydiag::helper::WriteDumpWithStreams(
+    proc.process,
+    proc.pid,
+    fullDumpPath,
+    dumpSnapshot,
+    dumpSnapshotBytes,
+    {},
+    {},
+    true,
+    configuredDumpProfile,
+    /*isProcessSnapshot=*/false,
+    &fullDumpErr,
+    &fullDumpMemory);
+  if (fullWritten && MoveFileExW(fullDumpPath.c_str(), dumpPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    AppendLogLine(outBase, L"This time the exception was kept as a crash; rewrote its dump at the configured size.");
+    LogDumpCodeMemory(outBase, fullDumpMemory.code);
+    *writtenProfile = WrittenDumpProfile(configuredDumpProfile, fullDumpMemory);
+  } else {
+    if (fullWritten) {
+      fullDumpErr = L"MoveFileExW failed: " + std::to_wstring(GetLastError());
+    }
+    std::error_code ec;
+    std::filesystem::remove(fullDumpPath, ec);
+    AppendLogLine(outBase, L"Keeping the minimal crash dump; rewriting it at the configured size failed: " + fullDumpErr);
+  }
+}
+
 }  // namespace
 
 void NoteCrashLoggerThreadDumpHotkeyPressed(std::uint64_t tick64) noexcept
@@ -1153,65 +1546,16 @@ bool HandleCrashEventTick(
         + L": an error while the game was being closed, not a CTD (the viewer will not open).");
   }
 
-  // Right after Crash Logger's thread dump hotkey, a C++ exception or
-  // breakpoint is most likely one of its thread dump's probes
-  // (IsLikelyCrashLoggerThreadDumpFault): check that the game keeps running
-  // before writing a dump, not after. Not for one on the game's main thread:
-  // that is a crash Crash Logger is reporting, and it may end the game before
-  // the check is done.
   bool exitedBeforeDump = false;
-  const std::uint64_t nowTick64 = GetTickCount64();
-  const std::uint64_t lastCrashLoggerHotkeyTick64 = g_lastCrashLoggerHotkeyTick64.load(std::memory_order_relaxed);
-  const bool inThreadDumpWindow = proc.process && proc.shm &&
-    IsInCrashLoggerThreadDumpWindow(info.exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64);
-  const std::uint32_t mainThreadId = inThreadDumpWindow
-    ? skydiag::helper::InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes).value_or(0u)
-    : 0u;
-  if (inThreadDumpWindow &&
-      !IsLikelyCrashLoggerThreadDumpFault(
-        info.exceptionCode, nowTick64, lastCrashLoggerHotkeyTick64, info.faultingTid, mainThreadId)) {
-    AppendLogLine(
-      outBase,
-      L"This exception came within a minute of Crash Logger's thread dump hotkey, but on the game's main thread "
-      L"(tid=" + std::to_wstring(mainThreadId)
-        + L"), so it is not one of its thread dump's probes: writing the crash dump now.");
-  } else if (inThreadDumpWindow) {
-    FILETIME eventTime{};
-    GetSystemTimeAsFileTime(&eventTime);
-    const auto early = FilterFirstChanceException(
-      cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
-    if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
-      const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
-        TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
-      if (crashState) {
-        crashState->latched = false;
-        crashState->releasedCrashSeq = info.crashSeq;
-        crashState->releasedCrashTick64 = GetTickCount64();
-        // As weak as the release after a dump (ShouldReportReleasedCrashAtExit),
-        // and a non-zero exit also needs Crash Logger's crash log to record it.
-        crashState->releasedOnBriefHeartbeat = early == FilterVerdict::kDeleteRecovered;
-        crashState->releasedInThreadDumpWindow = true;
-        crashState->releasedForcedClose = forcedClose;
-        crashState->releasedCrashEventFileTimeUtc =
-          (static_cast<std::uint64_t>(eventTime.dwHighDateTime) << 32) | eventTime.dwLowDateTime;
-      }
-      AppendLogLine(
-        outBase,
-        std::wstring(L"No dump written: this exception came within a minute of Crash Logger's thread dump hotkey, "
-                     L"whose thread dump probes each thread, and the game ")
-          + (early == FilterVerdict::kDeleteRecovered ? L"kept running" : L"exited normally")
-          + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
+  switch (CheckCrashLoggerThreadDumpWindow(
+    cfg, proc, outBase, info, dumpSnapshot, dumpSnapshotBytes, forcedClose, crashState)) {
+    case ThreadDumpWindowOutcome::kReleased:
       return true;
-    }
-    // The filter keeps the dump when the game exited with a non-zero or
-    // unreadable exit code. Its address space is gone then: MiniDumpWriteDump
-    // can only fail and leave an empty file.
-    exitedBeforeDump = WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
-    AppendLogLine(
-      outBase,
-      exitedBeforeDump
-        ? L"The game exited after this exception, before a crash dump could be written."
-        : L"The game did not keep running after this exception; writing the crash dump.");
+    case ThreadDumpWindowOutcome::kExitedBeforeDump:
+      exitedBeforeDump = true;
+      break;
+    case ThreadDumpWindowOutcome::kWriteDump:
+      break;
   }
 
   const auto ts = Timestamp();
@@ -1242,94 +1586,13 @@ bool HandleCrashEventTick(
     pendingHangViewerDumpPath->clear();
   }
 
-  // The crash event was already consumed and reset, and the game has committed
-  // its record and will not signal again for this fault. Nothing would drive a
-  // later attempt, so a transient failure (sharing violation, momentary disk
-  // pressure) has to be retried here or the incident is lost outright.
-  std::wstring dumpErr = exitedBeforeDump ? L"the game process had already exited" : L"";
-  bool dumpOk = false;
+  std::wstring dumpErr;
   skydiag::helper::DumpObjectMemoryStats dumpMemory{};
-  for (int attempt = 0; attempt < kDumpWriteAttempts && !exitedBeforeDump; ++attempt) {
-    if (attempt > 0) {
-      if (!ShouldAttemptDumpWrite(attempt, IsProcessStillActive(proc.process))) {
-        AppendLogLine(
-          outBase,
-          L"Skipping remaining crash dump retries because the game process already exited; "
-            L"its address space is gone and no dump can be produced.");
-        break;
-      }
-      Sleep(kDumpRetryBackoffMs);
-      std::error_code retryEc;
-      std::filesystem::remove(dumpPath, retryEc);
-      AppendLogLine(
-        outBase,
-        L"Retrying crash dump write (attempt " + std::to_wstring(attempt + 1)
-          + L" of " + std::to_wstring(kDumpWriteAttempts) + L").");
-    }
-
-    dumpErr.clear();
-    dumpOk = skydiag::helper::WriteDumpWithStreams(
-      proc.process,
-      proc.pid,
-      dumpPath,
-      dumpSnapshot,
-      dumpSnapshotBytes,
-      {},
-      {},
-      true,
-      dumpProfile,
-      /*isProcessSnapshot=*/false,
-      &dumpErr,
-      &dumpMemory);
-    if (dumpOk) {
-      if (attempt > 0) {
-        AppendLogLine(
-          outBase,
-          L"Crash dump succeeded on attempt " + std::to_wstring(attempt + 1) + L".");
-      }
-      LogDumpCodeMemory(outBase, dumpMemory.code);
-      break;
-    }
-
-    AppendLogLine(
-      outBase,
-      L"Crash dump attempt " + std::to_wstring(attempt + 1) + L" failed: " + dumpErr);
-  }
+  const bool dumpOk = WriteCrashDumpWithRetries(
+    proc, outBase, dumpPath, dumpSnapshot, dumpSnapshotBytes, dumpProfile, exitedBeforeDump, &dumpErr, &dumpMemory);
 
   if (!dumpOk) {
-    AppendLogLine(outBase, L"Crash dump failed: " + dumpErr);
-    std::wcerr << L"[SkyrimDiagHelper] Crash dump failed: " << dumpErr << L"\n";
-    if (cfg.enableWerDumpFallbackHint) {
-      WriteWerFallbackHint(outBase, WerFallbackReason::kDumpWriteFailed, 0);
-      AppendLogLine(
-        outBase,
-        L"Wrote WER LocalDumps fallback hint: " + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
-    }
-    std::error_code ec;
-    std::filesystem::remove(dumpPath, ec);
-    if (lastCrashDumpPath) {
-      lastCrashDumpPath->clear();
-    }
-
-    // Terminal state for this incident: no dump exists, so there is no evidence
-    // left to protect. Leaving the game frozen would keep blackbox recording
-    // stopped and, with strong-fault preservation active, would block every
-    // later CTD from being published. Thawing restores normal capture.
-    if (proc.shmWritable) {
-      const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
-      AppendLogLine(
-        outBase,
-        thawed
-          ? L"Crash dump could not be written; thawed capture so a later CTD can still be recorded."
-          : L"Crash dump could not be written; capture was not thawed because a newer crash record "
-            L"is already present.");
-    }
-    if (crashState) {
-      crashState->latched = false;
-      crashState->dumpWriteFailedCrashSeq = info.crashSeq;
-      crashState->dumpWriteFailedProcessExited =
-        proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
-    }
+    HandleCrashDumpWriteFailure(cfg, proc, outBase, dumpPath, dumpErr, info, crashState, lastCrashDumpPath);
     return true;
   }
 
@@ -1356,145 +1619,7 @@ bool HandleCrashEventTick(
         cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
     }
     if (verdict != FilterVerdict::kKeepDump) {
-      if (verdict == FilterVerdict::kDeleteRecovered) {
-        const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
-        AppendLogLine(
-          outBase,
-          thawed
-            ? L"Recovered first-chance exception thawed blackbox/resource capture for a later real CTD."
-            : L"Recovered first-chance exception was not thawed because a newer crash record is already present.");
-      } else if (verdict == FilterVerdict::kRetryNewerCrash) {
-        AppendLogLine(
-          outBase,
-          L"Discarding the superseded first-chance dump state and immediately retrying the newer crash event.");
-      }
-
-      bool preserveFilteredDump = cfg.preserveFilteredCrashDumps;
-      bool dumpRemovalHandled = false;
-      if (verdict == FilterVerdict::kDeleteBenign) {
-        const std::wstring_view context =
-          (crashState && !crashState->cleanExitFilterContext.empty())
-            ? std::wstring_view(crashState->cleanExitFilterContext)
-            : std::wstring_view(L"filtered_exit");
-        const bool evidenceRequired = IsCleanExitEvidenceRequired(cfg, crashState);
-        if (evidenceRequired && cfg.preserveFilteredCrashDumps) {
-          (void)TryWriteCleanExitEvidenceRecord(
-            cfg,
-            outBase,
-            crashState,
-            context,
-            dumpPath,
-            CleanExitDumpState::kPreserved);
-          preserveFilteredDump = true;
-        } else if (evidenceRequired) {
-          const bool pendingWritten = TryWriteCleanExitEvidenceRecord(
-            cfg,
-            outBase,
-            crashState,
-            context,
-            dumpPath,
-            CleanExitDumpState::kPendingDelete);
-          // Without a durable pending record, keep the dump as the fail-safe.
-          preserveFilteredDump =
-            ShouldPreserveFilteredDump(cfg.preserveFilteredCrashDumps, evidenceRequired, pendingWritten);
-          if (!preserveFilteredDump) {
-            const auto removal = RemoveFileAndObserve(dumpPath);
-            dumpRemovalHandled = true;
-            preserveFilteredDump = removal.existsAfter;
-            const auto finalState = removal.existsAfter
-              ? CleanExitDumpState::kDeleteFailed
-              : CleanExitDumpState::kDiscarded;
-            if (!TryWriteCleanExitEvidenceRecord(
-                  cfg,
-                  outBase,
-                  crashState,
-                  context,
-                  dumpPath,
-                  finalState)) {
-              AppendLogLine(
-                outBase,
-                L"Clean-exit evidence finalization failed; the durable pending_delete record "
-                L"does not claim an unobserved dump state.");
-            }
-            if (removal.existsAfter) {
-              AppendLogLine(
-                outBase,
-                L"Filtered crash dump removal failed or could not be verified; preserving observed file state"
-                  + (removal.error
-                       ? L" (err=" + std::to_wstring(removal.error.value()) + L")."
-                       : L"."));
-            }
-          }
-        }
-      }
-      // A release on a few seconds of heartbeat may still be followed by the
-      // crash it was (ShouldReportReleasedCrashAtExit), so its dump is held
-      // until that is settled (CrashCaptureState::releasedDumpPath).
-      const bool holdReleasedDump = verdict == FilterVerdict::kDeleteRecovered && crashState;
-      std::wstring heldDumpPath = dumpPath;
-      if (preserveFilteredDump) {
-        AppendLogLine(
-          outBase,
-          cfg.preserveFilteredCrashDumps
-            ? L"Filtered dump file preserved without crash post-processing or capture latch "
-              L"(PreserveFilteredCrashDumps=1)."
-            : L"Clean-exit evidence metadata write failed; preserved the filtered dump as a fail-safe "
-              L"without crash post-processing or capture latch.");
-      } else if (holdReleasedDump) {
-        // Held under its own name (ReleasedDumpPathFor): a helper that stops
-        // before the release is settled leaves no dump that reads as a crash.
-        const std::wstring releasedPath = ReleasedDumpPathFor(dumpPath);
-        if (MoveFileExW(dumpPath.c_str(), releasedPath.c_str(), 0)) {
-          heldDumpPath = releasedPath;
-        } else {
-          AppendLogLine(
-            outBase,
-            L"Could not rename the released dump while it is held (err=" + std::to_wstring(GetLastError())
-              + L"); keeping its crash name.");
-        }
-        AppendLogLine(
-          outBase,
-          L"Keeping the released dump until the game exits or outlives this exception: "
-            + std::filesystem::path(heldDumpPath).filename().wstring());
-      } else if (!dumpRemovalHandled) {
-        const auto removal = RemoveFileAndObserve(dumpPath);
-        if (removal.existsAfter) {
-          preserveFilteredDump = true;
-          AppendLogLine(
-            outBase,
-            L"Filtered crash dump removal failed or could not be verified; file remains on disk"
-              + (removal.error
-                   ? L" (err=" + std::to_wstring(removal.error.value()) + L")."
-                   : L"."));
-        }
-      }
-      if (lastCrashDumpPath) {
-        lastCrashDumpPath->clear();
-      }
-      if (crashState) {
-        crashState->latched = false;
-        if (verdict != FilterVerdict::kRetryNewerCrash) {
-          crashState->releasedCrashSeq = info.crashSeq;
-          crashState->releasedCrashTick64 = GetTickCount64();
-          crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
-          crashState->releasedInThreadDumpWindow = false;
-          crashState->releasedForcedClose = forcedClose;
-        }
-        if (holdReleasedDump) {
-          NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
-          crashState->releasedDumpPath = heldDumpPath;
-          crashState->releasedDumpPreserve = preserveFilteredDump;
-          StartLateRecovery(
-            &crashState->releasedDumpRecovery,
-            GetTickCount64(),
-            proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u);
-        }
-      }
-      AppendLogLine(
-        outBase,
-        (preserveFilteredDump || holdReleasedDump)
-          ? L"Filtered crash event consumed; dump kept, capture remains ready for a later CTD."
-          : L"Filtered crash event consumed; dump deleted, capture remains ready for a later CTD.");
+      ReleaseFilteredCrashDump(cfg, proc, outBase, dumpPath, info, forcedClose, verdict, crashState, lastCrashDumpPath);
       return true;
     }
   }
@@ -1503,38 +1628,9 @@ bool HandleCrashEventTick(
   // the minimal one unless its rewrite at the configured size below succeeds.
   auto writtenProfile = WrittenDumpProfile(dumpProfile, dumpMemory);
 
-  // Kept as a crash after a minimal first dump (reducedDumpForRepeatedFault):
-  // while the game still runs, write it again at the configured size. The
-  // minimal dump stays if that fails.
   if (reducedDumpForRepeatedFault && IsProcessStillActive(proc.process)) {
-    const std::wstring fullDumpPath = dumpPath + L".full.tmp";
-    std::wstring fullDumpErr;
-    skydiag::helper::DumpObjectMemoryStats fullDumpMemory{};
-    const bool fullWritten = skydiag::helper::WriteDumpWithStreams(
-      proc.process,
-      proc.pid,
-      fullDumpPath,
-      dumpSnapshot,
-      dumpSnapshotBytes,
-      {},
-      {},
-      true,
-      configuredDumpProfile,
-      /*isProcessSnapshot=*/false,
-      &fullDumpErr,
-      &fullDumpMemory);
-    if (fullWritten && MoveFileExW(fullDumpPath.c_str(), dumpPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-      AppendLogLine(outBase, L"This time the exception was kept as a crash; rewrote its dump at the configured size.");
-      LogDumpCodeMemory(outBase, fullDumpMemory.code);
-      writtenProfile = WrittenDumpProfile(configuredDumpProfile, fullDumpMemory);
-    } else {
-      if (fullWritten) {
-        fullDumpErr = L"MoveFileExW failed: " + std::to_wstring(GetLastError());
-      }
-      std::error_code ec;
-      std::filesystem::remove(fullDumpPath, ec);
-      AppendLogLine(outBase, L"Keeping the minimal crash dump; rewriting it at the configured size failed: " + fullDumpErr);
-    }
+    RewriteCrashDumpAtConfiguredSize(
+      proc, outBase, dumpPath, dumpSnapshot, dumpSnapshotBytes, configuredDumpProfile, &writtenProfile);
   }
 
   ProcessValidCrashDump(

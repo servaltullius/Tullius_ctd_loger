@@ -318,6 +318,13 @@ void TestExecuteConfirmedHangCapture_WritesArtifacts()
 
   const auto wctJson = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_WCT_", L".json"));
   AssertContains(wctJson, "\"modal_dialogs\"", "Hang WCT json must always record the visible-dialog probe result");
+  Require(nlohmann::json::parse(wctJson)["capture"]["kind"] == "hang", "the capture block names a hang");
+  const auto manifest = nlohmann::json::parse(
+    ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Hang_", L".json")));
+  Require(
+    manifest["context"]["seconds_since_heartbeat"] == 15.0 && manifest["context"].contains("dump_transport") &&
+      !manifest["context"].contains("trigger"),
+    "the hang manifest context");
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "Hang dump written", "Confirmed hang capture must log dump creation");
@@ -624,6 +631,17 @@ void TestManualCaptureWritesItsArtifacts()
     "its wait chains are written");
   AssertContains(
     ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "Manual capture triggered via test hotkey", "the trigger is logged");
+  // The shared freeze capture (FreezeCapture.cpp) with the manual settings.
+  const auto wct = nlohmann::json::parse(
+    ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_WCT_Manual_", L".json")));
+  Require(wct["capture"]["kind"] == "manual" && wct["capture"].contains("dump_transport"), "the capture block");
+  Require(!wct.contains("modal_dialogs"), "a manual capture does not probe dialog windows");
+  const auto manifest = nlohmann::json::parse(
+    ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Manual_", L".json")));
+  Require(
+    manifest["context"]["trigger"] == "test hotkey" && manifest["context"].contains("dump_transport") &&
+      manifest["context"].contains("in_menu"),
+    "the manifest context");
   ShutdownRetentionWorker();
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);

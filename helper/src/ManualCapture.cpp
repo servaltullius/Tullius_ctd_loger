@@ -11,19 +11,17 @@
 
 #include "CaptureCommon.h"
 #include "DumpToolLaunch.h"
+#include "FreezeCapture.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
-#include "PssSnapshot.h"
 #include "SkyrimDiagHelper/Config.h"
-#include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/LoadStats.h"
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
-#include "SkyrimDiagHelper/WctCapture.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
@@ -77,154 +75,57 @@ void DoManualCapture(
     }
   }
 
-  nlohmann::json wctJson;
-  std::wstring wctErr;
-  if (!skydiag::helper::CaptureWct(proc.pid, &proc.shm->header.state_flags, wctJson, &wctErr)) {
-    std::wcerr << L"[SkyrimDiagHelper] WCT capture failed: " << wctErr << L"\n";
-    AppendLogLine(outBase, L"WCT capture failed: " + wctErr);
-    wctJson = nlohmann::json::object();
-    wctJson["pid"] = proc.pid;
-    wctJson["error"] = "capture_failed";
-  }
-  // A normal (non-admin) user never holds SeDebugPrivilege, so the request
-  // ends in ERROR_NOT_ALL_ASSIGNED on every capture. The helper runs as the
-  // same user as the game, so the game's own wait chains are still read; only
-  // other errors are worth a warning.
-  if (wctJson.contains("debugPrivilegeEnabled") && wctJson["debugPrivilegeEnabled"].is_boolean() &&
-      !wctJson["debugPrivilegeEnabled"].get<bool>() &&
-      wctJson.value("debugPrivilegeError", 0u) != ERROR_NOT_ALL_ASSIGNED) {
-    AppendLogLine(
-      outBase,
-      L"Warning: EnableDebugPrivilege failed (error " + std::to_wstring(wctJson.value("debugPrivilegeError", 0u)) +
-        L"); WCT capture may be incomplete.");
+  FreezeCaptureRequest request{};
+  request.kind = "manual";
+  request.logName = L"Manual";
+  request.profileKind = skydiag::helper::CaptureKind::Manual;
+  request.wctPath = wctPath;
+  request.dumpPath = dumpPath;
+  const auto capture = CaptureFreezeDumpAndWct(cfg, proc, outBase, decision, stateFlags, request);
+  if (!capture.dumpWritten) {
+    return;
   }
 
-  wctJson["capture"] = nlohmann::json::object();
-  wctJson["capture"]["kind"] = "manual";
-  wctJson["capture"]["secondsSinceHeartbeat"] = decision.secondsSinceHeartbeat;
-  wctJson["capture"]["thresholdSec"] = decision.thresholdSec;
-  wctJson["capture"]["isLoading"] = decision.isLoading;
-  wctJson["capture"]["stateFlags"] = stateFlags;
+  std::wcout << L"[SkyrimDiagHelper] Manual dump written: " << dumpPath << L"\n";
+  std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
+  AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
+  LogDumpObjectMemory(outBase, capture.objectMemory);
+  AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
 
-  const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
-  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
-    cfg.dumpMode,
-    skydiag::helper::CaptureKind::Manual,
-    cfg.dumpAllModuleCode);
-  auto pssSnapshot = TryCapturePssSnapshotForFreeze(cfg.enablePssSnapshotForFreeze, proc.process);
-  if (pssSnapshot.requested) {
-    if (pssSnapshot.used) {
-      AppendLogLine(
-        outBase,
-        L"PSS snapshot captured for manual dump (durationMs="
-          + std::to_wstring(pssSnapshot.captureDurationMs)
-          + L").");
-    } else {
-      AppendLogLine(
-        outBase,
-        L"PSS snapshot unavailable for manual dump; falling back to live-process dump (status="
-          + pssSnapshot.status
-          + L").");
-    }
+  if (cfg.enableIncidentManifest) {
+    const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Manual_" + ts + L".json");
+    nlohmann::json ctx = FreezeManifestContext(decision, inMenu, capture);
+    ctx["trigger"] = WideToUtf8(trigger);
+
+    const auto writtenProfile = WrittenDumpProfile(capture.dumpProfile, capture.objectMemory);
+    const auto manifest = MakeIncidentManifestV1(
+      "manual",
+      ts,
+      proc.pid,
+      std::filesystem::path(dumpPath),
+      std::optional<std::filesystem::path>(wctPath),
+      /*etwPath=*/std::nullopt,
+      /*etwStatus=*/"disabled",
+      stateFlags,
+      ctx,
+      &writtenProfile,
+      &capture.recapture,
+      cfg,
+      cfg.incidentManifestIncludeConfigSnapshot);
+    WriteTextFileUtf8(manifestPath, DumpJsonForFile(manifest));
+    AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
   }
 
-  wctJson["capture"]["pss_snapshot_requested"] = pssSnapshot.requested;
-  wctJson["capture"]["pss_snapshot_used"] = pssSnapshot.used;
-  wctJson["capture"]["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
-  wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
-  wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
-
-  const bool strongDeadlock = skydiag::helper::WctHasCycle(wctJson);
-  const bool snapshotBackedLoaderStall = decision.isLoading && pssSnapshot.used;
-  const bool freezeAmbiguous = !strongDeadlock && !snapshotBackedLoaderStall;
-  const bool freezeSnapshotFallback = pssSnapshot.requested && !pssSnapshot.used;
-  const bool freezeCandidateWeak = decision.isLoading && !pssSnapshot.used;
-  const auto freezeRecaptureDecision = skydiag::helper::DecideFreezeRecapture(
-    cfg.enableAutoRecaptureOnUnknownCrash,
-    cfg.autoAnalyzeDump,
-    freezeAmbiguous,
-    freezeSnapshotFallback,
-    freezeCandidateWeak,
-    strongDeadlock,
-    snapshotBackedLoaderStall,
-    /*bucketSeenCount=*/1u,
-    cfg.autoRecaptureUnknownBucketThreshold);
-
-  const std::string wctUtf8 = DumpJsonForFile(wctJson);
-  WriteTextFileUtf8(wctPath, wctUtf8);
-
-  std::wstring dumpErr;
-  skydiag::helper::DumpObjectMemoryStats objectMemory{};
-  const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
-  if (!skydiag::helper::WriteDumpWithStreams(
-        dumpSource,
-        proc.pid,
-        dumpPath,
-        proc.shm,
-        proc.shmSize,
-        wctUtf8,
-        pluginScanJson,
-        /*isCrash=*/false,
-        dumpProfile,
-        /*isProcessSnapshot=*/pssSnapshot.used,
-        &dumpErr,
-        &objectMemory)) {
-    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
-    std::wcerr << L"[SkyrimDiagHelper] Manual dump failed: " << dumpErr << L"\n";
-    AppendLogLine(outBase, L"Manual dump failed: " + dumpErr);
-  } else {
-    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
-    std::wcout << L"[SkyrimDiagHelper] Manual dump written: " << dumpPath << L"\n";
-    std::wcout << L"[SkyrimDiagHelper] WCT written: " << wctPath.wstring() << L"\n";
-    AppendLogLine(outBase, L"Manual dump written: " + dumpPath);
-    LogDumpObjectMemory(outBase, objectMemory);
-    AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
-
-    if (cfg.enableIncidentManifest) {
-      const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Manual_" + ts + L".json");
-      nlohmann::json ctx = nlohmann::json::object();
-      ctx["trigger"] = WideToUtf8(trigger);
-      ctx["seconds_since_heartbeat"] = decision.secondsSinceHeartbeat;
-      ctx["threshold_sec"] = decision.thresholdSec;
-      ctx["is_loading"] = decision.isLoading;
-      ctx["in_menu"] = inMenu;
-      ctx["pss_snapshot_requested"] = pssSnapshot.requested;
-      ctx["pss_snapshot_used"] = pssSnapshot.used;
-      ctx["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
-      ctx["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
-      ctx["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
-
-      const auto writtenProfile = WrittenDumpProfile(dumpProfile, objectMemory);
-      const auto manifest = MakeIncidentManifestV1(
-        "manual",
-        ts,
-        proc.pid,
-        std::filesystem::path(dumpPath),
-        std::optional<std::filesystem::path>(wctPath),
-        /*etwPath=*/std::nullopt,
-        /*etwStatus=*/"disabled",
-        stateFlags,
-        ctx,
-        &writtenProfile,
-        &freezeRecaptureDecision,
-        cfg,
-        cfg.incidentManifestIncludeConfigSnapshot);
-      WriteTextFileUtf8(manifestPath, DumpJsonForFile(manifest));
-      AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
-    }
-
-    bool viewerNow = cfg.autoOpenViewerOnManualCapture;
-    if (viewerNow) {
-      const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
-      viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
-    }
-    if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
-      StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
-    } else if (viewerNow && cfg.autoAnalyzeDump) {
-      AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
-    }
-    ApplyRetentionFromConfig(cfg, outBase);
+  bool viewerNow = cfg.autoOpenViewerOnManualCapture;
+  if (viewerNow) {
+    const auto launch = StartDumpToolViewer(cfg, dumpPath, outBase, L"manual");
+    viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
   }
+  if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
+    StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
+  } else if (viewerNow && cfg.autoAnalyzeDump) {
+    AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
+  }
+  ApplyRetentionFromConfig(cfg, outBase);
 }
-
 }  // namespace skydiag::helper::internal

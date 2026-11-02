@@ -12,14 +12,11 @@
 #include "CaptureCommon.h"
 #include "DumpToolLaunch.h"
 #include "EtwCapture.h"
+#include "FreezeCapture.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
-#include "PssSnapshot.h"
-#include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
-#include "SkyrimDiagHelper/ModalDialogProbe.h"
-#include "SkyrimDiagHelper/WctCapture.h"
 
 namespace skydiag::helper::internal {
 
@@ -39,119 +36,18 @@ HangTickResult ExecuteConfirmedHangCapture(
   const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Hang_" + ts + L".json");
   bool manifestWritten = false;
 
-  nlohmann::json wctJson;
-  std::wstring wctErr;
-  if (!skydiag::helper::CaptureWct(proc.pid, &proc.shm->header.state_flags, wctJson, &wctErr)) {
-    std::wcerr << L"[SkyrimDiagHelper] WCT capture failed: " << wctErr << L"\n";
-    wctJson = nlohmann::json::object();
-    wctJson["pid"] = proc.pid;
-    wctJson["error"] = "capture_failed";
+  FreezeCaptureRequest request{};
+  request.kind = "hang";
+  request.logName = L"Hang";
+  request.profileKind = skydiag::helper::CaptureKind::Hang;
+  request.wctPath = wctPath;
+  request.dumpPath = dumpPath;
+  request.captureModalDialogs = true;
+  const auto capture = CaptureFreezeDumpAndWct(cfg, proc, outBase, decision, stateFlags, request);
+  if (capture.modalDialogCount != 0u && state) {
+    state->modalDialogSeenThisEpisode = true;
   }
-  // A normal (non-admin) user never holds SeDebugPrivilege, so the request
-  // ends in ERROR_NOT_ALL_ASSIGNED on every capture. The helper runs as the
-  // same user as the game, so the game's own wait chains are still read; only
-  // other errors are worth a warning.
-  if (wctJson.contains("debugPrivilegeEnabled") && wctJson["debugPrivilegeEnabled"].is_boolean() &&
-      !wctJson["debugPrivilegeEnabled"].get<bool>() &&
-      wctJson.value("debugPrivilegeError", 0u) != ERROR_NOT_ALL_ASSIGNED) {
-    AppendLogLine(
-      outBase,
-      L"Warning: EnableDebugPrivilege failed (error " + std::to_wstring(wctJson.value("debugPrivilegeError", 0u)) +
-        L"); WCT capture may be incomplete.");
-  }
-
-  // A main thread parked in a modal loop (e.g. a plugin's error MessageBox)
-  // stops the heartbeat while its stack only shows bystander modules. The
-  // visible dialog itself is the symbol-independent evidence for that state.
-  const auto modalDialogs = skydiag::helper::CaptureModalDialogs(proc.pid);
-  wctJson["modal_dialogs"] = skydiag::helper::ModalDialogsToJson(modalDialogs);
-  if (!modalDialogs.empty()) {
-    AppendLogLine(
-      outBase,
-      L"Visible dialog windows at hang capture: " + std::to_wstring(modalDialogs.size()));
-    if (state) {
-      state->modalDialogSeenThisEpisode = true;
-    }
-  }
-
-  wctJson["capture"] = nlohmann::json::object();
-  wctJson["capture"]["kind"] = "hang";
-  wctJson["capture"]["secondsSinceHeartbeat"] = decision.secondsSinceHeartbeat;
-  wctJson["capture"]["thresholdSec"] = decision.thresholdSec;
-  wctJson["capture"]["isLoading"] = decision.isLoading;
-  wctJson["capture"]["stateFlags"] = stateFlags;
-
-  const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
-  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
-    cfg.dumpMode,
-    skydiag::helper::CaptureKind::Hang,
-    cfg.dumpAllModuleCode);
-  auto pssSnapshot = TryCapturePssSnapshotForFreeze(cfg.enablePssSnapshotForFreeze, proc.process);
-  if (pssSnapshot.requested) {
-    if (pssSnapshot.used) {
-      AppendLogLine(
-        outBase,
-        L"PSS snapshot captured for hang dump (durationMs="
-          + std::to_wstring(pssSnapshot.captureDurationMs)
-          + L").");
-    } else {
-      AppendLogLine(
-        outBase,
-        L"PSS snapshot unavailable for hang dump; falling back to live-process dump (status="
-          + pssSnapshot.status
-          + L").");
-    }
-  }
-
-  wctJson["capture"]["pss_snapshot_requested"] = pssSnapshot.requested;
-  wctJson["capture"]["pss_snapshot_used"] = pssSnapshot.used;
-  wctJson["capture"]["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
-  wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
-  wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
-
-  const bool strongDeadlock = skydiag::helper::WctHasCycle(wctJson);
-  const bool snapshotBackedLoaderStall = decision.isLoading && pssSnapshot.used;
-  const bool freezeAmbiguous = !strongDeadlock && !snapshotBackedLoaderStall;
-  const bool freezeSnapshotFallback = pssSnapshot.requested && !pssSnapshot.used;
-  const bool freezeCandidateWeak = decision.isLoading && !pssSnapshot.used;
-  const auto freezeRecaptureDecision = skydiag::helper::DecideFreezeRecapture(
-    cfg.enableAutoRecaptureOnUnknownCrash,
-    cfg.autoAnalyzeDump,
-    freezeAmbiguous,
-    freezeSnapshotFallback,
-    freezeCandidateWeak,
-    strongDeadlock,
-    snapshotBackedLoaderStall,
-    /*bucketSeenCount=*/1u,
-    cfg.autoRecaptureUnknownBucketThreshold);
-
-  const std::string wctUtf8 = DumpJsonForFile(wctJson);
-  WriteTextFileUtf8(wctPath, wctUtf8);
-
-  bool dumpWritten = false;
-  std::wstring dumpErr;
-  skydiag::helper::DumpObjectMemoryStats objectMemory{};
-  const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
-  if (!skydiag::helper::WriteDumpWithStreams(
-        dumpSource,
-        proc.pid,
-        dumpPath,
-        proc.shm,
-        proc.shmSize,
-        wctUtf8,
-        pluginScanJson,
-        /*isCrash=*/false,
-        dumpProfile,
-        /*isProcessSnapshot=*/pssSnapshot.used,
-        &dumpErr,
-        &objectMemory)) {
-    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
-    std::wcerr << L"[SkyrimDiagHelper] Hang dump failed: " << dumpErr << L"\n";
-    AppendLogLine(outBase, L"Hang dump failed: " + dumpErr);
-  } else {
-    ReleasePssSnapshotForFreeze(proc.process, pssSnapshot.snapshotHandle);
-    dumpWritten = true;
-  }
+  const bool dumpWritten = capture.dumpWritten;
 
   // The trace starts after the dump, so wpr -start (up to the ETW timeout)
   // does not delay it, and is stopped from the helper loop once it has
@@ -179,24 +75,15 @@ HangTickResult ExecuteConfirmedHangCapture(
     std::wcout << L"[SkyrimDiagHelper] Hang decision: secondsSinceHeartbeat=" << decision.secondsSinceHeartbeat
                << L" threshold=" << decision.thresholdSec << L" loading=" << (decision.isLoading ? L"1" : L"0") << L"\n";
     AppendLogLine(outBase, L"Hang dump written: " + dumpPath);
-    LogDumpObjectMemory(outBase, objectMemory);
+    LogDumpObjectMemory(outBase, capture.objectMemory);
     AppendLogLine(outBase, L"WCT written: " + wctPath.wstring());
     AppendLogLine(outBase, L"Hang decision: secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
       L" threshold=" + std::to_wstring(decision.thresholdSec) + L" loading=" + std::to_wstring(decision.isLoading ? 1 : 0));
     if (cfg.enableIncidentManifest) {
       const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
-      nlohmann::json ctx = nlohmann::json::object();
-      ctx["seconds_since_heartbeat"] = decision.secondsSinceHeartbeat;
-      ctx["threshold_sec"] = decision.thresholdSec;
-      ctx["is_loading"] = decision.isLoading;
-      ctx["in_menu"] = inMenu;
-      ctx["pss_snapshot_requested"] = pssSnapshot.requested;
-      ctx["pss_snapshot_used"] = pssSnapshot.used;
-      ctx["pss_snapshot_capture_ms"] = pssSnapshot.captureDurationMs;
-      ctx["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
-      ctx["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
+      const nlohmann::json ctx = FreezeManifestContext(decision, inMenu, capture);
 
-      const auto writtenProfile = WrittenDumpProfile(dumpProfile, objectMemory);
+      const auto writtenProfile = WrittenDumpProfile(capture.dumpProfile, capture.objectMemory);
       const auto manifest = MakeIncidentManifestV1(
         "hang",
         ts,
@@ -208,7 +95,7 @@ HangTickResult ExecuteConfirmedHangCapture(
         stateFlags,
         ctx,
         &writtenProfile,
-        &freezeRecaptureDecision,
+        &capture.recapture,
         cfg,
         cfg.incidentManifestIncludeConfigSnapshot);
       WriteTextFileUtf8(manifestPath, DumpJsonForFile(manifest));
