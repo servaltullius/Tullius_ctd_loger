@@ -28,12 +28,6 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
   return L"(unknown)";
 }
 
-bool LocalCandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
-{
-  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
-         candidate.supporting_families.end();
-}
-
 bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
 {
   if (candidate.module_filename.empty() || module.empty()) {
@@ -44,29 +38,29 @@ bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_v
 
 bool CandidateHasFrameSupport(const ActionableCandidate& candidate)
 {
-  return LocalCandidateHasFamily(candidate, "crash_logger_frame");
+  return CandidateHasFamily(candidate, "crash_logger_frame");
 }
 
 bool CandidateHasObjectRefSupport(const ActionableCandidate& candidate)
 {
-  return LocalCandidateHasFamily(candidate, "crash_logger_object_ref");
+  return CandidateHasFamily(candidate, "crash_logger_object_ref");
 }
 
 bool CandidateHasScorableFirstChanceSupport(const AnalysisResult& r, const ActionableCandidate& candidate)
 {
-  return LocalCandidateHasFamily(candidate, "first_chance_context") &&
+  return CandidateHasFamily(candidate, "first_chance_context") &&
          HasScorableFirstChanceContext(r.first_chance_summary);
 }
 
 bool CandidateHasScorableHistorySupport(const AnalysisResult& r, const ActionableCandidate& candidate)
 {
-  return LocalCandidateHasFamily(candidate, "history_repeat") &&
+  return CandidateHasFamily(candidate, "history_repeat") &&
          (r.history_correlation.count > 1 || !r.bucket_candidate_repeats.empty());
 }
 
 bool CandidateHasResourceSupport(const ActionableCandidate& candidate)
 {
-  return LocalCandidateHasFamily(candidate, "resource_provider");
+  return CandidateHasFamily(candidate, "resource_provider");
 }
 
 std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
@@ -86,36 +80,6 @@ std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandi
   }
   // Korean particles after this label assume it ends in "프레임" (이/과).
   return en ? L"Crash Logger frame first" : L"Crash Logger 프레임";
-}
-
-std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en)
-{
-  std::vector<std::wstring> labels;
-  labels.reserve(candidate.supporting_families.size());
-  for (const auto& family : candidate.supporting_families) {
-    if (family == "crash_logger_frame") {
-      labels.push_back(en ? L"Crash Logger frame" : L"Crash Logger 프레임");
-    } else if (family == "crash_logger_object_ref") {
-      labels.push_back(en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조");
-    } else if (family == "actionable_stack") {
-      labels.push_back(en ? L"actionable stack" : L"실행 가능한 스택");
-    } else if (family == "resource_provider") {
-      labels.push_back(en ? L"near resource provider" : L"근처 리소스 제공 모드");
-    } else if (family == "history_repeat") {
-      labels.push_back(en ? L"history repeat" : L"반복 기록");
-    } else if (family == "first_chance_context") {
-      labels.push_back(en ? L"repeated first-chance context" : L"반복 선행 예외(first-chance)");
-    } else if (family == "hang_thread_group") {
-      labels.push_back(en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹");
-    } else if (family == "modal_dialog_owner") {
-      labels.push_back(en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈");
-    } else if (family == "hook_stub_owner") {
-      labels.push_back(en ? L"hook stub owner" : L"후킹 점프 코드 주인");
-    } else if (family == "freed_hook_owner") {
-      labels.push_back(en ? L"freed hook owner" : L"해제된 후킹 코드 주인");
-    }
-  }
-  return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
 }
 
 std::wstring JoinWaitPath(const std::vector<std::wstring>& names)

@@ -240,7 +240,7 @@ void AddStackSignals(const AnalysisResult& r, bool en, std::vector<CandidateSign
     signal.module_filename = suspect.module_filename;
     signal.detail = en
       ? (L"Actionable stack candidate: " + signal.display_name)
-      : (L"실행 가능한 스택 후보: " + signal.display_name);
+      : (L"스택 분석 후보: " + signal.display_name);
     const bool suspectAtLeastMedium =
       suspect.confidence_level == i18n::ConfidenceLevel::kHigh ||
       suspect.confidence_level == i18n::ConfidenceLevel::kMedium;

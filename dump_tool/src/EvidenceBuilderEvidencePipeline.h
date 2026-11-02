@@ -8,7 +8,6 @@ std::wstring DescribeCaptureProfileEvidence(const AnalysisResult& r, bool en);
 std::wstring DescribeRecaptureEvaluationEvidence(const AnalysisResult& r, bool en);
 std::wstring DescribeSymbolRuntimeEvidence(const AnalysisResult& r, bool en);
 std::wstring DescribeFreezeSupportQuality(std::string_view supportQuality, bool en);
-bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId);
 bool HasScorableFirstChanceContext(const FirstChanceSummary& summary);
 std::wstring DescribeFirstChanceSupport(const FirstChanceSummary& summary, bool en);
 

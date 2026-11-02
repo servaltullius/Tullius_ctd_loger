@@ -1439,6 +1439,27 @@ void TestDamagedSave()
   }
 }
 
+// The summary, the checklist and the share text name a candidate's signal
+// families with one set of words.
+void TestCandidateFamilyLabels()
+{
+  namespace internal = skydiag::dump_tool::internal;
+  skydiag::dump_tool::ActionableCandidate candidate{};
+  candidate.supporting_families = { "crash_logger_frame", "history_repeat", "actionable_stack", "resource_provider" };
+  Require(internal::JoinCandidateFamilies(candidate, false) ==
+            L"Crash Logger 프레임 + 반복 이력 + 스택 분석 + 근처 리소스 제공 모드",
+    "Korean family labels");
+  Require(internal::JoinCandidateFamilies(candidate, true) ==
+            L"Crash Logger frame + history repeat + actionable stack + near resource provider",
+    "English family labels");
+  Require(internal::CandidateHasFamily(candidate, "history_repeat") &&
+            !internal::CandidateHasFamily(candidate, "hang_thread_group"),
+    "family lookup");
+  Require(internal::DescribeCandidateFamily("not_a_family", false) == L"기타 신호", "an unknown family");
+  candidate.supporting_families.clear();
+  Require(internal::JoinCandidateFamilies(candidate, false) == L"제한된 근거", "no family");
+}
+
 // Batch D: what a player reads first in the text report, and no noise in it.
 void TestReportReadability()
 {
@@ -1730,6 +1751,7 @@ int main()
     TestForcedClose();
     TestDamagedSave();
     TestReportReadability();
+    TestCandidateFamilyLabels();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;
