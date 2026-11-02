@@ -1407,6 +1407,34 @@ void TestCrashHistorySaveLoadStats()
     assert(stats.count == 1u && stats.places.size() == 2u && stats.all_places_known);
   }
 
+  // The first analysis was days after capture. In either storage order the
+  // copy's header sets the 24-hour window and the boundary for earlier loads.
+  for (const bool legacyFirst : {true, false}) {
+    CrashHistory mixed;
+    const auto legacy = [&] { add(mixed, "old.dmp", 0u, "aaaa", "save76key", ""); };
+    if (legacyFirst) {
+      legacy();
+    }
+    add(mixed, "copy.dmp", k1618 - 3u * 86400u, "aaaa", "save76key", kNull);
+    if (!legacyFirst) {
+      legacy();
+    }
+    add(mixed, "between.dmp", k1618 - 2u * 86400u, "other", "save75key", kJump);
+    const auto stats = mixed.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+    assert(stats.count == 1u && stats.places.size() == 2u && stats.other_save_count == 1u);
+    assert(mixed.GetSaveLoadCrashStats(query(k1618 - 4u * 86400u, "before", kJump)).count == 0u);
+  }
+
+  // A legacy copy of an out-of-window failure of another save cannot veto
+  // damaged-save guidance once its actual capture time is known.
+  {
+    CrashHistory mixed;
+    add(mixed, "a.dmp", k1618, "aaaa", "save76key", kNull);
+    add(mixed, "old.dmp", 0u, "other", "save75key", "");
+    add(mixed, "copy.dmp", k1618 - 3u * 86400u, "other", "save75key", kJump);
+    assert(mixed.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump)).other_save_count == 0u);
+  }
+
   // The 2026-11-01 case: the second crash sees the first, in another place.
   add(history, "SkyrimDiag_Crash_20261101_161808_940.dmp", k1618, "aaaa", "save76key", kNull, "CTD3-7dbaf39d10226dde");
   auto stats = history.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));

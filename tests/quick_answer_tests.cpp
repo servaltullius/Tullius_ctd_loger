@@ -1387,6 +1387,8 @@ void TestDamagedSave()
         "one fault from two call paths is one place");
       auto noModule = crash(0, 0, 0);
       noModule.fault_module_filename.clear();
+      noModule.fault_instruction = {};
+      Require(internal::SaveLoadFailurePlace(noModule).empty(), "an exception code alone has no known place");
       noModule.fault_instruction.verdict = "bad_jump";
       noModule.fault_instruction.access = "execute";
       noModule.fault_instruction.target_state = "not_executable";
@@ -1396,6 +1398,8 @@ void TestDamagedSave()
       freeze.exc_code = 0;
       freeze.crash_bucket_key = L"HANG1-a29167f39cb6f9b0";
       Require(internal::SaveLoadFailurePlace(freeze) == "freeze|HANG1-a29167f39cb6f9b0", "a freeze's place");
+      freeze.crash_bucket_key.clear();
+      Require(internal::SaveLoadFailurePlace(freeze).empty(), "a freeze without a bucket has no known place");
     }
 
     // A known cause with its own fix leads everywhere: the quick answer, the

@@ -883,7 +883,7 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
     return result;
   };
 
-  const auto firstDump = write(L"SkyrimDiag_Crash_20261101_161808_940.dmp", faulting.Context().Rip, 0u);
+  const auto firstDump = write(L"SkyrimDiag_Crash_20261101_161808_940.dmp", faulting.Context().Rip, 1793517488u);
   const auto secondDump = write(
     L"SkyrimDiag_Crash_20261101_163419_163.dmp", reinterpret_cast<DWORD64>(&OtherCrashSite), headerTime(firstDump) + 971u);
 
@@ -931,6 +931,15 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   });
   Require(old != entries.end(), "The first incident is in the history");
   auto legacy = *old;
+  for (const char* placeholder : {"0xc0000005|||", "freeze|"}) {
+    legacy["loading_fault_place"] = placeholder;
+    entries = nlohmann::json::array({legacy});
+    std::ofstream(historyPath) << history;
+    const auto unknown = analyze(secondDump);
+    Require(unknown.save_load.earlier_crashes == 1u && unknown.save_load.crash_places == 1u &&
+              !unknown.save_load.all_places_known && unknown.quick_answer.case_id != "damaged_save",
+      "A stored placeholder is not evidence of another failure place");
+  }
   legacy.erase("loading_fault_place");
   legacy.erase("capture_unix");
   entries = nlohmann::json::array({legacy});
@@ -944,6 +953,27 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   Require(restored.save_load.earlier_crashes == 1u && restored.save_load.all_places_known &&
             restored.quick_answer.case_id == "damaged_save",
     "Reanalyzing the earlier bytes supplies their location without adding an incident");
+
+  // Delayed analysis of the legacy row must not hide an intervening failed
+  // load of a different save once a copy supplies the real capture time.
+  history = nlohmann::json::parse(std::ifstream(historyPath));
+  auto& restoredRows = history.at("entries");
+  for (auto& row : restoredRows) {
+    if (row.at("dump_file") == firstDump.filename().string()) {
+      row["timestamp_utc"] = "2026-11-05T17:00:00Z";
+    }
+  }
+  auto other = legacy;
+  other["dump_file"] = "another-save.dmp";
+  other["dump_identity_key"] = "other.meta";
+  other["loading_save_key"] = "another-save";
+  other["capture_unix"] = first.dump_capture_unix + 60u;
+  restoredRows.push_back(other);
+  std::ofstream(historyPath) << history;
+  const auto differentSave = analyze(secondDump);
+  Require(differentSave.save_load.earlier_crashes == 1u && differentSave.save_load.crash_places == 2u &&
+            differentSave.save_load.other_save_crashes == 1u && differentSave.quick_answer.case_id != "damaged_save",
+    "A different save failed between the two captures, even when the first was analyzed much later");
 
   std::filesystem::remove_all(outBase);
 }

@@ -192,7 +192,7 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
 std::string SaveLoadFailurePlace(const AnalysisResult& r)
 {
   if (r.exc_code == 0u) {
-    return "freeze|" + WideToUtf8(r.crash_bucket_key);
+    return r.crash_bucket_key.empty() ? std::string{} : "freeze|" + WideToUtf8(r.crash_bucket_key);
   }
   char code[16]{};
   std::snprintf(code, sizeof(code), "0x%08x", r.exc_code);
@@ -202,6 +202,9 @@ std::string SaveLoadFailurePlace(const AnalysisResult& r)
     return std::string(code) + "|" + WideToUtf8(minidump::WideLower(r.fault_module_filename)) + offset;
   }
   const auto& fault = r.fault_instruction;
+  if (fault.verdict.empty()) {
+    return {};
+  }
   return std::string(code) + "|" + fault.verdict + "|" + fault.access + "|" + fault.target_state;
 }
 
