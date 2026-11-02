@@ -42,6 +42,11 @@ std::string NormalizeStoredCandidateKey(std::string_view value)
 
 void UpsertHistoryEntry(std::vector<CrashHistoryEntry>* entries, CrashHistoryEntry entry)
 {
+  // Old writers emitted an exception code with three empty fields, or a
+  // freeze prefix without a bucket. Neither identifies a failure place.
+  if (entry.loading_fault_place.ends_with("|||") || entry.loading_fault_place == "freeze|") {
+    entry.loading_fault_place.clear();
+  }
   if (!entries || entry.dump_file.empty()) {
     if (entries) {
       entries->push_back(std::move(entry));
@@ -432,16 +437,32 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
       }
     }
   }
-  const auto isEarlier = [&](std::size_t i) {
-    const auto& e = m_entries[i];
-    if (query.capture_unix != 0u && e.capture_unix != 0u) {
-      return e.capture_unix < query.capture_unix;
-    }
-    return i < own;
-  };
   // The same bytes are one incident: a copy or a renamed dump, or this dump.
   const auto contentOf = [](const CrashHistoryEntry& e) {
     return std::string_view(e.dump_identity_key).substr(0, std::string_view(e.dump_identity_key).find('.'));
+  };
+  // Resolve header times before filtering any rows: a reanalyzed copy can
+  // date a legacy row even when the copy comes later in the history.
+  std::unordered_map<std::string_view, std::uint64_t> captureByContent;
+  for (const auto& entry : m_entries) {
+    const auto content = contentOf(entry);
+    if (!content.empty() && entry.capture_unix != 0u) {
+      captureByContent.emplace(content, entry.capture_unix);
+    }
+  }
+  const auto captureOf = [&](const CrashHistoryEntry& e) {
+    if (e.capture_unix != 0u) {
+      return e.capture_unix;
+    }
+    const auto it = captureByContent.find(contentOf(e));
+    return it != captureByContent.end() ? it->second : std::uint64_t{0};
+  };
+  const auto isEarlier = [&](std::size_t i) {
+    const auto captured = captureOf(m_entries[i]);
+    if (query.capture_unix != 0u && captured != 0u) {
+      return captured < query.capture_unix;
+    }
+    return i < own;
   };
   std::unordered_set<std::string> seen;
   if (!query.content_sha256.empty()) {
@@ -451,25 +472,36 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
     return content.empty() || contents.insert(std::string(content)).second;
   };
   // When an entry failed: its capture time, else its first analysis.
-  const auto whenOf = [](const CrashHistoryEntry& e) -> std::optional<std::int64_t> {
-    if (e.capture_unix != 0u) {
-      return static_cast<std::int64_t>(e.capture_unix);
+  const auto whenOf = [&](const CrashHistoryEntry& e) -> std::optional<std::int64_t> {
+    if (const auto captured = captureOf(e); captured != 0u) {
+      return static_cast<std::int64_t>(captured);
     }
     return ParseUtcSeconds(e.timestamp_utc);
   };
 
   std::size_t first = m_entries.size();
   std::optional<std::int64_t> firstWhen;
+  auto seenWithPlace = seen;
+  std::size_t located = 0;
   for (std::size_t i = 0; i < m_entries.size(); ++i) {
     const auto& e = m_entries[i];
-    if (e.loading_save_key != query.save_key || !isEarlier(i) || !firstTime(contentOf(e), seen)) {
+    if (e.loading_save_key != query.save_key || !isEarlier(i)) {
+      continue;
+    }
+    // A legacy bucket includes callers and cannot identify a failure place.
+    // A newer analysis of the same bytes can supply the missing location.
+    const auto content = contentOf(e);
+    const auto& place = e.loading_fault_place;
+    if (!place.empty() && firstTime(content, seenWithPlace)) {
+      ++located;
+      if (std::find(result.places.begin(), result.places.end(), place) == result.places.end()) {
+        result.places.push_back(place);
+      }
+    }
+    if (!firstTime(content, seen)) {
       continue;
     }
     result.count += 1;
-    const std::string& place = e.loading_fault_place.empty() ? e.bucket_key : e.loading_fault_place;
-    if (!place.empty() && std::find(result.places.begin(), result.places.end(), place) == result.places.end()) {
-      result.places.push_back(place);
-    }
     if (const auto when = whenOf(e); when.has_value() && (!firstWhen.has_value() || when.value() < firstWhen.value())) {
       firstWhen = when;
     }
@@ -480,6 +512,7 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
   if (result.count == 0) {
     return result;
   }
+  result.all_places_known = located == result.count && !query.place.empty();
 
   // Other saves failing before this capture: after the first of these, or in
   // the day before it (the player may have tried them first).

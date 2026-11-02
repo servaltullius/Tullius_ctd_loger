@@ -965,7 +965,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       // Failed before: in one place every time, or a freeze (which never
       // leads with the save).
       const std::wstring times = std::to_wstring(r.save_load.earlier_crashes + 1);
-      const bool samePlace = r.save_load.crash_places <= 1;
+      const bool samePlace = r.save_load.all_places_known && r.save_load.crash_places == 1;
       r.recommendations.push_back(en
         ? (L"[Save] Loading this save" + name + L" has crashed or frozen " + times + L" times so far" +
             (samePlace ? L", in the same place each time: a mod may fail on this save's data. "

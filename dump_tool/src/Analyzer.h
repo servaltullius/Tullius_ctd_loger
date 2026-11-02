@@ -156,7 +156,8 @@ struct SaveLoadInfo
   bool timed_to_crash = false;
   // From crash_history.json, counted up to this dump's own entry (later crashes left out).
   std::size_t earlier_crashes = 0;     // earlier failed loads of the same save
-  std::size_t crash_places = 0;        // distinct crash buckets among them and this capture
+  std::size_t crash_places = 0;        // distinct known failure places, including this capture
+  bool all_places_known = true;       // false when a counted failure has no comparable location
   // Failed loads of other saves after the first of them, or in the day before it.
   std::size_t other_save_crashes = 0;
 };

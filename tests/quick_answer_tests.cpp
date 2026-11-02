@@ -1311,6 +1311,15 @@ void TestDamagedSave()
               skydiag::dump_tool::SelectNextActionIndex(samePlace.recommendations) != once,
       "same place: a save line, not the next action");
 
+    auto unknownPlace = crash(1, 1, 0);
+    unknownPlace.save_load.all_places_known = false;
+    BuildEvidenceAndSummary(unknownPlace, lang);
+    const auto advice = saveLine(unknownPlace, saveTag);
+    Require(unknownPlace.quick_answer.case_id == plain.quick_answer.case_id &&
+              advice < unknownPlace.recommendations.size() &&
+              !Contains(unknownPlace.recommendations[advice], en ? L"same place" : L"매번 같은 곳"),
+      "An earlier load with no recorded location proves neither the same place nor a different one");
+
     // The first failed load of a save: what would tell.
     auto first = crash(0, 0, 0);
     BuildEvidenceAndSummary(first, lang);
@@ -1378,6 +1387,8 @@ void TestDamagedSave()
         "one fault from two call paths is one place");
       auto noModule = crash(0, 0, 0);
       noModule.fault_module_filename.clear();
+      noModule.fault_instruction = {};
+      Require(internal::SaveLoadFailurePlace(noModule).empty(), "an exception code alone has no known place");
       noModule.fault_instruction.verdict = "bad_jump";
       noModule.fault_instruction.access = "execute";
       noModule.fault_instruction.target_state = "not_executable";
@@ -1387,6 +1398,8 @@ void TestDamagedSave()
       freeze.exc_code = 0;
       freeze.crash_bucket_key = L"HANG1-a29167f39cb6f9b0";
       Require(internal::SaveLoadFailurePlace(freeze) == "freeze|HANG1-a29167f39cb6f9b0", "a freeze's place");
+      freeze.crash_bucket_key.clear();
+      Require(internal::SaveLoadFailurePlace(freeze).empty(), "a freeze without a bucket has no known place");
     }
 
     // A known cause with its own fix leads everywhere: the quick answer, the

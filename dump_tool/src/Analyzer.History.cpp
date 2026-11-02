@@ -195,6 +195,7 @@ void LoadCrashHistoryContext(
   out.history_correlation = {};
   out.save_load.earlier_crashes = 0;
   out.save_load.crash_places = 0;
+  out.save_load.all_places_known = true;
   out.save_load.other_save_crashes = 0;
   if (historyPath.empty()) {
     return;
@@ -228,6 +229,7 @@ void LoadCrashHistoryContext(
     out.save_load.earlier_crashes = saveStats.count;
     out.save_load.other_save_crashes = saveStats.other_save_count;
     out.save_load.crash_places = saveStats.places.size();
+    out.save_load.all_places_known = saveStats.all_places_known;
   }
 
   history.RemoveEntriesForDumpFile(dumpFile, dumpIdentityKey);

@@ -4,7 +4,7 @@
 Runs a baseline and a new SkyrimDiagDumpToolCli.exe on every dump (Korean and
 English by default) and lists, per dump and language, the fields that changed:
 the conclusion, freeze state and confidence, bucket, known signature, quick
-answer, suspects, actionable candidates, recommendations and their groups,
+answer, suspects, actionable candidates, recommendations and their groups, the selected next action,
 the faulting instruction, and summary keys that appeared or disappeared.
 Everything else in a summary (evidence details, events, paths, the analysis
 time) is left out on purpose: those move with every run.
@@ -70,6 +70,14 @@ def key_fields(summary: dict[str, Any]) -> dict[str, Any]:
     fields["recommendation_groups"] = [
         c.get("group", "") for c in summary.get("recommendation_classes") or [] if isinstance(c, dict)
     ]
+    # Compare the entry the analyzer picked. Its index can change on a reorder.
+    index = summary.get("next_action_index")
+    fields["next_action.text"] = fields["next_action.kind"] = None
+    if type(index) is int and 0 <= index < len(fields["recommendations"]):
+        fields["next_action.text"] = fields["recommendations"][index]
+        classes = summary.get("recommendation_classes")
+        if isinstance(classes, list) and index < len(classes):
+            fields["next_action.kind"] = _get(classes[index], "kind")
     return fields
 
 

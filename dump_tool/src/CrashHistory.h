@@ -69,6 +69,7 @@ struct SaveLoadCrashStats
 {
   std::size_t count = 0;                // earlier incidents (copies of one dump count once)
   std::vector<std::string> places;      // distinct failure places, this capture's included
+  bool all_places_known = true;
   // Failed loads of other saves before this capture, after the first of these
   // or in the day before it (a broken mod setup fails every save).
   std::size_t other_save_count = 0;

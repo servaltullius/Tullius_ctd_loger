@@ -6,6 +6,7 @@ from the real summaries and Crash Logger logs of 2026-10-12/13.
 """
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,24 @@ def _write(path: Path, payload) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def test_reviewed_quick_answer_guidance():
+    truth = {"none": True, "quick_answer": {"case": "forced_close", "action": "Nothing to do."}}
+    for qa, case_score, action_score in (
+        ({"case": "forced_close", "action": "Nothing to do."}, "correct", "correct"),
+        ({"case": "forced_close", "action": "Nothing  to do. "}, "correct", "correct"),
+        ({"case": "forced_close", "action": "Load another save."}, "correct", "wrong"),
+        ({"case": "damaged_save", "action": "Load another save."}, "wrong", "wrong"),
+        ({"case": "forced_close"}, "correct", "missing"),
+        ({}, "missing", "missing"),
+    ):
+        result = bench.score_view(bench.quick_answer_view({"quick_answer": qa}), truth)
+        assert result["guidance"] == {"case": case_score, "action": action_score}, result
+        assert result["outcome"] == "correct"  # the separate attribution score
+    partial = {"none": True, "quick_answer": {"case": "forced_close"}}
+    assert bench.score_view(bench.quick_answer_view({}), partial)["guidance"] == {"case": "missing"}
+    assert "guidance" not in bench.score_view(bench.tullius_view({}), truth)
+
+
 FAKE_CLI = """import json, sys
 from pathlib import Path
 dump = Path(sys.argv[1]); out = Path(sys.argv[sys.argv.index("--out-dir") + 1])
@@ -145,10 +164,12 @@ def test_add_case_and_score_end_to_end():
         corpus = root / "corpus"
         rc = bench.main(["add-case", "--corpus", str(corpus), "--id", "case-1", "--kind", "ctd",
                          "--dump", str(dump), "--crash-logger-log", str(log), "--expect-module", "Real.dll",
+                         "--expect-quick-case", "candidate", "--expect-quick-action", "Check Real.dll.",
                          "--cli", sys.executable, str(fake_cli)])
         assert rc == 0
         manifest = json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))
-        assert manifest["cases"][0]["ground_truth"] == {"modules": ["Real.dll"]}
+        assert manifest["cases"][0]["ground_truth"] == {
+            "modules": ["Real.dll"], "quick_answer": {"case": "candidate", "action": "Check Real.dll."}}
         report = bench.score_corpus(corpus)
         views = report["cases"][0]["views"]
         assert views["tullius_only"]["outcome"] == "wrong"  # without the log only the victim shows
@@ -164,10 +185,21 @@ def test_add_case_and_score_end_to_end():
         assert views["tullius_only_quick_answer"]["outcome"] == "abstain"  # names nothing without the log
         assert views["tullius_with_crash_logger_quick_answer"]["outcome"] == "correct"
         assert report["overall"]["tullius_with_crash_logger_quick_answer"]["top3_recall"] is None
+        # An older/unlabelled case changes the attribution denominator only.
+        unlabelled = dict(manifest["cases"][0], id="older", ground_truth={"modules": ["Real.dll"]})
+        manifest["cases"].append(unlabelled)
+        shutil.copytree(corpus / "cases" / "case-1", corpus / "cases" / "older")
+        _write(corpus / "manifest.json", manifest)
+        overall = bench.score_corpus(corpus)["overall"]["tullius_only_quick_answer"]
+        assert overall["cases"] == 2
+        assert overall["guidance"]["case"] == {"correct": 1, "wrong": 0, "missing": 0, "accuracy": 1.0}
+        assert overall["guidance"]["action"] == {"correct": 0, "wrong": 0, "missing": 1, "accuracy": 0.0}
         printed = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "accuracy_benchmark.py"), "score",
                                   "--corpus", str(corpus)], capture_output=True, text=True)
         assert printed.returncode == 0
         assert "Candidate ranking" in printed.stdout and "Quick answer" in printed.stdout, printed.stdout
+        assert "missing=1" in printed.stdout, printed.stdout
+        assert "guidance: case=correct, action=missing" in printed.stdout, printed.stdout
         # A case id is not silently overwritten.
         result = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "accuracy_benchmark.py"), "add-case",
                                  "--corpus", str(corpus), "--id", "case-1", "--kind", "ctd", "--dump", str(dump),

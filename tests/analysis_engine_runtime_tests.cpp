@@ -1361,7 +1361,7 @@ void TestCrashHistorySaveLoadStats()
     AssertContains(analyzerHistory, "query.content_sha256 = out.dump_identity.sha256;",
       "A copy of the dump being analyzed is that dump.");
     AssertContains(analyzerHistory, "entry.loading_fault_place = internal::SaveLoadFailurePlace(out);",
-      "A failed load keeps where it failed; without it the count falls back to crash buckets.");
+      "A failed load with a known location must preserve it in history.");
     AssertContains(analyzerHistory, "entry.capture_unix = out.dump_capture_unix;",
       "Every entry keeps when its dump was written.");
   }
@@ -1393,6 +1393,47 @@ void TestCrashHistorySaveLoadStats()
   };
   constexpr const char* kNull = "0xc0000005|skyrimse.exe+0x172a1e";
   constexpr const char* kJump = "0xc0000005|bad_jump|execute|not_executable";
+
+  // Older writers kept only the call-stack bucket. It cannot be compared
+  // with a fault location, but the failed load is still one earlier incident.
+  {
+    CrashHistory mixed;
+    add(mixed, "old.dmp", 0u, "aaaa", "save76key", "", "CTD3-old");
+    auto stats = mixed.GetSaveLoadCrashStats(query(k1634, "bbbb", kNull));
+    assert(stats.count == 1u && stats.places == std::vector<std::string>{kNull} && !stats.all_places_known);
+    // A newer analysis of a byte-identical copy supplies the missing place.
+    add(mixed, "copy.dmp", k1618, "aaaa", "save76key", kNull, "CTD3-old");
+    stats = mixed.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+    assert(stats.count == 1u && stats.places.size() == 2u && stats.all_places_known);
+  }
+
+  // The first analysis was days after capture. In either storage order the
+  // copy's header sets the 24-hour window and the boundary for earlier loads.
+  for (const bool legacyFirst : {true, false}) {
+    CrashHistory mixed;
+    const auto legacy = [&] { add(mixed, "old.dmp", 0u, "aaaa", "save76key", ""); };
+    if (legacyFirst) {
+      legacy();
+    }
+    add(mixed, "copy.dmp", k1618 - 3u * 86400u, "aaaa", "save76key", kNull);
+    if (!legacyFirst) {
+      legacy();
+    }
+    add(mixed, "between.dmp", k1618 - 2u * 86400u, "other", "save75key", kJump);
+    const auto stats = mixed.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+    assert(stats.count == 1u && stats.places.size() == 2u && stats.other_save_count == 1u);
+    assert(mixed.GetSaveLoadCrashStats(query(k1618 - 4u * 86400u, "before", kJump)).count == 0u);
+  }
+
+  // A legacy copy of an out-of-window failure of another save cannot veto
+  // damaged-save guidance once its actual capture time is known.
+  {
+    CrashHistory mixed;
+    add(mixed, "a.dmp", k1618, "aaaa", "save76key", kNull);
+    add(mixed, "old.dmp", 0u, "other", "save75key", "");
+    add(mixed, "copy.dmp", k1618 - 3u * 86400u, "other", "save75key", kJump);
+    assert(mixed.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump)).other_save_count == 0u);
+  }
 
   // The 2026-11-01 case: the second crash sees the first, in another place.
   add(history, "SkyrimDiag_Crash_20261101_161808_940.dmp", k1618, "aaaa", "save76key", kNull, "CTD3-7dbaf39d10226dde");
