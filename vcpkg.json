@@ -1,6 +1,6 @@
 {
   "name": "skyrimdiag",
-  "version-string": "0.2.73",
+  "version-string": "0.2.74",
   "dependencies": [
     "directxtk",
     "nlohmann-json",
