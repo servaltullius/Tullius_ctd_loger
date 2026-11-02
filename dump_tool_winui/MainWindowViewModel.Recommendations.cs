@@ -197,7 +197,7 @@ internal sealed partial class MainWindowViewModel
                     $"DLL 점검 안내: {candidateName}와 반복 버킷 이력을 먼저 확인"),
                 "related" when hasFrameFamily && hasResourceFamily => T(
                     $"DLL guidance: check {candidateName} and nearby resource providers first",
-                    $"DLL 점검 안내: {candidateName}와 인접 리소스 제공자를 먼저 확인"),
+                    $"DLL 점검 안내: {candidateName}와 근처 리소스 제공 모드를 먼저 확인"),
                 "related" when hasHangThreadGroupFamily => T(
                     $"Synchronization stall: update or isolate {candidateName} first",
                     $"동기화 정지: {candidateName} 업데이트/격리를 먼저 확인"),

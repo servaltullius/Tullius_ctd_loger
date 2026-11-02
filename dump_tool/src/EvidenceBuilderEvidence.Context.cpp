@@ -158,12 +158,6 @@ std::wstring DescribeFreezeSupportQuality(std::string_view supportQuality, bool 
   return en ? L"unknown capture quality" : L"캡처 품질 정보 없음";
 }
 
-bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
-{
-  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
-         candidate.supporting_families.end();
-}
-
 static bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
 {
   return summary.recent_count >= 3u &&

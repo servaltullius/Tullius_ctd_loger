@@ -28,57 +28,6 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
   return candidate.module_filename;
 }
 
-std::wstring DescribeFamily(std::string_view familyId, bool en)
-{
-  if (familyId == "crash_logger_frame") {
-    return en ? L"Crash Logger frame" : L"Crash Logger 프레임";
-  }
-  if (familyId == "crash_logger_object_ref") {
-    return en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조";
-  }
-  if (familyId == "actionable_stack") {
-    return en ? L"actionable stack" : L"실행 가능한 스택";
-  }
-  if (familyId == "resource_provider") {
-    return en ? L"near resource provider" : L"근처 리소스 제공 모드";
-  }
-  if (familyId == "history_repeat") {
-    return en ? L"history repeat" : L"버킷 반복";
-  }
-  if (familyId == "first_chance_context") {
-    return en ? L"repeated first-chance context" : L"반복 선행 예외(first-chance)";
-  }
-  if (familyId == "hang_thread_group") {
-    return en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹";
-  }
-  if (familyId == "modal_dialog_owner") {
-    return en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈";
-  }
-  if (familyId == "hook_stub_owner") {
-    return en ? L"hook stub owner" : L"후킹 점프 코드 주인";
-  }
-  if (familyId == "freed_hook_owner") {
-    return en ? L"freed hook owner" : L"해제된 후킹 코드 주인";
-  }
-  return en ? L"other signal" : L"기타 신호";
-}
-
-std::wstring JoinFamilies(const ActionableCandidate& candidate, bool en)
-{
-  std::vector<std::wstring> labels;
-  labels.reserve(candidate.supporting_families.size());
-  for (const auto& family : candidate.supporting_families) {
-    labels.push_back(DescribeFamily(family, en));
-  }
-  return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
-}
-
-bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
-{
-  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
-         candidate.supporting_families.end();
-}
-
 bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
 {
   if (candidate.module_filename.empty() || module.empty()) {
@@ -285,45 +234,45 @@ void AddActionableCandidateRecommendations(
       ? (hasScorableFirstChance
           ? (en
               ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
-                  L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and check the repeated first-chance path before broad EXE/system triage.")
+                  L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Use DLL guidance first and check the repeated first-chance path before broad EXE/system triage.")
               : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
-                  L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 반복 선행 예외 경로를 먼저 확인하세요."))
+                  L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 반복 선행 예외 경로를 먼저 확인하세요."))
           : hasScorableHistory
             ? (en
                 ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
-                    L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare repeated same-bucket crashes before broad EXE/system triage.")
+                    L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare repeated same-bucket crashes before broad EXE/system triage.")
                 : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
-                    L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 같은 유형으로 반복된 크래시 이력을 먼저 확인하세요."))
+                    L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 같은 유형으로 반복된 크래시 이력을 먼저 확인하세요."))
           : hasResourceFamily
             ? (en
                 ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
-                    L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare nearby resource providers before broad EXE/system triage.")
+                    L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Use DLL guidance first and compare nearby resource providers before broad EXE/system triage.")
                 : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
-                    L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 근처 리소스를 제공한 모드를 먼저 확인하세요."))
+                    L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL과 근처 리소스를 제공한 모드를 먼저 확인하세요."))
           : (en
               ? (L"[Actionable candidate] " + frameSupport + L" points to DLL candidate " + candidateName +
-                  L" (" + JoinFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")
+                  L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Use DLL guidance first before broad EXE/system triage.")
               : (L"[행동 우선 후보] " + frameSupport + L"이 DLL 후보 " + candidateName +
-                  L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL부터 확인하세요.")))
+                  L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 게임 본체·시스템 DLL을 넓게 점검하기 전에 이 DLL부터 확인하세요.")))
       // One family is no multi-signal support; a Low one (the pointer scan)
       // is a weak clue, a stronger one (a hook stub owner) just one signal.
       : (topCandidate->family_count <= 1u && topCandidate->confidence_level == i18n::ConfidenceLevel::kLow)
       ? (en
           ? (L"[Actionable candidate] A single weak clue points to " + candidateName +
-              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it, but do not treat it as the cause on this alone.")
+              L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Check it, but do not treat it as the cause on this alone.")
           : (L"[행동 우선 후보] 약한 단서 하나가 " + candidateName +
-              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 확인은 하되 이것만으로 원인이라고 단정하지 마세요."))
+              L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 확인은 하되 이것만으로 원인이라고 단정하지 마세요."))
       : topCandidate->family_count <= 1u
       ? (en
           ? (L"[Actionable candidate] One signal points to " + candidateName +
-              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+              L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
           : (L"[행동 우선 후보] 신호 하나가 " + candidateName +
-              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."))
+              L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요."))
       : (en
           ? (L"[Actionable candidate] Partial multi-signal support points to " + candidateName +
-              L" (" + JoinFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
+              L" (" + JoinCandidateFamilies(*topCandidate, en) + L"). Check it before falling back to generic SKSE/plugin triage.")
           : (L"[행동 우선 후보] 부분적인 다중 신호가 " + candidateName +
-              L"을(를) 가리킵니다(근거: " + JoinFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요.")));
+              L"을(를) 가리킵니다(근거: " + JoinCandidateFamilies(*topCandidate, en) + L"). 일반적인 SKSE/DLL 점검보다 먼저 확인하세요.")));
     if (hasFirstChanceFamily) {
       const auto firstChanceDetail = DescribeFirstChanceContext(r.first_chance_summary, en);
       if (!firstChanceDetail.empty()) {
@@ -355,10 +304,10 @@ void AddActionableCandidateRecommendations(
   } else if (topCandidate->status_id == "conflicting" && secondCandidate) {
     const auto secondName = DescribeCandidate(*secondCandidate);
     r.recommendations.push_back(en
-      ? (L"[Conflict] Signals split between " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L") and " +
-          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L"). Check whether Crash Logger frame first DLL guidance and object ref/stack evidence disagree before retesting.")
-      : (L"[충돌] 신호가 " + candidateName + L" (" + JoinFamilies(*topCandidate, en) + L")와 " +
-          secondName + L" (" + JoinFamilies(*secondCandidate, en) + L")로 갈립니다. Crash Logger 프레임 쪽 근거와 오브젝트 참조·스택 근거가 어디서 갈리는지 먼저 확인한 뒤 다시 재현해 보세요."));
+      ? (L"[Conflict] Signals split between " + candidateName + L" (" + JoinCandidateFamilies(*topCandidate, en) + L") and " +
+          secondName + L" (" + JoinCandidateFamilies(*secondCandidate, en) + L"). Check whether Crash Logger frame first DLL guidance and object ref/stack evidence disagree before retesting.")
+      : (L"[충돌] 신호가 " + candidateName + L" (" + JoinCandidateFamilies(*topCandidate, en) + L")와 " +
+          secondName + L" (" + JoinCandidateFamilies(*secondCandidate, en) + L")로 갈립니다. Crash Logger 프레임 쪽 근거와 오브젝트 참조·스택 근거가 어디서 갈리는지 먼저 확인한 뒤 다시 재현해 보세요."));
     r.recommendations.push_back(en
       ? L"[Conflict] If the split persists, rerun with a richer crash recapture profile first; use FullMemory (DumpMode=2) only if the tie remains."
       : L"[충돌] 이렇게 계속 갈리면 더 많은 정보를 담는 재수집 설정으로 먼저 다시 캡처하고, 그래도 갈리면 그때만 FullMemory(DumpMode=2)를 사용하세요.");

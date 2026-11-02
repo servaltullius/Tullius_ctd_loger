@@ -686,12 +686,60 @@ bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename)
   return minidump::IsSystemishModuleAt(filename, path);
 }
 
+bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId)
+{
+  return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), familyId) !=
+         candidate.supporting_families.end();
+}
+
+std::wstring DescribeCandidateFamily(std::string_view familyId, bool en)
+{
+  if (familyId == "crash_logger_frame") {
+    return en ? L"Crash Logger frame" : L"Crash Logger 프레임";
+  }
+  if (familyId == "crash_logger_object_ref") {
+    return en ? L"CrashLogger object ref" : L"CrashLogger 오브젝트 참조";
+  }
+  if (familyId == "actionable_stack") {
+    return en ? L"actionable stack" : L"스택 분석";
+  }
+  if (familyId == "resource_provider") {
+    return en ? L"near resource provider" : L"근처 리소스 제공 모드";
+  }
+  if (familyId == "history_repeat") {
+    return en ? L"history repeat" : L"반복 이력";
+  }
+  if (familyId == "first_chance_context") {
+    return en ? L"repeated first-chance context" : L"반복 선행 예외(first-chance)";
+  }
+  if (familyId == "hang_thread_group") {
+    return en ? L"stable same-module thread group" : L"동일 모듈 정지 스레드 그룹";
+  }
+  if (familyId == "modal_dialog_owner") {
+    return en ? L"modal dialog owner" : L"modal 대화상자 호출 모듈";
+  }
+  if (familyId == "hook_stub_owner") {
+    return en ? L"hook stub owner" : L"후킹 점프 코드 주인";
+  }
+  if (familyId == "freed_hook_owner") {
+    return en ? L"freed hook owner" : L"해제된 후킹 코드 주인";
+  }
+  return en ? L"other signal" : L"기타 신호";
+}
+
+std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en)
+{
+  std::vector<std::wstring> labels;
+  labels.reserve(candidate.supporting_families.size());
+  for (const auto& family : candidate.supporting_families) {
+    labels.push_back(DescribeCandidateFamily(family, en));
+  }
+  return labels.empty() ? (en ? L"limited evidence" : L"제한된 근거") : JoinList(labels, labels.size(), L" + ");
+}
+
 bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const ActionableCandidate& candidate)
 {
-  const auto has = [&](std::string_view family) {
-    return std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), family) !=
-           candidate.supporting_families.end();
-  };
+  const auto has = [&](std::string_view family) { return CandidateHasFamily(candidate, family); };
   return r.suspects_from_stackwalk && has("actionable_stack") && !has("hang_thread_group") &&
          !has("crash_logger_frame") && !has("crash_logger_object_ref") && !has("resource_provider") &&
          candidate.stack_weight >= 5u;
@@ -726,23 +774,12 @@ bool IsWeakFaultLocationActionableCandidate(
     return false;
   }
 
-  bool hasCrashLoggerFrame = false;
-  bool hasCrashLoggerObjectRef = false;
-  bool hasActionableStack = false;
-  for (const auto& family : candidate.supporting_families) {
-    if (family == "crash_logger_frame") {
-      hasCrashLoggerFrame = true;
-    } else if (family == "crash_logger_object_ref") {
-      hasCrashLoggerObjectRef = true;
-    } else if (family == "actionable_stack") {
-      hasActionableStack = true;
-    }
-  }
-
-  if (!hasCrashLoggerFrame) {
+  if (!CandidateHasFamily(candidate, "crash_logger_frame")) {
     return false;
   }
 
+  const bool hasCrashLoggerObjectRef = CandidateHasFamily(candidate, "crash_logger_object_ref");
+  const bool hasActionableStack = CandidateHasFamily(candidate, "actionable_stack");
   const bool hasQualifiedIndependentSupport =
     candidate.cross_validated && hasCrashLoggerObjectRef && hasActionableStack;
   return !hasQualifiedIndependentSupport;

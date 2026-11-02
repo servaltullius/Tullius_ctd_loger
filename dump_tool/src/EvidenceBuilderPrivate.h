@@ -150,6 +150,11 @@ std::wstring DescribeDialogNamedFiles(const ModalDialogWaitInfo& modal, bool en)
 // stack suspect of that name, so an ENB/ReShade d3d11.dll in the game folder
 // stays a mod.
 bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename);
+bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId);
+// One signal family's name in the summary, the checklist and the share text
+// ("Crash Logger 프레임"), and a candidate's families joined with " + ".
+std::wstring DescribeCandidateFamily(std::string_view familyId, bool en);
+std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en);
 // The candidate rests on the Tullius callstack alone: a real stack walk (not
 // the pointer scan) put it first with Medium weight (>= 5), and no Crash Logger
 // frame or object ref, nearby resource or thread group backs it. History and
