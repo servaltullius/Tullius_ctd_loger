@@ -37,15 +37,15 @@ HeartbeatAtExit ReadHeartbeatAtExit(const HelperConfig& cfg, const AttachedProce
   LARGE_INTEGER now{};
   QueryPerformanceCounter(&now);
   const std::uint32_t stateFlags = proc.shm->header.state_flags;
+  const auto thresholds = skydiag::helper::ComputeHangThresholds(
+    cfg, stateFlags, /*haveLoadingSamples=*/false, /*adaptiveLoadingThresholdSec=*/0u);
   const auto decision = skydiag::helper::EvaluateHang(
     static_cast<std::uint64_t>(now.QuadPart),
     proc.shm->header.last_heartbeat_qpc,
     proc.shm->header.qpc_freq,
     stateFlags,
-    (stateFlags & skydiag::kState_InMenu) != 0u
-      ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
-      : cfg.hangThresholdInGameSec,
-    cfg.hangThresholdLoadingSec);
+    thresholds.inGameSec,
+    thresholds.loadingSec);
   result.known = true;
   result.stalled = decision.isHang;
   result.secondsSince = decision.secondsSinceHeartbeat;

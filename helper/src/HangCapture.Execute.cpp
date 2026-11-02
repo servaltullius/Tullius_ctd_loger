@@ -22,22 +22,6 @@
 #include "SkyrimDiagHelper/WctCapture.h"
 
 namespace skydiag::helper::internal {
-namespace {
-
-bool WctJsonHasCycle(const nlohmann::json& wctJson)
-{
-  if (!wctJson.is_object() || !wctJson.contains("threads") || !wctJson["threads"].is_array()) {
-    return false;
-  }
-  for (const auto& thread : wctJson["threads"]) {
-    if (thread.is_object() && thread.value("isCycle", false)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-}  // namespace
 
 HangTickResult ExecuteConfirmedHangCapture(
   const skydiag::helper::HelperConfig& cfg,
@@ -125,7 +109,7 @@ HangTickResult ExecuteConfirmedHangCapture(
   wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
   wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
-  const bool strongDeadlock = WctJsonHasCycle(wctJson);
+  const bool strongDeadlock = skydiag::helper::WctHasCycle(wctJson);
   const bool snapshotBackedLoaderStall = decision.isLoading && pssSnapshot.used;
   const bool freezeAmbiguous = !strongDeadlock && !snapshotBackedLoaderStall;
   const bool freezeSnapshotFallback = pssSnapshot.requested && !pssSnapshot.used;

@@ -2,7 +2,6 @@
 
 #include <Windows.h>
 
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -29,23 +28,6 @@
 
 namespace skydiag::helper::internal {
 
-namespace {
-
-bool WctJsonHasCycle(const nlohmann::json& wctJson)
-{
-  if (!wctJson.is_object() || !wctJson.contains("threads") || !wctJson["threads"].is_array()) {
-    return false;
-  }
-  for (const auto& thread : wctJson["threads"]) {
-    if (thread.is_object() && thread.value("isCycle", false)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-}  // namespace
-
 void DoManualCapture(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,
@@ -62,19 +44,15 @@ void DoManualCapture(
   QueryPerformanceCounter(&now);
   const auto stateFlags = proc.shm->header.state_flags;
   const bool inMenu = (stateFlags & skydiag::kState_InMenu) != 0u;
-  const std::uint32_t inGameThresholdSec = inMenu
-    ? std::max(cfg.hangThresholdInGameSec, cfg.hangThresholdInMenuSec)
-    : cfg.hangThresholdInGameSec;
-  const std::uint32_t loadingThresholdSec = (cfg.enableAdaptiveLoadingThreshold && loadStats.HasSamples())
-    ? adaptiveLoadingThresholdSec
-    : cfg.hangThresholdLoadingSec;
+  const auto thresholds = skydiag::helper::ComputeHangThresholds(
+    cfg, stateFlags, loadStats.HasSamples(), adaptiveLoadingThresholdSec);
   const auto decision = skydiag::helper::EvaluateHang(
     static_cast<std::uint64_t>(now.QuadPart),
     proc.shm->header.last_heartbeat_qpc,
     proc.shm->header.qpc_freq,
     stateFlags,
-    inGameThresholdSec,
-    loadingThresholdSec);
+    thresholds.inGameSec,
+    thresholds.loadingSec);
 
   AppendLogLine(outBase, L"Manual capture triggered via " + std::wstring(trigger) +
     L" (secondsSinceHeartbeat=" + std::to_wstring(decision.secondsSinceHeartbeat) +
@@ -156,7 +134,7 @@ void DoManualCapture(
   wctJson["capture"]["pss_snapshot_status"] = WideToUtf8(pssSnapshot.status);
   wctJson["capture"]["dump_transport"] = pssSnapshot.used ? "pss_snapshot" : "live_process";
 
-  const bool strongDeadlock = WctJsonHasCycle(wctJson);
+  const bool strongDeadlock = skydiag::helper::WctHasCycle(wctJson);
   const bool snapshotBackedLoaderStall = decision.isLoading && pssSnapshot.used;
   const bool freezeAmbiguous = !strongDeadlock && !snapshotBackedLoaderStall;
   const bool freezeSnapshotFallback = pssSnapshot.requested && !pssSnapshot.used;
