@@ -86,6 +86,33 @@ def test_new_and_removed_keys() -> None:
         assert expected in lines, (expected, lines)
 
 
+def test_selected_next_action() -> None:
+    base = copy.deepcopy(BASE)
+    base["next_action_index"] = 0
+    base["recommendation_classes"][0]["kind"] = "basics"
+    new = dict(base, next_action_index=1)
+    lines = cmp.compare(base, new)
+    assert any(line.startswith("next_action.text:") and "Share the report." in line for line in lines), lines
+    assert any(line.startswith("next_action.kind:") for line in lines), lines
+
+    reordered = copy.deepcopy(base)
+    reordered["recommendations"].reverse()
+    reordered["recommendation_classes"].reverse()
+    reordered["next_action_index"] = 1
+    assert cmp.compare(base, reordered) == ["recommendations: same entries, new order"]
+
+    reclassified = copy.deepcopy(base)
+    reclassified["recommendation_classes"][0]["kind"] = "check"
+    assert cmp.compare(base, reclassified) == ["next_action.kind: 'basics' -> 'check'"]
+
+    for index in (-1, 2, True, "0", None):
+        fields = cmp.key_fields(dict(base, next_action_index=index))
+        assert fields["next_action.text"] is None and fields["next_action.kind"] is None
+    legacy = dict(new, recommendation_classes=[])
+    assert cmp.key_fields(legacy)["next_action.text"] == base["recommendations"][1]
+    assert cmp.key_fields(legacy)["next_action.kind"] is None
+
+
 def test_find_dumps(tmp: Path) -> None:
     (tmp / "a.dmp").write_bytes(b"")
     (tmp / "b.dmp").write_bytes(b"")
@@ -105,6 +132,7 @@ if __name__ == "__main__":
     test_same_summary_reads_same()
     test_volatile_fields_are_left_out()
     test_scalar_and_quick_answer_changes()
+    test_selected_next_action()
     test_list_changes_name_the_entries()
     test_new_and_removed_keys()
     with tempfile.TemporaryDirectory() as tmp:
