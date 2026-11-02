@@ -9,6 +9,10 @@
 #include "AnalyzerScoringPolicy.h"
 #include "CandidateConsensus.h"
 
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
+
 using skydiag::dump_tool::ActionableCandidate;
 using skydiag::dump_tool::BuildCandidateConsensus;
 using skydiag::dump_tool::CandidateSignal;
@@ -34,15 +38,6 @@ std::filesystem::path ProjectRoot()
   }
   assert(false && "Cannot find project root. Set SKYDIAG_PROJECT_ROOT.");
   return {};
-}
-
-std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
 }
 
 void AssertContains(const std::string& haystack, const char* needle, const char* message)

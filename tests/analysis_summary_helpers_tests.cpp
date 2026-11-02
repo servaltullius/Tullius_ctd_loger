@@ -4,14 +4,9 @@
 #include <sstream>
 #include <string>
 
-static std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
-}
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
 
 int main()
 {

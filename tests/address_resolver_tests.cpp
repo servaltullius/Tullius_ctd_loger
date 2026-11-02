@@ -5,14 +5,14 @@
 #include <iterator>
 #include <string>
 
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
+using skydiag::tests::source_guard::ProjectRoot;
+
 static std::string ReadFile(const char* relPath)
 {
-  const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
-  assert(root && "SKYDIAG_PROJECT_ROOT must be set");
-  const std::filesystem::path p = std::filesystem::path(root) / relPath;
-  std::ifstream in(p, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return ReadAllText(ProjectRoot() / relPath);
 }
 
 static void TestAddressDbExists()

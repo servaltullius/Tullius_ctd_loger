@@ -22,6 +22,10 @@
 #include "SkyrimDiagSaveLoad.h"
 #include "SignatureDatabase.h"
 
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
+
 using skydiag::dump_tool::AddressResolver;
 using skydiag::dump_tool::CrashHistory;
 using skydiag::dump_tool::CrashHistoryEntry;
@@ -37,15 +41,6 @@ std::filesystem::path ProjectRoot()
   const char* root = std::getenv("SKYDIAG_PROJECT_ROOT");
   assert(root && "SKYDIAG_PROJECT_ROOT must be set");
   return std::filesystem::path(root);
-}
-
-std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
 }
 
 std::string ReadJoinedText(std::initializer_list<std::filesystem::path> paths)
