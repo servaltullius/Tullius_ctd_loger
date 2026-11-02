@@ -1311,6 +1311,15 @@ void TestDamagedSave()
               skydiag::dump_tool::SelectNextActionIndex(samePlace.recommendations) != once,
       "same place: a save line, not the next action");
 
+    auto unknownPlace = crash(1, 1, 0);
+    unknownPlace.save_load.all_places_known = false;
+    BuildEvidenceAndSummary(unknownPlace, lang);
+    const auto advice = saveLine(unknownPlace, saveTag);
+    Require(unknownPlace.quick_answer.case_id == plain.quick_answer.case_id &&
+              advice < unknownPlace.recommendations.size() &&
+              !Contains(unknownPlace.recommendations[advice], en ? L"same place" : L"매번 같은 곳"),
+      "An earlier load with no recorded location proves neither the same place nor a different one");
+
     // The first failed load of a save: what would tell.
     auto first = crash(0, 0, 0);
     BuildEvidenceAndSummary(first, lang);

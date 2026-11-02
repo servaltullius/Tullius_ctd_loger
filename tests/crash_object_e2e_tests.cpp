@@ -921,6 +921,30 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   Require(again.save_load.earlier_crashes == 1u && again.save_load.crash_places == 2u,
     "A copy of a dump does not count twice");
 
+  // Start with the on-disk row an older analyzer would have left for the
+  // first dump. Its bucket cannot prove a second failure place.
+  const auto historyPath = outBase / L"crash_history.json";
+  auto history = nlohmann::json::parse(std::ifstream(historyPath));
+  auto& entries = history.at("entries");
+  auto old = std::find_if(entries.begin(), entries.end(), [&](const auto& row) {
+    return row.at("dump_file") == firstDump.filename().string();
+  });
+  Require(old != entries.end(), "The first incident is in the history");
+  auto legacy = *old;
+  legacy.erase("loading_fault_place");
+  legacy.erase("capture_unix");
+  entries = nlohmann::json::array({legacy});
+  std::ofstream(historyPath) << history;
+  const auto mixed = analyze(secondDump);
+  Require(mixed.save_load.earlier_crashes == 1u && mixed.save_load.crash_places == 1u &&
+            !mixed.save_load.all_places_known && mixed.quick_answer.case_id != "damaged_save",
+    "A legacy row adds one failed load and no evidence of another place");
+  (void)analyze(copy);
+  const auto restored = analyze(secondDump);
+  Require(restored.save_load.earlier_crashes == 1u && restored.save_load.all_places_known &&
+            restored.quick_answer.case_id == "damaged_save",
+    "Reanalyzing the earlier bytes supplies their location without adding an incident");
+
   std::filesystem::remove_all(outBase);
 }
 

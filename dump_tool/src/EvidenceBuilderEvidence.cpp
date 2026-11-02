@@ -336,6 +336,10 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
             std::to_wstring(save.crash_places) + L" places with this one).")
         : (L" 같은 세이브를 불러오다 난 이전 사고: " + std::to_wstring(save.earlier_crashes) + L"번(이번까지 난 곳 " +
             std::to_wstring(save.crash_places) + L"곳).");
+      if (!save.all_places_known) {
+        e.details += en ? L" This counts only the locations recorded in the dumps' history."
+                        : L" 위치를 확인한 사고만 장소 수에 포함했습니다.";
+      }
     }
     if (save.other_save_crashes > 0) {
       e.details += en

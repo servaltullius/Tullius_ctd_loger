@@ -460,16 +460,27 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
 
   std::size_t first = m_entries.size();
   std::optional<std::int64_t> firstWhen;
+  auto seenWithPlace = seen;
+  std::size_t located = 0;
   for (std::size_t i = 0; i < m_entries.size(); ++i) {
     const auto& e = m_entries[i];
-    if (e.loading_save_key != query.save_key || !isEarlier(i) || !firstTime(contentOf(e), seen)) {
+    if (e.loading_save_key != query.save_key || !isEarlier(i)) {
+      continue;
+    }
+    // A legacy bucket includes callers and cannot identify a failure place.
+    // A newer analysis of the same bytes can supply the missing location.
+    const auto content = contentOf(e);
+    const auto& place = e.loading_fault_place;
+    if (!place.empty() && firstTime(content, seenWithPlace)) {
+      ++located;
+      if (std::find(result.places.begin(), result.places.end(), place) == result.places.end()) {
+        result.places.push_back(place);
+      }
+    }
+    if (!firstTime(content, seen)) {
       continue;
     }
     result.count += 1;
-    const std::string& place = e.loading_fault_place.empty() ? e.bucket_key : e.loading_fault_place;
-    if (!place.empty() && std::find(result.places.begin(), result.places.end(), place) == result.places.end()) {
-      result.places.push_back(place);
-    }
     if (const auto when = whenOf(e); when.has_value() && (!firstWhen.has_value() || when.value() < firstWhen.value())) {
       firstWhen = when;
     }
@@ -480,6 +491,7 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
   if (result.count == 0) {
     return result;
   }
+  result.all_places_known = located == result.count && !query.place.empty();
 
   // Other saves failing before this capture: after the first of these, or in
   // the day before it (the player may have tried them first).
