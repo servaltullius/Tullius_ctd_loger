@@ -46,7 +46,10 @@ int main()
   const std::string pluginMain = ReadAllText(pluginMainPath);
   const std::string crashHandler = ReadAllText(crashHandlerPath);
   AssertContains(pluginMain, "EnableUnsafeCrashHookMode2", "Plugin config loader must read unsafe mode guard key");
-  AssertContains(pluginMain, "mode == 2", "Plugin config must check mode==2 before allowing all-exception hook mode");
+  AssertContains(pluginMain, "ResolveCrashHookMode(", "Plugin config must resolve the mode through ResolveCrashHookMode");
+  const std::string crashHookConfig = ReadAllText(repoRoot / "plugin" / "include" / "SkyrimDiag" / "CrashHookConfig.h");
+  AssertContains(crashHookConfig, "if (mode == 2 && !consented) {",
+    "Mode 2 must need its consent setting before the all-exception hook mode is allowed");
   AssertContains(
     crashHandler,
     "IsFatalExceptionCode(",

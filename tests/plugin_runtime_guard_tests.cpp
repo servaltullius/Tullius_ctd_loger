@@ -3,6 +3,7 @@
 #include <string>
 
 #include "SkyrimDiag/CrashHandler.h"
+#include "SkyrimDiag/CrashHookConfig.h"
 #include "SourceGuardTestUtils.h"
 
 using skydiag::tests::source_guard::AssertContains;
@@ -14,6 +15,22 @@ int main()
 {
   using skydiag::plugin::CrashHandlerModuleRange;
   using skydiag::plugin::IsInCrashLoggerModule;
+
+  // CrashHookMode in SkyrimDiag.ini: only 0, 1 and 2 are modes, a typo is the
+  // default 1 (never off or mode 2), and mode 2 needs its consent setting = 1.
+  {
+    using skydiag::plugin::ResolveCrashHookMode;
+    constexpr auto mode = [](std::wstring_view m, std::wstring_view c) { return ResolveCrashHookMode(m, c).mode; };
+    static_assert(mode(L"", L"") == 1u && !ResolveCrashHookMode(L"", L"").invalid_value);
+    static_assert(mode(L"1", L"") == 1u && mode(L" 0 ", L"") == 0u && mode(L"0 ; off", L"") == 0u);
+    static_assert(mode(L"2", L"1") == 2u && mode(L"2", L"1 ; I know") == 2u);
+    static_assert(mode(L"2", L"") == 1u && ResolveCrashHookMode(L"2", L"").mode2_refused);
+    static_assert(mode(L"2", L"2") == 1u && mode(L"2", L"yes") == 1u && mode(L"2", L"0") == 1u);
+    static_assert(mode(L"3", L"1") == 1u && ResolveCrashHookMode(L"3", L"1").invalid_value);
+    static_assert(mode(L"99", L"1") == 1u && mode(L"-1", L"") == 1u);
+    static_assert(mode(L"abc", L"") == 1u && ResolveCrashHookMode(L"abc", L"").invalid_value);
+    static_assert(mode(L"1x", L"") == 1u && mode(L"2 3", L"1") == 1u);
+  }
 
   constexpr CrashHandlerModuleRange crashLoggerRange{0x1000u, 0x2000u};
   constexpr CrashHandlerModuleRange crashLoggerSseRange{0x3000u, 0x4000u};
@@ -137,6 +154,13 @@ int main()
   const std::string heartbeat = ReadAllText(heartbeatPath);
   const std::string resourceHooks = ReadAllText(resourceHooksPath);
   const std::string pluginMain = ReadAllText(pluginMainPath);
+  {
+    const std::string loadConfigBody = ExtractFunctionBody(pluginMain, "PluginConfig LoadConfig()");
+    AssertContains(loadConfigBody, "skydiag::plugin::ResolveCrashHookMode(modeText, consentText)",
+      "CrashHookMode must go through ResolveCrashHookMode.");
+    assert(loadConfigBody.find("GetPrivateProfileIntW(L\"SkyrimDiag\", L\"CrashHookMode\"") == std::string::npos &&
+           "GetPrivateProfileIntW reads a typo in CrashHookMode as 0 (the crash hook off).");
+  }
   const std::string sharedMemory = ReadAllText(sharedMemoryPath);
   const std::string crashHandler = ReadAllText(crashHandlerPath);
   const std::string sharedProtocol = ReadAllText(sharedProtocolPath);
