@@ -10,6 +10,7 @@ namespace {
 
 using skydiag::tests::source_guard::AssertOrdered;
 using skydiag::tests::source_guard::ExtractFunctionBody;
+using skydiag::tests::source_guard::ExtractFunctionFlow;
 using skydiag::tests::source_guard::ReadSplitAwareText;
 
 std::string ReadFile(const char* relPath)
@@ -52,7 +53,11 @@ void TestDumpWriterHeaderHasPluginParam()
 void TestCrashPathIsDumpFirst()
 {
   const auto impl = ReadFile("helper/src/CrashCapture.cpp");
-  const auto crashTickBody = ExtractFunctionBody(impl, "bool HandleCrashEventTick(");
+  const auto crashTickBody = ExtractFunctionFlow(
+    impl,
+    "bool HandleCrashEventTick(",
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
   const auto writePos = crashTickBody.find("WriteDumpWithStreams(");
   const auto processPos = crashTickBody.find("ProcessValidCrashDump(");
   assert(writePos != std::string::npos);
@@ -78,7 +83,11 @@ void TestCrashPathWritesPluginScanSidecar()
 void TestCrashPathCollectsPluginScanInputsWhileProcessIsAlive()
 {
   const auto impl = ReadFile("helper/src/CrashCapture.cpp");
-  const auto crashTickBody = ExtractFunctionBody(impl, "bool HandleCrashEventTick(");
+  const auto crashTickBody = ExtractFunctionFlow(
+    impl,
+    "bool HandleCrashEventTick(",
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
   AssertOrdered(
     crashTickBody,
     "WriteDumpWithStreams(",

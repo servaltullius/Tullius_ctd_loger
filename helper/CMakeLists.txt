@@ -16,6 +16,7 @@ add_executable(${PROJECT_NAME}
   src/DumpToolLaunch.cpp
   src/DumpWriter.cpp
   src/EtwCapture.cpp
+  src/FreezeCapture.cpp
   src/HangCapture.cpp
   src/HangCapture.Guards.cpp
   src/HangCapture.Execute.cpp
@@ -61,6 +62,7 @@ add_executable(${PROJECT_NAME}
   include/SkyrimDiagHelper/PluginScanner.h
   include/SkyrimDiagHelper/ProcessAttach.h
   include/SkyrimDiagHelper/SkseLogParser.h
+  src/FreezeCapture.h
   src/HangCaptureInternal.h
   src/PssSnapshot.h
   src/PendingCrashAnalysisInternal.h

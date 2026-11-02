@@ -7,6 +7,7 @@
 using skydiag::tests::source_guard::AssertContains;
 using skydiag::tests::source_guard::AssertOrdered;
 using skydiag::tests::source_guard::ExtractFunctionBody;
+using skydiag::tests::source_guard::ExtractFunctionFlow;
 using skydiag::tests::source_guard::ReadAllText;
 
 int main()
@@ -20,7 +21,12 @@ int main()
   const std::string crashCapture = ReadAllText(crashCapturePath);
   const std::string crashCaptureHeader = ReadAllText(crashCaptureHeaderPath);
 
-  const std::string crashTickBody = ExtractFunctionBody(crashCapture, "bool HandleCrashEventTick(");
+  // HandleCrashEventTick with its steps (CheckCrashLoggerThreadDumpWindow, ...).
+  const std::string crashTickBody = ExtractFunctionFlow(
+    crashCapture,
+    "bool HandleCrashEventTick(",
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
   AssertContains(
     crashTickBody,
     "ExtractCrashInfo(",
