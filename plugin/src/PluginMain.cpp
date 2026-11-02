@@ -21,6 +21,7 @@
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/CrashHandler.h"
+#include "SkyrimDiag/CrashHookConfig.h"
 #include "SkyrimDiag/EventSinks.h"
 #include "SkyrimDiag/Heartbeat.h"
 #include "SkyrimDiag/ResourceLog.h"
@@ -34,7 +35,6 @@ struct PluginConfig
 {
   std::uint32_t heartbeatIntervalMs = 100;
   std::uint32_t crashHookMode = 1;
-  bool enableUnsafeCrashHookMode2 = false;
   bool logMenus = true;
   bool autoStartHelper = true;
   std::wstring helperExe = L"SkyrimDiagHelper.exe";
@@ -106,15 +106,17 @@ PluginConfig LoadConfig()
     L"SkyrimDiag", L"HeartbeatIntervalMs", 100, iniPath, 10, 5000);
 
   {
-    int mode = GetPrivateProfileIntW(L"SkyrimDiag", L"CrashHookMode", 1, iniPath);
-    cfg.enableUnsafeCrashHookMode2 =
-      GetPrivateProfileIntW(L"SkyrimDiag", L"EnableUnsafeCrashHookMode2", 0, iniPath) != 0;
-    if (mode == 2 && !cfg.enableUnsafeCrashHookMode2) {
-      mode = 1;
+    // Read as text: GetPrivateProfileIntW reads "abc" as 0 (the crash hook
+    // off) and 3 or 99 used to become mode 2 without its consent setting.
+    const auto modeText = ReadIniString(L"SkyrimDiag", L"CrashHookMode", L"", iniPath);
+    const auto consentText = ReadIniString(L"SkyrimDiag", L"EnableUnsafeCrashHookMode2", L"", iniPath);
+    const auto setting = skydiag::plugin::ResolveCrashHookMode(modeText, consentText);
+    cfg.crashHookMode = setting.mode;
+    if (setting.invalid_value) {
+      spdlog::warn("SkyrimDiag: CrashHookMode is not 0, 1 or 2; using 1 (fatal exceptions)");
+    } else if (setting.mode2_refused) {
+      spdlog::warn("SkyrimDiag: CrashHookMode=2 needs EnableUnsafeCrashHookMode2=1; using 1 (fatal exceptions)");
     }
-    if (mode < 0) mode = 0;
-    if (mode > 2) mode = 2;
-    cfg.crashHookMode = static_cast<std::uint32_t>(mode);
   }
   cfg.logMenus = GetPrivateProfileIntW(L"SkyrimDiag", L"LogMenus", 1, iniPath) != 0;
   cfg.autoStartHelper = GetPrivateProfileIntW(L"SkyrimDiag", L"AutoStartHelper", 1, iniPath) != 0;
