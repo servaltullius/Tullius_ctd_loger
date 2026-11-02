@@ -224,7 +224,7 @@ else
   exit 1
 fi
 
-echo "[gate] 8/8 reviewed-corpus analysis quality"
+echo "[gate] 8/8 reviewed-corpus analysis quality (candidate ranking; the quick answer is scored by accuracy_benchmark.py)"
 
 # This step measures accuracy against reviewed real incidents. Hand-authored
 # fixtures cannot substitute for that, so without a real corpus the honest report
