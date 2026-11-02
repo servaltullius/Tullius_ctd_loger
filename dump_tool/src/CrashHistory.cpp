@@ -158,8 +158,10 @@ CrashHistoryLoad CrashHistory::Load(const std::filesystem::path& path)
       row.top_suspect = JsonValueOr(e, "top_suspect", std::string{});
       row.confidence = JsonValueOr(e, "confidence", std::string{});
       row.signature_id = JsonValueOr(e, "signature_id", std::string{});
+      row.capture_unix = JsonValueOr(e, "capture_unix", std::uint64_t{ 0 });
       row.loading_save_key = JsonValueOr(e, "loading_save_key", std::string{});
       row.loading_save_name = JsonValueOr(e, "loading_save_name", std::string{});
+      row.loading_fault_place = JsonValueOr(e, "loading_fault_place", std::string{});
       if (e.contains("all_suspects") && e["all_suspects"].is_array()) {
         for (const auto& s : e["all_suspects"]) {
           if (s.is_string()) {
@@ -208,10 +210,14 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
         { "all_suspects", e.all_suspects },
         { "candidate_keys", e.candidate_keys },
       };
-      // Only a crash while loading a save has these (ADR-0025).
+      // ADR-0025: only a crash while loading a save has the loading fields.
+      if (e.capture_unix != 0u) {
+        row["capture_unix"] = e.capture_unix;
+      }
       if (!e.loading_save_key.empty()) {
         row["loading_save_key"] = e.loading_save_key;
         row["loading_save_name"] = e.loading_save_name;
+        row["loading_fault_place"] = e.loading_fault_place;
       }
       j["entries"].push_back(std::move(row));
     }
@@ -408,71 +414,93 @@ std::vector<BucketCandidateStats> CrashHistory::GetBucketCandidateStats(const st
   return result;
 }
 
-SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(
-  const std::string& saveKey,
-  const std::string& currentBucketKey,
-  std::string_view currentDumpFile,
-  std::string_view currentDumpIdentityKey) const
+SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery& query) const
 {
   SaveLoadCrashStats result{};
-  if (saveKey.empty()) {
+  if (query.save_key.empty()) {
     return result;
   }
-  // Entries after the current dump's own entry crashed after it.
-  const auto dumpKey = NormalizeStoredCandidateKey(currentDumpFile);
-  std::size_t end = m_entries.size();
-  if (!dumpKey.empty() || !currentDumpIdentityKey.empty()) {
+  // Without capture times, history order decides: entries after this dump's
+  // own entry are later.
+  const auto dumpKey = NormalizeStoredCandidateKey(query.dump_file);
+  std::size_t own = m_entries.size();
+  if (!dumpKey.empty() || !query.dump_identity_key.empty()) {
     for (std::size_t i = 0; i < m_entries.size(); ++i) {
-      if (IsEntryForDump(m_entries[i], dumpKey, currentDumpIdentityKey)) {
-        end = i;
+      if (IsEntryForDump(m_entries[i], dumpKey, query.dump_identity_key)) {
+        own = i;
         break;
       }
     }
   }
-  std::size_t first = end;
-  for (std::size_t i = 0; i < end; ++i) {
+  const auto isEarlier = [&](std::size_t i) {
     const auto& e = m_entries[i];
-    if (e.loading_save_key != saveKey) {
-      if (first < end && !e.loading_save_key.empty()) {
-        result.other_save_count += 1;
-      }
+    if (query.capture_unix != 0u && e.capture_unix != 0u) {
+      return e.capture_unix < query.capture_unix;
+    }
+    return i < own;
+  };
+  // The same bytes are one incident: a copy or a renamed dump, or this dump.
+  const auto contentOf = [](const CrashHistoryEntry& e) {
+    return std::string_view(e.dump_identity_key).substr(0, std::string_view(e.dump_identity_key).find('.'));
+  };
+  std::unordered_set<std::string> seen;
+  if (!query.content_sha256.empty()) {
+    seen.insert(query.content_sha256);
+  }
+  const auto firstTime = [](std::string_view content, std::unordered_set<std::string>& contents) {
+    return content.empty() || contents.insert(std::string(content)).second;
+  };
+  // When an entry failed: its capture time, else its first analysis.
+  const auto whenOf = [](const CrashHistoryEntry& e) -> std::optional<std::int64_t> {
+    if (e.capture_unix != 0u) {
+      return static_cast<std::int64_t>(e.capture_unix);
+    }
+    return ParseUtcSeconds(e.timestamp_utc);
+  };
+
+  std::size_t first = m_entries.size();
+  std::optional<std::int64_t> firstWhen;
+  for (std::size_t i = 0; i < m_entries.size(); ++i) {
+    const auto& e = m_entries[i];
+    if (e.loading_save_key != query.save_key || !isEarlier(i) || !firstTime(contentOf(e), seen)) {
       continue;
     }
-    if (first == end) {
-      first = i;
-    }
     result.count += 1;
-    if (!e.bucket_key.empty() &&
-        std::find(result.bucket_keys.begin(), result.bucket_keys.end(), e.bucket_key) == result.bucket_keys.end()) {
-      result.bucket_keys.push_back(e.bucket_key);
+    const std::string& place = e.loading_fault_place.empty() ? e.bucket_key : e.loading_fault_place;
+    if (!place.empty() && std::find(result.places.begin(), result.places.end(), place) == result.places.end()) {
+      result.places.push_back(place);
+    }
+    if (const auto when = whenOf(e); when.has_value() && (!firstWhen.has_value() || when.value() < firstWhen.value())) {
+      firstWhen = when;
+    }
+    if (first == m_entries.size()) {
+      first = i;
     }
   }
   if (result.count == 0) {
     return result;
   }
-  // Other saves failing in the day before the first failure of this one: the
-  // player may have tried them first.
-  if (const auto firstAt = ParseUtcSeconds(m_entries[first].timestamp_utc); firstAt.has_value()) {
-    constexpr std::int64_t kDaySeconds = std::int64_t{ 24 } * 60 * 60;
-    const std::int64_t firstSeconds = firstAt.value();
-    for (std::size_t i = 0; i < first; ++i) {
-      const auto& e = m_entries[i];
-      if (e.loading_save_key.empty()) {
-        continue;
-      }
-      const auto at = ParseUtcSeconds(e.timestamp_utc);
-      if (!at.has_value()) {
-        continue;
-      }
-      const std::int64_t atSeconds = at.value();
-      if (atSeconds <= firstSeconds && firstSeconds - atSeconds <= kDaySeconds) {
-        result.other_save_count += 1;
-      }
+
+  // Other saves failing before this capture: after the first of these, or in
+  // the day before it (the player may have tried them first).
+  constexpr std::int64_t kDaySeconds = std::int64_t{ 24 } * 60 * 60;
+  std::unordered_set<std::string> otherSeen = seen;
+  for (std::size_t i = 0; i < m_entries.size(); ++i) {
+    const auto& e = m_entries[i];
+    if (e.loading_save_key.empty() || e.loading_save_key == query.save_key || !isEarlier(i)) {
+      continue;
+    }
+    bool counts = i > first;
+    if (const auto when = whenOf(e); when.has_value() && firstWhen.has_value()) {
+      counts = when.value() >= firstWhen.value() - kDaySeconds;
+    }
+    if (counts && firstTime(contentOf(e), otherSeen)) {
+      result.other_save_count += 1;
     }
   }
-  if (!currentBucketKey.empty() &&
-      std::find(result.bucket_keys.begin(), result.bucket_keys.end(), currentBucketKey) == result.bucket_keys.end()) {
-    result.bucket_keys.push_back(currentBucketKey);
+
+  if (!query.place.empty() && std::find(result.places.begin(), result.places.end(), query.place) == result.places.end()) {
+    result.places.push_back(query.place);
   }
   return result;
 }

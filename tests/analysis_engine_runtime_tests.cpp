@@ -1353,32 +1353,6 @@ void TestCrashHistorySaveLoadStats()
     static_assert(skydiag::SaveNameTextLength("abcdefghijklmnopqrst\xED\x95\x9C") == 23u);
   }
 
-  CrashHistory history;
-  const auto add = [&](const char* dump, const char* bucket, const char* saveKey, const char* at = "2026-11-01T07:00:00Z") {
-    CrashHistoryEntry e{};
-    e.timestamp_utc = at;
-    e.dump_file = dump;
-    e.bucket_key = bucket;
-    e.loading_save_key = saveKey;
-    e.loading_save_name = *saveKey ? "Save76_FC70D793_0_646F7" : "";
-    history.AddEntry(std::move(e));
-  };
-  add("a.dmp", "CTD3-old", "");                                    // not loading a save
-  add("b.dmp", "CTD3-other", "save75key", "2026-10-29T07:00:00Z");  // another save, days before: not counted
-  add("c.dmp", "CTD3-7dba", "save76key");
-  add("d.dmp", "CTD3-2d9f", "save76key");
-  add("e.dmp", "CTD3-2d9f", "save76key");
-  add("f.dmp", "CTD3-x", "");               // not loading a save: not counted
-
-  auto stats = history.GetSaveLoadCrashStats("save76key");
-  assert(stats.count == 3u);
-  assert((stats.bucket_keys == std::vector<std::string>{ "CTD3-7dba", "CTD3-2d9f" }));
-  assert(stats.other_save_count == 0u);
-  assert(history.GetSaveLoadCrashStats("").count == 0u);
-  // The crash being analyzed is a place too, once there is an earlier one.
-  assert(history.GetSaveLoadCrashStats("save76key", "CTD3-new").bucket_keys.size() == 3u);
-  assert(history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f").bucket_keys.size() == 2u);
-  assert(history.GetSaveLoadCrashStats("unseenkey", "CTD3-new").bucket_keys.empty());
   // The analyzer counts before it removes the dump's own entry, and keeps a
   // save only for a capture that is a failed load.
   {
@@ -1387,46 +1361,105 @@ void TestCrashHistorySaveLoadStats()
       "Save-load stats must be counted before the dump's own entry is removed.");
     AssertContains(analyzerHistory, "if (internal::CountsAsFailedLoad(out)) {",
       "Only a failed load may keep its save in the crash history.");
+    AssertContains(analyzerHistory, "query.capture_unix = out.dump_capture_unix;",
+      "Earlier failed loads are found by the dumps' capture times.");
+    AssertContains(analyzerHistory, "query.content_sha256 = out.dump_identity.sha256;",
+      "A copy of the dump being analyzed is that dump.");
+    AssertContains(analyzerHistory, "entry.loading_fault_place = internal::SaveLoadFailurePlace(out);",
+      "A failed load keeps where it failed; without it the count falls back to crash buckets.");
+    AssertContains(analyzerHistory, "entry.capture_unix = out.dump_capture_unix;",
+      "Every entry keeps when its dump was written.");
   }
-  // A re-analysis counts only the crashes before the dump: d.dmp's own entry
-  // and the later e.dmp are left out.
-  {
-    const auto reanalysis = history.GetSaveLoadCrashStats("save76key", "CTD3-2d9f", "D.DMP");
-    assert(reanalysis.count == 1u && reanalysis.bucket_keys.size() == 2u && reanalysis.other_save_count == 0u);
-  }
-  // Another save failing in the day before the first failure counts (the
-  // player may have tried it first); one days before does not.
-  {
-    CrashHistory tried;
-    const auto row = [&](const char* dump, const char* bucket, const char* saveKey, const char* at) {
-      CrashHistoryEntry e{};
-      e.timestamp_utc = at;
-      e.dump_file = dump;
-      e.bucket_key = bucket;
-      e.loading_save_key = saveKey;
-      tried.AddEntry(std::move(e));
-    };
-    row("old.dmp", "CTD3-a", "saveAkey", "2026-10-30T05:00:00Z");
-    row("a.dmp", "CTD3-a", "saveAkey", "2026-11-01T06:30:00Z");
-    row("b1.dmp", "CTD3-b1", "saveBkey", "2026-11-01T07:00:00Z");
-    const auto b = tried.GetSaveLoadCrashStats("saveBkey", "CTD3-b2");
-    assert(b.count == 1u && b.bucket_keys.size() == 2u && b.other_save_count == 1u);
-  }
-  {
-    // 2026-11-01: Save76 failed to load at 16:18, then at 16:34 elsewhere.
-    CrashHistory first;
+  // Failed loads in a history: capture time (seconds), content, save, place.
+  constexpr std::uint64_t k1618 = 1793517488u;  // 2026-11-01T07:18:08Z, the first Save76 crash
+  constexpr std::uint64_t k1634 = k1618 + 971u;  // 07:34:19Z, the second
+  CrashHistory history;
+  const auto add = [](CrashHistory& h, const char* dump, std::uint64_t captured, const char* sha, const char* saveKey,
+                      const char* place, const char* bucket = "CTD3-x") {
     CrashHistoryEntry e{};
-    e.dump_file = "SkyrimDiag_Crash_20261101_161808_940.dmp";
-    e.bucket_key = "CTD3-7dbaf39d10226dde";
-    e.loading_save_key = "save76key";
-    first.AddEntry(std::move(e));
-    const auto second = first.GetSaveLoadCrashStats("save76key", "CTD3-2d9fca2cfea093da");
-    assert(second.count == 1u && second.bucket_keys.size() == 2u && second.other_save_count == 0u);
-  }
+    e.timestamp_utc = "2026-11-02T00:00:00Z";  // when it was analyzed: no part of the order
+    e.dump_file = dump;
+    e.dump_identity_key = std::string(sha) + ".meta-" + dump;
+    e.capture_unix = captured;
+    e.bucket_key = bucket;
+    e.loading_save_key = saveKey;
+    e.loading_save_name = *saveKey ? "Save76_FC70D793_0_646F7" : "";
+    e.loading_fault_place = place;
+    h.AddEntry(std::move(e));
+  };
+  const auto query = [](std::uint64_t captured, const char* sha, const char* place, const char* dump = "") {
+    skydiag::dump_tool::SaveLoadCrashQuery q{};
+    q.save_key = "save76key";
+    q.place = place;
+    q.capture_unix = captured;
+    q.content_sha256 = sha;
+    q.dump_file = dump;
+    return q;
+  };
+  constexpr const char* kNull = "0xc0000005|skyrimse.exe+0x172a1e";
+  constexpr const char* kJump = "0xc0000005|bad_jump|execute|not_executable";
 
-  add("g.dmp", "CTD3-y", "save77key");      // another save after: counted
-  stats = history.GetSaveLoadCrashStats("save76key");
-  assert(stats.other_save_count == 1u);
+  // The 2026-11-01 case: the second crash sees the first, in another place.
+  add(history, "SkyrimDiag_Crash_20261101_161808_940.dmp", k1618, "aaaa", "save76key", kNull, "CTD3-7dbaf39d10226dde");
+  auto stats = history.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+  assert(stats.count == 1u && stats.places.size() == 2u && stats.other_save_count == 0u);
+  // The first sees nothing earlier, whatever was analyzed before it.
+  add(history, "SkyrimDiag_Crash_20261101_163419_163.dmp", k1634, "bbbb", "save76key", kJump, "CTD3-2d9fca2cfea093da");
+  stats = history.GetSaveLoadCrashStats(query(k1618, "aaaa", kNull, "SkyrimDiag_Crash_20261101_161808_940.dmp"));
+  assert(stats.count == 0u && stats.places.empty());
+  {
+    // Analyzed in reverse order: the same answers.
+    CrashHistory reverse;
+    add(reverse, "SkyrimDiag_Crash_20261101_163419_163.dmp", k1634, "bbbb", "save76key", kJump);
+    add(reverse, "SkyrimDiag_Crash_20261101_161808_940.dmp", k1618, "aaaa", "save76key", kNull);
+    assert(reverse.GetSaveLoadCrashStats(query(k1618, "aaaa", kNull)).count == 0u);
+    const auto second = reverse.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+    assert(second.count == 1u && second.places.size() == 2u);
+  }
+  {
+    // One fault from another call path (another bucket) is the same place.
+    CrashHistory callers;
+    add(callers, "a.dmp", k1618, "aaaa", "save76key", "0xc0000005|same.dll+0x123", "CTD3-caller1");
+    const auto same = callers.GetSaveLoadCrashStats(query(k1634, "bbbb", "0xc0000005|same.dll+0x123"));
+    assert(same.count == 1u && same.places.size() == 1u);
+  }
+  {
+    // A copy of a dump (same bytes, another name and time) is one incident,
+    // and a copy of the dump being analyzed is that dump.
+    CrashHistory copies = history;
+    add(copies, "copy_of_1618.dmp", k1618, "aaaa", "save76key", kNull);
+    add(copies, "copy_of_1634.dmp", k1634, "bbbb", "save76key", kJump);
+    const auto deduped = copies.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+    assert(deduped.count == 1u && deduped.places.size() == 2u);
+  }
+  {
+    // Other saves: before this capture, after the first failure of this save
+    // or in the day before it; a later one or one days before does not count.
+    CrashHistory others;
+    add(others, "old.dmp", k1618 - 3u * 86400u, "o1", "save75key", kJump);
+    add(others, "tried.dmp", k1618 - 1800u, "o2", "save75key", kJump);
+    add(others, "a.dmp", k1618, "aaaa", "save76key", kNull);
+    add(others, "between.dmp", k1618 + 60u, "o3", "save77key", kJump);
+    add(others, "after.dmp", k1634 + 60u, "o4", "save77key", kJump);
+    const auto other = others.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+    assert(other.count == 1u && other.other_save_count == 2u);
+  }
+  {
+    // Entries with no capture time fall back to history order around this
+    // dump's own entry.
+    // A copy of the dump being analyzed, ahead of it in the history, is that
+    // dump, not an earlier failure.
+    CrashHistory legacy;
+    add(legacy, "a.dmp", 0u, "aaaa", "save76key", kNull);
+    add(legacy, "copy_of_b.dmp", 0u, "bbbb", "save76key", "0xc0000005|copy.dll+0x1");
+    add(legacy, "b.dmp", 0u, "bbbb", "save76key", kJump);
+    add(legacy, "c.dmp", 0u, "cccc", "save76key", "0xc0000005|x.dll+0x1");
+    auto atBQuery = query(0u, "bbbb", kJump, "b.dmp");
+    atBQuery.dump_identity_key = "bbbb.meta-b.dmp";  // as the analyzer passes it
+    const auto atB = legacy.GetSaveLoadCrashStats(atBQuery);
+    assert(atB.count == 1u && atB.places.size() == 2u);
+  }
+  assert(history.GetSaveLoadCrashStats(skydiag::dump_tool::SaveLoadCrashQuery{}).count == 0u);
 
   const auto historyPath = std::filesystem::temp_directory_path() / "skydiag_crash_history_save_load_test.json";
   const bool saved = history.SaveToFile(historyPath);
@@ -1434,11 +1467,13 @@ void TestCrashHistorySaveLoadStats()
   const auto text = ReadAllText(historyPath);
   AssertContains(text, "\"loading_save_key\": \"save76key\"", "a load crash keeps its save");
   AssertContains(text, "\"loading_save_name\": \"Save76_FC70D793_0_646F7\"", "and the save's name");
+  AssertContains(text, "\"loading_fault_place\": \"0xc0000005|bad_jump|execute|not_executable\"", "and where it failed");
+  AssertContains(text, "\"capture_unix\": 1793517488", "and when the dump was written");
   CrashHistory loaded;
   const bool historyLoaded = loaded.LoadFromFile(historyPath);
   assert(historyLoaded);
-  const auto reloaded = loaded.GetSaveLoadCrashStats("save76key");
-  assert(reloaded.count == 3u && reloaded.bucket_keys.size() == 2u && reloaded.other_save_count == 1u);
+  const auto reloaded = loaded.GetSaveLoadCrashStats(query(k1634, "bbbb", kJump));
+  assert(reloaded.count == 1u && reloaded.places.size() == 2u);
   std::error_code ec;
   std::filesystem::remove(historyPath, ec);
 }

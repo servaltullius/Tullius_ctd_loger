@@ -498,6 +498,8 @@ struct AnalysisResult
   std::wstring dump_path;
   std::wstring out_dir;
   DumpIdentity dump_identity;
+  // MINIDUMP_HEADER.TimeDateStamp, seconds since 1970 (UTC); 0 when unknown.
+  std::uint64_t dump_capture_unix = 0;
 
   std::uint32_t pid = 0;
   std::uint32_t state_flags = 0;
