@@ -126,7 +126,10 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   for (auto& candidate : r.actionable_candidates) {
     candidate.standalone_callstack = internal::CandidateHasStandaloneCallstackSupport(r, candidate);
   }
-  if (internal::IsWeakFaultLocationOnlySuspect(r, ctx) && !r.suspects.empty()) {
+  ctx.weakFaultLocationSuspect = internal::IsWeakFaultLocationOnlySuspect(r, ctx);
+  ctx.weakFaultLocationTopCandidate = !r.actionable_candidates.empty() &&
+    internal::IsWeakFaultLocationActionableCandidate(r, r.actionable_candidates[0], ctx);
+  if (ctx.weakFaultLocationSuspect && !r.suspects.empty()) {
     auto& topSuspect = r.suspects[0];
     topSuspect.confidence_level = i18n::ConfidenceLevel::kLow;
     topSuspect.confidence = i18n::ConfidenceText(lang, topSuspect.confidence_level);

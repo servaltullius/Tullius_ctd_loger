@@ -805,6 +805,29 @@ void TestWeakFaultLocationRequiresQualifiedIndependentSupport()
                   "A direct-fault frame must remain weak without qualified object-ref and formal-stack support.");
 }
 
+// The lead's inputs are set once (EvidenceBuildContext, ActionableCandidate::
+// standalone_callstack); an output that tests them again can disagree with
+// the others.
+void TestLeadInputsAreComputedOnce()
+{
+  const auto root = ProjectRoot();
+  for (const char* file : {
+         "EvidenceBuilderSummary.cpp", "EvidenceBuilderQuickAnswer.cpp", "EvidenceBuilderRecommendations.cpp",
+         "EvidenceBuilderEvidence.Crash.cpp" }) {
+    const auto source = ReadAllText(root / "dump_tool" / "src" / file);
+    for (const char* call : {
+           "IsWeakFaultLocationOnlySuspect(", "IsWeakFaultLocationActionableCandidate(",
+           "CandidateHasStandaloneCallstackSupport(" }) {
+      assert(source.find(call) == std::string::npos && "outputs read the lead inputs from the build context");
+    }
+  }
+  const auto builder = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilder.cpp");
+  AssertContains(builder, "ctx.weakFaultLocationSuspect = internal::IsWeakFaultLocationOnlySuspect(r, ctx);",
+    "the suspect test is set once");
+  AssertContains(builder, "internal::IsWeakFaultLocationActionableCandidate(r, r.actionable_candidates[0], ctx);",
+    "the top candidate test is set once");
+}
+
 void TestWeakFaultLocationPostprocessingResortsCandidates()
 {
   const auto root = ProjectRoot();
@@ -868,6 +891,7 @@ int main()
   TestSecondaryCallstackConfidencePolicyRejectsOnePointCandidates();
   TestFirstChanceFamilySourceContract();
   TestWeakFaultLocationRequiresQualifiedIndependentSupport();
+  TestLeadInputsAreComputedOnce();
   TestWeakFaultLocationPostprocessingResortsCandidates();
   return 0;
 }
