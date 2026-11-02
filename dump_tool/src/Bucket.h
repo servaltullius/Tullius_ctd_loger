@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "SkyrimDiagHash.h"
+
 namespace skydiag::dump_tool {
 
 struct CrashBucketFrame
@@ -61,15 +63,8 @@ inline std::string NarrowAsciiFallback(std::wstring_view s)
   return out;
 }
 
-inline std::uint64_t Fnv1a64(std::string_view s)
-{
-  std::uint64_t h = 14695981039346656037ull;
-  for (const unsigned char c : s) {
-    h ^= c;
-    h *= 1099511628211ull;
-  }
-  return h;
-}
+// The shared FNV-1a 64 (SkyrimDiagHash.h); bucket keys are unchanged.
+using skydiag::hash::Fnv1a64;
 
 }  // namespace bucket
 

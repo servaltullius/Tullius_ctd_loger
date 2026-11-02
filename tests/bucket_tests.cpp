@@ -7,6 +7,15 @@
 using skydiag::dump_tool::ComputeCrashBucketKey;
 using skydiag::dump_tool::CrashBucketFrame;
 
+// Keys already in players' crash histories must not change: these values were
+// computed with the hash before it moved to SkyrimDiagHash.h.
+static void Test_KeysMatchEarlierBuilds()
+{
+  const std::vector<CrashBucketFrame> frames = { { L"SkyrimSE.exe", 0x2da88d } };
+  assert(ComputeCrashBucketKey(0xC0000005u, L"SkyrimSE.exe", 0x172a1e, frames) == L"CTD3-cb9ab7023e98f7ff");
+  assert(skydiag::dump_tool::ComputeHangBucketKey("main|wait") == L"HANG1-4db3222a3069acdd");
+}
+
 static void Test_SameInput_ProducesStableKey()
 {
   const std::vector<CrashBucketFrame> frames = {
@@ -161,6 +170,7 @@ static void Test_EngineLockKey_IsTheLocksOrThePattern()
 int main()
 {
   Test_EngineLockKey_IsTheLocksOrThePattern();
+  Test_KeysMatchEarlierBuilds();
   Test_SameInput_ProducesStableKey();
   Test_DifferentTopFrame_ChangesKey();
   Test_DifferentExceptionCode_ChangesKey();

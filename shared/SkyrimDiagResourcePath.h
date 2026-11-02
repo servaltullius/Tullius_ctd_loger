@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "SkyrimDiagHash.h"
+
 namespace skydiag {
 
 namespace resource_path_detail {
@@ -120,12 +122,7 @@ inline std::uint64_t NormalizeResourcePath(
   }
   out[outLen] = '\0';
 
-  std::uint64_t hash = 14695981039346656037ull;  // FNV-1a 64 offset basis
-  for (std::size_t k = 0; k < outLen; ++k) {
-    hash ^= static_cast<unsigned char>(out[k]);
-    hash *= 1099511628211ull;
-  }
-  return hash;
+  return hash::Fnv1a64(std::string_view(out, outLen));
 }
 
 }  // namespace skydiag

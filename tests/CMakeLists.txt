@@ -12,6 +12,10 @@ else()
   add_compile_options(-UNDEBUG)
 endif()
 
+# Headers in shared/ (SkyrimDiag*.h) are used by the analyzer sources most
+# test targets compile, so every target can find them.
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../shared")
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 

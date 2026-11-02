@@ -9,6 +9,10 @@
 #include <string_view>
 #include <vector>
 
+#include "SourceGuardTestUtils.h"
+
+using skydiag::tests::source_guard::ReadAllText;
+
 using skydiag::dump_tool::cli::DumpToolCliArgs;
 using skydiag::dump_tool::cli::ParseDumpToolCliArgs;
 
@@ -87,15 +91,6 @@ static void Test_RejectsUnknownFlag()
   const bool ok = ParseDumpToolCliArgs(argv, &a, &err);
   assert(!ok);
   assert(!err.empty());
-}
-
-static std::string ReadAllText(const std::filesystem::path& path)
-{
-  std::ifstream in(path, std::ios::in | std::ios::binary);
-  assert(in && "Failed to open source file");
-  std::ostringstream ss;
-  ss << in.rdbuf();
-  return ss.str();
 }
 
 static void Test_CliMainPrintsMachineReadableOutputPaths()
