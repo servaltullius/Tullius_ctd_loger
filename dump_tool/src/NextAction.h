@@ -10,9 +10,10 @@ namespace skydiag::dump_tool {
 // for reading, not for acting: it often starts with background such as
 // "[Basics] ExceptionCode=0xC0000005 ..." or a generic signature line, so taking
 // the first entry gave field reports a NextAction that was not an action.
-// Tags are matched in priority order (modal dialog, actionable/top candidate,
-// Crash Logger frame, object ref, conflict); without one, the first entry that
-// is not background-only is used. Returns npos for an empty list.
+// The leading tag's kind (ClassifyRecommendation) is ranked (forced close,
+// known cause, damaged save, modal dialog, candidate, Crash Logger frame, object
+// ref, snapshot, conflict); without one, the first entry that is not
+// background-only is used. Returns npos for an empty list.
 std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendations);
 
 }  // namespace skydiag::dump_tool
