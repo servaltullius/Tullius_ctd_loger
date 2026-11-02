@@ -1173,6 +1173,7 @@ add_test(NAME skydiag_plugin_rules_logic_tests COMMAND skydiag_plugin_rules_logi
 add_executable(skydiag_next_action_tests
   next_action_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/NextAction.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/RecommendationClass.cpp"
 )
 target_include_directories(skydiag_next_action_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"

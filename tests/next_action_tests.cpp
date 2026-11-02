@@ -112,6 +112,34 @@ int main()
            L"[Conflict] If multiple mods provide the same file, conflicts are common.",
          }) == 1u);
 
+  // The tag kinds come from ClassifyRecommendation, so each tier the list
+  // names is reached: main thread with modal dialog, top suspect and
+  // synchronization stall with the candidates, Crash Logger frame before an
+  // object ref, a manual capture with snapshots.
+  assert(SelectNextActionIndex({
+           L"[Actionable candidate] Check X.dll first.",
+           L"[메인 스레드] 메인 스레드가 엔진 내부에서 기다리고 있습니다.",
+         }) == 1u);
+  assert(SelectNextActionIndex({
+           L"[Crash Logger frame] Crash Logger names X.dll first.",
+           L"[Top suspect] X.dll.",
+         }) == 1u);
+  assert(SelectNextActionIndex({
+           L"[Crash Logger 프레임] X.dll.",
+           L"[동기화 정지] 여러 스레드가 같은 잠금을 기다립니다.",
+         }) == 1u);
+  assert(SelectNextActionIndex({
+           L"[Object ref] Y.esp.",
+           L"[Crash Logger frame] X.dll.",
+         }) == 1u);
+  assert(SelectNextActionIndex({
+           L"[Conflict] Two mods provide the same file.",
+           L"[수동] 수동 캡처입니다.",
+         }) == 1u);
+  // The same match the viewer section uses: English tags ignore case.
+  assert(SelectNextActionIndex({ L"[Basics] a", L"[actionable candidate] b" }) == 1u);
+  assert(SelectNextActionIndex({ L"[Basics] a", L"[Mod check] b", L"[Conflict] c" }) == 2u);
+
   // Only background left: fall back to the first entry rather than nothing.
   assert(SelectNextActionIndex({ L"[Basics] a", L"[Performance] b" }) == 0u);
   assert(SelectNextActionIndex({}) == std::wstring::npos);
