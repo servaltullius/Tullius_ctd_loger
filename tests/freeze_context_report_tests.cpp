@@ -425,7 +425,7 @@ void TestReportKeepsRecentEvents()
   resource.t_ms = 2915650.0;
   resource.tid = 10376;
   resource.kind = L"nif";
-  resource.path = L"meshes\clutter\example.nif";
+  resource.path = L"meshes\\clutter\\example.nif";
   r.resources.push_back(resource);
   BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
   const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", false);
@@ -438,7 +438,8 @@ void TestReportKeepsRecentEvents()
     "only the last 60 events are listed");
   Require(report.find("t_ms=5061899.0 ") != std::string::npos && report.find("e+06") == std::string::npos,
     "times are never in scientific notation");
-  Require(report.find("- t_ms=2915650 tid=10376 [nif]") != std::string::npos, "resource times are whole milliseconds");
+  Require(report.find("- t_ms=2915650 tid=10376 [nif] meshes\\clutter\\example.nif") != std::string::npos,
+    "resource times are whole milliseconds, and the path follows");
 }
 
 // Captures of the same freeze land in one bucket even when the stack below
