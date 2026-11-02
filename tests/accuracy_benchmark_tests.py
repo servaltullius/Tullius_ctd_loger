@@ -78,6 +78,42 @@ def test_scoring_outcomes():
     assert blamed["outcome"] == "wrong" and "known_cause_hit" not in blamed
 
 
+def test_quick_answer_is_scored_apart_from_the_ranking():
+    # A forced close: the analysis below still ranks the plugin that called
+    # freed code, but the quick answer names no mod. With "no plugin caused it"
+    # the ranking leads wrong and the quick answer is right.
+    forced = {
+        "actionable_candidates": [{"module_filename": "PrismaUI.dll"}],
+        "suspects": [{"module_filename": "PrismaUI.dll"}],
+        "signature_match": None,
+        "quick_answer": {"kind": "forced_close", "case": "forced_close", "suspect_mod": "", "suspect_file": ""},
+    }
+    none_truth = {"none": True}
+    assert bench.score_view(bench.tullius_view(forced), none_truth)["outcome"] == "wrong"
+    qa = bench.score_view(bench.quick_answer_view(forced), none_truth)
+    assert qa == {"outcome": "correct", "top3": None, "lead": "", "case": "forced_close"}, qa
+
+    # A named lead is matched by its file or its mod name; naming none when a
+    # mod was at fault is an abstention, not a hit.
+    named = {"quick_answer": {"case": "candidate", "suspect_mod": "Real Mod", "suspect_file": "Real.dll"}}
+    assert bench.score_view(bench.quick_answer_view(named), {"modules": ["Real Mod"]})["outcome"] == "correct"
+    assert bench.score_view(bench.quick_answer_view(named), {"modules": ["Other.dll"]})["outcome"] == "wrong"
+    quiet = bench.score_view(bench.quick_answer_view(forced), {"modules": ["PrismaUI.dll"]})
+    assert quiet["outcome"] == "abstain" and quiet["top3"] is None, quiet
+
+    # A known cause the quick answer leads with is checked against the
+    # expected signature; a signature it does not lead with is not counted.
+    known = {"signature_match": {"id": "CONTENT_CATALOG_FORMAT_MISMATCH"},
+             "quick_answer": {"case": "known_issue", "suspect_mod": "", "suspect_file": ""}}
+    cause_truth = {"none": True, "known_cause": "CONTENT_CATALOG_FORMAT_MISMATCH"}
+    assert bench.score_view(bench.quick_answer_view(known), cause_truth)["known_cause_hit"] is True
+    other_lead = dict(known, quick_answer={"case": "damaged_save", "suspect_mod": "", "suspect_file": ""})
+    assert bench.score_view(bench.quick_answer_view(other_lead), cause_truth)["known_cause_hit"] is False
+
+    # A summary from before the quick answer existed names nothing.
+    assert bench.quick_answer_view({"actionable_candidates": []})["lead"] == []
+
+
 def _write(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -89,7 +125,8 @@ dump = Path(sys.argv[1]); out = Path(sys.argv[sys.argv.index("--out-dir") + 1])
 with_cl = "--no-crash-logger" not in sys.argv
 summary = {"actionable_candidates": [{"module_filename": "Real.dll"}] if with_cl else [],
            "suspects": [{"module_filename": "Victim.dll"}],
-           "signature_match": None}
+           "signature_match": None,
+           "quick_answer": {"case": "candidate", "suspect_mod": "", "suspect_file": "Real.dll" if with_cl else ""}}
 if with_cl:  # the analyzer finds the log next to the dump on its own
     summary["crash_logger"] = {"log_path": "<redacted>\\\\crash.log"}
 (out / (dump.stem + "_SkyrimDiagSummary.json")).write_text(json.dumps(summary), encoding="utf-8")
@@ -118,6 +155,19 @@ def test_add_case_and_score_end_to_end():
         assert views["tullius_with_crash_logger"]["outcome"] == "correct"
         assert views["crash_logger"]["outcome"] == "wrong"
         assert report["overall"]["tullius_with_crash_logger"]["top1_accuracy"] == 1.0
+        # The quick answer is scored apart, in its own group.
+        assert report["schema_version"] == 2
+        assert report["view_groups"] == {
+            "candidate_ranking": ["tullius_only", "tullius_with_crash_logger", "crash_logger"],
+            "quick_answer": ["tullius_only_quick_answer", "tullius_with_crash_logger_quick_answer"],
+        }
+        assert views["tullius_only_quick_answer"]["outcome"] == "abstain"  # names nothing without the log
+        assert views["tullius_with_crash_logger_quick_answer"]["outcome"] == "correct"
+        assert report["overall"]["tullius_with_crash_logger_quick_answer"]["top3_recall"] is None
+        printed = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "accuracy_benchmark.py"), "score",
+                                  "--corpus", str(corpus)], capture_output=True, text=True)
+        assert printed.returncode == 0
+        assert "Candidate ranking" in printed.stdout and "Quick answer" in printed.stdout, printed.stdout
         # A case id is not silently overwritten.
         result = subprocess.run([sys.executable, str(REPO_ROOT / "scripts" / "accuracy_benchmark.py"), "add-case",
                                  "--corpus", str(corpus), "--id", "case-1", "--kind", "ctd", "--dump", str(dump),

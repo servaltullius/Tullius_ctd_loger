@@ -11,7 +11,16 @@ real or test incident whose cause a person confirmed, scored three ways:
   game EXE
 
 A view "leads" with the first module or mod it tells the user to check. For
-our analyzer that is the first actionable candidate, else the first suspect.
+our analyzer that is the first actionable candidate, else the first suspect:
+this candidate ranking is what the analysis behind the report decides.
+
+The quick answer, the first lines a player reads, is scored apart as two more
+views (tullius_only_quick_answer, tullius_with_crash_logger_quick_answer): it
+leads with the mod it names, or with none (a forced close, a clean exit, a
+snapshot, a damaged save, a known cause with its own fix), whatever the
+candidates below it say. A forced close whose candidates name a mod is a
+wrong lead in the ranking but a correct "names no mod" in the quick answer;
+the two sets of numbers answer different questions and are never mixed.
 Ground truth is either the module(s)/mod(s) at fault, or "none" when no
 plugin caused it (a game or setup problem, e.g. the 2026-10-13 ContentCatalog
 CTD); then the right answer is to lead with no plugin. A case can also name
@@ -37,8 +46,13 @@ import tempfile
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-VIEWS = ("tullius_only", "tullius_with_crash_logger", "crash_logger")
-SCHEMA_VERSION = 1
+# The candidate ranking (and Crash Logger read on its own) ...
+CANDIDATE_VIEWS = ("tullius_only", "tullius_with_crash_logger", "crash_logger")
+# ... and what the quick answer told the player, scored apart.
+QUICK_ANSWER_VIEWS = ("tullius_only_quick_answer", "tullius_with_crash_logger_quick_answer")
+VIEWS = CANDIDATE_VIEWS + QUICK_ANSWER_VIEWS
+VIEW_GROUPS = {"candidate_ranking": CANDIDATE_VIEWS, "quick_answer": QUICK_ANSWER_VIEWS}
+SCHEMA_VERSION = 2
 
 # Mirrors IsSystemishModuleAsciiLower / IsGameExeModuleAsciiLower in
 # dump_tool/src/CrashLoggerParseCore.cpp: frames a reader skips.
@@ -126,6 +140,22 @@ def tullius_view(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def quick_answer_view(summary: dict[str, Any]) -> dict[str, Any]:
+    """The quick answer's one lead: the mod it names, or none. A known cause
+    it leads with is checked against the expected signature."""
+    qa = summary.get("quick_answer") if isinstance(summary.get("quick_answer"), dict) else {}
+    labels = [norm(qa[k]) for k in ("suspect_file", "suspect_mod") if isinstance(qa.get(k), str) and qa[k].strip()]
+    case = qa.get("case", "") if isinstance(qa.get("case"), str) else ""
+    signature = summary.get("signature_match") or {}
+    return {
+        "ranked": [labels] if labels else [],
+        "lead": labels,
+        "single_answer": True,
+        "case": case,
+        "known_cause": (signature.get("id", "") if isinstance(signature, dict) else "") if case == "known_issue" else "",
+    }
+
+
 # ------------------------------------------------------------------- scoring
 
 def _hit(labels: list[str] | str, expected: set[str]) -> bool:
@@ -144,9 +174,13 @@ def score_view(view: dict[str, Any], truth: dict[str, Any]) -> dict[str, Any]:
         top3 = None
     else:
         outcome = "abstain" if not has_lead else ("correct" if _hit(lead, expected) else "wrong")
-        top3 = any(_hit(labels, expected) for labels in view.get("ranked", [])[:3])
+        # The quick answer names one lead at most: no top 3.
+        top3 = None if view.get("single_answer") else any(
+            _hit(labels, expected) for labels in view.get("ranked", [])[:3])
     result: dict[str, Any] = {"outcome": outcome, "top3": top3,
                               "lead": lead if isinstance(lead, str) else (lead[0] if lead else "")}
+    if view.get("single_answer"):
+        result["case"] = view.get("case", "")
     want_cause = str(truth.get("known_cause", "")).strip()
     if want_cause and "known_cause" in view:
         result["known_cause_hit"] = view["known_cause"] == want_cause
@@ -165,6 +199,7 @@ def score_corpus(corpus: Path) -> dict[str, Any]:
         for name in ("tullius_only", "tullius_with_crash_logger"):
             summary = json.loads((base / f"{name}_summary.json").read_text(encoding="utf-8"))
             views[name] = tullius_view(summary)
+            views[f"{name}_quick_answer"] = quick_answer_view(summary)
         views["crash_logger"] = json.loads((base / "crash_logger_view.json").read_text(encoding="utf-8"))
         scored = {name: score_view(view, truth) for name, view in views.items()}
         for name, result in scored.items():
@@ -193,22 +228,34 @@ def score_corpus(corpus: Path) -> dict[str, Any]:
         }
         for name, t in totals.items()
     }
-    return {"schema_version": SCHEMA_VERSION, "overall": overall, "cases": cases_out}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "view_groups": {group: list(views) for group, views in VIEW_GROUPS.items()},
+        "overall": overall,
+        "cases": cases_out,
+    }
 
 
 def print_table(report: dict[str, Any]) -> None:
     def fmt(v: float | None) -> str:
         return "-" if v is None else f"{v:.0%}"
-    print(f"{'view':28} {'cases':>5} {'top1':>6} {'wrong':>6} {'abstain':>8} {'top3':>6} {'cause':>6}")
-    for name in VIEWS:
-        o = report["overall"][name]
-        print(f"{name:28} {o['cases']:>5} {fmt(o['top1_accuracy']):>6} {fmt(o['wrong_lead_rate']):>6} "
-              f"{fmt(o['abstain_rate']):>8} {fmt(o['top3_recall']):>6} {fmt(o['known_cause_rate']):>6}")
-    print()
+    titles = {
+        "candidate_ranking": "Candidate ranking (the analysis: who to check first)",
+        "quick_answer": "Quick answer (what the report tells the player first)",
+    }
+    for group, names in VIEW_GROUPS.items():
+        print(titles[group])
+        print(f"  {'view':38} {'cases':>5} {'top1':>6} {'wrong':>6} {'abstain':>8} {'top3':>6} {'cause':>6}")
+        for name in names:
+            o = report["overall"][name]
+            print(f"  {name:38} {o['cases']:>5} {fmt(o['top1_accuracy']):>6} {fmt(o['wrong_lead_rate']):>6} "
+                  f"{fmt(o['abstain_rate']):>8} {fmt(o['top3_recall']):>6} {fmt(o['known_cause_rate']):>6}")
+        print()
     for case in report["cases"]:
-        marks = "  ".join(f"{name}={case['views'][name]['outcome']}({case['views'][name]['lead'] or '-'})"
-                          for name in VIEWS)
-        print(f"{case['id']}: {marks}")
+        for group, names in VIEW_GROUPS.items():
+            marks = "  ".join(f"{name}={case['views'][name]['outcome']}({case['views'][name]['lead'] or '-'})"
+                              for name in names)
+            print(f"{case['id']} [{group}]: {marks}")
 
 
 # ------------------------------------------------------------------ add-case

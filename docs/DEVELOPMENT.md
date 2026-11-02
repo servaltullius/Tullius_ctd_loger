@@ -213,7 +213,15 @@ When `SKYDIAG_QUALITY_CORPUS` is not set, the gate reports this step as `SKIPPED
 - `tullius_with_crash_logger`: our analyzer with the paired Crash Logger log
 - `crash_logger`: the first probable call-stack frame outside Windows, the C/C++ runtime and the game EXE, which is what a reader of the log alone would check
 
-Ground truth is the module(s) or mod(s) at fault, or `--expect-none` when no plugin caused it (then naming none is correct); `--expect-known-cause` also checks the signature. Metrics: top-1 accuracy, wrong-lead rate, abstain rate, top-3 recall, known-cause rate.
+These three score the candidate ranking: what the analysis behind the report decides. Two more views score the quick answer, the first lines a player reads, apart from it:
+
+- `tullius_only_quick_answer`, `tullius_with_crash_logger_quick_answer`: the mod the quick answer names, or none (a forced close, a clean exit, a snapshot, a damaged save, or a known cause with its own fix, which is checked against `--expect-known-cause`)
+
+The two groups answer different questions and are reported apart (`view_groups` in the JSON, two tables in the output). A forced close whose candidates still name the plugin that called freed code is a wrong lead in the ranking but a correct "names no mod" in the quick answer; neither number is a misdiagnosis rate on its own.
+
+Ground truth is the module(s) or mod(s) at fault, or `--expect-none` when no plugin caused it (then naming none is correct); `--expect-known-cause` also checks the signature. Metrics: top-1 accuracy, wrong-lead rate, abstain rate, top-3 recall (ranking only), known-cause rate.
+
+The release gate's reviewed-corpus step (`scripts/analyze_bucket_quality.py`, above) grades the candidate ranking too, not the quick answer.
 
 ```bash
 python scripts/accuracy_benchmark.py add-case --corpus <corpus> --id <id> --kind ctd \
