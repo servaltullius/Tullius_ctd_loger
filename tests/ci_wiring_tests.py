@@ -25,6 +25,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
+ACTIONS = REPO_ROOT / ".github" / "actions"
+WINDOWS_SETUP = "./.github/actions/windows-setup"
 
 
 def _read(path: Path) -> str:
@@ -531,7 +533,8 @@ def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
     # changes the build without a commit here; a hung step otherwise holds a
     # runner for the 6-hour default.
     # GitHub's own actions too: a tag can be moved, a commit cannot.
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    # The local actions (.github/actions/*/action.yml) are held to the same.
+    for path in sorted(WORKFLOWS.glob("*.yml")) + sorted(ACTIONS.glob("*/action.yml")):
         text = _read(path)
         for match in re.finditer(r"uses:\s*([^\s#]+)@([^\s#]+)", text):
             action, ref = match.groups()
@@ -552,11 +555,41 @@ def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
             if re.search(r"^    runs-on:", body, re.M) and not re.search(r"^    timeout-minutes:\s*\d+", body, re.M):
                 failures.append(f"{path.name}: job {job} needs a job-level timeout-minutes")
             # The plugin builds CommonLibSSE-NG from the extern/ submodule.
-            if "bootstrap-vcpkg" in body and not re.search(r"^\s+submodules:\s*true\b", body, re.M):
+            builds = "bootstrap-vcpkg" in body or f"uses: {WINDOWS_SETUP}" in body
+            if builds and not re.search(r"^\s+submodules:\s*true\b", body, re.M):
                 failures.append(f"{path.name}: job {job} builds the plugin but does not check out submodules")
+            # Python, .NET, MSVC and vcpkg come from the one shared setup, so
+            # the four Windows jobs cannot drift apart again.
+            if re.search(r"^    runs-on:\s*windows", body, re.M) and f"uses: {WINDOWS_SETUP}" not in body:
+                failures.append(f"{path.name}: Windows job {job} must use {WINDOWS_SETUP}")
         if "git clone https://github.com/microsoft/vcpkg" in text:
             if "'default-registry'.baseline" not in text or "checkout --quiet --detach $baseline" not in text:
                 failures.append(f"{path.name}: the vcpkg clone must be checked out at the manifest baseline")
+
+
+def check_windows_setup_action(failures: list[str]) -> None:
+    action = ACTIONS / "windows-setup" / "action.yml"
+    if not action.is_file():
+        failures.append(f"{action.relative_to(REPO_ROOT)} is missing")
+        return
+    text = _read(action)
+    for needed in (
+        "using: composite",
+        "actions/setup-python@",
+        "ilammy/msvc-dev-cmd@",
+        "git clone https://github.com/microsoft/vcpkg",
+        "vcpkg/archives",
+    ):
+        if needed not in text:
+            failures.append(f"windows-setup/action.yml must contain {needed!r}")
+    # dump-stress builds no viewer; every other job packages it.
+    if not re.search(r"Setup \.NET SDK\n\s+if: \$\{\{ inputs\.dotnet == 'true' \}\}", text):
+        failures.append("windows-setup/action.yml must install .NET only when inputs.dotnet is 'true'")
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = _read(path)
+        for inline in ("git clone https://github.com/microsoft/vcpkg", "ilammy/msvc-dev-cmd@"):
+            if inline in workflow:
+                failures.append(f"{path.name}: {inline!r} belongs in the windows-setup action")
 
 
 def check_release_job_hardening(failures: list[str]) -> None:
@@ -838,6 +871,7 @@ def main() -> int:
     check_compiler_cache_is_ci_only(failures)
     check_vcpkg_overlay_reaches_existing_build_dirs(failures)
     check_workflows_are_pinned_and_bounded(failures)
+    check_windows_setup_action(failures)
     check_release_job_hardening(failures)
     check_apt_installs_are_bounded(failures)
 
