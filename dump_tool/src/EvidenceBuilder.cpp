@@ -103,7 +103,13 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.isHangLike = isHangLike;
   ctx.isSnapshotLike = isSnapshotLike;
   ctx.isManualCapture = isManualCapture;
-  ctx.isDamagedSaveSuspected = isCrashLike && !ctx.isForcedClose && !ctx.isFilteredCleanExit &&
+  // A known cause with its own fix or a hook race leads the quick answer and
+  // the next action; the summary sentence must not lead with the save then.
+  const bool strongerLead =
+    (r.signature_match.has_value() && r.signature_match->scope == "root_cause" &&
+     !r.signature_match->recommendations.empty()) ||
+    r.hook_stub_race.detected;
+  ctx.isDamagedSaveSuspected = isCrashLike && !ctx.isForcedClose && !ctx.isFilteredCleanExit && !strongerLead &&
                                internal::SaveLoadSuggestsDamagedSave(r.save_load);
   ctx.hasModule = hasModule;
   ctx.isSystem = isSystem;

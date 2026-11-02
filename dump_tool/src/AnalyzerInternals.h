@@ -58,6 +58,11 @@ std::wstring DecodeSaveLoadName(std::uint64_t b, std::uint64_t c, std::uint64_t 
 // automatic freeze capture before the load finished. A manual capture may be
 // taken during a load that would have finished.
 bool CountsAsFailedLoad(const AnalysisResult& r);
+// Where a failed load failed, for counting places: the faulting module and
+// offset; without a module, what the faulting instruction did (a null read,
+// a jump into data); for a freeze, its wait bucket. Not the crash bucket: that
+// holds the callers too, and one fault reached from two call paths is one place.
+std::string SaveLoadFailurePlace(const AnalysisResult& r);
 
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,

@@ -16,6 +16,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <string>
@@ -822,7 +823,17 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
 
   const auto outBase = MakeTempDir(L"skydiag_save_load_e2e");
   ParkedThread faulting;
-  const auto analyze = [&](const wchar_t* dumpName, DWORD64 crashAddress) {
+  // The header time a dump was written with (MINIDUMP_HEADER.TimeDateStamp).
+  const auto headerTime = [](const std::filesystem::path& dumpPath) {
+    std::ifstream file(dumpPath, std::ios::binary);
+    MINIDUMP_HEADER header{};
+    file.read(reinterpret_cast<char*>(&header), sizeof(header));
+    Require(file.good(), "The dump header must be read");
+    return header.TimeDateStamp;
+  };
+  // Writes a crash dump; headerTimeOverride sets its header time (the two real
+  // crashes were 971 s apart, a test writes both within a second or two).
+  const auto write = [&](const wchar_t* dumpName, DWORD64 crashAddress, std::uint32_t headerTimeOverride) {
     CONTEXT ctx = faulting.Context();
     ctx.Rip = crashAddress;
     auto shared = layoutLoading(faulting.tid());
@@ -851,32 +862,64 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
       &err);
     CloseHandle(process);
     Require(written, "The crash dump must be written");
-
+    if (headerTimeOverride != 0u) {
+      std::fstream file(dumpPath, std::ios::in | std::ios::out | std::ios::binary);
+      MINIDUMP_HEADER header{};
+      file.read(reinterpret_cast<char*>(&header), sizeof(header));
+      header.TimeDateStamp = headerTimeOverride;
+      file.seekp(0);
+      file.write(reinterpret_cast<const char*>(&header), sizeof(header));
+      Require(file.good(), "The dump header time must be moved");
+    }
+    return dumpPath;
+  };
+  const auto analyze = [&](const std::filesystem::path& dumpPath) {
     skydiag::dump_tool::AnalyzeOptions opt{};
     opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
     opt.output_dir = outBase.wstring();
     skydiag::dump_tool::AnalysisResult result{};
+    std::wstring err;
     Require(skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err), "AnalyzeDump failed");
     return result;
   };
 
-  const auto first = analyze(L"SkyrimDiag_Crash_20261101_161808_940.dmp", faulting.Context().Rip);
-  Require(first.save_load.seen && first.save_load.in_progress && first.save_load.name == L"Save76_FC70D793_0_646F7" &&
-            first.save_load.seconds_loading > 18.9 && first.save_load.seconds_loading < 19.1,
-    "The save being loaded is read from the dump's blackbox");
-  Require(first.save_load.earlier_crashes == 0u && first.quick_answer.case_id != "damaged_save",
-    "One failed load names no damaged save");
+  const auto firstDump = write(L"SkyrimDiag_Crash_20261101_161808_940.dmp", faulting.Context().Rip, 0u);
+  const auto secondDump = write(
+    L"SkyrimDiag_Crash_20261101_163419_163.dmp", reinterpret_cast<DWORD64>(&OtherCrashSite), headerTime(firstDump) + 971u);
 
-  const auto second = analyze(
-    L"SkyrimDiag_Crash_20261101_163419_163.dmp", reinterpret_cast<DWORD64>(&OtherCrashSite));
+  // In reverse order: the later crash first sees nothing earlier, and the
+  // earlier one never counts the later one.
+  const auto secondAlone = analyze(secondDump);
+  Require(secondAlone.save_load.seen && secondAlone.save_load.in_progress &&
+            secondAlone.save_load.name == L"Save76_FC70D793_0_646F7" &&
+            secondAlone.save_load.seconds_loading > 18.9 && secondAlone.save_load.seconds_loading < 19.1,
+    "The save being loaded is read from the dump's blackbox");
+  Require(secondAlone.save_load.earlier_crashes == 0u && secondAlone.quick_answer.case_id != "damaged_save",
+    "One failed load names no damaged save");
+  const auto first = analyze(firstDump);
+  Require(first.dump_capture_unix + 971u == secondAlone.dump_capture_unix, "The dump header times are read");
+  Require(first.save_load.earlier_crashes == 0u && first.quick_answer.case_id != "damaged_save",
+    "The earlier crash does not count the later one, though it was analyzed after it");
+
+  const auto second = analyze(secondDump);
   Require(!first.crash_bucket_key.empty() && second.crash_bucket_key != first.crash_bucket_key,
     "The two crashes are in different places");
   Require(second.save_load.earlier_crashes == 1u && second.save_load.crash_places == 2u &&
             second.save_load.other_save_crashes == 0u,
-    "The second analysis reads the first one's save from crash_history.json");
+    "Re-analyzed, the later crash reads the earlier one's save from crash_history.json");
   Require(second.quick_answer.case_id == "damaged_save" && !second.recommendations.empty() &&
             second.recommendations[0].rfind(L"[Damaged save] ", 0) == 0,
-    "The second analysis leads with the save");
+    "The later crash leads with the save");
+
+  // A renamed copy of the earlier dump (same bytes, a new file time) is the
+  // same incident.
+  const auto copy = outBase / L"copy_of_the_first_crash.dmp";
+  std::filesystem::copy_file(firstDump, copy);
+  std::filesystem::last_write_time(copy, std::filesystem::last_write_time(firstDump) + std::chrono::hours(1));
+  (void)analyze(copy);
+  const auto again = analyze(secondDump);
+  Require(again.save_load.earlier_crashes == 1u && again.save_load.crash_places == 2u,
+    "A copy of a dump does not count twice");
 
   std::filesystem::remove_all(outBase);
 }

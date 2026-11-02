@@ -105,11 +105,13 @@ std::wstring DamagedSaveLead(const SaveLoadInfo& saveLoad, bool en)
 
 std::wstring DamagedSaveAction(bool en)
 {
+  // An earlier save that loads does not prove this one damaged: a mod may fail
+  // only on this save's data.
   return en
-    ? L"Load a save made before this one. If it loads, the problem is this save only, so carry on from that one; if it "
-      L"fails too, the problem is in the mod setup, not the save."
-    : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면 이 세이브만의 문제이니 그 세이브부터 이어 하세요. "
-      L"그 세이브도 안 되면 세이브가 아니라 모드 구성 쪽 문제입니다.";
+    ? L"Load a save made before this one. If it loads, check whether the problem comes back only with the save that "
+      L"failed; if it fails too, the mod setup is more likely than the save."
+    : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면, 문제가 난 세이브에서만 반복되는지 확인해 "
+      L"보세요. 그 세이브도 안 되면 세이브보다 모드 구성 쪽일 가능성이 큽니다.";
 }
 
 bool HasNearbyProbableDll(const AnalysisResult& r)

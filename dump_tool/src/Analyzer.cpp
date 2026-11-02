@@ -480,6 +480,13 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (!ComputeDumpIdentity(mf.file.get(), dumpBase, dumpSize, &out.dump_identity, err)) {
     return false;
   }
+  // When the dump was written (ADR-0025): a copy or a renamed file keeps it.
+  if (dumpSize >= sizeof(MINIDUMP_HEADER)) {
+    const auto* header = static_cast<const MINIDUMP_HEADER*>(dumpBase);
+    if (header->Signature == MINIDUMP_SIGNATURE) {
+      out.dump_capture_unix = header->TimeDateStamp;
+    }
+  }
 
   // Optional: allow external hook-framework list override.
   if (!opt.data_dir.empty()) {

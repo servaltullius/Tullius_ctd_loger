@@ -1257,8 +1257,11 @@ void TestDamagedSave()
       "the damaged save leads");
     Require(qa.headline == (en ? L"The game crashed to desktop (CTD). " : L"게임이 튕겼습니다(CTD). ") + lead,
       "the damaged-save headline");
-    Require(Contains(qa.action, en ? L"Load a save made before this one." : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요."),
-      "load an earlier save");
+    Require(Contains(qa.action, en ? L"Load a save made before this one." : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요.") &&
+              Contains(qa.action, en ? L"check whether the problem comes back only with the save that failed"
+                                     : L"문제가 난 세이브에서만 반복되는지 확인해 보세요") &&
+              !Contains(qa.action, en ? L"this save only" : L"이 세이브만의 문제"),
+      "load an earlier save, and see whether only this one fails");
     Require(!qa.why_not_certain.empty(), "why it is not certain");
     RequirePlainWords(qa, "damaged save");
     Require(r.summary_sentence == lead + L" " + plain.summary_sentence, "summary prefix");
@@ -1357,6 +1360,50 @@ void TestDamagedSave()
       auto finished = counted;
       finished.save_load.in_progress = false;
       Require(!internal::CountsAsFailedLoad(finished), "a finished load does not");
+    }
+
+    // Where a failed load failed: the faulting module and offset, else what the
+    // faulting instruction did; not the crash bucket, which holds the callers.
+    {
+      namespace internal = skydiag::dump_tool::internal;
+      auto inModule = crash(0, 0, 0);
+      inModule.fault_module_filename = L"SkyrimSE.exe";
+      inModule.fault_module_offset = 0x172a1e;
+      inModule.crash_bucket_key = L"CTD3-7dbaf39d10226dde";
+      auto otherCaller = inModule;
+      otherCaller.crash_bucket_key = L"CTD3-0000000000000001";
+      Require(internal::SaveLoadFailurePlace(inModule) == "0xc0000005|skyrimse.exe+0x172a1e" &&
+                internal::SaveLoadFailurePlace(otherCaller) == internal::SaveLoadFailurePlace(inModule),
+        "one fault from two call paths is one place");
+      auto noModule = crash(0, 0, 0);
+      noModule.fault_module_filename.clear();
+      noModule.fault_instruction.verdict = "bad_jump";
+      noModule.fault_instruction.access = "execute";
+      noModule.fault_instruction.target_state = "not_executable";
+      Require(internal::SaveLoadFailurePlace(noModule) == "0xc0000005|bad_jump|execute|not_executable",
+        "a jump into data has a place without a module");
+      auto freeze = crash(0, 0, 0);
+      freeze.exc_code = 0;
+      freeze.crash_bucket_key = L"HANG1-a29167f39cb6f9b0";
+      Require(internal::SaveLoadFailurePlace(freeze) == "freeze|HANG1-a29167f39cb6f9b0", "a freeze's place");
+    }
+
+    // A known cause with its own fix leads everywhere: the quick answer, the
+    // next action and the summary sentence.
+    {
+      auto known = crash(1, 2, 0);
+      skydiag::dump_tool::SignatureMatch sig{};
+      sig.id = "CONTENT_CATALOG_FORMAT_MISMATCH";
+      sig.scope = "root_cause";
+      sig.confidence_level = i18n::ConfidenceLevel::kMedium;
+      sig.recommendations.push_back(en ? L"[Known cause] Move ContentCatalog.txt to the Recycle Bin."
+                                       : L"[알려진 원인] ContentCatalog.txt를 휴지통으로 옮기세요.");
+      known.signature_match = sig;
+      BuildEvidenceAndSummary(known, lang);
+      Require(known.quick_answer.case_id == "known_issue" &&
+                !Contains(known.summary_sentence, en ? L"Loading the same save" : L"같은 세이브(") &&
+                saveLine(known, damagedTag) == known.recommendations.size(),
+        "a known cause leads, not the save");
     }
 
     // Other saves failed too: the mod setup, not one save.

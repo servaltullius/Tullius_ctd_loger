@@ -21,9 +21,13 @@ struct CrashHistoryEntry
   std::string signature_id;
   std::vector<std::string> all_suspects;
   std::vector<std::string> candidate_keys;
+  // ADR-0025: when the dump was written (MINIDUMP_HEADER, seconds since
+  // 1970), 0 when unknown; timestamp_utc is when it was first analyzed.
+  std::uint64_t capture_unix = 0;
   // ADR-0025: the save being loaded when the game crashed; empty otherwise.
-  std::string loading_save_key;   // SaveLoadInfo::key
-  std::string loading_save_name;  // SaveLoadInfo::name, for reading the file
+  std::string loading_save_key;     // SaveLoadInfo::key
+  std::string loading_save_name;    // SaveLoadInfo::name, for reading the file
+  std::string loading_fault_place;  // internal::SaveLoadFailurePlace
 };
 
 struct ModuleStats
@@ -47,13 +51,26 @@ struct BucketCandidateStats
   std::size_t count = 0;
 };
 
-// ADR-0025: the entries that crashed while loading one save.
+// ADR-0025: the capture being analyzed, as GetSaveLoadCrashStats compares it.
+struct SaveLoadCrashQuery
+{
+  std::string save_key;
+  std::string place;              // this capture's failure place
+  std::uint64_t capture_unix = 0;  // when this dump was written; 0 unknown
+  std::string content_sha256;     // copies of the dump (same bytes) are this capture
+  // Only for entries with no capture time: those after this dump's own entry
+  // (history order) count as later.
+  std::string dump_file;
+  std::string dump_identity_key;
+};
+
+// ADR-0025: the failed loads of one save before the capture being analyzed.
 struct SaveLoadCrashStats
 {
-  std::size_t count = 0;
-  std::vector<std::string> bucket_keys;  // distinct, in history order
-  // Entries that failed loading another save after the first of these, or in
-  // the day before it (a broken mod setup fails every save).
+  std::size_t count = 0;                // earlier incidents (copies of one dump count once)
+  std::vector<std::string> places;      // distinct failure places, this capture's included
+  // Failed loads of other saves before this capture, after the first of these
+  // or in the day before it (a broken mod setup fails every save).
   std::size_t other_save_count = 0;
 };
 
@@ -84,15 +101,9 @@ public:
   std::vector<ModuleStats> GetModuleStats(std::size_t lastN = 0) const;
   BucketStats GetBucketStats(const std::string& bucketKey) const;
   std::vector<BucketCandidateStats> GetBucketCandidateStats(const std::string& bucketKey) const;
-  // An empty key counts nothing. Only entries before the current dump's own
-  // entry count (a re-analysis leaves out the crashes after it); without one,
-  // every entry is earlier. The current crash's bucket is one of the places
-  // when there are earlier entries.
-  SaveLoadCrashStats GetSaveLoadCrashStats(
-    const std::string& saveKey,
-    const std::string& currentBucketKey = {},
-    std::string_view currentDumpFile = {},
-    std::string_view currentDumpIdentityKey = {}) const;
+  // An empty key counts nothing. "Earlier" is by the dumps' capture times, so
+  // the order the dumps were analyzed in does not matter.
+  SaveLoadCrashStats GetSaveLoadCrashStats(const SaveLoadCrashQuery& query) const;
 
   std::size_t Size() const { return m_entries.size(); }
 

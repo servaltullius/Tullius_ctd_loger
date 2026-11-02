@@ -189,6 +189,22 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
   return info;
 }
 
+std::string SaveLoadFailurePlace(const AnalysisResult& r)
+{
+  if (r.exc_code == 0u) {
+    return "freeze|" + WideToUtf8(r.crash_bucket_key);
+  }
+  char code[16]{};
+  std::snprintf(code, sizeof(code), "0x%08x", r.exc_code);
+  if (!r.fault_module_filename.empty()) {
+    char offset[24]{};
+    std::snprintf(offset, sizeof(offset), "+0x%llx", static_cast<unsigned long long>(r.fault_module_offset));
+    return std::string(code) + "|" + WideToUtf8(minidump::WideLower(r.fault_module_filename)) + offset;
+  }
+  const auto& fault = r.fault_instruction;
+  return std::string(code) + "|" + fault.verdict + "|" + fault.access + "|" + fault.target_state;
+}
+
 bool CountsAsFailedLoad(const AnalysisResult& r)
 {
   return r.save_load.in_progress && !r.save_load.key.empty() && !r.is_filtered_clean_exit &&

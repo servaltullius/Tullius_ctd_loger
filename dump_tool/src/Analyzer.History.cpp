@@ -212,14 +212,22 @@ void LoadCrashHistoryContext(
   const auto dumpIdentityKey = CrashHistoryIdentityKey(out);
   const auto bucketKey = WideToUtf8(out.crash_bucket_key);
 
-  // ADR-0025: earlier failed loads of the same save, and in how many places
-  // (buckets) they and this capture failed. Counted before this dump's own
-  // entry is removed: a re-analysis counts only the crashes before it.
+  // ADR-0025: earlier failed loads of the same save (by capture time, so the
+  // order the dumps are analyzed in does not matter), and in how many places
+  // they and this capture failed. Counted before this dump's own entry is
+  // removed, which an entry with no capture time is ordered by.
   if (out.save_load.in_progress && !out.save_load.key.empty()) {
-    const auto saveStats = history.GetSaveLoadCrashStats(out.save_load.key, bucketKey, dumpFile, dumpIdentityKey);
+    SaveLoadCrashQuery query{};
+    query.save_key = out.save_load.key;
+    query.place = internal::SaveLoadFailurePlace(out);
+    query.capture_unix = out.dump_capture_unix;
+    query.content_sha256 = out.dump_identity.sha256;
+    query.dump_file = dumpFile;
+    query.dump_identity_key = dumpIdentityKey;
+    const auto saveStats = history.GetSaveLoadCrashStats(query);
     out.save_load.earlier_crashes = saveStats.count;
     out.save_load.other_save_crashes = saveStats.other_save_count;
-    out.save_load.crash_places = saveStats.bucket_keys.size();
+    out.save_load.crash_places = saveStats.places.size();
   }
 
   history.RemoveEntriesForDumpFile(dumpFile, dumpIdentityKey);
@@ -333,9 +341,11 @@ void AppendCrashHistoryEntry(
     entry.signature_id = out.signature_match->id;
   }
   entry.candidate_keys = CollectHistoryCandidateKeys(out);
+  entry.capture_unix = out.dump_capture_unix;
   if (internal::CountsAsFailedLoad(out)) {
     entry.loading_save_key = out.save_load.key;
     entry.loading_save_name = WideToUtf8(out.save_load.name);
+    entry.loading_fault_place = internal::SaveLoadFailurePlace(out);
   }
 
   history.AddEntry(std::move(entry));
