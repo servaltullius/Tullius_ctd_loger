@@ -7,7 +7,9 @@ the conclusion, freeze state and confidence, bucket, known signature, quick
 answer, suspects, actionable candidates, recommendations and their groups, the selected next action,
 the faulting instruction, and summary keys that appeared or disappeared.
 Everything else in a summary (evidence details, events, paths, the analysis
-time) is left out on purpose: those move with every run.
+time) is left out on purpose: those move with every run. Dumps of the same
+name from different folders are numbered (crash-1, crash-2) in the output and
+its folders, and every changed analysis prints the dump's path.
 
   python scripts/compare_analyses.py --dumps <dir or .dmp> [...] \
       --base-cli <old build-win/bin/SkyrimDiagDumpToolCli.exe> \
@@ -25,6 +27,7 @@ import argparse
 import json
 import sys
 import tempfile
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -120,15 +123,40 @@ def only_keys(lines: list[str]) -> bool:
 
 
 def find_dumps(paths: list[Path]) -> list[Path]:
+    """The dumps to compare, each file once (a folder and a file in it can both be given)."""
     dumps: list[Path] = []
+    seen: set[Path] = set()
     for path in paths:
         if path.is_dir():
-            dumps.extend(sorted(path.glob("*.dmp")))
+            found = sorted(path.glob("*.dmp"))
         elif path.suffix.lower() == ".dmp" and path.is_file():
-            dumps.append(path)
+            found = [path]
         else:
             raise SystemExit(f"not a dump or a folder of dumps: {path}")
+        for dump in found:
+            if dump.resolve() not in seen:
+                seen.add(dump.resolve())
+                dumps.append(dump)
     return dumps
+
+
+def dump_labels(dumps: list[Path]) -> list[str]:
+    """A name per dump for its results and its output folder: the file name
+    without .dmp, numbered when dumps from different folders share it (dumps
+    from several players are often all crash.dmp)."""
+    stems = Counter(dump.stem for dump in dumps)
+    labels: list[str] = []
+    used: set[str] = set()
+    for dump in dumps:
+        label = dump.stem
+        if stems[dump.stem] > 1:
+            n = 1
+            while f"{dump.stem}-{n}" in used or f"{dump.stem}-{n}" in stems:
+                n += 1
+            label = f"{dump.stem}-{n}"
+        used.add(label)
+        labels.append(label)
+    return labels
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,25 +177,28 @@ def main(argv: list[str] | None = None) -> int:
         if not cli.is_file():
             raise SystemExit(f"analyzer not found: {cli}")
     out = args.out or Path(tempfile.mkdtemp(prefix="sdcmp-"))
+    labels = dump_labels(dumps)
 
-    jobs = [(side, cli, lang, dump)
-            for dump in dumps for lang in args.lang
+    jobs = [(side, cli, lang, label, dump)
+            for label, dump in zip(labels, dumps) for lang in args.lang
             for side, cli in (("base", args.base_cli), ("new", args.new_cli))]
 
-    def run(job: tuple[str, Path, str, Path]) -> tuple[tuple[str, str, str], dict[str, Any]]:
-        side, cli, lang, dump = job
-        summary = run_analyzer([str(cli)], dump, out / side / lang / dump.stem, with_crash_logger=True, lang=lang)
-        return (side, lang, dump.stem), summary
+    def run(job: tuple[str, Path, str, str, Path]) -> tuple[tuple[str, str, str], dict[str, Any]]:
+        side, cli, lang, label, dump = job
+        summary = run_analyzer([str(cli)], dump, out / side / lang / label, with_crash_logger=True, lang=lang)
+        return (side, lang, label), summary
 
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         results = dict(pool.map(run, jobs))
 
     changed = keys_only = 0
-    for dump in dumps:
+    for label, dump in zip(labels, dumps):
         for lang in args.lang:
-            lines = compare(results[("base", lang, dump.stem)], results[("new", lang, dump.stem)])
+            lines = compare(results[("base", lang, label)], results[("new", lang, label)])
             state = "same" if not lines else ("keys only" if only_keys(lines) else f"{len(lines)} change(s)")
-            print(f"{lang} {dump.stem}: {state}")
+            print(f"{lang} {label}: {state}")
+            if lines:
+                print(f"    dump: {dump}")
             for line in lines:
                 print(f"    {line}")
             keys_only += only_keys(lines)
