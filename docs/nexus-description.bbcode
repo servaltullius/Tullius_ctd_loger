@@ -63,8 +63,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.73 Update Notice[/b]
-Replace the previous installation with the complete v0.2.73 zip. Do not copy only individual EXEs or DLLs. The SKSE plugin, the Helper, the analyzer and the viewer have all changed (the SharedLayout protocol is still v4); there are no new settings. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.74 Update Notice[/b]
+Replace the previous installation with the complete v0.2.74 zip. Do not copy only individual EXEs or DLLs. The SKSE plugin, the Helper, the analyzer and the viewer have all changed (the SharedLayout protocol is still v4; the blackbox only gains event types); there are no new settings. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. The save being loaded is recorded only by the v0.2.74 plugin, so the damaged-save lead works for crashes from now on. [font=Courier New]CrashHookMode[/font] is now read strictly: a typo or an out-of-range value means 1 (the default), never 0 (off) or 2. [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -122,7 +122,16 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.73[/size][/b]
+[b][size=4]What's New in v0.2.74[/size][/b]
+Which save was loading, a damaged-save lead, and an easier text report.[list]
+[*][b]The save being loaded:[/b] the plugin records when a save starts and finishes loading, and the report shows it on a "Save:" line. On November 1 one save crashed twice while loading, each time somewhere else, while the save before it and a new save loaded fine; the reports named the mods seen at that moment, and nothing recorded which save it was
+[*][b]Damaged-save lead:[/b] when one save fails to load again in a different place, the quick answer, the conclusion and the next action lead with that save (medium likelihood). Only for a crash, with an earlier failed load of the same save, two or more known failure places, and no other save failing in between; a known cause or a hook race comes first. Order is by the dumps' capture time, copies of a dump count once, and a freeze and the crash of one load count as one failure. It never says the save is certainly broken: try an earlier save, and see whether the problem stays with this one
+[*][b]Easier text report:[/b] the checklist right after the evidence (it came after about 120 lines of recent resources); no empty exception block for freezes and manual captures; setup notes (plugin slots, DLLs SKSE did not load, files provided by several mods, capture profile) in their own section; the last 40 resources; repeated thread and module events on one line; modpack prefixes such as [font=Courier New][NoDelete] 0444[/font] removed from mod names where people read them
+[*][b]CrashHookMode typos:[/b] a non-numeric value used to turn the crash hook off, and an out-of-range one turned on mode 2 without its consent setting. Now only 0, 1 and 2 count, anything else is 1, and mode 2 needs [font=Courier New]EnableUnsafeCrashHookMode2=1[/font]; a bad value is logged in SkyrimDiag.log
+[*]The viewer re-analyzes a dump that was loading a save when the save history it was judged on has changed, and re-analyzes dumps analyzed by v0.2.73 once when you open them
+[/list]
+
+[b][size=4]Earlier: v0.2.73[/size][/b]
 Long output folders (MO2 too), advice that matches the analysis, and analyses that survive one bad value.[list]
 [*][b]Long output folder paths:[/b] with a long output folder path the analysis was not written (from about 130 characters, about 140 under MO2), and with a longer one saving the dump and starting the analyzer or the viewer failed too (from about 190). Steam's default install path was close to the limit. Long paths are now used in Windows' extended form, and the file checks MO2's virtual file system refuses past MAX_PATH go through file handles. Usual paths are handled as before
 [*][b]Advice that matches the analysis:[/b] a mod is no longer named (or "disable it") from the object references of a Crash Logger log that may belong to another crash; in a crash that jumped into freed code (often while the game closes) the mod that called it is not blamed; the wording for manual captures, freezes and errors while closing the game is fixed; the viewer's share text and labels agree with the report
@@ -254,6 +263,7 @@ For v0.2.70, the release candidates ran on the same setup. A manual capture kept
 For v0.2.71, a test build with the same plugin code ran on the same setup. The log showed the hooks set on the game window's thread 3 to 4 seconds after data load. A taskbar Close window during play in borderless mode was recorded as [font=Courier New]window_close[/font], and the shutdown error that followed was reported as a forced close without the viewer. A Quit from the Journal closed normally and left its quit line in SkyrimDiag.log. Not yet seen in real use: a direct click on the X button in windowed mode, Alt+F4 with the hooks on, and long play with the hooks on.
 For v0.2.72, a test build with the smaller dumps and the size cap ran on the same setup. Its first launch cut the output folder from 31 dumps (21.67 GB) to the newest 5 (4.23 GB). Five manual captures took 58-60 MB and a crash dump 67 MB; each analyzed the same with and without the local module files, and the crash call stack unwound from the dump alone through five mod DLLs. Not yet seen in real use: a freeze dump with the new scope, and the full-review fixes (covered by tests and the 31 kept dumps).
 For v0.2.73, test builds ran on the same setup. With a 205-character output folder under MO2, a manual capture and an F4 freeze both wrote their analyses (with 337-character cache paths) and the viewer opened the freeze. The hook stub record ran every 30 seconds and found 41 to 71 executable pages with jump stubs; a scan took 140-280 ms, so the module list now comes from one Toolhelp snapshot. The same check found that the plugin's previous-session log was not kept (CommonLib's own log emptied it first). A build with both fixes then took 16-110 ms per scan for the same pages and kept the previous session's plugin log. Not yet seen in real use: the freed-hook owner on a real crash (the exit crashes seen here stopped after October 30).
+For v0.2.74, the release package ran on the same setup (November 3, MO2): the plugin logged its version and the save loads, a manual capture wrote its dump, wait chains and report with the "Save:" line, and loading the save from November 1 crashed 17.5 s in (a call through a null function pointer). Loaded again, it crashed 29.7 s in somewhere else, and that report led with the damaged save (one earlier failed load, two places). Not yet seen in real use: a freeze capture after the Helper refactor, and the viewer re-analyzing after the save history changed (covered by tests).
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -443,8 +453,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.73 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.73 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었고(SharedLayout protocol은 그대로 v4), 새 설정은 없습니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.74 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.74 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었고(SharedLayout protocol은 그대로 v4, 블랙박스 이벤트 종류만 추가), 새 설정은 없습니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. 불러오던 세이브는 v0.2.74 플러그인부터 기록하므로, 세이브 손상 판단은 앞으로 나는 크래시부터 동작합니다. [font=Courier New]CrashHookMode[/font]를 엄격하게 읽습니다: 오타나 범위 밖 값은 0(끄기)이나 2가 아니라 1(기본값)로 읽습니다. [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -502,7 +512,16 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.73 새 기능[/size][/b]
+[b][size=4]v0.2.74 새 기능[/size][/b]
+불러오던 세이브 기록, 세이브 손상 판단, 읽기 쉬운 텍스트 리포트.[list]
+[*][b]불러오던 세이브 기록:[/b] 플러그인이 세이브 불러오기의 시작과 끝을 기록하고, 리포트에 "세이브:" 줄로 보여 줍니다. 11/01 같은 세이브를 두 번 불러오다 두 번 다 매번 다른 곳에서 튕겼고, 그 전 세이브와 새 세이브는 잘 열렸습니다. 리포트는 그 순간 보인 모드를 짚었고, 어떤 세이브였는지는 기록되지 않았습니다
+[*][b]세이브 손상 의심:[/b] 같은 세이브가 다시 다른 곳에서 실패하면 빠른 답, 결론, 다음 조치가 그 세이브를 먼저 말합니다(가능성 중간). 크래시이고, 같은 세이브의 이전 실패가 있고, 위치를 확인한 실패 장소가 2곳 이상이고, 그 사이 다른 세이브가 실패하지 않았을 때만입니다. 알려진 원인이나 설치 중인 후킹이 있으면 그것이 먼저입니다. 순서는 덤프의 캡처 시각으로 정하고, 같은 덤프의 사본은 한 번, 한 번 불러오는 동안 난 프리징과 크래시도 한 번으로 셉니다. 세이브가 깨졌다고 단정하지 않고, 이전 세이브가 열리는지와 이 세이브에서만 반복되는지 확인하도록 안내합니다
+[*][b]읽기 쉬운 텍스트 리포트:[/b] 권장 조치가 근거 바로 뒤에 옵니다(전에는 최근 리소스 120줄 남짓 뒤). 프리징과 수동 캡처에 빈 예외 블록을 쓰지 않습니다. 설치 환경 메모(플러그인 슬롯, SKSE가 로드하지 못한 DLL, 여러 모드가 제공하는 파일, 캡처 프로필)는 따로 모읍니다. 최근 리소스는 40개, 반복되는 스레드·모듈 이벤트는 한 줄로 묶고, 모드팩 접두어([font=Courier New][NoDelete] 0444[/font] 등)를 사람이 읽는 곳에서 뗍니다
+[*][b]CrashHookMode 오타:[/b] 숫자가 아닌 값은 크래시 훅을 껐고, 범위 밖 값은 동의 설정 없이 모드 2를 켰습니다. 이제 0·1·2만 인정하고 다른 값은 1로 읽으며, 모드 2는 [font=Courier New]EnableUnsafeCrashHookMode2=1[/font]일 때만 켭니다. 잘못된 값은 SkyrimDiag.log에 남깁니다
+[*]뷰어는 세이브를 불러오다 난 덤프의 판단에 쓴 세이브 이력이 바뀌었으면 다시 분석하고, v0.2.73이 분석해 둔 덤프는 열 때 한 번 다시 분석합니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.73[/size][/b]
 긴 출력 폴더(MO2 포함) 지원, 분석 결과와 맞는 조언, 값 하나에 무너지지 않는 분석.[list]
 [*][b]긴 출력 폴더 경로:[/b] 출력 폴더 경로가 길면 분석 결과를 쓰지 못했고(약 130자부터, MO2에서는 약 140자부터), 더 길면 덤프 저장과 분석기·뷰어 실행까지 실패했습니다(약 190자부터). Steam 기본 설치 경로도 한계에 가까웠습니다. 이제 긴 경로는 Windows의 긴 경로 형식으로 다루고, MO2 가상 파일 시스템이 MAX_PATH를 넘는 경로에서 막는 파일 확인은 파일 핸들로 처리합니다. 보통 길이의 경로는 예전과 같습니다
 [*][b]분석 결과와 맞는 조언:[/b] 다른 크래시의 것일 수 있는 Crash Logger 로그의 오브젝트 참조로 모드를 지목하거나 "꺼 보세요"라고 하지 않습니다. 해제된 코드로 이동한 크래시(게임 종료 중에 자주 남)에서 그 코드를 호출한 모드를 원인으로 단정하지 않습니다. 수동 캡처, 프리징, 게임 종료 중 오류의 안내 문구를 고쳤고, 뷰어의 공유 텍스트와 표시가 리포트와 맞습니다
@@ -634,6 +653,7 @@ v0.2.70은 릴리즈 후보들을 같은 환경에서 플레이했습니다. 수
 v0.2.71은 같은 플러그인 코드의 시험 빌드를 같은 환경에서 플레이했습니다. 데이터를 불러온 3~4초 뒤 게임 창 스레드에 훅이 걸렸다는 줄이 로그에 남았습니다. 전체 창 모드로 플레이하다 작업 표시줄 "창 닫기"로 끄자 [font=Courier New]window_close[/font]로 기록됐고, 뒤이은 종료 중 오류는 뷰어 없이 강제 종료로 보고됐습니다. 일지에서 종료하면 SkyrimDiag.log에 종료 줄을 남기고 정상 종료했습니다. 아직 실사용에서 보지 못한 것: 창 모드에서 X 버튼 직접 클릭, 훅이 켜진 채 Alt+F4, 훅이 켜진 채 오래 플레이하기.
 v0.2.72는 덤프 크기 축소와 용량 상한이 들어간 시험 빌드를 같은 환경에서 플레이했습니다. 첫 실행에서 출력 폴더의 덤프 31개(21.67GB)를 최신 5개(4.23GB)로 줄였습니다. 수동 캡처 5건은 58~60MB, 크래시 덤프는 67MB였고, 로컬 모듈 파일을 쓸 때와 덤프만 쓸 때 분석 결과가 같았으며, 크래시 콜스택은 덤프만으로 모드 DLL 5개를 지나 풀렸습니다. 아직 실사용에서 보지 못한 것: 새 범위로 쓴 프리징 덤프, 전체 검수 수정(테스트와 보관 덤프 31개로 확인).
 v0.2.73은 시험 빌드들을 같은 환경에서 플레이했습니다. MO2에서 205자 출력 폴더로 수동 캡처와 F4 프리징 모두 분석 결과가 만들어졌고(분석 캐시 경로 337자), 뷰어에서 프리징 결과를 열었습니다. 후킹 점프 코드 기록은 30초마다 돌아 점프 코드가 있는 실행 페이지 41~71개를 찾았고, 한 번 스캔에 140~280ms가 걸려 모듈 목록을 Toolhelp 스냅샷 한 번으로 만들도록 고쳤습니다. 같은 확인에서 플러그인 로그의 이전 세션이 남지 않는 것(CommonLib 자체 로그가 먼저 비움)을 찾았고, 두 수정을 넣은 빌드에서는 같은 페이지 수에 스캔이 16~110ms였고 앞 세션의 플러그인 로그가 남았습니다. 아직 실사용에서 보지 못한 것: 실제 크래시에서 해제된 후킹 코드의 주인(이 PC의 종료 중 크래시가 10/30 뒤로 나지 않음).
+v0.2.74는 릴리즈 패키지를 같은 환경(11/03, MO2)에서 플레이했습니다. 플러그인이 버전과 세이브 불러오기를 기록했고, 수동 캡처는 덤프·WCT·"세이브:" 줄이 있는 리포트를 남겼습니다. 11/01의 그 세이브를 불러오다 17.5초에 크래시(비어 있는 함수 포인터 호출)가 났고, 한 번 더 불러오자 29.7초에 다른 곳에서 크래시가 나서 리포트가 세이브 손상 의심(이전 1번, 난 곳 2곳)을 먼저 말했습니다. 아직 실사용에서 보지 못한 것: Helper 정리 뒤의 프리징 캡처, 세이브 이력이 바뀐 뒤 뷰어의 다시 분석(테스트로 확인).
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
