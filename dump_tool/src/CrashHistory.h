@@ -28,6 +28,7 @@ struct CrashHistoryEntry
   std::string loading_save_key;     // SaveLoadInfo::key
   std::string loading_save_name;    // SaveLoadInfo::name, for reading the file
   std::string loading_fault_place;  // internal::SaveLoadFailurePlace
+  std::string loading_attempt_key;  // SaveLoadInfo::attempt_key; empty from older writers
 };
 
 struct ModuleStats
@@ -56,6 +57,9 @@ struct SaveLoadCrashQuery
 {
   std::string save_key;
   std::string place;              // this capture's failure place
+  // This capture's load attempt (SaveLoadInfo::attempt_key): earlier captures
+  // of the same attempt are this failure, not earlier ones.
+  std::string attempt_key;
   std::uint64_t capture_unix = 0;  // when this dump was written; 0 unknown
   std::string content_sha256;     // copies of the dump (same bytes) are this capture
   // Only for entries with no capture time: those after this dump's own entry
@@ -67,8 +71,9 @@ struct SaveLoadCrashQuery
 // ADR-0025: the failed loads of one save before the capture being analyzed.
 struct SaveLoadCrashStats
 {
-  std::size_t count = 0;                // earlier incidents (copies of one dump count once)
-  std::vector<std::string> places;      // distinct failure places, this capture's included
+  std::size_t count = 0;                // earlier load attempts (copies of one dump, and a freeze and
+                                        // the crash of one attempt, count once)
+  std::vector<std::string> places;      // distinct failure places (one per attempt), this capture's included
   bool all_places_known = true;
   // Failed loads of other saves before this capture, after the first of these
   // or in the day before it (a broken mod setup fails every save).

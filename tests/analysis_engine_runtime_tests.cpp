@@ -1370,7 +1370,7 @@ void TestCrashHistorySaveLoadStats()
   constexpr std::uint64_t k1634 = k1618 + 971u;  // 07:34:19Z, the second
   CrashHistory history;
   const auto add = [](CrashHistory& h, const char* dump, std::uint64_t captured, const char* sha, const char* saveKey,
-                      const char* place, const char* bucket = "CTD3-x") {
+                      const char* place, const char* bucket = "CTD3-x", const char* attempt = "") {
     CrashHistoryEntry e{};
     e.timestamp_utc = "2026-11-02T00:00:00Z";  // when it was analyzed: no part of the order
     e.dump_file = dump;
@@ -1380,6 +1380,7 @@ void TestCrashHistorySaveLoadStats()
     e.loading_save_key = saveKey;
     e.loading_save_name = *saveKey ? "Save76_FC70D793_0_646F7" : "";
     e.loading_fault_place = place;
+    e.loading_attempt_key = attempt;
     h.AddEntry(std::move(e));
   };
   const auto query = [](std::uint64_t captured, const char* sha, const char* place, const char* dump = "") {
@@ -1494,6 +1495,63 @@ void TestCrashHistorySaveLoadStats()
     atBQuery.dump_identity_key = "bbbb.meta-b.dmp";  // as the analyzer passes it
     const auto atB = legacy.GetSaveLoadCrashStats(atBQuery);
     assert(atB.count == 1u && atB.places.size() == 2u);
+  }
+  {
+    // One load attempt (session and SaveLoadStart) is one failed load: a
+    // freeze captured during the load and the crash that ended it.
+    constexpr const char* kFreeze = "freeze|HANG1-load";
+    const auto addAttempt = [&](CrashHistory& h, const char* dump, std::uint64_t captured, const char* sha,
+                                const char* saveKey, const char* place, const char* attempt) {
+      add(h, dump, captured, sha, saveKey, place, "CTD3-x", attempt);
+    };
+    const auto attemptQuery = [&](std::uint64_t captured, const char* sha, const char* place, const char* attempt) {
+      auto q = query(captured, sha, place);
+      q.attempt_key = attempt;
+      return q;
+    };
+    CrashHistory attempts;
+    addAttempt(attempts, "hang.dmp", k1618, "f1", "save76key", kFreeze, "1a2c-1-5");
+    // The crash that ended the same load: no earlier failure.
+    auto stats = attempts.GetSaveLoadCrashStats(attemptQuery(k1618 + 12u, "c1", kNull, "1a2c-1-5"));
+    assert(stats.count == 0u && stats.places.empty());
+    addAttempt(attempts, "crash.dmp", k1618 + 12u, "c1", "save76key", kNull, "1a2c-1-5");
+    // Loaded again (a new session): one earlier load, whose place is its
+    // crash's, not where it froze first.
+    stats = attempts.GetSaveLoadCrashStats(attemptQuery(k1634, "c2", kNull, "2b3d-9-5"));
+    assert(stats.count == 1u && stats.places == std::vector<std::string>{kNull} && stats.all_places_known);
+    stats = attempts.GetSaveLoadCrashStats(attemptQuery(k1634, "c2", kJump, "2b3d-9-5"));
+    assert(stats.count == 1u && stats.places.size() == 2u);
+    // A row of the same load with no dump identity, and an older analysis of
+    // the same freeze dump that predates load attempts, are this load too.
+    CrashHistory sameLoad;
+    addAttempt(sameLoad, "no-identity.dmp", k1618, "", "save76key", kFreeze, "1a2c-1-5");
+    assert(sameLoad.GetSaveLoadCrashStats(attemptQuery(k1618 + 12u, "c1", kNull, "1a2c-1-5")).count == 0u);
+    CrashHistory olderCopy;
+    add(olderCopy, "hang-old.dmp", k1618, "f1", "save76key", kFreeze);
+    addAttempt(olderCopy, "hang.dmp", k1618, "f1", "save76key", kFreeze, "1a2c-1-5");
+    assert(olderCopy.GetSaveLoadCrashStats(attemptQuery(k1618 + 12u, "c1", kNull, "1a2c-1-5")).count == 0u);
+    // A load that only froze keeps the freeze's place.
+    CrashHistory frozeOnly;
+    addAttempt(frozeOnly, "hang.dmp", k1618, "f1", "save76key", kFreeze, "1a2c-1-5");
+    stats = frozeOnly.GetSaveLoadCrashStats(attemptQuery(k1634, "c2", kJump, "2b3d-9-5"));
+    assert(stats.count == 1u && stats.places == (std::vector<std::string>{ kFreeze, kJump }));
+    // Another save's freeze and crash of one load count once.
+    CrashHistory otherLoad;
+    addAttempt(otherLoad, "a.dmp", k1618, "aaaa", "save76key", kNull, "1-1-1");
+    addAttempt(otherLoad, "o-hang.dmp", k1618 + 60u, "o1", "save75key", kFreeze, "2-2-2");
+    addAttempt(otherLoad, "o-crash.dmp", k1618 + 70u, "o2", "save75key", kJump, "2-2-2");
+    assert(otherLoad.GetSaveLoadCrashStats(attemptQuery(k1634, "bbbb", kJump, "3-3-3")).other_save_count == 1u);
+
+    const auto attemptPath = std::filesystem::temp_directory_path() / "skydiag_crash_history_attempt_test.json";
+    const bool attemptSaved = attempts.SaveToFile(attemptPath);
+    assert(attemptSaved);
+    AssertContains(ReadAllText(attemptPath), "\"loading_attempt_key\": \"1a2c-1-5\"", "a failed load keeps its attempt");
+    CrashHistory attemptsLoaded;
+    const bool attemptsReloaded = attemptsLoaded.LoadFromFile(attemptPath);
+    assert(attemptsReloaded);
+    assert(attemptsLoaded.GetSaveLoadCrashStats(attemptQuery(k1618 + 12u, "c1", kNull, "1a2c-1-5")).count == 0u);
+    std::error_code attemptEc;
+    std::filesystem::remove(attemptPath, attemptEc);
   }
   assert(history.GetSaveLoadCrashStats(skydiag::dump_tool::SaveLoadCrashQuery{}).count == 0u);
 

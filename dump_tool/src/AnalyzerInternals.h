@@ -63,6 +63,9 @@ bool CountsAsFailedLoad(const AnalysisResult& r);
 // a jump into data); for a freeze, its wait bucket. Not the crash bucket: that
 // holds the callers too, and one fault reached from two call paths is one place.
 std::string SaveLoadFailurePlace(const AnalysisResult& r);
+// SaveLoadInfo::attempt_key for a save in play: "<pid>-<session start QPC>-
+// <SaveLoadStart's ring index>", all hex. Empty without a save or a session.
+std::string SaveLoadAttemptKey(const AnalysisResult& r);
 
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,

@@ -150,6 +150,12 @@ struct SaveLoadInfo
   bool in_progress = false;  // no SaveLoadEnd after it: captured before the load finished
   std::wstring name;         // the save's name, up to its first 23 bytes
   std::string key;           // 16 hex digits of SaveNameKey, empty without a name; what history entries match
+  // One load attempt: the game session (pid and the blackbox's start time)
+  // and this SaveLoadStart's place in the event ring. A freeze captured
+  // during the load and the crash that ended it share it; loading the save
+  // again gives a new one. Empty without a session.
+  std::string attempt_key;
+  std::uint32_t start_event = 0;  // EventRow::i of the SaveLoadStart
   // While in progress: from the load's start to the Crash event (timed_to_crash),
   // or else to the newest event, which a stuck game may have stopped writing.
   double seconds_loading = 0.0;
@@ -507,6 +513,7 @@ struct AnalysisResult
   std::uint64_t dump_capture_unix = 0;
 
   std::uint32_t pid = 0;
+  std::uint64_t blackbox_start_qpc = 0;  // the session's start (SharedHeader::start_qpc)
   std::uint32_t state_flags = 0;
   std::uint32_t blackbox_crash_seq = 0;
   std::uint32_t blackbox_exception_code = 0;
