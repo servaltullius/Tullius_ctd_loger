@@ -27,6 +27,7 @@
 #include <nlohmann/json.hpp>
 
 #include "Analyzer.h"
+#include "CrashHistory.h"
 #include "DumpObjects.h"
 #include "HangCaptureInternal.h"
 #include "HangObjectMemory.h"
@@ -911,12 +912,26 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
     "The save being loaded is read from the dump's blackbox");
   Require(secondAlone.save_load.earlier_crashes == 0u && secondAlone.quick_answer.case_id != "damaged_save",
     "One failed load names no damaged save");
+  // What the viewer compares (SaveLoadHistoryFingerprint.cs): the history the
+  // later crash's judgement read, without its own rows.
+  const auto historyFingerprint = [&](const skydiag::dump_tool::AnalysisResult& r) {
+    skydiag::dump_tool::CrashHistory h;
+    Require(h.LoadFromFile(outBase / L"crash_history.json"), "crash_history.json is read");
+    return h.SaveLoadHistoryFingerprint(r.dump_identity.sha256);
+  };
+  Require(!secondAlone.save_load.history_fingerprint.empty() &&
+            secondAlone.save_load.history_fingerprint == historyFingerprint(secondAlone),
+    "Analyzed alone, the later crash's judgement matches the history");
   const auto first = analyze(firstDump);
   Require(first.dump_capture_unix + 971u == secondAlone.dump_capture_unix, "The dump header times are read");
+  Require(historyFingerprint(secondAlone) != secondAlone.save_load.history_fingerprint,
+    "Once the earlier crash is in the history, the later crash's stored judgement is stale");
   Require(first.save_load.earlier_crashes == 0u && first.quick_answer.case_id != "damaged_save",
     "The earlier crash does not count the later one, though it was analyzed after it");
 
   const auto second = analyze(secondDump);
+  Require(second.save_load.history_fingerprint == historyFingerprint(second),
+    "Analyzed again, its judgement matches the history it read");
   Require(!first.crash_bucket_key.empty() && second.crash_bucket_key != first.crash_bucket_key,
     "The two crashes are in different places");
   Require(second.save_load.earlier_crashes == 1u && second.save_load.crash_places == 2u &&

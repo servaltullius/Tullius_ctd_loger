@@ -160,6 +160,11 @@ nlohmann::json BuildSummaryJson(
       { "other_save_failed_loads", save.other_save_crashes },
       { "damaged_save_suspected", r.quick_answer.case_id == "damaged_save" },
     };
+    if (!save.history_fingerprint.empty()) {
+      // The viewer analyzes the dump again when crash_history.json no longer
+      // gives this (SaveLoadHistoryFingerprint.cs).
+      summary["save_load"]["history_fingerprint"] = save.history_fingerprint;
+    }
   }
   summary["privacy"] = {
     { "path_redaction_applied", redactPaths },

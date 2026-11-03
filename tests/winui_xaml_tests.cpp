@@ -606,6 +606,10 @@ static void TestWinUiShowsQuickAnswerFirst()
   RequireContains(cs, "T(\"Quick answer\", \"빠른 답\")", "The card label must be localized.");
   RequireContains(cs, "if (summary.NeedsReanalysisFor(typeof(MainWindow).Assembly.GetName().Version))",
     "A saved summary from an older analyzer must be analyzed again, not reused.");
+  RequireContains(cs, "Path.Combine(outDir, \"crash_history.json\"),",
+    "The viewer reads the save-load history next to the summary (ADR-0025).");
+  RequireContains(cs, "summary.DumpIdentity.Sha256) != summary.SaveLoadHistoryFingerprint)",
+    "A saved summary judged on another save-load history must be analyzed again (ADR-0025).");
 
   const auto vm = ReadMainWindowViewModelText(repoRoot);
   RequireContains(vm, "BuildQuickAnswerLines(summary)", "Share texts must start from the quick answer lines.");

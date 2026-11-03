@@ -1281,7 +1281,13 @@ void TestDamagedSave()
     }
     Require(evidence, "the save-load evidence item");
 
+    Require(!skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true)["save_load"]
+               .contains("history_fingerprint"),
+      "no fingerprint when no history was read");
+    r.save_load.history_fingerprint = "9509785e8fa8add1";
     const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["save_load"]["history_fingerprint"] == "9509785e8fa8add1",
+      "the history the judgement read, for the viewer to tell it is stale");
     Require(summary["save_load"]["name"] == WideToUtf8(kSave) && summary["save_load"]["in_progress"] == true &&
               summary["save_load"]["seconds_loading"] == 19.4 && summary["save_load"]["earlier_failed_loads"] == 1 &&
               summary["save_load"]["failed_load_places"] == 2 && summary["save_load"]["other_save_failed_loads"] == 0 &&
