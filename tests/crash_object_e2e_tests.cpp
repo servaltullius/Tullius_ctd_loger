@@ -793,8 +793,9 @@ __declspec(noinline) int OtherCrashSite(int value)
 void TestRepeatedSaveLoadCrashFromTheDumps()
 {
   constexpr std::string_view kSaveName = "Save76_FC70D793_0_646F726F_Tamriel_000843_20261101071101_14_1";
-  const auto layoutLoading = [&](DWORD mainTid) {
+  const auto layoutLoading = [&](DWORD mainTid, std::uint64_t sessionStartQpc) {
     auto shared = MakeSharedLayout();
+    shared->header.start_qpc = sessionStartQpc;
     const auto push = [&](std::uint32_t index, std::uint64_t qpc, skydiag::EventType type, skydiag::EventPayload payload) {
       auto& e = shared->events[index];
       e.tid = mainTid;
@@ -822,6 +823,7 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   };
 
   const auto outBase = MakeTempDir(L"skydiag_save_load_e2e");
+  const auto attemptBase = MakeTempDir(L"skydiag_save_load_attempt_e2e");
   ParkedThread faulting;
   // The header time a dump was written with (MINIDUMP_HEADER.TimeDateStamp).
   const auto headerTime = [](const std::filesystem::path& dumpPath) {
@@ -833,19 +835,26 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   };
   // Writes a crash dump; headerTimeOverride sets its header time (the two real
   // crashes were 971 s apart, a test writes both within a second or two).
-  const auto write = [&](const wchar_t* dumpName, DWORD64 crashAddress, std::uint32_t headerTimeOverride) {
+  // A crash dump, or with freeze an automatic freeze capture taken while the
+  // save was still loading (no Crash event yet).
+  const auto writeIn = [&](const std::filesystem::path& dir, const wchar_t* dumpName, DWORD64 crashAddress,
+                           std::uint32_t headerTimeOverride, std::uint64_t sessionStartQpc, bool freeze) {
     CONTEXT ctx = faulting.Context();
     ctx.Rip = crashAddress;
-    auto shared = layoutLoading(faulting.tid());
-    shared->header.crash_seq = 2;
-    shared->header.crash.exception_code = 0xC0000005u;
-    shared->header.crash.faulting_tid = faulting.tid();
-    shared->header.crash.exception_addr = crashAddress;
-    shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
-    shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(crashAddress);
-    shared->header.crash.context = ctx;
+    auto shared = layoutLoading(faulting.tid(), sessionStartQpc);
+    if (freeze) {
+      shared->header.write_index = 2;  // the load started; no crash
+    } else {
+      shared->header.crash_seq = 2;
+      shared->header.crash.exception_code = 0xC0000005u;
+      shared->header.crash.faulting_tid = faulting.tid();
+      shared->header.crash.exception_addr = crashAddress;
+      shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+      shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(crashAddress);
+      shared->header.crash.context = ctx;
+    }
 
-    const auto dumpPath = outBase / dumpName;
+    const auto dumpPath = dir / dumpName;
     const HANDLE process = OpenSelfProcessHandle();
     std::wstring err;
     const bool written = WriteDumpWithStreams(
@@ -856,12 +865,12 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
       sizeof(skydiag::SharedLayout),
       {},
       {},
-      /*isCrash=*/true,
-      ResolveDumpProfile(DumpMode::kDefault, CaptureKind::Crash),
+      /*isCrash=*/!freeze,
+      ResolveDumpProfile(DumpMode::kDefault, freeze ? CaptureKind::Hang : CaptureKind::Crash),
       /*isProcessSnapshot=*/false,
       &err);
     CloseHandle(process);
-    Require(written, "The crash dump must be written");
+    Require(written, "The dump must be written");
     if (headerTimeOverride != 0u) {
       std::fstream file(dumpPath, std::ios::in | std::ios::out | std::ios::binary);
       MINIDUMP_HEADER header{};
@@ -873,15 +882,21 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
     }
     return dumpPath;
   };
-  const auto analyze = [&](const std::filesystem::path& dumpPath) {
+  // Each crash ends its game, so the next load of the save is a new session.
+  std::uint64_t nextSession = 1u;
+  const auto write = [&](const wchar_t* dumpName, DWORD64 crashAddress, std::uint32_t headerTimeOverride) {
+    return writeIn(outBase, dumpName, crashAddress, headerTimeOverride, nextSession++, /*freeze=*/false);
+  };
+  const auto analyzeIn = [&](const std::filesystem::path& dir, const std::filesystem::path& dumpPath) {
     skydiag::dump_tool::AnalyzeOptions opt{};
     opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
-    opt.output_dir = outBase.wstring();
+    opt.output_dir = dir.wstring();
     skydiag::dump_tool::AnalysisResult result{};
     std::wstring err;
-    Require(skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err), "AnalyzeDump failed");
+    Require(skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), dir.wstring(), opt, result, &err), "AnalyzeDump failed");
     return result;
   };
+  const auto analyze = [&](const std::filesystem::path& dumpPath) { return analyzeIn(outBase, dumpPath); };
 
   const auto firstDump = write(L"SkyrimDiag_Crash_20261101_161808_940.dmp", faulting.Context().Rip, 1793517488u);
   const auto secondDump = write(
@@ -931,6 +946,7 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   });
   Require(old != entries.end(), "The first incident is in the history");
   auto legacy = *old;
+  legacy.erase("loading_attempt_key");  // older writers had no load attempts
   for (const char* placeholder : {"0xc0000005|||", "freeze|"}) {
     legacy["loading_fault_place"] = placeholder;
     entries = nlohmann::json::array({legacy});
@@ -975,7 +991,42 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
             differentSave.save_load.other_save_crashes == 1u && differentSave.quick_answer.case_id != "damaged_save",
     "A different save failed between the two captures, even when the first was analyzed much later");
 
+  // One load, two captures: the helper took a freeze dump 7 s into the load,
+  // then the same load crashed at 19 s. Same session, same SaveLoadStart: one
+  // failed load, whatever the two dumps' places are.
+  constexpr std::uint32_t kLoadAt = 1793517000u;
+  const auto freezeDump = writeIn(attemptBase, L"SkyrimDiag_Hang_20261101_161000_000.dmp", faulting.Context().Rip,
+    kLoadAt, 7u, /*freeze=*/true);
+  const auto sameLoadCrash = writeIn(attemptBase, L"SkyrimDiag_Crash_20261101_161012_000.dmp",
+    reinterpret_cast<DWORD64>(&OtherCrashSite), kLoadAt + 12u, 7u, /*freeze=*/false);
+  const auto frozen = analyzeIn(attemptBase, freezeDump);
+  Require(frozen.is_hang_like && frozen.save_load.in_progress && !frozen.save_load.attempt_key.empty(),
+    "The freeze capture is a failed load with its load attempt");
+  const auto crashed = analyzeIn(attemptBase, sameLoadCrash);
+  Require(crashed.save_load.attempt_key == frozen.save_load.attempt_key, "Both captures are the same load attempt");
+  Require(crashed.save_load.earlier_crashes == 0u && crashed.quick_answer.case_id != "damaged_save",
+    "A freeze and the crash of the same load are one failed load");
+
+  // The save loaded again in a new session and crashed where the first load
+  // crashed: two loads, one place (the first load's crash, not its freeze).
+  const auto reloadSamePlace = writeIn(attemptBase, L"SkyrimDiag_Crash_20261101_162000_000.dmp",
+    reinterpret_cast<DWORD64>(&OtherCrashSite), kLoadAt + 600u, 8u, /*freeze=*/false);
+  const auto samePlace = analyzeIn(attemptBase, reloadSamePlace);
+  Require(samePlace.save_load.attempt_key != crashed.save_load.attempt_key, "A reload is a new attempt");
+  Require(samePlace.save_load.earlier_crashes == 1u && samePlace.save_load.crash_places == 1u &&
+            samePlace.quick_answer.case_id != "damaged_save",
+    "One earlier load whose crash was in the same place");
+
+  // Loaded again and crashed somewhere else: two loads, two places.
+  const auto reloadElsewhere = writeIn(attemptBase, L"SkyrimDiag_Crash_20261101_163000_000.dmp",
+    faulting.Context().Rip, kLoadAt + 1200u, 9u, /*freeze=*/false);
+  const auto elsewhere = analyzeIn(attemptBase, reloadElsewhere);
+  Require(elsewhere.save_load.earlier_crashes == 2u && elsewhere.save_load.crash_places == 2u &&
+            elsewhere.quick_answer.case_id == "damaged_save",
+    "Loads of one save that failed in different places still lead with the save");
+
   std::filesystem::remove_all(outBase);
+  std::filesystem::remove_all(attemptBase);
 }
 
 int main()

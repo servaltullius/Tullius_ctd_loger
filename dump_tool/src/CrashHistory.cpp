@@ -167,6 +167,7 @@ CrashHistoryLoad CrashHistory::Load(const std::filesystem::path& path)
       row.loading_save_key = JsonValueOr(e, "loading_save_key", std::string{});
       row.loading_save_name = JsonValueOr(e, "loading_save_name", std::string{});
       row.loading_fault_place = JsonValueOr(e, "loading_fault_place", std::string{});
+      row.loading_attempt_key = JsonValueOr(e, "loading_attempt_key", std::string{});
       if (e.contains("all_suspects") && e["all_suspects"].is_array()) {
         for (const auto& s : e["all_suspects"]) {
           if (s.is_string()) {
@@ -223,6 +224,9 @@ bool CrashHistory::SaveToFile(const std::filesystem::path& path) const
         row["loading_save_key"] = e.loading_save_key;
         row["loading_save_name"] = e.loading_save_name;
         row["loading_fault_place"] = e.loading_fault_place;
+        if (!e.loading_attempt_key.empty()) {
+          row["loading_attempt_key"] = e.loading_attempt_key;
+        }
       }
       j["entries"].push_back(std::move(row));
     }
@@ -464,9 +468,19 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
     }
     return i < own;
   };
+  // Not earlier failures: copies of this dump (same bytes), and captures of
+  // the same load attempt as this one (a freeze captured while the save was
+  // loading, before the crash that ended the same load).
   std::unordered_set<std::string> seen;
   if (!query.content_sha256.empty()) {
     seen.insert(query.content_sha256);
+  }
+  if (!query.attempt_key.empty()) {
+    for (const auto& e : m_entries) {
+      if (e.loading_attempt_key == query.attempt_key && !contentOf(e).empty()) {
+        seen.insert(std::string(contentOf(e)));
+      }
+    }
   }
   const auto firstTime = [](std::string_view content, std::unordered_set<std::string>& contents) {
     return content.empty() || contents.insert(std::string(content)).second;
@@ -479,38 +493,96 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
     return ParseUtcSeconds(e.timestamp_utc);
   };
 
-  std::size_t first = m_entries.size();
-  std::optional<std::int64_t> firstWhen;
-  auto seenWithPlace = seen;
-  std::size_t located = 0;
+  // One incident per dump: copies (same bytes) are one, and a newer analysis
+  // of the same bytes can supply a place or a load attempt an older row lacks
+  // (a legacy bucket includes callers and cannot identify a failure place).
+  struct Incident
+  {
+    std::size_t row = 0;
+    std::optional<std::int64_t> when;
+    std::string place;
+    std::string attempt;
+  };
+  std::vector<Incident> incidents;
+  std::unordered_map<std::string, std::size_t> incidentByContent;
   for (std::size_t i = 0; i < m_entries.size(); ++i) {
     const auto& e = m_entries[i];
     if (e.loading_save_key != query.save_key || !isEarlier(i)) {
       continue;
     }
-    // A legacy bucket includes callers and cannot identify a failure place.
-    // A newer analysis of the same bytes can supply the missing location.
-    const auto content = contentOf(e);
-    const auto& place = e.loading_fault_place;
-    if (!place.empty() && firstTime(content, seenWithPlace)) {
-      ++located;
-      if (std::find(result.places.begin(), result.places.end(), place) == result.places.end()) {
-        result.places.push_back(place);
-      }
-    }
-    if (!firstTime(content, seen)) {
+    if (!query.attempt_key.empty() && e.loading_attempt_key == query.attempt_key) {
       continue;
     }
-    result.count += 1;
-    if (const auto when = whenOf(e); when.has_value() && (!firstWhen.has_value() || when.value() < firstWhen.value())) {
-      firstWhen = when;
+    const auto content = contentOf(e);
+    if (!content.empty() && seen.contains(std::string(content))) {
+      continue;
     }
-    if (first == m_entries.size()) {
-      first = i;
+    std::size_t slot = incidents.size();
+    if (!content.empty()) {
+      slot = incidentByContent.emplace(std::string(content), incidents.size()).first->second;
+    }
+    if (slot == incidents.size()) {
+      incidents.push_back(Incident{ i, std::nullopt, {}, {} });
+    }
+    auto& incident = incidents[slot];
+    if (incident.place.empty()) {
+      incident.place = e.loading_fault_place;
+    }
+    if (incident.attempt.empty()) {
+      incident.attempt = e.loading_attempt_key;
+    }
+    if (const auto when = whenOf(e); when.has_value() && (!incident.when.has_value() || when.value() < incident.when.value())) {
+      incident.when = when;
     }
   }
+
+  // One failure per load attempt: a freeze captured during the load and the
+  // crash that ended it share an attempt key. Its place is the crash's when
+  // there is one; the freeze only shows where the load waited first. Entries
+  // from before attempt keys are one attempt each.
+  struct Attempt
+  {
+    std::string place;
+    bool crashPlace = false;
+  };
+  std::vector<Attempt> attempts;
+  std::unordered_map<std::string, std::size_t> attemptByKey;
+  std::size_t first = m_entries.size();
+  std::optional<std::int64_t> firstWhen;
+  for (const auto& incident : incidents) {
+    std::size_t slot = attempts.size();
+    if (!incident.attempt.empty()) {
+      slot = attemptByKey.emplace(incident.attempt, attempts.size()).first->second;
+    }
+    if (slot == attempts.size()) {
+      attempts.push_back(Attempt{});
+    }
+    auto& attempt = attempts[slot];
+    const bool crashPlace = !incident.place.empty() && !incident.place.starts_with("freeze|");
+    if (!incident.place.empty() && (attempt.place.empty() || (crashPlace && !attempt.crashPlace))) {
+      attempt.place = incident.place;
+      attempt.crashPlace = crashPlace;
+    }
+    if (incident.row < first) {
+      first = incident.row;
+    }
+    if (incident.when.has_value() && (!firstWhen.has_value() || incident.when.value() < firstWhen.value())) {
+      firstWhen = incident.when;
+    }
+  }
+  result.count = attempts.size();
   if (result.count == 0) {
     return result;
+  }
+  std::size_t located = 0;
+  for (const auto& attempt : attempts) {
+    if (attempt.place.empty()) {
+      continue;
+    }
+    ++located;
+    if (std::find(result.places.begin(), result.places.end(), attempt.place) == result.places.end()) {
+      result.places.push_back(attempt.place);
+    }
   }
   result.all_places_known = located == result.count && !query.place.empty();
 
@@ -518,6 +590,7 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
   // the day before it (the player may have tried them first).
   constexpr std::int64_t kDaySeconds = std::int64_t{ 24 } * 60 * 60;
   std::unordered_set<std::string> otherSeen = seen;
+  std::unordered_set<std::string> otherAttempts;
   for (std::size_t i = 0; i < m_entries.size(); ++i) {
     const auto& e = m_entries[i];
     if (e.loading_save_key.empty() || e.loading_save_key == query.save_key || !isEarlier(i)) {
@@ -527,7 +600,8 @@ SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery&
     if (const auto when = whenOf(e); when.has_value() && firstWhen.has_value()) {
       counts = when.value() >= firstWhen.value() - kDaySeconds;
     }
-    if (counts && firstTime(contentOf(e), otherSeen)) {
+    if (counts && firstTime(contentOf(e), otherSeen) &&
+        (e.loading_attempt_key.empty() || otherAttempts.insert(e.loading_attempt_key).second)) {
       result.other_save_count += 1;
     }
   }

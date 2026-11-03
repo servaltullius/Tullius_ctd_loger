@@ -221,6 +221,7 @@ void LoadCrashHistoryContext(
     SaveLoadCrashQuery query{};
     query.save_key = out.save_load.key;
     query.place = internal::SaveLoadFailurePlace(out);
+    query.attempt_key = out.save_load.attempt_key;
     query.capture_unix = out.dump_capture_unix;
     query.content_sha256 = out.dump_identity.sha256;
     query.dump_file = dumpFile;
@@ -348,6 +349,7 @@ void AppendCrashHistoryEntry(
     entry.loading_save_key = out.save_load.key;
     entry.loading_save_name = WideToUtf8(out.save_load.name);
     entry.loading_fault_place = internal::SaveLoadFailurePlace(out);
+    entry.loading_attempt_key = out.save_load.attempt_key;
   }
 
   history.AddEntry(std::move(entry));

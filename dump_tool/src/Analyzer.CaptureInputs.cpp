@@ -139,6 +139,7 @@ void ParseBlackboxStream(
 
   out.has_blackbox = true;
   out.pid = snap->header.pid;
+  out.blackbox_start_qpc = snap->header.start_qpc;
   out.state_flags = snap->header.state_flags;
   out.blackbox_crash_seq = snap->header.crash_seq;
   out.blackbox_exception_code = snap->header.crash.exception_code;

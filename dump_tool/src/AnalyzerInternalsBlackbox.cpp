@@ -162,6 +162,7 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
           std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(event.a));
           info.key = key;
         }
+        info.start_event = event.i;
         startedMs = event.t_ms;
         crashMs = -1.0;
         break;
@@ -187,6 +188,17 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
     info.seconds_loading = std::max(0.0, ((info.timed_to_crash ? crashMs : lastMs) - startedMs) / 1000.0);
   }
   return info;
+}
+
+std::string SaveLoadAttemptKey(const AnalysisResult& r)
+{
+  if (!r.save_load.seen || r.pid == 0u || r.blackbox_start_qpc == 0u) {
+    return {};
+  }
+  char key[48]{};
+  std::snprintf(key, sizeof(key), "%x-%llx-%x", r.pid, static_cast<unsigned long long>(r.blackbox_start_qpc),
+    r.save_load.start_event);
+  return key;
 }
 
 std::string SaveLoadFailurePlace(const AnalysisResult& r)
