@@ -125,6 +125,54 @@ def test_find_dumps(tmp: Path) -> None:
     else:
         raise AssertionError("a file that is not a dump is refused")
 
+    # A folder and a dump in it name that dump once.
+    assert [p.name for p in cmp.find_dumps([tmp, tmp / "a.dmp"])] == ["a.dmp", "b.dmp"]
+
+
+def test_dump_labels() -> None:
+    labels = cmp.dump_labels([Path("p1/crash.dmp"), Path("p2/crash.dmp"), Path("p3/other.dmp")])
+    assert labels == ["crash-1", "crash-2", "other"], labels
+    # A number another dump already has as its name is skipped.
+    labels = cmp.dump_labels([Path("p1/crash.dmp"), Path("p2/crash.dmp"), Path("p3/crash-1.dmp")])
+    assert labels == ["crash-2", "crash-3", "crash-1"], labels
+
+
+def test_same_named_dumps_from_different_folders(tmp: Path) -> None:
+    # Dumps from two players, both named same.dmp. Only the first changes.
+    for name in ("a", "b"):
+        (tmp / name).mkdir()
+        (tmp / name / "same.dmp").write_bytes(name.encode())
+    base_cli = tmp / "base.exe"
+    new_cli = tmp / "new.exe"
+    base_cli.write_bytes(b"")
+    new_cli.write_bytes(b"")
+    changed = copy.deepcopy(BASE)
+    changed["quick_answer"]["case"] = "candidate"
+    out_dirs = []
+
+    def fake_run(cli, dump, out_dir, with_crash_logger, lang="en"):
+        out_dirs.append(out_dir)
+        return changed if cli[0] == str(new_cli) and dump.parent.name == "a" else copy.deepcopy(BASE)
+
+    real_run = cmp.run_analyzer
+    cmp.run_analyzer = fake_run
+    try:
+        import contextlib
+        import io
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            code = cmp.main(["--dumps", str(tmp / "a" / "same.dmp"), str(tmp / "b" / "same.dmp"),
+                             "--base-cli", str(base_cli), "--new-cli", str(new_cli), "--lang", "en",
+                             "--out", str(tmp / "out"), "--fail-on-diff", "--jobs", "1"])
+    finally:
+        cmp.run_analyzer = real_run
+    text = printed.getvalue()
+    assert code == 1, text
+    assert "1 of 2 analyses changed" in text, text
+    assert "en same-1: 1 change(s)" in text and "en same-2: same" in text, text
+    assert f"dump: {tmp / 'a' / 'same.dmp'}" in text, text
+    assert len(set(out_dirs)) == 4, out_dirs  # base and new for each dump, none shared
+
 
 if __name__ == "__main__":
     import tempfile
@@ -137,4 +185,7 @@ if __name__ == "__main__":
     test_new_and_removed_keys()
     with tempfile.TemporaryDirectory() as tmp:
         test_find_dumps(Path(tmp))
+    test_dump_labels()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_same_named_dumps_from_different_folders(Path(tmp))
     print("compare_analyses_tests: OK")
