@@ -1,0 +1,63 @@
+{
+  "version": 2,
+  "entries": [
+    {
+      "timestamp_utc": "2026-11-01T07:20:00Z",
+      "dump_file": "SkyrimDiag_Hang_20261101_161000_000.dmp",
+      "dump_identity_key": "aaaa.size-1",
+      "bucket_key": "HANG1-x",
+      "all_suspects": [],
+      "candidate_keys": [],
+      "capture_unix": 1793517000,
+      "loading_save_key": "0646f9dee25d300b",
+      "loading_save_name": "Save76_FC70D793_0_646F7",
+      "loading_fault_place": "freeze|HANG1-x",
+      "loading_attempt_key": "1a2c-1-5"
+    },
+    {
+      "timestamp_utc": "2026-11-01T07:20:10Z",
+      "dump_file": "SkyrimDiag_Crash_20261101_161012_000.dmp",
+      "dump_identity_key": "bbbb.size-2",
+      "bucket_key": "CTD3-x",
+      "all_suspects": [],
+      "candidate_keys": [],
+      "capture_unix": 1793517012,
+      "loading_save_key": "0646f9dee25d300b",
+      "loading_save_name": "Save76_FC70D793_0_646F7",
+      "loading_fault_place": "0xc0000005|모드.dll+0x10",
+      "loading_attempt_key": "1a2c-1-5"
+    },
+    {
+      "timestamp_utc": "2026-10-30T07:20:10Z",
+      "dump_file": "old.dmp",
+      "dump_identity_key": "cccc.size-3",
+      "bucket_key": "CTD3-old",
+      "all_suspects": [],
+      "candidate_keys": [],
+      "loading_save_key": "0646f9dee25d300b",
+      "loading_save_name": "Save76_FC70D793_0_646F7",
+      "loading_fault_place": "0xc0000005|||"
+    },
+    {
+      "timestamp_utc": "2026-11-01T08:00:00Z",
+      "dump_file": "this.dmp",
+      "dump_identity_key": "dddd.size-4",
+      "bucket_key": "CTD3-y",
+      "all_suspects": [],
+      "candidate_keys": [],
+      "capture_unix": 1793519000,
+      "loading_save_key": "0646f9dee25d300b",
+      "loading_save_name": "Save76_FC70D793_0_646F7",
+      "loading_fault_place": "0xc0000005|skyrimse.exe+0x172a1e",
+      "loading_attempt_key": "2b3d-9-5"
+    },
+    {
+      "timestamp_utc": "2026-11-01T09:00:00Z",
+      "dump_file": "no-save.dmp",
+      "dump_identity_key": "eeee.size-5",
+      "bucket_key": "CTD3-z",
+      "all_suspects": [],
+      "candidate_keys": []
+    }
+  ]
+}

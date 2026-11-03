@@ -61,6 +61,15 @@ public sealed partial class MainWindow
                 {
                     return false;
                 }
+                // Judged on another save-load history (an earlier failed load
+                // of the save was analyzed afterwards): analyze it again.
+                if (summary.SaveLoadHistoryFingerprint.Length != 0 &&
+                    SaveLoadHistoryFingerprint.Compute(
+                        Path.Combine(outDir, "crash_history.json"),
+                        summary.DumpIdentity.Sha256) != summary.SaveLoadHistoryFingerprint)
+                {
+                    return false;
+                }
                 _currentSummaryPath = summaryPath;
                 RenderSummary(summary);
                 await RenderAdvancedArtifactsAsync(

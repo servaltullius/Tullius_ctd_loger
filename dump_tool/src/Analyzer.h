@@ -166,6 +166,9 @@ struct SaveLoadInfo
   bool all_places_known = true;       // false when a counted failure has no comparable location
   // Failed loads of other saves after the first of them, or in the day before it.
   std::size_t other_save_crashes = 0;
+  // CrashHistory::SaveLoadHistoryFingerprint of the history these counts came
+  // from; empty when no history was read for them.
+  std::string history_fingerprint;
 };
 
 struct FirstChanceSummary

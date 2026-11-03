@@ -1572,6 +1572,41 @@ void TestCrashHistorySaveLoadStats()
   std::filesystem::remove(historyPath, ec);
 }
 
+// ADR-0025: the fingerprint of the save-load history a judgement read. The
+// viewer computes the same value from the same file (SaveLoadHistoryFingerprint.cs,
+// tests/winui_state_fixture_harness).
+void TestSaveLoadHistoryFingerprint()
+{
+  using skydiag::dump_tool::CrashHistory;
+  using skydiag::dump_tool::CrashHistoryEntry;
+  CrashHistory history;
+  const bool loaded = history.LoadFromFile(ProjectRoot() / "tests" / "data" / "save_load_history" / "crash_history.json");
+  assert(loaded);
+  // Leaves out the rows of this dump (dddd), rows without a save, and reads a
+  // stored placeholder place as none; a non-ASCII place is hashed as UTF-8.
+  assert(history.SaveLoadHistoryFingerprint("dddd") == "9509785e8fa8add1");
+  assert(history.SaveLoadHistoryFingerprint("") != "9509785e8fa8add1");
+  assert(CrashHistory{}.SaveLoadHistoryFingerprint("dddd") == "0000000000000000");
+  // An earlier failed load analyzed afterwards changes it.
+  CrashHistory later = history;
+  CrashHistoryEntry e{};
+  e.dump_file = "SkyrimDiag_Crash_20261101_155000_000.dmp";
+  e.dump_identity_key = "ffff.size-6";
+  e.capture_unix = 1793515800u;
+  e.loading_save_key = "0646f9dee25d300b";
+  e.loading_fault_place = "0xc0000005|other.dll+0x20";
+  e.loading_attempt_key = "77-1-5";
+  later.AddEntry(e);
+  assert(later.SaveLoadHistoryFingerprint("dddd") != history.SaveLoadHistoryFingerprint("dddd"));
+  // A crash without a save does not.
+  CrashHistory unrelated = history;
+  e.dump_identity_key = "9999.size-7";
+  e.dump_file = "no-save-2.dmp";
+  e.loading_save_key.clear();
+  unrelated.AddEntry(e);
+  assert(unrelated.SaveLoadHistoryFingerprint("dddd") == history.SaveLoadHistoryFingerprint("dddd"));
+}
+
 void TestCrashHistoryLoadSaysWhy()
 {
   using skydiag::dump_tool::CrashHistoryLoad;
@@ -2068,6 +2103,7 @@ int main()
   TestCrashHistorySameDumpIsIdempotent();
   TestCrashHistorySameStemIdentityIsolation();
   TestCrashHistorySaveLoadStats();
+  TestSaveLoadHistoryFingerprint();
   TestCrashHistoryLoadSaysWhy();
 #ifdef _WIN32
   TestCrashHistoryFailedReplacementPreservesExistingFile();

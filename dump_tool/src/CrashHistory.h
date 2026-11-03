@@ -110,6 +110,14 @@ public:
   // An empty key counts nothing. "Earlier" is by the dumps' capture times, so
   // the order the dumps were analyzed in does not matter.
   SaveLoadCrashStats GetSaveLoadCrashStats(const SaveLoadCrashQuery& query) const;
+  // ADR-0025: the save-load rows a damaged-save judgement reads, as 16 hex
+  // digits, leaving out the rows of the dump with this content (SHA-256). The
+  // viewer computes the same from crash_history.json
+  // (SaveLoadHistoryFingerprint.cs) to tell that a stored summary's judgement
+  // no longer matches the history: the sum of FNV-1a 64 over each row's
+  // dump_identity_key, loading_save_key, loading_fault_place,
+  // loading_attempt_key and capture_unix, joined by U+001F.
+  std::string SaveLoadHistoryFingerprint(std::string_view excludeContentSha256) const;
 
   std::size_t Size() const { return m_entries.size(); }
 

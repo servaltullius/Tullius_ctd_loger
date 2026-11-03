@@ -304,6 +304,7 @@ internal static class Program
                 "atomic writes left temporary files behind");
 
             await CheckReanalysisByAnalyzerVersion(root, identityA);
+            await CheckSaveLoadHistoryFingerprint(root, identityA);
             CheckIniTextDecoding();
 
             Console.WriteLine("winui_state_fixture_harness: OK");
@@ -359,6 +360,43 @@ internal static class Program
         Require((await Load("not a version", true)).NeedsReanalysisFor(viewer), "an unreadable version: analyzed again");
         Require((await Load("0.2.71", false)).NeedsReanalysisFor(viewer), "no quick answer: analyzed again");
         Require(!(await Load(null, true)).NeedsReanalysisFor(null), "no viewer version: only the quick answer decides");
+    }
+
+    // ADR-0025: the viewer's fingerprint of crash_history.json matches the
+    // analyzer's (analysis_engine_runtime_tests, TestSaveLoadHistoryFingerprint,
+    // reads the same file), and a summary keeps the one it was judged on.
+    private static async Task CheckSaveLoadHistoryFingerprint(string root, DumpIdentityContract identity)
+    {
+        var fixture = Path.Combine(
+            Directory.GetCurrentDirectory(), "tests", "data", "save_load_history", "crash_history.json");
+        Require(File.Exists(fixture), "the shared crash_history.json fixture is found from the repository root");
+        Require(
+            SaveLoadHistoryFingerprint.Compute(fixture, "dddd") == "9509785e8fa8add1",
+            "the viewer's fingerprint matches the analyzer's");
+        Require(
+            SaveLoadHistoryFingerprint.Compute(fixture, string.Empty) != "9509785e8fa8add1",
+            "the rows of the dump being shown are left out");
+
+        var dir = Path.Combine(root, "fingerprint");
+        Directory.CreateDirectory(dir);
+        Require(
+            SaveLoadHistoryFingerprint.Compute(Path.Combine(dir, "missing.json"), "dddd") == "0000000000000000",
+            "no history file is an empty history");
+        var broken = Path.Combine(dir, "broken.json");
+        await File.WriteAllTextAsync(broken, "{ not json");
+        Require(SaveLoadHistoryFingerprint.Compute(broken, "dddd") is null, "an unreadable history is not a match");
+
+        var node = JsonNode.Parse(BuildSummary(identity))!.AsObject();
+        node["save_load"] = new JsonObject { ["key"] = "0646f9dee25d300b", ["history_fingerprint"] = "9509785e8fa8add1" };
+        var path = Path.Combine(dir, "summary.json");
+        await AtomicFile.WriteAllTextAsync(path, node.ToJsonString(), CancellationToken.None);
+        Require(
+            AnalysisSummary.LoadFromSummaryFile(path).SaveLoadHistoryFingerprint == "9509785e8fa8add1",
+            "the summary's history fingerprint is read");
+        await AtomicFile.WriteAllTextAsync(path, BuildSummary(identity), CancellationToken.None);
+        Require(
+            AnalysisSummary.LoadFromSummaryFile(path).SaveLoadHistoryFingerprint.Length == 0,
+            "a summary without a save load has none");
     }
 
     private static string BuildSummary(DumpIdentityContract identity)

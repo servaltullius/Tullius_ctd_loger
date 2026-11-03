@@ -1,5 +1,6 @@
 #include "CrashHistory.h"
 #include "JsonValue.h"
+#include "SkyrimDiagHash.h"
 #include "SkyrimDiagLongPath.h"
 
 #ifdef _WIN32
@@ -10,6 +11,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <optional>
 #include <string_view>
@@ -421,6 +423,31 @@ std::vector<BucketCandidateStats> CrashHistory::GetBucketCandidateStats(const st
     return a.candidate_key < b.candidate_key;
   });
   return result;
+}
+
+std::string CrashHistory::SaveLoadHistoryFingerprint(std::string_view excludeContentSha256) const
+{
+  std::uint64_t sum = 0;
+  for (const auto& e : m_entries) {
+    if (e.loading_save_key.empty()) {
+      continue;
+    }
+    const std::string_view identity(e.dump_identity_key);
+    if (!excludeContentSha256.empty() && identity.substr(0, identity.find('.')) == excludeContentSha256) {
+      continue;
+    }
+    std::string row = e.dump_identity_key;
+    for (const std::string* field : { &e.loading_save_key, &e.loading_fault_place, &e.loading_attempt_key }) {
+      row += '\x1f';
+      row += *field;
+    }
+    row += '\x1f';
+    row += std::to_string(e.capture_unix);
+    sum += skydiag::hash::Fnv1a64(row);  // wraps; the order of the rows does not matter
+  }
+  char hex[17]{};
+  std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(sum));
+  return hex;
 }
 
 SaveLoadCrashStats CrashHistory::GetSaveLoadCrashStats(const SaveLoadCrashQuery& query) const

@@ -35,6 +35,10 @@ internal sealed class AnalysisSummary
     // The product version of the analyzer that wrote the summary ("0.2.70");
     // empty in summaries written by v0.2.70-rc1 and earlier.
     public string AnalyzerVersion { get; init; } = string.Empty;
+    // ADR-0025: the save-load history the damaged-save judgement read
+    // (SaveLoadHistoryFingerprint); empty when the dump was not loading a save
+    // or the summary predates it.
+    public string SaveLoadHistoryFingerprint { get; init; } = string.Empty;
     // The plain-language answer for players; null in summaries written before it.
     public QuickAnswerItem? QuickAnswer { get; init; }
     public required string CrashBucketKey { get; init; }
@@ -229,6 +233,9 @@ internal sealed class AnalysisSummary
             IsSnapshotLike = ReadBool(analysis, "is_snapshot_like"),
             IsManualCapture = ReadBool(analysis, "is_manual_capture"),
             DumpIdentity = DumpIdentityContract.FromJson(root),
+            SaveLoadHistoryFingerprint = root.TryGetProperty("save_load", out var saveLoadNode)
+                ? ReadString(saveLoadNode, "history_fingerprint")
+                : string.Empty,
             IsFilteredCleanExit = ReadBool(analysis, "is_filtered_clean_exit") &&
                                   ReadBool(cleanExitEvidence, "validated"),
             CleanExitDumpState = ReadString(cleanExitEvidence, "dump_state"),

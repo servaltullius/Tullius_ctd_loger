@@ -13,5 +13,6 @@
     <Compile Include="..\..\dump_tool_winui\DumpDiscoveryStore.cs" Link="DumpDiscoveryStore.cs" />
     <Compile Include="..\..\dump_tool_winui\SummaryTriageStore.cs" Link="SummaryTriageStore.cs" />
     <Compile Include="..\..\dump_tool_winui\IniTextDecoder.cs" Link="IniTextDecoder.cs" />
+    <Compile Include="..\..\dump_tool_winui\SaveLoadHistoryFingerprint.cs" Link="SaveLoadHistoryFingerprint.cs" />
   </ItemGroup>
 </Project>
