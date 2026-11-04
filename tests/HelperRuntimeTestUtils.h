@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
@@ -22,12 +23,67 @@
 
 namespace skydiag::tests::runtime {
 
+// What a failure prints besides its message: the test that was running
+// (RunTest) and the end of the helper log in the newest MakeTempDir folder, so
+// a failure seen once under parallel ctest can be read from its output.
+inline std::string& CurrentTestName()
+{
+  static std::string name;
+  return name;
+}
+
+inline std::filesystem::path& CurrentTestDir()
+{
+  static std::filesystem::path dir;
+  return dir;
+}
+
+inline void PrintHelperLogTail(std::size_t maxLines)
+{
+  if (CurrentTestDir().empty()) {
+    return;
+  }
+  std::ifstream in(CurrentTestDir() / "SkyrimDiagHelper.log", std::ios::in | std::ios::binary);
+  if (!in) {
+    return;
+  }
+  std::vector<std::string> lines;
+  for (std::string line; std::getline(in, line);) {
+    lines.push_back(line);
+  }
+  const std::size_t first = lines.size() > maxLines ? lines.size() - maxLines : 0u;
+  std::cerr << "helper log (" << (lines.size() - first) << " of " << lines.size() << " lines):\n";
+  for (std::size_t i = first; i < lines.size(); ++i) {
+    std::cerr << "  " << lines[i] << '\n';
+  }
+}
+
 [[noreturn]] inline void Fail(std::string_view message)
 {
   std::cerr << "helper-runtime-test failure: " << message << '\n';
+  if (!CurrentTestName().empty()) {
+    std::cerr << "in test: " << CurrentTestName() << '\n';
+  }
+  PrintHelperLogTail(40u);
   std::cerr.flush();
   ExitProcess(1);
 }
+
+// Runs one test with its name kept for Fail.
+inline void RunTest(const char* name, void (*test)())
+{
+  CurrentTestName() = name;
+  CurrentTestDir().clear();
+  test();
+  CurrentTestName().clear();
+}
+
+}  // namespace skydiag::tests::runtime
+
+// SKYDIAG_RUN_TEST(TestName): runs it under its own name (RunTest).
+#define SKYDIAG_RUN_TEST(test) ::skydiag::tests::runtime::RunTest(#test, test)
+
+namespace skydiag::tests::runtime {
 
 inline void Require(bool condition, std::string_view message)
 {
@@ -51,6 +107,7 @@ inline std::filesystem::path MakeTempDir(const wchar_t* prefix)
   ec.clear();
   std::filesystem::create_directories(tempFile, ec);
   Require(!ec, "Failed to create temp directory");
+  CurrentTestDir() = tempFile;
   return tempFile;
 }
 
