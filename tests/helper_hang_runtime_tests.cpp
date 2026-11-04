@@ -734,22 +734,22 @@ void TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame()
 int main()
 {
   try {
-    TestEvaluateHangDecisions();
-    TestComputeHangThresholds();
-    TestWctHasCycle();
-    TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode();
-    TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick();
-    TestHandleHangTick_YieldsToACrashEvent();
-    TestPssSnapshotWorksFromTheAttachHandle();
-    TestManualCaptureWritesItsArtifacts();
-    TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait();
-    TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame();
-    TestLoadStatsAtomicSaveFailurePreservesExistingState();
-    TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample();
-    TestHandleHangTick_SkipsWhenHeartbeatNotInitialized();
-    TestStartupLoadingIsNotALoadingSample();
-    TestExecuteConfirmedHangCapture_WritesArtifacts();
-    TestCaptureModalDialogsFindsMessageBoxOwnerThread();
+    SKYDIAG_RUN_TEST(TestEvaluateHangDecisions);
+    SKYDIAG_RUN_TEST(TestComputeHangThresholds);
+    SKYDIAG_RUN_TEST(TestWctHasCycle);
+    SKYDIAG_RUN_TEST(TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode);
+    SKYDIAG_RUN_TEST(TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick);
+    SKYDIAG_RUN_TEST(TestHandleHangTick_YieldsToACrashEvent);
+    SKYDIAG_RUN_TEST(TestPssSnapshotWorksFromTheAttachHandle);
+    SKYDIAG_RUN_TEST(TestManualCaptureWritesItsArtifacts);
+    SKYDIAG_RUN_TEST(TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait);
+    SKYDIAG_RUN_TEST(TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame);
+    SKYDIAG_RUN_TEST(TestLoadStatsAtomicSaveFailurePreservesExistingState);
+    SKYDIAG_RUN_TEST(TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample);
+    SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsWhenHeartbeatNotInitialized);
+    SKYDIAG_RUN_TEST(TestStartupLoadingIsNotALoadingSample);
+    SKYDIAG_RUN_TEST(TestExecuteConfirmedHangCapture_WritesArtifacts);
+    SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());
