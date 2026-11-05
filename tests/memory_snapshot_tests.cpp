@@ -175,6 +175,24 @@ void TestDumpStreamsAreRead()
   Require(!skydiag::dump_tool::ApplyGpuMemoryJson("{\"adapters\":", broken) && !broken.has_gpu, "broken JSON is ignored");
 }
 
+// A virtual display (remote play, streaming) recorded by v0.2.74 repeats the
+// GPU's counters without a name, ahead of the GPU; the report said "GPU: GPU".
+void TestVirtualDisplayTieKeepsTheNamedAdapter()
+{
+  const std::string nameless = R"({"name":"","local_usage":8176,"local_budget":23370})";
+  const std::string named = R"({"name":"NVIDIA GeForce RTX 4090","local_usage":8176,"local_budget":23370})";
+  for (const auto& adapters : { nameless + "," + named, named + "," + nameless }) {
+    MemorySnapshot m{};
+    Require(skydiag::dump_tool::ApplyGpuMemoryJson(R"({"adapters":[)" + adapters + "]}", m), "both adapters read");
+    Require(m.gpu_name == L"NVIDIA GeForce RTX 4090" && m.vram_usage_bytes == 8176u, "the named adapter on a tie");
+  }
+  MemorySnapshot larger{};
+  Require(skydiag::dump_tool::ApplyGpuMemoryJson(
+            R"({"adapters":[{"name":"","local_usage":9000},{"name":"AMD Radeon(TM) Graphics","local_usage":12}]})", larger),
+    "both adapters read");
+  Require(larger.gpu_name.empty() && larger.vram_usage_bytes == 9000u, "the most-used adapter still wins without a name");
+}
+
 void TestPressureThresholds()
 {
   MemorySnapshot m{};
@@ -324,6 +342,7 @@ int main()
 {
   try {
     TestDumpStreamsAreRead();
+    TestVirtualDisplayTieKeepsTheNamedAdapter();
     TestPressureThresholds();
     TestGpuDescription();
     TestNormalMemoryIsContextOnly();
