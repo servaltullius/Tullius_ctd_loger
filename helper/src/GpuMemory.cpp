@@ -79,6 +79,27 @@ std::wstring AdapterName(const KmtApi& api, D3DKMT_HANDLE adapter)
   return info.AdapterString;
 }
 
+// False for an adapter that only shows a picture (a virtual display such as a
+// remote play or streaming app's): the kernel reports the render adapter's
+// counters for it too, so it would be counted twice, and it has no name. True
+// when the type is unknown.
+bool CanRender(const KmtApi& api, D3DKMT_HANDLE adapter)
+{
+  if (!api.queryAdapterInfo) {
+    return true;
+  }
+  D3DKMT_ADAPTERTYPE type{};
+  D3DKMT_QUERYADAPTERINFO query{};
+  query.hAdapter = adapter;
+  query.Type = KMTQAITYPE_ADAPTERTYPE;
+  query.pPrivateDriverData = &type;
+  query.PrivateDriverDataSize = sizeof(type);
+  if (!Succeeded(api.queryAdapterInfo(&query))) {
+    return true;
+  }
+  return type.RenderSupported != 0;
+}
+
 std::uint64_t DedicatedBytes(const KmtApi& api, const LUID& luid)
 {
   D3DKMT_QUERYSTATISTICS adapterQuery{};
@@ -179,6 +200,9 @@ std::vector<GpuAdapterMemory> QueryProcessGpuMemory(std::uint32_t pid)
 
   const OpenAdapters adapters(api);
   for (const auto& adapter : adapters.Get()) {
+    if (!CanRender(api, adapter.hAdapter)) {
+      continue;
+    }
     GpuAdapterMemory memory{};
     const bool local = QueryGroup(
       api, adapter.AdapterLuid, process.get(), D3DKMT_MEMORY_SEGMENT_GROUP_LOCAL,
@@ -192,10 +216,20 @@ std::vector<GpuAdapterMemory> QueryProcessGpuMemory(std::uint32_t pid)
       out.push_back(std::move(memory));
     }
   }
-  std::stable_sort(out.begin(), out.end(), [](const GpuAdapterMemory& a, const GpuAdapterMemory& b) {
-    return a.local_usage > b.local_usage;
-  });
+  SortAdaptersByUsage(out);
   return out;
+}
+
+void SortAdaptersByUsage(std::vector<GpuAdapterMemory>& adapters)
+{
+  // On a tie the named one first: an adapter of unknown type can still repeat
+  // another's counters without a name of its own.
+  std::stable_sort(adapters.begin(), adapters.end(), [](const GpuAdapterMemory& a, const GpuAdapterMemory& b) {
+    if (a.local_usage != b.local_usage) {
+      return a.local_usage > b.local_usage;
+    }
+    return !a.name.empty() && b.name.empty();
+  });
 }
 
 std::string GpuMemoryJson(const std::vector<GpuAdapterMemory>& adapters)

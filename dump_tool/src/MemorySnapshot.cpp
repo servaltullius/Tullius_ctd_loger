@@ -123,7 +123,11 @@ bool ApplyGpuMemoryJson(std::string_view json, MemorySnapshot& out)
       continue;
     }
     const std::uint64_t usage = JsonBytes(adapter, "local_usage");
-    if (!best || usage > bestUsage) {
+    // On a tie a named adapter: a virtual display recorded by an older helper
+    // repeats the GPU's numbers without a name.
+    const bool namedOverNameless =
+      best && usage == bestUsage && JsonText(*best, "name").empty() && !JsonText(adapter, "name").empty();
+    if (!best || usage > bestUsage || namedOverNameless) {
       best = &adapter;
       bestUsage = usage;
     }

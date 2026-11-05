@@ -192,6 +192,15 @@ void TestMemoryIsReadBackFromTheDump()
     Require(!m.gpu_name.empty(), "The adapter is named");
     const auto direct = skydiag::helper::internal::QueryProcessGpuMemory(GetCurrentProcessId());
     Require(!direct.empty() && direct.front().name == m.gpu_name, "The analyzer keeps the most-used adapter");
+    // A virtual display (here: a remote play app's) repeats the GPU's counters
+    // without a name; the helper leaves display-only adapters out.
+    for (const auto& adapter : direct) {
+      for (const auto& other : direct) {
+        Require(!adapter.name.empty() || &adapter == &other || adapter.local_usage != other.local_usage ||
+                  adapter.local_budget != other.local_budget,
+          "No nameless adapter repeats another adapter's counters");
+      }
+    }
     std::printf("GPU: %ls, %llu/%llu MiB\n", m.gpu_name.c_str(),
       static_cast<unsigned long long>(m.vram_usage_bytes / kMiB), static_cast<unsigned long long>(m.vram_budget_bytes / kMiB));
   }
@@ -226,10 +235,27 @@ void TestGpuStreamRoundTrip()
     "every field survives the round trip");
 }
 
+// A nameless adapter with the same counters as the GPU (a virtual display
+// whose type could not be read) goes after the named one.
+void TestSortPutsTheNamedAdapterFirstOnATie()
+{
+  std::vector<skydiag::helper::internal::GpuAdapterMemory> adapters(3);
+  adapters[0].local_usage = 4946 * kMiB;
+  adapters[1].name = L"AMD Radeon(TM) Graphics";
+  adapters[1].local_usage = 12 * kMiB;
+  adapters[2].name = L"NVIDIA GeForce RTX 4090";
+  adapters[2].local_usage = 4946 * kMiB;
+  skydiag::helper::internal::SortAdaptersByUsage(adapters);
+  Require(adapters[0].name == L"NVIDIA GeForce RTX 4090" && adapters[1].name.empty() &&
+            adapters[2].name == L"AMD Radeon(TM) Graphics",
+    "largest usage first, the named adapter first on a tie");
+}
+
 int main()
 {
   try {
     TestGpuStreamRoundTrip();
+    TestSortPutsTheNamedAdapterFirstOnATie();
     TestMemoryIsReadBackFromTheDump();
     std::puts("memory snapshot e2e tests passed");
     return 0;
