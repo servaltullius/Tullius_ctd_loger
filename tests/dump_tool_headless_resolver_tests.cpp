@@ -7,10 +7,14 @@
 
 using skydiag::helper::ResolveDumpToolHeadlessExe;
 
+static std::filesystem::path TempDirPath()
+{
+  return std::filesystem::temp_directory_path() / "skydiag_dump_tool_headless_resolver_tests";
+}
+
 static std::filesystem::path MakeTempDir()
 {
-  const auto base = std::filesystem::temp_directory_path();
-  const auto dir = base / "skydiag_dump_tool_headless_resolver_tests";
+  const auto dir = TempDirPath();
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
   std::filesystem::create_directories(dir, ec);
@@ -73,6 +77,9 @@ int main()
   Test_FallsBackToWinUiWhenCliMissing();
   Test_FallsBackToOverrideWhenBothMissing();
   Test_ReturnsEmptyWhenNothingExists();
+
+  std::error_code ec;
+  std::filesystem::remove_all(TempDirPath(), ec);
   return 0;
 }
 

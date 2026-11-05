@@ -1,42 +1,17 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
+
+from dotnet_harness import Harness
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROJECT = REPO_ROOT / "tests" / "winui_state_fixture_harness" / "WinUIStateFixtureHarness.csproj"
 
 
-def _dotnet_path(path: Path) -> str:
-    if os.environ.get("WSL_DISTRO_NAME"):
-        return subprocess.run(
-            ["wslpath", "-w", str(path)],
-            check=True,
-            text=True,
-            capture_output=True,
-        ).stdout.strip()
-    return str(path)
-
-
 def main() -> None:
-    completed = subprocess.run(
-        [
-            "dotnet",
-            "run",
-            "--project",
-            _dotnet_path(PROJECT),
-            "--framework",
-            "net8.0",
-        ],
-        cwd=str(REPO_ROOT),
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=False,
-    )
+    completed = Harness(PROJECT).run()
     if completed.returncode != 0:
         raise RuntimeError(
             "WinUI state harness failed\n"

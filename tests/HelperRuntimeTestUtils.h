@@ -24,8 +24,9 @@
 namespace skydiag::tests::runtime {
 
 // What a failure prints besides its message: the test that was running
-// (RunTest) and the end of the helper log in the newest MakeTempDir folder, so
-// a failure seen once under parallel ctest can be read from its output.
+// (RunTest), the end of the helper log in the newest MakeTempDir folder and
+// that folder, kept, so a failure seen once under parallel ctest can be read
+// from its output.
 inline std::string& CurrentTestName()
 {
   static std::string name;
@@ -65,6 +66,13 @@ inline void PrintHelperLogTail(std::size_t maxLines)
     std::cerr << "in test: " << CurrentTestName() << '\n';
   }
   PrintHelperLogTail(40u);
+  // A passing test removes its folder; a failing one keeps it to look at.
+  std::error_code ec;
+  if (!CurrentTestDir().empty() && std::filesystem::exists(CurrentTestDir(), ec)) {
+    const auto dir = CurrentTestDir().u8string();
+    std::cerr << "test folder kept: " << std::string_view(reinterpret_cast<const char*>(dir.data()), dir.size())
+              << '\n';
+  }
   std::cerr.flush();
   ExitProcess(1);
 }

@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 import tempfile
 from pathlib import Path
+
+from dotnet_harness import Harness, dotnet_path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -13,20 +13,7 @@ HARNESS_PROJECT = REPO_ROOT / "tests" / "share_text_fixture_harness" / "ShareTex
 DATA_DIR = REPO_ROOT / "tests" / "data" / "share_text_cases"
 
 
-def _dotnet_arg_path(path: Path) -> str:
-    # Use native paths on normal Linux/macOS/Windows runners.
-    # Only convert to UNC Windows paths when running inside WSL, where
-    # `dotnet` may resolve to the Windows host SDK path handling model.
-    if os.environ.get("WSL_DISTRO_NAME"):
-        completed = subprocess.run(
-            ["wslpath", "-w", str(path)],
-            cwd=str(REPO_ROOT),
-            text=True,
-            capture_output=True,
-            check=True,
-        )
-        return completed.stdout.strip()
-    return str(path)
+HARNESS = Harness(HARNESS_PROJECT)
 
 
 def _run_harness(summary_name: str, mode: str) -> str:
@@ -35,24 +22,7 @@ def _run_harness(summary_name: str, mode: str) -> str:
 
 def _run_harness_on(summary_path: Path, mode: str) -> str:
     summary_name = summary_path.name
-    completed = subprocess.run(
-        [
-            "dotnet",
-            "run",
-            "--project",
-            _dotnet_arg_path(HARNESS_PROJECT),
-            "--framework",
-            "net8.0",
-            "--",
-            _dotnet_arg_path(summary_path),
-            mode,
-        ],
-        cwd=str(REPO_ROOT),
-        text=True,
-        encoding="utf-8",
-        capture_output=True,
-        check=False,
-    )
+    completed = HARNESS.run(dotnet_path(summary_path), mode)
     if completed.returncode != 0:
         raise RuntimeError(
             f"dotnet harness failed for {summary_name} ({mode})\n"
