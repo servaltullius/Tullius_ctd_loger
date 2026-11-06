@@ -962,6 +962,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessUtil.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PssSnapshot.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/RetentionWorker.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SaveLoadRecord.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/StackCodeMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WctCapture.cpp"
@@ -993,6 +994,12 @@ if(WIN32)
       _UNICODE
       UNICODE
   )
+
+  add_executable(skydiag_save_load_record_tests
+    save_load_record_tests.cpp
+  )
+  target_link_libraries(skydiag_save_load_record_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_save_load_record_tests COMMAND skydiag_save_load_record_tests)
 
   add_executable(skydiag_helper_runtime_smoke_tests
     helper_runtime_smoke_tests.cpp

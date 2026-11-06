@@ -2,7 +2,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <string>
 #include <string_view>
 
 #include "SkyrimDiagHash.h"
@@ -100,5 +102,44 @@ inline SaveLoadStartWords MakeSaveLoadStartPayload(std::string_view saveName) no
   std::memcpy(&payload.d, text + sizeof(payload.b) * 2u, sizeof(payload.d));
   return payload;
 }
+
+// A SaveNameKey as history files write it: 16 hex digits, empty for no name.
+inline std::string SaveKeyHex(std::uint64_t key)
+{
+  if (key == 0u) {
+    return {};
+  }
+  char text[17]{};
+  std::snprintf(text, sizeof(text), "%016llx", static_cast<unsigned long long>(key));
+  return text;
+}
+
+// One load attempt: the game session (pid and SharedHeader::start_qpc) and
+// the ring index of its SaveLoadStart. Empty without a session.
+inline std::string SaveLoadAttemptKey(std::uint32_t pid, std::uint64_t sessionStartQpc, std::uint32_t startEvent)
+{
+  if (pid == 0u || sessionStartQpc == 0u) {
+    return {};
+  }
+  char key[48]{};
+  std::snprintf(key, sizeof(key), "%x-%llx-%x", pid, static_cast<unsigned long long>(sessionStartQpc), startEvent);
+  return key;
+}
+
+// Whether two attempt keys come from the same game session: all but the
+// ring index after the last '-'.
+inline bool SameSaveLoadSession(std::string_view a, std::string_view b) noexcept
+{
+  const auto aCut = a.find_last_of('-');
+  const auto bCut = b.find_last_of('-');
+  return aCut != std::string_view::npos && bCut != std::string_view::npos && a.substr(0, aCut) == b.substr(0, bCut);
+}
+
+// ADR-0025 (2026-11-06): the saves that finished loading, which the helper
+// keeps beside crash_history.json so a failed load can say another save
+// loads. {"version":1,"loads":[{"save_key","save_name","loaded_unix",
+// "attempt_key"}]}, oldest first, the newest kLoadedSavesKept.
+inline constexpr const char* kLoadedSavesFileName = "loaded_saves.json";
+inline constexpr std::size_t kLoadedSavesKept = 64;
 
 }  // namespace skydiag

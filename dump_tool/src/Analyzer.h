@@ -166,6 +166,13 @@ struct SaveLoadInfo
   bool all_places_known = true;       // false when a counted failure has no comparable location
   // Failed loads of other saves after the first of them, or in the day before it.
   std::size_t other_save_crashes = 0;
+  // While in progress: another save that finished loading in the day before
+  // this capture, newest first (ADR-0025, 2026-11-06). loaded_saves.json,
+  // which the helper keeps, says when; without it this session's blackbox
+  // can still show one, with no time. Empty name when none is known.
+  std::wstring other_loaded_name;
+  std::uint64_t other_loaded_unix = 0;  // 0 when only the blackbox showed it
+  bool other_loaded_this_session = false;
   // CrashHistory::SaveLoadHistoryFingerprint of the history these counts came
   // from; empty when no history was read for them.
   std::string history_fingerprint;

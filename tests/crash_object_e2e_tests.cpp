@@ -1039,6 +1039,23 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   Require(elsewhere.save_load.earlier_crashes == 2u && elsewhere.save_load.crash_places == 2u &&
             elsewhere.quick_answer.case_id == "damaged_save",
     "Loads of one save that failed in different places still lead with the save");
+  Require(elsewhere.save_load.other_loaded_name.empty(), "No other save is known to have loaded yet");
+
+  // ADR-0025 (2026-11-06): the helper recorded another save loading fine
+  // before this capture, and one more after it, which must not count.
+  nlohmann::json loaded{ { "version", 1 }, { "loads", nlohmann::json::array() } };
+  loaded["loads"].push_back({ { "save_key", "00000000000000aa" }, { "save_name", "Save75_FC70D793_0_646F7" },
+    { "loaded_unix", kLoadAt + 1100u }, { "attempt_key", "99-1-5" } });
+  loaded["loads"].push_back({ { "save_key", "00000000000000bb" }, { "save_name", "Later" },
+    { "loaded_unix", kLoadAt + 5000u }, { "attempt_key", "99-1-9" } });
+  std::ofstream(attemptBase / skydiag::kLoadedSavesFileName) << loaded;
+  const auto withOther = analyzeIn(attemptBase, reloadElsewhere);
+  Require(withOther.quick_answer.case_id == "damaged_save" &&
+            withOther.save_load.other_loaded_name == L"Save75_FC70D793_0_646F7" &&
+            withOther.save_load.other_loaded_unix == kLoadAt + 1100u && !withOther.save_load.other_loaded_this_session,
+    "Another save the helper saw load before the capture");
+  Require(withOther.quick_answer.why_not_certain.find(L"Save75_FC70D793_0_646F7") != std::wstring::npos,
+    "The quick answer says so");
 
   std::filesystem::remove_all(outBase);
   std::filesystem::remove_all(attemptBase);

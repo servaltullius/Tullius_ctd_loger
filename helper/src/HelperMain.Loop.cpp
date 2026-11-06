@@ -1,5 +1,6 @@
 #include "HelperMainInternal.h"
 
+#include <ctime>
 #include <filesystem>
 #include <string>
 
@@ -8,6 +9,7 @@
 #include "HookPageRecord.h"
 #include "ManualCapture.h"
 #include "ManualCaptureKeyWatcher.h"
+#include "SaveLoadRecord.h"
 
 namespace {
 
@@ -98,6 +100,23 @@ void PumpManualCaptureInputs(
   }
 }
 
+// ADR-0025 (2026-11-06): saves that finished loading, kept for a later failed
+// load to say another save loads.
+void RecordFinishedSaveLoads(const AttachedProcess& proc, const std::filesystem::path& outBase, SaveLoadWatcher* watcher)
+{
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  const auto loads =
+    watcher->Poll(proc.shm, static_cast<std::uint64_t>(now.QuadPart), static_cast<std::uint64_t>(std::time(nullptr)));
+  if (loads.empty()) {
+    return;
+  }
+  const bool written = RecordLoadedSaves(outBase, loads);
+  for (const auto& load : loads) {
+    AppendLogLine(outBase, LoadedSaveLogLine(load, written));
+  }
+}
+
 void RunHelperLoop(
   const HelperConfig& cfg,
   AttachedProcess& proc,
@@ -158,6 +177,8 @@ void RunHelperLoop(
             std::to_wstring(HookPages().Scans()) + L", " + std::to_wstring(GetTickCount64() - scanStart) + L" ms).");
       }
     }
+
+    RecordFinishedSaveLoads(proc, outBase, &state->saveLoads);
 
     if (!proc.crashEvent) {
       const auto nowTick = GetTickCount64();

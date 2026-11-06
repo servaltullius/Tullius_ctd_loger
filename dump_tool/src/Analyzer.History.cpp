@@ -5,10 +5,12 @@
 #include "CrashHistory.h"
 #include "CrashLoggerParseCore.h"
 #include "JsonValue.h"
+#include "LoadedSaves.h"
 #include "MainThreadWait.h"
 #include "OutputWriterInternals.h"
 #include "ScopedHistoryFileLock.h"
 #include "SkyrimDiagLongPath.h"
+#include "SkyrimDiagSaveLoad.h"
 #include "Utf.h"
 
 #include <algorithm>
@@ -200,6 +202,21 @@ void LoadCrashHistoryContext(
   out.save_load.history_fingerprint.clear();
   if (historyPath.empty()) {
     return;
+  }
+
+  // ADR-0025 (2026-11-06): another save that loaded, as the helper recorded
+  // it. Only loads up to this capture count, so its answer stays as it was
+  // first analyzed and needs no history fingerprint; without one this
+  // session's blackbox (DetectSaveLoad) is what is left.
+  if (out.save_load.in_progress && !out.save_load.key.empty()) {
+    const auto loads = ReadLoadedSaves(historyPath.parent_path() / skydiag::kLoadedSavesFileName);
+    if (const auto other = NewestOtherLoadedSave(loads, out.save_load.key, out.dump_capture_unix)) {
+      out.save_load.other_loaded_name = Utf8OrAnsiToWide(other->name_utf8);
+      out.save_load.other_loaded_unix = other->loaded_unix;
+      out.save_load.other_loaded_this_session =
+        !out.save_load.attempt_key.empty() && !other->attempt_key.empty() &&
+        skydiag::SameSaveLoadSession(other->attempt_key, out.save_load.attempt_key);
+    }
   }
 
   ScopedHistoryFileLock historyLock(historyPath);

@@ -768,9 +768,14 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     save.likelihood_text = LikelihoodText(i18n::ConfidenceLevel::kMedium, en);
     save.headline = KindPhrase(kind, en) + L" " + DamagedSaveLead(r.save_load, en);
     save.action = DamagedSaveAction(en);
-    save.why_not_certain = en
-      ? L"The crash history keeps only the loads that failed, so how other saves load is not known."
-      : L"크래시 기록에는 실패한 불러오기만 남아서, 다른 세이브는 어떻게 불러와지는지 알 수 없습니다.";
+    // Another save loading fine leans further toward this save, but a mod may
+    // still fail only on its data.
+    const std::wstring otherLoaded = OtherSaveLoadedSentence(r.save_load, en);
+    save.why_not_certain = !otherLoaded.empty()
+      ? (otherLoaded + (en ? L" A mod may still fail only on this save's data, so it is not certain."
+                           : L" 그래도 어떤 모드가 이 세이브의 데이터에서만 실패하는 것일 수 있어 단정할 수는 없습니다."))
+      : (en ? L"There is no record of another save loading fine, so whether only this save fails is not known."
+            : L"다른 세이브를 정상적으로 불러온 기록이 없어서, 이 세이브에서만 실패하는지는 알 수 없습니다.");
     AddFaultInstructionClue(r, en, save);
     return save;
   }

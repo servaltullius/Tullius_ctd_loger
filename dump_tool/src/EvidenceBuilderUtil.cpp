@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 #include <cwchar>
 #include <cwctype>
 #include <filesystem>
+#include <iterator>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
@@ -112,6 +114,28 @@ std::wstring DamagedSaveAction(bool en)
       L"failed; if it fails too, the mod setup is more likely than the save."
     : L"이 세이브보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면, 문제가 난 세이브에서만 반복되는지 확인해 "
       L"보세요. 그 세이브도 안 되면 세이브보다 모드 구성 쪽일 가능성이 큽니다.";
+}
+
+std::wstring OtherSaveLoadedSentence(const SaveLoadInfo& saveLoad, bool en)
+{
+  const std::wstring& other = saveLoad.other_loaded_name;
+  if (other.empty()) {
+    return {};
+  }
+  if (saveLoad.other_loaded_this_session) {
+    return en ? (L"Another save (" + other + L") loaded fine earlier in this game session.")
+              : (L"이번 게임에서 먼저 불러온 다른 세이브(" + other + L")는 정상적으로 열렸습니다.");
+  }
+  wchar_t when[32]{};
+  const auto seconds = static_cast<std::time_t>(saveLoad.other_loaded_unix);
+  std::tm local{};
+  if (seconds == 0 || localtime_s(&local, &seconds) != 0 ||
+      std::wcsftime(when, std::size(when), L"%m/%d %H:%M", &local) == 0u) {
+    return en ? (L"Another save (" + other + L") loaded fine before this.")
+              : (L"다른 세이브(" + other + L")는 그 전에 정상적으로 열렸습니다.");
+  }
+  return en ? (L"Another save (" + other + L") loaded fine at " + when + L".")
+            : (L"다른 세이브(" + other + L")는 " + when + L"에 정상적으로 열렸습니다.");
 }
 
 bool HasNearbyProbableDll(const AnalysisResult& r)
