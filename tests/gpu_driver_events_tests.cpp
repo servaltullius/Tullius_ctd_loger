@@ -50,6 +50,13 @@ void TestParsesTheDriversEvents()
             tdr->message == L"nvlddmkm; a & b",
     "a driver reset");
 
+  // Numeric character references: a control character folds into a space.
+  const auto escaped = ParseGpuDriverEventXml(
+    L"<Event><System><Provider Name='nvlddmkm'/><EventID>153</EventID><Level>2</Level>"
+    L"<TimeCreated SystemTime='2026-11-03T02:28:26Z'/></System><EventData>"
+    L"<Data>Error&#13;&#10;on GPU &#x41;&#66;</Data><Data>&#xZZ; &#;</Data></EventData></Event>");
+  Require(escaped && escaped->message == L"Error on GPU AB; &#xZZ; &#;", "numeric character references");
+
   Require(!ParseGpuDriverEventXml(L"") && !ParseGpuDriverEventXml(L"<Event><System><Provider Name='x'/></System></Event>"),
     "not an event");
 
@@ -59,6 +66,8 @@ void TestParsesTheDriversEvents()
             query.find(L"@SystemTime>='2026-11-03T02:28:26.000Z'") != std::wstring::npos &&
             query.find(L"@SystemTime<='2026-11-06T08:00:12.000Z'") != std::wstring::npos,
     "the query names the drivers and the window");
+  // Information events would push the errors out of the newest kept.
+  Require(query.find(L"(Level=1 or Level=2 or Level=3)") != std::wstring::npos, "errors and warnings only");
 }
 
 void TestJsonForTheDump()
@@ -76,8 +85,11 @@ void TestJsonForTheDump()
   Require(j["version"] == 1 && j["since_unix"] == 100 && j["until_unix"] == 200 && j["total"] == 40 &&
             j["events"].size() == 1u && j["events"][0]["provider"] == "nvlddmkm" && j["events"][0]["id"] == 153 &&
             j["events"][0]["level"] == 2 && j["events"][0]["unix"] == 150 &&
-            j["events"][0]["message"] == "Error occurred on GPUID: 100",
+            j["events"][0]["message"] == "Error occurred on GPUID: 100" && j["complete"] == true,
     "every field");
+  // A read that timed out or failed partway: none found is not none.
+  log.complete = false;
+  Require(nlohmann::json::parse(GpuDriverEventsJson(log))["complete"] == false, "an unfinished read says so");
 }
 
 void TestReadsThisPcsLog()
@@ -93,6 +105,9 @@ void TestReadsThisPcsLog()
     "the System log is read");
   for (std::size_t i = 1; i < log.events.size(); ++i) {
     Require(log.events[i - 1u].unix <= log.events[i].unix, "oldest first");
+  }
+  for (const auto& event : log.events) {
+    Require(event.level >= 1u && event.level <= 3u, "the System log returns errors and warnings only");
   }
   std::printf("GPU driver events in 30 days: %zu\n", log.total);
   Require(!QueryGpuDriverEvents(0u, now).read && !QueryGpuDriverEvents(now, now - 1u).read,

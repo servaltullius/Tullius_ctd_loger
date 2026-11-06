@@ -21,7 +21,8 @@ std::size_t GpuDriverProblemCount(const GpuDriverLog& log);
 
 // "게임 시작 이후 3건: nvlddmkm 153 3번(Error occurred on GPUID: 100), 마지막은
 // 캡처 2분 전" / "3 since the game started: ...", or that there were none.
-// Empty when the log was not read.
+// Errors and warnings only; says so when the helper could not read the log to
+// the end. Empty when the log was not read.
 std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t captureUnix, bool en);
 
 }  // namespace skydiag::dump_tool

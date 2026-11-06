@@ -23,9 +23,12 @@ namespace {
 // (Display 4101, "display driver stopped responding and has recovered").
 constexpr const wchar_t* kProviders[] = { L"nvlddmkm", L"amdkmdag", L"amdwddmg", L"igfx", L"igfxn", L"Display" };
 
-// Bounds the work when a broken driver floods the log.
+// Bounds the work when a broken driver floods the log. The read comes before
+// the dump is written, so it gets a time budget of its own as well.
 constexpr std::size_t kMaxEventsCounted = 10000;
 constexpr std::size_t kMaxMessageChars = 300;
+constexpr ULONGLONG kReadBudgetMs = 1500;
+constexpr DWORD kNextTimeoutMs = 500;
 
 class EvtHandle
 {
@@ -106,11 +109,31 @@ std::wstring Unescape(std::wstring_view text)
       continue;
     }
     const auto end = text.find(L';', i);
-    if (end == std::wstring_view::npos || end - i > 8u) {
+    if (end == std::wstring_view::npos || end - i > 10u) {
       out.push_back(text[i]);
       continue;
     }
     const auto entity = text.substr(i + 1u, end - i - 1u);
+    if (entity.size() > 1u && entity[0] == L'#') {
+      // &#13; or &#x41;: a control character becomes a space, which Tidy folds.
+      const bool hex = entity[1] == L'x' || entity[1] == L'X';
+      const std::wstring digits(entity.substr(hex ? 2u : 1u));
+      wchar_t* stop = nullptr;
+      const unsigned long code = digits.empty() ? 0ul : std::wcstoul(digits.c_str(), &stop, hex ? 16 : 10);
+      if (!digits.empty() && stop && *stop == L'\0' && code <= 0x10FFFFul) {
+        if (code < 0x20ul) {
+          out.push_back(L' ');
+        } else if (code <= 0xFFFFul) {
+          out.push_back(static_cast<wchar_t>(code));
+        } else {
+          const unsigned long v = code - 0x10000ul;
+          out.push_back(static_cast<wchar_t>(0xD800ul + (v >> 10)));
+          out.push_back(static_cast<wchar_t>(0xDC00ul + (v & 0x3FFul)));
+        }
+        i = end;
+        continue;
+      }
+    }
     wchar_t c = 0;
     if (entity == L"amp") {
       c = L'&';
@@ -238,7 +261,8 @@ std::wstring GpuDriverEventQuery(std::uint64_t sinceUnix, std::uint64_t untilUni
   for (const auto* provider : kProviders) {
     providers += (providers.empty() ? L"" : L" or ") + std::wstring(L"Provider[@Name='") + provider + L"']";
   }
-  return L"*[System[(" + providers + L") and TimeCreated[@SystemTime>='" + IsoUtc(sinceUnix) +
+  return L"*[System[(" + providers + L") and (Level=1 or Level=2 or Level=3) and TimeCreated[@SystemTime>='" +
+    IsoUtc(sinceUnix) +
     L"' and @SystemTime<='" + IsoUtc(untilUnix) + L"']]]";
 }
 
@@ -298,8 +322,17 @@ GpuDriverEventLog QueryGpuDriverEvents(std::uint64_t sinceUnix, std::uint64_t un
   std::map<std::wstring, EvtHandle> publishers;
   EVT_HANDLE batch[16]{};
   DWORD returned = 0;
-  while (log.total < kMaxEventsCounted &&
-         EvtNext(results.get(), static_cast<DWORD>(std::size(batch)), batch, 1000, 0, &returned)) {
+  const ULONGLONG started = GetTickCount64();
+  for (;;) {
+    if (log.total >= kMaxEventsCounted || GetTickCount64() - started > kReadBudgetMs) {
+      log.complete = false;  // more may follow
+      break;
+    }
+    if (!EvtNext(results.get(), static_cast<DWORD>(std::size(batch)), batch, kNextTimeoutMs, 0, &returned)) {
+      // Only "no more" is the end; a timeout or an error leaves the count short.
+      log.complete = GetLastError() == ERROR_NO_MORE_ITEMS;
+      break;
+    }
     for (DWORD i = 0; i < returned; ++i) {
       EvtHandle event(batch[i]);
       ++log.total;
@@ -338,6 +371,7 @@ std::string GpuDriverEventsJson(const GpuDriverEventLog& log)
     { "since_unix", log.since_unix },
     { "until_unix", log.until_unix },
     { "total", log.total },
+    { "complete", log.complete },
     { "events", events },
   }.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }

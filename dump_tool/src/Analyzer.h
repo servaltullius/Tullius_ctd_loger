@@ -527,6 +527,8 @@ struct GpuDriverEventRow
 struct GpuDriverLog
 {
   bool recorded = false;  // the helper read the log for this capture
+  // The helper read it to the end: otherwise no event is not "none".
+  bool complete = true;
   std::uint64_t since_unix = 0;
   std::uint64_t until_unix = 0;
   std::size_t total = 0;  // events in the window; `events` holds the newest of them
