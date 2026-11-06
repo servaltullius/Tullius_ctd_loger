@@ -193,11 +193,12 @@ void TestMemoryIsReadBackFromTheDump()
     const auto direct = skydiag::helper::internal::QueryProcessGpuMemory(GetCurrentProcessId());
     Require(!direct.empty() && direct.front().name == m.gpu_name, "The analyzer keeps the most-used adapter");
     // A virtual display (here: a remote play app's) repeats the GPU's counters
-    // without a name; the helper leaves display-only adapters out.
+    // without a name; the helper leaves display-only adapters out. Only a
+    // budget of its own tells two adapters apart, so 0/0 is not compared.
     for (const auto& adapter : direct) {
       for (const auto& other : direct) {
-        Require(!adapter.name.empty() || &adapter == &other || adapter.local_usage != other.local_usage ||
-                  adapter.local_budget != other.local_budget,
+        Require(!adapter.name.empty() || &adapter == &other || adapter.local_budget == 0 ||
+                  adapter.local_usage != other.local_usage || adapter.local_budget != other.local_budget,
           "No nameless adapter repeats another adapter's counters");
       }
     }

@@ -23,8 +23,9 @@ struct GpuAdapterMemory
 };
 
 // Adapters with any memory in use by the process, largest local usage first.
-// Display-only adapters (virtual displays) are left out: they repeat the
-// render adapter's counters. Empty when the process has none or the queries
+// Display-only adapters (virtual displays) are left out: one seen on a user's
+// PC (a remote play app's) repeated the render adapter's counters, and they
+// cannot hold the game's textures. Empty when the process has none or the queries
 // fail. Reads kernel counters only (D3DKMTQueryStatistics); it takes well
 // under a millisecond.
 std::vector<GpuAdapterMemory> QueryProcessGpuMemory(std::uint32_t pid);

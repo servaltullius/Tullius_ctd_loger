@@ -4,15 +4,14 @@ its build output.
 
 `dotnet run` built the project again on every call (about 2 s each), and every
 MSBuild run left two empty folders and a `Microsoft.NET.Workload_*.log` in the
-temp folder: about 80 folders and 40 logs per suite run, never removed. The one
-build here uses a private temp folder that is removed with the build output
-when the test process ends. Under WSL `dotnet` starts the Windows dotnet.exe,
-which does not see a Linux TEMP, so that build still uses the Windows temp
-folder (once per test process instead of once per case).
+temp folder: about 80 folders and 40 logs per suite run, never removed. Here
+the project is built once into a fixed folder under its own bin folder, with a
+private temp folder under its obj folder that is removed right after the build.
+Under WSL `dotnet` starts the Windows dotnet.exe, so that folder is handed over
+as a Windows path through WSLENV. Running the built program leaves nothing.
 """
 from __future__ import annotations
 
-import atexit
 import os
 import shutil
 import subprocess
@@ -40,19 +39,30 @@ def dotnet_path(path: Path) -> str:
     return str(path)
 
 
+def _build_env(temp: Path) -> dict[str, str]:
+    env = dict(os.environ)
+    temp_arg = dotnet_path(temp)
+    env.update(TEMP=temp_arg, TMP=temp_arg, TMPDIR=temp_arg)
+    if _in_wsl():
+        # The values are Windows paths already; /w passes them to Windows
+        # programs only, unchanged.
+        shared = [entry for entry in env.get("WSLENV", "").split(":") if entry]
+        env["WSLENV"] = ":".join(shared + ["TEMP/w", "TMP/w"])
+    return env
+
+
 class Harness:
     def __init__(self, project: Path, framework: str = "net8.0") -> None:
         self._project = project
         self._framework = framework
         self._program: Path | None = None
-        self._env: dict[str, str] = dict(os.environ)
+        self._failure: RuntimeError | None = None
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
         program = self._build()
         return subprocess.run(
             ["dotnet", dotnet_path(program), *args],
             cwd=str(REPO_ROOT),
-            env=self._env,
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -62,41 +72,48 @@ class Harness:
     def _build(self) -> Path:
         if self._program is not None:
             return self._program
-        root = Path(tempfile.mkdtemp(prefix="skydiag_dotnet_harness_"))
-        atexit.register(shutil.rmtree, root, ignore_errors=True)
-        out = root / "out"
-        if not _in_wsl():
-            temp = root / "temp"
-            temp.mkdir()
-            self._env.update(TEMP=str(temp), TMP=str(temp), TMPDIR=str(temp))
-        completed = subprocess.run(
-            [
-                "dotnet",
-                "build",
-                dotnet_path(self._project),
-                "--framework",
-                self._framework,
-                # A build server started now would keep the private temp folder
-                # as its TEMP after this process removed it.
-                "--disable-build-servers",
-                "--output",
-                dotnet_path(out),
-                "-nologo",
-                "-v",
-                "q",
-            ],
-            cwd=str(REPO_ROOT),
-            env=self._env,
-            text=True,
-            encoding="utf-8",
-            capture_output=True,
-            check=False,
-        )
+        # A failed build fails every case the same way; report it, not rebuild.
+        if self._failure is not None:
+            raise self._failure
+        obj = self._project.parent / "obj"
+        obj.mkdir(parents=True, exist_ok=True)
+        temp = Path(tempfile.mkdtemp(prefix="harness_temp_", dir=obj))
+        out = self._project.parent / "bin" / "harness" / self._framework
+        try:
+            completed = subprocess.run(
+                [
+                    "dotnet",
+                    "build",
+                    dotnet_path(self._project),
+                    "--framework",
+                    self._framework,
+                    # Named, not derived: a `Platform` variable (set by the
+                    # Visual Studio developer shell) moves bin\Debug to
+                    # bin\x64\Debug.
+                    "--output",
+                    dotnet_path(out),
+                    # A build server started now would keep the private temp
+                    # folder as its TEMP after it is removed.
+                    "--disable-build-servers",
+                    "-nologo",
+                    "-v",
+                    "q",
+                ],
+                cwd=str(REPO_ROOT),
+                env=_build_env(temp),
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+            )
+        finally:
+            shutil.rmtree(temp, ignore_errors=True)
         if completed.returncode != 0:
-            raise RuntimeError(
+            self._failure = RuntimeError(
                 f"dotnet build failed for {self._project.name}\n"
                 f"stdout:\n{completed.stdout}\n"
                 f"stderr:\n{completed.stderr}"
             )
+            raise self._failure
         self._program = out / f"{self._project.stem}.dll"
         return self._program

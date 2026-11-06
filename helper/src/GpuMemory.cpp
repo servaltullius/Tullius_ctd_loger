@@ -80,9 +80,10 @@ std::wstring AdapterName(const KmtApi& api, D3DKMT_HANDLE adapter)
 }
 
 // False for an adapter that only shows a picture (a virtual display such as a
-// remote play or streaming app's): the kernel reports the render adapter's
-// counters for it too, so it would be counted twice, and it has no name. True
-// when the type is unknown.
+// remote play or streaming app's). One seen on a user's PC reported the render
+// adapter's counters for the game too, without a name, so the GPU line read
+// "GPU"; a display-only adapter cannot render the game's textures anyway.
+// True when the type is unknown.
 bool CanRender(const KmtApi& api, D3DKMT_HANDLE adapter)
 {
   if (!api.queryAdapterInfo) {
