@@ -160,6 +160,15 @@ nlohmann::json BuildSummaryJson(
       { "other_save_failed_loads", save.other_save_crashes },
       { "damaged_save_suspected", r.quick_answer.case_id == "damaged_save" },
     };
+    if (!save.other_loaded_name.empty()) {
+      // ADR-0025 (2026-11-06): loaded_unix is 0 when only this session's
+      // blackbox showed it.
+      summary["save_load"]["other_save_loaded"] = {
+        { "name", WideToUtf8(save.other_loaded_name) },
+        { "loaded_unix", save.other_loaded_unix },
+        { "this_session", save.other_loaded_this_session },
+      };
+    }
     if (!save.history_fingerprint.empty()) {
       // The viewer analyzes the dump again when crash_history.json no longer
       // gives this (SaveLoadHistoryFingerprint.cs).

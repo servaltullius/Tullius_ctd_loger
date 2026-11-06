@@ -41,6 +41,7 @@ add_executable(${PROJECT_NAME}
   src/ProcessAttach.cpp
   src/ProcessUtil.cpp
   src/RetentionWorker.cpp
+  src/SaveLoadRecord.cpp
   src/SkseLogParser.cpp
   src/StackCodeMemory.cpp
   src/WctCapture.cpp
@@ -67,6 +68,8 @@ add_executable(${PROJECT_NAME}
   src/PssSnapshot.h
   src/PendingCrashAnalysisInternal.h
   src/RetentionWorker.h
+  src/SaveLoadRecord.h
+  src/SeqlockCopy.h
   include/SkyrimDiagHelper/WctCapture.h)
 
 skydiag_add_version_resource(

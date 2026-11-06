@@ -124,6 +124,9 @@ std::string BuildReportText(
       if (save.other_save_crashes > 0) {
         rpt << (en ? "; other saves since " : "; 그 뒤 다른 세이브 ") << save.other_save_crashes << (en ? "" : "번");
       }
+      if (!save.other_loaded_name.empty()) {
+        rpt << (en ? "; another save loaded: " : "; 정상적으로 열린 다른 세이브: ") << WideToUtf8(save.other_loaded_name);
+      }
       rpt << ")";
     } else {
       rpt << (en ? " (loaded before the capture)" : " (캡처 전에 불러오기 끝남)");

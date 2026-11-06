@@ -16,6 +16,7 @@
 #include "CrashCapture.h"
 #include "HangCapture.h"
 #include "PendingCrashAnalysis.h"
+#include "SaveLoadRecord.h"
 
 namespace skydiag::helper::internal {
 
@@ -65,6 +66,9 @@ struct HelperLoopState
   // logged (none yet: SIZE_MAX).
   std::uint64_t nextHookPageScanTick64 = 0;
   std::size_t loggedHookPageCount = static_cast<std::size_t>(-1);
+  // ADR-0025 (2026-11-06): where the blackbox was read up to for finished
+  // save loads (loaded_saves.json).
+  SaveLoadWatcher saveLoads{};
 };
 
 struct CrashArtifactRemovalResult

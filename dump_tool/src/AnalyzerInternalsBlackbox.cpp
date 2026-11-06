@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "MinidumpUtil.h"
 #include "SkyrimDiagCloseRequest.h"
@@ -149,6 +150,9 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
   double startedMs = 0.0;
   double lastMs = 0.0;
   double crashMs = -1.0;
+  // Saves this session loaded, newest last: a failing load can say another
+  // one loaded (loaded_saves.json says when, if the helper kept it).
+  std::vector<std::pair<std::string, std::wstring>> loaded;
   for (const auto& event : events) {
     lastMs = std::max(lastMs, event.t_ms);
     switch (static_cast<skydiag::EventType>(event.type)) {
@@ -157,11 +161,7 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
         info.seen = true;
         info.in_progress = true;
         info.name = DecodeSaveLoadName(event.b, event.c, event.d);
-        if (event.a != 0u) {
-          char key[17]{};
-          std::snprintf(key, sizeof(key), "%016llx", static_cast<unsigned long long>(event.a));
-          info.key = key;
-        }
+        info.key = skydiag::SaveKeyHex(event.a);
         info.start_event = event.i;
         startedMs = event.t_ms;
         crashMs = -1.0;
@@ -172,6 +172,9 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
           info = SaveLoadInfo{};  // a new game: no save is in play
         } else if (info.seen && event.t_ms >= startedMs) {
           info.in_progress = false;
+          if (event.a == static_cast<std::uint64_t>(skydiag::SaveLoadResult::kLoaded) && !info.key.empty()) {
+            loaded.emplace_back(info.key, info.name);
+          }
         }
         break;
       case skydiag::EventType::kCrash:
@@ -186,19 +189,23 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
   if (info.in_progress) {
     info.timed_to_crash = crashMs >= 0.0;
     info.seconds_loading = std::max(0.0, ((info.timed_to_crash ? crashMs : lastMs) - startedMs) / 1000.0);
+    for (auto it = loaded.rbegin(); it != loaded.rend() && !info.key.empty(); ++it) {
+      if (it->first != info.key) {
+        info.other_loaded_name = it->second;
+        info.other_loaded_this_session = true;
+        break;
+      }
+    }
   }
   return info;
 }
 
 std::string SaveLoadAttemptKey(const AnalysisResult& r)
 {
-  if (!r.save_load.seen || r.pid == 0u || r.blackbox_start_qpc == 0u) {
+  if (!r.save_load.seen) {
     return {};
   }
-  char key[48]{};
-  std::snprintf(key, sizeof(key), "%x-%llx-%x", r.pid, static_cast<unsigned long long>(r.blackbox_start_qpc),
-    r.save_load.start_event);
-  return key;
+  return skydiag::SaveLoadAttemptKey(r.pid, r.blackbox_start_qpc, r.save_load.start_event);
 }
 
 std::string SaveLoadFailurePlace(const AnalysisResult& r)

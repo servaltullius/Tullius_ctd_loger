@@ -346,6 +346,9 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
         ? (L" Failed loads of other saves since then: " + std::to_wstring(save.other_save_crashes) + L".")
         : (L" 그 뒤 다른 세이브를 불러오다 난 사고: " + std::to_wstring(save.other_save_crashes) + L"번.");
     }
+    if (const auto otherLoaded = OtherSaveLoadedSentence(save, en); !otherLoaded.empty()) {
+      e.details += L" " + otherLoaded;
+    }
     r.evidence.push_back(std::move(e));
   }
 

@@ -192,6 +192,10 @@ bool SaveLoadSuggestsDamagedSave(const SaveLoadInfo& saveLoad);
 std::wstring DamagedSaveLead(const SaveLoadInfo& saveLoad, bool en);
 // What to do about it: load an earlier save, and what either outcome means.
 std::wstring DamagedSaveAction(bool en);
+// ADR-0025 (2026-11-06): "다른 세이브(Save75)는 11/01 16:25에 정상적으로 열렸습니다." /
+// "Another save (Save75) loaded fine at 11/01 16:25." (local time), or "earlier in
+// this game session"; empty when no other save is known to have loaded.
+std::wstring OtherSaveLoadedSentence(const SaveLoadInfo& saveLoad, bool en);
 
 // Split parts of BuildEvidenceAndSummaryImpl.
 void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

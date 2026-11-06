@@ -7,8 +7,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <cwchar>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -21,6 +24,7 @@
 #include "AnalyzerInternals.h"
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
+#include "LoadedSaves.h"
 #include "ModNames.h"
 #include "NextAction.h"
 #include "OutputWriterPipeline.h"
@@ -1196,6 +1200,25 @@ void TestDamagedSave()
     info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
       start(20000.0, name76), at(25000.0, skydiag::EventType::kCrash, 0xC0000005u) });
     Require(info.in_progress && info.name == kSave, "the newest load counts");
+    // ADR-0025 (2026-11-06): another save this session loaded, newest first.
+    Require(info.other_loaded_name == L"Save75_FC70D793_0_646F7" && info.other_loaded_this_session &&
+              info.other_loaded_unix == 0u,
+      "another save this session loaded");
+    info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
+      start(10000.0, name76), at(15000.0, skydiag::EventType::kSaveLoadEnd, 1), start(20000.0, name76),
+      at(25000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.in_progress && info.other_loaded_name == L"Save75_FC70D793_0_646F7",
+      "the same save loading before is not another save");
+    info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 0),
+      start(20000.0, name76), at(25000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.in_progress && info.other_loaded_name.empty() && !info.other_loaded_this_session,
+      "a failed load of another save is no load");
+    info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
+      start(20000.0, ""), at(25000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(info.in_progress && info.other_loaded_name.empty(), "an unnamed load cannot tell another save");
+    info = internal::DetectSaveLoad({ start(1000.0, name75), at(9000.0, skydiag::EventType::kSaveLoadEnd, 1),
+      at(60000.0, skydiag::EventType::kCrash, 0xC0000005u) });
+    Require(!info.in_progress && info.other_loaded_name.empty(), "only a load in progress asks");
     Require(!internal::DetectSaveLoad({ at(1000.0, skydiag::EventType::kCrash, 0xC0000005u) }).seen, "no load seen");
 
     Require(internal::EventTypeName(start(0.0, name76).type) == L"SaveLoadStart" &&
@@ -1335,6 +1358,63 @@ void TestDamagedSave()
                 en ? L"crashed while loading a save (Save76_FC70D793_0_646F7). If loading it fails again"
                    : L"세이브(Save76_FC70D793_0_646F7)를 불러오다 튕겼습니다. 같은 세이브에서 또 그러면"),
       "the first failed load");
+
+    // ADR-0025 (2026-11-06): another save that loaded, told right after what
+    // happened and before the advice.
+    {
+      Require(r.quick_answer.why_not_certain ==
+                (en ? L"There is no record of another save loading fine, so whether only this save fails is not known."
+                    : L"다른 세이브를 정상적으로 불러온 기록이 없어서, 이 세이브에서만 실패하는지는 알 수 없습니다."),
+        "damaged save with no other load known");
+      auto withOther = crash(0, 0, 0);
+      withOther.save_load.other_loaded_name = L"Save75_FC70D793_0_646F7";
+      withOther.save_load.other_loaded_this_session = true;
+      BuildEvidenceAndSummary(withOther, lang);
+      const std::wstring sessionSentence = en
+        ? L"Another save (Save75_FC70D793_0_646F7) loaded fine earlier in this game session."
+        : L"이번 게임에서 먼저 불러온 다른 세이브(Save75_FC70D793_0_646F7)는 정상적으로 열렸습니다.";
+      const auto otherLine = saveLine(withOther, saveTag);
+      Require(otherLine < withOther.recommendations.size() &&
+                Contains(withOther.recommendations[otherLine],
+                  (en ? L"while loading a save (Save76_FC70D793_0_646F7). " : L"튕겼습니다. ") + sessionSentence +
+                    (en ? L" If loading it fails again" : L" 같은 세이브에서 또 그러면")),
+        "the save line tells another save loaded");
+      bool told = false;
+      for (const auto& item : withOther.evidence) {
+        told = told || Contains(item.details, sessionSentence);
+      }
+      Require(told, "the evidence item tells it too");
+      const auto otherSummary =
+        skydiag::dump_tool::BuildSummaryJson(withOther, std::filesystem::temp_directory_path(), L"stem", true);
+      Require(otherSummary["save_load"]["other_save_loaded"]["name"] == "Save75_FC70D793_0_646F7" &&
+                otherSummary["save_load"]["other_save_loaded"]["this_session"] == true &&
+                otherSummary["save_load"]["other_save_loaded"]["loaded_unix"] == 0 &&
+                !skydiag::dump_tool::BuildSummaryJson(first, std::filesystem::temp_directory_path(), L"stem", true)
+                   ["save_load"].contains("other_save_loaded"),
+        "summary JSON other_save_loaded");
+      Require(skydiag::dump_tool::BuildReportText(withOther, otherSummary, true)
+                  .find(en ? "(loading, 19.4 s in; another save loaded: Save75_FC70D793_0_646F7)"
+                           : "(불러오는 중, 19.4초째; 정상적으로 열린 다른 세이브: Save75_FC70D793_0_646F7)") !=
+                std::string::npos,
+        "the report's save line names it");
+
+      // Recorded by the helper in an earlier session: when, in local time.
+      auto damagedOther = crash(1, 2, 0);
+      damagedOther.save_load.other_loaded_name = L"Save75_FC70D793_0_646F7";
+      damagedOther.save_load.other_loaded_unix = 1793520300u;
+      BuildEvidenceAndSummary(damagedOther, lang);
+      const auto seconds = static_cast<std::time_t>(1793520300);
+      std::tm local{};
+      wchar_t when[32]{};
+      Require(localtime_s(&local, &seconds) == 0 && std::wcsftime(when, 32, L"%m/%d %H:%M", &local) > 0u, "local time");
+      Require(damagedOther.quick_answer.case_id == "damaged_save" &&
+                damagedOther.quick_answer.why_not_certain ==
+                  (en ? (std::wstring(L"Another save (Save75_FC70D793_0_646F7) loaded fine at ") + when +
+                          L". A mod may still fail only on this save's data, so it is not certain.")
+                      : (std::wstring(L"다른 세이브(Save75_FC70D793_0_646F7)는 ") + when +
+                          L"에 정상적으로 열렸습니다. 그래도 어떤 모드가 이 세이브의 데이터에서만 실패하는 것일 수 있어 단정할 수는 없습니다.")),
+        "a damaged save tells when another save loaded");
+    }
 
     // A capture with no Crash event says when the last record was, not the crash.
     auto stuck = crash(0, 0, 0);
@@ -1480,6 +1560,52 @@ void TestCandidateFamilyLabels()
 }
 
 // Batch D: what a player reads first in the text report, and no noise in it.
+// ADR-0025 (2026-11-06): the loads the helper records, as the analyzer reads them.
+void TestLoadedSavesFile()
+{
+  namespace dt = skydiag::dump_tool;
+  const auto dir = std::filesystem::temp_directory_path() / "skydiag_quick_answer_loaded_saves";
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  std::filesystem::create_directories(dir, ec);
+  const auto path = dir / skydiag::kLoadedSavesFileName;
+  const auto write = [&](std::string_view text) {
+    std::ofstream(path, std::ios::binary) << text;
+  };
+  write(R"({"version":1,"loads":[
+    {"save_key":"aaaaaaaaaaaaaaaa","save_name":"Save75","loaded_unix":1000,"attempt_key":"10-1-5"},
+    {"save_key":"bbbbbbbbbbbbbbbb","save_name":"Save76","loaded_unix":5000,"attempt_key":"10-1-9"},
+    {"save_key":"cccccccccccccccc","save_name":"Save77","loaded_unix":200000,"attempt_key":"20-2-3"},
+    {"save_name":"no key","loaded_unix":3000},
+    {"save_key":"dddddddddddddddd","save_name":"no time"},
+    "not an object"]})");
+  const auto loads = dt::ReadLoadedSaves(path);
+  Require(loads.size() == 3u && loads[0].name_utf8 == "Save75" && loads[1].loaded_unix == 5000u &&
+            loads[2].attempt_key == "20-2-3",
+    "rows without a key or a time are left out");
+
+  auto other = dt::NewestOtherLoadedSave(loads, "bbbbbbbbbbbbbbbb", 6000u);
+  Require(other && other->name_utf8 == "Save75", "another save, not the one that failed");
+  other = dt::NewestOtherLoadedSave(loads, "cccccccccccccccc", 6000u);
+  Require(other && other->name_utf8 == "Save76", "the newest other save");
+  other = dt::NewestOtherLoadedSave(loads, "aaaaaaaaaaaaaaaa", 4000u);
+  Require(!other, "a load after the capture is left out");
+  other = dt::NewestOtherLoadedSave(loads, "aaaaaaaaaaaaaaaa", 5000u + 86400u);
+  Require(other && other->name_utf8 == "Save76", "a day before the capture counts");
+  other = dt::NewestOtherLoadedSave(loads, "aaaaaaaaaaaaaaaa", 5001u + 86400u);
+  Require(!other, "older than a day is left out");
+  Require(!dt::NewestOtherLoadedSave(loads, "", 6000u) && !dt::NewestOtherLoadedSave(loads, "aaaaaaaaaaaaaaaa", 0u),
+    "no save key or no capture time: nothing");
+
+  write(R"({"version":2,"loads":[{"save_key":"aaaaaaaaaaaaaaaa","loaded_unix":1000}]})");
+  Require(dt::ReadLoadedSaves(path).empty(), "another version is not read");
+  write("{ damaged");
+  Require(dt::ReadLoadedSaves(path).empty(), "a damaged file tells nothing");
+  std::filesystem::remove(path, ec);
+  Require(dt::ReadLoadedSaves(path).empty(), "no file");
+  std::filesystem::remove_all(dir, ec);
+}
+
 void TestReportReadability()
 {
   using skydiag::dump_tool::EvidenceItem;
@@ -1769,6 +1895,7 @@ int main()
     TestFaultInstructionClue();
     TestForcedClose();
     TestDamagedSave();
+    TestLoadedSavesFile();
     TestReportReadability();
     TestCandidateFamilyLabels();
   } catch (const std::exception& e) {

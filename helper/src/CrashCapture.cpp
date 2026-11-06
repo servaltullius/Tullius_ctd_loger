@@ -28,6 +28,7 @@
 #include "IncidentManifest.h"
 #include "PendingCrashAnalysis.h"
 #include "PluginScanner.h"
+#include "SeqlockCopy.h"
 #include "HexFormat.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
@@ -48,7 +49,6 @@ constexpr int kMaxHeartbeatChecks = 4;
 constexpr DWORD kHeartbeatCheckIntervalMs = 2000;
 constexpr int kRequiredHeartbeatAdvances = 2;
 constexpr int kStableSnapshotAttempts = 64;
-constexpr int kRingEntrySnapshotAttempts = 8;
 
 // The retry window is deliberately short: the faulting game process is usually
 // seconds from exiting, and once it does the dump can no longer be produced.
@@ -108,43 +108,6 @@ std::uint32_t ReadCrashSequence(const skydiag::SharedHeader* header) noexcept
   auto* const sequence = reinterpret_cast<volatile LONG*>(
     const_cast<volatile std::uint32_t*>(&header->crash_seq));
   return static_cast<std::uint32_t>(InterlockedCompareExchange(sequence, 0, 0));
-}
-
-template <class Entry>
-std::uint32_t ReadEntrySequence(const Entry* entry) noexcept
-{
-  auto* const sequence = reinterpret_cast<volatile LONG*>(
-    const_cast<volatile std::uint32_t*>(&entry->seq));
-  return static_cast<std::uint32_t>(InterlockedCompareExchange(sequence, 0, 0));
-}
-
-template <class Entry>
-bool CopyStableSeqlockEntry(const Entry* source, Entry* destination) noexcept
-{
-  if (!source || !destination) {
-    return false;
-  }
-  for (int attempt = 0; attempt < kRingEntrySnapshotAttempts; ++attempt) {
-    const std::uint32_t before = ReadEntrySequence(source);
-    if ((before & 1u) != 0u) {
-      SwitchToThread();
-      continue;
-    }
-
-    Entry local{};
-    std::memcpy(&local, source, sizeof(local));
-    MemoryBarrier();
-    const std::uint32_t after = ReadEntrySequence(source);
-    if (before == after && (after & 1u) == 0u) {
-      std::memcpy(destination, &local, sizeof(local));
-      return true;
-    }
-    SwitchToThread();
-  }
-
-  std::memset(destination, 0, sizeof(*destination));
-  destination->seq = 1u;  // odd => intentionally invalid/unstable
-  return false;
 }
 
 bool TryCaptureDumpIdentity(
