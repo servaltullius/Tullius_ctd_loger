@@ -73,6 +73,18 @@ nlohmann::json DumpObjectJson(const DumpObject& object)
       { "form_id", object.base_form_id },
       { "source_files", std::move(baseFiles) },
     };
+    if (object.has_leveled_original) {
+      // shared/SkyrimDiagExtraData.h: the NPC a leveled actor was rolled from.
+      nlohmann::json originalFiles = nlohmann::json::array();
+      for (const auto& file : object.leveled_original_files) {
+        originalFiles.push_back(WideToUtf8(file));
+      }
+      entry["base_object"]["leveled_from"] = {
+        { "type", WideToUtf8(object.leveled_original_type_name) },
+        { "form_id", object.leveled_original_form_id },
+        { "source_files", std::move(originalFiles) },
+      };
+    }
   }
   if (object.is_package) {
     // shared/SkyrimDiagPackage.h: what the package was made from and of.

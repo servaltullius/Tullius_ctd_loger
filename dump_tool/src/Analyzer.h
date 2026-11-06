@@ -50,6 +50,13 @@ struct DumpObject
   std::wstring base_type_name;  // "TESNPC"
   std::uint32_t base_form_id = 0;
   std::vector<std::wstring> base_source_files;
+  // When the base is a temporary NPC the game made for a leveled list: the
+  // NPC it was rolled from (ExtraLeveledCreature, shared/SkyrimDiagExtraData.h),
+  // which names the plugin. Dumps whose helper did not follow it have none.
+  bool has_leveled_original = false;
+  std::wstring leveled_original_type_name;  // "TESNPC"
+  std::uint32_t leveled_original_form_id = 0;
+  std::vector<std::wstring> leveled_original_files;
   std::uint32_t relevance = 0;  // Crash Logger's location + type weights
   // An AI package (shared/SkyrimDiagPackage.h): its type, the package it was
   // made from (which names the plugin when the game made this one at run

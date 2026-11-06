@@ -11,6 +11,7 @@
 
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "CrashLoggerParseCore.h"
+#include "SkyrimDiagExtraData.h"
 #include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 #include "Utf.h"
@@ -189,6 +190,13 @@ std::wstring DescribeDumpObject(const DumpObject& object)
       if (const auto files = FilesText(object.base_source_files); !files.empty()) {
         text += L" " + files;
       }
+      if (object.has_leveled_original) {
+        text += L", leveled from " + object.leveled_original_type_name + L" [" +
+          FormIdText(object.leveled_original_form_id) + L"]";
+        if (const auto files = FilesText(object.leveled_original_files); !files.empty()) {
+          text += L" " + files;
+        }
+      }
       text += L")";
     }
   } else if (!object.module.empty()) {
@@ -222,6 +230,11 @@ std::wstring DescribeDumpObjectTarget(const DumpObject& object)
     text += L", base " + object.base_type_name + L" " + FormIdText(object.base_form_id);
     if (const auto baseFiles = FilesText(object.base_source_files); !baseFiles.empty()) {
       text += L" " + baseFiles;
+    } else if (object.has_leveled_original) {
+      text += L" from " + object.leveled_original_type_name + L" " + FormIdText(object.leveled_original_form_id);
+      if (const auto files = FilesText(object.leveled_original_files); !files.empty()) {
+        text += L" " + files;
+      }
     }
   }
   return text + L")";
@@ -314,6 +327,14 @@ std::vector<DumpObject> ReadDumpObjects(
       object.base_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(info->base_type_name));
       object.base_form_id = info->base_form_id;
       object.base_source_files = FileNamesToWide(info->base_source_files);
+      if (skydiag::extra_data::IsRuntimeFormId(info->base_form_id)) {
+        if (const auto original = skydiag::extra_data::ReadLeveledOriginal(read, info->complete_object)) {
+          object.has_leveled_original = true;
+          object.leveled_original_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(original->type_name));
+          object.leveled_original_form_id = original->form_id;
+          object.leveled_original_files = FileNamesToWide(original->source_files);
+        }
+      }
     }
     object.relevance = relevance;
     if (skydiag::package::IsPackage(*info)) {

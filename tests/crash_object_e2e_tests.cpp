@@ -98,12 +98,44 @@ public:
   ~TESNPC() override = default;
 };
 
+// A reference's extra data, AE 1.6.629+ layout (shared/SkyrimDiagExtraData.h).
+class BSExtraData
+{
+public:
+  virtual ~BSExtraData() = default;
+  BSExtraData* next = nullptr;  // 0x08
+};
+
+class ExtraCount : public BSExtraData
+{
+public:
+  ~ExtraCount() override = default;
+};
+
+class ExtraLeveledCreature : public BSExtraData
+{
+public:
+  ~ExtraLeveledCreature() override = default;
+  TESBoundObject* originalBase = nullptr;  // 0x10
+  TESBoundObject* templateBase = nullptr;  // 0x18
+};
+
+class BaseExtraList
+{
+public:
+  virtual ~BaseExtraList() = default;
+  BSExtraData* data = nullptr;  // 0x08
+  void* presence = nullptr;     // 0x10
+};
+
 class TESObjectREFR : public TESForm
 {
 public:
   ~TESObjectREFR() override = default;
   char unk20[0x20]{};
   TESBoundObject* baseObject = nullptr;  // 0x40, OBJ_REFR::objectReference
+  char unk48[0x28]{};
+  BaseExtraList extraList;               // 0x70, ExtraDataList::_extraData
 };
 
 class Actor : public TESObjectREFR
@@ -238,9 +270,29 @@ void TestCrashObjectsAreReadBackFromTheDump()
       "The package layout the reader assumes");
   }
 
+  // An actor from a leveled list: a temporary base NPC the game made, and the
+  // NPC it was rolled from in its extra data, after another extra.
+  auto temporaryNpc = std::make_unique<TESNPC>();
+  temporaryNpc->formID = 0xFF001234u;
+  temporaryNpc->formType = 0x2B;
+  temporaryNpc->fullName = kNpcName;
+  auto count = std::make_unique<ExtraCount>();
+  auto leveled = std::make_unique<ExtraLeveledCreature>();
+  leveled->originalBase = npc.get();
+  count->next = leveled.get();
+  auto spawned = std::make_unique<Character>();
+  spawned->formID = 0xFF00ABCDu;
+  spawned->formType = 0x3E;
+  spawned->baseObject = temporaryNpc.get();
+  spawned->extraList.data = count.get();
+  Require(reinterpret_cast<const char*>(&spawned->extraList) - reinterpret_cast<const char*>(spawned.get()) == 0x70 &&
+            reinterpret_cast<const char*>(&leveled->originalBase) - reinterpret_cast<const char*>(leveled.get()) == 0x10,
+    "The extra data layout the reader assumes");
+
   ParkedThread faulting;
   CONTEXT ctx = faulting.Context();
   ctx.Rcx = reinterpret_cast<DWORD64>(character.get());
+  ctx.R12 = reinterpret_cast<DWORD64>(spawned.get());
   ctx.Rsi = reinterpret_cast<DWORD64>(node.get());
   ctx.Rdx = reinterpret_cast<DWORD64>(notAnObject.get());
   ctx.R13 = reinterpret_cast<DWORD64>(runtimePackage.get());
@@ -324,6 +376,29 @@ void TestCrashObjectsAreReadBackFromTheDump()
   }
   Require(hasEvidence, "The objects are listed as evidence");
 
+  // The leveled actor: its temporary base, and the NPC it was rolled from.
+  const skydiag::dump_tool::DumpObject* spawnedObject = nullptr;
+  for (const auto& object : result.dump_objects) {
+    if (object.location == L"R12") {
+      spawnedObject = &object;
+    }
+  }
+  Require(spawnedObject != nullptr && spawnedObject->has_base_object && spawnedObject->base_form_id == 0xFF001234u &&
+            spawnedObject->base_source_files.empty(),
+    "The leveled actor's temporary base has no plugin");
+  Require(spawnedObject->has_leveled_original && spawnedObject->leveled_original_type_name == L"TESNPC" &&
+            spawnedObject->leveled_original_form_id == 0x0001D8F6u &&
+            spawnedObject->leveled_original_files.size() == 1u && spawnedObject->leveled_original_files[0] == L"Skyrim.esm",
+    "The NPC it was rolled from, and its plugin");
+  Require(!form->has_leveled_original, "A placed actor's own base is not followed");
+  Require(skydiag::dump_tool::DescribeDumpObject(*spawnedObject) ==
+            L"R12: Character \"Blood Dragon\" [0xFF00ABCD] (base TESNPC [0xFF001234], leveled from TESNPC [0x0001D8F6] "
+            L"Skyrim.esm)",
+    "The report line");
+  Require(skydiag::dump_tool::DescribeDumpObjectTarget(*spawnedObject) ==
+            L"Character \"Blood Dragon\" (FormID 0xFF00ABCD, base TESNPC 0xFF001234 from TESNPC 0x0001D8F6 Skyrim.esm)",
+    "The freeze clue's wording");
+
   // The package: what it was made from and of, one pointer past what the
   // registers reach.
   const skydiag::dump_tool::DumpObject* package = nullptr;
@@ -364,6 +439,15 @@ void TestCrashObjectsAreReadBackFromTheDump()
     }
   }
   Require(hasPackageJson, "The summary JSON carries the package");
+  bool hasLeveledJson = false;
+  for (const auto& object : summary["dump_objects"]) {
+    if (object.value("location", std::string{}) == "R12") {
+      hasLeveledJson = object["base_object"]["leveled_from"]["type"] == "TESNPC" &&
+        object["base_object"]["leveled_from"]["form_id"] == 0x0001D8F6u &&
+        object["base_object"]["leveled_from"]["source_files"][0] == "Skyrim.esm";
+    }
+  }
+  Require(hasLeveledJson, "The summary JSON carries the NPC it was rolled from");
 
   std::filesystem::remove_all(outBase);
 }
