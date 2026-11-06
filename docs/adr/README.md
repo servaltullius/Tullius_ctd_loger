@@ -28,3 +28,4 @@ ADR index:
 - `0023-dump-module-memory-scope.md`
 - `0024-freed-hook-page-record.md`
 - `0025-save-load-crashes.md`
+- `0026-gpu-driver-events.md`

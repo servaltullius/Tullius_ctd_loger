@@ -4,6 +4,7 @@
 #include "DumpObjects.h"
 #include "GameLockWait.h"
 #include "MainThreadWait.h"
+#include "GpuDriverLog.h"
 #include "MemorySnapshot.h"
 #include "ModNames.h"
 #include "SkyrimDiagShared.h"
@@ -394,6 +395,9 @@ std::string BuildReportText(
   }
   if (const auto gpu = DescribeGpuMemory(r.memory, en); !gpu.empty()) {
     rpt << "GPU: " << WideToUtf8(gpu) << "\n";
+  }
+  if (const auto driver = DescribeGpuDriverLog(r.gpu_driver_log, r.dump_capture_unix, en); !driver.empty()) {
+    rpt << (en ? "GPU driver events: " : "그래픽 드라이버 기록: ") << WideToUtf8(driver) << "\n";
   }
   if (!r.problematic_modules.empty()) {
     rpt << (en ? "ProblematicModules: " : "문제 모듈: ");

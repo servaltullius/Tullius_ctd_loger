@@ -5,6 +5,7 @@
 
 #include "GameLockWait.h"
 #include "MainThreadWait.h"
+#include "GpuDriverLog.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
 #include "MinidumpUtil.h"
@@ -986,6 +987,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
         : (L"[세이브] 세이브" + nameKo + L"를 불러오다 " + std::wstring(isCrashLike ? L"튕겼습니다" : L"멈췄습니다") +
             L"." + other + L" 같은 세이브에서 또 그러면 그보다 먼저 만든 세이브를 불러와 보세요. 그 세이브가 열리면, 문제가 이 세이브에서만 반복되는지 확인해 보세요."));
     }
+  }
+
+  // ADR-0026: a GPU fault or driver reset can leave the game frozen with
+  // nothing in any game log; the System log may still show it.
+  if (isHangLike && GpuDriverProblemCount(r.gpu_driver_log) > 0u) {
+    const auto driver = DescribeGpuDriverLog(r.gpu_driver_log, r.dump_capture_unix, en);
+    r.recommendations.push_back(en
+      ? (L"[GPU driver] The graphics driver logged errors while the game ran (" + driver +
+          L"). A GPU fault or driver reset can freeze the game with nothing in its logs: reinstall the graphics "
+          L"driver cleanly and undo any GPU overclock or undervolt, then see whether the freezes stop. Happening in "
+          L"the same game does not prove it is the cause.")
+      : (L"[GPU 드라이버] 게임 중 그래픽 드라이버 오류가 기록됐습니다(" + driver +
+          L"). GPU가 멈추거나 드라이버가 재시작되면 게임은 로그 없이 굳을 수 있습니다. 그래픽 드라이버를 깨끗이 다시 "
+          L"설치하고, GPU 오버클럭이나 언더볼트를 쓰고 있다면 되돌린 뒤 프리징이 계속되는지 보세요. 같은 게임 중에 났다는 "
+          L"것만으로 원인이라고 단정할 수는 없습니다."));
   }
 
   if (r.freeze_analysis.has_analysis) {

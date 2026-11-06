@@ -284,6 +284,7 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
   BuildResourceEvidence(r, lang, ctx);
   BuildProblematicModuleEvidence(r, lang, ctx);
   BuildMemoryEvidence(r, lang, ctx);
+  BuildGpuDriverEvidence(r, lang, ctx);
   BuildHitchAndFreezeEvidence(r, lang, ctx);
   BuildModuleClassificationEvidence(r, lang, ctx);
 

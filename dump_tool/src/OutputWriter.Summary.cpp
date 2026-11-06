@@ -4,6 +4,7 @@
 #include "GameLockWait.h"
 #include "JsonValue.h"
 #include "MainThreadWait.h"
+#include "GpuDriverLog.h"
 #include "MemorySnapshot.h"
 #include "NextAction.h"
 #include "OutputWriterInternals.h"
@@ -399,6 +400,26 @@ nlohmann::json BuildSummaryJson(
     memory["commit_high"] = pressure.commit_high;
     memory["vram_high"] = pressure.vram_high;
     summary["memory"] = std::move(memory);
+  }
+  if (const auto& log = r.gpu_driver_log; log.recorded) {
+    // ADR-0026: the display drivers' events from the game's start to the capture.
+    nlohmann::json events = nlohmann::json::array();
+    for (const auto& event : log.events) {
+      events.push_back({
+        { "provider", WideToUtf8(event.provider) },
+        { "id", event.id },
+        { "level", event.level },
+        { "unix", event.unix },
+        { "message", WideToUtf8(event.message) },
+      });
+    }
+    summary["gpu_driver_events"] = {
+      { "since_unix", log.since_unix },
+      { "until_unix", log.until_unix },
+      { "total", log.total },
+      { "problems", GpuDriverProblemCount(log) },
+      { "events", std::move(events) },
+    };
   }
 
   if (!r.problematic_modules.empty()) {

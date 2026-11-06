@@ -1,5 +1,6 @@
 #include "EvidenceBuilderEvidencePipeline.h"
 
+#include "GpuDriverLog.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
 #include "Utf.h"
@@ -291,6 +292,29 @@ void BuildMemoryEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceB
     ? (en ? L"Memory was close to its limit at capture time" : L"캡처 당시 메모리가 한도에 가까웠음")
     : (en ? L"Memory at capture time" : L"캡처 당시 메모리");
   e.details = JoinList(parts, parts.size(), L" | ");
+  r.evidence.push_back(std::move(e));
+}
+
+// ADR-0026: what the display drivers logged while the game ran. None is worth
+// saying too: a freeze without driver errors is less likely the GPU's.
+void BuildGpuDriverEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
+{
+  const auto& log = r.gpu_driver_log;
+  if (!log.recorded) {
+    return;
+  }
+  const bool en = ctx.en;
+  const bool problems = GpuDriverProblemCount(log) > 0u;
+  EvidenceItem e{};
+  e.confidence_level = problems ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+  e.confidence = ConfidenceText(lang, e.confidence_level);
+  e.title = problems
+    ? (en ? L"The graphics driver logged errors while the game ran" : L"게임 중 그래픽 드라이버 오류가 기록됨")
+    : (en ? L"Graphics driver events while the game ran" : L"게임 중 그래픽 드라이버 기록");
+  e.details = DescribeGpuDriverLog(log, r.dump_capture_unix, en) +
+    (problems ? (en ? L". Windows System log; happening in the same game does not make it the cause."
+                    : L". Windows 시스템 로그 기록이며, 같은 게임 중에 났다는 것만으로 원인이라고 단정할 수는 없습니다.")
+              : (en ? L". Windows System log." : L". Windows 시스템 로그 기록입니다."));
   r.evidence.push_back(std::move(e));
 }
 

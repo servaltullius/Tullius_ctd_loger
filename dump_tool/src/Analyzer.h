@@ -513,6 +513,26 @@ struct MemorySnapshot
   std::uint64_t gpu_shared_usage_bytes = 0;
 };
 
+// ADR-0026: the display drivers' events in the Windows System log from the
+// game's start to a freeze or manual capture, as the helper read them.
+struct GpuDriverEventRow
+{
+  std::wstring provider;  // nvlddmkm, amdkmdag, igfx, ..., Display (TDR 4101)
+  std::uint32_t id = 0;
+  std::uint32_t level = 0;  // 1 critical, 2 error, 3 warning, 4 information
+  std::uint64_t unix = 0;
+  std::wstring message;
+};
+
+struct GpuDriverLog
+{
+  bool recorded = false;  // the helper read the log for this capture
+  std::uint64_t since_unix = 0;
+  std::uint64_t until_unix = 0;
+  std::size_t total = 0;  // events in the window; `events` holds the newest of them
+  std::vector<GpuDriverEventRow> events;  // oldest first
+};
+
 struct AnalysisResult
 {
   i18n::Language language = i18n::DefaultLanguage();
@@ -631,6 +651,7 @@ struct AnalysisResult
   // Freezes and manual captures: the same per thread, threads with objects only.
   std::vector<FreezeThreadObjects> freeze_thread_objects;
   MemorySnapshot memory;
+  GpuDriverLog gpu_driver_log;
   std::vector<ProblematicModule> problematic_modules;
 
   // Heuristic: suspects inferred from stack/module scanning

@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <ctime>
 #include <iterator>
 #include <optional>
 #include <string_view>
@@ -16,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CrashObjectMemory.h"
+#include "GpuDriverEvents.h"
 #include "GpuMemory.h"
 #include "HangObjectMemory.h"
 #include "HookPageRecord.h"
@@ -538,7 +540,7 @@ bool WriteDumpWithStreams(
   }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
-  streams.reserve(5);
+  streams.reserve(6);
 
   MINIDUMP_USER_STREAM s1{};
   s1.Type = skydiag::protocol::kMinidumpUserStream_Blackbox;
@@ -581,6 +583,24 @@ bool WriteDumpWithStreams(
     s5.BufferSize = static_cast<ULONG>(hookPagesJson.size());
     s5.Buffer = const_cast<char*>(hookPagesJson.data());
     streams.push_back(s5);
+  }
+
+  // ADR-0026: a freeze can be the GPU: a driver fault or reset leaves the game
+  // waiting on it with nothing in any game log. The driver errors since the
+  // game started go with a freeze or manual capture; a crash is written
+  // before the process exits, so it does not wait for the event log.
+  std::string gpuDriverEventsJson;
+  if (!isCrash && (dumpProfile.captureKind == CaptureKind::Hang || dumpProfile.captureKind == CaptureKind::Manual)) {
+    const auto now = static_cast<std::uint64_t>(std::time(nullptr));
+    gpuDriverEventsJson =
+      internal::GpuDriverEventsJson(internal::QueryGpuDriverEvents(internal::ProcessStartUnix(pid), now));
+  }
+  MINIDUMP_USER_STREAM s6{};
+  if (!gpuDriverEventsJson.empty()) {
+    s6.Type = skydiag::protocol::kMinidumpUserStream_GpuDriverEvents;
+    s6.BufferSize = static_cast<ULONG>(gpuDriverEventsJson.size());
+    s6.Buffer = const_cast<char*>(gpuDriverEventsJson.data());
+    streams.push_back(s6);
   }
 
   MINIDUMP_USER_STREAM_INFORMATION usi{};

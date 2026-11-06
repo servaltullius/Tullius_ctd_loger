@@ -20,6 +20,9 @@ inline constexpr std::uint32_t kMinidumpUserStream_GpuMemory = 0x10000u + 0x474D
 // JSON: the hook stubs the helper read in the game's executable private
 // memory while it ran (ADR-0024, "HP").
 inline constexpr std::uint32_t kMinidumpUserStream_HookPages = 0x10000u + 0x4850u;
+// JSON: the display drivers' events in the Windows System log from the game's
+// start to a freeze or manual capture (ADR-0026, "GD").
+inline constexpr std::uint32_t kMinidumpUserStream_GpuDriverEvents = 0x10000u + 0x4744u;
 
 // Build a kernel object name from PID and suffix.
 inline std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)

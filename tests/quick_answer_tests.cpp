@@ -24,6 +24,7 @@
 #include "AnalyzerInternals.h"
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
+#include "GpuDriverLog.h"
 #include "LoadedSaves.h"
 #include "ModNames.h"
 #include "NextAction.h"
@@ -1560,6 +1561,101 @@ void TestCandidateFamilyLabels()
 }
 
 // Batch D: what a player reads first in the text report, and no noise in it.
+struct GpuDriverLogFixture
+{
+  std::string json = R"({"version":1,"since_unix":1000,"until_unix":2000,"total":3,"events":[
+    {"provider":"nvlddmkm","id":153,"level":2,"unix":1500,"message":"Error occurred on GPUID: 100"},
+    {"provider":"nvlddmkm","id":153,"level":2,"unix":1700,"message":"Error occurred on GPUID: 100"},
+    {"provider":"Display","id":4101,"level":3,"unix":1900,
+     "message":"디스플레이 드라이버 nvlddmkm이(가) 응답을 멈추었으며 복구되었습니다."}]})";
+};
+
+// ADR-0026: the display drivers' events the helper put in a freeze capture.
+void TestGpuDriverLog()
+{
+  namespace dt = skydiag::dump_tool;
+  GpuDriverLogFixture fixture;
+  dt::GpuDriverLog log{};
+  Require(!dt::ApplyGpuDriverLogJson("{ damaged", log) && !log.recorded, "a damaged stream is ignored");
+  Require(!dt::ApplyGpuDriverLogJson(R"({"version":2,"events":[]})", log) && !log.recorded, "another version");
+  Require(dt::ApplyGpuDriverLogJson(fixture.json, log) && log.recorded && log.total == 3u && log.events.size() == 3u &&
+            log.events[0].provider == L"nvlddmkm" && log.events[2].id == 4101u && dt::GpuDriverProblemCount(log) == 3u,
+    "the helper's stream is read");
+  Require(dt::DescribeGpuDriverLog(log, 2000u, false) ==
+              L"게임 시작 이후 3건: Display 4101 1번(디스플레이 드라이버 nvlddmkm이(가) 응답을 멈추었으며 복구되었습니다.), "
+              L"nvlddmkm 153 2번(Error occurred on GPUID: 100), 마지막은 캡처 100초 전" &&
+            dt::DescribeGpuDriverLog(log, 2000u, true) ==
+              L"3 since the game started: Display 4101 x1 (디스플레이 드라이버 nvlddmkm이(가) 응답을 멈추었으며 "
+              L"복구되었습니다.), nvlddmkm 153 x2 (Error occurred on GPUID: 100), the last 100 s before the capture",
+    "grouped by driver and event, the newest first");
+  dt::GpuDriverLog none{};
+  Require(dt::ApplyGpuDriverLogJson(R"({"version":1,"since_unix":10,"until_unix":20,"total":0,"events":[]})", none) &&
+            dt::DescribeGpuDriverLog(none, 20u, false) == L"게임 시작 이후 없음" &&
+            dt::DescribeGpuDriverLog(dt::GpuDriverLog{}, 20u, false).empty(),
+    "none, and nothing when the log was not read");
+
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const std::wstring tag = en ? L"[GPU driver] " : L"[GPU 드라이버] ";
+    AnalysisResult hang{};
+    hang.dump_path = L"C:\\out\\SkyrimDiag_Hang_20261106_170000_000.dmp";
+    hang.freeze_analysis.has_analysis = true;
+    hang.freeze_analysis.state_id = "freeze_candidate";
+    hang.dump_capture_unix = 2000u;
+    hang.gpu_driver_log = log;
+    BuildEvidenceAndSummary(hang, lang);
+    bool line = false;
+    for (const auto& rec : hang.recommendations) {
+      line = line || (rec.rfind(tag, 0) == 0 && Contains(rec, en ? L"reinstall the graphics driver" : L"그래픽 드라이버를 깨끗이 다시 설치"));
+    }
+    Require(hang.is_hang_like && line, "a freeze with driver errors: the GPU line");
+    bool evidence = false;
+    for (const auto& item : hang.evidence) {
+      evidence = evidence || (item.title == (en ? L"The graphics driver logged errors while the game ran"
+                                                : L"게임 중 그래픽 드라이버 오류가 기록됨") &&
+                               item.confidence_level == i18n::ConfidenceLevel::kMedium &&
+                               Contains(item.details, en ? L"does not make it the cause" : L"단정할 수는 없습니다"));
+    }
+    Require(evidence, "the evidence item");
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(hang, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["gpu_driver_events"]["total"] == 3 && summary["gpu_driver_events"]["problems"] == 3 &&
+              summary["gpu_driver_events"]["events"].size() == 3u &&
+              summary["gpu_driver_events"]["events"][0]["message"] == "Error occurred on GPUID: 100",
+      "summary JSON gpu_driver_events");
+    Require(skydiag::dump_tool::BuildReportText(hang, summary, true)
+                .find(en ? "GPU driver events: 3 since the game started" : "그래픽 드라이버 기록: 게임 시작 이후 3건") !=
+              std::string::npos,
+      "the report line");
+
+    // Informational events only, or none: no GPU line.
+    AnalysisResult quiet = hang;
+    quiet.recommendations.clear();
+    quiet.evidence.clear();
+    quiet.gpu_driver_log = none;
+    BuildEvidenceAndSummary(quiet, lang);
+    bool quietLine = false;
+    bool quietEvidence = false;
+    for (const auto& rec : quiet.recommendations) {
+      quietLine = quietLine || rec.rfind(tag, 0) == 0;
+    }
+    for (const auto& item : quiet.evidence) {
+      quietEvidence = quietEvidence || (item.title == (en ? L"Graphics driver events while the game ran" : L"게임 중 그래픽 드라이버 기록") &&
+                                        item.confidence_level == i18n::ConfidenceLevel::kLow);
+    }
+    Require(!quietLine && quietEvidence, "no driver errors: said, and no GPU line");
+
+    // A crash is not told to look at the GPU from this alone.
+    auto crash = CrashIn(L"SkyrimSE.exe", L"");
+    crash.gpu_driver_log = log;
+    BuildEvidenceAndSummary(crash, lang);
+    bool crashLine = false;
+    for (const auto& rec : crash.recommendations) {
+      crashLine = crashLine || rec.rfind(tag, 0) == 0;
+    }
+    Require(!crashLine, "only a freeze gets the GPU line");
+  }
+}
+
 // ADR-0025 (2026-11-06): the loads the helper records, as the analyzer reads them.
 void TestLoadedSavesFile()
 {
@@ -1896,6 +1992,7 @@ int main()
     TestForcedClose();
     TestDamagedSave();
     TestLoadedSavesFile();
+    TestGpuDriverLog();
     TestReportReadability();
     TestCandidateFamilyLabels();
   } catch (const std::exception& e) {

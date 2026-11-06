@@ -16,6 +16,7 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
 void BuildResourceEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildProblematicModuleEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildMemoryEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
+void BuildGpuDriverEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildHitchAndFreezeEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildModuleClassificationEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 void BuildWctEvidence(AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);

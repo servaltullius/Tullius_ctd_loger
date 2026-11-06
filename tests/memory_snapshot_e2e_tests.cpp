@@ -181,6 +181,11 @@ void TestMemoryIsReadBackFromTheDump()
     hasEvidence = hasEvidence || e.title == L"Memory at capture time";
   }
   Require(hasEvidence, "The memory is listed as evidence");
+  // ADR-0026: a manual capture carries the display drivers' events since this
+  // process started (any user may read the System log).
+  Require(result.gpu_driver_log.recorded && result.gpu_driver_log.since_unix != 0u &&
+            result.gpu_driver_log.since_unix <= result.gpu_driver_log.until_unix,
+    "The GPU driver events stream is read back");
 
   if (!gpu.Ready()) {
     std::puts("no real GPU; GPU part skipped");
