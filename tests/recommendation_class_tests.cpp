@@ -180,6 +180,8 @@ int main()
   Expect(L"[훅 프레임워크] x", "immediate", "hook_framework");
   Expect(L"[External software] x", "immediate", "external_software");
   Expect(L"[외부 프로그램] x", "immediate", "external_software");
+  Expect(L"[GPU driver] x", "immediate", "gpu_driver");
+  Expect(L"[GPU 드라이버] x", "immediate", "gpu_driver");
 
   // Recapture or Compare: the snapshot/manual tags, and capture-again wording
   // anywhere, which outranks an immediate tag (the kind still names the tag).

@@ -84,6 +84,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AddressResolver.h
   src/CrashHistory.cpp
   src/CrashHistory.h
+  src/GpuDriverLog.cpp
+  src/GpuDriverLog.h
   src/LoadedSaves.cpp
   src/LoadedSaves.h
   src/CleanExitEvidence.cpp

@@ -931,6 +931,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashObjectMemory.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/GpuDriverEvents.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/GpuMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ModuleUnwindMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/DumpProfile.cpp"
@@ -987,6 +988,7 @@ if(WIN32)
       Version
       Shell32
       Ole32
+      Wevtapi
   )
 
   target_compile_definitions(skydiag_helper_runtime_test_support
@@ -994,6 +996,12 @@ if(WIN32)
       _UNICODE
       UNICODE
   )
+
+  add_executable(skydiag_gpu_driver_events_tests
+    gpu_driver_events_tests.cpp
+  )
+  target_link_libraries(skydiag_gpu_driver_events_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_gpu_driver_events_tests COMMAND skydiag_gpu_driver_events_tests)
 
   add_executable(skydiag_save_load_record_tests
     save_load_record_tests.cpp

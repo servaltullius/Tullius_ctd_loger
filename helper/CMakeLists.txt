@@ -10,6 +10,7 @@ add_executable(${PROJECT_NAME}
   src/CrashEtwCapture.cpp
   src/CrashCapture.cpp
   src/CrashObjectMemory.cpp
+  src/GpuDriverEvents.cpp
   src/GpuMemory.cpp
   src/ModuleUnwindMemory.cpp
   src/DumpProfile.cpp
@@ -49,6 +50,7 @@ add_executable(${PROJECT_NAME}
   src/main.cpp
   src/CompatibilityPreflight.h
   src/CrashObjectMemory.h
+  src/GpuDriverEvents.h
   src/GpuMemory.h
   src/HangObjectMemory.h
   src/HookPageRecord.h
@@ -92,7 +94,8 @@ target_link_libraries(${PROJECT_NAME}
     Dbghelp
     Version
     Shell32
-    Ole32)
+    Ole32
+    Wevtapi)
 
 target_compile_definitions(${PROJECT_NAME}
   PRIVATE

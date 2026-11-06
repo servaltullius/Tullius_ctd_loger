@@ -15,6 +15,7 @@
 #include "DumpIdentity.h"
 #include "AnalyzerInternals.h"
 #include "MinidumpUtil.h"
+#include "GpuDriverLog.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
 #include "Mo2Index.h"
@@ -573,6 +574,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // RAM, commit and VRAM at capture time
   ReadMemorySnapshot(dumpBase, dumpSize, out.memory);
+  ReadGpuDriverLog(dumpBase, dumpSize, out.gpu_driver_log);
   if (out.has_wct) {
     // Freeze dumps taken from a PSS snapshot: the clone is charged to system
     // commit while the dump is written (ADR-0012).
