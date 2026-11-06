@@ -5,7 +5,7 @@ its build output.
 `dotnet run` built the project again on every call (about 2 s each), and every
 MSBuild run left two empty folders and a `Microsoft.NET.Workload_*.log` in the
 temp folder: about 80 folders and 40 logs per suite run, never removed. Here
-the project is built once into its own bin folder, as `dotnet run` did, with a
+the project is built once into a fixed folder under its own bin folder, with a
 private temp folder under its obj folder that is removed right after the build.
 Under WSL `dotnet` starts the Windows dotnet.exe, so that folder is handed over
 as a Windows path through WSLENV. Running the built program leaves nothing.
@@ -20,7 +20,6 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CONFIGURATION = "Debug"
 
 
 def _in_wsl() -> bool:
@@ -79,16 +78,20 @@ class Harness:
         obj = self._project.parent / "obj"
         obj.mkdir(parents=True, exist_ok=True)
         temp = Path(tempfile.mkdtemp(prefix="harness_temp_", dir=obj))
+        out = self._project.parent / "bin" / "harness" / self._framework
         try:
             completed = subprocess.run(
                 [
                     "dotnet",
                     "build",
                     dotnet_path(self._project),
-                    "--configuration",
-                    CONFIGURATION,
                     "--framework",
                     self._framework,
+                    # Named, not derived: a `Platform` variable (set by the
+                    # Visual Studio developer shell) moves bin\Debug to
+                    # bin\x64\Debug.
+                    "--output",
+                    dotnet_path(out),
                     # A build server started now would keep the private temp
                     # folder as its TEMP after it is removed.
                     "--disable-build-servers",
@@ -112,7 +115,5 @@ class Harness:
                 f"stderr:\n{completed.stderr}"
             )
             raise self._failure
-        self._program = (
-            self._project.parent / "bin" / CONFIGURATION / self._framework / f"{self._project.stem}.dll"
-        )
+        self._program = out / f"{self._project.stem}.dll"
         return self._program
