@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,11 +112,50 @@ def _check_smoke_identity_family_contract() -> None:
             )
 
 
+# What package.py and its provenance read from the repository root.
+PACKAGING_FIXTURE_FILES = (
+    "scripts/package.py",
+    "scripts/release_contract.py",
+    "scripts/write_build_provenance.py",
+    "CMakeLists.txt",
+    "vcpkg.json",
+    "NOTICE",
+    "COPYING",
+    "dist/SkyrimDiag.ini",
+    "dist/SkyrimDiagHelper.ini",
+)
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+
+def _packaging_fixture_repo(root: Path) -> Path:
+    """A committed copy of what packaging reads, so its provenance cannot be
+    changed by edits to the real checkout while the test runs: the checks hash
+    the whole working tree several times, under WSL for minutes (Linux git sees
+    every file of a Windows CRLF checkout as modified), and another session or
+    an editor saving a file in between failed the test with a source state
+    mismatch."""
+    for rel in PACKAGING_FIXTURE_FILES:
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / rel, target)
+    shutil.copytree(REPO_ROOT / "dump_tool" / "data", root / "dump_tool" / "data")
+    # The scripts import each other: their bytecode must not dirty the copy.
+    (root / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "tests@example.invalid")
+    _git(root, "config", "user.name", "SkyrimDiag Tests")
+    _git(root, "add", ".")
+    _git(root, "commit", "-q", "-m", "packaging fixture")
+    return root
+
+
 def main() -> int:
     agents_md = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     development_md = (REPO_ROOT / "docs" / "DEVELOPMENT.md").read_text(encoding="utf-8")
     prerelease_template_path = REPO_ROOT / "docs" / "release" / "PRERELEASE_NOTES_TEMPLATE.md"
-    package_py = REPO_ROOT / "scripts" / "package.py"
     release_workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text(
         encoding="utf-8"
     )
@@ -485,6 +525,7 @@ def main() -> int:
         build_dir = td_path / "build"
         winui_dir = td_path / "winui"
         out_zip = td_path / "out.zip"
+        fixture_root = _packaging_fixture_repo(td_path / "repo")
 
         # Minimal fake build artifacts expected by scripts/package.py
         (build_dir / "CMakeCache.txt").parent.mkdir(parents=True, exist_ok=True)
@@ -517,13 +558,13 @@ def main() -> int:
             "release contract must reject nested WinUI candidates instead of selecting by search order"
         )
 
-        provenance_writer = SCRIPTS_DIR / "write_build_provenance.py"
+        provenance_writer = fixture_root / "scripts" / "write_build_provenance.py"
         native_manifest = build_dir / "bin" / _RELEASE_CONTRACT.BUILD_PROVENANCE_FILENAME
         native_command = [
             sys.executable,
             str(provenance_writer),
             "--repo-root",
-            str(REPO_ROOT),
+            str(fixture_root),
             "--output",
             str(native_manifest),
             "--kind",
@@ -535,13 +576,17 @@ def main() -> int:
             native_command.extend(
                 ["--artifact", f"{filename}={build_dir / 'bin' / filename}"]
             )
-        subprocess.run(native_command, check=True, cwd=REPO_ROOT)
+        subprocess.run(native_command, check=True, cwd=fixture_root)
+        native_provenance = json.loads(native_manifest.read_text(encoding="utf-8"))
+        assert native_provenance["git_dirty"] is False, (
+            "the packaging fixture is a clean commit, not the working checkout"
+        )
         subprocess.run(
             [
                 sys.executable,
                 str(provenance_writer),
                 "--repo-root",
-                str(REPO_ROOT),
+                str(fixture_root),
                 "--output",
                 str(winui_dir / _RELEASE_CONTRACT.BUILD_PROVENANCE_FILENAME),
                 "--kind",
@@ -552,13 +597,13 @@ def main() -> int:
                 str(winui_dir),
             ],
             check=True,
-            cwd=REPO_ROOT,
+            cwd=fixture_root,
         )
 
         proc = subprocess.run(
             [
                 sys.executable,
-                str(package_py),
+                str(fixture_root / "scripts" / "package.py"),
                 "--build-dir",
                 str(build_dir),
                 "--winui-dir",
@@ -569,7 +614,7 @@ def main() -> int:
                 str(out_zip),
                 "--no-pdb",
             ],
-            cwd=str(REPO_ROOT),
+            cwd=str(fixture_root),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -618,7 +663,7 @@ def main() -> int:
                 f"Nested WinUI output must not be packaged: {forbidden_prefix}"
             )
 
-        data_root = REPO_ROOT / "dump_tool" / "data"
+        data_root = fixture_root / "dump_tool" / "data"
         expected_data = [
             p.relative_to(data_root).as_posix()
             for p in data_root.rglob("*")
