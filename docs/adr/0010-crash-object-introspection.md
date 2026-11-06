@@ -87,6 +87,17 @@ Crash Logger는 게임 프로세스 안에서 돌아 이 메모리를 바로 읽
 - 스레드가 실행 중이면 오브젝트 메모리는 덤프 작성기가 스레드를 정지시킨 시점의 값이다. 같은 순간의 레지스터와 맞지만, 정지 직전에 바뀐 필드는 다를 수 있다.
 - 덤프 크기는 최대 4MB 늘어난다(테스트에서 스레드 3\~5개에 1\~2KB, 실제 게임은 스레드당 보통 수십 KB로 예상).
 
+## Addendum (2026-11-06): AI packages
+
+2026-11-06 17:00 크래시(SkyrimSE.exe+0x454cef, `call [r8+8]`에서 r8=0x2)는 에이드리안 아베니치가 실행 중에 만들어진 패키지 `FF0036C8`(따라가기·추적 절차)을 처리하다 났습니다. 패키지 본체는 덤프에 있었지만, 그 패키지가 어떤 패키지(템플릿)에서 만들어졌는지와 데이터 항목은 한 단계 더 떨어진 메모리라 기본 덤프에 없었습니다. 실행 중에 만든 패키지는 플러그인이 없어서, 원인 플러그인을 짚으려면 템플릿이 필요합니다.
+
+- 레지스터·스택에서 찾은 오브젝트가 `TESPackage`이면 한 단계 더 따라간다(`shared/SkyrimDiagPackage.h`, 헬퍼와 분석기가 같은 함수). CommonLibSSE-NG 기준: `TESPackage` +0x24 패키지 종류(18 = 템플릿에서 만든 패키지), +0x30 `TESPackageData*`. 그것이 `TESCustomPackageData`이면 +0x08 데이터 배열, +0x18 개수, +0x30 템플릿 `TESPackage*`.
+- 헬퍼는 그 읽기를 그대로 덤프에 담는다(크래시와 프리징·수동 캡처 모두). 데이터 항목은 최대 32개, 템플릿은 폼 정보만 읽고 그 링크는 다시 따라가지 않는다.
+- 분석기: `dump_objects`의 패키지에 `package`(`type`, `template`(`form_id`, `source_files`), `data_count`, `data_types`)를 더하고, 리포트·근거 줄에 `TESPackage [0xFF0036C8] {type 18, made from [0x00037CC0] Skyrim.esm, data 3: Bool, Location, ?}`처럼 적는다. `?`는 오브젝트가 아닌 데이터 항목이다.
+- 단서일 뿐이다: 템플릿을 정의한 플러그인을 원인으로 지목하지 않고, 판정·후보·빠른 답은 바뀌지 않는다.
+- 이 버전 이전 덤프에는 이 메모리가 없어 패키지 종류만 나온다.
+- 검증: `skydiag_rtti_decoder_tests`(Linux)가 템플릿·데이터 항목·개수 상한·사용자 정의 데이터가 아닌 경우·패키지가 아닌 템플릿·읽을 수 없는 패키지를, `skydiag_crash_object_e2e_tests`가 실제 MSVC 클래스로 만든 실행 중 패키지를 실제 헬퍼 크래시 덤프로 쓰고 분석기가 템플릿 FormID·플러그인·데이터 종류와 리포트 줄·요약 JSON을 다시 읽는지 확인한다. 게임 안 확인(미확인): 실제 패키지 크래시에서 템플릿이 나오는지.
+
 ## Verification
 
 - `skydiag_rtti_decoder_tests`(Linux): 손으로 만든 주소 공간에서 Character 폼 판별, 숫자·잘못된 locator·이름이 아닌 값 거부, 계층·파일 일부가 없는 경우, 읽을 수 없는 메모리 바로 앞에서 끝나는 타입 이름, TESForm이 아닌 클래스, 이름 해독.
@@ -98,6 +109,7 @@ Crash Logger는 게임 프로세스 안에서 돌아 이 메모리를 바로 읽
 ## References
 
 - `shared/SkyrimDiagRtti.h`
+- `shared/SkyrimDiagPackage.h`
 - `helper/src/CrashObjectMemory.cpp`
 - `helper/src/HangObjectMemory.cpp`
 - `shared/SkyrimDiagHangObjectThreads.h`

@@ -51,6 +51,18 @@ struct DumpObject
   std::uint32_t base_form_id = 0;
   std::vector<std::wstring> base_source_files;
   std::uint32_t relevance = 0;  // Crash Logger's location + type weights
+  // An AI package (shared/SkyrimDiagPackage.h): its type, the package it was
+  // made from (which names the plugin when the game made this one at run
+  // time), and its data entries. Dumps whose helper did not follow the links
+  // have none of it.
+  bool is_package = false;
+  std::uint8_t package_type = 0;  // PACKAGE_PROCEDURE_TYPE
+  bool package_has_template = false;
+  std::uint32_t package_template_form_id = 0;
+  std::vector<std::wstring> package_template_files;
+  bool package_has_data = false;
+  std::uint16_t package_data_count = 0;  // as the package says
+  std::vector<std::wstring> package_data_types;  // "Bool", "Location", ...; "?" for an entry that is no object
 };
 
 // ADR-0010 addendum (2026-10-22): the objects one thread of a freeze or
