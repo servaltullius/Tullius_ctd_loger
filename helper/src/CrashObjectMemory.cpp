@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "SkyrimDiagExtraData.h"
 #include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 
@@ -197,6 +198,11 @@ std::vector<ExtraDumpMemory> CollectObjectMemory(
     // pointer further than the registers and stack reach (shared/SkyrimDiagPackage.h).
     if (skydiag::package::IsPackage(*object)) {
       (void)skydiag::package::ReadPackageLinks(reader, object->complete_object);
+    }
+    // An actor from a leveled list: the NPC it was rolled from, whose plugin
+    // its temporary base lacks (shared/SkyrimDiagExtraData.h).
+    if (object->has_base_object && skydiag::extra_data::IsRuntimeFormId(object->base_form_id)) {
+      (void)skydiag::extra_data::ReadLeveledOriginal(reader, object->complete_object);
     }
   }
   return MergeExtraDumpMemory(std::move(reader.Reads()));

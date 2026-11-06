@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "SkyrimDiagExtraData.h"
 #include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 
@@ -392,6 +393,58 @@ void TestPackageLinks()
   assert(!skydiag::package::ReadPackageLinks(gone, kRuntime));
 }
 
+// shared/SkyrimDiagExtraData.h: an actor from a leveled list and the NPC it
+// was rolled from, in both extra data layouts.
+void TestLeveledOriginal()
+{
+  assert(skydiag::extra_data::IsRuntimeFormId(0xFF001234u) && !skydiag::extra_data::IsRuntimeFormId(0x0001D8F6u) &&
+         !skydiag::extra_data::IsRuntimeFormId(0xFE001234u));
+  auto m = MakeCharacter();
+  PutNpc(m);
+  const auto listVtable = PutClass(m, 0x40000, { ".?AVBaseExtraList@@" });
+  const auto countVtable = PutClass(m, 0x50000, { ".?AVExtraCount@@", ".?AVBSExtraData@@" });
+  const auto leveledVtable = PutClass(m, 0x60000, { ".?AVExtraLeveledCreature@@", ".?AVBSExtraData@@" });
+  constexpr std::uint64_t kCount = 0x2A000020000ull;
+  constexpr std::uint64_t kLeveled = 0x2A000021000ull;
+  m.PutValue(kCount, countVtable);
+  m.PutValue<std::uint64_t>(kCount + 0x08, kLeveled);
+  m.PutValue(kLeveled, leveledVtable);
+  m.PutValue<std::uint64_t>(kLeveled + 0x08, 0);
+  m.PutValue<std::uint64_t>(kLeveled + 0x10, kNpc);
+
+  // AE 1.6.629+: the list's vtable, then its data.
+  auto ae = m;
+  ae.PutValue(kObject + 0x70, listVtable);
+  ae.PutValue<std::uint64_t>(kObject + 0x78, kCount);
+  auto original = skydiag::extra_data::ReadLeveledOriginal(ae, kObject);
+  assert(original && original->type_name == ".?AVTESNPC@@" && original->form_id == 0x0001D8F6u &&
+         (original->source_files == std::vector<std::string>{ "Skyrim.esm", "AE_StellarBlade_Doro.esp" }));
+
+  // SE and AE before 1.6.629: the data pointer first.
+  auto se = m;
+  se.PutValue<std::uint64_t>(kObject + 0x70, kCount);
+  original = skydiag::extra_data::ReadLeveledOriginal(se, kObject);
+  assert(original && original->form_id == 0x0001D8F6u);
+
+  // No leveled creature in the list, a loop, a node that is no object, and
+  // an original that is no form: none.
+  auto none = se;
+  none.PutValue<std::uint64_t>(kCount + 0x08, 0);
+  assert(!skydiag::extra_data::ReadLeveledOriginal(none, kObject));
+  auto loop = se;
+  loop.PutValue<std::uint64_t>(kCount + 0x08, kCount);
+  assert(!skydiag::extra_data::ReadLeveledOriginal(loop, kObject));
+  auto garbage = se;
+  garbage.PutValue<std::uint64_t>(kCount + 0x08, 0x2A000030000ull);
+  assert(!skydiag::extra_data::ReadLeveledOriginal(garbage, kObject));
+  auto notForm = se;
+  notForm.PutValue<std::uint64_t>(kLeveled + 0x10, kCount);
+  assert(!skydiag::extra_data::ReadLeveledOriginal(notForm, kObject));
+  auto empty = m;
+  empty.PutValue<std::uint64_t>(kObject + 0x70, 0);
+  assert(!skydiag::extra_data::ReadLeveledOriginal(empty, kObject));
+}
+
 }  // namespace
 
 int main()
@@ -403,6 +456,7 @@ int main()
   TestNames();
   TestUndecorate();
   TestPackageLinks();
+  TestLeveledOriginal();
   std::puts("rtti decoder tests passed");
   return 0;
 }

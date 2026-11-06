@@ -98,6 +98,16 @@ Crash Logger는 게임 프로세스 안에서 돌아 이 메모리를 바로 읽
 - 이 버전 이전 덤프에는 이 메모리가 없어 패키지 종류만 나온다.
 - 검증: `skydiag_rtti_decoder_tests`(Linux)가 템플릿·데이터 항목·개수 상한·사용자 정의 데이터가 아닌 경우·패키지가 아닌 템플릿·읽을 수 없는 패키지를, `skydiag_crash_object_e2e_tests`가 실제 MSVC 클래스로 만든 실행 중 패키지를 실제 헬퍼 크래시 덤프로 쓰고 분석기가 템플릿 FormID·플러그인·데이터 종류와 리포트 줄·요약 JSON을 다시 읽는지 확인한다. 게임 안 확인(미확인): 실제 패키지 크래시에서 템플릿이 나오는지.
 
+## Addendum (2026-11-06): leveled actors
+
+위 2026-10-12 부록의 한계("레벨드 리스트에서 생긴 액터는 베이스가 임시 NPC라 플러그인이 나오지 않음, `ExtraLeveledCreature`는 아직 읽지 않음")를 메웁니다.
+
+- 레퍼런스의 베이스가 실행 중에 만든 폼(FormID FFxxxxxx)이면, 레퍼런스의 엑스트라 데이터 목록에서 `ExtraLeveledCreature`를 찾아 원래 NPC(`originalBase`, +0x10)를 읽는다(`shared/SkyrimDiagExtraData.h`, 헬퍼와 분석기가 같은 함수). CommonLibSSE-NG 기준: `TESObjectREFR` +0x70 `ExtraDataList`. AE 1.6.629부터는 그 앞에 vtable이 있어 첫 노드가 +0x78이며, 어느 배치인지는 +0x70의 RTTI(`BaseExtraList`)로 가린다. 노드는 +0x08 `next`로 잇고 RTTI 이름으로 종류를 가린다(최대 64개, 고리는 멈춤).
+- 헬퍼는 크래시와 프리징·수동 캡처의 오브젝트 메모리에 그 읽기를 담는다. 배치된 액터(베이스가 플러그인 폼)는 따라가지 않는다.
+- 분석기: `dump_objects[].base_object.leveled_from`(`type`, `form_id`, `source_files`), 오브젝트 줄 `(base TESNPC [0xFF001234], leveled from TESNPC [0x0001D8F6] Skyrim.esm)`, 프리징 단서의 대상 문구 `base TESNPC 0xFF001234 from TESNPC 0x0001D8F6 Skyrim.esm`.
+- 단서일 뿐이다: 원래 NPC를 정의한 플러그인을 원인으로 지목하지 않는다.
+- 검증: `skydiag_rtti_decoder_tests`(Linux)가 AE·SE 두 배치, 다른 엑스트라 뒤의 레벨드 노드, 레벨드 노드 없음·고리·오브젝트가 아닌 노드·폼이 아닌 원본·빈 목록을, `skydiag_crash_object_e2e_tests`가 실제 MSVC 클래스로 만든 AE 배치의 레벨드 액터를 실제 헬퍼 크래시 덤프로 쓰고 분석기가 원래 NPC·플러그인·문구·요약 JSON을 다시 읽는지, 배치된 액터는 따라가지 않는지 확인한다. 게임 안 확인(미확인): 실제 적의 크래시·프리징에서 원래 NPC가 나오는지.
+
 ## Verification
 
 - `skydiag_rtti_decoder_tests`(Linux): 손으로 만든 주소 공간에서 Character 폼 판별, 숫자·잘못된 locator·이름이 아닌 값 거부, 계층·파일 일부가 없는 경우, 읽을 수 없는 메모리 바로 앞에서 끝나는 타입 이름, TESForm이 아닌 클래스, 이름 해독.
@@ -110,6 +120,7 @@ Crash Logger는 게임 프로세스 안에서 돌아 이 메모리를 바로 읽
 
 - `shared/SkyrimDiagRtti.h`
 - `shared/SkyrimDiagPackage.h`
+- `shared/SkyrimDiagExtraData.h`
 - `helper/src/CrashObjectMemory.cpp`
 - `helper/src/HangObjectMemory.cpp`
 - `shared/SkyrimDiagHangObjectThreads.h`
