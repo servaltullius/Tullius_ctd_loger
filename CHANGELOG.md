@@ -43,6 +43,7 @@
 - 시험 빌드(main `708e6c0`, 2026-11-06 15:37\~15:40, MO2, MuMuPlayer 켬): 수동 캡처 두 번의 리포트가 `GPU: NVIDIA GeForce RTX 4090, VRAM 10.72/22.82 GB`였습니다(전에는 `GPU: GPU`). Save87을 불러오자 Helper 로그에 `Save load finished: Save87_…`이 남았고, `loaded_saves.json`에 그 전 게임 세션의 Save79·Save83과 함께 세 번의 불러오기가 시각과 함께 쌓였습니다(플러그인 로그의 불러오기 끝 시각과 1초 안으로 맞음).
 - 시험 빌드(main `f10eed1`, 2026-11-06 19:54\~19:58): 수동 캡처 리포트에 `그래픽 드라이버 기록: 게임 시작 이후 없음`이 나왔고, 같은 시간 범위의 시스템 로그를 직접 조회해도 드라이버 기록은 0건이었습니다.
 - 11/06 17:00 실제 크래시(에이드리안 아베니치)의 Crash Logger 로그에서, RTTI로 `BaseExtraList`로 찍힌 주소가 그 액터 주소 + 0x70과 같았습니다. 레벨드 원래 NPC를 읽는 엑스트라 데이터 배치가 이 게임 버전(1.6.1170)과 맞는다는 확인입니다.
+- v0.2.75 패키지(main `d6e238a`, 2026-11-06 22:09\~22:12, 같은 MO2 환경): `SkyrimDiag.log` 로드 줄이 `SkyrimDiag: loaded (v0.2.75.0)`였고, Save89를 불러온 시작과 26초 뒤 끝이 기록됐습니다. Helper 로그에 `Save load finished: Save89_…`이 남고 `loaded_saves.json`에 이어서 쌓였습니다. 수동 캡처(Ctrl+Shift+Backspace) 리포트에 `GPU: NVIDIA GeForce RTX 4090`, `그래픽 드라이버 기록: 게임 시작 이후 없음`, `세이브: Save89_… (캡처 전에 불러오기 끝남)`이 나왔고, 요약의 분석기 버전은 `0.2.75`였습니다.
 - 실게임 미확인: 드라이버 오류가 있는 프리징의 `[GPU 드라이버]` 줄, 실제 패키지 크래시의 원래 패키지·플러그인, 실제 레벨드 적의 원래 NPC, 불러오다 튕긴 크래시의 "다른 세이브" 문장, 게임 안 SPID 크래시의 안내, `CrashHookMode`에 잘못된 값을 넣었을 때의 경고 줄, 새 게임 시작 줄
 
 ### 주의사항
@@ -57,6 +58,10 @@
 - 실제 덤프 재분석(`scripts/compare_analyses.py`): SPID 등 프레임워크(#255)는 52개 한·영 104건 중 11/01 SPID 크래시 한 건(한·영)만 의도대로 바뀌었습니다. 패키지(#260)와 레벨드 액터(#261)는 57개에서 결론·후보·빠른 답·다음 조치가 그대로였습니다(이 덤프들에는 그 메모리가 없음). 11/05 프리징 덤프를 다시 분석하면 GPU 이름이 `NVIDIA GeForce RTX 4090`으로 나옵니다.
 - 변이 검사: 수정을 되돌리면 해당 테스트가 실패하는지 확인했습니다(정상 불러오기 기록 3가지, AI 패키지와 레벨드 액터의 Helper 따라가기, GPU 어댑터 판정).
 - 실사고 품질 코퍼스: `SKIPPED (not measured)` — 코퍼스 미제공
+- Windows native RelWithDebInfo / WinUI self-contained publish: 성공 (`d6e238a`), 그 상태로 Windows test suite `118/118`
+- 로컬 패키징: `Tullius_ctd_loger_v0.2.75.zip` 생성 성공 (`--no-pdb`, `89,735,746` bytes, 525 entries, PDB 0개)
+- Release hard gate(clean provenance 강제): `OK`
+- 공개 asset은 태그 워크플로가 다시 빌드하므로, SHA-256은 릴리즈 페이지에 표시되는 값을 기준으로 확인해 주세요. 출시 바이너리의 PDB는 릴리즈 자산 `Tullius_ctd_loger_v0.2.75_symbols.zip`에 있습니다.
 
 ## v0.2.74 (2026-11-03)
 
