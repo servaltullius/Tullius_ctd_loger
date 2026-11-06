@@ -74,6 +74,26 @@ nlohmann::json DumpObjectJson(const DumpObject& object)
       { "source_files", std::move(baseFiles) },
     };
   }
+  if (object.is_package) {
+    // shared/SkyrimDiagPackage.h: what the package was made from and of.
+    nlohmann::json package = { { "type", object.package_type } };
+    if (object.package_has_template) {
+      nlohmann::json templateFiles = nlohmann::json::array();
+      for (const auto& file : object.package_template_files) {
+        templateFiles.push_back(WideToUtf8(file));
+      }
+      package["template"] = { { "form_id", object.package_template_form_id }, { "source_files", std::move(templateFiles) } };
+    }
+    if (object.package_has_data) {
+      nlohmann::json types = nlohmann::json::array();
+      for (const auto& type : object.package_data_types) {
+        types.push_back(WideToUtf8(type));
+      }
+      package["data_count"] = object.package_data_count;
+      package["data_types"] = std::move(types);
+    }
+    entry["package"] = std::move(package);
+  }
   return entry;
 }
 

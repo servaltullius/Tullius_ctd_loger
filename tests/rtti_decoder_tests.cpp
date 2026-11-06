@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 
 using skydiag::rtti::ReadObject;
@@ -302,6 +303,95 @@ void TestUndecorate()
   assert(UndecorateTypeName("not decorated") == "not decorated");
 }
 
+// A class whose hierarchy lists `names`, all at offset 0, in its own block
+// of the fake module; returns its vtable.
+std::uint64_t PutClass(FakeMemory& m, std::uint32_t block, const std::vector<std::string>& names)
+{
+  const std::uint32_t vtable = block + 0x100;
+  const std::uint32_t locatorRva = block + 0x200;
+  const std::uint32_t hierarchyRva = block + 0x300;
+  const std::uint32_t baseArray = block + 0x400;
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    const auto td = static_cast<std::uint32_t>(block + 0x1000 + i * 0x100);
+    PutTypeDescriptor(m, td, names[i]);
+    const auto bcd = static_cast<std::uint32_t>(block + 0x2000 + i * 0x40);
+    skydiag::rtti::detail::BaseClassDescriptor base{ td, 0, 0, -1, 0, 0, hierarchyRva };
+    m.PutValue(kModule + bcd, base);
+    m.PutValue<std::uint32_t>(kModule + baseArray + 4 * i, bcd);
+  }
+  skydiag::rtti::detail::ClassHierarchyDescriptor hierarchy{ 0, 0, static_cast<std::uint32_t>(names.size()), baseArray };
+  m.PutValue(kModule + hierarchyRva, hierarchy);
+  skydiag::rtti::detail::CompleteObjectLocator locator{ 1, 0, 0, block + 0x1000, hierarchyRva, locatorRva };
+  m.PutValue(kModule + locatorRva, locator);
+  m.PutValue<std::uint64_t>(kModule + vtable - 8, kModule + locatorRva);
+  return kModule + vtable;
+}
+
+// shared/SkyrimDiagPackage.h: a package the game made at run time, its
+// custom data, the package it was made from and its data entries.
+void TestPackageLinks()
+{
+  auto m = MakeCharacter();
+  const auto packageVtable = PutClass(m, 0x10000, { ".?AVTESPackage@@", ".?AVTESForm@@" });
+  const auto customVtable = PutClass(m, 0x20000, { ".?AVTESCustomPackageData@@", ".?AVTESPackageData@@" });
+  const auto boolVtable = PutClass(m, 0x30000, { ".?AVBGSPackageDataBool@@", ".?AVIPackageData@@" });
+  constexpr std::uint64_t kRuntime = 0x2A000010000ull;
+  constexpr std::uint64_t kCustom = 0x2A000011000ull;
+  constexpr std::uint64_t kTemplate = 0x2A000012000ull;
+  constexpr std::uint64_t kArray = 0x2A000013000ull;
+  constexpr std::uint64_t kBool = 0x2A000014000ull;
+  m.PutValue(kRuntime, packageVtable);
+  m.PutValue<std::uint64_t>(kRuntime + 0x08, 0);
+  m.PutValue<std::uint32_t>(kRuntime + 0x14, 0xFF0036C8u);
+  m.PutValue<std::uint8_t>(kRuntime + 0x1A, 0x4F);
+  m.PutValue<std::uint8_t>(kRuntime + 0x24, 18);
+  m.PutValue<std::uint64_t>(kRuntime + 0x30, kCustom);
+  m.PutValue(kCustom, customVtable);
+  m.PutValue<std::uint64_t>(kCustom + 0x08, kArray);
+  m.PutValue<std::uint16_t>(kCustom + 0x18, 2);
+  m.PutValue<std::uint64_t>(kCustom + 0x30, kTemplate);
+  m.PutValue(kTemplate, packageVtable);
+  m.PutValue<std::uint64_t>(kTemplate + 0x08, kFileArray);
+  m.PutValue<std::uint32_t>(kTemplate + 0x14, 0x00037CC0u);
+  m.PutValue<std::uint8_t>(kTemplate + 0x1A, 0x4F);
+  m.PutValue<std::uint64_t>(kArray, kBool);
+  m.PutValue<std::uint64_t>(kArray + 8, 2);  // not an object
+  m.PutValue(kBool, boolVtable);
+
+  const auto package = ReadObject(m, kRuntime);
+  assert(package && skydiag::package::IsPackage(*package) && !skydiag::package::IsPackage(*ReadObject(m, kObject)));
+  auto links = skydiag::package::ReadPackageLinks(m, kRuntime);
+  assert(links && links->pack_type == 18 && links->has_custom_data && links->template_package &&
+         links->template_package->form_id == 0x00037CC0u &&
+         (links->template_package->source_files == std::vector<std::string>{ "Skyrim.esm", "AE_StellarBlade_Doro.esp" }));
+  assert(links->data_count == 2u && links->data.size() == 2u && links->data[0].type_name == ".?AVBGSPackageDataBool@@" &&
+         links->data[1].address == 2u && links->data[1].type_name.empty());
+
+  // More entries than any package has: the count is kept, past the cap
+  // nothing is read, and an array the dump does not hold gives none.
+  auto many = m;
+  many.PutValue<std::uint16_t>(kCustom + 0x18, 100);
+  links = skydiag::package::ReadPackageLinks(many, kRuntime);
+  assert(links && links->data_count == 100u && links->data.empty() && links->template_package);
+
+  // Data that is not a custom package's: the type only.
+  auto other = m;
+  other.PutValue<std::uint64_t>(kRuntime + 0x30, kObject);
+  links = skydiag::package::ReadPackageLinks(other, kRuntime);
+  assert(links && links->pack_type == 18 && !links->has_custom_data && !links->template_package && links->data.empty());
+
+  // A template that is no package is not one.
+  auto notPackage = m;
+  notPackage.PutValue<std::uint64_t>(kCustom + 0x30, kObject);
+  links = skydiag::package::ReadPackageLinks(notPackage, kRuntime);
+  assert(links && links->has_custom_data && !links->template_package && links->data.size() == 2u);
+
+  // The package itself unreadable: nothing.
+  auto gone = m;
+  gone.Erase(kRuntime + 0x24, 1);
+  assert(!skydiag::package::ReadPackageLinks(gone, kRuntime));
+}
+
 }  // namespace
 
 int main()
@@ -312,6 +402,7 @@ int main()
   TestNonFormClass();
   TestNames();
   TestUndecorate();
+  TestPackageLinks();
   std::puts("rtti decoder tests passed");
   return 0;
 }

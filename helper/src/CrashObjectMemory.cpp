@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 
 namespace skydiag::helper::internal {
@@ -191,6 +192,11 @@ std::vector<ExtraDumpMemory> CollectObjectMemory(
     // its allocation is better than none.
     if (!reader(object->complete_object, window.data(), window.size())) {
       reader(object->complete_object, window.data(), 0x40);
+    }
+    // An AI package: the package it was made from and its data entries, one
+    // pointer further than the registers and stack reach (shared/SkyrimDiagPackage.h).
+    if (skydiag::package::IsPackage(*object)) {
+      (void)skydiag::package::ReadPackageLinks(reader, object->complete_object);
     }
   }
   return MergeExtraDumpMemory(std::move(reader.Reads()));

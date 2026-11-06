@@ -118,6 +118,55 @@ public:
   ~Character() override = default;
 };
 
+// An AI package and its data, as shared/SkyrimDiagPackage.h reads them.
+class TESPackageData
+{
+public:
+  virtual ~TESPackageData() = default;
+};
+
+class IPackageData
+{
+public:
+  virtual ~IPackageData() = default;
+};
+
+class BGSPackageDataBool : public IPackageData
+{
+public:
+  ~BGSPackageDataBool() override = default;
+};
+
+class BGSPackageDataLocation : public IPackageData
+{
+public:
+  ~BGSPackageDataLocation() override = default;
+};
+
+class TESPackage;
+
+class TESCustomPackageData : public TESPackageData
+{
+public:
+  ~TESCustomPackageData() override = default;
+  IPackageData** data = nullptr;          // 0x08, BGSPackageDataList::data
+  std::int8_t* uids = nullptr;            // 0x10
+  std::uint16_t dataSize = 0;             // 0x18
+  void* procedureTree = nullptr;          // 0x20
+  void* nameMap = nullptr;                // 0x28
+  TESPackage* templateParent = nullptr;   // 0x30
+};
+
+class TESPackage : public TESForm
+{
+public:
+  ~TESPackage() override = default;
+  std::uint32_t packFlags = 0;            // 0x20, PACKAGE_DATA
+  std::uint8_t packType = 0;              // 0x24
+  std::uint8_t pad25[0x0B]{};
+  TESPackageData* data = nullptr;         // 0x30
+};
+
 class BSFadeNode
 {
 public:
@@ -160,11 +209,41 @@ void TestCrashObjectsAreReadBackFromTheDump()
   auto node = std::make_unique<BSFadeNode>();
   auto notAnObject = std::make_unique<std::uint64_t>(42);
 
+  // A package the game made at run time (no plugin) from Skyrim.esm's
+  // package, with a data entry that is no object.
+  auto templatePackage = std::make_unique<TESPackage>();
+  templatePackage->sourceFiles = &npcFiles;
+  templatePackage->formID = 0x00037CC0u;
+  templatePackage->formType = 0x4F;
+  auto boolData = std::make_unique<BGSPackageDataBool>();
+  auto locationData = std::make_unique<BGSPackageDataLocation>();
+  IPackageData* entries[] = { boolData.get(), locationData.get(), reinterpret_cast<IPackageData*>(std::uintptr_t{ 2 }) };
+  auto customData = std::make_unique<TESCustomPackageData>();
+  customData->data = entries;
+  customData->dataSize = 3;
+  customData->templateParent = templatePackage.get();
+  auto runtimePackage = std::make_unique<TESPackage>();
+  runtimePackage->formID = 0xFF0036C8u;
+  runtimePackage->formType = 0x4F;
+  runtimePackage->packType = 18;
+  runtimePackage->data = customData.get();
+  {
+    const auto* pkg = reinterpret_cast<const char*>(runtimePackage.get());
+    const auto* custom = reinterpret_cast<const char*>(customData.get());
+    Require(reinterpret_cast<const char*>(&runtimePackage->packType) - pkg == 0x24 &&
+              reinterpret_cast<const char*>(&runtimePackage->data) - pkg == 0x30 &&
+              reinterpret_cast<const char*>(&customData->data) - custom == 0x08 &&
+              reinterpret_cast<const char*>(&customData->dataSize) - custom == 0x18 &&
+              reinterpret_cast<const char*>(&customData->templateParent) - custom == 0x30,
+      "The package layout the reader assumes");
+  }
+
   ParkedThread faulting;
   CONTEXT ctx = faulting.Context();
   ctx.Rcx = reinterpret_cast<DWORD64>(character.get());
   ctx.Rsi = reinterpret_cast<DWORD64>(node.get());
   ctx.Rdx = reinterpret_cast<DWORD64>(notAnObject.get());
+  ctx.R13 = reinterpret_cast<DWORD64>(runtimePackage.get());
 
   auto shared = MakeSharedLayout();
   shared->header.crash_seq = 2;
@@ -245,6 +324,27 @@ void TestCrashObjectsAreReadBackFromTheDump()
   }
   Require(hasEvidence, "The objects are listed as evidence");
 
+  // The package: what it was made from and of, one pointer past what the
+  // registers reach.
+  const skydiag::dump_tool::DumpObject* package = nullptr;
+  for (const auto& object : result.dump_objects) {
+    if (object.location == L"R13") {
+      package = &object;
+    }
+  }
+  Require(package != nullptr && package->type_name == L"TESPackage" && package->form_id == 0xFF0036C8u,
+    "The package in R13 is read back");
+  Require(package->is_package && package->package_type == 18u && package->package_has_template &&
+            package->package_template_form_id == 0x00037CC0u && package->package_template_files.size() == 1u &&
+            package->package_template_files[0] == L"Skyrim.esm",
+    "The package it was made from, and its plugin");
+  Require(package->package_has_data && package->package_data_count == 3u &&
+            (package->package_data_types == std::vector<std::wstring>{ L"Bool", L"Location", L"?" }),
+    "Its data entries, the one that is no object marked");
+  Require(skydiag::dump_tool::DescribeDumpObject(*package) ==
+            L"R13: TESPackage [0xFF0036C8] {type 18, made from [0x00037CC0] Skyrim.esm, data 3: Bool, Location, ?}",
+    "The report line");
+
   const auto summary = skydiag::dump_tool::BuildSummaryJson(result, outBase, L"stem", false);
   bool hasJson = false;
   for (const auto& object : summary["dump_objects"]) {
@@ -255,6 +355,15 @@ void TestCrashObjectsAreReadBackFromTheDump()
     }
   }
   Require(hasJson, "The summary JSON carries the name and the base object");
+  bool hasPackageJson = false;
+  for (const auto& object : summary["dump_objects"]) {
+    if (object.value("location", std::string{}) == "R13") {
+      hasPackageJson = object["package"]["type"] == 18 && object["package"]["template"]["form_id"] == 0x00037CC0u &&
+        object["package"]["template"]["source_files"][0] == "Skyrim.esm" && object["package"]["data_count"] == 3 &&
+        object["package"]["data_types"].size() == 3u && object["package"]["data_types"][2] == "?";
+    }
+  }
+  Require(hasPackageJson, "The summary JSON carries the package");
 
   std::filesystem::remove_all(outBase);
 }

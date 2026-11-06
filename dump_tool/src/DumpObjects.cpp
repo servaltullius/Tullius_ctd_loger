@@ -11,6 +11,7 @@
 
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "CrashLoggerParseCore.h"
+#include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 #include "Utf.h"
 
@@ -114,6 +115,62 @@ std::vector<Root> CollectRoots(const internal::stackwalk_internal::MinidumpMemor
   return roots;
 }
 
+// "BGSPackageDataBool" -> "Bool": the kind of each data entry, short.
+std::wstring PackageDataTypeName(const std::string& decorated)
+{
+  if (decorated.empty()) {
+    return L"?";
+  }
+  auto name = skydiag::rtti::UndecorateTypeName(decorated);
+  constexpr std::string_view kPrefix = "BGSPackageData";
+  if (name.rfind(kPrefix, 0) == 0 && name.size() > kPrefix.size()) {
+    name.erase(0, kPrefix.size());
+  }
+  return Utf8ToWide(name);
+}
+
+template <class Reader>
+void ReadPackageInto(const Reader& read, std::uint64_t package, DumpObject& object)
+{
+  const auto links = skydiag::package::ReadPackageLinks(read, package);
+  if (!links) {
+    return;
+  }
+  object.is_package = true;
+  object.package_type = links->pack_type;
+  if (links->template_package) {
+    object.package_has_template = true;
+    object.package_template_form_id = links->template_package->form_id;
+    object.package_template_files = FileNamesToWide(links->template_package->source_files);
+  }
+  object.package_has_data = links->has_custom_data;
+  object.package_data_count = links->data_count;
+  for (const auto& entry : links->data) {
+    object.package_data_types.push_back(PackageDataTypeName(entry.type_name));
+  }
+}
+
+std::wstring DescribePackage(const DumpObject& object)
+{
+  std::wstring text = L"type " + std::to_wstring(object.package_type);
+  if (object.package_has_template) {
+    text += L", made from [" + FormIdText(object.package_template_form_id) + L"]";
+    if (const auto files = FilesText(object.package_template_files); !files.empty()) {
+      text += L" " + files;
+    }
+  }
+  if (object.package_has_data) {
+    text += L", data " + std::to_wstring(object.package_data_count);
+    for (std::size_t i = 0; i < object.package_data_types.size(); ++i) {
+      text += (i == 0u ? L": " : L", ") + object.package_data_types[i];
+    }
+    if (object.package_data_types.size() < object.package_data_count) {
+      text += L", ...";
+    }
+  }
+  return text;
+}
+
 }  // namespace
 
 std::wstring DescribeDumpObject(const DumpObject& object)
@@ -136,6 +193,9 @@ std::wstring DescribeDumpObject(const DumpObject& object)
     }
   } else if (!object.module.empty()) {
     text += L" (" + object.module + L")";
+  }
+  if (object.is_package) {
+    text += L" {" + DescribePackage(object) + L"}";
   }
   return text;
 }
@@ -256,6 +316,9 @@ std::vector<DumpObject> ReadDumpObjects(
       object.base_source_files = FileNamesToWide(info->base_source_files);
     }
     object.relevance = relevance;
+    if (skydiag::package::IsPackage(*info)) {
+      ReadPackageInto(read, info->complete_object, object);
+    }
     objects.push_back(std::move(object));
   }
   std::stable_sort(objects.begin(), objects.end(), [](const DumpObject& a, const DumpObject& b) {
