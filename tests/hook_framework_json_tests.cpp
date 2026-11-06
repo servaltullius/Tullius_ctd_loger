@@ -41,6 +41,15 @@ static void TestKnownDllsPresent()
   // Added injection/framework examples.
   assert(content.find("d3d11.dll") != std::string::npos);
   assert(content.find("dxgi.dll") != std::string::npos);
+
+  // Frameworks that act on other mods' INIs or scripts: a crash in them is
+  // often fed by another mod, and turning them off breaks the mods that rely
+  // on them (the SPID load crash of 2026-11-01 was told to disable it).
+  assert(content.find("po3_spellperkitemdistributor.dll") != std::string::npos);
+  assert(content.find("po3_keyworditemdistributor.dll") != std::string::npos);
+  assert(content.find("skypatcher.dll") != std::string::npos);
+  assert(content.find("po3_baseobjectswapper.dll") != std::string::npos);
+  assert(content.find("po3_papyrusextender.dll") != std::string::npos);
 }
 
 static void TestNoInternalWrapperForMinidumpFunctions()
