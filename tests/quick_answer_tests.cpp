@@ -1594,6 +1594,34 @@ void TestGpuDriverLog()
             dt::DescribeGpuDriverLog(dt::GpuDriverLog{}, 20u, false).empty(),
     "none, and nothing when the log was not read");
 
+  // An information event (from a stream that kept them) is neither counted,
+  // grouped nor the last one: the error was 1 h 40 min before the capture.
+  dt::GpuDriverLog mixed{};
+  Require(dt::ApplyGpuDriverLogJson(R"({"version":1,"since_unix":1000,"until_unix":8000,"total":3,"events":[
+    {"provider":"nvlddmkm","id":153,"level":2,"unix":2000,"message":"Error occurred on GPUID: 100"},
+    {"provider":"igfx","id":1,"level":4,"unix":7900,"message":"info"},
+    {"provider":"igfx","id":1,"level":4,"unix":7950,"message":"info"}]})", mixed) &&
+            dt::GpuDriverProblemCount(mixed) == 1u,
+    "one error among information events");
+  Require(dt::DescribeGpuDriverLog(mixed, 8000u, false) ==
+            L"게임 시작 이후 1건: nvlddmkm 153 1번(Error occurred on GPUID: 100), 마지막은 캡처 100분 전",
+    "errors and warnings only, and the time of the last of them");
+
+  // The helper could not read the log to the end: none found is not none.
+  dt::GpuDriverLog unfinished{};
+  Require(dt::ApplyGpuDriverLogJson(
+            R"({"version":1,"since_unix":10,"until_unix":20,"total":0,"complete":false,"events":[]})", unfinished) &&
+            !unfinished.complete && dt::DescribeGpuDriverLog(unfinished, 20u, false) == L"찾은 것 없음(기록을 끝까지 읽지 못함)" &&
+            dt::DescribeGpuDriverLog(unfinished, 20u, true) == L"none found, but the log could not be read to the end",
+    "an unfinished read is not none");
+  Require(log.complete && Contains(dt::DescribeGpuDriverLog(log, 2000u, false), L"마지막은 캡처") &&
+            !Contains(dt::DescribeGpuDriverLog(log, 2000u, false), L"끝까지"),
+    "a stream without the field was read to the end");
+  dt::GpuDriverLog partial = log;
+  partial.complete = false;
+  Require(Contains(dt::DescribeGpuDriverLog(partial, 2000u, false), L" (기록을 끝까지 읽지 못함), 마지막은 캡처 100초 전"),
+    "events found before the read stopped say it stopped");
+
   for (const auto lang : kLanguages) {
     const bool en = lang == i18n::Language::kEnglish;
     const std::wstring tag = en ? L"[GPU driver] " : L"[GPU 드라이버] ";
@@ -1619,6 +1647,7 @@ void TestGpuDriverLog()
     Require(evidence, "the evidence item");
     const auto summary = skydiag::dump_tool::BuildSummaryJson(hang, std::filesystem::temp_directory_path(), L"stem", true);
     Require(summary["gpu_driver_events"]["total"] == 3 && summary["gpu_driver_events"]["problems"] == 3 &&
+              summary["gpu_driver_events"]["complete"] == true &&
               summary["gpu_driver_events"]["events"].size() == 3u &&
               summary["gpu_driver_events"]["events"][0]["message"] == "Error occurred on GPUID: 100",
       "summary JSON gpu_driver_events");

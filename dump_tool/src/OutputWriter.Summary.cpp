@@ -417,6 +417,7 @@ nlohmann::json BuildSummaryJson(
       { "since_unix", log.since_unix },
       { "until_unix", log.until_unix },
       { "total", log.total },
+      { "complete", log.complete },
       { "problems", GpuDriverProblemCount(log) },
       { "events", std::move(events) },
     };

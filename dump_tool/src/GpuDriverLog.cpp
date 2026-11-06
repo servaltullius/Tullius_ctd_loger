@@ -51,6 +51,7 @@ bool ApplyGpuDriverLogJson(std::string_view json, GpuDriverLog& out)
   log.since_unix = JsonValueOr(j, "since_unix", std::uint64_t{ 0 });
   log.until_unix = JsonValueOr(j, "until_unix", std::uint64_t{ 0 });
   log.total = JsonValueOr(j, "total", std::size_t{ 0 });
+  log.complete = JsonValueOr(j, "complete", true);
   for (const auto& e : j["events"]) {
     GpuDriverEventRow row{};
     row.provider = Utf8ToWide(JsonValueOr(e, "provider", std::string{}));
@@ -87,7 +88,21 @@ std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t capture
   if (!log.recorded) {
     return {};
   }
-  if (log.total == 0u) {
+  // Errors and warnings only: the helper asks for nothing else, and an
+  // information event in an older stream says nothing about a fault, nor
+  // should its time read as the last error's.
+  std::vector<const GpuDriverEventRow*> problems;
+  for (const auto& event : log.events) {
+    if (IsProblem(event)) {
+      problems.push_back(&event);
+    }
+  }
+  // When every kept event is one, the helper's count is of them too.
+  const std::size_t total = problems.size() == log.events.size() ? log.total : problems.size();
+  if (total == 0u) {
+    if (!log.complete) {
+      return en ? L"none found, but the log could not be read to the end" : L"찾은 것 없음(기록을 끝까지 읽지 못함)";
+    }
     return en ? L"none since the game started" : L"게임 시작 이후 없음";
   }
   // One group per driver and event ID, the most recent first.
@@ -97,18 +112,19 @@ std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t capture
     std::size_t count = 0;
   };
   std::vector<Group> groups;
-  for (auto it = log.events.rbegin(); it != log.events.rend(); ++it) {
+  for (auto it = problems.rbegin(); it != problems.rend(); ++it) {
+    const GpuDriverEventRow* event = *it;
     auto found = std::find_if(groups.begin(), groups.end(), [&](const Group& g) {
-      return g.newest->provider == it->provider && g.newest->id == it->id;
+      return g.newest->provider == event->provider && g.newest->id == event->id;
     });
     if (found == groups.end()) {
-      groups.push_back({ &*it, 1u });
+      groups.push_back({ event, 1u });
     } else {
       ++found->count;
     }
   }
-  std::wstring text = en ? (std::to_wstring(log.total) + L" since the game started")
-                         : (L"게임 시작 이후 " + std::to_wstring(log.total) + L"건");
+  std::wstring text = en ? (std::to_wstring(total) + L" since the game started")
+                         : (L"게임 시작 이후 " + std::to_wstring(total) + L"건");
   for (std::size_t i = 0; i < groups.size() && i < kGroupsShown; ++i) {
     const auto& g = groups[i];
     std::wstring message = g.newest->message.substr(0, kMessageCharsShown);
@@ -119,12 +135,16 @@ std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t capture
   if (groups.size() > kGroupsShown) {
     text += en ? L", ..." : L" 외";
   }
-  if (log.total > log.events.size()) {
-    text += en ? (L" (the newest " + std::to_wstring(log.events.size()) + L" kept)")
-               : (L" (최근 " + std::to_wstring(log.events.size()) + L"건만 남김)");
+  if (total > problems.size()) {
+    text += en ? (L" (the newest " + std::to_wstring(problems.size()) + L" kept)")
+               : (L" (최근 " + std::to_wstring(problems.size()) + L"건만 남김)");
   }
-  if (!log.events.empty() && captureUnix != 0u && log.events.back().unix != 0u && log.events.back().unix <= captureUnix) {
-    const auto ago = Ago(captureUnix - log.events.back().unix, en);
+  if (!log.complete) {
+    text += en ? L" (the log could not be read to the end)" : L" (기록을 끝까지 읽지 못함)";
+  }
+  const auto* last = problems.back();
+  if (captureUnix != 0u && last->unix != 0u && last->unix <= captureUnix) {
+    const auto ago = Ago(captureUnix - last->unix, en);
     text += en ? (L", the last " + ago + L" before the capture") : (L", 마지막은 캡처 " + ago + L" 전");
   }
   return text;

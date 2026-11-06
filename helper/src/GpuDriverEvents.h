@@ -25,6 +25,9 @@ struct GpuDriverEvent
 struct GpuDriverEventLog
 {
   bool read = false;  // the System log could be queried
+  // Read to the end; false when a read failed or timed out, or the time or
+  // count budget ran out, so `total` may be short and none is not "none".
+  bool complete = true;
   std::uint64_t since_unix = 0;
   std::uint64_t until_unix = 0;
   std::size_t total = 0;  // events in the window; `events` holds the newest of them
@@ -33,7 +36,9 @@ struct GpuDriverEventLog
 
 inline constexpr std::size_t kGpuDriverEventsKept = 32;
 
-// The System log query for the display drivers' events in [since, until].
+// The System log query for the display drivers' errors and warnings (levels
+// 1 to 3) in [since, until]: information events would push them out of the
+// kGpuDriverEventsKept newest.
 std::wstring GpuDriverEventQuery(std::uint64_t sinceUnix, std::uint64_t untilUnix);
 
 // One event as EvtRender writes it (EvtRenderEventXml); its message is the
