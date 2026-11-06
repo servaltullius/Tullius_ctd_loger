@@ -5,11 +5,22 @@
 #include <fstream>
 #include <string>
 
+#ifdef _WIN32
+#include <process.h>
+#define SKYDIAG_GETPID _getpid
+#else
+#include <unistd.h>
+#define SKYDIAG_GETPID getpid
+#endif
+
 using skydiag::helper::ResolveDumpToolHeadlessExe;
 
+// One folder per process: two builds running this test at once must not
+// clear each other's files.
 static std::filesystem::path TempDirPath()
 {
-  return std::filesystem::temp_directory_path() / "skydiag_dump_tool_headless_resolver_tests";
+  return std::filesystem::temp_directory_path() /
+    ("skydiag_dump_tool_headless_resolver_tests_" + std::to_string(SKYDIAG_GETPID()));
 }
 
 static std::filesystem::path MakeTempDir()

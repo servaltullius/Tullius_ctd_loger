@@ -53,7 +53,8 @@ inline void PrintHelperLogTail(std::size_t maxLines)
     lines.push_back(line);
   }
   const std::size_t first = lines.size() > maxLines ? lines.size() - maxLines : 0u;
-  std::cerr << "helper log (" << (lines.size() - first) << " of " << lines.size() << " lines):\n";
+  std::cerr << "helper log (" << (lines.size() - first) << " of " << lines.size() << " lines"
+            << (CurrentTestName().empty() ? ", newest test folder" : "") << "):\n";
   for (std::size_t i = first; i < lines.size(); ++i) {
     std::cerr << "  " << lines[i] << '\n';
   }
@@ -67,11 +68,13 @@ inline void PrintHelperLogTail(std::size_t maxLines)
   }
   PrintHelperLogTail(40u);
   // A passing test removes its folder; a failing one keeps it to look at.
+  // Outside RunTest nothing clears the folder between tests, so it may be an
+  // earlier test's.
   std::error_code ec;
   if (!CurrentTestDir().empty() && std::filesystem::exists(CurrentTestDir(), ec)) {
     const auto dir = CurrentTestDir().u8string();
-    std::cerr << "test folder kept: " << std::string_view(reinterpret_cast<const char*>(dir.data()), dir.size())
-              << '\n';
+    std::cerr << (CurrentTestName().empty() ? "newest test folder (may be an earlier test's): " : "test folder kept: ")
+              << std::string_view(reinterpret_cast<const char*>(dir.data()), dir.size()) << '\n';
   }
   std::cerr.flush();
   ExitProcess(1);

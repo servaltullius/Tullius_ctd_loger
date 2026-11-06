@@ -4,6 +4,7 @@
 
 #include <DbgHelp.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -101,6 +102,26 @@ std::string JsonText(const nlohmann::json& object, const char* key)
   return (it != object.end() && it->is_string()) ? it->get<std::string>() : std::string{};
 }
 
+bool Within(std::uint64_t a, std::uint64_t b, std::uint64_t percent)
+{
+  const std::uint64_t diff = a > b ? a - b : b - a;
+  return diff <= std::max(a, b) / 100u * percent;
+}
+
+// The same adapter seen twice: one of the two has no name and both report
+// the same budget and usage, up to what changes between two reads.
+bool RepeatsCounters(const nlohmann::json& a, std::uint64_t aUsage, const nlohmann::json& b, std::uint64_t bUsage)
+{
+  constexpr std::uint64_t kReadDriftPercent = 2;
+  if (!JsonText(a, "name").empty() && !JsonText(b, "name").empty()) {
+    return false;
+  }
+  const std::uint64_t aBudget = JsonBytes(a, "local_budget");
+  const std::uint64_t bBudget = JsonBytes(b, "local_budget");
+  return aBudget > 0 && bBudget > 0 && Within(aBudget, bBudget, kReadDriftPercent) &&
+    Within(aUsage, bUsage, kReadDriftPercent);
+}
+
 }  // namespace
 
 std::wstring FormatGb(std::uint64_t bytes, int decimals)
@@ -123,11 +144,22 @@ bool ApplyGpuMemoryJson(std::string_view json, MemorySnapshot& out)
       continue;
     }
     const std::uint64_t usage = JsonBytes(adapter, "local_usage");
-    // On a tie a named adapter: a virtual display recorded by an older helper
-    // repeats the GPU's numbers without a name.
-    const bool namedOverNameless =
-      best && usage == bestUsage && JsonText(*best, "name").empty() && !JsonText(adapter, "name").empty();
-    if (!best || usage > bestUsage || namedOverNameless) {
+    if (!best) {
+      best = &adapter;
+      bestUsage = usage;
+      continue;
+    }
+    // A virtual display recorded by an older helper repeats the GPU's numbers
+    // without a name, read a moment apart, so they can differ a little: of
+    // such a pair the named one, whichever is larger.
+    if (RepeatsCounters(*best, bestUsage, adapter, usage)) {
+      if (JsonText(*best, "name").empty() && !JsonText(adapter, "name").empty()) {
+        best = &adapter;
+        bestUsage = usage;
+      }
+      continue;
+    }
+    if (usage > bestUsage) {
       best = &adapter;
       bestUsage = usage;
     }

@@ -186,6 +186,19 @@ void TestVirtualDisplayTieKeepsTheNamedAdapter()
     Require(skydiag::dump_tool::ApplyGpuMemoryJson(R"({"adapters":[)" + adapters + "]}", m), "both adapters read");
     Require(m.gpu_name == L"NVIDIA GeForce RTX 4090" && m.vram_usage_bytes == 8176u, "the named adapter on a tie");
   }
+  // Read a moment apart the copy can be a little larger or smaller.
+  const std::string drifted = R"({"name":"","local_usage":8240,"local_budget":23371})";
+  for (const auto& adapters : { drifted + "," + named, named + "," + drifted }) {
+    MemorySnapshot m{};
+    Require(skydiag::dump_tool::ApplyGpuMemoryJson(R"({"adapters":[)" + adapters + "]}", m), "both adapters read");
+    Require(m.gpu_name == L"NVIDIA GeForce RTX 4090" && m.vram_usage_bytes == 8176u, "the named adapter of a drifted copy");
+  }
+  // A nameless adapter with clearly more in use is another adapter.
+  MemorySnapshot other{};
+  Require(skydiag::dump_tool::ApplyGpuMemoryJson(
+            R"({"adapters":[)" + named + R"(,{"name":"","local_usage":9000,"local_budget":23370}]})", other),
+    "both adapters read");
+  Require(other.gpu_name.empty() && other.vram_usage_bytes == 9000u, "more than read drift is not a copy");
   MemorySnapshot larger{};
   Require(skydiag::dump_tool::ApplyGpuMemoryJson(
             R"({"adapters":[{"name":"","local_usage":9000},{"name":"AMD Radeon(TM) Graphics","local_usage":12}]})", larger),
