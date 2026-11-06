@@ -19,6 +19,11 @@
     { "dll": "dxgi.dll", "reason_ko": "렌더링 인젝션", "reason_en": "Rendering injection" },
     { "dll": "dinput8.dll", "reason_ko": "입력 인젝션", "reason_en": "Input injection" },
     { "dll": "d3dcompiler_46e.dll", "reason_ko": "ENB 셰이더 컴파일러", "reason_en": "ENB shader compiler" },
-    { "dll": "tbbmalloc.dll", "reason_ko": "메모리 할당자 교체", "reason_en": "Memory allocator replacement" }
+    { "dll": "tbbmalloc.dll", "reason_ko": "메모리 할당자 교체", "reason_en": "Memory allocator replacement" },
+    { "dll": "po3_spellperkitemdistributor.dll", "reason_ko": "다른 모드의 INI로 NPC에 주문·퍽·아이템 배포 (SPID)", "reason_en": "Distributes spells/perks/items to NPCs from other mods' INIs (SPID)" },
+    { "dll": "po3_keyworditemdistributor.dll", "reason_ko": "다른 모드의 INI로 아이템에 키워드 배포 (KID)", "reason_en": "Distributes keywords to items from other mods' INIs (KID)" },
+    { "dll": "skypatcher.dll", "reason_ko": "다른 모드의 INI로 레코드 필드 패치", "reason_en": "Patches record fields from other mods' INIs" },
+    { "dll": "po3_baseobjectswapper.dll", "reason_ko": "다른 모드의 INI로 배치 오브젝트 교체", "reason_en": "Swaps placed objects from other mods' INIs" },
+    { "dll": "po3_papyrusextender.dll", "reason_ko": "다른 모드 스크립트가 쓰는 Papyrus 함수 제공", "reason_en": "Papyrus functions other mods' scripts call" }
   ]
 }
