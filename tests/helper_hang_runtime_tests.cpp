@@ -335,88 +335,6 @@ void TestExecuteConfirmedHangCapture_WritesArtifacts()
   std::filesystem::remove_all(outBase);
 }
 
-void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
-{
-  constexpr wchar_t kTitle[] = L"SkyrimDiag modal probe test";
-  DWORD dialogTid = 0;
-  std::thread dialogThread([&]() {
-    dialogTid = GetCurrentThreadId();
-    MessageBoxW(nullptr, L"Plugin failed to load.\nSee C:\\Users\\Tester\\log.txt", kTitle, MB_OK | MB_SETFOREGROUND);
-  });
-
-  std::vector<skydiag::helper::ModalDialogWindow> dialogs;
-  const skydiag::helper::ModalDialogWindow* found = nullptr;
-  for (int attempt = 0; attempt < 100 && !found; ++attempt) {
-    Sleep(50);
-    dialogs = skydiag::helper::CaptureModalDialogs(GetCurrentProcessId());
-    for (const auto& dialog : dialogs) {
-      if (dialog.title == "SkyrimDiag modal probe test") {
-        found = &dialog;
-        break;
-      }
-    }
-  }
-
-  Require(skydiag::tests::runtime::CloseDialogAndJoin(dialogThread, kTitle), "Test MessageBox did not close");
-
-  Require(found != nullptr, "Visible MessageBox owned by this process must be captured");
-  Require(found->tid == dialogTid, "Captured dialog must report the thread that pumps it");
-  Require(
-    found->text.find("Plugin failed to load.") != std::string::npos,
-    "Captured dialog must include the MessageBox body text");
-  const auto json = skydiag::helper::ModalDialogsToJson(dialogs).dump();
-  AssertContains(json, "\"tid\"", "Dialog json must include the owner thread id");
-  AssertContains(json, "\"owner_disabled\"", "Dialog json must record whether the owner window is disabled");
-}
-
-}  // namespace
-
-// Loading at attach is the game starting up (the plugin keeps the flag on
-// until its data has loaded). Timing it from start_qpc put a 2-minute sample
-// next to every 25 s save load; only a load screen seen start to end counts.
-void TestStartupLoadingIsNotALoadingSample()
-{
-  const auto outBase = MakeTempDir(L"skydiag_startup_loading_sample");
-  const auto statsPath = outBase / L"SkyrimDiag_LoadStats.json";
-
-  auto shared = MakeSharedLayout();
-  LARGE_INTEGER now{};
-  QueryPerformanceCounter(&now);
-  shared->header.qpc_freq = 10'000'000ull;
-  shared->header.start_qpc = static_cast<std::uint64_t>(now.QuadPart) - (120ull * shared->header.qpc_freq);
-  shared->header.last_heartbeat_qpc = static_cast<std::uint64_t>(now.QuadPart);
-  shared->header.state_flags = skydiag::kState_Loading;
-
-  auto proc = MakeSelfAttachedProcess(shared.get());
-  auto cfg = MakeTestConfig();
-  HelperLoopState loop{};
-  InitializeLoopState(proc, outBase, &loop);
-  Require(loop.hangState.wasLoading, "attached while loading");
-
-  // The startup load ends.
-  shared->header.state_flags = skydiag::kState_None;
-  LoadStats loadStats;
-  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
-  std::wstring pendingHangViewerDumpPath;
-  HandleHangTick(
-    cfg,
-    proc,
-    outBase,
-    &loadStats,
-    statsPath,
-    &adaptiveLoadingThresholdSec,
-    static_cast<std::uint64_t>(now.QuadPart),
-    &pendingHangViewerDumpPath,
-    &loop.hangState);
-  Require(!loadStats.HasSamples(), "the startup is no loading sample");
-  Require(!std::filesystem::exists(statsPath), "nothing is written");
-  CloseAttachedProcess(&proc);
-  std::error_code ec;
-  std::filesystem::remove_all(outBase, ec);
-}
-
-// The hang decision alone (nowQpc, lastHeartbeatQpc, qpcFreq, stateFlags,
-// thresholdInGameSec, thresholdLoadingSec), at 100 ticks per second.
 // A hang dump of a game that then exits, as `exitCode`, with the hang still
 // open: what HeldHangDump leaves in the folder and the log.
 struct HeldHangExit
@@ -523,6 +441,88 @@ void TestHeldHangDump_ReleasedWhenTheGameRecovers()
   std::filesystem::remove_all(outBase);
 }
 
+void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
+{
+  constexpr wchar_t kTitle[] = L"SkyrimDiag modal probe test";
+  DWORD dialogTid = 0;
+  std::thread dialogThread([&]() {
+    dialogTid = GetCurrentThreadId();
+    MessageBoxW(nullptr, L"Plugin failed to load.\nSee C:\\Users\\Tester\\log.txt", kTitle, MB_OK | MB_SETFOREGROUND);
+  });
+
+  std::vector<skydiag::helper::ModalDialogWindow> dialogs;
+  const skydiag::helper::ModalDialogWindow* found = nullptr;
+  for (int attempt = 0; attempt < 100 && !found; ++attempt) {
+    Sleep(50);
+    dialogs = skydiag::helper::CaptureModalDialogs(GetCurrentProcessId());
+    for (const auto& dialog : dialogs) {
+      if (dialog.title == "SkyrimDiag modal probe test") {
+        found = &dialog;
+        break;
+      }
+    }
+  }
+
+  Require(skydiag::tests::runtime::CloseDialogAndJoin(dialogThread, kTitle), "Test MessageBox did not close");
+
+  Require(found != nullptr, "Visible MessageBox owned by this process must be captured");
+  Require(found->tid == dialogTid, "Captured dialog must report the thread that pumps it");
+  Require(
+    found->text.find("Plugin failed to load.") != std::string::npos,
+    "Captured dialog must include the MessageBox body text");
+  const auto json = skydiag::helper::ModalDialogsToJson(dialogs).dump();
+  AssertContains(json, "\"tid\"", "Dialog json must include the owner thread id");
+  AssertContains(json, "\"owner_disabled\"", "Dialog json must record whether the owner window is disabled");
+}
+
+}  // namespace
+
+// Loading at attach is the game starting up (the plugin keeps the flag on
+// until its data has loaded). Timing it from start_qpc put a 2-minute sample
+// next to every 25 s save load; only a load screen seen start to end counts.
+void TestStartupLoadingIsNotALoadingSample()
+{
+  const auto outBase = MakeTempDir(L"skydiag_startup_loading_sample");
+  const auto statsPath = outBase / L"SkyrimDiag_LoadStats.json";
+
+  auto shared = MakeSharedLayout();
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  shared->header.qpc_freq = 10'000'000ull;
+  shared->header.start_qpc = static_cast<std::uint64_t>(now.QuadPart) - (120ull * shared->header.qpc_freq);
+  shared->header.last_heartbeat_qpc = static_cast<std::uint64_t>(now.QuadPart);
+  shared->header.state_flags = skydiag::kState_Loading;
+
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  auto cfg = MakeTestConfig();
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+  Require(loop.hangState.wasLoading, "attached while loading");
+
+  // The startup load ends.
+  shared->header.state_flags = skydiag::kState_None;
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  std::wstring pendingHangViewerDumpPath;
+  HandleHangTick(
+    cfg,
+    proc,
+    outBase,
+    &loadStats,
+    statsPath,
+    &adaptiveLoadingThresholdSec,
+    static_cast<std::uint64_t>(now.QuadPart),
+    &pendingHangViewerDumpPath,
+    &loop.hangState);
+  Require(!loadStats.HasSamples(), "the startup is no loading sample");
+  Require(!std::filesystem::exists(statsPath), "nothing is written");
+  CloseAttachedProcess(&proc);
+  std::error_code ec;
+  std::filesystem::remove_all(outBase, ec);
+}
+
+// The hang decision alone (nowQpc, lastHeartbeatQpc, qpcFreq, stateFlags,
+// thresholdInGameSec, thresholdLoadingSec), at 100 ticks per second.
 void TestEvaluateHangDecisions()
 {
   using skydiag::helper::EvaluateHang;
@@ -844,10 +844,6 @@ int main()
     SKYDIAG_RUN_TEST(TestComputeHangThresholds);
     SKYDIAG_RUN_TEST(TestWctHasCycle);
     SKYDIAG_RUN_TEST(TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode);
-    SKYDIAG_RUN_TEST(TestHeldHangDump_RemovedForASlowShutdown);
-    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptForAnEndedGame);
-    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenAsked);
-    SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheGameRecovers);
     SKYDIAG_RUN_TEST(TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick);
     SKYDIAG_RUN_TEST(TestHandleHangTick_YieldsToACrashEvent);
     SKYDIAG_RUN_TEST(TestPssSnapshotWorksFromTheAttachHandle);
@@ -859,6 +855,10 @@ int main()
     SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsWhenHeartbeatNotInitialized);
     SKYDIAG_RUN_TEST(TestStartupLoadingIsNotALoadingSample);
     SKYDIAG_RUN_TEST(TestExecuteConfirmedHangCapture_WritesArtifacts);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_RemovedForASlowShutdown);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptForAnEndedGame);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenAsked);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheGameRecovers);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);
     return 0;
   } catch (const std::exception& ex) {
