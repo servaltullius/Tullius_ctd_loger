@@ -102,7 +102,12 @@ Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰
 
 프리징 감지 임계값 (`SkyrimDiagHelper.ini`):
 - `HangThresholdInGameSec` / `HangThresholdLoadingSec`
+- `HangThresholdInMenuSec` (기본 30): 메뉴가 열려 있을 때, 메뉴에서 게임을 끄는 동안도 포함
 - `EnableAdaptiveLoadingThreshold=1` (권장 — 로딩 시간 자동 학습)
+
+큰 모드팩에서는 게임을 끄는 데 메뉴 기준 시간보다 오래 걸릴 수 있습니다. Helper는 이것을 프리징으로 보지 않습니다.
+- 게임이 이미 종료 처리 중이면(스레드가 하나만 남음) 프리징 덤프를 만들지 않고, Helper 로그에 `Hang detected while the game is closing`만 남깁니다.
+- 메뉴에서 잡힌 프리징은 게임이 회복하거나 꺼질 때까지 분석을 미룹니다. 멈춘 채로 정상 종료(종료 코드 0)하면 느린 종료였으므로, 덤프와 함께 쓴 파일을 분석 전에 지웁니다. 덤프 보관 자리도, 크래시 이력도 차지하지 않습니다. `KeepSlowShutdownHangDumps=1`이면 남기고 분석합니다. 게임 중 프리징은 바로 분석하고 항상 남깁니다.
 
 ## 언어
 
