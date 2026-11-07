@@ -60,6 +60,7 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
   j["auto_open_viewer_on_manual_capture"] = cfg.autoOpenViewerOnManualCapture;
   j["auto_open_viewer_under_wine"] = cfg.autoOpenViewerUnderWine;
   j["auto_open_hang_after_process_exit"] = cfg.autoOpenHangAfterProcessExit;
+  j["keep_slow_shutdown_hang_dumps"] = cfg.keepSlowShutdownHangDumps;
   j["auto_open_hang_delay_ms"] = cfg.autoOpenHangDelayMs;
   j["auto_open_viewer_beginner_mode"] = cfg.autoOpenViewerBeginnerMode;
   j["enable_pss_snapshot_for_freeze"] = cfg.enablePssSnapshotForFreeze;

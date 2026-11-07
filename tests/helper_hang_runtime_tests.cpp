@@ -417,6 +417,112 @@ void TestStartupLoadingIsNotALoadingSample()
 
 // The hang decision alone (nowQpc, lastHeartbeatQpc, qpcFreq, stateFlags,
 // thresholdInGameSec, thresholdLoadingSec), at 100 ticks per second.
+// A hang dump of a game that then exits, as `exitCode`, with the hang still
+// open: what HeldHangDump leaves in the folder and the log.
+struct HeldHangExit
+{
+  std::size_t dumps = 0;
+  std::size_t jsonFiles = 0;
+  bool heldCleared = false;
+  bool viewerCleared = false;
+  std::string log;
+};
+
+HeldHangExit CaptureHangThenExit(skydiag::helper::HelperConfig cfg, DWORD exitCode, const wchar_t* dirPrefix)
+{
+  const auto outBase = MakeTempDir(dirPrefix);
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  shared->header.state_flags = skydiag::kState_InMenu;
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+  HangDecision decision{};
+  decision.isHang = true;
+  decision.secondsSinceHeartbeat = 32.0;
+  decision.thresholdSec = 30u;
+  (void)ExecuteConfirmedHangCapture(
+    cfg, proc, outBase, decision, skydiag::kState_InMenu, &loop.pendingHangViewerDumpPath, &loop.hangState);
+  Require(CountFilesWithExt(outBase, L".dmp") == 1u, "the hang dump is written");
+  Require(!loop.hangState.heldDump.dumpPath.empty(), "no viewer opened it, so it is held unanalyzed");
+
+  Require(TerminateProcess(child.pi.hProcess, exitCode) != FALSE, "TerminateProcess failed");
+  Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "the child did not exit");
+  Require(HandleProcessExitTick(cfg, proc, outBase, &loop), "the exit tick handles the exit");
+
+  HeldHangExit result{};
+  result.dumps = CountFilesWithExt(outBase, L".dmp");
+  result.jsonFiles = CountFilesWithExt(outBase, L".json");
+  result.heldCleared = loop.hangState.heldDump.dumpPath.empty();
+  result.viewerCleared = loop.pendingHangViewerDumpPath.empty();
+  result.log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  ShutdownRetentionWorker();
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+  return result;
+}
+
+// A freeze that lasts until a normal exit was a slow shutdown: its dump, WCT
+// file and incident manifest go before anything analyzes it, and no viewer
+// is queued for it any more.
+void TestHeldHangDump_RemovedForASlowShutdown()
+{
+  auto cfg = MakeHangTestConfig();
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+  const auto r = CaptureHangThenExit(cfg, 0u, L"skydiag_held_hang_slow_shutdown");
+  Require(r.dumps == 0u, "the dump is removed");
+  Require(r.jsonFiles == 0u, "its WCT file and manifest are removed");
+  Require(r.heldCleared && r.viewerCleared, "nothing is left to analyze or open");
+  AssertContains(r.log, "Removed the hang dump of a slow shutdown", "the removal is logged");
+  Require(r.log.find("the hang dump is kept") == std::string::npos, "not also logged as kept");
+}
+
+// An exit with another code is a frozen game that was ended: the dump stays.
+void TestHeldHangDump_KeptForAnEndedGame()
+{
+  const auto r = CaptureHangThenExit(MakeHangTestConfig(), 1u, L"skydiag_held_hang_ended");
+  Require(r.dumps == 1u, "the dump stays");
+  Require(r.heldCleared, "it is released for analysis");
+  Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+}
+
+// KeepSlowShutdownHangDumps=1 keeps the dump of a slow shutdown.
+void TestHeldHangDump_KeptWhenAsked()
+{
+  auto cfg = MakeHangTestConfig();
+  cfg.keepSlowShutdownHangDumps = true;
+  const auto r = CaptureHangThenExit(cfg, 0u, L"skydiag_held_hang_keep");
+  Require(r.dumps == 1u && r.heldCleared, "the dump stays and is released for analysis");
+  Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+}
+
+// A freeze the game comes back from is not a slow shutdown: the heartbeat's
+// return releases its dump for analysis, so the exit cannot remove it.
+void TestHeldHangDump_ReleasedWhenTheGameRecovers()
+{
+  const auto outBase = MakeTempDir(L"skydiag_held_hang_recovered");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  const auto cfg = MakeHangTestConfig();
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  std::wstring pendingHangViewerDumpPath;
+  HangCaptureState state{};
+  state.heldDump = skydiag::helper::internal::HeldHangDump{ (outBase / L"SkyrimDiag_Hang_20261107_120000_000.dmp").wstring(), false };
+  state.hangCapturedThisEpisode = true;
+  shared->header.last_heartbeat_qpc = QpcNow();
+  (void)HandleHangTick(
+    cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec, QpcNow(),
+    &pendingHangViewerDumpPath, &state);
+  Require(state.heldDump.dumpPath.empty() && !state.hangCapturedThisEpisode, "the episode ended and released it");
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
 void TestEvaluateHangDecisions()
 {
   using skydiag::helper::EvaluateHang;
@@ -738,6 +844,10 @@ int main()
     SKYDIAG_RUN_TEST(TestComputeHangThresholds);
     SKYDIAG_RUN_TEST(TestWctHasCycle);
     SKYDIAG_RUN_TEST(TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_RemovedForASlowShutdown);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptForAnEndedGame);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenAsked);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheGameRecovers);
     SKYDIAG_RUN_TEST(TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick);
     SKYDIAG_RUN_TEST(TestHandleHangTick_YieldsToACrashEvent);
     SKYDIAG_RUN_TEST(TestPssSnapshotWorksFromTheAttachHandle);

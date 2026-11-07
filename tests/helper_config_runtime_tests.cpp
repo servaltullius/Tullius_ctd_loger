@@ -246,6 +246,15 @@ void TestDumpAllModuleCodeIsRead(const IniFile& ini)
   Require(!LoadConfig(nullptr).dumpAllModuleCode, "DumpAllModuleCode=0 is read");
 }
 
+// KeepSlowShutdownHangDumps: off when missing, and read as written.
+void TestKeepSlowShutdownHangDumpsIsRead(const IniFile& ini)
+{
+  ini.Write("[SkyrimDiagHelper]\r\n");
+  Require(!LoadConfig(nullptr).keepSlowShutdownHangDumps, "KeepSlowShutdownHangDumps defaults to 0");
+  ini.Write("[SkyrimDiagHelper]\r\nKeepSlowShutdownHangDumps=1\r\n");
+  Require(LoadConfig(nullptr).keepSlowShutdownHangDumps, "KeepSlowShutdownHangDumps=1 is read");
+}
+
 }  // namespace
 
 int main()
@@ -262,6 +271,7 @@ int main()
     TestOutputDirFallbacks(ini);
     TestTotalDumpBudgetIsRead(ini);
     TestDumpAllModuleCodeIsRead(ini);
+    TestKeepSlowShutdownHangDumpsIsRead(ini);
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "FAILED: %s\n", ex.what());
     return 1;

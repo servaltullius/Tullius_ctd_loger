@@ -253,6 +253,8 @@ void ShutdownLoopState(
 
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
   MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &state->hangState.pendingEtw);
+  // Left by a helper that stops before the game's exit settled it.
+  ReleaseHeldHangDump(cfg, outBase, L"the helper is stopping", &state->hangState);
   UnregisterManualCaptureHotkeyIfEnabled(cfg);
   if (!state->crashCaptured.releasedDumpPath.empty()) {
     AppendLogLine(

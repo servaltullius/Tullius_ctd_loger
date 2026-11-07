@@ -79,6 +79,7 @@
   - `EnableAdaptiveLoadingThreshold=1` 이면 최근 로딩 시간을 학습해 자동 보정합니다(추천).
   - **Alt-Tab(백그라운드) 주의:** 게임이 Alt-Tab으로 “일시정지”되는 환경에서는 heartbeat가 멈출 수 있습니다. 기본 설정(`SuppressHangWhenNotForeground=1`)은 **비포그라운드 상태에서 자동 hang dump 생성을 억제**합니다. (백그라운드 프리징도 자동 덤프를 원하면 `0`으로)
   - **Alt-Tab 복귀 직후 오탐 방지:** 포그라운드로 돌아온 직후 잠깐 동안은 heartbeat가 바로 회복되지 않을 수 있습니다. 기본 설정(`ForegroundGraceSec=5`)은 이 구간에서 자동 hang dump 생성을 잠시 유예합니다.
+  - **느린 종료:** hang dump의 분석은 그 프리징이 끝날 때까지 미룹니다. 게임이 회복하거나 0이 아닌 코드로 끝나면 분석하고, 멈춘 채로 정상 종료(exit code 0)하면 종료가 느렸던 것이므로 덤프와 함께 쓴 파일을 분석 전에 지웁니다(크래시 이력에도 남지 않음). 남기려면 `KeepSlowShutdownHangDumps=1`.
 
 ### C. 수동 스냅샷(핫키)
 
