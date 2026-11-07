@@ -98,7 +98,12 @@ Capture and the text report work under Wine/Proton; the WinUI viewer does not ([
 
 Hang detection thresholds are configurable in `SkyrimDiagHelper.ini`:
 - `HangThresholdInGameSec` / `HangThresholdLoadingSec`
+- `HangThresholdInMenuSec` (default 30): with a menu open, including while quitting from a menu
 - `EnableAdaptiveLoadingThreshold=1` (recommended — auto-learns loading times)
+
+Quitting can take longer than the menu threshold on a large load order. The helper does not treat that as a freeze:
+- When the game is already in its exit (one thread left), no freeze dump is taken. The helper log says `Hang detected while the game is closing`.
+- A freeze captured in a menu waits to be analyzed until the game recovers or exits. If it is still frozen when the game exits normally (exit code 0), it was a slow quit: its dump and files are removed before analysis, so it takes no dump slot and no crash history entry. `KeepSlowShutdownHangDumps=1` keeps and analyzes it. Freezes during play are analyzed at once and always kept.
 
 ## Language
 
