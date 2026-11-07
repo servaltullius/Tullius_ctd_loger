@@ -350,14 +350,43 @@ struct HeldHangExit
   std::string log;
 };
 
+// A process created suspended has only its first thread: the thread count a
+// game in ExitProcess shows (all other threads ended, the DLLs detaching).
+skydiag::tests::runtime::ChildProcess LaunchSuspendedChildProcess()
+{
+  skydiag::tests::runtime::ChildProcess child{};
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  std::wstring commandLine = L"cmd.exe /c exit 0";
+  const auto applicationPath = skydiag::tests::runtime::GetCmdExePath();
+  const BOOL ok = CreateProcessW(
+    applicationPath.c_str(),
+    commandLine.data(),
+    nullptr,
+    nullptr,
+    FALSE,
+    CREATE_SUSPENDED | CREATE_NO_WINDOW,
+    nullptr,
+    nullptr,
+    &si,
+    &child.pi);
+  Require(ok != FALSE, "CreateProcessW(cmd.exe, suspended) failed");
+  CloseHandle(child.pi.hThread);
+  child.pi.hThread = nullptr;
+  return child;
+}
+
 // What happens between the capture and the exit.
 enum class BeforeExit
 {
   kNothing,
   // The heartbeat comes back but no hang tick runs before the exit.
   kHeartbeatReturns,
-  // A hang tick runs on the still-stalled heartbeat.
+  // A hang tick runs on the still-stalled heartbeat, with the pid of a
+  // one-thread process, so the closing check would skip it if it ran.
   kHangTick,
+  // The flags at the exit show a load (whose threshold is 600 s here).
+  kLoadFlagAtExit,
 };
 
 HeldHangExit CaptureHangThenExit(
@@ -386,13 +415,20 @@ HeldHangExit CaptureHangThenExit(
   if (beforeExit == BeforeExit::kHeartbeatReturns) {
     shared->header.last_heartbeat_qpc = QpcNow();
   } else if (beforeExit == BeforeExit::kHangTick) {
+    auto oneThread = LaunchSuspendedChildProcess();
+    const auto gamePid = proc.pid;
+    proc.pid = oneThread.pi.dwProcessId;
     LoadStats loadStats;
     std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
     (void)HandleHangTick(
       cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec,
       QpcNow(), &loop.pendingHangViewerDumpPath, &loop.hangState);
+    proc.pid = gamePid;
+    TerminateChildProcess(&oneThread);
     Require(!loop.hangState.heldDump.dumpPath.empty(), "the held dump stays held while the hang lasts");
     Require(!loop.hangState.hangSkippedAsClosingThisEpisode, "a captured episode is not checked as closing again");
+  } else if (beforeExit == BeforeExit::kLoadFlagAtExit) {
+    shared->header.state_flags = skydiag::kState_InMenu | skydiag::kState_Loading;
   }
 
   Require(TerminateProcess(child.pi.hProcess, exitCode) != FALSE, "TerminateProcess failed");
@@ -483,6 +519,18 @@ void TestHeldHangDump_HeldEpisodeIsNotSkippedAsClosing()
   const auto r = CaptureHangThenExit(
     MakeHangTestConfig(), 0u, L"skydiag_held_hang_then_tick", skydiag::kState_InMenu, BeforeExit::kHangTick);
   Require(r.slowShutdownAtExit && r.dumps == 0u, "still a slow shutdown at the exit, and removed");
+}
+
+// The stall at the exit is judged by the threshold the hang was captured at
+// (30 s here), not by the flags left at the exit: a load flag there would
+// switch to the 600 s loading threshold and hide the slow shutdown.
+void TestHeldHangDump_StallJudgedByTheCaptureThreshold()
+{
+  auto cfg = MakeHangTestConfig();
+  cfg.hangThresholdLoadingSec = 600u;
+  const auto r = CaptureHangThenExit(
+    cfg, 0u, L"skydiag_held_hang_load_flag", skydiag::kState_InMenu, BeforeExit::kLoadFlagAtExit);
+  Require(r.slowShutdownAtExit && r.dumps == 0u, "a slow shutdown, removed");
 }
 
 static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, false), "a menu");
@@ -652,31 +700,6 @@ static_assert(skydiag::helper::IsGameProcessClosing(0u), "no threads left");
 static_assert(!skydiag::helper::IsGameProcessClosing(2u), "a running process has more");
 static_assert(!skydiag::helper::IsGameProcessClosing(std::nullopt), "an unknown count is not closing");
 
-// A process created suspended has only its first thread: the thread count a
-// game in ExitProcess shows (all other threads ended, the DLLs detaching).
-skydiag::tests::runtime::ChildProcess LaunchSuspendedChildProcess()
-{
-  skydiag::tests::runtime::ChildProcess child{};
-  STARTUPINFOW si{};
-  si.cb = sizeof(si);
-  std::wstring commandLine = L"cmd.exe /c exit 0";
-  const auto applicationPath = skydiag::tests::runtime::GetCmdExePath();
-  const BOOL ok = CreateProcessW(
-    applicationPath.c_str(),
-    commandLine.data(),
-    nullptr,
-    nullptr,
-    FALSE,
-    CREATE_SUSPENDED | CREATE_NO_WINDOW,
-    nullptr,
-    nullptr,
-    &si,
-    &child.pi);
-  Require(ok != FALSE, "CreateProcessW(cmd.exe, suspended) failed");
-  CloseHandle(child.pi.hThread);
-  child.pi.hThread = nullptr;
-  return child;
-}
 
 void TestCountProcessThreads()
 {
@@ -1185,6 +1208,7 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_GameplayFreezeIsNotHeld);
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenTheGameRecoveredBeforeAQuickQuit);
     SKYDIAG_RUN_TEST(TestHeldHangDump_HeldEpisodeIsNotSkippedAsClosing);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_StallJudgedByTheCaptureThreshold);
     SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);
