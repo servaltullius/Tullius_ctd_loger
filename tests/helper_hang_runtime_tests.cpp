@@ -6,12 +6,14 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <thread>
 
 #include <nlohmann/json.hpp>
 
 #include "CrashCapture.h"
+#include "FreezeCapture.h"
 #include "HangCapture.h"
 #include "HangCaptureInternal.h"
 #include "HelperLog.h"
@@ -523,6 +525,166 @@ void TestStartupLoadingIsNotALoadingSample()
 
 // The hang decision alone (nowQpc, lastHeartbeatQpc, qpcFreq, stateFlags,
 // thresholdInGameSec, thresholdLoadingSec), at 100 ticks per second.
+// IsGameProcessClosing: one thread left (or none) is a game in ExitProcess.
+static_assert(skydiag::helper::IsGameProcessClosing(1u), "one thread left");
+static_assert(skydiag::helper::IsGameProcessClosing(0u), "no threads left");
+static_assert(!skydiag::helper::IsGameProcessClosing(2u), "a running process has more");
+static_assert(!skydiag::helper::IsGameProcessClosing(std::nullopt), "an unknown count is not closing");
+
+// A process created suspended has only its first thread: the thread count a
+// game in ExitProcess shows (all other threads ended, the DLLs detaching).
+skydiag::tests::runtime::ChildProcess LaunchSuspendedChildProcess()
+{
+  skydiag::tests::runtime::ChildProcess child{};
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  std::wstring commandLine = L"cmd.exe /c exit 0";
+  const auto applicationPath = skydiag::tests::runtime::GetCmdExePath();
+  const BOOL ok = CreateProcessW(
+    applicationPath.c_str(),
+    commandLine.data(),
+    nullptr,
+    nullptr,
+    FALSE,
+    CREATE_SUSPENDED | CREATE_NO_WINDOW,
+    nullptr,
+    nullptr,
+    &si,
+    &child.pi);
+  Require(ok != FALSE, "CreateProcessW(cmd.exe, suspended) failed");
+  CloseHandle(child.pi.hThread);
+  child.pi.hThread = nullptr;
+  return child;
+}
+
+void TestCountProcessThreads()
+{
+  using skydiag::helper::internal::CountProcessThreads;
+  auto child = LaunchSuspendedChildProcess();
+  const auto childThreads = CountProcessThreads(child.pi.dwProcessId);
+  Require(childThreads.has_value() && *childThreads == 1u, "a suspended new process has one thread");
+  TerminateChildProcess(&child);
+
+  HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(stop != nullptr, "CreateEventW failed");
+  std::thread parked([stop] { WaitForSingleObject(stop, INFINITE); });
+  const auto selfThreads = CountProcessThreads(GetCurrentProcessId());
+  SetEvent(stop);
+  parked.join();
+  CloseHandle(stop);
+  Require(selfThreads.has_value() && *selfThreads >= 2u, "this process has at least the parked thread too");
+
+  const auto none = CountProcessThreads(0xFFFFFFF0u);
+  Require(none.has_value() && *none == 0u, "no process with that id: no threads");
+}
+
+// 2026-11-01: a shutdown that took more than 30 s in a menu was confirmed as a
+// hang with one game thread left, and its dump failed. A game that is closing
+// gets no hang dump and no WCT file, once per episode.
+void TestHandleHangTick_SkipsAGameThatIsClosing()
+{
+  const auto outBase = MakeTempDir(L"skydiag_hang_closing");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  shared->header.state_flags = skydiag::kState_InMenu;
+  auto child = LaunchSuspendedChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  const auto cfg = MakeHangTestConfig();
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  std::wstring pendingHangViewerDumpPath;
+  HangCaptureState state{};
+  const auto tick = [&] {
+    return HandleHangTick(
+      cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec,
+      QpcNow(), &pendingHangViewerDumpPath, &state);
+  };
+
+  Require(tick() == HangTickResult::kContinue, "the loop goes on to the exit");
+  Require(state.hangSkippedAsClosingThisEpisode, "the episode is marked as a closing game");
+  Require(!state.hangCapturedThisEpisode, "not a captured hang (the exit classification relies on it)");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "no hang dump");
+  Require(CountFilesWithExt(outBase, L".json") == 0u, "no WCT file");
+  Require(pendingHangViewerDumpPath.empty(), "no viewer queued");
+
+  (void)tick();
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  const std::string line = "Hang detected while the game is closing (1 thread left";
+  const auto first = log.find(line);
+  Require(first != std::string::npos, "the skipped hang is logged");
+  Require(log.find(line, first + 1u) == std::string::npos, "once per episode");
+
+  shared->header.last_heartbeat_qpc = QpcNow();
+  (void)tick();
+  Require(!state.hangSkippedAsClosingThisEpisode, "a heartbeat ends the episode");
+
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// After a skipped closing hang, the exit tick says the game exited while it
+// was closing, not that a game that stopped responding was ended.
+void TestProcessExitAfterASkippedClosingHang()
+{
+  const auto outBase = MakeTempDir(L"skydiag_hang_closing_exit");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  shared->header.state_flags = skydiag::kState_InMenu;
+  auto child = LaunchSuspendedChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  const auto cfg = MakeHangTestConfig();
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+  (void)HandleHangTick(
+    cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec, QpcNow(),
+    &loop.pendingHangViewerDumpPath, &loop.hangState);
+  Require(loop.hangState.hangSkippedAsClosingThisEpisode, "the hang is skipped as a closing game");
+
+  // Ended during its stalled exit, e.g. from Task Manager.
+  Require(TerminateProcess(child.pi.hProcess, 1u) != FALSE, "TerminateProcess failed");
+  Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "the child did not exit");
+  Require(HandleProcessExitTick(cfg, proc, outBase, &loop), "the exit tick handles the exit");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "The game exited while it was still closing (exit_code=1", "the exit is told as a closing game");
+  Require(log.find("The game stopped responding and then exited") == std::string::npos, "not as a frozen game");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "no dump");
+  ShutdownRetentionWorker();
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// The closing check right before the capture can miss an ExitProcess that is
+// still ending the other threads; a dump that then fails is told as the exit.
+void TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame()
+{
+  const auto outBase = MakeTempDir(L"skydiag_hang_closing_capture");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  // One thread, and a dump of it fails (ERROR_PARTIAL_COPY), like the 11/01 exit.
+  auto child = LaunchSuspendedChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HangDecision decision{};
+  decision.isHang = true;
+  decision.secondsSinceHeartbeat = 32.0;
+  decision.thresholdSec = 30u;
+  std::wstring pendingViewer;
+  HangCaptureState state{};
+  const auto result = ExecuteConfirmedHangCapture(
+    MakeHangTestConfig(), proc, outBase, decision, skydiag::kState_InMenu, &pendingViewer, &state);
+  Require(result == HangTickResult::kContinue, "the loop goes on");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "the dump of the closing game failed");
+  Require(state.hangSkippedAsClosingThisEpisode && !state.hangCapturedThisEpisode, "marked as a closing game");
+  Require(CountFilesWithExt(outBase, L".json") == 0u, "no WCT file or incident manifest left");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "The game was closing by the end of the hang capture",
+    "the failed dump is told as the exit");
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 void TestEvaluateHangDecisions()
 {
   using skydiag::helper::EvaluateHang;
@@ -587,6 +749,11 @@ void TestWctHasCycle()
 // and WCT after the grace check), and the episode ends when it comes back.
 void TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode()
 {
+  // The tick skips a process with one thread left (IsGameProcessClosing), and
+  // this test process may have only its main thread.
+  HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(stop != nullptr, "CreateEventW failed");
+  std::thread parked([stop] { WaitForSingleObject(stop, INFINITE); });
   const auto outBase = MakeTempDir(L"skydiag_hang_auto_capture");
   ClearLog(outBase);
   auto shared = MakeStaleHeartbeatLayout(30u);
@@ -620,6 +787,9 @@ void TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode()
   ShutdownRetentionWorker();
   CloseAttachedProcess(&proc);
   std::filesystem::remove_all(outBase);
+  SetEvent(stop);
+  parked.join();
+  CloseHandle(stop);
 }
 
 // A game that exits during the hang grace wait is left to the exit tick
@@ -753,6 +923,33 @@ void TestManualCaptureWritesItsArtifacts()
   std::filesystem::remove_all(outBase);
 }
 
+// A freeze capture whose dump cannot be written leaves no WCT file behind:
+// retention removes one only with its dump (2026-11-01, one left for good).
+void TestFreezeCaptureRemovesTheWctFileOfAFailedDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_freeze_failed_dump");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(30u);
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  skydiag::helper::internal::FreezeCaptureRequest request{};
+  request.kind = "hang";
+  request.logName = L"Hang";
+  request.wctPath = outBase / L"SkyrimDiag_WCT_test.json";
+  // A folder that does not exist: CreateFileW fails.
+  request.dumpPath = (outBase / L"missing" / L"SkyrimDiag_Hang_test.dmp").wstring();
+  HangDecision decision{};
+  decision.isHang = true;
+  decision.secondsSinceHeartbeat = 30.0;
+  decision.thresholdSec = 10u;
+  const auto result = skydiag::helper::internal::CaptureFreezeDumpAndWct(
+    MakeHangTestConfig(), proc, outBase, decision, skydiag::kState_None, request);
+  Require(!result.dumpWritten, "the dump fails");
+  Require(!std::filesystem::exists(request.wctPath), "its WCT file is removed");
+  AssertContains(ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "Hang dump failed", "the failure is logged");
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
+}
+
 // A press within 250 ms of the end of the last manual capture starts none.
 static_assert(!skydiag::helper::internal::ShouldDebounceManualCapture(1'000u, 0u), "no capture yet");
 static_assert(skydiag::helper::internal::ShouldDebounceManualCapture(1'100u, 1'000u), "100 ms after one");
@@ -843,11 +1040,16 @@ int main()
     SKYDIAG_RUN_TEST(TestEvaluateHangDecisions);
     SKYDIAG_RUN_TEST(TestComputeHangThresholds);
     SKYDIAG_RUN_TEST(TestWctHasCycle);
+    SKYDIAG_RUN_TEST(TestCountProcessThreads);
     SKYDIAG_RUN_TEST(TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode);
+    SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsAGameThatIsClosing);
+    SKYDIAG_RUN_TEST(TestProcessExitAfterASkippedClosingHang);
+    SKYDIAG_RUN_TEST(TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame);
     SKYDIAG_RUN_TEST(TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick);
     SKYDIAG_RUN_TEST(TestHandleHangTick_YieldsToACrashEvent);
     SKYDIAG_RUN_TEST(TestPssSnapshotWorksFromTheAttachHandle);
     SKYDIAG_RUN_TEST(TestManualCaptureWritesItsArtifacts);
+    SKYDIAG_RUN_TEST(TestFreezeCaptureRemovesTheWctFileOfAFailedDump);
     SKYDIAG_RUN_TEST(TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait);
     SKYDIAG_RUN_TEST(TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame);
     SKYDIAG_RUN_TEST(TestLoadStatsAtomicSaveFailurePreservesExistingState);

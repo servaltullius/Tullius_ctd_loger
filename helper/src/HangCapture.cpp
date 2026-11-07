@@ -109,7 +109,7 @@ HangTickResult HandleHangTick(
     return HangTickResult::kContinue;
   }
 
-  if (state->hangCapturedThisEpisode) {
+  if (state->hangCapturedThisEpisode || state->hangSkippedAsClosingThisEpisode) {
     return HangTickResult::kContinue;
   }
 
@@ -168,6 +168,12 @@ HangTickResult HandleHangTick(
   if (!decision2.isHang) {
     AppendLogLine(outBase, L"Hang detected but recovered during grace period; skipping hang dump.");
     ResetHangCaptureEpisode(state);
+    return HangTickResult::kContinue;
+  }
+
+  // A shutdown that outlasts the grace wait: the game is tearing down, not
+  // frozen, and its dump would fail part way.
+  if (SkipHangIfGameIsClosing(proc, outBase, decision2, state)) {
     return HangTickResult::kContinue;
   }
 

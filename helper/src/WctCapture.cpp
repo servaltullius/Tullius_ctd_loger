@@ -12,23 +12,20 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace skydiag::helper {
-namespace {
 
-constexpr DWORD kConsensusCaptureDelayMs = 15;
-
-std::vector<DWORD> EnumerateThreads(DWORD pid)
+std::optional<std::vector<std::uint32_t>> EnumerateProcessThreads(std::uint32_t pid)
 {
-  std::vector<DWORD> tids;
-
-  HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
   if (snap == INVALID_HANDLE_VALUE) {
-    return tids;
+    return std::nullopt;
   }
 
+  std::vector<std::uint32_t> tids;
   THREADENTRY32 te{};
   te.dwSize = sizeof(te);
   for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
@@ -36,10 +33,18 @@ std::vector<DWORD> EnumerateThreads(DWORD pid)
       tids.push_back(te.th32ThreadID);
     }
   }
-
+  // The walk ends with ERROR_NO_MORE_FILES; anything else cut it short.
+  const DWORD lastError = GetLastError();
   CloseHandle(snap);
+  if (lastError != ERROR_NO_MORE_FILES) {
+    return std::nullopt;
+  }
   return tids;
 }
+
+namespace {
+
+constexpr DWORD kConsensusCaptureDelayMs = 15;
 
 std::string WideToUtf8(const wchar_t* s)
 {
@@ -112,7 +117,7 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
   out.threads = nlohmann::json::array();
   out.hasLoadingSignal = ReadLoadingSignal(captureStateFlags);
 
-  const auto tids = EnumerateThreads(pid);
+  const auto tids = EnumerateProcessThreads(pid).value_or(std::vector<std::uint32_t>{});
   for (const auto tid : tids) {
     DWORD nodeCount = WCT_MAX_NODE_COUNT;
     WAITCHAIN_NODE_INFO nodes[WCT_MAX_NODE_COUNT]{};

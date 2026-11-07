@@ -787,6 +787,21 @@ bool HandleProcessExitTick(
             L"Abnormal process exit (exit_code=" + std::to_wstring(exitCode)
               + L") with a crash on record as post-exit metadata; no abnormal-exit WER LocalDumps hint.");
         }
+      } else if (hang.hangSkippedAsClosingThisEpisode && exitCode < 0xC0000000u) {
+        // The hang check had seen the game in its exit (IsGameProcessClosing),
+        // so this was no freeze during play. An NTSTATUS exit code (a crash
+        // WER can capture) still gets the hint below.
+        std::wstring evidence;
+        if (heartbeat.known) {
+          evidence += L", no heartbeat for " + std::to_wstring(static_cast<std::uint64_t>(heartbeat.secondsSince)) + L" s";
+        }
+        AppendLogLine(
+          outBase,
+          L"The game exited while it was still closing (exit_code=" + std::to_wstring(exitCode) + evidence
+            + L"; the hang check had seen at most one thread left). Either it was ended during a stalled exit (Task "
+              L"Manager or a watchdog), or a crash handler ended a crash in the exit: Crash Logger ends a crash "
+              L"it reports with exit code 1. Check for a Crash Logger crash-*.log from this time. Not a freeze "
+              L"during play; no WER LocalDumps hint, since WER captures neither case.");
       } else if (IsCloseOfUnresponsiveGame(
                    exitCode,
                    crashOnRecord,

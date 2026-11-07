@@ -72,6 +72,10 @@ struct HangCaptureState
   // A dialog window lifted the responsive-window suppression this episode
   // (logged once).
   bool hangSuppressionLiftedForDialogThisEpisode = false;
+  // The game was already closing when this episode's hang was confirmed
+  // (IsGameProcessClosing): no dump, logged once. Not a captured hang, so
+  // the exit classification still sees only the stalled heartbeat.
+  bool hangSkippedAsClosingThisEpisode = false;
 
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;
