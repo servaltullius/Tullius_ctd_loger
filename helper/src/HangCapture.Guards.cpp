@@ -29,16 +29,18 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->hangSuppressedForegroundResponsiveThisEpisode = false;
   state->hangSuppressionLiftedForDialogThisEpisode = false;
   state->hangSkippedAsClosingThisEpisode = false;
+  state->captureMayBeSlowShutdownThisEpisode = false;
   state->hangSuppressionState = {};
 }
 
 std::optional<std::size_t> CountProcessThreads(std::uint32_t pid)
 {
+  // Only a full walk can say the process is down to one thread.
   const auto threads = skydiag::helper::EnumerateProcessThreads(pid);
-  if (!threads) {
+  if (!threads.complete) {
     return std::nullopt;
   }
-  return threads->size();
+  return threads.ids.size();
 }
 
 bool SkipHangIfGameIsClosing(

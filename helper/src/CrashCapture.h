@@ -581,6 +581,23 @@ constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpiso
   return exitCode == 0u && hangEpisodeOpenAtExit;
 }
 
+// The exit the helper treats as a slow shutdown: its viewer is not opened and
+// a held dump (HeldHangDump) is removed. On top of IsHangDuringNormalShutdown,
+// the hang was captured where quitting happens (MayBeSlowShutdown: a menu, no
+// load), so a freeze during play that a quit hotkey or a launcher ends with
+// code 0 keeps its viewer; and the heartbeat was still stalled at the exit, so
+// a freeze the game came back from just before a quick quit (before a hang
+// tick saw the recovery) is not taken for one.
+constexpr bool IsSlowShutdownAtExit(
+  std::uint32_t exitCode,
+  bool hangEpisodeOpenAtExit,
+  bool captureMayBeSlowShutdown,
+  bool heartbeatStalledAtExit) noexcept
+{
+  return IsHangDuringNormalShutdown(exitCode, hangEpisodeOpenAtExit) && captureMayBeSlowShutdown &&
+         heartbeatStalledAtExit;
+}
+
 // The held dump of a released crash is renamed from SkyrimDiag_Crash_<ts>.dmp
 // to SkyrimDiag_Released_<ts>.dmp while it is held, so one a stopped helper
 // leaves behind is not listed as a crash (retention bounds those), and back

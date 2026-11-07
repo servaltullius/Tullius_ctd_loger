@@ -2449,6 +2449,7 @@ void TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown()
   skydiag::helper::internal::HelperLoopState state{};
   state.pendingHangViewerDumpPath = L"C:\\Temp\\SyntheticHang.dmp";
   state.hangState.hangCapturedThisEpisode = true;
+  state.slowShutdownAtExit = true;  // the exit tick's IsSlowShutdownAtExit
   LaunchDeferredViewersAfterExit(cfg, outBase, /*exitCode=*/0, &state);
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");

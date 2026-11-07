@@ -81,11 +81,8 @@ std::vector<std::uint32_t> GameThreadIds(HANDLE process)
   if (!process || !query || !GameImageRange(process, base, end)) {
     return tids;
   }
-  const auto threads = EnumerateProcessThreads(GetProcessId(process));
-  if (!threads) {
-    return tids;
-  }
-  for (const std::uint32_t tid : *threads) {
+  // A walk cut short still gives the threads it reached.
+  for (const std::uint32_t tid : EnumerateProcessThreads(GetProcessId(process)).ids) {
     HANDLE thread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, tid);
     if (!thread) {
       continue;

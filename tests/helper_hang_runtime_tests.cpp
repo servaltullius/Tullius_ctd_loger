@@ -346,14 +346,26 @@ struct HeldHangExit
   bool heldCleared = false;
   bool viewerCleared = false;
   bool heldAtCapture = false;
+  bool slowShutdownAtExit = false;
   std::string log;
+};
+
+// What happens between the capture and the exit.
+enum class BeforeExit
+{
+  kNothing,
+  // The heartbeat comes back but no hang tick runs before the exit.
+  kHeartbeatReturns,
+  // A hang tick runs on the still-stalled heartbeat.
+  kHangTick,
 };
 
 HeldHangExit CaptureHangThenExit(
   skydiag::helper::HelperConfig cfg,
   DWORD exitCode,
   const wchar_t* dirPrefix,
-  std::uint32_t stateFlags = skydiag::kState_InMenu)
+  std::uint32_t stateFlags = skydiag::kState_InMenu,
+  BeforeExit beforeExit = BeforeExit::kNothing)
 {
   const auto outBase = MakeTempDir(dirPrefix);
   ClearLog(outBase);
@@ -371,6 +383,17 @@ HeldHangExit CaptureHangThenExit(
     cfg, proc, outBase, decision, stateFlags, &loop.pendingHangViewerDumpPath, &loop.hangState);
   Require(CountFilesWithExt(outBase, L".dmp") == 1u, "the hang dump is written");
   const bool heldAtCapture = !loop.hangState.heldDump.dumpPath.empty();
+  if (beforeExit == BeforeExit::kHeartbeatReturns) {
+    shared->header.last_heartbeat_qpc = QpcNow();
+  } else if (beforeExit == BeforeExit::kHangTick) {
+    LoadStats loadStats;
+    std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+    (void)HandleHangTick(
+      cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec,
+      QpcNow(), &loop.pendingHangViewerDumpPath, &loop.hangState);
+    Require(!loop.hangState.heldDump.dumpPath.empty(), "the held dump stays held while the hang lasts");
+    Require(!loop.hangState.hangSkippedAsClosingThisEpisode, "a captured episode is not checked as closing again");
+  }
 
   Require(TerminateProcess(child.pi.hProcess, exitCode) != FALSE, "TerminateProcess failed");
   Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "the child did not exit");
@@ -382,6 +405,7 @@ HeldHangExit CaptureHangThenExit(
   result.heldCleared = loop.hangState.heldDump.dumpPath.empty();
   result.viewerCleared = loop.pendingHangViewerDumpPath.empty();
   result.heldAtCapture = heldAtCapture;
+  result.slowShutdownAtExit = loop.slowShutdownAtExit;
   result.log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   ShutdownRetentionWorker();
   TerminateChildProcess(&child);
@@ -436,7 +460,29 @@ void TestHeldHangDump_GameplayFreezeIsNotHeld()
   const auto r = CaptureHangThenExit(MakeHangTestConfig(), 0u, L"skydiag_held_hang_gameplay", skydiag::kState_None);
   Require(!r.heldAtCapture, "a capture during play is analyzed at once, not held");
   Require(r.dumps == 1u, "its dump stays at exit code 0");
+  Require(!r.slowShutdownAtExit, "not a slow shutdown, so its exit viewer is not suppressed");
   Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+}
+
+// A menu freeze that recovers just before a quick quit, before a hang tick
+// saw the recovery: the heartbeat at the exit says it was no slow shutdown.
+void TestHeldHangDump_KeptWhenTheGameRecoveredBeforeAQuickQuit()
+{
+  const auto r = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_held_hang_recovered_quit", skydiag::kState_InMenu,
+    BeforeExit::kHeartbeatReturns);
+  Require(r.heldAtCapture && !r.slowShutdownAtExit, "held, but the exit is no slow shutdown");
+  Require(r.dumps == 1u && r.heldCleared, "the dump stays and is released for analysis");
+  Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+}
+
+// #267 and #268 together: a held menu capture is not checked again as a
+// closing game (its episode is captured), and its normal exit removes it.
+void TestHeldHangDump_HeldEpisodeIsNotSkippedAsClosing()
+{
+  const auto r = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_held_hang_then_tick", skydiag::kState_InMenu, BeforeExit::kHangTick);
+  Require(r.slowShutdownAtExit && r.dumps == 0u, "still a slow shutdown at the exit, and removed");
 }
 
 static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, false), "a menu");
@@ -1137,6 +1183,8 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenAsked);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheGameRecovers);
     SKYDIAG_RUN_TEST(TestHeldHangDump_GameplayFreezeIsNotHeld);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenTheGameRecoveredBeforeAQuickQuit);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_HeldEpisodeIsNotSkippedAsClosing);
     SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);
