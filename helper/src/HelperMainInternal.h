@@ -141,6 +141,15 @@ void CleanupCrashArtifactsAfterZeroExit(
   const std::filesystem::path& outBase,
   HelperLoopState* state);
 void AppendExitClassificationLog(const std::filesystem::path& outBase, bool hadCapturedCrash);
+// The held hang dump (HeldHangDump) once the exit's hang viewer was started
+// for it: the viewer analyzes it, or, when the viewer did not open, its
+// analysis is started here.
+void SettleHeldHangDumpAfterExitViewer(
+  const HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  bool viewerLaunched,
+  HelperLoopState* state);
+
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,

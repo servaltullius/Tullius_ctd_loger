@@ -345,15 +345,20 @@ struct HeldHangExit
   std::size_t jsonFiles = 0;
   bool heldCleared = false;
   bool viewerCleared = false;
+  bool heldAtCapture = false;
   std::string log;
 };
 
-HeldHangExit CaptureHangThenExit(skydiag::helper::HelperConfig cfg, DWORD exitCode, const wchar_t* dirPrefix)
+HeldHangExit CaptureHangThenExit(
+  skydiag::helper::HelperConfig cfg,
+  DWORD exitCode,
+  const wchar_t* dirPrefix,
+  std::uint32_t stateFlags = skydiag::kState_InMenu)
 {
   const auto outBase = MakeTempDir(dirPrefix);
   ClearLog(outBase);
   auto shared = MakeStaleHeartbeatLayout(32u);
-  shared->header.state_flags = skydiag::kState_InMenu;
+  shared->header.state_flags = stateFlags;
   auto child = LaunchSleepingChildProcess();
   auto proc = MakeAttachedProcessForChild(child, shared.get());
   HelperLoopState loop{};
@@ -363,9 +368,9 @@ HeldHangExit CaptureHangThenExit(skydiag::helper::HelperConfig cfg, DWORD exitCo
   decision.secondsSinceHeartbeat = 32.0;
   decision.thresholdSec = 30u;
   (void)ExecuteConfirmedHangCapture(
-    cfg, proc, outBase, decision, skydiag::kState_InMenu, &loop.pendingHangViewerDumpPath, &loop.hangState);
+    cfg, proc, outBase, decision, stateFlags, &loop.pendingHangViewerDumpPath, &loop.hangState);
   Require(CountFilesWithExt(outBase, L".dmp") == 1u, "the hang dump is written");
-  Require(!loop.hangState.heldDump.dumpPath.empty(), "no viewer opened it, so it is held unanalyzed");
+  const bool heldAtCapture = !loop.hangState.heldDump.dumpPath.empty();
 
   Require(TerminateProcess(child.pi.hProcess, exitCode) != FALSE, "TerminateProcess failed");
   Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "the child did not exit");
@@ -376,6 +381,7 @@ HeldHangExit CaptureHangThenExit(skydiag::helper::HelperConfig cfg, DWORD exitCo
   result.jsonFiles = CountFilesWithExt(outBase, L".json");
   result.heldCleared = loop.hangState.heldDump.dumpPath.empty();
   result.viewerCleared = loop.pendingHangViewerDumpPath.empty();
+  result.heldAtCapture = heldAtCapture;
   result.log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   ShutdownRetentionWorker();
   TerminateChildProcess(&child);
@@ -393,6 +399,7 @@ void TestHeldHangDump_RemovedForASlowShutdown()
   cfg.autoOpenHangAfterProcessExit = true;
   cfg.autoOpenHangDelayMs = 0u;
   const auto r = CaptureHangThenExit(cfg, 0u, L"skydiag_held_hang_slow_shutdown");
+  Require(r.heldAtCapture, "a capture in a menu that no viewer opened is held unanalyzed");
   Require(r.dumps == 0u, "the dump is removed");
   Require(r.jsonFiles == 0u, "its WCT file and manifest are removed");
   Require(r.heldCleared && r.viewerCleared, "nothing is left to analyze or open");
@@ -417,6 +424,74 @@ void TestHeldHangDump_KeptWhenAsked()
   const auto r = CaptureHangThenExit(cfg, 0u, L"skydiag_held_hang_keep");
   Require(r.dumps == 1u && r.heldCleared, "the dump stays and is released for analysis");
   Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+  Require(r.log.find("its dump is removed") == std::string::npos, "the hold line does not claim a removal");
+  AssertContains(r.log, "kept, KeepSlowShutdownHangDumps=1", "the hold line says it is kept");
+}
+
+// A freeze during play is no slow shutdown, even when something ends the game
+// with exit code 0 (a quit hotkey, a launcher): it is not held, so its report
+// is written at once, and the exit leaves its dump.
+void TestHeldHangDump_GameplayFreezeIsNotHeld()
+{
+  const auto r = CaptureHangThenExit(MakeHangTestConfig(), 0u, L"skydiag_held_hang_gameplay", skydiag::kState_None);
+  Require(!r.heldAtCapture, "a capture during play is analyzed at once, not held");
+  Require(r.dumps == 1u, "its dump stays at exit code 0");
+  Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+}
+
+static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, false), "a menu");
+static_assert(!skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_None, false), "play");
+static_assert(
+  !skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu | skydiag::kState_Loading, false), "a load");
+static_assert(!skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, true), "a load by the decision");
+
+// The exit's hang viewer and the held dump: a viewer that opened analyzes it;
+// one that did not leaves its analysis to the helper.
+void TestHeldHangDump_SettledByTheExitViewer()
+{
+  const auto outBase = MakeTempDir(L"skydiag_held_hang_exit_viewer");
+  ClearLog(outBase);
+  // AutoAnalyzeDump=0 here: the release logs, and starts no analyzer next to the test.
+  const auto cfg = MakeHangTestConfig();
+  const std::wstring dump = (outBase / L"SkyrimDiag_Hang_20261107_120000_000.dmp").wstring();
+  HelperLoopState loop{};
+  loop.pendingHangViewerDumpPath = dump;
+
+  loop.hangState.heldDump = skydiag::helper::internal::HeldHangDump{ dump, true };
+  skydiag::helper::internal::SettleHeldHangDumpAfterExitViewer(cfg, outBase, /*viewerLaunched=*/true, &loop);
+  Require(loop.hangState.heldDump.dumpPath.empty(), "an opened viewer takes it");
+  Require(
+    !std::filesystem::exists(outBase / "SkyrimDiagHelper.log") ||
+      ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log").find("Analyzing the held hang dump") == std::string::npos,
+    "and the helper does not analyze it too");
+
+  loop.hangState.heldDump = skydiag::helper::internal::HeldHangDump{ dump, true };
+  skydiag::helper::internal::SettleHeldHangDumpAfterExitViewer(cfg, outBase, /*viewerLaunched=*/false, &loop);
+  Require(loop.hangState.heldDump.dumpPath.empty(), "released");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "Analyzing the held hang dump (the hang viewer did not open)",
+    "a viewer that did not open leaves the analysis to the helper");
+  std::filesystem::remove_all(outBase);
+}
+
+// A helper that stops before the game's exit settled a held dump analyzes it.
+void TestHeldHangDump_ReleasedWhenTheHelperStops()
+{
+  const auto outBase = MakeTempDir(L"skydiag_held_hang_helper_stops");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  auto proc = MakeSelfAttachedProcess(shared.get());
+  const auto cfg = MakeHangTestConfig();
+  HelperLoopState loop{};
+  loop.hangState.heldDump = skydiag::helper::internal::HeldHangDump{
+    (outBase / L"SkyrimDiag_Hang_20261107_120000_000.dmp").wstring(), true };
+  skydiag::helper::internal::ShutdownLoopState(cfg, proc, outBase, &loop);
+  Require(loop.hangState.heldDump.dumpPath.empty(), "released");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "Analyzing the held hang dump (the helper is stopping)",
+    "its analysis is started");
+  CloseAttachedProcess(&proc);
+  std::filesystem::remove_all(outBase);
 }
 
 // A freeze the game comes back from is not a slow shutdown: the heartbeat's
@@ -1061,6 +1136,9 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptForAnEndedGame);
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenAsked);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheGameRecovers);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_GameplayFreezeIsNotHeld);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);
     return 0;
   } catch (const std::exception& ex) {

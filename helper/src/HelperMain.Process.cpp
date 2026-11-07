@@ -585,12 +585,19 @@ void AppendExitClassificationLog(const std::filesystem::path& outBase, bool hadC
 
 namespace {
 
-// Whether LaunchDeferredViewersAfterExit opens a viewer for this hang dump
-// (which then analyzes it).
-bool HangViewerOpensAtExit(const HelperConfig& cfg, DWORD exitCode, const HelperLoopState& state, const std::wstring& dumpPath)
+// A hang viewer queued for the game's exit (AutoOpenHangAfterProcessExit).
+bool HangViewerQueuedForExit(const HelperConfig& cfg, const HelperLoopState& state)
 {
-  return !dumpPath.empty() && state.pendingHangViewerDumpPath == dumpPath && cfg.autoOpenViewerOnHang &&
-         cfg.autoOpenHangAfterProcessExit && !IsHangDuringNormalShutdown(exitCode, state.hangState.hangCapturedThisEpisode);
+  return !state.pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit;
+}
+
+// Whether LaunchDeferredViewersAfterExit opens the queued hang viewer: not for
+// a slow shutdown. The one place that decides it, so a held dump left to the
+// viewer is never left to one that does not open.
+bool HangViewerOpensAtExit(const HelperConfig& cfg, DWORD exitCode, const HelperLoopState& state)
+{
+  return HangViewerQueuedForExit(cfg, state) &&
+         !IsHangDuringNormalShutdown(exitCode, state.hangState.hangCapturedThisEpisode);
 }
 
 // HeldHangDump at the game's exit. A hang still open at exit code 0 was a slow
@@ -636,7 +643,7 @@ void SettleHeldHangDumpAtExit(
             + dump.filename().wstring());
     return;
   }
-  if (HangViewerOpensAtExit(cfg, exitCode, *state, hang.heldDump.dumpPath)) {
+  if (HangViewerOpensAtExit(cfg, exitCode, *state) && state->pendingHangViewerDumpPath == hang.heldDump.dumpPath) {
     return;  // LaunchDeferredViewersAfterExit hands it to the viewer
   }
   ReleaseHeldHangDump(
@@ -644,6 +651,23 @@ void SettleHeldHangDumpAtExit(
 }
 
 }  // namespace
+
+void SettleHeldHangDumpAfterExitViewer(
+  const HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  bool viewerLaunched,
+  HelperLoopState* state)
+{
+  if (!state || state->hangState.heldDump.dumpPath.empty() ||
+      state->hangState.heldDump.dumpPath != state->pendingHangViewerDumpPath) {
+    return;
+  }
+  if (viewerLaunched) {
+    state->hangState.heldDump = HeldHangDump{};  // the viewer analyzes it
+    return;
+  }
+  ReleaseHeldHangDump(cfg, outBase, L"the hang viewer did not open", &state->hangState);
+}
 
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
@@ -692,31 +716,24 @@ void LaunchDeferredViewersAfterExit(
     state->pendingCrashViewerDumpPath.clear();
   }
 
-  if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit &&
-      IsHangDuringNormalShutdown(exitCode, state->hangState.hangCapturedThisEpisode)) {
+  if (HangViewerQueuedForExit(cfg, *state) && !HangViewerOpensAtExit(cfg, exitCode, *state)) {
     AppendLogLine(
       outBase,
       L"Suppressed hang viewer launch: the game was still not responding when it exited normally (exit_code=0), "
       L"a slow shutdown rather than a freeze; the hang dump is kept: "
         + std::filesystem::path(state->pendingHangViewerDumpPath).filename().wstring());
-  } else if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
+  } else if (HangViewerOpensAtExit(cfg, exitCode, *state)) {
     const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
     if (delayMs > 0) {
       Sleep(delayMs);
     }
     const auto launch = StartDumpToolViewer(cfg, state->pendingHangViewerDumpPath, outBase, L"hang_exit");
-    const bool heldForViewer = state->hangState.heldDump.dumpPath == state->pendingHangViewerDumpPath;
-    if (launch == DumpToolViewerLaunchResult::kLaunched) {
-      AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
-      if (heldForViewer) {
-        state->hangState.heldDump = HeldHangDump{};  // the viewer analyzes it
-      }
-    } else {
-      AppendLogLine(outBase, L"Hang viewer auto-open attempt failed after process exit.");
-      if (heldForViewer) {
-        ReleaseHeldHangDump(cfg, outBase, L"the hang viewer did not open", &state->hangState);
-      }
-    }
+    const bool launched = launch == DumpToolViewerLaunchResult::kLaunched;
+    AppendLogLine(
+      outBase,
+      launched ? L"Auto-opened DumpTool viewer for latest hang dump after process exit."
+               : L"Hang viewer auto-open attempt failed after process exit.");
+    SettleHeldHangDumpAfterExitViewer(cfg, outBase, launched, state);
   }
 }
 
