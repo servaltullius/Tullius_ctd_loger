@@ -30,6 +30,7 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->hangSuppressionLiftedForDialogThisEpisode = false;
   state->hangSkippedAsClosingThisEpisode = false;
   state->captureMayBeSlowShutdownThisEpisode = false;
+  state->captureThresholdSecThisEpisode = 0;
   state->hangSuppressionState = {};
 }
 

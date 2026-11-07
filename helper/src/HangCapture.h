@@ -92,6 +92,10 @@ struct HangCaptureState
   // (MayBeSlowShutdown). Only such a hang counts as a slow shutdown at a
   // normal exit (IsSlowShutdownAtExit).
   bool captureMayBeSlowShutdownThisEpisode = false;
+  // The threshold this episode's hang was captured at. The exit judges the
+  // stall by it, not by the flags left at the exit (a load flag there would
+  // switch to the loading threshold and hide a slow shutdown).
+  std::uint32_t captureThresholdSecThisEpisode = 0;
 
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;

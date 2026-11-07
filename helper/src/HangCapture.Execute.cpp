@@ -166,6 +166,7 @@ HangTickResult ExecuteConfirmedHangCapture(
   if (state) {
     state->hangCapturedThisEpisode = true;
     state->captureMayBeSlowShutdownThisEpisode = MayBeSlowShutdown(stateFlags, decision.isLoading);
+    state->captureThresholdSecThisEpisode = decision.thresholdSec;
   }
   return HangTickResult::kContinue;
 }

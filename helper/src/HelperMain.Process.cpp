@@ -871,10 +871,13 @@ bool HandleProcessExitTick(
     std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
     AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
     {
+      // Stalled by the threshold the hang was captured at.
       const auto& hang = state->hangState;
+      const auto heartbeat = ReadHeartbeatAtExit(cfg, proc);
+      const bool stalledSinceCapture = heartbeat.known && hang.captureThresholdSecThisEpisode != 0u &&
+        heartbeat.secondsSince >= static_cast<double>(hang.captureThresholdSecThisEpisode);
       state->slowShutdownAtExit = IsSlowShutdownAtExit(
-        exitCode, hang.hangCapturedThisEpisode, hang.captureMayBeSlowShutdownThisEpisode,
-        ReadHeartbeatAtExit(cfg, proc).stalled);
+        exitCode, hang.hangCapturedThisEpisode, hang.captureMayBeSlowShutdownThisEpisode, stalledSinceCapture);
     }
     SettleHeldHangDumpAtExit(cfg, outBase, state);
     LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, state);
