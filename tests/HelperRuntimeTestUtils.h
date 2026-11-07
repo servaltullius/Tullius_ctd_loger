@@ -249,8 +249,13 @@ public:
     Require(release_ != nullptr && parked_ != nullptr, "CreateEventW failed");
     thread_ = std::thread([this]() {
       tid_ = GetCurrentThreadId();
-      SetEvent(parked_);
-      WaitForSingleObject(release_, INFINITE);
+      // Signals and starts waiting in one system call, so once `parked_` is
+      // set the thread's user-mode RIP is that call's return point and stays
+      // there. With SetEvent then WaitForSingleObject, a context read at once
+      // could still be on the way to the wait, and a later freeze dump, which
+      // uses the live RIP, could show another one (the likely cause of a
+      // crash_dump_context_tests failure in CI on 2026-11-07).
+      SignalObjectAndWait(parked_, release_, INFINITE, FALSE);
     });
     Require(WaitForSingleObject(parked_, 5000) == WAIT_OBJECT_0, "Parked thread did not start");
   }
