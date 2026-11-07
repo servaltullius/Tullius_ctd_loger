@@ -557,6 +557,12 @@ static void Test_IsSystemish_KnownModules()
   assert(IsSystemishModuleAsciiLower("ucrtbase.dll"));
   assert(IsSystemishModuleAsciiLower("user32.dll"));
   assert(IsSystemishModuleAsciiLower("win32u.dll"));
+  // .NET runtime (synced with MinidumpUtil.cpp)
+  assert(IsSystemishModuleAsciiLower("clr.dll"));
+  assert(IsSystemishModuleAsciiLower("clrjit.dll"));
+  assert(IsSystemishModuleAsciiLower("coreclr.dll"));
+  assert(IsSystemishModuleAsciiLower("mscoree.dll"));
+  assert(IsSystemishModuleAsciiLower("mscoreei.dll"));
   // Graphics / DirectX (synced with MinidumpUtil.cpp)
   assert(IsSystemishModuleAsciiLower("d3d11.dll"));
   assert(IsSystemishModuleAsciiLower("d3d12.dll"));

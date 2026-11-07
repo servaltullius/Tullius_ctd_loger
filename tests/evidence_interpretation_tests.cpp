@@ -99,6 +99,24 @@ void TestSystemishByPath()
   Require(IsSystemishModuleAt(L"KERNELBASE.dll", std::wstring(kGameDir) + L"KERNELBASE.dll"), "other system names");
   Require(IsSystemishModuleAt(L"Unknown.dll", L"C:\\Windows\\System32\\Unknown.dll"), "anything under Windows");
   Require(!IsSystemishModuleAt(L"ExampleMod.dll", L"G:\\MO2\\mods\\Example\\ExampleMod.dll"), "a mod DLL");
+  // 2026-11-07: a freeze report named clr.dll as the suspected mod. The .NET
+  // runtime is a Windows component that a mod running .NET code loads.
+  Require(
+    IsSystemishModuleAt(L"clr.dll", L"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\clr.dll"),
+    "the .NET Framework runtime");
+  Require(
+    IsSystemishModuleAt(L"clrjit.dll", L"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\clrjit.dll"),
+    "its JIT");
+  Require(IsSystemishModuleAt(L"clr.dll", L""), "by name without a path (Crash Logger frames)");
+  Require(
+    IsSystemishModuleAt(L"wpfgfx_v0400.dll", L"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\WPF\\wpfgfx_v0400.dll"),
+    "any other .NET Framework DLL, by its folder");
+  Require(
+    IsSystemishModuleAt(L"coreclr.dll", L"C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\8.0.11\\coreclr.dll"),
+    "the .NET runtime of a mod that hosts .NET 5+");
+  Require(
+    !IsSystemishModuleAt(L"NetScriptFramework.Runtime.dll", L"G:\\MO2\\mods\\NSF\\NetScriptFramework.Runtime.dll"),
+    "the mod that hosts .NET stays a mod");
 
   Require(IsPassiveHookModule(L"skse64_1_6_1170.dll"), "SKSE runtime");
   Require(IsPassiveHookModule(L"CrashLoggerSSE.dll"), "Crash Logger");
