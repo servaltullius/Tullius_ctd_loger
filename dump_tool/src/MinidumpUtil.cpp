@@ -65,10 +65,15 @@ bool IsLikelyWindowsSystemModulePathLower(std::wstring_view lowerPath)
   // - C:\Windows\System32\...
   // - \??\C:\Windows\System32\...
   // - \SystemRoot\System32\...
+  // - C:\Windows\Microsoft.NET\Framework64\v4.0.30319\clr.dll: the .NET
+  //   Framework runtime, which a mod or overlay that runs .NET code in the
+  //   game loads; never itself the mod (2026-11-07: a freeze report named
+  //   clr.dll as the suspected mod, with High confidence).
   const bool hasWindowsSystemDir =
     (lowerPath.find(L"\\windows\\system32\\") != std::wstring::npos) ||
     (lowerPath.find(L"\\windows\\syswow64\\") != std::wstring::npos) ||
     (lowerPath.find(L"\\windows\\winsxs\\") != std::wstring::npos) ||
+    (lowerPath.find(L"\\windows\\microsoft.net\\") != std::wstring::npos) ||
     (lowerPath.find(L"\\systemroot\\system32\\") != std::wstring::npos);
   return hasWindowsSystemDir;
 }
@@ -339,6 +344,10 @@ bool IsSystemishModule(std::wstring_view filename)
     L"opengl32.dll",   L"d3dcompiler_47.dll", L"dxcore.dll",
     // Debugging
     L"dbghelp.dll",    L"dbgcore.dll",
+    // .NET runtime (Framework and Core): a mod that runs .NET code in the
+    // game loads it; the runtime is not that mod.
+    L"clr.dll",        L"clrjit.dll",    L"coreclr.dll",   L"mscoree.dll",
+    L"mscoreei.dll",
   };
   for (const auto* m : k) {
     if (lower == m) {

@@ -245,6 +245,9 @@ bool IsSystemishModuleAsciiLower(std::string_view filenameLower)
     "opengl32.dll",   "d3dcompiler_47.dll", "dxcore.dll",
     // Debugging
     "dbghelp.dll",    "dbgcore.dll",
+    // .NET runtime (Framework and Core), as in minidump::IsSystemishModule
+    "clr.dll",        "clrjit.dll",      "coreclr.dll",       "mscoree.dll",
+    "mscoreei.dll",
   };
   for (const auto* m : k) {
     if (filenameLower == m) {
