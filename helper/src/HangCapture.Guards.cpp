@@ -2,8 +2,6 @@
 
 #include <Windows.h>
 
-#include <TlHelp32.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -13,6 +11,7 @@
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/HangSuppression.h"
 #include "SkyrimDiagHelper/ModalDialogProbe.h"
+#include "SkyrimDiagHelper/WctCapture.h"
 #include "WindowHeuristics.h"
 #include "SkyrimDiagShared.h"
 
@@ -35,23 +34,11 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
 
 std::optional<std::size_t> CountProcessThreads(std::uint32_t pid)
 {
-  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-  if (snapshot == INVALID_HANDLE_VALUE) {
+  const auto threads = skydiag::helper::EnumerateProcessThreads(pid);
+  if (!threads) {
     return std::nullopt;
   }
-  std::size_t count = 0;
-  THREADENTRY32 entry{};
-  entry.dwSize = sizeof(entry);
-  for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry)) {
-    count += entry.th32OwnerProcessID == pid ? 1u : 0u;
-  }
-  const DWORD lastError = GetLastError();
-  CloseHandle(snapshot);
-  // The walk ends with ERROR_NO_MORE_FILES; anything else cut it short.
-  if (lastError != ERROR_NO_MORE_FILES) {
-    return std::nullopt;
-  }
-  return count;
+  return threads->size();
 }
 
 bool SkipHangIfGameIsClosing(

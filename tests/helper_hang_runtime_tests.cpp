@@ -516,6 +516,69 @@ void TestHandleHangTick_SkipsAGameThatIsClosing()
   std::filesystem::remove_all(outBase);
 }
 
+// After a skipped closing hang, the exit tick says the game exited while it
+// was closing, not that a game that stopped responding was ended.
+void TestProcessExitAfterASkippedClosingHang()
+{
+  const auto outBase = MakeTempDir(L"skydiag_hang_closing_exit");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  shared->header.state_flags = skydiag::kState_InMenu;
+  auto child = LaunchSuspendedChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  const auto cfg = MakeHangTestConfig();
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+  (void)HandleHangTick(
+    cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec, QpcNow(),
+    &loop.pendingHangViewerDumpPath, &loop.hangState);
+  Require(loop.hangState.hangSkippedAsClosingThisEpisode, "the hang is skipped as a closing game");
+
+  // Ended during its stalled exit, e.g. from Task Manager.
+  Require(TerminateProcess(child.pi.hProcess, 1u) != FALSE, "TerminateProcess failed");
+  Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "the child did not exit");
+  Require(HandleProcessExitTick(cfg, proc, outBase, &loop), "the exit tick handles the exit");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "The game exited while it was still closing (exit_code=1", "the exit is told as a closing game");
+  Require(log.find("The game stopped responding and then exited") == std::string::npos, "not as a frozen game");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "no dump");
+  ShutdownRetentionWorker();
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// The closing check right before the capture can miss an ExitProcess that is
+// still ending the other threads; a dump that then fails is told as the exit.
+void TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame()
+{
+  const auto outBase = MakeTempDir(L"skydiag_hang_closing_capture");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  // One thread, and a dump of it fails (ERROR_PARTIAL_COPY), like the 11/01 exit.
+  auto child = LaunchSuspendedChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HangDecision decision{};
+  decision.isHang = true;
+  decision.secondsSinceHeartbeat = 32.0;
+  decision.thresholdSec = 30u;
+  std::wstring pendingViewer;
+  HangCaptureState state{};
+  const auto result = ExecuteConfirmedHangCapture(
+    MakeHangTestConfig(), proc, outBase, decision, skydiag::kState_InMenu, &pendingViewer, &state);
+  Require(result == HangTickResult::kContinue, "the loop goes on");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "the dump of the closing game failed");
+  Require(state.hangSkippedAsClosingThisEpisode && !state.hangCapturedThisEpisode, "marked as a closing game");
+  Require(CountFilesWithExt(outBase, L".json") == 0u, "no WCT file or incident manifest left");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "The game was closing by the end of the hang capture",
+    "the failed dump is told as the exit");
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 void TestEvaluateHangDecisions()
 {
   using skydiag::helper::EvaluateHang;
@@ -874,6 +937,8 @@ int main()
     SKYDIAG_RUN_TEST(TestCountProcessThreads);
     SKYDIAG_RUN_TEST(TestHandleHangTick_CapturesAStaleHeartbeatOncePerEpisode);
     SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsAGameThatIsClosing);
+    SKYDIAG_RUN_TEST(TestProcessExitAfterASkippedClosingHang);
+    SKYDIAG_RUN_TEST(TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame);
     SKYDIAG_RUN_TEST(TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick);
     SKYDIAG_RUN_TEST(TestHandleHangTick_YieldsToACrashEvent);
     SKYDIAG_RUN_TEST(TestPssSnapshotWorksFromTheAttachHandle);

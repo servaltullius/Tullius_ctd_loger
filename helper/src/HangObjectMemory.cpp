@@ -1,7 +1,6 @@
 #include "HangObjectMemory.h"
 
 #include <Psapi.h>
-#include <TlHelp32.h>
 
 #include <algorithm>
 #include <array>
@@ -10,6 +9,8 @@
 
 #include "SkyrimDiagGameLocks.h"
 #include "SkyrimDiagHangObjectThreads.h"
+#include "SkyrimDiagHelper/WctCapture.h"
+#include "SkyrimDiagHelper/WctCapture.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -80,18 +81,12 @@ std::vector<std::uint32_t> GameThreadIds(HANDLE process)
   if (!process || !query || !GameImageRange(process, base, end)) {
     return tids;
   }
-  const DWORD pid = GetProcessId(process);
-  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-  if (snapshot == INVALID_HANDLE_VALUE) {
+  const auto threads = EnumerateProcessThreads(GetProcessId(process));
+  if (!threads) {
     return tids;
   }
-  THREADENTRY32 entry{};
-  entry.dwSize = sizeof(entry);
-  for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry)) {
-    if (entry.th32OwnerProcessID != pid) {
-      continue;
-    }
-    HANDLE thread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, entry.th32ThreadID);
+  for (const std::uint32_t tid : *threads) {
+    HANDLE thread = OpenThread(THREAD_QUERY_INFORMATION, FALSE, tid);
     if (!thread) {
       continue;
     }
@@ -99,12 +94,11 @@ std::vector<std::uint32_t> GameThreadIds(HANDLE process)
     if (query(thread, kThreadWin32StartAddress, static_cast<PVOID>(&start), sizeof(start), nullptr) >= 0) {
       const auto address = reinterpret_cast<std::uint64_t>(start);
       if (address >= base && address < end) {
-        tids.push_back(entry.th32ThreadID);
+        tids.push_back(tid);
       }
     }
     CloseHandle(thread);
   }
-  CloseHandle(snapshot);
   return tids;
 }
 
