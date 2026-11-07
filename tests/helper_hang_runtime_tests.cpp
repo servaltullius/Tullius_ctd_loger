@@ -1,11 +1,14 @@
 #include <Windows.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cwchar>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <thread>
@@ -612,6 +615,92 @@ void TestHeldHangDump_ReleasedWhenTheGameRecovers()
   std::filesystem::remove_all(outBase);
 }
 
+// WM_GETTEXT messages the probe-text test dialog received.
+std::atomic<int> g_probeTextGetTextCount{ 0 };
+
+INT_PTR CALLBACK CountGetTextDialogProc(HWND, UINT message, WPARAM, LPARAM)
+{
+  if (message == WM_GETTEXT) {
+    g_probeTextGetTextCount.fetch_add(1);
+  }
+  return message == WM_INITDIALOG ? TRUE : FALSE;
+}
+
+// The probe reads a dialog of its own process without WM_GETTEXT: a sent
+// message would make the dialog thread handle it right before the dump the
+// self-process tests take (the "Main-thread stack must match the MessageBox
+// wait chain" flake). A real dialog (class #32770) from an in-memory template
+// counts the WM_GETTEXT it gets while CaptureModalDialogs reads it.
+void TestCaptureModalDialogsSendsNoMessageToOwnDialogs()
+{
+  constexpr wchar_t kTitle[] = L"SkyrimDiag probe text test";
+  struct alignas(4) Template
+  {
+    DLGTEMPLATE dialog;
+    WORD menu;
+    WORD windowClass;
+    wchar_t title[std::size(kTitle)];
+  } tmpl{};
+  tmpl.dialog.style = WS_POPUP | WS_CAPTION | WS_VISIBLE;
+  // No taskbar button, whose title the shell reads with WM_GETTEXT.
+  tmpl.dialog.dwExtendedStyle = WS_EX_TOOLWINDOW;
+  tmpl.dialog.cx = 120;
+  tmpl.dialog.cy = 40;
+  std::copy(std::begin(kTitle), std::end(kTitle), tmpl.title);
+
+  HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(ready != nullptr, "CreateEventW failed");
+  DWORD dialogTid = 0;
+  HWND dialog = nullptr;
+  std::thread dialogThread([&]() {
+    dialogTid = GetCurrentThreadId();
+    dialog = CreateDialogIndirectParamW(
+      GetModuleHandleW(nullptr), &tmpl.dialog, nullptr, CountGetTextDialogProc, 0);
+    // The message queue exists before `ready`, so the WM_QUIT posted at the
+    // end arrives even if the dialog could not be created.
+    MSG peek{};
+    PeekMessageW(&peek, nullptr, 0, 0, PM_NOREMOVE);
+    SetEvent(ready);
+    MSG msg{};
+    while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+      if (!dialog || !IsDialogMessageW(dialog, &msg)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+    }
+    if (dialog) {
+      DestroyWindow(dialog);
+    }
+  });
+  Require(WaitForSingleObject(ready, 5000) == WAIT_OBJECT_0, "the dialog thread did not start");
+  CloseHandle(ready);
+
+  bool found = false;
+  int getTextDuringProbe = 0;
+  if (dialog) {
+    // Other programs can read a new window's title with WM_GETTEXT right
+    // after it appears; wait until 100 ms pass without one.
+    for (int attempt = 0; attempt < 50; ++attempt) {
+      g_probeTextGetTextCount = 0;
+      Sleep(100);
+      if (g_probeTextGetTextCount.load() == 0) {
+        break;
+      }
+    }
+    g_probeTextGetTextCount = 0;
+    for (const auto& probed : skydiag::helper::CaptureModalDialogs(GetCurrentProcessId())) {
+      found = found || (probed.tid == dialogTid && probed.title == "SkyrimDiag probe text test");
+    }
+    getTextDuringProbe = g_probeTextGetTextCount.load();
+  }
+  PostThreadMessageW(dialogTid, WM_QUIT, 0, 0);
+  dialogThread.join();
+
+  Require(dialog != nullptr, "the test dialog was not created");
+  Require(found, "the probe finds the dialog and reads its title");
+  Require(getTextDuringProbe == 0, "reading a dialog of this process sends it no WM_GETTEXT");
+}
+
 void TestCaptureModalDialogsFindsMessageBoxOwnerThread()
 {
   constexpr wchar_t kTitle[] = L"SkyrimDiag modal probe test";
@@ -1212,6 +1301,7 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);
+    SKYDIAG_RUN_TEST(TestCaptureModalDialogsSendsNoMessageToOwnDialogs);
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

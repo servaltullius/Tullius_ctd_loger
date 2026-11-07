@@ -18,12 +18,18 @@ using skydiag::helper::internal::WideToUtf8;
 
 std::wstring ReadWindowTextBounded(HWND hwnd, std::size_t maxChars)
 {
-  // The text the system stores for the window, without a WM_GETTEXT. That is
-  // what GetWindowTextW returns for another process's window (the game), but
-  // for a window of this process it sends WM_GETTEXT, so the self-process
-  // tests made the dialog thread handle messages right before their dump.
+  // The text the system stores for the window, without a WM_GETTEXT. For
+  // another process's window (the game) that is what GetWindowTextW returns.
+  // For a window of this process GetWindowTextW sends WM_GETTEXT, which made
+  // the dialog thread of the self-process tests handle messages right before
+  // their dump; InternalGetWindowText (documented as not for general use)
+  // reads the stored text there instead.
   std::wstring buf(maxChars + 1u, L'\0');
-  const int n = InternalGetWindowText(hwnd, buf.data(), static_cast<int>(buf.size()));
+  DWORD ownerPid = 0;
+  GetWindowThreadProcessId(hwnd, &ownerPid);
+  const int size = static_cast<int>(buf.size());
+  const int n = ownerPid == GetCurrentProcessId() ? InternalGetWindowText(hwnd, buf.data(), size)
+                                                  : GetWindowTextW(hwnd, buf.data(), size);
   if (n <= 0) {
     return {};
   }
