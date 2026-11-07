@@ -88,6 +88,10 @@ struct HangCaptureState
   // (IsGameProcessClosing): no dump, logged once. Not a captured hang, so
   // the exit classification still sees only the stalled heartbeat.
   bool hangSkippedAsClosingThisEpisode = false;
+  // This episode's hang was captured in a state that may be a slow shutdown
+  // (MayBeSlowShutdown). Only such a hang counts as a slow shutdown at a
+  // normal exit (IsSlowShutdownAtExit).
+  bool captureMayBeSlowShutdownThisEpisode = false;
 
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;

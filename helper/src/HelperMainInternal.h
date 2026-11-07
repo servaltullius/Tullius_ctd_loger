@@ -51,6 +51,9 @@ struct HelperLoopState
   std::uint64_t nextCrashEventRetryTick64 = 0;
   std::uint64_t nextCrashEventWarnTick64 = 0;
   std::uint32_t postExitEvidenceSeq = 0;
+  // Set by the exit tick (IsSlowShutdownAtExit) before it settles the held
+  // hang dump and launches the deferred viewers, which both follow it.
+  bool slowShutdownAtExit = false;
   // A crash viewer was opened for the dump when the game exited; it runs its
   // own analysis of that dump.
   bool crashViewerLaunchedAtExit = false;

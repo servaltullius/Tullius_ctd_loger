@@ -12,34 +12,30 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <vector>
 
 namespace skydiag::helper {
 
-std::optional<std::vector<std::uint32_t>> EnumerateProcessThreads(std::uint32_t pid)
+ProcessThreads EnumerateProcessThreads(std::uint32_t pid)
 {
+  ProcessThreads threads;
   const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
   if (snap == INVALID_HANDLE_VALUE) {
-    return std::nullopt;
+    return threads;
   }
 
-  std::vector<std::uint32_t> tids;
   THREADENTRY32 te{};
   te.dwSize = sizeof(te);
   for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
     if (te.th32OwnerProcessID == pid) {
-      tids.push_back(te.th32ThreadID);
+      threads.ids.push_back(te.th32ThreadID);
     }
   }
   // The walk ends with ERROR_NO_MORE_FILES; anything else cut it short.
-  const DWORD lastError = GetLastError();
+  threads.complete = GetLastError() == ERROR_NO_MORE_FILES;
   CloseHandle(snap);
-  if (lastError != ERROR_NO_MORE_FILES) {
-    return std::nullopt;
-  }
-  return tids;
+  return threads;
 }
 
 namespace {
@@ -117,7 +113,8 @@ void CaptureWctPass(HWCT session, std::uint32_t pid, const volatile std::uint32_
   out.threads = nlohmann::json::array();
   out.hasLoadingSignal = ReadLoadingSignal(captureStateFlags);
 
-  const auto tids = EnumerateProcessThreads(pid).value_or(std::vector<std::uint32_t>{});
+  // A walk cut short still gives the threads it reached.
+  const auto tids = EnumerateProcessThreads(pid).ids;
   for (const auto tid : tids) {
     DWORD nodeCount = WCT_MAX_NODE_COUNT;
     WAITCHAIN_NODE_INFO nodes[WCT_MAX_NODE_COUNT]{};

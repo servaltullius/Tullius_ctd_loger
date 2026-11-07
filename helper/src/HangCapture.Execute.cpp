@@ -165,6 +165,7 @@ HangTickResult ExecuteConfirmedHangCapture(
 
   if (state) {
     state->hangCapturedThisEpisode = true;
+    state->captureMayBeSlowShutdownThisEpisode = MayBeSlowShutdown(stateFlags, decision.isLoading);
   }
   return HangTickResult::kContinue;
 }

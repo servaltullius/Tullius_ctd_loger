@@ -112,6 +112,12 @@ static_assert(
 static_assert(skydiag::helper::internal::IsHangDuringNormalShutdown(0u, true), "slow shutdown");
 static_assert(!skydiag::helper::internal::IsHangDuringNormalShutdown(1u, true), "a frozen game that was ended");
 static_assert(!skydiag::helper::internal::IsHangDuringNormalShutdown(0u, false), "a freeze the game came back from");
+// A slow shutdown also needs a capture where quitting happens (a menu) and a
+// heartbeat still stalled at the exit.
+static_assert(skydiag::helper::internal::IsSlowShutdownAtExit(0u, true, true, true), "a menu freeze until a normal exit");
+static_assert(!skydiag::helper::internal::IsSlowShutdownAtExit(0u, true, false, true), "a freeze during play");
+static_assert(!skydiag::helper::internal::IsSlowShutdownAtExit(0u, true, true, false), "recovered just before the exit");
+static_assert(!skydiag::helper::internal::IsSlowShutdownAtExit(1u, true, true, true), "a frozen game that was ended");
 
 // The same handled fault released twice within the cooldown gets the minimal
 // dump first; once is not enough, and another fault or address is unaffected.

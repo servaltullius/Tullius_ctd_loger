@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -9,9 +8,17 @@
 
 namespace skydiag::helper {
 
-// The ids of the process's threads from one Toolhelp snapshot; nullopt when
-// the snapshot fails or its walk stops short.
-std::optional<std::vector<std::uint32_t>> EnumerateProcessThreads(std::uint32_t pid);
+// The process's threads from one Toolhelp snapshot.
+struct ProcessThreads
+{
+  // The thread ids walked, all of them when complete.
+  std::vector<std::uint32_t> ids;
+  // The walk ran to its end (ERROR_NO_MORE_FILES). False when the snapshot
+  // failed (ids empty) or the walk stopped short (ids partial).
+  bool complete = false;
+};
+
+ProcessThreads EnumerateProcessThreads(std::uint32_t pid);
 
 bool CaptureWct(
   std::uint32_t pid,

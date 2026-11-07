@@ -594,27 +594,25 @@ bool HangViewerQueuedForExit(const HelperConfig& cfg, const HelperLoopState& sta
 // Whether LaunchDeferredViewersAfterExit opens the queued hang viewer: not for
 // a slow shutdown. The one place that decides it, so a held dump left to the
 // viewer is never left to one that does not open.
-bool HangViewerOpensAtExit(const HelperConfig& cfg, DWORD exitCode, const HelperLoopState& state)
+bool HangViewerOpensAtExit(const HelperConfig& cfg, const HelperLoopState& state)
 {
-  return HangViewerQueuedForExit(cfg, state) &&
-         !IsHangDuringNormalShutdown(exitCode, state.hangState.hangCapturedThisEpisode);
+  return HangViewerQueuedForExit(cfg, state) && !state.slowShutdownAtExit;
 }
 
-// HeldHangDump at the game's exit. A hang still open at exit code 0 was a slow
-// shutdown (IsHangDuringNormalShutdown): its dump goes, with what was written
+// HeldHangDump at the game's exit. A slow shutdown (IsSlowShutdownAtExit,
+// state->slowShutdownAtExit): its dump goes, with what was written
 // for it, before any analysis puts it in crash_history.json. Any other held
 // dump is analyzed, by the exit viewer when one opens for it.
 void SettleHeldHangDumpAtExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
-  DWORD exitCode,
   HelperLoopState* state)
 {
   auto& hang = state->hangState;
   if (hang.heldDump.dumpPath.empty()) {
     return;
   }
-  if (IsHangDuringNormalShutdown(exitCode, hang.hangCapturedThisEpisode) && !cfg.keepSlowShutdownHangDumps) {
+  if (state->slowShutdownAtExit && !cfg.keepSlowShutdownHangDumps) {
     // Its ETW trace is written now, so it is removed with the dump.
     MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &hang.pendingEtw);
     const std::filesystem::path dump(hang.heldDump.dumpPath);
@@ -643,11 +641,12 @@ void SettleHeldHangDumpAtExit(
             + dump.filename().wstring());
     return;
   }
-  if (HangViewerOpensAtExit(cfg, exitCode, *state) && state->pendingHangViewerDumpPath == hang.heldDump.dumpPath) {
+  if (HangViewerOpensAtExit(cfg, *state) && state->pendingHangViewerDumpPath == hang.heldDump.dumpPath) {
     return;  // LaunchDeferredViewersAfterExit hands it to the viewer
   }
   ReleaseHeldHangDump(
-    cfg, outBase, exitCode == 0 ? L"the game exited normally, KeepSlowShutdownHangDumps=1" : L"the game exited", &hang);
+    cfg, outBase,
+    state->slowShutdownAtExit ? L"a slow shutdown, KeepSlowShutdownHangDumps=1" : L"the game exited", &hang);
 }
 
 }  // namespace
@@ -716,13 +715,13 @@ void LaunchDeferredViewersAfterExit(
     state->pendingCrashViewerDumpPath.clear();
   }
 
-  if (HangViewerQueuedForExit(cfg, *state) && !HangViewerOpensAtExit(cfg, exitCode, *state)) {
+  if (HangViewerQueuedForExit(cfg, *state) && !HangViewerOpensAtExit(cfg, *state)) {
     AppendLogLine(
       outBase,
       L"Suppressed hang viewer launch: the game was still not responding when it exited normally (exit_code=0), "
       L"a slow shutdown rather than a freeze; the hang dump is kept: "
         + std::filesystem::path(state->pendingHangViewerDumpPath).filename().wstring());
-  } else if (HangViewerOpensAtExit(cfg, exitCode, *state)) {
+  } else if (HangViewerOpensAtExit(cfg, *state)) {
     const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
     if (delayMs > 0) {
       Sleep(delayMs);
@@ -871,7 +870,13 @@ bool HandleProcessExitTick(
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
     std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
     AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
-    SettleHeldHangDumpAtExit(cfg, outBase, exitCode, state);
+    {
+      const auto& hang = state->hangState;
+      state->slowShutdownAtExit = IsSlowShutdownAtExit(
+        exitCode, hang.hangCapturedThisEpisode, hang.captureMayBeSlowShutdownThisEpisode,
+        ReadHeartbeatAtExit(cfg, proc).stalled);
+    }
+    SettleHeldHangDumpAtExit(cfg, outBase, state);
     LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, state);
     return true;
   }
