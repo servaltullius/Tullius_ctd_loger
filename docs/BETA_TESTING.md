@@ -59,6 +59,7 @@
     - `MaxHelperLogBytes`, `MaxHelperLogFiles`
   - `HangThresholdInMenuSec` : 메뉴/종료 직전 같은 “메뉴 상태”에서의 프리징 기준(기본 30초)
     - 정상 종료 직전에 일시적으로 heartbeat가 멈춰도 hang dump가 쌓이지 않도록, 메뉴 상태에서는 더 높은 임계값을 사용합니다.
+    - 종료가 이 임계값보다 오래 걸려도, 게임 프로세스에 스레드가 하나만 남았으면(종료 처리 중) hang dump를 만들지 않고 Helper 로그에 `Hang detected while the game is closing`만 남깁니다.
   - ETW hang 프로필:
     - `EtwHangProfile` 기본 프로필
     - `EtwHangFallbackProfile` (선택) 기본 프로필 실패 시 재시도

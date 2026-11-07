@@ -2,7 +2,12 @@
 
 #include <Windows.h>
 
+#include <TlHelp32.h>
+
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 #include "HelperLog.h"
@@ -24,7 +29,55 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->hangSuppressedForegroundGraceThisEpisode = false;
   state->hangSuppressedForegroundResponsiveThisEpisode = false;
   state->hangSuppressionLiftedForDialogThisEpisode = false;
+  state->hangSkippedAsClosingThisEpisode = false;
   state->hangSuppressionState = {};
+}
+
+std::optional<std::size_t> CountProcessThreads(std::uint32_t pid)
+{
+  const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    return std::nullopt;
+  }
+  std::size_t count = 0;
+  THREADENTRY32 entry{};
+  entry.dwSize = sizeof(entry);
+  for (BOOL ok = Thread32First(snapshot, &entry); ok; ok = Thread32Next(snapshot, &entry)) {
+    count += entry.th32OwnerProcessID == pid ? 1u : 0u;
+  }
+  const DWORD lastError = GetLastError();
+  CloseHandle(snapshot);
+  // The walk ends with ERROR_NO_MORE_FILES; anything else cut it short.
+  if (lastError != ERROR_NO_MORE_FILES) {
+    return std::nullopt;
+  }
+  return count;
+}
+
+bool SkipHangIfGameIsClosing(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const skydiag::helper::HangDecision& decision,
+  HangCaptureState* state)
+{
+  if (!state) {
+    return false;
+  }
+  const auto threads = CountProcessThreads(proc.pid);
+  if (!skydiag::helper::IsGameProcessClosing(threads)) {
+    return false;
+  }
+  state->hangSkippedAsClosingThisEpisode = true;
+  AppendLogLine(
+    outBase,
+    std::wstring(L"Hang detected while the game is closing (")
+      + (*threads == 0u ? L"no threads" : L"1 thread")
+      + L" left, secondsSinceHeartbeat="
+      + std::to_wstring(decision.secondsSinceHeartbeat)
+      + L", threshold="
+      + std::to_wstring(decision.thresholdSec)
+      + L"); its exit is not a freeze, skipping hang dump.");
+  return true;
 }
 
 void EnsureTargetWindowForPid(HangCaptureState* state, std::uint32_t pid)
