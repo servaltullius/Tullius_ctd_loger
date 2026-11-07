@@ -2,8 +2,10 @@
 
 #include <Windows.h>
 
+#include <filesystem>
 #include <iostream>
 #include <string>
+#include <system_error>
 
 #include <nlohmann/json.hpp>
 
@@ -154,6 +156,17 @@ FreezeCaptureResult CaptureFreezeDumpAndWct(
   if (!result.dumpWritten) {
     std::wcerr << L"[SkyrimDiagHelper] " << request.logName << L" dump failed: " << dumpErr << L"\n";
     AppendLogLine(outBase, std::wstring(request.logName) + L" dump failed: " + dumpErr);
+    // Retention removes a WCT file only with its dump, and nothing reads one
+    // without its dump, so it would stay for good (2026-11-01). remove, not
+    // DeleteFileW, which MO2 refuses past MAX_PATH.
+    std::error_code removeEc;
+    std::filesystem::remove(request.wctPath, removeEc);
+    if (removeEc) {
+      AppendLogLine(
+        outBase,
+        L"Could not remove the WCT file of the failed dump (error " + std::to_wstring(removeEc.value()) +
+          L"): " + request.wctPath.wstring());
+    }
   }
   return result;
 }

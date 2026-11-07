@@ -49,6 +49,18 @@ HangTickResult ExecuteConfirmedHangCapture(
   }
   const bool dumpWritten = capture.dumpWritten;
 
+  // The check before the capture can come while ExitProcess is still ending
+  // the other threads; a dump that then fails may be that exit. No ETW trace
+  // for it either.
+  if (!dumpWritten && state && skydiag::helper::IsGameProcessClosing(CountProcessThreads(proc.pid))) {
+    state->hangSkippedAsClosingThisEpisode = true;
+    AppendLogLine(
+      outBase,
+      L"The game was closing by the end of the hang capture (at most one thread left); the failed hang dump "
+      L"most likely met its exit, not a freeze.");
+    return HangTickResult::kContinue;
+  }
+
   // The trace starts after the dump, so wpr -start (up to the ETW timeout)
   // does not delay it, and is stopped from the helper loop once it has
   // recorded for a while (MaybeFinalizePendingHangEtwCapture) rather than here.

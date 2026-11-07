@@ -2,12 +2,16 @@
 
 #include <Windows.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/HangSuppression.h"
 #include "SkyrimDiagHelper/ModalDialogProbe.h"
+#include "SkyrimDiagHelper/WctCapture.h"
 #include "WindowHeuristics.h"
 #include "SkyrimDiagShared.h"
 
@@ -24,7 +28,43 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->hangSuppressedForegroundGraceThisEpisode = false;
   state->hangSuppressedForegroundResponsiveThisEpisode = false;
   state->hangSuppressionLiftedForDialogThisEpisode = false;
+  state->hangSkippedAsClosingThisEpisode = false;
   state->hangSuppressionState = {};
+}
+
+std::optional<std::size_t> CountProcessThreads(std::uint32_t pid)
+{
+  const auto threads = skydiag::helper::EnumerateProcessThreads(pid);
+  if (!threads) {
+    return std::nullopt;
+  }
+  return threads->size();
+}
+
+bool SkipHangIfGameIsClosing(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const skydiag::helper::HangDecision& decision,
+  HangCaptureState* state)
+{
+  if (!state) {
+    return false;
+  }
+  const auto threads = CountProcessThreads(proc.pid);
+  if (!skydiag::helper::IsGameProcessClosing(threads)) {
+    return false;
+  }
+  state->hangSkippedAsClosingThisEpisode = true;
+  AppendLogLine(
+    outBase,
+    std::wstring(L"Hang detected while the game is closing (")
+      + (*threads == 0u ? L"no threads" : L"1 thread")
+      + L" left, secondsSinceHeartbeat="
+      + std::to_wstring(decision.secondsSinceHeartbeat)
+      + L", threshold="
+      + std::to_wstring(decision.thresholdSec)
+      + L"); its exit is not a freeze, skipping hang dump.");
+  return true;
 }
 
 void EnsureTargetWindowForPid(HangCaptureState* state, std::uint32_t pid)
