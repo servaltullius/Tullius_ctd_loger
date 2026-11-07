@@ -6,6 +6,8 @@
 #include <iostream>
 #include <optional>
 #include <string>
+#include <system_error>
+#include <unordered_map>
 #include <vector>
 
 #include "CrashCapture.h"
@@ -13,6 +15,7 @@
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
+#include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
@@ -580,6 +583,92 @@ void AppendExitClassificationLog(const std::filesystem::path& outBase, bool hadC
     L"and suppressing crash viewer/deferred behavior.");
 }
 
+namespace {
+
+// A hang viewer queued for the game's exit (AutoOpenHangAfterProcessExit).
+bool HangViewerQueuedForExit(const HelperConfig& cfg, const HelperLoopState& state)
+{
+  return !state.pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit;
+}
+
+// Whether LaunchDeferredViewersAfterExit opens the queued hang viewer: not for
+// a slow shutdown. The one place that decides it, so a held dump left to the
+// viewer is never left to one that does not open.
+bool HangViewerOpensAtExit(const HelperConfig& cfg, DWORD exitCode, const HelperLoopState& state)
+{
+  return HangViewerQueuedForExit(cfg, state) &&
+         !IsHangDuringNormalShutdown(exitCode, state.hangState.hangCapturedThisEpisode);
+}
+
+// HeldHangDump at the game's exit. A hang still open at exit code 0 was a slow
+// shutdown (IsHangDuringNormalShutdown): its dump goes, with what was written
+// for it, before any analysis puts it in crash_history.json. Any other held
+// dump is analyzed, by the exit viewer when one opens for it.
+void SettleHeldHangDumpAtExit(
+  const HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  DWORD exitCode,
+  HelperLoopState* state)
+{
+  auto& hang = state->hangState;
+  if (hang.heldDump.dumpPath.empty()) {
+    return;
+  }
+  if (IsHangDuringNormalShutdown(exitCode, hang.hangCapturedThisEpisode) && !cfg.keepSlowShutdownHangDumps) {
+    // Its ETW trace is written now, so it is removed with the dump.
+    MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &hang.pendingEtw);
+    const std::filesystem::path dump(hang.heldDump.dumpPath);
+    hang.heldDump = HeldHangDump{};
+    if (state->pendingHangViewerDumpPath == dump.wstring()) {
+      state->pendingHangViewerDumpPath.clear();
+    }
+    const std::string name = PathPartUtf8(dump.filename());
+    const auto ts = TryExtractTimestampToken(name);
+    bool removed = false;
+    if (ts) {
+      std::unordered_map<std::string, std::uint32_t> tsRefs{ { *ts, 1u } };
+      RemoveDumpAndArtifacts(
+        dump.parent_path(), DatedFile{ dump, *ts }, kHangDumpFiles.prefix, tsRefs, kHangDumpFiles.deleteWctForTimestamp,
+        kHangDumpFiles.deleteManualWctForTimestamp, kHangDumpFiles.deleteEtlForStem);
+      std::error_code ec;
+      removed = !ExistsForIo(dump, ec) && !ec;
+    }
+    AppendLogLine(
+      outBase,
+      removed
+        ? L"Removed the hang dump of a slow shutdown: the game was still not responding when it exited normally "
+          L"(exit_code=0), so it was closing, not frozen (KeepSlowShutdownHangDumps=1 keeps it): "
+            + dump.filename().wstring()
+        : L"Could not remove the hang dump of a slow shutdown (exit_code=0); it stays unanalyzed: "
+            + dump.filename().wstring());
+    return;
+  }
+  if (HangViewerOpensAtExit(cfg, exitCode, *state) && state->pendingHangViewerDumpPath == hang.heldDump.dumpPath) {
+    return;  // LaunchDeferredViewersAfterExit hands it to the viewer
+  }
+  ReleaseHeldHangDump(
+    cfg, outBase, exitCode == 0 ? L"the game exited normally, KeepSlowShutdownHangDumps=1" : L"the game exited", &hang);
+}
+
+}  // namespace
+
+void SettleHeldHangDumpAfterExitViewer(
+  const HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  bool viewerLaunched,
+  HelperLoopState* state)
+{
+  if (!state || state->hangState.heldDump.dumpPath.empty() ||
+      state->hangState.heldDump.dumpPath != state->pendingHangViewerDumpPath) {
+    return;
+  }
+  if (viewerLaunched) {
+    state->hangState.heldDump = HeldHangDump{};  // the viewer analyzes it
+    return;
+  }
+  ReleaseHeldHangDump(cfg, outBase, L"the hang viewer did not open", &state->hangState);
+}
+
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
@@ -627,24 +716,24 @@ void LaunchDeferredViewersAfterExit(
     state->pendingCrashViewerDumpPath.clear();
   }
 
-  if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit &&
-      IsHangDuringNormalShutdown(exitCode, state->hangState.hangCapturedThisEpisode)) {
+  if (HangViewerQueuedForExit(cfg, *state) && !HangViewerOpensAtExit(cfg, exitCode, *state)) {
     AppendLogLine(
       outBase,
       L"Suppressed hang viewer launch: the game was still not responding when it exited normally (exit_code=0), "
       L"a slow shutdown rather than a freeze; the hang dump is kept: "
         + std::filesystem::path(state->pendingHangViewerDumpPath).filename().wstring());
-  } else if (!state->pendingHangViewerDumpPath.empty() && cfg.autoOpenViewerOnHang && cfg.autoOpenHangAfterProcessExit) {
+  } else if (HangViewerOpensAtExit(cfg, exitCode, *state)) {
     const DWORD delayMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenHangDelayMs, 10000u));
     if (delayMs > 0) {
       Sleep(delayMs);
     }
     const auto launch = StartDumpToolViewer(cfg, state->pendingHangViewerDumpPath, outBase, L"hang_exit");
-    if (launch == DumpToolViewerLaunchResult::kLaunched) {
-      AppendLogLine(outBase, L"Auto-opened DumpTool viewer for latest hang dump after process exit.");
-    } else {
-      AppendLogLine(outBase, L"Hang viewer auto-open attempt failed after process exit.");
-    }
+    const bool launched = launch == DumpToolViewerLaunchResult::kLaunched;
+    AppendLogLine(
+      outBase,
+      launched ? L"Auto-opened DumpTool viewer for latest hang dump after process exit."
+               : L"Hang viewer auto-open attempt failed after process exit.");
+    SettleHeldHangDumpAfterExitViewer(cfg, outBase, launched, state);
   }
 }
 
@@ -782,6 +871,7 @@ bool HandleProcessExitTick(
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
     std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
     AppendLogLine(outBase, L"Target process exited (exit_code=" + std::to_wstring(exitCode) + L").");
+    SettleHeldHangDumpAtExit(cfg, outBase, exitCode, state);
     LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, state);
     return true;
   }

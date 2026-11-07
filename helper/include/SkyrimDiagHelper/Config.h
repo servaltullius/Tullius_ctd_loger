@@ -54,6 +54,10 @@ struct HelperConfig {
   // unless this is set.
   bool autoOpenViewerUnderWine = false;
   bool autoOpenHangAfterProcessExit = true;
+  // A hang dump whose hang was still open when the game exited with code 0
+  // is a slow shutdown and is removed before it is analyzed, unless this is
+  // set (HeldHangDump).
+  bool keepSlowShutdownHangDumps = false;
   std::uint32_t autoOpenHangDelayMs = 2000;
   bool autoOpenViewerBeginnerMode = true;
   bool enablePssSnapshotForFreeze = false;

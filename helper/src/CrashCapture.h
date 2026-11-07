@@ -572,7 +572,10 @@ constexpr bool IsCloseOfUnresponsiveGame(
 // game stopped answering while it shut down (a large load order can take
 // longer than the hang threshold to quit), which a frozen game that is ended
 // does not do (Task Manager, a watchdog and Windows' not-responding close all
-// give a non-zero code). Its dump stays, but its viewer is not opened.
+// give a non-zero code). Its viewer is not opened. A dump held for it
+// (HeldHangDump, a capture in a menu) is removed unless
+// KeepSlowShutdownHangDumps; any other dump stays, as a quit hotkey or a
+// launcher can also end a game frozen during play with code 0.
 constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpisodeOpenAtExit) noexcept
 {
   return exitCode == 0u && hangEpisodeOpenAtExit;

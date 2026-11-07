@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 #include "SkyrimDiagHelper/HangSuppression.h"
+#include "SkyrimDiagShared.h"
 
 namespace skydiag::helper {
 struct AttachedProcess;
@@ -43,6 +45,31 @@ constexpr std::uint32_t HangEtwCaptureSeconds(std::uint32_t etwMaxDurationSec) n
   return etwMaxDurationSec < kHangEtwCaptureMaxSeconds ? etwMaxDurationSec : kHangEtwCaptureMaxSeconds;
 }
 
+// A hang dump nothing has analyzed yet, kept back until its hang settles. A
+// freeze in a menu that lasts until the game exits with code 0 was a slow
+// shutdown, and its dump is removed before an analysis puts it in
+// crash_history.json (unless KeepSlowShutdownHangDumps). It is analyzed when
+// the heartbeat comes back, when the game exits otherwise (by the exit viewer
+// when one opens), or when the helper stops first. Only a capture that may be
+// a slow shutdown is held (MayBeSlowShutdown); any other is analyzed at once.
+struct HeldHangDump
+{
+  std::wstring dumpPath;
+  // Run the headless analysis when it is released (AutoAnalyzeDump and no
+  // viewer that analyzes it).
+  bool analyze = false;
+};
+
+// Whether a confirmed hang may be the game quitting slowly: quitting runs from
+// a menu (the pause menu, the main menu, the journal, the console's qqq), so
+// the state flags have a menu open and no load. Every slow shutdown seen
+// (2026-09-18..28, 11-01) was one. A freeze during play is never one, even if
+// something then ends the game with exit code 0 (a quit hotkey, a launcher).
+constexpr bool MayBeSlowShutdown(std::uint32_t stateFlags, bool isLoading) noexcept
+{
+  return (stateFlags & skydiag::kState_InMenu) != 0u && (stateFlags & skydiag::kState_Loading) == 0u && !isLoading;
+}
+
 struct HangCaptureState
 {
   bool hangCapturedThisEpisode = false;
@@ -69,6 +96,7 @@ struct HangCaptureState
   std::uint64_t loadStartQpc = 0;
 
   PendingHangEtwCapture pendingEtw{};
+  HeldHangDump heldDump{};
 };
 
 enum class HangTickResult : std::uint8_t {
@@ -85,6 +113,14 @@ HangTickResult HandleHangTick(
   std::uint32_t* adaptiveLoadingThresholdSec,
   std::uint64_t attachNowQpc,
   std::wstring* pendingHangViewerDumpPath,
+  HangCaptureState* state);
+
+// Starts the held hang dump's analysis when it asks for one, and clears it.
+// `why` ends the log line ("the game recovered").
+void ReleaseHeldHangDump(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  std::wstring_view why,
   HangCaptureState* state);
 
 // Stops a hang capture's pending ETW trace once it has recorded for its

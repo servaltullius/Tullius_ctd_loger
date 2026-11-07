@@ -127,7 +127,18 @@ HangTickResult ExecuteConfirmedHangCapture(
         viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
       }
     }
-    if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false)) {
+    const bool analyze = ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false);
+    if (!viewerNow && state && MayBeSlowShutdown(stateFlags, decision.isLoading)) {
+      // Nothing analyzes it until the hang settles (HeldHangDump).
+      ReleaseHeldHangDump(cfg, outBase, L"another hang was captured", state);
+      state->heldDump = HeldHangDump{ dumpPath, analyze };
+      AppendLogLine(
+        outBase,
+        std::wstring(analyze ? L"Hang dump analysis waits" : L"Hang dump held")
+          + L" until the game recovers or exits: a freeze in a menu that lasts until a normal exit is a slow "
+            L"shutdown"
+          + (cfg.keepSlowShutdownHangDumps ? L" (kept, KeepSlowShutdownHangDumps=1)." : L", and its dump is removed."));
+    } else if (analyze) {
       StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
     } else if (viewerNow && cfg.autoAnalyzeDump) {
       AppendLogLine(outBase, L"Skipped headless analysis: viewer auto-open is enabled.");
@@ -156,6 +167,27 @@ HangTickResult ExecuteConfirmedHangCapture(
     state->hangCapturedThisEpisode = true;
   }
   return HangTickResult::kContinue;
+}
+
+void ReleaseHeldHangDump(
+  const skydiag::helper::HelperConfig& cfg,
+  const std::filesystem::path& outBase,
+  std::wstring_view why,
+  HangCaptureState* state)
+{
+  if (!state || state->heldDump.dumpPath.empty()) {
+    return;
+  }
+  const HeldHangDump held = state->heldDump;
+  state->heldDump = HeldHangDump{};
+  if (!held.analyze) {
+    return;
+  }
+  AppendLogLine(
+    outBase,
+    L"Analyzing the held hang dump (" + std::wstring(why) + L"): " +
+      std::filesystem::path(held.dumpPath).filename().wstring());
+  StartDumpToolHeadlessIfConfigured(cfg, held.dumpPath, outBase);
 }
 
 void MaybeFinalizePendingHangEtwCapture(

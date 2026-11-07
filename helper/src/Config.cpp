@@ -209,6 +209,8 @@ HelperConfig LoadConfig(std::wstring* err)
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"AutoOpenViewerOnManualCapture", 0) != 0;
   cfg.autoOpenHangAfterProcessExit =
     ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"AutoOpenHangAfterProcessExit", 1) != 0;
+  cfg.keepSlowShutdownHangDumps =
+    ReadIniProfileInt(ini, L"SkyrimDiagHelper", L"KeepSlowShutdownHangDumps", 0) != 0;
   cfg.autoOpenHangDelayMs = ReadIniUint32Clamped(
     ini, L"SkyrimDiagHelper", L"AutoOpenHangDelayMs", 2000, 0, 10000);
   cfg.autoOpenViewerUnderWine =

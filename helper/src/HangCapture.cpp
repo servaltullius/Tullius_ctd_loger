@@ -103,6 +103,8 @@ HangTickResult HandleHangTick(
     thresholds.loadingSec);
 
   if (!decision.isHang) {
+    // A freeze the game came back from: not a slow shutdown.
+    ReleaseHeldHangDump(cfg, outBase, L"the game recovered", state);
     ResetHangCaptureEpisode(state);
     return HangTickResult::kContinue;
   }
