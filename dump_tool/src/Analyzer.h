@@ -695,7 +695,12 @@ struct AnalysisResult
 
   // Best-effort callstack (primary thread: crash thread, WCT cycle thread, or inferred main thread)
   std::uint32_t stackwalk_primary_tid = 0;
+  // Two frames above the first plugin frame on (crash), or from frame 0
+  // (freeze): what signatures and the evidence line read.
   std::vector<std::wstring> stackwalk_primary_frames;
+  // What the report and the viewer show (FormatCrashCallstackForReport): a
+  // crash stack from frame 0. Empty when not set; then stackwalk_primary_frames.
+  std::vector<std::wstring> stackwalk_display_frames;
   std::vector<CrashBucketFrame> stackwalk_primary_bucket_frames;
   std::uint32_t stackwalk_total_frames = 0;
   std::uint32_t stackwalk_symbolized_frames = 0;

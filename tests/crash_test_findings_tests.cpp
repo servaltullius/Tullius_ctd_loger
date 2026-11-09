@@ -31,6 +31,25 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   const std::vector<std::uint64_t>& pcs,
   i18n::Language lang,
   bool walkReachedThreadStart = true);
+
+std::vector<std::wstring> FormatCallstackForDisplay(
+  HANDLE process,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames,
+  std::uint32_t* outTotalFrames,
+  std::uint32_t* outSymbolizedFrames,
+  std::uint32_t* outSourceLineFrames,
+  bool fromTop,
+  const std::vector<std::wstring>* frameLabels);
+
+std::vector<std::wstring> FormatCrashCallstackForReport(
+  HANDLE process,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames,
+  const std::vector<std::wstring>* frameLabels,
+  bool english);
 }
 
 namespace {
@@ -277,6 +296,50 @@ void TestSkseRuntimeIsThePathNotASuspect()
   Require(!skydiag::dump_tool::internal::HasNearbyProbableDll(r), "SKSE is not a nearby DLL to compare");
   r.crash_logger_top_modules.push_back(L"NPCWaterAIFix.dll");
   Require(skydiag::dump_tool::internal::HasNearbyProbableDll(r), "another plugin is");
+}
+
+// 2026-11-09: a crash's own game frames above the first plugin frame
+// (LockForRead <- GetExtraData <- GetDisplayFullName <- IsInCombat, above a
+// condition hook) were cut from the shown stack, which started two frames
+// above the plugin. The report and the viewer show it from frame 0; the list
+// signatures read keeps its window.
+void TestCrashStackIsShownFromTheTop()
+{
+  using skydiag::dump_tool::minidump::ModuleInfo;
+  namespace sw = skydiag::dump_tool::internal::stackwalk;
+  std::vector<ModuleInfo> modules(2);
+  modules[0].filename = L"SkyrimSE.exe";
+  modules[0].base = 0x10000;
+  modules[0].end = 0x20000;
+  modules[0].is_game_exe = true;
+  modules[1].filename = L"Hook.dll";
+  modules[1].base = 0x30000;
+  modules[1].end = 0x31000;
+
+  // Six game frames, then the plugin, then game frames.
+  const std::vector<std::uint64_t> pcs = { 0x10100, 0x10200, 0x10300, 0x10400, 0x10500, 0x10600, 0x30100, 0x10700 };
+  const auto shown = sw::FormatCrashCallstackForReport(nullptr, modules, pcs, 12u, nullptr, true);
+  Require(shown.size() == pcs.size(), "every frame is shown");
+  Require(shown.front() == L"SkyrimSE.exe+0x100", "from frame 0");
+  Require(shown[6] == L"Hook.dll+0x100", "the plugin frame in its place");
+
+  std::uint32_t total = 0;
+  const auto window = sw::FormatCallstackForDisplay(nullptr, modules, pcs, 12u, &total, nullptr, nullptr, false, nullptr);
+  Require(window.front() == L"SkyrimSE.exe+0x500", "the signature list still starts two frames above the plugin");
+
+  // Twelve game frames above the plugin: the first four, a line for the rest,
+  // then the window.
+  std::vector<std::uint64_t> deep;
+  for (std::uint64_t i = 0; i < 12; i++) {
+    deep.push_back(0x10100 + i * 0x10);
+  }
+  deep.push_back(0x30100);
+  const auto cut = sw::FormatCrashCallstackForReport(nullptr, modules, deep, 12u, nullptr, true);
+  Require(cut.size() == 4u + 1u + 3u, "four, the line, and the window from two above the plugin");
+  Require(cut[4] == L"... 6 frames left out", "says how many are left out");
+  Require(cut[7] == L"Hook.dll+0x100", "the plugin frame");
+  const auto cutKo = sw::FormatCrashCallstackForReport(nullptr, modules, deep, 12u, nullptr, false);
+  Require(cutKo[4] == L"... 프레임 6개 생략", "in Korean too");
 }
 
 const skydiag::dump_tool::EvidenceItem* FindEvidence(const AnalysisResult& r, std::wstring_view titlePart)
@@ -800,6 +863,7 @@ int main()
     TestBlockedPluginSplitsTheHangBucket();
     TestConfirmedCppExceptionIsARealCrash();
     TestSkseRuntimeIsThePathNotASuspect();
+    TestCrashStackIsShownFromTheTop();
     TestHookStubRaceNamesTheHookOwner();
     TestLocationRefIsNotTheCulprit();
     TestAmbiguousLogNamesNoCulprit();

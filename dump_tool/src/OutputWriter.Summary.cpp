@@ -681,7 +681,8 @@ nlohmann::json BuildSummaryJson(
   summary["callstack"] = nlohmann::json::object();
   summary["callstack"]["thread_id"] = r.stackwalk_primary_tid;
   summary["callstack"]["frames"] = nlohmann::json::array();
-  for (const auto& f : r.stackwalk_primary_frames) {
+  // What the viewer shows: a crash stack from frame 0 (stackwalk_display_frames).
+  for (const auto& f : r.stackwalk_display_frames.empty() ? r.stackwalk_primary_frames : r.stackwalk_display_frames) {
     summary["callstack"]["frames"].push_back(WideToUtf8(f));
   }
   const std::wstring redactedSymbolCachePath = MaybeRedactPath(r.symbol_cache_path, redactPaths);

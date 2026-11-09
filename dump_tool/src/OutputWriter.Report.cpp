@@ -633,9 +633,11 @@ std::string BuildReportText(
   for (const auto& s : r.recommendations) {
     rpt << "- " << WideToUtf8(s) << "\n";
   }
-  if (!r.stackwalk_primary_frames.empty()) {
+  // From frame 0 for a crash (stackwalk_display_frames).
+  const auto& shownFrames = r.stackwalk_display_frames.empty() ? r.stackwalk_primary_frames : r.stackwalk_display_frames;
+  if (!shownFrames.empty()) {
     rpt << (en ? "\nCallstack (primary, tid=" : "\n콜스택(대표, tid=") << r.stackwalk_primary_tid << "):\n";
-    for (const auto& f : r.stackwalk_primary_frames) {
+    for (const auto& f : shownFrames) {
       rpt << "  " << WideToUtf8(f) << "\n";
     }
   }

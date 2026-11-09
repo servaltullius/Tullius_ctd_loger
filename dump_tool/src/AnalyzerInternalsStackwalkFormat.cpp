@@ -121,7 +121,64 @@ std::pair<std::size_t, std::size_t> SelectCallstackFrameRange(
   return { start, std::min<std::size_t>(pcs.size(), start + maxFrames) };
 }
 
+// One frame as shown: with a SkyrimSE.exe function name from the address DB
+// when there is no PDB symbol (no PDB exists for the game):
+// "SkyrimSE.exe+0xcc90cf (BSReadWriteLock::LockForRead+0xf)".
+std::wstring FormatLabeledFrame(
+  HANDLE process,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t i,
+  const std::vector<std::wstring>* frameLabels,
+  bool* outHasSymbol,
+  bool* outHasSourceLine)
+{
+  auto frame = FormatSymbolizedFrame(process, modules, pcs[i], outHasSymbol, outHasSourceLine);
+  if (!*outHasSymbol && frameLabels && i < frameLabels->size() && !(*frameLabels)[i].empty()) {
+    frame += L" (" + (*frameLabels)[i] + L")";
+  }
+  return frame;
+}
+
 }  // namespace
+
+std::vector<std::wstring> FormatCrashCallstackForReport(
+  HANDLE process,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames,
+  const std::vector<std::wstring>* frameLabels,
+  bool english)
+{
+  std::vector<std::wstring> out;
+  if (pcs.empty() || maxFrames == 0) {
+    return out;
+  }
+  const auto [start, end] = SelectCallstackFrameRange(modules, pcs, maxFrames);
+  const auto add = [&](std::size_t i) {
+    bool hasSymbol = false;
+    bool hasSourceLine = false;
+    out.push_back(FormatLabeledFrame(process, modules, pcs, i, frameLabels, &hasSymbol, &hasSourceLine));
+  };
+  constexpr std::size_t kLeadingShownWhole = 8;
+  constexpr std::size_t kLeadingShownCut = 4;
+  if (start <= kLeadingShownWhole) {
+    for (std::size_t i = 0; i < end; i++) {
+      add(i);
+    }
+    return out;
+  }
+  for (std::size_t i = 0; i < kLeadingShownCut; i++) {
+    add(i);
+  }
+  const std::size_t skipped = start - kLeadingShownCut;
+  out.push_back(english ? L"... " + std::to_wstring(skipped) + L" frames left out"
+                        : L"... 프레임 " + std::to_wstring(skipped) + L"개 생략");
+  for (std::size_t i = start; i < end; i++) {
+    add(i);
+  }
+  return out;
+}
 
 std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
   const std::vector<ModuleInfo>& modules,
@@ -221,13 +278,7 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   for (std::size_t i = start; i < end; i++) {
     bool hasSymbol = false;
     bool hasSourceLine = false;
-    auto frame = FormatSymbolizedFrame(process, modules, pcs[i], &hasSymbol, &hasSourceLine);
-    // A SkyrimSE.exe function name from the address DB (no PDB exists for
-    // the game): "SkyrimSE.exe+0xcc90cf (BSReadWriteLock::LockForRead+0xf)".
-    if (!hasSymbol && frameLabels && i < frameLabels->size() && !(*frameLabels)[i].empty()) {
-      frame += L" (" + (*frameLabels)[i] + L")";
-    }
-    out.push_back(std::move(frame));
+    out.push_back(FormatLabeledFrame(process, modules, pcs, i, frameLabels, &hasSymbol, &hasSourceLine));
     if (outTotalFrames) {
       *outTotalFrames += 1;
     }
