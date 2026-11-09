@@ -42,7 +42,6 @@ public:
   {
     return m_addressLibrary.IdAt(functionStart);
   }
-  bool HasAddressLibrary() const { return m_addressLibrary.Size() != 0; }
 
 private:
   std::unordered_map<std::uint64_t, std::string> m_functions;

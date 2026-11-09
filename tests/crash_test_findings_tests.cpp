@@ -358,6 +358,44 @@ const skydiag::dump_tool::EvidenceItem* FindEvidence(const AnalysisResult& r, st
   return nullptr;
 }
 
+// The evidence line lists the signature window; when the shown stack starts
+// higher, its title says the line is around the first plugin frame.
+void TestCallstackEvidenceTitleSaysWhereItStarts()
+{
+  for (const auto lang : { i18n::Language::kEnglish, i18n::Language::kKorean }) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const std::wstring_view prefix = en ? L"Callstack (primary thread)" : L"콜스택(대표 스레드)";
+
+    AnalysisResult around{};
+    around.stackwalk_primary_tid = 7;
+    around.stackwalk_primary_frames = { L"SkyrimSE.exe+0x500", L"SkyrimSE.exe+0x600", L"Hook.dll+0x100" };
+    around.stackwalk_display_frames = { L"SkyrimSE.exe+0x100", L"SkyrimSE.exe+0x200", L"SkyrimSE.exe+0x500",
+      L"SkyrimSE.exe+0x600", L"Hook.dll+0x100" };
+    BuildEvidenceAndSummary(around, lang);
+    const auto* aroundLine = FindEvidence(around, prefix);
+    Require(aroundLine && Contains(aroundLine->title, en ? L"around the first plugin frame" : L"첫 모드 프레임 주변"),
+      "a window below the top is titled around the first plugin frame");
+
+    AnalysisResult top{};
+    top.stackwalk_primary_tid = 7;
+    top.stackwalk_primary_frames = { L"Hook.dll+0x100", L"SkyrimSE.exe+0x700" };
+    top.stackwalk_display_frames = top.stackwalk_primary_frames;
+    BuildEvidenceAndSummary(top, lang);
+    const auto* topLine = FindEvidence(top, prefix);
+    Require(topLine && Contains(topLine->title, en ? L"top frames" : L"상위 프레임"),
+      "a window from frame 0 keeps the top frames title");
+
+    // A freeze shows the window from the top and no separate display list.
+    AnalysisResult freeze{};
+    freeze.stackwalk_primary_tid = 7;
+    freeze.stackwalk_primary_frames = { L"SkyrimSE.exe+0x100" };
+    BuildEvidenceAndSummary(freeze, lang);
+    const auto* freezeLine = FindEvidence(freeze, prefix);
+    Require(freezeLine && Contains(freezeLine->title, en ? L"top frames" : L"상위 프레임"),
+      "no display list keeps the top frames title");
+  }
+}
+
 // A walk cut short says where and why, so a missing suspect is explained.
 void TestTruncatedCallStackIsExplained()
 {
@@ -906,6 +944,7 @@ int main()
     TestConfirmedCppExceptionIsARealCrash();
     TestSkseRuntimeIsThePathNotASuspect();
     TestCrashStackIsShownFromTheTop();
+    TestCallstackEvidenceTitleSaysWhereItStarts();
     TestStackCutInHookCodeIsExplained();
     TestHookStubRaceNamesTheHookOwner();
     TestLocationRefIsNotTheCulprit();
