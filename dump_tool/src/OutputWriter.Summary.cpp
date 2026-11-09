@@ -701,6 +701,7 @@ nlohmann::json BuildSummaryJson(
     { "total_frames", r.stackwalk_total_frames },
     { "symbolized_frames", r.stackwalk_symbolized_frames },
     { "source_line_frames", r.stackwalk_source_line_frames },
+    { "address_library_ids", r.address_library_ids },
     { "online_symbol_source_allowed", r.online_symbol_source_allowed },
     { "online_symbol_source_used", r.online_symbol_source_used },
   };

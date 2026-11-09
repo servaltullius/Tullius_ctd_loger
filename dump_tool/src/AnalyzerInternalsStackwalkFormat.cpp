@@ -148,10 +148,29 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
   const std::vector<std::uint64_t>& pcs,
   std::size_t maxFrames,
   const std::vector<std::wstring>* frameLabels,
-  bool english)
+  bool english,
+  std::uint32_t* outTotalFrames,
+  std::uint32_t* outSymbolizedFrames,
+  std::uint32_t* outSourceLineFrames)
 {
+  std::uint32_t total = 0;
+  std::uint32_t symbolized = 0;
+  std::uint32_t sourceLines = 0;
   std::vector<std::wstring> out;
+  // The counts describe the frames shown (not the "left out" line).
+  const auto setCounts = [&]() {
+    if (outTotalFrames) {
+      *outTotalFrames = total;
+    }
+    if (outSymbolizedFrames) {
+      *outSymbolizedFrames = symbolized;
+    }
+    if (outSourceLineFrames) {
+      *outSourceLineFrames = sourceLines;
+    }
+  };
   if (pcs.empty() || maxFrames == 0) {
+    setCounts();
     return out;
   }
   const auto [start, end] = SelectCallstackFrameRange(modules, pcs, maxFrames);
@@ -159,6 +178,9 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
     bool hasSymbol = false;
     bool hasSourceLine = false;
     out.push_back(FormatLabeledFrame(process, modules, pcs, i, frameLabels, &hasSymbol, &hasSourceLine));
+    total += 1;
+    symbolized += hasSymbol ? 1u : 0u;
+    sourceLines += hasSourceLine ? 1u : 0u;
   };
   constexpr std::size_t kLeadingShownWhole = 8;
   constexpr std::size_t kLeadingShownCut = 4;
@@ -166,6 +188,7 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
     for (std::size_t i = 0; i < end; i++) {
       add(i);
     }
+    setCounts();
     return out;
   }
   for (std::size_t i = 0; i < kLeadingShownCut; i++) {
@@ -177,6 +200,7 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
   for (std::size_t i = start; i < end; i++) {
     add(i);
   }
+  setCounts();
   return out;
 }
 

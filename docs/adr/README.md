@@ -29,3 +29,4 @@ ADR index:
 - `0024-freed-hook-page-record.md`
 - `0025-save-load-crashes.md`
 - `0026-gpu-driver-events.md`
+- `0027-address-library-frame-ids.md`

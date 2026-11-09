@@ -63,4 +63,18 @@ FreedHookInfo ResolveFreedHook(
   std::uint64_t address,
   const std::function<bool(const std::wstring&)>& notOwner);
 
+// A stack walk cut at an address outside every module: whether that address
+// is in hook code the helper recorded (a mod's trampoline or detour, which
+// has no unwind data), and the jump that code continues with, the first
+// recorded stub within kHookCodeContinueWindow bytes after the address.
+struct HookCodeAtInfo
+{
+  bool found = false;
+  std::uint64_t page_base = 0;
+  bool has_next_stub = false;
+  RecordedHookStubInfo next_stub;
+};
+inline constexpr std::uint64_t kHookCodeContinueWindow = 64;
+HookCodeAtInfo FindHookCodeAt(const HookPageRecordInfo& record, std::uint64_t address);
+
 }  // namespace skydiag::dump_tool
