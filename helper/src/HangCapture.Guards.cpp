@@ -31,6 +31,8 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->hangSkippedAsClosingThisEpisode = false;
   state->captureMayBeSlowShutdownThisEpisode = false;
   state->captureThresholdSecThisEpisode = 0;
+  state->closingSeenAfterCaptureThisEpisode = false;
+  state->nextClosingCheckTick64 = 0;
   state->hangSuppressionState = {};
 }
 
@@ -53,21 +55,44 @@ bool SkipHangIfGameIsClosing(
   if (!state) {
     return false;
   }
-  const auto threads = CountProcessThreads(proc.pid);
-  if (!skydiag::helper::IsGameProcessClosing(threads)) {
+  if (!skydiag::helper::IsGameProcessClosing(CountProcessThreads(proc.pid))) {
     return false;
   }
   state->hangSkippedAsClosingThisEpisode = true;
   AppendLogLine(
     outBase,
-    std::wstring(L"Hang detected while the game is closing (")
-      + (*threads == 0u ? L"no threads" : L"1 thread")
-      + L" left, secondsSinceHeartbeat="
+    L"Hang detected while the game is closing (1 thread left, secondsSinceHeartbeat="
       + std::to_wstring(decision.secondsSinceHeartbeat)
       + L", threshold="
       + std::to_wstring(decision.thresholdSec)
       + L"); its exit is not a freeze, skipping hang dump.");
   return true;
+}
+
+void NoteGameClosingAfterCapture(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HangCaptureState* state)
+{
+  // A thread snapshot covers every process, so once a second is enough for
+  // an exit that outlasted a hang threshold.
+  constexpr std::uint64_t kClosingCheckIntervalMs = 1000;
+  if (!state || !state->hangCapturedThisEpisode || state->closingSeenAfterCaptureThisEpisode) {
+    return;
+  }
+  const std::uint64_t nowTick64 = GetTickCount64();
+  if (nowTick64 < state->nextClosingCheckTick64) {
+    return;
+  }
+  state->nextClosingCheckTick64 = nowTick64 + kClosingCheckIntervalMs;
+  if (!skydiag::helper::IsGameProcessClosing(CountProcessThreads(proc.pid))) {
+    return;
+  }
+  state->closingSeenAfterCaptureThisEpisode = true;
+  AppendLogLine(
+    outBase,
+    L"The game entered its exit after the hang capture (1 thread left); a normal exit from here is a slow "
+    L"shutdown, not a freeze.");
 }
 
 void EnsureTargetWindowForPid(HangCaptureState* state, std::uint32_t pid)

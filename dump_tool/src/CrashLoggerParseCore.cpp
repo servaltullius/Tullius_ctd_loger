@@ -247,14 +247,17 @@ bool IsSystemishModuleAsciiLower(std::string_view filenameLower)
     "dbghelp.dll",    "dbgcore.dll",
     // .NET runtime (Framework and Core), as in minidump::IsSystemishModule
     "clr.dll",        "clrjit.dll",      "coreclr.dll",       "mscoree.dll",
-    "mscoreei.dll",
+    "mscoreei.dll",   "hostfxr.dll",     "hostpolicy.dll",    "system.private.corelib.dll",
   };
   for (const auto* m : k) {
     if (filenameLower == m) {
       return true;
     }
   }
-  return false;
+  // The .NET Framework's precompiled libraries (mscorlib.ni.dll, System.ni.dll).
+  constexpr std::string_view kNativeImageSuffix = ".ni.dll";
+  return filenameLower.size() > kNativeImageSuffix.size() &&
+         filenameLower.substr(filenameLower.size() - kNativeImageSuffix.size()) == kNativeImageSuffix;
 }
 
 bool IsGameExeModuleAsciiLower(std::string_view filenameLower)

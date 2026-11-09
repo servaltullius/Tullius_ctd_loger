@@ -38,17 +38,19 @@ HangThresholds ComputeHangThresholds(
   std::uint32_t adaptiveLoadingThresholdSec);
 
 // Whether a game process with this many threads is closing. ExitProcess ends
-// every other thread before the DLLs detach, so one thread left (or none)
-// means the game loop is over: the heartbeat stopped because the game is
-// shutting down, not because it froze, and a dump of an address space being
-// torn down fails part way (2026-11-01: 32 s without a heartbeat in a menu,
-// one thread left, MiniDumpWriteDump 0x8007012B, then exit code 0). A running
-// game always has many threads, and before its heartbeat starts no hang is
-// judged at all. An unknown count (the thread snapshot failed) is not taken
-// as closing.
+// every other thread before the DLLs detach, so exactly one thread left means
+// the game loop is over: the heartbeat stopped because the game is shutting
+// down, not because it froze, and a dump of an address space being torn down
+// fails part way (2026-11-01: 32 s without a heartbeat in a menu, one thread
+// left, MiniDumpWriteDump 0x8007012B, then exit code 0). A running game
+// always has many threads, and before its heartbeat starts no hang is judged
+// at all. No threads is a process that is already gone, which says nothing
+// about how it went (a frozen game ended from Task Manager leaves none too);
+// the exit tick classifies that. An unknown count (the thread snapshot
+// failed) is not taken as closing either.
 constexpr bool IsGameProcessClosing(std::optional<std::size_t> threadCount) noexcept
 {
-  return threadCount.has_value() && *threadCount <= 1u;
+  return threadCount.has_value() && *threadCount == 1u;
 }
 
 }  // namespace skydiag::helper

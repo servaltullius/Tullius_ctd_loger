@@ -136,7 +136,7 @@ jobs:
           -DCMAKE_CXX_COMPILER=clang++
 
       - name: Build fuzz targets
-        run: cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser fuzz_skse_log_parser
+        run: cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser fuzz_skse_log_parser fuzz_address_library
 
       # Bounded smoke run, not a fuzzing campaign: it re-runs the seed corpus and
       # explores briefly, so a parser that regressed into a crash on known-good
@@ -164,6 +164,16 @@ jobs:
           ./build-fuzz/bin/fuzz_skse_log_parser /tmp/fuzz-skse-log fuzz/corpus/skse_log \
             -max_total_time=60 -print_final_stats=1 \
             -artifact_prefix=artifacts/fuzz/skse-log-
+
+      # The Address Library a dump carries (ADR-0027). A real file has several
+      # hundred thousand entries; -malloc_limit_mb keeps a damaged count from
+      # passing as a legitimate large allocation.
+      - name: Fuzz Address Library parser
+        run: |
+          mkdir -p artifacts/fuzz /tmp/fuzz-address-library
+          ./build-fuzz/bin/fuzz_address_library /tmp/fuzz-address-library fuzz/corpus/address_library \
+            -max_total_time=60 -max_len=4096 -malloc_limit_mb=64 -print_final_stats=1 \
+            -artifact_prefix=artifacts/fuzz/address-library-
 
       - name: Upload crash artifacts
         if: failure()

@@ -31,6 +31,14 @@ bool SkipHangIfGameIsClosing(
   const skydiag::helper::HangDecision& decision,
   HangCaptureState* state);
 
+// While a captured hang lasts: whether the game has since entered its exit
+// (IsGameProcessClosing), checked about once a second, noted once per episode
+// in closingSeenAfterCaptureThisEpisode and the log.
+void NoteGameClosingAfterCapture(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HangCaptureState* state);
+
 bool SuppressHangAndLogIfNeeded(
   const skydiag::helper::HelperConfig& cfg,
   const skydiag::helper::AttachedProcess& proc,

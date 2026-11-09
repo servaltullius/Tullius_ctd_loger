@@ -110,6 +110,8 @@ HangTickResult HandleHangTick(
   }
 
   if (state->hangCapturedThisEpisode || state->hangSkippedAsClosingThisEpisode) {
+    // A captured hang that turns into the game's exit was a slow shutdown.
+    NoteGameClosingAfterCapture(proc, outBase, state);
     return HangTickResult::kContinue;
   }
 

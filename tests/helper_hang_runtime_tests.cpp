@@ -387,10 +387,13 @@ enum class BeforeExit
   // The heartbeat comes back but no hang tick runs before the exit.
   kHeartbeatReturns,
   // A hang tick runs on the still-stalled heartbeat, with the pid of a
-  // one-thread process, so the closing check would skip it if it ran.
+  // one-thread process: the closing check would skip it if it ran, and the
+  // tick notes that the game has entered its exit.
   kHangTick,
   // The flags at the exit show a load (whose threshold is 600 s here).
   kLoadFlagAtExit,
+  // A dialog window of the game was visible at the capture.
+  kDialogSeen,
 };
 
 HeldHangExit CaptureHangThenExit(
@@ -429,10 +432,14 @@ HeldHangExit CaptureHangThenExit(
       QpcNow(), &loop.pendingHangViewerDumpPath, &loop.hangState);
     proc.pid = gamePid;
     TerminateChildProcess(&oneThread);
-    Require(!loop.hangState.heldDump.dumpPath.empty(), "the held dump stays held while the hang lasts");
+    Require(
+      loop.hangState.heldDump.dumpPath.empty() == !heldAtCapture, "a held dump stays held while the hang lasts");
     Require(!loop.hangState.hangSkippedAsClosingThisEpisode, "a captured episode is not checked as closing again");
+    Require(loop.hangState.closingSeenAfterCaptureThisEpisode, "the tick notes that the game entered its exit");
   } else if (beforeExit == BeforeExit::kLoadFlagAtExit) {
     shared->header.state_flags = skydiag::kState_InMenu | skydiag::kState_Loading;
+  } else if (beforeExit == BeforeExit::kDialogSeen) {
+    loop.hangState.modalDialogSeenThisEpisode = true;
   }
 
   Require(TerminateProcess(child.pi.hProcess, exitCode) != FALSE, "TerminateProcess failed");
@@ -535,6 +542,35 @@ void TestHeldHangDump_StallJudgedByTheCaptureThreshold()
   const auto r = CaptureHangThenExit(
     cfg, 0u, L"skydiag_held_hang_load_flag", skydiag::kState_InMenu, BeforeExit::kLoadFlagAtExit);
   Require(r.slowShutdownAtExit && r.dumps == 0u, "a slow shutdown, removed");
+}
+
+// A dialog window at the capture is no slow shutdown: a quitting game shows
+// none, and the dump says whose dialog it was (a plugin's error message that
+// ends the game with code 0 once it is dismissed).
+void TestHeldHangDump_KeptWhenADialogWasVisible()
+{
+  const auto r = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_held_hang_dialog", skydiag::kState_InMenu, BeforeExit::kDialogSeen);
+  Require(r.heldAtCapture && !r.slowShutdownAtExit, "held, but the exit is no slow shutdown");
+  Require(r.dumps == 1u && r.heldCleared, "the dump stays and is released for analysis");
+  Require(r.log.find("Removed the hang dump") == std::string::npos, "nothing is removed");
+}
+
+// A quit that starts outside a menu (Alt+F4 during play) and stalls is
+// captured as a freeze during play: analyzed at once, its dump kept. The game
+// is then seen in its exit, so its normal exit opens no freeze viewer.
+void TestGameplayCaptureThenTheGamesExitIsASlowShutdown()
+{
+  auto cfg = MakeHangTestConfig();
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+  const auto r = CaptureHangThenExit(
+    cfg, 0u, L"skydiag_hang_play_then_exit", skydiag::kState_None, BeforeExit::kHangTick);
+  Require(!r.heldAtCapture && r.dumps == 1u, "a capture during play is not held, and its dump stays");
+  Require(r.slowShutdownAtExit, "seen in its exit, then a normal exit: a slow shutdown");
+  AssertContains(r.log, "The game entered its exit after the hang capture", "the exit is noted");
+  AssertContains(r.log, "Suppressed hang viewer launch", "no freeze viewer for it");
 }
 
 static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, false), "a menu");
@@ -784,9 +820,10 @@ void TestStartupLoadingIsNotALoadingSample()
 
 // The hang decision alone (nowQpc, lastHeartbeatQpc, qpcFreq, stateFlags,
 // thresholdInGameSec, thresholdLoadingSec), at 100 ticks per second.
-// IsGameProcessClosing: one thread left (or none) is a game in ExitProcess.
+// IsGameProcessClosing: exactly one thread left is a game in ExitProcess; none
+// is a process already gone, however it went.
 static_assert(skydiag::helper::IsGameProcessClosing(1u), "one thread left");
-static_assert(skydiag::helper::IsGameProcessClosing(0u), "no threads left");
+static_assert(!skydiag::helper::IsGameProcessClosing(0u), "no threads: already gone, not closing");
 static_assert(!skydiag::helper::IsGameProcessClosing(2u), "a running process has more");
 static_assert(!skydiag::helper::IsGameProcessClosing(std::nullopt), "an unknown count is not closing");
 
@@ -915,6 +952,43 @@ void TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame()
   AssertContains(
     ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "The game was closing by the end of the hang capture",
     "the failed dump is told as the exit");
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// A frozen game ended (Task Manager) while its hang dump is written leaves no
+// threads. That is a game that stopped responding and was ended, not one that
+// was closing.
+void TestExecuteConfirmedHangCapture_AGameEndedDuringTheCaptureIsNotClosing()
+{
+  const auto outBase = MakeTempDir(L"skydiag_hang_ended_capture");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  auto child = LaunchSuspendedChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  const auto cfg = MakeHangTestConfig();
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+  // Gone before the dump is written, as if it was ended while it was.
+  Require(TerminateProcess(child.pi.hProcess, 1u) != FALSE, "TerminateProcess failed");
+  Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "the child did not exit");
+  HangDecision decision{};
+  decision.isHang = true;
+  decision.secondsSinceHeartbeat = 32.0;
+  decision.thresholdSec = 10u;
+  (void)ExecuteConfirmedHangCapture(
+    cfg, proc, outBase, decision, skydiag::kState_None, &loop.pendingHangViewerDumpPath, &loop.hangState);
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "no dump of a process that is gone");
+  Require(!loop.hangState.hangSkippedAsClosingThisEpisode, "not told as a closing game");
+  Require(loop.hangState.hangCapturedThisEpisode, "the hang stays on record for the exit");
+  Require(HandleProcessExitTick(cfg, proc, outBase, &loop), "the exit tick handles the exit");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "The game exited during the hang capture", "the failed dump is told as the exit it met");
+  AssertContains(
+    log, "The game stopped responding and then exited (exit_code=1", "the exit is told as a frozen game that was ended");
+  Require(log.find("while it was still closing") == std::string::npos, "not as a closing game");
+  ShutdownRetentionWorker();
   TerminateChildProcess(&child);
   std::filesystem::remove_all(outBase);
 }
@@ -1291,6 +1365,7 @@ int main()
     SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsAGameThatIsClosing);
     SKYDIAG_RUN_TEST(TestProcessExitAfterASkippedClosingHang);
     SKYDIAG_RUN_TEST(TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame);
+    SKYDIAG_RUN_TEST(TestExecuteConfirmedHangCapture_AGameEndedDuringTheCaptureIsNotClosing);
     SKYDIAG_RUN_TEST(TestHandleHangTick_LeavesAnExitDuringTheGraceWaitToTheExitTick);
     SKYDIAG_RUN_TEST(TestHandleHangTick_YieldsToACrashEvent);
     SKYDIAG_RUN_TEST(TestPssSnapshotWorksFromTheAttachHandle);
@@ -1311,6 +1386,8 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenTheGameRecoveredBeforeAQuickQuit);
     SKYDIAG_RUN_TEST(TestHeldHangDump_HeldEpisodeIsNotSkippedAsClosing);
     SKYDIAG_RUN_TEST(TestHeldHangDump_StallJudgedByTheCaptureThreshold);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenADialogWasVisible);
+    SKYDIAG_RUN_TEST(TestGameplayCaptureThenTheGamesExitIsASlowShutdown);
     SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);

@@ -132,13 +132,14 @@ HookCodeAtInfo FindHookCodeAt(const HookPageRecordInfo& record, std::uint64_t ad
   const std::uint64_t at = address - page->base;
   const RecordedHookStubInfo* next = nullptr;
   for (const auto& stub : page->stubs) {
-    if (stub.offset >= at && stub.offset - at <= kHookCodeContinueWindow && (!next || stub.offset < next->offset)) {
+    if (stub.offset >= at && stub.offset - at <= kHookCodeNextJumpWindow && (!next || stub.offset < next->offset)) {
       next = &stub;
     }
   }
   if (next) {
     info.has_next_stub = true;
     info.next_stub = *next;
+    info.next_stub_distance = static_cast<std::uint32_t>(next->offset - at);
   }
   return info;
 }

@@ -19,9 +19,10 @@ inline constexpr std::uint64_t kAddressLibraryMaxBytes = 16ull * 1024ull * 1024u
 
 // The game's Address Library file from Data\SKSE\Plugins beside its
 // executable, read through the same file system the game sees (MO2's VFS
-// included, the helper being the game's child process). Read once per game
-// executable; empty when the version, the file or the read is missing, or the
-// file is over kAddressLibraryMaxBytes.
+// included, the helper being the game's child process). Read once per
+// process, at the first call; later calls return what that one read without
+// touching the process. Empty when the version, the file or the read is
+// missing, or the file is over kAddressLibraryMaxBytes.
 std::string GameAddressLibraryBytes(std::uint32_t pid);
 
 }  // namespace skydiag::helper::internal

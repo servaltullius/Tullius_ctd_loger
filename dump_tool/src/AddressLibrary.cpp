@@ -56,8 +56,10 @@ bool ParseDeltaEncoded(Reader& in, std::vector<std::pair<std::uint64_t, std::uin
   }
   std::int32_t pointerSize = 0;
   std::int32_t count = 0;
+  // Every entry takes at least its type byte, so a count beyond the bytes
+  // left is a damaged file (and is refused before anything is reserved).
   if (!in.Read(&pointerSize) || !in.Read(&count) || pointerSize <= 0 || count < 0 ||
-      static_cast<std::uint64_t>(count) > kMaxEntries) {
+      static_cast<std::uint64_t>(count) > kMaxEntries || static_cast<std::uint64_t>(count) > in.Remaining()) {
     return false;
   }
   out.reserve(static_cast<std::size_t>(count));

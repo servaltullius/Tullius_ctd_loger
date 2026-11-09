@@ -106,6 +106,10 @@ void TestUnknownInput()
   Require(!library.Parse(unknown), "an unknown format");
   std::string huge = DeltaHeader(2, 0x7FFFFFFF);
   Require(!library.Parse(huge), "a count no real file has");
+  // Every entry takes at least a byte, so this count cannot be true.
+  std::string overcount = DeltaHeader(2, 1000);
+  overcount.push_back(static_cast<char>(0x11));
+  Require(!library.Parse(overcount), "a count beyond the bytes left");
 }
 
 }  // namespace

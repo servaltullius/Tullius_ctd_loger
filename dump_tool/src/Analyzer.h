@@ -699,8 +699,15 @@ struct AnalysisResult
   // (freeze): what signatures and the evidence line read.
   std::vector<std::wstring> stackwalk_primary_frames;
   // What the report and the viewer show (FormatCrashCallstackForReport): a
-  // crash stack from frame 0. Empty when not set; then stackwalk_primary_frames.
+  // crash stack from frame 0, the frames above the window put before it, so
+  // it is longer than stackwalk_primary_frames when the window starts below
+  // the top. Empty when not set; then stackwalk_primary_frames is shown
+  // (ShownCallstackFrames).
   std::vector<std::wstring> stackwalk_display_frames;
+  const std::vector<std::wstring>& ShownCallstackFrames() const
+  {
+    return stackwalk_display_frames.empty() ? stackwalk_primary_frames : stackwalk_display_frames;
+  }
   std::vector<CrashBucketFrame> stackwalk_primary_bucket_frames;
   std::uint32_t stackwalk_total_frames = 0;
   std::uint32_t stackwalk_symbolized_frames = 0;
@@ -716,10 +723,12 @@ struct AnalysisResult
   std::wstring stackwalk_truncation_module;         // no_unwind_info: the frame's module
   std::wstring stackwalk_truncation_unloaded_module;  // the cut address lies in this unloaded DLL
   // ADR-0027: the cut address lies in a mod's hook code the helper recorded
-  // (this page, 0: not), and where that code continues ("SkyrimSE.exe+0x37f9e6
-  // (ID 23329+0x776)"; empty when no recorded jump follows it).
+  // (this page, 0: not), and the next jump recorded in that code
+  // ("SkyrimSE.exe+0x37f9e6 (ID 23329+0x776)", that many bytes after the
+  // address; empty when none follows within kHookCodeNextJumpWindow).
   std::uint64_t stackwalk_truncation_hook_page = 0;
-  std::wstring stackwalk_truncation_hook_continues_to;
+  std::wstring stackwalk_truncation_hook_next_jump;
+  std::uint32_t stackwalk_truncation_hook_next_jump_distance = 0;
   std::wstring fault_unloaded_module;  // the exception address lies in this unloaded DLL
   // ADR-0019: what the faulting instruction of an access violation did
   // (verdict empty: nothing to say).

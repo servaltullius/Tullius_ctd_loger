@@ -814,7 +814,7 @@ bool HandleProcessExitTick(
         AppendLogLine(
           outBase,
           L"The game exited while it was still closing (exit_code=" + std::to_wstring(exitCode) + evidence
-            + L"; the hang check had seen at most one thread left). Either it was ended during a stalled exit (Task "
+            + L"; the hang check had seen one thread left). Either it was ended during a stalled exit (Task "
               L"Manager or a watchdog), or a crash handler ended a crash in the exit: Crash Logger ends a crash "
               L"it reports with exit code 1. Check for a Crash Logger crash-*.log from this time. Not a freeze "
               L"during play; no WER LocalDumps hint, since WER captures neither case.");
@@ -877,7 +877,11 @@ bool HandleProcessExitTick(
       const bool stalledSinceCapture = heartbeat.known && hang.captureThresholdSecThisEpisode != 0u &&
         heartbeat.secondsSince >= static_cast<double>(hang.captureThresholdSecThisEpisode);
       state->slowShutdownAtExit = IsSlowShutdownAtExit(
-        exitCode, hang.hangCapturedThisEpisode, hang.captureMayBeSlowShutdownThisEpisode, stalledSinceCapture);
+        exitCode,
+        hang.hangCapturedThisEpisode,
+        hang.captureMayBeSlowShutdownThisEpisode || hang.closingSeenAfterCaptureThisEpisode,
+        stalledSinceCapture,
+        hang.modalDialogSeenThisEpisode);
     }
     SettleHeldHangDumpAtExit(cfg, outBase, state);
     LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, state);

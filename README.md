@@ -8,7 +8,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 - **Not a crash-prevention mod.** It records signals and captures evidence; it does not swallow exceptions or attempt to keep playing.
 - **No uploads / telemetry.** All output is local. Online symbol downloads are OFF by default (`AllowOnlineSymbols=0`).
-- **Game frames with Address Library IDs** — the dump carries the game version's Address Library file, so a crash call stack (shown from its top frame) reads `SkyrimSE.exe+0x49fb54 (ID 29895+0xe4)` for mod authors to look up. A stack cut in a mod's hook code says so and where that code continues.
+- **Game frames with Address Library IDs** — the dump carries the game version's Address Library file, so a crash call stack (shown from its top frame) reads `SkyrimSE.exe+0x49fb54 (ID 29895+0xe4)` for mod authors to look up. A stack cut in a mod's hook code says so and names the next jump recorded in that code.
 - **CrashLoggerSSE integration** — auto-detects timestamped `crash-*.log` / `threaddump-*.log` artifacts (checked against logs up to v1.27), and surfaces top callstack modules (crash logs only; a thread dump's all-thread module tally is not used), C++ exception blocks, and CrashLogger version. A normal runtime `CrashLogger.log` without a `Callstack:` section is not treated as crash evidence.
 
 ## Components
@@ -105,6 +105,9 @@ Hang detection thresholds are configurable in `SkyrimDiagHelper.ini`:
 Quitting can take longer than the menu threshold on a large load order. The helper does not treat that as a freeze:
 - When the game is already in its exit (one thread left), no freeze dump is taken. The helper log says `Hang detected while the game is closing`.
 - A freeze captured in a menu waits to be analyzed until the game recovers or exits. If it is still frozen when the game exits normally (exit code 0), it was a slow quit: its dump and files are removed before analysis, so it takes no dump slot and no crash history entry. `KeepSlowShutdownHangDumps=1` keeps and analyzes it. Freezes during play are analyzed at once and always kept.
+- A capture with a dialog window of the game on screen (a plugin's error message) is never taken for a slow quit, whatever the exit code.
+- A quit that starts outside a menu (Alt+F4 during play) and stalls is captured as a freeze during play. When the helper then sees the game in its exit (one thread left), the normal exit opens no freeze viewer; the dump stays.
+- When the viewer opens at the freeze itself (`AutoOpenViewerOnHang=1` with `AutoOpenHangAfterProcessExit=0`), it analyzes the capture at once, so nothing waits and a slow quit's dump stays.
 
 ## Language
 
