@@ -90,8 +90,16 @@ FreezeCaptureResult CaptureFreezeDumpAndWct(
   wctJson["capture"]["isLoading"] = decision.isLoading;
   wctJson["capture"]["stateFlags"] = stateFlags;
   // A game in the background can be paused, not stuck: the analyzer takes a
-  // manual capture for a stuck game only when its window was in front.
+  // manual capture for a stuck game when its window was in front, or when
+  // its window no longer answered. A frozen game is not always the
+  // foreground window: the player switched away from it, or Windows shows
+  // its own "Not Responding" window in its place. Hang suppression makes the
+  // same exception (EvaluateHangSuppression). Not written when the game has
+  // no window to ask.
   wctJson["capture"]["gameInForeground"] = IsPidInForeground(proc.pid);
+  if (const HWND gameWindow = FindMainWindowForPid(proc.pid)) {
+    wctJson["capture"]["gameWindowResponsive"] = IsWindowResponsive(gameWindow, 250);
+  }
 
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
   result.dumpProfile = skydiag::helper::ResolveDumpProfile(cfg.dumpMode, request.profileKind, cfg.dumpAllModuleCode);

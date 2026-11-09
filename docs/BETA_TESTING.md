@@ -89,7 +89,7 @@
 
 - `Ctrl+Shift+Backspace` : 현재 상태를 “스냅샷”으로 캡처합니다. (`SkyrimDiagHelper.ini`의 `ManualCaptureHotkey=`로 변경할 수 있습니다. v0.2.68-rc3까지의 `Ctrl+Shift+F12`는 이제 Crash Logger 스레드 덤프만 동작시킵니다.)
 - 정상 상태에서 찍은 수동 스냅샷은 “문제가 있다”는 의미가 아닐 수 있습니다.
-  - 게임 창이 앞에 있고 heartbeat가 5초 이상 멈춘 상태에서 찍으면 프리징으로 분석합니다(WCT의 `capture.gameInForeground`). 백그라운드에서 찍었거나 이 값이 없는 이전 버전 덤프는 스냅샷으로 두되, "멈춤이 아닙니다"라고 단정하지 않고 몇 초 동안 응답이 없었는지 알려 줍니다.
+  - heartbeat가 5초 이상 멈췄고 게임 창이 앞에 있거나(WCT의 `capture.gameInForeground`) 창이 응답하지 않는(`capture.gameWindowResponsive`가 false) 상태에서 찍으면 프리징으로 분석합니다. 창이 응답하는 채 백그라운드에서 찍었거나 이 값들이 없는 이전 버전 덤프는 스냅샷으로 두되, "멈춤이 아닙니다"라고 단정하지 않고 몇 초 동안 응답이 없었는지 알려 줍니다.
   - 진단은 **문제 상황(프리징/무한로딩/CTD 직전)** 에서 캡처했을 때 가장 유효합니다.
 
 ## 3-1) “빠른 재현” 테스트(가능한 경우)

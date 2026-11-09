@@ -268,13 +268,9 @@ std::optional<WctInfo> TrySummarizeWct(std::string_view utf8)
       info.secondsSinceHeartbeat = capIt->value("secondsSinceHeartbeat", 0.0);
       info.thresholdSec = capIt->value("thresholdSec", 0u);
       info.isLoading = capIt->value("isLoading", false);
-      if (const auto fg = capIt->find("gameInForeground"); fg != capIt->end() && fg->is_boolean()) {
-        info.gameInForegroundKnown = true;
-        info.gameInForeground = fg->get<bool>();
-      }
+      info.gameWindow = ParseWctGameWindowState(*capIt);
       if ((info.thresholdSec > 0u && info.secondsSinceHeartbeat >= static_cast<double>(info.thresholdSec)) ||
-          IsManualCaptureOfStalledGame(
-            info.capture_kind, info.secondsSinceHeartbeat, info.gameInForegroundKnown, info.gameInForeground)) {
+          IsManualCaptureOfStalledGame(info.capture_kind, info.secondsSinceHeartbeat, info.gameWindow)) {
         info.suggestsHang = true;
       }
     }

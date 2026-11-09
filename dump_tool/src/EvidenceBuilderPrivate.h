@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Analyzer.h"
+#include "WctTypes.h"
 
 namespace skydiag::dump_tool::internal {
 
@@ -22,9 +23,7 @@ struct WctInfo
   double secondsSinceHeartbeat = 0.0;
   std::uint32_t thresholdSec = 0;
   bool isLoading = false;
-  // "gameInForeground" in the capture block; absent in older captures.
-  bool gameInForegroundKnown = false;
-  bool gameInForeground = false;
+  WctGameWindowState gameWindow{};
   bool suggestsHang = false;
 };
 

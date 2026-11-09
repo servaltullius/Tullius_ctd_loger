@@ -814,8 +814,7 @@ bool DetermineHangLike(
       capSaysHang =
         (cap->kind == "hang") ||
         (cap->thresholdSec > 0u && cap->secondsSinceHeartbeat >= static_cast<double>(cap->thresholdSec)) ||
-        internal::IsManualCaptureOfStalledGame(
-          cap->kind, cap->secondsSinceHeartbeat, cap->gameInForegroundKnown, cap->gameInForeground);
+        internal::IsManualCaptureOfStalledGame(cap->kind, cap->secondsSinceHeartbeat, cap->gameWindow);
       hangLike = capSaysHang;
     } else {
       hangLike = nameHang;

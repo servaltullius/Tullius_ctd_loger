@@ -14,22 +14,53 @@ namespace skydiag::dump_tool::internal {
 // stall in progress, so it is not called "not a hang".
 inline constexpr double kNotHangHeartbeatAgeSec = 5.0;
 
+// Where the game's window was at a capture, from the capture block. Each
+// value is absent in captures of helpers that did not write it, and
+// "gameWindowResponsive" also when the game had no window to ask.
+struct WctGameWindowState
+{
+  bool inForegroundKnown = false;
+  bool inForeground = false;     // "gameInForeground"
+  bool responsiveKnown = false;
+  bool responsive = false;       // "gameWindowResponsive"
+};
+
 // A manual capture of a game that was stuck: the player pressed the hotkey
-// with the game window in front while its main thread had not answered for
-// kNotHangHeartbeatAgeSec. The helper's own threshold is no test for it (an
-// endless loading screen stays under the 600 s loading threshold for ten
-// minutes), and such a capture used to be called "a snapshot, not a freeze,
-// nothing to do". A game in the background can simply be paused, and a
-// capture that does not say where the game window was (helpers before
-// "gameInForeground") is not judged this way.
+// while its main thread had not answered for kNotHangHeartbeatAgeSec, and
+// the game's window was in front or did not answer either. The helper's own
+// threshold is no test for it (an endless loading screen stays under the
+// 600 s loading threshold for ten minutes), and such a capture used to be
+// called "a snapshot, not a freeze, nothing to do". A game in the background
+// whose window still answers can simply be paused. A window that does not
+// answer is a stuck game wherever it is (the player switched away, or
+// Windows put its "Not Responding" window in front of it), as the helper's
+// hang suppression has it. A capture that says neither (helpers before these
+// fields) is not judged this way.
 inline bool IsManualCaptureOfStalledGame(
   std::string_view kind,
   double secondsSinceHeartbeat,
-  bool gameInForegroundKnown,
-  bool gameInForeground) noexcept
+  const WctGameWindowState& window) noexcept
 {
-  return kind == "manual" && gameInForegroundKnown && gameInForeground &&
-         secondsSinceHeartbeat >= kNotHangHeartbeatAgeSec;
+  const bool inFront = window.inForegroundKnown && window.inForeground;
+  const bool windowHung = window.responsiveKnown && !window.responsive;
+  return kind == "manual" && (inFront || windowHung) && secondsSinceHeartbeat >= kNotHangHeartbeatAgeSec;
+}
+
+// Reads WctGameWindowState from the capture block (a nlohmann::json object;
+// a template so this header stays free of the JSON library).
+template <class Json>
+WctGameWindowState ParseWctGameWindowState(const Json& capture)
+{
+  WctGameWindowState state{};
+  if (const auto it = capture.find("gameInForeground"); it != capture.end() && it->is_boolean()) {
+    state.inForegroundKnown = true;
+    state.inForeground = it->template get<bool>();
+  }
+  if (const auto it = capture.find("gameWindowResponsive"); it != capture.end() && it->is_boolean()) {
+    state.responsiveKnown = true;
+    state.responsive = it->template get<bool>();
+  }
+  return state;
 }
 
 struct WctCaptureDecision
@@ -39,9 +70,7 @@ struct WctCaptureDecision
   double secondsSinceHeartbeat = 0.0;
   std::uint32_t thresholdSec = 0;
   bool isLoading = false;
-  // "gameInForeground" in the capture block; absent in older captures.
-  bool gameInForegroundKnown = false;
-  bool gameInForeground = false;
+  WctGameWindowState gameWindow{};
 };
 
 struct WctModalDialog
@@ -73,9 +102,7 @@ struct WctFreezeSummary
   double secondsSinceHeartbeat = 0.0;
   std::uint32_t thresholdSec = 0;
   bool isLoading = false;
-  // "gameInForeground" in the capture block; absent in older captures.
-  bool gameInForegroundKnown = false;
-  bool gameInForeground = false;
+  WctGameWindowState gameWindow{};
   bool suggestsHang = false;
   bool pss_snapshot_requested = false;
   bool pss_snapshot_used = false;
