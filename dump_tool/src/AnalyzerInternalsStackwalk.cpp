@@ -124,6 +124,21 @@ std::vector<std::wstring> FormatCallstackForDisplay(
   bool fromTop,
   const std::vector<std::wstring>* frameLabels);
 
+// The crash stack shown in the report and the viewer. FormatCallstackForDisplay
+// starts two frames above the first plugin frame (that list feeds signatures
+// and the evidence line), but the frames above it are what the game was doing
+// when it crashed (2026-11-09: LockForRead <- GetExtraData <-
+// GetDisplayFullName <- IsInCombat, above a plugin's condition hook). They are
+// shown from frame 0; more than 8 of them shrink to the first 4 and a line
+// saying how many are left out.
+std::vector<std::wstring> FormatCrashCallstackForReport(
+  HANDLE process,
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t maxFrames,
+  const std::vector<std::wstring>* frameLabels,
+  bool english);
+
 }  // namespace stackwalk
 
 bool TryReadContextFromLocation(void* dumpBase, std::uint64_t dumpSize, const MINIDUMP_LOCATION_DESCRIPTOR& loc, CONTEXT& out)
@@ -387,6 +402,10 @@ bool TryComputeStackwalkSuspects(
         &out.stackwalk_source_line_frames,
         fromTop,
         &labels);
+      out.stackwalk_display_frames = fromTop
+        ? out.stackwalk_primary_frames
+        : stackwalk::FormatCrashCallstackForReport(
+            sym.process, modules, bestAny.pcs, /*maxFrames=*/12u, &labels, lang == i18n::Language::kEnglish);
     }
     return false;
   }
@@ -412,6 +431,10 @@ bool TryComputeStackwalkSuspects(
     &out.stackwalk_source_line_frames,
     fromTop,
     &labels);
+  out.stackwalk_display_frames = fromTop
+    ? out.stackwalk_primary_frames
+    : stackwalk::FormatCrashCallstackForReport(
+        sym.process, modules, best.pcs, /*maxFrames=*/12u, &labels, lang == i18n::Language::kEnglish);
   return true;
 }
 
