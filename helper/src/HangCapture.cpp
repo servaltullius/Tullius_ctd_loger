@@ -103,6 +103,17 @@ HangTickResult HandleHangTick(
     thresholds.loadingSec);
 
   if (!decision.isHang) {
+    // Under the threshold, but is that a recovery? The threshold follows the
+    // game's flags, which can change while the heartbeat stays stopped (a
+    // load flag makes it 600 s). A captured or skipped episode is over only
+    // when the heartbeat has moved; otherwise it would be released as
+    // "recovered" and the exit would no longer see it.
+    const bool episodeOpen = state->hangCapturedThisEpisode || state->hangSkippedAsClosingThisEpisode;
+    if (episodeOpen && state->episodeHeartbeatQpc != 0u &&
+        proc.shm->header.last_heartbeat_qpc == state->episodeHeartbeatQpc) {
+      NoteGameClosingAfterCapture(proc, outBase, state);
+      return HangTickResult::kContinue;
+    }
     // A freeze the game came back from: not a slow shutdown.
     ReleaseHeldHangDump(cfg, outBase, L"the game recovered", state);
     ResetHangCaptureEpisode(state);
@@ -118,8 +129,8 @@ HangTickResult HandleHangTick(
   // Common case: users Alt-Tab away while Skyrim is intentionally paused.
   // In that state, the heartbeat can stop, but it is not actionable to create a hang dump.
   // Default: suppress auto hang dumps while Skyrim is not the foreground process.
-  // (Optional) If suppression is disabled, we still try to detect "background pause" by checking
-  // whether the game window is responsive.
+  // With SuppressHangWhenNotForeground=0 nothing is suppressed, a background pause included
+  // (the ini says so: "may increase false positives").
   if (SuppressHangAndLogIfNeeded(
         cfg,
         proc,

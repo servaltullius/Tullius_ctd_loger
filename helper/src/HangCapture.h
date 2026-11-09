@@ -106,6 +106,11 @@ struct HangCaptureState
   bool closingSeenAfterCaptureThisEpisode = false;
   // When NoteGameClosingAfterCapture looks next (GetTickCount64).
   std::uint64_t nextClosingCheckTick64 = 0;
+  // The heartbeat this episode's hang was captured (or skipped as closing)
+  // at. The thresholds follow the game's flags, which can change while the
+  // heartbeat stays stopped (a load flag makes the threshold 600 s), so the
+  // episode is over only when the heartbeat moves (HandleHangTick).
+  std::uint64_t episodeHeartbeatQpc = 0;
 
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;

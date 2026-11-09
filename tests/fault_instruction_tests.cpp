@@ -384,6 +384,33 @@ void TestOtherVerdicts()
   assert(DescribeFaultInstruction(info, L"", true).find(L"aligned to 16 bytes, but [rax] was 0x10000008") !=
          std::wstring::npos);
 
+  // The same on a store: a general-protection fault is reported as a read
+  // with no address whatever the instruction does (a prolog saving xmm6 to a
+  // misaligned stack slot), so the kind is not held against it.
+  regs[kRax] = 0x10000008ull;
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x0F, 0x29, 0x00 });
+  assert(info.verdict == "misaligned");
+  regs[kRax] = 0x89E2DDDE1A260000ull;
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x48, 0x89, 0x08 });
+  assert(info.verdict == "noncanonical");
+  // With an address the kind still has to fit: a read fault on a store says
+  // nothing about the store.
+  regs[kRax] = 0x10000000ull;
+  info = Explain(Fault(kAccessViolationRead, 0x10000000ull, regs), { 0x48, 0x89, 0x08 });
+  assert(info.verdict == "address_only");
+
+  // [small + large], unscaled: which register is the pointer is only the
+  // encoding's order, and the address is far from 0, so no "null pointer".
+  regs[kRcx] = 5;
+  regs[kRax] = 0x7FF012345000ull;
+  info = Explain(Fault(kAccessViolationRead, 0x7FF012345005ull, regs), { 0x8A, 0x04, 0x01 });
+  assert(info.verdict == "address_only");
+  // A null base with a scaled index stays a null pointer.
+  regs[kRcx] = 0;
+  regs[kRdx] = 0x100000ull;
+  info = Explain(Fault(kAccessViolationRead, 0x800000ull, regs), { 0x8B, 0x04, 0xD1 });
+  assert(info.verdict == "null_pointer");
+
   // A RIP-relative global.
   info = Explain(Fault(kAccessViolationRead, kRip + 7u + 0x10u, regs), { 0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00 });
   assert(info.verdict == "fixed_address" && info.base_register.empty());

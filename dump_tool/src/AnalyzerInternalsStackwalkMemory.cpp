@@ -122,7 +122,12 @@ const LocalImageMemory::Image* LocalImageMemory::Resolve(std::uint64_t addr) con
       const auto* view = reinterpret_cast<const std::uint8_t*>(
         reinterpret_cast<ULONG_PTR>(handle) & ~static_cast<ULONG_PTR>(3));
       const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(view);
-      bool matches = dos->e_magic == IMAGE_DOS_SIGNATURE && dos->e_lfanew > 0;
+      // The low bits say how it was mapped: 2 as an image (sections at their
+      // RVAs), 1 as a flat data file, which the loader can fall back to with
+      // these flags and which the RVA reads below would misread; 0 is a
+      // module this process already has loaded, an image too.
+      const bool flatDataFile = (reinterpret_cast<ULONG_PTR>(handle) & 3u) == 1u;
+      bool matches = !flatDataFile && dos->e_magic == IMAGE_DOS_SIGNATURE && dos->e_lfanew > 0;
       if (matches) {
         const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(view + dos->e_lfanew);
         matches =

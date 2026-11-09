@@ -18,6 +18,7 @@
 #include "SkyrimDiagHelper/ModalDialogProbe.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagHelper/WctCapture.h"
+#include "WindowHeuristics.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -88,6 +89,9 @@ FreezeCaptureResult CaptureFreezeDumpAndWct(
   wctJson["capture"]["thresholdSec"] = decision.thresholdSec;
   wctJson["capture"]["isLoading"] = decision.isLoading;
   wctJson["capture"]["stateFlags"] = stateFlags;
+  // A game in the background can be paused, not stuck: the analyzer takes a
+  // manual capture for a stuck game only when its window was in front.
+  wctJson["capture"]["gameInForeground"] = IsPidInForeground(proc.pid);
 
   const std::string pluginScanJson = CollectPluginScanJson(proc, outBase);
   result.dumpProfile = skydiag::helper::ResolveDumpProfile(cfg.dumpMode, request.profileKind, cfg.dumpAllModuleCode);

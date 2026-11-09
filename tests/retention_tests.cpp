@@ -268,6 +268,40 @@ static void Test_RotatesHelperLog()
   assert(Exists(dir / "SkyrimDiagHelper.log.1"));
 }
 
+#ifdef _WIN32
+// Another program holding the log open without delete sharing (a tail in a
+// console) makes the log's own move fail. The archives must stay as they are
+// then, at every later log line too: moving them first lost one generation
+// per line.
+static void Test_LockedLogLeavesItsArchivesAlone()
+{
+  const auto dir = MakeTempDir();
+  const auto log = dir / "SkyrimDiagHelper.log";
+  WriteFile(log, 64);
+  WriteFile(dir / "SkyrimDiagHelper.log.1", 8);
+  WriteFile(dir / "SkyrimDiagHelper.log.2", 4);
+
+  const HANDLE held = CreateFileW(
+    log.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+  assert(held != INVALID_HANDLE_VALUE);
+  for (int line = 0; line < 3; ++line) {
+    RotateLogFileIfNeeded(log, /*maxBytes=*/16, /*maxFiles=*/2);
+  }
+  CloseHandle(held);
+  std::error_code ec;
+  assert(Exists(log));
+  assert(std::filesystem::file_size(dir / "SkyrimDiagHelper.log.1", ec) == 8u);
+  assert(std::filesystem::file_size(dir / "SkyrimDiagHelper.log.2", ec) == 4u);
+
+  // Once it is free the rotation goes through, and leaves no work file.
+  RotateLogFileIfNeeded(log, /*maxBytes=*/16, /*maxFiles=*/2);
+  assert(!Exists(log));
+  assert(std::filesystem::file_size(dir / "SkyrimDiagHelper.log.1", ec) == 64u);
+  assert(std::filesystem::file_size(dir / "SkyrimDiagHelper.log.2", ec) == 8u);
+  assert(!Exists(dir / "SkyrimDiagHelper.log.rotating"));
+}
+#endif
+
 // Names the ANSI code page cannot represent (here a snowman): retention now
 // compares UTF-8 names, which never throw, instead of path::string(), which
 // substitutes '?' on most systems but can throw when the code page is UTF-8.
@@ -777,6 +811,9 @@ int main()
   Test_PrunesCrashManifestWithPrecisionTimestamp();
   Test_PrunesCrashRecaptureManifestWithItsDump();
   Test_RotatesHelperLog();
+#ifdef _WIN32
+  Test_LockedLogLeavesItsArchivesAlone();
+#endif
   Test_PrunesAroundNamesOutsideTheAnsiCodePage();
   Test_PrunesAnalysisCachesWithoutTheirDump();
   Test_PrunesAnalysisCachesUnderALongOutputDir();

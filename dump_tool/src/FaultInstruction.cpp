@@ -755,7 +755,12 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
     // A general-protection fault has no address to state.
     return fault.address == kAccessViolationNoAddress ? FaultInstructionInfo{} : info;
   };
-  if (!fault.has_registers || !(write ? Writes(insn->access) : Reads(insn->access))) {
+  // A general-protection fault carries no address and is reported as a read
+  // whatever the instruction does (a movaps store to a misaligned stack slot
+  // too), so its kind is not held against the instruction.
+  const bool kindFits = fault.address == kAccessViolationNoAddress ||
+    (write ? Writes(insn->access) : Reads(insn->access));
+  if (!fault.has_registers || !kindFits) {
     return unexplained();
   }
   const auto ea = X64EffectiveAddress(*insn, fault.exception_address, fault.registers);
@@ -796,6 +801,10 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
     // is the index's address, not a fixed one.
     if (insn->stack_slot || (m.base == kRsp && !bigIndex)) {
       verdict = "stack";
+    } else if (m.base >= 0 && info.base_value < kNullPageEnd && bigIndex && m.scale == 1u) {
+      // [small + large], unscaled: which register is the pointer is only the
+      // encoding's order, and the address is not near 0. State the address.
+      verdict = "address_only";
     } else if (m.base >= 0 && info.base_value < kNullPageEnd) {
       verdict = "null_pointer";
     } else if (bigIndex || (m.base < 0 && m.index >= 0)) {

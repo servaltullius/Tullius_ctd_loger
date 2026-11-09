@@ -10,8 +10,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "CaptureCommon.h"
 #include "CrashCapture.h"
 #include "DumpToolLaunch.h"
+#include "HelperCommon.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
@@ -102,9 +104,11 @@ bool PromoteReleasedCrashDump(
     return false;
   }
   std::wstring dumpPath = crash.releasedDumpPath;
+  const auto pluginScanInputs = std::move(crash.releasedPluginScanInputs);
   crash.releasedDumpPath.clear();
   crash.releasedDumpPreserve = false;
   crash.releasedDumpRecovery = LateRecoveryState{};
+  crash.releasedPluginScanInputs.reset();
   std::error_code ec;
   const bool exists = ExistsForIo(dumpPath, ec);
   if (ec) {
@@ -137,6 +141,18 @@ bool PromoteReleasedCrashDump(
     outBase,
     L"Its dump was kept since the release; reporting it as the crash dump: "
       + std::filesystem::path(dumpPath).filename().wstring());
+  // A crash dump carries no plugin stream; the analyzer reads the scan from
+  // this file beside it (plugin list, missing masters, SKSE log, MO2 mods).
+  // The game is gone now, so the scan uses what was read at the release.
+  if (pluginScanInputs) {
+    const std::string pluginScanJson = CollectPluginScanJson(*pluginScanInputs, outBase);
+    if (!pluginScanJson.empty()) {
+      const std::filesystem::path dumpFs(dumpPath);
+      const auto pluginScanPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
+      WriteTextFileUtf8(pluginScanPath, pluginScanJson);
+      AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
+    }
+  }
   // The game has exited, so a queued viewer opens right after this
   // (LaunchDeferredViewersAfterExit) and analyzes the dump itself.
   // ADR-0022: no viewer for an error while the game was being closed.
@@ -153,6 +169,9 @@ bool PromoteReleasedCrashDump(
       AppendLogLine(outBase, L"Crash headless analysis queue failed: " + analyzeErr);
     }
   } else if (viewerQueued) {
+    // Nothing else analyzes it: LaunchDeferredViewersAfterExit starts the
+    // analysis itself when the viewer does not open.
+    state->promotedDumpAwaitsViewer = true;
     AppendLogLine(outBase, L"Queued the released crash's dump for the crash viewer.");
   }
   return true;
@@ -304,6 +323,38 @@ bool DrainCrashEventBeforeExit(
         + std::to_wstring(info.crashSeq)
         + L"); the process address space is already gone, so dump capture was not attempted.");
     return true;
+  }
+
+  auto& crashState = state->crashCaptured;
+  const std::uint64_t exitTick64 = GetTickCount64();
+  // The dump of this exception could not be written while the game was
+  // alive, and the game then ran on for a minute or more: it handled the
+  // exception, as with one the filters release. Its record is still the
+  // newest at the exit, but this exit is not its crash.
+  if (crashState.dumpWriteFailedCrashSeq == info.crashSeq && !crashState.dumpWriteFailedProcessExited &&
+      crashState.dumpWriteFailedTick64 != 0u && exitTick64 >= crashState.dumpWriteFailedTick64 &&
+      exitTick64 - crashState.dumpWriteFailedTick64 >= kLateRecoveryMinAliveMs) {
+    AppendLogLine(
+      outBase,
+      L"Committed crash_seq=" + std::to_wstring(info.crashSeq) + L", whose dump could not be written, is "
+        + std::to_wstring((exitTick64 - crashState.dumpWriteFailedTick64) / 1000u)
+        + L" s old and the game kept running after it; not reporting it at process exit (exit_code="
+        + std::to_wstring(exitCode) + L").");
+    crashState.dumpWriteFailedCrashSeq = 0u;
+    return false;
+  }
+  // The newest crash has no dump (its write failed), but an exception this
+  // game raised moments before left one, held since it was released on a few
+  // seconds of heartbeat: the same dying game, and the only dump of it.
+  if (crashState.dumpWriteFailedCrashSeq == info.crashSeq && !crashState.releasedDumpPath.empty() &&
+      exitTick64 >= crashState.releasedCrashTick64 &&
+      exitTick64 - crashState.releasedCrashTick64 < kLateRecoveryMinAliveMs) {
+    AppendLogLine(
+      outBase,
+      L"The dump of crash_seq=" + std::to_wstring(info.crashSeq) + L" could not be written; reporting the dump kept "
+        L"from the exception released " + std::to_wstring((exitTick64 - crashState.releasedCrashTick64) / 1000u)
+        + L" s earlier (crash_seq=" + std::to_wstring(crashState.releasedCrashSeq) + L") as this crash's.");
+    (void)PromoteReleasedCrashDump(cfg, outBase, info, state);
   }
 
   if (state->postExitEvidenceSeq == info.crashSeq) {
@@ -688,6 +739,12 @@ void LaunchDeferredViewersAfterExit(
       outBase,
       L"crash_deferred_exit");
     state->crashViewerLaunchedAtExit = launch == DumpToolViewerLaunchResult::kLaunched;
+    if (launch != DumpToolViewerLaunchResult::kLaunched && state->promotedDumpAwaitsViewer) {
+      // A promoted dump was left to this viewer; without it there would be no report.
+      AppendLogLine(outBase, L"The crash viewer did not open; starting the analysis of the released crash's dump.");
+      StartDumpToolHeadlessIfConfigured(cfg, deferredDumpPath, outBase);
+    }
+    state->promotedDumpAwaitsViewer = false;
     if (launch == DumpToolViewerLaunchResult::kLaunched) {
       AppendLogLine(
         outBase,

@@ -49,7 +49,10 @@ jobs:
             # keeps non-ASCII paths (doc/*.md) unquoted for the match.
             if files=$(git -c core.quotePath=false diff --no-renames --name-only "$BASE_SHA...$HEAD_SHA") && [ -n "$files" ]; then
               echo "$files"
-              if ! echo "$files" | grep -qvE '(\.md$|^docs/|^doc/)'; then
+              # A here-string, not a pipe: grep -q ends at its first match,
+              # and on a long list echo then dies of SIGPIPE, which pipefail
+              # would report as "no code file" and skip the Windows job.
+              if ! grep -qvE '(\.md$|^docs/|^doc/)' <<< "$files"; then
                 code=false
               fi
             fi

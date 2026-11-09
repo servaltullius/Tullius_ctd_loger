@@ -136,6 +136,48 @@ def test_user_visible_object_ref_is_graded_before_raw_suspect_fallback() -> None
         assert report["overall_high_confidence_precision_vs_ground_truth_mod"] == 1.0
 
 
+def test_location_and_ambiguous_object_refs_are_graded_as_the_viewer_shows_them() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        # The cell's plugin is first in the list, but the viewer leaves a
+        # location out: the first reference it shows is the actual cause.
+        located = {
+            "crash_bucket_key": "bucket-location-ref",
+            "triage": {"review_status": "reviewed", "ground_truth_mod": "Actual Cause.esp"},
+            "exception": {"module_plus_offset": "unknown"},
+            "actionable_candidates": [],
+            "crash_logger": {
+                "object_refs": [
+                    {"esp_name": "Where It Happened.esp", "best_object_type": "TESObjectCELL", "relevance_score": 18},
+                    {"esp_name": "Actual Cause.esp", "best_object_type": "Character", "relevance_score": 16},
+                ]
+            },
+            "suspects": [],
+        }
+        _write_summary(root / "case_location_SkyrimDiagSummary.json", located)
+        report = _run_script(root=root, out_json=root / "report.json")
+        assert report["gt_top1_match_total"] == 1
+        assert report["high_confidence_predictions_total"] == 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        # A log that may be another crash's is shown as a low reference.
+        ambiguous = {
+            "crash_bucket_key": "bucket-ambiguous-ref",
+            "triage": {"review_status": "reviewed", "ground_truth_mod": "Actual Cause.esp"},
+            "exception": {"module_plus_offset": "unknown"},
+            "actionable_candidates": [],
+            "crash_logger": {
+                "pairing": {"ambiguous": True},
+                "object_refs": [{"esp_name": "Other Crash.esp", "best_object_type": "Character", "relevance_score": 18}],
+            },
+            "suspects": [],
+        }
+        _write_summary(root / "case_ambiguous_SkyrimDiagSummary.json", ambiguous)
+        report = _run_script(root=root, out_json=root / "report.json")
+        assert report["high_confidence_predictions_total"] == 0
+
+
 def test_abstention_is_measured_when_no_candidate_is_shown() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -409,6 +451,7 @@ if __name__ == "__main__":
     test_ground_truth_mod_matches_inferred_mod_name()
     test_user_visible_actionable_candidate_is_graded_before_raw_suspect()
     test_user_visible_object_ref_is_graded_before_raw_suspect_fallback()
+    test_location_and_ambiguous_object_refs_are_graded_as_the_viewer_shows_them()
     test_abstention_is_measured_when_no_candidate_is_shown()
     test_quality_gate_fails_closed_when_samples_or_precision_are_missing()
     test_quality_gate_passes_when_configured_thresholds_are_met()

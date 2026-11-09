@@ -975,6 +975,12 @@ static void Test_IsVanillaDlcEsp_AllKnown()
   assert(IsVanillaDlcEspAsciiLower("dragonborn.esm"));
   assert(!IsVanillaDlcEspAsciiLower("mymod.esp"));
   assert(!IsVanillaDlcEspAsciiLower(""));
+  // Creation Club content is a master or light master; a mod's plugin can
+  // start with "cc" too.
+  assert(IsVanillaDlcEspAsciiLower("ccbgssse001-fish.esm"));
+  assert(IsVanillaDlcEspAsciiLower("ccqdrsse001-survivalmode.esl"));
+  assert(!IsVanillaDlcEspAsciiLower("cc's enhanced ore veins sse.esp"));
+  assert(!IsVanillaDlcEspAsciiLower("cc"));
 }
 
 static void Test_ParseObjectRefs_MalformedQuotedParen_NoInfiniteLoop()

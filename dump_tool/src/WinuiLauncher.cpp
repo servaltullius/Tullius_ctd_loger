@@ -68,24 +68,42 @@ bool HasArg(int argc, wchar_t** argv, std::wstring_view expected)
   return false;
 }
 
+std::string ToUtf8(std::wstring_view text)
+{
+  if (text.empty()) {
+    return {};
+  }
+  const int size = WideCharToMultiByte(
+    CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+  if (size <= 0) {
+    return {};
+  }
+  std::string out(static_cast<std::size_t>(size), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
+  return out;
+}
+
 void WriteLauncherError(const std::filesystem::path& launcherDir, std::wstring_view message)
 {
   const auto logPath = launcherDir / L"SkyrimDiagDumpToolWinUI_launcher_error.log";
-  std::wofstream log(logPath, std::ios::app);
+  // UTF-8 bytes through a narrow stream: a wide stream in the "C" locale
+  // stops at the first character it cannot convert (a Korean folder name in
+  // the path), and the message, with its error code, ended there.
+  std::ofstream log(logPath, std::ios::app | std::ios::binary);
   if (!log) {
     return;
   }
 
   SYSTEMTIME now{};
   GetLocalTime(&now);
-  log << L"["
-      << now.wYear << L"-"
-      << now.wMonth << L"-"
-      << now.wDay << L" "
-      << now.wHour << L":"
-      << now.wMinute << L":"
-      << now.wSecond << L"] "
-      << message << L"\n";
+  log << "["
+      << now.wYear << "-"
+      << now.wMonth << "-"
+      << now.wDay << " "
+      << now.wHour << ":"
+      << now.wMinute << ":"
+      << now.wSecond << "] "
+      << ToUtf8(message) << "\n";
 }
 
 int Fail(const std::filesystem::path& launcherDir, const std::wstring& message, bool headless)

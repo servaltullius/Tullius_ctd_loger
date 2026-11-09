@@ -22,6 +22,9 @@ struct WctInfo
   double secondsSinceHeartbeat = 0.0;
   std::uint32_t thresholdSec = 0;
   bool isLoading = false;
+  // "gameInForeground" in the capture block; absent in older captures.
+  bool gameInForegroundKnown = false;
+  bool gameInForeground = false;
   bool suggestsHang = false;
 };
 

@@ -563,6 +563,57 @@ void TestManualLoadingCaptureHasOneHeartbeatRule()
   }
 }
 
+// A manual capture of a game stuck in the foreground (the hotkey on an
+// endless loading screen, far under the helper's 600 s loading threshold) is
+// a freeze, not "a snapshot, nothing to do". In the background, or from a
+// helper that does not say where the window was, it stays a snapshot, but its
+// wording no longer claims that the game was not stuck.
+void TestManualCaptureOfAStalledGame()
+{
+  const auto make = [](const char* age, const char* foreground) {
+    AnalysisResult r{};
+    r.dump_path = L"C:\\Logs\\SkyrimDiag_Manual_20261110_120000_000.dmp";
+    r.state_flags = skydiag::kState_Loading;
+    r.has_wct = true;
+    r.wct_json_utf8 = std::string(R"({"capture":{"kind":"manual","secondsSinceHeartbeat":)") + age +
+                      R"(,"thresholdSec":600,"isLoading":true)" + foreground + R"(},"threads":[]})";
+    return r;
+  };
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+
+    auto front = make("120.0", R"(,"gameInForeground":true)");
+    BuildEvidenceAndSummary(front, lang);
+    Require(front.is_hang_like && !front.is_snapshot_like, "stuck with its window in front: a freeze");
+    Require(front.quick_answer.kind == "freeze", "and the quick answer says so");
+    Require(front.summary_sentence.find(en ? L"heartbeatAge=120.0s, threshold 600s" : L"heartbeatAge=120.0s, 기준 600s") !=
+              std::wstring::npos,
+      "under the helper's threshold is not written as over it");
+
+    for (const char* where : { R"(,"gameInForeground":false)", "" }) {
+      auto unknown = make("120.0", where);
+      BuildEvidenceAndSummary(unknown, lang);
+      Require(unknown.is_snapshot_like, "in the background, or not said: still a snapshot");
+      Require(unknown.quick_answer.case_id == "manual_snapshot_unresponsive", "with its own quick answer");
+      Require(unknown.quick_answer.headline.find(en ? L"had not responded for 120 seconds" : L"120초 동안 응답하지 않았습니다") !=
+                std::wstring::npos,
+        "that says how long the game had not responded");
+      Require(unknown.quick_answer.headline.find(en ? L"not a crash or a freeze" : L"멈춤이 아닙니다") ==
+                std::wstring::npos &&
+              unknown.quick_answer.action.find(en ? L"Nothing to do:" : L"따로 할 일은 없습니다. 직접") == std::wstring::npos,
+        "and does not say it was no freeze");
+      Require(unknown.summary_sentence.find(en ? L"had not answered for 120 s" : L"120초 동안 응답하지 않았습니다") !=
+                std::wstring::npos,
+        "the conclusion says the same");
+    }
+
+    auto fresh = make("0.4", R"(,"gameInForeground":true)");
+    BuildEvidenceAndSummary(fresh, lang);
+    Require(fresh.is_snapshot_like && fresh.quick_answer.case_id == "manual_snapshot",
+      "a game that had just answered is a plain snapshot");
+  }
+}
+
 void TestHistoryShowsUtf8ModuleNames()
 {
   auto r = MakeCrashIn(L"SkyrimSE.exe", std::wstring(kGameDir) + L"SkyrimSE.exe");
@@ -625,6 +676,7 @@ int main()
     TestOneMissingMasterItemLowAfterLoad();
     TestLoadingSnapshotGetsNoCrashAdvice();
     TestManualLoadingCaptureHasOneHeartbeatRule();
+    TestManualCaptureOfAStalledGame();
     TestHistoryShowsUtf8ModuleNames();
     TestLongDumpTextNeedsNoFixedBuffer();
   } catch (const std::exception& e) {

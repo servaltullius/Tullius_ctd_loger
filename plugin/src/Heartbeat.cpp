@@ -205,7 +205,9 @@ bool CaptureLoadedModules(std::unordered_map<std::uint64_t, std::string>& out)
     }
   }
 
-  const std::size_t moduleCount = neededBytes / sizeof(HMODULE);
+  // More modules can load between the two calls (other SKSE plugins, at
+  // startup): the second one then reports more than the array holds.
+  const std::size_t moduleCount = std::min<std::size_t>(modules.size(), neededBytes / sizeof(HMODULE));
   std::vector<wchar_t> pathBuf(32768, L'\0');
   for (std::size_t i = 0; i < moduleCount; ++i) {
     const DWORD len = GetModuleFileNameW(modules[i], pathBuf.data(), static_cast<DWORD>(pathBuf.size()));

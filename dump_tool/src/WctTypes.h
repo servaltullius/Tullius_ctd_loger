@@ -14,6 +14,24 @@ namespace skydiag::dump_tool::internal {
 // stall in progress, so it is not called "not a hang".
 inline constexpr double kNotHangHeartbeatAgeSec = 5.0;
 
+// A manual capture of a game that was stuck: the player pressed the hotkey
+// with the game window in front while its main thread had not answered for
+// kNotHangHeartbeatAgeSec. The helper's own threshold is no test for it (an
+// endless loading screen stays under the 600 s loading threshold for ten
+// minutes), and such a capture used to be called "a snapshot, not a freeze,
+// nothing to do". A game in the background can simply be paused, and a
+// capture that does not say where the game window was (helpers before
+// "gameInForeground") is not judged this way.
+inline bool IsManualCaptureOfStalledGame(
+  std::string_view kind,
+  double secondsSinceHeartbeat,
+  bool gameInForegroundKnown,
+  bool gameInForeground) noexcept
+{
+  return kind == "manual" && gameInForegroundKnown && gameInForeground &&
+         secondsSinceHeartbeat >= kNotHangHeartbeatAgeSec;
+}
+
 struct WctCaptureDecision
 {
   bool has = false;
@@ -21,6 +39,9 @@ struct WctCaptureDecision
   double secondsSinceHeartbeat = 0.0;
   std::uint32_t thresholdSec = 0;
   bool isLoading = false;
+  // "gameInForeground" in the capture block; absent in older captures.
+  bool gameInForegroundKnown = false;
+  bool gameInForeground = false;
 };
 
 struct WctModalDialog
@@ -52,6 +73,9 @@ struct WctFreezeSummary
   double secondsSinceHeartbeat = 0.0;
   std::uint32_t thresholdSec = 0;
   bool isLoading = false;
+  // "gameInForeground" in the capture block; absent in older captures.
+  bool gameInForegroundKnown = false;
+  bool gameInForeground = false;
   bool suggestsHang = false;
   bool pss_snapshot_requested = false;
   bool pss_snapshot_used = false;

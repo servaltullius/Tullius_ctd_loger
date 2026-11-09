@@ -135,17 +135,23 @@ std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t capture
   if (groups.size() > kGroupsShown) {
     text += en ? L", ..." : L" 외";
   }
-  if (total > problems.size()) {
+  if (problems.empty()) {
+    // The helper counted them, but none could be read into the record (its
+    // count comes before an event is rendered).
+    text += en ? L" (their details could not be read)" : L" (내용은 읽지 못함)";
+  } else if (total > problems.size()) {
     text += en ? (L" (the newest " + std::to_wstring(problems.size()) + L" kept)")
                : (L" (최근 " + std::to_wstring(problems.size()) + L"건만 남김)");
   }
   if (!log.complete) {
     text += en ? L" (the log could not be read to the end)" : L" (기록을 끝까지 읽지 못함)";
   }
-  const auto* last = problems.back();
-  if (captureUnix != 0u && last->unix != 0u && last->unix <= captureUnix) {
-    const auto ago = Ago(captureUnix - last->unix, en);
-    text += en ? (L", the last " + ago + L" before the capture") : (L", 마지막은 캡처 " + ago + L" 전");
+  if (!problems.empty()) {
+    const auto* last = problems.back();
+    if (captureUnix != 0u && last->unix != 0u && last->unix <= captureUnix) {
+      const auto ago = Ago(captureUnix - last->unix, en);
+      text += en ? (L", the last " + ago + L" before the capture") : (L", 마지막은 캡처 " + ago + L" 전");
+    }
   }
   return text;
 }

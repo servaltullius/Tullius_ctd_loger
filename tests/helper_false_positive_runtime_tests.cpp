@@ -2397,6 +2397,93 @@ void TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash()
   }
 }
 
+// A newer crash whose dump could not be written (the game was already gone)
+// leaves the held dump of the exception released moments before as the only
+// dump of that dying game: the exit reports it instead of deleting it. Its
+// plugin scan, whose inputs were read at the release, is written beside it.
+void TestHeldDumpIsReportedWhenTheNewerCrashHasNoDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_held_dump_for_failed_newer");
+  ClearLog(outBase);
+  const auto heldDump = outBase / L"SkyrimDiag_Released_20261110_120000_001.dmp";
+  const auto crashDump = outBase / L"SkyrimDiag_Crash_20261110_120000_001.dmp";
+  WriteAllTextUtf8(heldDump, "dump");
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 4u;  // the newer exception
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = 0x12345678u;
+  shared->header.crash.faulting_tid = 4242u;
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HelperConfig cfg = MakeTestConfig();
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.releasedCrashSeq = 2u;
+  state.crashCaptured.releasedOnBriefHeartbeat = true;
+  state.crashCaptured.releasedCrashTick64 = GetTickCount64() - 5'000u;
+  state.crashCaptured.releasedDumpPath = heldDump.wstring();
+  state.crashCaptured.dumpWriteFailedCrashSeq = 4u;
+  state.crashCaptured.dumpWriteFailedProcessExited = true;
+  state.crashCaptured.dumpWriteFailedTick64 = GetTickCount64();
+
+  TerminateWithExitCode(child, 1u);
+  Require(HandleProcessExitTick(cfg, proc, outBase, &state), "the exit tick handles the exit");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  if (!FileExists(crashDump)) {
+    std::fprintf(stderr, "%s\n", log.c_str());
+  }
+  Require(FileExists(crashDump) && !FileExists(heldDump), "the held dump is the crash dump now");
+  Require(state.crashCaptured.latched && state.capturedCrashDumpPath == crashDump.wstring(), "and is on record");
+  Require(state.crashCaptured.releasedDumpPath.empty(), "nothing is held any more");
+  AssertContains(log, "reporting the dump kept from the exception released", "why it is reported is logged");
+  Require(HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), "the newer exception's record is written too");
+
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// A dump that could not be written while the game was alive, and a game that
+// then ran on for more than a minute: it handled that exception, and an exit
+// long after is not its crash (the stale record used to be reported at any
+// later abnormal exit).
+void TestHandleProcessExitTick_AnOldDumpFailureIsNotThisExitsCrash()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_old_dump_failure");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.state_flags = 0u;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  HelperConfig cfg = MakeTestConfig();
+  cfg.enableWerDumpFallbackHint = true;
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
+  state.crashCaptured.dumpWriteFailedCrashSeq = 2u;
+  state.crashCaptured.dumpWriteFailedProcessExited = false;
+  state.crashCaptured.dumpWriteFailedTick64 = GetTickCount64() - 120'000u;
+
+  TerminateWithExitCode(child, 1u);
+  Require(HandleProcessExitTick(cfg, proc, outBase, &state), "the exit tick handles the exit");
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "the game kept running after it; not reporting it at process exit", "the stale failure is told");
+  Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), "no record of it as this exit's crash");
+  Require(log.find("keeping its WER LocalDumps hint") == std::string::npos, "the exit is not tied to it");
+  Require(state.crashCaptured.dumpWriteFailedCrashSeq == 0u, "and it is forgotten");
+
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 // The held dump goes once the game has outlived its exception (a minute
 // alive, 30 s of advancing heartbeat), not before.
 void TestExpireReleasedCrashDumpIfOutlived()
@@ -2572,6 +2659,8 @@ int wmain(int argc, wchar_t** argv)
     TestHandleProcessExitTick_ReportsAReleasedCrashFollowedByAnAbnormalExit();
     TestHandleProcessExitTick_AbnormalExitHintOnlyForAResponsiveGame();
     TestHandleProcessExitTick_KeepsTheDumpFailureHint();
+    TestHandleProcessExitTick_AnOldDumpFailureIsNotThisExitsCrash();
+    TestHeldDumpIsReportedWhenTheNewerCrashHasNoDump();
     TestThreadDumpFaultOfAnExitedGame_IsRecordedAsADumpFailure();
     TestFindForcedCloseInSnapshot();
     TestForcedCloseCrash_SkipsTheViewer();

@@ -230,6 +230,8 @@ constexpr bool IsRepeatedRecoveredFault(
   return false;
 }
 
+struct PluginScanInputs;  // CaptureCommon.h
+
 struct CrashCaptureState {
   bool latched = false;
   // The heartbeat when the crash was latched
@@ -274,12 +276,21 @@ struct CrashCaptureState {
   std::wstring releasedDumpPath;
   bool releasedDumpPreserve = false;
   LateRecoveryState releasedDumpRecovery{};
+  // What the plugin scan needs from the live game (its folder and modules),
+  // read at the release for the held dump: when it is made the crash's dump
+  // at the exit, the game is gone. The scan itself, which reads every plugin
+  // header, runs only then.
+  std::shared_ptr<const PluginScanInputs> releasedPluginScanInputs;
   // Faults released as handled this session (IsRepeatedRecoveredFault).
   RecoveredFaultHistory recoveredFaults{};
-  // The crash generation whose dump could not be written, and whether the
-  // game had already exited then. Its dump-failure WER hint stays at exit.
+  // The crash generation whose dump could not be written, whether the game
+  // had already exited then, and when (GetTickCount64; 0: not noted). Its
+  // dump-failure WER hint stays at an exit that follows it. A game that ran
+  // on for kLateRecoveryMinAliveMs handled that exception, and a later exit
+  // is not its crash (DrainCrashEventBeforeExit).
   std::uint32_t dumpWriteFailedCrashSeq = 0;
   bool dumpWriteFailedProcessExited = false;
+  std::uint64_t dumpWriteFailedTick64 = 0;
 };
 
 struct StableSharedSnapshot {

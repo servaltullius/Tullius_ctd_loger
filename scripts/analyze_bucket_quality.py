@@ -62,6 +62,14 @@ def _dict_rows(value: Any) -> list[dict[str, Any]]:
     return [row for row in value if isinstance(row, dict)]
 
 
+def _is_location_ref(ref: dict[str, Any]) -> bool:
+    object_type = ref.get("best_object_type", "")
+    if not isinstance(object_type, str):
+        return False
+    lowered = object_type.lower()
+    return "tesobjectcell" in lowered or "tesworldspace" in lowered
+
+
 def _user_visible_candidates(summary: dict[str, Any]) -> list[dict[str, Any]]:
     """Return candidates in the same priority order used by summary/WinUI.
 
@@ -75,9 +83,18 @@ def _user_visible_candidates(summary: dict[str, Any]) -> list[dict[str, Any]]:
         return actionable[:5]
 
     crash_logger = summary.get("crash_logger", {})
-    object_refs = _dict_rows(
-        crash_logger.get("object_refs", []) if isinstance(crash_logger, dict) else []
-    )[:3]
+    if not isinstance(crash_logger, dict):
+        crash_logger = {}
+    pairing = crash_logger.get("pairing", {})
+    # A log that may be another crash's: WinUI shows its references as "low".
+    pairing_ambiguous = isinstance(pairing, dict) and pairing.get("ambiguous") is True
+    # A cell or worldspace only says where the player was; WinUI leaves those
+    # out (CrashLoggerRefItem.IsLocation) before it takes three.
+    object_refs = [
+        ref
+        for ref in _dict_rows(crash_logger.get("object_refs", []))
+        if not _is_location_ref(ref)
+    ][:3]
     visible: list[dict[str, Any]] = []
     for ref in object_refs:
         esp_name = ref.get("esp_name", "")
@@ -91,7 +108,7 @@ def _user_visible_candidates(summary: dict[str, Any]) -> list[dict[str, Any]]:
                 "plugin_name": esp_name,
                 "display_name": esp_name,
                 # WinUI labels score >= 16 as "ESP ref (high)".
-                "confidence": "High" if relevance_score >= 16 else "",
+                "confidence": "High" if relevance_score >= 16 and not pairing_ambiguous else "",
             }
         )
 

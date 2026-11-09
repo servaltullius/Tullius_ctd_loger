@@ -30,3 +30,4 @@ ADR index:
 - `0025-save-load-crashes.md`
 - `0026-gpu-driver-events.md`
 - `0027-address-library-frame-ids.md`
+- `0028-whole-mod-review-2026-11.md`

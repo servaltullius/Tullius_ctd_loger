@@ -61,6 +61,7 @@ Skyrim SE/AE 환경에서 **CTD(크래시) / 프리징 / 무한로딩**을 best-
 
 **수동 스냅샷:** `Ctrl+Shift+Backspace` (`SkyrimDiagHelper.ini`의 `ManualCaptureHotkey=`로 변경)
 > 정상 플레이 중 찍은 스냅샷은 신뢰도가 낮을 수 있습니다. 프리징/무한로딩/CTD 직전에 찍는 것이 가장 유효합니다.
+> 게임 창이 앞에 있고 게임이 5초 이상 응답하지 않을 때 찍은 스냅샷은 프리징으로 분석합니다(무한 로딩은 자동 캡처의 로딩 기준 600초에 한참 못 미칩니다). 게임이 백그라운드에 있으면 일시정지와 구분되지 않으므로 스냅샷으로 둡니다.
 >
 > v0.2.68-rc3까지는 `Ctrl+Shift+F12`였습니다. Crash Logger 1.25가 같은 키를 스레드 덤프 단축키로 쓰는데, 이 스레드 덤프는 게임 스레드를 하나씩 멈추며 게임을 멈추게(교착) 할 수 있습니다. 그래서 지금 `Ctrl+Shift+F12`를 누르면 Tullius 스냅샷이 아니라 Crash Logger 스레드 덤프만 동작합니다. `ManualCaptureHotkey`를 Crash Logger 단축키의 키를 모두 포함하는 조합으로 바꾸지 마세요. 시작 시 사전 점검이 `CRASH_LOGGER_HOTKEY_COLLISION`으로 경고합니다.
 
@@ -136,7 +137,7 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 - 출력 폴더의 `SkyrimDiagHelper.log` (기본: MO2 `overwrite\\SKSE\\Plugins\\Tullius Ctd Logs\\SkyrimDiagHelper.log`)
   - `DumpTool viewer launch failed ... win32_error=...` : 실행 실패(경로/파일 누락/권한)
   - `DumpTool viewer launch succeeded ...` 뒤에 `DumpTool viewer exited immediately ...` : `v0.2.52+` 파일 누락/구버전 혼합 또는 뷰어 시작 크래시 가능성
-- 뷰어 폴더(`SKSE\\Plugins\\SkyrimDiagWinUI\\`)의 `SkyrimDiagDumpToolWinUI_startup_error.log` (있으면 내용 첨부)
+- 뷰어 앱 폴더(`SKSE\\Plugins\\SkyrimDiagWinUI\\app\\`)의 `SkyrimDiagDumpToolWinUI_startup_error.log`, 런처 폴더(`SKSE\\Plugins\\SkyrimDiagWinUI\\`)의 `SkyrimDiagDumpToolWinUI_launcher_error.log` (있으면 내용 첨부)
 - `v0.2.52+` 릴리즈의 WinUI 뷰어는 self-contained로 배포됩니다. 뷰어 시작 실패가 계속되면 기존 `SKSE\\Plugins\\SkyrimDiagWinUI\\` 폴더를 완전히 제거한 뒤 새 릴리즈 zip 전체를 다시 설치하고, MO2에서 파일 제공 모드를 확인하세요.
 - `v0.2.53+`에서는 `SKSE\\Plugins\\SkyrimDiagWinUI\\SkyrimDiagDumpToolWinUI.exe`가 런처이고, 실제 앱/런타임 파일은 `SKSE\\Plugins\\SkyrimDiagWinUI\\app\\` 아래에 있습니다.
 - `v0.2.49`~`v0.2.51`의 WinUI 뷰어는 Windows App Runtime 1.8을 별도로 요구했으며, Windows App Runtime 2.x 설치만으로는 이 요구사항이 해결되지 않을 수 있습니다.

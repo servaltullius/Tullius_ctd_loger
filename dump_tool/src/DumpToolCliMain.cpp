@@ -33,6 +33,13 @@ void PrintUtf8KeyValue(const char* key, std::wstring_view value)
   std::cout << key << "=" << skydiag::dump_tool::WideToUtf8(value) << "\n";
 }
 
+// Errors as UTF-8 too: std::wcerr in the "C" locale stops at the first
+// character it cannot convert, so a message with a Korean path ended there.
+void PrintError(std::wstring_view message)
+{
+  std::cerr << skydiag::dump_tool::WideToUtf8(message);
+}
+
 void PrintOutputPaths(const skydiag::dump_tool::cli::DumpToolCliArgs& args)
 {
   const std::filesystem::path dumpPath(args.dump_path);
@@ -73,13 +80,13 @@ int wmain(int argc, wchar_t** argv)
   std::wstring parseErr;
   if (!cli::ParseDumpToolCliArgs(args, &a, &parseErr)) {
     if (!parseErr.empty() && parseErr.rfind(L"Usage:", 0) == 0) {
-      std::wcout << parseErr;
+      std::cout << skydiag::dump_tool::WideToUtf8(parseErr);
       return 0;
     }
     if (!parseErr.empty()) {
-      std::wcerr << L"[SkyrimDiagDumpToolCli] " << parseErr << L"\n";
+      PrintError(L"[SkyrimDiagDumpToolCli] " + parseErr + L"\n");
     }
-    std::wcerr << cli::DumpToolCliUsage();
+    PrintError(cli::DumpToolCliUsage());
     return 2;
   }
 
@@ -118,20 +125,20 @@ int wmain(int argc, wchar_t** argv)
   std::wstring err;
   try {
     if (!AnalyzeDump(a.dump_path, a.out_dir, opt, result, &err)) {
-      std::wcerr << L"[SkyrimDiagDumpToolCli] AnalyzeDump failed: " << err << L"\n";
+      PrintError(L"[SkyrimDiagDumpToolCli] AnalyzeDump failed: " + err + L"\n");
       return 3;
     }
   } catch (const std::exception& ex) {
-    std::wcerr << L"[SkyrimDiagDumpToolCli] AnalyzeDump threw: " << Utf8OrAnsiToWide(ex.what()) << L"\n";
+    PrintError(L"[SkyrimDiagDumpToolCli] AnalyzeDump threw: " + Utf8OrAnsiToWide(ex.what()) + L"\n");
     return 3;
   }
   try {
     if (!WriteOutputs(result, &err)) {
-      std::wcerr << L"[SkyrimDiagDumpToolCli] WriteOutputs failed: " << err << L"\n";
+      PrintError(L"[SkyrimDiagDumpToolCli] WriteOutputs failed: " + err + L"\n");
       return 4;
     }
   } catch (const std::exception& ex) {
-    std::wcerr << L"[SkyrimDiagDumpToolCli] WriteOutputs threw: " << Utf8OrAnsiToWide(ex.what()) << L"\n";
+    PrintError(L"[SkyrimDiagDumpToolCli] WriteOutputs threw: " + Utf8OrAnsiToWide(ex.what()) + L"\n");
     return 4;
   }
 

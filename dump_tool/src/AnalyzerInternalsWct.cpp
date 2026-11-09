@@ -343,6 +343,10 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
       summary.secondsSinceHeartbeat = JsonValueOr(*capIt, "secondsSinceHeartbeat", 0.0);
       summary.thresholdSec = JsonValueOr(*capIt, "thresholdSec", 0u);
       summary.isLoading = JsonValueOr(*capIt, "isLoading", false);
+      if (const auto fg = capIt->find("gameInForeground"); fg != capIt->end() && fg->is_boolean()) {
+        summary.gameInForegroundKnown = true;
+        summary.gameInForeground = fg->get<bool>();
+      }
       summary.pss_snapshot_requested = JsonValueOr(*capIt, "pss_snapshot_requested", false);
       summary.pss_snapshot_used = JsonValueOr(*capIt, "pss_snapshot_used", false);
       summary.pss_snapshot_capture_ms = JsonValueOr(*capIt, "pss_snapshot_capture_ms", 0u);
@@ -350,7 +354,9 @@ std::optional<WctFreezeSummary> TryParseWctFreezeSummary(std::string_view wctJso
       summary.dump_transport = JsonValueOr(*capIt, "dump_transport", std::string{});
       summary.suggestsHang =
         (summary.capture_kind == "hang") ||
-        (summary.thresholdSec > 0u && summary.secondsSinceHeartbeat >= static_cast<double>(summary.thresholdSec));
+        (summary.thresholdSec > 0u && summary.secondsSinceHeartbeat >= static_cast<double>(summary.thresholdSec)) ||
+        IsManualCaptureOfStalledGame(
+          summary.capture_kind, summary.secondsSinceHeartbeat, summary.gameInForegroundKnown, summary.gameInForeground);
     }
 
     return summary;
@@ -576,6 +582,8 @@ std::optional<WctCaptureDecision> TryParseWctCaptureDecision(std::string_view wc
   d.secondsSinceHeartbeat = freeze->secondsSinceHeartbeat;
   d.thresholdSec = freeze->thresholdSec;
   d.isLoading = freeze->isLoading;
+  d.gameInForegroundKnown = freeze->gameInForegroundKnown;
+  d.gameInForeground = freeze->gameInForeground;
   return d;
 }
 

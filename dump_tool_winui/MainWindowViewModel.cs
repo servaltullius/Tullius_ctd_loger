@@ -457,9 +457,11 @@ internal sealed partial class MainWindowViewModel
             try
             {
                 using var doc = JsonDocument.Parse(raw);
+                // Shown as text: a Korean dialog title must not turn into \uXXXX.
                 data.WctText = JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions
                 {
                     WriteIndented = true,
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                 });
             }
             catch (Exception ex)

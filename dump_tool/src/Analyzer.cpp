@@ -238,11 +238,43 @@ void IntegrateCrashLoggerFrameSignals(
       CanonicalizeCrashLoggerFrameModule(rawSignals.probable_streak_module, canonicalByFilenameLower);
   }
   out->crash_logger_probable_streak_length = rawSignals.probable_streak_length;
-  for (const auto& hook : rawSignals.thread_entry_hook_modules) {
-    const auto module = CanonicalizeCrashLoggerFrameModule(hook, canonicalByFilenameLower);
-    if (std::find(out->thread_entry_hook_modules.begin(), out->thread_entry_hook_modules.end(), module) ==
-        out->thread_entry_hook_modules.end()) {
-      out->thread_entry_hook_modules.push_back(module);
+  // The parser knows names only, so a Windows or driver DLL outside its list
+  // (nvwgf2umx.dll) reads there as the first plugin frame. Loaded from a
+  // system folder it is none, and refusing it below would leave no first
+  // actionable frame at all: the next plugin frame takes its place.
+  bool firstActionableInSystemNamedMod = rawSignals.first_actionable_probable_in_system_named_mod;
+  if (!firstActionableInSystemNamedMod && !out->crash_logger_first_actionable_probable_module.empty() &&
+      IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_first_actionable_probable_module, allModules)) {
+    out->crash_logger_first_actionable_probable_module.clear();
+    for (std::size_t i = 0; i < rawSignals.probable_modules_in_order.size(); ++i) {
+      const bool threadEntryHook =
+        i < rawSignals.probable_frame_is_thread_entry_hook.size() && rawSignals.probable_frame_is_thread_entry_hook[i];
+      const bool inSystemNamedMod =
+        i < rawSignals.probable_frame_in_system_named_mod.size() && rawSignals.probable_frame_in_system_named_mod[i];
+      const auto module =
+        CanonicalizeCrashLoggerFrameModule(rawSignals.probable_modules_in_order[i], canonicalByFilenameLower);
+      if (threadEntryHook || module.empty()) {
+        continue;
+      }
+      const bool pluginFrame = inSystemNamedMod ||
+        (!IsSystemishModule(module) && !IsExternalSoftwareModule(module) && !IsGameExeModule(module) &&
+         !IsCrashLoggerFrameModuleLoadedFromSystemPath(module, allModules));
+      if (pluginFrame) {
+        out->crash_logger_first_actionable_probable_module = module;
+        firstActionableInSystemNamedMod = inSystemNamedMod;
+        break;
+      }
+    }
+  }
+  // Not from a log that may be another crash's: the stack scan drops these
+  // modules from its suspects.
+  if (!out->crash_logger_pairing_ambiguous) {
+    for (const auto& hook : rawSignals.thread_entry_hook_modules) {
+      const auto module = CanonicalizeCrashLoggerFrameModule(hook, canonicalByFilenameLower);
+      if (std::find(out->thread_entry_hook_modules.begin(), out->thread_entry_hook_modules.end(), module) ==
+          out->thread_entry_hook_modules.end()) {
+        out->thread_entry_hook_modules.push_back(module);
+      }
     }
   }
 
@@ -253,7 +285,7 @@ void IntegrateCrashLoggerFrameSignals(
     (CanPromoteCrashLoggerFrameModule(out->crash_logger_direct_fault_module) &&
      !IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_direct_fault_module, allModules));
   out->crash_logger_first_actionable_probable_eligible =
-    rawSignals.first_actionable_probable_in_system_named_mod ||
+    firstActionableInSystemNamedMod ||
     (CanPromoteCrashLoggerFrameModule(out->crash_logger_first_actionable_probable_module) &&
      !IsCrashLoggerFrameModuleLoadedFromSystemPath(
        out->crash_logger_first_actionable_probable_module,
@@ -388,6 +420,21 @@ void ApplyCrashLoggerCorroborationToSuspects(
     return a.index < b.index;
   });
 
+  // The stack walk and the stack scan put a mod ahead of a hook framework
+  // that scored higher (the framework is the victim more often than the
+  // cause), by position only: the scores stay. Sorting by score here put the
+  // framework back on top whenever a log was paired. A hook framework gets no
+  // frame signal from the log (CanPromoteCrashLoggerFrameModule), so unless
+  // the log itself raised another suspect above both, their order stands.
+  if (!rows.empty() && rows.front().index != 0u && !IsKnownHookFramework(out->suspects[0].module_filename) &&
+      IsKnownHookFramework(out->suspects[rows.front().index].module_filename) &&
+      rows.front().promotion.frameSignalStrength == 0u && rows.front().promotion.cppExceptionSupport == 0u) {
+    const auto original = std::find_if(rows.begin(), rows.end(), [](const Ranked& r) { return r.index == 0u; });
+    if (original != rows.end()) {
+      std::rotate(rows.begin(), original, original + 1);
+    }
+  }
+
   std::vector<SuspectItem> reordered;
   reordered.reserve(out->suspects.size());
   const bool en = (out->language == i18n::Language::kEnglish);
@@ -423,10 +470,14 @@ void ApplyCrashLoggerCorroborationToSuspects(
 
   if (!out->suspects.empty() && !rows.empty()) {
     const auto& topRow = rows.front();
+    // A hook framework's place among the log's top modules is where it sits
+    // in every stack, not support for it: the stack walk lowered its
+    // confidence for that reason, and the rank alone does not raise it back.
+    const bool topIsHookFramework = IsKnownHookFramework(out->suspects[0].module_filename);
     const bool hasCrashLoggerSupport =
       topRow.promotion.frameSignalStrength > 0 ||
       topRow.promotion.cppExceptionSupport > 0 ||
-      (topRow.matchedRank && *topRow.matchedRank <= 1u);
+      (!topIsHookFramework && topRow.matchedRank && *topRow.matchedRank <= 1u);
     out->suspects[0].confidence_level = internal::policy::ConfidenceAfterCrashLoggerCorroboration(
       out->suspects[0].confidence_level,
       hasCrashLoggerSupport,

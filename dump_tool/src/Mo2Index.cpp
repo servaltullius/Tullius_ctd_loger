@@ -204,28 +204,46 @@ std::vector<std::wstring> ReadMo2EnabledModsWinnerFirst(const std::filesystem::p
 
 }  // namespace
 
+namespace {
+
+constexpr std::wstring_view kMo2ModsNeedle = L"\\mods\\";
+
+// Where MO2's mods folder is in a lower-cased path: the last "\mods\" that a
+// mod folder follows ("\mods\<Mod>\..."). A folder above MO2 can be named
+// mods too (D:\Mods\MO2\mods\<Mod>\..., ...\MODS\mods\<Mod>\...); taking the
+// first one named every DLL's mod after the folder below it, and merged
+// different mods into one candidate.
+std::size_t FindMo2ModsFolder(const std::wstring& lowerPath)
+{
+  std::size_t pos = lowerPath.rfind(kMo2ModsNeedle);
+  while (pos != std::wstring::npos) {
+    const std::size_t start = pos + kMo2ModsNeedle.size();
+    const std::size_t end = lowerPath.find(L'\\', start);
+    if (end != std::wstring::npos && end > start) {
+      return pos;
+    }
+    if (pos == 0u) {
+      break;
+    }
+    pos = lowerPath.rfind(kMo2ModsNeedle, pos - 1u);
+  }
+  return std::wstring::npos;
+}
+
+}  // namespace
+
 std::wstring InferMo2ModNameFromPath(std::wstring_view fullPath)
 {
   // Best-effort: detect "...\\mods\\<ModName>\\..." (MO2)
   std::wstring s(fullPath);
-  std::wstring lower = WideLower(s);
+  const std::wstring lower = WideLower(s);
 
-  const std::wstring needle = L"\\mods\\";
-  const auto pos = lower.find(needle);
+  const auto pos = FindMo2ModsFolder(lower);
   if (pos == std::wstring::npos) {
     return {};
   }
-
-  const auto start = pos + needle.size();
-  if (start >= s.size()) {
-    return {};
-  }
-
+  const auto start = pos + kMo2ModsNeedle.size();
   const auto end = s.find(L'\\', start);
-  if (end == std::wstring::npos || end <= start) {
-    return {};
-  }
-
   return CleanMo2ModFolderName(s.substr(start, end - start));
 }
 
@@ -295,9 +313,7 @@ std::optional<std::filesystem::path> TryInferMo2BaseDirFromModulePaths(const std
     if (path.empty()) {
       continue;
     }
-    const std::wstring lower = WideLower(path);
-    const std::wstring needle = L"\\mods\\";
-    const auto pos = lower.find(needle);
+    const auto pos = FindMo2ModsFolder(WideLower(path));
     if (pos == std::wstring::npos || pos == 0) {
       continue;
     }

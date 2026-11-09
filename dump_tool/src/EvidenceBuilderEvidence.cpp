@@ -307,7 +307,7 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en
       ? L"Capture appears to have happened during loading"
-      : L"크래시 당시 로딩 상태로 추정";
+      : L"캡처 당시 로딩 상태로 추정";
     e.details = en
       ? L"The Loading flag is set in state_flags. (Likely mesh/texture/script init stage)"
       : L"state_flags에 Loading 플래그가 설정되어 있습니다. (메쉬/텍스처/스크립트 초기화 단계일 수 있음)";

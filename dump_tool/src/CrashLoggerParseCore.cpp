@@ -714,8 +714,11 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(
   std::uint32_t currentLength = 0;
   for (std::size_t i = 0; i < out.probable_modules_in_order.size(); ++i) {
     const auto& module = out.probable_modules_in_order[i];
-    // A thread-entry hook is no streak (the Analyzer promotes this one).
-    if (out.probable_frame_is_thread_entry_hook[i]) {
+    // A thread-entry hook is no streak (the Analyzer promotes this one), nor
+    // is a run of game or Windows frames: it can never be promoted, and as
+    // the longest run it hid the plugin's (a game frame ends a plugin's run,
+    // as in BuildNormalizedCrashLoggerFrameSignals).
+    if (out.probable_frame_is_thread_entry_hook[i] || kinds[i] != StackFrameKind::kPlugin) {
       currentLower.clear();
       currentModule.clear();
       currentLength = 0;
@@ -949,10 +952,12 @@ bool IsVanillaDlcEspAsciiLower(std::string_view espLower)
       espLower == "dragonborn.esm") {
     return true;
   }
-  if (espLower.size() >= 3 && espLower[0] == 'c' && espLower[1] == 'c') {
-    return true;
-  }
-  return false;
+  // Creation Club content (ccbgssse001-fish.esm, ccqdrsse001-survivalmode.esl):
+  // a master or light master, as PluginRules' IsCreationClubPluginName has
+  // it. A mod's plugin can start with "cc" too (CC's Enhanced Ore Veins.esp).
+  const bool masterOrLight = espLower.size() > 4u &&
+    (espLower.substr(espLower.size() - 4u) == ".esm" || espLower.substr(espLower.size() - 4u) == ".esl");
+  return masterOrLight && espLower[0] == 'c' && espLower[1] == 'c';
 }
 
 std::uint32_t LocationWeight(std::string_view loc)
@@ -1496,7 +1501,7 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
     }
   }
 
-  std::sort(results.begin(), results.end(), [](const CrashLoggerObjectRef& a, const CrashLoggerObjectRef& b) {
+  std::stable_sort(results.begin(), results.end(), [](const CrashLoggerObjectRef& a, const CrashLoggerObjectRef& b) {
     return a.relevance_score > b.relevance_score;
   });
 
@@ -1551,7 +1556,7 @@ std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
     }
   }
 
-  std::sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) {
+  std::stable_sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) {
     return a.max_score > b.max_score;
   });
 
