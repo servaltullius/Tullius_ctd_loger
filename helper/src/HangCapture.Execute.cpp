@@ -49,15 +49,22 @@ HangTickResult ExecuteConfirmedHangCapture(
   }
   const bool dumpWritten = capture.dumpWritten;
 
-  // The check before the capture can come while ExitProcess is still ending
-  // the other threads; a dump that then fails may be that exit. No ETW trace
-  // for it either.
-  if (!dumpWritten && state && skydiag::helper::IsGameProcessClosing(CountProcessThreads(proc.pid))) {
+  // A failed dump of a game that is gone or going. Gone: it exited while the
+  // dump was written, which a frozen game ended from Task Manager does too,
+  // so it is not told as closing; the exit tick classifies it by its exit
+  // code. Going: the check before the capture can come while ExitProcess is
+  // still ending the other threads, and a dump that then fails met that exit.
+  // No ETW trace for either.
+  const bool exitedDuringCapture =
+    !dumpWritten && proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+  if (exitedDuringCapture) {
+    AppendLogLine(outBase, L"The game exited during the hang capture, so its hang dump could not be written.");
+  } else if (!dumpWritten && state && skydiag::helper::IsGameProcessClosing(CountProcessThreads(proc.pid))) {
     state->hangSkippedAsClosingThisEpisode = true;
     AppendLogLine(
       outBase,
-      L"The game was closing by the end of the hang capture (at most one thread left); the failed hang dump "
-      L"most likely met its exit, not a freeze.");
+      L"The game was closing by the end of the hang capture (1 thread left); the failed hang dump most likely "
+      L"met its exit, not a freeze.");
     return HangTickResult::kContinue;
   }
 
@@ -68,7 +75,7 @@ HangTickResult ExecuteConfirmedHangCapture(
   std::uint64_t etwStartedAtTick64 = 0;
   if (cfg.enableEtwCaptureOnHang && state && state->pendingEtw.active) {
     AppendLogLine(outBase, L"ETW hang capture not started: the previous hang's trace is still being stopped.");
-  } else if (cfg.enableEtwCaptureOnHang) {
+  } else if (cfg.enableEtwCaptureOnHang && !exitedDuringCapture) {
     std::wstring etwUsedProfile;
     std::wstring etwErr;
     if (StartEtwCaptureForHang(cfg, outBase, &etwUsedProfile, &etwErr)) {

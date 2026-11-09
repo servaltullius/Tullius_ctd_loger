@@ -50,9 +50,10 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
   std::size_t maxFrames,
   const std::vector<std::wstring>* frameLabels,
   bool english,
-  std::uint32_t* outTotalFrames,
-  std::uint32_t* outSymbolizedFrames,
-  std::uint32_t* outSourceLineFrames);
+  const std::vector<std::wstring>& windowFrames,
+  std::uint32_t* totalFrames,
+  std::uint32_t* symbolizedFrames,
+  std::uint32_t* sourceLineFrames);
 }
 
 namespace {
@@ -321,16 +322,17 @@ void TestCrashStackIsShownFromTheTop()
 
   // Six game frames, then the plugin, then game frames.
   const std::vector<std::uint64_t> pcs = { 0x10100, 0x10200, 0x10300, 0x10400, 0x10500, 0x10600, 0x30100, 0x10700 };
-  std::uint32_t shownTotal = 0;
-  const auto shown = sw::FormatCrashCallstackForReport(nullptr, modules, pcs, 12u, nullptr, true, &shownTotal, nullptr, nullptr);
-  Require(shown.size() == pcs.size(), "every frame is shown");
-  Require(shown.front() == L"SkyrimSE.exe+0x100", "from frame 0");
-  Require(shown[6] == L"Hook.dll+0x100", "the plugin frame in its place");
-  Require(shownTotal == shown.size(), "the frame count describes the frames shown");
-
   std::uint32_t total = 0;
   const auto window = sw::FormatCallstackForDisplay(nullptr, modules, pcs, 12u, &total, nullptr, nullptr, false, nullptr);
   Require(window.front() == L"SkyrimSE.exe+0x500", "the signature list still starts two frames above the plugin");
+  Require(total == window.size(), "counted as the window so far");
+
+  const auto shown =
+    sw::FormatCrashCallstackForReport(nullptr, modules, pcs, 12u, nullptr, true, window, &total, nullptr, nullptr);
+  Require(shown.size() == pcs.size(), "every frame is shown");
+  Require(shown.front() == L"SkyrimSE.exe+0x100", "from frame 0");
+  Require(shown[6] == L"Hook.dll+0x100", "the plugin frame in its place");
+  Require(total == shown.size(), "the frame count describes the frames shown");
 
   // Twelve game frames above the plugin: the first four, a line for the rest,
   // then the window.
@@ -339,12 +341,17 @@ void TestCrashStackIsShownFromTheTop()
     deep.push_back(0x10100 + i * 0x10);
   }
   deep.push_back(0x30100);
-  const auto cut = sw::FormatCrashCallstackForReport(nullptr, modules, deep, 12u, nullptr, true, &shownTotal, nullptr, nullptr);
+  std::uint32_t deepTotal = 0;
+  const auto deepWindow =
+    sw::FormatCallstackForDisplay(nullptr, modules, deep, 12u, &deepTotal, nullptr, nullptr, false, nullptr);
+  const auto cut =
+    sw::FormatCrashCallstackForReport(nullptr, modules, deep, 12u, nullptr, true, deepWindow, &deepTotal, nullptr, nullptr);
   Require(cut.size() == 4u + 1u + 3u, "four, the line, and the window from two above the plugin");
   Require(cut[4] == L"... 6 frames left out", "says how many are left out");
   Require(cut[7] == L"Hook.dll+0x100", "the plugin frame");
-  Require(shownTotal == 7u, "the left-out line is no frame");
-  const auto cutKo = sw::FormatCrashCallstackForReport(nullptr, modules, deep, 12u, nullptr, false, nullptr, nullptr, nullptr);
+  Require(deepTotal == 7u, "the left-out line is no frame");
+  const auto cutKo = sw::FormatCrashCallstackForReport(
+    nullptr, modules, deep, 12u, nullptr, false, deepWindow, nullptr, nullptr, nullptr);
   Require(cutKo[4] == L"... 프레임 6개 생략", "in Korean too");
 }
 
@@ -760,7 +767,7 @@ void TestFreedHookIsResolvedFromTheRecord()
 
 // ADR-0027: a stack walk cut at an address in recorded hook code (11/09: a
 // detour's call at +0x12, its jump back to the game at +0x27) says so and
-// where that code continues.
+// names the next jump recorded there, with its distance.
 void TestStackCutInHookCodeIsExplained()
 {
   using skydiag::dump_tool::FindHookCodeAt;
@@ -777,6 +784,9 @@ void TestStackCutInHookCodeIsExplained()
   const auto hook = FindHookCodeAt(record, 0x244C6E94012ull);
   Require(hook.found && hook.page_base == 0x244C6E94000ull, "the address is in the recorded page");
   Require(hook.has_next_stub && hook.next_stub.module_offset == 0x37F9E6u, "the jump right after it, not a later one");
+  Require(hook.next_stub_distance == 39u - 0x12u, "and how far after the address it is");
+  const auto atStub = FindHookCodeAt(record, 0x244C6E94000ull + 39u);
+  Require(atStub.has_next_stub && atStub.next_stub_distance == 0u, "a jump at the address itself");
   const auto beyond = FindHookCodeAt(record, 0x244C6E94100ull);
   Require(beyond.found && !beyond.has_next_stub, "no jump within 64 bytes: the page only");
   Require(!FindHookCodeAt(record, 0x244C6E96000ull).found, "outside every recorded page");
@@ -786,12 +796,57 @@ void TestStackCutInHookCodeIsExplained()
   r.stackwalk_truncation_depth = 17;
   r.stackwalk_truncation_address = 0x244C6E94012ull;
   r.stackwalk_truncation_hook_page = hook.page_base;
-  r.stackwalk_truncation_hook_continues_to = L"SkyrimSE.exe+0x37f9e6 (ID 23329+0x776)";
+  r.stackwalk_truncation_hook_next_jump = L"SkyrimSE.exe+0x37f9e6 (ID 23329+0x776)";
+  r.stackwalk_truncation_hook_next_jump_distance = hook.next_stub_distance;
   BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
   const auto* cut = FindEvidence(r, L"Call stack cut short");
   Require(cut && cut->details.find(L"hook code the helper recorded") != std::wstring::npos &&
-            cut->details.find(L"continues to SkyrimSE.exe+0x37f9e6 (ID 23329+0x776)") != std::wstring::npos,
-    "the cut is told as hook code, with where it continues");
+            cut->details.find(
+              L"the next jump recorded there, 21 bytes on, goes to SkyrimSE.exe+0x37f9e6 (ID 23329+0x776)") !=
+              std::wstring::npos,
+    "the cut is told as hook code, with the next jump recorded there");
+  Require(
+    cut->details.find(L"continues") == std::wstring::npos, "not as where the code continues: the record cannot say");
+
+  AnalysisResult ko{};
+  ko.stackwalk_truncation = r.stackwalk_truncation;
+  ko.stackwalk_truncation_depth = r.stackwalk_truncation_depth;
+  ko.stackwalk_truncation_address = r.stackwalk_truncation_address;
+  ko.stackwalk_truncation_hook_page = r.stackwalk_truncation_hook_page;
+  ko.stackwalk_truncation_hook_next_jump = r.stackwalk_truncation_hook_next_jump;
+  ko.stackwalk_truncation_hook_next_jump_distance = r.stackwalk_truncation_hook_next_jump_distance;
+  BuildEvidenceAndSummary(ko, i18n::Language::kKorean);
+  const auto* cutKo = FindEvidence(ko, L"콜스택이 중간에 끊김");
+  Require(
+    cutKo && cutKo->details.find(
+               L"그 주소에서 21바이트 뒤에 기록된 점프는 SkyrimSE.exe+0x37f9e6 (ID 23329+0x776)(으)로 갑니다") !=
+               std::wstring::npos,
+    "in Korean too");
+
+  // A jump recorded at the address itself, and a page with no jump near it.
+  AnalysisResult at{};
+  at.stackwalk_truncation = r.stackwalk_truncation;
+  at.stackwalk_truncation_depth = r.stackwalk_truncation_depth;
+  at.stackwalk_truncation_address = r.stackwalk_truncation_address;
+  at.stackwalk_truncation_hook_page = r.stackwalk_truncation_hook_page;
+  at.stackwalk_truncation_hook_next_jump = r.stackwalk_truncation_hook_next_jump;
+  BuildEvidenceAndSummary(at, i18n::Language::kEnglish);
+  const auto* cutAt = FindEvidence(at, L"Call stack cut short");
+  Require(
+    cutAt && cutAt->details.find(L"the jump recorded at that address goes to SkyrimSE.exe+0x37f9e6") !=
+               std::wstring::npos,
+    "a jump at the address is told without a distance");
+
+  AnalysisResult bare{};
+  bare.stackwalk_truncation = r.stackwalk_truncation;
+  bare.stackwalk_truncation_depth = r.stackwalk_truncation_depth;
+  bare.stackwalk_truncation_address = r.stackwalk_truncation_address;
+  bare.stackwalk_truncation_hook_page = r.stackwalk_truncation_hook_page;
+  BuildEvidenceAndSummary(bare, i18n::Language::kEnglish);
+  const auto* cutBare = FindEvidence(bare, L"Call stack cut short");
+  Require(cutBare && cutBare->details.find(L"hook code the helper recorded") != std::wstring::npos &&
+            cutBare->details.find(L"jump") == std::wstring::npos,
+    "no jump near the address: the hook code only");
 }
 
 // The owner then has a name in the outputs: it leads during play (Medium for

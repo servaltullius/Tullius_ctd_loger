@@ -49,8 +49,6 @@ struct SymbolRuntimeHealth
   bool policyMismatch = false;
 };
 
-std::string QueryFileVersionString(const std::filesystem::path& filePath);
-
 std::string AsciiLower(std::string_view s)
 {
   std::string out;
@@ -291,33 +289,6 @@ bool VersionLessThan(std::string_view lhs, std::string_view rhs)
     }
   }
   return false;
-}
-
-std::string QueryFileVersionString(const std::filesystem::path& filePath)
-{
-  DWORD handle = 0;
-  const DWORD size = GetFileVersionInfoSizeW(filePath.c_str(), &handle);
-  if (size == 0) {
-    return {};
-  }
-
-  std::vector<std::uint8_t> buffer(size);
-  if (!GetFileVersionInfoW(filePath.c_str(), handle, size, buffer.data())) {
-    return {};
-  }
-
-  VS_FIXEDFILEINFO* ffi = nullptr;
-  UINT ffiSize = 0;
-  if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<LPVOID*>(&ffi), &ffiSize) || !ffi || ffiSize < sizeof(VS_FIXEDFILEINFO)) {
-    return {};
-  }
-
-  const std::uint32_t ms = ffi->dwFileVersionMS;
-  const std::uint32_t ls = ffi->dwFileVersionLS;
-  return std::to_string(HIWORD(ms)) + "."
-       + std::to_string(LOWORD(ms)) + "."
-       + std::to_string(HIWORD(ls)) + "."
-       + std::to_string(LOWORD(ls));
 }
 
 bool FileExistsAny(const std::filesystem::path& dir, std::initializer_list<const wchar_t*> names)

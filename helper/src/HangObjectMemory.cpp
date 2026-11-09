@@ -10,7 +10,6 @@
 #include "SkyrimDiagGameLocks.h"
 #include "SkyrimDiagHangObjectThreads.h"
 #include "SkyrimDiagHelper/WctCapture.h"
-#include "SkyrimDiagHelper/WctCapture.h"
 
 namespace skydiag::helper::internal {
 namespace {

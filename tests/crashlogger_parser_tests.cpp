@@ -563,6 +563,12 @@ static void Test_IsSystemish_KnownModules()
   assert(IsSystemishModuleAsciiLower("coreclr.dll"));
   assert(IsSystemishModuleAsciiLower("mscoree.dll"));
   assert(IsSystemishModuleAsciiLower("mscoreei.dll"));
+  assert(IsSystemishModuleAsciiLower("hostfxr.dll"));
+  assert(IsSystemishModuleAsciiLower("hostpolicy.dll"));
+  assert(IsSystemishModuleAsciiLower("system.private.corelib.dll"));
+  assert(IsSystemishModuleAsciiLower("mscorlib.ni.dll"));
+  assert(!IsSystemishModuleAsciiLower(".ni.dll"));
+  assert(!IsSystemishModuleAsciiLower("omni.dll"));
   // Graphics / DirectX (synced with MinidumpUtil.cpp)
   assert(IsSystemishModuleAsciiLower("d3d11.dll"));
   assert(IsSystemishModuleAsciiLower("d3d12.dll"));

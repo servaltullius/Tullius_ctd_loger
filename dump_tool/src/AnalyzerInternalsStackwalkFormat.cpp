@@ -149,58 +149,48 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
   std::size_t maxFrames,
   const std::vector<std::wstring>* frameLabels,
   bool english,
-  std::uint32_t* outTotalFrames,
-  std::uint32_t* outSymbolizedFrames,
-  std::uint32_t* outSourceLineFrames)
+  const std::vector<std::wstring>& windowFrames,
+  std::uint32_t* totalFrames,
+  std::uint32_t* symbolizedFrames,
+  std::uint32_t* sourceLineFrames)
 {
-  std::uint32_t total = 0;
-  std::uint32_t symbolized = 0;
-  std::uint32_t sourceLines = 0;
   std::vector<std::wstring> out;
-  // The counts describe the frames shown (not the "left out" line).
-  const auto setCounts = [&]() {
-    if (outTotalFrames) {
-      *outTotalFrames = total;
-    }
-    if (outSymbolizedFrames) {
-      *outSymbolizedFrames = symbolized;
-    }
-    if (outSourceLineFrames) {
-      *outSourceLineFrames = sourceLines;
-    }
-  };
   if (pcs.empty() || maxFrames == 0) {
-    setCounts();
     return out;
   }
-  const auto [start, end] = SelectCallstackFrameRange(modules, pcs, maxFrames);
-  const auto add = [&](std::size_t i) {
+  // The frames above the window are formatted here; the window's own are
+  // windowFrames, already formatted and counted.
+  const std::size_t start = SelectCallstackFrameRange(modules, pcs, maxFrames).first;
+  const auto addLeading = [&](std::size_t i) {
     bool hasSymbol = false;
     bool hasSourceLine = false;
     out.push_back(FormatLabeledFrame(process, modules, pcs, i, frameLabels, &hasSymbol, &hasSourceLine));
-    total += 1;
-    symbolized += hasSymbol ? 1u : 0u;
-    sourceLines += hasSourceLine ? 1u : 0u;
+    if (totalFrames) {
+      *totalFrames += 1;
+    }
+    if (hasSymbol && symbolizedFrames) {
+      *symbolizedFrames += 1;
+    }
+    if (hasSourceLine && sourceLineFrames) {
+      *sourceLineFrames += 1;
+    }
   };
   constexpr std::size_t kLeadingShownWhole = 8;
   constexpr std::size_t kLeadingShownCut = 4;
   if (start <= kLeadingShownWhole) {
-    for (std::size_t i = 0; i < end; i++) {
-      add(i);
+    for (std::size_t i = 0; i < start; i++) {
+      addLeading(i);
     }
-    setCounts();
-    return out;
+  } else {
+    for (std::size_t i = 0; i < kLeadingShownCut; i++) {
+      addLeading(i);
+    }
+    // Not a frame, so not counted.
+    const std::size_t skipped = start - kLeadingShownCut;
+    out.push_back(english ? L"... " + std::to_wstring(skipped) + L" frames left out"
+                          : L"... 프레임 " + std::to_wstring(skipped) + L"개 생략");
   }
-  for (std::size_t i = 0; i < kLeadingShownCut; i++) {
-    add(i);
-  }
-  const std::size_t skipped = start - kLeadingShownCut;
-  out.push_back(english ? L"... " + std::to_wstring(skipped) + L" frames left out"
-                        : L"... 프레임 " + std::to_wstring(skipped) + L"개 생략");
-  for (std::size_t i = start; i < end; i++) {
-    add(i);
-  }
-  setCounts();
+  out.insert(out.end(), windowFrames.begin(), windowFrames.end());
   return out;
 }
 

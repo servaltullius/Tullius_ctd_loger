@@ -63,8 +63,10 @@ struct HeldHangDump
 // Whether a confirmed hang may be the game quitting slowly: quitting runs from
 // a menu (the pause menu, the main menu, the journal, the console's qqq), so
 // the state flags have a menu open and no load. Every slow shutdown seen
-// (2026-09-18..28, 11-01) was one. A freeze during play is never one, even if
-// something then ends the game with exit code 0 (a quit hotkey, a launcher).
+// (2026-09-18..28, 11-01) was one. A freeze during play is not one on this
+// ground, even if something then ends the game with exit code 0 (a quit
+// hotkey, a launcher); only seeing the game in its exit afterwards makes its
+// normal exit a slow shutdown (closingSeenAfterCaptureThisEpisode).
 constexpr bool MayBeSlowShutdown(std::uint32_t stateFlags, bool isLoading) noexcept
 {
   return (stateFlags & skydiag::kState_InMenu) != 0u && (stateFlags & skydiag::kState_Loading) == 0u && !isLoading;
@@ -89,13 +91,21 @@ struct HangCaptureState
   // the exit classification still sees only the stalled heartbeat.
   bool hangSkippedAsClosingThisEpisode = false;
   // This episode's hang was captured in a state that may be a slow shutdown
-  // (MayBeSlowShutdown). Only such a hang counts as a slow shutdown at a
+  // (MayBeSlowShutdown). Such a hang, or one followed by the game's exit
+  // (closingSeenAfterCaptureThisEpisode), counts as a slow shutdown at a
   // normal exit (IsSlowShutdownAtExit).
   bool captureMayBeSlowShutdownThisEpisode = false;
   // The threshold this episode's hang was captured at. The exit judges the
   // stall by it, not by the flags left at the exit (a load flag there would
   // switch to the loading threshold and hide a slow shutdown).
   std::uint32_t captureThresholdSecThisEpisode = 0;
+  // After this episode's capture the game was seen in its exit (one thread
+  // left, NoteGameClosingAfterCapture). A quit that starts outside a menu
+  // (Alt+F4 during play) goes through it too, so a normal exit from there is
+  // a slow shutdown wherever the hang was captured (IsSlowShutdownAtExit).
+  bool closingSeenAfterCaptureThisEpisode = false;
+  // When NoteGameClosingAfterCapture looks next (GetTickCount64).
+  std::uint64_t nextClosingCheckTick64 = 0;
 
   skydiag::helper::HangSuppressionState hangSuppressionState{};
   HWND targetWindow = nullptr;

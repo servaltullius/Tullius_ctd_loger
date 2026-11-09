@@ -65,16 +65,20 @@ FreedHookInfo ResolveFreedHook(
 
 // A stack walk cut at an address outside every module: whether that address
 // is in hook code the helper recorded (a mod's trampoline or detour, which
-// has no unwind data), and the jump that code continues with, the first
-// recorded stub within kHookCodeContinueWindow bytes after the address.
+// has no unwind data), and the next jump recorded there: the first stub at
+// the address or within kHookCodeNextJumpWindow bytes after it. The record
+// holds the jumps only, so whether the code at the address runs on to that
+// jump is not known (another hook's code can lie between); the report states
+// it as the next recorded jump, with its distance.
 struct HookCodeAtInfo
 {
   bool found = false;
   std::uint64_t page_base = 0;
   bool has_next_stub = false;
   RecordedHookStubInfo next_stub;
+  std::uint32_t next_stub_distance = 0;  // bytes from the address to the stub
 };
-inline constexpr std::uint64_t kHookCodeContinueWindow = 64;
+inline constexpr std::uint64_t kHookCodeNextJumpWindow = 64;
 HookCodeAtInfo FindHookCodeAt(const HookPageRecordInfo& record, std::uint64_t address);
 
 }  // namespace skydiag::dump_tool

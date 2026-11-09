@@ -697,6 +697,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.crash_logger_top_modules.clear();
     out.thread_entry_hook_modules.clear();
     out.stackwalk_truncation.clear();
+    out.stackwalk_truncation_hook_page = 0;
+    out.stackwalk_truncation_hook_next_jump.clear();
+    out.stackwalk_truncation_hook_next_jump_distance = 0;
     out.fault_unloaded_module.clear();
     out.fault_instruction = {};
     out.hook_stub_race = {};

@@ -2,7 +2,7 @@
 #
 # Usage:
 #   cmake -S . -B build-fuzz -DSKYDIAG_FUZZ=ON -DCMAKE_CXX_COMPILER=clang++
-#   cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser fuzz_skse_log_parser
+#   cmake --build build-fuzz --target fuzz_crashlogger_parser fuzz_wct_parser fuzz_skse_log_parser fuzz_address_library
 #   ./build-fuzz/bin/fuzz_crashlogger_parser fuzz/corpus/crashlogger -max_total_time=60
 #
 # Sanitizer flags are attached per target rather than through CMAKE_CXX_FLAGS:
@@ -44,6 +44,19 @@ target_include_directories(fuzz_skse_log_parser PRIVATE
 )
 
 skydiag_configure_fuzz_target(fuzz_skse_log_parser)
+
+# The Address Library a dump carries (ADR-0027): bytes from a file that can be
+# cut short or damaged.
+add_executable(fuzz_address_library
+  fuzz_address_library.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressLibrary.cpp"
+)
+
+target_include_directories(fuzz_address_library PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+
+skydiag_configure_fuzz_target(fuzz_address_library)
 
 if(SKYDIAG_HAS_NLOHMANN_JSON_FOR_FUZZ)
   add_executable(fuzz_wct_parser

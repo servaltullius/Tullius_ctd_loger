@@ -67,6 +67,8 @@ SYSTEM_MODULES = {
     "d3d11.dll", "d3d12.dll", "dxgi.dll", "d3d9.dll",
     "opengl32.dll", "d3dcompiler_47.dll", "dxcore.dll",
     "dbghelp.dll", "dbgcore.dll",
+    "clr.dll", "clrjit.dll", "coreclr.dll", "mscoree.dll", "mscoreei.dll",
+    "hostfxr.dll", "hostpolicy.dll", "system.private.corelib.dll",
 }
 GAME_MODULES = {"skyrimse.exe", "skyrimae.exe", "skyrimvr.exe", "skyrim.exe"}
 FRAME_RE = re.compile(r"^\s*\[\s*\d+\]\s*(\[[PS]\])?\s*0x[0-9A-Fa-f]+\s+([^\s+]+)\+[0-9A-Fa-f]+")
@@ -113,7 +115,9 @@ def crash_logger_view(log_text: str | None) -> dict[str, Any]:
     if log_text:
         for module in crash_logger_probable_modules(log_text):
             low = module.lower()
-            if low in SYSTEM_MODULES or low in GAME_MODULES or low in (m.lower() for m in ranked):
+            # ".ni.dll": the .NET Framework's precompiled libraries, as there.
+            if (low in SYSTEM_MODULES or low in GAME_MODULES or (len(low) > 7 and low.endswith(".ni.dll"))
+                    or low in (m.lower() for m in ranked)):
                 continue
             ranked.append(module)
     return {"ranked": ranked, "lead": ranked[0] if ranked else ""}

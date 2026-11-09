@@ -69,11 +69,20 @@ bool IsLikelyWindowsSystemModulePathLower(std::wstring_view lowerPath)
   //   Framework runtime, which a mod or overlay that runs .NET code in the
   //   game loads; never itself the mod (2026-11-07: a freeze report named
   //   clr.dll as the suspected mod, with High confidence).
+  // - C:\Windows\assembly\NativeImages_v4.0.30319_64\mscorlib\<id>\mscorlib.ni.dll:
+  //   the .NET Framework's precompiled libraries, the frames right below
+  //   clr.dll on a managed thread's stack.
+  // - C:\Program Files\dotnet\shared\Microsoft.NETCore.App\8.0.11\System.Private.CoreLib.dll:
+  //   the shared .NET (Core) runtime and its libraries.
+  // Only these folders, not everything under C:\Windows: a DLL some other
+  // software put elsewhere in there stays a module to name.
   const bool hasWindowsSystemDir =
     (lowerPath.find(L"\\windows\\system32\\") != std::wstring::npos) ||
     (lowerPath.find(L"\\windows\\syswow64\\") != std::wstring::npos) ||
     (lowerPath.find(L"\\windows\\winsxs\\") != std::wstring::npos) ||
     (lowerPath.find(L"\\windows\\microsoft.net\\") != std::wstring::npos) ||
+    (lowerPath.find(L"\\windows\\assembly\\") != std::wstring::npos) ||
+    (lowerPath.find(L"\\dotnet\\shared\\microsoft.") != std::wstring::npos) ||
     (lowerPath.find(L"\\systemroot\\system32\\") != std::wstring::npos);
   return hasWindowsSystemDir;
 }
@@ -345,16 +354,20 @@ bool IsSystemishModule(std::wstring_view filename)
     // Debugging
     L"dbghelp.dll",    L"dbgcore.dll",
     // .NET runtime (Framework and Core): a mod that runs .NET code in the
-    // game loads it; the runtime is not that mod.
+    // game loads it; the runtime is not that mod. By name too, since a mod
+    // can ship its own copy of the .NET (Core) runtime beside its DLL.
     L"clr.dll",        L"clrjit.dll",    L"coreclr.dll",   L"mscoree.dll",
-    L"mscoreei.dll",
+    L"mscoreei.dll",   L"hostfxr.dll",   L"hostpolicy.dll", L"system.private.corelib.dll",
   };
   for (const auto* m : k) {
     if (lower == m) {
       return true;
     }
   }
-  return false;
+  // The .NET Framework's precompiled libraries (mscorlib.ni.dll,
+  // System.ni.dll), for a frame known by name only (a Crash Logger log).
+  constexpr std::wstring_view kNativeImageSuffix = L".ni.dll";
+  return lower.size() > kNativeImageSuffix.size() && EndsWith(lower, kNativeImageSuffix);
 }
 
 bool IsLikelyWindowsSystemModulePath(std::wstring_view modulePath)

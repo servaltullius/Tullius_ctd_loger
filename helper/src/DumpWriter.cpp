@@ -541,7 +541,7 @@ bool WriteDumpWithStreams(
   }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
-  streams.reserve(6);
+  streams.reserve(7);  // s1..s7 below
 
   MINIDUMP_USER_STREAM s1{};
   s1.Type = skydiag::protocol::kMinidumpUserStream_Blackbox;

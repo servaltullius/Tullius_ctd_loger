@@ -150,7 +150,10 @@ std::vector<std::wstring> FormatCallstackForDisplay(
 // when it crashed (2026-11-09: LockForRead <- GetExtraData <-
 // GetDisplayFullName <- IsInCombat, above a plugin's condition hook). They are
 // shown from frame 0; more than 8 of them shrink to the first 4 and a line
-// saying how many are left out.
+// saying how many are left out. windowFrames is what FormatCallstackForDisplay
+// returned for the same pcs and maxFrames (not fromTop), and the counts are
+// its counts: the frames put before the window are added to them, so they end
+// up describing the frames shown.
 std::vector<std::wstring> FormatCrashCallstackForReport(
   HANDLE process,
   const std::vector<ModuleInfo>& modules,
@@ -158,9 +161,10 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
   std::size_t maxFrames,
   const std::vector<std::wstring>* frameLabels,
   bool english,
-  std::uint32_t* outTotalFrames,
-  std::uint32_t* outSymbolizedFrames,
-  std::uint32_t* outSourceLineFrames);
+  const std::vector<std::wstring>& windowFrames,
+  std::uint32_t* totalFrames,
+  std::uint32_t* symbolizedFrames,
+  std::uint32_t* sourceLineFrames);
 
 }  // namespace stackwalk
 
@@ -375,8 +379,8 @@ bool TryComputeStackwalkSuspects(
       out.stackwalk_truncation_unloaded_module = gone->filename;
     } else if (end.stop == StackWalkStop::kOutsideModules) {
       // ADR-0027: a mod's hook code (no unwind data) the helper recorded;
-      // name where it continues (2026-11-09: a cut at 0x244c6e94012 was a
-      // detour returning to SkyrimSE.exe+0x37f9e6).
+      // name the next jump recorded there (2026-11-09: a cut at 0x244c6e94012
+      // was a detour returning to SkyrimSE.exe+0x37f9e6).
       void* recordPtr = nullptr;
       ULONG recordSize = 0;
       HookPageRecordInfo record{};
@@ -402,7 +406,8 @@ bool TryComputeStackwalkSuspects(
             target += L" (" + label + L")";
           }
         }
-        out.stackwalk_truncation_hook_continues_to = std::move(target);
+        out.stackwalk_truncation_hook_next_jump = std::move(target);
+        out.stackwalk_truncation_hook_next_jump_distance = hook.next_stub_distance;
       }
     }
   };
@@ -459,7 +464,8 @@ bool TryComputeStackwalkSuspects(
       if (!fromTop) {
         out.stackwalk_display_frames = stackwalk::FormatCrashCallstackForReport(
           sym.process, modules, bestAny.pcs, kCrashStackWindowFrames, &labels, lang == i18n::Language::kEnglish,
-          &out.stackwalk_total_frames, &out.stackwalk_symbolized_frames, &out.stackwalk_source_line_frames);
+          out.stackwalk_primary_frames, &out.stackwalk_total_frames, &out.stackwalk_symbolized_frames,
+          &out.stackwalk_source_line_frames);
       }
     }
     return false;
@@ -489,7 +495,8 @@ bool TryComputeStackwalkSuspects(
   if (!fromTop) {
     out.stackwalk_display_frames = stackwalk::FormatCrashCallstackForReport(
       sym.process, modules, best.pcs, kCrashStackWindowFrames, &labels, lang == i18n::Language::kEnglish,
-      &out.stackwalk_total_frames, &out.stackwalk_symbolized_frames, &out.stackwalk_source_line_frames);
+      out.stackwalk_primary_frames, &out.stackwalk_total_frames, &out.stackwalk_symbolized_frames,
+      &out.stackwalk_source_line_frames);
   }
   return true;
 }

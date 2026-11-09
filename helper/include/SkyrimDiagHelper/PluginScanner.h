@@ -124,7 +124,21 @@ std::vector<std::string> ParsePluginsTxt(const std::string& content);
 // Plugin names from Skyrim.ccc, the Creation Club files the game loads on its own.
 std::vector<std::string> ParseCreationClubContentList(const std::string& content);
 
+// The full path of the process's executable.
+bool TryResolveProcessImagePath(HANDLE processHandle, std::filesystem::path& outPath);
 bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir);
+// The file version in a file's version resource (1.6.1170.0); none when the
+// file has no such resource or cannot be read.
+struct FileVersionNumbers
+{
+  std::uint32_t major = 0;
+  std::uint32_t minor = 0;
+  std::uint32_t build = 0;
+  std::uint32_t revision = 0;
+};
+std::optional<FileVersionNumbers> QueryFileVersion(const std::filesystem::path& filePath);
+// The same as "1.6.1170.0"; empty when there is none.
+std::string QueryFileVersionString(const std::filesystem::path& filePath);
 std::vector<std::wstring> CollectModuleFilenamesBestEffort(std::uint32_t pid);
 std::vector<std::wstring> CollectModulePathsBestEffort(std::uint32_t pid);
 // Base address of the process executable; 0 when it cannot be read.

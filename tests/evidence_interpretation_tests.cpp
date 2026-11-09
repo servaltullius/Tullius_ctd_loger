@@ -114,6 +114,33 @@ void TestSystemishByPath()
   Require(
     IsSystemishModuleAt(L"coreclr.dll", L"C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\8.0.11\\coreclr.dll"),
     "the .NET runtime of a mod that hosts .NET 5+");
+  // The frames right below the runtime on a managed thread's stack are the
+  // framework's own libraries, which are no more the mod than clr.dll is.
+  Require(
+    IsSystemishModuleAt(
+      L"mscorlib.ni.dll",
+      L"C:\\Windows\\assembly\\NativeImages_v4.0.30319_64\\mscorlib\\0a1b2c\\mscorlib.ni.dll"),
+    "a .NET Framework native image, by its folder");
+  Require(IsSystemishModuleAt(L"System.Core.ni.dll", L""), "and by its name without a path");
+  Require(
+    IsSystemishModuleAt(
+      L"System.Private.CoreLib.dll",
+      L"C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\8.0.11\\System.Private.CoreLib.dll"),
+    "the shared .NET library folder");
+  Require(
+    IsSystemishModuleAt(
+      L"System.Collections.dll",
+      L"C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\8.0.11\\System.Collections.dll"),
+    "any library in it");
+  Require(
+    IsSystemishModuleAt(L"hostfxr.dll", L"G:\\MO2\\mods\\Example\\runtime\\hostfxr.dll"),
+    "a .NET runtime a mod ships beside its DLL");
+  Require(
+    !IsSystemishModuleAt(L"Example.dll", L"D:\\Games\\Windows\\Skyrim\\Data\\SKSE\\Plugins\\Example.dll"),
+    "a mod under some folder named Windows stays a mod");
+  Require(
+    !IsSystemishModuleAt(L"Injected.dll", L"C:\\Windows\\Injected.dll"),
+    "a DLL elsewhere under Windows stays a module to name");
   Require(
     !IsSystemishModuleAt(L"NetScriptFramework.Runtime.dll", L"G:\\MO2\\mods\\NSF\\NetScriptFramework.Runtime.dll"),
     "the mod that hosts .NET stays a mod");

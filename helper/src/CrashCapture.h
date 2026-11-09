@@ -582,20 +582,31 @@ constexpr bool IsHangDuringNormalShutdown(std::uint32_t exitCode, bool hangEpiso
 }
 
 // The exit the helper treats as a slow shutdown: its viewer is not opened and
-// a held dump (HeldHangDump) is removed. On top of IsHangDuringNormalShutdown,
-// the hang was captured where quitting happens (MayBeSlowShutdown: a menu, no
-// load), so a freeze during play that a quit hotkey or a launcher ends with
-// code 0 keeps its viewer; and the heartbeat was still stalled at the exit, so
-// a freeze the game came back from just before a quick quit (before a hang
-// tick saw the recovery) is not taken for one.
+// a held dump (HeldHangDump) is removed. On top of IsHangDuringNormalShutdown:
+// - the game was quitting. Either the hang was captured where quitting
+//   happens (MayBeSlowShutdown: a menu, no load), or after the capture the
+//   game was seen in its exit (one thread left, NoteGameClosingAfterCapture),
+//   which a quit that starts outside a menu (Alt+F4 during play) goes through
+//   too. A freeze during play that is ended from outside with code 0 (a
+//   launcher, TerminateProcess) shows neither and keeps its viewer. One ended
+//   by ExitProcess inside the game (a quit hotkey's own thread) can show the
+//   second; it then loses only the viewer at the exit, as its dump was
+//   analyzed at the capture and stays.
+// - the heartbeat was still stalled at the exit, so a freeze the game came
+//   back from just before a quick quit (before a hang tick saw the recovery)
+//   is not taken for one.
+// - no dialog window of the game was visible at the capture. A game that is
+//   quitting shows none, and a dump with one says whose it was (a plugin's
+//   error message that ends the game with code 0 once it is dismissed).
 constexpr bool IsSlowShutdownAtExit(
   std::uint32_t exitCode,
   bool hangEpisodeOpenAtExit,
-  bool captureMayBeSlowShutdown,
-  bool heartbeatStalledAtExit) noexcept
+  bool gameWasQuitting,
+  bool heartbeatStalledAtExit,
+  bool dialogSeenAtCapture) noexcept
 {
-  return IsHangDuringNormalShutdown(exitCode, hangEpisodeOpenAtExit) && captureMayBeSlowShutdown &&
-         heartbeatStalledAtExit;
+  return IsHangDuringNormalShutdown(exitCode, hangEpisodeOpenAtExit) && gameWasQuitting && heartbeatStalledAtExit &&
+         !dialogSeenAtCapture;
 }
 
 // The held dump of a released crash is renamed from SkyrimDiag_Crash_<ts>.dmp

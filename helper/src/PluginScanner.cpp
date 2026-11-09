@@ -118,38 +118,6 @@ std::filesystem::path ResolveGameExePathFromDir(const std::filesystem::path& gam
   return {};
 }
 
-std::string QueryFileVersionString(const std::filesystem::path& filePath)
-{
-  if (filePath.empty()) {
-    return {};
-  }
-  DWORD handle = 0;
-  const DWORD size = GetFileVersionInfoSizeW(filePath.c_str(), &handle);
-  if (size == 0) {
-    return {};
-  }
-
-  std::vector<std::uint8_t> buffer(size);
-  if (!GetFileVersionInfoW(filePath.c_str(), handle, size, buffer.data())) {
-    return {};
-  }
-
-  VS_FIXEDFILEINFO* ffi = nullptr;
-  UINT ffiSize = 0;
-  if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<LPVOID*>(&ffi), &ffiSize) ||
-      !ffi ||
-      ffiSize < sizeof(VS_FIXEDFILEINFO)) {
-    return {};
-  }
-
-  const std::uint32_t ms = ffi->dwFileVersionMS;
-  const std::uint32_t ls = ffi->dwFileVersionLS;
-  return std::to_string(HIWORD(ms)) + "."
-       + std::to_string(LOWORD(ms)) + "."
-       + std::to_string(HIWORD(ls)) + "."
-       + std::to_string(LOWORD(ls));
-}
-
 std::filesystem::path ResolveMo2IniFromModulePath(const std::filesystem::path& modulePath)
 {
   if (modulePath.empty()) {
@@ -599,7 +567,51 @@ std::vector<std::string> ParseCreationClubContentList(const std::string& content
   return plugins;
 }
 
-bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir)
+std::optional<FileVersionNumbers> QueryFileVersion(const std::filesystem::path& filePath)
+{
+  if (filePath.empty()) {
+    return std::nullopt;
+  }
+  DWORD handle = 0;
+  const DWORD size = GetFileVersionInfoSizeW(filePath.c_str(), &handle);
+  if (size == 0) {
+    return std::nullopt;
+  }
+
+  std::vector<std::uint8_t> buffer(size);
+  if (!GetFileVersionInfoW(filePath.c_str(), handle, size, buffer.data())) {
+    return std::nullopt;
+  }
+
+  VS_FIXEDFILEINFO* ffi = nullptr;
+  UINT ffiSize = 0;
+  if (!VerQueryValueW(buffer.data(), L"\\", reinterpret_cast<LPVOID*>(&ffi), &ffiSize) ||
+      !ffi ||
+      ffiSize < sizeof(VS_FIXEDFILEINFO)) {
+    return std::nullopt;
+  }
+
+  FileVersionNumbers version{};
+  version.major = HIWORD(ffi->dwFileVersionMS);
+  version.minor = LOWORD(ffi->dwFileVersionMS);
+  version.build = HIWORD(ffi->dwFileVersionLS);
+  version.revision = LOWORD(ffi->dwFileVersionLS);
+  return version;
+}
+
+std::string QueryFileVersionString(const std::filesystem::path& filePath)
+{
+  const auto version = QueryFileVersion(filePath);
+  if (!version) {
+    return {};
+  }
+  return std::to_string(version->major) + "."
+       + std::to_string(version->minor) + "."
+       + std::to_string(version->build) + "."
+       + std::to_string(version->revision);
+}
+
+bool TryResolveProcessImagePath(HANDLE processHandle, std::filesystem::path& outPath)
 {
   if (!processHandle) {
     return false;
@@ -611,9 +623,14 @@ bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir)
     return false;
   }
   buf.resize(size);
+  outPath = std::filesystem::path(buf);
+  return true;
+}
 
-  const std::filesystem::path exePath(buf);
-  if (!exePath.has_parent_path()) {
+bool TryResolveGameExeDir(HANDLE processHandle, std::filesystem::path& outDir)
+{
+  std::filesystem::path exePath;
+  if (!TryResolveProcessImagePath(processHandle, exePath) || !exePath.has_parent_path()) {
     return false;
   }
 

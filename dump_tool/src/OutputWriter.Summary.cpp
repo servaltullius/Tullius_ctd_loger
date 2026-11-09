@@ -563,6 +563,15 @@ nlohmann::json BuildSummaryJson(
       { "module", WideToUtf8(r.stackwalk_truncation_module) },
       { "unloaded_module", WideToUtf8(r.stackwalk_truncation_unloaded_module) },
     };
+    // Additive (ADR-0027): the cut address is in hook code the helper
+    // recorded, with the next jump recorded there (may be empty).
+    if (r.stackwalk_truncation_hook_page != 0u) {
+      char page[32]{};
+      std::snprintf(page, sizeof(page), "0x%llX", static_cast<unsigned long long>(r.stackwalk_truncation_hook_page));
+      summary["stackwalk_truncation"]["hook_page"] = page;
+      summary["stackwalk_truncation"]["hook_next_jump"] = WideToUtf8(r.stackwalk_truncation_hook_next_jump);
+      summary["stackwalk_truncation"]["hook_next_jump_distance"] = r.stackwalk_truncation_hook_next_jump_distance;
+    }
   }
   if (!r.fault_unloaded_module.empty()) {
     summary["fault_unloaded_module"] = WideToUtf8(r.fault_unloaded_module);
@@ -682,7 +691,7 @@ nlohmann::json BuildSummaryJson(
   summary["callstack"]["thread_id"] = r.stackwalk_primary_tid;
   summary["callstack"]["frames"] = nlohmann::json::array();
   // What the viewer shows: a crash stack from frame 0 (stackwalk_display_frames).
-  for (const auto& f : r.stackwalk_display_frames.empty() ? r.stackwalk_primary_frames : r.stackwalk_display_frames) {
+  for (const auto& f : r.ShownCallstackFrames()) {
     summary["callstack"]["frames"].push_back(WideToUtf8(f));
   }
   const std::wstring redactedSymbolCachePath = MaybeRedactPath(r.symbol_cache_path, redactPaths);
