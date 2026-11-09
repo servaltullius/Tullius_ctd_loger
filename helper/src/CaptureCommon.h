@@ -10,6 +10,7 @@
 
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
+#include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
@@ -86,6 +87,20 @@ struct PluginScanInputs
   std::uint64_t gameImageBase = 0;
   // A skse64.log written before this is from an earlier launch.
   std::optional<std::filesystem::file_time_type> gameProcessStart;
+};
+
+// What the dump of a released crash needs when the exit reports that crash
+// after all (PromoteReleasedCrashDump): the game is gone by then, so this is
+// kept from the release. The plugin scan's inputs, and for the incident
+// manifest the capture's timestamp, the game's pid, the crash event's state
+// flags and the profile the dump was written with.
+struct ReleasedDumpContext
+{
+  PluginScanInputs pluginScan;
+  std::wstring timestamp;
+  DWORD pid = 0;
+  std::uint32_t stateFlags = 0;
+  skydiag::helper::DumpProfile writtenProfile{};
 };
 
 inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedProcess& proc)

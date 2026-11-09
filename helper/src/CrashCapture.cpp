@@ -686,7 +686,7 @@ void DiscardReleasedCrashDump(
   crashState->releasedDumpPath.clear();
   crashState->releasedDumpPreserve = false;
   crashState->releasedDumpRecovery = LateRecoveryState{};
-  crashState->releasedPluginScanInputs.reset();
+  crashState->releasedDumpContext.reset();
 }
 
 bool IsCleanExitEvidenceRequired(
@@ -1223,6 +1223,8 @@ void ReleaseFilteredCrashDump(
   const skydiag::ForcedCloseMatch& forcedClose,
   FilterVerdict verdict,
   const PluginScanInputs& pluginScanInputs,
+  std::wstring_view ts,
+  const skydiag::helper::DumpProfile& writtenProfile,
   CrashCaptureState* crashState,
   std::wstring* lastCrashDumpPath)
 {
@@ -1355,7 +1357,13 @@ void ReleaseFilteredCrashDump(
       crashState->releasedDumpPath = heldDumpPath;
       crashState->releasedDumpPreserve = preserveFilteredDump;
       // For the exit that reports this fault after all (PromoteReleasedCrashDump).
-      crashState->releasedPluginScanInputs = std::make_shared<const PluginScanInputs>(pluginScanInputs);
+      crashState->releasedDumpContext = std::make_shared<const ReleasedDumpContext>(ReleasedDumpContext{
+        pluginScanInputs,
+        std::wstring(ts),
+        proc.pid,
+        info.stateFlags,
+        writtenProfile,
+      });
       StartLateRecovery(
         &crashState->releasedDumpRecovery,
         GetTickCount64(),
@@ -1595,7 +1603,18 @@ bool HandleCrashEventTick(
     }
     if (verdict != FilterVerdict::kKeepDump) {
       ReleaseFilteredCrashDump(
-        cfg, proc, outBase, dumpPath, info, forcedClose, verdict, pluginScanInputs, crashState, lastCrashDumpPath);
+        cfg,
+        proc,
+        outBase,
+        dumpPath,
+        info,
+        forcedClose,
+        verdict,
+        pluginScanInputs,
+        ts,
+        WrittenDumpProfile(dumpProfile, dumpMemory),
+        crashState,
+        lastCrashDumpPath);
       return true;
     }
   }

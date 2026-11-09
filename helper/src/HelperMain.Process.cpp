@@ -15,6 +15,7 @@
 #include "DumpToolLaunch.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
+#include "IncidentManifest.h"
 #include "SkyrimDiagHelper/HangDetect.h"
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/Retention.h"
@@ -104,11 +105,11 @@ bool PromoteReleasedCrashDump(
     return false;
   }
   std::wstring dumpPath = crash.releasedDumpPath;
-  const auto pluginScanInputs = std::move(crash.releasedPluginScanInputs);
+  const auto releasedContext = std::move(crash.releasedDumpContext);
   crash.releasedDumpPath.clear();
   crash.releasedDumpPreserve = false;
   crash.releasedDumpRecovery = LateRecoveryState{};
-  crash.releasedPluginScanInputs.reset();
+  crash.releasedDumpContext.reset();
   std::error_code ec;
   const bool exists = ExistsForIo(dumpPath, ec);
   if (ec) {
@@ -144,14 +145,38 @@ bool PromoteReleasedCrashDump(
   // A crash dump carries no plugin stream; the analyzer reads the scan from
   // this file beside it (plugin list, missing masters, SKSE log, MO2 mods).
   // The game is gone now, so the scan uses what was read at the release.
-  if (pluginScanInputs) {
-    const std::string pluginScanJson = CollectPluginScanJson(*pluginScanInputs, outBase);
+  if (releasedContext) {
+    const std::string pluginScanJson = CollectPluginScanJson(releasedContext->pluginScan, outBase);
     if (!pluginScanJson.empty()) {
       const std::filesystem::path dumpFs(dumpPath);
       const auto pluginScanPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_PluginScan.json");
       WriteTextFileUtf8(pluginScanPath, pluginScanJson);
       AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
     }
+  }
+  // Its incident manifest, as a kept crash gets one: the analyzer reads the
+  // capture profile from it. No ETW trace was started for a released
+  // exception.
+  if (cfg.enableIncidentManifest && releasedContext && !releasedContext->timestamp.empty()) {
+    nlohmann::json ctx = nlohmann::json::object();
+    ctx["reason"] = "released_exception_reported_at_exit";
+    const auto manifest = MakeIncidentManifestV1(
+      "crash",
+      releasedContext->timestamp,
+      releasedContext->pid,
+      std::filesystem::path(dumpPath),
+      std::nullopt,
+      std::nullopt,
+      /*etwStatus=*/"disabled",
+      releasedContext->stateFlags,
+      ctx,
+      &releasedContext->writtenProfile,
+      /*recaptureDecision=*/nullptr,
+      cfg,
+      cfg.incidentManifestIncludeConfigSnapshot);
+    const auto manifestPath = outBase / (L"SkyrimDiag_Incident_Crash_" + releasedContext->timestamp + L".json");
+    WriteTextFileUtf8(manifestPath, DumpJsonForFile(manifest));
+    AppendLogLine(outBase, L"Incident manifest written: " + manifestPath.wstring());
   }
   // The game has exited, so a queued viewer opens right after this
   // (LaunchDeferredViewersAfterExit) and analyzes the dump itself.

@@ -7,11 +7,13 @@
 #include <ctime>
 #include <exception>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
 
+#include "CaptureCommon.h"
 #include "HelperLog.h"
 #include "HelperCommon.h"
 #include "HelperMainInternal.h"
@@ -2425,6 +2427,15 @@ void TestHeldDumpIsReportedWhenTheNewerCrashHasNoDump()
   state.crashCaptured.releasedOnBriefHeartbeat = true;
   state.crashCaptured.releasedCrashTick64 = GetTickCount64() - 5'000u;
   state.crashCaptured.releasedDumpPath = heldDump.wstring();
+  {
+    skydiag::helper::internal::ReleasedDumpContext context{};
+    context.timestamp = L"20261110_120000_001";
+    context.pid = proc.pid;
+    context.stateFlags = skydiag::kState_Frozen;
+    context.writtenProfile.includeProcessThreadData = true;
+    state.crashCaptured.releasedDumpContext =
+      std::make_shared<const skydiag::helper::internal::ReleasedDumpContext>(std::move(context));
+  }
   state.crashCaptured.dumpWriteFailedCrashSeq = 4u;
   state.crashCaptured.dumpWriteFailedProcessExited = true;
   state.crashCaptured.dumpWriteFailedTick64 = GetTickCount64();
@@ -2441,6 +2452,14 @@ void TestHeldDumpIsReportedWhenTheNewerCrashHasNoDump()
   Require(state.crashCaptured.releasedDumpPath.empty(), "nothing is held any more");
   AssertContains(log, "reporting the dump kept from the exception released", "why it is reported is logged");
   Require(HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), "the newer exception's record is written too");
+  // The analyzer finds the manifest by the dump's timestamp and reads the
+  // capture profile from it.
+  const auto manifestPath = outBase / L"SkyrimDiag_Incident_Crash_20261110_120000_001.json";
+  Require(FileExists(manifestPath), "the promoted dump gets its incident manifest");
+  const auto manifest = ReadAllTextUtf8(manifestPath);
+  AssertContains(manifest, "\"dump\": \"SkyrimDiag_Crash_20261110_120000_001.dmp\"", "under its crash name");
+  AssertContains(manifest, "\"reason\": \"released_exception_reported_at_exit\"", "with why it is one");
+  AssertContains(manifest, "\"capture_profile\"", "and the profile it was written with");
 
   TerminateChildProcess(&child);
   std::filesystem::remove_all(outBase);
