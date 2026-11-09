@@ -208,7 +208,7 @@ void BuildHistoryEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
       const std::wstring modW = Utf8ToWide(ms.module_name);
       if (ctx.en) {
         details += modW + L": " + std::to_wstring(ms.total_appearances) + L"/" +
-          std::to_wstring(ms.total_crashes) + L" crashes, top " + std::to_wstring(ms.as_top_suspect) + L"x";
+          std::to_wstring(ms.total_crashes) + L" captures, top " + std::to_wstring(ms.as_top_suspect) + L"x";
       } else {
         details += modW + L": " + std::to_wstring(ms.total_crashes) + L"회 중 " +
           std::to_wstring(ms.total_appearances) + L"회 등장, 1위 " + std::to_wstring(ms.as_top_suspect) + L"회";

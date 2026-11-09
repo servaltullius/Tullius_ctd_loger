@@ -490,6 +490,13 @@ void TestHookStubRaceNamesTheHookOwner()
               Contains(r.summary_sentence, en ? L"(Confidence: High)" : L"(신뢰도: 높음)"),
       "the conclusion names the hook owner");
     Require(!Contains(r.summary_sentence, L"SkyrimUpscaler"), "the stack scan is not the conclusion");
+    // Outside every module by definition: nothing to find, no richer dump to ask for.
+    Require(!FindEvidence(r, en ? L"Could not determine the fault module" : L"fault module을 특정하지 못함"),
+      "no fault-module-unknown item beside the known cause");
+    for (const auto& line : r.recommendations) {
+      Require(!Contains(line, en ? L"Fault module could not be determined" : L"예외가 난 모듈을 특정하지 못했습니다"),
+        "no recapture advice for it");
+    }
     Require(!r.actionable_candidates.empty() &&
               r.actionable_candidates[0].display_name == L"zzzz_TypeMode.dll" &&
               r.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kHigh,

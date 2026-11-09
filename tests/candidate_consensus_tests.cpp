@@ -621,6 +621,30 @@ void TestSortActionableCandidatesRestoresStatusPriorityAndKeepsScoreRanking()
   assert(sameStatus[1].score == 7u);
 }
 
+// Stack-scan suspects all weigh the same, so their candidates tie: they keep
+// the order of their signals (the suspects' score order), not the alphabet's,
+// which named the weakest one the "actionable candidate".
+void TestEqualCandidatesKeepSignalOrder()
+{
+  const std::vector<CandidateSignal> signals = {
+    MakeSignal("actionable_stack", L"skyrimupscaler.dll", L"SkyrimUpscaler.dll", 2, L"", L"", L"SkyrimUpscaler.dll"),
+    MakeSignal("actionable_stack", L"prismaui.dll", L"PrismaUI.dll", 2, L"", L"", L"PrismaUI.dll"),
+    MakeSignal("actionable_stack", L"betterthirdpersonselection.dll", L"BetterThirdPersonSelection.dll", 2, L"", L"",
+      L"BetterThirdPersonSelection.dll"),
+  };
+  const auto candidates = BuildCandidateConsensus(signals, Language::kEnglish);
+  assert(candidates.size() == 3u);
+  assert(candidates[0].display_name == L"SkyrimUpscaler.dll");
+  assert(candidates[1].display_name == L"PrismaUI.dll");
+  assert(candidates[2].display_name == L"BetterThirdPersonSelection.dll");
+
+  // A later sort of the same list (the evidence builder re-sorts after it
+  // changes a status) keeps that order too.
+  auto resorted = candidates;
+  SortActionableCandidates(resorted);
+  assert(resorted[0].display_name == L"SkyrimUpscaler.dll" && resorted[2].display_name == L"BetterThirdPersonSelection.dll");
+}
+
 void TestTotalScoreStillRanksCandidatesWithinSameStatus()
 {
   const std::vector<CandidateSignal> signals = {
@@ -877,6 +901,7 @@ int main()
   TestFrameAndStackRemainMediumWithAuxiliaryFamilies();
   TestBoostOnlyScoresDoNotFillGeneralRelatedThreshold();
   TestSortActionableCandidatesRestoresStatusPriorityAndKeepsScoreRanking();
+  TestEqualCandidatesKeepSignalOrder();
   TestTotalScoreStillRanksCandidatesWithinSameStatus();
   TestResourceOnlyDoesNotCreateStandaloneCandidate();
   TestResourceAndHistoryDoNotCreateStandaloneCandidate();

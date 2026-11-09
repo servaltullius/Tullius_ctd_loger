@@ -696,6 +696,24 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     answer.action = en ? L"Nothing to do." : L"따로 할 일은 없습니다.";
     return answer;
   }
+  if (ctx.isSnapshotLike && ctx.isManualCapture && ctx.wct && ctx.wct->has_capture &&
+      ctx.wct->secondsSinceHeartbeat >= internal::kNotHangHeartbeatAgeSec) {
+    // The game had stopped answering when the snapshot was taken, so "not a
+    // freeze, nothing to do" would be wrong for a player who pressed the
+    // hotkey on a stuck game; a game paused in the background looks the same.
+    const std::wstring age = FormatDecimal(ctx.wct->secondsSinceHeartbeat, 0);
+    answer.kind = "snapshot";
+    answer.case_id = "manual_snapshot_unresponsive";
+    answer.headline = en
+      ? (L"This is a snapshot you took. The game had not responded for " + age + L" seconds when it was taken.")
+      : (L"직접 찍은 스냅샷입니다. 찍을 당시 게임이 " + age + L"초 동안 응답하지 않았습니다.");
+    answer.action = en
+      ? L"If the game was stuck (a freeze or an endless loading screen), take the snapshot again while it is stuck and "
+        L"its window is in front. If it was only paused or in the background, there is nothing to do."
+      : L"게임이 멈춰 있었다면(프리징, 끝나지 않는 로딩) 게임 창을 앞에 둔 채 멈춘 상태에서 다시 찍어 주세요. 일시정지 중이었거나 "
+        L"백그라운드였다면 따로 할 일은 없습니다.";
+    return answer;
+  }
   if (ctx.isSnapshotLike) {
     answer.kind = "snapshot";
     answer.case_id = ctx.isManualCapture ? "manual_snapshot" : "snapshot";
@@ -850,7 +868,17 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
           : (L" 게임이 띄운 오류 창" + title + L"이 닫히기를 기다리고 있습니다.")) +
       opener;
     const bool versionIssue = !modal.address_library_issue.empty();
-    if (named) {
+    if (modal.address_library_issue == "address_library_missing") {
+      // The file the window asks for is missing: installing it is the fix,
+      // not updating or disabling the mod that said so.
+      const std::wstring who = named ? lead.name : (en ? std::wstring(L"the mod named in the window") : std::wstring(L"창에 적힌 모드"));
+      freeze.action = en
+        ? (L"Install or update Address Library for SKSE Plugins for your game version (the error window says its file "
+            L"was not found). If it is already installed, " + who +
+            L" was built for the other edition (SE 1.5.97 or AE 1.6+): install its matching file.")
+        : (L"지금 게임 버전용 Address Library for SKSE Plugins를 설치하거나 업데이트하세요(오류 창은 그 파일을 찾지 못했다는 "
+            L"내용입니다). 이미 설치되어 있다면 " + who + L"이(가) 다른 판(SE 1.5.97 / AE 1.6 이상)용이니 맞는 파일로 바꾸세요.");
+    } else if (named) {
       freeze.action = modal.named_module_version_issue
         ? (en ? (L"Update " + lead.name + L" to a version made for your game version, or disable it (see what the "
                   L"error window says).")

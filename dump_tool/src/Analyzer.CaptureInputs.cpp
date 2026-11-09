@@ -813,7 +813,9 @@ bool DetermineHangLike(
     if (auto cap = internal::TryParseWctCaptureDecision(out.wct_json_utf8)) {
       capSaysHang =
         (cap->kind == "hang") ||
-        (cap->thresholdSec > 0u && cap->secondsSinceHeartbeat >= static_cast<double>(cap->thresholdSec));
+        (cap->thresholdSec > 0u && cap->secondsSinceHeartbeat >= static_cast<double>(cap->thresholdSec)) ||
+        internal::IsManualCaptureOfStalledGame(
+          cap->kind, cap->secondsSinceHeartbeat, cap->gameInForegroundKnown, cap->gameInForeground);
       hangLike = capSaysHang;
     } else {
       hangLike = nameHang;

@@ -44,6 +44,20 @@ static void Test_InferModName_StandardPath()
   assert(result == L"CBBE");
 }
 
+// A folder above MO2 can be named mods too: the mod is the folder below the
+// last "\\mods\\", not the first (which named every DLL's mod "MO2" or "mods"
+// and merged different mods into one candidate).
+static void Test_InferModName_ParentFolderNamedMods()
+{
+  assert(InferMo2ModNameFromPath(L"D:\\Mods\\MO2\\mods\\Precision\\SKSE\\Plugins\\Precision.dll") == L"Precision");
+  assert(InferMo2ModNameFromPath(L"D:\\Lists\\Instance\\MODS\\mods\\Some Mod\\SKSE\\Plugins\\x.dll") == L"Some Mod");
+  // A file right under a folder named mods inside the mod is no mod folder.
+  assert(InferMo2ModNameFromPath(L"C:\\MO2\\mods\\CBBE\\SKSE\\Plugins\\mods\\x.dll") == L"CBBE");
+  const auto base = TryInferMo2BaseDirFromModulePaths(
+    { L"D:\\Mods\\MO2\\mods\\Precision\\SKSE\\Plugins\\Precision.dll" });
+  assert(base.has_value() && base->wstring() == L"D:\\Mods\\MO2");
+}
+
 static void Test_InferModName_CaseInsensitive()
 {
   const auto result = InferMo2ModNameFromPath(L"D:\\Modding\\MODS\\SomeHDT\\meshes\\test.nif");
@@ -279,6 +293,7 @@ int main()
   Test_CleanMo2ModFolderName();
   Test_InferModName_StandardPath();
   Test_InferModName_CaseInsensitive();
+  Test_InferModName_ParentFolderNamedMods();
   Test_InferModName_NoModsDir();
   Test_InferModName_EmptyInput();
   Test_InferModName_TrailingMods();

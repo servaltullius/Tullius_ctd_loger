@@ -201,6 +201,10 @@ int main()
   Expect(L"[프리징] 다시 캡처하세요.", "recapture", "");
   // The English form of the same freeze line goes to the same group.
   Expect(L"[Freeze] Compare related candidates and repeat capture during the issue.", "recapture", "");
+  Expect(L"[Freeze] Prefer another capture during the issue and compare.", "recapture", "");
+  Expect(L"[프리징] 문제 상황에서 다시 캡처해 비교하세요.", "recapture", "");
+  Expect(L"[Main thread] If the freeze repeats, capture it again while frozen.", "recapture", "main_thread");
+  Expect(L"[메인 스레드] 프리징이 반복되면 멈춘 상태에서 다시 캡처해 비교하세요.", "recapture", "main_thread");
   Expect(L"[행동 우선 후보] 재수집 전에 확인하세요.", "recapture", "actionable_candidate");
 
   // Verify Next: everything else, including no tag and a tag not at the start.

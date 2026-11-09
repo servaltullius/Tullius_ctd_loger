@@ -45,7 +45,7 @@ constexpr TagRule kTagRules[] = {
 // or a candidate line that asks for another dump is a recapture line.
 constexpr std::wstring_view kRecaptureWordingEn[] = {
   L"DumpMode=2", L"capture another", L"recapture", L"repeat capture", L"capture taken during", L"second signal",
-  L"break the tie",
+  L"break the tie", L"capture it again", L"another capture during",
 };
 constexpr std::wstring_view kRecaptureWordingKo[] = {
   L"다시 캡처", L"재수집", L"한 번 더", L"두 번째 신호",

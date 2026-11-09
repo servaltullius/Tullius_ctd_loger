@@ -57,6 +57,9 @@ struct HelperLoopState
   // A crash viewer was opened for the dump when the game exited; it runs its
   // own analysis of that dump.
   bool crashViewerLaunchedAtExit = false;
+  // A released crash's dump was made the crash dump at the exit and left to
+  // the exit's crash viewer to analyze (PromoteReleasedCrashDump).
+  bool promotedDumpAwaitsViewer = false;
   // The full recapture of the captured crash, cleaned up with it.
   CrashRecaptureArtifacts crashRecapture{};
   // Where Crash Logger writes its logs (ResolveCrashLoggerLogDirs), for the

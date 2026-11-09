@@ -686,6 +686,7 @@ void DiscardReleasedCrashDump(
   crashState->releasedDumpPath.clear();
   crashState->releasedDumpPreserve = false;
   crashState->releasedDumpRecovery = LateRecoveryState{};
+  crashState->releasedDumpContext.reset();
 }
 
 bool IsCleanExitEvidenceRequired(
@@ -1207,6 +1208,7 @@ void HandleCrashDumpWriteFailure(
     crashState->dumpWriteFailedCrashSeq = info.crashSeq;
     crashState->dumpWriteFailedProcessExited =
       proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+    crashState->dumpWriteFailedTick64 = GetTickCount64();
   }
 }
 
@@ -1220,6 +1222,9 @@ void ReleaseFilteredCrashDump(
   const CrashEventInfo& info,
   const skydiag::ForcedCloseMatch& forcedClose,
   FilterVerdict verdict,
+  const PluginScanInputs& pluginScanInputs,
+  std::wstring_view ts,
+  const skydiag::helper::DumpProfile& writtenProfile,
   CrashCaptureState* crashState,
   std::wstring* lastCrashDumpPath)
 {
@@ -1351,6 +1356,14 @@ void ReleaseFilteredCrashDump(
       NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
       crashState->releasedDumpPath = heldDumpPath;
       crashState->releasedDumpPreserve = preserveFilteredDump;
+      // For the exit that reports this fault after all (PromoteReleasedCrashDump).
+      crashState->releasedDumpContext = std::make_shared<const ReleasedDumpContext>(ReleasedDumpContext{
+        pluginScanInputs,
+        std::wstring(ts),
+        proc.pid,
+        info.stateFlags,
+        writtenProfile,
+      });
       StartLateRecovery(
         &crashState->releasedDumpRecovery,
         GetTickCount64(),
@@ -1487,9 +1500,10 @@ bool HandleCrashEventTick(
     crashState->cleanExitEvidencePath.clear();
     crashState->cleanExitDumpIdentity = CleanExitDumpIdentity{};
     crashState->cleanExitFilterContext.clear();
-    // The exit path only ever reports the newest committed crash, so an
-    // earlier released one's dump is no longer needed.
-    DiscardReleasedCrashDump(outBase, crashState, L"a newer crash event arrived");
+    // An earlier released exception's held dump is not needed once this
+    // newer crash has a dump of its own (the exit path only ever reports the
+    // newest committed crash). Until then it is kept: if this dump cannot be
+    // written (the game is already gone), it is the only dump of the crash.
   }
   AppendLogLine(
     outBase,
@@ -1513,6 +1527,9 @@ bool HandleCrashEventTick(
   switch (CheckCrashLoggerThreadDumpWindow(
     cfg, proc, outBase, info, dumpSnapshot, dumpSnapshotBytes, forcedClose, crashState)) {
     case ThreadDumpWindowOutcome::kReleased:
+      // Released without a dump: the exit path would take an older held dump
+      // for this exception's.
+      DiscardReleasedCrashDump(outBase, crashState, L"a newer crash event arrived");
       return true;
     case ThreadDumpWindowOutcome::kExitedBeforeDump:
       exitedBeforeDump = true;
@@ -1545,10 +1562,6 @@ bool HandleCrashEventTick(
         + std::to_wstring(kRepeatedRecoveredFaultCooldownMs / 60000u)
         + L" minutes; writing a minimal dump first.");
   }
-  if (pendingHangViewerDumpPath) {
-    pendingHangViewerDumpPath->clear();
-  }
-
   std::wstring dumpErr;
   skydiag::helper::DumpObjectMemoryStats dumpMemory{};
   const bool dumpOk = WriteCrashDumpWithRetries(
@@ -1556,8 +1569,15 @@ bool HandleCrashEventTick(
 
   if (!dumpOk) {
     HandleCrashDumpWriteFailure(cfg, proc, outBase, dumpPath, dumpErr, info, crashState, lastCrashDumpPath);
+    if (crashState && !crashState->releasedDumpPath.empty()) {
+      AppendLogLine(
+        outBase,
+        L"Keeping the dump held from the exception released before this one: it may be the only dump of this "
+        L"crash (" + std::filesystem::path(crashState->releasedDumpPath).filename().wstring() + L").");
+    }
     return true;
   }
+  DiscardReleasedCrashDump(outBase, crashState, L"a newer crash's dump was written");
 
   if (lastCrashDumpPath) {
     *lastCrashDumpPath = dumpPath;
@@ -1582,9 +1602,27 @@ bool HandleCrashEventTick(
         cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
     }
     if (verdict != FilterVerdict::kKeepDump) {
-      ReleaseFilteredCrashDump(cfg, proc, outBase, dumpPath, info, forcedClose, verdict, crashState, lastCrashDumpPath);
+      ReleaseFilteredCrashDump(
+        cfg,
+        proc,
+        outBase,
+        dumpPath,
+        info,
+        forcedClose,
+        verdict,
+        pluginScanInputs,
+        ts,
+        WrittenDumpProfile(dumpProfile, dumpMemory),
+        crashState,
+        lastCrashDumpPath);
       return true;
     }
+  }
+  // A kept crash takes the exit's viewer from an earlier hang capture. One
+  // released above as a handled exception does not: the hang's viewer was
+  // dropped for it before, and then no viewer opened at the exit at all.
+  if (pendingHangViewerDumpPath) {
+    pendingHangViewerDumpPath->clear();
   }
 
   // The profile the kept dump was written with, for its manifest (ADR-0023):

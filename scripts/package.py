@@ -113,37 +113,22 @@ def main(argv: list[str]) -> int:
     cli_exe = native_artifacts["SkyrimDiagDumpToolCli.exe"]
     winui_launcher_exe = native_artifacts["SkyrimDiagDumpToolWinUI.exe"]
 
-    plugin_pdb = (
-        None
-        if args.no_pdb
-        else native_artifact_path(
-            build_dir, args.config, "SkyrimDiag.pdb", bin_dir=bin_dir
-        )
-    )
-    helper_pdb = (
-        None
-        if args.no_pdb
-        else native_artifact_path(
-            build_dir, args.config, "SkyrimDiagHelper.pdb", bin_dir=bin_dir
-        )
-    )
-    native_pdb = (
-        None
-        if args.no_pdb
-        else native_artifact_path(
-            build_dir,
-            args.config,
-            "SkyrimDiagDumpToolNative.pdb",
-            bin_dir=bin_dir,
-        )
-    )
-    cli_pdb = (
-        None
-        if args.no_pdb
-        else native_artifact_path(
-            build_dir, args.config, "SkyrimDiagDumpToolCli.pdb", bin_dir=bin_dir
-        )
-    )
+    def optional_pdb(filename: str) -> Path | None:
+        # "Included when present": a build without PDBs (--config Release)
+        # packages without them instead of stopping on the lookup.
+        if args.no_pdb:
+            return None
+        try:
+            return native_artifact_path(
+                build_dir, args.config, filename, bin_dir=bin_dir
+            )
+        except (FileNotFoundError, ValueError):
+            return None
+
+    plugin_pdb = optional_pdb("SkyrimDiag.pdb")
+    helper_pdb = optional_pdb("SkyrimDiagHelper.pdb")
+    native_pdb = optional_pdb("SkyrimDiagDumpToolNative.pdb")
+    cli_pdb = optional_pdb("SkyrimDiagDumpToolCli.pdb")
 
     winui_publish_dir = find_winui_build_root(winui_dir)
     if not winui_publish_dir:

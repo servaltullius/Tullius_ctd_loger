@@ -440,6 +440,17 @@ void TestIncidentManifestMatchesHelperTimestamps()
     "second-precision names still match");
   Require(name(L"SkyrimDiag_Crash_20261007_123742_441").empty(), "no manifest for another millisecond");
   Require(name(L"SkyrimDiag_Crash").empty(), "no timestamp, no manifest");
+  // The helper writes the recapture's manifest under the crash's timestamp,
+  // so both are in the folder: each dump gets its own.
+  WriteText(outBase / L"SkyrimDiag_Incident_Crash_20261019_120500_456.json", "{}");
+  Require(name(L"SkyrimDiag_Crash_20261019_120500_456_Full") ==
+            L"SkyrimDiag_Incident_CrashRecapture_20261019_120500_456.json",
+    "a recapture dump takes its own manifest, not the crash's");
+  Require(name(L"SkyrimDiag_Crash_20261019_120500_456_Richer") ==
+            L"SkyrimDiag_Incident_CrashRecapture_20261019_120500_456.json",
+    "the richer one too");
+  Require(name(L"SkyrimDiag_Crash_20261019_120500_456") == L"SkyrimDiag_Incident_Crash_20261019_120500_456.json",
+    "and the crash dump keeps the crash's");
   std::filesystem::remove_all(outBase);
 }
 

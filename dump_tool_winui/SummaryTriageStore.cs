@@ -88,9 +88,14 @@ internal static class SummaryTriageStore
             ? DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
             : string.Empty;
 
+        // The default encoder writes every non-ASCII character (and '+') as
+        // \uXXXX, which turned the Korean text of a summary the analyzer wrote
+        // as UTF-8 into escapes when a review was saved. The file is read as
+        // JSON only, never put into HTML, so the relaxed encoder is safe.
         var options = new JsonSerializerOptions
         {
             WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
         };
         var stateNode = new JsonObject
         {

@@ -677,6 +677,17 @@ inline void RotateLogFileIfNeeded(const std::filesystem::path& path, std::uint64
     return;
   }
 
+  // Take the current log out of the way first. That is the step that fails
+  // while another program holds the log open, and failing after the archives
+  // had moved lost one generation of them at every log line.
+  auto pending = path;
+  pending += ".rotating";
+  std::filesystem::remove(pending, ec);
+  std::filesystem::rename(path, pending, ec);
+  if (ec) {
+    return;  // the log goes on growing; the next line tries again
+  }
+
   // Delete oldest archive.
   {
     auto oldest = path;
@@ -700,7 +711,7 @@ inline void RotateLogFileIfNeeded(const std::filesystem::path& path, std::uint64
   auto dst = path;
   dst += ".1";
   std::filesystem::remove(dst, ec);
-  std::filesystem::rename(path, dst, ec);
+  std::filesystem::rename(pending, dst, ec);
 }
 
 }  // namespace skydiag::helper

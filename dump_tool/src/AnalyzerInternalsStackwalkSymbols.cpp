@@ -320,7 +320,8 @@ SymSession::SymSession(const std::vector<ModuleInfo>& modules, bool allowOnlineS
       actualSearchPath[0] != L'\0') {
     searchPath = actualSearchPath;
   }
-  usedOnlineSymbolSource = (searchPath.find(L"https://") != std::wstring::npos);
+  usedOnlineSymbolSource =
+    WideContainsAsciiInsensitive(searchPath, "https://") || WideContainsAsciiInsensitive(searchPath, "http://");
 
   for (const auto& m : modules) {
     if (m.path.empty() || m.base == 0 || m.end <= m.base) {

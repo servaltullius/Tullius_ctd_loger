@@ -191,6 +191,8 @@ std::vector<EngineLockDeadlockInfo::Link> FindEngineLockCycle(const std::vector<
   // Depth-first from each thread in order, along the first candidate (in the
   // helper's order) whose owner is waiting too; each step's choices are
   // tried in order, so the result does not depend on hash order.
+  constexpr std::size_t kMaxCycleSearchSteps = 200'000;
+  std::size_t steps = 0;
   for (std::size_t start = 0; start < waits.size(); ++start) {
     std::vector<EngineLockDeadlockInfo::Link> path;
     std::vector<std::size_t> onPath;
@@ -203,6 +205,12 @@ std::vector<EngineLockDeadlockInfo::Link> FindEngineLockCycle(const std::vector<
       std::size_t& next = cursor.back();
       bool advanced = false;
       while (next < candidates.size()) {
+        // A real deadlock closes within a few steps. Without a cycle the
+        // search tries every simple path, which a dense graph (a damaged or
+        // crafted dump) makes endless: give up instead.
+        if (++steps > kMaxCycleSearchSteps) {
+          return {};
+        }
         const auto& candidate = candidates[next++];
         if (!candidate.owner_waiting) {
           continue;

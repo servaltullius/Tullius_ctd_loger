@@ -187,7 +187,30 @@ void TestThreadEntryHookIsNoStreak()
     "\n";
   const auto signals = core::ParseCrashLoggerFrameSignalsAscii(log);
   assert((signals.thread_entry_hook_modules == std::vector<std::string>{ "Hooks.dll" }));
-  assert(signals.probable_streak_module == "SkyrimSE.exe" && signals.probable_streak_length == 3u);
+  // Nor is the run of game frames one: only a plugin's run can be promoted.
+  assert(signals.probable_streak_module.empty() && signals.probable_streak_length == 0u);
+}
+
+// A plugin's two frames above a longer run of game frames: the game's run
+// used to be the streak, was then refused (it is no plugin), and the plugin's
+// run got no signal. Game and Windows frames end a run and are none.
+void TestStreakIsOfPluginFrames()
+{
+  const std::string log =
+    "CALL STACK ([P]robable / [S]tack scan):\n"
+    "\t[ 0][P] 0x7FF9BE000001          ModA.dll+0000001\n"
+    "\t[ 1][P] 0x7FF9BE000002          ModA.dll+0000002\n"
+    "\t[ 2][P] 0x7FF6AB000001      SkyrimSE.exe+0000001\n"
+    "\t[ 3][P] 0x7FF6AB000002      SkyrimSE.exe+0000002\n"
+    "\t[ 4][P] 0x7FF6AB000003      SkyrimSE.exe+0000003\n"
+    "\t[ 5][P] 0x7FF9BF000001          ModB.dll+0000001\n"
+    "\t[ 6][P] 0x7FF6AB000004      SkyrimSE.exe+0000004\n"
+    "\t[ 7][P] 0x7FF9BF000002          ModB.dll+0000002\n"
+    "\t[ 8][P] 0x7FF6AB000005      SkyrimSE.exe+0000005\n"
+    "\n";
+  const auto signals = core::ParseCrashLoggerFrameSignalsAscii(log);
+  assert(signals.probable_streak_module == "ModA.dll" && signals.probable_streak_length == 2u);
+  assert(signals.first_actionable_probable_module == "ModA.dll");
 }
 
 void TestCrashLoggerStackMustReachThreadStart()
@@ -244,6 +267,7 @@ int main()
   TestCrashLoggerObjectTypes();
   TestPluginOnTheCrashingPathIsNoHook();
   TestThreadEntryHookIsNoStreak();
+  TestStreakIsOfPluginFrames();
   TestCrashLoggerStackMustReachThreadStart();
   TestFrameWithoutModuleKeepsItsPlace();
   return 0;

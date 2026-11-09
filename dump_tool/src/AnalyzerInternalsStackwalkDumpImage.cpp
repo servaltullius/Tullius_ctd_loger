@@ -193,8 +193,20 @@ std::vector<DumpImageData::Export> DumpImageData::ReadExports(const minidump::Mo
     char piece[64]{};
     for (std::uint32_t offset = 0; offset < 512; offset += sizeof(piece)) {
       if (!Read(module.base + names[i] + offset, piece, sizeof(piece))) {
-        name.clear();
-        break;
+        // The dump holds the export directory and no byte more, so a name
+        // near its end has no whole piece left: read it byte by byte, up to
+        // its terminator.
+        bool terminated = false;
+        for (std::size_t got = 0; got < sizeof(piece) && !terminated; ++got) {
+          if (!Read(module.base + names[i] + offset + got, piece + got, 1)) {
+            break;
+          }
+          terminated = piece[got] == 0;
+        }
+        if (!terminated) {
+          name.clear();
+          break;
+        }
       }
       const auto* end = static_cast<const char*>(std::memchr(piece, 0, sizeof(piece)));
       name.append(piece, end ? static_cast<std::size_t>(end - piece) : sizeof(piece));

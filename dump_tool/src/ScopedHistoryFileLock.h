@@ -19,8 +19,16 @@ public:
     // Derive a unique mutex name from the history file path.
     std::wstring name = L"Local\\SkyrimDiag_HistoryLock_";
     // Use a simple hash of the path to keep the name short and unique.
+    // The same file spelled another way (D:/Logs, d:\\logs\\.\\) must take the
+    // same lock, or two analyzers each save over the other's entry.
+    std::wstring key = historyPath.lexically_normal().make_preferred().wstring();
+    for (auto& c : key) {
+      if (c >= L'A' && c <= L'Z') {
+        c = static_cast<wchar_t>(c - L'A' + L'a');
+      }
+    }
     std::hash<std::wstring> hasher;
-    name += std::to_wstring(hasher(historyPath.wstring()));
+    name += std::to_wstring(hasher(key));
     m_mutex = CreateMutexW(nullptr, FALSE, name.c_str());
   }
 

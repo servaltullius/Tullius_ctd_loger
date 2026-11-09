@@ -495,6 +495,18 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     summary = en
       ? L"Validated clean-exit quarantine metadata matches this preserved dump. The process exited with code 0, so this is not classified as a CTD. (Confidence: High)"
       : L"검증된 정상 종료 격리 메타데이터가 이 보존 덤프와 일치합니다. 프로세스가 종료 코드 0으로 끝났으므로 CTD로 분류하지 않습니다. (신뢰도: 높음)";
+  } else if (isSnapshotLike && isManualCapture && wct && wct->has_capture &&
+             wct->secondsSinceHeartbeat >= internal::kNotHangHeartbeatAgeSec) {
+    // Not the plain snapshot sentence: the main thread had stopped answering,
+    // which the game also does while paused in the background.
+    const std::wstring age = FormatDecimal(wct->secondsSinceHeartbeat, 0);
+    summary = en
+      ? (L"A manual snapshot. When it was taken the game's main thread had not answered for " + age +
+          L" s: it may have been stuck, or only paused in the background, and this capture does not tell which. "
+          L"(Confidence: Low)")
+      : (L"수동 캡처 스냅샷입니다. 캡처 당시 게임 메인 스레드가 " + age +
+          L"초 동안 응답하지 않았습니다. 멈춰 있었을 수도 있고 백그라운드에서 일시정지 중이었을 수도 있는데, 이 캡처로는 "
+          L"어느 쪽인지 알 수 없습니다. (신뢰도: 낮음)");
   } else if (isSnapshotLike) {
     summary = isManualCapture
       ? (en
@@ -932,9 +944,12 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       if (wct && wct->has_capture && wct->thresholdSec > 0u) {
         // No fixed buffer: the capture kind and heartbeat age come from the
         // dump's WCT stream and have no length limit.
+        // Hang-like can also come from a WCT cycle alone, under the threshold.
+        const bool overThreshold = wct->secondsSinceHeartbeat >= static_cast<double>(wct->thresholdSec);
         hangPrefix = (en ? L"Hang detected (capture=" : L"프리징 감지(capture=") + ToWideAscii(wct->capture_kind) +
-          L", heartbeatAge=" + FormatDecimal(wct->secondsSinceHeartbeat, 1) + L"s >= " +
-          std::to_wstring(wct->thresholdSec) + L"s).";
+          L", heartbeatAge=" + FormatDecimal(wct->secondsSinceHeartbeat, 1) +
+          (overThreshold ? L"s >= " : (en ? L"s, threshold " : L"s, 기준 ")) + std::to_wstring(wct->thresholdSec) +
+          L"s).";
       }
       if (!r.modal_dialog_wait.detected) {
         // ADR-0009: what the player had open (the Console in most of the
@@ -954,14 +969,22 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         summary = hangPrefix + L" " + DescribeEngineSpinNan(r, lang, en);
       } else if (r.hang_thread_module_consensus.has_consensus) {
         const auto& consensus = r.hang_thread_module_consensus;
+        // The thread group is found without looking at WCT, so WCT may have
+        // reported a wait cycle too; do not deny it then.
+        const bool wctCycle = wct && wct->cycles > 0;
         summary = en
           ? (hangPrefix + L" " + consensus.module_filename + L" appears on the game main thread and " +
               std::to_wstring(consensus.matching_thread_count - 1u) +
-              L" other non-progressing threads, supporting a module-level synchronization stall. WCT did not prove an OS lock cycle. (Confidence: Medium)")
+              L" other non-progressing threads, supporting a module-level synchronization stall. " +
+              (wctCycle ? L"WCT also reported threads waiting in a cycle." : L"WCT did not prove an OS lock cycle.") +
+              L" (Confidence: Medium)")
           : (hangPrefix + L" 게임 메인 스레드와 진행이 멈춘 다른 " +
               std::to_wstring(consensus.matching_thread_count - 1u) + L"개 스레드에서 " +
               consensus.module_filename +
-              L"이(가) 반복되어 모듈 내부 동기화 정지 가능성이 높습니다. WCT가 OS 잠금 사이클을 입증한 것은 아닙니다. (신뢰도: 중간)");
+              L"이(가) 반복되어 모듈 내부 동기화 정지 가능성이 높습니다. " +
+              (wctCycle ? L"WCT도 서로를 기다리는 스레드 사이클을 보고했습니다."
+                        : L"WCT가 OS 잠금 사이클을 입증한 것은 아닙니다.") +
+              L" (신뢰도: 중간)");
       } else if (r.freeze_analysis.state_id == "deadlock_likely" || r.freeze_analysis.state_id == "loader_stall_likely") {
         // The recommendations and the freeze reasons put these first; the
         // engine wait on the main thread does not overrule them.

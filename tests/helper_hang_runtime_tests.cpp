@@ -394,6 +394,9 @@ enum class BeforeExit
   kLoadFlagAtExit,
   // A dialog window of the game was visible at the capture.
   kDialogSeen,
+  // A load flag appears while the heartbeat stays stopped, and a hang tick
+  // runs: under the 600 s loading threshold the stall is no hang any more.
+  kLoadFlagThenHangTick,
 };
 
 HeldHangExit CaptureHangThenExit(
@@ -440,6 +443,16 @@ HeldHangExit CaptureHangThenExit(
     shared->header.state_flags = skydiag::kState_InMenu | skydiag::kState_Loading;
   } else if (beforeExit == BeforeExit::kDialogSeen) {
     loop.hangState.modalDialogSeenThisEpisode = true;
+  } else if (beforeExit == BeforeExit::kLoadFlagThenHangTick) {
+    shared->header.state_flags = skydiag::kState_InMenu | skydiag::kState_Loading;
+    LoadStats loadStats;
+    std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+    (void)HandleHangTick(
+      cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec,
+      QpcNow(), &loop.pendingHangViewerDumpPath, &loop.hangState);
+    Require(loop.hangState.hangCapturedThisEpisode, "the heartbeat has not moved: the episode is still open");
+    Require(
+      loop.hangState.heldDump.dumpPath.empty() == !heldAtCapture, "and its dump is not released as recovered");
   }
 
   Require(TerminateProcess(child.pi.hProcess, exitCode) != FALSE, "TerminateProcess failed");
@@ -542,6 +555,20 @@ void TestHeldHangDump_StallJudgedByTheCaptureThreshold()
   const auto r = CaptureHangThenExit(
     cfg, 0u, L"skydiag_held_hang_load_flag", skydiag::kState_InMenu, BeforeExit::kLoadFlagAtExit);
   Require(r.slowShutdownAtExit && r.dumps == 0u, "a slow shutdown, removed");
+}
+
+// The thresholds follow the game's flags, which can change while the
+// heartbeat stays stopped. A load flag before the exit made the stall "no
+// hang" under the 600 s loading threshold: the episode was reset, the held
+// dump released as recovered, and the slow shutdown's dump stayed.
+void TestHeldHangDump_EpisodeEndsOnlyWhenTheHeartbeatMoves()
+{
+  auto cfg = MakeHangTestConfig();
+  cfg.hangThresholdLoadingSec = 600u;
+  const auto r = CaptureHangThenExit(
+    cfg, 0u, L"skydiag_held_hang_flag_tick", skydiag::kState_InMenu, BeforeExit::kLoadFlagThenHangTick);
+  Require(r.heldAtCapture && r.slowShutdownAtExit && r.dumps == 0u, "still a slow shutdown, removed");
+  Require(r.log.find("the game recovered") == std::string::npos, "never told as recovered");
 }
 
 // A dialog window at the capture is no slow shutdown: a quitting game shows
@@ -1387,6 +1414,7 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_HeldEpisodeIsNotSkippedAsClosing);
     SKYDIAG_RUN_TEST(TestHeldHangDump_StallJudgedByTheCaptureThreshold);
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenADialogWasVisible);
+    SKYDIAG_RUN_TEST(TestHeldHangDump_EpisodeEndsOnlyWhenTheHeartbeatMoves);
     SKYDIAG_RUN_TEST(TestGameplayCaptureThenTheGamesExitIsASlowShutdown);
     SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);

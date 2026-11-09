@@ -148,7 +148,8 @@ void AddActionableCandidateRecommendations(
     bool en,
     const ActionableCandidate* topCandidate,
     const ActionableCandidate* secondCandidate,
-    bool weakFaultLocationTopCandidate)
+    bool weakFaultLocationTopCandidate,
+    bool wctCycle)
 {
   if (!topCandidate) {
     return;
@@ -222,9 +223,12 @@ void AddActionableCandidateRecommendations(
     r.recommendations.push_back(hasHangThreadGroupFamily
       ? (en
           ? (L"[Synchronization stall] The game main thread and a stable worker group repeatedly retain " + candidateName +
-              L" near their active stacks. Update or isolate this DLL first; no OS lock cycle was proven.")
+              L" near their active stacks. Update or isolate this DLL first" +
+              (wctCycle ? L"; WCT also reported threads waiting in a cycle." : L"; no OS lock cycle was proven."))
           : (L"[동기화 정지] 게임 메인 스레드와 정지된 워커 그룹의 현재 스택 상단에 " + candidateName +
-              L"이(가) 반복됩니다. 이 DLL의 업데이트/격리를 먼저 확인하되 OS 잠금 사이클이 입증된 것은 아닙니다."))
+              L"이(가) 반복됩니다. 이 DLL의 업데이트/격리를 먼저 확인하세요. " +
+              (wctCycle ? L"WCT도 서로를 기다리는 스레드 사이클을 보고했습니다."
+                        : L"OS 잠금 사이클이 입증된 것은 아닙니다.")))
       : hasStandaloneCallstackFamily
       ? (en
           ? (L"[Actionable candidate] Tullius callstack first points to DLL candidate " + candidateName +
@@ -323,9 +327,28 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
     : modal.caller_module_filename;
   const std::wstring named = modal.named_module_filename.empty() ? std::wstring{} : DialogNamedModuleDisplay(modal);
 
-  // The mod the dialog names comes first, as in the quick answer (and so it is
-  // the next action).
-  if (!named.empty()) {
+  // CommonLib puts the plugin's file name in the dialog title, so it names the
+  // plugin even when the stack walk could not resolve the caller.
+  std::wstring plugin = (modal.caller_kind == "plugin" && !caller.empty()) ? caller
+    : (!named.empty() ? named : modal.dialog_title);
+  if (plugin.empty()) {
+    plugin = en ? L"The plugin" : L"해당 플러그인";
+  }
+  const std::wstring gameVersion = r.game_version.empty() ? std::wstring{} : (L" (" + ToWideAscii(r.game_version) + L")");
+  // A missing Address Library file is fixed by installing it, so that line
+  // leads (and is the next action), not "update or disable the mod".
+  const bool addressLibraryMissing = modal.address_library_issue == "address_library_missing";
+  if (addressLibraryMissing) {
+    r.recommendations.push_back(en
+      ? (L"[Modal dialog] " + plugin + L" could not find the Address Library file for this game version" + gameVersion +
+          L". Install or update Address Library for SKSE Plugins for this game version. If it is already installed, the plugin was likely built for the other edition (SE 1.5.97 or AE 1.6+); install the matching file.")
+      : (L"[Modal 대화상자] " + plugin + L"이(가) 현재 게임 버전" + gameVersion +
+          L"용 Address Library 파일을 찾지 못했습니다. 이 게임 버전용 Address Library for SKSE Plugins를 설치하거나 업데이트하세요. 이미 설치되어 있다면 플러그인이 다른 판(SE 1.5.97 / AE 1.6 이상)용으로 빌드되었을 가능성이 높으니 맞는 파일로 바꾸세요."));
+  }
+
+  // Otherwise the mod the dialog names comes first, as in the quick answer
+  // (and so it is the next action).
+  if (!named.empty() && !addressLibraryMissing) {
     r.recommendations.push_back(modal.named_module_version_issue
       ? (en ? (L"[Modal dialog] Update " + named +
                 L" to a version made for your game version, or disable it (see what the error window says).")
@@ -348,14 +371,6 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
       ? (L"[Modal dialog] " + files + L" Read the window to see which mod it is about.")
       : (L"[Modal 대화상자] " + files + L" 창 내용을 읽고 어느 모드에 대한 것인지 확인하세요."));
   }
-  // CommonLib puts the plugin's file name in the dialog title, so it names the
-  // plugin even when the stack walk could not resolve the caller.
-  std::wstring plugin = (modal.caller_kind == "plugin" && !caller.empty()) ? caller
-    : (!named.empty() ? named : modal.dialog_title);
-  if (plugin.empty()) {
-    plugin = en ? L"The plugin" : L"해당 플러그인";
-  }
-  const std::wstring gameVersion = r.game_version.empty() ? std::wstring{} : (L" (" + ToWideAscii(r.game_version) + L")");
   if (modal.address_library_issue == "plugin_incompatible") {
     r.recommendations.push_back(en
       ? (L"[Modal dialog] " + plugin + L" could not use the Address Library of this game" + gameVersion +
@@ -366,12 +381,8 @@ void AddModalDialogWaitRecommendations(AnalysisResult& r, bool en)
           L"의 Address Library를 쓰지 못했습니다(형식이 맞지 않거나 필요한 주소가 없음). 대개 플러그인이 다른 게임 버전용으로 "
           L"빌드된 경우지만, Address Library 파일이 오래되었거나 손상되어도 같은 메시지가 나옵니다. 이 게임 버전용 Address "
           L"Library가 최신인지 먼저 확인하고, 그다음 이 게임 버전용 모드 파일로 바꾸거나 해당 모드를 비활성화하세요."));
-  } else if (modal.address_library_issue == "address_library_missing") {
-    r.recommendations.push_back(en
-      ? (L"[Modal dialog] " + plugin + L" could not find the Address Library file for this game version" + gameVersion +
-          L". Install or update Address Library for SKSE Plugins for this game version. If it is already installed, the plugin was likely built for the other edition (SE 1.5.97 or AE 1.6+); install the matching file.")
-      : (L"[Modal 대화상자] " + plugin + L"이(가) 현재 게임 버전" + gameVersion +
-          L"용 Address Library 파일을 찾지 못했습니다. 이 게임 버전용 Address Library for SKSE Plugins를 설치하거나 업데이트하세요. 이미 설치되어 있다면 플러그인이 다른 판(SE 1.5.97 / AE 1.6 이상)용으로 빌드되었을 가능성이 높으니 맞는 파일로 바꾸세요."));
+  } else if (addressLibraryMissing) {
+    // Said first, above.
   } else if (modal.caller_kind == "plugin" && !caller.empty()) {
     r.recommendations.push_back(en
       ? (L"[Modal dialog] " + caller + L" opened the dialog. Follow its message (missing requirement, version mismatch, config error) or check that mod's documentation.")
@@ -756,7 +767,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
       en,
       topCandidate,
       secondCandidate,
-      ctx.weakFaultLocationTopCandidate);
+      ctx.weakFaultLocationTopCandidate,
+      wct && wct->cycles > 0);
   }
 
   // A main thread waiting in the engine, the GPU or a driver only has the
@@ -934,7 +946,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     // is a richer dump the next step when the game was being closed anyway
     // (ADR-0022) or the decoded jump to no code names its call (ADR-0019).
     const bool jumpFromKnownCall = FaultIsJumpToNoCode(r) && !r.fault_instruction.call_site.empty();
-    if (isCrashLike && !ctx.isForcedClose && !jumpFromKnownCall) {
+    // ADR-0016: a hook being installed is outside every module by definition.
+    if (isCrashLike && !ctx.isForcedClose && !jumpFromKnownCall && !r.hook_stub_race.detected) {
     r.recommendations.push_back(en
       ? L"[Check] Fault module could not be determined. Capture again with a richer crash recapture profile (full memory info / module headers / indirect memory) before escalating to FullMemory (DumpMode=2)."
       : L"[점검] 덤프에서 예외가 난 모듈을 특정하지 못했습니다. 바로 FullMemory(DumpMode=2)로 가지 말고 더 많은 정보를 담는 재수집 설정(full memory info / module headers / indirect memory)으로 먼저 다시 캡처하세요.");

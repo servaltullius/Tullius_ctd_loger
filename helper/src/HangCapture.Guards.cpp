@@ -33,6 +33,7 @@ void ResetHangCaptureEpisode(HangCaptureState* state)
   state->captureThresholdSecThisEpisode = 0;
   state->closingSeenAfterCaptureThisEpisode = false;
   state->nextClosingCheckTick64 = 0;
+  state->episodeHeartbeatQpc = 0;
   state->hangSuppressionState = {};
 }
 
@@ -59,6 +60,7 @@ bool SkipHangIfGameIsClosing(
     return false;
   }
   state->hangSkippedAsClosingThisEpisode = true;
+  state->episodeHeartbeatQpc = proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u;
   AppendLogLine(
     outBase,
     L"Hang detected while the game is closing (1 thread left, secondsSinceHeartbeat="

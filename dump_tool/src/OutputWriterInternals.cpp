@@ -725,9 +725,18 @@ std::filesystem::path FindIncidentManifestForDump(const std::filesystem::path& o
   }
   const std::wstring& ts = *tsOpt;
 
+  // A recapture dump (SkyrimDiag_Crash_<ts>_Richer.dmp, ..._Full.dmp) shares
+  // its timestamp with the crash dump it follows, and both manifests are in
+  // the folder: its own comes first.
+  const auto endsWith = [&](std::wstring_view suffix) {
+    return dumpStem.size() >= suffix.size() && dumpStem.substr(dumpStem.size() - suffix.size()) == suffix;
+  };
+  const bool recapture = endsWith(L"_Richer") || endsWith(L"_Full");
+  const std::wstring crash = L"SkyrimDiag_Incident_Crash_" + ts + L".json";
+  const std::wstring crashRecapture = L"SkyrimDiag_Incident_CrashRecapture_" + ts + L".json";
   const std::wstring candidates[] = {
-    L"SkyrimDiag_Incident_Crash_" + ts + L".json",
-    L"SkyrimDiag_Incident_CrashRecapture_" + ts + L".json",
+    recapture ? crashRecapture : crash,
+    recapture ? crash : crashRecapture,
     L"SkyrimDiag_Incident_Hang_" + ts + L".json",
     L"SkyrimDiag_Incident_Manual_" + ts + L".json",
   };

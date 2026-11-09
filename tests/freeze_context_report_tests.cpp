@@ -289,6 +289,31 @@ void TestStallOutranksTheWaitAdvice()
   }
 }
 
+// The thread group is found without looking at WCT. When WCT reported a wait
+// cycle as well, the conclusion and the advice must not say that none was
+// proven.
+void TestThreadGroupDoesNotDenyAReportedWctCycle()
+{
+  for (const bool cycle : { false, true }) {
+    auto r = MakeHang();
+    r.freeze_analysis.state_id = cycle ? "deadlock_likely" : "synchronization_stall_likely";
+    r.hang_thread_module_consensus.has_consensus = true;
+    r.hang_thread_module_consensus.module_filename = L"CommunityShaders.dll";
+    r.hang_thread_module_consensus.matching_thread_count = 4u;
+    r.has_wct = true;
+    r.wct_json_utf8 = std::string(R"({"threads":[{"tid":1,"isCycle":)") + (cycle ? "true" : "false") +
+                      R"(}],"capture":{"kind":"hang","secondsSinceHeartbeat":40.0,"thresholdSec":10}})";
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    const bool denies = r.summary_sentence.find(L"WCT did not prove an OS lock cycle") != std::wstring::npos;
+    const bool reports = r.summary_sentence.find(L"WCT also reported threads waiting in a cycle") != std::wstring::npos;
+    Require(denies == !cycle && reports == cycle, "the conclusion follows what WCT reported");
+    for (const auto& line : r.recommendations) {
+      Require(!cycle || line.find(L"no OS lock cycle was proven") == std::wstring::npos,
+        "no advice line denies the cycle either");
+    }
+  }
+}
+
 // The 2026-10-18 freeze without its Crash Logger log: both WCT passes show the
 // main thread blocked in dxgi.dll on a critical section held by the DLSS
 // frame-generation thread, which sat in the NVIDIA driver. The report leads
@@ -852,6 +877,7 @@ int main()
     TestEngineGpuQueryPoll();
     TestOtherThreadSuspectsKeepTheirSignal();
     TestStallOutranksTheWaitAdvice();
+    TestThreadGroupDoesNotDenyAReportedWctCycle();
     TestStallOutranksTheWaitSummary();
     TestLockOwnerWaitLeadsTheReport();
     TestMainThreadFromEvents();

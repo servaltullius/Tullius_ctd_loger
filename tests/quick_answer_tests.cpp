@@ -1593,6 +1593,14 @@ void TestGpuDriverLog()
             dt::DescribeGpuDriverLog(none, 20u, false) == L"게임 시작 이후 없음" &&
             dt::DescribeGpuDriverLog(dt::GpuDriverLog{}, 20u, false).empty(),
     "none, and nothing when the log was not read");
+  // Counted by the helper, but no event could be kept: the last-event time
+  // used to be read from the empty list.
+  dt::GpuDriverLog countedOnly{};
+  Require(dt::ApplyGpuDriverLogJson(R"({"version":1,"since_unix":10,"until_unix":20,"total":2,"events":[]})", countedOnly) &&
+            dt::DescribeGpuDriverLog(countedOnly, 20u, true) ==
+              L"2 since the game started (their details could not be read)" &&
+            dt::DescribeGpuDriverLog(countedOnly, 20u, false) == L"게임 시작 이후 2건 (내용은 읽지 못함)",
+    "a count without events is told as that");
 
   // An information event (from a stream that kept them) is neither counted,
   // grouped nor the last one: the error was 1 h 40 min before the capture.

@@ -61,6 +61,7 @@ HangTickResult ExecuteConfirmedHangCapture(
     AppendLogLine(outBase, L"The game exited during the hang capture, so its hang dump could not be written.");
   } else if (!dumpWritten && state && skydiag::helper::IsGameProcessClosing(CountProcessThreads(proc.pid))) {
     state->hangSkippedAsClosingThisEpisode = true;
+    state->episodeHeartbeatQpc = proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u;
     AppendLogLine(
       outBase,
       L"The game was closing by the end of the hang capture (1 thread left); the failed hang dump most likely "
@@ -174,6 +175,7 @@ HangTickResult ExecuteConfirmedHangCapture(
     state->hangCapturedThisEpisode = true;
     state->captureMayBeSlowShutdownThisEpisode = MayBeSlowShutdown(stateFlags, decision.isLoading);
     state->captureThresholdSecThisEpisode = decision.thresholdSec;
+    state->episodeHeartbeatQpc = proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u;
   }
   return HangTickResult::kContinue;
 }

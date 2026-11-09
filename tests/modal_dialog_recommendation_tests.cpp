@@ -93,6 +93,35 @@ void TestMissingAddressLibraryUsesDialogTitleWhenCallerIsUnknown()
     "a missing database can also mean a plugin built for the other edition");
 }
 
+// A missing Address Library file is fixed by installing it: that leads the
+// recommendations and is the quick answer's action, not "update or disable
+// the mod" whose window said so.
+void TestMissingAddressLibraryLeadsWithInstallingIt()
+{
+  for (const bool named : { false, true }) {
+    auto r = MakeModalHang("address_library_missing", false);
+    if (named) {
+      auto& modal = r.modal_dialog_wait;
+      modal.named_module_filename = L"SmoothCam.dll";
+      modal.named_mod_name = L"SmoothCam";
+      modal.named_module_source = "title";
+      modal.named_module_level = i18n::ConfidenceLevel::kHigh;
+      modal.named_module_version_issue = true;
+    }
+    BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+    Require(!r.recommendations.empty() &&
+              r.recommendations.front().find(L"Install or update Address Library for SKSE Plugins") != std::wstring::npos,
+      "installing Address Library is the first recommendation");
+    Require(r.quick_answer.action.find(L"Install or update Address Library for SKSE Plugins") != std::wstring::npos,
+      "and the quick answer's action");
+    Require(r.quick_answer.action.find(L"or disable it") == std::wstring::npos, "not disabling the mod");
+    for (const auto& line : r.recommendations) {
+      Require(line.find(L"to a version made for your game version, or disable it") == std::wstring::npos,
+        "no update-or-disable line beside it");
+    }
+  }
+}
+
 void TestOtherDialogsKeepTheGenericGuidance()
 {
   auto r = MakeModalHang("", true);
@@ -112,6 +141,7 @@ int main()
   try {
     TestIncompatiblePluginGetsSpecificGuidance();
     TestMissingAddressLibraryUsesDialogTitleWhenCallerIsUnknown();
+    TestMissingAddressLibraryLeadsWithInstallingIt();
     TestOtherDialogsKeepTheGenericGuidance();
     std::puts("modal dialog recommendation tests passed");
     return 0;

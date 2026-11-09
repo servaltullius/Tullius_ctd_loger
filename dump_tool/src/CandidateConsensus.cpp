@@ -38,6 +38,9 @@ struct CandidateRow
 {
   ActionableCandidate candidate;
   std::unordered_map<std::string, std::uint32_t> family_weight;
+  // The index of the first signal that named it: equal candidates stay in the
+  // order their signals came in.
+  std::size_t first_signal = 0;
 };
 
 bool RowHasFamily(const CandidateRow& row, std::string_view familyId)
@@ -464,7 +467,12 @@ std::wstring CanonicalCandidateKey(std::wstring_view value)
 
 void SortActionableCandidates(std::vector<ActionableCandidate>& candidates)
 {
-  std::sort(candidates.begin(), candidates.end(), [](const ActionableCandidate& a, const ActionableCandidate& b) {
+  // Stable: candidates equal in status, score and families keep the order
+  // they are in, which BuildCandidateConsensus makes the order of their
+  // signals (suspects by score, object references by relevance). Breaking
+  // the tie by name put the alphabetically first stack-scan suspect, all of
+  // which weigh the same, ahead of the one with the highest score.
+  std::stable_sort(candidates.begin(), candidates.end(), [](const ActionableCandidate& a, const ActionableCandidate& b) {
     const int rankA = StatusRank(a);
     const int rankB = StatusRank(b);
     if (rankA != rankB) {
@@ -473,10 +481,7 @@ void SortActionableCandidates(std::vector<ActionableCandidate>& candidates)
     if (a.score != b.score) {
       return a.score > b.score;
     }
-    if (a.family_count != b.family_count) {
-      return a.family_count > b.family_count;
-    }
-    return a.display_name < b.display_name;
+    return a.family_count > b.family_count;
   });
 }
 
@@ -485,7 +490,9 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
   std::unordered_map<std::wstring, CandidateRow> rowsByKey;
   rowsByKey.reserve(signals.size());
 
+  std::size_t signalIndex = 0;
   for (const auto& signal : signals) {
+    ++signalIndex;
     // Capture richness describes evidence quality, not a second causal signal.
     // Keep it out of score, supporting_families, family_count and confidence.
     if (signal.family_id == kFamilyCaptureQualityStack) {
@@ -497,6 +504,9 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
     }
 
     auto& row = rowsByKey[candidateKey];
+    if (row.first_signal == 0u) {
+      row.first_signal = signalIndex;
+    }
     if (row.candidate.display_name.empty()) {
       row.candidate.display_name = signal.display_name;
     }
@@ -598,13 +608,22 @@ std::vector<ActionableCandidate> BuildCandidateConsensus(const std::vector<Candi
     }
   }
 
-  std::vector<ActionableCandidate> candidates;
-  candidates.reserve(rowsByKey.size());
+  // In signal order, not the map's: the sort below is stable.
+  std::vector<CandidateRow*> ordered;
+  ordered.reserve(rowsByKey.size());
   for (auto& [key, row] : rowsByKey) {
     (void)key;
-    RefreshCandidateFields(&row, language);
-    if (IsStandaloneCandidateAllowed(row.candidate)) {
-      candidates.push_back(std::move(row.candidate));
+    ordered.push_back(&row);
+  }
+  std::sort(ordered.begin(), ordered.end(), [](const CandidateRow* a, const CandidateRow* b) {
+    return a->first_signal < b->first_signal;
+  });
+  std::vector<ActionableCandidate> candidates;
+  candidates.reserve(ordered.size());
+  for (auto* row : ordered) {
+    RefreshCandidateFields(row, language);
+    if (IsStandaloneCandidateAllowed(row->candidate)) {
+      candidates.push_back(std::move(row->candidate));
     }
   }
 
