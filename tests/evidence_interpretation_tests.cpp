@@ -590,10 +590,21 @@ void TestManualCaptureOfAStalledGame()
               std::wstring::npos,
       "under the helper's threshold is not written as over it");
 
-    for (const char* where : { R"(,"gameInForeground":false)", "" }) {
+    // Windows' "Not Responding" window is in front, not the game's, and a
+    // player may have switched away from a frozen game.
+    for (const char* where : { R"(,"gameInForeground":false,"gameWindowResponsive":false)",
+                               R"(,"gameWindowResponsive":false)" }) {
+      auto hung = make("120.0", where);
+      BuildEvidenceAndSummary(hung, lang);
+      Require(hung.is_hang_like && !hung.is_snapshot_like && hung.quick_answer.kind == "freeze",
+        "a window that does not answer is a stuck game wherever it is");
+    }
+
+    for (const char* where : { R"(,"gameInForeground":false)", R"(,"gameInForeground":false,"gameWindowResponsive":true)",
+                               "" }) {
       auto unknown = make("120.0", where);
       BuildEvidenceAndSummary(unknown, lang);
-      Require(unknown.is_snapshot_like, "in the background, or not said: still a snapshot");
+      Require(unknown.is_snapshot_like, "in the background with a window that answers, or not said: still a snapshot");
       Require(unknown.quick_answer.case_id == "manual_snapshot_unresponsive", "with its own quick answer");
       Require(unknown.quick_answer.headline.find(en ? L"had not responded for 120 seconds" : L"120초 동안 응답하지 않았습니다") !=
                 std::wstring::npos,
@@ -607,10 +618,12 @@ void TestManualCaptureOfAStalledGame()
         "the conclusion says the same");
     }
 
-    auto fresh = make("0.4", R"(,"gameInForeground":true)");
-    BuildEvidenceAndSummary(fresh, lang);
-    Require(fresh.is_snapshot_like && fresh.quick_answer.case_id == "manual_snapshot",
-      "a game that had just answered is a plain snapshot");
+    for (const char* where : { R"(,"gameInForeground":true)", R"(,"gameWindowResponsive":false)" }) {
+      auto fresh = make("0.4", where);
+      BuildEvidenceAndSummary(fresh, lang);
+      Require(fresh.is_snapshot_like && fresh.quick_answer.case_id == "manual_snapshot",
+        "a game that had just answered is a plain snapshot");
+    }
   }
 }
 

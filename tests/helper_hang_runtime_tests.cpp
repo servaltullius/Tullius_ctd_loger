@@ -1257,6 +1257,10 @@ void TestManualCaptureWritesItsArtifacts()
   const auto wct = nlohmann::json::parse(
     ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_WCT_Manual_", L".json")));
   Require(wct["capture"]["kind"] == "manual" && wct["capture"].contains("dump_transport"), "the capture block");
+  // For the analyzer's "was the game stuck" rule (IsManualCaptureOfStalledGame).
+  // The child process is a console program without a window to ask.
+  Require(wct["capture"]["gameInForeground"].is_boolean(), "where the game's window was is recorded");
+  Require(!wct["capture"].contains("gameWindowResponsive"), "and nothing is claimed about a window it does not have");
   Require(!wct.contains("modal_dialogs"), "a manual capture does not probe dialog windows");
   const auto manifest = nlohmann::json::parse(
     ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Manual_", L".json")));

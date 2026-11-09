@@ -44,7 +44,7 @@ A best-effort diagnostics tool for **Skyrim SE / AE** that captures **CTD, freez
 
 **Manual snapshot hotkey:** `Ctrl+Shift+Backspace` (change it with `ManualCaptureHotkey=` in `SkyrimDiagHelper.ini`)
 > Snapshots taken during normal gameplay may have low confidence. Best used when the game is already stuck (freeze / ILS) or right before a CTD.
-> A snapshot taken while the game window is in front and the game has not responded for 5 seconds or more is analyzed as a freeze (an endless loading screen stays far below the 600 s loading threshold of the automatic capture). With the game in the background it stays a snapshot, since a paused game looks the same.
+> A snapshot taken while the game has not responded for 5 seconds or more, with its window in front or no longer answering (Windows shows "Not Responding"), is analyzed as a freeze (an endless loading screen stays far below the 600 s loading threshold of the automatic capture). With the game in the background and its window still answering it stays a snapshot, since a paused game looks the same.
 >
 > Up to v0.2.68-rc3 the hotkey was `Ctrl+Shift+F12`. Crash Logger 1.25 uses those keys for its thread dump, which suspends the game's threads one at a time and can freeze the game, so pressing `Ctrl+Shift+F12` still starts Crash Logger's thread dump (not a Tullius snapshot). Do not set `ManualCaptureHotkey` to a chord that holds all of Crash Logger's keys; the startup preflight warns about it (`CRASH_LOGGER_HOTKEY_COLLISION`).
 
