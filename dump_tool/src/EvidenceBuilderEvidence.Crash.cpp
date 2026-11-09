@@ -195,9 +195,13 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
     EvidenceItem e{};
     e.confidence_level = !r.suspects.empty() ? r.suspects[0].confidence_level : i18n::ConfidenceLevel::kLow;
     e.confidence = !r.suspects.empty() ? r.suspects[0].confidence : ConfidenceText(lang, e.confidence_level);
-    e.title = en
-      ? L"Callstack (primary thread): top frames"
-      : L"콜스택(대표 스레드) 상위 프레임";
+    // The window from two frames above the first plugin frame; the stack
+    // shown below starts higher when stackwalk_display_frames is longer.
+    const bool aroundPlugin = !r.stackwalk_display_frames.empty() &&
+      r.stackwalk_display_frames.front() != r.stackwalk_primary_frames.front();
+    e.title = aroundPlugin
+      ? (en ? L"Callstack (primary thread): around the first plugin frame" : L"콜스택(대표 스레드) 첫 모드 프레임 주변")
+      : (en ? L"Callstack (primary thread): top frames" : L"콜스택(대표 스레드) 상위 프레임");
     e.details = L"tid=" + std::to_wstring(r.stackwalk_primary_tid) + L": " + JoinList(r.stackwalk_primary_frames, 4, L" | ");
     r.evidence.push_back(std::move(e));
   }
@@ -265,6 +269,16 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
                   r.stackwalk_truncation_unloaded_module + L", which was unloaded before the capture")
                : (L"다음 리턴 주소 " + std::wstring(addr) + L"가 캡처 전에 언로드된 " +
                   r.stackwalk_truncation_unloaded_module + L" 자리입니다");
+    } else if (r.stackwalk_truncation_hook_page != 0u) {
+      // ADR-0027: a mod's hook code the helper recorded during the game.
+      const std::wstring& to = r.stackwalk_truncation_hook_continues_to;
+      why = en ? (L"the next return address " + std::wstring(addr) +
+                  L" is in hook code the helper recorded during the game (code a mod made to hook a game function, "
+                  L"which has no unwind data)" +
+                  (to.empty() ? std::wstring() : (L"; that code continues to " + to)))
+               : (L"다음 리턴 주소 " + std::wstring(addr) +
+                  L"는 Helper가 게임 중에 기록한 후킹 코드(모드가 게임 함수를 후킹하며 만든 코드로, 스택 해제 정보가 없음)에 있습니다" +
+                  (to.empty() ? std::wstring() : (L". 그 코드는 " + to + L"(으)로 이어집니다")));
     } else {
       why = en ? (L"the next return address " + std::wstring(addr) + L" is in no loaded module")
                : (L"다음 리턴 주소 " + std::wstring(addr) + L"가 로드된 어떤 모듈에도 속하지 않습니다");

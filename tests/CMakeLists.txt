@@ -62,6 +62,15 @@ target_include_directories(skydiag_thread_entry_hook_tests PRIVATE
 )
 add_test(NAME skydiag_thread_entry_hook_tests COMMAND skydiag_thread_entry_hook_tests)
 
+add_executable(skydiag_address_library_tests
+  address_library_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressLibrary.cpp"
+)
+target_include_directories(skydiag_address_library_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_address_library_tests COMMAND skydiag_address_library_tests)
+
 add_executable(skydiag_hook_stub_race_tests hook_stub_race_tests.cpp)
 target_include_directories(skydiag_hook_stub_race_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
@@ -705,6 +714,7 @@ set_tests_properties(skydiag_triage_fields_tests PROPERTIES
 add_executable(skydiag_analysis_engine_runtime_tests
   analysis_engine_runtime_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/SignatureDatabase.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressLibrary.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressResolver.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashHistory.cpp"
 )
@@ -928,6 +938,7 @@ if(WIN32)
   target_link_libraries(skydiag_minidump_fixture_writer PRIVATE Dbghelp)
 
   add_library(skydiag_helper_runtime_test_support STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/AddressLibraryFile.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashEtwCapture.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/CrashObjectMemory.cpp"

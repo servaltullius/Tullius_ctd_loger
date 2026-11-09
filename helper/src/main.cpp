@@ -14,6 +14,7 @@
 #include "SkyrimDiagHelper/ProcessAttach.h"
 #include "SkyrimDiagShared.h"
 
+#include "AddressLibraryFile.h"
 #include "CaptureCommon.h"
 #include "CompatibilityPreflight.h"
 #include "HelperCommon.h"
@@ -136,6 +137,17 @@ static int RunHelper(int argc, wchar_t** argv)
   }
 
   RunCompatibilityPreflight(cfg, proc, outBase);
+
+  // ADR-0027: read once now, not at the first crash; every dump carries it.
+  {
+    const auto addressLibrary = skydiag::helper::internal::GameAddressLibraryBytes(proc.pid);
+    AppendLogLine(
+      outBase,
+      addressLibrary.empty()
+        ? std::wstring(L"Address Library for dumps: not found in Data\\SKSE\\Plugins for this game version; game "
+                       L"frames get no Address Library IDs.")
+        : L"Address Library for dumps: " + std::to_wstring(addressLibrary.size()) + L" bytes.");
+  }
 
   const bool grassCacheMode = skydiag::helper::internal::DetectGrassCacheMode(cfg, proc, outBase);
 

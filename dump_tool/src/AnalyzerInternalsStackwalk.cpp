@@ -4,14 +4,24 @@
 #include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "EngineSpinLoop.h"
+#include "FreedHook.h"
+#include "SkyrimDiagProtocol.h"
 #include "ThreadEntryHooks.h"
 
 #include <algorithm>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 namespace skydiag::dump_tool::internal {
 namespace {
+
+// The crash stack's window from two frames above the first plugin frame: the
+// bucket key, signatures and the shown stack (from frame 0) all use this one
+// window, which keeps buckets and signatures the same whatever is shown.
+constexpr std::size_t kCrashStackWindowFrames = 12;
+// A freeze stack is shown from frame 0, up to this many frames.
+constexpr std::size_t kFreezeStackFrames = 16;
 
 using skydiag::dump_tool::internal::stackwalk_internal::AddDumpExportSymbols;
 using skydiag::dump_tool::internal::stackwalk_internal::DumpImageData;
@@ -60,13 +70,23 @@ std::wstring LabelGameFrame(
     return {};
   }
   const auto name = gameFunctions.Resolve(*start - module.base);
-  if (!name) {
+  // ADR-0027: the Address Library ID of that function start, from the
+  // dump's Address Library ("ID 29895+0xe4"; with a name, ", ID 29924").
+  const auto id = gameFunctions.ResolveId(*start - module.base);
+  if (!name && !id) {
     return {};
   }
-  out.resolved_functions[pc - module.base] = *name;
   wchar_t disp[32]{};
   swprintf_s(disp, L"+0x%llx", static_cast<unsigned long long>(pc - *start));
-  return std::wstring(name->begin(), name->end()) + disp;
+  if (!name) {
+    return L"ID " + std::to_wstring(*id) + disp;
+  }
+  out.resolved_functions[pc - module.base] = *name;
+  std::wstring label = std::wstring(name->begin(), name->end()) + disp;
+  if (id) {
+    label += L", ID " + std::to_wstring(*id);
+  }
+  return label;
 }
 
 std::vector<std::wstring> LabelGameFrames(
@@ -137,7 +157,10 @@ std::vector<std::wstring> FormatCrashCallstackForReport(
   const std::vector<std::uint64_t>& pcs,
   std::size_t maxFrames,
   const std::vector<std::wstring>* frameLabels,
-  bool english);
+  bool english,
+  std::uint32_t* outTotalFrames,
+  std::uint32_t* outSymbolizedFrames,
+  std::uint32_t* outSourceLineFrames);
 
 }  // namespace stackwalk
 
@@ -350,6 +373,37 @@ bool TryComputeStackwalkSuspects(
       }
     } else if (const auto* gone = minidump::FindUnloadedModule(unloaded, end.address)) {
       out.stackwalk_truncation_unloaded_module = gone->filename;
+    } else if (end.stop == StackWalkStop::kOutsideModules) {
+      // ADR-0027: a mod's hook code (no unwind data) the helper recorded;
+      // name where it continues (2026-11-09: a cut at 0x244c6e94012 was a
+      // detour returning to SkyrimSE.exe+0x37f9e6).
+      void* recordPtr = nullptr;
+      ULONG recordSize = 0;
+      HookPageRecordInfo record{};
+      if (!minidump::ReadStreamSized(
+            dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_HookPages, &recordPtr, &recordSize) ||
+          !recordPtr || recordSize == 0u ||
+          !ParseHookPageRecordJson(std::string_view(static_cast<const char*>(recordPtr), recordSize), &record)) {
+        return;
+      }
+      const auto hook = FindHookCodeAt(record, end.address);
+      if (!hook.found) {
+        return;
+      }
+      out.stackwalk_truncation_hook_page = hook.page_base;
+      if (hook.has_next_stub && !hook.next_stub.module.empty()) {
+        wchar_t offset[32]{};
+        swprintf_s(offset, L"+0x%llx", static_cast<unsigned long long>(hook.next_stub.module_offset));
+        std::wstring target = hook.next_stub.module + offset;
+        if (gameFunctions) {
+          const auto label =
+            LabelGameFrame(mem, modules, hook.next_stub.target, /*returnAddress=*/false, *gameFunctions, out);
+          if (!label.empty()) {
+            target += L" (" + label + L")";
+          }
+        }
+        out.stackwalk_truncation_hook_continues_to = std::move(target);
+      }
     }
   };
   // Only when fetching the instruction itself faulted: code that ran there
@@ -389,23 +443,24 @@ bool TryComputeStackwalkSuspects(
       out.stackwalk_primary_bucket_frames = stackwalk::BuildCanonicalCallstackFrames(
         modules,
         bestAny.pcs,
-        /*maxFrames=*/12);
+        kCrashStackWindowFrames);
       const bool fromTop = modalProbeTid != 0u && bestAny.tid == modalProbeTid;
       const auto labels = LabelGameFrames(mem, modules, bestAny.pcs, gameFunctions, out);
       out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
         sym.process,
         modules,
         bestAny.pcs,
-        /*maxFrames=*/fromTop ? 16u : 12u,
+        fromTop ? kFreezeStackFrames : kCrashStackWindowFrames,
         &out.stackwalk_total_frames,
         &out.stackwalk_symbolized_frames,
         &out.stackwalk_source_line_frames,
         fromTop,
         &labels);
-      out.stackwalk_display_frames = fromTop
-        ? out.stackwalk_primary_frames
-        : stackwalk::FormatCrashCallstackForReport(
-            sym.process, modules, bestAny.pcs, /*maxFrames=*/12u, &labels, lang == i18n::Language::kEnglish);
+      if (!fromTop) {
+        out.stackwalk_display_frames = stackwalk::FormatCrashCallstackForReport(
+          sym.process, modules, bestAny.pcs, kCrashStackWindowFrames, &labels, lang == i18n::Language::kEnglish,
+          &out.stackwalk_total_frames, &out.stackwalk_symbolized_frames, &out.stackwalk_source_line_frames);
+      }
     }
     return false;
   }
@@ -418,23 +473,24 @@ bool TryComputeStackwalkSuspects(
   out.stackwalk_primary_bucket_frames = stackwalk::BuildCanonicalCallstackFrames(
     modules,
     best.pcs,
-    /*maxFrames=*/12);
+    kCrashStackWindowFrames);
   const bool fromTop = modalProbeTid != 0u && best.tid == modalProbeTid;
   const auto labels = LabelGameFrames(mem, modules, best.pcs, gameFunctions, out);
   out.stackwalk_primary_frames = stackwalk::FormatCallstackForDisplay(
     sym.process,
     modules,
     best.pcs,
-    /*maxFrames=*/fromTop ? 16u : 12u,
+    fromTop ? kFreezeStackFrames : kCrashStackWindowFrames,
     &out.stackwalk_total_frames,
     &out.stackwalk_symbolized_frames,
     &out.stackwalk_source_line_frames,
     fromTop,
     &labels);
-  out.stackwalk_display_frames = fromTop
-    ? out.stackwalk_primary_frames
-    : stackwalk::FormatCrashCallstackForReport(
-        sym.process, modules, best.pcs, /*maxFrames=*/12u, &labels, lang == i18n::Language::kEnglish);
+  if (!fromTop) {
+    out.stackwalk_display_frames = stackwalk::FormatCrashCallstackForReport(
+      sym.process, modules, best.pcs, kCrashStackWindowFrames, &labels, lang == i18n::Language::kEnglish,
+      &out.stackwalk_total_frames, &out.stackwalk_symbolized_frames, &out.stackwalk_source_line_frames);
+  }
   return true;
 }
 

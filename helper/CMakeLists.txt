@@ -5,6 +5,7 @@ project(SkyrimDiagHelper LANGUAGES CXX)
 find_package(nlohmann_json CONFIG REQUIRED)
 
 add_executable(${PROJECT_NAME}
+  src/AddressLibraryFile.cpp
   src/CompatibilityPreflight.cpp
   src/Config.cpp
   src/CrashEtwCapture.cpp

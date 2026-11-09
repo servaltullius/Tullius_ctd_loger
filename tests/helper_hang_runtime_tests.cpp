@@ -15,6 +15,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "AddressLibraryFile.h"
 #include "CrashCapture.h"
 #include "FreezeCapture.h"
 #include "HangCapture.h"
@@ -918,6 +919,17 @@ void TestExecuteConfirmedHangCapture_TellsAFailedDumpOfAClosingGame()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0027: the Address Library file SKSE plugins load for a game version.
+void TestAddressLibraryFileName()
+{
+  using skydiag::helper::internal::AddressLibraryFileName;
+  Require(AddressLibraryFileName(1, 5, 97, 0) == L"version-1-5-97-0.bin", "1.5.x");
+  Require(AddressLibraryFileName(1, 6, 1170, 0) == L"versionlib-1-6-1170-0.bin", "1.6.x");
+  Require(AddressLibraryFileName(1, 7, 104, 0) == L"versionlib-1-7-104-0.bin", "1.7.x");
+  Require(skydiag::helper::internal::GameAddressLibraryBytes(GetCurrentProcessId()).empty(),
+    "a process with no game Address Library beside it gets none");
+}
+
 void TestEvaluateHangDecisions()
 {
   using skydiag::helper::EvaluateHang;
@@ -1271,6 +1283,7 @@ int main()
 {
   try {
     SKYDIAG_RUN_TEST(TestEvaluateHangDecisions);
+    SKYDIAG_RUN_TEST(TestAddressLibraryFileName);
     SKYDIAG_RUN_TEST(TestComputeHangThresholds);
     SKYDIAG_RUN_TEST(TestWctHasCycle);
     SKYDIAG_RUN_TEST(TestCountProcessThreads);

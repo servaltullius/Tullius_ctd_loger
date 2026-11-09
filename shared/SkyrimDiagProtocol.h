@@ -23,6 +23,10 @@ inline constexpr std::uint32_t kMinidumpUserStream_HookPages = 0x10000u + 0x4850
 // JSON: the display drivers' events in the Windows System log from the game's
 // start to a freeze or manual capture (ADR-0026, "GD").
 inline constexpr std::uint32_t kMinidumpUserStream_GpuDriverEvents = 0x10000u + 0x4744u;
+// Raw bytes: the game version's Address Library file as the game loads it
+// (Data\SKSE\Plugins\versionlib-1-6-1170-0.bin, version-1-5-97-0.bin), so
+// game frames get "ID 29924+0x6bc" labels (ADR-0027, "AL").
+inline constexpr std::uint32_t kMinidumpUserStream_AddressLibrary = 0x10000u + 0x414Cu;
 
 // Build a kernel object name from PID and suffix.
 inline std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)

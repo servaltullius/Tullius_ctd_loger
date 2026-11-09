@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "AddressLibraryFile.h"
 #include "CrashObjectMemory.h"
 #include "GpuDriverEvents.h"
 #include "GpuMemory.h"
@@ -601,6 +602,17 @@ bool WriteDumpWithStreams(
     s6.BufferSize = static_cast<ULONG>(gpuDriverEventsJson.size());
     s6.Buffer = const_cast<char*>(gpuDriverEventsJson.data());
     streams.push_back(s6);
+  }
+
+  // ADR-0027: the game version's Address Library file, so the analyzer can
+  // label game frames with Address Library IDs (read once, at attach).
+  const std::string addressLibrary = internal::GameAddressLibraryBytes(pid);
+  MINIDUMP_USER_STREAM s7{};
+  if (!addressLibrary.empty()) {
+    s7.Type = skydiag::protocol::kMinidumpUserStream_AddressLibrary;
+    s7.BufferSize = static_cast<ULONG>(addressLibrary.size());
+    s7.Buffer = const_cast<char*>(addressLibrary.data());
+    streams.push_back(s7);
   }
 
   MINIDUMP_USER_STREAM_INFORMATION usi{};

@@ -120,6 +120,29 @@ bool ParseHookPageRecordJson(std::string_view json, HookPageRecordInfo* out)
   return true;
 }
 
+HookCodeAtInfo FindHookCodeAt(const HookPageRecordInfo& record, std::uint64_t address)
+{
+  HookCodeAtInfo info{};
+  const auto* page = PageOf(record, address);
+  if (!page) {
+    return info;
+  }
+  info.found = true;
+  info.page_base = page->base;
+  const std::uint64_t at = address - page->base;
+  const RecordedHookStubInfo* next = nullptr;
+  for (const auto& stub : page->stubs) {
+    if (stub.offset >= at && stub.offset - at <= kHookCodeContinueWindow && (!next || stub.offset < next->offset)) {
+      next = &stub;
+    }
+  }
+  if (next) {
+    info.has_next_stub = true;
+    info.next_stub = *next;
+  }
+  return info;
+}
+
 FreedHookInfo ResolveFreedHook(
   const HookPageRecordInfo& record,
   std::uint64_t address,

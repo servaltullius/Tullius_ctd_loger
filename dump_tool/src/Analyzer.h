@@ -705,6 +705,9 @@ struct AnalysisResult
   std::uint32_t stackwalk_total_frames = 0;
   std::uint32_t stackwalk_symbolized_frames = 0;
   std::uint32_t stackwalk_source_line_frames = 0;
+  // ADR-0027: IDs in the Address Library the dump carries (0: none), which
+  // label game frames "ID 29924+0x6bc".
+  std::uint64_t address_library_ids = 0;
   // The shown thread's walk stopped before the thread start ("" when it did
   // not): "outside_modules", "non_code_address" or "no_unwind_info".
   std::string stackwalk_truncation;
@@ -712,6 +715,11 @@ struct AnalysisResult
   std::uint64_t stackwalk_truncation_address = 0;   // the rejected caller, or the last frame
   std::wstring stackwalk_truncation_module;         // no_unwind_info: the frame's module
   std::wstring stackwalk_truncation_unloaded_module;  // the cut address lies in this unloaded DLL
+  // ADR-0027: the cut address lies in a mod's hook code the helper recorded
+  // (this page, 0: not), and where that code continues ("SkyrimSE.exe+0x37f9e6
+  // (ID 23329+0x776)"; empty when no recorded jump follows it).
+  std::uint64_t stackwalk_truncation_hook_page = 0;
+  std::wstring stackwalk_truncation_hook_continues_to;
   std::wstring fault_unloaded_module;  // the exception address lies in this unloaded DLL
   // ADR-0019: what the faulting instruction of an access violation did
   // (verdict empty: nothing to say).

@@ -630,6 +630,24 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       gameFunctionsLoaded = true;
     }
   }
+  // ADR-0027: the Address Library the helper put in the dump gives game
+  // frames IDs, with or without names.
+  {
+    void* ptr = nullptr;
+    ULONG size = 0;
+    if (ReadStreamSized(
+          dumpBase, dumpSize, skydiag::protocol::kMinidumpUserStream_AddressLibrary, &ptr, &size) &&
+        ptr && size > 0u) {
+      AddressLibrary library;
+      if (library.Parse(std::string_view(static_cast<const char*>(ptr), size))) {
+        out.address_library_ids = library.Size();
+        gameFunctions.SetAddressLibrary(std::move(library));
+        gameFunctionsLoaded = true;
+      } else {
+        out.diagnostics.push_back(L"[Data] the dump's Address Library could not be read");
+      }
+    }
+  }
 
   // Suspects (prefer callstack/stackwalk; fallback to stack scan)
   ComputeSuspects(dumpBase, dumpSize, allModules, excCtx, hangLike, opt, out, gameFunctionsLoaded ? &gameFunctions : nullptr);
