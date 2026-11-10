@@ -84,6 +84,7 @@ nlohmann::json MakeIncidentConfigSnapshotSafe(const skydiag::helper::HelperConfi
 
   j["retention"] = {
     { "max_crash_dumps", cfg.maxCrashDumps },
+    { "max_forced_close_crash_dumps", cfg.maxForcedCloseCrashDumps },
     { "max_hang_dumps", cfg.maxHangDumps },
     { "max_manual_dumps", cfg.maxManualDumps },
     { "max_etw_traces", cfg.maxEtwTraces },

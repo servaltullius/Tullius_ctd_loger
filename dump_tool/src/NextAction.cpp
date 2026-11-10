@@ -20,7 +20,9 @@ struct PriorityKind
 // - One save that keeps failing to load in different places (ADR-0025) says
 //   more than the modules this dump shows.
 // - What the main thread was doing (modal dialog, engine or driver wait) comes
-//   before any module triage.
+//   before any module triage, and so does a graphics driver error moments
+//   before a crash (ADR-0029): with the graphics device gone, the module the
+//   crash is in is where it showed, not why.
 // - A snapshot of a running game has nothing to fix (its quick answer says so);
 //   a file two mods provide among its recent loads is no reason to act.
 constexpr PriorityKind kPriorityKinds[] = {
@@ -29,6 +31,7 @@ constexpr PriorityKind kPriorityKinds[] = {
   { "damaged_save", 2 },
   { "modal_dialog", 3 },
   { "main_thread", 3 },
+  { "driver_error_before_crash", 3 },
   { "actionable_candidate", 4 },
   { "top_suspect", 4 },
   { "synchronization_stall", 4 },

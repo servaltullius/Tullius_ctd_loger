@@ -274,6 +274,8 @@ HelperConfig LoadConfig(std::wstring* err)
 
   cfg.maxCrashDumps = ReadIniUint32Clamped(
     ini, L"SkyrimDiagHelper", L"MaxCrashDumps", 20, 0, 500);
+  cfg.maxForcedCloseCrashDumps = ReadIniUint32Clamped(
+    ini, L"SkyrimDiagHelper", L"MaxForcedCloseCrashDumps", 3, 0, 500);
   cfg.maxHangDumps = ReadIniUint32Clamped(
     ini, L"SkyrimDiagHelper", L"MaxHangDumps", 20, 0, 500);
   cfg.maxManualDumps = ReadIniUint32Clamped(

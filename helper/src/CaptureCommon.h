@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <optional>
@@ -8,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include "GpuDriverEvents.h"
+#include "HelperCommon.h"
 #include "HelperLog.h"
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
@@ -88,6 +91,37 @@ struct PluginScanInputs
   // A skse64.log written before this is from an earlier launch.
   std::optional<std::filesystem::file_time_type> gameProcessStart;
 };
+
+// ADR-0026, ADR-0029: the display drivers' errors since the game started,
+// beside a crash dump as <stem>_GpuDriverEvents.json. A freeze or manual dump
+// carries them as a stream, but a crash dump is written while the game is
+// still there to read, so it does not wait for the event log: they are read
+// after it, here. Nothing is written when the log cannot be read or the
+// game's start time is not known (the analyzer then says nothing of it).
+inline void WriteGpuDriverEventsSidecar(
+  const std::filesystem::path& outBase,
+  const std::filesystem::path& dumpPath,
+  std::uint32_t pid)
+{
+  try {
+    const auto now = static_cast<std::uint64_t>(std::time(nullptr));
+    const auto log = QueryGpuDriverEvents(ProcessStartUnix(pid), now);
+    const std::string json = GpuDriverEventsJson(log);
+    if (json.empty()) {
+      return;
+    }
+    const auto path = dumpPath.parent_path() / (dumpPath.stem().wstring() + L"_GpuDriverEvents.json");
+    WriteTextFileUtf8(path, json);
+    AppendLogLine(
+      outBase,
+      L"Graphics driver events since the game started: " + std::to_wstring(log.total) +
+        (log.complete ? L"" : L" (the log could not be read to the end)") + L"; written beside the crash dump.");
+  } catch (const std::exception& ex) {
+    AppendLogLine(outBase, L"Graphics driver events could not be read; capture continues without them: " + AnsiExceptionText(ex));
+  } catch (...) {
+    AppendLogLine(outBase, L"Graphics driver events could not be read; capture continues without them.");
+  }
+}
 
 // What the dump of a released crash needs when the exit reports that crash
 // after all (PromoteReleasedCrashDump): the game is gone by then, so this is

@@ -1690,7 +1690,82 @@ void TestGpuDriverLog()
       crashLine = crashLine || rec.rfind(tag, 0) == 0;
     }
     Require(!crashLine, "only a freeze gets the GPU line");
+
+    // ADR-0029: a driver error moments before a crash is the first thing to
+    // check, and the mod the crash is in stays named as the second.
+    const std::wstring crashTag = en ? L"[Driver error before crash] " : L"[크래시 직전 드라이버 오류] ";
+    const auto gpuLines = [&](const AnalysisResult& r) {
+      std::size_t count = 0;
+      for (const auto& rec : r.recommendations) {
+        count += (rec.rfind(tag, 0) == 0 || rec.rfind(crashTag, 0) == 0) ? 1u : 0u;
+      }
+      return count;
+    };
+    auto soon = CrashIn(L"wheeler.dll", L"Wheeler ctd-fix");
+    soon.gpu_driver_log = log;
+    soon.dump_capture_unix = 1914u;  // 14 s after the Display 4101 at 1900
+    BuildEvidenceAndSummary(soon, lang);
+    Require(gpuLines(soon) == 1u && soon.recommendations.front().rfind(crashTag, 0) == 0 &&
+              Contains(soon.recommendations.front(), en ? L"14 s before the crash" : L"튕기기 14초 전") &&
+              Contains(soon.recommendations.front(), en ? L"does not prove" : L"단정할 수는"),
+      "the driver line leads a crash that follows a driver error");
+    Require(skydiag::dump_tool::SelectNextActionIndex(soon.recommendations) == 0u,
+      "and is the next action, ahead of the module the crash is in");
+    Require(soon.quick_answer.kind == "crash" && soon.quick_answer.suspect_file == L"wheeler.dll" &&
+              Contains(soon.quick_answer.headline, L"Wheeler ctd-fix"),
+      "the mod stays named");
+    Require(Contains(soon.quick_answer.action, en ? L"First reinstall the graphics driver" : L"먼저 그래픽 드라이버를") &&
+              Contains(soon.quick_answer.action, L"Display 4101") &&
+              Contains(soon.quick_answer.action, en ? L"14 s before the crash" : L"튕기기 14초 전") &&
+              Contains(soon.quick_answer.action, en ? L"suspect Wheeler ctd-fix then" : L"그때 Wheeler ctd-fix을(를) 의심"),
+      "but the driver is the first thing to try");
+    Require(Contains(soon.quick_answer.why_not_certain, en ? L"does not prove" : L"단정할 수는 없습니다"),
+      "and close in time is not called proof");
+    bool soonEvidence = false;
+    for (const auto& item : soon.evidence) {
+      soonEvidence = soonEvidence || item.title == (en ? L"The graphics driver logged errors while the game ran"
+                                                        : L"게임 중 그래픽 드라이버 오류가 기록됨");
+    }
+    Require(soonEvidence, "with the evidence item");
+
+    // More than a minute later the driver error is evidence only.
+    auto later = CrashIn(L"wheeler.dll", L"Wheeler ctd-fix");
+    later.gpu_driver_log = log;
+    later.dump_capture_unix = 1961u;
+    BuildEvidenceAndSummary(later, lang);
+    Require(gpuLines(later) == 0u && !Contains(later.quick_answer.action, en ? L"graphics driver" : L"그래픽 드라이버"),
+      "an error from earlier in the session does not change the advice");
+
+    // An error of a game being closed is no CTD to explain (ADR-0022).
+    auto closing = CrashIn(L"wheeler.dll", L"Wheeler ctd-fix");
+    closing.gpu_driver_log = log;
+    closing.dump_capture_unix = 1914u;
+    closing.forced_close.detected = true;
+    closing.forced_close.kind = "alt_f4";
+    closing.forced_close.seconds_before_crash = 0.2;
+    BuildEvidenceAndSummary(closing, lang);
+    Require(gpuLines(closing) == 0u && closing.quick_answer.case_id == "forced_close", "nor a forced close's");
+
+    // A crash names its place: "none" is not worth a line on every report.
+    auto clean = CrashIn(L"wheeler.dll", L"Wheeler ctd-fix");
+    clean.gpu_driver_log = none;
+    clean.dump_capture_unix = 20u;
+    BuildEvidenceAndSummary(clean, lang);
+    bool cleanEvidence = false;
+    for (const auto& item : clean.evidence) {
+      cleanEvidence = cleanEvidence ||
+        item.title == (en ? L"Graphics driver events while the game ran" : L"게임 중 그래픽 드라이버 기록");
+    }
+    Require(!cleanEvidence && gpuLines(clean) == 0u, "a crash without driver errors says nothing of the driver");
   }
+
+  // The newest error at or before the capture; a crash's log is read after
+  // its dump and can hold later ones.
+  const auto last = dt::LastGpuDriverProblemBefore(log, 1750u);
+  Require(last && last->seconds_before_capture == 50u && last->name == L"nvlddmkm 153", "the newest one before the capture");
+  Require(!dt::LastGpuDriverProblemBefore(log, 1400u) && !dt::LastGpuDriverProblemBefore(log, 0u) &&
+            !dt::LastGpuDriverProblemBefore(none, 20u) && !dt::LastGpuDriverProblemBefore(dt::GpuDriverLog{}, 2000u),
+    "none before it, no capture time, no errors, no log");
 }
 
 // ADR-0025 (2026-11-06): the loads the helper records, as the analyzer reads them.

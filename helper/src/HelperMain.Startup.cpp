@@ -92,6 +92,7 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   artifacts.push_back(outBase / (stem + L"_SkyrimDiagSummary.json"));
   artifacts.push_back(outBase / (stem + L"_SkyrimDiagWct.json"));
   artifacts.push_back(dumpFs.parent_path() / (stem + L"_PluginScan.json"));
+  artifacts.push_back(dumpFs.parent_path() / (stem + L"_GpuDriverEvents.json"));
   artifacts.push_back(outBase / (stem + L".etl"));
 
   const std::wstring kCrashStemPrefix = L"SkyrimDiag_Crash_";

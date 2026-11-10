@@ -305,6 +305,11 @@ void BuildGpuDriverEvidence(AnalysisResult& r, i18n::Language lang, const Eviden
   }
   const bool en = ctx.en;
   const bool problems = GpuDriverProblemCount(log) > 0u;
+  // "None" says something about a freeze (less likely the GPU's). A crash
+  // names its place, so there it would be one more line on every report.
+  if (!problems && ctx.isCrashLike) {
+    return;
+  }
   EvidenceItem e{};
   e.confidence_level = problems ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
   e.confidence = ConfidenceText(lang, e.confidence_level);

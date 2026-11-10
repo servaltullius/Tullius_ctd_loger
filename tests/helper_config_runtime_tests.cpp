@@ -220,6 +220,7 @@ void TestTotalDumpBudgetIsRead(const IniFile& ini)
 {
   ini.Write("[SkyrimDiagHelper]\r\n");
   Require(LoadConfig(nullptr).maxTotalDumpGB == 5u, "MaxTotalDumpGB defaults to 5");
+  Require(LoadConfig(nullptr).maxForcedCloseCrashDumps == 3u, "MaxForcedCloseCrashDumps defaults to 3");
   ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=12\r\n");
   Require(LoadConfig(nullptr).maxTotalDumpGB == 12u, "MaxTotalDumpGB is read");
   ini.Write("[SkyrimDiagHelper]\r\nMaxTotalDumpGB=5000\r\n");
@@ -227,8 +228,9 @@ void TestTotalDumpBudgetIsRead(const IniFile& ini)
 
   ini.Write(
     "[SkyrimDiagHelper]\r\nMaxTotalDumpGB=0\r\nMaxCrashDumps=3\r\nMaxHangDumps=4\r\nMaxManualDumps=6\r\n"
-    "MaxEtwTraces=7\r\n");
+    "MaxEtwTraces=7\r\nMaxForcedCloseCrashDumps=9\r\n");
   const auto limits = RetentionLimitsFromConfig(LoadConfig(nullptr));
+  Require(limits.maxForcedCloseCrashDumps == 9u, "MaxForcedCloseCrashDumps reaches the sweep");
   Require(limits.maxTotalDumpGB == 0u, "MaxTotalDumpGB=0 reaches the sweep as unlimited");
   Require(limits.maxCrashDumps == 3u && limits.maxHangDumps == 4u && limits.maxManualDumps == 6u,
     "the dump counts reach the sweep");

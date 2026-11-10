@@ -21,6 +21,7 @@ using skydiag::helper::RetentionLimits;
 using skydiag::helper::RotateLogFileIfNeeded;
 using skydiag::helper::ApplyRetentionToOutputDir;
 using skydiag::helper::PruneDumpsOverTotalBytes;
+using skydiag::helper::IsForcedCloseCrashManifest;
 using skydiag::ExtendedLengthPath;
 
 static void WriteFile(const std::filesystem::path& path, std::size_t bytes = 1)
@@ -109,6 +110,96 @@ static void Test_PrunesCrashDumpsAndArtifacts()
 
   assert(Exists(dir / (stem1 + ".dmp")));
   assert(Exists(dir / (stem2 + ".dmp")));
+}
+
+static void WriteText(const std::filesystem::path& path, const std::string& text)
+{
+  std::ofstream f(path, std::ios::binary);
+  assert(f && "Failed to open file for writing");
+  f.write(text.data(), static_cast<std::streamsize>(text.size()));
+}
+
+// What the helper writes for a crash, as DumpJsonForFile lays it out, with
+// the retention block of the config snapshot (its key holds "forced_close").
+static std::string CrashManifest(bool forcedClose)
+{
+  return std::string("{\n \"capture_kind\": \"crash\",\n \"config_snapshot\": {\n  \"retention\": {\n"
+                     "   \"max_forced_close_crash_dumps\": 3\n  }\n },\n \"context\": {\n") +
+         (forcedClose ? "  \"forced_close\": true,\n" : "") + "  \"reason\": \"crash_event\"\n }\n}\n";
+}
+
+static void Test_ReadsTheForcedCloseMarkOfAManifest()
+{
+  assert(IsForcedCloseCrashManifest(CrashManifest(true)));
+  assert(!IsForcedCloseCrashManifest(CrashManifest(false)));
+  assert(IsForcedCloseCrashManifest("{\"context\":{\"forced_close\":true}}"));
+  assert(!IsForcedCloseCrashManifest("{\"context\":{\"forced_close\":false}}"));
+  assert(!IsForcedCloseCrashManifest("{\"context\":{\"forced_close\""));
+  assert(!IsForcedCloseCrashManifest(""));
+}
+
+// A game that errors at every quit writes a crash dump at every quit. Those
+// are counted apart, so the real crashes keep their MaxCrashDumps places:
+// one night of 18 quits had left no dump of the day's crashes.
+static void Test_ForcedCloseCrashDumpsHaveTheirOwnLimit()
+{
+  const auto dir = MakeTempDir();
+  const auto stem = [](int n) { return "SkyrimDiag_Crash_20260101_01000" + std::to_string(n); };
+  const auto manifest = [](int n) { return "SkyrimDiag_Incident_Crash_20260101_01000" + std::to_string(n) + ".json"; };
+
+  // Oldest to newest: two crashes (the older from a helper that wrote no
+  // manifest), then four errors at a quit.
+  WriteFile(dir / (stem(0) + ".dmp"));
+  WriteFile(dir / (stem(0) + "_SkyrimDiagReport.txt"));
+  WriteFile(dir / (stem(1) + ".dmp"));
+  WriteText(dir / manifest(1), CrashManifest(false));
+  for (int n = 2; n <= 5; ++n) {
+    WriteFile(dir / (stem(n) + ".dmp"));
+    WriteFile(dir / (stem(n) + "_SkyrimDiagReport.txt"));
+    WriteText(dir / manifest(n), CrashManifest(true));
+  }
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 2;
+  limits.maxForcedCloseCrashDumps = 2;
+  limits.maxHangDumps = 0;
+  limits.maxManualDumps = 0;
+  limits.maxEtwTraces = 0;
+  limits.maxTotalDumpGB = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+
+  // The two newest errors at a quit stay; the older two go with their files.
+  assert(Exists(dir / (stem(5) + ".dmp")) && Exists(dir / (stem(4) + ".dmp")));
+  for (int n = 2; n <= 3; ++n) {
+    assert(!Exists(dir / (stem(n) + ".dmp")));
+    assert(!Exists(dir / (stem(n) + "_SkyrimDiagReport.txt")));
+    assert(!Exists(dir / manifest(n)));
+  }
+  // Both crashes stay: six crash dumps with MaxCrashDumps=2 used to leave
+  // only the two newest, both errors at a quit.
+  assert(Exists(dir / (stem(1) + ".dmp")) && Exists(dir / manifest(1)));
+  assert(Exists(dir / (stem(0) + ".dmp")) && Exists(dir / (stem(0) + "_SkyrimDiagReport.txt")));
+
+  // A third crash is over MaxCrashDumps: the oldest crash goes, and the
+  // errors at a quit are not touched.
+  WriteFile(dir / (stem(6) + ".dmp"));
+  WriteText(dir / manifest(6), CrashManifest(false));
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(!Exists(dir / (stem(0) + ".dmp")) && !Exists(dir / (stem(0) + "_SkyrimDiagReport.txt")));
+  assert(Exists(dir / (stem(1) + ".dmp")) && Exists(dir / (stem(6) + ".dmp")));
+  assert(Exists(dir / (stem(5) + ".dmp")) && Exists(dir / (stem(4) + ".dmp")));
+
+  // 0 = unlimited, as the other counts.
+  for (int n = 7; n <= 9; ++n) {
+    WriteFile(dir / (stem(n) + ".dmp"));
+    WriteText(dir / manifest(n), CrashManifest(true));
+  }
+  limits.maxForcedCloseCrashDumps = 0;
+  ApplyRetentionToOutputDir(dir, limits);
+  for (int n : { 4, 5, 7, 8, 9 }) {
+    assert(Exists(dir / (stem(n) + ".dmp")));
+  }
+  assert(Exists(dir / (stem(1) + ".dmp")) && Exists(dir / (stem(6) + ".dmp")));
 }
 
 static void Test_PrunesHangWctAndEtlWithDump()
@@ -806,6 +897,8 @@ int main()
   Test_PrunesHelperLeftovers();
   Test_PrunesCorruptBucketStatsCopies();
   Test_PrunesHangWctAndEtlWithDump();
+  Test_ReadsTheForcedCloseMarkOfAManifest();
+  Test_ForcedCloseCrashDumpsHaveTheirOwnLimit();
   Test_KeepsCrashManifestWhenSiblingDumpSharesTimestamp();
   Test_PrunesEtwTracesAcrossCrashAndHangPrefixes();
   Test_PrunesCrashManifestWithPrecisionTimestamp();

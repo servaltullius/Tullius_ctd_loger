@@ -1703,6 +1703,17 @@ void TestForcedCloseCrash_SkipsTheViewer()
   AssertContains(log, "Skipped viewer auto-open: crash followed a close request (Alt+F4) 0.8 s earlier.", "The skip is logged");
   Require(log.find("deferring viewer") == std::string::npos, "No viewer deferred");
   Require(log.find("Auto-opened DumpTool viewer") == std::string::npos, "No viewer opened");
+  // Retention counts these apart from the real crashes, by this mark.
+  const auto manifestText = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json"));
+  AssertContains(manifestText, "\"forced_close\": true", "The manifest says it was an error of a game being closed");
+  Require(skydiag::helper::IsForcedCloseCrashManifest(manifestText), "as retention reads it");
+  // ADR-0029: the display drivers' errors since the game started, beside the dump.
+  const auto dumpFile = FindSingleFileByPrefix(outBase, L"SkyrimDiag_Crash_", L".dmp");
+  const auto driverEvents = nlohmann::json::parse(
+    ReadAllTextUtf8(dumpFile.parent_path() / (dumpFile.stem().wstring() + L"_GpuDriverEvents.json")));
+  Require(driverEvents["version"] == 1 && driverEvents["events"].is_array() && driverEvents["since_unix"] > 0,
+    "The driver events of the game's session are written beside the crash dump");
+  AssertContains(log, "Graphics driver events since the game started:", "and logged");
 
   CloseHandle(proc.crashEvent);
   proc.crashEvent = nullptr;
@@ -2460,6 +2471,7 @@ void TestHeldDumpIsReportedWhenTheNewerCrashHasNoDump()
   AssertContains(manifest, "\"dump\": \"SkyrimDiag_Crash_20261110_120000_001.dmp\"", "under its crash name");
   AssertContains(manifest, "\"reason\": \"released_exception_reported_at_exit\"", "with why it is one");
   AssertContains(manifest, "\"capture_profile\"", "and the profile it was written with");
+  Require(!skydiag::helper::IsForcedCloseCrashManifest(manifest), "a crash, not an error of a game being closed");
 
   TerminateChildProcess(&child);
   std::filesystem::remove_all(outBase);

@@ -36,6 +36,15 @@ void LoadPluginScanJson(
   std::uint64_t dumpSize,
   AnalysisResult& out);
 
+// The display drivers' errors while the game ran (ADR-0026): the dump stream
+// of a freeze or manual capture, or the _GpuDriverEvents.json sidecar of a
+// crash (ADR-0029).
+void LoadGpuDriverLog(
+  const std::wstring& dumpPath,
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  AnalysisResult& out);
+
 // From the MO2 state captured with the dump when present, else from the
 // current disk (marked as analysis-time in `out`).
 std::optional<Mo2Index> BuildMo2IndexForDump(const std::vector<std::wstring>& modulePaths, AnalysisResult& out);

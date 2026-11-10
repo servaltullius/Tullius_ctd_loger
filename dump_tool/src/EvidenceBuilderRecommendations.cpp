@@ -451,6 +451,33 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     r.recommendations.push_back(
       (en ? L"[Damaged save] " : L"[세이브 손상] ") + DamagedSaveLead(r.save_load, en) + L" " + DamagedSaveAction(en));
   }
+  // ADR-0029: a graphics driver error moments before the crash, under a tag
+  // of its own so it is the next action (NextAction.cpp; the freeze line's
+  // [GPU driver] never is, ADR-0026). Listed first, unless something already
+  // explains the crash (a known cause with its fix, a hook being installed,
+  // a damaged save: the quick answer leads with those); then it comes with
+  // the other advice.
+  const bool crashExplained = ctx.isDamagedSaveSuspected || r.hook_stub_race.detected ||
+    (r.signature_match.has_value() && r.signature_match->scope == "root_cause" &&
+     !r.signature_match->recommendations.empty());
+  const auto addGpuDriverErrorBeforeCrash = [&] {
+    const std::wstring seconds = std::to_wstring(*ctx.gpuDriverErrorSecBeforeCrash);
+    const auto driver = DescribeGpuDriverLog(r.gpu_driver_log, r.dump_capture_unix, en);
+    r.recommendations.push_back(en
+      ? (L"[Driver error before crash] The graphics driver logged an error " + seconds + L" s before the crash (" + driver +
+          L"). After a driver error or reset the game's graphics device can be gone, and code that uses it, in any "
+          L"mod, crashes next. Before removing a mod this report names, reinstall the graphics driver cleanly and undo "
+          L"any GPU overclock or undervolt, then see whether it still crashes in the same place without a driver "
+          L"error. Being close in time does not prove it is the cause.")
+      : (L"[크래시 직전 드라이버 오류] 튕기기 " + seconds + L"초 전에 그래픽 드라이버 오류가 기록됐습니다(" + driver +
+          L"). 드라이버가 오류를 내거나 재시작되면 게임의 그래픽 장치가 사라져, 그 뒤 그래픽을 쓰는 코드는 어느 모드의 것이든 "
+          L"튕길 수 있습니다. 이 리포트에 나온 모드를 빼기 전에 그래픽 드라이버를 깨끗이 다시 설치하고 GPU 오버클럭·언더볼트를 "
+          L"되돌린 뒤, 드라이버 오류 없이도 같은 곳에서 튕기는지 보세요. 시각이 가깝다는 것만으로 원인이라고 단정할 수는 "
+          L"없습니다."));
+  };
+  if (ctx.gpuDriverErrorSecBeforeCrash && !crashExplained) {
+    addGpuDriverErrorBeforeCrash();
+  }
   const bool isCrashLike = ctx.isCrashLike;
   const bool isSnapshotLike = ctx.isSnapshotLike;
   const bool isHangLike = ctx.isHangLike;
@@ -1002,6 +1029,9 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
     }
   }
 
+  if (ctx.gpuDriverErrorSecBeforeCrash && crashExplained) {
+    addGpuDriverErrorBeforeCrash();
+  }
   // ADR-0026: a GPU fault or driver reset can leave the game frozen with
   // nothing in any game log; the System log may still show it.
   if (isHangLike && GpuDriverProblemCount(r.gpu_driver_log) > 0u) {

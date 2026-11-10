@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <initializer_list>
 #include <optional>
 #include <string>
@@ -70,6 +71,13 @@ inline std::string PathPartUtf8(const std::filesystem::path& part)
 struct RetentionLimits {
   // 0 = unlimited (no cleanup).
   std::uint32_t maxCrashDumps = 20;
+  // Of the crash dumps, those written for an error while the game was being
+  // closed (ADR-0022; IsForcedCloseCrashManifest). They are no CTDs and one
+  // can come with every quit, so they have a small limit of their own
+  // instead of the places of real crashes: 18 of them in one night left no
+  // dump of that day's nine crashes (2026-11-10). maxCrashDumps counts the
+  // other crash dumps.
+  std::uint32_t maxForcedCloseCrashDumps = 3;
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
   std::uint32_t maxEtwTraces = 5;
@@ -333,6 +341,94 @@ inline void PruneDumpFilesFromCollected(
     RemoveDumpAndArtifacts(
       dir, dumps[i], dumpPrefix, tsRefs, deleteWctForTimestamp, deleteManualWctForTimestamp, deleteEtlForStem);
   }
+}
+
+// The incident manifest of a crash the helper took for an error of a game
+// being closed says so in its context: "forced_close": true (CrashCapture's
+// ProcessValidCrashDump). Read as text: this header parses no JSON, and the
+// key is written nowhere else in a manifest.
+inline bool IsForcedCloseCrashManifest(std::string_view manifestText)
+{
+  constexpr std::string_view kKey = "\"forced_close\"";
+  auto pos = manifestText.find(kKey);
+  if (pos == std::string_view::npos) {
+    return false;
+  }
+  pos += kKey.size();
+  const auto skipSpace = [&] {
+    while (pos < manifestText.size() && std::isspace(static_cast<unsigned char>(manifestText[pos])) != 0) {
+      ++pos;
+    }
+  };
+  skipSpace();
+  if (pos >= manifestText.size() || manifestText[pos] != ':') {
+    return false;
+  }
+  ++pos;
+  skipSpace();
+  return manifestText.substr(pos, 4) == "true";
+}
+
+// Whether the crash captured at `ts` was such an error. A crash without a
+// manifest (EnableIncidentManifest=0, a dump from before the key) is a crash.
+inline bool IsForcedCloseCrashTimestamp(const std::filesystem::path& dir, const std::string& ts)
+{
+  // A manifest with its config snapshot is a few KiB; more than this is not one.
+  constexpr std::streamsize kMaxManifestBytes = std::streamsize{ 256 } * 1024;
+  std::ifstream in(PathForIo(dir / ("SkyrimDiag_Incident_Crash_" + ts + ".json")), std::ios::binary);
+  if (!in) {
+    return false;
+  }
+  std::string text(static_cast<std::size_t>(kMaxManifestBytes), '\0');
+  in.read(text.data(), kMaxManifestBytes);
+  text.resize(static_cast<std::size_t>(in.gcount()));
+  return IsForcedCloseCrashManifest(text);
+}
+
+// The crash dumps by count, newest first as collected: the forced-close ones
+// under their own limit, the rest under maxCount (RetentionLimits). A
+// recapture dump (_Richer, _Full) shares its crash's timestamp and so its
+// manifest and its kind.
+inline void PruneCrashDumpsFromCollected(
+  const std::filesystem::path& dir,
+  const std::vector<DatedFile>& dumps,
+  std::string_view dumpPrefix,
+  std::uint32_t maxCount,
+  std::uint32_t maxForcedCloseCount,
+  bool deleteWctForTimestamp,
+  bool deleteManualWctForTimestamp,
+  bool deleteEtlForStem)
+{
+  const bool overCount = maxCount != 0 && dumps.size() > static_cast<std::size_t>(maxCount);
+  const bool overForcedCloseCount =
+    maxForcedCloseCount != 0 && dumps.size() > static_cast<std::size_t>(maxForcedCloseCount);
+  if (!overCount && !overForcedCloseCount) {
+    return;  // neither kind can be over its limit: no manifest is read
+  }
+
+  std::unordered_map<std::string, bool> forcedCloseByTs;
+  std::vector<const DatedFile*> crashes;
+  std::vector<const DatedFile*> forcedCloses;
+  for (const auto& dump : dumps) {
+    auto it = forcedCloseByTs.find(dump.ts);
+    if (it == forcedCloseByTs.end()) {
+      it = forcedCloseByTs.emplace(dump.ts, IsForcedCloseCrashTimestamp(dir, dump.ts)).first;
+    }
+    (it->second ? forcedCloses : crashes).push_back(&dump);
+  }
+
+  auto tsRefs = BuildTimestampRefCounts(dumps);
+  const auto prune = [&](const std::vector<const DatedFile*>& kind, std::uint32_t limit) {
+    if (limit == 0) {
+      return;
+    }
+    for (std::size_t i = limit; i < kind.size(); i++) {
+      RemoveDumpAndArtifacts(
+        dir, *kind[i], dumpPrefix, tsRefs, deleteWctForTimestamp, deleteManualWctForTimestamp, deleteEtlForStem);
+    }
+  };
+  prune(forcedCloses, maxForcedCloseCount);
+  prune(crashes, maxCount);
 }
 
 inline void PruneDumpFiles(
@@ -644,7 +740,15 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
       kind.deleteManualWctForTimestamp,
       kind.deleteEtlForStem);
   };
-  pruneByCount(kCrashDumpFiles, limits.maxCrashDumps);
+  PruneCrashDumpsFromCollected(
+    outBase,
+    CollectFilesByPrefixAndExt(files, kCrashDumpFiles.prefix, ".dmp"),
+    kCrashDumpFiles.prefix,
+    limits.maxCrashDumps,
+    limits.maxForcedCloseCrashDumps,
+    kCrashDumpFiles.deleteWctForTimestamp,
+    kCrashDumpFiles.deleteManualWctForTimestamp,
+    kCrashDumpFiles.deleteEtlForStem);
   pruneByCount(kHangDumpFiles, limits.maxHangDumps);
   pruneByCount(kManualDumpFiles, limits.maxManualDumps);
   PruneDumpsOverTotalBytes(outBase, static_cast<std::uint64_t>(limits.maxTotalDumpGB) << 30u);

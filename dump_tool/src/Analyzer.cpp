@@ -625,7 +625,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // RAM, commit and VRAM at capture time
   ReadMemorySnapshot(dumpBase, dumpSize, out.memory);
-  ReadGpuDriverLog(dumpBase, dumpSize, out.gpu_driver_log);
+  LoadGpuDriverLog(dumpPath, dumpBase, dumpSize, out);
   if (out.has_wct) {
     // Freeze dumps taken from a PSS snapshot: the clone is charged to system
     // commit while the dump is written (ADR-0012).

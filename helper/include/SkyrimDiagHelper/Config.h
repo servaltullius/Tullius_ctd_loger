@@ -81,6 +81,9 @@ struct HelperConfig {
 
   // Retention / disk cleanup (0 = unlimited)
   std::uint32_t maxCrashDumps = 20;
+  // Crash dumps of an error while the game was being closed (ADR-0022),
+  // counted apart from MaxCrashDumps.
+  std::uint32_t maxForcedCloseCrashDumps = 3;
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
   std::uint32_t maxEtwTraces = 5;
@@ -124,6 +127,7 @@ inline RetentionLimits RetentionLimitsFromConfig(const HelperConfig& cfg)
 {
   RetentionLimits limits{};
   limits.maxCrashDumps = cfg.maxCrashDumps;
+  limits.maxForcedCloseCrashDumps = cfg.maxForcedCloseCrashDumps;
   limits.maxHangDumps = cfg.maxHangDumps;
   limits.maxManualDumps = cfg.maxManualDumps;
   limits.maxEtwTraces = cfg.maxEtwTraces;
