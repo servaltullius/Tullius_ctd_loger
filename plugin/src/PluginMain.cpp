@@ -24,6 +24,7 @@
 #include "SkyrimDiag/CrashHookConfig.h"
 #include "SkyrimDiag/EventSinks.h"
 #include "SkyrimDiag/Heartbeat.h"
+#include "SkyrimDiag/HelperWatchdog.h"
 #include "SkyrimDiag/ResourceLog.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagProtocol.h"
@@ -470,72 +471,76 @@ void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
     g_watchdogThread = new std::jthread(
       [helperExe = cfg.helperExe](const std::stop_token &stopToken) noexcept {
         try {
-          constexpr std::uint32_t kRetryMinMs = 1000;
-          constexpr std::uint32_t kRetryMaxMs = 30000;
           constexpr std::uint32_t kLoopSleepMs = 1000;
-          constexpr std::uint32_t kInitialGraceMs = 3000;
           constexpr int kHelperConfirmPollCount = 15;
           constexpr std::uint32_t kHelperConfirmPollSleepMs = 100;
 
+          using skydiag::plugin::HelperWatchdogPolicy;
           const auto pid = GetCurrentProcessId();
-          std::uint32_t retryBackoffMs = kRetryMinMs;
-          ULONGLONG nextAttemptTick = GetTickCount64() + kInitialGraceMs;
+          // When to start the helper again, and when to stop trying
+          // (HelperWatchdog.h).
+          HelperWatchdogPolicy policy(GetTickCount64());
+          const auto logPolicyEvent = [&policy]() {
+            switch (policy.LastEvent()) {
+              case HelperWatchdogPolicy::Event::kHelperExitedEarly:
+                spdlog::warn(
+                  "SkyrimDiag: helper exited {} ms after it started; retry in {} ms (failed start {} of {})",
+                  policy.LastRunMs(), policy.RetryInMs(), policy.FailedStarts(),
+                  HelperWatchdogPolicy::kMaxFailedStarts);
+                break;
+              case HelperWatchdogPolicy::Event::kStartFailed:
+                spdlog::warn(
+                  "SkyrimDiag: helper watchdog launch unconfirmed; retry in {} ms (failed start {} of {})",
+                  policy.RetryInMs(), policy.FailedStarts(), HelperWatchdogPolicy::kMaxFailedStarts);
+                break;
+              case HelperWatchdogPolicy::Event::kGaveUp:
+                spdlog::error(
+                  "SkyrimDiag: the helper did not stay running after {} starts in a row; not starting it again "
+                  "this session. Crashes and freezes are not captured until the game is restarted. "
+                  "SkyrimDiagHelper.log in the output folder may say why it exits; security software that ends "
+                  "SkyrimDiagHelper.exe does this too.",
+                  policy.FailedStarts());
+                break;
+              default:
+                break;
+            }
+          };
 
           while (!stopToken.stop_requested()) {
             try {
-              if (IsHelperSingletonPresent(pid)) {
-                retryBackoffMs = kRetryMinMs;
-                nextAttemptTick = 0;
-                Sleep(kLoopSleepMs);
-                continue;
-              }
-
-              const ULONGLONG now = GetTickCount64();
-              if (nextAttemptTick != 0 && now < nextAttemptTick) {
-                Sleep(kLoopSleepMs);
-                continue;
-              }
-
-              DWORD helperPid = 0;
-              const auto helperPath = ResolveHelperPath(helperExe);
-              if (StartHelperProcess(helperPath, pid, &helperPid)) {
+              const auto action = policy.Tick(GetTickCount64(), IsHelperSingletonPresent(pid));
+              logPolicyEvent();
+              if (action == HelperWatchdogPolicy::Action::kLaunch) {
+                DWORD helperPid = 0;
                 bool confirmed = false;
-                for (int i = 0; i < kHelperConfirmPollCount; ++i) {
-                  if (stopToken.stop_requested())
-                    break;
-                  if (IsHelperSingletonPresent(pid)) {
-                    confirmed = true;
-                    break;
+                if (StartHelperProcess(ResolveHelperPath(helperExe), pid, &helperPid)) {
+                  for (int i = 0; i < kHelperConfirmPollCount && !stopToken.stop_requested(); ++i) {
+                    if (IsHelperSingletonPresent(pid)) {
+                      confirmed = true;
+                      break;
+                    }
+                    Sleep(kHelperConfirmPollSleepMs);
                   }
-                  Sleep(kHelperConfirmPollSleepMs);
                 }
+                if (stopToken.stop_requested()) {
+                  break;  // the game is closing: not a failed start
+                }
+                policy.NoteLaunch(GetTickCount64(), confirmed);
                 if (confirmed) {
                   spdlog::info("SkyrimDiag: helper watchdog confirmed helper "
                                "running (helperPid={})",
                                helperPid);
-                  retryBackoffMs = kRetryMinMs;
-                  nextAttemptTick = 0;
-                } else if (!stopToken.stop_requested()) {
-                  nextAttemptTick = GetTickCount64() + retryBackoffMs;
-                  spdlog::warn("SkyrimDiag: helper watchdog launch "
-                               "unconfirmed; retry in {} ms",
-                               retryBackoffMs);
-                  retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
                 }
-              } else {
-                nextAttemptTick = GetTickCount64() + retryBackoffMs;
-                spdlog::warn("SkyrimDiag: helper watchdog retry in {} ms",
-                             retryBackoffMs);
-                retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
+                logPolicyEvent();
               }
 
               Sleep(kLoopSleepMs);
             } catch (...) {
               // A watchdog failure must not unwind across the thread entry
               // point or permanently disable helper recovery after one
-              // transient exception.
-              nextAttemptTick = GetTickCount64() + retryBackoffMs;
-              retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);
+              // transient exception. It counts as a failed start, so a
+              // failure that repeats ends in the policy's stop, not a loop.
+              policy.NoteLaunch(GetTickCount64(), /*confirmed=*/false);
               OutputDebugStringW(L"SkyrimDiag: helper watchdog iteration "
                                  L"failed; retry scheduled.\n");
               Sleep(kLoopSleepMs);

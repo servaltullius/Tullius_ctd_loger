@@ -34,6 +34,14 @@ target_include_directories(skydiag_hang_suppression_tests PRIVATE
 
 add_test(NAME skydiag_hang_suppression_tests COMMAND skydiag_hang_suppression_tests)
 
+add_executable(skydiag_helper_watchdog_policy_tests
+  helper_watchdog_policy_tests.cpp
+)
+target_include_directories(skydiag_helper_watchdog_policy_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../plugin/include"
+)
+add_test(NAME skydiag_helper_watchdog_policy_tests COMMAND skydiag_helper_watchdog_policy_tests)
+
 add_executable(skydiag_helper_ini_text_tests
   helper_ini_text_tests.cpp
 )

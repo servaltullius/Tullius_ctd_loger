@@ -170,6 +170,8 @@ MO2는 USVFS 가상 파일 시스템 안에서 스카이림을 실행합니다. 
 | `CrashHookMode` | `1` | **1 유지 권장.** 2 = 모든 예외 기록 (비권장). |
 | `AllowOnlineSymbols` | `0` | 로컬/오프라인 캐시 우선 분석. |
 
+플러그인은 Helper가 사라지면 다시 실행합니다. Helper가 시작 후 1분 안에 종료되기를 반복하면(보안 프로그램이 `SkyrimDiagHelper.exe`를 끝내는 경우 등) 다섯 번 연속 실패한 뒤 더 실행하지 않고 `SkyrimDiag.log`(`문서\My Games\Skyrim Special Edition\SKSE\`)에 남깁니다. 이때는 게임을 다시 시작할 때까지 크래시·프리징을 캡처하지 못합니다.
+
 Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 
 | 옵션 | 기본값 | 참고 |

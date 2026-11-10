@@ -670,25 +670,27 @@ int main()
     watchdogBody,
     "unconfirmed; retry in {} ms",
     "An unconfirmed helper launch must be logged as a retryable failure.");
-  AssertOrdered(
-    watchdogBody,
-    "if (confirmed)",
-    "retryBackoffMs = kRetryMinMs;",
-    "A confirmed helper launch must be the branch that resets watchdog backoff.");
-  AssertOrdered(
-    watchdogBody,
-    "if (confirmed)",
-    "nextAttemptTick = 0;",
-    "A confirmed helper launch must clear its pending retry deadline.");
-  AssertOrdered(
-    watchdogBody,
-    "unconfirmed; retry in {} ms",
-    "retryBackoffMs = std::min(retryBackoffMs * 2, kRetryMaxMs);",
-    "An unconfirmed launch must increase watchdog backoff after scheduling its retry.");
+  // The retry rules themselves are in HelperWatchdog.h and tested there
+  // (helper_watchdog_policy_tests): a confirmed launch alone no longer puts
+  // the wait back to its minimum, since a helper that exits seconds after
+  // every start was then started again every few seconds without end.
   AssertContains(
     watchdogBody,
-    "nextAttemptTick = GetTickCount64() + retryBackoffMs;",
-    "Unconfirmed and failed launches must schedule a bounded retry delay.");
+    "HelperWatchdogPolicy policy(GetTickCount64());",
+    "The watchdog must take its retry decisions from HelperWatchdogPolicy.");
+  AssertOrdered(
+    watchdogBody,
+    "policy.Tick(GetTickCount64(), IsHelperSingletonPresent(pid))",
+    "policy.NoteLaunch(GetTickCount64(), confirmed);",
+    "The watchdog must report every launch's outcome to the policy.");
+  AssertContains(
+    watchdogBody,
+    "did not stay running after {} starts in a row",
+    "Giving up on a helper that keeps exiting must be logged.");
+  assert(
+    watchdogBody.find("retryBackoffMs") == std::string::npos &&
+    watchdogBody.find("nextAttemptTick") == std::string::npos &&
+    "The watchdog must not keep retry state of its own beside the policy.");
 
   AssertContains(
     pluginMain,

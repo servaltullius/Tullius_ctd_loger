@@ -32,3 +32,4 @@ ADR index:
 - `0027-address-library-frame-ids.md`
 - `0028-whole-mod-review-2026-11.md`
 - `0029-crash-gpu-driver-events-and-forced-close-retention.md`
+- `0030-helper-watchdog-gives-up.md`
