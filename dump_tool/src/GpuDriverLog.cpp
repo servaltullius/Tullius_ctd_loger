@@ -83,6 +83,24 @@ std::size_t GpuDriverProblemCount(const GpuDriverLog& log)
   return static_cast<std::size_t>(std::count_if(log.events.begin(), log.events.end(), IsProblem));
 }
 
+std::optional<GpuDriverLastProblem> LastGpuDriverProblemBefore(const GpuDriverLog& log, std::uint64_t captureUnix)
+{
+  if (!log.recorded || captureUnix == 0u) {
+    return std::nullopt;
+  }
+  const GpuDriverEventRow* newest = nullptr;
+  for (const auto& event : log.events) {
+    // The crash's own log is read after the dump, so it can hold later events.
+    if (IsProblem(event) && event.unix != 0u && event.unix <= captureUnix && (!newest || event.unix >= newest->unix)) {
+      newest = &event;
+    }
+  }
+  if (!newest) {
+    return std::nullopt;
+  }
+  return GpuDriverLastProblem{ captureUnix - newest->unix, newest->provider + L" " + std::to_wstring(newest->id) };
+}
+
 std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t captureUnix, bool en)
 {
   if (!log.recorded) {

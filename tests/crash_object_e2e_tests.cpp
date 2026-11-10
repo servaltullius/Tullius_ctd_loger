@@ -449,6 +449,25 @@ void TestCrashObjectsAreReadBackFromTheDump()
   }
   Require(hasLeveledJson, "The summary JSON carries the NPC it was rolled from");
 
+  // ADR-0029: a crash dump has no driver events stream; the helper leaves
+  // them beside it, and the analyzer reads that file.
+  Require(!result.gpu_driver_log.recorded, "A crash dump carries no driver events of its own");
+  const auto errorUnix = static_cast<std::uint64_t>(result.dump_capture_unix) - 10u;
+  std::ofstream(outBase / L"SkyrimDiag_Crash_20261010_120000_000_GpuDriverEvents.json", std::ios::binary)
+    << R"({"version":1,"since_unix":)" << (errorUnix - 100u) << R"(,"until_unix":)" << (errorUnix + 20u)
+    << R"(,"total":1,"complete":true,"events":[{"provider":"nvlddmkm","id":153,"level":2,"unix":)" << errorUnix
+    << R"(,"message":"Restarting TDR occurred on GPUID:100"}]})";
+  skydiag::dump_tool::AnalysisResult withDriverLog{};
+  Require(
+    skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, withDriverLog, &err),
+    "AnalyzeDump failed on the crash dump with its driver events");
+  Require(withDriverLog.gpu_driver_log.recorded && withDriverLog.gpu_driver_log.events.size() == 1u,
+    "The driver events beside the dump are read");
+  Require(!withDriverLog.recommendations.empty() &&
+            withDriverLog.recommendations.front().find(
+              L"[Driver error before crash] The graphics driver logged an error 10 s before the crash") == 0u,
+    "A driver error 10 s before the crash leads the advice");
+
   std::filesystem::remove_all(outBase);
 }
 

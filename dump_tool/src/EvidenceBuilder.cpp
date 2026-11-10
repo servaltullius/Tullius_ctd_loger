@@ -5,6 +5,7 @@
 #include <filesystem>
 
 #include "EvidenceBuilderPrivate.h"
+#include "GpuDriverLog.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
 #include "WctTypes.h"
@@ -111,6 +112,13 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     r.hook_stub_race.detected;
   ctx.isDamagedSaveSuspected = isCrashLike && !ctx.isForcedClose && !ctx.isFilteredCleanExit && !strongerLead &&
                                internal::SaveLoadSuggestsDamagedSave(r.save_load);
+  if (isCrashLike && !ctx.isForcedClose && !ctx.isFilteredCleanExit) {
+    if (const auto last = LastGpuDriverProblemBefore(r.gpu_driver_log, r.dump_capture_unix);
+        last && last->seconds_before_capture <= kGpuDriverErrorNearCrashSec) {
+      ctx.gpuDriverErrorSecBeforeCrash = last->seconds_before_capture;
+      ctx.gpuDriverErrorName = last->name;
+    }
+  }
   ctx.hasModule = hasModule;
   ctx.isSystem = isSystem;
   ctx.externalSoftware = r.fault_module_external_software;

@@ -506,6 +506,8 @@ void ProcessValidCrashDump(
       AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
     }
   }
+  // A driver reset moments before the crash can be why it crashed (ADR-0029).
+  WriteGpuDriverEventsSidecar(outBase, dumpFs, proc.pid);
 
   bool etwStarted = false;
   std::string etwStatus = cfg.enableEtwCaptureOnCrash ? "start_failed" : "disabled";
@@ -540,6 +542,11 @@ void ProcessValidCrashDump(
   if (cfg.enableIncidentManifest) {
     nlohmann::json ctx = nlohmann::json::object();
     ctx["reason"] = "crash_event";
+    if (forcedClose.matched()) {
+      // ADR-0022: an error of a game being closed. Retention keeps few of
+      // these (IsForcedCloseCrashManifest), apart from the real crashes.
+      ctx["forced_close"] = true;
+    }
     const auto manifest = MakeIncidentManifestV1(
       "crash",
       ts,

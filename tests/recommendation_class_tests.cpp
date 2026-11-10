@@ -182,6 +182,8 @@ int main()
   Expect(L"[외부 프로그램] x", "immediate", "external_software");
   Expect(L"[GPU driver] x", "immediate", "gpu_driver");
   Expect(L"[GPU 드라이버] x", "immediate", "gpu_driver");
+  Expect(L"[Driver error before crash] x", "immediate", "driver_error_before_crash");
+  Expect(L"[크래시 직전 드라이버 오류] x", "immediate", "driver_error_before_crash");
 
   // Recapture or Compare: the snapshot/manual tags, and capture-again wording
   // anywhere, which outranks an immediate tag (the kind still names the tag).

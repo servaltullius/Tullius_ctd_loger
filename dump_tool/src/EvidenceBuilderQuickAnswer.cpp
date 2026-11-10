@@ -661,6 +661,34 @@ void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answ
   answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
 }
 
+// ADR-0029: a graphics driver error moments before the crash. The mod the
+// crash names stays named, but it is the second thing to check: with the
+// graphics device gone, whatever used it next crashed. Close in time is not
+// proof, and the answer says so.
+void AddGpuDriverErrorBeforeCrash(const EvidenceBuildContext& ctx, bool en, QuickAnswer& answer)
+{
+  if (!ctx.gpuDriverErrorSecBeforeCrash) {
+    return;
+  }
+  const std::wstring seconds = std::to_wstring(*ctx.gpuDriverErrorSecBeforeCrash);
+  const std::wstring& driver = ctx.gpuDriverErrorName;
+  const std::wstring& mod = answer.suspect_mod;
+  answer.action = en
+    ? (L"First reinstall the graphics driver cleanly and undo any GPU overclock or undervolt: the driver logged an "
+        L"error (" + driver + L") " + seconds + L" s before the crash." +
+        (mod.empty() ? std::wstring{}
+                     : (L" If it crashes in the same place again without a driver error, suspect " + mod + L" then.")))
+    : (L"먼저 그래픽 드라이버를 깨끗이 다시 설치하고 GPU 오버클럭·언더볼트를 되돌려 보세요. 튕기기 " + seconds +
+        L"초 전에 그래픽 드라이버 오류(" + driver + L")가 기록됐습니다." +
+        (mod.empty() ? std::wstring{}
+                     : (L" 드라이버 오류 없이도 같은 곳에서 또 튕기면 그때 " + mod + L"을(를) 의심하세요.")));
+  answer.why_not_certain = en
+    ? L"After a graphics driver error or reset the game's graphics device can be gone, and code that uses it, in any "
+      L"mod, crashes next. Being close in time does not prove the driver error is the cause, though."
+    : L"그래픽 드라이버가 오류를 내거나 재시작되면 게임의 그래픽 장치가 사라져, 그 뒤 그래픽을 쓰는 코드는 어느 모드의 것이든 "
+      L"튕길 수 있습니다. 다만 시각이 가깝다는 것만으로 드라이버 오류가 원인이라고 단정할 수는 없습니다.";
+}
+
 }  // namespace
 
 QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx)
@@ -801,6 +829,7 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
   if (!freezePath) {
     QuickAnswer crash = Finish(kind, CrashLead(r, ctx), en);
     AddFaultInstructionClue(r, en, crash);
+    AddGpuDriverErrorBeforeCrash(ctx, en, crash);
     return crash;
   }
 

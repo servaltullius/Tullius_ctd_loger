@@ -153,6 +153,8 @@ bool PromoteReleasedCrashDump(
       WriteTextFileUtf8(pluginScanPath, pluginScanJson);
       AppendLogLine(outBase, L"Plugin scan sidecar written: " + pluginScanPath.wstring());
     }
+    // As a kept crash gets (ProcessValidCrashDump).
+    WriteGpuDriverEventsSidecar(outBase, std::filesystem::path(dumpPath), releasedContext->pid);
   }
   // Its incident manifest, as a kept crash gets one: the analyzer reads the
   // capture profile from it. No ETW trace was started for a released
@@ -160,6 +162,10 @@ bool PromoteReleasedCrashDump(
   if (cfg.enableIncidentManifest && releasedContext && !releasedContext->timestamp.empty()) {
     nlohmann::json ctx = nlohmann::json::object();
     ctx["reason"] = "released_exception_reported_at_exit";
+    if (crash.releasedForcedClose.matched()) {
+      // As ProcessValidCrashDump marks it, for retention.
+      ctx["forced_close"] = true;
+    }
     const auto manifest = MakeIncidentManifestV1(
       "crash",
       releasedContext->timestamp,

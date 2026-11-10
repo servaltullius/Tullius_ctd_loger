@@ -6,6 +6,7 @@
 #include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
 #include "GameLockWait.h"
+#include "GpuDriverLog.h"
 #include "MainThreadWait.h"
 #include "MinidumpThreadNames.h"
 #include "ModalDialogWait.h"
@@ -298,6 +299,24 @@ void LoadPluginScanJson(
       out.has_plugin_scan = true;
       out.plugin_scan_json_utf8 = std::move(sidecarJson);
     }
+  }
+}
+
+void LoadGpuDriverLog(
+  const std::wstring& dumpPath,
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  AnalysisResult& out)
+{
+  ReadGpuDriverLog(dumpBase, dumpSize, out.gpu_driver_log);
+  if (out.gpu_driver_log.recorded) {
+    return;
+  }
+  const std::filesystem::path dumpFs(dumpPath);
+  const auto sidecarPath = dumpFs.parent_path() / (dumpFs.stem().wstring() + L"_GpuDriverEvents.json");
+  std::string sidecarJson;
+  if (ReadTextFileUtf8(sidecarPath, &sidecarJson) && !sidecarJson.empty()) {
+    ApplyGpuDriverLogJson(sidecarJson, out.gpu_driver_log);
   }
 }
 

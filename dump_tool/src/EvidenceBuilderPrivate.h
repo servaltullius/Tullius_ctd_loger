@@ -49,6 +49,11 @@ struct EvidenceBuildContext
   bool isManualCapture = false;
   // ADR-0025: SaveLoadSuggestsDamagedSave, for a crash.
   bool isDamagedSaveSuspected = false;
+  // ADR-0029: a crash within kGpuDriverErrorNearCrashSec of a graphics driver
+  // error (LastGpuDriverProblemBefore); not for an error of a game being
+  // closed. Its seconds and "nvlddmkm 153".
+  std::optional<std::uint64_t> gpuDriverErrorSecBeforeCrash{};
+  std::wstring gpuDriverErrorName;
 
   bool hasModule = false;
   // Also true for a GPU vendor tool or overlay (externalSoftware names it).

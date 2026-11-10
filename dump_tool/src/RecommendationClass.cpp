@@ -36,6 +36,8 @@ constexpr TagRule kTagRules[] = {
   { "hook_framework", kRecommendationGroupImmediate, L"[Hook framework]", L"[훅 프레임워크]" },
   { "external_software", kRecommendationGroupImmediate, L"[External software]", L"[외부 프로그램]" },
   { "gpu_driver", kRecommendationGroupImmediate, L"[GPU driver]", L"[GPU 드라이버]" },
+  { "driver_error_before_crash", kRecommendationGroupImmediate, L"[Driver error before crash]",
+    L"[크래시 직전 드라이버 오류]" },
   { "snapshot", kRecommendationGroupRecapture, L"[Snapshot]", L"[정상/스냅샷]" },
   { "manual", kRecommendationGroupRecapture, L"[Manual]", L"[수동]" },
   { "recapture", kRecommendationGroupRecapture, L"[Recapture]", L"[재수집]" },
