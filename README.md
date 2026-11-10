@@ -135,6 +135,8 @@ Options that may have marginal impact on heavy modpacks:
 | `CrashHookMode` | `1` | **Keep at 1.** Mode 2 (all exceptions) is not recommended. |
 | `AllowOnlineSymbols` | `0` | Offline/local cache analysis by default. |
 
+The plugin starts the helper again when it goes away. If the helper keeps exiting within a minute of starting (security software ending `SkyrimDiagHelper.exe` does this), the plugin stops after five failed starts in a row and says so in `SkyrimDiag.log` (`Documents\My Games\Skyrim Special Edition\SKSE\`); crashes and freezes are then not captured until the game is restarted.
+
 Helper diagnostics options (`SkyrimDiagHelper.ini`):
 
 | Option | Default | Note |
