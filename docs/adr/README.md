@@ -33,3 +33,4 @@ ADR index:
 - `0028-whole-mod-review-2026-11.md`
 - `0029-crash-gpu-driver-events-and-forced-close-retention.md`
 - `0030-helper-watchdog-gives-up.md`
+- `0031-skip-dump-for-repeated-handled-faults.md`

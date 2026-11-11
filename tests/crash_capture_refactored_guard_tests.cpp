@@ -25,8 +25,11 @@ int main()
   const std::string crashTickBody = ExtractFunctionFlow(
     crashCapture,
     "bool HandleCrashEventTick(",
-    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
-      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(",
+      "RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(",
+      "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(",
+      "void ReleaseFilteredCrashDump(" });
   AssertContains(
     crashTickBody,
     "ExtractCrashInfo(",

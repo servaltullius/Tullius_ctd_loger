@@ -137,6 +137,8 @@ Options that may have marginal impact on heavy modpacks:
 
 The plugin starts the helper again when it goes away. If the helper keeps exiting within a minute of starting (security software ending `SkyrimDiagHelper.exe` does this), the plugin stops after five failed starts in a row and says so in `SkyrimDiag.log` (`Documents\My Games\Skyrim Special Edition\SKSE\`); crashes and freezes are then not captured until the game is restarted.
 
+When the game or a mod repeatedly raises and catches the same exception (same exception code and instruction address, including on the main thread), the first two occurrences still write a dump first so genuine sudden crashes are not missed, and once two in the same session are released as handled, later occurrences check recovery before calling `MiniDumpWriteDump` — avoiding repeated thread-suspension stutters when the game keeps running. Tradeoff: if that exact twice-handled address later has an unhandled crash that exits the game immediately, only post-exit exception metadata (`SkyrimDiag_PostExitCrashEvidence_*.json`) is recorded without a `.dmp`.
+
 Helper diagnostics options (`SkyrimDiagHelper.ini`):
 
 | Option | Default | Note |

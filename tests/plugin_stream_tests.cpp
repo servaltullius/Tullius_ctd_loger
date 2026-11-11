@@ -56,8 +56,11 @@ void TestCrashPathIsDumpFirst()
   const auto crashTickBody = ExtractFunctionFlow(
     impl,
     "bool HandleCrashEventTick(",
-    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
-      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(",
+      "RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(",
+      "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(",
+      "void ReleaseFilteredCrashDump(" });
   const auto writePos = crashTickBody.find("WriteDumpWithStreams(");
   const auto processPos = crashTickBody.find("ProcessValidCrashDump(");
   assert(writePos != std::string::npos);
@@ -86,8 +89,11 @@ void TestCrashPathCollectsPluginScanInputsWhileProcessIsAlive()
   const auto crashTickBody = ExtractFunctionFlow(
     impl,
     "bool HandleCrashEventTick(",
-    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
-      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(",
+      "RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(",
+      "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(",
+      "void ReleaseFilteredCrashDump(" });
   AssertOrdered(
     crashTickBody,
     "WriteDumpWithStreams(",

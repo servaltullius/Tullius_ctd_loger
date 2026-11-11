@@ -475,19 +475,19 @@ void TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump()
   std::filesystem::remove_all(outBase);
 }
 
-// A handled fault that keeps coming back (same code and address, released
-// twice within the cooldown) gets the minimal dump first, not a full-size one
-// each time. Kept as a crash while the game still runs, it is written again
-// at the configured size. Not on the game's main thread: unhandled there, it
-// ends the game before a second dump could be written.
-void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
+// ADR-0031: a fault released as handled at least twice in this session (main
+// thread included) checks whether the game recovers before calling
+// MiniDumpWriteDump. When the game recovers, no dump is written at all; when
+// it stalls while still alive, the configured crash dump is written then.
+void TestHandleCrashEventTick_RepeatedHandledFaultChecksRecoveryBeforeDump()
 {
   struct Case
   {
     bool gameKeepsRunning;
     bool onMainThread;
   };
-  for (const auto [gameKeepsRunning, onMainThread] : { Case{ true, false }, Case{ false, false }, Case{ true, true } }) {
+  for (const auto [gameKeepsRunning, onMainThread] :
+       { Case{ true, false }, Case{ false, false }, Case{ true, true }, Case{ false, true } }) {
     const auto outBase = MakeTempDir(L"skydiag_helper_repeated_fault");
     ClearLog(outBase);
 
@@ -520,9 +520,8 @@ void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
 
     HelperConfig cfg = MakeTestConfig();
     CrashCaptureState crashState{};
-    const auto now = GetTickCount64();
-    skydiag::helper::internal::NoteRecoveredFault(&crashState.recoveredFaults, 0xC0000005u, faultingContext.Rip, now);
-    skydiag::helper::internal::NoteRecoveredFault(&crashState.recoveredFaults, 0xC0000005u, faultingContext.Rip, now);
+    skydiag::helper::internal::NoteRecoveredFault(&crashState.recoveredFaults, 0xC0000005u, faultingContext.Rip);
+    skydiag::helper::internal::NoteRecoveredFault(&crashState.recoveredFaults, 0xC0000005u, faultingContext.Rip);
     PendingCrashEtwCapture pendingCrashEtw{};
     PendingCrashAnalysis pendingCrashAnalysis{};
     std::wstring lastCrashDumpPath;
@@ -536,21 +535,27 @@ void TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst()
 
     const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
     Require(handled, "the event is consumed");
-    if (onMainThread) {
-      Require(log.find("writing a minimal dump first") == std::string::npos, "a main-thread fault gets its full dump");
-    } else {
-      AssertContains(log, "writing a minimal dump first", "the smaller first dump is logged");
-    }
+    AssertContains(
+      log,
+      "checking whether the game recovers before writing a crash dump",
+      "both worker and main-thread repeated faults check recovery before dumping");
     if (gameKeepsRunning) {
-      Require(!crashState.latched && FileExists(crashState.releasedDumpPath), "released again, its dump held");
+      bool anyDump = false;
+      for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
+        anyDump = anyDump || entry.path().extension() == L".dmp";
+      }
+      Require(
+        !crashState.latched && crashState.releasedDumpPath.empty() && !anyDump,
+        "recovered repeated fault writes no dump at all");
+      Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "recovered repeated fault thaws capture");
+      Require(!crashState.releasedInThreadDumpWindow && crashState.releasedOnBriefHeartbeat, "brief-heartbeat release without thread-dump log gate");
+      AssertContains(log, "No dump written: this repeated exception was handled again", "skip is logged");
     } else {
-      if (log.find("rewrote its dump at the configured size") == std::string::npos) {
+      if (!FileExists(lastCrashDumpPath)) {
         std::fprintf(stderr, "%s\n", log.c_str());
       }
-      Require(crashState.latched && FileExists(lastCrashDumpPath), "kept as a crash with its dump");
-      AssertContains(log, "rewrote its dump at the configured size", "the kept crash gets the configured dump size");
-      Require(!FileExists(lastCrashDumpPath + L".full.tmp"), "no temporary dump is left");
-      // ADR-0023: the manifest describes the dump as rewritten, not the minimal first one.
+      Require(crashState.latched && FileExists(lastCrashDumpPath), "unrecovered repeated fault writes the crash dump");
+      AssertContains(log, "The game did not recover from this repeated exception; writing the crash dump now.", "unrecovered dump write is logged");
       const auto manifest = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json"));
       AssertContains(manifest, "\"base_mode\": \"default\"", "the manifest records the configured dump mode");
       AssertContains(manifest, "\"code_segments_scope\": \"game_and_stacks\"", "and the code it holds");
@@ -912,7 +917,7 @@ int main()
     TestHandleCrashEventTick_SkipsTheDumpForCrashLoggerThreadDump();
     TestHandleCrashEventTick_WritesTheDumpAtOnceForAMainThreadFault();
     TestHandleCrashEventTick_ReleasesARecoveredCrashAfterItsDump();
-    TestHandleCrashEventTick_RepeatedHandledFaultGetsTheMinimalDumpFirst();
+    TestHandleCrashEventTick_RepeatedHandledFaultChecksRecoveryBeforeDump();
     TestRecoveredCrashThaw_AllowsStableFollowupSnapshot();
     TestStableSnapshot_PerEntrySeqlocksRejectTornRingData();
     TestHandleCrashEventTick_RejectsUncommittedCrashSequenceBeforeDump();

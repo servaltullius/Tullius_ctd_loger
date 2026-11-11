@@ -2634,6 +2634,258 @@ void TestPendingHangEtwStopRunsOneWprCallPerTick()
   std::filesystem::remove_all(outBase);
 }
 
+CONTEXT CaptureLiveThreadContext(DWORD tid)
+{
+  CONTEXT ctx{};
+  ctx.ContextFlags = CONTEXT_FULL;
+  const HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT, FALSE, tid);
+  Require(thread != nullptr, "OpenThread failed");
+  Require(SuspendThread(thread) != static_cast<DWORD>(-1), "SuspendThread failed");
+  const bool ok = GetThreadContext(thread, &ctx) != FALSE;
+  Require(ResumeThread(thread) != static_cast<DWORD>(-1), "ResumeThread failed");
+  CloseHandle(thread);
+  Require(ok, "GetThreadContext failed");
+  return ctx;
+}
+
+void NameMainThreadInSharedHeartbeat(skydiag::SharedLayout* shared, std::uint32_t mainTid)
+{
+  const std::uint32_t index = shared->header.write_index++;
+  auto& event = shared->events[index % shared->header.capacity];
+  event.tid = 40000u;
+  event.qpc = shared->header.last_heartbeat_qpc;
+  event.type = static_cast<std::uint16_t>(skydiag::EventType::kHeartbeat);
+  event.size = static_cast<std::uint16_t>(sizeof(event.payload));
+  event.payload.b = mainTid;
+  event.seq = index * 2u;
+}
+
+// ADR-0031: first two occurrences of a handled fault still write a dump first
+// (held as SkyrimDiag_Released_*.dmp); from the third occurrence in the same
+// session (including on the main thread), recovery is checked first so no dump
+// is written when the game keeps running. If the game then exits abnormally
+// within a minute, post-exit exception metadata is recorded without needing a
+// Crash Logger crash log.
+void TestRepeatedHandledFault_FirstTwoWriteDumpsThenThirdSkipsDumpAndReportsAbnormalExit()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_repeated_fault_progression");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F1234ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  std::atomic_bool stopHeartbeat{ false };
+  std::thread heartbeatThread([&] {
+    while (!stopHeartbeat.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+
+  auto publishFault = [&](std::uint32_t seq) {
+    shared->header.state_flags = skydiag::kState_Frozen;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash.exception_addr = kFaultAddr;
+    shared->header.crash.faulting_tid = child.pi.dwThreadId;
+    shared->header.crash.context = faultContext;
+    shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+    shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+    shared->header.crash_seq = seq;
+    Require(SetEvent(proc.crashEvent) != FALSE, "SetEvent failed");
+  };
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+
+  // 1st occurrence: writes a dump first and holds it on recovery.
+  publishFault(2u);
+  Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "1st fault handled");
+  const std::wstring firstHeldDump = state.crashCaptured.releasedDumpPath;
+  Require(!firstHeldDump.empty() && FileExists(firstHeldDump), "1st handled fault writes and holds a dump");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "1st handled fault thaws capture");
+  Require(
+    !skydiag::helper::internal::IsRepeatedRecoveredFault(state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr),
+    "seen once is not yet repeated");
+
+  // 2nd occurrence: still writes a dump first, replacing the first held dump.
+  publishFault(4u);
+  Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "2nd fault handled");
+  const std::wstring secondHeldDump = state.crashCaptured.releasedDumpPath;
+  Require(!secondHeldDump.empty() && FileExists(secondHeldDump), "2nd handled fault writes and holds a dump");
+  Require(!FileExists(firstHeldDump), "1st held dump is discarded once the 2nd dump is written");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "2nd handled fault thaws capture");
+  Require(
+    skydiag::helper::internal::IsRepeatedRecoveredFault(state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr),
+    "seen twice marks the fault as repeated for the session");
+
+  // 3rd occurrence (on the main thread): checks recovery first and writes no dump at all.
+  publishFault(6u);
+  Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "3rd fault handled");
+  stopHeartbeat.store(true);
+  heartbeatThread.join();
+
+  Require(!FileExists(secondHeldDump), "2nd held dump is settled when the 3rd event is released without a dump");
+  Require(!HasDumpFile(outBase), "3rd recovered fault leaves no dump file on disk");
+  Require(state.crashCaptured.releasedDumpPath.empty(), "no held dump remains after 3rd release");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "3rd handled fault thaws capture");
+  Require(state.crashCaptured.releasedCrashSeq == 6u, "3rd generation is marked released");
+  Require(state.crashCaptured.releasedOnBriefHeartbeat, "3rd release is marked brief-heartbeat");
+  Require(!state.crashCaptured.releasedInThreadDumpWindow, "releasedInThreadDumpWindow must stay false");
+  Require(state.crashCaptured.recoveredFaults.entries[0].count == 3u, "release without dump still increments count");
+
+  // Abnormal exit within 60 s of the 3rd release records exception metadata even with no held dump and no Crash Logger log.
+  shared->header.last_heartbeat_qpc = QpcNow();
+  TerminateWithExitCode(child, 1u);
+  Require(HandleProcessExitTick(cfg, proc, outBase, &state), "Process exit tick handles abnormal exit");
+  Require(!HasDumpFile(outBase), "Abnormal exit after dump-less release creates no dump file");
+  const auto evidence = ReadAllTextUtf8(
+    FindSingleFileByPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_", L".json"));
+  AssertContains(
+    evidence,
+    "\"reason\": \"released_fault_followed_by_abnormal_exit\"",
+    "Post-exit metadata records the released fault after abnormal exit");
+  AssertContains(evidence, "\"crash_seq\": 6", "Post-exit metadata records the 3rd crash sequence");
+
+  CloseHandle(proc.crashEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
+// ADR-0031: when a repeated fault does not recover while the game process stays
+// alive, the helper writes the crash dump at the configured size after the check.
+void TestRepeatedHandledFault_WritesDumpWhenGameDoesNotRecover()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_repeated_fault_unrecovered");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F5678ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = kFaultAddr;
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+  shared->header.crash_seq = 6u;
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+  skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr);
+  skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr);
+
+  Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "Unrecovered repeated fault is handled");
+  Require(state.crashCaptured.latched, "Unrecovered repeated fault is latched as a crash");
+  Require(HasDumpFile(outBase) && FileExists(state.capturedCrashDumpPath), "Crash dump is written once stall is confirmed");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(
+    log,
+    "The game did not recover from this repeated exception; writing the crash dump now.",
+    "Log explains writing the dump after the failed recovery check");
+
+  CloseHandle(proc.crashEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
+// ADR-0031: when a repeated fault kills the game before the pre-dump check can
+// write a dump, only post-exit exception metadata is recorded (an earlier held
+// dump from the same repeated handled fault is discarded rather than promoted,
+// while a held dump from a different recent fault is still rescued per ADR-0028).
+void TestRepeatedHandledFault_ExitedGameRecordsMetadataOnly()
+{
+  constexpr std::uint64_t kRepeatedAddr = 0x7FF7055F9999ull;
+  for (const bool heldFromSameFault : { true, false }) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_repeated_fault_exited");
+    ClearLog(outBase);
+
+    const auto heldDump = outBase / L"SkyrimDiag_Released_20261111_120000_001.dmp";
+    const auto promotedDump = outBase / L"SkyrimDiag_Crash_20261111_120000_001.dmp";
+    WriteAllTextUtf8(heldDump, "earlier released dump");
+
+    auto shared = MakeSharedLayout();
+    shared->header.qpc_freq = QpcFrequency();
+    shared->header.last_heartbeat_qpc = QpcNow();
+    shared->header.state_flags = skydiag::kState_Frozen;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash.exception_addr = kRepeatedAddr;
+    shared->header.crash.faulting_tid = 4242u;
+    shared->header.crash_seq = 6u;
+
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+    HelperConfig cfg = MakeTestConfig();
+    cfg.enableWerDumpFallbackHint = true;
+    skydiag::helper::internal::HelperLoopState state{};
+    skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kRepeatedAddr);
+    skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kRepeatedAddr);
+    state.crashCaptured.releasedCrashSeq = 4u;
+    state.crashCaptured.releasedOnBriefHeartbeat = true;
+    state.crashCaptured.releasedCrashTick64 = GetTickCount64() - 5'000u;
+    state.crashCaptured.releasedDumpPath = heldDump.wstring();
+    state.crashCaptured.releasedDumpExceptionCode = 0xC0000005u;
+    state.crashCaptured.releasedDumpExceptionAddr = heldFromSameFault ? kRepeatedAddr : 0x7FF7055F0001ull;
+
+    TerminateWithExitCode(child, 1u);
+    Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "Crash tick consumes exited repeated fault");
+    Require(
+      state.crashCaptured.dumpWriteFailedCrashSeq == 6u && state.crashCaptured.dumpWriteFailedProcessExited,
+      "Recorded as exited before dump");
+    Require(HandleProcessExitTick(cfg, proc, outBase, &state), "Process exit tick handles exit");
+
+    const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+    Require(log.find("Crash dump attempt") == std::string::npos, "No MiniDumpWriteDump attempt on dead process");
+    const auto evidence = ReadAllTextUtf8(
+      FindSingleFileByPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_", L".json"));
+    AssertContains(
+      evidence,
+      "\"reason\": \"committed_fault_dump_write_failed_process_exited\"",
+      "Post-exit metadata records that the game exited before a dump could be written");
+
+    if (heldFromSameFault) {
+      Require(!HasDumpFile(outBase), "Same repeated fault's earlier handled dump is discarded, leaving metadata only");
+      Require(!state.crashCaptured.latched, "Metadata-only exit does not latch a dump");
+    } else {
+      Require(FileExists(promotedDump), "A different fault's recent held dump is still rescued per ADR-0028");
+      Require(state.crashCaptured.latched, "Rescued dump from another fault is latched");
+    }
+
+    CloseHandle(proc.crashEvent);
+    proc.crashEvent = nullptr;
+    TerminateChildProcess(&child);
+    ShutdownRetentionWorker();
+    std::filesystem::remove_all(outBase);
+  }
+}
+
 int wmain(int argc, wchar_t** argv)
 {
   try {
@@ -2712,6 +2964,9 @@ int wmain(int argc, wchar_t** argv)
     TestExpireReleasedCrashDumpIfOutlived();
     TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown();
     TestPendingHangEtwStopRunsOneWprCallPerTick();
+    TestRepeatedHandledFault_FirstTwoWriteDumpsThenThirdSkipsDumpAndReportsAbnormalExit();
+    TestRepeatedHandledFault_WritesDumpWhenGameDoesNotRecover();
+    TestRepeatedHandledFault_ExitedGameRecordsMetadataOnly();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

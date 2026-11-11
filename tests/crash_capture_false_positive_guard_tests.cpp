@@ -46,8 +46,11 @@ int main()
   const std::string crashTickBody = ExtractFunctionFlow(
     crashCapture,
     "bool HandleCrashEventTick(",
-    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(", "bool WriteCrashDumpWithRetries(",
-      "void HandleCrashDumpWriteFailure(", "void ReleaseFilteredCrashDump(", "void RewriteCrashDumpAtConfiguredSize(" });
+    { "ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(",
+      "RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(",
+      "bool WriteCrashDumpWithRetries(",
+      "void HandleCrashDumpWriteFailure(",
+      "void ReleaseFilteredCrashDump(" });
   AssertContains(
     crashTickBody,
     "WaitForSingleObject(proc.crashEvent, waitMs)",
@@ -292,6 +295,25 @@ int main()
     "FilterFirstChanceException(",
     "crashState->releasedInThreadDumpWindow = true;",
     "The early thread dump window release must be marked for the exit path.");
+  const std::string repeatedFaultCheckBody = ExtractFunctionBody(
+    crashCapture,
+    "RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(");
+  AssertOrdered(
+    repeatedFaultCheckBody,
+    "IsRepeatedRecoveredFault(",
+    "FilterFirstChanceException(",
+    "A repeated handled fault must check recovery before writing a dump.");
+  AssertContains(
+    repeatedFaultCheckBody,
+    "crashState->releasedInThreadDumpWindow = false;",
+    "A repeated handled fault release must not require Crash Logger's crash log at exit.");
+  assert(
+    repeatedFaultCheckBody.find("releasedInThreadDumpWindow = true") == std::string::npos &&
+    "CheckRepeatedRecoveredFault must never set releasedInThreadDumpWindow.");
+  AssertContains(
+    repeatedFaultCheckBody,
+    "NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr);",
+    "Releasing a repeated fault without a dump must still increment the recovered-fault count.");
 
   // A helper the plugin's watchdog restarted must not report a generation an
   // earlier helper already acknowledged by clearing its freeze.

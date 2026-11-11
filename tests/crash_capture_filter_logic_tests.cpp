@@ -125,49 +125,52 @@ static_assert(
 static_assert(
   !skydiag::helper::internal::IsSlowShutdownAtExit(0u, true, true, true, true), "a dialog, then an exit with code 0");
 
-// The same handled fault released twice within the cooldown gets the minimal
-// dump first; once is not enough, and another fault or address is unaffected.
+// The same handled fault released twice in this session checks recovery before
+// writing a dump; once is not enough, and another fault or address is unaffected.
 static_assert([] {
   using namespace skydiag::helper::internal;
   RecoveredFaultHistory h{};
-  if (IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 1'000u)) {
+  if (IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u)) {
     return false;
   }
-  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u, 1'000u);
-  if (IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 2'000u)) {
+  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u);
+  if (IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u)) {
     return false;  // seen once
   }
-  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u, 2'000u);
-  return IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 3'000u) &&
-         !IsRepeatedRecoveredFault(h, 0xC0000005u, 0x2000u, 3'000u) &&
-         !IsRepeatedRecoveredFault(h, 0xE06D7363u, 0x1000u, 3'000u) &&
-         IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 2'000u + kRepeatedRecoveredFaultCooldownMs) &&
-         !IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u, 2'001u + kRepeatedRecoveredFaultCooldownMs);
-}(), "a repeated handled fault within the cooldown");
+  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u);
+  if (!IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u)) {
+    return false;
+  }
+  NoteRecoveredFault(&h, 0xC0000005u, 0x1000u);
+  return IsRepeatedRecoveredFault(h, 0xC0000005u, 0x1000u) &&
+         !IsRepeatedRecoveredFault(h, 0xC0000005u, 0x2000u) &&
+         !IsRepeatedRecoveredFault(h, 0xC0000094u, 0x1000u) &&
+         !IsRepeatedRecoveredFault(h, 0xE06D7363u, 0x1000u);
+}(), "a repeated handled fault remembered for the session");
 static_assert([] {
   using namespace skydiag::helper::internal;
   // A C++ throw or a breakpoint is raised at the same KernelBase address
   // whatever threw it: code and address do not make it the same fault.
   RecoveredFaultHistory h{};
   for (const std::uint32_t code : { 0xE06D7363u, 0x80000003u }) {
-    NoteRecoveredFault(&h, code, 0x7FF800001000u, 1'000u);
-    NoteRecoveredFault(&h, code, 0x7FF800001000u, 2'000u);
-    if (IsRepeatedRecoveredFault(h, code, 0x7FF800001000u, 3'000u)) {
+    NoteRecoveredFault(&h, code, 0x7FF800001000u);
+    NoteRecoveredFault(&h, code, 0x7FF800001000u);
+    if (IsRepeatedRecoveredFault(h, code, 0x7FF800001000u)) {
       return false;
     }
   }
   return true;
-}(), "C++ throws and breakpoints never get the reduced dump");
+}(), "C++ throws and breakpoints never skip the upfront dump");
 static_assert([] {
   using namespace skydiag::helper::internal;
   // A full history replaces entries in turn and keeps tracking new faults.
   RecoveredFaultHistory h{};
   for (std::uint64_t addr = 1; addr <= kRecoveredFaultHistoryCapacity + 1u; ++addr) {
-    NoteRecoveredFault(&h, 0xC0000005u, addr, 1'000u);
-    NoteRecoveredFault(&h, 0xC0000005u, addr, 1'000u);
+    NoteRecoveredFault(&h, 0xC0000005u, addr);
+    NoteRecoveredFault(&h, 0xC0000005u, addr);
   }
-  return IsRepeatedRecoveredFault(h, 0xC0000005u, kRecoveredFaultHistoryCapacity + 1u, 1'000u) &&
-         !IsRepeatedRecoveredFault(h, 0xC0000005u, 1u, 1'000u);
+  return IsRepeatedRecoveredFault(h, 0xC0000005u, kRecoveredFaultHistoryCapacity + 1u) &&
+         !IsRepeatedRecoveredFault(h, 0xC0000005u, 1u);
 }(), "a full history");
 
 static void TestClassifyExitCodeVerdict_DeleteBenignOnWeakZeroExit()
