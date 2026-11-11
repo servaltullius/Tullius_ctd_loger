@@ -107,6 +107,8 @@ bool PromoteReleasedCrashDump(
   std::wstring dumpPath = crash.releasedDumpPath;
   const auto releasedContext = std::move(crash.releasedDumpContext);
   crash.releasedDumpPath.clear();
+  crash.releasedDumpExceptionCode = 0;
+  crash.releasedDumpExceptionAddr = 0;
   crash.releasedDumpPreserve = false;
   crash.releasedDumpRecovery = LateRecoveryState{};
   crash.releasedDumpContext.reset();

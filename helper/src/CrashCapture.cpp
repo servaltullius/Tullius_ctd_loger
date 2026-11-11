@@ -691,6 +691,8 @@ void DiscardReleasedCrashDump(
         + std::wstring(reason) + L": " + filename);
   }
   crashState->releasedDumpPath.clear();
+  crashState->releasedDumpExceptionCode = 0;
+  crashState->releasedDumpExceptionAddr = 0;
   crashState->releasedDumpPreserve = false;
   crashState->releasedDumpRecovery = LateRecoveryState{};
   crashState->releasedDumpContext.reset();
@@ -1102,6 +1104,79 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
   return ThreadDumpWindowOutcome::kWriteDump;
 }
 
+enum class RepeatedRecoveredFaultOutcome
+{
+  kNotApplicable,
+  kWriteDumpAfterCheck,
+  kExitedBeforeDump,
+  kReleased,
+  kSuperseded,
+};
+
+// ADR-0031: once the same exception code and address was already released as
+// handled at least kRepeatedRecoveredFaultMinCount times in this session (main
+// thread included), check whether the game recovers before calling
+// MiniDumpWriteDump, which suspends every thread while writing.
+RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  const skydiag::ForcedCloseMatch& forcedClose,
+  CrashCaptureState* crashState)
+{
+  if (!crashState || !proc.process || !proc.shm ||
+      !IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr)) {
+    return RepeatedRecoveredFaultOutcome::kNotApplicable;
+  }
+  AppendLogLine(
+    outBase,
+    L"This exception (same code and address) was already released as handled at least "
+      + std::to_wstring(kRepeatedRecoveredFaultMinCount)
+      + L" times in this session; checking whether the game recovers before writing a crash dump.");
+  const auto early = FilterFirstChanceException(
+    cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+  if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
+    const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
+      TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+    crashState->latched = false;
+    crashState->releasedCrashSeq = info.crashSeq;
+    crashState->releasedCrashTick64 = GetTickCount64();
+    // Keep ShouldReportReleasedCrashAtExit active for a worker-thread crash
+    // whose main loop kept ticking briefly, without requiring Crash Logger's
+    // crash log (releasedInThreadDumpWindow stays false).
+    crashState->releasedOnBriefHeartbeat = early == FilterVerdict::kDeleteRecovered;
+    crashState->releasedInThreadDumpWindow = false;
+    crashState->releasedForcedClose = forcedClose;
+    if (early == FilterVerdict::kDeleteRecovered) {
+      NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr);
+    }
+    AppendLogLine(
+      outBase,
+      std::wstring(L"No dump written: this repeated exception was handled again and the game ")
+        + (early == FilterVerdict::kDeleteRecovered ? L"kept running" : L"exited normally")
+        + (early == FilterVerdict::kDeleteRecovered && !thawed
+             ? L" (capture not thawed: a newer crash record is present)."
+             : L"."));
+    return RepeatedRecoveredFaultOutcome::kReleased;
+  }
+  if (early == FilterVerdict::kRetryNewerCrash) {
+    AppendLogLine(
+      outBase,
+      L"No dump written for the superseded repeated exception; immediately retrying the newer crash event.");
+    return RepeatedRecoveredFaultOutcome::kSuperseded;
+  }
+  const bool exitedBeforeDump = WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+  AppendLogLine(
+    outBase,
+    exitedBeforeDump
+      ? L"The game exited after this repeated exception, before a crash dump could be written."
+      : L"The game did not recover from this repeated exception; writing the crash dump now.");
+  return exitedBeforeDump
+    ? RepeatedRecoveredFaultOutcome::kExitedBeforeDump
+    : RepeatedRecoveredFaultOutcome::kWriteDumpAfterCheck;
+}
+
   // The crash event was already consumed and reset, and the game has committed
   // its record and will not signal again for this fault. Nothing would drive a
   // later attempt, so a transient failure (sharing violation, momentary disk
@@ -1360,8 +1435,10 @@ void ReleaseFilteredCrashDump(
       crashState->releasedForcedClose = forcedClose;
     }
     if (holdReleasedDump) {
-      NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64());
+      NoteRecoveredFault(&crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr);
       crashState->releasedDumpPath = heldDumpPath;
+      crashState->releasedDumpExceptionCode = info.exceptionCode;
+      crashState->releasedDumpExceptionAddr = info.exceptionAddr;
       crashState->releasedDumpPreserve = preserveFilteredDump;
       // For the exit that reports this fault after all (PromoteReleasedCrashDump).
       crashState->releasedDumpContext = std::make_shared<const ReleasedDumpContext>(ReleasedDumpContext{
@@ -1382,48 +1459,6 @@ void ReleaseFilteredCrashDump(
     (preserveFilteredDump || holdReleasedDump)
       ? L"Filtered crash event consumed; dump kept, capture remains ready for a later CTD."
       : L"Filtered crash event consumed; dump deleted, capture remains ready for a later CTD.");
-}
-
-  // Kept as a crash after a minimal first dump (reducedDumpForRepeatedFault):
-  // while the game still runs, write it again at the configured size. The
-  // minimal dump stays if that fails.
-void RewriteCrashDumpAtConfiguredSize(
-  const skydiag::helper::AttachedProcess& proc,
-  const std::filesystem::path& outBase,
-  const std::wstring& dumpPath,
-  const skydiag::SharedLayout* dumpSnapshot,
-  std::size_t dumpSnapshotBytes,
-  const skydiag::helper::DumpProfile& configuredDumpProfile,
-  skydiag::helper::DumpProfile* writtenProfile)
-{
-  const std::wstring fullDumpPath = dumpPath + L".full.tmp";
-  std::wstring fullDumpErr;
-  skydiag::helper::DumpObjectMemoryStats fullDumpMemory{};
-  const bool fullWritten = skydiag::helper::WriteDumpWithStreams(
-    proc.process,
-    proc.pid,
-    fullDumpPath,
-    dumpSnapshot,
-    dumpSnapshotBytes,
-    {},
-    {},
-    true,
-    configuredDumpProfile,
-    /*isProcessSnapshot=*/false,
-    &fullDumpErr,
-    &fullDumpMemory);
-  if (fullWritten && MoveFileExW(fullDumpPath.c_str(), dumpPath.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-    AppendLogLine(outBase, L"This time the exception was kept as a crash; rewrote its dump at the configured size.");
-    LogDumpCodeMemory(outBase, fullDumpMemory.code);
-    *writtenProfile = WrittenDumpProfile(configuredDumpProfile, fullDumpMemory);
-  } else {
-    if (fullWritten) {
-      fullDumpErr = L"MoveFileExW failed: " + std::to_wstring(GetLastError());
-    }
-    std::error_code ec;
-    std::filesystem::remove(fullDumpPath, ec);
-    AppendLogLine(outBase, L"Keeping the minimal crash dump; rewriting it at the configured size failed: " + fullDumpErr);
-  }
 }
 
 }  // namespace
@@ -1531,6 +1566,7 @@ bool HandleCrashEventTick(
   }
 
   bool exitedBeforeDump = false;
+  bool checkedRecoveryBeforeDump = false;
   switch (CheckCrashLoggerThreadDumpWindow(
     cfg, proc, outBase, info, dumpSnapshot, dumpSnapshotBytes, forcedClose, crashState)) {
     case ThreadDumpWindowOutcome::kReleased:
@@ -1542,39 +1578,47 @@ bool HandleCrashEventTick(
       exitedBeforeDump = true;
       break;
     case ThreadDumpWindowOutcome::kWriteDump:
+      switch (CheckRepeatedRecoveredFault(cfg, proc, outBase, info, forcedClose, crashState)) {
+        case RepeatedRecoveredFaultOutcome::kNotApplicable:
+          break;
+        case RepeatedRecoveredFaultOutcome::kReleased:
+          DiscardReleasedCrashDump(outBase, crashState, L"a newer crash event arrived");
+          return true;
+        case RepeatedRecoveredFaultOutcome::kSuperseded:
+          return true;
+        case RepeatedRecoveredFaultOutcome::kExitedBeforeDump:
+          exitedBeforeDump = true;
+          checkedRecoveryBeforeDump = true;
+          break;
+        case RepeatedRecoveredFaultOutcome::kWriteDumpAfterCheck:
+          checkedRecoveryBeforeDump = true;
+          break;
+      }
       break;
   }
 
   const auto ts = Timestamp();
   const auto dumpPath = (outBase / (L"SkyrimDiag_Crash_" + ts + L".dmp")).wstring();
-  const auto configuredDumpProfile = skydiag::helper::ResolveDumpProfile(
+  const auto dumpProfile = skydiag::helper::ResolveDumpProfile(
     cfg.dumpMode,
     skydiag::helper::CaptureKind::Crash,
     cfg.dumpAllModuleCode);
-  // A fault released as handled again and again gets the minimal dump first
-  // (IsRepeatedRecoveredFault); if it is kept as a crash after all while the
-  // game still runs, the dump is written again at the configured size below.
-  // Not on the game's main thread: a fault there that is not handled ends
-  // the game before a second dump could be written.
-  const bool reducedDumpForRepeatedFault = crashState && cfg.dumpMode != skydiag::helper::DumpMode::kMini &&
-    IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr, GetTickCount64()) &&
-    skydiag::helper::InferMainThreadIdFromSnapshot(dumpSnapshot, dumpSnapshotBytes).value_or(0u) != info.faultingTid;
-  const auto dumpProfile = reducedDumpForRepeatedFault
-    ? skydiag::helper::ResolveDumpProfile(skydiag::helper::DumpMode::kMini, skydiag::helper::CaptureKind::Crash)
-    : configuredDumpProfile;
-  if (reducedDumpForRepeatedFault) {
-    AppendLogLine(
-      outBase,
-      L"This exception (same code and address) was released as handled repeatedly in the last "
-        + std::to_wstring(kRepeatedRecoveredFaultCooldownMs / 60000u)
-        + L" minutes; writing a minimal dump first.");
-  }
   std::wstring dumpErr;
   skydiag::helper::DumpObjectMemoryStats dumpMemory{};
   const bool dumpOk = WriteCrashDumpWithRetries(
     proc, outBase, dumpPath, dumpSnapshot, dumpSnapshotBytes, dumpProfile, exitedBeforeDump, &dumpErr, &dumpMemory);
 
   if (!dumpOk) {
+    if (checkedRecoveryBeforeDump && crashState && !crashState->releasedDumpPath.empty() &&
+        crashState->releasedDumpExceptionCode == info.exceptionCode &&
+        crashState->releasedDumpExceptionAddr == info.exceptionAddr) {
+      // An earlier held dump of this same repeated fault came from a handled
+      // probe, not a dying game; do not promote it as this crash's dump.
+      DiscardReleasedCrashDump(
+        outBase,
+        crashState,
+        L"this repeated handled exception was not recovered and had no live process to dump");
+    }
     HandleCrashDumpWriteFailure(cfg, proc, outBase, dumpPath, dumpErr, info, crashState, lastCrashDumpPath);
     if (crashState && !crashState->releasedDumpPath.empty()) {
       AppendLogLine(
@@ -1596,17 +1640,27 @@ bool HandleCrashEventTick(
 
   auto verdict = FilterVerdict::kKeepDump;
   if (proc.process) {
-    verdict = FilterShutdownException(
-      cfg,
-      proc.process,
-      proc.crashEvent,
-      proc.shm ? &proc.shm->header : nullptr,
-      info,
-      outBase,
-      crashState);
-    if (verdict == FilterVerdict::kKeepDump && proc.shm) {
-      verdict = FilterFirstChanceException(
-        cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+    if (checkedRecoveryBeforeDump) {
+      if (WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0) {
+        DWORD exitCode = STILL_ACTIVE;
+        if (TryReadExitCode(proc.process, outBase, &exitCode)) {
+          verdict = ClassifyExitCodeVerdictWithContext(
+            cfg, exitCode, info, outBase, L"post_dump_exit_check", -1, crashState);
+        }
+      }
+    } else {
+      verdict = FilterShutdownException(
+        cfg,
+        proc.process,
+        proc.crashEvent,
+        proc.shm ? &proc.shm->header : nullptr,
+        info,
+        outBase,
+        crashState);
+      if (verdict == FilterVerdict::kKeepDump && proc.shm) {
+        verdict = FilterFirstChanceException(
+          cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+      }
     }
     if (verdict != FilterVerdict::kKeepDump) {
       ReleaseFilteredCrashDump(
@@ -1632,14 +1686,8 @@ bool HandleCrashEventTick(
     pendingHangViewerDumpPath->clear();
   }
 
-  // The profile the kept dump was written with, for its manifest (ADR-0023):
-  // the minimal one unless its rewrite at the configured size below succeeds.
-  auto writtenProfile = WrittenDumpProfile(dumpProfile, dumpMemory);
-
-  if (reducedDumpForRepeatedFault && IsProcessStillActive(proc.process)) {
-    RewriteCrashDumpAtConfiguredSize(
-      proc, outBase, dumpPath, dumpSnapshot, dumpSnapshotBytes, configuredDumpProfile, &writtenProfile);
-  }
+  // The profile the kept dump was written with, for its manifest (ADR-0023).
+  const auto writtenProfile = WrittenDumpProfile(dumpProfile, dumpMemory);
 
   ProcessValidCrashDump(
     cfg,

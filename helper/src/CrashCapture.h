@@ -158,16 +158,17 @@ constexpr bool ShouldHoldHangDetectionForCapturedCrash(
   return latched && heartbeatQpc <= latchedHeartbeatQpc;
 }
 
-// A fault the heartbeat filter releases as handled is often one that a mod
-// raises and catches again and again (e.g. an SEH-guarded probe), and each
-// one gets a dump of the configured size, which suspends the game while it is
+// A fault the heartbeat filter releases as handled is often one that the game
+// or a mod raises and catches again and again (e.g. an SEH-guarded probe), and
+// MiniDumpWriteDump suspends every game thread for ~1 s while a dump is
 // written. Once the same code at the same address was released
-// kRepeatedRecoveredFaultMinCount times, and the last time within
-// kRepeatedRecoveredFaultCooldownMs, its next dump is written at the minimal
-// size first. A fault seen for the first time still gets the full dump first.
+// kRepeatedRecoveredFaultMinCount times in this session (main thread included),
+// later occurrences check recovery first instead of writing a dump upfront: if
+// the game recovers nothing is written, if it stalls while still alive the dump
+// is written then, and if it already exited only post-exit exception metadata
+// is recorded (ADR-0031). First-time faults still write the dump first.
 inline constexpr std::size_t kRecoveredFaultHistoryCapacity = 16;
 inline constexpr std::uint32_t kRepeatedRecoveredFaultMinCount = 2;
-inline constexpr std::uint64_t kRepeatedRecoveredFaultCooldownMs = 10ull * 60ull * 1000ull;
 
 struct RecoveredFaultHistory
 {
@@ -176,7 +177,6 @@ struct RecoveredFaultHistory
     std::uint32_t exceptionCode = 0;
     std::uint64_t exceptionAddr = 0;
     std::uint32_t count = 0;
-    std::uint64_t lastTick64 = 0;
   };
   Entry entries[kRecoveredFaultHistoryCapacity]{};
   std::size_t nextReplace = 0;
@@ -185,8 +185,7 @@ struct RecoveredFaultHistory
 constexpr void NoteRecoveredFault(
   RecoveredFaultHistory* history,
   std::uint32_t exceptionCode,
-  std::uint64_t exceptionAddr,
-  std::uint64_t nowTick64) noexcept
+  std::uint64_t exceptionAddr) noexcept
 {
   if (!history) {
     return;
@@ -194,18 +193,17 @@ constexpr void NoteRecoveredFault(
   for (auto& entry : history->entries) {
     if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
       ++entry.count;
-      entry.lastTick64 = nowTick64;
       return;
     }
   }
   for (auto& entry : history->entries) {
     if (entry.count == 0u) {
-      entry = { exceptionCode, exceptionAddr, 1u, nowTick64 };
+      entry = { exceptionCode, exceptionAddr, 1u };
       return;
     }
   }
   // Full: replace in turn, so a long session keeps tracking new faults.
-  history->entries[history->nextReplace] = { exceptionCode, exceptionAddr, 1u, nowTick64 };
+  history->entries[history->nextReplace] = { exceptionCode, exceptionAddr, 1u };
   history->nextReplace = (history->nextReplace + 1u) % kRecoveredFaultHistoryCapacity;
 }
 
@@ -215,16 +213,14 @@ constexpr void NoteRecoveredFault(
 constexpr bool IsRepeatedRecoveredFault(
   const RecoveredFaultHistory& history,
   std::uint32_t exceptionCode,
-  std::uint64_t exceptionAddr,
-  std::uint64_t nowTick64) noexcept
+  std::uint64_t exceptionAddr) noexcept
 {
   if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
     return false;
   }
   for (const auto& entry : history.entries) {
     if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
-      return entry.count >= kRepeatedRecoveredFaultMinCount && nowTick64 >= entry.lastTick64 &&
-             nowTick64 - entry.lastTick64 <= kRepeatedRecoveredFaultCooldownMs;
+      return entry.count >= kRepeatedRecoveredFaultMinCount;
     }
   }
   return false;
@@ -257,7 +253,7 @@ struct CrashCaptureState {
   std::uint32_t releasedCrashSeq = 0;
   // When that release happened (GetTickCount64), and whether it rested only on
   // the heartbeat advancing for a few seconds, before a dump (Crash Logger's
-  // thread dump window) or after it.
+  // thread dump window or a repeated handled fault) or after it.
   std::uint64_t releasedCrashTick64 = 0;
   bool releasedOnBriefHeartbeat = false;
   // Whether that release was the early one in Crash Logger's thread dump
@@ -274,6 +270,8 @@ struct CrashCaptureState {
   // outlived it (releasedDumpRecovery, as late recovery), or when a newer
   // crash supersedes it; made the crash's dump when the fault is reported.
   std::wstring releasedDumpPath;
+  std::uint32_t releasedDumpExceptionCode = 0;
+  std::uint64_t releasedDumpExceptionAddr = 0;
   bool releasedDumpPreserve = false;
   LateRecoveryState releasedDumpRecovery{};
   // What the held dump needs when it is made the crash's dump at the exit,
