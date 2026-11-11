@@ -2,7 +2,7 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
-## v0.2.76-rc1 (미배포)
+## v0.2.76-rc1 (2026-11-11)
 
 v0.2.75 이후의 수정을 모은 테스트용 프리릴리즈입니다. 게임이 주기적으로 끊긴다는 넥서스 제보 가운데 원인이 확인된 한 건의 수정이 들어 있습니다. 그 수정은 제보 환경에서 아직 확인되지 않았습니다. 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었으니 ZIP 전체를 설치해 주세요(SharedLayout protocol v4는 그대로). MO2에서 새 모드로 설치했다면 이전 버전 모드는 꺼 주세요. 새 설정은 `SkyrimDiagHelper.ini`의 `MaxForcedCloseCrashDumps`(기본 3)와 `KeepSlowShutdownHangDumps`(기본 0)입니다.
 
