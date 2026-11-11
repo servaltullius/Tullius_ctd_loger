@@ -659,9 +659,11 @@ inline void PruneOrphanedAnalysisCaches(
 // - SkyrimDiag_Released_<ts>.dmp, the dump of a released crash held until
 //   the release is settled. A helper holds one at a time, its newest, so the
 //   newest is kept for a day and every older one goes.
-// - SkyrimDiag_Crash_<ts>.dmp.full.tmp, a full-size rewrite of a crash dump
-//   that did not finish. Kept for a while so a rewrite in progress is never
-//   touched.
+// - SkyrimDiag_Crash_<ts>.dmp.full.tmp, left by a helper of v0.2.68 to
+//   v0.2.75 that stopped while writing a crash dump again at the configured
+//   size. Nothing writes one since ADR-0031 took that rewrite out; the ones
+//   older than partialMinAge go (the age is from when a rewrite could still
+//   be in progress).
 // - SkyrimDiag_CrashRearm_<...>.marker, a crash generation signaled again for
 //   a restarted helper (HelperMain RearmFrozenCrashFromEarlierHelper),
 //   deleted when its game exits. A day old, that game is long gone.
