@@ -19,6 +19,11 @@
 //   F9  stack overflow from recursion inside CrashTester.dll
 //   F10 game job thread spinning in CrashTester.dll for 45 s (a busy freeze)
 //   F11 menu event sink holding the game for 45 s when the Journal Menu opens
+//   Ins the same access violation inside SkyrimSE.exe, caught by
+//       CrashTester.dll, 6 times 15 s apart, on the game's task thread and a
+//       thread of CrashTester.dll in turn; not a crash, may be pressed again
+//   Del the same access violation caught twice, 15 s apart, and the third
+//       time left unhandled on the game's task thread (a crash)
 // Built a second time as SkyrimCrashGuard.dll (CRASH_TESTER_GUARD_STUB),
 // which only loads and does nothing, to check the problem-module warning.
 
@@ -28,13 +33,16 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -264,6 +272,245 @@ void CaughtThenRealCrash(const char* what)
   }).detach();
 }
 
+// Scenario Insert: the same fatal-code exception at the same address, handled
+// every time, the way a game or mod that probes memory under SEH raises it
+// (a Nexus stutter report of 2026-11: 14 times in 23 minutes at one
+// SkyrimSE.exe address, on six threads). The helper dumps the first two; from
+// the third on it must find the game still running and write no dump
+// (ADR-0031). The fault is the engine's first access to an unreadable
+// "reference", so its address is inside SkyrimSE.exe and the same on every
+// thread.
+std::atomic_bool g_repeatRunning{ false };
+std::atomic<int> g_repeatCount{ 6 };
+std::atomic<int> g_repeatIntervalSec{ 15 };
+
+// Never freed: a task queued by the scenario may still use it after the
+// scenario's own thread ended.
+void* UnreadablePage()
+{
+  static void* const page = VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS);
+  return page;
+}
+
+// True when the engine call faulted and the fault was caught here. With
+// catchIt false the same fault, at the same address, is left to the game:
+// nothing handles it and the game crashes. Nothing with a destructor may live
+// in a function that uses __try.
+__declspec(noinline) bool EngineFault(void* unreadable, const char** nameOut, bool catchIt)
+{
+  __try {
+    *nameOut = reinterpret_cast<RE::TESObjectREFR*>(unreadable)->GetDisplayFullName();
+    return false;
+  } __except (catchIt && GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+    return true;
+  }
+}
+
+void RaiseHandledEngineFault(void* unreadable, int index, int count, const char* where)
+{
+  const char* name = nullptr;
+  const bool caught = EngineFault(unreadable, &name, true);
+  spdlog::warn("CrashTester: handled fault {} of {} on {} tid={} caught={}", index, count, where,
+    GetCurrentThreadId(), caught);
+  spdlog::default_logger()->flush();
+}
+
+// ---- probe of the top-level exception filter (Delete scenario) ----
+// When an exception is not handled by any frame, Windows calls the process's
+// top-level filter (SetUnhandledExceptionFilter) before it ends the process.
+// A plugin that wants to act at that point has to be that filter when the
+// exception is dispatched, and other plugins set the filter too. The probe
+// shows who holds it and whether a filter put on top from the last vectored
+// handler is called: it logs when it is reached, optionally holds the thread
+// there (UnhandledHoldMs), then calls the filter it replaced.
+std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_filterUnderProbe{ nullptr };
+std::atomic_bool g_probeArmed{ false };
+std::atomic<std::int64_t> g_fatalFaultQpc{ 0 };
+std::atomic<int> g_unhandledHoldMs{ 0 };
+
+std::int64_t QpcNow()
+{
+  LARGE_INTEGER value{};
+  QueryPerformanceCounter(&value);
+  return value.QuadPart;
+}
+
+// "Module.dll+0x1234" for a code address, for the log.
+std::string DescribeCodeAddress(const void* address)
+{
+  if (!address) {
+    return "none";
+  }
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        static_cast<LPCWSTR>(address), &module) ||
+      !module) {
+    return "an address outside every module";
+  }
+  wchar_t path[MAX_PATH]{};
+  GetModuleFileNameW(module, path, MAX_PATH);
+  const std::wstring_view full(path);
+  const auto slash = full.find_last_of(L"\\/");
+  const std::wstring_view name = slash == std::wstring_view::npos ? full : full.substr(slash + 1);
+  char nameA[MAX_PATH]{};
+  WideCharToMultiByte(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), nameA, sizeof(nameA) - 1, nullptr,
+    nullptr);
+  char text[MAX_PATH + 32]{};
+  std::snprintf(text, sizeof(text), "%s+0x%llX", nameA,
+    static_cast<unsigned long long>(
+      reinterpret_cast<std::uintptr_t>(address) - reinterpret_cast<std::uintptr_t>(module)));
+  return text;
+}
+
+LONG WINAPI ProbeTopLevelFilter(EXCEPTION_POINTERS* exception)
+{
+  const auto under = g_filterUnderProbe.load();
+  LARGE_INTEGER frequency{};
+  QueryPerformanceFrequency(&frequency);
+  const std::int64_t faultQpc = g_fatalFaultQpc.load();
+  const double sinceFaultMs =
+    faultQpc != 0 ? static_cast<double>(QpcNow() - faultQpc) * 1000.0 / static_cast<double>(frequency.QuadPart) : -1.0;
+  const int holdMs = g_unhandledHoldMs.load();
+  spdlog::warn("CrashTester: top-level filter reached {:.1f} ms after the fault on tid={}; the filter under it is {}; "
+               "holding {} ms",
+    sinceFaultMs, GetCurrentThreadId(), DescribeCodeAddress(reinterpret_cast<const void*>(under)), holdMs);
+  spdlog::default_logger()->flush();
+  if (holdMs > 0) {
+    Sleep(static_cast<DWORD>(holdMs));
+    spdlog::warn("CrashTester: hold over, calling the filter under the probe");
+    spdlog::default_logger()->flush();
+  }
+  return under ? under(exception) : EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Puts the probe on top and returns the filter that was there.
+LPTOP_LEVEL_EXCEPTION_FILTER PutProbeOnTop()
+{
+  const auto previous = SetUnhandledExceptionFilter(ProbeTopLevelFilter);
+  if (previous != ProbeTopLevelFilter) {
+    g_filterUnderProbe.store(previous);
+  }
+  return previous;
+}
+
+// Registered last in the vectored chain, so it runs after any handler that
+// sets the top-level filter while an exception is dispatched. Acts once, on
+// the fault the scenario leaves unhandled; no logging here.
+LONG CALLBACK ProbeLastVectoredHandler(EXCEPTION_POINTERS* exception)
+{
+  if (exception && exception->ExceptionRecord &&
+      exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && g_probeArmed.exchange(false)) {
+    g_fatalFaultQpc.store(QpcNow());
+    PutProbeOnTop();
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void StartTopLevelFilterProbe()
+{
+  static std::atomic_bool s_vectoredHandlerAdded{ false };
+  if (!s_vectoredHandlerAdded.exchange(true)) {
+    AddVectoredExceptionHandler(/*First=*/0, ProbeLastVectoredHandler);
+  }
+  const auto previous = PutProbeOnTop();
+  spdlog::warn("CrashTester: top-level filter before the scenario: {}",
+    DescribeCodeAddress(reinterpret_cast<const void*>(previous)));
+  spdlog::default_logger()->flush();
+}
+
+// Whether something took the top-level filter back while a handled exception
+// was dispatched; the probe goes back on top either way.
+void LogTopLevelFilterAfterHandledFault(int index)
+{
+  const auto current = PutProbeOnTop();
+  if (current == ProbeTopLevelFilter) {
+    spdlog::warn("CrashTester: after handled fault {} the probe was still the top-level filter", index);
+  } else {
+    spdlog::warn("CrashTester: after handled fault {} the top-level filter was {} (set while the exception was "
+                 "dispatched)",
+      index, DescribeCodeAddress(reinterpret_cast<const void*>(current)));
+  }
+  spdlog::default_logger()->flush();
+}
+
+// The log line comes first: nothing runs after the fault.
+void RaiseUnhandledEngineFault(void* unreadable, int index, int count)
+{
+  g_probeArmed.store(true);
+  spdlog::warn("CrashTester: fault {} of {} on the game's task thread tid={} is not caught: the game crashes now",
+    index, count, GetCurrentThreadId());
+  spdlog::default_logger()->flush();
+  const char* name = nullptr;
+  EngineFault(unreadable, &name, false);
+}
+
+// The longest time this thread went without running in the next `seconds`.
+// MiniDumpWriteDump suspends every thread of the game, this one included, so
+// a dump written by the helper shows up here as one long gap.
+std::uint32_t LongestPauseMs(int seconds)
+{
+  using Clock = std::chrono::steady_clock;
+  const auto until = Clock::now() + std::chrono::seconds(seconds);
+  auto before = Clock::now();
+  std::chrono::milliseconds longest{ 0 };
+  for (;;) {
+    Sleep(5);
+    const auto now = Clock::now();
+    longest = std::max(longest, std::chrono::duration_cast<std::chrono::milliseconds>(now - before));
+    before = now;
+    if (now >= until) {
+      break;
+    }
+  }
+  return static_cast<std::uint32_t>(longest.count());
+}
+
+// Scenario Delete: the same fault handled twice, then left unhandled on the
+// game's task thread, so the helper meets a real crash at an address it has
+// stopped dumping up front (ADR-0031, decision 2: it must find that the game
+// did not recover and write the dump then, or record the exception when the
+// game is already gone).
+constexpr int kHandledBeforeUnhandled = 2;
+
+// fatalIndex 0: every fault is caught. Otherwise that fault is not caught.
+void RepeatHandledEngineFault(const char* what, int count, int fatalIndex)
+{
+  const int intervalSec = g_repeatIntervalSec.load();
+  spdlog::warn("CrashTester: {} ({} times, {} s apart)", what, count, intervalSec);
+  spdlog::default_logger()->flush();
+  std::thread([count, intervalSec, fatalIndex] {
+    void* const unreadable = UnreadablePage();
+    auto* const tasks = SKSE::GetTaskInterface();
+    if (!unreadable || !tasks) {
+      spdlog::warn("CrashTester: repeated handled fault not started (no unreadable page or no SKSE task interface)");
+    } else if (fatalIndex != 0) {
+      StartTopLevelFilterProbe();
+    }
+    for (int index = 1; unreadable && tasks && index <= count; ++index) {
+      if (index == fatalIndex) {
+        tasks->AddTask([unreadable, index, count] { RaiseUnhandledEngineFault(unreadable, index, count); });
+      } else if (index % 2 == 1) {
+        tasks->AddTask([unreadable, index, count] {
+          RaiseHandledEngineFault(unreadable, index, count, "the game's task thread");
+        });
+      } else {
+        RaiseHandledEngineFault(unreadable, index, count, "a CrashTester.dll thread");
+      }
+      const std::uint32_t pauseMs = LongestPauseMs(intervalSec);
+      spdlog::warn("CrashTester: handled fault {} of {}: the longest pause in the {} s after it was {} ms", index,
+        count, intervalSec, pauseMs);
+      spdlog::default_logger()->flush();
+      if (fatalIndex != 0 && index < fatalIndex) {
+        LogTopLevelFilterAfterHandledFault(index);
+      }
+    }
+    spdlog::warn("CrashTester: repeated handled fault finished");
+    spdlog::default_logger()->flush();
+    g_repeatRunning.store(false);
+  }).detach();
+}
+
 void CrashOnNewThread()
 {
   spdlog::warn("CrashTester: F8 access violation on a thread of its own");
@@ -289,6 +536,8 @@ void HotkeyLoop(const std::stop_token& stop)
   // log (ADR-0022), so that bit was mostly gone by the time this loop looked
   // and Ctrl+Shift+F4 often did nothing (2026-10-31).
   std::array<bool, 12> wasDown{};
+  bool insertWasDown = false;
+  bool deleteWasDown = false;
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -311,7 +560,22 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool f9 = pressed(VK_F9);
     const bool f10 = pressed(VK_F10);
     const bool f11 = pressed(VK_F11);
+    const bool insertDown = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
+    const bool insert = insertDown && !insertWasDown;
+    insertWasDown = insertDown;
+    const bool deleteDown = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0;
+    const bool del = deleteDown && !deleteWasDown;
+    deleteWasDown = deleteDown;
     if (ctrl && shift) {
+      if (insert && !g_repeatRunning.exchange(true)) {
+        RepeatHandledEngineFault(
+          "Insert access violation inside SkyrimSE.exe, caught every time", g_repeatCount.load(), 0);
+      }
+      if (del && !g_crashQueued.load() && !g_repeatRunning.exchange(true)) {
+        g_crashQueued.store(true);
+        RepeatHandledEngineFault("Delete access violation inside SkyrimSE.exe, caught twice and then not caught",
+          kHandledBeforeUnhandled + 1, kHandledBeforeUnhandled + 1);
+      }
       if ((f7 || f8 || f9) && !g_crashQueued.exchange(true)) {
         if (f7) {
           OpenJournalWith(SinkAction::kCrash, "F7 access violation in the Journal Menu event sink");
@@ -364,12 +628,19 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..10 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+// AutoScenario=1..12 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
 //                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
-//                     10: F5).
+//                     10: F5; 11: Insert; 12: Delete).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
+// RepeatCount=6        how many times the Insert scenario faults (1..50)
+// RepeatIntervalSec=15 seconds between its faults (5..120), and between
+//                      those of the Delete scenario; both also apply to the
+//                      hotkeys
+// UnhandledHoldMs=0    how long the Delete scenario's top-level filter probe
+//                      holds the crashing thread before it calls the filter
+//                      under it (0..60000)
 
 struct AutoConfig
 {
@@ -407,6 +678,12 @@ AutoConfig ReadAutoConfig()
   AutoConfig cfg{};
   cfg.scenario = static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"AutoScenario", 0, ini.c_str()));
   cfg.startDelaySec = static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"StartDelaySec", 20, ini.c_str()));
+  g_repeatCount.store(
+    std::clamp(static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"RepeatCount", 6, ini.c_str())), 1, 50));
+  g_repeatIntervalSec.store(
+    std::clamp(static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"RepeatIntervalSec", 15, ini.c_str())), 5, 120));
+  g_unhandledHoldMs.store(
+    std::clamp(static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"UnhandledHoldMs", 0, ini.c_str())), 0, 60000));
   wchar_t save[260]{};
   GetPrivateProfileStringW(L"CrashTester", L"SaveName", L"", save, 260, ini.c_str());
   char saveA[520]{};
@@ -504,6 +781,18 @@ void RunAutoScenario()
   case 10:
     CaughtThenRealCrash("auto F5 caught access violation, a real one 2 s later");
     break;
+  case 11:
+    if (!g_repeatRunning.exchange(true)) {
+      RepeatHandledEngineFault(
+        "auto Insert access violation inside SkyrimSE.exe, caught every time", g_repeatCount.load(), 0);
+    }
+    break;
+  case 12:
+    if (!g_crashQueued.exchange(true) && !g_repeatRunning.exchange(true)) {
+      RepeatHandledEngineFault("auto Delete access violation inside SkyrimSE.exe, caught twice and then not caught",
+        kHandledBeforeUnhandled + 1, kHandledBeforeUnhandled + 1);
+    }
+    break;
   default:
     break;
   }
@@ -569,8 +858,10 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   }
   g_auto = ReadAutoConfig();
   spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
-               "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze; "
-               "AutoScenario={} SaveName={}", g_auto.scenario, g_auto.saveName);
+               "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
+               "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled "
+               "(top-level filter hold {} ms); AutoScenario={} SaveName={}",
+    g_repeatCount.load(), g_repeatIntervalSec.load(), g_unhandledHoldMs.load(), g_auto.scenario, g_auto.saveName);
   spdlog::default_logger()->flush();
   if (auto* messaging = SKSE::GetMessagingInterface()) {
     messaging->RegisterListener(OnSkseMessage);
