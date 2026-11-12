@@ -64,6 +64,14 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 | 확인하는 동안 이미 종료됨 | `The game exited after this repeated exception, before a crash dump could be written.` | 덤프 없이 `SkyrimDiag_PostExitCrashEvidence_*.json`(예외 코드와 주소). 두 번째 예외의 보류 덤프는 이 크래시의 덤프로 쓰지 않고 지움 |
 | 확인하는 동안 하트비트가 계속 진행됨 | `No dump written: this repeated exception was handled again and the game kept running.` | 풀어 준 뒤 60초 안에 비정상 종료하면 `SkyrimDiag_PostExitCrashEvidence_*.json` |
 
+이 시나리오는 최상위 예외 필터도 확인합니다. 어떤 프레임도 처리하지 않은 예외는 프로세스가 끝나기 전에 `SetUnhandledExceptionFilter`로 등록된 필터 하나에 넘어가는데, 그 자리는 다른 플러그인도 가져갑니다. CrashTester.dll은 자기 필터를 올려 두고 `CrashTester.log`에 다음을 남깁니다.
+
+- `top-level filter before the scenario: ...`: 시나리오 시작 때 그 자리에 있던 필터의 모듈.
+- `after handled fault N ...`: 처리된 예외가 지나가는 동안 다른 모듈이 그 자리를 다시 가져갔는지.
+- `top-level filter reached ... ms after the fault ...; the filter under it is ...`: 세 번째 예외에서 벡터 핸들러 체인의 마지막에 등록한 핸들러가 올린 필터가 실제로 불렸는지와, 그 아래에 있던 필터의 모듈. 이 줄이 없으면 불리지 않은 것입니다.
+
+`CrashTester.ini`의 `UnhandledHoldMs`(기본 0)를 주면 필터가 그 시간만큼 스레드를 붙잡은 뒤 아래 필터를 부릅니다. Helper가 회복하지 못했다고 판정하는 6초보다 길게 주면(예: 10000) 위 표의 첫째 줄, 곧 살아 있는 게임에서 쓰는 덤프를 확인할 수 있습니다.
+
 버그로 볼 것: 세 번째 예외가 어디에도 기록되지 않는 경우, 두 번째 예외의 보류 덤프(`SkyrimDiag_Released_*.dmp`)가 이 크래시의 덤프로 승격되는 경우, 세 번째에서 회복 확인 없이 덤프부터 쓰는 경우.
 
 ## 무인 실행
@@ -77,6 +85,7 @@ SaveName=<세이브 파일 이름, .ess 제외>
 StartDelaySec=20
 RepeatCount=6         ; Insert 시나리오가 예외를 내는 횟수(1~50). 단축키에도 적용
 RepeatIntervalSec=15  ; Insert와 Delete 시나리오에서 예외 사이의 간격(5~120초). 단축키에도 적용
+UnhandledHoldMs=0     ; Delete 시나리오의 최상위 필터가 아래 필터를 부르기 전에 기다리는 시간(0~60000ms)
 ```
 
-`RepeatCount`와 `RepeatIntervalSec`는 게임을 켤 때 읽습니다. 메인 메뉴에서 그 세이브를 불러오고, 로딩 20초 뒤 시나리오를 실행합니다. MO2가 켜져 있으면 `ModOrganizer.exe -p "<프로필>" "moshortcut://:SKSE"`로 실행할 수 있습니다. 프리징 감지는 게임 창이 앞에 있어야 동작합니다.
+`RepeatCount`, `RepeatIntervalSec`, `UnhandledHoldMs`는 게임을 켤 때 읽습니다. 메인 메뉴에서 그 세이브를 불러오고, 로딩 20초 뒤 시나리오를 실행합니다. MO2가 켜져 있으면 `ModOrganizer.exe -p "<프로필>" "moshortcut://:SKSE"`로 실행할 수 있습니다. 프리징 감지는 게임 창이 앞에 있어야 동작합니다.

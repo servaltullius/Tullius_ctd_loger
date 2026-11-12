@@ -38,9 +38,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 
@@ -313,9 +315,129 @@ void RaiseHandledEngineFault(void* unreadable, int index, int count, const char*
   spdlog::default_logger()->flush();
 }
 
+// ---- probe of the top-level exception filter (Delete scenario) ----
+// When an exception is not handled by any frame, Windows calls the process's
+// top-level filter (SetUnhandledExceptionFilter) before it ends the process.
+// A plugin that wants to act at that point has to be that filter when the
+// exception is dispatched, and other plugins set the filter too. The probe
+// shows who holds it and whether a filter put on top from the last vectored
+// handler is called: it logs when it is reached, optionally holds the thread
+// there (UnhandledHoldMs), then calls the filter it replaced.
+std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_filterUnderProbe{ nullptr };
+std::atomic_bool g_probeArmed{ false };
+std::atomic<std::int64_t> g_fatalFaultQpc{ 0 };
+std::atomic<int> g_unhandledHoldMs{ 0 };
+
+std::int64_t QpcNow()
+{
+  LARGE_INTEGER value{};
+  QueryPerformanceCounter(&value);
+  return value.QuadPart;
+}
+
+// "Module.dll+0x1234" for a code address, for the log.
+std::string DescribeCodeAddress(const void* address)
+{
+  if (!address) {
+    return "none";
+  }
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        static_cast<LPCWSTR>(address), &module) ||
+      !module) {
+    return "an address outside every module";
+  }
+  wchar_t path[MAX_PATH]{};
+  GetModuleFileNameW(module, path, MAX_PATH);
+  const std::wstring_view full(path);
+  const auto slash = full.find_last_of(L"\\/");
+  const std::wstring_view name = slash == std::wstring_view::npos ? full : full.substr(slash + 1);
+  char nameA[MAX_PATH]{};
+  WideCharToMultiByte(CP_UTF8, 0, name.data(), static_cast<int>(name.size()), nameA, sizeof(nameA) - 1, nullptr,
+    nullptr);
+  char text[MAX_PATH + 32]{};
+  std::snprintf(text, sizeof(text), "%s+0x%llX", nameA,
+    static_cast<unsigned long long>(
+      reinterpret_cast<std::uintptr_t>(address) - reinterpret_cast<std::uintptr_t>(module)));
+  return text;
+}
+
+LONG WINAPI ProbeTopLevelFilter(EXCEPTION_POINTERS* exception)
+{
+  const auto under = g_filterUnderProbe.load();
+  LARGE_INTEGER frequency{};
+  QueryPerformanceFrequency(&frequency);
+  const std::int64_t faultQpc = g_fatalFaultQpc.load();
+  const double sinceFaultMs =
+    faultQpc != 0 ? static_cast<double>(QpcNow() - faultQpc) * 1000.0 / static_cast<double>(frequency.QuadPart) : -1.0;
+  const int holdMs = g_unhandledHoldMs.load();
+  spdlog::warn("CrashTester: top-level filter reached {:.1f} ms after the fault on tid={}; the filter under it is {}; "
+               "holding {} ms",
+    sinceFaultMs, GetCurrentThreadId(), DescribeCodeAddress(reinterpret_cast<const void*>(under)), holdMs);
+  spdlog::default_logger()->flush();
+  if (holdMs > 0) {
+    Sleep(static_cast<DWORD>(holdMs));
+    spdlog::warn("CrashTester: hold over, calling the filter under the probe");
+    spdlog::default_logger()->flush();
+  }
+  return under ? under(exception) : EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Puts the probe on top and returns the filter that was there.
+LPTOP_LEVEL_EXCEPTION_FILTER PutProbeOnTop()
+{
+  const auto previous = SetUnhandledExceptionFilter(ProbeTopLevelFilter);
+  if (previous != ProbeTopLevelFilter) {
+    g_filterUnderProbe.store(previous);
+  }
+  return previous;
+}
+
+// Registered last in the vectored chain, so it runs after any handler that
+// sets the top-level filter while an exception is dispatched. Acts once, on
+// the fault the scenario leaves unhandled; no logging here.
+LONG CALLBACK ProbeLastVectoredHandler(EXCEPTION_POINTERS* exception)
+{
+  if (exception && exception->ExceptionRecord &&
+      exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && g_probeArmed.exchange(false)) {
+    g_fatalFaultQpc.store(QpcNow());
+    PutProbeOnTop();
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void StartTopLevelFilterProbe()
+{
+  static std::atomic_bool s_vectoredHandlerAdded{ false };
+  if (!s_vectoredHandlerAdded.exchange(true)) {
+    AddVectoredExceptionHandler(/*First=*/0, ProbeLastVectoredHandler);
+  }
+  const auto previous = PutProbeOnTop();
+  spdlog::warn("CrashTester: top-level filter before the scenario: {}",
+    DescribeCodeAddress(reinterpret_cast<const void*>(previous)));
+  spdlog::default_logger()->flush();
+}
+
+// Whether something took the top-level filter back while a handled exception
+// was dispatched; the probe goes back on top either way.
+void LogTopLevelFilterAfterHandledFault(int index)
+{
+  const auto current = PutProbeOnTop();
+  if (current == ProbeTopLevelFilter) {
+    spdlog::warn("CrashTester: after handled fault {} the probe was still the top-level filter", index);
+  } else {
+    spdlog::warn("CrashTester: after handled fault {} the top-level filter was {} (set while the exception was "
+                 "dispatched)",
+      index, DescribeCodeAddress(reinterpret_cast<const void*>(current)));
+  }
+  spdlog::default_logger()->flush();
+}
+
 // The log line comes first: nothing runs after the fault.
 void RaiseUnhandledEngineFault(void* unreadable, int index, int count)
 {
+  g_probeArmed.store(true);
   spdlog::warn("CrashTester: fault {} of {} on the game's task thread tid={} is not caught: the game crashes now",
     index, count, GetCurrentThreadId());
   spdlog::default_logger()->flush();
@@ -362,6 +484,8 @@ void RepeatHandledEngineFault(const char* what, int count, int fatalIndex)
     auto* const tasks = SKSE::GetTaskInterface();
     if (!unreadable || !tasks) {
       spdlog::warn("CrashTester: repeated handled fault not started (no unreadable page or no SKSE task interface)");
+    } else if (fatalIndex != 0) {
+      StartTopLevelFilterProbe();
     }
     for (int index = 1; unreadable && tasks && index <= count; ++index) {
       if (index == fatalIndex) {
@@ -377,6 +501,9 @@ void RepeatHandledEngineFault(const char* what, int count, int fatalIndex)
       spdlog::warn("CrashTester: handled fault {} of {}: the longest pause in the {} s after it was {} ms", index,
         count, intervalSec, pauseMs);
       spdlog::default_logger()->flush();
+      if (fatalIndex != 0 && index < fatalIndex) {
+        LogTopLevelFilterAfterHandledFault(index);
+      }
     }
     spdlog::warn("CrashTester: repeated handled fault finished");
     spdlog::default_logger()->flush();
@@ -511,6 +638,9 @@ std::jthread* g_hotkeys = nullptr;
 // RepeatIntervalSec=15 seconds between its faults (5..120), and between
 //                      those of the Delete scenario; both also apply to the
 //                      hotkeys
+// UnhandledHoldMs=0    how long the Delete scenario's top-level filter probe
+//                      holds the crashing thread before it calls the filter
+//                      under it (0..60000)
 
 struct AutoConfig
 {
@@ -552,6 +682,8 @@ AutoConfig ReadAutoConfig()
     std::clamp(static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"RepeatCount", 6, ini.c_str())), 1, 50));
   g_repeatIntervalSec.store(
     std::clamp(static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"RepeatIntervalSec", 15, ini.c_str())), 5, 120));
+  g_unhandledHoldMs.store(
+    std::clamp(static_cast<int>(GetPrivateProfileIntW(L"CrashTester", L"UnhandledHoldMs", 0, ini.c_str())), 0, 60000));
   wchar_t save[260]{};
   GetPrivateProfileStringW(L"CrashTester", L"SaveName", L"", save, 260, ini.c_str());
   char saveA[520]{};
@@ -727,9 +859,9 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   g_auto = ReadAutoConfig();
   spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
                "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
-               "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled; "
-               "AutoScenario={} SaveName={}",
-    g_repeatCount.load(), g_repeatIntervalSec.load(), g_auto.scenario, g_auto.saveName);
+               "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled "
+               "(top-level filter hold {} ms); AutoScenario={} SaveName={}",
+    g_repeatCount.load(), g_repeatIntervalSec.load(), g_unhandledHoldMs.load(), g_auto.scenario, g_auto.saveName);
   spdlog::default_logger()->flush();
   if (auto* messaging = SKSE::GetMessagingInterface()) {
     messaging->RegisterListener(OnSkseMessage);
