@@ -32,8 +32,9 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 | Ctrl+Shift+F10 | 작업 스레드가 CrashTester.dll 안에서 45초 동안 CPU를 돌림 | 대기가 아니라 바쁘게 도는 프리징. 막힌 작업 스레드의 CrashTester.dll을 후보로 |
 | Ctrl+Shift+F11 | 저널 메뉴를 열어, 메뉴 이벤트 콜백이 45초 동안 붙잡음 | 게임이 부른 플러그인 콜백의 프리징. 후보 CrashTester.dll |
 | Ctrl+Shift+Insert | SkyrimSE.exe 안의 같은 주소에서 나는 접근 위반을 CrashTester.dll이 스스로 잡기를 15초 간격으로 6번 반복(홀수 번째는 게임의 작업 스레드, 짝수 번째는 CrashTester.dll 스레드). 크래시가 아니며, 끝난 뒤 다시 누를 수 있음 | 처음 두 번만 덤프를 쓰고, 세 번째부터는 덤프 없이 지나감(ADR-0031). 아래 "반복되는 처리된 예외" 참고 |
+| Ctrl+Shift+Delete | 위와 같은 접근 위반을 15초 간격으로 두 번 잡은 뒤, 세 번째는 게임의 작업 스레드에서 잡지 않고 둠(크래시) | 덤프를 먼저 쓰지 않게 된 주소에서 난 진짜 크래시가 기록됨(ADR-0031 Decision 2). 아래 "두 번 처리된 뒤의 진짜 크래시" 참고 |
 
-크래시 단축키(F1·F2·F3·F5~F9)는 게임 한 번에 하나만 동작합니다. 결과는 `scripts/accuracy_benchmark.py`로 정확도 측정 세트에 넣습니다(DEVELOPMENT의 Accuracy Benchmark). 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
+크래시 단축키(F1·F2·F3·F5~F9, Delete)는 게임 한 번에 하나만 동작합니다. 결과는 `scripts/accuracy_benchmark.py`로 정확도 측정 세트에 넣습니다(DEVELOPMENT의 Accuracy Benchmark). 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
 
 ## 반복되는 처리된 예외 (Ctrl+Shift+Insert)
 
@@ -51,17 +52,31 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 
 시험이 끝나면 게임을 메뉴로 정상 종료합니다.
 
+## 두 번 처리된 뒤의 진짜 크래시 (Ctrl+Shift+Delete)
+
+같은 접근 위반을 두 번 잡아 Helper가 "두 번 처리된 예외"로 기억하게 한 뒤, 세 번째는 `__except`가 잡지 않습니다. 같은 주소에서 난 예외지만 이번에는 게임이 죽습니다. Helper는 덤프를 먼저 쓰지 않고 회복부터 확인하므로, 그 확인 뒤에 무엇이 남는지를 봅니다. 세 번째는 게임의 작업 스레드에서 내므로 게임 루프가 멈추고 하트비트도 멈춥니다.
+
+`SkyrimDiagHelper.log`에서 세 번째 `Crash event signaled` 뒤에 `checking whether the game recovers before writing a crash dump`가 찍히고, 그 뒤는 게임이 얼마나 빨리 종료되느냐에 따라 셋 중 하나입니다. 셋 다 ADR-0031이 정한 동작입니다.
+
+| 그때 게임의 상태 | Helper 로그 | 남는 것 |
+|---|---|---|
+| 회복하지 못한 채 살아 있음(약 6초 뒤) | `The game did not recover from this repeated exception; writing the crash dump now.` | `SkyrimDiag_Crash_*.dmp`와 그 리포트. 예외 모듈 SkyrimSE.exe, 콜스택으로 CrashTester.dll을 후보로 |
+| 확인하는 동안 이미 종료됨 | `The game exited after this repeated exception, before a crash dump could be written.` | 덤프 없이 `SkyrimDiag_PostExitCrashEvidence_*.json`(예외 코드와 주소). 두 번째 예외의 보류 덤프는 이 크래시의 덤프로 쓰지 않고 지움 |
+| 확인하는 동안 하트비트가 계속 진행됨 | `No dump written: this repeated exception was handled again and the game kept running.` | 풀어 준 뒤 60초 안에 비정상 종료하면 `SkyrimDiag_PostExitCrashEvidence_*.json` |
+
+버그로 볼 것: 세 번째 예외가 어디에도 기록되지 않는 경우, 두 번째 예외의 보류 덤프(`SkyrimDiag_Released_*.dmp`)가 이 크래시의 덤프로 승격되는 경우, 세 번째에서 회복 확인 없이 덤프부터 쓰는 경우.
+
 ## 무인 실행
 
 `Documents\My Games\Skyrim Special Edition\SKSE\CrashTester.ini`(MO2 가상 폴더가 아닌 실제 폴더라 실행 중에 바꿔도 됨):
 
 ```
 [CrashTester]
-AutoScenario=1      ; 1: 프리징 2번 뒤 가장 가까운 NPC로 F1, 2: F2, 3: F3, 4: F6, 5: F7, 6: F8, 7: F9, 8: F10, 9: F11, 10: F5, 11: Insert, 0: 단축키만
+AutoScenario=1      ; 1: 프리징 2번 뒤 가장 가까운 NPC로 F1, 2: F2, 3: F3, 4: F6, 5: F7, 6: F8, 7: F9, 8: F10, 9: F11, 10: F5, 11: Insert, 12: Delete, 0: 단축키만
 SaveName=<세이브 파일 이름, .ess 제외>
 StartDelaySec=20
 RepeatCount=6         ; Insert 시나리오가 예외를 내는 횟수(1~50). 단축키에도 적용
-RepeatIntervalSec=15  ; 그 사이의 간격(5~120초). 단축키에도 적용
+RepeatIntervalSec=15  ; Insert와 Delete 시나리오에서 예외 사이의 간격(5~120초). 단축키에도 적용
 ```
 
 `RepeatCount`와 `RepeatIntervalSec`는 게임을 켤 때 읽습니다. 메인 메뉴에서 그 세이브를 불러오고, 로딩 20초 뒤 시나리오를 실행합니다. MO2가 켜져 있으면 `ModOrganizer.exe -p "<프로필>" "moshortcut://:SKSE"`로 실행할 수 있습니다. 프리징 감지는 게임 창이 앞에 있어야 동작합니다.

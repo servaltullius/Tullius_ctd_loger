@@ -22,6 +22,8 @@
 //   Ins the same access violation inside SkyrimSE.exe, caught by
 //       CrashTester.dll, 6 times 15 s apart, on the game's task thread and a
 //       thread of CrashTester.dll in turn; not a crash, may be pressed again
+//   Del the same access violation caught twice, 15 s apart, and the third
+//       time left unhandled on the game's task thread (a crash)
 // Built a second time as SkyrimCrashGuard.dll (CRASH_TESTER_GUARD_STUB),
 // which only loads and does nothing, to check the problem-module warning.
 
@@ -288,14 +290,16 @@ void* UnreadablePage()
   return page;
 }
 
-// True when the engine call faulted and the fault was caught here. Nothing
-// with a destructor may live in a function that uses __try.
-__declspec(noinline) bool CaughtEngineFault(void* unreadable, const char** nameOut)
+// True when the engine call faulted and the fault was caught here. With
+// catchIt false the same fault, at the same address, is left to the game:
+// nothing handles it and the game crashes. Nothing with a destructor may live
+// in a function that uses __try.
+__declspec(noinline) bool EngineFault(void* unreadable, const char** nameOut, bool catchIt)
 {
   __try {
     *nameOut = reinterpret_cast<RE::TESObjectREFR*>(unreadable)->GetDisplayFullName();
     return false;
-  } __except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+  } __except (catchIt && GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
     return true;
   }
 }
@@ -303,10 +307,20 @@ __declspec(noinline) bool CaughtEngineFault(void* unreadable, const char** nameO
 void RaiseHandledEngineFault(void* unreadable, int index, int count, const char* where)
 {
   const char* name = nullptr;
-  const bool caught = CaughtEngineFault(unreadable, &name);
+  const bool caught = EngineFault(unreadable, &name, true);
   spdlog::warn("CrashTester: handled fault {} of {} on {} tid={} caught={}", index, count, where,
     GetCurrentThreadId(), caught);
   spdlog::default_logger()->flush();
+}
+
+// The log line comes first: nothing runs after the fault.
+void RaiseUnhandledEngineFault(void* unreadable, int index, int count)
+{
+  spdlog::warn("CrashTester: fault {} of {} on the game's task thread tid={} is not caught: the game crashes now",
+    index, count, GetCurrentThreadId());
+  spdlog::default_logger()->flush();
+  const char* name = nullptr;
+  EngineFault(unreadable, &name, false);
 }
 
 // The longest time this thread went without running in the next `seconds`.
@@ -330,20 +344,29 @@ std::uint32_t LongestPauseMs(int seconds)
   return static_cast<std::uint32_t>(longest.count());
 }
 
-void RepeatHandledEngineFault(const char* what)
+// Scenario Delete: the same fault handled twice, then left unhandled on the
+// game's task thread, so the helper meets a real crash at an address it has
+// stopped dumping up front (ADR-0031, decision 2: it must find that the game
+// did not recover and write the dump then, or record the exception when the
+// game is already gone).
+constexpr int kHandledBeforeUnhandled = 2;
+
+// fatalIndex 0: every fault is caught. Otherwise that fault is not caught.
+void RepeatHandledEngineFault(const char* what, int count, int fatalIndex)
 {
-  const int count = g_repeatCount.load();
   const int intervalSec = g_repeatIntervalSec.load();
   spdlog::warn("CrashTester: {} ({} times, {} s apart)", what, count, intervalSec);
   spdlog::default_logger()->flush();
-  std::thread([count, intervalSec] {
+  std::thread([count, intervalSec, fatalIndex] {
     void* const unreadable = UnreadablePage();
     auto* const tasks = SKSE::GetTaskInterface();
     if (!unreadable || !tasks) {
       spdlog::warn("CrashTester: repeated handled fault not started (no unreadable page or no SKSE task interface)");
     }
     for (int index = 1; unreadable && tasks && index <= count; ++index) {
-      if (index % 2 == 1) {
+      if (index == fatalIndex) {
+        tasks->AddTask([unreadable, index, count] { RaiseUnhandledEngineFault(unreadable, index, count); });
+      } else if (index % 2 == 1) {
         tasks->AddTask([unreadable, index, count] {
           RaiseHandledEngineFault(unreadable, index, count, "the game's task thread");
         });
@@ -387,6 +410,7 @@ void HotkeyLoop(const std::stop_token& stop)
   // and Ctrl+Shift+F4 often did nothing (2026-10-31).
   std::array<bool, 12> wasDown{};
   bool insertWasDown = false;
+  bool deleteWasDown = false;
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -412,9 +436,18 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool insertDown = (GetAsyncKeyState(VK_INSERT) & 0x8000) != 0;
     const bool insert = insertDown && !insertWasDown;
     insertWasDown = insertDown;
+    const bool deleteDown = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0;
+    const bool del = deleteDown && !deleteWasDown;
+    deleteWasDown = deleteDown;
     if (ctrl && shift) {
       if (insert && !g_repeatRunning.exchange(true)) {
-        RepeatHandledEngineFault("Insert access violation inside SkyrimSE.exe, caught every time");
+        RepeatHandledEngineFault(
+          "Insert access violation inside SkyrimSE.exe, caught every time", g_repeatCount.load(), 0);
+      }
+      if (del && !g_crashQueued.load() && !g_repeatRunning.exchange(true)) {
+        g_crashQueued.store(true);
+        RepeatHandledEngineFault("Delete access violation inside SkyrimSE.exe, caught twice and then not caught",
+          kHandledBeforeUnhandled + 1, kHandledBeforeUnhandled + 1);
       }
       if ((f7 || f8 || f9) && !g_crashQueued.exchange(true)) {
         if (f7) {
@@ -468,15 +501,16 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..11 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+// AutoScenario=1..12 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
 //                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
-//                     10: F5; 11: Insert).
+//                     10: F5; 11: Insert; 12: Delete).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
 // RepeatCount=6        how many times the Insert scenario faults (1..50)
-// RepeatIntervalSec=15 seconds between its faults (5..120); both also apply
-//                      to the hotkey
+// RepeatIntervalSec=15 seconds between its faults (5..120), and between
+//                      those of the Delete scenario; both also apply to the
+//                      hotkeys
 
 struct AutoConfig
 {
@@ -617,7 +651,14 @@ void RunAutoScenario()
     break;
   case 11:
     if (!g_repeatRunning.exchange(true)) {
-      RepeatHandledEngineFault("auto Insert access violation inside SkyrimSE.exe, caught every time");
+      RepeatHandledEngineFault(
+        "auto Insert access violation inside SkyrimSE.exe, caught every time", g_repeatCount.load(), 0);
+    }
+    break;
+  case 12:
+    if (!g_crashQueued.exchange(true) && !g_repeatRunning.exchange(true)) {
+      RepeatHandledEngineFault("auto Delete access violation inside SkyrimSE.exe, caught twice and then not caught",
+        kHandledBeforeUnhandled + 1, kHandledBeforeUnhandled + 1);
     }
     break;
   default:
@@ -686,7 +727,8 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   g_auto = ReadAutoConfig();
   spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
                "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
-               "Insert repeated handled AV ({} times, {} s apart); AutoScenario={} SaveName={}",
+               "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled; "
+               "AutoScenario={} SaveName={}",
     g_repeatCount.load(), g_repeatIntervalSec.load(), g_auto.scenario, g_auto.saveName);
   spdlog::default_logger()->flush();
   if (auto* messaging = SKSE::GetMessagingInterface()) {
