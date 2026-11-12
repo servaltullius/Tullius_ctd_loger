@@ -361,7 +361,44 @@ DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noe
   return WAIT_FAILED;
 }
 
+DWORD WaitForCrashUnhandledOrProcess(
+  HANDLE crashEvent,
+  HANDLE unhandledEvent,
+  HANDLE process,
+  DWORD waitMs) noexcept
+{
+  if (crashEvent && process && unhandledEvent) {
+    const HANDLE handles[] = { crashEvent, process, unhandledEvent };
+    return WaitForMultipleObjects(static_cast<DWORD>(std::size(handles)), handles, FALSE, waitMs);
+  }
+  return WaitForCrashOrProcess(crashEvent, process, waitMs);
+}
+
+bool IsUnhandledExceptionSignaled(HANDLE unhandledEvent) noexcept
+{
+  return unhandledEvent && WaitForSingleObject(unhandledEvent, 0) == WAIT_OBJECT_0;
+}
+
 namespace {
+
+// ADR-0032: the plugin said this exception reached the top-level filter, so
+// nothing in the game handled it. Logged once per incident.
+void NoteUnhandledSignal(
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  CrashCaptureState* crashState)
+{
+  if (crashState) {
+    if (crashState->unhandledSignalCrashSeq == info.crashSeq) {
+      return;
+    }
+    crashState->unhandledSignalCrashSeq = info.crashSeq;
+  }
+  AppendLogLine(
+    outBase,
+    L"The game did not handle this exception: it reached the process's top-level exception filter "
+    L"(crash_seq=" + std::to_wstring(info.crashSeq) + L"). It is a crash; not waiting for the heartbeat.");
+}
 
 // Reads the exit code, reporting whether it is trustworthy. A failed query used
 // to leave the STILL_ACTIVE initializer in place, which reads as a non-zero
@@ -389,17 +426,24 @@ FilterVerdict FilterShutdownException(
   const skydiag::helper::HelperConfig& cfg,
   HANDLE process,
   HANDLE crashEvent,
+  HANDLE unhandledEvent,
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase,
   CrashCaptureState* crashState)
 {
-  const DWORD pw = WaitForCrashOrProcess(crashEvent, process, kShutdownWaitMs);
+  const DWORD pw = WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kShutdownWaitMs);
   if (pw == WAIT_OBJECT_0 && crashEvent) {
     if (HasNewerCrashRecord(shm, info.crashSeq)) {
       AppendLogLine(outBase, L"A newer crash record arrived during shutdown filtering; prioritizing the newer CTD.");
       return FilterVerdict::kRetryNewerCrash;
     }
+  }
+  // ADR-0032: before the exit code is looked at. An unhandled exception that
+  // some filter ended with exit code 0 is still a crash.
+  if (IsUnhandledExceptionSignaled(unhandledEvent)) {
+    NoteUnhandledSignal(outBase, info, crashState);
+    return FilterVerdict::kKeepDump;
   }
   if (pw == WAIT_OBJECT_0 + 1u) {
     DWORD exitCode = STILL_ACTIVE;
@@ -419,6 +463,7 @@ FilterVerdict FilterFirstChanceException(
   const skydiag::helper::HelperConfig& cfg,
   HANDLE process,
   HANDLE crashEvent,
+  HANDLE unhandledEvent,
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase,
@@ -431,7 +476,8 @@ FilterVerdict FilterFirstChanceException(
   int heartbeatAdvanceCount = 0;
   for (int attempt = 0; attempt < kMaxHeartbeatChecks; ++attempt) {
     const auto hb0 = shm->last_heartbeat_qpc;
-    const DWORD waitResult = WaitForCrashOrProcess(crashEvent, process, kHeartbeatCheckIntervalMs);
+    const DWORD waitResult =
+      WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kHeartbeatCheckIntervalMs);
     if (waitResult == WAIT_OBJECT_0 && crashEvent) {
       if (HasNewerCrashRecord(shm, info.crashSeq)) {
         AppendLogLine(
@@ -439,6 +485,12 @@ FilterVerdict FilterFirstChanceException(
           L"A newer crash record arrived during first-chance recovery filtering; prioritizing the newer CTD.");
         return FilterVerdict::kRetryNewerCrash;
       }
+    }
+    // ADR-0032: the plugin knows what the heartbeat can only suggest. Before
+    // the exit code is looked at, as in FilterShutdownException.
+    if (IsUnhandledExceptionSignaled(unhandledEvent)) {
+      NoteUnhandledSignal(outBase, info, crashState);
+      return FilterVerdict::kKeepDump;
     }
     if (waitResult == WAIT_OBJECT_0 + 1u) {
       DWORD exitCode = STILL_ACTIVE;
@@ -546,6 +598,10 @@ void ProcessValidCrashDump(
       // ADR-0022: an error of a game being closed. Retention keeps few of
       // these (IsForcedCloseCrashManifest), apart from the real crashes.
       ctx["forced_close"] = true;
+    }
+    if (IsUnhandledExceptionSignaled(proc.unhandledEvent)) {
+      // ADR-0032: the plugin saw the exception reach the top-level filter.
+      ctx["unhandled_exception_signal"] = true;
     }
     const auto manifest = MakeIncidentManifestV1(
       "crash",
@@ -862,6 +918,26 @@ bool TryClearRecoveredCrashFreeze(
   return true;
 }
 
+bool ThawCrashCapture(
+  const skydiag::helper::AttachedProcess& proc,
+  std::uint32_t expectedCrashSeq) noexcept
+{
+  if (!proc.shmWritable) {
+    return false;
+  }
+  // Only for the incident being let go: when a newer record is already there,
+  // TryClearRecoveredCrashFreeze refuses and its signals must stay.
+  if (ReadCrashSequence(&proc.shmWritable->header) == expectedCrashSeq) {
+    if (proc.unhandledEvent) {
+      ResetEvent(proc.unhandledEvent);
+    }
+    if (proc.dumpSettledEvent) {
+      ResetEvent(proc.dumpSettledEvent);
+    }
+  }
+  return TryClearRecoveredCrashFreeze(proc.shmWritable, expectedCrashSeq);
+}
+
 skydiag::ForcedCloseMatch FindForcedCloseInSnapshot(
   const skydiag::SharedLayout* snapshot,
   std::size_t snapshotBytes) noexcept
@@ -1066,10 +1142,10 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
     FILETIME eventTime{};
     GetSystemTimeAsFileTime(&eventTime);
     const auto early = FilterFirstChanceException(
-      cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+      cfg, proc.process, proc.crashEvent, proc.unhandledEvent, &proc.shm->header, info, outBase, crashState);
     if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
       const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
-        TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+        ThawCrashCapture(proc, info.crashSeq);
       if (crashState) {
         crashState->latched = false;
         crashState->releasedCrashSeq = info.crashSeq;
@@ -1135,10 +1211,10 @@ RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
       + std::to_wstring(kRepeatedRecoveredFaultMinCount)
       + L" times in this session; checking whether the game recovers before writing a crash dump.");
   const auto early = FilterFirstChanceException(
-    cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+    cfg, proc.process, proc.crashEvent, proc.unhandledEvent, &proc.shm->header, info, outBase, crashState);
   if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
     const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
-      TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+      ThawCrashCapture(proc, info.crashSeq);
     crashState->latched = false;
     crashState->releasedCrashSeq = info.crashSeq;
     crashState->releasedCrashTick64 = GetTickCount64();
@@ -1167,11 +1243,14 @@ RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
     return RepeatedRecoveredFaultOutcome::kSuperseded;
   }
   const bool exitedBeforeDump = WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0;
+  const bool unhandledSignal = crashState->unhandledSignalCrashSeq == info.crashSeq;
   AppendLogLine(
     outBase,
     exitedBeforeDump
       ? L"The game exited after this repeated exception, before a crash dump could be written."
-      : L"The game did not recover from this repeated exception; writing the crash dump now.");
+      : (unhandledSignal
+           ? L"The game did not handle this repeated exception; writing the crash dump now."
+           : L"The game did not recover from this repeated exception; writing the crash dump now."));
   return exitedBeforeDump
     ? RepeatedRecoveredFaultOutcome::kExitedBeforeDump
     : RepeatedRecoveredFaultOutcome::kWriteDumpAfterCheck;
@@ -1277,7 +1356,7 @@ void HandleCrashDumpWriteFailure(
   // stopped and, with strong-fault preservation active, would block every
   // later CTD from being published. Thawing restores normal capture.
   if (proc.shmWritable) {
-    const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+    const bool thawed = ThawCrashCapture(proc, info.crashSeq);
     AppendLogLine(
       outBase,
       thawed
@@ -1311,7 +1390,7 @@ void ReleaseFilteredCrashDump(
   std::wstring* lastCrashDumpPath)
 {
   if (verdict == FilterVerdict::kDeleteRecovered) {
-    const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, info.crashSeq);
+    const bool thawed = ThawCrashCapture(proc, info.crashSeq);
     AppendLogLine(
       outBase,
       thawed
@@ -1607,6 +1686,12 @@ bool HandleCrashEventTick(
   skydiag::helper::DumpObjectMemoryStats dumpMemory{};
   const bool dumpOk = WriteCrashDumpWithRetries(
     proc, outBase, dumpPath, dumpSnapshot, dumpSnapshotBytes, dumpProfile, exitedBeforeDump, &dumpErr, &dumpMemory);
+  // ADR-0032: written or given up, the dump is settled. The plugin holds the
+  // crashing thread in the top-level filter until this, so that the game does
+  // not end while the dump is still to be written.
+  if (proc.dumpSettledEvent) {
+    SetEvent(proc.dumpSettledEvent);
+  }
 
   if (!dumpOk) {
     if (checkedRecoveryBeforeDump && crashState && !crashState->releasedDumpPath.empty() &&
@@ -1653,13 +1738,14 @@ bool HandleCrashEventTick(
         cfg,
         proc.process,
         proc.crashEvent,
+        proc.unhandledEvent,
         proc.shm ? &proc.shm->header : nullptr,
         info,
         outBase,
         crashState);
       if (verdict == FilterVerdict::kKeepDump && proc.shm) {
         verdict = FilterFirstChanceException(
-          cfg, proc.process, proc.crashEvent, &proc.shm->header, info, outBase, crashState);
+          cfg, proc.process, proc.crashEvent, proc.unhandledEvent, &proc.shm->header, info, outBase, crashState);
       }
     }
     if (verdict != FilterVerdict::kKeepDump) {

@@ -168,6 +168,7 @@ MO2는 USVFS 가상 파일 시스템 안에서 스카이림을 실행합니다. 
 | `EnablePerfHitchLog` | `1` | 메인 스레드 스톨 기록 (가벼움). |
 | `EnableCloseRequestLog` | `1` | Alt+F4·창 닫기·종료 요청 기록. 그 직후(10초 안) 난 오류는 강제 종료 중 오류로 분류하고 CTD로 보고하지 않음(뷰어도 뜨지 않음). |
 | `CrashHookMode` | `1` | **1 유지 권장.** 2 = 모든 예외 기록 (비권장). |
+| `UnhandledCrashHoldMs` | `5000` | 진짜 크래시에서 Helper가 덤프를 쓰는 동안 크래시 난 스레드를 붙잡는 최대 시간(ms). `0` = 붙잡지 않음. |
 | `AllowOnlineSymbols` | `0` | 로컬/오프라인 캐시 우선 분석. |
 
 플러그인은 Helper가 사라지면 다시 실행합니다. Helper가 시작 후 1분 안에 종료되기를 반복하면(보안 프로그램이 `SkyrimDiagHelper.exe`를 끝내는 경우 등) 다섯 번 연속 실패한 뒤 더 실행하지 않고 `SkyrimDiag.log`(`문서\My Games\Skyrim Special Edition\SKSE\`)에 남깁니다. 이때는 게임을 다시 시작할 때까지 크래시·프리징을 캡처하지 못합니다.

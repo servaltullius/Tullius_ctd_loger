@@ -21,6 +21,14 @@ struct AttachedProcess {
 
   HANDLE crashEvent = nullptr;
   std::uint32_t crashEventOpenError = ERROR_SUCCESS;
+
+  // ADR-0032. unhandledEvent: the plugin sets it when an exception reached
+  // the top-level filter (opened here; null with a plugin that does not have
+  // it). dumpSettledEvent: created here and set when a crash dump write is
+  // over, so the plugin stops holding the crashing thread; made only when the
+  // plugin's event exists.
+  HANDLE unhandledEvent = nullptr;
+  HANDLE dumpSettledEvent = nullptr;
 };
 
 bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err);

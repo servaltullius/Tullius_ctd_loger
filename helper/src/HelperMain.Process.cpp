@@ -626,7 +626,7 @@ bool HandleLateRecoveryTick(
   crash.releasedCrashTick64 = GetTickCount64();
   crash.releasedOnBriefHeartbeat = false;
   crash.releasedInThreadDumpWindow = false;
-  const bool thawed = TryClearRecoveredCrashFreeze(proc.shmWritable, crashSeq);
+  const bool thawed = ThawCrashCapture(proc, crashSeq);
   AppendLogLine(
     outBase,
     thawed

@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <cstring>
+#include <iterator>
 #include <string>
 
 #include "SkyrimDiag/Blackbox.h"
@@ -14,6 +15,8 @@ namespace {
 
 HANDLE g_mapping = nullptr;
 HANDLE g_crashEvent = nullptr;
+HANDLE g_unhandledEvent = nullptr;
+wchar_t g_dumpSettledEventName[64]{};
 skydiag::SharedLayout* g_shared = nullptr;
 std::uint32_t g_mainThreadId = 0;
 
@@ -61,8 +64,28 @@ bool InitSharedMemory()
   g_shared = static_cast<skydiag::SharedLayout*>(view);
   std::memset(g_shared, 0, sizeof(skydiag::SharedLayout));
 
+  // ADR-0032. Not being able to create it only turns the signal off. Made
+  // before the crash event: a helper that can open the crash event must
+  // find this one too.
+  g_unhandledEvent = CreateEventW(
+    nullptr,
+    /*bManualReset=*/TRUE,
+    /*bInitialState=*/FALSE,
+    MakeKernelName(skydiag::protocol::kKernelObjectSuffix_UnhandledEvent).c_str());
+  const std::wstring dumpSettledEventName = MakeKernelName(skydiag::protocol::kKernelObjectSuffix_DumpSettledEvent);
+  if (dumpSettledEventName.size() < std::size(g_dumpSettledEventName)) {
+    std::memcpy(
+      g_dumpSettledEventName,
+      dumpSettledEventName.c_str(),
+      (dumpSettledEventName.size() + 1u) * sizeof(wchar_t));
+  }
+
   g_crashEvent = CreateEventW(nullptr, /*bManualReset=*/TRUE, /*bInitialState=*/FALSE, crashEventName.c_str());
   if (!g_crashEvent) {
+    if (g_unhandledEvent) {
+      CloseHandle(g_unhandledEvent);
+      g_unhandledEvent = nullptr;
+    }
     UnmapViewOfFile(g_shared);
     g_shared = nullptr;
     CloseHandle(g_mapping);
@@ -104,6 +127,10 @@ void ShutdownSharedMemory()
     CloseHandle(g_crashEvent);
     g_crashEvent = nullptr;
   }
+  if (g_unhandledEvent) {
+    CloseHandle(g_unhandledEvent);
+    g_unhandledEvent = nullptr;
+  }
   if (g_mapping) {
     CloseHandle(g_mapping);
     g_mapping = nullptr;
@@ -123,6 +150,16 @@ skydiag::SharedLayout* GetShared() noexcept
 HANDLE GetCrashEvent() noexcept
 {
   return g_crashEvent;
+}
+
+HANDLE GetUnhandledEvent() noexcept
+{
+  return g_unhandledEvent;
+}
+
+const wchar_t* GetDumpSettledEventName() noexcept
+{
+  return g_dumpSettledEventName;
 }
 
 }  // namespace skydiag::plugin

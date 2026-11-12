@@ -213,6 +213,70 @@ constexpr CrashLoggerStackScanWindow SelectCrashLoggerStackScanWindow(
 //   1 = Fatal exceptions only (recommended; avoids many false positives)
 //   2 = All exceptions (can false-trigger on handled exceptions)
 //
+// ADR-0032: whether the crash record in shared memory is the record of the
+// exception that just reached the top-level filter. Only then may that filter
+// tell the helper "this one was not handled": the incident slot may still be
+// held by an earlier exception the helper is checking (ADR-0017), and saying
+// it about that one would be wrong. sequenceBefore and sequenceAfter are
+// crash_seq read before and after the record's fields; an odd or changed
+// value means the record was being written.
+constexpr bool IsCrashRecordOfException(
+  bool incidentClaimed,
+  std::uint32_t sequenceBefore,
+  std::uint32_t sequenceAfter,
+  std::uint32_t recordThreadId,
+  std::uint32_t recordCode,
+  std::uint64_t recordAddress,
+  std::uint32_t threadId,
+  std::uint32_t code,
+  std::uint64_t address) noexcept
+{
+  return incidentClaimed && sequenceBefore != 0u && (sequenceBefore & 1u) == 0u &&
+         sequenceBefore == sequenceAfter && recordThreadId == threadId && recordCode == code &&
+         recordAddress == address;
+}
+
+// ADR-0032: the threads that are inside the top-level filter now, so a filter
+// under ours that calls ours again is not answered a second time. A fixed
+// array instead of thread-local storage, which may have to be allocated on the
+// crashing thread. 0 marks a free slot.
+inline constexpr std::size_t kTopLevelFilterThreadSlotCount = 4;
+
+enum class TopLevelFilterEntry
+{
+  // First time on this thread: slot taken, leave it on the way out.
+  kEntered,
+  // This thread is already inside the filter.
+  kReentered,
+  // Every slot is taken by another thread: run without the re-entry guard,
+  // and without the hold.
+  kNoSlot,
+};
+
+// What entering does given the slots' current owners; `slotOut` is the slot to
+// take for kEntered.
+constexpr TopLevelFilterEntry ClassifyTopLevelFilterEntry(
+  const std::uint32_t* slotThreadIds,
+  std::size_t slotCount,
+  std::uint32_t threadId,
+  std::size_t* slotOut) noexcept
+{
+  std::size_t freeSlot = slotCount;
+  for (std::size_t i = 0; i < slotCount; ++i) {
+    if (slotThreadIds[i] == threadId) {
+      return TopLevelFilterEntry::kReentered;
+    }
+    if (slotThreadIds[i] == 0u && freeSlot == slotCount) {
+      freeSlot = i;
+    }
+  }
+  if (freeSlot == slotCount) {
+    return TopLevelFilterEntry::kNoSlot;
+  }
+  *slotOut = freeSlot;
+  return TopLevelFilterEntry::kEntered;
+}
+
 // Mode 1 also chains a top-level unhandled exception filter and a SIGABRT
 // handler. They record an unhandled C++ throw or breakpoint when CrashLogger is
 // not there to fault while reporting it: the filter sees one no frame handled,
@@ -220,7 +284,23 @@ constexpr CrashLoggerStackScanWindow SelectCrashLoggerStackScanWindow(
 // (a throw out of a noexcept function never reaches the filter). Neither runs
 // for a handled exception, and both use only the fatal path's fixed-size,
 // allocation-free steps.
+//
+// ADR-0032: other plugins take the top-level filter slot too (CrashLogger
+// registers its own again while every exception is dispatched), so mode 1 also
+// adds a vectored handler at the end of the chain that, for an exception of a
+// fatal code, puts the filter back and remembers the one it displaced, which
+// the filter calls when it is done.
+// When the exception that reached the filter is the recorded crash, the filter
+// sets the "unhandled" event and holds the thread until the helper has written
+// the dump (SetUnhandledCrashHoldMs).
 bool InstallCrashHandler(std::uint32_t crashHookMode);
+
+// ADR-0032: how long at most the top-level filter holds the crashing thread
+// for the helper's dump. 0: signal only, never hold. Call before
+// InstallCrashHandler; the default is kDefaultUnhandledCrashHoldMs.
+inline constexpr std::uint32_t kDefaultUnhandledCrashHoldMs = 5000;
+inline constexpr std::uint32_t kMaxUnhandledCrashHoldMs = 30000;
+void SetUnhandledCrashHoldMs(std::uint32_t holdMs) noexcept;
 
 // Caches the CrashLogger module image ranges used by nested-exception
 // suppression. InstallCrashHandler runs during SKSE plugin load, which is too

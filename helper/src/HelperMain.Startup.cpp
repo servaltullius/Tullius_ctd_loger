@@ -245,7 +245,7 @@ std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, con
   // same frozen crash was signaled again by every new helper.
   const bool alreadyRearmed = ExistsForIo(marker, existsEc) || existsEc;
   if (alreadyRearmed || !WriteTextFileUtf8(marker, "rearmed\n")) {
-    const bool thawed = proc.shmWritable && TryClearRecoveredCrashFreeze(proc.shmWritable, committed.crashSeq);
+    const bool thawed = proc.shmWritable && ThawCrashCapture(proc, committed.crashSeq);
     AppendLogLine(
       outBase,
       L"Committed crash_seq=" + std::to_wstring(committed.crashSeq)
@@ -331,6 +331,15 @@ void RegisterManualCaptureHotkeyIfEnabled(
   const AttachedProcess& proc,
   const std::filesystem::path& outBase)
 {
+  // ADR-0032.
+  AppendLogLine(
+    outBase,
+    (proc.unhandledEvent && proc.dumpSettledEvent)
+      ? L"Unhandled-exception signal from the plugin: on (a crash nothing handled is dumped at once, and the "
+        L"plugin holds the game until the dump is written)."
+      : L"Unhandled-exception signal from the plugin: not available (crash event not open yet, or a plugin "
+        L"older than this helper).");
+
   // Crash Logger's thread dump runs on its own hotkey whatever the manual
   // capture hotkey is, so its keys are watched either way
   // (IsLikelyCrashLoggerThreadDumpFault).

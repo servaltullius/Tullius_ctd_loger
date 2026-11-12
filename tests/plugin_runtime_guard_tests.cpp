@@ -1,6 +1,7 @@
 #include <cassert>
 #include <filesystem>
 #include <string>
+#include <utility>
 
 #include "SkyrimDiag/CrashHandler.h"
 #include "SkyrimDiag/CrashHookConfig.h"
@@ -108,6 +109,52 @@ int main()
   static_assert(ClassifyCrashLoggerFault(
     false, 0x1800u, crashLoggerRange, crashLoggerSseRange, true, true, false) ==
     CrashLoggerFaultAction::kIgnore);
+
+  // ADR-0032: the top-level filter says "not handled" only about the
+  // exception the crash record is of.
+  using skydiag::plugin::IsCrashRecordOfException;
+  static_assert(IsCrashRecordOfException(true, 6u, 6u, 77u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x1234u));
+  static_assert(
+    !IsCrashRecordOfException(false, 6u, 6u, 77u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x1234u),
+    "an incident the helper already let go of is not this exception's");
+  static_assert(
+    !IsCrashRecordOfException(true, 0u, 0u, 77u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x1234u),
+    "no record was published yet");
+  static_assert(
+    !IsCrashRecordOfException(true, 5u, 5u, 77u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x1234u),
+    "an odd sequence is a record being written");
+  static_assert(
+    !IsCrashRecordOfException(true, 4u, 6u, 77u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x1234u),
+    "the record changed while it was read");
+  static_assert(
+    !IsCrashRecordOfException(true, 6u, 6u, 78u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x1234u),
+    "another thread's exception holds the incident (ADR-0017)");
+  static_assert(!IsCrashRecordOfException(true, 6u, 6u, 77u, 0xC0000005u, 0x1234u, 77u, 0xE06D7363u, 0x1234u));
+  static_assert(!IsCrashRecordOfException(true, 6u, 6u, 77u, 0xC0000005u, 0x1234u, 77u, 0xC0000005u, 0x5678u));
+
+  // ADR-0032: one answer per thread from the top-level filter.
+  using skydiag::plugin::ClassifyTopLevelFilterEntry;
+  using skydiag::plugin::TopLevelFilterEntry;
+  constexpr auto classifyEntry = [](const std::uint32_t* slots, std::size_t count, std::uint32_t tid) constexpr {
+    std::size_t slot = count;
+    const auto entry = ClassifyTopLevelFilterEntry(slots, count, tid, &slot);
+    return std::pair{ entry, slot };
+  };
+  constexpr std::uint32_t kNoThreads[3] = { 0u, 0u, 0u };
+  static_assert(classifyEntry(kNoThreads, 3, 77u) == std::pair{ TopLevelFilterEntry::kEntered, std::size_t{ 0 } });
+  constexpr std::uint32_t kOneInside[3] = { 55u, 0u, 0u };
+  static_assert(
+    classifyEntry(kOneInside, 3, 77u) == std::pair{ TopLevelFilterEntry::kEntered, std::size_t{ 1 } },
+    "another crashing thread takes the next free slot");
+  static_assert(
+    classifyEntry(kOneInside, 3, 55u).first == TopLevelFilterEntry::kReentered,
+    "a filter under ours that calls ours again is not answered twice");
+  constexpr std::uint32_t kFullOfOthers[3] = { 55u, 66u, 88u };
+  static_assert(classifyEntry(kFullOfOthers, 3, 77u).first == TopLevelFilterEntry::kNoSlot);
+  constexpr std::uint32_t kOwnAfterFree[3] = { 0u, 77u, 0u };
+  static_assert(
+    classifyEntry(kOwnAfterFree, 3, 77u).first == TopLevelFilterEntry::kReentered,
+    "a free slot before the thread's own does not hide the re-entry");
 
   // A fault outside CrashLogger is checked for CrashLogger frames only between
   // it and the kept exception's dispatch CONTEXT, on this thread's stack.
@@ -533,6 +580,64 @@ int main()
     ExtractFunctionBody(crashHandler, "void __cdecl AbortSignalHandler("),
     "previous(signalNumber)",
     "The SIGABRT handler must chain the handler it replaced.");
+
+  // ADR-0032.
+  AssertContains(
+    installCrashHandlerBody,
+    "AddVectoredExceptionHandler(/*First=*/0, ReclaimTopLevelFilterHandler)",
+    "The handler that takes the top-level filter back must be last in the vectored chain, after CrashLogger's.");
+  const std::string reclaimBody =
+    ExtractFunctionBody(crashHandler, "LONG CALLBACK ReclaimTopLevelFilterHandler(");
+  AssertContains(
+    reclaimBody,
+    "displaced != UnhandledExceptionFilterHook",
+    "Taking the filter back must not make the filter chain to itself.");
+  AssertOrdered(
+    reclaimBody,
+    "!ShouldRecordException(code) || code == EXCEPTION_STACK_OVERFLOW",
+    "SetUnhandledExceptionFilter(UnhandledExceptionFilterHook)",
+    "The filter is taken back only for the codes recorded at first chance, and never with a stack overflow's "
+    "little stack: a caught C++ throw must not pay for it.");
+  AssertContains(
+    reclaimBody,
+    "return EXCEPTION_CONTINUE_SEARCH;",
+    "The reclaiming handler must never consume an exception.");
+  AssertOrdered(
+    unhandledFilterBody,
+    "TopLevelFilterEntry::kReentered",
+    "previous(ep)",
+    "A re-entry into the top-level filter must return before the filter under ours is called again.");
+  AssertOrdered(
+    unhandledFilterBody,
+    "SignalUnhandledAndHold(shm, ep->ExceptionRecord)",
+    "previous(ep)",
+    "The helper must be told, and the dump waited for, before the filter under ours ends the process.");
+  AssertOrdered(
+    unhandledFilterBody,
+    "code != EXCEPTION_STACK_OVERFLOW",
+    "SignalUnhandledAndHold(shm, ep->ExceptionRecord)",
+    "A stack overflow must not be held: the stack left belongs to the filters that end the process.");
+  const std::string signalAndHoldBody =
+    ExtractFunctionBody(crashHandler, "void SignalUnhandledAndHold(");
+  AssertOrdered(
+    signalAndHoldBody,
+    "IsCrashRecordOfException(",
+    "SetEvent(unhandled)",
+    "Only the exception the crash record is of may be reported as unhandled.");
+  AssertOrdered(
+    signalAndHoldBody,
+    "OpenEventW(SYNCHRONIZE, FALSE, settledName)",
+    "SetEvent(unhandled)",
+    "The helper's event must be opened before the signal, so a settle that follows at once is not missed.");
+  AssertContains(
+    signalAndHoldBody,
+    "WaitForSingleObject(settled, holdMs)",
+    "The hold must be bounded.");
+  AssertOrdered(
+    sharedMemory,
+    "kKernelObjectSuffix_UnhandledEvent",
+    "g_crashEvent = CreateEventW(",
+    "The unhandled event must exist before the crash event, which is what the helper waits for to attach.");
 
   // CrashLogger is an SKSE plugin and can load after us, leaving the install-time
   // lookup empty. Without a lifecycle refresh, nested-fault suppression would be

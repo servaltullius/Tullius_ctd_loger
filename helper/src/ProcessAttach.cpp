@@ -160,6 +160,22 @@ bool TryAttachCrashEvent(AttachedProcess& proc, std::wstring* err)
   if (err) {
     err->clear();
   }
+
+  // ADR-0032: the plugin makes its "unhandled" event before the crash event,
+  // so it is there now if the plugin has it at all.
+  if (!proc.unhandledEvent) {
+    proc.unhandledEvent = OpenEventW(
+      EVENT_MODIFY_STATE | SYNCHRONIZE,
+      FALSE,
+      MakeKernelName(proc.pid, skydiag::protocol::kKernelObjectSuffix_UnhandledEvent).c_str());
+  }
+  if (proc.unhandledEvent && !proc.dumpSettledEvent) {
+    proc.dumpSettledEvent = CreateEventW(
+      nullptr,
+      /*bManualReset=*/TRUE,
+      /*bInitialState=*/FALSE,
+      MakeKernelName(proc.pid, skydiag::protocol::kKernelObjectSuffix_DumpSettledEvent).c_str());
+  }
   return true;
 }
 
@@ -177,6 +193,14 @@ void Detach(AttachedProcess& p)
   if (p.crashEvent) {
     CloseHandle(p.crashEvent);
     p.crashEvent = nullptr;
+  }
+  if (p.unhandledEvent) {
+    CloseHandle(p.unhandledEvent);
+    p.unhandledEvent = nullptr;
+  }
+  if (p.dumpSettledEvent) {
+    CloseHandle(p.dumpSettledEvent);
+    p.dumpSettledEvent = nullptr;
   }
   if (p.process) {
     CloseHandle(p.process);
