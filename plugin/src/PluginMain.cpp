@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cwchar>
 #include <filesystem>
 #include <optional>
@@ -463,8 +464,79 @@ bool StartHelperIfConfigured(const PluginConfig& cfg)
 // thread outside DllMain.
 static std::jthread* g_watchdogThread = nullptr;
 static std::jthread* g_testHotkeysThread = nullptr;
+static std::jthread* g_topLevelFilterKeeperThread = nullptr;
 static std::atomic_bool g_watchdogStarted{ false };
 static std::atomic_bool g_testHotkeysStarted{ false };
+static std::atomic_bool g_topLevelFilterKeeperStarted{ false };
+
+// "Module.dll+0x1234" for a code address, for the log.
+std::string DescribeCodeAddressForLog(std::uintptr_t address)
+{
+  char text[MAX_PATH * 3 + 32]{};
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExW(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(address), &module) ||
+      !module) {
+    std::snprintf(text, sizeof(text), "an address outside every module (0x%llX)",
+      static_cast<unsigned long long>(address));
+    return text;
+  }
+  wchar_t path[MAX_PATH]{};
+  const DWORD length = GetModuleFileNameW(module, path, MAX_PATH);
+  const std::wstring_view full(path, length);
+  const auto slash = full.find_last_of(L"\\/");
+  const std::wstring_view name = slash == std::wstring_view::npos ? full : full.substr(slash + 1);
+  char nameUtf8[MAX_PATH * 3]{};
+  WideCharToMultiByte(
+    CP_UTF8, 0, name.data(), static_cast<int>(name.size()), nameUtf8, static_cast<int>(sizeof(nameUtf8)) - 1,
+    nullptr, nullptr);
+  std::snprintf(text, sizeof(text), "%s+0x%llX", nameUtf8,
+    static_cast<unsigned long long>(address - reinterpret_cast<std::uintptr_t>(module)));
+  return text;
+}
+
+// ADR-0032: keeps the plugin's filter the process's top-level exception
+// filter. The crash handler takes the slot back while a fatal-code exception
+// is dispatched; this covers what takes it at any other time, so that an
+// unhandled C++ throw or breakpoint still reaches the plugin's filter when no
+// CrashLogger reports it. Logs who held the slot, a few times at most.
+void StartTopLevelFilterKeeper()
+{
+  if (g_topLevelFilterKeeperStarted.exchange(true)) {
+    return;
+  }
+  try {
+    g_topLevelFilterKeeperThread = new std::jthread([](const std::stop_token& stopToken) noexcept {
+      constexpr std::uint32_t kPeriodMs = 1000;
+      constexpr std::uint32_t kStopPollMs = 100;
+      constexpr std::size_t kMaxLoggedHolders = 4;
+      std::uintptr_t loggedHolders[kMaxLoggedHolders]{};
+      std::size_t loggedCount = 0;
+      while (!stopToken.stop_requested()) {
+        const std::uintptr_t displaced = skydiag::plugin::ReclaimTopLevelFilter();
+        if (displaced != 0u && loggedCount < kMaxLoggedHolders &&
+            std::find(loggedHolders, loggedHolders + loggedCount, displaced) == loggedHolders + loggedCount) {
+          loggedHolders[loggedCount++] = displaced;
+          try {
+            spdlog::info(
+              "SkyrimDiag: took the top-level exception filter back from {} (it is called after ours)",
+              DescribeCodeAddressForLog(displaced));
+          } catch (...) {
+            OutputDebugStringW(L"SkyrimDiag: could not log the displaced top-level exception filter.\n");
+          }
+        }
+        for (std::uint32_t waited = 0; waited < kPeriodMs && !stopToken.stop_requested(); waited += kStopPollMs) {
+          Sleep(kStopPollMs);
+        }
+      }
+    });
+  } catch (...) {
+    // Without the keeper the filter is still taken back for fatal codes.
+    g_topLevelFilterKeeperStarted.store(false);
+    spdlog::warn("SkyrimDiag: could not start the top-level exception filter keeper");
+  }
+}
 
 void StartHelperWatchdogIfConfigured(const PluginConfig& cfg)
 {
@@ -657,8 +729,10 @@ void StopPluginBackgroundWorkers() noexcept
 {
   StopOwnedWorker(g_testHotkeysThread);
   StopOwnedWorker(g_watchdogThread);
+  StopOwnedWorker(g_topLevelFilterKeeperThread);
   g_testHotkeysStarted.store(false);
   g_watchdogStarted.store(false);
+  g_topLevelFilterKeeperStarted.store(false);
 }
 
 } // namespace
@@ -732,6 +806,8 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
       skydiag::plugin::SetUnhandledCrashHoldMs(g_cfg.unhandledCrashHoldMs);
       if (!skydiag::plugin::InstallCrashHandler(g_cfg.crashHookMode)) {
         spdlog::warn("SkyrimDiag: crash handler install failed");
+      } else if (g_cfg.crashHookMode == 1) {
+        StartTopLevelFilterKeeper();
       }
     }
 

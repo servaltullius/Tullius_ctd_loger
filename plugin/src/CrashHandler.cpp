@@ -115,6 +115,8 @@ constexpr std::uintptr_t kCrashLoggerStackScanMaxBytes = 0x10000u;  // 64 KB
 // ReclaimTopLevelFilterHandler, i.e. the filter under ours.
 std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_previousUnhandledExceptionFilter{ nullptr };
 std::atomic<std::uint32_t> g_unhandledCrashHoldMs{ kDefaultUnhandledCrashHoldMs };
+// Set once the top-level filter is installed (mode 1).
+std::atomic<bool> g_topLevelFilterInstalled{ false };
 std::atomic<std::uint32_t> g_topLevelFilterThreads[kTopLevelFilterThreadSlotCount]{};
 using AbortSignalHandlerFn = void(__cdecl*)(int);
 std::atomic<AbortSignalHandlerFn> g_previousAbortSignalHandler{ nullptr };
@@ -726,6 +728,23 @@ LONG CALLBACK ReclaimTopLevelFilterHandler(EXCEPTION_POINTERS* ep) noexcept
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+}  // namespace
+
+std::uintptr_t ReclaimTopLevelFilter() noexcept
+{
+  if (!g_topLevelFilterInstalled.load(std::memory_order_acquire)) {
+    return 0u;
+  }
+  const auto displaced = SetUnhandledExceptionFilter(UnhandledExceptionFilterHook);
+  if (displaced == UnhandledExceptionFilterHook) {
+    return 0u;
+  }
+  g_previousUnhandledExceptionFilter.store(displaced, std::memory_order_release);
+  return reinterpret_cast<std::uintptr_t>(displaced);
+}
+
+namespace {
+
 // abort() raises SIGABRT before it ends the process. A throw that leaves a
 // noexcept function, or one caught only to call terminate(), never reaches the
 // top-level filter: terminate() and abort() run right after it is thrown.
@@ -788,6 +807,7 @@ bool InstallCrashHandler(std::uint32_t crashHookMode)
   if (h != nullptr && crashHookMode == 1 && !s_lastChanceHandlersInstalled.exchange(true)) {
     g_previousUnhandledExceptionFilter.store(
       SetUnhandledExceptionFilter(UnhandledExceptionFilterHook), std::memory_order_release);
+    g_topLevelFilterInstalled.store(true, std::memory_order_release);
     // Failing to add it leaves the filter as it was before ADR-0032.
     AddVectoredExceptionHandler(/*First=*/0, ReclaimTopLevelFilterHandler);
     const AbortSignalHandlerFn previousAbort = std::signal(SIGABRT, AbortSignalHandler);

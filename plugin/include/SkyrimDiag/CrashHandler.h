@@ -295,6 +295,21 @@ constexpr TopLevelFilterEntry ClassifyTopLevelFilterEntry(
 // the dump (SetUnhandledCrashHoldMs).
 bool InstallCrashHandler(std::uint32_t crashHookMode);
 
+// ADR-0032: puts the plugin's top-level filter back now, outside any
+// exception. Returns the address of the filter that was on top instead, or 0
+// when the plugin's was (or the filter is not installed: mode 0 or 2).
+//
+// The vectored handler does this only while a fatal-code exception is
+// dispatched. Without CrashLogger nothing re-registers per exception, but
+// something may still take the slot once after the plugin loaded; then an
+// unhandled C++ throw or breakpoint, which only the filter records in that
+// configuration, left no record (seen in game 2026-11-13). The plugin calls
+// this once a second from a thread of its own.
+//
+// Not for the crash path: it is a few kernel calls and takes a lock inside
+// kernelbase.
+std::uintptr_t ReclaimTopLevelFilter() noexcept;
+
 // ADR-0032: how long at most the top-level filter holds the crashing thread
 // for the helper's dump. 0: signal only, never hold. Call before
 // InstallCrashHandler; the default is kDefaultUnhandledCrashHoldMs.

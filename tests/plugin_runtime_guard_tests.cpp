@@ -617,6 +617,37 @@ int main()
     "code != EXCEPTION_STACK_OVERFLOW",
     "SignalUnhandledAndHold(shm, ep->ExceptionRecord)",
     "A stack overflow must not be held: the stack left belongs to the filters that end the process.");
+  // The filter is also taken back outside exceptions, once a second.
+  const std::string reclaimNowBody =
+    ExtractFunctionBody(crashHandler, "std::uintptr_t ReclaimTopLevelFilter() noexcept");
+  AssertOrdered(
+    reclaimNowBody,
+    "!g_topLevelFilterInstalled.load(",
+    "SetUnhandledExceptionFilter(UnhandledExceptionFilterHook)",
+    "The reclaim must do nothing when the plugin's filter was never installed (mode 0 or 2).");
+  AssertContains(
+    reclaimNowBody,
+    "displaced == UnhandledExceptionFilterHook",
+    "The reclaim must not make the filter chain to itself.");
+  const std::string keeperBody = ExtractFunctionBody(pluginMain, "void StartTopLevelFilterKeeper()");
+  AssertContains(
+    keeperBody,
+    "skydiag::plugin::ReclaimTopLevelFilter()",
+    "The keeper thread must take the top-level filter back.");
+  AssertContains(
+    keeperBody,
+    "stopToken.stop_requested()",
+    "The keeper thread must stop with the plugin's other workers.");
+  AssertContains(
+    pluginMain,
+    "StopOwnedWorker(g_topLevelFilterKeeperThread);",
+    "The keeper thread must be stopped at shutdown.");
+  AssertOrdered(
+    pluginMain,
+    "skydiag::plugin::InstallCrashHandler(g_cfg.crashHookMode)",
+    "StartTopLevelFilterKeeper();",
+    "The keeper starts only after the crash handler installed the filter.");
+
   const std::string signalAndHoldBody =
     ExtractFunctionBody(crashHandler, "void SignalUnhandledAndHold(");
   AssertOrdered(
