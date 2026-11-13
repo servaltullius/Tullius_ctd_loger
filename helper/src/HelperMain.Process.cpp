@@ -270,7 +270,7 @@ bool DrainCrashEventBeforeExit(
       exitCode == kExitCodeClosedAsNotResponding || ReadHeartbeatAtExit(cfg, proc).stalled;
     // ADR-0032: the plugin reported it as not handled after the release.
     const bool reportedUnhandled = ShouldReportReleasedCrashOnUnhandledSignal(
-      IsUnhandledExceptionSignaled(proc.unhandledEvent), crash.releasedCrashTick64, nowTick64);
+      IsUnhandledExceptionSignaled(UnhandledEventFor(proc, info, &crash)), crash.releasedCrashTick64, nowTick64);
     if (!reportedUnhandled &&
         !ShouldReportReleasedCrashAtExit(
           exitCode,
@@ -369,6 +369,7 @@ bool DrainCrashEventBeforeExit(
     state->crashCaptured.cleanExitEvidencePath.clear();
     state->crashCaptured.cleanExitDumpIdentity = CleanExitDumpIdentity{};
     state->crashCaptured.cleanExitFilterContext = L"process_exit_metadata_drain";
+    state->crashCaptured.cleanExitUnhandledSignalLeftSet = false;
     AppendLogLine(
       outBase,
       L"Drained committed strong-fault metadata after process exit (exit_code=0, crash_seq="
@@ -595,6 +596,9 @@ void CleanupCrashArtifactsAfterZeroExit(
   const bool lateRecoveryWasWithheld = state && state->crashCaptured.latched &&
     IsLateRecoveryWithheld(
       state->crashCaptured.lateRecoveryWithheldCrashSeq, state->crashCaptured.capturedInfo.crashSeq);
+  if (lateRecoveryWasWithheld) {
+    state->crashCaptured.cleanExitUnhandledSignalLeftSet = true;
+  }
   CleanupFilteredCrashArtifacts(
     cfg, proc, outBase, state, L"process_exit", L"exit_code=0", /*keepDump=*/lateRecoveryWasWithheld);
 }
@@ -631,12 +635,15 @@ bool HandleLateRecoveryTick(
     return false;  // the exit tick classifies an exited process
   }
   auto& crash = state->crashCaptured;
-  if (!AdvanceLateRecovery(&crash.lateRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc)) {
+  const std::uint64_t nowTick64 = GetTickCount64();
+  if (!AdvanceLateRecovery(&crash.lateRecovery, nowTick64, proc.shm->header.last_heartbeat_qpc)) {
     return false;
   }
 
   const std::uint32_t crashSeq = crash.capturedInfo.crashSeq;
-  if (IsCapturedCrashStillUnhandled(crash.latched, IsUnhandledExceptionSignaled(proc.unhandledEvent))) {
+  const bool unhandledSignalSet =
+    IsUnhandledExceptionSignaled(UnhandledEventFor(proc, crash.capturedInfo, &crash));
+  if (ShouldWithholdLateRecovery(unhandledSignalSet, crash.lateRecovery.latchedTick64, nowTick64)) {
     // ADR-0032: the heartbeat is the main thread's; the faulting thread is
     // still in the filters that end the process.
     if (crash.lateRecoveryWithheldCrashSeq != crashSeq) {
@@ -645,7 +652,9 @@ bool HandleLateRecoveryTick(
         outBase,
         L"The game is still running with the heartbeat advancing, but the plugin reported this exception as not "
         L"handled and no filter has resumed it (crash_seq=" + std::to_wstring(crashSeq)
-          + L"): a crash handler is still at work on the faulting thread. Keeping it as a crash.");
+          + L"): a crash handler is still at work on the faulting thread. Keeping it as a crash (released if the "
+            L"game is still running " + std::to_wstring(kLateRecoveryWithheldMaxMs / 1000u)
+          + L" s after the capture).");
     }
     return false;
   }
@@ -653,11 +662,36 @@ bool HandleLateRecoveryTick(
   const auto keptForSec = crash.lateRecovery.lastSampleTick64 >= crash.lateRecovery.latchedTick64
     ? (crash.lateRecovery.lastSampleTick64 - crash.lateRecovery.latchedTick64) / 1000u
     : 0u;
+  // ADR-0032, with the signal still set: it was held back as long as a crash
+  // handler could be at work (kLateRecoveryWithheldMaxMs). The code that
+  // handled this exception itself leaves the signal set each time, so the
+  // signal is not used for this exception again (UnhandledEventFor), and this
+  // release counts as its first handled occurrence (ADR-0031).
+  bool signalDroppedForSession = false;
+  if (unhandledSignalSet) {
+    const auto& fault = crash.capturedInfo;
+    NoteRecoveredFault(&crash.signalLeftSetFaults, fault.exceptionCode, fault.exceptionAddr);
+    NoteRecoveredFault(&crash.recoveredFaults, fault.exceptionCode, fault.exceptionAddr);
+    signalDroppedForSession =
+      IsSignalLeftSetFault(crash.signalLeftSetFaults, fault.exceptionCode, fault.exceptionAddr);
+    crash.cleanExitUnhandledSignalLeftSet = true;
+  }
   AppendLogLine(
     outBase,
     L"Game kept running " + std::to_wstring(keptForSec)
-      + L"s after a crash was captured, with the heartbeat advancing; the exception was handled "
-        L"(crash_seq=" + std::to_wstring(crashSeq) + L"). Releasing the capture.");
+      + L"s after a crash was captured, with the heartbeat advancing"
+      + (unhandledSignalSet
+           ? L". The plugin's report of this exception as not handled was never taken back, but nothing ended "
+             L"the game in that time (crash_seq="
+           : L"; the exception was handled (crash_seq=")
+      + std::to_wstring(crashSeq)
+      + (unhandledSignalSet
+           ? (signalDroppedForSession
+                ? L"): taking the report as left by code that handled the exception itself, and not using it "
+                  L"for this exception again in this session. Releasing the capture."
+                : L"): taking the report as left by code that handled the exception itself. Releasing the "
+                  L"capture.")
+           : L"). Releasing the capture."));
   // The heartbeat proves the main thread runs, not that the faulting thread
   // recovered: a worker blocked for a minute in a crash handler would look
   // the same. So the dump is kept (marked late_recovery) instead of deleted;
@@ -915,7 +949,8 @@ bool HandleProcessExitTick(
     // whatever the exit code is, unless its late recovery was held back.
     const bool capturedCrashOutlivesZeroExit = DoesCapturedCrashOutliveZeroExit(
       state->crashCaptured.latched,
-      IsUnhandledExceptionSignaled(proc.unhandledEvent),
+      IsUnhandledExceptionSignaled(
+        UnhandledEventFor(proc, state->crashCaptured.capturedInfo, &state->crashCaptured)),
       IsLateRecoveryWithheld(
         state->crashCaptured.lateRecoveryWithheldCrashSeq, state->crashCaptured.capturedInfo.crashSeq));
     // Always drain the committed crash generation after observing process exit.

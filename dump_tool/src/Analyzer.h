@@ -575,6 +575,9 @@ struct AnalysisResult
   // Helper filter context: "process_exit" (exit code 0) or "late_recovery"
   // (the game kept running after the crash was captured).
   std::string clean_exit_filter_context;
+  // ADR-0032: the plugin had reported the exception as not handled and never
+  // took that back before the helper let the capture go.
+  bool clean_exit_unhandled_signal_left_set = false;
   std::wstring clean_exit_evidence_filename;
   ForcedCloseInfo forced_close;
   SaveLoadInfo save_load;

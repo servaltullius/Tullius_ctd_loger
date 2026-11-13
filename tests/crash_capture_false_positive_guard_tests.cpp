@@ -216,7 +216,7 @@ int main()
     "The exit code's verdict must look at the plugin's unhandled signal first.");
   AssertContains(
     crashTickBody,
-    "cfg, exitCode, proc.unhandledEvent, info, outBase, L\"post_dump_exit_check\", -1, crashState);",
+    "cfg, exitCode, UnhandledEventFor(proc, info, crashState), info, outBase, L\"post_dump_exit_check\", -1,",
     "The exit check after a dump written late must judge the exit code with the plugin's signal.");
   assert(
     crashCapture.find("ClassifyExitCodeVerdict(exitCode") == crashCapture.rfind("ClassifyExitCodeVerdict(exitCode") &&
@@ -331,6 +331,80 @@ int main()
     processExitTickBody,
     "LaunchDeferredViewersAfterExit(",
     "Process exit tick must invoke deferred viewer launch helper.");
+
+  // ADR-0032: the plugin's signal holds a late recovery back, but only up to
+  // its cap, and only once the heartbeat says the game is running on.
+  const std::string lateRecoveryTickBody = ExtractFunctionBody(helperMain, "bool HandleLateRecoveryTick(");
+  AssertOrdered(
+    lateRecoveryTickBody,
+    "AdvanceLateRecovery(",
+    "ShouldWithholdLateRecovery(unhandledSignalSet, crash.lateRecovery.latchedTick64, nowTick64)",
+    "The late recovery must be held back through the capped rule, after the heartbeat check.");
+  assert(
+    lateRecoveryTickBody.find("if (IsCapturedCrashStillUnhandled(") == std::string::npos &&
+    "The late recovery must not be held back for the signal without the cap.");
+  AssertOrdered(
+    lateRecoveryTickBody,
+    "ShouldWithholdLateRecovery(",
+    "ThawCrashCapture(proc, crashSeq)",
+    "A capture released at the cap must let go of the plugin's signal with the freeze.");
+
+  // An exception released at that cap left the signal set while the game ran
+  // on: the signal is not used for it again. Everything that reads or waits
+  // on the signal for an exception takes the event from UnhandledEventFor;
+  // a bare proc.unhandledEvent would bring back a dump and a freeze each time.
+  AssertContains(
+    lateRecoveryTickBody,
+    "NoteRecoveredFault(&crash.signalLeftSetFaults, fault.exceptionCode, fault.exceptionAddr);",
+    "A release at the cap must note the exception whose signal was left set.");
+  const std::string exitDrainBody = ExtractFunctionBody(helperMain, "bool DrainCrashEventBeforeExit(");
+  assert(
+    lateRecoveryTickBody.find("proc.unhandledEvent") == std::string::npos &&
+    processExitTickBody.find("proc.unhandledEvent") == std::string::npos &&
+    exitDrainBody.find("proc.unhandledEvent") == std::string::npos &&
+    "The helper loop must read the plugin's signal through UnhandledEventFor.");
+  {
+    // In CrashCapture.cpp the event itself is named only where the accessor
+    // is defined and where an incident is let go. Lines that are comments
+    // do not count.
+    const auto usesInCode = [](const std::string& text) {
+      std::size_t uses = 0;
+      std::size_t lineStart = 0;
+      while (lineStart < text.size()) {
+        std::size_t lineEnd = text.find('\n', lineStart);
+        if (lineEnd == std::string::npos) {
+          lineEnd = text.size();
+        }
+        const std::string line = text.substr(lineStart, lineEnd - lineStart);
+        const auto firstChar = line.find_first_not_of(" \t");
+        const bool comment = firstChar != std::string::npos && line.compare(firstChar, 2, "//") == 0;
+        if (!comment) {
+          for (auto at = line.find("proc.unhandledEvent"); at != std::string::npos;
+               at = line.find("proc.unhandledEvent", at + 1)) {
+            ++uses;
+          }
+        }
+        lineStart = lineEnd + 1;
+      }
+      return uses;
+    };
+    const std::string accessorBody = ExtractFunctionBody(crashCapture, "HANDLE UnhandledEventFor(");
+    const std::size_t allowed = usesInCode(accessorBody) + usesInCode(thawCaptureBody);
+    assert(allowed != 0u && "The accessor and the release must be found.");
+    assert(
+      usesInCode(crashCapture) == allowed &&
+      "Crash capture must read the plugin's signal through UnhandledEventFor.");
+  }
+  AssertOrdered(
+    crashTickBody,
+    "ResetEvent(proc.dumpSettledEvent)",
+    "EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);",
+    "A new incident must clear the settled event of an earlier one before anything can set it.");
+  AssertOrdered(
+    crashTickBody,
+    "EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);",
+    "CheckCrashLoggerThreadDumpWindow(",
+    "The plugin's hold for an exception whose signal is not used must end before any recovery check.");
 
   const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
   AssertContains(

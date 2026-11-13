@@ -192,7 +192,8 @@ bool WriteCleanExitEvidenceRecord(
   const CrashEventInfo& info,
   const CleanExitDumpIdentity& dumpIdentity,
   std::wstring_view context,
-  CleanExitDumpState dumpState)
+  CleanExitDumpState dumpState,
+  bool unhandledSignalLeftSet)
 {
   nlohmann::json j = nlohmann::json::object();
   j["schema"] = "skydiag.clean_exit_evidence.v1";
@@ -226,6 +227,11 @@ bool WriteCleanExitEvidenceRecord(
   }
   j["captured_at"] = WideToUtf8(Timestamp());
   j["filter_context"] = WideToUtf8(context);
+  if (unhandledSignalLeftSet) {
+    // Additive (ADR-0032): the plugin reported the exception as not handled
+    // and had not taken that back when the capture was let go.
+    j["unhandled_signal_left_set"] = true;
+  }
   j["exception_code"] = info.exceptionCode;
   j["exception_addr"] = info.exceptionAddr;
   j["faulting_tid"] = info.faultingTid;
@@ -247,8 +253,12 @@ bool WriteCleanExitEvidenceRecord(
       "will record whether the dump was discarded or remained on disk.";
   } else if (dumpState == CleanExitDumpState::kPreserved) {
     j["note"] = context == L"late_recovery"
-      ? "The game published a strong fault record but kept running for over a minute with "
-        "its heartbeat advancing. The dump remains available; derived crash actions were suppressed."
+      ? (unhandledSignalLeftSet
+           ? "The game published a strong fault record and the plugin reported the exception as not "
+             "handled, a report it never took back, but the game kept running for minutes with its "
+             "heartbeat advancing. The dump remains available; derived crash actions were suppressed."
+           : "The game published a strong fault record but kept running for over a minute with "
+             "its heartbeat advancing. The dump remains available; derived crash actions were suppressed.")
       : "The game published a strong fault record but exited with code 0. The filtered "
         "dump remains available; derived crash actions were suppressed.";
   } else if (dumpState == CleanExitDumpState::kDeleteFailed) {
@@ -332,7 +342,44 @@ bool IsUnhandledExceptionSignaled(HANDLE unhandledEvent) noexcept
   return unhandledEvent && WaitForSingleObject(unhandledEvent, 0) == WAIT_OBJECT_0;
 }
 
+HANDLE UnhandledEventFor(
+  const skydiag::helper::AttachedProcess& proc,
+  const CrashEventInfo& info,
+  const CrashCaptureState* crashState) noexcept
+{
+  if (crashState &&
+      IsSignalLeftSetFault(crashState->signalLeftSetFaults, info.exceptionCode, info.exceptionAddr)) {
+    return nullptr;
+  }
+  return proc.unhandledEvent;
+}
+
 namespace {
+
+// ADR-0032: an exception whose "not handled" report was left set before
+// while the game ran on is judged without that report (UnhandledEventFor).
+// The plugin holds its thread in the top-level filter until the dump is
+// settled, and where recovery is checked first no dump may ever be written:
+// the hold is ended at once.
+void EndHoldOfSignalLeftSetFault(
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  const CrashCaptureState* crashState)
+{
+  if (!crashState ||
+      !IsSignalLeftSetFault(crashState->signalLeftSetFaults, info.exceptionCode, info.exceptionAddr)) {
+    return;
+  }
+  AppendLogLine(
+    outBase,
+    L"This exception (same code and address) kept the plugin's \"not handled\" report set earlier in this "
+    L"session while the game ran on; that report is not used for it. Judging it by the heartbeat and the exit "
+    L"code.");
+  if (proc.dumpSettledEvent) {
+    SetEvent(proc.dumpSettledEvent);
+  }
+}
 
 // ADR-0032: the plugin said this exception reached the top-level filter, so
 // nothing in the game handled it. Logged once per incident.
@@ -547,6 +594,9 @@ void ProcessValidCrashDump(
   const std::wstring& dumpPath,
   const std::wstring& ts,
   const CrashEventInfo& info,
+  // ADR-0032: the plugin's signal as far as this exception goes
+  // (UnhandledEventFor), not the process's event itself.
+  HANDLE unhandledEvent,
   const skydiag::ForcedCloseMatch& forcedClose,
   const skydiag::helper::DumpProfile& writtenProfile,
   const PluginScanInputs& pluginScanInputs,
@@ -609,7 +659,7 @@ void ProcessValidCrashDump(
       // these (IsForcedCloseCrashManifest), apart from the real crashes.
       ctx["forced_close"] = true;
     }
-    if (IsUnhandledExceptionSignaled(proc.unhandledEvent)) {
+    if (IsUnhandledExceptionSignaled(unhandledEvent)) {
       // ADR-0032: the plugin saw the exception reach the top-level filter.
       ctx["unhandled_exception_signal"] = true;
     }
@@ -663,7 +713,7 @@ void ProcessValidCrashDump(
         // after this, and its late recovery has not begun); an exit with code
         // 0 undoes that only when the plugin does not report it as not handled.
         const bool crashOutlivesZeroExit = DoesCapturedCrashOutliveZeroExit(
-          /*crashLatched=*/true, IsUnhandledExceptionSignaled(proc.unhandledEvent), /*lateRecoveryWithheld=*/false);
+          /*crashLatched=*/true, IsUnhandledExceptionSignaled(unhandledEvent), /*lateRecoveryWithheld=*/false);
         if (IsNormalExitForCapturedCrash(processExitCode, crashOutlivesZeroExit)) {
           AppendLogLine(
             outBase,
@@ -811,7 +861,8 @@ bool TryWriteCleanExitEvidenceRecord(
         crashState->capturedInfo,
         crashState->cleanExitDumpIdentity,
         context,
-        dumpState)) {
+        dumpState,
+        crashState->cleanExitUnhandledSignalLeftSet)) {
     return false;
   }
   crashState->cleanExitEvidenceWritten = true;
@@ -1165,7 +1216,14 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
     FILETIME eventTime{};
     GetSystemTimeAsFileTime(&eventTime);
     const auto early = FilterFirstChanceException(
-      cfg, proc.process, proc.crashEvent, proc.unhandledEvent, &proc.shm->header, info, outBase, crashState);
+      cfg,
+      proc.process,
+      proc.crashEvent,
+      UnhandledEventFor(proc, info, crashState),
+      &proc.shm->header,
+      info,
+      outBase,
+      crashState);
     if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
       const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
         ThawCrashCapture(proc, info.crashSeq);
@@ -1234,7 +1292,14 @@ RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
       + std::to_wstring(kRepeatedRecoveredFaultMinCount)
       + L" times in this session; checking whether the game recovers before writing a crash dump.");
   const auto early = FilterFirstChanceException(
-    cfg, proc.process, proc.crashEvent, proc.unhandledEvent, &proc.shm->header, info, outBase, crashState);
+    cfg,
+    proc.process,
+    proc.crashEvent,
+    UnhandledEventFor(proc, info, crashState),
+    &proc.shm->header,
+    info,
+    outBase,
+    crashState);
   if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
     const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
       ThawCrashCapture(proc, info.crashSeq);
@@ -1644,6 +1709,7 @@ bool HandleCrashEventTick(
     crashState->cleanExitEvidencePath.clear();
     crashState->cleanExitDumpIdentity = CleanExitDumpIdentity{};
     crashState->cleanExitFilterContext.clear();
+    crashState->cleanExitUnhandledSignalLeftSet = false;
     // An earlier released exception's held dump is not needed once this
     // newer crash has a dump of its own (the exit path only ever reports the
     // newest committed crash). Until then it is kept: if this dump cannot be
@@ -1666,6 +1732,15 @@ bool HandleCrashEventTick(
       L"This " + DescribeForcedCloseForLog(forcedClose)
         + L": an error while the game was being closed, not a CTD (the viewer will not open).");
   }
+
+  // ADR-0032: this incident's dump is not settled yet. The event is cleared
+  // when an incident is let go (ThawCrashCapture), but one that a newer crash
+  // record superseded is never let go: left set, it would end the plugin's
+  // hold of the crash that superseded it before that crash's dump is written.
+  if (proc.dumpSettledEvent) {
+    ResetEvent(proc.dumpSettledEvent);
+  }
+  EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);
 
   bool exitedBeforeDump = false;
   bool checkedRecoveryBeforeDump = false;
@@ -1753,7 +1828,8 @@ bool HandleCrashEventTick(
         DWORD exitCode = STILL_ACTIVE;
         if (TryReadExitCode(proc.process, outBase, &exitCode)) {
           verdict = ClassifyExitCodeVerdictWithContext(
-            cfg, exitCode, proc.unhandledEvent, info, outBase, L"post_dump_exit_check", -1, crashState);
+            cfg, exitCode, UnhandledEventFor(proc, info, crashState), info, outBase, L"post_dump_exit_check", -1,
+            crashState);
         }
       }
     } else {
@@ -1761,14 +1837,21 @@ bool HandleCrashEventTick(
         cfg,
         proc.process,
         proc.crashEvent,
-        proc.unhandledEvent,
+        UnhandledEventFor(proc, info, crashState),
         proc.shm ? &proc.shm->header : nullptr,
         info,
         outBase,
         crashState);
       if (verdict == FilterVerdict::kKeepDump && proc.shm) {
         verdict = FilterFirstChanceException(
-          cfg, proc.process, proc.crashEvent, proc.unhandledEvent, &proc.shm->header, info, outBase, crashState);
+          cfg,
+          proc.process,
+          proc.crashEvent,
+          UnhandledEventFor(proc, info, crashState),
+          &proc.shm->header,
+          info,
+          outBase,
+          crashState);
       }
     }
     if (verdict != FilterVerdict::kKeepDump) {
@@ -1805,6 +1888,7 @@ bool HandleCrashEventTick(
     dumpPath,
     ts,
     info,
+    UnhandledEventFor(proc, info, crashState),
     forcedClose,
     writtenProfile,
     pluginScanInputs,

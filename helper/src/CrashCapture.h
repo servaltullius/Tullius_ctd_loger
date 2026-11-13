@@ -207,23 +207,42 @@ constexpr void NoteRecoveredFault(
   history->nextReplace = (history->nextReplace + 1u) % kRecoveredFaultHistoryCapacity;
 }
 
-// Not for a C++ throw or a breakpoint: their address is always the same
-// RaiseException / DebugBreak in KernelBase, so code and address match every
-// unrelated throw, not the same fault.
-constexpr bool IsRepeatedRecoveredFault(
+// How often `history` holds this fault (NoteRecoveredFault). Never for a C++
+// throw or a breakpoint: their address is always the same RaiseException /
+// DebugBreak in KernelBase, so code and address match every unrelated throw,
+// not the same fault.
+constexpr std::uint32_t RecoveredFaultCount(
   const RecoveredFaultHistory& history,
   std::uint32_t exceptionCode,
   std::uint64_t exceptionAddr) noexcept
 {
   if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
-    return false;
+    return 0u;
   }
   for (const auto& entry : history.entries) {
     if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
-      return entry.count >= kRepeatedRecoveredFaultMinCount;
+      return entry.count;
     }
   }
-  return false;
+  return 0u;
+}
+
+constexpr bool IsRepeatedRecoveredFault(
+  const RecoveredFaultHistory& history,
+  std::uint32_t exceptionCode,
+  std::uint64_t exceptionAddr) noexcept
+{
+  return RecoveredFaultCount(history, exceptionCode, exceptionAddr) >= kRepeatedRecoveredFaultMinCount;
+}
+
+// ADR-0032: whether `history` holds this fault at all, for
+// CrashCaptureState::signalLeftSetFaults.
+constexpr bool IsSignalLeftSetFault(
+  const RecoveredFaultHistory& history,
+  std::uint32_t exceptionCode,
+  std::uint64_t exceptionAddr) noexcept
+{
+  return RecoveredFaultCount(history, exceptionCode, exceptionAddr) != 0u;
 }
 
 struct ReleasedDumpContext;  // CaptureCommon.h
@@ -239,6 +258,11 @@ struct CrashCaptureState {
   std::filesystem::path cleanExitEvidencePath;
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
+  // ADR-0032: whether the plugin's "not handled" report was still set when
+  // this capture was let go as handled (released at kLateRecoveryWithheldMaxMs,
+  // or a zero exit after its late recovery was held back). It goes into the
+  // clean-exit evidence, the only record left beside the dump.
+  bool cleanExitUnhandledSignalLeftSet = false;
   LateRecoveryState lateRecovery{};
   // ADR-0022: the close request this crash followed (FindForcedCloseInSnapshot),
   // and the one the released crash below followed. A forced-close error opens
@@ -294,26 +318,59 @@ struct CrashCaptureState {
   // reached the top-level exception filter). 0: none.
   std::uint32_t unhandledSignalCrashSeq = 0;
   // The crash generation whose late recovery was held back because that
-  // signal is still set (logged once). 0: none.
+  // signal is still set (logged once; ShouldWithholdLateRecovery). 0: none.
   std::uint32_t lateRecoveryWithheldCrashSeq = 0;
+  // Exceptions (code and address) whose capture was released at
+  // kLateRecoveryWithheldMaxMs with that signal still set: the code that
+  // handles them leaves it set every time. For the rest of the session the
+  // signal is not used for them (UnhandledEventFor), so they are judged as
+  // any handled exception, ADR-0031's repeat rule included. Otherwise each
+  // occurrence would be dumped at once and frozen for the cap again.
+  RecoveredFaultHistory signalLeftSetFaults{};
 };
 
 // ADR-0032: whether the captured crash is one the plugin reported as not
 // handled and that no filter has made run on since. The plugin sets the signal
 // only for the exception in the crash record and takes it back when a filter
 // under its own resumes the thread; the helper resets it when it lets go of
-// the incident. While it is set, the faulting thread is still in the filters
-// that end the process (a crash handler writing its log, or showing a dialog),
-// however long the main thread's heartbeat goes on: not a handled exception,
-// and not a normal exit when the process then ends with code 0.
+// the incident. While it is set, the faulting thread is taken to be still in
+// the filters that end the process (a crash handler writing its log, or
+// showing a dialog), although the main thread's heartbeat goes on: not a
+// handled exception (for as long as ShouldWithholdLateRecovery says), and not
+// a normal exit when the process then ends with code 0.
 constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSignalSet) noexcept
 {
   return crashLatched && unhandledSignalSet;
 }
 
+// How long that signal holds the late recovery of a captured crash back,
+// counted from when the crash was kept. A crash handler ends the game within
+// seconds (Crash Logger wrote its log about 2 s after the fault with 4,250
+// plugins, ADR-0032), so a game still running after this long, its heartbeat
+// advancing, is not being ended: the signal was left set by code that calls
+// UnhandledExceptionFilter from its own __except and then runs on (the plugin
+// takes the signal back only when a filter answers
+// EXCEPTION_CONTINUE_EXECUTION). Without this such a capture would stay
+// latched and frozen until the game ends, and no later exception of the
+// session would be recorded.
+inline constexpr std::uint64_t kLateRecoveryWithheldMaxMs = 300'000;
+
+// Whether the late recovery of a latched capture that has come up
+// (AdvanceLateRecovery) is held back: the crash is still reported as not
+// handled, and it was kept less than kLateRecoveryWithheldMaxMs ago.
+constexpr bool ShouldWithholdLateRecovery(
+  bool unhandledSignalSet,
+  std::uint64_t latchedTick64,
+  std::uint64_t nowTick64) noexcept
+{
+  return unhandledSignalSet && nowTick64 - latchedTick64 < kLateRecoveryWithheldMaxMs;
+}
+
 // Whether the late recovery of the captured crash was held back
 // (HandleLateRecoveryTick): the game ran on for kLateRecoveryMinAliveMs (a
 // minute) with the heartbeat advancing while the plugin's signal stayed set.
+// Such a capture is still latched; kLateRecoveryWithheldMaxMs after it was
+// kept it is released.
 constexpr bool IsLateRecoveryWithheld(std::uint32_t withheldCrashSeq, std::uint32_t capturedCrashSeq) noexcept
 {
   return withheldCrashSeq != 0u && withheldCrashSeq == capturedCrashSeq;
@@ -780,6 +837,16 @@ DWORD WaitForCrashUnhandledOrProcess(
   HANDLE process,
   DWORD waitMs) noexcept;
 bool IsUnhandledExceptionSignaled(HANDLE unhandledEvent) noexcept;
+
+// ADR-0032: the plugin's "not handled" event as far as the exception `info`
+// goes: none for one that left it set before while the game ran on
+// (CrashCaptureState::signalLeftSetFaults). Everything that reads or waits on
+// the signal for an exception takes the event from here; only letting go of
+// an incident (ThawCrashCapture) resets the event itself.
+HANDLE UnhandledEventFor(
+  const skydiag::helper::AttachedProcess& proc,
+  const CrashEventInfo& info,
+  const CrashCaptureState* crashState) noexcept;
 
 // The verdict a process exit code gives a captured exception; every reader of
 // an exit code that decides a verdict comes through here. ADR-0032: the

@@ -168,6 +168,7 @@ nlohmann::json BuildSummaryJson(
       { "validated", true },
       { "dump_state", r.clean_exit_dump_state },
       { "filter_context", r.clean_exit_filter_context },
+      { "unhandled_signal_left_set", r.clean_exit_unhandled_signal_left_set },
       { "sidecar_filename", WideToUtf8(r.clean_exit_evidence_filename) },
     };
   }
