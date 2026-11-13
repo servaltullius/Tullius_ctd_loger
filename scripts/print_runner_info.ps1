@@ -21,7 +21,7 @@ try {
 }
 
 # The processor state Windows is set up to save with every exception. Where it
-# is large (Intel AMX on Windows Server 2022: a context of 11,696 bytes on the
+# is large (Intel AMX on Windows Server 2022: a context of 11,648 to 11,696 bytes on the
 # thread's stack, of the 12,288 kept back at a stack overflow) a stack overflow
 # ends the process before any handler runs (ADR-0032). The length printed is
 # InitializeContext's for the features enabled system-wide; what an exception

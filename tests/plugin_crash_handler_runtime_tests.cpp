@@ -376,7 +376,7 @@ __declspec(noinline) DWORD MeasureExceptionContextBytes()
 // that (11,744 to 12,288 bytes were left where it was measured). On those
 // hosts a context takes 1,792 to 3,440 bytes and the handlers and filters here
 // are done in the rest. Where Windows saves a large extended state (Intel AMX
-// on Windows Server 2022: 11,696 bytes for every thread) the context does not
+// on Windows Server 2022: 11,648 to 11,696 bytes, any thread) the context does not
 // fit: Windows ends the process and calls no handler, the plugin's included,
 // so there is nothing of the plugin's to test (ADR-0032, Decision 5). There,
 // and only there, the child keeps back what an ordinary host has left after
