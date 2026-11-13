@@ -92,7 +92,7 @@ Capture and the text report work under Wine/Proton, but the WinUI viewer does no
 
 [b]Automatic capture[/b]
 [list]
-[*][b]CTD:[/b] For captured fatal crashes, Tullius normally writes a crash dump and report. Strong faults followed by process exit code 0 are filtered by default and leave clean-exit evidence metadata instead
+[*][b]CTD:[/b] For captured fatal crashes, Tullius normally writes a crash dump and report. Strong faults followed by process exit code 0 are filtered by default and leave clean-exit evidence metadata instead, unless the plugin saw the exception go unhandled (it reached the process's top-level exception filter): that one is kept as a crash whatever the exit code is
 [*][b]Freeze / ILS:[/b] When the configured threshold is exceeded, Tullius generates a hang dump
 [/list]
 

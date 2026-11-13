@@ -264,7 +264,11 @@ bool DrainCrashEventBeforeExit(
     // A frozen game that was closed, not a crash handler that ended it.
     const bool frozeAfterRelease = state->hangState.hangCapturedThisEpisode ||
       exitCode == kExitCodeClosedAsNotResponding || ReadHeartbeatAtExit(cfg, proc).stalled;
-    if (!ShouldReportReleasedCrashAtExit(
+    // ADR-0032: the plugin reported it as not handled after the release.
+    const bool reportedUnhandled = ShouldReportReleasedCrashOnUnhandledSignal(
+      IsUnhandledExceptionSignaled(proc.unhandledEvent), crash.releasedCrashTick64, nowTick64);
+    if (!reportedUnhandled &&
+        !ShouldReportReleasedCrashAtExit(
           exitCode,
           info.exceptionCode,
           crash.releasedOnBriefHeartbeat,
@@ -309,16 +313,23 @@ bool DrainCrashEventBeforeExit(
     }
     AppendLogLine(
       outBase,
-      L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
-        + L" was released as a handled exception, but the game then exited abnormally (exit_code="
+      L"Committed crash_seq=" + std::to_wstring(info.crashSeq) + L" was released as a handled exception, but "
+        + (reportedUnhandled ? L"the plugin then reported it as not handled and the game exited (exit_code="
+                             : L"the game then exited abnormally (exit_code=")
         + std::to_wstring(exitCode) + L", " + std::to_wstring(secondsSinceRelease) + L" s after the release"
         + crashLogEvidence + L"); recording it after all.");
     if (PromoteReleasedCrashDump(cfg, outBase, info, state)) {
+      // The exit tick must not undo it for an exit code of 0.
+      state->crashCaptured.releasedCrashPromotedOnUnhandledSignal = reportedUnhandled;
       return true;
     }
     if (state->postExitEvidenceSeq != info.crashSeq &&
         TryWritePostExitCrashEvidenceRecord(
-          outBase, info, exitCode, PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit)) {
+          outBase,
+          info,
+          exitCode,
+          reportedUnhandled ? PostExitEvidenceReason::kReleasedFaultReportedUnhandled
+                            : PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit)) {
       state->postExitEvidenceSeq = info.crashSeq;
     }
     return true;
@@ -571,12 +582,11 @@ void CleanupCrashArtifactsAfterZeroExit(
 {
   // ADR-0032: a crash whose late recovery was held back (the plugin reported
   // it as not handled) would have kept its dump had the recovery run; an exit
-  // with code 0 after that keeps it too. This runs for it only once the plugin
-  // took the signal back: with the signal still set the exit tick keeps the
-  // whole crash (IsNormalExitForCapturedCrash).
+  // with code 0 after that keeps it too, whether or not the signal is still
+  // set (DoesCapturedCrashOutliveZeroExit says why not the whole crash).
   const bool lateRecoveryWasWithheld = state && state->crashCaptured.latched &&
-    state->crashCaptured.lateRecoveryWithheldCrashSeq != 0u &&
-    state->crashCaptured.lateRecoveryWithheldCrashSeq == state->crashCaptured.capturedInfo.crashSeq;
+    IsLateRecoveryWithheld(
+      state->crashCaptured.lateRecoveryWithheldCrashSeq, state->crashCaptured.capturedInfo.crashSeq);
   CleanupFilteredCrashArtifacts(
     cfg, proc, outBase, state, L"process_exit", L"exit_code=0", /*keepDump=*/lateRecoveryWasWithheld);
 }
@@ -586,8 +596,9 @@ void ReleasePendingCrashAnalysisAtShutdown(const std::filesystem::path& outBase,
   if (!state || !state->pendingCrashAnalysis.active) {
     return;
   }
-  // The game exited after a crash (a zero exit already stopped the
-  // analyzer). Stopping it now would lose the report when no viewer runs
+  // The game exited after a crash (the cleanup of a normal exit already
+  // stopped the analyzer; a crash kept through an exit with code 0 comes here
+  // as any other). Stopping it now would lose the report when no viewer runs
   // (AutoOpenViewerOnCrash=0): let it finish, unless the viewer opened at
   // exit is analyzing the same dump.
   if (state->crashViewerLaunchedAtExit) {
@@ -779,7 +790,7 @@ void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
   DWORD exitCode,
-  bool capturedCrashStillUnhandled,
+  bool crashOutlivesZeroExit,
   HelperLoopState* state)
 {
   if (!state) {
@@ -787,7 +798,7 @@ void LaunchDeferredViewersAfterExit(
   }
 
   // ADR-0032: a crash kept through an exit with code 0 gets its viewer too.
-  const bool normalExit = IsNormalExitForCapturedCrash(exitCode, capturedCrashStillUnhandled);
+  const bool normalExit = IsNormalExitForCapturedCrash(exitCode, crashOutlivesZeroExit);
   if (!state->pendingCrashViewerDumpPath.empty() &&
       cfg.autoOpenViewerOnCrash &&
       !normalExit) {
@@ -893,12 +904,18 @@ bool HandleProcessExitTick(
     }
     // ADR-0032: read before the drain, which latches a record nobody captured.
     // A captured crash the plugin still reports as not handled stays a crash
-    // whatever the exit code is.
-    const bool capturedCrashStillUnhandled = IsCapturedCrashStillUnhandled(
-      state->crashCaptured.latched, IsUnhandledExceptionSignaled(proc.unhandledEvent));
+    // whatever the exit code is, unless its late recovery was held back.
+    const bool capturedCrashOutlivesZeroExit = DoesCapturedCrashOutliveZeroExit(
+      state->crashCaptured.latched,
+      IsUnhandledExceptionSignaled(proc.unhandledEvent),
+      IsLateRecoveryWithheld(
+        state->crashCaptured.lateRecoveryWithheldCrashSeq, state->crashCaptured.capturedInfo.crashSeq));
     // Always drain the committed crash generation after observing process exit.
     // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
     const bool crashOnRecord = DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
+    // So does a released crash the drain just made the crash on that report.
+    const bool crashOutlivesZeroExit =
+      capturedCrashOutlivesZeroExit || state->crashCaptured.releasedCrashPromotedOnUnhandledSignal;
     // A dump held for a released crash that the drain did not report (or
     // whose record is gone) is not needed any more.
     DiscardReleasedCrashDump(outBase, &state->crashCaptured, L"the game exited without reporting its exception");
@@ -983,11 +1000,12 @@ bool HandleProcessExitTick(
             + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
       }
     }
-    if (IsNormalExitForCapturedCrash(exitCode, capturedCrashStillUnhandled)) {
+    if (IsNormalExitForCapturedCrash(exitCode, crashOutlivesZeroExit)) {
       const bool hadCapturedCrash = state->crashCaptured.latched;
       CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, state);
       AppendExitClassificationLog(outBase, hadCapturedCrash);
-    } else if (exitCode == 0) {
+    } else if (exitCode == 0 && capturedCrashOutlivesZeroExit) {
+      // (The drain has logged a released crash it reported.)
       AppendLogLine(
         outBase,
         L"The game exited with exit_code=0, but the plugin had reported the captured exception as not handled and "
@@ -1012,7 +1030,7 @@ bool HandleProcessExitTick(
         hang.modalDialogSeenThisEpisode);
     }
     SettleHeldHangDumpAtExit(cfg, outBase, state);
-    LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, capturedCrashStillUnhandled, state);
+    LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, crashOutlivesZeroExit, state);
     return true;
   }
   if (w == WAIT_FAILED) {
