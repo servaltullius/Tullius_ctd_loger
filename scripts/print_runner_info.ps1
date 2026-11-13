@@ -1,6 +1,7 @@
-# Prints the Windows runner details the intermittent self-dump failure
-# (MiniDumpWriteDump 0x800706F8) may depend on, so failing and passing CI runs
-# can be compared. Diagnostic only: it never fails the job.
+# Prints the Windows runner details that intermittent CI failures have depended
+# on (the self-dump failure MiniDumpWriteDump 0x800706F8, the stack overflow
+# test of the plugin's crash handler), so failing and passing CI runs can be
+# compared. Diagnostic only: it never fails the job.
 $ErrorActionPreference = 'Continue'
 
 $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -19,9 +20,13 @@ try {
   "IsProcessorFeaturePresent unavailable: $_"
 }
 
-# What Windows saves of the processor's state with every exception. A context
-# too large for the stack kept back at a stack overflow (Intel AMX: 11.5 KB of
-# the 12 KB) ends such a crash before any handler runs (ADR-0032).
+# The processor state Windows is set up to save with every exception. Where it
+# is large (Intel AMX on Windows Server 2022: a context of 11,696 bytes on the
+# thread's stack, of the 12,288 kept back at a stack overflow) a stack overflow
+# ends the process before any handler runs (ADR-0032). The length printed is
+# InitializeContext's for the features enabled system-wide; what an exception
+# of a thread really takes is in the failure messages of
+# skydiag_plugin_crash_handler_runtime_tests.
 try {
   Add-Type -Namespace SkyDiag -Name XState -MemberDefinition '[DllImport("kernel32.dll")] public static extern ulong GetEnabledXStateFeatures(); [DllImport("kernel32.dll")] public static extern bool InitializeContext(IntPtr buffer, uint contextFlags, IntPtr context, ref uint contextLength);'
   $xstate = [SkyDiag.XState]::GetEnabledXStateFeatures()
@@ -29,7 +34,7 @@ try {
   # CONTEXT_ALL | CONTEXT_XSTATE on x64; fails by design and reports the length.
   [void][SkyDiag.XState]::InitializeContext([IntPtr]::Zero, 0x0010005F, [IntPtr]::Zero, [ref]$contextLength)
   # XSTATE_MASK_AMX_TILE_DATA = bit 18
-  "XState features=0x$($xstate.ToString('x')) AMX=$(($xstate -band 0x40000) -ne 0) exception context=$contextLength bytes"
+  "XState features enabled system-wide=0x$($xstate.ToString('x')) (AMX tile data=$(($xstate -band 0x40000) -ne 0)) InitializeContext length=$contextLength bytes"
 } catch {
   "XState query unavailable: $_"
 }

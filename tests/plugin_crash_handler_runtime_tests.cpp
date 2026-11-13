@@ -349,31 +349,79 @@ __declspec(noinline) std::uint64_t RecurseUntil(std::uint64_t depth, volatile st
   return RecurseUntil(depth + 1, limit) + static_cast<std::uint64_t>(pad[0]);
 }
 
-// Windows puts the exception's CONTEXT, with the processor's extended state,
-// on the stack that overflowed, and keeps about 12 KB of every stack back for
-// that. An ordinary host's context is 3.3 KB or less, and the handlers and
-// filters here are done in the rest. Where that state is large (Intel AMX: a
-// context of 11.5 KB) it does not fit: Windows ends the process and calls no
-// handler, the plugin's included, so there is nothing of the plugin's to test
-// (ADR-0032, Decision 5). There, and only there, the child keeps back what an
-// ordinary host has left after its context; elsewhere it overflows with the
-// default, as the game does.
-constexpr DWORD kDefaultStackOverflowReserveBytes = 12u * 1024u;
-constexpr DWORD kStackOverflowHandlerRoomBytes = 8u * 1024u;
+// The bytes the last exception measured here took on its thread's stack for
+// its CONTEXT: Windows puts that right under the stack pointer the thread had.
+DWORD g_exceptionContextBytes = 0;
 
-bool KeepStackForALargeExceptionContext()
+int NoteExceptionContextBytes(const EXCEPTION_POINTERS* ep)
 {
-  DWORD contextLength = 0;
-  // Fails by design: with no buffer it only says how large one must be.
-  InitializeContext(nullptr, CONTEXT_ALL | CONTEXT_XSTATE, nullptr, &contextLength);
-  if (contextLength == 0u) {
+  g_exceptionContextBytes =
+    static_cast<DWORD>(ep->ContextRecord->Rsp - reinterpret_cast<std::uintptr_t>(ep->ContextRecord));
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// Takes a fault of its own to see it, so only before the plugin's handlers
+// are installed: they would record it.
+__declspec(noinline) DWORD MeasureExceptionContextBytes()
+{
+  __try {
+    WriteThroughNull();
+  } __except (NoteExceptionContextBytes(GetExceptionInformation())) {
+  }
+  return g_exceptionContextBytes;
+}
+
+// Windows puts the exception's CONTEXT, with the processor's extended state,
+// on the stack that overflowed, and keeps three pages of every stack back for
+// that (11,744 to 12,288 bytes were left where it was measured). On those
+// hosts a context takes 1,792 to 3,440 bytes and the handlers and filters here
+// are done in the rest. Where Windows saves a large extended state (Intel AMX
+// on Windows Server 2022: 11,696 bytes for every thread) the context does not
+// fit: Windows ends the process and calls no handler, the plugin's included,
+// so there is nothing of the plugin's to test (ADR-0032, Decision 5). There,
+// and only there, the child keeps back what an ordinary host has left after
+// its context; elsewhere it overflows with the default, as the game does.
+constexpr DWORD kDefaultStackOverflowReserveBytes = 3u * 4096u;
+constexpr DWORD kStackOverflowHandlerRoomBytes = 2u * 4096u;
+// Larger than any context: a measurement beyond it is not one.
+constexpr DWORD kExceptionContextBytesMax = 256u * 1024u;
+
+// The stack to have Windows keep back for a context of that size; 0 leaves
+// the default.
+constexpr DWORD StackGuaranteeForExceptionContext(DWORD contextBytes) noexcept
+{
+  return contextBytes + kStackOverflowHandlerRoomBytes <= kDefaultStackOverflowReserveBytes
+    ? 0u
+    : contextBytes + kStackOverflowHandlerRoomBytes;
+}
+
+static_assert(StackGuaranteeForExceptionContext(1792u) == 0u);
+static_assert(StackGuaranteeForExceptionContext(3440u) == 0u);
+static_assert(StackGuaranteeForExceptionContext(4096u) == 0u);
+static_assert(StackGuaranteeForExceptionContext(4097u) == 4097u + kStackOverflowHandlerRoomBytes);
+static_assert(StackGuaranteeForExceptionContext(11696u) == 19888u);
+
+// `always`: also where the default would do, so that this path runs on every
+// host and not only on the few with a large context.
+bool KeepStackForExceptionContext(DWORD contextBytes, bool always)
+{
+  if (contextBytes == 0u || contextBytes > kExceptionContextBytesMax) {
     return false;
   }
-  if (contextLength + kStackOverflowHandlerRoomBytes <= kDefaultStackOverflowReserveBytes) {
-    return true;
+  ULONG guarantee = StackGuaranteeForExceptionContext(contextBytes);
+  if (guarantee == 0u) {
+    if (!always) {
+      return true;
+    }
+    guarantee = contextBytes + kStackOverflowHandlerRoomBytes;
   }
-  ULONG guarantee = contextLength + kStackOverflowHandlerRoomBytes;
-  return SetThreadStackGuarantee(&guarantee) != FALSE;
+  const ULONG asked = guarantee;
+  if (!SetThreadStackGuarantee(&guarantee)) {
+    return false;
+  }
+  // Asked with 0, it changes nothing and says what the thread has.
+  ULONG kept = 0;
+  return SetThreadStackGuarantee(&kept) != FALSE && kept >= asked;
 }
 
 [[noreturn]] __declspec(noinline) void ThrowRuntimeError()
@@ -399,6 +447,11 @@ int RunChild(const char* mode, const char* goEventName)
   }
   if (std::strcmp(mode, "unhandled-fault-no-hold") == 0) {
     skydiag::plugin::SetUnhandledCrashHoldMs(0);
+  }
+  const bool stackOverflowKeptBack = std::strcmp(mode, "unhandled-stack-overflow-kept-back") == 0;
+  const bool stackOverflow = stackOverflowKeptBack || std::strcmp(mode, "unhandled-stack-overflow") == 0;
+  if (stackOverflow && !KeepStackForExceptionContext(MeasureExceptionContextBytes(), stackOverflowKeptBack)) {
+    return 97;
   }
   if (!skydiag::plugin::InitSharedMemory() || !skydiag::plugin::InstallCrashHandler(/*crashHookMode=*/1)) {
     return 90;
@@ -466,10 +519,7 @@ int RunChild(const char* mode, const char* goEventName)
   if (std::strncmp(mode, "unhandled-fault", 15) == 0) {
     WriteThroughNull();
   }
-  if (std::strcmp(mode, "unhandled-stack-overflow") == 0) {
-    if (!KeepStackForALargeExceptionContext()) {
-      return 97;
-    }
+  if (stackOverflow) {
     volatile std::uint64_t limit = ~0ull;
     return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
   }
@@ -502,6 +552,52 @@ struct ChildOutcome
   skydiag::BlackboxEvent lastEvent{};
 };
 
+// What the child left behind, for a failure message: a failure that shows on
+// one CI runner in several cannot be run again to look at.
+std::string Describe(const ChildOutcome& outcome)
+{
+  char text[256]{};
+  std::snprintf(
+    text,
+    sizeof(text),
+    " (child: crash event signaled %d, recorded code 0x%08lX on thread %lu, main thread %lu, crash_seq %lu, "
+    "state flags 0x%lX, exit code 0x%08lX; exception context %lu bytes on this host)",
+    outcome.crashEventSignaled ? 1 : 0,
+    static_cast<unsigned long>(outcome.crash.exception_code),
+    static_cast<unsigned long>(outcome.crash.faulting_tid),
+    static_cast<unsigned long>(outcome.mainTid),
+    static_cast<unsigned long>(outcome.crashSeq),
+    static_cast<unsigned long>(outcome.stateFlags),
+    static_cast<unsigned long>(outcome.exitCode),
+    static_cast<unsigned long>(g_exceptionContextBytes));
+  return text;
+}
+
+void RequireOf(const ChildOutcome& outcome, bool condition, const char* message)
+{
+  if (!condition) {
+    throw std::runtime_error(message + Describe(outcome));
+  }
+}
+
+// The child made no shared memory and crash event to attach to. Ends it, and
+// says with which exit code it had ended by itself if it had (RunChild).
+[[noreturn]] void FailChildNotAttached(const PROCESS_INFORMATION& pi, HANDLE go)
+{
+  DWORD exitCode = 0;
+  const bool ended =
+    WaitForSingleObject(pi.hProcess, 0) == WAIT_OBJECT_0 && GetExitCodeProcess(pi.hProcess, &exitCode) != FALSE;
+  TerminateProcess(pi.hProcess, 1);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  CloseHandle(go);
+  const std::string state =
+    ended ? "the child had ended with exit code " + std::to_string(exitCode) : "the child was still running";
+  throw std::runtime_error(
+    "the helper could not attach to the child's shared memory and crash event (" + state +
+    "; exception context " + std::to_string(g_exceptionContextBytes) + " bytes on this host)");
+}
+
 ChildOutcome RunChildToCrash(const char* mode)
 {
   char exePath[MAX_PATH]{};
@@ -532,11 +628,7 @@ ChildOutcome RunChildToCrash(const char* mode)
     }
   }
   if (!attached) {
-    TerminateProcess(pi.hProcess, 1);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    CloseHandle(go);
-    Require(false, "the helper could not attach to the child's shared memory and crash event");
+    FailChildNotAttached(pi, go);
   }
 
   ChildOutcome outcome{};
@@ -574,21 +666,29 @@ ChildOutcome RunChildToCrash(const char* mode)
 void RequireChildCrashRecorded(const ChildOutcome& outcome, std::uint32_t code, DWORD exitCode, const char* what)
 {
   const std::string prefix = std::string(what) + ": ";
-  Require(outcome.crashEventSignaled, (prefix + "the helper must be signaled").c_str());
-  Require(
+  RequireOf(outcome, outcome.crashEventSignaled, (prefix + "the helper must be signaled").c_str());
+  RequireOf(
+    outcome,
     outcome.crashSeq != 0u && (outcome.crashSeq & 1u) == 0u,
     (prefix + "a committed crash record must be published").c_str());
   Require((outcome.stateFlags & skydiag::kState_Frozen) != 0u, (prefix + "the incident must be claimed").c_str());
-  Require(outcome.crash.exception_code == code, (prefix + "the unhandled exception must be the recorded crash").c_str());
-  Require(outcome.crash.faulting_tid == outcome.mainTid, (prefix + "the throwing thread must be recorded").c_str());
-  Require(
+  RequireOf(
+    outcome,
+    outcome.crash.exception_code == code,
+    (prefix + "the unhandled exception must be the recorded crash").c_str());
+  RequireOf(
+    outcome,
+    outcome.crash.faulting_tid == outcome.mainTid,
+    (prefix + "the throwing thread must be recorded").c_str());
+  RequireOf(
+    outcome,
     outcome.lastEvent.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash) &&
       outcome.lastEvent.payload.a == code,
     (prefix + "the blackbox must end with the kCrash event").c_str());
-  Require(
+  RequireOf(
+    outcome,
     outcome.exitCode == exitCode,
-    (prefix + "the handler installed before the plugin's must still run (exit code " +
-     std::to_string(outcome.exitCode) + ")").c_str());
+    (prefix + "the handler installed before the plugin's must still run").c_str());
 }
 
 // ADR-0032: what the helper sees when a fault in the child is not handled.
@@ -607,21 +707,32 @@ struct UnhandledOutcome
   std::uint32_t stateFlags = 0;
 };
 
-// What the child left behind, for a failure message: a failure that shows on
-// one CI runner in several cannot be run again to look at.
 std::string Describe(const UnhandledOutcome& outcome)
 {
-  char text[192]{};
+  char text[320]{};
   std::snprintf(
     text,
     sizeof(text),
-    " (recorded code 0x%08lX, crash_seq %lu, state flags 0x%lX, exit code 0x%08lX, reported as unhandled: %d)",
+    " (child: recorded code 0x%08lX, crash_seq %lu, state flags 0x%lX, exit code 0x%08lX, reported as unhandled %d, "
+    "still reported at the exit %d, alive while held %d, %lu ms from the report to the exit; exception context "
+    "%lu bytes on this host)",
     static_cast<unsigned long>(outcome.recordedCode),
     static_cast<unsigned long>(outcome.crashSeq),
     static_cast<unsigned long>(outcome.stateFlags),
     static_cast<unsigned long>(outcome.exitCode),
-    outcome.unhandledSignaled ? 1 : 0);
+    outcome.unhandledSignaled ? 1 : 0,
+    outcome.unhandledSignaledAtExit ? 1 : 0,
+    outcome.aliveWhileHeld ? 1 : 0,
+    static_cast<unsigned long>(outcome.msFromSignalToExit),
+    static_cast<unsigned long>(g_exceptionContextBytes));
   return text;
+}
+
+void RequireOf(const UnhandledOutcome& outcome, bool condition, const char* message)
+{
+  if (!condition) {
+    throw std::runtime_error(message + Describe(outcome));
+  }
 }
 
 enum class HelperSettle
@@ -661,11 +772,7 @@ UnhandledOutcome RunChildToUnhandled(const char* mode, HelperSettle settle, DWOR
     }
   }
   if (!attached) {
-    TerminateProcess(pi.hProcess, 1);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    CloseHandle(go);
-    Require(false, "the helper could not attach to the child's shared memory and crash event");
+    FailChildNotAttached(pi, go);
   }
 
   UnhandledOutcome outcome{};
@@ -710,14 +817,19 @@ UnhandledOutcome RunChildToUnhandled(const char* mode, HelperSettle settle, DWOR
 void TestUnhandledFaultIsSignaledAndHeldUntilTheDumpIsSettled()
 {
   const auto outcome = RunChildToUnhandled("unhandled-fault", HelperSettle::kAfterCheck, 700);
-  Require(outcome.attachedSignalEvents, "the helper must find the plugin's unhandled event and make its own");
-  Require(outcome.unhandledSignaled, "an unhandled fault must be reported to the helper");
-  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the fault must be the recorded crash");
-  Require(outcome.aliveWhileHeld, "the crashing thread must be held until the helper settles the dump");
-  Require(
+  RequireOf(
+    outcome,
+    outcome.attachedSignalEvents,
+    "the helper must find the plugin's unhandled event and make its own");
+  RequireOf(outcome, outcome.unhandledSignaled, "an unhandled fault must be reported to the helper");
+  RequireOf(outcome, outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the fault must be the recorded crash");
+  RequireOf(outcome, outcome.aliveWhileHeld, "the crashing thread must be held until the helper settles the dump");
+  RequireOf(
+    outcome,
     outcome.msFromSignalToExit < 4000u,
     "the hold must end when the dump is settled, not at its cap");
-  Require(
+  RequireOf(
+    outcome,
     outcome.exitCode == kChildFilterExitCode,
     "the filter under the plugin's must still run after the hold");
 }
@@ -728,9 +840,13 @@ void TestUnhandledFaultIsSignaledAndHeldUntilTheDumpIsSettled()
 void TestUnhandledFaultIsHeldWhenAnotherHandlerRetakesTheFilter()
 {
   const auto outcome = RunChildToUnhandled("unhandled-fault-filter-retaken", HelperSettle::kAfterCheck, 700);
-  Require(outcome.unhandledSignaled, "the plugin's filter must be called although another handler retook the slot");
-  Require(outcome.aliveWhileHeld, "the hold must work with a retaking handler");
-  Require(
+  RequireOf(
+    outcome,
+    outcome.unhandledSignaled,
+    "the plugin's filter must be called although another handler retook the slot");
+  RequireOf(outcome, outcome.aliveWhileHeld, "the hold must work with a retaking handler");
+  RequireOf(
+    outcome,
     outcome.exitCode == kChildRetakingFilterExitCode,
     "the retaking handler's filter is the one under the plugin's and must end the process");
 }
@@ -742,8 +858,9 @@ void TestUnhandledFaultIsHeldWhenAnotherHandlerRetakesTheFilter()
 void TestUnhandledThrowLeavesARetakenFilterAlone()
 {
   const auto outcome = RunChildToUnhandled("unhandled-throw-filter-retaken", HelperSettle::kAfterCheck, 700);
-  Require(!outcome.unhandledSignaled, "the plugin's filter must not be put back for a C++ throw");
-  Require(
+  RequireOf(outcome, !outcome.unhandledSignaled, "the plugin's filter must not be put back for a C++ throw");
+  RequireOf(
+    outcome,
     outcome.exitCode == kChildRetakingFilterExitCode,
     "the retaking handler's filter must be the one that ends the process");
 }
@@ -756,8 +873,11 @@ void TestUnhandledThrowLeavesARetakenFilterAlone()
 void TestUnhandledThrowIsRecordedAfterTheFilterWasTakenOnceAndReclaimed()
 {
   const auto lost = RunChildToCrash("unhandled-throw-filter-taken-once");
-  Require(!lost.crashEventSignaled && lost.crashSeq == 0u, "without the reclaim the displaced filter records nothing");
-  Require(lost.exitCode == kChildRetakingFilterExitCode, "the other filter ends the process");
+  RequireOf(
+    lost,
+    !lost.crashEventSignaled && lost.crashSeq == 0u,
+    "without the reclaim the displaced filter records nothing");
+  RequireOf(lost, lost.exitCode == kChildRetakingFilterExitCode, "the other filter ends the process");
 
   RequireChildCrashRecorded(
     RunChildToCrash("unhandled-throw-filter-taken-once-reclaimed"),
@@ -772,9 +892,12 @@ void TestUnhandledThrowIsRecordedAfterTheFilterWasTakenOnceAndReclaimed()
 void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions()
 {
   const auto outcome = RunChildToUnhandled("unhandled-fault-other-record", HelperSettle::kAfterCheck, 700);
-  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
-  Require(!outcome.unhandledSignaled, "another exception's record must not be reported as unhandled");
-  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+  RequireOf(outcome, outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
+  RequireOf(outcome, !outcome.unhandledSignaled, "another exception's record must not be reported as unhandled");
+  RequireOf(
+    outcome,
+    outcome.exitCode == kChildFilterExitCode,
+    "the filter under the plugin's must still end the process");
 }
 
 // The incident is held by this thread's own earlier fault at the same
@@ -784,11 +907,15 @@ void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions()
 void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnEarlierOccurrence()
 {
   const auto outcome = RunChildToUnhandled("unhandled-fault-repeat-of-held-record", HelperSettle::kAfterCheck, 700);
-  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
-  Require(
+  RequireOf(outcome, outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
+  RequireOf(
+    outcome,
     !outcome.unhandledSignaled,
     "an earlier occurrence's record must not be reported as this unhandled exception's");
-  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+  RequireOf(
+    outcome,
+    outcome.exitCode == kChildFilterExitCode,
+    "the filter under the plugin's must still end the process");
 }
 
 // A handler faults and catches its own fault while the crash is dispatched,
@@ -798,9 +925,12 @@ void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnEarlierOccurrence()
 void TestUnhandledFaultIsReportedDespiteAFaultDispatchedInsideIt()
 {
   const auto outcome = RunChildToUnhandled("unhandled-fault-with-nested-probe", HelperSettle::kAfterCheck, 700);
-  Require(outcome.unhandledSignaled, "a fault dispatched inside the crash must not hide the crash");
-  Require(outcome.aliveWhileHeld, "the crashing thread must still be held for the dump");
-  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+  RequireOf(outcome, outcome.unhandledSignaled, "a fault dispatched inside the crash must not hide the crash");
+  RequireOf(outcome, outcome.aliveWhileHeld, "the crashing thread must still be held for the dump");
+  RequireOf(
+    outcome,
+    outcome.exitCode == kChildFilterExitCode,
+    "the filter under the plugin's must still end the process");
 }
 
 // A filter registered after the plugin's keeps the plugin's as its previous
@@ -823,38 +953,45 @@ void TestFilterPresentAtInstallStillRunsUnderAChainingFilter()
 void TestUnhandledSignalIsTakenBackWhenAFilterResumesTheThread()
 {
   const auto outcome = RunChildToUnhandled("resumed-fault", HelperSettle::kAfterCheck, 300);
-  Require(outcome.unhandledSignaled, "the exception reached the top-level filter and must be reported");
-  Require(outcome.aliveWhileHeld, "the thread is held for the dump as for any unhandled exception");
-  Require(outcome.exitCode == 0u, "the child must have run on and ended normally");
-  Require(!outcome.unhandledSignaledAtExit, "the signal must be taken back once the thread runs on");
+  RequireOf(outcome, outcome.unhandledSignaled, "the exception reached the top-level filter and must be reported");
+  RequireOf(outcome, outcome.aliveWhileHeld, "the thread is held for the dump as for any unhandled exception");
+  RequireOf(outcome, outcome.exitCode == 0u, "the child must have run on and ended normally");
+  RequireOf(outcome, !outcome.unhandledSignaledAtExit, "the signal must be taken back once the thread runs on");
 }
 
 // A stack overflow leaves little stack: it is recorded at first chance as
 // before, but the filter neither reports nor holds it, and the filter under
-// the plugin's still ends the process.
+// the plugin's still ends the process. "-kept-back": the same with stack kept
+// back on every host, the path a host with a large exception context takes
+// (KeepStackForExceptionContext).
 void TestUnhandledStackOverflowIsNotHeld()
 {
-  const auto outcome = RunChildToUnhandled("unhandled-stack-overflow", HelperSettle::kNever, 0);
-  const std::string left = Describe(outcome);
-  Require(
-    outcome.recordedCode == EXCEPTION_STACK_OVERFLOW,
-    ("the stack overflow is recorded at first chance" + left).c_str());
-  Require(
-    !outcome.unhandledSignaled,
-    ("a stack overflow must not be reported from the top-level filter" + left).c_str());
-  Require(
-    outcome.exitCode == kChildFilterExitCode,
-    ("the filter under the plugin's must still end the process" + left).c_str());
+  for (const char* mode : { "unhandled-stack-overflow", "unhandled-stack-overflow-kept-back" }) {
+    const auto outcome = RunChildToUnhandled(mode, HelperSettle::kNever, 0);
+    const std::string prefix = std::string(mode) + ": ";
+    RequireOf(
+      outcome,
+      outcome.recordedCode == EXCEPTION_STACK_OVERFLOW,
+      (prefix + "the stack overflow is recorded at first chance").c_str());
+    RequireOf(
+      outcome,
+      !outcome.unhandledSignaled,
+      (prefix + "a stack overflow must not be reported from the top-level filter").c_str());
+    RequireOf(
+      outcome,
+      outcome.exitCode == kChildFilterExitCode,
+      (prefix + "the filter under the plugin's must still end the process").c_str());
+  }
 }
 
 // A helper that never answers: the hold ends at its cap.
 void TestUnhandledFaultHoldEndsAtItsCap()
 {
   const auto outcome = RunChildToUnhandled("unhandled-fault-short-hold", HelperSettle::kNever, 0);
-  Require(outcome.unhandledSignaled, "the fault must be reported");
-  Require(outcome.msFromSignalToExit >= 300u, "the thread must be held for about the cap (400 ms)");
-  Require(outcome.msFromSignalToExit < 4000u, "the cap must end the hold");
-  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must run after the cap");
+  RequireOf(outcome, outcome.unhandledSignaled, "the fault must be reported");
+  RequireOf(outcome, outcome.msFromSignalToExit >= 300u, "the thread must be held for about the cap (400 ms)");
+  RequireOf(outcome, outcome.msFromSignalToExit < 4000u, "the cap must end the hold");
+  RequireOf(outcome, outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must run after the cap");
 }
 
 // No helper event (the helper is gone), or a hold of 0: the helper is told,
@@ -862,23 +999,26 @@ void TestUnhandledFaultHoldEndsAtItsCap()
 void TestUnhandledFaultIsNotHeldWithoutAHelperOrWithHoldOff()
 {
   const auto noHelper = RunChildToUnhandled("unhandled-fault", HelperSettle::kNoEvent, 0);
-  Require(noHelper.unhandledSignaled, "without the helper's event the fault is still reported");
-  Require(noHelper.msFromSignalToExit < 2000u, "without the helper's event nothing is waited for");
-  Require(noHelper.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
+  RequireOf(noHelper, noHelper.unhandledSignaled, "without the helper's event the fault is still reported");
+  RequireOf(noHelper, noHelper.msFromSignalToExit < 2000u, "without the helper's event nothing is waited for");
+  RequireOf(noHelper, noHelper.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
 
   const auto holdOff = RunChildToUnhandled("unhandled-fault-no-hold", HelperSettle::kNever, 0);
-  Require(holdOff.unhandledSignaled, "with the hold off the fault is still reported");
-  Require(holdOff.msFromSignalToExit < 2000u, "with the hold off nothing is waited for");
-  Require(holdOff.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
+  RequireOf(holdOff, holdOff.unhandledSignaled, "with the hold off the fault is still reported");
+  RequireOf(holdOff, holdOff.msFromSignalToExit < 2000u, "with the hold off nothing is waited for");
+  RequireOf(holdOff, holdOff.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
 }
 
 // A fault the game handles never reaches the top-level filter.
 void TestHandledFaultIsNotReportedAsUnhandled()
 {
   const auto outcome = RunChildToUnhandled("handled-fault", HelperSettle::kNever, 0);
-  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the handled fault is recorded at first chance");
-  Require(!outcome.unhandledSignaled, "a handled fault must not be reported as unhandled");
-  Require(outcome.exitCode == 0u, "the child must have caught the fault and ended normally");
+  RequireOf(
+    outcome,
+    outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION,
+    "the handled fault is recorded at first chance");
+  RequireOf(outcome, !outcome.unhandledSignaled, "a handled fault must not be reported as unhandled");
+  RequireOf(outcome, outcome.exitCode == 0u, "the child must have caught the fault and ended normally");
 }
 
 // Without CrashLogger, nothing faulted on the throwing thread, so an unhandled
@@ -898,9 +1038,12 @@ void TestUnhandledExceptionsWithoutCrashLoggerAreRecorded()
 void TestAbortAfterACaughtThrowIsNotBlamedOnIt()
 {
   const auto outcome = RunChildToCrash("abort-after-caught-throw");
-  Require(!outcome.crashEventSignaled, "an abort after a caught throw must not signal a crash");
-  Require(outcome.crashSeq == 0u, "an abort after a caught throw must not publish a crash record");
-  Require(outcome.exitCode == kChildAbortExitCode, "the SIGABRT handler installed before the plugin's must still run");
+  RequireOf(outcome, !outcome.crashEventSignaled, "an abort after a caught throw must not signal a crash");
+  RequireOf(outcome, outcome.crashSeq == 0u, "an abort after a caught throw must not publish a crash record");
+  RequireOf(
+    outcome,
+    outcome.exitCode == kChildAbortExitCode,
+    "the SIGABRT handler installed before the plugin's must still run");
 }
 
 }  // namespace
@@ -920,6 +1063,8 @@ int main(int argc, char** argv)
       reinterpret_cast<CallGameCodeFn>(GetProcAddress(crashLogger, "SkydiagFakeCrashLoggerCallGameCode"));
     Require(g_callGameCode != nullptr, "fake CrashLogger.dll has no game-code call export");
 
+    // Before the plugin's handlers are installed (see the function).
+    Require(MeasureExceptionContextBytes() != 0u, "could not measure an exception context");
     Require(skydiag::plugin::InitSharedMemory(), "InitSharedMemory failed");
     Require(skydiag::plugin::InstallCrashHandler(/*crashHookMode=*/1), "InstallCrashHandler failed");
     skydiag::plugin::RefreshCrashLoggerModuleRanges();
