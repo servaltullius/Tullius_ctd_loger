@@ -163,11 +163,21 @@ bool TryAttachCrashEvent(AttachedProcess& proc, std::wstring* err)
 
   // ADR-0032: the plugin makes its "unhandled" event before the crash event,
   // so it is there now if the plugin has it at all.
+  (void)TryAttachUnhandledSignal(proc);
+  return true;
+}
+
+bool TryAttachUnhandledSignal(AttachedProcess& proc)
+{
+  if (proc.pid == 0) {
+    return false;
+  }
   if (!proc.unhandledEvent) {
     proc.unhandledEvent = OpenEventW(
       EVENT_MODIFY_STATE | SYNCHRONIZE,
       FALSE,
       MakeKernelName(proc.pid, skydiag::protocol::kKernelObjectSuffix_UnhandledEvent).c_str());
+    proc.unhandledEventOpenError = proc.unhandledEvent ? ERROR_SUCCESS : GetLastError();
   }
   if (proc.unhandledEvent && !proc.dumpSettledEvent) {
     proc.dumpSettledEvent = CreateEventW(
@@ -175,8 +185,17 @@ bool TryAttachCrashEvent(AttachedProcess& proc, std::wstring* err)
       /*bManualReset=*/TRUE,
       /*bInitialState=*/FALSE,
       MakeKernelName(proc.pid, skydiag::protocol::kKernelObjectSuffix_DumpSettledEvent).c_str());
+    proc.dumpSettledEventCreateError = proc.dumpSettledEvent ? ERROR_SUCCESS : GetLastError();
   }
-  return true;
+  return proc.unhandledEvent && proc.dumpSettledEvent;
+}
+
+bool ShouldRetryUnhandledSignalAttach(const AttachedProcess& proc) noexcept
+{
+  if (!proc.crashEvent || (proc.unhandledEvent && proc.dumpSettledEvent)) {
+    return false;
+  }
+  return proc.unhandledEvent || proc.unhandledEventOpenError != ERROR_FILE_NOT_FOUND;
 }
 
 void Detach(AttachedProcess& p)

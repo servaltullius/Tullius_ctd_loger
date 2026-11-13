@@ -153,8 +153,30 @@ int main()
   static_assert(classifyEntry(kFullOfOthers, 3, 77u).first == TopLevelFilterEntry::kNoSlot);
   constexpr std::uint32_t kOwnAfterFree[3] = { 0u, 77u, 0u };
   static_assert(
-    classifyEntry(kOwnAfterFree, 3, 77u).first == TopLevelFilterEntry::kReentered,
-    "a free slot before the thread's own does not hide the re-entry");
+    classifyEntry(kOwnAfterFree, 3, 77u) == std::pair{ TopLevelFilterEntry::kReentered, std::size_t{ 1 } },
+    "a free slot before the thread's own does not hide the re-entry, and the thread gets its own slot back");
+
+  // ADR-0032: which filter the plugin's filter calls. First the one it last
+  // displaced; called again from inside (that filter had kept ours as its
+  // previous), the one that was there when the plugin loaded; then none.
+  using skydiag::plugin::SelectFilterUnderOurs;
+  static_assert(SelectFilterUnderOurs(0xB000u, 0xA000u, 0u) == 0xB000u);
+  static_assert(
+    SelectFilterUnderOurs(0xB000u, 0xA000u, 1u) == 0xA000u,
+    "the filter present at install must not drop out of the chain when the slot was taken back");
+  static_assert(SelectFilterUnderOurs(0xB000u, 0xA000u, 2u) == 0u, "a further call ends the chain");
+  static_assert(
+    SelectFilterUnderOurs(0xA000u, 0xA000u, 1u) == 0u,
+    "a filter that calls the top-level filter itself is not called twice");
+  static_assert(SelectFilterUnderOurs(0u, 0u, 0u) == 0u);
+
+  // ADR-0032: the threads whose fatal-code exception could not be recorded.
+  using skydiag::plugin::SelectUnrecordedFaultThreadSlot;
+  constexpr std::uint32_t kNotedThreads[3] = { 55u, 0u, 66u };
+  static_assert(SelectUnrecordedFaultThreadSlot(kNotedThreads, 3, 66u, 7u) == 2u, "a thread keeps its slot");
+  static_assert(SelectUnrecordedFaultThreadSlot(kNotedThreads, 3, 77u, 7u) == 1u, "else the first free one");
+  constexpr std::uint32_t kAllNoted[3] = { 55u, 44u, 66u };
+  static_assert(SelectUnrecordedFaultThreadSlot(kAllNoted, 3, 77u, 7u) == 1u, "else the fallback, inside the table");
 
   // A fault outside CrashLogger is checked for CrashLogger frames only between
   // it and the kept exception's dispatch CONTEXT, on this thread's stack.
@@ -604,9 +626,38 @@ int main()
     "The reclaiming handler must never consume an exception.");
   AssertOrdered(
     unhandledFilterBody,
-    "TopLevelFilterEntry::kReentered",
-    "previous(ep)",
-    "A re-entry into the top-level filter must return before the filter under ours is called again.");
+    "++g_topLevelFilterDepth[slot]",
+    "SelectFilterUnderOurs(lastDisplaced, presentAtInstall, depth)",
+    "A re-entry into the top-level filter must go on down the chain by its depth, never back to the same filter.");
+  AssertOrdered(
+    unhandledFilterBody,
+    "return reenteredResult;",
+    "SignalUnhandledAndHold(shm, ep->ExceptionRecord)",
+    "A re-entry must return before anything is recorded or reported a second time.");
+  AssertOrdered(
+    unhandledFilterBody,
+    "Sleep(kTopLevelFilterSlotWaitMs);",
+    "SelectFilterUnderOurs(",
+    "A thread that finds every slot taken must wait for one before any filter is called: without a slot there is "
+    "no re-entry guard.");
+  AssertContains(
+    unhandledFilterBody,
+    "!(ShouldRecordException(code) && IsThisThreadsFaultUnrecorded(ep->ExceptionRecord))",
+    "A fatal-code exception the vectored handler could not record must not be reported as the recorded crash.");
+  AssertOrdered(
+    unhandledFilterBody,
+    "result == EXCEPTION_CONTINUE_EXECUTION",
+    "ResetEvent(unhandled)",
+    "When a filter under ours resumes the thread, the signal must be taken back.");
+  AssertOrdered(
+    vectoredHandlerBody,
+    "NoteFaultRecorded(false, ep->ExceptionRecord);",
+    "NoteFaultRecorded(true, ep->ExceptionRecord);",
+    "The vectored handler must note whether this thread's fatal-code exception was recorded.");
+  AssertContains(
+    installCrashHandlerBody,
+    "g_installTimeUnhandledExceptionFilter.store(presentAtInstall",
+    "The filter present at install must be remembered apart from the one last displaced.");
   AssertOrdered(
     unhandledFilterBody,
     "SignalUnhandledAndHold(shm, ep->ExceptionRecord)",
@@ -638,6 +689,20 @@ int main()
     keeperBody,
     "stopToken.stop_requested()",
     "The keeper thread must stop with the plugin's other workers.");
+  AssertOrdered(
+    keeperBody,
+    "skydiag::plugin::IsCrashLoggerCodeAddress(displaced)",
+    "return;",
+    "The keeper thread must end once it finds CrashLogger holding the filter: CrashLogger sets it again on every "
+    "exception, so there is nothing to keep.");
+  AssertContains(
+    keeperBody,
+    "stopOrPeriod.wait_for(lock, stopToken, kPeriod",
+    "The keeper thread must sleep its whole period and wake on a stop request.");
+  if (keeperBody.find("Sleep(") != std::string::npos) {
+    std::fprintf(stderr, "The keeper thread must not poll for its stop request.\n");
+    std::abort();
+  }
   AssertContains(
     pluginMain,
     "StopOwnedWorker(g_topLevelFilterKeeperThread);",
@@ -649,7 +714,7 @@ int main()
     "The keeper starts only after the crash handler installed the filter.");
 
   const std::string signalAndHoldBody =
-    ExtractFunctionBody(crashHandler, "void SignalUnhandledAndHold(");
+    ExtractFunctionBody(crashHandler, "bool SignalUnhandledAndHold(");
   AssertOrdered(
     signalAndHoldBody,
     "IsCrashRecordOfException(",

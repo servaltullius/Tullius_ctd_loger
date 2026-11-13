@@ -291,6 +291,37 @@ LONG CALLBACK ChildRetakingVectoredHandler(EXCEPTION_POINTERS*)
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// A filter that keeps the one it replaced and calls it when it is done, as a
+// well-behaved filter does. Registered after the plugin's, that one is the
+// plugin's.
+LPTOP_LEVEL_EXCEPTION_FILTER g_childChainingFilterPrevious = nullptr;
+
+LONG WINAPI ChildChainingFilter(EXCEPTION_POINTERS* ep)
+{
+  return g_childChainingFilterPrevious ? g_childChainingFilterPrevious(ep) : EXCEPTION_CONTINUE_SEARCH;
+}
+
+// A stand-in for a crash handler that probes memory while an exception is
+// dispatched: a fault of its own, caught, inside the dispatch of the first.
+bool g_childProbing = false;
+int CatchWriteThroughNull();
+
+LONG CALLBACK ChildProbingVectoredHandler(EXCEPTION_POINTERS* ep)
+{
+  if (!g_childProbing && ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+    g_childProbing = true;
+    CatchWriteThroughNull();
+    g_childProbing = false;
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// A filter that makes the thread run on (a continuable exception).
+LONG WINAPI ChildResumingFilter(EXCEPTION_POINTERS*)
+{
+  return EXCEPTION_CONTINUE_EXECUTION;
+}
+
 __declspec(noinline) void WriteThroughNull()
 {
   volatile int* nowhere = nullptr;
@@ -334,7 +365,7 @@ int RunChild(const char* mode, const char* goEventName)
 {
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
   _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-  SetUnhandledExceptionFilter(ChildPreviousFilter);
+  SetUnhandledExceptionFilter(std::strcmp(mode, "resumed-fault") == 0 ? ChildResumingFilter : ChildPreviousFilter);
   std::signal(SIGABRT, ChildPreviousAbortHandler);
   if (std::strcmp(mode, "unhandled-fault-short-hold") == 0) {
     skydiag::plugin::SetUnhandledCrashHoldMs(400);
@@ -356,6 +387,17 @@ int RunChild(const char* mode, const char* goEventName)
         return 95;
       }
     }
+  }
+  if (std::strcmp(mode, "unhandled-throw-chaining-filter-reclaimed") == 0) {
+    // Something registers a filter that chains to the one it replaced (the
+    // plugin's), and the plugin's reclaim then puts the plugin's back on top.
+    g_childChainingFilterPrevious = SetUnhandledExceptionFilter(ChildChainingFilter);
+    if (skydiag::plugin::ReclaimTopLevelFilter() != reinterpret_cast<std::uintptr_t>(&ChildChainingFilter)) {
+      return 96;
+    }
+  }
+  if (std::strcmp(mode, "unhandled-fault-with-nested-probe") == 0) {
+    AddVectoredExceptionHandler(0, ChildProbingVectoredHandler);
   }
   if (std::strcmp(mode, "unhandled-fault-filter-retaken") == 0 ||
       std::strcmp(mode, "unhandled-throw-filter-retaken") == 0) {
@@ -380,6 +422,19 @@ int RunChild(const char* mode, const char* goEventName)
     // checking it when this thread crashes (ADR-0017).
     std::thread other([] { CatchWriteThroughNull(); });
     other.join();
+  }
+  if (std::strcmp(mode, "unhandled-fault-repeat-of-held-record") == 0) {
+    // This thread's own fault, handled, takes the incident; the helper is
+    // still checking it when the same fault comes again and is not handled.
+    // Same thread, code and address as the record, but not its exception.
+    CatchWriteThroughNull();
+  }
+  if (std::strcmp(mode, "resumed-fault") == 0) {
+    // Nothing handles it, the top-level filter is reached, and the filter
+    // under the plugin's resumes the thread.
+    RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+    Sleep(300);
+    return 0;
   }
   if (std::strncmp(mode, "unhandled-fault", 15) == 0) {
     WriteThroughNull();
@@ -511,6 +566,8 @@ struct UnhandledOutcome
 {
   bool attachedSignalEvents = false;
   bool unhandledSignaled = false;
+  // Whether the signal was still set once the child had ended.
+  bool unhandledSignaledAtExit = false;
   // Whether the child was still running some time after the signal.
   bool aliveWhileHeld = false;
   DWORD msFromSignalToExit = 0;
@@ -584,6 +641,8 @@ UnhandledOutcome RunChildToUnhandled(const char* mode, HelperSettle settle, DWOR
     WaitForSingleObject(pi.hProcess, 5000);
   }
   outcome.msFromSignalToExit = static_cast<DWORD>(GetTickCount64() - signalTick);
+  outcome.unhandledSignaledAtExit =
+    proc.unhandledEvent && WaitForSingleObject(proc.unhandledEvent, 0) == WAIT_OBJECT_0;
   GetExitCodeProcess(pi.hProcess, &outcome.exitCode);
   outcome.recordedCode = proc.shm->header.crash.exception_code;
 
@@ -665,6 +724,58 @@ void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions()
   Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
   Require(!outcome.unhandledSignaled, "another exception's record must not be reported as unhandled");
   Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+}
+
+// The incident is held by this thread's own earlier fault at the same
+// address, which the game handled and the helper is still checking. The fault
+// that comes again and is not handled could not be recorded, so the record,
+// though it names the same thread, code and address, is not its record.
+void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnEarlierOccurrence()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault-repeat-of-held-record", HelperSettle::kAfterCheck, 700);
+  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
+  Require(
+    !outcome.unhandledSignaled,
+    "an earlier occurrence's record must not be reported as this unhandled exception's");
+  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+}
+
+// A handler faults and catches its own fault while the crash is dispatched,
+// as a crash handler that probes memory does. That inner fault cannot be
+// recorded (the crash holds the incident), but it is another exception: the
+// crash itself was recorded and must still be reported and held.
+void TestUnhandledFaultIsReportedDespiteAFaultDispatchedInsideIt()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault-with-nested-probe", HelperSettle::kAfterCheck, 700);
+  Require(outcome.unhandledSignaled, "a fault dispatched inside the crash must not hide the crash");
+  Require(outcome.aliveWhileHeld, "the crashing thread must still be held for the dump");
+  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+}
+
+// A filter registered after the plugin's keeps the plugin's as its previous
+// filter and calls it. Once the plugin has taken the slot back, that filter is
+// the one under the plugin's, and its call comes back into the plugin's
+// filter: the chain must go on to the filter that was there when the plugin
+// loaded, as it did before the slot was taken back, and not end there.
+void TestFilterPresentAtInstallStillRunsUnderAChainingFilter()
+{
+  RequireChildCrashRecorded(
+    RunChildToCrash("unhandled-throw-chaining-filter-reclaimed"),
+    kCppException,
+    kChildFilterExitCode,
+    "unhandled C++ throw under a chaining filter after the reclaim");
+}
+
+// A filter under the plugin's resumes the thread: the helper was told while
+// the exception was unhandled, and the plugin takes that back when the thread
+// runs on, so the helper does not go on reading a crash in progress.
+void TestUnhandledSignalIsTakenBackWhenAFilterResumesTheThread()
+{
+  const auto outcome = RunChildToUnhandled("resumed-fault", HelperSettle::kAfterCheck, 300);
+  Require(outcome.unhandledSignaled, "the exception reached the top-level filter and must be reported");
+  Require(outcome.aliveWhileHeld, "the thread is held for the dump as for any unhandled exception");
+  Require(outcome.exitCode == 0u, "the child must have run on and ended normally");
+  Require(!outcome.unhandledSignaledAtExit, "the signal must be taken back once the thread runs on");
 }
 
 // A stack overflow leaves little stack: it is recorded at first chance as
@@ -770,6 +881,10 @@ int main(int argc, char** argv)
     TestUnhandledThrowLeavesARetakenFilterAlone();
     TestUnhandledThrowIsRecordedAfterTheFilterWasTakenOnceAndReclaimed();
     TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions();
+    TestUnhandledFaultIsNotReportedWhenTheRecordIsAnEarlierOccurrence();
+    TestUnhandledFaultIsReportedDespiteAFaultDispatchedInsideIt();
+    TestFilterPresentAtInstallStillRunsUnderAChainingFilter();
+    TestUnhandledSignalIsTakenBackWhenAFilterResumesTheThread();
     TestUnhandledStackOverflowIsNotHeld();
     TestUnhandledFaultHoldEndsAtItsCap();
     TestUnhandledFaultIsNotHeldWithoutAHelperOrWithHoldOff();

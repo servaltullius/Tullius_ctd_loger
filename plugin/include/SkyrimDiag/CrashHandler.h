@@ -240,7 +240,7 @@ constexpr bool IsCrashRecordOfException(
 // under ours that calls ours again is not answered a second time. A fixed
 // array instead of thread-local storage, which may have to be allocated on the
 // crashing thread. 0 marks a free slot.
-inline constexpr std::size_t kTopLevelFilterThreadSlotCount = 4;
+inline constexpr std::size_t kTopLevelFilterThreadSlotCount = 8;
 
 enum class TopLevelFilterEntry
 {
@@ -248,13 +248,14 @@ enum class TopLevelFilterEntry
   kEntered,
   // This thread is already inside the filter.
   kReentered,
-  // Every slot is taken by another thread: run without the re-entry guard,
-  // and without the hold.
+  // Every slot is taken by another thread. The filter waits for one: without
+  // a slot it could not tell a filter under ours calling it again, and two
+  // filters that call each other would never end.
   kNoSlot,
 };
 
 // What entering does given the slots' current owners; `slotOut` is the slot to
-// take for kEntered.
+// take for kEntered and the thread's own slot for kReentered.
 constexpr TopLevelFilterEntry ClassifyTopLevelFilterEntry(
   const std::uint32_t* slotThreadIds,
   std::size_t slotCount,
@@ -264,6 +265,7 @@ constexpr TopLevelFilterEntry ClassifyTopLevelFilterEntry(
   std::size_t freeSlot = slotCount;
   for (std::size_t i = 0; i < slotCount; ++i) {
     if (slotThreadIds[i] == threadId) {
+      *slotOut = i;
       return TopLevelFilterEntry::kReentered;
     }
     if (slotThreadIds[i] == 0u && freeSlot == slotCount) {
@@ -275,6 +277,57 @@ constexpr TopLevelFilterEntry ClassifyTopLevelFilterEntry(
   }
   *slotOut = freeSlot;
   return TopLevelFilterEntry::kEntered;
+}
+
+// ADR-0032: the filter the plugin's top-level filter calls when it is done.
+// `depth` is how many times the filter is already running on this thread.
+//
+// The plugin takes the filter slot back from whatever took it, and that filter
+// becomes the one under ours (`lastDisplaced`). One that had kept ours as its
+// own previous filter calls ours again when it is done; the chain then goes on
+// with the filter that was there when the plugin loaded (`presentAtInstall`),
+// which is what that call reached before the slot was taken back. A further
+// call ends the chain. 0: no filter to call.
+constexpr std::uintptr_t SelectFilterUnderOurs(
+  std::uintptr_t lastDisplaced,
+  std::uintptr_t presentAtInstall,
+  std::uint32_t depth) noexcept
+{
+  if (depth == 0u) {
+    return lastDisplaced;
+  }
+  if (depth == 1u && presentAtInstall != lastDisplaced) {
+    return presentAtInstall;
+  }
+  return 0u;
+}
+
+// ADR-0032: the threads whose latest fatal-code exception could not be
+// recorded (the incident was another exception's). The top-level filter must
+// not report such an exception as the recorded crash, even when the record has
+// the same thread, code and address: that is an earlier occurrence, which the
+// game handled and the helper is still checking. 0 marks a free slot.
+inline constexpr std::size_t kUnrecordedFaultThreadSlotCount = 8;
+
+// The slot that notes `threadId`: the one it already has, else a free one,
+// else `fallbackSlot` (another thread's note is lost, and that thread is then
+// judged by the record alone, as before).
+constexpr std::size_t SelectUnrecordedFaultThreadSlot(
+  const std::uint32_t* slotThreadIds,
+  std::size_t slotCount,
+  std::uint32_t threadId,
+  std::size_t fallbackSlot) noexcept
+{
+  std::size_t freeSlot = slotCount;
+  for (std::size_t i = 0; i < slotCount; ++i) {
+    if (slotThreadIds[i] == threadId) {
+      return i;
+    }
+    if (slotThreadIds[i] == 0u && freeSlot == slotCount) {
+      freeSlot = i;
+    }
+  }
+  return freeSlot != slotCount ? freeSlot : fallbackSlot % slotCount;
 }
 
 // Mode 1 also chains a top-level unhandled exception filter and a SIGABRT
@@ -309,6 +362,13 @@ bool InstallCrashHandler(std::uint32_t crashHookMode);
 // Not for the crash path: it is a few kernel calls and takes a lock inside
 // kernelbase.
 std::uintptr_t ReclaimTopLevelFilter() noexcept;
+
+// Whether a code address is inside CrashLogger (CrashLogger.dll or
+// CrashLoggerSSE.dll). Looks the modules up when they were not loaded yet at
+// the last look, so not for the crash path. CrashLogger registers its filter
+// again on every exception: a filter slot it holds needs no reclaim on a
+// timer, and the plugin's once-a-second reclaim stops when it finds that.
+bool IsCrashLoggerCodeAddress(std::uintptr_t address) noexcept;
 
 // ADR-0032: how long at most the top-level filter holds the crashing thread
 // for the helper's dump. 0: signal only, never hold. Call before

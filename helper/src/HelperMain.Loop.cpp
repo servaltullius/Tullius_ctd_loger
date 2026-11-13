@@ -185,6 +185,7 @@ void RunHelperLoop(
       if (state->nextCrashEventRetryTick64 == 0 || nowTick >= state->nextCrashEventRetryTick64) {
         if (skydiag::helper::TryAttachCrashEvent(proc, nullptr)) {
           AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
+          AppendLogLine(outBase, DescribeUnhandledSignalState(proc));
           state->nextCrashEventWarnTick64 = 0;
           if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc, outBase); rearmed != 0u) {
             AppendLogLine(
@@ -204,6 +205,8 @@ void RunHelperLoop(
           }
         }
       }
+    } else {
+      RetryUnhandledSignalAttachTick(proc, outBase, state);
     }
 
     const DWORD waitMs = 250;

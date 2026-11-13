@@ -114,10 +114,25 @@ constexpr std::uintptr_t kCrashLoggerStackScanMaxBytes = 0x10000u;  // 64 KB
 // ADR-0032: for the filter this is the one last displaced by
 // ReclaimTopLevelFilterHandler, i.e. the filter under ours.
 std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_previousUnhandledExceptionFilter{ nullptr };
+// The filter that was there when the plugin installed its own; never changed
+// afterwards (SelectFilterUnderOurs).
+std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> g_installTimeUnhandledExceptionFilter{ nullptr };
 std::atomic<std::uint32_t> g_unhandledCrashHoldMs{ kDefaultUnhandledCrashHoldMs };
 // Set once the top-level filter is installed (mode 1).
 std::atomic<bool> g_topLevelFilterInstalled{ false };
 std::atomic<std::uint32_t> g_topLevelFilterThreads[kTopLevelFilterThreadSlotCount]{};
+// How many times the filter is running on a slot's thread beyond the first;
+// only that thread touches it.
+std::uint32_t g_topLevelFilterDepth[kTopLevelFilterThreadSlotCount]{};
+// How long a thread that finds every slot taken waits before it looks again.
+constexpr DWORD kTopLevelFilterSlotWaitMs = 10;
+// SelectUnrecordedFaultThreadSlot. `record` is where the dispatcher keeps that
+// exception's EXCEPTION_RECORD on the thread's stack: the vectored handler and
+// the top-level filter are handed the same one, so it tells that exception
+// from another one dispatched inside it (a probe fault of a crash handler).
+std::atomic<std::uint32_t> g_unrecordedFaultThreads[kUnrecordedFaultThreadSlotCount]{};
+std::atomic<std::uintptr_t> g_unrecordedFaultRecords[kUnrecordedFaultThreadSlotCount]{};
+std::atomic<std::uint32_t> g_unrecordedFaultFallbackSlot{ 0 };
 using AbortSignalHandlerFn = void(__cdecl*)(int);
 std::atomic<AbortSignalHandlerFn> g_previousAbortSignalHandler{ nullptr };
 
@@ -537,6 +552,47 @@ void SignalPublishedCrash(DWORD code, std::uint64_t address) noexcept
   }
 }
 
+// ADR-0032: notes whether this thread's fatal-code exception was recorded
+// (kUnrecordedFaultThreadSlotCount). Fixed-size and allocation-free. Two
+// threads may pick the same free slot; the note that is lost only puts that
+// thread back to being judged by the record alone.
+void NoteFaultRecorded(bool recorded, const EXCEPTION_RECORD* record) noexcept
+{
+  const std::uint32_t tid = GetCurrentThreadId();
+  if (recorded) {
+    for (auto& slot : g_unrecordedFaultThreads) {
+      std::uint32_t expected = tid;
+      slot.compare_exchange_strong(expected, 0u, std::memory_order_acq_rel);
+    }
+    return;
+  }
+  std::uint32_t slotThreadIds[kUnrecordedFaultThreadSlotCount]{};
+  for (std::size_t i = 0; i < kUnrecordedFaultThreadSlotCount; ++i) {
+    slotThreadIds[i] = g_unrecordedFaultThreads[i].load(std::memory_order_relaxed);
+  }
+  const std::size_t slot = SelectUnrecordedFaultThreadSlot(
+    slotThreadIds,
+    kUnrecordedFaultThreadSlotCount,
+    tid,
+    g_unrecordedFaultFallbackSlot.fetch_add(1u, std::memory_order_relaxed));
+  g_unrecordedFaultRecords[slot].store(reinterpret_cast<std::uintptr_t>(record), std::memory_order_relaxed);
+  g_unrecordedFaultThreads[slot].store(tid, std::memory_order_release);
+}
+
+// Whether `record` is the exception of this thread that was noted as not
+// recorded.
+bool IsThisThreadsFaultUnrecorded(const EXCEPTION_RECORD* record) noexcept
+{
+  const std::uint32_t tid = GetCurrentThreadId();
+  for (std::size_t i = 0; i < kUnrecordedFaultThreadSlotCount; ++i) {
+    if (g_unrecordedFaultThreads[i].load(std::memory_order_acquire) == tid) {
+      return g_unrecordedFaultRecords[i].load(std::memory_order_relaxed) ==
+             reinterpret_cast<std::uintptr_t>(record);
+    }
+  }
+  return false;
+}
+
 LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 {
   auto* shm = GetShared();
@@ -559,13 +615,17 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
       // ClassifyCrashLoggerFault): record the exception it is reporting if
       // one was kept, and otherwise leave the probe to CrashLogger's handler.
       if (!TryPublishKeptExceptionForCrashLoggerFault(shm, exceptionAddress, &recordedCode, &recordedAddress)) {
+        NoteFaultRecorded(false, ep->ExceptionRecord);
         return EXCEPTION_CONTINUE_SEARCH;
       }
     } else if (
       !TryPublishKeptExceptionForCrashLoggerSideFault(shm, ep->ContextRecord, &recordedCode, &recordedAddress) &&
       !TryPublishCrashRecord(shm, ep, code)) {
+      NoteFaultRecorded(false, ep->ExceptionRecord);
       return EXCEPTION_CONTINUE_SEARCH;
     }
+    // The record is this thread's now (ADR-0032, IsThisThreadsFaultUnrecorded).
+    NoteFaultRecorded(true, ep->ExceptionRecord);
 
     // ADR-0022: Alt+F4 still held as the crash is recorded (a crash in the
     // frame that handles it), or the quit flag set since the pollers last
@@ -608,7 +668,8 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
 // ADR-0032: tells the helper that the recorded crash was not handled, and
 // holds this thread until the helper has written its dump (or the cap).
 // Nothing here allocates: two kernel calls on handles and a name made at init.
-void SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RECORD* record) noexcept
+// Returns whether the helper was told.
+bool SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RECORD* record) noexcept
 {
   const std::uint32_t sequenceBefore = shm->header.crash_seq;
   const std::uint32_t recordThreadId = shm->header.crash.faulting_tid;
@@ -626,12 +687,12 @@ void SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
         GetCurrentThreadId(),
         record->ExceptionCode,
         reinterpret_cast<std::uint64_t>(record->ExceptionAddress))) {
-    return;
+    return false;
   }
 
   const HANDLE unhandled = GetUnhandledEvent();
   if (!unhandled) {
-    return;
+    return false;
   }
   // The helper creates this event, so it cannot be opened when there is no
   // helper, the helper died, or it is one that does not know the signal: then
@@ -647,6 +708,7 @@ void SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
     WaitForSingleObject(settled, holdMs);
     CloseHandle(settled);
   }
+  return true;
 }
 
 // Top-level filter, chained in front of the previous one. Windows calls it
@@ -658,26 +720,49 @@ void SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
 // it: the CRT's filter calls terminate() and the process ends by __fastfail.
 LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
 {
-  // ADR-0032: a filter under ours may call the top-level filter again. Answer
-  // once per thread, and do not call the filter under ours a second time.
+  // ADR-0032: a filter under ours may call the top-level filter again. Record
+  // and report once per thread; a call from inside the filter only goes on
+  // down the chain (SelectFilterUnderOurs).
   const DWORD tid = GetCurrentThreadId();
-  std::uint32_t slotThreadIds[kTopLevelFilterThreadSlotCount]{};
-  for (std::size_t i = 0; i < kTopLevelFilterThreadSlotCount; ++i) {
-    slotThreadIds[i] = g_topLevelFilterThreads[i].load(std::memory_order_relaxed);
-  }
   std::size_t slot = kTopLevelFilterThreadSlotCount;
-  auto entry = ClassifyTopLevelFilterEntry(slotThreadIds, kTopLevelFilterThreadSlotCount, tid, &slot);
-  if (entry == TopLevelFilterEntry::kReentered) {
-    return EXCEPTION_CONTINUE_SEARCH;
-  }
-  if (entry == TopLevelFilterEntry::kEntered) {
-    std::uint32_t expected = 0u;
-    if (!g_topLevelFilterThreads[slot].compare_exchange_strong(expected, tid, std::memory_order_acq_rel)) {
-      // Another crashing thread took the slot between the read and here.
-      entry = TopLevelFilterEntry::kNoSlot;
+  auto entry = TopLevelFilterEntry::kNoSlot;
+  for (;;) {
+    std::uint32_t slotThreadIds[kTopLevelFilterThreadSlotCount]{};
+    for (std::size_t i = 0; i < kTopLevelFilterThreadSlotCount; ++i) {
+      slotThreadIds[i] = g_topLevelFilterThreads[i].load(std::memory_order_relaxed);
     }
+    entry = ClassifyTopLevelFilterEntry(slotThreadIds, kTopLevelFilterThreadSlotCount, tid, &slot);
+    if (entry == TopLevelFilterEntry::kReentered) {
+      break;
+    }
+    if (entry == TopLevelFilterEntry::kEntered) {
+      std::uint32_t expected = 0u;
+      if (g_topLevelFilterThreads[slot].compare_exchange_strong(expected, tid, std::memory_order_acq_rel)) {
+        break;
+      }
+      // Another crashing thread took the slot between the read and here.
+      continue;
+    }
+    // kNoSlot: that many threads are in the filter already and the process is
+    // ending. Wait for a slot rather than run without the guard.
+    Sleep(kTopLevelFilterSlotWaitMs);
   }
 
+  const auto lastDisplaced =
+    reinterpret_cast<std::uintptr_t>(g_previousUnhandledExceptionFilter.load(std::memory_order_acquire));
+  const auto presentAtInstall =
+    reinterpret_cast<std::uintptr_t>(g_installTimeUnhandledExceptionFilter.load(std::memory_order_acquire));
+  if (entry == TopLevelFilterEntry::kReentered) {
+    const std::uint32_t depth = ++g_topLevelFilterDepth[slot];
+    const auto under = reinterpret_cast<LPTOP_LEVEL_EXCEPTION_FILTER>(
+      SelectFilterUnderOurs(lastDisplaced, presentAtInstall, depth));
+    const LONG reenteredResult = under ? under(ep) : EXCEPTION_CONTINUE_SEARCH;
+    --g_topLevelFilterDepth[slot];
+    return reenteredResult;
+  }
+  g_topLevelFilterDepth[slot] = 0u;
+
+  bool unhandledSignaled = false;
   auto* shm = GetShared();
   if (shm && ep && ep->ExceptionRecord && ep->ContextRecord && g_crashHookMode == 1) {
     const DWORD code = ep->ExceptionRecord->ExceptionCode;
@@ -686,15 +771,26 @@ LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
       SignalPublishedCrash(code, reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress));
     }
     // Not on a stack overflow, where the little stack left is the filters'.
-    if (entry == TopLevelFilterEntry::kEntered && code != EXCEPTION_STACK_OVERFLOW) {
-      SignalUnhandledAndHold(shm, ep->ExceptionRecord);
+    // Not for a fatal code the vectored handler could not record: the record
+    // is then an earlier exception's, even one of the same thread and address.
+    // (An exception dispatched inside this one, such as a crash handler's
+    // probe fault, has its own EXCEPTION_RECORD and does not count.)
+    if (code != EXCEPTION_STACK_OVERFLOW && !(ShouldRecordException(code) && IsThisThreadsFaultUnrecorded(ep->ExceptionRecord))) {
+      unhandledSignaled = SignalUnhandledAndHold(shm, ep->ExceptionRecord);
     }
   }
-  const auto previous = g_previousUnhandledExceptionFilter.load(std::memory_order_acquire);
+  const auto previous =
+    reinterpret_cast<LPTOP_LEVEL_EXCEPTION_FILTER>(SelectFilterUnderOurs(lastDisplaced, presentAtInstall, 0u));
   const LONG result = previous ? previous(ep) : EXCEPTION_CONTINUE_SEARCH;
-  if (entry == TopLevelFilterEntry::kEntered) {
-    g_topLevelFilterThreads[slot].store(0u, std::memory_order_release);
+  if (unhandledSignaled && result == EXCEPTION_CONTINUE_EXECUTION) {
+    // A filter under ours makes the thread run on: the exception was dealt
+    // with after all, so the helper must not go on reading it as a crash in
+    // progress (its late recovery waits while the signal is set).
+    if (const HANDLE unhandled = GetUnhandledEvent()) {
+      ResetEvent(unhandled);
+    }
   }
+  g_topLevelFilterThreads[slot].store(0u, std::memory_order_release);
   return result;
 }
 
@@ -741,6 +837,12 @@ std::uintptr_t ReclaimTopLevelFilter() noexcept
   }
   g_previousUnhandledExceptionFilter.store(displaced, std::memory_order_release);
   return reinterpret_cast<std::uintptr_t>(displaced);
+}
+
+bool IsCrashLoggerCodeAddress(std::uintptr_t address) noexcept
+{
+  RefreshCrashLoggerModuleRanges();
+  return IsInCrashLoggerModule(address, g_crashLoggerRange.Load(), g_crashLoggerSseRange.Load());
 }
 
 namespace {
@@ -805,8 +907,9 @@ bool InstallCrashHandler(std::uint32_t crashHookMode)
   // itself).
   static std::atomic<bool> s_lastChanceHandlersInstalled{ false };
   if (h != nullptr && crashHookMode == 1 && !s_lastChanceHandlersInstalled.exchange(true)) {
-    g_previousUnhandledExceptionFilter.store(
-      SetUnhandledExceptionFilter(UnhandledExceptionFilterHook), std::memory_order_release);
+    const auto presentAtInstall = SetUnhandledExceptionFilter(UnhandledExceptionFilterHook);
+    g_installTimeUnhandledExceptionFilter.store(presentAtInstall, std::memory_order_release);
+    g_previousUnhandledExceptionFilter.store(presentAtInstall, std::memory_order_release);
     g_topLevelFilterInstalled.store(true, std::memory_order_release);
     // Failing to add it leaves the filter as it was before ADR-0032.
     AddVectoredExceptionHandler(/*First=*/0, ReclaimTopLevelFilterHandler);

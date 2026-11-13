@@ -134,6 +134,9 @@ static int RunHelper(int argc, wchar_t** argv)
       BuildCrashEventUnavailableMessage(
         proc,
         L"Warning: crash event unavailable; helper is running in hang-only mode and will keep retrying."));
+  } else {
+    // ADR-0032. Without the crash event this is logged when it is opened.
+    AppendLogLine(outBase, skydiag::helper::internal::DescribeUnhandledSignalState(proc));
   }
 
   RunCompatibilityPreflight(cfg, proc, outBase);

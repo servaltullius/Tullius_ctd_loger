@@ -39,6 +39,11 @@ constexpr UINT ManualCaptureHotkeyRegistrationModifiers(const ManualCaptureHotke
   return static_cast<UINT>(hotkey.modifiers) | MOD_NOREPEAT;
 }
 
+// ADR-0032: a failed open of the unhandled signal's events is tried again this
+// often, this many times.
+inline constexpr std::uint64_t kUnhandledSignalRetryIntervalMs = 2000;
+inline constexpr std::uint32_t kUnhandledSignalRetryCount = 5;
+
 struct HelperLoopState
 {
   CrashCaptureState crashCaptured{};
@@ -50,6 +55,10 @@ struct HelperLoopState
   PendingCrashEtwCapture pendingCrashEtw{};
   std::uint64_t nextCrashEventRetryTick64 = 0;
   std::uint64_t nextCrashEventWarnTick64 = 0;
+  // ADR-0032: when and how many more times the events of the unhandled signal
+  // are tried again after a failed open (RetryUnhandledSignalAttachTick).
+  std::uint64_t nextUnhandledSignalRetryTick64 = 0;
+  std::uint32_t unhandledSignalRetriesLeft = kUnhandledSignalRetryCount;
   std::uint32_t postExitEvidenceSeq = 0;
   // Set by the exit tick (IsSlowShutdownAtExit) before it settles the held
   // hang dump and launches the deferred viewers, which both follow it.
@@ -118,6 +127,16 @@ std::filesystem::path DecodeCrashLoggerIniPath(const std::string& bytes);
 // set in CrashLogger.ini, and the SKSE log folder under Documents\My Games.
 // Empty unless Crash Logger is installed with its thread dump hotkey on.
 std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig& cfg, const AttachedProcess& proc);
+// ADR-0032: the log line that says whether the plugin's "not handled" signal
+// is in use, and why not. Logged when the crash event is open: at start, when
+// it is opened later, and when a retry changes the answer.
+std::wstring DescribeUnhandledSignalState(const AttachedProcess& proc);
+// Tries the signal's events again after a failed open, a few times
+// (kUnhandledSignalRetryCount), and logs the outcome.
+void RetryUnhandledSignalAttachTick(
+  AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state);
 // Also starts watching Crash Logger's thread dump hotkey when Crash Logger is
 // installed with it on, whether or not the manual capture hotkey is enabled;
 // the unregister call stops both.

@@ -21,6 +21,7 @@
 #include "EtwCapture.h"
 #include "IncidentManifest.h"
 #include "RetentionWorker.h"
+#include "SkyrimDiagProtocol.h"
 
 using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
@@ -2093,6 +2094,165 @@ void TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0032: the plugin reported the exception as not handled and no filter has
+// resumed it. The heartbeat is the main thread's; the faulting thread is still
+// in a crash handler, so the capture stays a crash until the signal is taken
+// back. An exit with code 0 after that keeps the dump the recovery would have
+// kept.
+void TestHandleLateRecoveryTick_KeepsACrashThePluginReportedUnhandled()
+{
+  using skydiag::helper::internal::HandleLateRecoveryTick;
+
+  const auto outBase = MakeTempDir(L"skydiag_helper_late_recovery_unhandled");
+  ClearLog(outBase);
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20261113_120000_001.dmp";
+  const auto reportPath = outBase / "SkyrimDiag_Crash_20261113_120000_001_SkyrimDiagReport.txt";
+  WriteAllTextUtf8(dumpPath, "dump");
+  WriteAllTextUtf8(reportPath, "report");
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.last_heartbeat_qpc = 100u;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.unhandledEvent = CreateEventW(nullptr, /*bManualReset=*/TRUE, /*bInitialState=*/TRUE, nullptr);
+  Require(proc.unhandledEvent != nullptr, "CreateEventW failed");
+  HelperConfig cfg = MakeTestConfig();
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo =
+    skydiag::helper::internal::BuildCrashEventInfo(0xC0000005u, 0x12345678u, child.pi.dwThreadId, skydiag::kState_Frozen);
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  state.pendingCrashViewerDumpPath = dumpPath.wstring();
+
+  // Two minutes alive and six advancing windows, twice: a release without the signal.
+  auto& late = state.crashCaptured.lateRecovery;
+  for (std::uint64_t heartbeat : { 300u, 400u }) {
+    const auto now = GetTickCount64();
+    late.latchedTick64 = now - 120'000;
+    late.lastSampleTick64 = now - 6'000;
+    late.lastHeartbeatQpc = heartbeat - 100u;
+    late.advancingWindows = 5u;
+    shared->header.last_heartbeat_qpc = heartbeat;
+    Require(!HandleLateRecoveryTick(cfg, proc, outBase, &state), "Reported unhandled: not released");
+  }
+  Require(state.crashCaptured.latched, "The crash stays captured");
+  Require(FileExists(dumpPath) && FileExists(reportPath), "Its dump and report stay");
+  Require(state.pendingCrashViewerDumpPath == dumpPath.wstring(), "The exit's viewer stays queued");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) != 0u, "Still frozen");
+  Require(state.crashCaptured.lateRecoveryWithheldCrashSeq == 2u, "The held-back recovery is noted");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  const auto firstLine = log.find("Keeping it as a crash");
+  Require(firstLine != std::string::npos, "The log says why the crash is kept");
+  Require(log.find("Keeping it as a crash", firstLine + 1) == std::string::npos, "It says so once");
+  Require(log.find("Game kept running") == std::string::npos, "It is not called handled");
+
+  // The game then ends with code 0: the crash actions go as for any zero
+  // exit, but the dump is kept.
+  {
+    skydiag::helper::internal::HelperLoopState exitState = state;
+    CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &exitState);
+    Require(!exitState.crashCaptured.latched, "A zero exit still releases the capture");
+    Require(FileExists(dumpPath), "The dump of a crash reported as unhandled is kept at a zero exit");
+    Require(!FileExists(reportPath), "Derived crash artifacts are removed");
+    WriteAllTextUtf8(reportPath, "report");
+  }
+
+  // A filter under the plugin's resumed the thread: the plugin took the
+  // signal back, and the game is then judged by its heartbeat as before.
+  ResetEvent(proc.unhandledEvent);
+  {
+    const auto now = GetTickCount64();
+    late.latchedTick64 = now - 120'000;
+    late.lastSampleTick64 = now - 6'000;
+    late.lastHeartbeatQpc = 400u;
+    late.advancingWindows = 5u;
+    shared->header.last_heartbeat_qpc = 500u;
+  }
+  Require(HandleLateRecoveryTick(cfg, proc, outBase, &state), "Signal taken back: released on the heartbeat");
+  Require(!state.crashCaptured.latched && FileExists(dumpPath), "Released with the dump kept");
+
+  CloseHandle(proc.unhandledEvent);
+  proc.unhandledEvent = nullptr;
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
+// ADR-0032: the log says whether the plugin's "not handled" signal is in use
+// and why not, and a failed open is tried again, unless the plugin has no such
+// event at all.
+void TestUnhandledSignalAttach_SaysWhyAndRetries()
+{
+  using skydiag::helper::internal::DescribeUnhandledSignalState;
+  using skydiag::helper::internal::RetryUnhandledSignalAttachTick;
+
+  const auto outBase = MakeTempDir(L"skydiag_helper_unhandled_signal_attach");
+  ClearLog(outBase);
+
+  // The game is this test process: nothing named for it exists yet.
+  skydiag::helper::AttachedProcess proc{};
+  proc.pid = GetCurrentProcessId();
+  proc.crashEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  // An older plugin: the event does not exist. Said once, never retried.
+  Require(!skydiag::helper::TryAttachUnhandledSignal(proc), "No plugin event: not attached");
+  Require(proc.unhandledEventOpenError == ERROR_FILE_NOT_FOUND, "The reason is kept");
+  Require(!skydiag::helper::ShouldRetryUnhandledSignalAttach(proc), "A plugin without the event is not retried");
+  AssertContains(
+    skydiag::helper::internal::WideToUtf8(DescribeUnhandledSignalState(proc)),
+    "older than this helper",
+    "The log names the older plugin");
+  skydiag::helper::internal::HelperLoopState state{};
+  RetryUnhandledSignalAttachTick(proc, outBase, &state);
+  Require(
+    state.unhandledSignalRetriesLeft == skydiag::helper::internal::kUnhandledSignalRetryCount,
+    "No retry is spent on a plugin without the event");
+
+  // The open failed for another reason (as when handles ran out): retried,
+  // and the plugin's event is there this time.
+  proc.unhandledEventOpenError = ERROR_NOT_ENOUGH_MEMORY;
+  Require(skydiag::helper::ShouldRetryUnhandledSignalAttach(proc), "A failed open is retried");
+  AssertContains(
+    skydiag::helper::internal::WideToUtf8(DescribeUnhandledSignalState(proc)),
+    "could not be opened, err=8",
+    "The log gives the error");
+  const std::wstring unhandledName = std::wstring(skydiag::protocol::kKernelObjectPrefix)
+    + std::to_wstring(proc.pid) + skydiag::protocol::kKernelObjectSuffix_UnhandledEvent;
+  HANDLE pluginEvent = CreateEventW(nullptr, TRUE, FALSE, unhandledName.c_str());
+  Require(pluginEvent != nullptr, "CreateEventW failed for the plugin's event");
+  RetryUnhandledSignalAttachTick(proc, outBase, &state);
+  Require(proc.unhandledEvent != nullptr && proc.dumpSettledEvent != nullptr, "The retry attached both events");
+  Require(!skydiag::helper::ShouldRetryUnhandledSignalAttach(proc), "Nothing left to retry");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"),
+    "Unhandled-exception signal from the plugin: on",
+    "The log says the signal is on after the retry");
+
+  // Retries are bounded: a failure that stays is given up on, and said so.
+  skydiag::helper::AttachedProcess stuck{};
+  stuck.pid = GetCurrentProcessId();
+  stuck.crashEvent = proc.crashEvent;
+  stuck.unhandledEvent = proc.unhandledEvent;  // open, but the helper's event is missing
+  stuck.dumpSettledEventCreateError = ERROR_NOT_ENOUGH_MEMORY;
+  skydiag::helper::internal::HelperLoopState stuckState{};
+  stuckState.unhandledSignalRetriesLeft = 0u;
+  ClearLog(outBase);
+  RetryUnhandledSignalAttachTick(stuck, outBase, &stuckState);
+  Require(stuck.dumpSettledEvent == nullptr, "No retries left: nothing is tried");
+
+  CloseHandle(pluginEvent);
+  CloseHandle(proc.dumpSettledEvent);
+  CloseHandle(proc.unhandledEvent);
+  CloseHandle(proc.crashEvent);
+  std::filesystem::remove_all(outBase);
+}
+
 // Without heartbeat progress (the game is stuck, or a real crash is still
 // being reported) the capture is never released, however long it waits.
 void TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat()
@@ -3191,6 +3351,8 @@ int wmain(int argc, wchar_t** argv)
     TestEtwStopExitZeroRequiresNonEmptyArtifact();
     TestLateRecoveryNeedsAMinuteOfAdvancingHeartbeat();
     TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived();
+    TestHandleLateRecoveryTick_KeepsACrashThePluginReportedUnhandled();
+    TestUnhandledSignalAttach_SaysWhyAndRetries();
     TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat();
     TestOutputDirResolvesAgainstTheHelperFolder();
     TestShutdownLeavesTheAnalyzerRunningUnlessTheViewerOpened();

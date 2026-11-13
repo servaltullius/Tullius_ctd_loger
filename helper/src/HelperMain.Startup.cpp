@@ -326,20 +326,50 @@ std::vector<std::filesystem::path> ResolveCrashLoggerLogDirs(const HelperConfig&
   return dirs;
 }
 
+std::wstring DescribeUnhandledSignalState(const AttachedProcess& proc)
+{
+  const std::wstring_view prefix = L"Unhandled-exception signal from the plugin: ";
+  if (proc.unhandledEvent && proc.dumpSettledEvent) {
+    return std::wstring(prefix)
+      + L"on (a crash nothing handled is dumped at once, and the plugin holds the game until the dump is written).";
+  }
+  if (!proc.unhandledEvent && proc.unhandledEventOpenError == ERROR_FILE_NOT_FOUND) {
+    return std::wstring(prefix) + L"not available (the plugin has no such event: it is older than this helper).";
+  }
+  if (!proc.unhandledEvent) {
+    return std::wstring(prefix) + L"not available yet (the plugin's event could not be opened, err="
+      + std::to_wstring(proc.unhandledEventOpenError) + L").";
+  }
+  return std::wstring(prefix) + L"not available yet (the helper's \"dump settled\" event could not be made, err="
+    + std::to_wstring(proc.dumpSettledEventCreateError) + L").";
+}
+
+void RetryUnhandledSignalAttachTick(
+  AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  HelperLoopState* state)
+{
+  if (!state || state->unhandledSignalRetriesLeft == 0u || !skydiag::helper::ShouldRetryUnhandledSignalAttach(proc)) {
+    return;
+  }
+  const std::uint64_t nowTick = GetTickCount64();
+  if (nowTick < state->nextUnhandledSignalRetryTick64) {
+    return;
+  }
+  --state->unhandledSignalRetriesLeft;
+  state->nextUnhandledSignalRetryTick64 = nowTick + kUnhandledSignalRetryIntervalMs;
+  if (skydiag::helper::TryAttachUnhandledSignal(proc)) {
+    AppendLogLine(outBase, DescribeUnhandledSignalState(proc));
+  } else if (state->unhandledSignalRetriesLeft == 0u || !skydiag::helper::ShouldRetryUnhandledSignalAttach(proc)) {
+    AppendLogLine(outBase, DescribeUnhandledSignalState(proc) + L" Not trying again in this session.");
+  }
+}
+
 void RegisterManualCaptureHotkeyIfEnabled(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase)
 {
-  // ADR-0032.
-  AppendLogLine(
-    outBase,
-    (proc.unhandledEvent && proc.dumpSettledEvent)
-      ? L"Unhandled-exception signal from the plugin: on (a crash nothing handled is dumped at once, and the "
-        L"plugin holds the game until the dump is written)."
-      : L"Unhandled-exception signal from the plugin: not available (crash event not open yet, or a plugin "
-        L"older than this helper).");
-
   // Crash Logger's thread dump runs on its own hotkey whatever the manual
   // capture hotkey is, so its keys are watched either way
   // (IsLikelyCrashLoggerThreadDumpFault).
