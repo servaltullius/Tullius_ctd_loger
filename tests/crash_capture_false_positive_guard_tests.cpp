@@ -199,6 +199,16 @@ int main()
     processValidBody,
     "suppressing deferred crash viewer",
     "Post-processing helper must suppress crash viewer launch once the process reports a zero exit code.");
+  // ADR-0032: not for a dump the plugin still reports as an unhandled crash.
+  AssertContains(
+    processValidBody,
+    "if (IsNormalExitForCapturedCrash(processExitCode, IsUnhandledExceptionSignaled(proc.unhandledEvent))) {",
+    "A zero exit code in the viewer wait window must not undo a crash the plugin reported as unhandled.");
+  AssertOrdered(
+    crashTickBody,
+    "NoteUnhandledSignal(outBase, info, crashState);",
+    "L\"post_dump_exit_check\"",
+    "The exit check after a dump written late must look at the plugin's unhandled signal before the exit code.");
 
   AssertOrdered(
     processValidBody,
@@ -272,12 +282,29 @@ int main()
   assert(
     processExitTickBody.find("sharedMemoryStrongCrash") == std::string::npos &&
     processExitTickBody.find("exitCode0StrongCrash") == std::string::npos &&
-    "Process exit tick must treat exit_code=0 as authoritative normal termination.");
+    "Process exit tick must not override exit_code=0 on the strength of the exception.");
 
   AssertContains(
     processExitTickBody,
     "CleanupCrashArtifactsAfterZeroExit(",
     "Process exit tick must invoke zero-exit crash artifact cleanup path.");
+  // ADR-0032: exit_code=0 is normal termination unless the plugin still
+  // reports the captured crash as not handled. Read before the drain, which
+  // latches a record nobody captured.
+  AssertOrdered(
+    processExitTickBody,
+    "IsCapturedCrashStillUnhandled(",
+    "DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);",
+    "Whether the captured crash is still unhandled must be read before the exit drain latches anything.");
+  AssertOrdered(
+    processExitTickBody,
+    "if (IsNormalExitForCapturedCrash(exitCode, capturedCrashStillUnhandled)) {",
+    "CleanupCrashArtifactsAfterZeroExit(",
+    "Zero-exit cleanup must not run for a crash the plugin still reports as unhandled.");
+  AssertContains(
+    processExitTickBody,
+    "LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, capturedCrashStillUnhandled, state);",
+    "The exit's viewer must be told when a crash is kept through a zero exit.");
 
   AssertContains(
     processExitTickBody,
@@ -287,8 +314,16 @@ int main()
   const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
   AssertContains(
     deferredViewerBody,
-    "cfg.autoOpenViewerOnCrash &&\n      exitCode != 0",
-    "Deferred crash viewer launch must require a non-zero process exit code.");
+    "const bool normalExit = IsNormalExitForCapturedCrash(exitCode, capturedCrashStillUnhandled);",
+    "Deferred crash viewer launch must judge the exit as the exit tick does.");
+  AssertContains(
+    deferredViewerBody,
+    "cfg.autoOpenViewerOnCrash &&\n      !normalExit",
+    "Deferred crash viewer launch must require a non-zero process exit code, or a crash kept through a zero exit.");
+  AssertContains(
+    deferredViewerBody,
+    "cfg.autoOpenViewerOnCrash && normalExit) {",
+    "Only a normal exit suppresses the deferred crash viewer.");
   assert(
     deferredViewerBody.find("exitCode0StrongCrash") == std::string::npos &&
     "Deferred crash viewer launch must not override a zero exit code with exception strength.");

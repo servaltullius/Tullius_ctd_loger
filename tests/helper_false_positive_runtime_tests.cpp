@@ -492,6 +492,7 @@ void TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit()
     cfg,
     outBase,
     /*exitCode=*/0,
+    /*capturedCrashStillUnhandled=*/false,
     &state);
 
   Require(state.pendingCrashViewerDumpPath.empty(), "Normal exit must suppress deferred crash viewer");
@@ -577,6 +578,95 @@ void TestHandleProcessExitTick_TreatsStrongSharedMemoryExceptionAsHandledOnZeroE
 
   TerminateChildProcess(&child);
   std::filesystem::remove_all(outBase);
+}
+
+// ADR-0032: the plugin reported the captured exception as not handled and no
+// filter resumed it, and the process then ended with code 0 (a filter under
+// the plugin's, or the game closing on another thread). That exit code does
+// not undo the crash. With the signal taken back it does, as before.
+static_assert(skydiag::helper::internal::IsNormalExitForCapturedCrash(0u, /*capturedCrashStillUnhandled=*/false));
+static_assert(!skydiag::helper::internal::IsNormalExitForCapturedCrash(0u, /*capturedCrashStillUnhandled=*/true));
+static_assert(!skydiag::helper::internal::IsNormalExitForCapturedCrash(1u, /*capturedCrashStillUnhandled=*/false));
+static_assert(!skydiag::helper::internal::IsNormalExitForCapturedCrash(1u, /*capturedCrashStillUnhandled=*/true));
+
+void TestHandleProcessExitTick_KeepsACrashReportedUnhandledAtZeroExit()
+{
+  for (const bool signalSet : { true, false }) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_exit_tick_unhandled_zero_exit");
+    ClearLog(outBase);
+
+    const auto dumpPath = outBase / "SkyrimDiag_Crash_20261113_170000_001.dmp";
+    const auto reportPath = outBase / "SkyrimDiag_Crash_20261113_170000_001_SkyrimDiagReport.txt";
+    WriteAllTextUtf8(dumpPath, "dump");
+    WriteAllTextUtf8(reportPath, "report");
+
+    auto shared = MakeSharedLayout();
+    shared->header.crash_seq = 2u;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.state_flags = skydiag::kState_Frozen;
+
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    proc.unhandledEvent =
+      CreateEventW(nullptr, /*bManualReset=*/TRUE, /*bInitialState=*/signalSet ? TRUE : FALSE, nullptr);
+    Require(proc.unhandledEvent != nullptr, "CreateEventW failed");
+
+    // The viewer stays off: with it on, a kept crash would open the real
+    // viewer when one is built beside this test.
+    HelperConfig cfg = MakeTestConfig();
+    cfg.enableWerDumpFallbackHint = true;
+
+    skydiag::helper::internal::HelperLoopState state{};
+    state.crashCaptured.latched = true;
+    state.crashCaptured.capturedInfo =
+      skydiag::helper::internal::BuildCrashEventInfo(0xC0000005u, 0x12345678u, child.pi.dwThreadId, skydiag::kState_Frozen);
+    state.crashCaptured.capturedInfo.crashSeq = 2u;
+    state.capturedCrashDumpPath = dumpPath.wstring();
+    state.pendingCrashViewerDumpPath = dumpPath.wstring();
+
+    Require(TerminateProcess(child.pi.hProcess, 0) != FALSE, "TerminateProcess(exit_code=0) failed");
+    Require(WaitForSingleObject(child.pi.hProcess, 5000) == WAIT_OBJECT_0, "Zero-exit child did not terminate");
+    Require(HandleProcessExitTick(cfg, proc, outBase, &state), "Process exit tick must handle the zero exit");
+
+    bool evidenceWritten = false;
+    for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
+      evidenceWritten = evidenceWritten ||
+        entry.path().filename().wstring().rfind(L"SkyrimDiag_CleanExitEvidence_", 0) == 0;
+    }
+    const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+    if (signalSet) {
+      Require(FileExists(dumpPath), "A crash reported as unhandled keeps its dump at a zero exit");
+      Require(FileExists(reportPath), "A crash reported as unhandled keeps its report at a zero exit");
+      Require(state.crashCaptured.latched, "A crash reported as unhandled stays captured at a zero exit");
+      Require(state.capturedCrashDumpPath == dumpPath.wstring(), "Its dump stays the captured dump");
+      Require(state.pendingCrashViewerDumpPath == dumpPath.wstring(), "Its viewer is not dropped as for a normal exit");
+      Require(!evidenceWritten, "A kept crash is not recorded as a clean exit");
+      AssertContains(
+        log,
+        "the plugin had reported the captured exception as not handled and no filter resumed it (crash_seq=2)",
+        "The log must say why a zero exit did not undo the crash");
+      Require(
+        log.find("Process exited normally (exit_code=0)") == std::string::npos,
+        "A crash reported as unhandled must not be called a normal exit");
+    } else {
+      Require(!FileExists(dumpPath), "With the signal taken back, a zero exit deletes the dump as before");
+      Require(!FileExists(reportPath), "With the signal taken back, a zero exit deletes the report as before");
+      Require(!state.crashCaptured.latched, "With the signal taken back, a zero exit releases the capture");
+      Require(evidenceWritten, "The strong fault is recorded as clean-exit evidence as before");
+      AssertContains(
+        log,
+        "Process exited normally (exit_code=0)",
+        "With the signal taken back, a zero exit is a normal exit");
+      Require(log.find("Keeping it as a crash") == std::string::npos, "Nothing is kept as a crash then");
+    }
+    Require(
+      !FileExists(outBase / "SkyrimDiag_WER_LocalDumps_Hint.txt"),
+      "A zero exit must not emit abnormal-exit WER guidance");
+
+    CloseHandle(proc.unhandledEvent);
+    TerminateChildProcess(&child);
+    std::filesystem::remove_all(outBase);
+  }
 }
 
 void TestHandleProcessExitTick_DrainsLateZeroExitFaultMetadataWithoutDumpAttempt()
@@ -2152,8 +2242,10 @@ void TestHandleLateRecoveryTick_KeepsACrashThePluginReportedUnhandled()
   Require(log.find("Keeping it as a crash", firstLine + 1) == std::string::npos, "It says so once");
   Require(log.find("Game kept running") == std::string::npos, "It is not called handled");
 
-  // The game then ends with code 0: the crash actions go as for any zero
-  // exit, but the dump is kept.
+  // The zero-exit cleanup of such a crash: the crash actions go as for any
+  // zero exit, but the dump is kept. The exit tick runs it only once the
+  // signal was taken back (with it set, the whole crash is kept); the cleanup
+  // itself does not look at the signal.
   {
     skydiag::helper::internal::HelperLoopState exitState = state;
     CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, &exitState);
@@ -2728,7 +2820,7 @@ void TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown()
   state.pendingHangViewerDumpPath = L"C:\\Temp\\SyntheticHang.dmp";
   state.hangState.hangCapturedThisEpisode = true;
   state.slowShutdownAtExit = true;  // the exit tick's IsSlowShutdownAtExit
-  LaunchDeferredViewersAfterExit(cfg, outBase, /*exitCode=*/0, &state);
+  LaunchDeferredViewersAfterExit(cfg, outBase, /*exitCode=*/0, /*capturedCrashStillUnhandled=*/false, &state);
 
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "Suppressed hang viewer launch", "the skipped viewer is logged");
@@ -3326,6 +3418,7 @@ int wmain(int argc, wchar_t** argv)
     TestCleanupCrashArtifactsAfterZeroExit_RemovesItsRecapture();
     TestCleanupCrashArtifactsAfterZeroExit_StopsDelayedAnalyzerWriter();
     TestLaunchDeferredViewersAfterExit_SuppressesOnNormalExit();
+    TestHandleProcessExitTick_KeepsACrashReportedUnhandledAtZeroExit();
     TestHandleProcessExitTick_TreatsStrongSharedMemoryExceptionAsHandledOnZeroExit();
     TestHandleProcessExitTick_DrainsLateZeroExitFaultMetadataWithoutDumpAttempt();
     TestHandleProcessExitTick_PreservesPendingEvidenceAfterFinalizationFailure();

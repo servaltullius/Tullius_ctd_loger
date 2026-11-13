@@ -649,7 +649,9 @@ void ProcessValidCrashDump(
         if (!GetExitCodeProcess(proc.process, &processExitCode)) {
           processExitCode = 0xFFFFFFFFu;
         }
-        if (processExitCode == 0) {
+        // ADR-0032: this dump was kept as a crash; an exit with code 0 undoes
+        // that only when the plugin does not report it as not handled.
+        if (IsNormalExitForCapturedCrash(processExitCode, IsUnhandledExceptionSignaled(proc.unhandledEvent))) {
           AppendLogLine(
             outBase,
             L"Process exited with exit_code=0 during wait window; "
@@ -1727,10 +1729,15 @@ bool HandleCrashEventTick(
   if (proc.process) {
     if (checkedRecoveryBeforeDump) {
       if (WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0) {
-        DWORD exitCode = STILL_ACTIVE;
-        if (TryReadExitCode(proc.process, outBase, &exitCode)) {
-          verdict = ClassifyExitCodeVerdictWithContext(
-            cfg, exitCode, info, outBase, L"post_dump_exit_check", -1, crashState);
+        // ADR-0032: before the exit code is looked at, as in the filters.
+        if (IsUnhandledExceptionSignaled(proc.unhandledEvent)) {
+          NoteUnhandledSignal(outBase, info, crashState);
+        } else {
+          DWORD exitCode = STILL_ACTIVE;
+          if (TryReadExitCode(proc.process, outBase, &exitCode)) {
+            verdict = ClassifyExitCodeVerdictWithContext(
+              cfg, exitCode, info, outBase, L"post_dump_exit_check", -1, crashState);
+          }
         }
       }
     } else {

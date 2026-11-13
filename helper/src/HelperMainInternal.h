@@ -175,10 +175,13 @@ void SettleHeldHangDumpAfterExitViewer(
   bool viewerLaunched,
   HelperLoopState* state);
 
+// `capturedCrashStillUnhandled`: IsCapturedCrashStillUnhandled as read when the
+// exit was seen; with it the crash viewer opens after an exit with code 0 too.
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
   DWORD exitCode,
+  bool capturedCrashStillUnhandled,
   HelperLoopState* state);
 void HandleProcessWaitFailed(
   const HelperConfig& cfg,

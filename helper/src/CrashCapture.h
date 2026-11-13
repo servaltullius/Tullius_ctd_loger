@@ -311,6 +311,17 @@ constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSi
   return crashLatched && unhandledSignalSet;
 }
 
+// Whether an exit with `exitCode` says the captured exception was handled:
+// code 0 does, unless the capture is still reported as not handled
+// (IsCapturedCrashStillUnhandled). Then something ended the process with code
+// 0 while the faulting thread was in the filters: a filter under the plugin's,
+// or the game closing on another thread. The exit path keeps such a crash as
+// it keeps one that ended with any other code.
+constexpr bool IsNormalExitForCapturedCrash(std::uint32_t exitCode, bool capturedCrashStillUnhandled) noexcept
+{
+  return exitCode == 0u && !capturedCrashStillUnhandled;
+}
+
 struct StableSharedSnapshot {
   struct AlignedByteDeleter {
     std::size_t alignment = alignof(std::max_align_t);
@@ -443,7 +454,9 @@ inline bool IsCommittedCrashSequence(std::uint32_t crashSeq) noexcept
 // That rule is deliberately absolute, so it also discards the rare genuine CTD
 // that exits 0 — a foreign handler calling ExitProcess(0), a launcher
 // normalizing the child exit code, or teardown that reaches a normal exit path
-// after a fatal fault.
+// after a fatal fault. The one exception is a crash the plugin reported as not
+// handled (ADR-0032, IsNormalExitForCapturedCrash): there the plugin saw what
+// the exit code can only suggest.
 //
 // This predicate does not change the filter decision. It only marks the subset
 // where the filtered incident carried real fault evidence, so a compact metadata

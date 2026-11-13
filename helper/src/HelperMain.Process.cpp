@@ -571,7 +571,9 @@ void CleanupCrashArtifactsAfterZeroExit(
 {
   // ADR-0032: a crash whose late recovery was held back (the plugin reported
   // it as not handled) would have kept its dump had the recovery run; an exit
-  // with code 0 after that keeps it too.
+  // with code 0 after that keeps it too. This runs for it only once the plugin
+  // took the signal back: with the signal still set the exit tick keeps the
+  // whole crash (IsNormalExitForCapturedCrash).
   const bool lateRecoveryWasWithheld = state && state->crashCaptured.latched &&
     state->crashCaptured.lateRecoveryWithheldCrashSeq != 0u &&
     state->crashCaptured.lateRecoveryWithheldCrashSeq == state->crashCaptured.capturedInfo.crashSeq;
@@ -777,15 +779,18 @@ void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
   DWORD exitCode,
+  bool capturedCrashStillUnhandled,
   HelperLoopState* state)
 {
   if (!state) {
     return;
   }
 
+  // ADR-0032: a crash kept through an exit with code 0 gets its viewer too.
+  const bool normalExit = IsNormalExitForCapturedCrash(exitCode, capturedCrashStillUnhandled);
   if (!state->pendingCrashViewerDumpPath.empty() &&
       cfg.autoOpenViewerOnCrash &&
-      exitCode != 0) {
+      !normalExit) {
     const std::wstring deferredDumpPath = state->pendingCrashViewerDumpPath;
     const auto launch = StartDumpToolViewer(
       cfg,
@@ -817,7 +822,7 @@ void LaunchDeferredViewersAfterExit(
           + L").");
     }
     state->pendingCrashViewerDumpPath.clear();
-  } else if (!state->pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && exitCode == 0) {
+  } else if (!state->pendingCrashViewerDumpPath.empty() && cfg.autoOpenViewerOnCrash && normalExit) {
     AppendLogLine(
       outBase,
       L"Suppressed deferred crash viewer launch on normal process exit (exit_code=0, dump="
@@ -886,6 +891,11 @@ bool HandleProcessExitTick(
           + L"); treating exit code as unavailable/non-zero.");
       exitCode = STILL_ACTIVE;
     }
+    // ADR-0032: read before the drain, which latches a record nobody captured.
+    // A captured crash the plugin still reports as not handled stays a crash
+    // whatever the exit code is.
+    const bool capturedCrashStillUnhandled = IsCapturedCrashStillUnhandled(
+      state->crashCaptured.latched, IsUnhandledExceptionSignaled(proc.unhandledEvent));
     // Always drain the committed crash generation after observing process exit.
     // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
     const bool crashOnRecord = DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
@@ -973,10 +983,17 @@ bool HandleProcessExitTick(
             + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
       }
     }
-    if (exitCode == 0) {
+    if (IsNormalExitForCapturedCrash(exitCode, capturedCrashStillUnhandled)) {
       const bool hadCapturedCrash = state->crashCaptured.latched;
       CleanupCrashArtifactsAfterZeroExit(cfg, proc, outBase, state);
       AppendExitClassificationLog(outBase, hadCapturedCrash);
+    } else if (exitCode == 0) {
+      AppendLogLine(
+        outBase,
+        L"The game exited with exit_code=0, but the plugin had reported the captured exception as not handled and "
+        L"no filter resumed it (crash_seq=" + std::to_wstring(state->crashCaptured.capturedInfo.crashSeq)
+          + L"): a filter, or the game closing on another thread, ended the process with that code while the "
+            L"faulting thread was in the exception filters. Keeping it as a crash.");
     }
     MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &pendingCrashEtw);
     std::wcerr << L"[SkyrimDiagHelper] Target process exited (exit_code=" << exitCode << L").\n";
@@ -995,7 +1012,7 @@ bool HandleProcessExitTick(
         hang.modalDialogSeenThisEpisode);
     }
     SettleHeldHangDumpAtExit(cfg, outBase, state);
-    LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, state);
+    LaunchDeferredViewersAfterExit(cfg, outBase, exitCode, capturedCrashStillUnhandled, state);
     return true;
   }
   if (w == WAIT_FAILED) {
