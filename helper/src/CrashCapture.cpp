@@ -285,53 +285,6 @@ bool WriteCleanExitEvidenceRecord(
   return true;
 }
 
-FilterVerdict ClassifyExitCodeVerdictWithContext(
-  const skydiag::helper::HelperConfig& cfg,
-  std::uint32_t exitCode,
-  const CrashEventInfo& info,
-  const std::filesystem::path& outBase,
-  std::wstring_view context,
-  int checkIndex,
-  CrashCaptureState* crashState)
-{
-  const auto verdict = ClassifyExitCodeVerdict(exitCode, info, outBase);
-  const std::wstring checkSuffix = (checkIndex >= 0)
-    ? (L", check=" + std::to_wstring(checkIndex + 1))
-    : L"";
-
-  // The filters only give the verdict; the caller logs what happens to the
-  // dump, since the early check runs before any dump is written.
-  if (verdict == FilterVerdict::kDeleteBenign) {
-    AppendLogLine(
-      outBase,
-      L"Crash event received but process exited normally (context=" + std::wstring(context)
-        + L", exit_code=0"
-        + checkSuffix
-        + L"); treating it as a handled first-chance or shutdown exception."
-    );
-    if (crashState && cfg.enableCleanExitEvidenceQuarantine &&
-        ShouldQuarantineCleanExitEvidence(exitCode, info)) {
-      crashState->cleanExitFilterContext.assign(context);
-    }
-    return verdict;
-  }
-
-  if (info.inMenu && exitCode != 0) {
-    AppendLogLine(
-      outBase,
-      L"Crash event reached menu/shutdown boundary with non-zero exit (context="
-        + std::wstring(context)
-        + L", exit_code="
-        + std::to_wstring(exitCode)
-        + checkSuffix
-        + L", state_flags="
-        + std::to_wstring(info.stateFlags)
-        + L"); treating it as a crash and preserving crash auto-actions.");
-  }
-
-  return verdict;
-}
-
 bool HasNewerCrashRecord(
   const skydiag::SharedHeader* shm,
   std::uint32_t expectedCrashSeq) noexcept
@@ -400,6 +353,63 @@ void NoteUnhandledSignal(
     L"(crash_seq=" + std::to_wstring(info.crashSeq) + L"). It is a crash; not waiting for the heartbeat.");
 }
 
+}  // namespace
+
+FilterVerdict ClassifyExitCodeVerdictWithContext(
+  const skydiag::helper::HelperConfig& cfg,
+  std::uint32_t exitCode,
+  HANDLE unhandledEvent,
+  const CrashEventInfo& info,
+  const std::filesystem::path& outBase,
+  std::wstring_view context,
+  int checkIndex,
+  CrashCaptureState* crashState)
+{
+  // ADR-0032: before the exit code, here for every caller.
+  if (IsUnhandledExceptionSignaled(unhandledEvent)) {
+    NoteUnhandledSignal(outBase, info, crashState);
+    return FilterVerdict::kKeepDump;
+  }
+  const auto verdict = ClassifyExitCodeVerdict(exitCode, info, outBase);
+  const std::wstring checkSuffix = (checkIndex >= 0)
+    ? (L", check=" + std::to_wstring(checkIndex + 1))
+    : L"";
+
+  // The filters only give the verdict; the caller logs what happens to the
+  // dump, since the early check runs before any dump is written.
+  if (verdict == FilterVerdict::kDeleteBenign) {
+    AppendLogLine(
+      outBase,
+      L"Crash event received but process exited normally (context=" + std::wstring(context)
+        + L", exit_code=0"
+        + checkSuffix
+        + L"); treating it as a handled first-chance or shutdown exception."
+    );
+    if (crashState && cfg.enableCleanExitEvidenceQuarantine &&
+        ShouldQuarantineCleanExitEvidence(exitCode, info)) {
+      crashState->cleanExitFilterContext.assign(context);
+    }
+    return verdict;
+  }
+
+  if (info.inMenu && exitCode != 0) {
+    AppendLogLine(
+      outBase,
+      L"Crash event reached menu/shutdown boundary with non-zero exit (context="
+        + std::wstring(context)
+        + L", exit_code="
+        + std::to_wstring(exitCode)
+        + checkSuffix
+        + L", state_flags="
+        + std::to_wstring(info.stateFlags)
+        + L"); treating it as a crash and preserving crash auto-actions.");
+  }
+
+  return verdict;
+}
+
+namespace {
+
 // Reads the exit code, reporting whether it is trustworthy. A failed query used
 // to leave the STILL_ACTIVE initializer in place, which reads as a non-zero
 // (crash-like) exit; callers must not treat that as an observed exit code.
@@ -451,7 +461,7 @@ FilterVerdict FilterShutdownException(
       return FilterVerdict::kKeepDump;
     }
     return ClassifyExitCodeVerdictWithContext(
-      cfg, exitCode, info, outBase, L"shutdown", -1, crashState);
+      cfg, exitCode, unhandledEvent, info, outBase, L"shutdown", -1, crashState);
   }
   if (pw == WAIT_TIMEOUT) {
     return FilterVerdict::kKeepDump;
@@ -498,7 +508,7 @@ FilterVerdict FilterFirstChanceException(
         return FilterVerdict::kKeepDump;
       }
       return ClassifyExitCodeVerdictWithContext(
-        cfg, exitCode, info, outBase, L"heartbeat_check", attempt, crashState);
+        cfg, exitCode, unhandledEvent, info, outBase, L"heartbeat_check", attempt, crashState);
     }
 
     const auto hb1 = shm->last_heartbeat_qpc;
@@ -649,7 +659,12 @@ void ProcessValidCrashDump(
         if (!GetExitCodeProcess(proc.process, &processExitCode)) {
           processExitCode = 0xFFFFFFFFu;
         }
-        if (processExitCode == 0) {
+        // ADR-0032: this dump was just kept as a crash (it is latched right
+        // after this, and its late recovery has not begun); an exit with code
+        // 0 undoes that only when the plugin does not report it as not handled.
+        const bool crashOutlivesZeroExit = DoesCapturedCrashOutliveZeroExit(
+          /*crashLatched=*/true, IsUnhandledExceptionSignaled(proc.unhandledEvent), /*lateRecoveryWithheld=*/false);
+        if (IsNormalExitForCapturedCrash(processExitCode, crashOutlivesZeroExit)) {
           AppendLogLine(
             outBase,
             L"Process exited with exit_code=0 during wait window; "
@@ -1052,6 +1067,9 @@ bool TryWritePostExitCrashEvidenceRecord(
     case PostExitEvidenceReason::kReleasedFaultFollowedByAbnormalExit:
       j["reason"] = "released_fault_followed_by_abnormal_exit";
       break;
+    case PostExitEvidenceReason::kReleasedFaultReportedUnhandled:
+      j["reason"] = "released_fault_reported_unhandled";
+      break;
   }
   j["captured_at"] = WideToUtf8(ts);
   j["capture_status"] = "metadata_only_process_already_exited";
@@ -1091,6 +1109,11 @@ bool TryWritePostExitCrashEvidenceRecord(
       logLine =
         L"Recorded crash metadata after process exit for an exception released as handled before the "
         L"game exited abnormally: ";
+      break;
+    case PostExitEvidenceReason::kReleasedFaultReportedUnhandled:
+      logLine =
+        L"Recorded crash metadata after process exit for an exception released as handled that the "
+        L"plugin then reported as not handled: ";
       break;
   }
   AppendLogLine(outBase, logLine + path.wstring());
@@ -1730,7 +1753,7 @@ bool HandleCrashEventTick(
         DWORD exitCode = STILL_ACTIVE;
         if (TryReadExitCode(proc.process, outBase, &exitCode)) {
           verdict = ClassifyExitCodeVerdictWithContext(
-            cfg, exitCode, info, outBase, L"post_dump_exit_check", -1, crashState);
+            cfg, exitCode, proc.unhandledEvent, info, outBase, L"post_dump_exit_check", -1, crashState);
         }
       }
     } else {

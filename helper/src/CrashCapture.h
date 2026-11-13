@@ -311,6 +311,46 @@ constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSi
   return crashLatched && unhandledSignalSet;
 }
 
+// Whether the late recovery of the captured crash was held back
+// (HandleLateRecoveryTick): the game ran on for kLateRecoveryMinAliveMs (a
+// minute) with the heartbeat advancing while the plugin's signal stayed set.
+constexpr bool IsLateRecoveryWithheld(std::uint32_t withheldCrashSeq, std::uint32_t capturedCrashSeq) noexcept
+{
+  return withheldCrashSeq != 0u && withheldCrashSeq == capturedCrashSeq;
+}
+
+// Whether a captured crash stands although the process ended with code 0: it
+// is still reported as not handled (IsCapturedCrashStillUnhandled), and the
+// game did not run on long enough for its late recovery to come up. Then
+// something ended the process with code 0 while the faulting thread was in
+// the filters: a filter under the plugin's, or the game closing on another
+// thread.
+//
+// Not once the late recovery was held back. The plugin takes its signal back
+// only when a filter answers EXCEPTION_CONTINUE_EXECUTION; code that calls
+// UnhandledExceptionFilter from its own __except and then runs on leaves it
+// set, and a normal exit long after that is not that exception's crash. Such
+// a capture keeps its dump only, as the late recovery would have
+// (CleanupCrashArtifactsAfterZeroExit). Within that first minute the two
+// cannot be told apart, and the capture is kept as a crash.
+constexpr bool DoesCapturedCrashOutliveZeroExit(
+  bool crashLatched,
+  bool unhandledSignalSet,
+  bool lateRecoveryWithheld) noexcept
+{
+  return IsCapturedCrashStillUnhandled(crashLatched, unhandledSignalSet) && !lateRecoveryWithheld;
+}
+
+// Whether an exit with `exitCode` says the captured exception was handled:
+// code 0 does, unless the crash outlives it (DoesCapturedCrashOutliveZeroExit).
+// The places that act on a captured crash after its verdict judge the exit
+// with this: the viewer wait after the dump, the exit tick, the exit's viewer.
+// (The verdict itself comes from ClassifyExitCodeVerdictWithContext.)
+constexpr bool IsNormalExitForCapturedCrash(std::uint32_t exitCode, bool crashOutlivesZeroExit) noexcept
+{
+  return exitCode == 0u && !crashOutlivesZeroExit;
+}
+
 struct StableSharedSnapshot {
   struct AlignedByteDeleter {
     std::size_t alignment = alignof(std::max_align_t);
@@ -443,7 +483,10 @@ inline bool IsCommittedCrashSequence(std::uint32_t crashSeq) noexcept
 // That rule is deliberately absolute, so it also discards the rare genuine CTD
 // that exits 0 — a foreign handler calling ExitProcess(0), a launcher
 // normalizing the child exit code, or teardown that reaches a normal exit path
-// after a fatal fault.
+// after a fatal fault. The one exception is a crash the plugin reported as not
+// handled (ADR-0032; ClassifyExitCodeVerdictWithContext for the verdict,
+// IsNormalExitForCapturedCrash after it): there the plugin saw what the exit
+// code can only suggest.
 //
 // This predicate does not change the filter decision. It only marks the subset
 // where the filtered incident carried real fault evidence, so a compact metadata
@@ -489,6 +532,22 @@ constexpr bool ShouldReportReleasedCrashAtExit(
          exitTick64 - releasedTick64 < kLateRecoveryMinAliveMs;
 }
 
+// ADR-0032: a crash released as handled whose exception the plugin then
+// reported as not handled (it reached the top-level filter only after the
+// release; a report between the filter's last look and the release is lost,
+// since the release clears the incident's signals).
+// The exit records it whatever the exit code is, while the release is younger
+// than kLateRecoveryMinAliveMs: an older signal may be one left set by code
+// that ran on (DoesCapturedCrashOutliveZeroExit).
+constexpr bool ShouldReportReleasedCrashOnUnhandledSignal(
+  bool unhandledSignalSet,
+  std::uint64_t releasedTick64,
+  std::uint64_t exitTick64) noexcept
+{
+  return unhandledSignalSet && exitTick64 >= releasedTick64 &&
+         exitTick64 - releasedTick64 < kLateRecoveryMinAliveMs;
+}
+
 // Why a committed fault is recorded only as metadata after the game exited.
 enum class PostExitEvidenceReason
 {
@@ -501,6 +560,9 @@ enum class PostExitEvidenceReason
   // Released as handled, but the game then exited abnormally
   // (ShouldReportReleasedCrashAtExit).
   kReleasedFaultFollowedByAbnormalExit,
+  // Released as handled, but the plugin then reported it as not handled
+  // (ShouldReportReleasedCrashOnUnhandledSignal).
+  kReleasedFaultReportedUnhandled,
 };
 
 CrashEventInfo ExtractCrashInfo(const skydiag::SharedHeader* shm) noexcept;
@@ -718,6 +780,22 @@ DWORD WaitForCrashUnhandledOrProcess(
   HANDLE process,
   DWORD waitMs) noexcept;
 bool IsUnhandledExceptionSignaled(HANDLE unhandledEvent) noexcept;
+
+// The verdict a process exit code gives a captured exception; every reader of
+// an exit code that decides a verdict comes through here. ADR-0032: the
+// plugin's signal is looked at first, in this one place: an exception it
+// reported as not handled is kept whatever code the process ended with (and
+// the signal is noted for the incident). Without the signal, code 0 releases
+// it as handled. `checkIndex` is the heartbeat check it came from, or -1.
+FilterVerdict ClassifyExitCodeVerdictWithContext(
+  const skydiag::helper::HelperConfig& cfg,
+  std::uint32_t exitCode,
+  HANDLE unhandledEvent,
+  const CrashEventInfo& info,
+  const std::filesystem::path& outBase,
+  std::wstring_view context,
+  int checkIndex,
+  CrashCaptureState* crashState);
 #endif
 
 bool HandleCrashEventTick(

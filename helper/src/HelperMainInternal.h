@@ -154,12 +154,18 @@ void PumpManualCaptureInputs(
 // After the process exited: true when a committed crash that the helper did
 // not release as handled is on record (captured, or recorded here as
 // metadata). A crash released earlier is not reported again.
+// `releasedCrashPromotedOnUnhandledSignal` (optional) is set when the drain made
+// a released crash's held dump the crash dump because the plugin reported that
+// exception as not handled after the release
+// (ShouldReportReleasedCrashOnUnhandledSignal): the exit tick then keeps it
+// whatever the exit code is.
 bool DrainCrashEventBeforeExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
   DWORD exitCode,
-  HelperLoopState* state);
+  HelperLoopState* state,
+  bool* releasedCrashPromotedOnUnhandledSignal = nullptr);
 void CleanupCrashArtifactsAfterZeroExit(
   const HelperConfig& cfg,
   const AttachedProcess& proc,
@@ -175,10 +181,14 @@ void SettleHeldHangDumpAfterExitViewer(
   bool viewerLaunched,
   HelperLoopState* state);
 
+// `crashOutlivesZeroExit`: DoesCapturedCrashOutliveZeroExit as the exit tick
+// read it (or a released crash the drain reported on the plugin's signal);
+// with it the crash viewer opens after an exit with code 0 too.
 void LaunchDeferredViewersAfterExit(
   const HelperConfig& cfg,
   const std::filesystem::path& outBase,
   DWORD exitCode,
+  bool crashOutlivesZeroExit,
   HelperLoopState* state);
 void HandleProcessWaitFailed(
   const HelperConfig& cfg,
