@@ -3343,12 +3343,10 @@ void TestSignalLeftSetFault_IsJudgedByTheHeartbeat()
   });
   // The release lets go of both events again, so when the hold ended is
   // watched from the side.
-  const ULONGLONG startTick = GetTickCount64();
-  std::atomic<ULONGLONG> settledAfterMs{ ~0ull };
+  // On this path no dump is written, so nothing else would set the event.
+  std::atomic_bool settled{ false };
   std::thread settleWatcher([&] {
-    if (WaitForSingleObject(proc.dumpSettledEvent, 3000) == WAIT_OBJECT_0) {
-      settledAfterMs.store(GetTickCount64() - startTick);
-    }
+    settled.store(WaitForSingleObject(proc.dumpSettledEvent, 3000) == WAIT_OBJECT_0);
   });
   const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
   settleWatcher.join();
@@ -3358,7 +3356,7 @@ void TestSignalLeftSetFault_IsJudgedByTheHeartbeat()
   Require(handled, "The exception is handled");
   Require(!crash.latched, "It is released on the heartbeat although the signal is set");
   Require(!HasDumpFile(outBase), "No dump is written");
-  Require(settledAfterMs.load() < 1500u, "The plugin's hold is ended at once, not after the recovery check");
+  Require(settled.load(), "The plugin's hold is ended although no dump is written");
   Require(crash.unhandledSignalCrashSeq != 8u, "The signal is not noted as this incident's");
   Require(crash.releasedCrashSeq == 8u, "A later exit does not re-report it");
   Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "Thawed for a later exception");
@@ -3374,6 +3372,83 @@ void TestSignalLeftSetFault_IsJudgedByTheHeartbeat()
   Require(
     log.find("it reached the process's top-level exception filter") == std::string::npos,
     "It is not called unhandled");
+
+  CloseHandle(proc.crashEvent);
+  CloseHandle(proc.unhandledEvent);
+  CloseHandle(proc.dumpSettledEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
+// ADR-0032: the helper's "dump settled" event is cleared when an incident is
+// let go. One that a newer crash record superseded is never let go, so a new
+// incident starts by clearing it: left set, it would end the plugin's hold of
+// the new crash before its dump is written.
+void TestCrashEventTick_ClearsADumpSettledLeftFromAnEarlierIncident()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_stale_dump_settled");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F9999ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = kFaultAddr;
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+  shared->header.crash_seq = 10u;
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = MakeSignalEvent(true);
+  proc.unhandledEvent = MakeSignalEvent(false);
+  proc.dumpSettledEvent = MakeSignalEvent(true);  // left from the superseded incident
+
+  // A repeated handled exception: recovery is checked for seconds before any
+  // dump, which is when the stale event would let the game end.
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+  skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr);
+  skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr);
+
+  std::atomic_bool stopHeartbeat{ false };
+  std::thread heartbeatThread([&] {
+    while (!stopHeartbeat.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+  // The release clears the event too, but only after the recovery check
+  // (two heartbeat windows of 2 s): it has to be seen cleared before that.
+  std::atomic_bool clearedDuringTheCheck{ false };
+  std::thread settleWatcher([&] {
+    const ULONGLONG until = GetTickCount64() + 3000u;
+    while (GetTickCount64() < until) {
+      if (!IsSignaled(proc.dumpSettledEvent)) {
+        clearedDuringTheCheck.store(true);
+        return;
+      }
+      Sleep(20);
+    }
+  });
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  settleWatcher.join();
+  stopHeartbeat.store(true);
+  heartbeatThread.join();
+
+  Require(handled, "The exception is handled");
+  Require(clearedDuringTheCheck.load(), "The event of an earlier incident is cleared when a new one starts");
+  Require(!state.crashCaptured.latched && !HasDumpFile(outBase), "The repeated exception is released without a dump");
 
   CloseHandle(proc.crashEvent);
   CloseHandle(proc.unhandledEvent);
@@ -3572,6 +3647,9 @@ static_assert(
   !skydiag::helper::internal::DoesCapturedCrashOutliveZeroExit(true, true, true),
   "the game ran on for minutes: the signal may be one left set by code that handled the exception");
 static_assert(skydiag::helper::internal::IsLateRecoveryWithheld(2u, 2u));
+static_assert(
+  skydiag::helper::internal::RecoveredFaultCount(skydiag::helper::internal::RecoveredFaultHistory{}, 0xC0000005u, 0x1000u) == 0u,
+  "an empty history holds no fault");
 static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(true, 1'000u, 121'000u));
 static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(
   true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs - 1u));
@@ -3966,6 +4044,7 @@ int wmain(int argc, wchar_t** argv)
     TestRepeatedHandledFault_ExitedGameRecordsMetadataOnly();
     TestUnhandledSignal_RepeatedFaultIsDumpedAtOnce();
     TestSignalLeftSetFault_IsJudgedByTheHeartbeat();
+    TestCrashEventTick_ClearsADumpSettledLeftFromAnEarlierIncident();
     TestUnhandledSignal_FirstFaultIsKeptWithoutWaitingForTheHeartbeat();
     TestUnhandledSignal_ReleaseClearsTheIncidentsSignals();
     TestClassifyExitCodeVerdict_LooksAtThePluginsSignalFirst();

@@ -404,6 +404,21 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
   const bool en = ctx.en;
   if (ctx.isFilteredCleanExit) {
     const bool lateRecovery = r.clean_exit_filter_context == "late_recovery";
+    if (lateRecovery && r.clean_exit_unhandled_signal_left_set) {
+      // ADR-0032: not the plain "do not blame a mod": this may be the crash of
+      // a game that closed later.
+      r.recommendations.push_back(en
+        ? L"[Clean exit] The validated helper record says the game kept running after this exception, although "
+          L"Tullius CTD Logger had recorded it as one the game did not handle. If the game closed with an error "
+          L"later in the same session, treat this dump as that crash; otherwise do not blame a mod from it."
+        : L"[정상 종료] 검증된 헬퍼 레코드에 따르면 이 예외 뒤에도 게임이 계속 실행됐지만, Tullius CTD Logger는 이 예외를 "
+          L"게임이 처리하지 못한 것으로 기록했습니다. 같은 세션에서 나중에 게임이 오류로 꺼졌다면 이 덤프를 그 크래시로 "
+          L"보고, 그렇지 않았다면 이 덤프만으로 모드를 원인으로 지목하지 마세요.");
+      r.recommendations.push_back(en
+        ? L"[Clean exit] Keep the dump, clean-exit evidence sidecar, and helper log together when reporting filter behavior."
+        : L"[정상 종료] 필터 동작을 제보할 때 덤프, 정상 종료 증거 사이드카, 헬퍼 로그를 함께 보관하세요.");
+      return;
+    }
     r.recommendations.push_back(en
       ? (lateRecovery
            ? L"[Clean exit] The validated helper record says the game kept running after this exception. Do not blame a mod from this preserved diagnostic dump."

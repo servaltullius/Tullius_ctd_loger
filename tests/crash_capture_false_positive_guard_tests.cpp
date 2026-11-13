@@ -364,15 +364,42 @@ int main()
     exitDrainBody.find("proc.unhandledEvent") == std::string::npos &&
     "The helper loop must read the plugin's signal through UnhandledEventFor.");
   {
-    // In CrashCapture.cpp only UnhandledEventFor itself and ThawCrashCapture
-    // (a check and a reset) name the event.
-    std::size_t bareUses = 0;
-    for (auto at = crashCapture.find("proc.unhandledEvent"); at != std::string::npos;
-         at = crashCapture.find("proc.unhandledEvent", at + 1)) {
-      ++bareUses;
-    }
-    assert(bareUses == 3u && "Crash capture must read the plugin's signal through UnhandledEventFor.");
+    // In CrashCapture.cpp the event itself is named only where the accessor
+    // is defined and where an incident is let go. Lines that are comments
+    // do not count.
+    const auto usesInCode = [](const std::string& text) {
+      std::size_t uses = 0;
+      std::size_t lineStart = 0;
+      while (lineStart < text.size()) {
+        std::size_t lineEnd = text.find('\n', lineStart);
+        if (lineEnd == std::string::npos) {
+          lineEnd = text.size();
+        }
+        const std::string line = text.substr(lineStart, lineEnd - lineStart);
+        const auto firstChar = line.find_first_not_of(" \t");
+        const bool comment = firstChar != std::string::npos && line.compare(firstChar, 2, "//") == 0;
+        if (!comment) {
+          for (auto at = line.find("proc.unhandledEvent"); at != std::string::npos;
+               at = line.find("proc.unhandledEvent", at + 1)) {
+            ++uses;
+          }
+        }
+        lineStart = lineEnd + 1;
+      }
+      return uses;
+    };
+    const std::string accessorBody = ExtractFunctionBody(crashCapture, "HANDLE UnhandledEventFor(");
+    const std::size_t allowed = usesInCode(accessorBody) + usesInCode(thawCaptureBody);
+    assert(allowed != 0u && "The accessor and the release must be found.");
+    assert(
+      usesInCode(crashCapture) == allowed &&
+      "Crash capture must read the plugin's signal through UnhandledEventFor.");
   }
+  AssertOrdered(
+    crashTickBody,
+    "ResetEvent(proc.dumpSettledEvent)",
+    "EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);",
+    "A new incident must clear the settled event of an earlier one before anything can set it.");
   AssertOrdered(
     crashTickBody,
     "EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);",

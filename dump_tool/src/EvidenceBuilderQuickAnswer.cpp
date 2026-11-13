@@ -703,9 +703,19 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
       answer.headline = en ? L"An error was recorded, but the game kept running afterwards, so this is not counted as "
                              L"a crash."
                            : L"오류가 기록됐지만 게임이 그 뒤에도 계속 실행됐으므로 튕긴 것으로 보지 않습니다.";
-      answer.action = en ? L"Nothing to do, unless the game closed right after; then share this report when asking for "
-                           L"help."
-                         : L"그 직후 게임이 꺼진 것이 아니라면 따로 할 일은 없습니다. 꺼졌다면 도움을 요청할 때 이 리포트를 공유하세요.";
+      if (r.clean_exit_unhandled_signal_left_set) {
+        // ADR-0032: the logger's record that the game did not handle it was
+        // never withdrawn; a crash handler that held the thread for minutes
+        // looks the same, and then the game closes much later.
+        answer.action = en ? L"Nothing to do, unless the game closed with an error later in the same session; then this "
+                             L"error may be why, so share this report when asking for help."
+                           : L"같은 세션에서 나중에 게임이 오류로 꺼진 것이 아니라면 따로 할 일은 없습니다. 꺼졌다면 이 오류가 원인일 "
+                             L"수 있으니 도움을 요청할 때 이 리포트를 공유하세요.";
+      } else {
+        answer.action = en ? L"Nothing to do, unless the game closed right after; then share this report when asking "
+                             L"for help."
+                           : L"그 직후 게임이 꺼진 것이 아니라면 따로 할 일은 없습니다. 꺼졌다면 도움을 요청할 때 이 리포트를 공유하세요.";
+      }
     } else {
       answer.headline = en ? L"The game closed normally; this is not a crash."
                            : L"게임이 정상적으로 종료됐습니다(튕긴 것이 아닙니다).";

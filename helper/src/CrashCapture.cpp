@@ -1733,6 +1733,13 @@ bool HandleCrashEventTick(
         + L": an error while the game was being closed, not a CTD (the viewer will not open).");
   }
 
+  // ADR-0032: this incident's dump is not settled yet. The event is cleared
+  // when an incident is let go (ThawCrashCapture), but one that a newer crash
+  // record superseded is never let go: left set, it would end the plugin's
+  // hold of the crash that superseded it before that crash's dump is written.
+  if (proc.dumpSettledEvent) {
+    ResetEvent(proc.dumpSettledEvent);
+  }
   EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);
 
   bool exitedBeforeDump = false;

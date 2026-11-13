@@ -207,42 +207,42 @@ constexpr void NoteRecoveredFault(
   history->nextReplace = (history->nextReplace + 1u) % kRecoveredFaultHistoryCapacity;
 }
 
-// Not for a C++ throw or a breakpoint: their address is always the same
-// RaiseException / DebugBreak in KernelBase, so code and address match every
-// unrelated throw, not the same fault.
+// How often `history` holds this fault (NoteRecoveredFault). Never for a C++
+// throw or a breakpoint: their address is always the same RaiseException /
+// DebugBreak in KernelBase, so code and address match every unrelated throw,
+// not the same fault.
+constexpr std::uint32_t RecoveredFaultCount(
+  const RecoveredFaultHistory& history,
+  std::uint32_t exceptionCode,
+  std::uint64_t exceptionAddr) noexcept
+{
+  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
+    return 0u;
+  }
+  for (const auto& entry : history.entries) {
+    if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
+      return entry.count;
+    }
+  }
+  return 0u;
+}
+
 constexpr bool IsRepeatedRecoveredFault(
   const RecoveredFaultHistory& history,
   std::uint32_t exceptionCode,
   std::uint64_t exceptionAddr) noexcept
 {
-  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
-    return false;
-  }
-  for (const auto& entry : history.entries) {
-    if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
-      return entry.count >= kRepeatedRecoveredFaultMinCount;
-    }
-  }
-  return false;
+  return RecoveredFaultCount(history, exceptionCode, exceptionAddr) >= kRepeatedRecoveredFaultMinCount;
 }
 
-// ADR-0032: whether `history` holds this fault at all (NoteRecoveredFault), for
-// CrashCaptureState::signalLeftSetFaults. Not for a C++ throw or a breakpoint,
-// as above: every unrelated one would match.
+// ADR-0032: whether `history` holds this fault at all, for
+// CrashCaptureState::signalLeftSetFaults.
 constexpr bool IsSignalLeftSetFault(
   const RecoveredFaultHistory& history,
   std::uint32_t exceptionCode,
   std::uint64_t exceptionAddr) noexcept
 {
-  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
-    return false;
-  }
-  for (const auto& entry : history.entries) {
-    if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
-      return true;
-    }
-  }
-  return false;
+  return RecoveredFaultCount(history, exceptionCode, exceptionAddr) != 0u;
 }
 
 struct ReleasedDumpContext;  // CaptureCommon.h

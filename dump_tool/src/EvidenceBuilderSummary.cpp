@@ -495,14 +495,23 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       // ADR-0032: released at the cap of the held-back late recovery. A crash
       // handler that held the faulting thread that long looks the same.
       summary += en
-        ? L" The plugin had reported this exception as not handled and never took that back: if the game closed with an error later in the same session, review this dump as that crash."
-        : L" 플러그인은 이 예외가 처리되지 않았다고 알렸고 그 알림을 거두지 않았습니다. 같은 세션에서 나중에 게임이 오류로 꺼졌다면 이 덤프를 그 크래시로 보고 확인하세요.";
+        ? L" Tullius CTD Logger had recorded this exception as one the game did not handle, and that record was never withdrawn: if the game closed with an error later in the same session, review this dump as that crash."
+        : L" Tullius CTD Logger는 이 예외를 게임이 처리하지 못한 것으로 기록했고 그 기록은 끝까지 남아 있었습니다. 같은 세션에서 나중에 게임이 오류로 꺼졌다면 이 덤프를 그 크래시로 보고 확인하세요.";
     }
     summary += en ? L" (Confidence: Medium)" : L" (신뢰도: 중간)";
   } else if (ctx.isFilteredCleanExit) {
     summary = en
-      ? L"Validated clean-exit quarantine metadata matches this preserved dump. The process exited with code 0, so this is not classified as a CTD. (Confidence: High)"
-      : L"검증된 정상 종료 격리 메타데이터가 이 보존 덤프와 일치합니다. 프로세스가 종료 코드 0으로 끝났으므로 CTD로 분류하지 않습니다. (신뢰도: 높음)";
+      ? L"Validated clean-exit quarantine metadata matches this preserved dump. The process exited with code 0, so this is not classified as a CTD."
+      : L"검증된 정상 종료 격리 메타데이터가 이 보존 덤프와 일치합니다. 프로세스가 종료 코드 0으로 끝났으므로 CTD로 분류하지 않습니다.";
+    if (r.clean_exit_unhandled_signal_left_set) {
+      // ADR-0032: its late recovery had been held back for that record, and
+      // the game then closed normally. Not as sure as a plain zero exit.
+      summary += en
+        ? L" Tullius CTD Logger had recorded this exception as one the game did not handle, and that record was never withdrawn, but the game ran on for over a minute after it before closing normally. (Confidence: Medium)"
+        : L" Tullius CTD Logger는 이 예외를 게임이 처리하지 못한 것으로 기록했고 그 기록은 끝까지 남아 있었습니다. 다만 게임은 그 뒤에도 1분 넘게 실행되다가 정상 종료됐습니다. (신뢰도: 중간)";
+    } else {
+      summary += en ? L" (Confidence: High)" : L" (신뢰도: 높음)";
+    }
   } else if (isSnapshotLike && isManualCapture && wct && wct->has_capture &&
              wct->secondsSinceHeartbeat >= internal::kNotHangHeartbeatAgeSec) {
     // Not the plain snapshot sentence: the main thread had stopped answering,

@@ -991,7 +991,10 @@ void TestLateRecoveredCleanExitWording()
       "the advice says the same");
 
     // ADR-0032: released with the plugin's "not handled" report still set.
-    const wchar_t* const leftSet = en ? L"never took that back" : L"거두지 않았습니다";
+    // Named as the logger: "the plugin" means a suspect mod everywhere else.
+    const wchar_t* const leftSet =
+      en ? L"Tullius CTD Logger had recorded this exception as one the game did not handle"
+         : L"Tullius CTD Logger는 이 예외를 게임이 처리하지 못한 것으로 기록했고";
     Require(!Contains(r.summary_sentence, leftSet), "no word of the plugin's report without one");
     r.clean_exit_unhandled_signal_left_set = true;
     BuildEvidenceAndSummary(r, lang);
@@ -999,11 +1002,39 @@ void TestLateRecoveredCleanExitWording()
     Require(
       Contains(r.summary_sentence, en ? L"(Confidence: Medium)" : L"(신뢰도: 중간)"),
       "the confidence still closes the summary");
+    Require(!Contains(r.summary_sentence, en ? L"The plugin" : L"플러그인"), "the logger is not called a plugin");
+    // The quick answer and the advice say the same as the summary.
+    Require(
+      Contains(r.quick_answer.action, en ? L"later in the same session" : L"같은 세션에서 나중에"),
+      "the quick answer asks about a later close, not one right after");
+    Require(
+      !r.recommendations.empty() &&
+        Contains(r.recommendations[0], en ? L"treat this dump as that crash" : L"이 덤프를 그 크래시로"),
+      "the advice does not rule the dump out");
+
+    // A zero exit after the late recovery was held back for that record.
+    r.clean_exit_filter_context = "process_exit";
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, en ? L"code 0" : L"종료 코드 0"), "it still ended with code 0");
+    Require(Contains(r.summary_sentence, leftSet), "the summary of a zero exit names the record too");
+    Require(
+      Contains(r.summary_sentence, en ? L"(Confidence: Medium)" : L"(신뢰도: 중간)") &&
+        !Contains(r.summary_sentence, en ? L"(Confidence: High)" : L"(신뢰도: 높음)"),
+      "a zero exit with that record is not High");
     r.clean_exit_unhandled_signal_left_set = false;
+
+    r.clean_exit_filter_context = "late_recovery";
+    BuildEvidenceAndSummary(r, lang);
+    Require(
+      Contains(r.quick_answer.action, en ? L"closed right after" : L"그 직후 게임이 꺼진"),
+      "a plain late recovery keeps its quick answer");
 
     r.clean_exit_filter_context = "process_exit";
     BuildEvidenceAndSummary(r, lang);
     Require(Contains(r.summary_sentence, en ? L"code 0" : L"종료 코드 0"), "a zero exit keeps its wording");
+    Require(
+      Contains(r.summary_sentence, en ? L"(Confidence: High)" : L"(신뢰도: 높음)"),
+      "a plain zero exit stays High");
   }
 }
 
