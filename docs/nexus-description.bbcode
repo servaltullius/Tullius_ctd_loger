@@ -92,7 +92,7 @@ Capture and the text report work under Wine/Proton, but the WinUI viewer does no
 
 [b]Automatic capture[/b]
 [list]
-[*][b]CTD:[/b] For captured fatal crashes, Tullius normally writes a crash dump and report. Strong faults followed by process exit code 0 are filtered by default and leave clean-exit evidence metadata instead, unless the plugin saw the exception go unhandled (it reached the process's top-level exception filter): that one is kept as a crash whatever the exit code is
+[*][b]CTD:[/b] For captured fatal crashes, Tullius normally writes a crash dump and report. Strong faults followed by process exit code 0 are filtered by default and leave clean-exit evidence metadata instead, unless the plugin saw the exception go unhandled (it reached the process's top-level exception filter): that one is kept as a crash, or only its dump when the game ran on for over a minute after it
 [*][b]Freeze / ILS:[/b] When the configured threshold is exceeded, Tullius generates a hang dump
 [/list]
 
@@ -497,7 +497,7 @@ Wine/Proton에서도 캡처와 텍스트 리포트는 동작하지만, WinUI 뷰
 
 [b]자동 캡처[/b]
 [list]
-[*][b]CTD:[/b] 포착된 치명적 크래시는 보통 crash dump와 보고서를 생성합니다. 강한 결함 뒤 프로세스 종료 코드가 0이면 기본적으로 정상 종료로 필터링하고 clean-exit 증거 메타데이터를 대신 남깁니다.
+[*][b]CTD:[/b] 포착된 치명적 크래시는 보통 crash dump와 보고서를 생성합니다. 강한 결함 뒤 프로세스 종료 코드가 0이면 기본적으로 정상 종료로 필터링하고 clean-exit 증거 메타데이터를 대신 남깁니다. 다만 플러그인이 그 예외가 처리되지 않은 것(프로세스의 최상위 예외 필터까지 간 것)을 본 경우에는 크래시로 남기고, 그 뒤 게임이 1분 넘게 돌았으면 덤프만 남깁니다.
 [*][b]프리징 / 무한 로딩:[/b] 설정한 임계 시간이 지나면 hang dump를 자동으로 생성합니다.
 [/list]
 

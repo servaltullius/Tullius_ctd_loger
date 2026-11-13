@@ -296,11 +296,6 @@ struct CrashCaptureState {
   // The crash generation whose late recovery was held back because that
   // signal is still set (logged once). 0: none.
   std::uint32_t lateRecoveryWithheldCrashSeq = 0;
-  // The exit drain made a released crash's dump the crash dump because the
-  // plugin reported it as not handled after the release
-  // (ShouldReportReleasedCrashOnUnhandledSignal). The exit tick then keeps
-  // it whatever the exit code is.
-  bool releasedCrashPromotedOnUnhandledSignal = false;
 };
 
 // ADR-0032: whether the captured crash is one the plugin reported as not
@@ -317,8 +312,8 @@ constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSi
 }
 
 // Whether the late recovery of the captured crash was held back
-// (HandleLateRecoveryTick): the game ran on for two minutes with the heartbeat
-// advancing while the plugin's signal stayed set.
+// (HandleLateRecoveryTick): the game ran on for kLateRecoveryMinAliveMs (a
+// minute) with the heartbeat advancing while the plugin's signal stayed set.
 constexpr bool IsLateRecoveryWithheld(std::uint32_t withheldCrashSeq, std::uint32_t capturedCrashSeq) noexcept
 {
   return withheldCrashSeq != 0u && withheldCrashSeq == capturedCrashSeq;
@@ -336,7 +331,8 @@ constexpr bool IsLateRecoveryWithheld(std::uint32_t withheldCrashSeq, std::uint3
 // UnhandledExceptionFilter from its own __except and then runs on leaves it
 // set, and a normal exit long after that is not that exception's crash. Such
 // a capture keeps its dump only, as the late recovery would have
-// (CleanupCrashArtifactsAfterZeroExit).
+// (CleanupCrashArtifactsAfterZeroExit). Within that first minute the two
+// cannot be told apart, and the capture is kept as a crash.
 constexpr bool DoesCapturedCrashOutliveZeroExit(
   bool crashLatched,
   bool unhandledSignalSet,

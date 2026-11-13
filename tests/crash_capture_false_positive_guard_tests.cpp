@@ -289,7 +289,7 @@ int main()
 
   AssertContains(
     processExitTickBody,
-    "DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);",
+    "DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state, &releasedCrashPromotedOnUnhandledSignal);",
     "Process exit tick must drain pending crash metadata for every observed exit code.");
   assert(
     processExitTickBody.find("sharedMemoryStrongCrash") == std::string::npos &&
@@ -306,7 +306,7 @@ int main()
   AssertOrdered(
     processExitTickBody,
     "DoesCapturedCrashOutliveZeroExit(",
-    "DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);",
+    "DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state, &releasedCrashPromotedOnUnhandledSignal);",
     "Whether the captured crash is still unhandled must be read before the exit drain latches anything.");
   AssertOrdered(
     processExitTickBody,
@@ -320,7 +320,7 @@ int main()
     "Zero-exit cleanup must not run for a crash the plugin still reports as unhandled.");
   AssertContains(
     processExitTickBody,
-    "capturedCrashOutlivesZeroExit || state->crashCaptured.releasedCrashPromotedOnUnhandledSignal;",
+    "capturedCrashOutlivesZeroExit || releasedCrashPromotedOnUnhandledSignal;",
     "A released crash the drain reported on the plugin's signal must outlive a zero exit too.");
   AssertContains(
     processExitTickBody,
@@ -393,7 +393,7 @@ int main()
   // worker's crash Crash Logger ended; only its crash log tells them apart.
   AssertOrdered(
     drainBody,
-    "if (crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {",
+    "if (!reportedUnhandled && crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {",
     "TryWritePostExitCrashEvidenceRecord(",
     "An early thread dump window release must need Crash Logger's crash log before it is recorded at exit.");
   AssertOrdered(

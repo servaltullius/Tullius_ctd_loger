@@ -3530,7 +3530,9 @@ void TestUnhandledSignal_ZeroExitInTheViewerWaitKeepsTheCrash()
 // ADR-0032: a crash released as handled whose exception the plugin reported as
 // not handled afterwards. The exit records it whatever its exit code is while
 // the release is young: with the dump held since the release (which the exit
-// tick must then not delete for the exit code of 0), or as metadata.
+// tick must then not delete for the exit code of 0, and whose viewer opens),
+// or as metadata. A release in Crash Logger's thread dump window needs no
+// crash log then: a thread dump's probes never reach the top-level filter.
 void TestHandleProcessExitTick_ReportsAReleasedCrashThePluginThenReportedUnhandled()
 {
   struct Case
@@ -3539,13 +3541,20 @@ void TestHandleProcessExitTick_ReportsAReleasedCrashThePluginThenReportedUnhandl
     bool signalSet;
     std::uint64_t releasedAgoMs;
     bool heldDump;
+    bool threadDumpWindow;
+    bool viewerOn;
     bool expectReported;
   };
   const Case cases[] = {
-    { "reported five seconds after the release: recorded with its dump", true, 5'000u, true, true },
-    { "reported five seconds after the release, no dump held: recorded as metadata", true, 5'000u, false, true },
-    { "no report: a normal exit", false, 5'000u, true, false },
-    { "a signal still set long after the release: a normal exit", true, 90'000u, true, false },
+    { "reported five seconds after the release: recorded with its dump", true, 5'000u, true, false, false, true },
+    { "the same with the viewer on: its viewer opens", true, 5'000u, true, false, true, true },
+    { "reported five seconds after the release, no dump held: recorded as metadata", true, 5'000u, false, false, false,
+      true },
+    { "released in the thread dump window, no crash log: recorded on the report", true, 5'000u, true, true, false,
+      true },
+    { "no report: a normal exit", false, 5'000u, true, false, true, false },
+    { "no report, released in the thread dump window: a normal exit", false, 5'000u, true, true, false, false },
+    { "a signal still set long after the release: a normal exit", true, 90'000u, true, false, true, false },
   };
   for (const auto& c : cases) {
     const auto outBase = MakeTempDir(L"skydiag_helper_released_then_unhandled");
@@ -3567,11 +3576,22 @@ void TestHandleProcessExitTick_ReportsAReleasedCrashThePluginThenReportedUnhandl
     auto proc = MakeAttachedProcessForChild(child, shared.get());
     proc.unhandledEvent = MakeSignalEvent(c.signalSet);
     HelperConfig cfg = MakeTestConfig();
+    cfg.autoOpenViewerOnCrash = c.viewerOn;
+    cfg.dumpToolExe = CurrentExecutablePath().wstring();  // the stand-in viewer of wmain
 
     skydiag::helper::internal::HelperLoopState state{};
     state.crashCaptured.releasedCrashSeq = 2u;
     state.crashCaptured.releasedOnBriefHeartbeat = true;
     state.crashCaptured.releasedCrashTick64 = GetTickCount64() - c.releasedAgoMs;
+    if (c.threadDumpWindow) {
+      // No folder of Crash Logger's is known (state.crashLoggerLogDirs), so
+      // there is no crash log to find.
+      FILETIME eventTime{};
+      GetSystemTimeAsFileTime(&eventTime);
+      state.crashCaptured.releasedInThreadDumpWindow = true;
+      state.crashCaptured.releasedCrashEventFileTimeUtc =
+        (static_cast<std::uint64_t>(eventTime.dwHighDateTime) << 32) | eventTime.dwLowDateTime;
+    }
     if (c.heldDump) {
       state.crashCaptured.releasedDumpPath = heldDump.wstring();
     }
@@ -3589,6 +3609,10 @@ void TestHandleProcessExitTick_ReportsAReleasedCrashThePluginThenReportedUnhandl
       AssertContains(log, "the plugin then reported it as not handled and the game exited (exit_code=0", c.name);
       AssertContains(log, "reporting it as the crash dump", c.name);
       Require(log.find("Process exited normally (exit_code=0)") == std::string::npos, c.name);
+      Require(
+        (log.find("DumpTool viewer launch succeeded (reason=crash_deferred_exit") != std::string::npos) == c.viewerOn,
+        c.name);
+      Require(log.find("Suppressed deferred crash viewer launch") == std::string::npos, c.name);
     } else if (c.expectReported) {
       Require(!state.crashCaptured.latched, c.name);
       const auto record =
@@ -3600,6 +3624,7 @@ void TestHandleProcessExitTick_ReportsAReleasedCrashThePluginThenReportedUnhandl
       Require(!state.crashCaptured.latched, c.name);
       Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), c.name);
       AssertContains(log, "already released as a handled exception", c.name);
+      Require(log.find("DumpTool viewer launch succeeded") == std::string::npos, c.name);
     }
 
     CloseHandle(proc.unhandledEvent);

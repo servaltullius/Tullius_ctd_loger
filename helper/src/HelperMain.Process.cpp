@@ -217,8 +217,12 @@ bool DrainCrashEventBeforeExit(
   const AttachedProcess& proc,
   const std::filesystem::path& outBase,
   DWORD exitCode,
-  HelperLoopState* state)
+  HelperLoopState* state,
+  bool* releasedCrashPromotedOnUnhandledSignal)
 {
+  if (releasedCrashPromotedOnUnhandledSignal) {
+    *releasedCrashPromotedOnUnhandledSignal = false;
+  }
   if (!state) {
     return false;
   }
@@ -290,9 +294,11 @@ bool DrainCrashEventBeforeExit(
     // soft-locked game (its main loop still ticking) that was then ended in
     // Task Manager (exit code 1, as Crash Logger's) looks the same in
     // heartbeat and exit code as a worker's crash that Crash Logger ended.
-    // Only Crash Logger's crash log tells them apart.
+    // Only Crash Logger's crash log tells them apart, or the plugin's report
+    // (ADR-0032): a thread dump's probes are caught, so they never reach the
+    // top-level filter.
     std::wstring crashLogEvidence;
-    if (crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {
+    if (!reportedUnhandled && crash.releasedInThreadDumpWindow && exitCode != info.exceptionCode) {
       const std::uint64_t since = crash.releasedCrashEventFileTimeUtc > kCrashLogTimeSlack100ns
         ? crash.releasedCrashEventFileTimeUtc - kCrashLogTimeSlack100ns
         : 0u;
@@ -320,7 +326,9 @@ bool DrainCrashEventBeforeExit(
         + crashLogEvidence + L"); recording it after all.");
     if (PromoteReleasedCrashDump(cfg, outBase, info, state)) {
       // The exit tick must not undo it for an exit code of 0.
-      state->crashCaptured.releasedCrashPromotedOnUnhandledSignal = reportedUnhandled;
+      if (releasedCrashPromotedOnUnhandledSignal) {
+        *releasedCrashPromotedOnUnhandledSignal = reportedUnhandled;
+      }
       return true;
     }
     if (state->postExitEvidenceSeq != info.crashSeq &&
@@ -912,10 +920,11 @@ bool HandleProcessExitTick(
         state->crashCaptured.lateRecoveryWithheldCrashSeq, state->crashCaptured.capturedInfo.crashSeq));
     // Always drain the committed crash generation after observing process exit.
     // This is metadata-only because MiniDumpWriteDump cannot read a dead process.
-    const bool crashOnRecord = DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state);
+    bool releasedCrashPromotedOnUnhandledSignal = false;
+    const bool crashOnRecord =
+      DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state, &releasedCrashPromotedOnUnhandledSignal);
     // So does a released crash the drain just made the crash on that report.
-    const bool crashOutlivesZeroExit =
-      capturedCrashOutlivesZeroExit || state->crashCaptured.releasedCrashPromotedOnUnhandledSignal;
+    const bool crashOutlivesZeroExit = capturedCrashOutlivesZeroExit || releasedCrashPromotedOnUnhandledSignal;
     // A dump held for a released crash that the drain did not report (or
     // whose record is gone) is not needed any more.
     DiscardReleasedCrashDump(outBase, &state->crashCaptured, L"the game exited without reporting its exception");
