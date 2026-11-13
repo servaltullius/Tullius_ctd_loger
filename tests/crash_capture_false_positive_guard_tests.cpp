@@ -117,8 +117,52 @@ int main()
   const std::string firstChanceFilterBody = ExtractFunctionBody(crashCapture, "FilterVerdict FilterFirstChanceException(");
   AssertContains(
     firstChanceFilterBody,
-    "WaitForCrashOrProcess(crashEvent, process, kHeartbeatCheckIntervalMs)",
-    "First-chance filter must wake for a newer crash instead of sleeping through the real CTD.");
+    "WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kHeartbeatCheckIntervalMs)",
+    "First-chance filter must wake for a newer crash, and for the plugin's unhandled signal, instead of sleeping "
+    "through the real CTD.");
+  // ADR-0032: the plugin's signal settles what the heartbeat and the exit
+  // code can only suggest, so it is looked at before both.
+  AssertOrdered(
+    firstChanceFilterBody,
+    "IsUnhandledExceptionSignaled(unhandledEvent)",
+    "ClassifyExitCodeVerdictWithContext(",
+    "An exception the plugin reported as unhandled must be kept whatever the exit code is.");
+  AssertOrdered(
+    firstChanceFilterBody,
+    "HasNewerCrashRecord(shm, info.crashSeq)",
+    "IsUnhandledExceptionSignaled(unhandledEvent)",
+    "A newer crash record still comes first.");
+  const std::string shutdownFilterBody = ExtractFunctionBody(crashCapture, "FilterVerdict FilterShutdownException(");
+  AssertOrdered(
+    shutdownFilterBody,
+    "IsUnhandledExceptionSignaled(unhandledEvent)",
+    "ClassifyExitCodeVerdictWithContext(",
+    "The shutdown filter must not release an exception the plugin reported as unhandled.");
+  AssertOrdered(
+    crashTickBody,
+    "WriteCrashDumpWithRetries(",
+    "SetEvent(proc.dumpSettledEvent)",
+    "The plugin's hold must be ended once the dump write is over.");
+  AssertOrdered(
+    crashTickBody,
+    "SetEvent(proc.dumpSettledEvent)",
+    "FilterShutdownException(",
+    "The plugin's hold must be ended before the filters wait for the game.");
+  const std::string thawCaptureBody = ExtractFunctionBody(crashCapture, "bool ThawCrashCapture(");
+  AssertOrdered(
+    thawCaptureBody,
+    "ResetEvent(proc.dumpSettledEvent)",
+    "TryClearRecoveredCrashFreeze(",
+    "An incident's signals must be cleared before the freeze, or the next crash finds them.");
+  AssertOrdered(
+    thawCaptureBody,
+    "ResetEvent(proc.unhandledEvent)",
+    "TryClearRecoveredCrashFreeze(",
+    "An incident's signals must be cleared before the freeze, or the next crash finds them.");
+  assert(
+    crashCapture.find("TryClearRecoveredCrashFreeze(proc.shmWritable") ==
+      crashCapture.rfind("TryClearRecoveredCrashFreeze(proc.shmWritable") &&
+    "Every release of an incident must go through ThawCrashCapture.");
   AssertContains(
     firstChanceFilterBody,
     "HasNewerCrashRecord(shm, info.crashSeq)",

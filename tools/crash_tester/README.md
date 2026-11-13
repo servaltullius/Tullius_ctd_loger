@@ -56,7 +56,15 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 
 같은 접근 위반을 두 번 잡아 Helper가 "두 번 처리된 예외"로 기억하게 한 뒤, 세 번째는 `__except`가 잡지 않습니다. 같은 주소에서 난 예외지만 이번에는 게임이 죽습니다. Helper는 덤프를 먼저 쓰지 않고 회복부터 확인하므로, 그 확인 뒤에 무엇이 남는지를 봅니다. 세 번째는 게임의 작업 스레드에서 내므로 게임 루프가 멈추고 하트비트도 멈춥니다.
 
-`SkyrimDiagHelper.log`에서 세 번째 `Crash event signaled` 뒤에 `checking whether the game recovers before writing a crash dump`가 찍히고, 그 뒤는 게임이 얼마나 빨리 종료되느냐에 따라 셋 중 하나입니다. 셋 다 ADR-0031이 정한 동작입니다.
+`SkyrimDiagHelper.log`에서 세 번째 `Crash event signaled` 뒤에 `checking whether the game recovers before writing a crash dump`가 찍힙니다.
+
+플러그인이 처리되지 않은 예외를 Helper에 알리는 빌드(ADR-0032, Helper 로그 첫머리에 `Unhandled-exception signal from the plugin: on`)에서는 곧바로 다음이 이어져야 합니다.
+
+- `The game did not handle this exception: it reached the process's top-level exception filter ...`
+- `The game did not handle this repeated exception; writing the crash dump now.`
+- `SkyrimDiag_Crash_*.dmp`와 그 리포트(예외 모듈 SkyrimSE.exe, 콜스택으로 CrashTester.dll을 후보로), 그리고 평소처럼 Crash Logger의 로그.
+
+그 신호가 없는 빌드(v0.2.76-rc1까지)에서는 게임이 얼마나 빨리 종료되느냐에 따라 아래 셋 중 하나입니다. 셋 다 ADR-0031이 정한 동작입니다.
 
 | 그때 게임의 상태 | Helper 로그 | 남는 것 |
 |---|---|---|
@@ -68,11 +76,11 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 
 - `top-level filter before the scenario: ...`: 시나리오 시작 때 그 자리에 있던 필터의 모듈.
 - `after handled fault N ...`: 처리된 예외가 지나가는 동안 다른 모듈이 그 자리를 다시 가져갔는지.
-- `top-level filter reached ... ms after the fault ...; the filter under it is ...`: 세 번째 예외에서 벡터 핸들러 체인의 마지막에 등록한 핸들러가 올린 필터가 실제로 불렸는지와, 그 아래에 있던 필터의 모듈. 이 줄이 없으면 불리지 않은 것입니다.
+- `top-level filter reached ... ms after the fault ...; the filter under it is ...`: 세 번째 예외에서 벡터 핸들러 체인의 마지막에 등록한 핸들러가 올린 필터가 실제로 불렸는지와, 그 아래에 있던 필터의 모듈. 이 줄이 없으면 불리지 않은 것입니다. ADR-0032의 플러그인에서는 그 아래 필터가 `SkyrimDiag.dll`이어야 합니다(플러그인이 치명적 코드의 예외마다 자리를 되찾으므로).
 
 `CrashTester.ini`의 `UnhandledHoldMs`(기본 0)를 주면 필터가 그 시간만큼 스레드를 붙잡은 뒤 아래 필터를 부릅니다. Helper가 회복하지 못했다고 판정하는 6초보다 길게 주면(예: 10000) 위 표의 첫째 줄, 곧 살아 있는 게임에서 쓰는 덤프를 확인할 수 있습니다.
 
-버그로 볼 것: 세 번째 예외가 어디에도 기록되지 않는 경우, 두 번째 예외의 보류 덤프(`SkyrimDiag_Released_*.dmp`)가 이 크래시의 덤프로 승격되는 경우, 세 번째에서 회복 확인 없이 덤프부터 쓰는 경우.
+버그로 볼 것: 세 번째 예외가 어디에도 기록되지 않는 경우, 두 번째 예외의 보류 덤프(`SkyrimDiag_Released_*.dmp`)가 이 크래시의 덤프로 승격되는 경우, 세 번째에서 회복 확인 없이 덤프부터 쓰는 경우, 신호가 있는 빌드인데 덤프가 남지 않는 경우.
 
 ## 무인 실행
 

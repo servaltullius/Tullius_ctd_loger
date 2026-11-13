@@ -2886,6 +2886,243 @@ void TestRepeatedHandledFault_ExitedGameRecordsMetadataOnly()
   }
 }
 
+// ADR-0032. A manual-reset event as the plugin or the helper makes it.
+HANDLE MakeSignalEvent(bool signaled)
+{
+  const HANDLE event = CreateEventW(nullptr, TRUE, signaled ? TRUE : FALSE, nullptr);
+  Require(event != nullptr, "CreateEventW failed");
+  return event;
+}
+
+bool IsSignaled(HANDLE event)
+{
+  return WaitForSingleObject(event, 0) == WAIT_OBJECT_0;
+}
+
+std::size_t CountOccurrences(std::string_view text, std::string_view needle)
+{
+  std::size_t count = 0;
+  for (std::size_t at = text.find(needle); at != std::string_view::npos; at = text.find(needle, at + needle.size())) {
+    ++count;
+  }
+  return count;
+}
+
+// ADR-0032: a fault at an address that was handled twice goes to the recovery
+// check first (ADR-0031). When the plugin says it was not handled, the helper
+// writes the dump at once instead of watching the heartbeat for 6 s, even
+// while the heartbeat keeps advancing (a crash on a thread the game loop does
+// not wait for), and tells the plugin when the dump is written.
+void TestUnhandledSignal_RepeatedFaultIsDumpedAtOnce()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_unhandled_repeated");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F7777ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = kFaultAddr;
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+  shared->header.crash_seq = 6u;
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = MakeSignalEvent(true);
+  proc.unhandledEvent = MakeSignalEvent(true);
+  proc.dumpSettledEvent = MakeSignalEvent(false);
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+  skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr);
+  skydiag::helper::internal::NoteRecoveredFault(&state.crashCaptured.recoveredFaults, 0xC0000005u, kFaultAddr);
+
+  std::atomic_bool stopHeartbeat{ false };
+  std::thread heartbeatThread([&] {
+    while (!stopHeartbeat.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+  const ULONGLONG startTick = GetTickCount64();
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  const ULONGLONG elapsedMs = GetTickCount64() - startTick;
+  stopHeartbeat.store(true);
+  heartbeatThread.join();
+
+  Require(handled, "The unhandled repeated fault is handled");
+  Require(state.crashCaptured.latched, "It is latched as a crash although the heartbeat kept advancing");
+  Require(HasDumpFile(outBase) && FileExists(state.capturedCrashDumpPath), "The crash dump is written");
+  Require(elapsedMs < 4000u, "The dump is not preceded by the 6 s recovery check");
+  Require(IsSignaled(proc.dumpSettledEvent), "The plugin is told that the dump is written");
+  Require(state.crashCaptured.unhandledSignalCrashSeq == 6u, "The signal is noted for this crash generation");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) != 0u, "A kept crash stays frozen");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(
+    log,
+    "checking whether the game recovers before writing a crash dump",
+    "The repeated fault still starts with the recovery check");
+  AssertContains(
+    log,
+    "it reached the process's top-level exception filter",
+    "The log says why the check ended");
+  AssertContains(
+    log,
+    "The game did not handle this repeated exception; writing the crash dump now.",
+    "The log says the dump follows the signal");
+  const auto manifest = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json"));
+  AssertContains(manifest, "\"unhandled_exception_signal\": true", "The incident manifest records the signal");
+
+  CloseHandle(proc.crashEvent);
+  CloseHandle(proc.unhandledEvent);
+  CloseHandle(proc.dumpSettledEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
+// ADR-0032: on the ordinary path the dump is written first. With the plugin's
+// signal the helper keeps it as the crash without the 3 s exit wait and the
+// heartbeat checks, and does not release it although the heartbeat advances.
+void TestUnhandledSignal_FirstFaultIsKeptWithoutWaitingForTheHeartbeat()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_unhandled_first");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F8888ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = kFaultAddr;
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+  shared->header.crash_seq = 2u;
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = MakeSignalEvent(true);
+  proc.unhandledEvent = MakeSignalEvent(true);
+  proc.dumpSettledEvent = MakeSignalEvent(false);
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+
+  std::atomic_bool stopHeartbeat{ false };
+  std::thread heartbeatThread([&] {
+    while (!stopHeartbeat.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+  const ULONGLONG startTick = GetTickCount64();
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  const ULONGLONG elapsedMs = GetTickCount64() - startTick;
+  stopHeartbeat.store(true);
+  heartbeatThread.join();
+
+  Require(handled, "The unhandled fault is handled");
+  Require(state.crashCaptured.latched, "It is kept as a crash although the heartbeat kept advancing");
+  Require(state.crashCaptured.releasedDumpPath.empty(), "Its dump is not held as a released one");
+  Require(FileExists(state.capturedCrashDumpPath), "The crash dump is kept");
+  Require(elapsedMs < 2500u, "Neither the 3 s exit wait nor the heartbeat checks are waited for");
+  Require(IsSignaled(proc.dumpSettledEvent), "The plugin is told that the dump is written");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  Require(
+    CountOccurrences(log, "it reached the process's top-level exception filter") == 1u,
+    "The signal is logged once for the incident, by whichever filter sees it first");
+  Require(
+    log.find("likely a handled first-chance exception") == std::string::npos,
+    "The heartbeat must not release an exception the plugin reported as unhandled");
+
+  CloseHandle(proc.crashEvent);
+  CloseHandle(proc.unhandledEvent);
+  CloseHandle(proc.dumpSettledEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
+// ADR-0032: without the signal a handled fault is released as before, and the
+// release clears the incident's signals, so the next crash does not find a
+// "dump settled" left from this one and go on before its dump is written.
+void TestUnhandledSignal_ReleaseClearsTheIncidentsSignals()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_unhandled_release");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F6666ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = kFaultAddr;
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+  shared->header.crash_seq = 2u;
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = MakeSignalEvent(true);
+  proc.unhandledEvent = MakeSignalEvent(false);
+  proc.dumpSettledEvent = MakeSignalEvent(false);
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+
+  std::atomic_bool stopHeartbeat{ false };
+  std::thread heartbeatThread([&] {
+    while (!stopHeartbeat.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  stopHeartbeat.store(true);
+  heartbeatThread.join();
+
+  Require(handled && !state.crashCaptured.latched, "A handled fault is released as before");
+  Require(state.crashCaptured.unhandledSignalCrashSeq == 0u, "No signal was noted");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "The release thaws capture");
+  Require(!IsSignaled(proc.dumpSettledEvent), "The release clears the dump-settled signal of this incident");
+  Require(!IsSignaled(proc.unhandledEvent), "The unhandled signal stays clear");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "likely a handled first-chance exception", "The heartbeat still releases a handled fault");
+
+  CloseHandle(proc.crashEvent);
+  CloseHandle(proc.unhandledEvent);
+  CloseHandle(proc.dumpSettledEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
 int wmain(int argc, wchar_t** argv)
 {
   try {
@@ -2967,6 +3204,9 @@ int wmain(int argc, wchar_t** argv)
     TestRepeatedHandledFault_FirstTwoWriteDumpsThenThirdSkipsDumpAndReportsAbnormalExit();
     TestRepeatedHandledFault_WritesDumpWhenGameDoesNotRecover();
     TestRepeatedHandledFault_ExitedGameRecordsMetadataOnly();
+    TestUnhandledSignal_RepeatedFaultIsDumpedAtOnce();
+    TestUnhandledSignal_FirstFaultIsKeptWithoutWaitingForTheHeartbeat();
+    TestUnhandledSignal_ReleaseClearsTheIncidentsSignals();
     return 0;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "%s\n", ex.what());

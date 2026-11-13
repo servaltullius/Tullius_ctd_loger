@@ -290,6 +290,9 @@ struct CrashCaptureState {
   std::uint32_t dumpWriteFailedCrashSeq = 0;
   bool dumpWriteFailedProcessExited = false;
   std::uint64_t dumpWriteFailedTick64 = 0;
+  // ADR-0032: the crash generation the plugin said was not handled (it
+  // reached the top-level exception filter). 0: none.
+  std::uint32_t unhandledSignalCrashSeq = 0;
 };
 
 struct StableSharedSnapshot {
@@ -500,6 +503,13 @@ bool CaptureStableSharedSnapshot(
 bool TryClearRecoveredCrashFreeze(
   skydiag::SharedLayout* shm,
   std::uint32_t expectedCrashSeq) noexcept;
+// Lets go of the incident: TryClearRecoveredCrashFreeze, after the incident's
+// "unhandled" and "dump settled" signals were reset (ADR-0032). The order
+// matters: once the freeze is cleared the plugin can publish the next crash,
+// which must not find the signals of this one.
+bool ThawCrashCapture(
+  const skydiag::helper::AttachedProcess& proc,
+  std::uint32_t expectedCrashSeq) noexcept;
 // Why the WER LocalDumps hint is being written. The two cases need different
 // first steps, so the hint must not claim a failed capture when none was tried.
 enum class WerFallbackReason
@@ -681,6 +691,17 @@ inline bool ShouldPreserveFilteredDump(
 // event), WAIT_TIMEOUT or WAIT_FAILED otherwise. The crash event wins when
 // both are signaled.
 DWORD WaitForCrashOrProcess(HANDLE crashEvent, HANDLE process, DWORD waitMs) noexcept;
+// ADR-0032: the same, also woken by the plugin's "unhandled" event
+// (kWaitUnhandledSignal). Without that event it is WaitForCrashOrProcess.
+// The crash event wins, then the process exit: check
+// IsUnhandledExceptionSignaled after either.
+inline constexpr DWORD kWaitUnhandledSignal = WAIT_OBJECT_0 + 2u;
+DWORD WaitForCrashUnhandledOrProcess(
+  HANDLE crashEvent,
+  HANDLE unhandledEvent,
+  HANDLE process,
+  DWORD waitMs) noexcept;
+bool IsUnhandledExceptionSignaled(HANDLE unhandledEvent) noexcept;
 #endif
 
 bool HandleCrashEventTick(

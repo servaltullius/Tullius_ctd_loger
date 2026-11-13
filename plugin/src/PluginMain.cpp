@@ -36,6 +36,7 @@ struct PluginConfig
 {
   std::uint32_t heartbeatIntervalMs = 100;
   std::uint32_t crashHookMode = 1;
+  std::uint32_t unhandledCrashHoldMs = skydiag::plugin::kDefaultUnhandledCrashHoldMs;
   bool logMenus = true;
   bool autoStartHelper = true;
   std::wstring helperExe = L"SkyrimDiagHelper.exe";
@@ -119,6 +120,13 @@ PluginConfig LoadConfig()
       spdlog::warn("SkyrimDiag: CrashHookMode=2 needs EnableUnsafeCrashHookMode2=1; using 1 (fatal exceptions)");
     }
   }
+  cfg.unhandledCrashHoldMs = ReadIniUint32Clamped(
+    L"SkyrimDiag",
+    L"UnhandledCrashHoldMs",
+    static_cast<int>(skydiag::plugin::kDefaultUnhandledCrashHoldMs),
+    iniPath,
+    0,
+    skydiag::plugin::kMaxUnhandledCrashHoldMs);
   cfg.logMenus = GetPrivateProfileIntW(L"SkyrimDiag", L"LogMenus", 1, iniPath) != 0;
   cfg.autoStartHelper = GetPrivateProfileIntW(L"SkyrimDiag", L"AutoStartHelper", 1, iniPath) != 0;
   cfg.helperExe = ReadIniString(L"SkyrimDiag", L"HelperExe", L"SkyrimDiagHelper.exe", iniPath);
@@ -265,9 +273,10 @@ void OnDataLoaded(const PluginConfig& cfg)
     }
   }
 
-  spdlog::info("SkyrimDiag: data loaded; heartbeat={}ms crashHookMode={} logMenus={}",
+  spdlog::info("SkyrimDiag: data loaded; heartbeat={}ms crashHookMode={} unhandledCrashHoldMs={} logMenus={}",
                cfg.heartbeatIntervalMs,
                cfg.crashHookMode,
+               cfg.unhandledCrashHoldMs,
                cfg.logMenus);
 }
 
@@ -720,6 +729,7 @@ SKSEPluginLoad(const SKSE::LoadInterface *skse) {
     }
 
     if (g_cfg.crashHookMode != 0) {
+      skydiag::plugin::SetUnhandledCrashHoldMs(g_cfg.unhandledCrashHoldMs);
       if (!skydiag::plugin::InstallCrashHandler(g_cfg.crashHookMode)) {
         spdlog::warn("SkyrimDiag: crash handler install failed");
       }

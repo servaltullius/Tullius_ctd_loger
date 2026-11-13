@@ -262,6 +262,7 @@ void TestFaultWithoutCrashLoggerFramesIsRecordedItself(skydiag::SharedLayout* sh
 // copy of this test that the parent attaches to the way the helper does.
 constexpr UINT kChildFilterExitCode = 41;
 constexpr UINT kChildAbortExitCode = 42;
+constexpr UINT kChildRetakingFilterExitCode = 43;
 
 // Stand-ins for the handlers installed before the plugin's (the CRT's filter,
 // another mod's SIGABRT handler). The child must still end through them.
@@ -274,6 +275,47 @@ LONG WINAPI ChildPreviousFilter(EXCEPTION_POINTERS*)
 void __cdecl ChildPreviousAbortHandler(int)
 {
   TerminateProcess(GetCurrentProcess(), kChildAbortExitCode);
+}
+
+// ADR-0032. A stand-in for CrashLogger: it registers its own top-level filter
+// again while every exception is dispatched.
+LONG WINAPI ChildRetakingFilter(EXCEPTION_POINTERS*)
+{
+  TerminateProcess(GetCurrentProcess(), kChildRetakingFilterExitCode);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+LONG CALLBACK ChildRetakingVectoredHandler(EXCEPTION_POINTERS*)
+{
+  SetUnhandledExceptionFilter(ChildRetakingFilter);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+__declspec(noinline) void WriteThroughNull()
+{
+  volatile int* nowhere = nullptr;
+  *nowhere = 1;
+}
+
+__declspec(noinline) int CatchWriteThroughNull()
+{
+  __try {
+    WriteThroughNull();
+    return 0;
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 1;
+  }
+}
+
+// Recursion the compiler cannot see the end of; the limit is never reached.
+__declspec(noinline) std::uint64_t RecurseUntil(std::uint64_t depth, volatile std::uint64_t* limit)
+{
+  volatile char pad[512];
+  pad[depth % sizeof(pad)] = static_cast<char>(depth);
+  if (depth >= *limit) {
+    return depth;
+  }
+  return RecurseUntil(depth + 1, limit) + static_cast<std::uint64_t>(pad[0]);
 }
 
 [[noreturn]] __declspec(noinline) void ThrowRuntimeError()
@@ -294,14 +336,25 @@ int RunChild(const char* mode, const char* goEventName)
   _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
   SetUnhandledExceptionFilter(ChildPreviousFilter);
   std::signal(SIGABRT, ChildPreviousAbortHandler);
+  if (std::strcmp(mode, "unhandled-fault-short-hold") == 0) {
+    skydiag::plugin::SetUnhandledCrashHoldMs(400);
+  }
+  if (std::strcmp(mode, "unhandled-fault-no-hold") == 0) {
+    skydiag::plugin::SetUnhandledCrashHoldMs(0);
+  }
   if (!skydiag::plugin::InitSharedMemory() || !skydiag::plugin::InstallCrashHandler(/*crashHookMode=*/1)) {
     return 90;
+  }
+  if (std::strcmp(mode, "unhandled-fault-filter-retaken") == 0 ||
+      std::strcmp(mode, "unhandled-throw-filter-retaken") == 0) {
+    // After the plugin's handlers, as CrashLogger's when it loads later.
+    AddVectoredExceptionHandler(1, ChildRetakingVectoredHandler);
   }
   HANDLE go = OpenEventA(SYNCHRONIZE, FALSE, goEventName);
   if (!go || WaitForSingleObject(go, 30000) != WAIT_OBJECT_0) {
     return 91;
   }
-  if (std::strcmp(mode, "unhandled-throw") == 0) {
+  if (std::strcmp(mode, "unhandled-throw") == 0 || std::strcmp(mode, "unhandled-throw-filter-retaken") == 0) {
     ThrowRuntimeError();
   }
   if (std::strcmp(mode, "unhandled-breakpoint") == 0) {
@@ -309,6 +362,26 @@ int RunChild(const char* mode, const char* goEventName)
   }
   if (std::strcmp(mode, "noexcept-throw") == 0) {
     CallThrowerFromNoexcept();
+  }
+  if (std::strcmp(mode, "unhandled-fault-other-record") == 0) {
+    // Another thread's handled fault takes the incident; the helper is still
+    // checking it when this thread crashes (ADR-0017).
+    std::thread other([] { CatchWriteThroughNull(); });
+    other.join();
+  }
+  if (std::strncmp(mode, "unhandled-fault", 15) == 0) {
+    WriteThroughNull();
+  }
+  if (std::strcmp(mode, "unhandled-stack-overflow") == 0) {
+    volatile std::uint64_t limit = ~0ull;
+    return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
+  }
+  if (std::strcmp(mode, "handled-fault") == 0) {
+    // The record is published at first chance; the parent then sees whether
+    // the handled fault was reported as unhandled.
+    const int caught = CatchWriteThroughNull();
+    Sleep(1500);
+    return caught == 1 ? 0 : 93;
   }
   if (std::strcmp(mode, "abort-after-caught-throw") == 0) {
     try {
@@ -377,6 +450,11 @@ ChildOutcome RunChildToCrash(const char* mode)
   const HANDLE crashOrExit[] = { proc.crashEvent, pi.hProcess };
   WaitForMultipleObjects(2, crashOrExit, FALSE, 30000);
   outcome.crashEventSignaled = WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0;
+  // ADR-0032: the plugin's filter holds the thread until the helper has
+  // written the dump; this stand-in helper has nothing to write.
+  if (proc.dumpSettledEvent) {
+    SetEvent(proc.dumpSettledEvent);
+  }
   if (WaitForSingleObject(pi.hProcess, 30000) != WAIT_OBJECT_0) {
     TerminateProcess(pi.hProcess, 1);
     WaitForSingleObject(pi.hProcess, 5000);
@@ -414,6 +492,194 @@ void RequireChildCrashRecorded(const ChildOutcome& outcome, std::uint32_t code, 
     outcome.exitCode == exitCode,
     (prefix + "the handler installed before the plugin's must still run (exit code " +
      std::to_string(outcome.exitCode) + ")").c_str());
+}
+
+// ADR-0032: what the helper sees when a fault in the child is not handled.
+struct UnhandledOutcome
+{
+  bool attachedSignalEvents = false;
+  bool unhandledSignaled = false;
+  // Whether the child was still running some time after the signal.
+  bool aliveWhileHeld = false;
+  DWORD msFromSignalToExit = 0;
+  DWORD exitCode = 0;
+  std::uint32_t recordedCode = 0;
+};
+
+enum class HelperSettle
+{
+  // The helper sets "dump settled" after holdCheckMs.
+  kAfterCheck,
+  // The helper is there but never settles.
+  kNever,
+  // No helper event to wait for (the helper is gone).
+  kNoEvent,
+};
+
+UnhandledOutcome RunChildToUnhandled(const char* mode, HelperSettle settle, DWORD holdCheckMs)
+{
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goEventName = "Local\\skydiag_crash_handler_test_go_" + std::to_string(GetCurrentProcessId()) +
+    "_" + std::to_string(GetTickCount64());
+  HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goEventName.c_str());
+  Require(go != nullptr, "CreateEventA failed");
+
+  std::string commandLine = std::string("\"") + exePath + "\" --child " + mode + " " + goEventName;
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(
+    CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+      FALSE,
+    "CreateProcessA failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    TerminateProcess(pi.hProcess, 1);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(go);
+    Require(false, "the helper could not attach to the child's shared memory and crash event");
+  }
+
+  UnhandledOutcome outcome{};
+  outcome.attachedSignalEvents = proc.unhandledEvent != nullptr && proc.dumpSettledEvent != nullptr;
+  if (settle == HelperSettle::kNoEvent && proc.dumpSettledEvent) {
+    // The only handle to it: the event is gone, as when the helper died.
+    CloseHandle(proc.dumpSettledEvent);
+    proc.dumpSettledEvent = nullptr;
+  }
+  SetEvent(go);
+  if (proc.unhandledEvent) {
+    const HANDLE unhandledOrExit[] = { proc.unhandledEvent, pi.hProcess };
+    outcome.unhandledSignaled = WaitForMultipleObjects(2, unhandledOrExit, FALSE, 30000) == WAIT_OBJECT_0;
+  }
+  const ULONGLONG signalTick = GetTickCount64();
+  if (outcome.unhandledSignaled && settle == HelperSettle::kAfterCheck) {
+    outcome.aliveWhileHeld = WaitForSingleObject(pi.hProcess, holdCheckMs) == WAIT_TIMEOUT;
+    SetEvent(proc.dumpSettledEvent);
+  }
+  if (WaitForSingleObject(pi.hProcess, 30000) != WAIT_OBJECT_0) {
+    TerminateProcess(pi.hProcess, 1);
+    WaitForSingleObject(pi.hProcess, 5000);
+  }
+  outcome.msFromSignalToExit = static_cast<DWORD>(GetTickCount64() - signalTick);
+  GetExitCodeProcess(pi.hProcess, &outcome.exitCode);
+  outcome.recordedCode = proc.shm->header.crash.exception_code;
+
+  skydiag::helper::Detach(proc);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  CloseHandle(go);
+  return outcome;
+}
+
+// ADR-0032: a fault nothing handles reaches the plugin's top-level filter,
+// which tells the helper and holds the thread until the helper has written
+// the dump; then the filter under the plugin's still ends the process.
+void TestUnhandledFaultIsSignaledAndHeldUntilTheDumpIsSettled()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault", HelperSettle::kAfterCheck, 700);
+  Require(outcome.attachedSignalEvents, "the helper must find the plugin's unhandled event and make its own");
+  Require(outcome.unhandledSignaled, "an unhandled fault must be reported to the helper");
+  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the fault must be the recorded crash");
+  Require(outcome.aliveWhileHeld, "the crashing thread must be held until the helper settles the dump");
+  Require(
+    outcome.msFromSignalToExit < 4000u,
+    "the hold must end when the dump is settled, not at its cap");
+  Require(
+    outcome.exitCode == kChildFilterExitCode,
+    "the filter under the plugin's must still run after the hold");
+}
+
+// CrashLogger takes the top-level filter again on every exception. The
+// plugin's last vectored handler takes it back, and the plugin's filter then
+// calls CrashLogger's.
+void TestUnhandledFaultIsHeldWhenAnotherHandlerRetakesTheFilter()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault-filter-retaken", HelperSettle::kAfterCheck, 700);
+  Require(outcome.unhandledSignaled, "the plugin's filter must be called although another handler retook the slot");
+  Require(outcome.aliveWhileHeld, "the hold must work with a retaking handler");
+  Require(
+    outcome.exitCode == kChildRetakingFilterExitCode,
+    "the retaking handler's filter is the one under the plugin's and must end the process");
+}
+
+// A C++ throw is not a fatal code: the plugin does not take the filter back
+// for it, so with a handler like CrashLogger's the unhandled throw goes to
+// that handler's filter as before ADR-0032 (CrashLogger then reports it, and
+// its probe faults are what records the kept throw, ADR-0017).
+void TestUnhandledThrowLeavesARetakenFilterAlone()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-throw-filter-retaken", HelperSettle::kAfterCheck, 700);
+  Require(!outcome.unhandledSignaled, "the plugin's filter must not be put back for a C++ throw");
+  Require(
+    outcome.exitCode == kChildRetakingFilterExitCode,
+    "the retaking handler's filter must be the one that ends the process");
+}
+
+// The incident is held by another thread's exception, which the helper is
+// still checking. Saying "not handled" now would be said about that one, so
+// the filter says nothing and does not hold.
+void TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault-other-record", HelperSettle::kAfterCheck, 700);
+  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the first, handled fault holds the record");
+  Require(!outcome.unhandledSignaled, "another exception's record must not be reported as unhandled");
+  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+}
+
+// A stack overflow leaves little stack: it is recorded at first chance as
+// before, but the filter neither reports nor holds it, and the filter under
+// the plugin's still ends the process.
+void TestUnhandledStackOverflowIsNotHeld()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-stack-overflow", HelperSettle::kNever, 0);
+  Require(outcome.recordedCode == EXCEPTION_STACK_OVERFLOW, "the stack overflow is recorded at first chance");
+  Require(!outcome.unhandledSignaled, "a stack overflow must not be reported from the top-level filter");
+  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+}
+
+// A helper that never answers: the hold ends at its cap.
+void TestUnhandledFaultHoldEndsAtItsCap()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault-short-hold", HelperSettle::kNever, 0);
+  Require(outcome.unhandledSignaled, "the fault must be reported");
+  Require(outcome.msFromSignalToExit >= 300u, "the thread must be held for about the cap (400 ms)");
+  Require(outcome.msFromSignalToExit < 4000u, "the cap must end the hold");
+  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must run after the cap");
+}
+
+// No helper event (the helper is gone), or a hold of 0: the helper is told,
+// and the crash goes on at once.
+void TestUnhandledFaultIsNotHeldWithoutAHelperOrWithHoldOff()
+{
+  const auto noHelper = RunChildToUnhandled("unhandled-fault", HelperSettle::kNoEvent, 0);
+  Require(noHelper.unhandledSignaled, "without the helper's event the fault is still reported");
+  Require(noHelper.msFromSignalToExit < 2000u, "without the helper's event nothing is waited for");
+  Require(noHelper.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
+
+  const auto holdOff = RunChildToUnhandled("unhandled-fault-no-hold", HelperSettle::kNever, 0);
+  Require(holdOff.unhandledSignaled, "with the hold off the fault is still reported");
+  Require(holdOff.msFromSignalToExit < 2000u, "with the hold off nothing is waited for");
+  Require(holdOff.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
+}
+
+// A fault the game handles never reaches the top-level filter.
+void TestHandledFaultIsNotReportedAsUnhandled()
+{
+  const auto outcome = RunChildToUnhandled("handled-fault", HelperSettle::kNever, 0);
+  Require(outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the handled fault is recorded at first chance");
+  Require(!outcome.unhandledSignaled, "a handled fault must not be reported as unhandled");
+  Require(outcome.exitCode == 0u, "the child must have caught the fault and ended normally");
 }
 
 // Without CrashLogger, nothing faulted on the throwing thread, so an unhandled
@@ -469,6 +735,14 @@ int main(int argc, char** argv)
     TestFaultWithoutCrashLoggerFramesIsRecordedItself(shm);
     TestUnhandledExceptionsWithoutCrashLoggerAreRecorded();
     TestAbortAfterACaughtThrowIsNotBlamedOnIt();
+    TestUnhandledFaultIsSignaledAndHeldUntilTheDumpIsSettled();
+    TestUnhandledFaultIsHeldWhenAnotherHandlerRetakesTheFilter();
+    TestUnhandledThrowLeavesARetakenFilterAlone();
+    TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions();
+    TestUnhandledStackOverflowIsNotHeld();
+    TestUnhandledFaultHoldEndsAtItsCap();
+    TestUnhandledFaultIsNotHeldWithoutAHelperOrWithHoldOff();
+    TestHandledFaultIsNotReportedAsUnhandled();
     std::puts("plugin crash handler runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {

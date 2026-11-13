@@ -10,6 +10,13 @@ inline constexpr wchar_t kKernelObjectPrefix[] = L"Local\\SkyrimDiag_";
 inline constexpr wchar_t kKernelObjectSuffix_SharedMemory[] = L"_SHM";
 inline constexpr wchar_t kKernelObjectSuffix_CrashEvent[] = L"_CRASH";
 inline constexpr wchar_t kKernelObjectSuffix_HelperMutex[] = L"_HELPER_MUTEX";
+// ADR-0032. The plugin creates and sets _UNHANDLED when an exception reaches
+// the process's top-level exception filter, i.e. nothing handled it. The
+// helper creates _DUMP_SETTLED and sets it when a crash dump write is over;
+// the plugin holds the crashing thread until then. Both are manual-reset and
+// are reset by the helper when it lets go of the incident.
+inline constexpr wchar_t kKernelObjectSuffix_UnhandledEvent[] = L"_UNHANDLED";
+inline constexpr wchar_t kKernelObjectSuffix_DumpSettledEvent[] = L"_DUMP_SETTLED";
 
 // Custom minidump user stream types must be > MINIDUMP_STREAM_TYPE::LastReservedStream (0xffff).
 inline constexpr std::uint32_t kMinidumpUserStream_Blackbox = 0x10000u + 0x5344u;  // arbitrary
