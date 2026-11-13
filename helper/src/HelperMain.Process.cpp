@@ -631,12 +631,14 @@ bool HandleLateRecoveryTick(
     return false;  // the exit tick classifies an exited process
   }
   auto& crash = state->crashCaptured;
-  if (!AdvanceLateRecovery(&crash.lateRecovery, GetTickCount64(), proc.shm->header.last_heartbeat_qpc)) {
+  const std::uint64_t nowTick64 = GetTickCount64();
+  if (!AdvanceLateRecovery(&crash.lateRecovery, nowTick64, proc.shm->header.last_heartbeat_qpc)) {
     return false;
   }
 
   const std::uint32_t crashSeq = crash.capturedInfo.crashSeq;
-  if (IsCapturedCrashStillUnhandled(crash.latched, IsUnhandledExceptionSignaled(proc.unhandledEvent))) {
+  const bool unhandledSignalSet = IsUnhandledExceptionSignaled(proc.unhandledEvent);
+  if (ShouldWithholdLateRecovery(crash.latched, unhandledSignalSet, crash.lateRecovery.latchedTick64, nowTick64)) {
     // ADR-0032: the heartbeat is the main thread's; the faulting thread is
     // still in the filters that end the process.
     if (crash.lateRecoveryWithheldCrashSeq != crashSeq) {
@@ -645,7 +647,9 @@ bool HandleLateRecoveryTick(
         outBase,
         L"The game is still running with the heartbeat advancing, but the plugin reported this exception as not "
         L"handled and no filter has resumed it (crash_seq=" + std::to_wstring(crashSeq)
-          + L"): a crash handler is still at work on the faulting thread. Keeping it as a crash.");
+          + L"): a crash handler is still at work on the faulting thread. Keeping it as a crash (released if the "
+            L"game is still running " + std::to_wstring(kLateRecoveryWithheldMaxMs / 1000u)
+          + L" s after the capture).");
     }
     return false;
   }
@@ -653,11 +657,24 @@ bool HandleLateRecoveryTick(
   const auto keptForSec = crash.lateRecovery.lastSampleTick64 >= crash.lateRecovery.latchedTick64
     ? (crash.lateRecovery.lastSampleTick64 - crash.lateRecovery.latchedTick64) / 1000u
     : 0u;
-  AppendLogLine(
-    outBase,
-    L"Game kept running " + std::to_wstring(keptForSec)
-      + L"s after a crash was captured, with the heartbeat advancing; the exception was handled "
-        L"(crash_seq=" + std::to_wstring(crashSeq) + L"). Releasing the capture.");
+  if (unhandledSignalSet) {
+    // ADR-0032: held back as long as a crash handler could be at work
+    // (kLateRecoveryWithheldMaxMs). Releasing it lets go of the signal too
+    // (ThawCrashCapture), so the next exception is judged on its own.
+    AppendLogLine(
+      outBase,
+      L"Game kept running " + std::to_wstring(keptForSec)
+        + L"s after a crash was captured, with the heartbeat advancing. The plugin's report of this exception as "
+          L"not handled was never taken back, but nothing ended the game in that time (crash_seq="
+        + std::to_wstring(crashSeq)
+        + L"): taking the report as left by code that handled the exception itself. Releasing the capture.");
+  } else {
+    AppendLogLine(
+      outBase,
+      L"Game kept running " + std::to_wstring(keptForSec)
+        + L"s after a crash was captured, with the heartbeat advancing; the exception was handled "
+          L"(crash_seq=" + std::to_wstring(crashSeq) + L"). Releasing the capture.");
+  }
   // The heartbeat proves the main thread runs, not that the faulting thread
   // recovered: a worker blocked for a minute in a crash handler would look
   // the same. So the dump is kept (marked late_recovery) instead of deleted;

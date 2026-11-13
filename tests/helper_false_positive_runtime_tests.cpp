@@ -2185,6 +2185,93 @@ void TestHandleLateRecoveryTick_KeepsACrashThePluginReportedUnhandled()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0032: the plugin's signal holds a late recovery back only for
+// kLateRecoveryWithheldMaxMs. A crash handler ends the game long before that;
+// a game still running then, its heartbeat advancing, was left the signal by
+// code that handled the exception itself. The capture is released, and the
+// signal with it, so that a later exception is recorded.
+void TestHandleLateRecoveryTick_ReleasesAWithheldCrashAtTheCap()
+{
+  using skydiag::helper::internal::HandleLateRecoveryTick;
+  using skydiag::helper::internal::kLateRecoveryWithheldMaxMs;
+
+  const auto outBase = MakeTempDir(L"skydiag_helper_late_recovery_withheld_cap");
+  ClearLog(outBase);
+  const auto dumpPath = outBase / "SkyrimDiag_Crash_20261113_130000_001.dmp";
+  const auto reportPath = outBase / "SkyrimDiag_Crash_20261113_130000_001_SkyrimDiagReport.txt";
+  WriteAllTextUtf8(dumpPath, "dump");
+  WriteAllTextUtf8(reportPath, "report");
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2u;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.last_heartbeat_qpc = 100u;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.unhandledEvent = CreateEventW(nullptr, /*bManualReset=*/TRUE, /*bInitialState=*/TRUE, nullptr);
+  Require(proc.unhandledEvent != nullptr, "CreateEventW failed");
+  HelperConfig cfg = MakeTestConfig();
+
+  skydiag::helper::internal::HelperLoopState state{};
+  state.crashCaptured.latched = true;
+  state.crashCaptured.capturedInfo =
+    skydiag::helper::internal::BuildCrashEventInfo(0xC0000005u, 0x12345678u, child.pi.dwThreadId, skydiag::kState_Frozen);
+  state.crashCaptured.capturedInfo.crashSeq = 2u;
+  state.capturedCrashDumpPath = dumpPath.wstring();
+  state.pendingCrashViewerDumpPath = dumpPath.wstring();
+
+  // The crash was kept `keptForMs` ago; five advancing windows were seen, and
+  // the sixth is due with the heartbeat at `heartbeatNow`.
+  auto& late = state.crashCaptured.lateRecovery;
+  const auto arm = [&](std::uint64_t keptForMs, std::uint64_t heartbeatBefore, std::uint64_t heartbeatNow) {
+    const auto now = GetTickCount64();
+    late.latchedTick64 = now - keptForMs;
+    late.lastSampleTick64 = now - 6'000;
+    late.lastHeartbeatQpc = heartbeatBefore;
+    late.advancingWindows = 5u;
+    shared->header.last_heartbeat_qpc = heartbeatNow;
+  };
+  const auto signalSet = [&] { return WaitForSingleObject(proc.unhandledEvent, 0) == WAIT_OBJECT_0; };
+
+  // Short of the cap: held back, as a crash handler may still be at work.
+  arm(kLateRecoveryWithheldMaxMs - 20'000, 200u, 300u);
+  Require(!HandleLateRecoveryTick(cfg, proc, outBase, &state), "Short of the cap: not released");
+  Require(state.crashCaptured.latched && FileExists(dumpPath) && FileExists(reportPath), "Short of the cap: the crash stays");
+  Require(state.crashCaptured.lateRecoveryWithheldCrashSeq == 2u, "Short of the cap: the held-back recovery is noted");
+  Require(signalSet() && (shared->header.state_flags & skydiag::kState_Frozen) != 0u, "Short of the cap: signal and freeze stay");
+
+  // Past the cap, but the heartbeat stopped: the game is not running on.
+  arm(kLateRecoveryWithheldMaxMs + 60'000, 300u, 300u);
+  Require(!HandleLateRecoveryTick(cfg, proc, outBase, &state), "Past the cap without heartbeat progress: not released");
+  Require(state.crashCaptured.latched && FileExists(reportPath) && signalSet(), "Without heartbeat progress the crash stays");
+
+  // Past the cap with the heartbeat advancing: released as a late recovery.
+  arm(kLateRecoveryWithheldMaxMs + 60'000, 300u, 400u);
+  Require(HandleLateRecoveryTick(cfg, proc, outBase, &state), "Past the cap: released");
+  Require(!state.crashCaptured.latched, "Latch cleared");
+  Require(FileExists(dumpPath), "The dump is kept");
+  Require(!FileExists(reportPath), "Derived crash artifacts are removed");
+  Require(state.pendingCrashViewerDumpPath.empty(), "The exit's viewer is cancelled");
+  Require(state.crashCaptured.releasedCrashSeq == 2u, "A later exit does not re-report this exception");
+  Require(!state.crashCaptured.releasedOnBriefHeartbeat, "Not a brief-heartbeat release");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "Freeze thawed for a later exception");
+  Require(!signalSet(), "The signal is let go with the incident");
+
+  const auto evidence = ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_CleanExitEvidence_", L".json"));
+  AssertContains(evidence, "\"filter_context\": \"late_recovery\"", "Recorded as a late recovery");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "was never taken back", "The log says the signal was still set");
+  AssertContains(log, "Releasing the capture", "The log says the capture is released");
+  Require(log.find("the exception was handled (crash_seq=") == std::string::npos, "It is not logged as a plain recovery");
+
+  CloseHandle(proc.unhandledEvent);
+  proc.unhandledEvent = nullptr;
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 // ADR-0032: the log says whether the plugin's "not handled" signal is in use
 // and why not, and a failed open is tried again, unless the plugin has no such
 // event at all.
@@ -3341,6 +3428,18 @@ static_assert(
   !skydiag::helper::internal::DoesCapturedCrashOutliveZeroExit(true, true, true),
   "the game ran on for minutes: the signal may be one left set by code that handled the exception");
 static_assert(skydiag::helper::internal::IsLateRecoveryWithheld(2u, 2u));
+static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(true, true, 1'000u, 121'000u));
+static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(
+  true, true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs - 1u));
+static_assert(
+  !skydiag::helper::internal::ShouldWithholdLateRecovery(
+    true, true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs),
+  "at the cap: no crash handler takes that long with the game running on");
+static_assert(!skydiag::helper::internal::ShouldWithholdLateRecovery(true, false, 1'000u, 121'000u), "signal taken back");
+static_assert(!skydiag::helper::internal::ShouldWithholdLateRecovery(false, true, 1'000u, 121'000u), "nothing captured");
+static_assert(
+  skydiag::helper::internal::kLateRecoveryWithheldMaxMs > skydiag::helper::internal::kLateRecoveryMinAliveMs,
+  "the cap must leave room for the late recovery to be held back at all");
 static_assert(!skydiag::helper::internal::IsLateRecoveryWithheld(0u, 0u), "none noted");
 static_assert(!skydiag::helper::internal::IsLateRecoveryWithheld(2u, 4u), "an earlier capture's");
 static_assert(skydiag::helper::internal::IsNormalExitForCapturedCrash(0u, /*crashOutlivesZeroExit=*/false));
@@ -3707,6 +3806,7 @@ int wmain(int argc, wchar_t** argv)
     TestLateRecoveryNeedsAMinuteOfAdvancingHeartbeat();
     TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived();
     TestHandleLateRecoveryTick_KeepsACrashThePluginReportedUnhandled();
+    TestHandleLateRecoveryTick_ReleasesAWithheldCrashAtTheCap();
     TestUnhandledSignalAttach_SaysWhyAndRetries();
     TestHandleLateRecoveryTick_KeepsACrashWithoutHeartbeat();
     TestOutputDirResolvesAgainstTheHelperFolder();

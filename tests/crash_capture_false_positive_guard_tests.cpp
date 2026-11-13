@@ -332,6 +332,23 @@ int main()
     "LaunchDeferredViewersAfterExit(",
     "Process exit tick must invoke deferred viewer launch helper.");
 
+  // ADR-0032: the plugin's signal holds a late recovery back, but only up to
+  // its cap, and only once the heartbeat says the game is running on.
+  const std::string lateRecoveryTickBody = ExtractFunctionBody(helperMain, "bool HandleLateRecoveryTick(");
+  AssertOrdered(
+    lateRecoveryTickBody,
+    "AdvanceLateRecovery(",
+    "ShouldWithholdLateRecovery(crash.latched, unhandledSignalSet, crash.lateRecovery.latchedTick64, nowTick64)",
+    "The late recovery must be held back through the capped rule, after the heartbeat check.");
+  assert(
+    lateRecoveryTickBody.find("if (IsCapturedCrashStillUnhandled(") == std::string::npos &&
+    "The late recovery must not be held back for the signal without the cap.");
+  AssertOrdered(
+    lateRecoveryTickBody,
+    "ShouldWithholdLateRecovery(",
+    "ThawCrashCapture(proc, crashSeq)",
+    "A capture released at the cap must let go of the plugin's signal with the freeze.");
+
   const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
   AssertContains(
     deferredViewerBody,

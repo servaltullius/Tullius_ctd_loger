@@ -294,7 +294,7 @@ struct CrashCaptureState {
   // reached the top-level exception filter). 0: none.
   std::uint32_t unhandledSignalCrashSeq = 0;
   // The crash generation whose late recovery was held back because that
-  // signal is still set (logged once). 0: none.
+  // signal is still set (logged once; ShouldWithholdLateRecovery). 0: none.
   std::uint32_t lateRecoveryWithheldCrashSeq = 0;
 };
 
@@ -302,18 +302,46 @@ struct CrashCaptureState {
 // handled and that no filter has made run on since. The plugin sets the signal
 // only for the exception in the crash record and takes it back when a filter
 // under its own resumes the thread; the helper resets it when it lets go of
-// the incident. While it is set, the faulting thread is still in the filters
-// that end the process (a crash handler writing its log, or showing a dialog),
-// however long the main thread's heartbeat goes on: not a handled exception,
-// and not a normal exit when the process then ends with code 0.
+// the incident. While it is set, the faulting thread is taken to be still in
+// the filters that end the process (a crash handler writing its log, or
+// showing a dialog), although the main thread's heartbeat goes on: not a
+// handled exception (for as long as ShouldWithholdLateRecovery says), and not
+// a normal exit when the process then ends with code 0.
 constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSignalSet) noexcept
 {
   return crashLatched && unhandledSignalSet;
 }
 
+// How long that signal holds the late recovery of a captured crash back,
+// counted from when the crash was kept. A crash handler ends the game within
+// seconds (Crash Logger wrote its log about 2 s after the fault with 4,250
+// plugins, ADR-0032), so a game still running after this long, its heartbeat
+// advancing, is not being ended: the signal was left set by code that calls
+// UnhandledExceptionFilter from its own __except and then runs on (the plugin
+// takes the signal back only when a filter answers
+// EXCEPTION_CONTINUE_EXECUTION). Without this such a capture would stay
+// latched and frozen until the game ends, and no later exception of the
+// session would be recorded.
+inline constexpr std::uint64_t kLateRecoveryWithheldMaxMs = 300'000;
+
+// Whether a late recovery that has come up (AdvanceLateRecovery) is held back:
+// the crash is still reported as not handled, and it was kept less than
+// kLateRecoveryWithheldMaxMs ago.
+constexpr bool ShouldWithholdLateRecovery(
+  bool crashLatched,
+  bool unhandledSignalSet,
+  std::uint64_t latchedTick64,
+  std::uint64_t nowTick64) noexcept
+{
+  return IsCapturedCrashStillUnhandled(crashLatched, unhandledSignalSet) &&
+         nowTick64 - latchedTick64 < kLateRecoveryWithheldMaxMs;
+}
+
 // Whether the late recovery of the captured crash was held back
 // (HandleLateRecoveryTick): the game ran on for kLateRecoveryMinAliveMs (a
 // minute) with the heartbeat advancing while the plugin's signal stayed set.
+// Such a capture is still latched; kLateRecoveryWithheldMaxMs after it was
+// kept it is released.
 constexpr bool IsLateRecoveryWithheld(std::uint32_t withheldCrashSeq, std::uint32_t capturedCrashSeq) noexcept
 {
   return withheldCrashSeq != 0u && withheldCrashSeq == capturedCrashSeq;
