@@ -351,19 +351,25 @@ __declspec(noinline) std::uint64_t RecurseUntil(std::uint64_t depth, volatile st
 
 // The bytes the last exception measured here took on its thread's stack for
 // its CONTEXT: Windows puts that right under the stack pointer the thread had.
+// 0: not measured.
 DWORD g_exceptionContextBytes = 0;
+// Larger than any context: a distance beyond it is not one (the context was
+// not under the stack pointer).
+constexpr std::uint64_t kExceptionContextBytesMax = 256u * 1024u;
 
 int NoteExceptionContextBytes(const EXCEPTION_POINTERS* ep)
 {
-  g_exceptionContextBytes =
-    static_cast<DWORD>(ep->ContextRecord->Rsp - reinterpret_cast<std::uintptr_t>(ep->ContextRecord));
+  // Unsigned: a context above the stack pointer gives a huge distance.
+  const std::uint64_t bytes = ep->ContextRecord->Rsp - reinterpret_cast<std::uintptr_t>(ep->ContextRecord);
+  g_exceptionContextBytes = bytes <= kExceptionContextBytesMax ? static_cast<DWORD>(bytes) : 0u;
   return EXCEPTION_EXECUTE_HANDLER;
 }
 
 // Takes a fault of its own to see it, so only before the plugin's handlers
-// are installed: they would record it.
+// are installed: they would record it. Returns 0 when it could not tell.
 __declspec(noinline) DWORD MeasureExceptionContextBytes()
 {
+  g_exceptionContextBytes = 0;
   __try {
     WriteThroughNull();
   } __except (NoteExceptionContextBytes(GetExceptionInformation())) {
@@ -374,17 +380,18 @@ __declspec(noinline) DWORD MeasureExceptionContextBytes()
 // Windows puts the exception's CONTEXT, with the processor's extended state,
 // on the stack that overflowed, and keeps three pages of every stack back for
 // that (11,744 to 12,288 bytes were left where it was measured). On those
-// hosts a context takes 1,792 to 3,440 bytes and the handlers and filters here
+// hosts a context takes 1,792 to 3,448 bytes and the handlers and filters here
 // are done in the rest. Where Windows saves a large extended state (Intel AMX
 // on Windows Server 2022: 11,648 to 11,696 bytes, any thread) the context does not
 // fit: Windows ends the process and calls no handler, the plugin's included,
 // so there is nothing of the plugin's to test (ADR-0032, Decision 5). There,
-// and only there, the child keeps back what an ordinary host has left after
-// its context; elsewhere it overflows with the default, as the game does.
+// and only there, the child has Windows keep back the context and two pages;
+// elsewhere it overflows with the default, as the game does. Not the same
+// room: Windows keeps a page more than asked, so 12,416 to 12,928 bytes were
+// left after the context there, and 8,320 to 10,496 on the ordinary hosts.
+// A handler that came to need more would fail on the ordinary hosts first.
 constexpr DWORD kDefaultStackOverflowReserveBytes = 3u * 4096u;
 constexpr DWORD kStackOverflowHandlerRoomBytes = 2u * 4096u;
-// Larger than any context: a measurement beyond it is not one.
-constexpr DWORD kExceptionContextBytesMax = 256u * 1024u;
 
 // The stack to have Windows keep back for a context of that size; 0 leaves
 // the default.
@@ -405,7 +412,7 @@ static_assert(StackGuaranteeForExceptionContext(11696u) == 19888u);
 // host and not only on the few with a large context.
 bool KeepStackForExceptionContext(DWORD contextBytes, bool always)
 {
-  if (contextBytes == 0u || contextBytes > kExceptionContextBytesMax) {
+  if (contextBytes == 0u) {
     return false;
   }
   ULONG guarantee = StackGuaranteeForExceptionContext(contextBytes);
@@ -552,6 +559,15 @@ struct ChildOutcome
   skydiag::BlackboxEvent lastEvent{};
 };
 
+// For a failure message: what this host's exceptions take (measured by the
+// test itself before any child runs).
+std::string DescribeHost()
+{
+  return g_exceptionContextBytes != 0u
+    ? "exception context " + std::to_string(g_exceptionContextBytes) + " bytes on this host"
+    : std::string("exception context on this host not measured");
+}
+
 // What the child left behind, for a failure message: a failure that shows on
 // one CI runner in several cannot be run again to look at.
 std::string Describe(const ChildOutcome& outcome)
@@ -561,16 +577,15 @@ std::string Describe(const ChildOutcome& outcome)
     text,
     sizeof(text),
     " (child: crash event signaled %d, recorded code 0x%08lX on thread %lu, main thread %lu, crash_seq %lu, "
-    "state flags 0x%lX, exit code 0x%08lX; exception context %lu bytes on this host)",
+    "state flags 0x%lX, exit code 0x%08lX; ",
     outcome.crashEventSignaled ? 1 : 0,
     static_cast<unsigned long>(outcome.crash.exception_code),
     static_cast<unsigned long>(outcome.crash.faulting_tid),
     static_cast<unsigned long>(outcome.mainTid),
     static_cast<unsigned long>(outcome.crashSeq),
     static_cast<unsigned long>(outcome.stateFlags),
-    static_cast<unsigned long>(outcome.exitCode),
-    static_cast<unsigned long>(g_exceptionContextBytes));
-  return text;
+    static_cast<unsigned long>(outcome.exitCode));
+  return text + DescribeHost() + ")";
 }
 
 void RequireOf(const ChildOutcome& outcome, bool condition, const char* message)
@@ -594,8 +609,8 @@ void RequireOf(const ChildOutcome& outcome, bool condition, const char* message)
   const std::string state =
     ended ? "the child had ended with exit code " + std::to_string(exitCode) : "the child was still running";
   throw std::runtime_error(
-    "the helper could not attach to the child's shared memory and crash event (" + state +
-    "; exception context " + std::to_string(g_exceptionContextBytes) + " bytes on this host)");
+    "the helper could not attach to the child's shared memory and crash event (" + state + "; " +
+    DescribeHost() + ")");
 }
 
 ChildOutcome RunChildToCrash(const char* mode)
@@ -671,7 +686,10 @@ void RequireChildCrashRecorded(const ChildOutcome& outcome, std::uint32_t code, 
     outcome,
     outcome.crashSeq != 0u && (outcome.crashSeq & 1u) == 0u,
     (prefix + "a committed crash record must be published").c_str());
-  Require((outcome.stateFlags & skydiag::kState_Frozen) != 0u, (prefix + "the incident must be claimed").c_str());
+  RequireOf(
+    outcome,
+    (outcome.stateFlags & skydiag::kState_Frozen) != 0u,
+    (prefix + "the incident must be claimed").c_str());
   RequireOf(
     outcome,
     outcome.crash.exception_code == code,
@@ -714,8 +732,7 @@ std::string Describe(const UnhandledOutcome& outcome)
     text,
     sizeof(text),
     " (child: recorded code 0x%08lX, crash_seq %lu, state flags 0x%lX, exit code 0x%08lX, reported as unhandled %d, "
-    "still reported at the exit %d, alive while held %d, %lu ms from the report to the exit; exception context "
-    "%lu bytes on this host)",
+    "still reported at the exit %d, alive while held %d, %lu ms from the report to the exit; ",
     static_cast<unsigned long>(outcome.recordedCode),
     static_cast<unsigned long>(outcome.crashSeq),
     static_cast<unsigned long>(outcome.stateFlags),
@@ -723,9 +740,8 @@ std::string Describe(const UnhandledOutcome& outcome)
     outcome.unhandledSignaled ? 1 : 0,
     outcome.unhandledSignaledAtExit ? 1 : 0,
     outcome.aliveWhileHeld ? 1 : 0,
-    static_cast<unsigned long>(outcome.msFromSignalToExit),
-    static_cast<unsigned long>(g_exceptionContextBytes));
-  return text;
+    static_cast<unsigned long>(outcome.msFromSignalToExit));
+  return text + DescribeHost() + ")";
 }
 
 void RequireOf(const UnhandledOutcome& outcome, bool condition, const char* message)
@@ -1063,8 +1079,9 @@ int main(int argc, char** argv)
       reinterpret_cast<CallGameCodeFn>(GetProcAddress(crashLogger, "SkydiagFakeCrashLoggerCallGameCode"));
     Require(g_callGameCode != nullptr, "fake CrashLogger.dll has no game-code call export");
 
-    // Before the plugin's handlers are installed (see the function).
-    Require(MeasureExceptionContextBytes() != 0u, "could not measure an exception context");
+    // For the failure messages only (DescribeHost), so it may fail. Before the
+    // plugin's handlers are installed (see the function).
+    MeasureExceptionContextBytes();
     Require(skydiag::plugin::InitSharedMemory(), "InitSharedMemory failed");
     Require(skydiag::plugin::InstallCrashHandler(/*crashHookMode=*/1), "InstallCrashHandler failed");
     skydiag::plugin::RefreshCrashLoggerModuleRanges();
