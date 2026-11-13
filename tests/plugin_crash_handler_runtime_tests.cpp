@@ -345,6 +345,18 @@ int RunChild(const char* mode, const char* goEventName)
   if (!skydiag::plugin::InitSharedMemory() || !skydiag::plugin::InstallCrashHandler(/*crashHookMode=*/1)) {
     return 90;
   }
+  if (std::strncmp(mode, "unhandled-throw-filter-taken-once", 33) == 0) {
+    // Something registers its own filter once after the plugin loaded, and
+    // never again. "-reclaimed": the plugin's once-a-second reclaim then ran.
+    SetUnhandledExceptionFilter(ChildRetakingFilter);
+    if (std::strcmp(mode, "unhandled-throw-filter-taken-once-reclaimed") == 0) {
+      const auto displaced = skydiag::plugin::ReclaimTopLevelFilter();
+      if (displaced != reinterpret_cast<std::uintptr_t>(&ChildRetakingFilter) ||
+          skydiag::plugin::ReclaimTopLevelFilter() != 0u) {
+        return 95;
+      }
+    }
+  }
   if (std::strcmp(mode, "unhandled-fault-filter-retaken") == 0 ||
       std::strcmp(mode, "unhandled-throw-filter-retaken") == 0) {
     // After the plugin's handlers, as CrashLogger's when it loads later.
@@ -354,7 +366,7 @@ int RunChild(const char* mode, const char* goEventName)
   if (!go || WaitForSingleObject(go, 30000) != WAIT_OBJECT_0) {
     return 91;
   }
-  if (std::strcmp(mode, "unhandled-throw") == 0 || std::strcmp(mode, "unhandled-throw-filter-retaken") == 0) {
+  if (std::strncmp(mode, "unhandled-throw", 15) == 0) {
     ThrowRuntimeError();
   }
   if (std::strcmp(mode, "unhandled-breakpoint") == 0) {
@@ -626,6 +638,24 @@ void TestUnhandledThrowLeavesARetakenFilterAlone()
     "the retaking handler's filter must be the one that ends the process");
 }
 
+// Without CrashLogger only the plugin's filter records an unhandled C++
+// throw. Something that takes the top-level filter once after the plugin
+// loaded used to leave such a crash with no record at all (in game on
+// 2026-11-13, three startup deaths). The plugin's reclaim, which it runs once
+// a second, puts its filter back; the other filter is then the one under it.
+void TestUnhandledThrowIsRecordedAfterTheFilterWasTakenOnceAndReclaimed()
+{
+  const auto lost = RunChildToCrash("unhandled-throw-filter-taken-once");
+  Require(!lost.crashEventSignaled && lost.crashSeq == 0u, "without the reclaim the displaced filter records nothing");
+  Require(lost.exitCode == kChildRetakingFilterExitCode, "the other filter ends the process");
+
+  RequireChildCrashRecorded(
+    RunChildToCrash("unhandled-throw-filter-taken-once-reclaimed"),
+    kCppException,
+    kChildRetakingFilterExitCode,
+    "unhandled C++ throw after the filter was taken once and reclaimed");
+}
+
 // The incident is held by another thread's exception, which the helper is
 // still checking. Saying "not handled" now would be said about that one, so
 // the filter says nothing and does not hold.
@@ -738,6 +768,7 @@ int main(int argc, char** argv)
     TestUnhandledFaultIsSignaledAndHeldUntilTheDumpIsSettled();
     TestUnhandledFaultIsHeldWhenAnotherHandlerRetakesTheFilter();
     TestUnhandledThrowLeavesARetakenFilterAlone();
+    TestUnhandledThrowIsRecordedAfterTheFilterWasTakenOnceAndReclaimed();
     TestUnhandledFaultIsNotReportedWhenTheRecordIsAnotherExceptions();
     TestUnhandledStackOverflowIsNotHeld();
     TestUnhandledFaultHoldEndsAtItsCap();
