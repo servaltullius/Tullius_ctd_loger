@@ -102,7 +102,16 @@ Accepted (2026-11-13). 구현했고 자동 테스트와 실게임으로 확인�
 
 실게임 미확인: F2(중단점), F5(처리된 접근 위반 2초 뒤 진짜 접근 위반), F6, F8, F9(스택 오버플로), Crash Logger를 끈 구성의 F1, Helper가 답하지 않아 상한에서 풀리는 경우. 자식 프로세스 테스트로는 확인했습니다.
 
-같은 날 알게 된 것: Crash Logger를 끈 구성에서 게임이 시작 중에 처리되지 않은 C++ 예외(`ContentCatalog.txt` 형식 불일치)로 세 번 끝났는데, 세 번 모두 기록이 남지 않았습니다(`Abnormal process exit without a recorded crash`, 종료 코드 `0xE06D7363`). 플러그인이 로드 때 한 번 등록한 필터가 그때는 최상위가 아니었다는 뜻이고, 이 변경 전부터 그랬던 것으로 보입니다. Crash Logger를 켠 구성에서는 같은 크래시가 보관분으로 기록됐습니다. 이 경우를 위해 1초에 한 번 자리를 되찾는 것을 넣었습니다(Decision 1). 그 뒤의 실게임 확인(Crash Logger를 끈 구성의 F3, `SkyrimDiag.log`에 찍히는 필터 주인)은 아직입니다.
+같은 날 알게 된 것: Crash Logger를 끈 구성에서 게임이 시작 중에 처리되지 않은 C++ 예외(`ContentCatalog.txt` 형식 불일치)로 세 번 끝났는데, 세 번 모두 기록이 남지 않았습니다(`Abnormal process exit without a recorded crash`, 종료 코드 `0xE06D7363`). 플러그인이 로드 때 한 번 등록한 필터가 그때는 최상위가 아니었다는 뜻이고, 이 변경 전부터 그랬던 것으로 보입니다. Crash Logger를 켠 구성에서는 같은 크래시가 보관분으로 기록됐습니다. 이 경우를 위해 1초에 한 번 자리를 되찾는 것을 넣었습니다(Decision 1).
+
+1초에 한 번 되찾는 것의 실게임 확인(2026-11-13, 커밋 `25ac67a`의 테스트 빌드, Crash Logger 1.27이 있는 구성, 세션 네 번). 거의 모든 사용자가 쓰는 구성에서 되찾는 스레드가 돌아도 지금까지의 동작이 그대로인지 본 것입니다.
+
+- 네 번 모두 로드 1초 뒤 `SkyrimDiag.log`에 `took the top-level exception filter back from CrashLogger.dll+0xE0CD0`이 한 번 찍혔습니다(같은 필터는 한 번만 적음).
+- 그중 두 번은 세이브를 여러 번 불러온 뒤 보통대로 끝낸 세션입니다. 종료 코드 0이었고 크래시나 프리징으로 기록된 것이 없었습니다.
+- **F3**(처리되지 않은 C++ throw): 커밋 `46d441e`의 빌드 때와 같았습니다. 신호 없이 기록됐고, 덤프(74.5MB), 리포트(같은 버킷 키), 뷰어, Crash Logger의 C++ 예외 로그가 남았으며 종료 코드는 1이었습니다.
+- **Ctrl+Shift+Delete**: 시나리오를 시작하기 전의 최상위 필터가 이미 `SkyrimDiag.dll`의 것이었습니다. 처리된 두 번은 덤프가 써졌고(멈춤 1,416ms, 1,454ms), 세 번째에서 Helper는 신호를 받아 예외 약 3ms 뒤에 덤프를 쓰기 시작했습니다(73.9MB). 사고 기록(`unhandled_exception_signal: true`), 리포트(같은 버킷 키), `crash_history.json`, 종료 뒤 뷰어, Crash Logger의 로그(예외 약 2초 뒤), 종료 코드 1까지 커밋 `46d441e`의 빌드 때와 같았습니다. 붙잡고 있는 동안에도 되찾는 스레드는 돌고 있었습니다.
+
+실게임 미확인: Crash Logger를 끈 구성의 F3(이 스레드가 덮으려는 경우)과, 그 구성에서 필터 자리를 가져가는 것이 무엇인지. 자식 프로세스 테스트로는 확인했습니다.
 
 ## References
 - ADR-0031 (`0031-skip-dump-for-repeated-handled-faults.md`): 첫 한계, 2026-11-13의 실게임 확인 세 건, 스냅샷 측정
