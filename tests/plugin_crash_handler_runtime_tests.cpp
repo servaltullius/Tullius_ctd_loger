@@ -349,6 +349,33 @@ __declspec(noinline) std::uint64_t RecurseUntil(std::uint64_t depth, volatile st
   return RecurseUntil(depth + 1, limit) + static_cast<std::uint64_t>(pad[0]);
 }
 
+// Windows puts the exception's CONTEXT, with the processor's extended state,
+// on the stack that overflowed, and keeps about 12 KB of every stack back for
+// that. An ordinary host's context is 3.3 KB or less, and the handlers and
+// filters here are done in the rest. Where that state is large (Intel AMX: a
+// context of 11.5 KB) it does not fit: Windows ends the process and calls no
+// handler, the plugin's included, so there is nothing of the plugin's to test
+// (ADR-0032, Decision 5). There, and only there, the child keeps back what an
+// ordinary host has left after its context; elsewhere it overflows with the
+// default, as the game does.
+constexpr DWORD kDefaultStackOverflowReserveBytes = 12u * 1024u;
+constexpr DWORD kStackOverflowHandlerRoomBytes = 8u * 1024u;
+
+bool KeepStackForALargeExceptionContext()
+{
+  DWORD contextLength = 0;
+  // Fails by design: with no buffer it only says how large one must be.
+  InitializeContext(nullptr, CONTEXT_ALL | CONTEXT_XSTATE, nullptr, &contextLength);
+  if (contextLength == 0u) {
+    return false;
+  }
+  if (contextLength + kStackOverflowHandlerRoomBytes <= kDefaultStackOverflowReserveBytes) {
+    return true;
+  }
+  ULONG guarantee = contextLength + kStackOverflowHandlerRoomBytes;
+  return SetThreadStackGuarantee(&guarantee) != FALSE;
+}
+
 [[noreturn]] __declspec(noinline) void ThrowRuntimeError()
 {
   throw std::runtime_error("unhandled in a SkyrimDiag crash handler test child");
@@ -440,6 +467,9 @@ int RunChild(const char* mode, const char* goEventName)
     WriteThroughNull();
   }
   if (std::strcmp(mode, "unhandled-stack-overflow") == 0) {
+    if (!KeepStackForALargeExceptionContext()) {
+      return 97;
+    }
     volatile std::uint64_t limit = ~0ull;
     return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
   }
@@ -573,7 +603,26 @@ struct UnhandledOutcome
   DWORD msFromSignalToExit = 0;
   DWORD exitCode = 0;
   std::uint32_t recordedCode = 0;
+  std::uint32_t crashSeq = 0;
+  std::uint32_t stateFlags = 0;
 };
+
+// What the child left behind, for a failure message: a failure that shows on
+// one CI runner in several cannot be run again to look at.
+std::string Describe(const UnhandledOutcome& outcome)
+{
+  char text[192]{};
+  std::snprintf(
+    text,
+    sizeof(text),
+    " (recorded code 0x%08lX, crash_seq %lu, state flags 0x%lX, exit code 0x%08lX, reported as unhandled: %d)",
+    static_cast<unsigned long>(outcome.recordedCode),
+    static_cast<unsigned long>(outcome.crashSeq),
+    static_cast<unsigned long>(outcome.stateFlags),
+    static_cast<unsigned long>(outcome.exitCode),
+    outcome.unhandledSignaled ? 1 : 0);
+  return text;
+}
 
 enum class HelperSettle
 {
@@ -645,6 +694,8 @@ UnhandledOutcome RunChildToUnhandled(const char* mode, HelperSettle settle, DWOR
     proc.unhandledEvent && WaitForSingleObject(proc.unhandledEvent, 0) == WAIT_OBJECT_0;
   GetExitCodeProcess(pi.hProcess, &outcome.exitCode);
   outcome.recordedCode = proc.shm->header.crash.exception_code;
+  outcome.crashSeq = proc.shm->header.crash_seq;
+  outcome.stateFlags = proc.shm->header.state_flags;
 
   skydiag::helper::Detach(proc);
   CloseHandle(pi.hThread);
@@ -784,9 +835,16 @@ void TestUnhandledSignalIsTakenBackWhenAFilterResumesTheThread()
 void TestUnhandledStackOverflowIsNotHeld()
 {
   const auto outcome = RunChildToUnhandled("unhandled-stack-overflow", HelperSettle::kNever, 0);
-  Require(outcome.recordedCode == EXCEPTION_STACK_OVERFLOW, "the stack overflow is recorded at first chance");
-  Require(!outcome.unhandledSignaled, "a stack overflow must not be reported from the top-level filter");
-  Require(outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still end the process");
+  const std::string left = Describe(outcome);
+  Require(
+    outcome.recordedCode == EXCEPTION_STACK_OVERFLOW,
+    ("the stack overflow is recorded at first chance" + left).c_str());
+  Require(
+    !outcome.unhandledSignaled,
+    ("a stack overflow must not be reported from the top-level filter" + left).c_str());
+  Require(
+    outcome.exitCode == kChildFilterExitCode,
+    ("the filter under the plugin's must still end the process" + left).c_str());
 }
 
 // A helper that never answers: the hold ends at its cap.

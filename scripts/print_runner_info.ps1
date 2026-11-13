@@ -19,6 +19,21 @@ try {
   "IsProcessorFeaturePresent unavailable: $_"
 }
 
+# What Windows saves of the processor's state with every exception. A context
+# too large for the stack kept back at a stack overflow (Intel AMX: 11.5 KB of
+# the 12 KB) ends such a crash before any handler runs (ADR-0032).
+try {
+  Add-Type -Namespace SkyDiag -Name XState -MemberDefinition '[DllImport("kernel32.dll")] public static extern ulong GetEnabledXStateFeatures(); [DllImport("kernel32.dll")] public static extern bool InitializeContext(IntPtr buffer, uint contextFlags, IntPtr context, ref uint contextLength);'
+  $xstate = [SkyDiag.XState]::GetEnabledXStateFeatures()
+  $contextLength = [uint32]0
+  # CONTEXT_ALL | CONTEXT_XSTATE on x64; fails by design and reports the length.
+  [void][SkyDiag.XState]::InitializeContext([IntPtr]::Zero, 0x0010005F, [IntPtr]::Zero, [ref]$contextLength)
+  # XSTATE_MASK_AMX_TILE_DATA = bit 18
+  "XState features=0x$($xstate.ToString('x')) AMX=$(($xstate -band 0x40000) -ne 0) exception context=$contextLength bytes"
+} catch {
+  "XState query unavailable: $_"
+}
+
 "System32 dbghelp: $((Get-Item "$env:WINDIR\System32\dbghelp.dll").VersionInfo.FileVersion)"
 
 try {
