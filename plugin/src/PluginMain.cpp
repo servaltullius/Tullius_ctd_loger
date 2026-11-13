@@ -7,9 +7,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cwchar>
 #include <filesystem>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -501,6 +504,12 @@ std::string DescribeCodeAddressForLog(std::uintptr_t address)
 // is dispatched; this covers what takes it at any other time, so that an
 // unhandled C++ throw or breakpoint still reaches the plugin's filter when no
 // CrashLogger reports it. Logs who held the slot, a few times at most.
+//
+// With CrashLogger there is nothing for it to do: CrashLogger registers its
+// own filter again on every exception and reports such a crash itself. So the
+// thread ends the first time the filter it displaced is CrashLogger's (ours
+// then stays in front of CrashLogger's until the next exception, as after any
+// fatal-code exception).
 void StartTopLevelFilterKeeper()
 {
   if (g_topLevelFilterKeeperStarted.exchange(true)) {
@@ -508,27 +517,45 @@ void StartTopLevelFilterKeeper()
   }
   try {
     g_topLevelFilterKeeperThread = new std::jthread([](const std::stop_token& stopToken) noexcept {
-      constexpr std::uint32_t kPeriodMs = 1000;
-      constexpr std::uint32_t kStopPollMs = 100;
+      constexpr auto kPeriod = std::chrono::milliseconds(1000);
       constexpr std::size_t kMaxLoggedHolders = 4;
       std::uintptr_t loggedHolders[kMaxLoggedHolders]{};
       std::size_t loggedCount = 0;
-      while (!stopToken.stop_requested()) {
-        const std::uintptr_t displaced = skydiag::plugin::ReclaimTopLevelFilter();
-        if (displaced != 0u && loggedCount < kMaxLoggedHolders &&
-            std::find(loggedHolders, loggedHolders + loggedCount, displaced) == loggedHolders + loggedCount) {
-          loggedHolders[loggedCount++] = displaced;
+      try {
+        std::mutex waitMutex;
+        std::condition_variable_any stopOrPeriod;
+        while (!stopToken.stop_requested()) {
+          const std::uintptr_t displaced = skydiag::plugin::ReclaimTopLevelFilter();
+          const bool crashLoggerHolds = displaced != 0u && skydiag::plugin::IsCrashLoggerCodeAddress(displaced);
+          // A log line that cannot be written must not end the keeping.
           try {
-            spdlog::info(
-              "SkyrimDiag: took the top-level exception filter back from {} (it is called after ours)",
-              DescribeCodeAddressForLog(displaced));
+            if (crashLoggerHolds) {
+              spdlog::info(
+                "SkyrimDiag: Crash Logger holds the top-level exception filter ({}) and sets it again on every "
+                "exception; the once-a-second check of that filter is not needed and has stopped",
+                DescribeCodeAddressForLog(displaced));
+            } else if (displaced != 0u && loggedCount < kMaxLoggedHolders &&
+                       std::find(loggedHolders, loggedHolders + loggedCount, displaced) ==
+                         loggedHolders + loggedCount) {
+              loggedHolders[loggedCount++] = displaced;
+              spdlog::info(
+                "SkyrimDiag: took the top-level exception filter back from {} (it is called after ours)",
+                DescribeCodeAddressForLog(displaced));
+            }
           } catch (...) {
             OutputDebugStringW(L"SkyrimDiag: could not log the displaced top-level exception filter.\n");
           }
+          if (crashLoggerHolds) {
+            return;
+          }
+          // Sleeps the whole period; a stop request ends the wait at once.
+          std::unique_lock lock(waitMutex);
+          stopOrPeriod.wait_for(lock, stopToken, kPeriod, [] { return false; });
         }
-        for (std::uint32_t waited = 0; waited < kPeriodMs && !stopToken.stop_requested(); waited += kStopPollMs) {
-          Sleep(kStopPollMs);
-        }
+      } catch (...) {
+        // The wait itself failed: the filter is still taken back for fatal
+        // codes.
+        OutputDebugStringW(L"SkyrimDiag: the top-level exception filter keeper stopped on an error.\n");
       }
     });
   } catch (...) {

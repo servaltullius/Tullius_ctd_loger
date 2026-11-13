@@ -293,7 +293,23 @@ struct CrashCaptureState {
   // ADR-0032: the crash generation the plugin said was not handled (it
   // reached the top-level exception filter). 0: none.
   std::uint32_t unhandledSignalCrashSeq = 0;
+  // The crash generation whose late recovery was held back because that
+  // signal is still set (logged once). 0: none.
+  std::uint32_t lateRecoveryWithheldCrashSeq = 0;
 };
+
+// ADR-0032: whether the captured crash is one the plugin reported as not
+// handled and that no filter has made run on since. The plugin sets the signal
+// only for the exception in the crash record and takes it back when a filter
+// under its own resumes the thread; the helper resets it when it lets go of
+// the incident. While it is set, the faulting thread is still in the filters
+// that end the process (a crash handler writing its log, or showing a dialog),
+// however long the main thread's heartbeat goes on: not a handled exception,
+// and not a normal exit when the process then ends with code 0.
+constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSignalSet) noexcept
+{
+  return crashLatched && unhandledSignalSet;
+}
 
 struct StableSharedSnapshot {
   struct AlignedByteDeleter {

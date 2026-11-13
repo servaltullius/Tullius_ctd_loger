@@ -569,7 +569,14 @@ void CleanupCrashArtifactsAfterZeroExit(
   const std::filesystem::path& outBase,
   HelperLoopState* state)
 {
-  CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"process_exit", L"exit_code=0", /*keepDump=*/false);
+  // ADR-0032: a crash whose late recovery was held back (the plugin reported
+  // it as not handled) would have kept its dump had the recovery run; an exit
+  // with code 0 after that keeps it too.
+  const bool lateRecoveryWasWithheld = state && state->crashCaptured.latched &&
+    state->crashCaptured.lateRecoveryWithheldCrashSeq != 0u &&
+    state->crashCaptured.lateRecoveryWithheldCrashSeq == state->crashCaptured.capturedInfo.crashSeq;
+  CleanupFilteredCrashArtifacts(
+    cfg, proc, outBase, state, L"process_exit", L"exit_code=0", /*keepDump=*/lateRecoveryWasWithheld);
 }
 
 void ReleasePendingCrashAnalysisAtShutdown(const std::filesystem::path& outBase, HelperLoopState* state)
@@ -608,6 +615,20 @@ bool HandleLateRecoveryTick(
   }
 
   const std::uint32_t crashSeq = crash.capturedInfo.crashSeq;
+  if (IsCapturedCrashStillUnhandled(crash.latched, IsUnhandledExceptionSignaled(proc.unhandledEvent))) {
+    // ADR-0032: the heartbeat is the main thread's; the faulting thread is
+    // still in the filters that end the process.
+    if (crash.lateRecoveryWithheldCrashSeq != crashSeq) {
+      crash.lateRecoveryWithheldCrashSeq = crashSeq;
+      AppendLogLine(
+        outBase,
+        L"The game is still running with the heartbeat advancing, but the plugin reported this exception as not "
+        L"handled and no filter has resumed it (crash_seq=" + std::to_wstring(crashSeq)
+          + L"): a crash handler is still at work on the faulting thread. Keeping it as a crash.");
+    }
+    return false;
+  }
+
   const auto keptForSec = crash.lateRecovery.lastSampleTick64 >= crash.lateRecovery.latchedTick64
     ? (crash.lateRecovery.lastSampleTick64 - crash.lateRecovery.latchedTick64) / 1000u
     : 0u;
