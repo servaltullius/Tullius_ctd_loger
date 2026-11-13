@@ -216,7 +216,7 @@ int main()
     "The exit code's verdict must look at the plugin's unhandled signal first.");
   AssertContains(
     crashTickBody,
-    "cfg, exitCode, proc.unhandledEvent, info, outBase, L\"post_dump_exit_check\", -1, crashState);",
+    "cfg, exitCode, UnhandledEventFor(proc, info, crashState), info, outBase, L\"post_dump_exit_check\", -1,",
     "The exit check after a dump written late must judge the exit code with the plugin's signal.");
   assert(
     crashCapture.find("ClassifyExitCodeVerdict(exitCode") == crashCapture.rfind("ClassifyExitCodeVerdict(exitCode") &&
@@ -338,7 +338,7 @@ int main()
   AssertOrdered(
     lateRecoveryTickBody,
     "AdvanceLateRecovery(",
-    "ShouldWithholdLateRecovery(crash.latched, unhandledSignalSet, crash.lateRecovery.latchedTick64, nowTick64)",
+    "ShouldWithholdLateRecovery(unhandledSignalSet, crash.lateRecovery.latchedTick64, nowTick64)",
     "The late recovery must be held back through the capped rule, after the heartbeat check.");
   assert(
     lateRecoveryTickBody.find("if (IsCapturedCrashStillUnhandled(") == std::string::npos &&
@@ -348,6 +348,36 @@ int main()
     "ShouldWithholdLateRecovery(",
     "ThawCrashCapture(proc, crashSeq)",
     "A capture released at the cap must let go of the plugin's signal with the freeze.");
+
+  // An exception released at that cap left the signal set while the game ran
+  // on: the signal is not used for it again. Everything that reads or waits
+  // on the signal for an exception takes the event from UnhandledEventFor;
+  // a bare proc.unhandledEvent would bring back a dump and a freeze each time.
+  AssertContains(
+    lateRecoveryTickBody,
+    "NoteRecoveredFault(&crash.signalLeftSetFaults, fault.exceptionCode, fault.exceptionAddr);",
+    "A release at the cap must note the exception whose signal was left set.");
+  const std::string exitDrainBody = ExtractFunctionBody(helperMain, "bool DrainCrashEventBeforeExit(");
+  assert(
+    lateRecoveryTickBody.find("proc.unhandledEvent") == std::string::npos &&
+    processExitTickBody.find("proc.unhandledEvent") == std::string::npos &&
+    exitDrainBody.find("proc.unhandledEvent") == std::string::npos &&
+    "The helper loop must read the plugin's signal through UnhandledEventFor.");
+  {
+    // In CrashCapture.cpp only UnhandledEventFor itself and ThawCrashCapture
+    // (a check and a reset) name the event.
+    std::size_t bareUses = 0;
+    for (auto at = crashCapture.find("proc.unhandledEvent"); at != std::string::npos;
+         at = crashCapture.find("proc.unhandledEvent", at + 1)) {
+      ++bareUses;
+    }
+    assert(bareUses == 3u && "Crash capture must read the plugin's signal through UnhandledEventFor.");
+  }
+  AssertOrdered(
+    crashTickBody,
+    "EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);",
+    "CheckCrashLoggerThreadDumpWindow(",
+    "The plugin's hold for an exception whose signal is not used must end before any recovery check.");
 
   const std::string deferredViewerBody = ExtractFunctionBody(helperMain, "void LaunchDeferredViewersAfterExit(");
   AssertContains(

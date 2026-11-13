@@ -990,6 +990,17 @@ void TestLateRecoveredCleanExitWording()
     Require(!r.recommendations.empty() && Contains(r.recommendations[0], en ? L"kept running" : L"계속 실행"),
       "the advice says the same");
 
+    // ADR-0032: released with the plugin's "not handled" report still set.
+    const wchar_t* const leftSet = en ? L"never took that back" : L"거두지 않았습니다";
+    Require(!Contains(r.summary_sentence, leftSet), "no word of the plugin's report without one");
+    r.clean_exit_unhandled_signal_left_set = true;
+    BuildEvidenceAndSummary(r, lang);
+    Require(Contains(r.summary_sentence, leftSet), "the summary says the report was never taken back");
+    Require(
+      Contains(r.summary_sentence, en ? L"(Confidence: Medium)" : L"(신뢰도: 중간)"),
+      "the confidence still closes the summary");
+    r.clean_exit_unhandled_signal_left_set = false;
+
     r.clean_exit_filter_context = "process_exit";
     BuildEvidenceAndSummary(r, lang);
     Require(Contains(r.summary_sentence, en ? L"code 0" : L"종료 코드 0"), "a zero exit keeps its wording");

@@ -226,6 +226,25 @@ constexpr bool IsRepeatedRecoveredFault(
   return false;
 }
 
+// ADR-0032: whether `history` holds this fault at all (NoteRecoveredFault), for
+// CrashCaptureState::signalLeftSetFaults. Not for a C++ throw or a breakpoint,
+// as above: every unrelated one would match.
+constexpr bool IsSignalLeftSetFault(
+  const RecoveredFaultHistory& history,
+  std::uint32_t exceptionCode,
+  std::uint64_t exceptionAddr) noexcept
+{
+  if (exceptionCode == skydiag::kStatusCppException || exceptionCode == skydiag::kStatusBreakpoint) {
+    return false;
+  }
+  for (const auto& entry : history.entries) {
+    if (entry.count != 0u && entry.exceptionCode == exceptionCode && entry.exceptionAddr == exceptionAddr) {
+      return true;
+    }
+  }
+  return false;
+}
+
 struct ReleasedDumpContext;  // CaptureCommon.h
 
 struct CrashCaptureState {
@@ -239,6 +258,11 @@ struct CrashCaptureState {
   std::filesystem::path cleanExitEvidencePath;
   CleanExitDumpIdentity cleanExitDumpIdentity{};
   std::wstring cleanExitFilterContext;
+  // ADR-0032: whether the plugin's "not handled" report was still set when
+  // this capture was let go as handled (released at kLateRecoveryWithheldMaxMs,
+  // or a zero exit after its late recovery was held back). It goes into the
+  // clean-exit evidence, the only record left beside the dump.
+  bool cleanExitUnhandledSignalLeftSet = false;
   LateRecoveryState lateRecovery{};
   // ADR-0022: the close request this crash followed (FindForcedCloseInSnapshot),
   // and the one the released crash below followed. A forced-close error opens
@@ -296,6 +320,13 @@ struct CrashCaptureState {
   // The crash generation whose late recovery was held back because that
   // signal is still set (logged once; ShouldWithholdLateRecovery). 0: none.
   std::uint32_t lateRecoveryWithheldCrashSeq = 0;
+  // Exceptions (code and address) whose capture was released at
+  // kLateRecoveryWithheldMaxMs with that signal still set: the code that
+  // handles them leaves it set every time. For the rest of the session the
+  // signal is not used for them (UnhandledEventFor), so they are judged as
+  // any handled exception, ADR-0031's repeat rule included. Otherwise each
+  // occurrence would be dumped at once and frozen for the cap again.
+  RecoveredFaultHistory signalLeftSetFaults{};
 };
 
 // ADR-0032: whether the captured crash is one the plugin reported as not
@@ -324,17 +355,15 @@ constexpr bool IsCapturedCrashStillUnhandled(bool crashLatched, bool unhandledSi
 // session would be recorded.
 inline constexpr std::uint64_t kLateRecoveryWithheldMaxMs = 300'000;
 
-// Whether a late recovery that has come up (AdvanceLateRecovery) is held back:
-// the crash is still reported as not handled, and it was kept less than
-// kLateRecoveryWithheldMaxMs ago.
+// Whether the late recovery of a latched capture that has come up
+// (AdvanceLateRecovery) is held back: the crash is still reported as not
+// handled, and it was kept less than kLateRecoveryWithheldMaxMs ago.
 constexpr bool ShouldWithholdLateRecovery(
-  bool crashLatched,
   bool unhandledSignalSet,
   std::uint64_t latchedTick64,
   std::uint64_t nowTick64) noexcept
 {
-  return IsCapturedCrashStillUnhandled(crashLatched, unhandledSignalSet) &&
-         nowTick64 - latchedTick64 < kLateRecoveryWithheldMaxMs;
+  return unhandledSignalSet && nowTick64 - latchedTick64 < kLateRecoveryWithheldMaxMs;
 }
 
 // Whether the late recovery of the captured crash was held back
@@ -808,6 +837,16 @@ DWORD WaitForCrashUnhandledOrProcess(
   HANDLE process,
   DWORD waitMs) noexcept;
 bool IsUnhandledExceptionSignaled(HANDLE unhandledEvent) noexcept;
+
+// ADR-0032: the plugin's "not handled" event as far as the exception `info`
+// goes: none for one that left it set before while the game ran on
+// (CrashCaptureState::signalLeftSetFaults). Everything that reads or waits on
+// the signal for an exception takes the event from here; only letting go of
+// an incident (ThawCrashCapture) resets the event itself.
+HANDLE UnhandledEventFor(
+  const skydiag::helper::AttachedProcess& proc,
+  const CrashEventInfo& info,
+  const CrashCaptureState* crashState) noexcept;
 
 // The verdict a process exit code gives a captured exception; every reader of
 // an exit code that decides a verdict comes through here. ADR-0032: the

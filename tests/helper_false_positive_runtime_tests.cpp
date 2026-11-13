@@ -2087,6 +2087,10 @@ void TestHandleLateRecoveryTick_ReleasesACrashTheGameOutlived()
   AssertContains(evidence, "strong_fault_published_but_game_kept_running_dump_preserved", "Evidence says the game kept running");
   AssertContains(evidence, "kept running for over a minute", "The note does not claim an exit code");
   AssertContains(evidence, "\"filter_context\": \"late_recovery\"", "Late-recovery context is explicit");
+  Require(evidence.find("unhandled_signal_left_set") == std::string::npos, "No report of the plugin was involved");
+  Require(
+    !skydiag::helper::internal::IsSignalLeftSetFault(state.crashCaptured.signalLeftSetFaults, 0xC0000005u, 0x12345678u),
+    "A plain late recovery does not drop the signal for its exception");
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
   AssertContains(log, "Game kept running", "Log explains the release");
   AssertContains(log, "thawed", "Log confirms the thaw");
@@ -2205,6 +2209,7 @@ void TestHandleLateRecoveryTick_ReleasesAWithheldCrashAtTheCap()
   auto shared = MakeSharedLayout();
   shared->header.crash_seq = 2u;
   shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = 0x12345678u;
   shared->header.state_flags = skydiag::kState_Frozen;
   shared->header.last_heartbeat_qpc = 100u;
 
@@ -2265,6 +2270,54 @@ void TestHandleLateRecoveryTick_ReleasesAWithheldCrashAtTheCap()
   AssertContains(log, "was never taken back", "The log says the signal was still set");
   AssertContains(log, "Releasing the capture", "The log says the capture is released");
   Require(log.find("the exception was handled (crash_seq=") == std::string::npos, "It is not logged as a plain recovery");
+  AssertContains(evidence, "\"unhandled_signal_left_set\": true", "The evidence says the report was never taken back");
+  AssertContains(log, "not using it for this exception again", "The log says the report is dropped for this exception");
+
+  // The code that handled this exception itself sets the signal each time.
+  // It is not used for that exception again, so its next occurrence is judged
+  // as any handled exception, and this release counts as the first one
+  // (ADR-0031). Another exception's signal is believed as before.
+  using skydiag::helper::internal::ClassifyExitCodeVerdictWithContext;
+  using skydiag::helper::internal::FilterVerdict;
+  using skydiag::helper::internal::IsRepeatedRecoveredFault;
+  using skydiag::helper::internal::UnhandledEventFor;
+  auto& crash = state.crashCaptured;
+  SetEvent(proc.unhandledEvent);
+  const auto sameFault = crash.capturedInfo;
+  auto otherFault = crash.capturedInfo;
+  otherFault.exceptionAddr = 0x87654321u;
+  Require(UnhandledEventFor(proc, sameFault, &crash) == nullptr, "The signal is not used for this exception again");
+  Require(UnhandledEventFor(proc, otherFault, &crash) == proc.unhandledEvent, "Another exception's signal is used");
+  Require(
+    ClassifyExitCodeVerdictWithContext(
+      cfg, 0u, UnhandledEventFor(proc, sameFault, &crash), sameFault, outBase, L"test", -1, &crash) ==
+      FilterVerdict::kDeleteBenign,
+    "The same exception with the signal set again: an exit with code 0 is a normal exit");
+  Require(
+    ClassifyExitCodeVerdictWithContext(
+      cfg, 0u, UnhandledEventFor(proc, otherFault, &crash), otherFault, outBase, L"test", -1, &crash) ==
+      FilterVerdict::kKeepDump,
+    "Another exception reported as not handled is still kept");
+  Require(
+    !IsRepeatedRecoveredFault(crash.recoveredFaults, sameFault.exceptionCode, sameFault.exceptionAddr),
+    "One handled occurrence so far: the next one still writes its dump first");
+  auto counted = crash.recoveredFaults;
+  skydiag::helper::internal::NoteRecoveredFault(&counted, sameFault.exceptionCode, sameFault.exceptionAddr);
+  Require(
+    IsRepeatedRecoveredFault(counted, sameFault.exceptionCode, sameFault.exceptionAddr),
+    "The release at the cap counted as the first handled occurrence");
+
+  // The game then ends normally, the signal set once more: the released
+  // exception is not reported after all, and the dump kept for review stays.
+  TerminateWithExitCode(child, 0u);
+  Require(HandleProcessExitTick(cfg, proc, outBase, &state), "The exit is handled");
+  Require(!crash.latched && FileExists(dumpPath), "Nothing is captured at the exit, and the kept dump stays");
+  Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"), "The exit records no crash");
+  const auto exitLog = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(exitLog, "already released as a handled exception", "The exit says why it reports nothing");
+  Require(
+    exitLog.find("the plugin then reported it as not handled") == std::string::npos,
+    "The signal left set again is not read as a report");
 
   CloseHandle(proc.unhandledEvent);
   proc.unhandledEvent = nullptr;
@@ -3240,6 +3293,97 @@ void TestUnhandledSignal_RepeatedFaultIsDumpedAtOnce()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0032: an exception whose capture was released at the cap of the
+// held-back late recovery sets the plugin's signal again each time its code
+// handles it. The signal is not used for it: the plugin's hold is ended at
+// once, and the repeated exception is released on the heartbeat without a
+// dump, as any repeated handled exception (the same setup is dumped at once
+// in TestUnhandledSignal_RepeatedFaultIsDumpedAtOnce).
+void TestSignalLeftSetFault_IsJudgedByTheHeartbeat()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_signal_left_set");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+
+  auto child = LaunchSleepingChildProcess();
+  const CONTEXT faultContext = CaptureLiveThreadContext(child.pi.dwThreadId);
+  constexpr std::uint64_t kFaultAddr = 0x7FF7055F8888ull;
+  NameMainThreadInSharedHeartbeat(shared.get(), child.pi.dwThreadId);
+
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.exception_addr = kFaultAddr;
+  shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  shared->header.crash.context = faultContext;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kFaultAddr);
+  shared->header.crash_seq = 8u;
+
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = MakeSignalEvent(true);
+  proc.unhandledEvent = MakeSignalEvent(true);
+  proc.dumpSettledEvent = MakeSignalEvent(false);
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+  auto& crash = state.crashCaptured;
+  skydiag::helper::internal::NoteRecoveredFault(&crash.recoveredFaults, 0xC0000005u, kFaultAddr);
+  skydiag::helper::internal::NoteRecoveredFault(&crash.recoveredFaults, 0xC0000005u, kFaultAddr);
+  skydiag::helper::internal::NoteRecoveredFault(&crash.signalLeftSetFaults, 0xC0000005u, kFaultAddr);
+
+  std::atomic_bool stopHeartbeat{ false };
+  std::thread heartbeatThread([&] {
+    while (!stopHeartbeat.load()) {
+      shared->header.last_heartbeat_qpc += 1'000'000ull;
+      Sleep(100);
+    }
+  });
+  // The release lets go of both events again, so when the hold ended is
+  // watched from the side.
+  const ULONGLONG startTick = GetTickCount64();
+  std::atomic<ULONGLONG> settledAfterMs{ ~0ull };
+  std::thread settleWatcher([&] {
+    if (WaitForSingleObject(proc.dumpSettledEvent, 3000) == WAIT_OBJECT_0) {
+      settledAfterMs.store(GetTickCount64() - startTick);
+    }
+  });
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  settleWatcher.join();
+  stopHeartbeat.store(true);
+  heartbeatThread.join();
+
+  Require(handled, "The exception is handled");
+  Require(!crash.latched, "It is released on the heartbeat although the signal is set");
+  Require(!HasDumpFile(outBase), "No dump is written");
+  Require(settledAfterMs.load() < 1500u, "The plugin's hold is ended at once, not after the recovery check");
+  Require(crash.unhandledSignalCrashSeq != 8u, "The signal is not noted as this incident's");
+  Require(crash.releasedCrashSeq == 8u, "A later exit does not re-report it");
+  Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "Thawed for a later exception");
+  Require(
+    !IsSignaled(proc.unhandledEvent) && !IsSignaled(proc.dumpSettledEvent),
+    "Both events are let go with the incident");
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "that report is not used for it", "The log says the report is not used");
+  AssertContains(
+    log,
+    "No dump written: this repeated exception was handled again and the game kept running",
+    "The log says it was released without a dump");
+  Require(
+    log.find("it reached the process's top-level exception filter") == std::string::npos,
+    "It is not called unhandled");
+
+  CloseHandle(proc.crashEvent);
+  CloseHandle(proc.unhandledEvent);
+  CloseHandle(proc.dumpSettledEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  ShutdownRetentionWorker();
+  std::filesystem::remove_all(outBase);
+}
+
 // ADR-0032: on the ordinary path the dump is written first. With the plugin's
 // signal the helper keeps it as the crash without the 3 s exit wait and the
 // heartbeat checks, and does not release it although the heartbeat advances.
@@ -3428,15 +3572,14 @@ static_assert(
   !skydiag::helper::internal::DoesCapturedCrashOutliveZeroExit(true, true, true),
   "the game ran on for minutes: the signal may be one left set by code that handled the exception");
 static_assert(skydiag::helper::internal::IsLateRecoveryWithheld(2u, 2u));
-static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(true, true, 1'000u, 121'000u));
+static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(true, 1'000u, 121'000u));
 static_assert(skydiag::helper::internal::ShouldWithholdLateRecovery(
-  true, true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs - 1u));
+  true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs - 1u));
 static_assert(
   !skydiag::helper::internal::ShouldWithholdLateRecovery(
-    true, true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs),
+    true, 1'000u, 1'000u + skydiag::helper::internal::kLateRecoveryWithheldMaxMs),
   "at the cap: no crash handler takes that long with the game running on");
-static_assert(!skydiag::helper::internal::ShouldWithholdLateRecovery(true, false, 1'000u, 121'000u), "signal taken back");
-static_assert(!skydiag::helper::internal::ShouldWithholdLateRecovery(false, true, 1'000u, 121'000u), "nothing captured");
+static_assert(!skydiag::helper::internal::ShouldWithholdLateRecovery(false, 1'000u, 121'000u), "signal taken back");
 static_assert(
   skydiag::helper::internal::kLateRecoveryWithheldMaxMs > skydiag::helper::internal::kLateRecoveryMinAliveMs,
   "the cap must leave room for the late recovery to be held back at all");
@@ -3822,6 +3965,7 @@ int wmain(int argc, wchar_t** argv)
     TestRepeatedHandledFault_WritesDumpWhenGameDoesNotRecover();
     TestRepeatedHandledFault_ExitedGameRecordsMetadataOnly();
     TestUnhandledSignal_RepeatedFaultIsDumpedAtOnce();
+    TestSignalLeftSetFault_IsJudgedByTheHeartbeat();
     TestUnhandledSignal_FirstFaultIsKeptWithoutWaitingForTheHeartbeat();
     TestUnhandledSignal_ReleaseClearsTheIncidentsSignals();
     TestClassifyExitCodeVerdict_LooksAtThePluginsSignalFirst();

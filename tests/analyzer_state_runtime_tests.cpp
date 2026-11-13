@@ -294,6 +294,14 @@ void TestCleanExitEvidenceFailsClosedAndRequiresExactMatch()
     WriteEvidence(root, L"SkyrimDiag_CleanExitEvidence_valid.json", late);
     assert(TryConsumeCleanExitEvidence(dump.wstring(), result));
     assert(result.clean_exit_filter_context == "late_recovery");
+    assert(!result.clean_exit_unhandled_signal_left_set);
+
+    // ADR-0032: released with the plugin's "not handled" report still set.
+    auto leftSet = MakeCleanExitResult(identity);
+    late["unhandled_signal_left_set"] = true;
+    WriteEvidence(root, L"SkyrimDiag_CleanExitEvidence_valid.json", late);
+    assert(TryConsumeCleanExitEvidence(dump.wstring(), leftSet));
+    assert(leftSet.clean_exit_unhandled_signal_left_set);
   }
 
   std::error_code ec;

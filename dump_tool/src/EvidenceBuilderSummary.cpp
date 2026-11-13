@@ -489,8 +489,16 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     // The heartbeat shows the main thread kept running, not that the faulting
     // thread recovered, so this stays below High.
     summary = en
-      ? L"Validated helper metadata matches this preserved dump. The game kept running for over a minute after this exception was captured, so it is not classified as a CTD. If the game closed shortly after, review this dump anyway. (Confidence: Medium)"
-      : L"검증된 헬퍼 메타데이터가 이 보존 덤프와 일치합니다. 이 예외가 잡힌 뒤에도 게임이 1분 넘게 계속 실행됐으므로 CTD로 분류하지 않습니다. 그 직후 게임이 꺼졌다면 이 덤프도 확인해 보세요. (신뢰도: 중간)";
+      ? L"Validated helper metadata matches this preserved dump. The game kept running for over a minute after this exception was captured, so it is not classified as a CTD. If the game closed shortly after, review this dump anyway."
+      : L"검증된 헬퍼 메타데이터가 이 보존 덤프와 일치합니다. 이 예외가 잡힌 뒤에도 게임이 1분 넘게 계속 실행됐으므로 CTD로 분류하지 않습니다. 그 직후 게임이 꺼졌다면 이 덤프도 확인해 보세요.";
+    if (r.clean_exit_unhandled_signal_left_set) {
+      // ADR-0032: released at the cap of the held-back late recovery. A crash
+      // handler that held the faulting thread that long looks the same.
+      summary += en
+        ? L" The plugin had reported this exception as not handled and never took that back: if the game closed with an error later in the same session, review this dump as that crash."
+        : L" 플러그인은 이 예외가 처리되지 않았다고 알렸고 그 알림을 거두지 않았습니다. 같은 세션에서 나중에 게임이 오류로 꺼졌다면 이 덤프를 그 크래시로 보고 확인하세요.";
+    }
+    summary += en ? L" (Confidence: Medium)" : L" (신뢰도: 중간)";
   } else if (ctx.isFilteredCleanExit) {
     summary = en
       ? L"Validated clean-exit quarantine metadata matches this preserved dump. The process exited with code 0, so this is not classified as a CTD. (Confidence: High)"
