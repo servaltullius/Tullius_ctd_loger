@@ -193,6 +193,23 @@ std::optional<X64Instruction> FindCallTo(
   const std::function<std::optional<std::uint64_t>(std::uint64_t)>& readQword,
   std::size_t* outLength);
 
+// Where the walk of a null_jump's thread resumes. Its RIP is an address with
+// no code and no unwind data, so nothing unwinds from there; but the call
+// that sent the CPU there pushed its return address at rsp, so the caller's
+// frame resumes at that address with rsp 8 higher, as its ret would have
+// done. nullopt when that slot cannot be read or does not hold an address in
+// code (isCode): then a jmp, not a call, went there and left no address.
+struct ResumedCallerFrame
+{
+  std::uint64_t pc = 0;
+  std::uint64_t sp = 0;
+};
+
+std::optional<ResumedCallerFrame> ResumeAtCallerOfNullJump(
+  std::uint64_t rsp,
+  const std::function<std::optional<std::uint64_t>(std::uint64_t)>& readQword,
+  const std::function<bool(std::uint64_t)>& isCode);
+
 // The evidence sentence; location is the fault's Module+Offset (may be empty).
 std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wstring_view location, bool en);
 

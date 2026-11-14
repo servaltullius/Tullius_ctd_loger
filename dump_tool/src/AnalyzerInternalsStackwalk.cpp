@@ -4,6 +4,7 @@
 #include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "EngineSpinLoop.h"
+#include "FaultInstruction.h"
 #include "FreedHook.h"
 #include "SkyrimDiagProtocol.h"
 #include "ThreadEntryHooks.h"
@@ -288,14 +289,43 @@ bool TryComputeStackwalkSuspects(
     if (!haveCtx) {
       continue;
     }
+    // A null function-pointer call (null_jump) stopped at an address with
+    // no code, so the walk starts at the caller the call left on the stack
+    // (2026-11-15: a call [rax+0x18] in po3_LightPlacer.dll went to 0 and
+    // the crash stack was empty, while Crash Logger showed the caller). The
+    // fault address stays frame 0, so later frames remain return addresses.
+    std::optional<std::uint64_t> nullJumpPc;
+    if (tid == excTid && excCtx && out.fault_instruction.verdict == "null_jump" && ctx.Rip == out.exc_addr) {
+      const auto readQword = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
+        std::uint64_t value = 0;
+        std::size_t got = 0;
+        if (!mem.Read(address, &value, sizeof(value), got) || got != sizeof(value)) {
+          return std::nullopt;
+        }
+        return value;
+      };
+      const auto isCode = [&](std::uint64_t address) {
+        return FindModuleIndexForAddress(modules, address).has_value() &&
+               !(mem.image_fallback && mem.image_fallback->IsKnownNonCodeAddress(address));
+      };
+      if (const auto caller = ResumeAtCallerOfNullJump(ctx.Rsp, readQword, isCode)) {
+        nullJumpPc = ctx.Rip;
+        ctx.Rip = caller->pc;
+        ctx.Rsp = caller->sp;
+      }
+    }
     if (ctx.Rip == 0 || ctx.Rsp == 0) {
       continue;
     }
 
     StackWalkEnd end{};
-    auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end);
+    auto pcs = StackWalkAddrsForContext(
+      sym.process, mem, ctx, /*maxFrames=*/64, &end, /*contextIsCallerFrame=*/nullJumpPc.has_value());
     if (pcs.empty()) {
       continue;
+    }
+    if (nullJumpPc) {
+      pcs.insert(pcs.begin(), *nullJumpPc);
     }
     if (outModalProbeFrames && modalProbeTid != 0u && tid == modalProbeTid) {
       *outModalProbeFrames = stackwalk::BuildModalProbeFrames(

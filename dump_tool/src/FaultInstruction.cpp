@@ -819,6 +819,21 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
   return info;
 }
 
+std::optional<ResumedCallerFrame> ResumeAtCallerOfNullJump(
+  std::uint64_t rsp,
+  const std::function<std::optional<std::uint64_t>(std::uint64_t)>& readQword,
+  const std::function<bool(std::uint64_t)>& isCode)
+{
+  if (rsp == 0 || rsp > ~std::uint64_t{ 0 } - 8u || !readQword || !isCode) {
+    return std::nullopt;
+  }
+  const auto returnAddress = readQword(rsp);
+  if (!returnAddress || *returnAddress < kNullPageEnd || !isCode(*returnAddress)) {
+    return std::nullopt;
+  }
+  return ResumedCallerFrame{ *returnAddress, rsp + 8u };
+}
+
 std::optional<X64Instruction> FindCallTo(
   const std::uint8_t* before,
   std::size_t size,

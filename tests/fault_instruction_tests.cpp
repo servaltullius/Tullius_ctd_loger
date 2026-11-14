@@ -31,6 +31,7 @@ using skydiag::dump_tool::kAccessViolationExecute;
 using skydiag::dump_tool::kAccessViolationNoAddress;
 using skydiag::dump_tool::kAccessViolationRead;
 using skydiag::dump_tool::kAccessViolationWrite;
+using skydiag::dump_tool::ResumeAtCallerOfNullJump;
 using skydiag::dump_tool::X64EffectiveAddress;
 using skydiag::dump_tool::X64Instruction;
 using skydiag::dump_tool::X64MemoryAccess;
@@ -641,6 +642,37 @@ void TestFindCallTo()
   assert(call && length == 5u && call->call_is_relative);
 }
 
+void TestResumeAtCallerOfNullJump()
+{
+  constexpr std::uint64_t kRsp = 0x5000;
+  constexpr std::uint64_t kInCode = 0x7FF700001234ull;
+  std::uint64_t slot = kInCode;
+  const auto read = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
+    if (address == kRsp) {
+      return slot;
+    }
+    return std::nullopt;
+  };
+  const auto isCode = [](std::uint64_t address) { return address >= 0x7FF700000000ull; };
+
+  // The call's return address on top of the stack: the caller resumes
+  // there, with the stack as its ret would leave it.
+  auto caller = ResumeAtCallerOfNullJump(kRsp, read, isCode);
+  assert(caller && caller->pc == kInCode && caller->sp == kRsp + 8u);
+
+  // Nothing to resume at: the slot holds no code address (a jmp went
+  // there), is unreadable, or the stack pointer is missing or at the top.
+  slot = 0x20000001000ull;
+  assert(!ResumeAtCallerOfNullJump(kRsp, read, isCode));
+  slot = 0x18;
+  assert(!ResumeAtCallerOfNullJump(kRsp, read, [](std::uint64_t) { return true; }));
+  slot = kInCode;
+  assert(!ResumeAtCallerOfNullJump(kRsp + 8u, read, isCode));
+  assert(!ResumeAtCallerOfNullJump(0, read, isCode));
+  assert(!ResumeAtCallerOfNullJump(~std::uint64_t{ 0 } - 4u, read, isCode));
+  assert(!ResumeAtCallerOfNullJump(kRsp, nullptr, isCode));
+}
+
 }  // namespace
 
 int main()
@@ -659,5 +691,6 @@ int main()
   TestExecute();
   TestJumpTargetState();
   TestFindCallTo();
+  TestResumeAtCallerOfNullJump();
   return 0;
 }

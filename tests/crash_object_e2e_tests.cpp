@@ -645,6 +645,86 @@ std::unique_ptr<skydiag::SharedLayout> SharedLayoutNamingMainThread(DWORD mainTi
   return shared;
 }
 
+// ADR-0019 addendum 2026-11-15: a call through a null function pointer
+// stops the thread at 0, where nothing unwinds. The crash stack starts at
+// the caller the call left on the stack instead of being empty. A thread
+// parked in a system call stands in for the caller: its RSP points at the
+// return address into the function that made the call.
+void TestNullJumpCrashStackStartsAtTheCaller()
+{
+  ParkedThread faulting;
+  CONTEXT ctx = faulting.Context();
+  ctx.Rip = 0;
+
+  auto shared = MakeSharedLayout();
+  shared->header.crash_seq = 2;
+  shared->header.crash.exception_code = 0xC0000005u;
+  shared->header.crash.faulting_tid = faulting.tid();
+  shared->header.crash.exception_addr = 0;
+  shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
+  shared->header.crash.exception_record.ExceptionAddress = nullptr;
+  shared->header.crash.exception_record.NumberParameters = 2;
+  shared->header.crash.exception_record.ExceptionInformation[0] = 8;  // execute
+  shared->header.crash.exception_record.ExceptionInformation[1] = 0;
+  shared->header.crash.context = ctx;
+
+  const auto outBase = MakeTempDir(L"skydiag_null_jump_e2e");
+  const auto dumpPath = outBase / L"SkyrimDiag_Crash_20261115_001549_269.dmp";
+  const HANDLE process = OpenSelfProcessHandle();
+  std::wstring err;
+  const bool written = WriteDumpWithStreams(
+    process,
+    GetCurrentProcessId(),
+    dumpPath.wstring(),
+    shared.get(),
+    sizeof(skydiag::SharedLayout),
+    {},
+    {},
+    /*isCrash=*/true,
+    ResolveDumpProfile(DumpMode::kDefault, CaptureKind::Crash),
+    /*isProcessSnapshot=*/false,
+    &err);
+  CloseHandle(process);
+  if (!written) {
+    std::fprintf(stderr, "null jump dump failed: %ls\n", err.c_str());
+  }
+  Require(written, "The null jump dump must be written");
+
+  skydiag::dump_tool::AnalyzeOptions opt{};
+  opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
+  opt.output_dir = outBase.wstring();
+  skydiag::dump_tool::AnalysisResult result{};
+  Require(
+    skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err),
+    "AnalyzeDump failed on the null jump dump");
+  Require(result.fault_instruction.verdict == "null_jump", "The fault reads as a null jump");
+
+  const auto& frames = result.stackwalk_display_frames;
+  std::wstring shown;
+  for (const auto& frame : frames) {
+    shown += L"\n  " + frame;
+  }
+  if (frames.size() < 3u) {
+    std::fprintf(stderr, "null jump crash stack:%ls\n", shown.c_str());
+  }
+  Require(frames.size() >= 3u, "The crash stack is walked from the caller, not left empty");
+  Require(frames[0] == L"0x0", "Frame 0 is still where the call went");
+  const auto contains = [&](const wchar_t* text) {
+    const std::wstring needle = skydiag::dump_tool::minidump::WideLower(text);
+    return std::any_of(frames.begin(), frames.end(), [&](const std::wstring& frame) {
+      return skydiag::dump_tool::minidump::WideLower(frame).find(needle) != std::wstring::npos;
+    });
+  };
+  const bool callerIsFrame1 =
+    skydiag::dump_tool::minidump::WideLower(frames[1]).find(L"kernelbase.dll") != std::wstring::npos;
+  if (!callerIsFrame1) {
+    std::fprintf(stderr, "null jump crash stack:%ls\n", shown.c_str());
+  }
+  Require(callerIsFrame1, "Frame 1 is the function that made the call");
+  Require(contains(L"skydiag_crash_object_e2e_tests.exe"), "The walk goes on below the caller");
+  Require(result.stackwalk_primary_tid == faulting.tid(), "The crashed thread's stack is the one shown");
+}
+
 void TestHangObjectsAreReadBackFromTheDump()
 {
   auto master = std::make_unique<TESFile>();
@@ -1278,6 +1358,7 @@ int main()
   try {
     TestGameLockMemoryWindows();
     TestCrashObjectsAreReadBackFromTheDump();
+    TestNullJumpCrashStackStartsAtTheCaller();
     TestRepeatedSaveLoadCrashFromTheDumps();
     TestHangObjectsAreReadBackFromTheDump();
     TestHangObjectBudgets();
