@@ -819,6 +819,38 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
   return info;
 }
 
+bool EndsWithCall(const std::uint8_t* before, std::size_t size)
+{
+  if (!before) {
+    return false;
+  }
+  const std::size_t longest = std::min(size, kMaxX64InstructionBytes);
+  for (std::size_t length = 2; length <= longest; ++length) {
+    const auto insn = DecodeX64Instruction(before + (size - length), length);
+    if (insn && insn->is_call && insn->length == length) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<ResumedCallerFrame> ResumeAtCallerOfNullJump(std::uint64_t rsp, const NullJumpCallerChecks& checks)
+{
+  if (rsp == 0 || rsp > ~std::uint64_t{ 0 } - 8u || !checks.readQword || !checks.isCode || !checks.codeBefore ||
+      !checks.hasUnwindData) {
+    return std::nullopt;
+  }
+  const auto returnAddress = checks.readQword(rsp);
+  if (!returnAddress || *returnAddress < kNullPageEnd || !checks.isCode(*returnAddress)) {
+    return std::nullopt;
+  }
+  const auto before = checks.codeBefore(*returnAddress);
+  if (!EndsWithCall(before.data(), before.size()) || !checks.hasUnwindData(*returnAddress)) {
+    return std::nullopt;
+  }
+  return ResumedCallerFrame{ *returnAddress, rsp + 8u };
+}
+
 std::optional<X64Instruction> FindCallTo(
   const std::uint8_t* before,
   std::size_t size,
