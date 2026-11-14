@@ -19,6 +19,7 @@
 using skydiag::dump_tool::DecodeX64Instruction;
 using skydiag::dump_tool::DescribeFaultInstruction;
 using skydiag::dump_tool::DescribeFaultInstructionPlain;
+using skydiag::dump_tool::EndsWithCall;
 using skydiag::dump_tool::ExplainFaultInstruction;
 using skydiag::dump_tool::FaultInstructionInfo;
 using skydiag::dump_tool::FaultInstructionReportText;
@@ -31,6 +32,7 @@ using skydiag::dump_tool::kAccessViolationExecute;
 using skydiag::dump_tool::kAccessViolationNoAddress;
 using skydiag::dump_tool::kAccessViolationRead;
 using skydiag::dump_tool::kAccessViolationWrite;
+using skydiag::dump_tool::NullJumpCallerChecks;
 using skydiag::dump_tool::ResumeAtCallerOfNullJump;
 using skydiag::dump_tool::X64EffectiveAddress;
 using skydiag::dump_tool::X64Instruction;
@@ -642,35 +644,70 @@ void TestFindCallTo()
   assert(call && length == 5u && call->call_is_relative);
 }
 
+void TestEndsWithCall()
+{
+  const auto ends = [](std::vector<std::uint8_t> bytes) { return EndsWithCall(bytes.data(), bytes.size()); };
+  assert(ends({ 0xCC, 0xCC, 0xFF, 0x50, 0x18 }));                    // call qword ptr [rax+0x18]
+  assert(ends({ 0xCC, 0xFF, 0x15, 0x00, 0x10, 0x00, 0x00 }));        // call qword ptr [rip+0x1000]
+  assert(ends({ 0xCC, 0xE8, 0x10, 0x00, 0x00, 0x00 }));              // call rel32
+  assert(ends({ 0xCC, 0xFF, 0xD0 }));                                // call rax
+  assert(!ends({ 0xCC, 0xFF, 0x60, 0x18 }));                         // jmp qword ptr [rax+0x18]
+  assert(!ends({ 0xCC, 0x48, 0x8B, 0x41, 0x24 }));                   // mov rax, [rcx+0x24]
+  assert(!ends({ 0xD0 }));
+  assert(!ends({}));
+  assert(!EndsWithCall(nullptr, 5));
+}
+
 void TestResumeAtCallerOfNullJump()
 {
   constexpr std::uint64_t kRsp = 0x5000;
   constexpr std::uint64_t kInCode = 0x7FF700001234ull;
   std::uint64_t slot = kInCode;
-  const auto read = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
+  std::vector<std::uint8_t> before = { 0xCC, 0xCC, 0xFF, 0x50, 0x18 };
+  bool unwind = true;
+  NullJumpCallerChecks checks;
+  checks.readQword = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
     if (address == kRsp) {
       return slot;
     }
     return std::nullopt;
   };
-  const auto isCode = [](std::uint64_t address) { return address >= 0x7FF700000000ull; };
+  checks.isCode = [](std::uint64_t address) { return address >= 0x7FF700000000ull; };
+  checks.codeBefore = [&](std::uint64_t) { return before; };
+  checks.hasUnwindData = [&](std::uint64_t) { return unwind; };
 
   // The call's return address on top of the stack: the caller resumes
   // there, with the stack as its ret would leave it.
-  auto caller = ResumeAtCallerOfNullJump(kRsp, read, isCode);
+  auto caller = ResumeAtCallerOfNullJump(kRsp, checks);
   assert(caller && caller->pc == kInCode && caller->sp == kRsp + 8u);
 
-  // Nothing to resume at: the slot holds no code address (a jmp went
-  // there), is unreadable, or the stack pointer is missing or at the top.
+  // Not a return address: no call ends there (a jmp went to the null
+  // address and left whatever was on the stack), or its function has no
+  // unwind data, or the bytes could not be read.
+  before = { 0xCC, 0xFF, 0x60, 0x18 };
+  assert(!ResumeAtCallerOfNullJump(kRsp, checks));
+  before = {};
+  assert(!ResumeAtCallerOfNullJump(kRsp, checks));
+  before = { 0xCC, 0xCC, 0xFF, 0x50, 0x18 };
+  unwind = false;
+  assert(!ResumeAtCallerOfNullJump(kRsp, checks));
+  unwind = true;
+
+  // Nothing to resume at: the slot holds no code address, is unreadable,
+  // or the stack pointer is missing or at the top.
   slot = 0x20000001000ull;
-  assert(!ResumeAtCallerOfNullJump(kRsp, read, isCode));
+  assert(!ResumeAtCallerOfNullJump(kRsp, checks));
   slot = 0x18;
-  assert(!ResumeAtCallerOfNullJump(kRsp, read, [](std::uint64_t) { return true; }));
+  auto anyCode = checks;
+  anyCode.isCode = [](std::uint64_t) { return true; };
+  assert(!ResumeAtCallerOfNullJump(kRsp, anyCode));
   slot = kInCode;
-  assert(!ResumeAtCallerOfNullJump(kRsp + 8u, read, isCode));
-  assert(!ResumeAtCallerOfNullJump(0, read, isCode));
-  assert(!ResumeAtCallerOfNullJump(~std::uint64_t{ 0 } - 4u, read, isCode));
-  assert(!ResumeAtCallerOfNullJump(kRsp, nullptr, isCode));
+  assert(!ResumeAtCallerOfNullJump(kRsp + 8u, checks));
+  assert(!ResumeAtCallerOfNullJump(0, checks));
+  assert(!ResumeAtCallerOfNullJump(~std::uint64_t{ 0 } - 4u, checks));
+  auto missing = checks;
+  missing.codeBefore = nullptr;
+  assert(!ResumeAtCallerOfNullJump(kRsp, missing));
 }
 
 }  // namespace
@@ -691,6 +728,7 @@ int main()
   TestExecute();
   TestJumpTargetState();
   TestFindCallTo();
+  TestEndsWithCall();
   TestResumeAtCallerOfNullJump();
   return 0;
 }

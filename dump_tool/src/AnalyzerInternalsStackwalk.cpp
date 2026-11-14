@@ -294,9 +294,12 @@ bool TryComputeStackwalkSuspects(
     // (2026-11-15: a call [rax+0x18] in po3_LightPlacer.dll went to 0 and
     // the crash stack was empty, while Crash Logger showed the caller). The
     // fault address stays frame 0, so later frames remain return addresses.
+    // A caller in hook code outside the modules is not resumed at (no unwind
+    // data there): the stack then stays empty, as before.
     std::optional<std::uint64_t> nullJumpPc;
     if (tid == excTid && excCtx && out.fault_instruction.verdict == "null_jump" && ctx.Rip == out.exc_addr) {
-      const auto readQword = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
+      NullJumpCallerChecks checks;
+      checks.readQword = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
         std::uint64_t value = 0;
         std::size_t got = 0;
         if (!mem.Read(address, &value, sizeof(value), got) || got != sizeof(value)) {
@@ -304,11 +307,39 @@ bool TryComputeStackwalkSuspects(
         }
         return value;
       };
-      const auto isCode = [&](std::uint64_t address) {
+      checks.isCode = [&](std::uint64_t address) {
         return FindModuleIndexForAddress(modules, address).has_value() &&
                !(mem.image_fallback && mem.image_fallback->IsKnownNonCodeAddress(address));
       };
-      if (const auto caller = ResumeAtCallerOfNullJump(ctx.Rsp, readQword, isCode)) {
+      checks.codeBefore = [&](std::uint64_t address) {
+        std::vector<std::uint8_t> bytes;
+        const auto mi = FindModuleIndexForAddress(modules, address);
+        if (!mi) {
+          return bytes;
+        }
+        const auto& module = modules[*mi];
+        const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(kMaxX64InstructionBytes, address - module.base));
+        bytes.resize(n);
+        std::size_t got = 0;
+        // The dump's own bytes first: a local SkyrimSE.exe has its code
+        // encrypted on disk, so only other modules' local files may fill in.
+        MinidumpMemoryView dumpOnly = mem;
+        dumpOnly.image_fallback = nullptr;
+        if (n != 0u && dumpOnly.Read(address - n, bytes.data(), n, got) && got == n) {
+          return bytes;
+        }
+        if (n != 0u && !module.is_game_exe && mem.Read(address - n, bytes.data(), n, got) && got == n) {
+          return bytes;
+        }
+        bytes.clear();
+        return bytes;
+      };
+      checks.hasUnwindData = [&](std::uint64_t address) {
+        return (mem.image_fallback && mem.image_fallback->FindFunctionEntry(address)) ||
+               (mem.dump_images && mem.dump_images->FindFunctionEntry(address)) ||
+               SymFunctionTableAccess64(sym.process, address) != nullptr;
+      };
+      if (const auto caller = ResumeAtCallerOfNullJump(ctx.Rsp, checks)) {
         nullJumpPc = ctx.Rip;
         ctx.Rip = caller->pc;
         ctx.Rsp = caller->sp;
@@ -319,8 +350,7 @@ bool TryComputeStackwalkSuspects(
     }
 
     StackWalkEnd end{};
-    auto pcs = StackWalkAddrsForContext(
-      sym.process, mem, ctx, /*maxFrames=*/64, &end, /*contextIsCallerFrame=*/nullJumpPc.has_value());
+    auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end);
     if (pcs.empty()) {
       continue;
     }

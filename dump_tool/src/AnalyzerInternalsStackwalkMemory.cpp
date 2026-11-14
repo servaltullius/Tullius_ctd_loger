@@ -409,8 +409,7 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,
   std::size_t maxFrames,
-  StackWalkEnd* outEnd,
-  bool contextIsCallerFrame)
+  StackWalkEnd* outEnd)
 {
   std::vector<std::uint64_t> pcs;
   StackWalkEnd end{};
@@ -477,9 +476,7 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
     // frame without an unwind entry would be unwound by guessing the next
     // stack slot, which yields heap and data addresses rather than callers.
     // (STACKFRAME64::FuncTableEntry is not filled on x64, so look it up.)
-    // A context resumed at a caller (ResumeAtCallerOfNullJump) is a caller
-    // frame from the start.
-    if ((pcs.size() > 1u || contextIsCallerFrame) && FunctionTableAccessFromImages(process, pc) == nullptr) {
+    if (pcs.size() > 1u && FunctionTableAccessFromImages(process, pc) == nullptr) {
       end = { StackWalkStop::kNoUnwind, static_cast<std::uint64_t>(pc) };
       break;
     }

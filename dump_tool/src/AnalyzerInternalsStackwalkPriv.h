@@ -180,7 +180,6 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,
   std::size_t maxFrames,
-  StackWalkEnd* outEnd = nullptr,
-  bool contextIsCallerFrame = false);
+  StackWalkEnd* outEnd = nullptr);
 
 }  // namespace skydiag::dump_tool::internal::stackwalk_internal
