@@ -146,7 +146,7 @@ Accepted (2026-11-13). 구현했고 자동 테스트와 실게임으로 확인�
 - **Crash Logger를 끈 구성, Ctrl+Shift+Delete**: 세 번째 예외에서 신호를 받아 곧바로 덤프(73.4MB)와 리포트가 남았습니다. 아래 필터가 프로세스를 끝내지 않는 구성이라 종료 코드는 예외 코드(`0xC0000005`)였습니다.
 - **테스터가 아닌 실제 크래시 한 건**(같은 빌드, 개발 중인 다른 플러그인 DLL 안의 접근 위반): 신호가 붙은 채 덤프와 리포트가 남았고 Crash Logger의 로그와 짝지어졌습니다.
 
-실게임 미확인: F2(중단점), F5(처리된 접근 위반 2초 뒤 진짜 접근 위반), F6, F8, F9(스택 오버플로), Crash Logger를 끈 구성의 F1, Helper가 답하지 않아 상한에서 풀리는 경우. 자식 프로세스 테스트로는 확인했습니다.
+실게임 미확인: F2(중단점), F5(처리된 접근 위반 2초 뒤 진짜 접근 위반), F6, F8, F9(스택 오버플로, 2026-11-14에 확인: 아래 "v0.2.76-rc2의 빌드로 한 실게임 확인"), Crash Logger를 끈 구성의 F1, Helper가 답하지 않아 상한에서 풀리는 경우. 자식 프로세스 테스트로는 확인했습니다.
 
 같은 날 알게 된 것: Crash Logger를 끈 구성에서 게임이 시작 중에 처리되지 않은 C++ 예외(`ContentCatalog.txt` 형식 불일치)로 세 번 끝났는데, 세 번 모두 기록이 남지 않았습니다(`Abnormal process exit without a recorded crash`, 종료 코드 `0xE06D7363`). 플러그인이 로드 때 한 번 등록한 필터가 그때는 최상위가 아니었다는 뜻이고, 이 변경 전부터 그랬던 것으로 보입니다. Crash Logger를 켠 구성에서는 같은 크래시가 보관분으로 기록됐습니다. 이 경우를 위해 1초에 한 번 자리를 되찾는 것을 넣었습니다(Decision 1).
 
@@ -194,6 +194,15 @@ Accepted (2026-11-13). 구현했고 자동 테스트와 실게임으로 확인�
 - 되돌려 보기: 상한 없애기, 보류 없애기, 풀린 예외에 신호 다시 쓰기, 붙잡기를 곧바로 끝내지 않기, 상한에서 푼 예외를 적지 않기, 그것을 처리된 한 번으로 세지 않기, 증거 기록에 적지 않기, 종료 드레인이 이벤트를 직접 읽기, 새 사고에서 "덤프 끝"을 끄지 않기를 하나씩 되돌려 각각 Helper의 실행 테스트가 실패하는 것을 확인했습니다. 종료 코드 0 요약, 빠른 답, 권장 항목의 분기를 하나씩 되돌리면 분석기 테스트가 실패합니다.
 - 실행 테스트가 없는 것: 상한에서 풀린 뒤의 두 번째 발생(덤프를 먼저 쓴 뒤 하트비트로 풀리는 경로)은 그 경로의 필터 호출이 `UnhandledEventFor`를 거치는지의 소스 가드로만 확인했습니다.
 - 실게임 미확인: 신호가 켜진 채 게임이 5분 넘게 도는 상황은 실게임에서 만들어 보지 않았습니다(`tools/crash_tester`에 예외를 스스로 처리하고 신호를 남기는 시나리오가 없음).
+
+v0.2.76-rc2의 빌드로 한 실게임 확인(2026-11-14, main `df0d36d`를 로컬에서 패키징한 ZIP, 게임 1.6.1170, Crash Logger 1.27이 있는 구성, `tools/crash_tester`). 종료 코드 0 규칙, 늦은 회복 보류의 상한, 스택 오버플로 테스트의 수정까지 들어간 뒤의 빌드입니다. 매번 Helper 로그의 둘째 줄에 `Unhandled-exception signal from the plugin: on`이, `SkyrimDiag.log`에 `Crash Logger holds the top-level exception filter (CrashLogger.dll+0xE0CD0) ... has stopped`이 찍혔습니다.
+
+- **Ctrl+Shift+Delete**: 같은 주소(`SkyrimSE.exe+0xcc90cf`)의 접근 위반이 15초 간격으로 세 번, 서로 다른 세 스레드에서 났습니다. 세 번째에서 덤프(71.4MB), 사고 기록(`unhandled_exception_signal: true`), 리포트(후보 CrashTester.dll), `crash_history.json`의 항목이 남았고, Crash Logger의 로그가 덤프가 시작된 1\~2초 뒤에 평소 크기로 써졌습니다. 처음 두 번의 보류 덤프는 남아 있지 않았습니다. 이 세션의 Helper 로그는 그 뒤의 여섯 번의 실행으로 보관 한도(5개)에서 밀려나, 예외에서 덤프까지의 시간과 종료 코드, 종료 뒤 뷰어는 로그로 확인하지 못했습니다.
+- **F1**(플러그인 DLL 안의 접근 위반): Helper 로그에 `The game did not handle this exception: it reached the process's top-level exception filter (crash_seq=2). It is a crash; not waiting for the heartbeat.`가 찍혔습니다. 덤프(74.1MB), 사고 기록(`unhandled_exception_signal: true`), 리포트, 종료 뒤 뷰어, Crash Logger의 로그(덤프가 시작된 1\~2초 뒤)가 남았고 종료 코드는 1이었습니다.
+- **F9**(스택 오버플로, 실게임에서 처음): `0xC00000FD`가 1차 예외에서 기록됐고(`CrashTester.dll+0x679d3`), 테스터가 키 입력을 로그에 적은 약 9ms 뒤에 덤프(79.0MB)를 쓰기 시작했습니다. Decision 1대로 알림은 없었습니다(Helper 로그에 그 줄이 없고 사고 기록에도 그 값이 없음). 리포트(알려진 메커니즘 스택 오버플로, 후보 CrashTester.dll)와 뷰어가 나왔습니다. Crash Logger의 로그는 남지 않았고 종료 코드는 `0xC0000005`였습니다(1이 아닌 이유는 확인하지 않음).
+- 세이브를 불러온 뒤 보통대로 끝낸 세션 세 번: 종료 코드 0이었고 크래시나 프리징으로 기록된 것이 없었습니다.
+
+실게임 미확인(이 확인 뒤): F2(중단점), F5(처리된 접근 위반 2초 뒤 진짜 접근 위반), F6, F8, Crash Logger를 끈 구성의 F1과 F3, Helper가 답하지 않아 상한에서 풀리는 경우, 알림이 켜진 채 종료 코드 0으로 끝나는 경우, 늦은 회복 보류가 5분 상한에서 풀리는 경우.
 
 ## References
 - ADR-0031 (`0031-skip-dump-for-repeated-handled-faults.md`): 첫 한계, 2026-11-13의 실게임 확인 세 건, 스냅샷 측정
