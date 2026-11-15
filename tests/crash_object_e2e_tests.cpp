@@ -29,6 +29,7 @@
 #include "Analyzer.h"
 #include "CrashHistory.h"
 #include "DumpObjects.h"
+#include "FaultInstruction.h"
 #include "HangCaptureInternal.h"
 #include "HangObjectMemory.h"
 #include "HelperLog.h"
@@ -645,27 +646,23 @@ std::unique_ptr<skydiag::SharedLayout> SharedLayoutNamingMainThread(DWORD mainTi
   return shared;
 }
 
-// ADR-0019 addendum 2026-11-15: a call through a null function pointer
-// stops the thread at 0, where nothing unwinds. The crash stack starts at
-// the caller the call left on the stack instead of being empty. A thread
-// parked in a system call stands in for the caller: its RSP points at the
-// return address into the function that made the call.
-void TestNullJumpCrashStackStartsAtTheCaller()
+// Writes a crash dump of this process whose fault is a jump to `target` (an
+// address below 64 KB) on thread `tid` with the context `ctx`, and analyzes
+// it.
+skydiag::dump_tool::AnalysisResult AnalyzeNullJumpDump(DWORD tid, CONTEXT ctx, std::uint64_t target)
 {
-  ParkedThread faulting;
-  CONTEXT ctx = faulting.Context();
-  ctx.Rip = 0;
+  ctx.Rip = target;
 
   auto shared = MakeSharedLayout();
   shared->header.crash_seq = 2;
   shared->header.crash.exception_code = 0xC0000005u;
-  shared->header.crash.faulting_tid = faulting.tid();
-  shared->header.crash.exception_addr = 0;
+  shared->header.crash.faulting_tid = tid;
+  shared->header.crash.exception_addr = target;
   shared->header.crash.exception_record.ExceptionCode = 0xC0000005u;
-  shared->header.crash.exception_record.ExceptionAddress = nullptr;
+  shared->header.crash.exception_record.ExceptionAddress = reinterpret_cast<void*>(target);
   shared->header.crash.exception_record.NumberParameters = 2;
   shared->header.crash.exception_record.ExceptionInformation[0] = 8;  // execute
-  shared->header.crash.exception_record.ExceptionInformation[1] = 0;
+  shared->header.crash.exception_record.ExceptionInformation[1] = target;
   shared->header.crash.context = ctx;
 
   const auto outBase = MakeTempDir(L"skydiag_null_jump_e2e");
@@ -698,31 +695,138 @@ void TestNullJumpCrashStackStartsAtTheCaller()
     skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err),
     "AnalyzeDump failed on the null jump dump");
   Require(result.fault_instruction.verdict == "null_jump", "The fault reads as a null jump");
+  // Kept when a check above fails, for reading the dump.
+  std::filesystem::remove_all(outBase);
+  return result;
+}
 
-  const auto& frames = result.stackwalk_display_frames;
+void PrintCrashStack(const char* what, const std::vector<std::wstring>& frames)
+{
   std::wstring shown;
   for (const auto& frame : frames) {
     shown += L"\n  " + frame;
   }
-  if (frames.size() < 3u) {
-    std::fprintf(stderr, "null jump crash stack:%ls\n", shown.c_str());
+  std::fprintf(stderr, "%s:%ls\n", what, shown.c_str());
+}
+
+// ADR-0019 addendum 2026-11-15: a call through a null function pointer
+// stops the thread at 0, where nothing unwinds. The crash stack starts at
+// the caller the call left on the stack instead of being empty. A thread
+// parked in a system call stands in for the caller: its RSP points at the
+// return address into the function that made the call. A pointer that held
+// a small number instead of 0 is the same fault at another address.
+void TestNullJumpCrashStackStartsAtTheCaller()
+{
+  for (const std::uint64_t target : { std::uint64_t{ 0 }, std::uint64_t{ 0x18 } }) {
+    ParkedThread faulting;
+    const auto result = AnalyzeNullJumpDump(faulting.tid(), faulting.Context(), target);
+
+    const auto& frames = result.stackwalk_display_frames;
+    const auto contains = [&](const wchar_t* text) {
+      const std::wstring needle = skydiag::dump_tool::minidump::WideLower(text);
+      return std::any_of(frames.begin(), frames.end(), [&](const std::wstring& frame) {
+        return skydiag::dump_tool::minidump::WideLower(frame).find(needle) != std::wstring::npos;
+      });
+    };
+    const bool walked = frames.size() >= 3u;
+    const bool faultIsFrame0 = walked && frames[0] == (target == 0 ? L"0x0" : L"0x18");
+    const bool callerIsFrame1 =
+      walked && skydiag::dump_tool::minidump::WideLower(frames[1]).find(L"kernelbase.dll") != std::wstring::npos;
+    const bool goesOn = contains(L"skydiag_crash_object_e2e_tests.exe");
+    if (!faultIsFrame0 || !callerIsFrame1 || !goesOn) {
+      PrintCrashStack("null jump crash stack", frames);
+    }
+    Require(walked, "The crash stack is walked from the caller, not left empty");
+    Require(faultIsFrame0, "Frame 0 is still where the call went");
+    Require(callerIsFrame1, "Frame 1 is the function that made the call");
+    Require(goesOn, "The walk goes on below the caller");
+    Require(result.stackwalk_primary_tid == faulting.tid(), "The crashed thread's stack is the one shown");
   }
-  Require(frames.size() >= 3u, "The crash stack is walked from the caller, not left empty");
-  Require(frames[0] == L"0x0", "Frame 0 is still where the call went");
-  const auto contains = [&](const wchar_t* text) {
-    const std::wstring needle = skydiag::dump_tool::minidump::WideLower(text);
-    return std::any_of(frames.begin(), frames.end(), [&](const std::wstring& frame) {
-      return skydiag::dump_tool::minidump::WideLower(frame).find(needle) != std::wstring::npos;
-    });
-  };
-  const bool callerIsFrame1 =
-    skydiag::dump_tool::minidump::WideLower(frames[1]).find(L"kernelbase.dll") != std::wstring::npos;
-  if (!callerIsFrame1) {
-    std::fprintf(stderr, "null jump crash stack:%ls\n", shown.c_str());
+}
+
+// Code of this executable that no unwind entry covers, as hand-written code
+// in a mod's DLL is: a `call rax` whose return address is byte 16. It is
+// never run. Merged into .text: the dump writer keeps this executable's
+// code sections whole (it is the game's image to it), and a section of
+// its own is not one of them.
+#pragma section(".sdcode", execute, read)
+#pragma comment(linker, "/MERGE:.sdcode=.text")
+__declspec(allocate(".sdcode")) const std::uint8_t kCodeWithoutUnwindData[32] = {
+  0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+  0xFF, 0xD0,                                                              // call rax
+  0xC3, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+};
+
+// A caller without unwind data is still the caller, and the last frame: the
+// walk cannot find what is below it. The stack's top is the return address
+// in kCodeWithoutUnwindData, and the slot above it holds a real return
+// address (the parked thread's), which a walk that guessed on from the next
+// stack slot would show as a third frame.
+void TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack()
+{
+  ParkedThread faulting;
+  CONTEXT ctx = faulting.Context();
+  std::uint64_t realReturnAddress = 0;
+  std::memcpy(&realReturnAddress, reinterpret_cast<const void*>(ctx.Rsp), sizeof(realReturnAddress));
+  volatile std::uint64_t slots[2] = { reinterpret_cast<std::uint64_t>(&kCodeWithoutUnwindData[16]), realReturnAddress };
+  ctx.Rsp = reinterpret_cast<std::uint64_t>(&slots[0]);
+  const auto result = AnalyzeNullJumpDump(faulting.tid(), ctx, 0);
+
+  const auto& frames = result.stackwalk_display_frames;
+  const auto lower = [](const std::wstring& text) { return skydiag::dump_tool::minidump::WideLower(text); };
+  const bool twoFrames = frames.size() == 2u && frames[0] == L"0x0" &&
+                         lower(frames[1]).find(L"skydiag_crash_object_e2e_tests.exe") != std::wstring::npos;
+  if (!twoFrames) {
+    PrintCrashStack("null jump crash stack of a caller without unwind data", frames);
   }
-  Require(callerIsFrame1, "Frame 1 is the function that made the call");
-  Require(contains(L"skydiag_crash_object_e2e_tests.exe"), "The walk goes on below the caller");
-  Require(result.stackwalk_primary_tid == faulting.tid(), "The crashed thread's stack is the one shown");
+  Require(twoFrames, "The crash stack is the fault address and the caller, and ends there");
+  Require(result.stackwalk_truncation == "no_unwind_info", "The report says the stack was cut for lack of unwind data");
+  Require(
+    lower(result.stackwalk_truncation_module) == L"skydiag_crash_object_e2e_tests.exe",
+    "The cut is at the caller's module");
+}
+
+// An address in this executable's code that no call instruction ends right
+// before: a value that is in code and is not a return address.
+std::uint64_t CodeAddressNotAfterACall()
+{
+  const auto* code = reinterpret_cast<const std::uint8_t*>(&TestNullJumpCrashStackStartsAtTheCaller);
+  if (code[0] == 0xE9) {  // an incremental-link thunk: jmp rel32 to the function
+    std::int32_t relative = 0;
+    std::memcpy(&relative, code + 1, sizeof(relative));
+    code += 5 + relative;
+  }
+  constexpr std::size_t kBefore = skydiag::dump_tool::kMaxX64InstructionBytes;
+  for (std::size_t offset = kBefore; offset < 0x100u; ++offset) {
+    if (!skydiag::dump_tool::EndsWithCall(code + offset - kBefore, kBefore)) {
+      return reinterpret_cast<std::uint64_t>(code + offset);
+    }
+  }
+  Require(false, "No code address without a call before it");
+  return 0;
+}
+
+// The stack's top is taken for the return address only after a call. Here it
+// holds a code address that no call ends before, as after a jmp from the
+// middle of a function, so the thread gets no crash stack. (Before the
+// re-review fix, a target other than 0 was walked by DbgHelp as a leaf frame
+// with that value as its return address.) The slot is a local of this
+// thread: its stack is in the dump like any other.
+void TestNullJumpWithoutAReturnAddressGetsNoCrashStack()
+{
+  volatile std::uint64_t slot = CodeAddressNotAfterACall();
+  for (const std::uint64_t target : { std::uint64_t{ 0 }, std::uint64_t{ 0x18 } }) {
+    ParkedThread faulting;
+    CONTEXT ctx = faulting.Context();
+    ctx.Rsp = reinterpret_cast<std::uint64_t>(&slot);
+    const auto result = AnalyzeNullJumpDump(faulting.tid(), ctx, target);
+    if (!result.stackwalk_display_frames.empty()) {
+      PrintCrashStack("null jump crash stack that should be empty", result.stackwalk_display_frames);
+    }
+    Require(
+      result.stackwalk_display_frames.empty() && result.stackwalk_primary_frames.empty(),
+      "A stack top that is not a return address gives no crash stack");
+  }
 }
 
 void TestHangObjectsAreReadBackFromTheDump()
@@ -1353,12 +1457,29 @@ void TestRepeatedSaveLoadCrashFromTheDumps()
   std::filesystem::remove_all(attemptBase);
 }
 
-int main()
+// With the argument null_jump only the null_jump tests run. ctest runs those
+// a second time as if no local module file matched; the whole file takes
+// about two minutes that way.
+int main(int argc, char** argv)
 {
+  const bool nullJumpOnly = argc > 1 && std::strcmp(argv[1], "null_jump") == 0;
+  if (argc > 1 && !nullJumpOnly) {
+    std::fprintf(stderr, "unknown argument: %s\n", argv[1]);
+    return 2;
+  }
   try {
+    if (nullJumpOnly) {
+      TestNullJumpCrashStackStartsAtTheCaller();
+      TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack();
+      TestNullJumpWithoutAReturnAddressGetsNoCrashStack();
+      std::puts("null jump e2e tests passed");
+      return 0;
+    }
     TestGameLockMemoryWindows();
     TestCrashObjectsAreReadBackFromTheDump();
     TestNullJumpCrashStackStartsAtTheCaller();
+    TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack();
+    TestNullJumpWithoutAReturnAddressGetsNoCrashStack();
     TestRepeatedSaveLoadCrashFromTheDumps();
     TestHangObjectsAreReadBackFromTheDump();
     TestHangObjectBudgets();

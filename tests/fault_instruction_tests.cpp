@@ -664,7 +664,6 @@ void TestResumeAtCallerOfNullJump()
   constexpr std::uint64_t kInCode = 0x7FF700001234ull;
   std::uint64_t slot = kInCode;
   std::vector<std::uint8_t> before = { 0xCC, 0xCC, 0xFF, 0x50, 0x18 };
-  bool unwind = true;
   NullJumpCallerChecks checks;
   checks.readQword = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
     if (address == kRsp) {
@@ -674,24 +673,21 @@ void TestResumeAtCallerOfNullJump()
   };
   checks.isCode = [](std::uint64_t address) { return address >= 0x7FF700000000ull; };
   checks.codeBefore = [&](std::uint64_t) { return before; };
-  checks.hasUnwindData = [&](std::uint64_t) { return unwind; };
 
   // The call's return address on top of the stack: the caller resumes
   // there, with the stack as its ret would leave it.
   auto caller = ResumeAtCallerOfNullJump(kRsp, checks);
   assert(caller && caller->pc == kInCode && caller->sp == kRsp + 8u);
 
-  // Not a return address: no call ends there (a jmp went to the null
-  // address and left whatever was on the stack), or its function has no
-  // unwind data, or the bytes could not be read.
+  // Not a return address: no call ends there (a jmp from the middle of a
+  // function went to the null address and left whatever was on the stack),
+  // or the bytes could not be read.
   before = { 0xCC, 0xFF, 0x60, 0x18 };
   assert(!ResumeAtCallerOfNullJump(kRsp, checks));
   before = {};
   assert(!ResumeAtCallerOfNullJump(kRsp, checks));
   before = { 0xCC, 0xCC, 0xFF, 0x50, 0x18 };
-  unwind = false;
-  assert(!ResumeAtCallerOfNullJump(kRsp, checks));
-  unwind = true;
+  assert(ResumeAtCallerOfNullJump(kRsp, checks));
 
   // Nothing to resume at: the slot holds no code address, is unreadable,
   // or the stack pointer is missing or at the top.

@@ -202,13 +202,16 @@ bool EndsWithCall(const std::uint8_t* before, std::size_t size);
 // no code and no unwind data, so nothing unwinds from there; but the call
 // that sent the CPU there pushed its return address at rsp, so the caller's
 // frame resumes at that address with rsp 8 higher, as its ret would have
-// done. A jmp that went there (a tail call, a hook stub) pushed nothing, and
-// the slot then holds whatever was there, which can be any value in a
-// module. So the value counts as that return address only when it is in
-// code (isCode), a call ends right before it (codeBefore: the bytes up to it,
-// as many as could be read) and its function has unwind data
-// (hasUnwindData: x64 code that calls has a prolog, so it has unwind data).
-// nullopt otherwise, and when the slot cannot be read.
+// done. The value at rsp counts as that return address only when it is in
+// code (isCode) and a call ends right before it (codeBefore: the bytes up to
+// it, empty when they could not be read). nullopt otherwise, and when the
+// slot cannot be read.
+// What the two checks cannot tell: a jmp that went there (a tail call, a
+// hook stub whose original function pointer was null) pushed nothing, so the
+// slot holds the return address of whoever called the code that jumped. It
+// passes, the stack walked from it is a real one, and the code that jumped
+// is not on it. Only a jmp from the middle of a function leaves another
+// value there, which is refused unless it is an old return address.
 struct ResumedCallerFrame
 {
   std::uint64_t pc = 0;
@@ -220,7 +223,6 @@ struct NullJumpCallerChecks
   std::function<std::optional<std::uint64_t>(std::uint64_t)> readQword;
   std::function<bool(std::uint64_t)> isCode;
   std::function<std::vector<std::uint8_t>(std::uint64_t)> codeBefore;
-  std::function<bool(std::uint64_t)> hasUnwindData;
 };
 
 std::optional<ResumedCallerFrame> ResumeAtCallerOfNullJump(std::uint64_t rsp, const NullJumpCallerChecks& checks);

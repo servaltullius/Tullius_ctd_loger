@@ -77,7 +77,13 @@ struct MinidumpMemoryView
 
   bool Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads);
 
+  // The dump's memory, and for an address the dump does not have, the
+  // matching local module file (image_fallback).
   bool Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
+
+  // The dump's own memory only. For code bytes of the game: a local
+  // SkyrimSE.exe has its code encrypted on disk.
+  bool ReadDump(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
 };
 
 // ADR-0011: PE data that the dump itself carries for a module (headers,
@@ -174,6 +180,12 @@ struct StackWalkEnd
   StackWalkStop stop = StackWalkStop::kWalkEnded;
   std::uint64_t address = 0;  // the rejected caller address, or the last frame for kNoUnwind
 };
+
+// The x64 unwind entry covering addr, from the sources the stack walk uses
+// and in its order: a matching local image, the dump's own .pdata (ADR-0011),
+// DbgHelp. nullptr for a leaf function, or when no source has the module's
+// unwind data.
+PVOID FindUnwindEntry(HANDLE process, const MinidumpMemoryView& mem, std::uint64_t addr);
 
 std::vector<std::uint64_t> StackWalkAddrsForContext(
   HANDLE process,

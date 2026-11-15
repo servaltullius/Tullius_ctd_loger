@@ -27,6 +27,7 @@ constexpr std::size_t kFreezeStackFrames = 16;
 using skydiag::dump_tool::internal::stackwalk_internal::AddDumpExportSymbols;
 using skydiag::dump_tool::internal::stackwalk_internal::DumpImageData;
 using skydiag::dump_tool::internal::stackwalk_internal::FindFunctionStart;
+using skydiag::dump_tool::internal::stackwalk_internal::FindUnwindEntry;
 using skydiag::dump_tool::internal::stackwalk_internal::LocalImageMemory;
 using skydiag::dump_tool::internal::stackwalk_internal::MinidumpMemoryView;
 using skydiag::dump_tool::internal::stackwalk_internal::StackWalkAddrsForContext;
@@ -294,9 +295,13 @@ bool TryComputeStackwalkSuspects(
     // (2026-11-15: a call [rax+0x18] in po3_LightPlacer.dll went to 0 and
     // the crash stack was empty, while Crash Logger showed the caller). The
     // fault address stays frame 0, so later frames remain return addresses.
-    // A caller in hook code outside the modules is not resumed at (no unwind
-    // data there): the stack then stays empty, as before.
+    // When the stack's top is not such a return address (also a caller in
+    // hook code outside the modules), the thread gets no crash stack. That
+    // has to be said here: a fault address other than 0 is a frame without
+    // unwind data to DbgHelp, a leaf, and it would take the stack's top for
+    // the return address whatever it holds.
     std::optional<std::uint64_t> nullJumpPc;
+    bool callerIsLastFrame = false;
     if (tid == excTid && excCtx && out.fault_instruction.verdict == "null_jump" && ctx.Rip == out.exc_addr) {
       NullJumpCallerChecks checks;
       checks.readQword = [&](std::uint64_t address) -> std::optional<std::uint64_t> {
@@ -318,39 +323,43 @@ bool TryComputeStackwalkSuspects(
           return bytes;
         }
         const auto& module = modules[*mi];
-        const auto n = static_cast<std::size_t>(std::min<std::uint64_t>(kMaxX64InstructionBytes, address - module.base));
-        bytes.resize(n);
+        const auto wanted = std::min<std::uint64_t>(kMaxX64InstructionBytes, address - module.base);
+        bytes.resize(static_cast<std::size_t>(wanted));
+        const std::uint64_t from = address - bytes.size();
         std::size_t got = 0;
-        // The dump's own bytes first: a local SkyrimSE.exe has its code
-        // encrypted on disk, so only other modules' local files may fill in.
-        MinidumpMemoryView dumpOnly = mem;
-        dumpOnly.image_fallback = nullptr;
-        if (n != 0u && dumpOnly.Read(address - n, bytes.data(), n, got) && got == n) {
-          return bytes;
+        // The game's bytes from the dump alone (its local file has the code
+        // encrypted); other modules' local files fill in what the dump lacks.
+        const bool read = !bytes.empty() && (module.is_game_exe ? mem.ReadDump(from, bytes.data(), bytes.size(), got)
+                                                                : mem.Read(from, bytes.data(), bytes.size(), got));
+        if (!read || got != bytes.size()) {
+          bytes.clear();
         }
-        if (n != 0u && !module.is_game_exe && mem.Read(address - n, bytes.data(), n, got) && got == n) {
-          return bytes;
-        }
-        bytes.clear();
         return bytes;
       };
-      checks.hasUnwindData = [&](std::uint64_t address) {
-        return (mem.image_fallback && mem.image_fallback->FindFunctionEntry(address)) ||
-               (mem.dump_images && mem.dump_images->FindFunctionEntry(address)) ||
-               SymFunctionTableAccess64(sym.process, address) != nullptr;
-      };
-      if (const auto caller = ResumeAtCallerOfNullJump(ctx.Rsp, checks)) {
-        nullJumpPc = ctx.Rip;
-        ctx.Rip = caller->pc;
-        ctx.Rsp = caller->sp;
+      const auto caller = ResumeAtCallerOfNullJump(ctx.Rsp, checks);
+      if (!caller) {
+        continue;
       }
+      nullJumpPc = ctx.Rip;
+      ctx.Rip = caller->pc;
+      ctx.Rsp = caller->sp;
+      // A caller without unwind data (a module whose .pdata no source has,
+      // hand-written code) is still the caller, but nothing below it can be
+      // found: the walk would guess from the next stack slot.
+      callerIsLastFrame = FindUnwindEntry(sym.process, mem, caller->pc) == nullptr;
     }
     if (ctx.Rip == 0 || ctx.Rsp == 0) {
       continue;
     }
 
     StackWalkEnd end{};
-    auto pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end);
+    std::vector<std::uint64_t> pcs;
+    if (callerIsLastFrame) {
+      pcs.push_back(ctx.Rip);
+      end = { StackWalkStop::kNoUnwind, ctx.Rip };
+    } else {
+      pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end);
+    }
     if (pcs.empty()) {
       continue;
     }
@@ -365,8 +374,6 @@ bool TryComputeStackwalkSuspects(
         kModalApiMaxDepth + 16u);
       // The calls the top frames made, for ClassifyMainThreadWait. Only the
       // dump's own memory: a local SkyrimSE.exe has its code encrypted on disk.
-      MinidumpMemoryView dumpOnly = mem;
-      dumpOnly.image_fallback = nullptr;
       constexpr std::size_t kCodeBeforeBytes = 0x60;
       constexpr std::size_t kCodeFrames = 12;
       for (std::size_t i = 0; i < outModalProbeFrames->size() && i < kCodeFrames; ++i) {
@@ -376,7 +383,7 @@ bool TryComputeStackwalkSuspects(
         }
         std::vector<std::uint8_t> bytes(kCodeBeforeBytes);
         std::size_t got = 0;
-        if (dumpOnly.Read(frame.pc - kCodeBeforeBytes, bytes.data(), bytes.size(), got) && got == bytes.size()) {
+        if (mem.ReadDump(frame.pc - kCodeBeforeBytes, bytes.data(), bytes.size(), got) && got == bytes.size()) {
           frame.code_before = std::move(bytes);
         }
       }

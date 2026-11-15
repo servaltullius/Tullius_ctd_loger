@@ -819,7 +819,13 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
   return info;
 }
 
-bool EndsWithCall(const std::uint8_t* before, std::size_t size)
+namespace {
+
+// Every call instruction that ends at the end of before (before[size-1] is
+// the byte just below a return address), shortest first, until visit
+// returns true. Returns whether a visit did.
+template <typename Visit>
+bool AnyCallEndingAt(const std::uint8_t* before, std::size_t size, Visit&& visit)
 {
   if (!before) {
     return false;
@@ -827,17 +833,23 @@ bool EndsWithCall(const std::uint8_t* before, std::size_t size)
   const std::size_t longest = std::min(size, kMaxX64InstructionBytes);
   for (std::size_t length = 2; length <= longest; ++length) {
     const auto insn = DecodeX64Instruction(before + (size - length), length);
-    if (insn && insn->is_call && insn->length == length) {
+    if (insn && insn->is_call && insn->length == length && visit(*insn, length)) {
       return true;
     }
   }
   return false;
 }
 
+}  // namespace
+
+bool EndsWithCall(const std::uint8_t* before, std::size_t size)
+{
+  return AnyCallEndingAt(before, size, [](const X64Instruction&, std::size_t) { return true; });
+}
+
 std::optional<ResumedCallerFrame> ResumeAtCallerOfNullJump(std::uint64_t rsp, const NullJumpCallerChecks& checks)
 {
-  if (rsp == 0 || rsp > ~std::uint64_t{ 0 } - 8u || !checks.readQword || !checks.isCode || !checks.codeBefore ||
-      !checks.hasUnwindData) {
+  if (rsp == 0 || rsp > ~std::uint64_t{ 0 } - 8u || !checks.readQword || !checks.isCode || !checks.codeBefore) {
     return std::nullopt;
   }
   const auto returnAddress = checks.readQword(rsp);
@@ -845,7 +857,7 @@ std::optional<ResumedCallerFrame> ResumeAtCallerOfNullJump(std::uint64_t rsp, co
     return std::nullopt;
   }
   const auto before = checks.codeBefore(*returnAddress);
-  if (!EndsWithCall(before.data(), before.size()) || !checks.hasUnwindData(*returnAddress)) {
+  if (!EndsWithCall(before.data(), before.size())) {
     return std::nullopt;
   }
   return ResumedCallerFrame{ *returnAddress, rsp + 8u };
@@ -872,30 +884,27 @@ std::optional<X64Instruction> FindCallTo(
   // that reads the same (a redundant REX) does not count.
   std::optional<X64Instruction> found;
   std::size_t foundLength = 0;
-  const std::size_t longest = std::min(size, kMaxX64InstructionBytes);
-  for (std::size_t length = 2; length <= longest; ++length) {
-    const std::uint8_t* start = before + (size - length);
-    const auto insn = DecodeX64Instruction(start, length);
-    if (!insn || !insn->is_call || insn->length != length) {
-      continue;
-    }
+  const bool ambiguous = AnyCallEndingAt(before, size, [&](const X64Instruction& insn, std::size_t length) {
     std::optional<std::uint64_t> went;
-    if (insn->call_is_relative) {
-      went = returnAddress + static_cast<std::uint64_t>(insn->call_relative);
-    } else if (insn->call_register >= 0) {
-      went = atCall[static_cast<std::size_t>(insn->call_register)];
-    } else if (const auto slot = X64EffectiveAddress(*insn, returnAddress - length, atCall); slot && readQword) {
+    if (insn.call_is_relative) {
+      went = returnAddress + static_cast<std::uint64_t>(insn.call_relative);
+    } else if (insn.call_register >= 0) {
+      went = atCall[static_cast<std::size_t>(insn.call_register)];
+    } else if (const auto slot = X64EffectiveAddress(insn, returnAddress - length, atCall); slot && readQword) {
       went = readQword(*slot);
     }
     if (!went || *went != target) {
-      continue;
+      return false;
     }
     if (!found) {
       found = insn;
       foundLength = length;
-    } else if (FormatX64Call(*insn, returnAddress) != FormatX64Call(*found, returnAddress)) {
-      return std::nullopt;
+      return false;
     }
+    return FormatX64Call(insn, returnAddress) != FormatX64Call(*found, returnAddress);
+  });
+  if (ambiguous) {
+    return std::nullopt;
   }
   if (found && outLength) {
     *outLength = foundLength;
