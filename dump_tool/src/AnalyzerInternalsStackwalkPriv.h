@@ -78,7 +78,8 @@ struct MinidumpMemoryView
   bool Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads);
 
   // The dump's memory, and for an address the dump does not have, the
-  // matching local module file (image_fallback).
+  // matching local module file (image_fallback): a request the dump covers
+  // only in part gets the rest from that file.
   bool Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
 
   // The dump's own memory only. For code bytes of the game: a local

@@ -858,7 +858,8 @@ void TestWeakFaultLocationPostprocessingResortsCandidates()
   const auto source = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderCandidates.cpp");
   const auto consensusPos = source.find("r.actionable_candidates = BuildCandidateConsensus(signals, lang);");
   const auto loopPos = source.find("for (auto& candidate : r.actionable_candidates)", consensusPos);
-  const auto downgradePos = source.find("candidate.status_id = hasStackSupport ? \"related\" : \"reference_clue\";", loopPos);
+  const auto downgradePos =
+    source.find("candidate.status_id = aloneRated ? alone.front().status_id : std::string(\"reference_clue\");", loopPos);
   const auto resortPos = source.find("SortActionableCandidates(r.actionable_candidates);", downgradePos);
   assert(consensusPos != std::string::npos);
   assert(loopPos != std::string::npos && loopPos > consensusPos);
