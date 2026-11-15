@@ -294,6 +294,51 @@ void TestLocalImageRejectsNonCodeReturnAddresses()
     "an address outside every module cannot be judged");
 }
 
+// A request the dump covers only in part (its window around a stack value
+// ends inside it): the dump's bytes first, the rest from the matching local
+// file, as for any address the dump lacks. ReadDump stays the dump's own
+// memory (the game's code is encrypted in its local file).
+void TestPartialDumpReadIsCompletedFromTheLocalImage()
+{
+  const HMODULE self = GetModuleHandleW(nullptr);
+  MODULEINFO info{};
+  Require(GetModuleInformation(GetCurrentProcess(), self, &info, sizeof(info)) != 0, "GetModuleInformation failed");
+  wchar_t path[MAX_PATH]{};
+  Require(GetModuleFileNameW(self, path, MAX_PATH) != 0, "GetModuleFileNameW failed");
+  const auto* view = reinterpret_cast<const std::uint8_t*>(self);
+  const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(view);
+  const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(view + dos->e_lfanew);
+  std::vector<skydiag::dump_tool::minidump::ModuleInfo> modules(1);
+  modules[0].base = reinterpret_cast<std::uint64_t>(info.lpBaseOfDll);
+  modules[0].end = modules[0].base + info.SizeOfImage;
+  modules[0].time_date_stamp = nt->FileHeader.TimeDateStamp;
+  modules[0].path = path;
+
+  namespace sw = skydiag::dump_tool::internal::stackwalk_internal;
+  const sw::LocalImageMemory images(modules);
+  const auto code = reinterpret_cast<std::uint64_t>(&DeepFrameB);
+  std::uint8_t fromFile[8]{};
+  std::size_t fileGot = 0;
+  Require(images.Read(code + 8, fromFile, sizeof(fromFile), fileGot) && fileGot == sizeof(fromFile),
+    "the local file has the code");
+
+  // The dump holds the first 8 bytes only, marked so their source shows.
+  std::uint8_t dumpBytes[8];
+  std::memset(dumpBytes, 0xAB, sizeof(dumpBytes));
+  sw::MinidumpMemoryView mem;
+  mem.ranges.push_back({ code, code + sizeof(dumpBytes), dumpBytes });
+  mem.image_fallback = &images;
+
+  std::uint8_t out[16]{};
+  std::size_t got = 0;
+  Require(mem.Read(code, out, sizeof(out), got) && got == sizeof(out), "the whole request is read");
+  Require(std::memcmp(out, dumpBytes, sizeof(dumpBytes)) == 0, "the dump's bytes come first");
+  Require(std::memcmp(out + 8, fromFile, sizeof(fromFile)) == 0, "the rest comes from the local file");
+
+  got = 0;
+  Require(mem.ReadDump(code, out, sizeof(out), got) && got == sizeof(dumpBytes), "ReadDump reads the dump alone");
+}
+
 // FindFunctionStart names a frame only by the exact start of its function.
 // A chained .pdata entry is a fragment of another function (for example a
 // cold block moved away from it) and must lead back to that function.
@@ -387,6 +432,7 @@ int main()
     TestMemory64ListCountOverflowIsRejected();
     TestFindFunctionStartFollowsChainedEntries();
     TestLocalImageRejectsNonCodeReturnAddresses();
+    TestPartialDumpReadIsCompletedFromTheLocalImage();
     TestFormalStackwalkUnwindsRealCallerChain();
     TestThreadDumpPairingNamesNoSuspects();
     return 0;

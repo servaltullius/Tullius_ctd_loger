@@ -711,6 +711,16 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
   AddFirstChanceSignals(r, en, ctx, &signals);
 
   r.actionable_candidates = BuildCandidateConsensus(signals, lang);
+  // A Crash Logger frame in the fault DLL names the place the exception
+  // happened, which the fault (and the stack, when it lands there) already
+  // names: it adds nothing, and it must take nothing away either. Such a
+  // candidate gets what the consensus gives its own signals without that
+  // frame (a strong stack Medium, a weak one Low), or stays a Low reference
+  // clue when the frame was all there was. Only its own signals: the other
+  // candidates, such as an object ref from the same Crash Logger log, would
+  // turn the frame's absence into a split that a run without Crash Logger
+  // never shows. Low for every one of them made a crash in a mod's DLL weaker
+  // for players who run Crash Logger (2026-11-15).
   for (auto& candidate : r.actionable_candidates) {
     if (!IsWeakFaultLocationActionableCandidate(r, candidate, ctx)) {
       continue;
@@ -719,15 +729,26 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
     const bool hasStackSupport =
       std::find(candidate.supporting_families.begin(), candidate.supporting_families.end(), "actionable_stack") !=
       candidate.supporting_families.end();
-    candidate.status_id = hasStackSupport ? "related" : "reference_clue";
-    // The frame names the same fault location as the stack, so it adds
-    // nothing, and it must take nothing away either: without a Crash Logger
-    // log the stack alone gives this candidate Medium from
-    // policy::kStackWeightForMedium (strongStackOnly in CandidateConsensus.cpp).
-    // Low here made a crash in a mod's DLL weaker for players who run Crash
-    // Logger.
-    const bool stackAloneIsMedium = hasStackSupport && candidate.stack_weight >= policy::kStackWeightForMedium;
-    candidate.confidence_level = stackAloneIsMedium ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
+    std::wstring ownKey;
+    for (const auto& signal : signals) {
+      if (signal.family_id == "crash_logger_frame" &&
+          minidump::WideLower(signal.module_filename) == minidump::WideLower(candidate.module_filename)) {
+        ownKey = CanonicalCandidateKey(signal.candidate_key);
+        break;
+      }
+    }
+    std::vector<CandidateSignal> ownWithoutFrame;
+    for (const auto& signal : signals) {
+      if (!ownKey.empty() && signal.family_id != "crash_logger_frame" &&
+          CanonicalCandidateKey(signal.candidate_key) == ownKey) {
+        ownWithoutFrame.push_back(signal);
+      }
+    }
+    const auto alone = BuildCandidateConsensus(ownWithoutFrame, lang);
+    const bool aloneRated = !alone.empty() && !alone.front().status_id.empty() &&
+      alone.front().confidence_level != i18n::ConfidenceLevel::kUnknown;
+    candidate.status_id = aloneRated ? alone.front().status_id : std::string("reference_clue");
+    candidate.confidence_level = aloneRated ? alone.front().confidence_level : i18n::ConfidenceLevel::kLow;
     candidate.confidence = i18n::ConfidenceText(lang, candidate.confidence_level);
     candidate.cross_validated = false;
     candidate.explanation = en

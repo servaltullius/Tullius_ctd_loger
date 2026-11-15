@@ -321,6 +321,15 @@ bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std:
 bool MinidumpMemoryView::Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const
 {
   if (ReadDump(addr, dst, n, outRead)) {
+    // The dump's range can end inside the request (its window around a stack
+    // value stops there): the rest is memory the dump does not have, which the
+    // matching local file fills in as for any other such address.
+    if (outRead < n && image_fallback) {
+      std::size_t more = 0;
+      if (image_fallback->Read(addr + outRead, static_cast<std::uint8_t*>(dst) + outRead, n - outRead, more)) {
+        outRead += more;
+      }
+    }
     return true;
   }
   if (!dst || n == 0 || ranges.empty()) {

@@ -34,6 +34,7 @@
 namespace {
 
 using skydiag::dump_tool::AnalysisResult;
+using skydiag::dump_tool::ActionableCandidate;
 using skydiag::dump_tool::BuildEvidenceAndSummary;
 using skydiag::dump_tool::EventRow;
 using skydiag::dump_tool::PluginRuleDiagnosis;
@@ -385,7 +386,8 @@ void TestCrashLoggerFrameDoesNotWeakenAFaultDllLead()
   const std::wstring modPath = L"G:\\MO2\\mods\\Mod\\SKSE\\Plugins\\Mod.dll";
   for (const auto lang : kLanguages) {
     const bool en = lang == i18n::Language::kEnglish;
-    const auto crash = [&](bool crashLoggerFrame, i18n::ConfidenceLevel suspectLevel = i18n::ConfidenceLevel::kHigh) {
+    const auto crash = [&](bool crashLoggerFrame, i18n::ConfidenceLevel suspectLevel = i18n::ConfidenceLevel::kHigh,
+                           bool objectRefElsewhere = false) {
       auto r = MakeCrashIn(L"Mod.dll", modPath);
       r.suspects.push_back(MakeSuspect(L"Mod.dll", modPath, suspectLevel));
       r.suspects_from_stackwalk = true;
@@ -394,6 +396,17 @@ void TestCrashLoggerFrameDoesNotWeakenAFaultDllLead()
         r.crash_logger_direct_fault_module = L"Mod.dll";
         r.crash_logger_first_actionable_probable_eligible = true;
         r.crash_logger_first_actionable_probable_module = L"Mod.dll";
+      }
+      if (objectRefElsewhere) {
+        // An NPC from another plugin in a register, from the same log.
+        AnalysisResult::CrashLoggerModReference ref{};
+        ref.esp_name = L"Other.esp";
+        ref.best_object_type = L"Actor*";
+        ref.best_location = L"RDX";
+        ref.ref_count = 1;
+        ref.relevance_score = 16;
+        r.crash_logger_log_path = L"crash-2026-11-15-14-12-54.log";
+        r.crash_logger_object_refs.push_back(ref);
       }
       BuildEvidenceAndSummary(r, lang);
       return r;
@@ -440,6 +453,19 @@ void TestCrashLoggerFrameDoesNotWeakenAFaultDllLead()
               weakWithFrame.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kLow,
       "a weak stack with the frame stays Low");
     Require(AnyContains(weakWithFrame.recommendations, isolated), "a Low lead keeps the recapture advice");
+
+    // An object ref to another plugin from the same Crash Logger log does not
+    // turn the fault DLL's lead into a split: the frame is left out of the
+    // DLL's own evidence only (the 11/15 OSLAroused and 11/13 PoEProtoItems
+    // dumps, which a frame-less consensus over every candidate called split).
+    const auto withRef = crash(true, i18n::ConfidenceLevel::kHigh, /*objectRefElsewhere=*/true);
+    const ActionableCandidate* dll = nullptr;
+    for (const auto& c : withRef.actionable_candidates) {
+      dll = c.module_filename == L"Mod.dll" ? &c : dll;
+    }
+    Require(dll && dll->status_id == "related" && dll->confidence_level == i18n::ConfidenceLevel::kMedium,
+      "with an object ref elsewhere the fault DLL stays a related Medium lead, not a conflict");
+    Require(withRef.quick_answer.likelihood == "medium", "and the quick answer stays Medium");
   }
 }
 
