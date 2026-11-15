@@ -80,6 +80,7 @@ Accepted
   - 되돌려 보기(하나씩 넣고 위 테스트 실행): 다시 시작하지 않기, 프레임 0을 남기지 않기, RSP를 옮기지 않기는 e2e가, 코드 주소 확인 없애기는 단위 테스트가, `call` 확인 없애기는 단위 테스트와 e2e가, 거절된 값에서도 그대로 걷기는 e2e의 0x18 쪽이, unwind 정보 없는 호출자에서도 걷기는 e2e의 두 줄 테스트가 실패했습니다(셋째 줄로 `KERNELBASE.dll!SignalObjectAndWait`가 나옴).
   - 실행 테스트가 없는 것: SkyrimSE.exe 안의 반환 주소는 덤프의 명령 바이트로만 `call`을 확인하는 것. 로컬 파일도 읽게 바꿔도 테스트는 통과합니다(테스트의 호출자는 SkyrimSE.exe가 아님).
   - 실제 덤프 재분석(`scripts/compare_analyses.py`, v0.2.76-rc2 분석기 대비, 덤프 44개의 한·영 88건): 바뀐 것은 위 크래시 2건뿐입니다. 콜스택이 Crash Logger의 것과 같은 순서(`TraverseScenegraphObjects` ← `LightData::GenLight` ← `LightManager::AttachLight` ← … ← `SkyrimSE.exe` ID 68445)로 나오고, 빠른 답이 Light Placer를 "가능성 높음"으로, 후보 충돌 안내가 "DLL 후보부터"로 바뀌었습니다. 나머지 86건은 같습니다. 재검수 수정 뒤에 같은 비교를 다시 돌려도 같은 2건만 바뀌고, 그 리포트는 수정 전(main 23a7c8d) 빌드의 것과 한 글자도 다르지 않습니다.
+  - 실게임 확인(2026-11-15, v0.2.76-rc3, Crash Logger 1.27이 있는 구성, 크래시 테스터의 Ctrl+Shift+End): `CrashTester.dll`이 빈 함수 포인터를 `call rax`로 부른 크래시에서, 판정이 `null_jump`이고 콜스택이 `0x0`, `CrashTester.dll!CallEmptyFunctionPointer+0x2e`, `skse64_1_6_1170.dll`, 게임 함수(ID 36588, 39092, 69378, 69380, 69344, 68445), `kernel32.dll`, `ntdll.dll` 순으로 나왔습니다. Crash Logger의 `[P]` 프레임 10줄과 둘째 줄부터 끝까지 같습니다. 호출 위치 문장(`CrashTester.dll+0x66bac`, `call rax`)도 나왔고, 빠른 답은 CrashTester.dll을 "가능성 높음"으로 짚었습니다.
 - 남은 것: 이 크래시에서도 호출 위치(`call qword ptr [rax+0x18]`) 문장은 나오지 않았습니다. 호출이 읽은 메모리(`[rax+0x18]`, 힙)가 덤프에 없어 그 호출이 0으로 갔는지 확인할 수 없기 때문입니다(`FindCallTo`).
 
 ## Verification
