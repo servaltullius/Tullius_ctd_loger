@@ -358,8 +358,9 @@ void TestFrameOnlyFaultLocationDoesNotClaimTheStack()
     r.crash_logger_direct_fault_eligible = true;
     r.crash_logger_direct_fault_module = L"Mod.dll";
     BuildEvidenceAndSummary(r, lang);
-    Require(!r.actionable_candidates.empty() && r.actionable_candidates[0].status_id == "reference_clue",
-      "a frame-only fault-location clue");
+    Require(!r.actionable_candidates.empty() && r.actionable_candidates[0].status_id == "reference_clue" &&
+              r.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kLow,
+      "a frame-only fault-location clue, Low");
     Require(AnyStartsWith(r.recommendations, en ? L"[Actionable candidate]" : L"[행동 우선 후보]"), "candidate advice");
     Require(!AnyContains(r.recommendations, stackClaim), "no stack agreement without a stack signal");
 
@@ -370,6 +371,59 @@ void TestFrameOnlyFaultLocationDoesNotClaimTheStack()
     withStack.suspects_from_stackwalk = true;
     BuildEvidenceAndSummary(withStack, lang);
     Require(AnyContains(withStack.recommendations, stackClaim), "a stack signal may say both");
+  }
+}
+
+// A crash in a mod's DLL that the stack walk also lands in. Crash Logger's
+// frame names the same fault location, so it adds nothing to the stack, and
+// it must take nothing away either: it used to make the lead Low, while the
+// same dump without a Crash Logger log got Medium (2026-11-15, four real dumps).
+void TestCrashLoggerFrameDoesNotWeakenAFaultDllLead()
+{
+  const std::wstring modPath = L"G:\\MO2\\mods\\Mod\\SKSE\\Plugins\\Mod.dll";
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const auto crash = [&](bool crashLoggerFrame, i18n::ConfidenceLevel suspectLevel = i18n::ConfidenceLevel::kHigh) {
+      auto r = MakeCrashIn(L"Mod.dll", modPath);
+      r.suspects.push_back(MakeSuspect(L"Mod.dll", modPath, suspectLevel));
+      r.suspects_from_stackwalk = true;
+      if (crashLoggerFrame) {
+        r.crash_logger_direct_fault_eligible = true;
+        r.crash_logger_direct_fault_module = L"Mod.dll";
+        r.crash_logger_first_actionable_probable_eligible = true;
+        r.crash_logger_first_actionable_probable_module = L"Mod.dll";
+      }
+      BuildEvidenceAndSummary(r, lang);
+      return r;
+    };
+    const auto stackOnly = crash(false);
+    const auto withFrame = crash(true);
+    Require(!stackOnly.actionable_candidates.empty() &&
+              stackOnly.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kMedium,
+      "the stack alone makes the fault DLL a Medium candidate");
+    Require(!withFrame.actionable_candidates.empty(), "a candidate with the frame too");
+    const auto& top = withFrame.actionable_candidates[0];
+    Require(top.module_filename == L"Mod.dll" && top.confidence_level == i18n::ConfidenceLevel::kMedium &&
+              top.status_id == "related" && !top.cross_validated,
+      "with Crash Logger's frame it stays Medium: not weaker, and not cross-validated by the same location");
+    Require(withFrame.quick_answer.likelihood == "medium" &&
+              withFrame.quick_answer.likelihood == stackOnly.quick_answer.likelihood,
+      "the quick answer gives the same likelihood with or without the Crash Logger log");
+    Require(Contains(withFrame.summary_sentence, en ? L"same-dump stack" : L"같은 덤프의 스택") &&
+              Contains(withFrame.summary_sentence, en ? L"(Confidence: Medium)" : L"(신뢰도: 중간)"),
+      "the summary says the frame and the stack both land there, at Medium");
+
+    // A weak stack (a Low suspect: stack weight 3) is Low alone, and so with
+    // the frame: the frame does not lift it either.
+    const auto weakStackOnly = crash(false, i18n::ConfidenceLevel::kLow);
+    const auto weakWithFrame = crash(true, i18n::ConfidenceLevel::kLow);
+    Require(!weakStackOnly.actionable_candidates.empty() &&
+              weakStackOnly.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kLow,
+      "a weak stack alone is Low");
+    Require(!weakWithFrame.actionable_candidates.empty() &&
+              weakWithFrame.actionable_candidates[0].stack_weight < 5u &&
+              weakWithFrame.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kLow,
+      "a weak stack with the frame stays Low");
   }
 }
 
@@ -683,6 +737,7 @@ int main()
     TestEnbD3d11CrashLoggerFramesAreAMod();
     TestPassiveHookDoesNotOwnAFreeze();
     TestFrameOnlyFaultLocationDoesNotClaimTheStack();
+    TestCrashLoggerFrameDoesNotWeakenAFaultDllLead();
     TestAmbiguousCrashLoggerPairingRaisesNoCandidate();
     TestPointerScanIsNotTheTulliusCallstack();
     TestUnconfirmedCppExceptionAdvice();

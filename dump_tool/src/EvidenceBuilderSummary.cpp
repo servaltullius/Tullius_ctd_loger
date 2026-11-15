@@ -610,7 +610,9 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       const std::wstring compareKo = nearby
         ? std::wstring(L" Crash Logger가 함께 지목한 근처 DLL도 비교하세요.")
         : std::wstring(L" Crash Logger가 함께 지목한 다른 DLL은 없습니다.");
-      if (topCandidateHasStandaloneCallstack) {
+      // A weak fault-location candidate always has a Crash Logger frame, so
+      // standalone_callstack (no frame) is never true here: ask the stack.
+      if (CandidateHasFamily(*topCandidate, "actionable_stack")) {
         summary = en
           ? (L"Crash is reported in " + who + L", and " + frameSupport +
               L" plus the same-dump stack both land in this DLL, but that still reflects the current fault-location cluster rather than an independent confirmation." +
