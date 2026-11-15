@@ -63,8 +63,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.75 Update Notice[/b]
-Replace the previous installation with the complete v0.2.75 zip. Do not copy only individual EXEs or DLLs. The Helper, the analyzer and the viewer have changed (the plugin works as before; the SharedLayout protocol is still v4); there are no new settings. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. The Helper now also writes [font=Courier New]loaded_saves.json[/font] (the saves that finished loading, with their names) beside crash_history.json in the output folder. The AI package's template, a leveled enemy's original NPC and the graphics driver record appear only in dumps captured by the v0.2.75 Helper. [b]If you update from v0.2.73 or older:[/b] the save being loaded is recorded only from the v0.2.74 plugin on, and since v0.2.74 [font=Courier New]CrashHookMode[/font] is read strictly (a typo or an out-of-range value means 1, the default, never 0 or 2). [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.76 Update Notice[/b]
+Replace the previous installation with the complete v0.2.76 zip. Do not copy only individual EXEs or DLLs. The SKSE plugin, the Helper, the analyzer and the viewer have all changed (the SharedLayout protocol is still v4). New settings: [font=Courier New]UnhandledCrashHoldMs[/font] in SkyrimDiag.ini (default 5000), and [font=Courier New]MaxForcedCloseCrashDumps[/font] (default 3) and [font=Courier New]KeepSlowShutdownHangDumps[/font] (default 0) in SkyrimDiagHelper.ini. Dumps analyzed by an older version are re-analyzed once when you open them in the viewer. A crash that called an empty (null) function pointer now gets a callstack and with it a new bucket key, so it does not continue the repeat-crash count of the same crash recorded before the update. Address Library IDs, the driver record beside a crash dump and the plugin's unhandled-exception signal appear only in captures made by v0.2.76. [b]If you update from v0.2.74 or older:[/b] the Helper writes [font=Courier New]loaded_saves.json[/font] (the saves that finished loading) beside crash_history.json since v0.2.75. [b]If you update from v0.2.73 or older:[/b] the save being loaded is recorded only from the v0.2.74 plugin on, and since v0.2.74 [font=Courier New]CrashHookMode[/font] is read strictly (a typo or an out-of-range value means 1, the default, never 0 or 2). [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -122,7 +122,25 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.75[/size][/b]
+[b][size=4]What's New in v0.2.76[/size][/b]
+No stall on every repeat of a handled exception, an unhandled crash reported at once, game function IDs, and a callstack for a call through an empty function pointer.[list]
+[*][b]Repeated handled exceptions:[/b] when the same exception (code and address) has been handled by the game twice in a session, the Helper first checks whether the game keeps running and writes nothing if it does. Each of those dumps froze every game thread for about a second (a Nexus report measured a 1,162 ms stop on v0.2.73; the reporter's Helper log had the same access violation 14 times in 23 minutes). The first two still write a dump
+[*][b]Unhandled crashes at once:[/b] when an exception that nothing handled reaches the process's top-level exception filter, the plugin tells the Helper and holds the crashing thread only until the dump is written ([font=Courier New]UnhandledCrashHoldMs[/font], default 5000 ms; in game the hold took 1.4 to 1.7 s); then Crash Logger writes its log as usual. A real crash at an address that had been handled twice is dumped too, a crash is confirmed without the 3 s heartbeat wait, and a crash on a thread that does not block the game loop is no longer released as handled
+[*][b]Crashes at exit code 0:[/b] a crash the plugin saw go unhandled is kept even when the game ends with exit code 0 (a crash on another thread while closing the game), or only its dump when the game ran on for over a minute
+[*][b]Without Crash Logger:[/b] the plugin checks once a second that its top-level exception filter is still in place and takes it back, so unhandled C++ exceptions and breakpoints are no longer lost when something replaced it
+[*][b]Empty function pointer calls:[/b] the callstack is walked from the return address the call left on the stack, after checking that a call instruction ends right before it, so it starts at the caller instead of being empty. The November 15 Light Placer crash now shows the same stack as Crash Logger and names Light Placer with high likelihood. Such crashes get a new bucket key
+[*][b]Game function IDs:[/b] game frames show their Address Library ID, e.g. [font=Courier New]SkyrimSE.exe+0x49fb54 (ID 29895+0xe4)[/font], only when the function start matches an ID exactly
+[*][b]Callstack from the top:[/b] the report's callstack starts at the faulting frame instead of two frames above the first plugin frame; a stack that ends in hook code says so and where the hook's recorded jump goes
+[*][b]Driver errors just before a crash:[/b] the Helper writes the graphics driver record beside a crash dump, and a driver error within 60 s before the crash comes first in the quick answer, with the suspected mod second
+[*][b]Forced-close dumps counted apart:[/b] dumps of an error while the game was being closed have their own limit ([font=Courier New]MaxForcedCloseCrashDumps[/font], default 3) and no longer push out real crash dumps
+[*][b]Closing is not a freeze:[/b] a game already closing with one thread left gets no freeze dump, and a freeze caught in a menu that never recovered before a clean exit is treated as a slow shutdown and deleted ([font=Courier New]KeepSlowShutdownHangDumps=1[/font] keeps it)
+[*][b]Manual capture of a stuck game:[/b] analyzed as a freeze when the heartbeat had stopped for over 5 s and the game window was in front or not responding
+[*][b].NET runtime:[/b] [font=Courier New]clr.dll[/font] and the other .NET runtime files are Windows components, not suspected mods
+[*][b]Helper watchdog:[/b] when the Helper keeps exiting right after start, the plugin waits 1, 2, 4 and 8 s and gives up after five failures in a row
+[*]The viewer re-analyzes dumps analyzed by v0.2.75 once when you open them
+[/list]
+
+[b][size=4]Earlier: v0.2.75[/size][/b]
 Where a runtime AI package and a leveled enemy came from, graphics driver errors with freezes, and another save that loaded.[list]
 [*][b]AI packages made during play:[/b] when a crash or freeze has an AI package in its registers or stack, the dump also keeps the package it was made from (its template) and its data entries. The object line shows e.g. [font=Courier New]TESPackage [0xFF0036C8] {type 18, made from [0x00037CC0] Skyrim.esm, data 3: Bool, Location, ?}[/font], where ? is a data entry that is not an object. On November 6 the game crashed while a woken NPC ran such a package, and nothing showed which mod's package it was
 [*][b]Leveled enemies:[/b] an actor spawned from a leveled list has a temporary base NPC (FFxxxxxx) without a plugin; the report now adds the NPC it was rolled from and its plugin ([font=Courier New]leveled from TESNPC [0x0001D8F6] Skyrim.esm[/font])
@@ -468,8 +486,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.75 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.75 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. Helper, 분석기, 뷰어가 바뀌었고(플러그인 동작과 SharedLayout protocol v4는 그대로), 새 설정은 없습니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. Helper가 출력 폴더의 crash_history.json 옆에 [font=Courier New]loaded_saves.json[/font](정상적으로 불러온 세이브와 그 이름)도 남깁니다. AI 패키지의 원래 패키지, 레벨드 적의 원래 NPC, 그래픽 드라이버 기록은 v0.2.75 Helper가 찍은 덤프부터 나옵니다. [b]v0.2.73 이하에서 업데이트한다면:[/b] 불러오던 세이브는 v0.2.74 플러그인부터 기록하고, v0.2.74부터 [font=Courier New]CrashHookMode[/font]를 엄격하게 읽습니다(오타나 범위 밖 값은 0이나 2가 아니라 기본값 1). [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.76 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.76 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol v4는 그대로). 새 설정은 SkyrimDiag.ini의 [font=Courier New]UnhandledCrashHoldMs[/font](기본 5000)와 SkyrimDiagHelper.ini의 [font=Courier New]MaxForcedCloseCrashDumps[/font](기본 3), [font=Courier New]KeepSlowShutdownHangDumps[/font](기본 0)입니다. 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. 비어 있는(null) 함수 포인터를 부른 크래시는 이제 콜스택이 생기면서 버킷 키가 바뀌어, 업데이트 전에 기록된 같은 크래시의 반복 횟수에 이어지지 않습니다. Address Library ID, 크래시 덤프 옆의 드라이버 기록, 플러그인의 처리되지 않은 예외 알림은 v0.2.76이 찍은 캡처부터 나옵니다. [b]v0.2.74 이하에서 업데이트한다면:[/b] v0.2.75부터 Helper가 crash_history.json 옆에 [font=Courier New]loaded_saves.json[/font](정상적으로 불러온 세이브)을 남깁니다. [b]v0.2.73 이하에서 업데이트한다면:[/b] 불러오던 세이브는 v0.2.74 플러그인부터 기록하고, v0.2.74부터 [font=Courier New]CrashHookMode[/font]를 엄격하게 읽습니다(오타나 범위 밖 값은 0이나 2가 아니라 기본값 1). [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -527,7 +545,25 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.75 새 기능[/size][/b]
+[b][size=4]v0.2.76 새 기능[/size][/b]
+처리된 예외가 반복될 때의 끊김 제거, 처리되지 않은 크래시의 즉시 알림, 게임 함수 ID, 빈 함수 포인터 크래시의 콜스택.[list]
+[*][b]반복되는 처리된 예외:[/b] 같은 예외(코드와 주소)를 한 세션에서 게임이 두 번 처리했으면, 세 번째부터는 Helper가 게임이 계속 도는지 먼저 확인하고 계속 돌면 아무것도 쓰지 않습니다. 그 덤프마다 게임의 모든 스레드가 1초쯤 멈췄습니다(넥서스 제보: v0.2.73에서 한 번에 1,162ms 정지, 제보 환경의 Helper 로그에는 같은 접근 위반이 23분에 14번). 처음 두 번은 여전히 덤프를 씁니다
+[*][b]처리되지 않은 크래시의 즉시 알림:[/b] 어떤 코드도 처리하지 않은 예외가 최상위 예외 필터에 닿으면 플러그인이 Helper에 알리고, 덤프를 다 쓸 때까지만 크래시가 난 스레드를 붙잡습니다([font=Courier New]UnhandledCrashHoldMs[/font], 기본 5000ms, 실게임에서 1.4~1.7초). 그 뒤 Crash Logger가 평소처럼 로그를 씁니다. 두 번 처리됐던 주소의 진짜 크래시도 덤프가 남고, 3초 하트비트 대기 없이 크래시로 확정하며, 게임 루프를 막지 않는 스레드의 크래시를 처리된 것으로 풀지 않습니다
+[*][b]종료 코드 0의 크래시:[/b] 처리되지 않은 것으로 확인된 크래시는 게임이 종료 코드 0으로 끝나도 남습니다(게임을 끄는 도중 다른 스레드에서 난 크래시). 그 뒤 게임이 1분 넘게 돌았으면 덤프만 남깁니다
+[*][b]Crash Logger가 없을 때:[/b] 플러그인이 1초에 한 번 최상위 예외 필터 자리를 확인해 되찾아, 다른 것이 그 자리를 가져가도 처리되지 않은 C++ 예외와 중단점을 놓치지 않습니다
+[*][b]빈 함수 포인터 호출:[/b] 그 호출이 스택에 남긴 반환 주소 바로 앞에서 call 명령이 끝나는지 확인한 뒤 거기서 콜스택을 걸어, 빈 콜스택 대신 부른 쪽부터 보여 줍니다. 11/15 Light Placer 크래시는 이제 Crash Logger와 같은 콜스택이 나오고 Light Placer를 가능성 높음으로 짚습니다. 이런 크래시는 버킷 키가 바뀝니다
+[*][b]게임 함수 ID:[/b] 게임 프레임에 Address Library ID가 붙습니다([font=Courier New]SkyrimSE.exe+0x49fb54 (ID 29895+0xe4)[/font]). 함수 시작이 ID와 정확히 맞을 때만입니다
+[*][b]맨 위부터의 콜스택:[/b] 리포트의 콜스택이 첫 플러그인 프레임의 두 프레임 위가 아니라 크래시 지점부터 시작합니다. 후킹 코드에서 끊긴 스택은 그렇다고 적고 그 후킹의 점프가 어디로 가는지 알려 줍니다
+[*][b]크래시 직전 드라이버 오류:[/b] Helper가 크래시 덤프 옆에 그래픽 드라이버 기록을 쓰고, 크래시 60초 안의 드라이버 오류를 빠른 답에서 먼저 안내합니다(의심 모드는 두 번째)
+[*][b]강제 종료 덤프 따로 세기:[/b] 게임을 닫는 중에 난 오류의 덤프는 따로 셉니다([font=Courier New]MaxForcedCloseCrashDumps[/font], 기본 3). 진짜 크래시 덤프를 밀어내지 않습니다
+[*][b]끄는 중은 프리징이 아님:[/b] 이미 종료 중이라 스레드가 하나 남은 게임은 프리징 덤프를 쓰지 않고, 메뉴에서 잡혀 풀리지 않은 채 정상 종료한 프리징은 느린 종료로 보고 지웁니다([font=Courier New]KeepSlowShutdownHangDumps=1[/font]이면 남김)
+[*][b]멈춘 게임의 수동 캡처:[/b] 하트비트가 5초 넘게 멈춰 있고 게임 창이 앞에 있었거나 응답하지 않았으면 프리징으로 분석합니다
+[*][b].NET 런타임:[/b] [font=Courier New]clr.dll[/font] 등 .NET 런타임 파일을 의심 모드가 아니라 Windows 구성 요소로 봅니다
+[*][b]Helper 워치독:[/b] Helper가 뜨자마자 계속 꺼지면 플러그인이 1·2·4·8초를 기다리고, 다섯 번 연속 실패하면 다시 띄우기를 그만둡니다
+[*]뷰어는 v0.2.75가 분석해 둔 덤프를 열 때 한 번 다시 분석합니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.75[/size][/b]
 게임 도중 만들어진 AI 패키지와 레벨드 적의 출처, 프리징의 그래픽 드라이버 오류, 정상적으로 열린 다른 세이브.[list]
 [*][b]게임 도중 만들어진 AI 패키지:[/b] 크래시나 프리징의 레지스터·스택에 AI 패키지가 있으면, 그 패키지를 만든 원래 패키지(템플릿)와 데이터 항목까지 덤프에 담습니다. 오브젝트 줄이 [font=Courier New]TESPackage [0xFF0036C8] {type 18, made from [0x00037CC0] Skyrim.esm, data 3: Bool, Location, ?}[/font]처럼 나오고, ?는 오브젝트가 아닌 데이터 항목입니다. 11/06 깨운 NPC가 이런 패키지를 실행하던 중 튕겼는데, 어느 모드의 패키지인지 알 수 없었습니다
 [*][b]레벨드 적:[/b] 레벨드 리스트에서 생긴 액터는 게임이 만든 임시 NPC(FFxxxxxx)를 베이스로 가져 플러그인이 없었습니다. 이제 원래 NPC와 그 플러그인을 붙여 보여 줍니다([font=Courier New]leveled from TESNPC [0x0001D8F6] Skyrim.esm[/font])
