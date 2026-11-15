@@ -175,6 +175,12 @@ struct StackWalkEnd
   std::uint64_t address = 0;  // the rejected caller address, or the last frame for kNoUnwind
 };
 
+// The x64 unwind entry covering addr, from the sources the stack walk uses
+// and in its order: a matching local image, the dump's own .pdata (ADR-0011),
+// DbgHelp. nullptr for a leaf function, or when no source has the module's
+// unwind data.
+PVOID FindUnwindEntry(HANDLE process, const MinidumpMemoryView& mem, std::uint64_t addr);
+
 std::vector<std::uint64_t> StackWalkAddrsForContext(
   HANDLE process,
   const MinidumpMemoryView& mem,

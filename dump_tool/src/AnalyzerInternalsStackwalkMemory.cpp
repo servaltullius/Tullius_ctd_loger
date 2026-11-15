@@ -54,17 +54,8 @@ BOOL CALLBACK ReadProcessMemoryFromMinidump64(HANDLE, DWORD64 baseAddr, PVOID bu
 // degrades to treating every stack slot as a return address.
 PVOID CALLBACK FunctionTableAccessFromImages(HANDLE process, DWORD64 addrBase)
 {
-  if (g_stackwalkMemView && g_stackwalkMemView->image_fallback) {
-    if (const auto* entry = g_stackwalkMemView->image_fallback->FindFunctionEntry(static_cast<std::uint64_t>(addrBase))) {
-      return const_cast<RUNTIME_FUNCTION*>(entry);
-    }
-  }
-  // No matching local file (for example after a Windows update): the dump's
-  // own .pdata, when it carries it (ADR-0011).
-  if (g_stackwalkMemView && g_stackwalkMemView->dump_images) {
-    if (const auto* entry = g_stackwalkMemView->dump_images->FindFunctionEntry(static_cast<std::uint64_t>(addrBase))) {
-      return const_cast<RUNTIME_FUNCTION*>(entry);
-    }
+  if (g_stackwalkMemView) {
+    return FindUnwindEntry(process, *g_stackwalkMemView, static_cast<std::uint64_t>(addrBase));
   }
   return SymFunctionTableAccess64(process, addrBase);
 }
@@ -359,6 +350,23 @@ bool MinidumpMemoryView::Read(std::uint64_t addr, void* dst, std::size_t n, std:
     }
   }
   return outRead > 0;
+}
+
+PVOID FindUnwindEntry(HANDLE process, const MinidumpMemoryView& mem, std::uint64_t addr)
+{
+  if (mem.image_fallback) {
+    if (const auto* entry = mem.image_fallback->FindFunctionEntry(addr)) {
+      return const_cast<RUNTIME_FUNCTION*>(entry);
+    }
+  }
+  // No matching local file (for example after a Windows update): the dump's
+  // own .pdata, when it carries it (ADR-0011).
+  if (mem.dump_images) {
+    if (const auto* entry = mem.dump_images->FindFunctionEntry(addr)) {
+      return const_cast<RUNTIME_FUNCTION*>(entry);
+    }
+  }
+  return SymFunctionTableAccess64(process, addr);
 }
 
 std::optional<std::uint64_t> FindFunctionStart(const MinidumpMemoryView& mem, std::uint64_t moduleBase, std::uint64_t pc)

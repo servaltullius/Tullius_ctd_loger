@@ -1116,6 +1116,15 @@ if(WIN32)
     SkyrimDiagDumpToolCore
   )
   add_test(NAME skydiag_crash_object_e2e_tests COMMAND skydiag_crash_object_e2e_tests)
+  # ADR-0019, ADR-0023: the null_jump dumps analyzed with no matching local
+  # module file, as a mod's DLL is after its update or outside the mod
+  # manager's virtual folder; the dump alone must carry the code bytes before
+  # the return address and the unwind data that the crash stack needs. Only
+  # those tests: the whole file takes about two minutes this way.
+  add_test(NAME skydiag_null_jump_e2e_dump_only_tests COMMAND skydiag_crash_object_e2e_tests null_jump)
+  set_tests_properties(skydiag_null_jump_e2e_dump_only_tests PROPERTIES
+    ENVIRONMENT "SKYDIAG_STACKWALK_IGNORE_LOCAL_IMAGES=1"
+  )
 
   # RAM/commit from the dump's own streams and VRAM from the helper's stream,
   # read back by the production analyzer.
