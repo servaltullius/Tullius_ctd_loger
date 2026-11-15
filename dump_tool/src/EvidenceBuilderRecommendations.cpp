@@ -29,33 +29,6 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
   return candidate.module_filename;
 }
 
-bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
-{
-  if (candidate.module_filename.empty() || module.empty()) {
-    return false;
-  }
-  return minidump::WideLower(candidate.module_filename) == minidump::WideLower(module);
-}
-
-std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
-{
-  if (r.crash_logger_direct_fault_eligible &&
-      CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
-    return en ? L"Crash Logger frame first (direct DLL fault)" : L"Crash Logger 프레임(DLL 안에서 바로 난 예외)";
-  }
-  if (r.crash_logger_first_actionable_probable_eligible &&
-      CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
-    return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
-              : L"Crash Logger 프레임(첫 번째 유력 DLL 프레임)";
-  }
-  if (r.crash_logger_probable_streak_eligible &&
-      CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
-    return en ? L"Crash Logger frame first (probable frame streak)" : L"Crash Logger 프레임(유력 DLL 프레임 연속)";
-  }
-  // Korean particles after this label assume it ends in "프레임" (이/과).
-  return en ? L"Crash Logger frame first" : L"Crash Logger 프레임";
-}
-
 bool HasDenseFirstChanceLoadingWindow(const FirstChanceSummary& summary)
 {
   return summary.recent_count >= 3u &&
@@ -189,9 +162,14 @@ void AddActionableCandidateRecommendations(
               L"을(를) 가리키지만, 둘 다 예외가 난 위치를 보여 줄 뿐입니다. " + nextKo)
           : (L"[행동 우선 후보] " + frameSupport + L"이 " + candidateName +
               L"을(를) 가리키지만, 예외가 난 위치를 보여 줄 뿐입니다. " + nextKo)));
-    r.recommendations.push_back(en
-      ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
-      : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 더 많은 정보를 담는 재수집 설정을 먼저 쓰세요.");
+    // A Low candidate (a lone frame, or a weak stack) is the isolated clue; a
+    // Medium one (a strong stack too) has the step above first: disable or
+    // update it.
+    if (topCandidate->confidence_level == i18n::ConfidenceLevel::kLow) {
+      r.recommendations.push_back(en
+        ? L"[Actionable candidate] If this clue stays isolated, prefer another capture or a richer recapture profile before escalating to FullMemory (DumpMode=2)."
+        : L"[행동 우선 후보] 이 단서가 계속 고립되어 있으면, 바로 FullMemory(DumpMode=2)로 가기 전에 다른 사고를 한 번 더 캡처하거나 더 많은 정보를 담는 재수집 설정을 먼저 쓰세요.");
+    }
     return;
   }
   if (topCandidate->status_id == "cross_validated") {

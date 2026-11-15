@@ -14,6 +14,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "AnalyzerScoringPolicy.h"
 #include "CrashLoggerParseCore.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
@@ -769,7 +770,34 @@ bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const Actio
   const auto has = [&](std::string_view family) { return CandidateHasFamily(candidate, family); };
   return r.suspects_from_stackwalk && has("actionable_stack") && !has("hang_thread_group") &&
          !has("crash_logger_frame") && !has("crash_logger_object_ref") && !has("resource_provider") &&
-         candidate.stack_weight >= 5u;
+         candidate.stack_weight >= policy::kStackWeightForMedium;
+}
+
+bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
+{
+  if (candidate.module_filename.empty() || module.empty()) {
+    return false;
+  }
+  return minidump::WideLower(candidate.module_filename) == minidump::WideLower(module);
+}
+
+std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
+{
+  if (r.crash_logger_direct_fault_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
+    return en ? L"Crash Logger frame first (direct DLL fault)" : L"Crash Logger 프레임(DLL 안에서 바로 난 예외)";
+  }
+  if (r.crash_logger_first_actionable_probable_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
+    return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
+              : L"Crash Logger 프레임(첫 번째 유력 DLL 프레임)";
+  }
+  if (r.crash_logger_probable_streak_eligible &&
+      CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
+    return en ? L"Crash Logger frame first (probable frame streak)" : L"Crash Logger 프레임(유력 DLL 프레임 연속)";
+  }
+  // Korean particles after this label assume it ends in "프레임" (이/과).
+  return en ? L"Crash Logger frame first" : L"Crash Logger 프레임";
 }
 
 bool IsWeakFaultLocationOnlySuspect(const AnalysisResult& r, const EvidenceBuildContext& ctx)

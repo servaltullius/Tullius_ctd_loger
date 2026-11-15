@@ -28,14 +28,6 @@ std::wstring DescribeCandidate(const ActionableCandidate& candidate)
   return L"(unknown)";
 }
 
-bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module)
-{
-  if (candidate.module_filename.empty() || module.empty()) {
-    return false;
-  }
-  return minidump::WideLower(candidate.module_filename) == minidump::WideLower(module);
-}
-
 bool CandidateHasFrameSupport(const ActionableCandidate& candidate)
 {
   return CandidateHasFamily(candidate, "crash_logger_frame");
@@ -61,25 +53,6 @@ bool CandidateHasScorableHistorySupport(const AnalysisResult& r, const Actionabl
 bool CandidateHasResourceSupport(const ActionableCandidate& candidate)
 {
   return CandidateHasFamily(candidate, "resource_provider");
-}
-
-std::wstring DescribeFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en)
-{
-  if (r.crash_logger_direct_fault_eligible &&
-      CandidateMatchesModule(candidate, r.crash_logger_direct_fault_module)) {
-    return en ? L"Crash Logger frame first (direct DLL fault)" : L"Crash Logger 프레임(DLL 안에서 바로 난 예외)";
-  }
-  if (r.crash_logger_first_actionable_probable_eligible &&
-      CandidateMatchesModule(candidate, r.crash_logger_first_actionable_probable_module)) {
-    return en ? L"Crash Logger frame first (first actionable probable DLL frame)"
-              : L"Crash Logger 프레임(첫 번째 유력 DLL 프레임)";
-  }
-  if (r.crash_logger_probable_streak_eligible &&
-      CandidateMatchesModule(candidate, r.crash_logger_probable_streak_module)) {
-    return en ? L"Crash Logger frame first (probable frame streak)" : L"Crash Logger 프레임(유력 DLL 프레임 연속)";
-  }
-  // Korean particles after this label assume it ends in "프레임" (이/과).
-  return en ? L"Crash Logger frame first" : L"Crash Logger 프레임";
 }
 
 std::wstring JoinWaitPath(const std::vector<std::wstring>& names)
@@ -555,7 +528,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       : (en ? L"known hook framework" : L"알려진 훅 프레임워크");
     if (topCandidateIsActionableNonHookDll && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
-      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
       summary = en
         ? (L"Crash is reported in " + who + L" (" + frameworkLabel + L"), but the paired CrashLogger log's " +
             frameSupport + L" points to DLL candidate " + candidateName +
@@ -602,7 +575,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       CandidateHasObjectRefSupport(*topCandidate);
 
     if (topCandidateMatchesFaultModule && weakFaultLocationTopCandidate) {
-      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
       const bool nearby = HasNearbyProbableDll(r);
       const std::wstring compareEn = nearby
         ? std::wstring(L" Compare nearby probable DLLs too.")
@@ -612,7 +585,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
         : std::wstring(L" Crash Logger가 함께 지목한 다른 DLL은 없습니다.");
       // A weak fault-location candidate always has a Crash Logger frame, so
       // standalone_callstack (no frame) is never true here: ask the stack.
-      if (CandidateHasFamily(*topCandidate, "actionable_stack")) {
+      if (ctx.weakFaultLocationTopCandidateWithStack) {
         summary = en
           ? (L"Crash is reported in " + who + L", and " + frameSupport +
               L" plus the same-dump stack both land in this DLL, but that still reflects the current fault-location cluster rather than an independent confirmation." +
@@ -644,7 +617,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidateMatchesFaultModule && topCandidate->status_id == "cross_validated") {
       const auto families = JoinCandidateFamilies(*topCandidate, en);
       if (topCandidateBackedByFrame) {
-        const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+        const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
         summary = en
           ? (L"Top suspect: " + who + L" — " + frameSupport + L" and another signal agree on this DLL (" + families +
               L"). (Confidence: " + topCandidateConf + L")")
@@ -665,7 +638,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           : (L"크래시 위치가 " + who + L"로 보고되었고, Tullius 콜스택도 이 DLL을 가리킵니다. "
               L"이는 프레임 단서 하나보다 강하지만, 여전히 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
       } else if (topCandidateBackedByFrame) {
-        const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+        const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
         const auto families = JoinCandidateFamilies(*topCandidate, en);
         if (topCandidateHasFirstChanceSupport || topCandidateHasHistorySupport || topCandidateHasResourceSupport || topCandidateHasObjectRefSupport) {
           summary = en
@@ -692,7 +665,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidateMatchesFaultModule && topCandidate->status_id == "reference_clue") {
       const auto candidateName = DescribeCandidate(*topCandidate);
       if (topCandidateBackedByFrame) {
-        const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+        const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
         summary = en
           ? (L"Crash is reported in " + who + L", and " + frameSupport +
               L" points inside this DLL, but no second independent signal agrees yet. Treat it as a clue first. (Confidence: " + topCandidateConf + L")")
@@ -723,7 +696,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
           : (L"크래시 위치가 " + who + L"로 보고되었지만, Tullius 콜스택은 DLL 후보 " + candidateName +
               L"을(를) 가리킵니다. 예외가 난 DLL은 피해 위치일 수 있습니다. (신뢰도: " + topCandidateConf + L")");
       } else if (topCandidateBackedByFrame) {
-        const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+        const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
         summary = en
           ? (L"Crash is reported in " + who + L", but " + frameSupport + L" points to DLL candidate " + candidateName +
               L" (" + families + L"). The faulting DLL can still be a victim location. (Confidence: " + topCandidateConf + L")")
@@ -755,7 +728,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
             L" 입니다. (" + families + L", 신뢰도: " + topCandidateConf + L")");
     } else if (topCandidate && topCandidateHasFrame && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
-      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
       const bool hasFirstChanceSupport = CandidateHasScorableFirstChanceSupport(r, *topCandidate);
       const bool hasHistorySupport = CandidateHasScorableHistorySupport(r, *topCandidate);
       const bool hasResourceSupport = CandidateHasResourceSupport(*topCandidate);
@@ -850,7 +823,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
     } else if (topCandidate && topCandidateHasFrame && topCandidateBackedByFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
       const auto families = JoinCandidateFamilies(*topCandidate, en);
-      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
       const bool hasFirstChanceSupport = CandidateHasScorableFirstChanceSupport(r, *topCandidate);
       const bool hasHistorySupport = CandidateHasScorableHistorySupport(r, *topCandidate);
       const bool hasResourceSupport = CandidateHasResourceSupport(*topCandidate);
@@ -885,7 +858,7 @@ std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, 
       }
     } else if (topCandidate && topCandidate->status_id == "reference_clue" && topCandidateHasFrame) {
       const auto candidateName = DescribeCandidate(*topCandidate);
-      const auto frameSupport = DescribeFrameSupport(r, *topCandidate, en);
+      const auto frameSupport = DescribeCrashLoggerFrameSupport(r, *topCandidate, en);
       summary = en
         ? (L"Crash is reported in the game executable, and " + frameSupport + L" points to DLL candidate " + candidateName +
             L". No second independent signal agrees yet. (Confidence: " + topCandidateConf + L")")

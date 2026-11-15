@@ -722,10 +722,11 @@ void BuildActionableCandidates(AnalysisResult& r, i18n::Language lang, const Evi
     candidate.status_id = hasStackSupport ? "related" : "reference_clue";
     // The frame names the same fault location as the stack, so it adds
     // nothing, and it must take nothing away either: without a Crash Logger
-    // log the stack alone gives this candidate Medium from a stack weight of 5
-    // (strongStackOnly in CandidateConsensus.cpp). Low here made a crash in a
-    // mod's DLL weaker for players who run Crash Logger.
-    const bool stackAloneIsMedium = hasStackSupport && candidate.stack_weight >= 5u;
+    // log the stack alone gives this candidate Medium from
+    // policy::kStackWeightForMedium (strongStackOnly in CandidateConsensus.cpp).
+    // Low here made a crash in a mod's DLL weaker for players who run Crash
+    // Logger.
+    const bool stackAloneIsMedium = hasStackSupport && candidate.stack_weight >= policy::kStackWeightForMedium;
     candidate.confidence_level = stackAloneIsMedium ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
     candidate.confidence = i18n::ConfidenceText(lang, candidate.confidence_level);
     candidate.cross_validated = false;
