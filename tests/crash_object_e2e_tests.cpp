@@ -695,8 +695,10 @@ skydiag::dump_tool::AnalysisResult AnalyzeNullJumpDump(DWORD tid, CONTEXT ctx, s
     skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err),
     "AnalyzeDump failed on the null jump dump");
   Require(result.fault_instruction.verdict == "null_jump", "The fault reads as a null jump");
-  // Kept when a check above fails, for reading the dump.
-  std::filesystem::remove_all(outBase);
+  // Kept when a check above fails, for reading the dump. A file still held
+  // (an antivirus scanning the new dump) leaves the folder, not a failure.
+  std::error_code ec;
+  std::filesystem::remove_all(outBase, ec);
   return result;
 }
 

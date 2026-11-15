@@ -130,8 +130,14 @@ constexpr bool SecondaryCallstackCanBeMedium(
   return score >= minimumScore && firstDepth <= maximumDepth;
 }
 
+// A stack walk alone makes a candidate Medium from this weight. Candidate
+// consensus (strongStackOnly), the standalone-callstack test and the
+// fault-location post-processing read this one value, so a crash in a mod's
+// DLL gets the same confidence with or without a Crash Logger log.
+inline constexpr std::uint32_t kStackWeightForMedium = 5u;
+
 // Candidate-consensus weights must not silently upgrade a Low/Unknown
-// stackwalk suspect into the standalone Medium threshold (weight >= 5).
+// stackwalk suspect into the standalone Medium threshold (kStackWeightForMedium).
 constexpr std::uint32_t ActionableStackSignalWeight(
   bool fromStackwalk,
   bool symbolRuntimeDegraded,
@@ -144,7 +150,7 @@ constexpr std::uint32_t ActionableStackSignalWeight(
   if (symbolRuntimeDegraded || !suspectAtLeastMedium) {
     return firstVisibleSuspect ? 3u : 2u;
   }
-  return firstVisibleSuspect ? 5u : 4u;
+  return firstVisibleSuspect ? kStackWeightForMedium : kStackWeightForMedium - 1u;
 }
 
 }  // namespace skydiag::dump_tool::internal::policy

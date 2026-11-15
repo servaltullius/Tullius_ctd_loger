@@ -357,7 +357,11 @@ void BuildSuspectEvidence(AnalysisResult& r, i18n::Language lang, const Evidence
       }
     }
     e.details = JoinList(display, 3, L", ");
-    if (weakFaultLocationOnly) {
+    if (ctx.weakFaultLocationTopCandidateWithStack) {
+      e.details += en
+        ? L" — Crash Logger's frame and the stack both land in this DLL, but both read where the exception happened."
+        : L" — Crash Logger 프레임과 스택이 모두 이 DLL을 가리키지만, 둘 다 예외가 난 위치를 보는 것입니다.";
+    } else if (weakFaultLocationOnly) {
       e.details += en
         ? L" — current signal is still fault-location only."
         : L" — 지금은 예외가 난 위치라는 단서만 있습니다.";

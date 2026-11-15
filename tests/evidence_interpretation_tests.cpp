@@ -363,6 +363,8 @@ void TestFrameOnlyFaultLocationDoesNotClaimTheStack()
       "a frame-only fault-location clue, Low");
     Require(AnyStartsWith(r.recommendations, en ? L"[Actionable candidate]" : L"[행동 우선 후보]"), "candidate advice");
     Require(!AnyContains(r.recommendations, stackClaim), "no stack agreement without a stack signal");
+    Require(AnyContains(r.recommendations, en ? L"If this clue stays isolated" : L"이 단서가 계속 고립되어 있으면"),
+      "a lone frame keeps the recapture advice");
 
     auto withStack = MakeCrashIn(L"Mod.dll", modPath);
     withStack.crash_logger_direct_fault_eligible = true;
@@ -412,6 +414,19 @@ void TestCrashLoggerFrameDoesNotWeakenAFaultDllLead()
     Require(Contains(withFrame.summary_sentence, en ? L"same-dump stack" : L"같은 덤프의 스택") &&
               Contains(withFrame.summary_sentence, en ? L"(Confidence: Medium)" : L"(신뢰도: 중간)"),
       "the summary says the frame and the stack both land there, at Medium");
+    // The other outputs say the same, not "a lone clue" (review of #305).
+    const std::wstring isolated = en ? L"If this clue stays isolated" : L"이 단서가 계속 고립되어 있으면";
+    Require(!AnyContains(withFrame.recommendations, isolated), "no recapture advice for a Medium lead");
+    bool evidenceSaysBoth = false;
+    bool evidenceSaysLoneClue = false;
+    for (const auto& e : withFrame.evidence) {
+      evidenceSaysBoth = evidenceSaysBoth ||
+        Contains(e.details, en ? L"Crash Logger's frame and the stack both land in this DLL"
+                               : L"Crash Logger 프레임과 스택이 모두 이 DLL을 가리키지만");
+      evidenceSaysLoneClue = evidenceSaysLoneClue ||
+        Contains(e.details, en ? L"still fault-location only" : L"예외가 난 위치라는 단서만 있습니다");
+    }
+    Require(evidenceSaysBoth && !evidenceSaysLoneClue, "the evidence says both land there, not that it is a lone clue");
 
     // A weak stack (a Low suspect: stack weight 3) is Low alone, and so with
     // the frame: the frame does not lift it either.
@@ -424,6 +439,7 @@ void TestCrashLoggerFrameDoesNotWeakenAFaultDllLead()
               weakWithFrame.actionable_candidates[0].stack_weight < 5u &&
               weakWithFrame.actionable_candidates[0].confidence_level == i18n::ConfidenceLevel::kLow,
       "a weak stack with the frame stays Low");
+    Require(AnyContains(weakWithFrame.recommendations, isolated), "a Low lead keeps the recapture advice");
   }
 }
 

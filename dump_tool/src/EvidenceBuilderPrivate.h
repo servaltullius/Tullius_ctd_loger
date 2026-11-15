@@ -73,6 +73,10 @@ struct EvidenceBuildContext
   bool weakFaultLocationSuspect = false;
   // IsWeakFaultLocationActionableCandidate for actionable_candidates[0].
   bool weakFaultLocationTopCandidate = false;
+  // That candidate also has the stack walk: Crash Logger's frame and the
+  // stack both land in the fault DLL. Medium when the stack is strong
+  // (BuildActionableCandidates), so the outputs do not call it a lone clue.
+  bool weakFaultLocationTopCandidateWithStack = false;
 
   HitchSummary hitch{};
   std::optional<WctInfo> wct{};
@@ -167,12 +171,17 @@ std::wstring DescribeDialogNamedFiles(const ModalDialogWaitInfo& modal, bool en)
 // stays a mod.
 bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename);
 bool CandidateHasFamily(const ActionableCandidate& candidate, std::string_view familyId);
+// The candidate is that module (file names compared without case).
+bool CandidateMatchesModule(const ActionableCandidate& candidate, std::wstring_view module);
+// Which Crash Logger frame backs the candidate, for the summary sentence and
+// the recommendations ("Crash Logger 프레임(DLL 안에서 바로 난 예외)").
+std::wstring DescribeCrashLoggerFrameSupport(const AnalysisResult& r, const ActionableCandidate& candidate, bool en);
 // One signal family's name in the summary, the checklist and the share text
 // ("Crash Logger 프레임"), and a candidate's families joined with " + ".
 std::wstring DescribeCandidateFamily(std::string_view familyId, bool en);
 std::wstring JoinCandidateFamilies(const ActionableCandidate& candidate, bool en);
 // The candidate rests on the Tullius callstack alone: a real stack walk (not
-// the pointer scan) put it first with Medium weight (>= 5), and no Crash Logger
+// the pointer scan) put it first with Medium weight (policy::kStackWeightForMedium), and no Crash Logger
 // frame or object ref, nearby resource or thread group backs it. History and
 // first-chance context do not count toward that weight.
 bool CandidateHasStandaloneCallstackSupport(const AnalysisResult& r, const ActionableCandidate& candidate);

@@ -137,6 +137,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.weakFaultLocationSuspect = internal::IsWeakFaultLocationOnlySuspect(r, ctx);
   ctx.weakFaultLocationTopCandidate = !r.actionable_candidates.empty() &&
     internal::IsWeakFaultLocationActionableCandidate(r, r.actionable_candidates[0], ctx);
+  ctx.weakFaultLocationTopCandidateWithStack = ctx.weakFaultLocationTopCandidate &&
+    internal::CandidateHasFamily(r.actionable_candidates[0], "actionable_stack");
   if (ctx.weakFaultLocationSuspect && !r.suspects.empty()) {
     auto& topSuspect = r.suspects[0];
     topSuspect.confidence_level = i18n::ConfidenceLevel::kLow;

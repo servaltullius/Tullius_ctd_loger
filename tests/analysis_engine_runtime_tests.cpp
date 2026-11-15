@@ -1943,12 +1943,14 @@ void TestCrashLoggerFrameFixture_ExeVictimFirstProbableDllRuntimeContracts()
   const auto log = ReadCrashLoggerFrameFixture("exe_victim_first_probable_dll.log.txt");
   const auto summaryCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderSummary.cpp");
   const auto recommendationCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderRecommendations.cpp");
+  // The frame wording the summary and the recommendations share.
+  const auto frameWordingCpp = ReadAllText(root / "dump_tool" / "src" / "EvidenceBuilderUtil.cpp");
 
   AssertContains(log, "SkyrimSE.exe+0x00ABCDEF",
                  "exe_victim_first_probable_dll.log.txt: fixture must keep the EXE victim direct-fault token.");
   AssertContains(log, "ExampleMod.dll+00000003",
                  "exe_victim_first_probable_dll.log.txt: fixture must keep the first actionable probable DLL frame.");
-  AssertContains(summaryCpp, "Crash Logger frame first",
+  AssertContains(frameWordingCpp, "Crash Logger frame first",
                  "exe_victim_first_probable_dll.log.txt: EXE victim summaries must keep frame-first wording.");
   AssertContains(summaryCpp, "stronger than an isolated object ref",
                  "exe_victim_first_probable_dll.log.txt: frame-backed DLL guidance must outrank isolated object refs.");

@@ -1,5 +1,7 @@
 #include "CandidateConsensus.h"
 
+#include "AnalyzerScoringPolicy.h"
+
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -224,7 +226,7 @@ void RefreshCandidateFields(CandidateRow* row, i18n::Language language)
   const bool frameOnly = hasCrashLoggerFrame && !hasStack && !hasCrashLoggerObjectRef;
   const bool strongFrameOnly = frameOnly && FamilyWeight(*row, kFamilyCrashLoggerFrame) >= 6u;
   const bool stackOnly = hasStack && !hasCrashLoggerFrame && !hasCrashLoggerObjectRef;
-  const bool strongStackOnly = stackOnly && FamilyWeight(*row, kFamilyStack) >= 5u;
+  const bool strongStackOnly = stackOnly && FamilyWeight(*row, kFamilyStack) >= internal::policy::kStackWeightForMedium;
   const bool objectRefWithHistory =
     hasCrashLoggerObjectRef &&
     HasFamily(candidate, kFamilyHistory) &&

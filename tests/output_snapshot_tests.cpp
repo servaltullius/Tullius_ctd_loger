@@ -332,10 +332,13 @@ void TestCrashLoggerFrameCandidateFamilySourceGuards()
 
 void TestCrashLoggerFrameFirstSummaryPrioritySourceGuards()
 {
+  // EvidenceBuilderUtil.cpp holds the frame wording the summary and the
+  // recommendations share (DescribeCrashLoggerFrameSupport).
   const std::string summarySrc = ReadProjectConcatenatedText({
     "dump_tool/src/EvidenceBuilder.cpp",
     "dump_tool/src/EvidenceBuilderSummary.cpp",
     "dump_tool/src/EvidenceBuilderRecommendations.cpp",
+    "dump_tool/src/EvidenceBuilderUtil.cpp",
     "dump_tool/src/OutputWriter.Summary.cpp",
   });
 
