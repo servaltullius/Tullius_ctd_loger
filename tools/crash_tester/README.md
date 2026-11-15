@@ -31,10 +31,11 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 | Ctrl+Shift+F9 | CrashTester.dll 안의 무한 재귀 | `0xC00000FD`(스택 오버플로), 후보 CrashTester.dll |
 | Ctrl+Shift+F10 | 작업 스레드가 CrashTester.dll 안에서 45초 동안 CPU를 돌림 | 대기가 아니라 바쁘게 도는 프리징. 막힌 작업 스레드의 CrashTester.dll을 후보로 |
 | Ctrl+Shift+F11 | 저널 메뉴를 열어, 메뉴 이벤트 콜백이 45초 동안 붙잡음 | 게임이 부른 플러그인 콜백의 프리징. 후보 CrashTester.dll |
+| Ctrl+Shift+End | CrashTester.dll이 비어 있는(null) 함수 포인터를 `call`로 부름(설정되지 않은 콜백, vtable 칸, 후킹의 원래 함수를 부르는 경우) | `null_jump` 판정("비어 있는(null) 함수 포인터로 함수를 부르다가 튕겼습니다"). v0.2.76-rc3부터 콜스택이 `0x0`, `CrashTester.dll!CallEmptyFunctionPointer`, 게임의 작업 처리 프레임 순으로 이어지고 Crash Logger의 `PROBABLE CALL STACK`과 앞부분 순서가 같음(ADR-0019). 호출이 `call rax`(rax=0)로 빌드되므로 근거에 "호출한 곳은 CrashTester.dll+…(call rax)입니다"가 나옴. 후보 CrashTester.dll. 그 이전 분석기에서는 콜스택이 비고 스택 스캔으로만 짚음 |
 | Ctrl+Shift+Insert | SkyrimSE.exe 안의 같은 주소에서 나는 접근 위반을 CrashTester.dll이 스스로 잡기를 15초 간격으로 6번 반복(홀수 번째는 게임의 작업 스레드, 짝수 번째는 CrashTester.dll 스레드). 크래시가 아니며, 끝난 뒤 다시 누를 수 있음 | 처음 두 번만 덤프를 쓰고, 세 번째부터는 덤프 없이 지나감(ADR-0031). 아래 "반복되는 처리된 예외" 참고 |
 | Ctrl+Shift+Delete | 위와 같은 접근 위반을 15초 간격으로 두 번 잡은 뒤, 세 번째는 게임의 작업 스레드에서 잡지 않고 둠(크래시) | 덤프를 먼저 쓰지 않게 된 주소에서 난 진짜 크래시가 기록됨(ADR-0031 Decision 2). 아래 "두 번 처리된 뒤의 진짜 크래시" 참고 |
 
-크래시 단축키(F1·F2·F3·F5~F9, Delete)는 게임 한 번에 하나만 동작합니다. 결과는 `scripts/accuracy_benchmark.py`로 정확도 측정 세트에 넣습니다(DEVELOPMENT의 Accuracy Benchmark). 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
+크래시 단축키(F1·F2·F3·F5~F9, End, Delete)는 게임 한 번에 하나만 동작합니다. 결과는 `scripts/accuracy_benchmark.py`로 정확도 측정 세트에 넣습니다(DEVELOPMENT의 Accuracy Benchmark). 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
 
 ## 반복되는 처리된 예외 (Ctrl+Shift+Insert)
 
@@ -88,7 +89,7 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 
 ```
 [CrashTester]
-AutoScenario=1      ; 1: 프리징 2번 뒤 가장 가까운 NPC로 F1, 2: F2, 3: F3, 4: F6, 5: F7, 6: F8, 7: F9, 8: F10, 9: F11, 10: F5, 11: Insert, 12: Delete, 0: 단축키만
+AutoScenario=1      ; 1: 프리징 2번 뒤 가장 가까운 NPC로 F1, 2: F2, 3: F3, 4: F6, 5: F7, 6: F8, 7: F9, 8: F10, 9: F11, 10: F5, 11: Insert, 12: Delete, 13: End, 0: 단축키만
 SaveName=<세이브 파일 이름, .ess 제외>
 StartDelaySec=20
 RepeatCount=6         ; Insert 시나리오가 예외를 내는 횟수(1~50). 단축키에도 적용
