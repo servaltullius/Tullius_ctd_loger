@@ -320,6 +320,17 @@ bool MinidumpMemoryView::Init(void* dumpBase, std::uint64_t dumpSize, const std:
 
 bool MinidumpMemoryView::Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const
 {
+  if (ReadDump(addr, dst, n, outRead)) {
+    return true;
+  }
+  if (!dst || n == 0 || ranges.empty()) {
+    return false;
+  }
+  return image_fallback && image_fallback->Read(addr, dst, n, outRead);
+}
+
+bool MinidumpMemoryView::ReadDump(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const
+{
   outRead = 0;
   if (!dst || n == 0 || ranges.empty()) {
     return false;
@@ -329,11 +340,11 @@ bool MinidumpMemoryView::Read(std::uint64_t addr, void* dst, std::size_t n, std:
     return value < r.start;
   });
   if (it == ranges.begin()) {
-    return image_fallback && image_fallback->Read(addr, dst, n, outRead);
+    return false;
   }
   auto current = it - 1;
   if (addr < current->start || addr >= current->end || !current->bytes) {
-    return image_fallback && image_fallback->Read(addr, dst, n, outRead);
+    return false;
   }
   // Continue into ranges that start exactly where the previous one ends.
   auto* out = static_cast<std::uint8_t*>(dst);

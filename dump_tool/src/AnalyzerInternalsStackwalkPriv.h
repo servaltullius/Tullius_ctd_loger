@@ -77,7 +77,13 @@ struct MinidumpMemoryView
 
   bool Init(void* dumpBase, std::uint64_t dumpSize, const std::vector<minidump::ThreadRecord>* threads);
 
+  // The dump's memory, and for an address the dump does not have, the
+  // matching local module file (image_fallback).
   bool Read(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
+
+  // The dump's own memory only. For code bytes of the game: a local
+  // SkyrimSE.exe has its code encrypted on disk.
+  bool ReadDump(std::uint64_t addr, void* dst, std::size_t n, std::size_t& outRead) const;
 };
 
 // ADR-0011: PE data that the dump itself carries for a module (headers,

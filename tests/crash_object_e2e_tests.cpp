@@ -695,6 +695,8 @@ skydiag::dump_tool::AnalysisResult AnalyzeNullJumpDump(DWORD tid, CONTEXT ctx, s
     skydiag::dump_tool::AnalyzeDump(dumpPath.wstring(), outBase.wstring(), opt, result, &err),
     "AnalyzeDump failed on the null jump dump");
   Require(result.fault_instruction.verdict == "null_jump", "The fault reads as a null jump");
+  // Kept when a check above fails, for reading the dump.
+  std::filesystem::remove_all(outBase);
   return result;
 }
 
@@ -740,6 +742,48 @@ void TestNullJumpCrashStackStartsAtTheCaller()
     Require(goesOn, "The walk goes on below the caller");
     Require(result.stackwalk_primary_tid == faulting.tid(), "The crashed thread's stack is the one shown");
   }
+}
+
+// Code of this executable that no unwind entry covers, as hand-written code
+// in a mod's DLL is: a `call rax` whose return address is byte 16. It is
+// never run. Merged into .text: the dump writer keeps this executable's
+// code sections whole (it is the game's image to it), and a section of
+// its own is not one of them.
+#pragma section(".sdcode", execute, read)
+#pragma comment(linker, "/MERGE:.sdcode=.text")
+__declspec(allocate(".sdcode")) const std::uint8_t kCodeWithoutUnwindData[32] = {
+  0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+  0xFF, 0xD0,                                                              // call rax
+  0xC3, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC,
+};
+
+// A caller without unwind data is still the caller, and the last frame: the
+// walk cannot find what is below it. The stack's top is the return address
+// in kCodeWithoutUnwindData, and the slot above it holds a real return
+// address (the parked thread's), which a walk that guessed on from the next
+// stack slot would show as a third frame.
+void TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack()
+{
+  ParkedThread faulting;
+  CONTEXT ctx = faulting.Context();
+  std::uint64_t realReturnAddress = 0;
+  std::memcpy(&realReturnAddress, reinterpret_cast<const void*>(ctx.Rsp), sizeof(realReturnAddress));
+  volatile std::uint64_t slots[2] = { reinterpret_cast<std::uint64_t>(&kCodeWithoutUnwindData[16]), realReturnAddress };
+  ctx.Rsp = reinterpret_cast<std::uint64_t>(&slots[0]);
+  const auto result = AnalyzeNullJumpDump(faulting.tid(), ctx, 0);
+
+  const auto& frames = result.stackwalk_display_frames;
+  const auto lower = [](const std::wstring& text) { return skydiag::dump_tool::minidump::WideLower(text); };
+  const bool twoFrames = frames.size() == 2u && frames[0] == L"0x0" &&
+                         lower(frames[1]).find(L"skydiag_crash_object_e2e_tests.exe") != std::wstring::npos;
+  if (!twoFrames) {
+    PrintCrashStack("null jump crash stack of a caller without unwind data", frames);
+  }
+  Require(twoFrames, "The crash stack is the fault address and the caller, and ends there");
+  Require(result.stackwalk_truncation == "no_unwind_info", "The report says the stack was cut for lack of unwind data");
+  Require(
+    lower(result.stackwalk_truncation_module) == L"skydiag_crash_object_e2e_tests.exe",
+    "The cut is at the caller's module");
 }
 
 // An address in this executable's code that no call instruction ends right
@@ -1426,6 +1470,7 @@ int main(int argc, char** argv)
   try {
     if (nullJumpOnly) {
       TestNullJumpCrashStackStartsAtTheCaller();
+      TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack();
       TestNullJumpWithoutAReturnAddressGetsNoCrashStack();
       std::puts("null jump e2e tests passed");
       return 0;
@@ -1433,6 +1478,7 @@ int main(int argc, char** argv)
     TestGameLockMemoryWindows();
     TestCrashObjectsAreReadBackFromTheDump();
     TestNullJumpCrashStackStartsAtTheCaller();
+    TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack();
     TestNullJumpWithoutAReturnAddressGetsNoCrashStack();
     TestRepeatedSaveLoadCrashFromTheDumps();
     TestHangObjectsAreReadBackFromTheDump();

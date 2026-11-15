@@ -273,11 +273,6 @@ bool TryComputeStackwalkSuspects(
     }
   }
 
-  // Only the dump's own memory, for code bytes of the game: a local
-  // SkyrimSE.exe has its code encrypted on disk.
-  MinidumpMemoryView dumpOnly = mem;
-  dumpOnly.image_fallback = nullptr;
-
   Candidate best{};
   Candidate bestAny{};
   for (const auto tid : targetTids) {
@@ -328,13 +323,14 @@ bool TryComputeStackwalkSuspects(
           return bytes;
         }
         const auto& module = modules[*mi];
-        // The game's bytes from the dump alone; other modules' local files
-        // fill in what the dump lacks (mem reads the dump first).
-        const MinidumpMemoryView& view = module.is_game_exe ? dumpOnly : mem;
         const auto wanted = std::min<std::uint64_t>(kMaxX64InstructionBytes, address - module.base);
         bytes.resize(static_cast<std::size_t>(wanted));
+        const std::uint64_t from = address - bytes.size();
         std::size_t got = 0;
-        const bool read = !bytes.empty() && view.Read(address - bytes.size(), bytes.data(), bytes.size(), got);
+        // The game's bytes from the dump alone (its local file has the code
+        // encrypted); other modules' local files fill in what the dump lacks.
+        const bool read = !bytes.empty() && (module.is_game_exe ? mem.ReadDump(from, bytes.data(), bytes.size(), got)
+                                                                : mem.Read(from, bytes.data(), bytes.size(), got));
         if (!read || got != bytes.size()) {
           bytes.clear();
         }
@@ -377,7 +373,7 @@ bool TryComputeStackwalkSuspects(
         pcs,
         kModalApiMaxDepth + 16u);
       // The calls the top frames made, for ClassifyMainThreadWait. Only the
-      // dump's own memory (dumpOnly).
+      // dump's own memory: a local SkyrimSE.exe has its code encrypted on disk.
       constexpr std::size_t kCodeBeforeBytes = 0x60;
       constexpr std::size_t kCodeFrames = 12;
       for (std::size_t i = 0; i < outModalProbeFrames->size() && i < kCodeFrames; ++i) {
@@ -387,7 +383,7 @@ bool TryComputeStackwalkSuspects(
         }
         std::vector<std::uint8_t> bytes(kCodeBeforeBytes);
         std::size_t got = 0;
-        if (dumpOnly.Read(frame.pc - kCodeBeforeBytes, bytes.data(), bytes.size(), got) && got == bytes.size()) {
+        if (mem.ReadDump(frame.pc - kCodeBeforeBytes, bytes.data(), bytes.size(), got) && got == bytes.size()) {
           frame.code_before = std::move(bytes);
         }
       }
