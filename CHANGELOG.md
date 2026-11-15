@@ -2,7 +2,7 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
-## v0.2.76 (미배포)
+## v0.2.76 (2026-11-15)
 
 v0.2.76-rc1\~rc3를 묶어 정식으로 내는 릴리즈입니다. rc3 이후에는 배포되는 파일의 코드가 바뀌지 않았습니다(개발용 크래시 테스터와 문서만, 아래 "rc3 이후 바뀐 것"). v0.2.75에서 올리면 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었으니 ZIP 전체를 설치해 주세요(SharedLayout protocol v4는 그대로). MO2에서 새 모드로 설치했다면 이전 버전 모드는 꺼 주세요. 새 설정은 `SkyrimDiag.ini`의 `UnhandledCrashHoldMs`(기본 5000)와 `SkyrimDiagHelper.ini`의 `MaxForcedCloseCrashDumps`(기본 3), `KeepSlowShutdownHangDumps`(기본 0)입니다.
 
