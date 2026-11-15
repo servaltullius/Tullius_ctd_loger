@@ -19,7 +19,9 @@
 //   F9  stack overflow from recursion inside CrashTester.dll
 //   F10 game job thread spinning in CrashTester.dll for 45 s (a busy freeze)
 //   F11 menu event sink holding the game for 45 s when the Journal Menu opens
-//   Ins the same access violation inside SkyrimSE.exe, caught by
+//   End a call through an empty (null) function pointer from CrashTester.dll:
+//       execution at address 0, the caller's return address on the stack
+//   Insthe same access violation inside SkyrimSE.exe, caught by
 //       CrashTester.dll, 6 times 15 s apart, on the game's task thread and a
 //       thread of CrashTester.dll in turn; not a crash, may be pressed again
 //   Del the same access violation caught twice, 15 s apart, and the third
@@ -98,6 +100,19 @@ __declspec(noinline) void AccessViolationWith(RE::TESObjectREFR* ref)
 __declspec(noinline) void Breakpoint()
 {
   __debugbreak();
+}
+
+// The End scenario: a mod calling a callback, a vtable slot or a hook's
+// original function that was never set (ADR-0019 null_jump). volatile keeps
+// the compiler from knowing the pointer is empty. The log line after the call
+// keeps it a call: as the function's last statement it could become a tail
+// jmp, which leaves no return address of this function on the stack.
+__declspec(noinline) void CallEmptyFunctionPointer()
+{
+  using Callback = void (*)();
+  volatile Callback callback = nullptr;
+  callback();
+  spdlog::warn("CrashTester: the empty function pointer returned");
 }
 
 // Scenario 3.
@@ -538,6 +553,7 @@ void HotkeyLoop(const std::stop_token& stop)
   std::array<bool, 12> wasDown{};
   bool insertWasDown = false;
   bool deleteWasDown = false;
+  bool endWasDown = false;
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -566,6 +582,9 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool deleteDown = (GetAsyncKeyState(VK_DELETE) & 0x8000) != 0;
     const bool del = deleteDown && !deleteWasDown;
     deleteWasDown = deleteDown;
+    const bool endDown = (GetAsyncKeyState(VK_END) & 0x8000) != 0;
+    const bool end = endDown && !endWasDown;
+    endWasDown = endDown;
     if (ctrl && shift) {
       if (insert && !g_repeatRunning.exchange(true)) {
         RepeatHandledEngineFault(
@@ -587,6 +606,9 @@ void HotkeyLoop(const std::stop_token& stop)
       }
       if (f5 && !g_crashQueued.exchange(true)) {
         CaughtThenRealCrash("F5 caught access violation, a real one 2 s later");
+      }
+      if (end && !g_crashQueued.exchange(true)) {
+        RunOnMainThread("End call through an empty function pointer", [] { CallEmptyFunctionPointer(); });
       }
       if (f10 && !g_freezeRunning.exchange(true)) {
         SpinJobThread();
@@ -628,9 +650,9 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..12 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+// AutoScenario=1..13 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
 //                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
-//                     10: F5; 11: Insert; 12: Delete).
+//                     10: F5; 11: Insert; 12: Delete; 13: End).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
@@ -793,6 +815,9 @@ void RunAutoScenario()
         kHandledBeforeUnhandled + 1, kHandledBeforeUnhandled + 1);
     }
     break;
+  case 13:
+    RunOnMainThread("auto End call through an empty function pointer", [] { CallEmptyFunctionPointer(); });
+    break;
   default:
     break;
   }
@@ -859,6 +884,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   g_auto = ReadAutoConfig();
   spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
                "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
+               "End empty function pointer call, "
                "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled "
                "(top-level filter hold {} ms); AutoScenario={} SaveName={}",
     g_repeatCount.load(), g_repeatIntervalSec.load(), g_unhandledHoldMs.load(), g_auto.scenario, g_auto.saveName);
