@@ -909,7 +909,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   g_auto = ReadAutoConfig();
   spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
                "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
-               "End empty function pointer call, "
+               "End empty function pointer call, Home FormID used as a form pointer, "
                "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled "
                "(top-level filter hold {} ms); AutoScenario={} SaveName={}",
     g_repeatCount.load(), g_repeatIntervalSec.load(), g_unhandledHoldMs.load(), g_auto.scenario, g_auto.saveName);
