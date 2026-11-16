@@ -1243,6 +1243,15 @@ void TestStackScanOnlyCandidateIsNearby()
     Require(!Contains(BuildQuickAnswer(framed, lang, ctx).why_not_certain,
               en ? L"only seen nearby in memory" : L"메모리 근처에서 보였을 뿐"),
       "a Crash Logger frame is more than a nearby slot");
+
+    // The crash inside the scan's module: it crashed there, not only nearby.
+    auto inside = CrashIn(L"ExampleMod.dll", L"Example Mod");
+    inside.actionable_candidates.push_back(Candidate(
+      "related", i18n::ConfidenceLevel::kLow, L"ExampleMod.dll", L"Example Mod", { "actionable_stack" }));
+    const auto insideQa = BuildQuickAnswer(inside, lang, CrashContext(en, inside.fault_module_filename));
+    Require(insideQa.suspect_mod == L"Example Mod" &&
+              Contains(insideQa.why_not_certain, en ? L"crashed inside this mod" : L"이 모드 안에서 튕겼지만"),
+      "the fault module keeps 'crashed inside'");
   }
 }
 

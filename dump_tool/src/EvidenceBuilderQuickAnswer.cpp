@@ -335,8 +335,9 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
   if (lead.type == LeadType::kMod && lead.is_plugin_file && lead.case_id == "candidate") {
     lead.case_id = "object_ref";
   }
+  // The module the crash is in is more than a nearby slot (kInsideMod).
   if (lead.doubt == Doubt::kNone && lead.case_id == "candidate" && top && CandidateFromStackScanOnly(r, *top) &&
-      SameFile(lead.file, BaseName(top->module_filename))) {
+      SameFile(lead.file, BaseName(top->module_filename)) && !SameFile(lead.file, BaseName(r.fault_module_filename))) {
     lead.doubt = Doubt::kNearbyOnly;
   }
   if (lead.type != LeadType::kNone) {
