@@ -35,6 +35,21 @@ i18n::ConfidenceLevel ConfidenceForSecondaryCallstackLevel(std::uint32_t score, 
     : i18n::ConfidenceLevel::kLow;
 }
 
+std::vector<StackFrameKind> FrameKinds(const std::vector<ModuleInfo>& modules, const std::vector<std::uint64_t>& pcs)
+{
+  std::vector<StackFrameKind> kinds;
+  kinds.reserve(pcs.size());
+  for (const auto pc : pcs) {
+    const auto mi = FindModuleIndexForAddress(modules, pc);
+    kinds.push_back(
+      !mi                          ? StackFrameKind::kUnknown
+      : modules[*mi].is_systemish  ? StackFrameKind::kSystem
+      : modules[*mi].is_game_exe   ? StackFrameKind::kGame
+                                   : StackFrameKind::kPlugin);
+  }
+  return kinds;
+}
+
 }  // namespace
 
 std::vector<bool> MarkThreadEntryHookPcs(
@@ -47,17 +62,15 @@ std::vector<bool> MarkThreadEntryHookPcs(
   if (!walkReachedThreadStart) {
     return std::vector<bool>(pcs.size(), false);
   }
-  std::vector<StackFrameKind> kinds;
-  kinds.reserve(pcs.size());
-  for (const auto pc : pcs) {
-    const auto mi = FindModuleIndexForAddress(modules, pc);
-    kinds.push_back(
-      !mi                          ? StackFrameKind::kUnknown
-      : modules[*mi].is_systemish  ? StackFrameKind::kSystem
-      : modules[*mi].is_game_exe   ? StackFrameKind::kGame
-                                   : StackFrameKind::kPlugin);
-  }
-  return MarkThreadEntryHookFrames(kinds);
+  return MarkThreadEntryHookFrames(FrameKinds(modules, pcs));
+}
+
+bool CompleteWalkWithoutPluginFrames(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  bool walkReachedThreadStart)
+{
+  return NoPluginOnCompleteWalk(FrameKinds(modules, pcs), walkReachedThreadStart);
 }
 
 std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(

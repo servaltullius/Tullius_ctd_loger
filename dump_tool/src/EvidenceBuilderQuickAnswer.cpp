@@ -661,6 +661,24 @@ void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answ
   answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
 }
 
+// ADR-0034: with no mod named, a crash mechanism that has its own headline
+// (the Papyrus script loader) says what the game was doing and what to check
+// in place of "share this report". It names no mod and sets no likelihood.
+void AddMechanismWithoutLead(const AnalysisResult& r, bool en, QuickAnswer& answer)
+{
+  if (!answer.suspect_mod.empty() || !r.signature_match.has_value()) {
+    return;
+  }
+  const auto& sig = *r.signature_match;
+  if (sig.scope != "mechanism" || sig.headline.empty() || sig.recommendations.empty()) {
+    return;
+  }
+  answer.case_id = "known_mechanism";
+  answer.headline = KindPhrase(answer.kind, en) + L" " + sig.headline + L" " + SuspectPhrase(Lead{}, en);
+  answer.action = FirstSentenceWithoutTag(sig.recommendations.front());
+  answer.why_not_certain = sig.why_not_certain;
+}
+
 // ADR-0029: a graphics driver error moments before the crash. The mod the
 // crash names stays named, but it is the second thing to check: with the
 // graphics device gone, whatever used it next crashed. Close in time is not
@@ -838,6 +856,7 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
 
   if (!freezePath) {
     QuickAnswer crash = Finish(kind, CrashLead(r, ctx), en);
+    AddMechanismWithoutLead(r, en, crash);
     AddFaultInstructionClue(r, en, crash);
     AddGpuDriverErrorBeforeCrash(ctx, en, crash);
     return crash;

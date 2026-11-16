@@ -1092,6 +1092,115 @@ void TestFormIdFaultInstructionOutput()
   }
 }
 
+// ADR-0034: the 2026-11-17 script loader crash. No mod on the crashing path
+// and no stack scan, so no mod is named; the matched mechanism says what the
+// game was doing, and the faulting instruction what overwrote the pointer.
+void TestScriptLoaderCrashOutput()
+{
+  using skydiag::dump_tool::DescribeFaultInstructionPlain;
+  using skydiag::dump_tool::ExplainFaultInstruction;
+  using skydiag::dump_tool::FaultRecord;
+  const std::vector<std::uint8_t> code = { 0xC6, 0x04, 0x03, 0x00 };
+  FaultRecord fault{};
+  fault.exception_address = 0x7FF69A1BE7DDull;
+  fault.access_kind = 0;
+  fault.address = ~0ull;
+  fault.has_registers = true;
+  fault.registers[0] = 0x2065726120736C6Cull;  // rax
+  fault.registers[3] = 0x138Dull;              // rbx
+  const auto decoded = ExplainFaultInstruction(fault, code.data(), code.size());
+  Require(decoded.verdict == "noncanonical" && decoded.overwritten_text == "lls are ", "decoded with its text");
+
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    skydiag::dump_tool::SignatureDatabase db;
+    Require(db.LoadFromJson(std::filesystem::path(__FILE__).parent_path().parent_path() / "dump_tool" / "data" /
+                            "crash_signatures.json"),
+      "the bundled signatures load");
+    skydiag::dump_tool::SignatureMatchInput input{};
+    input.exc_code = 0xC0000005u;
+    input.fault_module = L"SkyrimSE.exe";
+    input.fault_offset = 0x143E7DDull;
+    input.game_version = "1.6.1170.0";
+    input.object_types = { L"SkyrimScript::Store", L"BSScript::CompiledScriptLoader" };
+    const auto sig = db.Match(input, /*useKorean=*/!en);
+    Require(sig && sig->id == "PAPYRUS_SCRIPT_LOAD" && sig->scope == "mechanism" && !sig->headline.empty(),
+      "the script loader mechanism");
+
+    const auto crash = [&] {
+      AnalysisResult r{};
+      r.dump_path = L"C:\\Logs\\SkyrimDiag_Crash_20261117_015918_048.dmp";
+      r.exc_code = 0xC0000005u;
+      r.exc_addr = 0x7FF69A1BE7DDull;
+      r.exc_info = { 0, ~0ull };
+      r.fault_module_filename = L"SkyrimSE.exe";
+      r.fault_module_plus_offset = L"SkyrimSE.exe+0x143e7dd";
+      r.fault_instruction = decoded;
+      return r;
+    };
+    auto ctx = CrashContext(en, L"SkyrimSE.exe");
+    ctx.isGameExe = true;
+
+    auto r = crash();
+    r.signature_match = sig;
+    const auto qa = BuildQuickAnswer(r, lang, ctx);
+    Require(qa.case_id == "known_mechanism" && qa.suspect_mod.empty() && qa.likelihood == "none",
+      "no mod named, the mechanism leads");
+    Require(qa.headline == (en ? L"The game crashed to desktop (CTD). " + sig->headline + L" The tool could not name a mod."
+                               : L"게임이 튕겼습니다(CTD). " + sig->headline + L" 원인 모드는 특정하지 못했습니다."),
+      "what the game was doing, and that no mod is named");
+    Require(qa.action == (en ? L"Disable, or roll back to the previous files, the mods you added or updated recently and "
+                               L"any script (.pex) compiled anew, one at a time."
+                             : L"최근에 추가하거나 업데이트한 모드와 새로 컴파일한 스크립트(.pex)부터 하나씩 끄거나 이전 파일로 "
+                               L"되돌려 보세요."),
+      "its first recommendation, without the tag");
+    Require(qa.why_not_certain == sig->why_not_certain && !qa.why_not_certain.empty(), "its own doubt line");
+    Require(qa.how_it_crashed == DescribeFaultInstructionPlain(decoded, en) && Contains(qa.how_it_crashed, L"lls are "),
+      "how it crashed shows the text");
+    RequirePlainWords(qa, "script loader");
+
+    // A mod the evidence names keeps the lead; the mechanism stays in the summary.
+    auto named = crash();
+    named.signature_match = sig;
+    named.actionable_candidates.push_back(Candidate(
+      "cross_validated", i18n::ConfidenceLevel::kHigh, L"ExampleMod.dll", L"Example Mod", { "crash_logger_frame" }));
+    Require(BuildQuickAnswer(named, lang, ctx).case_id == "candidate", "a named mod still leads");
+
+    // A mechanism with no headline of its own does not take over.
+    auto quiet = crash();
+    auto noHeadline = *sig;
+    noHeadline.headline.clear();
+    quiet.signature_match = noHeadline;
+    const auto quietQa = BuildQuickAnswer(quiet, lang, ctx);
+    Require(quietQa.case_id == "none" && quietQa.why_not_certain.empty() &&
+              Contains(quietQa.action, en ? L"Share this report when asking for help" : L"이 리포트를 함께 공유"),
+      "no headline, no change");
+
+    // The report line and summary JSON carry the text.
+    BuildEvidenceAndSummary(r, lang);
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["fault_instruction"]["overwritten_text"] == "lls are " &&
+              summary["fault_instruction"]["overwritten_text_register"] == "rax",
+      "summary JSON overwritten_text");
+    Require(summary["quick_answer"]["case"] == "known_mechanism", "summary JSON case");
+    const auto report = skydiag::dump_tool::BuildReportText(r, summary, true);
+    Require(report.find(std::string(en ? "FaultInstruction: " : "예외 명령어: ") +
+                        "mov byte ptr [rbx+rax] (C6 04 03 00), read 0xFFFFFFFFFFFFFFFF, rbx=0x138D, "
+                        "rax=0x2065726120736C6C -> noncanonical" +
+                        (en ? " (rax holds the text \"lls are \")\n" : " (rax 값은 글자 \"lls are \")\n")) !=
+              std::string::npos,
+      "the report line shows the text");
+    auto plainFault = crash();
+    plainFault.fault_instruction.overwritten_text.clear();
+    plainFault.fault_instruction.overwritten_text_register.clear();
+    const auto plainSummary =
+      skydiag::dump_tool::BuildSummaryJson(plainFault, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(!plainSummary["fault_instruction"].contains("overwritten_text") &&
+              !plainSummary["fault_instruction"].contains("overwritten_text_register"),
+      "no fields without text");
+  }
+}
+
 void TestFaultInstructionClue()
 {
   using skydiag::dump_tool::DescribeFaultInstruction;
@@ -2172,6 +2281,7 @@ int main()
     TestSummaryAndReportStartWithIt();
     TestFaultInstructionClue();
     TestFormIdFaultInstructionOutput();
+    TestScriptLoaderCrashOutput();
     TestForcedClose();
     TestDamagedSave();
     TestLoadedSavesFile();

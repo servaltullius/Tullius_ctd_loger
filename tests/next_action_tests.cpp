@@ -112,6 +112,22 @@ int main()
            L"[Conflict] If multiple mods provide the same file, conflicts are common.",
          }) == 1u);
 
+  // ADR-0034: a known crash mechanism (the Papyrus script loader) leads a
+  // file two mods provide (the 2026-11-17 crash picked [충돌] for the menu
+  // logo), and follows every mod-level line, as the quick answer does.
+  assert(SelectNextActionIndex({
+           L"[충돌] 같은 파일을 제공하는 모드가 2개 이상이면 충돌 가능성이 큽니다.",
+           L"[알려진 크래시 메커니즘] 최근에 추가하거나 업데이트한 모드부터 하나씩 꺼 보세요.",
+         }) == 1u);
+  assert(SelectNextActionIndex({
+           L"[Known crash mechanism] Disable the mods you added recently, one at a time.",
+           L"[Object ref] Y.esp.",
+         }) == 1u);
+  assert(SelectNextActionIndex({
+           L"[Known crash mechanism] Disable the mods you added recently, one at a time.",
+           L"[Actionable candidate] Check X.dll first.",
+         }) == 1u);
+
   // The tag kinds come from ClassifyRecommendation, so each tier the list
   // names is reached: main thread with modal dialog, top suspect and
   // synchronization stall with the candidates, Crash Logger frame before an

@@ -290,6 +290,11 @@ std::string BuildReportText(
                  : " (" + r.fault_instruction.base_register + " 값은 이 폼의 FormID: ")
           << WideToUtf8(r.fault_instruction.base_value_form) << ")";
     }
+    if (!r.fault_instruction.overwritten_text.empty()) {
+      // ADR-0034
+      rpt << " (" << r.fault_instruction.overwritten_text_register << (en ? " holds the text \"" : " 값은 글자 \"")
+          << r.fault_instruction.overwritten_text << "\")";
+    }
     rpt << "\n";
   }
   if (!r.inferred_mod_name.empty()) {

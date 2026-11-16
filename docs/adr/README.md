@@ -36,3 +36,4 @@ ADR index:
 - `0031-skip-dump-for-repeated-handled-faults.md`
 - `0032-unhandled-exception-signal-and-hold.md`
 - `0033-formid-used-as-pointer.md`
+- `0034-game-only-walks-and-overwritten-text.md`

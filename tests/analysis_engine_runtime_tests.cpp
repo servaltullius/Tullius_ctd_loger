@@ -243,6 +243,54 @@ void TestContentCatalogSignatureRuntime()
   assert(!otherMessage || otherMessage->id != "CONTENT_CATALOG_FORMAT_MISMATCH");
 }
 
+// ADR-0034: an access violation in the game with the Papyrus script loader
+// near it, on any game version; behind every exact crash site.
+void TestPapyrusScriptLoadSignatureRuntime()
+{
+  SignatureDatabase db;
+  assert(db.LoadFromJson(ProjectRoot() / "dump_tool" / "data" / "crash_signatures.json"));
+
+  SignatureMatchInput input{};
+  input.exc_code = 0xC0000005u;
+  input.game_version = "1.6.1170.0";
+  input.fault_module = L"SkyrimSE.exe";
+  input.fault_offset = 0x143E7DDull;
+  input.object_types = { L"SkyrimScript::Store", L"BSScript::CompiledScriptLoader", L"ScrapHeap" };
+  const auto hit = db.Match(input, /*useKorean=*/true);
+  assert(hit && hit->id == "PAPYRUS_SCRIPT_LOAD" && hit->scope == "mechanism");
+  assert(hit->confidence_level == skydiag::dump_tool::i18n::ConfidenceLevel::kMedium);
+  assert(!hit->headline.empty() && !hit->why_not_certain.empty());
+  assert(hit->recommendations.size() == 1u && hit->recommendations[0].rfind(L"[알려진 크래시 메커니즘]", 0) == 0);
+  const auto hitEn = db.Match(input, /*useKorean=*/false);
+  assert(hitEn && hitEn->recommendations[0].rfind(L"[Known crash mechanism]", 0) == 0 && !hitEn->headline.empty());
+  auto se = input;
+  se.game_version = "1.5.97.0";
+  se.fault_offset = 0x1234ull;
+  const auto seHit = db.Match(se, /*useKorean=*/false);
+  assert(seHit && seHit->id == "PAPYRUS_SCRIPT_LOAD");
+
+  // Without the loader near the crash, in a plugin, or another exception: not it.
+  auto noLoader = input;
+  noLoader.object_types = { L"SkyrimScript::Store", L"BSScript::CompiledScriptLoaderX" };
+  const auto noLoaderHit = db.Match(noLoader, /*useKorean=*/false);
+  assert(!noLoaderHit || noLoaderHit->id != "PAPYRUS_SCRIPT_LOAD");
+  auto inPlugin = input;
+  inPlugin.fault_module = L"SomeMod.dll";
+  const auto inPluginHit = db.Match(inPlugin, /*useKorean=*/false);
+  assert(!inPluginHit || inPluginHit->id != "PAPYRUS_SCRIPT_LOAD");
+  auto breakpoint = input;
+  breakpoint.exc_code = 0x80000003u;
+  const auto breakpointHit = db.Match(breakpoint, /*useKorean=*/false);
+  assert(!breakpointHit || breakpointHit->id != "PAPYRUS_SCRIPT_LOAD");
+
+  // An exact crash site wins over it.
+  auto facegen = input;
+  facegen.fault_offset = 0x4301DCull;
+  facegen.access_violation_address = 0x24ull;
+  const auto facegenHit = db.Match(facegen, /*useKorean=*/false);
+  assert(facegenHit && facegenHit->id == "FACEGEN_MORPHDATA_NULLPTR_1_6_1170");
+}
+
 // Known crash sites from public fixes (2026-10-13 research): each matches only
 // its exact game version and instruction, ahead of the generic NULL-AV rule.
 void TestKnownCrashSiteSignaturesRuntime()
@@ -2086,6 +2134,7 @@ int main()
   TestSignatureCallstackContainsRuntime();
   TestContentCatalogSignatureRuntime();
   TestKnownCrashSiteSignaturesRuntime();
+  TestPapyrusScriptLoadSignatureRuntime();
   TestAiPathingFreezeSignatureRuntime();
   TestCellLoadLockOrderDeadlockSignatureRuntime();
   TestCellLoadSelfDeadlockSignatureRuntime();

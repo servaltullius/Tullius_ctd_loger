@@ -33,6 +33,7 @@ using skydiag::dump_tool::kAccessViolationNoAddress;
 using skydiag::dump_tool::kAccessViolationRead;
 using skydiag::dump_tool::kAccessViolationWrite;
 using skydiag::dump_tool::NullJumpCallerChecks;
+using skydiag::dump_tool::RegisterValueAsText;
 using skydiag::dump_tool::ResumeAtCallerOfNullJump;
 using skydiag::dump_tool::X64EffectiveAddress;
 using skydiag::dump_tool::X64Instruction;
@@ -367,6 +368,75 @@ void TestFormIdAsPointer()
   assert(plainKo != DescribeFaultInstructionPlain(info, false) && plainEn != DescribeFaultInstructionPlain(info, true));
   // The report line itself stays as it was; the report adds the form after it.
   assert(FaultInstructionReportText(info) == "cmp byte ptr [rdx+0x1a] (80 7A 1A 1A), read 0x12ED0, rdx=0x12EB6 -> bad_pointer");
+}
+
+// ADR-0034: SkyrimSE.exe+0x143e7dd (2026-11-17), the Papyrus script loader
+// writing through [rbx+rax] after a 5005-byte string in a .pex overran its
+// 4096-byte buffer: rax held bytes 4096..4103 of that string.
+void TestTextOverwrotePointer()
+{
+  X64Registers regs{};
+  regs[kRbx] = 0x138Dull;
+  regs[kRax] = 0x2065726120736C6Cull;
+  auto info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xC6, 0x04, 0x03, 0x00 });
+  assert(info.verdict == "noncanonical" && info.base_register == "rbx" && info.index_register == "rax");
+  assert(info.overwritten_text_register == "rax" && info.overwritten_text == "lls are ");
+  const auto ko = DescribeFaultInstruction(info, L"SkyrimSE.exe+0x143e7dd", false);
+  assert(ko.find(L"포인터 자리가 다른 데이터로 덮어써졌다는 뜻입니다(메모리 손상). rax 값을 바이트로 읽으면 글자 \"lls are \"입니다. "
+                 L"글(문자열)이 포인터 자리를 덮어쓴 것으로 보입니다.") != std::wstring::npos);
+  const auto en = DescribeFaultInstruction(info, L"SkyrimSE.exe+0x143e7dd", true);
+  assert(en.find(L"(corrupted memory). Read as bytes, the value of rax is the text \"lls are \": a string seems to have "
+                 L"overwritten the pointer.") != std::wstring::npos);
+  assert(DescribeFaultInstructionPlain(info, false) ==
+         L"포인터 자리를 글(\"lls are \")이 덮어썼고, 그 값을 주소로 쓰다가 튕겼습니다(메모리 손상).");
+  assert(DescribeFaultInstructionPlain(info, true) ==
+         L"It crashed on a pointer that text (\"lls are \") had overwritten (corrupted memory).");
+  // The report line stays as it was; the report adds the text after it.
+  assert(FaultInstructionReportText(info) ==
+         "mov byte ptr [rbx+rax] (C6 04 03 00), read 0xFFFFFFFFFFFFFFFF, rbx=0x138D, rax=0x2065726120736C6C -> noncanonical");
+
+  // The base register is looked at first.
+  regs[kRbx] = 0x6867666564636261ull;  // "abcdefgh"
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xC6, 0x04, 0x03, 0x00 });
+  assert(info.overwritten_text_register == "rbx" && info.overwritten_text == "abcdefgh");
+
+  // Garbage that is no text (2026-10-05 CrashLogger.dll shape) says nothing more.
+  regs[kRdi] = 0x89E2DDDE1A260000ull;
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x0F, 0xB6, 0x07 });
+  assert(info.verdict == "noncanonical" && info.overwritten_text.empty() && info.overwritten_text_register.empty());
+  assert(DescribeFaultInstructionPlain(info, false) == L"다른 데이터로 덮어써진 포인터를 쓰다가 튕겼습니다(메모리 손상).");
+  assert(DescribeFaultInstruction(info, L"", true).find(L"Read as bytes") == std::wstring::npos);
+
+  // Text in a register of a pointer that is only bad, not impossible, is no
+  // case: text never makes a canonical address (its top bytes are not 0).
+  regs[kRcx] = 0x7FF012345000ull;
+  info = Explain(Fault(kAccessViolationRead, 0x7FF012345024ull, regs), { 0x48, 0x8B, 0x41, 0x24 });
+  assert(info.verdict == "bad_pointer" && info.overwritten_text.empty());
+}
+
+void TestRegisterValueAsText()
+{
+  assert(RegisterValueAsText(0x2065726120736C6Cull) == std::optional<std::string>("lls are "));
+  // UTF-16: "Abc " as four code units.
+  assert(RegisterValueAsText(0x0020006300620041ull) == std::optional<std::string>("Abc "));
+  // Escaped: backslash, double quote, tab, line feed, carriage return.
+  const std::uint8_t escaped[8] = { 'a', '"', '\\', '\t', 'b', 'c', '\n', '\r' };
+  std::uint64_t value = 0;
+  std::memcpy(&value, escaped, sizeof(value));
+  assert(RegisterValueAsText(value) == std::optional<std::string>("a\\\"\\\\\\tbc\\n\\r"));
+  // One byte that is no text spoils it.
+  const std::uint8_t oneOff[8] = { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 0x80 };
+  std::memcpy(&value, oneOff, sizeof(value));
+  assert(!RegisterValueAsText(value).has_value());
+  // A string's end (a zero byte) is not text either.
+  const std::uint8_t ended[8] = { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 0 };
+  std::memcpy(&value, ended, sizeof(value));
+  assert(!RegisterValueAsText(value).has_value());
+  // UTF-16 needs every high byte 0 and every low byte text.
+  assert(!RegisterValueAsText(0x0120006300620041ull).has_value());
+  assert(!RegisterValueAsText(0x0020006300620001ull).has_value());
+  assert(!RegisterValueAsText(0).has_value());
+  assert(!RegisterValueAsText(0x89E2DDDE1A260000ull).has_value());
 }
 
 void TestOtherVerdicts()
@@ -752,6 +822,8 @@ int main()
   TestNullBaseSentence();
   TestOtherVerdicts();
   TestFormIdAsPointer();
+  TestTextOverwrotePointer();
+  TestRegisterValueAsText();
   TestAddressOnly();
   TestNothingToSay();
   TestExecute();

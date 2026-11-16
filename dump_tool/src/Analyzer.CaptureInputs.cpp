@@ -3,6 +3,7 @@
 #include "AddressResolver.h"
 #include "AnalyzerInternals.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
+#include "AnalyzerScoringPolicy.h"
 #include "CrashLogger.h"
 #include "CrashLoggerParseCore.h"
 #include "DumpObjects.h"
@@ -1185,6 +1186,15 @@ void ComputeSuspects(
     // only add stale return addresses (Crash Logger's own, the MO2 VFS).
     out.diagnostics.push_back(
       L"[Stackwalk] complete walk; its only plugin frames wrap the thread entry, so no stack scan");
+  } else if (!out.suspects_from_stackwalk &&
+             internal::policy::SkipStackScanAfterCompleteWalk(
+               hangLike, out.stackwalk_complete_without_plugin_frames, out.stackwalk_primary_tid, out.exc_tid)) {
+    // ADR-0034: the crashing thread's walk went down to its start through
+    // game and system code only. Its stack slots that are no return address
+    // of the walk hold what earlier calls left (Engine Fixes' allocator, a
+    // hook that ran before), and the same crash leaves the same stale slots,
+    // so a repeat only seemed to confirm them (2026-11-17 script loader crash).
+    out.diagnostics.push_back(L"[Stackwalk] complete walk through game and system code only, so no stack scan");
   } else if (!out.suspects_from_stackwalk) {
     // The helper treats the "failed" diagnostic as degraded capture quality,
     // so keep it for walks that produced no caller frames at all.

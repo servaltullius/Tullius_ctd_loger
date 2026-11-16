@@ -175,7 +175,21 @@ struct FaultInstructionInfo
   // ('TESObjectARMO "Iron Shield" (FormID 0x00012EB6, Skyrim.esm)'); empty
   // otherwise. Set by the analyzer from what the helper added to the dump.
   std::wstring base_value_form;
+  // noncanonical whose base register (else index register) held text: its
+  // 8 bytes, in memory order, are 8 printable ASCII characters or 4 UTF-16
+  // ones ("lls are " for 0x2065726120736C6C), so a string overwrote the
+  // pointer (ADR-0034). The text is escaped as RegisterValueAsText says;
+  // both are empty otherwise.
+  std::string overwritten_text_register;
+  std::string overwritten_text;
 };
+
+// value's 8 bytes in memory order (little-endian) as text: 8 printable ASCII
+// characters (0x20..0x7E, or tab, line feed, carriage return), or 4 UTF-16
+// code units in that range each followed by a zero byte. Backslash, double
+// quote, tab, line feed and carriage return come back escaped (\\ \" \t \n
+// \r). nullopt for any other value.
+std::optional<std::string> RegisterValueAsText(std::uint64_t value);
 
 // Reads read/write AVs from the code bytes at the exception address (code,
 // codeSize; codeSize may be shorter than an instruction when the dump holds

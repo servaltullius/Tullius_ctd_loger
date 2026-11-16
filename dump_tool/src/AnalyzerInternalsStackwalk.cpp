@@ -124,6 +124,11 @@ std::vector<bool> MarkThreadEntryHookPcs(
   const std::vector<std::uint64_t>& pcs,
   bool walkReachedThreadStart);
 
+bool CompleteWalkWithoutPluginFrames(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  bool walkReachedThreadStart);
+
 std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
@@ -493,6 +498,8 @@ bool TryComputeStackwalkSuspects(
     const auto marked = stackwalk::MarkThreadEntryHookPcs(modules, pcs, WalkReachedThreadStart(end));
     out.stackwalk_only_thread_entry_hook_plugins =
       std::find(marked.begin(), marked.end(), true) != marked.end();
+    out.stackwalk_complete_without_plugin_frames =
+      stackwalk::CompleteWalkWithoutPluginFrames(modules, pcs, WalkReachedThreadStart(end));
     std::vector<std::wstring> frameModules;
     frameModules.reserve(pcs.size());
     for (const auto pc : pcs) {

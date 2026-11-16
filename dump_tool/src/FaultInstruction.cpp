@@ -4,6 +4,8 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
+#include <utility>
 
 namespace skydiag::dump_tool {
 namespace {
@@ -815,8 +817,57 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
       verdict = "fixed_address";
     }
   }
+  if (verdict == "noncanonical") {
+    // ADR-0034: a register holding text says what overwrote the pointer.
+    const std::pair<const std::string*, std::uint64_t> registers[] = {
+      { &info.base_register, info.base_value },
+      { &info.index_register, info.index_value },
+    };
+    for (const auto& [name, value] : registers) {
+      if (name->empty()) {
+        continue;
+      }
+      if (auto text = RegisterValueAsText(value)) {
+        info.overwritten_text_register = *name;
+        info.overwritten_text = std::move(*text);
+        break;
+      }
+    }
+  }
   info.verdict = std::move(verdict);
   return info;
+}
+
+std::optional<std::string> RegisterValueAsText(std::uint64_t value)
+{
+  std::uint8_t bytes[8]{};
+  for (std::size_t i = 0; i < 8u; ++i) {
+    bytes[i] = static_cast<std::uint8_t>(value >> (8u * i));
+  }
+  const auto isText = [](std::uint8_t c) { return (c >= 0x20u && c <= 0x7Eu) || c == '\t' || c == '\n' || c == '\r'; };
+  std::vector<std::uint8_t> chars;
+  if (std::all_of(std::begin(bytes), std::end(bytes), isText)) {
+    chars.assign(std::begin(bytes), std::end(bytes));
+  } else {
+    for (std::size_t i = 0; i < 8u; i += 2u) {
+      if (!isText(bytes[i]) || bytes[i + 1u] != 0u) {
+        return std::nullopt;
+      }
+      chars.push_back(bytes[i]);
+    }
+  }
+  std::string text;
+  for (const auto c : chars) {
+    switch (c) {
+      case '\\': text += "\\\\"; break;
+      case '"': text += "\\\""; break;
+      case '\t': text += "\\t"; break;
+      case '\n': text += "\\n"; break;
+      case '\r': text += "\\r"; break;
+      default: text += static_cast<char>(c); break;
+    }
+  }
+  return text;
 }
 
 namespace {
@@ -966,6 +1017,22 @@ std::wstring AddressExpression(const FaultInstructionInfo& info)
   return text;
 }
 
+// ADR-0034: the text that overwrote the pointer, and where to look for it.
+std::wstring OverwrittenTextSentence(const FaultInstructionInfo& info, bool en)
+{
+  if (info.overwritten_text.empty()) {
+    return {};
+  }
+  const std::wstring reg = Widen(info.overwritten_text_register);
+  const std::wstring text = Widen(info.overwritten_text);
+  return en ? (L" Read as bytes, the value of " + reg + L" is the text \"" + text +
+                L"\": a string seems to have overwritten the pointer. Searching the mods' files for this text can find "
+                L"the file it came from (a script, a settings file).")
+            : (L" " + reg + L" 값을 바이트로 읽으면 글자 \"" + text +
+                L"\"입니다. 글(문자열)이 포인터 자리를 덮어쓴 것으로 보입니다. 모드 폴더의 파일에서 이 글을 찾으면 그 글이 "
+                L"나온 파일(스크립트, 설정 파일 등)을 알 수 있습니다.");
+}
+
 }  // namespace
 
 std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wstring_view location, bool en)
@@ -1111,12 +1178,14 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
       const std::wstring what = baseIsBad ? (base + L" was " + HexW(info.base_value))
                                           : (L"the address was " + ea + L" (" + AddressExpression(info) + L")");
       return subject + tried + L", and " + what +
-        L", which cannot be a memory address: the pointer had been overwritten with other data (corrupted memory).";
+        L", which cannot be a memory address: the pointer had been overwritten with other data (corrupted memory)." +
+        OverwrittenTextSentence(info, en);
     }
     const std::wstring what = baseIsBad ? (base + L"가 " + HexW(info.base_value))
                                         : (L"주소가 " + ea + L"(" + AddressExpression(info) + L")");
     return subject + tried + L" " + what +
-      L"였습니다. 이 값은 메모리 주소가 될 수 없으므로 포인터 자리가 다른 데이터로 덮어써졌다는 뜻입니다(메모리 손상).";
+      L"였습니다. 이 값은 메모리 주소가 될 수 없으므로 포인터 자리가 다른 데이터로 덮어써졌다는 뜻입니다(메모리 손상)." +
+      OverwrittenTextSentence(info, en);
   }
   const std::wstring noMemory = en
     ? (write ? (L"memory at " + ea + L" could not be written (read-only or not there)")
@@ -1168,6 +1237,11 @@ std::wstring DescribeFaultInstructionPlain(const FaultInstructionInfo& info, boo
   if (v == "bad_index") {
     return en ? L"It crashed using a position outside a list or table (a wrong index), or a broken pointer."
               : L"목록이나 표의 범위를 벗어난 위치(잘못된 인덱스)나 망가진 포인터를 쓰다가 튕겼습니다.";
+  }
+  if (v == "noncanonical" && !info.overwritten_text.empty()) {
+    const std::wstring text = Widen(info.overwritten_text);
+    return en ? (L"It crashed on a pointer that text (\"" + text + L"\") had overwritten (corrupted memory).")
+              : (L"포인터 자리를 글(\"" + text + L"\")이 덮어썼고, 그 값을 주소로 쓰다가 튕겼습니다(메모리 손상).");
   }
   if (v == "noncanonical") {
     return en ? L"It crashed on a pointer that had been overwritten with other data (corrupted memory)."
