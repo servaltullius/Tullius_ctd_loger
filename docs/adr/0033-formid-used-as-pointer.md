@@ -1,7 +1,7 @@
 # ADR-0033: 포인터 자리에 든 FormID는 게임의 FormID 표로 찾아 이름을 붙인다
 
 ## Status
-Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실게임 확인은 아직입니다(Verification).
+Accepted (2026-11-17). 구현했고 자동 테스트와 실게임으로 확인했습니다(Verification).
 
 ## Context
 - 2026-11-15와 11-16에 같은 세이브(Save96)를 불러오다 같은 크래시가 두 번 났습니다.
@@ -61,9 +61,13 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실�
 - 실제 게임 데이터:
   - 사용자 환경 1.6.1170의 Address Library에서 ID 400507은 오프셋 0x20FBB88입니다.
   - 2026-11-16 덤프에는 그 전역 변수가 없어서, 덤프로 값을 확인하지는 못했습니다.
-- **실게임 미확인.** 아래 경로는 실제 게임에서 돌려 본 적이 없습니다.
-  - Helper가 게임 exe 베이스와 Address Library로 전역 변수 주소를 구하는 부분(`GameAllFormsOffset`, `GameImageRange`).
-  - 분석기가 실제 SkyrimSE.exe 모듈과 실제 Address Library 파일로 같은 주소를 구하는 부분(`ResolveFormIdBaseValue`; 위 e2e는 지어낸 모듈과 한 항목짜리 파일로 확인함).
-  - 실제 게임의 해시 표 배치와 해시 함수가 CommonLib의 정의와 같다는 것.
-  - 찾은 폼을 먼저 읽는 순서(Decision 1)는 자동 테스트가 확인하지 않습니다. 순서가 결과를 바꾸려면 크래시 오브젝트 메모리 상한이 먼저 차야 하는데, 테스트에서 그 상황을 만들지 않았습니다.
-  - 확인 방법: 크래시 테스터 Ctrl+Shift+Home. 근거에 `TESObjectARMO … (FormID 0x00012EB6, Skyrim.esm …)`이 나오면 이 경로 전체가 맞는 것입니다.
+- **실게임 확인 (2026-11-17 02:47, 1.6.1170, Crash Logger 1.27 켬, MO2 모드 약 4,380개, PR #310 브랜치 로컬 빌드).** 크래시 테스터 Ctrl+Shift+Home.
+  - Helper 로그(게임에 붙을 때): `FormID lookup for crash dumps: TESForm::allForms at the game executable+0x20FBB88.`
+  - 리포트의 예외 명령어 줄: `movzx byte ptr [rax+0x1a] (0F B6 58 1A), read 0x12ED0, rax=0x12EB6 -> bad_pointer (rax 값은 이 폼의 FormID: TESObjectARMO "[U] 견고한 철 방패" (FormID 0x00012EB6, Skyrim.esm -> MUNG_UBE Armor Patch 2.esp))`.
+  - 근거 문장은 "이 값은 이 게임에 있는 폼 …의 FormID와 같습니다. 폼을 가리키는 포인터 자리에 FormID가 들어갔을 수 있습니다."로 끝나고, 빠른 답의 "어떻게 튕겼나"는 "폼의 번호(FormID)를 포인터처럼 쓰다가 튕긴 것으로 보입니다."였습니다.
+  - 플러그인 경로(Skyrim.esm → MUNG_UBE Armor Patch 2.esp)는 houseCARL로 본 그 레코드의 최종 적용 플러그인과 같습니다. 이름은 한국어판 게임의 이름입니다.
+  - 이로써 Helper의 전역 변수 주소 계산, 실제 게임의 해시 표 배치와 해시 함수, 분석기가 실제 SkyrimSE.exe 모듈과 실제 Address Library로 같은 주소를 구하는 부분이 맞는 것을 확인했습니다.
+  - 같은 날 End 시나리오도 이 빌드로 돌려, 결과(`null_jump`, `call rax`, 콜스택)가 이전과 같은 것을 확인했습니다.
+- **여전히 미확인.**
+  - 찾은 폼을 먼저 읽는 순서(Decision 1)는 자동 테스트도 실게임도 확인하지 않았습니다. 순서가 결과를 바꾸려면 크래시 오브젝트 메모리 상한이 먼저 차야 하는데, 그런 상황을 만들지 않았습니다.
+  - SE 1.5.97(ID 514351)과 1.7.x 게임에서는 돌려 보지 않았습니다.
