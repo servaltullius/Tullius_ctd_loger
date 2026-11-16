@@ -11,7 +11,9 @@
 //
 // Layouts (CommonLibSSE-NG):
 // - TESForm::allForms, at Address Library ID 514351 (SE 1.5.x) / 400507
-//   (AE 1.6 and later), holds a pointer to a BSTHashMap<FormID, TESForm*>.
+//   (AE 1.6.x), holds a pointer to a BSTHashMap<FormID, TESForm*>. 1.7.x
+//   files are assumed to keep the AE ID (not checked); if they do not, the
+//   checks below find no table and nothing is named.
 // - BSTHashMap (BSTScatterTable, standard parent, heap allocator): capacity
 //   at 0x0C (a power of two), free count at 0x10, the end-of-chain sentinel
 //   at 0x18, the entry array at 0x28.
@@ -28,13 +30,15 @@
 #include <cstring>
 #include <optional>
 
+#include "SkyrimDiagRtti.h"
+
 namespace skydiag::form_map {
 
 inline constexpr std::uint64_t kAllFormsIdSe = 514351;
 inline constexpr std::uint64_t kAllFormsIdAe = 400507;
 
 // The Address Library ID of TESForm::allForms for a file of this format
-// (1: SE 1.5.x; 2 and 5: AE and later).
+// (1: SE 1.5.x; 2: AE 1.6.x; 5: 1.7.x, assumed to keep the AE ID).
 inline constexpr std::uint64_t AllFormsId(std::int32_t addressLibraryFormat)
 {
   return addressLibraryFormat == 1 ? kAllFormsIdSe : kAllFormsIdAe;
@@ -52,9 +56,11 @@ inline constexpr std::uint32_t kMaxCapacity = 1u << 26;
 // Longer chains than a power-of-two table with a fair hash ever builds.
 inline constexpr std::uint32_t kMaxChain = 64;
 
-// A register value worth looking up: above the first 64 KB, which is never
-// mapped (a null pointer plus an offset there says enough), and no wider
-// than a FormID.
+// A register value worth looking up: no wider than a FormID, and above the
+// first 64 KB. Values below it are left out on purpose: they are mostly
+// small numbers (counts, indices, offsets), and Skyrim.esm's FormIDs start
+// there densely, so a match would say little; such a fault stays a
+// null_pointer (ADR-0033 Consequences).
 inline constexpr bool IsFormIdCandidate(std::uint64_t value)
 {
   return value >= 0x10000u && value <= 0xFFFFFFFFull;
@@ -77,16 +83,14 @@ inline constexpr std::array<std::uint32_t, 256> MakeCrcTable()
 
 inline constexpr std::array<std::uint32_t, 256> kCrcTable = MakeCrcTable();
 
+// A user-mode pointer (shared/SkyrimDiagRtti.h) to 8-byte aligned data: the
+// table, its entries and the forms are all heap allocations.
 inline bool PlausiblePointer(std::uint64_t p)
 {
-  return p >= 0x10000u && p < 0x7FFFFFFF0000ull && (p & 7u) == 0u;
+  return skydiag::rtti::detail::PlausiblePointer(p) && (p & 7u) == 0u;
 }
 
-template <class Reader, class T>
-bool ReadValue(const Reader& read, std::uint64_t address, T& out)
-{
-  return read(address, &out, sizeof(T));
-}
+using skydiag::rtti::detail::ReadValue;
 
 template <class T>
 T Field(const std::uint8_t* bytes, std::uint64_t offset)

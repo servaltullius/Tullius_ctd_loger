@@ -231,8 +231,20 @@ void TestDamagedTables()
     table.memory.Put<std::uint32_t>(chained, ids.second + 7u);
     table.memory.Put<std::uint64_t>(chained + 0x10, kStray);
     Require(!FindForm(table.memory, kSlot, ids.second).has_value(), "a link outside the entry array");
-    // A link into the middle of an entry.
-    table.memory.Put<std::uint64_t>(chained + 0x10, kEntries + 4u);
+    // A link into the middle of an entry, where the bytes read from there
+    // would make a matching entry: two free slots f and f + 1 hold, from
+    // f's 8th byte on, the key, the form and the end of the chain.
+    const auto chainedIndex = static_cast<std::uint32_t>((chained - kEntries) / skydiag::form_map::kEntryBytes);
+    std::uint32_t f = 0;
+    while (f == home || f + 1u == home || f == chainedIndex || f + 1u == chainedIndex) {
+      ++f;
+    }
+    Require(f + 1u < kCapacity, "two free slots side by side");
+    const std::uint64_t middle = EntryAt(f) + 8u;
+    table.memory.Put<std::uint32_t>(middle, ids.second);
+    table.memory.Put<std::uint64_t>(middle + 0x08, table.forms[ids.second]);
+    table.memory.Put<std::uint64_t>(middle + 0x10, kSentinel);
+    table.memory.Put<std::uint64_t>(chained + 0x10, middle);
     Require(!FindForm(table.memory, kSlot, ids.second).has_value(), "a link into the middle of an entry");
     // A chain that loops back on itself ends after kMaxChain steps.
     table.memory.Put<std::uint64_t>(chained + 0x10, chained);

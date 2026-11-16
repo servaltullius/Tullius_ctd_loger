@@ -1119,6 +1119,7 @@ if(WIN32)
   target_link_libraries(skydiag_crash_object_e2e_tests PRIVATE
     skydiag_helper_runtime_test_support
     SkyrimDiagDumpToolCore
+    Dbghelp
   )
   add_test(NAME skydiag_crash_object_e2e_tests COMMAND skydiag_crash_object_e2e_tests)
   # ADR-0019, ADR-0023: the null_jump dumps analyzed with no matching local

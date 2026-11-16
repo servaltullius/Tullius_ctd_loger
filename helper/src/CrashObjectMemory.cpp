@@ -181,10 +181,12 @@ std::vector<ExtraDumpMemory> CollectObjectMemory(
   }
   RecordingReader reader(process, budget, pages);
   const bool timed = deadline != std::chrono::steady_clock::time_point::max();
-  auto roots = CollectRoots(process, context, pages);
   // ADR-0033: a register holding a FormID where a pointer belongs. The
   // lookup's reads stay in the dump with the form it found, so the analyzer
-  // can run the same lookup; one that finds nothing leaves nothing.
+  // can run the same lookup; one that finds nothing leaves nothing. The forms
+  // found are read first: the analyzer can name one only if its object is in
+  // the dump, which the budget must not cut.
+  std::vector<std::uint64_t> roots;
   if (allFormsSlot != 0u) {
     for (const auto value : RegisterValues(context)) {
       if (!skydiag::form_map::IsFormIdCandidate(value)) {
@@ -198,6 +200,8 @@ std::vector<ExtraDumpMemory> CollectObjectMemory(
       }
     }
   }
+  const auto pointerRoots = CollectRoots(process, context, pages);
+  roots.insert(roots.end(), pointerRoots.begin(), pointerRoots.end());
   std::unordered_set<std::uint64_t> seen;
   std::array<std::uint8_t, kObjectWindowBytes> window{};
   for (const auto root : roots) {
@@ -265,7 +269,9 @@ std::vector<ExtraDumpMemory> MergeExtraDumpMemory(std::vector<ExtraDumpMemory> r
 
 std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONTEXT& context, std::uint64_t allFormsSlot)
 {
-  // The game is stopped in its crash handler and will not run on.
+  // The crashing thread is held in its crash handler, so what it points at
+  // stays put. Other game threads run on: a table they change (the FormID
+  // table, ADR-0033) is read with the checks of shared/SkyrimDiagFormMap.h.
   return CollectObjectMemory(process, context, kCrashObjectMemoryBudget, std::chrono::steady_clock::time_point::max(),
     /*pages=*/nullptr, allFormsSlot);
 }

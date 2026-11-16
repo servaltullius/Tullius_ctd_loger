@@ -18,13 +18,14 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실�
 ## Decision
 1. **Helper가 크래시 순간 레지스터 값을 게임의 FormID 표에서 찾습니다.**
    - 대상: 크래시 레지스터 15개(rsp 제외, ADR-0010의 루트와 같은 순서) 중 값이 0x10000 이상 0xFFFFFFFF 이하인 것(`IsFormIdCandidate`). 64KB 미만은 null 포인터라는 말로 충분하고, 32비트보다 넓은 값은 FormID가 아닙니다.
-   - 표의 위치: 게임 exe 베이스 + Address Library에서 찾은 `TESForm::allForms`의 오프셋. ID는 SE 1.5.x가 514351, AE 1.6 이후(1.7.x 포함)가 400507입니다(CommonLibSSE-NG의 `RELOCATION_ID(514351, 400507)`). 어느 ID를 쓸지는 Address Library 파일 형식으로 고릅니다(1: SE, 2·5: AE). 파일은 ADR-0027에서 이미 읽어 두는 것을 그대로 씁니다. 크래시 때 파싱하느라 붙잡힌 스레드가 늦게 풀리지 않도록, 게임에 붙을 때 오프셋까지 구해 두고 `SkyrimDiagHelper.log`에 남깁니다(`FormID lookup for crash dumps: TESForm::allForms at the game executable+0x20FBB88.`, 없으면 `off`).
+   - 표의 위치: 게임 exe 베이스 + Address Library에서 찾은 `TESForm::allForms`의 오프셋. ID는 SE 1.5.x가 514351, AE 1.6.x가 400507입니다(CommonLibSSE-NG의 `RELOCATION_ID(514351, 400507)`). 어느 ID를 쓸지는 Address Library 파일 형식으로 고릅니다(1: SE, 2: AE). 1.7.x(형식 5)도 AE ID를 그대로 쓴다고 보고 400507을 쓰지만, 확인하지 않았습니다. 다르면 아래 검증에서 걸러져 아무것도 붙지 않습니다. 파일은 ADR-0027에서 이미 읽어 두는 것을 그대로 씁니다. 크래시 때 파싱하느라 붙잡힌 스레드가 늦게 풀리지 않도록, 게임에 붙을 때 오프셋까지 구해 두고 `SkyrimDiagHelper.log`에 남깁니다(`FormID lookup for crash dumps: TESForm::allForms at the game executable+0x20FBB88.`, 없으면 `off`).
    - 찾는 법: CommonLibSSE-NG의 `BSTHashMap` 배치를 따릅니다(`shared/SkyrimDiagFormMap.h`).
      - 표 머리 0x30바이트: 칸 수(0x0C, 2의 거듭제곱), 빈 칸 수(0x10), 체인 끝 표시(0x18), 엔트리 배열(0x28).
      - 엔트리 0x18바이트: FormID, 폼 포인터, 다음 엔트리. 다음 엔트리가 0이면 빈 칸입니다.
      - 해시는 CRC-32(0xEDB88320)를 0에서 시작해 마지막 반전 없이 FormID 4바이트에 돌린 값이고, 시작 칸은 해시 & (칸 수 - 1)입니다.
    - 검증: 칸 수가 2의 거듭제곱이고 2^26 이하일 것, 빈 칸 수가 칸 수보다 작을 것, 체인이 엔트리 배열 안의 엔트리 경계만 가리킬 것, 체인 길이 64 이하일 것, 찾은 폼의 `formID`(0x14)가 찾던 값과 같을 것. 하나라도 어긋나면 찾지 못한 것으로 둡니다.
    - 찾으면 읽은 바이트(전역 변수 8바이트, 표 머리, 거쳐 간 엔트리)와 그 폼 자체(ADR-0010의 오브젝트 읽기: RTTI, FormID, 이름, 플러그인)를 덤프에 넣습니다. 찾지 못하면 그 조회로 읽은 것은 넣지 않습니다.
+   - 찾은 폼은 레지스터·스택이 가리키는 오브젝트보다 먼저 읽습니다. 분석기는 폼 오브젝트까지 덤프에 있어야 이름을 붙일 수 있는데, 크래시 오브젝트 메모리 상한(2MB)이 스택 쪽에서 먼저 차면 뒤에 붙인 폼은 읽히지 않기 때문입니다.
    - 크래시 덤프에서만 합니다. 프리징·수동 캡처의 오브젝트 수집에는 넣지 않습니다. 이 정보를 쓰는 곳이 접근 위반의 예외 명령어 분석뿐이기 때문입니다.
    - 다른 스레드는 그동안 계속 돌기 때문에, 표가 바뀌는 중에 읽을 수 있습니다. 위 검증으로 걸러지고, 걸리면 아무것도 붙지 않을 뿐입니다. 락은 잡지 않습니다(밖에서 읽기만 함).
 2. **분석기는 같은 조회를 덤프에 대고 다시 합니다.**
@@ -45,6 +46,7 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실�
 - 크래시 덤프가 조회마다 수백 바이트 커집니다(표 머리 0x30, 엔트리 0x18씩, 폼 오브젝트 창 0x100). 크래시 오브젝트 메모리 상한(2MB) 안입니다.
 - 게임의 내부 배치(전역 변수 ID, 해시 표 배치, 해시 함수)에 기댑니다. 게임 업데이트로 바뀌면 검증에서 걸러져 아무것도 붙지 않습니다. 틀린 폼이 붙지는 않습니다(찾은 폼의 `formID`를 다시 확인함).
 - VR은 다루지 않습니다(Address Library 형식이 다르고, 이 도구가 지원하지 않음).
+- 0x10000 미만의 FormID(플레이어 0x14, 금화 0xF 같은 Skyrim.esm 앞쪽 폼)를 포인터로 쓴 크래시는 지금처럼 `null_pointer`("이미 사라졌거나 만들어진 적 없는 오브젝트")로 나옵니다. 그 구간의 레지스터 값은 대개 개수·인덱스·오프셋 같은 작은 수이고, Skyrim.esm의 FormID가 그 구간에 빽빽해서 맞아떨어져도 근거가 되지 않기 때문입니다. 알려진 한계입니다.
 
 ## Verification
 - `skydiag_form_map_tests`: 해시가 zlib CRC-32에서 구한 값, CommonLib 표의 첫·마지막 값과 같습니다. 게임처럼 넣은 가짜 표에서 자기 칸의 폼, 체인 뒤의 폼, 빈 칸, 체인 끝, 잘못된 칸 수, 없는 전역 변수, 배열 밖·엔트리 중간을 가리키는 링크, 순환하는 체인, `formID`가 다른 폼을 확인합니다.
@@ -52,13 +54,15 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실�
   - 찾은 조회의 바이트와 폼이 덤프용 범위에 남는지 확인합니다.
   - 그 범위만으로 같은 조회를 돌려 같은 폼과 이름("Iron Shield"), 플러그인(Skyrim.esm)을 읽는지 확인합니다.
   - 찾지 못한 조회는 아무것도 남기지 않는지, 표 주소가 없으면 조회하지 않는지도 확인합니다.
+  - 그 범위만 담은 이 프로세스의 실제 미니덤프를 쓰고, 분석기의 `ResolveFormIdBaseValue`를 그대로 돌립니다. 덤프의 Address Library(형식 2, ID 400507)와 게임 모듈로 전역 변수 주소를 구해 `TESObjectARMO "Iron Shield" (FormID 0x00012EB6, Skyrim.esm)`을 붙이는지 확인합니다. 게임 모듈은 이 프로세스에 SkyrimSE.exe가 없어 전역 변수 둘레의 범위로 지어냈습니다. Helper가 찾지 못한 FormID, `null_pointer` 판정, FormID보다 넓은 값, SE 형식 파일(ID 514351을 찾음), 모듈 밖 오프셋, Address Library 없음에서는 아무것도 붙지 않는지도 확인합니다.
 - `skydiag_fault_instruction_tests` (`TestFormIdAsPointer`): 실제 명령어 바이트(80 7A 1A 1A, rdx=0x12EB6)로 판정과 한국어·영어 문장, 빠른 답 문장을 확인합니다.
 - `skydiag_address_library_tests`: `OffsetOf`를 확인합니다.
+- 크래시 테스터: 빌드한 `CrashTester.dll`의 `ReadFormTypeThroughFormId`가 `mov rax, qword ptr [rsp+80h]`(값 0x12EB6) 다음 `movzx ebx, byte ptr [rax+1Ah]`로 빌드된 것을 디스어셈블리로 확인했습니다(2026-11-17). 실게임에서는 rax=0x12EB6의 `bad_pointer`가 나와야 합니다.
 - 실제 게임 데이터:
   - 사용자 환경 1.6.1170의 Address Library에서 ID 400507은 오프셋 0x20FBB88입니다.
   - 2026-11-16 덤프에는 그 전역 변수가 없어서, 덤프로 값을 확인하지는 못했습니다.
 - **실게임 미확인.** 아래 경로는 실제 게임에서 돌려 본 적이 없습니다.
   - Helper가 게임 exe 베이스와 Address Library로 전역 변수 주소를 구하는 부분(`GameAllFormsOffset`, `GameImageRange`).
-  - 분석기가 덤프의 Address Library 스트림과 exe 모듈로 같은 주소를 구하는 부분(`ResolveFormIdBaseValue`).
+  - 분석기가 실제 SkyrimSE.exe 모듈과 실제 Address Library 파일로 같은 주소를 구하는 부분(`ResolveFormIdBaseValue`; 위 e2e는 지어낸 모듈과 한 항목짜리 파일로 확인함).
   - 실제 게임의 해시 표 배치와 해시 함수가 CommonLib의 정의와 같다는 것.
   - 확인 방법: 크래시 테스터 Ctrl+Shift+Home. 근거에 `TESObjectARMO … (FormID 0x00012EB6, Skyrim.esm …)`이 나오면 이 경로 전체가 맞는 것입니다.
