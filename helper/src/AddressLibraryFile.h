@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace skydiag::helper::internal {
@@ -24,5 +25,10 @@ inline constexpr std::uint64_t kAddressLibraryMaxBytes = 16ull * 1024ull * 1024u
 // touching the process. Empty when the version, the file or the read is
 // missing, or the file is over kAddressLibraryMaxBytes.
 std::string GameAddressLibraryBytes(std::uint32_t pid);
+
+// ADR-0033: the offset (RVA) of TESForm::allForms in the game executable,
+// from that same file (SE or AE ID by its format); nullopt without the file
+// or the ID. Parsed once per process, like the bytes.
+std::optional<std::uint64_t> GameAllFormsOffset(std::uint32_t pid);
 
 }  // namespace skydiag::helper::internal

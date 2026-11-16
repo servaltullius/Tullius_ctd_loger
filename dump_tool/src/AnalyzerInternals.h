@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AddressLibrary.h"
 #include "Analyzer.h"
 #include "MinidumpUtil.h"
 #include "MainThreadWait.h"
@@ -177,6 +178,19 @@ FaultInstructionInfo ProbeFaultInstruction(
   const std::vector<minidump::ThreadRecord>& threads,
   const AnalysisResult& out,
   const std::optional<CONTEXT>& excCtx);
+
+// ADR-0033: for a bad_pointer whose base register held a FormID, the form the
+// game's FormID table gives for it, through the lookup the helper added to
+// the dump; sets the fault instruction's base_value_form. library: the
+// dump's Address Library (where TESForm::allForms is), null or empty when
+// the dump has none.
+void ResolveFormIdBaseValue(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const AddressLibrary* library,
+  AnalysisResult& out);
 
 // ADR-0024: for a bad_jump into freed code, whose hook stub the target was,
 // from the helper's record in the dump (kMinidumpUserStream_HookPages); sets

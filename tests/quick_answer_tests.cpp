@@ -1022,6 +1022,76 @@ void TestSummaryAndReportStartWithIt()
 // answer's how-it-crashed line, the summary JSON and the report say what it
 // did; the lead, the doubt line, the candidates and the summary sentence do
 // not change.
+// ADR-0033: the 2026-11-16 OSLAroused crash with the helper's FormID lookup
+// in the dump. The form shows in the evidence sentence, the report's
+// instruction line, the summary JSON and how it crashed; nothing else moves.
+void TestFormIdFaultInstructionOutput()
+{
+  using skydiag::dump_tool::DescribeFaultInstruction;
+  using skydiag::dump_tool::DescribeFaultInstructionPlain;
+  using skydiag::dump_tool::ExplainFaultInstruction;
+  using skydiag::dump_tool::FaultRecord;
+  const std::vector<std::uint8_t> code = { 0x80, 0x7A, 0x1A, 0x1A };
+  FaultRecord fault{};
+  fault.exception_address = 0x7FF81244A5A0ull;
+  fault.access_kind = 0;
+  fault.address = 0x12ED0;
+  fault.has_registers = true;
+  fault.registers[2] = 0x12EB6;  // rdx
+  auto decoded = ExplainFaultInstruction(fault, code.data(), code.size());
+  Require(decoded.verdict == "bad_pointer", "decoded");
+  const std::wstring form = L"TESObjectARMO (FormID 0x00012EB6, Skyrim.esm -> MUNG_UBE Armor Patch 2.esp)";
+
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    const auto crash = [&] {
+      auto r = CrashIn(L"OSLAroused.dll", L"OSL Aroused - Arousal Reborn");
+      r.exc_addr = 0x7FF81244A5A0ull;
+      r.exc_info = { 0, 0x12ED0 };
+      r.fault_module_plus_offset = L"OSLAroused.dll+0x5a5a0";
+      r.fault_instruction = decoded;
+      return r;
+    };
+    auto plain = crash();
+    auto named = crash();
+    named.fault_instruction.base_value_form = form;
+    const auto plainQa = BuildQuickAnswer(plain, lang, CrashContext(en, plain.fault_module_filename));
+    const auto namedQa = BuildQuickAnswer(named, lang, CrashContext(en, named.fault_module_filename));
+    Require(namedQa.how_it_crashed == DescribeFaultInstructionPlain(named.fault_instruction, en) &&
+              namedQa.how_it_crashed != plainQa.how_it_crashed,
+      "how it crashed names the FormID");
+    Require(namedQa.case_id == plainQa.case_id && namedQa.likelihood == plainQa.likelihood &&
+              namedQa.headline == plainQa.headline && namedQa.action == plainQa.action &&
+              namedQa.suspect_mod == plainQa.suspect_mod && namedQa.why_not_certain == plainQa.why_not_certain,
+      "the rest of the quick answer is unchanged");
+    RequirePlainWords(namedQa, "FormID clue");
+
+    BuildEvidenceAndSummary(plain, lang);
+    BuildEvidenceAndSummary(named, lang);
+    Require(named.summary_sentence == plain.summary_sentence &&
+              named.actionable_candidates.size() == plain.actionable_candidates.size() &&
+              named.evidence.size() == plain.evidence.size(),
+      "summary, candidates and evidence count unchanged");
+    const std::wstring sentence = DescribeFaultInstruction(named.fault_instruction, L"OSLAroused.dll+0x5a5a0", en);
+    Require(Contains(sentence, form), "the sentence names the form");
+    Require(std::any_of(named.evidence.begin(), named.evidence.end(),
+              [&](const auto& e) { return e.details == sentence; }),
+      "the evidence item carries it");
+
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(named, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["fault_instruction"]["base_value_form"] == WideToUtf8(form), "summary JSON base_value_form");
+    const auto plainSummary =
+      skydiag::dump_tool::BuildSummaryJson(plain, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(!plainSummary["fault_instruction"].contains("base_value_form"), "no field without a form");
+    const auto report = skydiag::dump_tool::BuildReportText(named, summary, true);
+    Require(report.find(std::string(en ? "FaultInstruction: " : "예외 명령어: ") +
+                        "cmp byte ptr [rdx+0x1a] (80 7A 1A 1A), read 0x12ED0, rdx=0x12EB6 -> bad_pointer" +
+                        (en ? " (rdx holds the FormID of " : " (rdx 값은 이 폼의 FormID: ") + WideToUtf8(form) + ")\n") !=
+              std::string::npos,
+      "the report line names the form");
+  }
+}
+
 void TestFaultInstructionClue()
 {
   using skydiag::dump_tool::DescribeFaultInstruction;
@@ -2101,6 +2171,7 @@ int main()
     TestSnapshotsAndCleanExit();
     TestSummaryAndReportStartWithIt();
     TestFaultInstructionClue();
+    TestFormIdFaultInstructionOutput();
     TestForcedClose();
     TestDamagedSave();
     TestLoadedSavesFile();

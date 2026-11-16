@@ -42,6 +42,7 @@ public:
   {
     return m_addressLibrary.IdAt(functionStart);
   }
+  const AddressLibrary& Library() const { return m_addressLibrary; }
 
 private:
   std::unordered_map<std::uint64_t, std::string> m_functions;

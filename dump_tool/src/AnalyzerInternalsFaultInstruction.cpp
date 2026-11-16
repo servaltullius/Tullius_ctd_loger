@@ -1,8 +1,11 @@
 #include "AnalyzerInternals.h"
 
+#include "AddressLibrary.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
+#include "DumpObjects.h"
 #include "FaultInstruction.h"
 #include "FreedHook.h"
+#include "SkyrimDiagFormMap.h"
 #include "SkyrimDiagProtocol.h"
 
 #include <algorithm>
@@ -135,6 +138,30 @@ FaultInstructionInfo ProbeFaultInstruction(
     info.call_instruction = FormatX64Call(*call, ret);
   }
   return info;
+}
+
+void ResolveFormIdBaseValue(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const AddressLibrary* library,
+  AnalysisResult& out)
+{
+  auto& fi = out.fault_instruction;
+  if (fi.verdict != "bad_pointer" || !fi.address_matches || fi.base_register.empty() ||
+      !skydiag::form_map::IsFormIdCandidate(fi.base_value) || !library || library->Size() == 0u) {
+    return;
+  }
+  const auto game = std::find_if(modules.begin(), modules.end(), [](const auto& m) { return m.is_game_exe; });
+  const auto offset = library->OffsetOf(skydiag::form_map::AllFormsId(library->Format()));
+  if (game == modules.end() || !offset || *offset >= game->end - game->base) {
+    return;
+  }
+  if (const auto form = ReadDumpFormById(
+        dumpBase, dumpSize, threads, modules, game->base + *offset, static_cast<std::uint32_t>(fi.base_value))) {
+    fi.base_value_form = DescribeDumpObjectTarget(*form);
+  }
 }
 
 void ResolveFreedHookOwner(

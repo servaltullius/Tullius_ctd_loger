@@ -26,7 +26,10 @@ inline constexpr std::size_t kCrashObjectMemoryBudget = std::size_t{2} * 1024u *
 // every byte range that took, merged. Adding these ranges to the crash dump
 // lets the analyzer read the same objects back (ADR-0010). The game's heap is
 // otherwise not in the dump.
-std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONTEXT& context);
+// allFormsSlot (the address of TESForm::allForms, 0: unknown): a register
+// holding a FormID is looked up in the game's FormID table, and the table
+// entries read and the form found go into the dump too (ADR-0033).
+std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONTEXT& context, std::uint64_t allFormsSlot);
 
 // The same for one thread of a game that keeps running afterwards (a freeze
 // or manual capture): only committed, readable pages are touched (no guard,

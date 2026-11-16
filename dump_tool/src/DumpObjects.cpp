@@ -12,6 +12,7 @@
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "CrashLoggerParseCore.h"
 #include "SkyrimDiagExtraData.h"
+#include "SkyrimDiagFormMap.h"
 #include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 #include "Utf.h"
@@ -172,6 +173,45 @@ std::wstring DescribePackage(const DumpObject& object)
   return text;
 }
 
+// The object ReadObject found, with what DescribeDumpObject shows.
+template <class Reader>
+DumpObject MakeDumpObject(
+  const Reader& read,
+  const skydiag::rtti::ObjectInfo& info,
+  const std::string& typeName,
+  const std::vector<minidump::ModuleInfo>& modules,
+  std::wstring location)
+{
+  DumpObject object{};
+  object.location = std::move(location);
+  object.address = info.complete_object;
+  object.type_name = Utf8ToWide(typeName);
+  object.module = ModuleNameFor(modules, info.module_base);
+  object.is_form = info.is_form;
+  object.form_id = info.form_id;
+  object.form_type = info.form_type;
+  object.source_files = FileNamesToWide(info.source_files);
+  object.name = FileNameToWide(info.full_name);
+  if (info.has_base_object) {
+    object.has_base_object = true;
+    object.base_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(info.base_type_name));
+    object.base_form_id = info.base_form_id;
+    object.base_source_files = FileNamesToWide(info.base_source_files);
+    if (skydiag::extra_data::IsRuntimeFormId(info.base_form_id)) {
+      if (const auto original = skydiag::extra_data::ReadLeveledOriginal(read, info.complete_object)) {
+        object.has_leveled_original = true;
+        object.leveled_original_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(original->type_name));
+        object.leveled_original_form_id = original->form_id;
+        object.leveled_original_files = FileNamesToWide(original->source_files);
+      }
+    }
+  }
+  if (skydiag::package::IsPackage(info)) {
+    ReadPackageInto(read, info.complete_object, object);
+  }
+  return object;
+}
+
 }  // namespace
 
 std::wstring DescribeDumpObject(const DumpObject& object)
@@ -312,34 +352,8 @@ std::vector<DumpObject> ReadDumpObjects(
       continue;
     }
     indexByObject.emplace(info->complete_object, objects.size());
-    DumpObject object{};
-    object.location = Utf8ToWide(root.location);
-    object.address = info->complete_object;
-    object.type_name = Utf8ToWide(typeName);
-    object.module = ModuleNameFor(modules, info->module_base);
-    object.is_form = info->is_form;
-    object.form_id = info->form_id;
-    object.form_type = info->form_type;
-    object.source_files = FileNamesToWide(info->source_files);
-    object.name = FileNameToWide(info->full_name);
-    if (info->has_base_object) {
-      object.has_base_object = true;
-      object.base_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(info->base_type_name));
-      object.base_form_id = info->base_form_id;
-      object.base_source_files = FileNamesToWide(info->base_source_files);
-      if (skydiag::extra_data::IsRuntimeFormId(info->base_form_id)) {
-        if (const auto original = skydiag::extra_data::ReadLeveledOriginal(read, info->complete_object)) {
-          object.has_leveled_original = true;
-          object.leveled_original_type_name = Utf8ToWide(skydiag::rtti::UndecorateTypeName(original->type_name));
-          object.leveled_original_form_id = original->form_id;
-          object.leveled_original_files = FileNamesToWide(original->source_files);
-        }
-      }
-    }
+    DumpObject object = MakeDumpObject(read, *info, typeName, modules, Utf8ToWide(root.location));
     object.relevance = relevance;
-    if (skydiag::package::IsPackage(*info)) {
-      ReadPackageInto(read, info->complete_object, object);
-    }
     objects.push_back(std::move(object));
   }
   std::stable_sort(objects.begin(), objects.end(), [](const DumpObject& a, const DumpObject& b) {
@@ -349,6 +363,34 @@ std::vector<DumpObject> ReadDumpObjects(
     objects.resize(kMaxDumpObjects);
   }
   return objects;
+}
+
+std::optional<DumpObject> ReadDumpFormById(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const std::vector<minidump::ModuleInfo>& modules,
+  std::uint64_t allFormsSlot,
+  std::uint32_t formId)
+{
+  internal::stackwalk_internal::MinidumpMemoryView memory;
+  if (allFormsSlot == 0u || !memory.Init(dumpBase, dumpSize, &threads)) {
+    return std::nullopt;
+  }
+  // Dump memory only, as ReadDumpObjects.
+  const auto read = [&memory](std::uint64_t address, void* destination, std::size_t size) {
+    std::size_t got = 0;
+    return memory.Read(address, destination, size, got) && got == size;
+  };
+  const auto form = skydiag::form_map::FindForm(read, allFormsSlot, formId);
+  if (!form) {
+    return std::nullopt;
+  }
+  const auto info = skydiag::rtti::ReadObject(read, *form);
+  if (!info || !info->is_form || info->form_id != formId) {
+    return std::nullopt;
+  }
+  return MakeDumpObject(read, *info, skydiag::rtti::UndecorateTypeName(info->type_name), modules, std::wstring());
 }
 
 }  // namespace skydiag::dump_tool

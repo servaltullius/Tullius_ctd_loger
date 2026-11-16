@@ -72,12 +72,18 @@ add_test(NAME skydiag_thread_entry_hook_tests COMMAND skydiag_thread_entry_hook_
 
 add_executable(skydiag_address_library_tests
   address_library_tests.cpp
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressLibrary.cpp"
 )
 target_include_directories(skydiag_address_library_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 add_test(NAME skydiag_address_library_tests COMMAND skydiag_address_library_tests)
+
+add_executable(skydiag_form_map_tests form_map_tests.cpp)
+target_include_directories(skydiag_form_map_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+add_test(NAME skydiag_form_map_tests COMMAND skydiag_form_map_tests)
 
 add_executable(skydiag_hook_stub_race_tests hook_stub_race_tests.cpp)
 target_include_directories(skydiag_hook_stub_race_tests PRIVATE
@@ -722,7 +728,6 @@ set_tests_properties(skydiag_triage_fields_tests PROPERTIES
 add_executable(skydiag_analysis_engine_runtime_tests
   analysis_engine_runtime_tests.cpp
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/SignatureDatabase.cpp"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressLibrary.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressResolver.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/CrashHistory.cpp"
 )

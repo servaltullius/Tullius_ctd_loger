@@ -1,5 +1,5 @@
 // ADR-0027: the Address Library the helper puts in a dump, read back into
-// offset -> ID (dump_tool/src/AddressLibrary.cpp).
+// offset -> ID (shared/SkyrimDiagAddressLibrary.h).
 #include "AddressLibrary.h"
 
 #include <cstdint>
@@ -64,6 +64,8 @@ void TestDeltaEncodedFormat()
   Require(library.IdAt(0x1010) == 101u, "an offset relative to the previous one");
   Require(library.IdAt(0x1020) == 102u, "an offset in pointer units");
   Require(!library.IdAt(0x1008).has_value(), "only exact offsets map to an ID");
+  Require(library.OffsetOf(101) == 0x1010u && library.OffsetOf(102) == 0x1020u, "an ID back to its offset");
+  Require(!library.OffsetOf(99).has_value(), "an ID the file does not have");
 
   std::string sse = bytes;
   sse[0] = 1;  // 1.5.x files are format 1, the same encoding
@@ -93,6 +95,7 @@ void TestDenseFormat()
   Require(library.Format() == 5 && library.Size() == 2u, "IDs without an address are left out");
   Require(library.IdAt(0x2000) == 1u && library.IdAt(0x1000) == 3u, "the ID is the index");
   Require(!library.IdAt(0).has_value(), "0 is no address");
+  Require(library.OffsetOf(3) == 0x1000u && !library.OffsetOf(2).has_value(), "an ID without an address has no offset");
   Require(!library.Parse(bytes.substr(0, bytes.size() - 2)), "a table cut short is refused");
 }
 

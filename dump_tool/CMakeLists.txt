@@ -80,7 +80,6 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/QuickAnswer.h
   src/PluginRules.cpp
   src/PluginRules.h
-  src/AddressLibrary.cpp
   src/AddressLibrary.h
   src/AddressResolver.cpp
   src/AddressResolver.h

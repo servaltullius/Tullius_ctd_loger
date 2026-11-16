@@ -115,6 +115,21 @@ __declspec(noinline) void CallEmptyFunctionPointer()
   spdlog::warn("CrashTester: the empty function pointer returned");
 }
 
+// The Home scenario: a mod holding a FormID where a pointer to the form
+// belongs, and reading the form's type through it (ADR-0033), as a mod that
+// reads an inventory while the save is still loading may. 0x00012EB6 is
+// Skyrim.esm's ArmorIronShield, there in every load order. volatile keeps the
+// compiler from folding the address; the read is through a register
+// (movzx eax, byte ptr [rax+0x1a]), so the analyzer sees rax=0x12EB6.
+__declspec(noinline) std::uint8_t ReadFormTypeThroughFormId()
+{
+  volatile std::uintptr_t formId = 0x00012EB6u;
+  const auto* form = reinterpret_cast<const volatile std::uint8_t*>(formId);
+  const std::uint8_t type = form[0x1A];
+  spdlog::warn("CrashTester: the FormID read returned form type {}", type);
+  return type;
+}
+
 // Scenario 3.
 __declspec(noinline) void ThrowUnhandled()
 {
@@ -554,6 +569,7 @@ void HotkeyLoop(const std::stop_token& stop)
   bool insertWasDown = false;
   bool deleteWasDown = false;
   bool endWasDown = false;
+  bool homeWasDown = false;
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -585,6 +601,9 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool endDown = (GetAsyncKeyState(VK_END) & 0x8000) != 0;
     const bool end = endDown && !endWasDown;
     endWasDown = endDown;
+    const bool homeDown = (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
+    const bool home = homeDown && !homeWasDown;
+    homeWasDown = homeDown;
     if (ctrl && shift) {
       if (insert && !g_repeatRunning.exchange(true)) {
         RepeatHandledEngineFault(
@@ -609,6 +628,9 @@ void HotkeyLoop(const std::stop_token& stop)
       }
       if (end && !g_crashQueued.exchange(true)) {
         RunOnMainThread("End call through an empty function pointer", [] { CallEmptyFunctionPointer(); });
+      }
+      if (home && !g_crashQueued.exchange(true)) {
+        RunOnMainThread("Home FormID used as a form pointer", [] { (void)ReadFormTypeThroughFormId(); });
       }
       if (f10 && !g_freezeRunning.exchange(true)) {
         SpinJobThread();
@@ -650,9 +672,9 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..13 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+// AutoScenario=1..14 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
 //                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
-//                     10: F5; 11: Insert; 12: Delete; 13: End).
+//                     10: F5; 11: Insert; 12: Delete; 13: End; 14: Home).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
@@ -817,6 +839,9 @@ void RunAutoScenario()
     break;
   case 13:
     RunOnMainThread("auto End call through an empty function pointer", [] { CallEmptyFunctionPointer(); });
+    break;
+  case 14:
+    RunOnMainThread("auto Home FormID used as a form pointer", [] { (void)ReadFormTypeThroughFormId(); });
     break;
   default:
     break;

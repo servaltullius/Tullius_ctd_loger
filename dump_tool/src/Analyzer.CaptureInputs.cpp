@@ -1,5 +1,6 @@
 #include "AnalyzerPipeline.h"
 
+#include "AddressResolver.h"
 #include "AnalyzerInternals.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "CrashLogger.h"
@@ -1113,6 +1114,8 @@ void ComputeSuspects(
     out.hook_stub_race = internal::DetectHookStubRace(dumpBase, dumpSize, allModules, threads, out, excCtx);
   }
   out.fault_instruction = internal::ProbeFaultInstruction(dumpBase, dumpSize, allModules, threads, out, excCtx);
+  internal::ResolveFormIdBaseValue(
+    dumpBase, dumpSize, allModules, threads, gameFunctions ? &gameFunctions->Library() : nullptr, out);
   if (out.fault_instruction.verdict == "bad_jump" && out.fault_instruction.target_state == "freed") {
     // ADR-0024: the freed page is gone from the dump; the helper's record
     // while the game ran says whose hook it was.

@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,18 @@ std::vector<DumpObject> ReadDumpObjects(
   const CONTEXT& context);
 
 inline constexpr std::size_t kMaxDumpObjects = 24;
+
+// ADR-0033: the form whose FormID is formId, found through the game's FormID
+// table (allFormsSlot: the address of TESForm::allForms) in the dump's own
+// memory. nullopt when the dump does not hold that lookup: the helper found
+// no such form, or wrote the dump before it looked FormIDs up.
+std::optional<DumpObject> ReadDumpFormById(
+  void* dumpBase,
+  std::uint64_t dumpSize,
+  const std::vector<minidump::ThreadRecord>& threads,
+  const std::vector<minidump::ModuleInfo>& modules,
+  std::uint64_t allFormsSlot,
+  std::uint32_t formId);
 
 // RBX: Character "Lydia" [0xFEAD081B] Skyrim.esm -> MyMod.esp (base TESNPC
 // [0x000A2C94] Skyrim.esm), or for other objects

@@ -337,6 +337,38 @@ void TestNullBaseSentence()
   assert(DescribeFaultInstructionPlain(call, false).find(L"오브젝트의 함수를") != std::wstring::npos);
 }
 
+// ADR-0033: OSLAroused.dll+0x5a5a0 (2026-11-15 and 11-16), reading a form's
+// type through a register that held ArmorIronShield's FormID. The analyzer
+// names the form when the helper's FormID lookup is in the dump.
+void TestFormIdAsPointer()
+{
+  X64Registers regs{};
+  regs[kRdx] = 0x12EB6ull;
+  auto info = Explain(Fault(kAccessViolationRead, 0x12ED0ull, regs), { 0x80, 0x7A, 0x1A, 0x1A });
+  assert(info.verdict == "bad_pointer" && info.base_register == "rdx" && info.base_value == 0x12EB6u);
+  const auto plainKo = DescribeFaultInstructionPlain(info, false);
+  const auto plainEn = DescribeFaultInstructionPlain(info, true);
+  assert(DescribeFaultInstruction(info, L"Mod.dll+0x5a5a0", false).find(L"포인터가 망가졌을 가능성") != std::wstring::npos);
+  assert(FaultInstructionReportText(info) == "cmp byte ptr [rdx+0x1a] (80 7A 1A 1A), read 0x12ED0, rdx=0x12EB6 -> bad_pointer");
+
+  info.base_value_form = L"TESObjectARMO \"Iron Shield\" (FormID 0x00012EB6, Skyrim.esm)";
+  const auto en = DescribeFaultInstruction(info, L"Mod.dll+0x5a5a0", true);
+  assert(en.find(L"rdx was 0x12EB6; there was no readable memory at 0x12ED0. That value is the FormID of a form in "
+                 L"this game, TESObjectARMO \"Iron Shield\" (FormID 0x00012EB6, Skyrim.esm): a FormID may have been "
+                 L"used where a pointer to a form belongs.") != std::wstring::npos);
+  assert(en.find(L"freed already") == std::wstring::npos);
+  const auto ko = DescribeFaultInstruction(info, L"Mod.dll+0x5a5a0", false);
+  assert(ko.find(L"이 값은 이 게임에 있는 폼 TESObjectARMO \"Iron Shield\" (FormID 0x00012EB6, Skyrim.esm)의 FormID와 "
+                 L"같습니다. 폼을 가리키는 포인터 자리에 FormID가 들어갔을 수 있습니다.") != std::wstring::npos);
+  assert(ko.find(L"해제됐거나") == std::wstring::npos);
+  assert(DescribeFaultInstructionPlain(info, false) == L"폼의 번호(FormID)를 포인터처럼 쓰다가 튕긴 것으로 보입니다.");
+  assert(DescribeFaultInstructionPlain(info, true) ==
+         L"It seems to have crashed using a form's FormID (its number) as if it were a pointer.");
+  assert(plainKo != DescribeFaultInstructionPlain(info, false) && plainEn != DescribeFaultInstructionPlain(info, true));
+  // The report line itself stays as it was; the report adds the form after it.
+  assert(FaultInstructionReportText(info) == "cmp byte ptr [rdx+0x1a] (80 7A 1A 1A), read 0x12ED0, rdx=0x12EB6 -> bad_pointer");
+}
+
 void TestOtherVerdicts()
 {
   X64Registers regs{};
@@ -719,6 +751,7 @@ int main()
   TestCanonical();
   TestNullBaseSentence();
   TestOtherVerdicts();
+  TestFormIdAsPointer();
   TestAddressOnly();
   TestNothingToSay();
   TestExecute();

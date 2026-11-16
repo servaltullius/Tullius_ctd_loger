@@ -170,6 +170,11 @@ struct FaultInstructionInfo
   // started at the target, empty when only the page's stubs point there.
   std::wstring freed_hook_owner;
   std::wstring freed_hook_stub_target;
+  // bad_pointer whose base register held the FormID of a form in the game's
+  // FormID table (ADR-0033): that form, as DescribeDumpObjectTarget names it
+  // ('TESObjectARMO "Iron Shield" (FormID 0x00012EB6, Skyrim.esm)'); empty
+  // otherwise. Set by the analyzer from what the helper added to the dump.
+  std::wstring base_value_form;
 };
 
 // Reads read/write AVs from the code bytes at the exception address (code,

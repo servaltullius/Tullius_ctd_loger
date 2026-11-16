@@ -646,7 +646,16 @@ bool WriteDumpWithStreams(
     ep.ContextRecord = sized ? sized : &ctx;
     if (!isProcessSnapshot) {
       // The game is stopped in its crash handler, so the objects are intact.
-      crashObjectMemory = internal::CollectCrashObjectMemory(process, ctx);
+      // ADR-0033: where the game's FormID table is, for a register holding
+      // a FormID.
+      std::uint64_t allFormsSlot = 0;
+      std::uint64_t gameBase = 0;
+      std::uint64_t gameEnd = 0;
+      const auto allFormsOffset = internal::GameAllFormsOffset(pid);
+      if (allFormsOffset && internal::GameImageRange(process, gameBase, gameEnd) && gameBase + *allFormsOffset < gameEnd) {
+        allFormsSlot = gameBase + *allFormsOffset;
+      }
+      crashObjectMemory = internal::CollectCrashObjectMemory(process, ctx, allFormsSlot);
       g_crashObjectMemoryBytes.fetch_add(TotalBytes(crashObjectMemory), std::memory_order_relaxed);
     }
 

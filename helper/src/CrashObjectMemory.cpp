@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "SkyrimDiagExtraData.h"
+#include "SkyrimDiagFormMap.h"
 #include "SkyrimDiagPackage.h"
 #include "SkyrimDiagRtti.h"
 
@@ -139,12 +140,17 @@ private:
   mutable std::size_t bytes_ = 0;
 };
 
-std::vector<std::uint64_t> CollectRoots(HANDLE process, const CONTEXT& context, PageCheck* pages)
+std::array<DWORD64, 15> RegisterValues(const CONTEXT& context)
 {
-  const std::array<DWORD64, 15> registers = {
+  return {
     context.Rax, context.Rbx, context.Rcx, context.Rdx, context.Rsi, context.Rdi, context.Rbp, context.R8,
     context.R9,  context.R10, context.R11, context.R12, context.R13, context.R14, context.R15,
   };
+}
+
+std::vector<std::uint64_t> CollectRoots(HANDLE process, const CONTEXT& context, PageCheck* pages)
+{
+  const auto registers = RegisterValues(context);
   std::vector<std::uint64_t> roots(registers.begin(), registers.end());
 
   // The stack itself is already in the dump; only its values are needed here.
@@ -167,16 +173,34 @@ std::vector<ExtraDumpMemory> CollectObjectMemory(
   const CONTEXT& context,
   std::size_t budget,
   std::chrono::steady_clock::time_point deadline,
-  PageCheck* pages)
+  PageCheck* pages,
+  std::uint64_t allFormsSlot)
 {
   if (!process) {
     return {};
   }
   RecordingReader reader(process, budget, pages);
   const bool timed = deadline != std::chrono::steady_clock::time_point::max();
+  auto roots = CollectRoots(process, context, pages);
+  // ADR-0033: a register holding a FormID where a pointer belongs. The
+  // lookup's reads stay in the dump with the form it found, so the analyzer
+  // can run the same lookup; one that finds nothing leaves nothing.
+  if (allFormsSlot != 0u) {
+    for (const auto value : RegisterValues(context)) {
+      if (!skydiag::form_map::IsFormIdCandidate(value)) {
+        continue;
+      }
+      const auto mark = reader.Mark();
+      if (const auto form = skydiag::form_map::FindForm(reader, allFormsSlot, static_cast<std::uint32_t>(value))) {
+        roots.push_back(*form);
+      } else {
+        reader.Rewind(mark);
+      }
+    }
+  }
   std::unordered_set<std::uint64_t> seen;
   std::array<std::uint8_t, kObjectWindowBytes> window{};
-  for (const auto root : CollectRoots(process, context, pages)) {
+  for (const auto root : roots) {
     if (reader.OverBudget() || (timed && std::chrono::steady_clock::now() >= deadline)) {
       break;
     }
@@ -239,11 +263,11 @@ std::vector<ExtraDumpMemory> MergeExtraDumpMemory(std::vector<ExtraDumpMemory> r
   return merged;
 }
 
-std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONTEXT& context)
+std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONTEXT& context, std::uint64_t allFormsSlot)
 {
   // The game is stopped in its crash handler and will not run on.
-  return CollectObjectMemory(
-    process, context, kCrashObjectMemoryBudget, std::chrono::steady_clock::time_point::max(), /*pages=*/nullptr);
+  return CollectObjectMemory(process, context, kCrashObjectMemoryBudget, std::chrono::steady_clock::time_point::max(),
+    /*pages=*/nullptr, allFormsSlot);
 }
 
 std::vector<ExtraDumpMemory> CollectThreadObjectMemory(
@@ -253,7 +277,7 @@ std::vector<ExtraDumpMemory> CollectThreadObjectMemory(
   std::chrono::steady_clock::time_point deadline)
 {
   PageCheck pages(process);
-  return CollectObjectMemory(process, context, budgetBytes, deadline, &pages);
+  return CollectObjectMemory(process, context, budgetBytes, deadline, &pages, /*allFormsSlot=*/0u);
 }
 
 }  // namespace skydiag::helper::internal

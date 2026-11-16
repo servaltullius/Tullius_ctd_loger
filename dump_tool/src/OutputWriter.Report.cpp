@@ -284,6 +284,12 @@ std::string BuildReportText(
     if (!r.fault_instruction.call_site.empty()) {
       rpt << (en ? " (call at " : " (호출 위치 ") << WideToUtf8(r.fault_instruction.call_site) << ")";
     }
+    if (!r.fault_instruction.base_value_form.empty()) {
+      // ADR-0033
+      rpt << (en ? " (" + r.fault_instruction.base_register + " holds the FormID of "
+                 : " (" + r.fault_instruction.base_register + " 값은 이 폼의 FormID: ")
+          << WideToUtf8(r.fault_instruction.base_value_form) << ")";
+    }
     rpt << "\n";
   }
   if (!r.inferred_mod_name.empty()) {
