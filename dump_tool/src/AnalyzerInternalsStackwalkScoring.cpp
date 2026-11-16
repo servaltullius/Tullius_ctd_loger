@@ -35,17 +35,24 @@ i18n::ConfidenceLevel ConfidenceForSecondaryCallstackLevel(std::uint32_t score, 
     : i18n::ConfidenceLevel::kLow;
 }
 
-std::vector<StackFrameKind> FrameKinds(const std::vector<ModuleInfo>& modules, const std::vector<std::uint64_t>& pcs)
+// externalSoftwareIsPlugin: software outside the game and its mods (an
+// overlay's hook DLL) is systemish for suspects and entry hooks, but code of
+// it on the path is still code that is not the game's.
+std::vector<StackFrameKind> FrameKinds(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  bool externalSoftwareIsPlugin = false)
 {
   std::vector<StackFrameKind> kinds;
   kinds.reserve(pcs.size());
   for (const auto pc : pcs) {
     const auto mi = FindModuleIndexForAddress(modules, pc);
     kinds.push_back(
-      !mi                          ? StackFrameKind::kUnknown
-      : modules[*mi].is_systemish  ? StackFrameKind::kSystem
-      : modules[*mi].is_game_exe   ? StackFrameKind::kGame
-                                   : StackFrameKind::kPlugin);
+      !mi                                                                 ? StackFrameKind::kUnknown
+      : externalSoftwareIsPlugin && !modules[*mi].external_software.empty() ? StackFrameKind::kPlugin
+      : modules[*mi].is_systemish                                         ? StackFrameKind::kSystem
+      : modules[*mi].is_game_exe                                          ? StackFrameKind::kGame
+                                                                          : StackFrameKind::kPlugin);
   }
   return kinds;
 }
@@ -68,9 +75,14 @@ std::vector<bool> MarkThreadEntryHookPcs(
 bool CompleteWalkWithoutPluginFrames(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
+  const std::vector<bool>& threadEntryHookMarks,
   bool walkReachedThreadStart)
 {
-  return NoPluginOnCompleteWalk(FrameKinds(modules, pcs), walkReachedThreadStart);
+  // An external program's frame is never marked (it is no plugin to
+  // MarkThreadEntryHookPcs), so here it keeps the walk from counting as
+  // plugin-free.
+  return NoPluginOnCompleteWalk(
+    FrameKinds(modules, pcs, /*externalSoftwareIsPlugin=*/true), threadEntryHookMarks, walkReachedThreadStart);
 }
 
 std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(

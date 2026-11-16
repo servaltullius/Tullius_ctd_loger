@@ -4,7 +4,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
-#include <iterator>
+#include <initializer_list>
 #include <utility>
 
 namespace skydiag::dump_tool {
@@ -840,34 +840,23 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
 
 std::optional<std::string> RegisterValueAsText(std::uint64_t value)
 {
-  std::uint8_t bytes[8]{};
-  for (std::size_t i = 0; i < 8u; ++i) {
-    bytes[i] = static_cast<std::uint8_t>(value >> (8u * i));
-  }
-  const auto isText = [](std::uint8_t c) { return (c >= 0x20u && c <= 0x7Eu) || c == '\t' || c == '\n' || c == '\r'; };
-  std::vector<std::uint8_t> chars;
-  if (std::all_of(std::begin(bytes), std::end(bytes), isText)) {
-    chars.assign(std::begin(bytes), std::end(bytes));
-  } else {
-    for (std::size_t i = 0; i < 8u; i += 2u) {
-      if (!isText(bytes[i]) || bytes[i + 1u] != 0u) {
-        return std::nullopt;
+  const auto byteAt = [value](std::size_t i) { return static_cast<std::uint8_t>(value >> (8u * i)); };
+  const auto isText = [](std::uint8_t c) { return c >= 0x20u && c <= 0x7Eu; };
+  // 8 ASCII characters, else 4 UTF-16 ones (each followed by a zero byte).
+  for (const std::size_t stride : { std::size_t{ 1 }, std::size_t{ 2 } }) {
+    std::string text;
+    for (std::size_t i = 0; i < 8u; i += stride) {
+      if (!isText(byteAt(i)) || (stride == 2u && byteAt(i + 1u) != 0u)) {
+        text.clear();
+        break;
       }
-      chars.push_back(bytes[i]);
+      text.push_back(static_cast<char>(byteAt(i)));
+    }
+    if (!text.empty()) {
+      return text;
     }
   }
-  std::string text;
-  for (const auto c : chars) {
-    switch (c) {
-      case '\\': text += "\\\\"; break;
-      case '"': text += "\\\""; break;
-      case '\t': text += "\\t"; break;
-      case '\n': text += "\\n"; break;
-      case '\r': text += "\\r"; break;
-      default: text += static_cast<char>(c); break;
-    }
-  }
-  return text;
+  return std::nullopt;
 }
 
 namespace {

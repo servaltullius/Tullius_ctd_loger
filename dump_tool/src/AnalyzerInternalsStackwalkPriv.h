@@ -196,3 +196,23 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   StackWalkEnd* outEnd = nullptr);
 
 }  // namespace skydiag::dump_tool::internal::stackwalk_internal
+
+namespace skydiag::dump_tool::internal::stackwalk {
+
+// ThreadEntryHooks.h for a walk's pcs: which frames only wrap the thread's
+// entry (all false for a walk that did not reach the thread start).
+std::vector<bool> MarkThreadEntryHookPcs(
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  bool walkReachedThreadStart);
+
+// ADR-0034: NoPluginOnCompleteWalk for a walk's pcs, with the marks
+// MarkThreadEntryHookPcs gave them. An external program's module (an
+// overlay's hook DLL) on the path counts as a plugin here.
+bool CompleteWalkWithoutPluginFrames(
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  const std::vector<bool>& threadEntryHookMarks,
+  bool walkReachedThreadStart);
+
+}  // namespace skydiag::dump_tool::internal::stackwalk

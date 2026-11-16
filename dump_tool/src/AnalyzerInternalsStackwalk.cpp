@@ -119,16 +119,6 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   i18n::Language lang,
   bool walkReachedThreadStart = true);
 
-std::vector<bool> MarkThreadEntryHookPcs(
-  const std::vector<ModuleInfo>& modules,
-  const std::vector<std::uint64_t>& pcs,
-  bool walkReachedThreadStart);
-
-bool CompleteWalkWithoutPluginFrames(
-  const std::vector<ModuleInfo>& modules,
-  const std::vector<std::uint64_t>& pcs,
-  bool walkReachedThreadStart);
-
 std::vector<CrashBucketFrame> BuildCanonicalCallstackFrames(
   const std::vector<ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
@@ -191,6 +181,28 @@ bool TryReadContextFromLocation(void* dumpBase, std::uint64_t dumpSize, const MI
   std::memset(&out, 0, sizeof(out));
   std::memcpy(&out, base + rva, copyN);
   return true;
+}
+
+StackScanChoice ChooseStackScan(const AnalysisResult& out, bool hangLike)
+{
+  if (out.suspects_from_stackwalk) {
+    return StackScanChoice::kScan;  // nothing to skip; ComputeSuspects scans only without suspects
+  }
+  if (out.stackwalk_only_thread_entry_hook_plugins) {
+    // No plugin is on the crashing path; a pointer scan would only add stale
+    // return addresses (Crash Logger's own, the MO2 VFS).
+    return StackScanChoice::kSkipThreadEntryHooksOnly;
+  }
+  // ADR-0034: the crashing thread's walk went down to its start through game
+  // and system code only. Its stack slots that are no return address of the
+  // walk hold what earlier calls left (Engine Fixes' allocator, a hook that
+  // ran before), and the same crash leaves the same stale slots, so a repeat
+  // only seemed to confirm them (2026-11-17 script loader crash).
+  if (policy::SkipStackScanAfterCompleteWalk(
+        hangLike, out.stackwalk_complete_without_plugin_frames, out.stackwalk_primary_tid, out.exc_tid)) {
+    return StackScanChoice::kSkipCompleteWalk;
+  }
+  return StackScanChoice::kScan;
 }
 
 bool TryComputeStackwalkSuspects(
@@ -499,7 +511,7 @@ bool TryComputeStackwalkSuspects(
     out.stackwalk_only_thread_entry_hook_plugins =
       std::find(marked.begin(), marked.end(), true) != marked.end();
     out.stackwalk_complete_without_plugin_frames =
-      stackwalk::CompleteWalkWithoutPluginFrames(modules, pcs, WalkReachedThreadStart(end));
+      stackwalk::CompleteWalkWithoutPluginFrames(modules, pcs, marked, WalkReachedThreadStart(end));
     std::vector<std::wstring> frameModules;
     frameModules.reserve(pcs.size());
     for (const auto pc : pcs) {

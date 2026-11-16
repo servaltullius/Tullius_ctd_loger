@@ -13,8 +13,9 @@ struct PriorityKind
   int rank;               // lower acts first
 };
 
-// Same priority the WinUI viewer uses for its next action, plus the other
-// candidate-level tags the checklist emits.
+// The order of the summary's next_action_index, which the WinUI viewer shows
+// as written (its own tag list, IsPriorityActionRecommendation, is only for
+// summaries from before that field, so tags added since need not be there).
 // - A forced close (ADR-0022) says there is nothing to do, before any module.
 // - A known root cause (crash_signatures.json) names the fix itself.
 // - One save that keeps failing to load in different places (ADR-0025) says

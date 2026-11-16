@@ -419,11 +419,18 @@ void TestRegisterValueAsText()
   assert(RegisterValueAsText(0x2065726120736C6Cull) == std::optional<std::string>("lls are "));
   // UTF-16: "Abc " as four code units.
   assert(RegisterValueAsText(0x0020006300620041ull) == std::optional<std::string>("Abc "));
-  // Escaped: backslash, double quote, tab, line feed, carriage return.
-  const std::uint8_t escaped[8] = { 'a', '"', '\\', '\t', 'b', 'c', '\n', '\r' };
+  // Quotes and backslashes come back as they are, so the text can be searched
+  // for in files as shown.
+  const std::uint8_t quoted[8] = { 'a', '"', '\\', 'b', 'c', 'd', 'e', 'f' };
   std::uint64_t value = 0;
-  std::memcpy(&value, escaped, sizeof(value));
-  assert(RegisterValueAsText(value) == std::optional<std::string>("a\\\"\\\\\\tbc\\n\\r"));
+  std::memcpy(&value, quoted, sizeof(value));
+  assert(RegisterValueAsText(value) == std::optional<std::string>("a\"\\bcdef"));
+  // A control character (a tab, a line feed) makes it no text: it could not be
+  // shown so that a search finds it.
+  const std::uint8_t tabbed[8] = { 'a', 'b', '\t', 'c', 'd', 'e', 'f', 'g' };
+  std::memcpy(&value, tabbed, sizeof(value));
+  assert(!RegisterValueAsText(value).has_value());
+  assert(!RegisterValueAsText(0x000A006300620041ull).has_value());
   // One byte that is no text spoils it.
   const std::uint8_t oneOff[8] = { 'a', 'b', 'c', 'd', 'e', 'f', 'g', 0x80 };
   std::memcpy(&value, oneOff, sizeof(value));

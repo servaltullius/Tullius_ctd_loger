@@ -289,6 +289,17 @@ void TestPapyrusScriptLoadSignatureRuntime()
   facegen.access_violation_address = 0x24ull;
   const auto facegenHit = db.Match(facegen, /*useKorean=*/false);
   assert(facegenHit && facegenHit->id == "FACEGEN_MORPHDATA_NULLPTR_1_6_1170");
+  // So does a plain null pointer: the loader may only have been left nearby.
+  auto nullRead = input;
+  nullRead.access_violation_address = 0x20ull;
+  const auto nullHit = db.Match(nullRead, /*useKorean=*/false);
+  assert(nullHit && nullHit->id == "ACCESS_VIOLATION_NULL");
+  // The 2026-11-17 crash had no faulting address (a general-protection
+  // fault, ~0): not near 0, so it is the loader's.
+  auto noAddress = input;
+  noAddress.access_violation_address = ~0ull;
+  const auto noAddressHit = db.Match(noAddress, /*useKorean=*/false);
+  assert(noAddressHit && noAddressHit->id == "PAPYRUS_SCRIPT_LOAD");
 }
 
 // Known crash sites from public fixes (2026-10-13 research): each matches only

@@ -222,8 +222,10 @@ static void TestCompleteWalkSkipsStackScan()
   static_assert(!SkipStackScanAfterCompleteWalk(false, false, 41920u, 41920u));
   static_assert(!SkipStackScanAfterCompleteWalk(false, true, 47080u, 41920u));
   static_assert(!SkipStackScanAfterCompleteWalk(false, true, 0u, 0u));
-  const auto src = ReadFile("dump_tool/src/Analyzer.CaptureInputs.cpp");
+  const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalk.cpp");
   assert(src.find("policy::SkipStackScanAfterCompleteWalk(") != std::string::npos);
+  assert(ReadFile("dump_tool/src/Analyzer.CaptureInputs.cpp").find("internal::ChooseStackScan(out, hangLike)") !=
+         std::string::npos);
 }
 
 int main()

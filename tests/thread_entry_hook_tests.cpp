@@ -261,24 +261,29 @@ void TestFrameWithoutModuleKeepsItsPlace()
 // ADR-0034: a complete walk with no plugin on it gets no stack scan.
 void TestNoPluginOnCompleteWalk()
 {
+  const auto complete = [](const std::vector<StackFrameKind>& frames, bool reached) {
+    return NoPluginOnCompleteWalk(frames, MarkThreadEntryHookFrames(frames), reached);
+  };
   // The 2026-11-17 script loader crash: 14 game frames (the last is the
   // game's thread start), KERNEL32 and ntdll.
   std::vector<StackFrameKind> scriptLoader(14, G);
   scriptLoader.push_back(S);
   scriptLoader.push_back(S);
-  assert(NoPluginOnCompleteWalk(scriptLoader, true));
+  assert(complete(scriptLoader, true));
   // The same walk cut short says nothing about the frames below the cut.
-  assert(!NoPluginOnCompleteWalk(scriptLoader, false));
-  assert(!NoPluginOnCompleteWalk({}, true));
+  assert(!complete(scriptLoader, false));
+  assert(!complete({}, true));
   // Thread-entry hooks are no plugin on the path (the ContentCatalog shape).
-  assert(NoPluginOnCompleteWalk({ S, S, S, G, G, G, G, G, G, G, G, G, G, P, P, G, S, S }, true));
+  assert(complete({ S, S, S, G, G, G, G, G, G, G, G, G, G, P, P, G, S, S }, true));
   // A plugin anywhere else is: the game called it, or it is the main loop's
   // hook (two game frames below), or its own thread.
-  assert(!NoPluginOnCompleteWalk({ G, G, G, P, P, G, G, G, G, S, S }, true));
-  assert(!NoPluginOnCompleteWalk({ G, G, G, P, G, G, S, S }, true));
-  assert(!NoPluginOnCompleteWalk({ G, G, G, P, S, S }, true));
+  assert(!complete({ G, G, G, P, P, G, G, G, G, S, S }, true));
+  assert(!complete({ G, G, G, P, G, G, S, S }, true));
+  assert(!complete({ G, G, G, P, S, S }, true));
+  // Marks of another length are refused.
+  assert(!NoPluginOnCompleteWalk(scriptLoader, {}, true));
   // Code outside every module may be a plugin's hook.
-  assert(!NoPluginOnCompleteWalk({ G, G, U, G, G, S, S }, true));
+  assert(!complete({ G, G, U, G, G, S, S }, true));
 }
 
 }  // namespace

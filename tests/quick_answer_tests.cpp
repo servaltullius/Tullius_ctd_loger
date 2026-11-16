@@ -1166,6 +1166,16 @@ void TestScriptLoaderCrashOutput()
       "cross_validated", i18n::ConfidenceLevel::kHigh, L"ExampleMod.dll", L"Example Mod", { "crash_logger_frame" }));
     Require(BuildQuickAnswer(named, lang, ctx).case_id == "candidate", "a named mod still leads");
 
+    // A driver error moments before the crash comes first (ADR-0029): no
+    // mechanism headline next to the driver's action.
+    auto gpuCtx = ctx;
+    gpuCtx.gpuDriverErrorSecBeforeCrash = 5u;
+    gpuCtx.gpuDriverErrorName = L"nvlddmkm";
+    const auto gpuQa = BuildQuickAnswer(r, lang, gpuCtx);
+    Require(gpuQa.case_id == "none" && !Contains(gpuQa.headline, sig->headline) &&
+              Contains(gpuQa.action, L"nvlddmkm"),
+      "the driver error leads without the mechanism headline");
+
     // A mechanism with no headline of its own does not take over.
     auto quiet = crash();
     auto noHeadline = *sig;
@@ -1198,6 +1208,41 @@ void TestScriptLoaderCrashOutput()
     Require(!plainSummary["fault_instruction"].contains("overwritten_text") &&
               !plainSummary["fault_instruction"].contains("overwritten_text_register"),
       "no fields without text");
+  }
+}
+
+// ADR-0034: a candidate the raw stack scan alone found (with history next to
+// it) was only seen near the crash in memory, and the quick answer says so,
+// not that "the clues point to this mod".
+void TestStackScanOnlyCandidateIsNearby()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    AnalysisResult r{};
+    r.exc_code = 0xC0000005u;
+    r.fault_module_filename = L"SkyrimSE.exe";
+    r.fault_module_plus_offset = L"SkyrimSE.exe+0x143e7dd";
+    r.actionable_candidates.push_back(Candidate(
+      "related", i18n::ConfidenceLevel::kLow, L"AnimationQueueFix.dll", L"Animation Queue Fix",
+      { "actionable_stack", "history_repeat" }));
+    auto ctx = CrashContext(en, r.fault_module_filename);
+    ctx.isGameExe = true;
+    const auto scan = BuildQuickAnswer(r, lang, ctx);
+    Require(scan.suspect_mod == L"Animation Queue Fix" && scan.likelihood == "low", "still named, weakly");
+    Require(Contains(scan.why_not_certain, en ? L"only seen nearby in memory" : L"메모리 근처에서 보였을 뿐"),
+      "only seen nearby");
+
+    // The same candidate from a stack walk keeps its wording.
+    auto walked = r;
+    walked.suspects_from_stackwalk = true;
+    Require(Contains(BuildQuickAnswer(walked, lang, ctx).why_not_certain, en ? L"another file" : L"다른 파일"),
+      "a walked frame points to it");
+    // So does one with a Crash Logger frame next to the scan.
+    auto framed = r;
+    framed.actionable_candidates[0].supporting_families.push_back("crash_logger_frame");
+    Require(!Contains(BuildQuickAnswer(framed, lang, ctx).why_not_certain,
+              en ? L"only seen nearby in memory" : L"메모리 근처에서 보였을 뿐"),
+      "a Crash Logger frame is more than a nearby slot");
   }
 }
 
@@ -2282,6 +2327,7 @@ int main()
     TestFaultInstructionClue();
     TestFormIdFaultInstructionOutput();
     TestScriptLoaderCrashOutput();
+    TestStackScanOnlyCandidateIsNearby();
     TestForcedClose();
     TestDamagedSave();
     TestLoadedSavesFile();

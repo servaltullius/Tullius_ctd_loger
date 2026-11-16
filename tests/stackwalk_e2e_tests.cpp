@@ -426,9 +426,75 @@ void TestMemory64ListCountOverflowIsRejected()
   Require(!loaded && mem.ranges.empty(), "a Memory64List with an impossible range count is rejected");
 }
 
+// ADR-0034: a crash walk with only the game and Windows on it skips the
+// pointer scan; an overlay's hook DLL on the path, a frame outside every
+// module, a freeze, or another thread's walk keeps it.
+void TestCompleteGameWalkSkipsStackScan()
+{
+  using skydiag::dump_tool::internal::ChooseStackScan;
+  using skydiag::dump_tool::internal::StackScanChoice;
+  using skydiag::dump_tool::internal::stackwalk::CompleteWalkWithoutPluginFrames;
+  using skydiag::dump_tool::internal::stackwalk::MarkThreadEntryHookPcs;
+  using skydiag::dump_tool::minidump::ModuleInfo;
+
+  const auto module = [](std::uint64_t base, const wchar_t* name) {
+    ModuleInfo m{};
+    m.base = base;
+    m.end = base + 0x100000;
+    m.filename = name;
+    return m;
+  };
+  auto game = module(0x140000000ull, L"SkyrimSE.exe");
+  game.is_game_exe = true;
+  auto overlay = module(0x7FF800000000ull, L"RTSSHooks64.dll");
+  overlay.external_software = L"RivaTuner Statistics Server";
+  overlay.is_systemish = true;
+  auto kernel32 = module(0x7FF900000000ull, L"KERNEL32.DLL");
+  kernel32.is_systemish = true;
+  auto ntdll = module(0x7FFA00000000ull, L"ntdll.dll");
+  ntdll.is_systemish = true;
+  const std::vector<ModuleInfo> modules = { game, overlay, kernel32, ntdll };  // sorted by base
+
+  const std::vector<std::uint64_t> gameOnly = {
+    0x140001000ull, 0x140002000ull, 0x140003000ull, 0x140004000ull, 0x7FF900001000ull, 0x7FFA00001000ull,
+  };
+  const auto marks = [&](const std::vector<std::uint64_t>& pcs) { return MarkThreadEntryHookPcs(modules, pcs, true); };
+  Require(CompleteWalkWithoutPluginFrames(modules, gameOnly, marks(gameOnly), true), "the game and Windows only");
+  Require(!CompleteWalkWithoutPluginFrames(modules, gameOnly, marks(gameOnly), false), "a walk cut short");
+  auto throughOverlay = gameOnly;
+  throughOverlay.insert(throughOverlay.begin() + 2, 0x7FF800001000ull);
+  Require(!CompleteWalkWithoutPluginFrames(modules, throughOverlay, marks(throughOverlay), true),
+    "an overlay's hook DLL on the path");
+  auto outsideModules = gameOnly;
+  outsideModules.insert(outsideModules.begin() + 2, 0x500000000ull);
+  Require(!CompleteWalkWithoutPluginFrames(modules, outsideModules, marks(outsideModules), true),
+    "a frame outside every module");
+
+  skydiag::dump_tool::AnalysisResult crash{};
+  crash.exc_tid = 41920u;
+  crash.stackwalk_primary_tid = 41920u;
+  crash.stackwalk_complete_without_plugin_frames = true;
+  Require(ChooseStackScan(crash, /*hangLike=*/false) == StackScanChoice::kSkipCompleteWalk, "skipped for the crash");
+  Require(ChooseStackScan(crash, /*hangLike=*/true) == StackScanChoice::kScan, "a freeze keeps its scan");
+  auto otherThread = crash;
+  otherThread.stackwalk_primary_tid = 47080u;
+  Require(ChooseStackScan(otherThread, false) == StackScanChoice::kScan, "another thread's walk");
+  auto withPlugin = crash;
+  withPlugin.stackwalk_complete_without_plugin_frames = false;
+  Require(ChooseStackScan(withPlugin, false) == StackScanChoice::kScan, "a plugin on the path");
+  auto entryHooks = withPlugin;
+  entryHooks.stackwalk_only_thread_entry_hook_plugins = true;
+  Require(ChooseStackScan(entryHooks, true) == StackScanChoice::kSkipThreadEntryHooksOnly,
+    "entry hooks only, freezes too (ADR-0015)");
+  auto named = crash;
+  named.suspects_from_stackwalk = true;
+  Require(ChooseStackScan(named, false) == StackScanChoice::kScan, "nothing to skip when the walk named suspects");
+}
+
 int main()
 {
   try {
+    TestCompleteGameWalkSkipsStackScan();
     TestMemory64ListCountOverflowIsRejected();
     TestFindFunctionStartFollowsChainedEntries();
     TestLocalImageRejectsNonCodeReturnAddresses();
