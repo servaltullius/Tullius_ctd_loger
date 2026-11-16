@@ -1131,6 +1131,15 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
                   L" 인덱스(" + index + L")가 범위를 벗어났거나 포인터가 잘못됐을 가능성이 큽니다.");
   }
   // bad_pointer
+  if (!info.base_value_form.empty()) {
+    // ADR-0033: the value is no address but a form's FormID.
+    return en ? (subject + tried + L", and " + base + L" was " + HexW(info.base_value) + L"; " + noMemory +
+                  L". That value is the FormID of a form in this game, " + info.base_value_form +
+                  L": a FormID may have been used where a pointer to a form belongs.")
+              : (subject + tried + L" " + base + L"가 " + HexW(info.base_value) + L"였고 " + noMemory +
+                  L" 이 값은 이 게임에 있는 폼 " + info.base_value_form +
+                  L"의 FormID와 같습니다. 폼을 가리키는 포인터 자리에 FormID가 들어갔을 수 있습니다.");
+  }
   return en ? (subject + tried + L", and " + base + L" was " + HexW(info.base_value) + L"; " + noMemory +
                 L": the object was probably freed already, or the pointer is corrupted.")
             : (subject + tried + L" " + base + L"가 " + HexW(info.base_value) + L"였고 " + noMemory +
@@ -1147,6 +1156,10 @@ std::wstring DescribeFaultInstructionPlain(const FaultInstructionInfo& info, boo
     }
     return en ? L"It crashed while using an object that was already gone or never created (a null pointer)."
               : L"이미 사라졌거나 만들어진 적 없는 오브젝트를 쓰다가 튕겼습니다(null 포인터).";
+  }
+  if (v == "bad_pointer" && !info.base_value_form.empty()) {
+    return en ? L"It seems to have crashed using a form's FormID (its number) as if it were a pointer."
+              : L"폼의 번호(FormID)를 포인터처럼 쓰다가 튕긴 것으로 보입니다.";
   }
   if (v == "bad_pointer") {
     return en ? L"It crashed while using memory that was already freed, or a broken pointer."

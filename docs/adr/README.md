@@ -35,3 +35,4 @@ ADR index:
 - `0030-helper-watchdog-gives-up.md`
 - `0031-skip-dump-for-repeated-handled-faults.md`
 - `0032-unhandled-exception-signal-and-hold.md`
+- `0033-formid-used-as-pointer.md`

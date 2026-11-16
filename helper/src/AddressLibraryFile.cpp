@@ -9,6 +9,8 @@
 #include <string>
 #include <system_error>
 
+#include "SkyrimDiagAddressLibrary.h"
+#include "SkyrimDiagFormMap.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
 
 namespace skydiag::helper::internal {
@@ -73,6 +75,24 @@ std::string GameAddressLibraryBytes(std::uint32_t pid)
     return it->second;
   }
   return byPid.emplace(pid, ReadAddressLibrary(pid)).first->second;
+}
+
+std::optional<std::uint64_t> GameAllFormsOffset(std::uint32_t pid)
+{
+  static std::mutex mutex;
+  static std::map<std::uint32_t, std::optional<std::uint64_t>> byPid;
+  const std::string bytes = GameAddressLibraryBytes(pid);
+  std::lock_guard lock(mutex);
+  const auto it = byPid.find(pid);
+  if (it != byPid.end()) {
+    return it->second;
+  }
+  std::optional<std::uint64_t> offset;
+  skydiag::address_library::AddressLibrary library;
+  if (library.Parse(bytes)) {
+    offset = library.OffsetOf(skydiag::form_map::AllFormsId(library.Format()));
+  }
+  return byPid.emplace(pid, offset).first->second;
 }
 
 }  // namespace skydiag::helper::internal

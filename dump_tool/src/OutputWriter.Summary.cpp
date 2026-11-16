@@ -617,6 +617,9 @@ nlohmann::json BuildSummaryJson(
     if (!fi.target_state.empty()) {
       j["target_state"] = fi.target_state;
     }
+    if (!fi.base_value_form.empty()) {
+      j["base_value_form"] = WideToUtf8(fi.base_value_form);
+    }
     summary["fault_instruction"] = std::move(j);
   }
   if (r.hook_stub_race.detected) {

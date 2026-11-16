@@ -1,10 +1,25 @@
-#include "AddressLibrary.h"
+#pragma once
+
+// ADR-0027: an Address Library file (Data\SKSE\Plugins\versionlib-*.bin or
+// version-*.bin), turned into an offset <-> ID lookup. The helper reads it
+// for the game it watches and puts the bytes in the dump
+// (kMinidumpUserStream_AddressLibrary); the analyzer reads them back.
+// Formats 1 (1.5.x) and 2 (1.6.x) are delta encoded; format 5 (1.7.x) is a
+// table of 32-bit offsets indexed by ID. Only exact offsets map to an ID.
+// Header-only and free of <Windows.h>: shared by the helper and the analyzer.
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <optional>
+#include <string_view>
+#include <utility>
+#include <vector>
 
-namespace skydiag::dump_tool {
-namespace {
+namespace skydiag::address_library {
+
+namespace detail {
 
 // Reads little-endian values from the file, failing (not throwing) at its end.
 class Reader
@@ -41,12 +56,12 @@ private:
 
 // A count no real file reaches (1.7.104 has under a million IDs); a bigger
 // one is a damaged file, not a reason to allocate gigabytes.
-constexpr std::uint64_t kMaxEntries = 8'000'000;
+inline constexpr std::uint64_t kMaxEntries = 8'000'000;
 
 // Formats 1 and 2: format, version[4], name length, name, pointer size,
 // count, then per entry a type byte whose low nibble encodes the ID and high
 // nibble the offset, each relative to the previous entry.
-bool ParseDeltaEncoded(Reader& in, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out)
+inline bool ParseDeltaEncoded(Reader& in, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out)
 {
   std::uint32_t version[4]{};
   std::int32_t nameLength = 0;
@@ -114,7 +129,7 @@ bool ParseDeltaEncoded(Reader& in, std::vector<std::pair<std::uint64_t, std::uin
 
 // Format 5: format, version[4], name[64], pointer size, data format, count,
 // then count 32-bit offsets indexed by ID (0: no address for that ID).
-bool ParseDense(Reader& in, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out)
+inline bool ParseDense(Reader& in, std::vector<std::pair<std::uint64_t, std::uint64_t>>& out)
 {
   std::uint32_t version[4]{};
   std::int32_t pointerSize = 0;
@@ -138,39 +153,67 @@ bool ParseDense(Reader& in, std::vector<std::pair<std::uint64_t, std::uint64_t>>
   return true;
 }
 
-}  // namespace
+}  // namespace detail
 
-bool AddressLibrary::Parse(std::string_view bytes)
+class AddressLibrary
 {
-  m_byOffset.clear();
-  m_format = 0;
-  Reader in(bytes);
-  std::int32_t format = 0;
-  if (!in.Read(&format)) {
-    return false;
+public:
+  // False (and empty) for a file it does not understand or that is cut short.
+  bool Parse(std::string_view bytes)
+  {
+    m_byOffset.clear();
+    m_format = 0;
+    detail::Reader in(bytes);
+    std::int32_t format = 0;
+    if (!in.Read(&format)) {
+      return false;
+    }
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> entries;
+    const bool ok = (format == 1 || format == 2) ? detail::ParseDeltaEncoded(in, entries)
+                    : format == 5                ? detail::ParseDense(in, entries)
+                                                 : false;
+    if (!ok || entries.empty()) {
+      return false;
+    }
+    std::sort(entries.begin(), entries.end());
+    m_byOffset = std::move(entries);
+    m_format = format;
+    return true;
   }
-  std::vector<std::pair<std::uint64_t, std::uint64_t>> entries;
-  const bool ok = (format == 1 || format == 2) ? ParseDeltaEncoded(in, entries)
-                  : format == 5                ? ParseDense(in, entries)
-                                               : false;
-  if (!ok || entries.empty()) {
-    return false;
-  }
-  std::sort(entries.begin(), entries.end());
-  m_byOffset = std::move(entries);
-  m_format = format;
-  return true;
-}
 
-std::optional<std::uint64_t> AddressLibrary::IdAt(std::uint64_t offset) const
-{
-  const auto it = std::lower_bound(
-    m_byOffset.begin(), m_byOffset.end(), offset,
-    [](const std::pair<std::uint64_t, std::uint64_t>& entry, std::uint64_t value) { return entry.first < value; });
-  if (it == m_byOffset.end() || it->first != offset) {
+  // The Address Library ID whose address is this offset (RVA) in the game
+  // executable; the lowest one when several share it.
+  std::optional<std::uint64_t> IdAt(std::uint64_t offset) const
+  {
+    const auto it = std::lower_bound(
+      m_byOffset.begin(), m_byOffset.end(), offset,
+      [](const std::pair<std::uint64_t, std::uint64_t>& entry, std::uint64_t value) { return entry.first < value; });
+    if (it == m_byOffset.end() || it->first != offset) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  // The offset (RVA) of an Address Library ID; nullopt when the file has no
+  // address for it. A linear search: for the few IDs looked up per dump.
+  std::optional<std::uint64_t> OffsetOf(std::uint64_t id) const
+  {
+    for (const auto& [offset, entryId] : m_byOffset) {
+      if (entryId == id) {
+        return offset;
+      }
+    }
     return std::nullopt;
   }
-  return it->second;
-}
 
-}  // namespace skydiag::dump_tool
+  std::size_t Size() const { return m_byOffset.size(); }
+  // 1: Skyrim SE 1.5.x; 2: AE 1.6.x; 5: 1.7.x (AE IDs).
+  std::int32_t Format() const { return m_format; }
+
+private:
+  // (offset, id), sorted by offset then id.
+  std::vector<std::pair<std::uint64_t, std::uint64_t>> m_byOffset;
+  std::int32_t m_format = 0;
+};
+
+}  // namespace skydiag::address_library

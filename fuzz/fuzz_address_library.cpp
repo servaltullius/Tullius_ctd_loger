@@ -1,8 +1,8 @@
 // Fuzz harness for the Address Library parser (ADR-0027): the bytes come from
 // a user stream of a dump, which can be cut short or damaged.
 // Build with: clang++ -g -O1 -fsanitize=fuzzer,address \
-//   -I ../dump_tool/src \
-//   fuzz_address_library.cpp ../dump_tool/src/AddressLibrary.cpp \
+//   -I ../dump_tool/src -I ../shared \
+//   fuzz_address_library.cpp \
 //   -o fuzz_address_library
 //
 // Run: ./fuzz_address_library corpus/address_library -max_len=4096

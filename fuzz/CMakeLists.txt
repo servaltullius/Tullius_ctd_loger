@@ -49,11 +49,11 @@ skydiag_configure_fuzz_target(fuzz_skse_log_parser)
 # cut short or damaged.
 add_executable(fuzz_address_library
   fuzz_address_library.cpp
-  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/AddressLibrary.cpp"
 )
 
 target_include_directories(fuzz_address_library PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
 )
 
 skydiag_configure_fuzz_target(fuzz_address_library)

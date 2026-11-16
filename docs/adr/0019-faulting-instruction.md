@@ -83,6 +83,9 @@ Accepted
   - 실게임 확인(2026-11-15, v0.2.76-rc3, Crash Logger 1.27이 있는 구성, 크래시 테스터의 Ctrl+Shift+End): `CrashTester.dll`이 빈 함수 포인터를 `call rax`로 부른 크래시에서, 판정이 `null_jump`이고 콜스택이 `0x0`, `CrashTester.dll!CallEmptyFunctionPointer+0x2e`, `skse64_1_6_1170.dll`, 게임 함수(ID 36588, 39092, 69378, 69380, 69344, 68445), `kernel32.dll`, `ntdll.dll` 순으로 나왔습니다. Crash Logger의 `[P]` 프레임 10줄과 둘째 줄부터 끝까지 같습니다. 호출 위치 문장(`CrashTester.dll+0x66bac`, `call rax`)도 나왔고, 빠른 답은 CrashTester.dll을 "가능성 높음"으로 짚었습니다.
 - 남은 것: 이 크래시에서도 호출 위치(`call qword ptr [rax+0x18]`) 문장은 나오지 않았습니다. 호출이 읽은 메모리(`[rax+0x18]`, 힙)가 덤프에 없어 그 호출이 0으로 갔는지 확인할 수 없기 때문입니다(`FindCallTo`).
 
+## Addendum (2026-11-17): 포인터 자리에 든 FormID
+- `bad_pointer`의 기준 레지스터 값이 게임의 FormID 표에 있는 폼의 FormID이면, 근거 문장의 끝("오브젝트가 이미 해제됐거나 포인터가 망가졌을 가능성")과 빠른 답의 "어떻게 튕겼나"를 그 폼의 FormID라는 문장으로 바꿉니다. 조회와 조건은 ADR-0033에 있습니다. 판정 이름(`bad_pointer`)과 리포트의 예외 명령어 줄은 그대로이고, 그 줄 뒤에 폼이 붙습니다.
+
 ## Verification
 - `skydiag_fault_instruction_tests`(Linux 포함): 위 형식마다 합성 바이트열의 해독(크기, 읽기/쓰기, 피연산자 문자열, SIB·r12/r13·REX.X·disp32·RIP 상대 주소·즉값 길이), 거부 형식(VEX/EVEX, 67, GS, 0F 38, MMX, popcnt, rep, 잘린 바이트), 판정마다의 교차 검증과 영어·한국어 문장(레지스터가 0인 경우 전체 문장 일치), `address_only`에서 레지스터를 말하지 않음, 호출 위치 찾기(`call [rax+0x18]`, `call [rsp+8]`의 rsp 보정, `call reg`, `call rel32`, 긴 호출 명령어의 꼬리가 짧은 호출로 보이는 경우)
 - `skydiag_quick_answer_tests`: 근거 항목의 위치·신뢰도·문장, 빠른 답의 덧붙인 문장과 나머지 불변, 요약 JSON `fault_instruction`, 리포트 줄, 레지스터 없는 경우

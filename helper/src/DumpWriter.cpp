@@ -628,6 +628,13 @@ bool WriteDumpWithStreams(
 
   MINIDUMP_EXCEPTION_INFORMATION* meiPtr = nullptr;
   std::vector<internal::ExtraDumpMemory> crashObjectMemory;
+  // The game executable's range, read once: the FormID table (ADR-0033) and
+  // the stack code (ADR-0023) both need it. A PSS snapshot handle cannot be
+  // read for it.
+  std::uint64_t gameBase = 0;
+  std::uint64_t gameEnd = 0;
+  const bool gameImageKnown =
+    !isProcessSnapshot && internal::GameImageRange(process, gameBase, gameEnd) && gameBase != 0;
   if (isCrash && hasCommittedHeader &&
       committedHeader.crash_seq != 0u &&
       (committedHeader.crash_seq & 1u) == 0u) {
@@ -645,8 +652,15 @@ bool WriteDumpWithStreams(
     }
     ep.ContextRecord = sized ? sized : &ctx;
     if (!isProcessSnapshot) {
-      // The game is stopped in its crash handler, so the objects are intact.
-      crashObjectMemory = internal::CollectCrashObjectMemory(process, ctx);
+      // The crashing thread is held in its crash handler, so the objects it
+      // points at stay put (other threads run on). ADR-0033: where the
+      // game's FormID table is, for a register holding a FormID.
+      std::uint64_t allFormsSlot = 0;
+      const auto allFormsOffset = internal::GameAllFormsOffset(pid);
+      if (allFormsOffset && gameImageKnown && *allFormsOffset < gameEnd - gameBase) {
+        allFormsSlot = gameBase + *allFormsOffset;
+      }
+      crashObjectMemory = internal::CollectCrashObjectMemory(process, ctx, allFormsSlot);
       g_crashObjectMemoryBytes.fetch_add(TotalBytes(crashObjectMemory), std::memory_order_relaxed);
     }
 
@@ -702,9 +716,7 @@ bool WriteDumpWithStreams(
   std::optional<internal::StackCodeMemoryCollector> stackCode;
   DumpCodeMemoryStats codeWithoutCollector{};
   if (effectiveProfile.gameAndStackCodeOnly && !isProcessSnapshot) {
-    std::uint64_t gameBase = 0;
-    std::uint64_t gameEnd = 0;
-    if (internal::GameImageRange(process, gameBase, gameEnd) && gameBase != 0) {
+    if (gameImageKnown) {
       stackCode.emplace(process, gameBase, callbackContext.preferredThreadIds, meiPtr ? ctx.Rip : 0u);
       callbackContext.gameImageBase = gameBase;
       callbackContext.stackCode = &*stackCode;

@@ -150,6 +150,18 @@ static int RunHelper(int argc, wchar_t** argv)
         ? std::wstring(L"Address Library for dumps: not found in Data\\SKSE\\Plugins for this game version; game "
                        L"frames get no Address Library IDs.")
         : L"Address Library for dumps: " + std::to_wstring(addressLibrary.size()) + L" bytes.");
+    // ADR-0033: parsed now too, so a crash does not wait for it.
+    if (!addressLibrary.empty()) {
+      const auto allForms = skydiag::helper::internal::GameAllFormsOffset(proc.pid);
+      wchar_t offset[32]{};
+      if (allForms) {
+        swprintf_s(offset, L"+0x%llX", static_cast<unsigned long long>(*allForms));
+      }
+      AppendLogLine(
+        outBase,
+        allForms ? L"FormID lookup for crash dumps: TESForm::allForms at the game executable" + std::wstring(offset) + L"."
+                 : std::wstring(L"FormID lookup for crash dumps: off (the Address Library has no TESForm::allForms)."));
+    }
   }
 
   const bool grassCacheMode = skydiag::helper::internal::DetectGrassCacheMode(cfg, proc, outBase);

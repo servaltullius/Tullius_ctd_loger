@@ -9,6 +9,8 @@
 
 #include <Windows.h>
 
+#include <DbgHelp.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -26,8 +28,11 @@
 
 #include <nlohmann/json.hpp>
 
+#include "AddressLibrary.h"
 #include "Analyzer.h"
+#include "AnalyzerInternals.h"
 #include "CrashHistory.h"
+#include "CrashObjectMemory.h"
 #include "DumpObjects.h"
 #include "FaultInstruction.h"
 #include "HangCaptureInternal.h"
@@ -37,6 +42,8 @@
 #include "MinidumpUtil.h"
 #include "OutputWriterPipeline.h"
 #include "RetentionWorker.h"
+#include "SkyrimDiagFormMap.h"
+#include "SkyrimDiagRtti.h"
 #include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
@@ -200,6 +207,13 @@ public:
   TESPackageData* data = nullptr;         // 0x30
 };
 
+// An armor form, found by its FormID in the game's FormID table (ADR-0033).
+class TESObjectARMO : public TESBoundObject, public TESFullName
+{
+public:
+  ~TESObjectARMO() override = default;
+};
+
 class BSFadeNode
 {
 public:
@@ -208,6 +222,224 @@ public:
 };
 
 namespace {
+
+// A minidump of this process holding only `ranges` (and what every dump
+// holds: threads, modules), as the helper's crash dump holds the ranges it
+// collected.
+BOOL CALLBACK AddRangesCallback(PVOID param, const PMINIDUMP_CALLBACK_INPUT input, PMINIDUMP_CALLBACK_OUTPUT output)
+{
+  auto* state = static_cast<std::pair<const std::vector<skydiag::helper::internal::ExtraDumpMemory>*, std::size_t>*>(param);
+  if (input->CallbackType != MemoryCallback) {
+    return TRUE;
+  }
+  if (state->second >= state->first->size()) {
+    return FALSE;
+  }
+  const auto& range = (*state->first)[state->second++];
+  output->MemoryBase = range.base;
+  output->MemorySize = range.size;
+  return TRUE;
+}
+
+void WriteDumpWithRanges(
+  const std::filesystem::path& path,
+  const std::vector<skydiag::helper::internal::ExtraDumpMemory>& ranges)
+{
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  Require(file != INVALID_HANDLE_VALUE, "create the dump file");
+  std::pair<const std::vector<skydiag::helper::internal::ExtraDumpMemory>*, std::size_t> state{ &ranges, 0 };
+  MINIDUMP_CALLBACK_INFORMATION callback{};
+  callback.CallbackRoutine = AddRangesCallback;
+  callback.CallbackParam = &state;
+  const BOOL written = MiniDumpWriteDump(
+    GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpNormal, nullptr, nullptr, &callback);
+  CloseHandle(file);
+  Require(written != FALSE, "MiniDumpWriteDump");
+}
+
+// An Address Library file (format 2 or 1) with one ID at one offset.
+std::string OneIdAddressLibrary(std::int32_t format, std::uint64_t id, std::uint64_t offset)
+{
+  std::string bytes;
+  const auto put = [&bytes](const auto value) {
+    char raw[sizeof(value)];
+    std::memcpy(raw, &value, sizeof(value));
+    bytes.append(raw, sizeof(value));
+  };
+  put(format);
+  for (const std::uint32_t v : { 1u, 6u, 1170u, 0u }) {
+    put(v);
+  }
+  put(std::int32_t{ 0 });  // name length
+  put(std::int32_t{ 8 });  // pointer size
+  put(std::int32_t{ 1 });  // count
+  bytes.push_back('\0');  // full ID, full offset
+  put(id);
+  put(offset);
+  return bytes;
+}
+
+// ADR-0033: a crash register holding a FormID. The helper looks it up in a
+// FormID table laid out as the game's (shared/SkyrimDiagFormMap.h) and keeps
+// what it read; the same lookup over only those bytes, as the analyzer runs
+// it over the dump, finds the same form and reads its type and name.
+void TestFormIdRegisterIsLookedUp()
+{
+  struct Entry
+  {
+    std::uint32_t key = 0;
+    std::uint32_t pad = 0;
+    std::uint64_t form = 0;
+    std::uint64_t next = 0;
+  };
+  static_assert(sizeof(Entry) == skydiag::form_map::kEntryBytes);
+  struct Map
+  {
+    std::uint8_t pad00[0x0C]{};
+    std::uint32_t capacity = 0;   // 0x0C
+    std::uint32_t free = 0;       // 0x10
+    std::uint32_t good = 0;       // 0x14
+    std::uint64_t sentinel = 0;   // 0x18
+    std::uint64_t allocator = 0;  // 0x20
+    std::uint64_t entries = 0;    // 0x28
+  };
+  static_assert(offsetof(Map, capacity) == 0x0C && offsetof(Map, sentinel) == 0x18 && offsetof(Map, entries) == 0x28);
+
+  constexpr std::uint32_t kCapacity = 16;
+  constexpr std::uint32_t kArmorId = 0x00012EB6u;
+  constexpr std::uint32_t kAbsentId = 0x00012EB7u;
+  static const std::uint8_t sentinelBytes[4] = { 0xDE, 0xAD, 0xBE, 0xEF };
+
+  auto master = std::make_unique<TESFile>();
+  strcpy_s(master->fileName, "Skyrim.esm");
+  TESFile* files[] = { master.get() };
+  TESFileArray fileArray{ files, 1 };
+  auto armor = std::make_unique<TESObjectARMO>();
+  armor->sourceFiles = &fileArray;
+  armor->formID = kArmorId;
+  armor->formType = 0x1A;
+  static const char kName[] = "Iron Shield";
+  armor->fullName = kName;
+
+  auto entries = std::make_unique<Entry[]>(kCapacity);
+  const std::uint32_t home = skydiag::form_map::FormIdHash(kArmorId) & (kCapacity - 1u);
+  Require((skydiag::form_map::FormIdHash(kAbsentId) & (kCapacity - 1u)) != home, "the absent FormID hashes elsewhere");
+  entries[home].key = kArmorId;
+  entries[home].form = reinterpret_cast<std::uint64_t>(armor.get());
+  entries[home].next = reinterpret_cast<std::uint64_t>(sentinelBytes);
+  auto map = std::make_unique<Map>();
+  map->capacity = kCapacity;
+  map->free = kCapacity - 1u;
+  map->sentinel = reinterpret_cast<std::uint64_t>(sentinelBytes);
+  map->entries = reinterpret_cast<std::uint64_t>(entries.get());
+  auto slot = std::make_unique<std::uint64_t>(reinterpret_cast<std::uint64_t>(map.get()));
+  const auto slotAddress = reinterpret_cast<std::uint64_t>(slot.get());
+
+  const auto covered = [](const std::vector<skydiag::helper::internal::ExtraDumpMemory>& ranges, const void* p,
+                          std::size_t n) {
+    const auto at = reinterpret_cast<std::uint64_t>(p);
+    return std::any_of(ranges.begin(), ranges.end(), [&](const auto& r) { return at >= r.base && at + n <= r.base + r.size; });
+  };
+
+  const HANDLE process = OpenSelfProcessHandle();
+  CONTEXT ctx{};  // no stack: only the registers are looked at
+  ctx.Rdx = kArmorId;
+  const auto ranges = skydiag::helper::internal::CollectCrashObjectMemory(process, ctx, slotAddress);
+  CONTEXT absent{};
+  absent.Rdx = kAbsentId;
+  const auto absentRanges = skydiag::helper::internal::CollectCrashObjectMemory(process, absent, slotAddress);
+  const auto noSlot = skydiag::helper::internal::CollectCrashObjectMemory(process, ctx, 0u);
+  CloseHandle(process);
+
+  Require(covered(ranges, slot.get(), 8) && covered(ranges, &map->capacity, 4) && covered(ranges, &map->entries, 8) &&
+            covered(ranges, &entries[home], sizeof(Entry)) && covered(ranges, &armor->formID, 4),
+    "the lookup's reads and the form are kept");
+  Require(!covered(absentRanges, &map->capacity, 4) && !covered(absentRanges, slot.get(), 8),
+    "a lookup that finds nothing keeps nothing");
+  Require(!covered(noSlot, &map->capacity, 4), "no lookup without the table's address");
+
+  // Only the kept bytes, as the analyzer has them in the dump.
+  const auto keptOnly = [&ranges](std::uint64_t address, void* destination, std::size_t size) {
+    for (const auto& r : ranges) {
+      if (address >= r.base && address + size <= r.base + r.size) {
+        std::memcpy(destination, reinterpret_cast<const void*>(address), size);
+        return true;
+      }
+    }
+    return false;
+  };
+  const auto form = skydiag::form_map::FindForm(keptOnly, slotAddress, kArmorId);
+  Require(form == reinterpret_cast<std::uint64_t>(armor.get()), "the analyzer's lookup finds the same form");
+  const auto object = skydiag::rtti::ReadObject(keptOnly, *form);
+  Require(object && object->is_form && object->form_id == kArmorId && object->full_name == kName &&
+            skydiag::rtti::UndecorateTypeName(object->type_name) == "TESObjectARMO" &&
+            object->source_files == std::vector<std::string>{ "Skyrim.esm" },
+    "and reads its type, name and plugin");
+
+  // The analyzer's own path over a real minidump holding those ranges: the
+  // Address Library from the dump gives the slot inside the game module.
+  // The "game module" here is a range made up around the slot, as the test
+  // process has no SkyrimSE.exe.
+  const auto outBase = MakeTempDir(L"skydiag_formid_dump");
+  const auto dumpPath = outBase / L"SkyrimDiag_Crash_20261117_120000_000.dmp";
+  WriteDumpWithRanges(dumpPath, ranges);
+  HANDLE file = CreateFileW(dumpPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  Require(file != INVALID_HANDLE_VALUE, "open dump");
+  LARGE_INTEGER size{};
+  GetFileSizeEx(file, &size);
+  HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+  Require(mapping != nullptr, "map dump");
+  void* dumpBase = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+  Require(dumpBase != nullptr, "view dump");
+  const auto dumpSize = static_cast<std::uint64_t>(size.QuadPart);
+  const auto threads = skydiag::dump_tool::minidump::LoadThreads(dumpBase, dumpSize);
+
+  constexpr std::uint64_t kSlotOffset = 0x1000;
+  skydiag::dump_tool::minidump::ModuleInfo game{};
+  game.base = slotAddress - kSlotOffset;
+  game.end = slotAddress + kSlotOffset;
+  game.filename = L"SkyrimSE.exe";
+  game.is_game_exe = true;
+  const std::vector<skydiag::dump_tool::minidump::ModuleInfo> modules{ game };
+  // A game module that ends where the slot starts: the slot is outside it.
+  auto shortGame = game;
+  shortGame.end = slotAddress;
+  const std::vector<skydiag::dump_tool::minidump::ModuleInfo> shortModules{ shortGame };
+  const auto resolveIn = [&](const std::vector<skydiag::dump_tool::minidump::ModuleInfo>& in,
+                           const skydiag::dump_tool::AddressLibrary* library, const char* verdict, std::uint64_t value) {
+    skydiag::dump_tool::AnalysisResult r{};
+    r.fault_instruction.verdict = verdict;
+    r.fault_instruction.address_matches = true;
+    r.fault_instruction.base_register = "rdx";
+    r.fault_instruction.base_value = value;
+    skydiag::dump_tool::internal::ResolveFormIdBaseValue(dumpBase, dumpSize, in, threads, library, r);
+    return r.fault_instruction.base_value_form;
+  };
+  const auto resolve = [&](const skydiag::dump_tool::AddressLibrary* library, const char* verdict, std::uint64_t value) {
+    return resolveIn(modules, library, verdict, value);
+  };
+  skydiag::dump_tool::AddressLibrary ae;
+  Require(ae.Parse(OneIdAddressLibrary(2, skydiag::form_map::kAllFormsIdAe, kSlotOffset)), "an AE Address Library");
+  skydiag::dump_tool::AddressLibrary se;
+  Require(se.Parse(OneIdAddressLibrary(1, skydiag::form_map::kAllFormsIdAe, kSlotOffset)), "an SE one with the AE ID");
+
+  const std::wstring named = resolve(&ae, "bad_pointer", kArmorId);
+  if (named != L"TESObjectARMO \"Iron Shield\" (FormID 0x00012EB6, Skyrim.esm)") {
+    std::fprintf(stderr, "named: %ls\n", named.c_str());
+  }
+  Require(named == L"TESObjectARMO \"Iron Shield\" (FormID 0x00012EB6, Skyrim.esm)", "the analyzer names the form");
+  Require(resolve(&ae, "bad_pointer", kAbsentId).empty(), "a FormID the helper did not find");
+  Require(resolve(&ae, "null_pointer", kArmorId).empty(), "only for a bad_pointer");
+  Require(resolve(&ae, "bad_pointer", 0x100000000ull + kArmorId).empty(), "only for a value as wide as a FormID");
+  Require(resolve(&se, "bad_pointer", kArmorId).empty(), "an SE file is read with the SE ID");
+  Require(resolveIn(shortModules, &ae, "bad_pointer", kArmorId).empty(), "an offset at the game module's end");
+  Require(resolve(nullptr, "bad_pointer", kArmorId).empty(), "no Address Library in the dump");
+  UnmapViewOfFile(dumpBase);
+  CloseHandle(mapping);
+  CloseHandle(file);
+  std::error_code ec;
+  std::filesystem::remove_all(outBase, ec);
+}
 
 void TestCrashObjectsAreReadBackFromTheDump()
 {
@@ -1478,6 +1710,7 @@ int main(int argc, char** argv)
       return 0;
     }
     TestGameLockMemoryWindows();
+    TestFormIdRegisterIsLookedUp();
     TestCrashObjectsAreReadBackFromTheDump();
     TestNullJumpCrashStackStartsAtTheCaller();
     TestNullJumpCallerWithoutUnwindDataEndsTheCrashStack();
