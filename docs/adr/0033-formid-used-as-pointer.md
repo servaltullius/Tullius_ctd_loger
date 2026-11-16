@@ -17,7 +17,7 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실�
 
 ## Decision
 1. **Helper가 크래시 순간 레지스터 값을 게임의 FormID 표에서 찾습니다.**
-   - 대상: 크래시 레지스터 15개(rsp 제외, ADR-0010의 루트와 같은 순서) 중 값이 0x10000 이상 0xFFFFFFFF 이하인 것(`IsFormIdCandidate`). 64KB 미만은 null 포인터라는 말로 충분하고, 32비트보다 넓은 값은 FormID가 아닙니다.
+   - 대상: 크래시 레지스터 15개(rsp 제외, ADR-0010의 루트와 같은 순서) 중 값이 0x10000 이상 0xFFFFFFFF 이하인 것(`IsFormIdCandidate`). 32비트보다 넓은 값은 FormID가 아닙니다. 64KB 미만은 일부러 뺍니다(Consequences의 마지막 항목).
    - 표의 위치: 게임 exe 베이스 + Address Library에서 찾은 `TESForm::allForms`의 오프셋. ID는 SE 1.5.x가 514351, AE 1.6.x가 400507입니다(CommonLibSSE-NG의 `RELOCATION_ID(514351, 400507)`). 어느 ID를 쓸지는 Address Library 파일 형식으로 고릅니다(1: SE, 2: AE). 1.7.x(형식 5)도 AE ID를 그대로 쓴다고 보고 400507을 쓰지만, 확인하지 않았습니다. 다르면 아래 검증에서 걸러져 아무것도 붙지 않습니다. 파일은 ADR-0027에서 이미 읽어 두는 것을 그대로 씁니다. 크래시 때 파싱하느라 붙잡힌 스레드가 늦게 풀리지 않도록, 게임에 붙을 때 오프셋까지 구해 두고 `SkyrimDiagHelper.log`에 남깁니다(`FormID lookup for crash dumps: TESForm::allForms at the game executable+0x20FBB88.`, 없으면 `off`).
    - 찾는 법: CommonLibSSE-NG의 `BSTHashMap` 배치를 따릅니다(`shared/SkyrimDiagFormMap.h`).
      - 표 머리 0x30바이트: 칸 수(0x0C, 2의 거듭제곱), 빈 칸 수(0x10), 체인 끝 표시(0x18), 엔트리 배열(0x28).
@@ -65,4 +65,5 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다. 실�
   - Helper가 게임 exe 베이스와 Address Library로 전역 변수 주소를 구하는 부분(`GameAllFormsOffset`, `GameImageRange`).
   - 분석기가 실제 SkyrimSE.exe 모듈과 실제 Address Library 파일로 같은 주소를 구하는 부분(`ResolveFormIdBaseValue`; 위 e2e는 지어낸 모듈과 한 항목짜리 파일로 확인함).
   - 실제 게임의 해시 표 배치와 해시 함수가 CommonLib의 정의와 같다는 것.
+  - 찾은 폼을 먼저 읽는 순서(Decision 1)는 자동 테스트가 확인하지 않습니다. 순서가 결과를 바꾸려면 크래시 오브젝트 메모리 상한이 먼저 차야 하는데, 테스트에서 그 상황을 만들지 않았습니다.
   - 확인 방법: 크래시 테스터 Ctrl+Shift+Home. 근거에 `TESObjectARMO … (FormID 0x00012EB6, Skyrim.esm …)`이 나오면 이 경로 전체가 맞는 것입니다.
