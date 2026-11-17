@@ -152,9 +152,10 @@ struct BlackboxFreezeSummary
 
 // ADR-0022: the blackbox recorded a request to close the game before this
 // crash: the game's quit flag (Quit, qqq, a forced quit) at any time before
-// it, Alt+F4 seen by the keys or the window's X button at most
-// kForcedCloseCrashWindowMs before it. It is an error during a forced close, not a CTD: kept out of
-// the crash history like a clean exit, but analyzed in full.
+// it; Alt+F4 seen by the keys, the window's X button or a close message at
+// most kForcedCloseCrashWindowMs before it. It is an error during a forced
+// close, not a CTD: kept out of the crash history like a clean exit, but
+// analyzed in full.
 struct ForcedCloseInfo
 {
   bool detected = false;
