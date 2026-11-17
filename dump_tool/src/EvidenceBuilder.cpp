@@ -69,9 +69,11 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     (nameCrash || (hasException && !likelyHandledExceptionFalsePositive) ||
      (hasCrashEvent && !manualCaptureHint && !handledCppException));
   const bool nameHangEffective = nameHang && !manualFromWct && !heartbeatSuggestsNotHang;
+  // ADR-0035: a slow shutdown was judged a freeze by the analyzer
+  // (DetectSlowShutdown), so the result's flags say so too.
   const bool isHangLike =
     !r.is_filtered_clean_exit &&
-    (nameHangEffective || hasHangEvent || wctSuggestsHang);
+    (nameHangEffective || hasHangEvent || wctSuggestsHang || r.quit_before_freeze.detected);
   const bool isSnapshotLike = !isCrashLike && !isHangLike;
   const bool isManualCapture =
     !r.is_filtered_clean_exit &&

@@ -31,7 +31,8 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다(Verif
 3. 분석기도 같은 기록을 봅니다. 예외가 없는 프리징 덤프의 블랙박스에 종료 플래그 기록이 있으면(`DetectSlowShutdown`) "느린 종료"로 분류합니다.
    - 빠른 답: 경우 `slow_shutdown`/`freeze_after_quit`, 제목 "게임 종료(메뉴의 종료나 콘솔 qqq)를 고른 뒤 게임이 꺼지는 데 오래 걸린 것입니다. 플레이 중 멈춘 프리징이 아닙니다.", 해볼 일 "따로 할 일은 없습니다…". 의심 모드를 짚지 않습니다. `forced_quit`이면 "게임을 강제로 끈(Alt+F4 등) 뒤…".
    - 결론 문장 앞에 같은 문장을 붙이고, 근거 첫 항목과 `[느린 종료]` 권장(다음 조치 순위 0)을 더합니다. 프리징 분석과 후보는 그 아래에 그대로 둡니다(종료 중 무엇이 돌고 있었는지).
-   - 리포트 `분류: 느린 종료 (플레이 중 프리징 아님; game_quit)`, 요약 JSON `analysis.is_slow_shutdown`, `quit_before_freeze.kind`. 뷰어는 분류 줄과 공유 텍스트 머리말을 "느린 종료"로 씁니다.
+   - 리포트 `분류: 느린 종료 (플레이 중 프리징 아님; game_quit)`, 요약 JSON `analysis.is_slow_shutdown`, `quit_before_freeze.kind`. 뷰어는 분류 줄, 요약 카드, 공유 텍스트 머리말과 유형 줄(`SLOW_SHUTDOWN`)을 "느린 종료"로 씁니다.
+   - 프리징인지는 분석기의 판정(`DetermineHangLike`) 하나를 따릅니다. 느린 종료로 판정한 캡처는 요약의 `is_hang_like`도 참이고 `is_snapshot_like`는 거짓입니다.
    - 크래시 이력과 버킷 통계에서 뺍니다(강제 종료와 같음).
 4. Helper의 두 링 감시자(`SaveLoadWatcher`, `QuitRequestWatcher`)는 같은 커서(`BlackboxCursor`)로 링을 읽습니다.
 
@@ -53,9 +54,11 @@ Accepted (2026-11-17). 구현했고 자동 테스트로 확인했습니다(Verif
 - `skydiag_helper_hang_runtime_tests`(`TestRunHelperLoop_AFreezeAfterAQuitIsASlowShutdown`): Helper 루프가 직접 `game_quit`을 읽고, 로딩 플래그가 켜진 프리징을 보류한 뒤 정상 종료에서 지웁니다.
 - `skydiag_quick_answer_tests`(`TestFreezeAfterQuitIsASlowShutdown`): 빠른 답, 결론 앞머리, 근거 첫 항목, 다음 조치, 요약 JSON, 리포트 줄, `forced_quit` 문구, 블랙박스에서의 판정(종료 플래그 종류만, 가장 새 것), 예외·정상 종료 증거가 있거나 프리징이 아니면 판정하지 않음, 크래시 이력에서 빠짐.
 - `skydiag_close_request_tests`, `skydiag_recommendation_class_tests`: `IsQuitFlagCloseRequest`, `[느린 종료]` 태그.
+- `skydiag_share_text_fixture_tests`(`test_slow_shutdown_is_not_shared_as_a_freeze`): 공유 텍스트의 머리말·유형 줄·다음 조치, 뷰어의 분류 줄과 요약 카드(하네스의 `classification` 모드, 강제 종료도 같이 확인).
 - `skydiag_save_load_record_tests`(`TestBlackboxCursor`): 한 바퀴 돌았음을 알림(한 번만), 뒤 바퀴가 이미 쓴 칸은 건너뜀, 한 바퀴에 끝이 사라진 세이브 불러오기를 뒤의 끝으로 잇지 않음.
 - Helper 쪽 변이 7개를 모두 잡았습니다: 판정이 종료 플래그를 무시, 보류가 무시, 에피소드 판정이 무시, 루프가 세션에 표시하지 않음, Alt+F4 키를 종료 플래그로 셈, `forced_quit`을 빼먹음, 아직 쓰이지 않은 항목을 건너뜀.
 - 검수 수정 뒤 변이 11개도 모두 잡았습니다: 루프가 종료 요청을 읽지 않음, 커서가 바퀴를 알리지 않음·뒤 바퀴 칸에서 멈춤·쓰는 중인 칸을 건너뜀, 분석기가 크래시나 프리징 아닌 캡처에도 판정·크래시 이력에 남김·아무 종료 요청이나 셈, 빠른 답이 무시, 다음 조치가 아님, 요약 JSON 항목 빠짐.
 - 보관 덤프 비교(`scripts/compare_analyses.py`, v0.2.77 분석기 대비, 덤프 75개의 한·영 150건): 바뀐 것 없음. 보관 덤프 중에는 종료 플래그 뒤의 프리징이 없습니다.
+- 두 번째 검수 수정의 변이 4개 중 3개를 잡았습니다(요약 플래그가 판정을 무시, 공유 텍스트 유형 줄, 뷰어 분류 줄). 공유 텍스트의 `isHangLike`에서 느린 종료를 빼지 않는 변이는 결과가 같은 변이입니다(쓰는 곳마다 느린 종료를 먼저 봄).
 - Windows ctest 122/122, WSL 88/88, clang-tidy(CI 스크립트와 Windows) 경고 없음.
 - 실게임 미확인: 실제로 기준 시간보다 오래 걸린 qqq·메뉴 종료에서 보류와 삭제가 일어나는 것. 이 PC는 Engine Fixes의 빠른 종료라 재현되지 않습니다.

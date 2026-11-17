@@ -1,0 +1,51 @@
+{
+  "summary_sentence": "The game took long to close after you chose to quit (Quit in a menu, or qqq in the console). It is not a freeze during play. Freeze detected (capture=hang, heartbeatAge=128.6s >= 127s). Stack candidate: usvfs_x64.dll (Medium). (Confidence: Medium)",
+  "quick_answer": {
+    "kind": "slow_shutdown",
+    "case": "freeze_after_quit",
+    "suspect_mod": "",
+    "suspect_file": "",
+    "likelihood": "none",
+    "likelihood_text": "",
+    "headline": "The game took long to close after you chose to quit (Quit in a menu, or qqq in the console). It is not a freeze during play.",
+    "action": "Nothing to do. If closing the game takes minutes every time, share this report when you ask for help: it shows what was still running while the game closed.",
+    "why_not_certain": "",
+    "how_it_crashed": ""
+  },
+  "crash_bucket_key": "CTD3-424ff75b51309778",
+  "analysis": {
+    "is_crash_like": false,
+    "is_hang_like": true,
+    "is_snapshot_like": false,
+    "is_manual_capture": false,
+    "is_filtered_clean_exit": false,
+    "is_forced_close": false,
+    "is_slow_shutdown": true
+  },
+  "quit_before_freeze": {
+    "kind": "game_quit"
+  },
+  "exception": {
+    "module_plus_offset": "",
+    "inferred_mod_name": ""
+  },
+  "suspects": [
+    {
+      "confidence": "Medium",
+      "module_filename": "usvfs_x64.dll",
+      "module_path": "",
+      "inferred_mod_name": "",
+      "reason": "stack scan",
+      "score": 6
+    }
+  ],
+  "callstack": {
+    "frames": []
+  },
+  "evidence": [],
+  "resources": [],
+  "recommendations": [
+    "[Slow shutdown] The game took long to close after you chose to quit (Quit in a menu, or qqq in the console). It is not a freeze during play. Nothing to do. If it takes minutes every time you close the game, pass this report on when you ask for help; the threads below show what the game was still doing.",
+    "[Hang] Check the main thread's wait in the WCT tab."
+  ]
+}

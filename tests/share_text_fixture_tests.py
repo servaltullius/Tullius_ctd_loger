@@ -227,6 +227,33 @@ def test_forced_close_is_not_shared_as_a_ctd() -> None:
     assert clipboard.split("\n")[1].startswith("Quick answer: This error happened while you force-quit"), clipboard
 
 
+def test_slow_shutdown_is_not_shared_as_a_freeze() -> None:
+    # ADR-0035: a freeze after the game's quit flag is shared as a slow
+    # shutdown, not under the freeze header, and its type is no HANG. Without
+    # next_action_index (an older summary) the next action is still its line.
+    community = _run_harness("slow_shutdown_summary.json", "community")
+    lines = community.split("\n")
+    assert lines[0] == "⚪ Skyrim Slow-Shutdown Report — SkyrimDiag", community
+    assert lines[1].startswith("💬 Quick answer: The game took long to close after you chose to quit"), community
+    assert "🔍 Category: SLOW_SHUTDOWN" in lines, community
+    assert "Freeze/ILS Report" not in community and "HANG" not in community, community
+    next_action = [line for line in lines if line.startswith("🛠️ Next action: ")]
+    assert next_action and next_action[0].startswith("🛠️ Next action: The game took long to close"), community
+
+    clipboard = _run_harness("slow_shutdown_summary.json", "clipboard")
+    assert clipboard.split("\n")[1].startswith("Quick answer: The game took long to close"), clipboard
+
+    # The viewer's classification line and summary card say the same.
+    assert _run_harness("slow_shutdown_summary.json", "classification") == (
+        "Classification: SLOW_SHUTDOWN (not a freeze in play)\n"
+        "Classification: Slow shutdown — not a freeze in play\n"
+    )
+    assert _run_harness("forced_close_summary.json", "classification") == (
+        "Classification: FORCED_CLOSE (not CTD)\n"
+        "Classification: Forced close — not a CTD\n"
+    )
+
+
 def _run_harness_on_modified(base_name: str, modify, mode: str) -> str:
     summary = json.loads((DATA_DIR / base_name).read_text(encoding="utf-8"))
     modify(summary)
@@ -350,6 +377,7 @@ if __name__ == "__main__":
     test_summary_without_quick_answer_keeps_its_share_texts()
     test_recommendation_classes_decide_the_sections()
     test_forced_close_is_not_shared_as_a_ctd()
+    test_slow_shutdown_is_not_shared_as_a_freeze()
     test_ambiguous_crash_logger_log_names_no_mod()
     test_ctd_named_freeze_stays_a_ctd()
     test_callstack_label_follows_the_analyzer()

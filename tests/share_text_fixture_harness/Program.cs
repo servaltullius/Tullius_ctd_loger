@@ -6,7 +6,7 @@ internal static class Program
     {
         if (args.Length != 2)
         {
-            Console.Error.WriteLine("usage: ShareTextFixtureHarness <summary.json> <community|clipboard|cleared|groups>");
+            Console.Error.WriteLine("usage: ShareTextFixtureHarness <summary.json> <community|clipboard|cleared|groups|classification>");
             return 2;
         }
 
@@ -52,6 +52,8 @@ internal static class Program
             "clipboard" => vm.BuildSummaryClipboardText(),
             "cleared" => ClearedShareText(vm),
             "groups" => RecommendationGroupsText(vm),
+            // The classification line and the summary card's first row.
+            "classification" => vm.BucketText + "\n" + vm.QuickPrimaryLabel + ": " + vm.QuickPrimaryValue + "\n",
             _ => throw new InvalidOperationException("unsupported mode: " + mode),
         };
 

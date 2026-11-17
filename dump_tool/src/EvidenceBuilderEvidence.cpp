@@ -57,19 +57,18 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
   }
 
   if (ctx.isSlowShutdown) {
-    const bool forced = r.quit_before_freeze.kind == "forced_quit";
+    // Which quit it was is in the summary sentence's lead (SlowShutdownLead).
+    const std::wstring kind = ToWideAscii(r.quit_before_freeze.kind);
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kHigh;
     e.confidence = ConfidenceText(lang, e.confidence_level);
     e.title = en ? L"A freeze after the game was told to quit (not a freeze in play)"
                  : L"게임 종료 뒤의 멈춤(플레이 중 프리징 아님)";
     e.details = en
-      ? (std::wstring(L"The blackbox recorded the game's quit flag (") +
-         (forced ? L"the game being force-quit, Alt+F4 or similar" : L"Quit in a menu, or qqq in the console") +
+      ? (L"The blackbox recorded the game's quit flag (" + kind +
          L") before this freeze. The game's main loop ends there, so the game was closing; it is left out of the "
          L"crash history and bucket statistics, and the analysis below shows what was still running.")
-      : (std::wstring(L"블랙박스에 이 멈춤 전에 게임의 종료 플래그(") +
-         (forced ? L"게임 강제 종료, Alt+F4 등" : L"메뉴의 종료나 콘솔 qqq") +
+      : (L"블랙박스에 이 멈춤 전에 게임의 종료 플래그(" + kind +
          L")가 기록돼 있습니다. 게임의 메인 루프는 거기서 끝나므로 게임이 닫히는 중이었습니다. 크래시 이력과 버킷 "
          L"통계에서 빼고, 아래 분석은 그때 무엇이 돌고 있었는지 보여 줍니다.");
     r.evidence.push_back(std::move(e));

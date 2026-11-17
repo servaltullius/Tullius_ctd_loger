@@ -2176,7 +2176,7 @@ void TestFreezeAfterQuitIsASlowShutdown()
     Require(!r.evidence.empty() &&
               r.evidence[0].title == (en ? L"A freeze after the game was told to quit (not a freeze in play)"
                                          : L"게임 종료 뒤의 멈춤(플레이 중 프리징 아님)") &&
-              Contains(r.evidence[0].details, en ? L"qqq in the console" : L"콘솔 qqq"),
+              Contains(r.evidence[0].details, en ? L"quit flag (game_quit)" : L"종료 플래그(game_quit)"),
       "the slow-shutdown evidence item first");
     Require(!r.recommendations.empty() &&
               r.recommendations[0].rfind(en ? L"[Slow shutdown] " : L"[느린 종료] ", 0) == 0 &&
@@ -2196,6 +2196,21 @@ void TestFreezeAfterQuitIsASlowShutdown()
     Require(report.find(en ? "Classification: SLOW_SHUTDOWN (not a freeze in play; game_quit)\n"
                            : "분류: 느린 종료 (플레이 중 프리징 아님; game_quit)\n") != std::string::npos,
       "the report line");
+
+    // The flags follow the analyzer's judgement: a capture the analyzer took
+    // for a freeze after a quit is no snapshot, even when its name and the
+    // other signals here would make it one.
+    AnalysisResult manual{};
+    manual.dump_path = L"C:\\Logs\\SkyrimDiag_Manual_20261116_235051_347.dmp";
+    manual.quit_before_freeze.detected = true;
+    manual.quit_before_freeze.kind = "game_quit";
+    BuildEvidenceAndSummary(manual, lang);
+    Require(manual.is_hang_like && !manual.is_snapshot_like && manual.quick_answer.case_id == "freeze_after_quit",
+      "one judgement for the flags and the quick answer");
+    const auto manualSummary =
+      skydiag::dump_tool::BuildSummaryJson(manual, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(manualSummary["analysis"]["is_slow_shutdown"] == true && manualSummary["analysis"]["is_snapshot_like"] == false,
+      "and in the summary JSON");
 
     auto forced = EngineCallPathHang();
     forced.quit_before_freeze.detected = true;
