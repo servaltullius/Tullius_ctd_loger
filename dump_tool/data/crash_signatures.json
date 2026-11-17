@@ -716,6 +716,32 @@
       }
     },
     {
+      "id": "PAPYRUS_SCRIPT_LOAD",
+      "match": {
+        "exc_code": "0xC0000005",
+        "fault_module": "SkyrimSE.exe",
+        "object_type_any": [
+          "BSScript::CompiledScriptLoader"
+        ]
+      },
+      "diagnosis": {
+        "scope": "mechanism",
+        "headline_ko": "Papyrus 스크립트(.pex)를 읽는 중이었던 것으로 보입니다.",
+        "headline_en": "It seems to have been reading a Papyrus script (.pex).",
+        "cause_ko": "크래시 근처에 Papyrus 스크립트 로더(BSScript::CompiledScriptLoader)가 있었습니다. 게임이 스크립트 파일(.pex)을 읽는 중에 튕긴 것으로 보이며, 읽던 스크립트 파일이 원인일 수 있습니다. 예를 들어 4096바이트가 넘는 문자열(긴 설명 주석 등)이 든 스크립트는 게임이 읽다가 튕길 수 있습니다. 어느 스크립트였는지는 이 패턴만으로 알 수 없습니다.",
+        "cause_en": "The Papyrus script loader (BSScript::CompiledScriptLoader) was near the crash: the game seems to have crashed while reading a script file (.pex), and that file may be the cause. A script holding a string longer than 4096 bytes (a long doc comment, say), for one, can crash the game as it reads it. Which script it was is not known from this pattern alone.",
+        "confidence": "medium",
+        "why_not_certain_ko": "스크립트 로더가 크래시 근처에 있었던 것은 덤프에서 보이지만, 어느 스크립트를 읽고 있었는지는 보이지 않습니다.",
+        "why_not_certain_en": "The dump shows the script loader near the crash, but not which script it was reading.",
+        "recommendations_ko": [
+          "[알려진 크래시 메커니즘] 최근에 추가하거나 업데이트한 모드와 새로 컴파일한 스크립트(.pex)부터 하나씩 끄거나 이전 파일로 되돌려 보세요. 예외 명령어 줄에 레지스터 값이 글자로 나왔다면, 모드 폴더의 .pex 파일에서 그 글을 찾으면 문제 스크립트를 바로 찾을 수 있습니다. 스크립트를 직접 만든다면 문자열(설명 주석 포함)을 4096바이트보다 짧게 하세요."
+        ],
+        "recommendations_en": [
+          "[Known crash mechanism] Disable, or roll back to the previous files, the mods you added or updated recently and any script (.pex) compiled anew, one at a time. If the faulting instruction line shows a register value as text, searching the .pex files in the mods' folders for that text finds the script. If you write scripts, keep every string (doc comments too) under 4096 bytes."
+        ]
+      }
+    },
+    {
       "id": "IN_PAGE_ERROR",
       "match": {
         "exc_code": "0xC0000006"

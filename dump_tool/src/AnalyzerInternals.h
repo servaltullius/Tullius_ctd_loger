@@ -115,6 +115,20 @@ bool TryComputeStackwalkSuspects(
   std::vector<ThreadTopFrames>* outSideFrames = nullptr,
   const AddressResolver* gameFunctions = nullptr);
 
+// Whether a pointer scan of the raw stack follows a stack walk that named no
+// suspect (ComputeSuspects).
+enum class StackScanChoice : std::uint8_t
+{
+  kScan,
+  // ADR-0015: the walk reached the thread start and its only plugin frames
+  // wrap the thread's entry.
+  kSkipThreadEntryHooksOnly,
+  // ADR-0034: the crashing thread's own walk reached its start with no plugin
+  // on it (policy::SkipStackScanAfterCompleteWalk).
+  kSkipCompleteWalk,
+};
+StackScanChoice ChooseStackScan(const AnalysisResult& out, bool hangLike);
+
 // What crash_logger_thread_dump_deadlock reads from the dump itself.
 struct CrashLoggerThreadDumpProbe
 {

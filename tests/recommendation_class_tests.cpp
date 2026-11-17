@@ -152,6 +152,8 @@ int main()
   Expect(L"[Damaged save] Load a save made before this one.", "immediate", "damaged_save");
   Expect(L"[세이브 손상] 이 세이브보다 먼저 만든 세이브를 불러와 보세요.", "immediate", "damaged_save");
   Expect(L"[알려진 크래시 지점] x", "immediate", "known_crash_site");
+  Expect(L"[Known crash mechanism] x", "immediate", "known_mechanism");
+  Expect(L"[알려진 크래시 메커니즘] x", "immediate", "known_mechanism");
   Expect(L"[MODAL DIALOG] Read the dialog.", "immediate", "modal_dialog");
   Expect(L"[Modal 대화상자] 대화상자를 확인하세요.", "immediate", "modal_dialog");
   Expect(L"[Main thread] x", "immediate", "main_thread");

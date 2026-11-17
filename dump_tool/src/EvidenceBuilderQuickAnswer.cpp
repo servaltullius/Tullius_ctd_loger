@@ -7,6 +7,7 @@
 #include "ModNames.h"
 #include "EvidenceBuilderPrivate.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cwctype>
 #include <string>
@@ -170,6 +171,20 @@ std::wstring CandidateName(const ActionableCandidate& candidate)
   return !candidate.display_name.empty() ? candidate.display_name : candidate.module_filename;
 }
 
+// ADR-0034: a candidate whose only execution clue is the raw stack scan (the
+// stack walk named no suspect), with at most history or resource ownership
+// next to it, was only seen near the crash in memory.
+bool CandidateFromStackScanOnly(const AnalysisResult& r, const ActionableCandidate& candidate)
+{
+  if (r.suspects_from_stackwalk || !CandidateHasFamily(candidate, "actionable_stack")) {
+    return false;
+  }
+  return std::all_of(candidate.supporting_families.begin(), candidate.supporting_families.end(),
+    [](const std::string& family) {
+      return family == "actionable_stack" || family == "history_repeat" || family == "resource_provider";
+    });
+}
+
 void SetDoubtForCrash(const AnalysisResult& r, Lead& lead)
 {
   if (lead.doubt != Doubt::kNone) {
@@ -319,6 +334,11 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
   }
   if (lead.type == LeadType::kMod && lead.is_plugin_file && lead.case_id == "candidate") {
     lead.case_id = "object_ref";
+  }
+  // The module the crash is in is more than a nearby slot (kInsideMod).
+  if (lead.doubt == Doubt::kNone && lead.case_id == "candidate" && top && CandidateFromStackScanOnly(r, *top) &&
+      SameFile(lead.file, BaseName(top->module_filename)) && !SameFile(lead.file, BaseName(r.fault_module_filename))) {
+    lead.doubt = Doubt::kNearbyOnly;
   }
   if (lead.type != LeadType::kNone) {
     SetDoubtForCrash(r, lead);
@@ -661,6 +681,24 @@ void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answ
   answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
 }
 
+// ADR-0034: with no mod named, a crash mechanism that has its own headline
+// (the Papyrus script loader) says what the game was doing and what to check
+// in place of "share this report". It names no mod and sets no likelihood.
+void AddMechanismWithoutLead(const AnalysisResult& r, bool en, QuickAnswer& answer)
+{
+  if (!answer.suspect_mod.empty() || !r.signature_match.has_value()) {
+    return;
+  }
+  const auto& sig = *r.signature_match;
+  if (sig.scope != "mechanism" || sig.headline.empty() || sig.recommendations.empty()) {
+    return;
+  }
+  answer.case_id = "known_mechanism";
+  answer.headline = KindPhrase(answer.kind, en) + L" " + sig.headline + L" " + SuspectPhrase(Lead{}, en);
+  answer.action = FirstSentenceWithoutTag(sig.recommendations.front());
+  answer.why_not_certain = sig.why_not_certain;
+}
+
 // ADR-0029: a graphics driver error moments before the crash. The mod the
 // crash names stays named, but it is the second thing to check: with the
 // graphics device gone, whatever used it next crashed. Close in time is not
@@ -838,6 +876,11 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
 
   if (!freezePath) {
     QuickAnswer crash = Finish(kind, CrashLead(r, ctx), en);
+    // A driver error moments before the crash comes first (ADR-0029); a
+    // mechanism headline would not fit its action.
+    if (!ctx.gpuDriverErrorSecBeforeCrash) {
+      AddMechanismWithoutLead(r, en, crash);
+    }
     AddFaultInstructionClue(r, en, crash);
     AddGpuDriverErrorBeforeCrash(ctx, en, crash);
     return crash;

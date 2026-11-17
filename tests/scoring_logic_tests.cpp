@@ -211,9 +211,27 @@ static void TestLowStackwalkCannotBeReupgradedByConsensusWeight()
   assert(ActionableStackSignalWeight(false, false, true, true) == 2u);
 }
 
+// ADR-0034: a crashing thread's own complete walk with no plugin on it skips
+// the pointer scan; a freeze, a walk of another thread or a cut-short walk
+// keeps it.
+static void TestCompleteWalkSkipsStackScan()
+{
+  using skydiag::dump_tool::internal::policy::SkipStackScanAfterCompleteWalk;
+  static_assert(SkipStackScanAfterCompleteWalk(false, true, 41920u, 41920u));
+  static_assert(!SkipStackScanAfterCompleteWalk(true, true, 41920u, 41920u));
+  static_assert(!SkipStackScanAfterCompleteWalk(false, false, 41920u, 41920u));
+  static_assert(!SkipStackScanAfterCompleteWalk(false, true, 47080u, 41920u));
+  static_assert(!SkipStackScanAfterCompleteWalk(false, true, 0u, 0u));
+  const auto src = ReadFile("dump_tool/src/AnalyzerInternalsStackwalk.cpp");
+  assert(src.find("policy::SkipStackScanAfterCompleteWalk(") != std::string::npos);
+  assert(ReadFile("dump_tool/src/Analyzer.CaptureInputs.cpp").find("internal::ChooseStackScan(out, hangLike)") !=
+         std::string::npos);
+}
+
 int main()
 {
   TestCallstackFrameWeightConstants();
+  TestCompleteWalkSkipsStackScan();
   TestStackwalkConfidenceThresholds();
   TestStackwalkHookPromotionThreshold();
   TestStackScanConfidenceIsAlwaysLow();

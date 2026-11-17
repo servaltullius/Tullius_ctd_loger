@@ -1179,12 +1179,12 @@ void ComputeSuspects(
       }
     }
   }
-  if (!out.suspects_from_stackwalk && out.stackwalk_only_thread_entry_hook_plugins) {
-    // The walk reached the thread start and its only plugin frames wrap the
-    // thread's entry: no plugin is on the crashing path. A pointer scan would
-    // only add stale return addresses (Crash Logger's own, the MO2 VFS).
+  const auto scanChoice = internal::ChooseStackScan(out, hangLike);
+  if (scanChoice == internal::StackScanChoice::kSkipThreadEntryHooksOnly) {
     out.diagnostics.push_back(
       L"[Stackwalk] complete walk; its only plugin frames wrap the thread entry, so no stack scan");
+  } else if (scanChoice == internal::StackScanChoice::kSkipCompleteWalk) {
+    out.diagnostics.push_back(L"[Stackwalk] complete walk through game and system code only, so no stack scan");
   } else if (!out.suspects_from_stackwalk) {
     // The helper treats the "failed" diagnostic as degraded capture quality,
     // so keep it for walks that produced no caller frames at all.

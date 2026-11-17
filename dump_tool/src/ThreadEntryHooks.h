@@ -77,6 +77,27 @@ inline std::vector<bool> MarkThreadEntryHookFrames(const std::vector<StackFrameK
   return marked;
 }
 
+// ADR-0034: no plugin is on a walk that reached the thread start: every frame
+// is the game's or a system module's, or a plugin frame marked (by
+// MarkThreadEntryHookFrames, passed in as marked). A frame outside every
+// module may be a plugin's hook code, so it counts as a plugin. False for a
+// walk cut short, an empty one, or marks of another length.
+inline bool NoPluginOnCompleteWalk(
+  const std::vector<StackFrameKind>& frames,
+  const std::vector<bool>& marked,
+  bool walkReachedThreadStart)
+{
+  if (!walkReachedThreadStart || frames.empty() || marked.size() != frames.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < frames.size(); ++i) {
+    if (frames[i] == StackFrameKind::kUnknown || (frames[i] == StackFrameKind::kPlugin && !marked[i])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // The modules of the marked frames that have no unmarked frame in the same
 // stack, first occurrence order. A plugin that also sits on the crashing path
 // above the entry stays a suspect there, so it is not reported as a hook.

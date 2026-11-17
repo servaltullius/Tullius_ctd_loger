@@ -121,6 +121,19 @@ constexpr i18n::ConfidenceLevel ConfidenceAfterCrashLoggerCorroboration(
   return currentConfidence;
 }
 
+// ADR-0034: no pointer scan of a crashing thread whose own walk went down to
+// its start with no plugin on it. A freeze keeps its main-thread scan (a weak
+// clue it says so), and a walk shown for another thread says nothing about
+// the crashing one.
+constexpr bool SkipStackScanAfterCompleteWalk(
+  bool hangLike,
+  bool walkCompleteWithoutPluginFrames,
+  std::uint32_t walkTid,
+  std::uint32_t crashTid) noexcept
+{
+  return !hangLike && walkCompleteWithoutPluginFrames && crashTid != 0u && walkTid == crashTid;
+}
+
 constexpr bool SecondaryCallstackCanBeMedium(
   std::uint32_t score,
   std::size_t firstDepth,

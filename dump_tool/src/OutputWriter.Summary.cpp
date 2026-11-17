@@ -620,6 +620,10 @@ nlohmann::json BuildSummaryJson(
     if (!fi.base_value_form.empty()) {
       j["base_value_form"] = WideToUtf8(fi.base_value_form);
     }
+    if (!fi.overwritten_text.empty()) {
+      j["overwritten_text_register"] = fi.overwritten_text_register;
+      j["overwritten_text"] = fi.overwritten_text;
+    }
     summary["fault_instruction"] = std::move(j);
   }
   if (r.hook_stub_race.detected) {

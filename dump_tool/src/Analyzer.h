@@ -643,6 +643,10 @@ struct AnalysisResult
   // The shown thread's walk reached its start and had plugin frames, all of
   // them thread-entry hooks (no stack scan then; see Analyzer.CaptureInputs).
   bool stackwalk_only_thread_entry_hook_plugins = false;
+  // ADR-0034: the shown thread's walk reached its start, and every frame is
+  // the game's, a system module's, or a thread-entry hook's: no plugin is on
+  // the path. For the crashing thread there is no stack scan then either.
+  bool stackwalk_complete_without_plugin_frames = false;
   std::wstring crash_logger_cpp_exception_type;
   std::wstring crash_logger_cpp_exception_info;
   std::wstring crash_logger_cpp_exception_throw_location;

@@ -13,8 +13,9 @@ struct PriorityKind
   int rank;               // lower acts first
 };
 
-// Same priority the WinUI viewer uses for its next action, plus the other
-// candidate-level tags the checklist emits.
+// The order of the summary's next_action_index, which the WinUI viewer shows
+// as written (its own tag list, IsPriorityActionRecommendation, is only for
+// summaries from before that field, so tags added since need not be there).
 // - A forced close (ADR-0022) says there is nothing to do, before any module.
 // - A known root cause (crash_signatures.json) names the fix itself.
 // - One save that keeps failing to load in different places (ADR-0025) says
@@ -25,6 +26,10 @@ struct PriorityKind
 //   crash is in is where it showed, not why.
 // - A snapshot of a running game has nothing to fix (its quick answer says so);
 //   a file two mods provide among its recent loads is no reason to act.
+// - A known crash mechanism whose signature fills the quick answer when no
+//   mod is named (ADR-0034) comes after every mod-level line, so it leads
+//   only when the quick answer names no mod, and before a file two mods
+//   provide (the menu logo of a large load order).
 constexpr PriorityKind kPriorityKinds[] = {
   { "forced_close", 0 },
   { "known_cause", 1 },
@@ -39,6 +44,7 @@ constexpr PriorityKind kPriorityKinds[] = {
   { "object_ref", 6 },
   { "snapshot", 7 },
   { "manual", 7 },
+  { "known_mechanism", 7 },
   { "conflict", 8 },
 };
 constexpr int kNoPriority = 1000;
