@@ -1670,10 +1670,14 @@ void TestFindForcedCloseInSnapshot()
   }
 }
 
-// End to end, the 2026-10-26 case: Alt+F4 and 0.8 s later an access
-// violation while the game still runs. The dump is written and kept as a
-// crash, but no viewer is opened or queued for the game's exit.
-void TestForcedCloseCrash_SkipsTheViewer()
+// End to end: a close request, and requestSeconds + crashAfterSeconds an
+// access violation while the game still runs. The dump is written and kept
+// as a crash, but no viewer is opened or queued for the game's exit.
+void ExpectForcedCloseCrashSkipsTheViewer(
+  skydiag::CloseRequestKind kind,
+  double requestSeconds,
+  double crashAfterSeconds,
+  std::string_view skipLine)
 {
   const auto outBase = MakeTempDir(L"skydiag_helper_forced_close");
   ClearLog(outBase);
@@ -1683,9 +1687,8 @@ void TestForcedCloseCrash_SkipsTheViewer()
   shared->header.crash.exception_code = 0xC0000005u;
   shared->header.crash.exception_addr = 0x7FF7055F0000ull;
   shared->header.crash_seq = 2u;
-  PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 120.0,
-    static_cast<std::uint64_t>(skydiag::CloseRequestKind::kAltF4));
-  PutEvent(shared.get(), skydiag::EventType::kCrash, 120.8, 0xC0000005u);
+  PutEvent(shared.get(), skydiag::EventType::kCloseRequest, requestSeconds, static_cast<std::uint64_t>(kind));
+  PutEvent(shared.get(), skydiag::EventType::kCrash, requestSeconds + crashAfterSeconds, 0xC0000005u);
 
   auto child = LaunchSleepingChildProcess();
   shared->header.crash.faulting_tid = child.pi.dwThreadId;
@@ -1717,11 +1720,11 @@ void TestForcedCloseCrash_SkipsTheViewer()
 
   Require(HandleCrashEventTickForState(cfg, proc, outBase, &state), "The crash event is handled");
   Require(state.crashCaptured.latched, "The crash is kept");
-  Require(state.crashCaptured.forcedClose.kind == skydiag::CloseRequestKind::kAltF4, "It followed Alt+F4");
+  Require(state.crashCaptured.forcedClose.kind == kind, "It followed the close request");
   Require(HasDumpFile(outBase), "Its dump is written");
   Require(state.pendingCrashViewerDumpPath.empty(), "No viewer is queued for the exit");
   const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
-  AssertContains(log, "Skipped viewer auto-open: crash followed a close request (Alt+F4) 0.8 s earlier.", "The skip is logged");
+  AssertContains(log, std::string(skipLine), "The skip is logged");
   Require(log.find("deferring viewer") == std::string::npos, "No viewer deferred");
   Require(log.find("Auto-opened DumpTool viewer") == std::string::npos, "No viewer opened");
   // Retention counts these apart from the real crashes, by this mark.
@@ -1740,6 +1743,16 @@ void TestForcedCloseCrash_SkipsTheViewer()
   proc.crashEvent = nullptr;
   TerminateChildProcess(&child);
   std::filesystem::remove_all(outBase);
+}
+
+void TestForcedCloseCrash_SkipsTheViewer()
+{
+  // The 2026-10-26 case: Alt+F4 and 0.8 s later the access violation.
+  ExpectForcedCloseCrashSkipsTheViewer(skydiag::CloseRequestKind::kAltF4, 120.0, 0.8,
+    "Skipped viewer auto-open: crash followed a close request (Alt+F4) 0.8 s earlier.");
+  // ADR-0022 (2026-11-17): qqq, and the crash 130 s into a slow shutdown.
+  ExpectForcedCloseCrashSkipsTheViewer(skydiag::CloseRequestKind::kGameQuit, 100.0, 130.0,
+    "Skipped viewer auto-open: crash followed a close request (quit from the game's menu) 130.0 s earlier.");
 }
 
 void TestPreservedFilteredDump_DoesNotKeepCaptureLatch()

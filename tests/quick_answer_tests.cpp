@@ -2334,8 +2334,9 @@ void TestForcedClose()
     const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
     Require(summary["analysis"]["is_forced_close"] == true && summary["analysis"]["is_crash_like"] == true,
       "summary JSON analysis flags");
-    Require(summary["forced_close"]["kind"] == "alt_f4" && summary["forced_close"]["seconds_before_crash"] == 0.8 &&
-              summary["forced_close"]["window_seconds"] == 10.0,
+    Require(summary.contains("forced_close") && summary["forced_close"].value("kind", "") == "alt_f4" &&
+              summary["forced_close"].value("seconds_before_crash", -1.0) == 0.8 &&
+              summary["forced_close"].value("window_seconds", -1.0) == 10.0,
       "summary JSON forced_close");
     Require(summary["quick_answer"]["kind"] == "forced_close", "summary JSON quick answer");
     Require(summary["fault_instruction"]["target_state"] == "freed", "summary JSON target_state");

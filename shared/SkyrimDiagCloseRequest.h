@@ -315,12 +315,13 @@ constexpr bool CloseRequestCoversCrash(CloseRequestKind kind, double beforeMs) n
 }
 
 // The same for a CloseRequestKindId ("game_quit", ...): true when the kind has
-// a time window, so the summary JSON's window_seconds applies to it.
+// a time window (a known kind that is not the quit flag's), so the summary
+// JSON's window_seconds applies to it.
 constexpr bool CloseRequestKindIdHasWindow(std::string_view id) noexcept
 {
-  for (const auto kind : { CloseRequestKind::kAltF4, CloseRequestKind::kWindowClose, CloseRequestKind::kCloseMessage }) {
-    if (id == CloseRequestKindId(kind)) {
-      return true;
+  for (auto value = static_cast<std::uint64_t>(CloseRequestKind::kAltF4); IsCloseRequestKind(value); ++value) {
+    if (id == CloseRequestKindId(static_cast<CloseRequestKind>(value))) {
+      return !IsQuitFlagCloseRequest(value);
     }
   }
   return false;

@@ -50,7 +50,7 @@ Accepted
    - 빠른 답: `kind`/`case` = `forced_close`, 제목 = 위 두 문장 + "세이브에는 보통 영향이 없습니다." / "Saves are usually unaffected.", 해볼 일 = "따로 할 일은 없습니다." / "Nothing to do.", 의심 모드·확실하지 않은 이유·어떻게 튕겼나 줄 없음.
    - 결론 문장: 위 두 문장을 앞에 붙이고 기존 결론을 그대로 잇습니다. 근거 첫 항목 "강제 종료 중 오류(CTD 아님)" / "Error during a forced close (not a CTD)"(신뢰도 높음, 몇 초 전 무슨 요청인지). 권장 첫 줄 `[강제 종료]` / `[Forced close]`(다음 조치로 선택, 즉시 그룹 `forced_close`). "실제 CTD"라고 하는 C++ 예외 해석 줄과 `CPP_EXCEPTION_HANDLED` 시그니처는 내지 않습니다.
 6. **출력 계약**(추가 필드)
-   - 요약 JSON `analysis.is_forced_close`(항상), `forced_close`(감지 시): `kind`, `seconds_before_crash`(0.001초 단위), `window_seconds`(10).
+   - 요약 JSON `analysis.is_forced_close`(항상), `forced_close`(감지 시): `kind`, `seconds_before_crash`(0.001초 단위), `window_seconds`(10). 2026-11-17부터 `window_seconds`는 시간 창이 있는 종류에만 씁니다(아래 Addendum).
    - 리포트: `Summary:` 다음 줄 `Classification: FORCED_CLOSE (not a CTD; alt_f4, 0.8 s before the error)` / `분류: 강제 종료 (CTD 아님; alt_f4, 오류 0.8초 전)`.
    - 블랙박스 이벤트 이름 `CloseRequest`, 상세 `kind=alt_f4 msg=0x0104 wparam=0x0073 posted`, 종료 플래그는 `kind=forced_quit quit_flag reason=no_menu_no_keys`(`alt_f4_held`, `menu_open`, `menu_closed`).
    - `crash_bucket_key`는 정상 종료처럼 그대로 씁니다(이력에 넣지 않을 뿐).
