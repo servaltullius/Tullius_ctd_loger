@@ -81,9 +81,49 @@ def test_new_and_removed_keys() -> None:
     keys["analyzer_version"] = "0.2.70"
     assert cmp.only_keys(cmp.compare(BASE, keys)) and not cmp.only_keys([]), "an added key alone"
     for expected in ("summary keys + analyzer_version", "summary keys + fault_instruction",
-                     "summary keys - crash_history_stats", "freeze_analysis keys + game_lock_waits",
+                     "summary keys - crash_history_stats", "summary keys + freeze_analysis.game_lock_waits",
                      "fault_instruction: None -> 'null_pointer'"):
         assert expected in lines, (expected, lines)
+    # A new object is one line, not one per key in it.
+    assert "summary keys + fault_instruction.verdict" not in lines, lines
+
+
+def test_nested_keys() -> None:
+    # 2026-11-17 (#319): forced_close lost window_seconds for the quit flag's
+    # kinds, and #318 added analysis.is_slow_shutdown; both read as "same".
+    base = dict(copy.deepcopy(BASE), analysis={"is_forced_close": True},
+                forced_close={"kind": "forced_quit", "seconds_before_crash": 0.0, "window_seconds": 10.0})
+    new = copy.deepcopy(base)
+    del new["forced_close"]["window_seconds"]
+    new["analysis"]["is_slow_shutdown"] = False
+    lines = cmp.compare(base, new)
+    assert lines == ["summary keys + analysis.is_slow_shutdown", "summary keys - forced_close.window_seconds"], lines
+    assert cmp.only_keys(lines)
+
+    # The keys of a list's items, pooled over the items.
+    scored = copy.deepcopy(BASE)
+    scored["suspects"][0]["reason"] = "stack"
+    assert cmp.compare(BASE, scored) == ["summary keys + suspects[].reason"]
+    deep = dict(copy.deepcopy(BASE), freeze_analysis={"state_id": "", "confidence": "",
+                                                      "thread_objects": [{"tid": 1, "objects": [{"name": "a"}]}]})
+    deeper = copy.deepcopy(deep)
+    deeper["freeze_analysis"]["thread_objects"][0]["objects"][0]["form_id"] = "0x14"
+    assert cmp.compare(deep, deeper) == ["summary keys + freeze_analysis.thread_objects[].objects[].form_id"]
+
+    # A list that filled or emptied changed its value, not its keys.
+    empty = copy.deepcopy(BASE)
+    empty["suspects"] = []
+    empty["evidence"] = []
+    assert cmp.compare(BASE, empty) == ["suspects - CrashLogger.dll (Low)"], cmp.compare(BASE, empty)
+    assert cmp.compare(empty, BASE) == ["suspects + CrashLogger.dll (Low)"]
+
+    # Keys that are data (module offsets) read as one.
+    funcs = dict(copy.deepcopy(BASE), resolved_functions={"0xCD8FC0": "Actor::Update"})
+    other = dict(copy.deepcopy(BASE), resolved_functions={"0x2EA36B": "Main::Update", "0x1": "f"})
+    assert cmp.compare(funcs, other) == []
+    assert cmp.compare(BASE, funcs) == ["summary keys + resolved_functions"]
+    assert cmp.compare(dict(copy.deepcopy(BASE), resolved_functions={}), funcs) == [
+        "summary keys + resolved_functions.*"]
 
 
 def test_selected_next_action() -> None:
@@ -183,6 +223,7 @@ if __name__ == "__main__":
     test_selected_next_action()
     test_list_changes_name_the_entries()
     test_new_and_removed_keys()
+    test_nested_keys()
     with tempfile.TemporaryDirectory() as tmp:
         test_find_dumps(Path(tmp))
     test_dump_labels()
