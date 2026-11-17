@@ -5,9 +5,10 @@ Runs a baseline and a new SkyrimDiagDumpToolCli.exe on every dump (Korean and
 English by default) and lists, per dump and language, the fields that changed:
 the conclusion, freeze state and confidence, bucket, known signature, quick
 answer, suspects, actionable candidates, recommendations and their groups, the selected next action,
-the faulting instruction, and summary keys that appeared or disappeared.
-Everything else in a summary (evidence details, events, paths, the analysis
-time) is left out on purpose: those move with every run. Dumps of the same
+the faulting instruction, and summary keys that appeared or disappeared at
+any depth (forced_close.window_seconds, suspects[].score). The values of
+everything else in a summary (evidence details, events, paths, the analysis
+time) are left out on purpose: those move with every run. Dumps of the same
 name from different folders are numbered (crash-1, crash-2) in the output and
 its folders, and every changed analysis prints the dump's path.
 
@@ -25,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 from collections import Counter
@@ -84,8 +86,61 @@ def key_fields(summary: dict[str, Any]) -> dict[str, Any]:
     return fields
 
 
-def key_set(obj: Any) -> set[str]:
-    return set(obj) if isinstance(obj, dict) else set()
+KeyPath = tuple[str, ...]
+# A key that is not a snake_case name is data, not schema (resolved_functions
+# is keyed by module offset, "0xCD8FC0"): all such keys of one object read as "*".
+_SCHEMA_KEY = re.compile(r"[a-z][a-z0-9_]*")
+
+
+def key_paths(obj: Any) -> tuple[set[KeyPath], set[KeyPath]]:
+    """Every key path in a summary, at any depth, and the lists that have items.
+
+    A path is the keys from the root, with "[]" for a list's items: the keys
+    of all items of a list are pooled under it.
+    """
+    paths: set[KeyPath] = set()
+    filled: set[KeyPath] = set()
+
+    def walk(node: Any, prefix: KeyPath) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                path = prefix + (key if _SCHEMA_KEY.fullmatch(key) else "*",)
+                paths.add(path)
+                walk(value, path)
+        elif isinstance(node, list):
+            path = prefix + ("[]",)
+            if node:
+                filled.add(path)
+            for item in node:
+                walk(item, path)
+
+    walk(obj, ())
+    return paths, filled
+
+
+def format_path(path: KeyPath) -> str:
+    return ".".join(path).replace(".[]", "[]")
+
+
+def changed_keys(base: Any, new: Any) -> list[str]:
+    """Keys that appeared or went anywhere in the summary, as "summary keys +/- path".
+
+    Only the outermost one is named: a new object is one line, not one per key
+    in it. A list's item keys count only when that list has items on both
+    sides; a list that filled or emptied changed its value, not its keys.
+    """
+    old_paths, old_filled = key_paths(base)
+    new_paths, new_filled = key_paths(new)
+    both_filled = old_filled & new_filled
+    lines: list[str] = []
+    for sign, diff in (("+", new_paths - old_paths), ("-", old_paths - new_paths)):
+        for path in sorted(diff):
+            if any(path[:i] in diff for i in range(1, len(path))):
+                continue
+            if any(seg == "[]" and path[:i + 1] not in both_filled for i, seg in enumerate(path)):
+                continue
+            lines.append(f"summary keys {sign} {format_path(path)}")
+    return lines
 
 
 def compare(base: dict[str, Any], new: dict[str, Any]) -> list[str]:
@@ -106,20 +161,13 @@ def compare(base: dict[str, Any], new: dict[str, Any]) -> list[str]:
                 lines.append(f"{name} + {x}")
         else:
             lines.append(f"{name}: {a[name]!r} -> {b[name]!r}")
-    for label, old_keys, new_keys in (
-        ("summary keys", key_set(base), key_set(new)),
-        ("freeze_analysis keys", key_set(base.get("freeze_analysis")), key_set(new.get("freeze_analysis"))),
-    ):
-        for key in sorted(new_keys - old_keys):
-            lines.append(f"{label} + {key}")
-        for key in sorted(old_keys - new_keys):
-            lines.append(f"{label} - {key}")
+    lines.extend(changed_keys(base, new))
     return lines
 
 
 def only_keys(lines: list[str]) -> bool:
     """Only keys appeared or went (an additive field), nothing a reader sees changed."""
-    return bool(lines) and all(line.startswith(("summary keys ", "freeze_analysis keys ")) for line in lines)
+    return bool(lines) and all(line.startswith("summary keys ") for line in lines)
 
 
 def find_dumps(paths: list[Path]) -> list[Path]:
