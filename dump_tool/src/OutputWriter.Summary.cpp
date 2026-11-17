@@ -162,6 +162,7 @@ nlohmann::json BuildSummaryJson(
     { "is_manual_capture", r.is_manual_capture },
     { "is_filtered_clean_exit", r.is_filtered_clean_exit },
     { "is_forced_close", r.forced_close.detected },
+    { "is_slow_shutdown", r.quit_before_freeze.detected },
   };
   if (r.is_filtered_clean_exit) {
     summary["clean_exit_evidence"] = {
@@ -179,6 +180,10 @@ nlohmann::json BuildSummaryJson(
       { "seconds_before_crash", std::round(r.forced_close.seconds_before_crash * 1000.0) / 1000.0 },
       { "window_seconds", static_cast<double>(skydiag::kForcedCloseCrashWindowMs) / 1000.0 },
     };
+  }
+  // Additive (ADR-0035): the quit this freeze followed.
+  if (r.quit_before_freeze.detected) {
+    summary["quit_before_freeze"] = { { "kind", r.quit_before_freeze.kind } };
   }
   // Additive (ADR-0025): the save the newest load started with.
   if (r.save_load.seen) {

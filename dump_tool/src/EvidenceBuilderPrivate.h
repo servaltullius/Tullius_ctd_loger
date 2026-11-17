@@ -43,6 +43,8 @@ struct EvidenceBuildContext
   // ADR-0022: a crash right after the player asked the game to close. Still
   // crash-like (the analysis stays for mod authors), but never called a CTD.
   bool isForcedClose = false;
+  // ADR-0035: a freeze after the game's quit flag: its shutdown took long.
+  bool isSlowShutdown = false;
   bool isCrashLike = false;
   bool isHangLike = false;
   bool isSnapshotLike = false;
@@ -198,6 +200,10 @@ bool IsWeakFaultLocationActionableCandidate(
 // CTD가 아닙니다." / "This error happened while you force-quit the game
 // (Alt+F4). It is not a crash during play.", by the close request's kind.
 std::wstring ForcedCloseLead(const ForcedCloseInfo& forcedClose, bool en);
+
+// ADR-0035: "게임 종료(메뉴의 종료나 콘솔 qqq)를 고른 뒤 게임이 꺼지는 데 오래 걸린
+// 것입니다. 플레이 중 멈춘 프리징이 아닙니다.", by the quit's kind.
+std::wstring SlowShutdownLead(const QuitBeforeFreezeInfo& quit, bool en);
 
 // ADR-0025: the capture came while loading a save that failed to load before,
 // it and the earlier ones failed in at least two places (crash buckets), and

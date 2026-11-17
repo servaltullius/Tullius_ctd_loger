@@ -16,6 +16,7 @@
 #include "CrashCapture.h"
 #include "HangCapture.h"
 #include "PendingCrashAnalysis.h"
+#include "QuitRequestWatcher.h"
 #include "SaveLoadRecord.h"
 
 namespace skydiag::helper::internal {
@@ -84,6 +85,8 @@ struct HelperLoopState
   // ADR-0025 (2026-11-06): where the blackbox was read up to for finished
   // save loads (loaded_saves.json).
   SaveLoadWatcher saveLoads{};
+  // ADR-0035: the game's quit flag, as the plugin recorded it.
+  QuitRequestWatcher quitRequests{};
 };
 
 struct CrashArtifactRemovalResult
@@ -102,6 +105,13 @@ CrashArtifactRemovalResult RemoveCrashArtifactsForDump(
   const std::filesystem::path& extraArtifactPath = {},
   bool preserveDumpFile = false);
 void InitializeLoopState(const AttachedProcess& proc, const std::filesystem::path& outBase, HelperLoopState* state);
+// ADR-0035: polls the blackbox for the game's quit flag; the first time it is
+// found, marks the session's hang state (gameQuitRequested) and logs it.
+void NoteGameQuitRequest(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  QuitRequestWatcher* watcher,
+  HangCaptureState* hang);
 // The marker files RearmFrozenCrashFromEarlierHelper leaves in the output
 // folder: <prefix><pid>_<game creation time>_<crash_seq>.marker.
 inline constexpr std::wstring_view kFrozenCrashRearmMarkerPrefix = L"SkyrimDiag_CrashRearm_";

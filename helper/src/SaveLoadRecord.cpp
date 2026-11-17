@@ -9,7 +9,6 @@
 #include <nlohmann/json.hpp>
 
 #include "HelperCommon.h"
-#include "SeqlockCopy.h"
 #include "SkyrimDiagLongPath.h"
 #include "SkyrimDiagSaveLoad.h"
 
@@ -47,54 +46,28 @@ std::string DecodeName(const skydiag::EventPayload& payload)
   return NameAsUtf8(std::string(text, strnlen(text, skydiag::kSaveNameTextBytes)));
 }
 
-std::uint32_t ReadWriteIndex(const skydiag::SharedHeader& header) noexcept
-{
-  auto* const index = reinterpret_cast<volatile LONG*>(const_cast<volatile std::uint32_t*>(&header.write_index));
-  return static_cast<std::uint32_t>(InterlockedCompareExchange(index, 0, 0));
-}
-
 }  // namespace
 
 std::vector<LoadedSave> SaveLoadWatcher::Poll(
   const skydiag::SharedLayout* shm, std::uint64_t nowQpc, std::uint64_t nowUnix)
 {
   std::vector<LoadedSave> loads;
-  if (!shm || shm->header.magic != skydiag::kMagic) {
+  bool lapped = false;
+  if (!cursor_.Begin(shm, &lapped)) {
     return loads;
   }
+  if (lapped) {
+    loading_ = false;  // its SaveLoadEnd may be among the lost entries
+  }
   const auto& header = shm->header;
-  std::uint32_t capacity = header.capacity;
-  if (capacity == 0u || capacity > skydiag::kEventCapacity) {
-    capacity = skydiag::kEventCapacity;
-  }
-  const std::uint32_t writeIndex = ReadWriteIndex(header);
-  const std::uint32_t oldest = writeIndex > capacity ? writeIndex - capacity : 0u;
-  if (!started_ || next_ < oldest) {
-    // First poll, or a lap behind: start at the oldest entry the ring holds.
-    if (started_) {
-      loading_ = false;
-    }
-    next_ = oldest;
-    started_ = true;
-  }
-  for (; next_ < writeIndex; ++next_) {
-    skydiag::BlackboxEvent event{};
-    if (!CopyStableSeqlockEntry(&shm->events[next_ % capacity], &event)) {
-      break;  // being written: read it on the next poll
-    }
-    // The plugin commits ring index i as seq i*2.
-    const std::uint32_t committed = next_ * 2u;
-    if (event.seq != committed) {
-      if (event.seq < committed) {
-        break;  // claimed but not written yet
-      }
-      continue;  // a later lap already took the slot
-    }
+  skydiag::BlackboxEvent event{};
+  std::uint32_t index = 0;
+  while (cursor_.Next(shm, &event, &index)) {
     if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadStart)) {
       loading_ = true;
       loadingKey_ = event.payload.a;
       loadingName_ = DecodeName(event.payload);
-      loadingEvent_ = next_;
+      loadingEvent_ = index;
     } else if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kSaveLoadEnd)) {
       if (loading_ && loadingKey_ != 0u &&
           event.payload.a == static_cast<std::uint64_t>(skydiag::SaveLoadResult::kLoaded)) {

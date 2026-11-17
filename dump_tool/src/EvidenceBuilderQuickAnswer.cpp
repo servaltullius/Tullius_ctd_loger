@@ -772,6 +772,18 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     answer.action = en ? L"Nothing to do." : L"따로 할 일은 없습니다.";
     return answer;
   }
+  if (ctx.isSlowShutdown) {
+    // ADR-0035: no lead and no "how it crashed" line, as for a forced close.
+    answer.kind = "slow_shutdown";
+    answer.case_id = "freeze_after_quit";
+    answer.headline = SlowShutdownLead(r.quit_before_freeze, en);
+    answer.action = en
+      ? L"Nothing to do. If closing the game takes minutes every time, share this report when you ask for help: it "
+        L"shows what was still running while the game closed."
+      : L"따로 할 일은 없습니다. 끌 때마다 몇 분씩 걸린다면, 게임이 닫히는 동안 무엇이 돌고 있었는지 이 리포트에 "
+        L"나오니 도움을 요청할 때 공유해 주세요.";
+    return answer;
+  }
   if (ctx.isSnapshotLike && ctx.isManualCapture && ctx.wct && ctx.wct->has_capture &&
       ctx.wct->secondsSinceHeartbeat >= internal::kNotHangHeartbeatAgeSec) {
     // The game had stopped answering when the snapshot was taken, so "not a

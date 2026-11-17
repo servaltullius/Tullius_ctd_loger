@@ -147,12 +147,15 @@ internal sealed partial class MainWindowViewModel
         // freeze. Every summary the viewer shows has them (NeedsReanalysisFor).
         var isFilteredCleanExit = summary.IsFilteredCleanExit;
         var isForcedClose = !isFilteredCleanExit && summary.IsForcedClose;
-        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose && summary.IsSnapshotLike;
-        var isHangLike = !isFilteredCleanExit && !isForcedClose && !isSnapshotLike && summary.IsHangLike;
+        var isSlowShutdown = !isFilteredCleanExit && !isForcedClose && summary.IsSlowShutdown;
+        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose && !isSlowShutdown && summary.IsSnapshotLike;
+        var isHangLike = !isFilteredCleanExit && !isForcedClose && !isSlowShutdown && !isSnapshotLike && summary.IsHangLike;
         lines.Add(isFilteredCleanExit
             ? (_isKorean ? "🟢 Skyrim 정상 종료 진단 리포트 — SkyrimDiag" : "🟢 Skyrim Clean-Exit Diagnostic Report — SkyrimDiag")
             : isForcedClose
             ? (_isKorean ? "⚪ Skyrim 강제 종료 중 오류 리포트 — SkyrimDiag" : "⚪ Skyrim Forced-Close Error Report — SkyrimDiag")
+            : isSlowShutdown
+            ? (_isKorean ? "⚪ Skyrim 느린 종료 리포트 — SkyrimDiag" : "⚪ Skyrim Slow-Shutdown Report — SkyrimDiag")
             : isSnapshotLike
             ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
             : isHangLike
@@ -208,13 +211,15 @@ internal sealed partial class MainWindowViewModel
 
         if (!string.IsNullOrWhiteSpace(summary.CrashBucketKey))
         {
-            var typeLabel = isFilteredCleanExit || isForcedClose || isSnapshotLike
+            var typeLabel = isFilteredCleanExit || isForcedClose || isSlowShutdown || isSnapshotLike
                 ? (_isKorean ? "분류" : "Category")
                 : (_isKorean ? "유형" : "Type");
             var typeValue = isFilteredCleanExit
                 ? "CLEAN_EXIT"
                 : isForcedClose
                 ? "FORCED_CLOSE"
+                : isSlowShutdown
+                ? "SLOW_SHUTDOWN"
                 : isSnapshotLike
                 ? "SNAPSHOT"
                 : isHangLike
@@ -247,6 +252,12 @@ internal sealed partial class MainWindowViewModel
                 firstAction = summary.Recommendations.FirstOrDefault(r =>
                     r.StartsWith("[Forced close]", StringComparison.OrdinalIgnoreCase) ||
                     r.StartsWith("[강제 종료]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
+            }
+            else if (isSlowShutdown && !summary.HasNextActionIndex)
+            {
+                firstAction = summary.Recommendations.FirstOrDefault(r =>
+                    r.StartsWith("[Slow shutdown]", StringComparison.OrdinalIgnoreCase) ||
+                    r.StartsWith("[느린 종료]", StringComparison.Ordinal)) ?? summary.Recommendations[0];
             }
             else if (isSnapshotLike)
             {

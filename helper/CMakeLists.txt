@@ -42,6 +42,7 @@ add_executable(${PROJECT_NAME}
   src/PluginScanner.cpp
   src/ProcessAttach.cpp
   src/ProcessUtil.cpp
+  src/QuitRequestWatcher.cpp
   src/RetentionWorker.cpp
   src/SaveLoadRecord.cpp
   src/SkseLogParser.cpp
@@ -49,6 +50,7 @@ add_executable(${PROJECT_NAME}
   src/WctCapture.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
+  src/BlackboxCursor.h
   src/CompatibilityPreflight.h
   src/CrashObjectMemory.h
   src/GpuDriverEvents.h
@@ -70,6 +72,7 @@ add_executable(${PROJECT_NAME}
   src/HangCaptureInternal.h
   src/PssSnapshot.h
   src/PendingCrashAnalysisInternal.h
+  src/QuitRequestWatcher.h
   src/RetentionWorker.h
   src/SaveLoadRecord.h
   src/SeqlockCopy.h

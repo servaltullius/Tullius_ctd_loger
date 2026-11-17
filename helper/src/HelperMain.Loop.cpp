@@ -117,6 +117,23 @@ void RecordFinishedSaveLoads(const AttachedProcess& proc, const std::filesystem:
   }
 }
 
+// ADR-0035: once the game's quit flag is recorded, a freeze is its shutdown.
+void NoteGameQuitRequest(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  QuitRequestWatcher* watcher,
+  HangCaptureState* hang)
+{
+  if (!watcher->Poll(proc.shm)) {
+    return;
+  }
+  hang->gameQuitRequested = true;
+  AppendLogLine(
+    outBase,
+    std::wstring(L"The game was asked to quit (") + skydiag::CloseRequestKindLabel(watcher->Kind())
+      + L"); a freeze from here on is its shutdown, and a normal exit after one is a slow shutdown.");
+}
+
 void RunHelperLoop(
   const HelperConfig& cfg,
   AttachedProcess& proc,
@@ -179,6 +196,7 @@ void RunHelperLoop(
     }
 
     RecordFinishedSaveLoads(proc, outBase, &state->saveLoads);
+    NoteGameQuitRequest(proc, outBase, &state->quitRequests, &state->hangState);
 
     if (!proc.crashEvent) {
       const auto nowTick = GetTickCount64();

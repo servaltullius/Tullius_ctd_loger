@@ -15,13 +15,18 @@
 #include <nlohmann/json.hpp>
 
 #include "HelperCommon.h"
+#include "BlackboxCursor.h"
 #include "HelperRuntimeTestUtils.h"
+#include "QuitRequestWatcher.h"
 #include "SaveLoadRecord.h"
+#include "SkyrimDiagCloseRequest.h"
 #include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagShared.h"
 
+using skydiag::helper::internal::BlackboxCursor;
 using skydiag::helper::internal::LoadedSave;
 using skydiag::helper::internal::MergeLoadedSavesJson;
+using skydiag::helper::internal::QuitRequestWatcher;
 using skydiag::helper::internal::RecordLoadedSaves;
 using skydiag::helper::internal::SaveLoadWatcher;
 using skydiag::tests::runtime::MakeTempDir;
@@ -197,6 +202,100 @@ void TestRecordWritesTheFile()
   std::filesystem::remove_all(dir, ec);
 }
 
+// The ring cursor both watchers read with: a lap is told, a slot a later lap
+// already took is passed over, the next pass goes on where this one stopped.
+void TestBlackboxCursor()
+{
+  Ring ring;
+  for (std::uint32_t i = 0; i < 3u; ++i) {
+    ring.Add(skydiag::EventType::kHeartbeat, kStartQpc + i);
+  }
+  // Slot 1 already holds an entry of a later lap (seq past its own).
+  ring.shm->events[1].seq = (1u + skydiag::kEventCapacity) * 2u;
+  BlackboxCursor cursor;
+  bool lapped = true;
+  Require(cursor.Begin(ring.shm.get(), &lapped) && !lapped, "the first pass is no lap");
+  skydiag::BlackboxEvent event{};
+  std::uint32_t index = 99u;
+  Require(cursor.Next(ring.shm.get(), &event, &index) && index == 0u, "entry 0");
+  Require(cursor.Next(ring.shm.get(), &event, &index) && index == 2u, "slot 1 is passed over, entry 2 follows");
+  Require(!cursor.Next(ring.shm.get(), &event, &index), "the end of the pass");
+
+  // The ring goes a lap past the cursor: the next pass says so and starts at
+  // the oldest entry left.
+  for (std::uint32_t i = 0; i < skydiag::kEventCapacity + 5u; ++i) {
+    ring.Add(skydiag::EventType::kThreadExit, kStartQpc + 10u + i);
+  }
+  Require(cursor.Begin(ring.shm.get(), &lapped) && lapped, "a lap is told");
+  Require(cursor.Next(ring.shm.get(), &event, &index) &&
+            index == ring.shm->header.write_index - skydiag::kEventCapacity,
+    "from the oldest entry left");
+  Require(cursor.Begin(ring.shm.get(), &lapped) && !lapped, "and only once");
+
+  // A save load whose end went with the lap is not finished by a later end.
+  Ring loads;
+  loads.Start(kSave75, kStartQpc + 1u);
+  SaveLoadWatcher watcher;
+  Require(watcher.Poll(loads.shm.get(), kStartQpc + 2u, 1'800'000'000u).empty(), "loading");
+  for (std::uint32_t i = 0; i < skydiag::kEventCapacity + 5u; ++i) {
+    loads.Add(skydiag::EventType::kThreadExit, kStartQpc + 10u + i);
+  }
+  Require(watcher.Poll(loads.shm.get(), kStartQpc + 2000u, 1'800'000'002u).empty(), "the lap");
+  loads.End(skydiag::SaveLoadResult::kLoaded, kStartQpc + 3000u);
+  Require(watcher.Poll(loads.shm.get(), kStartQpc + 3000u, 1'800'000'003u).empty(),
+    "an end after a lap is not taken for the lost load's");
+}
+
+// ADR-0035: the same ring followed for the game's quit flag (game_quit or
+// forced_quit), latched once read.
+void TestQuitRequestWatcher()
+{
+  const auto request = [](skydiag::CloseRequestKind kind) {
+    return skydiag::EventPayload{ static_cast<std::uint64_t>(kind), 0, 0,
+      static_cast<std::uint64_t>(skydiag::CloseRequestSource::kQuitFlag) };
+  };
+  Ring ring;
+  ring.Add(skydiag::EventType::kHeartbeat, kStartQpc + 100u);
+  // Close requests that are not the quit flag do not count.
+  ring.Add(skydiag::EventType::kCloseRequest, kStartQpc + 200u, request(skydiag::CloseRequestKind::kAltF4));
+  ring.Add(skydiag::EventType::kCloseRequest, kStartQpc + 300u, request(skydiag::CloseRequestKind::kWindowClose));
+  ring.Add(skydiag::EventType::kCloseRequest, kStartQpc + 400u, request(skydiag::CloseRequestKind::kCloseMessage));
+  QuitRequestWatcher watcher;
+  Require(!watcher.Poll(ring.shm.get()) && !watcher.Seen(), "no quit flag yet");
+
+  // Claimed but not written yet: read on a later poll.
+  const auto quit = ring.Claim();
+  Require(!watcher.Poll(ring.shm.get()) && !watcher.Seen(), "an unwritten entry is not read");
+  ring.Commit(quit, skydiag::EventType::kCloseRequest, kStartQpc + 500u, request(skydiag::CloseRequestKind::kGameQuit));
+  Require(watcher.Poll(ring.shm.get()), "the first poll that reads it says so");
+  Require(watcher.Seen() && watcher.Kind() == skydiag::CloseRequestKind::kGameQuit, "latched with its kind");
+  Require(!watcher.Poll(ring.shm.get()), "once");
+
+  // A long shutdown laps the ring (thread exits): the watcher keeps it, a
+  // helper started only now finds no request.
+  for (std::uint32_t i = 0; i < skydiag::kEventCapacity + 10u; ++i) {
+    ring.Add(skydiag::EventType::kThreadExit, kStartQpc + 600u + i);
+  }
+  Require(watcher.Seen() && !watcher.Poll(ring.shm.get()), "still latched after the lap");
+  QuitRequestWatcher late;
+  Require(!late.Poll(ring.shm.get()) && !late.Seen(), "gone from the ring");
+
+  // A helper started again while it is still in the ring finds it.
+  Ring again;
+  again.Add(skydiag::EventType::kCloseRequest, kStartQpc + 100u, request(skydiag::CloseRequestKind::kForcedQuit));
+  again.Add(skydiag::EventType::kThreadExit, kStartQpc + 200u);
+  QuitRequestWatcher restarted;
+  Require(restarted.Poll(again.shm.get()) && restarted.Kind() == skydiag::CloseRequestKind::kForcedQuit,
+    "forced_quit, read on the first poll");
+
+  // No layout, or one that is not the plugin's.
+  Require(!QuitRequestWatcher{}.Poll(nullptr), "no layout");
+  Ring foreign;
+  foreign.Add(skydiag::EventType::kCloseRequest, kStartQpc, request(skydiag::CloseRequestKind::kGameQuit));
+  foreign.shm->header.magic = 0u;
+  Require(!QuitRequestWatcher{}.Poll(foreign.shm.get()), "a layout without the magic");
+}
+
 }  // namespace
 
 int main()
@@ -206,6 +305,8 @@ int main()
     SKYDIAG_RUN_TEST(TestUnwrittenEntryIsReadLater);
     SKYDIAG_RUN_TEST(TestFileKeepsEachLoadOnce);
     SKYDIAG_RUN_TEST(TestRecordWritesTheFile);
+    SKYDIAG_RUN_TEST(TestQuitRequestWatcher);
+    SKYDIAG_RUN_TEST(TestBlackboxCursor);
     std::puts("save load record tests passed");
     return 0;
   } catch (const std::exception& ex) {

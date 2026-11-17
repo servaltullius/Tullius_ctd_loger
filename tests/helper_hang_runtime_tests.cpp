@@ -43,6 +43,7 @@ using skydiag::helper::internal::HangCaptureState;
 using skydiag::helper::internal::HangTickResult;
 using skydiag::helper::internal::HelperLoopState;
 using skydiag::helper::internal::InitializeLoopState;
+using skydiag::helper::internal::NoteGameQuitRequest;
 using skydiag::helper::internal::RunHelperLoop;
 using skydiag::helper::internal::ShutdownRetentionWorker;
 using skydiag::tests::runtime::AssertContains;
@@ -399,23 +400,38 @@ enum class BeforeExit
   kLoadFlagThenHangTick,
 };
 
+// A close request the plugin recorded before the freeze (none: no event).
 HeldHangExit CaptureHangThenExit(
   skydiag::helper::HelperConfig cfg,
   DWORD exitCode,
   const wchar_t* dirPrefix,
   std::uint32_t stateFlags = skydiag::kState_InMenu,
-  BeforeExit beforeExit = BeforeExit::kNothing)
+  BeforeExit beforeExit = BeforeExit::kNothing,
+  skydiag::CloseRequestKind closeRequest = skydiag::CloseRequestKind::kNone)
 {
   const auto outBase = MakeTempDir(dirPrefix);
   ClearLog(outBase);
   auto shared = MakeStaleHeartbeatLayout(32u);
   shared->header.state_flags = stateFlags;
+  if (closeRequest != skydiag::CloseRequestKind::kNone) {
+    // As the plugin writes it: ring index i committed as seq i*2.
+    const std::uint32_t i = shared->header.write_index;
+    auto& e = shared->events[i % skydiag::kEventCapacity];
+    e.type = static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest);
+    e.qpc = shared->header.last_heartbeat_qpc;
+    e.payload.a = static_cast<std::uint64_t>(closeRequest);
+    e.payload.d = static_cast<std::uint64_t>(skydiag::CloseRequestSource::kQuitFlag);
+    e.seq = i * 2u;
+    shared->header.write_index = i + 1u;
+  }
   auto child = LaunchSleepingChildProcess();
   auto proc = MakeAttachedProcessForChild(child, shared.get());
   HelperLoopState loop{};
   InitializeLoopState(proc, outBase, &loop);
+  NoteGameQuitRequest(proc, outBase, &loop.quitRequests, &loop.hangState);
   HangDecision decision{};
   decision.isHang = true;
+  decision.isLoading = (stateFlags & skydiag::kState_Loading) != 0u;
   decision.secondsSinceHeartbeat = 32.0;
   decision.thresholdSec = 30u;
   (void)ExecuteConfirmedHangCapture(
@@ -600,11 +616,72 @@ void TestGameplayCaptureThenTheGamesExitIsASlowShutdown()
   AssertContains(r.log, "Suppressed hang viewer launch", "no freeze viewer for it");
 }
 
-static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, false), "a menu");
-static_assert(!skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_None, false), "play");
+static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, false, false), "a menu");
+static_assert(!skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_None, false, false), "play");
 static_assert(
-  !skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu | skydiag::kState_Loading, false), "a load");
-static_assert(!skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, true), "a load by the decision");
+  !skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu | skydiag::kState_Loading, false, false),
+  "a load");
+static_assert(
+  !skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu, true, false), "a load by the decision");
+// ADR-0035: after the game's quit flag, whatever the flags say.
+static_assert(skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_None, false, true), "a quit during play");
+static_assert(
+  skydiag::helper::internal::MayBeSlowShutdown(skydiag::kState_InMenu | skydiag::kState_Loading, true, true),
+  "a quit with the load flag");
+
+// ADR-0035 (a 2026-11-16 report): a qqq shutdown that lasted over two minutes
+// was captured with the load flag set, so it was analyzed at once as an
+// endless load and its dump stayed. With the quit flag recorded before it,
+// the capture is held, and the normal exit removes it as a slow shutdown.
+void TestHangAfterAQuitIsASlowShutdownWhateverTheFlags()
+{
+  auto cfg = MakeHangTestConfig();
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+  const auto r = CaptureHangThenExit(
+    cfg, 0u, L"skydiag_hang_after_qqq", skydiag::kState_Loading, BeforeExit::kNothing,
+    skydiag::CloseRequestKind::kGameQuit);
+  AssertContains(r.log, "The game was asked to quit (quit from the game's menu)", "the quit is logged when read");
+  Require(r.heldAtCapture, "held although the load flag was set");
+  AssertContains(r.log, "the game was asked to quit before this freeze", "the hold line says why");
+  Require(r.slowShutdownAtExit && r.dumps == 0u && r.jsonFiles == 0u, "a slow shutdown, removed with its files");
+  Require(r.heldCleared && r.viewerCleared, "nothing is left to analyze or open");
+
+  // forced_quit is the quit flag too (Alt+F4 that the game read itself),
+  // during play.
+  const auto forced = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_hang_after_forced_quit", skydiag::kState_None, BeforeExit::kNothing,
+    skydiag::CloseRequestKind::kForcedQuit);
+  Require(forced.heldAtCapture && forced.slowShutdownAtExit && forced.dumps == 0u, "forced_quit: removed");
+}
+
+// The quit does not hide a game that was ended instead: another exit code
+// keeps the dump and releases it for analysis.
+void TestHangAfterAQuitKeptForAnEndedGame()
+{
+  const auto r = CaptureHangThenExit(
+    MakeHangTestConfig(), 1u, L"skydiag_hang_after_qqq_ended", skydiag::kState_Loading, BeforeExit::kNothing,
+    skydiag::CloseRequestKind::kGameQuit);
+  Require(r.heldAtCapture && !r.slowShutdownAtExit, "held, but no slow shutdown at exit code 1");
+  Require(r.dumps == 1u && r.heldCleared, "the dump stays and is released for analysis");
+}
+
+// Without a quit flag nothing changes: a freeze with the load flag, and one
+// after Alt+F4 that only the key sampler saw (the game never set its quit
+// flag), are analyzed at once and keep their dumps.
+void TestHangWithoutAQuitFlagIsNotHeld()
+{
+  const auto load = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_hang_load_no_quit", skydiag::kState_Loading);
+  Require(!load.heldAtCapture && load.dumps == 1u && !load.slowShutdownAtExit, "a load freeze stays");
+  Require(load.log.find("asked to quit") == std::string::npos, "no quit is told");
+
+  const auto keys = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_hang_alt_f4_keys", skydiag::kState_None, BeforeExit::kNothing,
+    skydiag::CloseRequestKind::kAltF4);
+  Require(!keys.heldAtCapture && keys.dumps == 1u && !keys.slowShutdownAtExit, "Alt+F4 keys alone change nothing");
+}
 
 // The exit's hang viewer and the held dump: a viewer that opened analyzes it;
 // one that did not leaves its analysis to the helper.
@@ -1384,6 +1461,58 @@ void TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0035 end to end: the helper loop itself reads the game_quit the plugin
+// recorded, so the freeze that follows (here with the load flag, as in the
+// report) is held and its normal exit removes it.
+void TestRunHelperLoop_AFreezeAfterAQuitIsASlowShutdown()
+{
+  const auto outBase = MakeTempDir(L"skydiag_loop_quit_freeze");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  shared->header.state_flags = skydiag::kState_Loading;
+  {
+    // As the plugin writes it: ring index i committed as seq i*2.
+    const std::uint32_t i = shared->header.write_index;
+    auto& e = shared->events[i % skydiag::kEventCapacity];
+    e.type = static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest);
+    e.qpc = shared->header.last_heartbeat_qpc;
+    e.payload.a = static_cast<std::uint64_t>(skydiag::CloseRequestKind::kGameQuit);
+    e.payload.d = static_cast<std::uint64_t>(skydiag::CloseRequestSource::kQuitFlag);
+    e.seq = i * 2u;
+    shared->header.write_index = i + 1u;
+  }
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  auto cfg = MakeHangTestConfig();
+  cfg.hangThresholdLoadingSec = 30u;
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+
+  // Long enough for the grace wait and the dump; the normal exit after it.
+  std::thread killer([&] {
+    Sleep(6000);
+    TerminateProcess(child.pi.hProcess, 0u);
+  });
+  RunHelperLoop(
+    cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec, QpcNow(),
+    &loop);
+  killer.join();
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "The game was asked to quit (quit from the game's menu)", "the loop read the quit");
+  AssertContains(log, "Hang dump written", "the freeze was captured");
+  AssertContains(log, "the game was asked to quit before this freeze", "and held for the quit");
+  AssertContains(log, "Removed the hang dump of a slow shutdown", "the normal exit removed it");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "no hang dump is left");
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 int main()
 {
   try {
@@ -1404,6 +1533,7 @@ int main()
     SKYDIAG_RUN_TEST(TestFreezeCaptureRemovesTheWctFileOfAFailedDump);
     SKYDIAG_RUN_TEST(TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait);
     SKYDIAG_RUN_TEST(TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame);
+    SKYDIAG_RUN_TEST(TestRunHelperLoop_AFreezeAfterAQuitIsASlowShutdown);
     SKYDIAG_RUN_TEST(TestLoadStatsAtomicSaveFailurePreservesExistingState);
     SKYDIAG_RUN_TEST(TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample);
     SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsWhenHeartbeatNotInitialized);
@@ -1420,6 +1550,9 @@ int main()
     SKYDIAG_RUN_TEST(TestHeldHangDump_KeptWhenADialogWasVisible);
     SKYDIAG_RUN_TEST(TestHeldHangDump_EpisodeEndsOnlyWhenTheHeartbeatMoves);
     SKYDIAG_RUN_TEST(TestGameplayCaptureThenTheGamesExitIsASlowShutdown);
+    SKYDIAG_RUN_TEST(TestHangAfterAQuitIsASlowShutdownWhateverTheFlags);
+    SKYDIAG_RUN_TEST(TestHangAfterAQuitKeptForAnEndedGame);
+    SKYDIAG_RUN_TEST(TestHangWithoutAQuitFlagIsNotHeld);
     SKYDIAG_RUN_TEST(TestHeldHangDump_SettledByTheExitViewer);
     SKYDIAG_RUN_TEST(TestHeldHangDump_ReleasedWhenTheHelperStops);
     SKYDIAG_RUN_TEST(TestCaptureModalDialogsFindsMessageBoxOwnerThread);

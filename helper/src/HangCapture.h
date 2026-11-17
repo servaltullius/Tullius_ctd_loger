@@ -67,8 +67,15 @@ struct HeldHangDump
 // ground, even if something then ends the game with exit code 0 (a quit
 // hotkey, a launcher); only seeing the game in its exit afterwards makes its
 // normal exit a slow shutdown (closingSeenAfterCaptureThisEpisode).
-constexpr bool MayBeSlowShutdown(std::uint32_t stateFlags, bool isLoading) noexcept
+// ADR-0035: once the plugin has recorded the game's quit flag
+// (gameQuitRequested), the game is shutting down whatever the flags say: a qqq
+// shutdown that lasted over two minutes was captured with the load flag set
+// (a 2026-11-16 report).
+constexpr bool MayBeSlowShutdown(std::uint32_t stateFlags, bool isLoading, bool gameQuitRequested) noexcept
 {
+  if (gameQuitRequested) {
+    return true;
+  }
   return (stateFlags & skydiag::kState_InMenu) != 0u && (stateFlags & skydiag::kState_Loading) == 0u && !isLoading;
 }
 
@@ -117,6 +124,12 @@ struct HangCaptureState
 
   bool wasLoading = false;
   std::uint64_t loadStartQpc = 0;
+
+  // ADR-0035: the plugin recorded the game's quit flag this session
+  // (QuitRequestWatcher, polled by the helper loop). Not an episode field:
+  // ResetHangCaptureEpisode leaves it, as the game does not come back from a
+  // quit.
+  bool gameQuitRequested = false;
 
   PendingHangEtwCapture pendingEtw{};
   HeldHangDump heldDump{};

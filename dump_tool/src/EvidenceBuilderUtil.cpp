@@ -88,6 +88,16 @@ std::wstring ForcedCloseLead(const ForcedCloseInfo& forcedClose, bool en)
   return what + (en ? L" It is not a crash during play." : L" 플레이 중에 튕긴 CTD가 아닙니다.");
 }
 
+std::wstring SlowShutdownLead(const QuitBeforeFreezeInfo& quit, bool en)
+{
+  const std::wstring what = quit.kind == "forced_quit"
+    ? (en ? L"The game took long to close after it was force-quit (Alt+F4 or similar)."
+          : L"게임을 강제로 끈(Alt+F4 등) 뒤 게임이 꺼지는 데 오래 걸린 것입니다.")
+    : (en ? L"The game took long to close after you chose to quit (Quit in a menu, or qqq in the console)."
+          : L"게임 종료(메뉴의 종료나 콘솔 qqq)를 고른 뒤 게임이 꺼지는 데 오래 걸린 것입니다.");
+  return what + (en ? L" It is not a freeze during play." : L" 플레이 중 멈춘 프리징이 아닙니다.");
+}
+
 bool SaveLoadSuggestsDamagedSave(const SaveLoadInfo& saveLoad)
 {
   return saveLoad.in_progress && saveLoad.earlier_crashes > 0 && saveLoad.crash_places >= 2 &&

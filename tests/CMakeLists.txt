@@ -986,6 +986,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessAttach.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/ProcessUtil.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/PssSnapshot.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/QuitRequestWatcher.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/RetentionWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SaveLoadRecord.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"

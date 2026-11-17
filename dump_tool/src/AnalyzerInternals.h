@@ -50,6 +50,18 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
 // kForcedCloseCrashWindowMs after; detected is false without one.
 ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events);
 
+// ADR-0035: the newest close request in the blackbox that set the game's
+// quit flag (IsQuitFlagCloseRequest); detected is false without one.
+QuitBeforeFreezeInfo DetectQuitRequest(const std::vector<EventRow>& events);
+
+// ADR-0035: sets out.quit_before_freeze for a freeze (hangLike) with no
+// exception and no validated clean exit, from out.events.
+void DetectSlowShutdown(bool hangLike, AnalysisResult& out);
+
+// A capture left out of the crash history and its statistics: a validated
+// clean exit, a forced close (ADR-0022), a slow shutdown (ADR-0035).
+bool KeepsOutOfCrashHistory(const AnalysisResult& out);
+
 // ADR-0025: the newest SaveLoadStart and whether a SaveLoadEnd followed it.
 // Fills the blackbox part of SaveLoadInfo; the history counts stay 0.
 SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events);

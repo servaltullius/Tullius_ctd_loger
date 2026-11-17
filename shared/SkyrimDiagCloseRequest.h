@@ -53,6 +53,16 @@ constexpr bool IsCloseRequestKind(std::uint64_t value) noexcept
          value <= static_cast<std::uint64_t>(CloseRequestKind::kForcedQuit);
 }
 
+// ADR-0035: a close request that means the game's quit flag was set (game_quit
+// or forced_quit). The main loop ends then and the game does not come back, so
+// a freeze after one is its shutdown. Alt+F4 seen by the keys, a window close
+// and a close message are not: the game may not have quit on them.
+constexpr bool IsQuitFlagCloseRequest(std::uint64_t value) noexcept
+{
+  return value == static_cast<std::uint64_t>(CloseRequestKind::kGameQuit) ||
+         value == static_cast<std::uint64_t>(CloseRequestKind::kForcedQuit);
+}
+
 // Summary JSON / report / helper log id.
 constexpr const char* CloseRequestKindId(CloseRequestKind kind) noexcept
 {

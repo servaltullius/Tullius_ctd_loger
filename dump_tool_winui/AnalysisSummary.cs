@@ -56,6 +56,9 @@ internal sealed class AnalysisSummary
     // error during a forced close, not a CTD. The analysis is still shown.
     public bool IsForcedClose { get; init; }
     public string ForcedCloseKind { get; init; } = string.Empty;
+    // ADR-0035: a freeze after the game's quit flag: its shutdown took long,
+    // not a freeze in play. The analysis is still shown.
+    public bool IsSlowShutdown { get; init; }
     public required IReadOnlyList<SuspectItem> Suspects { get; init; }
     public required IReadOnlyList<string> Recommendations { get; init; }
     // The analyzer's group and tag id for each entry of Recommendations (same
@@ -245,6 +248,7 @@ internal sealed class AnalysisSummary
                               forcedCloseNode.ValueKind == JsonValueKind.Object
                 ? ReadString(forcedCloseNode, "kind")
                 : string.Empty,
+            IsSlowShutdown = ReadBool(analysis, "is_slow_shutdown"),
             Suspects = suspects,
             Recommendations = recommendations,
             RecommendationClasses = recommendationClasses.Count == recommendations.Count

@@ -5,7 +5,16 @@
 #include <cstdint>
 #include <cstring>
 
+#include "SkyrimDiagShared.h"
+
 namespace skydiag::helper::internal {
+
+// The blackbox ring's write index, read once with a full barrier.
+inline std::uint32_t ReadRingWriteIndex(const skydiag::SharedHeader& header) noexcept
+{
+  auto* const index = reinterpret_cast<volatile LONG*>(const_cast<volatile std::uint32_t*>(&header.write_index));
+  return static_cast<std::uint32_t>(InterlockedCompareExchange(index, 0, 0));
+}
 
 // A blackbox ring entry (BlackboxEvent, ResourceEntry) is a seqlock: seq is
 // odd while the game writes it, even once committed.
