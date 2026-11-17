@@ -82,6 +82,12 @@ Accepted
   - 종료 플래그 기록이 블랙박스 링(65536개)에서 밀려나면 Helper와 분석기 모두 예전처럼 CTD로 봅니다. 둘 다 같은 링을 읽으므로 판정이 어긋나지는 않습니다. Helper의 `QuitRequestWatcher`(ADR-0035)는 크래시 분류에 쓰지 않습니다. 쓰면 같은 덤프를 분석기가 다르게 판정하게 됩니다.
   - 남는 한계: 종료 플래그는 켜졌는데 게임이 실제로는 종료하지 않고 계속 돈 경우가 있다면 그 뒤의 플레이 중 크래시도 강제 종료로 분류됩니다. 1.6.1170의 메인 루프는 플래그를 보고 끝나므로 그런 경우는 확인하지 못했습니다.
 - 실게임 미확인: 이 PC는 Engine Fixes의 빠른 종료라 qqq가 1초 안에 끝나 느린 종료를 재현하지 못했습니다(ADR-0035 Context).
+- 검증:
+  - `skydiag_close_request_tests`(Linux 포함): `CloseRequestCoversCrash`(종료 플래그는 130초·1시간 뒤도, 크래시 뒤는 아님, 나머지 셋은 10초 경계), `CloseRequestKindIdHasWindow`, qqq 130초 뒤 크래시, 종료 플래그 뒤의 오래된 Alt+F4와 10초 안의 Alt+F4, 닫기 메시지 단독은 창 유지, 더 오래된 크래시 앞의 종료 플래그, 닫기 메시지 20개가 와도 종료 플래그가 남음.
+  - `skydiag_quick_answer_tests`: 블랙박스에서 qqq 130초 뒤 크래시가 `game_quit` 강제 종료, 빠른 답 제목, 크래시 이력 제외, 근거의 "130.0초 전", 요약 JSON에 `window_seconds` 없음. 키로 본 Alt+F4와 닫기 메시지는 130초 뒤 크래시에 해당하지 않음.
+  - `skydiag_helper_false_positive_runtime_tests`: 스냅샷에서 qqq 130초 뒤 크래시(사이에 닫기 메시지 20개)를 `game_quit`으로 찾고, Helper 로그 문장이 "130.0 s earlier".
+  - 변이 8개를 모두 잡았습니다: 종료 플래그에도 10초 창, 모든 종류에 창 없음, 크래시 뒤 요청도 셈, 링 하나로 합침, 종료 플래그 링을 읽지 않음, `window_seconds`를 모든 종류에 씀·아무 데도 안 씀, `game_quit`을 창 있는 종류로 셈. 첫 변이는 `close_request_tests`를 빼고 빌드해도 분석기 빠른 답 테스트와 Helper 런타임 테스트가 잡았습니다.
+  - 보관 덤프 44건(한국어·영어 88회)을 v0.2.77 분석기와 나란히 재분석했습니다(`scripts/compare_analyses.py`와 요약 JSON 전체 비교). 바뀐 것은 `forced_quit` 강제 종료 덤프 3건(2026-11-11 13:47, 13:54, 14:01; 크래시 0\~0.015초 전 종료 플래그)의 `forced_close.window_seconds`가 빠진 것뿐입니다. ADR-0035의 `analysis.is_slow_shutdown` 추가 외에는 리포트를 포함해 그대로이고, 분류가 바뀐 덤프는 없습니다(종료 플래그 뒤 10초가 지나 난 크래시가 보관 덤프에 없음). `compare_analyses.py`는 최상위 키만 비교해 중첩 키(`forced_close.window_seconds`, `analysis.is_slow_shutdown`)의 변화는 "same"으로 보고합니다.
 
 ## Verification
 - `skydiag_close_request_tests`(Linux 포함): 메시지 분류(게시된 Alt+F4 키 입력과 이어지는 SC_CLOSE·WM_CLOSE·WM_QUIT이 한 요청, 키 입력만으로 Alt+F4, Alt는 29번 비트나 키 상태로, 자동 반복·Alt 없는 F4·다른 키 제외, 보내진 SC_CLOSE의 Alt+F4, X 버튼, Alt만 누른 SC_CLOSE, WM_CLOSE 단독, WM_QUIT 단독은 기록 안 함, 1초 뒤 새 요청, 다른 메시지·SC_ 명령), 키 샘플(두 키와 전경 창이 모두 필요, 누르는 동안 한 번, 떼고 다시 누르면 다시, 다른 프로그램에서 누르다 게임이 전경이 되면 그때), 여러 출처의 한 누름(키 샘플 뒤 크래시 순간·종료 플래그는 기록 안 함, 1.1초 뒤 새 누름), 종료 플래그 판정(지금 눌림·1.5초 안에 보임·경계, 메뉴보다 Alt+F4 우선, 메뉴 열림·3초 안에 닫힘·경계, 둘 다 없으면 forced_quit, 미래 시각 무시), 10초 경계, 크래시 뒤 요청·오래된 크래시·모르는 종류 제외, 우선순위, 링 보관 개수.
