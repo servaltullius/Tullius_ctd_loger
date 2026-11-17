@@ -439,6 +439,15 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
                : L" 따로 할 일은 없습니다. 게임을 닫을 때마다 같은 오류가 난다면 아래 분석을 거기 나온 모드의 제작자에게 전해 "
                  L"주세요.")));
   }
+  if (ctx.isSlowShutdown) {
+    // ADR-0035: first, so it is the next action (NextAction.cpp).
+    r.recommendations.push_back(
+      (en ? L"[Slow shutdown] " : L"[느린 종료] ") + SlowShutdownLead(r.quit_before_freeze, en) +
+      (en ? L" Nothing to do. If it takes minutes every time you close the game, pass this report on when you ask "
+            L"for help; the threads below show what the game was still doing."
+          : L" 따로 할 일은 없습니다. 끌 때마다 몇 분씩 걸린다면 도움을 요청할 때 이 리포트를 전해 주세요. 아래 "
+            L"스레드가 게임이 그때 무엇을 하고 있었는지 보여 줍니다."));
+  }
   if (ctx.isDamagedSaveSuspected) {
     // ADR-0025: first, so it is the next action (NextAction.cpp).
     r.recommendations.push_back(

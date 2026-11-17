@@ -147,12 +147,15 @@ internal sealed partial class MainWindowViewModel
         // freeze. Every summary the viewer shows has them (NeedsReanalysisFor).
         var isFilteredCleanExit = summary.IsFilteredCleanExit;
         var isForcedClose = !isFilteredCleanExit && summary.IsForcedClose;
-        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose && summary.IsSnapshotLike;
+        var isSlowShutdown = !isFilteredCleanExit && !isForcedClose && summary.IsSlowShutdown;
+        var isSnapshotLike = !isFilteredCleanExit && !isForcedClose && !isSlowShutdown && summary.IsSnapshotLike;
         var isHangLike = !isFilteredCleanExit && !isForcedClose && !isSnapshotLike && summary.IsHangLike;
         lines.Add(isFilteredCleanExit
             ? (_isKorean ? "🟢 Skyrim 정상 종료 진단 리포트 — SkyrimDiag" : "🟢 Skyrim Clean-Exit Diagnostic Report — SkyrimDiag")
             : isForcedClose
             ? (_isKorean ? "⚪ Skyrim 강제 종료 중 오류 리포트 — SkyrimDiag" : "⚪ Skyrim Forced-Close Error Report — SkyrimDiag")
+            : isSlowShutdown
+            ? (_isKorean ? "⚪ Skyrim 느린 종료 리포트 — SkyrimDiag" : "⚪ Skyrim Slow-Shutdown Report — SkyrimDiag")
             : isSnapshotLike
             ? (_isKorean ? "🟡 Skyrim 상태 스냅샷 리포트 — SkyrimDiag" : "🟡 Skyrim Snapshot Report — SkyrimDiag")
             : isHangLike

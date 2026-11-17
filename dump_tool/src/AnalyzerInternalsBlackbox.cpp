@@ -135,6 +135,32 @@ ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
   return info;
 }
 
+QuitBeforeFreezeInfo DetectQuitRequest(const std::vector<EventRow>& events)
+{
+  QuitBeforeFreezeInfo info{};
+  for (const auto& event : events) {
+    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest) &&
+        skydiag::IsQuitFlagCloseRequest(event.a)) {
+      info.detected = true;
+      info.kind = skydiag::CloseRequestKindId(static_cast<skydiag::CloseRequestKind>(event.a));
+    }
+  }
+  return info;
+}
+
+void DetectSlowShutdown(bool hangLike, AnalysisResult& out)
+{
+  out.quit_before_freeze = {};
+  if (hangLike && out.exc_code == 0u && !out.is_filtered_clean_exit) {
+    out.quit_before_freeze = DetectQuitRequest(out.events);
+  }
+}
+
+bool KeepsOutOfCrashHistory(const AnalysisResult& out)
+{
+  return out.is_filtered_clean_exit || out.forced_close.detected || out.quit_before_freeze.detected;
+}
+
 std::wstring DecodeSaveLoadName(std::uint64_t b, std::uint64_t c, std::uint64_t d)
 {
   char buf[sizeof(b) * 3]{};

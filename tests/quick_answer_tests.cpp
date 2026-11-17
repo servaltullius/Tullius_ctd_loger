@@ -25,6 +25,7 @@
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
 #include "GpuDriverLog.h"
+#include "SkyrimDiagCloseRequest.h"
 #include "LoadedSaves.h"
 #include "ModNames.h"
 #include "NextAction.h"
@@ -2143,6 +2144,115 @@ void TestReportReadability()
   }
 }
 
+// ADR-0035 (a 2026-11-16 report): a qqq shutdown that took over two minutes
+// was captured as a freeze with the load flag set and answered "the game
+// froze on a loading screen; suspected mod: usvfs_x64.dll". With the quit
+// flag in the blackbox before it, the freeze reads as a slow shutdown.
+void TestFreezeAfterQuitIsASlowShutdown()
+{
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto plain = EngineCallPathHang();
+    BuildEvidenceAndSummary(plain, lang);
+    auto r = EngineCallPathHang();
+    r.quit_before_freeze.detected = true;
+    r.quit_before_freeze.kind = "game_quit";
+    BuildEvidenceAndSummary(r, lang);
+
+    const auto& qa = r.quick_answer;
+    Require(qa.kind == "slow_shutdown" && qa.case_id == "freeze_after_quit" && qa.likelihood == "none" &&
+              qa.suspect_mod.empty() && qa.why_not_certain.empty() && qa.how_it_crashed.empty(),
+      "a slow shutdown names no suspect");
+    const std::wstring lead = en
+      ? L"The game took long to close after you chose to quit (Quit in a menu, or qqq in the console). It is not a "
+        L"freeze during play."
+      : L"게임 종료(메뉴의 종료나 콘솔 qqq)를 고른 뒤 게임이 꺼지는 데 오래 걸린 것입니다. 플레이 중 멈춘 프리징이 아닙니다.";
+    Require(qa.headline == lead, "the slow-shutdown headline");
+    Require(qa.action.rfind(en ? L"Nothing to do." : L"따로 할 일은 없습니다.", 0) == 0, "nothing to do");
+    RequirePlainWords(qa, "slow shutdown");
+
+    Require(r.summary_sentence == lead + L" " + plain.summary_sentence, "summary prefix, the analysis after it");
+    Require(r.suspects.size() == plain.suspects.size(), "the analysis stays");
+    Require(!r.evidence.empty() &&
+              r.evidence[0].title == (en ? L"A freeze after the game was told to quit (not a freeze in play)"
+                                         : L"게임 종료 뒤의 멈춤(플레이 중 프리징 아님)") &&
+              Contains(r.evidence[0].details, en ? L"qqq in the console" : L"콘솔 qqq"),
+      "the slow-shutdown evidence item first");
+    Require(!r.recommendations.empty() &&
+              r.recommendations[0].rfind(en ? L"[Slow shutdown] " : L"[느린 종료] ", 0) == 0 &&
+              skydiag::dump_tool::SelectNextActionIndex(r.recommendations) == 0u,
+      "the slow-shutdown line is the next action");
+
+    const auto summary = skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(summary["analysis"]["is_slow_shutdown"] == true && summary["analysis"]["is_hang_like"] == true,
+      "summary JSON analysis flags");
+    Require(summary["quit_before_freeze"]["kind"] == "game_quit", "summary JSON quit_before_freeze");
+    Require(summary["quick_answer"]["kind"] == "slow_shutdown", "summary JSON quick answer");
+    const auto plainSummary =
+      skydiag::dump_tool::BuildSummaryJson(plain, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(!plainSummary.contains("quit_before_freeze") && plainSummary["analysis"]["is_slow_shutdown"] == false,
+      "nothing for an ordinary freeze");
+    const auto report = skydiag::dump_tool::BuildReportText(r, summary, true);
+    Require(report.find(en ? "Classification: SLOW_SHUTDOWN (not a freeze in play; game_quit)\n"
+                           : "분류: 느린 종료 (플레이 중 프리징 아님; game_quit)\n") != std::string::npos,
+      "the report line");
+
+    auto forced = EngineCallPathHang();
+    forced.quit_before_freeze.detected = true;
+    forced.quit_before_freeze.kind = "forced_quit";
+    BuildEvidenceAndSummary(forced, lang);
+    Require(forced.quick_answer.headline.rfind(en ? L"The game took long to close after it was force-quit"
+                                                  : L"게임을 강제로 끈(Alt+F4 등) 뒤", 0) == 0,
+      "forced_quit wording");
+  }
+
+  // From the blackbox: the quit flag's kinds only, the newest one.
+  {
+    using skydiag::dump_tool::EventRow;
+    namespace internal = skydiag::dump_tool::internal;
+    const auto row = [](double t, std::uint64_t kind) {
+      EventRow e{};
+      e.t_ms = t;
+      e.type = static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest);
+      e.a = kind;
+      return e;
+    };
+    const auto K = [](skydiag::CloseRequestKind kind) { return static_cast<std::uint64_t>(kind); };
+    Require(!internal::DetectQuitRequest({ row(1.0, K(skydiag::CloseRequestKind::kAltF4)),
+                                           row(2.0, K(skydiag::CloseRequestKind::kWindowClose)),
+                                           row(3.0, K(skydiag::CloseRequestKind::kCloseMessage)) })
+               .detected,
+      "other close requests are no quit");
+    const auto quit = internal::DetectQuitRequest({ row(1.0, K(skydiag::CloseRequestKind::kForcedQuit)),
+                                                    row(2.0, K(skydiag::CloseRequestKind::kAltF4)),
+                                                    row(3.0, K(skydiag::CloseRequestKind::kGameQuit)) });
+    Require(quit.detected && quit.kind == "game_quit", "the newest quit-flag request");
+    Require(!internal::DetectQuitRequest({}).detected, "an empty blackbox");
+
+    // Only for a freeze with no exception and no validated clean exit; then
+    // it stays out of the crash history.
+    AnalysisResult freeze{};
+    freeze.events = { row(3.0, K(skydiag::CloseRequestKind::kGameQuit)) };
+    internal::DetectSlowShutdown(/*hangLike=*/true, freeze);
+    Require(freeze.quit_before_freeze.detected && internal::KeepsOutOfCrashHistory(freeze), "a freeze after a quit");
+    auto play = freeze;
+    internal::DetectSlowShutdown(/*hangLike=*/false, play);
+    Require(!play.quit_before_freeze.detected && !internal::KeepsOutOfCrashHistory(play), "not a freeze");
+    auto crash = freeze;
+    crash.exc_code = 0xC0000005u;
+    internal::DetectSlowShutdown(/*hangLike=*/true, crash);
+    Require(!crash.quit_before_freeze.detected, "a crash is the forced-close path's");
+    auto clean = freeze;
+    clean.is_filtered_clean_exit = true;
+    internal::DetectSlowShutdown(/*hangLike=*/true, clean);
+    Require(!clean.quit_before_freeze.detected, "a validated clean exit says more");
+    auto noQuit = freeze;
+    noQuit.events = { row(3.0, K(skydiag::CloseRequestKind::kAltF4)) };
+    internal::DetectSlowShutdown(/*hangLike=*/true, noQuit);
+    Require(!noQuit.quit_before_freeze.detected && !internal::KeepsOutOfCrashHistory(noQuit), "no quit flag");
+  }
+}
+
 void TestForcedClose()
 {
   using skydiag::dump_tool::ExplainFaultInstruction;
@@ -2338,6 +2448,7 @@ int main()
     TestScriptLoaderCrashOutput();
     TestStackScanOnlyCandidateIsNearby();
     TestForcedClose();
+    TestFreezeAfterQuitIsASlowShutdown();
     TestDamagedSave();
     TestLoadedSavesFile();
     TestGpuDriverLog();

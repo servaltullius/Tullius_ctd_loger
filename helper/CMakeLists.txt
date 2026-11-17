@@ -50,6 +50,7 @@ add_executable(${PROJECT_NAME}
   src/WctCapture.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
+  src/BlackboxCursor.h
   src/CompatibilityPreflight.h
   src/CrashObjectMemory.h
   src/GpuDriverEvents.h

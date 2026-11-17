@@ -283,6 +283,15 @@ constexpr std::uint64_t K(CloseRequestKind kind)
   return static_cast<std::uint64_t>(kind);
 }
 
+// ADR-0035: only the quit flag's kinds mean the game was quitting.
+static_assert(skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kGameQuit)));
+static_assert(skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kForcedQuit)));
+static_assert(!skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kAltF4)));
+static_assert(!skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kWindowClose)));
+static_assert(!skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kCloseMessage)));
+static_assert(!skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kNone)));
+static_assert(!skydiag::IsQuitFlagCloseRequest(99u));
+
 // The 2026-10-26 case: Alt+F4, and 0.8 s later the access violation.
 static_assert(Scan({ 120800.0 }, { { 120000.0, K(CloseRequestKind::kAltF4) } }).Result().kind == CloseRequestKind::kAltF4);
 static_assert(Scan({ 120800.0 }, { { 120000.0, K(CloseRequestKind::kAltF4) } }).Result().msBeforeCrash == 800.0);

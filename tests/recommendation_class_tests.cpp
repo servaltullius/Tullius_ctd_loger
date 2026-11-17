@@ -148,6 +148,8 @@ int main()
   Expect(L"[알려진 원인] ContentCatalog.txt를 휴지통으로 옮기세요.", "immediate", "known_cause");
   Expect(L"[Known crash site] x", "immediate", "known_crash_site");
   Expect(L"[Forced close] Nothing to do.", "immediate", "forced_close");
+  Expect(L"[Slow shutdown] Nothing to do.", "immediate", "slow_shutdown");
+  Expect(L"[느린 종료] 따로 할 일은 없습니다.", "immediate", "slow_shutdown");
   Expect(L"[강제 종료] 따로 할 일은 없습니다.", "immediate", "forced_close");
   Expect(L"[Damaged save] Load a save made before this one.", "immediate", "damaged_save");
   Expect(L"[세이브 손상] 이 세이브보다 먼저 만든 세이브를 불러와 보세요.", "immediate", "damaged_save");

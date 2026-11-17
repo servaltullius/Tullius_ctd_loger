@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "BlackboxCursor.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper::internal {
@@ -30,8 +31,7 @@ public:
   std::vector<LoadedSave> Poll(const skydiag::SharedLayout* shm, std::uint64_t nowQpc, std::uint64_t nowUnix);
 
 private:
-  bool started_ = false;  // the ring position below is set
-  std::uint32_t next_ = 0;
+  BlackboxCursor cursor_{};
   // The newest SaveLoadStart, until its SaveLoadEnd.
   bool loading_ = false;
   std::uint64_t loadingKey_ = 0;

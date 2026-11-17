@@ -612,8 +612,6 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   // ADR-0025: a save load the capture came before the end of.
   out.save_load = internal::DetectSaveLoad(out.events);
   out.save_load.attempt_key = internal::SaveLoadAttemptKey(out);
-  // Kept out of the crash history and its statistics, as a clean exit is.
-  const bool keepOutOfHistory = out.is_filtered_clean_exit || out.forced_close.detected;
 
   // WCT stream (optional)
   void* wctPtr = nullptr;
@@ -638,6 +636,10 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // Hang detection
   const bool hangLike = DetermineHangLike(nameHang, out);
+  // ADR-0035: a freeze after the game's quit flag is its slow shutdown.
+  internal::DetectSlowShutdown(hangLike, out);
+  // Kept out of the crash history and its statistics, as a clean exit is.
+  const bool keepOutOfHistory = internal::KeepsOutOfCrashHistory(out);
 
   // Crash Logger integration (best-effort)
   {

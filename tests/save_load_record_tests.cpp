@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include "HelperCommon.h"
+#include "BlackboxCursor.h"
 #include "HelperRuntimeTestUtils.h"
 #include "QuitRequestWatcher.h"
 #include "SaveLoadRecord.h"
@@ -22,6 +23,7 @@
 #include "SkyrimDiagSaveLoad.h"
 #include "SkyrimDiagShared.h"
 
+using skydiag::helper::internal::BlackboxCursor;
 using skydiag::helper::internal::LoadedSave;
 using skydiag::helper::internal::MergeLoadedSavesJson;
 using skydiag::helper::internal::QuitRequestWatcher;
@@ -200,6 +202,50 @@ void TestRecordWritesTheFile()
   std::filesystem::remove_all(dir, ec);
 }
 
+// The ring cursor both watchers read with: a lap is told, a slot a later lap
+// already took is passed over, the next pass goes on where this one stopped.
+void TestBlackboxCursor()
+{
+  Ring ring;
+  for (std::uint32_t i = 0; i < 3u; ++i) {
+    ring.Add(skydiag::EventType::kHeartbeat, kStartQpc + i);
+  }
+  // Slot 1 already holds an entry of a later lap (seq past its own).
+  ring.shm->events[1].seq = (1u + skydiag::kEventCapacity) * 2u;
+  BlackboxCursor cursor;
+  bool lapped = true;
+  Require(cursor.Begin(ring.shm.get(), &lapped) && !lapped, "the first pass is no lap");
+  skydiag::BlackboxEvent event{};
+  std::uint32_t index = 99u;
+  Require(cursor.Next(ring.shm.get(), &event, &index) && index == 0u, "entry 0");
+  Require(cursor.Next(ring.shm.get(), &event, &index) && index == 2u, "slot 1 is passed over, entry 2 follows");
+  Require(!cursor.Next(ring.shm.get(), &event, &index), "the end of the pass");
+
+  // The ring goes a lap past the cursor: the next pass says so and starts at
+  // the oldest entry left.
+  for (std::uint32_t i = 0; i < skydiag::kEventCapacity + 5u; ++i) {
+    ring.Add(skydiag::EventType::kThreadExit, kStartQpc + 10u + i);
+  }
+  Require(cursor.Begin(ring.shm.get(), &lapped) && lapped, "a lap is told");
+  Require(cursor.Next(ring.shm.get(), &event, &index) &&
+            index == ring.shm->header.write_index - skydiag::kEventCapacity,
+    "from the oldest entry left");
+  Require(cursor.Begin(ring.shm.get(), &lapped) && !lapped, "and only once");
+
+  // A save load whose end went with the lap is not finished by a later end.
+  Ring loads;
+  loads.Start(kSave75, kStartQpc + 1u);
+  SaveLoadWatcher watcher;
+  Require(watcher.Poll(loads.shm.get(), kStartQpc + 2u, 1'800'000'000u).empty(), "loading");
+  for (std::uint32_t i = 0; i < skydiag::kEventCapacity + 5u; ++i) {
+    loads.Add(skydiag::EventType::kThreadExit, kStartQpc + 10u + i);
+  }
+  Require(watcher.Poll(loads.shm.get(), kStartQpc + 2000u, 1'800'000'002u).empty(), "the lap");
+  loads.End(skydiag::SaveLoadResult::kLoaded, kStartQpc + 3000u);
+  Require(watcher.Poll(loads.shm.get(), kStartQpc + 3000u, 1'800'000'003u).empty(),
+    "an end after a lap is not taken for the lost load's");
+}
+
 // ADR-0035: the same ring followed for the game's quit flag (game_quit or
 // forced_quit), latched once read.
 void TestQuitRequestWatcher()
@@ -260,6 +306,7 @@ int main()
     SKYDIAG_RUN_TEST(TestFileKeepsEachLoadOnce);
     SKYDIAG_RUN_TEST(TestRecordWritesTheFile);
     SKYDIAG_RUN_TEST(TestQuitRequestWatcher);
+    SKYDIAG_RUN_TEST(TestBlackboxCursor);
     std::puts("save load record tests passed");
     return 0;
   } catch (const std::exception& ex) {

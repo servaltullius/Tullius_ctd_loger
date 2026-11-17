@@ -1461,6 +1461,58 @@ void TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame()
   std::filesystem::remove_all(outBase);
 }
 
+// ADR-0035 end to end: the helper loop itself reads the game_quit the plugin
+// recorded, so the freeze that follows (here with the load flag, as in the
+// report) is held and its normal exit removes it.
+void TestRunHelperLoop_AFreezeAfterAQuitIsASlowShutdown()
+{
+  const auto outBase = MakeTempDir(L"skydiag_loop_quit_freeze");
+  ClearLog(outBase);
+  auto shared = MakeStaleHeartbeatLayout(32u);
+  shared->header.state_flags = skydiag::kState_Loading;
+  {
+    // As the plugin writes it: ring index i committed as seq i*2.
+    const std::uint32_t i = shared->header.write_index;
+    auto& e = shared->events[i % skydiag::kEventCapacity];
+    e.type = static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest);
+    e.qpc = shared->header.last_heartbeat_qpc;
+    e.payload.a = static_cast<std::uint64_t>(skydiag::CloseRequestKind::kGameQuit);
+    e.payload.d = static_cast<std::uint64_t>(skydiag::CloseRequestSource::kQuitFlag);
+    e.seq = i * 2u;
+    shared->header.write_index = i + 1u;
+  }
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  auto cfg = MakeHangTestConfig();
+  cfg.hangThresholdLoadingSec = 30u;
+  cfg.autoOpenViewerOnHang = true;
+  cfg.autoOpenHangAfterProcessExit = true;
+  cfg.autoOpenHangDelayMs = 0u;
+  LoadStats loadStats;
+  std::uint32_t adaptiveLoadingThresholdSec = cfg.hangThresholdLoadingSec;
+  HelperLoopState loop{};
+  InitializeLoopState(proc, outBase, &loop);
+
+  // Long enough for the grace wait and the dump; the normal exit after it.
+  std::thread killer([&] {
+    Sleep(6000);
+    TerminateProcess(child.pi.hProcess, 0u);
+  });
+  RunHelperLoop(
+    cfg, proc, outBase, &loadStats, outBase / L"SkyrimDiag_LoadStats.json", &adaptiveLoadingThresholdSec, QpcNow(),
+    &loop);
+  killer.join();
+
+  const auto log = ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log");
+  AssertContains(log, "The game was asked to quit (quit from the game's menu)", "the loop read the quit");
+  AssertContains(log, "Hang dump written", "the freeze was captured");
+  AssertContains(log, "the game was asked to quit before this freeze", "and held for the quit");
+  AssertContains(log, "Removed the hang dump of a slow shutdown", "the normal exit removed it");
+  Require(CountFilesWithExt(outBase, L".dmp") == 0u, "no hang dump is left");
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 int main()
 {
   try {
@@ -1481,6 +1533,7 @@ int main()
     SKYDIAG_RUN_TEST(TestFreezeCaptureRemovesTheWctFileOfAFailedDump);
     SKYDIAG_RUN_TEST(TestRunHelperLoop_HandlesAnExitDuringTheHangGraceWait);
     SKYDIAG_RUN_TEST(TestRunHelperLoop_HoldsHangDetectionWhileACapturedCrashFreezesTheGame);
+    SKYDIAG_RUN_TEST(TestRunHelperLoop_AFreezeAfterAQuitIsASlowShutdown);
     SKYDIAG_RUN_TEST(TestLoadStatsAtomicSaveFailurePreservesExistingState);
     SKYDIAG_RUN_TEST(TestHandleHangTick_ReportsStatsPersistenceFailureAndUsesMemorySample);
     SKYDIAG_RUN_TEST(TestHandleHangTick_SkipsWhenHeartbeatNotInitialized);

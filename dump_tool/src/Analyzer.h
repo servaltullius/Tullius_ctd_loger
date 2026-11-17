@@ -161,6 +161,16 @@ struct ForcedCloseInfo
   double seconds_before_crash = 0.0;
 };
 
+// ADR-0035: the blackbox recorded the game's quit flag (game_quit: Quit in a
+// menu or the console's qqq; forced_quit) before this freeze. The main loop
+// ends then, so the freeze is the game's shutdown taking long, not a freeze
+// in play: kept out of the crash history like a forced close.
+struct QuitBeforeFreezeInfo
+{
+  bool detected = false;
+  std::string kind;  // game_quit / forced_quit (CloseRequestKindId)
+};
+
 // ADR-0025: the save the newest load started with (SaveLoadStart), and the
 // crashes crash_history.json holds from loading the same save.
 struct SaveLoadInfo
@@ -580,6 +590,7 @@ struct AnalysisResult
   bool clean_exit_unhandled_signal_left_set = false;
   std::wstring clean_exit_evidence_filename;
   ForcedCloseInfo forced_close;
+  QuitBeforeFreezeInfo quit_before_freeze;
   SaveLoadInfo save_load;
 
   std::uint32_t exc_code = 0;

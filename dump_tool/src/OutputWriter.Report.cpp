@@ -109,6 +109,11 @@ std::string BuildReportText(
     rpt << (en ? "Classification: FORCED_CLOSE (not a CTD; " : "분류: 강제 종료 (CTD 아님; ") << r.forced_close.kind
         << (en ? ", " : ", 오류 ") << seconds << (en ? " s before the error)" : "초 전)") << "\n";
   }
+  if (r.quit_before_freeze.detected) {
+    // ADR-0035: a freeze after the game's quit flag, not a freeze in play.
+    rpt << (en ? "Classification: SLOW_SHUTDOWN (not a freeze in play; " : "분류: 느린 종료 (플레이 중 프리징 아님; ")
+        << r.quit_before_freeze.kind << ")\n";
+  }
   if (r.save_load.seen) {
     // ADR-0025: the save the newest load started with.
     const auto& save = r.save_load;

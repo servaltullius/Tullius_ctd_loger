@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include "BlackboxCursor.h"
 #include "SkyrimDiagCloseRequest.h"
 #include "SkyrimDiagShared.h"
 
@@ -25,17 +26,9 @@ public:
   skydiag::CloseRequestKind Kind() const noexcept { return kind_; }
 
 private:
-  bool started_ = false;  // the ring position below is set
-  std::uint32_t next_ = 0;
+  BlackboxCursor cursor_{};
   bool seen_ = false;
   skydiag::CloseRequestKind kind_ = skydiag::CloseRequestKind::kNone;
 };
-
-// A kCloseRequest event whose kind means the quit flag was set.
-constexpr bool IsQuitFlagRequest(std::uint64_t kind) noexcept
-{
-  return kind == static_cast<std::uint64_t>(skydiag::CloseRequestKind::kGameQuit) ||
-         kind == static_cast<std::uint64_t>(skydiag::CloseRequestKind::kForcedQuit);
-}
 
 }  // namespace skydiag::helper::internal

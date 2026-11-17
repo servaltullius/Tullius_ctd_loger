@@ -100,6 +100,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.hasException = hasException;
   ctx.isFilteredCleanExit = r.is_filtered_clean_exit;
   ctx.isForcedClose = r.forced_close.detected && !r.is_filtered_clean_exit;
+  // Detected only for a freeze with no exception (Analyzer.cpp), so never with a forced close.
+  ctx.isSlowShutdown = r.quit_before_freeze.detected && !ctx.isForcedClose;
   ctx.isCrashLike = isCrashLike;
   ctx.isHangLike = isHangLike;
   ctx.isSnapshotLike = isSnapshotLike;
@@ -169,6 +171,10 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     // The detail stays for mod authors; the player reads first that this is
     // no crash in play.
     r.summary_sentence = internal::ForcedCloseLead(r.forced_close, en) + L" " + r.summary_sentence;
+  } else if (ctx.isSlowShutdown) {
+    // ADR-0035: the freeze analysis stays below; the player reads first that
+    // the game was quitting.
+    r.summary_sentence = internal::SlowShutdownLead(r.quit_before_freeze, en) + L" " + r.summary_sentence;
   } else if (ctx.isDamagedSaveSuspected) {
     // ADR-0025: what the repeats say comes before what this one dump says.
     r.summary_sentence = internal::DamagedSaveLead(r.save_load, en) + L" " + r.summary_sentence;
