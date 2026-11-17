@@ -47,12 +47,6 @@ std::string DecodeName(const skydiag::EventPayload& payload)
   return NameAsUtf8(std::string(text, strnlen(text, skydiag::kSaveNameTextBytes)));
 }
 
-std::uint32_t ReadWriteIndex(const skydiag::SharedHeader& header) noexcept
-{
-  auto* const index = reinterpret_cast<volatile LONG*>(const_cast<volatile std::uint32_t*>(&header.write_index));
-  return static_cast<std::uint32_t>(InterlockedCompareExchange(index, 0, 0));
-}
-
 }  // namespace
 
 std::vector<LoadedSave> SaveLoadWatcher::Poll(
@@ -67,7 +61,7 @@ std::vector<LoadedSave> SaveLoadWatcher::Poll(
   if (capacity == 0u || capacity > skydiag::kEventCapacity) {
     capacity = skydiag::kEventCapacity;
   }
-  const std::uint32_t writeIndex = ReadWriteIndex(header);
+  const std::uint32_t writeIndex = ReadRingWriteIndex(header);
   const std::uint32_t oldest = writeIndex > capacity ? writeIndex - capacity : 0u;
   if (!started_ || next_ < oldest) {
     // First poll, or a lap behind: start at the oldest entry the ring holds.

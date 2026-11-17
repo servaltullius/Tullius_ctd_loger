@@ -136,15 +136,18 @@ HangTickResult ExecuteConfirmedHangCapture(
       }
     }
     const bool analyze = ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, /*analysisRequired=*/false);
-    if (!viewerNow && state && MayBeSlowShutdown(stateFlags, decision.isLoading)) {
+    const bool quitRequested = state && state->gameQuitRequested;
+    if (!viewerNow && state && MayBeSlowShutdown(stateFlags, decision.isLoading, quitRequested)) {
       // Nothing analyzes it until the hang settles (HeldHangDump).
       ReleaseHeldHangDump(cfg, outBase, L"another hang was captured", state);
       state->heldDump = HeldHangDump{ dumpPath, analyze };
       AppendLogLine(
         outBase,
         std::wstring(analyze ? L"Hang dump analysis waits" : L"Hang dump held")
-          + L" until the game recovers or exits: a freeze in a menu that lasts until a normal exit is a slow "
-            L"shutdown"
+          + L" until the game recovers or exits: "
+          + (quitRequested ? L"the game was asked to quit before this freeze, so a freeze that lasts until a normal "
+                             L"exit is a slow shutdown"
+                           : L"a freeze in a menu that lasts until a normal exit is a slow shutdown")
           + (cfg.keepSlowShutdownHangDumps ? L" (kept, KeepSlowShutdownHangDumps=1)." : L", and its dump is removed."));
     } else if (analyze) {
       StartDumpToolHeadlessIfConfigured(cfg, dumpPath, outBase);
@@ -173,7 +176,8 @@ HangTickResult ExecuteConfirmedHangCapture(
 
   if (state) {
     state->hangCapturedThisEpisode = true;
-    state->captureMayBeSlowShutdownThisEpisode = MayBeSlowShutdown(stateFlags, decision.isLoading);
+    state->captureMayBeSlowShutdownThisEpisode =
+      MayBeSlowShutdown(stateFlags, decision.isLoading, state->gameQuitRequested);
     state->captureThresholdSecThisEpisode = decision.thresholdSec;
     state->episodeHeartbeatQpc = proc.shm ? proc.shm->header.last_heartbeat_qpc : 0u;
   }
