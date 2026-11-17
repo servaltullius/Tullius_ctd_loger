@@ -2422,6 +2422,62 @@ void TestForcedClose()
       "forced quit detail");
   }
 
+  // ADR-0022 (2026-11-17): qqq, a shutdown of over two minutes (MO2's usvfs),
+  // and a crash in it: still a forced-close error, kept out of the crash
+  // history, and the summary JSON gives no window for the quit flag.
+  {
+    using skydiag::dump_tool::EventRow;
+    namespace internal = skydiag::dump_tool::internal;
+    const auto row = [](double t, skydiag::EventType type, std::uint64_t a, std::uint64_t c = 0, std::uint64_t d = 0) {
+      EventRow e{};
+      e.t_ms = t;
+      e.type = static_cast<std::uint16_t>(type);
+      e.a = a;
+      e.c = c;
+      e.d = d;
+      return e;
+    };
+    const std::vector<EventRow> slow = {
+      row(1000.0, skydiag::EventType::kHeartbeat, 0),
+      row(100000.0, skydiag::EventType::kCloseRequest, 4, 1, 2),
+      row(100300.0, skydiag::EventType::kCloseRequest, 3),
+      row(230000.0, skydiag::EventType::kCrash, 0xC0000005u),
+    };
+    const auto fc = internal::DetectForcedClose(slow);
+    Require(fc.detected && fc.kind == "game_quit" && fc.seconds_before_crash > 129.99 && fc.seconds_before_crash < 130.01,
+      "a crash 130 s after qqq is a forced close");
+    Require(!internal::DetectForcedClose({ slow[0], slow[2], slow[3] }).detected,
+      "a close message alone keeps the 10 s window");
+    const std::vector<EventRow> lateAltF4 = {
+      row(100000.0, skydiag::EventType::kCloseRequest, 1, 0, 3),
+      row(230000.0, skydiag::EventType::kCrash, 0xC0000005u),
+    };
+    Require(!internal::DetectForcedClose(lateAltF4).detected, "Alt+F4 seen by the keys keeps the 10 s window");
+
+    for (const auto lang : kLanguages) {
+      const bool en = lang == i18n::Language::kEnglish;
+      auto r = crash();
+      r.events = slow;
+      r.forced_close = fc;
+      BuildEvidenceAndSummary(r, lang);
+      Require(r.quick_answer.kind == "forced_close", "the quick answer is a forced close");
+      Require(r.quick_answer.headline.rfind(en ? L"This error happened while the game was closing after you chose to quit."
+                                               : L"게임 종료를 고른 뒤 게임이 닫히는 과정에서 난 오류입니다.",
+                0) == 0,
+        "the quit headline");
+      Require(internal::KeepsOutOfCrashHistory(r), "kept out of the crash history");
+      Require(!r.evidence.empty() &&
+                Contains(r.evidence[0].details, en ? L"130.0 s before this error" : L"이 오류 130.0초 전"),
+        "the evidence gives the real time");
+      const auto summary =
+        skydiag::dump_tool::BuildSummaryJson(r, std::filesystem::temp_directory_path(), L"stem", true);
+      Require(summary["analysis"]["is_forced_close"] == true && summary["forced_close"]["kind"] == "game_quit" &&
+                summary["forced_close"]["seconds_before_crash"] == 130.0 &&
+                !summary["forced_close"].contains("window_seconds"),
+        "summary JSON: no window for the quit flag");
+    }
+  }
+
   // A validated clean exit says more (code 0) and wins.
   auto clean = crash();
   clean.forced_close.detected = true;

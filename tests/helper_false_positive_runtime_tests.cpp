@@ -1634,6 +1634,25 @@ void TestFindForcedCloseInSnapshot()
     Require(!FindForcedCloseInSnapshot(shared.get(), sizeof(skydiag::SharedLayout)).matched(), "11 s is too long");
   }
   {
+    // ADR-0022 (2026-11-17): after qqq the shutdown under MO2's usvfs took
+    // over two minutes; a crash in it is still a forced-close error, and the
+    // WM_CLOSEs the game sends itself meanwhile do not push the flag out.
+    auto shared = MakeSharedLayout();
+    PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 100.0,
+      static_cast<std::uint64_t>(skydiag::CloseRequestKind::kGameQuit));
+    for (int i = 0; i < 20; ++i) {
+      PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 101.0 + i,
+        static_cast<std::uint64_t>(skydiag::CloseRequestKind::kCloseMessage));
+    }
+    PutEvent(shared.get(), skydiag::EventType::kCrash, 230.0, 0xC0000005u);
+    const auto match = FindForcedCloseInSnapshot(shared.get(), sizeof(skydiag::SharedLayout));
+    Require(match.kind == skydiag::CloseRequestKind::kGameQuit, "qqq 130 s before the crash");
+    Require(match.msBeforeCrash > 129999.0 && match.msBeforeCrash < 130001.0, "130 s");
+    Require(skydiag::helper::internal::DescribeForcedCloseForLog(match) ==
+              L"crash followed a close request (quit from the game's menu) 130.0 s earlier",
+      "the helper log line");
+  }
+  {
     // An entry the snapshot could not copy stably (odd seq) is skipped.
     auto shared = MakeSharedLayout();
     PutEvent(shared.get(), skydiag::EventType::kCloseRequest, 100.0, kAltF4);

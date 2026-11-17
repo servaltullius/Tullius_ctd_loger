@@ -150,15 +150,16 @@ struct BlackboxFreezeSummary
   double pause_gap_ended_seconds_before = 0.0;
 };
 
-// ADR-0022: the blackbox recorded a request to close the game (Alt+F4, the
-// window's X button, the game's Quit) at most kForcedCloseCrashWindowMs before
-// this crash. It is an error during a forced close, not a CTD: kept out of
+// ADR-0022: the blackbox recorded a request to close the game before this
+// crash: the game's quit flag (Quit, qqq, a forced quit) at any time before
+// it, Alt+F4 seen by the keys or the window's X button at most
+// kForcedCloseCrashWindowMs before it. It is an error during a forced close, not a CTD: kept out of
 // the crash history like a clean exit, but analyzed in full.
 struct ForcedCloseInfo
 {
   bool detected = false;
   std::string kind;  // alt_f4 / window_close / close_message / game_quit / forced_quit (CloseRequestKindId)
-  double seconds_before_crash = 0.0;
+  double seconds_before_crash = 0.0;  // from that request; past 10 s only for game_quit / forced_quit
 };
 
 // ADR-0035: the blackbox recorded the game's quit flag (game_quit: Quit in a

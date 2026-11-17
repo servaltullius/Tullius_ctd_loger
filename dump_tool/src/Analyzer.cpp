@@ -604,7 +604,8 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   // SkyrimDiag blackbox (optional)
   ParseBlackboxStream(dumpBase, dumpSize, mo2Index, modulePaths, out);
   TryConsumeCleanExitEvidence(dumpPath, out);
-  // ADR-0022: a crash right after the player asked the game to close. A
+  // ADR-0022: a crash after the player asked the game to close (the quit
+  // flag at any time before it, the other requests within 10 s). A
   // validated clean exit already says more (the game exited with code 0).
   if (!out.is_filtered_clean_exit && out.exc_code != 0u) {
     out.forced_close = internal::DetectForcedClose(out.events);

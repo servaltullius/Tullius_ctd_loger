@@ -174,12 +174,16 @@ nlohmann::json BuildSummaryJson(
     };
   }
   // Additive (ADR-0022): the close request this crash followed.
+  // window_seconds only for the kinds that have a window: the quit flag's
+  // (game_quit, forced_quit) cover any later crash (ADR-0022, 2026-11-17).
   if (r.forced_close.detected) {
     summary["forced_close"] = {
       { "kind", r.forced_close.kind },
       { "seconds_before_crash", std::round(r.forced_close.seconds_before_crash * 1000.0) / 1000.0 },
-      { "window_seconds", static_cast<double>(skydiag::kForcedCloseCrashWindowMs) / 1000.0 },
     };
+    if (skydiag::CloseRequestKindIdHasWindow(r.forced_close.kind)) {
+      summary["forced_close"]["window_seconds"] = static_cast<double>(skydiag::kForcedCloseCrashWindowMs) / 1000.0;
+    }
   }
   // Additive (ADR-0035): the quit this freeze followed.
   if (r.quit_before_freeze.detected) {

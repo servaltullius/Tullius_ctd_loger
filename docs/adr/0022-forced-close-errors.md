@@ -42,7 +42,7 @@ Accepted
    - 비용: 큐에서 꺼내는 메시지와 보내진 메시지마다 메시지 번호 비교 네 번(마우스·키 입력도 이 비교만 지남). 해당 메시지일 때만 `GetAncestor`와 `GetKeyState`를 부르고, 기록은 기존 블랙박스 링에 잠금 없이 한 번 씁니다.
    - `SkyrimDiag.ini`의 `EnableCloseRequestLog=1`(기본 켬)으로 끌 수 있습니다.
 2. **프로토콜**: `EventType::kCloseRequest = 90`, payload a=`CloseRequestKind`(1 alt_f4, 2 window_close, 3 close_message, 4 game_quit, 5 forced_quit), b=창 메시지(종료 플래그는 0), c=wParam(종료 플래그는 `QuitFlagReason`: 0 Alt+F4 눌림, 1 메뉴 열림, 2 메뉴 막 닫힘, 3 메뉴·키 없음), d=출처(`CloseRequestSource`: 0 보내진 메시지, 1 게시된 메시지, 2 종료 플래그, 3 키 샘플, 4 크래시 순간의 키). `kFirstChanceException`(80)을 더할 때처럼 레이아웃과 기존 이벤트의 해석은 그대로이고 이전 헬퍼·분석기는 모르는 종류를 건너뛰므로(분석기는 `Unknown`으로 표시) `kVersion`은 올리지 않습니다(ADR-0004의 버전 증가 조건에 해당하지 않음, 배포는 여전히 한 zip).
-3. **규칙**(`ForcedCloseScanner`): 블랙박스에서 가장 최근 `kCrash` 이벤트보다 앞서고 그로부터 `kForcedCloseCrashWindowMs` = **10초** 안에 있는 닫기 요청이 있으면 강제 종료 중 오류입니다. Alt+F4 뒤 스카이림은 메인 루프를 멈추고 렌더러·힙·플러그인 DLL을 정리하며, 큰 로드오더에서는 몇 초 걸립니다. 10초는 느린 정리까지 덮고, 게임이 무시한 닫기 요청 직후 플레이 중 크래시가 날 가능성보다 정리 중 크래시가 훨씬 흔합니다. 여럿이면 Alt+F4 > 창 닫기 > game_quit > forced_quit > close_message(게임이 종료하며 스스로 보낼 수 있음) 순으로 이름을 정하고, 같은 종류면 가까운 것으로 시간을 잽니다. 크래시 뒤의 요청, 더 오래된 크래시 근처의 요청은 세지 않습니다. 헬퍼와 분석기가 같은 상수를 쓰므로 INI로 바꾸지 않습니다(바꾸면 둘이 어긋남).
+3. **규칙**(`ForcedCloseScanner`): 블랙박스에서 가장 최근 `kCrash` 이벤트보다 앞서고 그로부터 `kForcedCloseCrashWindowMs` = **10초** 안에 있는 닫기 요청이 있으면 강제 종료 중 오류입니다. Alt+F4 뒤 스카이림은 메인 루프를 멈추고 렌더러·힙·플러그인 DLL을 정리하며, 큰 로드오더에서는 몇 초 걸립니다. 10초는 느린 정리까지 덮고, 게임이 무시한 닫기 요청 직후 플레이 중 크래시가 날 가능성보다 정리 중 크래시가 훨씬 흔합니다. 여럿이면 Alt+F4 > 창 닫기 > game_quit > forced_quit > close_message(게임이 종료하며 스스로 보낼 수 있음) 순으로 이름을 정하고, 같은 종류면 가까운 것으로 시간을 잽니다. 크래시 뒤의 요청, 더 오래된 크래시 근처의 요청은 세지 않습니다. 헬퍼와 분석기가 같은 상수를 쓰므로 INI로 바꾸지 않습니다(바꾸면 둘이 어긋남). 2026-11-17부터 종료 플래그(`game_quit`, `forced_quit`)에는 10초 창이 없습니다(아래 Addendum).
 4. **헬퍼**(`CrashCapture.cpp`): 크래시 이벤트 때 잡은 블랙박스 스냅샷에 규칙을 적용합니다(`FindForcedCloseInSnapshot`). 맞으면 `This crash followed a close request (Alt+F4) 0.8 s earlier: …`를 남기고, 뷰어를 바로 열지도, 종료 시로 미루지도 않습니다(`Skipped viewer auto-open: crash followed a close request (Alt+F4) 0.8 s earlier.`). 핸들된 예외로 풀렸다가 비정상 종료로 다시 보고되는 경우(`PromoteReleasedCrashDump`)도 같습니다. 덤프·매니페스트·헤드리스 분석(리포트·요약)은 그대로 진행합니다. 요약의 `analysis.is_forced_close`가 참이면 재수집 정책용 크래시 버킷 통계(`SkyrimDiag_CrashBucketStats.json`)를 갱신하지 않습니다.
 5. **분석기**: 덤프의 블랙박스 스트림에 같은 규칙을 적용해 `AnalysisResult::forced_close`를 채웁니다(예외가 있는 덤프만, 검증된 정상 종료가 있으면 그것이 우선).
    - 정상 종료 플래그(`is_filtered_clean_exit`)를 재사용하지 않고 형제 플래그를 둔 이유: 정상 종료는 헬퍼 사이드카로만 확인되고 "종료 코드 0, 원인 모드 지목 안 함"을 뜻해 후보·예외 명령어 등 분석을 모두 비웁니다. 강제 종료는 덤프 자체로 확인되고 분석을 그대로 남겨야 하며 예외로 끝난(종료 코드 1) 경우입니다. 대신 정상 종료가 하는 제외 처리는 똑같이 따릅니다: 크래시 이력 읽기/추가(`crash_history.json`, 반복 횟수·버킷 상관), 문제 해결 가이드를 건너뜁니다. `is_crash_like`는 참으로 둡니다(분석 경로 유지).
@@ -66,6 +66,22 @@ Accepted
 - 게임 창을 찾지 못하면 `SkyrimDiag.log`에 `close request log off`가 남고, 동작은 이전과 같습니다. 켜지면 `close request log on (key sampler, quit flag; window hooks from the game window's thread)`가 남고, 창 훅이 걸리면 `window hooks on (game window thread N)`이 남습니다.
 - 창 훅이 거부되거나 하트비트 작업이 게임 창 스레드에서 돌지 않으면(v0.2.70까지는 늘 이 상태), X 버튼·작업 표시줄 닫기·작업 끝내기는 게임이 켜는 종료 플래그로만 기록됩니다. 그래도 강제 종료로 분류되지만, 종류는 메뉴가 열려 있으면 `game_quit`, 아니면 `forced_quit`이 됩니다. SE(1.5.97)에서 UI 작업이 게임 창 스레드에서 도는지는 확인하지 않았습니다.
 - 훅은 하트비트 작업이 게임 창 스레드에서 처음 돌 때(메인 메뉴가 뜬 뒤) 걸리므로, 처음 데이터를 불러오는 동안의 X 버튼·작업 표시줄 닫기는 종료 플래그로만 기록됩니다.
+
+## Addendum (2026-11-17): 종료 플래그 뒤의 크래시에는 시간 창이 없다
+- 계기: 툴챈 제보(ADR-0035). MO2 usvfs 환경에서 콘솔 `qqq` 뒤 게임이 꺼지는 데 2분 넘게 걸렸습니다. 그 사이에 크래시가 나면 종료 요청에서 10초가 지난 뒤라 플레이 중 CTD로 분류되고, 크래시 이력에 남고, 뷰어가 자동으로 열렸습니다.
+- 결정: 종료 플래그(`Main::quitGame`)로 생긴 요청(`IsQuitFlagCloseRequest`: `game_quit`, `forced_quit`)은 시간과 상관없이 그 뒤의 모든 크래시에 적용합니다. 플래그가 켜지면 메인 루프가 끝나고 게임은 돌아오지 않으므로, 그 뒤의 크래시는 모두 종료 중에 난 것입니다(ADR-0035와 같은 근거).
+  - Alt+F4 키 기록, 창 닫기, 닫기 메시지는 지금처럼 10초 창을 그대로 둡니다. 게임이 그 요청을 무시하고 계속 돌았을 수 있기 때문입니다.
+  - 규칙은 `CloseRequestCoversCrash`(공유 헤더) 하나이고, `ForcedCloseScanner`가 그것을 씁니다. 그래서 Helper(`FindForcedCloseInSnapshot`: 크래시 로그 줄, 뷰어 억제, 강제 종료 덤프 보관 수)와 분석기(`DetectForcedClose`: 빠른 답 `forced_close`, 크래시 이력·버킷 통계 제외)가 같은 판정을 합니다.
+  - `ForcedCloseScanner`는 종료 플래그 요청을 다른 요청과 따로 보관합니다. 긴 종료 중에 게임이 스스로 보내는 `WM_CLOSE` 같은 요청이 8개를 넘어도 종료 플래그 기록이 밀려나지 않습니다.
+  - 여러 요청 중 이름을 고르는 순서는 그대로입니다. 그래서 종료 플래그 뒤 오래 걸리는 종료 중에 Alt+F4를 누르고 10초 안에 크래시가 나면 `alt_f4`로, 그 Alt+F4가 10초보다 오래되면 종료 플래그(`forced_quit` 등)로 나옵니다.
+- 출력 계약의 의미 변화:
+  - `forced_close.seconds_before_crash`: 뜻은 그대로(이름으로 고른 요청에서 크래시까지)이고, 종료 플래그 종류일 때 10초를 넘을 수 있습니다(예: 130.0). 리포트 줄 `분류: 강제 종료 (CTD 아님; game_quit, 오류 130.0초 전)`, 근거 문장, Helper 로그 `crash followed a close request (quit from the game's menu) 130.0 s earlier`도 같은 값을 씁니다.
+  - `forced_close.window_seconds`: 시간 창이 있는 종류(`alt_f4`, `window_close`, `close_message`)에만 씁니다(10). `game_quit`, `forced_quit`에는 쓰지 않습니다(`CloseRequestKindIdHasWindow`). 저장소 안에서 이 값을 읽는 곳은 없습니다(뷰어는 `kind`만 읽음).
+- 결과:
+  - qqq나 메뉴의 종료 뒤 오래 걸리는 종료 중에 난 크래시는 "강제 종료 중 오류"로 분류되고, 크래시 이력에 남지 않으며, 뷰어가 자동으로 열리지 않습니다. 덤프와 분석은 그대로 남습니다(강제 종료 덤프 보관 수 `MaxForcedCloseCrashDumps`).
+  - 종료 플래그 기록이 블랙박스 링(65536개)에서 밀려나면 Helper와 분석기 모두 예전처럼 CTD로 봅니다. 둘 다 같은 링을 읽으므로 판정이 어긋나지는 않습니다. Helper의 `QuitRequestWatcher`(ADR-0035)는 크래시 분류에 쓰지 않습니다. 쓰면 같은 덤프를 분석기가 다르게 판정하게 됩니다.
+  - 남는 한계: 종료 플래그는 켜졌는데 게임이 실제로는 종료하지 않고 계속 돈 경우가 있다면 그 뒤의 플레이 중 크래시도 강제 종료로 분류됩니다. 1.6.1170의 메인 루프는 플래그를 보고 끝나므로 그런 경우는 확인하지 못했습니다.
+- 실게임 미확인: 이 PC는 Engine Fixes의 빠른 종료라 qqq가 1초 안에 끝나 느린 종료를 재현하지 못했습니다(ADR-0035 Context).
 
 ## Verification
 - `skydiag_close_request_tests`(Linux 포함): 메시지 분류(게시된 Alt+F4 키 입력과 이어지는 SC_CLOSE·WM_CLOSE·WM_QUIT이 한 요청, 키 입력만으로 Alt+F4, Alt는 29번 비트나 키 상태로, 자동 반복·Alt 없는 F4·다른 키 제외, 보내진 SC_CLOSE의 Alt+F4, X 버튼, Alt만 누른 SC_CLOSE, WM_CLOSE 단독, WM_QUIT 단독은 기록 안 함, 1초 뒤 새 요청, 다른 메시지·SC_ 명령), 키 샘플(두 키와 전경 창이 모두 필요, 누르는 동안 한 번, 떼고 다시 누르면 다시, 다른 프로그램에서 누르다 게임이 전경이 되면 그때), 여러 출처의 한 누름(키 샘플 뒤 크래시 순간·종료 플래그는 기록 안 함, 1.1초 뒤 새 누름), 종료 플래그 판정(지금 눌림·1.5초 안에 보임·경계, 메뉴보다 Alt+F4 우선, 메뉴 열림·3초 안에 닫힘·경계, 둘 다 없으면 forced_quit, 미래 시각 무시), 10초 경계, 크래시 뒤 요청·오래된 크래시·모르는 종류 제외, 우선순위, 링 보관 개수.
