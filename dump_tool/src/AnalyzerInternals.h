@@ -46,8 +46,9 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   bool loadingContext,
   double lastHeartbeatMs = -1.0);
 
-// ADR-0022: the close request the newest Crash event came at most
-// kForcedCloseCrashWindowMs after; detected is false without one.
+// ADR-0022: the close request the newest Crash event followed
+// (ForcedCloseScanner: the quit flag at any time before it, the others at
+// most kForcedCloseCrashWindowMs before it); detected is false without one.
 ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events);
 
 // ADR-0035: the newest close request in the blackbox that set the game's

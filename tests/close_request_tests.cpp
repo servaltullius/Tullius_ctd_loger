@@ -340,6 +340,58 @@ static_assert(Scan({ 9000.0 },
                 .Result()
                 .msBeforeCrash == 1000.0);
 
+// ADR-0022 (2026-11-17): the quit flag has no time limit. Once it is set the
+// main loop has ended, so a crash minutes later (qqq, then a shutdown of over
+// two minutes under MO2's usvfs) is still in the shutdown. Alt+F4 seen by the
+// keys, the X button and a close message keep the window: the game may have
+// ignored them.
+static_assert(skydiag::CloseRequestCoversCrash(CloseRequestKind::kGameQuit, 130000.0));
+static_assert(skydiag::CloseRequestCoversCrash(CloseRequestKind::kForcedQuit, 3600000.0));
+static_assert(skydiag::CloseRequestCoversCrash(CloseRequestKind::kGameQuit, 0.0));
+static_assert(!skydiag::CloseRequestCoversCrash(CloseRequestKind::kGameQuit, -0.5), "after the crash");
+static_assert(skydiag::CloseRequestCoversCrash(CloseRequestKind::kAltF4, static_cast<double>(kForcedCloseCrashWindowMs)));
+static_assert(!skydiag::CloseRequestCoversCrash(CloseRequestKind::kAltF4, kForcedCloseCrashWindowMs + 1.0));
+static_assert(!skydiag::CloseRequestCoversCrash(CloseRequestKind::kWindowClose, kForcedCloseCrashWindowMs + 1.0));
+static_assert(!skydiag::CloseRequestCoversCrash(CloseRequestKind::kCloseMessage, kForcedCloseCrashWindowMs + 1.0));
+static_assert(!skydiag::CloseRequestCoversCrash(CloseRequestKind::kNone, 0.0));
+static_assert(!skydiag::CloseRequestCoversCrash(static_cast<CloseRequestKind>(99), 0.0));
+// The summary JSON's window_seconds goes with the windowed kinds only.
+static_assert(skydiag::CloseRequestKindIdHasWindow("alt_f4"));
+static_assert(skydiag::CloseRequestKindIdHasWindow("window_close"));
+static_assert(skydiag::CloseRequestKindIdHasWindow("close_message"));
+static_assert(!skydiag::CloseRequestKindIdHasWindow("game_quit"));
+static_assert(!skydiag::CloseRequestKindIdHasWindow("forced_quit"));
+static_assert(!skydiag::CloseRequestKindIdHasWindow(""));
+
+// qqq, and 130 s later the crash.
+static_assert(Scan({ 230000.0 }, { { 100000.0, K(CloseRequestKind::kGameQuit) } }).Result().kind ==
+              CloseRequestKind::kGameQuit);
+static_assert(Scan({ 230000.0 }, { { 100000.0, K(CloseRequestKind::kGameQuit) } }).Result().msBeforeCrash == 130000.0);
+static_assert(Scan({ 3700000.0 }, { { 100000.0, K(CloseRequestKind::kForcedQuit) } }).Result().kind ==
+              CloseRequestKind::kForcedQuit);
+// Still only before the crash, and the newest crash decides.
+static_assert(!Scan({ 5000.0 }, { { 5000.5, K(CloseRequestKind::kGameQuit) } }, false).Result().matched());
+static_assert(!Scan({ 2000.0, 60000.0 }, { { 61000.0, K(CloseRequestKind::kGameQuit) } }).Result().matched());
+static_assert(Scan({ 2000.0, 60000.0 }, { { 1000.0, K(CloseRequestKind::kForcedQuit) } }).Result().matched(),
+  "a released exception after the flag does not reset it");
+// An Alt+F4 long before the crash no longer names it; the quit flag it led to
+// does.
+static_assert(Scan({ 200000.0 },
+                { { 1000.0, K(CloseRequestKind::kAltF4) }, { 1100.0, K(CloseRequestKind::kForcedQuit) } })
+                .Result()
+                .kind == CloseRequestKind::kForcedQuit);
+static_assert(Scan({ 200000.0 },
+                { { 1000.0, K(CloseRequestKind::kAltF4) }, { 1100.0, K(CloseRequestKind::kForcedQuit) } })
+                .Result()
+                .msBeforeCrash == 198900.0);
+// Alt+F4 pressed during the slow shutdown, 2 s before the crash, names it.
+static_assert(Scan({ 200000.0 },
+                { { 1000.0, K(CloseRequestKind::kGameQuit) }, { 198000.0, K(CloseRequestKind::kAltF4) } })
+                .Result()
+                .kind == CloseRequestKind::kAltF4);
+// A close message alone keeps the window.
+static_assert(!Scan({ 200000.0 }, { { 1000.0, K(CloseRequestKind::kCloseMessage) } }).Result().matched());
+
 }  // namespace
 
 int main()
@@ -362,5 +414,17 @@ int main()
   scanner.AddCrash(52500.0);
   const auto match = scanner.Result();
   Require(match.kind == CloseRequestKind::kWindowClose && match.msBeforeCrash == 2500.0, "the newest request is kept");
+
+  // The quit flag is kept apart: the WM_CLOSEs and other requests that come
+  // during a long shutdown do not push it out.
+  ForcedCloseScanner shutdown;
+  shutdown.AddCloseRequest(100000.0, static_cast<std::uint64_t>(CloseRequestKind::kGameQuit));
+  for (int i = 0; i < 20; ++i) {
+    shutdown.AddCloseRequest(100500.0 + 1000.0 * i, static_cast<std::uint64_t>(CloseRequestKind::kCloseMessage));
+  }
+  shutdown.AddCrash(230000.0);
+  const auto afterQuit = shutdown.Result();
+  Require(afterQuit.kind == CloseRequestKind::kGameQuit && afterQuit.msBeforeCrash == 130000.0,
+    "the quit flag outlives a flood of close messages");
   return 0;
 }

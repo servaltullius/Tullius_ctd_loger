@@ -501,8 +501,9 @@ inline std::wstring DescribeForcedCloseForLog(const skydiag::ForcedCloseMatch& m
     std::to_wstring(tenths / 10u) + L"." + std::to_wstring(tenths % 10u) + L" s earlier";
 }
 
-// The close request (ADR-0022) the newest crash in a blackbox snapshot came at
-// most kForcedCloseCrashWindowMs after; no match without one.
+// The close request (ADR-0022) the newest crash in a blackbox snapshot
+// followed (ForcedCloseScanner: the quit flag at any time before it, the
+// others at most kForcedCloseCrashWindowMs before it); no match without one.
 skydiag::ForcedCloseMatch FindForcedCloseInSnapshot(
   const skydiag::SharedLayout* snapshot,
   std::size_t snapshotBytes) noexcept;

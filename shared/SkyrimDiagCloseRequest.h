@@ -10,6 +10,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
+#include <string_view>
 
 namespace skydiag {
 
@@ -289,12 +291,41 @@ constexpr bool IsAltF4AlreadyRecorded(std::uint64_t recordedMs, std::uint64_t no
   return recordedMs != 0u && nowMs >= recordedMs && nowMs - recordedMs <= windowMs;
 }
 
-// A crash this soon after a close request is part of the game closing: after
-// Alt+F4 Skyrim stops its main loop and tears down (renderer, heaps, plugin
-// DLLs), which takes a few seconds with a large load order. Ten seconds covers
-// a slow teardown; a crash in play that soon after a close the game ignored is
-// far less likely than one in the teardown.
+// A crash this soon after an Alt+F4 seen by the keys, a window close or a
+// close message is part of the game closing: Skyrim stops its main loop and
+// tears down (renderer, heaps, plugin DLLs), which takes a few seconds with a
+// large load order. Ten seconds covers a slow teardown; a crash in play that
+// soon after a close the game ignored is far less likely than one in the
+// teardown.
 inline constexpr std::uint64_t kForcedCloseCrashWindowMs = 10'000;
+
+// Whether a close request of this kind, beforeMs before a crash, makes it a
+// forced-close error. The quit flag's kinds (IsQuitFlagCloseRequest) have no
+// time limit (ADR-0022, 2026-11-17): once the flag is set the main loop has
+// ended and the game does not come back, so every later crash is in its
+// shutdown, which under MO2's usvfs can take minutes. The others keep the
+// window: the game may have ignored them and played on.
+constexpr bool CloseRequestCoversCrash(CloseRequestKind kind, double beforeMs) noexcept
+{
+  if (!IsCloseRequestKind(static_cast<std::uint64_t>(kind)) || !(beforeMs >= 0.0)) {
+    return false;
+  }
+  return IsQuitFlagCloseRequest(static_cast<std::uint64_t>(kind)) ||
+         beforeMs <= static_cast<double>(kForcedCloseCrashWindowMs);
+}
+
+// The same for a CloseRequestKindId ("game_quit", ...): true when the kind has
+// a time window (a known kind that is not the quit flag's), so the summary
+// JSON's window_seconds applies to it.
+constexpr bool CloseRequestKindIdHasWindow(std::string_view id) noexcept
+{
+  for (auto value = static_cast<std::uint64_t>(CloseRequestKind::kAltF4); IsCloseRequestKind(value); ++value) {
+    if (id == CloseRequestKindId(static_cast<CloseRequestKind>(value))) {
+      return !IsQuitFlagCloseRequest(value);
+    }
+  }
+  return false;
+}
 
 struct ForcedCloseMatch
 {
@@ -328,7 +359,9 @@ constexpr int CloseRequestRank(CloseRequestKind kind) noexcept
 
 // Reads the blackbox oldest first (AddCloseRequest for kCloseRequest events,
 // AddCrash for kCrash events, times on one clock in milliseconds) and finds a
-// close request at most kForcedCloseCrashWindowMs before the newest crash.
+// close request before the newest crash that covers it
+// (CloseRequestCoversCrash: the quit flag at any time before it, the others
+// at most kForcedCloseCrashWindowMs before it).
 class ForcedCloseScanner
 {
 public:
@@ -337,10 +370,13 @@ public:
     if (!IsCloseRequestKind(payloadA)) {
       return;
     }
-    requests_[next_] = Request{ static_cast<CloseRequestKind>(payloadA), timeMs };
-    next_ = (next_ + 1u) % kKeptRequests;
-    if (count_ < kKeptRequests) {
-      ++count_;
+    // Kept apart: window messages the game sends itself while it shuts down
+    // must not push out the quit flag, which has no time limit.
+    Ring& ring = IsQuitFlagCloseRequest(payloadA) ? quitFlags_ : others_;
+    ring.requests[ring.next] = Request{ static_cast<CloseRequestKind>(payloadA), timeMs };
+    ring.next = (ring.next + 1u) % kKeptRequests;
+    if (ring.count < kKeptRequests) {
+      ++ring.count;
     }
   }
 
@@ -356,34 +392,41 @@ public:
     if (!hasCrash_) {
       return best;
     }
-    for (std::size_t i = 0; i < count_; ++i) {
-      const Request& request = requests_[i];
-      if (request.timeMs > crashMs_ || crashMs_ - request.timeMs > static_cast<double>(kForcedCloseCrashWindowMs)) {
-        continue;
-      }
-      const double before = crashMs_ - request.timeMs;
-      const int rank = CloseRequestRank(request.kind);
-      const int bestRank = CloseRequestRank(best.kind);
-      // The nearer one of the same kind.
-      if (rank < bestRank || (rank == bestRank && before < best.msBeforeCrash)) {
-        best.kind = request.kind;
-        best.msBeforeCrash = before;
+    for (const Ring* ring : { &quitFlags_, &others_ }) {
+      for (std::size_t i = 0; i < ring->count; ++i) {
+        const Request& request = ring->requests[i];
+        const double before = crashMs_ - request.timeMs;
+        if (!CloseRequestCoversCrash(request.kind, before)) {
+          continue;
+        }
+        const int rank = CloseRequestRank(request.kind);
+        const int bestRank = CloseRequestRank(best.kind);
+        // The nearer one of the same kind.
+        if (rank < bestRank || (rank == bestRank && before < best.msBeforeCrash)) {
+          best.kind = request.kind;
+          best.msBeforeCrash = before;
+        }
       }
     }
     return best;
   }
 
 private:
-  // Close requests are rare (one per close); the newest few are enough.
+  // Close requests are rare (one per close); the newest few of each are enough.
   static constexpr std::size_t kKeptRequests = 8;
   struct Request
   {
     CloseRequestKind kind = CloseRequestKind::kNone;
     double timeMs = 0.0;
   };
-  Request requests_[kKeptRequests]{};
-  std::size_t count_ = 0;
-  std::size_t next_ = 0;
+  struct Ring
+  {
+    Request requests[kKeptRequests]{};
+    std::size_t count = 0;
+    std::size_t next = 0;
+  };
+  Ring quitFlags_{};
+  Ring others_{};
   bool hasCrash_ = false;
   double crashMs_ = 0.0;
 };
