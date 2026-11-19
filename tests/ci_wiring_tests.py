@@ -838,9 +838,16 @@ def check_apt_installs_are_bounded(failures: list[str]) -> None:
         failures.append("scripts/ci_apt_install.sh is missing")
     else:
         text = _read(script)
-        for needle in ("timeout ", "Acquire::Retries", "Acquire::http::Timeout", "attempts"):
+        for needle in (
+            "timeout ",
+            "Acquire::Retries",
+            "Acquire::http::Timeout",
+            "attempts",
+            "dpkg-query",
+            "Dir::Etc::sourcelist",
+        ):
             if needle not in text:
-                failures.append(f"ci_apt_install.sh lost its bound: {needle!r}")
+                failures.append(f"ci_apt_install.sh lost its bound/fallback: {needle!r}")
     for path in sorted(WORKFLOWS.glob("*.yml")):
         text = _read(path)
         if re.search(r"\bapt-get\b", text):

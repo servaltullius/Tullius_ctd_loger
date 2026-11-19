@@ -349,7 +349,7 @@ bool IsSystemishModule(std::wstring_view filename)
     L"gdi32.dll",      L"combase.dll",   L"ole32.dll",     L"ws2_32.dll",
     L"win32u.dll",     L"advapi32.dll",  L"rpcrt4.dll",    L"sechost.dll",
     // Graphics / DirectX runtime
-    L"d3d11.dll",      L"d3d12.dll",     L"dxgi.dll",      L"d3d9.dll",
+    L"d3d11.dll",      L"d3d12.dll",     L"d3d12core.dll", L"dxgi.dll",      L"d3d9.dll",
     L"opengl32.dll",   L"d3dcompiler_47.dll", L"dxcore.dll",
     // Debugging
     L"dbghelp.dll",    L"dbgcore.dll",

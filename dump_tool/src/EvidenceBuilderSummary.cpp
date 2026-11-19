@@ -172,7 +172,7 @@ std::wstring DescribeLockOwnerWait(const AnalysisResult& r, i18n::Language lang,
     : (wait.waiting_module + (wait.wait_api.empty() ? std::wstring{} : (L", " + wait.wait_api)));
   const std::wstring path = wait.path_modules.empty() ? std::wstring{} : JoinWaitPath(wait.path_modules);
   // A confirmed owner inside the graphics driver points at the GPU side.
-  const bool ownerInGraphics = owner.confirmed && IsGraphicsStackModule(owner.top_module);
+  const bool ownerInGraphics = IsLockOwnerInGraphicsStack(owner);
   return en
     ? (L"The game main thread was waiting for a " + DescribeLockType(owner, en) + L" held by " +
         DescribeLockOwnerThread(owner, en) + (where.empty() ? std::wstring{} : (L" (in " + where + L")")) +

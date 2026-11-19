@@ -150,17 +150,22 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::filesystem::path& dir, 
   //   <stem>_SkyrimDiagSummary.json
   //   <stem>_SkyrimDiagReport.txt
   //   <stem>_SkyrimDiagBlackbox.jsonl
-  // increment(ec), not the range-for's operator++, which throws when the
-  // folder becomes unreadable mid-scan (a removed drive).
+  // ListDirectoryForIo goes through a handle on extended-length paths so MO2
+  // USVFS long paths do not fail with ERROR_PATH_NOT_FOUND.
   std::error_code iterEc;
-  for (std::filesystem::directory_iterator it(dir, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
-    std::error_code ec;
-    if (!it->is_regular_file(ec)) {
+  const auto entries = ListDirectoryForIo(dir, iterEc);
+  if (iterEc) {
+    return;
+  }
+  const auto prefix = stem + "_";
+  for (const auto& entry : entries) {
+    if (entry.directory) {
       continue;
     }
-    const auto name = PathPartUtf8(it->path().filename());
-    if (StartsWith(name, stem + "_")) {
-      std::filesystem::remove(it->path(), ec);
+    const auto name = PathPartUtf8(entry.path.filename());
+    if (StartsWith(name, prefix)) {
+      std::error_code ec;
+      std::filesystem::remove(entry.path, ec);
     }
   }
 }
@@ -187,12 +192,11 @@ inline std::vector<std::filesystem::path> CollectRegularFiles(const std::filesys
 {
   std::vector<std::filesystem::path> files;
   std::error_code iterEc;
-  for (std::filesystem::directory_iterator it(dir, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
-    std::error_code ec;
-    if (!it->is_regular_file(ec)) {
+  for (const auto& entry : ListDirectoryForIo(dir, iterEc)) {
+    if (entry.directory) {
       continue;
     }
-    files.push_back(it->path());
+    files.push_back(entry.path);
   }
   return files;
 }
@@ -726,8 +730,7 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
   if (outBase.empty()) {
     return;
   }
-  std::error_code ec;
-  if (!std::filesystem::is_directory(outBase, ec)) {
+  if (!IsDirectoryForIo(outBase)) {
     return;
   }
 
@@ -773,12 +776,15 @@ inline void RotateLogFileIfNeeded(const std::filesystem::path& path, std::uint64
     return;
   }
 
+  // Reserve space for ".rotating" / ".<n>" suffixes so extended-length paths
+  // stay consistent across exists, size, remove and rename.
+  const auto ioPath = PathForIo(path, 16);
   std::error_code ec;
-  if (!std::filesystem::exists(path, ec)) {
+  if (!ExistsForIo(ioPath, ec) || ec) {
     return;
   }
 
-  const auto sz = std::filesystem::file_size(path, ec);
+  const auto sz = FileSizeForIo(ioPath, ec);
   if (ec || sz <= maxBytes) {
     return;
   }
@@ -786,35 +792,35 @@ inline void RotateLogFileIfNeeded(const std::filesystem::path& path, std::uint64
   // Take the current log out of the way first. That is the step that fails
   // while another program holds the log open, and failing after the archives
   // had moved lost one generation of them at every log line.
-  auto pending = path;
+  auto pending = ioPath;
   pending += ".rotating";
   std::filesystem::remove(pending, ec);
-  std::filesystem::rename(path, pending, ec);
+  std::filesystem::rename(ioPath, pending, ec);
   if (ec) {
     return;  // the log goes on growing; the next line tries again
   }
 
   // Delete oldest archive.
   {
-    auto oldest = path;
+    auto oldest = ioPath;
     oldest += "." + std::to_string(maxFiles);
     std::filesystem::remove(oldest, ec);
   }
 
   // Shift: .(n-1) -> .n
   for (std::uint32_t i = maxFiles; i > 1; i--) {
-    auto src = path;
+    auto src = ioPath;
     src += "." + std::to_string(i - 1);
-    auto dst = path;
+    auto dst = ioPath;
     dst += "." + std::to_string(i);
-    if (std::filesystem::exists(src, ec)) {
+    if (ExistsForIo(src, ec) && !ec) {
       std::filesystem::remove(dst, ec);
       std::filesystem::rename(src, dst, ec);
     }
   }
 
   // Current -> .1
-  auto dst = path;
+  auto dst = ioPath;
   dst += ".1";
   std::filesystem::remove(dst, ec);
   std::filesystem::rename(pending, dst, ec);

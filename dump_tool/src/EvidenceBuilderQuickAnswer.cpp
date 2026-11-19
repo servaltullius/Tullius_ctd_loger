@@ -157,10 +157,13 @@ Lead SuspectLead(const AnalysisResult& r, const SuspectItem& suspect, i18n::Conf
 }
 
 // A system DLL or the game itself is never shown to a player as a mod to disable.
+// DumpModuleIsSystemish already rejects Windows-loaded DirectX runtimes while
+// letting game-folder proxies (ENB/ReShade/DXVK d3d11.dll, dxgi.dll) through;
+// GPU user-mode drivers are rejected by name.
 bool IsModModule(const AnalysisResult& r, std::wstring_view file)
 {
   return !file.empty() && !DumpModuleIsSystemish(r, file) && !minidump::IsGameExeModule(file) &&
-         !IsGraphicsStackModule(file);
+         !IsGraphicsDriverModule(file);
 }
 
 std::wstring CandidateName(const ActionableCandidate& candidate)
@@ -434,7 +437,7 @@ Lead FreezeLead(const AnalysisResult& r, bool en)
   }
   if (owner.tid != 0u) {
     const auto level = owner.confirmed ? i18n::ConfidenceLevel::kMedium : i18n::ConfidenceLevel::kLow;
-    if (owner.confirmed && IsGraphicsStackModule(owner.top_module)) {
+    if (IsLockOwnerInGraphicsStack(owner)) {
       return GpuLead(owner.top_module, level, en);
     }
     if (IsModModule(r, owner.top_module) && !minidump::IsKnownHookFramework(owner.top_module)) {

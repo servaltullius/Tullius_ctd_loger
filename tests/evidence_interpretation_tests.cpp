@@ -187,6 +187,9 @@ void TestEnbD3d11FaultIsAMod()
       candidate = candidate || c.module_filename == L"d3d11.dll";
     }
     Require(candidate, "the injector DLL on the stack is a candidate like any mod DLL");
+    Require(r.quick_answer.suspect_file == L"d3d11.dll" && r.quick_answer.case_id != "none" &&
+              r.quick_answer.case_id != "gpu_driver",
+      "quick_answer names the game-folder d3d11.dll proxy as a mod rather than dropping it");
 
     auto windows = MakeCrashIn(L"d3d11.dll", L"C:\\Windows\\System32\\d3d11.dll");
     windows.suspects.push_back(
@@ -194,6 +197,31 @@ void TestEnbD3d11FaultIsAMod()
     windows.suspects_from_stackwalk = true;
     BuildEvidenceAndSummary(windows, lang);
     Require(Contains(windows.summary_sentence, windowsDll), "the System32 copy is still Windows");
+    Require(windows.quick_answer.suspect_file != L"d3d11.dll", "System32 d3d11.dll is not named as a mod in quick_answer");
+
+    // Lock owner inside a game-folder ReShade/ENB proxy (dxgi.dll) is a mod
+    // lead, not a GPU driver wait; System32 dxgi.dll remains GPU driver.
+    AnalysisResult proxyFreeze{};
+    proxyFreeze.dump_path = L"C:\\Logs\\SkyrimDiag_Hang_20261120_010000_000.dmp";
+    proxyFreeze.is_hang_like = true;
+    proxyFreeze.main_thread_lock_owner.tid = 4012;
+    proxyFreeze.main_thread_lock_owner.lock_type = "critical_section";
+    proxyFreeze.main_thread_lock_owner.confirmed = true;
+    proxyFreeze.main_thread_lock_owner.top_module = L"dxgi.dll";
+    proxyFreeze.main_thread_lock_owner.top_module_path = std::wstring(kGameDir) + L"dxgi.dll";
+    proxyFreeze.main_thread_lock_owner.top_mod_name = L"ReShade";
+    proxyFreeze.main_thread_lock_owner.top_module_is_system = false;
+    BuildEvidenceAndSummary(proxyFreeze, lang);
+    Require(proxyFreeze.quick_answer.case_id == "lock_owner" && proxyFreeze.quick_answer.suspect_file == L"dxgi.dll",
+      "lock owner in game-folder dxgi.dll proxy stays a mod lead");
+
+    AnalysisResult sysFreeze = proxyFreeze;
+    sysFreeze.main_thread_lock_owner.top_module_path = L"C:\\Windows\\System32\\dxgi.dll";
+    sysFreeze.main_thread_lock_owner.top_mod_name.clear();
+    sysFreeze.main_thread_lock_owner.top_module_is_system = true;
+    BuildEvidenceAndSummary(sysFreeze, lang);
+    Require(sysFreeze.quick_answer.case_id == "gpu_driver",
+      "lock owner in System32 dxgi.dll remains a GPU driver lead");
   }
 }
 
@@ -375,6 +403,70 @@ void TestGameFolderProxyWinmmCrashLoggerFramesAreAMod()
   Require(!pred("winmm.dll", 0u), "missing address with both copies loaded stays ambiguous");
   Require(!pred("PDPerfPlugin.dll", 0x7FF800001000ull), "ordinary mod DLLs are not marked system-named");
   Require(!pred("hdtsmp64.dll", 0x7FF700001000ull), "hook frameworks cannot bypass CanPromote via system-named flag");
+}
+
+// A GPU driver (nvwgf2umx.dll) or passive hook (skse64_*.dll) with a longer
+// run on the probable callstack must not hide a real plugin's first actionable
+// frame or consecutive streak once module paths and hook roles are known.
+void TestCrashLoggerProbableStreakAndPassiveHookRescan()
+{
+  const auto logPath = std::filesystem::temp_directory_path() / "skydiag_test_streak_rescan.log";
+  const std::vector<ModuleInfo> modules = {
+    LoadedModule(
+      L"nvwgf2umx.dll",
+      L"C:\\Windows\\System32\\DriverStore\\FileRepository\\nv_dispi.inf_amd64_1234\\",
+      0x7FFA00000000ull),
+    LoadedModule(L"skse64_1_6_1170.dll", kGameDir, 0x7FF900000000ull),
+    LoadedModule(L"BuggyMod.dll", L"G:\\MO2\\mods\\BuggyMod\\SKSE\\Plugins\\", 0x7FF800000000ull),
+  };
+
+  {
+    std::ofstream log(logPath, std::ios::binary | std::ios::trunc);
+    log << "Skyrim SSE v1.6.1170\n"
+           "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FFA00001234 nvwgf2umx.dll+0001234\n\n"
+           "PROBABLE CALL STACK:\n"
+           "\t[ 0] 0x7FFA00001234 nvwgf2umx.dll+0001234\n"
+           "\t[ 1] 0x7FFA00002345 nvwgf2umx.dll+0002345\n"
+           "\t[ 2] 0x7FFA00003456 nvwgf2umx.dll+0003456\n"
+           "\t[ 3] 0x7FF800001000 BuggyMod.dll+0001000\n"
+           "\t[ 4] 0x7FF800002000 BuggyMod.dll+0002000\n";
+  }
+  AnalysisResult driverRun = MakeCrashIn(
+    L"nvwgf2umx.dll",
+    L"C:\\Windows\\System32\\DriverStore\\FileRepository\\nv_dispi.inf_amd64_1234\\nvwgf2umx.dll");
+  driverRun.crash_logger_log_path = logPath.wstring();
+  skydiag::dump_tool::IntegrateCrashLoggerFrameSignals(modules, &driverRun);
+  Require(driverRun.crash_logger_first_actionable_probable_module == L"BuggyMod.dll" &&
+            driverRun.crash_logger_first_actionable_probable_eligible,
+    "driver frames are skipped to find BuggyMod.dll as first actionable frame");
+  Require(driverRun.crash_logger_probable_streak_module == L"BuggyMod.dll" &&
+            driverRun.crash_logger_probable_streak_length == 2u &&
+            driverRun.crash_logger_probable_streak_eligible,
+    "a longer DriverStore driver run does not hide BuggyMod.dll's promotable streak");
+
+  {
+    std::ofstream log(logPath, std::ios::binary | std::ios::trunc);
+    log << "Skyrim SSE v1.6.1170\n"
+           "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x7FF900001234 skse64_1_6_1170.dll+0001234\n\n"
+           "PROBABLE CALL STACK:\n"
+           "\t[ 0] 0x7FF900001234 skse64_1_6_1170.dll+0001234\n"
+           "\t[ 1] 0x7FF900002345 skse64_1_6_1170.dll+0002345\n"
+           "\t[ 2] 0x7FF800001000 BuggyMod.dll+0001000\n"
+           "\t[ 3] 0x7FF800002000 BuggyMod.dll+0002000\n";
+  }
+  AnalysisResult passiveRun = MakeCrashIn(L"skse64_1_6_1170.dll", std::wstring(kGameDir) + L"skse64_1_6_1170.dll");
+  passiveRun.crash_logger_log_path = logPath.wstring();
+  skydiag::dump_tool::IntegrateCrashLoggerFrameSignals(modules, &passiveRun);
+  Require(passiveRun.crash_logger_first_actionable_probable_module == L"BuggyMod.dll" &&
+            passiveRun.crash_logger_first_actionable_probable_eligible,
+    "leading passive hook frames (skse64) are skipped to find BuggyMod.dll");
+  Require(passiveRun.crash_logger_probable_streak_module == L"BuggyMod.dll" &&
+            passiveRun.crash_logger_probable_streak_length == 2u &&
+            passiveRun.crash_logger_probable_streak_eligible,
+    "leading passive hook frames do not hide BuggyMod.dll's promotable streak");
+
+  std::error_code ec;
+  std::filesystem::remove(logPath, ec);
 }
 
 AnalysisResult MakePointerScanHang(std::wstring topModule, std::wstring topPath)
@@ -853,6 +945,7 @@ int main()
     TestEnbD3d11FaultIsAMod();
     TestEnbD3d11CrashLoggerFramesAreAMod();
     TestGameFolderProxyWinmmCrashLoggerFramesAreAMod();
+    TestCrashLoggerProbableStreakAndPassiveHookRescan();
     TestPassiveHookDoesNotOwnAFreeze();
     TestFrameOnlyFaultLocationDoesNotClaimTheStack();
     TestCrashLoggerFrameDoesNotWeakenAFaultDllLead();

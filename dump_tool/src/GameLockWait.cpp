@@ -23,7 +23,7 @@ std::optional<std::size_t> WaitSiteIndex(const std::vector<ModalStackFrame>& fra
     if (!frame.has_module) {
       return std::nullopt;
     }
-    if (!frame.is_system && !IsGraphicsStackModule(frame.module_filename)) {
+    if (!frame.is_system && !IsGraphicsStackFrame(frame)) {
       return frame.is_game_exe ? std::optional<std::size_t>(i) : std::nullopt;
     }
   }
