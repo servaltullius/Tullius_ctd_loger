@@ -214,16 +214,32 @@ std::vector<std::uint32_t> FindThreadsWithNearStackModule(
   std::uint64_t dumpSize,
   const std::vector<ModuleInfo>& modules,
   std::wstring_view moduleFilename,
-  std::size_t maxSlots)
+  std::size_t maxSlots,
+  std::wstring_view modulePath)
 {
   std::vector<std::uint32_t> matchingTids;
   if (!dumpBase || moduleFilename.empty() || maxSlots == 0u) {
     return matchingTids;
   }
 
-  const auto moduleIt = std::find_if(modules.begin(), modules.end(), [&](const ModuleInfo& module) {
-    return WideLower(module.filename) == WideLower(moduleFilename);
-  });
+  auto moduleIt = modules.end();
+  if (!modulePath.empty()) {
+    const auto targetPath = WideLower(modulePath);
+    moduleIt = std::find_if(modules.begin(), modules.end(), [&](const ModuleInfo& module) {
+      return WideLower(module.path) == targetPath;
+    });
+  }
+  if (moduleIt == modules.end()) {
+    const auto targetName = WideLower(moduleFilename);
+    moduleIt = std::find_if(modules.begin(), modules.end(), [&](const ModuleInfo& module) {
+      return !module.is_systemish && WideLower(module.filename) == targetName;
+    });
+    if (moduleIt == modules.end()) {
+      moduleIt = std::find_if(modules.begin(), modules.end(), [&](const ModuleInfo& module) {
+        return WideLower(module.filename) == targetName;
+      });
+    }
+  }
   if (moduleIt == modules.end()) {
     return matchingTids;
   }

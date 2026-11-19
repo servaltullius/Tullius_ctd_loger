@@ -1383,18 +1383,10 @@ std::vector<CrashLoggerObjectRef> ParseCrashLoggerObjectRefsAscii(std::string_vi
     if (section != Section::kNone) {
       if (ContainsCaseInsensitiveAscii(line, "MODULES:") ||
           ContainsCaseInsensitiveAscii(line, "PROBABLE CALL STACK") ||
+          ContainsCaseInsensitiveAscii(line, "CALL STACK") ||
           ContainsCaseInsensitiveAscii(line, "STACK:") ||
           ContainsCaseInsensitiveAscii(line, "C++ EXCEPTION:")) {
-        if (section == Section::kPossibleObjects) {
-          section = Section::kRegisters;
-          if (ContainsCaseInsensitiveAscii(line, "REGISTERS:")) {
-            currentRegister.clear();
-            continue;
-          }
-          section = Section::kNone;
-        } else {
-          section = Section::kNone;
-        }
+        section = Section::kNone;
         continue;
       }
     }
