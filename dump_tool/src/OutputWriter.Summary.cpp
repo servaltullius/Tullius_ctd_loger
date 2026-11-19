@@ -181,7 +181,7 @@ nlohmann::json BuildSummaryJson(
       { "kind", r.forced_close.kind },
       { "seconds_before_crash", std::round(r.forced_close.seconds_before_crash * 1000.0) / 1000.0 },
     };
-    if (skydiag::CloseRequestKindIdHasWindow(r.forced_close.kind)) {
+    if (!r.forced_close.from_quit_flag && skydiag::CloseRequestKindIdHasWindow(r.forced_close.kind)) {
       summary["forced_close"]["window_seconds"] = static_cast<double>(skydiag::kForcedCloseCrashWindowMs) / 1000.0;
     }
   }

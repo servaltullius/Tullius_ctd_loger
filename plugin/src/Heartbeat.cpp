@@ -241,17 +241,20 @@ bool CaptureThreadIds(std::unordered_set<std::uint32_t>& out)
     return false;
   }
 
-  const auto closeSnapshot = [&snapshot]() noexcept {
-    if (snapshot != INVALID_HANDLE_VALUE) {
-      CloseHandle(snapshot);
-      snapshot = INVALID_HANDLE_VALUE;
+  struct SnapshotGuard
+  {
+    HANDLE handle;
+    ~SnapshotGuard() noexcept
+    {
+      if (handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(handle);
+      }
     }
-  };
+  } guard{ snapshot };
 
   THREADENTRY32 entry{};
   entry.dwSize = sizeof(entry);
   if (!Thread32First(snapshot, &entry)) {
-    closeSnapshot();
     return false;
   }
 
@@ -263,7 +266,6 @@ bool CaptureThreadIds(std::unordered_set<std::uint32_t>& out)
     entry.dwSize = sizeof(entry);
   } while (Thread32Next(snapshot, &entry));
 
-  closeSnapshot();
   return true;
 }
 

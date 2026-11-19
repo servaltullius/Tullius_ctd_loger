@@ -292,6 +292,17 @@ static_assert(!skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kCloseMessage
 static_assert(!skydiag::IsQuitFlagCloseRequest(K(CloseRequestKind::kNone)));
 static_assert(!skydiag::IsQuitFlagCloseRequest(99u));
 
+// CloseRequestSource::kQuitFlag in payload.d also marks an Alt+F4 quit-flag
+// transition as a quit-flag event, whereas key-sampled Alt+F4 is not.
+constexpr std::uint64_t S(skydiag::CloseRequestSource source)
+{
+  return static_cast<std::uint64_t>(source);
+}
+static_assert(skydiag::IsQuitFlagCloseRequestEvent(K(CloseRequestKind::kAltF4), S(skydiag::CloseRequestSource::kQuitFlag)));
+static_assert(!skydiag::IsQuitFlagCloseRequestEvent(K(CloseRequestKind::kAltF4), S(skydiag::CloseRequestSource::kKeys)));
+static_assert(!skydiag::IsQuitFlagCloseRequestEvent(K(CloseRequestKind::kNone), S(skydiag::CloseRequestSource::kQuitFlag)));
+static_assert(skydiag::IsQuitFlagCloseRequestEvent(K(CloseRequestKind::kGameQuit), S(skydiag::CloseRequestSource::kSentMessage)));
+
 // The 2026-10-26 case: Alt+F4, and 0.8 s later the access violation.
 static_assert(Scan({ 120800.0 }, { { 120000.0, K(CloseRequestKind::kAltF4) } }).Result().kind == CloseRequestKind::kAltF4);
 static_assert(Scan({ 120800.0 }, { { 120000.0, K(CloseRequestKind::kAltF4) } }).Result().msBeforeCrash == 800.0);
@@ -424,7 +435,22 @@ int main()
   }
   shutdown.AddCrash(230000.0);
   const auto afterQuit = shutdown.Result();
-  Require(afterQuit.kind == CloseRequestKind::kGameQuit && afterQuit.msBeforeCrash == 130000.0,
+  Require(afterQuit.kind == CloseRequestKind::kGameQuit && afterQuit.msBeforeCrash == 130000.0 && afterQuit.fromQuitFlag,
     "the quit flag outlives a flood of close messages");
+
+  // Alt+F4 recorded from Main::quitGame (payload.d == kQuitFlag) has no 10 s
+  // time limit and survives a flood of window close messages, even when a
+  // key-sampled Alt+F4 also fired right before it.
+  ForcedCloseScanner altF4QuitFlag;
+  altF4QuitFlag.AddCloseRequest(100000.0, K(CloseRequestKind::kAltF4), S(skydiag::CloseRequestSource::kKeys));
+  altF4QuitFlag.AddCloseRequest(100025.0, K(CloseRequestKind::kAltF4), S(skydiag::CloseRequestSource::kQuitFlag));
+  for (int i = 0; i < 20; ++i) {
+    altF4QuitFlag.AddCloseRequest(100500.0 + 1000.0 * i, K(CloseRequestKind::kCloseMessage));
+  }
+  altF4QuitFlag.AddCrash(230025.0);
+  const auto altF4Match = altF4QuitFlag.Result();
+  Require(
+    altF4Match.kind == CloseRequestKind::kAltF4 && altF4Match.msBeforeCrash == 130000.0 && altF4Match.fromQuitFlag,
+    "Alt+F4 from Main::quitGame covers a slow-shutdown crash past 10 s");
   return 0;
 }

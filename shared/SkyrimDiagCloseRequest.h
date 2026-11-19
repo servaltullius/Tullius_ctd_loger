@@ -65,6 +65,16 @@ constexpr bool IsQuitFlagCloseRequest(std::uint64_t value) noexcept
          value == static_cast<std::uint64_t>(CloseRequestKind::kForcedQuit);
 }
 
+// Whether a recorded EventType::kCloseRequest event came from Main::quitGame
+// becoming set (either via its quit-flag kinds or via payload.d == kQuitFlag,
+// which also occurs when Alt+F4 was held as the quit flag became set).
+constexpr bool IsQuitFlagCloseRequestEvent(std::uint64_t payloadA, std::uint64_t payloadD) noexcept
+{
+  return IsQuitFlagCloseRequest(payloadA) ||
+         (payloadA == static_cast<std::uint64_t>(CloseRequestKind::kAltF4) &&
+          payloadD == static_cast<std::uint64_t>(CloseRequestSource::kQuitFlag));
+}
+
 // Summary JSON / report / helper log id.
 constexpr const char* CloseRequestKindId(CloseRequestKind kind) noexcept
 {
@@ -332,6 +342,9 @@ struct ForcedCloseMatch
   CloseRequestKind kind = CloseRequestKind::kNone;
   // From the close request to the crash.
   double msBeforeCrash = 0.0;
+  // True when the winning close request came from Main::quitGame becoming set
+  // (no time window applies even when kind is kAltF4).
+  bool fromQuitFlag = false;
 
   constexpr bool matched() const noexcept { return kind != CloseRequestKind::kNone; }
 };
@@ -365,15 +378,16 @@ constexpr int CloseRequestRank(CloseRequestKind kind) noexcept
 class ForcedCloseScanner
 {
 public:
-  constexpr void AddCloseRequest(double timeMs, std::uint64_t payloadA) noexcept
+  constexpr void AddCloseRequest(double timeMs, std::uint64_t payloadA, std::uint64_t payloadD = 0u) noexcept
   {
     if (!IsCloseRequestKind(payloadA)) {
       return;
     }
     // Kept apart: window messages the game sends itself while it shuts down
     // must not push out the quit flag, which has no time limit.
-    Ring& ring = IsQuitFlagCloseRequest(payloadA) ? quitFlags_ : others_;
-    ring.requests[ring.next] = Request{ static_cast<CloseRequestKind>(payloadA), timeMs };
+    const bool fromQuitFlag = IsQuitFlagCloseRequestEvent(payloadA, payloadD);
+    Ring& ring = fromQuitFlag ? quitFlags_ : others_;
+    ring.requests[ring.next] = Request{ static_cast<CloseRequestKind>(payloadA), timeMs, fromQuitFlag };
     ring.next = (ring.next + 1u) % kKeptRequests;
     if (ring.count < kKeptRequests) {
       ++ring.count;
@@ -396,15 +410,22 @@ public:
       for (std::size_t i = 0; i < ring->count; ++i) {
         const Request& request = ring->requests[i];
         const double before = crashMs_ - request.timeMs;
-        if (!CloseRequestCoversCrash(request.kind, before)) {
+        const bool covers = request.fromQuitFlag
+          ? (IsCloseRequestKind(static_cast<std::uint64_t>(request.kind)) && before >= 0.0)
+          : CloseRequestCoversCrash(request.kind, before);
+        if (!covers) {
           continue;
         }
         const int rank = CloseRequestRank(request.kind);
         const int bestRank = CloseRequestRank(best.kind);
-        // The nearer one of the same kind.
-        if (rank < bestRank || (rank == bestRank && before < best.msBeforeCrash)) {
+        // The nearer one of the same kind; prefer quit-flag provenance on a tie.
+        if (rank < bestRank ||
+            (rank == bestRank &&
+             (before < best.msBeforeCrash ||
+              (before == best.msBeforeCrash && request.fromQuitFlag && !best.fromQuitFlag)))) {
           best.kind = request.kind;
           best.msBeforeCrash = before;
+          best.fromQuitFlag = request.fromQuitFlag;
         }
       }
     }
@@ -418,6 +439,7 @@ private:
   {
     CloseRequestKind kind = CloseRequestKind::kNone;
     double timeMs = 0.0;
+    bool fromQuitFlag = false;
   };
   struct Ring
   {

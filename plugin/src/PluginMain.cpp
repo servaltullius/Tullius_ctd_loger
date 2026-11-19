@@ -249,6 +249,10 @@ bool SetupLog() noexcept
 
 void OnDataLoaded(const PluginConfig& cfg)
 {
+  // Register menu sinks before checking LoadingMenu so a LoadingMenu open
+  // right around kDataLoaded cannot slip between the check and registration.
+  skydiag::plugin::RegisterEventSinks(cfg.logMenus);
+
   // If we're no longer in the loading menu, clear the initial loading flag.
   if (auto* shm = skydiag::plugin::GetShared()) {
     auto* ui = RE::UI::GetSingleton();
@@ -259,7 +263,6 @@ void OnDataLoaded(const PluginConfig& cfg)
     }
   }
 
-  skydiag::plugin::RegisterEventSinks(cfg.logMenus);
   skydiag::plugin::StartHeartbeatScheduler(skydiag::plugin::HeartbeatConfig{
     cfg.heartbeatIntervalMs,
     cfg.enablePerfHitchLog,

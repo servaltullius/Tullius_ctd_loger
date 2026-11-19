@@ -445,6 +445,39 @@ void TestLeveledOriginal()
   assert(!skydiag::extra_data::ReadLeveledOriginal(empty, kObject));
 }
 
+void TestReadCStringRespectsMaxBytes()
+{
+  // Place a 5-byte NUL-terminated string ("abcd\0") at 0x1000 with maxBytes=5
+  // and verify ReadCString never reads beyond address + maxBytes.
+  FakeMemory m;
+  m.PutString(0x1000, "abcd");
+  std::uint64_t maxReadEnd = 0;
+  const auto trackedRead = [&](std::uint64_t address, void* dst, std::size_t size) {
+    if (address + size > maxReadEnd) {
+      maxReadEnd = address + size;
+    }
+    return m(address, dst, size);
+  };
+  std::string out;
+  assert(skydiag::rtti::detail::ReadCString(trackedRead, 0x1000, 5, true, out));
+  assert(out == "abcd");
+  assert(maxReadEnd <= 0x1005);
+
+  // A 6-byte string ("abcde\0") must fail with maxBytes=5 without reading past 0x1005.
+  FakeMemory m2;
+  m2.PutString(0x2000, "abcde");
+  std::uint64_t maxReadEnd2 = 0;
+  const auto trackedRead2 = [&](std::uint64_t address, void* dst, std::size_t size) {
+    if (address + size > maxReadEnd2) {
+      maxReadEnd2 = address + size;
+    }
+    return m2(address, dst, size);
+  };
+  assert(!skydiag::rtti::detail::ReadCString(trackedRead2, 0x2000, 5, true, out));
+  assert(out.empty());
+  assert(maxReadEnd2 <= 0x2005);
+}
+
 }  // namespace
 
 int main()
@@ -457,6 +490,7 @@ int main()
   TestUndecorate();
   TestPackageLinks();
   TestLeveledOriginal();
+  TestReadCStringRespectsMaxBytes();
   std::puts("rtti decoder tests passed");
   return 0;
 }

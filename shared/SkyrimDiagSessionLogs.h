@@ -6,6 +6,8 @@
 #include <string>
 #include <system_error>
 
+#include "SkyrimDiagLongPath.h"
+
 namespace skydiag {
 
 // The log of an earlier session next to `log` ("X.log"): "X.previous.log"
@@ -26,21 +28,25 @@ inline std::filesystem::path PreviousSessionLogPath(const std::filesystem::path&
 inline bool KeepSessionLog(const std::filesystem::path& log, std::uint32_t keep)
 {
   std::error_code ec;
-  if (!std::filesystem::exists(log, ec) || std::filesystem::file_size(log, ec) == 0) {
+  if (!ExistsForIo(log, ec) || ec) {
+    return true;
+  }
+  const auto size = FileSizeForIo(log, ec);
+  if (ec || size == 0) {
     return true;
   }
   keep = (std::max)(1u, keep);
-  std::filesystem::remove(PreviousSessionLogPath(log, keep), ec);
+  std::filesystem::remove(PathForIo(PreviousSessionLogPath(log, keep)), ec);
   for (std::uint32_t age = keep; age > 1u; --age) {
     const auto older = PreviousSessionLogPath(log, age - 1u);
-    if (std::filesystem::exists(older, ec)) {
-      std::filesystem::rename(older, PreviousSessionLogPath(log, age), ec);
+    if (ExistsForIo(older, ec) && !ec) {
+      std::filesystem::rename(PathForIo(older), PathForIo(PreviousSessionLogPath(log, age)), ec);
     }
   }
   const auto previous = PreviousSessionLogPath(log, 1u);
-  std::filesystem::remove(previous, ec);
+  std::filesystem::remove(PathForIo(previous), ec);
   ec.clear();
-  std::filesystem::rename(log, previous, ec);
+  std::filesystem::rename(PathForIo(log), PathForIo(previous), ec);
   return !ec;
 }
 

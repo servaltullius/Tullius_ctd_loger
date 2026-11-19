@@ -486,6 +486,18 @@ int RunChild(const char* mode, const char* goEventName)
   if (std::strcmp(mode, "unhandled-fault-with-nested-probe") == 0) {
     AddVectoredExceptionHandler(0, ChildProbingVectoredHandler);
   }
+  if (std::strcmp(mode, "unhandled-fault-after-thaw") == 0) {
+    AddVectoredExceptionHandler(0, [](EXCEPTION_POINTERS* ep) noexcept -> LONG {
+      if (ep && ep->ExceptionRecord && ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        if (auto* shm = skydiag::plugin::GetShared()) {
+          InterlockedAnd(
+            reinterpret_cast<volatile LONG*>(&shm->header.state_flags),
+            ~static_cast<LONG>(skydiag::kState_Frozen));
+        }
+      }
+      return EXCEPTION_CONTINUE_SEARCH;
+    });
+  }
   if (std::strcmp(mode, "unhandled-fault-filter-retaken") == 0 ||
       std::strcmp(mode, "unhandled-throw-filter-retaken") == 0) {
     // After the plugin's handlers, as CrashLogger's when it loads later.
@@ -1025,6 +1037,40 @@ void TestUnhandledFaultIsNotHeldWithoutAHelperOrWithHoldOff()
   RequireOf(holdOff, holdOff.exitCode == kChildFilterExitCode, "the filter under the plugin's must run");
 }
 
+// A fault whose incident was already thawed by the helper (released during a
+// recovery/thread-dump check) before reaching the top-level filter must still
+// signal unhandledEvent (without holding on settled) so the helper can report
+// the released crash.
+void TestReleasedFaultIsStillReportedAsUnhandledWithoutHolding()
+{
+  const auto outcome = RunChildToUnhandled("unhandled-fault-after-thaw", HelperSettle::kNever, 0);
+  RequireOf(outcome, outcome.recordedCode == EXCEPTION_ACCESS_VIOLATION, "the fault was recorded at first chance");
+  RequireOf(outcome, (outcome.stateFlags & skydiag::kState_Frozen) == 0u, "the incident was thawed before the filter");
+  RequireOf(outcome, outcome.unhandledSignaled, "a thawed fault that reaches the top-level filter must still signal");
+  RequireOf(outcome, outcome.msFromSignalToExit < 2000u, "a thawed fault must not block waiting on dumpSettled");
+  RequireOf(outcome, outcome.exitCode == kChildFilterExitCode, "the filter under the plugin's must still run");
+}
+
+// A stale unhandled signal left behind after a previous crash thawed must be
+// cleared when the next crash claims ownership and publishes a new crash_seq.
+void TestStaleUnhandledSignalIsClearedWhenNextCrashPublishes(skydiag::SharedLayout* shm)
+{
+  RearmIncident(shm);
+  const HANDLE unhandled = skydiag::plugin::GetUnhandledEvent();
+  Require(unhandled != nullptr, "GetUnhandledEvent must be available");
+  Require(SetEvent(unhandled) != FALSE, "SetEvent(unhandled) failed");
+  Require(WaitForSingleObject(unhandled, 0) == WAIT_OBJECT_0, "precondition: stale unhandled event is set");
+
+  const auto seqBefore = CrashSeq(shm);
+  const int caught = CatchWriteThroughNull();
+  Require(caught == 1, "CatchWriteThroughNull should catch the fault");
+  Require(CrashSeq(shm) != seqBefore, "the new fault must publish a new crash_seq");
+  Require(
+    WaitForSingleObject(unhandled, 0) == WAIT_TIMEOUT,
+    "TryPublishCrashRecord must clear a stale unhandled signal before publishing the new crash");
+  RearmIncident(shm);
+}
+
 // A fault the game handles never reaches the top-level filter.
 void TestHandledFaultIsNotReportedAsUnhandled()
 {
@@ -1108,6 +1154,8 @@ int main(int argc, char** argv)
     TestUnhandledStackOverflowIsNotHeld();
     TestUnhandledFaultHoldEndsAtItsCap();
     TestUnhandledFaultIsNotHeldWithoutAHelperOrWithHoldOff();
+    TestReleasedFaultIsStillReportedAsUnhandledWithoutHolding();
+    TestStaleUnhandledSignalIsClearedWhenNextCrashPublishes(shm);
     TestHandledFaultIsNotReportedAsUnhandled();
     std::puts("plugin crash handler runtime tests passed");
     return 0;

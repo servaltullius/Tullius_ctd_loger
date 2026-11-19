@@ -18,7 +18,7 @@ namespace {
 
 using ErrorCode = RE::BSResource::ErrorCode;
 using DoOpen_t = ErrorCode(void*);  // this = the Stream subobject
-DoOpen_t* g_origLooseFileDoOpen = nullptr;
+std::atomic<DoOpen_t*> g_origLooseFileDoOpen{ nullptr };
 
 std::size_t Append(char* dst, std::size_t cap, std::size_t pos, const char* s) noexcept
 {
@@ -160,9 +160,9 @@ bool IsLooseFileStreamVtable(std::uintptr_t vtable, std::uint32_t streamOffset) 
   const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
   const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
   const std::uintptr_t end = base + nt->OptionalHeader.SizeOfImage;
-  const auto inImage = [&](std::uintptr_t p, std::size_t n) { return p >= base && p + n <= end; };
+  const auto inImage = [&](std::uintptr_t p, std::size_t n) { return p >= base && p <= end && n <= end - p; };
 
-  if (!inImage(vtable - sizeof(void*), 2 * sizeof(void*))) {
+  if (vtable < sizeof(void*) || !inImage(vtable - sizeof(void*), 3 * sizeof(void*))) {
     return false;
   }
   const auto colAddr = *reinterpret_cast<const std::uintptr_t*>(vtable - sizeof(void*));
@@ -170,7 +170,8 @@ bool IsLooseFileStreamVtable(std::uintptr_t vtable, std::uint32_t streamOffset) 
     return false;
   }
   const auto& col = *reinterpret_cast<const CompleteObjectLocator*>(colAddr);
-  if (col.signature != 1 || col.offset != streamOffset || base + col.selfRva != colAddr) {
+  if (col.signature != 1 || col.offset != streamOffset || col.selfRva > end - base || base + col.selfRva != colAddr ||
+      col.typeDescriptorRva > end - base) {
     return false;
   }
   const std::uintptr_t nameAddr = base + col.typeDescriptorRva + 0x10;
@@ -186,11 +187,12 @@ bool IsLooseFileStreamVtable(std::uintptr_t vtable, std::uint32_t streamOffset) 
 
 ErrorCode LooseFileDoOpen_Hook(void* self)
 {
-  if (!g_origLooseFileDoOpen) {
+  const auto orig = g_origLooseFileDoOpen.load(std::memory_order_acquire);
+  if (!orig) {
     return ErrorCode::kInvalidParam;
   }
 
-  const auto rc = g_origLooseFileDoOpen(self);
+  const auto rc = orig(self);
   if (rc != ErrorCode::kNone || !self) {
     return rc;
   }
@@ -213,7 +215,10 @@ ErrorCode LooseFileDoOpen_Hook(void* self)
     // resource had ever been recorded on AE before v0.2.65).
     static std::atomic_bool logged{ false };
     if (!logged.exchange(true, std::memory_order_relaxed)) {
-      spdlog::info("SkyrimDiag: resource hook saw its first loose file: {}", std::string_view(buf, n));
+      try {
+        spdlog::info("SkyrimDiag: resource hook saw its first loose file: {}", std::string_view(buf, n));
+      } catch (...) {
+      }
     }
   }
 
@@ -237,12 +242,20 @@ bool InstallResourceHooks() noexcept
     if (!IsLooseFileStreamVtable(vtbl.address(), g_layout.streamOffset)) {
       return false;  // an unknown layout: patch nothing
     }
-    g_origLooseFileDoOpen = reinterpret_cast<DoOpen_t*>(vtbl.write_vfunc(0x01, LooseFileDoOpen_Hook));
-    installed = (g_origLooseFileDoOpen != nullptr);
+    // Publish the original slot pointer before patching the vtable so a
+    // concurrent thread entering LooseFileDoOpen_Hook immediately sees it.
+    const auto originalBeforePatch =
+      reinterpret_cast<DoOpen_t*>(*reinterpret_cast<const std::uintptr_t*>(vtbl.address() + sizeof(void*)));
+    g_origLooseFileDoOpen.store(originalBeforePatch, std::memory_order_release);
+    const auto replaced = reinterpret_cast<DoOpen_t*>(vtbl.write_vfunc(0x01, LooseFileDoOpen_Hook));
+    if (replaced != nullptr) {
+      g_origLooseFileDoOpen.store(replaced, std::memory_order_release);
+    }
+    installed = (g_origLooseFileDoOpen.load(std::memory_order_acquire) != nullptr);
   } catch (...) {
     // Hook installation is optional. Keep this noexcept boundary reliable when
     // relocation lookup or trampoline patching rejects the current runtime.
-    g_origLooseFileDoOpen = nullptr;
+    g_origLooseFileDoOpen.store(nullptr, std::memory_order_release);
     installed = false;
   }
   return installed;

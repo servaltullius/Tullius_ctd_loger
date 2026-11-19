@@ -120,7 +120,7 @@ ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
   skydiag::ForcedCloseScanner scanner;
   for (const auto& event : events) {
     if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest)) {
-      scanner.AddCloseRequest(event.t_ms, event.a);
+      scanner.AddCloseRequest(event.t_ms, event.a, event.d);
     } else if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash)) {
       scanner.AddCrash(event.t_ms);
     }
@@ -131,6 +131,7 @@ ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
     info.detected = true;
     info.kind = skydiag::CloseRequestKindId(match.kind);
     info.seconds_before_crash = match.msBeforeCrash / 1000.0;
+    info.from_quit_flag = match.fromQuitFlag;
   }
   return info;
 }
@@ -140,7 +141,7 @@ QuitBeforeFreezeInfo DetectQuitRequest(const std::vector<EventRow>& events)
   QuitBeforeFreezeInfo info{};
   for (const auto& event : events) {
     if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest) &&
-        skydiag::IsQuitFlagCloseRequest(event.a)) {
+        skydiag::IsQuitFlagCloseRequestEvent(event.a, event.d)) {
       info.detected = true;
       info.kind = skydiag::CloseRequestKindId(static_cast<skydiag::CloseRequestKind>(event.a));
     }

@@ -11,7 +11,7 @@ bool QuitRequestWatcher::Poll(const skydiag::SharedLayout* shm) noexcept
   std::uint32_t index = 0;
   while (cursor_.Next(shm, &event, &index)) {
     if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest) &&
-        skydiag::IsQuitFlagCloseRequest(event.payload.a)) {
+        skydiag::IsQuitFlagCloseRequestEvent(event.payload.a, event.payload.d)) {
       seen_ = true;
       kind_ = static_cast<skydiag::CloseRequestKind>(event.payload.a);
       return true;

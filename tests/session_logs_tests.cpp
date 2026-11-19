@@ -90,11 +90,42 @@ void TestSessionsShiftDownAndTheOldestGoes()
   std::filesystem::remove_all(dir, ec);
 }
 
+#ifdef _WIN32
+void TestLongPathSessionsRotate()
+{
+  const auto base = MakeTempDir();
+  auto deep = base;
+  for (int i = 0; i < 10; ++i) {
+    deep /= "mod_organizer_profile_segment_0123456789";
+  }
+  std::error_code ec;
+  skydiag::CreateDirectoriesForIo(deep, ec);
+  assert(!ec);
+
+  const auto log = deep / "SkyrimDiag.log";
+  assert(log.native().size() > 260u);
+  WriteText(skydiag::PathForIo(log), "long session 1");
+  assert(KeepSessionLog(log, 2));
+  assert(!skydiag::ExistsForIo(log, ec));
+  assert(ReadText(skydiag::PathForIo(PreviousSessionLogPath(log, 1))) == "long session 1");
+
+  WriteText(skydiag::PathForIo(log), "long session 2");
+  assert(KeepSessionLog(log, 2));
+  assert(ReadText(skydiag::PathForIo(PreviousSessionLogPath(log, 1))) == "long session 2");
+  assert(ReadText(skydiag::PathForIo(PreviousSessionLogPath(log, 2))) == "long session 1");
+
+  skydiag::RemoveAllForIo(base, ec);
+}
+#endif
+
 }  // namespace
 
 int main()
 {
   TestNames();
   TestSessionsShiftDownAndTheOldestGoes();
+#ifdef _WIN32
+  TestLongPathSessionsRotate();
+#endif
   return 0;
 }
