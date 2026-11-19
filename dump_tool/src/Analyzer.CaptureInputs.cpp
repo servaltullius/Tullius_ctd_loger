@@ -38,7 +38,10 @@ namespace skydiag::dump_tool {
 using skydiag::dump_tool::internal::output_writer::ReadTextFileUtf8;
 using skydiag::dump_tool::minidump::ExternalSoftwareName;
 using skydiag::dump_tool::minidump::FindModuleIndexForAddress;
+using skydiag::dump_tool::minidump::IsExternalSoftwareModule;
 using skydiag::dump_tool::minidump::IsGameExeModule;
+using skydiag::dump_tool::minidump::IsKnownHookFramework;
+using skydiag::dump_tool::minidump::IsSystemishModule;
 using skydiag::dump_tool::minidump::IsSystemishModuleAt;
 using skydiag::dump_tool::minidump::LoadThreads;
 using skydiag::dump_tool::minidump::ModuleForAddress;
@@ -865,21 +868,42 @@ crashlogger_core::CrashLoggerSystemNamedModFn CrashLoggerSystemNamedModTest(
 {
   return [&allModules](std::string_view moduleUtf8, std::uint64_t address) {
     const std::wstring module = Utf8ToWide(std::string(moduleUtf8));
+    const std::wstring moduleLower = WideLower(module);
+    if (moduleLower.empty() || IsGameExeModule(module) || IsKnownHookFramework(module) ||
+        IsExternalSoftwareModule(module)) {
+      return false;
+    }
     const auto isModCopy = [](const ModuleInfo& m) {
       return !IsSystemishModuleAt(m.filename, m.path) && m.external_software.empty();
     };
+    // Only modules whose filename would otherwise be treated as a Windows or
+    // external DLL (hardcoded system names like d3d11.dll, or any name that
+    // also has a system/external copy loaded, like a game-folder winmm.dll
+    // proxy alongside System32\winmm.dll).
+    bool sharesSystemOrExternalName = IsSystemishModule(module);
+    if (!sharesSystemOrExternalName) {
+      for (const auto& m : allModules) {
+        if (WideLower(m.filename) == moduleLower && !isModCopy(m)) {
+          sharesSystemOrExternalName = true;
+          break;
+        }
+      }
+    }
+    if (!sharesSystemOrExternalName) {
+      return false;
+    }
     // Such a proxy loads the Windows DLL of the same name too, so the frame
     // address picks the copy.
     if (address != 0) {
       if (const auto index = FindModuleIndexForAddress(allModules, address)) {
         const auto& m = allModules[*index];
-        return WideLower(m.filename) == WideLower(module) && isModCopy(m);
+        return WideLower(m.filename) == moduleLower && isModCopy(m);
       }
     }
     // Without one, only a name no Windows copy shares.
     bool found = false;
     for (const auto& m : allModules) {
-      if (WideLower(m.filename) != WideLower(module)) {
+      if (WideLower(m.filename) != moduleLower) {
         continue;
       }
       if (!isModCopy(m)) {

@@ -618,10 +618,13 @@ CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(
   if (logUtf8.empty()) {
     return out;
   }
-  // A frame named like a Windows DLL in a mod's copy (ENB/ReShade d3d11.dll in
-  // the game folder) is a plugin frame (review H4).
+  // A frame named like a Windows DLL in a mod's copy (ENB/ReShade d3d11.dll,
+  // OptiScaler winmm.dll, version.dll, ...) is a plugin frame (review H4).
+  // Ask the caller for any non-game module, not only IsSystemishModuleAsciiLower:
+  // proxies like winmm.dll also load System32's copy, so Analyzer's name-based
+  // system-path check would otherwise reject every frame of that name.
   const auto inSystemNamedMod = [&](std::string_view lineText, const std::string& module) {
-    return isSystemNamedMod && IsSystemishModuleAsciiLower(AsciiLower(module)) &&
+    return isSystemNamedMod && !IsGameExeModuleAsciiLower(AsciiLower(module)) &&
            isSystemNamedMod(module, TryExtractFrameAddressAscii(lineText));
   };
 

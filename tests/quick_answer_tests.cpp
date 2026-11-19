@@ -1196,7 +1196,7 @@ void TestScriptLoaderCrashOutput()
     Require(summary["quick_answer"]["case"] == "known_mechanism", "summary JSON case");
     const auto report = skydiag::dump_tool::BuildReportText(r, summary, true);
     Require(report.find(std::string(en ? "FaultInstruction: " : "예외 명령어: ") +
-                        "mov byte ptr [rbx+rax] (C6 04 03 00), read 0xFFFFFFFFFFFFFFFF, rbx=0x138D, "
+                        "mov byte ptr [rbx+rax] (C6 04 03 00), write 0xFFFFFFFFFFFFFFFF, rbx=0x138D, "
                         "rax=0x2065726120736C6C -> noncanonical" +
                         (en ? " (rax holds the text \"lls are \")\n" : " (rax 값은 글자 \"lls are \")\n")) !=
               std::string::npos,

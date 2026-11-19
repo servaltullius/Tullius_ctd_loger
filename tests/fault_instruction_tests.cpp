@@ -379,21 +379,24 @@ void TestTextOverwrotePointer()
   regs[kRbx] = 0x138Dull;
   regs[kRax] = 0x2065726120736C6Cull;
   auto info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xC6, 0x04, 0x03, 0x00 });
-  assert(info.verdict == "noncanonical" && info.base_register == "rbx" && info.index_register == "rax");
+  assert(info.verdict == "noncanonical" && info.access == "write" && info.base_register == "rbx" &&
+         info.index_register == "rax");
   assert(info.overwritten_text_register == "rax" && info.overwritten_text == "lls are ");
   const auto ko = DescribeFaultInstruction(info, L"SkyrimSE.exe+0x143e7dd", false);
+  assert(ko.find(L"[rbx+rax]에 1바이트를 쓰려 했는데") != std::wstring::npos);
   assert(ko.find(L"포인터 자리가 다른 데이터로 덮어써졌다는 뜻입니다(메모리 손상). rax 값을 바이트로 읽으면 글자 \"lls are \"입니다. "
                  L"글(문자열)이 포인터 자리를 덮어쓴 것으로 보입니다.") != std::wstring::npos);
   const auto en = DescribeFaultInstruction(info, L"SkyrimSE.exe+0x143e7dd", true);
+  assert(en.find(L"tried to write 1 byte to [rbx+rax]") != std::wstring::npos);
   assert(en.find(L"(corrupted memory). Read as bytes, the value of rax is the text \"lls are \": a string seems to have "
                  L"overwritten the pointer.") != std::wstring::npos);
   assert(DescribeFaultInstructionPlain(info, false) ==
          L"포인터 자리를 글(\"lls are \")이 덮어썼고, 그 값을 주소로 쓰다가 튕겼습니다(메모리 손상).");
   assert(DescribeFaultInstructionPlain(info, true) ==
          L"It crashed on a pointer that text (\"lls are \") had overwritten (corrupted memory).");
-  // The report line stays as it was; the report adds the text after it.
+  // A #GP store reports access=write from the decoded instruction instead of Windows's read(0).
   assert(FaultInstructionReportText(info) ==
-         "mov byte ptr [rbx+rax] (C6 04 03 00), read 0xFFFFFFFFFFFFFFFF, rbx=0x138D, rax=0x2065726120736C6C -> noncanonical");
+         "mov byte ptr [rbx+rax] (C6 04 03 00), write 0xFFFFFFFFFFFFFFFF, rbx=0x138D, rax=0x2065726120736C6C -> noncanonical");
 
   // The base register is looked at first.
   regs[kRbx] = 0x6867666564636261ull;  // "abcdefgh"
@@ -403,7 +406,8 @@ void TestTextOverwrotePointer()
   // Garbage that is no text (2026-10-05 CrashLogger.dll shape) says nothing more.
   regs[kRdi] = 0x89E2DDDE1A260000ull;
   info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x0F, 0xB6, 0x07 });
-  assert(info.verdict == "noncanonical" && info.overwritten_text.empty() && info.overwritten_text_register.empty());
+  assert(info.verdict == "noncanonical" && info.access == "read" && info.overwritten_text.empty() &&
+         info.overwritten_text_register.empty());
   assert(DescribeFaultInstructionPlain(info, false) == L"다른 데이터로 덮어써진 포인터를 쓰다가 튕겼습니다(메모리 손상).");
   assert(DescribeFaultInstruction(info, L"", true).find(L"Read as bytes") == std::wstring::npos);
 
@@ -492,19 +496,23 @@ void TestOtherVerdicts()
   // movaps on an address that is not 16-byte aligned.
   regs[kRax] = 0x10000008ull;
   info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x0F, 0x28, 0x00 });
-  assert(info.verdict == "misaligned");
+  assert(info.verdict == "misaligned" && info.access == "read");
   assert(DescribeFaultInstruction(info, L"", true).find(L"aligned to 16 bytes, but [rax] was 0x10000008") !=
          std::wstring::npos);
 
   // The same on a store: a general-protection fault is reported as a read
   // with no address whatever the instruction does (a prolog saving xmm6 to a
-  // misaligned stack slot), so the kind is not held against it.
+  // misaligned stack slot), so the kind is not held against it and pure stores
+  // report access=write from the decoded instruction.
   regs[kRax] = 0x10000008ull;
   info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x0F, 0x29, 0x00 });
-  assert(info.verdict == "misaligned");
+  assert(info.verdict == "misaligned" && info.access == "write");
   regs[kRax] = 0x89E2DDDE1A260000ull;
   info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x48, 0x89, 0x08 });
-  assert(info.verdict == "noncanonical");
+  assert(info.verdict == "noncanonical" && info.access == "write");
+  // Read-modify-write faults on its initial read, so access stays read.
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0x48, 0x01, 0x08 });
+  assert(info.verdict == "noncanonical" && info.access == "read");
   // With an address the kind still has to fit: a read fault on a store says
   // nothing about the store.
   regs[kRax] = 0x10000000ull;
