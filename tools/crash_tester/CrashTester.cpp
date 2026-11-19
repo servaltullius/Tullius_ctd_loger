@@ -21,6 +21,9 @@
 //   F11 menu event sink holding the game for 45 s when the Journal Menu opens
 //   End a call through an empty (null) function pointer from CrashTester.dll:
 //       execution at address 0, the caller's return address on the stack
+//   Home FormID 0x00012EB6 used as a form pointer inside CrashTester.dll
+//   PgUp C++ exception caught by CrashTester.dll, then an access violation
+//       inside the catch block
 //   Insthe same access violation inside SkyrimSE.exe, caught by
 //       CrashTester.dll, 6 times 15 s apart, on the game's task thread and a
 //       thread of CrashTester.dll in turn; not a crash, may be pressed again
@@ -128,6 +131,32 @@ __declspec(noinline) std::uint8_t ReadFormTypeThroughFormId()
   const std::uint8_t type = form[0x1A];
   spdlog::warn("CrashTester: the FormID read returned form type {}", type);
   return type;
+}
+
+// The PageUp scenario: a C++ exception that CrashTester.dll catches itself,
+// followed by an access violation inside the catch block. On x64 MSVC the
+// catch funclet runs below the exception dispatcher's CONTEXT, which is still
+// unchanged on the stack; stale CrashLogger addresses left there by
+// CrashLogger's vectored handler can make IsCrashLoggerReportingKeptException
+// mistake this real access violation (0xC0000005) for a side fault of
+// CrashLogger reporting the already-caught C++ throw (0xE06D7363).
+__declspec(noinline) void AccessViolationInCatchBlock(const std::exception& ex)
+{
+  volatile std::uint32_t* nowhere = nullptr;
+  const char* const what = ex.what();
+  *nowhere = what ? static_cast<std::uint32_t>(static_cast<unsigned char>(what[0])) : 1u;
+}
+
+__declspec(noinline) void ThrowCaughtThenAccessViolation()
+{
+  try {
+    throw std::runtime_error("CrashTester: caught C++ exception before AV in catch");
+  } catch (const std::exception& ex) {
+    AccessViolationInCatchBlock(ex);
+    // Keeps AccessViolationInCatchBlock a real call (not a tail jump) so the
+    // catch funclet stays on the stack underneath it.
+    spdlog::warn("CrashTester: catch block access violation returned");
+  }
 }
 
 // Scenario 3.
@@ -570,6 +599,7 @@ void HotkeyLoop(const std::stop_token& stop)
   bool deleteWasDown = false;
   bool endWasDown = false;
   bool homeWasDown = false;
+  bool pageUpWasDown = false;
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -604,6 +634,9 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool homeDown = (GetAsyncKeyState(VK_HOME) & 0x8000) != 0;
     const bool home = homeDown && !homeWasDown;
     homeWasDown = homeDown;
+    const bool pageUpDown = (GetAsyncKeyState(VK_PRIOR) & 0x8000) != 0;
+    const bool pageUp = pageUpDown && !pageUpWasDown;
+    pageUpWasDown = pageUpDown;
     if (ctrl && shift) {
       if (insert && !g_repeatRunning.exchange(true)) {
         RepeatHandledEngineFault(
@@ -631,6 +664,9 @@ void HotkeyLoop(const std::stop_token& stop)
       }
       if (home && !g_crashQueued.exchange(true)) {
         RunOnMainThread("Home FormID used as a form pointer", [] { (void)ReadFormTypeThroughFormId(); });
+      }
+      if (pageUp && !g_crashQueued.exchange(true)) {
+        RunOnMainThread("PageUp access violation inside a C++ catch block", [] { ThrowCaughtThenAccessViolation(); });
       }
       if (f10 && !g_freezeRunning.exchange(true)) {
         SpinJobThread();
@@ -672,9 +708,10 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..14 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+// AutoScenario=1..15 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
 //                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
-//                     10: F5; 11: Insert; 12: Delete; 13: End; 14: Home).
+//                     10: F5; 11: Insert; 12: Delete; 13: End; 14: Home;
+//                     15: PageUp).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
@@ -843,6 +880,9 @@ void RunAutoScenario()
   case 14:
     RunOnMainThread("auto Home FormID used as a form pointer", [] { (void)ReadFormTypeThroughFormId(); });
     break;
+  case 15:
+    RunOnMainThread("auto PageUp access violation inside a C++ catch block", [] { ThrowCaughtThenAccessViolation(); });
+    break;
   default:
     break;
   }
@@ -910,6 +950,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
   spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
                "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
                "End empty function pointer call, Home FormID used as a form pointer, "
+               "PageUp AV in catch block, "
                "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled "
                "(top-level filter hold {} ms); AutoScenario={} SaveName={}",
     g_repeatCount.load(), g_repeatIntervalSec.load(), g_unhandledHoldMs.load(), g_auto.scenario, g_auto.saveName);
