@@ -149,19 +149,11 @@ internal sealed partial class MainWindowViewModel
 
     private string BuildNextActionSummary(AnalysisSummary summary)
     {
-        if (summary.ModalDialogWaitDetected)
-        {
-            // The game is waiting for a dialog; reading it beats any module triage.
-            return string.IsNullOrWhiteSpace(summary.ModalDialogTitle)
-                ? T("Find and read the error dialog behind the game window", "게임 창 뒤의 오류 대화상자를 찾아 내용을 확인")
-                : T(
-                    $"Find and read the \"{summary.ModalDialogTitle}\" dialog behind the game window",
-                    $"게임 창 뒤의 \"{summary.ModalDialogTitle}\" 대화상자를 찾아 내용을 확인");
-        }
-
-        // The analyzer picks the same entry as the text report's NextAction.
-        // Only a module-triage line keeps the shorter candidate wording below,
-        // which names the same module.
+        // The analyzer picks the same entry as the text report's NextAction
+        // (including modal-dialog actions like Address Library missing or
+        // incompatible plugin, and slow-shutdown guidance). Only a
+        // module-triage line keeps the shorter candidate wording below, which
+        // names the same module.
         if (summary.HasNextActionIndex &&
             summary.NextActionIndex >= 0 &&
             summary.NextActionIndex < summary.Recommendations.Count)
@@ -172,6 +164,17 @@ internal sealed partial class MainWindowViewModel
             {
                 return StripRecommendationTag(chosen);
             }
+        }
+
+        if (summary.ModalDialogWaitDetected)
+        {
+            // Fallback when the analyzer did not pick a specific modal action:
+            // reading the dialog still beats any module triage.
+            return string.IsNullOrWhiteSpace(summary.ModalDialogTitle)
+                ? T("Find and read the error dialog behind the game window", "게임 창 뒤의 오류 대화상자를 찾아 내용을 확인")
+                : T(
+                    $"Find and read the \"{summary.ModalDialogTitle}\" dialog behind the game window",
+                    $"게임 창 뒤의 \"{summary.ModalDialogTitle}\" 대화상자를 찾아 내용을 확인");
         }
 
         if (summary.ActionableCandidates.Count > 0)

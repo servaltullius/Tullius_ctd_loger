@@ -355,6 +355,35 @@ def test_cleared_summary_produces_no_share_text() -> None:
     assert actual == "", actual
 
 
+def test_modal_dialog_prefers_analyzed_next_action_and_keeps_fallback() -> None:
+    # When the analyzer selects a specific recommendation (e.g. Address Library
+    # missing), BuildNextActionSummary uses it even when modal_dialog_wait is
+    # detected; without next_action_index, it falls back to the modal wording.
+    def with_specific_next_action(summary: dict) -> None:
+        summary.setdefault("freeze_analysis", {})["modal_dialog_wait"] = {
+            "detected": True,
+            "dialog_title": "REL/Relocation.h(567)",
+        }
+        summary["recommendations"] = [
+            "[Address Library] Install the matching Address Library for SKSE Plugins version.",
+        ]
+        summary["next_action_index"] = 0
+
+    groups = _run_harness_on_modified("gpu_wait_hang_summary.json", with_specific_next_action, "groups")
+    assert "next: Install the matching Address Library for SKSE Plugins version." in groups, groups
+
+    def without_next_action(summary: dict) -> None:
+        summary.setdefault("freeze_analysis", {})["modal_dialog_wait"] = {
+            "detected": True,
+            "dialog_title": "SKSE Error",
+        }
+        summary.pop("next_action_index", None)
+        summary["recommendations"] = []
+
+    fallback_groups = _run_harness_on_modified("gpu_wait_hang_summary.json", without_next_action, "groups")
+    assert 'next: Find and read the "SKSE Error" dialog behind the game window' in fallback_groups, fallback_groups
+
+
 if __name__ == "__main__":
     test_frame_first_community_share_fixture()
     test_frame_first_summary_clipboard_fixture()
@@ -385,4 +414,5 @@ if __name__ == "__main__":
     test_viewer_survives_fields_of_another_type()
     test_viewer_reads_helper_ini_like_the_helper()
     test_cleared_summary_produces_no_share_text()
+    test_modal_dialog_prefers_analyzed_next_action_and_keeps_fallback()
     print("share_text_fixture_tests: OK")

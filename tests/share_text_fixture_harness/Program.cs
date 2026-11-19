@@ -80,9 +80,14 @@ internal static class Program
     // may still produce text from the previous dump.
     private static string ClearedShareText(MainWindowViewModel vm)
     {
+        vm.PopulateAdvancedArtifacts(new MainWindowViewModel.AdvancedArtifactsData
+        {
+            EventCount = 5,
+        });
         vm.CurrentDumpPath = "/tmp/OtherDump.dmp";
         vm.ClearSummary();
         return (vm.BuildSummaryClipboardText() ?? string.Empty) +
-               (vm.BuildCommunityShareText() ?? string.Empty);
+               (vm.BuildCommunityShareText() ?? string.Empty) +
+               vm.QuickEventsValue;
     }
 }
