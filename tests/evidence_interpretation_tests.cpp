@@ -302,6 +302,81 @@ void TestEnbD3d11CrashLoggerFramesAreAMod()
   Require(skydiag::dump_tool::CrashLoggerSystemNamedModTest(enbOnly)("D3D11.DLL", 0u), "only the game-folder copy");
 }
 
+// A game-folder proxy whose name is a Windows DLL outside IsSystemishModule
+// (e.g. OptiScaler/upscaler winmm.dll alongside System32\winmm.dll): frames in
+// the game-folder copy must stay promotable instead of being dropped by the
+// name-only system-path check and displaced by the plugin below it.
+void TestGameFolderProxyWinmmCrashLoggerFramesAreAMod()
+{
+  const std::vector<ModuleInfo> modules = {
+    LoadedModule(L"SkyrimSE.exe", kGameDir, 0x7FF612300000ull),
+    LoadedModule(L"hdtsmp64.dll", L"G:\\MO2\\mods\\FSMP\\SKSE\\Plugins\\", 0x7FF700000000ull),
+    LoadedModule(L"PDPerfPlugin.dll", L"G:\\MO2\\mods\\Upscaler\\SKSE\\Plugins\\", 0x7FF800000000ull),
+    LoadedModule(L"winmm.dll", kGameDir, 0x7FF900000000ull),
+    LoadedModule(L"winmm.dll", L"C:\\Windows\\System32\\", 0x7FFA00000000ull),
+    LoadedModule(L"KERNEL32.DLL", L"C:\\Windows\\System32\\", 0x7FFB00000000ull),
+    LoadedModule(L"ntdll.dll", L"C:\\Windows\\System32\\", 0x7FFC00000000ull),
+  };
+
+  const auto makeLog = [](const char* top) {
+    const std::string t(top);
+    return "CRASH TIME: 2026-11-18 19:22:04\n"
+           "CrashLoggerSSE v1-27-0-0 Oct 25 2026 06:20:14\n\n"
+           "Unhandled exception \"EXCEPTION_ACCESS_VIOLATION\" at 0x" + t + "1234 WINMM.dll+0001234\tmov rcx, [rbx]\n\n"
+           "CALL STACK ([P]robable / [S]tack scan):\n"
+           "\t[ 0][P] 0x" + t + "1234 winmm.dll+0001234\n"
+           "\t[ 1][P] 0x" + t + "5678 winmm.dll+0005678\n"
+           "\t[ 2][P] 0x7FF800001000 PDPerfPlugin.dll+0001000\n"
+           "\t[ 3][P] 0x7FF612340001 SkyrimSE.exe+0040001\n"
+           "\t[ 4][P] 0x7FFB00001000 KERNEL32.DLL+0001000\n"
+           "\t[ 5][P] 0x7FFC00002000 ntdll.dll+0002000\n\n"
+           "REGISTERS:\n";
+  };
+
+  const auto logPath = std::filesystem::temp_directory_path() / "skydiag_winmm_proxy_crashlogger.log.txt";
+  const auto integrate = [&](const char* top) {
+    {
+      std::ofstream log(logPath, std::ios::binary | std::ios::trunc);
+      log << makeLog(top);
+    }
+    AnalysisResult r = MakeCrashIn(L"winmm.dll", std::wstring(kGameDir) + L"winmm.dll");
+    r.fault_module_offset = 0x1234u;
+    r.crash_logger_log_path = logPath.wstring();
+    skydiag::dump_tool::IntegrateCrashLoggerFrameSignals(modules, &r);
+    return r;
+  };
+
+  auto proxy = integrate("7FF90000");
+  Require(proxy.crash_logger_direct_fault_module == L"winmm.dll" && proxy.crash_logger_direct_fault_eligible,
+    "the fault in the game-folder winmm.dll proxy is a promotable direct fault");
+  Require(proxy.crash_logger_first_actionable_probable_module == L"winmm.dll" &&
+            proxy.crash_logger_first_actionable_probable_eligible,
+    "its top frame stays the first actionable frame instead of falling through to PDPerfPlugin.dll");
+  Require(proxy.crash_logger_probable_streak_module == L"winmm.dll" && proxy.crash_logger_probable_streak_length == 2u &&
+            proxy.crash_logger_probable_streak_eligible,
+    "its consecutive proxy frames form a promotable streak");
+  Require(proxy.crash_logger_frame_signal_strength == 66u, "direct + first actionable + streak all contribute");
+
+  // The same frames in System32's winmm.dll stay system frames and fall through
+  // to the plugin below them.
+  auto windows = integrate("7FFA0000");
+  Require(!windows.crash_logger_direct_fault_eligible, "a fault in System32's winmm.dll is not promoted");
+  Require(windows.crash_logger_first_actionable_probable_module == L"PDPerfPlugin.dll" &&
+            windows.crash_logger_first_actionable_probable_eligible,
+    "System32's winmm.dll is skipped for the plugin below it");
+  Require(!windows.crash_logger_probable_streak_eligible, "System32's winmm.dll frames are not a promotable streak");
+
+  std::error_code ec;
+  std::filesystem::remove(logPath, ec);
+
+  const auto pred = skydiag::dump_tool::CrashLoggerSystemNamedModTest(modules);
+  Require(pred("winmm.dll", 0x7FF900001234ull), "proxy address is recognized as the mod copy");
+  Require(!pred("winmm.dll", 0x7FFA00001234ull), "System32 address stays a system DLL");
+  Require(!pred("winmm.dll", 0u), "missing address with both copies loaded stays ambiguous");
+  Require(!pred("PDPerfPlugin.dll", 0x7FF800001000ull), "ordinary mod DLLs are not marked system-named");
+  Require(!pred("hdtsmp64.dll", 0x7FF700001000ull), "hook frameworks cannot bypass CanPromote via system-named flag");
+}
+
 AnalysisResult MakePointerScanHang(std::wstring topModule, std::wstring topPath)
 {
   AnalysisResult r{};
@@ -777,6 +852,7 @@ int main()
     TestSystemishByPath();
     TestEnbD3d11FaultIsAMod();
     TestEnbD3d11CrashLoggerFramesAreAMod();
+    TestGameFolderProxyWinmmCrashLoggerFramesAreAMod();
     TestPassiveHookDoesNotOwnAFreeze();
     TestFrameOnlyFaultLocationDoesNotClaimTheStack();
     TestCrashLoggerFrameDoesNotWeakenAFaultDllLead();
