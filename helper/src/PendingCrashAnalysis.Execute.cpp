@@ -8,6 +8,7 @@
 #include <system_error>
 
 #include "CaptureCommon.h"
+#include "CrashCapture.h"
 #include "DumpToolLaunch.h"
 #include "HelperLog.h"
 #include "IncidentManifest.h"
@@ -129,13 +130,19 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
         outBase,
         L"PluginScanner skipped for full recapture: failed to resolve game exe directory.");
 
+      StableSharedSnapshot stableShm;
+      const bool hasStableShm = CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &stableShm);
+      const skydiag::SharedLayout* dumpShm = hasStableShm ? stableShm.layout() : proc.shm;
+      const std::size_t dumpShmSize = hasStableShm ? stableShm.size() : proc.shmSize;
+      const std::uint32_t recaptureStateFlags = dumpShm ? dumpShm->header.state_flags : 0u;
+
       std::wstring fullDumpErr;
       if (!skydiag::helper::WriteDumpWithStreams(
             proc.process,
             proc.pid,
             recaptureDumpPath,
-            proc.shm,
-            proc.shmSize,
+            dumpShm,
+            dumpShmSize,
             /*wctJsonUtf8=*/{},
             pluginScanJson,
             /*isCrash=*/true,
@@ -169,7 +176,7 @@ CrashRecaptureArtifacts ApplyCrashRecaptureDecision(
             std::nullopt,
             std::nullopt,
             /*etwStatus=*/"disabled",
-            /*stateFlags=*/0u,
+            recaptureStateFlags,
             ctx,
             &dumpProfile,
             &context.recaptureDecision,

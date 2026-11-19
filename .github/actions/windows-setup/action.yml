@@ -27,16 +27,37 @@ runs:
     - name: Setup MSVC environment
       uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
+    - name: Cache vcpkg checkout
+      id: vcpkg-cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ runner.temp }}\vcpkg
+        key: vcpkg-tool-${{ runner.os }}-${{ hashFiles('vcpkg-configuration.json') }}
+
     - name: Bootstrap vcpkg
+      if: steps.vcpkg-cache.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
-        git clone https://github.com/microsoft/vcpkg "$env:RUNNER_TEMP\vcpkg"
         # The vcpkg tool from the manifest's baseline commit, not whatever
         # vcpkg master is on the day of the run.
         $baseline = (Get-Content vcpkg-configuration.json -Raw | ConvertFrom-Json).'default-registry'.baseline
-        git -C "$env:RUNNER_TEMP\vcpkg" checkout --quiet --detach $baseline
-        if ($LASTEXITCODE -ne 0) { throw "vcpkg checkout of baseline $baseline failed" }
-        & "$env:RUNNER_TEMP\vcpkg\bootstrap-vcpkg.bat"
+        if (-not $baseline) { throw "Could not resolve vcpkg baseline from vcpkg-configuration.json" }
+        $vcpkgDir = "$env:RUNNER_TEMP\vcpkg"
+        $maxAttempts = 3
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+          if (Test-Path $vcpkgDir) { Remove-Item -Recurse -Force $vcpkgDir }
+          git clone --filter=blob:none --no-checkout https://github.com/microsoft/vcpkg $vcpkgDir
+          if ($LASTEXITCODE -eq 0) {
+            git -C $vcpkgDir checkout --quiet --detach $baseline
+            if ($LASTEXITCODE -eq 0) {
+              & "$vcpkgDir\bootstrap-vcpkg.bat" -disableMetrics
+              if ($LASTEXITCODE -eq 0) { exit 0 }
+            }
+          }
+          Write-Warning "vcpkg bootstrap attempt $attempt/$maxAttempts failed"
+          if ($attempt -lt $maxAttempts) { Start-Sleep -Seconds ($attempt * 10) }
+        }
+        throw "vcpkg bootstrap of baseline $baseline failed after $maxAttempts attempts"
 
     - name: Setup vcpkg binary cache
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0

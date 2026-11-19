@@ -147,6 +147,18 @@ int main()
     "SYMBOL_CACHE_HEALTH",
     "Preflight must report symbol cache health.");
   AssertContains(
+    preflightCppText,
+    "BINARY_VERSION_CONSISTENCY",
+    "Preflight must verify SkyrimDiag sibling binary versions match.");
+  AssertContains(
+    preflightCppText,
+    "ADDRESS_LIBRARY_PRESENT",
+    "Preflight must check whether the Address Library database for the running game version is present.");
+  AssertContains(
+    preflightCppText,
+    "GameAddressLibraryBytes(proc.pid)",
+    "Preflight must reuse the shared Address Library resolver for ADDRESS_LIBRARY_PRESENT.");
+  AssertContains(
     helperIniText,
     "EnablePssSnapshotForFreeze",
     "Helper ini must expose the opt-in PSS snapshot freeze toggle.");

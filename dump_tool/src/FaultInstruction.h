@@ -15,11 +15,12 @@ namespace skydiag::dump_tool {
 // words ("it read 8 bytes from [rcx+0x24] and rcx was 0").
 //
 // A small x64 decoder for the instruction forms game and plugin code faults
-// on: integer moves, loads and stores (mov, movzx, movsx, movsxd), compares,
-// tests and arithmetic with a memory operand, SSE moves and scalar or packed
-// math (movss, movsd, movups, movaps, movdqu, addss, comiss, ...), call/jmp
-// through memory, push and pop. Legacy prefixes, REX, ModRM, SIB, disp8,
-// disp32 and RIP-relative operands are decoded; VEX/EVEX, 0F 38/0F 3A,
+// on: integer moves, loads and stores (mov, movzx, movsx, movsxd), string
+// copies/fills (rep movs/stos), compares, tests and arithmetic with a memory
+// operand, SSE and VEX AVX/AVX2 moves and scalar or packed math (movss,
+// movups, movaps, vmovdqu, vmovaps, vaddps, ...), call/jmp through memory,
+// push and pop. Legacy prefixes, REX, 2/3-byte VEX (0F map), ModRM, SIB,
+// disp8, disp32 and RIP-relative operands are decoded; EVEX, 0F 38/0F 3A,
 // 32-bit addressing (67) and FS/GS operands are not. An instruction it does
 // not know decodes to nothing: nothing is guessed.
 
@@ -63,10 +64,14 @@ struct X64Instruction
   // nop, prefetch and register-only forms.
   bool has_memory = false;
   X64MemoryOperand memory;
+  // Dual-memory string ops (movsb/movsw/movsd/movsq): memory is the read
+  // source [rsi], second_memory is the write destination [rdi].
+  bool has_second_memory = false;
+  X64MemoryOperand second_memory;
   X64MemoryAccess access = X64MemoryAccess::kNone;
   std::uint8_t access_size = 0;  // bytes the memory operand covers
-  // Legacy SSE that faults on an operand not aligned to 16 bytes (movaps,
-  // movdqa, packed math with a memory operand).
+  // Legacy SSE (16 bytes) or AVX aligned moves (vmovaps/vmovapd/vmovdqa: 16 or
+  // 32 bytes) that fault when the operand is not aligned to access_size.
   bool requires_alignment = false;
   // call / jmp through memory: the value read there is where the CPU goes next.
   bool branch_through_memory = false;
