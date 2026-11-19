@@ -317,6 +317,10 @@ internal static class Program
             await CheckSaveLoadHistoryFingerprint(root, identityA);
             CheckIniTextDecoding();
 
+            await CheckCompatibilityArtifactFallbackAndTailParsing(root, identityA);
+            await CheckCrashLoggerLogPathResolution(root);
+            await CheckRecentDumpsDefaultCapIncludesMoreThanTwelve(root);
+
             Console.WriteLine("winui_state_fixture_harness: OK");
             return 0;
         }
@@ -465,6 +469,84 @@ internal static class Program
             "an ini that is not UTF-8 decodes with the ANSI code page");
         Require(IniTextDecoder.AnsiEncoding() is not null, "the system ANSI code page resolves");
         Require(IniTextDecoder.Decode(Array.Empty<byte>()) == string.Empty, "an empty ini");
+    }
+
+    private static async Task CheckCompatibilityArtifactFallbackAndTailParsing(string root, DumpIdentityContract identity)
+    {
+        var dir = Path.Combine(root, "compat_artifacts");
+        Directory.CreateDirectory(dir);
+        var dumpPath = Path.Combine(dir, "CompatDump.dmp");
+        await File.WriteAllBytesAsync(dumpPath, new byte[] { 1, 2, 3, 4 });
+
+        var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpPath, dir);
+        var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpPath, dir);
+        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, dir);
+
+        await File.WriteAllTextAsync(reportPath, "compat report body");
+        await File.WriteAllTextAsync(wctPath, "{\"threads\":[{\"tid\":42}]}");
+        var bbLines = Enumerable.Range(0, 260)
+            .Select(i => $"{{\"i\":{i},\"t_ms\":{i * 10},\"tid\":1,\"type_name\":\"evt\",\"detail\":\"d{i}\"}}");
+        await File.WriteAllLinesAsync(blackboxPath, bbLines);
+
+        // Even with a valid identity whose isolated directory has no files,
+        // LoadAdvancedArtifacts must fall back to the compatibility files.
+        var data = MainWindowViewModel.LoadAdvancedArtifacts(
+            dumpPath,
+            dir,
+            identity,
+            "missing report",
+            "missing wct",
+            CancellationToken.None);
+        Require(data.HasReport && data.ReportText == "compat report body", "report must fall back to compatibility path");
+        Require(data.HasWct && data.WctText.Contains("\"tid\": 42", StringComparison.Ordinal), "WCT must fall back to compatibility path");
+        Require(data.EventCount == 260, "blackbox must count all 260 events");
+        Require(data.EventLines.Count == 200, "blackbox must retain the final 200 events");
+        Require(data.EventLines[0].StartsWith("[60]", StringComparison.Ordinal), "tail window must start at event 60");
+        Require(data.EventLines[^1].StartsWith("[259]", StringComparison.Ordinal), "tail window must end at event 259");
+    }
+
+    private static async Task CheckCrashLoggerLogPathResolution(string root)
+    {
+        var dir = Path.Combine(root, "cl_resolve");
+        Directory.CreateDirectory(dir);
+        var directLog = Path.Combine(dir, "crash-2026-11-20-01-00-00.log");
+        await File.WriteAllTextAsync(directLog, "Skyrim SSE v1.6.1170");
+
+        Require(
+            string.Equals(
+                MainWindowViewModel.ResolveCrashLoggerLogPath(directLog, null, null),
+                directLog,
+                StringComparison.OrdinalIgnoreCase),
+            "unredacted existing Crash Logger log path must resolve directly");
+        Require(
+            string.Equals(
+                MainWindowViewModel.ResolveCrashLoggerLogPath("<redacted>\\crash-2026-11-20-01-00-00.log", null, dir),
+                directLog,
+                StringComparison.OrdinalIgnoreCase),
+            "redacted Crash Logger log path must resolve by filename in outDir");
+        Require(
+            MainWindowViewModel.ResolveCrashLoggerLogPath("<redacted>\\missing-crash.log", null, dir) is null,
+            "missing Crash Logger log must resolve to null");
+        Require(
+            MainWindowViewModel.ResolveCrashLoggerLogPath("<redacted>\\..", null, dir) is null,
+            "traversal filename must resolve to null");
+    }
+
+    private static async Task CheckRecentDumpsDefaultCapIncludesMoreThanTwelve(string root)
+    {
+        var dir = Path.Combine(root, "many_dumps");
+        Directory.CreateDirectory(dir);
+        var baseTime = new DateTime(2026, 11, 20, 0, 0, 0, DateTimeKind.Utc);
+        for (var i = 0; i < 18; i++)
+        {
+            var dump = Path.Combine(dir, $"SkyrimDiag_Crash_20261120_0000{i:D2}_000.dmp");
+            await File.WriteAllBytesAsync(dump, new byte[] { 0x4D, 0x44, 0x4D, 0x50 });
+            File.SetLastWriteTimeUtc(dump, baseTime.AddMinutes(i));
+        }
+
+        var state = new DumpDiscoveryState { RegisteredRoots = new List<string> { dir } };
+        var dumps = DumpDiscoveryService.DiscoverRecentDumps(state, currentDumpPath: null, isKorean: false);
+        Require(dumps.Count >= 18, $"default recent-dump discovery cap must show at least 18 dumps, got {dumps.Count}");
     }
 
     private static void Require(bool condition, string message)

@@ -87,6 +87,10 @@ public sealed partial class MainWindow
         AnalyzeButton.Content = T("ANALYZE NOW", "지금 분석");
         CancelAnalyzeButton.Content = T("Cancel analysis", "분석 취소");
         OpenOutputButton.Content = T("Open report folder", "리포트 폴더 열기");
+        TriageOpenOutputButton.Content = T("Open report folder", "리포트 폴더 열기");
+        TriageOpenCrashLoggerButton.Content = T("Open Crash Logger log", "Crash Logger 로그 열기");
+        CopyWctButton.Content = T("Copy WCT", "WCT 복사");
+        CopyReportButton.Content = T("Copy report", "리포트 복사");
         CopySummaryButton.Content = T("Copy summary", "요약 복사");
         CopyShareButton.Content = T("Share", "공유");
         TriageEditorTitleText.Text = T("Review Feedback", "검토 피드백");

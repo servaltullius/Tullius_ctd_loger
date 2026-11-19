@@ -11,6 +11,13 @@
     <Compile Include="..\..\dump_tool_winui\DumpIdentityContract.cs" Link="DumpIdentityContract.cs" />
     <Compile Include="..\..\dump_tool_winui\AtomicFile.cs" Link="AtomicFile.cs" />
     <Compile Include="..\..\dump_tool_winui\DumpDiscoveryStore.cs" Link="DumpDiscoveryStore.cs" />
+    <Compile Include="..\..\dump_tool_winui\DumpDiscoveryService.cs" Link="DumpDiscoveryService.cs" />
+    <Compile Include="..\..\dump_tool_winui\DumpToolInvocationOptions.cs" Link="DumpToolInvocationOptions.cs" />
+    <Compile Include="..\..\dump_tool_winui\NativeAnalyzerBridge.cs" Link="NativeAnalyzerBridge.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.cs" Link="MainWindowViewModel.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.Candidates.cs" Link="MainWindowViewModel.Candidates.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.Recommendations.cs" Link="MainWindowViewModel.Recommendations.cs" />
+    <Compile Include="..\..\dump_tool_winui\MainWindowViewModel.ShareText.cs" Link="MainWindowViewModel.ShareText.cs" />
     <Compile Include="..\..\dump_tool_winui\SummaryTriageStore.cs" Link="SummaryTriageStore.cs" />
     <Compile Include="..\..\dump_tool_winui\IniTextDecoder.cs" Link="IniTextDecoder.cs" />
     <Compile Include="..\..\dump_tool_winui\SaveLoadHistoryFingerprint.cs" Link="SaveLoadHistoryFingerprint.cs" />

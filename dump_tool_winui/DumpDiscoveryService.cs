@@ -19,7 +19,7 @@ internal static class DumpDiscoveryService
         DumpDiscoveryState state,
         string? currentDumpPath,
         bool isKorean,
-        int maxResults = 12)
+        int maxResults = 30)
     {
         var discovered = new List<DumpFileCandidate>();
         var seenFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
