@@ -62,15 +62,15 @@ private:
   EVT_HANDLE handle_ = nullptr;
 };
 
-std::wstring IsoUtc(std::uint64_t unix)
+std::wstring IsoUtc(std::uint64_t unix, const wchar_t* fraction = L".000Z")
 {
   const auto seconds = static_cast<std::time_t>(unix);
   std::tm utc{};
   wchar_t text[32]{};
-  if (gmtime_s(&utc, &seconds) != 0 || std::wcsftime(text, std::size(text), L"%Y-%m-%dT%H:%M:%S.000Z", &utc) == 0u) {
-    return L"1970-01-01T00:00:00.000Z";
+  if (gmtime_s(&utc, &seconds) != 0 || std::wcsftime(text, std::size(text), L"%Y-%m-%dT%H:%M:%S", &utc) == 0u) {
+    return std::wstring(L"1970-01-01T00:00:00") + fraction;
   }
-  return text;
+  return std::wstring(text) + fraction;
 }
 
 // Days since 1970-01-01 of a civil date (proleptic Gregorian).
@@ -261,9 +261,12 @@ std::wstring GpuDriverEventQuery(std::uint64_t sinceUnix, std::uint64_t untilUni
   for (const auto* provider : kProviders) {
     providers += (providers.empty() ? L"" : L" or ") + std::wstring(L"Provider[@Name='") + provider + L"']";
   }
+  // untilUnix comes from std::time(nullptr) (whole seconds); extend the upper
+  // bound through .9999999Z so a driver TDR/reset in the same second as the
+  // crash or freeze is not dropped by 100 ns SystemTime comparison.
   return L"*[System[(" + providers + L") and (Level=1 or Level=2 or Level=3) and TimeCreated[@SystemTime>='" +
     IsoUtc(sinceUnix) +
-    L"' and @SystemTime<='" + IsoUtc(untilUnix) + L"']]]";
+    L"' and @SystemTime<='" + IsoUtc(untilUnix, L".9999999Z") + L"']]]";
 }
 
 std::optional<GpuDriverEvent> ParseGpuDriverEventXml(std::wstring_view xml)

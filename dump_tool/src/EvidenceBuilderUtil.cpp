@@ -719,6 +719,12 @@ bool DumpModuleIsSystemish(const AnalysisResult& r, std::wstring_view filename)
   std::wstring_view path;
   if (!r.fault_module_path.empty() && WideLower(r.fault_module_filename) == lower) {
     path = r.fault_module_path;
+  } else if (!r.main_thread_lock_owner.top_module_path.empty() &&
+             WideLower(r.main_thread_lock_owner.top_module) == lower) {
+    path = r.main_thread_lock_owner.top_module_path;
+  } else if (!r.main_thread_wait.blocked_module_path.empty() &&
+             WideLower(r.main_thread_wait.blocked_module) == lower) {
+    path = r.main_thread_wait.blocked_module_path;
   } else {
     for (const auto& s : r.suspects) {
       if (!s.module_path.empty() && WideLower(s.module_filename) == lower) {

@@ -338,6 +338,57 @@ inline std::filesystem::file_time_type LastWriteTimeForIo(const std::filesystem:
   return std::filesystem::last_write_time(ioPath, ec);
 }
 
+#ifdef _WIN32
+// Size and last-write FILETIME (100 ns UTC ticks since 1601) through a handle
+// on extended-length paths so MO2's USVFS does not reject long paths.
+inline bool TryQueryFileSizeAndWriteTimeUtc100nsForIo(
+  const std::filesystem::path& path,
+  std::uint64_t* sizeBytes,
+  std::uint64_t* lastWriteTimeUtc100ns)
+{
+  if (sizeBytes) {
+    *sizeBytes = 0u;
+  }
+  if (lastWriteTimeUtc100ns) {
+    *lastWriteTimeUtc100ns = 0u;
+  }
+  if (path.empty()) {
+    return false;
+  }
+  const auto ioPath = PathForIo(path);
+  if (long_path_detail::IsExtended(ioPath)) {
+    BY_HANDLE_FILE_INFORMATION info{};
+    if (!long_path_detail::QueryByHandle(ioPath, &info) ||
+        (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0u) {
+      return false;
+    }
+    if (sizeBytes) {
+      *sizeBytes = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32u) | info.nFileSizeLow;
+    }
+    if (lastWriteTimeUtc100ns) {
+      *lastWriteTimeUtc100ns =
+        (static_cast<std::uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32u) |
+        info.ftLastWriteTime.dwLowDateTime;
+    }
+    return true;
+  }
+  WIN32_FILE_ATTRIBUTE_DATA attributes{};
+  if (!GetFileAttributesExW(ioPath.c_str(), GetFileExInfoStandard, &attributes) ||
+      (attributes.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0u) {
+    return false;
+  }
+  if (sizeBytes) {
+    *sizeBytes = (static_cast<std::uint64_t>(attributes.nFileSizeHigh) << 32u) | attributes.nFileSizeLow;
+  }
+  if (lastWriteTimeUtc100ns) {
+    *lastWriteTimeUtc100ns =
+      (static_cast<std::uint64_t>(attributes.ftLastWriteTime.dwHighDateTime) << 32u) |
+      attributes.ftLastWriteTime.dwLowDateTime;
+  }
+  return true;
+}
+#endif
+
 struct DirectoryEntryForIo
 {
   std::filesystem::path path;  // in the form the directory was listed in

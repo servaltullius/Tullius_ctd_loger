@@ -881,11 +881,61 @@ static void Test_TotalBudgetIsInGibibytes()
   }
 }
 
+// Under an extended-length output directory past MAX_PATH, full retention
+// sweep (ApplyRetentionToOutputDir), log rotation (RotateLogFileIfNeeded),
+// and Win32 dump identity attribute query must all succeed via *ForIo.
+static void Test_SweepAndLogRotationUnderALongOutputDir()
+{
+  const auto root = MakeTempDir();
+  auto dir = root;
+  while (dir.native().size() < 230u) {
+    dir /= "a_long_output_folder_segment";
+  }
+  const auto outBase = ExtendedLengthPath(dir);
+  const auto crash1 = dir / "SkyrimDiag_Crash_20260101_000001_000.dmp";
+  const auto crash1Summary = dir / "SkyrimDiag_Crash_20260101_000001_000_SkyrimDiagSummary.json";
+  const auto crash2 = dir / "SkyrimDiag_Crash_20260101_000002_000.dmp";
+  const auto helperLog = dir / "SkyrimDiagHelper.log";
+  assert(crash1.native().size() >= 260u);
+
+  WriteFile(ExtendedLengthPath(crash1), 32);
+  WriteFile(ExtendedLengthPath(crash1Summary), 16);
+  WriteFile(ExtendedLengthPath(crash2), 48);
+  WriteFile(ExtendedLengthPath(helperLog), 64);
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  ApplyRetentionToOutputDir(outBase, limits);
+
+  assert(!skydiag::IsRegularFileForIo(crash1));
+  assert(!skydiag::IsRegularFileForIo(crash1Summary));
+  assert(skydiag::IsRegularFileForIo(crash2));
+
+  RotateLogFileIfNeeded(ExtendedLengthPath(helperLog), /*maxBytes=*/16, /*maxFiles=*/2);
+  assert(!skydiag::IsRegularFileForIo(helperLog));
+  auto rotated1 = helperLog;
+  rotated1 += ".1";
+  assert(skydiag::IsRegularFileForIo(rotated1));
+
+#ifdef _WIN32
+  std::uint64_t sizeBytes = 0u;
+  std::uint64_t lastWriteUtc100ns = 0u;
+  assert(skydiag::TryQueryFileSizeAndWriteTimeUtc100nsForIo(
+    ExtendedLengthPath(crash2), &sizeBytes, &lastWriteUtc100ns));
+  assert(sizeBytes == 48u);
+  assert(lastWriteUtc100ns != 0u);
+#endif
+
+  std::error_code ec;
+  skydiag::RemoveAllForIo(ExtendedLengthPath(root), ec);
+}
+
 int main()
 {
   Test_PrunesCrashDumpsAndArtifacts();
   Test_PrunesOldestDumpsOverTheTotalBudget();
   Test_TotalBudgetUnderALongOutputDir();
+  Test_SweepAndLogRotationUnderALongOutputDir();
   Test_TotalBudgetKeepsTheRecentNewestOfEachKind();
   Test_TotalBudgetDropsAnOldNewestOfItsKind();
   Test_TotalBudgetKeepsARecaptureWithItsCrash();

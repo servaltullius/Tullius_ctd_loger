@@ -64,8 +64,8 @@ void TestParsesTheDriversEvents()
   Require(query.find(L"Provider[@Name='nvlddmkm']") != std::wstring::npos &&
             query.find(L"Provider[@Name='Display']") != std::wstring::npos &&
             query.find(L"@SystemTime>='2026-11-03T02:28:26.000Z'") != std::wstring::npos &&
-            query.find(L"@SystemTime<='2026-11-06T08:00:12.000Z'") != std::wstring::npos,
-    "the query names the drivers and the window");
+            query.find(L"@SystemTime<='2026-11-06T08:00:12.9999999Z'") != std::wstring::npos,
+    "the query names the drivers and extends the upper bound through the full second");
   // Information events would push the errors out of the newest kept.
   Require(query.find(L"(Level=1 or Level=2 or Level=3)") != std::wstring::npos, "errors and warnings only");
 }

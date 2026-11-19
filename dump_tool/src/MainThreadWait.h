@@ -14,6 +14,13 @@ namespace skydiag::dump_tool {
 // from DriverStore paths that look system-like, so they are matched by name.
 bool IsGraphicsStackModule(std::wstring_view moduleFilename);
 bool IsGraphicsDriverModule(std::wstring_view moduleFilename);
+// A real GPU driver (matched by name) or a Windows-loaded DirectX runtime.
+// A game-folder proxy of the same name (ENB, ReShade, DXVK) has
+// is_system == false and stays a mod, not the graphics stack.
+bool IsGraphicsStackFrame(const ModalStackFrame& frame);
+// True when a confirmed lock owner is inside a GPU driver or Windows DirectX
+// runtime (not a game-folder proxy DLL of the same name).
+bool IsLockOwnerInGraphicsStack(const MainThreadLockOwnerInfo& owner);
 
 // Reads the top of the game main thread's stack (innermost first, the frames
 // the modal-dialog check uses) and says what the thread was doing: waiting in

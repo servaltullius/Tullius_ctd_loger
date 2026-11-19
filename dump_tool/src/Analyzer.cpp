@@ -239,12 +239,14 @@ void IntegrateCrashLoggerFrameSignals(
   }
   out->crash_logger_probable_streak_length = rawSignals.probable_streak_length;
   // The parser knows names only, so a Windows or driver DLL outside its list
-  // (nvwgf2umx.dll) reads there as the first plugin frame. Loaded from a
-  // system folder it is none, and refusing it below would leave no first
-  // actionable frame at all: the next plugin frame takes its place.
+  // (nvwgf2umx.dll) or a passive hook (skse64, CrashLogger) reads there as
+  // the first plugin frame or longest streak. Refusing it below would leave no
+  // actionable frame or streak at all, so rescan the probable stack with
+  // loaded-path and hook knowledge.
   bool firstActionableInSystemNamedMod = rawSignals.first_actionable_probable_in_system_named_mod;
   if (!firstActionableInSystemNamedMod && !out->crash_logger_first_actionable_probable_module.empty() &&
-      IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_first_actionable_probable_module, allModules)) {
+      (IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_first_actionable_probable_module, allModules) ||
+       minidump::IsPassiveHookModule(out->crash_logger_first_actionable_probable_module))) {
     out->crash_logger_first_actionable_probable_module.clear();
     for (std::size_t i = 0; i < rawSignals.probable_modules_in_order.size(); ++i) {
       const bool threadEntryHook =
@@ -258,11 +260,56 @@ void IntegrateCrashLoggerFrameSignals(
       }
       const bool pluginFrame = inSystemNamedMod ||
         (!IsSystemishModule(module) && !IsExternalSoftwareModule(module) && !IsGameExeModule(module) &&
+         !minidump::IsPassiveHookModule(module) &&
          !IsCrashLoggerFrameModuleLoadedFromSystemPath(module, allModules));
       if (pluginFrame) {
         out->crash_logger_first_actionable_probable_module = module;
         firstActionableInSystemNamedMod = inSystemNamedMod;
         break;
+      }
+    }
+  }
+  bool probableStreakInSystemNamedMod = rawSignals.probable_streak_in_system_named_mod;
+  if (!probableStreakInSystemNamedMod && !out->crash_logger_probable_streak_module.empty() &&
+      (IsCrashLoggerFrameModuleLoadedFromSystemPath(out->crash_logger_probable_streak_module, allModules) ||
+       !CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module))) {
+    out->crash_logger_probable_streak_module.clear();
+    out->crash_logger_probable_streak_length = 0u;
+    std::wstring currentLower;
+    std::wstring currentModule;
+    bool currentInSystemNamedMod = false;
+    std::uint32_t currentLength = 0u;
+    for (std::size_t i = 0; i < rawSignals.probable_modules_in_order.size(); ++i) {
+      const bool threadEntryHook =
+        i < rawSignals.probable_frame_is_thread_entry_hook.size() && rawSignals.probable_frame_is_thread_entry_hook[i];
+      const bool inSystemNamedMod =
+        i < rawSignals.probable_frame_in_system_named_mod.size() && rawSignals.probable_frame_in_system_named_mod[i];
+      const auto module =
+        CanonicalizeCrashLoggerFrameModule(rawSignals.probable_modules_in_order[i], canonicalByFilenameLower);
+      const bool promotableFrame = !threadEntryHook && !module.empty() &&
+        (inSystemNamedMod ||
+         (CanPromoteCrashLoggerFrameModule(module) &&
+          !IsCrashLoggerFrameModuleLoadedFromSystemPath(module, allModules)));
+      if (!promotableFrame) {
+        currentLower.clear();
+        currentModule.clear();
+        currentInSystemNamedMod = false;
+        currentLength = 0u;
+        continue;
+      }
+      const std::wstring moduleLower = WideLower(module);
+      if (moduleLower == currentLower && inSystemNamedMod == currentInSystemNamedMod) {
+        currentLength++;
+      } else {
+        currentLower = moduleLower;
+        currentModule = module;
+        currentInSystemNamedMod = inSystemNamedMod;
+        currentLength = 1u;
+      }
+      if (currentLength > out->crash_logger_probable_streak_length) {
+        out->crash_logger_probable_streak_length = currentLength;
+        out->crash_logger_probable_streak_module = currentModule;
+        probableStreakInSystemNamedMod = currentInSystemNamedMod;
       }
     }
   }
@@ -292,7 +339,7 @@ void IntegrateCrashLoggerFrameSignals(
        allModules));
   out->crash_logger_probable_streak_eligible =
     (out->crash_logger_probable_streak_length >= 2u) &&
-    (rawSignals.probable_streak_in_system_named_mod ||
+    (probableStreakInSystemNamedMod ||
      (CanPromoteCrashLoggerFrameModule(out->crash_logger_probable_streak_module) &&
       !IsCrashLoggerFrameModuleLoadedFromSystemPath(
         out->crash_logger_probable_streak_module,

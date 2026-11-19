@@ -211,11 +211,14 @@ void RemoveFrozenCrashRearmMarkers(const AttachedProcess& proc, const std::files
   }
   const std::wstring prefix = FrozenCrashRearmMarkerPrefix(proc);
   std::error_code iterEc;
-  for (std::filesystem::directory_iterator it(outBase, iterEc), end; !iterEc && it != end; it.increment(iterEc)) {
-    const std::wstring name = it->path().filename().wstring();
+  for (const auto& entry : skydiag::ListDirectoryForIo(outBase, iterEc)) {
+    if (entry.directory) {
+      continue;
+    }
+    const std::wstring name = entry.path.filename().wstring();
     if (name.rfind(prefix, 0) == 0) {
       std::error_code ec;
-      std::filesystem::remove(it->path(), ec);
+      std::filesystem::remove(entry.path, ec);
     }
   }
 }

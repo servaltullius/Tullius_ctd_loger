@@ -120,6 +120,21 @@ bool IsGraphicsStackModule(std::wstring_view moduleFilename)
   return Contains(kGraphicsDrivers, lower) || Contains(kGraphicsRuntimes, lower);
 }
 
+bool IsGraphicsStackFrame(const ModalStackFrame& frame)
+{
+  return IsGraphicsDriverModule(frame.module_filename) ||
+         (frame.is_system && IsGraphicsStackModule(frame.module_filename));
+}
+
+bool IsLockOwnerInGraphicsStack(const MainThreadLockOwnerInfo& owner)
+{
+  if (!owner.confirmed || owner.top_module.empty()) {
+    return false;
+  }
+  return IsGraphicsDriverModule(owner.top_module) ||
+         (owner.top_module_is_system && IsGraphicsStackModule(owner.top_module));
+}
+
 MainThreadWaitInfo ClassifyMainThreadWait(const std::vector<ModalStackFrame>& frames)
 {
   MainThreadWaitInfo info{};
@@ -137,7 +152,7 @@ MainThreadWaitInfo ClassifyMainThreadWait(const std::vector<ModalStackFrame>& fr
       topEnd = i;
       break;
     }
-    if (!frame.is_system && !IsGraphicsStackModule(frame.module_filename)) {
+    if (!frame.is_system && !IsGraphicsStackFrame(frame)) {
       caller = i;
       topEnd = i;
       break;
@@ -149,7 +164,7 @@ MainThreadWaitInfo ClassifyMainThreadWait(const std::vector<ModalStackFrame>& fr
   bool unnamedSystemFrame = false;
   for (std::size_t i = 0; i < topEnd; ++i) {
     const auto& frame = frames[i];
-    if (IsGraphicsStackModule(frame.module_filename)) {
+    if (IsGraphicsStackFrame(frame)) {
       if (!graphicsFrame ||
           (IsGraphicsDriverModule(frame.module_filename) && !IsGraphicsDriverModule(graphicsFrame->module_filename))) {
         graphicsFrame = &frame;
@@ -210,7 +225,7 @@ MainThreadWaitInfo ClassifyMainThreadWait(const std::vector<ModalStackFrame>& fr
   for (std::size_t i = callerKnown ? caller : topEnd; i < frames.size(); ++i) {
     const auto& frame = frames[i];
     if (!frame.has_module || frame.is_system || frame.is_game_exe || frame.is_skse_runtime ||
-        IsGraphicsStackModule(frame.module_filename)) {
+        IsGraphicsStackFrame(frame)) {
       continue;
     }
     const auto lower = LowerAscii(frame.module_filename);
@@ -242,7 +257,7 @@ namespace {
 bool IsPluginFrame(const ModalStackFrame& frame)
 {
   if (!frame.has_module || frame.is_system || frame.is_game_exe || frame.is_skse_runtime || frame.is_hook_framework ||
-      IsGraphicsStackModule(frame.module_filename)) {
+      IsGraphicsStackFrame(frame)) {
     return false;
   }
   return LowerAscii(frame.module_filename) != L"skyrimdiag.dll";
@@ -393,7 +408,7 @@ std::vector<std::wstring> CallPathModules(const std::vector<ModalStackFrame>& fr
   std::vector<std::wstring> seen;
   for (const auto& frame : frames) {
     if (!frame.has_module || frame.is_system || frame.is_game_exe || frame.is_skse_runtime ||
-        IsGraphicsStackModule(frame.module_filename)) {
+        IsGraphicsStackFrame(frame)) {
       continue;
     }
     const auto lower = LowerAscii(frame.module_filename);
@@ -471,7 +486,9 @@ void DescribeLockOwnerFrames(MainThreadLockOwnerInfo& owner, const std::vector<M
   constexpr std::size_t kShownFrames = 6;
   owner.top_frames.clear();
   owner.top_module.clear();
+  owner.top_module_path.clear();
   owner.top_mod_name.clear();
+  owner.top_module_is_system = true;
   for (const auto& frame : frames) {
     if (owner.top_frames.size() < kShownFrames) {
       if (!frame.has_module) {
@@ -488,9 +505,11 @@ void DescribeLockOwnerFrames(MainThreadLockOwnerInfo& owner, const std::vector<M
       }
     }
     if (owner.top_module.empty() && frame.has_module &&
-        (!frame.is_system || IsGraphicsStackModule(frame.module_filename))) {
+        (!frame.is_system || IsGraphicsStackFrame(frame))) {
       owner.top_module = frame.module_filename;
+      owner.top_module_path = frame.module_path;
       owner.top_mod_name = frame.inferred_mod_name;
+      owner.top_module_is_system = frame.is_system;
     }
   }
 }

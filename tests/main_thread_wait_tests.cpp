@@ -746,6 +746,70 @@ void TestLockOwnerFramesNameTheFirstNonWindowsModule()
   assert(DescribeLockOwnerThread(owner, false) == L"스레드 51944");
 }
 
+void TestGameFolderDirectXProxyIsNotGraphicsStack()
+{
+  using skydiag::dump_tool::DescribeLockOwnerFrames;
+  using skydiag::dump_tool::IsBystanderWait;
+  using skydiag::dump_tool::IsLockOwnerInGraphicsStack;
+
+  // Game-folder ENB d3d11.dll (is_system == false) is a mod, not the Windows
+  // DirectX runtime, so waiting inside it is a plugin_wait.
+  auto enbD3d11 = Plugin(L"d3d11.dll", L"ENB Series");
+  enbD3d11.module_path = L"G:\\Skyrim\\d3d11.dll";
+  const auto enbWait = ClassifyMainThreadWait({
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf),
+    enbD3d11,
+    GameExe(),
+  });
+  assert(enbWait.kind == "plugin_wait");
+  assert(enbWait.waiting_module == L"d3d11.dll");
+  assert(enbWait.waiting_mod_name == L"ENB Series");
+  assert(!IsBystanderWait(enbWait));
+
+  // Windows System32 d3d11.dll (is_system == true) remains graphics_driver_wait.
+  const auto sysWait = ClassifyMainThreadWait({
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    System(L"KERNELBASE.dll", L"WaitForSingleObjectEx", 0xaf),
+    System(L"d3d11.dll", L"CContext::Flush", 0x20),
+    GameExe(),
+  });
+  assert(sysWait.kind == "graphics_driver_wait");
+  assert(sysWait.waiting_module == L"d3d11.dll");
+  assert(IsBystanderWait(sysWait));
+
+  // Lock owner in game-folder ReShade dxgi.dll is not treated as GPU driver.
+  auto proxyOwner = SuspendedLockOwner();
+  auto reshade = Plugin(L"dxgi.dll", L"ReShade");
+  reshade.module_path = L"G:\\Skyrim\\dxgi.dll";
+  DescribeLockOwnerFrames(proxyOwner, {
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    reshade,
+  });
+  assert(proxyOwner.top_module == L"dxgi.dll");
+  assert(proxyOwner.top_module_path == L"G:\\Skyrim\\dxgi.dll");
+  assert(!proxyOwner.top_module_is_system);
+  assert(!IsLockOwnerInGraphicsStack(proxyOwner));
+
+  // Lock owner in System32 dxgi.dll or nvwgf2umx.dll stays in graphics stack.
+  auto sysOwner = SuspendedLockOwner();
+  DescribeLockOwnerFrames(sysOwner, {
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    System(L"dxgi.dll", L"CDXGISwapChain::Present", 0x40),
+  });
+  assert(sysOwner.top_module == L"dxgi.dll");
+  assert(sysOwner.top_module_is_system);
+  assert(IsLockOwnerInGraphicsStack(sysOwner));
+
+  auto driverOwner = SuspendedLockOwner();
+  DescribeLockOwnerFrames(driverOwner, {
+    System(L"ntdll.dll", L"NtWaitForSingleObject"),
+    Plugin(L"nvwgf2umx.dll"),
+  });
+  assert(driverOwner.top_module == L"nvwgf2umx.dll");
+  assert(IsLockOwnerInGraphicsStack(driverOwner));
+}
+
 }  // namespace
 
 int main()
@@ -767,5 +831,6 @@ int main()
   TestBlockedGameThreadIsTheLockOwner();
   TestCodeBeforeShapes();
   TestLockOwnerFramesNameTheFirstNonWindowsModule();
+  TestGameFolderDirectXProxyIsNotGraphicsStack();
   return 0;
 }

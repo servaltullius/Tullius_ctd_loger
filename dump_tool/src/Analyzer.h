@@ -359,7 +359,12 @@ struct MainThreadLockOwnerInfo
   // The first module on top of its stack that is not a Windows DLL (graphics
   // drivers count), e.g. "nvwgf2umx.dll"; empty when the walk found none.
   std::wstring top_module;
+  std::wstring top_module_path;
   std::wstring top_mod_name;
+  // True for Windows-loaded system/runtime modules; DescribeLockOwnerFrames
+  // copies frame.is_system so a game-folder proxy (ENB/ReShade d3d11.dll) is
+  // not mistaken for the Windows DirectX runtime.
+  bool top_module_is_system = true;
   std::vector<std::wstring> top_frames;  // innermost first, "module!symbol+0x.." or "module"
   // WCT: blocked with no wait object of its own (every pass).
   bool blocked_without_wait_object = false;

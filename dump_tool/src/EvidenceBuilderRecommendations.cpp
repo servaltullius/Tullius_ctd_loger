@@ -1090,8 +1090,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
                           : (L" 멈춘 스레드 스택의 플러그인(" + path + L")은 호출 경로에 있었을 뿐이므로 이 근거만으로 빼지 마세요."))));
     } else if (stallExplained) {
       // No [Main thread] advice.
-    } else if (isHangLike && r.main_thread_lock_owner.confirmed &&
-               IsGraphicsStackModule(r.main_thread_lock_owner.top_module)) {
+    } else if (isHangLike && IsLockOwnerInGraphicsStack(r.main_thread_lock_owner)) {
       // The thread holding the lock was itself in the graphics driver.
       const auto& owner = r.main_thread_lock_owner;
       const auto& injectors = r.graphics_env.injection_modules;

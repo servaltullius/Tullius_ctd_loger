@@ -112,7 +112,7 @@ std::uint32_t ReadCrashSequence(const skydiag::SharedHeader* header) noexcept
 
 bool TryCaptureDumpIdentity(
   const std::filesystem::path& dumpPath,
-  CleanExitDumpIdentity* out) noexcept
+  CleanExitDumpIdentity* out)
 {
   if (out) {
     *out = CleanExitDumpIdentity{};
@@ -121,25 +121,16 @@ bool TryCaptureDumpIdentity(
     return false;
   }
 
-  WIN32_FILE_ATTRIBUTE_DATA attributes{};
-  if (!GetFileAttributesExW(
-        dumpPath.c_str(),
-        GetFileExInfoStandard,
-        &attributes)) {
+  std::uint64_t sizeBytes = 0u;
+  std::uint64_t lastWriteTimeUtc100ns = 0u;
+  if (!skydiag::TryQueryFileSizeAndWriteTimeUtc100nsForIo(dumpPath, &sizeBytes, &lastWriteTimeUtc100ns)) {
     return false;
   }
 
-  ULARGE_INTEGER size{};
-  size.HighPart = attributes.nFileSizeHigh;
-  size.LowPart = attributes.nFileSizeLow;
-  ULARGE_INTEGER lastWrite{};
-  lastWrite.HighPart = attributes.ftLastWriteTime.dwHighDateTime;
-  lastWrite.LowPart = attributes.ftLastWriteTime.dwLowDateTime;
-
   out->valid = true;
   out->filename = dumpPath.filename().wstring();
-  out->sizeBytes = size.QuadPart;
-  out->lastWriteTimeUtc100ns = lastWrite.QuadPart;
+  out->sizeBytes = sizeBytes;
+  out->lastWriteTimeUtc100ns = lastWriteTimeUtc100ns;
   return true;
 }
 
