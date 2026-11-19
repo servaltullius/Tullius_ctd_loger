@@ -1041,6 +1041,57 @@ void TestHandleProcessExitTick_DoesNotReportAnEarlyReleasedFaultWithoutACrashLog
   std::filesystem::remove_all(outBase);
 }
 
+// A newer crash arriving while the early thread-dump-window recovery check is
+// running supersedes the probe: no dump is written for the superseded fault and
+// crashEvent stays signaled so the helper immediately handles the newer crash.
+void TestHandleCrashEventTick_ThreadDumpWindowSupersededByNewerCrashSkipsDump()
+{
+  const auto outBase = MakeTempDir(L"skydiag_helper_thread_dump_superseded");
+  ClearLog(outBase);
+
+  auto shared = MakeSharedLayout();
+  shared->header.qpc_freq = QpcFrequency();
+  shared->header.last_heartbeat_qpc = QpcNow();
+  shared->header.state_flags = skydiag::kState_Frozen;
+  shared->header.crash.exception_code = 0xE06D7363u;
+  shared->header.crash.faulting_tid = 53376u;
+  shared->header.crash_seq = 2u;
+
+  auto child = LaunchSleepingChildProcess();
+  auto proc = MakeAttachedProcessForChild(child, shared.get());
+  proc.crashEvent = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+  Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+
+  std::thread superseder([&] {
+    Sleep(150);
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash_seq = 4u;
+    SetEvent(proc.crashEvent);
+  });
+  NoteCrashLoggerThreadDumpHotkeyPressed(GetTickCount64());
+  const bool handled = HandleCrashEventTickForState(cfg, proc, outBase, &state);
+  superseder.join();
+  NoteCrashLoggerThreadDumpHotkeyPressed(0);
+
+  Require(handled && !state.crashCaptured.latched, "Superseded thread-dump-window fault must not latch a dump");
+  Require(!HasFileWithPrefix(outBase, L"SkyrimDiag_Crash_"), "Superseded fault must not write a crash dump");
+  Require(
+    WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0,
+    "crashEvent must remain signaled to immediately retry the newer crash");
+  AssertContains(
+    ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"),
+    "No dump written for the superseded thread-dump-window exception",
+    "Superseded thread-dump-window skip must be logged");
+
+  CloseHandle(proc.crashEvent);
+  proc.crashEvent = nullptr;
+  TerminateChildProcess(&child);
+  std::filesystem::remove_all(outBase);
+}
+
 // The exit path's check for an early release in Crash Logger's thread dump
 // window: a non-zero exit within a minute records it with Crash Logger's
 // crash-*.log written since its crash event, or with the exception's own exit
@@ -2654,6 +2705,9 @@ void TestRearmFrozenCrash_SignalsAGenerationAgainOnlyOnce()
   Require(state.rearmedFrozenCrashSeq == 0u, "not signaled a second time");
   Require(WaitForSingleObject(proc.crashEvent, 0) == WAIT_TIMEOUT, "its crash event stays clear");
   Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "thawed so a later crash is recorded");
+  Require(
+    state.crashCaptured.releasedCrashSeq == 2u && !state.crashCaptured.releasedOnBriefHeartbeat,
+    "abandoned frozen crash must be recorded as released so exit drain does not report it");
   AssertContains(
     ReadAllTextUtf8(outBase / "SkyrimDiagHelper.log"), "not signaling it again. Thawed capture", "the give-up is logged");
 
@@ -4039,6 +4093,7 @@ int wmain(int argc, wchar_t** argv)
     TestHandleProcessExitTick_DoesNotReReportAReleasedThreadDumpFault();
     TestHandleProcessExitTick_ReportsAnEarlyReleasedFaultEndedByCrashLogger();
     TestHandleProcessExitTick_DoesNotReportAnEarlyReleasedFaultWithoutACrashLog();
+    TestHandleCrashEventTick_ThreadDumpWindowSupersededByNewerCrashSkipsDump();
     TestHandleProcessExitTick_ThreadDumpWindowReleaseNeedsACrashLog();
     TestHandleProcessExitTick_ZeroExitDoesNotReportAReleasedStrongFault();
     TestHandleProcessExitTick_ReportsAFaultNewerThanTheReleasedOne();

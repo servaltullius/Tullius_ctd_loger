@@ -185,7 +185,7 @@ void InitializeLoopState(const AttachedProcess& proc, const std::filesystem::pat
     state->crashCaptured.releasedOnBriefHeartbeat = false;
     state->crashCaptured.releasedInThreadDumpWindow = false;
   }
-  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc, outBase);
+  state->rearmedFrozenCrashSeq = RearmFrozenCrashFromEarlierHelper(proc, outBase, &state->crashCaptured);
 }
 
 std::wstring FrozenCrashRearmMarkerPrefix(const AttachedProcess& proc)
@@ -220,7 +220,10 @@ void RemoveFrozenCrashRearmMarkers(const AttachedProcess& proc, const std::files
   }
 }
 
-std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, const std::filesystem::path& outBase)
+std::uint32_t RearmFrozenCrashFromEarlierHelper(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState)
 {
   if (!proc.crashEvent || !proc.process || WaitForSingleObject(proc.process, 0) != WAIT_TIMEOUT) {
     return 0u;  // an exited game's record is drained by the exit path
@@ -246,6 +249,12 @@ std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, con
   const bool alreadyRearmed = ExistsForIo(marker, existsEc) || existsEc;
   if (alreadyRearmed || !WriteTextFileUtf8(marker, "rearmed\n")) {
     const bool thawed = proc.shmWritable && ThawCrashCapture(proc, committed.crashSeq);
+    if (crashState) {
+      crashState->releasedCrashSeq = committed.crashSeq;
+      crashState->releasedCrashTick64 = GetTickCount64();
+      crashState->releasedOnBriefHeartbeat = false;
+      crashState->releasedInThreadDumpWindow = false;
+    }
     AppendLogLine(
       outBase,
       L"Committed crash_seq=" + std::to_wstring(committed.crashSeq)

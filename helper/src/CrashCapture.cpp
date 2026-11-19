@@ -693,6 +693,7 @@ void ProcessValidCrashDump(
   }
 
   bool viewerNow = false;
+  bool normalExitDuringWait = false;
   if (cfg.autoOpenViewerOnCrash && forcedClose.matched()) {
     // ADR-0022: the player closed the game; this is no CTD to pop up for.
     // The headless analysis below still writes the report and summary.
@@ -715,6 +716,7 @@ void ProcessValidCrashDump(
         const bool crashOutlivesZeroExit = DoesCapturedCrashOutliveZeroExit(
           /*crashLatched=*/true, IsUnhandledExceptionSignaled(unhandledEvent), /*lateRecoveryWithheld=*/false);
         if (IsNormalExitForCapturedCrash(processExitCode, crashOutlivesZeroExit)) {
+          normalExitDuringWait = true;
           AppendLogLine(
             outBase,
             L"Process exited with exit_code=0 during wait window; "
@@ -771,7 +773,7 @@ void ProcessValidCrashDump(
     }
   }
 
-  if (!crashAnalysisQueued) {
+  if (!crashAnalysisQueued && !normalExitDuringWait) {
     if (ShouldRunHeadlessDumpAnalysis(cfg, viewerNow, false)) {
       std::wstring analyzeQueueErr;
       if (StartPendingCrashAnalysisTask(cfg, dumpPath, outBase, pendingCrashAnalysis, &analyzeQueueErr)) {
@@ -1031,7 +1033,7 @@ skydiag::ForcedCloseMatch FindForcedCloseInSnapshot(
       continue;
     }
     if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest)) {
-      scanner.AddCloseRequest(toMs(event.qpc), event.payload.a);
+      scanner.AddCloseRequest(toMs(event.qpc), event.payload.a, event.payload.d);
     } else if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash)) {
       scanner.AddCrash(toMs(event.qpc));
     }
@@ -1176,9 +1178,11 @@ std::atomic<std::uint64_t> g_lastCrashLoggerHotkeyTick64{ 0 };
 
 enum class ThreadDumpWindowOutcome
 {
-  kWriteDump,
+  kNotApplicable,
+  kWriteDumpAfterCheck,
   kExitedBeforeDump,
   kReleased,
+  kSuperseded,
 };
 
   // Right after Crash Logger's thread dump hotkey, a C++ exception or
@@ -1247,6 +1251,12 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
           + (early == FilterVerdict::kDeleteRecovered && !thawed ? L" (capture not thawed: a newer crash record is present)." : L"."));
       return ThreadDumpWindowOutcome::kReleased;
     }
+    if (early == FilterVerdict::kRetryNewerCrash) {
+      AppendLogLine(
+        outBase,
+        L"No dump written for the superseded thread-dump-window exception; immediately retrying the newer crash event.");
+      return ThreadDumpWindowOutcome::kSuperseded;
+    }
     // The filter keeps the dump when the game exited with a non-zero or
     // unreadable exit code. Its address space is gone then: MiniDumpWriteDump
     // can only fail and leave an empty file.
@@ -1256,9 +1266,9 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
       exitedBeforeDump
         ? L"The game exited after this exception, before a crash dump could be written."
         : L"The game did not keep running after this exception; writing the crash dump.");
-    return exitedBeforeDump ? ThreadDumpWindowOutcome::kExitedBeforeDump : ThreadDumpWindowOutcome::kWriteDump;
+    return exitedBeforeDump ? ThreadDumpWindowOutcome::kExitedBeforeDump : ThreadDumpWindowOutcome::kWriteDumpAfterCheck;
   }
-  return ThreadDumpWindowOutcome::kWriteDump;
+  return ThreadDumpWindowOutcome::kNotApplicable;
 }
 
 enum class RepeatedRecoveredFaultOutcome
@@ -1751,10 +1761,16 @@ bool HandleCrashEventTick(
       // for this exception's.
       DiscardReleasedCrashDump(outBase, crashState, L"a newer crash event arrived");
       return true;
+    case ThreadDumpWindowOutcome::kSuperseded:
+      return true;
     case ThreadDumpWindowOutcome::kExitedBeforeDump:
       exitedBeforeDump = true;
+      checkedRecoveryBeforeDump = true;
       break;
-    case ThreadDumpWindowOutcome::kWriteDump:
+    case ThreadDumpWindowOutcome::kWriteDumpAfterCheck:
+      checkedRecoveryBeforeDump = true;
+      break;
+    case ThreadDumpWindowOutcome::kNotApplicable:
       switch (CheckRepeatedRecoveredFault(cfg, proc, outBase, info, forcedClose, crashState)) {
         case RepeatedRecoveredFaultOutcome::kNotApplicable:
           break;
