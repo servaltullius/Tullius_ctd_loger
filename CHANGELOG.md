@@ -2,6 +2,59 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.79-rc2 (2026-11-20)
+
+v0.2.79-rc1 이후의 변경(PR #331, #332, #333, #334)을 모은 테스트용 프리릴리즈입니다. 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol v4 그대로, 새 설정 없음). ZIP 전체를 설치해 주세요. MO2에서 새 모드로 설치했다면 이전 버전 모드는 꺼 주세요. rc1과 버전 번호(0.2.79)가 같으므로 rc1이 이미 분석해 둔 덤프를 새 분석기로 다시 보려면 뷰어에서 "지금 분석"을 눌러 주세요.
+
+### 한눈에 보기
+- **전역 분석기·Helper 신뢰성 버그 5건을 수정했습니다(PR #332).** DirectX 프록시 DLL의 빠른 답/메인 스레드 대기 판정을 통일하고, Crash Logger `probable_streak_module` 및 패시브 훅 재스캔, MO2 롱패스 보존/로테이션, GPU 드라이버 이벤트 상한 경계(`.9999999Z`)를 수정했습니다.
+- **WinUI 덤프 뷰어 사용성과 반응성을 개선했습니다(PR #333).** 전역 상태 바, Triage 텍스트 선택, Crash Logger 로그 열기·원시 데이터 복사 버튼을 추가하고, 최근 덤프 클릭 1.5초 폴링 제거, 호환성 산출물 폴백, Blackbox 말미 전용 파싱, 문제 해결 Expander 헤더 표시, 최근 덤프 기본 상한(30개)을 반영했습니다.
+- **플러그인 INI 로더, 스냅샷 일관성, 장애 명령 디코더, 사전 점검을 보강했습니다(PR #334).** `SkyrimDiag.dll` 옆의 `SkyrimDiag.ini`를 공용 `IniDocument` + `PathForIo`로 읽고, 프리즈/수동/재캡처 덤프에 `CaptureStableSharedSnapshot`과 실제 `state_flags`를 적용했으며, `rep movs*`/`rep stos*` 및 2/3바이트 VEX AVX/AVX2 명령 디코딩과 `BINARY_VERSION_CONSISTENCY`/`ADDRESS_LIBRARY_PRESENT` 사전 점검을 추가했습니다.
+
+### 수정
+**플러그인 및 공유 헤더**
+- `shared/SkyrimDiagIniText.h`, `helper/include/SkyrimDiagHelper/IniText.h`: 공용 INI 디코더/파서를 `shared/`(`namespace skydiag::ini`)로 분리하고 Helper 헤더는 호환 shim으로 유지했습니다.
+- `plugin/src/PluginMain.cpp`: `GetPrivateProfile*W` 대신 `GetThisModulePath().parent_path() / L"SkyrimDiag.ini"` + `PathForIo` + `IniDocument`로 설정을 읽고 로드/기본값 폴백 경로를 로그로 남깁니다.
+
+**Helper**
+- `Retention.cpp`, `HelperLog.cpp`, 덤프 식별 경로: MO2 롱패스 환경에서 `PathForIo` 기반으로 일관 동작하도록 수정했습니다.
+- `FreezeCapture.cpp`, `PendingCrashAnalysis.Execute.cpp`: 덤프 기록 전 `CaptureStableSharedSnapshot`을 호출(실패 시 `proc.shm` 폴백)하고 재캡처 매니페스트에 실제 `dumpShm->header.state_flags`를 기록합니다.
+- `CompatibilityPreflight.cpp`: `BINARY_VERSION_CONSISTENCY`와 `ADDRESS_LIBRARY_PRESENT` 사전 점검을 추가했습니다.
+
+**분석기**
+- `EvidenceBuilderQuickAnswer.cpp`, `MainThreadWait.cpp`: DirectX 프록시 DLL 판정을 빠른 답과 메인 스레드 대기 분석 간에 일치시켰습니다.
+- `CrashLoggerParseCore.cpp`: `probable_streak_module` 추적 및 패시브 훅 재스캔을 보강했습니다.
+- `GpuDriverEvents.cpp`: TDR 이벤트 조회 상한을 `.9999999Z`로 보정했습니다.
+- `FaultInstruction.h`, `FaultInstruction.cpp`: `rep movs*`/`rep stos*` 이중 메모리(`[rsi]`/`[rdi]`) 및 2/3바이트 VEX(`0xC5`/`0xC4`, `0F` 맵) AVX/AVX2 메모리 명령(32바이트 `ymmword` 및 AVX 정렬 규칙)을 추가했습니다.
+
+**뷰어 (WinUI)**
+- `MainWindow.xaml`, `MainWindow.cs`, `MainWindow.Analysis.cs`, `MainWindowViewModel.cs`: 전역 상태 바, Triage 텍스트 선택 및 빠른 액션 버튼, 최근 덤프 클릭 폴링 제거, 호환성 산출물 폴백, Blackbox 말미 전용 파싱, Expander 헤더 수정, 최근 덤프 상한 30건을 반영했습니다.
+
+**CI·테스트(내부)**
+- `scripts/ci_apt_install.sh`: `dpkg-query` 사전 확인 및 Ubuntu 미러 폴백 추가(PR #332).
+- `.github/actions/windows-setup/action.yml`: `vcpkg-configuration.json` 해시 기반 `vcpkg` 체크아웃 캐시 및 `--filter=blob:none --no-checkout` 3회 재시도 추가(PR #334).
+
+### 테스트 시 확인할 점
+- MO2에 `v0.2.79-rc2`를 설치해 게임을 실행했을 때 `SkyrimDiag.log`에 `loaded config from ...SkyrimDiag.ini`가 기록되고, `SkyrimDiag_Preflight.json`의 `BINARY_VERSION_CONSISTENCY`와 `ADDRESS_LIBRARY_PRESENT`가 `ok`인지 확인해 주세요.
+- WinUI 뷰어에서 전역 상태 바, Triage 텍스트 선택, Crash Logger 로그 열기·원시 데이터 복사 버튼, 최근 덤프 전환 반응성을 확인해 주세요.
+
+### 실게임에서 확인한 것
+- 이 RC 빌드(`v0.2.79-rc2`) 자체로 스카이림을 실행해 확인하지는 않았습니다. v0.2.79-rc1 미확인 항목과 이번 rc2의 인게임 INI 로드·사전 점검 신규 항목 출력은 실게임 미확인 상태입니다.
+
+### 주의사항
+- `v0.2.79-rc2`는 정식 `v0.2.79` 전에 1·2·3순위 개선 사항을 통합해 확인하기 위한 테스트용 프리릴리즈입니다.
+- `v0.2.79-rc1`과 버전 번호(`0.2.79`)가 같으므로 rc1이 분석해 둔 덤프는 뷰어에서 "지금 분석"으로 다시 분석해야 새 로직이 반영됩니다.
+
+### 검증
+- Windows test suite: `122/122` 통과 (`bba0cec`)
+- Linux test suite: WSL(g++)에서 `88/88` 통과, WSL `clang-tidy-18` `clean` (`bba0cec`). GitHub Actions CI(PR #332, #333, #334) 전 잡 통과
+- 실제 덤프 재분석(`scripts/compare_analyses.py`, 덤프 46개의 한·영 92건, 기준: `v0.2.79-rc1` CLI): 92건 중 0건 변경(의도치 않은 회귀 0건)
+- 실사고 품질 코퍼스: `SKIPPED (not measured)` — 코퍼스 미제공
+- Windows native RelWithDebInfo / WinUI self-contained publish: 성공 (`bba0cec`)
+- 로컬 패키징: `Tullius_ctd_loger_v0.2.79-rc2.zip` 생성 성공 (`--no-pdb`, `89,927,028` bytes, 525 entries, PDB 0개)
+- Release hard gate(clean provenance 강제): `OK`
+- 공개 asset은 태그 워크플로가 다시 빌드하므로, SHA-256은 릴리즈 페이지에 표시되는 값을 기준으로 확인해 주세요.
+
 ## v0.2.79-rc1 (2026-11-19)
 
 v0.2.78 이후의 변경(PR #327, #328, #329)을 모은 테스트용 프리릴리즈입니다. 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol v4 그대로, 새 설정 없음). ZIP 전체를 설치해 주세요. MO2에서 새 모드로 설치했다면 이전 버전 모드는 꺼 주세요. v0.2.78까지의 버전이 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다.
