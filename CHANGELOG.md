@@ -2,6 +2,74 @@
 
 > **버전 갭 안내:** v0.2.7, v0.2.24, v0.2.38은 RC(Release Candidate)만 배포 후 정식 릴리즈 없이 다음 버전으로 넘어간 번호입니다.
 
+## v0.2.79-rc1 (미배포)
+
+v0.2.78 이후의 변경(PR #327, #328, #329)을 모은 테스트용 프리릴리즈입니다. 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었습니다(SharedLayout protocol v4 그대로, 새 설정 없음). ZIP 전체를 설치해 주세요. MO2에서 새 모드로 설치했다면 이전 버전 모드는 꺼 주세요. v0.2.78까지의 버전이 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다.
+
+### 한눈에 보기
+- **게임 폴더 프록시 DLL(`winmm.dll` 등)을 Crash Logger 프레임에서 시스템 DLL로 오분류하지 않습니다.** 하드코딩된 시스템 DLL 이름 목록 바깥의 시스템 이름으로 게임 폴더에 놓인 프록시 DLL이 크래시 원인으로 보고됐을 때, 분석기가 Crash Logger 프레임에서 이를 모드 DLL 후보로 인식하도록 고쳤습니다.
+- **비정규 주소 접근(`#GP`)에서 순수 쓰기 명령의 접근 방향을 `write`로 정확히 기록합니다.** 이전에는 `ExceptionInformation[0] == 0`인 `#GP` 크래시에서 순수 쓰기 명령도 `read`로 표시됐습니다.
+- **플러그인·Helper·분석기·뷰어 4개 영역 코드 리뷰에서 찾은 결함 24건을 한꺼번에 정리했습니다.**
+  - **Alt+F4 종료 플래그 유지**: 키 샘플러가 Alt+F4를 먼저 기록한 뒤 `Main::quitGame`이 켜져도 종료 플래그 출처(`kQuitFlag`)를 버리지 않고 기록해, 느린 종료와 10초 이후 종료 중 크래시 판정이 일관되게 동작합니다.
+  - **처리되지 않은 예외 시그널 수명 보강**: Helper가 먼저 thaw한 예외가 top-level filter에 도달해도 `unhandledEvent`를 알리고, 다음 크래시 시작 시 이전 잔류 시그널을 초기화합니다.
+  - **Helper 가드 페이지 보호 및 상태 머신 보강**: first-chance 크래시 오브젝트 메모리 수집이 살아 있는 게임의 `PAGE_GUARD`를 소모하지 않도록 `PageCheck`를 적용했고, 방치된 frozen 크래시 포기 시 종료 오탐 방지와 thread-dump 윈도우 상태 분리를 반영했습니다.
+  - **분석기·뷰어 안정화**: WCT 데드락 사이클(`cycles > 0`)을 수동 캡처 hang 판정에 포함하고, WinUI 연속 분석 클릭 시 `CancellationTokenSource` 조기 `Dispose` 및 이전 작업의 `SetBusy(false)` 덮어쓰기 레이스를 없앴습니다.
+
+### 수정
+**플러그인 및 공유 헤더**
+- `CloseRequestHooks.cpp`: `Main::quitGame`이 Alt+F4와 함께 켜질 때 `TryClaimAltF4` 실패로 이벤트를 버리지 않고 항상 `CloseRequestSource::kQuitFlag` 이벤트를 기록합니다. 공유 헤더(`SkyrimDiagCloseRequest.h`)에 `IsQuitFlagCloseRequestEvent(payloadA, payloadD)`와 `ForcedCloseMatch::fromQuitFlag`를 추가해 Helper와 분석기가 동일한 규칙을 씁니다.
+- `CrashHandler.cpp`: `TryPublishCrashRecord`가 `kState_Frozen`을 선점한 직후 잔류 `unhandledEvent`를 `ResetEvent`로 비우고, 스레드별 발행 `(EXCEPTION_RECORD*, crash_seq)`를 고정 8슬롯 테이블에 기록해 Helper가 먼저 thaw한 예외가 top-level filter에 도달해도 `dumpSettled` 대기 없이 `SetEvent(unhandled)`를 보냅니다. `SignalPublishedCrash`에서도 `EXCEPTION_STACK_OVERFLOW`가 아니면 `RecordCloseRequestAtCrash()`를 호출합니다.
+- `ResourceHooks.cpp`: vtable 검증의 `inImage` 오버플로와 slot 1 범위(`3 * sizeof(void*)`) 검사를 고치고, `g_origLooseFileDoOpen`을 `std::atomic`으로 바꿔 패치 전에 원본 포인터를 먼저 공개하며, 첫 로그 `spdlog::info`를 `try/catch`로 감쌌습니다.
+- `PluginMain.cpp`, `EventSinks.cpp`: `OnDataLoaded`에서 `LoadingMenu` 확인 전에 `RegisterEventSinks`를 먼저 등록해 TOCTOU 창을 없앴고, `RefreshInMenuFlag`에서 `kState_Loading`도 동기화합니다.
+- `Heartbeat.cpp`, `SkyrimDiagSessionLogs.h`, `SkyrimDiagRtti.h`: `CaptureThreadIds`의 스냅샷 핸들에 RAII 가드를 적용하고, `KeepSessionLog`가 MO2 롱패스(`SkyrimDiagLongPath`)를 쓰도록 고쳤으며, `ReadCString`이 `maxBytes`를 넘겨 읽지 않도록 클램핑했습니다.
+
+**Helper**
+- `CrashObjectMemory.cpp`: `CollectCrashObjectMemory`에 `PageCheck`를 전달해 first-chance 예외 시 살아 있는 프로세스의 1회성 `PAGE_GUARD`를 소모하지 않도록 수정했습니다.
+- `HelperMain.Startup.cpp`, `HelperMain.Loop.cpp`: `RearmFrozenCrashFromEarlierHelper`가 방치된 frozen 세대를 포기하고 thaw할 때 `CrashCaptureState::releasedCrashSeq`를 함께 기록해 종료 시 `DrainCrashEventBeforeExit` 오탐을 막았습니다.
+- `CrashCapture.cpp`: `ThreadDumpWindowOutcome`을 `kNotApplicable`, `kWriteDumpAfterCheck`, `kExitedBeforeDump`, `kReleased`, `kSuperseded`로 분리해 superseded 프로브는 덤프를 쓰지 않고 사전 검사된 예외는 이중 필터링을 건너뛰도록 수정했습니다. `FindForcedCloseInSnapshot`에 `payload.d`를 전달하고, `ProcessValidCrashDump`에서 대기 중 정상 종료가 확인되면 헤드리스 분석 실행을 생략합니다.
+- `QuitRequestWatcher.cpp`, `HelperLog.cpp`, `ProcessAttach.cpp`: `QuitRequestWatcher`가 `IsQuitFlagCloseRequestEvent`를 쓰도록 맞추고, `HelperLog` 파일 기록·로테이션을 뮤텍스와 `PathForIo`로 보호했으며, `Detach`에서 `unhandledEventOpenError`와 `dumpSettledEventCreateError`를 초기화합니다.
+
+**분석기**
+- `CrashLoggerParseCore.cpp`, `Analyzer.CaptureInputs.cpp`: 게임 폴더에 놓인 시스템명 프록시 DLL(`winmm.dll` 등)이 Crash Logger 프레임 후보에서 빠지지 않도록 모듈 경로·주소 기반으로 판별합니다.
+- `FaultInstruction.cpp`: `#GP`(`kAccessViolationNoAddress`)에서 순수 쓰기 명령의 접근 방향을 `write`로 기록합니다.
+- `Analyzer.CaptureInputs.cpp`, `AnalyzerInternalsStackwalk.cpp`, `AnalyzerInternalsStackScan.cpp`: `DetermineHangLike`에 WCT 데드락 사이클(`cycles > 0`)을 반영하고, `stackwalk_only_thread_entry_hook_plugins`가 `stackwalk_complete_without_plugin_frames`를 전제하도록 고쳤으며, `FindThreadsWithNearStackModule`가 `module_path`(없으면 비시스템 복사본 우선)를 매칭해 게임 폴더 프록시 DLL을 System32 복사본과 혼동하지 않게 수정했습니다.
+- `AnalyzerInternalsBlackbox.cpp`, `EvidenceBuilderUtil.cpp`, `OutputWriter.Summary.cpp`: `from_quit_flag`가 참인 `alt_f4` 강제 종료는 요약 JSON에서 `window_seconds`를 생략하고, `SlowShutdownLead`에서 `alt_f4` 느린 종료가 메뉴 종료 문구로 떨어지지 않도록 분기했습니다.
+- `GpuDriverLog.cpp`, `EvidenceBuilderQuickAnswer.cpp`, `CrashLoggerParseCore.cpp`: `GpuDriverProblemCount`가 이벤트 목록이 비었거나 잘린 경우에도 `total`과 일치하게 맞추고 `DescribeGpuDriverLog`가 `LastGpuDriverProblemBefore`를 쓰도록 통일했으며, `SetDoubtForCrash`가 `ReadableModName(r.inferred_mod_name)`과 비교하도록 고치고 `ParseCrashLoggerObjectRefsAscii`에 `CALL STACK` 섹션 종료자를 추가했습니다.
+
+**뷰어 (WinUI)**
+- `MainWindow.Analysis.cs`: 새 분석 시작 시 이전 `_analysisCts?.Dispose()`를 조기 호출하지 않고 각 호출의 `finally`에서 자체 해제하며, 모든 `await` 이후 UI 갱신과 `SetBusy(false)`를 `ReferenceEquals(_analysisCts, analysisCts)`로 가드했습니다.
+- `DumpDiscoveryStore.cs`, `DumpDiscoveryService.cs`: `.TrimEnd` 대신 `Path.TrimEndingDirectorySeparator`와 `Path.EndsInDirectorySeparator`를 사용해 드라이브 루트(`D:\`)가 상대 경로(`D:`)로 깨지지 않도록 수정했습니다.
+- `MainWindowViewModel.Recommendations.cs`, `MainWindowViewModel.cs`: `BuildNextActionSummary`가 분석기의 비후보 `next_action_index` 권장을 일반 모달 대화상자 폴백보다 먼저 반영하도록 순서를 조정하고(인덱스가 없으면 기존 모달 폴백 유지), `ClearSummary`와 `ClearRenderedSummary`에서 `QuickEventsValue`를 초기화합니다.
+
+**CI·테스트·개발 도구(내부)**
+- `tools/crash_tester`: `Ctrl+Shift+PageUp` (`AutoScenario=15`, C++ `catch` 블록 안의 접근 위반 시나리오) 추가 (PR #327).
+- 전 영역 회귀 테스트 추가(플러그인 unhandled/stale 시그널, `PAGE_GUARD` 보존, 방치된 frozen 포기·thread-dump superseded, Alt+F4 `kQuitFlag`, WCT 사이클 hang 판정, 프록시 DLL 경로 매칭, GPU 드라이버 로그·태그된 MO2 모드명 의심 문구, `CALL STACK` 종료, #GP 순수 쓰기, 롱패스 로그 로테이션, `ReadCString` `maxBytes`, WinUI 모달 다음 조치·`QuickEventsValue` 초기화·드라이브 루트·취소 레이스 가드).
+
+### 테스트 시 확인할 점
+- MO2에 `v0.2.79-rc1`을 설치해 평소대로 게임을 실행·종료했을 때 `SkyrimDiag.log`에 `loaded (v0.2.79.0)`이 찍히고 사전 점검 경고·오류가 없는지 확인해 주세요.
+- 게임 폴더에 `winmm.dll` 등 프록시 DLL이 있는 크래시 덤프를 뷰어에서 열면 해당 DLL이 프레임 후보로 일관되게 표시되고, 다른 덤프를 빠르게 연속 클릭해 전환해도 분석 중 상태나 이벤트 수가 꼬이지 않는지 확인해 주세요.
+- `Alt+F4`로 종료했을 때 `SkyrimDiag.log`와 `SkyrimDiagHelper.log`가 정상 기록되는지 확인해 주세요.
+
+### 실게임에서 확인한 것
+- 이 RC 빌드(`v0.2.79-rc1`) 자체로 스카이림을 실행해 확인하지는 않았습니다.
+- PR #327의 크래시 테스터 `AutoScenario=15`(`catch` 블록 안 접근 위반)만 2026-11-19에 `v0.2.78` + Crash Logger v1.27 실게임에서 확인했고, `0xC0000005` (`CrashTester.dll+0x66556`, `unhandled_exception_signal: true`)로 정상 기록됐습니다.
+- 이번 RC에 들어간 플러그인·Helper·분석기·뷰어 수정 사항(PR #328, #329)과 SE 1.5.97 / 1.7.x / 느린 종료 환경은 실게임 미확인이며, v0.2.78 노트의 실게임 미확인 목록도 그대로 남습니다.
+
+### 주의사항
+- `v0.2.79-rc1`은 정식 `v0.2.79` 전에 변경을 모아 확인하기 위한 테스트용 프리릴리즈입니다. 추가 수정이 필요하면 `v0.2.79-rc2` 등으로 이어서 쌓은 뒤 정식 릴리즈로 올릴 예정입니다.
+- `v0.2.78` 이하 버전이 저장해 둔 요약은 뷰어에서 열 때 버전 차이(`0.2.79`)로 인해 한 번 다시 분석합니다.
+
+### 검증
+- Windows test suite: `122/122` 통과 (`7b4d386`)
+- Linux test suite: WSL(g++)에서 `88/88` 통과 (`7b4d386`). WSL `clang-tidy-18` `clean`. GitHub Actions CI(PR #327, #328, #329)에서 Linux ASan/UBSan, Fuzz Smoke, Unit Tests, `clang-tidy`, Windows `clang-tidy-20`·빌드·패키징·하드 게이트 모두 통과
+- 실제 덤프 재분석(`scripts/compare_analyses.py`, 덤프 46개의 한·영 92건, 기준: `v0.2.78` CLI): 92건 중 4건만 변경(모두 PR #328에서 의도적으로 수정한 `winmm.dll` 프록시 덤프 2개의 한·영 분석), 의도치 않은 회귀 0건, 키 추가·누락 0건
+- 코드 리뷰: 4개 영역(`shared/plugin`, `helper`, `dump_tool`, `dump_tool_winui`) 전체 리뷰로 식별한 24건(High 2, Medium 12, Low 10)을 반영했고 프로덕션 diff 전체를 라인 단위로 자체 재검토 완료
+- 실사고 품질 코퍼스: `SKIPPED (not measured)` — 코퍼스 미제공
+- Windows native RelWithDebInfo / WinUI self-contained publish: 성공 (`7b4d386`)
+- 로컬 패키징: `Tullius_ctd_loger_v0.2.79-rc1.zip` 생성 성공 (`--no-pdb`, `89,903,287` bytes, 525 entries, PDB 0개)
+- Release hard gate(clean provenance 강제): `OK`
+- 공개 asset은 태그 워크플로가 다시 빌드하므로, SHA-256은 릴리즈 페이지에 표시되는 값을 기준으로 확인해 주세요.
+
 ## v0.2.78 (2026-11-18)
 
 v0.2.78-rc1을 정식으로 내는 릴리즈입니다. rc1 이후에는 배포되는 파일의 코드가 바뀌지 않았습니다(문서만, 아래 "rc1 이후 바뀐 것"). v0.2.77에서 올리면 Helper, 분석기, 뷰어가 바뀌고, 플러그인의 동작과 설정은 v0.2.77과 같습니다(SharedLayout protocol v4 그대로, 새 설정 없음). ZIP 전체를 설치해 주세요. MO2에서 새 모드로 설치했다면 이전 버전 모드는 꺼 주세요. v0.2.76에서 바로 올린다면 v0.2.77 노트의 변경도 함께 들어갑니다.
