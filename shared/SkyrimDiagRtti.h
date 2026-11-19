@@ -93,8 +93,9 @@ bool ReadCString(const Reader& read, std::uint64_t address, std::size_t maxBytes
   constexpr std::size_t kPiece = 16;
   char piece[kPiece]{};
   for (std::size_t offset = 0; offset < maxBytes;) {
-    std::size_t got = kPiece;
-    if (!read(address + offset, piece, kPiece)) {
+    const std::size_t want = (std::min)(kPiece, maxBytes - offset);
+    std::size_t got = want;
+    if (!read(address + offset, piece, want)) {
       if (!read(address + offset, piece, 1)) {
         return fail();
       }

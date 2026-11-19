@@ -93,6 +93,7 @@ internal sealed partial class MainWindowViewModel
         QuickAnswerAction = string.Empty;
         QuickAnswerWhy = string.Empty;
         QuickAnswerHow = string.Empty;
+        QuickEventsValue = string.Empty;
         Suspects.Clear();
         Recommendations.Clear();
         RecommendationGroups.Clear();

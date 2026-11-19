@@ -205,7 +205,7 @@ void RunHelperLoop(
           AppendLogLine(outBase, L"Crash event recovered; crash capture path is enabled.");
           AppendLogLine(outBase, DescribeUnhandledSignalState(proc));
           state->nextCrashEventWarnTick64 = 0;
-          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc, outBase); rearmed != 0u) {
+          if (const auto rearmed = RearmFrozenCrashFromEarlierHelper(proc, outBase, &state->crashCaptured); rearmed != 0u) {
             AppendLogLine(
               outBase,
               L"Committed crash_seq=" + std::to_wstring(rearmed)

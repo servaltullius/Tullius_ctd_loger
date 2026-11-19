@@ -228,6 +228,8 @@ void Detach(AttachedProcess& p)
   p.pid = 0;
   p.shmSize = 0;
   p.crashEventOpenError = ERROR_SUCCESS;
+  p.unhandledEventOpenError = ERROR_SUCCESS;
+  p.dumpSettledEventCreateError = ERROR_SUCCESS;
 }
 
 }  // namespace skydiag::helper

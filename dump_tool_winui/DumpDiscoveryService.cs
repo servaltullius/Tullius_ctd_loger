@@ -152,7 +152,7 @@ internal static class DumpDiscoveryService
                 return;
             }
 
-            var normalized = fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalized = Path.TrimEndingDirectorySeparator(fullPath);
             if (!seen.Add(normalized))
             {
                 return;
@@ -502,17 +502,17 @@ internal static class DumpDiscoveryService
     {
         try
         {
-            var normalizedCandidate = Path.GetFullPath(candidatePath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            var normalizedRoot = Path.GetFullPath(rootPath)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var normalizedCandidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidatePath));
+            var normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
 
             if (string.Equals(normalizedCandidate, normalizedRoot, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
 
-            var rootWithSeparator = normalizedRoot + Path.DirectorySeparatorChar;
+            var rootWithSeparator = Path.EndsInDirectorySeparator(normalizedRoot)
+                ? normalizedRoot
+                : normalizedRoot + Path.DirectorySeparatorChar;
             return normalizedCandidate.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase);
         }
         catch

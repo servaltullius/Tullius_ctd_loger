@@ -508,10 +508,11 @@ bool TryComputeStackwalkSuspects(
   // Plugins that only wrap the entry of the shown thread, for the report.
   const auto recordThreadEntryHooks = [&](const std::vector<std::uint64_t>& pcs, const StackWalkEnd& end) {
     const auto marked = stackwalk::MarkThreadEntryHookPcs(modules, pcs, WalkReachedThreadStart(end));
-    out.stackwalk_only_thread_entry_hook_plugins =
-      std::find(marked.begin(), marked.end(), true) != marked.end();
     out.stackwalk_complete_without_plugin_frames =
       stackwalk::CompleteWalkWithoutPluginFrames(modules, pcs, marked, WalkReachedThreadStart(end));
+    out.stackwalk_only_thread_entry_hook_plugins =
+      out.stackwalk_complete_without_plugin_frames &&
+      std::find(marked.begin(), marked.end(), true) != marked.end();
     std::vector<std::wstring> frameModules;
     frameModules.reserve(pcs.size());
     for (const auto pc : pcs) {

@@ -107,7 +107,8 @@ std::vector<std::uint32_t> FindThreadsWithNearStackModule(
   std::uint64_t dumpSize,
   const std::vector<minidump::ModuleInfo>& modules,
   std::wstring_view moduleFilename,
-  std::size_t maxSlots);
+  std::size_t maxSlots,
+  std::wstring_view modulePath = {});
 
 bool TryReadContextFromLocation(void* dumpBase, std::uint64_t dumpSize, const MINIDUMP_LOCATION_DESCRIPTOR& loc, CONTEXT& out);
 

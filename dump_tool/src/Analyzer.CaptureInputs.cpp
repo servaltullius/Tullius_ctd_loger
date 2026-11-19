@@ -833,12 +833,19 @@ bool DetermineHangLike(
   bool hangLike = false;
   bool capSaysHang = false;
   if (out.has_wct) {
-    if (auto cap = internal::TryParseWctCaptureDecision(out.wct_json_utf8)) {
-      capSaysHang =
-        (cap->kind == "hang") ||
-        (cap->thresholdSec > 0u && cap->secondsSinceHeartbeat >= static_cast<double>(cap->thresholdSec)) ||
-        internal::IsManualCaptureOfStalledGame(cap->kind, cap->secondsSinceHeartbeat, cap->gameWindow);
-      hangLike = capSaysHang;
+    if (auto wct = internal::TryParseWctFreezeSummary(out.wct_json_utf8)) {
+      const bool wctHasCycle = wct->cycles > 0;
+      if (wct->has_capture) {
+        capSaysHang =
+          wctHasCycle ||
+          (wct->capture_kind == "hang") ||
+          (wct->thresholdSec > 0u && wct->secondsSinceHeartbeat >= static_cast<double>(wct->thresholdSec)) ||
+          internal::IsManualCaptureOfStalledGame(wct->capture_kind, wct->secondsSinceHeartbeat, wct->gameWindow);
+        hangLike = capSaysHang;
+      } else {
+        capSaysHang = wctHasCycle;
+        hangLike = wctHasCycle || nameHang;
+      }
     } else {
       hangLike = nameHang;
     }
@@ -1427,7 +1434,8 @@ void ComputeSuspects(
       dumpSize,
       allModules,
       out.suspects[0].module_filename,
-      kNearStackSlots);
+      kNearStackSlots,
+      out.suspects[0].module_path);
     const std::uint32_t stableCount = internal::CountWctThreadsWithStableContextSwitches(
       out.wct_json_utf8,
       matchingTids);

@@ -272,8 +272,11 @@ std::vector<ExtraDumpMemory> CollectCrashObjectMemory(HANDLE process, const CONT
   // The crashing thread is held in its crash handler, so what it points at
   // stays put. Other game threads run on: a table they change (the FormID
   // table, ADR-0033) is read with the checks of shared/SkyrimDiagFormMap.h.
+  // Guard-page filtering via PageCheck prevents ReadProcessMemory from
+  // consuming one-shot PAGE_GUARD pages on a still-live first-chance fault.
+  PageCheck pages(process);
   return CollectObjectMemory(process, context, kCrashObjectMemoryBudget, std::chrono::steady_clock::time_point::max(),
-    /*pages=*/nullptr, allFormsSlot);
+    &pages, allFormsSlot);
 }
 
 std::vector<ExtraDumpMemory> CollectThreadObjectMemory(

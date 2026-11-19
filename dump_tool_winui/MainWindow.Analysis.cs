@@ -25,6 +25,7 @@ public sealed partial class MainWindow
     private async Task<bool> TryLoadExistingAnalysisAsync(string dumpPath, string outDir, CancellationToken cancellationToken)
     {
         var selectedIdentity = await DumpIdentityContract.ComputeAsync(dumpPath, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var identitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(outDir, selectedIdentity);
         var compatibilitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
 
@@ -118,18 +119,23 @@ public sealed partial class MainWindow
 
             // Take over from a running analysis before the first await, so a
             // second click cannot interleave with this one and win with the
-            // older selection.
+            // older selection. Each invocation disposes its own CTS in finally
+            // so a still-unwinding predecessor never sees a disposed CTS.
             _analysisCts?.Cancel();
-            _analysisCts?.Dispose();
             analysisCts = new CancellationTokenSource();
             _analysisCts = analysisCts;
             var cancellationToken = analysisCts.Token;
+            bool IsCurrentAnalysis() => ReferenceEquals(_analysisCts, analysisCts);
 
             await PromoteLearnedDumpLocationAsync(dumpPath);
             // The recent-dump list refreshes in the background; the analysis
             // does not depend on it.
             _ = RefreshDiscoveredDumpsAsync();
             cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentAnalysis())
+            {
+                return;
+            }
 
             var options = _vm.BuildInvocationOptions(
                 dumpPath, OutputDirBox.Text.Trim(), _startupOptions.Language, false, _startupOptions);
@@ -160,10 +166,18 @@ public sealed partial class MainWindow
                 }
             }
 
+            if (!IsCurrentAnalysis())
+            {
+                return;
+            }
             SetBusy(true, T("Analyzing dump with native engine...", "네이티브 엔진으로 덤프를 분석 중입니다..."));
 
             var (exitCode, nativeErr) = await NativeAnalyzerBridge.RunAnalyzeAsync(options, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentAnalysis())
+            {
+                return;
+            }
             if (exitCode == NativeAnalyzerBridge.UserCanceledExitCode)
             {
                 SetBusy(false, T("Analysis canceled.", "분석이 취소되었습니다."));
@@ -183,6 +197,11 @@ public sealed partial class MainWindow
             }
 
             var selectedIdentity = await DumpIdentityContract.ComputeAsync(dumpPath, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsCurrentAnalysis())
+            {
+                return;
+            }
             var identitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(outDir, selectedIdentity);
             var compatibilitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
             var summaryPath = File.Exists(identitySummaryPath)
@@ -209,16 +228,26 @@ public sealed partial class MainWindow
                 outDir,
                 summary.DumpIdentity,
                 cancellationToken);
+            if (!IsCurrentAnalysis())
+            {
+                return;
+            }
             SetBusy(false, T("Analysis complete. The quick answer is at the top; details are below it.", "분석 완료. 맨 위의 빠른 답을 먼저 보고, 자세한 내용은 그 아래에서 확인하세요."));
             NavView.SelectedItem = NavTriage;
         }
         catch (OperationCanceledException)
         {
-            SetBusy(false, T("Analysis canceled.", "분석이 취소되었습니다."));
+            if (analysisCts is not null && ReferenceEquals(_analysisCts, analysisCts))
+            {
+                SetBusy(false, T("Analysis canceled.", "분석이 취소되었습니다."));
+            }
         }
         catch (Exception ex)
         {
-            SetBusy(false, T("Analysis failed: ", "분석 실패: ") + ex.Message);
+            if (analysisCts is not null && ReferenceEquals(_analysisCts, analysisCts))
+            {
+                SetBusy(false, T("Analysis failed: ", "분석 실패: ") + ex.Message);
+            }
         }
         finally
         {
@@ -312,6 +341,7 @@ public sealed partial class MainWindow
         CopySummaryButton.IsEnabled = false;
         CopyShareButton.IsEnabled = false;
         SetTriageEditorEnabled(false);
+        QuickEventsValueText.Text = "-";
         ReportTextBox.Text = string.Empty;
         WctTextBox.Text = string.Empty;
         SetRawDataContentVisibility(hasReport: false, hasWct: false);

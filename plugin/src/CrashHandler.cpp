@@ -133,6 +133,13 @@ constexpr DWORD kTopLevelFilterSlotWaitMs = 10;
 std::atomic<std::uint32_t> g_unrecordedFaultThreads[kUnrecordedFaultThreadSlotCount]{};
 std::atomic<std::uintptr_t> g_unrecordedFaultRecords[kUnrecordedFaultThreadSlotCount]{};
 std::atomic<std::uint32_t> g_unrecordedFaultFallbackSlot{ 0 };
+// Tracks the thread's own published (EXCEPTION_RECORD*, crash_seq) so
+// SignalUnhandledAndHold can still signal unhandledEvent if the helper thawed
+// the crash before it reached the top-level filter.
+std::atomic<std::uint32_t> g_publishedFaultThreads[kUnrecordedFaultThreadSlotCount]{};
+std::atomic<std::uintptr_t> g_publishedFaultRecords[kUnrecordedFaultThreadSlotCount]{};
+std::atomic<std::uint32_t> g_publishedFaultSeqs[kUnrecordedFaultThreadSlotCount]{};
+std::atomic<std::uint32_t> g_publishedFaultFallbackSlot{ 0 };
 using AbortSignalHandlerFn = void(__cdecl*)(int);
 std::atomic<AbortSignalHandlerFn> g_previousAbortSignalHandler{ nullptr };
 
@@ -287,6 +294,23 @@ bool ShouldRecordException(DWORD code) noexcept
   }
 }
 
+void NoteFaultPublished(const EXCEPTION_RECORD* record, std::uint32_t crashSeq) noexcept
+{
+  const std::uint32_t tid = GetCurrentThreadId();
+  std::uint32_t slotThreadIds[kUnrecordedFaultThreadSlotCount]{};
+  for (std::size_t i = 0; i < kUnrecordedFaultThreadSlotCount; ++i) {
+    slotThreadIds[i] = g_publishedFaultThreads[i].load(std::memory_order_relaxed);
+  }
+  const std::size_t slot = SelectUnrecordedFaultThreadSlot(
+    slotThreadIds,
+    kUnrecordedFaultThreadSlotCount,
+    tid,
+    g_publishedFaultFallbackSlot.fetch_add(1u, std::memory_order_relaxed));
+  g_publishedFaultRecords[slot].store(reinterpret_cast<std::uintptr_t>(record), std::memory_order_relaxed);
+  g_publishedFaultSeqs[slot].store(crashSeq, std::memory_order_relaxed);
+  g_publishedFaultThreads[slot].store(tid, std::memory_order_release);
+}
+
 bool TryPublishCrashRecord(
   skydiag::SharedLayout* shm,
   const EXCEPTION_POINTERS* ep,
@@ -301,6 +325,12 @@ bool TryPublishCrashRecord(
   // until the helper explicitly ACKs/rearms by clearing Frozen.
   if (!skydiag::TryClaimCrashIncidentOwnership(&shm->header.state_flags)) {
     return false;
+  }
+
+  // Clear any stale unhandled signal left behind by a previously thawed crash
+  // before publishing this new crash sequence.
+  if (const HANDLE unhandled = GetUnhandledEvent()) {
+    ResetEvent(unhandled);
   }
 
   auto* const sequence = reinterpret_cast<volatile LONG*>(&shm->header.crash_seq);
@@ -335,6 +365,7 @@ bool TryPublishCrashRecord(
   }
   InterlockedExchange(sequence, committed);
   g_lastPublishedCrashQpc.store(QpcNow(), std::memory_order_relaxed);
+  NoteFaultPublished(ep->ExceptionRecord, static_cast<std::uint32_t>(committed));
   return true;
 }
 
@@ -543,6 +574,9 @@ bool TryPublishKeptExceptionForCrashLoggerSideFault(
 // handler. Same fixed-size, allocation-free steps as the VEH fatal path.
 void SignalPublishedCrash(DWORD code, std::uint64_t address) noexcept
 {
+  if (code != EXCEPTION_STACK_OVERFLOW) {
+    RecordCloseRequestAtCrash();
+  }
   skydiag::EventPayload p{};
   p.a = code;
   p.b = address;
@@ -588,6 +622,19 @@ bool IsThisThreadsFaultUnrecorded(const EXCEPTION_RECORD* record) noexcept
     if (g_unrecordedFaultThreads[i].load(std::memory_order_acquire) == tid) {
       return g_unrecordedFaultRecords[i].load(std::memory_order_relaxed) ==
              reinterpret_cast<std::uintptr_t>(record);
+    }
+  }
+  return false;
+}
+
+bool IsThisThreadsPublishedFault(const EXCEPTION_RECORD* record, std::uint32_t crashSeq) noexcept
+{
+  const std::uint32_t tid = GetCurrentThreadId();
+  for (std::size_t i = 0; i < kUnrecordedFaultThreadSlotCount; ++i) {
+    if (g_publishedFaultThreads[i].load(std::memory_order_acquire) == tid) {
+      return g_publishedFaultRecords[i].load(std::memory_order_relaxed) ==
+               reinterpret_cast<std::uintptr_t>(record) &&
+             g_publishedFaultSeqs[i].load(std::memory_order_relaxed) == crashSeq;
     }
   }
   return false;
@@ -677,16 +724,34 @@ bool SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
   const std::uint64_t recordAddress = shm->header.crash.exception_addr;
   MemoryBarrier();
   const std::uint32_t sequenceAfter = shm->header.crash_seq;
-  if (!IsCrashRecordOfException(
-        IsCrashCaptureFrozen(shm),
-        sequenceBefore,
-        sequenceAfter,
-        recordThreadId,
-        recordCode,
-        recordAddress,
-        GetCurrentThreadId(),
-        record->ExceptionCode,
-        reinterpret_cast<std::uint64_t>(record->ExceptionAddress))) {
+  const bool frozen = IsCrashCaptureFrozen(shm);
+  const bool matchedFrozen = IsCrashRecordOfException(
+    frozen,
+    sequenceBefore,
+    sequenceAfter,
+    recordThreadId,
+    recordCode,
+    recordAddress,
+    GetCurrentThreadId(),
+    record->ExceptionCode,
+    reinterpret_cast<std::uint64_t>(record->ExceptionAddress));
+  // If the helper already released and thawed this exact published exception
+  // (e.g. during a Crash Logger thread-dump window) before it reached the
+  // top-level filter, still signal unhandledEvent without waiting on settled
+  // so the helper can report the released crash.
+  const bool matchedReleased = !matchedFrozen && !frozen &&
+    IsThisThreadsPublishedFault(record, sequenceBefore) &&
+    IsCrashRecordOfException(
+      /*incidentClaimed=*/true,
+      sequenceBefore,
+      sequenceAfter,
+      recordThreadId,
+      recordCode,
+      recordAddress,
+      GetCurrentThreadId(),
+      record->ExceptionCode,
+      reinterpret_cast<std::uint64_t>(record->ExceptionAddress));
+  if (!matchedFrozen && !matchedReleased) {
     return false;
   }
 
@@ -700,7 +765,12 @@ bool SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
   const std::uint32_t holdMs = g_unhandledCrashHoldMs.load(std::memory_order_relaxed);
   const wchar_t* const settledName = GetDumpSettledEventName();
   const HANDLE settled =
-    (holdMs != 0u && settledName[0] != L'\0') ? OpenEventW(SYNCHRONIZE, FALSE, settledName) : nullptr;
+    (matchedFrozen && holdMs != 0u && settledName[0] != L'\0')
+      ? OpenEventW(SYNCHRONIZE, FALSE, settledName)
+      : nullptr;
+  if (matchedReleased && (IsCrashCaptureFrozen(shm) || shm->header.crash_seq != sequenceBefore)) {
+    return false;
+  }
   SetEvent(unhandled);
   if (settled) {
     // MiniDumpWriteDump suspends this thread with the rest of the game, so

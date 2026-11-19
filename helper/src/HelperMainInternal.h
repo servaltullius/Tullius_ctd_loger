@@ -126,7 +126,10 @@ std::wstring FrozenCrashRearmMarkerPrefix(const AttachedProcess& proc);
 // marker file in outBase): found still Frozen after that, it is thawed
 // instead. Returns that generation's crash_seq, or 0 when nothing was
 // signaled.
-std::uint32_t RearmFrozenCrashFromEarlierHelper(const AttachedProcess& proc, const std::filesystem::path& outBase);
+std::uint32_t RearmFrozenCrashFromEarlierHelper(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  CrashCaptureState* crashState = nullptr);
 // Deletes this game process's rearm markers (once it has exited).
 void RemoveFrozenCrashRearmMarkers(const AttachedProcess& proc, const std::filesystem::path& outBase);
 // CrashLogger.ini's Crashlog Directory value (its raw bytes) as a path: UTF-8

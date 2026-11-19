@@ -617,6 +617,34 @@ static void TestWinUiShowsQuickAnswerFirst()
   RequireContains(summary, "\"quick_answer\"", "The viewer must read the summary's quick_answer object.");
 }
 
+void TestWinUiAnalysisCancellationAndRootNormalizationGuards()
+{
+  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto analysisCs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Analysis.cs");
+  assert(
+    analysisCs.find("_analysisCts?.Dispose();") == std::string::npos &&
+    "AnalyzeAsync must not dispose the previous CTS while its invocation is still unwinding.");
+  RequireContains(
+    analysisCs,
+    "bool IsCurrentAnalysis() => ReferenceEquals(_analysisCts, analysisCts);",
+    "AnalyzeAsync must guard post-await UI updates against stale superseded invocations.");
+
+  const auto storeCs = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryStore.cs");
+  const auto serviceCs = ReadAllText(repoRoot / "dump_tool_winui" / "DumpDiscoveryService.cs");
+  RequireContains(
+    storeCs,
+    "Path.TrimEndingDirectorySeparator(",
+    "DumpDiscoveryStore must preserve drive root separators.");
+  RequireContains(
+    serviceCs,
+    "Path.TrimEndingDirectorySeparator(",
+    "DumpDiscoveryService must preserve drive root separators.");
+  RequireContains(
+    serviceCs,
+    "Path.EndsInDirectorySeparator(",
+    "IsPathWithinRoot must not double-append a separator on drive roots.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -670,6 +698,7 @@ int main()
   TestReviewFeedbackFollowsPrimaryGuidance();
   TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
   TestWinUiShowsQuickAnswerFirst();
+  TestWinUiAnalysisCancellationAndRootNormalizationGuards();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

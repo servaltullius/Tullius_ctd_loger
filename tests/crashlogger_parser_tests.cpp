@@ -2094,5 +2094,18 @@ int main()
   Test_ParseCrashLoggerFrameSignals_Fixture_SystemDllPathqualifiedFirstProbableDll();
   Test_ParseCrashLoggerFrameSignals_Fixture_V124RealFormat();
 
+  // CALL STACK: must terminate POSSIBLE RELEVANT OBJECTS so stack lines are
+  // never parsed as object references.
+  {
+    const std::string log =
+      "POSSIBLE RELEVANT OBJECTS:\n"
+      "\tRBX: (Character*) \"Bandit\" (0x00012345) (\"RealMod.esp\")\n"
+      "CALL STACK:\n"
+      "\t[0] 0x7FF600001234 (Character*) \"AfterStack\" (0x00067890) (\"ShouldNotBeParsed.esp\")\n";
+    const auto refs = skydiag::dump_tool::crashlogger_core::ParseCrashLoggerObjectRefsAscii(log);
+    assert(refs.size() == 1u);
+    assert(refs[0].esp_name == "RealMod.esp");
+  }
+
   return 0;
 }

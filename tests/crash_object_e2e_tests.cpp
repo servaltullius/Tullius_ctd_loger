@@ -1157,6 +1157,13 @@ void TestHangObjectsAreReadBackFromTheDump()
   Require(!stats.budget_reached, "A few objects stay far inside the budgets");
   Require(HangObjectMemoryBytes() - bytesBefore == stats.bytes, "The counter adds what this dump took");
   Require((guard.Protection() & PAGE_GUARD) != 0, "The guard page is never touched");
+  {
+    CONTEXT crashCtx{};
+    crashCtx.Rbx = guard.Address();
+    const auto crashRanges = skydiag::helper::internal::CollectCrashObjectMemory(GetCurrentProcess(), crashCtx, 0u);
+    Require(crashRanges.empty(), "CollectCrashObjectMemory must skip PAGE_GUARD pages");
+    Require((guard.Protection() & PAGE_GUARD) != 0, "CollectCrashObjectMemory must never consume PAGE_GUARD");
+  }
 
   // Only the selected threads' objects are in the dump.
   Require(!ObjectsInDumpAt(dumpPath, running.Address()).empty(), "The running thread's object is in the dump");

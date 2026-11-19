@@ -195,7 +195,7 @@ void SetDoubtForCrash(const AnalysisResult& r, Lead& lead)
   } else if (lead.is_hook_framework) {
     lead.doubt = Doubt::kSharedMod;
   } else if (SameFile(lead.file, r.fault_module_filename) ||
-             (!r.inferred_mod_name.empty() && lead.name == r.inferred_mod_name)) {
+             (!r.inferred_mod_name.empty() && lead.name == ReadableModName(r.inferred_mod_name))) {
     lead.doubt = Doubt::kInsideMod;
   } else {
     lead.doubt = Doubt::kOtherFile;

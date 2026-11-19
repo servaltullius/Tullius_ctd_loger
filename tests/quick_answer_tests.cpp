@@ -1828,13 +1828,25 @@ void TestGpuDriverLog()
             dt::DescribeGpuDriverLog(dt::GpuDriverLog{}, 20u, false).empty(),
     "none, and nothing when the log was not read");
   // Counted by the helper, but no event could be kept: the last-event time
-  // used to be read from the empty list.
+  // used to be read from the empty list, and GpuDriverProblemCount must still
+  // report the counted total rather than 0.
   dt::GpuDriverLog countedOnly{};
   Require(dt::ApplyGpuDriverLogJson(R"({"version":1,"since_unix":10,"until_unix":20,"total":2,"events":[]})", countedOnly) &&
+            dt::GpuDriverProblemCount(countedOnly) == 2u &&
             dt::DescribeGpuDriverLog(countedOnly, 20u, true) ==
               L"2 since the game started (their details could not be read)" &&
             dt::DescribeGpuDriverLog(countedOnly, 20u, false) == L"게임 시작 이후 2건 (내용은 읽지 못함)",
     "a count without events is told as that");
+
+  // When a post-capture event is also present (unix > captureUnix), the "last
+  // before the capture" time still comes from the newest problem <= captureUnix.
+  dt::GpuDriverLog withLater{};
+  Require(dt::ApplyGpuDriverLogJson(R"({"version":1,"since_unix":1000,"until_unix":2500,"total":2,"events":[
+    {"provider":"nvlddmkm","id":153,"level":2,"unix":1900,"message":"Error occurred on GPUID: 100"},
+    {"provider":"nvlddmkm","id":153,"level":2,"unix":2200,"message":"Error occurred on GPUID: 100"}]})", withLater) &&
+            Contains(dt::DescribeGpuDriverLog(withLater, 2000u, true), L", the last 100 s before the capture") &&
+            Contains(dt::DescribeGpuDriverLog(withLater, 2000u, false), L", 마지막은 캡처 100초 전"),
+    "post-capture GPU event must not hide the last pre-capture problem time");
 
   // An information event (from a stream that kept them) is neither counted,
   // grouped nor the last one: the error was 1 h 40 min before the capture.
@@ -2486,6 +2498,60 @@ void TestForcedClose()
   clean.is_filtered_clean_exit = true;
   BuildEvidenceAndSummary(clean, i18n::Language::kEnglish);
   Require(clean.quick_answer.kind == "clean_exit", "clean exit first");
+
+  // Alt+F4 from Main::quitGame (from_quit_flag=true) has no window_seconds in
+  // summary JSON, and slow shutdown after Alt+F4 names Alt+F4 (not menu quit).
+  {
+    auto altF4Quit = crash();
+    altF4Quit.forced_close.detected = true;
+    altF4Quit.forced_close.kind = "alt_f4";
+    altF4Quit.forced_close.seconds_before_crash = 45.0;
+    altF4Quit.forced_close.from_quit_flag = true;
+    BuildEvidenceAndSummary(altF4Quit, i18n::Language::kEnglish);
+    const auto summary =
+      skydiag::dump_tool::BuildSummaryJson(altF4Quit, std::filesystem::temp_directory_path(), L"stem", true);
+    Require(
+      summary["forced_close"]["kind"] == "alt_f4" && !summary["forced_close"].contains("window_seconds"),
+      "Alt+F4 from Main::quitGame omits window_seconds");
+
+    AnalysisResult slowAltF4{};
+    slowAltF4.dump_path = L"C:\\out\\SkyrimDiag_Hang_20261119_120000_000.dmp";
+    slowAltF4.quit_before_freeze.detected = true;
+    slowAltF4.quit_before_freeze.kind = "alt_f4";
+    slowAltF4.freeze_analysis.has_analysis = true;
+    slowAltF4.freeze_analysis.state_id = "freeze_candidate";
+    BuildEvidenceAndSummary(slowAltF4, i18n::Language::kEnglish);
+    Require(
+      Contains(slowAltF4.quick_answer.headline, L"Alt+F4") &&
+        !Contains(slowAltF4.quick_answer.headline, L"chose to quit"),
+      "slow shutdown after Alt+F4 must name Alt+F4, not menu Quit");
+  }
+}
+
+void TestTaggedInferredModNameUsesInsideModDoubt()
+{
+  // When inferred_mod_name carries an MO2 tag prefix (e.g. "[Combat] FooMod"),
+  // ReadableModName strips the tag on lead.name; SetDoubtForCrash must compare
+  // against ReadableModName(r.inferred_mod_name) so a crash inside the mod
+  // gets inside-mod doubt instead of "crashed elsewhere".
+  AnalysisResult r{};
+  r.dump_path = L"C:\\out\\SkyrimDiag_Crash_20261119_120000_000.dmp";
+  r.exc_code = 0xC0000005u;
+  r.fault_module_filename = L"OtherHelper.dll";
+  r.inferred_mod_name = L"[Combat] FooMod";
+  ActionableCandidate cand{};
+  cand.status_id = "cross_validated";
+  cand.confidence_level = i18n::ConfidenceLevel::kHigh;
+  cand.display_name = L"[Combat] FooMod";
+  cand.mod_name = L"[Combat] FooMod";
+  cand.module_filename = L"FooMain.dll";
+  cand.supporting_families = { "crash_logger_frame", "actionable_stack" };
+  r.actionable_candidates.push_back(std::move(cand));
+
+  BuildEvidenceAndSummary(r, i18n::Language::kEnglish);
+  Require(
+    Contains(r.quick_answer.why_not_certain, L"inside this mod"),
+    "tagged inferred_mod_name must still match lead.name for inside-mod doubt");
 }
 
 }  // namespace
@@ -2526,6 +2592,7 @@ int main()
     TestGpuDriverLog();
     TestReportReadability();
     TestCandidateFamilyLabels();
+    TestTaggedInferredModNameUsesInsideModDoubt();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());
     return 1;

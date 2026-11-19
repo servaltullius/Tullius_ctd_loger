@@ -191,8 +191,8 @@ internal static class DumpDiscoveryStore
         string crashDumpsRoot;
         try
         {
-            crashDumpsRoot = Path.GetFullPath(Path.Combine(localAppData, "CrashDumps"))
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            crashDumpsRoot = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(Path.Combine(localAppData, "CrashDumps")));
         }
         catch
         {
@@ -211,8 +211,7 @@ internal static class DumpDiscoveryStore
 
         try
         {
-            return Path.GetFullPath(root.Trim())
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(root.Trim()));
         }
         catch
         {

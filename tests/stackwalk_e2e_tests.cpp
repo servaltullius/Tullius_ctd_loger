@@ -11,7 +11,9 @@
 #include <vector>
 
 #include "Analyzer.h"
+#include "AnalyzerInternals.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
+#include "AnalyzerPipeline.h"
 #include "HangCaptureInternal.h"
 #include "HelperLog.h"
 #include "HelperRuntimeTestUtils.h"
@@ -470,6 +472,21 @@ void TestCompleteGameWalkSkipsStackScan()
   Require(!CompleteWalkWithoutPluginFrames(modules, outsideModules, marks(outsideModules), true),
     "a frame outside every module");
 
+  // A walk with a thread-entry hook AND an unmapped trampoline frame marks the
+  // entry hook (3 game frames directly above it) but is NOT complete-without-plugin-frames.
+  const auto plugin = module(0x7FF700000000ull, L"Trails.dll");
+  const std::vector<ModuleInfo> modulesWithPlugin = { game, plugin, overlay, kernel32, ntdll };
+  auto hookPlusUnmapped = gameOnly;
+  hookPlusUnmapped.insert(hookPlusUnmapped.begin() + 3, 0x7FF700001000ull);  // thread entry hook
+  hookPlusUnmapped.insert(hookPlusUnmapped.begin(), 0x500000000ull);         // unmapped frame above the 3 game frames
+  const auto hookUnmappedMarks = MarkThreadEntryHookPcs(modulesWithPlugin, hookPlusUnmapped, true);
+  Require(
+    std::find(hookUnmappedMarks.begin(), hookUnmappedMarks.end(), true) != hookUnmappedMarks.end(),
+    "entry hook frame is marked");
+  Require(
+    !CompleteWalkWithoutPluginFrames(modulesWithPlugin, hookPlusUnmapped, hookUnmappedMarks, true),
+    "unmapped frame must prevent treating walk as complete without plugin frames");
+
   skydiag::dump_tool::AnalysisResult crash{};
   crash.exc_tid = 41920u;
   crash.stackwalk_primary_tid = 41920u;
@@ -491,10 +508,91 @@ void TestCompleteGameWalkSkipsStackScan()
   Require(ChooseStackScan(named, false) == StackScanChoice::kScan, "nothing to skip when the walk named suspects");
 }
 
+void TestDetermineHangLikeIncludesWctDeadlockCycles()
+{
+  skydiag::dump_tool::AnalysisResult manualDeadlock{};
+  manualDeadlock.has_wct = true;
+  manualDeadlock.wct_json_utf8 =
+    R"({"capture":{"kind":"manual","secondsSinceHeartbeat":0.2,"thresholdSec":10},"threads":[{"tid":100,"isCycle":true}]})";
+  Require(
+    skydiag::dump_tool::DetermineHangLike(/*nameHang=*/false, manualDeadlock),
+    "manual capture with WCT deadlock cycle must be treated as hang-like");
+
+  skydiag::dump_tool::AnalysisResult manualHealthy{};
+  manualHealthy.has_wct = true;
+  manualHealthy.wct_json_utf8 =
+    R"({"capture":{"kind":"manual","secondsSinceHeartbeat":0.2,"thresholdSec":10},"threads":[{"tid":100,"isCycle":false}]})";
+  Require(
+    !skydiag::dump_tool::DetermineHangLike(/*nameHang=*/false, manualHealthy),
+    "manual capture without cycle or stall must remain snapshot-like");
+}
+
+void TestFindThreadsWithNearStackModulePrefersMatchingPathOverSystemCopy()
+{
+  // Build a minimal in-memory minidump containing one ThreadListStream entry
+  // whose stack holds an address inside the game-folder proxy d3d11.dll.
+  struct FakeDump
+  {
+    MINIDUMP_HEADER header{};
+    MINIDUMP_DIRECTORY dir{};
+    ULONG32 threadCount = 1;
+    MINIDUMP_THREAD thread{};
+    CONTEXT ctx{};
+    std::uint64_t stackSlots[2]{};
+  } dump{};
+  dump.header.Signature = MINIDUMP_SIGNATURE;
+  dump.header.NumberOfStreams = 1;
+  dump.header.StreamDirectoryRva = static_cast<RVA>(offsetof(FakeDump, dir));
+  dump.dir.StreamType = ThreadListStream;
+  dump.dir.Location.DataSize = sizeof(ULONG32) + sizeof(MINIDUMP_THREAD);
+  dump.dir.Location.Rva = static_cast<RVA>(offsetof(FakeDump, threadCount));
+
+  dump.thread.ThreadId = 4242u;
+  dump.thread.Stack.StartOfMemoryRange = 0x000000100000ull;
+  dump.thread.Stack.Memory.DataSize = sizeof(dump.stackSlots);
+  dump.thread.Stack.Memory.Rva = static_cast<RVA>(offsetof(FakeDump, stackSlots));
+  dump.thread.ThreadContext.DataSize = sizeof(CONTEXT);
+  dump.thread.ThreadContext.Rva = static_cast<RVA>(offsetof(FakeDump, ctx));
+  dump.ctx.Rsp = 0x000000100000ull;
+  dump.stackSlots[0] = 0x0000000200000100ull;
+
+  skydiag::dump_tool::minidump::ModuleInfo sysCopy{};
+  sysCopy.base = 0x0000000100000000ull;
+  sysCopy.end = sysCopy.base + 0x10000u;
+  sysCopy.filename = L"d3d11.dll";
+  sysCopy.path = L"C:\\Windows\\System32\\d3d11.dll";
+  sysCopy.is_systemish = true;
+
+  skydiag::dump_tool::minidump::ModuleInfo proxyCopy{};
+  proxyCopy.base = 0x0000000200000000ull;
+  proxyCopy.end = proxyCopy.base + 0x10000u;
+  proxyCopy.filename = L"d3d11.dll";
+  proxyCopy.path = L"G:\\Game\\d3d11.dll";
+  proxyCopy.is_systemish = false;
+
+  const std::vector<skydiag::dump_tool::minidump::ModuleInfo> modules = { sysCopy, proxyCopy };
+
+  const auto byPath = skydiag::dump_tool::internal::FindThreadsWithNearStackModule(
+    &dump, sizeof(dump), modules, L"d3d11.dll", 16, L"G:\\Game\\d3d11.dll");
+  Require(byPath.size() == 1u && byPath[0] == 4242u, "exact module_path must select the proxy d3d11.dll");
+
+  const auto preferNonSys = skydiag::dump_tool::internal::FindThreadsWithNearStackModule(
+    &dump, sizeof(dump), modules, L"d3d11.dll", 16);
+  Require(
+    preferNonSys.size() == 1u && preferNonSys[0] == 4242u,
+    "without module_path, non-systemish copy must be preferred over System32 copy");
+
+  const auto sysExplicit = skydiag::dump_tool::internal::FindThreadsWithNearStackModule(
+    &dump, sizeof(dump), modules, L"d3d11.dll", 16, L"C:\\Windows\\System32\\d3d11.dll");
+  Require(sysExplicit.empty(), "explicit System32 path must not match proxy addresses");
+}
+
 int main()
 {
   try {
     TestCompleteGameWalkSkipsStackScan();
+    TestDetermineHangLikeIncludesWctDeadlockCycles();
+    TestFindThreadsWithNearStackModulePrefersMatchingPathOverSystemCopy();
     TestMemory64ListCountOverflowIsRejected();
     TestFindFunctionStartFollowsChainedEntries();
     TestLocalImageRejectsNonCodeReturnAddresses();

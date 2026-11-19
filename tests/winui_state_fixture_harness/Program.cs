@@ -299,6 +299,16 @@ internal static class Program
                 fromMissing.RegisteredRoots.Count == 1 && fromMissing.LearnedRoots.Count == 0,
                 "a discovery update without a state file starts from an empty state");
 
+            // Drive roots (e.g. "C:\") must keep their trailing separator rather
+            // than turning into drive-relative paths ("C:").
+            var driveRoot = Path.GetPathRoot(root)!;
+            var withDriveRoot = DumpDiscoveryStore.AddRegisteredRoot(new DumpDiscoveryState(), driveRoot);
+            Require(
+                withDriveRoot.RegisteredRoots.Count == 1 &&
+                string.Equals(withDriveRoot.RegisteredRoots[0], driveRoot, StringComparison.OrdinalIgnoreCase) &&
+                Path.EndsInDirectorySeparator(withDriveRoot.RegisteredRoots[0]),
+                "NormalizeRoot must preserve the trailing separator on a drive root");
+
             Require(
                 !Directory.EnumerateFiles(root, "*.tmp.*", SearchOption.AllDirectories).Any(),
                 "atomic writes left temporary files behind");

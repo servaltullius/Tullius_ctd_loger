@@ -346,9 +346,13 @@ void RecordQuitFlagChange() noexcept
   const std::uint64_t closedMs = g_quitConfirmClosedMs.load();
   const auto decision = skydiag::QuitFlagCloseRequestKind(
     AltF4HeldNow() && GameIsForeground(), g_altF4SeenMs.load(), open != 0u, closedMs, now);
-  // The same Alt+F4 the key sampler or the crash handler already recorded.
-  if (decision.kind == CloseRequestKind::kAltF4 && !TryClaimAltF4(now, skydiag::kQuitFlagAltF4RecentMs)) {
-    return;
+  // Claim the Alt+F4 repeat window if not already claimed so the key sampler
+  // does not emit a duplicate kKeys event right after, but always record the
+  // quit-flag transition itself: Main::quitGame becoming set proves the game is
+  // actually shutting down (no 10 s forced-close window, and slow-shutdown
+  // detection depends on seeing kQuitFlag even when kKeys already fired).
+  if (decision.kind == CloseRequestKind::kAltF4) {
+    (void)TryClaimAltF4(now, skydiag::kQuitFlagAltF4RecentMs);
   }
   std::string how;
   try {
@@ -466,8 +470,8 @@ void RecordCloseRequestAtCrash() noexcept
   }
   const auto decision = skydiag::QuitFlagCloseRequestKind(
     altF4Held, g_altF4SeenMs.load(), g_quitMenusOpen.load() != 0u, g_quitConfirmClosedMs.load(), now);
-  if (decision.kind == CloseRequestKind::kAltF4 && !TryClaimAltF4(now, skydiag::kQuitFlagAltF4RecentMs)) {
-    return;
+  if (decision.kind == CloseRequestKind::kAltF4) {
+    (void)TryClaimAltF4(now, skydiag::kQuitFlagAltF4RecentMs);
   }
   PushCloseRequestEvent(
     decision.kind,

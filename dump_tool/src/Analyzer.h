@@ -160,7 +160,8 @@ struct ForcedCloseInfo
 {
   bool detected = false;
   std::string kind;  // alt_f4 / window_close / close_message / game_quit / forced_quit (CloseRequestKindId)
-  double seconds_before_crash = 0.0;  // from that request; past 10 s only for game_quit / forced_quit
+  double seconds_before_crash = 0.0;  // from that request; past 10 s only when from_quit_flag
+  bool from_quit_flag = false;  // true when Main::quitGame became set (no time window applies)
 };
 
 // ADR-0035: the blackbox recorded the game's quit flag (game_quit: Quit in a

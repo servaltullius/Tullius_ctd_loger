@@ -140,6 +140,12 @@ void RefreshInMenuFlag() noexcept
   auto* ui = RE::UI::GetSingleton();
   if (shm && ui) {
     StoreInMenuFlag(*shm, *ui, false);
+    auto* flags = reinterpret_cast<volatile LONG*>(&shm->header.state_flags);
+    if (ui->IsMenuOpen(RE::LoadingMenu::MENU_NAME)) {
+      InterlockedOr(flags, static_cast<LONG>(skydiag::kState_Loading));
+    } else if (!ui->closingAllMenus) {
+      InterlockedAnd(flags, ~static_cast<LONG>(skydiag::kState_Loading));
+    }
   }
 }
 

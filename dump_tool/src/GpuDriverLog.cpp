@@ -80,7 +80,8 @@ void ReadGpuDriverLog(void* dumpBase, std::uint64_t dumpSize, GpuDriverLog& out)
 
 std::size_t GpuDriverProblemCount(const GpuDriverLog& log)
 {
-  return static_cast<std::size_t>(std::count_if(log.events.begin(), log.events.end(), IsProblem));
+  const auto kept = static_cast<std::size_t>(std::count_if(log.events.begin(), log.events.end(), IsProblem));
+  return kept == log.events.size() ? log.total : kept;
 }
 
 std::optional<GpuDriverLastProblem> LastGpuDriverProblemBefore(const GpuDriverLog& log, std::uint64_t captureUnix)
@@ -164,12 +165,9 @@ std::wstring DescribeGpuDriverLog(const GpuDriverLog& log, std::uint64_t capture
   if (!log.complete) {
     text += en ? L" (the log could not be read to the end)" : L" (기록을 끝까지 읽지 못함)";
   }
-  if (!problems.empty()) {
-    const auto* last = problems.back();
-    if (captureUnix != 0u && last->unix != 0u && last->unix <= captureUnix) {
-      const auto ago = Ago(captureUnix - last->unix, en);
-      text += en ? (L", the last " + ago + L" before the capture") : (L", 마지막은 캡처 " + ago + L" 전");
-    }
+  if (const auto last = LastGpuDriverProblemBefore(log, captureUnix)) {
+    const auto ago = Ago(last->seconds_before_capture, en);
+    text += en ? (L", the last " + ago + L" before the capture") : (L", 마지막은 캡처 " + ago + L" 전");
   }
   return text;
 }

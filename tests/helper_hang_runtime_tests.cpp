@@ -407,7 +407,8 @@ HeldHangExit CaptureHangThenExit(
   const wchar_t* dirPrefix,
   std::uint32_t stateFlags = skydiag::kState_InMenu,
   BeforeExit beforeExit = BeforeExit::kNothing,
-  skydiag::CloseRequestKind closeRequest = skydiag::CloseRequestKind::kNone)
+  skydiag::CloseRequestKind closeRequest = skydiag::CloseRequestKind::kNone,
+  skydiag::CloseRequestSource closeRequestSource = skydiag::CloseRequestSource::kQuitFlag)
 {
   const auto outBase = MakeTempDir(dirPrefix);
   ClearLog(outBase);
@@ -420,7 +421,7 @@ HeldHangExit CaptureHangThenExit(
     e.type = static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest);
     e.qpc = shared->header.last_heartbeat_qpc;
     e.payload.a = static_cast<std::uint64_t>(closeRequest);
-    e.payload.d = static_cast<std::uint64_t>(skydiag::CloseRequestSource::kQuitFlag);
+    e.payload.d = static_cast<std::uint64_t>(closeRequestSource);
     e.seq = i * 2u;
     shared->header.write_index = i + 1u;
   }
@@ -679,8 +680,15 @@ void TestHangWithoutAQuitFlagIsNotHeld()
 
   const auto keys = CaptureHangThenExit(
     MakeHangTestConfig(), 0u, L"skydiag_hang_alt_f4_keys", skydiag::kState_None, BeforeExit::kNothing,
-    skydiag::CloseRequestKind::kAltF4);
+    skydiag::CloseRequestKind::kAltF4, skydiag::CloseRequestSource::kKeys);
   Require(!keys.heldAtCapture && keys.dumps == 1u && !keys.slowShutdownAtExit, "Alt+F4 keys alone change nothing");
+
+  const auto altF4Quit = CaptureHangThenExit(
+    MakeHangTestConfig(), 0u, L"skydiag_hang_alt_f4_quit_flag", skydiag::kState_None, BeforeExit::kNothing,
+    skydiag::CloseRequestKind::kAltF4, skydiag::CloseRequestSource::kQuitFlag);
+  Require(
+    altF4Quit.heldAtCapture && altF4Quit.dumps == 0u && altF4Quit.slowShutdownAtExit,
+    "Alt+F4 from Main::quitGame holds and cleans up the slow-shutdown hang dump");
 }
 
 // The exit's hang viewer and the held dump: a viewer that opened analyzes it;

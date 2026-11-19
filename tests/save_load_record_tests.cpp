@@ -250,23 +250,35 @@ void TestBlackboxCursor()
 // forced_quit), latched once read.
 void TestQuitRequestWatcher()
 {
-  const auto request = [](skydiag::CloseRequestKind kind) {
-    return skydiag::EventPayload{ static_cast<std::uint64_t>(kind), 0, 0,
-      static_cast<std::uint64_t>(skydiag::CloseRequestSource::kQuitFlag) };
+  const auto request = [](skydiag::CloseRequestKind kind, skydiag::CloseRequestSource source) {
+    return skydiag::EventPayload{ static_cast<std::uint64_t>(kind), 0, 0, static_cast<std::uint64_t>(source) };
   };
   Ring ring;
   ring.Add(skydiag::EventType::kHeartbeat, kStartQpc + 100u);
   // Close requests that are not the quit flag do not count.
-  ring.Add(skydiag::EventType::kCloseRequest, kStartQpc + 200u, request(skydiag::CloseRequestKind::kAltF4));
-  ring.Add(skydiag::EventType::kCloseRequest, kStartQpc + 300u, request(skydiag::CloseRequestKind::kWindowClose));
-  ring.Add(skydiag::EventType::kCloseRequest, kStartQpc + 400u, request(skydiag::CloseRequestKind::kCloseMessage));
+  ring.Add(
+    skydiag::EventType::kCloseRequest,
+    kStartQpc + 200u,
+    request(skydiag::CloseRequestKind::kAltF4, skydiag::CloseRequestSource::kKeys));
+  ring.Add(
+    skydiag::EventType::kCloseRequest,
+    kStartQpc + 300u,
+    request(skydiag::CloseRequestKind::kWindowClose, skydiag::CloseRequestSource::kSentMessage));
+  ring.Add(
+    skydiag::EventType::kCloseRequest,
+    kStartQpc + 400u,
+    request(skydiag::CloseRequestKind::kCloseMessage, skydiag::CloseRequestSource::kSentMessage));
   QuitRequestWatcher watcher;
   Require(!watcher.Poll(ring.shm.get()) && !watcher.Seen(), "no quit flag yet");
 
   // Claimed but not written yet: read on a later poll.
   const auto quit = ring.Claim();
   Require(!watcher.Poll(ring.shm.get()) && !watcher.Seen(), "an unwritten entry is not read");
-  ring.Commit(quit, skydiag::EventType::kCloseRequest, kStartQpc + 500u, request(skydiag::CloseRequestKind::kGameQuit));
+  ring.Commit(
+    quit,
+    skydiag::EventType::kCloseRequest,
+    kStartQpc + 500u,
+    request(skydiag::CloseRequestKind::kGameQuit, skydiag::CloseRequestSource::kQuitFlag));
   Require(watcher.Poll(ring.shm.get()), "the first poll that reads it says so");
   Require(watcher.Seen() && watcher.Kind() == skydiag::CloseRequestKind::kGameQuit, "latched with its kind");
   Require(!watcher.Poll(ring.shm.get()), "once");
@@ -282,16 +294,33 @@ void TestQuitRequestWatcher()
 
   // A helper started again while it is still in the ring finds it.
   Ring again;
-  again.Add(skydiag::EventType::kCloseRequest, kStartQpc + 100u, request(skydiag::CloseRequestKind::kForcedQuit));
+  again.Add(
+    skydiag::EventType::kCloseRequest,
+    kStartQpc + 100u,
+    request(skydiag::CloseRequestKind::kForcedQuit, skydiag::CloseRequestSource::kQuitFlag));
   again.Add(skydiag::EventType::kThreadExit, kStartQpc + 200u);
   QuitRequestWatcher restarted;
   Require(restarted.Poll(again.shm.get()) && restarted.Kind() == skydiag::CloseRequestKind::kForcedQuit,
     "forced_quit, read on the first poll");
 
+  // Alt+F4 recorded from Main::quitGame (kQuitFlag) also latches as a quit request.
+  Ring altF4Quit;
+  altF4Quit.Add(
+    skydiag::EventType::kCloseRequest,
+    kStartQpc + 100u,
+    request(skydiag::CloseRequestKind::kAltF4, skydiag::CloseRequestSource::kQuitFlag));
+  QuitRequestWatcher altF4Watcher;
+  Require(
+    altF4Watcher.Poll(altF4Quit.shm.get()) && altF4Watcher.Kind() == skydiag::CloseRequestKind::kAltF4,
+    "alt_f4 from Main::quitGame latches as a quit request");
+
   // No layout, or one that is not the plugin's.
   Require(!QuitRequestWatcher{}.Poll(nullptr), "no layout");
   Ring foreign;
-  foreign.Add(skydiag::EventType::kCloseRequest, kStartQpc, request(skydiag::CloseRequestKind::kGameQuit));
+  foreign.Add(
+    skydiag::EventType::kCloseRequest,
+    kStartQpc,
+    request(skydiag::CloseRequestKind::kGameQuit, skydiag::CloseRequestSource::kQuitFlag));
   foreign.shm->header.magic = 0u;
   Require(!QuitRequestWatcher{}.Poll(foreign.shm.get()), "a layout without the magic");
 }

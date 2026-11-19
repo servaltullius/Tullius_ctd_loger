@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,13 +24,25 @@ std::uint32_t g_helperSessionLogsToKeep = kDefaultHelperSessionLogsToKeep;
 std::vector<std::wstring> g_sessionStartLines;
 std::filesystem::path g_sessionOutBase;
 std::filesystem::path g_preSessionOutBase;
+std::mutex g_logMutex;
+
+void ClearLogUnlocked(const std::filesystem::path& outBase)
+{
+  std::error_code ec;
+  const auto path = outBase / L"SkyrimDiagHelper.log";
+  if (skydiag::ExistsForIo(path, ec) && !ec) {
+    // Truncate: open in non-append mode and immediately close.
+    std::ofstream f(skydiag::PathForIo(path), std::ios::binary | std::ios::trunc);
+  }
+}
 
 void RotateAndStartSession(const std::filesystem::path& outBase)
 {
+  std::lock_guard<std::mutex> lock(g_logMutex);
   // A crash is often followed by several relaunches before anyone reads the
   // logs.
   if (!skydiag::KeepSessionLog(outBase / L"SkyrimDiagHelper.log", g_helperSessionLogsToKeep)) {
-    ClearLog(outBase);  // a locked log is still restarted, as before
+    ClearLogUnlocked(outBase);  // a locked log is still restarted, as before
   }
 }
 
@@ -60,12 +73,8 @@ std::filesystem::path HelperSessionLogPath(const std::filesystem::path& outBase,
 
 void ClearLog(const std::filesystem::path& outBase)
 {
-  std::error_code ec;
-  const auto path = outBase / L"SkyrimDiagHelper.log";
-  if (std::filesystem::exists(path, ec)) {
-    // Truncate: open in non-append mode and immediately close.
-    std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  }
+  std::lock_guard<std::mutex> lock(g_logMutex);
+  ClearLogUnlocked(outBase);
 }
 
 void StartHelperLogSession(const std::filesystem::path& outBase)
@@ -90,12 +99,13 @@ std::filesystem::path HelperSessionOutBase()
 
 void AppendLogLine(const std::filesystem::path& outBase, std::wstring_view line)
 {
+  std::lock_guard<std::mutex> lock(g_logMutex);
   std::error_code ec;
   skydiag::CreateDirectoriesForIo(outBase, ec);
 
   const auto path = outBase / L"SkyrimDiagHelper.log";
   skydiag::helper::RotateLogFileIfNeeded(path, g_maxHelperLogBytes, g_maxHelperLogFiles);
-  std::ofstream f(path, std::ios::binary | std::ios::app);
+  std::ofstream f(skydiag::PathForIo(path), std::ios::binary | std::ios::app);
   if (!f) {
     return;
   }
