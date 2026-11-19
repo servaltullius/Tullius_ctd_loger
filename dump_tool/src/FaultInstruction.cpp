@@ -743,7 +743,13 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
   if (!insn || !insn->has_memory) {
     return FaultInstructionInfo{};  // unknown, or nothing it could have faulted on
   }
-  const bool write = kind == kAccessViolationWrite;
+  const bool noAddressGp = fault.address == kAccessViolationNoAddress;
+  // A general-protection fault carries no address and Windows always reports
+  // ExceptionInformation[0] as read (0) even for stores (mov [rbx+rax], 0 or
+  // a misaligned movaps store), so pure stores take write from the instruction.
+  const bool write = noAddressGp
+    ? (insn->access == X64MemoryAccess::kWrite)
+    : (kind == kAccessViolationWrite);
   info.access = write ? "write" : "read";
   info.mnemonic = insn->mnemonic;
   info.operand = FormatX64MemoryOperand(*insn);
@@ -755,12 +761,12 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
 
   const auto unexplained = [&]() {
     // A general-protection fault has no address to state.
-    return fault.address == kAccessViolationNoAddress ? FaultInstructionInfo{} : info;
+    return noAddressGp ? FaultInstructionInfo{} : info;
   };
   // A general-protection fault carries no address and is reported as a read
   // whatever the instruction does (a movaps store to a misaligned stack slot
   // too), so its kind is not held against the instruction.
-  const bool kindFits = fault.address == kAccessViolationNoAddress ||
+  const bool kindFits = noAddressGp ||
     (write ? Writes(insn->access) : Reads(insn->access));
   if (!fault.has_registers || !kindFits) {
     return unexplained();
