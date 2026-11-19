@@ -91,6 +91,7 @@ internal sealed class AnalysisSummary
     // none from an ambiguous pairing (the analyzer's FirstCulpritObjectRef).
     public CrashLoggerRefItem? CulpritRef =>
         CrashLoggerPairingAmbiguous ? null : CrashLoggerRefs.FirstOrDefault(r => !r.IsLocation);
+    public string CrashLoggerLogPath { get; init; } = string.Empty;
     public string CrashLoggerDirectFaultModule { get; init; } = string.Empty;
     public string CrashLoggerFirstActionableProbableModule { get; init; } = string.Empty;
     public string CrashLoggerProbableStreakModule { get; init; } = string.Empty;
@@ -262,6 +263,7 @@ internal sealed class AnalysisSummary
             ActionableCandidates = actionableCandidates,
             CrashLoggerRefs = crashLoggerRefs,
             CrashLoggerPairingAmbiguous = crashLoggerPairingAmbiguous,
+            CrashLoggerLogPath = ReadString(crashLoggerNode, "log_path"),
             CrashLoggerDirectFaultModule = ReadString(crashLoggerNode, "direct_fault_module"),
             CrashLoggerFirstActionableProbableModule = ReadString(crashLoggerNode, "first_actionable_probable_module"),
             CrashLoggerProbableStreakModule = ReadString(crashLoggerNode, "probable_streak_module"),

@@ -208,7 +208,7 @@ public sealed partial class MainWindow
                 }
 
                 DumpPathBox.Text = dumpPath;
-                await AnalyzeAsync(preferExistingArtifacts: true);
+                await AnalyzeAsync(preferExistingArtifacts: true, waitForSummaryAppearance: false);
             },
             "Could not analyze the selected dump: ",
             "선택한 덤프를 분석하지 못했습니다: ");

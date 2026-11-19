@@ -645,6 +645,53 @@ void TestWinUiAnalysisCancellationAndRootNormalizationGuards()
     "IsPathWithinRoot must not double-append a separator on drive roots.");
 }
 
+static void TestWinUiUxReliabilityContracts()
+{
+  const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto xaml = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml");
+  const auto analysisCs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Analysis.cs");
+  const auto discoveryCs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.DumpDiscovery.cs");
+  const auto mainCs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  const auto localizationCs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.Localization.cs");
+
+  const auto scrollClose = xaml.find("</ScrollViewer>");
+  const auto globalBar = xaml.find("x:Name=\"GlobalStatusBar\"");
+  const auto statusText = xaml.find("x:Name=\"StatusText\"");
+  assert(
+    scrollClose != std::string::npos &&
+    globalBar != std::string::npos &&
+    statusText != std::string::npos &&
+    globalBar > scrollClose &&
+    statusText > globalBar &&
+    "StatusText must live inside GlobalStatusBar outside AnalyzePanel so Triage/RawData show status & errors.");
+
+  RequireContains(xaml, "IsTextSelectionEnabled=\"True\"", "Triage diagnostic text blocks must allow text selection.");
+  RequireContains(xaml, "x:Name=\"TriageOpenOutputButton\"", "Triage header must expose Open report folder button.");
+  RequireContains(xaml, "x:Name=\"TriageOpenCrashLoggerButton\"", "Triage header must expose Open Crash Logger log button.");
+  RequireContains(xaml, "x:Name=\"CopyWctButton\"", "Raw Data WCT card must expose Copy WCT button.");
+  RequireContains(xaml, "x:Name=\"CopyReportButton\"", "Raw Data Report card must expose Copy report button.");
+  RequireContains(localizationCs, "TriageOpenCrashLoggerButton.Content", "Crash Logger button must be localized.");
+  RequireContains(localizationCs, "CopyReportButton.Content", "Copy report button must be localized.");
+  RequireContains(localizationCs, "CopyWctButton.Content", "Copy WCT button must be localized.");
+
+  RequireNotContains(
+    analysisCs,
+    "TroubleshootingExpander.Header =",
+    "Must update TroubleshootingTitleText.Text instead of overwriting TroubleshootingExpander's styled Header.");
+  RequireContains(
+    analysisCs,
+    "TroubleshootingTitleText.Text = _vm.TroubleshootingTitle;",
+    "Troubleshooting header must preserve its XAML StackPanel icon & typography.");
+  RequireContains(
+    mainCs,
+    "waitForSummaryAppearance: true",
+    "Startup auto-open must keep waiting for summary creation race.");
+  RequireContains(
+    discoveryCs,
+    "waitForSummaryAppearance: false",
+    "Manual recent-dump clicks must not incur the 1.5s summary polling delay.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -699,6 +746,7 @@ int main()
   TestWinUiRootScrollViewerKeepsStableVerticalScrollbarWidth();
   TestWinUiShowsQuickAnswerFirst();
   TestWinUiAnalysisCancellationAndRootNormalizationGuards();
+  TestWinUiUxReliabilityContracts();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

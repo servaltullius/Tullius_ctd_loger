@@ -160,6 +160,9 @@ public sealed partial class MainWindow
         RootContentGrid.Padding = narrow
             ? new Thickness(10, 8, 10, 8)
             : compact ? new Thickness(14, 12, 14, 12) : new Thickness(22, 18, 22, 18);
+        GlobalStatusBar.Margin = narrow
+            ? new Thickness(10, 0, 10, 8)
+            : compact ? new Thickness(14, 0, 14, 10) : new Thickness(22, 0, 22, 12);
 
         AnalyzePanel.Spacing = compact ? 12 : 16;
         TriagePanel.Spacing = compact ? 12 : 16;

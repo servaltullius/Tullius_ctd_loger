@@ -22,19 +22,26 @@ public sealed partial class MainWindow
         _analysisCts?.Cancel();
     }
 
-    private async Task<bool> TryLoadExistingAnalysisAsync(string dumpPath, string outDir, CancellationToken cancellationToken)
+    private async Task<bool> TryLoadExistingAnalysisAsync(
+        string dumpPath,
+        string outDir,
+        bool waitForSummaryAppearance,
+        CancellationToken cancellationToken)
     {
         var selectedIdentity = await DumpIdentityContract.ComputeAsync(dumpPath, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         var identitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(outDir, selectedIdentity);
         var compatibilitySummaryPath = NativeAnalyzerBridge.ResolveSummaryPath(dumpPath, outDir);
 
-        for (var i = 0;
-             i < 15 && !File.Exists(identitySummaryPath) && !File.Exists(compatibilitySummaryPath);
-             i++)
+        if (waitForSummaryAppearance)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Task.Delay(100, cancellationToken);
+            for (var i = 0;
+                 i < 15 && !File.Exists(identitySummaryPath) && !File.Exists(compatibilitySummaryPath);
+                 i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Task.Delay(100, cancellationToken);
+            }
         }
 
         if (!File.Exists(identitySummaryPath) && !File.Exists(compatibilitySummaryPath))
@@ -98,7 +105,7 @@ public sealed partial class MainWindow
         return false;
     }
 
-    private async Task AnalyzeAsync(bool preferExistingArtifacts)
+    private async Task AnalyzeAsync(bool preferExistingArtifacts, bool waitForSummaryAppearance = false)
     {
         CancellationTokenSource? analysisCts = null;
         try
@@ -160,7 +167,7 @@ public sealed partial class MainWindow
                 SetBusy(true, T(
                     "Checking for existing analysis artifacts...",
                     "기존 분석 결과를 확인 중입니다..."));
-                if (await TryLoadExistingAnalysisAsync(dumpPath, outDir, cancellationToken))
+                if (await TryLoadExistingAnalysisAsync(dumpPath, outDir, waitForSummaryAppearance, cancellationToken))
                 {
                     return;
                 }
@@ -322,7 +329,7 @@ public sealed partial class MainWindow
 
         if (_vm.ShowTroubleshooting)
         {
-            TroubleshootingExpander.Header = _vm.TroubleshootingTitle;
+            TroubleshootingTitleText.Text = _vm.TroubleshootingTitle;
             TroubleshootingCard.Visibility = Visibility.Visible;
             TroubleshootingList.ItemsSource = _vm.TroubleshootingSteps;
         }
@@ -330,6 +337,14 @@ public sealed partial class MainWindow
         {
             TroubleshootingCard.Visibility = Visibility.Collapsed;
         }
+
+        _currentCrashLoggerLogPath = MainWindowViewModel.ResolveCrashLoggerLogPath(
+            summary.CrashLoggerLogPath,
+            _vm.CurrentDumpPath,
+            _vm.CurrentOutDir);
+        TriageOpenCrashLoggerButton.Visibility = !string.IsNullOrWhiteSpace(_currentCrashLoggerLogPath)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         PopulateTriageEditor(summary);
     }
@@ -340,6 +355,8 @@ public sealed partial class MainWindow
         SetAnalysisContentVisibility(false);
         CopySummaryButton.IsEnabled = false;
         CopyShareButton.IsEnabled = false;
+        _currentCrashLoggerLogPath = null;
+        TriageOpenCrashLoggerButton.Visibility = Visibility.Collapsed;
         SetTriageEditorEnabled(false);
         QuickEventsValueText.Text = "-";
         ReportTextBox.Text = string.Empty;
@@ -438,6 +455,78 @@ public sealed partial class MainWindow
         catch (Exception ex)
         {
             StatusText.Text = T("Failed to open output folder: ", "출력 폴더 열기 실패: ") + ex.Message;
+        }
+    }
+
+    private void OpenCrashLoggerLogButton_Click(object sender, RoutedEventArgs e)
+    {
+        var logPath = _currentCrashLoggerLogPath;
+        if (string.IsNullOrWhiteSpace(logPath) || !File.Exists(logPath))
+        {
+            StatusText.Text = T(
+                "Paired Crash Logger log file was not found.",
+                "짝지어진 Crash Logger 로그 파일을 찾지 못했습니다.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = logPath,
+                UseShellExecute = true,
+                Verb = "open",
+            });
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T("Failed to open Crash Logger log: ", "Crash Logger 로그 열기 실패: ") + ex.Message;
+        }
+    }
+
+    private void CopyWctButton_Click(object sender, RoutedEventArgs e)
+    {
+        var text = WctTextBox.Text;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            StatusText.Text = T("No WCT JSON to copy yet.", "복사할 WCT JSON이 없습니다.");
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(text);
+            Clipboard.SetContent(dataPackage);
+            Clipboard.Flush();
+            StatusText.Text = T("Copied WCT JSON to clipboard.", "WCT JSON을 클립보드에 복사했습니다.");
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T("Failed to copy to clipboard: ", "클립보드 복사 실패: ") + ex.Message;
+        }
+    }
+
+    private void CopyReportButton_Click(object sender, RoutedEventArgs e)
+    {
+        var text = ReportTextBox.Text;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            StatusText.Text = T("No report text to copy yet.", "복사할 리포트가 없습니다.");
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(text);
+            Clipboard.SetContent(dataPackage);
+            Clipboard.Flush();
+            StatusText.Text = T("Copied full report to clipboard.", "전체 리포트를 클립보드에 복사했습니다.");
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = T("Failed to copy to clipboard: ", "클립보드 복사 실패: ") + ex.Message;
         }
     }
 }

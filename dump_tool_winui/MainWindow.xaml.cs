@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
     private LayoutTier _currentLayoutTier = (LayoutTier)(-1);
     private CancellationTokenSource? _analysisCts;
     private string? _currentSummaryPath;
+    private string? _currentCrashLoggerLogPath;
 
     internal MainWindow(DumpToolInvocationOptions startupOptions, string? startupWarning)
     {
@@ -81,7 +82,7 @@ public sealed partial class MainWindow : Window
                     _ = RefreshDiscoveredDumpsAsync();
                     if (!string.IsNullOrWhiteSpace(_startupOptions.DumpPath))
                     {
-                        await AnalyzeAsync(preferExistingArtifacts: true);
+                        await AnalyzeAsync(preferExistingArtifacts: true, waitForSummaryAppearance: true);
                     }
                 },
                 "Initial dump loading failed: ",

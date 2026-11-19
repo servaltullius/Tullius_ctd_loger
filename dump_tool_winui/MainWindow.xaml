@@ -46,10 +46,16 @@
         </NavigationViewItem>
       </NavigationView.MenuItems>
 
-      <!-- Scrollable content area -->
-      <ScrollViewer
+      <!-- Scrollable content area + persistent global status bar -->
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ScrollViewer
           x:Name="RootScrollViewer"
           HorizontalContentAlignment="Stretch"
+          Grid.Row="0"
           VerticalScrollBarVisibility="Visible"
           HorizontalScrollBarVisibility="Disabled">
         <Grid x:Name="RootContentGrid"
@@ -328,18 +334,6 @@
                           Content="Open report folder"
                           AutomationProperties.Name="Open report folder" />
                 </StackPanel>
-
-                <!-- Status -->
-                <Border CornerRadius="6"
-                        BorderBrush="{ThemeResource StatusBorderBrush}" BorderThickness="1"
-                        Background="{ThemeResource StatusBackgroundBrush}" Padding="12,8">
-                  <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <ProgressRing x:Name="BusyRing" Width="18" Height="18" IsActive="False" />
-                    <TextBlock x:Name="StatusText" FontSize="14"
-                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                               Text="Ready." TextWrapping="WrapWholeWords" />
-                  </StackPanel>
-                </Border>
               </StackPanel>
             </Border>
           </StackPanel>
@@ -354,7 +348,6 @@
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
               </Grid.ColumnDefinitions>
               <TextBlock x:Name="SnapshotSectionTitleText"
                          Grid.Column="0"
@@ -362,27 +355,38 @@
                          Foreground="{ThemeResource TextFillColorPrimaryBrush}">
                 Crash Summary
               </TextBlock>
-              <Button x:Name="CopySummaryButton"
-                      Grid.Column="1"
-                      Click="CopySummaryButton_Click"
-                      VerticalAlignment="Center"
-                      Padding="14,8"
-                      FontSize="13"
-                      Content="Copy summary"
-                      AutomationProperties.Name="Copy summary to clipboard"
-                      ToolTipService.ToolTip="Copy summary (Ctrl+Shift+C)">
-                <Button.KeyboardAccelerators>
-                  <KeyboardAccelerator Modifiers="Control,Shift" Key="C" />
-                </Button.KeyboardAccelerators>
-              </Button>
-              <Button x:Name="CopyShareButton"
-                      Grid.Column="2"
-                      Click="CopyShareButton_Click"
-                      VerticalAlignment="Center"
-                      Padding="14,8"
-                      FontSize="13"
-                      Content="Share"
-                      AutomationProperties.Name="Copy share text to clipboard" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button x:Name="TriageOpenCrashLoggerButton"
+                        Click="OpenCrashLoggerLogButton_Click"
+                        Visibility="Collapsed"
+                        Padding="12,8"
+                        FontSize="13"
+                        Content="Open Crash Logger log"
+                        AutomationProperties.Name="Open paired Crash Logger log" />
+                <Button x:Name="TriageOpenOutputButton"
+                        Click="OpenOutputButton_Click"
+                        Padding="12,8"
+                        FontSize="13"
+                        Content="Open report folder"
+                        AutomationProperties.Name="Open report folder" />
+                <Button x:Name="CopySummaryButton"
+                        Click="CopySummaryButton_Click"
+                        Padding="14,8"
+                        FontSize="13"
+                        Content="Copy summary"
+                        AutomationProperties.Name="Copy summary to clipboard"
+                        ToolTipService.ToolTip="Copy summary (Ctrl+Shift+C)">
+                  <Button.KeyboardAccelerators>
+                    <KeyboardAccelerator Modifiers="Control,Shift" Key="C" />
+                  </Button.KeyboardAccelerators>
+                </Button>
+                <Button x:Name="CopyShareButton"
+                        Click="CopyShareButton_Click"
+                        Padding="14,8"
+                        FontSize="13"
+                        Content="Share"
+                        AutomationProperties.Name="Copy share text to clipboard" />
+              </StackPanel>
             </Grid>
 
             <Border x:Name="TriageEmptyStateCard"
@@ -419,16 +423,20 @@
                   Quick answer
                 </TextBlock>
                 <TextBlock x:Name="QuickAnswerHeadlineText"
+                           IsTextSelectionEnabled="True"
                            TextWrapping="WrapWholeWords" FontSize="20" FontWeight="SemiBold"
                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 <TextBlock x:Name="QuickAnswerActionText"
+                           IsTextSelectionEnabled="True"
                            TextWrapping="WrapWholeWords" FontSize="15"
                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 <TextBlock x:Name="QuickAnswerWhyText"
+                           IsTextSelectionEnabled="True"
                            TextWrapping="WrapWholeWords" FontSize="13"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            Visibility="Collapsed" />
                 <TextBlock x:Name="QuickAnswerHowText"
+                           IsTextSelectionEnabled="True"
                            TextWrapping="WrapWholeWords" FontSize="13"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            Visibility="Collapsed" />
@@ -442,9 +450,11 @@
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="4">
                 <TextBlock x:Name="SummarySentenceText"
+                           IsTextSelectionEnabled="True"
                            TextWrapping="WrapWholeWords" FontSize="18"
                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                 <TextBlock x:Name="CorrelationBadge" FontSize="13" Foreground="OrangeRed"
+                           IsTextSelectionEnabled="True"
                            Visibility="Collapsed" />
               </StackPanel>
             </Border>
@@ -470,6 +480,7 @@
                       CrashLogger context
                     </TextBlock>
                     <TextBlock x:Name="QuickPrimaryValueText"
+                               IsTextSelectionEnabled="True"
                                FontSize="18" FontWeight="SemiBold"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
@@ -492,6 +503,7 @@
                       Evidence agreement
                     </TextBlock>
                     <TextBlock x:Name="QuickConfidenceValueText"
+                               IsTextSelectionEnabled="True"
                                FontSize="18" FontWeight="SemiBold"
                                Foreground="{ThemeResource AccentBrush}">
                       -
@@ -513,6 +525,7 @@
                       Next action
                     </TextBlock>
                     <TextBlock x:Name="QuickActionsValueText"
+                               IsTextSelectionEnabled="True"
                                FontSize="18" FontWeight="SemiBold" TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}">
                       -
@@ -544,14 +557,17 @@
                               Background="{ThemeResource ItemBackgroundBrush}">
                         <StackPanel Spacing="4">
                           <TextBlock FontWeight="SemiBold"
+                                     IsTextSelectionEnabled="True"
                                      Text="{x:Bind Candidate}"
                                      TextWrapping="WrapWholeWords"
                                      Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                           <TextBlock FontSize="12"
+                                     IsTextSelectionEnabled="True"
                                      Text="{x:Bind Signals}"
                                      TextWrapping="WrapWholeWords"
                                      Foreground="{ThemeResource AccentBrush}" />
                           <TextBlock FontSize="13"
+                                     IsTextSelectionEnabled="True"
                                      Text="{x:Bind Detail}"
                                      TextWrapping="WrapWholeWords"
                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -618,9 +634,11 @@
                                 </Border>
                                 <StackPanel Grid.Column="1" Spacing="2">
                                   <TextBlock FontWeight="SemiBold"
+                                             IsTextSelectionEnabled="True"
                                              Text="{x:Bind Module}" TextWrapping="WrapWholeWords"
                                              Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                                   <TextBlock FontSize="13" Text="{x:Bind Reason}"
+                                             IsTextSelectionEnabled="True"
                                              TextWrapping="WrapWholeWords"
                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
@@ -654,6 +672,7 @@
                       <ListView.ItemTemplate>
                         <DataTemplate>
                           <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                     IsTextSelectionEnabled="True"
                                      FontFamily="Cascadia Code" FontSize="12" Margin="0,0,0,4"
                                      Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                         </DataTemplate>
@@ -699,9 +718,11 @@
                               </Border>
                               <StackPanel Grid.Column="1" Spacing="2">
                                 <TextBlock FontWeight="SemiBold"
+                                           IsTextSelectionEnabled="True"
                                            Text="{x:Bind Title}" TextWrapping="WrapWholeWords"
                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                                 <TextBlock FontSize="13" Text="{x:Bind Details}"
+                                           IsTextSelectionEnabled="True"
                                            TextWrapping="WrapWholeWords"
                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                               </StackPanel>
@@ -738,14 +759,18 @@
                                   Background="{ThemeResource ItemBackgroundBrush}">
                             <StackPanel Spacing="2">
                               <TextBlock FontWeight="SemiBold"
+                                         IsTextSelectionEnabled="True"
                                          Text="{x:Bind Path}" TextWrapping="WrapWholeWords"
                                          Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                               <TextBlock FontSize="12" Text="{x:Bind Kind}"
+                                         IsTextSelectionEnabled="True"
                                          Foreground="{ThemeResource AccentBrush}" />
                               <TextBlock FontSize="12" Text="{x:Bind Providers}"
+                                         IsTextSelectionEnabled="True"
                                          TextWrapping="WrapWholeWords"
                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                               <TextBlock FontSize="12" Text="{x:Bind Conflict}"
+                                         IsTextSelectionEnabled="True"
                                          Foreground="{ThemeResource ConflictBrush}" />
                             </StackPanel>
                           </Border>
@@ -776,6 +801,7 @@
                       <ListView.ItemTemplate>
                         <DataTemplate>
                           <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                     IsTextSelectionEnabled="True"
                                      FontFamily="Cascadia Code" FontSize="12" Margin="0,0,0,4"
                                      Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                         </DataTemplate>
@@ -804,15 +830,19 @@
                                  Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                     </StackPanel>
                     <TextBlock x:Name="CrashContextSummaryText" FontSize="12"
+                               IsTextSelectionEnabled="True"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock x:Name="BucketText" FontSize="13"
+                               IsTextSelectionEnabled="True"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                     <TextBlock x:Name="ModuleText" FontSize="13"
+                               IsTextSelectionEnabled="True"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                     <TextBlock x:Name="ModNameText" FontSize="13"
+                               IsTextSelectionEnabled="True"
                                TextWrapping="WrapWholeWords"
                                Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -880,6 +910,7 @@
                                       BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
                                       Background="{ThemeResource ItemBackgroundBrush}">
                                 <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                           IsTextSelectionEnabled="True"
                                            FontSize="13"
                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                               </Border>
@@ -901,6 +932,7 @@
                                       BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
                                       Background="{ThemeResource ItemBackgroundBrush}">
                                 <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                           IsTextSelectionEnabled="True"
                                            FontSize="13"
                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                               </Border>
@@ -922,6 +954,7 @@
                                       BorderBrush="{ThemeResource ItemBorderBrush}" BorderThickness="1"
                                       Background="{ThemeResource ItemBackgroundBrush}">
                                 <TextBlock Text="{Binding}" TextWrapping="WrapWholeWords"
+                                           IsTextSelectionEnabled="True"
                                            FontSize="13"
                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                               </Border>
@@ -955,7 +988,8 @@
                     <ItemsControl x:Name="TroubleshootingList" Margin="8,4">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                          <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                          <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2"
+                                     IsTextSelectionEnabled="True" />
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -1112,9 +1146,21 @@
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="10">
-                <TextBlock x:Name="WctLabelText" Text="WCT JSON"
-                           FontSize="22" FontWeight="SemiBold"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Grid ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock x:Name="WctLabelText" Grid.Column="0" Text="WCT JSON"
+                             FontSize="22" FontWeight="SemiBold"
+                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                  <Button x:Name="CopyWctButton" Grid.Column="1"
+                          Click="CopyWctButton_Click"
+                          VerticalAlignment="Center"
+                          Padding="12,6" FontSize="13"
+                          Content="Copy WCT"
+                          AutomationProperties.Name="Copy WCT JSON to clipboard" />
+                </Grid>
                 <TextBox x:Name="WctTextBox"
                          IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
@@ -1132,9 +1178,21 @@
                     BorderBrush="{ThemeResource CardBorderBrush}"
                     BorderThickness="1" CornerRadius="8" Padding="20">
               <StackPanel Spacing="10">
-                <TextBlock x:Name="ReportLabelText" Text="Report"
-                           FontSize="22" FontWeight="SemiBold"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Grid ColumnSpacing="12">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock x:Name="ReportLabelText" Grid.Column="0" Text="Report"
+                             FontSize="22" FontWeight="SemiBold"
+                             Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                  <Button x:Name="CopyReportButton" Grid.Column="1"
+                          Click="CopyReportButton_Click"
+                          VerticalAlignment="Center"
+                          Padding="12,6" FontSize="13"
+                          Content="Copy report"
+                          AutomationProperties.Name="Copy analysis report to clipboard" />
+                </Grid>
                 <TextBox x:Name="ReportTextBox"
                          IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -1147,7 +1205,24 @@
           </StackPanel>
 
         </Grid>
-      </ScrollViewer>
+        </ScrollViewer>
+
+        <!-- Persistent global status bar visible across Dashboard, Triage, and Raw Data -->
+        <Border x:Name="GlobalStatusBar"
+                Grid.Row="1"
+                Margin="22,0,22,12"
+                CornerRadius="6"
+                BorderBrush="{ThemeResource StatusBorderBrush}" BorderThickness="1"
+                Background="{ThemeResource StatusBackgroundBrush}" Padding="12,8">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <ProgressRing x:Name="BusyRing" Width="18" Height="18" IsActive="False" />
+            <TextBlock x:Name="StatusText" FontSize="14"
+                       IsTextSelectionEnabled="True"
+                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                       Text="Ready." TextWrapping="WrapWholeWords" />
+          </StackPanel>
+        </Border>
+      </Grid>
     </NavigationView>
   </Grid>
 </Window>

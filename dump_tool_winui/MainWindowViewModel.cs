@@ -379,6 +379,80 @@ internal sealed partial class MainWindowViewModel
         public string WctText { get; set; } = string.Empty;
     }
 
+    private static string ResolveExistingArtifactPath(string primaryPath, string fallbackPath)
+    {
+        if (File.Exists(primaryPath))
+        {
+            return primaryPath;
+        }
+        return File.Exists(fallbackPath) ? fallbackPath : primaryPath;
+    }
+
+    public static string? ResolveCrashLoggerLogPath(
+        string? summaryLogPath,
+        string? dumpPath,
+        string? outDir)
+    {
+        if (string.IsNullOrWhiteSpace(summaryLogPath))
+        {
+            return null;
+        }
+
+        var trimmed = summaryLogPath.Trim();
+        var isRedacted = trimmed.StartsWith("<redacted>", StringComparison.OrdinalIgnoreCase);
+        if (!isRedacted && File.Exists(trimmed))
+        {
+            return trimmed;
+        }
+
+        // Normalize backslashes on non-Windows test hosts as well.
+        var fileName = Path.GetFileName(trimmed.Replace('\\', Path.DirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            fileName is "." or ".." ||
+            fileName.IndexOfAny(new[] { '/', '\\', ':' }) >= 0)
+        {
+            return null;
+        }
+
+        var candidateDirs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(outDir))
+        {
+            candidateDirs.Add(outDir);
+        }
+        if (!string.IsNullOrWhiteSpace(dumpPath))
+        {
+            var dumpDir = Path.GetDirectoryName(dumpPath);
+            if (!string.IsNullOrWhiteSpace(dumpDir))
+            {
+                candidateDirs.Add(dumpDir);
+            }
+        }
+        var myDocs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (!string.IsNullOrWhiteSpace(myDocs))
+        {
+            candidateDirs.Add(Path.Combine(myDocs, "My Games", "Skyrim Special Edition", "SKSE"));
+            candidateDirs.Add(Path.Combine(myDocs, "My Games", "Skyrim Special Edition GOG", "SKSE"));
+            candidateDirs.Add(Path.Combine(myDocs, "My Games", "Skyrim VR", "SKSE"));
+        }
+
+        foreach (var dir in candidateDirs)
+        {
+            try
+            {
+                var candidate = Path.Combine(dir, fileName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+            catch
+            {
+                // Ignore invalid or inaccessible candidate paths.
+            }
+        }
+        return null;
+    }
+
     public static AdvancedArtifactsData LoadAdvancedArtifacts(
         string dumpPath,
         string outDir,
@@ -390,11 +464,13 @@ internal sealed partial class MainWindowViewModel
         var data = new AdvancedArtifactsData();
 
         var blackboxPath = dumpIdentity.IsValid
-            ? NativeAnalyzerBridge.ResolveBlackboxPath(outDir, dumpIdentity)
+            ? ResolveExistingArtifactPath(
+                NativeAnalyzerBridge.ResolveBlackboxPath(outDir, dumpIdentity),
+                NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir))
             : NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
         if (File.Exists(blackboxPath))
         {
-            var tail = new Queue<string>(capacity: 200);
+            var rawTail = new Queue<string>(capacity: 200);
             var totalEvents = 0;
             foreach (var line in File.ReadLines(blackboxPath))
             {
@@ -405,11 +481,16 @@ internal sealed partial class MainWindowViewModel
                 }
 
                 totalEvents++;
-                if (tail.Count == 200)
+                if (rawTail.Count == 200)
                 {
-                    tail.Dequeue();
+                    rawTail.Dequeue();
                 }
+                rawTail.Enqueue(line);
+            }
 
+            foreach (var line in rawTail)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     using var jDoc = JsonDocument.Parse(line);
@@ -431,21 +512,22 @@ internal sealed partial class MainWindowViewModel
                         var b = root.GetProperty("b").GetUInt64();
                         formatted = $"[{idx}] t={tMs:F0}ms tid={tid} {typeName} a={a} b={b}";
                     }
-                    tail.Enqueue(formatted);
+                    data.EventLines.Add(formatted);
                 }
                 catch (Exception ex)
                 {
                     Debug.WriteLine($"Blackbox line parse failed: {ex.GetType().Name}: {ex.Message}");
-                    tail.Enqueue(line);
+                    data.EventLines.Add(line);
                 }
             }
-            data.EventLines.AddRange(tail);
             // The list shows the last 200; the count is the whole log.
             data.EventCount = totalEvents;
         }
 
         var reportPath = dumpIdentity.IsValid
-            ? NativeAnalyzerBridge.ResolveReportPath(outDir, dumpIdentity)
+            ? ResolveExistingArtifactPath(
+                NativeAnalyzerBridge.ResolveReportPath(outDir, dumpIdentity),
+                NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir))
             : NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
         data.HasReport = File.Exists(reportPath);
         data.ReportText = data.HasReport
@@ -453,7 +535,9 @@ internal sealed partial class MainWindowViewModel
             : missingReportText;
 
         var wctPath = dumpIdentity.IsValid
-            ? NativeAnalyzerBridge.ResolveWctPath(outDir, dumpIdentity)
+            ? ResolveExistingArtifactPath(
+                NativeAnalyzerBridge.ResolveWctPath(outDir, dumpIdentity),
+                NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir))
             : NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
         data.HasWct = File.Exists(wctPath);
         if (data.HasWct)
