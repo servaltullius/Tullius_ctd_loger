@@ -900,8 +900,22 @@ int main()
 
   AssertContains(
     pluginMain,
-    "GetPrivateProfileStringW(",
+    "ResolvePluginIniPath()",
+    "Plugin config loader must resolve SkyrimDiag.ini beside SkyrimDiag.dll.");
+
+  AssertContains(
+    pluginMain,
+    "skydiag::ini::IniDocument::Parse(",
+    "Plugin config loader must parse SkyrimDiag.ini through shared IniDocument.");
+
+  AssertContains(
+    pluginMain,
+    "ReadIniString(ini, L\"SkyrimDiag\", L\"HelperExe\"",
     "Plugin config loader must still read helper path from ini.");
+
+  assert(
+    pluginMain.find("GetPrivateProfile") == std::string::npos &&
+    "Plugin config loader must not rely on CWD-sensitive GetPrivateProfile*W APIs.");
 
   AssertContains(
     pluginMain,

@@ -110,5 +110,23 @@ int main()
     "RecaptureTargetProfile::kCrashFull",
     "Pending crash analysis must support crash_full recapture profile selection.");
 
+  AssertContains(
+    execute,
+    "CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &stableShm)",
+    "Recapture must take a consistent shared-memory snapshot before writing the dump.");
+
+  AssertContains(
+    execute,
+    "const std::uint32_t recaptureStateFlags = dumpShm ? dumpShm->header.state_flags : 0u;",
+    "Recapture incident manifest must record the captured shared-memory state_flags instead of hardcoding 0.");
+
+  const std::filesystem::path freezeCapturePath = repoRoot / "helper" / "src" / "FreezeCapture.cpp";
+  assert(std::filesystem::exists(freezeCapturePath) && "helper/src/FreezeCapture.cpp not found");
+  const std::string freezeCapture = ReadAllText(freezeCapturePath);
+  AssertContains(
+    freezeCapture,
+    "CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &stableShm)",
+    "Freeze and manual capture must take a consistent shared-memory snapshot before writing the dump.");
+
   return 0;
 }

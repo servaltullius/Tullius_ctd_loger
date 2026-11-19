@@ -562,7 +562,7 @@ def check_workflows_are_pinned_and_bounded(failures: list[str]) -> None:
             # the four Windows jobs cannot drift apart again.
             if re.search(r"^    runs-on:\s*windows", body, re.M) and f"uses: {WINDOWS_SETUP}" not in body:
                 failures.append(f"{path.name}: Windows job {job} must use {WINDOWS_SETUP}")
-        if "git clone https://github.com/microsoft/vcpkg" in text:
+        if "https://github.com/microsoft/vcpkg" in text:
             if "'default-registry'.baseline" not in text or "checkout --quiet --detach $baseline" not in text:
                 failures.append(f"{path.name}: the vcpkg clone must be checked out at the manifest baseline")
 
@@ -577,7 +577,9 @@ def check_windows_setup_action(failures: list[str]) -> None:
         "using: composite",
         "actions/setup-python@",
         "ilammy/msvc-dev-cmd@",
-        "git clone https://github.com/microsoft/vcpkg",
+        "https://github.com/microsoft/vcpkg",
+        "--filter=blob:none --no-checkout",
+        "vcpkg-tool-",
         "vcpkg/archives",
     ):
         if needed not in text:
@@ -587,7 +589,7 @@ def check_windows_setup_action(failures: list[str]) -> None:
         failures.append("windows-setup/action.yml must install .NET only when inputs.dotnet is 'true'")
     for path in sorted(WORKFLOWS.glob("*.yml")):
         workflow = _read(path)
-        for inline in ("git clone https://github.com/microsoft/vcpkg", "ilammy/msvc-dev-cmd@"):
+        for inline in ("https://github.com/microsoft/vcpkg", "ilammy/msvc-dev-cmd@"):
             if inline in workflow:
                 failures.append(f"{path.name}: {inline!r} belongs in the windows-setup action")
 

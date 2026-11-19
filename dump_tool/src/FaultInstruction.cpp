@@ -15,6 +15,8 @@ constexpr std::uint8_t kRexR = 0x4u;
 constexpr std::uint8_t kRexX = 0x2u;
 constexpr std::uint8_t kRexB = 0x1u;
 constexpr int kRsp = 4;
+constexpr int kRsi = 6;
+constexpr int kRdi = 7;
 
 // The SSE prefix that selects the instruction (none, 66, F3, F2).
 enum class SsePrefix : std::uint8_t
@@ -237,8 +239,29 @@ std::optional<X64Instruction> DecodeOneByte(
   const std::uint8_t opSize = OperandSize(p);
   const std::uint8_t byteSize = 1;
   const std::size_t immZ = opSize == 2u ? 2u : 4u;
+  if (!p.repne && (op == 0xA4u || op == 0xA5u || op == 0xAAu || op == 0xABu)) {
+    X64Instruction insn{};
+    insn.length = at;
+    insn.has_memory = true;
+    const bool isByte = (op == 0xA4u || op == 0xAAu);
+    const std::uint8_t elemSize = isByte ? byteSize : opSize;
+    insn.access_size = elemSize;
+    const char* suffix = isByte ? "b" : (opSize == 2u ? "w" : (opSize == 8u ? "q" : "d"));
+    const bool isMovs = (op == 0xA4u || op == 0xA5u);
+    insn.mnemonic = std::string(p.rep ? "rep " : "") + (isMovs ? "movs" : "stos") + suffix;
+    if (isMovs) {
+      insn.memory.base = kRsi;
+      insn.has_second_memory = true;
+      insn.second_memory.base = kRdi;
+      insn.access = X64MemoryAccess::kReadWrite;
+    } else {
+      insn.memory.base = kRdi;
+      insn.access = X64MemoryAccess::kWrite;
+    }
+    return insn;
+  }
   if (p.rep || p.repne) {
-    return std::nullopt;  // rep / xacquire forms are not decoded
+    return std::nullopt;  // other rep / xacquire forms are not decoded
   }
   Form f{};
   if (op < 0x40u && (op & 7u) < 4u) {
@@ -621,6 +644,92 @@ bool Writes(X64MemoryAccess access)
   return access == X64MemoryAccess::kWrite || access == X64MemoryAccess::kReadWrite;
 }
 
+// VEX 2-byte (C5) or 3-byte (C4) prefix for the 0F opcode map.
+std::optional<X64Instruction> DecodeVex(
+  const std::uint8_t* code,
+  std::size_t size,
+  std::size_t at,
+  std::uint8_t vexByte,
+  const Prefixes& p)
+{
+  // VEX cannot be combined with legacy 66/F2/F3 or REX prefixes.
+  if (p.operand_size || p.rep || p.repne || p.rex != 0u) {
+    return std::nullopt;
+  }
+  std::uint8_t rex = 0u;
+  bool is256 = false;
+  std::uint8_t pp = 0u;
+  std::uint8_t op = 0u;
+  std::size_t modRmAt = 0u;
+  if (vexByte == 0xC5u) {
+    if (at + 1u >= size) {
+      return std::nullopt;
+    }
+    const std::uint8_t v1 = code[at];
+    if ((v1 & 0x80u) == 0u) {
+      rex |= kRexR;
+    }
+    is256 = (v1 & 0x04u) != 0u;
+    pp = v1 & 0x03u;
+    op = code[at + 1u];
+    modRmAt = at + 2u;
+  } else {
+    if (at + 2u >= size) {
+      return std::nullopt;
+    }
+    const std::uint8_t v1 = code[at];
+    const std::uint8_t v2 = code[at + 1u];
+    const std::uint8_t mapSelect = v1 & 0x1Fu;
+    if (mapSelect != 1u) {
+      return std::nullopt;  // only map 1 (0F) is decoded
+    }
+    if ((v1 & 0x80u) == 0u) {
+      rex |= kRexR;
+    }
+    if ((v1 & 0x40u) == 0u) {
+      rex |= kRexX;
+    }
+    if ((v1 & 0x20u) == 0u) {
+      rex |= kRexB;
+    }
+    if ((v2 & 0x80u) != 0u) {
+      rex |= kRexW;
+    }
+    is256 = (v2 & 0x04u) != 0u;
+    pp = v2 & 0x03u;
+    op = code[at + 2u];
+    modRmAt = at + 3u;
+  }
+
+  const auto sse = SseFormsFor(op, (rex & kRexW) != 0u);
+  if (!sse) {
+    return std::nullopt;
+  }
+  Form form = sse->by_prefix[pp];
+  if (!form.mnemonic) {
+    return std::nullopt;
+  }
+  // Unlike legacy SSE, VEX-encoded memory operands only require alignment on
+  // vmovaps/vmovapd (0x28/0x29) and vmovdqa (0x6F/0x7F with pp=66).
+  form.aligned = (op == 0x28u || op == 0x29u || ((op == 0x6Fu || op == 0x7Fu) && pp == 1u));
+  if (is256) {
+    if (op == 0x5Au && pp == 0u) {
+      // vcvtps2pd ymm, m128 reads 16 bytes (four floats -> four doubles).
+      form.size = 16u;
+    } else if (form.size == 16u) {
+      form.size = 32u;
+    } else {
+      return std::nullopt;
+    }
+  }
+  auto insn = Finish(code, size, modRmAt, rex, form);
+  if (!insn) {
+    return std::nullopt;
+  }
+  insn->mnemonic = std::string("v") + form.mnemonic;
+  return insn;
+}
+
 }  // namespace
 
 std::optional<X64Instruction> DecodeX64Instruction(const std::uint8_t* code, std::size_t size)
@@ -635,6 +744,9 @@ std::optional<X64Instruction> DecodeX64Instruction(const std::uint8_t* code, std
   }
   const std::size_t at = p->length + 1u;
   const std::uint8_t op = code[p->length];
+  if (op == 0xC4u || op == 0xC5u) {
+    return DecodeVex(code, size, at, op, *p);
+  }
   if (op != 0x0Fu) {
     return DecodeOneByte(code, size, at, op, *p);
   }
@@ -672,6 +784,9 @@ std::string FormatX64MemoryOperand(const X64Instruction& insn)
       break;
     case 16:
       width = "xmmword";
+      break;
+    case 32:
+      width = "ymmword";
       break;
     default:
       break;
@@ -744,19 +859,39 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
     return FaultInstructionInfo{};  // unknown, or nothing it could have faulted on
   }
   const bool noAddressGp = fault.address == kAccessViolationNoAddress;
+  X64Instruction effectiveInsn = *insn;
   // A general-protection fault carries no address and Windows always reports
   // ExceptionInformation[0] as read (0) even for stores (mov [rbx+rax], 0 or
   // a misaligned movaps store), so pure stores take write from the instruction.
-  const bool write = noAddressGp
-    ? (insn->access == X64MemoryAccess::kWrite)
+  bool write = noAddressGp
+    ? (effectiveInsn.access == X64MemoryAccess::kWrite)
     : (kind == kAccessViolationWrite);
+  if (effectiveInsn.has_second_memory) {
+    if (!noAddressGp) {
+      if (write) {
+        effectiveInsn.memory = effectiveInsn.second_memory;
+      }
+    } else if (fault.has_registers) {
+      const std::uint64_t span = std::max<std::uint64_t>(effectiveInsn.access_size, 1u);
+      const auto eaSrc = X64EffectiveAddress(effectiveInsn, fault.exception_address, fault.registers);
+      X64Instruction dstInsn = effectiveInsn;
+      dstInsn.memory = effectiveInsn.second_memory;
+      const auto eaDst = X64EffectiveAddress(dstInsn, fault.exception_address, fault.registers);
+      const bool srcBad = eaSrc && (!IsCanonicalX64Address(*eaSrc) || !IsCanonicalX64Address(*eaSrc + span - 1u));
+      const bool dstBad = eaDst && (!IsCanonicalX64Address(*eaDst) || !IsCanonicalX64Address(*eaDst + span - 1u));
+      if (!srcBad && dstBad) {
+        write = true;
+        effectiveInsn.memory = effectiveInsn.second_memory;
+      }
+    }
+  }
   info.access = write ? "write" : "read";
-  info.mnemonic = insn->mnemonic;
-  info.operand = FormatX64MemoryOperand(*insn);
-  info.bytes = BytesText(code, insn->length);
-  info.access_size = insn->access_size;
-  info.branch_through_memory = insn->branch_through_memory;
-  info.displacement = insn->memory.displacement;
+  info.mnemonic = effectiveInsn.mnemonic;
+  info.operand = FormatX64MemoryOperand(effectiveInsn);
+  info.bytes = BytesText(code, effectiveInsn.length);
+  info.access_size = effectiveInsn.access_size;
+  info.branch_through_memory = effectiveInsn.branch_through_memory;
+  info.displacement = effectiveInsn.memory.displacement;
   info.verdict = "address_only";
 
   const auto unexplained = [&]() {
@@ -767,20 +902,21 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
   // whatever the instruction does (a movaps store to a misaligned stack slot
   // too), so its kind is not held against the instruction.
   const bool kindFits = noAddressGp ||
-    (write ? Writes(insn->access) : Reads(insn->access));
+    (write ? Writes(effectiveInsn.access) : Reads(effectiveInsn.access));
   if (!fault.has_registers || !kindFits) {
     return unexplained();
   }
-  const auto ea = X64EffectiveAddress(*insn, fault.exception_address, fault.registers);
+  const auto ea = X64EffectiveAddress(effectiveInsn, fault.exception_address, fault.registers);
   if (!ea) {
     return unexplained();
   }
-  const std::uint64_t span = std::max<std::uint64_t>(insn->access_size, 1u);
+  const std::uint64_t span = std::max<std::uint64_t>(effectiveInsn.access_size, 1u);
+  const std::uint64_t alignBytes = effectiveInsn.access_size >= 32u ? 32u : 16u;
   std::string verdict;
   if (fault.address == kAccessViolationNoAddress) {
     if (!IsCanonicalX64Address(*ea) || !IsCanonicalX64Address(*ea + span - 1u)) {
       verdict = "noncanonical";
-    } else if (insn->requires_alignment && (*ea % 16u) != 0u) {
+    } else if (effectiveInsn.requires_alignment && (*ea % alignBytes) != 0u) {
       verdict = "misaligned";
     } else {
       return FaultInstructionInfo{};
@@ -791,7 +927,7 @@ FaultInstructionInfo ExplainFaultInstruction(const FaultRecord& fault, const std
 
   info.address_matches = true;
   info.effective_address = *ea;
-  const auto& m = insn->memory;
+  const auto& m = effectiveInsn.memory;
   if (m.base >= 0) {
     info.base_register = X64RegisterName(m.base);
     info.base_value = fault.registers[static_cast<std::size_t>(m.base)];
@@ -1127,9 +1263,10 @@ std::wstring DescribeFaultInstruction(const FaultInstructionInfo& info, std::wst
   const bool call = info.mnemonic == "call";
 
   if (info.verdict == "misaligned") {
-    return en ? (subject + L" needs an address aligned to 16 bytes, but " + bracket + L" was " + ea +
+    const std::wstring align = std::to_wstring(info.access_size >= 32u ? 32u : 16u);
+    return en ? (subject + L" needs an address aligned to " + align + L" bytes, but " + bracket + L" was " + ea +
                   L": the data was not aligned.")
-              : (subject + L"는 16바이트 단위로 정렬된 주소가 필요한데 " + bracket + L"의 주소가 " + ea +
+              : (subject + L"는 " + align + L"바이트 단위로 정렬된 주소가 필요한데 " + bracket + L"의 주소가 " + ea +
                   L"였습니다(정렬되지 않은 데이터).");
   }
   if (info.verdict == "stack") {

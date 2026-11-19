@@ -14,8 +14,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include "AddressLibraryFile.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
+#include "SkyrimDiagLongPath.h"
 #include "SkyrimDiagHelper/ManualCaptureHotkey.h"
 #include "SkyrimDiagHelper/PathRedaction.h"
 #include "SkyrimDiagHelper/PluginScanner.h"
@@ -386,7 +388,7 @@ void RunPreflightChecks(
   const SymbolRuntimeHealth symbolHealth = CollectSymbolRuntimeHealth(cfg);
 
   std::vector<PreflightCheck> checks;
-  checks.reserve(11);
+  checks.reserve(13);
 
   checks.push_back(PreflightCheck{
     "PLUGIN_SCAN_SOURCE",
@@ -572,6 +574,77 @@ void RunPreflightChecks(
       hasIncompatCombo ? "high" : "low",
       detailKo,
       detailEn,
+    });
+  }
+
+  // Component binary version consistency: detects partial updates / stale DLLs
+  // left behind from manual overwrites in MO2.
+  {
+    std::filesystem::path helperExePath;
+    {
+      std::vector<wchar_t> buf(32768, L'\0');
+      const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+      if (n > 0u && n < buf.size()) {
+        helperExePath = std::filesystem::path(buf.data(), buf.data() + n);
+      }
+    }
+    const std::string helperVersion = !helperExePath.empty() ? QueryFileVersionString(helperExePath) : std::string{};
+    const std::filesystem::path helperDir = helperExePath.parent_path();
+    std::vector<std::string> mismatches;
+    if (!helperVersion.empty() && !helperDir.empty()) {
+      for (const wchar_t* siblingName :
+           { L"SkyrimDiag.dll", L"SkyrimDiagDumpToolCli.exe", L"SkyrimDiagDumpToolNative.dll" }) {
+        std::filesystem::path candidate = helperDir / siblingName;
+        std::error_code ec;
+        if (!skydiag::ExistsForIo(candidate, ec) || ec) {
+          candidate = pluginsDir / siblingName;
+          if (!skydiag::ExistsForIo(candidate, ec) || ec) {
+            continue;
+          }
+        }
+        const std::string ver = QueryFileVersionString(candidate);
+        if (!ver.empty() && ver != helperVersion) {
+          mismatches.push_back(WideToUtf8(siblingName) + "=" + ver);
+        }
+      }
+    }
+    const bool hasMismatch = !mismatches.empty();
+    std::string mismatchList;
+    for (std::size_t i = 0; i < mismatches.size(); ++i) {
+      mismatchList += (i == 0 ? "" : ", ") + mismatches[i];
+    }
+    checks.push_back(PreflightCheck{
+      "BINARY_VERSION_CONSISTENCY",
+      hasMismatch ? "warn" : "ok",
+      hasMismatch ? "high" : "low",
+      hasMismatch
+        ? ("툴리우스 CTD 로거 구성 파일 버전이 섞여 있습니다(Helper=" + helperVersion + ", 불일치: " +
+            mismatchList + "). ZIP 전체를 깨끗하게 다시 설치하세요.")
+        : ("툴리우스 CTD 로거 구성 파일 버전이 일치합니다(" +
+            (helperVersion.empty() ? std::string("unknown") : helperVersion) + ")."),
+      hasMismatch
+        ? ("Tullius CTD Logger binaries have mismatched versions (Helper=" + helperVersion +
+            ", mismatched: " + mismatchList + "). Reinstall the full release ZIP cleanly.")
+        : ("Tullius CTD Logger binaries have matching versions (" +
+            (helperVersion.empty() ? std::string("unknown") : helperVersion) + ")."),
+    });
+  }
+
+  // Address Library presence for game-frame ID resolution (ADR-0027) and
+  // FormID pointer lookup (ADR-0033). Cached per process in AddressLibraryFile.
+  {
+    const auto addressLibrary = skydiag::helper::internal::GameAddressLibraryBytes(proc.pid);
+    const bool present = !addressLibrary.empty();
+    checks.push_back(PreflightCheck{
+      "ADDRESS_LIBRARY_PRESENT",
+      present ? "ok" : "warn",
+      present ? "low" : "medium",
+      present
+        ? ("Address Library 확인됨(" + std::to_string(addressLibrary.size()) + " bytes).")
+        : "현재 게임 버전에 맞는 Address Library 파일이 Data\\SKSE\\Plugins에 없어 게임 프레임 ID 및 FormID 조회가 비활성화됩니다.",
+      present
+        ? ("Address Library detected (" + std::to_string(addressLibrary.size()) + " bytes).")
+        : "Address Library file for this game version was not found in Data\\SKSE\\Plugins; game-frame ID and FormID lookup are disabled.",
     });
   }
 

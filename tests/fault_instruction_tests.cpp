@@ -250,14 +250,16 @@ void TestNoAccessAndRejections()
     assert(!insn.has_memory);
   }
   ExpectRejected({ 0x48, 0x8D, 0xC1 });                                      // lea without memory
-  ExpectRejected({ 0xC5, 0xF8, 0x10, 0x00 });                                // VEX vmovups
+  ExpectRejected({ 0xC4, 0xE2, 0x79, 0x18, 0x00 });                          // VEX 0F 38 map (vbroadcastss)
+  ExpectRejected({ 0x66, 0xC5, 0xF8, 0x10, 0x00 });                          // legacy prefix before VEX
   ExpectRejected({ 0x62, 0xF1, 0x7C, 0x48, 0x10, 0x00 });                    // EVEX
   ExpectRejected({ 0x67, 0x8B, 0x01 });                                      // 32-bit addressing
   ExpectRejected({ 0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00 }); // gs:
   ExpectRejected({ 0x66, 0x0F, 0x38, 0x00, 0x01 });                          // 0F 38
   ExpectRejected({ 0x0F, 0x6F, 0x01 });                                      // MMX
   ExpectRejected({ 0xF3, 0x48, 0x0F, 0xB8, 0x01 });                          // popcnt
-  ExpectRejected({ 0xF3, 0x48, 0xA5 });                                      // rep movsq
+  ExpectRejected({ 0xF3, 0xA6 });                                            // rep cmpsb
+  ExpectRejected({ 0xF2, 0xAE });                                            // repne scasb
   ExpectRejected({ 0xFF, 0x18 });                                            // call far
   ExpectRejected({ 0xF3, 0xF2, 0x0F, 0x10, 0x01 });                          // F3 and F2
   ExpectRejected({ 0x48, 0x8B, 0x41 });                                      // disp8 cut off
@@ -604,7 +606,7 @@ void TestNothingToSay()
   // No code bytes, an unknown instruction, lea, an exception kind that is not
   // read/write/execute.
   assert(Explain(Fault(kAccessViolationRead, 0x24, regs), {}).verdict.empty());
-  assert(Explain(Fault(kAccessViolationRead, 0x24, regs), { 0xC5, 0xF8, 0x10, 0x41, 0x24 }).verdict.empty());
+  assert(Explain(Fault(kAccessViolationRead, 0x24, regs), { 0x62, 0xF1, 0x7C, 0x48, 0x10, 0x41, 0x24 }).verdict.empty());
   assert(Explain(Fault(kAccessViolationRead, 0x24, regs), { 0x48, 0x8D, 0x41, 0x24 }).verdict.empty());
   assert(Explain(Fault(2, 0x24, regs), { 0x48, 0x8B, 0x41, 0x24 }).verdict.empty());
   // An execute fault somewhere other than the instruction pointer.
@@ -823,6 +825,121 @@ void TestResumeAtCallerOfNullJump()
   assert(!ResumeAtCallerOfNullJump(kRsp, missing));
 }
 
+void TestStringMovesAndStores()
+{
+  // rep movsb / movsw / movsd / movsq: reads [rsi] and writes [rdi].
+  {
+    const auto insn = Decode({ 0xF3, 0xA4 });
+    assert(insn.mnemonic == "rep movsb" && insn.has_memory && insn.has_second_memory);
+    assert(insn.access == X64MemoryAccess::kReadWrite && insn.access_size == 1u);
+    assert(insn.memory.base == kRsi && insn.second_memory.base == kRdi);
+    assert(FormatX64MemoryOperand(insn) == "byte ptr [rsi]");
+  }
+  {
+    const auto insn = Decode({ 0xF3, 0x66, 0xA5 });
+    assert(insn.mnemonic == "rep movsw" && insn.access_size == 2u);
+  }
+  {
+    const auto insn = Decode({ 0xF3, 0xA5 });
+    assert(insn.mnemonic == "rep movsd" && insn.access_size == 4u);
+  }
+  {
+    const auto insn = Decode({ 0xF3, 0x48, 0xA5 });
+    assert(insn.mnemonic == "rep movsq" && insn.access_size == 8u);
+  }
+  {
+    const auto insn = Decode({ 0x48, 0xA5 });
+    assert(insn.mnemonic == "movsq" && insn.access_size == 8u);
+  }
+  // rep stosb / stosq: writes [rdi] only.
+  ExpectMemory({ 0xF3, 0xAA }, "rep stosb", X64MemoryAccess::kWrite, 1, "byte ptr [rdi]");
+  ExpectMemory({ 0xF3, 0x48, 0xAB }, "rep stosq", X64MemoryAccess::kWrite, 8, "qword ptr [rdi]");
+  ExpectMemory({ 0xAB }, "stosd", X64MemoryAccess::kWrite, 4, "dword ptr [rdi]");
+
+  // Page fault on read picks [rsi]; page fault on write picks [rdi].
+  X64Registers regs{};
+  regs[kRsi] = 0;
+  regs[kRdi] = 0x7FF012345000ull;
+  auto info = Explain(Fault(kAccessViolationRead, 0, regs), { 0xF3, 0xA4 });
+  assert(info.verdict == "null_pointer" && info.access == "read" && info.base_register == "rsi");
+  assert(info.operand == "byte ptr [rsi]" && info.mnemonic == "rep movsb");
+
+  regs[kRsi] = 0x7FF012345000ull;
+  regs[kRdi] = 0x10;
+  info = Explain(Fault(kAccessViolationWrite, 0x10, regs), { 0xF3, 0x48, 0xA5 });
+  assert(info.verdict == "null_pointer" && info.access == "write" && info.base_register == "rdi");
+  assert(info.operand == "qword ptr [rdi]" && info.mnemonic == "rep movsq");
+
+  // #GP (no fault address) on non-canonical destination [rdi] vs source [rsi].
+  regs[kRsi] = 0x7FF012345000ull;
+  regs[kRdi] = 0x89E2DDDE1A260000ull;
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xF3, 0x48, 0xA5 });
+  assert(info.verdict == "noncanonical" && info.access == "write" && info.base_register == "rdi");
+  assert(info.operand == "qword ptr [rdi]");
+
+  regs[kRsi] = 0x89E2DDDE1A260000ull;
+  regs[kRdi] = 0x7FF012345000ull;
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xF3, 0x48, 0xA5 });
+  assert(info.verdict == "noncanonical" && info.access == "read" && info.base_register == "rsi");
+  assert(info.operand == "qword ptr [rsi]");
+
+  // rep stosq write fault through a null rdi.
+  regs[kRdi] = 0;
+  info = Explain(Fault(kAccessViolationWrite, 0, regs), { 0xF3, 0x48, 0xAB });
+  assert(info.verdict == "null_pointer" && info.access == "write" && info.base_register == "rdi");
+}
+
+void TestVexAvx()
+{
+  const auto r = X64MemoryAccess::kRead;
+  const auto w = X64MemoryAccess::kWrite;
+
+  // 2-byte VEX (0xC5)
+  ExpectMemory({ 0xC5, 0xF8, 0x10, 0x41, 0x24 }, "vmovups", r, 16, "xmmword ptr [rcx+0x24]");
+  ExpectMemory({ 0xC5, 0xFA, 0x10, 0x43, 0x54 }, "vmovss", r, 4, "dword ptr [rbx+0x54]");
+  ExpectMemory({ 0xC5, 0xFC, 0x28, 0x00 }, "vmovaps", r, 32, "ymmword ptr [rax]");
+  ExpectMemory({ 0xC5, 0xFC, 0x29, 0x00 }, "vmovaps", w, 32, "ymmword ptr [rax]");
+  ExpectMemory({ 0xC5, 0xFE, 0x6F, 0x01 }, "vmovdqu", r, 32, "ymmword ptr [rcx]");
+  ExpectMemory({ 0xC5, 0xFD, 0x7F, 0x01 }, "vmovdqa", w, 32, "ymmword ptr [rcx]");
+  ExpectMemory({ 0xC5, 0xF4, 0x58, 0x01 }, "vaddps", r, 32, "ymmword ptr [rcx]");
+  ExpectMemory({ 0xC5, 0xFC, 0x5A, 0x01 }, "vcvtps2pd", r, 16, "xmmword ptr [rcx]");
+
+  // 3-byte VEX (0xC4) with REX.B / REX.X extensions
+  ExpectMemory({ 0xC4, 0xC1, 0x7E, 0x6F, 0x40, 0x20 }, "vmovdqu", r, 32, "ymmword ptr [r8+0x20]");
+  ExpectMemory({ 0xC4, 0x81, 0x7C, 0x11, 0x04, 0x88 }, "vmovups", w, 32, "ymmword ptr [r8+r9*4]");
+
+  // Alignment requirements under VEX: only vmovaps/vmovapd/vmovdqa require alignment.
+  assert(Decode({ 0xC5, 0xF8, 0x28, 0x00 }).requires_alignment);
+  assert(Decode({ 0xC5, 0xFC, 0x28, 0x00 }).requires_alignment);
+  assert(Decode({ 0xC5, 0xFD, 0x7F, 0x01 }).requires_alignment);
+  assert(!Decode({ 0xC5, 0xF4, 0x58, 0x01 }).requires_alignment);
+  assert(!Decode({ 0xC5, 0xFE, 0x6F, 0x01 }).requires_alignment);
+
+  // 256-bit vmovaps misaligned at 16-byte boundary (not 32-byte aligned) -> "32 bytes" / "32바이트".
+  X64Registers regs{};
+  regs[kRax] = 0x10000010ull;
+  auto info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xC5, 0xFC, 0x28, 0x00 });
+  assert(info.verdict == "misaligned" && info.access == "read" && info.access_size == 32u);
+  assert(DescribeFaultInstruction(info, L"", true).find(L"aligned to 32 bytes, but [rax] was 0x10000010") !=
+         std::wstring::npos);
+  assert(DescribeFaultInstruction(info, L"", false).find(L"32바이트 단위로 정렬된 주소가 필요한데") !=
+         std::wstring::npos);
+
+  // 128-bit vmovaps at 16-byte boundary is properly aligned -> #GP has no misalignment verdict.
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xC5, 0xF8, 0x28, 0x00 });
+  assert(info.verdict.empty());
+
+  // Unaligned vaddps ymm does not trigger misaligned verdict on #GP.
+  regs[kRcx] = 0x10000004ull;
+  info = Explain(Fault(kAccessViolationRead, kAccessViolationNoAddress, regs), { 0xC5, 0xF4, 0x58, 0x01 });
+  assert(info.verdict.empty());
+
+  // Null pointer through 3-byte VEX vmovdqu ymm0, [r8+0x20].
+  regs[kR8] = 0;
+  info = Explain(Fault(kAccessViolationRead, 0x20, regs), { 0xC4, 0xC1, 0x7E, 0x6F, 0x40, 0x20 });
+  assert(info.verdict == "null_pointer" && info.base_register == "r8" && info.access_size == 32u);
+}
+
 }  // namespace
 
 int main()
@@ -830,6 +947,8 @@ int main()
   TestIntegerMovesAndLoads();
   TestCompareTestAndArithmetic();
   TestSse();
+  TestStringMovesAndStores();
+  TestVexAvx();
   TestAddressing();
   TestBranchesAndStack();
   TestNoAccessAndRejections();

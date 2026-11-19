@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "CaptureCommon.h"
+#include "CrashCapture.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
 #include "PssSnapshot.h"
@@ -149,14 +150,19 @@ FreezeCaptureResult CaptureFreezeDumpAndWct(
   const std::string wctUtf8 = DumpJsonForFile(wctJson);
   WriteTextFileUtf8(request.wctPath, wctUtf8);
 
+  StableSharedSnapshot stableShm;
+  const bool hasStableShm = CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &stableShm);
+  const skydiag::SharedLayout* dumpShm = hasStableShm ? stableShm.layout() : proc.shm;
+  const std::size_t dumpShmSize = hasStableShm ? stableShm.size() : proc.shmSize;
+
   std::wstring dumpErr;
   const HANDLE dumpSource = pssSnapshot.used ? pssSnapshot.snapshotHandle : proc.process;
   result.dumpWritten = skydiag::helper::WriteDumpWithStreams(
     dumpSource,
     proc.pid,
     request.dumpPath,
-    proc.shm,
-    proc.shmSize,
+    dumpShm,
+    dumpShmSize,
     wctUtf8,
     pluginScanJson,
     /*isCrash=*/false,

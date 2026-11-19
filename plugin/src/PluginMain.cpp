@@ -8,10 +8,12 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <condition_variable>
 #include <cstdio>
 #include <cwchar>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -31,6 +33,8 @@
 #include "SkyrimDiag/HelperWatchdog.h"
 #include "SkyrimDiag/ResourceLog.h"
 #include "SkyrimDiag/SharedMemory.h"
+#include "SkyrimDiagIniText.h"
+#include "SkyrimDiagLongPath.h"
 #include "SkyrimDiagProtocol.h"
 #include "SkyrimDiagSessionLogs.h"
 
@@ -57,43 +61,75 @@ struct PluginConfig
 
 PluginConfig g_cfg{};
 
-std::wstring ReadIniString(const wchar_t* section, const wchar_t* key, const wchar_t* def, const wchar_t* path)
+std::filesystem::path GetThisModulePath();
+std::string PathForLog(const std::filesystem::path& path);
+
+std::wstring AnsiToWide(std::string_view view)
 {
-  std::size_t capacity = 256;
-  if (def) {
-    const std::size_t defLen = std::wcslen(def) + 1;
-    if (defLen > capacity) {
-      capacity = defLen;
-    }
+  const std::string bytes(view);
+  if (bytes.empty() || bytes.size() > static_cast<std::size_t>(INT_MAX)) {
+    return {};
   }
-
-  while (capacity <= 32768) {
-    std::vector<wchar_t> buf(capacity, L'\0');
-    const DWORD n = GetPrivateProfileStringW(
-      section,
-      key,
-      def,
-      buf.data(),
-      static_cast<DWORD>(buf.size()),
-      path);
-    if (n < (buf.size() - 1)) {
-      return std::wstring(buf.data(), n);
-    }
-    capacity *= 2;
+  const int len = static_cast<int>(bytes.size());
+  const int wideLen = MultiByteToWideChar(CP_ACP, 0, bytes.data(), len, nullptr, 0);
+  if (wideLen <= 0) {
+    return {};
   }
+  std::wstring wide(static_cast<std::size_t>(wideLen), L'\0');
+  MultiByteToWideChar(CP_ACP, 0, bytes.data(), len, wide.data(), wideLen);
+  return wide;
+}
 
-  return def ? std::wstring(def) : std::wstring{};
+std::filesystem::path ResolvePluginIniPath()
+{
+  const auto dllPath = GetThisModulePath();
+  if (!dllPath.empty()) {
+    return dllPath.parent_path() / L"SkyrimDiag.ini";
+  }
+  return std::filesystem::path(L"Data\\SKSE\\Plugins\\SkyrimDiag.ini");
+}
+
+skydiag::ini::IniDocument LoadIniDocument(const std::filesystem::path& path, bool* outLoaded)
+{
+  if (outLoaded) {
+    *outLoaded = false;
+  }
+  std::ifstream in(skydiag::PathForIo(path), std::ios::binary);
+  if (!in) {
+    return {};
+  }
+  constexpr std::size_t kMaxIniBytes = std::size_t{ 4 } * 1024 * 1024;
+  in.seekg(0, std::ios::end);
+  const auto end = in.tellg();
+  in.seekg(0, std::ios::beg);
+  const std::size_t size = end >= 0 ? (std::min)(static_cast<std::size_t>(end), kMaxIniBytes) : kMaxIniBytes;
+  std::string bytes(size, '\0');
+  in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  bytes.resize(static_cast<std::size_t>(in.gcount()));
+  if (outLoaded) {
+    *outLoaded = true;
+  }
+  return skydiag::ini::IniDocument::Parse(skydiag::ini::DecodeIniBytes(bytes, &AnsiToWide));
+}
+
+std::wstring ReadIniString(
+  const skydiag::ini::IniDocument& ini,
+  const wchar_t* section,
+  const wchar_t* key,
+  const wchar_t* def)
+{
+  return skydiag::ini::ReadIniProfileString(ini, section, key, def ? def : L"");
 }
 
 std::uint32_t ReadIniUint32Clamped(
+  const skydiag::ini::IniDocument& ini,
   const wchar_t* section,
   const wchar_t* key,
   int def,
-  const wchar_t* path,
   std::uint32_t minValue,
   std::uint32_t maxValue)
 {
-  const int raw = GetPrivateProfileIntW(section, key, def, path);
+  const int raw = skydiag::ini::ReadIniProfileInt(ini, section, key, def);
   const auto clamped = std::clamp<long long>(
     static_cast<long long>(raw),
     static_cast<long long>(minValue),
@@ -105,17 +141,26 @@ PluginConfig LoadConfig()
 {
   PluginConfig cfg{};
 
-  // Relative to game root when installed in Data/SKSE/Plugins.
-  const wchar_t* iniPath = L"Data\\SKSE\\Plugins\\SkyrimDiag.ini";
+  // Read beside SkyrimDiag.dll (not relative to CWD) through IniDocument so
+  // UTF-8 BOM, non-ASCII paths and MO2 long paths work without silently
+  // falling back to defaults.
+  const auto iniPath = ResolvePluginIniPath();
+  bool iniLoaded = false;
+  const auto ini = LoadIniDocument(iniPath, &iniLoaded);
+  if (iniLoaded) {
+    spdlog::info("SkyrimDiag: loaded config from {}", PathForLog(iniPath));
+  } else {
+    spdlog::info("SkyrimDiag: config not found at {}; using defaults", PathForLog(iniPath));
+  }
 
   cfg.heartbeatIntervalMs = ReadIniUint32Clamped(
-    L"SkyrimDiag", L"HeartbeatIntervalMs", 100, iniPath, 10, 5000);
+    ini, L"SkyrimDiag", L"HeartbeatIntervalMs", 100, 10, 5000);
 
   {
-    // Read as text: GetPrivateProfileIntW reads "abc" as 0 (the crash hook
-    // off) and 3 or 99 used to become mode 2 without its consent setting.
-    const auto modeText = ReadIniString(L"SkyrimDiag", L"CrashHookMode", L"", iniPath);
-    const auto consentText = ReadIniString(L"SkyrimDiag", L"EnableUnsafeCrashHookMode2", L"", iniPath);
+    // Read as text: numeric INI reads turn "abc" into 0 (the crash hook off)
+    // and 3 or 99 used to become mode 2 without its consent setting.
+    const auto modeText = ReadIniString(ini, L"SkyrimDiag", L"CrashHookMode", L"");
+    const auto consentText = ReadIniString(ini, L"SkyrimDiag", L"EnableUnsafeCrashHookMode2", L"");
     const auto setting = skydiag::plugin::ResolveCrashHookMode(modeText, consentText);
     cfg.crashHookMode = setting.mode;
     if (setting.invalid_value) {
@@ -125,29 +170,29 @@ PluginConfig LoadConfig()
     }
   }
   cfg.unhandledCrashHoldMs = ReadIniUint32Clamped(
+    ini,
     L"SkyrimDiag",
     L"UnhandledCrashHoldMs",
     static_cast<int>(skydiag::plugin::kDefaultUnhandledCrashHoldMs),
-    iniPath,
     0,
     skydiag::plugin::kMaxUnhandledCrashHoldMs);
-  cfg.logMenus = GetPrivateProfileIntW(L"SkyrimDiag", L"LogMenus", 1, iniPath) != 0;
-  cfg.autoStartHelper = GetPrivateProfileIntW(L"SkyrimDiag", L"AutoStartHelper", 1, iniPath) != 0;
-  cfg.helperExe = ReadIniString(L"SkyrimDiag", L"HelperExe", L"SkyrimDiagHelper.exe", iniPath);
-  cfg.enableTestHotkeys = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableTestHotkeys", 0, iniPath) != 0;
-  cfg.enableResourceLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableResourceLog", 1, iniPath) != 0;
+  cfg.logMenus = skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"LogMenus", 1) != 0;
+  cfg.autoStartHelper = skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"AutoStartHelper", 1) != 0;
+  cfg.helperExe = ReadIniString(ini, L"SkyrimDiag", L"HelperExe", L"SkyrimDiagHelper.exe");
+  cfg.enableTestHotkeys = skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"EnableTestHotkeys", 0) != 0;
+  cfg.enableResourceLog = skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"EnableResourceLog", 1) != 0;
   cfg.enableAdaptiveResourceLogThrottle =
-    GetPrivateProfileIntW(L"SkyrimDiag", L"EnableAdaptiveResourceLogThrottle", 1, iniPath) != 0;
+    skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"EnableAdaptiveResourceLogThrottle", 1) != 0;
   cfg.resourceLogThrottleHighWatermarkPerSec = ReadIniUint32Clamped(
-    L"SkyrimDiag", L"ResourceLogThrottleHighWatermarkPerSec", 1500, iniPath, 1, 100000);
+    ini, L"SkyrimDiag", L"ResourceLogThrottleHighWatermarkPerSec", 1500, 1, 100000);
   cfg.resourceLogThrottleMaxSampleDivisor = ReadIniUint32Clamped(
-    L"SkyrimDiag", L"ResourceLogThrottleMaxSampleDivisor", 8, iniPath, 1, 64);
-  cfg.enablePerfHitchLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnablePerfHitchLog", 1, iniPath) != 0;
+    ini, L"SkyrimDiag", L"ResourceLogThrottleMaxSampleDivisor", 8, 1, 64);
+  cfg.enablePerfHitchLog = skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"EnablePerfHitchLog", 1) != 0;
   cfg.perfHitchThresholdMs = ReadIniUint32Clamped(
-    L"SkyrimDiag", L"PerfHitchThresholdMs", 250, iniPath, 1, 10000);
+    ini, L"SkyrimDiag", L"PerfHitchThresholdMs", 250, 1, 10000);
   cfg.perfHitchCooldownMs = ReadIniUint32Clamped(
-    L"SkyrimDiag", L"PerfHitchCooldownMs", 3000, iniPath, 0, 60000);
-  cfg.enableCloseRequestLog = GetPrivateProfileIntW(L"SkyrimDiag", L"EnableCloseRequestLog", 1, iniPath) != 0;
+    ini, L"SkyrimDiag", L"PerfHitchCooldownMs", 3000, 0, 60000);
+  cfg.enableCloseRequestLog = skydiag::ini::ReadIniProfileInt(ini, L"SkyrimDiag", L"EnableCloseRequestLog", 1) != 0;
 
   return cfg;
 }
