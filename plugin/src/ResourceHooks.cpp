@@ -218,6 +218,7 @@ ErrorCode LooseFileDoOpen_Hook(void* self)
       try {
         spdlog::info("SkyrimDiag: resource hook saw its first loose file: {}", std::string_view(buf, n));
       } catch (...) {
+        OutputDebugStringW(L"SkyrimDiag: could not log the first loose file.\n");
       }
     }
   }

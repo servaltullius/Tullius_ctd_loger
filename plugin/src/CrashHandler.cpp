@@ -742,7 +742,7 @@ bool SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
   const bool matchedReleased = !matchedFrozen && !frozen &&
     IsThisThreadsPublishedFault(record, sequenceBefore) &&
     IsCrashRecordOfException(
-      /*frozen=*/true,
+      /*incidentClaimed=*/true,
       sequenceBefore,
       sequenceAfter,
       recordThreadId,
