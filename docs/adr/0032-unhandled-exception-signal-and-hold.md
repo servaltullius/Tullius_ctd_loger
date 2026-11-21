@@ -204,6 +204,18 @@ v0.2.76-rc2의 빌드로 한 실게임 확인(2026-11-14, main `df0d36d`를 로�
 
 실게임 미확인(이 확인 뒤): F2(중단점), F5(처리된 접근 위반 2초 뒤 진짜 접근 위반), F6, F8, Crash Logger를 끈 구성의 F1과 F3, Helper가 답하지 않아 상한에서 풀리는 경우, 알림이 켜진 채 종료 코드 0으로 끝나는 경우, 늦은 회복 보류가 5분 상한에서 풀리는 경우.
 
+## Addendum (2026-11-19, v0.2.79-rc1): Helper가 먼저 풀어 준 크래시도 신호한다
+- 바뀐 것(#329, 커밋 12283d2):
+  - 크래시를 게시할 때(`TryPublishCrashRecord`) 스레드별로 게시한 예외(`EXCEPTION_RECORD` 주소, crash_seq)를 고정 크기 표(8칸)에 적습니다(`NoteFaultPublished`).
+  - 최상위 필터(`SignalUnhandledAndHold`)는 Decision 2의 조건(`kState_Frozen`이 잡혀 있고 기록이 이 예외의 것)이 아니어도, Helper가 이미 풀어 준(thaw) 바로 그 게시 예외가 이 스레드에서 필터에 닿았으면 "처리되지 않음" 이벤트를 켭니다. 이때는 "덤프 끝"을 기다리지 않습니다(덤프는 이미 끝났거나 지워졌음). 신호를 켜기 직전에 다시 Frozen이거나 crash_seq가 바뀌었으면 켜지 않습니다.
+  - 목적: Crash Logger 스레드 덤프 창(1분)에서 일찍 풀어 준 예외가 실제로는 처리되지 않은 크래시였을 때, 종료 시 Helper가 그것을 기록하게 하는 것(`ShouldReportReleasedCrashOnUnhandledSignal`).
+  - 새 사고를 게시할 때 "처리되지 않음" 이벤트를 먼저 끕니다(`ResetEvent`). 앞 사고에서 남은 신호가 새 사고에 붙지 않게 하려는 것입니다.
+- Decision 3의 "어느 사고의 신호인지는 `kState_Frozen`이 정한다"는 이제 Frozen 사고에만 맞습니다. 풀려난 사고의 신호는 게시 표와 crash_seq로 주인을 정합니다.
+- 남는 한계(코드를 읽어 본 것, 실게임 미확인):
+  - 풀려난 사고의 신호를 켠 뒤 같은 프로세스에서 다른 예외가 새 사고로 게시되면(예: 아래 필터인 Crash Logger가 로그를 쓰며 낸 예외가 보관된 예외 없이 게시됨), 그 게시의 `ResetEvent`가 신호를 지웁니다. 그러면 종료 시 Helper는 앞 크래시를 "처리되지 않음"으로 보지 못합니다(종료 코드 규칙 `ShouldReportReleasedCrashAtExit`는 그대로 적용).
+  - 필터가 crash_seq를 다시 본 뒤 `SetEvent` 전에 다른 스레드가 사고를 게시하고 `ResetEvent`까지 마치면, 앞 크래시의 신호가 새 사고에 붙을 수 있습니다. 창은 수 명령어 길이입니다.
+- 검증: `skydiag_plugin_crash_handler_runtime_tests`의 `TestReleasedFaultIsStillReportedAsUnhandledWithoutHolding`(풀려난 예외가 필터에 닿으면 기다리지 않고 신호), `TestStaleUnhandledSignalIsClearedWhenNextCrashPublishes`(남은 신호를 새 게시가 지움). 위 두 한계를 다루는 테스트는 없습니다.
+
 ## References
 - ADR-0031 (`0031-skip-dump-for-repeated-handled-faults.md`): 첫 한계, 2026-11-13의 실게임 확인 세 건, 스냅샷 측정
 - ADR-0017 (`0017-second-fault-while-filtering.md`): 스레드별 보관 슬롯, 남은 한계

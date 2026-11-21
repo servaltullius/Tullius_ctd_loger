@@ -33,3 +33,8 @@ Accepted (2026-11-10)
 - 각 항목에 테스트를 추가했습니다(`helper_hang_runtime_tests`, `helper_false_positive_runtime_tests`, `evidence_interpretation_tests`, `quick_answer_tests`, `candidate_consensus_tests`, `fault_instruction_tests`, `mo2_index_tests`, `retention_tests` 등). 판정 3·5와 에피소드 규칙, 후보 순서 테스트는 수정을 되돌렸을 때 실패하는 것을 확인했습니다.
 - 덤프 62건 재분석 비교(main 대비): 4건 변경, 모두 의도한 문구 변화(알려진 원인 문장 순서, 후킹 설치 경쟁의 "다시 캡처" 줄 제거).
 - 실게임 미확인: 수동 캡처의 `gameInForeground` 기록과 프리징 판정, 보류 덤프 승격, 종료 관찰.
+
+## Addendum (2026-11-19, v0.2.79-rc1): WCT 순환은 수동 캡처도 프리징으로 본다
+- 바뀐 것(#329, 커밋 b9a10e0): 분석기의 `DetermineHangLike`는 WCT 캡처가 있는 덤프에서 `cycles > 0`(대기 순환, 즉 교착)이면 캡처 종류와 하트비트 정지 시간에 상관없이 프리징으로 봅니다. 그래서 Decision 1의 수동 캡처 규칙(5초 이상 응답 없음 + 창 조건)을 거치지 않고, 하트비트가 정상인 수동 캡처도 순환이 하나라도 잡히면 프리징 분석(의심 모드, Crash Logger 검색, 느린 종료 판정)을 합니다.
+- 근거: 근거 문장을 만드는 쪽(`EvidenceBuilder`의 `is_hang_like`)은 이미 같은 기준을 썼고, 이 변경으로 두 쪽이 맞춰졌습니다.
+- 남는 한계: `cycles`는 Helper가 WCT를 한 번 훑은 결과(`threads[].isCycle`, 첫 사용 가능 패스)에서 오고, 여러 번 훑어 합의한 값(`cycle_consensus`)이 아닙니다. 게임이 돌고 있는데 백그라운드 스레드에 잠깐 잡힌 순환도 프리징으로 읽힐 수 있습니다. 실제 덤프로 확인한 사례는 없습니다.
