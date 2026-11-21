@@ -692,6 +692,19 @@ static void TestWinUiUxReliabilityContracts()
     "Manual recent-dump clicks must not incur the 1.5s summary polling delay.");
 }
 
+static void TestTriageOutputButtonFollowsBusyState()
+{
+  const auto repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+  const auto mainCs = ReadAllText(repoRoot / "dump_tool_winui" / "MainWindow.xaml.cs");
+  RequireContains(mainCs, "private void SetBusy(", "MainWindow must define SetBusy.");
+  const auto start = mainCs.find("private void SetBusy(");
+  const auto end = mainCs.find("\n    }", start);
+  RequireContains(
+    mainCs.substr(start, end - start),
+    "TriageOpenOutputButton.IsEnabled = !isBusy;",
+    "Triage report folder button must be disabled during analysis.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -747,6 +760,7 @@ int main()
   TestWinUiShowsQuickAnswerFirst();
   TestWinUiAnalysisCancellationAndRootNormalizationGuards();
   TestWinUiUxReliabilityContracts();
+  TestTriageOutputButtonFollowsBusyState();
 
   // Accessibility: interactive elements must have AutomationProperties.Name
   assert(xaml.find("AutomationProperties.Name") != std::string::npos && "No AutomationProperties.Name found in XAML");

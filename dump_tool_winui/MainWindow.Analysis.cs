@@ -468,6 +468,13 @@ public sealed partial class MainWindow
                 "짝지어진 Crash Logger 로그 파일을 찾지 못했습니다.");
             return;
         }
+        if (!string.Equals(Path.GetExtension(logPath), ".log", StringComparison.OrdinalIgnoreCase))
+        {
+            StatusText.Text = T(
+                "Opening the paired Crash Logger log requires a .log extension.",
+                "짝지어진 Crash Logger 로그는 확장자가 .log일 때만 열 수 있습니다.");
+            return;
+        }
 
         try
         {

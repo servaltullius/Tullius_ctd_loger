@@ -259,30 +259,35 @@ bool DrainCrashEventBeforeExit(
   if (!TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &info)) {
     return false;
   }
-  // A handled exception released earlier (the game kept running, or exited 0
-  // during the filter) keeps its committed record; it is not a crash at exit,
-  // unless the release was weak evidence and the exit says otherwise.
+  // A released generation keeps its committed record. Decide whether the
+  // exit warrants reporting it using the reason it was released.
   if (state->crashCaptured.releasedCrashSeq == info.crashSeq) {
     const auto& crash = state->crashCaptured;
     const std::uint64_t nowTick64 = GetTickCount64();
+    const bool abandonedRearm = crash.releasedByAbandonedRearm;
     // A frozen game that was closed, not a crash handler that ended it.
-    const bool frozeAfterRelease = state->hangState.hangCapturedThisEpisode ||
-      exitCode == kExitCodeClosedAsNotResponding || ReadHeartbeatAtExit(cfg, proc).stalled;
+    const bool frozeAfterRelease = !abandonedRearm &&
+      (state->hangState.hangCapturedThisEpisode || exitCode == kExitCodeClosedAsNotResponding ||
+       ReadHeartbeatAtExit(cfg, proc).stalled);
     // ADR-0032: the plugin reported it as not handled after the release.
-    const bool reportedUnhandled = ShouldReportReleasedCrashOnUnhandledSignal(
+    const bool reportedUnhandled = !abandonedRearm && ShouldReportReleasedCrashOnUnhandledSignal(
       IsUnhandledExceptionSignaled(UnhandledEventFor(proc, info, &crash)), crash.releasedCrashTick64, nowTick64);
     if (!reportedUnhandled &&
-        !ShouldReportReleasedCrashAtExit(
-          exitCode,
-          info.exceptionCode,
-          crash.releasedOnBriefHeartbeat,
-          frozeAfterRelease,
-          crash.releasedCrashTick64,
-          nowTick64)) {
+        (abandonedRearm
+           ? exitCode == 0u
+           : !ShouldReportReleasedCrashAtExit(
+               exitCode,
+               info.exceptionCode,
+               crash.releasedOnBriefHeartbeat,
+               frozeAfterRelease,
+               crash.releasedCrashTick64,
+               nowTick64))) {
       AppendLogLine(
         outBase,
         L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
-          + L" was already released as a handled exception; not re-reporting it at process exit (exit_code="
+          + (abandonedRearm
+               ? L" was left uncaptured when crash rearm was abandoned and the game exited normally (exit_code="
+               : L" was already released as a handled exception; not re-reporting it at process exit (exit_code=")
           + std::to_wstring(exitCode)
           + (frozeAfterRelease ? L", the game had stopped responding since" : L"") + L").");
       DiscardReleasedCrashDump(outBase, &state->crashCaptured, L"the exit did not report its exception");
@@ -319,7 +324,9 @@ bool DrainCrashEventBeforeExit(
     }
     AppendLogLine(
       outBase,
-      L"Committed crash_seq=" + std::to_wstring(info.crashSeq) + L" was released as a handled exception, but "
+      L"Committed crash_seq=" + std::to_wstring(info.crashSeq)
+        + (abandonedRearm ? L" was left uncaptured when crash rearm was abandoned, and "
+                          : L" was released as a handled exception, but ")
         + (reportedUnhandled ? L"the plugin then reported it as not handled and the game exited (exit_code="
                              : L"the game then exited abnormally (exit_code=")
         + std::to_wstring(exitCode) + L", " + std::to_wstring(secondsSinceRelease) + L" s after the release"
@@ -699,6 +706,7 @@ bool HandleLateRecoveryTick(
   CleanupFilteredCrashArtifacts(cfg, proc, outBase, state, L"late_recovery", L"game kept running", /*keepDump=*/true);
   // A later exit must not re-report this released exception.
   crash.releasedCrashSeq = crashSeq;
+  crash.releasedByAbandonedRearm = false;
   crash.releasedCrashTick64 = GetTickCount64();
   crash.releasedOnBriefHeartbeat = false;
   crash.releasedInThreadDumpWindow = false;

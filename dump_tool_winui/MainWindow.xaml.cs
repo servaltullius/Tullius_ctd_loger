@@ -149,6 +149,7 @@ public sealed partial class MainWindow : Window
         DumpPathBox.IsEnabled = !isBusy;
         OutputDirBox.IsEnabled = !isBusy;
         OpenOutputButton.IsEnabled = !isBusy;
+        TriageOpenOutputButton.IsEnabled = !isBusy;
         SetTriageEditorEnabled(!isBusy && _vm.CurrentSummary is not null);
         UpdateDumpSearchLocationSelectionState();
         StatusText.Text = message;

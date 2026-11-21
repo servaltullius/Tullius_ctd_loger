@@ -599,7 +599,13 @@ void RunPreflightChecks(
         if (!skydiag::ExistsForIo(candidate, ec) || ec) {
           candidate = pluginsDir / siblingName;
           if (!skydiag::ExistsForIo(candidate, ec) || ec) {
-            continue;
+            if (std::wstring_view(siblingName) != L"SkyrimDiagDumpToolNative.dll") {
+              continue;
+            }
+            candidate = pluginsDir / L"SkyrimDiagWinUI" / L"app" / siblingName;
+            if (!skydiag::ExistsForIo(candidate, ec) || ec) {
+              continue;
+            }
           }
         }
         const std::string ver = QueryFileVersionString(candidate);

@@ -930,8 +930,74 @@ static void Test_SweepAndLogRotationUnderALongOutputDir()
   skydiag::RemoveAllForIo(ExtendedLengthPath(root), ec);
 }
 
+#ifdef _WIN32
+static void Test_PrunesDumpsAndArtifactsFromPlainLongOutputPaths()
+{
+  const auto root = MakeTempDir();
+  const char* const expired[] = {
+    "SkyrimDiag_Crash_20260101_050000_100_Richer.dmp",
+    "SkyrimDiag_Crash_20260101_050000_100_Richer_SkyrimDiagSummary.json",
+    "SkyrimDiag_Incident_Crash_20260101_050000_100.json",
+    "SkyrimDiag_Incident_CrashRecapture_20260101_050000_100.json",
+    "SkyrimDiag_Hang_20260101_050000_100.dmp",
+    "SkyrimDiag_Hang_20260101_050000_100.etl",
+    "SkyrimDiag_Incident_Hang_20260101_050000_100.json",
+    "SkyrimDiag_WCT_20260101_050000_100.json",
+  };
+  const char* const kept[] = {
+    "SkyrimDiag_Crash_20260101_060000_100.dmp",
+    "SkyrimDiag_Hang_20260101_060000_100.dmp",
+  };
+
+  bool removedAllExpired = true;
+  bool keptNewDumps = true;
+  // The 230-character folder lists plain paths; the 250-character folder
+  // lists extended paths, but the incident and WCT paths are built from dir.
+  for (const std::size_t length : { 230u, 250u }) {
+    auto dir = root;
+    while (dir.native().size() + 64u < length) {
+      dir /= std::string(31, 'a');
+    }
+    assert(dir.native().size() + 1u < length);
+    dir /= std::string(length - dir.native().size() - 1u, 'b');
+    for (const auto* name : expired) {
+      const auto file = dir / name;
+      assert(file.native().size() >= MAX_PATH);
+      WriteFile(ExtendedLengthPath(file));
+      assert(Exists(ExtendedLengthPath(file)));
+    }
+    for (const auto* name : kept) {
+      WriteFile(ExtendedLengthPath(dir / name));
+    }
+
+    RetentionLimits limits{};
+    limits.maxCrashDumps = 1;
+    limits.maxHangDumps = 1;
+    ApplyRetentionToOutputDir(dir, limits);
+
+    for (const auto* name : expired) {
+      if (Exists(ExtendedLengthPath(dir / name))) {
+        std::fprintf(stderr, "Retention left %s in the %zu-character output folder.\n", name, length);
+        removedAllExpired = false;
+      }
+    }
+    for (const auto* name : kept) {
+      keptNewDumps = Exists(ExtendedLengthPath(dir / name)) && keptNewDumps;
+    }
+  }
+  std::error_code ec;
+  skydiag::RemoveAllForIo(ExtendedLengthPath(root), ec);
+  assert(!ec && "Failed to clean up the long-path retention fixtures");
+  assert(removedAllExpired && "Retention must remove expired dumps and artifacts under both plain output paths");
+  assert(keptNewDumps && "Retention must keep newer dumps under both plain output paths");
+}
+#endif
+
 int main()
 {
+#ifdef _WIN32
+  Test_PrunesDumpsAndArtifactsFromPlainLongOutputPaths();
+#endif
   Test_PrunesCrashDumpsAndArtifacts();
   Test_PrunesOldestDumpsOverTheTotalBudget();
   Test_TotalBudgetUnderALongOutputDir();

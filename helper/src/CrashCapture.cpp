@@ -1225,6 +1225,7 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
       if (crashState) {
         crashState->latched = false;
         crashState->releasedCrashSeq = info.crashSeq;
+        crashState->releasedByAbandonedRearm = false;
         crashState->releasedCrashTick64 = GetTickCount64();
         // As weak as the release after a dump (ShouldReportReleasedCrashAtExit),
         // and a non-zero exit also needs Crash Logger's crash log to record it.
@@ -1306,6 +1307,7 @@ RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
       ThawCrashCapture(proc, info.crashSeq);
     crashState->latched = false;
     crashState->releasedCrashSeq = info.crashSeq;
+    crashState->releasedByAbandonedRearm = false;
     crashState->releasedCrashTick64 = GetTickCount64();
     // Keep ShouldReportReleasedCrashAtExit active for a worker-thread crash
     // whose main loop kept ticking briefly, without requiring Crash Logger's
@@ -1597,6 +1599,7 @@ void ReleaseFilteredCrashDump(
     crashState->latched = false;
     if (verdict != FilterVerdict::kRetryNewerCrash) {
       crashState->releasedCrashSeq = info.crashSeq;
+      crashState->releasedByAbandonedRearm = false;
       crashState->releasedCrashTick64 = GetTickCount64();
       crashState->releasedOnBriefHeartbeat = verdict == FilterVerdict::kDeleteRecovered;
       crashState->releasedInThreadDumpWindow = false;

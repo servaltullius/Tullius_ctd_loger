@@ -269,12 +269,13 @@ struct CrashCaptureState {
   // no viewer.
   skydiag::ForcedCloseMatch forcedClose{};
   skydiag::ForcedCloseMatch releasedForcedClose{};
-  // The crash generation last released as a handled exception (the game kept
-  // running or exited with code 0). Its record stays committed in shared
-  // memory, so the exit path must not report it again, unless
-  // ShouldReportReleasedCrashAtExit says otherwise. A crash superseded by a
-  // newer one (kRetryNewerCrash) is not released.
+  // The crash generation last released. Its record stays committed in shared
+  // memory, so the exit path checks why it was released before reporting it.
+  // A crash superseded by a newer one (kRetryNewerCrash) is not released.
   std::uint32_t releasedCrashSeq = 0;
+  // The helper gave up on rearming a frozen generation.
+  // Its outcome is unknown, so an abnormal exit still reports the fault.
+  bool releasedByAbandonedRearm = false;
   // When that release happened (GetTickCount64), and whether it rested only on
   // the heartbeat advancing for a few seconds, before a dump (Crash Logger's
   // thread dump window or a repeated handled fault) or after it.
