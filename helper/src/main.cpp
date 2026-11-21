@@ -199,7 +199,9 @@ static int RunHelper(int argc, wchar_t** argv)
       loopState.crashLoggerLogDirs.clear();
       AppendLogLine(outBase, L"Warning: could not resolve Crash Logger's log folders; continuing without them.");
     }
-    if (loopState.crashCaptured.releasedCrashSeq != 0u) {
+    // A generation given up on (releasedByAbandonedRearm) was logged where it
+    // was thawed, and an abnormal exit still reports it.
+    if (loopState.crashCaptured.releasedCrashSeq != 0u && !loopState.crashCaptured.releasedByAbandonedRearm) {
       AppendLogLine(
         outBase,
         L"Committed crash_seq=" + std::to_wstring(loopState.crashCaptured.releasedCrashSeq)

@@ -12,6 +12,14 @@ static void AssertContains(const std::string& haystack, const char* needle, cons
   assert(haystack.find(needle) != std::string::npos && message);
 }
 
+static void Test_BinaryVersionCheckLooksForThePackagedNativeDll(const std::string& preflightSource)
+{
+  assert(
+    preflightSource.find("candidate = pluginsDir / L\"SkyrimDiagWinUI\" / L\"app\" / siblingName;") !=
+      std::string::npos &&
+    "Preflight must look for the packaged Native DLL under Plugins/SkyrimDiagWinUI/app.");
+}
+
 int main()
 {
   const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
@@ -41,6 +49,7 @@ int main()
   assert(std::filesystem::exists(pssSpikeDoc) && "docs/spikes/pss-snapshot-evaluation.md not found");
 
   const auto preflightCppText = ReadAllText(preflightCpp);
+  Test_BinaryVersionCheckLooksForThePackagedNativeDll(preflightCppText);
   const auto helperMainText = ReadSplitAwareText(helperMain);
   const auto helperIniText = ReadAllText(helperIni);
   const auto wctCaptureText = ReadAllText(wctCapture);

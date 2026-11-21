@@ -178,7 +178,10 @@ void TestMemoryIsReadBackFromTheDump()
 
   bool hasEvidence = false;
   for (const auto& e : result.evidence) {
-    hasEvidence = hasEvidence || e.title == L"Memory at capture time";
+    // The title says the memory was close to its limit when this machine's
+    // commit charge is high while the test runs (BuildMemoryEvidence).
+    hasEvidence = hasEvidence || e.title == L"Memory at capture time" ||
+                  e.title == L"Memory was close to its limit at capture time";
   }
   Require(hasEvidence, "The memory is listed as evidence");
   // ADR-0026: a manual capture carries the display drivers' events since this

@@ -2733,6 +2733,62 @@ void TestRearmFrozenCrash_SignalsAGenerationAgainOnlyOnce()
   std::filesystem::remove_all(outBase);
 }
 
+void TestHandleProcessExitTick_ReportsAbandonedRearmOnlyOnAbnormalExit()
+{
+  using skydiag::helper::internal::InitializeLoopState;
+  using skydiag::helper::internal::RearmFrozenCrashFromEarlierHelper;
+  for (const DWORD exitCode : { 0u, 1u }) {
+    const auto outBase = MakeTempDir(L"skydiag_helper_abandoned_rearm_exit");
+    ClearLog(outBase);
+    auto shared = MakeSharedLayout();
+    shared->header.crash_seq = 2u;
+    shared->header.crash.exception_code = 0xC0000005u;
+    shared->header.crash.exception_addr = 0x12345678u;
+    shared->header.state_flags = skydiag::kState_Frozen;
+    auto child = LaunchSleepingChildProcess();
+    auto proc = MakeAttachedProcessForChild(child, shared.get());
+    proc.crashEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    Require(proc.crashEvent != nullptr, "CreateEventW failed");
+
+    Require(RearmFrozenCrashFromEarlierHelper(proc, outBase) == 2u, "The first helper restart rearms the fault");
+    Require(ResetEvent(proc.crashEvent) != FALSE, "ResetEvent failed");
+    skydiag::helper::internal::HelperLoopState state{};
+    InitializeLoopState(proc, outBase, &state);
+    Require(state.rearmedFrozenCrashSeq == 0u, "The second helper restart abandons rearm");
+    Require(state.crashCaptured.releasedCrashSeq == 2u, "The abandoned generation is released");
+    Require((shared->header.state_flags & skydiag::kState_Frozen) == 0u, "The abandoned generation is thawed");
+
+    HelperConfig cfg = MakeTestConfig();
+    cfg.enableCleanExitEvidenceQuarantine = true;
+    shared->header.qpc_freq = QpcFrequency();
+    shared->header.last_heartbeat_qpc = QpcNow();
+    TerminateWithExitCode(child, exitCode);
+    Require(HandleProcessExitTick(cfg, proc, outBase, &state), "Process exit tick must handle the exit");
+
+    Require(
+      !HasFileWithPrefix(outBase, L"SkyrimDiag_CleanExitEvidence_"),
+      "An abandoned rearm must not be recorded as clean-exit evidence");
+    if (exitCode == 0u) {
+      Require(
+        !HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"),
+        "A zero exit after an abandoned rearm must not produce crash evidence");
+    } else {
+      Require(
+        HasFileWithPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_"),
+        "Exit code 1 after an abandoned rearm must produce crash evidence without a Crash Logger log");
+      const auto evidence = ReadAllTextUtf8(
+        FindSingleFileByPrefix(outBase, L"SkyrimDiag_PostExitCrashEvidence_", L".json"));
+      AssertContains(evidence, "\"reason\": \"released_fault_followed_by_abnormal_exit\"", "Abnormal release reason");
+      AssertContains(evidence, "\"crash_seq\": 2", "The abandoned generation is recorded");
+      AssertContains(evidence, "\"exit_code\": 1", "The abnormal exit code is recorded");
+    }
+
+    CloseHandle(proc.crashEvent);
+    TerminateChildProcess(&child);
+    std::filesystem::remove_all(outBase);
+  }
+}
+
 // A crash released on a few seconds of heartbeat keeps its dump until the
 // release is settled. When the exit then reports the fault after all, that
 // dump becomes its crash dump instead of a metadata-only record, under its
@@ -4122,6 +4178,7 @@ int wmain(int argc, wchar_t** argv)
     TestAnalysisTimeoutLeavesTheReportToFinish();
     TestInitializeLoopState_RearmsAFrozenCrashNoHelperHandles();
     TestRearmFrozenCrash_SignalsAGenerationAgainOnlyOnce();
+    SKYDIAG_RUN_TEST(TestHandleProcessExitTick_ReportsAbandonedRearmOnlyOnAbnormalExit);
     TestHandleProcessExitTick_SettlesTheHeldDumpOfAReleasedCrash();
     TestExpireReleasedCrashDumpIfOutlived();
     TestLaunchDeferredViewersAfterExit_SkipsTheHangViewerForASlowShutdown();

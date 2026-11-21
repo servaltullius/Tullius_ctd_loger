@@ -379,15 +379,6 @@ internal sealed partial class MainWindowViewModel
         public string WctText { get; set; } = string.Empty;
     }
 
-    private static string ResolveExistingArtifactPath(string primaryPath, string fallbackPath)
-    {
-        if (File.Exists(primaryPath))
-        {
-            return primaryPath;
-        }
-        return File.Exists(fallbackPath) ? fallbackPath : primaryPath;
-    }
-
     public static string? ResolveCrashLoggerLogPath(
         string? summaryLogPath,
         string? dumpPath,
@@ -399,6 +390,11 @@ internal sealed partial class MainWindowViewModel
         }
 
         var trimmed = summaryLogPath.Trim();
+        if (!string.Equals(Path.GetExtension(trimmed), ".log", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         var isRedacted = trimmed.StartsWith("<redacted>", StringComparison.OrdinalIgnoreCase);
         if (!isRedacted && File.Exists(trimmed))
         {
@@ -464,9 +460,7 @@ internal sealed partial class MainWindowViewModel
         var data = new AdvancedArtifactsData();
 
         var blackboxPath = dumpIdentity.IsValid
-            ? ResolveExistingArtifactPath(
-                NativeAnalyzerBridge.ResolveBlackboxPath(outDir, dumpIdentity),
-                NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir))
+            ? NativeAnalyzerBridge.ResolveBlackboxPath(outDir, dumpIdentity)
             : NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, outDir);
         if (File.Exists(blackboxPath))
         {
@@ -525,9 +519,7 @@ internal sealed partial class MainWindowViewModel
         }
 
         var reportPath = dumpIdentity.IsValid
-            ? ResolveExistingArtifactPath(
-                NativeAnalyzerBridge.ResolveReportPath(outDir, dumpIdentity),
-                NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir))
+            ? NativeAnalyzerBridge.ResolveReportPath(outDir, dumpIdentity)
             : NativeAnalyzerBridge.ResolveReportPath(dumpPath, outDir);
         data.HasReport = File.Exists(reportPath);
         data.ReportText = data.HasReport
@@ -535,9 +527,7 @@ internal sealed partial class MainWindowViewModel
             : missingReportText;
 
         var wctPath = dumpIdentity.IsValid
-            ? ResolveExistingArtifactPath(
-                NativeAnalyzerBridge.ResolveWctPath(outDir, dumpIdentity),
-                NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir))
+            ? NativeAnalyzerBridge.ResolveWctPath(outDir, dumpIdentity)
             : NativeAnalyzerBridge.ResolveWctPath(dumpPath, outDir);
         data.HasWct = File.Exists(wctPath);
         if (data.HasWct)

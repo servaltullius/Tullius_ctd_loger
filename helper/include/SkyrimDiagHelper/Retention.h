@@ -165,7 +165,7 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::filesystem::path& dir, 
     const auto name = PathPartUtf8(entry.path.filename());
     if (StartsWith(name, prefix)) {
       std::error_code ec;
-      std::filesystem::remove(entry.path, ec);
+      std::filesystem::remove(PathForIo(entry.path), ec);
     }
   }
 }
@@ -178,7 +178,7 @@ inline void DeleteAssociatedDumpToolArtifacts(const std::vector<std::filesystem:
   std::error_code ec;
   for (const auto& file : listing) {
     if (StartsWith(PathPartUtf8(file.filename()), prefix)) {
-      std::filesystem::remove(file, ec);
+      std::filesystem::remove(PathForIo(file), ec);
     }
   }
 }
@@ -283,7 +283,7 @@ inline void RemoveDumpAndArtifacts(
   const auto& p = dump.path;
   const auto stem = PathPartUtf8(p.stem());
 
-  std::filesystem::remove(p, ec);
+  std::filesystem::remove(PathForIo(p), ec);
   if (ec) {
     return;
   }
@@ -296,7 +296,7 @@ inline void RemoveDumpAndArtifacts(
   if (deleteEtlForStem) {
     auto etl = p;
     etl.replace_extension(".etl");
-    std::filesystem::remove(etl, ec);
+    std::filesystem::remove(PathForIo(etl), ec);
   }
 
   if (!incidentKind.empty()) {
@@ -307,11 +307,12 @@ inline void RemoveDumpAndArtifacts(
       }
       if (it->second == 0) {
         const auto manifest = dir / ("SkyrimDiag_Incident_" + std::string(incidentKind) + "_" + dump.ts + ".json");
-        std::filesystem::remove(manifest, ec);
+        std::filesystem::remove(PathForIo(manifest), ec);
         if (incidentKind == "Crash") {
           // A recapture dump (SkyrimDiag_Crash_<ts>_Richer.dmp) writes its
           // own manifest under the same timestamp.
-          std::filesystem::remove(dir / ("SkyrimDiag_Incident_CrashRecapture_" + dump.ts + ".json"), ec);
+          const auto recaptureManifest = dir / ("SkyrimDiag_Incident_CrashRecapture_" + dump.ts + ".json");
+          std::filesystem::remove(PathForIo(recaptureManifest), ec);
         }
       }
     }
@@ -319,11 +320,11 @@ inline void RemoveDumpAndArtifacts(
 
   if (deleteWctForTimestamp) {
     const auto wct = dir / ("SkyrimDiag_WCT_" + dump.ts + ".json");
-    std::filesystem::remove(wct, ec);
+    std::filesystem::remove(PathForIo(wct), ec);
   }
   if (deleteManualWctForTimestamp) {
     const auto wct = dir / ("SkyrimDiag_WCT_Manual_" + dump.ts + ".json");
-    std::filesystem::remove(wct, ec);
+    std::filesystem::remove(PathForIo(wct), ec);
   }
 }
 
@@ -468,7 +469,7 @@ inline void PruneEtwTracesFromCollected(std::vector<DatedFile> etls, std::uint32
 
   std::error_code ec;
   for (std::size_t i = maxCount; i < etls.size(); i++) {
-    std::filesystem::remove(etls[i].path, ec);
+    std::filesystem::remove(PathForIo(etls[i].path), ec);
   }
 }
 
@@ -643,7 +644,7 @@ inline void PruneOrphanedAnalysisCaches(
       RemoveAllForIo(generation.path, ec);
     }
     if (ListDirectoryForIo(identity.path, listEc).empty() && !listEc) {
-      std::filesystem::remove(identity.path, ec);
+      std::filesystem::remove(PathForIo(identity.path), ec);
     }
   }
 
@@ -654,7 +655,7 @@ inline void PruneOrphanedAnalysisCaches(
       continue;
     }
     // Fails harmlessly while an analysis holds the lock open.
-    std::filesystem::remove(lock.path, ec);
+    std::filesystem::remove(PathForIo(lock.path), ec);
   }
 }
 
@@ -691,7 +692,7 @@ inline void PruneHelperLeftovers(
   const auto keepNewestForADay = [&](const std::vector<std::filesystem::path>& newestFirst) {
     for (std::size_t i = 0; i < newestFirst.size(); ++i) {
       if (i > 0 || olderThan(newestFirst[i], heldMaxAge)) {
-        std::filesystem::remove(newestFirst[i], ec);
+        std::filesystem::remove(PathForIo(newestFirst[i]), ec);
       }
     }
   };
@@ -720,7 +721,7 @@ inline void PruneHelperLeftovers(
     const bool staleMarker = StartsWith(name, "SkyrimDiag_CrashRearm_") && EndsWith(name, ".marker") &&
       olderThan(file, heldMaxAge);
     if (partialDump || staleMarker) {
-      std::filesystem::remove(file, ec);
+      std::filesystem::remove(PathForIo(file), ec);
     }
   }
 }

@@ -317,8 +317,9 @@ internal static class Program
             await CheckSaveLoadHistoryFingerprint(root, identityA);
             CheckIniTextDecoding();
 
-            await CheckCompatibilityArtifactFallbackAndTailParsing(root, identityA);
+            await CheckAdvancedArtifactIdentityAndTailParsing(root, dumpA, dumpB, identityA);
             await CheckCrashLoggerLogPathResolution(root);
+            await CheckCrashLoggerLogPathExtensions(root);
             await CheckRecentDumpsDefaultCapIncludesMoreThanTwelve(root);
 
             Console.WriteLine("winui_state_fixture_harness: OK");
@@ -471,16 +472,18 @@ internal static class Program
         Require(IniTextDecoder.Decode(Array.Empty<byte>()) == string.Empty, "an empty ini");
     }
 
-    private static async Task CheckCompatibilityArtifactFallbackAndTailParsing(string root, DumpIdentityContract identity)
+    private static async Task CheckAdvancedArtifactIdentityAndTailParsing(
+        string root,
+        string dumpA,
+        string dumpB,
+        DumpIdentityContract identityA)
     {
         var dir = Path.Combine(root, "compat_artifacts");
         Directory.CreateDirectory(dir);
-        var dumpPath = Path.Combine(dir, "CompatDump.dmp");
-        await File.WriteAllBytesAsync(dumpPath, new byte[] { 1, 2, 3, 4 });
 
-        var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpPath, dir);
-        var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpPath, dir);
-        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpPath, dir);
+        var reportPath = NativeAnalyzerBridge.ResolveReportPath(dumpB, dir);
+        var wctPath = NativeAnalyzerBridge.ResolveWctPath(dumpB, dir);
+        var blackboxPath = NativeAnalyzerBridge.ResolveBlackboxPath(dumpB, dir);
 
         await File.WriteAllTextAsync(reportPath, "compat report body");
         await File.WriteAllTextAsync(wctPath, "{\"threads\":[{\"tid\":42}]}");
@@ -488,17 +491,27 @@ internal static class Program
             .Select(i => $"{{\"i\":{i},\"t_ms\":{i * 10},\"tid\":1,\"type_name\":\"evt\",\"detail\":\"d{i}\"}}");
         await File.WriteAllLinesAsync(blackboxPath, bbLines);
 
-        // Even with a valid identity whose isolated directory has no files,
-        // LoadAdvancedArtifacts must fall back to the compatibility files.
-        var data = MainWindowViewModel.LoadAdvancedArtifacts(
-            dumpPath,
+        // Only dump B has been analyzed. Its compatibility files share dump A's stem.
+        var dataA = MainWindowViewModel.LoadAdvancedArtifacts(
+            dumpA,
             dir,
-            identity,
+            identityA,
             "missing report",
             "missing wct",
             CancellationToken.None);
-        Require(data.HasReport && data.ReportText == "compat report body", "report must fall back to compatibility path");
-        Require(data.HasWct && data.WctText.Contains("\"tid\": 42", StringComparison.Ordinal), "WCT must fall back to compatibility path");
+        Require(!dataA.HasReport && dataA.ReportText == "missing report", "report must not come from another same-stem dump");
+        Require(!dataA.HasWct && dataA.WctText == "missing wct", "WCT must not come from another same-stem dump");
+        Require(dataA.EventCount == 0 && dataA.EventLines.Count == 0, "blackbox must not come from another same-stem dump");
+
+        var data = MainWindowViewModel.LoadAdvancedArtifacts(
+            dumpB,
+            dir,
+            DumpIdentityContract.Invalid,
+            "missing report",
+            "missing wct",
+            CancellationToken.None);
+        Require(data.HasReport && data.ReportText == "compat report body", "report must use the compatibility path without an identity");
+        Require(data.HasWct && data.WctText.Contains("\"tid\": 42", StringComparison.Ordinal), "WCT must use the compatibility path without an identity");
         Require(data.EventCount == 260, "blackbox must count all 260 events");
         Require(data.EventLines.Count == 200, "blackbox must retain the final 200 events");
         Require(data.EventLines[0].StartsWith("[60]", StringComparison.Ordinal), "tail window must start at event 60");
@@ -530,6 +543,37 @@ internal static class Program
         Require(
             MainWindowViewModel.ResolveCrashLoggerLogPath("<redacted>\\..", null, dir) is null,
             "traversal filename must resolve to null");
+    }
+
+    private static async Task CheckCrashLoggerLogPathExtensions(string root)
+    {
+        var dir = Path.Combine(root, "cl_extensions");
+        Directory.CreateDirectory(dir);
+        var summaryPath = Path.Combine(dir, "summary.json");
+        var batchPath = Path.Combine(dir, "not-a-log.bat");
+        var logPath = Path.Combine(dir, "crash.LOG");
+        await File.WriteAllTextAsync(batchPath, "fixture");
+        await File.WriteAllTextAsync(logPath, "Skyrim SSE v1.6.1170");
+
+        async Task<string?> ResolveSummaryLogPath(string path)
+        {
+            var summary = new JsonObject
+            {
+                ["crash_logger"] = new JsonObject { ["log_path"] = path },
+            };
+            await File.WriteAllTextAsync(summaryPath, summary.ToJsonString());
+            var loaded = AnalysisSummary.LoadFromSummaryFile(summaryPath);
+            return MainWindowViewModel.ResolveCrashLoggerLogPath(loaded.CrashLoggerLogPath, null, dir);
+        }
+
+        Require(await ResolveSummaryLogPath(batchPath) is null, "summary must reject an existing .bat path");
+        Require(
+            await ResolveSummaryLogPath("<redacted>\\" + Path.GetFileName(batchPath)) is null,
+            "summary must reject a matching .bat candidate in outDir");
+        Require(await ResolveSummaryLogPath(logPath) == logPath, "summary must accept an existing uppercase .LOG path");
+        Require(
+            await ResolveSummaryLogPath("<redacted>\\" + Path.GetFileName(logPath)) == logPath,
+            "summary must accept a matching uppercase .LOG candidate in outDir");
     }
 
     private static async Task CheckRecentDumpsDefaultCapIncludesMoreThanTwelve(string root)

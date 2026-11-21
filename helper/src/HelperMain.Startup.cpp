@@ -181,6 +181,7 @@ void InitializeLoopState(const AttachedProcess& proc, const std::filesystem::pat
   if (TryCaptureCommittedCrashInfo(proc.shm ? &proc.shm->header : nullptr, &committed) &&
       (committed.stateFlags & skydiag::kState_Frozen) == 0u) {
     state->crashCaptured.releasedCrashSeq = committed.crashSeq;
+    state->crashCaptured.releasedByAbandonedRearm = false;
     state->crashCaptured.releasedCrashTick64 = GetTickCount64();
     state->crashCaptured.releasedOnBriefHeartbeat = false;
     state->crashCaptured.releasedInThreadDumpWindow = false;
@@ -254,8 +255,10 @@ std::uint32_t RearmFrozenCrashFromEarlierHelper(
     const bool thawed = proc.shmWritable && ThawCrashCapture(proc, committed.crashSeq);
     if (crashState) {
       crashState->releasedCrashSeq = committed.crashSeq;
+      crashState->releasedByAbandonedRearm = true;
       crashState->releasedCrashTick64 = GetTickCount64();
       crashState->releasedOnBriefHeartbeat = false;
+      // Abandoning rearm uses the exit code without thread dump evidence.
       crashState->releasedInThreadDumpWindow = false;
     }
     AppendLogLine(
