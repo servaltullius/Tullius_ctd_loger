@@ -1624,8 +1624,9 @@ std::uint32_t ParseDecimalId(std::string_view value)
 {
   value = TrimAscii(value);
   std::uint32_t id = 0;
-  const auto end = value.data() + value.size();
-  const auto parsed = std::from_chars(value.data(), end, id);
+  const char* const first = value.data();
+  const char* const end = first + value.size();
+  const auto parsed = std::from_chars(first, end, id);
   return parsed.ec == std::errc{} && parsed.ptr == end ? id : 0;
 }
 
