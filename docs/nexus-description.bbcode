@@ -257,7 +257,7 @@ In that case, the shown suspect is [b]a warning signal[/b], not a confirmed root
 To reduce popups, use [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] or [font=Courier New]AutoOpenViewerOnCrash=0[/font].
 
 [b]Q: I closed the game with Alt+F4, an error was recorded, but the viewer did not open.[/b]
-A: That is intended from v0.2.70. An error within 10 seconds of Alt+F4, the window's X button or Quit is an error during a forced close, not a CTD while playing; saves are usually not affected. The dump and report are still in the output folder. Set [font=Courier New]EnableCloseRequestLog=0[/font] in [font=Courier New]SkyrimDiag.ini[/font] to report it as a CTD again.
+A: That is intended from v0.2.70. An error while the game is being closed is an error during a forced close, not a CTD while playing; saves are usually not affected. Once the game has recorded its quit flag (a menu Quit, console qqq, or Alt+F4 or the window's X button that the game went on to act on), an error any time after it counts, however long the shutdown takes. A close request with no quit flag recorded (Alt+F4, the X button or a close message from another program that the game did not act on) covers only errors within 10 seconds of it. The dump and report are still in the output folder. Set [font=Courier New]EnableCloseRequestLog=0[/font] in [font=Courier New]SkyrimDiag.ini[/font] to report it as a CTD again; this also stops recording the quit flag, so slow shutdowns are no longer recognized either.
 
 [b]Q: Where are the dump files?[/b]
 A: With [font=Courier New]OutputDir=[/font] left blank, new dumps go to MO2 [font=Courier New]overwrite\SKSE\Plugins\Tullius Ctd Logs\[/font].
@@ -564,7 +564,7 @@ A: 저장/코세이브 과정의 예외가 내부에서 처리되면 게임이 �
 팝업을 줄이고 싶다면 [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font] 또는 [font=Courier New]AutoOpenViewerOnCrash=0[/font]을 사용하세요.
 
 [b]Q: Alt+F4로 껐더니 오류가 기록됐는데 뷰어가 뜨지 않았어요.[/b]
-A: v0.2.70부터 의도한 동작입니다. Alt+F4, 창의 X 버튼, 종료 뒤 10초 안에 난 오류는 플레이 중 CTD가 아니라 강제 종료 중 오류이고, 세이브에는 보통 영향이 없습니다. 덤프와 리포트는 출력 폴더에 그대로 남습니다. CTD로 다시 보고하게 하려면 [font=Courier New]SkyrimDiag.ini[/font]에서 [font=Courier New]EnableCloseRequestLog=0[/font]으로 설정하세요.
+A: v0.2.70부터 의도한 동작입니다. 게임을 끄는 중에 난 오류는 플레이 중 CTD가 아니라 강제 종료 중 오류이고, 세이브에는 보통 영향이 없습니다. 게임이 종료 플래그를 기록했으면(메뉴의 종료, 콘솔 qqq, 또는 게임이 받아들여 종료로 이어진 Alt+F4나 창의 X 버튼) 그 뒤의 오류는 종료가 얼마나 오래 걸렸든 강제 종료 중 오류입니다. 종료 플래그 기록 없이 닫기 요청만 있었으면(Alt+F4, X 버튼, 다른 프로그램의 닫기 요청을 게임이 받아들이지 않은 경우) 그 요청 뒤 10초 안의 오류만 강제 종료 중 오류로 봅니다. 덤프와 리포트는 출력 폴더에 그대로 남습니다. CTD로 다시 보고하게 하려면 [font=Courier New]SkyrimDiag.ini[/font]에서 [font=Courier New]EnableCloseRequestLog=0[/font]으로 설정하세요. 이 설정은 종료 플래그 기록도 끄므로, 느린 종료도 알아보지 못하게 됩니다.
 
 [b]Q: dump 파일은 어디 있나요?[/b]
 A: [font=Courier New]OutputDir=[/font]를 비워 두면 새 dump는 MO2 [font=Courier New]overwrite\SKSE\Plugins\Tullius Ctd Logs\[/font] 아래에 생성됩니다.
