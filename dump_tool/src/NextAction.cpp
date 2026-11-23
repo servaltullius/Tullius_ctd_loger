@@ -33,6 +33,7 @@ struct PriorityKind
 constexpr PriorityKind kPriorityKinds[] = {
   { "forced_close", 0 },
   { "slow_shutdown", 0 },
+  { "crash_logger_later_crash", 0 },
   { "known_cause", 1 },
   { "damaged_save", 2 },
   { "modal_dialog", 3 },

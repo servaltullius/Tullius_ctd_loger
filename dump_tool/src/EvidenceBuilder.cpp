@@ -83,6 +83,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   r.is_hang_like = isHangLike;
   r.is_snapshot_like = isSnapshotLike;
   r.is_manual_capture = isManualCapture;
+  // Use the finalized capture kind after Analyzer.cpp checked the location mismatch.
+  r.crash_logger_later_crash = internal::CrashLoggerShowsLaterCrash(r, nameHang);
 
   // A GPU vendor tool or overlay is not a mod to disable; it takes the system
   // DLL path with its own wording (FaultPlace).
@@ -167,6 +169,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     }
   }
   internal::BuildEvidenceItems(r, lang, ctx);
+  r.quick_answer = internal::BuildQuickAnswer(r, lang, ctx);
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);
   if (ctx.isForcedClose) {
@@ -181,7 +184,13 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     // ADR-0025: what the repeats say comes before what this one dump says.
     r.summary_sentence = internal::DamagedSaveLead(r.save_load, en) + L" " + r.summary_sentence;
   }
-  r.quick_answer = internal::BuildQuickAnswer(r, lang, ctx);
+  if (r.crash_logger_later_crash) {
+    r.summary_sentence = (en ? L"[Different crash from dump] " : L"[덤프와 다른 크래시] ") +
+      internal::CrashLoggerLaterCrashDetails(r, en) +
+      (en ? L" The analysis below is of the earlier exception in this dump. "
+          : L" 아래는 이 덤프에 찍힌 앞선 예외의 분석입니다. ") +
+      r.summary_sentence;
+  }
 }
 
 }  // namespace

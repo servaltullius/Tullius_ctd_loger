@@ -14,6 +14,15 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
 {
   const bool en = ctx.en;
 
+  if (r.crash_logger_later_crash) {
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Different crash from dump" : L"덤프와 다른 크래시";
+    e.details = CrashLoggerLaterCrashDetails(r, en);
+    r.evidence.insert(r.evidence.begin(), std::move(e));
+  }
+
   if (!r.crash_logger_log_path.empty()) {
     EvidenceItem e{};
     e.confidence_level = r.crash_logger_pairing_ambiguous

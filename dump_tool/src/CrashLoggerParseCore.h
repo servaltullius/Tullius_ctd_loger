@@ -143,8 +143,16 @@ struct CrashLoggerExceptionLine {
   std::string type;         // "EXCEPTION_BREAKPOINT"
   std::string location;     // "ucrtbase.dll+00C2B24"
   std::string instruction;  // "int3"
+  std::uint64_t address = 0;
 };
 std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::string_view logUtf8);
+
+struct CrashLoggerIds {
+  std::uint32_t process_id = 0;
+  std::uint32_t exception_tid = 0;
+};
+CrashLoggerIds ParseCrashLoggerIdsAscii(std::string_view logUtf8);
+
 // The log's exception location ("KERNELBASE.dll+00C483A", the module may be
 // path-qualified) names a different module or offset than the dump's fault:
 // the time pairing most likely picked another crash's log. False when either

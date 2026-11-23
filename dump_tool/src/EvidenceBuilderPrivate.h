@@ -95,6 +95,9 @@ std::wstring ToWideAscii(std::string_view s);
 std::wstring FormatDecimal(double value, int decimals);
 // "12 seconds" / "84 minutes" (Korean: "12초" / "84분").
 std::wstring DescribeDuration(double seconds, bool en);
+bool CrashLoggerShowsLaterCrash(const AnalysisResult& r, bool nameHang);
+std::wstring CrashLoggerLaterCrashInterval(const AnalysisResult& r, bool en);
+std::wstring CrashLoggerLaterCrashDetails(const AnalysisResult& r, bool en);
 // Crash Logger's top modules other than the fault module and the SKSE runtime
 // (the path plugin tasks take): DLLs worth comparing with the fault module.
 bool HasNearbyProbableDll(const AnalysisResult& r);

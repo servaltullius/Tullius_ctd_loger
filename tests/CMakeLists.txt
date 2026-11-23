@@ -111,6 +111,13 @@ if(WIN32)
     COMMAND skydiag_crashlogger_search_integration_tests
   )
 
+  add_executable(skydiag_crashlogger_later_crash_tests crashlogger_later_crash_tests.cpp)
+  target_include_directories(skydiag_crashlogger_later_crash_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_crashlogger_later_crash_tests PRIVATE SkyrimDiagDumpToolCore)
+  add_test(NAME skydiag_crashlogger_later_crash_tests COMMAND skydiag_crashlogger_later_crash_tests)
+
   add_executable(skydiag_analyzer_state_runtime_tests
     analyzer_state_runtime_tests.cpp
   )

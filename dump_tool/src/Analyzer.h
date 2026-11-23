@@ -632,6 +632,12 @@ struct AnalysisResult
   // differs from the dump's (crash_logger_location_mismatch).
   bool crash_logger_pairing_ambiguous = false;
   bool crash_logger_location_mismatch = false;
+  bool crash_logger_later_crash = false;
+  // The paired log's exception location is in a mod DLL (checked against the
+  // dump's module list; never Crash Logger, SKSE, external programs or Windows).
+  bool crash_logger_exception_module_is_mod = false;
+  std::uint32_t crash_logger_process_id = 0;
+  std::uint32_t crash_logger_exception_tid = 0;
   std::vector<std::wstring> crash_logger_top_modules;  // e.g. "hdtSMP64.dll", "MuJointFix.dll"
   // The paired log is a Crash Logger thread dump: its thread records, its
   // "Total Threads" line (0 when absent) and whether it reached the
@@ -640,6 +646,7 @@ struct AnalysisResult
   std::uint32_t crash_logger_thread_dump_records = 0;
   std::uint32_t crash_logger_thread_dump_total_threads = 0;
   bool crash_logger_thread_dump_has_current_thread = false;
+  bool crash_logger_pairing_log_time_from_name = false;
   // The paired log's time (its file name, else its last write) is not after the dump's.
   bool crash_logger_pairing_log_before_dump = false;
   // FILETIME (UTC); 0 when unknown: the log's start from its file name, its
@@ -690,6 +697,7 @@ struct AnalysisResult
   std::wstring crash_logger_exception_type;      // "EXCEPTION_BREAKPOINT"
   std::wstring crash_logger_exception_location;  // "ucrtbase.dll+00C2B24"
   std::wstring crash_logger_exception_instruction;
+  std::uint64_t crash_logger_exception_address = 0;
   // Relevant objects with a name or FormID but no plugin (spawned at runtime);
   // esp_name is empty.
   std::vector<CrashLoggerModReference> crash_logger_unattributed_objects;
@@ -773,6 +781,7 @@ struct AnalysisResult
   bool symbol_runtime_degraded = false;
   bool incident_capture_profile_present = false;
   std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
+  bool incident_unhandled_exception_signal = false;
   std::string incident_capture_profile_base_mode;  // mini / default / full
   bool incident_capture_profile_code_segments = false;
   bool incident_capture_profile_process_thread_data = false;

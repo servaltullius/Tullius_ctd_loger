@@ -5,8 +5,10 @@
 #include "Bucket.h"
 #include "CandidateConsensus.h"
 #include "EvidenceBuilder.h"
+#include "EvidenceBuilderPrivate.h"
 #include "FreezeCandidateConsensus.h"
 #include "GraphicsInjectionDiag.h"
+#include "MainThreadWait.h"
 #include "OutputWriterInternals.h"
 #include "TroubleshootingGuide.h"
 #include "CrashLogger.h"
@@ -195,6 +197,65 @@ void DowngradeCrashLoggerLogForOtherLocation(AnalysisResult* out)
     L"[CrashLogger] log exception location " + out->crash_logger_exception_location +
     L" differs from the dump fault " + out->fault_module_plus_offset +
     L"; treating the pairing as ambiguous");
+}
+
+bool CrashLoggerExceptionModuleIsMod(
+  std::wstring_view location, std::uint64_t address, const std::vector<ModuleInfo>& allModules)
+{
+  const auto isCrashLoggerOrGraphicsDriver = [](std::wstring_view filename) {
+    const auto lower = WideLower(filename);
+    return lower == L"crashlogger.dll" || lower == L"crashloggersse.dll" || IsGraphicsDriverModule(filename);
+  };
+  const auto isModModule = [&](const ModuleInfo& m) {
+    return !m.is_systemish && m.external_software.empty() && !m.is_game_exe && !m.is_known_hook_framework &&
+           !isCrashLoggerOrGraphicsDriver(m.filename);
+  };
+  if (address != 0) {
+    if (const auto index = minidump::FindModuleIndexForAddress(allModules, address)) {
+      return isModModule(allModules[*index]);
+    }
+  }
+
+  const std::size_t plus = location.rfind(L'+');
+  if (plus == std::wstring_view::npos) {
+    return false;
+  }
+  const std::wstring module = NormalizeCrashLoggerModuleFilename(location.substr(0, plus));
+  const std::wstring key = WideLower(module);
+  bool loaded = false;
+  for (const auto& m : allModules) {
+    if (WideLower(m.filename) != key) {
+      continue;
+    }
+    loaded = true;
+    if (!isModModule(m)) {
+      return false;
+    }
+  }
+  return loaded || (key.ends_with(L".dll") && !IsSystemishModule(module) &&
+                    !IsExternalSoftwareModule(module) && !IsKnownHookFramework(module) &&
+                    !IsGameExeModule(module) && !isCrashLoggerOrGraphicsDriver(module));
+}
+
+bool internal::CrashLoggerShowsLaterCrash(const AnalysisResult& r, bool nameHang)
+{
+  // The helper's confirmation window lasts up to about 11 seconds after writing the dump.
+  constexpr std::uint64_t kMaxLaterCrashDeltaMs = 30'000;
+  if (!r.is_crash_like || r.is_hang_like || r.is_manual_capture || nameHang || KeepsOutOfCrashHistory(r) ||
+      r.incident_capture_kind == "hang" || r.incident_capture_kind == "manual" ||
+      r.incident_unhandled_exception_signal ||
+      r.crash_logger_log_path.empty() || !r.crash_logger_location_mismatch ||
+      r.crash_logger_pairing_nearby_competitor_count != 0 ||
+      r.crash_logger_exception_type.empty() || !r.crash_logger_pairing_log_time_from_name ||
+      r.crash_logger_pairing_log_before_dump || r.crash_logger_pairing_time_delta_ms > kMaxLaterCrashDeltaMs ||
+      r.pid == 0 || r.pid != r.crash_logger_process_id ||
+      r.exc_tid == 0 || r.crash_logger_exception_tid == 0 || r.exc_tid == r.crash_logger_exception_tid) {
+    return false;
+  }
+
+  // The WCT capture metadata can classify a capture even when its thread list is missing.
+  const auto wct = TryParseWctFreezeSummary(r.wct_json_utf8);
+  return !wct || (!wct->suggestsHang && wct->capture_kind != "manual");
 }
 
 void IntegrateCrashLoggerFrameSignals(
@@ -699,6 +760,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
       RunOptionalStep(L"Crash Logger log", out, [&] {
         IntegrateCrashLoggerLog(dumpPath, allModules, modulePaths, mo2Index, out);
         DowngradeCrashLoggerLogForOtherLocation(&out);
+        out.crash_logger_exception_module_is_mod =
+          CrashLoggerExceptionModuleIsMod(out.crash_logger_exception_location,
+                                         out.crash_logger_exception_address, allModules);
         IntegrateCrashLoggerFrameSignals(allModules, &out);
       });
     }
