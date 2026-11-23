@@ -21,7 +21,7 @@ endif()
 
 project(
   SkyrimDiag
-  VERSION 0.2.79
+  VERSION 0.2.80
   LANGUAGES CXX)
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SkyrimDiagVersion.cmake")
