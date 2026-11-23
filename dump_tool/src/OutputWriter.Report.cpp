@@ -314,7 +314,8 @@ std::string BuildReportText(
         << ", nearby_competitors=" << r.crash_logger_pairing_nearby_competitor_count
         << ", ambiguous=" << (r.crash_logger_pairing_ambiguous ? 1 : 0)
         << ", location_mismatch=" << (r.crash_logger_location_mismatch ? 1 : 0)
-        << ", confidence=" << r.crash_logger_pairing_confidence << "\n";
+        << ", confidence=" << r.crash_logger_pairing_confidence
+        << ", later_crash=" << (r.crash_logger_later_crash ? 1 : 0) << "\n";
   }
   if (!r.crash_logger_version.empty()) {
     rpt << (en ? "CrashLoggerVersion: " : "Crash Logger 버전: ") << WideToUtf8(r.crash_logger_version) << "\n";

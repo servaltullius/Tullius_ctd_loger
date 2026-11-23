@@ -963,6 +963,7 @@ void IntegrateCrashLoggerLog(
   }
 
   out.crash_logger_log_path = logPath->wstring();
+  out.crash_logger_pairing_log_time_from_name = pairing.selected_name_time != 0;
   out.crash_logger_pairing_time_delta_ms = pairing.time_delta_ms;
   out.crash_logger_pairing_runner_up_time_delta_ms = pairing.runner_up_time_delta_ms;
   out.crash_logger_pairing_eligible_candidate_count = pairing.eligible_candidate_count;
@@ -1043,7 +1044,11 @@ void IntegrateCrashLoggerLog(
     out.crash_logger_exception_type = Utf8ToWide(exceptionLine->type);
     out.crash_logger_exception_location = Utf8ToWide(exceptionLine->location);
     out.crash_logger_exception_instruction = Utf8ToWide(exceptionLine->instruction);
+    out.crash_logger_exception_address = exceptionLine->address;
   }
+  const auto ids = crashlogger_core::ParseCrashLoggerIdsAscii(*logUtf8);
+  out.crash_logger_process_id = ids.process_id;
+  out.crash_logger_exception_tid = ids.exception_tid;
   for (const auto& object : crashlogger_core::ParseCrashLoggerUnattributedObjectsAscii(*logUtf8)) {
     AnalysisResult::CrashLoggerModReference ref;
     ref.best_object_type = Utf8ToWide(object.object_type);

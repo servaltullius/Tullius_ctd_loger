@@ -163,6 +163,7 @@ nlohmann::json BuildSummaryJson(
     { "is_filtered_clean_exit", r.is_filtered_clean_exit },
     { "is_forced_close", r.forced_close.detected },
     { "is_slow_shutdown", r.quit_before_freeze.detected },
+    { "crash_logger_later_crash", r.crash_logger_later_crash },
   };
   if (r.is_filtered_clean_exit) {
     summary["clean_exit_evidence"] = {
@@ -334,6 +335,12 @@ nlohmann::json BuildSummaryJson(
   summary["crash_logger"] = nlohmann::json::object();
   summary["crash_logger"]["log_path"] = WideToUtf8(MaybeRedactPath(r.crash_logger_log_path, redactPaths));
   summary["crash_logger"]["version"] = WideToUtf8(r.crash_logger_version);
+  if (r.crash_logger_process_id != 0) {
+    summary["crash_logger"]["process_id"] = r.crash_logger_process_id;
+  }
+  if (r.crash_logger_exception_tid != 0) {
+    summary["crash_logger"]["exception_tid"] = r.crash_logger_exception_tid;
+  }
   summary["crash_logger"]["pairing"] = {
     { "time_delta_ms", r.crash_logger_pairing_time_delta_ms },
     { "runner_up_time_delta_ms", r.crash_logger_pairing_runner_up_time_delta_ms },

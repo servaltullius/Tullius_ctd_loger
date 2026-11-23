@@ -68,6 +68,10 @@ void LoadIncidentCaptureProfile(
   }
 
   out.incident_capture_kind = JsonValueOr(incidentManifest, "capture_kind", std::string{});
+  if (const auto context = incidentManifest.find("context");
+      context != incidentManifest.end() && context->is_object()) {
+    out.incident_unhandled_exception_signal = JsonValueOr(*context, "unhandled_exception_signal", false);
+  }
   if (incidentManifest.contains("capture_profile") && incidentManifest["capture_profile"].is_object()) {
     const auto& capture_profile = incidentManifest["capture_profile"];
     out.incident_capture_profile_present = true;

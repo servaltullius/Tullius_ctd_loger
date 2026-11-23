@@ -1571,10 +1571,11 @@ std::vector<CrashLoggerObjectRef> AggregateCrashLoggerObjectRefs(
   return result;
 }
 
+constexpr std::string_view kUnhandledExceptionPrefix = "Unhandled exception \"";
+
 std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::string_view logUtf8)
 {
-  constexpr std::string_view kPrefix = "Unhandled exception \"";
-  const std::size_t start = logUtf8.find(kPrefix);
+  const std::size_t start = logUtf8.find(kUnhandledExceptionPrefix);
   if (start == std::string_view::npos) {
     return std::nullopt;
   }
@@ -1583,7 +1584,7 @@ std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::
   if (!line.empty() && line.back() == '\r') {
     line.remove_suffix(1);
   }
-  line.remove_prefix(kPrefix.size());
+  line.remove_prefix(kUnhandledExceptionPrefix.size());
   const std::size_t quote = line.find('"');
   if (quote == std::string_view::npos || quote == 0) {
     return std::nullopt;
@@ -1596,6 +1597,15 @@ std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::
   if (at != std::string_view::npos) {
     rest = TrimLeftAscii(rest.substr(at + 4));
     const std::size_t afterAddress = rest.find_first_of(" \t");
+    const auto addressToken = rest.substr(0, afterAddress);
+    if (addressToken.size() > 2 && StartsWithCaseInsensitiveAscii(addressToken, "0x")) {
+      std::uint64_t address = 0;
+      const auto end = addressToken.data() + addressToken.size();
+      const auto parsed = std::from_chars(addressToken.data() + 2, end, address, 16);
+      if (parsed.ec == std::errc{} && parsed.ptr == end) {
+        out.address = address;
+      }
+    }
     if (afterAddress != std::string_view::npos) {
       rest = TrimLeftAscii(rest.substr(afterAddress));
       const std::size_t tab = rest.find('\t');
@@ -1606,6 +1616,69 @@ std::optional<CrashLoggerExceptionLine> ParseCrashLoggerExceptionLineAscii(std::
     }
   }
   return out;
+}
+
+namespace {
+
+std::uint32_t ParseDecimalId(std::string_view value)
+{
+  value = TrimAscii(value);
+  std::uint32_t id = 0;
+  const auto end = value.data() + value.size();
+  const auto parsed = std::from_chars(value.data(), end, id);
+  return parsed.ec == std::errc{} && parsed.ptr == end ? id : 0;
+}
+
+bool IsCrashLoggerSectionHeading(std::string_view line)
+{
+  return line.size() > 1 && line.ends_with(':') &&
+    std::all_of(line.begin(), line.end() - 1, [](char ch) {
+      return (ch >= 'A' && ch <= 'Z') || ch == ' ' || ch == '_';
+    });
+}
+
+}  // namespace
+
+CrashLoggerIds ParseCrashLoggerIdsAscii(std::string_view logUtf8)
+{
+  const auto firstException = logUtf8.find(kUnhandledExceptionPrefix);
+  if (firstException != std::string_view::npos &&
+      logUtf8.find(kUnhandledExceptionPrefix, firstException + kUnhandledExceptionPrefix.size()) != std::string_view::npos) {
+    return {};
+  }
+
+  constexpr std::string_view kThreadId = "Exception Thread ID:";
+  constexpr std::string_view kProcessId = "Process ID:";
+  constexpr std::string_view kCrashThreadId = "Crash Thread ID:";
+  std::optional<std::uint32_t> exceptionTid;
+  std::optional<std::uint32_t> processId;
+  bool inHeader = true;
+  bool inProcessInfo = false;
+  while (!logUtf8.empty()) {
+    const auto newline = logUtf8.find('\n');
+    auto line = logUtf8.substr(0, newline);
+    logUtf8.remove_prefix(newline == std::string_view::npos ? logUtf8.size() : newline + 1);
+    if (line.ends_with('\r')) {
+      line.remove_suffix(1);
+    }
+    line = TrimAscii(line);
+
+    if (IsCrashLoggerSectionHeading(line)) {
+      inHeader = false;
+      inProcessInfo = line == "PROCESS INFO:";
+    }
+    if (inHeader && line.starts_with(kThreadId) && !exceptionTid) {
+      exceptionTid = ParseDecimalId(line.substr(kThreadId.size()));
+    }
+    if (inProcessInfo && line.starts_with(kProcessId) && !processId) {
+      processId = ParseDecimalId(line.substr(kProcessId.size()));
+    }
+    if (inProcessInfo && exceptionTid && line.starts_with(kCrashThreadId) &&
+        ParseDecimalId(line.substr(kCrashThreadId.size())) != *exceptionTid) {
+      exceptionTid = 0;
+    }
+  }
+  return { processId.value_or(0), exceptionTid.value_or(0) };
 }
 
 namespace {

@@ -9,6 +9,32 @@
 #include "MinidumpUtil.h"
 
 namespace skydiag::dump_tool::internal {
+
+std::wstring CrashLoggerLaterCrashInterval(const AnalysisResult& r, bool en)
+{
+  const auto ms = r.crash_logger_pairing_time_delta_ms;
+  const auto seconds = ms / 1000 + (ms % 1000 >= 500 ? 1 : 0);
+  if (seconds == 0) {
+    return {};
+  }
+  return (en ? L"about " : L"약 ") + std::to_wstring(seconds) +
+    (en ? (seconds == 1 ? L" second" : L" seconds") : L"초");
+}
+
+std::wstring CrashLoggerLaterCrashDetails(const AnalysisResult& r, bool en)
+{
+  const auto interval = CrashLoggerLaterCrashInterval(r, en);
+  if (en) {
+    const std::wstring when = interval.empty() ? L"within a few seconds" : interval + L" later";
+    return L"The exception in this dump (" + r.fault_module_plus_offset + L") was an earlier exception the game was "
+      L"handling, and the crash that ended the game happened " + when + L" on another thread at " +
+      r.crash_logger_exception_location + L" (Crash Logger log, same process).";
+  }
+  const std::wstring when = interval.empty() ? L"몇 초 안에" : interval + L" 뒤";
+  return L"이 덤프의 예외(" + r.fault_module_plus_offset + L")는 게임이 처리하던 앞선 예외이고, 게임을 끝낸 크래시는 " +
+    when + L" 다른 스레드에서 난 " + r.crash_logger_exception_location + L"입니다(Crash Logger 로그, 같은 프로세스).";
+}
+
 namespace {
 
 std::wstring DescribeCandidate(const ActionableCandidate& candidate)

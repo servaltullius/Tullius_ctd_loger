@@ -684,6 +684,65 @@ void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answ
   answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
 }
 
+QuickAnswer LaterCrashAnswer(const AnalysisResult& r, bool en)
+{
+  QuickAnswer answer;
+  answer.kind = "crash";
+  answer.case_id = "crash_logger_later_crash";
+  answer.likelihood = LikelihoodId(i18n::ConfidenceLevel::kLow);
+  answer.likelihood_text = LikelihoodText(i18n::ConfidenceLevel::kLow, en);
+
+  const std::wstring_view location = r.crash_logger_exception_location;
+  const auto modulePath = location.substr(0, location.rfind(L'+'));
+  const auto module = BaseName(modulePath);
+  if (r.crash_logger_exception_module_is_mod) {
+    const auto lead = ModLead(r, module, {}, i18n::ConfidenceLevel::kLow);
+    answer.suspect_mod = lead.name;
+    answer.suspect_file = lead.file;
+  }
+
+  const auto& faultFile = r.fault_module_filename;
+  const std::wstring earlierModule = IsModModule(r, faultFile)
+    ? ModLead(r, faultFile, {}, i18n::ConfidenceLevel::kLow).name : faultFile;
+  const std::wstring earlierLabel = earlierModule.empty() ? L""
+    : (en ? L" (" : L"(") + earlierModule + L")";
+  const auto interval = CrashLoggerLaterCrashInterval(r, en);
+  answer.headline = KindPhrase(answer.kind, en);
+  if (en) {
+    const std::wstring when = interval.empty() ? L"within a few seconds before" : interval + L" before";
+    answer.headline += L" This dump captured an earlier exception" + earlierLabel +
+      L" the game was handling on another thread " + when +
+      L" the crash that ended the game. Crash Logger recorded that crash at " + r.crash_logger_exception_location + L".";
+  } else {
+    answer.headline += interval.empty()
+      ? L" 이 덤프는 게임이 다른 스레드에서 처리하던 앞선 예외" + earlierLabel +
+        L"를 찍었습니다. 몇 초 안에 게임을 끝낸 크래시가 났습니다."
+      : L" 이 덤프는 게임을 끝낸 크래시가 아니라, 그보다 " + interval +
+        L" 앞서 다른 스레드에서 나서 게임이 처리하던 예외" + earlierLabel + L"를 찍었습니다.";
+    answer.headline += L" 게임을 끝낸 크래시는 Crash Logger 로그에 있습니다: " + r.crash_logger_exception_location + L".";
+  }
+  if (!answer.suspect_mod.empty()) {
+    answer.headline += en
+      ? L" That location is in " + answer.suspect_mod + L" (" + answer.suspect_file + L")."
+      : L" 그 위치는 " + answer.suspect_mod + L"(" + answer.suspect_file + L")입니다.";
+  }
+
+  const auto logFile = BaseName(r.crash_logger_log_path);
+  answer.action = en
+    ? L"Check the relevant objects and the call stack for that crash in the Crash Logger log (" + logFile +
+      L"), and share that log when asking for help."
+    : L"Crash Logger 로그(" + logFile +
+      L")에서 그 크래시의 관련 오브젝트와 콜스택을 확인하고, 도움을 요청할 때 그 로그를 함께 공유하세요.";
+  if (!earlierModule.empty() && !SameFile(module, faultFile)) {
+    answer.action += en ? L" Do not treat " + earlierModule + L" from this dump as the cause of the crash."
+                        : L" 덤프에 찍힌 " + earlierModule + L"은(는) 이 크래시의 원인으로 보지 마세요.";
+  }
+  answer.why_not_certain = en
+    ? L"This dump does not hold the crash that ended the game, so that crash is seen only through the Crash Logger log."
+    : L"이 덤프에는 게임을 끝낸 크래시가 담겨 있지 않아, 그 크래시는 Crash Logger 로그로만 봤습니다.";
+  return answer;
+}
+
 // ADR-0034: with no mod named, a crash mechanism that has its own headline
 // (the Papyrus script loader) says what the game was doing and what to check
 // in place of "share this report". It names no mod and sets no likelihood.
@@ -815,6 +874,10 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
       : (en ? L"Nothing to do: a snapshot records the game's state and does not mean anything is wrong by itself."
             : L"따로 할 일은 없습니다. 스냅샷은 게임 상태를 남긴 기록이라 그것만으로 문제가 있다는 뜻은 아닙니다.");
     return answer;
+  }
+
+  if (r.crash_logger_later_crash) {
+    return LaterCrashAnswer(r, en);
   }
 
   const bool freezePath = !ctx.hasModule && ctx.isHangLike && !r.hook_stub_race.detected;
