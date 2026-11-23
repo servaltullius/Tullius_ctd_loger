@@ -1040,6 +1040,17 @@ if(WIN32)
   target_link_libraries(skydiag_helper_runtime_smoke_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_runtime_smoke_tests COMMAND skydiag_helper_runtime_smoke_tests)
 
+  add_executable(skydiag_helper_session_log_tests
+    helper_session_log_tests.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/Config.cpp"
+  )
+  target_link_libraries(skydiag_helper_session_log_tests PRIVATE skydiag_helper_runtime_test_support)
+  set_target_properties(skydiag_helper_session_log_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/helper_session_log_tests"
+  )
+  add_test(NAME skydiag_helper_session_log_tests COMMAND skydiag_helper_session_log_tests)
+  add_test(NAME skydiag_helper_session_log_defaults COMMAND skydiag_helper_session_log_tests --defaults)
+
   # LoadConfig reads SkyrimDiagHelper.ini beside the running executable, so
   # this test runs from its own directory and writes its ini there.
   add_executable(skydiag_helper_config_runtime_tests

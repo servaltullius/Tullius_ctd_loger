@@ -21,6 +21,7 @@
 #include "GpuDriverEvents.h"
 #include "GpuMemory.h"
 #include "HangObjectMemory.h"
+#include "HelperLog.h"
 #include "HookPageRecord.h"
 #include "ModuleUnwindMemory.h"
 #include "SkyrimDiagProtocol.h"
@@ -765,6 +766,7 @@ bool WriteDumpWithStreams(
     CloseHandle(file);
 
     if (ok) {
+      internal::RecordSessionDump(dumpPath);
       if (err) {
         err->clear();
       }

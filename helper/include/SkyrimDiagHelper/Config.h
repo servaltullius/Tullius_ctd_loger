@@ -94,7 +94,7 @@ struct HelperConfig {
   std::uint32_t maxHelperLogBytes = 8u * 1024u * 1024u;
   std::uint32_t maxHelperLogFiles = 3;
   // Earlier game sessions whose helper log is kept (previous.log, previous.2.log, ...).
-  std::uint32_t maxHelperSessionLogs = 5;
+  std::uint32_t maxHelperSessionLogs = 20;
 };
 
 // OutputDir as SkyrimDiagHelper.ini documents it: blank means the default
