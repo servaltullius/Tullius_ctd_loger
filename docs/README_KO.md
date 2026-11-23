@@ -146,7 +146,7 @@ SkyrimDiagDumpToolWinUI.exe --lang en   # 영어 강제
 
 MO2는 USVFS 가상 파일 시스템 안에서 스카이림을 실행합니다. 플러그인은 게임 프로세스에서 `SkyrimDiagHelper.exe`를 시작하므로, Helper도 보통 모드 파일의 가상 사본에서 실행됩니다. MO2 사용자 제보에 따르면, 모드로만 설치한 경우 게임 종료 뒤 Helper가 해야 할 작업이 조용히 실패할 수 있습니다. 새 덤프나 리포트가 없거나 뷰어가 열리지 않습니다([#4](https://github.com/servaltullius/Tullius_ctd_loger/issues/4)).
 
-이 경우 먼저 출력 폴더(기본: `overwrite\SKSE\Plugins\Tullius Ctd Logs\`)의 `SkyrimDiagHelper.log`에 사고 이후 기록이 있는지 확인하세요(그 뒤에 게임을 다시 켰다면 사고 난 세션의 로그는 `SkyrimDiagHelper.previous.log`, 더 이전 세션은 `SkyrimDiagHelper.previous.2.log`부터 차례로 남습니다. 각 로그 첫 줄에 세션 시작 시각이 있습니다. 플러그인 로그 `문서\My Games\Skyrim Special Edition\SKSE\SkyrimDiag.log`도 같은 방식으로 이전 다섯 세션을 `SkyrimDiag.previous.log`부터 남깁니다). 로그가 사고 시점에서 끊겨 있다면, 파일을 실제 폴더에 배치해 사고 후 동작이 복구됐다는 제보가 있습니다.
+이 경우 먼저 출력 폴더(기본: `overwrite\SKSE\Plugins\Tullius Ctd Logs\`)의 `SkyrimDiagHelper.log`에 사고 이후 기록이 있는지 확인하세요(그 뒤에 게임을 다시 켰다면 사고 난 세션의 로그는 `SkyrimDiagHelper.previous.log`, 더 이전 세션은 `SkyrimDiagHelper.previous.2.log`부터 차례로 남습니다. 각 로그 첫 줄에 세션 시작 시각이 있습니다. Helper가 끝날 때, 그 세션에서 쓴 덤프마다 그 세션의 로그 사본이 `<덤프 이름>_HelperLog.txt`로 덤프 옆에 남습니다. 플러그인 로그 `문서\My Games\Skyrim Special Edition\SKSE\SkyrimDiag.log`도 같은 방식으로 이전 다섯 세션을 `SkyrimDiag.previous.log`부터 남깁니다). 로그가 사고 시점에서 끊겨 있다면, 파일을 실제 폴더에 배치해 사고 후 동작이 복구됐다는 제보가 있습니다.
 
 1. 릴리즈 zip의 `SKSE\Plugins\` 내용 전체를 실제 게임 `Data\SKSE\Plugins\` 폴더에 복사합니다. `SkyrimDiag.dll`, `SkyrimDiag.ini`, `SkyrimDiagHelper.exe`, `SkyrimDiagHelper.ini`, `SkyrimDiagDumpToolCli.exe`, `data\` 폴더, `app\`을 포함한 `SkyrimDiagWinUI\` 폴더 전체입니다.
 2. MO2에서 Tullius 모드를 비활성화합니다. MO2가 실제 파일 위에 모드 사본을 겹쳐 올리지 않고, 한 버전만 설치된 상태가 됩니다.
@@ -189,7 +189,7 @@ Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = 무제한)
 - `MaxForcedCloseCrashDumps` (기본 3, 0 = 무제한): 게임을 닫는 중(Alt+F4, 종료 메뉴)에 난 오류의 크래시 덤프는 `MaxCrashDumps`와 따로 셉니다. 종료할 때마다 오류가 나도 진짜 크래시 덤프가 밀려나지 않습니다
 - `MaxTotalDumpGB` (기본 5, 0 = 무제한): 크래시·프리징·수동 덤프를 모두 합친 크기(GB). 이 크기를 넘으면 종류와 상관없이 오래된 덤프부터 리포트와 함께 지웁니다. 가장 최근 캡처와, 하루가 지나지 않은 종류별 최신 캡처(뷰어가 아직 열 수 있음)는 항상 남깁니다. `DumpAllModuleCode=1`이면 큰 모드팩에서 덤프 하나가 0.5~0.9GB이고, `DumpMode=2`나 크래시 재캡처를 쓰면 몇 GB가 될 수 있으니, 그런 덤프를 더 남기려면 값을 올려 주세요.
-- `MaxHelperLogBytes`, `MaxHelperLogFiles` (로그 로테이션), `MaxHelperSessionLogs` (이전 세션 로그 보관 개수, 기본 5)
+- `MaxHelperLogBytes`, `MaxHelperLogFiles` (로그 로테이션), `MaxHelperSessionLogs` (이전 세션 로그 보관 개수, 기본 20)
 - 덤프가 없어진 `.skydiag-analysis/`의 분석 사본과 `.skydiag-locks/`의 잠금 파일은 하루가 지나면 지웁니다. `.skydiag-triage/`의 검토 상태는 남깁니다.
 
 ## 이슈 제보

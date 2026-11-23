@@ -88,7 +88,11 @@ std::wstring Timestamp()
 {
   SYSTEMTIME st{};
   GetLocalTime(&st);
+  return Timestamp(st);
+}
 
+std::wstring Timestamp(const SYSTEMTIME& st)
+{
   wchar_t buf[80]{};
   swprintf_s(
     buf,
@@ -205,11 +209,13 @@ bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
   // Stateful helper JSON must never expose a truncated destination file. Write
   // and flush a sibling temporary file first, then atomically replace the
   // destination on the same volume.
+  constexpr std::size_t kTempSuffixChars = 57; // .tmp.<10-digit pid>.<20-digit tick>.<20-digit sequence>
+  const auto ioPath = skydiag::PathForIo(path, kTempSuffixChars);
   static std::atomic<std::uint64_t> tempSequence{0};
   std::filesystem::path tempPath;
   HANDLE file = INVALID_HANDLE_VALUE;
   for (int attempt = 0; attempt < 8 && file == INVALID_HANDLE_VALUE; ++attempt) {
-    tempPath = path;
+    tempPath = ioPath;
     tempPath +=
       L".tmp."
       + std::to_wstring(GetCurrentProcessId())
@@ -254,7 +260,7 @@ bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
   if (ok) {
     ok = MoveFileExW(
       tempPath.c_str(),
-      path.c_str(),
+      ioPath.c_str(),
       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
   }
   if (!ok) {

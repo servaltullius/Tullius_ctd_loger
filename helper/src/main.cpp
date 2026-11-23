@@ -110,13 +110,11 @@ static int RunHelper(int argc, wchar_t** argv)
     return 4;
   }
 
+  // The session's start time tells the kept session logs apart.
+  skydiag::helper::internal::SetHelperSessionLogMarker(
+    L"Attached to pid=" + std::to_wstring(proc.pid) + L" at " + SessionStartTimeText());
   skydiag::helper::internal::StartHelperLogSession(outBase);
   std::wcout << L"[SkyrimDiagHelper] Attached to pid=" << proc.pid << L", output=" << outBase.wstring() << L"\n";
-  // The session's start time tells the kept session logs apart.
-  AppendLogLine(
-    outBase,
-    L"Attached to pid=" + std::to_wstring(proc.pid) + L" at " + SessionStartTimeText() + L", output=" +
-      outBase.wstring());
   if (!configWarning.empty()) {
     AppendLogLine(outBase, L"Config warning: " + configWarning);
   }
@@ -169,7 +167,6 @@ static int RunHelper(int argc, wchar_t** argv)
   if (grassCacheMode) {
     ApplyRetentionFromConfig(cfg, outBase);
     skydiag::helper::internal::RunGrassCacheLoop(proc, outBase);
-    ShutdownRetentionWorker();
   } else {
     ApplyRetentionFromConfig(cfg, outBase);
 
@@ -225,8 +222,9 @@ static int RunHelper(int argc, wchar_t** argv)
       attachNowQpc,
       &loopState);
     skydiag::helper::internal::ShutdownLoopState(cfg, proc, outBase, &loopState);
-    ShutdownRetentionWorker();
   }
+  ShutdownRetentionWorker();
+  skydiag::helper::internal::KeepSessionHelperLogBesideDumps(outBase);
 
   if (helperSingletonMutex && helperSingletonMutex != INVALID_HANDLE_VALUE) {
     CloseHandle(helperSingletonMutex);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <Windows.h>
+
 #include <cstdint>
 #include <filesystem>
 #include <optional>
@@ -15,6 +17,7 @@ struct HelperConfig;
 namespace skydiag::helper::internal {
 
 std::wstring Timestamp();
+std::wstring Timestamp(const SYSTEMTIME& localTime);
 // Creates the folder and checks that a file can be written in it; err says why not.
 bool PrepareWritableOutputDir(const std::filesystem::path& dir, std::wstring* err);
 // cfg.outputDir, or the first writable cfg.outputDirFallbacks entry when it
