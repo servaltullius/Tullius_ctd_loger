@@ -14,6 +14,8 @@ namespace skydiag::dump_tool {
 // known cause, damaged save, modal dialog, candidate, Crash Logger frame, object
 // ref, snapshot, conflict); without one, the first entry that is not
 // background-only is used. Returns npos for an empty list.
-std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendations);
+std::size_t SelectNextActionIndex(
+  const std::vector<std::wstring>& recommendations,
+  bool hasSecondFaultNote = false);
 
 }  // namespace skydiag::dump_tool

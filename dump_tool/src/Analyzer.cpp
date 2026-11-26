@@ -21,6 +21,7 @@
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
 #include "Mo2Index.h"
+#include "SkyrimDiagLongPath.h"
 #include "Utf.h"
 
 #include <Windows.h>
@@ -241,7 +242,8 @@ bool internal::CrashLoggerShowsLaterCrash(const AnalysisResult& r, bool nameHang
 {
   // The helper's confirmation window lasts up to about 11 seconds after writing the dump.
   constexpr std::uint64_t kMaxLaterCrashDeltaMs = 30'000;
-  if (!r.is_crash_like || r.is_hang_like || r.is_manual_capture || nameHang || KeepsOutOfCrashHistory(r) ||
+  if (!r.is_crash_like || r.is_hang_like || r.is_manual_capture || r.is_second_fault_capture ||
+      nameHang || KeepsOutOfCrashHistory(r) ||
       r.incident_capture_kind == "hang" || r.incident_capture_kind == "manual" ||
       r.incident_unhandled_exception_signal ||
       r.crash_logger_log_path.empty() || !r.crash_logger_location_mismatch ||
@@ -679,6 +681,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // Exception info + fault module
   const auto excCtx = ParseExceptionInfo(dumpBase, dumpSize, out);
+  ParseSecondFaultStream(dumpBase, dumpSize, out);
   ResolveFaultModule(dumpBase, dumpSize, allModules, out);
 
   // Graphics injection diagnostics (best-effort, data-driven via JSON rules).
@@ -711,15 +714,17 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // SkyrimDiag blackbox (optional)
   ParseBlackboxStream(dumpBase, dumpSize, mo2Index, modulePaths, out);
-  TryConsumeCleanExitEvidence(dumpPath, out);
+  if (!out.is_second_fault_capture) {
+    TryConsumeCleanExitEvidence(dumpPath, out);
+  }
   // ADR-0022: a crash after the player asked the game to close (the quit
   // flag at any time before it, the other requests within 10 s). A
   // validated clean exit already says more (the game exited with code 0).
   if (!out.is_filtered_clean_exit && out.exc_code != 0u) {
-    out.forced_close = internal::DetectForcedClose(out.events);
+    out.forced_close = internal::DetectForcedClose(out.events, out.second_fault_time_ms);
   }
   // ADR-0025: a save load the capture came before the end of.
-  out.save_load = internal::DetectSaveLoad(out.events);
+  out.save_load = internal::DetectSaveLoad(out.events, out.second_fault_time_ms);
   out.save_load.attempt_key = internal::SaveLoadAttemptKey(out);
 
   // WCT stream (optional)
@@ -749,6 +754,9 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   internal::DetectSlowShutdown(hangLike, out);
   // Kept out of the crash history and its statistics, as a clean exit is.
   const bool keepOutOfHistory = internal::KeepsOutOfCrashHistory(out);
+  // A second fault dump is read against the history as a crash is, but is
+  // never added to it: its A is already there (ADR-0036).
+  const bool addToCrashHistory = !keepOutOfHistory && !out.is_second_fault_capture;
 
   // Crash Logger integration (best-effort)
   {
@@ -946,7 +954,24 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     }
   }
 
-  RunOptionalStep(L"incident manifest", out, [&] { LoadIncidentCaptureProfile(dumpPath, outDir, out); });
+  if (!out.is_second_fault_capture) {
+    RunOptionalStep(L"incident manifest", out, [&] { LoadIncidentCaptureProfile(dumpPath, outDir, out); });
+    if (auto& second = out.incident_second_fault; second) {
+      if (const auto idx = minidump::FindModuleIndexForAddress(allModules, second->address)) {
+        const auto& module = allModules[*idx];
+        second->module_plus_offset = minidump::ModulePlusOffsetText(module.filename, second->address - module.base);
+      }
+      if (!second->dump_filename.empty()) {
+        // Written beside A's dump; only its file name counts.
+        const auto name = std::filesystem::path(Utf8ToWide(second->dump_filename)).filename();
+        std::error_code existsEc;
+        second->dump_missing =
+          !name.empty() &&
+          !std::filesystem::exists(skydiag::PathForIo(std::filesystem::path(dumpPath).parent_path() / name), existsEc) &&
+          !existsEc;
+      }
+    }
+  }
   const auto analysisTimestamp = NowIso8601Utc();
   const auto historyPath = ResolveCrashHistoryPath(dumpPath, outDir, opt);
   if (!keepOutOfHistory) {
@@ -979,12 +1004,14 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     blackboxFreezeSummary = internal::BuildBlackboxFreezeSummary(
       out.events,
       (out.state_flags & skydiag::kState_Loading) != 0u,
-      out.blackbox_last_heartbeat_ms);
+      out.blackbox_last_heartbeat_ms,
+      out.second_fault_time_ms);
   }
   out.blackbox_freeze_summary = std::move(blackboxFreezeSummary);
   out.first_chance_summary = internal::BuildFirstChanceSummary(
     out.events,
-    (out.state_flags & skydiag::kState_Loading) != 0u);
+    (out.state_flags & skydiag::kState_Loading) != 0u,
+    out.second_fault_time_ms);
 
   BuildEvidenceAndSummary(out, opt.language);
   FreezeSignalInput freezeSignals{};
@@ -1060,7 +1087,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
   if (out.freeze_analysis.has_analysis) {
     BuildEvidenceAndSummary(out, opt.language);
   }
-  if (!keepOutOfHistory) {
+  if (addToCrashHistory) {
     RunOptionalStep(L"crash history update", out, [&] { AppendCrashHistoryEntry(historyPath, dumpPath, analysisTimestamp, out); });
   }
   if (err) err->clear();

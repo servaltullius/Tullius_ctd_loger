@@ -25,6 +25,57 @@ std::wstring MakeKernelName(std::uint32_t pid, const wchar_t* suffix)
   return name;
 }
 
+void DetachSecondFault(AttachedProcess& proc) noexcept
+{
+  if (proc.secondFaultSettled) {
+    CloseHandle(proc.secondFaultSettled);
+    proc.secondFaultSettled = nullptr;
+  }
+  if (proc.secondFaultPosted) {
+    CloseHandle(proc.secondFaultPosted);
+    proc.secondFaultPosted = nullptr;
+  }
+  if (proc.secondFault) {
+    UnmapViewOfFile(proc.secondFault);
+    proc.secondFault = nullptr;
+  }
+  if (proc.secondFaultMapping) {
+    CloseHandle(proc.secondFaultMapping);
+    proc.secondFaultMapping = nullptr;
+  }
+}
+
+// ADR-0036 is optional: whatever fails here, C++ exceptions included, only
+// turns it off, and v4 attaches as before.
+void AttachSecondFault(AttachedProcess& proc) noexcept
+{
+  namespace fault = skydiag::second_fault;
+  try {
+    proc.secondFaultMapping = OpenFileMappingW(
+      FILE_MAP_READ | FILE_MAP_WRITE, FALSE, MakeKernelName(proc.pid, fault::kMappingSuffix).c_str());
+    if (!proc.secondFaultMapping) {
+      proc.secondFaultAttachError = GetLastError();
+      return;
+    }
+    proc.secondFault = static_cast<fault::Slot*>(MapViewOfFile(
+      proc.secondFaultMapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(fault::Slot)));
+    if (!proc.secondFault) {
+      proc.secondFaultAttachError = GetLastError();
+    } else if (proc.secondFault->magic != fault::kMagic || proc.secondFault->version != fault::kVersion ||
+               proc.secondFault->size != sizeof(fault::Slot)) {
+      proc.secondFaultAttachError = ERROR_REVISION_MISMATCH;
+    } else {
+      proc.secondFaultPosted = OpenEventW(SYNCHRONIZE, FALSE, MakeKernelName(proc.pid, fault::kPostedSuffix).c_str());
+      proc.secondFaultAttachError = proc.secondFaultPosted ? ERROR_SUCCESS : GetLastError();
+    }
+  } catch (...) {
+    proc.secondFaultAttachError = ERROR_NOT_ENOUGH_MEMORY;
+  }
+  if (proc.secondFaultAttachError != ERROR_SUCCESS) {
+    DetachSecondFault(proc);
+  }
+}
+
 bool IEquals(const std::wstring& a, const wchar_t* b)
 {
   if (!b) {
@@ -109,6 +160,7 @@ bool AttachByPid(std::uint32_t pid, AttachedProcess& out, std::wstring* err)
 
   out.pid = pid;
   TryAttachCrashEvent(out, nullptr);
+  AttachSecondFault(out);
   if (err) err->clear();
   return true;
 }
@@ -198,8 +250,44 @@ bool ShouldRetryUnhandledSignalAttach(const AttachedProcess& proc) noexcept
   return proc.unhandledEvent || proc.unhandledEventOpenError != ERROR_FILE_NOT_FOUND;
 }
 
+bool StartSecondFaultSignal(AttachedProcess& proc, const std::filesystem::path& outBase) noexcept
+{
+  if (!proc.secondFault || !proc.secondFaultPosted) {
+    return false;
+  }
+  try {
+    proc.secondFaultOutputBase = outBase;
+    proc.secondFaultSettled = CreateEventW(
+      nullptr, FALSE, FALSE, MakeKernelName(proc.pid, skydiag::second_fault::kSettledSuffix).c_str());
+    if (!proc.secondFaultSettled) {
+      proc.secondFaultAttachError = GetLastError();
+    }
+  } catch (...) {
+    proc.secondFaultAttachError = ERROR_NOT_ENOUGH_MEMORY;
+  }
+  if (!proc.secondFaultSettled) {
+    // Without a consumer the slot is not used: turn the feature off.
+    DetachSecondFault(proc);
+    return false;
+  }
+  return true;
+}
+
+void StopSecondFaultSignal(const AttachedProcess& proc) noexcept
+{
+  if (proc.secondFaultSettled) {
+    CloseHandle(proc.secondFaultSettled);
+    proc.secondFaultSettled = nullptr;
+  }
+}
+
 void Detach(AttachedProcess& p)
 {
+  DetachSecondFault(p);
+  p.secondFaultAttachError = ERROR_SUCCESS;
+  p.secondFaultOutputBase.clear();
+  p.secondFaultRecord.clear();
+  p.secondFaultRetentionPending = false;
   if (p.shm) {
     UnmapViewOfFile(p.shm);
     p.shm = nullptr;

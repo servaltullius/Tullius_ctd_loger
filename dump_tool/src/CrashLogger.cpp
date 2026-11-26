@@ -484,7 +484,8 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   const Mo2Index* mo2Index,
   const std::optional<std::filesystem::path>& gameRootDir,
   std::wstring* err,
-  CrashLoggerPairingMetadata* pairingMetadata)
+  CrashLoggerPairingMetadata* pairingMetadata,
+  bool crashCapture)
 {
   if (pairingMetadata) {
     *pairingMetadata = {};
@@ -535,7 +536,7 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
     std::uint64_t nameTime = 0;  // 0: the time came from the last write
   };
   std::vector<PairCandidate> candidates;
-  const DumpIncidentKind dumpKind = ClassifyDumpIncidentKind(dumpPath);
+  const DumpIncidentKind dumpKind = crashCapture ? DumpIncidentKind::kCrash : ClassifyDumpIncidentKind(dumpPath);
   const std::wstring dumpParentLower = WideLower(dumpPath.parent_path().wstring());
 
   // Preserve search priority while preventing the same physical directory

@@ -9,6 +9,7 @@
 
 #include "SkyrimDiagHelper/Config.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
+#include "SkyrimDiagSecondFault.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::helper {
@@ -58,6 +59,16 @@ struct DumpObjectMemoryStats
   DumpCodeMemoryStats code{};
 };
 
+struct SecondFaultDumpInput
+{
+  const skydiag::second_fault::Slot& slot;
+  skydiag::second_fault::Stream stream;
+  bool holdExpired = false;
+  bool processExited = false;
+  // MiniDumpWriteDump ran (and suspended the game), whatever its result.
+  bool dumpCalled = false;
+};
+
 bool WriteDumpWithStreams(
   HANDLE process,
   std::uint32_t pid,
@@ -70,7 +81,8 @@ bool WriteDumpWithStreams(
   const DumpProfile& dumpProfile,
   bool isProcessSnapshot,
   std::wstring* err,
-  DumpObjectMemoryStats* objectMemory = nullptr);
+  DumpObjectMemoryStats* objectMemory = nullptr,
+  SecondFaultDumpInput* secondFault = nullptr);
 
 // The game's main thread, as the newest SessionStart or Heartbeat event in a
 // blackbox snapshot names it; nullopt when none does.

@@ -280,6 +280,8 @@ HelperConfig LoadConfig(std::wstring* err)
     ini, L"SkyrimDiagHelper", L"MaxHangDumps", 20, 0, 500);
   cfg.maxManualDumps = ReadIniUint32Clamped(
     ini, L"SkyrimDiagHelper", L"MaxManualDumps", 20, 0, 500);
+  cfg.maxSecondFaultDumps = ReadIniUint32Clamped(
+    ini, L"SkyrimDiagHelper", L"MaxSecondFaultDumps", second_fault::kDefaultMaxDumps, 0, second_fault::kMaxDumps);
   cfg.maxEtwTraces = ReadIniUint32Clamped(
     ini, L"SkyrimDiagHelper", L"MaxEtwTraces", 5, 0, 100);
   cfg.maxTotalDumpGB = ReadIniUint32Clamped(

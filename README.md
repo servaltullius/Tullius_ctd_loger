@@ -153,7 +153,8 @@ Helper diagnostics options (`SkyrimDiagHelper.ini`):
 Helper auto-cleans old dumps and artifacts via `SkyrimDiagHelper.ini`:
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = unlimited)
 - `MaxForcedCloseCrashDumps` (default 3, 0 = unlimited): crash dumps of an error while the game was being closed (Alt+F4, the quit menu) are counted apart from `MaxCrashDumps`, so an error at every quit does not push real crash dumps out
-- `MaxTotalDumpGB` (default 5, 0 = unlimited): total size of crash, hang and manual dumps together. Over this size the oldest dumps of any kind are deleted with their reports. Always kept: the latest capture, and the newest capture of each kind for a day (a viewer may still open it). With `DumpAllModuleCode=1` a dump of a large load order takes 0.5–0.9 GB, and with `DumpMode=2` or crash recapture a single dump can take several GB; raise the limit to keep more of those.
+- `MaxSecondFaultDumps` (default 3, range 0–20) limits supplemental dumps and records. If a second unhandled exception reaches the filter while the helper is checking a crash dump it has already written, the helper may save a separate `SkyrimDiag_SecondFault_*.dmp` for you to open in the viewer. Set it to 0 to keep up to three records without writing supplemental dumps.
+- `MaxTotalDumpGB` (default 5, 0 = unlimited) limits the total size of managed dumps. Supplemental dumps go first. The newest crash, hang or manual capture stays, as does the newest of each of those kinds for one day. With `DumpAllModuleCode=1` a dump of a large load order takes 0.5–0.9 GB. With `DumpMode=2` or crash recapture a single dump can take several GB.
 - `MaxHelperLogBytes`, `MaxHelperLogFiles` (log rotation), `MaxHelperSessionLogs` (earlier sessions' logs kept, default 20)
 - Analysis copies under `.skydiag-analysis/` and lock files under `.skydiag-locks/` whose dump is gone are removed after a day. Review state under `.skydiag-triage/` is kept.
 

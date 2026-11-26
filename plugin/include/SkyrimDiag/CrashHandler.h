@@ -309,6 +309,9 @@ constexpr std::uintptr_t SelectFilterUnderOurs(
 // game handled and the helper is still checking. 0 marks a free slot.
 inline constexpr std::size_t kUnrecordedFaultThreadSlotCount = 8;
 
+// ADR-0036 uses a separate, bounded table for candidates that lost Frozen.
+inline constexpr std::size_t kSecondFaultCandidateSlotCount = 8;
+
 // The slot that notes `threadId`: the one it already has, else a free one,
 // else `fallbackSlot` (another thread's note is lost, and that thread is then
 // judged by the record alone, as before).
@@ -388,5 +391,11 @@ void SetUnhandledCrashHoldMs(std::uint32_t holdMs) noexcept;
 // MUST NOT be called from the crash handler: GetModuleHandleW acquires the
 // loader lock, which may already be held by the faulting thread.
 void RefreshCrashLoggerModuleRanges() noexcept;
+
+// ADR-0036: the lookup once every SKSE plugin has loaded (the SKSE lifecycle,
+// from kPostLoad). Only after it, and with a Crash Logger range known, may a
+// top-level filter exception become a second fault. Same context rule as
+// RefreshCrashLoggerModuleRanges.
+void NoteCrashLoggerModuleRangesFinal() noexcept;
 
 }  // namespace skydiag::plugin

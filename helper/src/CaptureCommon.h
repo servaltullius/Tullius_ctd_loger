@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include "GpuDriverEvents.h"
 #include "HelperCommon.h"
 #include "HelperLog.h"
@@ -135,6 +137,8 @@ struct ReleasedDumpContext
   DWORD pid = 0;
   std::uint32_t stateFlags = 0;
   skydiag::helper::DumpProfile writtenProfile{};
+  // ADR-0036: the crash incident's "second_fault", null without one.
+  nlohmann::json secondFault;
 };
 
 inline PluginScanInputs CollectPluginScanInputs(const skydiag::helper::AttachedProcess& proc)

@@ -6,6 +6,10 @@
 
 #include "SkyrimDiagShared.h"
 
+namespace skydiag::second_fault {
+struct Slot;
+}
+
 namespace skydiag::plugin {
 
 bool InitSharedMemory();
@@ -18,6 +22,9 @@ HANDLE GetCrashEvent() noexcept;
 // name is built once at init so the crash path only reads it.
 HANDLE GetUnhandledEvent() noexcept;
 const wchar_t* GetDumpSettledEventName() noexcept;
+second_fault::Slot* GetSecondFaultSlot() noexcept;
+HANDLE GetSecondFaultPostedEvent() noexcept;
+const wchar_t* GetSecondFaultSettledEventName() noexcept;
 // The thread that loaded the plugin, the game main thread (SessionStart's tid).
 std::uint32_t GetMainThreadId() noexcept;
 

@@ -165,6 +165,9 @@ nlohmann::json BuildSummaryJson(
     { "is_slow_shutdown", r.quit_before_freeze.detected },
     { "crash_logger_later_crash", r.crash_logger_later_crash },
   };
+  if (r.is_second_fault_capture) {
+    summary["analysis"]["is_second_fault_capture"] = true;
+  }
   if (r.is_filtered_clean_exit) {
     summary["clean_exit_evidence"] = {
       { "validated", true },
@@ -224,7 +227,8 @@ nlohmann::json BuildSummaryJson(
     { "online_symbol_source_allowed", r.online_symbol_source_allowed },
     { "online_symbol_source_used", r.online_symbol_source_used },
   };
-  const auto incidentManifestPath = FindIncidentManifestForDump(outBase, stem);
+  const auto incidentManifestPath = r.is_second_fault_capture
+    ? std::filesystem::path{} : FindIncidentManifestForDump(outBase, stem);
   nlohmann::json incidentManifest;
   if (!incidentManifestPath.empty() && TryLoadIncidentManifestJson(incidentManifestPath, &incidentManifest)) {
     nlohmann::json artifacts = nlohmann::json::object();
@@ -304,6 +308,20 @@ nlohmann::json BuildSummaryJson(
       { "manifest_path", WideToUtf8(MaybeRedactPath(incidentManifestPath.wstring(), redactPaths)) },
       { "privacy", std::move(privacy) },
     };
+  }
+  if (const auto& second = r.incident_second_fault; second) {
+    auto& fault = summary["incident"]["second_fault"];
+    fault = {
+      { "exception_code", second->code },
+      { "exception_addr", second->address },
+      { "faulting_tid", second->tid },
+      { "resumed", second->resumed },
+    };
+    if (!second->dump_filename.empty()) {
+      fault["dump_filename"] = second->dump_filename;
+    } else {
+      fault["reason"] = second->reason;
+    }
   }
   const auto summaryPath = outBase / (stem + L"_SkyrimDiagSummary.json");
   nlohmann::json triage;
@@ -1096,7 +1114,7 @@ nlohmann::json BuildSummaryJson(
     });
   }
   // Index into "recommendations" of the report's NextAction; -1 when there is none.
-  const auto nextAction = SelectNextActionIndex(r.recommendations);
+  const auto nextAction = SelectNextActionIndex(r.recommendations, r.incident_second_fault.has_value());
   summary["next_action_index"] = nextAction == std::wstring::npos ? -1 : static_cast<int>(nextAction);
 
   if (!r.history_stats.empty()) {

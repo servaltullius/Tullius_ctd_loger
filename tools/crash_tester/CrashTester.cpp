@@ -9,8 +9,8 @@
 //       thread keeps throwing and catching C++ exceptions
 //   F4  main thread held in Sleep inside CrashTester.dll for 45 s (a freeze);
 //       may be pressed again after the game recovers
-//   F5  an access violation CrashTester.dll catches itself, then 2 s later
-//       a real one on a thread of its own
+//   F5  a caught access violation, then a real one on a thread of its own
+//       2 s after the helper settles the first dump
 //   F6  access violation inside SkyrimSE.exe: CrashTester.dll passes a
 //       corrupt reference to the engine's TESObjectREFR::GetDisplayFullName
 //   F7  access violation in CrashTester.dll's menu event sink, called by the
@@ -24,6 +24,7 @@
 //   Home FormID 0x00012EB6 used as a form pointer inside CrashTester.dll
 //   PgUp C++ exception caught by CrashTester.dll, then an access violation
 //       inside the catch block
+//   PgDn same as F5, with both faults on one CrashTester.dll worker thread
 //   Insthe same access violation inside SkyrimSE.exe, caught by
 //       CrashTester.dll, 6 times 15 s apart, on the game's task thread and a
 //       thread of CrashTester.dll in turn; not a crash, may be pressed again
@@ -50,8 +51,12 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 #include <spdlog/sinks/basic_file_sink.h>
+
+#include "../../shared/SkyrimDiagProtocol.h"
+#include "../../shared/SkyrimDiagShared.h"
 
 using namespace std::literals;
 
@@ -306,29 +311,102 @@ void OpenJournalWith(SinkAction action, const char* what)
   });
 }
 
-// Scenario F5: a fatal-code exception the mod handles itself (the helper
-// records it and starts checking it), then a real CTD while it is still
-// checked. The report must be about the second, naming the first (ADR-0017).
+// F5 and PageDown (ADR-0036): the helper writes A's dump and begins checking
+// the caught fault before B reaches the top-level filter.
+constexpr int kCaughtAccessViolation = -1;
+constexpr DWORD kSecondFaultDelayMs = 2000;
+constexpr DWORD kFirstDumpTimeoutMs = 30000;
+
 __declspec(noinline) int CaughtAccessViolation()
 {
   __try {
     volatile std::uint32_t* nowhere = nullptr;
     return static_cast<int>(*nowhere);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    return -1;
+    return kCaughtAccessViolation;
   }
 }
 
-void CaughtThenRealCrash(const char* what)
+bool IsFrozenCrashSequence(const skydiag::SharedHeader& header, std::uint32_t crashSeq)
 {
-  RunOnMainThread(what, [] {
-    spdlog::warn("CrashTester: F5 caught access violation returned {}", CaughtAccessViolation());
+  return (ReadUInt32Acquire(&header.state_flags) & skydiag::kState_Frozen) != 0u &&
+         ReadUInt32Acquire(&header.crash_seq) == crashSeq;
+}
+
+void RunSecondFaultScenario(bool sameThread)
+{
+  using KernelHandle = std::unique_ptr<void, decltype(&CloseHandle)>;
+  using MappingView = std::unique_ptr<void, decltype(&UnmapViewOfFile)>;
+  using namespace skydiag::protocol;
+  const DWORD pid = GetCurrentProcessId();
+  const auto mappingName = MakeKernelName(pid, kKernelObjectSuffix_SharedMemory);
+  const auto settledName = MakeKernelName(pid, kKernelObjectSuffix_DumpSettledEvent);
+  KernelHandle settled(OpenEventW(SYNCHRONIZE, FALSE, settledName.c_str()), &CloseHandle);
+  KernelHandle mapping(OpenFileMappingW(FILE_MAP_READ, FALSE, mappingName.c_str()), &CloseHandle);
+  MappingView view(
+    mapping ? MapViewOfFile(mapping.get(), FILE_MAP_READ, 0, 0, sizeof(skydiag::SharedHeader)) : nullptr,
+    &UnmapViewOfFile);
+
+  const auto abort = [](const char* reason) {
+    spdlog::warn("CrashTester: second-fault scenario stopped: {}", reason);
     spdlog::default_logger()->flush();
-  });
-  std::thread([] {
-    Sleep(2000);
+    g_crashQueued.store(false);
+  };
+  const auto* shared = static_cast<const skydiag::SharedHeader*>(view.get());
+  if (!settled || !shared || shared->magic != skydiag::kMagic || shared->version != skydiag::kVersion) {
+    abort("the v4 crash record or the helper's dump-settled event is unavailable");
+    return;
+  }
+  const auto previousSeq = ReadUInt32Acquire(&shared->crash_seq);
+  if ((previousSeq & 1u) != 0u || (ReadUInt32Acquire(&shared->state_flags) & skydiag::kState_Frozen) != 0u ||
+      WaitForSingleObject(settled.get(), 0) != WAIT_TIMEOUT) {
+    abort("an earlier incident is still active or its dump-settled event is still set");
+    return;
+  }
+
+  const DWORD firstTid = GetCurrentThreadId();
+  const int caught = CaughtAccessViolation();
+  const auto crashSeq = ReadUInt32Acquire(&shared->crash_seq);
+  if (caught != kCaughtAccessViolation || crashSeq == previousSeq || crashSeq == 0u || (crashSeq & 1u) != 0u ||
+      shared->crash.exception_code != EXCEPTION_ACCESS_VIOLATION || shared->crash.faulting_tid != firstTid ||
+      !IsFrozenCrashSequence(*shared, crashSeq)) {
+    abort("the caught access violation did not publish a frozen crash record");
+    return;
+  }
+
+  auto raiseSecondFault = [abort, crashSeq, firstTid, view = std::move(view), settled = std::move(settled)] {
+    const auto& header = *static_cast<const skydiag::SharedHeader*>(view.get());
+    if (WaitForSingleObject(settled.get(), kFirstDumpTimeoutMs) != WAIT_OBJECT_0 ||
+        !IsFrozenCrashSequence(header, crashSeq)) {
+      abort("the helper did not settle the caught fault's dump while its crash record was frozen");
+      return;
+    }
+    Sleep(kSecondFaultDelayMs);
+    if (!IsFrozenCrashSequence(header, crashSeq)) {
+      abort("the helper finished checking the caught fault before the second fault");
+      return;
+    }
+    spdlog::warn("CrashTester: raising the second fault on thread {} after crash_seq={} (first thread {}) settled",
+      GetCurrentThreadId(), crashSeq, firstTid);
+    spdlog::default_logger()->flush();
     CrashOnOwnThread();
-  }).detach();
+  };
+  if (sameThread) {
+    raiseSecondFault();
+  } else {
+    std::thread(std::move(raiseSecondFault)).detach();
+  }
+}
+
+void CaughtThenRealCrash(const char* what, bool sameThread)
+{
+  if (sameThread) {
+    spdlog::warn("CrashTester: {}", what);
+    spdlog::default_logger()->flush();
+    std::thread(RunSecondFaultScenario, true).detach();
+  } else {
+    RunOnMainThread(what, [] { RunSecondFaultScenario(false); });
+  }
 }
 
 // Scenario Insert: the same fatal-code exception at the same address, handled
@@ -600,6 +678,7 @@ void HotkeyLoop(const std::stop_token& stop)
   bool endWasDown = false;
   bool homeWasDown = false;
   bool pageUpWasDown = false;
+  bool pageDownWasDown = false;
   while (!stop.stop_requested()) {
     const bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -637,6 +716,9 @@ void HotkeyLoop(const std::stop_token& stop)
     const bool pageUpDown = (GetAsyncKeyState(VK_PRIOR) & 0x8000) != 0;
     const bool pageUp = pageUpDown && !pageUpWasDown;
     pageUpWasDown = pageUpDown;
+    const bool pageDownDown = (GetAsyncKeyState(VK_NEXT) & 0x8000) != 0;
+    const bool pageDown = pageDownDown && !pageDownWasDown;
+    pageDownWasDown = pageDownDown;
     if (ctrl && shift) {
       if (insert && !g_repeatRunning.exchange(true)) {
         RepeatHandledEngineFault(
@@ -657,7 +739,10 @@ void HotkeyLoop(const std::stop_token& stop)
         }
       }
       if (f5 && !g_crashQueued.exchange(true)) {
-        CaughtThenRealCrash("F5 caught access violation, a real one 2 s later");
+        CaughtThenRealCrash("F5 caught access violation, then a real one on a different thread", false);
+      }
+      if (pageDown && !g_crashQueued.exchange(true)) {
+        CaughtThenRealCrash("PageDown caught access violation, then a real one on the same thread", true);
       }
       if (end && !g_crashQueued.exchange(true)) {
         RunOnMainThread("End call through an empty function pointer", [] { CallEmptyFunctionPointer(); });
@@ -708,10 +793,10 @@ std::jthread* g_hotkeys = nullptr;
 
 // ---- unattended runs (CrashTester.ini next to the DLL) ----
 // [CrashTester]
-// AutoScenario=1..15 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
+// AutoScenario=1..16 (1: freeze twice, then F1 on the nearest NPC; 2: F2;
 //                     3: F3; 4: F6; 5: F7; 6: F8; 7: F9; 8: F10; 9: F11;
 //                     10: F5; 11: Insert; 12: Delete; 13: End; 14: Home;
-//                     15: PageUp).
+//                     15: PageUp; 16: PageDown).
 //                     0 or missing: hotkeys only.
 // SaveName=<save file name without .ess>, loaded from the main menu
 // StartDelaySec=20   seconds after the save has loaded
@@ -860,7 +945,9 @@ void RunAutoScenario()
     OpenJournalWith(SinkAction::kHold, "auto F11 Journal Menu event sink held for 45 s");
     break;
   case 10:
-    CaughtThenRealCrash("auto F5 caught access violation, a real one 2 s later");
+    if (!g_crashQueued.exchange(true)) {
+      CaughtThenRealCrash("auto F5 caught access violation, then a real one on a different thread", false);
+    }
     break;
   case 11:
     if (!g_repeatRunning.exchange(true)) {
@@ -882,6 +969,11 @@ void RunAutoScenario()
     break;
   case 15:
     RunOnMainThread("auto PageUp access violation inside a C++ catch block", [] { ThrowCaughtThenAccessViolation(); });
+    break;
+  case 16:
+    if (!g_crashQueued.exchange(true)) {
+      CaughtThenRealCrash("auto PageDown caught access violation, then a real one on the same thread", true);
+    }
     break;
   default:
     break;
@@ -947,10 +1039,11 @@ SKSEPluginLoad(const SKSE::LoadInterface* skse)
     spdlog::set_default_logger(std::make_shared<spdlog::logger>("CrashTester", std::move(sink)));
   }
   g_auto = ReadAutoConfig();
-  spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, F6 engine fault, "
+  spdlog::warn("CrashTester loaded: Ctrl+Shift+F1 AV, F2 breakpoint, F3 C++ exception, F4 freeze 45 s, "
+               "F5 second fault on another thread, F6 engine fault, "
                "F7 event sink AV, F8 own-thread AV, F9 stack overflow, F10 spin freeze, F11 event sink freeze, "
                "End empty function pointer call, Home FormID used as a form pointer, "
-               "PageUp AV in catch block, "
+               "PageUp AV in catch block, PageDown second fault on the same thread, "
                "Insert repeated handled AV ({} times, {} s apart), Delete handled AV twice then unhandled "
                "(top-level filter hold {} ms); AutoScenario={} SaveName={}",
     g_repeatCount.load(), g_repeatIntervalSec.load(), g_unhandledHoldMs.load(), g_auto.scenario, g_auto.saveName);

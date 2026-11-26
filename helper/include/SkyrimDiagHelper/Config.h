@@ -86,8 +86,9 @@ struct HelperConfig {
   std::uint32_t maxForcedCloseCrashDumps = 3;
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
+  std::uint32_t maxSecondFaultDumps = second_fault::kDefaultMaxDumps;
   std::uint32_t maxEtwTraces = 5;
-  // Crash, freeze and manual dumps together, in GiB.
+  // All managed dumps together, in GiB.
   std::uint32_t maxTotalDumpGB = 5;
 
   // Helper log rotation (0 = unlimited/disabled)
@@ -130,6 +131,7 @@ inline RetentionLimits RetentionLimitsFromConfig(const HelperConfig& cfg)
   limits.maxForcedCloseCrashDumps = cfg.maxForcedCloseCrashDumps;
   limits.maxHangDumps = cfg.maxHangDumps;
   limits.maxManualDumps = cfg.maxManualDumps;
+  limits.maxSecondFaultDumps = cfg.maxSecondFaultDumps;
   limits.maxEtwTraces = cfg.maxEtwTraces;
   limits.maxTotalDumpGB = cfg.maxTotalDumpGB;
   return limits;

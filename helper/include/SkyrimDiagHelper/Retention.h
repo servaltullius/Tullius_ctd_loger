@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "SkyrimDiagLongPath.h"
+#include "SkyrimDiagSecondFault.h"
 
 namespace skydiag::helper {
 
@@ -80,8 +81,9 @@ struct RetentionLimits {
   std::uint32_t maxForcedCloseCrashDumps = 3;
   std::uint32_t maxHangDumps = 20;
   std::uint32_t maxManualDumps = 20;
+  std::uint32_t maxSecondFaultDumps = second_fault::kDefaultMaxDumps;
   std::uint32_t maxEtwTraces = 5;
-  // Crash, freeze and manual dumps together, in GiB.
+  // All managed dumps together, in GiB.
   std::uint32_t maxTotalDumpGB = 5;
 };
 
@@ -299,6 +301,12 @@ inline void RemoveDumpAndArtifacts(
     std::filesystem::remove(PathForIo(etl), ec);
   }
 
+  if (dumpPrefix == second_fault::kFilePrefix && p.extension() == ".dmp") {
+    auto record = p;
+    record.replace_extension(".json");
+    std::filesystem::remove(PathForIo(record), ec);
+  }
+
   if (!incidentKind.empty()) {
     auto it = tsRefs.find(dump.ts);
     if (it != tsRefs.end()) {
@@ -492,6 +500,65 @@ struct DumpKindFiles {
 inline constexpr DumpKindFiles kCrashDumpFiles{ "SkyrimDiag_Crash_", false, false, true };
 inline constexpr DumpKindFiles kHangDumpFiles{ "SkyrimDiag_Hang_", true, false, true };
 inline constexpr DumpKindFiles kManualDumpFiles{ "SkyrimDiag_Manual_", false, true, false };
+inline constexpr DumpKindFiles kSecondFaultDumpFiles{ second_fault::kFilePrefix, false, false, false };
+
+// A second fault's own files are <prefix><ts> or <prefix><ts>-<n> (the helper's
+// NewSecondFaultStem), so the "<stem>_" sweep of one never takes another's.
+inline bool IsSecondFaultCaptureStem(std::string_view stem, std::string_view ts)
+{
+  const std::string head = std::string(second_fault::kFilePrefix) + std::string(ts);
+  if (!StartsWith(stem, head)) {
+    return false;
+  }
+  const auto rest = stem.substr(head.size());
+  return rest.empty() ||
+         (rest.size() >= 2u && rest[0] == '-' && rest.find_first_not_of("0123456789", 1) == std::string_view::npos);
+}
+
+// A second fault dump being written (SkyrimDiag_SecondFault_<ts>.dmp.partial)
+// is renamed when it is complete. One this old was left by a helper that
+// stopped while writing it.
+inline constexpr std::chrono::minutes kAbandonedPartialDumpAge{ 10 };
+
+inline void PruneSecondFaultsByCount(
+  const std::filesystem::path& dir,
+  const std::vector<std::filesystem::path>& files,
+  std::uint32_t maxDumps)
+{
+  const auto dumps = CollectFilesByPrefixAndExt(files, kSecondFaultDumpFiles.prefix, ".dmp");
+  auto records = CollectFilesByPrefixAndExt(files, kSecondFaultDumpFiles.prefix, ".json");
+  std::unordered_set<std::filesystem::path> dumpStems;
+  for (const auto& dump : dumps) {
+    dumpStems.insert(dump.path.stem());
+  }
+  std::erase_if(records, [&](const DatedFile& record) {
+    // Only the capture record is named as a capture. Other files ending in
+    // .json are analysis artifacts and do not take their own place, and a
+    // dump's record goes with its dump.
+    return !IsSecondFaultCaptureStem(PathPartUtf8(record.path.stem()), record.ts) ||
+           dumpStems.contains(record.path.stem());
+  });
+
+  auto refs = BuildTimestampRefCounts(dumps);
+  if (maxDumps == 0) {
+    for (const auto& dump : dumps) {
+      RemoveDumpAndArtifacts(dir, dump, kSecondFaultDumpFiles.prefix, refs, false, false, false, &files);
+    }
+    // Recording is still enabled when the user disables dump writes.
+    maxDumps = second_fault::kDefaultMaxDumps;
+  } else {
+    records.insert(records.end(), dumps.begin(), dumps.end());
+    std::sort(records.begin(), records.end(), [](const DatedFile& a, const DatedFile& b) {
+      if (a.ts != b.ts) {
+        return a.ts > b.ts;
+      }
+      return a.path < b.path;
+    });
+  }
+  for (std::size_t i = maxDumps; i < records.size(); ++i) {
+    RemoveDumpAndArtifacts(dir, records[i], kSecondFaultDumpFiles.prefix, refs, false, false, false, &files);
+  }
+}
 
 // The count limits bound each kind, but a dump of a large load order is
 // 0.5-0.9 GB (it holds the code of every loaded module), so the default
@@ -536,9 +603,6 @@ inline void PruneDumpsOverTotalBytes(
       all.push_back(SizedDump{ dump, k, sizeEc ? 0u : static_cast<std::uint64_t>(size) });
     }
   }
-  if (all.empty()) {
-    return;
-  }
   std::sort(all.begin(), all.end(), [](const SizedDump& a, const SizedDump& b) {
     if (a.dump.ts != b.dump.ts) {
       return a.dump.ts > b.dump.ts;
@@ -546,7 +610,7 @@ inline void PruneDumpsOverTotalBytes(
     return PathPartUtf8(a.dump.path.filename()) < PathPartUtf8(b.dump.path.filename());
   });
 
-  const auto latestTs = all.front().dump.ts;
+  const auto latestTs = all.empty() ? std::string{} : all.front().dump.ts;
   const auto now = std::filesystem::file_time_type::clock::now();
   const auto alwaysKept = [&](const SizedDump& entry) {
     if (entry.dump.ts != newestOfKind[entry.kind]) {
@@ -570,12 +634,48 @@ inline void PruneDumpsOverTotalBytes(
     }
   }
   bool full = false;
+  std::vector<const SizedDump*> overLimit;
   for (const auto* entry : rest) {
     if (!full && total + entry->bytes <= maxTotalBytes) {
       total += entry->bytes;
       continue;
     }
     full = true;
+    overLimit.push_back(entry);
+  }
+
+  // Second faults never displace the other kinds and never get newest
+  // protection. Delete them first when there is a budget shortfall. A dump
+  // still being written (.dmp.partial) takes its bytes too; one is deleted
+  // only once it is old enough to be abandoned.
+  auto secondFaultDumps = CollectFilesByPrefixAndExt(files, kSecondFaultDumpFiles.prefix, ".dmp");
+  auto secondFaultRefs = BuildTimestampRefCounts(secondFaultDumps);
+  const auto partialDumps = CollectFilesByPrefixAndExt(files, kSecondFaultDumpFiles.prefix, ".dmp.partial");
+  secondFaultDumps.insert(secondFaultDumps.end(), partialDumps.begin(), partialDumps.end());
+  std::stable_sort(secondFaultDumps.begin(), secondFaultDumps.end(), [](const DatedFile& a, const DatedFile& b) {
+    return a.ts > b.ts;
+  });
+  for (const auto& dump : secondFaultDumps) {
+    std::error_code sizeEc;
+    const auto size = FileSizeForIo(dump.path, sizeEc);
+    const auto bytes = sizeEc ? 0u : static_cast<std::uint64_t>(size);
+    if (!full && total + bytes <= maxTotalBytes) {
+      total += bytes;
+      continue;
+    }
+    full = true;
+    if (EndsWith(PathPartUtf8(dump.path.filename()), ".dmp.partial")) {
+      std::error_code timeEc;
+      const auto written = LastWriteTimeForIo(dump.path, timeEc);
+      if (!timeEc && now - written >= kAbandonedPartialDumpAge) {
+        std::error_code removeEc;
+        std::filesystem::remove(PathForIo(dump.path), removeEc);
+      }
+      continue;
+    }
+    RemoveDumpAndArtifacts(dir, dump, kSecondFaultDumpFiles.prefix, secondFaultRefs, false, false, false, &files);
+  }
+  for (const auto* entry : overLimit) {
     const auto& kind = *kinds[entry->kind];
     RemoveDumpAndArtifacts(
       dir,
@@ -669,6 +769,8 @@ inline void PruneOrphanedAnalysisCaches(
 //   size. Nothing writes one since ADR-0031 took that rewrite out; the ones
 //   older than partialMinAge go (the age is from when a rewrite could still
 //   be in progress).
+// - SkyrimDiag_SecondFault_<ts>.dmp.partial, a second fault dump (ADR-0036)
+//   whose helper stopped while writing it (kAbandonedPartialDumpAge).
 // - SkyrimDiag_CrashRearm_<...>.marker, a crash generation signaled again for
 //   a restarted helper (HelperMain RearmFrozenCrashFromEarlierHelper),
 //   deleted when its game exits. A day old, that game is long gone.
@@ -718,9 +820,11 @@ inline void PruneHelperLeftovers(
     const auto name = PathPartUtf8(file.filename());
     const bool partialDump = StartsWith(name, "SkyrimDiag_Crash_") && EndsWith(name, ".dmp.full.tmp") &&
       olderThan(file, partialMinAge);
+    const bool partialSecondFault = StartsWith(name, second_fault::kFilePrefix) && EndsWith(name, ".dmp.partial") &&
+      olderThan(file, kAbandonedPartialDumpAge);
     const bool staleMarker = StartsWith(name, "SkyrimDiag_CrashRearm_") && EndsWith(name, ".marker") &&
       olderThan(file, heldMaxAge);
-    if (partialDump || staleMarker) {
+    if (partialDump || partialSecondFault || staleMarker) {
       std::filesystem::remove(PathForIo(file), ec);
     }
   }
@@ -757,6 +861,7 @@ inline void ApplyRetentionToOutputDir(const std::filesystem::path& outBase, cons
     kCrashDumpFiles.deleteEtlForStem);
   pruneByCount(kHangDumpFiles, limits.maxHangDumps);
   pruneByCount(kManualDumpFiles, limits.maxManualDumps);
+  PruneSecondFaultsByCount(outBase, files, limits.maxSecondFaultDumps);
   PruneDumpsOverTotalBytes(outBase, static_cast<std::uint64_t>(limits.maxTotalDumpGB) << 30u);
 
   // The steps above deleted dumps with their traces; a trace already gone

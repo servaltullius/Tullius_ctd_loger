@@ -54,7 +54,8 @@ std::uint64_t FirstChanceSignature(const EventRow& event, const std::wstring& mo
 
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,
-  bool loadingContext)
+  bool loadingContext,
+  std::optional<double> captureMs)
 {
   FirstChanceSummary summary{};
   if (events.empty()) {
@@ -66,12 +67,12 @@ FirstChanceSummary BuildFirstChanceSummary(
     maxMs = std::max(maxMs, event.t_ms);
   }
   const double windowMs = loadingContext ? 8000.0 : 5000.0;
-  const double cutoffMs = std::max(0.0, maxMs - windowMs);
+  const double cutoffMs = std::max(0.0, captureMs.value_or(maxMs) - windowMs);
 
   std::unordered_map<std::uint64_t, std::uint32_t> signatureHits;
   std::unordered_map<std::wstring, std::uint32_t> moduleHits;
   for (const auto& event : events) {
-    if (event.t_ms < cutoffMs) {
+    if (event.t_ms < cutoffMs || (captureMs && event.t_ms > *captureMs)) {
       continue;
     }
     if (event.type != static_cast<std::uint16_t>(skydiag::EventType::kFirstChanceException)) {

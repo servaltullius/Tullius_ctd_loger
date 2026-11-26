@@ -148,6 +148,14 @@ void RunHelperLoop(
     return;
   }
 
+  if (!StartSecondFaultSignal(proc, outBase)) {
+    try {
+      AppendLogLine(outBase, L"Second fault capture is unavailable (error=" +
+        std::to_wstring(proc.secondFaultAttachError) + L").");
+    } catch (...) {  // NOLINT(bugprone-empty-catch): the optional feature's log line must not stop capture
+    }
+  }
+
   for (;;) {
     PumpManualCaptureInputs(cfg, proc, outBase, loadStats, *adaptiveLoadingThresholdSec);
 
@@ -158,7 +166,7 @@ void RunHelperLoop(
     // handle and crash event commonly become signaled in the same scheduler
     // slice; giving the event first chance preserves the live address space
     // for MiniDumpWriteDump whenever Windows has not torn it down yet.
-    if (HandleCrashEventTick(
+    const bool handledCrash = HandleCrashEventTick(
           cfg,
           proc,
           outBase,
@@ -168,7 +176,9 @@ void RunHelperLoop(
           &state->pendingCrashAnalysis,
           &state->capturedCrashDumpPath,
           &state->pendingHangViewerDumpPath,
-          &state->pendingCrashViewerDumpPath)) {
+          &state->pendingCrashViewerDumpPath);
+    DrainSecondFault(cfg, proc, outBase, state->crashCaptured);
+    if (handledCrash) {
       continue;
     }
     // After the crash event's first chance: a wpr call here can block for a
@@ -228,7 +238,7 @@ void RunHelperLoop(
     }
 
     const DWORD waitMs = 250;
-    if (HandleCrashEventTick(
+    const bool handledCrashAfterWait = HandleCrashEventTick(
           cfg,
           proc,
           outBase,
@@ -238,7 +248,9 @@ void RunHelperLoop(
           &state->pendingCrashAnalysis,
           &state->capturedCrashDumpPath,
           &state->pendingHangViewerDumpPath,
-          &state->pendingCrashViewerDumpPath)) {
+          &state->pendingCrashViewerDumpPath);
+    DrainSecondFault(cfg, proc, outBase, state->crashCaptured);
+    if (handledCrashAfterWait) {
       continue;
     }
     if (proc.shm && ShouldHoldHangDetectionForCapturedCrash(
@@ -272,6 +284,11 @@ void ShutdownLoopState(
     return;
   }
 
+  // ADR-0036: settle any B and stop answering for the feature, then settle a
+  // B posted in between, which the plugin sees by the slot's state alone.
+  DrainSecondFault(cfg, proc, outBase, state->crashCaptured, SecondFaultDrain::kHelperStopping);
+  StopSecondFaultSignal(proc);
+  DrainSecondFault(cfg, proc, outBase, state->crashCaptured, SecondFaultDrain::kHelperStopping);
   MaybeStopPendingCrashEtwCapture(cfg, proc, outBase, /*force=*/true, &state->pendingCrashEtw);
   MaybeFinalizePendingHangEtwCapture(cfg, outBase, /*force=*/true, &state->hangState.pendingEtw);
   // Left by a helper that stops before the game's exit settled it.

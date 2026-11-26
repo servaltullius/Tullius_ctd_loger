@@ -15,6 +15,7 @@
 #include "SkyrimDiag/CloseRequestHooks.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagCrashCodes.h"
+#include "SkyrimDiagSecondFault.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::plugin {
@@ -66,6 +67,7 @@ struct PublishOnceModuleRange
 
 PublishOnceModuleRange g_crashLoggerRange{};
 PublishOnceModuleRange g_crashLoggerSseRange{};
+std::atomic<bool> g_crashLoggerRangesPublished{false};
 
 constexpr std::uint32_t kFirstChancePerSecondLimit = 8;
 
@@ -140,6 +142,11 @@ std::atomic<std::uint32_t> g_publishedFaultThreads[kUnrecordedFaultThreadSlotCou
 std::atomic<std::uintptr_t> g_publishedFaultRecords[kUnrecordedFaultThreadSlotCount]{};
 std::atomic<std::uint32_t> g_publishedFaultSeqs[kUnrecordedFaultThreadSlotCount]{};
 std::atomic<std::uint32_t> g_publishedFaultFallbackSlot{ 0 };
+
+// ADR-0036: the fatal exceptions that lost Frozen, by thread (CandidateTable).
+static_assert(second_fault::CandidateTable::kCount == kSecondFaultCandidateSlotCount);
+second_fault::CandidateTable g_secondFaultCandidates{};
+
 using AbortSignalHandlerFn = void(__cdecl*)(int);
 std::atomic<AbortSignalHandlerFn> g_previousAbortSignalHandler{ nullptr };
 
@@ -185,6 +192,22 @@ std::uint64_t QpcNow() noexcept
   LARGE_INTEGER li{};
   QueryPerformanceCounter(&li);
   return static_cast<std::uint64_t>(li.QuadPart);
+}
+
+// A still holds Frozen at the generation a B candidate lost to.
+bool OwnsSecondFaultGeneration(const skydiag::SharedLayout* shm, std::uint32_t seq) noexcept
+{
+  return IsCrashCaptureFrozen(shm) && shm->header.crash_seq == seq;
+}
+
+// seq == 0 forgets this thread's candidate for record.
+void NoteSecondFaultCandidate(
+  const skydiag::SharedLayout* shm, const EXCEPTION_RECORD* record, std::uint32_t seq) noexcept
+{
+  (void)g_secondFaultCandidates.Note(
+    GetCurrentThreadId(), record, seq, [shm](std::uint32_t stored) noexcept {
+      return OwnsSecondFaultGeneration(shm, stored);
+    });
 }
 
 bool IsBenignFirstChanceException(DWORD code) noexcept
@@ -311,11 +334,21 @@ void NoteFaultPublished(const EXCEPTION_RECORD* record, std::uint32_t crashSeq) 
   g_publishedFaultThreads[slot].store(tid, std::memory_order_release);
 }
 
+enum class CrashPublishFailure
+{
+  kOther,
+  kFrozen,
+};
+
 bool TryPublishCrashRecord(
   skydiag::SharedLayout* shm,
   const EXCEPTION_POINTERS* ep,
-  DWORD code) noexcept
+  DWORD code,
+  CrashPublishFailure* failure = nullptr) noexcept
 {
+  if (failure) {
+    *failure = CrashPublishFailure::kOther;
+  }
   if (!shm || !ep || !ep->ExceptionRecord || !ep->ContextRecord) {
     return false;
   }
@@ -324,6 +357,9 @@ bool TryPublishCrashRecord(
   // every later exception observes Frozen and leaves this record untouched
   // until the helper explicitly ACKs/rearms by clearing Frozen.
   if (!skydiag::TryClaimCrashIncidentOwnership(&shm->header.state_flags)) {
+    if (failure) {
+      *failure = CrashPublishFailure::kFrozen;
+    }
     return false;
   }
 
@@ -456,7 +492,8 @@ bool TryPublishThreadKeptException(
   skydiag::SharedLayout* shm,
   Accept accept,
   DWORD* outCode,
-  std::uint64_t* outAddress) noexcept
+  std::uint64_t* outAddress,
+  bool* recognizedKept = nullptr) noexcept
 {
   const DWORD tid = GetCurrentThreadId();
   auto* const slot = FindKeptException(tid);
@@ -470,6 +507,9 @@ bool TryPublishThreadKeptException(
   bool published = false;
   const DWORD keptTid = kept.tid.load(std::memory_order_relaxed);
   if (accept(kept, keptTid)) {
+    if (recognizedKept) {
+      *recognizedKept = true;
+    }
     EXCEPTION_POINTERS keptPointers{ &kept.record, &kept.context };
     published = TryPublishCrashRecord(shm, &keptPointers, kept.record.ExceptionCode);
     if (published) {
@@ -554,7 +594,8 @@ bool TryPublishKeptExceptionForCrashLoggerSideFault(
   skydiag::SharedLayout* shm,
   const CONTEXT* faultContext,
   DWORD* outCode,
-  std::uint64_t* outAddress) noexcept
+  std::uint64_t* outAddress,
+  bool* recognizedKept) noexcept
 {
   if (g_crashHookMode != 1) {
     return false;
@@ -567,7 +608,8 @@ bool TryPublishKeptExceptionForCrashLoggerSideFault(
              IsCrashLoggerReportingKeptException(static_cast<std::uintptr_t>(faultContext->Rsp), kept);
     },
     outCode,
-    outAddress);
+    outAddress,
+    recognizedKept);
 }
 
 // Signals the helper about a crash record published outside the vectored
@@ -657,6 +699,7 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
     // std::filesystem telemetry are unsafe with a corrupt heap or low stack.
     DWORD recordedCode = code;
     auto recordedAddress = static_cast<std::uint64_t>(exceptionAddress);
+    const bool canNoteSecondFault = g_crashHookMode == 1 && code != EXCEPTION_STACK_OVERFLOW && GetSecondFaultPostedEvent();
     if (IsInCrashLoggerModule(exceptionAddress, g_crashLoggerRange.Load(), g_crashLoggerSseRange.Load())) {
       // CrashLogger's own probe faults are never the crash (see
       // ClassifyCrashLoggerFault): record the exception it is reporting if
@@ -665,11 +708,29 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
         NoteFaultRecorded(false, ep->ExceptionRecord);
         return EXCEPTION_CONTINUE_SEARCH;
       }
-    } else if (
-      !TryPublishKeptExceptionForCrashLoggerSideFault(shm, ep->ContextRecord, &recordedCode, &recordedAddress) &&
-      !TryPublishCrashRecord(shm, ep, code)) {
-      NoteFaultRecorded(false, ep->ExceptionRecord);
-      return EXCEPTION_CONTINUE_SEARCH;
+    } else {
+      bool recognizedKept = false;
+      if (!TryPublishKeptExceptionForCrashLoggerSideFault(
+            shm, ep->ContextRecord, &recordedCode, &recordedAddress, &recognizedKept)) {
+        const auto seq = canNoteSecondFault ? shm->header.crash_seq : 0u;
+        CrashPublishFailure failure{};
+        const bool published = canNoteSecondFault
+          ? TryPublishCrashRecord(shm, ep, code, &failure)
+          : TryPublishCrashRecord(shm, ep, code);
+        if (!published) {
+          if (canNoteSecondFault) {
+            // A non-candidate forgets an earlier candidate of this thread
+            // with the same record, which is not the exception reaching the
+            // filter now. A published exception needs no such step: its new
+            // generation already makes every stored one over.
+            const bool candidate = second_fault::IsSecondFaultCandidate(
+              failure == CrashPublishFailure::kFrozen, recognizedKept, seq, shm->header.crash_seq);
+            NoteSecondFaultCandidate(shm, ep->ExceptionRecord, candidate ? seq : 0u);
+          }
+          NoteFaultRecorded(false, ep->ExceptionRecord);
+          return EXCEPTION_CONTINUE_SEARCH;
+        }
+      }
     }
     // The record is this thread's now (ADR-0032, IsThisThreadsFaultUnrecorded).
     NoteFaultRecorded(true, ep->ExceptionRecord);
@@ -781,6 +842,85 @@ bool SignalUnhandledAndHold(const skydiag::SharedLayout* shm, const EXCEPTION_RE
   return true;
 }
 
+// ADR-0036: posts this fatal exception as A's B and holds the thread until the
+// helper settles it or the hold runs out. entryQpc is when the thread reached
+// the filter, before the filter's own slot wait: B's time and the start of its
+// hold. Returns the generation posted for, 0 when none.
+std::uint32_t PublishSecondFaultAndHold(
+  const skydiag::SharedLayout* shm, const EXCEPTION_POINTERS* ep, DWORD tid, std::uint64_t entryQpc) noexcept
+{
+  const auto* record = ep->ExceptionRecord;
+  if (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW || !IsFatalExceptionCode(record->ExceptionCode) ||
+      !g_crashLoggerRangesPublished.load(std::memory_order_acquire)) {
+    return 0;
+  }
+
+  const auto address = reinterpret_cast<std::uintptr_t>(record->ExceptionAddress);
+  if (IsInCrashLoggerModule(address, g_crashLoggerRange.Load(), g_crashLoggerSseRange.Load())) {
+    return 0;
+  }
+  const auto seq = g_secondFaultCandidates.Take(tid, record);
+  if (seq == 0 || !OwnsSecondFaultGeneration(shm, seq)) {
+    return 0;
+  }
+
+  auto* const slot = GetSecondFaultSlot();
+  const HANDLE posted = GetSecondFaultPostedEvent();
+  if (!slot || !posted) {
+    return 0;
+  }
+  const HANDLE settled = OpenEventW(SYNCHRONIZE, FALSE, GetSecondFaultSettledEventName());
+  if (!settled) {
+    return 0;
+  }
+
+  const auto claim = second_fault::ClaimSlot(*slot, seq, [shm, seq]() noexcept {
+    return OwnsSecondFaultGeneration(shm, seq);
+  });
+  if (claim != second_fault::SlotClaim::kClaimed) {
+    if (claim == second_fault::SlotClaim::kGenerationEnded) {
+      // The helper let A go between the first check and the claim: it
+      // empties the settled slot, which carries no exception.
+      SetEvent(posted);
+    }
+    CloseHandle(settled);
+    return 0;
+  }
+
+  const auto holdMs = g_unhandledCrashHoldMs.load(std::memory_order_relaxed);
+  const auto freq = shm->header.qpc_freq;
+  const auto holdUntil = entryQpc + (freq * holdMs) / 1000u;
+  slot->tid = tid;
+  slot->code = record->ExceptionCode;
+  slot->address = address;
+  slot->qpc = entryQpc;
+  slot->hold_until_qpc = holdUntil;
+  std::memcpy(&slot->exception_record, record, sizeof(EXCEPTION_RECORD));
+  std::memcpy(&slot->context, ep->ContextRecord, sizeof(CONTEXT));
+  InterlockedExchange(&slot->state, second_fault::kPosted);
+  SetEvent(posted);
+
+  // The settled event is auto-reset and shared by every B of the session, so
+  // the slot itself says when this B is settled: looked at after each slice.
+  while (holdMs != 0 && freq != 0) {
+    if (second_fault::ReadState(*slot) != second_fault::kPosted || second_fault::ReadOwner(*slot) != seq) {
+      break;
+    }
+    const auto now = QpcNow();
+    if (now >= holdUntil) {
+      break;
+    }
+    const auto remainingMs = ((holdUntil - now) * 1000u + freq - 1) / freq;
+    const auto sliceMs = static_cast<DWORD>((std::min)(remainingMs, std::uint64_t{second_fault::kHoldSliceMs}));
+    const DWORD wait = WaitForSingleObject(settled, sliceMs);
+    if (wait != WAIT_OBJECT_0 && wait != WAIT_TIMEOUT) {
+      break;
+    }
+  }
+  CloseHandle(settled);
+  return seq;
+}
+
 // Top-level filter, chained in front of the previous one. Windows calls it
 // only for an exception that no frame handler took, right before the process
 // ends. In fatal-only mode the vectored handler skips C++ throws, breakpoints
@@ -793,6 +933,8 @@ LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
   // ADR-0032: a filter under ours may call the top-level filter again. Record
   // and report once per thread; a call from inside the filter only goes on
   // down the chain (SelectFilterUnderOurs).
+  // ADR-0036: B's time is when it got here, before any wait for a slot below.
+  const auto entryQpc = QpcNow();
   const DWORD tid = GetCurrentThreadId();
   std::size_t slot = kTopLevelFilterThreadSlotCount;
   auto entry = TopLevelFilterEntry::kNoSlot;
@@ -833,6 +975,7 @@ LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
   g_topLevelFilterDepth[slot] = 0u;
 
   bool unhandledSignaled = false;
+  std::uint32_t secondFaultSeq = 0;
   auto* shm = GetShared();
   if (shm && ep && ep->ExceptionRecord && ep->ContextRecord && g_crashHookMode == 1) {
     const DWORD code = ep->ExceptionRecord->ExceptionCode;
@@ -848,6 +991,7 @@ LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
     if (code != EXCEPTION_STACK_OVERFLOW && !(ShouldRecordException(code) && IsThisThreadsFaultUnrecorded(ep->ExceptionRecord))) {
       unhandledSignaled = SignalUnhandledAndHold(shm, ep->ExceptionRecord);
     }
+    secondFaultSeq = PublishSecondFaultAndHold(shm, ep, tid, entryQpc);
   }
   const auto previous =
     reinterpret_cast<LPTOP_LEVEL_EXCEPTION_FILTER>(SelectFilterUnderOurs(lastDisplaced, presentAtInstall, 0u));
@@ -858,6 +1002,11 @@ LONG WINAPI UnhandledExceptionFilterHook(EXCEPTION_POINTERS* ep) noexcept
     // progress (its late recovery waits while the signal is set).
     if (const HANDLE unhandled = GetUnhandledEvent()) {
       ResetEvent(unhandled);
+    }
+  }
+  if (secondFaultSeq != 0 && result == EXCEPTION_CONTINUE_EXECUTION) {
+    if (auto* secondFault = GetSecondFaultSlot()) {
+      second_fault::MarkResumed(*secondFault, secondFaultSeq);
     }
   }
   g_topLevelFilterThreads[slot].store(0u, std::memory_order_release);
@@ -954,6 +1103,18 @@ void RefreshCrashLoggerModuleRanges() noexcept
   // never run from VectoredHandler.
   g_crashLoggerRange.PublishOnce(QueryLoadedModuleRange(L"CrashLogger.dll"));
   g_crashLoggerSseRange.PublishOnce(QueryLoadedModuleRange(L"CrashLoggerSSE.dll"));
+}
+
+void NoteCrashLoggerModuleRangesFinal() noexcept
+{
+  // ADR-0036: B is recorded only outside a known Crash Logger image, so only
+  // once both names were looked up with every SKSE plugin loaded. A range
+  // known from the install-time lookup alone could leave the other name's
+  // image, loaded later, outside every known range.
+  RefreshCrashLoggerModuleRanges();
+  if (g_crashLoggerRange.IsPublished() || g_crashLoggerSseRange.IsPublished()) {
+    g_crashLoggerRangesPublished.store(true, std::memory_order_release);
+  }
 }
 
 void SetUnhandledCrashHoldMs(std::uint32_t holdMs) noexcept

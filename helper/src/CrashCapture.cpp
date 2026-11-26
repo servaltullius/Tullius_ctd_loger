@@ -44,6 +44,8 @@ void WriteWerFallbackHint(const std::filesystem::path& outBase, WerFallbackReaso
 
 namespace {
 
+namespace fault = skydiag::second_fault;
+
 constexpr DWORD kShutdownWaitMs = 3000;
 constexpr int kMaxHeartbeatChecks = 4;
 constexpr DWORD kHeartbeatCheckIntervalMs = 2000;
@@ -60,6 +62,13 @@ bool IsProcessStillActive(HANDLE process) noexcept
     return false;
   }
   return WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+}
+
+std::uint64_t SecondFaultClock() noexcept
+{
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  return static_cast<std::uint64_t>(now.QuadPart);
 }
 
 struct FileRemovalObservation {
@@ -345,7 +354,454 @@ HANDLE UnhandledEventFor(
   return proc.unhandledEvent;
 }
 
+std::filesystem::path NewSecondFaultStem(const std::filesystem::path& outBase, std::wstring_view ts)
+{
+  const std::wstring head = L"SkyrimDiag_SecondFault_" + std::wstring(ts);
+  for (int n = 1; n <= 99; ++n) {
+    auto stem = outBase / (n == 1 ? head : head + L"-" + std::to_wstring(n));
+    bool taken = false;
+    for (const wchar_t* extension : { L".dmp", L".dmp.partial", L".json" }) {
+      auto file = stem;
+      file += extension;
+      std::error_code ec;
+      if (skydiag::ExistsForIo(file, ec) || ec) {
+        taken = true;
+        break;
+      }
+    }
+    if (!taken) {
+      return stem;
+    }
+  }
+  return {};
+}
+
 namespace {
+
+struct SecondFaultFilter
+{
+  const AttachedProcess& proc;
+  const std::filesystem::path& outBase;
+  const CrashEventInfo& info;
+  // The dump-first path's profile after A's dump; null where B is only
+  // recorded (the recovery-first check).
+  const DumpProfile* profile;
+  // The generation whose dump was written: only its B may be dumped.
+  std::uint32_t dumpedCrashSeq = 0;
+  bool dumpEnabled = false;
+  nlohmann::json* incident = nullptr;
+};
+
+enum class SecondFaultOutcome
+{
+  kNone,        // nothing posted
+  kHeld,        // left posted for its own A, whose handling has not begun
+  kRecorded,    // settled without a MiniDumpWriteDump call
+  kDumpCalled,  // settled after MiniDumpWriteDump suspended the game for B
+};
+
+void LogSecondFaultError(const std::filesystem::path& outBase, std::wstring_view message) noexcept
+{
+  try {
+    AppendLogLine(outBase, message);
+  } catch (...) {  // NOLINT(bugprone-empty-catch): logging must not interrupt crash capture
+  }
+}
+
+LONG ReadSecondFaultFlag(volatile LONG& value) noexcept
+{
+  return InterlockedCompareExchange(&value, 0, 0);
+}
+
+bool SecondFaultHoldExpired(const fault::Slot& slot) noexcept
+{
+  return SecondFaultClock() >= slot.hold_until_qpc;
+}
+
+// The committed generation while it holds Frozen, 0 otherwise.
+std::uint32_t LiveFrozenCrashSeq(const AttachedProcess& proc, CrashEventInfo* live) noexcept
+{
+  CrashEventInfo current{};
+  if (!proc.shm || !TryCaptureCommittedCrashInfo(&proc.shm->header, &current) ||
+      (current.stateFlags & skydiag::kState_Frozen) == 0u) {
+    return 0u;
+  }
+  if (live) {
+    *live = current;
+  }
+  return current.crashSeq;
+}
+
+std::filesystem::path NewSecondFaultStemNow(const std::filesystem::path& outBase)
+{
+  return NewSecondFaultStem(outBase, Timestamp());
+}
+
+// The record's counters may move after B was released. The record is only
+// rewritten while it is still there: retention may have deleted it.
+void RefreshSecondFaultRecord(const AttachedProcess& proc) noexcept
+{
+  if (proc.secondFaultRecord.empty() || !proc.secondFault) {
+    return;
+  }
+  try {
+    auto& slot = *proc.secondFault;
+    const auto owner = fault::ReadOwner(slot);
+    const LONG resumed = ReadSecondFaultFlag(slot.resumed);
+    const LONG dropped = fault::ReadDropped(slot, owner);
+    if (resumed == proc.secondFaultRecordedResumed && dropped == proc.secondFaultRecordedDropped) {
+      return;
+    }
+    std::string previous;
+    if (!ReadTextFileUtf8(proc.secondFaultRecord, &previous)) {
+      proc.secondFaultRecord.clear();
+      return;
+    }
+    auto record = nlohmann::json::parse(previous);
+    record["resumed"] = resumed != 0;
+    record["dropped"] = dropped;
+    if (ReplaceTextFileUtf8(proc.secondFaultRecord, DumpJsonForFile(record))) {
+      proc.secondFaultRecordedResumed = resumed;
+      proc.secondFaultRecordedDropped = dropped;
+      proc.secondFaultRetentionPending = true;
+    } else {
+      LogSecondFaultError(proc.secondFaultOutputBase, L"Could not update the second fault record.");
+    }
+  } catch (...) {
+    LogSecondFaultError(proc.secondFaultOutputBase, L"Could not update the second fault record.");
+  }
+}
+
+void SettleSecondFaultSlot(const AttachedProcess& proc) noexcept
+{
+  InterlockedExchange(&proc.secondFault->state, fault::kSettled);
+  // Closed once the helper stops: the plugin then sees the state.
+  if (proc.secondFaultSettled) {
+    SetEvent(proc.secondFaultSettled);
+  }
+}
+
+// ADR-0036: records the B in the slot, and dumps it on the dump-first path
+// after A's dump (filter). info is the A being handled. With holdForItsOwnA,
+// a B of a newer A that still holds Frozen is left to that A's own handling.
+SecondFaultOutcome ProcessSecondFault(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  const char* recordOnlyReason,
+  const SecondFaultFilter* filter = nullptr,
+  nlohmann::json* incident = nullptr,
+  bool holdForItsOwnA = true) noexcept try
+{
+  auto* slot = proc.secondFault;
+  if (!slot || fault::ReadState(*slot) != fault::kPosted) {
+    return SecondFaultOutcome::kNone;
+  }
+
+  const std::uint32_t owner = fault::ReadOwner(*slot);
+  const bool matches = owner == info.crashSeq;
+  const bool alive = IsProcessStillActive(proc.process);
+  CrashEventInfo live{};
+  const std::uint32_t liveSeq = matches ? 0u : LiveFrozenCrashSeq(proc, &live);
+  if (holdForItsOwnA && alive && !matches && liveSeq != 0u && liveSeq == owner && !SecondFaultHoldExpired(*slot)) {
+    return SecondFaultOutcome::kHeld;
+  }
+  // A's identity, when the helper knows which exception owns the slot.
+  const CrashEventInfo* a = matches ? &info : (liveSeq != 0u && liveSeq == owner ? &live : nullptr);
+  if (a && a->faultingTid == 0u && a->exceptionCode == 0u) {
+    a = nullptr;
+  }
+
+  const char* reason = nullptr;
+  if (!alive) {
+    reason = "process_exited";
+  } else if (!matches) {
+    reason = "a_mismatch";
+  } else if (recordOnlyReason) {
+    reason = recordOnlyReason;
+  } else if (!filter || !filter->profile || filter->dumpedCrashSeq != owner) {
+    reason = "no_a_dump_yet";
+  } else if (SecondFaultHoldExpired(*slot)) {
+    reason = "hold_expired";
+  } else if (!filter->dumpEnabled) {
+    reason = "second_fault_dumps_disabled";
+  }
+
+  std::wstring detail;
+  std::filesystem::path stem;
+  std::wstring dumpFilename;
+  bool dumpCalled = false;
+  // Only a live, matching post-dump filter can suspend the target for B.
+  if (!reason) {
+    try {
+      StableSharedSnapshot snapshot;
+      if (!CaptureStableSharedSnapshot(proc.shm, proc.shmSize, &snapshot)) {
+        reason = "snapshot_unavailable";
+      } else if (snapshot.layout()->header.crash_seq != info.crashSeq ||
+                 (snapshot.layout()->header.state_flags & skydiag::kState_Frozen) == 0u) {
+        reason = "a_mismatch";
+      } else if (stem = NewSecondFaultStemNow(outBase); stem.empty()) {
+        reason = "dump_write_failed";
+        detail = L"no free file name";
+      } else {
+        auto dumpPath = stem;
+        dumpPath += L".dmp";
+        auto filename = dumpPath.filename().wstring();
+        SecondFaultDumpInput input{*slot, {}};
+        input.stream.version = fault::kVersion;
+        input.stream.size = static_cast<std::uint32_t>(sizeof(input.stream));
+        input.stream.tid = slot->tid;
+        input.stream.code = slot->code;
+        input.stream.address = slot->address;
+        input.stream.qpc = slot->qpc;
+        input.stream.a_crash_seq = info.crashSeq;
+        input.stream.a_code = info.exceptionCode;
+        input.stream.a_address = info.exceptionAddr;
+        input.stream.a_tid = info.faultingTid;
+        const bool written = WriteDumpWithStreams(
+          proc.process,
+          proc.pid,
+          dumpPath.wstring(),
+          snapshot.layout(),
+          snapshot.size(),
+          {},
+          {},
+          true,
+          *filter->profile,
+          false,
+          &detail,
+          nullptr,
+          &input);
+        dumpCalled = input.dumpCalled;
+        if (written) {
+          dumpFilename = std::move(filename);
+        } else {
+          reason = input.processExited ? "process_exited" : input.holdExpired ? "hold_expired" : "dump_write_failed";
+        }
+      }
+    } catch (...) {
+      reason = "capture_exception";
+    }
+  }
+
+  // Release the plugin even if path creation, dump capture, or JSON fails.
+  SettleSecondFaultSlot(proc);
+
+  try {
+    const LONG resumed = ReadSecondFaultFlag(slot->resumed);
+    const LONG dropped = fault::ReadDropped(*slot, owner);
+    nlohmann::json evidence{
+      {"exception_code", slot->code},
+      {"exception_addr", slot->address},
+      {"faulting_tid", slot->tid},
+      {"resumed", resumed != 0},
+    };
+    if (reason) {
+      evidence["reason"] = reason;
+    } else {
+      evidence["dump_filename"] = WideToUtf8(dumpFilename);
+    }
+    if (incident && matches) {
+      *incident = evidence;
+    }
+
+    evidence["schema"] = "skydiag.second_fault.v1";
+    evidence["qpc"] = slot->qpc;
+    evidence["dropped"] = dropped;
+    auto aRecord = nlohmann::json{{"crash_seq", owner}};
+    aRecord["exception_code"] = a ? nlohmann::json(a->exceptionCode) : nlohmann::json(nullptr);
+    aRecord["exception_addr"] = a ? nlohmann::json(a->exceptionAddr) : nlohmann::json(nullptr);
+    aRecord["faulting_tid"] = a ? nlohmann::json(a->faultingTid) : nlohmann::json(nullptr);
+    evidence["a"] = std::move(aRecord);
+    if (!detail.empty()) {
+      evidence["detail"] = WideToUtf8(detail);
+    }
+    const auto text = DumpJsonForFile(evidence);
+    // A new record never replaces a file already there (another B's, or one
+    // left by an earlier session): a name taken meanwhile gets the next one.
+    bool written = false;
+    for (int attempt = 0; attempt < 3 && !written; ++attempt) {
+      if (stem.empty() || attempt > 0) {
+        stem = NewSecondFaultStemNow(outBase);
+      }
+      if (stem.empty()) {
+        break;
+      }
+      auto recordPath = stem;
+      recordPath += L".json";
+      if (CreateTextFileUtf8(recordPath, text)) {
+        written = true;
+        proc.secondFaultRecord = std::move(recordPath);
+        proc.secondFaultRecordedResumed = resumed;
+        proc.secondFaultRecordedDropped = dropped;
+        proc.secondFaultRetentionPending = true;
+      } else {
+        std::error_code ec;
+        if (!skydiag::ExistsForIo(recordPath, ec)) {
+          break;
+        }
+      }
+    }
+    if (!written) {
+      LogSecondFaultError(outBase, L"Could not write the second fault record.");
+    }
+    if (reason) {
+      AppendLogLine(outBase, L"Second fault recorded without a dump (" + std::wstring(reason, reason + std::strlen(reason)) +
+        (detail.empty() ? L")." : L"): " + detail + L"."));
+    } else {
+      AppendLogLine(outBase, L"Second fault dump written: " + dumpFilename + L".");
+    }
+  } catch (...) {
+    LogSecondFaultError(outBase, L"Could not write the second fault record.");
+  }
+  return dumpCalled ? SecondFaultOutcome::kDumpCalled : SecondFaultOutcome::kRecorded;
+} catch (...) {
+  if (proc.secondFault && fault::ReadState(*proc.secondFault) == fault::kPosted) {
+    SettleSecondFaultSlot(proc);
+  }
+  LogSecondFaultError(outBase, L"Could not process the second fault record.");
+  return SecondFaultOutcome::kRecorded;
+}
+
+// Empties a settled slot once its incident is over; the record's counters
+// are read a last time first.
+void ClearSecondFault(const AttachedProcess& proc) noexcept
+{
+  if (!proc.secondFault || fault::ReadState(*proc.secondFault) != fault::kSettled) {
+    return;
+  }
+  RefreshSecondFaultRecord(proc);
+  proc.secondFaultRecord.clear();
+  InterlockedCompareExchange(&proc.secondFault->state, fault::kEmpty, fault::kSettled);
+}
+
+// A thawed A's B: a B still posted is recorded, and the slot emptied.
+void ReleaseSecondFaultOf(const AttachedProcess& proc, std::uint32_t crashSeq) noexcept
+{
+  auto* const slot = proc.secondFault;
+  if (!slot || fault::ReadState(*slot) < fault::kPosted || fault::ReadOwner(*slot) != crashSeq) {
+    return;
+  }
+  // A thaw at helper startup (rearm) runs before the capture loop knows its
+  // output folder: leave the posted B to the loop's first drain, which
+  // records it as a_released once that folder is set.
+  if (fault::ReadState(*slot) == fault::kPosted && proc.secondFaultOutputBase.empty()) {
+    return;
+  }
+  if (fault::ReadState(*slot) == fault::kPosted) {
+    CrashEventInfo released{};
+    if (!proc.shm || !TryCaptureCommittedCrashInfo(&proc.shm->header, &released) || released.crashSeq != crashSeq) {
+      released = CrashEventInfo{};
+      released.crashSeq = crashSeq;
+    }
+    (void)ProcessSecondFault(proc, proc.secondFaultOutputBase, released, "a_released", nullptr, nullptr, false);
+  }
+  ClearSecondFault(proc);
+}
+
+// The lower filter may have returned after B's record was first written.
+void ResampleSecondFaultResumed(const AttachedProcess& proc, const CrashEventInfo& info, nlohmann::json* secondFault) noexcept
+{
+  if (!secondFault || !secondFault->is_object() || !proc.secondFault) {
+    return;
+  }
+  try {
+    if (fault::ReadState(*proc.secondFault) == fault::kSettled && fault::ReadOwner(*proc.secondFault) == info.crashSeq) {
+      (*secondFault)["resumed"] = ReadSecondFaultFlag(proc.secondFault->resumed) != 0;
+    }
+  } catch (...) {
+    LogSecondFaultError(proc.secondFaultOutputBase, L"Could not update the second fault in the crash incident record.");
+  }
+}
+
+struct CrashFilterWait
+{
+  DWORD result;
+  bool restart;
+};
+
+CrashFilterWait WaitWithSecondFault(
+  HANDLE crashEvent,
+  HANDLE unhandledEvent,
+  HANDLE process,
+  DWORD waitMs,
+  const SecondFaultFilter& filter,
+  bool heartbeatCheck) noexcept
+{
+  const ULONGLONG deadline = GetTickCount64() + waitMs;
+  const auto remainingMs = [deadline] {
+    const auto now = GetTickCount64();
+    return now < deadline ? static_cast<DWORD>(deadline - now) : 0u;
+  };
+  // The original ordering makes a pending crash, process exit or unhandled
+  // signal take priority over B. A is still responsible for its own verdict.
+  const HANDLE handles[] = { crashEvent, process, unhandledEvent ? unhandledEvent : filter.proc.secondFaultPosted,
+    filter.proc.secondFaultPosted };
+  const DWORD count = unhandledEvent ? 4u : 3u;
+  for (;;) {
+    const bool pending = fault::ReadState(*filter.proc.secondFault) == fault::kPosted;
+    const DWORD result = WaitForMultipleObjects(count, handles, FALSE, pending ? 0u : remainingMs());
+    if (result == WAIT_FAILED) {
+      // Continue the original wait if the optional handle could not be used.
+      return {WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, remainingMs()), false};
+    }
+    if (result != WAIT_OBJECT_0 + count - 1u && !(result == WAIT_TIMEOUT && pending)) {
+      return {result, false};
+    }
+    const auto outcome = ProcessSecondFault(
+      filter.proc,
+      filter.outBase,
+      filter.info,
+      filter.profile ? nullptr : "a_checked_first",
+      &filter,
+      filter.incident);
+    if (outcome == SecondFaultOutcome::kHeld) {
+      // A newer A's B: that A comes first. Wait as before, without B.
+      return {WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, remainingMs()), false};
+    }
+    // Only a check that B's dump suspended the game is started over (its hb0
+    // is read again); a record alone lets the check go on.
+    if (outcome == SecondFaultOutcome::kDumpCalled && heartbeatCheck) {
+      return {WAIT_TIMEOUT, true};
+    }
+  }
+}
+
+// ADR-0036: the wait for the game's exit after A was kept, with B recorded
+// whenever it is posted meanwhile. The result is the original wait's: the
+// process's exit (WAIT_OBJECT_0), WAIT_TIMEOUT, or WAIT_FAILED.
+DWORD WaitForExitRecordingSecondFault(
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashEventInfo& info,
+  DWORD waitMs) noexcept
+{
+  if (!proc.secondFault || !proc.secondFaultPosted || !proc.secondFaultSettled) {
+    return WaitForSingleObject(proc.process, waitMs);
+  }
+  const ULONGLONG deadline = GetTickCount64() + waitMs;
+  const auto remainingMs = [deadline] {
+    const auto now = GetTickCount64();
+    return now < deadline ? static_cast<DWORD>(deadline - now) : 0u;
+  };
+  const HANDLE handles[] = { proc.process, proc.secondFaultPosted };
+  for (;;) {
+    const bool pending = fault::ReadState(*proc.secondFault) == fault::kPosted;
+    const DWORD result = WaitForMultipleObjects(2u, handles, FALSE, pending ? 0u : remainingMs());
+    if (result == WAIT_OBJECT_0) {
+      return result;
+    }
+    if (result == WAIT_FAILED) {
+      return WaitForSingleObject(proc.process, remainingMs());
+    }
+    if (result == WAIT_TIMEOUT && !pending) {
+      return WAIT_TIMEOUT;
+    }
+    if (ProcessSecondFault(proc, outBase, info, "a_already_captured") == SecondFaultOutcome::kHeld) {
+      return WaitForSingleObject(proc.process, remainingMs());
+    }
+  }
+}
 
 // ADR-0032: an exception whose "not handled" report was left set before
 // while the game ran on is judged without that report (UnhandledEventFor).
@@ -478,9 +934,13 @@ FilterVerdict FilterShutdownException(
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase,
-  CrashCaptureState* crashState)
+  CrashCaptureState* crashState,
+  const SecondFaultFilter& secondFault)
 {
-  const DWORD pw = WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kShutdownWaitMs);
+  const DWORD pw = secondFault.proc.secondFaultSettled
+    ? WaitWithSecondFault(
+        crashEvent, unhandledEvent, process, kShutdownWaitMs, secondFault, /*heartbeatCheck=*/false).result
+    : WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kShutdownWaitMs);
   if (pw == WAIT_OBJECT_0 && crashEvent) {
     if (HasNewerCrashRecord(shm, info.crashSeq)) {
       AppendLogLine(outBase, L"A newer crash record arrived during shutdown filtering; prioritizing the newer CTD.");
@@ -515,17 +975,25 @@ FilterVerdict FilterFirstChanceException(
   const skydiag::SharedHeader* shm,
   const CrashEventInfo& info,
   const std::filesystem::path& outBase,
-  CrashCaptureState* crashState)
+  CrashCaptureState* crashState,
+  const SecondFaultFilter& secondFault)
 {
   if (!shm) {
     return FilterVerdict::kKeepDump;
   }
 
   int heartbeatAdvanceCount = 0;
-  for (int attempt = 0; attempt < kMaxHeartbeatChecks; ++attempt) {
+  for (int attempt = 0; attempt < kMaxHeartbeatChecks;) {
     const auto hb0 = shm->last_heartbeat_qpc;
-    const DWORD waitResult =
-      WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kHeartbeatCheckIntervalMs);
+    const auto wait = secondFault.proc.secondFaultSettled
+      ? WaitWithSecondFault(
+          crashEvent, unhandledEvent, process, kHeartbeatCheckIntervalMs, secondFault, /*heartbeatCheck=*/true)
+      : CrashFilterWait{
+          WaitForCrashUnhandledOrProcess(crashEvent, unhandledEvent, process, kHeartbeatCheckIntervalMs), false};
+    if (wait.restart) {
+      continue;
+    }
+    const DWORD waitResult = wait.result;
     if (waitResult == WAIT_OBJECT_0 && crashEvent) {
       if (HasNewerCrashRecord(shm, info.crashSeq)) {
         AppendLogLine(
@@ -573,6 +1041,7 @@ FilterVerdict FilterFirstChanceException(
     if (heartbeatAdvanceCount + (kMaxHeartbeatChecks - attempt - 1) < kRequiredHeartbeatAdvances) {
       break;
     }
+    ++attempt;
   }
 
   return FilterVerdict::kKeepDump;
@@ -591,6 +1060,7 @@ void ProcessValidCrashDump(
   const skydiag::ForcedCloseMatch& forcedClose,
   const skydiag::helper::DumpProfile& writtenProfile,
   const PluginScanInputs& pluginScanInputs,
+  nlohmann::json& secondFault,
   PendingCrashEtwCapture* pendingCrashEtw,
   PendingCrashAnalysis* pendingCrashAnalysis,
   std::wstring* pendingCrashViewerDumpPath)
@@ -611,6 +1081,8 @@ void ProcessValidCrashDump(
   }
   // A driver reset moments before the crash can be why it crashed (ADR-0029).
   WriteGpuDriverEventsSidecar(outBase, dumpFs, proc.pid);
+  // ADR-0036: A is kept now; a B posted meanwhile is recorded at once.
+  (void)ProcessSecondFault(proc, outBase, info, "a_already_captured", nullptr, &secondFault);
 
   bool etwStarted = false;
   std::string etwStatus = cfg.enableEtwCaptureOnCrash ? "start_failed" : "disabled";
@@ -641,6 +1113,7 @@ void ProcessValidCrashDump(
       AppendLogLine(outBase, L"ETW crash capture start failed: " + etwErr);
     }
   }
+  (void)ProcessSecondFault(proc, outBase, info, "a_already_captured", nullptr, &secondFault);
 
   if (cfg.enableIncidentManifest) {
     nlohmann::json ctx = nlohmann::json::object();
@@ -653,6 +1126,16 @@ void ProcessValidCrashDump(
     if (IsUnhandledExceptionSignaled(unhandledEvent)) {
       // ADR-0032: the plugin saw the exception reach the top-level filter.
       ctx["unhandled_exception_signal"] = true;
+    }
+    if (!secondFault.is_null()) {
+      // The lower filter may have returned after the standalone record was
+      // first written. Sample again before writing A's manifest once.
+      ResampleSecondFaultResumed(proc, info, &secondFault);
+      try {
+        ctx["second_fault"] = std::move(secondFault);
+      } catch (...) {
+        LogSecondFaultError(outBase, L"Could not add the second fault to the crash incident record.");
+      }
     }
     const auto manifest = MakeIncidentManifestV1(
       "crash",
@@ -695,7 +1178,7 @@ void ProcessValidCrashDump(
       viewerNow = (launch == DumpToolViewerLaunchResult::kLaunched);
     } else if (proc.process) {
       const DWORD waitExitMs = static_cast<DWORD>(std::min<std::uint32_t>(cfg.autoOpenCrashWaitForExitMs, 10000u));
-      const DWORD wExit = WaitForSingleObject(proc.process, waitExitMs);
+      const DWORD wExit = WaitForExitRecordingSecondFault(proc, outBase, info, waitExitMs);
       if (wExit == WAIT_OBJECT_0) {
         DWORD processExitCode = STILL_ACTIVE;
         if (!GetExitCodeProcess(proc.process, &processExitCode)) {
@@ -778,6 +1261,7 @@ void ProcessValidCrashDump(
     }
   }
 
+  (void)ProcessSecondFault(proc, outBase, info, "a_already_captured");
   ApplyRetentionFromConfig(cfg, outBase);
 }
 
@@ -993,8 +1477,70 @@ bool ThawCrashCapture(
     if (proc.dumpSettledEvent) {
       ResetEvent(proc.dumpSettledEvent);
     }
+    // ADR-0036: before Frozen is lowered, so the next A's first B finds the
+    // slot empty. Nothing to do without a B.
+    if (proc.secondFault && fault::ReadState(*proc.secondFault) != fault::kEmpty) {
+      ReleaseSecondFaultOf(proc, expectedCrashSeq);
+    }
   }
   return TryClearRecoveredCrashFreeze(proc.shmWritable, expectedCrashSeq);
+}
+
+void DrainSecondFault(
+  const HelperConfig& cfg,
+  const AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashCaptureState& crashState,
+  SecondFaultDrain when) noexcept
+{
+  auto* const slot = proc.secondFault;
+  if (!slot) {
+    return;
+  }
+  const LONG slotState = fault::ReadState(*slot);
+  if (slotState != fault::kEmpty) {
+    const bool stopping = when == SecondFaultDrain::kHelperStopping;
+    const bool gameExited = when == SecondFaultDrain::kProcessExited ||
+      (proc.process && WaitForSingleObject(proc.process, 0) == WAIT_OBJECT_0);
+    const auto owner = fault::ReadOwner(*slot);
+    CrashEventInfo current{};
+    const bool haveCurrent = proc.shm && TryCaptureCommittedCrashInfo(&proc.shm->header, &current);
+    const bool currentOwner = haveCurrent && current.crashSeq == owner;
+    const bool ownerFrozen = currentOwner && (current.stateFlags & skydiag::kState_Frozen) != 0u;
+    if (slotState == fault::kPosted) {
+      const bool observed = crashState.capturedInfo.crashSeq == owner;
+      // A's crash event is still to be handled: its dump or check comes first,
+      // within B's hold.
+      const bool aNotStarted = ownerFrozen && !observed && proc.crashEvent && !crashState.latched;
+      if (stopping || gameExited || !aNotStarted || SecondFaultHoldExpired(*slot)) {
+        const char* reason = gameExited ? "process_exited"
+          : stopping ? "helper_stopped"
+          : !currentOwner ? "a_mismatch"
+          : !ownerFrozen ? "a_released"
+          : (observed || crashState.latched) ? "a_already_captured"
+          : "no_a_dump_yet";
+        (void)ProcessSecondFault(
+          proc, outBase, observed ? crashState.capturedInfo : current, reason, nullptr, nullptr, false);
+      }
+    } else if (slotState == fault::kSettled) {
+      RefreshSecondFaultRecord(proc);
+    } else if (gameExited) {
+      // kWriting with the writer gone: a partly written slot is no record.
+      InterlockedCompareExchange(&slot->state, fault::kEmpty, fault::kWriting);
+    }
+    // Emptied once its incident is over.
+    if (stopping || gameExited || !ownerFrozen) {
+      ClearSecondFault(proc);
+    }
+  }
+  if (proc.secondFaultRetentionPending) {
+    proc.secondFaultRetentionPending = false;
+    try {
+      ApplyRetentionFromConfig(cfg, outBase);
+    } catch (...) {
+      LogSecondFaultError(outBase, L"Could not schedule retention for the second fault record.");
+    }
+  }
 }
 
 skydiag::ForcedCloseMatch FindForcedCloseInSnapshot(
@@ -1190,7 +1736,8 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
   const skydiag::SharedLayout* dumpSnapshot,
   std::size_t dumpSnapshotBytes,
   const skydiag::ForcedCloseMatch& forcedClose,
-  CrashCaptureState* crashState)
+  CrashCaptureState* crashState,
+  nlohmann::json* secondFault)
 {
   const std::uint64_t nowTick64 = GetTickCount64();
   const std::uint64_t lastCrashLoggerHotkeyTick64 = g_lastCrashLoggerHotkeyTick64.load(std::memory_order_relaxed);
@@ -1218,7 +1765,9 @@ ThreadDumpWindowOutcome CheckCrashLoggerThreadDumpWindow(
       &proc.shm->header,
       info,
       outBase,
-      crashState);
+      crashState,
+      SecondFaultFilter{proc, outBase, info, nullptr, 0, false, secondFault});
+    (void)ProcessSecondFault(proc, outBase, info, "a_checked_first", nullptr, secondFault);
     if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
       const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
         ThawCrashCapture(proc, info.crashSeq);
@@ -1282,7 +1831,8 @@ RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
   const std::filesystem::path& outBase,
   const CrashEventInfo& info,
   const skydiag::ForcedCloseMatch& forcedClose,
-  CrashCaptureState* crashState)
+  CrashCaptureState* crashState,
+  nlohmann::json* secondFault)
 {
   if (!crashState || !proc.process || !proc.shm ||
       !IsRepeatedRecoveredFault(crashState->recoveredFaults, info.exceptionCode, info.exceptionAddr)) {
@@ -1301,7 +1851,9 @@ RepeatedRecoveredFaultOutcome CheckRepeatedRecoveredFault(
     &proc.shm->header,
     info,
     outBase,
-    crashState);
+    crashState,
+    SecondFaultFilter{proc, outBase, info, nullptr, 0, false, secondFault});
+  (void)ProcessSecondFault(proc, outBase, info, "a_checked_first", nullptr, secondFault);
   if (early == FilterVerdict::kDeleteRecovered || early == FilterVerdict::kDeleteBenign) {
     const bool thawed = early == FilterVerdict::kDeleteRecovered && proc.shmWritable &&
       ThawCrashCapture(proc, info.crashSeq);
@@ -1478,8 +2030,12 @@ void ReleaseFilteredCrashDump(
   std::wstring_view ts,
   const skydiag::helper::DumpProfile& writtenProfile,
   CrashCaptureState* crashState,
-  std::wstring* lastCrashDumpPath)
+  std::wstring* lastCrashDumpPath,
+  nlohmann::json& secondFault)
 {
+  // ADR-0036: the lower filter may have returned since B's record. Sampled
+  // before the thaw below empties the slot.
+  ResampleSecondFaultResumed(proc, info, &secondFault);
   if (verdict == FilterVerdict::kDeleteRecovered) {
     const bool thawed = ThawCrashCapture(proc, info.crashSeq);
     AppendLogLine(
@@ -1618,6 +2174,7 @@ void ReleaseFilteredCrashDump(
         proc.pid,
         info.stateFlags,
         writtenProfile,
+        std::move(secondFault),
       });
       StartLateRecovery(
         &crashState->releasedDumpRecovery,
@@ -1745,11 +2302,14 @@ bool HandleCrashEventTick(
     ResetEvent(proc.dumpSettledEvent);
   }
   EndHoldOfSignalLeftSetFault(proc, outBase, info, crashState);
+  // ADR-0036: A first. A B posted already stays posted until A's dump (the
+  // filters after it may dump B) or A's recovery-first check has begun.
+  nlohmann::json secondFault;
 
   bool exitedBeforeDump = false;
   bool checkedRecoveryBeforeDump = false;
   switch (CheckCrashLoggerThreadDumpWindow(
-    cfg, proc, outBase, info, dumpSnapshot, dumpSnapshotBytes, forcedClose, crashState)) {
+    cfg, proc, outBase, info, dumpSnapshot, dumpSnapshotBytes, forcedClose, crashState, &secondFault)) {
     case ThreadDumpWindowOutcome::kReleased:
       // Released without a dump: the exit path would take an older held dump
       // for this exception's.
@@ -1765,7 +2325,7 @@ bool HandleCrashEventTick(
       checkedRecoveryBeforeDump = true;
       break;
     case ThreadDumpWindowOutcome::kNotApplicable:
-      switch (CheckRepeatedRecoveredFault(cfg, proc, outBase, info, forcedClose, crashState)) {
+      switch (CheckRepeatedRecoveredFault(cfg, proc, outBase, info, forcedClose, crashState, &secondFault)) {
         case RepeatedRecoveredFaultOutcome::kNotApplicable:
           break;
         case RepeatedRecoveredFaultOutcome::kReleased:
@@ -1799,6 +2359,17 @@ bool HandleCrashEventTick(
   // not end while the dump is still to be written.
   if (proc.dumpSettledEvent) {
     SetEvent(proc.dumpSettledEvent);
+  }
+  // Without a dump of this A or with its check done, B is only recorded;
+  // otherwise it waits for the filters below.
+  if (!dumpOk || checkedRecoveryBeforeDump || !proc.process) {
+    (void)ProcessSecondFault(
+      proc,
+      outBase,
+      info,
+      !dumpOk ? "a_dump_failed" : checkedRecoveryBeforeDump ? "a_checked_first" : "a_already_captured",
+      nullptr,
+      &secondFault);
   }
 
   if (!dumpOk) {
@@ -1843,6 +2414,8 @@ bool HandleCrashEventTick(
         }
       }
     } else {
+      const SecondFaultFilter secondFaultFilter{
+        proc, outBase, info, &dumpProfile, info.crashSeq, cfg.maxSecondFaultDumps != 0u, &secondFault};
       verdict = FilterShutdownException(
         cfg,
         proc.process,
@@ -1851,7 +2424,8 @@ bool HandleCrashEventTick(
         proc.shm ? &proc.shm->header : nullptr,
         info,
         outBase,
-        crashState);
+        crashState,
+        secondFaultFilter);
       if (verdict == FilterVerdict::kKeepDump && proc.shm) {
         verdict = FilterFirstChanceException(
           cfg,
@@ -1861,9 +2435,19 @@ bool HandleCrashEventTick(
           &proc.shm->header,
           info,
           outBase,
-          crashState);
+          crashState,
+          secondFaultFilter);
       }
     }
+    (void)ProcessSecondFault(
+      proc,
+      outBase,
+      info,
+      verdict == FilterVerdict::kKeepDump          ? "a_already_captured"
+        : verdict == FilterVerdict::kRetryNewerCrash ? "a_superseded"
+                                                     : "a_released",
+      nullptr,
+      &secondFault);
     if (verdict != FilterVerdict::kKeepDump) {
       ReleaseFilteredCrashDump(
         cfg,
@@ -1877,7 +2461,8 @@ bool HandleCrashEventTick(
         ts,
         WrittenDumpProfile(dumpProfile, dumpMemory),
         crashState,
-        lastCrashDumpPath);
+        lastCrashDumpPath,
+        secondFault);
       return true;
     }
   }
@@ -1902,6 +2487,7 @@ bool HandleCrashEventTick(
     forcedClose,
     writtenProfile,
     pluginScanInputs,
+    secondFault,
     pendingCrashEtw,
     pendingCrashAnalysis,
     pendingCrashViewerDumpPath);

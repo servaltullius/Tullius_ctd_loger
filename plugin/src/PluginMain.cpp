@@ -346,6 +346,8 @@ void OnSkseMessage(SKSE::MessagingInterface::Message* message)
       message->type == SKSE::MessagingInterface::kInputLoaded ||
       message->type == SKSE::MessagingInterface::kDataLoaded) {
     skydiag::plugin::RefreshCrashLoggerModuleRanges();
+    // ADR-0036: every SKSE plugin is loaded by now, so the ranges are final.
+    skydiag::plugin::NoteCrashLoggerModuleRangesFinal();
   }
   if (message->type == SKSE::MessagingInterface::kInputLoaded) {
     skydiag::plugin::HeartbeatOnInputLoaded();
