@@ -80,14 +80,19 @@ bool IsBackground(const std::wstring& text)
 
 }  // namespace
 
-std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendations)
+std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendations, bool hasSecondFaultNote)
 {
   if (recommendations.empty()) {
     return std::wstring::npos;
   }
+  // The second-fault note is appended after A's recommendations.
+  const auto count = recommendations.size() - static_cast<std::size_t>(hasSecondFaultNote);
+  if (count == 0u) {
+    return std::wstring::npos;
+  }
   std::size_t best = std::wstring::npos;
   int bestRank = kNoPriority;
-  for (std::size_t i = 0; i < recommendations.size(); ++i) {
+  for (std::size_t i = 0; i < count; ++i) {
     const int rank = PriorityRank(ClassifyRecommendation(recommendations[i]).kind);
     if (rank < bestRank) {
       best = i;
@@ -97,7 +102,7 @@ std::size_t SelectNextActionIndex(const std::vector<std::wstring>& recommendatio
   if (best != std::wstring::npos) {
     return best;
   }
-  for (std::size_t i = 0; i < recommendations.size(); ++i) {
+  for (std::size_t i = 0; i < count; ++i) {
     if (!IsBackground(recommendations[i])) {
       return i;
     }

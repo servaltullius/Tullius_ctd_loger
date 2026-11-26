@@ -188,7 +188,8 @@ Helper 진단 옵션 (`SkyrimDiagHelper.ini`):
 `SkyrimDiagHelper.ini`에서 자동 정리:
 - `MaxCrashDumps`, `MaxHangDumps`, `MaxManualDumps`, `MaxEtwTraces` (0 = 무제한)
 - `MaxForcedCloseCrashDumps` (기본 3, 0 = 무제한): 게임을 닫는 중(Alt+F4, 종료 메뉴)에 난 오류의 크래시 덤프는 `MaxCrashDumps`와 따로 셉니다. 종료할 때마다 오류가 나도 진짜 크래시 덤프가 밀려나지 않습니다
-- `MaxTotalDumpGB` (기본 5, 0 = 무제한): 크래시·프리징·수동 덤프를 모두 합친 크기(GB). 이 크기를 넘으면 종류와 상관없이 오래된 덤프부터 리포트와 함께 지웁니다. 가장 최근 캡처와, 하루가 지나지 않은 종류별 최신 캡처(뷰어가 아직 열 수 있음)는 항상 남깁니다. `DumpAllModuleCode=1`이면 큰 모드팩에서 덤프 하나가 0.5~0.9GB이고, `DumpMode=2`나 크래시 재캡처를 쓰면 몇 GB가 될 수 있으니, 그런 덤프를 더 남기려면 값을 올려 주세요.
+- `MaxSecondFaultDumps`(기본 3, 범위 0~20)는 보조 덤프와 기록의 보존 개수입니다. Helper가 덤프를 쓴 뒤 첫 예외를 확인하는 동안 다른 예외가 처리되지 않은 채 최상위 필터에 닿으면, 뷰어에서 열 수 있는 `SkyrimDiag_SecondFault_*.dmp`가 별도로 남을 수 있습니다. 0으로 설정하면 보조 덤프를 쓰지 않고 기록을 최대 세 건 남깁니다.
+- `MaxTotalDumpGB`(기본 5, 0 = 무제한)는 관리하는 덤프의 총 크기 한도입니다. 한도를 넘으면 보조 덤프부터 지웁니다. 크래시·프리징·수동 캡처 중 가장 최근 캡처와 하루가 지나지 않은 종류별 최신 캡처는 남깁니다. `DumpAllModuleCode=1`이면 큰 모드팩에서 덤프 하나가 0.5~0.9GB이고, `DumpMode=2`나 크래시 재캡처를 쓰면 몇 GB가 될 수 있습니다.
 - `MaxHelperLogBytes`, `MaxHelperLogFiles` (로그 로테이션), `MaxHelperSessionLogs` (이전 세션 로그 보관 개수, 기본 20)
 - 덤프가 없어진 `.skydiag-analysis/`의 분석 사본과 `.skydiag-locks/`의 잠금 파일은 하루가 지나면 지웁니다. `.skydiag-triage/`의 검토 상태는 남깁니다.
 

@@ -44,12 +44,15 @@ std::optional<double> InferHeartbeatAgeFromEventsSec(const std::vector<EventRow>
 BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   const std::vector<EventRow>& events,
   bool loadingContext,
-  double lastHeartbeatMs = -1.0);
+  double lastHeartbeatMs = -1.0,
+  std::optional<double> captureMs = std::nullopt);
 
 // ADR-0022: the close request the newest Crash event followed
 // (ForcedCloseScanner: the quit flag at any time before it, the others at
 // most kForcedCloseCrashWindowMs before it); detected is false without one.
-ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events);
+ForcedCloseInfo DetectForcedClose(
+  const std::vector<EventRow>& events,
+  std::optional<double> crashTimeMs = std::nullopt);
 
 // ADR-0035: the newest close request in the blackbox that set the game's
 // quit flag (IsQuitFlagCloseRequest); detected is false without one.
@@ -65,7 +68,9 @@ bool KeepsOutOfCrashHistory(const AnalysisResult& out);
 
 // ADR-0025: the newest SaveLoadStart and whether a SaveLoadEnd followed it.
 // Fills the blackbox part of SaveLoadInfo; the history counts stay 0.
-SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events);
+SaveLoadInfo DetectSaveLoad(
+  const std::vector<EventRow>& events,
+  std::optional<double> crashTimeMs = std::nullopt);
 // The save name a SaveLoadStart carries in b..d, read as UTF-8 (else ANSI).
 std::wstring DecodeSaveLoadName(std::uint64_t b, std::uint64_t c, std::uint64_t d);
 // Whether this capture is a failed load for crash_history.json: a crash or an
@@ -83,7 +88,8 @@ std::string SaveLoadAttemptKey(const AnalysisResult& r);
 
 FirstChanceSummary BuildFirstChanceSummary(
   const std::vector<EventRow>& events,
-  bool loadingContext);
+  bool loadingContext,
+  std::optional<double> captureMs = std::nullopt);
 
 std::wstring ResourceKindFromPath(std::wstring_view path);
 

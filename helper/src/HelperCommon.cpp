@@ -200,7 +200,16 @@ std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg)
   return configured;
 }
 
-bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
+namespace {
+
+enum class TextFileWrite
+{
+  kCreateOrReplace,
+  kCreateOnly,
+  kReplaceOnly,
+};
+
+bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s, TextFileWrite mode)
 {
   if (path.empty() || path.filename().empty()) {
     return false;
@@ -258,10 +267,22 @@ bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
   }
 
   if (ok) {
-    ok = MoveFileExW(
-      tempPath.c_str(),
-      ioPath.c_str(),
-      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+    switch (mode) {
+      case TextFileWrite::kCreateOrReplace:
+        ok = MoveFileExW(
+          tempPath.c_str(),
+          ioPath.c_str(),
+          MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != FALSE;
+        break;
+      case TextFileWrite::kCreateOnly:
+        ok = MoveFileExW(tempPath.c_str(), ioPath.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
+        break;
+      case TextFileWrite::kReplaceOnly:
+        // Fails when the destination is gone, instead of creating it again.
+        ok = ReplaceFileW(ioPath.c_str(), tempPath.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr) !=
+          FALSE;
+        break;
+    }
   }
   if (!ok) {
     // remove, not DeleteFileW, which MO2 refuses past MAX_PATH (SkyrimDiagLongPath.h).
@@ -269,6 +290,23 @@ bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
     std::filesystem::remove(tempPath, removeEc);
   }
   return ok;
+}
+
+}  // namespace
+
+bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s)
+{
+  return WriteTextFileUtf8(path, s, TextFileWrite::kCreateOrReplace);
+}
+
+bool CreateTextFileUtf8(const std::filesystem::path& path, const std::string& s)
+{
+  return WriteTextFileUtf8(path, s, TextFileWrite::kCreateOnly);
+}
+
+bool ReplaceTextFileUtf8(const std::filesystem::path& path, const std::string& s)
+{
+  return WriteTextFileUtf8(path, s, TextFileWrite::kReplaceOnly);
 }
 
 std::string DumpJsonForFile(const nlohmann::json& j)

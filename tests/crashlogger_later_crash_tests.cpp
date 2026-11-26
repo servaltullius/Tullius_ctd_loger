@@ -1,23 +1,28 @@
 #include <Windows.h>
 #include <DbgHelp.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
 #include "Analyzer.h"
 #include "EvidenceBuilder.h"
 #include "OutputWriterPipeline.h"
+#include "SkyrimDiagCloseRequest.h"
 #include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagSecondFault.h"
 #include "SkyrimDiagShared.h"
 
 namespace {
@@ -61,7 +66,7 @@ struct TempDirectory
 struct DumpFixture
 {
   MINIDUMP_HEADER header{};
-  MINIDUMP_DIRECTORY streams[4]{};
+  MINIDUMP_DIRECTORY streams[5]{};
   struct
   {
     ULONG32 count = 0;
@@ -75,6 +80,8 @@ struct DumpFixture
   MINIDUMP_EXCEPTION_STREAM exception{};
   skydiag::SharedHeader blackbox{};
   skydiag::BlackboxEvent events[skydiag::kEventCapacity]{};
+  skydiag::ResourceLog resources{};
+  skydiag::second_fault::Stream second_fault{};
 };
 
 struct Case
@@ -94,7 +101,50 @@ struct Case
   ULONG32 dump_pid = kPid;
   ULONG32 dump_tid = kDumpTid;
   bool unhandled = true;
+  bool second_fault_timeline = false;
+  bool second_fault_stream = false;
+  bool damaged_second_fault_stream = false;
+  bool second_fault_qpc_unknown = false;
+  bool expect_log_pairing = true;
 };
+
+constexpr std::uint64_t kTimelineStart = 1000;
+constexpr std::uint64_t kFirstFaultMs = 10000;
+constexpr std::uint64_t kSecondFaultMs = 14000;
+
+void WriteSecondFaultTimeline(DumpFixture& dump)
+{
+  dump.blackbox.start_qpc = kTimelineStart;
+  dump.blackbox.qpc_freq = 1000;
+  dump.blackbox.crash_seq = 2;
+  dump.blackbox.crash.exception_code = EXCEPTION_ILLEGAL_INSTRUCTION;
+  dump.blackbox.crash.faulting_tid = kLogTid;
+  dump.blackbox.crash.exception_addr = kModuleBase + 0x321;
+  std::uint32_t i = 0;
+  const auto record = [&](skydiag::EventType type, std::uint64_t relativeMs, std::uint64_t a = 0u) {
+    auto& event = dump.events[i];
+    event.seq = i * 2;
+    event.qpc = kTimelineStart + relativeMs;
+    event.type = static_cast<std::uint16_t>(type);
+    event.payload.a = a;
+    ++i;
+  };
+  record(skydiag::EventType::kSaveLoadStart, 1000);
+  record(skydiag::EventType::kCloseRequest, 3500, static_cast<std::uint64_t>(skydiag::CloseRequestKind::kAltF4));
+  record(skydiag::EventType::kFirstChanceException, 6000);
+  record(skydiag::EventType::kFirstChanceException, 9800);
+  record(skydiag::EventType::kCrash, kFirstFaultMs, EXCEPTION_ILLEGAL_INSTRUCTION);
+  dump.blackbox.write_index = i;
+
+  dump.resources.write_index = 2;
+  dump.resources.entries[0].qpc = kTimelineStart + 6000;
+  dump.resources.entries[1].qpc = kTimelineStart + 9800;
+  dump.resources.entries[1].seq = 2;
+  constexpr char older[] = "meshes\\older.nif";
+  constexpr char recent[] = "meshes\\recent.nif";
+  std::memcpy(dump.resources.entries[0].path_utf8, older, sizeof(older));
+  std::memcpy(dump.resources.entries[1].path_utf8, recent, sizeof(recent));
+}
 
 void WriteDump(const fs::path& path, const Case& input)
 {
@@ -135,6 +185,33 @@ void WriteDump(const fs::path& path, const Case& input)
   d->blackbox.pid = input.dump_pid;
   static_assert(offsetof(DumpFixture, events) - offsetof(DumpFixture, blackbox) ==
                 offsetof(skydiag::SharedLayout, events));
+  static_assert(offsetof(DumpFixture, resources) - offsetof(DumpFixture, blackbox) ==
+                offsetof(skydiag::SharedLayout, resources));
+  if (input.second_fault_timeline) {
+    WriteSecondFaultTimeline(*d);
+    d->streams[2].Location.DataSize = sizeof(skydiag::SharedLayout);
+  }
+  if (input.second_fault_stream) {
+    d->second_fault = {
+      .version = skydiag::second_fault::kVersion,
+      .size = sizeof(d->second_fault),
+      .tid = d->exception.ThreadId,
+      .code = d->exception.ExceptionRecord.ExceptionCode,
+      .address = d->exception.ExceptionRecord.ExceptionAddress,
+      .qpc = input.second_fault_qpc_unknown ? 0u : kTimelineStart + kSecondFaultMs,
+      .a_crash_seq = 2,
+      .a_code = EXCEPTION_ILLEGAL_INSTRUCTION,
+      .a_address = kModuleBase + 0x321,
+      .a_tid = kLogTid,
+    };
+    if (input.damaged_second_fault_stream) {
+      ++d->second_fault.version;
+    }
+    d->streams[d->header.NumberOfStreams] = {
+      skydiag::second_fault::kStreamType, { sizeof(d->second_fault), offsetof(DumpFixture, second_fault) }
+    };
+    ++d->header.NumberOfStreams;
+  }
 
   std::ofstream file(path, std::ios::binary);
   file.write(reinterpret_cast<const char*>(d.get()), sizeof(*d));
@@ -161,7 +238,8 @@ void SetFixtureLastWrite(const fs::path& path, WORD hour, WORD minute, WORD seco
 
 AnalysisResult Analyze(const fs::path& dir, const Case& input, i18n::Language lang)
 {
-  const auto dump = dir / (input.dump_time_from_last_write ? L"Fixture_crash.dmp" : L"Fixture_crash_20970713_120000.dmp");
+  const auto dump = dir / (input.second_fault_stream ? L"SkyrimDiag_SecondFault_20970713_120000_000.dmp"
+    : input.dump_time_from_last_write ? L"Fixture_crash.dmp" : L"Fixture_crash_20970713_120000.dmp");
   WriteDump(dump, input);
   if (input.dump_time_from_last_write) {
     SetFixtureLastWrite(dump, 11, 59, 59, 999);
@@ -198,7 +276,8 @@ AnalysisResult Analyze(const fs::path& dir, const Case& input, i18n::Language la
   Require(AnalyzeDump(dump.wstring(), dir.wstring(), options, result, &error), "analyze synthetic minidump");
   Require(result.pid == input.dump_pid && result.exc_tid == input.dump_tid &&
           result.fault_module_filename == L"Earlier.dll", "read the fixture's dump PID, TID, and module");
-  Require(result.crash_logger_log_path.empty() == input.log_name.empty(), "pair the expected fixture log");
+  Require(result.crash_logger_log_path.empty() == (input.log_name.empty() || !input.expect_log_pairing),
+          "pair the expected fixture log");
   return result;
 }
 
@@ -443,11 +522,208 @@ void TestOutputExclusions()
   check(analyzed, [](AnalysisResult& r) { r.crash_logger_pairing_nearby_competitor_count = 1; }, "crash");
 }
 
+void TestSecondFaultIncident(i18n::Language lang)
+{
+  TempDirectory baselineDir;
+  const auto baseline = Analyze(baselineDir.path, Case{ .log_name = L"" }, lang);
+  constexpr auto stem = L"Fixture_crash_20970713_120000";
+  const auto original = BuildSummaryJson(baseline, baselineDir.path, stem, true);
+  Require(!original.contains("incident") && fs::is_regular_file(baselineDir.path / "crash_history.json"),
+          "the original capture writes history and has no second-fault metadata");
+
+  constexpr std::uint64_t unmappedAddress = 0xABCDEF;
+  constexpr std::string_view filename = "SkyrimDiag_SecondFault_20970713_120000_000.dmp";
+  constexpr std::string_view noDumpReason = "dump_write_failed";
+  const bool en = lang == i18n::Language::kEnglish;
+  struct IncidentCase
+  {
+    bool hasDump;
+    bool resumed;
+    bool present;
+  };
+  for (const auto [hasDump, resumed, present] :
+       { IncidentCase{ true, false, true }, { false, false, false }, { true, true, true }, { true, false, false } }) {
+    TempDirectory temp;
+    if (present) {
+      std::ofstream(temp.path / filename, std::ios::binary) << "dump";
+    }
+    nlohmann::json fault = {
+      { "exception_code", EXCEPTION_ACCESS_VIOLATION },
+      { "exception_addr", hasDump ? kModuleBase + 0x321 : unmappedAddress },
+      { "faulting_tid", kLogTid },
+      { "resumed", resumed },
+    };
+    if (hasDump) {
+      fault["dump_filename"] = filename;
+    } else {
+      fault["reason"] = noDumpReason;
+    }
+    const nlohmann::json manifest = {
+      { "capture_kind", "crash" },
+      { "context", { { "second_fault", fault } } },
+    };
+    const auto serialized = manifest.dump();
+    auto r = Analyze(temp.path, Case{ .log_name = L"", .manifest = serialized }, lang);
+    const auto summary = BuildSummaryJson(r, temp.path, stem, true);
+    Require(summary["incident"]["second_fault"] == fault, "copy second_fault from the incident to the summary");
+    for (const char* field : { "quick_answer", "summary_sentence", "actionable_candidates",
+                               "crash_bucket_key", "next_action_index", "analysis" }) {
+      Require(summary[field] == original[field], field);
+    }
+    Require(r.evidence.size() == baseline.evidence.size() + 1 &&
+            r.recommendations.size() == baseline.recommendations.size() + 1,
+            "append one evidence item and one recommendation");
+    const auto report = BuildReportText(r, summary, true);
+    Require(report.find(en ? "reached the top-level exception filter unhandled" : "최상위 예외 필터에 닿았습니다") !=
+              std::string::npos, "identify the second exception in the report");
+    Require(report.find(en ? "thread 56" : "스레드 56") != std::string::npos,
+            "give the second exception's thread");
+    const bool reportsResume = report.find(en ? "Execution resumed after that exception"
+                                               : "그 예외는 그 뒤 실행이 이어졌습니다") != std::string::npos;
+    Require(reportsResume == resumed, "mention that execution resumed only when recorded");
+    if (hasDump) {
+      Require(report.find(en ? "from this dump's module list" : "이 덤프의 모듈 목록 기준") != std::string::npos &&
+              r.evidence.back().details.find(L"Earlier.dll+0x321") != std::wstring::npos,
+              "resolve the second address against the first dump and say where it came from");
+      Require(report.find(filename) != std::string::npos, "name the second dump");
+      const bool directed = report.find(en ? "in the viewer" : "뷰어에서") != std::string::npos;
+      const bool gone = report.find(en ? "not in this folder any more" : "지금은 이 폴더에 없습니다") != std::string::npos;
+      Require(directed == present && gone == !present,
+              "direct the reader to the second dump only while it is there");
+    } else {
+      Require(r.evidence.back().details.find(L"0xABCDEF") != std::wstring::npos &&
+              report.find(noDumpReason) == std::string::npos &&
+              report.find(en ? "writing the dump failed" : "덤프 쓰기에 실패했습니다") != std::string::npos &&
+              report.find(en ? "No dump was saved" : "덤프는 남기지 못했습니다") != std::string::npos,
+              "give the raw address and explain in words why the second dump is missing");
+    }
+    r.recommendations = { en ? L"[Basics] Original note." : L"[기본] 원래 문구.", r.recommendations.back() };
+    Require(BuildSummaryJson(r, temp.path, stem, true)["next_action_index"] == 0,
+            "the appended note does not displace the background fallback");
+  }
+}
+
+void TestSecondFaultStream(i18n::Language lang)
+{
+  const bool en = lang == i18n::Language::kEnglish;
+  constexpr auto stem = L"SkyrimDiag_SecondFault_20970713_120000_000";
+  TempDirectory temp;
+  const auto r = Analyze(temp.path, Case{ .log_name = L"", .second_fault_timeline = true,
+                                         .second_fault_stream = true }, lang);
+  const auto summary = BuildSummaryJson(r, temp.path, stem, true);
+  const auto report = BuildReportText(r, summary, true);
+  Require(r.is_second_fault_capture && r.is_crash_like && !r.is_hang_like && !r.crash_bucket_key.empty() &&
+          summary["analysis"].at("is_second_fault_capture") == true,
+          "recognize a second-fault minidump without a sidecar");
+  Require(r.exc_code == EXCEPTION_ACCESS_VIOLATION && r.exc_tid == kDumpTid &&
+          r.blackbox_exception_code == EXCEPTION_ILLEGAL_INSTRUCTION && r.blackbox_faulting_tid == kLogTid,
+          "use B's exception stream and keep the blackbox's A fields");
+  Require(r.events.back().t_ms == kFirstFaultMs && r.second_fault_time_ms == kSecondFaultMs,
+          "preserve the source events and use B's QPC as the crash anchor");
+  Require(!r.forced_close.detected && r.save_load.timed_to_crash && r.save_load.seconds_loading == 13.0 &&
+          r.first_chance_summary.recent_count == 1,
+          "forced-close, save-load, and recent first-chance windows use B's QPC");
+  const auto resources = std::find_if(r.evidence.begin(), r.evidence.end(), [en](const EvidenceItem& item) {
+    return item.title.starts_with(en ? L"Resources loaded near the crash" : L"크래시 직전/직후 로드된 리소스");
+  });
+  Require(resources != r.evidence.end() && resources->details.find(L"-4200ms") != std::wstring::npos &&
+          resources->details.find(L"recent.nif") != std::wstring::npos &&
+          resources->details.find(L"older.nif") == std::wstring::npos,
+          "resource evidence uses B's QPC for both its cutoff and relative time");
+  Require(report.find(en ? "earlier exception held it frozen" : "일반 이벤트가 기록되지 않았습니다") !=
+            std::string::npos &&
+          r.summary_sentence.starts_with(en ? L"This dump is of an exception" : L"이 덤프는 Tullius"),
+          "explain what the second dump contains before its conclusion and account for the blackbox gap");
+  Require(!fs::exists(temp.path / "crash_history.json"), "analyzing B does not write history");
+
+  const auto withManifest = Analyze(temp.path, Case{ .log_name = L"",
+    .manifest = R"({"capture_kind":"crash","context":{"unhandled_exception_signal":true}})",
+    .second_fault_timeline = true, .second_fault_stream = true }, lang);
+  Require(!withManifest.incident_unhandled_exception_signal &&
+          !BuildSummaryJson(withManifest, temp.path, stem, true).contains("incident"),
+          "a timestamp collision does not attach A's incident to B");
+
+  TempDirectory oldDir;
+  const auto old = Analyze(oldDir.path, Case{ .log_name = L"", .second_fault_timeline = true }, lang);
+  Require(!old.is_second_fault_capture && !old.second_fault_time_ms && old.forced_close.detected &&
+          old.save_load.seconds_loading == 9.0 && old.first_chance_summary.recent_count == 2,
+          "a legacy dump still uses A's crash marker for its timing");
+  TempDirectory badDir;
+  const auto bad = Analyze(badDir.path, Case{ .log_name = L"", .second_fault_timeline = true,
+    .second_fault_stream = true, .damaged_second_fault_stream = true }, lang);
+  Require(!bad.is_second_fault_capture && !bad.second_fault_time_ms && bad.forced_close.detected,
+          "an unsupported stream version leaves the original analysis in place");
+}
+
+// Item 18: a second fault dump is a crash capture for Crash Logger pairing,
+// whatever its name says: a thread dump's log is never its log.
+void TestSecondFaultCrashLoggerPairing(i18n::Language lang)
+{
+  {
+    TempDirectory temp;
+    const auto r = Analyze(temp.path, Case{ .log_name = L"threaddump-2097-07-13-12-00-04.log",
+      .second_fault_stream = true, .expect_log_pairing = false }, lang);
+    Require(r.is_second_fault_capture && r.crash_logger_log_path.empty(),
+            "a thread dump log does not pair with a second fault dump");
+  }
+  TempDirectory temp;
+  const auto r = Analyze(temp.path, Case{ .second_fault_stream = true }, lang);
+  Require(r.is_second_fault_capture && !r.crash_logger_log_path.empty(),
+          "a crash log near a second fault dump pairs as with a crash");
+}
+
+// Item 18: the history is read for a second fault dump as for a crash, and
+// never written.
+void TestSecondFaultReadsCrashHistory(i18n::Language lang)
+{
+  TempDirectory temp;
+  const auto earlier = Analyze(temp.path, Case{ .log_name = L"" }, lang);
+  const auto history = temp.path / "crash_history.json";
+  Require(fs::is_regular_file(history), "the crash fixture writes the history");
+  std::ifstream before(history, std::ios::binary);
+  const std::string written((std::istreambuf_iterator<char>(before)), std::istreambuf_iterator<char>());
+  before.close();
+
+  const auto r = Analyze(temp.path, Case{ .log_name = L"", .second_fault_stream = true }, lang);
+  Require(r.is_second_fault_capture && r.crash_bucket_key == earlier.crash_bucket_key &&
+            r.history_correlation.count == 2u,
+          "B's report reads the earlier crash of its bucket");
+  std::ifstream after(history, std::ios::binary);
+  const std::string now((std::istreambuf_iterator<char>(after)), std::istreambuf_iterator<char>());
+  Require(now == written, "analyzing B leaves the history as it was");
+}
+
+// Item 19: B's time is unknown when its stream has no usable QPC.
+void TestSecondFaultTimeUnknown(i18n::Language lang)
+{
+  const bool en = lang == i18n::Language::kEnglish;
+  TempDirectory temp;
+  const auto r = Analyze(temp.path, Case{ .log_name = L"", .second_fault_timeline = true, .second_fault_stream = true,
+    .second_fault_qpc_unknown = true }, lang);
+  Require(r.is_second_fault_capture && !r.second_fault_time_ms, "a zero QPC gives no B time");
+  const bool said = std::any_of(r.evidence.begin(), r.evidence.end(), [en](const EvidenceItem& item) {
+    return item.details.find(en ? L"When this exception happened is not known" : L"이 예외가 난 시각은 알 수 없습니다") !=
+      std::wstring::npos;
+  });
+  Require(said, "the report says B's time is not known");
+}
+
 }  // namespace
 
-int main()
+int main(int argc, char* argv[])
 {
   try {
+    if (argc == 2 && std::string_view(argv[1]) == "--second-fault") {
+      TestSecondFaultIncident(i18n::Language::kEnglish);
+      TestSecondFaultIncident(i18n::Language::kKorean);
+      TestSecondFaultStream(i18n::Language::kEnglish);
+      TestSecondFaultStream(i18n::Language::kKorean);
+      TestSecondFaultCrashLoggerPairing(i18n::Language::kEnglish);
+      TestSecondFaultReadsCrashHistory(i18n::Language::kEnglish);
+      TestSecondFaultTimeUnknown(i18n::Language::kEnglish);
+      TestSecondFaultTimeUnknown(i18n::Language::kKorean);
+      return 0;
+    }
     TestPairingTime();
     TestUnhandledSignal();
     TestExceptionModules();

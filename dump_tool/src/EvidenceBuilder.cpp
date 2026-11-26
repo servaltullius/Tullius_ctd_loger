@@ -3,16 +3,137 @@
 #include <algorithm>
 #include <cwctype>
 #include <filesystem>
+#include <string_view>
 
 #include "EvidenceBuilderPrivate.h"
 #include "GpuDriverLog.h"
 #include "MinidumpUtil.h"
 #include "SkyrimDiagShared.h"
+#include "Utf.h"
 #include "WctTypes.h"
 
 namespace skydiag::dump_tool {
 
 namespace {
+
+// Why the helper left no dump of a second fault (its record's "reason"), as a
+// sentence. The identifiers are the helper's (CrashCapture ProcessSecondFault,
+// DrainSecondFault).
+std::wstring DescribeSecondFaultReason(std::string_view reason, bool en)
+{
+  struct Text
+  {
+    std::string_view id;
+    const wchar_t* en;
+    const wchar_t* ko;
+  };
+  static constexpr Text kTexts[] = {
+    { "no_a_dump_yet", L"its hold ended before this exception's dump was written",
+      L"이 예외의 덤프를 쓰기 전에 붙잡아 둘 수 있는 시간이 끝났습니다" },
+    { "a_checked_first", L"Tullius was checking whether the game recovers before writing a dump of this exception",
+      L"Tullius가 이 예외의 덤프를 쓰기 전에 게임이 회복하는지 확인하던 중이었습니다" },
+    { "a_already_captured", L"this exception had already been kept as the crash",
+      L"이 예외를 이미 크래시로 확정한 뒤였습니다" },
+    { "a_released", L"this exception was being let go as one the game handled",
+      L"이 예외를 게임이 처리한 것으로 보고 놓아 주던 중이었습니다" },
+    { "a_superseded", L"a newer crash came in and was handled first",
+      L"더 새로운 크래시가 들어와 그쪽을 먼저 처리했습니다" },
+    { "a_dump_failed", L"this exception's own dump could not be written",
+      L"이 예외의 덤프부터 쓰지 못했습니다" },
+    { "a_mismatch", L"it was recorded for another exception than this one",
+      L"이 예외가 아닌 다른 예외에 대해 적힌 기록이었습니다" },
+    { "process_exited", L"the game had already ended", L"게임이 이미 끝난 뒤였습니다" },
+    { "hold_expired", L"the plugin's hold time ran out before the dump could start",
+      L"덤프를 시작하기 전에 플러그인이 붙잡아 둘 수 있는 시간이 끝났습니다" },
+    { "second_fault_dumps_disabled", L"MaxSecondFaultDumps=0 turns these dumps off",
+      L"MaxSecondFaultDumps=0으로 이 덤프를 끄도록 설정되어 있습니다" },
+    { "snapshot_unavailable", L"the blackbox could not be read consistently",
+      L"블랙박스를 일관되게 읽지 못했습니다" },
+    { "dump_write_failed", L"writing the dump failed", L"덤프 쓰기에 실패했습니다" },
+    { "capture_exception", L"an error occurred while writing it", L"기록하는 중 오류가 났습니다" },
+    { "helper_stopped", L"the helper was stopping", L"Helper가 끝나는 중이었습니다" },
+  };
+  for (const auto& text : kTexts) {
+    if (text.id == reason) {
+      return en ? text.en : text.ko;
+    }
+  }
+  return en ? L"the reason was not recorded" : L"이유가 기록되지 않았습니다";
+}
+
+void AppendSecondFaultEvidence(AnalysisResult& r, i18n::Language lang)
+{
+  const bool en = lang == i18n::Language::kEnglish;
+  if (r.is_second_fault_capture) {
+    r.summary_sentence = (en
+      ? L"This dump is of an exception that reached the top-level exception filter unhandled while Tullius was checking an earlier exception. "
+      : L"이 덤프는 Tullius가 다른 예외를 확인하던 동안 처리되지 않은 채 최상위 예외 필터에 닿은 예외의 것입니다. ") +
+      r.summary_sentence;
+    if (r.has_blackbox) {
+      EvidenceItem item{};
+      item.confidence_level = i18n::ConfidenceLevel::kHigh;
+      item.confidence = i18n::ConfidenceText(lang, item.confidence_level);
+      item.title = en ? L"Blackbox gap before the second fault" : L"두 번째 예외 직전의 블랙박스 공백";
+      item.details = en
+        ? L"The blackbox did not record ordinary events while the earlier exception held it frozen."
+        : L"앞선 예외가 블랙박스를 동결한 동안에는 일반 이벤트가 기록되지 않았습니다.";
+      if (!r.second_fault_time_ms) {
+        // ParseBlackboxStream found no usable QPC for B.
+        item.details += en
+          ? L" When this exception happened is not known (its time is missing or before the session start), so the "
+            L"times here are measured from the earlier exception's crash marker."
+          : L" 이 예외가 난 시각은 알 수 없습니다(시각이 없거나 세션 시작 전). 그래서 여기의 시간은 앞선 예외의 크래시 "
+            L"표시를 기준으로 했습니다.";
+      }
+      r.evidence.push_back(std::move(item));
+    }
+    return;
+  }
+
+  if (!r.incident_second_fault) {
+    return;
+  }
+  const auto& second = *r.incident_second_fault;
+  const std::wstring location = second.module_plus_offset.empty()
+    ? internal::Hex64(second.address)
+    : second.module_plus_offset + (en ? L", from this dump's module list" : L", 이 덤프의 모듈 목록 기준");
+  const auto tid = std::to_wstring(second.tid);
+  EvidenceItem item{};
+  item.confidence_level = i18n::ConfidenceLevel::kHigh;
+  item.confidence = i18n::ConfidenceText(lang, item.confidence_level);
+  item.title = en ? L"Second exception reached the top-level filter" : L"최상위 예외 필터에 닿은 두 번째 예외";
+  item.details = en
+    ? L"While Tullius was checking whether the game handled this exception, another exception (" + location +
+        L", thread " + tid + L") reached the top-level exception filter unhandled."
+    : L"Tullius가 이 예외를 게임이 처리했는지 확인하던 동안 다른 예외(" + location +
+        L", 스레드 " + tid + L")가 처리되지 않은 채 최상위 예외 필터에 닿았습니다.";
+  if (!second.dump_filename.empty() && second.dump_missing) {
+    const auto filename = Utf8ToWide(second.dump_filename);
+    const std::wstring gone = en
+      ? L"A separate dump of that exception was saved as " + filename +
+          L", but it is not in this folder any more (retention may have deleted it)."
+      : L"그 예외의 덤프를 " + filename + L"에 따로 남겼지만 지금은 이 폴더에 없습니다(보존 정리로 지워졌을 수 있음).";
+    item.details += L" " + gone;
+    r.recommendations.push_back(gone);
+  } else if (!second.dump_filename.empty()) {
+    const auto filename = Utf8ToWide(second.dump_filename);
+    item.details += en ? L" A separate dump was saved as " + filename + L"."
+                       : L" 그 예외의 덤프를 " + filename + L"에 따로 남겼습니다.";
+    r.recommendations.push_back(en
+      ? L"That exception may have ended the game. Open " + filename + L" in the viewer to examine it."
+      : L"게임을 끝낸 것은 그 예외일 수 있으니 뷰어에서 " + filename + L"도 열어 보세요.");
+  } else {
+    const std::wstring reason = DescribeSecondFaultReason(second.reason, en);
+    const std::wstring noDump = en ? L"No dump was saved for that exception: " + reason + L"."
+                                   : L"그 예외의 덤프는 남기지 못했습니다. " + reason + L".";
+    item.details += L" " + noDump;
+    r.recommendations.push_back(noDump);
+  }
+  if (second.resumed) {
+    item.details += en ? L" Execution resumed after that exception." : L" 그 예외는 그 뒤 실행이 이어졌습니다.";
+  }
+  r.evidence.push_back(std::move(item));
+}
 
 void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 {
@@ -64,19 +185,19 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     handledCppException && !wctSuggestsHang && (manualCaptureHint || heartbeatSuggestsNotHang || nameCrash);
   // A manual capture can include a "Crash" blackbox marker due to handled exceptions (or false triggers),
   // but that does not necessarily mean the game actually CTD'd. Prefer exception stream presence for crash classification.
-  const bool isCrashLike =
-    !r.is_filtered_clean_exit &&
-    (nameCrash || (hasException && !likelyHandledExceptionFalsePositive) ||
-     (hasCrashEvent && !manualCaptureHint && !handledCppException));
+  const bool isCrashLike = r.is_second_fault_capture ||
+    (!r.is_filtered_clean_exit &&
+     (nameCrash || (hasException && !likelyHandledExceptionFalsePositive) ||
+      (hasCrashEvent && !manualCaptureHint && !handledCppException)));
   const bool nameHangEffective = nameHang && !manualFromWct && !heartbeatSuggestsNotHang;
   // ADR-0035: a slow shutdown was judged a freeze by the analyzer
   // (DetectSlowShutdown), so the result's flags say so too.
   const bool isHangLike =
-    !r.is_filtered_clean_exit &&
+    !r.is_second_fault_capture && !r.is_filtered_clean_exit &&
     (nameHangEffective || hasHangEvent || wctSuggestsHang || r.quit_before_freeze.detected);
   const bool isSnapshotLike = !isCrashLike && !isHangLike;
   const bool isManualCapture =
-    !r.is_filtered_clean_exit &&
+    !r.is_second_fault_capture && !r.is_filtered_clean_exit &&
     (manualCaptureHint || (nameHang && isSnapshotLike));
 
   r.is_crash_like = isCrashLike;
@@ -191,6 +312,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
           : L" 아래는 이 덤프에 찍힌 앞선 예외의 분석입니다. ") +
       r.summary_sentence;
   }
+  AppendSecondFaultEvidence(r, lang);
 }
 
 }  // namespace

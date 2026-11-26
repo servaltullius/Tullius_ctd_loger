@@ -16,11 +16,16 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <atomic>
+#include <chrono>
+#include <memory>
 #include <thread>
 
 #include "SkyrimDiag/CrashHandler.h"
 #include "SkyrimDiag/SharedMemory.h"
 #include "SkyrimDiagHelper/ProcessAttach.h"
+#include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagSecondFault.h"
 #include "SkyrimDiagShared.h"
 
 // CloseRequestHooks.cpp needs CommonLibSSE; with no game window there the
@@ -560,6 +565,101 @@ int RunChild(const char* mode, const char* goEventName)
   return 92;
 }
 
+LONG WINAPI ReenterSecondFaultFilter(EXCEPTION_POINTERS* ep)
+{
+  g_childChainingFilterPrevious(ep);
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+LONG WINAPI ChildSecondFaultChainingFilter(EXCEPTION_POINTERS*)
+{
+  // Give the reentrant call its own first-chance candidate, before the outer
+  // filter returns. It must not count as another eligible B.
+  __try {
+    RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+  } __except (ReenterSecondFaultFilter(GetExceptionInformation())) {
+  }
+  return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+int RunSecondFaultChild(const char* mode, const char* goEventName, const char* crashLoggerPath)
+{
+  SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+  const bool stackOverflow = std::strcmp(mode, "stack-overflow") == 0;
+  SetUnhandledExceptionFilter(stackOverflow ? ChildPreviousFilter : ChildResumingFilter);
+  if (stackOverflow && !KeepStackForExceptionContext(MeasureExceptionContextBytes(), false)) {
+    return 89;
+  }
+  const bool haveRange = std::strcmp(mode, "range-unpublished") != 0;
+  const auto crashLogger = haveRange ? LoadLibraryA(crashLoggerPath) : nullptr;
+  if (haveRange && !crashLogger) {
+    return 90;
+  }
+  if (std::strcmp(mode, "zero-hold") == 0) {
+    skydiag::plugin::SetUnhandledCrashHoldMs(0);
+  }
+  if (std::strcmp(mode, "short-hold") == 0) {
+    skydiag::plugin::SetUnhandledCrashHoldMs(1500);
+  }
+  if (!skydiag::plugin::InitSharedMemory() || !skydiag::plugin::InstallCrashHandler(1)) {
+    return 91;
+  }
+  // The SKSE lifecycle's lookup once every plugin is loaded.
+  if (std::strcmp(mode, "lookups-pending") != 0) {
+    skydiag::plugin::NoteCrashLoggerModuleRangesFinal();
+  }
+  const std::string startBName = std::string(goEventName) + "_B";
+  HANDLE go = OpenEventA(SYNCHRONIZE, FALSE, goEventName);
+  HANDLE startB = OpenEventA(SYNCHRONIZE, FALSE, startBName.c_str());
+  if (!go || !startB || WaitForSingleObject(go, 10000) != WAIT_OBJECT_0 || CatchWriteThroughNull() != 1) {
+    return 92;
+  }
+  if (std::strcmp(mode, "thawed") == 0) {
+    if (!AddVectoredExceptionHandler(0, [](EXCEPTION_POINTERS*) -> LONG {
+          RearmIncident(skydiag::plugin::GetShared());
+          return EXCEPTION_CONTINUE_SEARCH;
+        })) {
+      return 93;
+    }
+  }
+  if (std::strcmp(mode, "range-inside") == 0) {
+    // Put this synthetic exception inside the stand-in module's image,
+    // without changing the machine context that allows it to resume.
+    g_probe = reinterpret_cast<ProbeFn>(GetProcAddress(crashLogger, "SkydiagFakeCrashLoggerProbe"));
+    if (!g_probe || !AddVectoredExceptionHandler(1, [](EXCEPTION_POINTERS* ep) -> LONG {
+          ep->ExceptionRecord->ExceptionAddress = reinterpret_cast<void*>(g_probe);
+          return EXCEPTION_CONTINUE_SEARCH;
+        })) {
+      return 93;
+    }
+  }
+  if (std::strcmp(mode, "reentered") == 0) {
+    g_childChainingFilterPrevious = SetUnhandledExceptionFilter(ChildSecondFaultChainingFilter);
+    if (skydiag::plugin::ReclaimTopLevelFilter() != reinterpret_cast<std::uintptr_t>(ChildSecondFaultChainingFilter)) {
+      return 93;
+    }
+  }
+  if (WaitForSingleObject(startB, 10000) != WAIT_OBJECT_0) {
+    return 94;
+  }
+  CloseHandle(startB);
+  CloseHandle(go);
+  if (stackOverflow) {
+    volatile std::uint64_t limit = ~0ull;
+    return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
+  }
+  if (std::strcmp(mode, "different-thread") == 0) {
+    std::thread worker([] { RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr); });
+    worker.join();
+  } else {
+    RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+    if (std::strcmp(mode, "same-thread") == 0) {
+      RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+    }
+  }
+  return 0;
+}
+
 struct ChildOutcome
 {
   DWORD mainTid = 0;
@@ -624,6 +724,268 @@ void RequireOf(const ChildOutcome& outcome, bool condition, const char* message)
     "the helper could not attach to the child's shared memory and crash event (" + state + "; " +
     DescribeHost() + ")");
 }
+
+void TestSecondFaultChild(const char* mode, const char* crashLoggerPath)
+{
+  namespace fault = skydiag::second_fault;
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goName = "Local\\skydiag_fault2_test_" + std::to_string(GetCurrentProcessId());
+  const std::string startBName = goName + "_B";
+  const HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goName.c_str());
+  const HANDLE startB = CreateEventA(nullptr, TRUE, FALSE, startBName.c_str());
+  Require(go && startB, "second fault barrier creation failed");
+
+  std::string command = std::string("\"") + exePath + "\" --child-second-fault " + mode + " " +
+                        goName + " \"" + crashLoggerPath + "\"";
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(CreateProcessA(exePath, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi),
+          "second fault child creation failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    CloseHandle(startB);
+    FailChildNotAttached(pi, go);
+  }
+
+  HANDLE settled = nullptr;
+  const auto cleanup = [&] {
+    if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+      TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+    }
+    if (settled) {
+      CloseHandle(settled);
+    }
+    skydiag::helper::Detach(proc);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(startB);
+    CloseHandle(go);
+  };
+  try {
+    Require(proc.secondFault && proc.secondFaultPosted, "plugin did not create the second fault mapping and event");
+    const bool sameThread = std::strcmp(mode, "same-thread") == 0;
+    const bool differentThread = std::strcmp(mode, "different-thread") == 0;
+    const bool zeroHold = std::strcmp(mode, "zero-hold") == 0;
+    const bool reentered = std::strcmp(mode, "reentered") == 0;
+    const bool stackOverflow = std::strcmp(mode, "stack-overflow") == 0;
+    const bool shortHold = std::strcmp(mode, "short-hold") == 0;
+    const bool stateSettle = std::strcmp(mode, "state-settle") == 0;
+    const bool expectPost = sameThread || differentThread || zeroHold || reentered || shortHold || stateSettle;
+    const bool haveHelper = std::strcmp(mode, "no-helper") != 0;
+    if (haveHelper) {
+      const auto name = skydiag::protocol::MakeKernelName(pi.dwProcessId, fault::kSettledSuffix);
+      settled = CreateEventW(nullptr, FALSE, FALSE, name.c_str());
+      Require(settled, "second fault settlement event creation failed");
+      // A stale wake must never release a different publication.
+      Require(SetEvent(settled), "setting stale second fault wake failed");
+    }
+
+    SetEvent(go);
+    Require(WaitForSingleObject(proc.crashEvent, 5000) == WAIT_OBJECT_0, "A did not publish");
+    const auto seq = proc.shm->header.crash_seq;
+    const auto addressA = proc.shm->header.crash.exception_addr;
+    Require(seq != 0 && (seq & 1u) == 0 && addressA != 0, "A is not committed");
+    Require(fault::ReadState(*proc.secondFault) == fault::kEmpty, "handled A filled the second fault slot");
+    SetEvent(startB);
+    if (expectPost) {
+      Require(WaitForSingleObject(proc.secondFaultPosted, 2000) == WAIT_OBJECT_0, "B did not post");
+      const auto& b = *proc.secondFault;
+      Require(fault::ReadState(b) == fault::kPosted && b.a_crash_seq == seq, "B has the wrong A generation");
+      Require(b.tid != 0 && (b.tid == pi.dwThreadId) == !differentThread, "B has the wrong thread");
+      Require(b.code == EXCEPTION_ACCESS_VIOLATION && b.address != addressA && b.address != 0,
+              "B has the wrong exception");
+      Require(b.exception_record.ExceptionCode == b.code && b.context.ContextFlags && b.context.Rsp &&
+                b.qpc && (b.hold_until_qpc > b.qpc) == !zeroHold,
+              "B does not carry its own context and hold deadline");
+      if (shortHold) {
+        // Nobody settles it: the finite hold (1.5 s from the filter's entry)
+        // ends the wait, and B stays posted for the helper.
+        Require(WaitForSingleObject(pi.hProcess, 150) == WAIT_TIMEOUT, "B was not held until its limit");
+        Require(WaitForSingleObject(pi.hProcess, 3000) == WAIT_OBJECT_0, "the hold limit did not end the wait");
+        Require(fault::ReadState(*proc.secondFault) == fault::kPosted, "an expired hold left the slot as posted");
+      } else if (stateSettle) {
+        // The wake went to another waiter: the state alone must end the wait
+        // long before the 5 s limit.
+        Require(WaitForSingleObject(pi.hProcess, 100) == WAIT_TIMEOUT, "B was released early");
+        const auto settledAt = std::chrono::steady_clock::now();
+        InterlockedExchange(&proc.secondFault->state, fault::kSettled);
+        Require(WaitForSingleObject(pi.hProcess, 1000) == WAIT_OBJECT_0, "B waited past its settled state");
+        Require(std::chrono::steady_clock::now() - settledAt < std::chrono::milliseconds(1000),
+                "a settled state without a wake ends the wait within a slice");
+      } else if (!zeroHold) {
+        Require(WaitForSingleObject(pi.hProcess, 100) == WAIT_TIMEOUT, "B was released by a stale wake");
+        InterlockedExchange(&proc.secondFault->state, fault::kSettled);
+        SetEvent(settled);
+      }
+    }
+    Require(WaitForSingleObject(pi.hProcess, 2000) == WAIT_OBJECT_0, "B never continued after its lower filter");
+    DWORD exit = 1;
+    Require(GetExitCodeProcess(pi.hProcess, &exit) && exit == (stackOverflow ? kChildFilterExitCode : 0),
+            "the lower filter was not reached");
+    if (expectPost) {
+      Require(proc.secondFault->resumed == 1, "B's resume was not recorded");
+      Require(fault::ReadDropped(*proc.secondFault, seq) == (sameThread ? 1 : 0),
+              "only the second B must be counted as dropped");
+      Require(WaitForSingleObject(proc.secondFaultPosted, 0) == WAIT_TIMEOUT, "another B overwrote A's slot");
+    } else {
+      Require(fault::ReadState(*proc.secondFault) == fault::kEmpty &&
+                WaitForSingleObject(proc.secondFaultPosted, 0) == WAIT_TIMEOUT,
+              "B posted without a matching A, known range, or compatible helper");
+    }
+    Require(proc.shm->header.crash_seq == seq && proc.shm->header.crash.exception_addr == addressA,
+            "B changed the v4 record");
+    Require(WaitForSingleObject(proc.unhandledEvent, 0) == WAIT_TIMEOUT &&
+              WaitForSingleObject(proc.dumpSettledEvent, 0) == WAIT_TIMEOUT,
+            "B used A's events");
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+  cleanup();
+}
+
+namespace fault_tests {
+
+namespace fault = skydiag::second_fault;
+
+// Item: B candidates. Two threads that pick the same free entry at once must
+// both end up with an entry of their own.
+void TestCandidateTableConcurrentClaims()
+{
+  constexpr int kRounds = 20000;
+  fault::CandidateTable* table = nullptr;
+  std::atomic<int> round{0};
+  std::atomic<int> done{0};
+  std::atomic<bool> stop{false};
+  bool noted[2]{};
+  const auto worker = [&](int index) {
+    int seen = 0;
+    for (;;) {
+      int current = round.load(std::memory_order_acquire);
+      while (current == seen && !stop.load(std::memory_order_acquire)) {
+        YieldProcessor();
+        current = round.load(std::memory_order_acquire);
+      }
+      if (stop.load(std::memory_order_acquire)) {
+        return;
+      }
+      seen = current;
+      noted[index] = table->Note(DWORD{100} + static_cast<DWORD>(index),&noted[index], 2u, [](std::uint32_t) noexcept {
+        return true;
+      });
+      done.fetch_add(1, std::memory_order_acq_rel);
+    }
+  };
+  std::thread first(worker, 0);
+  std::thread second(worker, 1);
+  int lost = 0;
+  for (int i = 1; i <= kRounds; ++i) {
+    auto fresh = std::make_unique<fault::CandidateTable>();
+    table = fresh.get();
+    done.store(0, std::memory_order_release);
+    round.store(i, std::memory_order_release);
+    while (done.load(std::memory_order_acquire) != 2) {
+      YieldProcessor();
+    }
+    if (!noted[0] || !noted[1] || table->Take(100, &noted[0]) != 2u || table->Take(101, &noted[1]) != 2u) {
+      ++lost;
+    }
+  }
+  stop.store(true, std::memory_order_release);
+  first.join();
+  second.join();
+  if (lost != 0) {
+    std::fprintf(stderr, "candidate claims lost in %d of %d rounds\n", lost, kRounds);
+  }
+  Require(lost == 0, "two threads claiming free entries at once must both keep a candidate");
+}
+
+void TestCandidateTableOwnershipAndSaturation()
+{
+  const auto live = [](std::uint32_t seq) noexcept { return seq == 4u; };
+  int records[fault::CandidateTable::kCount + 2]{};
+  fault::CandidateTable table;
+  for (DWORD i = 0; i < fault::CandidateTable::kCount; ++i) {
+    Require(table.Note(10 + i, &records[i], 4u, live), "a free entry takes a candidate");
+  }
+  Require(!table.Note(99, &records[8], 4u, live), "a live candidate of another thread is never replaced");
+  Require(table.Note(10, &records[9], 4u, live), "a thread updates its own entry");
+  Require(table.Take(10, &records[0]) == 0u && table.Take(10, &records[9]) == 4u,
+          "only the thread's latest candidate is kept");
+  Require(table.Note(10, &records[0], 4u, live), "the freed entry is reusable");
+  Require(!table.Note(10, &records[1], 0u, live) && table.Take(10, &records[0]) == 4u,
+          "forgetting another record keeps the candidate");
+  Require(table.Note(11, &records[1], 0u, live) && table.Take(11, &records[1]) == 0u,
+          "forgetting the same record drops the candidate");
+  Require(table.Take(12, &records[1]) == 0u, "another thread's record is not taken");
+
+  fault::CandidateTable stale;
+  for (DWORD i = 0; i < fault::CandidateTable::kCount; ++i) {
+    Require(stale.Note(10 + i, &records[i], i == 3u ? 2u : 4u, live), "fill");
+  }
+  Require(stale.Note(99, &records[8], 4u, live), "an entry whose generation is over can be reused");
+  Require(stale.Take(13, &records[3]) == 0u && stale.Take(99, &records[8]) == 4u, "the over entry was reused");
+  for (DWORD i = 0; i < fault::CandidateTable::kCount; ++i) {
+    Require(i == 3u || stale.Take(10 + i, &records[i]) == 4u, "live entries survive the reuse");
+  }
+}
+
+void TestSlotClaimAndDropped()
+{
+  auto slot = std::make_unique<fault::Slot>();
+  Require(fault::ClaimSlot(*slot, 4u, []() noexcept { return true; }) == fault::SlotClaim::kClaimed &&
+            fault::ReadState(*slot) == fault::kWriting && fault::ReadOwner(*slot) == 4u,
+          "an empty slot is claimed with its owner written at once");
+  Require(fault::ClaimSlot(*slot, 4u, []() noexcept { return true; }) == fault::SlotClaim::kTaken &&
+            fault::ReadDropped(*slot, 4u) == 1,
+          "the same A's second B is counted as dropped");
+  Require(fault::ClaimSlot(*slot, 6u, []() noexcept { return true; }) == fault::SlotClaim::kTaken &&
+            fault::ReadDropped(*slot, 6u) == 0 && fault::ReadDropped(*slot, 4u) == 1,
+          "a B of another A is not counted on this A's slot");
+  Require(fault::ClaimSlot(*slot, 4u, []() noexcept { return false; }) == fault::SlotClaim::kTaken &&
+            fault::ReadDropped(*slot, 4u) == 1,
+          "a B whose A was let go is not counted");
+
+  // A late count of the old generation never carries into the next.
+  fault::CountDropped(*slot, 4u);
+  Require(fault::ReadDropped(*slot, 4u) == 2, "counts accumulate per generation");
+  // The helper empties the slot (it leaves the counter as it is).
+  InterlockedExchange(&slot->state, fault::kEmpty);
+  Require(fault::ClaimSlot(*slot, 6u, []() noexcept { return true; }) == fault::SlotClaim::kClaimed &&
+            fault::ReadDropped(*slot, 6u) == 0,
+          "the next A starts with no dropped count");
+  fault::CountDropped(*slot, 4u);
+  Require(fault::ReadDropped(*slot, 6u) == 0, "a late count of the earlier A is not the next A's");
+
+  auto ended = std::make_unique<fault::Slot>();
+  Require(fault::ClaimSlot(*ended, 4u, []() noexcept { return false; }) == fault::SlotClaim::kGenerationEnded &&
+            fault::ReadState(*ended) == fault::kSettled && fault::ReadOwner(*ended) == 4u,
+          "a claim after A was let go leaves a settled slot for the helper to empty");
+}
+
+void TestCandidateRule()
+{
+  using fault::IsSecondFaultCandidate;
+  Require(IsSecondFaultCandidate(true, false, 2u, 2u), "a fatal exception that lost Frozen is a candidate");
+  Require(!IsSecondFaultCandidate(false, false, 2u, 2u), "another publish failure is not");
+  Require(!IsSecondFaultCandidate(true, true, 2u, 2u), "Crash Logger reporting a kept exception is not");
+  Require(!IsSecondFaultCandidate(true, false, 3u, 3u) && !IsSecondFaultCandidate(true, false, 0u, 0u),
+          "an odd or zero generation is not");
+  Require(!IsSecondFaultCandidate(true, false, 2u, 4u), "a generation that changed meanwhile is not");
+}
+
+}  // namespace fault_tests
 
 ChildOutcome RunChildToCrash(const char* mode)
 {
@@ -1112,10 +1474,26 @@ void TestAbortAfterACaughtThrowIsNotBlamedOnIt()
 
 int main(int argc, char** argv)
 {
+  if (argc == 5 && std::strcmp(argv[1], "--child-second-fault") == 0) {
+    return RunSecondFaultChild(argv[2], argv[3], argv[4]);
+  }
   if (argc == 4 && std::strcmp(argv[1], "--child") == 0) {
     return RunChild(argv[2], argv[3]);
   }
   try {
+    if (argc == 3 && std::strcmp(argv[2], "--second-fault") == 0) {
+      fault_tests::TestCandidateRule();
+      fault_tests::TestCandidateTableOwnershipAndSaturation();
+      fault_tests::TestCandidateTableConcurrentClaims();
+      fault_tests::TestSlotClaimAndDropped();
+      for (const char* mode : {"different-thread", "same-thread", "zero-hold", "no-helper", "range-unpublished",
+                              "range-inside", "reentered", "stack-overflow", "thawed", "lookups-pending",
+                              "short-hold", "state-settle"}) {
+        std::printf("Second fault: %s\n", mode);
+        TestSecondFaultChild(mode, argv[1]);
+      }
+      return 0;
+    }
     Require(argc == 2, "usage: plugin_crash_handler_runtime_tests <path to fake CrashLogger.dll>");
     const HMODULE crashLogger = LoadLibraryA(argv[1]);
     Require(crashLogger != nullptr, "failed to load the fake CrashLogger.dll");

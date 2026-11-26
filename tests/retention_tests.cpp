@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -993,8 +994,125 @@ static void Test_PrunesDumpsAndArtifactsFromPlainLongOutputPaths()
 }
 #endif
 
-int main()
+static void Test_SecondFaultsShareTheirOwnCountLimit()
 {
+  const auto dir = MakeTempDir();
+  const auto crash = dir / "SkyrimDiag_Crash_20260101_000000.dmp";
+  const auto oldDump = dir / "SkyrimDiag_SecondFault_20260101_000001_001.dmp";
+  const auto oldRecord = dir / "SkyrimDiag_SecondFault_20260101_000001_001.json";
+  const auto oldReport = dir / "SkyrimDiag_SecondFault_20260101_000001_001_SkyrimDiagReport.txt";
+  const auto newestDump = dir / "SkyrimDiag_SecondFault_20260101_000002_001.dmp";
+  const auto newestRecord = dir / "SkyrimDiag_SecondFault_20260101_000002_001.json";
+  const auto recordOnly = dir / "SkyrimDiag_SecondFault_20260101_000003_001-2.json";
+  for (const auto& path : {crash, oldDump, oldRecord, oldReport, newestDump, newestRecord, recordOnly}) {
+    WriteFile(path);
+  }
+
+  RetentionLimits limits{};
+  limits.maxCrashDumps = 1;
+  limits.maxSecondFaultDumps = 2;
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(Exists(crash) && "a supplemental capture must not count as a crash");
+  assert(!Exists(oldDump) && !Exists(oldRecord) && !Exists(oldReport) && "all old capture artifacts go together");
+  assert(Exists(newestDump) && Exists(newestRecord) && "a dump and record share one place");
+  assert(Exists(recordOnly) && "an entry can consist of a record alone");
+
+  limits.maxSecondFaultDumps = 1;
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(!Exists(newestDump) && !Exists(newestRecord) && "a newer standalone record takes a retention place");
+  assert(Exists(recordOnly) && Exists(crash));
+
+  limits.maxSecondFaultDumps = 0;
+  WriteFile(oldDump);
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(!Exists(oldDump) && Exists(recordOnly) && "disabled supplemental dumps still leave evidence");
+}
+
+static void Test_SecondFaultsDoNotDisplaceAnyOtherDump()
+{
+  const auto dir = MakeTempDir();
+  const auto oldCrash = dir / "SkyrimDiag_Crash_20260101_000001.dmp";
+  const auto newCrash = dir / "SkyrimDiag_Crash_20260101_000002.dmp";
+  const auto secondFault = dir / "SkyrimDiag_SecondFault_20260101_000003_000.dmp";
+  const auto record = dir / "SkyrimDiag_SecondFault_20260101_000003_000.json";
+  for (const auto& path : {oldCrash, newCrash, secondFault, record}) {
+    WriteFile(path, 5);
+  }
+  PruneDumpsOverTotalBytes(dir, 10);
+  assert(Exists(oldCrash) && Exists(newCrash) && "both primary dumps fit");
+  assert(!Exists(secondFault) && !Exists(record) && "even the newest supplemental dump is evicted first");
+
+  const auto secondOnly = MakeTempDir();
+  const auto loneDump = secondOnly / secondFault.filename();
+  WriteFile(loneDump, 5);
+  PruneDumpsOverTotalBytes(secondOnly, 4);
+  assert(!Exists(loneDump) && "a lone supplemental dump is subject to the byte limit");
+}
+
+// Item 16: the names the helper writes, SkyrimDiag_SecondFault_<Timestamp()>
+// and <ts>-<n> for a name already taken.
+static void Test_SecondFaultRealNamesKeepTheirOrder()
+{
+  const auto dir = MakeTempDir();
+  const auto older = dir / "SkyrimDiag_SecondFault_20261126_120000_100.dmp";
+  const auto olderRecord = dir / "SkyrimDiag_SecondFault_20261126_120000_100.json";
+  const auto olderReport = dir / "SkyrimDiag_SecondFault_20261126_120000_100_SkyrimDiagReport.txt";
+  const auto taken = dir / "SkyrimDiag_SecondFault_20261126_120000_100-2.dmp";
+  const auto takenRecord = dir / "SkyrimDiag_SecondFault_20261126_120000_100-2.json";
+  const auto takenReport = dir / "SkyrimDiag_SecondFault_20261126_120000_100-2_SkyrimDiagReport.txt";
+  const auto newer = dir / "SkyrimDiag_SecondFault_20261126_120001_005.json";
+  const auto newest = dir / "SkyrimDiag_SecondFault_20261126_130000_000.dmp";
+  for (const auto& path : {older, olderRecord, olderReport, taken, takenRecord, takenReport, newer, newest}) {
+    WriteFile(path);
+  }
+  assert(skydiag::helper::TryExtractTimestampToken("SkyrimDiag_SecondFault_20261126_120000_100-2") == std::string("20261126_120000_100"));
+
+  RetentionLimits limits{};
+  limits.maxSecondFaultDumps = 3;
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(Exists(newest) && Exists(newer) && "the newest entries stay");
+  assert(Exists(taken) && Exists(takenRecord) && Exists(takenReport) && "a suffixed name sorts by its timestamp");
+  assert(!Exists(older) && !Exists(olderRecord) && !Exists(olderReport) && "the oldest goes with its files");
+
+  limits.maxSecondFaultDumps = 2;
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(!Exists(taken) && !Exists(takenRecord) && !Exists(takenReport) && Exists(newer) && Exists(newest));
+}
+
+// Item 13: a second fault dump being written counts against the byte limit,
+// and one abandoned by a stopped helper goes.
+static void Test_SecondFaultPartialDumps()
+{
+  const auto dir = MakeTempDir();
+  const auto abandoned = dir / "SkyrimDiag_SecondFault_20261126_120000_100.dmp.partial";
+  const auto writing = dir / "SkyrimDiag_SecondFault_20261126_120001_100.dmp.partial";
+  const auto crash = dir / "SkyrimDiag_Crash_20261126_110000_000.dmp";
+  WriteFile(abandoned, 4);
+  WriteFile(writing, 4);
+  WriteFile(crash, 4);
+  std::filesystem::last_write_time(abandoned, std::filesystem::file_time_type::clock::now() - std::chrono::hours(1));
+
+  PruneDumpsOverTotalBytes(dir, 8);
+  assert(Exists(crash) && Exists(writing) && "a partial in progress is never deleted");
+  assert(!Exists(abandoned) && "an abandoned partial over the byte limit goes");
+
+  WriteFile(abandoned, 1);
+  std::filesystem::last_write_time(abandoned, std::filesystem::file_time_type::clock::now() - std::chrono::hours(1));
+  RetentionLimits limits{};
+  ApplyRetentionToOutputDir(dir, limits);
+  assert(!Exists(abandoned) && Exists(writing) && "leftover partials go, the one being written stays");
+}
+
+int main(int argc, char** argv)
+{
+  if (argc == 2 && std::string_view(argv[1]) == "--second-fault") {
+    Test_SecondFaultsShareTheirOwnCountLimit();
+    Test_SecondFaultsDoNotDisplaceAnyOtherDump();
+    Test_SecondFaultRealNamesKeepTheirOrder();
+    Test_SecondFaultPartialDumps();
+    RemoveTempDirs();
+    return 0;
+  }
 #ifdef _WIN32
   Test_PrunesDumpsAndArtifactsFromPlainLongOutputPaths();
 #endif

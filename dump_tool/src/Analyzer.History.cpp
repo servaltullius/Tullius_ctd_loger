@@ -71,6 +71,18 @@ void LoadIncidentCaptureProfile(
   if (const auto context = incidentManifest.find("context");
       context != incidentManifest.end() && context->is_object()) {
     out.incident_unhandled_exception_signal = JsonValueOr(*context, "unhandled_exception_signal", false);
+    if (const auto fault = context->find("second_fault"); fault != context->end() && fault->is_object()) {
+      IncidentSecondFault second{};
+      second.code = JsonValueOr(*fault, "exception_code", 0u);
+      second.address = JsonValueOr(*fault, "exception_addr", std::uint64_t{});
+      second.tid = JsonValueOr(*fault, "faulting_tid", 0u);
+      second.dump_filename = JsonValueOr(*fault, "dump_filename", std::string{});
+      second.reason = JsonValueOr(*fault, "reason", std::string{});
+      second.resumed = JsonValueOr(*fault, "resumed", false);
+      if (second.code != 0u && second.tid != 0u && (!second.dump_filename.empty() || !second.reason.empty())) {
+        out.incident_second_fault = std::move(second);
+      }
+    }
   }
   if (incidentManifest.contains("capture_profile") && incidentManifest["capture_profile"].is_object()) {
     const auto& capture_profile = incidentManifest["capture_profile"];

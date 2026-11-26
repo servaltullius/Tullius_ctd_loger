@@ -32,6 +32,19 @@ struct EvidenceItem
   bool setup_note = false;
 };
 
+struct IncidentSecondFault
+{
+  std::uint32_t code = 0;
+  std::uint64_t address = 0;
+  std::uint32_t tid = 0;
+  std::string dump_filename;
+  std::string reason;
+  bool resumed = false;
+  std::wstring module_plus_offset;  // From A's dump module list.
+  // dump_filename is not beside A's dump any more (retention may have deleted it).
+  bool dump_missing = false;
+};
+
 // ADR-0010: an object that a crash register or the top of the crash stack
 // points at, read from the memory the helper added to the dump.
 struct DumpObject
@@ -782,6 +795,7 @@ struct AnalysisResult
   bool incident_capture_profile_present = false;
   std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
   bool incident_unhandled_exception_signal = false;
+  std::optional<IncidentSecondFault> incident_second_fault;
   std::string incident_capture_profile_base_mode;  // mini / default / full
   bool incident_capture_profile_code_segments = false;
   bool incident_capture_profile_process_thread_data = false;
@@ -801,6 +815,9 @@ struct AnalysisResult
   bool path_redaction_applied = true;
 
   bool has_blackbox = false;
+  bool is_second_fault_capture = false;
+  std::uint64_t second_fault_qpc = 0;
+  std::optional<double> second_fault_time_ms;  // On the blackbox clock.
   std::vector<EventRow> events;
   // Last main-thread heartbeat on the event clock (-1 = unknown). In a freeze
   // this is when the main thread stopped.

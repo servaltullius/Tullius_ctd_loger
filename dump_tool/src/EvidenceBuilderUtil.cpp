@@ -430,6 +430,9 @@ std::wstring BuildPreFreezeContextLine(const std::vector<EventRow>& events, bool
 
 std::optional<double> InferCaptureAnchorMs(const AnalysisResult& r)
 {
+  if (r.second_fault_time_ms) {
+    return r.second_fault_time_ms;
+  }
   // Prefer explicit crash/hang marks when available, otherwise fall back to the last recorded timestamp.
   if (auto t = FindLastEventTimeMsByType(r.events, static_cast<std::uint16_t>(skydiag::EventType::kCrash))) {
     return t;

@@ -168,6 +168,10 @@ bool PromoteReleasedCrashDump(
       // As ProcessValidCrashDump marks it, for retention.
       ctx["forced_close"] = true;
     }
+    if (releasedContext->secondFault.is_object()) {
+      // ADR-0036: the B kept from the release, as a kept crash records it.
+      ctx["second_fault"] = releasedContext->secondFault;
+    }
     const auto manifest = MakeIncidentManifestV1(
       "crash",
       releasedContext->timestamp,
@@ -966,6 +970,7 @@ bool HandleProcessExitTick(
     bool releasedCrashPromotedOnUnhandledSignal = false;
     const bool crashOnRecord =
       DrainCrashEventBeforeExit(cfg, proc, outBase, exitCode, state, &releasedCrashPromotedOnUnhandledSignal);
+    DrainSecondFault(cfg, proc, outBase, state->crashCaptured, SecondFaultDrain::kProcessExited);
     // So does a released crash the drain just made the crash on that report.
     const bool crashOutlivesZeroExit = capturedCrashOutlivesZeroExit || releasedCrashPromotedOnUnhandledSignal;
     // A dump held for a released crash that the drain did not report (or

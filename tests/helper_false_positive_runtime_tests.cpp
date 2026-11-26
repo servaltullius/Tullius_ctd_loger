@@ -1,9 +1,12 @@
 #include <Windows.h>
 
+#include <DbgHelp.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <exception>
 #include <filesystem>
@@ -12,6 +15,8 @@
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "CaptureCommon.h"
 #include "HelperLog.h"
@@ -4095,9 +4100,759 @@ void TestHandleProcessExitTick_ReportsAReleasedCrashThePluginThenReportedUnhandl
   }
 }
 
+namespace {
+
+namespace second = skydiag::second_fault;
+
+struct SecondFaultHarness
+{
+  static constexpr std::uint32_t kSequence = 2;
+  static constexpr std::uint32_t kCodeA = EXCEPTION_ACCESS_VIOLATION;
+  static constexpr std::uint32_t kCodeB = EXCEPTION_ILLEGAL_INSTRUCTION;
+  static constexpr std::uint64_t kAddressA = 0x7FF7055F1234ull;
+  static constexpr std::uint64_t kAddressB = 0x7FF7055F5678ull;
+  static constexpr std::uint64_t kRegisterA = 0x1234567812345678ull;
+  static constexpr std::uint64_t kRegisterB = 0x8765432187654321ull;
+  static constexpr std::wstring_view kSecondPrefix = L"SkyrimDiag_SecondFault_";
+
+  const std::filesystem::path outBase = MakeTempDir(L"sdf");
+  const std::unique_ptr<skydiag::SharedLayout> shared = MakeSharedLayout();
+  skydiag::tests::runtime::ParkedThread faultA;
+  skydiag::tests::runtime::ParkedThread faultB;
+  skydiag::helper::AttachedProcess proc = skydiag::tests::runtime::MakeSelfAttachedProcess(shared.get());
+  const std::unique_ptr<second::Slot> slotStorage = std::make_unique<second::Slot>();
+  second::Slot& slot = *slotStorage;
+  HelperConfig cfg = MakeTestConfig();
+  skydiag::helper::internal::HelperLoopState state{};
+
+  SecondFaultHarness()
+  {
+    proc.crashEvent = MakeSignalEvent(true);
+    proc.dumpSettledEvent = MakeSignalEvent(false);
+    proc.unhandledEvent = MakeSignalEvent(false);
+    proc.secondFaultPosted = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    proc.secondFaultSettled = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    Require(proc.secondFaultPosted && proc.secondFaultSettled, "CreateEventW failed for second faults");
+    proc.secondFault = &slot;
+    proc.secondFaultOutputBase = outBase;
+    shared->header.qpc_freq = QpcFrequency();
+    shared->header.last_heartbeat_qpc = QpcNow();
+    shared->header.crash_seq = kSequence;
+    shared->header.state_flags = skydiag::kState_Frozen;
+    auto& first = shared->header.crash;
+    first.exception_code = kCodeA;
+    first.exception_addr = kAddressA;
+    first.faulting_tid = faultA.tid();
+    first.context = faultA.Context();
+    first.context.Rax = kRegisterA;
+    first.exception_record.ExceptionCode = kCodeA;
+    first.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kAddressA);
+    slot.tid = faultB.tid();
+    slot.code = kCodeB;
+    slot.address = kAddressB;
+    slot.context = faultB.Context();
+    slot.context.Rax = kRegisterB;
+    slot.exception_record.ExceptionCode = kCodeB;
+    slot.exception_record.ExceptionAddress = reinterpret_cast<PVOID>(kAddressB);
+    cfg.dumpMode = skydiag::helper::DumpMode::kMini;
+    cfg.autoOpenViewerOnCrash = true;
+    cfg.autoOpenCrashOnlyIfProcessExited = true;
+    cfg.autoOpenCrashWaitForExitMs = 0;
+  }
+
+  SecondFaultHarness(const SecondFaultHarness&) = delete;
+  SecondFaultHarness& operator=(const SecondFaultHarness&) = delete;
+
+  ~SecondFaultHarness()
+  {
+    if (proc.secondFaultSettled) {
+      CloseHandle(proc.secondFaultSettled);
+    }
+    CloseHandle(proc.secondFaultPosted);
+    CloseHandle(proc.unhandledEvent);
+    CloseHandle(proc.dumpSettledEvent);
+    skydiag::tests::runtime::CloseAttachedProcess(&proc);
+    try {
+      ShutdownRetentionWorker();
+      std::error_code ec;
+      std::filesystem::remove_all(outBase, ec);
+    } catch (...) {  // NOLINT(bugprone-empty-catch): a leftover temporary folder is not a test failure
+    }
+  }
+
+  void Publish(std::uint32_t owner = kSequence, bool expired = false)
+  {
+    Require(InterlockedCompareExchange(&slot.state, second::kWriting, second::kEmpty) == second::kEmpty,
+      "Fake plugin claims the empty slot");
+    second::SetOwner(slot, owner);
+    slot.qpc = QpcNow();
+    slot.hold_until_qpc = expired ? slot.qpc : slot.qpc + 15u * shared->header.qpc_freq;
+    InterlockedExchange(&slot.state, second::kPosted);
+    SetEvent(proc.secondFaultPosted);
+  }
+
+  void WaitForSecondFault(DWORD timeoutMs = 10000) const
+  {
+    Require(WaitForSingleObject(proc.secondFaultSettled, timeoutMs) == WAIT_OBJECT_0,
+      "The helper acknowledges ADR-0036 independently of A");
+    Require(second::ReadState(slot) == second::kSettled, "A wake confirms the settled state");
+  }
+
+  nlohmann::json ReadRecord() const
+  {
+    return nlohmann::json::parse(ReadAllTextUtf8(FindSingleFileByPrefix(outBase, kSecondPrefix, L".json")));
+  }
+
+  nlohmann::json ReadManifest() const
+  {
+    return nlohmann::json::parse(
+      ReadAllTextUtf8(FindSingleFileByPrefix(outBase, L"SkyrimDiag_Incident_Crash_", L".json")));
+  }
+
+  void ExpectNoSecondDump() const
+  {
+    for (const auto& entry : std::filesystem::directory_iterator(outBase)) {
+      Require(!entry.path().filename().wstring().starts_with(kSecondPrefix) ||
+          entry.path().extension() == L".json", "Only the second fault JSON may exist");
+    }
+  }
+};
+
+void CheckSecondFaultDump(
+  const std::filesystem::path& path,
+  const SecondFaultHarness& harness,
+  bool supplemental)
+{
+  const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+  Require(file != INVALID_HANDLE_VALUE, "Crash dump must open");
+  const HANDLE mapping = CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+  Require(mapping != nullptr, "Crash dump mapping must open");
+  void* view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+  Require(view != nullptr, "Crash dump view must open");
+
+  PMINIDUMP_DIRECTORY directory = nullptr;
+  void* bytes = nullptr;
+  ULONG size = 0;
+  Require(MiniDumpReadDumpStream(view, ExceptionStream, &directory, &bytes, &size) &&
+      size == sizeof(MINIDUMP_EXCEPTION_STREAM), "Exception stream must be present");
+  MINIDUMP_EXCEPTION_STREAM exception{};
+  std::memcpy(&exception, bytes, sizeof(exception));
+  Require(exception.ThreadId == (supplemental ? harness.slot.tid : harness.faultA.tid()),
+    "The exception thread is the selected fault's thread");
+  Require(exception.ExceptionRecord.ExceptionCode == (supplemental ? harness.kCodeB : harness.kCodeA) &&
+      exception.ExceptionRecord.ExceptionAddress == (supplemental ? harness.kAddressB : harness.kAddressA),
+    "The exception record belongs to the selected fault");
+  CONTEXT context{};
+  Require(exception.ThreadContext.DataSize >= sizeof(context), "The saved CONTEXT must be present");
+  std::memcpy(&context, static_cast<const std::byte*>(view) + exception.ThreadContext.Rva, sizeof(context));
+  Require(context.Rax == (supplemental ? harness.kRegisterB : harness.kRegisterA),
+    "The exception CONTEXT is the selected fault's context");
+
+  const bool hasMarker = MiniDumpReadDumpStream(view, second::kStreamType, &directory, &bytes, &size) != FALSE;
+  Require(hasMarker == supplemental, "Only the supplemental dump carries the second-fault stream");
+  if (supplemental) {
+    Require(size == sizeof(second::Stream), "Second fault stream has its fixed size");
+    second::Stream stream{};
+    std::memcpy(&stream, bytes, sizeof(stream));
+    Require(stream.version == second::kVersion && stream.size == sizeof(stream) &&
+        stream.a_crash_seq == harness.kSequence && stream.a_tid == harness.faultA.tid() &&
+        stream.a_code == harness.kCodeA && stream.a_address == harness.kAddressA &&
+        stream.tid == harness.slot.tid && stream.code == harness.kCodeB &&
+        stream.address == harness.kAddressB && stream.qpc == harness.slot.qpc,
+      "The second fault stream describes both A and B");
+  }
+  Require(MiniDumpReadDumpStream(view, skydiag::protocol::kMinidumpUserStream_Blackbox, &directory, &bytes, &size) &&
+      size == sizeof(skydiag::SharedLayout), "A blackbox snapshot is available");
+  skydiag::SharedHeader header{};
+  std::memcpy(&header, bytes, sizeof(header));
+  Require(header.crash_seq == harness.kSequence && header.crash.exception_addr == harness.kAddressA,
+    "The blackbox header still describes the first fault");
+
+  UnmapViewOfFile(view);
+  CloseHandle(mapping);
+  CloseHandle(file);
+}
+
+// The supplemental dump's name: SkyrimDiag_SecondFault_<Timestamp()>.dmp.
+void CheckSecondFaultFileName(const std::filesystem::path& path)
+{
+  const auto stem = path.stem().string();
+  Require(stem.size() == std::string_view("SkyrimDiag_SecondFault_YYYYMMDD_HHMMSS_mmm").size() &&
+            skydiag::helper::TryExtractTimestampToken(stem) == stem.substr(std::strlen(second::kFilePrefix)),
+          "The supplemental dump is named by the capture timestamp alone");
+}
+
+void TestSecondFaultDuringPostDumpFiltering()
+{
+  for (const bool withSecondFault : {false, true}) {
+    SecondFaultHarness harness;
+    std::thread plugin([&] {
+      Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+      if (withSecondFault) {
+        // A's dump is settled: a B now waits for the filters, which dump it.
+        harness.Publish();
+        harness.WaitForSecondFault();
+        second::MarkResumed(harness.slot, harness.kSequence);
+        second::CountDropped(harness.slot, harness.kSequence);
+      }
+      SetEvent(harness.proc.unhandledEvent);
+    });
+    Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+      "The helper handles A");
+    plugin.join();
+    Require(harness.state.crashCaptured.latched, "A's own unhandled signal determines its verdict");
+    Require(harness.state.pendingCrashViewerDumpPath == harness.state.capturedCrashDumpPath,
+      "Only A's dump is queued for the viewer");
+    CheckSecondFaultDump(harness.state.capturedCrashDumpPath, harness, false);
+    const auto manifest = harness.ReadManifest();
+    Require(manifest.at("context").contains("second_fault") == withSecondFault,
+      "A's incident gains B evidence only when B was published");
+    if (withSecondFault) {
+      const auto dump = FindSingleFileByPrefix(harness.outBase, harness.kSecondPrefix, L".dmp");
+      CheckSecondFaultDump(dump, harness, true);
+      CheckSecondFaultFileName(dump);
+      const auto& evidence = manifest.at("context").at("second_fault");
+      Require(evidence.at("dump_filename") == dump.filename().string() && evidence.at("resumed") == true,
+        "A's first incident manifest names B's complete dump and samples resumed again");
+      Require(second::ReadState(harness.slot) == second::kSettled, "B stays in the slot while A is frozen");
+      Require(skydiag::helper::internal::ThawCrashCapture(harness.proc, harness.kSequence), "A can be released");
+      Require(second::ReadState(harness.slot) == second::kEmpty, "Releasing A empties B's slot");
+      const auto record = harness.ReadRecord();
+      Require(record.at("dump_filename") == dump.filename().string() && record.at("resumed") == true &&
+          record.at("dropped") == 1, "The standalone record preserves the final observed counters");
+      Require(record.at("a").at("exception_code") == harness.kCodeA && record.at("a").at("faulting_tid") == harness.faultA.tid(),
+        "The record names A");
+    }
+  }
+}
+
+// Item 1: A and B both posted before the helper takes A. A's dump comes
+// first; B, still held, is dumped by the filter after it.
+void TestSecondFaultPostedBeforeADumpWaitsForIt()
+{
+  SecondFaultHarness harness;
+  harness.Publish();
+  bool aDumpSettledFirst = false;
+  std::thread plugin([&] {
+    harness.WaitForSecondFault();
+    aDumpSettledFirst = WaitForSingleObject(harness.proc.dumpSettledEvent, 0) == WAIT_OBJECT_0 &&
+      HasFileWithPrefix(harness.outBase, L"SkyrimDiag_Crash_");
+    SetEvent(harness.proc.unhandledEvent);
+  });
+  Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+    "The helper handles A");
+  plugin.join();
+  Require(aDumpSettledFirst, "B is held until A's dump is written and settled");
+  Require(harness.state.crashCaptured.latched &&
+            harness.state.pendingCrashViewerDumpPath == harness.state.capturedCrashDumpPath,
+          "A's verdict and viewer are as without B");
+  CheckSecondFaultDump(harness.state.capturedCrashDumpPath, harness, false);
+  const auto dump = FindSingleFileByPrefix(harness.outBase, harness.kSecondPrefix, L".dmp");
+  CheckSecondFaultDump(dump, harness, true);
+  Require(harness.ReadManifest().at("context").at("second_fault").at("dump_filename") == dump.filename().string(),
+    "A's incident names B's dump");
+}
+
+void TestSecondFaultRecordOnly()
+{
+  struct Case
+  {
+    const char* reason;
+    bool recoveredFirst;
+    bool expired;
+    bool disabled;
+    bool mismatch;
+    bool unfrozen;
+  };
+  const Case cases[] = {
+    {"a_checked_first", true, false, false, false, false},
+    {"hold_expired", false, true, false, false, false},
+    {"second_fault_dumps_disabled", false, false, true, false, false},
+    {"a_mismatch", false, false, false, true, false},
+    // Frozen and crash_seq are read again right before B's dump.
+    {"a_mismatch", false, false, false, false, true},
+  };
+  for (const auto& c : cases) {
+    SecondFaultHarness harness;
+    if (c.disabled) {
+      harness.cfg.maxSecondFaultDumps = 0;
+    }
+    if (c.recoveredFirst) {
+      auto& history = harness.state.crashCaptured.recoveredFaults;
+      skydiag::helper::internal::NoteRecoveredFault(&history, harness.kCodeA, harness.kAddressA);
+      skydiag::helper::internal::NoteRecoveredFault(&history, harness.kCodeA, harness.kAddressA);
+    }
+    std::thread plugin([&] {
+      if (c.recoveredFirst) {
+        // The existing pre-dump log is emitted before waiting for recovery.
+        const auto path = harness.outBase / "SkyrimDiagHelper.log";
+        const auto deadline = GetTickCount64() + 10000u;
+        for (;;) {
+          std::string log;
+          if (skydiag::helper::internal::ReadTextFileUtf8(path, &log) &&
+              log.find("checking whether the game recovers before writing a crash dump.") != std::string::npos) {
+            break;
+          }
+          Require(GetTickCount64() < deadline, "The recovery-first check must begin");
+          Sleep(10);
+        }
+      } else {
+        Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+      }
+      if (c.unfrozen) {
+        InterlockedAnd(reinterpret_cast<volatile LONG*>(&harness.shared->header.state_flags),
+          ~static_cast<LONG>(skydiag::kState_Frozen));
+      }
+      harness.Publish(c.mismatch ? harness.kSequence + 2u : harness.kSequence, c.expired);
+      harness.WaitForSecondFault();
+      SetEvent(harness.proc.unhandledEvent);
+    });
+    Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+      "A is still handled normally in record-only cases");
+    plugin.join();
+    Require(harness.state.crashCaptured.latched, "A's unhandled result stays a crash");
+    harness.ExpectNoSecondDump();
+    const auto record = harness.ReadRecord();
+    Require(record.at("reason") == c.reason, c.reason);
+    Require(c.mismatch ? record.at("a").at("exception_code").is_null()
+                       : record.at("a").at("exception_code") == harness.kCodeA,
+            "The record names A when it is A's");
+    const auto manifest = harness.ReadManifest();
+    const auto& context = manifest.at("context");
+    Require(context.contains("second_fault") != c.mismatch, "A only cites B when the generation matches");
+    if (!c.mismatch) {
+      Require(context.at("second_fault").at("reason") == c.reason, "A records why no supplemental dump was written");
+    }
+  }
+}
+
+// C6: B's dump that cannot be written settles B with its reason; A is as
+// without B.
+void TestSecondFaultDumpFailure()
+{
+  SecondFaultHarness harness;
+  std::thread plugin([&] {
+    Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+    // The blackbox cannot be read consistently for B's dump (a record being
+    // written), so B's dump is not written.
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(&harness.shared->header.crash_seq), harness.kSequence + 1);
+    harness.Publish();
+    harness.WaitForSecondFault();
+    InterlockedExchange(reinterpret_cast<volatile LONG*>(&harness.shared->header.crash_seq), harness.kSequence);
+    SetEvent(harness.proc.unhandledEvent);
+  });
+  Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+    "The helper handles A");
+  plugin.join();
+  Require(harness.state.crashCaptured.latched &&
+            harness.state.pendingCrashViewerDumpPath == harness.state.capturedCrashDumpPath,
+          "A's verdict and viewer are as without B");
+  CheckSecondFaultDump(harness.state.capturedCrashDumpPath, harness, false);
+  harness.ExpectNoSecondDump();
+  Require(harness.ReadRecord().at("reason") == "snapshot_unavailable", "B's record says why");
+  Require(harness.ReadManifest().at("context").at("second_fault").at("reason") == "snapshot_unavailable",
+    "A's incident says why");
+}
+
+// The game ends while the filters wait: B is recorded as such, and A is
+// judged by the exit as without B.
+void TestSecondFaultGameExitsDuringFiltering()
+{
+  SecondFaultHarness harness;
+  harness.cfg.autoOpenViewerOnCrash = false;
+  auto child = LaunchSleepingChildProcess();
+  const HANDLE self = harness.proc.process;
+  const auto selfPid = harness.proc.pid;
+  harness.proc.process = child.pi.hProcess;
+  harness.proc.pid = child.pi.dwProcessId;
+  harness.shared->header.crash.faulting_tid = child.pi.dwThreadId;
+  std::thread plugin([&] {
+    Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+    TerminateWithExitCode(child, harness.kCodeA);
+    harness.Publish();
+  });
+  const bool handled = HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state);
+  plugin.join();
+  // As the loop does after each tick: a B posted after the tick's last look.
+  skydiag::helper::internal::DrainSecondFault(harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+  Require(second::ReadState(harness.slot) == second::kEmpty, "B is settled and its slot emptied once the game is gone");
+  harness.proc.process = self;
+  harness.proc.pid = selfPid;
+  TerminateChildProcess(&child);
+  Require(handled && harness.state.crashCaptured.latched, "A's exit with its own code keeps it a crash");
+  harness.ExpectNoSecondDump();
+  Require(harness.ReadRecord().at("reason") == "process_exited", "B is recorded without a dump once the game is gone");
+}
+
+// Item 3: a B posted in the viewer's exit wait is recorded at once, and the
+// wait goes on to the same result.
+void TestSecondFaultDuringViewerWait()
+{
+  SecondFaultHarness harness;
+  harness.cfg.autoOpenCrashWaitForExitMs = 3000;
+  ULONGLONG settledAfterMs = ~0ull;
+  std::thread plugin([&] {
+    Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+    SetEvent(harness.proc.unhandledEvent);
+    const auto deadline = GetTickCount64() + 10000u;
+    while (!HasFileWithPrefix(harness.outBase, L"SkyrimDiag_Incident_Crash_")) {
+      Require(GetTickCount64() < deadline, "A's manifest is written");
+      Sleep(5);
+    }
+    const auto posted = GetTickCount64();
+    harness.Publish();
+    harness.WaitForSecondFault(2000);
+    settledAfterMs = GetTickCount64() - posted;
+  });
+  const auto start = GetTickCount64();
+  Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+    "The helper handles A");
+  const auto elapsed = GetTickCount64() - start;
+  plugin.join();
+  Require(settledAfterMs < 1000u, "B is not held through the exit wait");
+  Require(elapsed >= 2900u, "The exit wait still lasts its full time");
+  Require(harness.state.crashCaptured.latched &&
+            harness.state.pendingCrashViewerDumpPath == harness.state.capturedCrashDumpPath,
+          "The game still running defers A's viewer as without B");
+  harness.ExpectNoSecondDump();
+  Require(harness.ReadRecord().at("reason") == "a_already_captured", "B came after A was kept");
+  Require(!harness.ReadManifest().at("context").contains("second_fault"), "A's manifest was written before B");
+}
+
+void TestSecondFaultDuringAnalysisAndExit()
+{
+  for (const bool exited : {false, true}) {
+    SecondFaultHarness harness;
+    harness.state.crashCaptured.latched = true;
+    harness.state.crashCaptured.capturedInfo =
+      skydiag::helper::internal::ExtractCrashInfo(&harness.shared->header);
+    harness.Publish();
+    if (exited) {
+      auto child = LaunchSleepingChildProcess();
+      Require(TerminateProcess(child.pi.hProcess, EXCEPTION_ACCESS_VIOLATION), "End the target before drainage");
+      Require(WaitForSingleObject(child.pi.hProcess, 10000) == WAIT_OBJECT_0, "Target exited");
+      const HANDLE self = harness.proc.process;
+      harness.proc.process = child.pi.hProcess;
+      Require(HandleProcessExitTick(harness.cfg, harness.proc, harness.outBase, &harness.state),
+        "The process exit path drains the second fault");
+      harness.proc.process = self;
+      TerminateChildProcess(&child);
+    } else {
+      skydiag::helper::internal::DrainSecondFault(
+        harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+    }
+    Require(WaitForSingleObject(harness.proc.secondFaultSettled, 0) == WAIT_OBJECT_0,
+      "A late B settles without a dump or a wait");
+    Require(second::ReadState(harness.slot) == (exited ? second::kEmpty : second::kSettled),
+      "The slot is held during analysis, then cleared at exit");
+    harness.ExpectNoSecondDump();
+    Require(harness.ReadRecord().at("reason") == (exited ? "process_exited" : "a_already_captured"),
+      "Late B has the reason for record-only handling");
+  }
+}
+
+// Item 11: a tick leaves B to A's pending crash event, but not past B's hold.
+void TestSecondFaultDrainWaitsForPendingA()
+{
+  SecondFaultHarness harness;
+  harness.Publish();
+  skydiag::helper::internal::DrainSecondFault(harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+  Require(second::ReadState(harness.slot) == second::kPosted, "B waits while A's crash event is still to be handled");
+  harness.slot.hold_until_qpc = QpcNow();
+  skydiag::helper::internal::DrainSecondFault(harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+  Require(second::ReadState(harness.slot) == second::kSettled, "An expired hold is settled at once");
+  Require(harness.ReadRecord().at("reason") == "no_a_dump_yet", "B came before A's dump");
+}
+
+// Item 11: the helper's last drain settles any B, and the helper stops
+// answering for the feature before the game is detached.
+void TestSecondFaultHelperStopping()
+{
+  SecondFaultHarness harness;
+  harness.Publish();
+  skydiag::helper::internal::ShutdownLoopState(harness.cfg, harness.proc, harness.outBase, &harness.state);
+  Require(harness.proc.secondFaultSettled == nullptr, "The settled event is closed when the helper stops");
+  Require(second::ReadState(harness.slot) == second::kEmpty, "The stopping helper settles and empties the slot");
+  Require(harness.ReadRecord().at("reason") == "helper_stopped", "B says the helper stopped");
+}
+
+// Item 7: the slot is emptied before Frozen is lowered, so the next A's
+// first B finds it free.
+void TestSecondFaultSlotIsFreeWhenAIsReleased()
+{
+  SecondFaultHarness harness;
+  harness.state.crashCaptured.latched = true;
+  harness.state.crashCaptured.capturedInfo = skydiag::helper::internal::ExtractCrashInfo(&harness.shared->header);
+  harness.Publish();
+  skydiag::helper::internal::DrainSecondFault(harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+  Require(second::ReadState(harness.slot) == second::kSettled, "B of A1 is settled and kept");
+  // The record is rewritten when A1 is let go.
+  second::MarkResumed(harness.slot, harness.kSequence);
+
+  std::atomic<bool> watching{false};
+  LONG claimedWhenThawed = -1;
+  std::thread nextB([&] {
+    watching.store(true, std::memory_order_release);
+    auto* const flags = reinterpret_cast<volatile LONG*>(&harness.shared->header.state_flags);
+    const auto deadline = GetTickCount64() + 10000u;
+    while ((InterlockedCompareExchange(flags, 0, 0) & static_cast<LONG>(skydiag::kState_Frozen)) != 0) {
+      Require(GetTickCount64() < deadline, "A1 is released");
+      YieldProcessor();
+    }
+    // A2's first B tries the slot the moment A1's Frozen is gone.
+    claimedWhenThawed = InterlockedCompareExchange(&harness.slot.state, second::kWriting, second::kEmpty);
+  });
+  while (!watching.load(std::memory_order_acquire)) {
+    YieldProcessor();
+  }
+  Require(skydiag::helper::internal::ThawCrashCapture(harness.proc, harness.kSequence), "A1 is released");
+  nextB.join();
+  Require(claimedWhenThawed == second::kEmpty, "A2's first B gets the slot right after A1 is released");
+  Require(harness.ReadRecord().at("resumed") == true, "A1's record got its last counters before the slot was reused");
+}
+
+// Item 7: a slot the plugin left settled after A was let go between its
+// checks carries no exception; a tick empties it once A is not frozen.
+void TestSecondFaultSlotSettledByThePluginIsEmptied()
+{
+  SecondFaultHarness harness;
+  Require(second::ClaimSlot(harness.slot, harness.kSequence, [] { return false; }) == second::SlotClaim::kGenerationEnded,
+    "The plugin leaves a settled slot when A was let go");
+  skydiag::helper::internal::DrainSecondFault(harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+  Require(second::ReadState(harness.slot) == second::kSettled, "A still frozen keeps its slot");
+  harness.shared->header.state_flags = 0;
+  skydiag::helper::internal::DrainSecondFault(harness.cfg, harness.proc, harness.outBase, harness.state.crashCaptured);
+  Require(second::ReadState(harness.slot) == second::kEmpty, "Once A is not frozen the slot is emptied");
+  Require(!HasFileWithPrefix(harness.outBase, L"SkyrimDiag_SecondFault_"), "No record is written for it");
+}
+
+// Item 2: an A released on its heartbeat and promoted at the exit still
+// names its B.
+void TestSecondFaultSurvivesReleaseAndPromotion()
+{
+  SecondFaultHarness harness;
+  harness.cfg.autoOpenViewerOnCrash = false;
+  std::thread plugin([&] {
+    Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+    const auto start = GetTickCount64();
+    const auto waitUntil = [start](ULONGLONG offset) {
+      const auto now = GetTickCount64();
+      if (now < start + offset) {
+        Sleep(static_cast<DWORD>(start + offset - now));
+      }
+    };
+    harness.Publish();
+    harness.WaitForSecondFault();
+    waitUntil(4100);
+    harness.shared->header.last_heartbeat_qpc = QpcNow();
+    waitUntil(6400);
+    harness.shared->header.last_heartbeat_qpc = QpcNow();
+  });
+  Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+    "A is handled after filtering");
+  plugin.join();
+  const auto& crash = harness.state.crashCaptured;
+  Require(!crash.latched && !crash.releasedDumpPath.empty() && crash.releasedDumpContext &&
+            crash.releasedDumpContext->secondFault.is_object(),
+          "A was released on its heartbeat and kept its B");
+  const auto dump = FindSingleFileByPrefix(harness.outBase, harness.kSecondPrefix, L".dmp");
+
+  auto child = LaunchSleepingChildProcess();
+  TerminateWithExitCode(child, harness.kCodeA);
+  const HANDLE self = harness.proc.process;
+  harness.proc.process = child.pi.hProcess;
+  Require(HandleProcessExitTick(harness.cfg, harness.proc, harness.outBase, &harness.state),
+    "The exit with A's code is handled");
+  harness.proc.process = self;
+  TerminateChildProcess(&child);
+  Require(harness.state.crashCaptured.latched, "The exit promotes the released A");
+  const auto manifest = harness.ReadManifest();
+  Require(manifest.at("context").at("reason") == "released_exception_reported_at_exit" &&
+            manifest.at("context").at("second_fault").at("dump_filename") == dump.filename().string(),
+          "The promoted A's incident names B's dump");
+}
+
+void TestSecondFaultShutdownDeadlineAndHeartbeatRestart()
+{
+  enum class Variant
+  {
+    kDuringShutdown,  // B dumped in the 3 s filter: its deadline is kept
+    kDumpInCheck,     // B dumped in a heartbeat check: that check starts over
+    kRecordInCheck,   // B recorded only in a heartbeat check: it goes on
+  };
+  for (const auto variant : {Variant::kDuringShutdown, Variant::kDumpInCheck, Variant::kRecordInCheck}) {
+    SecondFaultHarness harness;
+    std::thread plugin([&] {
+      Require(WaitForSingleObject(harness.proc.dumpSettledEvent, 10000) == WAIT_OBJECT_0, "A is dumped first");
+      const auto start = GetTickCount64();
+      const auto waitUntil = [start](ULONGLONG offset) {
+        const auto now = GetTickCount64();
+        if (now < start + offset) {
+          Sleep(static_cast<DWORD>(start + offset - now));
+        }
+      };
+      if (variant == Variant::kDuringShutdown) {
+        waitUntil(2300);
+      } else {
+        waitUntil(3600);
+        // This progress belongs to the heartbeat check B interrupts.
+        harness.shared->header.last_heartbeat_qpc = QpcNow();
+      }
+      if (variant == Variant::kRecordInCheck) {
+        // The check before the dump finds A let go: B is only recorded.
+        InterlockedAnd(reinterpret_cast<volatile LONG*>(&harness.shared->header.state_flags),
+          ~static_cast<LONG>(skydiag::kState_Frozen));
+      }
+      harness.Publish();
+      harness.WaitForSecondFault();
+      if (variant == Variant::kDuringShutdown) {
+        // These advances fall into separate heartbeat checks when the first
+        // filter keeps its initial deadline, but not when it starts over.
+        waitUntil(4100);
+        harness.shared->header.last_heartbeat_qpc = QpcNow();
+      }
+      waitUntil(6400);
+      harness.shared->header.last_heartbeat_qpc = QpcNow();
+    });
+    Require(HandleCrashEventTickForState(harness.cfg, harness.proc, harness.outBase, &harness.state),
+      "A is handled after filtering");
+    plugin.join();
+    Require(harness.state.crashCaptured.latched == (variant == Variant::kDumpInCheck),
+      variant == Variant::kDuringShutdown ? "A keeps the first filter's deadline and sees both advances"
+      : variant == Variant::kDumpInCheck  ? "A discards the heartbeat sample B's dump interrupted"
+                                          : "A keeps the heartbeat sample a record-only B did not interrupt");
+    if (variant == Variant::kRecordInCheck) {
+      harness.ExpectNoSecondDump();
+      Require(harness.ReadRecord().at("reason") == "a_mismatch", "B was not dumped");
+    } else {
+      const auto dump = FindSingleFileByPrefix(harness.outBase, harness.kSecondPrefix, L".dmp");
+      CheckSecondFaultDump(dump, harness, true);
+    }
+  }
+}
+
+void TestSecondFaultNeverOverwritesDumpFiles()
+{
+  SecondFaultHarness harness;
+  harness.Publish();
+  const auto dumpPath = harness.outBase / "supplemental.dmp";
+  auto temporaryPath = dumpPath;
+  temporaryPath += L".partial";
+  const auto profile = skydiag::helper::ResolveDumpProfile(harness.cfg.dumpMode, skydiag::helper::CaptureKind::Crash);
+  skydiag::helper::SecondFaultDumpInput input{harness.slot, {}};
+  input.stream.tid = harness.slot.tid;
+  std::wstring error;
+  const auto writeDump = [&] {
+    return skydiag::helper::WriteDumpWithStreams(
+      harness.proc.process, harness.proc.pid, dumpPath.wstring(), harness.shared.get(), sizeof(skydiag::SharedLayout),
+      {}, {}, true, profile, false, &error, nullptr, &input);
+  };
+  WriteAllTextUtf8(temporaryPath, "another in-progress dump");
+  Require(!writeDump() && ReadAllTextUtf8(temporaryPath) == "another in-progress dump" && !input.dumpCalled,
+    "An existing temporary name cannot be opened or removed");
+  std::filesystem::remove(temporaryPath);
+  WriteAllTextUtf8(dumpPath, "existing completed dump");
+  Require(!writeDump() && ReadAllTextUtf8(dumpPath) == "existing completed dump" && input.dumpCalled,
+    "A completed dump cannot be replaced at publication");
+  Require(!FileExists(temporaryPath), "The failed publication cleans its own temporary dump");
+}
+
+// Items 12 and 16: names and records never replace a file already there, and
+// a record retention deleted is not written again.
+void TestSecondFaultFilesAreNeverReplaced()
+{
+  const auto outBase = MakeTempDir(L"sdf");
+  const auto stem = [&](std::wstring_view name) { return outBase / name; };
+  constexpr std::wstring_view ts = L"20261126_120000_123";
+  Require(skydiag::helper::internal::NewSecondFaultStem(outBase, ts) == stem(L"SkyrimDiag_SecondFault_20261126_120000_123"),
+    "A free timestamp is used as it is");
+  WriteAllTextUtf8(outBase / L"SkyrimDiag_SecondFault_20261126_120000_123.json", "earlier record");
+  Require(skydiag::helper::internal::NewSecondFaultStem(outBase, ts) == stem(L"SkyrimDiag_SecondFault_20261126_120000_123-2"),
+    "A taken name gets a suffix retention still reads");
+  WriteAllTextUtf8(outBase / L"SkyrimDiag_SecondFault_20261126_120000_123-2.dmp.partial", "dump in progress");
+  Require(skydiag::helper::internal::NewSecondFaultStem(outBase, ts) == stem(L"SkyrimDiag_SecondFault_20261126_120000_123-3"),
+    "A dump in progress also takes its name");
+  Require(skydiag::helper::TryExtractTimestampToken("SkyrimDiag_SecondFault_20261126_120000_123-3") == std::string(ts.begin(), ts.end()),
+    "The suffix keeps the timestamp readable");
+
+  const auto record = outBase / L"record.json";
+  WriteAllTextUtf8(record, "first");
+  Require(!skydiag::helper::internal::CreateTextFileUtf8(record, "second") && ReadAllTextUtf8(record) == "first",
+    "A new record does not replace a file there");
+  Require(skydiag::helper::internal::ReplaceTextFileUtf8(record, "updated") && ReadAllTextUtf8(record) == "updated",
+    "An update replaces the record while it is there");
+  std::filesystem::remove(record);
+  Require(!skydiag::helper::internal::ReplaceTextFileUtf8(record, "again") && !FileExists(record),
+    "An update does not bring back a deleted record");
+  std::error_code ec;
+  std::filesystem::remove_all(outBase, ec);
+}
+
+void TestSecondFaultMappingMismatch()
+{
+  const auto outBase = MakeTempDir(L"sdf");
+  const auto pid = GetCurrentProcessId();
+  const std::wstring kernel = std::wstring(skydiag::protocol::kKernelObjectPrefix) + std::to_wstring(pid);
+  const HANDLE primary = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+    sizeof(skydiag::SharedLayout), (kernel + skydiag::protocol::kKernelObjectSuffix_SharedMemory).c_str());
+  const HANDLE mapping = CreateFileMappingW(
+    INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(second::Slot), (kernel + second::kMappingSuffix).c_str());
+  Require(primary && mapping, "Synthetic plugin creates both mappings");
+  auto* slot = static_cast<second::Slot*>(MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(second::Slot)));
+  const HANDLE posted = CreateEventW(nullptr, FALSE, FALSE, (kernel + second::kPostedSuffix).c_str());
+  Require(slot && posted, "Synthetic plugin creates the post event and maps B");
+
+  slot->magic = second::kMagic;
+  slot->size = sizeof(second::Slot);
+  slot->version = second::kVersion + 1u;
+  skydiag::helper::AttachedProcess proc{};
+  Require(skydiag::helper::AttachByPid(pid, proc, nullptr), "A can attach independently");
+  Require(proc.secondFaultAttachError == ERROR_REVISION_MISMATCH && proc.secondFault == nullptr,
+    "An incompatible second fault mapping is rejected");
+  Require(!skydiag::helper::StartSecondFaultSignal(proc, outBase), "An incompatible map must not advertise support");
+  skydiag::helper::Detach(proc);
+
+  slot->version = second::kVersion;
+  Require(skydiag::helper::AttachByPid(pid, proc, nullptr), "A attaches with the corrected mapping as well");
+  Require(proc.secondFault && proc.secondFaultPosted, "Both B objects are attached");
+  Require(OpenEventW(SYNCHRONIZE, FALSE, (kernel + second::kSettledSuffix).c_str()) == nullptr,
+    "Attaching does not advertise support before the capture loop");
+  Require(skydiag::helper::StartSecondFaultSignal(proc, outBase), "The valid mapping enables the capture loop handshake");
+  skydiag::helper::StopSecondFaultSignal(proc);
+  Require(OpenEventW(SYNCHRONIZE, FALSE, (kernel + second::kSettledSuffix).c_str()) == nullptr,
+    "A stopped helper no longer advertises support");
+  skydiag::helper::Detach(proc);
+  UnmapViewOfFile(slot);
+  CloseHandle(posted);
+  CloseHandle(mapping);
+  CloseHandle(primary);
+  std::filesystem::remove_all(outBase);
+}
+
+}  // namespace
+
 int wmain(int argc, wchar_t** argv)
 {
   try {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--second-fault") {
+      SKYDIAG_RUN_TEST(TestSecondFaultDuringPostDumpFiltering);
+      SKYDIAG_RUN_TEST(TestSecondFaultPostedBeforeADumpWaitsForIt);
+      SKYDIAG_RUN_TEST(TestSecondFaultRecordOnly);
+      SKYDIAG_RUN_TEST(TestSecondFaultDumpFailure);
+      SKYDIAG_RUN_TEST(TestSecondFaultGameExitsDuringFiltering);
+      SKYDIAG_RUN_TEST(TestSecondFaultDuringViewerWait);
+      SKYDIAG_RUN_TEST(TestSecondFaultDuringAnalysisAndExit);
+      SKYDIAG_RUN_TEST(TestSecondFaultDrainWaitsForPendingA);
+      SKYDIAG_RUN_TEST(TestSecondFaultHelperStopping);
+      SKYDIAG_RUN_TEST(TestSecondFaultSlotIsFreeWhenAIsReleased);
+      SKYDIAG_RUN_TEST(TestSecondFaultSlotSettledByThePluginIsEmptied);
+      SKYDIAG_RUN_TEST(TestSecondFaultSurvivesReleaseAndPromotion);
+      SKYDIAG_RUN_TEST(TestSecondFaultShutdownDeadlineAndHeartbeatRestart);
+      SKYDIAG_RUN_TEST(TestSecondFaultNeverOverwritesDumpFiles);
+      SKYDIAG_RUN_TEST(TestSecondFaultFilesAreNeverReplaced);
+      SKYDIAG_RUN_TEST(TestSecondFaultMappingMismatch);
+      return 0;
+    }
     // The stand-in for the dump viewer (HelperConfig::dumpToolExe), started as
     // "<dump> --out-dir <dir> ...": it ends at once, so nothing is left running.
     if (argc >= 3 && std::wstring_view(argv[2]) == L"--out-dir") {

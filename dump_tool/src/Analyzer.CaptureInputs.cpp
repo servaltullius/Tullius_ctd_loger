@@ -31,6 +31,7 @@
 #include "SkyrimDiagGameLocks.h"
 #include "SkyrimDiagHangObjectThreads.h"
 #include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagSecondFault.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::dump_tool {
@@ -79,6 +80,25 @@ std::optional<CONTEXT> ParseExceptionInfo(
     return ctx;
   }
   return std::nullopt;
+}
+
+void ParseSecondFaultStream(void* dumpBase, std::uint64_t dumpSize, AnalysisResult& out)
+{
+  void* bytes = nullptr;
+  ULONG size = 0;
+  skydiag::second_fault::Stream stream{};
+  if (!ReadStreamSized(dumpBase, dumpSize, skydiag::second_fault::kStreamType, &bytes, &size) ||
+      size != sizeof(stream)) {
+    return;
+  }
+  std::memcpy(&stream, bytes, sizeof(stream));
+  if (stream.version != skydiag::second_fault::kVersion || stream.size != sizeof(stream) ||
+      stream.code == 0u || stream.code != out.exc_code || stream.tid != out.exc_tid ||
+      stream.address != out.exc_addr) {
+    return;
+  }
+  out.is_second_fault_capture = true;
+  out.second_fault_qpc = stream.qpc;
 }
 
 void ResolveFaultModule(
@@ -157,6 +177,10 @@ void ParseBlackboxStream(
   }
   const std::uint64_t freq = snap->header.qpc_freq ? snap->header.qpc_freq : 1;
   const std::uint64_t start = snap->header.start_qpc;
+  if (out.is_second_fault_capture && snap->header.qpc_freq != 0u &&
+      out.second_fault_qpc != 0u && out.second_fault_qpc >= start) {
+    out.second_fault_time_ms = 1000.0 * (static_cast<double>(out.second_fault_qpc - start) / static_cast<double>(freq));
+  }
   out.blackbox_last_heartbeat_ms = (snap->header.last_heartbeat_qpc > start)
     ? (1000.0 * (static_cast<double>(snap->header.last_heartbeat_qpc - start) / static_cast<double>(freq)))
     : -1.0;
@@ -822,6 +846,9 @@ bool DetermineHangLike(
   bool nameHang,
   const AnalysisResult& out)
 {
+  if (out.is_second_fault_capture) {
+    return false;
+  }
   bool hasHangEvent = false;
   for (const auto& ev : out.events) {
     if (ev.type == static_cast<std::uint16_t>(skydiag::EventType::kHangMark)) {
@@ -954,7 +981,8 @@ void IntegrateCrashLoggerLog(
     mo2Index ? &*mo2Index : nullptr,
     gameRootDir,
     &clErr,
-    &pairing);
+    &pairing,
+    out.is_second_fault_capture);
   if (!logPath) {
     if (!clErr.empty()) {
       out.diagnostics.push_back(L"[CrashLogger] log not found: " + clErr);

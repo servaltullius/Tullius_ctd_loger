@@ -28,6 +28,11 @@ std::filesystem::path ConfiguredOutputBase(const skydiag::helper::HelperConfig& 
 std::filesystem::path MakeOutputBase(const skydiag::helper::HelperConfig& cfg);
 
 bool WriteTextFileUtf8(const std::filesystem::path& path, const std::string& s);
+// As WriteTextFileUtf8, but fails rather than replace a file already there.
+bool CreateTextFileUtf8(const std::filesystem::path& path, const std::string& s);
+// As WriteTextFileUtf8, but only replaces a file still there: fails, and
+// creates nothing, once it is gone.
+bool ReplaceTextFileUtf8(const std::filesystem::path& path, const std::string& s);
 // j as indented text for a file, invalid UTF-8 replaced: dump()'s default
 // throws on it, which would cost the capture the file it writes.
 std::string DumpJsonForFile(const nlohmann::json& j);

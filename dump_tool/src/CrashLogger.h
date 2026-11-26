@@ -42,7 +42,10 @@ std::optional<std::filesystem::path> TryFindCrashLoggerLogForDump(
   const Mo2Index* mo2Index,
   const std::optional<std::filesystem::path>& gameRootDir,
   std::wstring* err,
-  CrashLoggerPairingMetadata* pairingMetadata = nullptr);
+  CrashLoggerPairingMetadata* pairingMetadata = nullptr,
+  // The dump is a crash capture whatever its file name says (a second fault
+  // dump, ADR-0036): a thread dump's log never pairs with it.
+  bool crashCapture = false);
 
 // Reads a whole text file as UTF-8/bytes (Crash Logger logs are typically ASCII/UTF-8).
 std::optional<std::string> ReadWholeFileUtf8(const std::filesystem::path& path, std::wstring* err);

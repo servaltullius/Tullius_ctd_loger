@@ -74,6 +74,9 @@ void AddGameStateContext(const std::vector<EventRow>& events, double lastMs, Bla
   std::vector<std::pair<std::wstring, double>> open;  // menu, opened at
   double lastLoadEndMs = -1.0;
   for (const auto& event : events) {
+    if (event.t_ms > lastMs) {
+      continue;
+    }
     switch (static_cast<skydiag::EventType>(event.type)) {
       case skydiag::EventType::kMenuOpen: {
         const auto name = DecodePackedShortText(event);
@@ -115,15 +118,21 @@ void AddGameStateContext(const std::vector<EventRow>& events, double lastMs, Bla
 
 }  // namespace
 
-ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events)
+ForcedCloseInfo DetectForcedClose(const std::vector<EventRow>& events, std::optional<double> crashTimeMs)
 {
   skydiag::ForcedCloseScanner scanner;
   for (const auto& event : events) {
+    if (crashTimeMs && event.t_ms > *crashTimeMs) {
+      continue;
+    }
     if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCloseRequest)) {
       scanner.AddCloseRequest(event.t_ms, event.a, event.d);
-    } else if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash)) {
+    } else if (!crashTimeMs && event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash)) {
       scanner.AddCrash(event.t_ms);
     }
+  }
+  if (crashTimeMs) {
+    scanner.AddCrash(*crashTimeMs);
   }
   const auto match = scanner.Result();
   ForcedCloseInfo info{};
@@ -171,7 +180,7 @@ std::wstring DecodeSaveLoadName(std::uint64_t b, std::uint64_t c, std::uint64_t 
   return Utf8OrAnsiToWide(std::string_view(buf, strnlen(buf, skydiag::kSaveNameTextBytes)));
 }
 
-SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
+SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events, std::optional<double> crashTimeMs)
 {
   SaveLoadInfo info{};
   double startedMs = 0.0;
@@ -181,6 +190,9 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
   // one loaded (loaded_saves.json says when, if the helper kept it).
   std::vector<std::pair<std::string, std::wstring>> loaded;
   for (const auto& event : events) {
+    if (crashTimeMs && event.t_ms > *crashTimeMs) {
+      continue;
+    }
     lastMs = std::max(lastMs, event.t_ms);
     switch (static_cast<skydiag::EventType>(event.type)) {
       case skydiag::EventType::kSaveLoadStart: {
@@ -205,7 +217,7 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
         }
         break;
       case skydiag::EventType::kCrash:
-        if (info.in_progress && event.t_ms >= startedMs) {
+        if (!crashTimeMs && info.in_progress && event.t_ms >= startedMs) {
           crashMs = event.t_ms;
         }
         break;
@@ -214,6 +226,9 @@ SaveLoadInfo DetectSaveLoad(const std::vector<EventRow>& events)
     }
   }
   if (info.in_progress) {
+    if (crashTimeMs) {
+      crashMs = *crashTimeMs;
+    }
     info.timed_to_crash = crashMs >= 0.0;
     info.seconds_loading = std::max(0.0, ((info.timed_to_crash ? crashMs : lastMs) - startedMs) / 1000.0);
     for (auto it = loaded.rbegin(); it != loaded.rend() && !info.key.empty(); ++it) {
@@ -263,7 +278,8 @@ bool CountsAsFailedLoad(const AnalysisResult& r)
 BlackboxFreezeSummary BuildBlackboxFreezeSummary(
   const std::vector<EventRow>& events,
   bool loadingContext,
-  double lastHeartbeatMs)
+  double lastHeartbeatMs,
+  std::optional<double> captureMs)
 {
   BlackboxFreezeSummary summary{};
   summary.loading_window = loadingContext;
@@ -276,11 +292,11 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
     maxMs = std::max(maxMs, event.t_ms);
   }
   const double windowMs = loadingContext ? 8000.0 : 5000.0;
-  const double cutoffMs = std::max(0.0, maxMs - windowMs);
+  const double cutoffMs = std::max(0.0, captureMs.value_or(maxMs) - windowMs);
 
   std::unordered_map<std::wstring, std::uint32_t> moduleHits;
   for (const auto& event : events) {
-    if (event.t_ms < cutoffMs) {
+    if (event.t_ms < cutoffMs || (captureMs && event.t_ms > *captureMs)) {
       continue;
     }
 
@@ -334,7 +350,7 @@ BlackboxFreezeSummary BuildBlackboxFreezeSummary(
 
   // Quiet play writes no events, so the newest one can be long before the
   // freeze. The main thread's last heartbeat is when it stopped.
-  AddGameStateContext(events, std::max(maxMs, lastHeartbeatMs), summary);
+  AddGameStateContext(events, captureMs.value_or(std::max(maxMs, lastHeartbeatMs)), summary);
 
   summary.has_context =
     summary.recent_module_loads > 0u ||

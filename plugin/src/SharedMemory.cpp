@@ -8,6 +8,7 @@
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiagProtocol.h"
+#include "SkyrimDiagSecondFault.h"
 #include "SkyrimDiagShared.h"
 
 namespace skydiag::plugin {
@@ -17,8 +18,62 @@ HANDLE g_mapping = nullptr;
 HANDLE g_crashEvent = nullptr;
 HANDLE g_unhandledEvent = nullptr;
 wchar_t g_dumpSettledEventName[64]{};
+HANDLE g_secondFaultMapping = nullptr;
+HANDLE g_secondFaultPostedEvent = nullptr;
+second_fault::Slot* g_secondFaultSlot = nullptr;
+wchar_t g_secondFaultSettledEventName[64]{};
 skydiag::SharedLayout* g_shared = nullptr;
 std::uint32_t g_mainThreadId = 0;
+
+// Fixed buffers: this optional part must not throw before the v4 crash event
+// exists.
+bool FormatSecondFaultName(wchar_t (&out)[64], const wchar_t* suffix) noexcept
+{
+  return _snwprintf_s(
+           out, _TRUNCATE, L"%ls%lu%ls", skydiag::protocol::kKernelObjectPrefix, GetCurrentProcessId(), suffix) > 0;
+}
+
+void InitSecondFault() noexcept
+{
+  wchar_t mappingName[64]{};
+  wchar_t postedName[64]{};
+  if (!FormatSecondFaultName(mappingName, second_fault::kMappingSuffix) ||
+      !FormatSecondFaultName(postedName, second_fault::kPostedSuffix) ||
+      !FormatSecondFaultName(g_secondFaultSettledEventName, second_fault::kSettledSuffix)) {
+    g_secondFaultSettledEventName[0] = L'\0';
+    return;
+  }
+  g_secondFaultMapping = CreateFileMappingW(
+    INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(second_fault::Slot), mappingName);
+  if (!g_secondFaultMapping) {
+    return;
+  }
+  g_secondFaultSlot = static_cast<second_fault::Slot*>(
+    MapViewOfFile(g_secondFaultMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(second_fault::Slot)));
+  if (g_secondFaultSlot) {
+    std::memset(g_secondFaultSlot, 0, sizeof(*g_secondFaultSlot));
+    g_secondFaultSlot->magic = second_fault::kMagic;
+    g_secondFaultSlot->version = second_fault::kVersion;
+    g_secondFaultSlot->size = sizeof(*g_secondFaultSlot);
+    g_secondFaultPostedEvent = CreateEventW(nullptr, FALSE, FALSE, postedName);
+  }
+}
+
+void ShutdownSecondFault() noexcept
+{
+  if (g_secondFaultPostedEvent) {
+    CloseHandle(g_secondFaultPostedEvent);
+    g_secondFaultPostedEvent = nullptr;
+  }
+  if (g_secondFaultSlot) {
+    UnmapViewOfFile(g_secondFaultSlot);
+    g_secondFaultSlot = nullptr;
+  }
+  if (g_secondFaultMapping) {
+    CloseHandle(g_secondFaultMapping);
+    g_secondFaultMapping = nullptr;
+  }
+}
 
 }  // namespace
 
@@ -80,8 +135,10 @@ bool InitSharedMemory()
       (dumpSettledEventName.size() + 1u) * sizeof(wchar_t));
   }
 
+  InitSecondFault();
   g_crashEvent = CreateEventW(nullptr, /*bManualReset=*/TRUE, /*bInitialState=*/FALSE, crashEventName.c_str());
   if (!g_crashEvent) {
+    ShutdownSecondFault();
     if (g_unhandledEvent) {
       CloseHandle(g_unhandledEvent);
       g_unhandledEvent = nullptr;
@@ -119,6 +176,7 @@ bool InitSharedMemory()
 
 void ShutdownSharedMemory()
 {
+  ShutdownSecondFault();
   if (g_shared) {
     UnmapViewOfFile(g_shared);
     g_shared = nullptr;
@@ -160,6 +218,21 @@ HANDLE GetUnhandledEvent() noexcept
 const wchar_t* GetDumpSettledEventName() noexcept
 {
   return g_dumpSettledEventName;
+}
+
+second_fault::Slot* GetSecondFaultSlot() noexcept
+{
+  return g_secondFaultSlot;
+}
+
+HANDLE GetSecondFaultPostedEvent() noexcept
+{
+  return g_secondFaultPostedEvent;
+}
+
+const wchar_t* GetSecondFaultSettledEventName() noexcept
+{
+  return g_secondFaultSettledEventName;
 }
 
 }  // namespace skydiag::plugin

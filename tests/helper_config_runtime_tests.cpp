@@ -237,6 +237,17 @@ void TestTotalDumpBudgetIsRead(const IniFile& ini)
   Require(limits.maxEtwTraces == 7u, "MaxEtwTraces reaches the sweep");
 }
 
+void TestSecondFaultDumpLimitIsRead(const IniFile& ini)
+{
+  ini.Write("[SkyrimDiagHelper]\r\n");
+  Require(LoadConfig(nullptr).maxSecondFaultDumps == 3u, "MaxSecondFaultDumps defaults to 3");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxSecondFaultDumps=0\r\n");
+  const auto disabled = RetentionLimitsFromConfig(LoadConfig(nullptr));
+  Require(disabled.maxSecondFaultDumps == 0u, "MaxSecondFaultDumps=0 reaches retention");
+  ini.Write("[SkyrimDiagHelper]\r\nMaxSecondFaultDumps=21\r\n");
+  Require(LoadConfig(nullptr).maxSecondFaultDumps == 20u, "MaxSecondFaultDumps is clamped to 20");
+}
+
 // DumpAllModuleCode (ADR-0023): off when missing, and read as written.
 void TestDumpAllModuleCodeIsRead(const IniFile& ini)
 {
@@ -272,6 +283,7 @@ int main()
     TestLookupsMatchTheWindowsApi();
     TestOutputDirFallbacks(ini);
     TestTotalDumpBudgetIsRead(ini);
+    TestSecondFaultDumpLimitIsRead(ini);
     TestDumpAllModuleCodeIsRead(ini);
     TestKeepSlowShutdownHangDumpsIsRead(ini);
   } catch (const std::exception& ex) {

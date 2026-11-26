@@ -24,7 +24,7 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 | Ctrl+Shift+F2 | CrashTester.dll 안에서 `int 3` | `0x80000003`, 모드가 스스로 멈춘 것이라는 해석, 후보 CrashTester.dll |
 | Ctrl+Shift+F3 | CrashTester.dll에서 처리되지 않는 C++ 예외. 그동안 다른 스레드가 잡히는 C++ 예외를 계속 던짐 | C++ 예외(`0xE06D7363`), Crash Logger의 C++ 예외 정보와 대조. 다른 스레드의 잡힌 예외 때문에 크래시가 빠지지 않음(리뷰 #5) |
 | Ctrl+Shift+F4 | 작업 스레드를 CrashTester.dll 안의 `Sleep`으로 45초 붙잡음(다시 누를 수 있음) | 자동 프리징 캡처, 막힌 작업 스레드의 CrashTester.dll을 후보로, 두 번째는 같은 `HANG1-` 버킷 |
-| Ctrl+Shift+F5 | CrashTester.dll이 스스로 잡는 접근 위반, 2초 뒤 CrashTester.dll 스레드에서 진짜 접근 위반 | 남은 한계(ADR-0017): 진짜 크래시는 기록되지 않고, 첫 예외가 크래시로 남음. 고친 뒤에는 두 번째 크래시가 잡혀야 함 |
+| Ctrl+Shift+F5 | 게임 작업 스레드에서 잡히는 접근 위반. Helper가 첫 덤프 쓰기를 마친 뒤 2초가 지나면 CrashTester.dll 스레드에서 처리되지 않는 접근 위반 | 첫 예외에 기존 덤프와 판정이 유지되고, 두 번째 예외의 보조 덤프와 JSON이 남음(ADR-0036) |
 | Ctrl+Shift+F6 | CrashTester.dll이 읽을 수 없는 메모리를 레퍼런스로 엔진의 `TESObjectREFR::GetDisplayFullName`에 넘김 | 예외 모듈 SkyrimSE.exe, 콜스택으로 CrashTester.dll을 후보로 |
 | Ctrl+Shift+F7 | 저널 메뉴를 열어, 게임이 부르는 CrashTester.dll의 메뉴 이벤트 콜백 안에서 접근 위반 | 게임이 부른 플러그인 콜백의 크래시. 후보 CrashTester.dll, 그 아래는 게임의 이벤트 처리 프레임 |
 | Ctrl+Shift+F8 | CrashTester.dll이 직접 만든 스레드에서 접근 위반 | 아래에 게임 프레임이 없는 스레드. 후보 CrashTester.dll |
@@ -34,10 +34,17 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 | Ctrl+Shift+End | CrashTester.dll이 비어 있는(null) 함수 포인터를 `call`로 부름(설정되지 않은 콜백, vtable 칸, 후킹의 원래 함수를 부르는 경우) | `null_jump` 판정("비어 있는(null) 함수 포인터로 함수를 부르다가 튕겼습니다"). v0.2.76-rc3부터 콜스택이 `0x0`, `CrashTester.dll!CallEmptyFunctionPointer`, 게임의 작업 처리 프레임 순으로 이어지고 Crash Logger의 `PROBABLE CALL STACK`과 앞부분 순서가 같음(ADR-0019). 호출이 `call rax`(rax=0)로 빌드되므로 근거에 "호출한 곳은 CrashTester.dll+…(call rax)입니다"가 나옴. 후보 CrashTester.dll. 그 이전 분석기에서는 콜스택이 비고 스택 스캔으로만 짚음 |
 | Ctrl+Shift+Home | CrashTester.dll이 폼 포인터 자리에 FormID `0x00012EB6`(Skyrim.esm의 철 방패, ArmorIronShield)을 넣고 폼 종류를 읽음(빌드 결과 `movzx ebx, byte ptr [rax+0x1a]`, rax=0x12EB6, 2026-11-17 디스어셈블리로 확인). 세이브를 불러오는 중에 인벤토리를 읽은 모드에서 실제로 본 모양 | `bad_pointer` 판정(rax=0x12EB6)에 더해, 근거 문장이 "이 값은 이 게임에 있는 폼 …의 FormID와 같습니다"로 끝나며 그 폼이 `TESObjectARMO "철 방패" (FormID 0x00012EB6, Skyrim.esm …)`로 나오고, 빠른 답의 어떻게 튕겼나가 "폼의 번호(FormID)를 포인터처럼 쓰다가 튕긴 것으로 보입니다", 리포트의 예외 명령어 줄 끝에 `(rax 값은 이 폼의 FormID: …)`가 붙음(ADR-0033). 이 조회를 하는 Helper로 캡처한 덤프에서만 나옴. 후보 CrashTester.dll |
 | Ctrl+Shift+PageUp | CrashTester.dll이 C++ 예외(`std::runtime_error`)를 던지고 스스로 `catch`로 잡은 뒤, 그 `catch` 블록 안에서 접근 위반을 일으킴 | 진짜 크래시는 `0xC0000005`(접근 위반, 후보 CrashTester.dll). 현재(`IsCrashLoggerReportingKeptException`)는 `catch` 실행 중 스택 위에 남은 C++ 예외의 `CONTEXT`와 `CrashLogger.dll` 벡터 핸들러의 잔재 주소가 겹치면, 이미 잡힌 C++ 예외(`0xE06D7363`)로 오기록되고 ADR-0032 처리되지 않은 예외 신호도 켜지지 않는지 확인하는 용도. 고친 뒤에는 `0xC0000005`(후보 CrashTester.dll, 처리되지 않은 예외 신호 포함)로 기록돼야 함 |
+| Ctrl+Shift+PageDown | F5와 같은 두 접근 위반을 CrashTester.dll의 같은 워커 스레드에서 서로 다른 주소에 일으킴 | 첫 덤프와 보조 덤프의 예외 스레드는 같고 주소는 다름(ADR-0036) |
 | Ctrl+Shift+Insert | SkyrimSE.exe 안의 같은 주소에서 나는 접근 위반을 CrashTester.dll이 스스로 잡기를 15초 간격으로 6번 반복(홀수 번째는 게임의 작업 스레드, 짝수 번째는 CrashTester.dll 스레드). 크래시가 아니며, 끝난 뒤 다시 누를 수 있음 | 처음 두 번만 덤프를 쓰고, 세 번째부터는 덤프 없이 지나감(ADR-0031). 아래 "반복되는 처리된 예외" 참고 |
 | Ctrl+Shift+Delete | 위와 같은 접근 위반을 15초 간격으로 두 번 잡은 뒤, 세 번째는 게임의 작업 스레드에서 잡지 않고 둠(크래시) | 덤프를 먼저 쓰지 않게 된 주소에서 난 진짜 크래시가 기록됨(ADR-0031 Decision 2). 아래 "두 번 처리된 뒤의 진짜 크래시" 참고 |
 
-크래시 단축키(F1·F2·F3·F5~F9, End, Home, PageUp, Delete)는 게임 한 번에 하나만 동작합니다. 결과는 `scripts/accuracy_benchmark.py`로 정확도 측정 세트에 넣습니다(DEVELOPMENT의 Accuracy Benchmark). 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
+크래시 단축키(F1·F2·F3·F5~F9, End, Home, PageUp, PageDown, Delete)는 게임 한 번에 하나만 동작합니다. 결과는 `scripts/accuracy_benchmark.py`로 정확도 측정 세트에 넣습니다(DEVELOPMENT의 Accuracy Benchmark). 테스트용 세이브에서 쓰고, 끝나면 MO2에서 두 모드를 끄세요.
+
+## 확인 중 들어온 두 번째 예외 (Ctrl+Shift+F5, Ctrl+Shift+PageDown)
+
+Crash Logger를 켜고 `CrashHookMode=1`, `MaxSecondFaultDumps`가 1 이상인 세션에서 하나씩 시험합니다. 테스터는 첫 번째 접근 위반의 `crash_seq`가 게시된 뒤 `DUMP_SETTLED`가 켜졌는지 확인하고 2초를 셉니다. 신호를 확인하지 못하거나 그사이 첫 사고가 해제되면 `CrashTester.log`에 이유를 적고 두 번째 예외를 일으키지 않습니다.
+
+`SkyrimDiag_SecondFault_*.dmp`의 예외 주소와 스레드는 같은 이름의 JSON과 Crash Logger 로그에 나온 두 번째 접근 위반과 일치해야 합니다. 일반 크래시 덤프는 첫 번째 접근 위반을 담고 자동 뷰어도 그 덤프를 엽니다. 일반 덤프의 리포트에 두 번째 접근 위반 항목이 나오며, 보조 덤프는 뷰어에서 따로 엽니다.
 
 ## 반복되는 처리된 예외 (Ctrl+Shift+Insert)
 
@@ -91,7 +98,7 @@ cmake --build build-ct --target CrashTester SkyrimCrashGuardStub
 
 ```
 [CrashTester]
-AutoScenario=1      ; 1: 프리징 2번 뒤 가장 가까운 NPC로 F1, 2: F2, 3: F3, 4: F6, 5: F7, 6: F8, 7: F9, 8: F10, 9: F11, 10: F5, 11: Insert, 12: Delete, 13: End, 14: Home, 15: PageUp, 0: 단축키만
+AutoScenario=1      ; 1: 프리징 2번 뒤 가장 가까운 NPC로 F1, 2: F2, 3: F3, 4: F6, 5: F7, 6: F8, 7: F9, 8: F10, 9: F11, 10: F5, 11: Insert, 12: Delete, 13: End, 14: Home, 15: PageUp, 16: PageDown, 0: 단축키만
 SaveName=<세이브 파일 이름, .ess 제외>
 StartDelaySec=20
 RepeatCount=6         ; Insert 시나리오가 예외를 내는 횟수(1~50). 단축키에도 적용

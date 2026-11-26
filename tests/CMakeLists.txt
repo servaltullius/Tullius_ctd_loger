@@ -117,6 +117,7 @@ if(WIN32)
   )
   target_link_libraries(skydiag_crashlogger_later_crash_tests PRIVATE SkyrimDiagDumpToolCore)
   add_test(NAME skydiag_crashlogger_later_crash_tests COMMAND skydiag_crashlogger_later_crash_tests)
+  add_test(NAME skydiag_second_fault_analyzer_tests COMMAND skydiag_crashlogger_later_crash_tests --second-fault)
 
   add_executable(skydiag_analyzer_state_runtime_tests
     analyzer_state_runtime_tests.cpp
@@ -516,6 +517,7 @@ target_include_directories(skydiag_retention_tests PRIVATE
 )
 
 add_test(NAME skydiag_retention_tests COMMAND skydiag_retention_tests)
+add_test(NAME skydiag_second_fault_retention_tests COMMAND skydiag_retention_tests --second-fault)
 
 add_executable(skydiag_hook_stub_decoder_tests
   hook_stub_decoder_tests.cpp
@@ -1084,6 +1086,8 @@ if(WIN32)
   )
   target_link_libraries(skydiag_helper_false_positive_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_helper_false_positive_runtime_tests COMMAND skydiag_helper_false_positive_runtime_tests)
+  add_test(NAME skydiag_helper_second_fault_runtime_tests
+    COMMAND skydiag_helper_false_positive_runtime_tests --second-fault)
 
   add_executable(skydiag_helper_hang_runtime_tests
     helper_hang_runtime_tests.cpp
@@ -1208,6 +1212,8 @@ if(WIN32)
     NAME skydiag_plugin_crash_handler_runtime_tests
     COMMAND skydiag_plugin_crash_handler_runtime_tests $<TARGET_FILE:skydiag_fake_crashlogger>
   )
+  add_test(NAME skydiag_plugin_second_fault_runtime_tests
+    COMMAND skydiag_plugin_crash_handler_runtime_tests $<TARGET_FILE:skydiag_fake_crashlogger> --second-fault)
 
   # Real helper hang capture of a thread parked three calls deep: the formal
   # stackwalk must unwind every caller instead of stopping or guessing.

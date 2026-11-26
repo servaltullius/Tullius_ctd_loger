@@ -24,6 +24,7 @@
 #include "HelperLog.h"
 #include "HookPageRecord.h"
 #include "ModuleUnwindMemory.h"
+#include "SkyrimDiagLongPath.h"
 #include "SkyrimDiagProtocol.h"
 #include "StackCodeMemory.h"
 
@@ -514,7 +515,8 @@ bool WriteDumpWithStreams(
   const DumpProfile& dumpProfile,
   bool isProcessSnapshot,
   std::wstring* err,
-  DumpObjectMemoryStats* objectMemory)
+  DumpObjectMemoryStats* objectMemory,
+  SecondFaultDumpInput* secondFault)
 {
   if (objectMemory) {
     *objectMemory = DumpObjectMemoryStats{};
@@ -542,7 +544,7 @@ bool WriteDumpWithStreams(
   }
 
   std::vector<MINIDUMP_USER_STREAM> streams;
-  streams.reserve(7);  // s1..s7 below
+  streams.reserve(7 + (secondFault ? 1 : 0));
 
   MINIDUMP_USER_STREAM s1{};
   s1.Type = skydiag::protocol::kMinidumpUserStream_Blackbox;
@@ -615,6 +617,13 @@ bool WriteDumpWithStreams(
     s7.Buffer = const_cast<char*>(addressLibrary.data());
     streams.push_back(s7);
   }
+  if (secondFault) {
+    MINIDUMP_USER_STREAM stream{};
+    stream.Type = skydiag::second_fault::kStreamType;
+    stream.BufferSize = sizeof(secondFault->stream);
+    stream.Buffer = &secondFault->stream;
+    streams.push_back(stream);
+  }
 
   MINIDUMP_USER_STREAM_INFORMATION usi{};
   usi.UserStreamCount = static_cast<ULONG>(streams.size());
@@ -636,14 +645,14 @@ bool WriteDumpWithStreams(
   std::uint64_t gameEnd = 0;
   const bool gameImageKnown =
     !isProcessSnapshot && internal::GameImageRange(process, gameBase, gameEnd) && gameBase != 0;
-  if (isCrash && hasCommittedHeader &&
+  if (secondFault || (isCrash && hasCommittedHeader &&
       committedHeader.crash_seq != 0u &&
-      (committedHeader.crash_seq & 1u) == 0u) {
+      (committedHeader.crash_seq & 1u) == 0u)) {
     // The exception stream and the blackbox user stream must originate from
     // this same immutable byte copy. Reading the live mapping again here can
     // combine a later exception with an earlier event/resource history.
-    er = committedHeader.crash.exception_record;
-    ctx = committedHeader.crash.context;
+    er = secondFault ? secondFault->slot.exception_record : committedHeader.crash.exception_record;
+    ctx = secondFault ? secondFault->slot.context : committedHeader.crash.context;
     ep.ExceptionRecord = &er;
     // See CopyIntoXStateSizedContext; the bare copy is only a fallback, and
     // it must not claim extended state it does not have.
@@ -665,7 +674,7 @@ bool WriteDumpWithStreams(
       g_crashObjectMemoryBytes.fetch_add(TotalBytes(crashObjectMemory), std::memory_order_relaxed);
     }
 
-    mei.ThreadId = committedHeader.crash.faulting_tid;
+    mei.ThreadId = secondFault ? secondFault->stream.tid : committedHeader.crash.faulting_tid;
     mei.ExceptionPointers = &ep;
     mei.ClientPointers = FALSE;  // pointers are in this process address space
     meiPtr = &mei;
@@ -735,14 +744,18 @@ bool WriteDumpWithStreams(
 
   // See ShouldRetryDumpIgnoringInaccessibleMemory: an ERROR_PARTIAL_COPY
   // failure is retried once at once with unreadable regions skipped.
+  const auto finalPath = secondFault ? skydiag::PathForIo(dumpPath) : std::filesystem::path{};
+  const auto temporaryPath = secondFault
+    ? skydiag::PathForIo(dumpPath + L".partial")
+    : std::filesystem::path{};
   DWORD lastErr = ERROR_SUCCESS;
   for (int attempt = 0; attempt < 2; ++attempt) {
     HANDLE file = CreateFileW(
-      dumpPath.c_str(),
+      secondFault ? temporaryPath.c_str() : dumpPath.c_str(),
       GENERIC_WRITE,
       0,
       nullptr,
-      CREATE_ALWAYS,
+      secondFault ? CREATE_NEW : CREATE_ALWAYS,
       FILE_ATTRIBUTE_NORMAL,
       nullptr);
     if (file == INVALID_HANDLE_VALUE) {
@@ -753,6 +766,21 @@ bool WriteDumpWithStreams(
     callbackContext.progress.Reset();
     // A retry hands the writer the same ranges again.
     callbackContext.nextExtraMemory = 0;
+    if (secondFault) {
+      LARGE_INTEGER now{};
+      QueryPerformanceCounter(&now);
+      secondFault->holdExpired = static_cast<std::uint64_t>(now.QuadPart) >= secondFault->slot.hold_until_qpc;
+      secondFault->processExited = WaitForSingleObject(process, 0) != WAIT_TIMEOUT;
+      if (secondFault->holdExpired || secondFault->processExited) {
+        CloseHandle(file);
+        std::error_code removeEc;
+        std::filesystem::remove(temporaryPath, removeEc);
+        return false;
+      }
+    }
+    if (secondFault) {
+      secondFault->dumpCalled = true;
+    }
     const BOOL ok = MiniDumpWriteDump(
       process,
       pid,
@@ -766,6 +794,13 @@ bool WriteDumpWithStreams(
     CloseHandle(file);
 
     if (ok) {
+      if (secondFault && !MoveFileExW(temporaryPath.c_str(), finalPath.c_str(), MOVEFILE_WRITE_THROUGH)) {
+        const DWORD moveErr = GetLastError();
+        std::error_code removeEc;
+        std::filesystem::remove(temporaryPath, removeEc);
+        if (err) *err = L"MoveFileExW failed: " + std::to_wstring(moveErr);
+        return false;
+      }
       internal::RecordSessionDump(dumpPath);
       if (err) {
         err->clear();
@@ -781,6 +816,13 @@ bool WriteDumpWithStreams(
       }
       return true;
     }
+    if (secondFault) {
+      std::error_code removeEc;
+      std::filesystem::remove(temporaryPath, removeEc);
+      if (removeEc) {
+        break;
+      }
+    }
     if (!ShouldRetryDumpIgnoringInaccessibleMemory(static_cast<std::uint32_t>(dumpType), lastErr)) {
       break;
     }
@@ -791,7 +833,9 @@ bool WriteDumpWithStreams(
   // and retention would keep it as the newest capture.
   // remove, not DeleteFileW, which MO2 refuses past MAX_PATH (SkyrimDiagLongPath.h).
   std::error_code removeEc;
-  std::filesystem::remove(std::filesystem::path(dumpPath), removeEc);
+  if (!secondFault) {
+    std::filesystem::remove(std::filesystem::path(dumpPath), removeEc);
+  }
   if (err) {
     *err = L"MiniDumpWriteDump failed: " + std::to_wstring(lastErr) + L" (" + Hex(lastErr) + L", " +
       DescribeDumpProgress(callbackContext.progress) + L"; dbghelp " + DescribeLoadedDbgHelp() + L")";

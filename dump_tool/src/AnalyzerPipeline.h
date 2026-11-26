@@ -23,6 +23,8 @@ std::optional<CONTEXT> ParseExceptionInfo(
   std::uint64_t dumpSize,
   AnalysisResult& out);
 
+void ParseSecondFaultStream(void* dumpBase, std::uint64_t dumpSize, AnalysisResult& out);
+
 void ResolveFaultModule(
   void* dumpBase,
   std::uint64_t dumpSize,

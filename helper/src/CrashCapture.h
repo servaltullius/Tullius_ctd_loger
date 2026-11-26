@@ -647,6 +647,28 @@ bool TryClearRecoveredCrashFreeze(
 bool ThawCrashCapture(
   const skydiag::helper::AttachedProcess& proc,
   std::uint32_t expectedCrashSeq) noexcept;
+// ADR-0036: the stem of a new second fault capture, SkyrimDiag_SecondFault_<ts>,
+// or <ts>-<n> when a file of that stem (.dmp, .dmp.partial, .json) is there
+// already: retention still reads <ts> from it (TryExtractTimestampToken), and
+// the "<stem>_" sweep of another capture's analysis files never matches it.
+// Empty when no name is free.
+std::filesystem::path NewSecondFaultStem(const std::filesystem::path& outBase, std::wstring_view ts);
+
+// ADR-0036: when a second fault in the slot is looked at outside A's own
+// handling. A tick leaves a B posted while its A's crash event is still to be
+// handled (within its hold); the other two always settle it.
+enum class SecondFaultDrain
+{
+  kTick,
+  kProcessExited,
+  kHelperStopping,
+};
+void DrainSecondFault(
+  const skydiag::helper::HelperConfig& cfg,
+  const skydiag::helper::AttachedProcess& proc,
+  const std::filesystem::path& outBase,
+  const CrashCaptureState& crashState,
+  SecondFaultDrain when = SecondFaultDrain::kTick) noexcept;
 // Why the WER LocalDumps hint is being written. The two cases need different
 // first steps, so the hint must not claim a failed capture when none was tried.
 enum class WerFallbackReason
