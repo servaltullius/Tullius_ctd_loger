@@ -48,17 +48,20 @@ add_executable(${PROJECT_NAME}
   src/SkseLogParser.cpp
   src/StackCodeMemory.cpp
   src/WctCapture.cpp
+  src/WerExitEvent.cpp
   src/WindowHeuristics.cpp
   src/main.cpp
   src/BlackboxCursor.h
   src/CompatibilityPreflight.h
   src/CrashObjectMemory.h
+  src/EventLogCommon.h
   src/GpuDriverEvents.h
   src/GpuMemory.h
   src/HangObjectMemory.h
   src/HookPageRecord.h
   src/ModuleUnwindMemory.h
   src/StackCodeMemory.h
+  src/WerExitEvent.h
   include/SkyrimDiagHelper/Config.h
   include/SkyrimDiagHelper/DumpProfile.h
   include/SkyrimDiagHelper/DumpWriter.h

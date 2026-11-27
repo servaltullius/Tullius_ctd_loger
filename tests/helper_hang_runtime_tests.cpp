@@ -26,6 +26,7 @@
 #include "ManualCapture.h"
 #include "PssSnapshot.h"
 #include "RetentionWorker.h"
+#include "WerExitEvent.h"
 #include "SkyrimDiagHelper/DumpProfile.h"
 #include "SkyrimDiagHelper/DumpWriter.h"
 #include "SkyrimDiagHelper/HangDetect.h"
@@ -1521,9 +1522,18 @@ void TestRunHelperLoop_AFreezeAfterAQuitIsASlowShutdown()
   std::filesystem::remove_all(outBase);
 }
 
+std::atomic<int> g_werExitLookupStubCalls{ 0 };
+
+std::optional<std::wstring> StubWerExitLookupForRuntimeTests(HANDLE, std::uint32_t, std::uint32_t)
+{
+  g_werExitLookupStubCalls.fetch_add(1, std::memory_order_relaxed);
+  return std::nullopt;
+}
+
 int main()
 {
   try {
+    skydiag::helper::internal::SetWerExitEventLineLookupOverrideForTests(&StubWerExitLookupForRuntimeTests);
     SKYDIAG_RUN_TEST(TestEvaluateHangDecisions);
     SKYDIAG_RUN_TEST(TestAddressLibraryFileName);
     SKYDIAG_RUN_TEST(TestComputeHangThresholds);

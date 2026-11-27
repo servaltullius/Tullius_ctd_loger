@@ -27,6 +27,7 @@
 #include "IncidentManifest.h"
 #include "RetentionWorker.h"
 #include "SkyrimDiagProtocol.h"
+#include "WerExitEvent.h"
 
 using skydiag::helper::HelperConfig;
 using skydiag::helper::internal::ClearLog;
@@ -4829,11 +4830,20 @@ void TestSecondFaultMappingMismatch()
   std::filesystem::remove_all(outBase);
 }
 
+std::atomic<int> g_werExitLookupStubCalls{ 0 };
+
+std::optional<std::wstring> StubWerExitLookupForRuntimeTests(HANDLE, std::uint32_t, std::uint32_t)
+{
+  g_werExitLookupStubCalls.fetch_add(1, std::memory_order_relaxed);
+  return std::nullopt;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv)
 {
   try {
+    skydiag::helper::internal::SetWerExitEventLineLookupOverrideForTests(&StubWerExitLookupForRuntimeTests);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--second-fault") {
       SKYDIAG_RUN_TEST(TestSecondFaultDuringPostDumpFiltering);
       SKYDIAG_RUN_TEST(TestSecondFaultPostedBeforeADumpWaitsForIt);
