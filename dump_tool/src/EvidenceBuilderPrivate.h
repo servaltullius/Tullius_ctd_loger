@@ -106,6 +106,8 @@ bool SecondFaultEndedGame(const AnalysisResult& r, const EvidenceBuildContext& c
 // The paired Crash Logger log shows a later crash (CrashLoggerShowsLaterCrash)
 // that is not B: the lead names both.
 bool CrashLoggerShowsAnotherCrash(const AnalysisResult& r);
+// That crash as "<location>, thread <tid>".
+std::wstring AnotherCrashLabel(const AnalysisResult& r, bool en);
 // "on the same thread" / "on another thread" for B; empty when this dump's
 // thread is not known.
 std::wstring SecondFaultThread(const AnalysisResult& r, bool en);

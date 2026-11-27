@@ -112,6 +112,7 @@ struct Case
   // default A's own (its address and thread).
   bool crash_timeline = false;
   std::uint64_t crash_marker_address = kModuleBase + 0x123;
+  std::optional<ULONG32> crash_marker_tid;  // dump_tid when not given
   bool expect_log_pairing = true;
 };
 
@@ -202,7 +203,7 @@ void WriteDump(const fs::path& path, const Case& input)
     d->blackbox.qpc_freq = 1000;
     d->blackbox.crash_seq = 2;
     auto& crash = d->events[0];
-    crash.tid = input.dump_tid;
+    crash.tid = input.crash_marker_tid.value_or(input.dump_tid);
     crash.qpc = kTimelineStart + kFirstFaultMs;
     crash.type = static_cast<std::uint16_t>(skydiag::EventType::kCrash);
     crash.payload.a = EXCEPTION_ACCESS_VIOLATION;
@@ -789,6 +790,7 @@ void TestSecondFaultLead(i18n::Language lang)
     { "record before the first exception", timed, SecondFaultRecord(kLogTid, kTimelineStart + kFirstFaultMs - 1) },
     { "marker of another exception",
       { .log_name = L"", .crash_timeline = true, .crash_marker_address = kModuleBase + 0x777 }, delayed },
+    { "marker of another thread", { .log_name = L"", .crash_timeline = true, .crash_marker_tid = 99u }, delayed },
     { "no crash marker", { .log_name = L"" }, delayed },
   };
   for (const auto& [name, input, record] : untimed) {
@@ -805,6 +807,30 @@ void TestSecondFaultLead(i18n::Language lang)
     std::ofstream(dir.path / L"SkyrimDiag_SecondFault_20970713_120000_000.json", std::ios::binary) << "{\"schema\":";
     const auto u = AnalyzeWithSecondFault(dir.path, timed, SecondFault(kLogTid), std::nullopt, lang);
     Require(u.second_fault_lead && !u.incident_second_fault->seconds_after_first, "a torn record gives no time");
+  }
+  {
+    // A record past 64 KB is no record of the helper's, even if it parses.
+    TempDirectory dir;
+    std::ofstream(dir.path / L"SkyrimDiag_SecondFault_20970713_120000_000.json", std::ios::binary)
+      << delayed->dump() << std::string(70000, ' ');
+    const auto u = AnalyzeWithSecondFault(dir.path, timed, SecondFault(kLogTid), std::nullopt, lang);
+    Require(u.second_fault_lead && !u.incident_second_fault->seconds_after_first, "an oversized record gives no time");
+  }
+  {
+    // A resume in a record of another pair is not B's.
+    TempDirectory dir;
+    auto other = SecondFaultRecord(kDumpTid, kTimelineStart + kSecondFaultMs);
+    (*other)["resumed"] = true;
+    const auto u = AnalyzeWithSecondFault(dir.path, timed, SecondFault(kLogTid), other, lang);
+    Require(u.second_fault_lead && !u.incident_second_fault->resumed, "a resume in another pair's record is ignored");
+  }
+  {
+    // A folder where B's dump should be is no dump to open.
+    TempDirectory dir;
+    fs::create_directory(dir.path / kSecondDump);
+    const auto u = AnalyzeWithSecondFault(dir.path, timed, SecondFault(kLogTid), delayed, lang);
+    Require(!u.second_fault_lead && !u.incident_second_fault->dump_present && !u.incident_second_fault->dump_missing &&
+            u.quick_answer.case_id != "second_fault_crash", "a folder is not B's dump");
   }
   {
     // The helper recorded after A's incident that execution resumed after B.
@@ -933,33 +959,53 @@ void TestSecondFaultLeadCrashLogger(i18n::Language lang)
     std::string_view name;
     Case input;
     bool another_crash;
+    std::wstring_view log_tid;
   } others[] = {
-    { "a log at another location", { .location = "Earlier.dll+999", .address = "0x180000999" }, true },
+    { "a log at another location", { .location = "Earlier.dll+999", .address = "0x180000999" }, true, L"56" },
+    // B's location on another thread than B's and A's: still another crash.
     { "a log of another thread", { .location = "Earlier.dll+321", .thread_line = "Exception Thread ID: 57",
-                                   .address = "0x180000321" }, true },
+                                   .address = "0x180000321" }, true, L"57" },
     { "a log of another process", { .location = "Earlier.dll+321", .process_line = "Process ID: 786",
-                                    .address = "0x180000321" }, false },
+                                    .address = "0x180000321" }, false, L"" },
   };
-  for (const auto& [name, input, anotherCrash] : others) {
+  for (const auto& [name, input, anotherCrash, logTid] : others) {
     TempDirectory temp;
     const auto r = AnalyzeWithSecondFault(temp.path, input, SecondFault(kLogTid), std::nullopt, lang);
     Require(r.second_fault_lead && !r.incident_second_fault->crash_logger_log_is_second &&
             r.crash_logger_later_crash == anotherCrash && crashLoggerItem(r).find(isSecond) == std::wstring::npos &&
             CountOf(r.summary_sentence, tag) == 1, name);
-    const std::wstring location = Utf8ToWide(input.location);
+    const std::wstring label = Utf8ToWide(input.location) + (en ? L", thread " : L", 스레드 ") + std::wstring(logTid);
     const bool named =
-      r.quick_answer.action.find(en ? L"recorded a crash at another location (" + location + L"); check that log too."
-                                    : L"다른 위치(" + location + L")의 크래시가 기록됐으니 그 로그도 확인하세요.") !=
+      r.quick_answer.action.find(en ? L"recorded another crash (" + label + L"); check that log too."
+                                    : L"다른 크래시(" + label + L")가 기록됐으니 그 로그도 확인하세요.") !=
       std::wstring::npos;
     const bool uncertain =
       r.quick_answer.why_not_certain.find(en ? L"which of the two" : L"둘 중 어느 것이") != std::wstring::npos &&
       r.summary_sentence.find(en ? L"which of the two ended the game is not certain"
                                  : L"둘 중 어느 것이 게임을 끝냈는지 확실하지 않습니다") != std::wstring::npos;
+    // B is then only a crash that may have ended the game.
+    const bool hedged =
+      r.quick_answer.headline.find(en ? L"a crash that may have ended the game" : L"게임을 끝냈을 수 있는 크래시(") !=
+        std::wstring::npos &&
+      r.summary_sentence.find(en ? L"the crash that may have ended the game happened" : L"게임을 끝냈을 수 있는 크래시는") !=
+        std::wstring::npos;
     const bool laterItem = std::any_of(r.evidence.begin(), r.evidence.end(), [en](const EvidenceItem& e) {
       return e.title == (en ? L"Different crash from dump" : L"덤프와 다른 크래시");
     });
-    Require(named == anotherCrash && uncertain == anotherCrash && laterItem == anotherCrash &&
+    Require(named == anotherCrash && uncertain == anotherCrash && hedged == anotherCrash &&
+            laterItem == anotherCrash &&
             (anotherCrash || r.quick_answer.action.find(L"Crash Logger") == std::wstring::npos), name);
+  }
+  {
+    // The other crash in this dump's module: that module is not set aside.
+    constexpr DumpModule windows{ L"C:\\Windows\\System32\\d3d11.dll", kModuleBase + 0x4000 };
+    TempDirectory temp;
+    const auto r = AnalyzeWithSecondFault(temp.path, Case{ .location = "Earlier.dll+999", .address = "0x180000999",
+                                                           .extra_modules = { &windows, 1 } },
+                                          SecondFault(kLogTid, kModuleBase + 0x4321), std::nullopt, lang);
+    Require(r.second_fault_lead && internal::CrashLoggerShowsAnotherCrash(r) &&
+            r.quick_answer.action.find(en ? L"Do not treat" : L"원인으로 보지 마세요") == std::wstring::npos,
+            "with the other crash in this dump's module, that module is not set aside");
   }
 
   // How the log's location and IDs are read against B.
@@ -1038,10 +1084,13 @@ void TestSecondFaultLeadExclusions()
     r.has_wct = true;
     r.wct_json_utf8 = R"({"capture":{"kind":"hang"}})";
   }, "freeze by its WCT record");
+  // Without a thread list the WCT summary is not read for the capture kind,
+  // so only the lead's own check sees this one.
   check(analyzed, [](AnalysisResult& r) {
     r.has_wct = true;
-    r.wct_json_utf8 = R"({"threads":[],"capture":{"kind":"manual"}})";
+    r.wct_json_utf8 = R"({"capture":{"kind":"manual"}})";
   }, "manual capture by its WCT record");
+  check(analyzed, [](AnalysisResult& r) { r.exc_code = 0; }, "no exception in this dump");
   check(analyzed, [](AnalysisResult& r) { r.incident_second_fault->resumed = true; }, "resumed");
   check(analyzed, [](AnalysisResult& r) { r.incident_second_fault->dump_missing = true; }, "dump gone");
   check(analyzed, [](AnalysisResult& r) { r.incident_second_fault->dump_present = false; }, "dump not seen");

@@ -774,14 +774,17 @@ QuickAnswer SecondFaultAnswer(const AnalysisResult& r, bool en)
   const bool anotherCrash = CrashLoggerShowsAnotherCrash(r);
   const auto logFile = BaseName(r.crash_logger_log_path);
   answer.headline = KindPhrase(answer.kind, en);
+  // With another crash in the Crash Logger log, B only may have ended the game.
   if (en) {
     answer.headline += L" This dump captured an earlier exception" + earlierLabel + L" the game was handling " +
       (thread.empty() ? L"" : thread + L" ") + (interval.empty() ? L"before" : interval + L" before") +
-      L" the crash that ended the game. That crash (" + location + L") has its own dump: " + file + L".";
+      (anotherCrash ? L" a crash that may have ended the game. That crash (" : L" the crash that ended the game. That crash (") +
+      location + L") has its own dump: " + file + L".";
   } else {
     answer.headline += L" 이 덤프는 게임을 끝낸 크래시가 아니라, 그보다 " + (interval.empty() ? L"" : interval + L" ") +
       L"앞서 " + (thread.empty() ? L"" : thread + L" ") + L"나서 게임이 처리하던 예외" + earlierLabel +
-      L"를 찍었습니다. 게임을 끝낸 크래시(" + location + L")의 덤프는 " + file + L"에 따로 남았습니다.";
+      L"를 찍었습니다. 게임을 " + (anotherCrash ? L"끝냈을 수 있는" : L"끝낸") + L" 크래시(" + location + L")의 덤프는 " +
+      file + L"에 따로 남았습니다.";
   }
   if (!answer.suspect_mod.empty()) {
     answer.headline += en
@@ -796,20 +799,24 @@ QuickAnswer SecondFaultAnswer(const AnalysisResult& r, bool en)
                         : L" Crash Logger 로그(" + logFile + L")도 같은 크래시를 기록했습니다.";
   } else if (anotherCrash) {
     answer.action += en
-      ? L" The Crash Logger log (" + logFile + L") recorded a crash at another location (" +
-          r.crash_logger_exception_location + L"); check that log too."
-      : L" Crash Logger 로그(" + logFile + L")에는 다른 위치(" + r.crash_logger_exception_location +
-          L")의 크래시가 기록됐으니 그 로그도 확인하세요.";
+      ? L" The Crash Logger log (" + logFile + L") recorded another crash (" + AnotherCrashLabel(r, en) +
+          L"); check that log too."
+      : L" Crash Logger 로그(" + logFile + L")에는 다른 크래시(" + AnotherCrashLabel(r, en) +
+          L")가 기록됐으니 그 로그도 확인하세요.";
   }
-  if (!earlierModule.empty() && !SameFile(second.module_filename, faultFile)) {
+  // The other crash may be in this dump's module: then it is not set aside.
+  const std::wstring_view otherLocation = r.crash_logger_exception_location;
+  const auto otherModule = BaseName(otherLocation.substr(0, otherLocation.rfind(L'+')));
+  if (!earlierModule.empty() && !SameFile(second.module_filename, faultFile) &&
+      !(anotherCrash && SameFile(otherModule, faultFile))) {
     answer.action += en ? L" Do not treat " + earlierModule + L" from this dump as the cause of the crash."
                         : L" 덤프에 찍힌 " + earlierModule + L"은(는) 이 크래시의 원인으로 보지 마세요.";
   }
   answer.why_not_certain = anotherCrash
-    ? (en ? L"This dump does not hold the crash that ended the game, and the Crash Logger log names a crash at "
-            L"another location, so which of the two ended the game is not certain."
-          : L"이 덤프에는 게임을 끝낸 크래시가 담겨 있지 않고, Crash Logger 로그는 다른 위치의 크래시를 기록해 둘 중 "
-            L"어느 것이 게임을 끝냈는지 확실하지 않습니다.")
+    ? (en ? L"This dump does not hold the crash that ended the game, and the Crash Logger log names another crash, so "
+            L"which of the two ended the game is not certain."
+          : L"이 덤프에는 게임을 끝낸 크래시가 담겨 있지 않고, Crash Logger 로그는 다른 크래시를 기록해 둘 중 어느 것이 "
+            L"게임을 끝냈는지 확실하지 않습니다.")
     : (en ? L"This dump does not hold the crash that ended the game, so that crash is examined in its own dump."
           : L"이 덤프에는 게임을 끝낸 크래시가 담겨 있지 않아, 그 크래시는 따로 남은 덤프에서 확인해야 합니다.");
   return answer;

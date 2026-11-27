@@ -43,8 +43,8 @@ bool SecondFaultEndedGame(const AnalysisResult& r, const EvidenceBuildContext& c
   // freeze or manual capture by its name or WCT record is none, as for the
   // later crash a Crash Logger log shows (CrashLoggerShowsLaterCrash).
   const auto& second = *r.incident_second_fault;
-  if (!second.dump_present || second.dump_missing || second.resumed || !ctx.isCrashLike || ctx.isHangLike ||
-      ctx.isManualCapture ||
+  if (!second.dump_present || second.dump_missing || second.resumed || !ctx.hasException || !ctx.isCrashLike ||
+      ctx.isHangLike || ctx.isManualCapture ||
       ctx.isFilteredCleanExit || ctx.isForcedClose || ctx.isSlowShutdown || nameHang ||
       r.incident_unhandled_exception_signal || r.incident_capture_kind == "hang" ||
       r.incident_capture_kind == "manual") {
@@ -58,6 +58,13 @@ bool SecondFaultEndedGame(const AnalysisResult& r, const EvidenceBuildContext& c
 bool CrashLoggerShowsAnotherCrash(const AnalysisResult& r)
 {
   return r.crash_logger_later_crash && r.incident_second_fault && !r.incident_second_fault->crash_logger_log_is_second;
+}
+
+std::wstring AnotherCrashLabel(const AnalysisResult& r, bool en)
+{
+  // CrashLoggerShowsLaterCrash requires the log's thread.
+  return r.crash_logger_exception_location + (en ? L", thread " : L", 스레드 ") +
+    std::to_wstring(r.crash_logger_exception_tid);
 }
 
 std::wstring SecondFaultInterval(const AnalysisResult& r, bool en)
@@ -101,22 +108,23 @@ std::wstring SecondFaultLeadDetails(const AnalysisResult& r, bool en)
   const auto earlier = r.fault_module_plus_offset.empty() ? Hex64(r.exc_addr) : r.fault_module_plus_offset;
   const auto file = Utf8ToWide(second.dump_filename);
   const auto logFile = std::filesystem::path(r.crash_logger_log_path).filename().wstring();
+  // With another crash in the Crash Logger log, B only may have ended the game.
+  const bool another = CrashLoggerShowsAnotherCrash(r);
   if (en) {
     return L"The exception in this dump (" + earlier + L") was an earlier exception the game was handling, and the "
-      L"crash that ended the game happened " + (interval.empty() ? L"after it" : interval + L" later") +
-      (thread.empty() ? L"" : L" " + thread) + L" at " + SecondFaultLocation(r) + L" (its own dump: " + file + L")." +
-      (CrashLoggerShowsAnotherCrash(r)
-         ? L" The Crash Logger log (" + logFile + L") recorded a crash at another location (" +
-             r.crash_logger_exception_location + L"), so which of the two ended the game is not certain."
-         : L"");
+      L"crash that " + (another ? L"may have ended" : L"ended") + L" the game happened " +
+      (interval.empty() ? L"after it" : interval + L" later") + (thread.empty() ? L"" : L" " + thread) + L" at " +
+      SecondFaultLocation(r) + L" (its own dump: " + file + L")." +
+      (another ? L" The Crash Logger log (" + logFile + L") recorded another crash (" + AnotherCrashLabel(r, en) +
+                   L"), so which of the two ended the game is not certain."
+               : L"");
   }
-  return L"이 덤프의 예외(" + earlier + L")는 게임이 처리하던 앞선 예외이고, 게임을 끝낸 크래시는 " +
-    (interval.empty() ? L"그 뒤" : interval + L" 뒤") + (thread.empty() ? L"" : L" " + thread) + L" 난 " +
-    SecondFaultLocation(r) + L"입니다(그 덤프: " + file + L")." +
-    (CrashLoggerShowsAnotherCrash(r)
-       ? L" Crash Logger 로그(" + logFile + L")에는 다른 위치(" + r.crash_logger_exception_location +
-           L")의 크래시가 기록돼, 둘 중 어느 것이 게임을 끝냈는지 확실하지 않습니다."
-       : L"");
+  return L"이 덤프의 예외(" + earlier + L")는 게임이 처리하던 앞선 예외이고, 게임을 " +
+    (another ? L"끝냈을 수 있는" : L"끝낸") + L" 크래시는 " + (interval.empty() ? L"그 뒤" : interval + L" 뒤") +
+    (thread.empty() ? L"" : L" " + thread) + L" 난 " + SecondFaultLocation(r) + L"입니다(그 덤프: " + file + L")." +
+    (another ? L" Crash Logger 로그(" + logFile + L")에는 다른 크래시(" + AnotherCrashLabel(r, en) +
+                 L")가 기록돼, 둘 중 어느 것이 게임을 끝냈는지 확실하지 않습니다."
+             : L"");
 }
 
 std::wstring CrashLoggerLaterCrashDetails(const AnalysisResult& r, bool en)
