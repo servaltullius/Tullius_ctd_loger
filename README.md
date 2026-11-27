@@ -66,6 +66,7 @@ Tullius complements CrashLogger rather than replacing it. There is no reviewed r
   Leaving it blank uses the default `Tullius Ctd Logs` subfolder. Explicit values should be plain paths without quotes. Absolute paths work; relative paths are resolved from the helper folder.
 - Startup compatibility snapshot: `SkyrimDiag_Preflight.json` (`EnableCompatibilityPreflight=1`)
 - Dump failure fallback hint: `SkyrimDiag_WER_LocalDumps_Hint.txt` (`EnableWerDumpFallbackHint=1`)
+- When the game ends with a non-zero exit code and no crash was recorded, `SkyrimDiagHelper.log` also gets one line with what Windows Error Reporting recorded for that exit (Application log, event 1000: exception code, module, version and offset). That is where the process ended, not necessarily where the problem began (ADR-0038).
 
 ## Mod Organizer 2: Nothing Appears After a Crash
 

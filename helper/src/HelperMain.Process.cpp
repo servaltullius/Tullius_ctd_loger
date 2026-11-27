@@ -20,6 +20,7 @@
 #include "SkyrimDiagHelper/HeadlessAnalysisPolicy.h"
 #include "SkyrimDiagHelper/Retention.h"
 #include "SkyrimDiagShared.h"
+#include "WerExitEvent.h"
 
 namespace skydiag::helper::internal {
 namespace {
@@ -1049,12 +1050,23 @@ bool HandleProcessExitTick(
                 L"exception SkyrimDiag does not record. Check for a Crash Logger crash-*.log from this time. "
                 L"No WER LocalDumps hint, since WER captures neither case.");
         }
-      } else if (cfg.enableWerDumpFallbackHint) {
-        WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
-        AppendLogLine(
-          outBase,
-          L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
-            + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+      } else {
+        if (cfg.enableWerDumpFallbackHint) {
+          WriteWerFallbackHint(outBase, WerFallbackReason::kAbnormalExitWithoutCrash, exitCode);
+          AppendLogLine(
+            outBase,
+            L"Abnormal process exit without a recorded crash (no dump was attempted); wrote WER LocalDumps fallback guidance: "
+              + (outBase / L"SkyrimDiag_WER_LocalDumps_Hint.txt").wstring());
+        }
+      }
+      // ADR-0038: when the exit had no crash on record (and was not Windows'
+      // not-responding close), copy the matching Application Error event 1000
+      // fault location into the helper log, independent of EnableWerDumpFallbackHint.
+      if (ShouldQueryWerExitEvent(exitCode, state->crashCaptured.latched, crash.dumpWriteFailedCrashSeq, crashOnRecord)) {
+        if (const auto werLine = QueryWerExitEventLineForProcess(proc.process, proc.pid, exitCode);
+            werLine && !werLine->empty()) {
+          AppendLogLine(outBase, *werLine);
+        }
       }
     }
     if (IsNormalExitForCapturedCrash(exitCode, crashOutlivesZeroExit)) {

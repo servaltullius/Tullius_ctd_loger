@@ -13,6 +13,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include "EventLogCommon.h"
 #include "HelperCommon.h"
 
 namespace skydiag::helper::internal {
@@ -29,38 +30,6 @@ constexpr std::size_t kMaxEventsCounted = 10000;
 constexpr std::size_t kMaxMessageChars = 300;
 constexpr ULONGLONG kReadBudgetMs = 1500;
 constexpr DWORD kNextTimeoutMs = 500;
-
-class EvtHandle
-{
-public:
-  EvtHandle() = default;
-  explicit EvtHandle(EVT_HANDLE handle) : handle_(handle) {}
-  EvtHandle(const EvtHandle&) = delete;
-  EvtHandle& operator=(const EvtHandle&) = delete;
-  EvtHandle(EvtHandle&& other) noexcept : handle_(other.handle_) { other.handle_ = nullptr; }
-  EvtHandle& operator=(EvtHandle&& other) noexcept
-  {
-    if (this != &other) {
-      Reset();
-      handle_ = other.handle_;
-      other.handle_ = nullptr;
-    }
-    return *this;
-  }
-  ~EvtHandle() { Reset(); }
-  EVT_HANDLE get() const noexcept { return handle_; }
-  explicit operator bool() const noexcept { return handle_ != nullptr; }
-
-private:
-  void Reset() noexcept
-  {
-    if (handle_) {
-      EvtClose(handle_);
-      handle_ = nullptr;
-    }
-  }
-  EVT_HANDLE handle_ = nullptr;
-};
 
 std::wstring IsoUtc(std::uint64_t unix, const wchar_t* fraction = L".000Z")
 {
@@ -97,99 +66,6 @@ std::uint64_t ParseSystemTime(std::wstring_view text)
   const std::int64_t days = DaysFromCivil(y, static_cast<unsigned>(mo), static_cast<unsigned>(d));
   const std::int64_t unix = days * 86400 + std::int64_t{ h } * 3600 + std::int64_t{ mi } * 60 + s;
   return unix > 0 ? static_cast<std::uint64_t>(unix) : 0u;
-}
-
-std::wstring Unescape(std::wstring_view text)
-{
-  std::wstring out;
-  out.reserve(text.size());
-  for (std::size_t i = 0; i < text.size(); ++i) {
-    if (text[i] != L'&') {
-      out.push_back(text[i]);
-      continue;
-    }
-    const auto end = text.find(L';', i);
-    if (end == std::wstring_view::npos || end - i > 10u) {
-      out.push_back(text[i]);
-      continue;
-    }
-    const auto entity = text.substr(i + 1u, end - i - 1u);
-    if (entity.size() > 1u && entity[0] == L'#') {
-      // &#13; or &#x41;: a control character becomes a space, which Tidy folds.
-      const bool hex = entity[1] == L'x' || entity[1] == L'X';
-      const std::wstring digits(entity.substr(hex ? 2u : 1u));
-      wchar_t* stop = nullptr;
-      const unsigned long code = digits.empty() ? 0ul : std::wcstoul(digits.c_str(), &stop, hex ? 16 : 10);
-      if (!digits.empty() && stop && *stop == L'\0' && code <= 0x10FFFFul) {
-        if (code < 0x20ul) {
-          out.push_back(L' ');
-        } else if (code <= 0xFFFFul) {
-          out.push_back(static_cast<wchar_t>(code));
-        } else {
-          const unsigned long v = code - 0x10000ul;
-          out.push_back(static_cast<wchar_t>(0xD800ul + (v >> 10)));
-          out.push_back(static_cast<wchar_t>(0xDC00ul + (v & 0x3FFul)));
-        }
-        i = end;
-        continue;
-      }
-    }
-    wchar_t c = 0;
-    if (entity == L"amp") {
-      c = L'&';
-    } else if (entity == L"lt") {
-      c = L'<';
-    } else if (entity == L"gt") {
-      c = L'>';
-    } else if (entity == L"quot") {
-      c = L'"';
-    } else if (entity == L"apos") {
-      c = L'\'';
-    }
-    if (c == 0) {
-      out.push_back(text[i]);
-      continue;
-    }
-    out.push_back(c);
-    i = end;
-  }
-  return out;
-}
-
-// The value of attr='...' (or "...") inside the first tag that starts with `tag`.
-std::wstring AttributeOf(std::wstring_view xml, std::wstring_view tag, std::wstring_view attr)
-{
-  const auto at = xml.find(tag);
-  if (at == std::wstring_view::npos) {
-    return {};
-  }
-  const auto close = xml.find(L'>', at);
-  const auto inside = xml.substr(at, close == std::wstring_view::npos ? std::wstring_view::npos : close - at);
-  // " Name=", so EventSourceName= is not taken for it.
-  const std::wstring key = L" " + std::wstring(attr) + L"=";
-  const auto name = inside.find(key);
-  if (name == std::wstring_view::npos || name + key.size() >= inside.size()) {
-    return {};
-  }
-  const wchar_t quote = inside[name + key.size()];
-  const auto start = name + key.size() + 1u;
-  const auto end = inside.find(quote, start);
-  return end == std::wstring_view::npos ? std::wstring{} : Unescape(inside.substr(start, end - start));
-}
-
-// The text of <tag ...>text</tag>.
-std::wstring TextOf(std::wstring_view xml, std::wstring_view tag)
-{
-  const auto at = xml.find(L"<" + std::wstring(tag));
-  if (at == std::wstring_view::npos) {
-    return {};
-  }
-  const auto open = xml.find(L'>', at);
-  if (open == std::wstring_view::npos || xml[open - 1u] == L'/') {
-    return {};
-  }
-  const auto end = xml.find(L"</" + std::wstring(tag) + L">", open);
-  return end == std::wstring_view::npos ? std::wstring{} : Unescape(xml.substr(open + 1u, end - open - 1u));
 }
 
 // Whitespace runs to one space, trimmed, capped.
@@ -237,22 +113,6 @@ std::wstring FormatEventMessage(EVT_HANDLE event, const std::wstring& provider, 
   return Tidy(text);
 }
 
-std::wstring RenderXml(EVT_HANDLE event)
-{
-  DWORD used = 0;
-  DWORD properties = 0;
-  if (EvtRender(nullptr, event, EvtRenderEventXml, 0, nullptr, &used, &properties) ||
-      GetLastError() != ERROR_INSUFFICIENT_BUFFER || used == 0u) {
-    return {};
-  }
-  std::wstring xml(used / sizeof(wchar_t) + 1u, L'\0');
-  if (!EvtRender(nullptr, event, EvtRenderEventXml, used, xml.data(), &used, &properties)) {
-    return {};
-  }
-  xml.resize(wcsnlen(xml.c_str(), xml.size()));
-  return xml;
-}
-
 }  // namespace
 
 std::wstring GpuDriverEventQuery(std::uint64_t sinceUnix, std::uint64_t untilUnix)
@@ -272,14 +132,14 @@ std::wstring GpuDriverEventQuery(std::uint64_t sinceUnix, std::uint64_t untilUni
 std::optional<GpuDriverEvent> ParseGpuDriverEventXml(std::wstring_view xml)
 {
   GpuDriverEvent event{};
-  event.provider = AttributeOf(xml, L"<Provider", L"Name");
-  const auto id = TextOf(xml, L"EventID");
-  const auto time = AttributeOf(xml, L"<TimeCreated", L"SystemTime");
+  event.provider = XmlAttributeOf(xml, L"<Provider", L"Name");
+  const auto id = XmlTextOf(xml, L"EventID");
+  const auto time = XmlAttributeOf(xml, L"<TimeCreated", L"SystemTime");
   if (event.provider.empty() || id.empty() || time.empty()) {
     return std::nullopt;
   }
   event.id = static_cast<std::uint32_t>(std::wcstoul(id.c_str(), nullptr, 10));
-  event.level = static_cast<std::uint32_t>(std::wcstoul(TextOf(xml, L"Level").c_str(), nullptr, 10));
+  event.level = static_cast<std::uint32_t>(std::wcstoul(XmlTextOf(xml, L"Level").c_str(), nullptr, 10));
   event.unix = ParseSystemTime(time);
 
   // The data strings, the device path (\Device\Video3) left out.
@@ -298,7 +158,7 @@ std::optional<GpuDriverEvent> ParseGpuDriverEventXml(std::wstring_view xml)
     if (end == std::wstring_view::npos) {
       break;
     }
-    const auto value = Tidy(Unescape(xml.substr(open + 1u, end - open - 1u)));
+    const auto value = Tidy(UnescapeXml(xml.substr(open + 1u, end - open - 1u)));
     if (!value.empty() && value.rfind(L"\\Device\\", 0) != 0) {
       message += (message.empty() ? L"" : L"; ") + value;
     }
@@ -342,7 +202,7 @@ GpuDriverEventLog QueryGpuDriverEvents(std::uint64_t sinceUnix, std::uint64_t un
       if (log.events.size() >= kGpuDriverEventsKept) {
         continue;
       }
-      if (auto parsed = ParseGpuDriverEventXml(RenderXml(event.get()))) {
+      if (auto parsed = ParseGpuDriverEventXml(RenderEventXml(event.get()))) {
         if (auto text = FormatEventMessage(event.get(), parsed->provider, publishers); !text.empty()) {
           parsed->message = std::move(text);
         }

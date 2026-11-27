@@ -40,3 +40,4 @@ ADR index:
 - `0035-freeze-after-quit-is-a-slow-shutdown.md`
 - `0036-unhandled-crash-during-filtering.md`
 - `0037-stack-overflow-front-guard.md`
+- `0038-wer-event-line-for-unrecorded-exits.md`

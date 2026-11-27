@@ -455,6 +455,28 @@ target_include_directories(skydiag_crash_capture_filter_logic_tests PRIVATE
 
 add_test(NAME skydiag_crash_capture_filter_logic_tests COMMAND skydiag_crash_capture_filter_logic_tests)
 
+# ADR-0038: Application Error (event 1000) XML parsing, matching, formatting,
+# retry/failure logic, and exit-branch wiring (portable; live smoke test on Win32).
+add_executable(skydiag_wer_exit_event_tests
+  wer_exit_event_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WerExitEvent.cpp"
+)
+
+target_include_directories(skydiag_wer_exit_event_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../shared"
+)
+
+if(WIN32)
+  target_link_libraries(skydiag_wer_exit_event_tests PRIVATE Wevtapi)
+  target_compile_definitions(skydiag_wer_exit_event_tests PRIVATE _UNICODE UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
+add_test(NAME skydiag_wer_exit_event_tests COMMAND skydiag_wer_exit_event_tests)
+set_tests_properties(skydiag_wer_exit_event_tests PROPERTIES
+  ENVIRONMENT "SKYDIAG_PROJECT_ROOT=${CMAKE_SOURCE_DIR}"
+)
+
 add_executable(skydiag_crash_capture_refactored_guard_tests
   crash_capture_refactored_guard_tests.cpp
 )
@@ -1001,6 +1023,7 @@ if(WIN32)
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/SkseLogParser.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/StackCodeMemory.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WctCapture.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WerExitEvent.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../helper/src/WindowHeuristics.cpp"
   )
 
@@ -1036,6 +1059,12 @@ if(WIN32)
   )
   target_link_libraries(skydiag_gpu_driver_events_tests PRIVATE skydiag_helper_runtime_test_support)
   add_test(NAME skydiag_gpu_driver_events_tests COMMAND skydiag_gpu_driver_events_tests)
+
+  add_executable(skydiag_wer_exit_runtime_tests
+    wer_exit_runtime_tests.cpp
+  )
+  target_link_libraries(skydiag_wer_exit_runtime_tests PRIVATE skydiag_helper_runtime_test_support)
+  add_test(NAME skydiag_wer_exit_runtime_tests COMMAND skydiag_wer_exit_runtime_tests)
 
   add_executable(skydiag_save_load_record_tests
     save_load_record_tests.cpp

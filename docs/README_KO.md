@@ -83,6 +83,7 @@ Tullius는 CrashLogger를 대체하는 도구가 아니라 서로 다른 근거�
   비워 두면 기본 `Tullius Ctd Logs` 폴더를 사용합니다. 직접 지정할 때는 따옴표 없이 경로 문자열만 적으면 됩니다. 절대경로를 써도 되고, 상대경로는 헬퍼 폴더 기준으로 해석됩니다.
 - 시작 시 호환성 점검 결과: `SkyrimDiag_Preflight.json` (설정 `EnableCompatibilityPreflight=1`)
 - 덤프 실패 fallback 힌트: `SkyrimDiag_WER_LocalDumps_Hint.txt` (설정 `EnableWerDumpFallbackHint=1`)
+- 게임이 0이 아닌 종료 코드로 끝났는데 기록된 크래시가 없으면, `SkyrimDiagHelper.log`에 Windows 오류 보고가 그 종료에 적은 내용(Application 로그 이벤트 1000의 예외 코드, 모듈, 버전, 오프셋)이 한 줄 남습니다. 프로세스가 끝난 위치이지 문제가 시작된 위치가 아닐 수 있습니다(ADR-0038).
 
 ## Linux (Wine / Proton)
 
