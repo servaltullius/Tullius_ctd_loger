@@ -33,7 +33,7 @@ When the game hits a [b]CTD[/b], [b]freeze[/b], or [b]infinite loading (ILS)[/b]
 [url=https://www.nexusmods.com/skyrimspecialedition/mods/59818]Crash Logger SSE AE VR — PDB support[/url]
 
 If installed, Tullius auto-detects CrashLogger logs and includes them in the report.
-It is not required, but it is strongly recommended for [b]richer diagnostics[/b].
+It is not required, but it is strongly recommended for [b]richer diagnostics[/b]. Since v0.2.80 two features work only with it: telling a dump of an earlier exception from the crash that ended the game, and the supplemental dump of that crash.
 
 [b][size=4]Key Included Files[/size][/b]
 [code]
@@ -63,8 +63,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 If Windows asks to install Windows App Runtime 1.8 on v0.2.52+, an older or incomplete viewer is most likely being launched. Remove the existing [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] folder completely, reinstall the latest zip, and check which mod provides these files in MO2.
 
-[b]Important v0.2.79 Update Notice[/b]
-Replace the previous installation with the complete v0.2.79 zip. Do not copy only individual EXEs or DLLs. The SKSE plugin, the Helper, the analyzer and the viewer all changed (the SharedLayout protocol is still v4), and there are no new settings. The plugin now reads SkyrimDiag.ini from beside SkyrimDiag.dll, and SkyrimDiag.log says whether it found it ([font=Courier New]loaded config from ...[/font] or [font=Courier New]config not found at ...; using defaults[/font]). Dumps analyzed by v0.2.78 or older are re-analyzed once when you open them in the viewer. If you tried v0.2.79-rc1, rc2 or rc3, the dumps they analyzed are not re-analyzed on their own (same version number): the rc2 and rc3 analysis is the same as this release; for a dump analyzed by rc1, select it and click [b]ANALYZE NOW[/b]. [b]If you update from v0.2.77:[/b] v0.2.78 changed the Helper, the analyzer and the viewer (a slow shutdown after a quit is not a freeze). [b]If you update from v0.2.76:[/b] v0.2.77 changed the Helper and the analyzer; form names for a FormID used as a pointer appear only in crash dumps captured by a v0.2.77 or newer Helper. [b]If you update from v0.2.75 or older:[/b] v0.2.76 added [font=Courier New]UnhandledCrashHoldMs[/font] in SkyrimDiag.ini (default 5000), and [font=Courier New]MaxForcedCloseCrashDumps[/font] (default 3) and [font=Courier New]KeepSlowShutdownHangDumps[/font] (default 0) in SkyrimDiagHelper.ini. Since v0.2.76 a crash that called an empty (null) function pointer gets a callstack and with it a new bucket key, so it does not continue the repeat-crash count of the same crash recorded before. [b]If you update from v0.2.74 or older:[/b] the Helper writes [font=Courier New]loaded_saves.json[/font] (the saves that finished loading) beside crash_history.json since v0.2.75. [b]If you update from v0.2.73 or older:[/b] the save being loaded is recorded only from the v0.2.74 plugin on, and since v0.2.74 [font=Courier New]CrashHookMode[/font] is read strictly (a typo or an out-of-range value means 1, the default, never 0 or 2). [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
+[b]Important v0.2.80 Update Notice[/b]
+Replace the previous installation with the complete v0.2.80 zip. Do not copy only individual EXEs or DLLs. The SKSE plugin, the Helper and the analyzer changed; the viewer's own code is the same, and its analysis DLL changed with the analyzer (the SharedLayout protocol is still v4). SkyrimDiagHelper.ini has a new setting, [font=Courier New]MaxSecondFaultDumps[/font] (default 3, also when the line is missing), and [font=Courier New]MaxHelperSessionLogs[/font] now defaults to 20; an old SkyrimDiagHelper.ini you keep still says 5, while the new ini in the zip says 20. Dumps analyzed by v0.2.79 or older are re-analyzed once when you open them in the viewer. If you tried v0.2.80-rc1, rc2 or rc3, the dumps they analyzed are not re-analyzed on their own (same version number). Their analysis is the same as this release, except for two kinds of dump analyzed by rc2: a supplemental dump ([font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font]) and a crash dump whose incident record has a supplemental dump entry; select such a dump and click [b]ANALYZE NOW[/b]. [b]If you update from v0.2.78:[/b] v0.2.79 changed the SKSE plugin, the Helper, the analyzer and the viewer; the plugin reads SkyrimDiag.ini from beside SkyrimDiag.dll, and SkyrimDiag.log says whether it found it ([font=Courier New]loaded config from ...[/font] or [font=Courier New]config not found at ...; using defaults[/font]). [b]If you update from v0.2.77:[/b] v0.2.78 changed the Helper, the analyzer and the viewer (a slow shutdown after a quit is not a freeze). [b]If you update from v0.2.76:[/b] v0.2.77 changed the Helper and the analyzer; form names for a FormID used as a pointer appear only in crash dumps captured by a v0.2.77 or newer Helper. [b]If you update from v0.2.75 or older:[/b] v0.2.76 added [font=Courier New]UnhandledCrashHoldMs[/font] in SkyrimDiag.ini (default 5000), and [font=Courier New]MaxForcedCloseCrashDumps[/font] (default 3) and [font=Courier New]KeepSlowShutdownHangDumps[/font] (default 0) in SkyrimDiagHelper.ini. Since v0.2.76 a crash that called an empty (null) function pointer gets a callstack and with it a new bucket key, so it does not continue the repeat-crash count of the same crash recorded before. [b]If you update from v0.2.74 or older:[/b] the Helper writes [font=Courier New]loaded_saves.json[/font] (the saves that finished loading) beside crash_history.json since v0.2.75. [b]If you update from v0.2.73 or older:[/b] the save being loaded is recorded only from the v0.2.74 plugin on, and since v0.2.74 [font=Courier New]CrashHookMode[/font] is read strictly (a typo or an out-of-range value means 1, the default, never 0 or 2). [b]If you update from v0.2.71 or older:[/b] on the first launch the dump folder is capped at 5 GB ([font=Courier New]MaxTotalDumpGB[/font], since v0.2.72) and the oldest dumps are deleted with their reports; move dumps you want to keep elsewhere first, or set [font=Courier New]MaxTotalDumpGB=0[/font] (unlimited) in the new SkyrimDiagHelper.ini. Since v0.2.68 the manual capture hotkey is [font=Courier New]Ctrl+Shift+Backspace[/font]. In MO2, install it as a new mod and disable the old one, or fully replace the old mod's files; do not merge a partial old viewer/runtime folder.
 On Skyrim 1.5.97, v0.2.62 and v0.2.63 crash right after launch (SkyrimDiag.dll); fixed since v0.2.64.
 On Skyrim 1.7.104, update SKSE to 2.3.1 and Address Library to the v13 All in One first. v0.2.61 and older do not load on 1.7.104 (SKSE shows a SkyrimDiag.dll popup); v0.2.62 and later fix that.
 
@@ -122,7 +122,17 @@ The viewer typically shows:
 [*]Wait Chain (WCT)
 [/list]
 
-[b][size=4]What's New in v0.2.79[/size][/b]
+[b][size=4]What's New in v0.2.80[/size][/b]
+With Crash Logger installed, the report tells when a dump caught an earlier exception the game was handling instead of the crash that ended the game, and a separate dump of that crash may be kept. Every dump also gets a copy of its session's Helper log.[list]
+[*][b]A dump of an earlier exception:[/b] a dump from November 23 held an access violation inside TheNewGentleman.dll, an exception the game handles as a matter of course (it was handled five times in another run that day). The crash that ended the game came about 4 s later on another thread at SkyrimSE.exe+0x783642 and was only in the Crash Logger log, yet v0.2.79 named The New Gentleman (medium). This is a known limit: for the few seconds the Helper checks whether the game handled the exception it just captured, another crash cannot be recorded. Now, when the paired Crash Logger log of the same game process records an unhandled exception at another location on another thread, less than 30 s after the dump, the quick answer says this dump captured an earlier exception the game was handling, puts the crash Crash Logger recorded first (low likelihood), and says not to treat the module in this dump as the cause. Re-analyzing the 51 kept dumps changed only that one
+[*][b]A separate dump of the crash that ended the game:[/b] if another exception reaches the top-level exception filter unhandled while the Helper is checking the earlier one, the plugin records it, and once the Helper has written the earlier exception's dump it also writes [font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font] (named by the time) with a record of the same name ([font=Courier New].json[/font]). The earlier exception's report points to it from the quick answer on: this dump captured an earlier exception the game was handling about N seconds before the crash that ended the game, and that crash has its own dump. The next step is to open that dump in the viewer. The supplemental dump is in the viewer's list and is analyzed when you open it; its quick answer says what it is right after the first sentence (such as "The game crashed to desktop (CTD)."), or first when the answer does not start with such a sentence. It does not open the viewer or get analyzed on its own, and it is not added to the crash history. Writing it stops the game for about 1.5 s, which can delay the verdict on the earlier exception and the game's exit by as much
+[*][b]When there is no supplemental dump:[/b] protecting the earlier exception comes first, so where its dump could not be written or the check had to come first (such as a handled exception repeating at one address), only the record is kept, and the report lists it at the end of the evidence and recommendations
+[*][b]Helper log beside each dump:[/b] when the game was restarted several times a day, the crash session's SkyrimDiagHelper.log was rotated away. Now, when the Helper finishes, each dump it wrote in that session gets a copy beside it named after the dump ([font=Courier New]*_HelperLog.txt[/font]): the end of that session's log, up to 2 MiB, deleted together with the dump. Earlier sessions' logs ([font=Courier New]MaxHelperSessionLogs[/font]) are now kept 20 by default instead of 5
+[*][b]New setting:[/b] [font=Courier New]MaxSecondFaultDumps[/font] (default 3, 0 to 20). Supplemental dumps are counted only by this, take no place from other dumps, and are deleted first when [font=Courier New]MaxTotalDumpGB[/font] is exceeded. 0 writes none (and deletes those already there) and keeps up to three records without a dump
+[*][b]Limits:[/b] both need [b]Crash Logger[/b]; without it the report judges by the dump's own exception as in v0.2.79, and no supplemental dump or record is kept. A supplemental dump is written only for an exception that passes Tullius's top-level exception filter. Stack overflows, C++ exceptions and breakpoints never get one, nor does a crash after another plugin took over that filter (as in v0.2.79). A supplemental dump also needs both the plugin and the Helper at v0.2.80
+[/list]
+
+[b][size=4]Earlier: v0.2.79[/size][/b]
 Mod DLLs in the game folder that carry a Windows DLL name are judged by where they loaded from, the viewer's summary got buttons and selectable text, the plugin reads its INI beside its DLL, and old dumps are deleted on long output paths.[list]
 [*][b]Mod DLLs with Windows names:[/b] a mod DLL in the game folder named like a Windows DLL, such as OptiScaler's winmm.dll, loads next to System32's copy of the same name. The analyzer filtered it by name as a system DLL, so even when Crash Logger said the crash was inside it, the report said the signals were split with another mod. It now checks where the DLL was loaded from and treats it as a mod. Re-analyzing the 46 kept dumps changed only the two winmm.dll crashes: one now names winmm.dll as the crash location (medium) and asks to compare the nearby DLLs Crash Logger listed; the other, a crash reported in a system DLL, now lists winmm.dll as a medium candidate from Crash Logger's frame instead of a high suspect
 [*][b]DirectX-named DLLs in the game folder:[/b] d3d11.dll, dxgi.dll, d3d9.dll and d3d12.dll from ENB, ReShade or DXVK were already judged by path as candidates; now the freeze's "waiting on the GPU" check and the quick answer treat them as mods too. A freeze inside such a DLL with no graphics driver frames can name that DLL instead of saying the game waited on the GPU (not yet seen in a real dump)
@@ -151,31 +161,13 @@ The same answer for a crash inside a mod DLL with or without Crash Logger, the f
 [*]The viewer re-analyzes dumps analyzed by v0.2.76 once when you open them
 [/list]
 
-[b][size=4]Earlier: v0.2.76[/size][/b]
-No stall on every repeat of a handled exception, an unhandled crash reported at once, game function IDs, and a callstack for a call through an empty function pointer.[list]
-[*][b]Repeated handled exceptions:[/b] when the same exception (code and address) has been handled by the game twice in a session, the Helper first checks whether the game keeps running and writes nothing if it does. Each of those dumps froze every game thread for about a second (a Nexus report measured a 1,162 ms stop on v0.2.73; the reporter's Helper log had the same access violation 14 times in 23 minutes). The first two still write a dump
-[*][b]Unhandled crashes at once:[/b] when an exception that nothing handled reaches the process's top-level exception filter, the plugin tells the Helper and holds the crashing thread only until the dump is written ([font=Courier New]UnhandledCrashHoldMs[/font], default 5000 ms; in game the hold took 1.4 to 1.7 s); then Crash Logger writes its log as usual. A real crash at an address that had been handled twice is dumped too, a crash is confirmed without the 3 s heartbeat wait, and a crash on a thread that does not block the game loop is no longer released as handled
-[*][b]Crashes at exit code 0:[/b] a crash the plugin saw go unhandled is kept even when the game ends with exit code 0 (a crash on another thread while closing the game), or only its dump when the game ran on for over a minute
-[*][b]Without Crash Logger:[/b] the plugin checks once a second that its top-level exception filter is still in place and takes it back, so unhandled C++ exceptions and breakpoints are no longer lost when something replaced it
-[*][b]Empty function pointer calls:[/b] the callstack is walked from the return address the call left on the stack, after checking that a call instruction ends right before it, so it starts at the caller instead of being empty. The November 15 Light Placer crash now shows the same stack as Crash Logger and names Light Placer with high likelihood. Such crashes get a new bucket key
-[*][b]Game function IDs:[/b] game frames show their Address Library ID, e.g. [font=Courier New]SkyrimSE.exe+0x49fb54 (ID 29895+0xe4)[/font], only when the function start matches an ID exactly
-[*][b]Callstack from the top:[/b] the report's callstack starts at the faulting frame instead of two frames above the first plugin frame; a stack that ends in hook code says so and where the hook's recorded jump goes
-[*][b]Driver errors just before a crash:[/b] the Helper writes the graphics driver record beside a crash dump, and a driver error within 60 s before the crash comes first in the quick answer, with the suspected mod second
-[*][b]Forced-close dumps counted apart:[/b] dumps of an error while the game was being closed have their own limit ([font=Courier New]MaxForcedCloseCrashDumps[/font], default 3) and no longer push out real crash dumps
-[*][b]Closing is not a freeze:[/b] a game already closing with one thread left gets no freeze dump, and a freeze caught in a menu that never recovered before a clean exit is treated as a slow shutdown and deleted ([font=Courier New]KeepSlowShutdownHangDumps=1[/font] keeps it)
-[*][b]Manual capture of a stuck game:[/b] analyzed as a freeze when the heartbeat had stopped for over 5 s and the game window was in front or not responding
-[*][b].NET runtime:[/b] [font=Courier New]clr.dll[/font] and the other .NET runtime files are Windows components, not suspected mods
-[*][b]Helper watchdog:[/b] when the Helper keeps exiting right after start, the plugin waits 1, 2, 4 and 8 s and gives up after five failures in a row
-[*]The viewer re-analyzes dumps analyzed by v0.2.75 once when you open them
-[/list]
-
 [b][size=4]Older Versions[/size][/b]
-Changes in v0.2.75 and earlier are in the [url=https://github.com/servaltullius/Tullius_ctd_loger/blob/main/CHANGELOG.md]changelog[/url] and the [url=https://github.com/servaltullius/Tullius_ctd_loger/releases]GitHub releases[/url].
+Changes in v0.2.76 and earlier are in the [url=https://github.com/servaltullius/Tullius_ctd_loger/blob/main/CHANGELOG.md]changelog[/url] and the [url=https://github.com/servaltullius/Tullius_ctd_loger/releases]GitHub releases[/url].
 
 [i]Real use:[/i] each release is played on one MO2 setup (game 1.6.1170, SKSE 2.2.8, Crash Logger 1.27) before it ships.
-For v0.2.77, the release candidates ran on the same MO2 setup with Crash Logger 1.27 (November 16 and 17). A real OSLAroused.dll crash while loading a save was rated medium by rc1, with the conclusion that Crash Logger's frame and the stack both point at that DLL. With the rc2 package, which has the same code as this release, the Helper logged the form table it uses, and a development-only test plugin that reads a form through its FormID crashed with the report naming the form (as above) and its plugin, which matched the record's last override. The Papyrus script loader crashes were checked by re-analyzing the two real November 17 dumps; they stopped after the script was fixed. Not yet seen in real use: the text-over-pointer line and the script loader answer on a dump captured by the new Helper, and 1.5.97 and 1.7.x.
 For v0.2.78, the release candidate package, which has the same code as this release, ran on the same MO2 setup with Crash Logger and Engine Fixes' safe exit (November 18). The plugin logged v0.2.78.0. Two sessions closed with a menu Quit left the Helper's "The game was asked to quit" line and exited normally without a capture, and a session closed with Alt+F4 was logged as a close request without that line, as intended. None of those sessions wrote a dump. With the safe exit the game closes within a second, so a slow shutdown could not be reproduced here. Not yet seen in real use: a slow shutdown held and then deleted, a crash more than 10 s after the quit flag (both covered by tests), and 1.5.97 and 1.7.x.
 For v0.2.79, the rc3 package, which has the same code as this release, ran seven times on the same MO2 setup (November 22). Every session exited normally with no preflight warnings, the plugin logged that it loaded SkyrimDiag.ini and v0.2.79.0, and a start that took 1 min 49 s to load its data left no freeze capture. The rc3 viewer opened a November 19 crash dump, and Open Crash Logger log opened its paired log. Not yet seen in real use: the exit after a Helper gave up on a crash, retention on a long output path, a new crash in a game-folder winmm.dll or d3d11.dll (checked by re-analysis only), the new instruction decoding, the quit flag record with Alt+F4, and 1.5.97 and 1.7.x.
+For v0.2.80, the public rc1, rc2 and rc3 packages ran on the same MO2 setup with Crash Logger 1.27 and a development-only crash tester plugin (November 24 to 27); this release has the rc3 code. With rc3, a second access violation 2 s after the Helper finished the first dump, on another thread and then on the same thread, left a supplemental dump and its record both times, and Crash Logger logged that second exception. The first dump's report pointed to the supplemental dump from the quick answer on (about 4 seconds, which thread), and the supplemental dump opened in the viewer said what it was right after the first sentence. An unhandled C++ exception, and an unhandled access violation after two handled ones, left one dump each and no supplemental dump. A stack overflow left neither a dump nor a Crash Logger log: a frame generation DLL that comes with an upscaler mod ([font=Courier New]nvngx_dlssg.dll[/font]) registers its exception handler in front of Tullius's, and that handler seems to have run out of stack first (inferred, not confirmed; not changed in this version). With rc1, five crashes and one manual capture all got the Helper log copy beside the dump, also where rotation had removed the session's own log. Not yet seen in real use: this version's stack overflow record, a supplemental dump or a dump of an earlier exception from real play rather than the test plugin (the real case is the re-analyzed November 23 dump), a record without a dump, cleanup by [font=Courier New]MaxSecondFaultDumps[/font] and setting it to 0, mixed plugin and Helper versions, a Crash Logger log that recorded a crash other than the second exception, the Helper log copy beside a freeze dump, joining a session log split by the size limit, and what v0.2.79 lists above.
 
 [b][size=4]Where To Find The Viewer (MO2)[/size][/b]
 In MO2, right-click the mod and choose [b]Open in Explorer[/b].
@@ -194,6 +186,7 @@ Situation              Dump pattern           Trigger
 CTD                    *_Crash_*.dmp          Automatic
 Freeze / ILS           *_Hang_*.dmp           Automatic (threshold)
 Manual snapshot        *_Manual_*.dmp         Ctrl+Shift+Backspace
+Supplemental dump      *_SecondFault_*.dmp    Automatic (Crash Logger)
 [/code]
 
 [b][size=4]Output Location[/size][/b]
@@ -227,6 +220,9 @@ MaxCrashDumps=20
 MaxForcedCloseCrashDumps=3
 MaxHangDumps=20
 MaxManualDumps=20
+; Supplemental dumps (SkyrimDiag_SecondFault_*.dmp) with their records, 0-20;
+; 0 writes none and deletes those already there
+MaxSecondFaultDumps=3
 MaxEtwTraces=5
 ; Total size of all dumps, in GB
 MaxTotalDumpGB=5
@@ -259,13 +255,16 @@ To reduce popups, use [font=Courier New]AutoOpenCrashOnlyIfProcessExited=1[/font
 [b]Q: I closed the game with Alt+F4, an error was recorded, but the viewer did not open.[/b]
 A: That is intended from v0.2.70. An error while the game is being closed is an error during a forced close, not a CTD while playing; saves are usually not affected. Once the game has recorded its quit flag (a menu Quit, console qqq, or Alt+F4 or the window's X button that the game went on to act on), an error any time after it counts, however long the shutdown takes. A close request with no quit flag recorded (Alt+F4, the X button or a close message from another program that the game did not act on) covers only errors within 10 seconds of it. The dump and report are still in the output folder. Set [font=Courier New]EnableCloseRequestLog=0[/font] in [font=Courier New]SkyrimDiag.ini[/font] to report it as a CTD again; this also stops recording the quit flag, so slow shutdowns are no longer recognized either.
 
+[b]Q: The report says the dump captured an earlier exception, not the crash that ended the game.[/b]
+A: That is new in v0.2.80 and needs Crash Logger. For the few seconds the Helper checks whether the game handled an exception it just captured, another crash can end the game. If a supplemental dump ([font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font]) was kept beside it, open that dump in the viewer: it usually holds the crash to look at, and if the report also names another crash in the Crash Logger log, check both. Otherwise the report names the crash in the Crash Logger log; check that log. Do not treat the module in the first dump as the cause.
+
 [b]Q: Where are the dump files?[/b]
 A: With [font=Courier New]OutputDir=[/font] left blank, new dumps go to MO2 [font=Courier New]overwrite\SKSE\Plugins\Tullius Ctd Logs\[/font].
 You can collect them in another folder by setting [font=Courier New]OutputDir=[/font].
 Write the path as plain text without quotes. Absolute paths work; relative paths are resolved from the helper folder.
 
 [b]Q: Do I need CrashLoggerSSE?[/b]
-A: No, but it is recommended. If present, Tullius can produce richer reports.
+A: No, but it is recommended. If present, Tullius can produce richer reports. Since v0.2.80, telling a dump of an earlier exception from the crash that ended the game, and the supplemental dump of that crash, work only with it.
 
 [b]Q: Does freeze analysis work automatically?[/b]
 A: Yes. The report says what the game's main thread was waiting for (the GPU, the driver, an error dialog, the engine or a game thread stuck in a plugin) and uses WCT, the blackbox and the loading context alongside it.
@@ -281,7 +280,7 @@ A: That is a bug in v0.2.62 and v0.2.63 on 1.5.97. Install v0.2.64 (the whole zi
 
 [b][size=4]Privacy[/size][/b]
 [list]
-[*]Dumps and logs may contain [b]local file paths[/b] and [b]usernames[/b]
+[*]Dumps and logs (also the [font=Courier New]*_HelperLog.txt[/font] copies beside dumps) may contain [b]local file paths[/b] and [b]usernames[/b]
 [*]crash_history.json and loaded_saves.json in the output folder hold save names
 [*]Review and redact before sharing publicly
 [*]Analysis results are best-effort estimates, not a guaranteed verdict
@@ -295,6 +294,8 @@ When reporting an issue, include as many of these as possible:
 [*][font=Courier New]*_SkyrimDiagSummary.json[/font]
 [*][font=Courier New]SkyrimDiag_Incident_*.json[/font] if present
 [*][font=Courier New]*_SkyrimDiagBlackbox.jsonl[/font] if present
+[*][font=Courier New]*_HelperLog.txt[/font] beside the dump if present (that session's Helper log)
+[*][font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font] and its [font=Courier New].json[/font] if present
 [*]CrashLogger logs if present
 [/list]
 
@@ -338,7 +339,7 @@ dump와 주변 단서를 모아서, 맨 위에 [b]빠른 답[/b](무슨 일이 �
 [url=https://www.nexusmods.com/skyrimspecialedition/mods/59818]Crash Logger SSE AE VR — PDB support[/url]
 
 설치하면 CrashLogger 로그를 자동으로 읽어서 보고서에 포함합니다.
-필수는 아니지만, 더 풍부한 진단을 원하면 권장합니다.
+필수는 아니지만, 더 풍부한 진단을 원하면 권장합니다. v0.2.80부터 두 기능은 Crash Logger가 있어야 동작합니다: 덤프가 게임을 끝낸 크래시가 아니라 앞선 예외를 찍었는지 알아보기와, 그 크래시의 보조 덤프.
 
 [b][size=4]주요 포함 파일[/size][/b]
 [code]
@@ -368,8 +369,8 @@ SKSE/Plugins/SkyrimDiagWinUI/
 
 v0.2.52+에서 Windows App Runtime 1.8 설치 창이 뜬다면 구버전 또는 불완전하게 섞인 뷰어가 실행 중일 가능성이 큽니다. 기존 [font=Courier New]SKSE\Plugins\SkyrimDiagWinUI[/font] 폴더를 완전히 제거하고 최신 zip을 다시 설치한 뒤, MO2에서 해당 파일의 제공 모드를 확인해 주세요.
 
-[b]v0.2.79 중요 업데이트 안내[/b]
-기존 설치를 완전히 교체하고 v0.2.79 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. SKSE 플러그인, Helper, 분석기, 뷰어가 모두 바뀌었고(SharedLayout protocol v4 그대로), 새 설정은 없습니다. 플러그인은 이제 SkyrimDiag.ini를 SkyrimDiag.dll 옆에서 읽고, 읽었는지를 SkyrimDiag.log에 남깁니다([font=Courier New]loaded config from ...[/font] 또는 [font=Courier New]config not found at ...; using defaults[/font]). v0.2.78 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. v0.2.79-rc1·rc2·rc3을 써 보셨다면 그 버전이 분석해 둔 덤프는 버전 번호가 같아 저절로 다시 분석하지 않습니다. rc2·rc3의 분석은 이 릴리즈와 같고, rc1이 분석한 덤프는 덤프를 고른 뒤 [b]지금 분석[/b]을 눌러 주세요. [b]v0.2.77에서 업데이트한다면:[/b] v0.2.78에서 Helper, 분석기, 뷰어가 바뀌었습니다(종료를 고른 뒤 느린 종료는 프리징이 아님). [b]v0.2.76에서 업데이트한다면:[/b] v0.2.77에서 Helper와 분석기가 바뀌었습니다. 포인터 자리의 FormID에 붙는 폼 이름은 v0.2.77 이후 Helper가 찍은 크래시 덤프부터 나옵니다. [b]v0.2.75 이하에서 업데이트한다면:[/b] v0.2.76에서 SkyrimDiag.ini의 [font=Courier New]UnhandledCrashHoldMs[/font](기본 5000)와 SkyrimDiagHelper.ini의 [font=Courier New]MaxForcedCloseCrashDumps[/font](기본 3), [font=Courier New]KeepSlowShutdownHangDumps[/font](기본 0)가 생겼습니다. 비어 있는(null) 함수 포인터를 부른 크래시는 v0.2.76부터 콜스택이 생기면서 버킷 키가 바뀌어, 그 전에 기록된 같은 크래시의 반복 횟수에 이어지지 않습니다. [b]v0.2.74 이하에서 업데이트한다면:[/b] v0.2.75부터 Helper가 crash_history.json 옆에 [font=Courier New]loaded_saves.json[/font](정상적으로 불러온 세이브)을 남깁니다. [b]v0.2.73 이하에서 업데이트한다면:[/b] 불러오던 세이브는 v0.2.74 플러그인부터 기록하고, v0.2.74부터 [font=Courier New]CrashHookMode[/font]를 엄격하게 읽습니다(오타나 범위 밖 값은 0이나 2가 아니라 기본값 1). [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
+[b]v0.2.80 중요 업데이트 안내[/b]
+기존 설치를 완전히 교체하고 v0.2.80 zip 전체를 설치해 주세요. EXE나 DLL 일부만 복사하면 안 됩니다. SKSE 플러그인, Helper, 분석기가 바뀌었습니다. 뷰어 화면 코드는 같고, 뷰어 안의 분석 DLL은 분석기와 같이 바뀌었습니다(SharedLayout protocol v4 그대로). SkyrimDiagHelper.ini에 새 설정 [font=Courier New]MaxSecondFaultDumps[/font](기본 3, 줄이 없어도 3)가 생겼고, [font=Courier New]MaxHelperSessionLogs[/font]의 기본값이 20이 됐습니다. 쓰던 SkyrimDiagHelper.ini를 그대로 두면 5가 남고, zip의 새 ini는 20입니다. v0.2.79 이전 버전으로 분석해 둔 덤프는 뷰어에서 열 때 한 번 다시 분석합니다. v0.2.80-rc1·rc2·rc3을 써 보셨다면 그 버전이 분석해 둔 덤프는 버전 번호가 같아 저절로 다시 분석하지 않습니다. 분석 결과는 이 릴리즈와 같지만, rc2로 분석한 보조 덤프([font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font])와 사고 기록에 보조 덤프 항목이 있는 크래시 덤프는 덤프를 고른 뒤 [b]지금 분석[/b]을 눌러 주세요. [b]v0.2.78에서 업데이트한다면:[/b] v0.2.79에서 SKSE 플러그인, Helper, 분석기, 뷰어가 바뀌었습니다. 플러그인은 SkyrimDiag.ini를 SkyrimDiag.dll 옆에서 읽고, 읽었는지를 SkyrimDiag.log에 남깁니다([font=Courier New]loaded config from ...[/font] 또는 [font=Courier New]config not found at ...; using defaults[/font]). [b]v0.2.77에서 업데이트한다면:[/b] v0.2.78에서 Helper, 분석기, 뷰어가 바뀌었습니다(종료를 고른 뒤 느린 종료는 프리징이 아님). [b]v0.2.76에서 업데이트한다면:[/b] v0.2.77에서 Helper와 분석기가 바뀌었습니다. 포인터 자리의 FormID에 붙는 폼 이름은 v0.2.77 이후 Helper가 찍은 크래시 덤프부터 나옵니다. [b]v0.2.75 이하에서 업데이트한다면:[/b] v0.2.76에서 SkyrimDiag.ini의 [font=Courier New]UnhandledCrashHoldMs[/font](기본 5000)와 SkyrimDiagHelper.ini의 [font=Courier New]MaxForcedCloseCrashDumps[/font](기본 3), [font=Courier New]KeepSlowShutdownHangDumps[/font](기본 0)가 생겼습니다. 비어 있는(null) 함수 포인터를 부른 크래시는 v0.2.76부터 콜스택이 생기면서 버킷 키가 바뀌어, 그 전에 기록된 같은 크래시의 반복 횟수에 이어지지 않습니다. [b]v0.2.74 이하에서 업데이트한다면:[/b] v0.2.75부터 Helper가 crash_history.json 옆에 [font=Courier New]loaded_saves.json[/font](정상적으로 불러온 세이브)을 남깁니다. [b]v0.2.73 이하에서 업데이트한다면:[/b] 불러오던 세이브는 v0.2.74 플러그인부터 기록하고, v0.2.74부터 [font=Courier New]CrashHookMode[/font]를 엄격하게 읽습니다(오타나 범위 밖 값은 0이나 2가 아니라 기본값 1). [b]v0.2.71 이하에서 업데이트한다면:[/b] 처음 게임을 켤 때 덤프 폴더에 5GB 상한([font=Courier New]MaxTotalDumpGB[/font], v0.2.72부터)이 적용되어 오래된 덤프가 리포트와 함께 지워집니다. 남기고 싶은 덤프는 먼저 다른 폴더로 옮기거나, 새 SkyrimDiagHelper.ini에 [font=Courier New]MaxTotalDumpGB=0[/font](무제한)을 넣어 주세요. 수동 캡처 단축키는 v0.2.68부터 [font=Courier New]Ctrl+Shift+Backspace[/font]입니다. MO2에서는 새 모드로 설치하고 이전 버전 모드를 끄거나, 이전 모드의 파일을 완전히 교체해 주세요. 구버전 viewer/runtime 폴더를 섞지 마세요.
 Skyrim 1.5.97에서 v0.2.62와 v0.2.63은 게임을 켜자마자 SkyrimDiag.dll 때문에 CTD가 납니다. v0.2.64부터 고쳐졌습니다.
 Skyrim 1.7.104에서는 먼저 SKSE 2.3.1과 Address Library v13(All in One)으로 업데이트하세요. v0.2.61 이하는 1.7.104에서 로드되지 않고 SKSE가 SkyrimDiag.dll 오류 창을 띄웁니다. v0.2.62부터 고쳐졌습니다.
 
@@ -427,7 +428,17 @@ SkyrimDiagDumpToolWinUI.exe "경로\dump.dmp"
 [*]대기 체인(WCT)
 [/list]
 
-[b][size=4]v0.2.79 새 기능[/size][/b]
+[b][size=4]v0.2.80 새 기능[/size][/b]
+Crash Logger가 있으면, 덤프가 게임을 끝낸 크래시가 아니라 그보다 앞서 게임이 처리하던 예외를 찍은 경우를 알아보고, 그 크래시의 덤프를 따로 남길 수 있습니다. 덤프마다 그 세션의 Helper 로그 사본도 남습니다.[list]
+[*][b]앞선 예외를 찍은 덤프:[/b] 11/23의 덤프에는 TheNewGentleman.dll 안의 접근 위반이 찍혔습니다. 게임이 평소에 처리하는 예외로, 같은 날 다른 실행에서도 다섯 번 처리됐습니다. 게임을 끝낸 크래시는 약 4초 뒤 다른 스레드에서 난 SkyrimSE.exe+0x783642였고 Crash Logger 로그에만 남았는데, v0.2.79는 The New Gentleman을 가능성 중간으로 짚었습니다. Helper가 방금 찍은 예외를 게임이 처리했는지 확인하는 몇 초 동안 다른 크래시를 기록하지 못하는 알려진 한계 때문입니다. 이제 같은 게임 프로세스의 짝지어진 Crash Logger 로그가 덤프보다 30초 안쪽으로 늦게, 다른 스레드의 다른 위치에서 처리되지 않은 예외를 기록했으면, 빠른 답이 이 덤프는 그보다 앞서 게임이 처리하던 예외를 찍었다고 말하고 Crash Logger 로그의 크래시를 앞세웁니다(가능성 낮음). 덤프에 찍힌 모듈은 원인으로 보지 말라고 합니다. 보관 덤프 51개를 다시 분석하니 바뀐 것은 이 덤프 하나뿐이었습니다
+[*][b]게임을 끝낸 크래시의 보조 덤프:[/b] Helper가 앞선 예외를 확인하는 동안 다른 예외가 처리되지 않은 채 최상위 예외 필터에 닿으면 플러그인이 그 예외를 따로 적어 두고, Helper가 앞선 예외의 덤프를 쓴 뒤라면 그 예외의 덤프 [font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font](이름에 시각이 들어감)와 같은 이름의 기록([font=Courier New].json[/font])을 남깁니다. 앞선 예외의 리포트는 빠른 답부터 그 덤프를 가리킵니다("이 덤프는 게임을 끝낸 크래시가 아니라, 그보다 약 N초 앞서 다른(또는 같은) 스레드에서 나서 게임이 처리하던 예외를 찍었습니다. 게임을 끝낸 크래시(위치)의 덤프는 SkyrimDiag_SecondFault_*.dmp에 따로 남았습니다."). 다음 조치는 그 덤프를 뷰어로 여는 것입니다. 보조 덤프는 뷰어 목록에 보이고 열면 분석되며, 빠른 답의 첫 문장(예: "게임이 튕겼습니다(CTD).") 바로 다음에(그 문장으로 시작하지 않는 답에서는 맨 앞) 보조 덤프라는 것을 밝힙니다. 저절로 뷰어를 띄우거나 미리 분석하지 않고, 크래시 이력에도 넣지 않습니다. 보조 덤프를 쓰는 동안(약 1.5초) 게임이 멈춰, 앞선 예외의 판정과 게임 종료가 그만큼 늦어질 수 있습니다
+[*][b]보조 덤프가 없을 때:[/b] 앞선 예외를 지키는 것이 먼저라, 앞선 예외의 덤프를 쓸 수 없었거나 확인이 먼저인 경로(같은 주소에서 반복되는 처리된 예외 등)에서는 기록만 남고, 리포트는 근거와 권장의 끝에 그 내용을 적습니다
+[*][b]덤프 옆 Helper 로그:[/b] 게임을 하루에 여러 번 다시 켜면 크래시 세션의 SkyrimDiagHelper.log가 회전으로 지워졌습니다. 이제 Helper가 끝날 때 그 세션에서 쓴 덤프마다 덤프 이름을 딴 [font=Courier New]*_HelperLog.txt[/font]가 옆에 생깁니다. 그 세션 로그의 끝부분(최대 2 MiB)이고, 덤프가 지워질 때 함께 지워집니다. 이전 세션 로그의 기본 보관 개수([font=Courier New]MaxHelperSessionLogs[/font])도 5개에서 20개로 늘었습니다
+[*][b]새 설정:[/b] [font=Courier New]MaxSecondFaultDumps[/font](기본 3, 0에서 20 사이). 보조 덤프는 이 개수로만 세어 다른 덤프의 보존 자리를 차지하지 않고, [font=Courier New]MaxTotalDumpGB[/font]를 넘으면 가장 먼저 지웁니다. 0이면 보조 덤프를 쓰지 않고(이미 있는 것도 지움) 덤프 없는 기록을 최근 3개까지 남깁니다
+[*][b]한계:[/b] 둘 다 [b]Crash Logger가 있어야[/b] 합니다. 없으면 v0.2.79처럼 덤프의 예외로 판단하고, 보조 덤프도 기록도 남지 않습니다. 보조 덤프는 그 예외가 Tullius의 최상위 예외 필터를 거칠 때만 생깁니다. 스택 오버플로, C++ 예외, 중단점, 다른 플러그인이 필터 자리를 가져간 경우에는 생기지 않습니다(v0.2.79와 같음). 보조 덤프는 플러그인과 Helper가 둘 다 v0.2.80이어야 생깁니다
+[/list]
+
+[b][size=4]이전 변경: v0.2.79[/size][/b]
 게임 폴더에 놓인 Windows 이름의 모드 DLL을 올라온 위치로 판정, 뷰어 요약에 버튼과 글 선택, 플러그인 설정을 DLL 옆에서 읽기, 긴 출력 경로에서도 오래된 덤프 정리.[list]
 [*][b]Windows 이름을 쓰는 모드 DLL:[/b] OptiScaler의 winmm.dll처럼 게임 폴더에 놓여 Windows DLL 이름을 쓰는 모드 DLL은 System32의 같은 이름 DLL과 함께 올라옵니다. 분석기는 이를 이름만 보고 시스템 DLL로 걸러, Crash Logger가 그 DLL 안에서 튕겼다고 적어도 다른 모드와 "신호가 갈린다"고 했습니다. 이제 실제로 올라온 위치를 보고 모드 DLL로 봅니다. 보관 덤프 46개를 다시 분석하니 winmm.dll 크래시 두 개만 바뀌었습니다. 하나는 winmm.dll을 크래시 위치로 짚고(가능성 중간) Crash Logger가 함께 적은 근처 DLL도 비교하라고 하고, 시스템 DLL에서 난 것으로 보고된 다른 하나는 winmm.dll을 "가능성 높음" 의심 모드 대신 Crash Logger 프레임을 근거로 한 "가능성 중간" 후보로 짚습니다
 [*][b]게임 폴더의 DirectX 이름 DLL:[/b] ENB, ReShade, DXVK의 d3d11.dll, dxgi.dll, d3d9.dll, d3d12.dll은 후보 판정에서는 전부터 경로를 봤습니다. 이제 프리징의 "GPU 대기" 판정과 빠른 답도 이들을 모드로 봅니다. 그래픽 드라이버 프레임 없이 이런 DLL 안에서 멈춘 프리징은 GPU 대기 대신 그 DLL을 짚을 수 있습니다(실제 덤프로는 아직 못 봄)
@@ -456,31 +467,13 @@ qqq나 메뉴의 종료가 오래 걸려도 프리징으로 남기지 않기, �
 [*]뷰어는 v0.2.76이 분석해 둔 덤프를 열 때 한 번 다시 분석합니다
 [/list]
 
-[b][size=4]이전 변경: v0.2.76[/size][/b]
-처리된 예외가 반복될 때의 끊김 제거, 처리되지 않은 크래시의 즉시 알림, 게임 함수 ID, 빈 함수 포인터 크래시의 콜스택.[list]
-[*][b]반복되는 처리된 예외:[/b] 같은 예외(코드와 주소)를 한 세션에서 게임이 두 번 처리했으면, 세 번째부터는 Helper가 게임이 계속 도는지 먼저 확인하고 계속 돌면 아무것도 쓰지 않습니다. 그 덤프마다 게임의 모든 스레드가 1초쯤 멈췄습니다(넥서스 제보: v0.2.73에서 한 번에 1,162ms 정지, 제보 환경의 Helper 로그에는 같은 접근 위반이 23분에 14번). 처음 두 번은 여전히 덤프를 씁니다
-[*][b]처리되지 않은 크래시의 즉시 알림:[/b] 어떤 코드도 처리하지 않은 예외가 최상위 예외 필터에 닿으면 플러그인이 Helper에 알리고, 덤프를 다 쓸 때까지만 크래시가 난 스레드를 붙잡습니다([font=Courier New]UnhandledCrashHoldMs[/font], 기본 5000ms, 실게임에서 1.4~1.7초). 그 뒤 Crash Logger가 평소처럼 로그를 씁니다. 두 번 처리됐던 주소의 진짜 크래시도 덤프가 남고, 3초 하트비트 대기 없이 크래시로 확정하며, 게임 루프를 막지 않는 스레드의 크래시를 처리된 것으로 풀지 않습니다
-[*][b]종료 코드 0의 크래시:[/b] 처리되지 않은 것으로 확인된 크래시는 게임이 종료 코드 0으로 끝나도 남습니다(게임을 끄는 도중 다른 스레드에서 난 크래시). 그 뒤 게임이 1분 넘게 돌았으면 덤프만 남깁니다
-[*][b]Crash Logger가 없을 때:[/b] 플러그인이 1초에 한 번 최상위 예외 필터 자리를 확인해 되찾아, 다른 것이 그 자리를 가져가도 처리되지 않은 C++ 예외와 중단점을 놓치지 않습니다
-[*][b]빈 함수 포인터 호출:[/b] 그 호출이 스택에 남긴 반환 주소 바로 앞에서 call 명령이 끝나는지 확인한 뒤 거기서 콜스택을 걸어, 빈 콜스택 대신 부른 쪽부터 보여 줍니다. 11/15 Light Placer 크래시는 이제 Crash Logger와 같은 콜스택이 나오고 Light Placer를 가능성 높음으로 짚습니다. 이런 크래시는 버킷 키가 바뀝니다
-[*][b]게임 함수 ID:[/b] 게임 프레임에 Address Library ID가 붙습니다([font=Courier New]SkyrimSE.exe+0x49fb54 (ID 29895+0xe4)[/font]). 함수 시작이 ID와 정확히 맞을 때만입니다
-[*][b]맨 위부터의 콜스택:[/b] 리포트의 콜스택이 첫 플러그인 프레임의 두 프레임 위가 아니라 크래시 지점부터 시작합니다. 후킹 코드에서 끊긴 스택은 그렇다고 적고 그 후킹의 점프가 어디로 가는지 알려 줍니다
-[*][b]크래시 직전 드라이버 오류:[/b] Helper가 크래시 덤프 옆에 그래픽 드라이버 기록을 쓰고, 크래시 60초 안의 드라이버 오류를 빠른 답에서 먼저 안내합니다(의심 모드는 두 번째)
-[*][b]강제 종료 덤프 따로 세기:[/b] 게임을 닫는 중에 난 오류의 덤프는 따로 셉니다([font=Courier New]MaxForcedCloseCrashDumps[/font], 기본 3). 진짜 크래시 덤프를 밀어내지 않습니다
-[*][b]끄는 중은 프리징이 아님:[/b] 이미 종료 중이라 스레드가 하나 남은 게임은 프리징 덤프를 쓰지 않고, 메뉴에서 잡혀 풀리지 않은 채 정상 종료한 프리징은 느린 종료로 보고 지웁니다([font=Courier New]KeepSlowShutdownHangDumps=1[/font]이면 남김)
-[*][b]멈춘 게임의 수동 캡처:[/b] 하트비트가 5초 넘게 멈춰 있고 게임 창이 앞에 있었거나 응답하지 않았으면 프리징으로 분석합니다
-[*][b].NET 런타임:[/b] [font=Courier New]clr.dll[/font] 등 .NET 런타임 파일을 의심 모드가 아니라 Windows 구성 요소로 봅니다
-[*][b]Helper 워치독:[/b] Helper가 뜨자마자 계속 꺼지면 플러그인이 1·2·4·8초를 기다리고, 다섯 번 연속 실패하면 다시 띄우기를 그만둡니다
-[*]뷰어는 v0.2.75가 분석해 둔 덤프를 열 때 한 번 다시 분석합니다
-[/list]
-
 [b][size=4]이전 버전[/size][/b]
-v0.2.75 이하의 변경은 [url=https://github.com/servaltullius/Tullius_ctd_loger/blob/main/CHANGELOG.md]CHANGELOG[/url]와 [url=https://github.com/servaltullius/Tullius_ctd_loger/releases]GitHub 릴리즈[/url]에 있습니다.
+v0.2.76 이하의 변경은 [url=https://github.com/servaltullius/Tullius_ctd_loger/blob/main/CHANGELOG.md]CHANGELOG[/url]와 [url=https://github.com/servaltullius/Tullius_ctd_loger/releases]GitHub 릴리즈[/url]에 있습니다.
 
 [i]실사용 확인:[/i] 릴리즈마다 한 MO2 환경(게임 1.6.1170, SKSE 2.2.8, Crash Logger 1.27)에서 플레이해 본 뒤 냅니다.
-v0.2.77은 RC들을 같은 MO2 환경(Crash Logger 1.27, 11/16과 11/17)에서 플레이했습니다. 세이브를 불러오다 OSLAroused.dll 안에서 난 실제 크래시를 rc1이 가능성 중간으로 짚었고, 결론은 Crash Logger 프레임과 스택이 모두 그 DLL을 가리킨다고 적었습니다. 이 릴리즈와 코드가 같은 rc2 패키지에서는 Helper가 쓰는 폼 표 위치를 로그에 남겼고, 개발용 시험 플러그인이 FormID로 폼을 읽다 튕기자 리포트가 그 폼(위와 같음)과 플러그인을 짚었으며, 그 플러그인은 레코드를 마지막으로 덮어쓴 플러그인과 같았습니다. Papyrus 스크립트 로더 크래시는 11/17의 실제 덤프 두 개를 다시 분석해 확인했고, 스크립트를 고친 뒤에는 나지 않았습니다. 아직 실사용에서 보지 못한 것: 새 Helper로 찍은 덤프에서의 포인터를 덮어쓴 글자 줄과 스크립트 로더 빠른 답, 1.5.97과 1.7.x.
 v0.2.78은 이 릴리즈와 코드가 같은 RC 패키지를 같은 MO2 환경(Crash Logger 켬, Engine Fixes의 빠른 종료 켬, 11/18)에서 플레이했습니다. 플러그인이 v0.2.78.0 버전 줄을 남겼고, 메뉴의 종료로 끈 두 세션은 Helper 로그에 "The game was asked to quit" 줄을 남기고 캡처 없이 정상 종료했으며, Alt+F4로 끈 세션은 그 줄 없이 닫기 요청으로 기록됐습니다(의도한 대로). 그 세션들에서 덤프는 하나도 남지 않았습니다. 빠른 종료를 쓰면 게임이 1초 안에 꺼져 이 PC에서는 느린 종료를 재현하지 못했습니다. 아직 실사용에서 보지 못한 것: 보류됐다가 지워지는 느린 종료, 종료 플래그 뒤 10초가 지나 난 크래시(둘 다 테스트로 확인), 1.5.97과 1.7.x.
 v0.2.79는 이 릴리즈와 코드가 같은 rc3 패키지로 같은 MO2 환경에서 일곱 번 플레이했습니다(11/22). 모두 사전 점검 경고 없이 정상 종료했고, 플러그인은 SkyrimDiag.ini를 읽었다는 줄과 v0.2.79.0을 남겼으며, 데이터 로드까지 1분 49초 걸린 시작에서도 프리징 캡처가 생기지 않았습니다. rc3 뷰어로 11/19의 크래시 덤프를 열었고, Crash Logger 로그 열기가 짝지어진 로그를 열었습니다. 실사용에서 아직 못 본 것: Helper가 놓아준 크래시 뒤의 종료, 긴 출력 경로의 보존 정리, 게임 폴더 winmm.dll이나 d3d11.dll에서 난 새 크래시(재분석으로만 확인), 새 명령어 해석, Alt+F4와 함께 켜진 종료 플래그 기록, 1.5.97과 1.7.x.
+v0.2.80은 공개된 rc1·rc2·rc3 패키지를 같은 MO2 환경(Crash Logger 1.27, 개발용 크래시 테스터 플러그인)에서 플레이했습니다(11/24부터 11/27까지). 이 릴리즈의 코드는 rc3과 같습니다. rc3에서 Helper가 첫 덤프를 마친 2초 뒤 두 번째 접근 위반을 다른 스레드에서, 또 같은 스레드에서 낸 두 번 모두 보조 덤프와 기록이 생겼고, Crash Logger 로그도 두 번째 예외를 기록했습니다. 첫 덤프의 리포트는 빠른 답부터 보조 덤프를 가리켰고(약 4초, 어느 스레드인지), 뷰어로 연 보조 덤프는 빠른 답의 첫 문장 바로 다음에 보조 덤프라고 밝혔습니다. 처리되지 않은 C++ 예외, 그리고 처리된 접근 위반 두 번 뒤의 처리되지 않은 접근 위반은 덤프를 하나씩 남겼고 보조 덤프는 없었습니다. 스택 오버플로는 덤프도 Crash Logger 로그도 남기지 않았습니다. 업스케일러 모드에 딸린 프레임 생성 DLL([font=Courier New]nvngx_dlssg.dll[/font])이 Tullius보다 앞자리에 예외 처리기를 등록하는데, 그 처리기가 먼저 스택을 다 쓴 것으로 보입니다(추정, 이 버전에서 바꾸지 않음). rc1에서는 크래시 5건과 수동 캡처 1건 모두 덤프 옆에 Helper 로그 사본이 생겼고, 회전으로 원래 세션 로그가 지워진 크래시에서도 남았습니다. 실사용에서 아직 못 본 것: 이 버전의 스택 오버플로 기록, 시험 플러그인이 아닌 실제 플레이에서 생긴 보조 덤프와 앞선 예외를 찍은 덤프(실제 사례는 다시 분석한 11/23 덤프뿐), 덤프 없이 남은 기록, [font=Courier New]MaxSecondFaultDumps[/font]에 따른 정리와 0으로 둔 경우, 플러그인과 Helper의 버전이 섞인 경우, Crash Logger 로그가 두 번째 예외가 아닌 다른 크래시를 기록한 경우, 프리징 덤프 옆의 Helper 로그 사본, 크기 한도로 나뉜 세션 로그 이어 붙이기, 위 v0.2.79의 목록.
 
 [b][size=4]MO2에서 뷰어 찾기[/size][/b]
 MO2에서 모드를 우클릭 → [b]탐색기에서 열기[/b]
@@ -499,6 +492,7 @@ SKSE\Plugins\SkyrimDiagWinUI\SkyrimDiagDumpToolWinUI.exe
 CTD                    *_Crash_*.dmp          자동
 프리징 / 무한 로딩     *_Hang_*.dmp           자동 (임계값 기반)
 수동 스냅샷            *_Manual_*.dmp         Ctrl+Shift+Backspace
+보조 덤프              *_SecondFault_*.dmp    자동 (Crash Logger 있을 때)
 [/code]
 
 [b][size=4]출력 위치[/size][/b]
@@ -533,6 +527,9 @@ MaxCrashDumps=20
 MaxForcedCloseCrashDumps=3
 MaxHangDumps=20
 MaxManualDumps=20
+; 보조 덤프(SkyrimDiag_SecondFault_*.dmp)와 그 기록, 0~20.
+; 0이면 쓰지 않고 있던 것도 지움
+MaxSecondFaultDumps=3
 MaxEtwTraces=5
 ; 덤프 전체 크기 (GB)
 MaxTotalDumpGB=5
@@ -566,13 +563,16 @@ A: 저장/코세이브 과정의 예외가 내부에서 처리되면 게임이 �
 [b]Q: Alt+F4로 껐더니 오류가 기록됐는데 뷰어가 뜨지 않았어요.[/b]
 A: v0.2.70부터 의도한 동작입니다. 게임을 끄는 중에 난 오류는 플레이 중 CTD가 아니라 강제 종료 중 오류이고, 세이브에는 보통 영향이 없습니다. 게임이 종료 플래그를 기록했으면(메뉴의 종료, 콘솔 qqq, 또는 게임이 받아들여 종료로 이어진 Alt+F4나 창의 X 버튼) 그 뒤의 오류는 종료가 얼마나 오래 걸렸든 강제 종료 중 오류입니다. 종료 플래그 기록 없이 닫기 요청만 있었으면(Alt+F4, X 버튼, 다른 프로그램의 닫기 요청을 게임이 받아들이지 않은 경우) 그 요청 뒤 10초 안의 오류만 강제 종료 중 오류로 봅니다. 덤프와 리포트는 출력 폴더에 그대로 남습니다. CTD로 다시 보고하게 하려면 [font=Courier New]SkyrimDiag.ini[/font]에서 [font=Courier New]EnableCloseRequestLog=0[/font]으로 설정하세요. 이 설정은 종료 플래그 기록도 끄므로, 느린 종료도 알아보지 못하게 됩니다.
 
+[b]Q: 리포트가 이 덤프는 게임을 끝낸 크래시가 아니라 앞선 예외를 찍었다고 해요.[/b]
+A: v0.2.80에서 생긴 안내이고 Crash Logger가 있어야 나옵니다. Helper가 방금 찍은 예외를 게임이 처리했는지 확인하는 몇 초 동안 다른 크래시가 게임을 끝낼 수 있습니다. 덤프 옆에 보조 덤프([font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font])가 남았으면 그 덤프를 뷰어로 열어 보세요. 살펴볼 크래시는 대개 그쪽이고, 리포트가 Crash Logger 로그의 다른 크래시도 짚으면 둘 다 보세요. 없으면 리포트가 Crash Logger 로그의 크래시를 짚으니 그 로그를 확인하세요. 첫 덤프에 찍힌 모듈은 원인으로 보지 마세요.
+
 [b]Q: dump 파일은 어디 있나요?[/b]
 A: [font=Courier New]OutputDir=[/font]를 비워 두면 새 dump는 MO2 [font=Courier New]overwrite\SKSE\Plugins\Tullius Ctd Logs\[/font] 아래에 생성됩니다.
 [font=Courier New]OutputDir=[/font]를 설정하면 원하는 폴더로 모을 수 있습니다.
 직접 지정할 때는 따옴표 없이 경로 문자열만 적으면 되고, 절대경로/상대경로 모두 가능합니다. 상대경로는 헬퍼 폴더 기준입니다.
 
 [b]Q: CrashLoggerSSE가 꼭 필요한가요?[/b]
-A: 필수는 아닙니다. 다만 설치하면 더 풍부한 진단이 가능합니다.
+A: 필수는 아닙니다. 다만 설치하면 더 풍부한 진단이 가능합니다. v0.2.80부터 덤프가 앞선 예외를 찍었는지 알아보기와 게임을 끝낸 크래시의 보조 덤프는 Crash Logger가 있어야 동작합니다.
 
 [b]Q: 프리징 분석도 자동으로 되나요?[/b]
 A: 됩니다. 게임 메인 스레드가 무엇을 기다렸는지(GPU, 드라이버, 오류 창, 엔진, 플러그인에 갇힌 게임 스레드)를 알려 주고, WCT, blackbox, 로딩 문맥도 함께 씁니다.
@@ -588,7 +588,7 @@ A: v0.2.62와 v0.2.63의 1.5.97 버그입니다. v0.2.64를 zip 전체로 설치
 
 [b][size=4]개인정보 안내[/size][/b]
 [list]
-[*]dump와 로그에는 [b]로컬 경로[/b], [b]사용자 이름[/b] 등이 포함될 수 있습니다.
+[*]dump와 로그(덤프 옆의 [font=Courier New]*_HelperLog.txt[/font] 사본 포함)에는 [b]로컬 경로[/b], [b]사용자 이름[/b] 등이 포함될 수 있습니다.
 [*]출력 폴더의 crash_history.json과 loaded_saves.json에는 세이브 이름이 들어 있습니다.
 [*]공개 업로드 전 점검/마스킹을 권장합니다.
 [*]분석 결과는 best-effort 추정입니다. 확정 판결이 아닙니다.
@@ -602,6 +602,8 @@ A: v0.2.62와 v0.2.63의 1.5.97 버그입니다. v0.2.64를 zip 전체로 설치
 [*][font=Courier New]*_SkyrimDiagSummary.json[/font]
 [*][font=Courier New]SkyrimDiag_Incident_*.json[/font] (있다면)
 [*][font=Courier New]*_SkyrimDiagBlackbox.jsonl[/font] (있다면)
+[*]덤프 옆의 [font=Courier New]*_HelperLog.txt[/font] (있다면, 그 세션의 Helper 로그)
+[*][font=Courier New]SkyrimDiag_SecondFault_*.dmp[/font]와 그 [font=Courier New].json[/font] (있다면)
 [*]CrashLogger 로그 (있다면)
 [/list]
 
