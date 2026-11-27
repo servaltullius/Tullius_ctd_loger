@@ -216,6 +216,18 @@ v0.2.76-rc2의 빌드로 한 실게임 확인(2026-11-14, main `df0d36d`를 로�
   - 필터가 crash_seq를 다시 본 뒤 `SetEvent` 전에 다른 스레드가 사고를 게시하고 `ResetEvent`까지 마치면, 앞 크래시의 신호가 새 사고에 붙을 수 있습니다. 창은 수 명령어 길이입니다.
 - 검증: `skydiag_plugin_crash_handler_runtime_tests`의 `TestReleasedFaultIsStillReportedAsUnhandledWithoutHolding`(풀려난 예외가 필터에 닿으면 기다리지 않고 신호), `TestStaleUnhandledSignalIsClearedWhenNextCrashPublishes`(남은 신호를 새 게시가 지움). 위 두 한계를 다루는 테스트는 없습니다.
 
+## Addendum (2026-11-27, v0.2.80): 플러그인보다 앞에 끼어든 다른 모듈의 벡터 핸들러
+- 확인한 것(2026-11-27, v0.2.80-rc3 공개 패키지, 게임 1.6.1170, Crash Logger 1.27 켬, `tools/crash_tester`의 Ctrl+Shift+F9):
+  - 덤프도 Crash Logger 로그도 남지 않았고, 게임은 `0xC0000005`로 끝났습니다. Helper 로그에는 크래시 이벤트가 없고, 기록된 크래시 없는 비정상 종료로 보고 WER LocalDumps 안내를 썼습니다. Windows 오류 보고(이벤트 1000)는 ntdll.dll+0x55ae0의 접근 위반을 적었고, 그 자리는 힙 함수 첫머리의 `push rbp`입니다(로컬 ntdll 10.0.26100.9974, 타임스탬프가 같은 파일로 확인).
+  - 그 사이 구성에 업스케일러 모드에 딸린 프레임 생성 DLL(`nvngx_dlssg.dll`, 게임의 그래픽 초기화 때 올라옴)이 들어왔습니다. 이 DLL은 `AddVectoredExceptionHandler(1, …)`로 핸들러를 맨 앞에 등록하고, 스택 오버플로·접근 위반 등에서 자기 로그를 쓰고 미니덤프를 만듭니다(디스어셈블로 확인. 핸들러 자신의 스택 프레임만 약 1.6KB).
+  - 그 DLL의 로그에는 스택 오버플로(`0xc00000fd at CrashTester.dll+0x6af2c`)까지만 있고, 다른 세션에서 미니덤프 뒤에 남던 "minidump written" 줄이 없습니다.
+  - 같은 날 Ctrl+Shift+Delete의 첫 예외에서는 그 DLL이 미니덤프를 다 쓴 뒤(약 2초)에야 Helper가 덤프를 시작했습니다. 그 DLL의 핸들러가 플러그인의 핸들러보다 먼저 불린다는 뜻입니다. 플러그인은 SKSE 플러그인을 불러올 때 맨 앞에 등록하므로, 그 뒤에 맨 앞에 등록한 핸들러가 앞에 섭니다.
+  - 2026-11-14의 F9(위, v0.2.76-rc2)에서는 그 DLL이 없었고 스택 오버플로가 기록됐습니다. 이 PC의 예외 컨텍스트는 3,263바이트(XState `0x8e7`, AMX 없음)라 Decision 5의 AMX 한계와는 관계없습니다.
+- 추정(확인하지 못함): ntdll의 접근 위반은 그 DLL의 핸들러가 넘친 스택에 남은 여유(위 측정으로 핸들러가 불릴 때 7,552\~9,744바이트)를 다 써서 난 것입니다. Windows가 임시로 쓴 덤프가 지워져 스레드와 스택은 보지 못했습니다.
+- 한계: 플러그인보다 나중에 맨 앞자리에 벡터 핸들러를 등록한 모듈은 플러그인보다 먼저 불립니다. 그 핸들러가 스택 오버플로에서 남은 스택을 넘기면, 플러그인과 Crash Logger가 불리기 전에 게임이 끝나 기록과 덤프가 없습니다(Decision 5의 AMX 호스트와 같은 결과). 스택 오버플로가 아닌 예외는 스택이 넉넉해 해당하지 않았습니다(같은 날 F3, F5, PageDown, Delete는 모두 기록됨).
+- v0.2.80에서는 바꾸지 않았습니다. 플러그인의 스택 오버플로 경로는 v0.2.76-rc2 뒤에 `ResetEvent`와 게시 표 기록(위 2026-11-19 Addendum)이 더해졌고, 자식 프로세스 테스트(`TestUnhandledStackOverflowIsNotHeld`)로는 확인했지만 이 구성의 실게임에서는 그 경로에 닿지 못했습니다.
+- 생각해 볼 수 있는 방안(정하지 않음): 늦게 올라오는 DLL 뒤에 핸들러를 다시 맨 앞에 등록하기, 게임 메인 스레드의 스택 여유(`SetThreadStackGuarantee`)를 늘리기, 기록된 크래시 없는 비정상 종료 때 Windows 이벤트 로그의 오류 모듈과 오프셋을 Helper 로그에 옮기기.
+
 ## References
 - ADR-0031 (`0031-skip-dump-for-repeated-handled-faults.md`): 첫 한계, 2026-11-13의 실게임 확인 세 건, 스냅샷 측정
 - ADR-0017 (`0017-second-fault-while-filtering.md`): 스레드별 보관 슬롯, 남은 한계
