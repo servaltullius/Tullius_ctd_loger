@@ -178,6 +178,17 @@ int main()
   constexpr std::uint32_t kAllNoted[3] = { 55u, 44u, 66u };
   static_assert(SelectUnrecordedFaultThreadSlot(kAllNoted, 3, 77u, 7u) == 1u, "else the fallback, inside the table");
 
+  // ADR-0037: the stack-overflow front guard hold cap is clamped at 5,000 ms.
+  using skydiag::plugin::ComputeStackOverflowGuardHoldMs;
+  using skydiag::plugin::kMaxStackOverflowGuardHoldMs;
+  using skydiag::plugin::kMaxUnhandledCrashHoldMs;
+  static_assert(kMaxStackOverflowGuardHoldMs == 5000u);
+  static_assert(ComputeStackOverflowGuardHoldMs(0u) == 0u);
+  static_assert(ComputeStackOverflowGuardHoldMs(400u) == 400u);
+  static_assert(ComputeStackOverflowGuardHoldMs(5000u) == 5000u);
+  static_assert(ComputeStackOverflowGuardHoldMs(15000u) == 5000u);
+  static_assert(ComputeStackOverflowGuardHoldMs(kMaxUnhandledCrashHoldMs) == 5000u);
+
   // A fault outside CrashLogger is checked for CrashLogger frames only between
   // it and the kept exception's dispatch CONTEXT, on this thread's stack.
   using skydiag::plugin::SelectCrashLoggerStackScanWindow;
@@ -500,56 +511,171 @@ int main()
     "if (!g_crashEvent)",
     "Crash event failure branch must appear after event creation.");
 
-  const std::string vectoredHandlerBody = ExtractFunctionBody(crashHandler, "LONG CALLBACK VectoredHandler(");
+  const std::string handleVectoredBody = ExtractFunctionBody(crashHandler, "LONG HandleVectoredException(");
   AssertContains(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "ShouldRecordException(code)",
     "Crash handler must filter exceptions according to hook mode.");
 
   AssertContains(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "IsInCrashLoggerModule(exceptionAddress",
     "CrashLogger's own probe exceptions must be handled before the normal crash record.");
 
   AssertContains(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "TryPublishCrashRecord(shm, ep, code)",
     "Crash handler must publish a stable fixed-size crash record before signaling the helper.");
 
   AssertContains(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "SetEvent(ev)",
     "Crash handler must signal crash event after recording crash snapshot.");
 
   AssertOrdered(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "IsInCrashLoggerModule(exceptionAddress",
     "TryPublishCrashRecord(shm, ep, code)",
     "CrashLogger probe handling must run before publishing a crash record.");
 
   AssertOrdered(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "TryPublishCrashRecord(shm, ep, code)",
     "SetEvent(ev)",
     "Crash record publication must precede helper signaling.");
 
   AssertOrdered(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "TryPublishKeptExceptionForCrashLoggerFault(",
     "TryPublishCrashRecord(shm, ep, code)",
     "A CrashLogger fault must first record the exception CrashLogger is reporting.");
 
   AssertOrdered(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "SetEvent(ev)",
     "KeepUnrecordedException(shm, ep)",
     "Only exceptions the fatal filter let through may be kept for a later CrashLogger fault.");
 
   AssertOrdered(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "SetEvent(ev)",
     "ShouldEmitFirstChanceTelemetry(ep->ExceptionRecord)",
     "Fatal capture must return after signaling before dynamic first-chance telemetry can execute.");
+
+  // ADR-0037: VectoredHandler delegates to HandleVectoredException and skips
+  // stack overflow whenever the dedicated front guard is installed.
+  const std::string vectoredHandlerBody = ExtractFunctionBody(crashHandler, "LONG CALLBACK VectoredHandler(");
+  AssertOrdered(
+    vectoredHandlerBody,
+    "ExceptionCode == EXCEPTION_STACK_OVERFLOW",
+    "HandleVectoredException(ep)",
+    "VectoredHandler must skip stack overflow before calling HandleVectoredException when the front guard is installed.");
+  AssertContains(
+    vectoredHandlerBody,
+    "g_stackOverflowGuardInstalled.load(",
+    "VectoredHandler must only skip stack overflow when the front guard is installed.");
+  AssertContains(
+    vectoredHandlerBody,
+    "return EXCEPTION_CONTINUE_SEARCH;",
+    "VectoredHandler must return EXCEPTION_CONTINUE_SEARCH when skipping stack overflow for the guard.");
+
+  // ADR-0037: StackOverflowFrontGuard fast-path, hold contract, and stack-safe restrictions.
+  const std::string stackOverflowGuardBody =
+    ExtractFunctionBody(crashHandler, "LONG CALLBACK StackOverflowFrontGuard(");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "StackOverflowGuardActiveScope",
+    "ExceptionCode != EXCEPTION_STACK_OVERFLOW",
+    "The guard must increment its active counter before inspecting the exception.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "ExceptionCode != EXCEPTION_STACK_OVERFLOW",
+    "GetShared()",
+    "Non-stack-overflow exceptions must return before touching shared memory.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "seqBeforeCall = shm ? shm->header.crash_seq : 0u",
+    "HandleVectoredException(ep)",
+    "The guard must snapshot crash_seq before calling HandleVectoredException.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "HandleVectoredException(ep)",
+    "if (sequenceBefore == seqBeforeCall)",
+    "The guard must compare post-call crash_seq against pre-call crash_seq so non-writing calls never hold.");
+  AssertContains(
+    ExtractFunctionBody(stackOverflowGuardBody, "if (sequenceBefore == seqBeforeCall)"),
+    "return result;",
+    "When crash_seq did not change, the guard must return immediately without holding.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "if (sequenceBefore == seqBeforeCall)",
+    "IsCrashRecordOfException(",
+    "The guard must reject unchanged crash_seq before matching the frozen crash record.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "IsCrashRecordOfException(",
+    "OpenEventW(SYNCHRONIZE, FALSE, settledName)",
+    "The guard must only open DUMP_SETTLED when this call wrote the crash record.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "OpenEventW(SYNCHRONIZE, FALSE, settledName)",
+    "WaitForSingleObject(settled, holdMs)",
+    "The guard must wait on the opened DUMP_SETTLED handle.");
+  AssertOrdered(
+    stackOverflowGuardBody,
+    "WaitForSingleObject(settled, holdMs)",
+    "CloseHandle(settled)",
+    "The guard must close its DUMP_SETTLED handle immediately so helper liveness stays intact.");
+  AssertContains(
+    stackOverflowGuardBody,
+    "ComputeStackOverflowGuardHoldMs(",
+    "The guard must clamp its hold duration to 5 seconds.");
+  assert(
+    stackOverflowGuardBody.find("std::string") == std::string::npos &&
+    stackOverflowGuardBody.find("std::wstring") == std::string::npos &&
+    stackOverflowGuardBody.find("std::vector") == std::string::npos &&
+    stackOverflowGuardBody.find(" new ") == std::string::npos &&
+    stackOverflowGuardBody.find("malloc(") == std::string::npos &&
+    stackOverflowGuardBody.find("calloc(") == std::string::npos &&
+    stackOverflowGuardBody.find("realloc(") == std::string::npos &&
+    stackOverflowGuardBody.find("SetUnhandledExceptionFilter") == std::string::npos &&
+    stackOverflowGuardBody.find("RecordCloseRequestAtCrash") == std::string::npos &&
+    stackOverflowGuardBody.find("GetModuleHandleW") == std::string::npos &&
+    stackOverflowGuardBody.find("GetModuleHandleExW") == std::string::npos &&
+    stackOverflowGuardBody.find("GetModuleFileNameW") == std::string::npos &&
+    stackOverflowGuardBody.find("spdlog::") == std::string::npos &&
+    stackOverflowGuardBody.find("OutputDebugString") == std::string::npos &&
+    stackOverflowGuardBody.find("GetUnhandledEvent") == std::string::npos &&
+    stackOverflowGuardBody.find("SetEvent(") == std::string::npos &&
+    "StackOverflowFrontGuard must not use heap allocations, SetUnhandledExceptionFilter, RecordCloseRequestAtCrash, "
+    "GetModuleHandleW, logging, or unhandledEvent signaling on an overflowed stack.");
+
+  const std::string moveGuardBody =
+    ExtractFunctionBody(crashHandler, "StackOverflowGuardMoveResult MoveStackOverflowGuardToFrontImpl(");
+  AssertContains(
+    moveGuardBody,
+    "std::lock_guard<std::mutex>",
+    "Re-fronting the guard must serialize under a mutex.");
+  AssertOrdered(
+    moveGuardBody,
+    "g_stackOverflowGuardActiveCount.load(",
+    "SwitchToThread();",
+    "Re-fronting the guard should yield briefly while another thread is transiently passing through the guard.");
+  AssertOrdered(
+    moveGuardBody,
+    "SwitchToThread();",
+    "AddVectoredExceptionHandler(/*First=*/1, StackOverflowFrontGuard)",
+    "Re-fronting the guard must confirm the active count is zero before adding a new registration.");
+  AssertOrdered(
+    moveGuardBody,
+    "AddVectoredExceptionHandler(/*First=*/1, StackOverflowFrontGuard)",
+    "RemoveVectoredExceptionHandler(oldHandle)",
+    "Re-fronting the guard must add the new registration before removing the old one.");
+  AssertOrdered(
+    moveGuardBody,
+    "if (!newHandle)",
+    "RemoveVectoredExceptionHandler(oldHandle)",
+    "If re-registration fails, the previous guard registration must be kept.");
 
   const std::string refreshCrashLoggerRangesBody = ExtractFunctionBody(
     crashHandler,
@@ -580,6 +706,15 @@ int main()
     "RefreshCrashLoggerModuleRanges()",
     "AddVectoredExceptionHandler(",
     "CrashLogger module ranges must be cached before the vectored handler can run.");
+  AssertOrdered(
+    installCrashHandlerBody,
+    "AddVectoredExceptionHandler(/*First=*/1, VectoredHandler)",
+    "AddVectoredExceptionHandler(/*First=*/1, StackOverflowFrontGuard)",
+    "The stack-overflow front guard must be registered with First=1 after VectoredHandler so it runs in front.");
+  AssertContains(
+    installCrashHandlerBody,
+    "crashHookMode == 1 || crashHookMode == 2",
+    "The stack-overflow front guard must be installed only for CrashHookMode 1 and 2.");
   AssertContains(
     installCrashHandlerBody,
     "SetUnhandledExceptionFilter(UnhandledExceptionFilterHook)",
@@ -650,7 +785,7 @@ int main()
     "ResetEvent(unhandled)",
     "When a filter under ours resumes the thread, the signal must be taken back.");
   AssertOrdered(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "NoteFaultRecorded(false, ep->ExceptionRecord);",
     "NoteFaultRecorded(true, ep->ExceptionRecord);",
     "The vectored handler must note whether this thread's fatal-code exception was recorded.");
@@ -749,6 +884,32 @@ int main()
     onSkseMessageBody,
     "kPostLoad",
     "CrashLogger range refresh must start at the earliest post-load lifecycle stage.");
+  // ADR-0037: re-front the stack-overflow guard at every lifecycle stage.
+  // Slice only the condition block between NoteCrashLoggerModuleRangesFinal()
+  // and MoveStackOverflowGuardToFront() so constants from other blocks cannot
+  // mask missing message types.
+  const auto guardBlockStart = onSkseMessageBody.find("NoteCrashLoggerModuleRangesFinal();");
+  const auto guardCallPos = onSkseMessageBody.find("MoveStackOverflowGuardToFront()");
+  assert(
+    guardBlockStart != std::string::npos &&
+    guardCallPos != std::string::npos &&
+    guardBlockStart < guardCallPos &&
+    "OnSkseMessage must call MoveStackOverflowGuardToFront() after NoteCrashLoggerModuleRangesFinal().");
+  const std::string guardConditionSlice =
+    onSkseMessageBody.substr(guardBlockStart, guardCallPos - guardBlockStart);
+  for (const char* msgType : {
+         "SKSE::MessagingInterface::kPostLoad",
+         "SKSE::MessagingInterface::kPostPostLoad",
+         "SKSE::MessagingInterface::kInputLoaded",
+         "SKSE::MessagingInterface::kDataLoaded",
+         "SKSE::MessagingInterface::kPostLoadGame",
+         "SKSE::MessagingInterface::kNewGame",
+       }) {
+    AssertContains(
+      guardConditionSlice,
+      msgType,
+      "The MoveStackOverflowGuardToFront() condition in OnSkseMessage must cover all six ADR-0037 SKSE messages.");
+  }
   // ADR-0025: the save a load starts with, and the end of that load.
   AssertOrdered(
     onSkseMessageBody,
@@ -771,14 +932,14 @@ int main()
     "A new game must clear the save in play.");
 
   AssertContains(
-    vectoredHandlerBody,
+    handleVectoredBody,
     "PushFirstChanceExceptionEvent(code, addressBucket, {});",
     "VEH first-chance telemetry must record only the numeric address bucket.");
   assert(
     crashHandler.find("ResolveExceptionModuleBasenameUtf8") == std::string::npos &&
-    vectoredHandlerBody.find("GetModuleHandleExW") == std::string::npos &&
-    vectoredHandlerBody.find("GetModuleFileNameW") == std::string::npos &&
-    vectoredHandlerBody.find("WideCharToMultiByte") == std::string::npos &&
+    handleVectoredBody.find("GetModuleHandleExW") == std::string::npos &&
+    handleVectoredBody.find("GetModuleFileNameW") == std::string::npos &&
+    handleVectoredBody.find("WideCharToMultiByte") == std::string::npos &&
     "VEH must not perform loader, module, path, or text conversion lookups.");
 
   const std::string publishCrashBody =
@@ -814,7 +975,7 @@ int main()
     publishCrashBody.find("ResolveExceptionModuleBasenameUtf8") == std::string::npos &&
     "Fatal crash record publication must not allocate or resolve filesystem paths.");
   assert(
-    vectoredHandlerBody.find("InterlockedOr(") == std::string::npos &&
+    handleVectoredBody.find("InterlockedOr(") == std::string::npos &&
     "Fatal handler must not set ownership after publication; the CAS claim is the only ownership point.");
 
   const std::string setupLogBody = ExtractFunctionBody(pluginMain, "bool SetupLog() noexcept");

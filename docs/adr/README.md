@@ -39,3 +39,4 @@ ADR index:
 - `0034-game-only-walks-and-overwritten-text.md`
 - `0035-freeze-after-quit-is-a-slow-shutdown.md`
 - `0036-unhandled-crash-during-filtering.md`
+- `0037-stack-overflow-front-guard.md`

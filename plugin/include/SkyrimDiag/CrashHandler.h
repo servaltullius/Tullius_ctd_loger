@@ -380,6 +380,39 @@ inline constexpr std::uint32_t kDefaultUnhandledCrashHoldMs = 5000;
 inline constexpr std::uint32_t kMaxUnhandledCrashHoldMs = 30000;
 void SetUnhandledCrashHoldMs(std::uint32_t holdMs) noexcept;
 
+// ADR-0037: the stack-overflow front guard caps its hold at 5 seconds even
+// when UnhandledCrashHoldMs is higher, so helper paths that check heartbeat
+// before dumping (ADR-0031) cannot see a false hang caused by the guard.
+inline constexpr std::uint32_t kMaxStackOverflowGuardHoldMs = 5000;
+
+constexpr std::uint32_t ComputeStackOverflowGuardHoldMs(std::uint32_t unhandledCrashHoldMs) noexcept
+{
+  return unhandledCrashHoldMs < kMaxStackOverflowGuardHoldMs
+    ? unhandledCrashHoldMs
+    : kMaxStackOverflowGuardHoldMs;
+}
+
+enum class StackOverflowGuardMoveResult
+{
+  kNotInstalled,
+  kMoved,
+  kSkippedBusy,
+  kFailed,
+};
+
+// ADR-0037: registers the stack-overflow front guard again at the front of the
+// vectored exception chain, then removes its previous registration. Skips while
+// any thread is executing inside the guard, and leaves the previous
+// registration intact if adding the new one fails. Not for the crash path.
+StackOverflowGuardMoveResult MoveStackOverflowGuardToFront() noexcept;
+
+// Whether the stack-overflow front guard is installed (CrashHookMode 1 or 2).
+bool IsStackOverflowGuardInstalled() noexcept;
+
+// Test-only entry points for ADR-0037 verification.
+StackOverflowGuardMoveResult MoveStackOverflowGuardToFrontIgnoringActiveCountForTest() noexcept;
+void* AddDuplicateStackOverflowGuardRegistrationForTest() noexcept;
+
 // Caches the CrashLogger module image ranges used by nested-exception
 // suppression. InstallCrashHandler runs during SKSE plugin load, which is too
 // early to observe a CrashLogger build that loads after us, so the SKSE
