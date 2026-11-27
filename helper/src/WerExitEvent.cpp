@@ -136,9 +136,9 @@ bool ParseWerHexUint64(std::wstring_view text, std::uint64_t* out) noexcept
     if (c >= L'0' && c <= L'9') {
       digit = static_cast<std::uint64_t>(c - L'0');
     } else if (c >= L'a' && c <= L'f') {
-      digit = static_cast<std::uint64_t>(c - L'a' + 10);
+      digit = static_cast<std::uint64_t>(c - L'a') + 10u;
     } else if (c >= L'A' && c <= L'F') {
-      digit = static_cast<std::uint64_t>(c - L'A' + 10);
+      digit = static_cast<std::uint64_t>(c - L'A') + 10u;
     } else {
       return false;
     }
