@@ -41,8 +41,20 @@ struct IncidentSecondFault
   std::string reason;
   bool resumed = false;
   std::wstring module_plus_offset;  // From A's dump module list.
+  std::wstring module_filename;     // From A's dump module list; empty when no module holds the address.
+  std::uint64_t module_offset = 0;
+  std::wstring inferred_mod_name;   // The MO2 mod of that module, from its path.
+  bool module_is_mod = false;       // Not Windows, the game, a hook framework, Crash Logger or a driver.
   // dump_filename is not beside A's dump any more (retention may have deleted it).
   bool dump_missing = false;
+  // dump_filename is a file beside A's dump (checked, not just "not missing").
+  bool dump_present = false;
+  // How long after A's crash marker B reached the top-level filter: the QPC
+  // the helper wrote in the record beside B's dump, on A's blackbox clock.
+  std::optional<double> seconds_after_first;
+  // The paired Crash Logger log names B's location and thread, and not A's:
+  // it is B's log.
+  bool crash_logger_log_is_second = false;
 };
 
 // ADR-0010: an object that a crash register or the top of the crash stack
@@ -596,6 +608,7 @@ struct AnalysisResult
 
   std::uint32_t pid = 0;
   std::uint64_t blackbox_start_qpc = 0;  // the session's start (SharedHeader::start_qpc)
+  std::uint64_t blackbox_qpc_freq = 0;   // SharedHeader::qpc_freq; 0 when unknown
   std::uint32_t state_flags = 0;
   std::uint32_t blackbox_crash_seq = 0;
   std::uint32_t blackbox_exception_code = 0;
@@ -796,6 +809,12 @@ struct AnalysisResult
   std::string incident_capture_kind;               // crash / hang / manual / crash_recapture
   bool incident_unhandled_exception_signal = false;
   std::optional<IncidentSecondFault> incident_second_fault;
+  // ADR-0036 addendum: B has its own dump and ended the game, so this dump's
+  // exception is an earlier one; the quick answer, the conclusion and the
+  // first recommendation point to B's dump (EvidenceBuilder.cpp).
+  bool second_fault_lead = false;
+  // The last recommendation is the second-fault note, which the next action skips.
+  bool second_fault_note_last = false;
   std::string incident_capture_profile_base_mode;  // mini / default / full
   bool incident_capture_profile_code_segments = false;
   bool incident_capture_profile_process_thread_data = false;

@@ -448,7 +448,8 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
           : L" 따로 할 일은 없습니다. 끌 때마다 몇 분씩 걸린다면 도움을 요청할 때 이 리포트를 전해 주세요. 아래 "
             L"스레드가 게임이 그때 무엇을 하고 있었는지 보여 줍니다."));
   }
-  if (r.crash_logger_later_crash) {
+  // ADR-0036 addendum: with B's own dump, its action (open that dump) is this one.
+  if (r.second_fault_lead || r.crash_logger_later_crash) {
     r.recommendations.push_back(
       (en ? L"[Different crash from dump] " : L"[덤프와 다른 크래시] ") + r.quick_answer.action);
   }

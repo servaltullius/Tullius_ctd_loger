@@ -400,7 +400,7 @@ std::string BuildReportText(
     rpt << "CrashLoggerReadingPath: "
         << WideToUtf8(crashLoggerReadingPath) << "\n";
   }
-  if (const auto next = SelectNextActionIndex(r.recommendations, r.incident_second_fault.has_value());
+  if (const auto next = SelectNextActionIndex(r.recommendations, r.second_fault_note_last);
       next != std::wstring::npos) {
     rpt << "NextAction: "
         << WideToUtf8(stripRecommendationTag(r.recommendations[next])) << "\n";

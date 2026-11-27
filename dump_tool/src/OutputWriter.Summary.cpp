@@ -168,6 +168,9 @@ nlohmann::json BuildSummaryJson(
   if (r.is_second_fault_capture) {
     summary["analysis"]["is_second_fault_capture"] = true;
   }
+  if (r.second_fault_lead) {
+    summary["analysis"]["second_fault_lead"] = true;
+  }
   if (r.is_filtered_clean_exit) {
     summary["clean_exit_evidence"] = {
       { "validated", true },
@@ -1114,7 +1117,7 @@ nlohmann::json BuildSummaryJson(
     });
   }
   // Index into "recommendations" of the report's NextAction; -1 when there is none.
-  const auto nextAction = SelectNextActionIndex(r.recommendations, r.incident_second_fault.has_value());
+  const auto nextAction = SelectNextActionIndex(r.recommendations, r.second_fault_note_last);
   summary["next_action_index"] = nextAction == std::wstring::npos ? -1 : static_cast<int>(nextAction);
 
   if (!r.history_stats.empty()) {

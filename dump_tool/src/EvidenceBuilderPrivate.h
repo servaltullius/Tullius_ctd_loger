@@ -98,6 +98,23 @@ std::wstring DescribeDuration(double seconds, bool en);
 bool CrashLoggerShowsLaterCrash(const AnalysisResult& r, bool nameHang);
 std::wstring CrashLoggerLaterCrashInterval(const AnalysisResult& r, bool en);
 std::wstring CrashLoggerLaterCrashDetails(const AnalysisResult& r, bool en);
+// ADR-0036 addendum: the exception that reached the top-level filter while
+// this dump's exception was being checked (B) has its own dump beside this
+// one and ended the game: this dump holds an earlier exception. Set on
+// r.second_fault_lead once the capture kind is known.
+bool SecondFaultEndedGame(const AnalysisResult& r, const EvidenceBuildContext& ctx, bool nameHang);
+// The paired Crash Logger log shows a later crash (CrashLoggerShowsLaterCrash)
+// that is not B: the lead names both.
+bool CrashLoggerShowsAnotherCrash(const AnalysisResult& r);
+// "on the same thread" / "on another thread" for B; empty when this dump's
+// thread is not known.
+std::wstring SecondFaultThread(const AnalysisResult& r, bool en);
+// "about 4 seconds" from B's record; empty when its time is not known.
+std::wstring SecondFaultInterval(const AnalysisResult& r, bool en);
+// Where B was: its module and offset in this dump, else its address.
+std::wstring SecondFaultLocation(const AnalysisResult& r);
+// The conclusion's lead when r.second_fault_lead (after its tag).
+std::wstring SecondFaultLeadDetails(const AnalysisResult& r, bool en);
 // Crash Logger's top modules other than the fault module and the SKSE runtime
 // (the path plugin tasks take): DLLs worth comparing with the fault module.
 bool HasNearbyProbableDll(const AnalysisResult& r);
@@ -229,5 +246,7 @@ void BuildRecommendations(AnalysisResult& r, i18n::Language lang, const Evidence
 std::wstring BuildSummarySentence(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
 // The lead BuildSummarySentence follows, in everyday words (QuickAnswer.h).
 QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const EvidenceBuildContext& ctx);
+// A second-fault dump's quick answer says first what the dump is (ADR-0036 addendum).
+void MarkSecondFaultDumpAnswer(QuickAnswer& answer, bool en);
 
 }  // namespace skydiag::dump_tool::internal

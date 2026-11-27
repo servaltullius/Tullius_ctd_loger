@@ -18,6 +18,7 @@
 #include "AnalyzerInternals.h"
 #include "MinidumpUtil.h"
 #include "GpuDriverLog.h"
+#include "JsonValue.h"
 #include "MemorySnapshot.h"
 #include "ProblematicModules.h"
 #include "Mo2Index.h"
@@ -198,6 +199,78 @@ void DowngradeCrashLoggerLogForOtherLocation(AnalysisResult* out)
     L"[CrashLogger] log exception location " + out->crash_logger_exception_location +
     L" differs from the dump fault " + out->fault_module_plus_offset +
     L"; treating the pairing as ambiguous");
+}
+
+// A number the record holds as a non-negative integer; nothing for a missing
+// key, null or another type, which must not match a zero address or thread.
+std::optional<std::uint64_t> JsonUnsigned(const nlohmann::json& obj, const char* key)
+{
+  if (!obj.is_object()) {
+    return std::nullopt;
+  }
+  const auto it = obj.find(key);
+  if (it == obj.end()) {
+    return std::nullopt;
+  }
+  if (it->is_number_unsigned()) {
+    return it->get<std::uint64_t>();
+  }
+  if (it->is_number_integer() && it->get<std::int64_t>() >= 0) {
+    return static_cast<std::uint64_t>(it->get<std::int64_t>());
+  }
+  return std::nullopt;
+}
+
+// ADR-0036 addendum: the record the helper wrote beside B's dump
+// (CrashCapture.cpp), when it is about this pair: B's address and thread, and
+// A's (its "a"), all present. It gives when B reached the top-level filter,
+// measured from A's own crash marker on A's blackbox clock, and whether
+// execution resumed after B, which the helper may record after A's incident.
+void ReadSecondFaultRecord(const std::filesystem::path& recordPath, IncidentSecondFault& second, const AnalysisResult& out)
+{
+  // A record is a few hundred bytes.
+  constexpr std::uintmax_t kMaxRecordBytes = std::uintmax_t{ 64 } * 1024u;
+  std::error_code sizeEc;
+  const auto size = skydiag::FileSizeForIo(recordPath, sizeEc);
+  if (sizeEc || size == 0u || size > kMaxRecordBytes || out.exc_tid == 0u) {
+    return;
+  }
+  std::wstring readErr;
+  const auto text = ReadWholeFileUtf8(skydiag::PathForIo(recordPath), &readErr);
+  if (!text) {
+    return;
+  }
+  const auto record = nlohmann::json::parse(*text, nullptr, false);
+  const auto first = record.is_object() ? record.find("a") : record.end();
+  if (!record.is_object() || first == record.end() ||
+      JsonValueOr(record, "schema", std::string{}) != "skydiag.second_fault.v1" ||
+      JsonUnsigned(record, "exception_addr") != second.address ||
+      JsonUnsigned(record, "faulting_tid") != std::uint64_t{ second.tid } ||
+      JsonUnsigned(*first, "exception_addr") != out.exc_addr ||
+      JsonUnsigned(*first, "faulting_tid") != std::uint64_t{ out.exc_tid }) {
+    return;
+  }
+  if (JsonValueOr(record, "resumed", false)) {
+    second.resumed = true;
+  }
+
+  // A's own marker: the plugin's kCrash event carries A's code and address.
+  std::optional<double> firstMs;
+  for (const auto& event : out.events) {
+    if (event.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash) && event.a == out.exc_code &&
+        event.b == out.exc_addr && (event.tid == 0u || event.tid == out.exc_tid)) {
+      firstMs = event.t_ms;
+    }
+  }
+  const auto qpc = JsonUnsigned(record, "qpc");
+  if (out.blackbox_qpc_freq == 0u || !firstMs || !qpc || *qpc == 0u || *qpc < out.blackbox_start_qpc) {
+    return;
+  }
+  const double secondMs =
+    1000.0 * (static_cast<double>(*qpc - out.blackbox_start_qpc) / static_cast<double>(out.blackbox_qpc_freq));
+  if (secondMs >= *firstMs) {
+    second.seconds_after_first = (secondMs - *firstMs) / 1000.0;
+  }
 }
 
 bool CrashLoggerExceptionModuleIsMod(
@@ -956,20 +1029,41 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   if (!out.is_second_fault_capture) {
     RunOptionalStep(L"incident manifest", out, [&] { LoadIncidentCaptureProfile(dumpPath, outDir, out); });
-    if (auto& second = out.incident_second_fault; second) {
-      if (const auto idx = minidump::FindModuleIndexForAddress(allModules, second->address)) {
-        const auto& module = allModules[*idx];
-        second->module_plus_offset = minidump::ModulePlusOffsetText(module.filename, second->address - module.base);
-      }
-      if (!second->dump_filename.empty()) {
-        // Written beside A's dump; only its file name counts.
-        const auto name = std::filesystem::path(Utf8ToWide(second->dump_filename)).filename();
-        std::error_code existsEc;
-        second->dump_missing =
-          !name.empty() &&
-          !std::filesystem::exists(skydiag::PathForIo(std::filesystem::path(dumpPath).parent_path() / name), existsEc) &&
-          !existsEc;
-      }
+    if (out.incident_second_fault) {
+      RunOptionalStep(L"second fault", out, [&] {
+        auto& second = *out.incident_second_fault;
+        if (const auto idx = minidump::FindModuleIndexForAddress(allModules, second.address)) {
+          const auto& module = allModules[*idx];
+          second.module_filename = module.filename;
+          second.module_offset = second.address - module.base;
+          second.module_plus_offset = minidump::ModulePlusOffsetText(module.filename, second.module_offset);
+          second.inferred_mod_name = module.inferred_mod_name;
+        }
+        second.module_is_mod = CrashLoggerExceptionModuleIsMod({}, second.address, allModules);
+        if (!second.dump_filename.empty()) {
+          // Written beside A's dump; only its file name counts. Through a
+          // handle on a long path, which MO2's file system needs.
+          const auto name = std::filesystem::path(Utf8ToWide(second.dump_filename)).filename();
+          const auto dumpDir = std::filesystem::path(dumpPath).parent_path();
+          std::error_code existsEc;
+          second.dump_missing = !name.empty() && !skydiag::ExistsForIo(dumpDir / name, existsEc) && !existsEc;
+          second.dump_present = !name.empty() && skydiag::IsRegularFileForIo(dumpDir / name);
+          if (second.dump_present) {
+            auto recordName = name;
+            recordName.replace_extension(L".json");
+            ReadSecondFaultRecord(dumpDir / recordName, second, out);
+          }
+        }
+        // Only a log already set apart from this dump's own fault (its
+        // location contradicts A's) is named as B's: a log that A's location
+        // cannot be compared with stays A's clue, as before.
+        second.crash_logger_log_is_second =
+          !out.crash_logger_log_path.empty() && out.crash_logger_location_mismatch &&
+          crashlogger_core::CrashLoggerLocationIs(
+            out.crash_logger_exception_location, second.module_filename, second.module_offset) &&
+          (out.crash_logger_exception_tid == 0u || out.crash_logger_exception_tid == second.tid) &&
+          (out.crash_logger_process_id == 0u || out.pid == 0u || out.crash_logger_process_id == out.pid);
+      });
     }
   }
   const auto analysisTimestamp = NowIso8601Utc();

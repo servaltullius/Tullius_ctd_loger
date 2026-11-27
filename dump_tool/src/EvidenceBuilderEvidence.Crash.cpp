@@ -14,7 +14,9 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
 {
   const bool en = ctx.en;
 
-  if (r.crash_logger_later_crash) {
+  // With B's own dump the second-fault item leads instead (EvidenceBuilder.cpp),
+  // and says so when the log is B's; a log of another crash stays named.
+  if (r.crash_logger_later_crash && !(r.second_fault_lead && !CrashLoggerShowsAnotherCrash(r))) {
     EvidenceItem e{};
     e.confidence_level = i18n::ConfidenceLevel::kMedium;
     e.confidence = ConfidenceText(lang, e.confidence_level);
@@ -41,7 +43,18 @@ void BuildCrashLoggerEvidence(AnalysisResult& r, i18n::Language lang, const Evid
          L"ms, eligible=" + std::to_wstring(r.crash_logger_pairing_eligible_candidate_count))
       : (L" | 쌍짓기 시간차=" + std::to_wstring(r.crash_logger_pairing_time_delta_ms) +
          L"ms, 유효 후보=" + std::to_wstring(r.crash_logger_pairing_eligible_candidate_count));
-    if (r.crash_logger_location_mismatch) {
+    if (r.crash_logger_location_mismatch && r.incident_second_fault &&
+        r.incident_second_fault->crash_logger_log_is_second) {
+      // ADR-0036 addendum: not maybe another crash's, but the second fault's.
+      e.details += en
+        ? (L" | the log's exception location (" + r.crash_logger_exception_location +
+           L") is not this dump's (" + r.fault_module_plus_offset +
+           L") but that of the second exception that reached the top-level exception filter, so its clues are "
+           L"downgraded for this dump.")
+        : (L" | 로그의 예외 위치(" + r.crash_logger_exception_location +
+           L")는 이 덤프(" + r.fault_module_plus_offset +
+           L")가 아니라 최상위 예외 필터에 닿은 두 번째 예외의 위치라, 이 덤프의 단서로는 낮게 평가합니다.");
+    } else if (r.crash_logger_location_mismatch) {
       e.details += en
         ? (L" | the log's exception location (" + r.crash_logger_exception_location +
            L") differs from this dump's (" + r.fault_module_plus_offset +
