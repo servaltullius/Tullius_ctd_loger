@@ -163,6 +163,12 @@ bool CrashLoggerLocationContradictsDumpFault(
   std::wstring_view location,
   std::wstring_view faultModuleFilename,
   std::uint64_t faultModuleOffset);
+// Whether a Crash Logger location ("KERNELBASE.dll+00C483A", possibly
+// path-qualified) names this module and offset. False when it cannot be read.
+bool CrashLoggerLocationIs(
+  std::wstring_view location,
+  std::wstring_view moduleFilename,
+  std::uint64_t moduleOffset);
 CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(std::string_view logUtf8);
 // Same, with frames in a mod named like a Windows DLL counted as plugin frames.
 CrashLoggerFrameSignals ParseCrashLoggerFrameSignalsAscii(

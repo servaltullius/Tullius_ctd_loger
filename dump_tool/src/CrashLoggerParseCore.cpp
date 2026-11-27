@@ -1753,6 +1753,25 @@ bool CrashLoggerLocationContradictsDumpFault(
   return WideAsciiLower(module) != faultLower || *offset != faultModuleOffset;
 }
 
+bool CrashLoggerLocationIs(
+  std::wstring_view location,
+  std::wstring_view moduleFilename,
+  std::uint64_t moduleOffset)
+{
+  const auto plus = location.rfind(L'+');
+  if (moduleFilename.empty() || plus == std::wstring_view::npos || plus == 0) {
+    return false;
+  }
+  const auto offset = ParseHexOffset(location.substr(plus + 1));
+  std::wstring_view module = location.substr(0, plus);
+  const auto slash = module.find_last_of(L"/\\");
+  if (slash != std::wstring_view::npos) {
+    module.remove_prefix(slash + 1);
+  }
+  return offset && *offset == moduleOffset && !module.empty() &&
+         WideAsciiLower(module) == WideAsciiLower(moduleFilename);
+}
+
 bool IsLocationObjectTypeAscii(std::string_view objType)
 {
   const std::string lower = AsciiLower(objType);

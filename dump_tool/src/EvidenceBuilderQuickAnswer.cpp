@@ -17,6 +17,7 @@
 #include "DumpObjects.h"
 #include "MainThreadWait.h"
 #include "MinidumpUtil.h"
+#include "Utf.h"
 
 namespace skydiag::dump_tool::internal {
 namespace {
@@ -743,6 +744,84 @@ QuickAnswer LaterCrashAnswer(const AnalysisResult& r, bool en)
   return answer;
 }
 
+// ADR-0036 addendum: the exception that reached the top-level filter while
+// this one was being checked (B) has its own dump and ended the game. As for
+// the later crash a Crash Logger log shows (LaterCrashAnswer), but from the
+// helper's own record, on either thread, and it points to B's dump.
+QuickAnswer SecondFaultAnswer(const AnalysisResult& r, bool en)
+{
+  const auto& second = *r.incident_second_fault;
+  QuickAnswer answer;
+  answer.kind = "crash";
+  answer.case_id = "second_fault_crash";
+  answer.likelihood = LikelihoodId(i18n::ConfidenceLevel::kLow);
+  answer.likelihood_text = LikelihoodText(i18n::ConfidenceLevel::kLow, en);
+  if (second.module_is_mod) {
+    const auto lead = ModLead(r, second.module_filename, second.inferred_mod_name, i18n::ConfidenceLevel::kLow);
+    answer.suspect_mod = lead.name;
+    answer.suspect_file = lead.file;
+  }
+
+  const auto& faultFile = r.fault_module_filename;
+  const std::wstring earlierModule = IsModModule(r, faultFile)
+    ? ModLead(r, faultFile, {}, i18n::ConfidenceLevel::kLow).name : faultFile;
+  const std::wstring earlierLabel = earlierModule.empty() ? L""
+    : (en ? L" (" : L"(") + earlierModule + L")";
+  const auto thread = SecondFaultThread(r, en);
+  const auto interval = SecondFaultInterval(r, en);
+  const auto file = Utf8ToWide(second.dump_filename);
+  const auto location = SecondFaultLocation(r);
+  const bool anotherCrash = CrashLoggerShowsAnotherCrash(r);
+  const auto logFile = BaseName(r.crash_logger_log_path);
+  answer.headline = KindPhrase(answer.kind, en);
+  // With another crash in the Crash Logger log, B only may have ended the game.
+  if (en) {
+    answer.headline += L" This dump captured an earlier exception" + earlierLabel + L" the game was handling " +
+      (thread.empty() ? L"" : thread + L" ") + (interval.empty() ? L"before" : interval + L" before") +
+      (anotherCrash ? L" a crash that may have ended the game. That crash (" : L" the crash that ended the game. That crash (") +
+      location + L") has its own dump: " + file + L".";
+  } else {
+    answer.headline += L" 이 덤프는 게임을 끝낸 크래시가 아니라, 그보다 " + (interval.empty() ? L"" : interval + L" ") +
+      L"앞서 " + (thread.empty() ? L"" : thread + L" ") + L"나서 게임이 처리하던 예외" + earlierLabel +
+      L"를 찍었습니다. 게임을 " + (anotherCrash ? L"끝냈을 수 있는" : L"끝낸") + L" 크래시(" + location + L")의 덤프는 " +
+      file + L"에 따로 남았습니다.";
+  }
+  if (!answer.suspect_mod.empty()) {
+    answer.headline += en
+      ? L" That location is in " + answer.suspect_mod + L" (" + answer.suspect_file + L")."
+      : L" 그 위치는 " + answer.suspect_mod + L"(" + answer.suspect_file + L")입니다.";
+  }
+
+  answer.action = en ? L"Open " + file + L" in the viewer to see the analysis of that crash."
+                     : L"뷰어에서 " + file + L" 파일을 열어 그 크래시의 분석을 확인하세요.";
+  if (second.crash_logger_log_is_second) {
+    answer.action += en ? L" The Crash Logger log (" + logFile + L") recorded the same crash."
+                        : L" Crash Logger 로그(" + logFile + L")도 같은 크래시를 기록했습니다.";
+  } else if (anotherCrash) {
+    answer.action += en
+      ? L" The Crash Logger log (" + logFile + L") recorded another crash (" + AnotherCrashLabel(r, en) +
+          L"); check that log too."
+      : L" Crash Logger 로그(" + logFile + L")에는 다른 크래시(" + AnotherCrashLabel(r, en) +
+          L")가 기록됐으니 그 로그도 확인하세요.";
+  }
+  // The other crash may be in this dump's module: then it is not set aside.
+  const std::wstring_view otherLocation = r.crash_logger_exception_location;
+  const auto otherModule = BaseName(otherLocation.substr(0, otherLocation.rfind(L'+')));
+  if (!earlierModule.empty() && !SameFile(second.module_filename, faultFile) &&
+      !(anotherCrash && SameFile(otherModule, faultFile))) {
+    answer.action += en ? L" Do not treat " + earlierModule + L" from this dump as the cause of the crash."
+                        : L" 덤프에 찍힌 " + earlierModule + L"은(는) 이 크래시의 원인으로 보지 마세요.";
+  }
+  answer.why_not_certain = anotherCrash
+    ? (en ? L"This dump does not hold the crash that ended the game, and the Crash Logger log names another crash, so "
+            L"which of the two ended the game is not certain."
+          : L"이 덤프에는 게임을 끝낸 크래시가 담겨 있지 않고, Crash Logger 로그는 다른 크래시를 기록해 둘 중 어느 것이 "
+            L"게임을 끝냈는지 확실하지 않습니다.")
+    : (en ? L"This dump does not hold the crash that ended the game, so that crash is examined in its own dump."
+          : L"이 덤프에는 게임을 끝낸 크래시가 담겨 있지 않아, 그 크래시는 따로 남은 덤프에서 확인해야 합니다.");
+  return answer;
+}
+
 // ADR-0034: with no mod named, a crash mechanism that has its own headline
 // (the Papyrus script loader) says what the game was doing and what to check
 // in place of "share this report". It names no mod and sets no likelihood.
@@ -876,6 +955,10 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
     return answer;
   }
 
+  // B's own dump says more than a Crash Logger log of it.
+  if (r.second_fault_lead) {
+    return SecondFaultAnswer(r, en);
+  }
   if (r.crash_logger_later_crash) {
     return LaterCrashAnswer(r, en);
   }
@@ -1060,6 +1143,20 @@ QuickAnswer BuildQuickAnswer(const AnalysisResult& r, i18n::Language lang, const
   }
   AddFreezeObjectClue(r, en, freeze);
   return freeze;
+}
+
+void MarkSecondFaultDumpAnswer(QuickAnswer& answer, bool en)
+{
+  const std::wstring note = en
+    ? L"This is the separate dump of an exception that reached the top-level exception filter unhandled while "
+      L"Tullius was checking an earlier exception."
+    : L"이 덤프는 Tullius가 앞선 예외를 확인하던 동안 처리되지 않은 채 최상위 예외 필터에 닿은 예외의 보조 덤프입니다.";
+  const auto kind = KindPhrase(answer.kind, en);
+  if (answer.headline.starts_with(kind)) {
+    answer.headline.insert(kind.size(), L" " + note);
+  } else {
+    answer.headline = answer.headline.empty() ? note : note + L" " + answer.headline;
+  }
 }
 
 }  // namespace skydiag::dump_tool::internal

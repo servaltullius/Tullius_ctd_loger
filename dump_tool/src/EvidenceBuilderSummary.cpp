@@ -2,23 +2,129 @@
 #include "EvidenceBuilderEvidencePipeline.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cwchar>
+#include <filesystem>
 
 #include "GameLockWait.h"
 #include "MainThreadWait.h"
 #include "MinidumpUtil.h"
+#include "Utf.h"
 
 namespace skydiag::dump_tool::internal {
 
-std::wstring CrashLoggerLaterCrashInterval(const AnalysisResult& r, bool en)
+namespace {
+
+// "about 4 seconds", rounded to the nearest second; empty under half a second.
+std::wstring AboutSeconds(std::uint64_t ms, bool en)
 {
-  const auto ms = r.crash_logger_pairing_time_delta_ms;
   const auto seconds = ms / 1000 + (ms % 1000 >= 500 ? 1 : 0);
   if (seconds == 0) {
     return {};
   }
   return (en ? L"about " : L"약 ") + std::to_wstring(seconds) +
     (en ? (seconds == 1 ? L" second" : L" seconds") : L"초");
+}
+
+}  // namespace
+
+std::wstring CrashLoggerLaterCrashInterval(const AnalysisResult& r, bool en)
+{
+  return AboutSeconds(r.crash_logger_pairing_time_delta_ms, en);
+}
+
+bool SecondFaultEndedGame(const AnalysisResult& r, const EvidenceBuildContext& ctx, bool nameHang)
+{
+  if (r.is_second_fault_capture || !r.incident_second_fault) {
+    return false;
+  }
+  // B has a dump to open, and nothing says the game went on after it. A dump
+  // whose own exception reached the top-level filter holds a crash itself. A
+  // freeze or manual capture by its name or WCT record is none, as for the
+  // later crash a Crash Logger log shows (CrashLoggerShowsLaterCrash).
+  const auto& second = *r.incident_second_fault;
+  if (!second.dump_present || second.dump_missing || second.resumed || !ctx.hasException || !ctx.isCrashLike ||
+      ctx.isHangLike || ctx.isManualCapture ||
+      ctx.isFilteredCleanExit || ctx.isForcedClose || ctx.isSlowShutdown || nameHang ||
+      r.incident_unhandled_exception_signal || r.incident_capture_kind == "hang" ||
+      r.incident_capture_kind == "manual") {
+    return false;
+  }
+  const auto wct = TryParseWctFreezeSummary(r.wct_json_utf8);
+  return !wct || (!wct->suggestsHang && wct->capture_kind != "manual");
+}
+
+// Another crash the Crash Logger log shows than B: both are named.
+bool CrashLoggerShowsAnotherCrash(const AnalysisResult& r)
+{
+  return r.crash_logger_later_crash && r.incident_second_fault && !r.incident_second_fault->crash_logger_log_is_second;
+}
+
+std::wstring AnotherCrashLabel(const AnalysisResult& r, bool en)
+{
+  // CrashLoggerShowsLaterCrash requires the log's thread.
+  return r.crash_logger_exception_location + (en ? L", thread " : L", 스레드 ") +
+    std::to_wstring(r.crash_logger_exception_tid);
+}
+
+std::wstring SecondFaultInterval(const AnalysisResult& r, bool en)
+{
+  if (!r.incident_second_fault || !r.incident_second_fault->seconds_after_first) {
+    return {};
+  }
+  const double seconds = *r.incident_second_fault->seconds_after_first;
+  // A delay past a day is no reading of this pair.
+  if (!(seconds >= 0.0) || seconds > 86400.0) {
+    return {};
+  }
+  return AboutSeconds(static_cast<std::uint64_t>(std::llround(seconds * 1000.0)), en);
+}
+
+std::wstring SecondFaultLocation(const AnalysisResult& r)
+{
+  if (!r.incident_second_fault) {
+    return {};
+  }
+  const auto& second = *r.incident_second_fault;
+  return second.module_plus_offset.empty() ? Hex64(second.address) : second.module_plus_offset;
+}
+
+std::wstring SecondFaultThread(const AnalysisResult& r, bool en)
+{
+  // This dump's thread is not known without its exception stream.
+  if (r.exc_tid == 0u || !r.incident_second_fault) {
+    return {};
+  }
+  const bool sameThread = r.incident_second_fault->tid == r.exc_tid;
+  return en ? (sameThread ? L"on the same thread" : L"on another thread")
+            : (sameThread ? L"같은 스레드에서" : L"다른 스레드에서");
+}
+
+std::wstring SecondFaultLeadDetails(const AnalysisResult& r, bool en)
+{
+  const auto& second = *r.incident_second_fault;
+  const auto thread = SecondFaultThread(r, en);
+  const auto interval = SecondFaultInterval(r, en);
+  const auto earlier = r.fault_module_plus_offset.empty() ? Hex64(r.exc_addr) : r.fault_module_plus_offset;
+  const auto file = Utf8ToWide(second.dump_filename);
+  const auto logFile = std::filesystem::path(r.crash_logger_log_path).filename().wstring();
+  // With another crash in the Crash Logger log, B only may have ended the game.
+  const bool another = CrashLoggerShowsAnotherCrash(r);
+  if (en) {
+    return L"The exception in this dump (" + earlier + L") was an earlier exception the game was handling, and the "
+      L"crash that " + (another ? L"may have ended" : L"ended") + L" the game happened " +
+      (interval.empty() ? L"after it" : interval + L" later") + (thread.empty() ? L"" : L" " + thread) + L" at " +
+      SecondFaultLocation(r) + L" (its own dump: " + file + L")." +
+      (another ? L" The Crash Logger log (" + logFile + L") recorded another crash (" + AnotherCrashLabel(r, en) +
+                   L"), so which of the two ended the game is not certain."
+               : L"");
+  }
+  return L"이 덤프의 예외(" + earlier + L")는 게임이 처리하던 앞선 예외이고, 게임을 " +
+    (another ? L"끝냈을 수 있는" : L"끝낸") + L" 크래시는 " + (interval.empty() ? L"그 뒤" : interval + L" 뒤") +
+    (thread.empty() ? L"" : L" " + thread) + L" 난 " + SecondFaultLocation(r) + L"입니다(그 덤프: " + file + L")." +
+    (another ? L" Crash Logger 로그(" + logFile + L")에는 다른 크래시(" + AnotherCrashLabel(r, en) +
+                 L")가 기록돼, 둘 중 어느 것이 게임을 끝냈는지 확실하지 않습니다."
+             : L"");
 }
 
 std::wstring CrashLoggerLaterCrashDetails(const AnalysisResult& r, bool en)

@@ -115,24 +115,40 @@ void AppendSecondFaultEvidence(AnalysisResult& r, i18n::Language lang)
       : L"그 예외의 덤프를 " + filename + L"에 따로 남겼지만 지금은 이 폴더에 없습니다(보존 정리로 지워졌을 수 있음).";
     item.details += L" " + gone;
     r.recommendations.push_back(gone);
+    r.second_fault_note_last = true;
   } else if (!second.dump_filename.empty()) {
     const auto filename = Utf8ToWide(second.dump_filename);
     item.details += en ? L" A separate dump was saved as " + filename + L"."
                        : L" 그 예외의 덤프를 " + filename + L"에 따로 남겼습니다.";
-    r.recommendations.push_back(en
-      ? L"That exception may have ended the game. Open " + filename + L" in the viewer to examine it."
-      : L"게임을 끝낸 것은 그 예외일 수 있으니 뷰어에서 " + filename + L"도 열어 보세요.");
+    // As the lead, the first recommendation already points to that dump
+    // (BuildRecommendations).
+    if (!r.second_fault_lead) {
+      r.recommendations.push_back(en
+        ? L"That exception may have ended the game. Open " + filename + L" in the viewer to examine it."
+        : L"게임을 끝낸 것은 그 예외일 수 있으니 뷰어에서 " + filename + L"도 열어 보세요.");
+      r.second_fault_note_last = true;
+    }
   } else {
     const std::wstring reason = DescribeSecondFaultReason(second.reason, en);
     const std::wstring noDump = en ? L"No dump was saved for that exception: " + reason + L"."
                                    : L"그 예외의 덤프는 남기지 못했습니다. " + reason + L".";
     item.details += L" " + noDump;
     r.recommendations.push_back(noDump);
+    r.second_fault_note_last = true;
   }
   if (second.resumed) {
     item.details += en ? L" Execution resumed after that exception." : L" 그 예외는 그 뒤 실행이 이어졌습니다.";
   }
-  r.evidence.push_back(std::move(item));
+  if (second.crash_logger_log_is_second) {
+    const auto logFile = std::filesystem::path(r.crash_logger_log_path).filename().wstring();
+    item.details += en ? L" The Crash Logger log (" + logFile + L") is of that exception."
+                       : L" Crash Logger 로그(" + logFile + L")는 그 예외의 것입니다.";
+  }
+  if (r.second_fault_lead) {
+    r.evidence.insert(r.evidence.begin(), std::move(item));
+  } else {
+    r.evidence.push_back(std::move(item));
+  }
 }
 
 void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
@@ -142,6 +158,8 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 
   r.evidence.clear();
   r.recommendations.clear();
+  r.second_fault_lead = false;
+  r.second_fault_note_last = false;
 
   // A missing master stops the game while it loads plugins at startup. A
   // session that finished loading a save or cell had its masters, so the
@@ -289,8 +307,12 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
         : L" (해제된 코드를 호출했을 뿐; 다른 플러그인이 제거한 훅의 피해자일 수 있음)";
     }
   }
+  r.second_fault_lead = internal::SecondFaultEndedGame(r, ctx, nameHang);
   internal::BuildEvidenceItems(r, lang, ctx);
   r.quick_answer = internal::BuildQuickAnswer(r, lang, ctx);
+  if (r.is_second_fault_capture) {
+    internal::MarkSecondFaultDumpAnswer(r.quick_answer, en);
+  }
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);
   if (ctx.isForcedClose) {
@@ -305,9 +327,9 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
     // ADR-0025: what the repeats say comes before what this one dump says.
     r.summary_sentence = internal::DamagedSaveLead(r.save_load, en) + L" " + r.summary_sentence;
   }
-  if (r.crash_logger_later_crash) {
+  if (r.second_fault_lead || r.crash_logger_later_crash) {
     r.summary_sentence = (en ? L"[Different crash from dump] " : L"[덤프와 다른 크래시] ") +
-      internal::CrashLoggerLaterCrashDetails(r, en) +
+      (r.second_fault_lead ? internal::SecondFaultLeadDetails(r, en) : internal::CrashLoggerLaterCrashDetails(r, en)) +
       (en ? L" The analysis below is of the earlier exception in this dump. "
           : L" 아래는 이 덤프에 찍힌 앞선 예외의 분석입니다. ") +
       r.summary_sentence;
