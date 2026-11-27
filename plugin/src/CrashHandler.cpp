@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <mutex>
 
 #include "SkyrimDiag/Blackbox.h"
 #include "SkyrimDiag/CloseRequestHooks.h"
@@ -149,6 +150,24 @@ second_fault::CandidateTable g_secondFaultCandidates{};
 
 using AbortSignalHandlerFn = void(__cdecl*)(int);
 std::atomic<AbortSignalHandlerFn> g_previousAbortSignalHandler{ nullptr };
+
+// ADR-0037: dedicated front VEH for EXCEPTION_STACK_OVERFLOW.
+std::mutex g_stackOverflowGuardMutex;
+PVOID g_stackOverflowGuardHandle = nullptr;
+std::atomic<bool> g_stackOverflowGuardInstalled{ false };
+std::atomic<std::uint32_t> g_stackOverflowGuardActiveCount{ 0u };
+
+struct StackOverflowGuardActiveScope
+{
+  StackOverflowGuardActiveScope() noexcept
+  {
+    g_stackOverflowGuardActiveCount.fetch_add(1u, std::memory_order_acq_rel);
+  }
+  ~StackOverflowGuardActiveScope() noexcept
+  {
+    g_stackOverflowGuardActiveCount.fetch_sub(1u, std::memory_order_acq_rel);
+  }
+};
 
 CrashHandlerModuleRange QueryLoadedModuleRange(const wchar_t* moduleName) noexcept
 {
@@ -682,7 +701,7 @@ bool IsThisThreadsPublishedFault(const EXCEPTION_RECORD* record, std::uint32_t c
   return false;
 }
 
-LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
+__declspec(noinline) LONG HandleVectoredException(EXCEPTION_POINTERS* ep) noexcept
 {
   auto* shm = GetShared();
   if (!shm || !ep || !ep->ExceptionRecord || !ep->ContextRecord) {
@@ -771,6 +790,105 @@ LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
   }
 
   return EXCEPTION_CONTINUE_SEARCH;
+}
+
+LONG CALLBACK VectoredHandler(EXCEPTION_POINTERS* ep) noexcept
+{
+  if (ep && ep->ExceptionRecord &&
+      ep->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW &&
+      g_stackOverflowGuardInstalled.load(std::memory_order_acquire)) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  return HandleVectoredException(ep);
+}
+
+// ADR-0037: stands at the front of the vectored exception chain so a late-loaded
+// third-party VEH cannot exhaust the remaining overflow stack before SkyrimDiag
+// records the crash and holds until the helper settles the dump.
+LONG CALLBACK StackOverflowFrontGuard(EXCEPTION_POINTERS* ep) noexcept
+{
+  const StackOverflowGuardActiveScope activeScope{};
+  if (!ep || !ep->ExceptionRecord || ep->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+
+  auto* const shm = GetShared();
+  const std::uint32_t seqBeforeCall = shm ? shm->header.crash_seq : 0u;
+  const LONG result = HandleVectoredException(ep);
+  if (!shm || !ep->ContextRecord) {
+    return result;
+  }
+
+  const std::uint32_t sequenceBefore = shm->header.crash_seq;
+  if (sequenceBefore == seqBeforeCall) {
+    return result;
+  }
+  const std::uint32_t recordThreadId = shm->header.crash.faulting_tid;
+  const std::uint32_t recordCode = shm->header.crash.exception_code;
+  const std::uint64_t recordAddress = shm->header.crash.exception_addr;
+  MemoryBarrier();
+  const std::uint32_t sequenceAfter = shm->header.crash_seq;
+  const bool frozen = IsCrashCaptureFrozen(shm);
+  const bool wroteRecord = IsCrashRecordOfException(
+    frozen,
+    sequenceBefore,
+    sequenceAfter,
+    recordThreadId,
+    recordCode,
+    recordAddress,
+    GetCurrentThreadId(),
+    ep->ExceptionRecord->ExceptionCode,
+    reinterpret_cast<std::uint64_t>(ep->ExceptionRecord->ExceptionAddress));
+  if (!wroteRecord) {
+    return result;
+  }
+
+  const std::uint32_t holdMs =
+    ComputeStackOverflowGuardHoldMs(g_unhandledCrashHoldMs.load(std::memory_order_relaxed));
+  const wchar_t* const settledName = GetDumpSettledEventName();
+  if (holdMs != 0u && settledName && settledName[0] != L'\0') {
+    if (const HANDLE settled = OpenEventW(SYNCHRONIZE, FALSE, settledName)) {
+      WaitForSingleObject(settled, holdMs);
+      CloseHandle(settled);
+    }
+  }
+  return result;
+}
+
+StackOverflowGuardMoveResult MoveStackOverflowGuardToFrontImpl(bool ignoreActiveCount) noexcept
+{
+  if (!g_stackOverflowGuardInstalled.load(std::memory_order_acquire)) {
+    return StackOverflowGuardMoveResult::kNotInstalled;
+  }
+  try {
+    std::lock_guard<std::mutex> lock(g_stackOverflowGuardMutex);
+    PVOID oldHandle = g_stackOverflowGuardHandle;
+    if (!oldHandle) {
+      return StackOverflowGuardMoveResult::kNotInstalled;
+    }
+    if (!ignoreActiveCount) {
+      // Another thread may be transiently passing through the guard on a
+      // non-stack-overflow exception; yield briefly before skipping.
+      constexpr int kMaxActiveWaitRetries = 8;
+      for (int attempt = 0;
+           attempt < kMaxActiveWaitRetries && g_stackOverflowGuardActiveCount.load(std::memory_order_acquire) != 0u;
+           ++attempt) {
+        SwitchToThread();
+      }
+      if (g_stackOverflowGuardActiveCount.load(std::memory_order_acquire) != 0u) {
+        return StackOverflowGuardMoveResult::kSkippedBusy;
+      }
+    }
+    PVOID newHandle = AddVectoredExceptionHandler(/*First=*/1, StackOverflowFrontGuard);
+    if (!newHandle) {
+      return StackOverflowGuardMoveResult::kFailed;
+    }
+    g_stackOverflowGuardHandle = newHandle;
+    RemoveVectoredExceptionHandler(oldHandle);
+    return StackOverflowGuardMoveResult::kMoved;
+  } catch (...) {
+    return StackOverflowGuardMoveResult::kFailed;
+  }
 }
 
 // ADR-0032: tells the helper that the recorded crash was not handled, and
@@ -1122,6 +1240,29 @@ void SetUnhandledCrashHoldMs(std::uint32_t holdMs) noexcept
   g_unhandledCrashHoldMs.store((std::min)(holdMs, kMaxUnhandledCrashHoldMs), std::memory_order_relaxed);
 }
 
+StackOverflowGuardMoveResult MoveStackOverflowGuardToFront() noexcept
+{
+  return MoveStackOverflowGuardToFrontImpl(/*ignoreActiveCount=*/false);
+}
+
+bool IsStackOverflowGuardInstalled() noexcept
+{
+  return g_stackOverflowGuardInstalled.load(std::memory_order_acquire);
+}
+
+StackOverflowGuardMoveResult MoveStackOverflowGuardToFrontIgnoringActiveCountForTest() noexcept
+{
+  return MoveStackOverflowGuardToFrontImpl(/*ignoreActiveCount=*/true);
+}
+
+void* AddDuplicateStackOverflowGuardRegistrationForTest() noexcept
+{
+  if (!g_stackOverflowGuardInstalled.load(std::memory_order_acquire)) {
+    return nullptr;
+  }
+  return AddVectoredExceptionHandler(/*First=*/1, StackOverflowFrontGuard);
+}
+
 bool InstallCrashHandler(std::uint32_t crashHookMode)
 {
   g_crashHookMode = crashHookMode;
@@ -1131,6 +1272,21 @@ bool InstallCrashHandler(std::uint32_t crashHookMode)
 
   // First=1 to run early, but we never consume the exception.
   PVOID h = AddVectoredExceptionHandler(/*First=*/1, VectoredHandler);
+
+  // ADR-0037: register the stack-overflow front guard after VectoredHandler
+  // with First=1 so it always runs ahead of VectoredHandler.
+  if (h != nullptr && (crashHookMode == 1 || crashHookMode == 2)) {
+    try {
+      std::lock_guard<std::mutex> lock(g_stackOverflowGuardMutex);
+      if (!g_stackOverflowGuardHandle) {
+        if (PVOID guard = AddVectoredExceptionHandler(/*First=*/1, StackOverflowFrontGuard)) {
+          g_stackOverflowGuardHandle = guard;
+          g_stackOverflowGuardInstalled.store(true, std::memory_order_release);
+        }
+      }
+    } catch (...) {
+    }
+  }
 
   // Fatal-only mode leaves unhandled C++ throws and breakpoints to these two;
   // mode 2 already records every exception at first chance. Each is installed
