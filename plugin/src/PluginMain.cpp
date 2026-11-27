@@ -349,6 +349,36 @@ void OnSkseMessage(SKSE::MessagingInterface::Message* message)
     // ADR-0036: every SKSE plugin is loaded by now, so the ranges are final.
     skydiag::plugin::NoteCrashLoggerModuleRangesFinal();
   }
+  if (message->type == SKSE::MessagingInterface::kPostLoad ||
+      message->type == SKSE::MessagingInterface::kPostPostLoad ||
+      message->type == SKSE::MessagingInterface::kInputLoaded ||
+      message->type == SKSE::MessagingInterface::kDataLoaded ||
+      message->type == SKSE::MessagingInterface::kPostLoadGame ||
+      message->type == SKSE::MessagingInterface::kNewGame) {
+    // ADR-0037: keep the stack-overflow front guard ahead of VEH handlers
+    // registered by modules loaded after SkyrimDiag.
+    const auto moveResult = skydiag::plugin::MoveStackOverflowGuardToFront();
+    if (message->type == SKSE::MessagingInterface::kDataLoaded) {
+      switch (moveResult) {
+        case skydiag::plugin::StackOverflowGuardMoveResult::kMoved:
+          spdlog::info("SkyrimDiag: stack overflow front guard moved to front");
+          break;
+        case skydiag::plugin::StackOverflowGuardMoveResult::kSkippedBusy:
+          spdlog::info("SkyrimDiag: stack overflow front guard move skipped (guard active)");
+          break;
+        case skydiag::plugin::StackOverflowGuardMoveResult::kFailed:
+          spdlog::warn("SkyrimDiag: failed to move stack overflow front guard to front");
+          break;
+        case skydiag::plugin::StackOverflowGuardMoveResult::kNotInstalled:
+          if (g_cfg.crashHookMode != 0) {
+            spdlog::info("SkyrimDiag: stack overflow front guard move skipped (guard not installed)");
+          }
+          break;
+      }
+    } else if (moveResult == skydiag::plugin::StackOverflowGuardMoveResult::kFailed) {
+      spdlog::warn("SkyrimDiag: failed to move stack overflow front guard to front");
+    }
+  }
   if (message->type == SKSE::MessagingInterface::kInputLoaded) {
     skydiag::plugin::HeartbeatOnInputLoaded();
   }

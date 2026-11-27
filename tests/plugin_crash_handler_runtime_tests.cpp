@@ -7,6 +7,8 @@
 
 #include <Windows.h>
 #include <Psapi.h>
+#include <intrin.h>
+#include <malloc.h>
 
 #include <csignal>
 #include <cstdint>
@@ -327,6 +329,136 @@ LONG WINAPI ChildResumingFilter(EXCEPTION_POINTERS*)
   return EXCEPTION_CONTINUE_EXECUTION;
 }
 
+// ADR-0037: shared observation page between parent and stack-overflow guard child.
+struct StackOverflowChildObs
+{
+  volatile LONG otherHandlerCalls = 0;
+  volatile LONG guardStackMeasured = 0;
+  volatile LONG skippedMoveResult = -1;
+  volatile LONG forceMoveResult = -1;
+  volatile LONG workerDone = 0;
+  volatile LONG nonSoHandlerSawUntouchedShm = 0;
+  std::uint64_t stackLimit = 0;
+  std::uint64_t handlerEntryRsp = 0;
+  std::uint64_t lowestNonZero = 0;
+  std::uint64_t guardStackUsedBytes = 0;
+};
+
+StackOverflowChildObs* g_childObs = nullptr;
+HANDLE g_childObsMapping = nullptr;
+
+void OpenChildObsIfPresent(const char* goEventName) noexcept
+{
+  const std::string obsName = std::string(goEventName) + "_obs";
+  g_childObsMapping = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, obsName.c_str());
+  if (g_childObsMapping) {
+    g_childObs = static_cast<StackOverflowChildObs*>(
+      MapViewOfFile(g_childObsMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(StackOverflowChildObs)));
+  }
+}
+
+__declspec(noinline) std::uint8_t ExhaustRemainingStackInFrontVeh(int remainingFrames = 48) noexcept
+{
+  // Descend in 2 KB frames (< 4 KB so RSP itself advances down through every
+  // page instead of __chkstk faulting while RSP is still high). 48 * 2 KB =
+  // 96 KB (> 64 KB), exceeding even AMX KeepStackForExceptionContext room.
+  volatile std::uint8_t chunk[2048];
+  chunk[0] = static_cast<std::uint8_t>(remainingFrames);
+  chunk[sizeof(chunk) - 1u] = static_cast<std::uint8_t>(remainingFrames ^ 0x5Au);
+  if (remainingFrames <= 0) {
+    return chunk[0] ^ chunk[sizeof(chunk) - 1u];
+  }
+  return static_cast<std::uint8_t>(ExhaustRemainingStackInFrontVeh(remainingFrames - 1) ^ chunk[0]);
+}
+
+__declspec(noinline) void MeasureStackUsedBeforeCurrentVeh(std::uintptr_t entryRsp) noexcept
+{
+  if (!g_childObs) {
+    return;
+  }
+  const auto* const tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+  const auto stackLimit = reinterpret_cast<std::uintptr_t>(tib->StackLimit);
+  std::uintptr_t lowestNonZero = entryRsp;
+  if (entryRsp > stackLimit) {
+    const auto* bytes = reinterpret_cast<const volatile std::uint8_t*>(stackLimit);
+    const std::size_t span = static_cast<std::size_t>(entryRsp - stackLimit);
+    for (std::size_t i = 0; i < span; ++i) {
+      if (bytes[i] != 0u) {
+        lowestNonZero = stackLimit + i;
+        break;
+      }
+    }
+  }
+  g_childObs->stackLimit = stackLimit;
+  g_childObs->handlerEntryRsp = entryRsp;
+  g_childObs->lowestNonZero = lowestNonZero;
+  g_childObs->guardStackUsedBytes = entryRsp > lowestNonZero ? (entryRsp - lowestNonZero) : 0u;
+  InterlockedExchange(&g_childObs->guardStackMeasured, 1);
+}
+
+__declspec(noinline) LONG CALLBACK ChildFrontHeavyStackOverflowVeh(EXCEPTION_POINTERS* ep) noexcept
+{
+  if (!ep || !ep->ExceptionRecord || ep->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  MeasureStackUsedBeforeCurrentVeh(reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()));
+  if (g_childObs) {
+    InterlockedIncrement(&g_childObs->otherHandlerCalls);
+  }
+  (void)ExhaustRemainingStackInFrontVeh();
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+__declspec(noinline) LONG CALLBACK ChildStackOverflowMarkerVeh(EXCEPTION_POINTERS* ep) noexcept
+{
+  if (!ep || !ep->ExceptionRecord || ep->ExceptionRecord->ExceptionCode != EXCEPTION_STACK_OVERFLOW) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  if (g_childObs) {
+    InterlockedIncrement(&g_childObs->otherHandlerCalls);
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+std::uint32_t g_childExpectedWriteIndex = 0;
+
+LONG CALLBACK ChildNonStackOverflowConsumingVeh(EXCEPTION_POINTERS* ep) noexcept
+{
+  if (!ep || !ep->ExceptionRecord || ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  auto* shm = skydiag::plugin::GetShared();
+  const bool untouched = shm &&
+    shm->header.crash_seq == 0u &&
+    shm->header.write_index == g_childExpectedWriteIndex &&
+    (shm->header.state_flags & skydiag::kState_Frozen) == 0u &&
+    WaitForSingleObject(skydiag::plugin::GetCrashEvent(), 0) == WAIT_TIMEOUT;
+  if (g_childObs) {
+    InterlockedIncrement(&g_childObs->otherHandlerCalls);
+    if (untouched) {
+      InterlockedExchange(&g_childObs->nonSoHandlerSawUntouchedShm, 1);
+    }
+  }
+  return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+__declspec(noinline) std::uint64_t RecurseUntil(std::uint64_t depth, volatile std::uint64_t* limit);
+
+__declspec(noinline) bool TriggerHandledStackOverflowAndReset()
+{
+  bool caught = false;
+  __try {
+    volatile std::uint64_t limit = ~0ull;
+    (void)RecurseUntil(0, &limit);
+  } __except (GetExceptionCode() == EXCEPTION_STACK_OVERFLOW ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH) {
+    caught = true;
+  }
+  if (!caught) {
+    return false;
+  }
+  return _resetstkoflw() != 0;
+}
+
 __declspec(noinline) void WriteThroughNull()
 {
   volatile int* nowhere = nullptr;
@@ -452,21 +584,115 @@ int RunChild(const char* mode, const char* goEventName)
 {
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
   _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  OpenChildObsIfPresent(goEventName);
   SetUnhandledExceptionFilter(std::strcmp(mode, "resumed-fault") == 0 ? ChildResumingFilter : ChildPreviousFilter);
   std::signal(SIGABRT, ChildPreviousAbortHandler);
-  if (std::strcmp(mode, "unhandled-fault-short-hold") == 0) {
+  if (std::strcmp(mode, "unhandled-fault-short-hold") == 0 || std::strcmp(mode, "so-short-hold") == 0) {
     skydiag::plugin::SetUnhandledCrashHoldMs(400);
   }
-  if (std::strcmp(mode, "unhandled-fault-no-hold") == 0) {
+  if (std::strcmp(mode, "so-duplicate-guard") == 0) {
+    skydiag::plugin::SetUnhandledCrashHoldMs(1500);
+  }
+  if (std::strcmp(mode, "unhandled-fault-no-hold") == 0 || std::strcmp(mode, "so-no-hold") == 0) {
     skydiag::plugin::SetUnhandledCrashHoldMs(0);
   }
-  const bool stackOverflowKeptBack = std::strcmp(mode, "unhandled-stack-overflow-kept-back") == 0;
-  const bool stackOverflow = stackOverflowKeptBack || std::strcmp(mode, "unhandled-stack-overflow") == 0;
+  if (std::strcmp(mode, "so-large-hold-capped") == 0) {
+    skydiag::plugin::SetUnhandledCrashHoldMs(15000);
+  }
+  const bool stackOverflowKeptBack =
+    std::strcmp(mode, "unhandled-stack-overflow-kept-back") == 0 ||
+    std::strcmp(mode, "so-front-heavy-veh-kept-back") == 0;
+  const bool soFrontHeavyVehUnmoved = std::strcmp(mode, "so-front-heavy-veh-unmoved") == 0;
+  const bool soFrontHeavyVeh =
+    std::strcmp(mode, "so-front-heavy-veh") == 0 ||
+    std::strcmp(mode, "so-front-heavy-veh-kept-back") == 0;
+  const bool soMode0 = std::strcmp(mode, "so-mode-0") == 0;
+  const bool soMode2 = std::strcmp(mode, "so-mode-2") == 0;
+  const bool soNonSo = std::strcmp(mode, "so-non-so-ignores-shm") == 0;
+  const bool soDuplicate = std::strcmp(mode, "so-duplicate-guard") == 0;
+  const bool soWhileFrozen = std::strcmp(mode, "so-while-frozen") == 0;
+  const bool soHandledThenSecond = std::strcmp(mode, "so-handled-then-second") == 0;
+  const bool soThenHelperGoneSo = std::strcmp(mode, "so-then-helper-gone-so") == 0;
+  const bool soThenHelperGoneFilter = std::strcmp(mode, "so-then-helper-gone-filter") == 0;
+  const bool soThawedDuringGuardHold = std::strcmp(mode, "so-thawed-during-guard-hold") == 0;
+  const bool soRemoveWhileActive = std::strcmp(mode, "so-remove-while-active") == 0;
+  const bool stackOverflow =
+    stackOverflowKeptBack ||
+    std::strcmp(mode, "unhandled-stack-overflow") == 0 ||
+    soFrontHeavyVehUnmoved ||
+    soFrontHeavyVeh ||
+    std::strcmp(mode, "so-short-hold") == 0 ||
+    std::strcmp(mode, "so-no-hold") == 0 ||
+    std::strcmp(mode, "so-large-hold-capped") == 0 ||
+    soMode2 ||
+    soDuplicate ||
+    soWhileFrozen ||
+    soHandledThenSecond ||
+    soThenHelperGoneSo ||
+    soThenHelperGoneFilter ||
+    soThawedDuringGuardHold ||
+    soRemoveWhileActive;
   if (stackOverflow && !KeepStackForExceptionContext(MeasureExceptionContextBytes(), stackOverflowKeptBack)) {
     return 97;
   }
-  if (!skydiag::plugin::InitSharedMemory() || !skydiag::plugin::InstallCrashHandler(/*crashHookMode=*/1)) {
+  const std::uint32_t hookMode = soMode0 ? 0u : (soMode2 ? 2u : 1u);
+  if (!skydiag::plugin::InitSharedMemory() || !skydiag::plugin::InstallCrashHandler(hookMode)) {
     return 90;
+  }
+  if (soMode0) {
+    if (skydiag::plugin::IsStackOverflowGuardInstalled()) {
+      return 80;
+    }
+    if (skydiag::plugin::MoveStackOverflowGuardToFront() !=
+        skydiag::plugin::StackOverflowGuardMoveResult::kNotInstalled) {
+      return 81;
+    }
+    HANDLE go = OpenEventA(SYNCHRONIZE, FALSE, goEventName);
+    if (!go || WaitForSingleObject(go, 30000) != WAIT_OBJECT_0) {
+      return 91;
+    }
+    return 0;
+  }
+  if (soFrontHeavyVehUnmoved) {
+    // Control run: heavy front VEH registered AFTER InstallCrashHandler without
+    // calling MoveStackOverflowGuardToFront(), reproducing the lost crash.
+    if (!AddVectoredExceptionHandler(1, ChildFrontHeavyStackOverflowVeh)) {
+      return 98;
+    }
+  }
+  if (soFrontHeavyVeh || soMode2) {
+    if (!skydiag::plugin::IsStackOverflowGuardInstalled()) {
+      return 82;
+    }
+    // Registered at the front AFTER InstallCrashHandler, like a late-loaded
+    // third-party module (e.g., frame-generation DLL) that adds a heavy VEH.
+    if (!AddVectoredExceptionHandler(1, ChildFrontHeavyStackOverflowVeh)) {
+      return 98;
+    }
+    if (skydiag::plugin::MoveStackOverflowGuardToFront() != skydiag::plugin::StackOverflowGuardMoveResult::kMoved) {
+      return 83;
+    }
+  }
+  if (soNonSo) {
+    if (!AddVectoredExceptionHandler(1, ChildNonStackOverflowConsumingVeh)) {
+      return 98;
+    }
+    if (skydiag::plugin::MoveStackOverflowGuardToFront() != skydiag::plugin::StackOverflowGuardMoveResult::kMoved) {
+      return 83;
+    }
+  }
+  if (soDuplicate) {
+    if (!skydiag::plugin::AddDuplicateStackOverflowGuardRegistrationForTest()) {
+      return 84;
+    }
+  }
+  if (soRemoveWhileActive) {
+    if (!AddVectoredExceptionHandler(1, ChildStackOverflowMarkerVeh)) {
+      return 98;
+    }
+    if (skydiag::plugin::MoveStackOverflowGuardToFront() != skydiag::plugin::StackOverflowGuardMoveResult::kMoved) {
+      return 83;
+    }
   }
   if (std::strncmp(mode, "unhandled-throw-filter-taken-once", 33) == 0) {
     // Something registers its own filter once after the plugin loaded, and
@@ -542,6 +768,68 @@ int RunChild(const char* mode, const char* goEventName)
   }
   if (std::strncmp(mode, "unhandled-fault", 15) == 0) {
     WriteThroughNull();
+  }
+  if (soNonSo) {
+    g_childExpectedWriteIndex = skydiag::plugin::GetShared()->header.write_index;
+    // Continuable AV handled by ChildNonStackOverflowConsumingVeh right behind
+    // StackOverflowFrontGuard (and ahead of VectoredHandler).
+    RaiseException(EXCEPTION_ACCESS_VIOLATION, 0, 0, nullptr);
+    return 0;
+  }
+  if (soWhileFrozen) {
+    if (CatchWriteThroughNull() != 1) {
+      return 85;
+    }
+    const std::string go2Name = std::string(goEventName) + "_go2";
+    HANDLE go2 = OpenEventA(SYNCHRONIZE, FALSE, go2Name.c_str());
+    if (!go2 || WaitForSingleObject(go2, 30000) != WAIT_OBJECT_0) {
+      return 86;
+    }
+    volatile std::uint64_t limit = ~0ull;
+    return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
+  }
+  if (soHandledThenSecond || soThenHelperGoneSo || soThenHelperGoneFilter) {
+    if (!TriggerHandledStackOverflowAndReset()) {
+      return 87;
+    }
+    const std::string readyName = std::string(goEventName) + "_ready";
+    HANDLE ready = OpenEventA(EVENT_MODIFY_STATE, FALSE, readyName.c_str());
+    if (!ready) {
+      return 89;
+    }
+    SetEvent(ready);
+    CloseHandle(ready);
+    const std::string go2Name = std::string(goEventName) + "_go2";
+    HANDLE go2 = OpenEventA(SYNCHRONIZE, FALSE, go2Name.c_str());
+    if (!go2 || WaitForSingleObject(go2, 30000) != WAIT_OBJECT_0) {
+      return 86;
+    }
+    if (soThenHelperGoneFilter) {
+      WriteThroughNull();
+      return 88;
+    }
+    volatile std::uint64_t limit = ~0ull;
+    return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
+  }
+  if (soRemoveWhileActive) {
+    const std::string go2Name = std::string(goEventName) + "_go2";
+    std::thread remover([go2Name]() {
+      HANDLE go2 = OpenEventA(SYNCHRONIZE, FALSE, go2Name.c_str());
+      if (!go2 || WaitForSingleObject(go2, 30000) != WAIT_OBJECT_0) {
+        return;
+      }
+      const auto skipped = skydiag::plugin::MoveStackOverflowGuardToFront();
+      const auto forced = skydiag::plugin::MoveStackOverflowGuardToFrontIgnoringActiveCountForTest();
+      if (g_childObs) {
+        InterlockedExchange(&g_childObs->skippedMoveResult, static_cast<LONG>(skipped));
+        InterlockedExchange(&g_childObs->forceMoveResult, static_cast<LONG>(forced));
+        InterlockedExchange(&g_childObs->workerDone, 1);
+      }
+      CloseHandle(go2);
+    });
+    remover.detach();
+    volatile std::uint64_t limit = ~0ull;
+    return static_cast<int>(RecurseUntil(0, &limit) & 1u) + 94;
   }
   if (stackOverflow) {
     volatile std::uint64_t limit = ~0ull;
@@ -1350,10 +1638,13 @@ void TestUnhandledSignalIsTakenBackWhenAFilterResumesTheThread()
 }
 
 // A stack overflow leaves little stack: it is recorded at first chance as
-// before, but the filter neither reports nor holds it, and the filter under
-// the plugin's still ends the process. "-kept-back": the same with stack kept
-// back on every host, the path a host with a large exception context takes
-// (KeepStackForExceptionContext).
+// before, and the top-level filter neither reports nor holds it, so the filter
+// under the plugin's still ends the process. Since ADR-0037, the front guard
+// holds the thread until DUMP_SETTLED (up to its 5 s cap) before releasing it
+// to the top-level filter; because the parent passes HelperSettle::kNever here,
+// each mode waits out that 5 s guard cap before reaching the filter.
+// "-kept-back": the same with stack kept back on every host, the path a host
+// with a large exception context takes (KeepStackForExceptionContext).
 void TestUnhandledStackOverflowIsNotHeld()
 {
   for (const char* mode : { "unhandled-stack-overflow", "unhandled-stack-overflow-kept-back" }) {
@@ -1470,6 +1761,880 @@ void TestAbortAfterACaughtThrowIsNotBlamedOnIt()
     "the SIGABRT handler installed before the plugin's must still run");
 }
 
+// ADR-0037: parent runner for stack-overflow front guard tests. Waits for the
+// crash event (or process exit) rather than unhandledEvent, checks hold while
+// DUMP_SETTLED is unset, then settles and reads observation state.
+struct StackOverflowGuardOutcome
+{
+  DWORD mainTid = 0;
+  DWORD exitCode = 0;
+  bool crashEventSignaled = false;
+  bool unhandledSignaledAtExit = false;
+  bool aliveWhileHeld = false;
+  LONG otherHandlerCallsBeforeSettle = 0;
+  LONG otherHandlerCallsAtExit = 0;
+  bool guardStackMeasured = false;
+  std::uint64_t stackLimit = 0;
+  std::uint64_t handlerEntryRsp = 0;
+  std::uint64_t lowestNonZero = 0;
+  std::uint64_t guardStackUsedBytes = 0;
+  DWORD msFromCrashToExit = 0;
+  std::uint32_t crashSeq = 0;
+  std::uint32_t stateFlags = 0;
+  skydiag::CrashInfo crash{};
+  skydiag::BlackboxEvent lastEvent{};
+};
+
+std::string Describe(const StackOverflowGuardOutcome& outcome)
+{
+  char text[384]{};
+  std::snprintf(
+    text,
+    sizeof(text),
+    " (child: crashEvent=%d, code=0x%08lX, tid=%lu, mainTid=%lu, crash_seq=%lu, flags=0x%lX, exit=0x%08lX, "
+    "aliveWhileHeld=%d, otherBeforeSettle=%ld, otherAtExit=%ld, msCrashToExit=%lu, guardStackUsed=%llu; ",
+    outcome.crashEventSignaled ? 1 : 0,
+    static_cast<unsigned long>(outcome.crash.exception_code),
+    static_cast<unsigned long>(outcome.crash.faulting_tid),
+    static_cast<unsigned long>(outcome.mainTid),
+    static_cast<unsigned long>(outcome.crashSeq),
+    static_cast<unsigned long>(outcome.stateFlags),
+    static_cast<unsigned long>(outcome.exitCode),
+    outcome.aliveWhileHeld ? 1 : 0,
+    static_cast<long>(outcome.otherHandlerCallsBeforeSettle),
+    static_cast<long>(outcome.otherHandlerCallsAtExit),
+    static_cast<unsigned long>(outcome.msFromCrashToExit),
+    static_cast<unsigned long long>(outcome.guardStackUsedBytes));
+  return text + DescribeHost() + ")";
+}
+
+void RequireOf(const StackOverflowGuardOutcome& outcome, bool condition, const char* message)
+{
+  if (!condition) {
+    throw std::runtime_error(message + Describe(outcome));
+  }
+}
+
+StackOverflowGuardOutcome RunChildForStackOverflowGuard(
+  const char* mode,
+  HelperSettle settle,
+  DWORD holdCheckMs)
+{
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goEventName = "Local\\skydiag_so_guard_test_go_" + std::to_string(GetCurrentProcessId()) +
+    "_" + std::to_string(GetTickCount64());
+  const std::string obsName = goEventName + "_obs";
+  HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goEventName.c_str());
+  Require(go != nullptr, "CreateEventA failed");
+  HANDLE obsMapping = CreateFileMappingA(
+    INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(StackOverflowChildObs), obsName.c_str());
+  Require(obsMapping != nullptr, "CreateFileMappingA failed");
+  auto* obs = static_cast<StackOverflowChildObs*>(
+    MapViewOfFile(obsMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(StackOverflowChildObs)));
+  Require(obs != nullptr, "MapViewOfFile failed");
+  std::memset(obs, 0, sizeof(StackOverflowChildObs));
+
+  std::string commandLine = std::string("\"") + exePath + "\" --child " + mode + " " + goEventName;
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(
+    CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+      FALSE,
+    "CreateProcessA failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    UnmapViewOfFile(obs);
+    CloseHandle(obsMapping);
+    FailChildNotAttached(pi, go);
+  }
+
+  StackOverflowGuardOutcome outcome{};
+  outcome.mainTid = pi.dwThreadId;
+  if (settle == HelperSettle::kNoEvent && proc.dumpSettledEvent) {
+    CloseHandle(proc.dumpSettledEvent);
+    proc.dumpSettledEvent = nullptr;
+  }
+
+  SetEvent(go);
+  const HANDLE crashOrExit[] = { proc.crashEvent, pi.hProcess };
+  const DWORD waitResult = WaitForMultipleObjects(2, crashOrExit, FALSE, 30000);
+  outcome.crashEventSignaled = (waitResult == WAIT_OBJECT_0) ||
+    (WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0);
+  const ULONGLONG crashTick = GetTickCount64();
+
+  if (outcome.crashEventSignaled && settle == HelperSettle::kAfterCheck) {
+    outcome.aliveWhileHeld = WaitForSingleObject(pi.hProcess, holdCheckMs) == WAIT_TIMEOUT;
+    outcome.otherHandlerCallsBeforeSettle = InterlockedCompareExchange(&obs->otherHandlerCalls, 0, 0);
+    if (proc.dumpSettledEvent) {
+      SetEvent(proc.dumpSettledEvent);
+    }
+  }
+
+  if (WaitForSingleObject(pi.hProcess, 30000) != WAIT_OBJECT_0) {
+    TerminateProcess(pi.hProcess, 1);
+    WaitForSingleObject(pi.hProcess, 5000);
+  }
+  outcome.msFromCrashToExit = static_cast<DWORD>(GetTickCount64() - crashTick);
+  outcome.unhandledSignaledAtExit =
+    proc.unhandledEvent && WaitForSingleObject(proc.unhandledEvent, 0) == WAIT_OBJECT_0;
+  GetExitCodeProcess(pi.hProcess, &outcome.exitCode);
+
+  outcome.crashSeq = proc.shm->header.crash_seq;
+  outcome.stateFlags = proc.shm->header.state_flags;
+  outcome.crash = proc.shm->header.crash;
+  if (proc.shm->header.write_index > 0u && proc.shm->header.capacity > 0u) {
+    outcome.lastEvent = LastEvent(proc.shm);
+  }
+  outcome.otherHandlerCallsAtExit = InterlockedCompareExchange(&obs->otherHandlerCalls, 0, 0);
+  outcome.guardStackMeasured = InterlockedCompareExchange(&obs->guardStackMeasured, 0, 0) != 0;
+  outcome.stackLimit = obs->stackLimit;
+  outcome.handlerEntryRsp = obs->handlerEntryRsp;
+  outcome.lowestNonZero = obs->lowestNonZero;
+  outcome.guardStackUsedBytes = obs->guardStackUsedBytes;
+
+  UnmapViewOfFile(obs);
+  CloseHandle(obsMapping);
+  skydiag::helper::Detach(proc);
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+  CloseHandle(go);
+  return outcome;
+}
+
+// ADR-0037 Completion Condition 1 & 2: a late-registered front VEH that touches
+// >64 KB of stack on stack overflow kills the process before SkyrimDiag's
+// VectoredHandler runs unless the stack-overflow front guard is moved ahead of it.
+void TestStackOverflowWithFrontHeavyVehRecordsAndHolds()
+{
+  // Control run: without moving the guard to the front, the heavy front VEH
+  // exhausts the remaining stack first and SkyrimDiag never records the crash.
+  const auto lost = RunChildForStackOverflowGuard("so-front-heavy-veh-unmoved", HelperSettle::kAfterCheck, 700);
+  RequireOf(
+    lost,
+    !lost.crashEventSignaled && lost.crashSeq == 0u,
+    "without moving the guard to the front, the heavy front VEH must kill the process before any crash is recorded");
+  RequireOf(lost, lost.otherHandlerCallsAtExit >= 1, "the heavy front VEH must have run in the control run");
+  RequireOf(
+    lost,
+    lost.exitCode != kChildFilterExitCode && lost.exitCode != 0u,
+    "in the control run, the heavy front VEH must terminate the process before the lower filter");
+
+  for (const char* mode : { "so-front-heavy-veh", "so-front-heavy-veh-kept-back" }) {
+    const auto outcome = RunChildForStackOverflowGuard(mode, HelperSettle::kAfterCheck, 700);
+    const std::string prefix = std::string(mode) + ": ";
+    RequireOf(outcome, outcome.crashEventSignaled, (prefix + "stack overflow must signal the crash event").c_str());
+    RequireOf(
+      outcome,
+      outcome.crashSeq != 0u && (outcome.crashSeq & 1u) == 0u,
+      (prefix + "stack overflow must commit a crash record").c_str());
+    RequireOf(
+      outcome,
+      (outcome.stateFlags & skydiag::kState_Frozen) != 0u,
+      (prefix + "stack overflow must claim Frozen").c_str());
+    RequireOf(
+      outcome,
+      outcome.crash.exception_code == EXCEPTION_STACK_OVERFLOW,
+      (prefix + "stack overflow must record EXCEPTION_STACK_OVERFLOW (0xC00000FD)").c_str());
+    RequireOf(
+      outcome,
+      outcome.crash.faulting_tid == outcome.mainTid,
+      (prefix + "stack overflow must record the main thread").c_str());
+    RequireOf(
+      outcome,
+      outcome.lastEvent.type == static_cast<std::uint16_t>(skydiag::EventType::kCrash) &&
+        outcome.lastEvent.payload.a == EXCEPTION_STACK_OVERFLOW,
+      (prefix + "blackbox must end with kCrash for 0xC00000FD").c_str());
+    RequireOf(
+      outcome,
+      outcome.aliveWhileHeld,
+      (prefix + "the guard must hold the overflowing thread until the helper sets DUMP_SETTLED").c_str());
+    RequireOf(
+      outcome,
+      outcome.otherHandlerCallsBeforeSettle == 0,
+      (prefix + "the other front VEH must not run while the guard holds for DUMP_SETTLED").c_str());
+    RequireOf(
+      outcome,
+      outcome.otherHandlerCallsAtExit >= 1,
+      (prefix + "the other front VEH must run once DUMP_SETTLED releases the guard").c_str());
+    RequireOf(
+      outcome,
+      outcome.exitCode != kChildFilterExitCode && outcome.exitCode != 0u,
+      (prefix + "after DUMP_SETTLED releases the guard, the heavy front VEH must exhaust the stack and end the process before the lower filter").c_str());
+    RequireOf(
+      outcome,
+      !outcome.unhandledSignaledAtExit,
+      (prefix + "the guard must not set unhandledEvent on stack overflow").c_str());
+    std::printf(
+      "StackOverflowFrontGuard [%s] stack usage: %llu bytes (entryRsp=0x%llX, lowestNonZero=0x%llX, stackLimit=0x%llX)\n",
+      mode,
+      static_cast<unsigned long long>(outcome.guardStackUsedBytes),
+      static_cast<unsigned long long>(outcome.handlerEntryRsp),
+      static_cast<unsigned long long>(outcome.lowestNonZero),
+      static_cast<unsigned long long>(outcome.stackLimit));
+    RequireOf(
+      outcome,
+      outcome.guardStackMeasured && outcome.guardStackUsedBytes > 0u && outcome.guardStackUsedBytes <= 4096u,
+      (prefix + "guard stack usage must be measured (>0) and <= 4096 bytes").c_str());
+  }
+}
+
+// ADR-0037 Completion Condition 3: hold caps (timeout, 0, missing helper, >5000 ms clamped to 5000 ms).
+void TestStackOverflowGuardHoldCapsAndNoHold()
+{
+  const auto shortHold = RunChildForStackOverflowGuard("so-short-hold", HelperSettle::kNever, 0);
+  RequireOf(shortHold, shortHold.crashEventSignaled, "short-hold SO must signal crash event");
+  RequireOf(shortHold, shortHold.crash.exception_code == EXCEPTION_STACK_OVERFLOW, "short-hold SO must record 0xC00000FD");
+  RequireOf(shortHold, shortHold.msFromCrashToExit >= 300u, "short-hold SO must hold until its 400 ms cap");
+  RequireOf(shortHold, shortHold.msFromCrashToExit < 3500u, "short-hold SO must release at its cap");
+  RequireOf(shortHold, shortHold.exitCode == kChildFilterExitCode, "short-hold SO must reach lower filter");
+
+  const auto noHold = RunChildForStackOverflowGuard("so-no-hold", HelperSettle::kNever, 0);
+  RequireOf(noHold, noHold.crashEventSignaled, "hold=0 SO must signal crash event");
+  RequireOf(noHold, noHold.crash.exception_code == EXCEPTION_STACK_OVERFLOW, "hold=0 SO must record 0xC00000FD");
+  RequireOf(noHold, noHold.msFromCrashToExit < 2000u, "hold=0 SO must not hold");
+  RequireOf(noHold, noHold.exitCode == kChildFilterExitCode, "hold=0 SO must reach lower filter");
+
+  const auto noEvent = RunChildForStackOverflowGuard("unhandled-stack-overflow", HelperSettle::kNoEvent, 0);
+  RequireOf(noEvent, noEvent.crashEventSignaled, "no-helper SO must signal crash event");
+  RequireOf(noEvent, noEvent.crash.exception_code == EXCEPTION_STACK_OVERFLOW, "no-helper SO must record 0xC00000FD");
+  RequireOf(noEvent, noEvent.msFromCrashToExit < 2000u, "no-helper SO must not hold when DUMP_SETTLED does not exist");
+  RequireOf(noEvent, noEvent.exitCode == kChildFilterExitCode, "no-helper SO must reach lower filter");
+
+  const auto largeHold = RunChildForStackOverflowGuard("so-large-hold-capped", HelperSettle::kNever, 0);
+  RequireOf(largeHold, largeHold.crashEventSignaled, "large-hold SO must signal crash event");
+  RequireOf(largeHold, largeHold.crash.exception_code == EXCEPTION_STACK_OVERFLOW, "large-hold SO must record 0xC00000FD");
+  RequireOf(largeHold, largeHold.msFromCrashToExit >= 4500u, "large-hold SO must hold for ~5 s cap");
+  RequireOf(
+    largeHold,
+    largeHold.msFromCrashToExit < 9000u,
+    "UnhandledCrashHoldMs > 5000 must still release the stack-overflow guard at 5 s");
+  RequireOf(largeHold, largeHold.exitCode == kChildFilterExitCode, "large-hold SO must reach lower filter");
+}
+
+// ADR-0037 Completion Condition 3: non-stack-overflow exceptions pass straight
+// through StackOverflowFrontGuard without touching shared memory.
+void TestStackOverflowGuardIgnoresNonStackOverflowExceptions()
+{
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goEventName = "Local\\skydiag_so_nonso_go_" + std::to_string(GetCurrentProcessId()) +
+    "_" + std::to_string(GetTickCount64());
+  const std::string obsName = goEventName + "_obs";
+  HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goEventName.c_str());
+  HANDLE obsMapping = CreateFileMappingA(
+    INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(StackOverflowChildObs), obsName.c_str());
+  Require(go && obsMapping, "non-SO test event/mapping creation failed");
+  auto* obs = static_cast<StackOverflowChildObs*>(
+    MapViewOfFile(obsMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(StackOverflowChildObs)));
+  Require(obs != nullptr, "MapViewOfFile failed");
+  std::memset(obs, 0, sizeof(StackOverflowChildObs));
+
+  std::string commandLine = std::string("\"") + exePath + "\" --child so-non-so-ignores-shm " + goEventName;
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(
+    CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+      FALSE,
+    "CreateProcessA failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    UnmapViewOfFile(obs);
+    CloseHandle(obsMapping);
+    FailChildNotAttached(pi, go);
+  }
+
+  const auto cleanup = [&] {
+    if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+      TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+    }
+    UnmapViewOfFile(obs);
+    CloseHandle(obsMapping);
+    skydiag::helper::Detach(proc);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(go);
+  };
+  try {
+    SetEvent(go);
+    Require(WaitForSingleObject(pi.hProcess, 15000) == WAIT_OBJECT_0, "non-SO child did not exit");
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    const bool crashSignaled = WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0;
+    const auto crashSeq = proc.shm->header.crash_seq;
+    const LONG otherCalls = InterlockedCompareExchange(&obs->otherHandlerCalls, 0, 0);
+    const LONG sawUntouched = InterlockedCompareExchange(&obs->nonSoHandlerSawUntouchedShm, 0, 0);
+
+    Require(exitCode == 0u, "non-SO child must exit cleanly after front handler resumes");
+    Require(otherCalls == 1, "the front handler behind the guard must receive the non-SO exception");
+    Require(sawUntouched == 1, "the guard must not touch shared memory for non-SO exceptions");
+    Require(!crashSignaled && crashSeq == 0u, "non-SO exception consumed ahead of VectoredHandler must not record a crash");
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+  cleanup();
+}
+
+// ADR-0037 Completion Condition 3: duplicate guard registration records once
+// and holds only once (never settles DUMP_SETTLED so a second hold would double
+// the 1500 ms wait to ~3000 ms).
+void TestStackOverflowGuardDuplicateRegistrationRecordsOnce()
+{
+  const auto outcome = RunChildForStackOverflowGuard("so-duplicate-guard", HelperSettle::kNever, 0);
+  RequireOf(outcome, outcome.crashEventSignaled, "duplicate guard must signal crash event");
+  RequireOf(outcome, outcome.crashSeq == 2u, "duplicate guard must publish only one crash_seq (2)");
+  RequireOf(outcome, outcome.crash.exception_code == EXCEPTION_STACK_OVERFLOW, "duplicate guard must record 0xC00000FD");
+  RequireOf(outcome, outcome.msFromCrashToExit >= 1200u, "duplicate guard must hold for its ~1500 ms cap on the writing call");
+  RequireOf(
+    outcome,
+    outcome.msFromCrashToExit < 2600u,
+    "the second duplicate registration did not write the record and must not hold a second 1500 ms");
+  RequireOf(outcome, outcome.exitCode == kChildFilterExitCode, "duplicate guard must continue to lower filter");
+}
+
+// ADR-0037 Completion Condition 3: CrashHookMode=0 leaves guard uninstalled and
+// MoveStackOverflowGuardToFront no-ops; CrashHookMode=2 installs and runs guard.
+void TestStackOverflowGuardModes0And2()
+{
+  const auto mode0 = RunChildForStackOverflowGuard("so-mode-0", HelperSettle::kNever, 0);
+  RequireOf(mode0, mode0.exitCode == 0u, "CrashHookMode=0 must leave guard uninstalled and MoveToFront as kNotInstalled");
+  RequireOf(mode0, !mode0.crashEventSignaled && mode0.crashSeq == 0u, "CrashHookMode=0 must not record");
+
+  const auto mode2 = RunChildForStackOverflowGuard("so-mode-2", HelperSettle::kAfterCheck, 700);
+  RequireOf(mode2, mode2.crashEventSignaled, "CrashHookMode=2 guard must signal crash event");
+  RequireOf(mode2, mode2.crash.exception_code == EXCEPTION_STACK_OVERFLOW, "CrashHookMode=2 guard must record 0xC00000FD");
+  RequireOf(mode2, mode2.aliveWhileHeld, "CrashHookMode=2 guard must hold until DUMP_SETTLED");
+  RequireOf(mode2, mode2.otherHandlerCallsBeforeSettle == 0, "CrashHookMode=2 guard must run ahead of front VEH");
+  RequireOf(mode2, mode2.otherHandlerCallsAtExit >= 1, "CrashHookMode=2 guard must release to front VEH after settle");
+  RequireOf(
+    mode2,
+    mode2.exitCode != kChildFilterExitCode && mode2.exitCode != 0u,
+    "CrashHookMode=2 heavy front VEH must exhaust the stack and end the process after settle");
+}
+
+// ADR-0037 Decision 2: VectoredHandler must skip EXCEPTION_STACK_OVERFLOW when
+// StackOverflowFrontGuard is installed. If Frozen is thawed while the guard is
+// still holding and then released, VectoredHandler runs later in the same
+// dispatch and must NOT record the same stack overflow a second time.
+void TestVectoredHandlerSkipsStackOverflowWhenGuardInstalled()
+{
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goName = "Local\\skydiag_so_skip_veh_go_" + std::to_string(GetCurrentProcessId()) +
+    "_" + std::to_string(GetTickCount64());
+  HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goName.c_str());
+  Require(go != nullptr, "skip-VEH test barrier creation failed");
+
+  std::string commandLine = std::string("\"") + exePath + "\" --child so-thawed-during-guard-hold " + goName;
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(
+    CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+      FALSE,
+    "CreateProcessA failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    FailChildNotAttached(pi, go);
+  }
+
+  const auto cleanup = [&] {
+    if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+      TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+    }
+    skydiag::helper::Detach(proc);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(go);
+  };
+  try {
+    SetEvent(go);
+    Require(WaitForSingleObject(proc.crashEvent, 10000) == WAIT_OBJECT_0, "SO child did not signal crashEvent");
+    Require(proc.shm->header.crash_seq == 2u && proc.shm->header.crash.exception_code == EXCEPTION_STACK_OVERFLOW,
+            "guard must record 0xC00000FD with crash_seq == 2");
+    Require(WaitForSingleObject(pi.hProcess, 150) == WAIT_TIMEOUT,
+            "main thread must be held inside StackOverflowFrontGuard");
+
+    // Thaw Frozen while the guard still holds, reset crashEvent, then settle.
+    // When the guard returns EXCEPTION_CONTINUE_SEARCH, VectoredHandler runs
+    // for the same exception and must skip EXCEPTION_STACK_OVERFLOW.
+    InterlockedAnd(
+      reinterpret_cast<volatile LONG*>(&proc.shmWritable->header.state_flags),
+      ~static_cast<LONG>(skydiag::kState_Frozen));
+    ResetEvent(proc.crashEvent);
+    SetEvent(proc.dumpSettledEvent);
+
+    Require(WaitForSingleObject(pi.hProcess, 15000) == WAIT_OBJECT_0, "SO child did not exit after settle");
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    const auto seqAfter = proc.shm->header.crash_seq;
+    const bool crashEventReSignaled = WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0;
+    const bool frozenAfter = (proc.shm->header.state_flags & skydiag::kState_Frozen) != 0u;
+
+    Require(exitCode == kChildFilterExitCode, "SO child must reach lower filter after guard releases");
+    Require(seqAfter == 2u, "VectoredHandler must skip stack overflow and keep crash_seq == 2");
+    Require(!crashEventReSignaled, "VectoredHandler must not re-signal crashEvent for stack overflow");
+    Require(!frozenAfter, "VectoredHandler must not re-claim Frozen for stack overflow");
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+  cleanup();
+}
+
+// ADR-0037 Completion Condition 3: stack overflow while another incident owns
+// kState_Frozen must neither overwrite the record nor hold.
+void TestStackOverflowWhileFrozenNeitherRecordsNorHolds()
+{
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goName = "Local\\skydiag_so_frozen_go_" + std::to_string(GetCurrentProcessId()) +
+    "_" + std::to_string(GetTickCount64());
+  const std::string go2Name = goName + "_go2";
+  HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goName.c_str());
+  HANDLE go2 = CreateEventA(nullptr, TRUE, FALSE, go2Name.c_str());
+  Require(go && go2, "frozen SO test barrier creation failed");
+
+  std::string commandLine = std::string("\"") + exePath + "\" --child so-while-frozen " + goName;
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(
+    CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+      FALSE,
+    "CreateProcessA failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    CloseHandle(go2);
+    FailChildNotAttached(pi, go);
+  }
+
+  const auto cleanup = [&] {
+    if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+      TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+    }
+    skydiag::helper::Detach(proc);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(go2);
+    CloseHandle(go);
+  };
+  try {
+    SetEvent(go);
+    Require(WaitForSingleObject(proc.crashEvent, 10000) == WAIT_OBJECT_0, "first incident A did not publish");
+    const auto seqA = proc.shm->header.crash_seq;
+    const auto codeA = proc.shm->header.crash.exception_code;
+    const auto writeIndexA = proc.shm->header.write_index;
+    Require(codeA == EXCEPTION_ACCESS_VIOLATION, "first incident A must be ACCESS_VIOLATION");
+    Require((proc.shm->header.state_flags & skydiag::kState_Frozen) != 0u, "first incident A must hold Frozen");
+
+    // Keep Frozen held and DUMP_SETTLED unset, clear crashEvent, then trigger SO.
+    ResetEvent(proc.crashEvent);
+    const ULONGLONG triggerTick = GetTickCount64();
+    SetEvent(go2);
+    const DWORD waitExit = WaitForSingleObject(pi.hProcess, 15000);
+    const DWORD elapsedMs = static_cast<DWORD>(GetTickCount64() - triggerTick);
+    DWORD exitCode = 1;
+    if (waitExit == WAIT_OBJECT_0) {
+      GetExitCodeProcess(pi.hProcess, &exitCode);
+    }
+    const bool crashEventAfter = WaitForSingleObject(proc.crashEvent, 0) == WAIT_OBJECT_0;
+    const auto seqAfter = proc.shm->header.crash_seq;
+    const auto codeAfter = proc.shm->header.crash.exception_code;
+    const auto writeIndexAfter = proc.shm->header.write_index;
+
+    Require(waitExit == WAIT_OBJECT_0, "frozen SO child did not exit");
+    Require(elapsedMs < 2000u, "stack overflow while Frozen must not hold waiting on DUMP_SETTLED");
+    Require(!crashEventAfter, "stack overflow while Frozen must not signal crashEvent again");
+    Require(seqAfter == seqA && codeAfter == codeA && writeIndexAfter == writeIndexA,
+            "stack overflow while Frozen must not overwrite the existing crash record");
+    Require(exitCode == kChildFilterExitCode, "frozen SO must reach lower filter");
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+  cleanup();
+}
+
+// ADR-0037 Completion Condition 3:
+// - Handled stack overflow + _resetstkoflw + thaw -> second stack overflow on
+//   the same thread is also recorded and held.
+// - After helper resets and closes DUMP_SETTLED (helper gone), neither the
+//   guard nor the ADR-0032 filter holds (plugin never retains the DUMP_SETTLED handle).
+void TestHandledStackOverflowRecoveryAndHelperGoneNoHold()
+{
+  // 1) Same thread recovers via __except + _resetstkoflw, helper thaws, second SO records & holds.
+  {
+    char exePath[MAX_PATH]{};
+    Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+    const std::string goName = "Local\\skydiag_so_recover_go_" + std::to_string(GetCurrentProcessId()) +
+      "_" + std::to_string(GetTickCount64());
+    const std::string readyName = goName + "_ready";
+    const std::string go2Name = goName + "_go2";
+    HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goName.c_str());
+    HANDLE ready = CreateEventA(nullptr, TRUE, FALSE, readyName.c_str());
+    HANDLE go2 = CreateEventA(nullptr, TRUE, FALSE, go2Name.c_str());
+    Require(go && ready && go2, "recover SO test barrier creation failed");
+
+    std::string commandLine = std::string("\"") + exePath + "\" --child so-handled-then-second " + goName;
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    Require(
+      CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+        FALSE,
+      "CreateProcessA failed");
+
+    skydiag::helper::AttachedProcess proc{};
+    bool attached = false;
+    for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+      attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+      if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+        break;
+      }
+    }
+    if (!attached) {
+      CloseHandle(ready);
+      CloseHandle(go2);
+      FailChildNotAttached(pi, go);
+    }
+
+    const auto cleanup = [&] {
+      if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 2000);
+      }
+      skydiag::helper::Detach(proc);
+      CloseHandle(pi.hThread);
+      CloseHandle(pi.hProcess);
+      CloseHandle(ready);
+      CloseHandle(go2);
+      CloseHandle(go);
+    };
+    try {
+      SetEvent(go);
+      Require(WaitForSingleObject(proc.crashEvent, 10000) == WAIT_OBJECT_0, "first handled SO did not signal crashEvent");
+      const auto seq1 = proc.shm->header.crash_seq;
+      Require(seq1 == 2u && proc.shm->header.crash.exception_code == EXCEPTION_STACK_OVERFLOW,
+              "first handled SO must record 0xC00000FD");
+      // Settle first dump and wait until child finishes __except + _resetstkoflw.
+      SetEvent(proc.dumpSettledEvent);
+      Require(WaitForSingleObject(ready, 10000) == WAIT_OBJECT_0,
+              "child did not signal ready after handling first SO and _resetstkoflw");
+      // Simulate helper thawing Frozen after recovery and resetting events for next incident.
+      ResetEvent(proc.dumpSettledEvent);
+      ResetEvent(proc.crashEvent);
+      InterlockedAnd(
+        reinterpret_cast<volatile LONG*>(&proc.shmWritable->header.state_flags),
+        ~static_cast<LONG>(skydiag::kState_Frozen));
+
+      SetEvent(go2);
+      Require(WaitForSingleObject(proc.crashEvent, 10000) == WAIT_OBJECT_0,
+              "second SO on same thread after _resetstkoflw must also signal crashEvent");
+      const bool aliveSecond = WaitForSingleObject(pi.hProcess, 500) == WAIT_TIMEOUT;
+      const auto seq2 = proc.shm->header.crash_seq;
+      const auto code2 = proc.shm->header.crash.exception_code;
+      SetEvent(proc.dumpSettledEvent);
+      const DWORD waitExit = WaitForSingleObject(pi.hProcess, 15000);
+      DWORD exitCode = 1;
+      if (waitExit == WAIT_OBJECT_0) {
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+      }
+
+      Require(seq2 == seq1 + 2u && code2 == EXCEPTION_STACK_OVERFLOW,
+              "second SO after _resetstkoflw must publish a new 0xC00000FD crash_seq");
+      Require(aliveSecond, "second SO must also be held until DUMP_SETTLED");
+      Require(waitExit == WAIT_OBJECT_0 && exitCode == kChildFilterExitCode,
+              "second SO must finish cleanly through the lower filter");
+    } catch (...) {
+      cleanup();
+      throw;
+    }
+    cleanup();
+  }
+
+  // 2) After a first SO hold settles and helper resets + closes DUMP_SETTLED
+  //    (helper gone), neither the guard (second SO) nor the ADR-0032 filter
+  //    (unhandled AV) holds.
+  for (const char* mode : { "so-then-helper-gone-so", "so-then-helper-gone-filter" }) {
+    const bool isFilter = std::strcmp(mode, "so-then-helper-gone-filter") == 0;
+    char exePath[MAX_PATH]{};
+    Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+    const std::string goName = "Local\\skydiag_so_gone_go_" + std::to_string(GetCurrentProcessId()) +
+      "_" + std::to_string(GetTickCount64());
+    const std::string readyName = goName + "_ready";
+    const std::string go2Name = goName + "_go2";
+    HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goName.c_str());
+    HANDLE ready = CreateEventA(nullptr, TRUE, FALSE, readyName.c_str());
+    HANDLE go2 = CreateEventA(nullptr, TRUE, FALSE, go2Name.c_str());
+    Require(go && ready && go2, "helper-gone test barrier creation failed");
+
+    std::string commandLine = std::string("\"") + exePath + "\" --child " + mode + " " + goName;
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    Require(
+      CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+        FALSE,
+      "CreateProcessA failed");
+
+    skydiag::helper::AttachedProcess proc{};
+    bool attached = false;
+    for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+      attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+      if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+        break;
+      }
+    }
+    if (!attached) {
+      CloseHandle(ready);
+      CloseHandle(go2);
+      FailChildNotAttached(pi, go);
+    }
+
+    const auto cleanup = [&] {
+      if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 2000);
+      }
+      skydiag::helper::Detach(proc);
+      CloseHandle(pi.hThread);
+      CloseHandle(pi.hProcess);
+      CloseHandle(ready);
+      CloseHandle(go2);
+      CloseHandle(go);
+    };
+    try {
+      SetEvent(go);
+      Require(WaitForSingleObject(proc.crashEvent, 10000) == WAIT_OBJECT_0,
+              "first SO before helper exit did not signal");
+      // Hold briefly so the guard definitely opened DUMP_SETTLED, then settle
+      // and wait for child handshake after __except + _resetstkoflw.
+      Require(WaitForSingleObject(pi.hProcess, 150) == WAIT_TIMEOUT, "first SO must be held before settle");
+      SetEvent(proc.dumpSettledEvent);
+      Require(WaitForSingleObject(ready, 10000) == WAIT_OBJECT_0,
+              "child did not signal ready after handling first SO before helper exit");
+
+      // Helper resets DUMP_SETTLED (as CrashCapture does when releasing an
+      // incident) and then disappears (closes its handle). If the plugin kept
+      // a handle to DUMP_SETTLED, the kernel event would stay alive in the
+      // unsignaled state and the next crash would block for 5 seconds!
+      ResetEvent(proc.dumpSettledEvent);
+      CloseHandle(proc.dumpSettledEvent);
+      proc.dumpSettledEvent = nullptr;
+      ResetEvent(proc.crashEvent);
+      InterlockedAnd(
+        reinterpret_cast<volatile LONG*>(&proc.shmWritable->header.state_flags),
+        ~static_cast<LONG>(skydiag::kState_Frozen));
+
+      const ULONGLONG triggerTick = GetTickCount64();
+      SetEvent(go2);
+      const DWORD waitExit = WaitForSingleObject(pi.hProcess, 15000);
+      const DWORD elapsedMs = static_cast<DWORD>(GetTickCount64() - triggerTick);
+      DWORD exitCode = 1;
+      if (waitExit == WAIT_OBJECT_0) {
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+      }
+      const bool unhandledAfter = proc.unhandledEvent && WaitForSingleObject(proc.unhandledEvent, 0) == WAIT_OBJECT_0;
+      const auto codeAfter = proc.shm->header.crash.exception_code;
+
+      Require(waitExit == WAIT_OBJECT_0 && exitCode == kChildFilterExitCode,
+              "second crash after helper closed DUMP_SETTLED must reach lower filter");
+      Require(elapsedMs < 2000u,
+              "after helper resets and closes DUMP_SETTLED, neither guard nor ADR-0032 filter may hold (plugin must not retain event handle)");
+      if (isFilter) {
+        Require(codeAfter == EXCEPTION_ACCESS_VIOLATION && unhandledAfter,
+                "ADR-0032 filter must still record and signal unhandled AV after helper closed DUMP_SETTLED");
+      } else {
+        Require(codeAfter == EXCEPTION_STACK_OVERFLOW,
+                "guard must still record second SO after helper closed DUMP_SETTLED");
+      }
+    } catch (...) {
+      cleanup();
+      throw;
+    }
+    cleanup();
+  }
+}
+
+// ADR-0037 Completion Condition 4: while a thread is held inside
+// StackOverflowFrontGuard, another thread verifies that normal
+// MoveStackOverflowGuardToFront skips (kSkippedBusy), then removes the active
+// VEH registration via the test-only entry point; releasing DUMP_SETTLED must
+// still let the thread exit the removed registration cleanly to the next VEH.
+void TestRemovingActiveStackOverflowGuardRegistration()
+{
+  char exePath[MAX_PATH]{};
+  Require(GetModuleFileNameA(nullptr, exePath, MAX_PATH) != 0, "GetModuleFileNameA failed");
+  const std::string goName = "Local\\skydiag_so_active_rm_go_" + std::to_string(GetCurrentProcessId()) +
+    "_" + std::to_string(GetTickCount64());
+  const std::string go2Name = goName + "_go2";
+  const std::string obsName = goName + "_obs";
+  HANDLE go = CreateEventA(nullptr, TRUE, FALSE, goName.c_str());
+  HANDLE go2 = CreateEventA(nullptr, TRUE, FALSE, go2Name.c_str());
+  HANDLE obsMapping = CreateFileMappingA(
+    INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(StackOverflowChildObs), obsName.c_str());
+  Require(go && go2 && obsMapping, "active-removal test object creation failed");
+  auto* obs = static_cast<StackOverflowChildObs*>(
+    MapViewOfFile(obsMapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(StackOverflowChildObs)));
+  Require(obs != nullptr, "MapViewOfFile failed");
+  std::memset(obs, 0, sizeof(StackOverflowChildObs));
+  obs->skippedMoveResult = -1;
+  obs->forceMoveResult = -1;
+
+  std::string commandLine = std::string("\"") + exePath + "\" --child so-remove-while-active " + goName;
+  STARTUPINFOA si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  Require(
+    CreateProcessA(exePath, commandLine.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi) !=
+      FALSE,
+    "CreateProcessA failed");
+
+  skydiag::helper::AttachedProcess proc{};
+  bool attached = false;
+  for (int attempt = 0; attempt < 500 && !attached; ++attempt) {
+    attached = skydiag::helper::AttachByPid(pi.dwProcessId, proc, nullptr) && proc.crashEvent != nullptr;
+    if (!attached && WaitForSingleObject(pi.hProcess, 20) == WAIT_OBJECT_0) {
+      break;
+    }
+  }
+  if (!attached) {
+    UnmapViewOfFile(obs);
+    CloseHandle(obsMapping);
+    CloseHandle(go2);
+    FailChildNotAttached(pi, go);
+  }
+
+  const auto cleanup = [&] {
+    if (WaitForSingleObject(pi.hProcess, 0) != WAIT_OBJECT_0) {
+      TerminateProcess(pi.hProcess, 1);
+      WaitForSingleObject(pi.hProcess, 2000);
+    }
+    UnmapViewOfFile(obs);
+    CloseHandle(obsMapping);
+    skydiag::helper::Detach(proc);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(go2);
+    CloseHandle(go);
+  };
+  try {
+    SetEvent(go);
+    Require(WaitForSingleObject(proc.crashEvent, 10000) == WAIT_OBJECT_0,
+            "active-removal child did not signal crashEvent");
+    // Confirm main thread is actively held inside StackOverflowFrontGuard.
+    Require(WaitForSingleObject(pi.hProcess, 150) == WAIT_TIMEOUT,
+            "main thread must be held inside StackOverflowFrontGuard");
+
+    // Wake child's worker thread to attempt normal move (expect kSkippedBusy) and
+    // force-move (removes active VEH registration while main thread is inside it).
+    SetEvent(go2);
+    bool workerFinished = false;
+    for (int attempt = 0; attempt < 200; ++attempt) {
+      if (InterlockedCompareExchange(&obs->workerDone, 0, 0) != 0) {
+        workerFinished = true;
+        break;
+      }
+      Sleep(10);
+    }
+    const bool aliveAfterRemoval = WaitForSingleObject(pi.hProcess, 100) == WAIT_TIMEOUT;
+    const LONG otherBeforeSettle = InterlockedCompareExchange(&obs->otherHandlerCalls, 0, 0);
+    const LONG skippedResult = InterlockedCompareExchange(&obs->skippedMoveResult, 0, 0);
+    const LONG forcedResult = InterlockedCompareExchange(&obs->forceMoveResult, 0, 0);
+
+    // Release DUMP_SETTLED so the main thread unwinds out of the removed VEH entry
+    // and continues down the VEH chain to ChildStackOverflowMarkerVeh and ChildPreviousFilter.
+    SetEvent(proc.dumpSettledEvent);
+    const DWORD waitExit = WaitForSingleObject(pi.hProcess, 15000);
+    DWORD exitCode = 1;
+    if (waitExit == WAIT_OBJECT_0) {
+      GetExitCodeProcess(pi.hProcess, &exitCode);
+    }
+    const LONG otherAtExit = InterlockedCompareExchange(&obs->otherHandlerCalls, 0, 0);
+    const auto recordedCode = proc.shm->header.crash.exception_code;
+
+    std::printf(
+      "Active VEH removal test: workerFinished=%d skippedMove=%ld forceMove=%ld aliveAfterRemoval=%d "
+      "otherAtExit=%ld exitCode=%lu\n",
+      workerFinished ? 1 : 0,
+      static_cast<long>(skippedResult),
+      static_cast<long>(forcedResult),
+      aliveAfterRemoval ? 1 : 0,
+      static_cast<long>(otherAtExit),
+      static_cast<unsigned long>(exitCode));
+
+    Require(workerFinished, "worker thread did not complete active-removal sequence");
+    Require(
+      skippedResult == static_cast<LONG>(skydiag::plugin::StackOverflowGuardMoveResult::kSkippedBusy),
+      "MoveStackOverflowGuardToFront must return kSkippedBusy while a thread is inside the guard");
+    Require(
+      forcedResult == static_cast<LONG>(skydiag::plugin::StackOverflowGuardMoveResult::kMoved),
+      "force-move test helper must succeed in removing the active VEH registration");
+    Require(aliveAfterRemoval && otherBeforeSettle == 0,
+            "removing the active VEH registration must not disturb the held thread before DUMP_SETTLED");
+    Require(recordedCode == EXCEPTION_STACK_OVERFLOW, "active-removal child must record 0xC00000FD");
+    Require(otherAtExit == 1, "after DUMP_SETTLED, execution must proceed cleanly to the next VEH");
+    Require(waitExit == WAIT_OBJECT_0 && exitCode == kChildFilterExitCode,
+            "after removing active VEH registration, process must reach lower filter cleanly");
+  } catch (...) {
+    cleanup();
+    throw;
+  }
+  cleanup();
+}
+
+void RunStackOverflowFrontGuardTests()
+{
+  TestStackOverflowWithFrontHeavyVehRecordsAndHolds();
+  TestStackOverflowGuardHoldCapsAndNoHold();
+  TestStackOverflowGuardIgnoresNonStackOverflowExceptions();
+  TestStackOverflowGuardDuplicateRegistrationRecordsOnce();
+  TestStackOverflowGuardModes0And2();
+  TestVectoredHandlerSkipsStackOverflowWhenGuardInstalled();
+  TestStackOverflowWhileFrozenNeitherRecordsNorHolds();
+  TestHandledStackOverflowRecoveryAndHelperGoneNoHold();
+  TestRemovingActiveStackOverflowGuardRegistration();
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -1481,6 +2646,12 @@ int main(int argc, char** argv)
     return RunChild(argv[2], argv[3]);
   }
   try {
+    if (argc == 2 && std::strcmp(argv[1], "--stack-overflow-guard") == 0) {
+      MeasureExceptionContextBytes();
+      RunStackOverflowFrontGuardTests();
+      std::puts("stack overflow front guard tests passed");
+      return 0;
+    }
     if (argc == 3 && std::strcmp(argv[2], "--second-fault") == 0) {
       fault_tests::TestCandidateRule();
       fault_tests::TestCandidateTableOwnershipAndSaturation();
@@ -1535,6 +2706,7 @@ int main(int argc, char** argv)
     TestReleasedFaultIsStillReportedAsUnhandledWithoutHolding();
     TestStaleUnhandledSignalIsClearedWhenNextCrashPublishes(shm);
     TestHandledFaultIsNotReportedAsUnhandled();
+    RunStackOverflowFrontGuardTests();
     std::puts("plugin crash handler runtime tests passed");
     return 0;
   } catch (const std::exception& ex) {
