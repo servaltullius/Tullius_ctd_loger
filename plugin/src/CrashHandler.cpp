@@ -1284,7 +1284,7 @@ bool InstallCrashHandler(std::uint32_t crashHookMode)
           g_stackOverflowGuardInstalled.store(true, std::memory_order_release);
         }
       }
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch): a lock failure leaves the guard out, as before ADR-0037
     }
   }
 
