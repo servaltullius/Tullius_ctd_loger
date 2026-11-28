@@ -23,6 +23,7 @@
 #include "AnalyzerInternals.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
 #include "AnalyzerPipeline.h"
+#include "CandidateConsensus.h"
 #include "EarlierException.h"
 #include "EvidenceBuilder.h"
 #include "EvidenceBuilderPrivate.h"
@@ -468,6 +469,110 @@ void TestHookFrameworkLeadKeepsItsDoubt()
   }
 }
 
+AnalysisResult::CrashLoggerModReference ObjectRef(std::wstring esp)
+{
+  AnalysisResult::CrashLoggerModReference ref{};
+  ref.esp_name = std::move(esp);
+  ref.best_object_type = L"TESObjectWEAP";
+  ref.ref_count = 3;
+  ref.relevance_score = 20;
+  return ref;
+}
+
+void TestCandidatesFollowTheSuspects()
+{
+  // A Crash Logger object reference of the same mod plus its stack is what
+  // makes a candidate High (cross-validated). The module of the exception
+  // being handled stays Medium; a module only on the handler's side stays
+  // Low and after it.
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = NestedCrash(true);
+    r.suspects[0].inferred_mod_name = L"Precision";
+    r.earlier_exception.inferred_mod_name = L"Precision";
+    r.crash_logger_log_path = L"C:\\Logs\\crash-2026-11-28-10-02-35.log";
+    r.crash_logger_object_refs = { ObjectRef(L"Precision.esp"), ObjectRef(L"Upscaler.esp") };
+
+    auto control = r;
+    control.earlier_exception = {};
+    BuildEvidenceAndSummary(control, lang);
+    const auto controlTop = std::find_if(control.actionable_candidates.begin(), control.actionable_candidates.end(),
+      [](const auto& c) { return c.module_filename == L"Precision.dll"; });
+    Require(controlTop != control.actionable_candidates.end() &&
+              controlTop->confidence_level == i18n::ConfidenceLevel::kHigh,
+      "without ADR-0039 the cross-validation makes it High");
+
+    BuildEvidenceAndSummary(r, lang);
+    const auto earlier = std::find_if(r.actionable_candidates.begin(), r.actionable_candidates.end(),
+      [](const auto& c) { return c.module_filename == L"Precision.dll"; });
+    const auto handler = std::find_if(r.actionable_candidates.begin(), r.actionable_candidates.end(),
+      [](const auto& c) { return c.module_filename == L"nvngx_dlssg.dll"; });
+    Require(earlier != r.actionable_candidates.end() && earlier->confidence_level == i18n::ConfidenceLevel::kMedium,
+      "the earlier exception's module at Medium");
+    Require(handler != r.actionable_candidates.end() && handler->confidence_level == i18n::ConfidenceLevel::kLow &&
+              handler > earlier,
+      "the handler's module Low and after it");
+    Require(r.quick_answer.suspect_file == L"Precision.dll" && r.quick_answer.likelihood == "medium" &&
+              !r.quick_answer.why_not_certain.empty(),
+      "the quick answer at Medium, with its doubt line");
+    Require(Contains(r.summary_sentence, en ? L"Confidence: Medium" : L"신뢰도: 중간") &&
+              !Contains(r.summary_sentence, en ? L"Confidence: High" : L"신뢰도: 높음"),
+      "and the conclusion says the same");
+
+    // Only the handler's module has other clues (an object reference of its
+    // mod and repeats in this crash bucket): they would raise it from Low.
+    auto handlerOnly = NestedCrash(true);
+    handlerOnly.crash_logger_log_path = L"C:\\Logs\\crash-2026-11-28-10-02-35.log";
+    handlerOnly.crash_logger_object_refs = { ObjectRef(L"Upscaler.esp") };
+    skydiag::dump_tool::BucketCandidateRepeat repeat{};
+    repeat.candidate_key = WideToUtf8(skydiag::dump_tool::CanonicalCandidateKey(L"Upscaler"));
+    repeat.prior_count = 3;
+    handlerOnly.bucket_candidate_repeats = { repeat };
+    const auto handlerLevel = [](const AnalysisResult& result) {
+      const auto it = std::find_if(result.actionable_candidates.begin(), result.actionable_candidates.end(),
+        [](const auto& c) { return c.module_filename == L"nvngx_dlssg.dll"; });
+      return it == result.actionable_candidates.end() ? i18n::ConfidenceLevel::kUnknown : it->confidence_level;
+    };
+    auto handlerControl = handlerOnly;
+    handlerControl.earlier_exception.handler_only_modules.clear();
+    BuildEvidenceAndSummary(handlerControl, lang);
+    Require(handlerLevel(handlerControl) == i18n::ConfidenceLevel::kMedium ||
+              handlerLevel(handlerControl) == i18n::ConfidenceLevel::kHigh,
+      "those clues alone raise the handler's module");
+    BuildEvidenceAndSummary(handlerOnly, lang);
+    Require(handlerLevel(handlerOnly) == i18n::ConfidenceLevel::kLow, "a module only on the handler's side stays Low");
+    Require(!handlerOnly.actionable_candidates.empty() &&
+              handlerOnly.actionable_candidates[0].module_filename == L"Precision.dll" &&
+              handlerOnly.quick_answer.suspect_file == L"Precision.dll",
+      "and does not lead");
+  }
+}
+
+void TestReportedInTheHandlersOwnCode()
+{
+  // The handler faulted in its own code (not in Windows): the quick answer
+  // still leads with the module of the exception being handled.
+  for (const auto lang : kLanguages) {
+    const bool en = lang == i18n::Language::kEnglish;
+    auto r = NestedCrash(true);
+    r.exc_code = 0xC0000005u;
+    r.exc_addr = kHandlerBase + 0x1626Full;
+    r.exc_info = { 0u, 0x18u };
+    r.fault_module_filename = L"nvngx_dlssg.dll";
+    r.fault_module_path = L"G:\\MO2\\mods\\Upscaler\\SKSE\\Plugins\\nvngx_dlssg.dll";
+    r.fault_module_plus_offset = L"nvngx_dlssg.dll+0x1626f";
+    r.fault_module_offset = 0x1626Fu;
+    r.inferred_mod_name = L"Upscaler";
+    BuildEvidenceAndSummary(r, lang);
+    Require(r.quick_answer.suspect_file == L"Precision.dll" && r.quick_answer.case_id == "earlier_exception",
+      "the earlier exception's mod leads");
+    Require(r.quick_answer.how_it_crashed == ee::DescribePlain(r.earlier_exception, r.exc_code, en),
+      "how it crashed");
+    Require(!r.actionable_candidates.empty() && r.actionable_candidates[0].module_filename == L"Precision.dll",
+      "and the first candidate");
+  }
+}
+
 void TestForcedCloseLeadComesFirst()
 {
   for (const auto lang : kLanguages) {
@@ -503,6 +608,8 @@ int main()
     { "CrashLoggerLogOfTheHandlerIsSetAside", TestCrashLoggerLogOfTheHandlerIsSetAside },
     { "HookFrameworkLeadKeepsItsDoubt", TestHookFrameworkLeadKeepsItsDoubt },
     { "ForcedCloseLeadComesFirst", TestForcedCloseLeadComesFirst },
+    { "CandidatesFollowTheSuspects", TestCandidatesFollowTheSuspects },
+    { "ReportedInTheHandlersOwnCode", TestReportedInTheHandlersOwnCode },
   };
   int failed = 0;
   for (const auto& c : cases) {
