@@ -88,6 +88,17 @@ crashlogger_core::CrashLoggerSystemNamedModFn CrashLoggerSystemNamedModTest(
 // blocked game thread, which comes from the walk of that thread.
 void CapPointerScanSuspectConfidence(AnalysisResult& out);
 
+// ADR-0039: a paired Crash Logger log records the reported exception, which
+// happened in a handler of an earlier exception. Its frame signals that name
+// a module only on the handler's side are not used.
+void SetAsideCrashLoggerHandlerFrames(AnalysisResult* out);
+
+// Reorders the stack suspects by the paired Crash Logger log's frame signals
+// and top modules, and lifts the top one from Low with its support.
+void ApplyCrashLoggerCorroborationToSuspects(
+  AnalysisResult* out,
+  const std::vector<minidump::ModuleInfo>& allModules);
+
 // Direct-fault, first-actionable and streak modules of the paired Crash
 // Logger log, and whether each may promote a suspect.
 void IntegrateCrashLoggerFrameSignals(

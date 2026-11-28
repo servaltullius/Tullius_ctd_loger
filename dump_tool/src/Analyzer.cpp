@@ -565,6 +565,17 @@ void ApplyCrashLoggerCorroborationToSuspects(
     const bool firstActionableMatches = firstActionableEligible && (firstActionableLower == key);
     const bool probableStreakMatches = probableStreakEligible && (probableStreakLower == key);
     const bool cppModuleMatches = !cppModuleLower.empty() && (cppModuleLower == key);
+    // ADR-0039: the log records the reported exception, raised in a handler
+    // of an earlier one. A module only on the handler's side gets nothing
+    // from it: its frames there are the ones the stack walk set second.
+    if (earlier_exception::IsHandlerOnlyModule(out->earlier_exception, out->suspects[i].module_filename)) {
+      Ranked row{};
+      row.index = i;
+      row.score = out->suspects[i].score;
+      row.effective = row.score;
+      rows.push_back(std::move(row));
+      continue;
+    }
 
     CrashLoggerFramePromotion promotion{};
     promotion.directFaultPromotion = directFaultMatches ? kCrashLoggerDirectFaultPromotion : 0u;
@@ -666,6 +677,30 @@ void ApplyCrashLoggerCorroborationToSuspects(
       hasCrashLoggerSupport,
       out->suspects_from_stackwalk);
     out->suspects[0].confidence = i18n::ConfidenceText(out->language, out->suspects[0].confidence_level);
+  }
+}
+
+void SetAsideCrashLoggerHandlerFrames(AnalysisResult* out)
+{
+  if (!out || !out->earlier_exception.detected) {
+    return;
+  }
+  const auto& earlier = out->earlier_exception;
+  bool setAside = false;
+  const auto setAsideIfHandlerOnly = [&](bool& eligible, const std::wstring& module) {
+    if (eligible && earlier_exception::IsHandlerOnlyModule(earlier, module)) {
+      eligible = false;
+      setAside = true;
+    }
+  };
+  setAsideIfHandlerOnly(out->crash_logger_direct_fault_eligible, out->crash_logger_direct_fault_module);
+  setAsideIfHandlerOnly(
+    out->crash_logger_first_actionable_probable_eligible, out->crash_logger_first_actionable_probable_module);
+  setAsideIfHandlerOnly(out->crash_logger_probable_streak_eligible, out->crash_logger_probable_streak_module);
+  if (setAside) {
+    out->diagnostics.push_back(
+      L"[CrashLogger] frame signals in the exception handler that crashed are not used: the crash came while "
+      L"handling an earlier exception (ADR-0039)");
   }
 }
 
@@ -897,6 +932,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
 
   // Suspects (prefer callstack/stackwalk; fallback to stack scan)
   ComputeSuspects(dumpBase, dumpSize, allModules, excCtx, hangLike, opt, out, gameFunctionsLoaded ? &gameFunctions : nullptr);
+  SetAsideCrashLoggerHandlerFrames(&out);
   if (out.symbol_runtime_degraded) {
     out.diagnostics.push_back(L"[Symbols] degraded runtime environment detected; stackwalk/source lookup may be limited");
   }
@@ -948,6 +984,7 @@ bool AnalyzeDump(const std::wstring& dumpPath, const std::wstring& outDir, const
     out.stackwalk_truncation_hook_next_jump_distance = 0;
     out.fault_unloaded_module.clear();
     out.fault_instruction = {};
+    out.earlier_exception = {};
     out.hook_stub_race = {};
     out.freed_hook = {};
     out.crash_logger_object_types.clear();

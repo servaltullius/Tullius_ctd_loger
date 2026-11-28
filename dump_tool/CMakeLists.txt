@@ -28,6 +28,8 @@ add_library(SkyrimDiagDumpToolCore STATIC
   src/AnalyzerInternalsStackwalkMemory.cpp
   src/AnalyzerInternalsStackwalkPriv.h
   src/AnalyzerInternalsStackwalkSymbols.cpp
+  src/EarlierException.cpp
+  src/EarlierException.h
   src/EngineSpinLoop.cpp
   src/EngineSpinLoop.h
   src/FaultInstruction.cpp

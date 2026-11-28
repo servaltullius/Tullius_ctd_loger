@@ -351,6 +351,37 @@ nlohmann::json BuildSummaryJson(
   summary["exception"]["module_path"] = WideToUtf8(MaybeRedactPath(r.fault_module_path, redactPaths));
   summary["exception"]["inferred_mod_name"] = WideToUtf8(r.inferred_mod_name);
   summary["exception"]["external_software"] = WideToUtf8(r.fault_module_external_software);
+  if (const auto& earlier = r.earlier_exception; earlier.detected && !r.is_filtered_clean_exit) {
+    // ADR-0039: the exception the thread was handling when this one happened.
+    std::vector<std::string> handlerOnly;
+    for (const auto& module : earlier.handler_only_modules) {
+      handlerOnly.push_back(WideToUtf8(module));
+    }
+    std::vector<std::string> frames;
+    for (const auto& frame : earlier.frames) {
+      frames.push_back(WideToUtf8(frame));
+    }
+    summary["exception"]["earlier_exception"] = {
+      { "code", earlier.code },
+      { "flags", earlier.flags },
+      { "address", earlier.address },
+      { "info", earlier.info },
+      { "module_plus_offset", WideToUtf8(earlier.module_plus_offset) },
+      { "module_offset", earlier.module_offset },
+      { "module_path", WideToUtf8(MaybeRedactPath(earlier.module_path, redactPaths)) },
+      { "inferred_mod_name", WideToUtf8(earlier.inferred_mod_name) },
+      { "module_is_mod", earlier.module_is_mod },
+      { "handler_module", WideToUtf8(earlier.handler_module_filename) },
+      { "handler_inferred_mod_name", WideToUtf8(earlier.handler_inferred_mod_name) },
+      { "handler_only_modules", handlerOnly },
+      { "frames", frames },
+      { "dispatcher_depth", earlier.dispatcher_depth },
+      { "context_address", earlier.context_address },
+      { "record_address", earlier.record_address },
+      { "text",
+        WideToUtf8(earlier_exception::DescribeTechnical(earlier, r.exc_code, r.language == i18n::Language::kEnglish)) },
+    };
+  }
   summary["game_version"] = r.game_version;
 
   summary["crash_logger"] = nlohmann::json::object();

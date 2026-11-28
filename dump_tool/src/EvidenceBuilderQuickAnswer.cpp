@@ -48,6 +48,8 @@ enum class Doubt : std::uint8_t {
   kKnownIssue,       // matches a known problem
   kModalCaller,      // the dialog's opener
   kModalNamed,       // the DLL the dialog names (its opener was not seen)
+  kEarlierException, // ADR-0039: it failed first; the crash came while handling it
+  kHandlingEarlier,  // ADR-0039: it crashed handling another file's earlier error
 };
 
 struct Lead
@@ -344,6 +346,22 @@ Lead CrashLead(const AnalysisResult& r, const EvidenceBuildContext& ctx)
       SameFile(lead.file, BaseName(top->module_filename)) && !SameFile(lead.file, BaseName(r.fault_module_filename))) {
     lead.doubt = Doubt::kNearbyOnly;
   }
+  // ADR-0039: the crash came while the thread handled an earlier exception.
+  // A doubt already set (split clues, only seen nearby) says more, and so do
+  // the leads with a reason of their own (a hook framework many mods run
+  // through, the owner of a freed hook, a plugin's data).
+  const bool plainModLead = lead.type == LeadType::kMod && !lead.is_hook_framework &&
+    (lead.case_id == "suspect" || lead.case_id == "candidate" || lead.case_id == "fault_module");
+  if (plainModLead && lead.doubt == Doubt::kNone && r.earlier_exception.detected) {
+    const auto& earlier = r.earlier_exception;
+    if (earlier.module_is_mod && SameFile(lead.file, BaseName(earlier.module_filename))) {
+      lead.case_id = "earlier_exception";
+      lead.doubt = Doubt::kEarlierException;
+    } else if (SameFile(lead.file, BaseName(earlier.handler_module_filename)) &&
+               !SameFile(earlier.handler_module_filename, earlier.module_filename)) {
+      lead.doubt = Doubt::kHandlingEarlier;
+    }
+  }
   if (lead.type != LeadType::kNone) {
     SetDoubtForCrash(r, lead);
   }
@@ -622,6 +640,17 @@ std::wstring WhyFor(const Lead& lead, std::string_view kind, bool en)
     case Doubt::kModalNamed:
       return en ? L"The error window names this mod's file, but which mod opened the window was not seen."
                 : L"오류 창에 이 모드의 파일 이름이 적혀 있지만, 창을 띄운 모드를 직접 확인하지는 못했습니다.";
+    case Doubt::kEarlierException:
+      return en ? L"This mod hit an error first, and the game crashed while that error was being handled. Whether the "
+                  L"error would have been handled without that crash, or the code handling it made things worse, cannot "
+                  L"be told from the dump."
+                : L"이 모드에서 먼저 오류가 났고, 게임은 그 오류를 처리하는 중에 튕겼습니다. 그 오류가 원래 처리될 수 "
+                  L"있었는지, 처리하던 쪽이 문제를 키웠는지는 덤프만으로 알 수 없습니다.";
+    case Doubt::kHandlingEarlier:
+      return en ? L"The game crashed inside this mod while it was handling an error that happened first in another "
+                  L"file, and that earlier error may be the real problem."
+                : L"게임은 이 모드가 다른 파일에서 먼저 난 오류를 처리하던 중에 튕겼습니다. 먼저 난 그 오류가 진짜 문제일 "
+                  L"수도 있습니다.";
     default:
       return {};
   }
@@ -680,9 +709,14 @@ void AddFreezeObjectClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
 // ADR-0019: what the faulting instruction did, on a line of its own so it is
 // there with or without a doubt line. Never a lead: it says how the game
 // crashed, not which mod made it.
+// ADR-0039: an earlier exception the crash came while handling goes first.
 void AddFaultInstructionClue(const AnalysisResult& r, bool en, QuickAnswer& answer)
 {
   answer.how_it_crashed = DescribeFaultInstructionPlain(r.fault_instruction, en);
+  if (r.earlier_exception.detected) {
+    const auto earlier = earlier_exception::DescribePlain(r.earlier_exception, r.exc_code, en);
+    answer.how_it_crashed = answer.how_it_crashed.empty() ? earlier : earlier + L" " + answer.how_it_crashed;
+  }
 }
 
 QuickAnswer LaterCrashAnswer(const AnalysisResult& r, bool en)

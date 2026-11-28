@@ -1,11 +1,15 @@
 #include <Windows.h>
+#include <DbgHelp.h>
 #include <Psapi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -58,6 +62,133 @@ __declspec(noinline) void DeepFrameA()
 {
   DeepFrameB();
   g_sink.fetch_add(1);
+}
+
+// ADR-0039: a real dispatch of an access violation, with a second exception
+// raised inside the vectored handler that received it and dumped from there,
+// as a crash handler would. The CONTEXT and EXCEPTION_RECORD are wherever this
+// Windows puts them.
+constexpr std::uintptr_t kNestedFaultAddress = 0x10;
+constexpr DWORD kNestedRaisedCode = 0xE0391234u;
+std::filesystem::path g_nestedDumpPath;
+bool g_nestedDumpWritten = false;
+DWORD g_nestedThreadId = 0;
+
+LONG WriteNestedDump(EXCEPTION_POINTERS* ep, DWORD threadId = GetCurrentThreadId())
+{
+  const HANDLE file =
+    CreateFileW(g_nestedDumpPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file != INVALID_HANDLE_VALUE) {
+    MINIDUMP_EXCEPTION_INFORMATION info{};
+    info.ThreadId = threadId;
+    info.ExceptionPointers = ep;
+    info.ClientPointers = FALSE;
+    g_nestedDumpWritten = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+                            static_cast<MINIDUMP_TYPE>(MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules), &info,
+                            nullptr, nullptr) != FALSE;
+    CloseHandle(file);
+  }
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+__declspec(noinline) void RaiseInsideHandler()
+{
+  __try {
+    RaiseException(kNestedRaisedCode, 0, 0, nullptr);
+  } __except (WriteNestedDump(GetExceptionInformation())) {
+    g_sink.fetch_add(5);
+  }
+}
+
+LONG CALLBACK FirstSeeingHandler(EXCEPTION_POINTERS* ep)
+{
+  const auto* record = ep->ExceptionRecord;
+  if (GetCurrentThreadId() == g_nestedThreadId && !g_nestedDumpWritten &&
+      record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2u &&
+      record->ExceptionInformation[1] == kNestedFaultAddress) {
+    RaiseInsideHandler();
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// A crash handler that has the dump of the exception it received written by
+// another thread and waits, as the plugin waits for the helper: the faulting
+// thread's own context then waits inside the handler, above the dispatcher
+// of that same exception.
+constexpr std::uintptr_t kOwnFaultAddress = 0x20;
+
+LONG CALLBACK DumpingHandler(EXCEPTION_POINTERS* ep)
+{
+  const auto* record = ep->ExceptionRecord;
+  if (GetCurrentThreadId() == g_nestedThreadId && !g_nestedDumpWritten &&
+      record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2u &&
+      record->ExceptionInformation[1] == kOwnFaultAddress) {
+    const DWORD faultingThread = GetCurrentThreadId();
+    std::thread writer([ep, faultingThread] { (void)WriteNestedDump(ep, faultingThread); });
+    writer.join();
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Removes the exception's own context from a dump (its location reads as
+// empty), as when the analyzer cannot read it.
+void DropExceptionContext(const std::filesystem::path& dumpPath)
+{
+  std::vector<char> bytes;
+  {
+    std::ifstream in(dumpPath, std::ios::binary);
+    bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  }
+  Require(bytes.size() >= sizeof(MINIDUMP_HEADER), "dump header");
+  MINIDUMP_HEADER header{};
+  std::memcpy(&header, bytes.data(), sizeof(header));
+  bool dropped = false;
+  for (ULONG32 i = 0; i < header.NumberOfStreams; ++i) {
+    const std::size_t at = header.StreamDirectoryRva + i * sizeof(MINIDUMP_DIRECTORY);
+    Require(at + sizeof(MINIDUMP_DIRECTORY) <= bytes.size(), "stream directory");
+    MINIDUMP_DIRECTORY entry{};
+    std::memcpy(&entry, bytes.data() + at, sizeof(entry));
+    if (entry.StreamType != ExceptionStream) {
+      continue;
+    }
+    Require(entry.Location.Rva + sizeof(MINIDUMP_EXCEPTION_STREAM) <= bytes.size(), "exception stream");
+    MINIDUMP_EXCEPTION_STREAM stream{};
+    std::memcpy(&stream, bytes.data() + entry.Location.Rva, sizeof(stream));
+    stream.ThreadContext.DataSize = 0;
+    stream.ThreadContext.Rva = 0;
+    std::memcpy(bytes.data() + entry.Location.Rva, &stream, sizeof(stream));
+    dropped = true;
+  }
+  Require(dropped, "the dump has an exception stream");
+  std::ofstream out(dumpPath, std::ios::binary | std::ios::trunc);
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+}
+
+__declspec(noinline) int ReadThroughBadPointer(volatile int* p)
+{
+  const int value = *p;
+  g_sink.fetch_add(value);
+  return value;
+}
+
+__declspec(noinline) bool FaultUnderTheDumpingHandler()
+{
+  __try {
+    ReadThroughBadPointer(reinterpret_cast<volatile int*>(kOwnFaultAddress));
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return true;
+  }
+  return false;
+}
+
+__declspec(noinline) bool FaultUnderTheHandler()
+{
+  __try {
+    ReadThroughBadPointer(reinterpret_cast<volatile int*>(kNestedFaultAddress));
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return true;
+  }
+  return false;
 }
 
 std::size_t FindFrame(const std::vector<std::wstring>& frames, const wchar_t* name)
@@ -587,9 +718,113 @@ void TestFindThreadsWithNearStackModulePrefersMatchingPathOverSystemCopy()
   Require(sysExplicit.empty(), "explicit System32 path must not match proxy addresses");
 }
 
+void TestEarlierExceptionFromARealDispatch()
+{
+  const auto outBase = MakeTempDir(L"skydiag_earlier_exception_e2e");
+  g_nestedDumpPath = outBase / L"SkyrimDiag_Crash_20261128_100235_374.dmp";
+  g_nestedDumpWritten = false;
+  g_nestedThreadId = GetCurrentThreadId();
+  const PVOID handler = AddVectoredExceptionHandler(1, FirstSeeingHandler);
+  Require(handler != nullptr, "AddVectoredExceptionHandler failed");
+  const bool caught = FaultUnderTheHandler();
+  RemoveVectoredExceptionHandler(handler);
+  g_nestedThreadId = 0;
+  Require(caught, "the access violation reaches its own __except after the handler");
+  Require(g_nestedDumpWritten, "the dump was written from inside the handler");
+
+  wchar_t exePath[MAX_PATH]{};
+  Require(GetModuleFileNameW(nullptr, exePath, MAX_PATH) > 0, "GetModuleFileNameW failed");
+  const std::wstring exeName = std::filesystem::path(exePath).filename().wstring();
+
+  skydiag::dump_tool::AnalyzeOptions opt{};
+  opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
+  opt.output_dir = outBase.wstring();
+  opt.use_crash_logger = false;
+  skydiag::dump_tool::AnalysisResult result{};
+  std::wstring err;
+  Require(skydiag::dump_tool::AnalyzeDump(g_nestedDumpPath.wstring(), outBase.wstring(), opt, result, &err),
+    "AnalyzeDump failed on the nested exception dump");
+
+  Require(result.exc_code == kNestedRaisedCode, "the reported exception is the one raised in the handler");
+  const auto& earlier = result.earlier_exception;
+  Require(earlier.detected, "the access violation being handled is found on the stack");
+  Require(earlier.code == EXCEPTION_ACCESS_VIOLATION, "an access violation");
+  Require(earlier.info.size() == 2u && earlier.info[0] == 0u && earlier.info[1] == kNestedFaultAddress,
+    "a read of 0x10");
+  Require(_wcsicmp(earlier.module_filename.c_str(), exeName.c_str()) == 0, "in this test's own module");
+  Require(_wcsicmp(earlier.handler_module_filename.c_str(), exeName.c_str()) == 0, "and so is the handler");
+  Require(earlier.dispatcher_depth >= 2u, "the dispatcher is below the handler's frames");
+  Require(earlier.record_address > earlier.context_address, "the record after the CONTEXT");
+  Require(!result.suspects.empty() && _wcsicmp(result.suspects[0].module_filename.c_str(), exeName.c_str()) == 0,
+    "the faulting module leads");
+  // The handler is in the same module here, so only the reason shows the
+  // suspects were scored from the earlier exception's call stack.
+  Require(result.suspects[0].reason.find(L"exception being handled") != std::wstring::npos,
+    "scored from the earlier exception's call stack");
+  Require(!earlier.frames.empty() && earlier.frames[0].find(L"ReadThroughBadPointer") != std::wstring::npos,
+    "its own call stack starts where it faulted");
+  Require(earlier.handler_only_modules.empty(), "the handler's module is also below the dispatcher");
+
+  std::filesystem::remove_all(outBase);
+}
+
+// The crash handler's own dispatch is no earlier exception: the walk that
+// finds one starts at the exception's context, never at the thread's current
+// one, which waits in the handler above the dispatcher of the reported
+// exception itself (used when the exception's context cannot be read).
+void TestCrashHandlersOwnDispatchIsNoEarlierException()
+{
+  const auto outBase = MakeTempDir(L"skydiag_own_dispatch_e2e");
+  g_nestedDumpPath = outBase / L"SkyrimDiag_Crash_20261128_100236_001.dmp";
+  g_nestedDumpWritten = false;
+  g_nestedThreadId = GetCurrentThreadId();
+  const PVOID handler = AddVectoredExceptionHandler(1, DumpingHandler);
+  Require(handler != nullptr, "AddVectoredExceptionHandler failed");
+  const bool caught = FaultUnderTheDumpingHandler();
+  RemoveVectoredExceptionHandler(handler);
+  g_nestedThreadId = 0;
+  Require(caught && g_nestedDumpWritten, "the handler wrote the dump of the access violation");
+
+  const auto analyze = [&]() {
+    skydiag::dump_tool::AnalyzeOptions opt{};
+    opt.language = skydiag::dump_tool::i18n::Language::kEnglish;
+    opt.output_dir = outBase.wstring();
+    opt.use_crash_logger = false;
+    skydiag::dump_tool::AnalysisResult result{};
+    std::wstring err;
+    Require(skydiag::dump_tool::AnalyzeDump(g_nestedDumpPath.wstring(), outBase.wstring(), opt, result, &err),
+      "AnalyzeDump failed on the crash handler's dump");
+    Require(result.exc_code == EXCEPTION_ACCESS_VIOLATION, "the reported exception");
+    return result;
+  };
+  const auto withContext = analyze();
+  Require(!withContext.earlier_exception.detected, "nothing earlier from the exception's context");
+
+  DropExceptionContext(g_nestedDumpPath);
+  const auto withoutContext = analyze();
+  const auto& shown = withoutContext.ShownCallstackFrames();
+  if (!std::any_of(shown.begin(), shown.end(),
+        [](const std::wstring& f) { return f.find(L"DumpingHandler") != std::wstring::npos; })) {
+    std::fwprintf(stderr, L"walk without the exception's context (tid %u, %zu frames):\n",
+      withoutContext.stackwalk_primary_tid, shown.size());
+    for (const auto& f : shown) {
+      std::fwprintf(stderr, L"  %ls\n", f.c_str());
+    }
+    for (const auto& d : withoutContext.diagnostics) {
+      std::fwprintf(stderr, L"  diag: %ls\n", d.c_str());
+    }
+    Require(false, "without it the walk starts in the handler");
+  }
+  Require(!withoutContext.earlier_exception.detected, "and the reported exception is not taken for an earlier one");
+
+  std::filesystem::remove_all(outBase);
+}
+
 int main()
 {
   try {
+    TestEarlierExceptionFromARealDispatch();
+    TestCrashHandlersOwnDispatchIsNoEarlierException();
     TestCompleteGameWalkSkipsStackScan();
     TestDetermineHangLikeIncludesWctDeadlockCycles();
     TestFindThreadsWithNearStackModulePrefersMatchingPathOverSystemCopy();

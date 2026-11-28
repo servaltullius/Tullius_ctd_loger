@@ -151,6 +151,44 @@ void AppendSecondFaultEvidence(AnalysisResult& r, i18n::Language lang)
   }
 }
 
+int ConfidenceStrength(i18n::ConfidenceLevel level)
+{
+  switch (level) {
+    case i18n::ConfidenceLevel::kHigh: return 3;
+    case i18n::ConfidenceLevel::kMedium: return 2;
+    case i18n::ConfidenceLevel::kLow: return 1;
+    default: return 0;
+  }
+}
+
+// ADR-0039: the candidates follow the suspects. Whatever else points to the
+// module of the exception being handled, whether that exception would have
+// been handled is not known: Medium at most. A module only on the handler's
+// side stays Low, as on the stack.
+void ApplyEarlierExceptionToCandidates(AnalysisResult& r, i18n::Language lang)
+{
+  const auto& earlier = r.earlier_exception;
+  if (!earlier.detected) {
+    return;
+  }
+  for (auto& candidate : r.actionable_candidates) {
+    if (candidate.module_filename.empty()) {
+      continue;
+    }
+    const bool earlierModule = earlier.module_is_mod &&
+      _wcsicmp(candidate.module_filename.c_str(), earlier.module_filename.c_str()) == 0;
+    const bool handlerOnly = earlier_exception::IsHandlerOnlyModule(earlier, candidate.module_filename);
+    const auto cap = earlierModule ? i18n::ConfidenceLevel::kMedium
+                   : handlerOnly   ? i18n::ConfidenceLevel::kLow
+                                   : i18n::ConfidenceLevel::kUnknown;
+    if (cap != i18n::ConfidenceLevel::kUnknown &&
+        ConfidenceStrength(candidate.confidence_level) > ConfidenceStrength(cap)) {
+      candidate.confidence_level = cap;
+      candidate.confidence = i18n::ConfidenceText(lang, cap);
+    }
+  }
+}
+
 void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
 {
   r.language = lang;
@@ -276,6 +314,7 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   ctx.suspectBasis = suspectBasis;
 
   internal::BuildActionableCandidates(r, lang, ctx);
+  ApplyEarlierExceptionToCandidates(r, lang);
   for (auto& candidate : r.actionable_candidates) {
     candidate.standalone_callstack = internal::CandidateHasStandaloneCallstackSupport(r, candidate);
   }
@@ -315,6 +354,12 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   }
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);
+  if (r.earlier_exception.detected && ctx.isCrashLike && !ctx.isFilteredCleanExit) {
+    // ADR-0039: what happened first on the crashing thread, before what the
+    // reported exception alone says.
+    r.summary_sentence = (en ? L"[Crash while handling an exception] " : L"[예외 처리 중 크래시] ") +
+      earlier_exception::DescribeTechnical(r.earlier_exception, r.exc_code, en) + L" " + r.summary_sentence;
+  }
   if (ctx.isForcedClose) {
     // The detail stays for mod authors; the player reads first that this is
     // no crash in play.
