@@ -229,4 +229,64 @@ std::vector<SuspectItem> ComputeCallstackSuspectsFromAddrs(
   return out;
 }
 
+std::vector<SuspectItem> ComputeEarlierExceptionSuspects(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t dispatcherIndex,
+  std::uint64_t earlierAddress,
+  i18n::Language lang,
+  bool walkReachedThreadStart)
+{
+  if (dispatcherIndex >= pcs.size()) {
+    return ComputeCallstackSuspectsFromAddrs(modules, pcs, lang, walkReachedThreadStart);
+  }
+  const bool en = (lang == i18n::Language::kEnglish);
+  const auto split = pcs.begin() + static_cast<std::ptrdiff_t>(dispatcherIndex);
+  std::vector<std::uint64_t> earlier(split + 1, pcs.end());
+  const std::vector<std::uint64_t> handler(pcs.begin(), split);
+  // A walk that ended at the dispatcher still has the earlier exception's
+  // place, from its saved CONTEXT; nothing below it is known.
+  const bool walkEndsAtDispatcher = earlier.empty();
+  if (walkEndsAtDispatcher && earlierAddress != 0u) {
+    earlier.push_back(earlierAddress);
+  }
+
+  auto out = ComputeCallstackSuspectsFromAddrs(
+    modules, earlier, lang, walkEndsAtDispatcher ? false : walkReachedThreadStart);
+  for (auto& suspect : out) {
+    suspect.reason += en ? L" (call stack of the exception being handled)"
+                         : L" (처리 중이던 예외의 콜스택 기준)";
+  }
+  if (!out.empty() && out.front().confidence_level == i18n::ConfidenceLevel::kHigh) {
+    out.front().confidence_level = i18n::ConfidenceLevel::kMedium;
+    out.front().confidence = ConfidenceText(lang, out.front().confidence_level);
+  }
+
+  // Below every suspect of the earlier exception, whatever their order (a
+  // hook framework put second keeps its higher score). The handler's frames
+  // end at the dispatcher, which is no thread start.
+  std::uint32_t lowest = 0u;
+  for (const auto& suspect : out) {
+    lowest = lowest == 0u ? suspect.score : std::min(lowest, suspect.score);
+  }
+  const std::uint32_t ceiling = out.empty() ? 0u : (lowest > 1u ? lowest - 1u : 1u);
+  for (auto suspect : ComputeCallstackSuspectsFromAddrs(modules, handler, lang, /*walkReachedThreadStart=*/false)) {
+    const bool seen = std::any_of(out.begin(), out.end(), [&](const SuspectItem& s) {
+      return WideLower(s.module_filename) == WideLower(suspect.module_filename);
+    });
+    if (seen) {
+      continue;
+    }
+    suspect.confidence_level = i18n::ConfidenceLevel::kLow;
+    suspect.confidence = ConfidenceText(lang, suspect.confidence_level);
+    if (ceiling != 0u) {
+      suspect.score = std::min(suspect.score, ceiling);
+    }
+    suspect.reason += en ? L" (only on the exception handler's side, where the reported exception happened)"
+                         : L" (보고된 예외가 난 예외 처리기 쪽에만 있음)";
+    out.push_back(std::move(suspect));
+  }
+  return out;
+}
+
 }  // namespace skydiag::dump_tool::internal::stackwalk

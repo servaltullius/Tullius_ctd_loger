@@ -18,7 +18,7 @@ struct QuickAnswer
   // hook_framework / external_software / known_issue / modal_dialog /
   // crash_logger_thread_dump / gpu_driver / lock_owner / blocked_thread /
   // thread_group / engine_lock_deadlock / engine_spin_nan / damaged_save / snapshot / manual_snapshot /
-  // clean_exit / none.
+  // clean_exit / earlier_exception (ADR-0039: the mod where the exception being handled happened) / none.
   std::string case_id;
   // high / medium / low; "none" when nothing is named.
   std::string likelihood = "none";

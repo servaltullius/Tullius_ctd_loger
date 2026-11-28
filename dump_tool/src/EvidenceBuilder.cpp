@@ -315,6 +315,12 @@ void BuildEvidenceAndSummaryImpl(AnalysisResult& r, i18n::Language lang)
   }
   internal::BuildRecommendations(r, lang, ctx);
   r.summary_sentence = internal::BuildSummarySentence(r, lang, ctx);
+  if (r.earlier_exception.detected && ctx.isCrashLike && !ctx.isFilteredCleanExit) {
+    // ADR-0039: what happened first on the crashing thread, before what the
+    // reported exception alone says.
+    r.summary_sentence = (en ? L"[Crash while handling an exception] " : L"[예외 처리 중 크래시] ") +
+      earlier_exception::DescribeTechnical(r.earlier_exception, r.exc_code, en) + L" " + r.summary_sentence;
+  }
   if (ctx.isForcedClose) {
     // The detail stays for mod authors; the player reads first that this is
     // no crash in play.

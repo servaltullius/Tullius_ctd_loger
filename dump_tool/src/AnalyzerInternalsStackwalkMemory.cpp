@@ -437,9 +437,13 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,
   std::size_t maxFrames,
-  StackWalkEnd* outEnd)
+  StackWalkEnd* outEnd,
+  std::vector<std::uint64_t>* outSps)
 {
   std::vector<std::uint64_t> pcs;
+  if (outSps) {
+    outSps->clear();
+  }
   StackWalkEnd end{};
   if (!process || maxFrames == 0) {
     return pcs;
@@ -498,6 +502,11 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
       break;
     }
     pcs.push_back(static_cast<std::uint64_t>(pc));
+    if (outSps) {
+      // ADR-0039: the frame's stack pointer, where a dispatcher's frame
+      // holds the CONTEXT of the exception it dispatches.
+      outSps->push_back(static_cast<std::uint64_t>(sp));
+    }
     lastPc = pc;
     lastSp = sp;
     // Only the innermost frame may legitimately be a leaf function. A caller

@@ -3,6 +3,7 @@
 #include "Bucket.h"
 #include "CrashHistory.h"
 #include "DumpIdentity.h"
+#include "EarlierException.h"
 #include "FaultInstruction.h"
 #include "FreedHook.h"
 #include "GraphicsInjectionDiag.h"
@@ -793,6 +794,9 @@ struct AnalysisResult
   // ADR-0019: what the faulting instruction of an access violation did
   // (verdict empty: nothing to say).
   FaultInstructionInfo fault_instruction;
+  // ADR-0039: the exception the crashing thread was handling when this one
+  // happened, from its stack (detected false: none).
+  EarlierExceptionInfo earlier_exception;
   HookStubRaceInfo hook_stub_race;
   // ADR-0024: whose hook the freed code a bad_jump went to was, from the
   // helper's record of hook stubs while the game ran.

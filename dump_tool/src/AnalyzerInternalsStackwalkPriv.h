@@ -193,7 +193,8 @@ std::vector<std::uint64_t> StackWalkAddrsForContext(
   const MinidumpMemoryView& mem,
   const CONTEXT& inCtx,
   std::size_t maxFrames,
-  StackWalkEnd* outEnd = nullptr);
+  StackWalkEnd* outEnd = nullptr,
+  std::vector<std::uint64_t>* outSps = nullptr);
 
 }  // namespace skydiag::dump_tool::internal::stackwalk_internal
 
@@ -213,6 +214,22 @@ bool CompleteWalkWithoutPluginFrames(
   const std::vector<minidump::ModuleInfo>& modules,
   const std::vector<std::uint64_t>& pcs,
   const std::vector<bool>& threadEntryHookMarks,
+  bool walkReachedThreadStart);
+
+// ADR-0039: the suspects of a crash that happened while the thread handled an
+// earlier exception, whose dispatcher is pcs[dispatcherIndex]. The frames
+// below the dispatcher (from the first exception's own place on, or that
+// place alone, earlierAddress, when the walk ended at the dispatcher) are
+// scored as a crash stack of their own, with the top suspect at Medium at
+// most: whether that exception would have been handled is not known. Modules
+// only above the dispatcher (the handler that crashed) follow at Low, scored
+// below every one of them so a later sort keeps the order.
+std::vector<SuspectItem> ComputeEarlierExceptionSuspects(
+  const std::vector<minidump::ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  std::size_t dispatcherIndex,
+  std::uint64_t earlierAddress,
+  i18n::Language lang,
   bool walkReachedThreadStart);
 
 }  // namespace skydiag::dump_tool::internal::stackwalk

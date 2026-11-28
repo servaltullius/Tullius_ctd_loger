@@ -310,6 +310,22 @@ if(WIN32)
     COMMAND skydiag_quick_answer_tests
   )
 
+  # ADR-0039: the suspects, quick answer, conclusion, summary JSON and report
+  # of a crash that happened while the thread handled an earlier exception.
+  add_executable(skydiag_earlier_exception_analysis_tests
+    earlier_exception_analysis_tests.cpp
+  )
+  target_include_directories(skydiag_earlier_exception_analysis_tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+  )
+  target_link_libraries(skydiag_earlier_exception_analysis_tests PRIVATE
+    SkyrimDiagDumpToolCore
+  )
+  add_test(
+    NAME skydiag_earlier_exception_analysis_tests
+    COMMAND skydiag_earlier_exception_analysis_tests
+  )
+
   add_executable(skydiag_non_ascii_path_tests
     non_ascii_path_tests.cpp
   )
@@ -669,6 +685,16 @@ target_include_directories(skydiag_fault_instruction_tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
 )
 add_test(NAME skydiag_fault_instruction_tests COMMAND skydiag_fault_instruction_tests)
+
+# ADR-0039: the exception the crashing thread was handling, found on its stack.
+add_executable(skydiag_earlier_exception_tests
+  earlier_exception_tests.cpp
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src/EarlierException.cpp"
+)
+target_include_directories(skydiag_earlier_exception_tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../dump_tool/src"
+)
+add_test(NAME skydiag_earlier_exception_tests COMMAND skydiag_earlier_exception_tests)
 
 # ADR-0022: close-request classification and the forced-close window.
 add_executable(skydiag_close_request_tests

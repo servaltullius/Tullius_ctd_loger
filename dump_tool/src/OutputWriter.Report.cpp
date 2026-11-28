@@ -282,6 +282,27 @@ std::string BuildReportText(
     rpt << "ExceptionAddress: 0x" << std::hex << r.exc_addr << std::dec << "\n";
     rpt << "ThreadId: " << r.exc_tid << "\n";
     rpt << "Module+Offset: " << WideToUtf8(r.fault_module_plus_offset) << "\n";
+    if (const auto& earlier = r.earlier_exception; earlier.detected && !r.is_filtered_clean_exit) {
+      // ADR-0039: the exception the thread was handling when this one happened.
+      char address[32]{};
+      std::snprintf(address, sizeof(address), "0x%llx", static_cast<unsigned long long>(earlier.address));
+      rpt << (en ? "ExceptionBeingHandled: 0x" : "처리 중이던 예외: 0x") << std::hex << earlier.code << std::dec
+          << (en ? " at " : ", ")
+          << (earlier.module_plus_offset.empty() ? std::string(address) : WideToUtf8(earlier.module_plus_offset));
+      if (earlier.code == 0xC0000005u && earlier.info.size() >= 2u &&
+          (earlier.info[0] == 0u || earlier.info[0] == 1u || earlier.info[0] == 8u)) {
+        const char* kind = earlier.info[0] == 0u ? (en ? "read" : "읽기")
+                         : earlier.info[0] == 1u ? (en ? "write" : "쓰기")
+                                                 : (en ? "execute" : "실행");
+        char accessed[32]{};
+        std::snprintf(accessed, sizeof(accessed), "0x%llx", static_cast<unsigned long long>(earlier.info[1]));
+        rpt << " (" << kind << " " << accessed << ")";
+      }
+      if (!earlier.handler_module_filename.empty()) {
+        rpt << (en ? ", handler: " : ", 처리기: ") << WideToUtf8(earlier.handler_module_filename);
+      }
+      rpt << "\n";
+    }
   }
   if (const auto instruction = FaultInstructionReportText(r.fault_instruction); !instruction.empty()) {
     // ADR-0019: the faulting instruction as decoded from the dump.
@@ -656,6 +677,14 @@ std::string BuildReportText(
   if (!shownFrames.empty()) {
     rpt << (en ? "\nCallstack (primary, tid=" : "\n콜스택(대표, tid=") << r.stackwalk_primary_tid << "):\n";
     for (const auto& f : shownFrames) {
+      rpt << "  " << WideToUtf8(f) << "\n";
+    }
+  }
+  // ADR-0039: the shown crash stack may end before the dispatcher.
+  if (!r.earlier_exception.frames.empty() && !r.is_filtered_clean_exit) {
+    rpt << (en ? "\nCallstack of the exception being handled (from where it happened):\n"
+               : "\n처리 중이던 예외의 콜스택(그 예외가 난 곳부터):\n");
+    for (const auto& f : r.earlier_exception.frames) {
       rpt << "  " << WideToUtf8(f) << "\n";
     }
   }

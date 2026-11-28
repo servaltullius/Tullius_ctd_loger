@@ -74,6 +74,33 @@ void BuildEvidenceItems(AnalysisResult& r, i18n::Language lang, const EvidenceBu
     r.evidence.push_back(std::move(e));
   }
 
+  if (r.earlier_exception.detected && ctx.isCrashLike) {
+    // ADR-0039: seen directly on the crashing thread's stack; which of the two
+    // modules is at fault is the judgment, hence Medium.
+    const auto& earlier = r.earlier_exception;
+    EvidenceItem e{};
+    e.confidence_level = i18n::ConfidenceLevel::kMedium;
+    e.confidence = ConfidenceText(lang, e.confidence_level);
+    e.title = en ? L"Crash while handling another exception" : L"다른 예외를 처리하던 중 난 크래시";
+    e.details = earlier_exception::DescribeTechnical(earlier, r.exc_code, en);
+    if (!earlier.inferred_mod_name.empty()) {
+      e.details += (en ? L" | Mod of the exception being handled: " : L" | 처리 중이던 예외가 난 모드: ") +
+                   earlier.inferred_mod_name;
+    }
+    if (!earlier.handler_inferred_mod_name.empty() &&
+        _wcsicmp(earlier.handler_module_filename.c_str(), earlier.module_filename.c_str()) != 0) {
+      e.details += (en ? L" | Handler's mod: " : L" | 처리기 모드: ") + earlier.handler_inferred_mod_name;
+    }
+    e.details += en
+      ? (L" | Windows saved that exception's CONTEXT and EXCEPTION_RECORD on the crashing thread's stack at frame " +
+         std::to_wstring(earlier.dispatcher_depth) +
+         L" (KiUserExceptionDispatcher); the frames after it are the call stack of the exception being handled.")
+      : (L" | Windows가 그 예외의 CONTEXT와 EXCEPTION_RECORD를 크래시 스레드 스택의 " +
+         std::to_wstring(earlier.dispatcher_depth) +
+         L"번 프레임(KiUserExceptionDispatcher)에 남겼고, 그 다음 프레임부터가 처리 중이던 예외의 콜스택입니다.");
+    r.evidence.push_back(std::move(e));
+  }
+
   if (r.signature_match.has_value()) {
     const auto& sig = *r.signature_match;
     EvidenceItem e{};

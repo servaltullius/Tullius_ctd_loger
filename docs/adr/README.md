@@ -41,3 +41,4 @@ ADR index:
 - `0036-unhandled-crash-during-filtering.md`
 - `0037-stack-overflow-front-guard.md`
 - `0038-wer-event-line-for-unrecorded-exits.md`
+- `0039-crash-while-handling-an-earlier-exception.md`

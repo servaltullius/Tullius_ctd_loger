@@ -3,6 +3,7 @@
 #include "AddressResolver.h"
 #include "AnalyzerScoringPolicy.h"
 #include "AnalyzerInternalsStackwalkPriv.h"
+#include "EarlierException.h"
 #include "EngineSpinLoop.h"
 #include "FaultInstruction.h"
 #include "FreedHook.h"
@@ -23,6 +24,8 @@ namespace {
 constexpr std::size_t kCrashStackWindowFrames = 12;
 // A freeze stack is shown from frame 0, up to this many frames.
 constexpr std::size_t kFreezeStackFrames = 16;
+// ADR-0039: the earlier exception's own stack, from its faulting frame.
+constexpr std::size_t kEarlierExceptionFrames = 8;
 
 using skydiag::dump_tool::internal::stackwalk_internal::AddDumpExportSymbols;
 using skydiag::dump_tool::internal::stackwalk_internal::DumpImageData;
@@ -89,6 +92,87 @@ std::wstring LabelGameFrame(
     label += L", ID " + std::to_wstring(*id);
   }
   return label;
+}
+
+// ADR-0039: the earlier exception a dispatcher frame on the crashing thread's
+// walk was handling, from the CONTEXT and EXCEPTION_RECORD the kernel left on
+// that stack (the dump's own memory only), with the modules it names.
+std::optional<EarlierExceptionInfo> FindEarlierException(
+  const std::vector<ModuleInfo>& modules,
+  const std::vector<std::uint64_t>& pcs,
+  const std::vector<std::uint64_t>& sps,
+  const MinidumpMemoryView& mem)
+{
+  const auto moduleAt = [&](std::uint64_t address) -> const ModuleInfo* {
+    const auto idx = FindModuleIndexForAddress(modules, address);
+    return idx ? &modules[*idx] : nullptr;
+  };
+  std::vector<earlier_exception::Frame> frames;
+  frames.reserve(pcs.size());
+  for (std::size_t i = 0; i < pcs.size() && i < sps.size(); ++i) {
+    const auto* module = moduleAt(pcs[i]);
+    frames.push_back({ pcs[i], sps[i], module && _wcsicmp(module->filename.c_str(), L"ntdll.dll") == 0 });
+  }
+  const auto record = earlier_exception::FindEarliest(frames, [&](std::uint64_t address, void* out, std::size_t size) {
+    std::size_t got = 0;
+    return mem.ReadDump(address, out, size, got) && got == size;
+  });
+  if (!record) {
+    return std::nullopt;
+  }
+
+  EarlierExceptionInfo info{};
+  info.detected = true;
+  info.code = record->code;
+  info.flags = record->flags;
+  info.address = record->address;
+  info.info = record->info;
+  info.dispatcher_depth = static_cast<std::uint32_t>(record->dispatcher_index);
+  info.context_address = record->context_address;
+  info.record_address = record->record_address;
+  if (const auto* module = moduleAt(record->address)) {
+    info.module_filename = module->filename;
+    info.module_path = module->path;
+    info.module_offset = record->address - module->base;
+    info.module_plus_offset = minidump::ModulePlusOffsetText(module->filename, info.module_offset);
+    info.module_is_mod = !module->is_systemish && !module->is_game_exe && module->external_software.empty();
+    if (info.module_is_mod) {
+      info.inferred_mod_name = module->inferred_mod_name;
+    }
+  }
+  // Windows code and frames outside every module (a hook's trampoline) are
+  // passed over: the handler is the first module of a mod, the game or an
+  // external program above the dispatcher.
+  const auto passOver = [&](std::size_t i) {
+    const auto* module = moduleAt(pcs[i]);
+    return !module || (module->is_systemish && module->external_software.empty());
+  };
+  const auto handler = earlier_exception::FindHandlerFrame(record->dispatcher_index, passOver);
+  if (handler) {
+    const auto* module = moduleAt(pcs[*handler]);
+    info.handler_module_filename = module->filename;
+    if (!module->is_game_exe && module->external_software.empty()) {
+      info.handler_inferred_mod_name = module->inferred_mod_name;
+    }
+  }
+  // Modules seen above the dispatcher and nowhere below it (nor at the
+  // earlier exception's own place).
+  const auto* faulting = moduleAt(record->address);
+  for (std::size_t i = 0; i < record->dispatcher_index; ++i) {
+    if (passOver(i)) {
+      continue;
+    }
+    const auto* module = moduleAt(pcs[i]);
+    const auto sameModule = [&](std::uint64_t pc) { return moduleAt(pc) == module; };
+    const bool below = module == faulting ||
+                       std::any_of(pcs.begin() + static_cast<std::ptrdiff_t>(record->dispatcher_index) + 1, pcs.end(),
+                         sameModule);
+    if (!below && std::find(info.handler_only_modules.begin(), info.handler_only_modules.end(), module->filename) ==
+                    info.handler_only_modules.end()) {
+      info.handler_only_modules.push_back(module->filename);
+    }
+  }
+  return info;
 }
 
 std::vector<std::wstring> LabelGameFrames(
@@ -292,6 +376,9 @@ bool TryComputeStackwalkSuspects(
 
   Candidate best{};
   Candidate bestAny{};
+  // ADR-0039: what the exception thread's walk found, kept when that walk is
+  // the one the analysis uses.
+  EarlierExceptionInfo excEarlier{};
   for (const auto tid : targetTids) {
     CONTEXT ctx{};
     bool haveCtx = false;
@@ -371,17 +458,41 @@ bool TryComputeStackwalkSuspects(
 
     StackWalkEnd end{};
     std::vector<std::uint64_t> pcs;
+    std::vector<std::uint64_t> sps;
     if (callerIsLastFrame) {
       pcs.push_back(ctx.Rip);
       end = { StackWalkStop::kNoUnwind, ctx.Rip };
     } else {
-      pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end);
+      pcs = StackWalkAddrsForContext(sym.process, mem, ctx, /*maxFrames=*/64, &end, tid == excTid ? &sps : nullptr);
     }
     if (pcs.empty()) {
       continue;
     }
     if (nullJumpPc) {
       pcs.insert(pcs.begin(), *nullJumpPc);
+      if (!sps.empty()) {
+        sps.insert(sps.begin(), excCtx->Rsp);
+      }
+    }
+    // ADR-0039: the crash happened while this thread handled an earlier
+    // exception; its suspects come from that exception's stack first. Only a
+    // walk from the exception's own context: the thread's current context
+    // waits in a crash handler, whose dispatcher holds the reported
+    // exception itself.
+    std::optional<std::size_t> dispatcherIndex;
+    if (tid == excTid && excCtx && sps.size() == pcs.size()) {
+      if (auto earlier = FindEarlierException(modules, pcs, sps, mem)) {
+        dispatcherIndex = earlier->dispatcher_depth;
+        std::vector<std::uint64_t> earlierPcs(
+          pcs.begin() + static_cast<std::ptrdiff_t>(earlier->dispatcher_depth) + 1, pcs.end());
+        if (earlierPcs.empty()) {
+          earlierPcs.push_back(earlier->address);
+        }
+        const auto labels = LabelGameFrames(mem, modules, earlierPcs, gameFunctions, out);
+        earlier->frames = stackwalk::FormatCallstackForDisplay(sym.process, modules, earlierPcs, kEarlierExceptionFrames,
+          nullptr, nullptr, nullptr, /*fromTop=*/true, &labels);
+        excEarlier = std::move(*earlier);
+      }
     }
     if (outModalProbeFrames && modalProbeTid != 0u && tid == modalProbeTid) {
       *outModalProbeFrames = stackwalk::BuildModalProbeFrames(
@@ -419,7 +530,10 @@ bool TryComputeStackwalkSuspects(
       bestAny.end = end;
     }
 
-    auto suspects = stackwalk::ComputeCallstackSuspectsFromAddrs(modules, pcs, lang, WalkReachedThreadStart(end));
+    auto suspects = dispatcherIndex
+      ? stackwalk::ComputeEarlierExceptionSuspects(
+          modules, pcs, *dispatcherIndex, excEarlier.address, lang, WalkReachedThreadStart(end))
+      : stackwalk::ComputeCallstackSuspectsFromAddrs(modules, pcs, lang, WalkReachedThreadStart(end));
     if (suspects.empty()) {
       continue;
     }
@@ -528,6 +642,9 @@ bool TryComputeStackwalkSuspects(
   };
 
   if (best.suspects.empty()) {
+    if (excEarlier.detected && !bestAny.pcs.empty() && bestAny.tid == excTid) {
+      out.earlier_exception = std::move(excEarlier);
+    }
     if (!bestAny.pcs.empty()) {
       recordThreadEntryHooks(bestAny.pcs, bestAny.end);
       recordTruncation(bestAny.pcs, bestAny.end);
@@ -558,6 +675,9 @@ bool TryComputeStackwalkSuspects(
     return false;
   }
 
+  if (excEarlier.detected && best.tid == excTid) {
+    out.earlier_exception = std::move(excEarlier);
+  }
   recordThreadEntryHooks(best.pcs, best.end);
   recordTruncation(best.pcs, best.end);
   out.suspects_from_stackwalk = true;
